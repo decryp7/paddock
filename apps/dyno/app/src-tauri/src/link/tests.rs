@@ -21,9 +21,6 @@ fn only_saving_the_inventory_waits_minutes_and_every_job_request_is_quick() {
                 query: IssuesQuery::default(),
             },
         },
-        Request::StartJob {
-            spec: JobSpec::RefreshBackup,
-        },
         Request::Jobs,
         Request::CancelJob { id: 1 },
         Request::JobResult { id: 1 },
@@ -48,7 +45,44 @@ fn disc(version: &str, protocol: u32) -> Discovery {
         started: 0,
         version: version.into(),
         protocol,
+        build: String::new(),
     }
+}
+
+/// [`disc`] of another build of the same version.
+fn disc_built(version: &str, build: &str) -> Discovery {
+    Discovery {
+        build: build.into(),
+        ..disc(version, 1)
+    }
+}
+
+#[test]
+fn the_discovery_file_names_the_build_not_only_the_version() {
+    use dyno_agent::build_id::build_key;
+    let key = build_key("1.1.0", "aaaa");
+    assert_eq!(plan(Some(&disc_built("1.1.0", "aaaa")), &key, 1), Plan::Connect);
+    assert_eq!(
+        plan(Some(&disc_built("1.1.0", "bbbb")), &key, 1),
+        Plan::Replace,
+        "same version, another build"
+    );
+    assert_eq!(
+        plan(Some(&disc("1.1.0", 1)), &key, 1),
+        Plan::Replace,
+        "an older agent wrote no build id"
+    );
+    assert_eq!(
+        plan(Some(&disc_built("1.0.0", "aaaa")), &key, 1),
+        Plan::Connect,
+        "the build is the file on disk: another version of that file is still the agent the app would start"
+    );
+    assert_eq!(plan(Some(&disc_built("1.1.0", "aaaa")), &key, 2), Plan::Replace, "another protocol");
+    assert_eq!(
+        plan(Some(&disc_built("1.1.0", "bbbb")), "1.1.0", 1),
+        Plan::Connect,
+        "an app that could not read its agent file judges by version alone"
+    );
 }
 
 #[test]
@@ -165,12 +199,31 @@ fn quitting_stops_only_an_agent_this_app_started_without_a_service() {
 #[test]
 fn the_connection_asks_for_the_most_any_window_wants() {
     let mut v = DetailVotes::default();
-    assert_eq!(v.effective(), LiveDetail::Summary, "the tray needs numbers with no window open");
+    // With no window open the app used to ask for the summary, so the agent read the process table every 2 s for the menu
+    // bar icons alone (docs/benchmarks.md 2026-11-03); the tray level keeps their numbers without the table.
+    assert_eq!(
+        v.effective(),
+        LiveDetail::Tray,
+        "the tray needs the system numbers, not the process table"
+    );
     v.set("main", LiveDetail::Processes);
     v.set("tray", LiveDetail::Summary);
     assert_eq!(v.effective(), LiveDetail::Processes);
     v.remove("main");
     assert_eq!(v.effective(), LiveDetail::Summary);
+    v.remove("tray");
+    assert_eq!(v.effective(), LiveDetail::Tray);
+}
+
+// An agent older than the tray level cannot read `Subscribe { tray }` and answers "could not read that request": the link
+// then asks for the summary that agent understood, instead of keeping whatever it had before (the processes, perhaps).
+#[test]
+fn an_older_agent_that_cannot_read_the_tray_level_gets_the_summary() {
+    let unreadable = CommandError::new(ErrorCode::BadRequest, "Dyno could not read that request.");
+    assert_eq!(older_agent_fallback(LiveDetail::Tray, &unreadable), Some(LiveDetail::Summary));
+    assert_eq!(older_agent_fallback(LiveDetail::Summary, &unreadable), None);
+    let down = CommandError::new(ErrorCode::Timeout, "The agent did not answer in time.");
+    assert_eq!(older_agent_fallback(LiveDetail::Tray, &down), None);
 }
 
 #[test]
@@ -195,6 +248,8 @@ struct Recorder {
     live: AtomicUsize,
     statuses: Sender<AgentStatus>,
     stalls: Mutex<Vec<Option<Stall>>>,
+    lost: Mutex<Vec<dyno_core::protocol::LostEvents>>,
+    updated: Mutex<Vec<bool>>,
 }
 
 impl Recorder {
@@ -203,6 +258,8 @@ impl Recorder {
             live: AtomicUsize::new(0),
             statuses,
             stalls: Mutex::new(Vec::new()),
+            lost: Mutex::new(Vec::new()),
+            updated: Mutex::new(Vec::new()),
         })
     }
 
@@ -212,6 +269,10 @@ impl Recorder {
 }
 
 impl Sink for Recorder {
+    fn events_lost(&self, lost: dyno_core::protocol::LostEvents) {
+        lock(&self.lost).push(lost);
+    }
+
     fn live(&self, _: LiveUpdate) {
         self.live.fetch_add(1, Ordering::SeqCst);
     }
@@ -223,6 +284,22 @@ impl Sink for Recorder {
     fn stalled(&self, stall: Option<Stall>) {
         lock(&self.stalls).push(stall);
     }
+    fn app_updated(&self, updated: bool) {
+        lock(&self.updated).push(updated);
+    }
+}
+
+#[test]
+fn a_lost_events_notice_from_the_agent_reaches_the_sink() {
+    let (tx, _rx) = std::sync::mpsc::channel();
+    let r = Recorder::new(tx);
+    let lost = dyno_core::protocol::LostEvents {
+        activity: 2,
+        alerts: 1,
+        alarms: 0,
+    };
+    super::ports::deliver(&*r, dyno_core::protocol::Message::EventsLost(lost));
+    assert_eq!(*lock(&r.lost), [lost]);
 }
 
 /// How fast the tests' links look at the world (the thresholds are counted in ticks, so only the speed changes).
@@ -350,6 +427,11 @@ fn rig(fail: bool) -> Rig {
 }
 
 fn rig_with(fail: bool, tuning: super::machine::Tuning) -> Rig {
+    rig_keyed(fail, tuning, env!("CARGO_PKG_VERSION"))
+}
+
+/// A rig whose app asks for the build `key` (see `dyno_agent::build_id::build_key`).
+fn rig_keyed(fail: bool, tuning: super::machine::Tuning, key: &str) -> Rig {
     let tmp = tempfile::tempdir().unwrap();
     let dirs = Dirs::at(tmp.path().join("data"));
     let (tx, rx) = channel();
@@ -362,14 +444,7 @@ fn rig_with(fail: bool, tuning: super::machine::Tuning) -> Rig {
         fail,
         refused: Mutex::new(Vec::new()),
     });
-    let link = AgentLink::tuned(
-        dirs,
-        env!("CARGO_PKG_VERSION"),
-        sink.clone(),
-        Box::new(Shared(launcher.clone())),
-        FAST,
-        tuning,
-    );
+    let link = AgentLink::tuned(dirs, key, sink.clone(), Box::new(Shared(launcher.clone())), FAST, tuning);
     Rig {
         link,
         sink,
@@ -510,6 +585,9 @@ fn it_reconnects_after_the_agent_goes_away() {
 struct SlowLauncher {
     dirs: Dirs,
     gate: Arc<(Mutex<bool>, Condvar)>,
+    /// Open by default. Closed, a started agent is not yet recorded in `agents`: the window between `Running::start`
+    /// (which writes the discovery file the link connects through) and the push, made deterministic.
+    registration: Arc<(Mutex<bool>, Condvar)>,
     launches: AtomicUsize,
     ended: AtomicUsize,
     agents: Arc<Mutex<Vec<Running>>>,
@@ -521,6 +599,7 @@ impl SlowLauncher {
         Arc::new(SlowLauncher {
             dirs,
             gate: Arc::new((Mutex::new(false), Condvar::new())),
+            registration: Arc::new((Mutex::new(true), Condvar::new())),
             launches: AtomicUsize::new(0),
             ended: AtomicUsize::new(0),
             agents: Arc::new(Mutex::new(Vec::new())),
@@ -533,11 +612,21 @@ impl SlowLauncher {
         self.gate.1.notify_all();
     }
 
+    fn hold_registration(&self) {
+        *lock(&self.registration.0) = false;
+    }
+
+    fn release_registration(&self) {
+        *lock(&self.registration.0) = true;
+        self.registration.1.notify_all();
+    }
+
     fn running_agents(&self) -> usize {
         lock(&self.agents).iter().filter(|r| !r.stopped()).count()
     }
 
     fn stop_all(&self) {
+        self.release_registration();
         self.open();
         for t in std::mem::take(&mut *lock(&self.threads)) {
             let _ = t.join();
@@ -555,11 +644,14 @@ impl Launcher for SlowShared {
         let me = &self.0;
         me.launches.fetch_add(1, Ordering::SeqCst);
         let (gate, dirs, agents) = (me.gate.clone(), me.dirs.clone(), me.agents.clone());
+        let registration = me.registration.clone();
         let t = std::thread::spawn(move || {
             let open = lock(&gate.0);
             drop(gate.1.wait_while(open, |o| !*o).unwrap_or_else(|e| e.into_inner()));
             let fake = Fake::new();
             if let Ok(r) = Running::start(dirs, fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))) {
+                let held = lock(&registration.0);
+                drop(registration.1.wait_while(held, |open| !*open).unwrap_or_else(|e| e.into_inner()));
                 lock(&agents).push(r);
             }
         });
@@ -597,6 +689,9 @@ fn slow_rig() -> (Arc<AgentLink>, Arc<SlowLauncher>, Receiver<AgentStatus>, temp
 fn a_slow_agent_start_is_waited_for_and_never_doubled() {
     // No wall clock decides anything here: the link counts observations of the process and the discovery file.
     let (link, launcher, statuses, _tmp) = slow_rig();
+    // `Running::start` writes the discovery file the link connects through before the launcher records the agent, so the
+    // link can be running while `running_agents()` is still 0: hold that window open to show the count does not decide.
+    launcher.hold_registration();
     let handle = link.spawn().unwrap();
     // The wait is measured in observations, not in seconds (ER-12): the old link gave up after 50 looks and started a
     // second agent, so well over twice that many observations with the gate shut must still show exactly one launch.
@@ -610,7 +705,12 @@ fn a_slow_agent_start_is_waited_for_and_never_doubled() {
     launcher.open();
     running(&link, &statuses);
     assert_eq!(launcher.launches.load(Ordering::SeqCst), 1);
-    assert_eq!(launcher.running_agents(), 1, "exactly one agent runs");
+    // The link is connected while the launcher has not recorded the agent yet (held above): that is not a second agent.
+    launcher.release_registration();
+    assert!(
+        until(Duration::from_secs(10), || launcher.running_agents() == 1),
+        "exactly one agent runs"
+    );
     assert!(link.started_by_this_app());
     assert!(link.quit(), "the agent this app started is stopped on quit");
     handle.join().unwrap();
@@ -652,7 +752,11 @@ impl FakeServiceManager {
     fn new(dirs: Dirs, installed: bool, supervises: bool) -> Arc<FakeServiceManager> {
         Arc::new(FakeServiceManager {
             dirs,
-            state: Mutex::new(ServiceState { installed, supervises }),
+            state: Mutex::new(ServiceState {
+                installed,
+                supervises,
+                pending: false,
+            }),
             agent: Mutex::new(None),
             refused: AtomicUsize::new(0),
             done: std::sync::atomic::AtomicBool::new(false),
@@ -666,7 +770,16 @@ impl FakeServiceManager {
     }
 
     fn set(&self, installed: bool, supervises: bool) {
-        *lock(&self.state) = ServiceState { installed, supervises };
+        *lock(&self.state) = ServiceState {
+            installed,
+            supervises,
+            pending: false,
+        };
+    }
+
+    /// A registration is under way (or over): the job is absent and the service's agent will come.
+    fn set_pending(&self, pending: bool) {
+        lock(&self.state).pending = pending;
     }
 
     /// Runs its job: starts the agent, again and again while it is refused; when the agent exits (asked to), its
@@ -740,6 +853,66 @@ fn with_the_service_supervising_the_app_never_starts_an_agent_of_its_own() {
     manager.stop();
 }
 
+/// Production-like counts, shrunk so that a few dozen looks outlast the old fallback (idle rechecks of the service) many times.
+fn pending_tuning() -> super::machine::Tuning {
+    super::machine::Tuning {
+        service_recheck: 5,
+        idle_rechecks: 2,
+        pending_recheck: 2,
+        ..patient()
+    }
+}
+
+#[test]
+fn a_pending_registration_is_waited_for_and_the_services_agent_finds_the_data_folder_free() {
+    let r = rig_with(false, pending_tuning());
+    let manager = FakeServiceManager::new(r.link.dirs.clone(), false, false);
+    manager.set_pending(true);
+    r.link.set_service_probe(manager.probe());
+    let handle = r.link.spawn().unwrap();
+    wait_state(&r.link, "waiting for the registration", |s| {
+        s.phase == Phase::WaitingForService && s.stall.is_some_and(|(_, k)| k == super::Stall::RegisteringService)
+    });
+    // Many times the old fallback (two idle rechecks of five looks): the app starts nothing.
+    wait_state(&r.link, "the old fallback has passed", |s| s.looks >= 60);
+    assert_eq!(
+        r.launcher.launches.load(Ordering::SeqCst),
+        0,
+        "the app started an agent while the service was registering"
+    );
+    // The registration ends with the service: its agent starts, and finds the folder free (an exit with code 3 is refused()).
+    manager.set(true, true);
+    manager.start_job();
+    running(&r.link, &r.statuses);
+    assert_eq!(r.launcher.launches.load(Ordering::SeqCst), 0);
+    assert!(!r.link.started_by_this_app());
+    assert_eq!(
+        manager.refused.load(Ordering::SeqCst),
+        0,
+        "the service's agent found the data folder locked"
+    );
+    assert!(!r.link.quit(), "the service's agent stays");
+    handle.join().unwrap();
+    manager.stop();
+}
+
+#[test]
+fn a_pending_registration_that_ends_with_no_service_falls_back_to_the_apps_own_agent() {
+    let r = rig_with(false, pending_tuning());
+    let manager = FakeServiceManager::new(r.link.dirs.clone(), false, false);
+    manager.set_pending(true);
+    r.link.set_service_probe(manager.probe());
+    let handle = r.link.spawn().unwrap();
+    wait_state(&r.link, "waiting for the registration", |s| s.phase == Phase::WaitingForService);
+    manager.set_pending(false); // refused, switched off or used up: nothing is coming
+    running(&r.link, &r.statuses);
+    assert!(r.link.started_by_this_app(), "the app waited for a service that is not coming");
+    assert_eq!(r.launcher.launches.load(Ordering::SeqCst), 1);
+    r.link.quit();
+    handle.join().unwrap();
+    manager.stop();
+}
+
 #[test]
 fn turning_launch_at_login_on_hands_the_agent_over_to_the_service() {
     let r = rig(false);
@@ -791,6 +964,11 @@ fn turning_launch_at_login_off_brings_back_an_agent_of_the_apps_own() {
     manager.stop();
 }
 
+/// The pid the stub launcher reports: this test process, which the test holds, so it can never be another program's (ER-14, rule 53).
+fn held_pid() -> u32 {
+    std::process::id()
+}
+
 /// A launcher that does what the test says, counting what the link asks of it: after a launch the process is in
 /// `after_launch` (running and silent, or exited with a code), until `finish` ends it.
 struct StubLauncher {
@@ -798,6 +976,9 @@ struct StubLauncher {
     finished: AtomicUsize,
     after_launch: Child,
     state: Mutex<Child>,
+    /// Held by a test to keep a launch from happening (the launcher thread blocks on it), so the window between the machine
+    /// asking for a launch and the process existing can be looked at as long as the test wants.
+    gate: Mutex<()>,
 }
 
 impl StubLauncher {
@@ -807,6 +988,7 @@ impl StubLauncher {
             finished: AtomicUsize::new(0),
             after_launch,
             state: Mutex::new(Child::None),
+            gate: Mutex::new(()),
         })
     }
 
@@ -820,6 +1002,7 @@ struct StubShared(Arc<StubLauncher>);
 impl Launcher for StubShared {
     fn launch(&self) -> Result<(), String> {
         let me = &self.0;
+        drop(lock(&me.gate));
         if matches!(*lock(&me.state), Child::Running { .. }) {
             return Ok(());
         }
@@ -867,6 +1050,7 @@ fn stale_file() -> Discovery {
         started: 0,
         version: env!("CARGO_PKG_VERSION").into(),
         protocol: dyno_core::protocol::PROTOCOL_VERSION,
+        build: String::new(),
     }
 }
 
@@ -874,6 +1058,38 @@ fn stale_file() -> Discovery {
 fn other_agent(dirs: &Dirs) -> Running {
     let fake = Fake::new();
     Running::start(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap()
+}
+
+/// Another agent that has taken the data folder's lock and not yet written its discovery file: it is still starting. Nothing of
+/// it runs, so nothing writes `agent.json` until [`SlowHolder::start`]. A running agent ([`other_agent`]) would not do as this
+/// holder: its discovery guard writes its own file again at the next watch (30 s), and a test that put another file there and
+/// counted looks past that saw the link connect to it (CI run 7672, macOS, at 94 of 100 looks).
+struct SlowHolder {
+    dirs: Dirs,
+    lock: dyno_agent::instance::InstanceLock,
+}
+
+impl SlowHolder {
+    fn take(dirs: &Dirs) -> SlowHolder {
+        SlowHolder {
+            dirs: dirs.clone(),
+            lock: dyno_agent::instance::InstanceLock::acquire(dirs).expect("the data folder is free"),
+        }
+    }
+
+    /// The holder finishes starting with the lock it holds (no moment without it) and writes its discovery file.
+    fn start(self) -> Running {
+        let fake = Fake::new();
+        Running::start_with_lock(
+            self.dirs,
+            fake.platform(),
+            Box::new(fake.clone()),
+            Box::new(|_| Ok(())),
+            dyno_agent::disk::DiskPorts::none(),
+            Ok(self.lock),
+        )
+        .unwrap()
+    }
 }
 
 /// Every status up to and including the first with `state`.
@@ -893,13 +1109,22 @@ fn collect_until(rx: &Receiver<AgentStatus>, state: AgentState) -> Vec<AgentStat
 }
 
 #[test]
+fn the_stub_launchers_pid_is_a_process_this_test_holds() {
+    // A made-up pid such as 4242 can belong to a real program on the machine running the tests.
+    assert_eq!(held_pid(), std::process::id());
+    assert!(
+        paddock_proc::ProcessId::of(held_pid()).is_some(),
+        "the held pid names a live process"
+    );
+}
+
+#[test]
 fn a_stale_discovery_file_beside_a_slow_lock_holder_is_not_ready_and_launches_nothing_more() {
     let r = stub_rig(Child::Exited {
         code: Some(dyno_agent::cli::EXIT_ALREADY_RUNNING),
     });
     // Another agent holds the data folder but is slow to write its file; the file there is an old agent's.
-    let holder = other_agent(&r.link.dirs);
-    let fresh = holder.discovery.clone();
+    let holder = SlowHolder::take(&r.link.dirs);
     stale_file().write(&r.link.dirs.discovery()).unwrap();
     let handle = r.link.spawn().unwrap();
     wait_state(&r.link, "waiting for the holder", |s| s.phase == Phase::WaitingForHolder);
@@ -911,8 +1136,13 @@ fn a_stale_discovery_file_beside_a_slow_lock_holder_is_not_ready_and_launches_no
         seen.iter().all(|s| !matches!(s.state, AgentState::Failed | AgentState::Restarting)),
         "a false outage was reported: {seen:?}"
     );
+    assert_eq!(
+        Discovery::read(&r.link.dirs.discovery()),
+        Some(stale_file()),
+        "the stale file was replaced during the wait"
+    );
     // The holder writes its file: the link connects, still without another launch.
-    fresh.write(&r.link.dirs.discovery()).unwrap();
+    let holder = holder.start();
     running(&r.link, &r.statuses);
     assert_eq!(r.launcher.launches(), 0);
     r.link.quit();
@@ -922,7 +1152,7 @@ fn a_stale_discovery_file_beside_a_slow_lock_holder_is_not_ready_and_launches_no
 
 #[test]
 fn an_agent_that_never_answers_is_reported_with_retry_and_retry_ends_that_process_and_launches_again() {
-    let r = stub_rig(Child::Running { pid: 4242 });
+    let r = stub_rig(Child::Running { pid: held_pid() });
     let handle = r.link.spawn().unwrap();
     let s = wait_state(&r.link, "a stall for an agent that never wrote its discovery file", |s| {
         s.stall.is_some()
@@ -947,15 +1177,40 @@ fn an_agent_that_never_answers_is_reported_with_retry_and_retry_ends_that_proces
     assert_eq!(r.launcher.launches(), 2);
 }
 
+/// After Retry ends the agent, the launcher still reports that process as exited until the next launch has really happened.
+/// A look in that window must not be read as the new agent having exited (the retry then backed off and launched a third).
+#[test]
+fn a_look_between_retry_asking_for_a_launch_and_the_launch_does_not_judge_the_new_agent_by_the_old_ones_exit() {
+    let r = stub_rig(Child::Running { pid: 4242 });
+    let handle = r.link.spawn().unwrap();
+    wait_state(&r.link, "a stall for an agent that never wrote its discovery file", |s| {
+        s.stall.is_some()
+    });
+    // The second launch is held back: the machine has asked for it, the process does not exist yet.
+    let hold = lock(&r.launcher.gate);
+    r.link.retry();
+    wait_state(&r.link, "the second launch is asked for", |s| s.child == Some(2));
+    let_it_look(&r.link, 8);
+    let seen = r.link.transitions().current();
+    assert_eq!(
+        (seen.child, matches!(seen.phase, Phase::Starting { child: 2 })),
+        (Some(2), true),
+        "looks while the launch was held back took the old agent's exit for the new one's: {seen:?}"
+    );
+    drop(hold);
+    until(HANG_GUARD, || r.launcher.launches() == 2);
+    assert_eq!(r.launcher.launches(), 2);
+    r.link.quit();
+    handle.join().unwrap();
+}
+
 #[test]
 fn another_agent_that_holds_the_folder_without_answering_is_reported_with_retry() {
     let r = stub_rig(Child::Exited {
         code: Some(dyno_agent::cli::EXIT_ALREADY_RUNNING),
     });
-    // As after a replace: the old agent's file is gone, but it still holds the folder.
-    let holder = other_agent(&r.link.dirs);
-    let fresh = holder.discovery.clone();
-    let _ = std::fs::remove_file(r.link.dirs.discovery());
+    // As after a replace: no file names the agent that still holds the folder.
+    let holder = SlowHolder::take(&r.link.dirs);
     let handle = r.link.spawn().unwrap();
     // The look that finds the lock held re-checks it at a pace (paddock-proc), so a stall may show for the look first: wait for the one
     // that names the holder.
@@ -970,7 +1225,7 @@ fn another_agent_that_holds_the_folder_without_answering_is_reported_with_retry(
         until(HANG_GUARD, || r.launcher.launches() == 1),
         "Retry did not run the connection steps again"
     );
-    fresh.write(&r.link.dirs.discovery()).unwrap();
+    let holder = holder.start();
     running(&r.link, &r.statuses);
     r.link.quit();
     handle.join().unwrap();
@@ -1058,7 +1313,7 @@ fn taking_the_agent_back_waits_for_the_former_agent_to_release_the_data_folder_b
 fn quit_reports_the_agent_it_stopped_even_though_asking_it_to_exit_ended_its_process() {
     // The stub's `finish` ends the process at once, as asking the agent to exit does: the outcome was decided at the
     // moment of the quit, from the child that was held then, and is not read again afterwards.
-    let r = stub_rig(Child::Running { pid: 4242 });
+    let r = stub_rig(Child::Running { pid: held_pid() });
     let handle = r.link.spawn().unwrap();
     wait_state(&r.link, "the agent is launched", |s| s.child.is_some());
     assert!(
@@ -1127,7 +1382,7 @@ impl Sink for BlockedSink {
 fn a_quit_is_taken_at_once_while_the_shell_is_blocked_on_a_notification() {
     let tmp = tempfile::tempdir().unwrap();
     let gate = Arc::new((Mutex::new(false), Condvar::new()));
-    let launcher = StubLauncher::new(Child::Running { pid: 4242 });
+    let launcher = StubLauncher::new(Child::Running { pid: held_pid() });
     let link = AgentLink::paced(
         Dirs::at(tmp.path().join("data")),
         env!("CARGO_PKG_VERSION"),
@@ -1177,6 +1432,7 @@ fn the_first_look_does_not_ask_the_login_service_when_an_agent_is_there_to_conne
         started: 0,
         version: env!("CARGO_PKG_VERSION").into(),
         protocol: dyno_core::protocol::PROTOCOL_VERSION,
+        build: String::new(),
     }
     .write(&r.link.dirs.discovery())
     .unwrap();
@@ -1199,4 +1455,286 @@ fn the_first_look_does_not_ask_the_login_service_when_an_agent_is_there_to_conne
     r.link.quit();
     handle.join().unwrap();
     r.launcher.finish(Duration::ZERO);
+}
+
+/// A launcher that only writes its launches into a shared log (the order test below).
+struct LoggingLauncher {
+    log: Arc<Mutex<Vec<&'static str>>>,
+    launched: std::sync::mpsc::Sender<()>,
+}
+
+impl Launcher for LoggingLauncher {
+    fn launch(&self) -> Result<(), String> {
+        lock(&self.log).push("launch");
+        let _ = self.launched.send(());
+        Err("this launcher starts nothing".into())
+    }
+    fn child(&self) -> Child {
+        Child::None
+    }
+    fn finish(&self, _: Duration) {}
+}
+
+/// Bug 7538-1, the order: the first run's registration (the hook) is done before the link's first launch. The hook
+/// waits for a launch for a bounded grace: a link that launches without waiting for it is seen at once (the launch ends the
+/// wait, and the log reads launch before the end of the hook), a correct link makes the hook wait out the grace and launches
+/// after it. The grace only ever turns a missed bug into a pass, never a pass into a failure.
+#[test]
+fn the_first_runs_registration_is_done_before_the_first_launch() {
+    const GRACE: Duration = Duration::from_millis(300);
+    let tmp = tempfile::tempdir().unwrap();
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let (launched_tx, launched_rx) = channel();
+    let (status_tx, _status_rx) = channel();
+    let link = AgentLink::tuned(
+        Dirs::at(tmp.path().join("data")),
+        env!("CARGO_PKG_VERSION"),
+        Recorder::new(status_tx),
+        Box::new(LoggingLauncher {
+            log: log.clone(),
+            launched: launched_tx,
+        }),
+        FAST,
+        patient(),
+    );
+    let hook_log = log.clone();
+    link.before_first_launch(Box::new(move || {
+        lock(&hook_log).push("register: start");
+        let _ = launched_rx.recv_timeout(GRACE);
+        lock(&hook_log).push("register: done");
+    }));
+    link.spawn().unwrap();
+    wait_state(&link, "the first launch", |_| lock(&log).contains(&"launch"));
+    assert_eq!(
+        *lock(&log),
+        ["register: start", "register: done", "launch"],
+        "the link launched an agent before the registration was done"
+    );
+    link.quit();
+}
+
+#[test]
+fn an_agent_of_another_build_of_the_same_version_is_asked_to_exit_and_the_new_one_is_used() {
+    use dyno_agent::build_id::{build_key, own_build_id};
+    // The app asks for this build; the running agent's file says it is another one (an older install of the same version).
+    let r = rig_keyed(false, patient(), &build_key(env!("CARGO_PKG_VERSION"), &own_build_id()));
+    let old = other_agent(&r.link.dirs);
+    let mut d = Discovery::read(&r.link.dirs.discovery()).expect("the old agent wrote its file");
+    d.build = "0ld0ld0ld0ld0ld0".into();
+    d.write(&r.link.dirs.discovery()).unwrap();
+    // The old agent's "process": once asked to exit it ends and frees the data folder (what an exiting process does).
+    let asked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let ended = asked.clone();
+    let process = std::thread::spawn(move || {
+        while !old.stopped() {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        ended.store(true, Ordering::SeqCst);
+        old.stop();
+    });
+    let handle = r.link.spawn().unwrap();
+    running(&r.link, &r.statuses);
+    wait_state(&r.link, "the new agent after the old one was asked to exit", |s| {
+        s.started_by_this_app()
+    });
+    assert!(
+        asked.load(Ordering::SeqCst),
+        "the agent of the older build was asked to exit and is not the one in use"
+    );
+    assert_eq!(
+        r.launcher.launches.load(Ordering::SeqCst),
+        1,
+        "one new agent, started once the folder was free"
+    );
+    let now = Discovery::read(&r.link.dirs.discovery()).expect("the new agent's file");
+    assert_eq!(now.build, own_build_id(), "the link now talks to the new build");
+    assert!(r.link.quit());
+    handle.join().unwrap();
+    process.join().unwrap();
+}
+
+#[test]
+fn the_wanted_key_follows_a_replaced_agent_file_and_keeps_the_last_answer_when_it_cannot_be_read() {
+    use dyno_agent::build_id::build_key;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("dyno-agent");
+    std::fs::write(&path, b"build one").unwrap();
+    let there = std::sync::Arc::new(AtomicBool::new(true));
+    let (p, ok) = (path.clone(), there.clone());
+    let source = super::ports::wanted_key_source("1.1.0", move || {
+        if ok.load(Ordering::SeqCst) {
+            Ok(p.clone())
+        } else {
+            Err("gone".into())
+        }
+    });
+    let one = source();
+    assert_eq!(one, build_key("1.1.0", &dyno_agent::build_id::file_build_id(&path).unwrap()));
+    assert_eq!(source(), one, "an unchanged file keeps its answer");
+    let next = dir.path().join("dyno-agent.new");
+    std::fs::write(&next, b"build two!").unwrap();
+    std::fs::rename(&next, &path).unwrap();
+    let two = source();
+    assert_ne!(two, one, "a replaced file is hashed again");
+    there.store(false, Ordering::SeqCst);
+    assert_eq!(source(), two, "an unreadable program keeps the last answer");
+    let never = super::ports::wanted_key_source("1.1.0", || Err("no program".into()));
+    assert_eq!(never(), "1.1.0", "with no answer yet the version alone decides");
+}
+
+#[test]
+fn an_app_updated_while_it_runs_uses_the_agent_of_the_new_build_and_says_to_restart() {
+    use dyno_agent::build_id::{build_key, own_build_id};
+    // The app started from build A. The files on disk are build B now, and so is the only agent the launcher can start (the
+    // in-process agent's build is this test program's). Before the fix the link asked every such agent to exit, forever.
+    let r = rig_keyed(false, patient(), env!("CARGO_PKG_VERSION"));
+    let key = std::sync::Arc::new(Mutex::new(build_key(env!("CARGO_PKG_VERSION"), "aaaaaaaaaaaaaaaa")));
+    let cell = key.clone();
+    r.link.set_wanted_source(Arc::new(move || lock(&cell).clone()));
+    assert_eq!(
+        r.link.wanted_key(),
+        build_key(env!("CARGO_PKG_VERSION"), "aaaaaaaaaaaaaaaa"),
+        "the first read is the build the app started from"
+    );
+    assert!(!r.link.app_updated());
+    *lock(&key) = build_key(env!("CARGO_PKG_VERSION"), &own_build_id());
+    let handle = r.link.spawn().unwrap();
+    running(&r.link, &r.statuses);
+    wait_state(&r.link, "the new build is in use", |s| s.started_by_this_app());
+    assert_eq!(
+        r.launcher.launches.load(Ordering::SeqCst),
+        1,
+        "the agent of the new build was started once and never evicted"
+    );
+    assert!(matches!(r.launcher.child(), Child::Running { .. }));
+    assert!(r.link.app_updated());
+    assert_eq!(*lock(&r.sink.updated), [true], "the chip is told once to restart Dyno");
+    assert!(r.link.quit());
+    handle.join().unwrap();
+}
+
+#[test]
+fn an_agent_of_the_file_on_disk_is_used_whatever_version_it_reports() {
+    use dyno_agent::build_id::{build_key, own_build_id};
+    // The app runs as an older version; the files on disk (and the only agent that can start) are a newer one. Before the fix
+    // the version never matched: the agent was asked to exit and started again, forever.
+    let r = rig_keyed(false, patient(), "0.0.1");
+    let key = build_key("0.0.1", &own_build_id());
+    r.link.set_wanted_source(Arc::new(move || key.clone()));
+    let handle = r.link.spawn().unwrap();
+    running(&r.link, &r.statuses);
+    assert_eq!(
+        r.launcher.launches.load(Ordering::SeqCst),
+        1,
+        "at most one launch, no eviction loop"
+    );
+    assert!(r.launcher.refused.lock().unwrap().is_empty());
+    assert!(r.link.quit());
+    handle.join().unwrap();
+}
+
+#[test]
+fn an_unreadable_agent_program_is_logged_once_per_reason_with_the_reason() {
+    let _ = crate::logging::testlog::lines(); // installs the capture before anything is logged
+    let marker = format!("unique-{}", std::process::id());
+    let why = marker.clone();
+    let no_program = super::ports::wanted_key_source("1.1.0", move || Err(format!("{why} is missing")));
+    let gone = std::env::temp_dir().join(format!("{marker}-gone"));
+    let g = gone.clone();
+    let no_file = super::ports::wanted_key_source("1.1.0", move || Ok(g.clone()));
+    for _ in 0..3 {
+        assert_eq!(no_program(), "1.1.0");
+        assert_eq!(no_file(), "1.1.0");
+    }
+    let lines = crate::logging::testlog::lines();
+    let told = |needle: &str| lines.iter().filter(|l| l.contains(needle)).count();
+    assert_eq!(
+        told(&format!("{marker} is missing")),
+        1,
+        "one line per reason, however many reads: {lines:?}"
+    );
+    assert_eq!(told(&format!("{} cannot be read", gone.display())), 1, "{lines:?}");
+}
+
+#[test]
+fn the_updated_flag_latches_once_the_files_have_changed() {
+    use dyno_agent::build_id::build_key;
+    let r = rig_keyed(false, patient(), "1.0.0");
+    let key = std::sync::Arc::new(Mutex::new(build_key("1.0.0", "aaaaaaaaaaaaaaaa")));
+    let cell = key.clone();
+    r.link.set_wanted_source(Arc::new(move || lock(&cell).clone()));
+    r.link.wanted_key();
+    *lock(&key) = build_key("1.0.0", "bbbbbbbbbbbbbbbb");
+    r.link.wanted_key();
+    assert!(r.link.app_updated());
+    // Another read (the look and connect threads both read) that sees the old key again does not clear it.
+    *lock(&key) = build_key("1.0.0", "aaaaaaaaaaaaaaaa");
+    r.link.wanted_key();
+    assert!(r.link.app_updated(), "the flag flapped back");
+    assert_eq!(*lock(&r.sink.updated), [true], "the chip is told once");
+}
+
+#[test]
+fn an_agent_of_the_file_on_disk_with_another_protocol_is_marked_so_it_is_not_evicted() {
+    use dyno_agent::build_id::build_key;
+    let key = build_key("1.1.0", "aaaa");
+    let mut d = disc_built("1.2.0", "aaaa");
+    d.protocol = dyno_core::protocol::PROTOCOL_VERSION + 1;
+    let h = super::ports::hint_of(&d, &key);
+    assert!(!h.same_build && h.of_disk_file, "{h:?}");
+    let other = super::ports::hint_of(&disc_built("1.1.0", "bbbb"), &key);
+    assert!(!other.same_build && !other.of_disk_file, "another build is replaced as before");
+}
+
+#[test]
+fn a_first_read_without_a_build_id_does_not_make_a_later_hashed_read_an_update() {
+    use dyno_agent::build_id::build_key;
+    let r = rig_keyed(false, patient(), "1.0.0");
+    let key = std::sync::Arc::new(Mutex::new("1.0.0".to_string())); // the file could not be hashed yet
+    let cell = key.clone();
+    r.link.set_wanted_source(Arc::new(move || lock(&cell).clone()));
+    r.link.wanted_key();
+    *lock(&key) = build_key("1.0.0", "aaaaaaaaaaaaaaaa");
+    r.link.wanted_key();
+    assert!(!r.link.app_updated(), "a key that gained its build id is not a replaced file");
+    *lock(&key) = build_key("1.0.0", "bbbbbbbbbbbbbbbb");
+    r.link.wanted_key();
+    assert!(r.link.app_updated(), "the hashed build changed: updated");
+}
+
+/// The wiring from the link's `wanted_key` latch through the driver's look to the machine: an agent that holds the folder, is the
+/// installed file (its build is the wanted one) and speaks another protocol is left alone, and the chip's cause depends on whether this
+/// app really was updated while it ran.
+fn installed_agent_of_another_protocol(updated: bool) -> Option<Stall> {
+    use dyno_agent::build_id::build_key;
+    let r = stub_rig(Child::Exited {
+        code: Some(dyno_agent::cli::EXIT_ALREADY_RUNNING),
+    });
+    let holder = other_agent(&r.link.dirs);
+    let mut file = holder.discovery.clone();
+    file.protocol = dyno_core::protocol::PROTOCOL_VERSION + 1;
+    file.build = "aaaaaaaaaaaaaaaa".into();
+    file.write(&r.link.dirs.discovery()).unwrap();
+    let key = Arc::new(Mutex::new(build_key(
+        env!("CARGO_PKG_VERSION"),
+        if updated { "bbbbbbbbbbbbbbbb" } else { "aaaaaaaaaaaaaaaa" },
+    )));
+    let cell = key.clone();
+    r.link.set_wanted_source(Arc::new(move || lock(&cell).clone()));
+    r.link.wanted_key(); // the build this app started from
+    *lock(&key) = build_key(env!("CARGO_PKG_VERSION"), "aaaaaaaaaaaaaaaa"); // the files on disk now
+    let handle = r.link.spawn().unwrap();
+    let s = wait_state(&r.link, "a stall for the installed agent of another protocol", |s| {
+        matches!(s.stall.map(|(_, k)| k), Some(Stall::AppUpdated | Stall::AgentMismatch))
+    });
+    assert_eq!(r.launcher.launches(), 0, "nothing is started beside it");
+    r.link.quit();
+    handle.join().unwrap();
+    s.stall.map(|(_, k)| k)
+}
+
+#[test]
+fn the_installed_agent_of_another_protocol_is_an_update_only_when_the_link_saw_the_files_change() {
+    assert_eq!(installed_agent_of_another_protocol(true), Some(Stall::AppUpdated));
+    assert_eq!(installed_agent_of_another_protocol(false), Some(Stall::AgentMismatch));
 }

@@ -12,8 +12,8 @@ use dyno_core::ports::PlatformError;
 use dyno_core::protocol::{LiveDetail, Message, Reply, Request};
 use dyno_core::time::day_start;
 use dyno_core::time::{Timestamp, HOUR, MINUTE};
-use dyno_ipc::Peer;
 use dyno_platform::fake::{process, Fake};
+use paddock_ipc::BodyPeer;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -81,7 +81,7 @@ impl Harness {
         }
     }
 
-    fn client(&self) -> Peer<Message> {
+    fn client(&self) -> BodyPeer<Message> {
         connect(&self.dirs).unwrap().0
     }
 
@@ -124,7 +124,7 @@ fn crash_today(order: i64, app: &str, key: &str) -> Issue {
     )
 }
 
-fn overview(peer: &Peer<Message>, rescan: bool) -> dyno_core::issues::IssuesOverview {
+fn overview(peer: &BodyPeer<Message>, rescan: bool) -> dyno_core::issues::IssuesOverview {
     let query = IssuesQuery { days: 14 };
     if rescan {
         let JobOutput::Issues(o) = run_job(peer, JobSpec::RescanIssues { query }, Duration::from_secs(30)).unwrap() else {
@@ -343,7 +343,7 @@ fn wait_until(what: &str, mut f: impl FnMut() -> bool) {
     panic!("timed out waiting for {what}");
 }
 
-fn unusual(peer: &Peer<Message>) -> dyno_core::unusual::UnusualOverview {
+fn unusual(peer: &BodyPeer<Message>) -> dyno_core::unusual::UnusualOverview {
     let Reply::Unusual(o) = ask(peer, Request::Unusual).unwrap() else {
         panic!("unusual")
     };
@@ -352,7 +352,7 @@ fn unusual(peer: &Peer<Message>) -> dyno_core::unusual::UnusualOverview {
 
 /// Subscribes to the process table. With nobody watching the agent refreshes it only every 10 s, which is the same as
 /// the 10 s these tests wait for a new process; watching makes it follow the one-second system interval.
-fn watch_processes(peer: &Peer<Message>) {
+fn watch_processes(peer: &BodyPeer<Message>) {
     ask(
         peer,
         Request::Subscribe {
@@ -371,6 +371,30 @@ fn temp_exe(name: &str) -> String {
     }
 }
 
+/// A connection that keeps every activity push it receives.
+fn activity_pushes(h: &Harness) -> (BodyPeer<Message>, std::sync::mpsc::Receiver<Message>) {
+    let d = dyno_agent::discovery::Discovery::read(&h.dirs.discovery()).unwrap();
+    let conn = dyno_agent::wire::connect(&d.endpoint, &d.token().unwrap()).unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let peer = BodyPeer::start(
+        conn,
+        paddock_ipc::BodyOptions::new("the agent").on_push(move |m| {
+            if matches!(m, Message::Activity(_)) {
+                let _ = tx.send(m);
+            }
+        }),
+    )
+    .unwrap();
+    ask(
+        &peer,
+        Request::Subscribe {
+            detail: LiveDetail::Summary,
+        },
+    )
+    .unwrap();
+    (peer, rx)
+}
+
 fn shared_has_process(h: &Harness, name: &str) -> bool {
     dyno_agent::agent::lock(&h.shared().core)
         .latest
@@ -383,6 +407,7 @@ fn shared_has_process(h: &Harness, name: &str) -> bool {
 fn a_new_program_after_learning_is_listed_with_reasons_and_can_be_protected_ignored_and_forgotten() {
     let h = Harness::start(vec![]);
     let peer = h.client();
+    let (_watching, pushes) = activity_pushes(&h);
     watch_processes(&peer);
     // No learning period: the first look still only learns what is already running.
     let Reply::Settings(mut s) = ask(&peer, Request::Settings).unwrap() else {
@@ -413,6 +438,13 @@ fn a_new_program_after_learning_is_listed_with_reasons_and_can_be_protected_igno
     };
     let lines: Vec<_> = log.iter().filter(|e| e.title == "Unusual program: helper").collect();
     assert_eq!(lines.len(), 1);
+    // The window is told at once, not only when it reads the log.
+    loop {
+        match pushes.recv_timeout(Duration::from_secs(30)).expect("the activity row is pushed") {
+            Message::Activity(e) if e.title == "Unusual program: helper" => break,
+            _ => {}
+        }
+    }
     assert!(lines[0].detail.contains("Unusual because it"));
     shared.unusual.look(&shared);
     let Reply::Activities(log) = ask(&peer, Request::Activity { limit: 20 }).unwrap() else {

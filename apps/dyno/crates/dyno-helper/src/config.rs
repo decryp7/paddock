@@ -1,14 +1,14 @@
-//! What `install` records for the daemon: the one authorised user and the agent program that may call. Read at
-//! start; damage means the daemon refuses to serve (fail closed) and says why.
+//! What `install` records for the daemon: the owner (the account that turned the helper on, who may turn it off and read
+//! its audit log). Read at start; damage means the daemon refuses to serve (fail closed) and says why. There is no token:
+//! who a caller is comes from the OS (`paddock-ipc` identity), never from a secret in a file.
 
 use dyno_core::helper_wire::HelperUser;
-use dyno_ipc::Token;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-/// The schema of `config.json`.
-pub const SCHEMA: u32 = 1;
-/// The largest config or token file the daemon reads.
+/// The schema of `config.json` (2: the owner; 1 had a token and a single served user).
+pub const SCHEMA: u32 = 2;
+/// The largest config file the daemon reads.
 const MAX_FILE: u64 = 16 * 1024;
 
 /// The installed configuration.
@@ -16,12 +16,13 @@ const MAX_FILE: u64 = 16 * 1024;
 pub struct HelperConfig {
     /// [`SCHEMA`].
     pub schema: u32,
-    /// The only user the daemon serves.
-    pub user: HelperUser,
-    /// The only program allowed to call (full path of `dyno-agent`).
-    pub agent_exe: PathBuf,
+    /// The account that turned the helper on.
+    pub owner: HelperUser,
     /// The Dyno version that installed it.
     pub version: String,
+    /// Where the app it serves is (the orphan watch removes the helper when it stays gone); none on Linux.
+    #[serde(default)]
+    pub app: Option<std::path::PathBuf>,
 }
 
 /// Why the daemon cannot start.
@@ -43,36 +44,51 @@ impl std::fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
-fn read_bounded(path: &Path) -> Result<String, ConfigError> {
-    let meta = std::fs::metadata(path).map_err(|e| ConfigError::Unreadable(format!("{} cannot be read: {e}", path.display())))?;
-    if meta.len() > MAX_FILE {
-        return Err(ConfigError::Invalid(format!("{} is too large to be Dyno's file.", path.display())));
-    }
-    std::fs::read_to_string(path).map_err(|e| ConfigError::Unreadable(format!("{} cannot be read: {e}", path.display())))
-}
-
 impl HelperConfig {
+    /// A configuration for `owner`, written by version `version`.
+    pub fn new(owner: HelperUser, version: &str) -> HelperConfig {
+        HelperConfig {
+            schema: SCHEMA,
+            owner,
+            version: version.to_string(),
+            app: None,
+        }
+    }
+
+    /// With the app location the orphan watch looks for.
+    #[must_use]
+    pub fn with_app(mut self, app: Option<std::path::PathBuf>) -> Self {
+        self.app = app;
+        self
+    }
+
     /// Parses the configuration text.
+    ///
+    /// # Errors
+    /// [`ConfigError::Invalid`].
     pub fn parse(text: &str) -> Result<HelperConfig, ConfigError> {
         let c: HelperConfig =
             serde_json::from_str(text).map_err(|e| ConfigError::Invalid(format!("The helper's configuration is damaged: {e}")))?;
         if c.schema != SCHEMA {
             return Err(ConfigError::Invalid(format!(
-                "The helper's configuration has schema {}, expected {SCHEMA}.",
+                "The helper's configuration has schema {}, expected {SCHEMA}. Turn the helper off and on again in Settings > Dyno > Administrator readings.",
                 c.schema
             )));
-        }
-        if !c.agent_exe.is_absolute() {
-            return Err(ConfigError::Invalid(
-                "The helper's configuration names a relative agent path.".into(),
-            ));
         }
         Ok(c)
     }
 
     /// Reads the configuration file.
+    ///
+    /// # Errors
+    /// [`ConfigError`].
     pub fn load(path: &Path) -> Result<HelperConfig, ConfigError> {
-        HelperConfig::parse(&read_bounded(path)?)
+        let meta = std::fs::metadata(path).map_err(|e| ConfigError::Unreadable(format!("{} cannot be read: {e}", path.display())))?;
+        if meta.len() > MAX_FILE {
+            return Err(ConfigError::Invalid(format!("{} is too large to be Dyno's file.", path.display())));
+        }
+        let text = std::fs::read_to_string(path).map_err(|e| ConfigError::Unreadable(format!("{} cannot be read: {e}", path.display())))?;
+        HelperConfig::parse(&text)
     }
 
     /// The file's text.
@@ -82,28 +98,12 @@ impl HelperConfig {
     }
 }
 
-/// Reads the token file (64 hex digits, optionally followed by a newline).
-pub fn load_token(path: &Path) -> Result<Token, ConfigError> {
-    Token::from_hex(read_bounded(path)?.trim())
-        .ok_or_else(|| ConfigError::Invalid(format!("{} does not hold a Dyno token.", path.display())))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn sample() -> HelperConfig {
-        HelperConfig {
-            schema: SCHEMA,
-            user: HelperUser::Uid(501),
-            // Absolute on every platform: the parser checks it against the host, and "/Applications" has no drive on Windows.
-            agent_exe: PathBuf::from(if cfg!(windows) {
-                r"C:\Applications\Dyno.app\Contents\MacOS\dyno-agent"
-            } else {
-                "/Applications/Dyno.app/Contents/MacOS/dyno-agent"
-            }),
-            version: "1.0.0".into(),
-        }
+        HelperConfig::new(HelperUser::Uid(501), "1.1.0")
     }
 
     #[test]
@@ -112,33 +112,23 @@ mod tests {
         assert_eq!(HelperConfig::parse(&c.to_text()).unwrap(), c);
         assert!(matches!(HelperConfig::parse("{"), Err(ConfigError::Invalid(_))));
         assert!(matches!(HelperConfig::parse(""), Err(ConfigError::Invalid(_))));
-        let other = HelperConfig { schema: 9, ..sample() };
-        assert!(HelperConfig::parse(&other.to_text()).unwrap_err().to_string().contains("schema 9"));
-        let relative = HelperConfig {
-            agent_exe: PathBuf::from("dyno-agent"),
-            ..sample()
-        };
-        assert!(HelperConfig::parse(&relative.to_text()).is_err());
+        let other = HelperConfig { schema: 1, ..sample() };
+        let e = HelperConfig::parse(&other.to_text()).unwrap_err().to_string();
+        assert!(e.contains("schema 1") && e.contains("Settings > Dyno > Administrator readings"));
     }
 
     #[test]
-    fn files_are_read_with_a_bound_and_tokens_must_be_hex() {
+    fn files_are_read_with_a_bound() {
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("config.json");
         std::fs::write(&cfg, sample().to_text()).unwrap();
         assert_eq!(HelperConfig::load(&cfg).unwrap(), sample());
-        assert!(matches!(
-            HelperConfig::load(&dir.path().join("missing")),
-            Err(ConfigError::Unreadable(_))
-        ));
+        let missing = HelperConfig::load(&dir.path().join("missing")).unwrap_err();
+        assert!(matches!(missing, ConfigError::Unreadable(_)));
         let big = dir.path().join("big");
         std::fs::write(&big, vec![b'x'; 20_000]).unwrap();
         assert!(matches!(HelperConfig::load(&big), Err(ConfigError::Invalid(_))));
-        let tok = dir.path().join("token");
-        let t = Token::random().unwrap();
-        std::fs::write(&tok, format!("{}\n", t.to_hex())).unwrap();
-        assert!(load_token(&tok).unwrap().matches(t.as_bytes()));
-        std::fs::write(&tok, "not hex").unwrap();
-        assert!(matches!(load_token(&tok), Err(ConfigError::Invalid(_))));
+        std::fs::write(&cfg, [0xff, 0xfe]).unwrap();
+        assert!(matches!(HelperConfig::load(&cfg), Err(ConfigError::Unreadable(_))));
     }
 }

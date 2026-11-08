@@ -170,3 +170,10 @@ longer than 2 days.
   removed; DY-D is 2 days.
 - **D4. `unexercised` commands are allowed** with a written reason that is reviewed and counted. The per-app count may
   only fall: `dev check dialog-commands` fails when it rises above the committed baseline (1.2b).
+
+## Checklist line (ADR 0043)
+
+Adopting the shared dialogs means adopting their size model once: decisions, forms and viewers follow their content
+(`dialog_measure { epoch, seq, measure }`), a tool keeps its size, only a tool remembers its size. Debrief's five fixed-height
+forms become `Height` forms or tools. Run `expectLoopSettles` over the whole contract on chromium and webkit, and keep
+conformance C78 clean.

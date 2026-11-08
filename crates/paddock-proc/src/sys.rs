@@ -1,11 +1,25 @@
 //! The few platform calls, in one small file: signals and priority on Unix, process handles and `taskkill` on Windows, and
 //! when a process started. Everything here is a single call that hands over to tested code or makes one OS request.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 #![allow(unsafe_code)]
 
 #[cfg(unix)]
 mod unix {
     use std::os::unix::process::CommandExt;
     use std::process::Command;
+
+    /// The effective user id of this process.
+    pub fn effective_uid() -> u32 {
+        // SAFETY: geteuid has no arguments and cannot fail.
+        unsafe { libc::geteuid() }
+    }
 
     /// Sends `signal` to the process group `pgid`; false when there is no such group.
     #[expect(
@@ -289,7 +303,7 @@ pub fn start_time(pid: u32) -> Option<crate::StartTime> {
 
 /// The creation time of the process behind `h`.
 #[cfg(windows)]
-fn creation_time(h: windows_sys::Win32::Foundation::HANDLE) -> Option<crate::StartTime> {
+pub(crate) fn creation_time(h: windows_sys::Win32::Foundation::HANDLE) -> Option<crate::StartTime> {
     use windows_sys::Win32::Foundation::FILETIME;
     use windows_sys::Win32::System::Threading::GetProcessTimes;
     let mut t = [FILETIME {

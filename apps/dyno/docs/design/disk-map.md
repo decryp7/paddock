@@ -38,6 +38,7 @@ Page frame as every Dyno page (UI rule 16): 24 px gutter, title 18/600, one mute
 | Main, Chart view | Left card 616 px: the sunburst (outer radius 280, centre 92, four rings 58/50/40/34 px) and a two-item key ("Hidden space", "Other folders and small items"). The **Duplicate hints** tab shows a count only after the hint phase of a whole scan has run, and the count is the number of groups under the centre. Right card (flex): tabs **In this folder (n) · Largest files · Oldest files · Duplicate hints (n)**, a 28 px sticky header (Name · Size · Share), 32 px rows; below the rows the breakdown of hidden space (volume root) or the centre's details (path with Copy, items, newest change, duplicate hints, **Reveal in Finder**, **Copy path**); a muted one-line footer hint |
 | Main, Table view | One full-width card: filter field, `pd-table` in tree mode (Name with swatch · Size · bar · % of centre · Items · Newest change · sticky "…" column), footer with the keyboard hint and the row count |
 | Job strip (scanning) | `pd-job` between the toolbar and the cards: title, phase label, growing count `1,116,387 items · 325.9 GB of 568.6 GB counted`, determinate bar (volume) or indeterminate bar with growing count (folder), ETA only when `etaMs` is present, **Cancel** |
+| Rescan strip (ADR 0029, D9) | When Rescan runs over a finished map, the same job strip ("Rescanning Macintosh HD · the map below stays until this is done") sits above the **old map, which stays on screen and usable**, with **Show progress** (the growing tree) and **Cancel rescan**; the page swaps to the new map when its pass is done. Cancel and a failed rescan keep the old map (a failed one adds a danger callout "The rescan stopped"). A map read back from the cache has an info callout "Saved map, scanned 3 days ago. Net change in used space since: +12.4 GB (a net figure…)" with **Forget this map**, and the header subtitle says "(saved)"; a finished scan that was not kept says why ("Too big to keep; raise the limit in Settings") |
 
 Below 1100 px the right card moves under the chart (the chart keeps a 440 px minimum); below 760 px the Chart view
 falls back to the Table view with a one-line note, because a ring under 200 px cannot carry four levels.
@@ -261,8 +262,7 @@ counted once per name. It lives in the cleanup module that ADR 0021 drops.
      snapshots from `tmutil listlocalsnapshots <mount>` (count and dates; macOS gives no per-snapshot size, so their
      bytes stay in `remainder`).
    - Windows (NTFS): `pagefile.sys`, `hiberfil.sys`, `swapfile.sys` sizes from their directory entries (no open);
-     `SHQueryRecycleBinW` per drive; shadow-copy storage needs administrator rights, so it is read by the read-only
-     helper or shown as "Needs administrator" (ADR 0021 keeps the helper read-only).
+     `SHQueryRecycleBinW` per drive; shadow-copy storage needs administrator rights, so it is read by the helper or shown as "Needs administrator" (ADR 0027).
    - Linux: `f_bfree − f_bavail` (reserved for root); btrfs/ZFS snapshots `NotReported { "not measured" }`.
    - Network file systems: `NotReported` for purgeable and snapshots; free space as the server reports it.
 7. **File lists.** `DiskFiles { scan, under: node, order: Largest | Oldest, limit ≤ 500, min_bytes }` over the notable

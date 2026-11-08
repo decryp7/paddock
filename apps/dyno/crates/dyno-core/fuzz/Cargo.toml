@@ -1,0 +1,21 @@
+[package]
+name = "dyno-core-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+dyno-core = { path = ".." }
+
+[[bin]]
+name = "index_records"
+path = "fuzz_targets/index_records.rs"
+test = false
+doc = false
+
+# Not a member of the Dyno workspace: cargo-fuzz builds it on its own (nightly).
+[workspace]

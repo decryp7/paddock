@@ -447,4 +447,59 @@ mod tests {
             assert_eq!(from_baseline("System", m, 1.0, &j, true).metric, Some(want));
         }
     }
+
+    /// Every constructor in this file: the detail adds to the title and never repeats it (it is shown under the title).
+    #[test]
+    fn no_observation_repeats_its_title_in_its_detail() {
+        use crate::baseline::{BaselineMetric, Judgement};
+        use crate::hardware::Confidence;
+        use crate::issues::{Issue, IssueKind, IssueSourceId};
+        use crate::lifespan::{unavailable, LifeOutcome, LifeSubject};
+        use crate::throttle::{ThrottleCause, ThrottleEpisode};
+        let episode = ThrottleEpisode {
+            id: ThrottleEpisode::id_for(Timestamp(0)),
+            start: Timestamp(0),
+            end: None,
+            cause: ThrottleCause::Thermal,
+            avg_lost_percent: 31.6,
+            peak_lost_percent: 40.0,
+            peak_temperature_c: Some(99.0),
+        };
+        let mut life = unavailable(LifeSubject::Battery, "Battery", "n/a");
+        life.outcome = LifeOutcome::AlreadyPastLimit;
+        life.headline = "Time to think about a new battery".into();
+        let judged = Judgement::not_judged("Higher than usual for Monday nights", "CPU is 72% now.");
+        let all = [
+            from_alert(&alert(AlertKind::Overheating, "CPU is hot")),
+            from_threshold("gpu-limit", Metric::GpuLoad, Severity::Warning, 97.0, 90.0, true),
+            from_issue(&Issue::new(
+                IssueSourceId::MacLog,
+                Timestamp(5),
+                IssueKind::DiskError,
+                "",
+                "Disk error",
+                "I/O error on disk3",
+                "1",
+            )),
+            from_throttle(&episode, true, Confidence::High, &crate::time::FixedZone::UTC),
+            from_lifespan(&life, true),
+            from_baseline("System", BaselineMetric::Cpu, 72.0, &judged, true),
+            from_baseline("Chrome", BaselineMetric::Memory, 40.0, &judged, true),
+        ];
+        for o in all {
+            assert!(!o.detail.is_empty(), "empty detail for {}", o.title);
+            assert!(
+                !o.detail.contains(&o.title),
+                "detail contains its title: {:?} / {:?}",
+                o.title,
+                o.detail
+            );
+            assert!(
+                !o.detail.starts_with(&o.title),
+                "detail starts with its title: {:?} / {:?}",
+                o.title,
+                o.detail
+            );
+        }
+    }
 }

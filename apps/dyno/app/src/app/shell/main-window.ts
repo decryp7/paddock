@@ -9,7 +9,7 @@ import { provideContributions, provideShellContext, provideShellVersionCheck } f
 import { provideShellAbout } from '@decryp7/paddock-ui/shell/about';
 import { provideWebviewLog } from '@decryp7/paddock-ui/shell/diagnostics';
 import { tauriDialogIo } from '@decryp7/paddock-ui/shell/dialogs';
-import { provideSubmenus, tauriNativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
+import { provideSubmenus, QUIT_TITLE, tauriNativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
 import { provideShellSettings, SETTINGS_CONTRIBUTIONS } from '@decryp7/paddock-ui/shell/settings';
 import { MockStartupBackend, reportBootstrapFailure, TauriStartupBackend, windowReady } from '@decryp7/paddock-ui/shell/startup';
 import { LANGUAGE_CONFIG, LocalStorageLanguageStorage } from '@decryp7/paddock-ui/shell/i18n';
@@ -24,6 +24,7 @@ import { DynoIcon } from './icon';
 import { tauriBridge, tauriIpc } from './ipc';
 import { provideWidgetNavigation } from './navigate';
 import { provideTrayHint } from './tray-hint';
+import { QuitStore } from '../state/quit.store';
 import { SettingsStore } from '../state/settings.store';
 import type { DynoContext } from './context';
 
@@ -79,7 +80,12 @@ export function bootMainWindow(): Promise<unknown> {
       // Everything starts in the background: the first paint never waits for the backend.
       provideAppInitializer(() => {
         void inject(SettingsStore).load();
+        // What Quit does (the menu says "keeps measuring" while a service keeps the agent): read at the start and whenever the window is focused again.
+        const quit = inject(QuitStore);
+        void quit.refresh();
+        window.addEventListener('focus', () => void quit.refresh());
       }),
+      { provide: QUIT_TITLE, useFactory: () => inject(QuitStore).title },
       // The shell's frame already provides the native feel (browser keys, context menu, the Copy menu).
       provideShellPages({
         appName: 'Dyno',

@@ -15,6 +15,7 @@ export const FOLD_BELOW = 0.005;
 export const RINGS = 4;
 export const RING_MIN_SHARE = 0.005;
 export const RING_MAX_NODES = 1500;
+const DAY = 86_400_000;
 
 interface DiskMapState {
   volumes: Volume[];
@@ -42,6 +43,13 @@ interface DiskMapState {
   levelError: CommandError | null;
   levelLoading: boolean;
   view: DiskView;
+  /**
+   * A Rescan in progress (ADR 0029, D9): the new pass `scan` replaces the map `of`, which stays on screen until the pass is
+   * done. Cancel or a failure keeps the old map.
+   */
+  refreshing: { scan: number; of: number } | null;
+  /** The Rescan that failed, so the page says so next to the map that was kept. */
+  refreshFailure: DiskScanStatus | null;
 }
 
 const initial: DiskMapState = {
@@ -62,6 +70,8 @@ const initial: DiskMapState = {
   levelError: null,
   levelLoading: false,
   view: 'chart',
+  refreshing: null,
+  refreshFailure: null,
 };
 
 /**
@@ -80,6 +90,13 @@ export const DiskMapStore = signalStore(
     /** The folders above the centre, root first, for the chart's way back up. */
     ancestors: computed(() => s.trail().slice(0, -1).map((c) => ({ id: c.node ?? s.rootId() ?? 0, name: c.name, bytes: c.bytes }))),
     rows: computed(() => (s.level() ? levelRows(s.level()!) : [])),
+    /** The status of the Rescan in progress (its numbers are the strip's), else null. */
+    refreshStatus: computed(() => {
+      const r = s.refreshing();
+      return r ? (s.kept().find((k) => k.scan === r.scan) ?? null) : null;
+    }),
+    /** Whether the page shows the map a Rescan will replace (so it shows the Rescan's strip, not the growing tree). */
+    refreshingThis: computed(() => s.refreshing() !== null && s.refreshing()!.of === s.status()?.scan),
     capacity: computed(() => {
       const st = s.status();
       const vol = st?.volume ?? s.volumes().find((v) => v.id === s.selectedVolumeId()) ?? null;
@@ -88,6 +105,7 @@ export const DiskMapStore = signalStore(
   })),
   withMethods((store, backend = inject(BACKEND)) => {
     let token = 0;
+    let opened = false;
     const keep = (status: DiskScanStatus) =>
       patchState(store, (s) => ({ kept: [...s.kept.filter((k) => k.scan !== status.scan), status].sort((a, b) => a.scan - b.scan) }));
     /**
@@ -162,6 +180,23 @@ export const DiskMapStore = signalStore(
       return refresh();
     };
 
+    /** What happens when the Rescan's pass ends: done swaps to it, cancelled or failed keeps the map that was on screen. */
+    const settleRefresh = (status: DiskScanStatus): void => {
+      const r = store.refreshing();
+      if (!r || status.scan !== r.scan) return;
+      const how = outcome(status.state);
+      if (how === 'running') return;
+      patchState(store, { refreshing: null, refreshFailure: how === 'failed' ? status : null });
+      const shown = store.status();
+      if (how === 'done') {
+        // Showing the growing tree already: it just finished, keep the place in it. Otherwise swap to the new map.
+        if (shown?.scan !== status.scan) void show(status);
+        return;
+      }
+      // Watching the growing tree of a Rescan that did not finish: back to the map that was kept.
+      if (shown?.scan === status.scan) void show(store.kept().find((k) => k.scan === r.of) ?? null);
+    };
+
     /** Starts a scan (a job; resolves at once) and shows it. */
     const scan = async (target: DiskTarget): Promise<boolean> => {
       if (store.starting()) return false;
@@ -214,11 +249,35 @@ export const DiskMapStore = signalStore(
           patchState(store, { kept });
           if (store.status()) return;
           const latest = [...kept].reverse().find((k) => !store.selectedVolumeId() || (k.volume?.id ?? null) === store.selectedVolumeId()) ?? null;
-          if (latest) await show(latest);
+          // A Rescan still running shows the map it replaces, with its strip (D9), as it did before the window was closed.
+          const replaced = latest && latest.replaces !== null && outcome(latest.state) === 'running' ? (kept.find((k) => k.scan === latest.replaces) ?? null) : null;
+          if (latest && replaced) {
+            patchState(store, { refreshing: { scan: latest.scan, of: replaced.scan } });
+            await show(replaced);
+          } else if (latest) await show(latest);
         } catch {
           // Nothing kept is shown as "not scanned"; a scan can still be started.
         } finally {
           patchState(store, { restored: true });
+        }
+      },
+      /**
+       * The opt-in refresh of a saved map (`disk.savedMaps.refreshOnOpen`): at the first look at the page, when the map on screen
+       * was read back from the cache and is older than the setting says. Never on a timer, never in the background. Once per run
+       * of the page; returns whether a Rescan was started.
+       */
+      async refreshOnOpen(now: number): Promise<boolean> {
+        if (opened) return false;
+        opened = true;
+        const s = store.status();
+        if (!s || typeof s.origin === 'string' || s.scannedAt === null || store.refreshing()) return false;
+        try {
+          const when = (await backend.settings()).disk?.savedMaps?.refreshOnOpen ?? 'off';
+          const limit = when === 'olderThanDay' ? DAY : when === 'olderThanWeek' ? 7 * DAY : null;
+          return limit !== null && now - s.scannedAt > limit ? await this.rescan() : false;
+        } catch {
+          // The setting could not be read: nothing is refreshed by itself.
+          return false;
         }
       },
       /** Makes a volume the one the page is about, showing its kept scan when there is one. */
@@ -240,17 +299,57 @@ export const DiskMapStore = signalStore(
         }
       },
       scan,
-      /** Scans the same target again (Rescan, Retry). */
+      /**
+       * Scans the same target again (Rescan, Retry). From a finished map the new pass replaces it: the map stays on screen,
+       * readable, with the pass's progress beside it, and the page swaps when the pass is done (D9). Anything else (a partial
+       * or failed map, no map) shows the new scan at once.
+       */
       async rescan(): Promise<boolean> {
         const s = store.status();
         const id = store.selectedVolumeId();
-        return scan(s?.target ?? (id ? { volume: { id } } : { folder: { path: '/' } }));
+        if (!s || outcome(s.state) !== 'done') return scan(s?.target ?? (id ? { volume: { id } } : { folder: { path: '/' } }));
+        if (store.starting() || store.refreshing()) return false;
+        patchState(store, { starting: true, startError: null, refreshFailure: null });
+        try {
+          const before = store.kept();
+          const reply = adopt(await backend.startDiskScan(s.target, s.scan), before);
+          patchState(store, { refreshing: { scan: reply.scan, of: s.scan } });
+          // A short pass can end before its reply arrives.
+          settleRefresh(reply);
+          return true;
+        } catch (e) {
+          patchState(store, { startError: toCommandError(e) });
+          return false;
+        } finally {
+          patchState(store, { starting: false });
+        }
+      },
+      /** Shows the growing tree of the Rescan in progress instead of the map it will replace. */
+      async showProgress(): Promise<void> {
+        const rs = store.refreshStatus();
+        if (rs) await show(rs);
+      },
+      /** Forgets the saved map on screen (its row in the cache) and clears the page. */
+      async forgetSaved(): Promise<boolean> {
+        const s = store.status();
+        if (!s) return false;
+        try {
+          await backend.forgetSavedDiskMap(s.scan);
+          patchState(store, (st) => ({ kept: st.kept.filter((k) => k.scan !== s.scan), refreshing: st.refreshing?.of === s.scan ? null : st.refreshing }));
+          await show(null);
+          return true;
+        } catch (e) {
+          patchState(store, { startError: toCommandError(e) });
+          return false;
+        }
       },
       async cancel(): Promise<void> {
         const s = store.status();
-        if (!s) return;
+        // The pass to stop is the Rescan's when one runs for the map on screen; the map itself is not running.
+        const target = store.refreshing()?.scan ?? s?.scan;
+        if (target === undefined) return;
         try {
-          await backend.cancelDiskScan(s.scan);
+          await backend.cancelDiskScan(target);
         } catch (e) {
           patchState(store, { startError: toCommandError(e) });
         }
@@ -260,6 +359,7 @@ export const DiskMapStore = signalStore(
         const known = store.kept().find((k) => k.scan === status.scan);
         if (known && known.seq >= status.seq) return;
         keep(status);
+        settleRefresh(status);
         const shown = store.status();
         if (!shown || shown.scan !== status.scan) return;
         patchState(store, { status });

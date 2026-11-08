@@ -9,22 +9,13 @@ use std::path::Path;
 /// macOS: the user's data volume, joined to the sealed system volume at `/` by firmlinks.
 pub const MACOS_DATA: &str = "/System/Volumes/Data";
 
-/// Whether a macOS mount is plumbing no one manages: helper volumes, snapshots, Time Machine and VM mounts.
-fn is_plumbing(mount: &str) -> bool {
-    (mount.starts_with("/System/Volumes/") && mount != MACOS_DATA)
-        || mount.starts_with("/Volumes/.timemachine")
-        || mount.starts_with("/Volumes/com.apple.")
-        || mount.starts_with("/private/var/vm")
-        || mount.starts_with("/Library/Developer/CoreSimulator")
-}
-
 /// macOS: drops plumbing and shows the Data volume as the startup disk at `/`, scanned from the Data volume's own mount
 /// (`/` is the read-only sealed system volume; its folders reach the data through firmlinks).
 pub fn tidy_macos(mounts: Vec<RawMount>) -> Vec<RawMount> {
     let has_data = mounts.iter().any(|m| m.mount == MACOS_DATA);
     mounts
         .into_iter()
-        .filter(|m| !is_plumbing(&m.mount) && !(has_data && m.mount == "/"))
+        .filter(|m| !dyno_core::disk::volume::is_plumbing_mount(&m.mount) && !(has_data && m.mount == "/"))
         .map(|mut m| {
             if m.mount == MACOS_DATA {
                 m.mount = "/".into();
@@ -57,6 +48,7 @@ pub fn parse_diskutil_info(bytes: &[u8]) -> Option<MediaTraits> {
         removable: removable.filter(|_| internal != Some(true)),
         rotational: d.get("SolidState").and_then(plist::Value::as_boolean).map(|ssd| !ssd),
         bus: d.get("BusProtocol").and_then(plist::Value::as_string).map(str::to_string),
+        identity: d.get("VolumeUUID").and_then(plist::Value::as_string).map(str::to_string),
     })
 }
 
@@ -86,7 +78,28 @@ pub fn linux_traits(sys_root: &Path, device: &str) -> MediaTraits {
         removable: flag("removable").filter(|r| *r).or(bus.as_ref().map(|_| true)),
         rotational: flag("queue/rotational"),
         bus,
+        identity: None,
     }
+}
+
+/// Windows: the identity of a volume from its GUID path and its serial number. The GUID path survives a reformat (the partition
+/// keeps it), the serial changes with it, so both together tell a reformatted disk from the one that was scanned. Built here (not
+/// in the Windows module) so every OS tests the composition.
+pub fn compose_windows_identity(guid_path: &str, serial: Option<u32>) -> String {
+    match serial {
+        Some(s) => format!("{guid_path}|{s:08x}"),
+        None => guid_path.to_string(),
+    }
+}
+
+/// Linux: the file system UUID of the device `source` (`/dev/sda1`), from the links in `by_uuid` (`/dev/disk/by-uuid`), each of
+/// which points at the device that holds that UUID. `None` for a device without one (or an unreadable folder).
+pub fn linux_identity(by_uuid: &Path, source: &str) -> Option<String> {
+    let want = std::fs::canonicalize(source).ok()?;
+    std::fs::read_dir(by_uuid).ok()?.flatten().find_map(|e| {
+        let target = std::fs::canonicalize(e.path()).ok()?;
+        (target == want).then(|| e.file_name().to_string_lossy().into_owned())
+    })
 }
 
 // The field types of `statvfs` differ per OS (32 or 64 bits), so the widening is needed on some and a no-op on others.
@@ -108,21 +121,148 @@ fn statvfs(path: &Path) -> Option<(u64, u64)> {
     ))
 }
 
-/// Capacity and free bytes of the volume mounted at `mount`; `None` when the OS will not say. May block on a dead
-/// network mount: callers on a network mount run it on an abandonable thread.
-pub fn capacity(mount: &str) -> Option<(u64, u64)> {
-    #[cfg(unix)]
+/// The space of one volume as the person means it: what is free to write, counting what the OS gives back on demand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Space {
+    /// Capacity in bytes.
+    pub total: u64,
+    /// Free bytes by the one definition every Dyno view shares (on macOS Finder's "available": purgeable space counts as free).
+    pub free: u64,
+    /// Bytes the OS would give back when asked (macOS purgeable space: local snapshots, caches); `None` where there is no such notion.
+    pub purgeable: Option<u64>,
+}
+
+/// Picks the free bytes from what macOS can report, best first: the "important usage" figure (Finder's), the plain available
+/// figure, then `statvfs`'s `f_bavail` (which leaves purgeable space out). A missing or zero figure falls through to the next
+/// (zero is what a volume that cannot say reports), and the pick never exceeds the capacity.
+pub fn choose_free(important: Option<u64>, available: Option<u64>, bavail: Option<u64>, total: u64) -> Option<u64> {
+    [important, available, bavail]
+        .into_iter()
+        .flatten()
+        .find(|v| *v > 0)
+        .or(bavail)
+        .map(|v| v.min(total))
+}
+
+/// Capacity and free bytes of the volume mounted at `mount`, by the one definition of free (see [`Space`]); `None` when the OS
+/// will not say. May block on a dead network mount: callers on a network mount run it on an abandonable thread.
+pub fn space(mount: &str) -> Option<Space> {
+    #[cfg(target_os = "macos")]
     {
-        statvfs(Path::new(mount))
+        let (total, bavail) = statvfs(Path::new(mount)).map_or((None, None), |(t, b)| (Some(t), Some(b)));
+        let q = macos_space::read(mount);
+        let total = q.as_ref().and_then(|q| q.total).filter(|t| *t > 0).or(total)?;
+        let free = choose_free(
+            q.as_ref().and_then(|q| q.important),
+            q.as_ref().and_then(|q| q.available),
+            bavail,
+            total,
+        )?;
+        let purgeable = q
+            .as_ref()
+            .and_then(|q| Some(q.important?.saturating_sub(q.available?)))
+            .filter(|p| *p > 0);
+        Some(Space { total, free, purgeable })
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        statvfs(Path::new(mount)).map(|(total, free)| Space {
+            total,
+            free,
+            purgeable: None,
+        })
     }
     #[cfg(windows)]
     {
-        win::capacity(mount)
+        win::capacity(mount).map(|(total, free)| Space {
+            total,
+            free,
+            purgeable: None,
+        })
     }
     #[cfg(not(any(unix, windows)))]
     {
         let _ = mount;
         None
+    }
+}
+
+/// Capacity and free bytes of the volume mounted at `mount` (see [`space`]).
+pub fn capacity(mount: &str) -> Option<(u64, u64)> {
+    space(mount).map(|s| (s.total, s.free))
+}
+
+/// macOS volume figures from CoreFoundation. A fresh URL is made for every read: a URL object caches the resource values it
+/// has been asked for, so a long-lived one would show the first answer forever.
+#[cfg(target_os = "macos")]
+mod macos_space {
+    use std::ffi::c_void;
+    use std::os::unix::ffi::OsStrExt;
+
+    type CFTypeRef = *const c_void;
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        static kCFURLVolumeTotalCapacityKey: CFTypeRef;
+        static kCFURLVolumeAvailableCapacityKey: CFTypeRef;
+        static kCFURLVolumeAvailableCapacityForImportantUsageKey: CFTypeRef;
+        fn CFURLCreateFromFileSystemRepresentation(alloc: CFTypeRef, buf: *const u8, len: isize, is_dir: u8) -> CFTypeRef;
+        fn CFURLCopyResourcePropertyForKey(url: CFTypeRef, key: CFTypeRef, value: *mut CFTypeRef, error: *mut CFTypeRef) -> u8;
+        fn CFNumberGetValue(number: CFTypeRef, kind: isize, out: *mut i64) -> u8;
+        fn CFGetTypeID(cf: CFTypeRef) -> usize;
+        fn CFNumberGetTypeID() -> usize;
+        fn CFRelease(cf: CFTypeRef);
+    }
+
+    /// kCFNumberSInt64Type.
+    const SINT64: isize = 4;
+
+    /// What the OS said; each figure is `None` when it did not say.
+    pub struct Figures {
+        pub total: Option<u64>,
+        pub available: Option<u64>,
+        pub important: Option<u64>,
+    }
+
+    fn number(url: CFTypeRef, key: CFTypeRef) -> Option<u64> {
+        let mut value: CFTypeRef = std::ptr::null();
+        let mut error: CFTypeRef = std::ptr::null();
+        // SAFETY: `url` and `key` are live CF objects; the out pointers are valid. Both outputs are released below when set.
+        let ok = unsafe { CFURLCopyResourcePropertyForKey(url, key, &mut value, &mut error) } != 0;
+        if !error.is_null() {
+            // SAFETY: the call returned an owned error object.
+            unsafe { CFRelease(error) };
+        }
+        if !ok || value.is_null() {
+            return None;
+        }
+        let mut out = 0i64;
+        // SAFETY: `value` is an owned CF object; it is read only as a CFNumber after its type is checked, then released.
+        let got = unsafe { CFGetTypeID(value) == CFNumberGetTypeID() && CFNumberGetValue(value, SINT64, &mut out) != 0 };
+        // SAFETY: balances the copy above.
+        unsafe { CFRelease(value) };
+        got.then(|| u64::try_from(out).ok()).flatten()
+    }
+
+    /// The three figures of the volume holding `mount`; `None` when the URL could not be made.
+    pub fn read(mount: &str) -> Option<Figures> {
+        let bytes = std::path::Path::new(mount).as_os_str().as_bytes();
+        // SAFETY: `bytes` is valid for its length; the null allocator is the default one.
+        let url = unsafe { CFURLCreateFromFileSystemRepresentation(std::ptr::null(), bytes.as_ptr(), bytes.len() as isize, 1) };
+        if url.is_null() {
+            return None;
+        }
+        // SAFETY: the keys are CoreFoundation's own constants, valid for the life of the process.
+        let figures = unsafe {
+            Figures {
+                total: number(url, kCFURLVolumeTotalCapacityKey),
+                available: number(url, kCFURLVolumeAvailableCapacityKey),
+                important: number(url, kCFURLVolumeAvailableCapacityForImportantUsageKey),
+            }
+        };
+        // SAFETY: balances the create above.
+        unsafe { CFRelease(url) };
+        Some(figures)
     }
 }
 
@@ -162,7 +302,9 @@ pub fn media_traits(m: &RawMount) -> MediaTraits {
     }
     #[cfg(target_os = "linux")]
     {
-        m.device.as_deref().map(|d| linux_traits(Path::new("/sys"), d)).unwrap_or_default()
+        let mut t = m.device.as_deref().map(|d| linux_traits(Path::new("/sys"), d)).unwrap_or_default();
+        t.identity = linux_identity(Path::new("/dev/disk/by-uuid"), &m.source);
+        t
     }
     #[cfg(windows)]
     {
@@ -230,7 +372,9 @@ mod win {
     use super::{MediaTraits, RawMount};
     use windows::core::{PCWSTR, PWSTR};
     use windows::Win32::NetworkManagement::WNet::WNetGetConnectionW;
-    use windows::Win32::Storage::FileSystem::{GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDriveStringsW, GetVolumeInformationW};
+    use windows::Win32::Storage::FileSystem::{
+        GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDriveStringsW, GetVolumeInformationW, GetVolumeNameForVolumeMountPointW,
+    };
 
     // The `GetDriveTypeW` results (winbase.h).
     const DRIVE_REMOVABLE: u32 = 2;
@@ -302,6 +446,29 @@ mod win {
             .collect()
     }
 
+    /// The volume GUID path (`\\?\Volume{...}\`) of the volume mounted at `mount`: it stays the same for a disk whatever
+    /// drive letter it gets, and differs between disks.
+    pub(super) fn identity(mount: &str) -> Option<String> {
+        let root = wide(mount);
+        let mut buf = [0u16; 64];
+        // SAFETY: `root` is NUL-terminated; the buffer is valid for its length.
+        unsafe { GetVolumeNameForVolumeMountPointW(PCWSTR(root.as_ptr()), &mut buf) }.ok()?;
+        let guid = Some(text(&buf)).filter(|t| !t.is_empty())?;
+        let mut raw_serial = 0u32;
+        // SAFETY: `root` is NUL-terminated and the serial out pointer is valid for the call.
+        let read = unsafe {
+            GetVolumeInformationW(
+                PCWSTR(root.as_ptr()),
+                None,
+                Some(std::ptr::addr_of_mut!(raw_serial)),
+                None,
+                None,
+                None,
+            )
+        };
+        Some(super::compose_windows_identity(&guid, read.ok().map(|()| raw_serial)))
+    }
+
     pub(super) fn traits(m: &RawMount) -> MediaTraits {
         let root = wide(&m.mount);
         // SAFETY: `root` is NUL-terminated.
@@ -309,6 +476,7 @@ mod win {
         MediaTraits {
             internal: (kind == DRIVE_FIXED).then_some(true),
             removable: (kind == DRIVE_REMOVABLE).then_some(true),
+            identity: if kind == DRIVE_REMOTE { None } else { identity(&m.mount) },
             ..MediaTraits::default()
         }
     }
@@ -357,12 +525,14 @@ mod tests {
 <key>RemovableMediaOrExternalDevice</key><true/>
 <key>SolidState</key><true/>
 <key>BusProtocol</key><string>USB</string>
+<key>VolumeUUID</key><string>6F0A1B2C-0000-4A00-8000-000000000001</string>
 </dict></plist>"#;
         let t = parse_diskutil_info(plist).unwrap();
         assert_eq!(t.internal, Some(false));
         assert_eq!(t.removable, Some(true));
         assert_eq!(t.rotational, Some(false));
         assert_eq!(t.bus.as_deref(), Some("USB"));
+        assert_eq!(t.identity.as_deref(), Some("6F0A1B2C-0000-4A00-8000-000000000001"));
         let internal = br#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict>
 <key>Internal</key><true/><key>RemovableMediaOrExternalDevice</key><true/></dict></plist>"#;
         let t = parse_diskutil_info(internal).unwrap();
@@ -402,6 +572,58 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_linux_device_is_found_by_the_uuid_link_that_points_at_it() {
+        let t = tempfile::tempdir().unwrap();
+        let dev = t.path().join("sda1");
+        let other = t.path().join("sdb1");
+        std::fs::write(&dev, b"").unwrap();
+        std::fs::write(&other, b"").unwrap();
+        let by_uuid = t.path().join("by-uuid");
+        std::fs::create_dir(&by_uuid).unwrap();
+        std::os::unix::fs::symlink(&dev, by_uuid.join("1111-AAAA")).unwrap();
+        std::os::unix::fs::symlink(&other, by_uuid.join("2222-BBBB")).unwrap();
+        assert_eq!(linux_identity(&by_uuid, &dev.to_string_lossy()).as_deref(), Some("1111-AAAA"));
+        assert_eq!(linux_identity(&by_uuid, &other.to_string_lossy()).as_deref(), Some("2222-BBBB"));
+        let lone = t.path().join("sdc1");
+        std::fs::write(&lone, b"").unwrap();
+        assert_eq!(linux_identity(&by_uuid, &lone.to_string_lossy()), None, "no link points at it");
+        assert_eq!(linux_identity(&t.path().join("missing"), &dev.to_string_lossy()), None);
+        assert_eq!(linux_identity(&by_uuid, "/no/such/device"), None);
+    }
+
+    #[test]
+    fn a_windows_identity_is_the_guid_path_and_the_serial_so_a_reformat_changes_it() {
+        let guid = "\\\\?\\Volume{11111111-2222-3333-4444-555555555555}\\";
+        let before = compose_windows_identity(guid, Some(0xCAFE_F00D));
+        assert_eq!(before, format!("{guid}|cafef00d"));
+        assert_ne!(
+            before,
+            compose_windows_identity(guid, Some(0x0000_0001)),
+            "same partition, new serial after a format"
+        );
+        assert_ne!(before, compose_windows_identity("\\\\?\\Volume{other}\\", Some(0xCAFE_F00D)));
+        assert_eq!(compose_windows_identity(guid, None), guid, "no serial: the GUID alone");
+    }
+
+    #[test]
+    fn a_macos_answer_without_a_volume_uuid_has_no_identity() {
+        let p = br#"<?xml version="1.0"?><plist version="1.0"><dict><key>Internal</key><true/></dict></plist>"#;
+        assert_eq!(parse_diskutil_info(p).unwrap().identity, None);
+    }
+
+    /// The Windows CI leg: the drive holding the temp folder has an identity, the same one twice, with the serial in it.
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_drive_has_a_stable_identity_with_its_serial() {
+        let t = tempfile::tempdir().unwrap();
+        let root = t.path().ancestors().last().unwrap().to_string_lossy().into_owned();
+        let id = win::identity(&root).expect("the system drive has a volume GUID");
+        assert!(id.starts_with("\\\\?\\Volume{") && id.contains('|'), "{id}");
+        assert_eq!(win::identity(&root), Some(id));
+    }
+
     #[test]
     fn the_startup_disk_name_is_the_link_to_root() {
         #[cfg(unix)]
@@ -422,6 +644,40 @@ mod tests {
         let (total, free) = capacity(&t.path().to_string_lossy()).unwrap();
         assert!(total > 0 && free <= total);
         assert!(capacity("no-such-mount-for-dyno-tests").is_none());
+    }
+
+    /// The pick of the free figure: best first, a missing or zero figure falls through, never above the capacity.
+    #[test]
+    fn choose_free_takes_the_best_figure_that_is_there() {
+        let t = 1_000;
+        // (important, available, bavail) -> expected
+        type Figures = (Option<u64>, Option<u64>, Option<u64>);
+        let table: [(Figures, Option<u64>); 9] = [
+            ((Some(600), Some(400), Some(380)), Some(600)),
+            ((Some(0), Some(400), Some(380)), Some(400)),
+            ((None, Some(400), Some(380)), Some(400)),
+            ((None, Some(0), Some(380)), Some(380)),
+            ((None, None, Some(380)), Some(380)),
+            ((Some(0), Some(0), Some(0)), Some(0)),
+            ((None, None, None), None),
+            ((Some(5_000), None, None), Some(t)),
+            ((None, None, Some(0)), Some(0)),
+        ];
+        for ((i, a, b), want) in table {
+            assert_eq!(choose_free(i, a, b, t), want, "important {i:?}, available {a:?}, bavail {b:?}");
+        }
+    }
+
+    /// Purgeable space counts as free, so the figure is never below what `statvfs` reports (the tray used to show that one and the
+    /// dashboard Finder's: 589 GB against 1,256 GB on one Mac).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn free_on_macos_is_never_below_statvfs() {
+        let t = tempfile::tempdir().unwrap();
+        let (_, bavail) = statvfs(t.path()).unwrap();
+        let s = space(&t.path().to_string_lossy()).unwrap();
+        assert!(s.free >= bavail, "free {} below statvfs {}", s.free, bavail);
+        assert!(s.total > 0 && s.free <= s.total);
     }
 
     /// The one test that lists this machine's real mounts (ER-14: tests never depend on them). It does nothing unless

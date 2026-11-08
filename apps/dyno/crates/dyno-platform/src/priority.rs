@@ -65,6 +65,41 @@ pub const fn level(role: ThreadRole, os: Os) -> Level {
     }
 }
 
+/// The nice value of [`Level::Nice10`].
+#[cfg(target_os = "linux")]
+const NICE_BULK: i32 = 10;
+
+/// Whether moving a thread from nice value `current` to `target` lowers its priority (a higher nice value is lower). An
+/// unprivileged user may only do that; asking for a raise fails with EPERM.
+#[cfg(target_os = "linux")]
+const fn would_lower(current: i32, target: i32) -> bool {
+    current < target
+}
+
+/// The nice value from a `getpriority` return value and errno: -1 is both a valid value and the error marker, so it counts
+/// only when errno is 0.
+#[cfg(target_os = "linux")]
+const fn nice_result(raw: i32, errno: i32) -> Option<i32> {
+    if raw == -1 && errno != 0 {
+        None
+    } else {
+        Some(raw)
+    }
+}
+
+/// The calling thread's nice value, `None` when the system does not say.
+#[cfg(target_os = "linux")]
+fn current_nice() -> Option<i32> {
+    // SAFETY: `gettid` takes no arguments; `getpriority` with a thread id reads only that thread's nice value. -1 is a
+    // valid value, so errno is cleared first and checked after.
+    unsafe {
+        let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;
+        *libc::__errno_location() = 0;
+        let nice = libc::getpriority(libc::PRIO_PROCESS, tid);
+        nice_result(nice, *libc::__errno_location())
+    }
+}
+
 /// Sets the calling thread's priority for `role` on this OS ([`level`]). Returns whether the OS accepted it (true when
 /// nothing needs changing). It stays in effect until the thread ends, so call it only on threads made for this work.
 pub fn set_current_thread(role: ThreadRole) -> bool {
@@ -82,7 +117,15 @@ pub fn set_current_thread(role: ThreadRole) -> bool {
             // have their own nice value).
             unsafe {
                 let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;
-                libc::setpriority(libc::PRIO_PROCESS, tid, 10) == 0
+                // A process started under `nice -n 19` is already lower than asked; setting 10 would be a raise (EPERM
+                // for an unprivileged user), so leave it where it is.
+                if let Some(current) = current_nice() {
+                    if !would_lower(current, NICE_BULK) {
+                        log::debug!(current, target = NICE_BULK; "thread priority: already at or below the bulk nice value, left as is");
+                        return true;
+                    }
+                }
+                libc::setpriority(libc::PRIO_PROCESS, tid, NICE_BULK) == 0
             }
         }
         #[cfg(windows)]
@@ -202,6 +245,61 @@ mod tests {
     fn a_thread_can_be_lowered() {
         // On its own thread: the class stays until the thread ends.
         assert!(std::thread::spawn(super::lower_current_thread).join().unwrap());
+    }
+
+    /// A process started under `nice -n 19` (or a thread already lowered) is below the bulk level; asking for nice 10 would
+    /// be a raise, which an unprivileged user may not do (EPERM), yet the thread is lower than asked, so it counts as lowered.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_thread_that_is_already_lower_than_the_bulk_level_counts_as_lowered() {
+        let (lowered, nice) = std::thread::spawn(|| {
+            // SAFETY: `gettid` takes no arguments; `setpriority` with a thread id changes only that thread (lowering is
+            // allowed without privileges).
+            let tid = unsafe { libc::syscall(libc::SYS_gettid) as libc::id_t };
+            assert_eq!(unsafe { libc::setpriority(libc::PRIO_PROCESS, tid, 19) }, 0);
+            (super::lower_current_thread(), super::current_nice())
+        })
+        .join()
+        .unwrap();
+        assert!(lowered, "a thread at nice 19 is already lower than the bulk level");
+        assert_eq!(nice, Some(19), "it must stay at 19, never be raised to 10");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_normal_thread_is_lowered_to_the_bulk_level_on_linux() {
+        let nice = std::thread::spawn(|| {
+            // Start from the normal level whatever the test process was started with.
+            let before = super::current_nice().unwrap();
+            let lowered = super::lower_current_thread();
+            (before, lowered, super::current_nice().unwrap())
+        })
+        .join()
+        .unwrap();
+        assert!(nice.1);
+        assert_eq!(
+            nice.2,
+            nice.0.max(10),
+            "the thread ends at nice 10, or where it already was when lower"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn minus_one_is_a_nice_value_only_without_an_error() {
+        assert_eq!(super::nice_result(-1, 0), Some(-1));
+        assert_eq!(super::nice_result(-1, 1), None);
+        assert_eq!(super::nice_result(5, 1), Some(5));
+        assert_eq!(super::nice_result(0, 0), Some(0));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_level_is_set_only_when_it_would_lower_the_thread() {
+        assert!(super::would_lower(0, 10));
+        assert!(super::would_lower(9, 10));
+        assert!(!super::would_lower(10, 10));
+        assert!(!super::would_lower(19, 10));
     }
 
     /// The person waits for the disk scan (it is started from the Disk map and shows its progress), so a busy machine may

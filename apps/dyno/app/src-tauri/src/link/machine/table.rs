@@ -15,6 +15,7 @@ fn look(seq: Seq) -> Look {
         service: None,
         child: None,
         cpu: Cpu::NotRead,
+        app_updated: false,
     }
 }
 
@@ -25,16 +26,19 @@ fn hint(pid: u32, started_ms: i64, same_build: bool) -> HintSeen {
         version: "1.0.0".into(),
         protocol: 1,
         same_build,
+        of_disk_file: false,
     }
 }
 
 const SUPERVISING: ServiceState = ServiceState {
     installed: true,
     supervises: true,
+    pending: false,
 };
 const NO_SERVICE: ServiceState = ServiceState {
     installed: false,
     supervises: false,
+    pending: false,
 };
 
 fn find_look(cmds: &[Command]) -> Option<(Seq, bool)> {
@@ -509,6 +513,284 @@ fn a_lock_held_resets_the_count_of_a_service_that_starts_nothing() {
         launched += launches(&cmds);
     }
     assert_eq!(launched, 0, "a service that was running was replaced");
+}
+
+// ------------------------------------------------------------------------------------------------ a registration is pending (ADR 0056)
+
+/// The job is absent: a removal of the old registration or the OS has not loaded the new one yet.
+const PENDING_NO_JOB: ServiceState = ServiceState {
+    installed: false,
+    supervises: false,
+    pending: true,
+};
+/// The job runs, and the registration still waits for the service's agent to answer.
+const PENDING_JOB_RUNS: ServiceState = ServiceState {
+    installed: true,
+    supervises: true,
+    pending: true,
+};
+/// A job the OS refuses: registered, nothing runs, and nothing will (the attempts are not pending).
+const REFUSED_JOB: ServiceState = ServiceState {
+    installed: true,
+    supervises: false,
+    pending: false,
+};
+
+/// Ticks and answers the looks with `service` and a free lock (nobody holds the data folder).
+fn tick_with(s: &mut Supervisor, n: u32, service: ServiceState) -> Vec<Command> {
+    run_ticks(s, n, |seq, asked| Look {
+        service: asked.then_some(service),
+        ..look(seq)
+    })
+}
+
+#[test]
+fn a_pending_registration_is_waited_for_with_its_cause_at_once_and_the_app_starts_nothing() {
+    let (s, cmds) = first(|l| Look {
+        service: Some(PENDING_NO_JOB),
+        ..l
+    });
+    assert_eq!(launches(&cmds), 0);
+    assert_eq!(*s.phase(), Phase::WaitingForService);
+    assert_eq!(stall_of(&cmds), Some(Stall::RegisteringService), "a silent wait: {cmds:?}");
+}
+
+#[test]
+fn a_pending_registration_that_then_answers_is_connected_to_without_a_launch_however_long_it_took() {
+    let (mut s, _) = first(|l| Look {
+        service: Some(PENDING_NO_JOB),
+        ..l
+    });
+    // Longer than the old fallback (SERVICE_IDLE_RECHECKS rechecks of SERVICE_RECHECK ticks) and than the repair's wait.
+    let cmds = tick_with(&mut s, SERVICE_RECHECK * (SERVICE_IDLE_RECHECKS + 2), PENDING_NO_JOB);
+    assert_eq!(
+        launches(&cmds),
+        0,
+        "the app started its own agent while the service was registering"
+    );
+    let cmds = tick_with(&mut s, SERVICE_RECHECK * 2, PENDING_JOB_RUNS);
+    assert_eq!(launches(&cmds), 0, "the app started its own agent while the registered job ran");
+    // The service's agent answers: the lock is held and its file is there.
+    let cmds = run_ticks(&mut s, PENDING_RECHECK + LOCK_EVERY, |seq, service| Look {
+        hint: Some(hint(9, 1, true)),
+        lock: Some(LockSeen::Held),
+        service: service.then_some(SUPERVISING),
+        ..look(seq)
+    });
+    assert_eq!(launches(&cmds), 0);
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::Connect { purpose: Purpose::Use, .. })),
+        "{cmds:?}"
+    );
+}
+
+#[test]
+fn a_pending_registration_that_ends_with_no_service_falls_back_at_once_not_after_the_old_delay() {
+    let (mut s, _) = first(|l| Look {
+        service: Some(PENDING_NO_JOB),
+        ..l
+    });
+    tick_with(&mut s, SERVICE_RECHECK, PENDING_NO_JOB);
+    // The registration ended (switched off, approval pending, the attempts used up): nothing is coming.
+    let cmds = tick_with(&mut s, PENDING_RECHECK, NO_SERVICE);
+    assert_eq!(launches(&cmds), 1, "the app waited for a service that is not coming: {cmds:?}");
+    assert!(matches!(s.phase(), Phase::Starting { .. }));
+}
+
+#[test]
+fn a_job_the_os_refuses_after_a_pending_registration_falls_back_at_once() {
+    let (mut s, _) = first(|l| Look {
+        service: Some(PENDING_JOB_RUNS),
+        ..l
+    });
+    let cmds = tick_with(&mut s, PENDING_RECHECK, REFUSED_JOB);
+    assert_eq!(launches(&cmds), 1, "{cmds:?}");
+}
+
+#[test]
+fn a_refused_job_with_no_pending_registration_starts_the_apps_own_agent_at_the_first_look() {
+    let (s, cmds) = first(|l| Look {
+        service: Some(REFUSED_JOB),
+        ..l
+    });
+    assert_eq!(launches(&cmds), 1);
+    assert!(matches!(s.phase(), Phase::Starting { .. }));
+}
+
+#[test]
+fn a_slow_service_whose_job_runs_but_has_not_answered_is_not_given_up_on_while_the_registration_is_pending() {
+    let (mut s, _) = first(|l| Look {
+        service: Some(PENDING_JOB_RUNS),
+        ..l
+    });
+    // Free lock on every recheck, SERVICE_IDLE_RECHECKS times over: the count of a service that starts nothing must not run.
+    let cmds = tick_with(&mut s, PENDING_RECHECK * SERVICE_IDLE_RECHECKS * 4, PENDING_JOB_RUNS);
+    assert_eq!(launches(&cmds), 0, "{cmds:?}");
+    // The registration ends with a running job: the old count (the service starts nothing) starts only now.
+    let cmds = tick_with(&mut s, SERVICE_RECHECK * (SERVICE_IDLE_RECHECKS - 2), SUPERVISING);
+    assert_eq!(launches(&cmds), 0, "the count began before the registration ended");
+    let cmds = tick_with(&mut s, SERVICE_RECHECK * 3, SUPERVISING);
+    assert_eq!(launches(&cmds), 1, "a service that starts nothing is still replaced after the wait");
+}
+
+#[test]
+fn the_cause_of_a_pending_wait_gives_way_to_the_ordinary_one_when_the_registration_ends_and_the_wait_goes_on() {
+    let (mut s, _) = first(|l| Look {
+        service: Some(PENDING_NO_JOB),
+        ..l
+    });
+    assert_eq!(s.snapshot().stall.map(|(_, k)| k), Some(Stall::RegisteringService));
+    // Ends with a supervising service that does not answer yet: the agent is awaited, said in the usual words.
+    run_ticks(&mut s, PENDING_RECHECK + 1, |seq, service| Look {
+        lock: Some(LockSeen::Held),
+        service: service.then_some(SUPERVISING),
+        ..look(seq)
+    });
+    assert_ne!(
+        s.snapshot().stall.map(|(_, k)| k),
+        Some(Stall::RegisteringService),
+        "the registration is over"
+    );
+    run_ticks(&mut s, NOTE_AFTER, |seq, service| Look {
+        lock: Some(LockSeen::Held),
+        service: service.then_some(SUPERVISING),
+        ..look(seq)
+    });
+    assert_eq!(s.snapshot().stall.map(|(_, k)| k), Some(Stall::WaitingForService));
+}
+
+#[test]
+fn retry_in_a_pending_wait_looks_again_and_never_starts_an_agent_beside_the_registering_service() {
+    let (mut s, _) = first(|l| Look {
+        service: Some(PENDING_NO_JOB),
+        ..l
+    });
+    let id = s.snapshot().stall.map(|(i, _)| i);
+    let cmds = s.step(Event::Retry { stall: id });
+    let seq = look_seq(&cmds);
+    let cmds = s.step(Event::Looked(Look {
+        service: Some(PENDING_NO_JOB),
+        ..look(seq)
+    }));
+    assert_eq!(launches(&cmds), 0, "{cmds:?}");
+    assert_eq!(*s.phase(), Phase::WaitingForService);
+}
+
+#[test]
+fn a_pending_registration_that_never_ends_is_given_up_on_after_the_longest_wait_and_the_app_starts_its_own_agent() {
+    let tuning = Tuning {
+        pending_max: 40,
+        ..Tuning::default()
+    };
+    let mut s = Supervisor::with_tuning(tuning);
+    let seq = look_seq(&s.step(Event::Begin));
+    s.step(Event::Looked(Look {
+        service: Some(PENDING_NO_JOB),
+        ..look(seq)
+    }));
+    let cmds = tick_with(&mut s, 39, PENDING_NO_JOB);
+    assert_eq!(launches(&cmds), 0, "given up before the longest wait");
+    let cmds = tick_with(&mut s, PENDING_RECHECK, PENDING_NO_JOB);
+    assert_eq!(launches(&cmds), 1, "waited forever with no agent");
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::Report(r) if r.message.as_deref().is_some_and(|m| m.contains("did not finish")))),
+        "the fallback said nothing: {cmds:?}"
+    );
+}
+
+#[test]
+fn the_apps_own_agent_is_not_handed_over_while_the_registration_is_pending_and_is_when_it_ends() {
+    let mut s = connected_own();
+    let cmds = service_now(&mut s, PENDING_JOB_RUNS);
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::AskToExit { .. } | Command::EndHeldChild { .. })),
+        "the app's agent was retired for a service that is still registering: {cmds:?}"
+    );
+    // The registration ends with the service up: the usual hand-over (the service's agent was refused while ours held the folder).
+    let cmds = service_now(&mut s, SUPERVISING);
+    assert!(cmds.iter().any(|c| matches!(c, Command::EndHeldChild { .. })), "{cmds:?}");
+}
+
+#[test]
+fn a_connected_link_asks_again_while_a_registration_is_pending_so_the_hand_over_is_not_missed() {
+    let mut s = connected_own();
+    service_now(&mut s, PENDING_JOB_RUNS);
+    let mut asked = 0;
+    for _ in 0..PENDING_RECHECK * 3 {
+        if let Some((seq, true)) = find_look(&s.step(Event::Tick)) {
+            asked += 1;
+            s.step(Event::Looked(Look {
+                service: Some(PENDING_JOB_RUNS),
+                ..look(seq)
+            }));
+        }
+    }
+    assert!(asked >= 2, "the connected link never asked the service again ({asked})");
+}
+
+#[test]
+fn a_connected_link_asks_the_service_nothing_on_its_ticks_when_no_registration_is_pending() {
+    let mut s = connected_own();
+    service_now(&mut s, NO_SERVICE);
+    assert!(matches!(s.phase(), Phase::Connected { .. }));
+    let cmds = ticks(&mut s, PENDING_RECHECK * 3);
+    assert!(find_look(&cmds).is_none(), "a look with nothing pending: {cmds:?}");
+}
+
+#[test]
+fn the_cause_of_a_pending_wait_stays_put_while_it_is_asked_about_again() {
+    let (mut s, _) = first(|l| Look {
+        service: Some(PENDING_NO_JOB),
+        ..l
+    });
+    let id = s.snapshot().stall.map(|(i, _)| i);
+    let cmds = tick_with(&mut s, PENDING_RECHECK * 3, PENDING_NO_JOB);
+    assert!(
+        !cmds.contains(&Command::ClearStall),
+        "the cause was cleared and shown again: {cmds:?}"
+    );
+    assert_eq!(s.snapshot().stall.map(|(i, _)| i), id);
+}
+
+#[test]
+fn giving_up_on_a_pending_registration_lasts_while_it_stays_pending_and_ends_with_it() {
+    let tuning = Tuning {
+        pending_max: 40,
+        ..Tuning::default()
+    };
+    let mut s = Supervisor::with_tuning(tuning);
+    let seq = look_seq(&s.step(Event::Begin));
+    s.step(Event::Looked(Look {
+        service: Some(PENDING_NO_JOB),
+        ..look(seq)
+    }));
+    assert!(!s.gave_up_on_pending());
+    tick_with(&mut s, 40 + PENDING_RECHECK, PENDING_NO_JOB);
+    assert!(s.gave_up_on_pending());
+    // Still pending: asked again, still given up on (the wait is not started over).
+    service_now(&mut s, PENDING_NO_JOB);
+    assert!(s.gave_up_on_pending());
+    // The registration ended: the next one is waited for again.
+    service_now(&mut s, NO_SERVICE);
+    assert!(!s.gave_up_on_pending());
+}
+
+#[test]
+fn the_services_own_agent_is_not_asked_to_exit_while_the_registration_replaces_the_job() {
+    // An ordinary update: the old job is removed (absent for a while) and the service's agent still answers.
+    let mut s = connected_other(SUPERVISING);
+    let cmds = service_now(&mut s, PENDING_NO_JOB);
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::AskToExit { .. })),
+        "the service's agent was taken back during an update: {cmds:?}"
+    );
+    assert!(matches!(s.phase(), Phase::Connected { .. }));
+    // The registration ends and nothing is registered (the user switched it off meanwhile): taken back as usual.
+    let cmds = service_now(&mut s, NO_SERVICE);
+    assert!(cmds.iter().any(|c| matches!(c, Command::AskToExit { .. })), "{cmds:?}");
 }
 
 // ------------------------------------------------------------------------------------------------ starting
@@ -1328,4 +1610,310 @@ fn the_service_recheck_of_a_wait_is_marked_so_a_held_lock_can_skip_it() {
         Some((false, true)),
         "a service change always asks"
     );
+}
+
+#[test]
+fn an_agent_of_the_file_on_disk_that_the_app_cannot_speak_to_is_never_asked_to_exit() {
+    // The app was updated while it runs: the agent is the new build (the file on disk) with another protocol. Asking it to exit
+    // only makes the service start the same agent again, forever (Dyno lesson 2026-11-07).
+    let (s, cmds) = first(|l| Look {
+        hint: Some(HintSeen {
+            of_disk_file: true,
+            ..hint(9, 500, false)
+        }),
+        lock: Some(LockSeen::Held),
+        ..l
+    });
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::Connect { .. } | Command::Launch { .. } | Command::RemoveHint { .. })),
+        "the agent of the new build was dealt with: {cmds:?}"
+    );
+    assert!(!matches!(s.phase(), Phase::Connecting { .. }), "{:?}", s.phase());
+}
+
+#[test]
+fn repeated_replacements_of_agents_that_come_back_give_up_within_a_bound() {
+    // A service restarts the agent after each eviction and it is of another build each time.
+    let mut s = Supervisor::new();
+    let mut seq = look_seq(&s.step(Event::Begin));
+    let mut asks = 0;
+    for _ in 0..30 {
+        let cmds = s.step(Event::Looked(Look {
+            hint: Some(hint(9, 500, false)),
+            lock: Some(LockSeen::Held),
+            ..look(seq)
+        }));
+        let Some(c) = cmds.iter().find_map(|c| match c {
+            Command::Connect { seq, .. } => Some(*seq),
+            _ => None,
+        }) else {
+            break; // gave up: no connection to evict through
+        };
+        let cmds = s.step(Event::Connected {
+            seq: c,
+            peer: 5,
+            pid: Some(9),
+        });
+        if cmds.contains(&Command::AskToExit { peer: 5 }) {
+            asks += 1;
+        }
+        // It exits: the lock is free, the file goes, and a new look follows.
+        let t = tick_look(&mut s);
+        let cmds = s.step(Event::Looked(Look {
+            hint: Some(hint(9, 500, false)),
+            ..look(t)
+        }));
+        seq = look_seq(&cmds);
+    }
+    assert!(asks <= 3, "asked {asks} agents to exit in a row; it never gave up");
+}
+
+/// The lines logged so far: a test counts only what comes after this mark (the capture is process-wide and never cleared).
+fn log_mark() -> usize {
+    crate::logging::testlog::lines().len()
+}
+
+/// How many lines logged after `mark` contain `needle`. Use a pid of the test's own in `needle`: tests run in parallel.
+fn lines_since(mark: usize, needle: &str) -> usize {
+    crate::logging::testlog::lines()
+        .iter()
+        .skip(mark)
+        .filter(|l| l.contains(needle))
+        .count()
+}
+
+/// [`starting`] for an agent with the pid `pid` (a test that counts log lines names its own).
+fn starting_as(pid: u32) -> Supervisor {
+    let (mut s, _) = first(|l| l);
+    s.step(Event::Launched {
+        child: 1,
+        result: Ok(Launch {
+            at_ms: 1_000,
+            pid: Some(pid),
+        }),
+    });
+    s
+}
+
+#[test]
+fn an_own_agent_of_the_file_on_disk_with_another_protocol_is_waited_for_not_connected_to() {
+    // No login service: the app's old agent exited and the app launched the new file, which this app cannot speak to.
+    let pid = 880_010;
+    let mark = log_mark();
+    let mut s = starting_as(pid);
+    let cmds = run_ticks(&mut s, NOTE_AFTER * 4, |seq, _| Look {
+        hint: Some(HintSeen {
+            of_disk_file: true,
+            ..hint(pid, 1_500, false)
+        }),
+        lock: Some(LockSeen::Held),
+        child: Some((1, Child::Running { pid })),
+        app_updated: true,
+        ..look(seq)
+    });
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::Connect { .. } | Command::EndHeldChild { .. } | Command::Launch { .. })),
+        "a connection that the driver refuses, or the child ended: {:?}",
+        cmds.iter().filter(|c| matches!(c, Command::Connect { .. })).count()
+    );
+    assert_eq!(
+        s.snapshot().stall.map(|(_, k)| k),
+        Some(Stall::AppUpdated),
+        "the update state, not a holder"
+    );
+    assert_eq!(cmds.iter().filter(|c| matches!(c, Command::Stall { .. })).count(), 1, "one note");
+    assert_eq!(
+        lines_since(mark, &format!("pid {pid} is the installed build")),
+        1,
+        "logged on entering the state only"
+    );
+}
+
+#[test]
+fn the_update_wait_shows_the_update_state_at_once_and_logs_once() {
+    let mark = log_mark();
+    let (s, cmds) = first(|l| Look {
+        hint: Some(HintSeen {
+            of_disk_file: true,
+            ..hint(880_001, 500, false)
+        }),
+        lock: Some(LockSeen::Held),
+        app_updated: true,
+        ..l
+    });
+    assert_eq!(stall_of(&cmds), Some(Stall::AppUpdated), "{cmds:?}");
+    let mut s = s;
+    run_ticks(&mut s, NOTE_AFTER * 3, |seq, _| Look {
+        hint: Some(HintSeen {
+            of_disk_file: true,
+            ..hint(880_001, 500, false)
+        }),
+        lock: Some(LockSeen::Held),
+        app_updated: true,
+        ..look(seq)
+    });
+    assert_eq!(
+        s.snapshot().stall.map(|(_, k)| k),
+        Some(Stall::AppUpdated),
+        "never the holder's note"
+    );
+    assert_eq!(lines_since(mark, "pid 880001 is the installed build"), 1);
+}
+
+#[test]
+fn giving_up_on_replacing_agents_says_so_with_its_own_stall_and_logs_once() {
+    let mark = log_mark();
+    let mut s = Supervisor::new();
+    let mut seq = look_seq(&s.step(Event::Begin));
+    let mut gave_up = None;
+    for _ in 0..8 {
+        let cmds = s.step(Event::Looked(Look {
+            hint: Some(hint(880_002, 500, false)),
+            lock: Some(LockSeen::Held),
+            ..look(seq)
+        }));
+        if let Some(st) = stall_of(&cmds) {
+            gave_up = Some(st);
+            break;
+        }
+        let c = connect_seq(&cmds);
+        s.step(Event::Connected {
+            seq: c,
+            peer: 5,
+            pid: Some(880_002),
+        });
+        let t = tick_look(&mut s);
+        let cmds = s.step(Event::Looked(Look {
+            hint: Some(hint(880_002, 500, false)),
+            ..look(t)
+        }));
+        seq = look_seq(&cmds);
+    }
+    assert_eq!(gave_up, Some(Stall::OtherBuildKeepsComing));
+    run_ticks(&mut s, NOTE_AFTER * 2, |seq, _| Look {
+        hint: Some(hint(880_002, 500, false)),
+        lock: Some(LockSeen::Held),
+        ..look(seq)
+    });
+    assert_eq!(s.snapshot().stall.map(|(_, k)| k), Some(Stall::OtherBuildKeepsComing));
+    assert_eq!(
+        lines_since(mark, "pid 880002 keep coming back"),
+        1,
+        "logged once, not on every look"
+    );
+}
+
+fn disk_hint(pid: u32) -> Option<HintSeen> {
+    Some(HintSeen {
+        of_disk_file: true,
+        ..hint(pid, 1_500, false)
+    })
+}
+
+#[test]
+fn a_look_without_a_file_does_not_end_the_update_wait_of_a_running_own_agent() {
+    let pid = 880_011;
+    let mut s = starting_as(pid);
+    let cmds = run_ticks(&mut s, 60, |seq, _| Look {
+        // Every third look misses the discovery file (it is read while the agent rewrites it).
+        hint: if seq % 3 == 0 { None } else { disk_hint(pid) },
+        lock: Some(LockSeen::Held),
+        child: Some((1, Child::Running { pid })),
+        app_updated: true,
+        ..look(seq)
+    });
+    assert_eq!(
+        cmds.iter().filter(|c| matches!(c, Command::Stall { .. })).count(),
+        1,
+        "the note was cleared and shown again: {cmds:?}"
+    );
+    assert!(!cmds.iter().any(|c| matches!(c, Command::ClearStall)), "{cmds:?}");
+    assert_eq!(*s.phase(), Phase::WaitingForHolder);
+    assert_eq!(s.snapshot().stall.map(|(_, k)| k), Some(Stall::AppUpdated));
+}
+
+#[test]
+fn an_agent_of_the_installed_file_is_an_update_only_when_the_app_was_updated_otherwise_a_mismatch() {
+    for (updated, want) in [(true, Stall::AppUpdated), (false, Stall::AgentMismatch)] {
+        let mut s = starting();
+        let cmds = run_ticks(&mut s, 5, |seq, _| Look {
+            hint: disk_hint(PID),
+            lock: Some(LockSeen::Held),
+            child: Some((1, Child::Running { pid: PID })),
+            app_updated: updated,
+            ..look(seq)
+        });
+        assert_eq!(stall_of(&cmds), Some(want), "app_updated {updated}");
+        assert!(!cmds.iter().any(|c| matches!(c, Command::Connect { .. })));
+    }
+}
+
+#[test]
+fn a_later_stall_of_another_kind_replaces_the_one_shown() {
+    let (mut s, cmds) = first(|l| Look {
+        hint: disk_hint(880_003),
+        lock: Some(LockSeen::Held),
+        app_updated: true,
+        ..l
+    });
+    assert_eq!(stall_of(&cmds), Some(Stall::AppUpdated));
+    // Eviction attempts were used up meanwhile; the next look sees an ordinary agent of another build.
+    s.evictions = MAX_EVICTIONS;
+    let seq = tick_look(&mut s);
+    let cmds = s.step(Event::Looked(Look {
+        hint: Some(hint(880_003, 500, false)),
+        lock: Some(LockSeen::Held),
+        ..look(seq)
+    }));
+    assert_eq!(stall_of(&cmds), Some(Stall::OtherBuildKeepsComing), "{cmds:?}");
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::ClearStall)),
+        "the old note was not cleared first: {cmds:?}"
+    );
+    assert_eq!(s.snapshot().stall.map(|(_, k)| k), Some(Stall::OtherBuildKeepsComing));
+}
+
+#[test]
+fn a_look_without_a_file_does_not_end_the_update_wait_when_the_login_service_supervises() {
+    let (mut s, cmds) = first(|l| Look {
+        hint: disk_hint(880_012),
+        lock: Some(LockSeen::Held),
+        service: Some(SUPERVISING),
+        app_updated: true,
+        ..l
+    });
+    assert_eq!(stall_of(&cmds), Some(Stall::AppUpdated));
+    let cmds = run_ticks(&mut s, 60, |seq, _| Look {
+        hint: if seq % 3 == 0 { None } else { disk_hint(880_012) },
+        lock: Some(LockSeen::Held),
+        service: Some(SUPERVISING),
+        app_updated: true,
+        ..look(seq)
+    });
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::ClearStall | Command::Stall { .. })),
+        "the note was cleared or shown again: {cmds:?}"
+    );
+    assert_eq!(*s.phase(), Phase::WaitingForHolder);
+}
+
+#[test]
+fn the_update_wait_ends_when_the_agent_is_gone_and_the_lock_is_free() {
+    let (mut s, _) = first(|l| Look {
+        hint: disk_hint(880_013),
+        lock: Some(LockSeen::Held),
+        app_updated: true,
+        ..l
+    });
+    let seq = tick_look(&mut s);
+    let cmds = s.step(Event::Looked(Look {
+        hint: None,
+        lock: Some(LockSeen::Free),
+        ..look(seq)
+    }));
+    assert_eq!(launches(&cmds), 1, "an agent that is gone is started again: {cmds:?}");
 }

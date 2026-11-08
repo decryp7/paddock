@@ -34,6 +34,15 @@ class Bare {
 @Component({
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdSelect],
+  template: `<pd-select ariaLabel="A" [options]="options" /><pd-select ariaLabel="B" [options]="options" [panelWidth]="null" />`,
+})
+class Sized {
+  readonly options = OPTIONS;
+}
+
+@Component({
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PdSelect],
   template: `<pd-select label="Theme" [options]="options" value="dark" />`,
 })
 class Labelled {
@@ -204,5 +213,16 @@ describe('pd-select', () => {
     expect(named!.textContent?.trim()).toBe('Light');
     expect(bare!.id).toBe('nolabel');
     expect(bare!.getAttribute('aria-labelledby') ?? '').not.toContain('-label');
+  });
+
+  it('sizes its list to the trigger by default and to its longest option when panelWidth is null', async () => {
+    TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+    const f = TestBed.createComponent(Sized);
+    document.body.appendChild(f.nativeElement);
+    await settle(f);
+    await settle(f);
+    const [byTrigger, byOptions] = (f.debugElement.children as { componentInstance: PdSelect }[]).map((c) => c.componentInstance);
+    expect(byTrigger!.panelWidth()).toBe('auto');
+    expect(byOptions!.panelWidth()).toBeNull();
   });
 });

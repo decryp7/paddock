@@ -53,7 +53,9 @@ changes here, every app's copy is updated in the same change.
 ## User interface
 17. **Every dialog is a real OS window** (owned by and centred on the main window, remembered size/position, Escape/Enter);
     modality is explicit per dialog (modal for confirmations, credentials, unsaved changes, pickers that feed the next step;
-    modeless for tools kept open beside the work). Menus, dropdowns, autocomplete and tooltips stay in-app.
+    modeless for tools kept open beside the work). A dialog window is sized by its kind's size mode (ADR 0043): decisions, forms and
+    viewers follow their content (a viewer only grows), a tool keeps the size it was given; a user resize makes it manual for that
+    opening. Menus, dropdowns, autocomplete and tooltips stay in-app.
 18. **Panes lay out by container queries;** paths and file names truncate in the middle with the full value in a tooltip;
     no horizontal scroll at any width ≥ 320 px.
 19. **A control that repairs X never depends on X;** every "X is not running" message has a working Repair button; never
@@ -279,6 +281,13 @@ changes here, every app's copy is updated in the same change.
     *Why:* launchd's job report existed four times. The shared one already skipped nested blocks; Dyno's copy did not and
     replaced its healthy agent at every login (Dyno 1.0 blocker B4). The Windows network-sandbox fix of the browser driver
     sat in the one copy no app used, and the EBADF fix had to be made in two IPC endpoints.
+
+## Release checks (user, 2026-11-05; ER-33)
+71. **A release check counts only if its precondition was verified and its probe has shown it can see the thing.**
+    Otherwise it reports `not measured` or `check broken`, and the release does not pass. A cause is called confirmed
+    only after the same probe passed a positive control and a known-good peer (another app, machine or VM) was compared.
+    *Why:* on Dyno 1.1.0 a VM with no menu bar produced a false "confirmed" cause in 12 of 12 runs, a tray count matched
+    the app's own window buttons, and a reading row passed on a dead helper.
 
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:

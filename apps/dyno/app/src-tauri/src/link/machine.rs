@@ -16,6 +16,10 @@
 //! 5. the quit outcome is decided once, from the state at the `Quit` event;
 //! 6. one writer: only the owner thread calls `step`;
 //! 7. a discovery file is a hint: only a connection that answered makes the agent "connected".
+#![cfg_attr(
+    not(test),
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
+)]
 
 use super::{backoff, state_after_failures, stop_agent_on_quit, Child, ServiceState, Stall, FAILED_AFTER};
 use crate::dto::{AgentState, AgentStatus};
@@ -39,6 +43,14 @@ pub const SERVICE_RECHECK: u32 = 50;
 /// The login service is rechecked this many times in a row with no process holding the agent lock before the app takes it
 /// that the service starts nothing: four rechecks outlast launchd's `ThrottleInterval` (10 s) and systemd's `RestartSec`.
 pub const SERVICE_IDLE_RECHECKS: u32 = 4;
+/// While a registration of the service is pending, the service is asked again every this many ticks (about a second): the
+/// moment it ends with no service the app falls back, not a recheck of the usual interval later.
+pub const PENDING_RECHECK: u32 = 10;
+/// A pending registration is waited for this many ticks in one wait (300 s at the production pace, beyond the 231 s the
+/// repair's own waits add up to, ADR 0056 section 3), and then ignored: the flag is a hint, and a link that waits for it
+/// forever with no agent would be worse than the one start-up conflict the service's agent then meets (it exits and is
+/// started again). Not a limit on the registration, which goes on.
+pub const PENDING_MAX: u32 = 3000;
 /// Ticks per second at the production pace (a backoff of n seconds is n times this many ticks).
 pub const TICKS_PER_SECOND: u32 = 10;
 /// A connection that lasted this many ticks counts as having worked: only then the failures in a row start from zero.
@@ -60,6 +72,10 @@ pub struct Tuning {
     pub service_recheck: u32,
     /// Rechecks in a row with no agent running before the app starts its own beside a service that starts nothing.
     pub idle_rechecks: u32,
+    /// Ticks between the looks at the login service while a registration is pending (also while connected).
+    pub pending_recheck: u32,
+    /// Ticks one wait waits for a pending registration before the app takes it that nothing is coming.
+    pub pending_max: u32,
     /// Ticks a connection must last before the failures in a row start from zero.
     pub connected_for: u32,
     /// Ticks per second of backoff.
@@ -77,6 +93,8 @@ impl Default for Tuning {
             note_after: NOTE_AFTER,
             service_recheck: SERVICE_RECHECK,
             idle_rechecks: SERVICE_IDLE_RECHECKS,
+            pending_recheck: PENDING_RECHECK,
+            pending_max: PENDING_MAX,
             connected_for: CONNECTED_FOR,
             ticks_per_second: TICKS_PER_SECOND,
             cpu_every: CPU_EVERY,
@@ -84,6 +102,9 @@ impl Default for Tuning {
         }
     }
 }
+
+/// Agents of another build that are asked to exit in a row before the link stops asking.
+const MAX_EVICTIONS: u32 = 3;
 
 /// What a look found about the discovery file: a hint, never proof.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -98,6 +119,9 @@ pub struct HintSeen {
     pub protocol: u32,
     /// The file is of this build (version and protocol): its agent can be used, otherwise it is asked to exit.
     pub same_build: bool,
+    /// The agent is the build of the agent file on disk, yet this app cannot use it (another protocol): the app was updated while it
+    /// ran. Such an agent is never asked to exit (the next one would be the same).
+    pub of_disk_file: bool,
 }
 
 /// Whether some process holds the agent's lock (the authority for "is an agent running here").
@@ -127,6 +151,8 @@ pub struct Look {
     pub child: Option<(Generation, Child)>,
     /// The child's tree CPU time when it was asked for ([`Command::Look`] `cpu`), `Unavailable` when the OS did not say.
     pub cpu: Cpu,
+    /// The app was updated while it ran ([`AgentLink::app_updated`](super::AgentLink::app_updated) when the look was taken).
+    pub app_updated: bool,
 }
 
 /// Who runs the agent we are connected to.
@@ -523,8 +549,12 @@ pub struct Supervisor {
     look_out: Option<Seq>,
     service: ServiceState,
     fallback: bool,
+    /// A pending registration was waited for as long as it is waited for ([`PENDING_MAX`]): the app starts its own agent.
+    gave_up: bool,
     launch_anyway: bool,
     reask: bool,
+    /// Agents of another build asked to exit since the last connection to one that was used.
+    evictions: u32,
     wait: Wait,
     stall: Option<(StallId, Stall)>,
     stall_ids: StallId,
@@ -559,8 +589,10 @@ impl Supervisor {
             look_out: None,
             service: ServiceState::default(),
             fallback: false,
+            gave_up: false,
             launch_anyway: false,
             reask: false,
+            evictions: 0,
             wait: Wait::default(),
             stall: None,
             stall_ids: 0,
@@ -618,6 +650,12 @@ impl Supervisor {
     /// The generation of the child held, if any.
     pub fn held(&self) -> Option<Generation> {
         self.child.as_ref().map(|h| h.generation)
+    }
+
+    /// Whether a pending registration was given up on (the longest wait passed).
+    #[cfg(test)]
+    pub fn gave_up_on_pending(&self) -> bool {
+        self.gave_up
     }
 
     /// Whether the login service is known to supervise the agent.
@@ -739,6 +777,40 @@ impl Supervisor {
         });
     }
 
+    /// The agent is the file on disk and this app cannot speak to it. It is neither connected to, asked to exit nor ended (the next
+    /// one would be the same). When the app was updated while it ran, the chip says to restart Dyno; otherwise (a half-done install, a
+    /// stale development binary) a restart would not help, and the chip says to reinstall, with Retry. Said once, at once.
+    fn wait_for_restart(&mut self, h: &HintSeen, app_updated: bool, out: &mut Vec<Command>) {
+        if !matches!(self.phase, Phase::WaitingForHolder) {
+            self.set_phase(Phase::WaitingForHolder, out);
+        }
+        let (stall, message) = if app_updated {
+            (Stall::AppUpdated, "Dyno was updated. Restart Dyno to finish.")
+        } else {
+            (
+                Stall::AgentMismatch,
+                "The Dyno agent on this computer does not match this Dyno. Reinstall Dyno.",
+            )
+        };
+        if !matches!(self.stall, Some((_, k)) if k == stall) {
+            log::warn!(
+                "The agent (pid {} is the installed build, protocol {}, version {}) is of another protocol than this Dyno (app updated while running: {app_updated}): not replaced",
+                h.pid,
+                h.protocol,
+                h.version
+            );
+        }
+        self.show_stall_replacing(stall, message, out);
+    }
+
+    /// Shows `stall`, first clearing a note of another kind (a later cause must not stay hidden behind an earlier one).
+    fn show_stall_replacing(&mut self, stall: Stall, message: &str, out: &mut Vec<Command>) {
+        if matches!(self.stall, Some((_, k)) if k != stall) {
+            self.clear_stall(out);
+        }
+        self.show_stall(stall, message, out);
+    }
+
     fn launch(&mut self, out: &mut Vec<Command>) {
         debug_assert!(self.child.is_none(), "a launch while a child is held");
         self.generation += 1;
@@ -800,6 +872,10 @@ impl Supervisor {
             if self.connected_ticks >= self.tuning.connected_for {
                 self.failures = 0;
             }
+            // A registration that is pending decides the hand-over when it ends, and nothing else asks again while connected.
+            if self.service.pending && self.look_out.is_none() && self.connected_ticks.is_multiple_of(self.tuning.pending_recheck.max(1)) {
+                self.issue_look(true, false, false, false, out);
+            }
             return;
         }
         if self.wait.cat.is_none() {
@@ -830,7 +906,13 @@ impl Supervisor {
                 | Phase::TakingBack { .. }
         );
         if wants_look && self.look_out.is_none() {
-            let service = matches!(self.phase, Phase::WaitingForService) && self.wait.ticks.is_multiple_of(self.tuning.service_recheck);
+            // While a registration is pending the service is asked often, so that the end of it is seen at once.
+            let every = if self.service.pending {
+                self.tuning.pending_recheck
+            } else {
+                self.tuning.service_recheck
+            };
+            let service = matches!(self.phase, Phase::WaitingForService) && self.wait.ticks.is_multiple_of(every.max(1));
             let cpu = matches!(self.phase, Phase::Starting { .. }) && self.wait.ticks.is_multiple_of(self.tuning.cpu_every);
             // The lock is probed on the ticks that need it: never while our own agent starts, on the recheck ticks while a
             // service's agent or a holder is awaited, every tick only while a retired agent is awaited (its release is the
@@ -898,7 +980,8 @@ impl Supervisor {
         if self.changed_seq == Some(look.seq) {
             self.changes_answered += 1;
         }
-        let was_supervised = self.service.supervises;
+        // A pending registration counts as the service the app has been waiting for (its job is absent while it replaces the old one).
+        let was_supervised = self.service.supervises || self.service.pending;
         // Answers a `ServiceChanged` (the person changed Start at login) while the service's state was still unknown: the change is the
         // evidence that stands in for the earlier answer there is none of.
         let change_without_baseline = self.changed_seq == Some(look.seq) && !self.service_known;
@@ -909,6 +992,9 @@ impl Supervisor {
             self.service = s;
             if !s.supervises {
                 self.fallback = false;
+            }
+            if !s.pending {
+                self.gave_up = false;
             }
         }
         self.wait.since_ms.get_or_insert(look.now_ms);
@@ -922,8 +1008,27 @@ impl Supervisor {
                     self.wait.idle_rechecks = 0;
                 }
                 if look.service.is_some() {
-                    // The lock tells a service that supervises on paper from one that starts nothing.
-                    if look.lock == Some(LockSeen::Free) && self.service.supervises {
+                    if !self.service.pending && matches!(self.stall, Some((_, Stall::RegisteringService))) {
+                        // The registration is over; the wait goes on in the usual words.
+                        self.clear_stall(out);
+                        if self.wait.ticks >= self.tuning.note_after {
+                            self.show_wait_stall(out);
+                        }
+                    }
+                    if self.service.pending && !self.gave_up && self.wait.ticks >= self.tuning.pending_max {
+                        // The registration's own waits are far shorter: a flag that stays is not waited for without an agent.
+                        self.gave_up = true;
+                        log::warn!(Ticks = self.wait.ticks; "A pending registration of the service did not finish in time; the app starts its own agent");
+                        out.push(Command::Report(AgentStatus::new(
+                            AgentState::Starting,
+                            Some(
+                                "The background service did not finish registering, so Dyno started its own agent. Check Dyno in System Settings, Login Items."
+                                    .into(),
+                            ),
+                        )));
+                    }
+                    // The lock tells a service that supervises on paper from one that starts nothing (not while it is being registered).
+                    if look.lock == Some(LockSeen::Free) && self.service.supervises && !self.service.pending {
                         self.wait.idle_rechecks += 1;
                         if self.wait.idle_rechecks >= self.tuning.idle_rechecks {
                             self.fallback = true;
@@ -966,6 +1071,9 @@ impl Supervisor {
     /// A look while connected: the service may have changed.
     fn service_look(&mut self, was_supervised: bool, peer: PeerId, owner: Owner, out: &mut Vec<Command>) {
         let s = self.service;
+        if s.pending {
+            return; // neither hand over nor take back while a registration is under way (ADR 0056); asked again soon
+        }
         match owner {
             Owner::ThisApp(g) if s.supervises && !self.fallback && self.child.is_some() => {
                 // The service supervises now: ours is ended (only the process this app started) so the service's, refused
@@ -987,7 +1095,26 @@ impl Supervisor {
 
     /// What to do from a look when no child is held and no agent answers yet.
     fn decide(&mut self, look: Look, usable_hint: bool, out: &mut Vec<Command>) {
+        // One look that misses the file (it is read while the agent rewrites it) does not end the update wait, whether the agent is our
+        // own child (running) or the login service's. A free lock with no file means the agent is gone: decided afresh below.
+        let child_running = self
+            .child
+            .as_ref()
+            .is_none_or(|held| matches!(look.child, Some((g, Child::Running { .. })) if g == held.generation));
+        if look.hint.is_none()
+            && look.lock != Some(LockSeen::Free)
+            && child_running
+            && matches!(self.phase, Phase::WaitingForHolder)
+            && matches!(self.stall, Some((_, Stall::AppUpdated | Stall::AgentMismatch)))
+        {
+            return;
+        }
         if let Some(held) = self.child.clone() {
+            let running = matches!(look.child, Some((g, Child::Running { .. })) if g == held.generation);
+            if let (Some(h), true) = (look.hint.as_ref().filter(|h| !h.same_build && h.of_disk_file), running) {
+                self.wait_for_restart(h, look.app_updated, out); // our own agent is the new file: kept, not ended, not connected to
+                return;
+            }
             // A child is held (the connection to it dropped): it is starting again until a look says it is gone.
             match look.child {
                 Some((g, Child::Exited { .. })) if g == held.generation => self.child = None,
@@ -1020,7 +1147,28 @@ impl Supervisor {
                         self.connect(Purpose::Use, look, out);
                         return;
                     }
+                } else if h.of_disk_file {
+                    self.wait_for_restart(&h, look.app_updated, out);
+                    return;
                 } else if look.lock == Some(LockSeen::Held) {
+                    if self.evictions >= MAX_EVICTIONS {
+                        // Agents of another build keep coming back after being asked to exit: stop (a loop of exits and launches).
+                        self.set_phase(Phase::WaitingForHolder, out);
+                        if !matches!(self.stall, Some((_, Stall::OtherBuildKeepsComing))) {
+                            log::warn!(
+                                "Agents of another build keep coming back (pid {} keep coming back, {} asked to exit): no longer asked to exit",
+                                h.pid,
+                                self.evictions
+                            );
+                        }
+                        self.show_stall_replacing(
+                            Stall::OtherBuildKeepsComing,
+                            "Agents of another build keep coming back after being asked to exit.",
+                            out,
+                        );
+                        return;
+                    }
+                    self.evictions += 1;
                     self.connect(Purpose::AskToExit, look, out);
                     return;
                 } else {
@@ -1028,8 +1176,12 @@ impl Supervisor {
                 }
             }
         }
-        if self.service.supervises && !self.fallback {
+        if (self.service.supervises && !self.fallback) || (self.service.pending && !self.gave_up) {
             self.set_phase(Phase::WaitingForService, out);
+            if self.service.pending {
+                // Said at once, never a silent wait (ER-18): Retry looks again, and the registration's own waits end it.
+                self.show_stall(Stall::RegisteringService, "Waiting for the background service.", out);
+            }
             return;
         }
         #[cfg(test)]
@@ -1097,7 +1249,11 @@ impl Supervisor {
                     self.clear_stall(out);
                 }
             }
-            StartState::Ready => self.connect(Purpose::Use, look, out),
+            StartState::Ready => match look.hint.clone().filter(|h| !h.same_build && h.of_disk_file) {
+                // The agent this app started is the file on disk but of another protocol: waited for, never connected to.
+                Some(h) => self.wait_for_restart(&h, look.app_updated, out),
+                None => self.connect(Purpose::Use, look, out),
+            },
             StartState::Stalled(report) => {
                 if matches!(report.cause, StallCause::Slow | StallCause::Paused) || report.cause.is_stuck() {
                     self.show_stall(Stall::from(report.cause), &report.message, out);
@@ -1138,6 +1294,7 @@ impl Supervisor {
                     self.fallback = false; // the service's agent is up after all
                 }
                 self.ever_connected = true;
+                self.evictions = 0;
                 self.connected_ticks = 0;
                 self.look_out = None;
                 out.push(Command::UsePeer(Some(peer)));
@@ -1173,7 +1330,7 @@ impl Supervisor {
             self.begin_judging();
         } else if let Some(j) = self.judge.as_mut() {
             // The file named the agent but it did not answer: a tick that did not become ready.
-            let _ = j.observe(&Reading {
+            let _: StartState = j.observe(&Reading {
                 liveness: Liveness::Running,
                 ready: false,
                 progress: 0,
@@ -1221,7 +1378,8 @@ impl Supervisor {
                 return; // it answers a stall that is over
             }
         }
-        // A paused agent is never ended or replaced by a Retry (ADR 0031): it continues by itself.
+        self.evictions = 0; // a person asking again starts the count over
+                            // A paused agent is never ended or replaced by a Retry (ADR 0031): it continues by itself.
         if matches!(self.stall, Some((_, Stall::AgentPaused))) {
             return;
         }
@@ -1240,7 +1398,8 @@ impl Supervisor {
                 self.set_phase(Phase::Ending { child }, out);
             }
             Phase::WaitingForService => {
-                self.fallback = true;
+                // A registration under way is looked at again; the app's own agent beside it would hold the folder its agent needs.
+                self.fallback = !self.service.pending;
                 self.reset_wait(out);
                 self.start_looking(out);
             }
@@ -1439,6 +1598,7 @@ impl std::hash::Hash for Supervisor {
             self.look_out,
             self.service,
             self.fallback,
+            self.gave_up,
         )
             .hash(h);
         (

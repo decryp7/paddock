@@ -2,7 +2,9 @@ import type {
   DashboardKind,
   DashboardWidget,
   DynoSurface,
+  Cells,
   LayoutView,
+  Span,
   MenuBarItem,
   MenuBarKind,
   PlacementState,
@@ -14,11 +16,11 @@ import type {
 } from './generated/widgets';
 
 /** The popup's layout as the engine returns it. */
-export type PopoverView = LayoutView<DynoSurface, PopoverWidget, PopoverKind>;
+export type PopoverView = LayoutView<DynoSurface, PopoverWidget, Span, PopoverKind>;
 /** The dashboard's layout. */
-export type DashboardView = LayoutView<DynoSurface, DashboardWidget, DashboardKind>;
+export type DashboardView = LayoutView<DynoSurface, DashboardWidget, Cells, DashboardKind>;
 /** The menu-bar items' layout. */
-export type MenuBarView = LayoutView<DynoSurface, MenuBarItem, MenuBarKind>;
+export type MenuBarView = LayoutView<DynoSurface, MenuBarItem, Span, MenuBarKind>;
 /** Everything the popup shows: the notice (and what it is about) and each placement's state. */
 export type { PopoverSurfaceValues };
 /** One popup widget's state. */

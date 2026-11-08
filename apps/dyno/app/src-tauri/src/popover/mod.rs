@@ -3,7 +3,7 @@
 //! arguments; [`crate::shell`] owns the threads and the Tauri event.
 //!
 //! - The live kinds (CPU and memory, network, top apps) are built here from the live push.
-//! - The slow kinds (alarms, disk space, backup, last issue, pinned counters) are the agent's `PopoverValues` answers,
+//! - The slow kinds (alarms, disk space, last issue, pinned counters) are the agent's `PopoverValues` answers,
 //!   asked on open, on the agent's change events and by each kind's refresh period ([`PopoverModel::due`]).
 //! - Values go to the popup **only while it is visible** ([`PopoverModel::emission`]).
 //! - When the agent is lost the model freezes the last values as stale and the surface carries the "Agent stopped"

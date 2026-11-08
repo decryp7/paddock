@@ -1,6 +1,6 @@
 //! Per-client keys for the loopback transport (ADR 0007 rule 1, issued like Pitwall pairing): shown once when issued, only a
-//! SHA-256 kept, revocable. Persisting the entries (the OS credential store, a settings file) is the app's job: [`KeyStore::export`]
-//! and [`KeyStore::import`] carry them.
+//! SHA-256 kept, revocable. The entries are kept by a [`KeyListStore`](crate::KeyListStore) (an owner-only file, never the OS
+//! credential store): [`KeyStore::export`] and [`KeyStore::import`] carry them.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -104,6 +104,11 @@ impl KeyStore {
     /// The entries (hashes included; they are not secrets), for the app's list and for saving.
     pub fn export(&self) -> Vec<KeyEntry> {
         self.lock().clone()
+    }
+
+    /// Whether at least one key is unrevoked (a client could pair).
+    pub fn has_active(&self) -> bool {
+        self.lock().iter().any(|e| !e.revoked)
     }
 
     /// Replaces the entries with saved ones.

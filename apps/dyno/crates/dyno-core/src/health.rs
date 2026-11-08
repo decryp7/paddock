@@ -1,12 +1,13 @@
 //! The health score: 100 minus the points each problem costs, with the reasons.
 
+use crate::alarms::{Alarm, AlarmState};
 use crate::anomaly::Anomaly;
 use crate::facts::{DiskHealthStatus, SystemFacts};
 use crate::forecast::Forecast;
 use crate::metrics::{derive_pressure, percent, MemoryPressure, SystemSample};
 use crate::startup::{ImpactRating, StartupEntry};
 use crate::time::Timestamp;
-use crate::units::{bytes, duration};
+use crate::units::{bytes, duration, storage};
 use serde::{Deserialize, Serialize};
 
 /// The score in a word.
@@ -19,6 +20,17 @@ pub enum Grade {
     Fair,
     /// Below 60.
     Poor,
+}
+
+impl Grade {
+    /// The highest score in this band: the one place that maps a band to a number (`grade` is its inverse).
+    pub fn top_score(self) -> u32 {
+        match self {
+            Grade::Good => 100,
+            Grade::Fair => 79,
+            Grade::Poor => 59,
+        }
+    }
 }
 
 /// How bad a reason is.
@@ -47,6 +59,8 @@ pub struct HealthReason {
     pub impact: u32,
     /// Severity.
     pub severity: Severity,
+    /// For an active alarm: when its condition first appeared. Performance reasons have none.
+    pub since: Option<Timestamp>,
 }
 
 /// The report.
@@ -59,7 +73,11 @@ pub struct HealthReport {
     pub score: u32,
     /// In a word.
     pub grade: Grade,
-    /// Reasons, biggest impact first.
+    /// What performance alone scores, before active alarms cap it (equals `score` when none did).
+    pub performance_score: u32,
+    /// Set when an active alarm of this severity lowered the score: Warning caps it at Fair, Critical at Poor.
+    pub capped_by: Option<Severity>,
+    /// Reasons: each active alarm first (most severe, then oldest), then performance reasons, biggest impact first.
     pub reasons: Vec<HealthReason>,
 }
 
@@ -83,6 +101,17 @@ pub struct HealthInput<'a> {
     pub crashes_7d: u32,
     /// Disk and battery life forecasts (only ones that need attention cost points).
     pub lifespans: &'a [crate::lifespan::LifeForecast],
+    /// The alarm list; those in [`AlarmState::Active`] (condition holds, not acknowledged, not shelved) cap the score.
+    pub alarms: &'a [Alarm],
+}
+
+/// The band an active alarm of `severity` caps the score at, if any (Info does not cap).
+fn cap_for(severity: Severity) -> Option<Grade> {
+    match severity {
+        Severity::Critical => Some(Grade::Poor),
+        Severity::Warning => Some(Grade::Fair),
+        Severity::Info => None,
+    }
 }
 
 /// The grade for a score.
@@ -104,6 +133,7 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
             detail,
             impact,
             severity,
+            since: None,
         });
     };
 
@@ -134,7 +164,7 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
             };
             add(
                 "lowDisk",
-                format!("{} has {} free ({free:.0}%)", d.name, bytes(d.free)),
+                format!("{} has {} free ({free:.0}%)", d.name, storage(d.free)),
                 "Windows and apps need free space for updates, the page file and temporary files.".into(),
                 impact,
                 severity,
@@ -297,12 +327,43 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
 
     r.sort_by(|a, b| b.impact.cmp(&a.impact).then(b.severity.cmp(&a.severity)));
     let lost: u32 = r.iter().map(|x| x.impact).sum();
-    let score = 100u32.saturating_sub(lost);
+    let performance_score = 100u32.saturating_sub(lost);
+
+    let mut active: Vec<&Alarm> = i
+        .alarms
+        .iter()
+        .filter(|a| a.state == AlarmState::Active && !a.is_shelved(i.now))
+        .collect();
+    active.sort_by(|a, b| {
+        b.severity
+            .cmp(&a.severity)
+            .then(a.first_seen.cmp(&b.first_seen))
+            .then(a.id.cmp(&b.id))
+    });
+    // Sorted most severe first, so the first alarm decides the cap.
+    let worst = active.first().map(|a| a.severity);
+    let cap = worst.and_then(cap_for);
+    let score = cap.map_or(performance_score, |c| performance_score.min(c.top_score()));
+    let capped_by = worst.filter(|_| score < performance_score);
+    let mut reasons: Vec<HealthReason> = active
+        .iter()
+        .map(|a| HealthReason {
+            id: format!("alarm:{}", a.id),
+            title: a.title.clone(),
+            detail: a.detail.clone(),
+            impact: 0,
+            severity: a.severity,
+            since: Some(a.first_seen),
+        })
+        .collect();
+    reasons.extend(r);
     HealthReport {
         at: i.now,
         score,
         grade: grade(score),
-        reasons: r,
+        performance_score,
+        capped_by,
+        reasons,
     }
 }
 
@@ -333,6 +394,7 @@ mod tests {
             anomalies,
             crashes_7d: crashes,
             lifespans: &[],
+            alarms: &[],
         })
     }
 
@@ -492,6 +554,7 @@ mod tests {
                 anomalies: &[],
                 crashes_7d: 0,
                 lifespans: l,
+                alarms: &[],
             })
         };
         assert_eq!(run(&[ssd.clone()]).score, 100, "a low-confidence hint costs nothing");
@@ -512,5 +575,130 @@ mod tests {
         bat.confidence = Confidence::High;
         let r = run(&[bat]);
         assert_eq!(r.reasons[0].id, "batteryLife:Battery");
+    }
+
+    fn alarm(id: u64, severity: Severity, state: AlarmState, first_seen: i64) -> Alarm {
+        Alarm {
+            id,
+            rule: "r".into(),
+            key: format!("k{id}"),
+            severity,
+            state,
+            title: format!("Alarm {id}"),
+            detail: "d".into(),
+            first_seen: Timestamp(first_seen),
+            last_seen: Timestamp(first_seen),
+            repeat_count: 1,
+            current_value: None,
+            metric: None,
+            notes: vec![],
+            acknowledged_at: None,
+            cleared_at: None,
+            shelved: None,
+            muted: false,
+            chattering: false,
+            expires_at: None,
+        }
+    }
+
+    fn with_alarms(sample: &SystemSample, alarms: &[Alarm]) -> HealthReport {
+        let facts = SystemFacts::unknown("w");
+        assess(&HealthInput {
+            now: Timestamp(1_000),
+            sample,
+            facts: &facts,
+            system_disk: "C:",
+            forecasts: &[],
+            startup: &[],
+            anomalies: &[],
+            crashes_7d: 0,
+            lifespans: &[],
+            alarms,
+        })
+    }
+
+    #[test]
+    fn an_active_warning_caps_a_perfect_score_at_fair() {
+        let r = with_alarms(&sample(0), &[alarm(1, Severity::Warning, AlarmState::Active, 5)]);
+        assert_eq!((r.performance_score, r.score, r.grade), (100, 79, Grade::Fair));
+        assert_eq!(r.capped_by, Some(Severity::Warning));
+    }
+
+    #[test]
+    fn an_active_critical_caps_a_perfect_score_at_poor() {
+        let r = with_alarms(
+            &sample(0),
+            &[
+                alarm(1, Severity::Warning, AlarmState::Active, 5),
+                alarm(2, Severity::Critical, AlarmState::Active, 6),
+            ],
+        );
+        assert_eq!((r.score, r.grade, r.capped_by), (59, Grade::Poor, Some(Severity::Critical)));
+    }
+
+    #[test]
+    fn an_already_low_score_is_unaffected() {
+        let mut s = sample(0);
+        s.disks[0].free = 10 << 30;
+        s.memory.available = 256 << 20;
+        s.memory.pressure = Reading::unavailable("n/a");
+        s.temperatures = Reading::Available(vec![Temperature {
+            label: "CPU".into(),
+            celsius: 96.0,
+            critical: None,
+        }]);
+        let none = with_alarms(&s, &[]);
+        assert!(none.score < 59, "{}", none.score);
+        let r = with_alarms(&s, &[alarm(1, Severity::Critical, AlarmState::Active, 5)]);
+        assert_eq!((r.score, r.grade, r.capped_by), (none.score, none.grade, None));
+        let r = with_alarms(&sample(0), &[alarm(1, Severity::Warning, AlarmState::Active, 5)]);
+        assert_eq!(r.score, 79);
+    }
+
+    #[test]
+    fn resolved_acknowledged_shelved_and_info_alarms_do_not_cap() {
+        let mut shelved = alarm(4, Severity::Critical, AlarmState::Active, 5);
+        shelved.shelved = Some(crate::alarms::Shelf::Until(Timestamp(9_999)));
+        let r = with_alarms(
+            &sample(0),
+            &[
+                alarm(1, Severity::Critical, AlarmState::Cleared, 5),
+                alarm(2, Severity::Critical, AlarmState::ClearedUnacknowledged, 5),
+                alarm(3, Severity::Critical, AlarmState::Acknowledged, 5),
+                shelved,
+                alarm(5, Severity::Info, AlarmState::Active, 5),
+            ],
+        );
+        assert_eq!((r.score, r.grade, r.capped_by), (100, Grade::Good, None));
+        assert_eq!(r.reasons.len(), 1, "only the active info alarm is named");
+    }
+
+    #[test]
+    fn alarm_reasons_come_first_most_severe_then_oldest_then_performance() {
+        let mut s = sample(0);
+        s.disks[0].free = 10 << 30;
+        let r = with_alarms(
+            &s,
+            &[
+                alarm(1, Severity::Warning, AlarmState::Active, 10),
+                alarm(2, Severity::Critical, AlarmState::Active, 30),
+                alarm(3, Severity::Critical, AlarmState::Active, 20),
+            ],
+        );
+        let ids: Vec<&str> = r.reasons.iter().map(|x| x.id.as_str()).collect();
+        assert_eq!(&ids[..4], ["alarm:3", "alarm:2", "alarm:1", "lowDisk"]);
+        assert_eq!(r.reasons[0].since, Some(Timestamp(20)));
+        assert_eq!(
+            (r.reasons[0].title.as_str(), r.reasons[0].severity),
+            ("Alarm 3", Severity::Critical)
+        );
+        assert_eq!(r.reasons[3].since, None);
+    }
+
+    #[test]
+    fn the_grade_and_its_top_score_agree() {
+        for g in [Grade::Good, Grade::Fair, Grade::Poor] {
+            assert_eq!(grade(g.top_score()), g);
+        }
     }
 }

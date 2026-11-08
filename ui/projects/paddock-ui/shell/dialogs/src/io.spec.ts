@@ -2,7 +2,7 @@ import { DIALOG_EVENTS } from '@decryp7/paddock-ui/shell';
 import { BROWSER_DIALOG_RESULT_KEY, browserDialogIo, tauriDialogIo, type TauriBridge } from './io';
 
 describe('tauriDialogIo', () => {
-  it('calls the four commands of paddock_dialogs::tauri and its events', async () => {
+  it('calls the commands of paddock_dialogs::tauri and its events', async () => {
     const calls: unknown[][] = [];
     let handler: ((e: { payload: unknown }) => void) | null = null;
     const bridge: TauriBridge = {
@@ -15,8 +15,8 @@ describe('tauriDialogIo', () => {
     await io.take();
     await io.close(undefined);
     await io.close({ ok: 1 });
-    await io.ready({ content: { width: 400, height: 321 }, minContent: { width: 300, height: 150 } });
-    await io.fit({ content: { width: 400, height: 330 }, minContent: { width: 300, height: 150 } });
+    await io.measure(3, 1, { content: { width: 400, height: 321 }, minContent: { width: 300, height: 150 }, overflow: false });
+    await io.ready(3, 1);
     await io.requestClose('d-main-1');
     const got: unknown[] = [];
     await io.listen(DIALOG_EVENTS.result, (p) => got.push(p));
@@ -27,8 +27,8 @@ describe('tauriDialogIo', () => {
       ['dialog_take_input', undefined],
       ['dialog_close', { result: null }],
       ['dialog_close', { result: { ok: 1 } }],
-      ['dialog_ready', { measure: { content: { width: 400, height: 321 }, minContent: { width: 300, height: 150 } } }],
-      ['dialog_fit', { measure: { content: { width: 400, height: 330 }, minContent: { width: 300, height: 150 } } }],
+      ['dialog_measure', { epoch: 3, seq: 1, measure: { content: { width: 400, height: 321 }, minContent: { width: 300, height: 150 }, overflow: false } }],
+      ['dialog_ready', { epoch: 3, seq: 1 }],
       ['emitTo', 'd-main-1', DIALOG_EVENTS.closeRequested, null],
       ['listen', DIALOG_EVENTS.result],
     ]);
@@ -38,16 +38,19 @@ describe('tauriDialogIo', () => {
 describe('browserDialogIo', () => {
   afterEach(() => {
     localStorage.clear();
+    sessionStorage.clear();
     delete document.documentElement.dataset['fittedHeight'];
     delete document.documentElement.dataset['fitHistory'];
     delete document.documentElement.dataset['dialogReady'];
+    delete document.documentElement.dataset['fitSeq'];
+    delete document.documentElement.dataset['fitEpoch'];
     delete document.documentElement.dataset['minContent'];
     delete document.documentElement.dataset['contentWidth'];
   });
 
   it('reads its start from the route and leaves the answer for e2e', async () => {
     const io = browserDialogIo({ hash: '#/dialog?id=a.b&host=main&label=d-main-1&title=About&modality=modal&dialogInput=%7B%22a%22%3A1%7D' });
-    expect(await io.take()).toEqual({ dialogId: 'a.b', title: 'About', kind: 'form', modality: 'modal', requiredChoice: false, input: { a: 1 } });
+    expect(await io.take()).toEqual({ dialogId: 'a.b', title: 'About', kind: 'form', modality: 'modal', requiredChoice: false, input: { a: 1 }, epoch: 1 });
     const close = vi.spyOn(window, 'close').mockImplementation(() => undefined);
     await io.close({ ok: 1 });
     expect(JSON.parse(localStorage.getItem(BROWSER_DIALOG_RESULT_KEY)!)).toEqual({ result: { ok: 1 } });
@@ -58,10 +61,20 @@ describe('browserDialogIo', () => {
     await expect(io.open({ dialogId: 'x', title: 't' })).rejects.toThrow(/in the page/);
     (await io.listen('e', () => undefined))();
     await io.requestClose('d-main-1');
-    await io.ready({ content: { width: 400, height: 200 }, minContent: { width: 320, height: 120 } });
-    await io.fit({ content: { width: 400, height: 260 }, minContent: { width: 330, height: 120 } });
+    await io.measure(1, 1, { content: { width: 400, height: 200 }, minContent: { width: 320, height: 120 }, overflow: false });
+    await io.ready(1, 1);
+    await io.measure(1, 2, { content: { width: 400, height: 260 }, minContent: { width: 330, height: 120 }, overflow: false });
     const data = document.documentElement.dataset;
-    expect([data['dialogReady'], data['fittedHeight'], data['fitHistory'], data['minContent'], data['contentWidth']]).toEqual(['true', '260', '200,260', '330x120', '400']);
+    expect([data['dialogReady'], data['fittedHeight'], data['fitHistory'], data['minContent'], data['contentWidth'], data['fitSeq'], data['fitEpoch']]).toEqual(['true', '260', '200,260', '330x120', '400', '2', '1']);
+    // A reload of the same window is a new page load: its epoch is the next one.
+    expect((await io.take()).epoch).toBe(2);
+    expect((await browserDialogIo({ hash: '#/dialog?id=other' }).take()).epoch).toBe(1);
+    // Storage that throws leaves the epoch at 1.
+    const get = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    expect((await io.take()).epoch).toBe(1);
+    get.mockRestore();
   });
 
   it('tolerates a route without input, a bad input and a full storage', async () => {

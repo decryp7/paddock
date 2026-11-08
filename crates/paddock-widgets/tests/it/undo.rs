@@ -1,4 +1,4 @@
-//! One level of undo for the destructive edits.
+//! Undo and redo: twenty steps for every placement edit.
 
 use paddock_widgets::{Edit, Layout, WidgetError, apply};
 
@@ -39,28 +39,40 @@ fn undo_after_reset() {
 }
 
 #[test]
-fn undo_is_one_level() {
-    let undone = run(
-        &run(&defaults(), Edit::Remove { id: id("clock") }),
-        Edit::Undo,
-    );
-    assert!(!undone.can_undo());
+fn undo_goes_back_step_by_step_and_redo_forward() {
+    let one = run(&defaults(), Edit::Remove { id: id("clock") });
+    let two = run(&one, Edit::Remove { id: id("alarms") });
+    let undone = run(&two, Edit::Undo);
+    assert_eq!(undone.placements, one.placements);
+    assert!(undone.can_undo() && undone.can_redo());
+    let again = run(&undone, Edit::Undo);
+    assert_eq!(again.placements, defaults().placements);
+    assert!(!again.can_undo());
     assert_eq!(
-        apply::<Gadgets>(&undone, Edit::Undo),
+        apply::<Gadgets>(&again, Edit::Undo),
         Err(WidgetError::NothingToUndo)
+    );
+    let redone = run(&run(&again, Edit::Redo), Edit::Redo);
+    assert_eq!(redone.placements, two.placements);
+    assert!(!redone.can_redo());
+    assert_eq!(
+        apply::<Gadgets>(&redone, Edit::Redo),
+        Err(WidgetError::NothingToRedo)
     );
 }
 
 #[test]
-fn a_placement_edit_clears_the_level() {
+fn every_placement_edit_is_a_step_and_clears_redo() {
     let removed = run(&defaults(), Edit::Remove { id: id("clock") });
+    let undone = run(&removed, Edit::Undo);
+    assert!(undone.can_redo());
     for edit in [
         Edit::Move {
             id: id("alarms"),
             to: 0,
         },
         Edit::Resize {
-            id: id("disk-space"),
+            id: id("clock"),
             span: 2,
         },
         Edit::Replace {
@@ -68,13 +80,46 @@ fn a_placement_edit_clears_the_level() {
             widget: disk("x"),
         },
         Edit::Add {
-            widget: Gadget::Clock,
+            widget: disk("y"),
             span: None,
             at: None,
         },
+        Edit::Remove { id: id("alarms") },
     ] {
-        assert!(!run(&removed, edit).can_undo());
+        let next = run(&undone, edit);
+        assert!(next.can_undo(), "a step");
+        assert!(!next.can_redo(), "a new edit clears redo");
     }
+}
+
+#[test]
+fn an_edit_that_changes_nothing_is_not_a_step() {
+    let same = run(
+        &defaults(),
+        Edit::Resize {
+            id: id("disk-space"),
+            span: 2,
+        },
+    );
+    assert!(!same.can_undo());
+}
+
+#[test]
+fn at_most_twenty_steps_are_kept() {
+    let mut layout = defaults();
+    for n in 0..30 {
+        let edit = Edit::Replace {
+            id: id("disk-space"),
+            widget: disk(&format!("v{n}")),
+        };
+        layout = run(&layout, edit);
+    }
+    let mut steps = 0;
+    while layout.can_undo() {
+        layout = run(&layout, Edit::Undo);
+        steps += 1;
+    }
+    assert_eq!(steps, paddock_widgets::UNDO_DEPTH);
 }
 
 #[test]

@@ -1,27 +1,30 @@
-//! The extras (WP-13) and backup health (WP-14) on the agent side: runs the read-only OS tools behind a [`ToolRunner`],
+//! The extras (WP-13) on the agent side: runs the read-only OS tools behind a [`ToolRunner`],
 //! keeps the few results worth caching, records the changes the "What changed" timeline needs, and answers the requests.
 //! Everything is observe-only: nothing here moves or removes a file ([`finder`] only lists).
 
-pub mod backup_check;
 pub mod finder;
 
 use crate::agent::{lock, now, Shared};
+use crate::helper_first::HelperPort;
+use crate::helper_readers::extras::HelperExtras;
 use dyno_core::extras::boot::{self, BootReport, BootRow, SettleTracker};
 use dyno_core::extras::changes::{diff_software, diff_startup, timeline, Change, ChangesQuery};
 use dyno_core::extras::gpu::GpuReport;
+use dyno_core::extras::sleep::SleepReport;
 use dyno_core::extras::software::{render_report, validate_destination, InventoryFormat, SoftwareInventory, SoftwareItem};
 use dyno_core::extras::usage::{self, UsageReport};
+use dyno_core::metrics::Reading;
 use dyno_core::protocol::{AgentError, BootRecord, ErrorCode, Reply, Request, SavedInventory};
+use dyno_core::read_via::ReadVia;
 use dyno_core::time::{Timestamp, DAY, HOUR, SECOND};
-use dyno_platform::issues::{OsRunner, ToolRunner};
-use dyno_platform::toolpath::PathResolver;
+use dyno_platform::runner::{SystemRunner as OsRunner, ToolRunner};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// How long a software list is reused (reading it takes seconds to minutes).
 const SOFTWARE_TTL: Duration = Duration::from_secs(10 * 60);
-/// How often the background work runs (backup check, change recording).
+/// How often the background work runs (change recording).
 pub const BACKGROUND_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 /// The first background run waits this long after the agent starts.
 pub const FIRST_RUN_AFTER: Duration = Duration::from_secs(90);
@@ -53,15 +56,18 @@ fn internal(msg: impl std::fmt::Display) -> AgentError {
 /// See the module docs.
 pub struct ExtrasCentre {
     tools: Mutex<Arc<dyn ToolRunner>>,
-    resolver: Mutex<Arc<PathResolver>>,
-    /// Tests: runs every backup tool instead of resolving programs.
-    backup_tools: Mutex<Option<Arc<dyn ToolRunner>>>,
     os: Mutex<&'static str>,
     own_folder: bool,
-    software: Mutex<Option<(Instant, SoftwareInventory)>>,
-    pub(crate) backup: Arc<Mutex<backup_check::Slot>>,
-    /// Signalled when a backup check ends and when a job waiting for one is cancelled.
-    pub(crate) backup_done: Arc<std::sync::Condvar>,
+    software: Arc<Mutex<Option<(Instant, SoftwareInventory)>>>,
+    /// A read of the software list for the saved one is under way in the background.
+    software_refreshing: Arc<std::sync::atomic::AtomicBool>,
+    /// Its thread, so a test can wait for it to end.
+    software_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
+    /// The readings the helper can give better (what keeps Windows awake); none until the agent is
+    /// composed with a helper port ([`ExtrasCentre::use_helper`]), and then everything is read on this computer as before.
+    pub(crate) helper: Mutex<Option<HelperExtras>>,
+    /// The port the helper readings go through, to ask whether the helper changed since a report was made.
+    helper_port: Mutex<Option<Arc<dyn HelperPort>>>,
     counter: AtomicU64,
 }
 
@@ -70,31 +76,67 @@ impl ExtrasCentre {
     pub fn new(own_folder: bool) -> ExtrasCentre {
         ExtrasCentre {
             tools: Mutex::new(Arc::new(OsRunner)),
-            resolver: Mutex::new(Arc::new(PathResolver::system())),
-            backup_tools: Mutex::new(None),
             os: Mutex::new(std::env::consts::OS),
             own_folder,
-            software: Mutex::new(None),
-            backup: Arc::new(Mutex::new(backup_check::Slot::default())),
-            backup_done: Arc::new(std::sync::Condvar::new()),
+            software: Arc::new(Mutex::new(None)),
+            software_refreshing: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            software_thread: Mutex::new(None),
+            helper: Mutex::new(None),
+            helper_port: Mutex::new(None),
             counter: AtomicU64::new(1),
         }
+    }
+
+    /// Waits for the background read of the software list (started to replace a saved list), if one is running.
+    pub fn wait_background_software(&self) {
+        let handle = lock(&self.software_thread).take();
+        if let Some(h) = handle {
+            let _ = h.join();
+        }
+    }
+
+    /// Gives the extras the helper: what keeps Windows awake is then read helper first, and say
+    /// which path answered (`blockers_via`). Composition calls this once (`agent.rs`).
+    pub fn use_helper(&self, port: Arc<dyn HelperPort>) {
+        *lock(&self.helper_port) = Some(port.clone());
+        *lock(&self.helper) = Some(HelperExtras::new(port, dyno_platform::extras::windows_wake_refused));
+    }
+
+    /// Where the helper stands now: moves whenever it is turned on, off, repaired or updated (0 without a helper port).
+    pub fn helper_epoch(&self) -> u64 {
+        lock(&self.helper_port).as_ref().map_or(0, |p| p.epoch())
+    }
+
+    /// What keeps the computer awake and the last wakes. On Windows the blockers are read helper first.
+    pub fn sleep_report(&self) -> SleepReport {
+        let (tools, os) = (self.tools(), self.os());
+        let mut helper = lock(&self.helper);
+        let Some(h) = helper.as_mut().filter(|_| os == "windows") else {
+            return dyno_platform::extras::sleep_report(tools.as_ref(), os);
+        };
+        let mut via = ReadVia::Local;
+        // This runs as the job a person started (the Sleep tab's refresh): a helper left alone after a hang is asked again now.
+        h.wakes.retry_now();
+        let mut report = dyno_platform::extras::sleep_report_with(tools.as_ref(), os, &mut || {
+            let own = tools.clone();
+            h.wakes
+                .reading_mut()
+                .set_local(Box::new(move || dyno_platform::extras::windows_wake_requests(own.as_ref())));
+            let got = h.wakes.read();
+            via = got.via;
+            match got.value {
+                Reading::Available(list) => Ok(list),
+                Reading::Unavailable(why) => Err(why),
+            }
+        });
+        report.blockers_via = via;
+        report
     }
 
     /// Tests: replaces the tool runner for system tools.
     pub fn use_tools(&self, tools: Arc<dyn ToolRunner>) {
         *lock(&self.tools) = tools;
         *lock(&self.software) = None;
-    }
-
-    /// Tests: replaces the runner every backup tool goes through.
-    pub fn use_backup_tools(&self, tools: Arc<dyn ToolRunner>) {
-        *lock(&self.backup_tools) = Some(tools);
-    }
-
-    /// The backup report as it stands, without starting a check (tests).
-    pub fn backup_report(&self) -> dyno_core::backup::BackupReport {
-        backup_check::peek(self)
     }
 
     /// Tests: pretend to be another OS (`macos`, `windows`, `linux`).
@@ -126,12 +168,16 @@ pub fn handle(shared: &Arc<Shared>, request: Request) -> Result<Reply, AgentErro
             let core = lock(&shared.core);
             Ok(Reply::Maintenance(core.settings.maintenance.status(now(), core.zone.as_ref())))
         }
-        Request::Backup => Ok(Reply::Backup(Box::new(backup_check::report(shared)))),
         other => Err(bad(format!("{other:?} is not an extras request."))),
     }
 }
 
-/// The software list, from the cache when fresh.
+/// The key of the saved software list in the cache (`view_saved`) and its document format.
+const SAVED_SOFTWARE: &str = "extras.software";
+const SAVED_FORMAT: u32 = 1;
+
+/// The software list as read now, or from the last ten minutes. Always a list that was read in this run (the changes timeline
+/// compares it with the last baseline, which a saved list would make look like nothing changed).
 pub fn software(shared: &Shared) -> SoftwareInventory {
     let x = &shared.extras;
     if let Some((at, s)) = lock(&x.software).as_ref() {
@@ -139,11 +185,69 @@ pub fn software(shared: &Shared) -> SoftwareInventory {
             return s.clone();
         }
     }
-    let list = dyno_platform::extras::software_list(x.tools().as_ref(), x.os());
+    read_software(&x.software, x.tools(), x.os(), shared.cache.as_ref())
+}
+
+/// Reads the list from the system, remembers it for [`SOFTWARE_TTL`] and keeps it for the next run.
+fn read_software(
+    memory: &Mutex<Option<(Instant, SoftwareInventory)>>,
+    tools: Arc<dyn ToolRunner>,
+    os: &'static str,
+    cache: Option<&crate::cache::Cache>,
+) -> SoftwareInventory {
+    let list = dyno_platform::extras::software_list(tools.as_ref(), os);
     if list.unavailable.is_none() {
-        *lock(&x.software) = Some((Instant::now(), list.clone()));
+        *lock(memory) = Some((Instant::now(), list.clone()));
+        if let (Some(cache), Ok(json)) = (cache, serde_json::to_string(&list)) {
+            cache.put_view(SAVED_SOFTWARE, SAVED_FORMAT, json);
+        }
     }
     list
+}
+
+/// The software list for the Extras page. Before the first read of this run, the list an earlier run saved answers at once (with
+/// `saved_at`) and the system is read again in the background, so asking again a moment later gives the fresh one; otherwise as
+/// [`software`].
+pub fn software_for_page(shared: &Shared) -> SoftwareInventory {
+    let x = &shared.extras;
+    let first_of_this_run = lock(&x.software).is_none();
+    let saved = first_of_this_run.then(|| saved_software(shared)).flatten();
+    let Some(saved) = saved else { return software(shared) };
+    if !x.software_refreshing.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        let (memory, tools, os, cache, flag) = (
+            x.software.clone(),
+            x.tools(),
+            x.os(),
+            shared.cache.clone(),
+            x.software_refreshing.clone(),
+        );
+        let spawned = std::thread::Builder::new().name("dyno-software-refresh".into()).spawn({
+            let flag = flag.clone();
+            move || {
+                read_software(&memory, tools, os, cache.as_ref());
+                log::info!("Installed software listed again in the background");
+                flag.store(false, std::sync::atomic::Ordering::SeqCst);
+            }
+        });
+        match spawned {
+            Ok(h) => *lock(&x.software_thread) = Some(h),
+            Err(_) => flag.store(false, std::sync::atomic::Ordering::SeqCst),
+        }
+    }
+    saved
+}
+
+/// The list an earlier run saved, with the time it was saved; `None` when there is none or it does not parse.
+fn saved_software(shared: &Shared) -> Option<SoftwareInventory> {
+    let (format, at, data) = shared.cache.as_ref()?.view(SAVED_SOFTWARE)?;
+    if format != SAVED_FORMAT {
+        return None;
+    }
+    let parsed: SoftwareInventory = serde_json::from_str(&data).ok()?;
+    // Bound it again as the system's answer is: the file is not trusted more.
+    let mut list = SoftwareInventory::from_items(parsed.items);
+    list.saved_at = Some(Timestamp(at));
+    Some(list)
 }
 
 fn changes(shared: &Shared, query: ChangesQuery) -> Result<dyno_core::extras::changes::ChangeTimeline, AgentError> {
@@ -348,7 +452,7 @@ fn wait(shared: &Shared, d: Duration) {
 }
 
 /// The background thread: records the boot, then every [`BACKGROUND_EVERY`] (inside the maintenance windows) checks the
-/// backups and compares the software lists. Does nothing on a data folder of its own (tests, `DYNO_DATA_DIR`).
+/// compares the software lists. Does nothing on a data folder of its own (tests, `DYNO_DATA_DIR`).
 pub fn run(shared: &Arc<Shared>) {
     if !shared.extras.own_folder {
         return;
@@ -362,9 +466,6 @@ pub fn run(shared: &Arc<Shared>) {
     wait(shared, FIRST_RUN_AFTER);
     while !shared.stopped() {
         if maintenance_open(shared) {
-            if lock(&shared.core).settings.backup.alert_when_stale {
-                backup_check::check_now(shared);
-            }
             record_changes(shared);
             wait(shared, BACKGROUND_EVERY);
         } else {

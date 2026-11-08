@@ -44,7 +44,7 @@ import { MatButton } from '@angular/material/button';
         <span class="at">{{ momentTime() }} · CPU {{ cpuAt() }}</span>
         <button type="button" matButton="text" (click)="peak.emit()">Jump to peak</button>
       </div>
-      <pd-table [toolbar]="false" [label]="'Top processes at ' + momentTime()" [rows]="top()" [columns]="columns" [rowKey]="procKey" [filterable]="false" [maxHeight]="360" emptyText="No process detail was recorded for this second." />
+      <pd-table [toolbar]="false" [label]="'Top processes at ' + momentTime()" [rows]="top()" [columns]="columns" [rowKey]="procKey" [filterable]="false" height="window" emptyText="No process detail was recorded for this second." />
     </section>
   `,
   styles: `

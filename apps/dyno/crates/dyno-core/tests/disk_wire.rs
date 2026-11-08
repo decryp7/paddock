@@ -7,7 +7,7 @@
 
 use dyno_core::disk::index::{DiskIndex, ScanLimits, Sizes};
 use dyno_core::disk::reason::UnreadableReason;
-use dyno_core::disk::scan::{DiskScanStatus, DiskTarget, ScanFailure, ScanPhase, ScanProgress, ScanState};
+use dyno_core::disk::scan::{DiskScanStatus, DiskTarget, NotSaved, ScanFailure, ScanOrigin, ScanPhase, ScanProgress, ScanState};
 use dyno_core::disk::volume::{NetworkProtocol, Volume, VolumeLocation};
 use dyno_core::protocol::Request;
 use dyno_core::time::Timestamp;
@@ -27,6 +27,8 @@ fn volume(id: &str, location: VolumeLocation, whole: bool) -> Volume {
         read_only: false,
         reachable: true,
         whole_volume: whole,
+        measured_at: None,
+        freshness: Default::default(),
     }
 }
 
@@ -53,6 +55,27 @@ fn status(scan: u64, state: ScanState, volume: Option<Volume>) -> DiskScanStatus
         eta_seconds: None,
         hidden_bytes: Some(40),
         scanned_at: Some(Timestamp(1_700_000_100_000)),
+        origin: ScanOrigin::Live,
+        changed_bytes: None,
+        replaces: None,
+        not_saved: None,
+    }
+}
+
+/// A finished scan read back from the cache, or a live one that could not be kept.
+fn saved_status(scan: u64, changed_bytes: Option<i64>, replaces: Option<u64>, not_saved: Option<NotSaved>) -> DiskScanStatus {
+    DiskScanStatus {
+        origin: if not_saved.is_some() {
+            ScanOrigin::Live
+        } else {
+            ScanOrigin::Saved {
+                saved_at: Timestamp(1_700_000_200_000),
+            }
+        },
+        changed_bytes,
+        replaces,
+        not_saved,
+        ..status(scan, ScanState::Done, None)
     }
 }
 
@@ -132,8 +155,11 @@ fn sample() -> Value {
     json!({
         "requests": {
             "diskVolumes": to_value(Request::DiskVolumes).unwrap(),
-            "startVolume": to_value(Request::StartDiskScan { target: DiskTarget::Volume { id: "Macintosh HD".into() } }).unwrap(),
-            "startFolder": to_value(Request::StartDiskScan { target: DiskTarget::Folder { path: "/Users/alex".into() } }).unwrap(),
+            "startVolume": to_value(Request::StartDiskScan { target: DiskTarget::Volume { id: "Macintosh HD".into() }, replaces: None }).unwrap(),
+            "rescanVolume": to_value(Request::StartDiskScan { target: DiskTarget::Volume { id: "Macintosh HD".into() }, replaces: Some(7) }).unwrap(),
+            "startFolder": to_value(Request::StartDiskScan { target: DiskTarget::Folder { path: "/Users/alex".into() }, replaces: None }).unwrap(),
+            "forgetSaved": to_value(Request::ForgetSavedDiskMap { scan: 7 }).unwrap(),
+            "forgetAllSaved": to_value(Request::ForgetSavedDiskMaps).unwrap(),
             "cancel": to_value(Request::CancelDiskScan { scan: 7 }).unwrap(),
             "scans": to_value(Request::DiskScans).unwrap(),
             "children": to_value(Request::DiskChildren { scan: 7, node: Some(4), offset: 0, limit: 48, min_fraction: 0.004 }).unwrap(),
@@ -153,6 +179,10 @@ fn sample() -> Value {
             to_value(status(7, failed, None)).unwrap(),
             to_value(status(7, ScanState::Failed { failure: ScanFailure::CannotStart { reason: "no".into() } }, None)).unwrap(),
             to_value(status(7, ScanState::Failed { failure: ScanFailure::Internal { detail: "bug".into() } }, None)).unwrap(),
+            to_value(saved_status(8, Some(-120), None, None)).unwrap(),
+            to_value(saved_status(9, None, Some(8), Some(NotSaved::TooBig))).unwrap(),
+            to_value(saved_status(10, Some(4096), None, Some(NotSaved::NoSpace))).unwrap(),
+            to_value(saved_status(11, None, None, Some(NotSaved::Failed))).unwrap(),
         ],
         "settings": to_value(dyno_core::disk::settings::DiskSettings::default()).unwrap(),
         "rings": rings(),

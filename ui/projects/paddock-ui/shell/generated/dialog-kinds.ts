@@ -11,13 +11,13 @@ export const DIALOG_MIN_SIZE = { width: 320, height: 200 } as const;
 export const DIALOG_CAP_FRACTION = 0.75;
 
 /**
- * What each kind fixes: modalities, the default width and preferred height (`null`: measured), its floor, whether it
- * is fitted to its content (`fits`, the one "is fitted" table of ADR 0016 decision 7), whether a refit only grows, and
- * what it remembers between openings.
+ * What each kind fixes: modalities, the default width and preferred height (`null`: measured), its floor, its size mode
+ * (`height`: the window follows its content, with `shrink` `always` or `never`; `manual`: it keeps the size it was given; ADR 0043
+ * §1, the one table) and what it remembers between openings.
  */
 export const DIALOG_KIND_TABLE = {
-  decision: { modalities: ['modal'], width: 400, height: null, minSize: null, fits: true, growsOnly: false, remembers: 'offset', rememberHeight: false },
-  form: { modalities: ['modal', 'modeless'], width: 560, height: null, minSize: null, fits: true, growsOnly: false, remembers: 'widthAndOffset', rememberHeight: false },
-  viewer: { modalities: ['modeless'], width: 720, height: 560, minSize: { width: 680, height: 560 }, fits: true, growsOnly: true, remembers: 'sizeAndOffset', rememberHeight: true },
-  tool: { modalities: ['modeless'], width: 960, height: 680, minSize: null, fits: false, growsOnly: false, remembers: 'sizeAndOffset', rememberHeight: true },
+  decision: { modalities: ['modal'], width: 400, height: null, minSize: null, sizeMode: 'height', shrink: 'always', remembers: 'offset', rememberHeight: false },
+  form: { modalities: ['modal', 'modeless'], width: 560, height: null, minSize: null, sizeMode: 'height', shrink: 'always', remembers: 'offset', rememberHeight: false },
+  viewer: { modalities: ['modeless'], width: 720, height: 560, minSize: { width: 680, height: 560 }, sizeMode: 'height', shrink: 'never', remembers: 'offset', rememberHeight: false },
+  tool: { modalities: ['modeless'], width: 960, height: 680, minSize: null, sizeMode: 'manual', shrink: null, remembers: 'sizeAndOffset', rememberHeight: true },
 } as const;

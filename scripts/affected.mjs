@@ -248,7 +248,7 @@ export function appOfWorkflow(path, appNames) {
 export const E2E_GUARD_INPUTS = /^ui\/projects\/paddock-e2e\/src\/(env|build-guard)\.ts$/;
 
 /** Editor and VCS metadata: marks nothing. */
-export const META = [/(^|\/)\.gitignore$/, /^\.editorconfig$/, /(^|\/)\.DS_Store$/, /^lefthook\.yml$/];
+export const META = [/(^|\/)\.gitignore$/, /^\.editorconfig$/, /(^|\/)\.DS_Store$/, /^lefthook\.yml$/, /^\.gitea\/ISSUE_TEMPLATE\//];
 
 /** Documentation: marks only the link check... */
 export const DOCS = [/\.md$/, /^docs\//, /^apps\/[^/]+\/docs\//, /^diagrams\//, /(^|\/)LICENSE[^/]*$/];
@@ -264,9 +264,27 @@ export const DOC_INPUTS = [
   { re: /^docs\/blocks\//, projects: ['conformance', 'tools'], why: 'the shared doc blocks (conformance sync, release notes, new-app)' },
   { re: /^apps\/(shell-demo|workbench-demo)\/README\.md$/, projects: ['tools'], why: 'new-app.mjs copies its "Start a new app" section' },
   { re: /(^|\/)REVIEWED\.md$/, projects: (f) => (f.startsWith('apps/') ? owners(f) : ['conformance']), why: 'the image reviews conformance C24 checks' },
+  { re: /^ui\/projects\/paddock-ui\/format\/src\/storage-cases\.json$/, projects: ['ui', 'app:dyno'], why: "dyno-core units::storage_writes_what_the_ui_writes reads the UI's storage cases" },
   { re: /^apps\/debrief\/docs\/ai\/sql-views\.md$/, why: 'debrief-ai tests/sql_tool.rs (from the import)' },
   { re: /^apps\/debrief\/docs\/testing\/quarantine\.md$/, why: 'scripts/ci/check-quarantine (from the import)' },
 ];
+
+/**
+ * The Rust sources that can emit a health cause code: ui's cause-codes.spec.ts (`rustSources`) reads every `.rs` file under `crates/`
+ * and `apps/` against the chip's table (service-status-text.ts), skipping folders named target, node_modules, tests and benches and
+ * files named tests.rs. A change to one marks ui too (the owner keeps its own halves). Same as `is_cause_code_source` in plan.rs.
+ */
+export function isCauseCodeSource(f) {
+  const parts = f.split('/');
+  const last = parts.at(-1) ?? '';
+  return (
+    (parts[0] === 'crates' || parts[0] === 'apps') &&
+    parts.length > 1 &&
+    last.endsWith('.rs') &&
+    last !== 'tests.rs' &&
+    !parts.slice(1, -1).some((d) => ['target', 'node_modules', 'tests', 'benches'].includes(d))
+  );
+}
 
 /** Top-level folders and the projects that own them (apps/<name>/ is app:<name>). */
 const OWNERS = [
@@ -286,6 +304,28 @@ const OWNERS = [
 
 /** An app's `src-tauri/Cargo.toml` and `capabilities/`, which conformance C48 reads (the app itself is marked as their owner). */
 export const APP_CAPABILITY_INPUT = /^apps\/[^/]+\/(app\/)?src-tauri\/(Cargo\.toml|capabilities\/)/;
+
+/**
+ * What conformance C91 and paddock-service's `per_machine` sync test read of a per-machine app: its Tauri configuration, the
+ * Windows installer files (hooks, the exclusions and statements, the generated stop list, the include copy), and the shared
+ * include itself (which every adopting app copies).
+ */
+export const PER_MACHINE_INPUT = /^(apps\/[^/]+\/app\/src-tauri\/(tauri(\.windows)?\.conf\.json|windows\/)|crates\/paddock-setup\/nsis\/paddock-per-machine\.nsh)/;
+
+/** Whether the app that owns `f` (apps/<app>/app/src-tauri/...) adopts the shared installer include: its hooks include
+ * paddock-per-machine.nsh, or its Windows installer is perMachine. Read from the working tree. */
+export function adoptsPerMachine(root, f) {
+  const m = /^(apps\/[^/]+\/app\/src-tauri)\//.exec(f);
+  if (!m) return false;
+  const read = (p) => {
+    try {
+      return readFileSync(join(root, m[1], p), 'utf8');
+    } catch {
+      return '';
+    }
+  };
+  return read('windows/installer-hooks.nsh').includes('paddock-per-machine.nsh') || /"installMode"\s*:\s*"perMachine"/.test(read('tauri.windows.conf.json') + read('tauri.conf.json'));
+}
 
 /** The notices script and the shared cargo-about configuration (and the tool, conformance/src/notices/): inputs of every app with a `notices` block. */
 export const NOTICES_INPUTS = /^(scripts\/notices\.sh|templates\/repo\/about\.toml|conformance\/src\/notices\/.*)$/;
@@ -494,7 +534,7 @@ export function giteaTargets(f, gitea) {
  * Result: { all, crates, ui, eslint, conformance, tools, icons, ciImage, paddockDev, docs, apps: [name], kinds: { app: ['rust','ui'] },
  * packages: { workspace: [crate] } } and `why` with `explain`.
  */
-export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockAfter = null, all = false, explain = false, gitea = null } = {}) {
+export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockAfter = null, all = false, explain = false, gitea = null, perMachine = () => false } = {}) {
   const why = new Map();
   const kinds = new Map();
   const appProjects = [...apps.keys()].map((a) => `app:${a}`);
@@ -622,6 +662,9 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
       const owners_ = crateDirsNaming(f, cargo);
       for (const d of owners_.length ? owners_ : [...cargo].filter(([, x]) => x.workspace === 'crates').map(([d]) => d)) changedCrates.add(d);
     }
+    if (isCauseCodeSource(f)) {
+      mark('ui', `ui cause-codes.spec.ts scans ${f}`); // ui's own tests; not its dependents (the spec reads sources, not ui output)
+    }
     // ui/ is one Angular workspace: a change anywhere in it can change every output built from it.
     if (own.includes('ui') && f.startsWith('ui/')) changedPkgs.add('ui');
     // An app's icons (icons/<app>/) are checked by its release facts; the pipeline (icons/tools/) feeds every app.
@@ -636,6 +679,13 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
     // An app's Cargo dependencies and capabilities are read by conformance C48 (a shell app grants its dialog windows the
     // shell's dialog set), which runs in the conformance job.
     if (APP_CAPABILITY_INPUT.test(f)) mark('conformance', `C48 reads ${f}`);
+    // A per-machine app's installer files and configuration are read by conformance C91 and by paddock-service's per_machine
+    // sync test (the generated stop list and the include copy), which runs with the shared crates.
+    if (PER_MACHINE_INPUT.test(f)) {
+      mark('conformance', `C91 reads ${f}`);
+      // The sync test of paddock-service reads only the apps that adopt the include (and the include itself).
+      if (f.startsWith('crates/') || perMachine(f)) mark('crates', `the per_machine sync test reads ${f}`);
+    }
     // The notices tool and its cargo-about configuration decide the committed THIRD_PARTY_NOTICES.md of every app with a
     // `notices` block (conformance/src/notices/** is covered by the rule below): they are inputs of those apps.
     if (NOTICES_INPUTS.test(f)) {
@@ -903,7 +953,7 @@ export function planFor({ base = null, head = 'HEAD', files = null, all = false,
       lockAfter = show(head);
     }
   }
-  return { graph, changed, plan: affected(changed, graph, { lockBefore, lockAfter, all, explain, gitea }) };
+  return { graph, changed, plan: affected(changed, graph, { lockBefore, lockAfter, all, explain, gitea, perMachine: (f) => adoptsPerMachine(root, f) }) };
 }
 
 /** The ci.yml job outputs of a plan (the plan job declares and wires exactly these names; a test checks ci.yml against them). */

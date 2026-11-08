@@ -18,6 +18,9 @@ pub struct ListedVolume {
     pub volume: Volume,
     /// Where the walk starts (the mount point, except on the macOS startup disk).
     pub root: PathBuf,
+    /// The disk's identity (volume UUID or GUID) where the OS gives one: a saved map of another disk mounted at the same
+    /// place is not offered (ADR 0029).
+    pub identity: Option<String>,
 }
 
 /// Lists volumes. The real one asks the OS; tests give a fixed list.
@@ -28,6 +31,12 @@ pub trait VolumeLister: Send + Sync {
     /// the last listing). `None` when the lister cannot say quickly; the listing's numbers are used then.
     fn capacity_now(&self, _volume: &ListedVolume) -> Option<(u64, u64)> {
         None
+    }
+    /// Capacity and free bytes of one volume of the last listing, read again for the periodic space refresh. Unlike
+    /// [`VolumeLister::capacity_now`] it also answers for a network volume (on a thread given up after a limit); `None` when the
+    /// volume did not answer in time. The default is `capacity_now`.
+    fn space_now(&self, volume: &ListedVolume) -> Option<(u64, u64)> {
+        self.capacity_now(volume)
     }
 }
 
@@ -126,6 +135,7 @@ pub fn list_mounts(
             ListedVolume {
                 volume: classify(&m, &medium, size, reachable),
                 root,
+                identity: medium.identity.clone(),
             }
         })
         .collect()
@@ -145,6 +155,15 @@ impl VolumeLister for OsVolumes {
             return None;
         }
         dyno_platform::volumes::capacity(&volume.volume.mount)
+    }
+
+    fn space_now(&self, volume: &ListedVolume) -> Option<(u64, u64)> {
+        if !matches!(volume.volume.location, dyno_core::disk::volume::VolumeLocation::Network { .. }) {
+            return dyno_platform::volumes::capacity(&volume.volume.mount);
+        }
+        // Never twice in flight for one mount, and given up after the probe limit (the volume is then "not answering").
+        let rx = probe_network(volume.volume.mount.clone(), &dyno_platform::volumes::capacity, &self.inflight)?;
+        rx.recv_timeout(NETWORK_PROBE).ok().flatten()
     }
 
     fn list(&self) -> Vec<ListedVolume> {
@@ -214,6 +233,7 @@ mod tests {
             ],
             |m| MediaTraits {
                 internal: Some(m.mount == "/"),
+                identity: (m.mount == "/").then(|| "UUID-ROOT".to_string()),
                 ..MediaTraits::default()
             },
             |m| Some((1000, if m == "/" { 250 } else { 900 })),
@@ -223,6 +243,12 @@ mod tests {
         let names: Vec<&str> = listed.iter().map(|l| l.volume.id.as_str()).collect();
         assert_eq!(names, ["/", "/Volumes/usb", "/Volumes/media"], "proc is not a volume");
         assert_eq!(listed[0].root, PathBuf::from("/System/Volumes/Data"));
+        assert_eq!(
+            listed[0].identity.as_deref(),
+            Some("UUID-ROOT"),
+            "the identity of the medium is kept with the volume"
+        );
+        assert_eq!(listed[2].identity, None, "a share has none");
         assert_eq!(listed[0].volume.used(), Some(750));
         assert!(matches!(listed[1].volume.location, VolumeLocation::External { .. }));
         assert_eq!(listed[1].root, PathBuf::from("/Volumes/usb"));

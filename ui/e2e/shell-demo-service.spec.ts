@@ -6,7 +6,7 @@ import { axeViolations, expect, expectNoHorizontalScroll, test } from '@decryp7/
 
 test.describe('background service (plan X4)', () => {
   test('an install walks its phases and ends running with nothing left to press', async ({ app, page, pageErrors }) => {
-    await app.settings.open({ page: 'pd.login' }, '?service=notInstalled');
+    await app.settings.open({ page: 'pd.login' }, '?service=notInstalled&service-step=manual');
     await expect(page.getByTestId('service-condition')).toContainText('Not installed');
     const install = page.getByRole('button', { name: 'Install' });
     await expect(install).toHaveClass(/mat-mdc-unelevated-button/);
@@ -16,10 +16,20 @@ test.describe('background service (plan X4)', () => {
     expect(await axeViolations(page)).toEqual([]);
     await expectNoHorizontalScroll(page);
 
+    // The demo service's phases wait for the test (`?service-step=manual`): a poll can miss a phase that lasts as long as a 500 ms timer.
+    const step = async () => {
+      await page.waitForFunction(() => '__sdServiceStep' in window);
+      await page.evaluate(() => (window as unknown as { __sdServiceStep: () => void }).__sdServiceStep());
+    };
     await install.click();
+    await step();
     await expect(page.getByTestId('service-working')).toContainText('Installing the service…');
     await expect(page.getByTestId('service-step')).toHaveText('Removing the old registration');
+    await step();
+    await expect(page.getByTestId('service-step')).toHaveText('Registering the service');
+    await step();
     await expect(page.getByTestId('service-step')).toHaveText('Checking that it answers');
+    await step();
     await expect(page.getByTestId('service-outcome')).toContainText('installed and running');
     await expect(page.getByTestId('service-condition')).toContainText('Running');
     await expect(page.getByTestId('service-working')).toHaveCount(0);
@@ -28,16 +38,22 @@ test.describe('background service (plan X4)', () => {
   });
 
   test('a repair shows its phase and "Still working" for as long as it runs', async ({ app, page }) => {
-    await app.settings.open({ page: 'pd.login' }, '?service=notRunning&service-outcome=hang');
+    await app.settings.open({ page: 'pd.login' }, '?service=notRunning&service-outcome=hang&service-step=manual');
     await expect(page.getByTestId('service-condition')).toContainText('Not running');
     await page.getByRole('button', { name: 'Repair' }).click();
+    const step = async () => {
+      await page.waitForFunction(() => '__sdServiceStep' in window);
+      await page.evaluate(() => (window as unknown as { __sdServiceStep: () => void }).__sdServiceStep());
+    };
+    await step();
+    await step();
+    await step();
     await expect(page.getByTestId('service-step')).toHaveText('Checking that it answers');
     await expect(page.getByTestId('service-still-working')).toContainText('Still working');
     await expect(page.getByTestId('service-condition')).toContainText('Repairing');
     await expect(page.getByRole('button', { name: 'Repair' })).toHaveCount(0);
     await expect(page.locator('mat-progress-bar')).toHaveAccessibleName('Working…');
-    // Nothing gives up on it.
-    await page.waitForTimeout(1500);
+    // Nothing gives up on it: no step is left to run, and the page still says so.
     await expect(page.getByTestId('service-still-working')).toBeVisible();
   });
 

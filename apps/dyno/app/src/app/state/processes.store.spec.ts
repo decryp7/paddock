@@ -209,7 +209,7 @@ describe('ProcessesStore: requests', () => {
   });
   it('lockers resolves a list and rejects with a CommandError', async () => {
     const { store } = setup();
-    expect((await store.lockers('/Users/alex/dev/dyno/target')).length).toBeGreaterThan(0);
+    expect((await store.lockers('/Users/alex/dev/dyno/target')).lockers.length).toBeGreaterThan(0);
     await expect(store.lockers('  ')).rejects.toEqual({ code: 'badRequest', message: 'Enter a file or folder path.' });
   });
   it('lockers normalises odd rejections', async () => {

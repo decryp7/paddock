@@ -3,18 +3,28 @@
 //! drop, an optional memory cap),
 //! hands it the [`Bootstrap`] as one JSON line on stdin, keeps stdin open as its lifeline, and accepts its authenticated
 //! connection (token, protocol, and the pid of the process it started). The child side is [`crate::child`].
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::error::IpcError;
 use crate::frame::{FrameLimit, ProtocolVersion};
 use crate::handshake::Host;
 use crate::peer::{Handler, Peer, PeerOptions};
 use crate::wire::Json;
+use paddock_jobs::CancelToken;
+use paddock_jobs::time::{Clock, Deadline};
 use paddock_proc::{KEPT_ENV, MemoryCap, Supervised};
 use serde::{Deserialize, Serialize};
 use std::ffi::OsString;
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::process::{ChildStdin, Stdio};
+use std::process::{ChildStdin, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -53,6 +63,8 @@ pub struct ChildSpec {
     pub current_dir: Option<PathBuf>,
     /// End its process tree when it uses more than this many bytes (proportional memory, `paddock-proc`).
     pub memory_limit: Option<u64>,
+    /// Windows: also make `memory_limit` a hard commit limit of the job object (see `MemoryCap::hard_commit`); ignored elsewhere.
+    pub memory_hard: bool,
     /// Pass its stderr through to ours (default: discarded; an app that keeps child logs captures it itself).
     pub inherit_stderr: bool,
     /// The frame limit of the connection.
@@ -83,6 +95,7 @@ impl ChildSpec {
             lower_priority: false,
             current_dir: None,
             memory_limit: None,
+            memory_hard: false,
             inherit_stderr: false,
             limit: FrameLimit::default(),
             protocol: ProtocolVersion::UNVERSIONED,
@@ -115,6 +128,9 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 pub struct Child {
     process: Mutex<Supervised>,
     stdin: Mutex<Option<ChildStdin>>,
+    status: Mutex<Option<ExitStatus>>,
+    /// The clock `exit_status` waits on (the spec's peer clock).
+    clock: Arc<dyn Clock>,
     pid: u32,
     peer: Peer,
     /// Kept so the private socket folder lives as long as the connection.
@@ -141,6 +157,28 @@ impl Child {
     /// Whether the process has exited.
     pub fn exited(&self) -> bool {
         !lock(&self.process).is_running()
+    }
+
+    /// How it ended: waits up to `wait` for the OS to report the exit, then returns the status (`None` while it still runs,
+    /// or when its tree was already ended by [`Child::kill`] / [`Child::stop`], which reap it).
+    pub fn exit_status(&self, wait: Duration) -> Option<ExitStatus> {
+        let deadline = Deadline::after(self.clock.clone(), wait);
+        // The process lock is held for one look at a time, never across a wait, so `kill` and `stop` are not held up.
+        while lock(&self.process).is_running() {
+            if deadline.passed() {
+                return None;
+            }
+            // silent: Err(Cancelled) is the wake-up; the loop re-reads the process and the deadline right after
+            #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
+            let _ = self
+                .clock
+                .wait(Duration::from_millis(10), &CancelToken::new());
+        }
+        let mut status = lock(&self.status);
+        if status.is_none() {
+            *status = lock(&self.process).wait();
+        }
+        *status
     }
 
     /// The most memory its watcher saw, in bytes (0 without a memory limit).
@@ -183,6 +221,17 @@ impl Drop for Child {
     }
 }
 
+/// The launch error for a bootstrap line that could not be written. A closed pipe means the child is already gone (a child
+/// that exits at once may do so before the line is written, or after it): that is the same outcome as one that exits
+/// before it connects, so both read alike and the OS error stays in the message.
+fn bootstrap_failure(label: &str, e: &io::Error) -> IpcError {
+    if e.kind() == io::ErrorKind::BrokenPipe {
+        IpcError::Spawn(format!("{label} exited before it connected ({e})"))
+    } else {
+        IpcError::Spawn(format!("{label} did not take its bootstrap ({e})"))
+    }
+}
+
 /// Starts the child of `spec`, writes its bootstrap, and waits up to `spec.start_timeout` for it to connect (giving up
 /// at once if it exits). On any failure the child's tree is ended.
 pub fn launch(spec: &ChildSpec, handler: Arc<dyn Handler>) -> Result<Child, IpcError> {
@@ -208,7 +257,15 @@ pub fn launch(spec: &ChildSpec, handler: Arc<dyn Handler>) -> Result<Child, IpcE
     }
     let spawned = match spec.memory_limit {
         Some(limit) => {
-            Supervised::spawn_capped(cmd, MemoryCap::new(limit, spec.peer.label.clone()))
+            let cap = MemoryCap::new(limit, spec.peer.label.clone());
+            Supervised::spawn_capped(
+                cmd,
+                if spec.memory_hard {
+                    cap.hard_commit()
+                } else {
+                    cap
+                },
+            )
         }
         None => Supervised::spawn(cmd),
     };
@@ -236,15 +293,7 @@ pub fn launch(spec: &ChildSpec, handler: Arc<dyn Handler>) -> Result<Child, IpcE
         s.write_all(line.as_bytes()).and_then(|()| s.flush())
     });
     // On failure `process` is dropped, which ends its tree.
-    // A closed pipe means the child is already gone (a child that exits at once may do so before the line is written).
-    written.map_err(|e| {
-        let what = if e.kind() == io::ErrorKind::BrokenPipe {
-            "exited before it took"
-        } else {
-            "did not take"
-        };
-        IpcError::Spawn(format!("{label} {what} its bootstrap ({e})"))
-    })?;
+    written.map_err(|e| bootstrap_failure(&label, &e))?;
     let conn = host.accept_while(Some(pid), spec.start_timeout, &mut || {
         if process.is_running() {
             Ok(())
@@ -258,8 +307,41 @@ pub fn launch(spec: &ChildSpec, handler: Arc<dyn Handler>) -> Result<Child, IpcE
     Ok(Child {
         process: Mutex::new(process),
         stdin: Mutex::new(stdin),
+        status: Mutex::new(None),
+        clock: spec.peer.clock.clone(),
         pid,
         peer,
         _host: host,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn message(e: IpcError) -> String {
+        match e {
+            IpcError::Spawn(m) => m,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_child_that_exits_before_the_bootstrap_reads_like_one_that_exits_before_it_connects() {
+        let pipe = io::Error::from(io::ErrorKind::BrokenPipe);
+        let m = message(bootstrap_failure("plugin \"exit\"", &pipe));
+        assert!(m.contains("exited before it connected"), "{m}");
+        assert!(
+            m.contains(&pipe.to_string()),
+            "the OS error stays in the message: {m}"
+        );
+    }
+
+    #[test]
+    fn another_write_error_is_not_called_an_exit() {
+        let denied = io::Error::from(io::ErrorKind::PermissionDenied);
+        let m = message(bootstrap_failure("p", &denied));
+        assert!(m.contains("did not take its bootstrap"), "{m}");
+        assert!(!m.contains("exited"), "{m}");
+    }
 }

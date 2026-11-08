@@ -14,6 +14,14 @@
 //! [`StartWatch`] is the thin edge: it asks a [`StartProbe`] for the readings, feeds the judge and paces itself through a
 //! [`Pace`] (a clock in production, a fake in tests). It reads the CPU time every [`Patience::cpu_every`] ticks, one pid
 //! at a time ([`crate::tree_cpu_time`]), never the whole process table.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::{ProcessId, RunState, StallCause, StallReport, run_state, tree_cpu_time};
 use std::time::Duration;

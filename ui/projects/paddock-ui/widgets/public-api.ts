@@ -7,6 +7,10 @@ export type * from './generated/widgets';
 export { PdWidgetArea } from './src/area';
 export { PdWidgetChooser } from './src/chooser';
 export { PdWidgetFrame } from './src/frame';
+export { ManualFrameScheduler, PD_FRAME_SCHEDULER, type FrameScheduler } from './src/frame-scheduler';
+export { PD_WIDGET_GRID_BACKEND, type GridView, type WidgetGridBackend } from './src/grid-backend';
+export { PdGridGesture, type GridGestureKind, type GridGestureTarget } from './src/grid-gesture';
+export { PdWidgetGrid } from './src/grid';
 export { relativeAgo } from './src/time';
 export {
   defaultKindOf,
@@ -17,3 +21,4 @@ export {
   type PdWidgetContext,
   type PdWidgetOptionContext,
 } from './src/widget';
+export { blockText } from './src/grid-text';

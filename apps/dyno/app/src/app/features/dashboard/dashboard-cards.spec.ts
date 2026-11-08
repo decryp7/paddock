@@ -1,16 +1,15 @@
 import { Dialog } from '@angular/cdk/dialog';
 import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
-import type { Anomaly, Diagnosis, HealthReason, HealthReport } from '../../core/api.types';
+import type { Diagnosis, HealthReason, HealthReport } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { provideIcons } from '../../shared/icons';
 import { DiagnosisStore } from '../../state/diagnosis.store';
+import { HealthStore } from '../../state/health.store';
 import { LiveStore } from '../../state/live.store';
-import { AnomaliesCallout } from './anomalies-callout';
 import { DiagnosisCard } from './diagnosis-card';
 import { HealthHero } from './health-hero';
-import { TopApps } from './top-apps';
 
 const NOW = 1_700_000_000_000;
 
@@ -33,57 +32,6 @@ async function settle(f: { whenStable(): Promise<unknown>; detectChanges(): void
 const buttons = (el: HTMLElement) => [...el.querySelectorAll('button')];
 const byText = (el: HTMLElement, t: string) => buttons(el).find((b) => b.textContent?.includes(t))!;
 
-const anomaly = (id: string, kind: Anomaly['kind']): Anomaly => ({ id, kind, app: 'demo', since: NOW, title: `Title ${id}`, explanation: `Why ${id}`, evidence: [] });
-
-describe('AnomaliesCallout', () => {
-  it('renders nothing when there are no anomalies', async () => {
-    const { mock } = env();
-    vi.spyOn(mock, 'anomalies').mockResolvedValue([]);
-    const f = TestBed.createComponent(AnomaliesCallout);
-    await settle(f);
-    expect((f.nativeElement as HTMLElement).querySelector('section')).toBeNull();
-  });
-
-  it('summarises one anomaly in the singular and expands to its details', async () => {
-    const { mock } = env();
-    vi.spyOn(mock, 'anomalies').mockResolvedValue([anomaly('a', 'memoryGrowth')]);
-    const f = TestBed.createComponent(AnomaliesCallout);
-    await settle(f);
-    const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('strong')?.textContent).toBe('Dyno noticed 1 unusual pattern');
-    expect(el.querySelector('ul')).toBeNull();
-    const toggle = byText(el, 'Show');
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    toggle.click();
-    f.detectChanges();
-    expect(el.querySelector('li')?.textContent).toContain('Why a');
-    expect(byText(el, 'Hide').getAttribute('aria-expanded')).toBe('true');
-    byText(el, 'Hide').click();
-    f.detectChanges();
-    expect(el.querySelector('ul')).toBeNull();
-  });
-
-  it('pluralises for several and names the kinds in one quiet line, not a chip each', async () => {
-    const { mock } = env();
-    vi.spyOn(mock, 'anomalies').mockResolvedValue([anomaly('a', 'memoryGrowth'), anomaly('b', 'restartLoop')]);
-    const f = TestBed.createComponent(AnomaliesCallout);
-    await settle(f);
-    const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('strong')?.textContent).toBe('Dyno noticed 2 unusual patterns');
-    expect(el.querySelector('.chip')).toBeNull();
-    expect(el.querySelector('.kinds')?.textContent?.trim()).toBe('Memory growth · Restart loop');
-  });
-
-  it('stays hidden when loading the anomalies fails', async () => {
-    const { mock } = env();
-    vi.spyOn(mock, 'anomalies').mockRejectedValue({ code: 'busy', message: 'x' });
-    const f = TestBed.createComponent(AnomaliesCallout);
-    await settle(f);
-    expect((f.nativeElement as HTMLElement).querySelector('section')).toBeNull();
-    expect(TestBed.inject(DiagnosisStore).anomaliesError()).toEqual({ code: 'busy', message: 'x' });
-  });
-});
-
 const diagnosis = (extra: Diagnosis['causes'] = []): Diagnosis => ({
   at: NOW,
   windowSecs: 55,
@@ -104,6 +52,19 @@ const diagnosis = (extra: Diagnosis['causes'] = []): Diagnosis => ({
     },
     ...extra,
   ],
+});
+
+describe('DiagnosisCard stats', () => {
+  it('never cuts a number: only the busiest app name is ellipsized, with its full text in the tooltip', async () => {
+    env();
+    const f = TestBed.createComponent(DiagnosisCard);
+    await settle(f);
+    const dds = [...(f.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('.stats dd')];
+    expect(dds.length).toBe(4);
+    expect(dds.map((d) => d.classList.contains('name'))).toEqual([false, false, false, true]);
+    expect(dds[3]!.getAttribute('data-full-text')).toBeTruthy();
+    expect(dds[0]!.hasAttribute('data-full-text')).toBe(false);
+  });
 });
 
 describe('DiagnosisCard', () => {
@@ -164,23 +125,6 @@ describe('DiagnosisCard', () => {
     expect(el.querySelector('.others li')?.textContent).toContain('Low memory');
     expect(byText(el, 'other possible cause').textContent).toContain('Hide');
   });
-
-  it('shows the error with its hint, and Retry runs the check again', async () => {
-    const { mock } = env();
-    const spy = vi.spyOn(mock, 'whySlow').mockRejectedValueOnce({ code: 'timeout', message: 'Too slow' }).mockResolvedValue(diagnosis());
-    const f = TestBed.createComponent(DiagnosisCard);
-    f.detectChanges();
-    await TestBed.inject(DiagnosisStore).run();
-    await settle(f);
-    const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('.err')?.textContent).toContain('Too slow');
-    expect(el.querySelector('.err')?.textContent).toContain('Try again');
-    byText(el, 'Retry').click();
-    await settle(f);
-    expect(spy).toHaveBeenCalledTimes(2);
-    expect(el.querySelector('.err')).toBeNull();
-    expect(el.querySelector('.headline')).not.toBeNull();
-  });
 });
 
 const reason = (id: string, impact: number): HealthReason => ({
@@ -189,22 +133,48 @@ const reason = (id: string, impact: number): HealthReason => ({
   detail: `Detail ${id}`,
   impact,
   severity: 'warn' as HealthReason['severity'],
+  since: null,
 });
-const report = (reasons: HealthReason[]): HealthReport => ({ at: NOW, score: 100 - reasons.reduce((a, r) => a + r.impact, 0), grade: 'good', reasons });
+const report = (reasons: HealthReason[]): HealthReport => {
+  const score = 100 - reasons.reduce((a, r) => a + r.impact, 0);
+  return { at: NOW, score, grade: 'good', performanceScore: score, cappedBy: null, reasons };
+};
 
 describe('HealthHero', () => {
   afterEach(() => TestBed.inject(Dialog).closeAll());
 
-  it('shows a skeleton, then the score, grade and the three costliest reasons by impact', async () => {
+  it('draws the score, grade and the three costliest reasons by impact (content only: no card, no loading or error state)', async () => {
     const { mock } = env();
     vi.spyOn(mock, 'health').mockResolvedValue(report([reason('a', 2), reason('b', 9), reason('c', 5), reason('d', 7)]));
     const f = TestBed.createComponent(HealthHero);
     f.detectChanges();
     const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('[aria-busy="true"]')).not.toBeNull();
+    expect(el.querySelector('.num')).toBeNull();
+    expect(el.querySelector('section.card')).toBeNull();
+    await TestBed.inject(HealthStore).loadReport();
     await settle(f);
     expect(el.querySelector('.num')?.textContent).toBe('77');
     expect([...el.querySelectorAll('li .t')].map((t) => /Reason (\w)/.exec(t.textContent ?? '')?.[1])).toEqual(['b', 'd', 'c']);
+    expect(el.querySelector('.clear')).toBeNull();
+    // A description wraps to two lines, then the tooltip has all of it.
+    expect([...el.querySelectorAll('li .d')].map((d) => d.getAttribute('data-full-text'))).toEqual([...el.querySelectorAll('li .d')].map((d) => d.textContent));
+  });
+
+  it('names each active alarm with its severity and start, ahead of performance reasons, and says when alarms cap the grade', async () => {
+    const { mock } = env();
+    const alarm: HealthReason = { id: 'alarm:7', title: 'Disk is failing', detail: 'Back up now.', impact: 0, severity: 'critical', since: NOW - 2 * 3_600_000 };
+    vi.spyOn(mock, 'health').mockResolvedValue({ at: NOW, score: 59, grade: 'poor', performanceScore: 100, cappedBy: 'critical', reasons: [alarm] });
+    const f = TestBed.createComponent(HealthHero);
+    await TestBed.inject(HealthStore).loadReport();
+    await settle(f);
+    const el = f.nativeElement as HTMLElement;
+    expect(el.querySelector('.num')?.textContent).toBe('59');
+    const row = el.querySelector('li')!;
+    expect(row.textContent).toContain('Critical');
+    expect(row.textContent).toContain('Disk is failing');
+    expect(row.textContent).toContain('Active alarm since');
+    expect(row.querySelector('.imp')).toBeNull();
+    expect(el.querySelector('.trend')?.textContent).toContain('held at Poor by an active Critical alarm (performance alone: 100)');
     expect(el.querySelector('.clear')).toBeNull();
   });
 
@@ -212,65 +182,9 @@ describe('HealthHero', () => {
     const { mock } = env();
     vi.spyOn(mock, 'health').mockResolvedValue(report([]));
     const f = TestBed.createComponent(HealthHero);
+    await TestBed.inject(HealthStore).loadReport();
     await settle(f);
     expect((f.nativeElement as HTMLElement).querySelector('.clear')?.textContent).toContain('Nothing needs your attention');
   });
-
-  it('shows an error with Retry that reloads', async () => {
-    const { mock } = env();
-    const spy = vi.spyOn(mock, 'health').mockRejectedValueOnce({ code: 'agentUnavailable', message: 'No agent' }).mockResolvedValue(report([]));
-    const f = TestBed.createComponent(HealthHero);
-    await settle(f);
-    const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('.err')?.textContent).toContain('No agent');
-    byText(el, 'Retry').click();
-    await settle(f);
-    expect(spy).toHaveBeenCalledTimes(2);
-    expect(el.querySelector('.err')).toBeNull();
-  });
-
 });
 
-describe('TopApps', () => {
-  it('shows a loading skeleton until the first live update', () => {
-    env();
-    const f = TestBed.createComponent(TopApps);
-    f.detectChanges();
-    const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('[aria-busy="true"]')).not.toBeNull();
-    expect(el.querySelectorAll('.skeleton')).toHaveLength(5);
-    expect(el.querySelector('ol')).toBeNull();
-  });
-
-  it('lists at most seven apps with values and process counts, and opens one in the task manager', () => {
-    const { mock, navigate } = env();
-    const update = mock.liveUpdate('summary');
-    const many = Array.from({ length: 9 }, (_, i) => ({ id: `g${i}`, name: `App${i}`, exe: null, pids: i === 0 ? [1, 2, 3] : [i + 10], cpu: { value: 90 - i * 10 }, memory: { value: 1024 * 1024 * (i + 1) }, diskBps: { value: 0 }, partial: false }));
-    TestBed.inject(LiveStore).receive({ ...update, topCpu: many, topMemory: many });
-    const f = TestBed.createComponent(TopApps);
-    f.detectChanges();
-    const el = f.nativeElement as HTMLElement;
-    const rows = [...el.querySelectorAll('li')];
-    expect(rows).toHaveLength(7);
-    expect(rows[0]!.textContent).toContain('×3');
-    expect(rows[1]!.textContent).not.toContain('×');
-    expect(rows[0]!.querySelector<HTMLElement>('.bar-track span')!.style.width).toBe('100%');
-    expect(el.querySelector('h2')?.textContent).toContain('CPU');
-    rows[1]!.querySelector('button')!.click();
-    expect(navigate).toHaveBeenCalledWith(['/processes'], { queryParams: { q: 'App1' } });
-    byText(el, 'View all').click();
-    expect(navigate).toHaveBeenLastCalledWith(['/processes']);
-  });
-
-  it('ranks by memory when asked, and copes with an empty list', () => {
-    const { mock } = env();
-    const update = mock.liveUpdate('summary');
-    TestBed.inject(LiveStore).receive({ ...update, topCpu: [], topMemory: [] });
-    const f = TestBed.createComponent(TopApps);
-    f.componentRef.setInput('metric', 'memory');
-    f.detectChanges();
-    const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('h2')?.textContent).toContain('memory');
-    expect(el.querySelectorAll('li')).toHaveLength(0);
-  });
-});

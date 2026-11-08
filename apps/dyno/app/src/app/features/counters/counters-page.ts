@@ -6,6 +6,8 @@ import { AsyncState } from '../../shared/async-state';
 import { Chart } from '../../shared/chart';
 import { Icon } from '../../shared/icon';
 import { Notifier } from '../../shared/notifier';
+import { formatAgo } from '../../shared/format';
+import { injectNow } from '../../shared/now';
 import { CountersStore, RANGES } from '../../state/counters.store';
 import { SettingsStore } from '../../state/settings.store';
 import { EVENT_STYLE, eventCounts } from '../dashboard/history-options';
@@ -115,6 +117,12 @@ import { MatMenuModule } from '@angular/material/menu';
                 }
               </ul>
               @if (store.objects()?.truncated) { <p class="hint">The list was cut to keep it small. Search by name to find the rest.</p> }
+              @if (store.objects()?.savedAt; as at) {
+                <p class="hint" role="status" data-testid="saved-list">
+                  <strong>Last known list</strong>, read {{ ago(at) }}. Dyno is listing the counters again.
+                  <button type="button" matButton="text" (click)="store.loadObjects()">Refresh</button>
+                </p>
+              }
             </dy-async>
           }
         </section>
@@ -159,7 +167,7 @@ import { MatMenuModule } from '@angular/material/menu';
                 <button type="button" matButton="text" (click)="store.setWatching([])">Clear</button>
               </div>
               <div class="tablewrap">
-                <pd-table label="Charted counters" [rows]="store.watching()" [columns]="columns" [rowKey]="pathKey" [filterable]="false" [rowActions]="actions" [maxHeight]="480" (action)="run($event)">
+                <pd-table label="Charted counters" [rows]="store.watching()" [columns]="columns" [rowKey]="pathKey" [filterable]="false" [rowActions]="actions" height="window" (action)="run($event)">
                   <ng-template pdCell="counter" let-p>
                     <span class="swatch" [style.background]="swatch(index(p))" aria-hidden="true"></span>
                     <span class="truncate" [dyFullText]="title(p)">{{ title(p) }}</span>
@@ -272,6 +280,8 @@ export class CountersPage implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
   private readonly theme = inject(ThemeService);
   private readonly notifier = inject(Notifier);
+  private readonly now = injectNow();
+  protected readonly ago = (at: number): string => formatAgo(at, this.now());
   protected readonly ranges = RANGES;
   protected readonly rangeSegs: SuSegment[] = RANGES.map((r) => ({ value: String(r.minutes), label: r.label }));
   protected readonly instanceOptions = (list: readonly string[]): PdSelectOption[] => list.map((i) => ({ value: i, label: i }));

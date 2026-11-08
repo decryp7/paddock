@@ -2,28 +2,15 @@
 //! Its text is not a documented format, so the parser is strict about what it must see (a `Records for UID` header) and says so
 //! when it does not, instead of returning an empty list as if the user had no login items.
 
-/// What kind of background item a record is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BtmKind {
-    /// An app registered as a login item (`Type: login item`).
-    LoginItem,
-    /// A launch agent an app registered through `SMAppService` (`Type: agent`).
-    Agent,
-}
+pub use dyno_core::btm::{BtmItem, BtmKind};
 
-/// One login item or agent of one user.
+/// The records of one dump that concern one asking account.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BtmItem {
-    /// The record's kind.
-    pub kind: BtmKind,
-    /// The name shown in System Settings (`Name`), or the identifier when it has none.
-    pub name: String,
-    /// BTM's identifier (`Identifier`), unique per kind.
-    pub identifier: String,
-    /// Whether the user has it switched on (`Disposition` has `enabled`).
-    pub enabled: bool,
-    /// The program, when BTM names one (`Executable Path`, else a file `URL`).
-    pub exe: Option<String>,
+pub struct BtmView {
+    /// The account's own items, then the machine-wide ones (`system`), in file order.
+    pub items: Vec<BtmItem>,
+    /// How many records belong to other accounts (counted, never read).
+    pub other_accounts: usize,
 }
 
 /// Why the text could not be read as a BTM dump.
@@ -45,6 +32,18 @@ fn value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
 /// The login items and agents recorded for user `uid`, in file order. `Ok(vec![])` means the dump has that user's records and
 /// they hold none; a dump without any records is an error.
 pub fn parse_dumpbtm(text: &str, uid: u32) -> Result<Vec<BtmItem>, BtmError> {
+    parse_view(text, uid).map(|v| v.items.into_iter().filter(|i| !i.system).collect())
+}
+
+/// The records of `uid` plus the machine-wide ones (UID 0 and -2: daemons and items for every user). Other accounts'
+/// records are only counted. A dump without any records is an error.
+pub fn parse_view(text: &str, uid: u32) -> Result<BtmView, BtmError> {
+    #[derive(Clone, Copy, PartialEq)]
+    enum Section {
+        Mine,
+        Machine,
+        Other,
+    }
     struct Raw {
         kind: Option<BtmKind>,
         name: Option<String>,
@@ -52,9 +51,12 @@ pub fn parse_dumpbtm(text: &str, uid: u32) -> Result<Vec<BtmItem>, BtmError> {
         enabled: bool,
         exe: Option<String>,
         url: Option<String>,
+        system: bool,
     }
     let mut seen_header = false;
-    let mut in_user = false;
+    let mut section = Section::Other;
+    let mut others = 0usize;
+    let mut sys = false;
     let mut cur: Option<Raw> = None;
     let mut out: Vec<BtmItem> = Vec::new();
     let mut finish = |cur: &mut Option<Raw>| {
@@ -70,9 +72,13 @@ pub fn parse_dumpbtm(text: &str, uid: u32) -> Result<Vec<BtmItem>, BtmError> {
                     identifier,
                     enabled: r.enabled,
                     exe,
+                    system: r.system,
                 };
                 // The dump lists a user's records twice on some builds: keep the first of each identifier.
-                if !out.iter().any(|o| o.kind == item.kind && o.identifier == item.identifier) {
+                if !out
+                    .iter()
+                    .any(|o| o.kind == item.kind && o.identifier == item.identifier && o.system == item.system)
+                {
                     out.push(item);
                 }
             }
@@ -82,16 +88,24 @@ pub fn parse_dumpbtm(text: &str, uid: u32) -> Result<Vec<BtmItem>, BtmError> {
         if let Some(rest) = line.trim_start().strip_prefix("Records for UID") {
             finish(&mut cur);
             seen_header = true;
-            in_user = rest.split_whitespace().next().and_then(|n| n.parse::<i64>().ok()) == Some(i64::from(uid));
-            continue;
-        }
-        if !in_user {
+            let id = rest.split_whitespace().next().and_then(|n| n.parse::<i64>().ok());
+            section = match id {
+                Some(n) if n == i64::from(uid) && uid != 0 => Section::Mine,
+                Some(0 | -2) => Section::Machine,
+                _ => Section::Other,
+            };
+            sys = section == Section::Machine;
             continue;
         }
         let t = line.trim();
         let indent = line.len() - line.trim_start().len();
         // "#12:" alone starts an item; "#1: 16.com.x" deeper in is an embedded identifier of the item above.
-        if indent <= 2 && t.starts_with('#') && t.ends_with(':') && t[1..t.len() - 1].chars().all(|c| c.is_ascii_digit()) {
+        let is_header = indent <= 2 && t.starts_with('#') && t.ends_with(':') && t[1..t.len() - 1].chars().all(|c| c.is_ascii_digit());
+        if section == Section::Other {
+            others += usize::from(is_header);
+            continue;
+        }
+        if is_header {
             finish(&mut cur);
             cur = Some(Raw {
                 kind: None,
@@ -100,6 +114,7 @@ pub fn parse_dumpbtm(text: &str, uid: u32) -> Result<Vec<BtmItem>, BtmError> {
                 enabled: false,
                 exe: None,
                 url: None,
+                system: sys,
             });
             continue;
         }
@@ -109,6 +124,8 @@ pub fn parse_dumpbtm(text: &str, uid: u32) -> Result<Vec<BtmItem>, BtmError> {
                 Some(BtmKind::LoginItem)
             } else if v.starts_with("agent") {
                 Some(BtmKind::Agent)
+            } else if v.starts_with("daemon") || v.starts_with("legacy daemon") {
+                Some(BtmKind::Daemon)
             } else {
                 None
             };
@@ -136,7 +153,10 @@ pub fn parse_dumpbtm(text: &str, uid: u32) -> Result<Vec<BtmItem>, BtmError> {
             .collect();
         return Err(BtmError::NoRecords { first_line });
     }
-    Ok(out)
+    Ok(BtmView {
+        items: out,
+        other_accounts: others,
+    })
 }
 
 #[cfg(test)]
@@ -183,6 +203,28 @@ mod tests {
             items[1].exe.as_deref(),
             Some("/Applications/Example.app/Contents/Library/LaunchAgents/helper.plist")
         );
+    }
+
+    #[test]
+    fn the_view_adds_machine_wide_items_and_only_counts_other_accounts() {
+        let dump = format!(
+            "{DUMP}========================\n Records for UID 0 : 00000000-0000-0000-0000-000000000000\n========================\n\n Items:\n\n #1:\n\
+                 UUID: FFFF\n                 Name: Example Daemon\n                 Type: legacy daemon (0x10010)\n\
+          Disposition: [enabled, allowed, notified] (0xb)\n           Identifier: 16.com.example.daemon\n      Executable Path: /usr/local/bin/exampled\n\
+========================\n Records for UID 502 : 11111111-0000-0000-0000-000000000000\n========================\n\n Items:\n\n #1:\n\
+                 UUID: GGGG\n                 Name: Secret Person Thing\n                 Type: login item (0x4)\n           Identifier: 4.com.private.thing\n\n #2:\n                 UUID: HHHH\n                 Name: Another\n                 Type: agent (0x8)\n           Identifier: 8.com.private.other\n"
+        );
+        let v = parse_view(&dump, 501).unwrap();
+        let ids: Vec<_> = v.items.iter().map(|i| (i.identifier.as_str(), i.system, i.kind)).collect();
+        let want = vec![
+            ("4.com.shared.thing", true, BtmKind::LoginItem),
+            ("4.com.example.sync", false, BtmKind::LoginItem),
+            ("8.com.example.helper.agent", false, BtmKind::Agent),
+            ("16.com.example.daemon", true, BtmKind::Daemon),
+        ];
+        assert_eq!(ids, want);
+        assert_eq!(v.other_accounts, 2, "uid 502's two records are counted");
+        assert!(!format!("{v:?}").contains("Secret Person"), "their names are never kept");
     }
 
     #[test]

@@ -34,24 +34,6 @@ pub fn launch_agent_plist(exe: &Path, log_dir: &Path) -> String {
     )
 }
 
-fn systemd_quote(s: &str) -> String {
-    if s.contains(|c: char| c.is_whitespace() || c == '"' || c == '\\') {
-        format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
-    } else {
-        s.to_string()
-    }
-}
-
-/// The systemd user unit: restarted whenever it exits, low priority, started with the user's manager.
-pub fn systemd_unit(exe: &Path) -> String {
-    format!(
-        "[Unit]\nDescription=Dyno agent (measures and keeps your computer's history)\nDocumentation=https://dev.decryptology.net/decryp7/dyno\n\n\
-[Service]\nType=simple\nExecStart={exe} run\nRestart=always\nRestartSec=5\nNice=10\nCPUWeight=20\nIOSchedulingClass=best-effort\nIOSchedulingPriority=7\nMemoryHigh=256M\n\n\
-[Install]\nWantedBy=default.target\n",
-        exe = systemd_quote(&exe.to_string_lossy())
-    )
-}
-
 /// The name of the agent's own Run value on Windows. The app's autostart plugin writes `Dyno` (the product name), and the
 /// agent used `Dyno` too, so each overwrote the other: in 1.0.0 the app's `repair()` replaced `Dyno = dyno-app.exe --hidden` with
 /// `Dyno = dyno-agent.exe run` five seconds after every start, and the next logon started only the agent.
@@ -98,24 +80,6 @@ mod tests {
         assert!(p.contains("<key>ThrottleInterval</key>\n\t<integer>10</integer>"));
         assert!(p.contains("/Users/me/Library/Logs/Dyno/agent.log"));
         plist::Value::from_reader_xml(p.as_bytes()).unwrap_or_else(|e| panic!("not a valid plist: {e}"));
-    }
-
-    #[test]
-    fn unit_quotes_paths_with_spaces() {
-        let u = systemd_unit(Path::new("/opt/Dyno App/dyno-agent"));
-        assert!(u.contains("ExecStart=\"/opt/Dyno App/dyno-agent\" run"));
-        assert!(u.contains("Restart=always"));
-        assert!(systemd_unit(Path::new("/usr/bin/dyno-agent")).contains("ExecStart=/usr/bin/dyno-agent run"));
-    }
-
-    /// The agent answers every request of the app and reads the folders of a disk scan the person watches, so its disk access
-    /// is never at Linux's idle I/O class, which reads only when nothing else uses the disk (rule 52): best effort at the
-    /// lowest priority instead, which a busy disk slows but never stops.
-    #[test]
-    fn the_unit_never_uses_the_idle_io_class() {
-        let u = systemd_unit(Path::new("/usr/bin/dyno-agent"));
-        let io: Vec<&str> = u.lines().filter(|l| l.starts_with("IOScheduling")).collect();
-        assert_eq!(io, ["IOSchedulingClass=best-effort", "IOSchedulingPriority=7"]);
     }
 
     /// Every request of the app is answered inside the agent, so the agent must not be a launchd `Background` job: launchd

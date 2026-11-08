@@ -4,7 +4,7 @@ const Y = 144;
 // ---------- agent: requests and sampling ----------
 {
   const d = P({ title: 'dyno-agent — requests and sampling', kind: 'C4 · Level 3 — Components of the agent', w: 1344,
-    desc: 'A sampling loop feeds history, alarms and the flight recorder; an ipc server with one thread per connection answers the app; one SQLite writer holds the data.' });
+    desc: 'A sampling loop feeds history, alarms and the flight recorder; an ipc server with one thread per connection answers the app; one SQLite writer holds the data. Not shown: the helper link, power actions, wakes and Wake-on-LAN (1.1.0).' });
   const NH = 112, CW = 248, G = 120, ax = 48, gx = ax + 216 + 72, c0 = gx + 24, c1 = c0 + CW + G, c2 = c1 + CW + G;
   const r = (i) => Y + 40 + i * (NH + 32);
   const GH = 40 + NH * 4 + 32 * 3 + 24;
@@ -34,11 +34,11 @@ const Y = 144;
 // ---------- agent: support ----------
 {
   const d = P({ title: 'dyno-agent — support modules', kind: 'C4 · Level 3 — Components of the agent', w: 1472,
-    desc: 'What keeps the agent running and registered, its background readers, the plugin host and the benchmark runner. Every decision is a dyno-core call; every OS access goes through dyno-platform.' });
+    desc: 'What keeps the agent running and registered, its background readers, the plugin host and the benchmark runner. Every decision is a dyno-core call; every OS access goes through dyno-platform. Not shown: the helper link, power actions, wakes and Wake-on-LAN (1.1.0).' });
   const NH = 112, CW = 216, G = 104, ox = 48, gx = ox + 176 + 104, c0 = gx + 24, c1 = c0 + CW + G, c2 = c1 + CW + G, ex = c2 + CW + 24 + 72;
   const r = (i) => Y + 40 + i * (NH + 32);
   const BG = { name: 'issues · unusual · netwatch', tech: 'three threads', desc: 'OS logs every 15 min; programs against the baseline every 30 s (ADR 0017); Wi-Fi, VPN and IP changes on a slow poll.' };
-  const VW = { name: 'counters · hardware · extras', tech: 'modules', desc: 'Counter browser, pinned counters every 15 s; throttling, disk and battery life, baselines (ADR 0018); read-only OS tools, boot records, backup checks (ADR 0020).' };
+  const VW = { name: 'counters · hardware · extras', tech: 'modules', desc: 'Counter browser, pinned counters every 15 s; throttling, disk and battery life, baselines (ADR 0018); read-only OS tools, boot records and Extras (ADR 0020).' };
   const bgH = Math.max(NH, d.fit(CW, BG)), vwH = Math.max(NH, d.fit(CW, VW)), vwY = r(2) + bgH + 32;
   const GH = vwY + vwH + 24 - Y;
   d.node('sm', ox, r(1), 176, NH, 'process', { name: 'Service manager', tech: 'launchd · systemd · Run', desc: 'Starts the agent at login.' });
@@ -71,7 +71,7 @@ const Y = 144;
 // ---------- core ----------
 {
   const d = P({ title: 'dyno-core — components', kind: 'C4 · Level 3 — Components of the Rust core', w: 1400,
-    desc: 'Everything that decides is a pure function over values; time arrives as a parameter. The agent feeds it measurements and shows what it finds; dyno-platform implements its read-only ports.' });
+    desc: 'Everything that decides is a pure function over values; time arrives as a parameter. The agent feeds it measurements and shows what it finds; dyno-platform implements its ports.' });
   const NH = 112, CW = 264, G = 96, x = 72, c = (i) => x + i * (CW + G);
   const gx = 48, gw = 24 + 4 * CW + 3 * G + 24, ay = Y, ah = 80, gy = ay + ah + 56;
   const r = (i) => gy + 40 + i * (NH + 32);
@@ -87,11 +87,11 @@ const Y = 144;
   m('alerts', 1, 1, 'alerts · alarms · recorder', 'modules', 'Alert conditions, the alarm state machine, the flight-recorder ring (ADR 0013).');
   m('settings', 2, 1, 'settings · tray · counters', 'modules', 'Versioned settings, tray icon model, formatting, the performance counter model.');
   m('proto', 3, 1, 'protocol', 'module', 'Request, Reply, Message, LiveUpdate, PROTOCOL_VERSION.');
-  m('helper', 0, 2, 'startup', 'module', 'Startup entries, view only (ADR 0021).');
-  m('extras', 1, 2, 'extras · backup · toolpath', 'modules', 'Read-only views of the system, backup health and the login-shell PATH (ADR 0020).');
+  m('helper', 0, 2, 'startup · power · wake', 'modules', 'Startup entries; keep awake, idle and timed actions, scheduled wakes, Wake-on-LAN (ADR 0032).');
+  m('extras', 1, 2, 'extras', 'modules', 'What changed, sleep, boot, apps, GPU and files (ADR 0020).');
   m('web', 2, 2, 'weblinks · netchange · network', 'modules', 'Redacted search text and hash links; Wi-Fi, VPN and IP changes (ADR 0019).');
   m('snap', 3, 2, 'snapshot · report · inventory', 'modules', 'Snapshots and diffs, the weekly report, hardware and software inventory.');
-  d.node('ports', c(0), r(3), 4 * CW + 3 * G, NH, 'core', { name: 'ports', tech: 'traits, read-only', desc: 'SystemSensors · ProcessSource · FileLocks · StartupItems · FactsSource · UserActivity · CounterSource. Contract: no panics, Unavailable with a reason, bounded calls, a start-time check on every ProcessRef. None of them changes the machine.' });
+  d.node('ports', c(0), r(3), 4 * CW + 3 * G, NH, 'core', { name: 'ports', tech: 'traits', desc: 'SystemSensors · ProcessSource · FileLocks · StartupItems · CounterSource · PowerActions · IdleSignals, among 16, plus WakeScheduler and WolReader. Contract: no panics, Unavailable with a reason, bounded calls, a start-time check on every ProcessRef. PowerActions (sleep, hibernate, shut down) and WakeScheduler (scheduled wakes) ask the OS to act, as the owner set them up.' });
   d.node('platform', gx + gw / 2 - 160, gy + GH + 56, 320, ah, 'accent', { name: 'dyno-platform', tech: 'Rust, adapters', desc: 'Implements the ports per OS.' });
   link(d, 'agent', 'B', 'g', 'T', { label: 'Calls' });
   link(d, 'platform', 'T', 'ports', 'B', { label: 'Implements', dash: true, arrow: 'open', t: [0.5, 0.5] });

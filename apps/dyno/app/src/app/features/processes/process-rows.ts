@@ -60,6 +60,12 @@ function value(r: Pick<Row, SortKey>, key: SortKey): string | number | null {
   }
 }
 
+/** The account a group's members share; "Several" when they differ; null when no member's account could be read. */
+export function sharedUser(members: readonly ProcessSample[]): string | null {
+  const users = new Set(members.map((m) => readValue(m.user)).filter((u): u is string => u !== null && u !== undefined));
+  return users.size === 0 ? null : users.size === 1 ? [...users][0]! : 'Several';
+}
+
 /** Orders rows by `sort`; rows whose value is unavailable go last in either direction; ties by name so the order is stable. */
 export function compareRows(a: Row, b: Row, sort: Sort): number {
   const x = value(a, sort.key);
@@ -194,8 +200,8 @@ function buildListRows(input: RowInput): Row[] {
         disk: readValue(g.diskBps),
         unavailable: unavailableOf(g.cpu, g.memory, g.diskBps),
         partial: g.partial,
-        user: members.length === 1 ? readValue(members[0]!.user) : null,
-        pid: null,
+        user: sharedUser(members),
+        pid: g.pids.length === 1 ? g.pids[0]! : null,
         ref: null,
         groupId: g.id,
         expandable: g.pids.length > 1,

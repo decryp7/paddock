@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { isAcceptedEllipsis, isSilentlyClipped, unacceptedTextClips, type ClipProbe } from './layout.ts';
+import { lineCount, isAcceptedEllipsis, isSilentlyClipped, unacceptedTextClips, type ClipProbe } from './layout.ts';
 
 const base: ClipProbe = { clientWidth: 100, scrollWidth: 160, hasOwnText: true, overflowX: 'hidden', textOverflow: 'clip', positionAbsolute: false, says: true, never: false };
 
@@ -39,4 +39,11 @@ test('texts beyond their box or the window are reported unless they are an accep
   assert.equal(unacceptedTextClips([{ ...clip, never: true }]).length, 1);
   assert.equal(unacceptedTextClips([{ ...clip, beyondClipper: false, pastWindowEdge: true, textOverflow: 'clip' }]).length, 1);
   assert.equal(unacceptedTextClips([{ ...clip, pastWindowEdge: true, textOverflow: 'clip', beyondClipper: true }]).length, 2);
+});
+
+test('a label on one line has one line count; rects 2 px apart share a line; a second row is a second line', () => {
+  assert.equal(lineCount([]), 0);
+  assert.equal(lineCount([10, 10.5, 11]), 1);
+  assert.equal(lineCount([10, 28]), 2);
+  assert.equal(lineCount([28, 10, 46]), 3);
 });

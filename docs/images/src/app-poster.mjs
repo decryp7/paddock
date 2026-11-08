@@ -1,6 +1,8 @@
 // Marketing art for every Paddock app, from one small data file per app (apps/<app>.mjs). Plain Node, no dependencies.
 //   node docs/images/src/app-poster.mjs <app|all> [--png]
 // Writes into the app's own checkout (sibling directory of paddock, or $PADDOCK_APPS/<app>):
+// (an app with `home` in its data file, a planned app or tool with no folder under apps/ yet, writes into that folder of this repository
+// instead; `stem` replaces <app> in the file names, e.g. `recce-placeholder` for placeholder art)
 //   docs/images/<app>-hero.svg          1600x900, theme-aware, real screenshot in a window frame (a concept mock for planned apps,
 //                                       an illustration for apps with `illustrated: true` whose screenshots are out of date)
 //   docs/images/<app>-features.svg      four feature panels with zoomed screenshot crops, plus the "Works with" strip
@@ -22,6 +24,8 @@ import { MOCK_CSS } from './mocks.mjs';
 const here = dirname(fileURLToPath(import.meta.url));
 const paddock = join(here, '../../..');
 const appsRoot = process.env.PADDOCK_APPS || join(paddock, '..');
+/** The app's own folder: `home` (relative to this repository) for a planned app that has no folder under apps/ yet, else apps/<id>. */
+const appHome = (d, id) => (d.home ? join(paddock, d.home) : join(appsRoot, id));
 const FONT = '-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable Display","Segoe UI",Cantarell,"Noto Sans",system-ui,sans-serif';
 
 // ---- data --------------------------------------------------------------------------------------------------------------
@@ -65,7 +69,7 @@ text{font-family:${FONT};font-variant-numeric:tabular-nums;fill:var(--ink)}
 .mono{font-weight:600;fill:var(--muted)}
 .track{fill:none;stroke:var(--line);stroke-width:1.25;opacity:.8}
 .gl{fill:none;stroke:var(--acct);stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
-.accfill{fill:var(--acc);fill-opacity:.13}.accline{fill:var(--acc)}
+.accfill{fill:var(--acc);fill-opacity:.13}.accline{fill:var(--acc)}.neufill{fill:var(--muted);fill-opacity:.08}.neuline{fill:var(--muted)}.neutxt{font-size:17px;font-weight:600;fill:var(--muted)}
 .ptitle{font-size:29px;font-weight:600;letter-spacing:-.01em}
 .pbody{font-size:21px;fill:var(--muted)}
 .stepn{font-size:16px;font-weight:600;letter-spacing:.1em;fill:var(--muted)}
@@ -85,9 +89,9 @@ function wrap(s, n) {
   if (line) out.push(line); return out;
 }
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-function pill(x, y, text, status) { // status chip with a dot, left-aligned at x
-  const w = Math.round(text.length * 9.8 + 40);
-  return `<rect x="${x}" y="${y - 19}" width="${w}" height="38" rx="19" class="accfill"/><circle cx="${x + 18}" cy="${y}" r="4" class="accline"/><text class="pilltxt" x="${x + 32}" y="${y + 6}">${esc(text)}</text>`;
+function pill(x, y, text, status, neutral = false) { // status chip with a dot, left-aligned at x; neutral: grey, for a dropped item
+  const w = Math.round(text.length * 9.8 + 40), [f, l, t] = neutral ? ['neufill', 'neuline', 'neutxt'] : ['accfill', 'accline', 'pilltxt'];
+  return `<rect x="${x}" y="${y - 19}" width="${w}" height="38" rx="19" class="${f}"/><circle cx="${x + 18}" cy="${y}" r="4" class="${l}"/><text class="${t}" x="${x + 32}" y="${y + 6}">${esc(text)}</text>`;
 }
 function glow(w, h, cx, cy, r, id = 'g1') {
   return `<defs><radialGradient id="${id}" cx="${cx}" cy="${cy}" r="${r}" gradientUnits="userSpaceOnUse"><stop offset="0" style="stop-color:var(--acc);stop-opacity:var(--glow)"/><stop offset="1" style="stop-color:var(--acc);stop-opacity:0"/></radialGradient></defs>` +
@@ -147,8 +151,8 @@ function heroSvg(d, S, { W = 900 * 16 / 9, H = 900 } = {}) {
   const lines = d.headline.map((l, i) => `<text class="h1" x="96" y="${372 + i * 66}">${esc(l)}</text>`).join('');
   const sub = d.sub.map((l, i) => `<text class="sub" x="96" y="${372 + (d.headline.length - 1) * 66 + 58 + i * 34}">${esc(l)}</text>`).join('');
   const subEnd = 372 + (d.headline.length - 1) * 66 + 26 + d.sub.length * 34;
-  const tag = d.planned ? pill(96, subEnd + 46, 'Planned · coming soon') : pill(96, subEnd + 46, STATUS[d.id]?.text ?? d.status);
-  const note = d.planned ? 'Concept: the screen is a mock-up, not a product screenshot.' : d.illustrated ? 'Illustration of the app, not a product screenshot.' : '';
+  const tag = d.planned ? pill(96, subEnd + 46, 'Planned · coming soon') : pill(96, subEnd + 46, STATUS[d.id]?.text ?? d.status, false, STATUS[d.id]?.tone === 'muted');
+  const note = d.planned || d.concept ? 'Concept: the screen is a mock-up, not a product screenshot.' : d.illustrated ? 'Illustration of the app, not a product screenshot.' : '';
   const mockNote = note ? `<text class="small" x="${fx}" y="${fy + fbh + 54}" style="font-size:17px">${note}</text>` : '';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="t d">
 <title id="t">${d.name}: ${esc(d.headline.join(' '))}</title><desc id="d">${esc(d.sub.join(' '))}</desc>
@@ -184,7 +188,8 @@ function featuresSvg(d, S) {
     const x = 80 + i * cw;
     return `<g transform="translate(${x} ${sy + 24})">${iconSvg(w.app, 0, 0, 52)}<text class="wname" x="66" y="22">${names[w.app]}</text><text class="wnote" x="66" y="46">${esc(w.note)}</text></g>`;
   }).join('');
-  const H = sy + 24 + 52 + 48;
+  // No "Works with" strip for a member that names no partner apps yet (a planned tool).
+  const H = ww.length ? sy + 24 + 52 + 48 : sy - 28;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="t d">
 <title id="t">${d.name} features</title><desc id="d">${esc(d.features.panels.map((p) => `${p.title}: ${p.text}`).join(' '))}</desc>
 ${css(a)}<defs>${defs.join('')}</defs>${glow(W, 900, 800, 0, 900)}
@@ -192,8 +197,7 @@ ${iconSvg(d.icon ?? d.id, 80, 64, 56)}<text class="name" x="150" y="102">${d.nam
 ${d.planned ? pill(150 + d.name.length * 15.5 + 16, 94, 'Planned', true) : ''}
 <text class="h2" x="80" y="196">${esc(d.features.heading)}</text>
 ${panels}
-<line x1="80" x2="${W - 80}" y1="${sy - 28}" y2="${sy - 28}" stroke="var(--line)"/>
-${works}
+${ww.length ? `<line x1="80" x2="${W - 80}" y1="${sy - 28}" y2="${sy - 28}" stroke="var(--line)"/>\n${works}` : ''}
 </svg>`;
 }
 
@@ -255,7 +259,7 @@ ${win}
 ${iconSvg(d.icon ?? d.id, 72, 84, 76)}<text class="name" x="164" y="136" style="font-size:34px">${d.name}</text>
 ${d.headline.map((l, i) => `<text class="h1" x="72" y="${268 + i * 62}" style="font-size:50px">${esc(l)}</text>`).join('')}
 ${d.sub.map((l, i) => `<text class="sub" x="72" y="${268 + d.headline.length * 62 + 12 + i * 30}" style="font-size:20px">${esc(l)}</text>`).join('')}
-${pill(72, 568, d.planned ? 'Planned · coming soon' : STATUS[d.id]?.text ?? d.status)}
+${d.planned ? pill(72, 568, 'Planned · coming soon') : pill(72, 568, STATUS[d.id]?.text ?? d.status, false, STATUS[d.id]?.tone === 'muted')}
 </svg>`;
 }
 
@@ -265,20 +269,20 @@ const dims = (svg) => { const m = svg.match(/<svg[^>]* width="(\d+)" height="(\d
 
 async function build(id, wantPng) {
   const d = await load(id);
-  const outDir = join(appsRoot, id, 'docs/images');
+  const outDir = join(appHome(d, id), 'docs/images');
   mkdirSync(outDir, { recursive: true });
-  const S = shotsFor(d);
+  const S = shotsFor(d), stem = d.stem ?? id;
   const files = { hero: heroSvg(d, S), features: featuresSvg(d, S), 'how-it-works': howSvg(d), social: socialSvg(d, S), ...(d.tour ? { tour: tourSvg(d, S) } : {}) };
   for (const [k, svg] of Object.entries(files)) {
-    const p = join(outDir, `${id}-${k}.svg`);
+    const p = join(outDir, `${stem}-${k}.svg`);
     writeFileSync(p, svg);
     console.log(`wrote ${p} (${Math.round(svg.length / 1024)} KB)`);
     if (!wantPng) continue;
     const [w, h] = dims(svg);
-    if (k === 'social') { png(p, join(outDir, `${id}-social.png`), w, h, 'dark', 1); png(p, join(outDir, `${id}-social-light.png`), w, h, 'light', 1); }
-    else for (const th of ['light', 'dark']) png(p, join(outDir, `${id}-${k}-${th}.png`), w, h, th, 2);
+    if (k === 'social') { png(p, join(outDir, `${stem}-social.png`), w, h, 'dark', 1); png(p, join(outDir, `${stem}-social-light.png`), w, h, 'light', 1); }
+    else for (const th of ['light', 'dark']) png(p, join(outDir, `${stem}-${k}-${th}.png`), w, h, th, 2);
   }
-  if (versionFile(join(appsRoot, id, 'README.md'))) console.log(`versioned image links in ${id}/README.md`);
+  if (versionFile(join(appHome(d, id), 'README.md'))) console.log(`versioned image links in ${id}/README.md`);
 }
 
 const want = process.argv.slice(2).filter((a) => !a.startsWith('--'));

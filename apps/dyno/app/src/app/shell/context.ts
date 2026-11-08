@@ -4,9 +4,7 @@ import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { ShellPages } from '@decryp7/paddock-ui/shell/pages';
 import { BACKEND } from '../core/backend';
 import { Notifier } from '../shared/notifier';
-import { BackupStore } from '../state/backup.store';
 import { DiagnosisStore } from '../state/diagnosis.store';
-import { DiagnosticsStore } from '../state/diagnostics.store';
 import { HistoryStore } from '../state/history.store';
 import { IssuesStore } from '../state/issues.store';
 import { ReportsStore } from '../state/reports.store';
@@ -29,20 +27,16 @@ export interface DynoContext {
   /** Issues: saves the window for Debrief. */
   exportIssues(): Promise<void>;
   canExportIssues(): boolean;
-  /** Backup health: checks the backup tools now. */
-  checkBackup(): Promise<void>;
-  canCheckBackup(): boolean;
   /** Why slow: runs the check again. */
   runWhySlow(): Promise<void>;
   canRunWhySlow(): boolean;
   /** Reports: saves the shown week as Markdown. */
   exportReport(): Promise<void>;
   canExportReport(): boolean;
-  /** Diagnostics: saves the bundle. */
-  saveDiagnostics(): Promise<void>;
-  canSaveDiagnostics(): boolean;
   /** Alarms: opens the new-rule window (reads the settings first when they are not loaded yet). */
   addAlarmRule(): Promise<void>;
+  /** Quit and stop measuring: the engine stops the agent, checks that it is gone and closes the app. */
+  quitAndStop(): Promise<void>;
 }
 
 const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
@@ -55,10 +49,8 @@ export const dynoContext: AppContextFactory<DynoContext> = () => {
   const dialogs = inject(DialogService);
   const history = inject(HistoryStore);
   const issues = inject(IssuesStore);
-  const backup = inject(BackupStore);
   const diagnosis = inject(DiagnosisStore);
   const reports = inject(ReportsStore);
-  const diagnostics = inject(DiagnosticsStore);
   const settings = inject(SettingsStore);
 
   return {
@@ -86,13 +78,6 @@ export const dynoContext: AppContextFactory<DynoContext> = () => {
       await issues.exportForDebrief();
     },
     canExportIssues: () => !issues.exporting(),
-    checkBackup: async () => {
-      await pages.goAndFocus('dy.backup');
-      // The page's button waits for the first report; so does the command.
-      if (!backup.report()) await backup.load();
-      await backup.check();
-    },
-    canCheckBackup: () => !backup.busy(),
     runWhySlow: async () => {
       await pages.goAndFocus('dy.why-slow');
       await diagnosis.run();
@@ -104,11 +89,14 @@ export const dynoContext: AppContextFactory<DynoContext> = () => {
       await reports.export('markdown');
     },
     canExportReport: () => reports.exporting() === null,
-    saveDiagnostics: async () => {
-      await pages.goAndFocus('dy.diagnostics');
-      await diagnostics.save();
+    quitAndStop: async () => {
+      notifier.show('Stopping the agent…');
+      try {
+        await backend.quitAndStopAgent();
+      } catch (e) {
+        notifier.show(e instanceof Error ? e.message : 'The agent could not be stopped.', 'bad');
+      }
     },
-    canSaveDiagnostics: () => !diagnostics.saving(),
     addAlarmRule: async () => {
       await pages.goAndFocus('dy.alarms');
       if (!settings.settings()) await settings.load();

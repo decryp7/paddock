@@ -1,5 +1,6 @@
 //! The activity log: what Dyno itself reported (an alert fired, Dyno started or reset something of its own). Dyno
-//! changes nothing on the machine, so nothing in the log can be undone.
+//! changes nothing on the machine on its own (a power action runs only when its owner has set it up), so nothing in the log
+//! is an undoable change.
 
 use crate::time::Timestamp;
 use serde::{Deserialize, Serialize};

@@ -1,10 +1,16 @@
+import { PdViewportFollowsSize } from '@decryp7/paddock-ui/table';
+import { CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
 import { ChangeDetectionStrategy, Component, ViewEncapsulation, input, output, viewChildren } from '@angular/core';
+import { SuSparkline } from '@decryp7/paddock-ui';
 import { PdSkeleton, PdWidget, relativeAgo } from '@decryp7/paddock-ui/widgets';
 import { PdGlyph, PdStatusGlyph, type PdStatus } from '@decryp7/paddock-ui/icons';
-import type { AlarmRow, AppRow, BackupValue, CounterRow, IssueValue, Level, Page, PopoverValue, VolumeRow, WidgetActionId } from '../../../core/generated/widgets';
+import type { AlarmRow, AppRow, CounterRow, IssueValue, Level, Page, PopoverValue, VolumeRow, WidgetActionId } from '../../../core/generated/widgets';
+import { FullTextTip } from '../../../shared/full-text-tip';
 import { formatBytes, formatPercent, formatRate, splitValue } from '../../../shared/format';
-import { Sparkline } from '../../../shared/sparkline';
+import { volumeSpaceText } from './popover-meta';
+import { volumeAgeNote, volumeIsGreyed } from '../../../shared/volume-state';
 import { formatCounter } from '../../counters/counters-model';
+import { SPARK_CAPACITY } from '../../../state/live.store';
 
 type Value<K extends string> = Extract<PopoverValue, Record<K, unknown>>[K];
 
@@ -13,11 +19,10 @@ const LEVEL_WORD: Record<Level, string> = { info: 'Info', warning: 'Warning', cr
 
 /** Shapes drawn while a widget is loading: the same rows as a ready one, so the heights agree (their text is hidden). */
 const SK_ALARMS: AlarmRow[] = [1, 2].map((id) => ({ id, title: 'Memory pressure is high', level: 'warning', since: 0, acknowledged: false }));
-const SK_VOLUMES: VolumeRow[] = [1, 2, 3].map((n) => ({ id: `${n}`, name: 'Macintosh HD', usedPercent: 50, freeBytes: 1, totalBytes: 2, tone: 'ok', reachable: true }));
+const SK_VOLUMES: VolumeRow[] = [1, 2, 3].map((n) => ({ id: `${n}`, name: 'Macintosh HD', usedPercent: 50, freeBytes: 1, totalBytes: 2, tone: 'ok', reachable: true, measuredAt: null, freshness: 'fresh' }));
 const SK_COUNTERS: CounterRow[] = [1, 2, 3, 4].map((n) => ({ path: `${n}`, name: 'GPU memory in use', value: 1, unit: 'bytes', percent: null, tone: 'ok' }));
 const SK_APPS: AppRow[] = [1, 2, 3].map((n) => ({ name: `App ${n}`, cpuPercent: 10 }));
 const SK_ISSUE: IssueValue = { title: 'Disk write errors on disk4', app: '', kind: '', level: 'warning', at: 0, days: 7 };
-const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBackup: 0, summary: '', tools: 1 };
 
 /**
  * Dyno's template for each popup widget kind (`*pdWidget`), drawn inside `pd-widget-frame`. One set serves the popup and the
@@ -28,41 +33,41 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
   selector: 'dy-popover-widgets',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  imports: [PdWidget, PdSkeleton, PdGlyph, PdStatusGlyph, Sparkline],
+  imports: [PdWidget, PdSkeleton, PdGlyph, PdStatusGlyph, SuSparkline, FullTextTip, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, PdViewportFollowsSize],
   template: `
     <ng-template pdWidget="activeAlarms" [pdWidgetOf]="witness" let-value>
       @let a = alarms(value);
-      <ul class="dy-pw-list" aria-label="Active alarms">
-        @for (r of a?.rows ?? skAlarms; track r.id) {
-          <li>
-            <button type="button" class="dy-pw-row dy-pw-alarm" (click)="open('alarms')">
-              <span class="dy-pw-lvl" [attr.data-level]="r.level" pdSkeleton><pd-status-glyph [status]="status(r.level)" [size]="14" />{{ word(r.level) }}</span>
-              <span class="dy-pw-grow dy-pw-wrap" pdSkeleton>{{ r.title }}</span>
-              <span class="dy-pw-muted" pdSkeleton>{{ ago(r.since) }}</span>
-              <pd-glyph class="dy-pw-chev" name="chevron-right" [size]="14" />
-            </button>
-          </li>
-        }
-      </ul>
+      @let rows = a?.rows ?? skAlarms;
+      <cdk-virtual-scroll-viewport pdViewportFollowsSize class="dy-pw-viewport" [itemSize]="alarmRowPx" role="list" tabindex="0" aria-label="Active alarms" [style.--dy-n]="rows.length">
+        <div *cdkVirtualFor="let r of rows; trackBy: alarmId; let n = index" class="dy-pw-item" role="listitem" [attr.aria-setsize]="rows.length" [attr.aria-posinset]="n + 1">
+          <button type="button" class="dy-pw-row dy-pw-alarm" (click)="open('alarms')">
+            <span class="dy-pw-lvl" [attr.data-level]="r.level" pdSkeleton><pd-status-glyph [status]="status(r.level)" [size]="14" />{{ word(r.level) }}</span>
+            <span class="dy-pw-grow" [dyFullText]="r.title" pdSkeleton>{{ r.title }}</span>
+            <span class="dy-pw-muted" pdSkeleton>{{ ago(r.since) }}</span>
+            <pd-glyph class="dy-pw-chev" name="chevron-right" [size]="14" />
+          </button>
+        </div>
+      </cdk-virtual-scroll-viewport>
       @if (a && a.more > 0) {
-        <button type="button" class="dy-pw-more" (click)="open('alarms')">+{{ a.more }} more</button>
+        <p class="dy-pw-muted dy-pw-note">Showing the {{ a.rows.length }} most severe of {{ a.rows.length + a.more }}.</p>
+        <button type="button" class="dy-pw-more" (click)="open('alarms')">Open alarms</button>
       }
     </ng-template>
 
     <ng-template pdWidget="diskSpace" [pdWidgetOf]="witness" let-value>
       @let d = disks(value);
-      <ul class="dy-pw-list" aria-label="Volumes">
+      <ul class="dy-pw-list dy-pw-scroll" tabindex="0" aria-label="Volumes">
         @for (v of d?.rows ?? skVolumes; track v.id) {
-          <li class="dy-pw-vol" [attr.data-tone]="v.tone">
+          <li class="dy-pw-vol" [attr.data-tone]="v.tone" [attr.data-stale]="greyed(v) ? 'true' : null">
             <span class="dy-pw-vname"><span class="dy-pw-grow" pdSkeleton>{{ v.name }}</span>
-              @if (v.tone !== 'ok') { <span class="dy-pw-flag" [attr.data-tone]="v.tone"><pd-status-glyph [status]="v.tone === 'bad' ? 'error' : 'warning'" [size]="14" />{{ v.tone === 'bad' ? 'Full' : 'Low' }}</span> }
-              <span class="dy-pw-muted" pdSkeleton>{{ !v.reachable ? 'Not answering' : v.freeBytes === null ? 'Unavailable' : free(v) }}</span></span>
+              @if (v.tone !== 'ok' && !greyed(v)) { <span class="dy-pw-flag" [attr.data-tone]="v.tone"><pd-status-glyph [status]="v.tone === 'bad' ? 'error' : 'warning'" [size]="14" />{{ v.tone === 'bad' ? 'Full' : 'Low' }}</span> }
+              <span class="dy-pw-muted" pdSkeleton>{{ !v.reachable ? note(v) : v.freeBytes === null ? 'Unavailable' : free(v) }}@if (v.reachable && note(v); as n) { · {{ n }} }</span></span>
             <span class="dy-pw-meter" role="img" [attr.aria-label]="v.usedPercent === null ? 'Used space unavailable' : pct(v.usedPercent) + ' used'" pdSkeleton><i [style.width.%]="v.usedPercent ?? 0"></i></span>
           </li>
         }
       </ul>
       @if (d && d.more > 0) {
-        <p class="dy-pw-muted dy-pw-note">+{{ d.more }} more</p>
+        <p class="dy-pw-muted dy-pw-note">Showing the first {{ d.rows.length }} of {{ d.rows.length + d.more }} volumes.</p>
       }
     </ng-template>
 
@@ -72,7 +77,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
         <div class="dy-pw-half" [attr.data-tone]="c?.cpuTone ?? 'ok'">
           <span class="dy-pw-muted" pdSkeleton>CPU</span>
           <span class="dy-pw-big" pdSkeleton>{{ big(c?.cpuPercent ?? 0) }}<small>%</small></span>
-          <dy-sparkline [values]="c?.cpuMinute ?? []" [max]="100" color="var(--accent)" label="CPU over the last minute" style="--spark-h: 24px" />
+          <pd-sparkline [values]="c?.cpuMinute ?? []" scale="zero" [area]="true" [max]="100" [capacity]="sparkCapacity" [formatValue]="pct" [pad]="0" [dot]="false" [height]="24" color="var(--accent)" label="CPU over the last minute" />
         </div>
         <div class="dy-pw-half dy-pw-half--next" [attr.data-tone]="c?.memoryTone ?? 'ok'">
           <span class="dy-pw-muted" pdSkeleton>Memory {{ memText(c) }}</span>
@@ -87,18 +92,10 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
       <button type="button" class="dy-pw-plain" (click)="open('network')">
         <span class="dy-pw-big" pdSkeleton>↓ {{ rate(n?.rxBps ?? 0)[0] }}<small>{{ rate(n?.rxBps ?? 0)[1] }}</small></span>
         <span class="dy-pw-muted" pdSkeleton>↑ {{ rate(n?.txBps ?? 0).join(' ') }}</span>
-        <dy-sparkline [values]="n?.rxMinute ?? []" [values2]="n?.txMinute ?? null" color2="var(--text-3)" label="Network over the last minute" style="--spark-h: 28px" />
+        <pd-sparkline [values]="n?.rxMinute ?? []" [values2]="n?.txMinute ?? null" scale="zero" [area]="true" [capacity]="sparkCapacity" [formatValue]="rateText" [pad]="0" [dot]="false" [height]="28" color="var(--text-3)" color2="var(--text-3)" label="Download over the last minute" label2="Upload" />
       </button>
     </ng-template>
 
-    <ng-template pdWidget="backupHealth" [pdWidgetOf]="witness" let-value>
-      @let b = backup(value) ?? skBackup;
-      <button type="button" class="dy-pw-plain" (click)="open('backups')">
-        <span class="dy-pw-flag" [attr.data-state]="b.state" pdSkeleton><pd-status-glyph [status]="b.state === 'healthy' ? 'success' : 'warning'" [size]="14" />{{ b.state === 'healthy' ? 'OK' : b.state === 'stale' ? 'Out of date' : 'No backup yet' }}</span>
-        <span class="dy-pw-strong" pdSkeleton>{{ backupLine(backup(value)) }}</span>
-        <span class="dy-pw-muted" pdSkeleton>{{ b.name }}</span>
-      </button>
-    </ng-template>
 
     <ng-template pdWidget="lastIssue" [pdWidgetOf]="witness" let-value>
       @let i = issue(value) ?? skIssue;
@@ -137,14 +134,17 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
     .dy-pw-row, .dy-pw-plain, .dy-pw-more { all: unset; box-sizing: border-box; cursor: pointer; border-radius: var(--pd-radius-control); }
     .dy-pw-row { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; max-width: 100%; min-height: 24px; color: var(--pd-text); font: inherit; }
     .dy-pw-list > li { min-width: 0; }
-    /* An alarm is two lines: its level and age on the first, its title across the whole width on the second (a title squeezed beside the level wrapped to a column of words). */
-    .dy-pw-alarm { display: grid; grid-template-columns: auto 1fr auto auto; grid-template-areas: 'lvl . ago chev' 'title title title title'; row-gap: 2px; align-items: center; }
+    /* The alarm list scrolls inside a viewport as tall as its rows, up to 208 px (the stopped-agent popup must still fit the 520 px cap, tray-fit e2e); the popover stays as tall as that and no taller, and the wheel passes on at the ends. */
+    .dy-pw-viewport { height: min(calc(var(--dy-n, 1) * 44px), 208px); min-height: 44px; }
+    .dy-pw-viewport:focus-visible, .dy-pw-scroll:focus-visible { outline-offset: -2px; }
+    .dy-pw-item { box-sizing: border-box; height: 44px; padding-bottom: 4px; }
+    .dy-pw-scroll { max-height: 132px; overflow-y: auto; }
+    /* An alarm is two lines: its level and age on the first, its title across the whole width on the second, cut to one line (a title squeezed beside the level wrapped to a column of words). */
+    .dy-pw-alarm { height: 40px; display: grid; grid-template-columns: auto 1fr auto auto; grid-template-areas: 'lvl . ago chev' 'title title title title'; row-gap: 2px; align-items: center; }
     .dy-pw-alarm > .dy-pw-lvl { grid-area: lvl; justify-self: start; }
     .dy-pw-alarm > .dy-pw-muted { grid-area: ago; }
     .dy-pw-alarm > .dy-pw-chev { grid-area: chev; }
     .dy-pw-alarm > .dy-pw-grow { grid-area: title; }
-    /* A title wraps (two lines at most) instead of being cut: the time and chevron keep their place. */
-    .dy-pw-grow.dy-pw-wrap { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .dy-pw-chev { flex: none; color: var(--pd-text-muted); }
     .dy-pw-flag[data-tone='warn'] { background: var(--pd-warning-tint); } .dy-pw-flag[data-tone='bad'] { background: var(--pd-danger-tint); }
     .dy-pw-plain { display: grid; gap: 4px; width: 100%; }
@@ -158,6 +158,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
     .dy-pw-lvl[data-level='info'] { background: var(--pd-info-tint); } .dy-pw-lvl[data-level='warning'], .dy-pw-flag[data-state='stale'] { background: var(--pd-warning-tint); }
     .dy-pw-lvl[data-level='critical'] { background: var(--pd-danger-tint); } .dy-pw-flag[data-state='healthy'] { background: var(--pd-success-tint); }
     .dy-pw-vol { display: grid; gap: 4px; }
+    .dy-pw-vol[data-stale='true'] { opacity: 0.6; }
     .dy-pw-vname { display: flex; align-items: center; gap: 8px; }
     .dy-pw-meter { display: block; height: 4px; border-radius: 2px; background: var(--pd-surface-3); overflow: hidden; }
     .dy-pw-meter i { display: block; height: 100%; background: var(--pd-meter-neutral); }
@@ -187,13 +188,17 @@ export class DynoPopoverWidgets {
   /** The type witness of every template: what the area hands each one (`pdWidgetOf`). */
   protected readonly witness: PopoverValue | null = null;
   protected readonly skAlarms = SK_ALARMS;
+  /** An alarm's row height in the virtual viewport, in px (the row, 40, and the gap below it, 4). */
+  protected readonly alarmRowPx = 44;
+  protected readonly alarmId = (_: number, r: AlarmRow) => r.id;
   protected readonly skVolumes = SK_VOLUMES;
   protected readonly skCounters = SK_COUNTERS;
   protected readonly skApps = SK_APPS;
   protected readonly skIssue = SK_ISSUE;
-  protected readonly skBackup = SK_BACKUP;
 
   protected readonly pct = formatPercent;
+  protected readonly rateText = formatRate;
+  protected readonly sparkCapacity = SPARK_CAPACITY;
   protected readonly bytes = formatBytes;
   protected status(l: Level): PdStatus {
     return LEVEL_STATUS[l];
@@ -207,12 +212,7 @@ export class DynoPopoverWidgets {
     const [used, total] = [formatBytes(c.memoryUsed), formatBytes(c.memoryTotal)];
     const unit = total.split(' ')[1];
     return unit !== undefined && used.endsWith(` ${unit}`) ? `${used.slice(0, -unit.length - 1)} of ${total}` : `${used} of ${total}`;
-  }
-  protected backupLine(b: BackupValue | null): string {
-    if (b === null) return 'Last backup 2 h ago';
-    return b.lastBackup !== null ? `Last backup ${this.ago(b.lastBackup)}` : b.summary;
-  }
-  protected ago(ms: number): string {
+  }  protected ago(ms: number): string {
     return relativeAgo(this.now() ?? Date.now(), ms);
   }
   protected big(v: number): string {
@@ -221,8 +221,10 @@ export class DynoPopoverWidgets {
   protected rate(bps: number): [string, string] {
     return splitValue(formatRate(bps));
   }
+  protected readonly note = volumeAgeNote;
+  protected readonly greyed = volumeIsGreyed;
   protected free(v: VolumeRow): string {
-    return `${formatBytes(v.freeBytes)} free of ${formatBytes(v.totalBytes)}`;
+    return volumeSpaceText(v.freeBytes, v.totalBytes);
   }
   protected counter(r: CounterRow): string {
     return formatCounter(r.value ?? 0, r.unit).join(' ');
@@ -238,7 +240,6 @@ export class DynoPopoverWidgets {
   protected readonly disks = (v: PopoverValue | null) => this.pick(v, 'diskSpace');
   protected readonly cpuMem = (v: PopoverValue | null) => this.pick(v, 'cpuMemory');
   protected readonly net = (v: PopoverValue | null) => this.pick(v, 'network');
-  protected readonly backup = (v: PopoverValue | null) => this.pick(v, 'backupHealth');
   protected readonly issue = (v: PopoverValue | null) => this.pick(v, 'lastIssue');
   protected readonly counters = (v: PopoverValue | null) => this.pick(v, 'pinnedCounters');
   protected readonly apps = (v: PopoverValue | null) => this.pick(v, 'topApps');

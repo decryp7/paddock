@@ -8,6 +8,7 @@
 export { test, expect, type PaddockFixtures } from './fixtures.ts';
 export type { Page, Locator, BrowserContext } from '@playwright/test';
 export { e2ePort } from './env.ts';
+export { stablePressPoint } from './press.ts';
 export { clickShape, hoverShape, pointInShape, type PagePoint } from './svg.ts';
 export { assertChromeForTesting, browserProblems, isInstalledBrowser, pinnedChrome, CHROME_ENV, CHROMIUM_TEST_ENV, INSTALLED_CHANNELS, type BrowserUse, type GuardedConfig } from './browser.ts';
 export { paddockConfig, isOn, SCREENSHOT_SPECS, DOC_SCREEN_VIEWPORT, type PaddockConfigOptions } from './config.ts';
@@ -45,7 +46,7 @@ export {
   type TabWalkOptions,
   type WalkOutcome,
 } from './keyboard.ts';
-export { LAYOUT_WIDTHS, WINDOW_SIZES, horizontalOverflow, expectNoHorizontalScroll, expectWithinWidth, resize, isSilentlyClipped, isAcceptedEllipsis, unacceptedTextClips, ELLIPSIS_NEVER_WITHIN, ELLIPSIS_NEVER_SELF, textClippedWithoutEllipsis, textCutOffWithoutTooltip, type TextClip, expectNoSilentClipping, type ClipProbe } from './layout.ts';
+export { LAYOUT_WIDTHS, WINDOW_SIZES, horizontalOverflow, expectNoHorizontalScroll, expectWithinWidth, resize, isSilentlyClipped, isAcceptedEllipsis, unacceptedTextClips, ELLIPSIS_NEVER_WITHIN, ELLIPSIS_NEVER_SELF, textClippedWithoutEllipsis, textCutOffWithoutTooltip, type TextClip, expectNoSilentClipping, type ClipProbe, lineCount, BUTTON_SELECTOR, buttonLabelsThatWrap, expectNoButtonLabelWraps, checkboxLayoutProblems, bodyIndentProblems, rowPinProblems } from './layout.ts';
 export { headerCovers, headerTrack, expectHeaderOnTop, isOpaqueColor, type GridParts, type HeaderCover, type HeaderFrame, type HeaderReport } from './grid.ts';
 export { waitForStableFrame, captureStable, type StableFrameOptions } from './screenshot.ts';
 export { installTauriFake, TauriFake, START_REPLIES, SHELL_PLUGIN_PREFIX, type IpcCall, type TauriFakeOptions } from './ipc.ts';
@@ -96,3 +97,5 @@ export {
   type ScreenshotCheckOptions,
   type VisibleText,
 } from './screenshot-check.ts';
+
+export { expectLoopSettles, expectSizeToContent, SIZE_SCALES, type SizeFixture } from './size-to-content.ts';

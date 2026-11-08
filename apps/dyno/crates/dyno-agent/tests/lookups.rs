@@ -14,8 +14,8 @@ use dyno_core::protocol::{LiveDetail, Message, Reply, Request, TimelineEventKind
 use dyno_core::startup::{ImpactRating, StartupEntry, StartupFilter, StartupImpact, StartupLocation, StartupState};
 use dyno_core::time::Timestamp;
 use dyno_core::weblinks::HashSource;
-use dyno_ipc::{Client, Peer, PeerOptions};
 use dyno_platform::fake::{process, Fake};
+use paddock_ipc::{BodyOptions, BodyPeer};
 use std::path::PathBuf;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
@@ -44,7 +44,7 @@ impl Harness {
         }
     }
 
-    fn client(&self) -> Peer<Message> {
+    fn client(&self) -> BodyPeer<Message> {
         connect(&self.dirs).unwrap().0
     }
 
@@ -52,11 +52,11 @@ impl Harness {
     /// the agent answers only for processes it has sampled.
     fn wait_for_process(&self, pid: u32) {
         let d = dyno_agent::discovery::Discovery::read(&self.dirs.discovery()).unwrap();
-        let conn = Client::connect(&d.endpoint, &d.token().unwrap()).unwrap();
+        let conn = dyno_agent::wire::connect(&d.endpoint, &d.token().unwrap()).unwrap();
         let (tx, rx) = channel();
-        let peer = Peer::start(
+        let peer = BodyPeer::start(
             conn,
-            PeerOptions::new().on_push(move |m| {
+            BodyOptions::new("the agent").on_push(move |m| {
                 if let Message::Live(l) = m {
                     let _ = tx.send(*l);
                 }
@@ -128,7 +128,7 @@ fn a_search_seed_is_redacted_and_the_url_is_built_from_the_confirmed_text_only()
 }
 
 /// Hashes through a job and waits for it.
-fn hash(peer: &Peer<Message>, source: HashSource) -> Result<dyno_core::weblinks::FileHashInfo, String> {
+fn hash(peer: &BodyPeer<Message>, source: HashSource) -> Result<dyno_core::weblinks::FileHashInfo, String> {
     match run_job(peer, JobSpec::FileHash { source }, Duration::from_secs(30))? {
         JobOutput::FileHash(info) => Ok(info),
         other => panic!("{other:?}"),

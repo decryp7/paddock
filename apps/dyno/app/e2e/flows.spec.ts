@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { pressMod } from '@decryp7/paddock-e2e';
+import { bodyIndentProblems, checkboxLayoutProblems, pressMod, rowPinProblems } from '@decryp7/paddock-e2e';
 
 /** Browser flows against the mock backend (a macOS laptop; `?mock=desktop` has no battery or sensors). */
 const url = (path = '/', query = '') => `/?latency=0${query}#${path}`;
@@ -32,8 +32,7 @@ test.describe('screens', () => {
       ['Alarms', 'Alarms'],
       ['Flight recorder', 'Flight recorder'],
       ['Health', 'Health'],
-      ['Backup health', 'Backup health'],
-      ['Extras', 'Extras'],
+            ['Extras', 'Extras'],
       ['Lifespan', 'Lifespan'],
       ['Diagnostics', 'Diagnostics bundle'],
       ['Dashboard', 'Dashboard'],
@@ -98,9 +97,9 @@ test.describe('command palette', () => {
     await expect(input(page)).toBeHidden();
     await pressMod(page, 'Mod+Shift+P');
     // No waiting for the input: this is how fast people type.
-    await page.keyboard.type('check backup');
+    await page.keyboard.type('read the system logs');
     await page.keyboard.press('Enter');
-    await expect(page.getByRole('heading', { level: 1, name: 'Backup health' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Issues' })).toBeVisible();
     await expect(page.getByRole('dialog')).toHaveCount(0);
   });
 
@@ -135,8 +134,8 @@ test.describe('command palette', () => {
 test.describe('dashboard', () => {
   test('shows live tiles, history and the diagnosis on request', async ({ page }) => {
     await page.goto(url());
-    await expect(page.getByRole('group', { name: 'CPU', exact: true })).toBeVisible();
-    await expect(page.getByRole('group', { name: 'Memory', exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'CPU', exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Memory', exact: true })).toBeVisible();
     await expect(page.locator('dy-chart canvas').first()).toBeVisible();
     await page.getByRole('button', { name: 'Check now' }).click();
     await expect(page.getByText('A Rust build is using most of your CPU')).toBeVisible();
@@ -167,16 +166,17 @@ test.describe('dashboard', () => {
 
   test('a machine without a battery or sensors says so with the reason', async ({ page }) => {
     await page.goto(url('/', '&mock=desktop'));
-    const battery = page.getByRole('group', { name: 'Battery', exact: true });
+    const battery = page.getByRole('region', { name: 'Battery', exact: true });
     await expect(battery.getByText('Not available').first()).toBeVisible();
     await expect(battery.getByText(/no battery/i)).toBeVisible();
   });
 
   test('a failed request shows an inline error with Retry, and Retry recovers', async ({ page }) => {
     await page.goto(url('/', '&fail=history'));
-    const alert = page.getByRole('alert').filter({ hasText: 'asked to fail' }).first();
-    await expect(alert).toBeVisible();
-    await expect(alert.getByRole('button', { name: 'Retry' })).toBeVisible();
+    // The widget's frame draws the failure: its title, the cause's hint and Retry.
+    const failed = page.locator('pd-widget-frame').filter({ hasText: 'asked to fail' }).first();
+    await expect(failed).toBeVisible();
+    await expect(failed.getByRole('button', { name: 'Retry' })).toBeVisible();
   });
 
 });
@@ -184,17 +184,17 @@ test.describe('dashboard', () => {
 test.describe('cpu per core', () => {
   test('the tile switches to per-core bars grouped by kind and the choice is remembered', async ({ page }) => {
     await page.goto(url());
-    const tile = page.getByRole('group', { name: 'CPU', exact: true });
+    const tile = page.getByRole('region', { name: 'CPU', exact: true });
     await tile.getByRole('radio', { name: 'Per core' }).click();
     await expect(tile.getByRole('heading', { name: 'Performance cores' })).toBeVisible();
     await expect(tile.getByRole('heading', { name: 'Efficiency cores' })).toBeVisible();
     await page.reload();
-    await expect(page.getByRole('group', { name: 'CPU', exact: true }).getByRole('heading', { name: 'Efficiency cores' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'CPU', exact: true }).getByRole('heading', { name: 'Efficiency cores' })).toBeVisible();
   });
 
   test('a uniform CPU shows one plain Cores group', async ({ page }) => {
     await page.goto(url('/', '&mock=uniform'));
-    const tile = page.getByRole('group', { name: 'CPU', exact: true });
+    const tile = page.getByRole('region', { name: 'CPU', exact: true });
     await tile.getByRole('radio', { name: 'Per core' }).click();
     await expect(tile.getByRole('heading', { name: 'Cores', exact: true })).toBeVisible();
     await expect(tile.getByRole('heading', { name: 'Performance cores' })).toHaveCount(0);
@@ -233,12 +233,26 @@ test.describe('settings', () => {
   test('Settings is the shell’s window: Dyno’s page saves, the appearance is the shell’s', async ({ page }) => {
     await openSettings(page);
     const dialog = page.getByRole('dialog');
-    await expect(dialog.getByText(/Dyno only reads/).first()).toBeVisible();
+    await expect(dialog.getByText(/Dyno watches this computer/).first()).toBeVisible();
     await expect(dialog.getByRole('radio', { name: 'Dark' })).toHaveCount(0);
     await dialog.getByRole('switch', { name: 'Start Dyno at login' }).click();
     await dialog.getByRole('button', { name: 'Save changes' }).click();
     await expect(page.getByText('Settings saved')).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Save changes' })).toBeHidden();
+  });
+
+  test('Network ▸ Online data: both switches are on, the note says what goes online, one can be turned off', async ({ page }) => {
+    await openSettings(page);
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByRole('heading', { name: /Online data/ })).toBeVisible();
+    await expect(dialog.getByTestId('first-run-note')).toContainText('Cloudflare');
+    await expect(dialog.getByTestId('attribution')).toContainText('DB-IP');
+    const own = dialog.getByTestId('switch-own-location').getByRole('checkbox');
+    await expect(own).toBeChecked();
+    await own.uncheck();
+    await expect(own).not.toBeChecked();
+    await expect(dialog.getByTestId('switch-databases').getByRole('checkbox')).toBeChecked();
+    await expect(dialog.getByText(/offline mode/i)).toHaveCount(0);
   });
 });
 
@@ -381,7 +395,7 @@ test.describe('counters', () => {
     await page.getByRole('menuitem', { name: 'Add to the dashboard' }).click();
     await expect(page.getByText('Added to the dashboard')).toBeVisible();
     await page.getByRole('link', { name: 'Dashboard' }).first().click();
-    await expect(page.getByRole('group', { name: 'Bytes Sent (en0)' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Bytes Sent (en0)' })).toBeVisible();
   });
 
   test('search finds counters by words, a set charts several at once and an empty search is explained', async ({ page }) => {
@@ -414,10 +428,14 @@ test.describe('notifications', () => {
     await page.getByRole('button', { name: 'Copy as text' }).click();
     await page.getByRole('button', { name: /notifications/i }).first().click();
     const selects = page.locator('[data-testid^=notice-select-] input');
+    await expect(selects).toHaveCount(0);
+    await page.getByTestId('notices-select-toggle').click();
     await expect(selects).toHaveCount(2);
     await selects.first().check();
     await page.getByTestId('notices-delete-selected').click();
     await expect(selects).toHaveCount(1);
+    await page.getByTestId('notices-select-toggle').click();
+    await expect(selects).toHaveCount(0);
     await page.getByTestId('notices-delete-all').click();
     const decision = page.getByRole('alertdialog', { name: 'Delete all notifications?' });
     await expect(decision).toBeVisible();
@@ -426,6 +444,21 @@ test.describe('notifications', () => {
     await page.getByRole('button', { name: /notifications/i }).first().click();
     await expect(page.getByTestId('notices-empty')).toBeVisible();
     await expect(selects).toHaveCount(0);
+  });
+});
+
+test.describe('network alarm notices', () => {
+  test('the centre shows the body of each alarm under its title, laid out cleanly, and no toast', async ({ page }) => {
+    await page.goto(url('/', '&seed=network-alarms'));
+    await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
+    await expect(page.getByTestId('notification-dismiss')).toHaveCount(0);
+    await page.getByTestId('notifications-status').click();
+    const panel = page.locator('pd-notifications-panel');
+    await expect(panel.getByText('Address 203.0.113.17:443')).toBeVisible();
+    await expect(panel.getByText('TCP, on every network interface (reachable from the network).')).toBeVisible();
+    expect(await checkboxLayoutProblems(panel)).toEqual([]);
+    expect(await bodyIndentProblems(panel)).toEqual([]);
+    expect((await rowPinProblems(panel)).problems).toEqual([]);
   });
 });
 
@@ -728,41 +761,6 @@ test.describe('timeline', () => {
   test('network changes are a kind of event in the history legend', async ({ page }) => {
     await page.goto(url('/'));
     await expect(page.getByRole('region', { name: 'History' }).getByText('Network', { exact: false }).first()).toBeVisible();
-  });
-});
-
-test.describe('backup health', () => {
-  test('lists a healthy, a stale and an unreadable tool, and Check now waits for the check', async ({ page }) => {
-    await page.goto(url('/backup'));
-    await expect(page.getByRole('heading', { level: 1, name: 'Backup health' })).toBeVisible();
-    await expect(page.getByRole('heading', { level: 2, name: 'restic backup is out of date' })).toBeVisible();
-    const table = page.getByRole('grid', { name: 'Backup tools' });
-    await expect(table.getByRole('row', { name: /Time Machine/ })).toContainText('Healthy');
-    await expect(table.getByRole('row', { name: /restic/ })).toContainText('Out of date');
-    await expect(table.getByRole('row', { name: /BorgBackup/ })).toContainText('Could not check');
-    await table.getByRole('row', { name: /restic/ }).click();
-    const panel = page.getByRole('complementary', { name: 'Backup details' });
-    await expect(panel).toContainText('never starts a backup');
-    await page.keyboard.press('Escape');
-    await expect(panel).toHaveCount(0);
-    await page.getByRole('button', { name: 'Check now' }).click();
-    await expect(page.getByRole('button', { name: 'Check now' })).toBeVisible();
-    await expect(page.getByText('Checked just now')).toBeVisible();
-  });
-
-  test('finding no backup tool is a normal state', async ({ page }) => {
-    await page.goto(url('/backup', '&backup=none'));
-    await expect(page.getByText('No backup tool found')).toBeVisible();
-    await expect(page.locator('dy-backup-page')).toContainText('never runs or manages a backup');
-    await expect(page.getByRole('alert')).toHaveCount(0);
-  });
-
-  test('Settings has the Backup health section', async ({ page }) => {
-    await openSettings(page);
-    const section = page.getByRole('region', { name: 'Backup health' });
-    await expect(section.getByText('Out of date after')).toBeVisible();
-    await section.getByLabel('restic folders').fill('tools/restic');
-    await expect(section.getByRole('alert')).toContainText('not a full path');
   });
 });
 

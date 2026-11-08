@@ -1,4 +1,4 @@
-import { CdkDrag, CdkDragHandle, CdkDragPlaceholder, CdkDropList, type CdkDragDrop } from '@angular/cdk/drag-drop';
+import { CdkDrag, CdkDragHandle, CdkDropList, type CdkDragDrop } from '@angular/cdk/drag-drop';
 import { LiveAnnouncer } from '@angular/cdk/a11y';
 import { NgTemplateOutlet } from '@angular/common';
 import {
@@ -28,13 +28,20 @@ import { MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger } from '@angular/m
 import { MatSnackBar, type MatSnackBarRef, type TextOnlySnackBar } from '@angular/material/snack-bar';
 import { PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { KEY_PLATFORM } from '@decryp7/paddock-ui/shell/menu';
-import type { Edit, KindInfo, LayoutView, Placement, Preset } from '../generated/widgets';
+import type { Edit, KindInfo, LayoutView, Cells, Placement as GenericPlacement, Preset as GenericPreset, Span } from '../generated/widgets';
 import { defaultKindOf, PdWidgetOption } from './widget';
 
 /** The family's undo toast class (the safe area above the status bar is in `_material.scss`). */
 const UNDO_SNACK_CLASS = 'pd-undo-snack';
 const UNDO_SECONDS = 8;
+type Placement<W> = GenericPlacement<W, Span>;
+type Preset<W> = GenericPreset<W, Span>;
 let nextId = 0;
+
+/** The spans a flow kind allows (a grid kind has none: the chooser is for flow surfaces). */
+function spansOf(info: KindInfo<unknown>): readonly number[] {
+  return 'spans' in info.size ? info.size.spans.spans : [];
+}
 
 /** A move target: where a row goes. */
 type Move = 'up' | 'down' | 'top' | 'bottom';
@@ -55,7 +62,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
   selector: 'pd-widget-chooser',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  imports: [CdkDropList, CdkDrag, CdkDragHandle, CdkDragPlaceholder, NgTemplateOutlet, MatButton, MatIconButton, MatIcon, MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger, MatButtonToggleGroup, MatButtonToggle, MatFormField, MatLabel, MatInput, PdGlyph, PdStatusGlyph],
+  imports: [CdkDropList, CdkDrag, CdkDragHandle, NgTemplateOutlet, MatButton, MatIconButton, MatIcon, MatMenu, MatMenuContent, MatMenuItem, MatMenuTrigger, MatButtonToggleGroup, MatButtonToggle, MatFormField, MatLabel, MatInput, PdGlyph, PdStatusGlyph],
   host: { class: 'pd-widget-chooser' },
   template: `
     <div class="pd-wc" [class.pd-wc--preview]="preview()">
@@ -66,6 +73,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
         @for (note of view().notes; track $index) {
           <p class="pd-wc-limit pd-wc-note" role="status"><pd-status-glyph status="info" [size]="16" />{{ note.message }}</p>
         }
+        @if (mode() === 'edit') {
         <div class="pd-wc-label">
           <span [id]="ids + '-shown'">Shown in the {{ noun() }}</span>
           <span class="pd-wc-count">{{ placements().length }} of {{ surface().maxPlacements }}</span>
@@ -73,40 +81,43 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
         <ul class="pd-wc-list" role="list" cdkDropList cdkDropListLockAxis="y" [cdkDropListDisabled]="!editable()" [attr.aria-labelledby]="ids + '-shown'" (cdkDropListDropped)="dropped($event)">
           @for (p of placements(); track p.id; let i = $index; let n = $count) {
             @let info = infoOf(p);
-            <li class="pd-wc-item" cdkDrag [cdkDragDisabled]="!editable()" [cdkDragData]="p">
-              <button
-                #grip
-                type="button"
-                class="pd-wc-grip"
-                cdkDragHandle
-                [attr.data-id]="p.id"
-                [attr.aria-label]="'Reorder ' + titleOf(p) + ', position ' + (i + 1) + ' of ' + n"
-                [attr.aria-describedby]="ids + '-hint'"
-                [attr.aria-disabled]="editable() ? null : 'true'"
-                (keydown)="gripKey($event, p, i)"
-              >
-                <pd-glyph name="grip" [size]="16" />
-              </button>
-              @if (info) {
-                <mat-icon class="pd-wc-kicon" [svgIcon]="info.icon" />
-              }
-              <span class="pd-wc-txt"><b>{{ titleOf(p) }}</b><span>{{ info?.summary }}</span></span>
-              @if (editable()) {
-                @if (optionFor(p); as opt) {
-                  <ng-container *ngTemplateOutlet="opt.template; context: { $implicit: p }" />
-                }
-                @if (info && info.spans.length > 1) {
-                  <mat-button-toggle-group class="pd-wc-toggle" [hideSingleSelectionIndicator]="true" [value]="p.span" [attr.aria-label]="titleOf(p) + ' width'" (change)="resize(p, $event.value)">
-                    @for (s of info.spans; track s) {
-                      <mat-button-toggle [value]="s">{{ spanLabel(s) }}</mat-button-toggle>
-                    }
-                  </mat-button-toggle-group>
-                }
-                <button matIconButton type="button" class="pd-wc-more" [attr.aria-label]="'More actions for ' + titleOf(p)" [matMenuTriggerFor]="menu" [matMenuTriggerData]="{ p: p, i: i, n: n }">
-                  <pd-glyph name="more" [size]="16" />
+            <li class="pd-wc-item pd-wc-row" cdkDrag [cdkDragDisabled]="!editable()" [cdkDragData]="p">
+              <span class="pd-wc-lead">
+                <button
+                  #grip
+                  type="button"
+                  class="pd-wc-grip"
+                  cdkDragHandle
+                  [attr.data-id]="p.id"
+                  [attr.aria-label]="'Reorder ' + titleOf(p) + ', position ' + (i + 1) + ' of ' + n"
+                  [attr.aria-describedby]="ids + '-hint'"
+                  [attr.aria-disabled]="editable() ? null : 'true'"
+                  (keydown)="gripKey($event, p, i)"
+                >
+                  <pd-glyph name="grip" [size]="16" />
                 </button>
-              }
-              <div *cdkDragPlaceholder class="pd-wc-item pd-wc-placeholder"></div>
+                @if (info) {
+                  <mat-icon class="pd-wc-kicon" [svgIcon]="info.icon" />
+                }
+              </span>
+              <div class="pd-wc-body" [class.pd-wc-body--more]="editable()">
+                <span class="pd-wc-txt"><b>{{ titleOf(p) }}</b><span>{{ info?.summary }}</span></span>
+                @if (editable()) {
+                  @if (optionFor(p); as opt) {
+                    <ng-container *ngTemplateOutlet="opt.template; context: { $implicit: p }" />
+                  }
+                  @if (info && spansOf(info).length > 1) {
+                    <mat-button-toggle-group class="pd-wc-toggle" [hideSingleSelectionIndicator]="true" [value]="p.span" [attr.aria-label]="titleOf(p) + ' width'" (change)="resize(p, $event.value)">
+                      @for (s of spansOf(info); track s) {
+                        <mat-button-toggle [value]="s">{{ spanLabel(s) }}</mat-button-toggle>
+                      }
+                    </mat-button-toggle-group>
+                  }
+                  <button matIconButton type="button" class="pd-wc-more" [attr.aria-label]="'More actions for ' + titleOf(p)" [matMenuTriggerFor]="menu" [matMenuTriggerData]="{ p: p, i: i, n: n }">
+                    <pd-glyph name="more" [size]="16" />
+                  </button>
+                }
+              </div>
             </li>
           }
         </ul>
@@ -121,6 +132,8 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
           </ng-template>
         </mat-menu>
         <p class="pd-wc-hint" [id]="ids + '-hint'"><pd-glyph name="keyboard" [size]="16" /><span class="pd-wc-hint-text">Drag a widget, or focus its handle and hold {{ mac ? 'Option' : 'Alt' }} with the arrow keys, Home or End to move it.</span></p>
+
+        }
 
         <div class="pd-wc-label"><span>Add a widget</span></div>
         @if (atLimit()) {
@@ -144,7 +157,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
           }
         </ul>
         </div>
-        @if (hasPresets()) {
+        @if (mode() === 'edit' && hasPresets()) {
           <div class="pd-wc-label">
             <span [id]="ids + '-presets'">Presets</span>
             <span class="pd-wc-count">{{ userPresets().length }} of {{ surface().maxUserPresets }} saved</span>
@@ -183,7 +196,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
             }
           }
         }
-        @if (editable()) {
+        @if (editable() && mode() === 'edit') {
           <div class="pd-wc-foot"><button matButton="text" type="button" (click)="reset()">Reset to defaults</button></div>
         }
       </div>
@@ -202,27 +215,50 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     @container (min-width: 880px) { .pd-wc--preview { grid-template-columns: minmax(0, 1fr) 360px; } }
     .pd-wc-label { display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 6px; font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); }
     .pd-wc-count { font-weight: var(--pd-weight-regular); color: var(--pd-text-subtle); }
-    .pd-wc-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); overflow: hidden; position: relative; }
+    /* The rows' wrapping follows the list's own width (a preview column beside it narrows the list, not the chooser). */
+    .pd-wc-list { container-type: inline-size; list-style: none; margin: 0; padding: 0; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); overflow: hidden; position: relative; }
     .pd-wc-item { display: flex; align-items: center; gap: var(--pd-space-2); min-height: 48px; padding: 6px var(--pd-space-2) 6px var(--pd-space-1); background: var(--pd-surface-1); }
     .pd-wc-item + .pd-wc-item { border-top: 1px solid var(--pd-hairline); }
     .pd-wc-add { padding-left: var(--pd-space-3); }
     .pd-wc-added .pd-wc-txt b, .pd-wc-added .pd-wc-kicon.mat-icon { color: var(--pd-text-muted); }
     /* Material's .mat-icon (24 px) is one class; two win. */
-    .pd-wc-kicon.mat-icon { width: 16px; height: 16px; color: var(--pd-text-muted); flex: none; }
+    .pd-wc-kicon.mat-icon { width: var(--pd-wc-icon-size); height: var(--pd-wc-icon-size); color: var(--pd-text-muted); flex: none; }
     .pd-wc-txt { display: grid; min-width: 0; flex: 1; }
+    /* A shown row is two columns: the lead (grip and kind icon, --pd-wc-text-inset wide) and the body, a wrapping line of the
+       description, the app's controls and "more". A wrapped line starts at the body's edge, so it is never left of the text. */
+    /* The CDK preview is a clone of the row moved to the body, outside .pd-widget-chooser: it carries the sizes itself. */
+    .pd-widget-chooser, .cdk-drag-preview.pd-wc-row { --pd-wc-grip-size: 24px; --pd-wc-icon-size: 16px; --pd-wc-more-size: 40px; --pd-wc-text-inset: calc(var(--pd-wc-grip-size) + var(--pd-wc-icon-size) + 2 * var(--pd-space-2)); }
+    .pd-wc-row { display: grid; grid-template-columns: var(--pd-wc-text-inset) minmax(0, 1fr); align-items: center; column-gap: 0; }
+    .pd-wc-lead { display: flex; align-items: center; gap: var(--pd-space-2); height: var(--pd-control-height); align-self: start; }
+    .pd-wc-body { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); min-width: 0; }
+    .pd-wc-body--more { padding-inline-end: calc(var(--pd-wc-more-size) + var(--pd-space-1)); }
+    /* "more" is out of the flow, at the end of the body's last line (the body's bottom), so it is level with the last line of
+       controls however the controls wrap; the padding keeps every line clear of it. */
+    .pd-wc-body > .pd-wc-more { position: absolute; inset-inline-end: 0; bottom: 0; margin: 0; }
+    /* Wide: the description takes what the controls leave; narrow (the list under 35rem): it keeps 10rem, so the controls wrap
+       under it instead of squeezing it. */
+    .pd-wc-body > .pd-wc-txt { flex: 1 1 0; min-width: min-content; }
+    @container (max-width: 559px) { .pd-wc-body > .pd-wc-txt { flex-basis: 10rem; } }
     .pd-wc-txt b { font-weight: var(--pd-weight-medium); white-space: nowrap; }
     .pd-wc-txt span { font-size: var(--pd-text-label); line-height: var(--pd-lh-label); color: var(--pd-text-muted); }
-    .pd-wc-grip { display: inline-grid; place-items: center; width: 24px; height: 32px; padding: 0; border: 0; border-radius: var(--pd-radius-control); background: none; color: var(--pd-text-subtle); cursor: grab; flex: none; }
+    .pd-wc-grip { display: inline-grid; place-items: center; width: var(--pd-wc-grip-size); height: 32px; padding: 0; border: 0; border-radius: var(--pd-radius-control); background: none; color: var(--pd-text-subtle); cursor: grab; flex: none; }
     .pd-wc-grip:hover { background: var(--pd-hover); color: var(--pd-text-muted); }
     .pd-wc-grip:focus-visible { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 2px; }
     .pd-wc-grip[aria-disabled='true'] { cursor: default; opacity: 0.5; }
-    .pd-wc-more { flex: none; }
+    .pd-wc-more { flex: none; width: var(--pd-wc-more-size); height: var(--pd-wc-more-size); --mat-icon-button-state-layer-size: var(--pd-wc-more-size); }
     /* The row's ⋯ stays marked while its menu is open: a tint and a ring. */
     .pd-wc-more[aria-expanded='true'] { background: var(--pd-hover); box-shadow: inset 0 0 0 var(--pd-focus-width) var(--pd-focus-ring); }
     .pd-wc-addedlabel { display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     .pd-wc-addedlabel pd-status-glyph { color: var(--pd-success); }
-    .pd-wc-placeholder { background: var(--pd-accent-tint); outline: 1px dashed var(--pd-accent); outline-offset: -4px; min-height: 48px; }
-    .cdk-drag-preview.pd-wc-item { border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-control); box-shadow: var(--pd-shadow-2); }
+    /* The placeholder is the row's own clone (the CDK's default), so it keeps the row's height whatever the row holds; its content is hidden. */
+    .pd-wc-item.cdk-drag-placeholder { opacity: 1; background: var(--pd-accent-tint); outline: 1px dashed var(--pd-accent); outline-offset: -4px; }
+    .pd-wc-item.cdk-drag-placeholder > * { visibility: hidden; }
+    /* The ghost leaves the kind icon out (its column stays, so the title keeps the row's offset). */
+    .cdk-drag-preview.pd-wc-row .pd-wc-kicon { visibility: hidden; }
+    /* The ghost sits in the body, outside the list: it is its own container, so the rows' wrapping follows the ghost's width (the
+       row's), and it is raised (a raised surface and an accent edge, so it also lifts in the dark theme). The edge is an inset ring, not a border: a
+       border would take 2 px of the ghost's width, and a row whose summary just fits would wrap in the ghost and not in the list. */
+    .cdk-drag-preview.pd-wc-item { container-type: inline-size; background: var(--pd-surface-3); border-radius: var(--pd-radius-control); box-shadow: inset 0 0 0 1px var(--pd-accent), var(--pd-shadow-2); }
     .cdk-drag-animating { transition: transform var(--pd-duration) var(--pd-ease-enter); }
     .pd-wc-list.cdk-drop-list-dragging .pd-wc-item:not(.cdk-drag-placeholder) { transition: transform var(--pd-duration) var(--pd-ease-enter); }
     @media (prefers-reduced-motion: reduce) { :root:not([data-motion='full']) .cdk-drag-animating, :root:not([data-motion='full']) .pd-wc-list .pd-wc-item { transition: none !important; } }
@@ -262,7 +298,9 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   private readonly snackBar = inject(MatSnackBar);
 
   /** The engine's view of the surface: layout, catalogue, notes, `canUndo` and `editable`. */
-  readonly view = input.required<LayoutView<S, W, K>>();
+  readonly view = input.required<LayoutView<S, W, Span, K> | LayoutView<S, W, Cells, K>>();
+  /** `edit`: the Shown list, the add list and presets (flow surfaces). `add`: only the add list, for the side sheet of a grid surface (ADR 0044 §5: the grid is the editor). */
+  readonly mode = input<'edit' | 'add'>('edit');
   /** A new widget value of a kind, with its default options (`Edit.add`). */
   readonly widgetFor = input.required<(kind: K) => W>();
   /** The kind (wire name) of a widget value; see `defaultKindOf`. */
@@ -274,20 +312,22 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   /** Show the preview column (project the preview with `slot="preview"`). */
   readonly preview = input(false);
   /** The app's per-kind option controls. */
+  /* v8 ignore start: the compiler generates this query's accessor; the specs read the query through its consumers */
   readonly options = contentChildren<PdWidgetOption<W>>(PdWidgetOption);
+  /* v8 ignore stop */
   /** An edit for the engine. */
   readonly edit = output<Edit<W>>();
 
   protected readonly ids = `pd-wc-${nextId++}`;
-  protected readonly placements = computed(() => this.view().layout.placements);
+  protected readonly placements = computed(() => this.view().layout.placements as Placement<W>[]);
   protected readonly surface = computed(() => this.view().catalogue.surface);
   /** What the surface is called in the texts, from the catalogue ("popup"). */
   protected readonly noun = computed(() => this.surface().noun);
   protected readonly kinds = computed(() => this.view().catalogue.kinds);
   protected readonly editable = computed(() => this.view().editable);
   protected readonly atLimit = computed(() => this.placements().length >= this.surface().maxPlacements);
-  protected readonly userPresets = computed(() => this.view().layout.presets);
-  protected readonly presets = computed(() => [...this.view().builtinPresets, ...this.userPresets()]);
+  protected readonly userPresets = computed(() => this.view().layout.presets as Preset<W>[]);
+  protected readonly presets = computed(() => [...(this.view().builtinPresets as Preset<W>[]), ...this.userPresets()]);
   protected readonly hasPresets = computed(() => this.surface().maxUserPresets > 0 || this.presets().length > 0);
   protected readonly presetName = signal('');
   protected readonly canSave = computed(() => this.presetName().trim() !== '' && this.userPresets().length < this.surface().maxUserPresets);
@@ -361,6 +401,8 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   private query(selector: string): HTMLElement | null {
     return this.host.nativeElement.querySelector<HTMLElement>(selector);
   }
+
+  protected readonly spansOf = spansOf;
 
   protected infoOf(p: Placement<W>): KindInfo<K> | undefined {
     const kind = this.kindOf()(p.widget);

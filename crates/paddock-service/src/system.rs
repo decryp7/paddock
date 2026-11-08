@@ -1,5 +1,13 @@
 //! The real [`System`]: helper programs through `paddock-proc` (no console window, a timeout that ends the whole tree,
 //! bounded output), files through `paddock-env`'s atomic write.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::port::{Output, RunError, System};
 use paddock_proc::{Limits, Outcome};
@@ -45,7 +53,10 @@ impl RealSystem {
 
 impl System for RealSystem {
     fn run(&mut self, program: &str, args: &[&str]) -> Result<Output, RunError> {
-        let mut cmd = paddock_proc::command(program);
+        let resolved = crate::privileged::system_tool(program).map_err(|e| {
+            RunError::NotStarted(format!("{program}: the system folder is unknown: {e}"))
+        })?;
+        let mut cmd = paddock_proc::command(&resolved);
         cmd.args(args);
         let out =
             paddock_proc::run_bounded(cmd, Limits::new(self.timeout).max_output(MAX_HELPER_OUTPUT))

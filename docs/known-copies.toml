@@ -38,14 +38,8 @@ version = 1
 id = "launchd-job-report"
 title = "Reading launchd's job report and replacing a stale registration (catalogue R03, rule 24)"
 canonical = "paddock-service"
-paths = ["crates/paddock-service/src/parse.rs", "crates/paddock-service/src/plan.rs", "crates/paddock-service/src/repair.rs"]
+paths = ["crates/paddock-service/src/parse.rs", "crates/paddock-service/src/plan.rs", "crates/paddock-service/src/repair.rs", "crates/paddock-service/src/manager/resume.rs"]
 status = "built"
-
-  [[mechanism.copy]]
-  paths = ["apps/dyno/app/src-tauri/src/service_repair.rs"]
-  owner = "dyno"
-  delete_by = "dyno-v1.1.0"
-  note = "Ported from Pitwall on 2026-10-24. Its parser and stale() caused Dyno 1.0 blocker B4; Dyno's B4 fix changes both in this copy. The shared stale() still counts has_lwcr && !running (ADR 0034 WP-2)."
 
   [[mechanism.copy]]
   paths = ["apps/pitwall/app/src-tauri/src/service_repair.rs"]
@@ -76,34 +70,13 @@ status = "built"
   owner = "pitcrew"
   delete_by = "pitcrew-v1.1.0"
 
-  [[mechanism.copy]]
-  paths = ["apps/dyno/app/src-tauri/src/login.rs"]
-  symbols = ["item:SmService"]
-  owner = "dyno"
-  delete_by = "dyno-v1.1.0"
-  note = "SMAppService.agent for the bundled agent plist."
-
 [[mechanism]]
 id = "launch-at-login"
 title = "The launch-at-login switch: the app's own login item and the start reason (login item, restored at login)"
 canonical = "paddock-service"
-paths = ["crates/paddock-service/src/login.rs"]
+paths = ["crates/paddock-service/src/login.rs", "crates/paddock-service/src/login/**", "crates/paddock-service/src/launch.rs", "crates/paddock-service/src/apple_event.rs"]
 status = "built"
 adr = "0034"
-
-  [[mechanism.copy]]
-  paths = ["apps/dyno/app/src-tauri/src/login.rs", "apps/dyno/app/src-tauri/src/login_item.rs"]
-  symbols = ["item:apply_launch_at_login", "item:hidden_at_start"]
-  owner = "dyno"
-  delete_by = "dyno-v1.1.0"
-  note = "Dyno 1.0 adds SMAppService.mainApp and the lgit/rsto start reason here; they move into paddock-service::login (MainAppItem, LaunchReason) after the Dyno tag."
-
-  [[mechanism.copy]]
-  paths = ["apps/dyno/app/src-tauri/src/lib.rs"]
-  symbols = ["text:tauri_plugin_autostart"]
-  kind = "wiring"
-  owner = "dyno"
-  delete_by = "dyno-v1.1.0"
 
   [[mechanism.copy]]
   paths = ["apps/spotter/app/src-tauri/src/lib.rs", "apps/spotter/app/src-tauri/src/commands.rs"]
@@ -140,12 +113,6 @@ status = "built"
 adr = "0001"
 
   [[mechanism.copy]]
-  paths = ["apps/dyno/crates/dyno-ipc/src/endpoint/**"]
-  owner = "dyno"
-  delete_by = "dyno-v1.1.0"
-  note = "The macOS SS_DRAINING EBADF fix (poll-based waits) is needed here and in the canonical one. windows.rs differs in 22 of 245 lines."
-
-  [[mechanism.copy]]
   paths = ["apps/debrief/crates/debrief-ipc/src/endpoint.rs"]
   owner = "debrief"
   delete_by = "debrief-v1.2.0"
@@ -160,12 +127,6 @@ status = "built"
 adr = "0001"
 
   [[mechanism.copy]]
-  paths = ["apps/dyno/crates/dyno-ipc/src/frame.rs", "apps/dyno/crates/dyno-ipc/src/host.rs", "apps/dyno/crates/dyno-ipc/src/peer.rs", "apps/dyno/crates/dyno-ipc/src/queue.rs", "apps/dyno/crates/dyno-ipc/src/token.rs", "apps/dyno/crates/dyno-ipc/src/wire.rs"]
-  owner = "dyno"
-  delete_by = "dyno-v1.1.0"
-  note = "ADR 0001: Dyno 1.0 ships on its own copy."
-
-  [[mechanism.copy]]
   paths = ["apps/debrief/crates/debrief-ipc/src/frame.rs", "apps/debrief/crates/debrief-ipc/src/peer.rs", "apps/debrief/crates/debrief-ipc/src/wire.rs"]
   owner = "debrief"
   delete_by = "debrief-v1.2.0"
@@ -177,12 +138,6 @@ canonical = "paddock-ipc"
 paths = ["crates/paddock-ipc/src/launch.rs", "crates/paddock-ipc/src/child.rs"]
 status = "built"
 adr = "0001"
-
-  [[mechanism.copy]]
-  paths = ["apps/dyno/crates/dyno-ipc/src/child.rs"]
-  owner = "dyno"
-  delete_by = "dyno-v1.1.0"
-  note = "start_timeout is a fixed start wait (C51)."
 
   [[mechanism.copy]]
   paths = ["apps/debrief/crates/debrief-ipc/src/launch.rs", "apps/debrief/crates/debrief-ipc/src/child.rs"]
@@ -454,6 +409,8 @@ canonical = "paddock-dialogs"
 paths = ["crates/paddock-dialogs/src/**"]
 status = "built"
 adr = "0026"
+# ADR 0043 (2026-11-03): the canonical sizing is now `paddock_dialogs::size` and `tauri/sizing.rs`. Debrief's copy is frozen: it takes no sizing
+# change except a fix with the rule 55 trailer, and adopts the shared dialogs on this model in 1.2 (docs/plans/debrief-1-2-api-dialogs.md).
 
   [[mechanism.copy]]
   paths = ["apps/debrief/app/src-tauri/src/dialog_contracts.rs", "apps/debrief/app/src-tauri/src/dialog_placement.rs", "apps/debrief/app/src-tauri/src/dialog_windows.rs"]
@@ -657,11 +614,50 @@ paths = ["crates/paddock-diag/src/personal.rs"]
 status = "built"
 
   [[mechanism.copy]]
-  paths = ["apps/dyno/crates/dyno-core/src/diagnostics.rs"]
-  symbols = ["item:Redactor", "item:RedactionCounts", "item:replace_word", "item:replace_profiles", "item:replace_emails", "item:replace_ipv4"]
+  paths = ["apps/pitcrew/crates/pitcrew-core/src/redact.rs"]
+  owner = "pitcrew"
+  delete_by = "pitcrew-v1.1.0"
+  note = "Found by the 2026-11-05 bundle audit: Pitcrew's secrets and runner-id redaction; paddock-diag's secrets layer is the union of this and Debrief's. Pitcrew moves to paddock-diag's Redactor (its runner UUID pattern is a Redactor::with_pattern)."
+
+[[mechanism]]
+id = "diagnostics-zip"
+title = "Writing a diagnostics zip: files from sections, redacted, bounded, atomically replaced"
+canonical = "paddock-diag"
+paths = ["crates/paddock-diag/src/report.rs"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["apps/pitcrew/app/src-tauri/src/diagnostics.rs"]
+  owner = "pitcrew"
+  delete_by = "pitcrew-v1.1.0"
+  note = "Found by the 2026-11-05 bundle audit: Pitcrew writes its own zip of the service's sections with a second redaction pass. It becomes paddock-diag sections (the service's sections are Section implementations)."
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src-tauri/src/activity/report/cli.rs"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "Found by the 2026-11-05 bundle audit: Debrief's headless report export is the model for the shared headless export (paddock-diag), which Dyno uses first; Debrief migrates to it later."
+
+[[mechanism]]
+id = "log-tail-reading"
+title = "Reading the end of a log file without reading the file (a seek from the end, cut at a line)"
+canonical = "paddock-diag"
+paths = ["crates/paddock-diag/src/window.rs"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["apps/dyno/crates/dyno-helper/src/logfile.rs"]
+  symbols = ["item:tail_of_file"]
   owner = "dyno"
-  delete_by = "dyno-v1.1.0"
-  note = "personal.rs was ported from this file. Debrief's log redaction (redaction rules over imported logs) is product domain and not listed."
+  delete_by = "dyno-v1.2.0"
+  note = "The helper's LogTail answers lines over its wire, so it keeps its own reader (root's file, 400 character lines); it should call paddock-diag's try_tail and cut lines after."
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src-tauri/src/snapshots.rs"]
+  symbols = ["item:tail_of"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "Found by the 2026-11-05 bundle audit: Debrief's log tail for a snapshot."
 
 [[mechanism]]
 id = "schedules"
@@ -736,11 +732,6 @@ paths = ["ui/projects/paddock-ui/src/lib/sparkline.ts"]
 status = "built"
 
   [[mechanism.copy]]
-  paths = ["apps/dyno/app/src/app/shared/sparkline.ts"]
-  owner = "dyno"
-  delete_by = "dyno-v1.1.0"
-
-  [[mechanism.copy]]
   paths = ["apps/pitcrew/app/src/app/shared/ui/sparkline.ts"]
   owner = "pitcrew"
   delete_by = "pitcrew-v1.1.0"
@@ -750,6 +741,20 @@ status = "built"
   owner = "pitwall"
   delete_by = "pitwall-v1.1.0"
   note = "Pitwall 1.1 deletes it."
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src/app/share/dashboard/dashboard-tile.ts"]
+  symbols = ["item:sparkPoints"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "sparkPoints draws a polyline for the dashboard tile; Debrief 1.2 uses pd-sparkline."
+
+  [[mechanism.copy]]
+  paths = ["apps/pitcrew/app/src/app/shared/geometry.ts"]
+  symbols = ["item:sparkPaths"]
+  owner = "pitcrew"
+  delete_by = "pitcrew-v1.1.0"
+  note = "sparkPaths is the geometry of Pitcrew's sparkline copy above; it goes with it. runners/usage-chart.ts (line 93) uses sparkPaths too and moves to pd-sparkline with it."
 
 [[mechanism]]
 id = "schedule-editors"
@@ -842,7 +847,7 @@ adr = "0012"
 id = "ui-locale"
 title = "The UI language and the locale every formatter uses"
 canonical = "@decryp7/paddock-ui"
-paths = ["ui/projects/paddock-ui/shell/i18n/src/locale.ts"]
+paths = ["ui/projects/paddock-ui/locale/src/locale.ts"]
 status = "built"
 adr = "0012"
 
@@ -919,3 +924,22 @@ status = "built"
   owner = "sighter"
   delete_by = "sighter-v1.0.0"
   note = "Byte-identical to the canonical."
+
+# =====================================================================================================================
+# Release notes and screens: raw-text rules
+# =====================================================================================================================
+
+[[mechanism]]
+id = "raw-text-snake-case"
+title = "The SNAKE_CASE identifier rule a user must not read (screens and release notes)"
+canonical = "ui/projects/paddock-e2e"
+paths = ["ui/projects/paddock-e2e/src/screenshot-check.ts"]
+symbols = ["text:SNAKE_CASE"]
+status = "planned"
+
+  [[mechanism.copy]]
+  paths = ["apps/dyno/scripts/check-release-notes.mjs"]
+  symbols = ["text:SNAKE_CASE"]
+  owner = "dyno"
+  delete_by = "dyno-v1.1.1"
+  note = "The pattern is copied from RAW_TEXT_RULES of the VM harness's screenshot check, which is on test/dyno-release-vm-checks-v2 and not yet on this line. Import it from there once it lands."

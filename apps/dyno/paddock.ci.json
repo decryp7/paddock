@@ -8,8 +8,14 @@
   ],
   "angularDir": "app",
   "windowsClippy": true,
+  "prepare": [
+    "cd apps/dyno",
+    "cargo fetch --locked --target aarch64-apple-darwin",
+    "cargo fetch --locked --target x86_64-apple-darwin",
+    "cargo fetch --locked --target x86_64-pc-windows-msvc"
+  ],
   "processPatterns": [
-    "{build}[/\\\\]debug[/\\\\](dyno-ipc-test-child|dyno-test-plugin|dyno-bench)(\\.exe)?( |$)",
+    "{build}[/\\\\]debug[/\\\\](dyno-test-plugin|dyno-bench|dyno-bench-gpu)(\\.exe)?( |$)",
     "{tmp}[/\\\\]dyno-it-plugins-[A-Za-z0-9]+[/\\\\][^/\\\\]+[/\\\\]plugin(\\.exe)?( |$)"
   ],
   "checks": [
@@ -17,9 +23,11 @@
     "node --test scripts/check-capabilities.test.mjs",
     "node --test scripts/check-wording.test.mjs",
     "node --test scripts/check-shipped.test.mjs",
+    "node --test scripts/check-release-notes.test.mjs",
     "node --test scripts/check-pe-subsystem.test.mjs",
     "node --test scripts/check-logon-entry.test.mjs",
-    "node scripts/check-capabilities.mjs"
+    "node scripts/check-capabilities.mjs",
+    "node scripts/check-release-notes.mjs"
   ],
   "ui": [
     "npm run build -w ui",

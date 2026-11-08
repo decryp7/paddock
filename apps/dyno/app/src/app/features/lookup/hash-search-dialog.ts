@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, inject
 import { DialogActionError, type DialogAction, type DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 import type { HashSource } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
-import { formatBytes } from '../../shared/format';
+import { formatStorage } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { JobProgressCard } from '../../shared/job-progress';
 import { LookupStore } from '../../state/lookup.store';
@@ -65,7 +65,7 @@ export class HashSearchDialog implements DialogContent<true>, OnInit, OnDestroy 
   readonly name = input('');
   protected readonly store = inject(LookupStore);
   private readonly trackLoad = injectTrackLoad();
-  protected readonly size = computed(() => formatBytes(this.store.hash()?.bytes ?? 0));
+  protected readonly size = computed(() => formatStorage(this.store.hash()?.bytes ?? 0));
   protected readonly hint = computed(() => {
     const e = this.store.error();
     return e ? errorHint(e.code) : null;

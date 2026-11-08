@@ -10,6 +10,8 @@ use crate::time::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 
+mod records;
+pub use records::{RecordBounds, RecordDecoder, RecordError, RecordWriter, HEADER_LEN, RECORD_FORMAT, RECORD_LEN};
 mod rings;
 pub use rings::{DiskRings, RingNode, MAX_RINGS, MAX_RING_NODES};
 
@@ -104,6 +106,7 @@ impl Node {
     }
 }
 
+#[derive(Clone)]
 struct Node {
     parent: u32,
     first_child: u32,
@@ -190,7 +193,8 @@ pub struct DiskChildren {
     pub next_offset: Option<u32>,
 }
 
-/// The arena.
+/// The arena. Cloning copies every node: the walk clones only when it changes a tree that a pending save still reads.
+#[derive(Clone)]
 pub struct DiskIndex {
     nodes: Vec<Node>,
     names: Vec<u8>,
@@ -264,6 +268,12 @@ impl DiskIndex {
     /// How many nodes there are.
     pub fn len(&self) -> usize {
         self.nodes.len()
+    }
+
+    /// Bytes the arena holds on the heap now (nodes and names, by capacity): what a map loaded from the cache is compared with a
+    /// live one of the same size by (the footprint check of the bench, rule 26).
+    pub fn heap_bytes(&self) -> usize {
+        self.nodes.capacity() * std::mem::size_of::<Node>() + self.names.capacity()
     }
 
     /// Never empty: the root always exists.

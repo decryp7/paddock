@@ -29,6 +29,9 @@
       <trans-unit id="sd.dialog.confirm-reset" datatype="html">
         <source>Reset greetings?</source>
       </trans-unit>
+      <trans-unit id="sd.dialog.fixture" datatype="html">
+        <source>Size fixture</source>
+      </trans-unit>
       <trans-unit id="sd.dialog.inspector" datatype="html">
         <source>Engine inspector</source>
       </trans-unit>

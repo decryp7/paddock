@@ -217,7 +217,7 @@ Pitwall 1.1, Pitcrew 1.1, Debrief 1.2, Pacenotes, Sighter) and are proposals for
 | Spotter | `spotter-v1.0.0` | `native-feel.ts`, `copy-menu.ts`, `updater.rs`, the hand-built tray and popover, single-instance wiring (all deleted by the Spotter 1.0 batch) |
 | Pitwall | `pitwall-v1.1.0` | `native-feel.ts`, `sparkline.ts`, `updater.rs`, `window.rs`, the hand-built tray, single-instance wiring (all deleted by the Pitwall 1.1 batch) |
 | Pitcrew | `pitcrew-v1.1.0` | `service_repair.rs`, `service_install.rs`, `notify-channels`, `updater.rs`, the hand-built tray, its UI copies, login wiring |
-| Dyno | `dyno-v1.1.0` | `service_repair.rs`, the login and service parts of `login.rs`/`login_item.rs`, `dyno-ipc` endpoint, frames, peer and child, the redaction in `diagnostics.rs`, `sparkline.ts`, login wiring |
+| Dyno | `dyno-v1.1.0` | `service_repair.rs`, the login and service parts of `login.rs`/`login_item.rs` (removed 2026-11, now paddock-service::login), `dyno-ipc` endpoint, frames, peer and child, the redaction in `diagnostics.rs`, `sparkline.ts`, login wiring |
 | Dyno | `dyno-v1.2.0` | `dyno-plugin-api`, `dyno-plugin-host` (Dyno tier 3, ADR 0001) |
 | Spotter | `spotter-v1.1.0` | `spotter-render`, `mail.rs`, `pack.rs`, `time.rs`, `schedule.rs`, `schedule-editor.ts`, `clipboard.ts`, `check-icons.mjs`, login wiring |
 | Pitwall | `pitwall-v1.2.0` | the rest of `service_repair.rs`, `service_install.rs`, `packs.rs`, the tray model types, `check-icons.mjs`, login wiring |

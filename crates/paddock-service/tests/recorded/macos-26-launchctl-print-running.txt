@@ -1,0 +1,67 @@
+#! recorded 2026-11-04 on a Tart clone of vmgui-base-tahoe (macOS 26.6.2 build 25G83, Darwin 25.6.0), as root through tart exec
+#! command: sudo launchctl print system/<label>
+#! state: a LaunchDaemon running sleep 600
+system/fix.term = {
+	active count = 1
+	path = /Library/LaunchDaemons/fix.term.plist
+	type = LaunchDaemon
+	state = running
+
+	program = /tmp/fixjob.sh
+	arguments = {
+		/tmp/fixjob.sh
+		sleep
+	}
+
+	default environment = {
+		PATH => /usr/bin:/bin:/usr/sbin:/sbin
+	}
+
+	environment = {
+		OSLogRateLimit => 64
+		XPC_SERVICE_NAME => fix.term
+	}
+
+	domain = system
+	minimum runtime = 10
+	exit timeout = 5
+	runs = 1
+	pid = 691
+	immediate reason = speculative
+	forks = 0
+	execs = 3
+	initialized = 1
+	trampolined = 1
+	started suspended = 0
+	proxy started suspended = 0
+	checked allocations = 0 (queried = 1)
+	checked allocations reason = no host
+	checked allocations flags = 0x0
+	last exit code = (never exited)
+
+	resource coalition = {
+		ID = 790
+		type = resource
+		state = active
+		active count = 1
+		name = fix.term
+	}
+
+	jetsam coalition = {
+		ID = 791
+		type = jetsam
+		state = active
+		active count = 1
+		name = fix.term
+	}
+
+	spawn type = daemon (3)
+	jetsam priority = 40
+	jetsam memory limit (active) = (unlimited)
+	jetsam memory limit (inactive) = (unlimited)
+	jetsamproperties category = daemon
+	jetsam thread limit = 32
+	cpumon = default
+
+	properties = runatload | inferred program | system service | tle system
+}

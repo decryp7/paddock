@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, lstatSync, statSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { executableIn, platformId } from '../ci/install-test-browser.mjs';
@@ -556,6 +556,35 @@ test('stable-workspace keeps a clone at the stable path at the checkout\'s commi
   assert.equal(readFileSync(join(stable, 'Cargo.toml'), 'utf8'), 'y');
   assert.equal(git(stable, 'rev-parse', 'HEAD'), git(ws, 'rev-parse', 'HEAD'));
   assert.ok(!existsSync(join(stable, 'left-over.rs')));
+});
+
+// CI run 7467 (spotter, Windows): the step printed nothing for over an hour and blocked the runner. Every phase is bounded now:
+// a hang ends in one ::error:: line that names the phase, and every phase logs its duration (ER-27).
+test('stable-workspace ends a hung phase with one ::error:: line naming it, and logs the duration of every phase', () => {
+  const root = stableFixture();
+  const bin = join(root, 'bin');
+  mkdirSync(bin);
+  // `mv` waits for ever, as on a runner where a process left from an earlier job holds a file.
+  writeFileSync(join(bin, 'mv'), '#!/bin/sh\necho "waiting for a lock" >&2\nexec sleep 120\n', { mode: 0o755 });
+  const started = Date.now();
+  const r = runStableWorkspace('macOS', root, { PATH: `${bin}:/usr/bin:/bin`, PADDOCK_STABLE_WORKSPACE_TIMEOUT: '2' });
+  assert.ok(Date.now() - started < 30_000, 'the step ended by itself, long before the sleeping mv');
+  assert.notEqual(r.status, 0);
+  const errors = r.stdout.split('\n').filter((l) => l.startsWith('::error::'));
+  assert.equal(errors.length, 1, r.stdout);
+  assert.match(errors[0], /stable-workspace: 'move the checkout to .*decryp7_paddock-crate-s1' did not finish within 2 s/);
+  assert.match(errors[0], /waiting for a lock/, 'the last output of the phase is in the message');
+  assert.match(errors[0], /Next step:/);
+  assert.match(r.stdout, /stable-workspace: resolve the job slot's kept folder: done in \d+ s/);
+  assert.ok(!lstatSync(join(root, 'work', 'abc', 'hostexecutor')).isSymbolicLink());
+});
+
+test('stable-workspace logs the duration of the phases of a successful move', () => {
+  const root = stableFixture();
+  const r = runStableWorkspace('macOS', root);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /stable-workspace: move the checkout to .*: done in \d+ s/);
+  assert.match(r.stdout, /stable-workspace: link .* to .*: done in \d+ s/);
 });
 
 test('stable-workspace leaves Linux containers alone and never fails a job it cannot help', () => {
@@ -1127,7 +1156,7 @@ test("a kit app's host-cleanup temp sweep is <app>-it- and is a prefix of no tem
   assert.match(read(join(WORKFLOWS, 'ci.yml')), /uses: \.\/\.gitea\/actions\/host-cleanup\n(?:.*\n)*?\s+temp-prefix: \$\{\{ matrix\.app \}\}-it-\n/, 'ci.yml sweeps <app>-it-');
   assert.match(read(join(WORKFLOWS, 'app-release.yml')), /actions\/host-cleanup\n(?:.*\n)*?\s+temp-prefix: \$\{\{ inputs\.app-id \}\}-it-\n/, 'app-release.yml sweeps <app>-it-');
   const dyno = runtimeTempPrefixes('dyno').map(([, p]) => p);
-  assert.ok(dyno.includes('dyno-bench-') && dyno.some((p) => p === 'dyno-'), `the scan finds Dyno's own scratch folders (${dyno})`);
+  assert.ok(dyno.includes('dyno-bench-'), `the scan finds Dyno's own scratch folders (${dyno})`);
   for (const app of KIT_APPS) {
     const sweep = `${app}-it-`;
     for (const [file, prefix] of runtimeTempPrefixes(app)) {
@@ -1163,7 +1192,7 @@ test("app-gates runs every command list through run-commands.sh, which names the
  * call it) in a fake runner folder. The socket base goes under a scratch folder (PADDOCK_SOCKET_ROOT), never the real /tmp.
  */
 function runJobTmpdir(mode, { os = 'macOS', root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-job-tmpdir-'))), extra = {} } = {}) {
-  mkdirSync(join(root, 'runner-temp'), { recursive: true });
+  if (mode !== 'sweep') mkdirSync(join(root, 'runner-temp'), { recursive: true });
   mkdirSync(join(root, 'sockets'), { recursive: true });
   const envFile = join(root, 'github-env');
   if (!existsSync(envFile)) writeFileSync(envFile, '');
@@ -1205,6 +1234,64 @@ test('job-tmpdir: the job\'s temp folder is the runner\'s per-job folder, and it
   assert.match(iso, /bash "\$here\/job-tmpdir\.sh" setup/, 'acquire sets the folders through the same script');
   assert.match(iso, /bash "\$here\/job-tmpdir\.sh" sweep/, 'acquire sweeps the folders of killed jobs');
   assert.match(iso, /bash "\$here\/job-tmpdir\.sh" remove/, 'release removes them through it');
+});
+
+/** A fake `diskutil` on PATH that reports Internal=<internal> for every volume (the real one is not run, ER-14). */
+function fakeDiskutil(root, internal) {
+  const bin = join(root, 'fake-bin');
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, 'diskutil'), `#!/bin/sh\necho '<?xml version="1.0"?><plist><dict><key>Internal</key>'\necho '\t<${internal}/>'\necho '</dict></plist>'\n`);
+  chmodSync(join(bin, 'diskutil'), 0o755);
+  return bin;
+}
+
+test('job-tmpdir: on macOS an external work volume gets the job folder on the internal disk, logged with its reason, removed and swept', () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-job-tmpdir-')));
+  const bin = fakeDiskutil(root, 'false');
+  const internal = join(root, 'internal-tmp');
+  const extra = { PATH: `${bin}:/usr/bin:/bin`, PADDOCK_INTERNAL_TMP_ROOT: internal };
+  // RUNNER_TEMP is <workdir>/<hash>/tmp, as the runner makes it.
+  const runnerTemp = join(root, 'runner-temp');
+  const r = runJobTmpdir('setup', { root, extra });
+  assert.equal(r.status, 0, r.stderr);
+  const want = join(internal, basename(dirname(runnerTemp)));
+  assert.equal(r.exported.TMPDIR, want, 'TMPDIR is on the internal disk');
+  assert.equal(r.exported.PADDOCK_JOB_TEMP, want);
+  assert.ok(statSync(want).isDirectory());
+  assert.equal(statSync(want).mode & 0o777, 0o700);
+  assert.match(r.stderr, /job-tmpdir: temp folder .* on the internal disk, not .*external.*TCC/, 'one line names the path and the reason (ER-27)');
+  assert.equal(read(join(r.exported.PADDOCK_SOCKET_BASE, '.owner')), `${want}\n`, 'the sockets belong to the internal folder');
+  // remove deletes both (the runner knows only its own folder)
+  writeFileSync(join(want, 'left'), '');
+  const rm = runJobTmpdir('remove', { root, extra: { ...extra, PADDOCK_JOB_TEMP: want, PADDOCK_SOCKET_BASE: r.exported.PADDOCK_SOCKET_BASE } });
+  assert.equal(rm.status, 0, rm.stderr);
+  assert.ok(!existsSync(want), 'the internal job folder goes at the end of the job');
+  assert.ok(existsSync(runnerTemp), 'the runner folder is the runner\'s');
+  // sweep: a job killed before its remove, runner folder gone
+  const killed = runJobTmpdir('setup', { root, extra });
+  assert.equal(killed.status, 0, killed.stderr);
+  rmSync(runnerTemp, { recursive: true });
+  const sw = runJobTmpdir('sweep', { root, extra });
+  assert.equal(sw.status, 0, sw.stderr);
+  assert.ok(!existsSync(want), 'swept when the runner folder is gone');
+  assert.match(sw.stderr, /removed the internal job folder/);
+  assert.equal(readdirSync(internal).length, 0, 'the owner file goes too');
+});
+
+test('job-tmpdir: on macOS an internal volume keeps the runner folder, on other systems the check never runs', () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-job-tmpdir-')));
+  const bin = fakeDiskutil(root, 'true');
+  const extra = { PATH: `${bin}:/usr/bin:/bin`, PADDOCK_INTERNAL_TMP_ROOT: join(root, 'internal-tmp') };
+  const r = runJobTmpdir('setup', { root, extra });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.exported.TMPDIR, join(root, 'runner-temp'));
+  assert.ok(!existsSync(join(root, 'internal-tmp')));
+  assert.match(r.stderr, /is the runner's own: its volume is internal/);
+  const ext = fakeDiskutil(realpathSync(mkdtempSync(join(tmpdir(), 'paddock-job-tmpdir-'))), 'false');
+  for (const os of ['Linux', 'Windows']) {
+    const o = runJobTmpdir('setup', { os, extra: { PATH: `${ext}:/usr/bin:/bin`, PADDOCK_INTERNAL_TMP_ROOT: join(root, 'other') } });
+    assert.equal(o.exported.TMPDIR, join(o.root, 'runner-temp'), `${os} is unchanged`);
+  }
 });
 
 test('job-tmpdir: a socket folder that is a link, has another name or is outside the root is never used or removed (another user\'s folder fails the same check, -O, which a test cannot fake without root)', () => {

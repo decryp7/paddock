@@ -1,6 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { errorHint } from '../../core/command-error';
 import { formatCount, formatFraction, formatPercent, formatRate } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { CAUSE_ICON } from '../../shared/labels';
@@ -16,79 +15,68 @@ import { FullTextTip } from '../../shared/full-text-tip';
   imports: [FullTextTip, MatButton, Icon, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section class="card" aria-label="Why is my computer slow?">
-      <div class="card-head">
-        <h2><dy-icon name="why" /> Why is my computer slow?</h2>
-        <span class="spacer"></span>
-        @if (store.diagnosis()) {
-          <a matButton="text" routerLink="/why-slow">See the evidence</a>
-        }
-        <button type="button" matButton="filled" [disabled]="store.running()" (click)="store.run()">
-          <dy-icon name="why" /> {{ store.diagnosis() ? 'Check again' : 'Check now' }}
-        </button>
-      </div>
-      <div class="body" [attr.aria-busy]="store.running()">
-        @if (store.error(); as e) {
-          <div class="err" role="alert">
-            <dy-icon name="alert" />
-            <div class="text"><strong>{{ e.message }}</strong>@if (hint(); as h) {<span>{{ h }}</span>}</div>
-            <button type="button" matButton="outlined" (click)="store.run()">Retry</button>
-          </div>
-        } @else if (store.running() && !store.diagnosis()) {
-          <div class="skeleton" style="width: 70%"></div>
-          <div class="skeleton"></div>
-        } @else if (store.diagnosis(); as d) {
-          <p class="headline">{{ d.headline }}</p>
-          @if (cause(); as c) {
-            <div class="cause">
-              <span class="ic"><dy-icon [name]="icon(c.kind)" /></span>
-              <div class="txt">
-                <strong>{{ c.title }}</strong>
-                <span>{{ c.explanation }}</span>
-                <p class="evidence num">@for (e of c.evidence; track e.label) {<span>{{ e.label }} {{ e.value }}</span>}<span>Confidence {{ conf(c.confidence) }}</span></p>
-              </div>
-            </div>
-            @if (c.hints.length) {
-              <div class="actions">
-                @for (h of c.hints; track h.text) {
-                  @if (hintPath(h); as path) {
-                    <a matButton="outlined" [routerLink]="path">{{ h.text }}</a>
-                  } @else {
-                    <span class="hint">{{ h.text }}</span>
-                  }
-                }
-              </div>
-            }
-          }
-          @if (others().length) {
-            <button type="button" matButton="text" class="more dy-link" [attr.aria-expanded]="showOthers()" (click)="showOthers.set(!showOthers())">
-              {{ showOthers() ? 'Hide' : 'Show' }} {{ others().length === 1 ? '1 other possible cause' : count(others().length) + ' other possible causes' }}
-            </button>
-            @if (showOthers()) {
-              <ul class="others">
-                @for (c of others(); track c.title) {
-                  <li><dy-icon [name]="icon(c.kind)" /><span class="t">{{ c.title }}</span><span class="num faint">{{ conf(c.confidence) }}</span></li>
-                }
-              </ul>
-            }
-          }
-        } @else {
-          <p class="idle">Dyno looks at CPU, memory, disk, heat and background work together and names the likeliest cause, with the evidence. It only looks: Dyno changes nothing on your computer.</p>
-        }
-      </div>
-      @if (stats(); as st) {
-        <dl class="stats num" aria-label="Right now">
-          @for (x of st; track x.k) {
-            <div><dt>{{ x.k }}</dt><dd [dyFullText]="x.v">{{ x.v }}</dd></div>
-          }
-        </dl>
+    <div class="tools">
+      <span class="spacer"></span>
+      @if (store.diagnosis()) {
+        <a matButton="text" routerLink="/why-slow">See the evidence</a>
       }
-    </section>
+      <button type="button" matButton="filled" [disabled]="store.running()" (click)="store.run()">
+        <dy-icon name="why" /> {{ store.diagnosis() ? 'Check again' : 'Check now' }}
+      </button>
+    </div>
+    <div class="body" [attr.aria-busy]="store.running()">
+      @if (store.diagnosis(); as d) {
+        <p class="headline">{{ d.headline }}</p>
+        @if (cause(); as c) {
+          <div class="cause">
+            <span class="ic"><dy-icon [name]="icon(c.kind)" /></span>
+            <div class="txt">
+              <strong>{{ c.title }}</strong>
+              <span>{{ c.explanation }}</span>
+              <p class="evidence num">@for (e of c.evidence; track e.label) {<span>{{ e.label }} {{ e.value }}</span>}<span>Confidence {{ conf(c.confidence) }}</span></p>
+            </div>
+          </div>
+          @if (c.hints.length) {
+            <div class="actions">
+              @for (h of c.hints; track h.text) {
+                @if (hintPath(h); as path) {
+                  <a matButton="outlined" [routerLink]="path">{{ h.text }}</a>
+                } @else {
+                  <span class="hint">{{ h.text }}</span>
+                }
+              }
+            </div>
+          }
+        }
+        @if (others().length) {
+          <button type="button" matButton="text" class="more dy-link" [attr.aria-expanded]="showOthers()" (click)="showOthers.set(!showOthers())">
+            {{ showOthers() ? 'Hide' : 'Show' }} {{ others().length === 1 ? '1 other possible cause' : count(others().length) + ' other possible causes' }}
+          </button>
+          @if (showOthers()) {
+            <ul class="others">
+              @for (c of others(); track c.title) {
+                <li><dy-icon [name]="icon(c.kind)" /><span class="t">{{ c.title }}</span><span class="num faint">{{ conf(c.confidence) }}</span></li>
+              }
+            </ul>
+          }
+        }
+      } @else {
+        <p class="idle">Dyno looks at CPU, memory, disk, heat and background work together and names the likeliest cause, with the evidence. This card only reads.</p>
+      }
+    </div>
+    @if (stats(); as st) {
+      <dl class="stats num" aria-label="Right now">
+        @for (x of st; track x.k) {
+          <div><dt>{{ x.k }}</dt>@if (x.name) {<dd class="name" [dyFullText]="x.v">{{ x.v }}</dd>} @else {<dd>{{ x.v }}</dd>}</div>
+        }
+      </dl>
+    }
   `,
   styles: `
-    :host { display: block; min-width: 0; }
-    .card { height: 100%; }
-    .body { padding: var(--sp-4) var(--sp-4) var(--sp-5); display: grid; gap: var(--sp-4); align-content: start; }
+    :host { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+    .tools { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+    .spacer { flex: 1; }
+    .body { display: grid; gap: var(--sp-3); align-content: start; }
     .idle { color: var(--text-2); max-width: 62ch; }
     .headline { font: var(--fw-semibold) var(--fs-lg) / 1.3 var(--font-display); }
     .cause { display: flex; gap: var(--sp-3); align-items: flex-start; }
@@ -105,14 +93,12 @@ import { FullTextTip } from '../../shared/full-text-tip';
     .others dy-icon { --icon-size: 14px; color: var(--text-3); }
     .others .t { flex: 1; }
     .faint { color: var(--text-3); }
-    .card { display: flex; flex-direction: column; }
-    .body { flex: 1; }
-    .stats { margin: 0; padding: var(--sp-4); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); border-top: 1px solid var(--border-subtle); }
+    .stats { margin: 0; padding-top: var(--sp-3); display: grid; grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr)); gap: var(--sp-3); border-top: 1px solid var(--border-subtle); }
     .stats dt { color: var(--text-3); font-size: var(--fs-sm); }
-    .stats dd { margin: 2px 0 0; font: var(--fw-semibold) var(--fs-md) / 1.3 var(--font-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .err { display: flex; gap: var(--sp-3); align-items: flex-start; }
-    .err .text { flex: 1; display: grid; }
-    .err .text span { color: var(--text-2); font-size: var(--fs-sm); }
+    .stats > div { min-width: 0; }
+    /* A number is never cut: the grid gives it another row instead. Only the busiest app's name may ellipsize (its tooltip has the whole name). */
+    .stats dd { margin: 2px 0 0; font: var(--fw-semibold) var(--fs-md) / 1.3 var(--font-display); white-space: nowrap; }
+    .stats dd.name { overflow: hidden; text-overflow: ellipsis; }
   `,
 })
 export class DiagnosisCard {
@@ -126,17 +112,13 @@ export class DiagnosisCard {
     const memPct = sys.memory.total > 0 ? (sys.memory.used / sys.memory.total) * 100 : 0;
     const top = u.topCpu[0];
     return [
-      { k: 'CPU', v: formatPercent(sys.cpu.total, 0) },
-      { k: 'Memory', v: formatPercent(memPct, 0) },
-      { k: 'Disk', v: formatRate(sys.diskIo.readBps + sys.diskIo.writeBps) },
-      { k: 'Busiest', v: top ? top.name : '—' },
+      { k: 'CPU', v: formatPercent(sys.cpu.total, 0), name: false },
+      { k: 'Memory', v: formatPercent(memPct, 0), name: false },
+      { k: 'Disk', v: formatRate(sys.diskIo.readBps + sys.diskIo.writeBps), name: false },
+      { k: 'Busiest', v: top ? top.name : '—', name: true },
     ];
   });
   protected readonly cause = computed(() => this.store.diagnosis()?.causes[0] ?? null);
-  protected readonly hint = computed(() => {
-    const e = this.store.error();
-    return e ? errorHint(e.code) : null;
-  });
   protected readonly icon = CAUSE_ICON_FN;
   protected readonly conf = formatFraction;
   protected readonly count = formatCount;

@@ -991,6 +991,29 @@ fn the_tray_draws_its_model_only_when_it_changed_and_runs_its_items() {
 }
 
 #[test]
+fn a_tray_the_desktop_does_not_show_can_be_marked_unavailable_and_back() {
+    // Linux without a StatusNotifier host: the icon is made but nothing shows it, so the app says there is no tray (a hidden
+    // start opens the window, closing the last window quits) until the host appears.
+    let app = app_with(windows(multi(), &calls()).build());
+    let fake = FakeTray::default();
+    let tip = Arc::new(Mutex::new("App".to_string()));
+    assert!(create_tray(app.handle(), tray(&fake, &tip, &calls())));
+    assert!(tray_available(app.handle()));
+    set_tray_available(app.handle(), false);
+    assert!(!tray_available(app.handle()));
+    assert!(crate::close::creates_main_at_start(
+        true,
+        tray_available(app.handle())
+    ));
+    set_tray_available(app.handle(), true);
+    assert!(tray_available(app.handle()));
+    // Nothing to mark when the app has no tray at all.
+    let bare = app_with(windows(multi(), &calls()).build());
+    set_tray_available(bare.handle(), true);
+    assert!(!tray_available(bare.handle()));
+}
+
+#[test]
 fn without_a_tray_the_app_runs_without_one() {
     let app = app_with(windows(multi(), &calls()).build());
     let failing = FakeTray {

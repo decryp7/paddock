@@ -58,8 +58,14 @@ v_new=$(version_of "$new")
 [ "$v_old" != "$v_new" ] || { echo "::error::the two builds have the same version ($v_old)"; exit 1; }
 # The agent reports its own version in the heartbeat; it must be the app's, or the wait below can never succeed.
 for build in "$old" "$new"; do
-  a=$("$build/Contents/MacOS/shell-demo-agent" --self-test | awk '{print $2}')
-  [ "$a" = "$(version_of "$build")" ] || { echo "::error::$build: the agent is $a, the app $(version_of "$build")"; exit 1; }
+  # The report is a header `<name> <version> self-test` then one `ok <check>` line per check: only the header carries the version.
+  report=$("$build/Contents/MacOS/shell-demo-agent" --self-test 2>&1) || true
+  a=$(printf '%s\n' "$report" | head -n 1 | awk '{print $2}')
+  [ "$a" = "$(version_of "$build")" ] || {
+    echo "::error::$build: the agent reports version '$a' but the app is $(version_of "$build"); rebuild so both carry one version (self-test report follows)"
+    printf '%s\n' "$report"
+    exit 1
+  }
 done
 
 mkdir -p "$apps"

@@ -3,7 +3,7 @@
 use dyno_agent::cli::ask;
 use dyno_core::protocol::{Message, Reply, Request};
 use dyno_core::time::Timestamp;
-use dyno_ipc::Peer;
+use paddock_ipc::BodyPeer;
 use std::time::Duration;
 
 /// A sample whose only disk is almost full (the low-disk alert raises a critical alarm).
@@ -21,7 +21,7 @@ pub fn full_disk_sample() -> dyno_core::metrics::SystemSample {
 }
 
 /// The first alarm the agent lists, waiting for it to be raised (bounded: 10 s).
-pub fn wait_for_alarm(peer: &Peer<Message>) -> dyno_core::alarms::Alarm {
+pub fn wait_for_alarm(peer: &BodyPeer<Message>) -> dyno_core::alarms::Alarm {
     for _ in 0..100 {
         let Reply::Alarms(list) = ask(
             peer,

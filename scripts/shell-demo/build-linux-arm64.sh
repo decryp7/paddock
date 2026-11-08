@@ -45,7 +45,9 @@ for t in /src1/apps/shell-demo/src-tauri/Cargo.toml /src1/apps/shell-demo/src-ta
   sed -i "s/^version = \"$v_old\"/version = \"$v_new\"/" "$t"
 done
 build /src1 /out/n1/paddock-shell-demo
-[ "$(/out/n1/paddock-shell-demo/shell-demo-agent --self-test | awk '{print $2}')" = "$v_new" ] || { echo "::error::N+1's agent is not $v_new"; exit 1; }
+# The report is a header `<name> <version> self-test` then `ok <check>` lines: the shared checker reads the header only and
+# prints the path, exit status and whole report on a mismatch (ER-27).
+bash /src1/scripts/demo/check-agent-version.sh /out/n1/paddock-shell-demo/shell-demo-agent "$v_new"
 echo "$v_old $v_new" > /out/versions
 IN
 cat "$out/versions"

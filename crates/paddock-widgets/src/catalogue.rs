@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Counted;
 use crate::layout::{Placement, Preset};
+use crate::place::Place;
 
 /// The grid and limits of the surface a catalogue fills (ADR 0035 §6). Its identity is the app's `SurfaceId`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,7 +50,7 @@ pub enum Refresh {
 
 /// One catalogue entry, as data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct KindSpec<K: 'static> {
+pub struct KindSpec<K: 'static, R: 'static = &'static [u8]> {
     /// The kind.
     pub kind: K,
     /// Sentence case: "CPU and memory".
@@ -58,8 +59,9 @@ pub struct KindSpec<K: 'static> {
     pub summary: &'static str,
     /// The app's registered icon name.
     pub icon: &'static str,
-    /// Allowed spans (columns of the grid), the first is the default. Never empty.
-    pub spans: &'static [u8],
+    /// The sizes it allows: spans for a flow surface (columns, the first is the default, never empty), a
+    /// [`crate::SizeRule`] for a grid surface.
+    pub size: R,
     /// How many may be placed at once (1 for most).
     pub max_instances: u8,
     /// How it refreshes.
@@ -91,6 +93,13 @@ pub trait Catalogue: 'static {
     /// The widget type.
     type Widget: Widget;
 
+    /// How placements sit on this surface: [`crate::Span`] (flow) or [`crate::Cells`] (grid).
+    type Place: Place;
+
+    /// Widths of the surface's container, from which the arrangement has fewer columns than the design one (grid
+    /// surfaces only; widest first). Empty: the design arrangement at every width.
+    const BREAKPOINTS: &'static [Breakpoint] = &[];
+
     /// This catalogue's surface.
     const SURFACE_ID: Self::SurfaceId;
 
@@ -98,21 +107,40 @@ pub trait Catalogue: 'static {
     const SURFACE: Surface;
 
     /// Every kind, in the order the chooser lists them.
-    fn kinds() -> &'static [KindSpec<<Self::Widget as Widget>::Kind>];
+    fn kinds() -> &'static [Kind<Self>];
+
+    /// Brings a stored layout of an older `version` (below the surface's `schema_version`) up to the current one, as
+    /// JSON, before it is read; a grid surface uses [`crate::spans_to_cells`]. The default returns the value as it is
+    /// (read leniently, as before). An `Err` takes the damaged path: the defaults are shown and the old value is kept
+    /// until the first edit.
+    fn upgrade(_from: u32, value: serde_json::Value) -> Result<serde_json::Value, String> {
+        Ok(value)
+    }
 
     /// The layout of a new or reset surface.
-    fn defaults() -> Vec<Placement<Self::Widget>>;
+    fn defaults() -> Vec<Placement<Self::Widget, Self::Place>>;
 
     /// The built-in presets (`builtin` is set on read, whatever they say).
-    fn presets() -> Vec<Preset<Self::Widget>> {
+    fn presets() -> Vec<Preset<Self::Widget, Self::Place>> {
         Vec::new()
     }
 }
 
+/// A catalogue entry of `C`.
+pub type Kind<C> =
+    KindSpec<<<C as Catalogue>::Widget as Widget>::Kind, <<C as Catalogue>::Place as Place>::Rule>;
+
+/// The arrangement of a grid surface from a container width: from `min` px wide, `columns` columns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Breakpoint {
+    /// The least container width, in px, for this arrangement.
+    pub min: u16,
+    /// Its columns; the first (widest) breakpoint is the design arrangement and has the surface's columns.
+    pub columns: u8,
+}
+
 /// The catalogue entry of `kind`.
-pub(crate) fn spec_of<C: Catalogue>(
-    kind: <C::Widget as Widget>::Kind,
-) -> Option<&'static KindSpec<<C::Widget as Widget>::Kind>> {
+pub(crate) fn spec_of<C: Catalogue>(kind: <C::Widget as Widget>::Kind) -> Option<&'static Kind<C>> {
     C::kinds().iter().find(|s| s.kind == kind)
 }
 
@@ -136,6 +164,18 @@ pub fn check_catalogue<C: Catalogue>() -> Result<(), String> {
     if s.max_preset_placements > s.max_placements {
         return Err("max_preset_placements is above max_placements".into());
     }
+    if let Some(first) = C::BREAKPOINTS.first() {
+        let ok = first.columns == s.columns
+            && C::BREAKPOINTS
+                .windows(2)
+                .all(|w| w[0].min > w[1].min && w[0].columns >= w[1].columns)
+            && C::BREAKPOINTS
+                .last()
+                .is_some_and(|l| l.min == 0 && l.columns >= 1);
+        if !ok {
+            return Err("breakpoints go from the widest (the surface's columns) to min 0, with fewer columns each".into());
+        }
+    }
     if C::kinds().is_empty() {
         return Err("the catalogue has no kinds".into());
     }
@@ -149,9 +189,9 @@ pub fn check_catalogue<C: Catalogue>() -> Result<(), String> {
                 k.kind
             ));
         }
-        if k.spans.is_empty() || k.spans.iter().any(|&sp| sp == 0 || sp > s.columns) {
+        if !<C::Place as Place>::rule_valid(&k.size, s.columns) {
             return Err(format!(
-                "kind {:?} needs spans between 1 and {}",
+                "kind {:?} needs a size rule inside the {} columns (spans from 1; a grid kind's ranges not empty, its default inside)",
                 k.kind, s.columns
             ));
         }

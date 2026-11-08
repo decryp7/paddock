@@ -3,6 +3,14 @@
 //! launchd and the systemd user manager start a service with a minimal `PATH`, so tools in Homebrew, nvm or a Python venv
 //! are not found. The service asks the user's login shell (`$SHELL -l -i -c`, bounded output, timeout) for the `PATH` a
 //! terminal has and merges it in front of its own, once, at start. Parsing and merging are pure; running the shell is thin.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::{Limits, Outcome, command, run_bounded};
 use std::path::{Path, PathBuf};

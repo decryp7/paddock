@@ -131,6 +131,7 @@ fn the_child_gets_its_environment_role_and_memory_watch() {
     s.clean_env = false;
     s.lower_priority = true;
     s.memory_limit = Some(4 << 30);
+    s.memory_hard = true;
     s.current_dir = Some(std::env::temp_dir());
     s.inherit_stderr = true;
     let child = launch(&s, Arc::new(NoCalls)).unwrap();
@@ -168,4 +169,44 @@ fn the_bootstrap_line_roundtrips_and_bad_lines_are_refused() {
         ..b
     };
     assert!(connect(&no_host, ProtocolVersion::UNVERSIONED).is_err());
+}
+
+#[test]
+fn a_memory_limit_without_the_hard_commit_limit_still_runs_and_is_watched() {
+    let mut s = spec(&["echo"]);
+    s.memory_limit = Some(4 << 30);
+    s.memory_hard = false;
+    let child = launch(&s, Arc::new(NoCalls)).unwrap();
+    assert_eq!(child.peer().call(b"ok".to_vec(), T).unwrap(), b"ok");
+    assert_eq!(child.stopped_over_memory(), None);
+}
+
+#[test]
+fn exit_status_waits_for_the_exit_and_is_kept() {
+    let child = launch(&spec(&["echo"]), Arc::new(NoCalls)).unwrap();
+    // Still running: no status after a short wait.
+    assert_eq!(child.exit_status(Duration::ZERO), None);
+    child.close_stdin();
+    assert!(child.peer().wait_closed(Some(GUARD)));
+    let status = child.exit_status(GUARD).expect("it exited");
+    assert!(status.success(), "{status}");
+    // A second ask returns the same status (it is read once from the OS).
+    assert_eq!(child.exit_status(Duration::ZERO), Some(status));
+}
+
+#[test]
+fn exit_status_waits_on_the_injected_clock_not_on_the_wall() {
+    use paddock_jobs::time::FakeClock;
+    let clock = FakeClock::default();
+    let mut s = spec(&["echo"]);
+    s.peer.clock = Arc::new(clock.clone());
+    let child = Arc::new(launch(&s, Arc::new(NoCalls)).unwrap());
+    let waiting = child.clone();
+    let asked = std::thread::spawn(move || waiting.exit_status(Duration::from_secs(5)));
+    // The child runs, so the ask is waiting on the fake clock; moving the clock past its deadline ends it with no status.
+    assert!(clock.wait_for_pending(1, GUARD));
+    // A kill is not held up by the waiting ask: it holds the process lock only for one look at a time.
+    clock.advance(Duration::from_secs(5));
+    assert_eq!(asked.join().unwrap(), None);
+    child.kill();
 }

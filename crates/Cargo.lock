@@ -3323,6 +3323,7 @@ name = "paddock-diag"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "libc",
  "log",
  "paddock-commands",
  "paddock-dialogs",
@@ -3346,16 +3347,21 @@ dependencies = [
 name = "paddock-dialogs"
 version = "0.2.0"
 dependencies = [
+ "block2",
  "log",
+ "objc2",
  "objc2-app-kit",
+ "objc2-foundation",
  "paddock-commands",
  "paddock-workspace-hack",
+ "proptest",
  "serde",
  "serde_json",
  "tauri",
  "tauri-runtime",
  "toml 0.9.12+spec-1.1.0",
  "ts-rs",
+ "windows",
 ]
 
 [[package]]
@@ -3509,13 +3515,14 @@ name = "paddock-mcp"
 version = "0.1.0"
 dependencies = [
  "getrandom 0.3.4",
+ "libc",
  "log",
  "paddock-commands",
  "paddock-dialogs",
  "paddock-env",
  "paddock-jobs",
  "paddock-log",
- "paddock-secrets",
+ "paddock-proc",
  "paddock-testkit",
  "paddock-workspace-hack",
  "serde",
@@ -3711,6 +3718,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-power"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "windows-sys 0.61.2",
+ "zbus",
+]
+
+[[package]]
 name = "paddock-proc"
 version = "0.1.0"
 dependencies = [
@@ -3770,6 +3790,8 @@ name = "paddock-secrets"
 version = "0.1.0"
 dependencies = [
  "keyring",
+ "paddock-env",
+ "paddock-proc",
  "paddock-workspace-hack",
  "tempfile",
  "zeroize",
@@ -3795,8 +3817,10 @@ dependencies = [
  "plist",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tauri",
  "tempfile",
+ "thiserror 2.0.21",
  "ts-rs",
  "windows",
  "windows-service",
@@ -3817,6 +3841,21 @@ dependencies = [
  "tauri",
  "tempfile",
  "ts-rs",
+]
+
+[[package]]
+name = "paddock-setup"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "paddock-proc",
+ "paddock-service",
+ "paddock-updater",
+ "paddock-workspace-hack",
+ "semver",
+ "tempfile",
+ "thiserror 2.0.21",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3849,6 +3888,7 @@ dependencies = [
  "paddock-workspace-hack",
  "serde",
  "serde_json",
+ "sysinfo",
  "tauri",
  "tauri-plugin",
  "tauri-utils",
@@ -3885,7 +3925,12 @@ dependencies = [
 name = "paddock-startup"
 version = "0.2.0"
 dependencies = [
+ "block2",
+ "gtk",
  "log",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "paddock-commands",
  "paddock-env",
  "paddock-log",
@@ -3898,6 +3943,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tempfile",
  "ts-rs",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3959,6 +4005,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tempfile",
  "ts-rs",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4059,9 +4106,7 @@ dependencies = [
  "futures-core",
  "getrandom 0.3.4",
  "getrandom 0.4.3",
- "gio-sys",
- "glib-sys",
- "gobject-sys",
+ "gtk-sys",
  "http",
  "httparse",
  "idna",

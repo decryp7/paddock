@@ -36,4 +36,4 @@ pub use recorder::Recorder;
 pub use results::{
     Host, MAX_FILE_BYTES, MAX_MEASUREMENTS, Measurement, RESULTS_SCHEMA, RESULTS_VERSION, Results,
 };
-pub use stats::{Samples, summarize};
+pub use stats::{Samples, Summary as SampleSummary, summarize};

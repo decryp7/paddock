@@ -100,6 +100,7 @@ impl FileLocks for LinuxLocks {
                 },
                 name: name.unwrap_or_else(|| format!("Process {pid}")),
                 kind: Some(kind(&f)),
+                via: Default::default(),
             });
         }
         if out.is_empty() && timed_out {
@@ -110,7 +111,8 @@ impl FileLocks for LinuxLocks {
         }
         if out.is_empty() && hidden > 0 && effective_uid() != 0 {
             return Err(PlatformError::AccessDenied(format!(
-                "No process of yours holds this file, but {hidden} processes of other users are out of sight. Run Dyno as root to see them all."
+                "No process of yours holds this file, but {hidden} processes of other users are out of sight. {}",
+                dyno_core::read_via::NEEDS_ADMIN
             )));
         }
         Ok(out)

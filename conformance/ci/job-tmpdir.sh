@@ -8,9 +8,16 @@
 #                          (mktemp -d <root>/pd-XXXXXXXX, mode 700, its .owner naming the job's folder) for sockets whose path in
 #                          the temp folder would be too long (Debrief's endpoints, debrief-ipc endpoint.rs). Written to
 #                          $GITHUB_ENV. A second setup in the job reuses $PADDOCK_SOCKET_BASE when it passes the folder check.
-#   job-tmpdir.sh remove   removes $PADDOCK_SOCKET_BASE (the runner removes its own folder), after the same check.
+#                          On macOS, when the runner's work folder is on an external volume (diskutil: Internal=false) the
+#                          folder is $PADDOCK_INTERNAL_TMP_ROOT (default $HOME/gitea-runner/tmp)/<the runner's job hash> on the
+#                          internal disk instead: TCC (Removable Volumes) denies processes that are their own responsible
+#                          process (disclaimed children, `launchctl submit` jobs) the job folder on a USB disk, and Full Disk
+#                          Access of the runner does not help (docs/lessons.md). The script logs the folder and the reason.
+#   job-tmpdir.sh remove   removes $PADDOCK_SOCKET_BASE (the runner removes its own folder), after the same check, and the
+#                          internal job folder (the runner does not know it).
 #   job-tmpdir.sh sweep    removes the pd-* folders under the root whose owner folder is gone (a job killed before its
-#                          remove); job-isolation's acquire runs it.
+#                          remove), and the internal job folders (and their .owner files) whose runner folder is gone;
+#                          job-isolation's acquire runs it.
 #
 # The folder check: a real folder (not a link), owned by this user, directly under the root and named pd-*. Anything else
 # fails. Why the script exists: on a host runner the default temp folder is the runner user's own, which the developers' and
@@ -44,6 +51,31 @@ job_temp() {
   printf '%s\n' "${t%/}"
 }
 
+internal_root() { printf '%s\n' "${PADDOCK_INTERNAL_TMP_ROOT:-${HOME:-/tmp}/gitea-runner/tmp}" | sed 's|/*$||'; }
+
+# volume_is_external <folder>: true on macOS when diskutil says the volume holding the folder is not internal.
+volume_is_external() {
+  local mount plist
+  mount="$(df -P "$1" 2>/dev/null | awk 'NR==2 { $1=$2=$3=$4=$5=""; sub(/^ +/, ""); print }')"
+  [ -n "$mount" ] || return 1
+  plist="$(diskutil info -plist "$mount" 2>/dev/null)" || return 1
+  printf '%s\n' "$plist" | awk '/<key>Internal<\/key>/ { getline; if ($0 ~ /<false\/>/) found = 1 } END { exit found ? 0 : 1 }'
+}
+
+# On a macOS host with an external work folder: the per-job folder on the internal disk (see the header). Prints the folder.
+internal_job_temp() {
+  local t="$1" iroot hash d
+  iroot="$(internal_root)"
+  hash="$(basename "$(dirname "$t")")"
+  d="$iroot/$hash"
+  mkdir -p "$iroot" && chmod 700 "$iroot" && mkdir -p "$d" && chmod 700 "$d" || {
+    echo "::error::job-tmpdir: cannot make the internal job folder $d; make $iroot writable (or set PADDOCK_INTERNAL_TMP_ROOT)" >&2
+    exit 1
+  }
+  printf '%s\n' "$t" > "$iroot/$hash.owner"
+  printf '%s\n' "$d"
+}
+
 cmd_setup() {
   local t mixed native base
   t="$(job_temp)"
@@ -63,6 +95,13 @@ cmd_setup() {
     } >> "${GITHUB_ENV:?GITHUB_ENV is not set}"
     echo "job-tmpdir: temp folders in $t" >&2
     return 0
+  fi
+  if [ "${RUNNER_OS:-}" = macOS ] && volume_is_external "$t"; then
+    local ext="$t"
+    t="$(internal_job_temp "$ext")"
+    echo "job-tmpdir: temp folder $t on the internal disk, not $ext: that volume is external and macOS (TCC, Removable Volumes) denies disclaimed processes and launchctl jobs there" >&2
+  elif [ "${RUNNER_OS:-}" = macOS ]; then
+    echo "job-tmpdir: temp folder $t is the runner's own: its volume is internal (or diskutil could not tell)" >&2
   fi
   base="${PADDOCK_SOCKET_BASE:-}"
   if [ -n "$base" ]; then
@@ -85,7 +124,12 @@ cmd_setup() {
 
 cmd_remove() {
   [ "${RUNNER_OS:-}" != Windows ] || return 0
-  local base="${PADDOCK_SOCKET_BASE:-}"
+  local base="${PADDOCK_SOCKET_BASE:-}" j="${PADDOCK_JOB_TEMP:-}" iroot
+  iroot="$(internal_root)"
+  if [ -n "$j" ] && [ "${RUNNER_OS:-}" = macOS ] && [ -d "$j" ] && [ ! -L "$j" ] && [ "$(dirname "$j")" = "$iroot" ] && [ "$j" != "${RUNNER_TEMP:-}" ]; then
+    rm -rf "$j" "$iroot/$(basename "$j").owner"
+    echo "job-tmpdir: removed the internal job folder $j" >&2
+  fi
   [ -n "$base" ] || return 0
   if [ ! -e "$base" ] && [ ! -L "$base" ]; then return 0; fi
   if ! ours "$base"; then
@@ -97,7 +141,18 @@ cmd_remove() {
 
 cmd_sweep() {
   [ "${RUNNER_OS:-}" != Windows ] || return 0
-  local b owner
+  local b owner iroot f d
+  iroot="$(internal_root)"
+  for f in "$iroot"/*.owner; do
+    [ -f "$f" ] || continue
+    owner="$(head -n 1 "$f")"
+    d="${f%.owner}"
+    if [ -n "$owner" ] && [ ! -e "$owner" ]; then
+      if [ -d "$d" ] && [ ! -L "$d" ]; then rm -rf "$d"; fi
+      rm -f "$f"
+      echo "job-tmpdir: removed the internal job folder $d (the runner folder $owner is gone)" >&2
+    fi
+  done
   for b in "$root"/pd-*; do
     ours "$b" || continue
     [ -f "$b/.owner" ] || continue

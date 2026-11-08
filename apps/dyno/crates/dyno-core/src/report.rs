@@ -1,10 +1,11 @@
 //! The weekly health report: what the week looked like, in numbers and a few sentences.
 
+use crate::disk::volume::is_plumbing_mount;
 use crate::forecast::Forecast;
 use crate::health::Severity;
 use crate::history::{Consumer, HistoryPoint};
 use crate::time::{offset_label, to_local, LocalZone, Timestamp};
-use crate::units::bytes;
+use crate::units::{bytes, storage};
 use serde::{Deserialize, Serialize};
 
 /// The report.
@@ -116,8 +117,26 @@ pub struct ReportInput<'a> {
     pub hardware: Vec<String>,
 }
 
+/// A volume smaller than this is not a disk that fills up (mounted installer images, helper volumes): the report leaves it out.
+/// 256 MiB keeps every real disk, including a small decimal-GB stick, and drops the few-MB images.
+pub const MIN_REPORT_DISK_BYTES: u64 = 256 << 20;
+
+/// Temporary folders, which are never a disk to report on (the OS's plumbing mounts come from [`is_plumbing_mount`]).
+const TEMP_PREFIXES: &[&str] = &["/private/var/folders", "/var/folders", "/private/tmp", "/tmp", "/var/tmp"];
+
+/// Whether a disk of the history belongs in the report. The engine decides (the page and both exports show what the report holds):
+/// never an empty volume, a temporary folder, the OS's helper mounts or a volume too small to fill up. The startup disk is `/`.
+/// The history holds no read-only flag, so a large mounted image cannot be told from a disk here.
+pub fn is_report_disk(d: &ReportDisk) -> bool {
+    let temp = TEMP_PREFIXES
+        .iter()
+        .any(|p| d.disk == *p || d.disk.strip_prefix(p).is_some_and(|rest| rest.starts_with('/')));
+    !temp && !is_plumbing_mount(&d.disk) && d.total >= MIN_REPORT_DISK_BYTES && d.free <= d.total
+}
+
 /// Builds the report.
-pub fn weekly(i: ReportInput<'_>) -> WeeklyReport {
+pub fn weekly(mut i: ReportInput<'_>) -> WeeklyReport {
+    i.disks.retain(is_report_disk);
     let n = i.points.len().max(1) as f32;
     let avg_cpu = i.points.iter().map(|p| p.cpu).sum::<f32>() / n;
     let peak_cpu = i.points.iter().map(|p| p.cpu_max).fold(0.0, f32::max);
@@ -329,8 +348,8 @@ pub fn to_markdown(r: &WeeklyReport, zone: &dyn LocalZone) -> String {
             o.push_str(&format!(
                 "- {}: {} free of {}, {}\n",
                 d.disk,
-                bytes(d.free),
-                bytes(d.total),
+                storage(d.free),
+                storage(d.total),
                 forecast_text(d.forecast)
             ));
         }
@@ -430,8 +449,8 @@ pub fn to_html(r: &WeeklyReport, zone: &dyn LocalZone) -> String {
             o.push_str(&format!(
                 "<li>{}: {} free of {}, {}</li>\n",
                 e(&d.disk),
-                bytes(d.free),
-                bytes(d.total),
+                storage(d.free),
+                storage(d.total),
                 forecast_text(d.forecast)
             ));
         }
@@ -617,6 +636,37 @@ mod tests {
     }
 
     #[test]
+    fn noise_volumes_are_not_reported_in_the_page_the_highlights_or_the_exports() {
+        // Invented names of the same shape as real noise: a temp folder volume, mounted installer images, a helper volume.
+        let disk = |name: &str, total: u64, free: u64, forecast| ReportDisk {
+            disk: name.into(),
+            total,
+            free,
+            forecast,
+        };
+        let mut i = input(&[]);
+        i.crashes = 1; // a week with something in it, so the exports have their sections
+        i.disks = vec![
+            disk("/", 500 << 30, 20 << 30, Forecast::FullInDays(12.0)),
+            disk("/private/var/folders/ab/cdef0123/T/tmpXYZ", 0, 0, Forecast::NotEnoughData),
+            disk("/Volumes/Example Installer", 0, 0, Forecast::NotEnoughData),
+            disk("/Volumes/Example App", 55 << 20, 24 << 20, Forecast::NotEnoughData),
+            disk("/Volumes/Example Helper", 8 << 20, 5 << 20, Forecast::FullInDays(2.0)),
+            disk("/System/Volumes/Preboot", 500 << 30, 400 << 30, Forecast::NotFilling),
+            disk("/Volumes/Backup", 4 << 40, 1 << 40, Forecast::NotFilling),
+            disk("/Volumes/Small Stick", 512 << 20, 100 << 20, Forecast::NotFilling),
+        ];
+        let r = weekly(i);
+        let names: Vec<&str> = r.disks.iter().map(|d| d.disk.as_str()).collect();
+        assert_eq!(names, ["/", "/Volumes/Backup", "/Volumes/Small Stick"]);
+        assert!(!r.highlights.iter().any(|h| h.contains("Example Helper")), "{:?}", r.highlights);
+        for text in [to_markdown(&r, UTC), to_html(&r, UTC)] {
+            assert!(!text.contains("Example") && !text.contains("/private/var"), "{text}");
+            assert!(text.contains("Backup"), "missing Backup in: {text}");
+        }
+    }
+
+    #[test]
     fn issues_are_capped_and_disks_forecast() {
         let mut i = input(&[]);
         i.issues = (0..30).map(issue).collect();
@@ -649,7 +699,7 @@ mod tests {
         assert!(md.contains("Health score 80 (+10 against a week ago)."));
         assert!(md.contains("Recorded scores, oldest first: 70, 80."));
         assert!(md.contains("| <b>Evil\\|App</b> | 12.5% | 2.0 GB |"));
-        assert!(md.contains("- C:: 20.0 GB free of 500.0 GB, full in about 12 days"));
+        assert!(md.contains("- C:: 21 GB free of 537 GB, full in about 12 days"));
         assert!(md.contains("not filling up") && md.contains("not enough history for a forecast"));
         assert!(md.contains("1970-01-01 05:00 Warning: Issue 5 (detail)"));
     }

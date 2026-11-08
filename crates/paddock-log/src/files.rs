@@ -31,6 +31,10 @@ impl LineSink for StdoutSink {
 /// A failed open is retried at most this often (a broken disk must not make every line slow).
 const RETRY_AFTER: Duration = Duration::seconds(30);
 
+/// Most bytes the daily files of one process keep in all (today's included): the oldest days go first. 30 days at a normal rate are far
+/// below it; it is the bound that makes keeping a month safe.
+pub const TOTAL_CAP_BYTES: u64 = 100 * 1024 * 1024;
+
 struct State {
     day: Option<NaiveDate>,
     file: Option<File>,
@@ -48,6 +52,7 @@ pub struct DailyFiles {
     prefix: String,
     keep_files: usize,
     max_bytes: u64,
+    total_cap: u64,
     clock: Arc<dyn Clock>,
     enrich: Enrichment,
     state: Mutex<State>,
@@ -68,6 +73,7 @@ impl DailyFiles {
             prefix: prefix.to_string(),
             keep_files: keep_files as usize,
             max_bytes,
+            total_cap: TOTAL_CAP_BYTES,
             clock,
             enrich,
             state: Mutex::new(State {
@@ -86,6 +92,12 @@ impl DailyFiles {
     pub fn active_file(&self) -> PathBuf {
         self.dir
             .join(file_name(&self.prefix, now_utc(&*self.clock).date_naive()))
+    }
+
+    /// Another total cap than [`TOTAL_CAP_BYTES`] (tests, and apps that keep less).
+    pub fn with_total_cap(mut self, bytes: u64) -> Self {
+        self.total_cap = bytes;
+        self
     }
 
     /// Why the file cannot be written, in words for the user; `None` while it works.
@@ -138,8 +150,19 @@ impl DailyFiles {
             .filter(|(d, _)| *d != today)
             .collect();
         days.sort_by_key(|d| std::cmp::Reverse(d.0));
-        for (_, path) in days.into_iter().skip(self.keep_files) {
+        let (kept, old) = days.split_at(self.keep_files.min(days.len()));
+        for (_, path) in old {
             let _ = std::fs::remove_file(path);
+        }
+        // The total cap: today's file counts, then the newest older days while they fit; the rest go, oldest first. One
+        // busy day (Debug) can take at most its daily budget, so it can never push out more than that.
+        let mut total =
+            std::fs::metadata(self.dir.join(file_name(&self.prefix, today))).map_or(0, |m| m.len());
+        for (_, path) in kept {
+            total += std::fs::metadata(path).map_or(0, |m| m.len());
+            if total > self.total_cap {
+                let _ = std::fs::remove_file(path);
+            }
         }
     }
 }
@@ -163,10 +186,18 @@ impl LineSink for DailyFiles {
         }
         let len = line.len() as u64 + 1;
         // Once the budget is reached, only errors pass for the rest of the day, also a shorter line that would still fit.
-        let admitted =
-            level == log::Level::Error || (!st.warned && st.written + len <= self.max_bytes);
+        // Debug and Trace may use only half of the day's budget, so a Debug session cannot crowd out the day's Info, Warn and Error
+        // lines (which is what a bug report is read from).
+        let budget = if level > log::Level::Info {
+            self.max_bytes / 2
+        } else {
+            self.max_bytes
+        };
+        let full_ok = !st.warned && st.written + len <= self.max_bytes;
+        let admitted = level == log::Level::Error || (full_ok && st.written + len <= budget);
         let mut out = String::new();
-        if !admitted && !st.warned {
+        // The one-time notice is for the day's whole budget; a Debug line over its half is dropped without ending the day for the rest.
+        if !admitted && !full_ok && !st.warned {
             st.warned = true;
             let notice = format!(
                 "The log reached its daily limit of {} MB; only errors are written until tomorrow",
@@ -237,6 +268,63 @@ mod tests {
 
     fn files(dir: &Path, keep: u32, max: u64, c: &Arc<FakeClock>) -> DailyFiles {
         DailyFiles::new(dir, "demo", keep, max, c.clone(), test_enrichment())
+    }
+
+    #[test]
+    fn debug_lines_stop_at_half_the_days_budget_and_info_still_fits() {
+        let t = tempfile::tempdir().unwrap();
+        let c = clock();
+        let f = files(t.path(), 3, 1000, &c);
+        for _ in 0..100 {
+            f.write_line(log::Level::Debug, &"d".repeat(49));
+        }
+        let after_debug = std::fs::metadata(f.active_file()).unwrap().len();
+        assert!(
+            after_debug <= 500,
+            "debug stays within half the budget: {after_debug}"
+        );
+        f.write_line(log::Level::Info, "info still lands");
+        f.write_line(log::Level::Warn, "so does a warning");
+        let text = std::fs::read_to_string(f.active_file()).unwrap();
+        assert!(
+            text.contains("info still lands") && text.contains("so does a warning"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("daily limit"),
+            "debug alone did not use the budget up"
+        );
+    }
+
+    #[test]
+    fn the_total_cap_removes_the_oldest_days_first_and_never_today() {
+        let t = tempfile::tempdir().unwrap();
+        let c = clock();
+        for day in 1..=5 {
+            std::fs::write(
+                t.path().join(format!("demo.2026-10-{:02}.log", 10 + day)),
+                "x".repeat(100),
+            )
+            .unwrap();
+        }
+        // 30 days kept by count, but only about 250 bytes in all: today's file plus the newest older days that fit.
+        let f = files(t.path(), 30, 1 << 20, &c).with_total_cap(250);
+        f.write_line(log::Level::Info, "today");
+        let mut names: Vec<String> = std::fs::read_dir(t.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            [
+                "demo.2026-10-14.log",
+                "demo.2026-10-15.log",
+                "demo.2026-10-20.log"
+            ],
+            "{names:?}"
+        );
     }
 
     #[test]

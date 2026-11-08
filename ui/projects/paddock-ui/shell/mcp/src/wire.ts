@@ -40,6 +40,22 @@ function parseKey(v: unknown): KeyInfo | null {
   return { id: v['id'], client: v['client'], createdMs: v['createdMs'], revoked: v['revoked'] };
 }
 
+/** The listener state; anything unknown or malformed reads as `unavailable` (the page then shows no connection section). */
+function parseListener(v: unknown): McpView['listener'] {
+  if (!isObject(v)) return { kind: 'unavailable' };
+  switch (v['kind']) {
+    case 'off':
+    case 'noKey':
+      return { kind: v['kind'] };
+    case 'listening':
+      return count(v['port']) && typeof v['discoveryFile'] === 'string' ? { kind: 'listening', port: v['port'], discoveryFile: v['discoveryFile'] } : { kind: 'unavailable' };
+    case 'failed':
+      return typeof v['message'] === 'string' ? { kind: 'failed', message: v['message'] } : { kind: 'unavailable' };
+    default:
+      return { kind: 'unavailable' };
+  }
+}
+
 /** A `McpView` from `mcp_get` / `mcp_save` / `mcp_revoke_key`, or null when the payload is not one. */
 export function parseMcpView(v: unknown): McpView | null {
   if (!isObject(v) || !Array.isArray(v['tools']) || !Array.isArray(v['keys']) || !count(v['maxKeys'])) return null;
@@ -48,7 +64,7 @@ export function parseMcpView(v: unknown): McpView | null {
   const tools = (v['tools'] as unknown[]).map(parseTool);
   const keys = (v['keys'] as unknown[]).map(parseKey);
   if (tools.includes(null) || keys.includes(null)) return null;
-  return { settings, tools: tools as ToolInfo[], keys: keys as KeyInfo[], maxKeys: v['maxKeys'] };
+  return { settings, tools: tools as ToolInfo[], keys: keys as KeyInfo[], maxKeys: v['maxKeys'], listener: parseListener(v['listener']), keysProblem: typeof v['keysProblem'] === 'string' && v['keysProblem'] !== '' ? v['keysProblem'] : null };
 }
 
 /** The key `mcp_issue_key` answered with, or null. It is shown once and kept nowhere. */

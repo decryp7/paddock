@@ -1,5 +1,11 @@
 import type { PlacementId, PopoverValue, WidgetState } from '../../../core/generated/widgets';
 import type { WidgetActionId } from '../../../core/generated/widgets';
+import { formatStorage } from '../../../shared/format';
+
+/** "416 GB free of 995 GB": a volume's space in storage (decimal) units, as Finder shows it. */
+export function volumeSpaceText(freeBytes: number | null, totalBytes: number | null): string {
+  return `${formatStorage(freeBytes)} free of ${formatStorage(totalBytes)}`;
+}
 
 /**
  * The right-hand head text of a fresh popup widget ("2 active", "3 volumes", "last 7 days"): a count or range already in the
