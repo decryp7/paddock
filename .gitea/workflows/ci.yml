@@ -316,11 +316,7 @@ jobs:
       # nothing there, ADR 0025).
       - uses: ./.gitea/actions/build-jobs
 
-      - uses: ./.gitea/actions/build-folder
-        with:
-          workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/wiki
-          name: paddock-${{ github.job }}
-
+      # No build-folder action: the job is Linux-container only, so the build folder is tools/wiki/target in the container (git-ignored).
       - uses: ./.gitea/actions/setup-rust
         with:
           components: clippy,rustfmt
@@ -363,6 +359,9 @@ jobs:
         run: |
           cargo run --locked -- --repo ../.. lint --er ../../engineering-rules/RULES.md | tee wiki-lint.out
           echo "- wiki lint: $(tail -1 wiki-lint.out)" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
 
   # The family icons (icons/): the pipeline's tests (seam scan, coverage, tray shapes, .icns frames, docs copies) and the check that every
   # installed copy in the apps and the docs equals the build. Without the second step a hand edit of an app's icons goes unnoticed.
