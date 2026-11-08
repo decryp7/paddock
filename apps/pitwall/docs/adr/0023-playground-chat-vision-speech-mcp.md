@@ -477,6 +477,8 @@ From building WP-2a and WP-4a (`pitwall/1.1-wp2a` `9dc147e24`, `pitwall/1.1-wp4a
   capability disabled with the reason, and preselects the starter tool-capable model.
 - The build switch is temporary (plan, Phase A): a Cargo feature `chat` read by the command `chat_enabled`, until ADR 0049's
   switches exist.
+- Decided 2026-11-08 (user): the chat is sent whole up to the model's window less the answer's reserve; nothing is trimmed
+  silently, the meter shows the level and a turn that cannot fit is refused in words (WP-4b, `pitwall/1.1-wp4b` `0ef631f7f`).
 
 ## Consequences
 
