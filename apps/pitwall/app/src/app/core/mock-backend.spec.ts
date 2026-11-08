@@ -571,3 +571,12 @@ describe('MockBackend first start', () => {
     expect((await new MockBackend().overview()).server.version).toBe(BROWSER_VERSION);
   });
 });
+
+describe('MockBackend chat attachments', () => {
+  it("keeps each taken file's size for the browser build's context meter (WP-4b review 2 P2-F)", async () => {
+    const mock = new MockBackend({ latencyMs: 0 });
+    const taken = await mock.chatAttach('notes.txt', new TextEncoder().encode('x'.repeat(4000)));
+    expect(mock.chatAttachedBytes(taken.attachment.sha256)).toBe(4000);
+    expect(mock.chatAttachedBytes('0'.repeat(64))).toBeUndefined();
+  });
+});

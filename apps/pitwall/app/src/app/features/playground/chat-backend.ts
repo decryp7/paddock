@@ -16,6 +16,7 @@ import {
   type SendRequest,
   type Unlisten,
 } from '@decryp7/paddock-ui/workbench/assistant';
+import { BACKEND } from '../../core/backend';
 import { openedWith } from '../../core/backend-factory';
 import { tauriIpc } from '../../shell/ipc';
 
@@ -91,7 +92,14 @@ export function createChatBackend(): SavingAssistantBackend {
   // meter's high and full levels; `?mock-context=unknown` plays a model whose window is not known.
   const wanted = new URLSearchParams(openedWith()).get('mock-context');
   const tokens = wanted === 'unknown' ? -1 : Number(wanted);
-  const inner = ipc ? new TauriAssistantBackend(ipc) : (browser ??= new MemoryAssistantBackend({ reply: browserReply, ...(tokens > 0 ? { contextTokens: tokens } : tokens < 0 ? { contextTokens: 0 } : {}) }));
+  // The mock backend took the files (`chatAttach`) and knows their sizes: about four bytes a token, as Rust estimates.
+  const sizes = ipc ? null : (inject(BACKEND, { optional: true }) as { chatAttachedBytes?(sha256: string): number | undefined } | null);
+  const attachmentTokens = (a: Attachment): number => {
+    const bytes = sizes?.chatAttachedBytes?.(a.sha256);
+    return bytes === undefined ? 250 : Math.ceil(bytes / 4);
+  };
+  const room = tokens > 0 ? { contextTokens: tokens } : tokens < 0 ? { contextTokens: 0 } : {};
+  const inner = ipc ? new TauriAssistantBackend(ipc) : (browser ??= new MemoryAssistantBackend({ reply: browserReply, attachmentTokens, ...room }));
   return new SavingAssistantBackend(inner, saving);
 }
 

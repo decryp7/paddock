@@ -66,7 +66,7 @@ import { ChatSaving, createChatBackend, createChatSpeech } from './chat-backend'
       class="assistant"
       actionsGate="per-call"
       emptyTitle="Chat with a local model"
-      [emptyAction]="anyConnected() ? null : 'Connected apps…'"
+      [emptyAction]="anyConnected() || short() ? null : 'Connected apps…'"
       [emptyHint]="emptyHint"
       [failedCause]="failedCause"
       (emptyActionClick)="openApps()"
@@ -136,6 +136,9 @@ export class PlaygroundChat {
     }
     return out;
   });
+  /** The window is short (under about 760 px tall): the empty chat leaves "Connected apps…" to the bar above it, so the log
+   *  keeps its room (WP-4b review 2). */
+  protected readonly short = signal(false);
   /** Some app lends its tools now (the empty chat then needs no "Connected apps…"). */
   protected readonly anyConnected = computed(() => (this.apps() ?? []).some((a) => a.connected));
 
@@ -159,7 +162,15 @@ export class PlaygroundChat {
     void this.load();
     // Settings is another window: a connect made there reaches this tab through Rust's event.
     const stop = this.backend.onConnectedApps((apps) => this.apps.set(apps));
-    inject(DestroyRef).onDestroy(stop);
+    const destroy = inject(DestroyRef);
+    destroy.onDestroy(stop);
+    if (typeof matchMedia === 'function') {
+      const query = matchMedia('(max-height: 760px)');
+      this.short.set(query.matches);
+      const change = (e: MediaQueryListEvent): void => this.short.set(e.matches);
+      query.addEventListener('change', change);
+      destroy.onDestroy(() => query.removeEventListener('change', change));
+    }
   }
 
   async load(): Promise<void> {
