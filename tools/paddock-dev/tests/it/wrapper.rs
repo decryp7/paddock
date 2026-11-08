@@ -301,14 +301,20 @@ fn write_script(path: &Path, body: &str) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
+/// A stand-in `cargo` that "builds" a script answering `--version`, `self hash` (the hash it was built for, as the real tool shows)
+/// and a marker, then takes `slow` seconds to return, as a busy build would.
+#[cfg(unix)]
+fn shim_cargo(slow: u32) -> String {
+    format!(
+        r#"mkdir -p "$CARGO_TARGET_DIR/release"; printf '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 0; exit 0; fi\nif [ "$1" = self ]; then echo "embedded %s"; exit 0; fi\necho built-by-shim\n' "$PADDOCK_DEV_HASH" > "$CARGO_TARGET_DIR/release/paddock-dev"; chmod +x "$CARGO_TARGET_DIR/release/paddock-dev"; sleep {slow}"#
+    )
+}
+
 /// Runs the whole wrapper (not just `--wrapper-hash`) with a scratch cache and a stand-in `cargo` that "builds" a script.
 #[cfg(unix)]
 fn run_wrapper(f: &Fixture, home: &Path, extra_env: &[(&str, String)]) -> (i32, String, String) {
     let shims = f.cargo_home.path().join("shims");
-    write_script(
-        &shims.join("cargo"),
-        r#"mkdir -p "$CARGO_TARGET_DIR/release"; printf '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 0; exit 0; fi\necho built-by-shim\n' > "$CARGO_TARGET_DIR/release/paddock-dev"; chmod +x "$CARGO_TARGET_DIR/release/paddock-dev""#,
-    );
+    write_script(&shims.join("cargo"), &shim_cargo(0));
     let path = format!("{}:{}", shims.display(), std::env::var("PATH").unwrap());
     let mut cmd = Command::new("sh");
     cmd.arg(f.root().join("dev"))
@@ -475,10 +481,7 @@ fn on_a_ci_runner_with_a_kept_mount_the_tool_is_cached_there_and_an_explicit_hom
     std::fs::create_dir_all(&mount).unwrap();
     let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
     let (hash, _) = f.both(&[("RUSTC", rustc.clone())]);
-    write_script(
-        &f.cargo_home.path().join("shims/cargo"),
-        r#"mkdir -p "$CARGO_TARGET_DIR/release"; printf '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 0; exit 0; fi\necho built-by-shim\n' > "$CARGO_TARGET_DIR/release/paddock-dev"; chmod +x "$CARGO_TARGET_DIR/release/paddock-dev""#,
-    );
+    write_script(&f.cargo_home.path().join("shims/cargo"), &shim_cargo(0));
     let path = format!("{}:{}", f.cargo_home.path().join("shims").display(), std::env::var("PATH").unwrap());
     let run = |extra: &[(&str, &Path)]| {
         let mut cmd = Command::new("sh");
@@ -500,16 +503,153 @@ fn on_a_ci_runner_with_a_kept_mount_the_tool_is_cached_there_and_an_explicit_hom
     let cached = mount.join("paddock-dev/bin").join(&hash).join("paddock-dev-test-host");
     assert!(cached.exists(), "the tool is kept on the mount: {cached:?}");
     assert!(
-        mount.join("paddock-dev/target/release/paddock-dev").exists(),
+        mount
+            .join(format!("paddock-dev/target-{hash}"))
+            .join("release/paddock-dev")
+            .exists(),
         "and so is its build folder"
     );
     assert!(!scratch.path().join("home/.paddock-dev").exists(), "nothing in the runner's home");
     // The next run finds it without building.
-    std::fs::remove_dir_all(mount.join("paddock-dev/target")).unwrap();
+    std::fs::remove_dir_all(mount.join(format!("paddock-dev/target-{hash}"))).unwrap();
     assert_eq!(run(&[]), (0, "built-by-shim".to_string()));
-    assert!(!mount.join("paddock-dev/target").exists(), "no second build");
+    assert!(!mount.join(format!("paddock-dev/target-{hash}")).exists(), "no second build");
     // An explicit home is used as given.
     let own = scratch.path().join("own");
     assert_eq!(run(&[("PADDOCK_DEV_HOME", own.as_path())]).0, 0);
     assert!(own.join("bin").join(&hash).exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn two_wrappers_with_different_hashes_on_one_kept_mount_each_cache_their_own_binary() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let mount = scratch.path().join("mount");
+    std::fs::create_dir_all(&mount).unwrap();
+    let rustc_a = fake_rustc(scratch.path(), "rustc-a", "1.90.0", "aaaa", "test-host");
+    let rustc_b = fake_rustc(scratch.path(), "rustc-b", "1.91.0", "bbbb", "test-host");
+    let (hash_a, _) = f.both(&[("RUSTC", rustc_a.clone())]);
+    let (hash_b, _) = f.both(&[("RUSTC", rustc_b.clone())]);
+    assert_ne!(hash_a, hash_b);
+    write_script(&f.cargo_home.path().join("shims/cargo"), &shim_cargo(2));
+    let path = format!("{}:{}", f.cargo_home.path().join("shims").display(), std::env::var("PATH").unwrap());
+    let spawn = |rustc: &str| {
+        Command::new("sh")
+            .arg(f.root().join("dev"))
+            .arg("hello")
+            .current_dir(f.root())
+            .env_clear()
+            .env("PATH", &path)
+            .env("HOME", scratch.path().join("home"))
+            .env("CARGO_HOME", f.cargo_home.path())
+            .env("RUSTC", rustc)
+            .env("GITHUB_ACTIONS", "true")
+            .env("PADDOCK_CI_MOUNT", &mount)
+            .output_child()
+    };
+    // B starts while A's build is still "running": B's build replaces the binary A's build left.
+    let a = spawn(&rustc_a);
+    std::thread::sleep(std::time::Duration::from_millis(700));
+    let b = spawn(&rustc_b);
+    for (name, child) in [("a", a), ("b", b)] {
+        let out = child.wait_with_output().unwrap();
+        assert_eq!(out.status.code(), Some(0), "{name}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    for hash in [&hash_a, &hash_b] {
+        let cached = mount.join("paddock-dev/bin").join(hash).join("paddock-dev-test-host");
+        let out = Command::new(&cached).args(["self", "hash"]).output().unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            format!("embedded {hash}"),
+            "the binary cached under {hash} was built for another hash"
+        );
+    }
+    let leftovers: Vec<_> = std::fs::read_dir(mount.join("paddock-dev/bin").join(&hash_a))
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .collect();
+    assert_eq!(leftovers, ["paddock-dev-test-host"], "no temporary copy is left behind");
+}
+
+#[cfg(unix)]
+trait SpawnPiped {
+    fn output_child(&mut self) -> std::process::Child;
+}
+
+#[cfg(unix)]
+impl SpawnPiped for Command {
+    fn output_child(&mut self) -> std::process::Child {
+        use std::process::Stdio;
+        self.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap()
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failed_build_names_the_hash_and_the_next_step_in_an_annotation() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    write_script(&f.cargo_home.path().join("shims/cargo"), "echo boom >&2; exit 101");
+    let path = format!("{}:{}", f.cargo_home.path().join("shims").display(), std::env::var("PATH").unwrap());
+    let out = Command::new("sh")
+        .arg(f.root().join("dev"))
+        .current_dir(f.root())
+        .env("PATH", path)
+        .env("PADDOCK_DEV_HOME", scratch.path().join("home"))
+        .env("CARGO_HOME", f.cargo_home.path())
+        .env("RUSTC", rustc)
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1), "{err}");
+    assert!(
+        err.contains("::error::./dev could not build paddock-dev") && err.contains("cargo build --release --locked"),
+        "{err}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_ci_run_without_a_kept_mount_says_so() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    write_script(&f.cargo_home.path().join("shims/cargo"), &shim_cargo(0));
+    let path = format!("{}:{}", f.cargo_home.path().join("shims").display(), std::env::var("PATH").unwrap());
+    let out = Command::new("sh")
+        .arg(f.root().join("dev"))
+        .current_dir(f.root())
+        .env("PATH", path)
+        .env("HOME", scratch.path().join("home"))
+        .env("CARGO_HOME", f.cargo_home.path())
+        .env("RUSTC", rustc)
+        .env("GITHUB_ACTIONS", "true")
+        .env("PADDOCK_CI_MOUNT", scratch.path().join("missing"))
+        .env_remove("PADDOCK_DEV_HOME")
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("::notice::./dev builds paddock-dev in this job"), "{err}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_cached_tool_touched_in_the_last_minutes_is_never_pruned() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let home = scratch.path().join("home");
+    for i in 0..7 {
+        write_script(&home.join(format!("bin/recent-{i}/paddock-dev-test-host")), "exit 0");
+    }
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    let (code, _, err) = run_wrapper(&f, &home, &[("RUSTC", rustc)]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(
+        std::fs::read_dir(home.join("bin")).unwrap().count(),
+        8,
+        "a job on the same mount may be about to run them"
+    );
 }
