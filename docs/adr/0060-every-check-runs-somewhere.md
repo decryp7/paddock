@@ -347,6 +347,18 @@ after WP-3 (each fix then shows as a removed entry); WP-5 with WP-3. WP-4's app 
 `clippy.toml` and sources, so each app's part is scheduled outside that app's release freeze (ER-1). Inside ADR 0022
 G.7's cap of two tooling agents during a release.
 
+### Follow-up work packages (added at the review of `feat/gates-c100`, 2026-11-08)
+
+The baseline register (WP-3) lists what C100's first run found. Its entries need owners that exist, so the work behind them is
+named here. Estimates are agent-days, not yet planned by an app's planner.
+
+| WP | Content | Days |
+|---|---|---|
+| WP-6 | **App conformance lines.** A conformance line in each app's `paddock.ci.json` `checks` for C03, C04, C07, C08, C23, C28, C32, C33, C34 and C91 (the apps each applies to), fixing what the first run finds; C13 for Debrief and the two demos once the lint preset is adopted there (DBR-LINT; the demos need their lint tables, opt-ins and a `clippy.toml`). C14 and C29 become gates when an app's windowWeight budgets and stats are wired. | 3 |
+| WP-7 | **Orphaned scripts, npm scripts and actions.** Run each in CI or delete it: the `check-*` scripts of Dyno, the Debrief and demo `*.test.mjs`, the five `apps/*/app:test` npm scripts, `strip-signing-keys`, and the `conformance` action (called from the app legs or deleted). | 1.5 |
+| WP-8 | **What the deleted workflows used to give.** A nightly job over `crates/` and the apps running the never-panics properties with `PROPTEST_CASES=10000` in release mode (C36 requires the tests to exist; nothing ran them hard once `app-never-panics.yml` went), a record that no CI mutation gate exists outside `debrief-core` (a monorepo version of `app-mutants.yml` is a later decision), and one `npm audit --omit=dev` over the root lock in `ci.yml`. | 1.5 |
+| WP-9 | **Ignored and env-gated tests.** Give every file of the baseline a real gate: measurements into results blocks (rule 48), VM rows into the `vm-smoke` harness (the 27 `paddock-setup` Windows rows test hostile files, junctions and signatures and are run by nothing: a release-readiness question, ER-33), the documentation screenshot captures into one on-demand job. | 3 |
+
 **Rollback.** C100 can become a warning by one flag on its CI line (`./dev gates check --warn`, which still prints every
 finding, and which the model itself counts as report-only). The register stays as documentation.
 
