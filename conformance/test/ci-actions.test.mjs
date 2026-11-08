@@ -1846,3 +1846,13 @@ test('app-fuzz.yml writes new inputs to the cached corpus and keys its caches by
   assert.ok(keys.length >= 4, 'the build and corpus caches have keys and restore keys');
   for (const k of keys) assert.match(k, /inputs\.fuzz-dir/, `cache key without the fuzz dir: ${k}`);
 });
+
+test('no workflow passes every secret on (`secrets: inherit`): a called workflow gets the secrets it names, nothing else', () => {
+  const dir = join(PADDOCK, '.gitea', 'workflows');
+  const files = readdirSync(dir).filter((f) => f.endsWith('.yml'));
+  assert.ok(files.length > 10, `found the workflows (${files.length})`);
+  for (const f of files) {
+    const lines = readFileSync(join(dir, f), 'utf8').split('\n').filter((l) => !l.trim().startsWith('#'));
+    assert.ok(!lines.some((l) => /^\s*secrets:\s*inherit\b/.test(l)), `${f}: \`secrets: inherit\` hands the signing keys to every called job; name each secret`);
+  }
+});
