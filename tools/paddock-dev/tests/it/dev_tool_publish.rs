@@ -99,6 +99,7 @@ fn the_tool_is_uploaded_binary_first_then_its_checksum_and_never_labelled_as_a_f
         &script,
     )
     .unwrap();
+    let (consumer_hash, _) = f.both(&[("RUSTC", shims.join("rustc").display().to_string())]);
     let store = Store::start();
     let path = format!("{}:{}", shims.display(), std::env::var("PATH").unwrap());
     let out = Command::new("bash")
@@ -117,5 +118,11 @@ fn the_tool_is_uploaded_binary_first_then_its_checksum_and_never_labelled_as_a_f
     let files = store.files.lock().unwrap();
     let names: Vec<_> = files.keys().map(|k| k.rsplit('/').next().unwrap().to_string()).collect();
     assert_eq!(names, ["paddock-dev-test-host", "paddock-dev-test-host.sha256"], "{stdout}");
+    // The consumer (the wrapper every CI job runs) asks for the version the script published under.
+    assert!(
+        files.keys().all(|k| k.contains(&format!("/paddock-dev/{consumer_hash}/"))),
+        "published under {:?}, consumers ask for {consumer_hash}",
+        files.keys()
+    );
     assert!(!stdout.contains("write-token") && !stderr.contains("write-token"));
 }

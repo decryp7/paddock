@@ -231,6 +231,9 @@ fn a_tool_that_is_not_published_falls_back_to_a_build_with_a_notice() {
         err.contains("::notice::") && err.contains("not published") && err.contains("404"),
         "{err}"
     );
+    // A miss can be explained from the log: the compiler, the hashed variable names and the config digests (no values).
+    assert!(err.contains("inputs: ") && err.contains("release: 1.90.0"), "{err}");
+    assert!(err.contains("| env: ") && err.contains("| configs: "), "{err}");
     assert!(s.built());
     s.assert_clean();
 }
