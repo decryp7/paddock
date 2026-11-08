@@ -131,7 +131,15 @@ export async function trayCountdownStep(actor, { idleRuleSeeded = true } = {}) {
   for (let i = 0; i < 50 && !running; i++) { running = /Counting down/.test(ssh('& "$env:ProgramFiles\\Dyno\\dyno.exe" idle 2>&1 | Out-String')); if (!running) await sleep(4000); }
   checks.push({ ok: running, detail: running ? 'an idle countdown is running' : `no idle countdown within 200 s${idleRuleSeeded ? '' : ' (no idle rule seeded)'}` });
   if (!running) return result('Windows: tray menu during an idle countdown (Cancel, Snooze)', checks, evidence);
-  const { menu } = await openMenu(actor);
+  // Up to three tries: the countdown re-arms on input and the menu from an earlier click may still be closing (0ad round 5: an empty read with the countdown running).
+  let menu = [];
+  for (let k = 1; k <= 3 && !menu.length; k++) {
+    await closeMenus(actor);
+    const o = await openMenu(actor);
+    menu = o.menu;
+    evidence.push(`try ${k}: native menu ${o.watch.seen ? `seen after ${o.watch.ms} ms` : 'NOT seen in 6 s'}; app log right click ${o.logged ? 'logged' : 'NOT logged'}; ${o.menu.length} item(s)`);
+    if (!menu.length) await sleep(2000);
+  }
   evidence.push(`menu: ${menu.map((m) => m.name).join(' | ')}`);
   checks.push({ ...(menu.length ? {} : { kind: 'check' }), ok: menu.some((m) => /Will sleep in|Counting down/i.test(m.name)), detail: 'the menu shows the countdown line ("Will sleep in ...")' });
   const snooze = menu.find((m) => /Snooze/i.test(m.name));
