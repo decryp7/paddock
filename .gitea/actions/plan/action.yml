@@ -1,11 +1,11 @@
 name: plan
-description: "Decides whether this run is needed: a nightly is skipped while main is unchanged since the last green one, a push to main whose commit is tagged is covered by the tag run, and for an app's own workflow (`app`) the change must reach that app (scripts/affected.mjs --ci --app; needs fetch-depth 0)."
+description: "Decides whether this run is needed: a nightly is skipped while main is unchanged since the last green one, a push to main whose commit is tagged is covered by the tag run, and for an app's own workflow (`app`) the change must reach that app (`./dev plan --ci --app`; needs fetch-depth 0)."
 inputs:
   main-ref:
     description: The default branch ref.
     default: refs/heads/main
   app:
-    description: "An app of the monorepo: the run is needed only when the change reaches it (affected.mjs). Empty: no such check."
+    description: "An app of the monorepo: the run is needed only when the change reaches it (`./dev plan`). Empty: no such check."
     default: ""
   tag-pattern:
     description: "Tags of the push-to-main skip (git ls-remote pattern): v* for the repository's, pitcrew-v* for an app."
