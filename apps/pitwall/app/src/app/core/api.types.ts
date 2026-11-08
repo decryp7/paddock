@@ -574,6 +574,8 @@ export interface LocalModel {
   slotsCustom: boolean;
   /** The slots it is loaded with now (null: not loaded). A different `slots` applies on the next load. */
   loadedSlots: number | null;
+  /** The context of one slot in tokens: what one request may hold (loaded, or as it will load). Null from an older server. */
+  contextPerSlot: number | null;
 }
 
 /** One row of the slots fit table: what `slots` parallel slots mean at the asked context per slot. */

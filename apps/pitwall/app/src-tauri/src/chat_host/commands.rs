@@ -6,7 +6,7 @@
 use super::apps::{AppsError, ConnectedApp, ConnectedApps, Opened};
 use super::attach::{prepare, AttachRules, Attached, MAX_TEXT_BYTES};
 use super::chats::{ChatStorage, ChatStores, ChatsError};
-use super::models::{chat_models, ChatModels, Facts};
+use super::models::{chat_models, chat_window, ChatModels, Facts};
 use super::{ChatLog, PitwallPolicy, ToolNames};
 use crate::chat_provider::ServerChatProvider;
 use crate::commands::{forward, SharedClient};
@@ -221,8 +221,7 @@ async fn models_for(chat: &ChatState, wanted: Option<String>) -> Result<ChatMode
     let picker = chat_models(locals.iter().map(Facts::from), &catalog, wanted.as_deref());
     chat.provider.set_model(picker.selected.clone().unwrap_or_default());
     if let Some(m) = locals.iter().find(|m| Some(&m.id) == picker.selected.as_ref()) {
-        chat.provider
-            .set_context_length(m.context_max.and_then(|c| usize::try_from(c).ok()).unwrap_or(0));
+        chat.provider.set_context_length(chat_window(m.context_max, m.context_per_slot));
     }
     Ok(picker)
 }

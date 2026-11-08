@@ -136,10 +136,35 @@ pub fn chat_models<'a>(locals: impl IntoIterator<Item = Facts<'a>>, catalog: &[C
     ChatModels { models, selected, notes }
 }
 
+/// The chat's window in tokens (ADR 0023 WP-4b): what one request may hold, so the meter and the check before sending use it.
+/// llama-server gives each slot `--ctx-size / --parallel` tokens, so it is the context per slot, never more than the model was
+/// trained for; 0 when neither is known (the engine then says what overflowed).
+pub fn chat_window(context_max: Option<u64>, context_per_slot: Option<u32>) -> usize {
+    let tokens = match (context_max, context_per_slot.map(u64::from)) {
+        (Some(max), Some(slot)) => max.min(slot),
+        (max, slot) => max.or(slot).unwrap_or(0),
+    };
+    usize::try_from(tokens).unwrap_or(usize::MAX)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use Capability::{Chat, Embeddings, Tools};
+
+    #[test]
+    fn the_window_is_one_slots_context_never_more_than_the_model_was_trained_for() {
+        assert_eq!(chat_window(Some(131_072), Some(8192)), 8192);
+        assert_eq!(chat_window(Some(4096), Some(8192)), 4096);
+        assert_eq!(chat_window(None, Some(8192)), 8192);
+        assert_eq!(chat_window(Some(32_768), None), 32_768);
+        assert_eq!(chat_window(None, None), 0, "unknown: the engine then says what overflowed");
+        assert_eq!(chat_window(Some(u64::MAX), None), usize::MAX);
+        // The room the meter and the check before sending use: the slot's context less the answer's reserve.
+        let reserve = paddock_assistant::Budgets::default().max_answer_tokens as u64;
+        let room = paddock_assistant::ContextUse::new(0, chat_window(Some(131_072), Some(8192)) as u64, reserve, false);
+        assert_eq!(room.limit_tokens, 8192 - reserve);
+    }
 
     fn model<'a>(id: &'a str, loaded: bool, caps: &'a [Capability]) -> Facts<'a> {
         Facts {

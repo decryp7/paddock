@@ -488,6 +488,7 @@ fn verify_gguf(p: &Path) -> Result<(), String> {
 pub fn to_dto(
     f: &LocalFile,
     loaded_slots: Option<Slots>,
+    context_per_slot: Option<u32>,
     prefs: &pitwall_core::config::ModelPrefs,
     defaults: (u32, Slots),
     room: &Room,
@@ -520,6 +521,7 @@ pub fn to_dto(
         slots: slots.get(),
         slots_custom: prefs.slots.is_some(),
         loaded_slots: loaded_slots.map(Slots::get),
+        context_per_slot,
         fit: slots::assess_slots(Some(&size), prefs.context.unwrap_or(context), slots, room),
     }
 }

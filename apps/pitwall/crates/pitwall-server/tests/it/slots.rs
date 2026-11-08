@@ -50,6 +50,8 @@ async fn the_launch_gets_parallel_and_the_total_context() {
         ),
         (json!(4), json!(true), json!(4))
     );
+    // What one request may hold (the chat's window): the context of one slot, not the trained maximum.
+    assert_eq!(models[0]["contextPerSlot"], 8192);
     h.st.serving.release_all();
 }
 
@@ -61,6 +63,7 @@ async fn the_default_comes_from_the_settings_and_null_returns_to_it() {
         (m[0]["slots"].clone(), m[0]["slotsCustom"].clone(), m[0]["loadedSlots"].clone()),
         (json!(2), json!(false), Value::Null)
     );
+    assert_eq!(m[0]["contextPerSlot"], 8192, "not loaded: the context it will be loaded with");
     assert_eq!(set_slots(&h, json!(8)).await.status, 200);
     assert_eq!(h.rpc("local_models", json!({})).await.json()[0]["slots"], 8);
     let back = set_slots(&h, Value::Null).await;
