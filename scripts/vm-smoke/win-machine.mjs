@@ -242,6 +242,8 @@ export async function winHung() {
   const gMs = Number(ssh('[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()').trim().split('\n').at(-1)); const hMs = Date.now();
   const r = await hungPageStep({
     clockOffsetMs: Number.isFinite(gMs) ? hMs - gMs : undefined,
+    // The guest's own local time (the app's log writes local time labelled Z) read right after the stop: log lines are dated against it, whatever the zone.
+    guestAtSuspend: async () => ssh("(Get-Date).ToString('yyyy-MM-ddTHH:mm:ss.fff') + 'Z'").trim().split('\\n').at(-1),
     now: () => Date.now() / 1000, sleep,
     suspend: async () => { const out = ssh(`${NT}${renderers}foreach ($i in $ids) { [void][N.P]::NtSuspendProcess((Get-Process -Id $i).Handle) }; $ids.Count`, { admin: true }); if (!(Number(out.trim().split('\\n').at(-1)) > 0)) throw new Error(`no WebView2 renderer of dyno-app was found (dyno processes: ${ssh("Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^dyno' } | ForEach-Object { $_.Name + ' pid=' + $_.ProcessId + ' session=' + $_.SessionId + ' ' + $_.CommandLine }", { admin: true }).replace(/\s*\n\s*/g, ' | ').slice(0, 500) || 'none'}; WebView2 processes: ${ssh(WEBVIEW_LISTING_PS, { admin: true }).replace(/\s*\n\s*/g, ' | ').slice(0, 600) || 'none'})`); },
     resume: async () => { ssh(`${NT}${renderers}foreach ($i in $ids) { [void][N.P]::NtResumeProcess((Get-Process -Id $i).Handle) }`, { admin: true }); },

@@ -375,8 +375,9 @@ export async function winMcpStep() {
     os: 'windows', dyno: 'C:\\Program Files\\Dyno\\dyno.exe', sh,
     configDir: async () => ssh('foreach ($d in "$env:LOCALAPPDATA\\Dyno", "$env:APPDATA\\Dyno") { if (Test-Path "$d\\settings.json") { $d; break } }').trim() || null,
     stopApp: async () => { ssh('Get-Process dyno-app -ErrorAction SilentlyContinue | Stop-Process -Force'); await sleep(3000); }, startApp,
-    // The app supervises its agent and starts a new one within seconds, so the app is ended first: the call "with the agent gone" must find no agent (0ad round 7: a respawned agent, "not tested").
-    killAgent: async () => { ssh('Get-Process dyno-app -ErrorAction SilentlyContinue | Stop-Process -Force; Get-Process dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force'); await sleep(2000); },
+    // The app supervises its agent and starts a new one within seconds, so one kill leaves a gap shorter than the call (0ad round 7: "agent still running", "not tested"). The agent is held
+    // down by a kill loop in the guest (every 300 ms for 20 s) while the call and the check run; ending the app first made the CLI print "The app isn't open" instead of a JSON-RPC error.
+    killAgent: async () => { const l = spawn('bash', [VMWIN, 'ssh', '--admin', 'for ($i = 0; $i -lt 66; $i++) { Get-Process dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Milliseconds 300 }'], { stdio: 'ignore' }); l.unref(); await sleep(2500); },
     agentAlive: async () => ssh('[bool](Get-Process dyno-agent -ErrorAction SilentlyContinue)') === 'True',
     quitApp: async () => { ssh('Get-Process dyno-app -ErrorAction SilentlyContinue | Stop-Process -Force'); await sleep(3000); },
     pidAlive: async (pid) => ssh(`[bool](Get-Process -Id ${pid} -ErrorAction SilentlyContinue)`) === 'True',

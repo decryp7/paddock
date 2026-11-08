@@ -66,14 +66,16 @@ export async function hungPageStep(g, title) {
   await poll(); // lines from before the stop are not this stop's
   events.length = 0;
   const suspendedAt = g.now();
-  try { await g.suspend(); } catch (e) { return makeResult(title, [chk(false, `the page process could not be stopped: ${e.message}`, 'check')]); }
+  let guestMark = null;
+  const toHost = (iso) => (g.guestAtSuspend && guestMark ? suspendedAt + (Date.parse(iso) - Date.parse(guestMark)) / 1000 : g.clockOffsetMs !== undefined ? (Date.parse(iso) + g.clockOffsetMs) / 1000 : null);
+  try { await g.suspend(); guestMark = g.guestAtSuspend ? (await g.guestAtSuspend()) : null; } catch (e) { return makeResult(title, [chk(false, `the page process could not be stopped: ${e.message}`, 'check')]); }
   let questionsWhileOpen = null, keepWaitingAt = null, secondAskAt = null, shot = null;
   for (let i = 0; i < 90 && !events.some((e) => e.kind === 'asked'); i++) { await g.sleep(3000); await poll(); }
   // A question the polls did not return but the log holds (0ad round 7): dated by the log's own @t, moved to the host clock by the offset measured at the stop.
   if (!events.some((e) => e.kind === 'asked') && g.finalLines) {
     for (const l of await g.finalLines()) {
       const m = /"@t":"([^"]+)"/.exec(l);
-      if (eventOf(l) === 'asked' && m && g.clockOffsetMs !== undefined) { const t = (Date.parse(m[1]) + g.clockOffsetMs) / 1000; if (t >= suspendedAt) { events.push({ t, kind: 'asked' }); break; } }
+      if (eventOf(l) === 'asked' && m && toHost(m[1]) !== null) { const t = toHost(m[1]); if (t >= suspendedAt - 5) { events.push({ t, kind: 'asked' }); break; } }
     }
   }
   if (events.some((e) => e.kind === 'asked')) {
@@ -91,11 +93,11 @@ export async function hungPageStep(g, title) {
   try { await g.resume(); resumedAt = g.now(); for (let i = 0; i < 10 && !events.some((e) => e.kind === 'recovered' && e.t >= resumedAt); i++) { await g.sleep(3000); await poll(); } await g.sleep(2000); questionsAfterResume = await g.questions('resumed'); } catch { /* reported by the judge */ }
   // Lines the polls did not return but the log holds are added here, dated by their own @t on the host clock, so a poll that misses lines cannot turn into a verdict about the app.
   const all = g.finalLines ? await g.finalLines() : [];
-  if (g.clockOffsetMs !== undefined) for (const l of all) {
+  for (const l of all) {
     const m = /"@t":"([^"]+)"/.exec(l); const k = eventOf(l);
-    if (!k || !m) continue;
-    const t = (Date.parse(m[1]) + g.clockOffsetMs) / 1000;
-    if (t >= suspendedAt && !events.some((e) => e.kind === k && Math.abs(e.t - t) < 15)) events.push({ t, kind: k });
+    if (!k || !m || toHost(m[1]) === null) continue;
+    const t = toHost(m[1]);
+    if (t >= suspendedAt - 5 && !events.some((e) => e.kind === k && Math.abs(e.t - t) < 15)) events.push({ t, kind: k });
   }
   events.sort((a, b) => a.t - b.t);
   const lateAsk = all.filter((l) => eventOf(l) === 'asked');
