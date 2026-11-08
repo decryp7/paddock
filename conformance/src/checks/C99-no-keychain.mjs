@@ -18,17 +18,19 @@
 // Positive controls (ER-33): a tree with a Cargo.toml but no source file read, a tree with no Cargo.toml whose CI contract
 // does not say "no Rust", and a file that cannot be read are each "check broken", never a pass.
 //
-// Not built yet (ADR 0057 WP-2): the dependency source scan (3), the macOS graph probe with `cargo fetch` (4), the
-// Clippy entries in the preset and C13's disallowed-types (5). Until then a Keychain call inside a dependency, or a
-// dependency that pulls `keyring` in without naming it here, is not seen by this check.
-import { error } from '../finding.mjs';
+// 3. and 4. For every shipped Cargo.lock (not the crates/ library workspace, which is not a build): `cargo fetch`,
+//    `cargo metadata` and `cargo tree --target aarch64-apple-darwin` (util/keychain-graph.mjs). The keyring crates fail anywhere in that graph, a
+//    Keychain binding crate fails below a dependent nobody reviewed, and the sources of every other dependency are read
+//    for the Keychain symbols. A failed fetch or an unreadable graph is "check broken"; no Cargo.lock is "not measured".
+// 5. The Clippy entries (lint/clippy.toml, compared by C13) ban the Keychain API paths and types in the app's own code.
+import { join } from 'node:path';
+import { error, warn } from '../finding.mjs';
 import { tomlTables } from '../sync/baseline.mjs';
+import { graphFindings, MACOS_ONLY_BANNED, ONE_DOOR, probeWorkspace, readGraph, SYMBOLS, sourceScan } from '../util/keychain-graph.mjs';
 
 /** Paths that never ship: their manifests and sources are not checked. */
 const NOT_SHIPPED = [/(^|\/)fuzz\//, /^tools\/paddock-dev\//, /(^|\/)harness\//, /^spikes\//, /^conformance\//, /(^|\/)node_modules\//];
 
-const ONE_DOOR = new Set(['keyring', 'keyring-core', 'apple-native-keyring-store', 'windows-native-keyring-store', 'zbus-secret-service-keyring-store']);
-const MACOS_ONLY_BANNED = new Set(['security-framework', 'security-framework-sys', 'objc2-security']);
 const OFF_MACOS = new Set(['not(target_os = "macos")', 'windows', 'target_os = "windows"', 'target_os = "linux"']);
 const EXEMPT = new Set(['paddock-secrets', 'paddock-workspace-hack']);
 
@@ -36,7 +38,6 @@ const SOURCE = /\.(rs|c|m|h|cpp|swift)$/;
 const TS = /^(.*\/)?(app\/src|ui\/projects)\/.*\.ts$/;
 const CAPABILITY = /(^|\/)src-tauri\/capabilities\/[^/]+\.json$/;
 
-const SYMBOLS = /\b(SecItemCopyMatching|SecItemAdd|SecItemUpdate|SecItemDelete|SecItemImport|SecKeychain[A-Z]\w*|SecCertificateAddToKeychain|SecPKCS12Import)\b/g;
 const SUBCOMMANDS = /\b((?:find|add|delete)-(?:generic|internet)-password|find-certificate|find-identity|delete-certificate|delete-identity|add-trusted-cert|create-keychain|unlock-keychain|dump-keychain)\b/g;
 // `import` and `export` are common words: only right after `security` (as in `security export` or ["security", "export"]).
 const IMPORT_EXPORT = /\bsecurity\b["'`]?\s*[,)]?\s*["'`]?(import|export)\b/g;
@@ -130,6 +131,9 @@ export function sourceFindings(file, text) {
   return out.sort((a, b) => a.line - b.line);
 }
 
+/** Workspaces whose macOS graph is probed: every shipped Cargo.lock, but not the crates/ libraries (not a build). */
+const probed = (lock) => !/^crates$/.test(lock === 'Cargo.lock' ? '' : lock.slice(0, -'/Cargo.lock'.length));
+
 const shipped = (f) => !NOT_SHIPPED.some((re) => re.test(f));
 
 export default {
@@ -187,6 +191,42 @@ export default {
           'Keep the secret in an owner-only file through paddock-secrets (FileSecrets or SecretFile) instead (ADR 0057, rule 72).'));
       }
     }
+    out.push(...graphLayers(ctx, files));
     return out;
   },
 };
+
+/** Layers 3 and 4 over the macOS graph of every shipped Cargo.lock. */
+function graphLayers(ctx, files) {
+  if (ctx.options.graph === 'off') return [];
+  const locks = files.filter((f) => (f === 'Cargo.lock' || f.endsWith('/Cargo.lock')) && probed(f));
+  if (!locks.length) {
+    return [warn('C99', 72, '.', 1, 'not measured: there is no shipped Cargo.lock, so the macOS dependency graph was not probed', 'Commit the Cargo.lock of every app workspace (CI installs from it).')];
+  }
+  const probe = ctx.options.probe ?? ((dir) => probeWorkspace(dir, { extra: ctx.options.cargoArgs ?? [] }));
+  const out = [];
+  for (const lock of locks) {
+    const dir = lock === 'Cargo.lock' ? '.' : lock.slice(0, -'/Cargo.lock'.length);
+    const broken = (why) => error('C99', 72, lock, 1, `check broken: the macOS dependency graph of ${dir} could not be read (${why}), so a Keychain use in a dependency cannot be seen`, 'Fix the cause (network to the registry, a Cargo.lock that is out of date, cargo on PATH) and run the check again.');
+    const r = probe(join(ctx.root, dir));
+    if (r.broken) {
+      out.push(broken(r.broken));
+      continue;
+    }
+    const graph = readGraph(r.meta, r.tree);
+    if (graph.broken) {
+      out.push(broken(graph.broken));
+      continue;
+    }
+    for (const f of graphFindings(graph)) {
+      out.push(error('C99', 72, lock, 1, `${dir}: ${f.what}`, 'Keep the Keychain out of the macOS build: use paddock-secrets (an owner-only file on macOS); for a new reviewed TLS or OS dependent, add it to REVIEWED_DEPENDENTS in conformance/src/util/keychain-graph.mjs after reading what it calls (ADR 0057).'));
+    }
+    const scan = sourceScan(graph, ctx.options.readSources);
+    if (scan.unfetched.length) out.push(broken(`the sources of ${scan.unfetched.length} crates were not downloaded, for example ${scan.unfetched.slice(0, 3).join(', ')}`));
+    else if (graph.crates.some((p) => p.source) && scan.read === 0) out.push(broken('the source scan read no file of any dependency'));
+    for (const f of scan.findings) {
+      out.push(error('C99', 72, lock, 1, `${dir}: dependency ${f.what}: a shipped process must not reach the macOS Keychain`, 'Remove or replace the dependency (or its feature) that calls the Keychain; a binding that only evaluates TLS trust never uses SecItem or SecKeychain symbols.'));
+    }
+  }
+  return out;
+}
