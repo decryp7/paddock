@@ -54,6 +54,31 @@ static PER_MACHINE_INPUT: LazyLock<Regex> = LazyLock::new(|| {
     re(r"^(apps/[^/]+/app/src-tauri/(tauri(\.windows)?\.conf\.json|windows/)|crates/paddock-setup/nsis/paddock-per-machine\.nsh)")
 });
 
+/// What C100 reads (ADR 0060 section 4): scripts/affected.mjs `C100_INPUTS` and `./dev gates inputs`. A change marks conformance.
+/// The content rule (a test file that adds or removes an ignore attribute or an environment guard) needs the file's text before
+/// and after and is not in this port yet.
+static C100_INPUTS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+    [
+        r"^docs/gates\.toml$",
+        r"^apps/[^/]+/paddock\.ci\.json$",
+        r"(^|/)package\.json$",
+        r"^lefthook\.yml$",
+        r"^(apps/[^/]+/)?AGENTS\.md$",
+        r"^apps/[^/]+/docs/performance\.md$",
+        r"(^|/)README\.md$",
+        r"^docs/wiki/.*\.md$",
+        r"^conformance/src/(checks/|cli\.mjs$)",
+        r"^tools/paddock-dev/src/gates/",
+        r"^(scripts|conformance|tools|apps/[^/]+/scripts)/(.*/)?(check-[^/]*\.(mjs|sh|ps1)|[^/]*\.test\.mjs)$",
+    ]
+    .iter()
+    .map(|p| re(p))
+    .collect()
+});
+
+/// The conformance tool's own code.
+static CONFORMANCE_CODE: LazyLock<Regex> = LazyLock::new(|| re(r"^conformance/(src|bin)/"));
+
 /// Editor and VCS metadata: marks nothing.
 static META: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     [
@@ -111,6 +136,7 @@ static DOC_INPUTS: LazyLock<Vec<(Regex, Marks)>> = LazyLock::new(|| {
         ),
         (re(r"^docs/rules\.md$"), Marks::Projects(&["conformance", "tools"])),
         (re(r"^docs/blocks/"), Marks::Projects(&["conformance", "tools"])),
+        (re(r"^docs/(design-guide|benchmarks)\.md$"), Marks::Projects(&["conformance"])),
         (re(r"^apps/(shell-demo|workbench-demo)/README\.md$"), Marks::Projects(&["tools"])),
         (re(r"(^|/)REVIEWED\.md$"), Marks::Reviewed),
         (
@@ -189,6 +215,8 @@ pub struct Options {
     /// The `apps/<app>/app/src-tauri` folders that adopt the shared per-machine installer include (see
     /// [`per_machine_apps`]); read from the tree by [`plan_for`].
     pub per_machine_apps: Vec<String>,
+    /// The apps whose `paddock.ci.json` `checks` run `paddock-conformance` ([`conformance_apps`]).
+    pub conformance_apps: Vec<String>,
 }
 
 /// The apps whose Windows installer adopts the shared include: hooks that include `paddock-per-machine.nsh`, or a
@@ -206,6 +234,25 @@ pub fn per_machine_apps(root: &Path) -> Vec<String> {
             let adopts = read("windows/installer-hooks.nsh").contains("paddock-per-machine.nsh")
                 || Regex::new(r#""installMode"\s*:\s*"perMachine""#).is_ok_and(|r| r.is_match(&per_machine));
             adopts.then_some(dir)
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// The apps whose contract `checks` run `paddock-conformance` (scripts/affected.mjs `app.checks`).
+pub fn conformance_apps(root: &Path) -> Vec<String> {
+    let Ok(apps) = std::fs::read_dir(root.join("apps")) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = apps
+        .flatten()
+        .filter_map(|a| {
+            let name = a.file_name().to_string_lossy().to_string();
+            let text = std::fs::read_to_string(root.join("apps").join(&name).join("paddock.ci.json")).ok()?;
+            let json: Value = serde_json::from_str(&text).ok()?;
+            let checks = json.get("checks")?.to_string();
+            checks.contains("paddock-conformance").then_some(name)
         })
         .collect();
     out.sort();
@@ -274,6 +321,15 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
             st.mark(Some(format!("app:{app}")), format!("its workflow {f}"));
             st.kind(Some(&format!("app:{app}")), "all");
             continue;
+        }
+        if C100_INPUTS.iter().any(|r| r.is_match(f)) {
+            st.mark(Some("conformance".to_string()), format!("C100 reads {f} (./dev gates inputs)"));
+        }
+        // The apps whose own checks run paddock-conformance rerun those checks when conformance changes (scripts/affected.mjs).
+        if CONFORMANCE_CODE.is_match(f) {
+            for a in &opts.conformance_apps {
+                st.mark(Some(format!("app:{a}")), format!("its checks run paddock-conformance ({f})"));
+            }
         }
         if META.iter().any(|r| r.is_match(f)) {
             continue;
@@ -528,6 +584,7 @@ pub fn plan_for(root: &Path, history: &dyn History, req: &Request) -> Result<Val
         explain: req.explain,
         lock: (None, None),
         per_machine_apps: per_machine_apps(root),
+        conformance_apps: conformance_apps(root),
     };
     let mut changed = req.files.clone();
     if let (Some(base), false) = (&req.base, req.all) {

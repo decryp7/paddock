@@ -82,6 +82,9 @@ const SAMPLES: &[&[&str]] = &[
     &["conformance/ci/build-folder.sh"],
     &["conformance/src/util/is-main.mjs"],
     &[".gitignore", "crates/paddock-cli/CHANGELOG.md"],
+    &["docs/gates.toml"],
+    &["apps/dyno/paddock.ci.json", "AGENTS.md"],
+    &["lefthook.yml", "apps/dyno/scripts/check-wording.mjs"],
 ];
 
 #[test]
