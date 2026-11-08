@@ -2,11 +2,14 @@
 # ./dev: runs paddock-dev, the Paddock developer and CI tool (ADR 0022). Works from any subfolder: it finds the repository
 # root with git and runs the tool in the folder you are in. The tool is a content-addressed binary: the hash of its inputs
 # (tools/paddock-dev/inputs.txt, from git, plus the compiler cargo will use) names it. Order: the per-user cache (on a CI runner the
-# kept mount, see below), the prebuilt download (R0b: not wired yet), then a local build. A build also happens whenever an input has
+# kept mount, see below), the prebuilt download (R0b: on a CI runner by default, elsewhere with PADDOCK_DEV_DOWNLOAD=1), then a local build. A build also happens whenever an input has
 # uncommitted changes, because then HEAD's hash cannot describe it. `./dev --wrapper-hash` prints the hash and stops.
 # Environment: PADDOCK_DEV_TARGET_DIR (build folder, default tools/paddock-dev/target, which is ignored by git),
 # PADDOCK_DEV_HOME (cache, default ~/.paddock-dev), PADDOCK_CI_MOUNT (a CI runner's kept mount, default /sccache),
 # PADDOCK_DEV_FRESH=1 (build from source in a fresh folder without a compiler wrapper, as release jobs do).
+# Download: PADDOCK_DEV_DOWNLOAD (1 on, 0 off; default on only when GITHUB_ACTIONS=true), PADDOCK_DEV_PACKAGES (the Gitea generic
+# package base, default https://dev.decryptology.net/api/packages/decryp7/generic), PADDOCK_DEV_TOKEN (read token, else the job's
+# GITHUB_TOKEN; sent through curl's stdin config, never on a command line), PADDOCK_DEV_DOWNLOAD_TIMEOUT (seconds per file, default 60).
 set -eu
 
 root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "dev: run this inside the Paddock repository." >&2; exit 2; }
@@ -152,6 +155,69 @@ built_check() {
   }
 }
 
+# Prebuilt download (ADR 0022 R0b). Fetches the tool published for this hash and compiler target from the Gitea generic package
+# `paddock-dev` (version <hash>, file <name>, checksum <name>.sha256), checks the checksum and that the binary reports the hash it
+# was built for, then publishes it into the cache with an atomic rename. Returns 1 (after a ::notice:: or ::warning::) on any miss
+# or doubt, and the caller builds: a binary that was not checked is never run.
+download_enabled() {
+  case "${PADDOCK_DEV_DOWNLOAD:-}" in
+    1) return 0 ;;
+    0) return 1 ;;
+  esac
+  [ "${GITHUB_ACTIONS:-}" = true ]
+}
+download_prebuilt() {
+  _base=${PADDOCK_DEV_PACKAGES:-https://dev.decryptology.net/api/packages/decryp7/generic}
+  _tmo=${PADDOCK_DEV_DOWNLOAD_TIMEOUT:-60}
+  _url="$_base/paddock-dev/$hash/$name"
+  command -v curl >/dev/null 2>&1 || {
+    echo "::notice::./dev cannot download the prebuilt paddock-dev: curl is not installed. Building it." >&2
+    return 1
+  }
+  mkdir -p "$cache" || return 1
+  _dl=$(mktemp -d "$cache/.download.XXXXXX") || return 1
+  _t0=$(date +%s)
+  for _f in "$name.sha256" "$name"; do
+    # The token goes in through curl's config on stdin (so no process list shows it) and tracing is off while it is written.
+    _code=$({ set +x; } 2>/dev/null; { printf 'header = "Authorization: token %s"\n' "${PADDOCK_DEV_TOKEN:-${GITHUB_TOKEN:-}}"; } |
+      curl -sS -K - --connect-timeout 10 --max-time "$_tmo" -o "$_dl/$_f" -w '%{http_code}' "$_base/paddock-dev/$hash/$_f" 2>"$_dl/curl.err") || _code=000
+    case "$_code" in
+      200) ;;
+      404)
+        echo "::notice::./dev: paddock-dev $hash is not published for $host (HTTP 404 for $_f); building it." >&2
+        rm -rf "$_dl"
+        return 1
+        ;;
+      *)
+        echo "::warning::./dev could not download $_base/paddock-dev/$hash/$_f (HTTP $_code after $(($(date +%s) - _t0)) s, timeout ${_tmo} s): $(head -c 300 "$_dl/curl.err" 2>/dev/null | tr '\n' ' ') Building it instead." >&2
+        rm -rf "$_dl"
+        return 1
+        ;;
+    esac
+  done
+  _want=$(tr -d '\r' <"$_dl/$name.sha256" | awk '{print $1; exit}')
+  if command -v sha256sum >/dev/null 2>&1; then
+    _got=$(sha256sum "$_dl/$name" | awk '{print $1}')
+  else
+    _got=$(shasum -a 256 "$_dl/$name" | awk '{print $1}')
+  fi
+  if [ -z "$_want" ] || [ "$_want" != "$_got" ]; then
+    echo "::warning::./dev: the downloaded $name has checksum ${_got:-unknown}, the published one says ${_want:-nothing}: the checksum does not match, so it is not used. Building it instead." >&2
+    rm -rf "$_dl"
+    return 1
+  fi
+  chmod +x "$_dl/$name"
+  if ! "$_dl/$name" self hash 2>/dev/null | grep -q "^embedded $hash\$"; then
+    echo "::warning::./dev: the downloaded $name is not for hash $hash (it reports another one, or none). Building it instead." >&2
+    rm -rf "$_dl"
+    return 1
+  fi
+  mv -f "$_dl/$name" "$cache/$name"
+  rm -rf "$_dl"
+  echo "dev: downloaded paddock-dev $hash for $host in $(($(date +%s) - _t0)) s, checksum and embedded hash verified." >&2
+  return 0
+}
+
 if [ "${PADDOCK_DEV_FRESH:-}" = 1 ]; then
   refuse_build_target
   fresh=$(mktemp -d)
@@ -174,29 +240,33 @@ if [ -e "$cache/$name" ] && ! runs "$cache/$name"; then
   rm -f "$cache/$name"
 fi
 if [ ! -x "$cache/$name" ]; then
-  # R0b: download the published binary for this hash (Gitea generic package `paddock-dev`, version <hash>) and check its
-  # .sha256 here. Until the publishing workflow exists, every miss builds.
-  if [ -n "$kept_target" ]; then
-    target="$home/target-$hash"
-  else
-    target=${PADDOCK_DEV_TARGET_DIR:-$tool/target}
-    if [ "${GITHUB_ACTIONS:-}" = true ] && [ -z "${PADDOCK_DEV_HOME:-}" ]; then
-      echo "::notice::./dev builds paddock-dev in this job: the runner has no writable $ci_mount, so nothing is kept between runs (cold build, about a minute or two)." >&2
+  fetched=
+  if download_enabled && download_prebuilt; then fetched=1; fi
+  if [ -z "$fetched" ]; then
+    if [ -n "$kept_target" ]; then
+      target="$home/target-$hash"
+    else
+      target=${PADDOCK_DEV_TARGET_DIR:-$tool/target}
+      if [ "${GITHUB_ACTIONS:-}" = true ] && [ -z "${PADDOCK_DEV_HOME:-}" ]; then
+        echo "::notice::./dev builds paddock-dev in this job: the runner has no writable $ci_mount, so nothing is kept between runs (cold build, about a minute or two)." >&2
+      fi
     fi
+    _b0=$(date +%s)
+    build "$target" "$hash"
+    mkdir -p "$cache"
+    # A name of our own in the cache folder (never a PID: the folder may be shared by containers whose PIDs repeat), checked for the
+    # hash it was built for before it replaces anything, then published by an atomic rename.
+    tmp=$(mktemp "$cache/$name.XXXXXX")
+    cp "$target/release/paddock-dev$exe" "$tmp"
+    chmod +x "$tmp"
+    if ! "$tmp" self hash 2>/dev/null | grep -q "^embedded $hash\$"; then
+      rm -f "$tmp"
+      echo "::error::./dev built a paddock-dev that is not for hash $hash (another job replaced the build folder, or the build ignored PADDOCK_DEV_HASH). Run ./dev again; if it repeats, delete $target." >&2
+      exit 1
+    fi
+    mv -f "$tmp" "$cache/$name"
+    echo "dev: built paddock-dev $hash in $(($(date +%s) - _b0)) s (not downloaded)." >&2
   fi
-  build "$target" "$hash"
-  mkdir -p "$cache"
-  # A name of our own in the cache folder (never a PID: the folder may be shared by containers whose PIDs repeat), checked for the
-  # hash it was built for before it replaces anything, then published by an atomic rename.
-  tmp=$(mktemp "$cache/$name.XXXXXX")
-  cp "$target/release/paddock-dev$exe" "$tmp"
-  chmod +x "$tmp"
-  if ! "$tmp" self hash 2>/dev/null | grep -q "^embedded $hash\$"; then
-    rm -f "$tmp"
-    echo "::error::./dev built a paddock-dev that is not for hash $hash (another job replaced the build folder, or the build ignored PADDOCK_DEV_HASH). Run ./dev again; if it repeats, delete $target." >&2
-    exit 1
-  fi
-  mv -f "$tmp" "$cache/$name"
   # Keep the five newest cached tools (and their build folders); older hashes are rebuilt on demand. A folder touched in the
   # last five minutes is never removed: a job on the same mount may be about to run it.
   ls -t "$home/bin" | tail -n +6 | while IFS= read -r old; do

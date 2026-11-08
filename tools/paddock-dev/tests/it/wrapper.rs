@@ -29,14 +29,14 @@ fn git(dir: &Path, args: &[&str]) {
 }
 
 /// A repository with the real wrapper and input list, and a placeholder for every listed path.
-struct Fixture {
+pub(crate) struct Fixture {
     dir: tempfile::TempDir,
     repo: PathBuf,
-    cargo_home: tempfile::TempDir,
+    pub(crate) cargo_home: tempfile::TempDir,
 }
 
 impl Fixture {
-    fn new() -> Fixture {
+    pub(crate) fn new() -> Fixture {
         // The repository sits one folder below the scratch folder, so a test can put a config "above the repository".
         let dir = tempfile::tempdir().unwrap();
         let repo = dir.path().join("repo");
@@ -67,7 +67,7 @@ impl Fixture {
         }
     }
 
-    fn root(&self) -> &Path {
+    pub(crate) fn root(&self) -> &Path {
         &self.repo
     }
 
@@ -109,7 +109,7 @@ impl Fixture {
         (h.hash, h.dirty)
     }
 
-    fn both(&self, extra: &[(&str, String)]) -> (String, bool) {
+    pub(crate) fn both(&self, extra: &[(&str, String)]) -> (String, bool) {
         let env = self.env(extra);
         let (s, r) = (self.shell(&env), self.rust(&env));
         assert_eq!(s, r, "the wrapper and the tool must agree");
@@ -119,7 +119,7 @@ impl Fixture {
 
 /// A "compiler" that prints a chosen `-vV`.
 #[cfg(unix)]
-fn fake_rustc(dir: &Path, name: &str, release: &str, commit: &str, host: &str) -> String {
+pub(crate) fn fake_rustc(dir: &Path, name: &str, release: &str, commit: &str, host: &str) -> String {
     use std::os::unix::fs::PermissionsExt;
     let p = dir.join(name);
     let body = format!(
@@ -294,7 +294,7 @@ fn compiler_flags_are_part_of_the_hash_in_both_implementations() {
 
 /// A tiny stand-in for the tool binary: answers `--version`, otherwise prints a marker.
 #[cfg(unix)]
-fn write_script(path: &Path, body: &str) {
+pub(crate) fn write_script(path: &Path, body: &str) {
     use std::os::unix::fs::PermissionsExt;
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
@@ -304,7 +304,7 @@ fn write_script(path: &Path, body: &str) {
 /// A stand-in `cargo` that "builds" a script answering `--version`, `self hash` (the hash it was built for, as the real tool shows)
 /// and a marker, then takes `slow` seconds to return, as a busy build would.
 #[cfg(unix)]
-fn shim_cargo(slow: u32) -> String {
+pub(crate) fn shim_cargo(slow: u32) -> String {
     format!(
         r#"mkdir -p "$CARGO_TARGET_DIR/release"; printf '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 0; exit 0; fi\nif [ "$1" = self ]; then echo "embedded %s"; exit 0; fi\necho built-by-shim\n' "$PADDOCK_DEV_HASH" > "$CARGO_TARGET_DIR/release/paddock-dev"; chmod +x "$CARGO_TARGET_DIR/release/paddock-dev"; sleep {slow}"#
     )
@@ -494,6 +494,7 @@ fn on_a_ci_runner_with_a_kept_mount_the_tool_is_cached_there_and_an_explicit_hom
             .env("CARGO_HOME", f.cargo_home.path())
             .env("RUSTC", &rustc)
             .env("GITHUB_ACTIONS", "true")
+            .env("PADDOCK_DEV_DOWNLOAD", "0")
             .env("PADDOCK_CI_MOUNT", &mount);
         cmd.envs(extra.iter().map(|(k, v)| (*k, *v)));
         let out = cmd.output().unwrap();
@@ -554,6 +555,7 @@ fn run_overlapping(rustcs: &[&str], expected: usize) -> (tempfile::TempDir, Vec<
                 .env("CARGO_HOME", f.cargo_home.path())
                 .env("RUSTC", rustc)
                 .env("GITHUB_ACTIONS", "true")
+                .env("PADDOCK_DEV_DOWNLOAD", "0")
                 .env("PADDOCK_CI_MOUNT", &mount)
                 .env("BARRIER", &barrier)
                 .output_child()
@@ -727,6 +729,7 @@ fn a_ci_run_without_a_kept_mount_says_so() {
         .env("CARGO_HOME", f.cargo_home.path())
         .env("RUSTC", rustc)
         .env("GITHUB_ACTIONS", "true")
+        .env("PADDOCK_DEV_DOWNLOAD", "0")
         .env("PADDOCK_CI_MOUNT", scratch.path().join("missing"))
         .env_remove("PADDOCK_DEV_HOME")
         .output()
