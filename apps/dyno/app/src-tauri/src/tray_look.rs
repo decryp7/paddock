@@ -71,7 +71,7 @@ fn net_dir(m: &Metric) -> Option<NetDir> {
     }
 }
 
-/// The macOS format of an item (`Ring` is the meter there; `Number` is the stacked number, the default).
+/// The macOS format of an item (`Number` is the stacked number, the default).
 pub fn mac_kind(spec: &ItemSpec, cores: usize) -> mb::Kind {
     if let Some(dir) = net_dir(&spec.metric) {
         return mb::Kind::Network(dir);
@@ -88,7 +88,8 @@ pub fn mac_kind(spec: &ItemSpec, cores: usize) -> mb::Kind {
         Glyph::Bars => mb::Kind::Bar { label },
         Glyph::Graph => mb::Kind::Graph { label },
         Glyph::GraphNumber => mb::Kind::GraphValue { label, unit },
-        Glyph::Meter | Glyph::Ring => mb::Kind::Meter { label },
+        Glyph::Meter => mb::Kind::Meter { label },
+        Glyph::Ring => mb::Kind::Ring { label },
     }
 }
 
@@ -309,8 +310,8 @@ mod tests {
             mb::Kind::Stacked { .. }
         ));
         assert!(
-            matches!(mac_kind(&spec(Metric::Memory, Glyph::Ring), 8), mb::Kind::Meter { .. }),
-            "ring is the meter on macOS"
+            matches!(mac_kind(&spec(Metric::Memory, Glyph::Ring), 8), mb::Kind::Ring { .. }),
+            "the ring is its own circle on macOS"
         );
         assert!(matches!(
             mac_kind(&spec(Metric::CpuPerCore, Glyph::CoreBars), 10),
@@ -390,49 +391,83 @@ mod tests {
         MenuBarCatalogue::kinds().iter().map(|k| k.kind).collect()
     }
 
-    /// The support table's claims are the renderers': two styles draw the same picture exactly when the table says one is drawn
-    /// as the other, at every Windows size (and Linux's 22), light and dark.
+    /// The share of pixels in which two pictures differ by more than a faint step (40 of 255 in a channel); pictures of other
+    /// sizes differ everywhere.
+    fn differing(a: &Look, b: &Look) -> f32 {
+        let (pa, pb) = (&a.pictures[a.pictures.len() - 1], &b.pictures[b.pictures.len() - 1]);
+        if (pa.width, pa.height) != (pb.width, pb.height) {
+            return 1.0;
+        }
+        let n = pa.rgba.len() / 4;
+        let d = pa
+            .rgba
+            .chunks(4)
+            .zip(pb.rgba.chunks(4))
+            .filter(|(p, q)| p.iter().zip(q.iter()).any(|(x, y)| x.abs_diff(*y) > 40))
+            .count();
+        d as f32 / n as f32
+    }
+
+    /// Every style is its own picture: any two styles differ in at least a tenth of the icon's pixels, at every Windows size
+    /// (and Linux's 22), light and dark, normal and in alert (the closest pair is the line graph and the graph with its number
+    /// at 20 px, which differ by the number). Unavailable, every style is its empty mark with a dash, so there they need only
+    /// differ (at least 4 %).
     #[test]
-    fn windows_and_linux_styles_differ_exactly_where_the_support_table_says() {
-        for (platform, sizes) in [(TrayPlatform::Windows, vec![16u32, 20, 24, 32]), (TrayPlatform::Linux, vec![22])] {
-            let support = style_support(platform);
-            for size in sizes {
+    fn windows_and_linux_styles_differ_in_a_tenth_of_their_pixels() {
+        for (state, value, floor) in [
+            (px::State::Normal, Some(37.0), 0.10),
+            (px::State::Alert, Some(93.0), 0.10),
+            (px::State::Unavailable, None, 0.04),
+        ] {
+            let mut least = (1.0f32, String::new());
+            for size in [16u32, 20, 22, 24, 32] {
                 for dark in [true, false] {
-                    let hashes: Vec<(MenuBarKind, u64)> = kinds()
+                    let looks: Vec<(MenuBarKind, Look)> = kinds()
                         .into_iter()
                         .map(|k| {
-                            let look = render_px(&px_kind(&styled(k, Metric::CpuTotal)), &varied(), px::State::Normal, size, dark);
-                            (k, hash(&look))
+                            let s = Sample { value, ..varied() };
+                            (k, render_px(&px_kind(&styled(k, Metric::CpuTotal)), &s, state, size, dark))
                         })
                         .collect();
-                    for (a, ha) in &hashes {
-                        for (b, hb) in &hashes {
-                            let same = support.drawn_as(*a) == support.drawn_as(*b);
-                            assert_eq!(ha == hb, same, "{platform:?} {size} px dark={dark}: {a:?} vs {b:?}");
+                    for (i, (a, la)) in looks.iter().enumerate() {
+                        for (b, lb) in &looks[i + 1..] {
+                            let share = differing(la, lb);
+                            if share < least.0 {
+                                least = (share, format!("{a:?} vs {b:?} at {size} px dark={dark}"));
+                            }
                         }
                     }
                 }
             }
+            println!("{state:?}: least different {} in {:.1} %", least.1, least.0 * 100.0);
+            assert!(
+                least.0 >= floor,
+                "{state:?}: least different {} in {:.1} % of the pixels",
+                least.1,
+                least.0 * 100.0
+            );
         }
     }
 
-    /// The same on macOS: the ring is the meter there, and the table says so.
+    /// The same on macOS (the ring is its own full circle there): any two styles differ in at least a quarter of the pixels at
+    /// 1x and @2x.
     #[test]
-    fn mac_styles_differ_exactly_where_the_support_table_says() {
-        let support = style_support(TrayPlatform::Mac);
-        let hashes: Vec<(MenuBarKind, u64)> = kinds()
+    fn mac_styles_differ_in_a_quarter_of_their_pixels() {
+        let looks: Vec<(MenuBarKind, Look)> = kinds()
             .into_iter()
             .map(|k| {
-                let spec = styled(k, Metric::CpuTotal);
-                (k, hash(&render_mac(&mac_kind(&spec, 8), &varied(), mb::State::Normal, &BoxText)))
+                (
+                    k,
+                    render_mac(&mac_kind(&styled(k, Metric::CpuTotal), 8), &varied(), mb::State::Normal, &BoxText),
+                )
             })
             .collect();
-        for (a, ha) in &hashes {
-            for (b, hb) in &hashes {
-                assert_eq!(ha == hb, support.drawn_as(*a) == support.drawn_as(*b), "{a:?} vs {b:?}");
+        for (i, (a, la)) in looks.iter().enumerate() {
+            for (b, lb) in &looks[i + 1..] {
+                let share = differing(la, lb);
+                assert!(share >= 0.25, "{a:?} vs {b:?}: {:.1} %", share * 100.0);
             }
         }
-        assert_eq!(support.drawn_as(MenuBarKind::Ring), MenuBarKind::HorizontalMeter);
     }
 
     /// A metric the table calls fixed draws one picture in every style, on every platform.

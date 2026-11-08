@@ -1,45 +1,50 @@
-//! What a platform's tray draws of each menu-bar style: which styles have a picture of their own, which are drawn as
-//! another style there, which metrics draw one picture whatever the style, and what to tell the person after an add. The
-//! engine decides (the UI renders what this says and holds no per-OS rule); the app's tray tests check every claim against
-//! the pictures its renderers draw (`tray_look`: equal pictures exactly where this says "drawn as").
+//! What a platform's tray offers and draws of the menu-bar styles: the styles to choose from (a number's formats among them
+//! where the tray draws both), the metrics that draw one picture whatever the style, and what to tell the person after an add.
+//! The engine decides (the UI renders what this says and holds no per-OS rule or wording). Every style is drawn in a picture of
+//! its own on every platform; the app's tray tests hold the renderers to that (`tray_look`: every pair of styles differs in at
+//! least a quarter of its pixels).
 
-use super::menu_bar::{MenuBarCatalogue, MenuBarKind};
+use super::menu_bar::{MenuBarCatalogue, MenuBarKind, NumberFormat};
 use super::metric::Metric;
-use super::number_support::TrayPlatform;
+use super::number_support::{number_formats, TrayPlatform};
 use paddock_widgets::Catalogue;
 use serde::{Deserialize, Serialize};
 
-/// How one style is drawn here.
+/// One entry of the style picker.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
-pub struct StyleDrawn {
-    /// The style.
+pub struct StyleChoice {
+    /// The style (the item's kind).
     pub kind: MenuBarKind,
-    /// The style whose picture it shares here; `None` when it has its own.
-    pub drawn_as: Option<MenuBarKind>,
-    /// What the style picker shows: the style's title, and ", drawn as …" when it shares a picture.
+    /// For a number where the tray draws both formats, the format this entry sets; `None` for every other entry.
+    pub format: Option<NumberFormat>,
+    /// What the picker shows ("Line graph", "Number, one line").
     pub label: String,
 }
 
-/// A metric whose item draws one picture whatever its style.
+/// A metric whose item draws one picture whatever its style, and how its row is named.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct FixedStyle {
     /// The metric.
     pub metric: Metric,
-    /// What its item draws, in words for the row ("Rate with arrows").
+    /// The row's title, in place of the style's ("Upload").
+    pub title: String,
+    /// The row's summary, in place of the style's.
+    pub summary: String,
+    /// What its item draws, in words for the row's style field ("Rate with an arrow").
     pub drawn: String,
 }
 
-/// What this platform's tray draws of the menu-bar styles.
+/// What this platform's tray offers and draws of the menu-bar styles.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct StyleSupport {
-    /// Every style of the catalogue, in its order.
-    pub styles: Vec<StyleDrawn>,
+    /// The style picker's entries, in the catalogue's order (a number's formats in [`NumberFormat`] order).
+    pub styles: Vec<StyleChoice>,
     /// The metrics whose picture does not follow the style.
     pub fixed: Vec<FixedStyle>,
     /// Said once after an item is added: where the new icon appears and how to keep it in view; `None` when it simply
@@ -48,75 +53,62 @@ pub struct StyleSupport {
 }
 
 impl StyleSupport {
-    /// The style `kind` is drawn as here (itself when it has its own picture).
-    pub fn drawn_as(&self, kind: MenuBarKind) -> MenuBarKind {
-        self.styles.iter().find(|s| s.kind == kind).and_then(|s| s.drawn_as).unwrap_or(kind)
-    }
-
-    /// Whether an item of `metric` draws the same picture in every style.
-    pub fn is_fixed(&self, metric: &Metric) -> bool {
-        self.fixed.iter().any(|f| &f.metric == metric)
+    /// The entry of `metric`'s row when its picture does not follow the style.
+    pub fn fixed_for(&self, metric: &Metric) -> Option<&FixedStyle> {
+        self.fixed.iter().find(|f| &f.metric == metric)
     }
 }
 
-/// Where a new Windows notification-area icon goes, and how to keep it on the taskbar. Windows 11 puts every new icon in the
-/// overflow (behind the chevron); only the person can promote it (Dyno does not write the shell's promotion flag).
-pub const WINDOWS_ADDED_NOTE: &str = "Windows puts a new icon in the overflow, behind the ^ next to the clock. To keep it on the \
-taskbar, open Settings > Personalization > Taskbar > Other system tray icons and turn it on, or drag it from the overflow \
-onto the taskbar.";
+/// Where a new Windows 11 notification-area icon goes, and how to keep it on the taskbar. Windows puts every new icon in the
+/// overflow; only the person can promote it (Dyno does not write the shell's promotion flag).
+pub const WINDOWS_ADDED_NOTE: &str = "Windows puts a new icon in the overflow: open it with the ^ (Show hidden icons) on the \
+taskbar. To keep the icon on the taskbar, turn it on in Settings > Personalization > Taskbar > Other system tray icons, or drag \
+it from the overflow onto the taskbar.";
 
-/// The style each style is drawn as on `platform`: macOS draws the ring as the meter (a 270-degree gauge read as a spinner
-/// at 18 pt); Windows and Linux draw every style in its own picture at every size (16, 20, 22, 24, 32 px).
-fn shared_picture(platform: TrayPlatform, kind: MenuBarKind) -> Option<MenuBarKind> {
-    match (platform, kind) {
-        (TrayPlatform::Mac, MenuBarKind::Ring) => Some(MenuBarKind::HorizontalMeter),
-        _ => None,
-    }
-}
+/// The summary of a row whose metric draws one picture.
+const FIXED_SUMMARY: &str = "One picture in every style";
 
-fn title(kind: MenuBarKind) -> &'static str {
-    MenuBarCatalogue::kinds().iter().find(|k| k.kind == kind).map_or("", |k| k.title)
-}
-
-/// What the tray of `platform` draws of each style (at every icon size: no style changes with the taskbar's scaling).
+/// What the tray of `platform` offers and draws (at every icon size: no style changes with the taskbar's scaling).
 pub fn style_support(platform: TrayPlatform) -> StyleSupport {
+    let formats = number_formats(platform);
     let styles = MenuBarCatalogue::kinds()
         .iter()
-        .map(|k| {
-            let drawn_as = shared_picture(platform, k.kind);
-            let label = match drawn_as {
-                Some(other) => format!("{}, drawn as {}", k.title, title(other).to_lowercase()),
-                None => k.title.to_string(),
-            };
-            StyleDrawn {
-                kind: k.kind,
-                drawn_as,
-                label,
+        .flat_map(|k| {
+            if k.kind == MenuBarKind::Number && formats.len() > 1 {
+                formats
+                    .iter()
+                    .map(|f| StyleChoice {
+                        kind: k.kind,
+                        format: Some(*f),
+                        label: match f {
+                            NumberFormat::Stacked => k.title.to_string(),
+                            NumberFormat::Line => format!("{}, one line", k.title),
+                        },
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                vec![StyleChoice {
+                    kind: k.kind,
+                    format: None,
+                    label: k.title.to_string(),
+                }]
             }
         })
         .collect();
-    let rate = "Rate with arrows";
-    let fixed = vec![
-        FixedStyle {
-            metric: Metric::NetworkUp,
-            drawn: rate.into(),
-        },
-        FixedStyle {
-            metric: Metric::NetworkDown,
-            drawn: rate.into(),
-        },
-        FixedStyle {
-            metric: Metric::NetworkBoth,
-            drawn: "Both rates with arrows".into(),
-        },
-        FixedStyle {
-            metric: Metric::Temperature,
-            drawn: "Degrees".into(),
-        },
-    ];
+    let fixed = |metric: Metric, title: &str, drawn: &str| FixedStyle {
+        metric,
+        title: title.into(),
+        summary: FIXED_SUMMARY.into(),
+        drawn: drawn.into(),
+    };
     StyleSupport {
         styles,
-        fixed,
+        fixed: vec![
+            fixed(Metric::NetworkUp, "Upload", "Rate with an arrow"),
+            fixed(Metric::NetworkDown, "Download", "Rate with an arrow"),
+            fixed(Metric::NetworkBoth, "Network", "Both rates with arrows"),
+            fixed(Metric::Temperature, "Temperature", "Degrees"),
+        ],
         added_note: (platform == TrayPlatform::Windows).then(|| WINDOWS_ADDED_NOTE.to_string()),
     }
 }
@@ -126,55 +118,79 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_style_is_listed_in_the_catalogue_order() {
+    fn every_style_is_offered_in_the_catalogue_order() {
         for platform in [TrayPlatform::Mac, TrayPlatform::Windows, TrayPlatform::Linux] {
             let s = style_support(platform);
-            let kinds: Vec<MenuBarKind> = s.styles.iter().map(|d| d.kind).collect();
+            let mut kinds: Vec<MenuBarKind> = s.styles.iter().map(|d| d.kind).collect();
+            kinds.dedup();
             let catalogue: Vec<MenuBarKind> = MenuBarCatalogue::kinds().iter().map(|k| k.kind).collect();
             assert_eq!(kinds, catalogue, "{platform:?}");
+            assert!(s.styles.iter().all(|d| !d.label.is_empty()));
         }
     }
 
     #[test]
-    fn the_mac_ring_is_drawn_as_the_meter_and_says_so() {
-        let s = style_support(TrayPlatform::Mac);
-        assert_eq!(s.drawn_as(MenuBarKind::Ring), MenuBarKind::HorizontalMeter);
-        let ring = s.styles.iter().find(|d| d.kind == MenuBarKind::Ring).unwrap();
-        assert_eq!(ring.label, "Ring, drawn as meter");
-        let shared = s.styles.iter().filter(|d| d.drawn_as.is_some()).count();
-        assert_eq!(shared, 1, "only the ring shares a picture on macOS");
-    }
-
-    #[test]
-    fn windows_and_linux_draw_every_style_in_its_own_picture() {
-        for platform in [TrayPlatform::Windows, TrayPlatform::Linux] {
-            let s = style_support(platform);
-            assert!(s.styles.iter().all(|d| d.drawn_as.is_none()), "{platform:?}");
-            assert!(s.styles.iter().all(|d| !d.label.contains("drawn as")), "{platform:?}");
+    fn a_number_is_two_styles_where_the_tray_draws_both_formats_and_one_elsewhere() {
+        let numbers = |p| {
+            style_support(p)
+                .styles
+                .into_iter()
+                .filter(|d| d.kind == MenuBarKind::Number)
+                .map(|d| (d.format, d.label))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            numbers(TrayPlatform::Mac),
+            [
+                (Some(NumberFormat::Stacked), "Number".to_string()),
+                (Some(NumberFormat::Line), "Number, one line".to_string())
+            ]
+        );
+        for p in [TrayPlatform::Windows, TrayPlatform::Linux] {
+            assert_eq!(numbers(p), [(None, "Number".to_string())], "{p:?}");
         }
     }
 
     #[test]
-    fn network_and_temperature_keep_their_picture_on_every_platform() {
+    fn network_and_temperature_keep_their_picture_and_name_their_row() {
         for platform in [TrayPlatform::Mac, TrayPlatform::Windows, TrayPlatform::Linux] {
             let s = style_support(platform);
             for m in [Metric::NetworkUp, Metric::NetworkDown, Metric::NetworkBoth, Metric::Temperature] {
-                assert!(s.is_fixed(&m), "{platform:?} {m:?}");
+                let f = s.fixed_for(&m).unwrap_or_else(|| panic!("{platform:?} {m:?}"));
+                assert!(!f.title.is_empty() && !f.summary.is_empty() && !f.drawn.is_empty());
             }
-            assert!(!s.is_fixed(&Metric::CpuTotal));
-            assert!(s.fixed.iter().all(|f| !f.drawn.is_empty()));
+            assert!(s.fixed_for(&Metric::CpuTotal).is_none());
+            assert_eq!(s.fixed_for(&Metric::NetworkUp).unwrap().title, "Upload");
         }
     }
 
     #[test]
     fn only_windows_says_where_a_new_icon_goes_and_how_to_pin_it() {
         let note = style_support(TrayPlatform::Windows).added_note.expect("a note on Windows");
-        assert!(note.contains("overflow"), "{note}");
+        assert!(note.contains("overflow") && note.contains("Show hidden icons"), "{note}");
         assert!(
             note.contains("Settings > Personalization > Taskbar > Other system tray icons"),
             "{note}"
         );
+        assert!(!note.contains("clock"), "the chevron is not next to the clock: {note}");
         assert_eq!(style_support(TrayPlatform::Mac).added_note, None);
         assert_eq!(style_support(TrayPlatform::Linux).added_note, None);
+    }
+
+    /// The mock's imitation of this function is checked against these values (`style-support-golden.spec.ts`): the file is
+    /// checked on every test run and `PADDOCK_WRITE_TS=1` rewrites it.
+    #[test]
+    fn the_generated_golden_values_are_current() {
+        use paddock_commands::testing::{self, WriteMode};
+        use std::path::Path;
+        let case = |name: &str, platform| format!("  {name}: {},\n", serde_json::to_string(&style_support(platform)).expect("json"));
+        let body = format!(
+            "// Generated from `style_support` (dyno-core). Do not edit: PADDOCK_WRITE_TS=1 cargo test -p dyno-core --lib widgets::style_support.\n\nexport const STYLE_SUPPORT_GOLDEN = {{\n{}{}{}}} as const;\n",
+            case("macos", TrayPlatform::Mac),
+            case("windows", TrayPlatform::Windows),
+            case("linux", TrayPlatform::Linux),
+        );
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../app/src/app/core/generated/style-support-golden.ts");
+        testing::sync_generated(&path, &body, WriteMode::from_env()).unwrap_or_else(|e| panic!("{e}"));
     }
 }

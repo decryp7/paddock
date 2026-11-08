@@ -1,21 +1,16 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { MatFormField, MatLabel } from '@angular/material/form-field';
+import { MatButton } from '@angular/material/button';
 import { MatInput } from '@angular/material/input';
 import { PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 import { PdWidgetChooser, PdWidgetOption } from '@decryp7/paddock-ui/widgets';
-import type { Edit, MenuBarItem, MenuBarKind, Metric, NumberFormat, Placement } from '../../core/generated/widgets';
+import type { Edit, FixedStyle, MenuBarItem, MenuBarKind, Metric, NumberFormat, Placement } from '../../core/generated/widgets';
 import { Notifier } from '../../shared/notifier';
 import { WidgetLayouts } from '../../state/widget-layouts';
 import { optionLabel } from '../widgets/option-label';
 import { WidgetChoicesStore } from '../../state/widget-choices';
 import { TrayAvailabilityStore } from '../../state/tray-availability.store';
-
-/** The two ways a number draws (the engine's `NumberFormat`), as the style select names them after "Number" (stacked is the default). */
-const FORMAT_OPTIONS: PdSelectOption[] = [
-  { value: 'stacked', label: '' },
-  { value: 'line', label: ', one line' },
-];
 
 const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
 
@@ -26,7 +21,7 @@ const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
 @Component({
   selector: 'dy-menu-bar-items',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [MatFormField, MatLabel, MatInput, PdSelect, PdStatusGlyph, PdWidgetChooser, PdWidgetOption],
+  imports: [MatButton, MatFormField, MatLabel, MatInput, PdSelect, PdStatusGlyph, PdWidgetChooser, PdWidgetOption],
   template: `
     <!-- The engine's note when the desktop shows no tray icons (Linux without a StatusNotifier host). -->
     @if (tray.note(); as hint) {
@@ -39,22 +34,27 @@ const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
         <p class="info" role="note"><pd-status-glyph status="info" [size]="16" />{{ why }}</p>
       }
       @if (added(); as note) {
-        <p class="info" role="status" data-testid="added-note"><pd-status-glyph status="info" [size]="16" />{{ note }}</p>
+        <p class="info" role="status" data-testid="added-note">
+          <pd-status-glyph status="info" [size]="16" /><span class="grow">{{ note }}</span>
+          <button matButton type="button" (click)="added.set(null)">Hide note</button>
+        </p>
       }
-      <pd-widget-chooser [view]="v" [widgetFor]="widgetFor" (edit)="edit($event)">
+      <pd-widget-chooser [view]="v" [widgetFor]="widgetFor" [describe]="describe" (edit)="edit($event)">
         @for (kind of kinds(); track kind) {
           <ng-template [pdWidgetOption]="kind" [pdWidgetOptionOf]="sample" let-p>
-            <pd-select class="narrow" [options]="metricOptions()" [value]="metricName(p)" [ariaLabel]="label('Metric', p)" (valueChange)="setMetric(p, $event)" />
-            @if (kind === 'number') {
+            <!-- A number's label and unit come first, so the metric and style columns line up on every row (the controls sit at the
+                 row's end). A metric with one picture (network, temperature) has no label or unit to draw. -->
+            @if (kind === 'number' && !fixedOf(p)) {
               <span class="pair">
                 <mat-form-field class="short"><mat-label>Label</mat-label><input matInput maxlength="16" [attr.aria-label]="label('Label', p)" [value]="field(p, 'label')" (change)="commit(p, 'label', $event)" /></mat-form-field>
                 <mat-form-field class="short unit"><mat-label>Unit</mat-label><input matInput maxlength="8" [attr.aria-label]="label('Unit', p)" [value]="field(p, 'unit')" (change)="commit(p, 'unit', $event)" /></mat-form-field>
               </span>
             }
+            <pd-select class="narrow" [options]="metricOptions()" [value]="metricName(p)" [ariaLabel]="label('Metric', p)" (valueChange)="setMetric(p, $event)" />
             <!-- The style changes in place (the tray icon keeps its identity and place). A number's format is one of its styles where
                  the tray draws both; where it draws one, the note above says so once. A metric with one picture says what it draws. -->
-            @if (fixedOf(p); as drawn) {
-              <span class="style fixed-style" data-testid="style-fixed">{{ drawn }}</span>
+            @if (fixedOf(p); as fixed) {
+              <span class="style fixed-style" data-testid="style-fixed"><span class="faint">Style:</span>&nbsp;{{ fixed.drawn }}</span>
             } @else {
               <pd-select class="style" [panelWidth]="null" [options]="styleOptions()" [value]="styleOf(p)" [ariaLabel]="label('Style', p)" (valueChange)="setStyle(p, $event)" />
             }
@@ -79,6 +79,7 @@ const metricOf = (item: MenuBarItem): Metric => Object.values(item)[0]!.metric;
     .narrow { width: 11rem; flex: none; }
     .faint { color: var(--text-3); }
     .fixed-style { display: flex; align-items: center; color: var(--text-2); font-size: var(--fs-sm); }
+    .grow { flex: 1; }
     /* The style select: wide enough for "Ring, drawn as meter" and "Number, one line" in the trigger and the list, on one line. */
     /* Room for "Label over value" and at least 8 px before the caret. The field's 16 px padding each side leaves 117 px inside the
        11.5rem; where the fallback font is wide (DejaVu Sans on Linux: the text is 108 px) the caret touched the text. The row's
@@ -108,20 +109,18 @@ export class MenuBarItems implements OnInit {
   /** What the tray draws of a number here, and why anything is missing (from the engine). */
   protected readonly support = computed(() => this.choices.choices()?.number ?? { formats: [], labelInIcon: true, fixed: null, note: null });
   /**
-   * The styles, as this platform's tray draws them ("Ring, drawn as meter"), from the engine. Where the tray draws both number
-   * formats (`choices.number`) the number is two styles, "Number" (label over value) and "Number, one line" (values `number` and
-   * `number:line`).
+   * The style picker's entries, labels and all, from the engine (`choices.styles`). Where the tray draws both number formats the
+   * engine lists the number twice, with its format; the value is then `number:line` for the one-line format.
    */
-  protected readonly styleOptions = computed<PdSelectOption[]>(() => {
-    const c = this.choices.choices();
-    const formats = c?.number.formats ?? [];
-    return (c?.styles.styles ?? []).flatMap((s) =>
-      s.kind === 'number' && formats.length > 1
-        ? FORMAT_OPTIONS.filter((o) => formats.includes(o.value as NumberFormat)).map((o) => ({ value: o.value === 'line' ? 'number:line' : 'number', label: `${s.label}${o.label}` }))
-        : [{ value: s.kind, label: s.label }],
-    );
-  });
-  /** What the engine says after an add (Windows: the new icon is in the overflow, and how to pin it); shown until Settings closes. */
+  protected readonly styleOptions = computed<PdSelectOption[]>(() =>
+    (this.choices.choices()?.styles.styles ?? []).map((s) => ({ value: s.format === 'line' ? `${s.kind}:line` : s.kind, label: s.label })),
+  );
+  /** The engine's name for a row whose metric draws one picture ("Upload"); the kind's name otherwise. */
+  protected readonly describe = (p: Placement<MenuBarItem>): { title: string; summary: string } | null => {
+    const f = this.fixedOf(p);
+    return f ? { title: f.title, summary: f.summary } : null;
+  };
+  /** What the engine says after an add (Windows: the new icon is in the overflow, and how to pin it), until hidden or the next edit. */
   protected readonly added = signal<string | null>(null);
   /** Said once there are more than four items: what each system does with items that do not fit. */
   protected readonly overflowNote =
@@ -146,7 +145,6 @@ export class MenuBarItems implements OnInit {
     return kind === 'number' && this.format(p) === 'line' && this.styleOptions().some((o) => o.value === 'number:line') ? 'number:line' : kind;
   }
 
-
   protected metricName(p: Placement<MenuBarItem>): string {
     return this.choices.title(metricOf(p.widget));
   }
@@ -156,15 +154,16 @@ export class MenuBarItems implements OnInit {
   }
 
   protected async edit(e: Edit<MenuBarItem>): Promise<void> {
+    this.added.set(null);
     const failed = await this.layouts.edit('menuBar', e);
     if (failed) this.notifier.error(failed);
     else if (typeof e === 'object' && 'add' in e) this.added.set(this.choices.choices()?.styles.addedNote ?? null);
   }
 
-  /** What the item draws whatever its style (network, temperature), or null when the style is the person's choice. */
-  protected fixedOf(p: Placement<MenuBarItem>): string | null {
+  /** The engine's entry for a row whose metric draws one picture whatever its style (network, temperature); null otherwise. */
+  protected fixedOf(p: Placement<MenuBarItem>): FixedStyle | null {
     const metric = JSON.stringify(metricOf(p.widget));
-    return this.choices.choices()?.styles.fixed.find((f) => JSON.stringify(f.metric) === metric)?.drawn ?? null;
+    return this.choices.choices()?.styles.fixed.find((f) => JSON.stringify(f.metric) === metric) ?? null;
   }
 
   /** Changes the row's style in place: the engine keeps its id, so the tray icon keeps its identity and its place. */

@@ -30,7 +30,7 @@ pub use metric::Metric;
 pub use number_support::{number_support, NumberSupport, TrayPlatform};
 pub use popover::{PopoverCatalogue, PopoverKind, PopoverWidget, VolumeChoice};
 pub use reading::{read_all, read_metric, with_dashboard_thresholds, MetricReading, ReadingQuery};
-pub use style_support::{style_support, FixedStyle, StyleDrawn, StyleSupport};
+pub use style_support::{style_support, FixedStyle, StyleChoice, StyleSupport};
 pub use wire::{edit_layout, layout_view, JsonOnLink, SurfaceEdit, SurfaceView};
 
 use serde::{Deserialize, Serialize};

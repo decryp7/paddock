@@ -45,11 +45,19 @@ pub struct NumberSupport {
     pub note: Option<String>,
 }
 
+/// The number formats the tray of `platform` draws: both on macOS, the stacked one on Windows and Linux.
+pub fn number_formats(platform: TrayPlatform) -> Vec<NumberFormat> {
+    match platform {
+        TrayPlatform::Mac => vec![NumberFormat::Stacked, NumberFormat::Line],
+        TrayPlatform::Windows | TrayPlatform::Linux => vec![NumberFormat::Stacked],
+    }
+}
+
 /// What the tray draws of a number item on `platform`, for icons of `px` pixels (the taskbar's size; unused on macOS).
 pub fn number_support(platform: TrayPlatform, px: u32) -> NumberSupport {
     match platform {
         TrayPlatform::Mac => NumberSupport {
-            formats: vec![NumberFormat::Stacked, NumberFormat::Line],
+            formats: number_formats(platform),
             label_in_icon: true,
             fixed: None,
             note: None,
@@ -57,7 +65,7 @@ pub fn number_support(platform: TrayPlatform, px: u32) -> NumberSupport {
         TrayPlatform::Windows | TrayPlatform::Linux => {
             let label_in_icon = pixel::layout(i32::try_from(px).unwrap_or(i32::MAX)).label_rows > 0;
             NumberSupport {
-                formats: vec![NumberFormat::Stacked],
+                formats: number_formats(platform),
                 label_in_icon,
                 fixed: Some(
                     if label_in_icon {

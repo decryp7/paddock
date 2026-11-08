@@ -1,6 +1,6 @@
 //! The menu-bar styles as the app draws them, for review: every style of the catalogue through the app's own mapping
 //! (`items_from_settings`, `px_kind`, `mac_kind`) and renderers, at every tray size, light and dark, normal, alert and
-//! unavailable, with what `style_support` says beside each. Writes one PNG per picture and an `index.html` that lays them out
+//! unavailable (and at 0 % beside it), and the metrics `style_support` calls fixed. Writes one PNG per picture and an `index.html` that lays them out
 //! (8x, nearest neighbour, and 1x):
 //!
 //! `cargo run -p dyno-app --example tray_style_sheet -- <out dir>`
@@ -43,7 +43,17 @@ fn history() -> Vec<f32> {
         .collect()
 }
 
+/// The sheet's reading: `value` with the shared history, or, at 0, nothing at all (to set beside the unavailable state).
 fn sample(value: Option<f32>) -> Sample {
+    if value == Some(0.0) {
+        return Sample {
+            value,
+            history: vec![0.0; 64],
+            cores: vec![0.0; 8],
+            up: 0.0,
+            down: 0.0,
+        };
+    }
     Sample {
         value,
         history: history(),
@@ -79,15 +89,6 @@ fn save(dir: &Path, name: &str, p: &Picture, ink: Option<[u8; 3]>) -> String {
     name.to_string()
 }
 
-/// A row's head: the style's title, and the support table's words when they say more ("Ring, drawn as meter").
-fn row_head(title: &str, drawn: &str) -> String {
-    if drawn == title {
-        title.to_string()
-    } else {
-        format!("{title}<br><span class=note>{drawn}</span>")
-    }
-}
-
 fn main() {
     let out = PathBuf::from(std::env::args().nth(1).expect("usage: tray_style_sheet <out dir>"));
     let icons = out.join("icons");
@@ -111,10 +112,11 @@ fn main() {
     );
     // Windows and Linux: styles by size, light and dark.
     let sizes = [16u32, 20, 22, 24, 32];
-    for (state, state_name, value) in [
-        (px::State::Normal, "normal", Some(37.0)),
-        (px::State::Alert, "alert", Some(93.0)),
-        (px::State::Unavailable, "unavailable", None),
+    for (state, tag, state_name, value) in [
+        (px::State::Normal, "normal", "normal", Some(37.0)),
+        (px::State::Alert, "alert", "alert", Some(93.0)),
+        (px::State::Normal, "zero", "at 0 % (compare with unavailable below)", Some(0.0)),
+        (px::State::Unavailable, "unavailable", "unavailable", None),
     ] {
         let _ = write!(
             html,
@@ -125,12 +127,11 @@ fn main() {
                 .collect::<String>()
         );
         for (k, spec) in kinds.iter().zip(&specs) {
-            let drawn = &win.styles.iter().find(|d| d.kind == *k).unwrap().label;
-            let _ = write!(html, "<tr><th class=row>{}</th>", row_head(title(*k), drawn));
+            let _ = write!(html, "<tr><th class=row>{}</th>", title(*k));
             for size in sizes {
                 for dark in [true, false] {
                     let look = render_px(&px_kind(spec), &sample(value), state, size, dark);
-                    let name = format!("win-{k:?}-{size}-{}-{state_name}.png", if dark { "dark" } else { "light" });
+                    let name = format!("win-{k:?}-{size}-{}-{tag}.png", if dark { "dark" } else { "light" });
                     let f = save(&icons, &name, &look.pictures[0], None);
                     let _ = write!(
                         html,
@@ -153,7 +154,7 @@ fn main() {
     html.push_str("</tr>");
     for f in &win.fixed {
         let spec = &items_from_settings(&assign_spans([(1, item(MenuBarKind::Ring, f.metric.clone()))]))[0];
-        let _ = write!(html, "<tr><th class=row>{:?}<br><span class=note>{}</span></th>", f.metric, f.drawn);
+        let _ = write!(html, "<tr><th class=row>{}<br><span class=note>{}</span></th>", f.title, f.drawn);
         let value = if f.metric == Metric::Temperature { Some(64.0) } else { Some(37.0) };
         for size in sizes {
             let look = render_px(&px_kind(spec), &sample(value), px::State::Normal, size, true);
@@ -185,7 +186,6 @@ fn mac(
     use dyno_app_lib::tray_look::{mac_kind, render_mac};
     use dyno_core::tray::menu_bar as mb;
     let text = dyno_app_lib::tray_text::CoreText::new();
-    let support = style_support(TrayPlatform::Mac);
     let _ = write!(
         html,
         "<h2>macOS menu bar (templates, CoreText)</h2><p>@2x shown at 4x of its points, 1x at 8x; tinted as the bar tints them.</p>\
@@ -193,8 +193,7 @@ fn mac(
          <th>alert @2x</th><th>unavailable @2x</th></tr>"
     );
     for (k, spec) in kinds.iter().zip(specs) {
-        let drawn = &support.styles.iter().find(|d| d.kind == *k).unwrap().label;
-        let _ = write!(html, "<tr><th class=row>{}</th>", row_head(title(*k), drawn));
+        let _ = write!(html, "<tr><th class=row>{}</th>", title(*k));
         let kind = mac_kind(spec, 8);
         for (state, tag, value) in [
             (mb::State::Normal, "normal", Some(37.0)),

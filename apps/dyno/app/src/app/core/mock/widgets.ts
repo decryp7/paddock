@@ -100,7 +100,7 @@ const MENU_KINDS = [
   info('horizontalMeter', 'Meter', 'A horizontal meter', 'meter', [1], 32),
   info('ring', 'Ring', 'A percentage as a ring', 'ring', [1], 32),
   info('number', 'Number', 'The value as text', 'number', [1], 32),
-  info('graphAndNumber', 'Graph and number', 'A line with the number beside it', 'graph', [1], 32),
+  info('graphAndNumber', 'Graph and number', 'A small graph with its number', 'graph', [1], 32),
 ] as KindInfo<MenuBarKind>[];
 
 const SURFACES: Record<DynoSurface, { surface: SurfaceInfo<DynoSurface>; kinds: KindInfo<string>[] }> = {
@@ -591,7 +591,13 @@ export class MockWidgets {
       const k = kindInfo(kind);
       if (!k) throw err(`The ${noun} has no widget “${kind}”.`);
       if (placements.filter((p, j) => j !== i && kindOf(p.widget) === kind).length >= k.maxInstances) throw err(`The ${noun} can show ${k.title} only ${k.maxInstances} time${k.maxInstances === 1 ? '' : 's'}; remove one first.`);
-      if (grid && kindOf(placements[i]!.widget) !== kind) throw err("This widget's size does not suit that kind; resize it first.");
+      if (grid) {
+        // As the engine: the rectangle stays when the new kind allows its width and height.
+        const r = rectOf(placements[i] as unknown as Placement<W, Cells>);
+        const rule = cellsOf(kind);
+        const allows = (st: Steps, v: number) => ('range' in st ? v >= st.range.min && v <= st.range.max : st.only.values.includes(v));
+        if (!allows(rule.widths, r.w) || !allows(rule.heights, r.h)) throw err("This widget's size does not suit that kind; resize it first.");
+      }
       next(st.placements.map((p, j) => (j === i ? ({ ...p, widget: edit.changeKind.widget } as AnyPlacement) : p)));
     } else if ('applyPreset' in edit) {
       const preset = [...(grid ? builtinPresets() : []), ...(st.presets as Preset<W>[])].find((p) => p.id === edit.applyPreset.id);
@@ -773,24 +779,27 @@ export function mockWidgetChoices(numberSupport: WidgetChoices['number'] = mockN
   };
 }
 
-/** What the tray draws of each style (the engine's `style_support`, imitated: the Mac ring is the meter; Windows says where a new icon goes). */
+/** What the tray offers and draws of the styles (the engine's `style_support`, imitated; `style-support-golden.spec.ts` checks it): a number's two formats are two styles on a Mac; network and temperature rows are named by their metric; Windows says where a new icon goes. */
 export function mockStyleSupport(os: 'macos' | 'windows' | 'linux'): WidgetChoices['styles'] {
-  const ring = os === 'macos';
+  const fixed = (metric: Metric, title: string, drawn: string) => ({ metric, title, summary: 'One picture in every style', drawn });
   return {
-    styles: MENU_KINDS.map((k) => ({
-      kind: k.kind as MenuBarKind,
-      drawnAs: ring && k.kind === 'ring' ? 'horizontalMeter' : null,
-      label: ring && k.kind === 'ring' ? 'Ring, drawn as meter' : k.title,
-    })),
+    styles: MENU_KINDS.flatMap((k): WidgetChoices['styles']['styles'] =>
+      k.kind === 'number' && os === 'macos'
+        ? [
+            { kind: 'number' as MenuBarKind, format: 'stacked' as const, label: k.title },
+            { kind: 'number' as MenuBarKind, format: 'line' as const, label: `${k.title}, one line` },
+          ]
+        : [{ kind: k.kind as MenuBarKind, format: null, label: k.title }],
+    ),
     fixed: [
-      { metric: 'networkUp', drawn: 'Rate with arrows' },
-      { metric: 'networkDown', drawn: 'Rate with arrows' },
-      { metric: 'networkBoth', drawn: 'Both rates with arrows' },
-      { metric: 'temperature', drawn: 'Degrees' },
+      fixed('networkUp', 'Upload', 'Rate with an arrow'),
+      fixed('networkDown', 'Download', 'Rate with an arrow'),
+      fixed('networkBoth', 'Network', 'Both rates with arrows'),
+      fixed('temperature', 'Temperature', 'Degrees'),
     ],
     addedNote:
       os === 'windows'
-        ? 'Windows puts a new icon in the overflow, behind the ^ next to the clock. To keep it on the taskbar, open Settings > Personalization > Taskbar > Other system tray icons and turn it on, or drag it from the overflow onto the taskbar.'
+        ? 'Windows puts a new icon in the overflow: open it with the ^ (Show hidden icons) on the taskbar. To keep the icon on the taskbar, turn it on in Settings > Personalization > Taskbar > Other system tray icons, or drag it from the overflow onto the taskbar.'
         : null,
   };
 }

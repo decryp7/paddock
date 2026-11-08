@@ -23,6 +23,8 @@ pub const DIM: f32 = 0.45;
 pub const GAP: f32 = 4.0;
 /// Inset of a label from the item's left edge, so its alert plate fits inside the image.
 pub const LABEL_INSET: f32 = 1.5;
+/// The ring's diameter in points (two points of air above and below in the 18 pt bar).
+pub const RING: f32 = 14.0;
 
 /// One-line values: the menu bar's own font and size.
 pub const VALUE: TextStyle = TextStyle::new(13.0);
@@ -63,6 +65,11 @@ pub enum Kind {
     },
     /// A label and a horizontal meter.
     Meter {
+        /// The label.
+        label: String,
+    },
+    /// A label and a full ring that fills clockwise from the top.
+    Ring {
         /// The label.
         label: String,
     },
@@ -234,6 +241,7 @@ pub fn width(kind: &Kind, t: &dyn TextRaster) -> f32 {
         Kind::Value { label, unit } => label_width(t, label) + 3.0 + field(t, &VALUE) + t.advance(unit_text(*unit), &VALUE),
         Kind::Stacked { label, unit } => stack_width(t, label, *unit),
         Kind::Meter { label } => label_width(t, label) + GAP + 24.0,
+        Kind::Ring { label } => label_width(t, label) + GAP + RING,
         Kind::Bar { label } => label_width(t, label) + GAP - 1.0 + 5.0,
         Kind::Cores { cores } => (*cores).clamp(1, 64) as f32 * 3.0 - 1.0,
         Kind::Graph { label } => label_width(t, label) + GAP + 30.0,
@@ -309,6 +317,40 @@ impl Canvas<'_> {
         if let Some(path) = pb.finish() {
             self.pm.fill_path(&path, p, FillRule::Winding, Transform::identity(), None);
         }
+    }
+
+    /// Strokes an arc of radius `r` points, `sweep` degrees clockwise from `from` (0 is +x, -90 the top), with butt ends.
+    #[allow(clippy::too_many_arguments)]
+    fn arc(&mut self, cx: f32, cy: f32, r: f32, from: f32, sweep: f32, w: f32, p: &Paint) {
+        if sweep <= 0.0 {
+            return;
+        }
+        let s = self.scale;
+        let sweep = sweep.min(360.0);
+        let steps = ((sweep / 3.0).ceil() as usize).max(2);
+        let mut pb = PathBuilder::new();
+        for i in 0..=steps {
+            let t = (from + sweep * i as f32 / steps as f32).to_radians();
+            let (x, y) = ((cx + r * t.cos()) * s, (cy + r * t.sin()) * s);
+            if i == 0 {
+                pb.move_to(x, y);
+            } else {
+                pb.line_to(x, y);
+            }
+        }
+        let st = Stroke {
+            width: w * s,
+            ..Stroke::default()
+        };
+        if let Some(path) = pb.finish() {
+            self.pm.stroke_path(&path, p, &st, Transform::identity(), None);
+        }
+    }
+
+    /// The unavailable mark (design: "an en dash in the field"): `w` by 2 points of ink centred on (`cx`, `cy`), drawn where the
+    /// value's mark would be, so an item whose reading is missing never looks like a reading of 0.
+    fn dash(&mut self, cx: f32, cy: f32, w: f32) {
+        self.rect(cx - w / 2.0, cy - 1.0, w, 2.0, &ink(1.0));
     }
 
     fn circle(&mut self, cx: f32, cy: f32, r: f32, p: &Paint) {
@@ -511,7 +553,11 @@ pub fn render(kind: &Kind, r: &Reading, state: State, text: &dyn TextRaster, sca
             let (mh, mx) = (6.0, end + GAP);
             let my = snap(base - cap / 2.0 - mh / 2.0, s);
             let mw = w - mx;
-            c.rrect(mx, my, mw, mh, mh / 2.0, &ink(TRACK));
+            if state == State::Unavailable {
+                c.dash(mx + mw / 2.0, my + mh / 2.0, mw * 0.6);
+            } else {
+                c.rrect(mx, my, mw, mh, mh / 2.0, &ink(TRACK));
+            }
             if let Some(v) = value {
                 let fw = fill(v, mw, mh);
                 if fw > 0.0 {
@@ -522,13 +568,21 @@ pub fn render(kind: &Kind, r: &Reading, state: State, text: &dyn TextRaster, sca
         Kind::Bar { label } => {
             let end = c.label(label, None, base, alert);
             let (bx, bw, by, bh) = (end + GAP - 1.0, 5.0, 2.0, 14.0);
-            c.rrect(bx, by, bw, bh, 1.5, &ink(TRACK));
+            if state == State::Unavailable {
+                c.dash(bx + bw / 2.0, by + bh / 2.0, 6.0);
+            } else {
+                c.rrect(bx, by, bw, bh, 1.5, &ink(TRACK));
+            }
             if let Some(v) = value {
                 let fh = fill(v, bh, 1.0 / s);
                 if fh > 0.0 {
                     c.rrect(bx, by + bh - fh, bw, fh, 1.5_f32.min(fh / 2.0), &ink(1.0));
                 }
             }
+        }
+        Kind::Cores { cores } if state == State::Unavailable => {
+            let n = (*cores).clamp(1, 64) as f32;
+            c.dash((n * 3.0 - 1.0) / 2.0, 9.0, (n * 3.0 - 1.0) * 0.6);
         }
         Kind::Cores { cores } => {
             for i in 0..(*cores).clamp(1, 64) {
@@ -545,7 +599,24 @@ pub fn render(kind: &Kind, r: &Reading, state: State, text: &dyn TextRaster, sca
         Kind::Graph { label } => {
             let end = c.label(label, None, base, alert);
             let hist: &[f32] = if state == State::Unavailable { &[] } else { &r.history };
-            c.graph(end + GAP, 2.0, w - end - GAP, 14.0, hist);
+            let gw = w - end - GAP;
+            c.graph(end + GAP, 2.0, gw, 14.0, hist);
+            if state == State::Unavailable {
+                c.dash(end + GAP + gw / 2.0, 9.0, gw * 0.6);
+            }
+        }
+        Kind::Ring { label } => {
+            let end = c.label(label, None, base, alert);
+            let (cx, cy, stroke) = (end + GAP + RING / 2.0, HEIGHT / 2.0, 2.5);
+            let rad = RING / 2.0 - stroke / 2.0;
+            if state == State::Unavailable {
+                c.dash(cx, cy, 6.0);
+            } else {
+                c.arc(cx, cy, rad, -90.0, 360.0, stroke, &ink(TRACK));
+            }
+            if let Some(v) = value {
+                c.arc(cx, cy, rad, -90.0, 360.0 * v.clamp(0.0, 100.0) / 100.0, stroke, &ink(1.0));
+            }
         }
         Kind::GraphValue { label, unit } => {
             let hist: &[f32] = if state == State::Unavailable { &[] } else { &r.history };
@@ -634,6 +705,7 @@ mod tests {
                 unit: Unit::Percent,
             },
             Kind::Meter { label: "gpu".into() },
+            Kind::Ring { label: "gpu".into() },
             Kind::Bar { label: "mem".into() },
             Kind::Cores { cores: 10 },
             Kind::Graph { label: "dsk".into() },
@@ -779,6 +851,58 @@ mod tests {
             assert_ne!(both(&at(5e3, 5e3)), both(&at(5e3, 7e7)), "both follows down at {scale}x");
             assert_ne!(both(&at(5e3, 5e3)), draw(NetDir::Up, &at(5e3, 5e3)));
             assert_ne!(both(&at(5e3, 5e3)), draw(NetDir::Down, &at(5e3, 5e3)));
+        }
+    }
+
+    /// The ring is its own picture on the Mac: a full circle, not the meter's capsule.
+    #[test]
+    fn the_ring_is_a_circle_and_differs_from_the_meter() {
+        let r = Reading {
+            value: Some(37.0),
+            ..Reading::default()
+        };
+        for scale in [1, 2] {
+            let ring = render(&Kind::Ring { label: "cpu".into() }, &r, State::Normal, &BoxText, scale);
+            let meter = render(&Kind::Meter { label: "cpu".into() }, &r, State::Normal, &BoxText, scale);
+            assert_ne!(ring.alpha, meter.alpha, "@{scale}x");
+            // The ring's box is square: as many columns of ink as rows to the right of the label.
+            assert_eq!(
+                width(&Kind::Ring { label: "cpu".into() }, &BoxText),
+                (label_width(&BoxText, "cpu") + GAP + RING).ceil()
+            );
+        }
+    }
+
+    /// Unavailable is a dash, not only the 45 %: with the dimming taken off, at least 3 % of the image differs from a reading
+    /// of 0 for every value-only format. The number formats show "–" in their field (their text is the text port's, which the
+    /// box stand-in here cannot tell apart).
+    #[test]
+    fn unavailable_is_a_dash_on_every_value_only_format() {
+        let zero = Reading {
+            value: Some(0.0),
+            history: vec![0.0; 40],
+            cores: vec![0.0; 10],
+            ..Reading::default()
+        };
+        let value_only = kinds().into_iter().filter(|k| {
+            matches!(
+                k,
+                Kind::Meter { .. } | Kind::Ring { .. } | Kind::Bar { .. } | Kind::Cores { .. } | Kind::Graph { .. }
+            )
+        });
+        for kind in value_only {
+            for scale in [1, 2] {
+                let z = render(&kind, &zero, State::Normal, &BoxText, scale);
+                let u = render(&kind, &zero, State::Unavailable, &BoxText, scale);
+                let differ = z
+                    .alpha
+                    .iter()
+                    .zip(&u.alpha)
+                    .filter(|(a, b)| ((f32::from(**b) / DIM).min(255.0) - f32::from(**a)).abs() > 40.0)
+                    .count();
+                let share = differ as f32 / z.alpha.len() as f32;
+                assert!(share >= 0.03, "{kind:?} @{scale}x: unavailable differs in {:.1} %", share * 100.0);
+            }
         }
     }
 }

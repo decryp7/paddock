@@ -4,10 +4,12 @@
 
 ### Fixed
 
-- Menu-bar and tray items: each item has a Style select. Changing it changes the item in place, so a Windows icon you pinned to the taskbar stays pinned and in its place. Before, the only way was to add another item, which Windows put in the overflow. On a Mac a number's format is one of its styles there ("Number" or "Number, one line").
-- On Windows, adding an item says that Windows puts the new icon in the overflow and how to keep it on the taskbar (Settings > Personalization > Taskbar > Other system tray icons).
-- On Windows and Linux, Bars draws a vertical column (it drew the meter) and Graph and number draws the number over a small graph (it drew the graph), at every icon size.
-- Where a style is drawn as another, the Style select says so ("Ring, drawn as meter" on a Mac). Network and temperature items say what they draw instead of offering a style.
+- Menu-bar and tray items: each item has a Style select. Changing the style keeps the same tray icon: Dyno repaints it and no longer removes it and adds a new one. Before, the only way was to add another item, which Windows put in the overflow. On a Mac a number's format is one of its styles there ("Number" or "Number, one line").
+- On Windows, adding an item says that Windows puts the new icon in the overflow and how to keep it on the taskbar (Settings > Personalization > Taskbar > Other system tray icons). Hide note closes it.
+- Every style draws its own picture. On Windows and Linux, Bars is a vertical column (it drew the meter) and Graph and number is the number above a small graph (it drew the graph), at every icon size. On a Mac the Ring is a full ring (it drew the meter).
+- A Line graph over its limit shows the alert (a corner notch and the danger colour) on Windows and Linux; it showed nothing.
+- An item with no reading (or while the agent is away) shows a dash on its bar, meter, ring or graph, so it no longer looks like 0 %.
+- Network and temperature items are named by their metric ("Download", "Temperature") and say what they draw in place of a style.
 - A graph you add, or change an item to, starts with the recent values instead of one column, and a graph keeps its history when another item changes.
 
 ## [1.1.0] - 2026-11-06

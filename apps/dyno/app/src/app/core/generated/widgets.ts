@@ -806,17 +806,17 @@ fixed: string | null,
  */
 note: string | null, };
 
-export type StyleDrawn = { 
+export type StyleChoice = { 
 /**
- * The style.
+ * The style (the item's kind).
  */
 kind: MenuBarKind, 
 /**
- * The style whose picture it shares here; `None` when it has its own.
+ * For a number where the tray draws both formats, the format this entry sets; `None` for every other entry.
  */
-drawnAs: MenuBarKind | null, 
+format: NumberFormat | null, 
 /**
- * What the style picker shows: the style's title, and ", drawn as …" when it shares a picture.
+ * What the picker shows ("Line graph", "Number, one line").
  */
 label: string, };
 
@@ -826,15 +826,23 @@ export type FixedStyle = {
  */
 metric: Metric, 
 /**
- * What its item draws, in words for the row ("Rate with arrows").
+ * The row's title, in place of the style's ("Upload").
+ */
+title: string, 
+/**
+ * The row's summary, in place of the style's.
+ */
+summary: string, 
+/**
+ * What its item draws, in words for the row's style field ("Rate with an arrow").
  */
 drawn: string, };
 
 export type StyleSupport = { 
 /**
- * Every style of the catalogue, in its order.
+ * The style picker's entries, in the catalogue's order (a number's formats in [`NumberFormat`] order).
  */
-styles: Array<StyleDrawn>, 
+styles: Array<StyleChoice>, 
 /**
  * The metrics whose picture does not follow the style.
  */
