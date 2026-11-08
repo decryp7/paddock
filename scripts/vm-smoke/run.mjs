@@ -375,7 +375,7 @@ async function main(argv) {
           await gui.closeSettings();
           let afterRestore = await btm();
           for (let n = 0; n < 12 && restored && afterRestore !== 'on'; n++) { await sleepMs(5000); afterRestore = await btm(); } // dumpbtm lags the save
-          if (o.only) check.loginOn = afterRestore === 'on'; // the Quit step judges against the state this run measured, not the default
+          if (o.only) check.loginOn = false; // the agent was started by this row's reopen, not by the login job (it adopts it only at the next login): Quit is judged without the login supervision claim
           reopen.evidence = [...(reopen.evidence ?? []), `login item restore: switch read ${sw0}, pressed and saved ${restored}; sfltool dumpbtm then: ${afterRestore}`];
           // Hung or paused page: the WebContent process is stopped; the question is read through AX.
           const hung = !rowWanted(o.only, 'hung-page') ? null : await hungPageStep({
