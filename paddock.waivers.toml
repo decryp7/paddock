@@ -312,7 +312,7 @@ path = "commit eecea633fa"
 reason = "wip: subject from an unshared branch; history cannot be rewritten (no force)"
 expires = "2026-12-31"
 
-# Five 28-31 October commits of the Debrief 1.2 branches whose first line is over 100 characters (pre-landing check, rule 50(f)).
+# Five 28-31 October commits of the Debrief 1.2 branches whose first line is over 100 characters (pre-landing check, rule 50(g)).
 
 [[waiver]]
 check = "C23"

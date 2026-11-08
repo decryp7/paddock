@@ -1392,7 +1392,7 @@ and the release does not pass (rule 71, ER-33).
 A push to main lints only the commits main itself gets (`--first-parent`), so a branch's own subjects and trailers (two `wip:`
 commits, five first lines over 100 characters) were never checked once the branch landed without a pull request.
 **Lesson (class: a check that skips what it cannot see):** lint the branch before landing it (`commit-lint --range
-origin/main..<branch>`, rule 50(f)); C23 in the conformance run is the backstop. Waivers for commits are exact per commit
+origin/main..<branch>`, rule 50(g)); C23 in the conformance run is the backstop. Waivers for commits are exact per commit
 (`commit <10 or 40 hex>`, no patterns) and expire.
 
 ## A delayed service looked like a broken one (2026-11-04, Dyno helper after a Windows restart)
