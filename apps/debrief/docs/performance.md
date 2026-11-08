@@ -149,6 +149,25 @@ some fields; "n/s" means the source does not state them.
   still scans three times (count, ids, rows); merging count and ids into one statement would save about 65 ms at 56M and was
   not needed for the budget.
 
+### 2026-11-08, events-grid page query: the field list and instance key after a data change (branch `perf/debrief-grid-query`, WP-1 part 2)
+
+- **Commit:** before = `57ab5d5cd` plus the debug timing lines of `Inner::derived` (no other change); after = `546570a75` (`15df8b8e7` is the counting change, `546570a75` the import stage).
+- **Why:** part 1 (above) left the first page after a data change at 1.3-3.3 s at 56M events. Budget: interactive < 0.5 s.
+- **Cause (measured, `derived` log, 56M, 3 runs):** `Inner::derived` took 1.2-1.9 s of which `instance_key` was 1.1-1.8 s: one grouped `count(nullif(<field>, ''))` per candidate field over all events (`GROUP BY e.source`), repeated for every new data version, although a ready source's events never change. The persisted `analysis_cache` copy does not help there: it is keyed by the data version and not written while an import runs. The exact-distinct step was 70-860 ms in the same runs: it started with `SELECT count(*) FROM events` (a scan over the segments) only to compare the total with a threshold.
+- **Hypotheses ruled out:** the segment catalogue read (`segments` phase 4-7 ms); exact distinct counts of unlisted keys (the store is above `PREAGGREGATE_ABOVE`, so none are run, only the `count(*)`).
+- **Fix (rule 51: cheaper work, not more threads):** (1) the counts per source and candidate are kept (`presence.rs`) and only sources or candidates not yet counted are scanned (exact, never stale: an entry is used only for the event total the `sources` table states, and is dropped with its source, the profile and the parsers); (2) the import job prepares the list as its last labelled stage ("Preparing the field list"), so the first page after it counts nothing; (3) the events total comes from `sources.events`. A page never serves a last-known catalogue: every page reads the current one, only cheaper. Tests: `page_tests::the_instance_key_scans_only_new_sources_and_equals_a_full_recount` (incremental key equals a fresh store's, every source-candidate counted exactly once), `a_removed_sources_counts_are_dropped`, `the_import_prepares_the_instance_key_before_the_first_page`, and the unit tests of `presence.rs`.
+- **Machine, build, corpus, query, command:** as the block above (56M corpus, 54,441,640 events first, then 1,710,492; `bench_grid_page`, release). 2 runs per cell, before and after interleaved. The machine was heavily loaded by other agents (1-minute load 21-60 at the start of the runs, `out/matrix.load`), so read only the A/B within the table.
+
+| Measure (56M) | Before (2 runs) | After (2 runs) |
+|---|---|---|
+| First page after the import, quiet | 2,091 / 1,363 ms | 185 / 209 ms |
+| Quiet p50 of the following pages | 187 / 183 ms | 189 / 190 ms |
+| `derived` (field list and key) after the second import, in the page | 1,171 / 1,900 ms | 0 ms (prepared by the import job: 1.25-1.42 s inside the job, 5 ms for a later change) |
+| During import 2: a page after a data change, `derived` | 1,114 / 1,120 ms | 136 / 120 ms (1 new source), 5 ms once prepared |
+| During import 2: max page (the first page, store opened without a persisted list) | 4,999 / 4,931 ms | 3,666 / 3,494 ms |
+
+- **Left open:** the very first page of a store that has no persisted list still counts every source once (1.3 s quiet, 3.0-3.1 s while an import runs); it is the max of the "during" row. A user who has seen the grid before has the list in the database (`analysis_cache`) as long as the data version is unchanged. Persisting the per-source counts (a table) or preparing them when a project opens would remove it; not done here. The counting of one new source still takes 115-130 ms (a scan with `source IN (...)`); the page phases (count, ids, rows) are unchanged.
+
 ### 2026-10-31, store worker memory at 20 copies: the names catalogue (branch `fix/debrief-bench-query-rss`)
 
 - **Commit:** main 09293bcde; change on `fix/debrief-bench-query-rss`
