@@ -32,8 +32,10 @@ const MAX_MILLIS: u64 = 5_000;
 const MAX_REPS: u32 = 20;
 /// The longest warm-up or gap a caller may ask for, ms.
 const MAX_PAUSE_MILLIS: u64 = 10_000;
+/// The smallest free-space margin a caller may state for the disk test, MiB; a smaller one is raised to it.
+const MIN_FREE_MARGIN_MIB: u32 = 64;
 const USAGE: &str =
-    "usage: dyno-bench <cpu|memory|disk|gpu> [--dir <folder>] [--disk-mib <n>] [--rotational] [--millis <n>] [--reps <n>] [--warmup-ms <n>] [--gap-ms <n>] [--wait-go]";
+    "usage: dyno-bench <cpu|memory|disk|gpu> [--dir <folder>] [--disk-mib <n>] [--rotational] [--free-margin-mib <n>] [--sustained-secs <n>] [--sustained-write-mib <n>] [--avail-mib <n>] [--millis <n>] [--reps <n>] [--warmup-ms <n>] [--gap-ms <n>] [--wait-go]";
 
 /// What the command line asked for.
 #[derive(Debug, PartialEq)]
@@ -85,7 +87,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
             "--sustained-secs" => out.sustained_secs = Some(number::<u32>(flag, value)?.clamp(1, dyno_bench::cpu::sustained::MAX_SECS)),
             "--sustained-write-mib" => out.sustained_write_mib = number::<u32>(flag, value)?.min(64 * 1024),
             "--avail-mib" => out.avail_mib = Some(number(flag, value)?),
-            "--free-margin-mib" => out.free_margin_mib = Some(number(flag, value)?),
+            "--free-margin-mib" => out.free_margin_mib = Some(number::<u32>(flag, value)?.max(MIN_FREE_MARGIN_MIB)),
             "--dir" => out.dir = Some(PathBuf::from(value)),
             "--disk-mib" => out.mib = number(flag, value)?,
             "--millis" => out.millis = number::<u64>(flag, value)?.clamp(10, MAX_MILLIS),
@@ -220,6 +222,11 @@ mod tests {
         assert_eq!(p.free_margin_mib, None, "the default free-space margin unless one is stated");
         assert_eq!(parse(&a(&["disk", "--free-margin-mib", "64"])).unwrap().free_margin_mib, Some(64));
         assert!(parse(&a(&["disk", "--free-margin-mib", "x"])).is_err());
+        assert_eq!(
+            parse(&a(&["disk", "--free-margin-mib", "0"])).unwrap().free_margin_mib,
+            Some(MIN_FREE_MARGIN_MIB),
+            "a stated margin is floored, so 0 cannot switch the check off"
+        );
         assert_eq!(p.repeats, DISK_REPEATS, "disk: the ramp is its warm-up, three repetitions, no gap");
         assert_eq!(
             parse(&a(&["cpu"])).unwrap().repeats,

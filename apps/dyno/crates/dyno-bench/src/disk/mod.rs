@@ -41,7 +41,8 @@ pub struct DiskRun {
     /// The sustained write, MiB written past the drive's cache after the patterns (zero: none; the person confirmed the amount).
     pub sustained_mib: u32,
     /// The free space to keep beyond the file, MiB, instead of the default (10 % of the volume, at least 2 GiB). Set only on
-    /// purpose, by a test whose result must not depend on the size of the machine's drive.
+    /// purpose, by a test whose result must not depend on the size of the machine's drive. The command line floors it at 64 MiB
+    /// (`MIN_FREE_MARGIN_MIB` in `main.rs`); the agent never passes the flag (see `runner_args` and its pin in dyno-agent's `bench.rs`).
     pub free_margin_mib: Option<u32>,
 }
 
