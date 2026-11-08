@@ -230,17 +230,18 @@ export const WEBVIEW_LISTING_PS = `Get-CimInstance Win32_Process -Filter "Name='
 const renderers = RENDERERS_PS;
 
 /** A hung or paused visible page on Windows: the WebView2 renderer of dyno-app is suspended (NtSuspendProcess, no debugger); the question is read from the window list. Keep Waiting cannot be pressed here (no button lookup in the actor), so the doubling stays a broken check. */
+// CIM (Win32_Process) answers "Access denied" to the standard user over SSH (a network logon): every process query of this row runs as the administrator key (0ad round 6).
 export async function winHung() {
   ssh('Set-Content C:\\paddock-test\\vmcheck\\launch-hung.ps1 \'Start-Process "$env:ProgramFiles\\Dyno\\dyno-app.exe"\'; schtasks /create /tn DynoHungLaunch /sc once /st 00:00 /ru paddock-test /it /f /tr "cmd /c powershell -NoProfile -ExecutionPolicy Bypass -File C:\\paddock-test\\vmcheck\\launch-hung.ps1" | Out-Null; schtasks /run /tn DynoHungLaunch | Out-Null');
   // Condition wait (up to 90 s) for the app and a WebView2 renderer under it, never a fixed sleep; when none comes, what the launch task did is the evidence.
   let up = false;
-  for (let i = 0; i < 30 && !up; i++) { await sleep(3000); up = Number(ssh(`${NT}${renderers}$ids.Count`).trim().split('\n').at(-1)) > 0; }
+  for (let i = 0; i < 30 && !up; i++) { await sleep(3000); up = Number(ssh(`${NT}${renderers}$ids.Count`, { admin: true }).trim().split('\n').at(-1)) > 0; }
   const launchDiag = up ? 'a WebView2 renderer of dyno-app was up' : `no renderer after 90 s; task: ${ssh("schtasks /query /tn DynoHungLaunch /v /fo list | Select-String 'Last Result|Status|Last Run'").replace(/\s*\n\s*/g, ' | ')}; script: ${ssh('Get-Content C:\\paddock-test\\vmcheck\\launch-hung.ps1 -ErrorAction SilentlyContinue')}; dyno processes: ${ssh("(Get-Process dyno* -ErrorAction SilentlyContinue | ForEach-Object { $_.Name + ':' + $_.Id }) -join ','")}`;
   const actor = new Actor(); actor.start(); await sleep(6000);
   const r = await hungPageStep({
     now: () => Date.now() / 1000, sleep,
-    suspend: async () => { const out = ssh(`${NT}${renderers}foreach ($i in $ids) { [void][N.P]::NtSuspendProcess((Get-Process -Id $i).Handle) }; $ids.Count`); if (!(Number(out.trim().split('\\n').at(-1)) > 0)) throw new Error(`no WebView2 renderer of dyno-app was found (dyno processes: ${ssh("Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^dyno' } | ForEach-Object { $_.Name + ' pid=' + $_.ProcessId + ' session=' + $_.SessionId + ' ' + $_.CommandLine }").replace(/\s*\n\s*/g, ' | ').slice(0, 500) || 'none'}; WebView2 processes: ${ssh(WEBVIEW_LISTING_PS).replace(/\s*\n\s*/g, ' | ').slice(0, 600) || 'none'})`); },
-    resume: async () => { ssh(`${NT}${renderers}foreach ($i in $ids) { [void][N.P]::NtResumeProcess((Get-Process -Id $i).Handle) }`); },
+    suspend: async () => { const out = ssh(`${NT}${renderers}foreach ($i in $ids) { [void][N.P]::NtSuspendProcess((Get-Process -Id $i).Handle) }; $ids.Count`, { admin: true }); if (!(Number(out.trim().split('\\n').at(-1)) > 0)) throw new Error(`no WebView2 renderer of dyno-app was found (dyno processes: ${ssh("Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^dyno' } | ForEach-Object { $_.Name + ' pid=' + $_.ProcessId + ' session=' + $_.SessionId + ' ' + $_.CommandLine }", { admin: true }).replace(/\s*\n\s*/g, ' | ').slice(0, 500) || 'none'}; WebView2 processes: ${ssh(WEBVIEW_LISTING_PS, { admin: true }).replace(/\s*\n\s*/g, ' | ').slice(0, 600) || 'none'})`); },
+    resume: async () => { ssh(`${NT}${renderers}foreach ($i in $ids) { [void][N.P]::NtResumeProcess((Get-Process -Id $i).Handle) }`, { admin: true }); },
     logLines: async () => ssh(APP_LOG_PS).split('\\n'),
     questions: async (phase) => { const n = (await actor.send('windows').catch(() => '')).split('\\n').filter((l) => /not responding|Keep Waiting/i.test(l)).length; return phase === 'open' && n === 0 ? null : n; },
     keepWaiting: async () => false, shot: async (name) => actor.shot(name),
