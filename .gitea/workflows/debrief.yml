@@ -454,9 +454,12 @@ jobs:
 
       # One npm workspace for the monorepo (ADR 0014 §1): the root lock installs every package.
       - name: Install
+        env:
+          BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         run: |
           (cd ../../.. && npm ci)
-          npm audit --omit=dev --audit-level=high
+          # ADR 0062 section 3a: a release run accepts a stored audit record for this lockfile (at most 48 hours old).
+          node ../../conformance/ci/live-data.mjs npm-audit --level high
 
       - name: Lint
         run: npm run lint

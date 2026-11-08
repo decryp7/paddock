@@ -19,7 +19,7 @@
   ],
   "ui": [
     "cd apps/pitwall/app",
-    "npm audit --omit=dev --audit-level=high",
+    "node ../../../conformance/ci/live-data.mjs npm-audit --level high",
     "npm run lint",
     "npx ng build",
     "npm run check:index",

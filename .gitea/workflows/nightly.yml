@@ -41,6 +41,22 @@ jobs:
 
   # ADR 0026 §3 (D4): every command a dialog contract declares was sent by some run, or is listed as unexercised with a
   # reason, and every dialog opened. It needs the union of the runs, so it runs here only, never in affected-only CI.
+  # ADR 0062 section 3a: the nightly npm audit record (a release run accepts one at most 48 hours old for its lockfile) and the age
+  # of the RustSec advisory mirror.
+  live-data:
+    name: live data (npm audit record, advisory mirror age)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      - uses: actions/checkout@v4
+      - name: The advisory mirror is fresh
+        run: node conformance/ci/live-data.mjs advisory-db --release
+      - name: Store the npm audit record for the root lockfile
+        env:
+          BUILD_INPUTS_WRITE_TOKEN: ${{ secrets.BUILD_INPUTS_WRITE_TOKEN }}
+        run: node conformance/ci/live-data.mjs npm-audit-record --level high
+
   dialog-commands:
     name: dialog commands (declared but never sent)
     needs: [gate]
@@ -229,6 +245,7 @@ jobs:
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
 
   installers-spotter:
@@ -261,6 +278,7 @@ jobs:
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
 
   installers-pitcrew:
@@ -291,6 +309,7 @@ jobs:
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
 
   installers-pitwall:
@@ -322,6 +341,7 @@ jobs:
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
 
   installers-verdict:

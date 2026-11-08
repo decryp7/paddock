@@ -63,11 +63,19 @@ runs:
         COMMANDS: ${{ inputs.prepare }}
       run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
 
+    # ADR 0062 section 3a: `cargo deny` reads the RustSec database from Paddock's pull mirror; a release run fails when the mirror is
+    # older than 7 days (a warning above 2).
+    - name: Advisory database is fresh (${{ inputs.app }})
+      if: ${{ !cancelled() && inputs.rust == 'true' && runner.os == 'Linux' }}
+      shell: bash
+      run: node "${{ github.action_path }}/../../../conformance/ci/live-data.mjs" advisory-db
+
     - name: Checks (${{ inputs.app }})
       if: inputs.checks != ''
       shell: bash
       env:
         COMMANDS: ${{ inputs.checks }}
+        BUILD_INPUTS_TOKEN: ${{ inputs.build-inputs-token }}
       run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
 
     # Third-party notices (Rust through cargo-about, npm through the root lock) are generated output: the committed file must equal

@@ -24,7 +24,7 @@
   "ui": [
     "npm run build -w ui",
     "cd apps/spotter/app",
-    "npm audit --omit=dev --audit-level=high",
+    "node ../../../conformance/ci/live-data.mjs npm-audit --level high",
     "npm run lint",
     "npx ng build",
     "npx ng test --watch=false --coverage"

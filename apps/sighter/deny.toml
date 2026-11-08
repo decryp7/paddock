@@ -5,6 +5,8 @@
 all-features = false
 
 [advisories]
+# ADR 0062: the advisory database comes from Paddock's own pull mirror of rustsec/advisory-db (CC0-1.0), never from github.com.
+db-urls = ["https://dev.decryptology.net/paddock-mirrors/advisory-db.git"]
 # RustSec advisory database; unmaintained crates are reported for workspace dependencies only, transitive ones are
 # Renovate's job.
 unmaintained = "workspace"
