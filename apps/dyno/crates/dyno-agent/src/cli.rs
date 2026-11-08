@@ -467,7 +467,14 @@ mod tests {
         log::set_max_level(log::LevelFilter::Info);
         let tmp = tempfile::tempdir().unwrap();
         let (platform, _details) = platforms(&Dirs::at(tmp.path().join("data")));
-        let wired: Vec<_> = CAPTURE.0.lock().unwrap().iter().filter(|(m, _)| m == "Platform wired").cloned().collect();
+        let wired: Vec<_> = CAPTURE
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(m, _)| m == "Platform wired")
+            .cloned()
+            .collect();
         assert_eq!(wired.len(), 1, "exactly one line: {wired:?}");
         assert_eq!(wired[0].1, platform.wired_line(), "it carries every port=adapter pair");
         for port in ["sensors=", "locks=", "startup=", "facts=", "wol.udp="] {

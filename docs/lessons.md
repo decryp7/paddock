@@ -1499,3 +1499,14 @@ A redaction default in a shared crate was widened for one app's problem report. 
 ## Gitea tokens cannot mint narrower tokens, and agents must not create bot users (2026-11-08)
 
 An agent looking for a narrower CI token found that a Gitea token cannot create a token with fewer rights, and the only other route was creating a bot user. Agents must not create users. The user creates scoped CI tokens (one per purpose, least privilege) and the agent is given the one it needs; if none exists, the agent stops and asks.
+
+## `disk::centre::tests::the_cached_volumes_never_list_on_the_request` failed once in CI (2026-11-09)
+
+Symptom: in `ci.yml` run 7767 (Linux Dyno leg, nextest), `assertion left == right failed: a cached read within the freshness window never asks the system
+again`, left 2, right 1, at `crates/dyno-agent/src/disk/centre.rs:1616`. It passed five times in a row on the author's Mac and failed again on the retry. Not
+fixed here (routed by the coordinator); the cause is **not yet confirmed** (ER-28), so the candidates and the observation that rules each out are:
+(1) the test counts `lister` calls after `wait_cached` returns, but the centre's background list may be started twice (the first request and the mount-event thread's
+first trigger): rule out by logging each call's trigger and thread in the failing run; (2) the fake clock is not advanced, but the freshness window is read from the real clock
+somewhere on Linux only: rule out by grepping the window's `Instant`/`SystemTime` use in `centre.rs`; (3) a second listing started by the volume watcher that exists only on
+Linux (`mount_events`): rule out by running the test with the watcher stubbed out; (4) test order or a shared static between tests in one nextest process: rule out by running
+the test alone, 200 times, under the CI container. No sleep or raised timeout (ER-12).
