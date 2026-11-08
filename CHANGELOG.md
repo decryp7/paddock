@@ -4,6 +4,17 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Tooling train 3: `tools/heavy`, `tools/wiki`, ADR 0022 amendment and ADR 0051
+
+- Landed: `tools/heavy` (the Rust heavy-step lock), `tools/wiki` (the wiki CLI), the ADR 0022 amendment and the `paddock-tools` ADR 0051.
+- Shared change, declared: `crates/.config/hakari.toml` `[traversal-excludes]` now lists the gtk-rs `-sys` crates (`gtk-sys`, `gdk-sys`,
+  `gio-sys`, `glib-sys`, `gobject-sys`, `pango-sys`, `cairo-sys-rs`, `gdk-pixbuf-sys`, `atk-sys`), so `paddock-workspace-hack` no longer pulls
+  GTK into `paddock-proc` on x86_64 Linux; the hack and the lockfiles (crates, the apps, the three tools) were regenerated. These came in with
+  commit bbe024543 ("fix(wiki): mask the --flag=value form ..."), whose message names only the wiki parts. The tools job checks that the wiki and
+  heavy builds contain no GTK `-sys` crate.
+- `tools/paddock-dev` tests no longer depend on the checkout being a plain clone: the CLI tests build their own repositories, and the
+  `inputs.txt` test reads cargo metadata for the host platform only.
+
 ### `paddock-limits` (new): limits that explain themselves and replies that report what they left out
 
 - A new shared crate (ADR 0019, Debrief ADR 0065; plan 1.4 and B1), a leaf (serde; ts-rs behind `ts`): `LimitId`, `Quantity` with units, `Scope`,

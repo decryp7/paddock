@@ -26,7 +26,12 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 paddock-cli = { path = "../../crates/paddock-cli" }
 paddock-proc = { path = "../../crates/paddock-proc" }
 
+[features]
+# Counts the bytes the text scanners search, for the tests' linear-time checks (no clock). Enabled by the dev-dependency below.
+step-count = []
+
 [dev-dependencies]
+paddock-wiki = { path = ".", features = ["step-count"] }
 tempfile = "3"
 paddock-testkit = { path = "../../crates/paddock-testkit" }
 

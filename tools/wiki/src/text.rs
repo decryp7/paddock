@@ -172,6 +172,43 @@ pub struct Link {
 }
 
 /// Is `s` fenced-code opening/closing: `^\s*```.
+/// A step counter for the tests (feature `step-count`, enabled by the crate's own dev-dependency): the bytes every forward search
+/// of the scanners below looked at. A scan that restarts from the same place for each opening bracket makes the count grow with the
+/// square of the input, so a test asserts it grows in step with the input, with no clock involved (ER-12).
+#[cfg(feature = "step-count")]
+pub mod steps {
+    use std::cell::Cell;
+
+    thread_local! {
+        static COUNT: Cell<u64> = const { Cell::new(0) };
+    }
+
+    /// Sets this thread's count to zero.
+    pub fn reset() {
+        COUNT.with(|c| c.set(0));
+    }
+
+    /// Bytes searched on this thread since the last [`reset`].
+    pub fn get() -> u64 {
+        COUNT.with(Cell::get)
+    }
+
+    pub(crate) fn add(n: usize) {
+        COUNT.with(|c| c.set(c.get() + n as u64));
+    }
+}
+
+/// `s.find(pat)`, counting the bytes searched when the `step-count` feature is on.
+macro_rules! scan {
+    ($s:expr, $pat:expr) => {{
+        let s: &str = $s;
+        let found = s.find($pat);
+        #[cfg(feature = "step-count")]
+        steps::add(found.map_or(s.len(), |i| i + 1));
+        found
+    }};
+}
+
 fn is_fence(s: &str) -> bool {
     s.trim_start_matches(is_ws).starts_with("```")
 }
@@ -180,9 +217,9 @@ fn is_fence(s: &str) -> bool {
 fn without_code_spans(line: &str) -> String {
     let mut out = String::with_capacity(line.len());
     let mut rest = line;
-    while let Some(open) = rest.find('`') {
+    while let Some(open) = scan!(rest, '`') {
         let after = &rest[open + 1..];
-        match after.find('`') {
+        match scan!(after, '`') {
             Some(close) => {
                 out.push_str(&rest[..open]);
                 rest = &after[close + 1..];
@@ -251,9 +288,9 @@ fn hrefs(line: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut from = 0;
     let mut fail_end = 0;
-    while let Some(off) = line[from..].find('[') {
+    while let Some(off) = scan!(&line[from..], '[') {
         let open = from + off;
-        let Some(close_off) = line[open + 1..].find(']') else { break };
+        let Some(close_off) = scan!(&line[open + 1..], ']') else { break };
         let close = open + 1 + close_off;
         let start = close + 2;
         let Some(inner) = line[close + 1..].strip_prefix('(') else {
@@ -265,7 +302,7 @@ fn hrefs(line: &str) -> Vec<&str> {
             continue;
         }
         // No ')' or whitespace to the end of the line: no later start finds one either.
-        let Some(len) = inner.find(|c: char| c == ')' || is_ws(c)) else {
+        let Some(len) = scan!(inner, |c: char| c == ')' || is_ws(c)) else {
             break;
         };
         if len > 0 && inner[len..].starts_with(')') {
@@ -338,17 +375,17 @@ fn is_continuation(raw: &str) -> bool {
 /// `\]\([^)]+\)|\bsrc:`
 fn names_source(text: &str) -> bool {
     let mut from = 0;
-    while let Some(off) = text[from..].find("](") {
+    while let Some(off) = scan!(&text[from..], "](") {
         let after = &text[from + off + 2..];
         // No ')' anywhere after: no later "](" has one either, so stop looking (keeps the scan linear).
-        let Some(len) = after.find(')') else { break };
+        let Some(len) = scan!(after, ')') else { break };
         if len > 0 {
             return true;
         }
         from += off + 2;
     }
     let mut from = 0;
-    while let Some(off) = text[from..].find("src:") {
+    while let Some(off) = scan!(&text[from..], "src:") {
         let at = from + off;
         if !text[..at].chars().next_back().is_some_and(is_word) {
             return true;
@@ -399,14 +436,14 @@ fn replace_links(s: &str) -> String {
     let mut from = 0;
     let mut copied = 0;
     let mut no_more_paren = false;
-    while let Some(off) = s[from..].find('[') {
+    while let Some(off) = scan!(&s[from..], '[') {
         let open = from + off;
-        let Some(close_off) = s[open + 1..].find(']') else { break };
+        let Some(close_off) = scan!(&s[open + 1..], ']') else { break };
         let close = open + 1 + close_off;
         let hit = if no_more_paren {
             None
         } else if let Some(inner) = s[close + 1..].strip_prefix('(') {
-            let end = inner.find(')');
+            let end = scan!(inner, ')');
             no_more_paren = end.is_none();
             end.map(|len| close + 2 + len + 1)
         } else {

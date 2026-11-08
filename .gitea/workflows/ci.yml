@@ -356,6 +356,9 @@ jobs:
       # The tool lints the wiki the way a person runs it (stale pages only warn).
       - name: Lint the wiki
         if: ${{ !cancelled() }}
+        env:
+          # The run log in the workspace, not the container's home, so a failed run's log survives the job (uploaded below).
+          WIKI_LOG_DIR: ${{ github.workspace }}/wiki-logs
         run: |
           # The summary line is written whether the lint passes or fails; the step then ends with the lint's own exit code.
           set +e
@@ -363,6 +366,13 @@ jobs:
           rc=${PIPESTATUS[0]}
           echo "- wiki lint (exit $rc): $(tail -1 wiki-lint.out)" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
           exit "$rc"
+
+      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+        if: failure()
+        with:
+          name: wiki-logs
+          path: wiki-logs
+          if-no-files-found: ignore
 
       # The tools build with a plain Rust toolchain: no GTK -sys crate may reach them through the shared crates (the workspace
       # hack once pulled gtk-sys into paddock-proc on x86_64 Linux, so `cargo install` of wiki and heavy needed GTK headers). The

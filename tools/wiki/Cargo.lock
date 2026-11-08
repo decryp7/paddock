@@ -1070,6 +1070,7 @@ dependencies = [
  "paddock-cli",
  "paddock-proc",
  "paddock-testkit",
+ "paddock-wiki",
  "regex",
  "serde_json",
  "tempfile",

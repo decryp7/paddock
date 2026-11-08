@@ -99,6 +99,12 @@ fn per_source(line: &str) -> Vec<String> {
         return vec![line.to_string()];
     };
     let names = &line[tail_start..tail_start + close];
+    // A finding with more than three sources prints "a, b, c and N more": it cannot be split into one line per source, and a
+    // golden that grows that long must fail here, loudly, instead of comparing a half-split line.
+    assert!(
+        !names.contains(" more"),
+        "per_source cannot split a finding with \"and N more\": {line}"
+    );
     names
         .split(", ")
         .map(|n| format!("{}{}{}", &line[..head_end], n, &line[tail_start + close..]))
