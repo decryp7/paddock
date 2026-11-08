@@ -1,6 +1,6 @@
 # 53. Human-like name matching
 
-- Status: accepted (2026-10-23)
+- Status: accepted (2026-10-23); layer 2 (the AI alias job) removed by [ADR 0070](0070-pitwall-is-debriefs-only-ai-engine.md) with N1
 - Date: 2026-10-23
 - Related: the entity catalogue (`debrief_core::catalogue`, `entities`), `find`, the assistant's `find_values` and
   `find_events` tools, Debrief's own local AI model (optional)

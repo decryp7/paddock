@@ -1,6 +1,7 @@
 # 59. Pitwall as Debrief's AI engine, the built-in engine as the fallback
 
 - Status: Accepted (2026-10-24; user: "when Pitwall is installed, Debrief uses it; the built-in engine stays as the fallback", Debrief 1.1)
+- Amended by [ADR 0070](0070-pitwall-is-debriefs-only-ai-engine.md) (2026-11-08): Pitwall is the only engine in Debrief 1.2; the engine choice, the built-in fallback and "Built-in downloads while Pitwall is used" are superseded; the key moves to a file (family ADR 0057 WP-5)
 - Date: 2026-10-24
 - Related: ADR 0009 (built-in llama.cpp worker), ADR 0025 (images), ADR 0055 (service health), Pitwall ADRs 0001 (local only),
   0003 (API surface and compatibility), 0007 (security: keys, pairing, loopback), 0009 (app integration contract),
