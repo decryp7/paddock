@@ -4,6 +4,10 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui`: the Jobs list drops a stale "The jobs could not be read"
+
+- Fixed: after one failed first read (an app starting while its agent restarts) the Jobs panel kept the error heading for good, even while it listed live jobs from later events. A job event that arrives while the list is in error now reads the list again (`JobsStore._receive`): it shows the jobs the failed read missed and clears the error; a list that still cannot be read keeps its error.
+
 ### `paddock-bench`: `SampleSummary` has the mean, standard deviation and CV
 
 - `stats::Summary` (now exported as `SampleSummary`) gained `mean` and `std_dev` fields, `cv()` (std_dev / |mean|, `None` at a zero mean) and `range()`. Added for Dyno's benchmark repetitions (ADR 0030); a struct literal of `Summary` needs the two new fields.

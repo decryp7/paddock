@@ -57,6 +57,44 @@ describe('JobsStore', () => {
     expect(store.jobs()).toHaveLength(1);
   });
 
+  it('clears a failed load when a job event shows the link is back, and lists the jobs the event missed', async () => {
+    let calls = 0;
+    class FlakyBackend extends ControlledBackend {
+      override snapshot(): Promise<readonly SuJobSnapshot[]> {
+        return ++calls === 1 ? Promise.reject(new Error('agent unavailable')) : Promise.resolve([snap(1, 2), snap(2, 1)]);
+      }
+    }
+    const backend = new FlakyBackend();
+    jobsBed({ backend });
+    const store = TestBed.inject(JobsStore);
+    await settle();
+    expect(store.requestError()).toBe('agent unavailable');
+    backend.handler?.(snap(1, 3, 'running', { phase: phase('Running benchmarks', 1) }));
+    await settle();
+    expect(store.requestError()).toBeNull();
+    expect(store.requestStatus()).toBe('loaded');
+    expect(store.jobs().map((j) => [j.id, j.seq])).toEqual([
+      [1, 3],
+      [2, 1],
+    ]);
+  });
+
+  it('keeps the error while the list still cannot be read, whatever events arrive', async () => {
+    class DownBackend extends ControlledBackend {
+      override snapshot(): Promise<readonly SuJobSnapshot[]> {
+        return Promise.reject(new Error('agent unavailable'));
+      }
+    }
+    const backend = new DownBackend();
+    jobsBed({ backend });
+    const store = TestBed.inject(JobsStore);
+    await settle();
+    backend.handler?.(snap(1, 1));
+    await settle();
+    expect(store.requestError()).toBe('agent unavailable');
+    expect(store.jobs()).toHaveLength(1);
+  });
+
   it.each([
     ['a string', 'refused', 'refused'],
     ['an error-like object', { message: 'denied' }, 'denied'],
