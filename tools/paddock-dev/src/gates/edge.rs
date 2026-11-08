@@ -88,12 +88,30 @@ pub fn register_at(root: &Path, rev: &str) -> Option<String> {
     Real.run("git", &["show", &format!("{rev}:docs/gates.toml")], root, None).ok()
 }
 
-/// The history of `docs/gates.toml`, oldest first. A shallow clone gives the part it has.
-pub fn register_history(root: &Path) -> Result<Vec<Version>, String> {
+/// The merge base of `base` and HEAD (or `base` itself when there is none).
+fn merge_base(root: &Path, base: &str) -> String {
+    Real.run("git", &["merge-base", base, "HEAD"], root, None)
+        .map(|s| s.trim().to_string())
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| base.to_string())
+}
+
+/// The history of `docs/gates.toml` that date moves are judged against (§3.1), oldest first: every commit of the register that is
+/// reachable from the merge base with `base`, then one more version for HEAD whose message is the messages of all the branch's
+/// commits to the register together. A branch that creates the register, or moves several dates over several commits, is judged by
+/// its net effect and the trailers anywhere in its commits; the commits already on the base are judged one by one.
+pub fn register_history(root: &Path, base: &str) -> Result<Vec<Version>, String> {
+    let mb = merge_base(root, base);
     let list = Real
-        .run("git", &["log", "--reverse", "--format=%H", "--", "docs/gates.toml"], root, None)
+        .run(
+            "git",
+            &["log", "--reverse", "--format=%H", &mb, "--", "docs/gates.toml"],
+            root,
+            None,
+        )
         .map_err(|e| e.message)?;
-    Ok(list
+    let mut out: Vec<Version> = list
         .lines()
         .filter_map(|sha| {
             let text = register_at(root, sha)?;
@@ -104,7 +122,25 @@ pub fn register_history(root: &Path) -> Result<Vec<Version>, String> {
                 text,
             })
         })
-        .collect())
+        .collect();
+    if !out.is_empty() {
+        let messages = Real
+            .run(
+                "git",
+                &["log", "--format=%B", &format!("{mb}..HEAD"), "--", "docs/gates.toml"],
+                root,
+                None,
+            )
+            .map_err(|e| e.message)?;
+        if let (false, Some(text)) = (messages.trim().is_empty(), register_at(root, "HEAD")) {
+            out.push(Version {
+                sha: "HEAD".into(),
+                message: messages,
+                text,
+            });
+        }
+    }
+    Ok(out)
 }
 
 /// Whether the checkout is shallow (`git rev-parse --is-shallow-repository`).
@@ -211,5 +247,31 @@ mod tests {
         assert_eq!(register_at(root, "main").unwrap(), "version = 1\n# main moved\n");
         // no such revision: nothing to compare with, the caller reports "not measured"
         assert!(base_register(root, "nope").is_none());
+        // the history: the base's commits one by one, then HEAD with the messages of the branch's commits together
+        std::fs::write(root.join("docs/gates.toml"), "version = 1\n# topic one\n").unwrap();
+        commit("first move");
+        std::fs::write(root.join("docs/gates.toml"), "version = 1\n# topic two\n").unwrap();
+        git(
+            root,
+            &[
+                &init[..],
+                &[
+                    "commit",
+                    "-q",
+                    "-am",
+                    "second move",
+                    "-m",
+                    "Gates-date: x 2026-01-01 -> 2026-02-01; approved: coordinator",
+                ],
+            ]
+            .concat(),
+        );
+        let h = register_history(root, "main").unwrap();
+        assert_eq!(h.len(), 2, "{h:?}");
+        assert_eq!(h[0].text, "version = 1\n# base\n");
+        assert_eq!(h[1].sha, "HEAD");
+        assert!(h[1].message.contains("first move") && h[1].message.contains("Gates-date: x 2026-01-01"));
+        // a branch that creates the register has no history to judge
+        assert!(register_history(root, "nope").is_err() || register_history(root, "nope").unwrap().is_empty());
     }
 }
