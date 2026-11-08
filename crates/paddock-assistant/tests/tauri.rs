@@ -131,10 +131,21 @@ fn a_question_returns_at_once_and_the_answer_arrives_as_events_in_every_window()
     let used = invoke(&main, "assistant_context", json!({"conversationId": id})).unwrap();
     assert_eq!(
         used,
-        json!({"usedTokens": 15, "limitTokens": 8192, "exact": true, "level": "ok"})
+        json!({"usedTokens": 15, "limitTokens": 7168, "reserveTokens": 1024, "exact": true, "level": "ok"})
     );
-    let fresh = invoke(&main, "assistant_context", json!({"conversationId": null})).unwrap();
+    let fresh = invoke(
+        &main,
+        "assistant_context",
+        json!({"conversationId": null, "attachments": []}),
+    )
+    .unwrap();
     assert_eq!(fresh["exact"], json!(false));
+    let sha = "a".repeat(64);
+    let too_many = json!({"conversationId": null, "attachments": vec![json!({"kind": "file", "sha256": sha, "name": "a.txt"}); 17]});
+    assert!(
+        invoke(&main, "assistant_context", too_many).is_err(),
+        "bounded like a question"
+    );
     assert_eq!(
         invoke(&main, "assistant_stop", json!({"conversationId": id})).unwrap(),
         json!(false)

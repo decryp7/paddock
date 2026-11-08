@@ -22,6 +22,7 @@ use crate::context::ContextUse;
 use crate::conversation::{Conversation, ConversationSummary};
 use crate::event::{EVENT as EVENT_NAME, Envelope, EventSink};
 use crate::service::{Assistant, AssistantError, AssistantInfo, SendAck, SendRequest};
+use crate::types::Attachment;
 use ::tauri::ipc::Invoke;
 use ::tauri::{AppHandle, Emitter, Manager, Runtime};
 use paddock_commands::CommandError;
@@ -170,15 +171,24 @@ pub async fn assistant_info<R: Runtime>(app: AppHandle<R>) -> Result<AssistantIn
     Ok(assistant_of(&app)?.info())
 }
 
-/// How full the model's context is for a conversation (none: a new chat), for the composer's meter (ADR 0023 WP-4b).
+/// How full the model's context is for a conversation (none: a new chat) with the attachments waiting in the composer, for
+/// its meter (ADR 0023 WP-4b).
 #[::tauri::command]
 pub async fn assistant_context<R: Runtime>(
     app: AppHandle<R>,
     conversation_id: Option<String>,
+    attachments: Option<Vec<Attachment>>,
 ) -> Result<ContextUse, CommandError> {
     // The estimate reads the conversation's history (a saved store may read its file): off the command threads.
+    let pending = attachments.unwrap_or_default();
+    if pending.len() > crate::types::MAX_ATTACHMENTS {
+        return Err(CommandError::invalid(format!(
+            "A question can carry at most {} attachments.",
+            crate::types::MAX_ATTACHMENTS
+        )));
+    }
     blocking(assistant_of(&app)?, move |a| {
-        Ok(a.context(conversation_id.as_deref()))
+        Ok(a.context(conversation_id.as_deref(), &pending))
     })
     .await
 }

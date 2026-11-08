@@ -177,7 +177,17 @@ export const AssistantStore = signalStore(
             return { callId: p.card.callId, name: p.card.name, summary: p.card.summary, input: p.card.input, destructive: p.card.destructive, write: p.card.write, remember: p.card.remember === true };
         return null;
       }),
-      canSend: computed(() => store.run() === 'idle' && store.draft().trim().length > 0 && store.attaching() === 0),
+      /** The chat fills what the model can read: nothing more can be sent in it (the engine refuses it too). */
+      full: computed(() => store.context()?.level === 'full'),
+      canSend: computed(
+        () =>
+          store.run() === 'idle' &&
+          store.draft().trim().length > 0 &&
+          store.attaching() === 0 &&
+          store.context()?.level !== 'full' &&
+          store.speech().kind !== 'recording' &&
+          store.speech().kind !== 'transcribing',
+      ),
       /** The host takes attachments. */
       canAttach: computed(() => store.attachRules() !== null),
       /** Another file fits the next question. */
@@ -207,9 +217,10 @@ export const AssistantStore = signalStore(
     /** Asks the engine how full the context is for the conversation on screen (the meter); a failure only hides it. */
     const refreshContext = async (): Promise<void> => {
       const id = store.activeId();
+      const files = store.attached().map((c) => c.attachment);
       try {
-        const context = await store._backend.context(id);
-        if (store.activeId() === id) patchState(store, { context });
+        const context = await store._backend.context(id, files);
+        if (store.activeId() === id && store.attached().length === files.length) patchState(store, { context });
       } catch {
         patchState(store, { context: null });
       }
@@ -454,7 +465,11 @@ export const AssistantStore = signalStore(
           }
           if (file.size > rules.maxFileBytes) {
             const kib = Math.floor(rules.maxFileBytes / 1024);
-            refused.push($localize`:@@pd.wb.assistant.attach.too-big:"${file.name}:name:" is larger than ${kib}:kib: KiB.`);
+            refused.push(
+              kib > 0
+                ? $localize`:@@pd.wb.assistant.attach.too-big:"${file.name}:name:" is larger than ${kib}:kib: KiB.`
+                : $localize`:@@pd.wb.assistant.attach.too-big-bytes:"${file.name}:name:" is larger than ${rules.maxFileBytes}:bytes: bytes.`,
+            );
             continue;
           }
           patchState(store, { attaching: store.attaching() + 1 });
@@ -469,10 +484,16 @@ export const AssistantStore = signalStore(
           }
         }
         if (refused.length) patchState(store, { failure: refused.join(' ') });
+        void refreshContext();
       },
       /** Takes an attachment off the next question. */
       detach(sha256: string): void {
-        patchState(store, { attached: store.attached().filter((c) => c.attachment.sha256 !== sha256) });
+        const gone = store.attached().find((c) => c.attachment.sha256 === sha256);
+        if (!gone) return;
+        patchState(store, { attached: store.attached().filter((c) => c !== gone) });
+        // The host may forget the bytes; a failure there changes nothing for the question.
+        void store._attachments?.remove(gone.attachment).catch(() => undefined);
+        void refreshContext();
       },
       /**
        * Push-to-talk: starts recording, or stops it and puts the transcript into the question (after what is typed), to read

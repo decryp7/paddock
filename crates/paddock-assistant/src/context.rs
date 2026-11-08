@@ -4,7 +4,12 @@
 //! After a turn of this session the count is the engine's own: the last model call's prompt plus its answer, which is what
 //! the next question carries besides itself (tool definitions included, since they are part of every prompt). Before that,
 //! or for a provider that reports no usage, it is an estimate of about four characters per token over the system prompt, the
-//! tools offered and the history the model would be sent, and [`ContextUse::exact`] says so.
+//! tools offered and the history the model would be sent, and [`ContextUse::exact`] says so. Attachments count through the
+//! app's [`AssistantConfig::attachment_tokens`](crate::AssistantConfig::attachment_tokens) (the app keeps their bytes).
+//!
+//! The room for the conversation is the model's window less a reserve for the answer
+//! ([`Budgets::max_answer_tokens`](crate::Budgets::max_answer_tokens)): a question that would not leave that room is refused
+//! in words before it is sent ([`Assistant::send`](crate::Assistant::send)), never cut.
 
 use serde::Serialize;
 
@@ -34,9 +39,13 @@ pub struct ContextUse {
     /// Tokens the next question carries before its own text.
     #[cfg_attr(test, ts(type = "number"))]
     pub used_tokens: u64,
-    /// Tokens the model holds (prompt plus answer); 0 when unknown.
+    /// Tokens the conversation may take: the model's window less [`reserve_tokens`](Self::reserve_tokens); 0 when the window is
+    /// unknown.
     #[cfg_attr(test, ts(type = "number"))]
     pub limit_tokens: u64,
+    /// Tokens kept free for the answer.
+    #[cfg_attr(test, ts(type = "number"))]
+    pub reserve_tokens: u64,
     /// `used_tokens` is the engine's own count, not an estimate.
     pub exact: bool,
     /// How full that is.
@@ -44,14 +53,25 @@ pub struct ContextUse {
 }
 
 impl ContextUse {
-    /// A use of `used` tokens out of `limit` (0: unknown), with its level.
-    pub fn new(used: u64, limit: u64, exact: bool) -> ContextUse {
+    /// A use of `used` tokens in a model `window` (0: unknown) that keeps `reserve` tokens for the answer, with its level.
+    pub fn new(used: u64, window: u64, reserve: u64, exact: bool) -> ContextUse {
+        let limit = if window == 0 {
+            0
+        } else {
+            window.saturating_sub(reserve).max(1)
+        };
         ContextUse {
             used_tokens: used,
             limit_tokens: limit,
+            reserve_tokens: reserve,
             exact,
             level: context_level(used, limit),
         }
+    }
+
+    /// Whether `more` tokens fit besides what is used (an unknown window fits everything: the engine then says what overflowed).
+    pub fn fits(&self, more: u64) -> bool {
+        self.limit_tokens == 0 || self.used_tokens.saturating_add(more) <= self.limit_tokens
     }
 }
 

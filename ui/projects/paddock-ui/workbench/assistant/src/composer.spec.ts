@@ -5,7 +5,7 @@ import { PdAssistant } from './assistant';
 import { AssistantBackend, MemoryAssistantBackend, type MemoryAssistantOptions } from './backend';
 import { AssistantAttachments, AssistantSpeech } from './composer-ports';
 import { MemoryAssistantAttachments, MemoryAssistantSpeech } from './memory-ports';
-import type { ContextUse } from '../generated/assistant';
+import type { Attachment, ContextUse } from '../generated/assistant';
 
 /** The composer of ADR 0023 WP-4b: attachments (picker, paste, drop), push-to-talk and the context meter. */
 
@@ -18,11 +18,16 @@ interface Options extends MemoryAssistantOptions {
 class MeasuredBackend extends MemoryAssistantBackend {
   used: ContextUse | null = null;
   readonly asked: (string | null)[] = [];
-  override context(id: string | null): Promise<ContextUse | null> {
+  /** The attachments each question about the context carried (the composer's chips). */
+  readonly pending: (readonly Attachment[])[] = [];
+  override context(id: string | null, attachments: readonly Attachment[] = []): Promise<ContextUse | null> {
     this.asked.push(id);
-    return this.used ? Promise.resolve(this.used) : super.context(id);
+    this.pending.push(attachments);
+    return this.used ? Promise.resolve(this.used) : super.context(id, attachments);
   }
 }
+
+const use = (usedTokens: number, limitTokens: number, level: ContextUse['level'], exact = true): ContextUse => ({ usedTokens, limitTokens, reserveTokens: 1024, exact, level });
 
 async function open(options: Options = {}) {
   const backend = new MeasuredBackend(options);
@@ -115,7 +120,7 @@ describe('PdAssistant composer (ADR 0023 WP-4b)', () => {
     await pick(r, [file('photo.png', 'png', 'image/png'), file('huge.log', 'x'.repeat(11)), file('ok.txt', 'fine')]);
     const failure = text(r, 'assistant-failure');
     expect(failure).toContain('"photo.png" is an image');
-    expect(failure).toContain('"huge.log" is larger than 0 KiB');
+    expect(failure).toContain('"huge.log" is larger than 10 bytes');
     expect(attachments?.added).toEqual(['photo.png', 'ok.txt']);
     expect(text(r, 'assistant-file')).toContain('ok.txt');
   });
@@ -211,37 +216,96 @@ describe('PdAssistant composer (ADR 0023 WP-4b)', () => {
   });
 
   it("shows the engine's context count, an estimate as about, and each level in words and colour", async () => {
-    const { r, backend } = await open({ context: { usedTokens: 1234, limitTokens: 8192, exact: false, level: 'ok' } });
+    const { r, backend } = await open({ context: use(1234, 7168, 'ok', false) });
     expect(backend.asked).toContain(null);
-    expect(text(r, 'assistant-context')).toBe('About 1.2k of 8.2k tokens');
+    expect(text(r, 'assistant-context')).toBe('About 1.2k of 7.2k tokens');
+    // A meter people with a screen reader hear, level included (review P1-1).
+    const meter = r.one('[data-testid=assistant-context]');
+    expect(meter.getAttribute('role')).toBe('meter');
+    expect([meter.getAttribute('aria-valuenow'), meter.getAttribute('aria-valuemin'), meter.getAttribute('aria-valuemax')]).toEqual(['1234', '0', '7168']);
+    expect(meter.getAttribute('aria-label')).toBe('Context used');
+    expect(meter.getAttribute('aria-valuetext')).toBe('About 1.2k of 7.2k tokens');
     expect(r.one('[data-testid=assistant-context]').getAttribute('data-level')).toBe('ok');
     expect(r.one('[data-testid=assistant-context]').getAttribute('title')).toContain("tools' definitions");
 
-    backend.used = { usedTokens: 6900, limitTokens: 8192, exact: true, level: 'high' };
+    backend.used = use(6900, 7168, 'high');
     await type(r, 'go on');
     r.one<HTMLButtonElement>('[data-testid=assistant-send]').click();
     await settleAll(r);
-    expect(text(r, 'assistant-context')).toBe('6.9k of 8.2k tokens');
+    // Close to the limit says so in words and with a glyph, not by colour alone (review P1-1).
+    expect(text(r, 'assistant-context')).toBe('6.9k of 7.2k tokens · close to the limit');
+    expect(r.one('[data-testid=assistant-context]').getAttribute('aria-valuetext')).toBe('6.9k of 7.2k tokens, close to the limit');
+    expect(r.all('[data-testid=assistant-context] pd-status-glyph')).toHaveLength(1);
     expect(r.one('[data-testid=assistant-context]').getAttribute('data-level')).toBe('high');
     expect(r.all('[data-testid=assistant-context-full]')).toHaveLength(0);
 
-    backend.used = { usedTokens: 9000, limitTokens: 8192, exact: true, level: 'full' };
+    backend.used = use(7300, 7168, 'full');
     await type(r, 'more');
     r.one<HTMLButtonElement>('[data-testid=assistant-send]').click();
     await settleAll(r);
-    expect(text(r, 'assistant-context-full')).toContain('Start a new chat');
-    backend.used = { usedTokens: 40, limitTokens: 0, exact: false, level: 'unknown' };
+    // Full: the words say by how much, Send is off with the note as its reason, the note's button starts a new chat (P2-8, 11, 12).
+    expect(text(r, 'assistant-context')).toBe('Full: over by 132 of 7.2k tokens');
+    expect(text(r, 'assistant-context-full')).toContain('This chat fills what the model can read.');
+    expect(text(r, 'assistant-context-new')).toBe('Start a new chat');
+    await type(r, 'one more');
+    const send = r.one<HTMLButtonElement>('[data-testid=assistant-send]');
+    expect(send.disabled).toBe(true);
+    expect(send.getAttribute('title')).toContain('This chat fills what the model can read.');
+    backend.used = use(7168, 7168, 'full');
+    await r.fixture.componentInstance['store'].refreshContext();
+    await settleAll(r);
+    expect(text(r, 'assistant-context')).toBe('Full: 7.2k of 7.2k tokens');
+    backend.used = { usedTokens: 40, limitTokens: 0, reserveTokens: 0, exact: false, level: 'unknown' };
     r.one<HTMLButtonElement>('[data-testid=assistant-context-new]').click();
     await settleAll(r);
     expect(r.all('[data-testid=assistant-turn]')).toHaveLength(0);
     expect(text(r, 'assistant-context')).toBe('About 40 tokens');
+    expect(r.one('[data-testid=assistant-context]').getAttribute('role')).toBeNull();
+  });
+
+  it('asks the engine again with the files waiting in the composer, so the chips move the meter (review P1-2)', async () => {
+    const { r, backend } = await open();
+    await pick(r, [file('big.log', 'x'.repeat(100))]);
+    expect(backend.pending.at(-1)?.map((a) => (a.kind === 'file' ? a.name : ''))).toEqual(['big.log']);
+    r.one<HTMLButtonElement>('[data-testid=assistant-file-remove]').click();
+    await settleAll(r);
+    expect(backend.pending.at(-1)).toEqual([]);
+  });
+
+  it('tells the host when a file is taken off the question (review P2-1)', async () => {
+    const { r, attachments } = await open();
+    await pick(r, [file('a.txt', 'a')]);
+    r.one<HTMLButtonElement>('[data-testid=assistant-file-remove]').click();
+    await settleAll(r);
+    expect(attachments?.removed).toEqual(['a.txt']);
+  });
+
+  it('keeps Send off while recording or transcribing (review P2-7)', async () => {
+    const { r } = await open();
+    await type(r, 'Check the disks');
+    const send = (): HTMLButtonElement => r.one<HTMLButtonElement>('[data-testid=assistant-send]');
+    expect(send().disabled).toBe(false);
+    r.one<HTMLButtonElement>('[data-testid=assistant-mic]').click();
+    await settleAll(r);
+    expect(send().disabled).toBe(true);
+  });
+
+  it('lays a refusal out as one banner: its glyph, its words and Dismiss (review P2-13)', async () => {
+    const { r } = await open({ attachments: new MemoryAssistantAttachments({ maxFileBytes: 1 }) });
+    await pick(r, [file('two.txt', 'xx')]);
+    const banner = r.one('[data-testid=assistant-failure]');
+    expect(banner.querySelector('pd-status-glyph')).not.toBeNull();
+    expect(banner.querySelector('[data-testid=assistant-failure-text]')?.textContent).toContain('"two.txt" is larger than');
+    banner.querySelector<HTMLButtonElement>('[data-testid=assistant-failure-dismiss]')?.click();
+    await settleAll(r);
+    expect(r.all('[data-testid=assistant-failure]')).toHaveLength(0);
   });
 
   it('shows no meter for a backend that does not measure', async () => {
     const { r, backend } = await open({ speech: null });
     backend.used = null;
     // The memory backend measures; one that answers null (the base class) shows none.
-    (backend as { context: (id: string | null) => Promise<ContextUse | null> }).context = () => Promise.resolve(null);
+    (backend as { context: (id: string | null, a?: readonly Attachment[]) => Promise<ContextUse | null> }).context = () => Promise.resolve(null);
     r.one<HTMLButtonElement>('[data-testid=assistant-new]').click();
     await settleAll(r);
     expect(r.all('[data-testid=assistant-context]')).toHaveLength(0);

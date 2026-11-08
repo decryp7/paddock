@@ -55,7 +55,7 @@ describe('createChatBackend', () => {
 
   it("passes the context meter's question to the engine (ADR 0023 WP-4b)", async () => {
     const { backend } = create();
-    const used = { usedTokens: 10, limitTokens: 100, exact: true, level: 'ok' as const };
+    const used = { usedTokens: 10, limitTokens: 100, reserveTokens: 0, exact: true, level: 'ok' as const };
     const spy = vi.spyOn(backend.inner, 'context').mockResolvedValue(used);
     expect(await backend.context('c1')).toEqual(used);
     expect(spy).toHaveBeenCalledWith('c1');

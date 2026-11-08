@@ -224,9 +224,14 @@ export type ContextUse = {
  */
 usedTokens: number, 
 /**
- * Tokens the model holds (prompt plus answer); 0 when unknown.
+ * Tokens the conversation may take: the model's window less [`reserve_tokens`](Self::reserve_tokens); 0 when the window is
+ * unknown.
  */
 limitTokens: number, 
+/**
+ * Tokens kept free for the answer.
+ */
+reserveTokens: number, 
 /**
  * `used_tokens` is the engine's own count, not an estimate.
  */
