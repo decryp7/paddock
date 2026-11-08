@@ -13,9 +13,10 @@ systemctl daemon-reload || true
 
 case "$1" in
     configure)
-        # An upgrade restarts the helper only when the user turned it on.
+        # An upgrade starts the helper again only when the user turned it on. The old package's prerm stopped it, so this is a
+        # restart, not a try-restart (which does nothing to a stopped unit and left the helper off after every upgrade).
         if systemctl is-enabled --quiet dyno-helper.service 2>/dev/null; then
-            systemctl try-restart dyno-helper.service || true
+            systemctl restart dyno-helper.service || true
         fi
         ;;
 esac

@@ -63,23 +63,9 @@ status = "built"
 id = "launch-at-login"
 title = "The launch-at-login switch: the app's own login item and the start reason (login item, restored at login)"
 canonical = "paddock-service"
-paths = ["crates/paddock-service/src/login.rs", "crates/paddock-service/src/launch.rs", "crates/paddock-service/src/apple_event.rs"]
+paths = ["crates/paddock-service/src/login.rs", "crates/paddock-service/src/login/**", "crates/paddock-service/src/launch.rs", "crates/paddock-service/src/apple_event.rs"]
 status = "built"
 adr = "0034"
-
-  [[mechanism.copy]]
-  paths = ["apps/dyno/app/src-tauri/src/login.rs", "apps/dyno/app/src-tauri/src/login_item.rs"]
-  symbols = ["item:apply_launch_at_login", "item:hidden_at_start"]
-  owner = "dyno"
-  delete_by = "dyno-v1.1.0"
-  note = "Dyno 1.0 adds SMAppService.mainApp and the lgit/rsto start reason here; they move into paddock-service::login (MainAppItem, LaunchReason) after the Dyno tag."
-
-  [[mechanism.copy]]
-  paths = ["apps/dyno/app/src-tauri/src/lib.rs"]
-  symbols = ["text:tauri_plugin_autostart"]
-  kind = "wiring"
-  owner = "dyno"
-  delete_by = "dyno-v1.1.0"
 
   [[mechanism.copy]]
   paths = ["apps/spotter/app/src-tauri/src/lib.rs", "apps/spotter/app/src-tauri/src/commands.rs"]

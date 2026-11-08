@@ -17,7 +17,6 @@ pub mod health;
 pub mod link;
 pub mod logging;
 pub mod login;
-pub mod login_item;
 pub mod mcp;
 pub mod mcp_readings;
 pub mod per_machine;

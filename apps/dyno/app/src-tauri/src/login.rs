@@ -71,22 +71,32 @@ pub fn apply_launch_at_login(
     paddock_service::login::apply_launch_at_login_with(on, location, Some(service), autostart, &words())
 }
 
-/// What the first sight of the settings did about start at login.
-#[derive(Debug, PartialEq, Eq)]
-pub enum FirstRun {
-    /// The default was applied now (the switch was on and the marker was missing).
-    Applied,
-    /// Nothing to do: the marker is there, or the switch is off.
-    Skipped,
-}
+pub use paddock_service::login::FirstRun;
+
+/// The app's own login item on every OS ([`paddock_service::login::AppItem::for_this_os`]): the XDG file and the `Run` value
+/// keep the name the plugin used (the app name), so an upgrade rewrites them instead of adding a second entry; a login start
+/// passes `--hidden` (Linux and Windows; macOS says so in the open event instead).
+pub const APP_ITEM: paddock_service::login::AppItem<'static> = paddock_service::login::AppItem {
+    name: "Dyno",
+    file_stem: "Dyno",
+    run_value: dyno_agent::service::spec::WINDOWS_APP_VALUE,
+    args: &[paddock_window::launch::HIDDEN_FLAG],
+};
+
+/// The launch agent Dyno 1.0's `tauri-plugin-autostart` wrote on macOS (`~/Library/LaunchAgents/Dyno.plist`), which
+/// `migrate_legacy_login_at_start` (macOS) replaces with `SMAppService.mainApp`.
+pub const LEGACY_LAUNCH_AGENT: paddock_service::login::LegacyLaunchAgent<'static> = paddock_service::login::LegacyLaunchAgent {
+    label: "Dyno",
+    bundle: "Dyno.app",
+    exe: "dyno-app",
+    flag: paddock_window::launch::HIDDEN_FLAG,
+};
 
 /// The marker's file name inside the user's own app data folder.
 pub const FIRST_RUN_MARKER: &str = "login-default-applied";
 
-/// Start at login is on by default, so a fresh install registers itself once without Settings being opened. The first
-/// sight of the settings with the switch on and no per-user `marker` registers both entries and writes the marker, so a user who
-/// later turns the switch off is never overridden; a switch that is off (a file that says `false`) is respected and only
-/// leaves the marker. A failed registration leaves no marker (it is tried again at the next start) and returns the message.
+/// Start at login is on by default, so a fresh install registers itself once without Settings being opened
+/// ([`paddock_service::login::apply_first_run_with`] with Dyno's words and its agent service).
 pub fn apply_first_run(
     marker: &paddock_service::login::FirstRunMarker,
     sys: &mut dyn paddock_service::System,
@@ -95,16 +105,7 @@ pub fn apply_first_run(
     service: &mut dyn AgentService,
     autostart: &mut dyn Autostart,
 ) -> Result<FirstRun, String> {
-    if marker.is_set(sys) {
-        return Ok(FirstRun::Skipped);
-    }
-    if !wanted {
-        marker.record(sys, "off")?;
-        return Ok(FirstRun::Skipped);
-    }
-    apply_launch_at_login(true, location, service, autostart)?;
-    marker.record(sys, "applied")?;
-    Ok(FirstRun::Applied)
+    paddock_service::login::apply_first_run_with(marker, sys, wanted, location, Some(service), autostart, &words())
 }
 
 /// Whether the first run registers start at login, read from the settings file the app already has before any agent runs: a
@@ -407,21 +408,6 @@ pub fn apply_first_run_at_start(
     autostart: &mut dyn Autostart,
 ) -> Result<FirstRun, String> {
     apply_first_run(marker, sys, first_run_wanted(settings_file), location, service, autostart)
-}
-
-/// Removes the old route's `Dyno.plist` from `launch_agents` (only a file of exactly that shape) and, because its
-/// existence means the switch was on, registers the app's new entry through `autostart` so the switch never says on with
-/// nothing registered. An unstable `location` removes the file but registers nothing (the user is told at the next toggle).
-pub fn migrate_legacy_login(
-    launch_agents: &std::path::Path,
-    location: Result<(), String>,
-    autostart: &mut dyn Autostart,
-) -> Result<crate::login_item::LegacyPlist, String> {
-    let result = crate::login_item::remove_legacy_plist(launch_agents).map_err(|e| e.to_string())?;
-    if result == crate::login_item::LegacyPlist::Removed && location.is_ok() {
-        autostart.set(true)?;
-    }
-    Ok(result)
 }
 
 /// Whether the running executable may be registered to start at login.
@@ -769,12 +755,13 @@ mod mac {
         manager(std::sync::Arc::new(|| false), Timings::default())
     }
 
-    /// Moves a start-at-login the old route (`tauri-plugin-autostart`) wrote to `SMAppService.mainApp` ([`super::migrate_legacy_login`]).
+    /// Moves a start-at-login the old route (`tauri-plugin-autostart`) wrote to `SMAppService.mainApp`
+    /// ([`paddock_service::login::LegacyLaunchAgent::migrate`]).
     pub fn migrate_legacy_login_at_start() {
         let Some(home) = std::env::var_os("HOME") else { return };
         let dir = PathBuf::from(home).join("Library/LaunchAgents");
-        match super::migrate_legacy_login(&dir, super::current_location(), &mut MainAppItem::new()) {
-            Ok(crate::login_item::LegacyPlist::Removed) => {
+        match super::LEGACY_LAUNCH_AGENT.migrate(&dir, super::current_location(), &mut MainAppItem::new()) {
+            Ok(paddock_service::login::LegacyPlist::Removed) => {
                 crate::logging::info("moved start at login from the old Dyno.plist to a Login Items entry")
             }
             Ok(_) => {}
@@ -914,59 +901,14 @@ pub fn service_probe() -> crate::link::ServiceProbe {
     })
 }
 
-/// The app's own login item: `SMAppService.mainApp` on macOS, `tauri-plugin-autostart` elsewhere.
-#[cfg(target_os = "macos")]
+/// The app's own login item ([`APP_ITEM`]): `SMAppService.mainApp` on macOS, the per-user `Run` value on Windows (never
+/// written while elevated) and an XDG autostart file on Linux, each starting the app hidden in the tray.
 pub fn platform_autostart<R: tauri::Runtime>(_app: &tauri::AppHandle<R>) -> Box<dyn Autostart> {
-    Box::new(paddock_service::login::MainAppItem::new())
-}
-
-/// The app's own login item on Windows: always the per-user `Run` value, never written while elevated
-/// ([`paddock_service::login::UserRunEntry`]).
-#[cfg(windows)]
-pub fn platform_autostart<R: tauri::Runtime>(_app: &tauri::AppHandle<R>) -> Box<dyn Autostart> {
-    match std::env::current_exe() {
-        Ok(exe) => Box::new(paddock_service::login::UserRunEntry::new(
-            dyno_agent::service::spec::WINDOWS_APP_VALUE,
-            exe,
-            &[paddock_window::launch::HIDDEN_FLAG],
-            Box::new(paddock_service::RealSystem::new()),
-            Box::new(paddock_service::login::ProcessElevation),
-        )),
-        Err(e) => Box::new(NoAutostart(format!("the app's folder cannot be found: {e}"))),
-    }
-}
-
-/// The app's own login item on Linux: an XDG autostart file that starts the app hidden in the tray
-/// ([`paddock_service::login::XdgAutostart`]).
-#[cfg(not(any(target_os = "macos", windows)))]
-pub fn platform_autostart<R: tauri::Runtime>(_app: &tauri::AppHandle<R>) -> Box<dyn Autostart> {
-    let config = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
-    match (config, std::env::current_exe()) {
-        (Some(config), Ok(exe)) => Box::new(paddock_service::login::XdgAutostart::new(
-            &config,
-            // The file name the plugin used (the app name), so an upgrade rewrites it instead of adding a second entry.
-            "Dyno",
-            "Dyno",
-            exe,
-            &[paddock_window::launch::HIDDEN_FLAG],
-            Box::new(paddock_service::RealSystem::new()),
-        )),
-        _ => Box::new(NoAutostart("the home folder or the app's folder cannot be found".into())),
-    }
-}
-
-/// An entry that cannot be written, with the reason.
-#[cfg(not(target_os = "macos"))]
-struct NoAutostart(String);
-
-#[cfg(not(target_os = "macos"))]
-impl Autostart for NoAutostart {
-    fn set(&mut self, _: bool) -> Result<(), String> {
-        Err(self.0.clone())
-    }
+    APP_ITEM.for_this_os(
+        std::env::current_exe(),
+        &|key| std::env::var_os(key),
+        Box::new(paddock_service::RealSystem::new()),
+    )
 }
 
 #[cfg(test)]
@@ -1658,6 +1600,60 @@ mod tests {
         assert!(current_location_for("/Applications/Dyno.app/Contents/MacOS/dyno-app").is_ok());
     }
 
+    /// Pins the app's own login item as Dyno 1.1 writes it (the names the plugin used, started hidden), so the move into
+    /// `paddock_service::login::AppItem` changes nothing a user has registered.
+    #[test]
+    fn the_apps_own_login_item_keeps_its_names_and_starts_hidden() {
+        let sys = paddock_service::testing::FakeSystem::new();
+        let xdg = APP_ITEM
+            .xdg(
+                Some("/home/u/.config".into()),
+                Ok("/opt/dyno/dyno-app".into()),
+                Box::new(sys.clone()),
+            )
+            .unwrap();
+        assert_eq!(
+            xdg.definition(),
+            "[Desktop Entry]\nType=Application\nName=Dyno\nExec=\"/opt/dyno/dyno-app\" \"--hidden\"\nTerminal=false\n\
+             X-GNOME-Autostart-enabled=true\n"
+        );
+        let mut xdg = xdg;
+        xdg.set(true).unwrap();
+        assert!(sys.file(std::path::Path::new("/home/u/.config/autostart/Dyno.desktop")).is_some());
+
+        let run = APP_ITEM
+            .windows_run(
+                Ok(r"C:\Program Files\Dyno\dyno-app.exe".into()),
+                Box::new(sys.clone()),
+                Box::new(paddock_service::login::ProcessElevation),
+            )
+            .unwrap();
+        assert_eq!(run.command(), r#""C:\Program Files\Dyno\dyno-app.exe" --hidden"#);
+        assert_eq!(APP_ITEM.run_value, "Dyno");
+        assert_eq!(
+            APP_ITEM.xdg(None, Ok("/opt/dyno/dyno-app".into()), Box::new(sys)).err().as_deref(),
+            Some("the home folder or the app's folder cannot be found")
+        );
+    }
+
+    /// Pins which old file is Dyno 1.0's: label `Dyno`, `Dyno.app/Contents/MacOS/dyno-app`, optionally `--hidden`.
+    #[test]
+    fn the_legacy_launch_agent_is_dyno_1_0s_file_and_no_other() {
+        let file = |label: &str, args: &str| {
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\">\n<dict>\n<key>Label</key>\n<string>{label}</string>\n\
+                 <key>AssociatedBundleIdentifiers</key>\n<array></array>\n<key>ProgramArguments</key>\n<array>{args}</array>\n\
+                 <key>RunAtLoad</key>\n<true/>\n</dict>\n</plist>"
+            )
+        };
+        let exe = "<string>/Applications/Dyno.app/Contents/MacOS/dyno-app</string>";
+        assert!(LEGACY_LAUNCH_AGENT.matches(&file("Dyno", &format!("{exe}<string>--hidden</string>"))));
+        assert!(LEGACY_LAUNCH_AGENT.matches(&file("Dyno", exe)));
+        assert!(!LEGACY_LAUNCH_AGENT.matches(&file("Spotter", exe)));
+        assert!(!LEGACY_LAUNCH_AGENT.matches(&file("Dyno", "<string>/Applications/Dyno.app/Contents/MacOS/dyno</string>")));
+        assert!(!LEGACY_LAUNCH_AGENT.matches(&file("Dyno", &format!("{exe}<string>--safe-mode</string>"))));
+    }
+
     #[test]
     fn a_removed_legacy_file_registers_the_new_entry_once_and_nothing_else_does() {
         let dir = tempfile::tempdir().unwrap();
@@ -1671,28 +1667,28 @@ mod tests {
         };
         // Nothing there: nothing registered.
         assert_eq!(
-            migrate_legacy_login(dir.path(), Ok(()), &mut a),
-            Ok(crate::login_item::LegacyPlist::Absent)
+            LEGACY_LAUNCH_AGENT.migrate(dir.path(), Ok(()), &mut a),
+            Ok(paddock_service::login::LegacyPlist::Absent)
         );
         // A foreign file is kept and nothing is registered.
         std::fs::write(dir.path().join("Dyno.plist"), "mine").unwrap();
         assert_eq!(
-            migrate_legacy_login(dir.path(), Ok(()), &mut a),
-            Ok(crate::login_item::LegacyPlist::Foreign)
+            LEGACY_LAUNCH_AGENT.migrate(dir.path(), Ok(()), &mut a),
+            Ok(paddock_service::login::LegacyPlist::Foreign)
         );
         assert!(calls.0.lock().unwrap().is_empty());
         // The old file: removed, new entry registered.
         std::fs::write(dir.path().join("Dyno.plist"), old).unwrap();
         assert_eq!(
-            migrate_legacy_login(dir.path(), Ok(()), &mut a),
-            Ok(crate::login_item::LegacyPlist::Removed)
+            LEGACY_LAUNCH_AGENT.migrate(dir.path(), Ok(()), &mut a),
+            Ok(paddock_service::login::LegacyPlist::Removed)
         );
         assert_eq!(*calls.0.lock().unwrap(), vec!["autostart true".to_string()]);
         // From an unstable place the file goes but nothing is registered.
         std::fs::write(dir.path().join("Dyno.plist"), old).unwrap();
         assert_eq!(
-            migrate_legacy_login(dir.path(), Err("x".into()), &mut a),
-            Ok(crate::login_item::LegacyPlist::Removed)
+            LEGACY_LAUNCH_AGENT.migrate(dir.path(), Err("x".into()), &mut a),
+            Ok(paddock_service::login::LegacyPlist::Removed)
         );
         assert_eq!(calls.0.lock().unwrap().len(), 1);
     }

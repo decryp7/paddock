@@ -1060,6 +1060,38 @@ fn other_agent(dirs: &Dirs) -> Running {
     Running::start(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap()
 }
 
+/// Another agent that has taken the data folder's lock and not yet written its discovery file: it is still starting. Nothing of
+/// it runs, so nothing writes `agent.json` until [`SlowHolder::start`]. A running agent ([`other_agent`]) would not do as this
+/// holder: its discovery guard writes its own file again at the next watch (30 s), and a test that put another file there and
+/// counted looks past that saw the link connect to it (CI run 7672, macOS, at 94 of 100 looks).
+struct SlowHolder {
+    dirs: Dirs,
+    lock: dyno_agent::instance::InstanceLock,
+}
+
+impl SlowHolder {
+    fn take(dirs: &Dirs) -> SlowHolder {
+        SlowHolder {
+            dirs: dirs.clone(),
+            lock: dyno_agent::instance::InstanceLock::acquire(dirs).expect("the data folder is free"),
+        }
+    }
+
+    /// The holder finishes starting with the lock it holds (no moment without it) and writes its discovery file.
+    fn start(self) -> Running {
+        let fake = Fake::new();
+        Running::start_with_lock(
+            self.dirs,
+            fake.platform(),
+            Box::new(fake.clone()),
+            Box::new(|_| Ok(())),
+            dyno_agent::disk::DiskPorts::none(),
+            Ok(self.lock),
+        )
+        .unwrap()
+    }
+}
+
 /// Every status up to and including the first with `state`.
 fn collect_until(rx: &Receiver<AgentStatus>, state: AgentState) -> Vec<AgentStatus> {
     let mut seen = Vec::new();
@@ -1092,8 +1124,7 @@ fn a_stale_discovery_file_beside_a_slow_lock_holder_is_not_ready_and_launches_no
         code: Some(dyno_agent::cli::EXIT_ALREADY_RUNNING),
     });
     // Another agent holds the data folder but is slow to write its file; the file there is an old agent's.
-    let holder = other_agent(&r.link.dirs);
-    let fresh = holder.discovery.clone();
+    let holder = SlowHolder::take(&r.link.dirs);
     stale_file().write(&r.link.dirs.discovery()).unwrap();
     let handle = r.link.spawn().unwrap();
     wait_state(&r.link, "waiting for the holder", |s| s.phase == Phase::WaitingForHolder);
@@ -1105,8 +1136,13 @@ fn a_stale_discovery_file_beside_a_slow_lock_holder_is_not_ready_and_launches_no
         seen.iter().all(|s| !matches!(s.state, AgentState::Failed | AgentState::Restarting)),
         "a false outage was reported: {seen:?}"
     );
+    assert_eq!(
+        Discovery::read(&r.link.dirs.discovery()),
+        Some(stale_file()),
+        "the stale file was replaced during the wait"
+    );
     // The holder writes its file: the link connects, still without another launch.
-    fresh.write(&r.link.dirs.discovery()).unwrap();
+    let holder = holder.start();
     running(&r.link, &r.statuses);
     assert_eq!(r.launcher.launches(), 0);
     r.link.quit();
@@ -1173,10 +1209,8 @@ fn another_agent_that_holds_the_folder_without_answering_is_reported_with_retry(
     let r = stub_rig(Child::Exited {
         code: Some(dyno_agent::cli::EXIT_ALREADY_RUNNING),
     });
-    // As after a replace: the old agent's file is gone, but it still holds the folder.
-    let holder = other_agent(&r.link.dirs);
-    let fresh = holder.discovery.clone();
-    let _ = std::fs::remove_file(r.link.dirs.discovery());
+    // As after a replace: no file names the agent that still holds the folder.
+    let holder = SlowHolder::take(&r.link.dirs);
     let handle = r.link.spawn().unwrap();
     // The look that finds the lock held re-checks it at a pace (paddock-proc), so a stall may show for the look first: wait for the one
     // that names the holder.
@@ -1191,7 +1225,7 @@ fn another_agent_that_holds_the_folder_without_answering_is_reported_with_retry(
         until(HANG_GUARD, || r.launcher.launches() == 1),
         "Retry did not run the connection steps again"
     );
-    fresh.write(&r.link.dirs.discovery()).unwrap();
+    let holder = holder.start();
     running(&r.link, &r.statuses);
     r.link.quit();
     handle.join().unwrap();

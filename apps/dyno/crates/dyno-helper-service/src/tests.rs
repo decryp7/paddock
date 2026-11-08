@@ -443,10 +443,90 @@ fn the_maintainer_scripts_are_posix_sh_skip_without_systemd_and_touch_only_the_h
         2,
         "two removals, each of one fixed path (the state and the logs folder), only on purge"
     );
+    let postinst = package_file("postinst");
     assert!(
-        package_file("postinst").contains("try-restart dyno-helper.service"),
-        "an upgrade restarts it only when it was enabled"
+        postinst.contains("systemctl restart dyno-helper.service") && !postinst.contains("systemctl try-restart"),
+        "an upgrade starts it again (prerm stopped it) only when it is enabled"
     );
+}
+
+/// Runs the package's maintainer `script` with `args` the way dpkg would on a systemd machine, but over a fake `systemctl` first on
+/// PATH that records its arguments and answers `is-enabled` as `enabled` says (ER-14: the real systemctl is never called). The only
+/// change to the shipped script is where it looks for a running systemd (`/run/systemd/system`, here a folder of the test's).
+/// Returns every systemctl call made in `tmp` so far, one per line.
+#[cfg(unix)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test runs the shipped sh script itself; it exits on its own over the fake systemctl"
+)]
+fn run_maintainer_script(tmp: &std::path::Path, script: &str, args: &[&str], enabled: bool) -> Vec<String> {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = tmp.join("bin");
+    let systemd = tmp.join("run-systemd");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::create_dir_all(&systemd).unwrap();
+    let calls = tmp.join("calls");
+    let fake = bin.join("systemctl");
+    std::fs::write(
+        &fake,
+        format!(
+            "#!/bin/sh\necho \"$*\" >> '{}'\ncase \"$1\" in is-enabled) exit {} ;; esac\nexit 0\n",
+            calls.display(),
+            if enabled { 0 } else { 1 }
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let text = package_file(script);
+    assert!(text.contains("/run/systemd/system"), "{script} looks for a running systemd");
+    let copy = tmp.join(script);
+    std::fs::write(&copy, text.replace("/run/systemd/system", &systemd.display().to_string())).unwrap();
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
+    let out = std::process::Command::new("/bin/sh")
+        .arg(&copy)
+        .args(args)
+        .env("PATH", path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{script} {args:?} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    std::fs::read_to_string(&calls)
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+/// VM round on the 1.1.0 release candidate (Linux): after a .deb upgrade the helper stayed stopped. `prerm upgrade` stops it and
+/// `postinst configure` asked for `try-restart`, which does nothing to a stopped unit, so every upgrade turned the helper off for a
+/// user who had turned it on. The upgrade runs both scripts in dpkg's order: an enabled helper runs again, a disabled one is not
+/// started.
+#[cfg(unix)]
+#[test]
+fn a_deb_upgrade_starts_the_helper_again_only_when_the_user_turned_it_on() {
+    for enabled in [true, false] {
+        let tmp = tempfile::tempdir().unwrap();
+        run_maintainer_script(tmp.path(), "prerm", &["upgrade", "1.0.0"], enabled);
+        let calls = run_maintainer_script(tmp.path(), "postinst", &["configure", "1.0.0"], enabled);
+        let started: Vec<&String> = calls
+            .iter()
+            .filter(|c| ["start", "restart", "try-restart", "reload-or-restart", "enable"].contains(&c.split(' ').next().unwrap_or("")))
+            .collect();
+        if enabled {
+            let stop = calls.iter().position(|c| c == "stop dyno-helper.service");
+            let restart = calls.iter().position(|c| c == "restart dyno-helper.service");
+            assert!(
+                matches!((stop, restart), (Some(s), Some(r)) if s < r),
+                "an enabled helper was stopped by the upgrade and not started again: {calls:?}"
+            );
+            assert_eq!(started.len(), 1, "one restart and nothing else: {calls:?}");
+        } else {
+            assert!(started.is_empty(), "a helper the user did not turn on was started: {calls:?}");
+        }
+    }
 }
 
 #[test]
