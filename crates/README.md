@@ -1623,7 +1623,7 @@ service.repair(&cancel)?;                       // the Repair button (never depe
   per-user agent, bundled as Tauri's `externalBin` (`agent/sidecar.mjs` builds it per target triple in
   `beforeBuildCommand`; the bundle check starts it from the built app with `--self-test`, rule 23), with its generated
   plist and NSIS hooks, so the page, the health entry and
-  `scripts/shell-demo/smoke-service-update.sh` (C21: build N, then N+1; disposable Macs only, rule 7) have something real.
+  `scripts/shell-demo/smoke-service-update.sh` (build N, then N+1; disposable Macs only, rule 7) have something real.
 - Not here: Task Scheduler entries (no app uses them).
 
 ## `paddock-setup` (family ADR 0053, plan S2 and S3)

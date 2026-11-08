@@ -21,7 +21,7 @@
   `Copies-waived: <id> <path>: <reason>` in a commit that touches it (`*` only for a mechanism of at most two members
   besides wiring); a freeze does not stop such a fix; a new copy needs its entry and a delete-by tag, an entry leaves
   only with its files (or `Copies-removed:`), and a date moves only with `Copies-date: ... approved: <coordinator|user>`
-  (`user` for a later release line); register check `paddock-conformance.mjs copies --check-register` (ADR 0034, C58).
+  (`user` for a later release line); register check C58 (planned, ADR 0034 WP-1; not built yet, the steward checks the register by hand).
 - Slow means two questions (rule 51): can more threads or workers run it (bounded by the kind of work), and can it be made
   cheaper (less work per item, no repeats, a cheaper algorithm or format, caching, batching, skipping)? Measure both;
   thread counts are Settings with an "Auto" default; a long or bulk operation's design has a "Parallelism and cost" section.
