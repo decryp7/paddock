@@ -2,6 +2,7 @@
 //! `inputs.txt` list, the slot commands with the real binary, the CI kit's job-isolation.sh over it and the `./dev` wrapper.
 mod cli;
 mod contracts;
+mod dev_tool_workflow;
 mod golden;
 mod hostile;
 mod inputs;
