@@ -447,6 +447,7 @@ async function main(argv) {
         // how the Jobs list's Cancel is exposed (AX roles) for the benchmark row.
         const macJobsStopped = async () => {
           const ld = macLoginJobsDriver(gui);
+          const contInfo = [];
           const stopStep = await jobsStoppedStep({
             quitApp: async () => { await exec(`osascript -e 'quit app "Dyno"'; pkill -x dyno-app; true`); await sleepMs(4000); },
             // kill the agent, then stop the supervisor's NEW agent the moment its pid appears; the identity (pid and start time) is read in the same command
@@ -457,14 +458,18 @@ async function main(argv) {
             },
             openJobs: () => ld.openJobs(), jobsText: () => ld.jobsText(),
             // rule 53: continue only the process whose pid AND start time are the ones that were stopped
-            cont: async ({ pid, start }) => { await exec(`[ "$(ps -o lstart= -p ${pid} | sed 's/^ *//')" = '${start}' ] && kill -CONT ${pid}; echo "state after CONT: $(ps -o stat= -p ${pid})" >> /tmp/jobs-stopped.log`); },
+            cont: async ({ pid, start }) => { // same start time (whitespace-normalised) or no signal; the state before and after is returned as evidence
+              const norm = (x) => x.replace(/\s+/g, ' ').trim();
+              const r = await exec(`s=$(ps -o lstart= -p ${pid} | tr -s ' ' | sed 's/^ *//;s/ *$//'); echo "before: stat=$(ps -o stat= -p ${pid}) start=$s"; if [ "$s" = '${norm(start)}' ]; then kill -CONT ${pid}; echo "sent CONT"; else echo "identity differs: not signalled"; fi; sleep 1; echo "after: stat=$(ps -o stat= -p ${pid})"`);
+              contInfo.push(r.stdout.trim().replace(/\n/g, '; '));
+            },
             guestClock: async () => (await exec('date +%T')).stdout.trim(),
           }, { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) }, { clearMaxMs: 40_000 });
           { // the app and agent logs, copied next to the report, and the lines about the link and the Jobs read
             const files = (await exec('ls -1 "$HOME/Library/Logs/Dyno"/*.log 2>/dev/null')).stdout.trim().split('\n').filter(Boolean);
             const saved = []; for (const f of files) { const d = await fetch(f); if (d) saved.push(d); }
             const lg = (await exec('cat "$HOME/Library/Logs/Dyno"/dyno.*.log 2>/dev/null | grep -i -E "link phase|connected|handshake|agent|jobs|timeout|timed out|reconnect|retry" | tail -n 120 | cut -c1-330')).stdout;
-            stopStep.evidence = [...(stopStep.evidence ?? []), `logs copied: ${saved.join(', ')}`, `app log lines (link, agent, jobs, retry):\n${lg}`];
+            stopStep.evidence = [...(stopStep.evidence ?? []), `SIGCONT command result: ${contInfo.join(' | ')}`, `logs copied: ${saved.join(', ')}`, `app log lines (link, agent, jobs, retry):\n${lg}`];
           }
           // Measurement (not a release row): is the Jobs list's Cancel a real button? Start a benchmark, dump the AX tree around it, end it.
           await exec(`open -a ${bundle}`); await sleepMs(15_000);
