@@ -9,7 +9,13 @@ fn main() {
         let code = dyno_cli::run_mcp(&args, std::env::var(dyno_cli::MCP_KEY_VAR).ok(), &mut std::io::stderr().lock());
         std::process::exit(code);
     }
-    let env = dyno_cli::Env::from_process();
+    let env = match dyno_cli::Env::from_process() {
+        Ok(e) => e,
+        Err(why) => {
+            eprintln!("dyno: {why}");
+            std::process::exit(78);
+        }
+    };
     let (mut out, mut err) = (std::io::stdout().lock(), std::io::stderr().lock());
     std::process::exit(dyno_cli::run(&args, &env, &mut out, &mut err));
 }

@@ -41,7 +41,11 @@ impl Discovery {
     }
 
     /// Reads the file; `None` when missing or damaged.
+    /// Also `None` when the folder holding it is a link or belongs to another user: a planted file is not even a hint.
     pub fn read(path: &Path) -> Option<Discovery> {
+        if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+            paddock_env::check_private_dir(dir).ok()?;
+        }
         serde_json::from_slice(&paddock_proc::hint::read_bounded(path)?).ok()
     }
 
@@ -133,6 +137,19 @@ mod tests {
             protocol: 1,
             build: String::new(),
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_in_a_linked_folder_is_not_read() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real = tmp.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        sample().write(&real.join("agent.json")).unwrap();
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(Discovery::read(&real.join("agent.json")).is_some());
+        assert!(Discovery::read(&link.join("agent.json")).is_none());
     }
 
     #[test]

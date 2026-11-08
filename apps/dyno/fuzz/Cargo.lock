@@ -1653,6 +1653,7 @@ dependencies = [
 name = "paddock-env"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "log",
  "paddock-workspace-hack",
  "serde",

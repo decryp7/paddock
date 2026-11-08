@@ -7,6 +7,8 @@
 //! - [`VersionedFile`]: a JSON state file with a `version`: atomic writes with fsync and a `.bak`, missing or damaged gives
 //!   defaults (the damaged file is kept as `.corrupt-<time>`, a valid `.bak` is used), a newer version is refused and left
 //!   untouched, older versions go through a migration chain once.
+//! - [`check_private_dir`] and [`private_fallback_dir`]: a folder only the current user controls; the last-resort folder is
+//!   per user and verified, never a shared fixed path.
 //! - [`write_atomic`]: the atomic replace under it, for files that are not JSON state.
 //!
 //! Tests use temporary folders only and never read or write the user's real folders.
@@ -15,12 +17,14 @@ mod app;
 mod atomic;
 mod dirs;
 mod error;
+mod private;
 mod versioned;
 
 pub use app::AppId;
 pub use atomic::write_atomic;
 pub use dirs::{AppDirs, MapVars, Os, PORTABLE_FLAG, ProcessVars, Source, Vars};
 pub use error::{EnvError, Result};
+pub use private::{Untrusted, check_private_dir, private_fallback_dir};
 pub use versioned::{
     DEFAULT_KEEP_CORRUPT, DEFAULT_MAX_BYTES, FIRST_VERSION, Loaded, Migration, Problem,
     VersionedFile,
