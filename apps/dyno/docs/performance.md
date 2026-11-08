@@ -465,3 +465,16 @@ the pipe). The period is a constant, not yet a Setting with an "Auto" default (t
   readings in 60 s at the 2 s cadence, CPU of the process plus its waited-for children (`getrusage`).
   `ioreg` child: 529,051 us in total, 17,635 us per reading (about 0.9 % of one core). IOKit in process: 5,991 us in total, 199 us
   per reading (about 0.01 % of one core), 88 times cheaper.
+
+## The non-test cargo check of the dyno-platform packages (Dyno ADR 0033 section 3.2, 2026-11-09)
+
+- **Commit:** `c87c28aa7` on `fix/dyno-no-fakes-in-release`, `ci.yml` dispatch run 7767 (base `a6ec5b419`).
+- **What:** `cargo check --locked --lib --bins -p dyno-platform -p dyno-agent -p dyno-app -p dyno-helper` (no test targets, so no `test-support`), and
+  `cargo test --locked -p dyno-platform --test no_ungated_doubles` (the declaration scan), both as Dyno's `rustChecks` on the Linux leg.
+- **Linux CI leg (`ubuntu-latest`, container `paddock-ci:v2`, from the job log):** the check 49.6 s (`Finished` line; the leg had just compiled
+  the `cargo fetch` and `prepare` state, build folder not shared with the tests), the scan 46.0 s to build and 0.46 s to run.
+- **Local cold, macOS cross-check for Windows (`cargo xwin check`, 2 jobs, 2026-11-08):** the same four packages in 6 min 24 s cold; the
+  test targets of four packages another 2 min 44 s.
+- **Not measured:** the Windows and macOS legs (`hostRustChecks`). In run 7767 every host job (`app dyno (windows-latest)`, `app dyno
+  (macos-latest)`) stayed queued for the 2 h the wait allowed: no host runner was free. D10 asks for the per-leg cost, cold and warm, before the
+  user is asked again; it is still to be measured on the first run that gets a host runner.
