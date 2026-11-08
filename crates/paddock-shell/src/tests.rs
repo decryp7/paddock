@@ -159,16 +159,19 @@ fn building_a_shell_registers_the_shared_limit_registries() {
 
 /// Every crate the shell links that has a limit registry is registered by `register_shared_limits` (a registry left out would
 /// make its ids unknown to `LimitId::parse`, and a flood of them could refuse the known ones). The linked crates come from
-/// `cargo metadata` (the normal dependencies of this crate, transitively); a registry is a `pub const REGISTRY` in the crate's
+/// `cargo metadata --no-deps` (the normal dependencies of this crate among the workspace members, transitively); a registry is a `pub const REGISTRY` in the crate's
 /// `limits.rs` or `limit_rows.rs`.
 #[test]
 fn every_limit_registry_the_shell_links_is_registered() {
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    // `--no-deps` lists only the workspace members and reads no registry crate, so the test needs neither the network nor the
+    // runner's cargo cache (resolving the full graph downloaded crates for every platform, e.g. android_system_properties).
     let out = std::process::Command::new(env!("CARGO"))
         .args([
             "metadata",
             "--format-version",
             "1",
+            "--no-deps",
             "--offline",
             "--manifest-path",
         ])
@@ -181,33 +184,26 @@ fn every_limit_registry_the_shell_links_is_registered() {
         String::from_utf8_lossy(&out.stderr)
     );
     let meta: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    let nodes = meta["resolve"]["nodes"].as_array().unwrap();
-    let find = |id: &str| nodes.iter().find(|n| n["id"] == id).unwrap();
-    let root = meta["resolve"]["root"]
-        .as_str()
-        .expect("a package, not a virtual workspace");
+    let members = meta["packages"].as_array().unwrap();
+    let find = |name: &str| members.iter().find(|p| p["name"] == name);
     let mut seen = std::collections::BTreeSet::new();
-    let mut todo = vec![root.to_owned()];
-    while let Some(id) = todo.pop() {
-        if !seen.insert(id.clone()) {
+    let mut todo = vec!["paddock-shell".to_owned()];
+    while let Some(name) = todo.pop() {
+        let Some(pkg) = find(&name) else { continue };
+        if !seen.insert(name) {
             continue;
         }
-        for dep in find(&id)["deps"].as_array().unwrap() {
-            let normal = dep["dep_kinds"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|k| k["kind"].is_null());
-            if normal {
-                todo.push(dep["pkg"].as_str().unwrap().to_owned());
+        for dep in pkg["dependencies"].as_array().unwrap() {
+            if dep["kind"].is_null() {
+                todo.push(dep["name"].as_str().unwrap().to_owned());
             }
         }
     }
     let builder = include_str!("builder.rs");
     let mut missing = Vec::new();
     let mut found = 0;
-    for pkg in meta["packages"].as_array().unwrap() {
-        if !seen.contains(pkg["id"].as_str().unwrap()) {
+    for pkg in members {
+        if !seen.contains(pkg["name"].as_str().unwrap()) {
             continue;
         }
         let dir = std::path::Path::new(pkg["manifest_path"].as_str().unwrap())
