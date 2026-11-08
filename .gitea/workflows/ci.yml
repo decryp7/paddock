@@ -536,7 +536,7 @@ jobs:
   # Only the commits a change adds are linted (scripts/affected.mjs commitLintRange): a pull request since its target branch,
   # a push `before..sha`, a manual run from the plan's base. On a push to main that is `--first-parent`: only the commits main
   # itself gets (the landing merge, a direct commit), not the ones a merge brought in. A branch's commits are linted by the
-  # integrator before landing (`commit-lint --range origin/main..<branch>`, docs/rules.md rule 50(f)); C23 in the conformance
+  # integrator before landing (`commit-lint --range origin/main..<branch>`, docs/rules.md rule 50(g)); C23 in the conformance
   # run is the backstop for a branch that landed without that. Tags and an app's tag gates skip it (ER-15).
   commits:
     name: commit messages
