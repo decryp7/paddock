@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection, sig
 import { TestBed } from '@angular/core/testing';
 import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SuTrayPopover, type SuTrayMenuEntry } from './tray-popover';
 
 type Id = 'customize' | 'release' | 'settings' | 'quit';
@@ -143,13 +143,11 @@ describe('pd-tray-popover footer', () => {
     trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
     trigger.click();
     await f.whenStable();
-    await new Promise((r) => setTimeout(r, 0));
     const panel = document.querySelector<HTMLElement>('.mat-mdc-menu-panel')!;
-    expect(document.activeElement).toBe(panel.querySelector('[role="menuitem"]'));
+    await vi.waitFor(() => expect(document.activeElement).toBe(panel.querySelector('[role="menuitem"]')));
     panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
     await f.whenStable();
-    await new Promise((r) => setTimeout(r, 0));
-    expect(document.activeElement).toBe(trigger);
+    await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
     expect(trigger.classList).not.toContain('pd-tray-more--open');
   });
 

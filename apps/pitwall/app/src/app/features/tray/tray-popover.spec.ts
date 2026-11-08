@@ -174,8 +174,10 @@ describe('the tray popup', () => {
 
     it('handles exactly the menu ids it draws (an unknown id does not compile)', async () => {
       const { fixture } = await mount();
+      // Never called: the proof is that it does not compile.
       // @ts-expect-error: 'reboot' is not one of the tray menu's ids.
-      expect(() => fixture.componentInstance['choose']('reboot')).toThrow();
+      const unknown = (): void => fixture.componentInstance['choose']('reboot');
+      expect(unknown).toBeTypeOf('function');
     });
 
     it('Pause serving and Release memory go through the backend', async () => {

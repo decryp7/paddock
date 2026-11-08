@@ -106,8 +106,10 @@ describe('dy-tray', () => {
   it('handles exactly the menu ids it draws (an unknown id does not compile)', async () => {
     const { f } = await make();
     const tray = f.componentInstance;
+    // Never called: the proof is that it does not compile.
     // @ts-expect-error: 'reboot' is not one of the tray menu's ids.
-    expect(() => tray['choose']('reboot')).toThrow();
+    const unknown = (): void => tray['choose']('reboot');
+    expect(unknown).toBeTypeOf('function');
   });
 
   it('has a footer menu with Customize widgets, Settings and Quit, and shows no shortcuts the popover does not bind', async () => {

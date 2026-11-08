@@ -146,6 +146,12 @@ test.describe('the tray popup', () => {
     const [o, m, f] = await Promise.all([open.boundingBox(), more.boundingBox(), foot.boundingBox()]);
     expect(o!.x + o!.width).toBeLessThanOrEqual(m!.x);
     expect(m!.x + m!.width).toBeGreaterThan(f!.x + f!.width - 20);
+    // Keyboard focus on ⋯ shows its name as a tooltip (after Material's show delay: wait on the tooltip, not a time).
+    await open.focus();
+    await page.keyboard.press('Tab');
+    await expect(more).toBeFocused();
+    await expect(page.locator('.mat-mdc-tooltip')).toBeVisible();
+    await expect(page.locator('.mat-mdc-tooltip')).toHaveText('More actions');
     await more.click();
     const items = page.getByRole('menuitem');
     await expect(items).toHaveText(['Customize widgets…', 'Pause serving', 'Release memory', 'Settings…', 'Quit Pitwall']);
