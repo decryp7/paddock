@@ -97,8 +97,8 @@ fn merge_base(root: &Path, base: &str) -> String {
         .unwrap_or_else(|| base.to_string())
 }
 
-/// The history of `docs/gates.toml` that date moves are judged against (§3.1), oldest first: every commit of the register that is
-/// reachable from the merge base with `base`, then one more version for HEAD whose message is the messages of all the branch's
+/// The history of `docs/gates.toml` that date moves are judged against (§3.1), oldest first: every commit of the register along the
+/// first parent of the merge base with `base` (a merge into main is one version, carrying the messages of what it brings in), then one more version for HEAD whose message is the messages of all the branch's
 /// commits to the register together. A branch that creates the register, or moves several dates over several commits, is judged by
 /// its net effect and the trailers anywhere in its commits; the commits already on the base are judged one by one.
 pub fn register_history(root: &Path, base: &str) -> Result<Vec<Version>, String> {
@@ -106,7 +106,7 @@ pub fn register_history(root: &Path, base: &str) -> Result<Vec<Version>, String>
     let list = Real
         .run(
             "git",
-            &["log", "--reverse", "--format=%H", &mb, "--", "docs/gates.toml"],
+            &["log", "--first-parent", "--reverse", "--format=%H", &mb, "--", "docs/gates.toml"],
             root,
             None,
         )
@@ -115,7 +115,23 @@ pub fn register_history(root: &Path, base: &str) -> Result<Vec<Version>, String>
         .lines()
         .filter_map(|sha| {
             let text = register_at(root, sha)?;
-            let message = Real.run("git", &["log", "-1", "--format=%B", sha], root, None).ok()?;
+            let mut message = Real.run("git", &["log", "-1", "--format=%B", sha], root, None).ok()?;
+            // A merge is one version: it carries the messages of the register commits it brings in (`sha^1..sha`).
+            if Real
+                .run("git", &["rev-parse", "--verify", "-q", &format!("{sha}^2")], root, None)
+                .is_ok()
+            {
+                let brought = Real
+                    .run(
+                        "git",
+                        &["log", "--format=%B", &format!("{sha}^1..{sha}"), "--", "docs/gates.toml"],
+                        root,
+                        None,
+                    )
+                    .ok()?;
+                message.push('\n');
+                message.push_str(&brought);
+            }
             Some(Version {
                 sha: sha.to_string(),
                 message,
@@ -205,7 +221,12 @@ pub fn base_register(root: &Path, base: &str) -> Option<String> {
         .ok()
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| base.to_string());
-    register_at(root, &rev)
+    register_at(root, &rev).or_else(|| {
+        // A revision that exists but has no register: the branch creates it, so there is no list that could have grown.
+        Real.run("git", &["rev-parse", "--verify", "-q", &format!("{rev}^{{commit}}")], root, None)
+            .ok()
+            .map(|_| "version = 1\n".to_string())
+    })
 }
 
 #[cfg(test)]
@@ -215,6 +236,65 @@ mod tests {
     fn git(root: &Path, args: &[&str]) {
         Real.run("git", args, root, None)
             .unwrap_or_else(|e| panic!("git {args:?}: {}", e.message));
+    }
+
+    fn entry(review: &str) -> String {
+        format!(
+            "version = 1\n[[not_gated]]\nid = \"X\"\nreason = \"r\"\nowner = \"o\"\nsince = 2026-11-08\nreview_by = {review}\napproved = \"coordinator\"\n"
+        )
+    }
+
+    #[test]
+    fn main_judges_each_merge_as_one_version_and_a_direct_move_without_a_trailer_fails() {
+        use crate::gates::register::date_history;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let init = [
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+        ];
+        let git_c = |args: &[&str]| git(root, &[&init[..], args].concat());
+        let write = |review: &str| {
+            std::fs::create_dir_all(root.join("docs")).unwrap();
+            std::fs::write(root.join("docs/gates.toml"), entry(review)).unwrap();
+        };
+        git(root, &["init", "-q", "-b", "main"]);
+        write("2026-12-06");
+        git(root, &["add", "."]);
+        git_c(&["commit", "-q", "-m", "feat: register"]);
+        // a branch moves the date twice (the first commit alone has no trailer; the net move has one)
+        git(root, &["checkout", "-q", "-b", "topic"]);
+        write("2026-12-20");
+        git_c(&["commit", "-q", "-am", "docs: re-plan"]);
+        write("2027-01-07");
+        git_c(&[
+            "commit",
+            "-q",
+            "-am",
+            "docs: re-plan again",
+            "-m",
+            "Gates-date: X 2026-12-06 -> 2027-01-07; approved: coordinator",
+        ]);
+        git(root, &["checkout", "-q", "main"]);
+        git_c(&["merge", "-q", "--no-ff", "-m", "Merge topic", "topic"]);
+        // on main the merge is ONE version carrying the messages it brings in
+        let h = register_history(root, "main").unwrap();
+        assert_eq!(h.len(), 2, "{:?}", h.iter().map(|v| &v.message).collect::<Vec<_>>());
+        assert!(date_history(&h).is_empty(), "{:?}", date_history(&h));
+        // a later direct commit on main that moves the date without a trailer is caught
+        write("2027-01-06");
+        git_c(&["commit", "-q", "-am", "docs: quiet move"]);
+        let h = register_history(root, "main").unwrap();
+        assert_eq!(h.len(), 3);
+        assert!(
+            date_history(&h).iter().any(|p| p.message.contains("without a `Gates-date:")),
+            "{:?}",
+            date_history(&h)
+        );
     }
 
     #[test]
@@ -247,6 +327,14 @@ mod tests {
         assert_eq!(register_at(root, "main").unwrap(), "version = 1\n# main moved\n");
         // no such revision: nothing to compare with, the caller reports "not measured"
         assert!(base_register(root, "nope").is_none());
+        // a revision without a register (the branch creates it): an empty register, nothing could have grown
+        git(root, &["checkout", "-q", "--orphan", "bare"]);
+        git(root, &["rm", "-rfq", "."]);
+        std::fs::write(root.join("x"), "x").unwrap();
+        git(root, &["add", "x"]);
+        git(root, &[&init[..], &["commit", "-q", "-m", "bare"]].concat());
+        assert_eq!(base_register(root, "bare").as_deref(), Some("version = 1\n"));
+        git(root, &["checkout", "-q", "topic"]);
         // the history: the base's commits one by one, then HEAD with the messages of the branch's commits together
         std::fs::write(root.join("docs/gates.toml"), "version = 1\n# topic one\n").unwrap();
         commit("first move");
