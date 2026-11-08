@@ -943,3 +943,21 @@ status = "planned"
   owner = "dyno"
   delete_by = "dyno-v1.1.1"
   note = "The pattern is copied from RAW_TEXT_RULES of the VM harness's screenshot check, which is on test/dyno-release-vm-checks-v2 and not yet on this line. Import it from there once it lands."
+
+# =====================================================================================================================
+# Scratch folders
+# =====================================================================================================================
+
+[[mechanism]]
+id = "private-scratch-folder"
+title = "A scratch folder with a random name, created atomically and owner only (0700 on Unix)"
+canonical = "debrief-ipc"
+paths = ["apps/debrief/crates/debrief-ipc/src/scratch.rs"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/crates/chromium-driver/src/launch.rs"]
+  symbols = ["item:unique_dir"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "chromium-driver depends on no Debrief crate, so it sets the 0700 mode on its throwaway profile folder itself; Debrief 1.2 moves the helper to a shared crate both can use."
