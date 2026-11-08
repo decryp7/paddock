@@ -112,6 +112,10 @@ Conventional Commits; one semver tag for the whole repo.
 - `pd-widget-chooser`: a shown row is two columns, the lead (grip and kind icon; its width is the custom property `--pd-wc-text-inset`, derived from `--pd-wc-grip-size` and `--pd-wc-icon-size`) and a wrapping body of the description, the app's option controls and "more". A wrapped line starts at the body's edge, under the description's column, and "more" ends the last line. Narrow (the list under 35rem wide: the list is the container, so a preview column beside it counts) the description keeps 10rem so the controls wrap under it. `--pd-wc-more-size` (40px) sizes the "more" button and its reserve.
 - Dyno: the engine's `widget_choices` carries `number` (`NumberSupport`: the formats and label the tray draws on this OS, and why not); Settings shows only what it says and one item limit (the engine's).
 
+### `@decryp7/paddock-ui`: the Jobs list drops a stale "The jobs could not be read"
+
+- Fixed: after one failed first read (an app starting while its agent restarts) the Jobs panel kept the error heading for good, even while it listed live jobs from later events. A job event that arrives while the list is in error now starts a background re-read (`JobsStore`): it shows the jobs the failed read missed and clears the error when it succeeds. The error stays up (no flashing alert) until then; at most one re-read runs at a time, and after a failed one the next waits `stillWorkingAfterMs`. A read that finishes after a newer one is dropped. Retry still reads at once.
+
 ### `paddock-bench`: `SampleSummary` has the mean, standard deviation and CV
 
 - `stats::Summary` (now exported as `SampleSummary`) gained `mean` and `std_dev` fields, `cv()` (std_dev / |mean|, `None` at a zero mean) and `range()`. Added for Dyno's benchmark repetitions (ADR 0030); a struct literal of `Summary` needs the two new fields.
