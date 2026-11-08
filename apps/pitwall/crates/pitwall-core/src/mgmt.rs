@@ -871,6 +871,10 @@ pub struct LocalModel {
     pub capabilities: Vec<Capability>,
     /// Vision projector file.
     pub projector: Option<String>,
+    /// Most pixels of one image this model's projector is given (`ProjectorInfo::max_image_pixels`); the chat downscales an
+    /// attached image to it (ADR 0023 WP-5). `None` without a projector, or from an older server.
+    #[serde(default)]
+    pub image_pixels: Option<u64>,
     /// Added.
     pub added_at: Millis,
     /// Last used.
@@ -1751,5 +1755,6 @@ mod tests {
         assert_eq!(m.slots, 1);
         assert!(!m.slots_custom);
         assert_eq!(m.loaded_slots, None);
+        assert_eq!(m.image_pixels, None, "an older server sends no image budget");
     }
 }

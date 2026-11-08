@@ -561,6 +561,8 @@ export interface LocalModel {
   capabilities: Capability[];
   /** A vision projector downloaded with it. */
   projector: string | null;
+  /** Most pixels of one image its projector takes (the chat downscales to it); null without a projector, absent from an older server. */
+  imagePixels?: number | null;
   addedAt: number;
   lastUsedAt: number | null;
   loaded: boolean;

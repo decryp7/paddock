@@ -447,6 +447,8 @@ pub struct ProjectorInfo {
 
 /// Most image tokens IMT spends on one image: the downscaling target (a 1366×768 screenshot at 32 px per token).
 pub const MAX_IMAGE_TOKENS: u64 = 1024;
+/// The pixel budget of a projector whose header does not say its patch size: [`MAX_IMAGE_TOKENS`] at 28 px per token side.
+pub const FALLBACK_IMAGE_PIXELS: u64 = MAX_IMAGE_TOKENS * 28 * 28;
 
 impl ProjectorInfo {
     /// Pixels per image token along one side (`patch × merge`), 28 when the header does not say.

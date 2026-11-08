@@ -31,6 +31,9 @@ pub struct LocalFile {
     pub info: GgufInfo,
     /// Matching vision projector, if one sits next to it.
     pub projector: Option<PathBuf>,
+    /// Most pixels of one image its projector takes (read from the projector's header once, at the scan; the default budget
+    /// when the header does not say); `None` without a projector.
+    pub image_pixels: Option<u64>,
     /// Modified time.
     pub modified: u64,
     /// `owner/repo` when it was downloaded from there.
@@ -80,6 +83,7 @@ pub fn scan(dir: &Path) -> Vec<LocalFile> {
                 })
             })
             .cloned();
+        let image_pixels = projector.as_deref().map(image_budget);
         let modified = std::fs::metadata(p)
             .and_then(|m| m.modified())
             .ok()
@@ -95,11 +99,17 @@ pub fn scan(dir: &Path) -> Vec<LocalFile> {
             size,
             info,
             projector,
+            image_pixels,
             modified,
             repo,
         });
     }
     out
+}
+
+/// The pixel budget of the projector at `path`; [`gguf::FALLBACK_IMAGE_PIXELS`] when its header cannot be read.
+fn image_budget(path: &Path) -> u64 {
+    gguf::inspect_projector(path).map_or(gguf::FALLBACK_IMAGE_PIXELS, |p| p.max_image_pixels())
 }
 
 fn split_total(first: &Path, all: &[PathBuf]) -> u64 {
@@ -513,6 +523,7 @@ pub fn to_dto(
             .as_ref()
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().into_owned()),
+        image_pixels: f.image_pixels,
         added_at: f.modified,
         last_used_at: None,
         loaded,
@@ -578,6 +589,75 @@ mod tests {
         let p = Provenance::parse(&std::fs::read_to_string(sidecar_path(&dir.join(parts[0]))).unwrap()).unwrap();
         assert!(p.sha256.is_empty() && p.revision.is_none());
         assert_eq!(sidecar_path(Path::new("/x/m.gguf")), Path::new("/x/m.gguf.origin.json"));
+    }
+
+    /// A GGUF header with `kvs` (a string architecture, then u32 and bool values), padded to look like a real file.
+    fn header(arch: &str, u32s: &[(&str, u32)], bools: &[(&str, bool)]) -> Vec<u8> {
+        let mut b = b"GGUF".to_vec();
+        b.extend(3u32.to_le_bytes());
+        b.extend(0u64.to_le_bytes());
+        b.extend(((1 + u32s.len() + bools.len()) as u64).to_le_bytes());
+        let key = |b: &mut Vec<u8>, k: &str| {
+            b.extend((k.len() as u64).to_le_bytes());
+            b.extend(k.as_bytes());
+        };
+        key(&mut b, "general.architecture");
+        b.extend(8u32.to_le_bytes());
+        b.extend((arch.len() as u64).to_le_bytes());
+        b.extend(arch.as_bytes());
+        for (k, v) in u32s {
+            key(&mut b, k);
+            b.extend(4u32.to_le_bytes());
+            b.extend(v.to_le_bytes());
+        }
+        for (k, v) in bools {
+            key(&mut b, k);
+            b.extend(7u32.to_le_bytes());
+            b.push(u8::from(*v));
+        }
+        b.extend(vec![0u8; 70_000]);
+        b
+    }
+
+    /// ADR 0023 WP-5: the projector's pixel budget (`ProjectorInfo::max_image_pixels`, which nothing called before) reaches
+    /// the model list, so the app downscales an image to what this model's encoder takes. A projector whose header cannot be
+    /// read still gets the default budget; a model without one has none.
+    #[test]
+    fn a_vision_model_lists_its_projectors_image_budget() {
+        let d = tempfile::tempdir().unwrap();
+        let vl = d.path().join("o/vl");
+        let plain = d.path().join("o/plain");
+        let odd = d.path().join("o/odd");
+        for (dir, name) in [(&vl, "vl"), (&plain, "plain"), (&odd, "odd")] {
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::write(dir.join(format!("{name}-Q4_K_M.gguf")), header("llama", &[], &[])).unwrap();
+        }
+        let proj = header(
+            "clip",
+            &[
+                ("clip.vision.image_size", 768),
+                ("clip.vision.patch_size", 16),
+                ("clip.vision.spatial_merge_size", 2),
+            ],
+            &[("clip.has_vision_encoder", true)],
+        );
+        std::fs::write(vl.join("mmproj-vl-f16.gguf"), proj).unwrap();
+        std::fs::write(odd.join("mmproj-odd-f16.gguf"), header("clip", &[], &[])).unwrap();
+        let files = scan(d.path());
+        let budget = |repo: &str| files.iter().find(|f| f.repo == repo).map(|f| f.image_pixels);
+        assert_eq!(budget("o/vl"), Some(Some(gguf::MAX_IMAGE_TOKENS * 32 * 32)));
+        assert_eq!(budget("o/plain"), Some(None));
+        assert_eq!(budget("o/odd"), Some(Some(gguf::FALLBACK_IMAGE_PIXELS)));
+        let f = files.iter().find(|f| f.repo == "o/vl").unwrap();
+        let dto = to_dto(
+            f,
+            None,
+            None,
+            &pitwall_core::config::ModelPrefs::default(),
+            (4096, Slots::default()),
+            &Room::default(),
+        );
+        assert_eq!(dto.image_pixels, Some(gguf::MAX_IMAGE_TOKENS * 32 * 32));
     }
 
     #[test]
