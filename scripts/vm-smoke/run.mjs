@@ -422,7 +422,7 @@ async function main(argv) {
           const ld = macLoginJobsDriver(gui);
           return jobsRestartStep({
             openJobs: () => ld.openJobs(), jobsText: () => ld.jobsText(),
-            startJob: async () => { if ((await ld.readSwitch()) === 'unknown' || !(await ld.pressSwitch())) return false; if (ld.save) await ld.save(); else await gui.press(gui.app, '^Save changes$', 'AXButton'); await ld.openJobs(); for (let i = 0; i < 20; i++) { if (/Start Dyno at login/.test(await ld.jobsText())) return true; await sleepMs(500); } return false; },
+            startJob: async () => { const st = await ld.startLongJob(); if (!(st === true || st?.ok === true)) return false; await ld.openJobs(); for (let i = 0; i < 20; i++) { if (/Running benchmarks/.test(await ld.jobsText())) return true; await sleepMs(500); } return false; }, // a benchmark lasts, so the job is certainly in flight at the kill
             diag: async () => {
               const files = (await exec('ls -1 "$HOME/Library/Logs/Dyno"/*.log 2>/dev/null')).stdout.trim().split('\n').filter(Boolean);
               const saved = []; for (const f of files) { const d = await fetch(f); if (d) saved.push(d); }
