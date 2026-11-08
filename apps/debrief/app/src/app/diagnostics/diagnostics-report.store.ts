@@ -26,6 +26,8 @@ export const DiagnosticsReportStore = signalStore(
   withMethods((store, backend = inject(SnapshotBackend)) => {
     const loadImage = async (id: string): Promise<void> => {
       if (store.images()[id]) return;
+      // A report made without screenshots has nothing to fetch; the view says so instead of showing an error.
+      if (store.report()?.snapshots.find((x) => x.id === id)?.hasImage === false) return;
       try {
         const url = await backend.diagnosticsReportImage(id);
         patchState(store, (st) => ({ images: { ...st.images, [id]: url }, imageErrors: omit(st.imageErrors, id) }));

@@ -761,3 +761,12 @@ fn the_system_info_names_the_build_commit() {
     let v: serde_json::Value = serde_json::from_slice(&info.data).unwrap();
     assert_eq!(v["app"]["commit"], "abc1234", "{v}");
 }
+
+#[test]
+fn an_app_can_add_up_the_counts_of_its_own_files() {
+    let (_, a) = Redactor::new().text("token=abc 203.0.113.1");
+    let mut sum = paddock_diag::RedactionCounts::default();
+    sum.add(&a);
+    sum.add(&a);
+    assert_eq!((sum.secrets, sum.ip_addresses, sum.total()), (2, 2, 4));
+}

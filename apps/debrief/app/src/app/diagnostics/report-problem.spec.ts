@@ -2,7 +2,7 @@ import { Component } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MemoryLogger } from '../../testing/helpers';
 import { Breadcrumb } from '../core/activity/types';
-import { FILE_EXISTS_SUFFIX } from '../core/api.types';
+import { FILE_EXISTS_SUFFIX, ProblemReportPreview } from '../core/api.types';
 import { Logger } from '../core/logger';
 import { CommandRegistry } from '../extensions/command-registry';
 import { CommandContext } from '../extensions/tokens';
@@ -88,7 +88,7 @@ describe('ReportProblemDialog', () => {
     (el.querySelector('[data-testid=report-save]') as HTMLButtonElement).click();
     await flush(f);
     expect(target.titles).toEqual(['Save problem report']);
-    expect(backend.reports).toEqual([{ path: '/out/report.zip', description: 'It failed on export' }]);
+    expect(backend.reports).toEqual([{ path: '/out/report.zip', description: 'It failed on export', includeScreenshots: false }]);
     expect(el.querySelector('[data-testid=report-saved]')!.textContent).toContain('Saving to /out/report.zip.');
     // The report is written by a job: a toast says so and the dialog stays open on the preview.
     expect(at(TestBed.inject(NotificationsStore).toasts(), 0).title).toBe('Saving the problem report — running in Jobs');
@@ -96,6 +96,30 @@ describe('ReportProblemDialog', () => {
     expect(el.textContent).toContain('Close');
     (el.querySelector('.btn.ghost') as HTMLButtonElement).click();
     expect(close).toHaveBeenCalled();
+  });
+
+  it('leaves screenshots out until the user ticks the box, says what it adds, and passes the choice', async () => {
+    const { backend, target } = setup();
+    await backend.save(IMAGE, { reason: 'panel-failed', message: 'boom', manual: false });
+    const f = TestBed.createComponent(ReportProblemDialog);
+    await flush(f);
+    const el: HTMLElement = f.nativeElement;
+    const names = () => [...el.querySelectorAll('[data-testid=report-contents] .name')].map((n) => n.textContent ?? '');
+    const box = el.querySelector('[data-testid=report-screenshots] input[type=checkbox]') as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    expect(el.querySelector('#report-screenshots-hint')!.textContent).toMatch(/contents of the logs you have open/);
+    expect(box.getAttribute('aria-describedby')).toBe('report-screenshots-hint');
+    expect(names().some((n) => /^snapshots\/.*\.png$/.test(n))).toBe(false);
+    expect(names().some((n) => /^snapshots\/.*\.json$/.test(n))).toBe(true);
+    await f.componentInstance.save();
+    expect(backend.reports.at(-1)?.includeScreenshots).toBe(false);
+
+    box.click();
+    await flush(f);
+    expect(names().some((n) => /^snapshots\/.*\.png$/.test(n))).toBe(true);
+    target.path = '/out/with-shots.zip';
+    await f.componentInstance.save();
+    expect(backend.reports.at(-1)).toMatchObject({ path: '/out/with-shots.zip', includeScreenshots: true });
   });
 
   it('does nothing when the save dialog is cancelled and shows failures', async () => {
@@ -120,6 +144,32 @@ describe('ReportProblemDialog', () => {
     await f.componentInstance.load();
     await flush(f);
     expect(el.querySelector('[role=alert]')!.textContent).toContain('Could not collect the report: no logs');
+  });
+
+  it('ignores a preview that answers after a newer request (ticking the box twice quickly)', async () => {
+    const { backend } = setup();
+    const f = TestBed.createComponent(ReportProblemDialog);
+    await flush(f);
+    const answers: Array<(p: ProblemReportPreview) => void> = [];
+    backend.reportPreview = () => new Promise<ProblemReportPreview>((resolve) => answers.push(resolve));
+    const dialog = f.componentInstance;
+    dialog.setIncludeScreenshots(true);
+    dialog.setIncludeScreenshots(false);
+    const preview = (name: string): ProblemReportPreview => ({ entries: [{ name, bytes: 1, summary: '' }], steps: [], systemInfo: {} });
+    // The newer request answers first, then the older one: the older answer must not replace it.
+    at(answers, 1)(preview('newer.txt'));
+    await flush(f);
+    expect(dialog.loading()).toBe(false);
+    at(answers, 0)(preview('older.txt'));
+    await flush(f);
+    expect(dialog.preview()?.entries[0]?.name).toBe('newer.txt');
+    // A stale failure is ignored as well.
+    backend.reportPreview = vi.fn().mockRejectedValueOnce(new Error('old failure')).mockResolvedValue(preview('latest.txt'));
+    void dialog.load();
+    await dialog.load();
+    await flush(f);
+    expect(dialog.error()).toBeNull();
+    expect(dialog.preview()?.entries[0]?.name).toBe('latest.txt');
   });
 
   it('a declined overwrite saves nothing and says nothing', async () => {
@@ -189,13 +239,17 @@ describe('snapshots with breadcrumbs', () => {
     const invoke = vi.fn(async (_cmd: string, _a?: unknown): Promise<unknown> => 'ok');
     const b = new TauriSnapshotBackend(invoke as never, vi.fn());
     await b.reportPreview('desc');
+    await b.reportPreview('desc', true);
     await b.saveReport('/r.zip', 'desc');
     await b.saveReport('/r.zip', 'desc', true);
+    await b.saveReport('/r.zip', 'desc', false, true);
     await b.openActivityLog();
     expect(invoke.mock.calls).toEqual([
       ['problem_report_preview', { description: 'desc' }],
+      ['problem_report_preview', { description: 'desc', includeScreenshots: true }],
       ['save_problem_report', { path: '/r.zip', description: 'desc' }],
       ['save_problem_report', { path: '/r.zip', description: 'desc', overwrite: true }],
+      ['save_problem_report', { path: '/r.zip', description: 'desc', includeScreenshots: true }],
       ['open_activity_log'],
     ]);
   });

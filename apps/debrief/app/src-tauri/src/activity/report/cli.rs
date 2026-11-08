@@ -156,7 +156,7 @@ pub fn export(args: &ExportArgs, f: &Folders, cwd: &Path, default_dirs: &[PathBu
     if dest.exists() {
         std::fs::remove_file(&dest).map_err(|e| format!("cannot replace {}: {e}", dest.display()))?;
     }
-    let files = super::write(&inputs, "", &dest).map_err(|e| format!("{e:#}"))?;
+    let files = super::write(&inputs, "", &dest).map_err(|e| format!("{e:#}"))?.files;
     Ok(Exported {
         path: dest,
         files,

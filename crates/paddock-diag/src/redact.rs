@@ -134,7 +134,20 @@ impl Redactor {
         homes: &[String],
         machines: &[String],
     ) -> Self {
+        let keep_local = self.personal.keeps_local_addresses();
         self.personal = Personal::new(users, homes, machines);
+        if keep_local {
+            self.personal = self.personal.keep_local_addresses();
+        }
+        self
+    }
+
+    /// Keeps loopback, unspecified and private (RFC 1918) addresses, which show how this machine is set up and say nothing
+    /// about its owner (see [`Personal::keep_local_addresses`]). Off by default: every address is replaced. Only for a report
+    /// the user reads and saves; never for text that leaves the machine (a search seed). Works before or after
+    /// [`Redactor::with_personal`].
+    pub fn keep_local_addresses(mut self) -> Self {
+        self.personal = self.personal.keep_local_addresses();
         self
     }
 
@@ -190,6 +203,31 @@ impl Redactor {
         let mut counts = RedactionCounts::default();
         let out = self.walk(value, &mut counts);
         (out, counts)
+    }
+
+    /// Redacts the strings of structured data with [`Redactor::text`], at any depth, and nothing else: keys, numbers and
+    /// the shape stay, and the field rules of [`Redactor::json`] (masked secret keys, omitted contents, cut long values) are
+    /// not applied. For data whose keys are fixed names and whose values are free text (a report's breadcrumbs, processes
+    /// or snapshot details).
+    pub fn text_in_json(&self, value: &Value) -> (Value, RedactionCounts) {
+        let mut counts = RedactionCounts::default();
+        let out = self.text_walk(value, &mut counts);
+        (out, counts)
+    }
+
+    fn text_walk(&self, value: &Value, counts: &mut RedactionCounts) -> Value {
+        match value {
+            Value::String(_) => self.string_leaf(value.clone(), counts),
+            Value::Array(items) => {
+                Value::Array(items.iter().map(|v| self.text_walk(v, counts)).collect())
+            }
+            Value::Object(map) => Value::Object(
+                map.iter()
+                    .map(|(k, v)| (k.clone(), self.text_walk(v, counts)))
+                    .collect(),
+            ),
+            other => other.clone(),
+        }
     }
 
     fn walk(&self, value: &Value, counts: &mut RedactionCounts) -> Value {
@@ -468,5 +506,85 @@ mod tests {
         let r = Redactor::for_machine(&MapVars::new().with("USER", "x"));
         assert_eq!(r.text("x marks").0, "x marks");
         assert_eq!(format!("{r:?}"), "Redactor(0 app patterns)");
+    }
+
+    #[test]
+    fn a_log_line_redacts_nested_arrays_and_objects() {
+        let line = json!({
+            "@m": "x",
+            "Peers": [{ "Host": "ALEX-PC", "Path": "C:\\Users\\carol\\a.evtx" }, ["/home/dave/z", 7]],
+            "Deep": { "A": { "B": [{ "Mail": "bob@example.org", "Ip": "203.0.113.9", "Local": "127.0.0.1" }] } },
+            "Meta": { "apiKey": ["x"] },
+        })
+        .to_string();
+        let (out, c) = machine().log_line(&line);
+        let back: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(back["Peers"][0]["Host"], "<machine>");
+        assert_eq!(back["Peers"][0]["Path"], "C:\\Users\\<user>\\a.evtx");
+        assert_eq!(back["Peers"][1][0], "/home/<user>/z");
+        assert_eq!(back["Peers"][1][1], 7);
+        assert_eq!(back["Deep"]["A"]["B"][0]["Mail"], "<email>");
+        assert_eq!(back["Deep"]["A"]["B"][0]["Ip"], "<ip>");
+        assert_eq!(
+            back["Deep"]["A"]["B"][0]["Local"], "<ip>",
+            "by default local addresses go too"
+        );
+        assert_eq!(back["Meta"]["apiKey"], "***");
+        assert!(
+            c.machine_names == 1 && c.profile_paths == 2 && c.emails == 1 && c.ip_addresses == 2,
+            "{c:?}"
+        );
+    }
+
+    #[test]
+    fn keeping_local_addresses_is_opt_in_and_survives_with_personal() {
+        let text = "from 10.0.0.7 and 127.0.0.1 via 203.0.113.9 over fd7a:115c:a1e0::1 alex";
+        assert_eq!(
+            Redactor::new().text(text).0,
+            "from <ip> and <ip> via <ip> over <ip> alex"
+        );
+        let kept = "from 10.0.0.7 and 127.0.0.1 via <ip> over <ip> <user>";
+        // Before or after the machine's names are given, the choice stands.
+        let a = Redactor::new()
+            .keep_local_addresses()
+            .with_personal(&["alex".into()], &[], &[]);
+        let b = machine().keep_local_addresses();
+        assert_eq!(a.text(text).0, kept);
+        assert_eq!(b.text(text).0, kept);
+        // A log line gets the same rule.
+        let line = json!({"@m": "x", "Ip": ["10.0.0.7", "203.0.113.9"]}).to_string();
+        let back: Value = serde_json::from_str(&a.log_line(&line).0).unwrap();
+        assert_eq!(back["Ip"], json!(["10.0.0.7", "<ip>"]));
+    }
+
+    #[test]
+    fn text_in_json_redacts_values_only_and_keeps_keys_and_shape() {
+        let v = json!({
+            "/Users/alex/a": "opened /Users/alex/a",
+            "token": "token=abc123",
+            "list": [1, true, null, "bob@example.com", { "k": "203.0.113.9" }],
+            "n": 3,
+        });
+        let (out, c) = machine().text_in_json(&v);
+        assert_eq!(
+            out["/Users/alex/a"], "opened ~/a",
+            "the key is kept, the value redacted"
+        );
+        assert_eq!(
+            out["token"], "token=[redacted]",
+            "no field rules: the key is not masked"
+        );
+        assert_eq!(
+            out["list"],
+            json!([1, true, null, "<email>", { "k": "<ip>" }])
+        );
+        assert_eq!(out["n"], 3);
+        assert_eq!(
+            (c.home_paths, c.secrets, c.emails, c.ip_addresses),
+            (1, 1, 1, 1)
+        );
+        // Two keys that would collapse once redacted stay two.
+        let (out, _) = machine().text_in_json(&json!({"/Users/alex/x": 1, "/Users/alex/y": 2}));
+        assert_eq!(out.as_object().map(|m| m.len()), Some(2));
     }
 }

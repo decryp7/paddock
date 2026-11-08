@@ -1325,6 +1325,7 @@ checksum = "4b5b023fc2978536bbb2a3b71237964fc4630bec1eb31077b4977127f4cdb9c0"
 dependencies = [
  "chrono",
  "derive_builder",
+ "jiff",
  "strum",
 ]
 
@@ -1684,6 +1685,7 @@ dependencies = [
  "objc2-foundation",
  "objc2-web-kit",
  "open",
+ "paddock-diag",
  "semver",
  "serde",
  "serde_json",
@@ -3944,6 +3946,7 @@ dependencies = [
  "defmt",
  "jiff-core",
  "jiff-static",
+ "jiff-tzdb",
  "jiff-tzdb-platform",
  "log",
  "portable-atomic",
@@ -5214,6 +5217,82 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-commands"
+version = "0.2.0"
+dependencies = [
+ "paddock-workspace-hack",
+ "serde",
+]
+
+[[package]]
+name = "paddock-diag"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "libc",
+ "log",
+ "paddock-commands",
+ "paddock-dialogs",
+ "paddock-env",
+ "paddock-jobs",
+ "paddock-log",
+ "paddock-settings",
+ "paddock-workspace-hack",
+ "regex",
+ "serde",
+ "serde_json",
+ "zip",
+]
+
+[[package]]
+name = "paddock-dialogs"
+version = "0.2.0"
+dependencies = [
+ "paddock-commands",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "paddock-env"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "paddock-jobs"
+version = "0.2.0"
+dependencies = [
+ "croner",
+ "jiff",
+ "paddock-env",
+ "paddock-workspace-hack",
+ "serde",
+ "sha2 0.10.9",
+]
+
+[[package]]
+name = "paddock-log"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "log",
+ "paddock-env",
+ "paddock-jobs",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "tracing",
+ "tracing-log",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "paddock-proc"
 version = "0.1.0"
 dependencies = [
@@ -5223,6 +5302,17 @@ dependencies = [
  "sysinfo",
  "thiserror 2.0.21",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "paddock-settings"
+version = "0.2.0"
+dependencies = [
+ "log",
+ "paddock-workspace-hack",
+ "regex",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

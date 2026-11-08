@@ -10039,186 +10039,193 @@
           <context context-type="linenumber">160</context>
         </context-group>
       </trans-unit>
+      <trans-unit id="diagnostics.reportView.noScreenshot" datatype="html">
+        <source>Screenshot not included. This report was saved without screenshots.</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
+          <context context-type="linenumber">162,163</context>
+        </context-group>
+      </trans-unit>
       <trans-unit id="diagnostics.reportView.reason" datatype="html">
         <source>Reason</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">165,166</context>
+          <context context-type="linenumber">167,168</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.message" datatype="html">
         <source>Message</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">166,167</context>
+          <context context-type="linenumber">168,169</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.activeView" datatype="html">
         <source>Active view</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">167,168</context>
+          <context context-type="linenumber">169,170</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.id" datatype="html">
         <source>Id</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">168,169</context>
+          <context context-type="linenumber">170,171</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.snapshotSteps" datatype="html">
         <source>Steps to reproduce</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">171,172</context>
+          <context context-type="linenumber">173,174</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.loading" datatype="html">
         <source>Loading…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">185,187</context>
+          <context context-type="linenumber">187,189</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.empty" datatype="html">
         <source>No diagnostics report is open. Open a zip saved with Help ▸ Report a problem… (File ▸ Open, or drop it here) to see its processes, steps and snapshots.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">187,191</context>
+          <context context-type="linenumber">189,193</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.zoomHint" datatype="html">
         <source>Zoom the timeline to this moment</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">244</context>
+          <context context-type="linenumber">246</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.sys.appVersion" datatype="html">
         <source>Debrief version</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">249</context>
+          <context context-type="linenumber">251</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.sys.commit" datatype="html">
         <source>Build</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">250</context>
+          <context context-type="linenumber">252</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.sys.os" datatype="html">
         <source>Operating system</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">251</context>
+          <context context-type="linenumber">253</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.sys.osVersion" datatype="html">
         <source>OS version</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">252</context>
+          <context context-type="linenumber">254</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.sys.arch" datatype="html">
         <source>Architecture</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">253</context>
+          <context context-type="linenumber">255</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.sys.cpuCores" datatype="html">
         <source>CPU cores</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">254</context>
+          <context context-type="linenumber">256</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.sys.totalMemoryMb" datatype="html">
         <source>Memory (MB)</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">255</context>
+          <context context-type="linenumber">257</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.sys.availableMemoryMb" datatype="html">
         <source>Available memory (MB)</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">256</context>
+          <context context-type="linenumber">258</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.sys.safeMode" datatype="html">
         <source>Safe mode</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">257</context>
+          <context context-type="linenumber">259</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.state.running" datatype="html">
         <source>running</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">289</context>
+          <context context-type="linenumber">291</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.state.exited" datatype="html">
         <source>exited</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">290</context>
+          <context context-type="linenumber">292</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.state.stopped" datatype="html">
         <source>stopped</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">291</context>
+          <context context-type="linenumber">293</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.state.crashed" datatype="html">
         <source>crashed</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">292</context>
+          <context context-type="linenumber">294</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.state.quarantined" datatype="html">
         <source>quarantined</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">293</context>
+          <context context-type="linenumber">295</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.state.unknown" datatype="html">
         <source>unknown</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">294</context>
+          <context context-type="linenumber">296</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.openOne" datatype="html">
         <source>Open snapshot <x id="snapshot" equiv-text="snapshot"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">304</context>
+          <context context-type="linenumber">306</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.yes" datatype="html">
         <source>yes</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">322</context>
+          <context context-type="linenumber">324</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportView.no" datatype="html">
         <source>no</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/diagnostics-report-view.ts</context>
-          <context context-type="linenumber">322</context>
+          <context context-type="linenumber">324</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.snapshotsView.toolbar" datatype="html">
@@ -10439,63 +10446,77 @@
         <source>Debrief puts what is needed to diagnose the problem into one zip file that you save and attach to your report. Nothing is sent anywhere.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/report-problem-dialog.ts</context>
-          <context context-type="linenumber">25,27</context>
+          <context context-type="linenumber">27,29</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportDialog.whatHappened" datatype="html">
         <source>What happened? What did you expect?</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/report-problem-dialog.ts</context>
-          <context context-type="linenumber">27,30</context>
+          <context context-type="linenumber">29,32</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportDialog.descriptionHint" datatype="html">
-        <source>Optional. Do not paste passwords or keys.</source>
+        <source>Optional. It goes into the report as you write it, so do not paste passwords or keys.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/report-problem-dialog.ts</context>
-          <context context-type="linenumber">36,39</context>
+          <context context-type="linenumber">38,41</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="diagnostics.reportDialog.screenshots" datatype="html">
+        <source>Include screenshots of the Debrief window</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/diagnostics/report-problem-dialog.ts</context>
+          <context context-type="linenumber">41,42</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="diagnostics.reportDialog.screenshotsHint" datatype="html">
+        <source>Off by default. A screenshot shows what was on screen when an error happened, which can include the contents of the logs you have open, and it is not redacted. The error details are included either way.</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/diagnostics/report-problem-dialog.ts</context>
+          <context context-type="linenumber">42,45</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportDialog.collecting" datatype="html">
         <source>Collecting…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/report-problem-dialog.ts</context>
-          <context context-type="linenumber">39,42</context>
+          <context context-type="linenumber">45,48</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportDialog.contents" datatype="html">
         <source>Contents (<x id="INTERPOLATION" equiv-text="{{ entries().length }}"/> files, <x id="INTERPOLATION_1" equiv-text="{{ total() }}"/>)</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/report-problem-dialog.ts</context>
-          <context context-type="linenumber">43,44</context>
+          <context context-type="linenumber">49,50</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportDialog.steps" datatype="html">
         <source>Steps to reproduce</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/report-problem-dialog.ts</context>
-          <context context-type="linenumber">51,53</context>
+          <context context-type="linenumber">57,59</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportDialog.noActivity" datatype="html">
         <source>No recent activity was recorded.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/report-problem-dialog.ts</context>
-          <context context-type="linenumber">59,63</context>
+          <context context-type="linenumber">65,69</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportDialog.save" datatype="html">
         <source>Save report…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/report-problem-dialog.ts</context>
-          <context context-type="linenumber">71,75</context>
+          <context context-type="linenumber">77,81</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportDialog.close" datatype="html">
         <source>Close</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/report-problem-dialog.ts</context>
-          <context context-type="linenumber">100</context>
+          <context context-type="linenumber">107</context>
         </context-group>
         <note priority="1" from="description">Button</note>
         <note priority="1" from="meaning">Close the dialog</note>
@@ -10504,56 +10525,56 @@
         <source>Cancel</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/report-problem-dialog.ts</context>
-          <context context-type="linenumber">101</context>
+          <context context-type="linenumber">108</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportDialog.yourDescription" datatype="html">
         <source>Your description</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/report-problem-dialog.ts</context>
-          <context context-type="linenumber">113</context>
+          <context context-type="linenumber">122</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportDialog.noDescription" datatype="html">
         <source>No description</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/report-problem-dialog.ts</context>
-          <context context-type="linenumber">113</context>
+          <context context-type="linenumber">122</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportDialog.collectFailed" datatype="html">
         <source>Could not collect the report: <x id="error" equiv-text="describeError(e)"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/report-problem-dialog.ts</context>
-          <context context-type="linenumber">127</context>
+          <context context-type="linenumber">142</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportDialog.saveTitle" datatype="html">
         <source>Save problem report</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/report-problem-dialog.ts</context>
-          <context context-type="linenumber">138</context>
+          <context context-type="linenumber">159</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportDialog.started" datatype="html">
         <source>Saving the problem report — running in Jobs</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/report-problem-dialog.ts</context>
-          <context context-type="linenumber">143</context>
+          <context context-type="linenumber">164</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportDialog.saving" datatype="html">
         <source>Saving to <x id="path" equiv-text="path"/>. You can close this dialog; a message tells you when the file is ready to attach.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/report-problem-dialog.ts</context>
-          <context context-type="linenumber">144</context>
+          <context context-type="linenumber">165</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportDialog.saveFailed" datatype="html">
         <source>Could not save the report: <x id="error" equiv-text="describeError(e)"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/report-problem-dialog.ts</context>
-          <context context-type="linenumber">148</context>
+          <context context-type="linenumber">169</context>
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.toast.failed" datatype="html">

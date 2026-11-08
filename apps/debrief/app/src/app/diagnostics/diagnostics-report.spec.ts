@@ -186,6 +186,29 @@ describe('DiagnosticsReportPanel', () => {
     expect(el.querySelectorAll('[data-testid=diag-snapshot-card]')).toHaveLength(0 + 1);
   });
 
+  it('says "Screenshot not included" for a snapshot the report holds no image of, and does not ask for one', async () => {
+    const { backend } = setup();
+    const store = TestBed.inject(DiagnosticsReportStore);
+    const base = sampleReport('r.zip');
+    vi.spyOn(backend, 'diagnosticsReport').mockResolvedValue({
+      report: { ...base, snapshots: base.snapshots.map((x) => ({ ...x, hasImage: false })) },
+      notice: null,
+    });
+    const image = vi.spyOn(backend, 'diagnosticsReportImage');
+    await store.refresh();
+    await store.loadImages();
+    const id = store.report()?.snapshots[0]?.id ?? '';
+    await store.show(id);
+    expect(image).not.toHaveBeenCalled();
+    expect(store.imageErrors()[id]).toBeUndefined();
+    const f = TestBed.createComponent(DiagnosticsReportPanel);
+    await flush(f);
+    const el: HTMLElement = f.nativeElement;
+    expect(el.querySelector('[data-testid=diag-snapshot-no-image]')?.textContent).toContain('Screenshot not included');
+    expect(el.querySelector('[data-testid=diag-snapshot-image]')).toBeNull();
+    expect(el.querySelector('[role=alert]')).toBeNull();
+  });
+
   it('shows a warning for unreadable files and tolerates odd system info', async () => {
     setup();
     const store = TestBed.inject(DiagnosticsReportStore);

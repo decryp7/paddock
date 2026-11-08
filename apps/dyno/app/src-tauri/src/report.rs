@@ -157,7 +157,8 @@ pub fn export_cli(args: &[String], app: &paddock_diag::AppInfo) -> Option<i32> {
         let dest = paddock_diag::export::resolve(&a, app, &cwd, &default_dirs(), now)?;
         let mut sections = paddock_diag::builtin::all();
         sections.extend(disk_sections(Arc::new(NoAgent)));
-        let redactor = paddock_diag::Redactor::for_machine(&paddock_env::ProcessVars);
+        // A report the user reads and saves on this machine: private network addresses stay (paddock_diag::Redactor).
+        let redactor = paddock_diag::Redactor::for_machine(&paddock_env::ProcessVars).keep_local_addresses();
         paddock_diag::export::write(app, &dirs, &sections, &redactor, &dest, now)
     });
     Some(match outcome {
@@ -246,7 +247,8 @@ fn save_report_inner<R: tauri::Runtime>(app: &tauri::AppHandle<R>, app_info: &pa
     let dirs = paddock_env::AppDirs::for_app(&id).map_err(|e| e.to_string())?;
     let mut sections = paddock_diag::builtin::all();
     sections.extend(sections_of(app));
-    let redactor = paddock_diag::Redactor::for_machine(&paddock_env::ProcessVars);
+    // A report the user reads and saves on this machine: private network addresses stay (paddock_diag::Redactor).
+    let redactor = paddock_diag::Redactor::for_machine(&paddock_env::ProcessVars).keep_local_addresses();
     paddock_diag::export::write(app_info, &dirs, &sections, &redactor, &dest, now).map(|_| ())
 }
 

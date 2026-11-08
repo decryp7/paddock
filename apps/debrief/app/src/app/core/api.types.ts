@@ -1268,8 +1268,9 @@ export interface MomentSummary {
  * Event "debrief://error" carries an EngineError.
  *
  * Problem reports and the activity log (app/src-tauri/src/activity/report.rs):
- *   problem_report_preview { description? }               -> ProblemReportPreview
- *   save_problem_report    { path, description?, overwrite? } -> number (the export job writing the zip)
+ *   problem_report_preview { description?, includeScreenshots? } -> ProblemReportPreview
+ *   save_problem_report    { path, description?, overwrite?, includeScreenshots? } -> number (the export job writing the zip)
+ *                          includeScreenshots (default false): the engine decides what a screenshot adds; the UI passes the choice
  *   open_activity_log      {}                              -> string (label of the new window showing Debrief's own logs,
  *                                                             filtered to SourceContext = "Debrief.Activity")
  */

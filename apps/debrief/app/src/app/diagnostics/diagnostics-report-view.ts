@@ -158,6 +158,8 @@ const SYSTEM_KEYS = ['appVersion', 'commit', 'os', 'osVersion', 'arch', 'cpuCore
               </div>
               @if (store.images()[c.id]; as src) {
                 <img class="big" [src]="src" alt="Screenshot taken when the error happened" i18n-alt="@@diagnostics.reportView.screenshotAlt" data-testid="diag-snapshot-image" />
+              } @else if (!c.hasImage) {
+                <p class="muted" data-testid="diag-snapshot-no-image" i18n="@@diagnostics.reportView.noScreenshot">Screenshot not included. This report was saved without screenshots.</p>
               } @else if (store.imageErrors()[c.id]; as err) {
                 <div class="msg err" role="alert">{{ err }}</div>
               }

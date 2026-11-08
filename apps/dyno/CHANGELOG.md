@@ -5,6 +5,11 @@
 ### Changed
 
 - A job that a limit stopped now says which limit it was. The app and the agent of this version talk a new protocol, so an older Dyno app or agent is replaced at the next start instead of being read wrongly.
+- Report a problem: the report now keeps private network addresses and this computer's own address, because they show how the network is set up and say nothing about who you are. Public addresses are still replaced.
+
+### Fixed
+
+- Report a problem: a Windows user folder name made of several words, such as a first and last name, is now removed completely, also when it comes last in a line or is followed by more text. Up to 20 characters of the name are removed, so a word or two after it may go too. On macOS and Linux the first word of the account folder is removed.
 
 ## [1.1.0] - 2026-11-06
 

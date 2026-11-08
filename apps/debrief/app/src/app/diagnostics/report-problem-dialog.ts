@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, OnInit, signal } from '@angular/core';
+import { MatCheckbox } from '@angular/material/checkbox';
 import { ProblemReportPreview, ReportEntry } from '../core/api.types';
 import { describeError } from '../core/logger';
 import { DIALOG_REF } from '../ui/dialog.service';
@@ -21,6 +22,7 @@ export const MAX_DESCRIPTION = 10 * 1024;
 @Component({
   selector: 'debrief-report-problem-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [MatCheckbox],
   template: `
     <p class="lead" i18n="@@diagnostics.reportDialog.lead">Debrief puts what is needed to diagnose the problem into one zip file that you save and attach to your report. Nothing is sent anywhere.</p>
     <label class="field">
@@ -33,8 +35,12 @@ export const MAX_DESCRIPTION = 10 * 1024;
         aria-describedby="report-description-hint"
         data-testid="report-description"
       ></textarea>
-      <small id="report-description-hint" i18n="@@diagnostics.reportDialog.descriptionHint">Optional. Do not paste passwords or keys.</small>
+      <small id="report-description-hint" i18n="@@diagnostics.reportDialog.descriptionHint">Optional. It goes into the report as you write it, so do not paste passwords or keys.</small>
     </label>
+    <div class="screens">
+      <mat-checkbox [checked]="includeScreenshots()" (change)="setIncludeScreenshots($event.checked)" aria-describedby="report-screenshots-hint" data-testid="report-screenshots" i18n="@@diagnostics.reportDialog.screenshots">Include screenshots of the Debrief window</mat-checkbox>
+      <small id="report-screenshots-hint" i18n="@@diagnostics.reportDialog.screenshotsHint">Off by default. A screenshot shows what was on screen when an error happened, which can include the contents of the logs you have open, and it is not redacted. The error details are included either way.</small>
+    </div>
     @if (loading()) {
       <p class="muted" role="status" i18n="@@diagnostics.reportDialog.collecting">Collecting…</p>
     }
@@ -75,7 +81,8 @@ export const MAX_DESCRIPTION = 10 * 1024;
     :host { display: flex; flex-direction: column; gap: 10px; }
     .lead, .muted { margin: 0; color: var(--text-2); }
     .field { display: flex; flex-direction: column; gap: 4px; }
-    .field small { color: var(--muted); }
+    .field small, .screens small { color: var(--muted); }
+    .screens { display: flex; flex-direction: column; gap: 2px; }
     textarea { resize: vertical; font: inherit; }
     h3 { margin: 4px 0; font-size: var(--fs-md); }
     .files { list-style: none; margin: 0; padding: 0; max-height: 180px; overflow: auto; display: grid; grid-template-columns: minmax(0, max-content) max-content 1fr; gap: 2px 10px; font-size: var(--fs-sm); }
@@ -101,6 +108,8 @@ export class ReportProblemDialog implements OnInit {
   protected readonly cancelLabel = $localize`:@@diagnostics.reportDialog.cancel:Cancel`;
 
   readonly description = signal('');
+  /** Whether the zip gets the window screenshots; the engine decides what that adds, the dialog passes the choice. */
+  readonly includeScreenshots = signal(false);
   readonly preview = signal<ProblemReportPreview | null>(null);
   readonly loading = signal(false);
   readonly busy = signal(false);
@@ -118,15 +127,27 @@ export class ReportProblemDialog implements OnInit {
     void this.load();
   }
 
+  /** The newest preview request; an answer to an older one is dropped, so the list never shows a stale choice. */
+  private latest = 0;
+
   async load(): Promise<void> {
+    const request = ++this.latest;
     this.loading.set(true);
     this.error.set(null);
     try {
-      this.preview.set(await this.backend.reportPreview(this.description()));
+      const preview = await this.backend.reportPreview(this.description(), this.includeScreenshots());
+      if (request === this.latest) this.preview.set(preview);
     } catch (e) {
-      this.error.set($localize`:@@diagnostics.reportDialog.collectFailed:Could not collect the report: ${describeError(e)}:error:`);
+      if (request === this.latest) {
+        this.error.set($localize`:@@diagnostics.reportDialog.collectFailed:Could not collect the report: ${describeError(e)}:error:`);
+      }
     }
-    this.loading.set(false);
+    if (request === this.latest) this.loading.set(false);
+  }
+
+  setIncludeScreenshots(on: boolean): void {
+    this.includeScreenshots.set(on);
+    void this.load();
   }
 
   /** Asks where to save, then writes the zip (asking before replacing a file). */
@@ -137,7 +158,7 @@ export class ReportProblemDialog implements OnInit {
     try {
       const path = await this.target.pickZip(REPORT_FILE_NAME, $localize`:@@diagnostics.reportDialog.saveTitle:Save problem report`);
       if (path) {
-        const job = await this.overwrite.write(path, (replace) => this.backend.saveReport(path, this.description(), replace));
+        const job = await this.overwrite.write(path, (replace) => this.backend.saveReport(path, this.description(), replace, this.includeScreenshots()));
         if (job !== null) {
           // Written as a job; its message has "Show in folder". The preview stays.
           this.follow.started($localize`:@@diagnostics.reportDialog.started:Saving the problem report — running in Jobs`);

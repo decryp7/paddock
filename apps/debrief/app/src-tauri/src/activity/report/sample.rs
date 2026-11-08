@@ -306,6 +306,9 @@ pub fn build(work: &Path) -> PathBuf {
         previous_crash: Some(false),
         created_at: Utc.with_ymd_and_hms(2026, 10, 14, 13, 6, 0).unwrap(),
         system_override: Some(system_info()),
+        include_screenshots: true,
+        // Fixed, so the sample does not depend on who builds it.
+        redactor: super::redaction::redactor_for(&[], &[], &[]),
         ..ReportInputs::empty()
     };
     let out = work.join("debrief-diagnostics-sample.zip");

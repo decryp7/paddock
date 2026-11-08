@@ -1,7 +1,7 @@
 //! "Report a problem": one zip the user reviews and saves, to attach to a bug report. Nothing is sent
 //! anywhere. It holds the activity log and a bounded window of Debrief's own logs, the logs of the child
 //! processes Debrief supervises (AI engine, llama-server, plugin processes) with a `processes.json` summary,
-//! the error snapshots (with their breadcrumbs), the steps to reproduce, system information (no secrets),
+//! the error snapshots (their details with breadcrumbs; the screenshots only when the user ticks the box), the steps to reproduce, system information (no secrets),
 //! the last crash marker and recoverable sessions, the user's description, and a versioned `manifest.json`
 //! listing every file with its kind (Debrief opens such a zip as a diagnostics workspace: [`open`]).
 //! Also Help ▸ Show activity log, which opens Debrief's own logs filtered to the activity entries.
@@ -15,6 +15,7 @@ pub mod cli;
 pub mod manifest;
 pub mod open;
 mod recovery;
+pub mod redaction;
 #[cfg(test)]
 pub(crate) mod sample;
 
@@ -25,6 +26,7 @@ use crate::{err, CmdResult};
 use chrono::{DateTime, Datelike, SecondsFormat, Timelike, Utc};
 use debrief_ipc::child_log::ProcessSummary;
 use manifest::{FileKind, Manifest, ManifestFile};
+use paddock_diag::RedactionCounts;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::io::Write;
@@ -87,6 +89,12 @@ pub struct ReportInputs {
     pub created_at: DateTime<Utc>,
     /// Replaces the gathered system information (reproducible samples).
     pub system_override: Option<Value>,
+    /// Whether the window screenshots of the error snapshots go in. Off unless the user ticks the box in the
+    /// report dialog: a screenshot can show imported log content the text redaction cannot reach.
+    pub include_screenshots: bool,
+    /// Removes secrets and personal data from every file of the report that is not the user's own description: the logs, the
+    /// child logs and every JSON file, the steps and the preview.
+    pub redactor: paddock_diag::Redactor,
 }
 
 impl ReportInputs {
@@ -104,6 +112,8 @@ impl ReportInputs {
             previous_crash: None,
             created_at: Utc::now(),
             system_override: None,
+            include_screenshots: false,
+            redactor: redaction::machine_redactor(),
         }
     }
 
@@ -124,6 +134,8 @@ pub(crate) struct ReportFile {
     pub kind: FileKind,
     pub data: Vec<u8>,
     pub summary: String,
+    /// What the redaction removed from this file.
+    pub redacted: RedactionCounts,
 }
 
 /// The description, cut to [`MAX_DESCRIPTION`] bytes at a character boundary.
@@ -330,92 +342,135 @@ fn report_files(inputs: &ReportInputs, description: &str) -> Vec<ReportFile> {
             format!("Your description ({} characters)", description.chars().count())
         },
         data: description.into_bytes(),
+        redacted: RedactionCounts::default(),
     });
-    let steps = super::steps_text(&inputs.breadcrumbs, None);
+    let (steps, steps_counts) = redaction::redact_steps(&inputs.redactor, &super::steps(&inputs.breadcrumbs, None));
     files.push(ReportFile {
         name: "steps-to-reproduce.txt".into(),
         kind: FileKind::Steps,
-        summary: format!("{} steps from your recent activity", super::steps(&inputs.breadcrumbs, None).len()),
-        data: steps.into_bytes(),
+        summary: format!(
+            "{} steps from your recent activity{}",
+            steps.len(),
+            redaction::removed_note(&steps_counts)
+        ),
+        data: steps.join("\n").into_bytes(),
+        redacted: steps_counts,
     });
+    let (data, counts) = redaction::redacted_json(&inputs.redactor, &inputs.breadcrumbs);
     files.push(ReportFile {
         name: "breadcrumbs.json".into(),
         kind: FileKind::Breadcrumbs,
-        summary: format!("{} recent operations (no file contents)", inputs.breadcrumbs.len()),
-        data: serde_json::to_vec_pretty(&inputs.breadcrumbs).unwrap_or_default(),
+        summary: format!(
+            "{} recent operations (no file contents){}",
+            inputs.breadcrumbs.len(),
+            redaction::removed_note(&counts)
+        ),
+        data,
+        redacted: counts,
     });
     let info = system_info(inputs);
     let unreadable = unreadable_settings(&info);
+    let (data, counts) = redaction::redacted_json(&inputs.redactor, &info);
     files.push(ReportFile {
         name: "system-info.json".into(),
         kind: FileKind::SystemInfo,
-        summary: if unreadable.is_empty() {
-            "OS, Debrief version and build, memory, plugins, settings without secrets".into()
-        } else {
-            format!(
-                "OS, Debrief version and build, memory, plugins, settings without secrets ({} unreadable)",
-                unreadable.len()
-            )
-        },
-        data: serde_json::to_vec_pretty(&info).unwrap_or_default(),
+        summary: format!(
+            "OS, Debrief version and build, memory, plugins, settings without secrets{}{}",
+            if unreadable.is_empty() {
+                String::new()
+            } else {
+                format!(" ({} unreadable)", unreadable.len())
+            },
+            redaction::removed_note(&counts)
+        ),
+        data,
+        redacted: counts,
     });
     let kids = children::collect(inputs.children_dir().as_deref(), &inputs.live_children);
+    let (data, counts) = redaction::redacted_json(&inputs.redactor, &kids.processes);
     files.push(ReportFile {
         name: "processes.json".into(),
         kind: FileKind::Processes,
-        summary: children::processes_summary(&kids.processes),
-        data: serde_json::to_vec_pretty(&kids.processes).unwrap_or_default(),
+        summary: format!(
+            "{}{}",
+            children::processes_summary(&kids.processes),
+            redaction::removed_note(&counts)
+        ),
+        data,
+        redacted: counts,
     });
     let recovery = recovery::session_recovery(inputs.data_dir.as_deref(), inputs.previous_crash);
+    let (data, counts) = redaction::redacted_json(&inputs.redactor, &recovery);
     files.push(ReportFile {
         name: "session-recovery.json".into(),
         kind: FileKind::SessionRecovery,
-        summary: recovery::summary(&recovery),
-        data: serde_json::to_vec_pretty(&recovery).unwrap_or_default(),
+        summary: format!("{}{}", recovery::summary(&recovery), redaction::removed_note(&counts)),
+        data,
+        redacted: counts,
     });
-    let logs = inputs.log_dir.as_deref().map(log_window).unwrap_or_default();
+    // Redacted first: the activity file below is cut from the redacted lines.
+    let mut logs: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut log_counts: Vec<RedactionCounts> = Vec::new();
+    for (name, bytes) in inputs.log_dir.as_deref().map(log_window).unwrap_or_default() {
+        let (data, counts) = redaction::redact_log(&inputs.redactor, &bytes);
+        logs.push((name, data));
+        log_counts.push(counts);
+    }
     let activity = activity_lines(&logs);
     files.push(ReportFile {
         name: "logs/activity.log".into(),
         kind: FileKind::Activity,
         summary: format!("{} activity entries", activity.iter().filter(|b| **b == b'\n').count()),
         data: activity,
+        redacted: RedactionCounts::default(),
     });
-    for (name, bytes) in logs {
+    for ((name, data), counts) in logs.into_iter().zip(log_counts) {
         files.push(ReportFile {
             name: format!("logs/{name}"),
             kind: FileKind::Log,
-            summary: "Debrief's own log (recent part)".into(),
-            data: bytes,
+            summary: format!("Debrief's own log (recent part){}", redaction::removed_note(&counts)),
+            data,
+            redacted: counts,
         });
     }
     for log in kids.logs {
+        let (data, counts) = redaction::redact_log(&inputs.redactor, &log.data);
         files.push(ReportFile {
             name: format!("logs/children/{}", log.file),
             kind: FileKind::ChildLog,
-            summary: log.summary,
-            data: log.data,
+            summary: format!("{}{}", log.summary, redaction::removed_note(&counts)),
+            data,
+            redacted: counts,
         });
     }
     if let Some(store) = &inputs.snapshots {
         let all = store.list();
         let newest = &all[all.len().saturating_sub(MAX_SNAPSHOTS)..];
         for info in newest {
-            if let Ok((format, image)) = store.read_image(&info.id) {
-                files.push(ReportFile {
-                    name: format!("snapshots/{}.{}", info.id, format.extension()),
-                    kind: FileKind::Snapshot,
-                    summary: format!("Screenshot: {}", info.reason),
-                    data: image,
-                });
+            // Screenshots are opt-in: they show what was on screen, which the text redaction cannot reach.
+            if inputs.include_screenshots {
+                if let Ok((format, image)) = store.read_image(&info.id) {
+                    files.push(ReportFile {
+                        name: format!("snapshots/{}.{}", info.id, format.extension()),
+                        kind: FileKind::Snapshot,
+                        summary: format!("Screenshot: {}", info.reason),
+                        data: image,
+                        redacted: RedactionCounts::default(),
+                    });
+                }
             }
-            let mut sidecar = serde_json::to_vec_pretty(info).unwrap_or_default();
-            sidecar.push(b'\n');
+            // The error text can name a file the user had open: redacted as a value, string by string.
+            let (sidecar, counts) = redaction::redacted_json(&inputs.redactor, info);
             files.push(ReportFile {
                 name: format!("snapshots/{}.json", info.id),
                 kind: FileKind::SnapshotDetails,
-                summary: format!("Error details and {} breadcrumbs", info.breadcrumbs.len()),
+                summary: format!(
+                    "Error details and {} breadcrumbs{}",
+                    info.breadcrumbs.len(),
+                    redaction::removed_note(&counts)
+                ),
                 data: sidecar,
+                redacted: counts,
             });
         }
     }
@@ -449,6 +504,7 @@ pub(crate) fn all_files(inputs: &ReportInputs, description: &str) -> Vec<ReportF
             files.len()
         ),
         data: serde_json::to_vec_pretty(&manifest).unwrap_or_default(),
+        redacted: RedactionCounts::default(),
     });
     all.extend(files);
     all
@@ -465,8 +521,9 @@ pub fn preview(inputs: &ReportInputs, description: &str) -> ProblemReportPreview
                 summary: f.summary,
             })
             .collect(),
-        steps: super::steps(&inputs.breadcrumbs, None),
-        system_info: system_info(inputs),
+        // What the dialog shows is what the zip holds: the same redaction.
+        steps: redaction::redact_steps(&inputs.redactor, &super::steps(&inputs.breadcrumbs, None)).0,
+        system_info: inputs.redactor.text_in_json(&system_info(inputs)).0,
     }
 }
 
@@ -485,12 +542,23 @@ fn zip_time(t: &DateTime<Utc>) -> zip::DateTime {
     .unwrap_or_default()
 }
 
-/// Writes the report to `dest` (a `.zip` in an existing folder). Returns the number of files written.
+/// What a written report holds, for the log line and the command line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Written {
+    /// Files in the zip, the manifest included.
+    pub files: usize,
+    /// Window screenshots among them (only when the user asked for them).
+    pub screenshots: usize,
+    /// Secrets and personal details removed, over all files.
+    pub redacted: u32,
+}
+
+/// Writes the report to `dest` (a `.zip` in an existing folder). Returns what it holds.
 /// A failed write leaves no partial file. Entries are written in a fixed order with the report's time, so
 /// the same inputs give the same bytes.
-pub fn write(inputs: &ReportInputs, description: &str, dest: &Path) -> anyhow::Result<usize> {
+pub fn write(inputs: &ReportInputs, description: &str, dest: &Path) -> anyhow::Result<Written> {
     let dest = crate::snapshots::checked_destination(dest).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let result = (|| -> anyhow::Result<usize> {
+    let result = (|| -> anyhow::Result<Written> {
         let files = all_files(inputs, description);
         let mut zip = zip::ZipWriter::new(std::fs::File::create(&dest)?);
         // The zip crate records the writing platform (DOS on Windows, Unix elsewhere) unless told; fixing it keeps
@@ -505,7 +573,13 @@ pub fn write(inputs: &ReportInputs, description: &str, dest: &Path) -> anyhow::R
             zip.write_all(&f.data)?;
         }
         zip.finish()?;
-        Ok(files.len())
+        let mut redacted = RedactionCounts::default();
+        files.iter().for_each(|f| redacted.add(&f.redacted));
+        Ok(Written {
+            files: files.len(),
+            screenshots: files.iter().filter(|f| f.kind == FileKind::Snapshot).count(),
+            redacted: redacted.total(),
+        })
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&dest);
@@ -513,7 +587,7 @@ pub fn write(inputs: &ReportInputs, description: &str, dest: &Path) -> anyhow::R
     result
 }
 
-fn inputs<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> ReportInputs {
+fn inputs<R: tauri::Runtime>(app: &tauri::AppHandle<R>, include_screenshots: bool) -> ReportInputs {
     let plugins = app
         .try_state::<crate::windows::Windows>()
         .and_then(|w| w.all().into_iter().next())
@@ -546,6 +620,8 @@ fn inputs<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> ReportInputs {
         previous_crash: life.as_ref().map(|l| l.previous_crash),
         created_at: Utc::now(),
         system_override: None,
+        include_screenshots,
+        redactor: redaction::machine_redactor(),
     }
 }
 
@@ -554,8 +630,9 @@ fn inputs<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> ReportInputs {
 pub async fn problem_report_preview<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     description: Option<String>,
+    include_screenshots: Option<bool>,
 ) -> CmdResult<ProblemReportPreview> {
-    let inputs = inputs(&app);
+    let inputs = inputs(&app, include_screenshots.unwrap_or(false));
     crate::error::lift(
         tauri::async_runtime::spawn_blocking(move || preview(&inputs, description.as_deref().unwrap_or("")))
             .await
@@ -572,17 +649,23 @@ pub async fn save_problem_report<R: tauri::Runtime>(
     path: String,
     description: Option<String>,
     overwrite: Option<bool>,
+    include_screenshots: Option<bool>,
 ) -> CmdResult<u64> {
     let target = grants.write(&path, &["zip"])?.path().to_path_buf();
     debrief_core::overwrite::check_overwrite(Path::new(&path), overwrite.unwrap_or(false))?;
     // What the report shows is gathered now (the steps up to the click), the zip is written in the job.
-    let inputs = inputs(&app);
+    let inputs = inputs(&app, include_screenshots.unwrap_or(false));
     let spec = crate::jobs::export_spec("Save problem report", None, &target);
     let file = target.clone();
     crate::jobs::start_file(&app, spec, &target, move |_| {
-        let count = write(&inputs, description.as_deref().unwrap_or(""), &file).map_err(err)?;
-        log::info!(Files = count as u64; "Problem report saved");
-        Ok(format!("{count} files zipped."))
+        let written = write(&inputs, description.as_deref().unwrap_or(""), &file).map_err(err)?;
+        log::info!(
+            Files = written.files as u64,
+            Screenshots = written.screenshots as u64,
+            Redacted = u64::from(written.redacted);
+            "Problem report saved"
+        );
+        Ok(format!("{} files zipped.", written.files))
     })
 }
 
@@ -718,7 +801,8 @@ pub(crate) mod tests {
     #[test]
     fn report_zip_contents_and_redaction() {
         let d = temp("zip");
-        let inputs = inputs_in(&d);
+        let mut inputs = inputs_in(&d);
+        inputs.include_screenshots = true;
         let p = preview(&inputs, "It crashed when I exported");
         let names: Vec<&str> = p.entries.iter().map(|e| e.name.as_str()).collect();
         for want in [
@@ -740,8 +824,10 @@ pub(crate) mod tests {
         assert_eq!(p.system_info["plugins"][0]["id"], "net.decryptology.web");
 
         let out = d.join("report.zip");
-        let n = write(&inputs, "It crashed when I exported", &out).unwrap();
+        let written = write(&inputs, "It crashed when I exported", &out).unwrap();
+        let n = written.files;
         assert_eq!(n, p.entries.len());
+        assert_eq!(written.screenshots, 1, "the box was ticked");
         let mut zip = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
         assert_eq!(zip_text(&mut zip, "description.txt"), "It crashed when I exported");
         let info = zip_text(&mut zip, "system-info.json");
@@ -776,6 +862,370 @@ pub(crate) mod tests {
         assert!(write(&inputs, "", &d.join("report.txt")).is_err());
         assert!(write(&inputs, "", &d.join("missing/r.zip")).is_err());
         std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// Fixed machine facts, so the table does not depend on who runs the test.
+    fn alex() -> paddock_diag::Redactor {
+        redaction::redactor_for(&["alex".into()], &["/Users/alex".into()], &["ALEX-MBP".into()])
+    }
+
+    #[test]
+    fn screenshots_are_left_out_unless_the_user_asks() {
+        let d = temp("shots");
+        let mut inputs = inputs_in(&d);
+        assert!(!inputs.include_screenshots, "off by default");
+        let is_image = |n: &str| n.starts_with("snapshots/") && !n.ends_with(".json");
+        let off = preview(&inputs, "");
+        assert!(!off.entries.iter().any(|e| is_image(&e.name)), "{:?}", off.entries);
+        // The error details (no pixels) stay.
+        assert!(off
+            .entries
+            .iter()
+            .any(|e| e.name.starts_with("snapshots/") && e.name.ends_with(".json")));
+        inputs.include_screenshots = true;
+        let on = preview(&inputs, "");
+        assert!(on.entries.iter().any(|e| is_image(&e.name)));
+        let out = d.join("r.zip");
+        inputs.include_screenshots = false;
+        write(&inputs, "", &out).unwrap();
+        let zip = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
+        assert!(!zip.file_names().filter_map(Result::ok).any(|n| is_image(&n)));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// Hostile table: what must never reach the zip, in Debrief's own log and in a child's log.
+    const HOSTILE: &[(&str, &str)] = &[
+        ("/Users/alex/Documents/incident-2026/app.evtx", "alex"),
+        ("C:\\Users\\bob\\AppData\\Local\\x.log", "bob"),
+        ("/home/carol/logs/a.log", "carol"),
+        ("opened by alex on ALEX-MBP", "ALEX-MBP"),
+        ("peer 203.0.113.77:8443", "203.0.113.77"),
+        ("peer 2001:db8:85a3::8a2e:370:7334", "8a2e:370:7334"),
+        ("peer [2001:db8:85a3::8a2e:370:7334]:443", "db8:85a3"),
+        ("nic aa:bb:cc:dd:ee:ff", "aa:bb:cc:dd:ee:ff"),
+        ("nic AA-BB-CC-DD-EE-01", "AA-BB-CC-DD-EE-01"),
+        ("tailnet fd7a:115c:a1e0::1", "fd7a:115c:a1e0"),
+        ("carrier-grade 100.64.1.2", "100.64.1.2"),
+        ("mail dana.smith@example.org", "dana.smith"),
+        ("Authorization: Bearer abcdef0123456789abcdef", "abcdef0123456789abcdef"),
+        ("password=hunter2hunter2", "hunter2hunter2"),
+        ("https://svc:s3cr3tpw@internal.example/x", "s3cr3tpw"),
+        ("card 4111 1111 1111 1111", "4111 1111 1111 1111"),
+    ];
+
+    #[test]
+    fn logs_and_child_logs_are_redacted_in_the_zip() {
+        let d = temp("redact");
+        let mut inputs = inputs_in(&d);
+        inputs.redactor = alex();
+        inputs.snapshots = None;
+        let mut log = String::new();
+        let mut child = String::new();
+        for (i, (text, _)) in HOSTILE.iter().enumerate() {
+            // A JSON line (Debrief's own log, in the activity window too) and a plain stderr line.
+            log.push_str(&format!(
+                "{{\"@t\":\"2026-10-17T08:00:0{}Z\",\"@m\":{},\"SourceContext\":\"Debrief.Activity\",\"Operation\":\"file.open\",\"Path\":{}}}\n",
+                i % 10,
+                serde_json::to_string(text).unwrap(),
+                serde_json::to_string(text).unwrap()
+            ));
+            child.push_str(&format!("{text}\n"));
+        }
+        std::fs::write(inputs.log_dir.as_ref().unwrap().join("debrief.log"), log).unwrap();
+        let dir = inputs.children_dir().unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("plugin-x.log"), child).unwrap();
+        let out = d.join("r.zip");
+        write(&inputs, "", &out).unwrap();
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
+        for name in ["logs/debrief.log", "logs/activity.log", "logs/children/plugin-x.log"] {
+            let text = zip_text(&mut zip, name);
+            assert!(!text.is_empty(), "{name} is empty");
+            for (_, secret) in HOSTILE {
+                assert!(!text.contains(secret), "{name} still has {secret}:\n{text}");
+            }
+        }
+        // The redaction keeps the lines readable and the activity entries recognisable.
+        let activity = zip_text(&mut zip, "logs/activity.log");
+        assert_eq!(activity.lines().count(), HOSTILE.len(), "{activity}");
+        assert!(
+            activity.contains("<user>") && activity.contains("<ip>") && activity.contains("<mac>"),
+            "{activity}"
+        );
+        let p = preview(&inputs, "");
+        let log_entry = p.entries.iter().find(|e| e.name == "logs/debrief.log").unwrap();
+        assert!(log_entry.summary.contains("removed"), "{}", log_entry.summary);
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// Inputs where every hostile row sits in every place the report takes text from: breadcrumbs (and so the steps), the
+    /// settings and plugins of the system information, a child process, and an error snapshot.
+    fn hostile_inputs(d: &Path) -> ReportInputs {
+        let mut inputs = inputs_in(d);
+        inputs.redactor = alex();
+        inputs.include_screenshots = true;
+        inputs.breadcrumbs = HOSTILE
+            .iter()
+            .enumerate()
+            .map(|(i, (text, _))| {
+                let mut b = crumb(&format!("ui.click{i}"));
+                b.view = Some((*text).into());
+                b.params.insert("Title".into(), (*text).into());
+                b.params.insert("Path".into(), (*text).into());
+                b
+            })
+            .collect();
+        let texts: Vec<&str> = HOSTILE.iter().map(|h| h.0).collect();
+        std::fs::write(
+            inputs.config_dir.as_ref().unwrap().join("settings.json"),
+            json!({ "version": 1, "sections": { "recent": { "files": texts, "nested": { "deep": [{ "path": texts[0] }] } } } }).to_string(),
+        )
+        .unwrap();
+        inputs.plugins = vec![PluginLine {
+            id: texts[0].into(),
+            version: "1.0.0".into(),
+            status: texts[1].into(),
+        }];
+        inputs.live_children = vec![ProcessSummary {
+            name: "plugin-x".into(),
+            kind: debrief_ipc::child_log::ChildKind::Plugin,
+            version: Some(texts[2].into()),
+            pid: Some(7),
+            state: debrief_ipc::child_log::ChildRunState::Running,
+            starts: 1,
+            restarts: 0,
+            last_exit: Some(texts[3].into()),
+            last_exit_at: None,
+            quarantined: true,
+            quarantine_reason: Some(texts[4].into()),
+        }];
+        let store = inputs.snapshots.take().unwrap();
+        for (i, (text, _)) in HOSTILE.iter().enumerate().take(3) {
+            let ctx = SnapshotContext {
+                reason: "panel-failed".into(),
+                message: format!("failed to open {text}"),
+                stack: Some(format!("at {text}")),
+                view: Some((*text).into()),
+                breadcrumbs: vec![{
+                    let mut b = crumb("file.open");
+                    b.params.insert("Path".into(), (*text).into());
+                    b
+                }],
+                ..Default::default()
+            };
+            let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, i as u8];
+            let env = Environment {
+                app_version: "1".into(),
+                os: "x".into(),
+                arch: "y".into(),
+            };
+            store.save(ImageFormat::Png, &png, &ctx, &env).unwrap();
+        }
+        inputs.snapshots = Some(store);
+        inputs
+    }
+
+    #[test]
+    fn every_json_file_the_steps_and_the_sidecar_are_redacted_in_the_zip() {
+        let d = temp("redact-json");
+        let inputs = hostile_inputs(&d);
+        let out = d.join("r.zip");
+        write(&inputs, "", &out).unwrap();
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
+        let mut names: Vec<String> = ["breadcrumbs.json", "steps-to-reproduce.txt", "system-info.json", "processes.json"]
+            .map(String::from)
+            .into();
+        let sidecars: Vec<String> = zip
+            .file_names()
+            .filter_map(Result::ok)
+            .filter(|n| n.starts_with("snapshots/") && n.ends_with(".json"))
+            .map(String::from)
+            .collect();
+        assert_eq!(sidecars.len(), 4, "{sidecars:?}");
+        names.extend(sidecars);
+        for name in &names {
+            let text = zip_text(&mut zip, name);
+            assert!(!text.is_empty(), "{name} is empty");
+            if name.ends_with(".json") {
+                // Still valid JSON, and the strings are searched unescaped (a path in JSON has doubled backslashes).
+                let value: Value = serde_json::from_str(&text).unwrap_or_else(|e| panic!("{name} is not JSON: {e}"));
+                let plain = value.to_string().replace("\\\\", "\\");
+                for (_, secret) in HOSTILE {
+                    assert!(
+                        !text.contains(secret) && !plain.contains(secret),
+                        "{name} still has {secret}:\n{text}"
+                    );
+                }
+            } else {
+                for (_, secret) in HOSTILE {
+                    assert!(!text.contains(secret), "{name} still has {secret}:\n{text}");
+                }
+            }
+        }
+        // The replacements are in place, so the files stay useful.
+        assert!(zip_text(&mut zip, "steps-to-reproduce.txt").contains("<user>"));
+        assert!(zip_text(&mut zip, "system-info.json").contains("<ip>"));
+        assert!(zip_text(&mut zip, "processes.json").contains("<ip>"));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn quoted_and_multi_line_error_text_in_a_sidecar_is_redacted_inside_the_string() {
+        // What a panel reports can hold quotes, line breaks and a Windows path with a space: in the pretty-printed sidecar they
+        // are escapes (`\"`, `\n`, `\\`), so only the string itself reads right.
+        const AWKWARD: &[(&str, &str)] = &[
+            ("config {\"password\":\"hunter2hunter2\"} rejected", "hunter2hunter2"),
+            ("password=\"hunter2hunter2\"", "hunter2hunter2"),
+            (
+                "first line\nAuthorization: Bearer abcdef0123456789abcdef\nlast",
+                "abcdef0123456789abcdef",
+            ),
+            ("opened \"C:\\Users\\Dana Lee\\Documents\\a.evtx\" twice", "Dana Lee"),
+            ("url \"https://svc:s3cr3tpw@internal.example/x\"", "s3cr3tpw"),
+            ("failed to open C:\\Users\\Dana Lee", "Lee"),
+            ("cannot open C:\\Users\\Dana Lee because it is locked", "Lee"),
+            ("C:\\Users\\Ana de la Cruz Diaz\\Documents\\a.evtx", "Diaz"),
+        ];
+        let d = temp("sidecar-awkward");
+        let mut inputs = inputs_in(&d);
+        inputs.redactor = alex();
+        let store = inputs.snapshots.take().unwrap();
+        let env = Environment {
+            app_version: "1".into(),
+            os: "x".into(),
+            arch: "y".into(),
+        };
+        for (i, (text, _)) in AWKWARD.iter().enumerate() {
+            let ctx = SnapshotContext {
+                reason: "panel-failed".into(),
+                message: (*text).into(),
+                stack: Some(format!("{text}\n  at frame")),
+                ..Default::default()
+            };
+            store
+                .save(
+                    ImageFormat::Png,
+                    &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, i as u8],
+                    &ctx,
+                    &env,
+                )
+                .unwrap();
+        }
+        inputs.snapshots = Some(store);
+        let out = d.join("r.zip");
+        write(&inputs, "", &out).unwrap();
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
+        let sidecars: Vec<String> = zip
+            .file_names()
+            .filter_map(Result::ok)
+            .filter(|n| n.starts_with("snapshots/") && n.ends_with(".json"))
+            .map(String::from)
+            .collect();
+        let mut checked = 0;
+        for name in sidecars {
+            let v: Value = serde_json::from_str(&zip_text(&mut zip, &name)).unwrap();
+            let strings = format!(
+                "{} {}",
+                v["message"].as_str().unwrap_or_default(),
+                v["stack"].as_str().unwrap_or_default()
+            );
+            for (text, secret) in AWKWARD {
+                if v["message"].as_str().is_some_and(|m| m.starts_with(&text[..5.min(text.len())])) {
+                    assert!(!strings.contains(secret), "{name} still has {secret}: {strings}");
+                    checked += 1;
+                }
+            }
+        }
+        assert!(checked >= AWKWARD.len(), "checked {checked}");
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn the_preview_shows_what_the_zip_holds() {
+        let d = temp("redact-preview");
+        let inputs = hostile_inputs(&d);
+        let p = preview(&inputs, "");
+        let shown = format!("{:?} {}", p.steps, p.system_info);
+        for (_, secret) in HOSTILE {
+            assert!(!shown.contains(secret), "the preview still has {secret}: {shown}");
+        }
+        assert!(p.steps.iter().any(|s| s.contains("<user>")));
+        assert!(p
+            .entries
+            .iter()
+            .any(|e| e.name == "steps-to-reproduce.txt" && e.summary.contains("removed")));
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn loopback_and_private_network_addresses_stay_in_the_report() {
+        let d = temp("local-addresses");
+        let mut inputs = inputs_in(&d);
+        inputs.redactor = alex();
+        inputs.snapshots = None;
+        let line = "{\"@t\":\"2026-10-17T08:00:00Z\",\"@m\":\"engine on 127.0.0.1:52731, lan 192.168.1.5, from 203.0.113.9\",\"SourceContext\":\"Debrief.Activity\",\"Operation\":\"file.open\"}\n";
+        std::fs::write(inputs.log_dir.as_ref().unwrap().join("debrief.log"), line).unwrap();
+        inputs.breadcrumbs = vec![{
+            let mut b = crumb("file.open");
+            b.params.insert("Path".into(), "10.0.0.7 and 203.0.113.9".into());
+            b
+        }];
+        let out = d.join("r.zip");
+        write(&inputs, "", &out).unwrap();
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
+        let log = zip_text(&mut zip, "logs/debrief.log");
+        assert!(log.contains("127.0.0.1:52731") && log.contains("192.168.1.5"), "{log}");
+        assert!(!log.contains("203.0.113.9"), "{log}");
+        let crumbs = zip_text(&mut zip, "breadcrumbs.json");
+        assert!(crumbs.contains("10.0.0.7 and <ip>"), "{crumbs}");
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn session_recovery_json_is_redacted_too() {
+        let d = temp("recovery-redact");
+        let mut inputs = inputs_in(&d);
+        inputs.redactor = alex();
+        inputs.snapshots = None;
+        let data = d.join("data");
+        let session = data.join("recovered").join("alex");
+        std::fs::create_dir_all(&session).unwrap();
+        std::fs::write(session.join("last-session.debriefproj"), "{}").unwrap();
+        std::fs::write(data.join("recovered").join("manifest.json"), r#"{"version":2,"windows":["alex"]}"#).unwrap();
+        inputs.data_dir = Some(data);
+        let out = d.join("r.zip");
+        write(&inputs, "", &out).unwrap();
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
+        let text = zip_text(&mut zip, "session-recovery.json");
+        assert!(text.contains("<user>") && !text.contains("alex"), "{text}");
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn redacting_a_file_keeps_its_keys_so_two_keys_never_merge() {
+        let (out, _) = redaction::redacted_json(&alex(), &json!({ "/Users/alex/a": "x", "/Users/alex/b": "y" }));
+        let v: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(v.as_object().map(|m| m.len()), Some(2), "{v}");
+    }
+
+    #[test]
+    fn a_log_line_that_is_cut_or_not_json_is_still_redacted() {
+        let (out, counts) = redaction::redact_log(
+            &alex(),
+            b"tail of a cut line /Users/alex/x token=abcd1234efgh\n\n{\"@m\":\"ok\",\"Ip\":\"203.0.113.5\"}",
+        );
+        let text = String::from_utf8(out).unwrap();
+        assert!(
+            !text.contains("alex") && !text.contains("abcd1234efgh") && !text.contains("203.0.113.5"),
+            "{text}"
+        );
+        assert_eq!(
+            text.lines().count(),
+            3,
+            "blank lines and the missing final newline are kept: {text:?}"
+        );
+        assert!(!text.ends_with('\n'));
+        assert!(counts.total() >= 3);
     }
 
     #[test]
@@ -966,13 +1416,13 @@ pub(crate) mod tests {
         let app = crate::test_support::test_app(None);
         let handle = app.handle().clone();
         log::info!(target: super::super::SOURCE_CONTEXT, SourceContext = super::super::SOURCE_CONTEXT, Operation = "report.test", Trigger = "menu", Window = "main"; "User report.test via menu");
-        let p = tauri::async_runtime::block_on(problem_report_preview(handle.clone(), Some("d".into()))).unwrap();
+        let p = tauri::async_runtime::block_on(problem_report_preview(handle.clone(), Some("d".into()), None)).unwrap();
         assert!(p.steps.iter().any(|s| s.contains("report.test")), "{:?}", p.steps);
         assert!(!p.system_info["plugins"].as_array().unwrap().is_empty());
         let out = std::env::temp_dir().join(format!("debrief-report-cmd-{}.zip", std::process::id()));
         let _ = std::fs::remove_file(&out);
         let grants = || crate::paths::WindowGrants::of(&handle, "main");
-        let refused = save_problem_report(handle.clone(), grants(), out.to_string_lossy().into(), None, None).now();
+        let refused = save_problem_report(handle.clone(), grants(), out.to_string_lossy().into(), None, None, None).now();
         assert!(refused.unwrap_err().contains("only writes where you choose"));
         assert!(!out.exists());
         crate::paths::grant(
@@ -983,18 +1433,18 @@ pub(crate) mod tests {
             crate::paths::GrantSource::Dialog,
         )
         .unwrap();
-        let job = save_problem_report(handle.clone(), grants(), out.to_string_lossy().into(), None, None)
+        let job = save_problem_report(handle.clone(), grants(), out.to_string_lossy().into(), None, None, None)
             .now()
             .unwrap();
         let line = crate::test_support::job_done(&app, job);
         let n: usize = line.split(' ').next().unwrap().parse().unwrap();
         assert!(n >= 5, "{line}");
-        let refused = save_problem_report(handle.clone(), grants(), out.to_string_lossy().into(), None, None).now();
+        let refused = save_problem_report(handle.clone(), grants(), out.to_string_lossy().into(), None, None, None).now();
         assert_eq!(
             refused.unwrap_err(),
             crate::error::file_exists(format!("{} already exists; confirm to replace it", out.display()))
         );
-        let again = save_problem_report(handle.clone(), grants(), out.to_string_lossy().into(), None, Some(true))
+        let again = save_problem_report(handle.clone(), grants(), out.to_string_lossy().into(), None, Some(true), None)
             .now()
             .unwrap();
         crate::test_support::job_done(&app, again);

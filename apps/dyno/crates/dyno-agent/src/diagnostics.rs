@@ -114,7 +114,7 @@ pub fn collect(shared: &Shared) -> DiagnosticsFiles {
     match network {
         Ok(n) => add(
             "network/sockets.json",
-            "Listening ports and connections (addresses redacted)",
+            "Listening ports and connections (private addresses kept, others redacted)",
             json(&n),
         ),
         Err(e) => notes.push(format!("The listening ports and connections could not be read ({e:?}).")),

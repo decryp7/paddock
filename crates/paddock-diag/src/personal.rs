@@ -39,7 +39,8 @@ impl RedactionCounts {
             + self.ip_addresses
     }
 
-    pub(crate) fn add(&mut self, o: &RedactionCounts) {
+    /// Adds `o` to these counts, kind by kind.
+    pub fn add(&mut self, o: &RedactionCounts) {
         self.secrets += o.secrets;
         self.fields += o.fields;
         self.home_paths += o.home_paths;
@@ -58,6 +59,7 @@ pub struct Personal {
     user_names: Vec<String>,
     home_dirs: Vec<String>,
     machine_names: Vec<String>,
+    keep_local: bool,
 }
 
 fn is_word(c: char) -> bool {
@@ -104,18 +106,60 @@ fn replace_exact(text: &str, needle: &str, with: &str) -> (String, u32) {
     (text.replace(needle, with), count)
 }
 
-/// Replaces a path prefix (case-insensitive, either separator) with `with`.
+/// Length of the run of separators at the start of `t` (a normalised text: `/` only).
+fn sep_run(t: &str) -> usize {
+    t.bytes().take_while(|b| *b == b'/').count()
+}
+
+/// The end of `segs` matched at `start` in the normalised text `t`: segments joined by one or two separators (a path inside
+/// serialised JSON has every backslash doubled), after a leading run of them when `lead`.
+fn match_prefix_at(t: &str, start: usize, segs: &[&str], lead: bool) -> Option<usize> {
+    let mut i = start;
+    let between = |i: &mut usize| match sep_run(&t[*i..]) {
+        n @ 1..=2 => {
+            *i += n;
+            Some(())
+        }
+        _ => None,
+    };
+    if lead {
+        between(&mut i)?;
+    }
+    for (k, seg) in segs.iter().enumerate() {
+        if k > 0 {
+            between(&mut i)?;
+        }
+        if !t[i..].starts_with(seg) {
+            return None;
+        }
+        i += seg.len();
+    }
+    Some(i)
+}
+
+/// Replaces a path prefix (case-insensitive, either separator, a doubled separator as in JSON text) with `with`.
 fn replace_prefix(text: &str, prefix: &str, with: &str) -> (String, u32) {
     let norm = |s: &str| s.to_lowercase().replace('\\', "/");
     let (t, p) = (norm(text), norm(prefix.trim_end_matches(['/', '\\'])));
     if p.is_empty() || t.len() != text.len() {
         return (text.to_string(), 0);
     }
+    let lead = p.starts_with('/');
+    let segs: Vec<&str> = p.split('/').filter(|s| !s.is_empty()).collect();
+    let first = match segs.first() {
+        _ if lead => "/",
+        Some(first) => first,
+        None => return (text.to_string(), 0),
+    };
     let mut out = String::with_capacity(text.len());
-    let (mut last, mut from, mut count) = (0, 0, 0);
-    while let Some(i) = t[from..].find(&p) {
-        let start = from + i;
-        let end = start + p.len();
+    let (mut last, mut count) = (0, 0);
+    for (start, _) in t.match_indices(first) {
+        if start < last {
+            continue;
+        }
+        let Some(end) = match_prefix_at(&t, start, &segs, lead) else {
+            continue;
+        };
         let after_ok = text[end..]
             .chars()
             .next()
@@ -130,7 +174,6 @@ fn replace_prefix(text: &str, prefix: &str, with: &str) -> (String, u32) {
             last = end;
             count += 1;
         }
-        from = end;
     }
     out.push_str(&text[last..]);
     (out, count)
@@ -161,20 +204,49 @@ fn profile_marker(rest: &str) -> Option<usize> {
     (tail > 0).then_some(lead + word + tail)
 }
 
-/// The owner segment after a marker: up to the next separator or quote (spaces included: `Alex Doe`), at most four words; with
-/// no separator or quote after it (the end of a sentence) the first word only, so a sentence is not swallowed.
-fn profile_segment(after: &str) -> usize {
+/// The longest account name Windows allows (`sAMAccountName`); a profile folder name is at most this long.
+const WINDOWS_NAME_MAX: usize = 20;
+
+/// The owner segment after a marker, as a byte length. `windows` says the path is a Windows one (a backslash in the marker or
+/// a drive letter before it):
+/// - Windows folder names are display names and may hold spaces: the segment is the longest run of whole words of at most
+///   [`WINDOWS_NAME_MAX`] characters (at least the first word), ending earlier at the next separator, quote or line end. It may
+///   take a word or two of the sentence after the name; over-redacting is the safe side.
+/// - macOS and Linux account names have no spaces: the first word. A folder closed by a separator or quote on the same line is
+///   taken whole (`/Users/Alex Doe/Documents`).
+fn profile_segment(after: &str, windows: bool) -> usize {
     let stop = |c: char| is_sep(c) || matches!(c, '"' | '\'' | '\n' | '\r');
-    match after.find(stop) {
-        Some(i) if after[i..].starts_with(is_sep) || after[i..].starts_with(['"', '\'']) => {
-            if after[..i].split(' ').count() <= 4 {
-                i
-            } else {
-                after.find(' ').unwrap_or(i)
-            }
-        }
-        _ => after.find([' ', '\n', '\r']).unwrap_or(after.len()),
+    let end = after.find(stop).unwrap_or(after.len());
+    let region = &after[..end];
+    if !windows {
+        let closed = after[end..].starts_with(|c: char| is_sep(c) || matches!(c, '"' | '\''));
+        return if closed {
+            end
+        } else {
+            region.find(' ').unwrap_or(region.len())
+        };
     }
+    let mut taken = 0;
+    let mut pos = 0;
+    for word in region.split(' ') {
+        let word_end = pos + word.len();
+        if !word.is_empty() {
+            if taken > 0 && region[..word_end].chars().count() > WINDOWS_NAME_MAX {
+                break;
+            }
+            taken = word_end;
+        }
+        pos = word_end + 1;
+    }
+    taken
+}
+
+/// Whether the text before a marker ends in a drive letter and a colon (`C:`).
+fn after_drive_letter(before: &str) -> bool {
+    let mut chars = before.chars().rev();
+    chars.next() == Some(':')
+        && chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.next().is_none_or(|c| !is_word(c))
 }
 
 /// Replaces the owner segment of `/Users/<x>`, `/home/<x>` and `C:\Users\<x>` (any case, doubled separators too) with `<user>`.
@@ -185,7 +257,8 @@ fn replace_profiles(text: &str) -> (String, u32) {
     while !rest.is_empty() {
         if let Some(m) = profile_marker(rest) {
             let after = &rest[m..];
-            let seg = &after[..profile_segment(after)];
+            let windows = rest[..m].contains('\\') || after_drive_letter(&out);
+            let seg = &after[..profile_segment(after, windows)];
             out.push_str(&rest[..m]);
             if !seg.is_empty()
                 && !["<user>", "shared", "public", "~"]
@@ -243,7 +316,18 @@ fn replace_emails(text: &str) -> (String, u32) {
     (out, count)
 }
 
-fn replace_ipv4(text: &str) -> (String, u32) {
+/// Loopback, unspecified and private (RFC 1918) IPv4 addresses: they say how a machine is set up, not who owns it.
+fn is_local_v4(ip: std::net::Ipv4Addr) -> bool {
+    ip.is_loopback() || ip.is_unspecified() || ip.is_private()
+}
+
+/// Loopback and unspecified IPv6 addresses. Unique-local ones (`fc00::/7`, which include Tailscale's `fd7a:115c:a1e0::/48`)
+/// name a network the owner belongs to and are always redacted.
+fn is_local_v6(ip: std::net::Ipv6Addr) -> bool {
+    ip.is_loopback() || ip.is_unspecified()
+}
+
+fn replace_ipv4(text: &str, keep_local: bool) -> (String, u32) {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
     let (mut i, mut count) = (0, 0);
@@ -279,8 +363,14 @@ fn replace_ipv4(text: &str) -> (String, u32) {
                 || !(chars[j].is_ascii_alphanumeric()
                     || (chars[j] == '.' && chars.get(j + 1).is_some_and(|c| c.is_ascii_digit())));
             if ok && groups == 4 && after_ok {
-                out.push_str("<ip>");
-                count += 1;
+                let text: String = chars[i..j].iter().collect();
+                let keep = keep_local && text.parse::<std::net::Ipv4Addr>().is_ok_and(is_local_v4);
+                if keep {
+                    out.push_str(&text);
+                } else {
+                    out.push_str("<ip>");
+                    count += 1;
+                }
                 i = j;
                 continue;
             }
@@ -293,7 +383,7 @@ fn replace_ipv4(text: &str) -> (String, u32) {
 
 /// Replaces every IPv6 address (a run of hex digits, colons and dots that parses as one) with `<ip>`. Times
 /// (`12:30:45`) and MAC addresses do not parse as IPv6 and are left alone.
-fn replace_ipv6(text: &str) -> (String, u32) {
+fn replace_ipv6(text: &str, keep_local: bool) -> (String, u32) {
     let is_part = |c: char| c.is_ascii_hexdigit() || c == ':' || c == '.';
     let mut out = String::with_capacity(text.len());
     let (mut count, mut rest) = (0, text);
@@ -313,12 +403,18 @@ fn replace_ipv6(text: &str) -> (String, u32) {
             .chars()
             .next_back()
             .is_some_and(|c| c.is_alphanumeric() || c == '_');
-        if !word_before
-            && body.matches(':').count() >= 2
-            && body.parse::<std::net::Ipv6Addr>().is_ok()
-        {
-            out.push_str("<ip>");
-            count += 1;
+        let parsed = if !word_before && body.matches(':').count() >= 2 {
+            body.parse::<std::net::Ipv6Addr>().ok()
+        } else {
+            None
+        };
+        if let Some(ip) = parsed {
+            if keep_local && is_local_v6(ip) {
+                out.push_str(body);
+            } else {
+                out.push_str("<ip>");
+                count += 1;
+            }
         } else {
             out.push_str(body);
         }
@@ -346,7 +442,22 @@ impl Personal {
             user_names: clean(user_names, 2),
             home_dirs: clean(home_dirs, 3),
             machine_names: clean(machine_names, 2),
+            keep_local: false,
         }
+    }
+
+    /// Keeps loopback, unspecified and private (RFC 1918) IPv4 addresses and the IPv6 loopback and unspecified addresses
+    /// instead of replacing them. For a report the user reads and saves on this machine: such addresses show how it is set
+    /// up and say nothing about its owner. Everything else, including CGNAT (`100.64.0.0/10`) and unique-local IPv6 (Tailscale),
+    /// is still replaced. Anything that leaves the machine (a web search) must not use it.
+    pub fn keep_local_addresses(mut self) -> Personal {
+        self.keep_local = true;
+        self
+    }
+
+    /// Whether local addresses are kept ([`Personal::keep_local_addresses`]).
+    pub fn keeps_local_addresses(&self) -> bool {
+        self.keep_local
     }
 
     /// Redacts `text` and reports what was removed.
@@ -377,10 +488,10 @@ impl Personal {
         let (t, n) = replace_macs(&s);
         s = t;
         c.ip_addresses += n;
-        let (t, n) = replace_ipv4(&s);
+        let (t, n) = replace_ipv4(&s, self.keep_local);
         s = t;
         c.ip_addresses += n;
-        let (t, n) = replace_ipv6(&s);
+        let (t, n) = replace_ipv6(&s, self.keep_local);
         s = t;
         c.ip_addresses += n;
         (s, c)
@@ -483,17 +594,107 @@ mod tests {
     fn ipv6_addresses_are_redacted_but_times_and_mac_addresses_are_not() {
         let (t, n) = replace_ipv6(
             "peer 2a00:1450:4001:82b::200e and [::1]:443, fe80::1ff:fe23:4567:890a. at 12:30:45 mac aa:bb:cc:dd:ee:ff",
+            false,
         );
         assert_eq!(n, 3);
         assert_eq!(
             t,
             "peer <ip> and [<ip>]:443, <ip>. at 12:30:45 mac aa:bb:cc:dd:ee:ff"
         );
-        let (t, n) = replace_ipv6("nothing here: 1:2");
+        let (t, n) = replace_ipv6("nothing here: 1:2", false);
         assert_eq!((t.as_str(), n), ("nothing here: 1:2", 0));
         let r = Personal::new(&[], &[], &[]);
         let (t, c) = r.apply("a 10.1.2.3 b 2001:db8::5");
         assert_eq!(t, "a <ip> b <ip>");
         assert_eq!(c.ip_addresses, 2);
+    }
+
+    #[test]
+    fn by_default_every_address_is_replaced_local_ones_too() {
+        let (s, c) = Personal::default().apply(
+            "127.0.0.1 0.0.0.0 10.1.2.3 172.16.0.9 192.168.1.5 ::1 fd00::5 fd7a:115c:a1e0::1 100.64.1.2",
+        );
+        assert_eq!(s, "<ip> <ip> <ip> <ip> <ip> <ip> <ip> <ip> <ip>");
+        assert_eq!(c.ip_addresses, 9);
+    }
+
+    #[test]
+    fn opted_in_loopback_unspecified_and_rfc1918_addresses_stay() {
+        let r = Personal::default().keep_local_addresses();
+        let kept = "bind 127.0.0.1:8080, 0.0.0.0, 10.1.2.3, 172.16.0.9, 172.31.255.1, 192.168.1.5, ::1, [::1]:443 and ::";
+        let (s, c) = r.apply(kept);
+        assert_eq!(s, kept);
+        assert_eq!(c.ip_addresses, 0);
+        // Public, CGNAT, link-local, unique-local (Tailscale's fd7a:115c:a1e0::/48 too) and the edges of the private ranges go.
+        let (s, c) = r.apply(
+            "203.0.113.7 8.8.8.8 172.15.0.1 172.32.0.1 169.254.1.2 100.64.1.2 fe80::1ff:fe23:4567:890a 2001:db8::5 fd00::5 fc00::1 fd7a:115c:a1e0::1",
+        );
+        assert_eq!(s, "<ip> <ip> <ip> <ip> <ip> <ip> <ip> <ip> <ip> <ip> <ip>");
+        assert_eq!(c.ip_addresses, 11);
+    }
+
+    #[test]
+    fn json_escaped_windows_paths_are_redacted_like_plain_ones() {
+        // A path inside serialised JSON has every backslash doubled.
+        let r = Personal::new(&["alex".into()], &["C:\\Users\\alex".into()], &[]);
+        let (s, c) = r.apply(
+            r"open C:\\Users\\alex\\Documents\\a.evtx, C:\\Users\\carol\\x and C:\Users\alex\y",
+        );
+        assert_eq!(
+            s,
+            r"open ~\\Documents\\a.evtx, C:\\Users\\<user>\\x and ~\y"
+        );
+        assert_eq!((c.home_paths, c.profile_paths), (2, 1));
+        // The home folder must still end at a path boundary when doubled.
+        let (s, _) = r.apply(r"C:\\Users\\alexandra\\f");
+        assert_eq!(s, r"C:\\Users\\<user>\\f");
+    }
+
+    #[test]
+    fn a_profile_folder_with_a_space_is_removed_whole_even_at_the_end_of_the_text() {
+        let r = Personal::default();
+        for (text, want) in [
+            // Windows: the longest run of whole words that fits 20 characters, ending earlier at a separator or quote.
+            (r"crash in C:\Users\Dana Lee", r"crash in C:\Users\<user>"),
+            (r"C:\\Users\\Dana Lee", r"C:\\Users\\<user>"),
+            (
+                r"opened C:\Users\Dana Lee\x twice",
+                r"opened C:\Users\<user>\x twice",
+            ),
+            (
+                r"C:\Users\Ana de la Cruz Diaz\Documents",
+                r"C:\Users\<user>\Documents",
+            ),
+            (
+                r"crash in C:\Users\Jo Li Wu Ma Smith",
+                r"crash in C:\Users\<user>",
+            ),
+            (
+                r"C:\Users\Dana Lee because it is locked",
+                r"C:\Users\<user> is locked",
+            ),
+            (
+                r"C:\Users\averyveryverylongusername25 x",
+                r"C:\Users\<user> x",
+            ),
+            // macOS and Linux: account names have no spaces, so the first word; a folder closed by a separator or quote is whole.
+            ("see /Users/Dana Lee", "see /Users/<user> Lee"),
+            (
+                "see /home/carol for details",
+                "see /home/<user> for details",
+            ),
+            (
+                "see /home/dana lee\nnext line",
+                "see /home/<user> lee\nnext line",
+            ),
+            (
+                "/Users/Alex Doe/Documents/plan.docx",
+                "/Users/<user>/Documents/plan.docx",
+            ),
+        ] {
+            let (s, c) = r.apply(text);
+            assert_eq!(s, want, "{text}");
+            assert_eq!(c.profile_paths, 1, "{text}");
+        }
     }
 }
