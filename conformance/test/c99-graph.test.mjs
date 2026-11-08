@@ -27,7 +27,19 @@ function tree(crates) {
   walk(Object.keys(crates)[0], 0);
   return out.join('\n');
 }
-const probe = (crates) => ({ meta: metadata(crates), runs: MACOS_TARGETS.map((target) => ({ target, tree: tree(crates) })) });
+// The in-check control (ER-33) needs security-framework in some probed graph and its real call in the source: a fixture that
+// has none gets the reviewed TLS chain (app -> rustls-platform-verifier 0.7 -> security-framework 3.x) and `ctrl` serves the call.
+const CONTROL = 'unsafe { SecKeychainSetUserInteractionAllowed(0) }';
+const ctrl = (fn = () => [{ file: 'src/lib.rs', text: 'fn ok() {}' }]) => (m) => (m.includes('/security-framework/') ? [{ file: 'src/lib.rs', text: CONTROL }] : m.includes('/rustls-platform-verifier/') ? [{ file: 'src/lib.rs', text: '' }] : fn(m));
+function withControl(crates) {
+  if (crates['security-framework']) return crates;
+  const first = Object.keys(crates)[0];
+  return { ...crates, [first]: { ...crates[first], deps: [...(crates[first].deps ?? []), 'rustls-platform-verifier'] }, 'rustls-platform-verifier': { version: '0.7.1', deps: ['security-framework'] }, 'security-framework': { version: '3.7.0' } };
+}
+const probe = (input) => {
+  const crates = withControl(input);
+  return { meta: metadata(crates), runs: MACOS_TARGETS.map((target) => ({ target, tree: tree(crates) })) };
+};
 const found = (crates, scanOptions = { readSources: () => [{ file: 'src/lib.rs', text: 'fn ok() {}' }], listBinaries: () => [] }) => {
   const g = readGraph(metadata(crates), tree(crates));
   return { graph: graphFindings(g), scan: sourceScan(g, scanOptions) };
@@ -119,7 +131,7 @@ const make = (t, files) => {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   return root;
 };
-const probeOf = (crates, scan) => ({ options: { probe: () => probe(crates), readSources: scan?.readSources ?? (() => [{ file: 'src/lib.rs', text: 'fn ok() {}' }]), listBinaries: () => [] } });
+const probeOf = (crates, scan) => ({ options: { probe: () => probe(crates), readSources: ctrl(scan?.readSources), listBinaries: () => [] } });
 const waiver = (path) => `[[waiver]]\ncheck = "C99"\npath = "${path}"\nreason = "moves to files in its work package"\nexpires = "2099-01-01"\n`;
 
 test('C99 through the runner: every graph finding has its own path and a clean graph passes', async (t) => {
@@ -180,7 +192,7 @@ test('C99 through the runner: only the named workspaces and crates/ are probed, 
   });
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const seen = [];
-  const f = await findingsOf('C99', root, { options: { probe: (d) => (seen.push(d.slice(root.length)), probe({ app: {} })), readSources: () => [], listBinaries: () => [] } });
+  const f = await findingsOf('C99', root, { options: { probe: (d) => (seen.push(d.slice(root.length)), probe({ app: {} })), readSources: ctrl(() => []), listBinaries: () => [] } });
   assert.deepEqual(seen.sort(), ['/apps/a/src-tauri', '/crates']);
   // Neither has a clippy.toml: the demos' recorded deviation is reported as a warning, never silently dropped.
   assert.deepEqual(f.map((x) => [x.file, x.severity]), [['apps/a/src-tauri/Cargo.lock#clippy-not-measured', 'warn'], ['crates/Cargo.lock#clippy-not-measured', 'warn']]);
@@ -231,7 +243,7 @@ test('C99 --scope: a release of one app is judged on that app and crates/ only, 
   const root = makeApp({ ...app('good', ''), ...app('bad', 'keyring = "4"\n'), 'crates/Cargo.toml': '[package]\nname = "shared"\nversion = "0.1.0"\n', 'crates/Cargo.lock': '#', 'crates/clippy.toml': '', 'crates/src/lib.rs': '' });
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const seen = [];
-  const run = (scope) => findingsOf('C99', root, { options: { scope, probe: (d) => (seen.push(d.slice(root.length)), probe({ app: {} })), readSources: () => [], listBinaries: () => [] } });
+  const run = (scope) => findingsOf('C99', root, { options: { scope, probe: (d) => (seen.push(d.slice(root.length)), probe({ app: {} })), readSources: ctrl(() => []), listBinaries: () => [] } });
   assert.ok((await run(undefined)).some((f) => f.file === 'apps/bad/Cargo.toml'), 'repo-wide: the bad app is found');
   seen.length = 0;
   assert.deepEqual(await run('apps/good'), [], "scoped to the good app: the bad app's manifest does not block it");
@@ -268,11 +280,28 @@ test('C99 --scope reads the UI the app ships (ui/projects/<app>, paddock-ui) but
   assert.equal(all.filter((f) => f.check === 'W003').length, 2, 'unscoped: both are reported');
 });
 
+test('C99 fails closed: with no security-framework in any probed graph the control never ran, and that is a broken check no waiver covers', async (t) => {
+  const crates = { app: { deps: ['ok'] }, ok: {} };
+  const raw = { meta: metadata(crates), runs: MACOS_TARGETS.map((target) => ({ target, tree: tree(crates) })) };
+  const r = await findingsOf('C99', make(t, { 'paddock.waivers.toml': waiver('*') }), { options: { probe: () => raw, readSources: () => [{ file: 'src/lib.rs', text: '' }], listBinaries: () => [] } });
+  assert.ok(r.length > 0 && r.every((f) => f.severity === 'error'));
+  assert.match(r.map((f) => f.message).join('\n'), /check broken: no probed macOS graph contains security-framework/);
+});
+
 // The whole path with a real cargo and no network: path dependencies.
 const hasCargo = spawnSync('cargo', ['--version']).status === 0;
 const skipCargo = hasCargo ? false : 'cargo is not installed here: run the conformance tests where cargo is (CI image)';
 const env = { ...process.env, RUSTC_WRAPPER: '' };
 const pkg = (name, deps = '', extra = '') => `[package]\nname = "${name}"\nversion = "0.1.0"\nedition = "2021"\n${extra}\n[dependencies]\n${deps}`;
+// The reviewed TLS chain as path stubs, so the in-check control finds a real call: rustls-platform-verifier 0.7.1 -> security-framework 3.7.0.
+const stub = (name, version, deps = '') => `[package]\nname = "${name}"\nversion = "${version}"\nedition = "2021"\n\n[dependencies]\n${deps}`;
+const tlsStubs = {
+  'harness/rpv/Cargo.toml': stub('rustls-platform-verifier', '0.7.1', 'security-framework = { path = "../sf" }\n'),
+  'harness/rpv/src/lib.rs': '',
+  'harness/sf/Cargo.toml': stub('security-framework', '3.7.0'),
+  'harness/sf/src/lib.rs': 'extern "C" { pub fn SecKeychainSetUserInteractionAllowed(a: u8) -> i32; }\n',
+};
+const tlsDep = 'rustls-platform-verifier = { path = "harness/rpv" }\n';
 const lockfile = (dir) => {
   const r = spawnSync('cargo', ['generate-lockfile', '--offline'], { cwd: dir, encoding: 'utf8', env });
   assert.equal(r.status, 0, r.stderr);
@@ -282,7 +311,8 @@ test('C99 with a real cargo: a planted keyring crate and a planted SecItemAdd ca
   const root = makeApp({
     'paddock.ci.json': CI,
     'clippy.toml': '',
-    'Cargo.toml': pkg('demo-app', 'planted = { path = "vendor/planted" }\nkeyring = { path = "vendor/keyring" }\n'),
+    ...tlsStubs,
+    'Cargo.toml': pkg('demo-app', `${tlsDep}planted = { path = "vendor/planted" }\nkeyring = { path = "vendor/keyring" }\n`),
     'src/lib.rs': 'pub fn f() {}\n',
     'vendor/planted/Cargo.toml': pkg('planted'),
     'vendor/planted/src/lib.rs': 'extern "C" { pub fn SecItemAdd(a: usize, b: usize) -> i32; }\n',
@@ -296,6 +326,7 @@ test('C99 with a real cargo: a planted keyring crate and a planted SecItemAdd ca
   assert.match(msg, /keyring@0\.1\.0 is in the macOS build \(pulled in by demo-app\)/);
   assert.match(msg, /dependency planted@0\.1\.0 \(src\/lib\.rs\) uses SecItemAdd/);
   assert.ok(f.some((x) => x.file === 'Cargo.lock#keyring'));
+  assert.ok(!msg.includes('check broken'), 'the TLS stubs give the control its real call');
 });
 
 // The paddock-secrets pattern: a shared crate with an optional `keyring` feature that the app enables off macOS only.
@@ -303,7 +334,8 @@ test('C99 with a real cargo: a keyring feature enabled off macOS is not in the m
   const root = makeApp({
     'paddock.ci.json': CI,
     'clippy.toml': '',
-    'Cargo.toml': `${pkg('demo-app', 'secrets = { path = "vendor/secrets", package = "paddock-secrets" }\n')}\n[target.'cfg(not(target_os = "macos"))'.dependencies]\nsecrets = { path = "vendor/secrets", package = "paddock-secrets", features = ["keyring"] }\n`,
+    ...tlsStubs,
+    'Cargo.toml': `${pkg('demo-app', `${tlsDep}secrets = { path = "vendor/secrets", package = "paddock-secrets" }\n`)}\n[target.'cfg(not(target_os = "macos"))'.dependencies]\nsecrets = { path = "vendor/secrets", package = "paddock-secrets", features = ["keyring"] }\n`,
     'src/lib.rs': 'pub fn f() {}\n',
     'vendor/secrets/Cargo.toml': `${pkg('paddock-secrets', 'keyring = { path = "../keyring", optional = true }\n')}\n[features]\nkeyring = ["dep:keyring"]\n`,
     'vendor/secrets/src/lib.rs': '',

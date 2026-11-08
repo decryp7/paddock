@@ -30,8 +30,9 @@
 //    Recorded deviation (ADR 0057 §3.5): the two demos (apps/shell-demo, apps/workbench-demo) have no clippy.toml and keep
 //    none, so Clippy on macOS is NOT MEASURED for them; this check says so (a warning at `Cargo.lock#clippy-not-measured`)
 //    for every probed workspace without one. Their manifests, graphs and sources are still covered by layers 1 to 4.
-//    A binary that ships in a dependency and is not reviewed (REVIEWED_BINARIES) is an error, and the scan of the real
-//    security-framework source is run on every probe as a positive control.
+//    A binary that ships in a dependency and is not reviewed (REVIEWED_BINARIES) is an error. The scan of the real
+//    security-framework source is a positive control on every probe whose graph has it, and the run fails closed: if no
+//    probed graph has security-framework the control never ran, which is an unwaivable broken check.
 import { join, posix } from 'node:path';
 import { error, unwaivable, warn } from '../finding.mjs';
 import { tomlTables } from '../sync/baseline.mjs';
@@ -250,6 +251,7 @@ function graphLayers(ctx, files) {
   const broken = (lock, dir, why) => unwaivable(error('C99', 72, lock, 1, `check broken: the macOS dependency graph of ${dir} could not be read (${why}), so a Keychain use in a dependency cannot be seen`, 'Fix the cause (network to the registry, a Cargo.lock that is out of date, cargo on PATH) and run the check again.'));
   const notMeasured = (what, fix) => unwaivable(error('C99', 72, '.', 1, `not measured: ${what}, so the macOS dependency graph was not probed`, fix));
   if (!spaces.length) return [notMeasured('no paddock.ci.json names a Cargo workspace', 'Name the workspace in the app\'s paddock.ci.json (`cargo`).')];
+  let control = false;
   for (const { dir, allFeatures } of spaces) {
     const lock = lockOf(dir);
     if (!files.includes(lock)) {
@@ -292,14 +294,18 @@ function graphLayers(ctx, files) {
     // (it binds SecKeychainSetUserInteractionAllowed), or it cannot be trusted to see one elsewhere.
     const sf = [...merged.values()].find((p) => p.name === 'security-framework');
     if (sf) {
-      const control = sourceScan({ crates: [sf] }, { ...ctx.options, scanBindings: true });
-      if (!control.findings.some((f) => f.key.endsWith(':SecKeychainSetUserInteractionAllowed'))) {
+      const probeResult = sourceScan({ crates: [sf] }, { ...ctx.options, scanBindings: true });
+      if (!probeResult.findings.some((f) => f.key.endsWith(':SecKeychainSetUserInteractionAllowed'))) {
         out.push(broken(lock, dir, `the source scan did not find SecKeychainSetUserInteractionAllowed in ${sf.name}@${sf.version}, so it cannot be trusted to see a Keychain call`));
-      }
+      } else control = true;
     }
     if (!hasClippyConfig(files, dir)) {
       out.push(warn('C99', 72, `${lock}#clippy-not-measured`, 1, `${dir}: Clippy on macOS: not measured (no clippy.toml at ${dir} or above it), so the Keychain API bans (layer 5) do not apply to its own code`, 'Add a clippy.toml with the Keychain entries of lint/clippy.toml, or leave this recorded deviation (the demos, ADR 0057 §3.5).'));
     }
+  }
+  // Fail closed: if no probed graph holds security-framework, the scan was never shown a real Keychain call (ER-33).
+  if (!control && !out.some((f) => f.unwaivable)) {
+    out.push(unwaivable(error('C99', 72, '.', 1, 'check broken: no probed macOS graph contains security-framework, so the source scan was never shown to see a real Keychain call (SecKeychainSetUserInteractionAllowed)', 'Probe a workspace whose graph has security-framework (every app with TLS does), or fix the probe so it reads the dependency graph.')));
   }
   return out;
 }
