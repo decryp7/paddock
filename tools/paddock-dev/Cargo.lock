@@ -1153,6 +1153,7 @@ version = "0.2.0"
 dependencies = [
  "croner",
  "jiff",
+ "log",
  "paddock-env",
  "paddock-limits",
  "paddock-workspace-hack",
