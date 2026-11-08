@@ -1,9 +1,10 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject } from '@angular/core';
+import { ReadingSource } from '../../core/reading-source';
 import { PdCell, PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import type { ImpactRating, StartupEntry } from '../../core/api.types';
 import { FullTextTip } from '../../shared/full-text-tip';
 import { AsyncState } from '../../shared/async-state';
-import { formatBytes, formatSeconds } from '../../shared/format';
+import { formatSeconds, formatStorage } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { LOCATION_LABEL, startupStateText } from '../../shared/labels';
 import { ViewPrefs } from '../../core/view-prefs';
@@ -20,18 +21,22 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
 /** Health: the score and its reasons, and what starts at sign-in. Dyno only shows these; it changes nothing. */
 @Component({
   selector: 'dy-health-page',
-  imports: [FullTextTip, MatTooltip, MatCheckbox, AsyncState, HealthHero, Icon, PdTable, PdCell],
+  imports: [FullTextTip, MatTooltip, MatCheckbox, AsyncState, HealthHero, Icon, PdTable, PdCell, ReadingSource],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
       <header class="page-head">
         <div class="titles">
           <h1>Health</h1>
-          <p>A score with reasons, and what slows your sign-in. Dyno only looks.</p>
+          <p>A score with reasons, and what slows your sign-in. This page only looks.</p>
         </div>
       </header>
 
-      <dy-health-hero />
+      <section class="card" aria-label="Health score">
+        <dy-async [loaded]="store.report() !== null" [error]="store.reportError()" [empty]="false" what="health score" [rows]="3" (retry)="store.loadReport()">
+          <div class="hero-body"><dy-health-hero /></div>
+        </dy-async>
+      </section>
 
       <section class="card" aria-label="Start-up items">
         <div class="card-head">
@@ -44,13 +49,14 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
         </div>
         <dy-async [loaded]="store.startupLoaded()" [error]="store.startupError()" [empty]="store.startup().length === 0" [emptyTitle]="emptyTitle()" [emptyText]="emptyText()" what="startup items" [rows]="4" (retry)="reload()">
           <div class="tablewrap">
-            <pd-table [toolbar]="false" label="Programs that start at sign-in" [rows]="sorted()" [columns]="columns" [rowKey]="rowKey" [filterable]="false" [rowHeight]="36" [maxHeight]="480">
+            <pd-table [toolbar]="false" label="Programs that start at sign-in" [rows]="sorted()" [columns]="columns" [rowKey]="rowKey" [filterable]="false" [rowHeight]="36" height="window">
               <ng-template pdCell="name" let-e><span class="two"><strong class="nm" [dyFullText]="e.name">{{ e.name }}</strong><small class="faint">{{ e.publisher ?? 'Unknown publisher' }}</small></span></ng-template>
               <ng-template pdCell="impact" let-e><span class="impact" [matTooltip]="impactFull(e)"><span class="dot" [attr.data-tone]="tone(e)" aria-hidden="true"></span><span class="lbl">{{ impact(e) }}</span>@if (e.impact.rating !== 'notMeasured') { <small class="faint num ell">{{ secs(e.impact.cpuSecs) }} CPU · {{ bytes(e.impact.diskBytes) }}</small> }</span></ng-template>
             </pd-table>
           </div>
+          <dy-reading-source [via]="store.startupBtmVia()" [canRetry]="true" (retry)="reload()" />
           @for (u of store.startupUnavailable(); track u) {
-            <p class="shown" role="status">Not shown: {{ u }}</p>
+            @if (u !== btmReason()) { <p class="shown" role="status">Not shown: {{ u }}</p> }
           }
           <p class="shown">Showing {{ store.startup().length }} of {{ store.startupCounts().total }} entries@if (hidden() > 0) {, {{ hidden() }} hidden by the filter}.</p>
         </dy-async>
@@ -60,6 +66,7 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
   styles: `
     :host { display: block; }
     .page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); align-content: start; }
+    .hero-body { padding: var(--sp-5); }
     .tablewrap { margin: 0 var(--sp-4) var(--sp-3); }
     .two { display: grid; min-width: 0; line-height: 1.25; }
     .two > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -89,7 +96,13 @@ export class HealthPage implements OnInit {
   protected readonly emptyText = computed(() =>
     this.hidden() > 0 ? 'Turn a filter off above to see the entries it hides.' : 'Nothing is set to start when you sign in.',
   );
-  protected readonly bytes = formatBytes;
+  /** The reason the reading source already gives for the login items, so the list's own note does not say it twice. */
+  protected readonly btmReason = computed((): string | null => {
+    const v = this.store.startupBtmVia();
+    if (typeof v !== 'object') return null;
+    return 'needsHelper' in v ? v.needsHelper.reason : v.unavailable.reason;
+  });
+  protected readonly bytes = formatStorage;
   protected readonly secs = formatSeconds;
   protected readonly state = (e: StartupEntry) => startupStateText(e.state);
   protected readonly impact = (e: StartupEntry) => IMPACT_LABEL[e.impact.rating];

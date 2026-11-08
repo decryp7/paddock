@@ -4,7 +4,7 @@
 
 use super::{hours_back, timeout_for, ToolRunner};
 use dyno_core::grouping::file_name;
-use dyno_core::issues::{Issue, IssueKind, IssueSource, IssueSourceId, MAX_PER_READ};
+use dyno_core::issues::{kind_for_signal, Issue, IssueKind, IssueSource, IssueSourceId, MAX_PER_READ};
 use dyno_core::ports::PlatformError;
 use dyno_core::time::Timestamp;
 
@@ -181,12 +181,18 @@ pub fn coredump_issues(text: &str) -> Vec<Issue> {
             let app = if exe.is_empty() { comm } else { file_name(exe) };
             let sig = v.get("sig").and_then(|s| s.as_i64()).map(signal_name).unwrap_or_default();
             let pid = v.get("pid").and_then(|p| p.as_i64()).unwrap_or(0);
-            let title = format!("{} crashed", if app.is_empty() { "A program" } else { app });
+            let kind = kind_for_signal(v.get("sig").and_then(|s| s.as_i64()).map(|n| n.to_string()).as_deref());
+            let who = if app.is_empty() { "A program" } else { app };
+            let title = if kind == IssueKind::StoppedFromOutside {
+                format!("{who} was stopped from outside")
+            } else {
+                format!("{who} crashed")
+            };
             let evidence = format!("{sig}{}{}", if exe.is_empty() { "" } else { " in " }, exe);
             Some(Issue::new(
                 IssueSourceId::Coredumps,
                 Timestamp(micros / 1000),
-                IssueKind::AppCrash,
+                kind,
                 app,
                 &title,
                 evidence.trim(),
@@ -320,6 +326,11 @@ mod tests {
         assert_eq!(list[1].evidence, "SIGABRT");
         assert!(coredump_issues("not json").is_empty());
         assert!(coredump_issues("{}").is_empty());
+        // A core dump from a signal others send is not a crash; the numbers coredumpctl reports are the signal's.
+        let ended =
+            coredump_issues(r#"[{"time":5000000,"pid":9,"sig":15,"exe":"/usr/bin/foo"},{"time":6000000,"pid":10,"sig":9,"comm":"bar"}]"#);
+        assert!(ended.iter().all(|i| i.kind == IssueKind::StoppedFromOutside), "{ended:?}");
+        assert_eq!(ended[0].title, "foo was stopped from outside");
         assert_eq!(signal_name(7), "SIGBUS");
         assert_eq!(signal_name(99), "signal 99");
         assert_eq!(signal_name(4), "SIGILL");
@@ -330,8 +341,8 @@ mod tests {
         let s = std::sync::Arc::new(Scripted::new(answers));
         struct Shared(std::sync::Arc<Scripted>);
         impl ToolRunner for Shared {
-            fn run(&self, p: &str, a: &[String], t: std::time::Duration) -> Result<String, PlatformError> {
-                self.0.run(p, a, t)
+            fn run_tool(&self, tool: &crate::runner::Tool, t: std::time::Duration) -> Result<crate::runner::ToolOutput, PlatformError> {
+                self.0.run_tool(tool, t)
             }
         }
         (Box::new(Shared(s.clone())), s)

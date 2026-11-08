@@ -2,7 +2,7 @@
 
 use paddock_widgets::{
     Edit, Layout, PlacementState, Progress, Read, SurfaceNotice, SurfaceValues, Tone, WidgetAction,
-    WidgetState, apply, assign_ids, read,
+    WidgetState, apply, assign_spans, read,
 };
 use serde_json::json;
 
@@ -31,6 +31,7 @@ fn a_layout_survives_serialise_and_read() {
         layout: back,
         notes,
         unread,
+        ..
     } = read::<Gadgets>(&value);
     assert!(unread.is_none());
     assert!(notes.is_empty());
@@ -229,7 +230,7 @@ fn surface_values_carry_a_notice_and_the_placements() {
 
 #[test]
 fn ids_from_the_kinds_are_unique() {
-    let placed = assign_ids([
+    let placed = assign_spans([
         (2, disk("a")),
         (2, disk("b")),
         (1, Gadget::Clock),

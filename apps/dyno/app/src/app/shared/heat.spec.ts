@@ -1,4 +1,4 @@
-import { bar, heat } from './heat';
+import { bar, coreHeat, heat } from './heat';
 
 describe('heat', () => {
   it('gives nothing for zero, negative, non-finite or bad scales', () => {
@@ -36,5 +36,18 @@ describe('bar', () => {
   it('is grey unless the column is the sort column', () => {
     expect(bar(5, 10)).toContain('var(--text-3)');
     expect(bar(5, 10, true)).toContain('var(--pd-accent)');
+  });
+});
+
+describe('coreHeat', () => {
+  it('starts every cell from a neutral that is 3:1 on a card (WCAG 1.4.11), so an idle core is still a visible cell', () => {
+    expect(coreHeat(0)).toBe('color-mix(in srgb, var(--pd-accent-control) 25%, var(--pd-text-subtle))');
+    expect(coreHeat(NaN)).toBe(coreHeat(0));
+    expect(coreHeat(-20)).toBe(coreHeat(0));
+  });
+  it('moves toward the 3:1 accent control colour as the load grows and stops at full', () => {
+    expect(coreHeat(100)).toBe('color-mix(in srgb, var(--pd-accent-control) 100%, var(--pd-text-subtle))');
+    expect(coreHeat(400)).toBe(coreHeat(100));
+    expect(coreHeat(50)).toBe('color-mix(in srgb, var(--pd-accent-control) 63%, var(--pd-text-subtle))');
   });
 });

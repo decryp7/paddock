@@ -16,7 +16,7 @@
 //! newer than the CLI knows. The optional local web API (`Settings.webApi`) is a separate, opt-in adapter that maps
 //! HTTP onto these same requests; it is not a second protocol.
 
-use crate::agent::{lock, JobSlot, ScanSlot, Shared, Sub, VolumesSlot};
+use crate::agent::{lock, JobSlot, Pending, ScanSlot, Shared, Sub, VolumesSlot};
 use crate::discovery::Discovery;
 use crate::handlers::{handle, Conn};
 use dyno_core::protocol::{AgentError, ErrorCode, Message, PROTOCOL_VERSION};
@@ -39,6 +39,7 @@ pub fn bind(shared: &Shared) -> std::io::Result<(Host, Discovery)> {
         started: crate::agent::now().millis(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         protocol: PROTOCOL_VERSION,
+        build: crate::build_id::own_build_id(),
     };
     d.write(&shared.dirs.discovery())?;
     Ok((host, d))
@@ -97,6 +98,7 @@ fn connect(shared: &Arc<Shared>, conn: Connection) -> Result<(u64, BodyPeer<Mess
     let peer = BodyPeer::start(conn, BodyOptions::new("the app").serve(handler).calls(4, 64))?;
     let scans = Arc::new(ScanSlot::default());
     let volumes = Arc::new(VolumesSlot::default());
+    let pending = Arc::new(Pending::default());
     let jobs = Arc::new(JobSlot::default());
     lock(&shared.subs).push(Sub {
         id,
@@ -104,6 +106,7 @@ fn connect(shared: &Arc<Shared>, conn: Connection) -> Result<(u64, BodyPeer<Mess
         tx,
         scans: scans.clone(),
         volumes: volumes.clone(),
+        pending: pending.clone(),
         jobs: jobs.clone(),
     });
     // One thread per connection drains its queue; it ends when the app goes away or the Sub is dropped.
@@ -117,6 +120,7 @@ fn connect(shared: &Arc<Shared>, conn: Connection) -> Result<(u64, BodyPeer<Mess
                 &Slots {
                     scans: &scans,
                     volumes: &volumes,
+                    pending: &pending,
                     jobs: &jobs,
                 },
                 |m| p.push(m).is_ok(),
@@ -131,15 +135,33 @@ fn connect(shared: &Arc<Shared>, conn: Connection) -> Result<(u64, BodyPeer<Mess
 pub(crate) struct Slots<'a> {
     pub scans: &'a ScanSlot,
     pub volumes: &'a VolumesSlot,
+    pub pending: &'a Pending,
     pub jobs: &'a JobSlot,
 }
 
 /// Sends a connection's frames until the app goes away (`send` returns false) or the queue is closed. Disk scan statuses, the
-/// volume list and job statuses do not travel through the queue: their messages there only wake this loop, and after every
+/// volume list, job statuses and the wake list do not travel through the queue: their messages there only wake this loop, and after every
 /// message the newest of each is taken from its slot and sent.
 pub(crate) fn pump(rx: &Receiver<Message>, slots: &Slots<'_>, mut send: impl FnMut(Message) -> bool) {
     while let Ok(m) = rx.recv() {
-        if !matches!(m, Message::DiskScan(_) | Message::DiskVolumes(_) | Message::Job(_)) && !send(m) {
+        if !matches!(
+            m,
+            Message::DiskScan(_)
+                | Message::DiskVolumes(_)
+                | Message::Job(_)
+                | Message::WolChanged(_)
+                | Message::PowerChanged(_)
+                | Message::WakesChanged(_)
+                | Message::WidgetLayoutChanged(_)
+                | Message::Alarm(_)
+                | Message::Alert(_)
+                | Message::Activity(_)
+                | Message::EventsLost(_)
+        ) && !send(m)
+        {
+            return;
+        }
+        if !slots.pending.drain(&mut send) {
             return;
         }
         if let Some(v) = slots.volumes.take() {
@@ -168,6 +190,7 @@ pub fn unreadable() -> AgentError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::{EVENT_QUEUE, MAX_PENDING_ALARMS};
     use dyno_core::disk::scan::*;
     use std::sync::mpsc::sync_channel;
 
@@ -224,6 +247,7 @@ mod tests {
             &Slots {
                 scans: &slot,
                 volumes: &VolumesSlot::default(),
+                pending: &Pending::default(),
                 jobs: &JobSlot::default(),
             },
             |m| {
@@ -243,6 +267,259 @@ mod tests {
             .collect();
         assert_eq!(scans, vec![(7, 4), (8, 1)], "the newest event of each scan, once");
         assert_eq!(got.len(), QUEUE + 2, "the other frames are all there too");
+    }
+
+    fn full_queue() -> (std::sync::mpsc::SyncSender<Message>, Receiver<Message>) {
+        let (tx, rx) = sync_channel::<Message>(QUEUE);
+        for _ in 0..QUEUE {
+            tx.send(Message::Request(Box::new(dyno_core::protocol::Request::Health))).unwrap();
+        }
+        (tx, rx)
+    }
+
+    /// Pumps everything waiting in `rx` and returns what was sent, after the app's queue was full while `pending` filled up.
+    fn pumped(rx: &Receiver<Message>, pending: &Pending) -> Vec<Message> {
+        let mut got = Vec::new();
+        pump(
+            rx,
+            &Slots {
+                scans: &ScanSlot::default(),
+                volumes: &VolumesSlot::default(),
+                pending,
+                jobs: &JobSlot::default(),
+            },
+            |m| {
+                got.push(m);
+                true
+            },
+        );
+        got
+    }
+
+    /// A slow app: its queue is full of other frames while a whole-state event changes twice. The newest state must still arrive, once,
+    /// and the other frames after it (a lost push left a window showing an old state; Linux CI lost the wake list about once in 20 runs).
+    #[test]
+    fn a_state_event_survives_a_full_queue_and_only_the_newest_arrives() {
+        let list = |enabled| dyno_core::wol::WolView {
+            enabled,
+            devices: vec![],
+            can_send: dyno_core::power::Capability::default(),
+        };
+        let wakes = |n: usize| dyno_core::power::schedule::WakesView {
+            rows: Vec::with_capacity(n),
+            route: dyno_core::power::schedule::WakeRouteState::Agent {
+                note: String::new(),
+                cant_tell: vec![],
+            },
+        };
+        let (tx, rx) = full_queue();
+        let pending = Pending::default();
+        for round in 0..2 {
+            pending.wol.put(list(round == 1));
+            pending.power.put(dyno_core::power::PowerView::default());
+            pending.wakes.put(wakes(round));
+            pending.layout.put(if round == 0 {
+                dyno_core::widgets::DynoSurface::MenuBar
+            } else {
+                dyno_core::widgets::DynoSurface::Popover
+            });
+            assert!(
+                tx.try_send(Message::WolChanged(Box::new(list(round == 1)))).is_err(),
+                "the queue is full"
+            );
+        }
+        drop(tx);
+        let got = pumped(&rx, &pending);
+        let wol: Vec<bool> = got
+            .iter()
+            .filter_map(|m| if let Message::WolChanged(v) = m { Some(v.enabled) } else { None })
+            .collect();
+        assert_eq!(wol, [true], "the newest wake list, once");
+        assert_eq!(
+            got.iter().filter(|m| matches!(m, Message::PowerChanged(_))).count(),
+            1,
+            "the power view"
+        );
+        assert_eq!(
+            got.iter().filter(|m| matches!(m, Message::WakesChanged(_))).count(),
+            1,
+            "the wake schedules"
+        );
+        let layouts: Vec<_> = got
+            .iter()
+            .filter(|m| matches!(m, Message::WidgetLayoutChanged(dyno_core::widgets::DynoSurface::Popover)))
+            .collect();
+        assert_eq!(layouts.len(), 1, "the newest widget layout");
+        assert_eq!(got.iter().filter(|m| matches!(m, Message::WidgetLayoutChanged(_))).count(), 1);
+        assert_eq!(got.len(), QUEUE + 4, "the other frames are all there too");
+    }
+
+    fn alarm(id: u64, kind: dyno_core::alarms::ChangeKind, notify: bool) -> dyno_core::alarms::AlarmChange {
+        dyno_core::alarms::AlarmChange {
+            kind,
+            alarm: dyno_core::alarms::Alarm {
+                id,
+                rule: String::new(),
+                key: format!("k{id}"),
+                severity: dyno_core::health::Severity::Warning,
+                state: dyno_core::alarms::AlarmState::Active,
+                title: String::new(),
+                detail: String::new(),
+                first_seen: dyno_core::time::Timestamp(0),
+                last_seen: dyno_core::time::Timestamp(0),
+                repeat_count: 1,
+                current_value: None,
+                metric: None,
+                notes: vec![],
+                acknowledged_at: None,
+                cleared_at: None,
+                shelved: None,
+                muted: false,
+                chattering: false,
+                expires_at: None,
+            },
+            notify,
+            at: dyno_core::time::Timestamp(id as i64),
+        }
+    }
+
+    /// Raised and cleared before the app read either: the notification still goes out, and the tray ends with the final state.
+    #[test]
+    fn an_alarm_raised_and_cleared_behind_a_full_queue_still_notifies_and_ends_final() {
+        use dyno_core::alarms::ChangeKind::{Raised, Returned};
+        let (tx, rx) = full_queue();
+        let pending = Pending::default();
+        pending.alarms.put(alarm(7, Raised, true));
+        assert!(tx.try_send(Message::Alarm(alarm(7, Raised, true))).is_err());
+        pending.alarms.put(alarm(7, Returned, false));
+        pending.alarms.put(alarm(9, Raised, true));
+        drop(tx);
+        let got: Vec<(u64, dyno_core::alarms::ChangeKind, bool)> = pumped(&rx, &pending)
+            .into_iter()
+            .filter_map(|m| {
+                if let Message::Alarm(c) = m {
+                    Some((c.alarm.id, c.kind, c.notify))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(
+            got,
+            [(7, Raised, true), (7, Returned, false), (9, Raised, true)],
+            "the notifying change first, the final state last"
+        );
+    }
+
+    /// Changes that do not notify are merged into the latest: nothing user-visible is lost, and no stale "first" is delivered.
+    #[test]
+    fn quiet_alarm_changes_are_merged_and_a_later_notifying_one_is_kept() {
+        use dyno_core::alarms::ChangeKind::{Acknowledged, Raised, Returned};
+        let pending = Pending::default();
+        pending.alarms.put(alarm(5, Acknowledged, false));
+        pending.alarms.put(alarm(5, dyno_core::alarms::ChangeKind::Muted, false));
+        pending.alarms.put(alarm(5, Returned, false));
+        let (changes, lost) = pending.alarms.take();
+        assert_eq!(
+            (changes.iter().map(|c| c.kind).collect::<Vec<_>>(), lost),
+            (vec![Returned], 0),
+            "only the final state"
+        );
+        pending.alarms.put(alarm(6, Acknowledged, false));
+        pending.alarms.put(alarm(6, Raised, true));
+        pending.alarms.put(alarm(6, Returned, false));
+        let kinds: Vec<_> = pending.alarms.take().0.iter().map(|c| (c.kind, c.notify)).collect();
+        assert_eq!(
+            kinds,
+            [(Raised, true), (Returned, false)],
+            "the notifying change is kept even when it was not the first"
+        );
+    }
+
+    #[test]
+    fn alerts_given_up_by_the_bound_are_counted_apart_from_activity() {
+        let pending = Pending::default();
+        let alert = |n: usize| dyno_core::alerts::Alert {
+            id: format!("x{n}"),
+            at: dyno_core::time::Timestamp(0),
+            kind: dyno_core::alerts::AlertKind::LowDisk,
+            severity: dyno_core::health::Severity::Warning,
+            title: String::new(),
+            detail: String::new(),
+        };
+        for n in 0..EVENT_QUEUE + 2 {
+            pending.events.push(Message::Alert(alert(n)));
+        }
+        let (items, activity, alerts) = pending.events.take();
+        assert_eq!((items.len(), activity, alerts), (EVENT_QUEUE, 0, 2));
+    }
+
+    #[test]
+    fn the_pending_alarms_are_bounded_and_say_how_many_were_lost() {
+        use dyno_core::alarms::ChangeKind::Raised;
+        let pending = Pending::default();
+        for id in 0..(MAX_PENDING_ALARMS as u64 + 5) {
+            pending.alarms.put(alarm(id, Raised, true));
+        }
+        let (changes, lost) = pending.alarms.take();
+        assert_eq!((changes.len(), lost), (MAX_PENDING_ALARMS, 5));
+        assert_eq!(changes[0].alarm.id, 5, "the oldest were the ones given up");
+    }
+
+    fn activity(n: usize) -> dyno_core::activity::ActivityEntry {
+        dyno_core::activity::ActivityEntry {
+            id: format!("a{n}"),
+            at: dyno_core::time::Timestamp(n as i64),
+            kind: dyno_core::activity::ActivityKind::System,
+            title: format!("entry {n}"),
+            detail: String::new(),
+        }
+    }
+
+    /// Events are appended, never merged: a slow app gets them in order up to a bound, then the oldest go and the count is told.
+    #[test]
+    fn activity_behind_a_full_queue_arrives_in_order_and_an_overflow_is_counted() {
+        let (tx, rx) = full_queue();
+        let pending = Pending::default();
+        let total = EVENT_QUEUE + 3;
+        for n in 0..total {
+            pending.events.push(Message::Activity(activity(n)));
+            assert!(tx.try_send(Message::Activity(activity(n))).is_err());
+        }
+        pending.events.push(Message::Alert(dyno_core::alerts::Alert {
+            id: "x".into(),
+            at: dyno_core::time::Timestamp(0),
+            kind: dyno_core::alerts::AlertKind::LowDisk,
+            severity: dyno_core::health::Severity::Warning,
+            title: String::new(),
+            detail: String::new(),
+        }));
+        drop(tx);
+        let got = pumped(&rx, &pending);
+        let ids: Vec<String> = got
+            .iter()
+            .filter_map(|m| if let Message::Activity(a) = m { Some(a.id.clone()) } else { None })
+            .collect();
+        assert_eq!(ids.len(), EVENT_QUEUE - 1, "the bound, minus the slot the alert took");
+        assert_eq!(ids.first().map(String::as_str), Some("a4"), "the oldest were given up");
+        assert_eq!(ids.last().map(String::as_str), Some(format!("a{}", total - 1).as_str()));
+        let lost: Vec<_> = got
+            .iter()
+            .filter_map(|m| if let Message::EventsLost(l) = m { Some(*l) } else { None })
+            .collect();
+        assert_eq!(
+            lost,
+            [dyno_core::protocol::LostEvents {
+                activity: 4,
+                alerts: 0,
+                alarms: 0
+            }],
+            "four rows were lost, once"
+        );
+        assert!(
+            got.iter().any(|m| matches!(m, Message::Alert(_))),
+            "alerts travel in the same queue"
+        );
     }
 
     #[test]
@@ -268,6 +545,7 @@ mod tests {
             &Slots {
                 scans: &slot,
                 volumes: &VolumesSlot::default(),
+                pending: &Pending::default(),
                 jobs: &JobSlot::default(),
             },
             |_| false,
@@ -281,6 +559,7 @@ mod tests {
             &Slots {
                 scans: &slot,
                 volumes: &VolumesSlot::default(),
+                pending: &Pending::default(),
                 jobs: &JobSlot::default(),
             },
             |_| {
@@ -305,6 +584,8 @@ mod tests {
             read_only: false,
             reachable: true,
             whole_volume: true,
+            measured_at: None,
+            freshness: Default::default(),
         };
         let (tx, rx) = sync_channel::<Message>(QUEUE);
         let (scans, volumes) = (ScanSlot::default(), VolumesSlot::default());
@@ -325,6 +606,7 @@ mod tests {
             &Slots {
                 scans: &scans,
                 volumes: &volumes,
+                pending: &Pending::default(),
                 jobs: &JobSlot::default(),
             },
             |m| {
@@ -382,6 +664,7 @@ mod tests {
             &Slots {
                 scans: &ScanSlot::default(),
                 volumes: &VolumesSlot::default(),
+                pending: &Pending::default(),
                 jobs: &jobs,
             },
             |m| {

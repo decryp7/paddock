@@ -17,6 +17,14 @@
 //! The loop is pure over the [`Sessions`] port and a clock, so every path is tested on every OS with a fake; the Win32
 //! calls (`WTSEnumerateSessionsW`, `WTSQueryUserToken`, `CreateProcessAsUserW`, the SCM dispatcher) are the native glue
 //! (`native::scm`, Windows only). Pitcrew's named-pipe SDDL is the app ↔ service link and belongs to `paddock-ipc` (X13).
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use std::time::Duration;
 

@@ -71,6 +71,14 @@ describe('MemorySlots', () => {
     expect(so[0]!.getAttribute('viewBox')).toBe(so[1]!.getAttribute('viewBox'));
   });
 
+  it('says the whole maker and part when the line is cut short, so it can always be read', () => {
+    const long = { ...mod('ddr4'), maker: 'VMware Virtual RAM', part: 'VMW-8192MB' };
+    const el = slots([{ name: 'Slot 1', channel: null, module: long, tags: [], note: null }]);
+    const maker = el.querySelector('.maker')!;
+    expect(maker.textContent).toBe('VMware Virtual RAM · VMW-8192MB');
+    expect(maker.getAttribute('data-full-text')).toBe('VMware Virtual RAM · VMW-8192MB');
+  });
+
   it('falls back to a DIMM for an empty bank, a missing speed and an unknown maker', () => {
     const el = slots([{ name: 'Slot 1', channel: null, module: { ...mod('ddr4'), ratedMts: null, runningMts: null, maker: null, part: null }, tags: [], note: null }]);
     expect(el.querySelector('.channel')).toBeNull();

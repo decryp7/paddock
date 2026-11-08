@@ -1,8 +1,8 @@
 import type { EChartsCoreOption } from 'echarts/core';
 import type { Consumer, DiskTrend, History, HistoryPoint, TimelineEvent, TimelineEventKind } from '../../core/api.types';
 import { forecastText } from '../../shared/labels';
-import { byteAxis } from '../../shared/axis';
-import { formatBytes, formatClock, formatDate, formatPercent } from '../../shared/format';
+import { storageAxis } from '../../shared/axis';
+import { formatBytes, formatClock, formatDate, formatPercent, formatStorage } from '../../shared/format';
 import type { ThemeTokens } from '../../shared/tokens';
 
 /** How each kind of timeline event is drawn: a colour and a distinct shape (never colour alone). */
@@ -194,7 +194,10 @@ export function diskTrendOption(trend: DiskTrend, t: ThemeTokens): EChartsCoreOp
   const projection =
     last && typeof trend.forecast === 'object' ? [[last.at, last.free], [last.at + trend.forecast.fullInDays * day, 0]] : [];
   const color = t.chart[2]!;
-  const axis = byteAxis(Math.max(0, ...trend.points.map((p) => p.free)));
+  const nice = storageAxis(Math.max(0, ...trend.points.map((p) => p.free)));
+  // Three ticks (zero, the middle, the top): the card is short, and five labels in 90 px crowd each other.
+  const half = nice.interval * Math.ceil(nice.max / nice.interval / 2);
+  const axis = { max: half * 2, interval: half };
   // Evenly spaced date ticks (whole days, about five across the line and its forecast) instead of the month and day boundaries the
   // automatic ticks mix.
   const first = trend.points[0]?.at ?? 0;
@@ -213,7 +216,7 @@ export function diskTrendOption(trend: DiskTrend, t: ThemeTokens): EChartsCoreOp
       formatter: (raw: unknown) => {
         const list = raw as { axisValue: number; seriesName: string; value: [number, number] }[];
         const p = list[0];
-        return p ? `${formatDate(p.axisValue)}<br/>${p.seriesName}: <b>${formatBytes(p.value[1])}</b> free` : '';
+        return p ? `${formatDate(p.axisValue)}<br/>${p.seriesName}: <b>${formatStorage(p.value[1])}</b> free` : '';
       },
     },
     // A value axis in milliseconds: its ticks are exactly `tick` apart (a time axis rounds them to month and day boundaries).
@@ -223,7 +226,7 @@ export function diskTrendOption(trend: DiskTrend, t: ThemeTokens): EChartsCoreOp
       min: 0,
       max: axis.max,
       interval: axis.interval,
-      axisLabel: { ...axisText(t), formatter: (v: number) => formatBytes(v) },
+      axisLabel: { ...axisText(t), formatter: (v: number) => formatStorage(v) },
       splitLine: { lineStyle: { color: t.chartGrid } },
     },
     series: [

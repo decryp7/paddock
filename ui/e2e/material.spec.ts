@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@decryp7/paddock-e2e';
+import { expect, expectNoButtonLabelWraps, test, type Page } from '@decryp7/paddock-e2e';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -430,4 +430,9 @@ test('Material controls: tab nav bar links size to their label, so eight tabs fi
   const widths = await links.evaluateAll((els) => els.map((e) => ({ min: getComputedStyle(e).minWidth, width: e.getBoundingClientRect().width })));
   for (const w of widths) expect(w.min).toBe('0px');
   expect(Math.min(...widths.map((w) => w.width)), 'a short label is narrower than Material\'s own 160 px minimum').toBeLessThan(160);
+});
+
+test('Material: no button label wraps, even in a tight row', async ({ page }) => {
+  await open(page, 'dark');
+  await expectNoButtonLabelWraps(page, 'gallery');
 });

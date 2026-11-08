@@ -17,7 +17,7 @@ export const SHELL_COMMANDS = {
   diagnostics_preview: { kind: 'mutation', windows: ['dialog'], limit: 262144 },
   diagnostics_save: { kind: 'mutation', windows: ['dialog'], limit: 262144 },
   dialog_close: { kind: 'mutation', windows: ['dialog'], limit: 2097152 },
-  dialog_fit: { kind: 'quiet', windows: ['dialog'], limit: 262144 },
+  dialog_measure: { kind: 'quiet', windows: ['dialog'], limit: 262144 },
   dialog_open: { kind: 'mutation', windows: ['main', 'dialog'], limit: 9437184 },
   dialog_ready: { kind: 'quiet', windows: ['dialog'], limit: 262144 },
   dialog_take_input: { kind: 'query', windows: ['dialog'], limit: 262144 },

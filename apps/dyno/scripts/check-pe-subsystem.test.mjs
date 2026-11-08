@@ -39,7 +39,7 @@ test('files that are not programs fail with a reason, never throw', () => {
 });
 
 test('--dir names the release list in that folder', () => {
-  assert.deepEqual(specsFor(['--dir', 'C:/b/dist/']), ['C:/b/dist/dyno-agent.exe=2', 'C:/b/dist/dyno.exe=3', 'C:/b/dist/dyno-bench.exe=3']);
+  assert.deepEqual(specsFor(['--dir', 'C:/b/dist/']), ['C:/b/dist/dyno-agent.exe=2', 'C:/b/dist/dyno.exe=3', 'C:/b/dist/dyno-bench.exe=3', 'C:/b/dist/dyno-bench-gpu.exe=3']);
   assert.deepEqual(specsFor(['x.exe=2']), ['x.exe=2']);
 });
 
@@ -51,6 +51,7 @@ test('run as a program it exits 1 for a console agent and 0 for a GUI one', () =
     writeFileSync(bad, pe(CONSOLE));
     writeFileSync(cli, pe(CONSOLE));
     writeFileSync(join(dir, 'dyno-bench.exe'), pe(CONSOLE));
+    writeFileSync(join(dir, 'dyno-bench-gpu.exe'), pe(CONSOLE));
     const script = fileURLToPath(new URL('./check-pe-subsystem.mjs', import.meta.url));
     const run = (...args) => spawnSync(process.execPath, [script, ...args], { encoding: 'utf8' });
     const failed = run('--dir', dir);

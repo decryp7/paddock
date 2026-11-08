@@ -1,19 +1,21 @@
 [workspace]
 members = [
     "crates/dyno-core",
+    "crates/dyno-helper-service",
+    "crates/dyno-helper",
     "crates/dyno-plugin-api",
     "crates/dyno-plugin-host",
     "crates/dyno-platform",
     "crates/dyno-agent",
     "crates/dyno-cli",
     "crates/dyno-bench",
+    "crates/dyno-bench-gpu",
     "plugins/dyno-plugin-example",
     "app/src-tauri",
 ]
 resolver = "2"
-# The privileged helper is not part of Dyno 1.0: its source stays for 1.1 (ADR 0022) but is neither built nor bundled.
 # vendor/: patched copies of third-party crates (vendor/PATCHES.md), not members.
-exclude = ["crates/dyno-helper", "vendor"]
+exclude = ["vendor"]
 
 # Shared by every member: `edition.workspace = true` etc.
 [workspace.package]
@@ -21,7 +23,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 rust-version = "1.89"
 repository = "https://dev.decryptology.net/decryp7/dyno"
-version = "1.0.0"
+version = "1.1.0"
 
 # Versions of the dependencies that two or more members use, so they stay on one version.
 [workspace.dependencies]
@@ -33,6 +35,7 @@ dyno-platform = { path = "crates/dyno-platform" }
 dyno-agent = { path = "crates/dyno-agent" }
 dyno-cli = { path = "crates/dyno-cli" }
 dyno-bench = { path = "crates/dyno-bench" }
+dyno-bench-gpu = { path = "crates/dyno-bench-gpu" }
 postcard = { version = "1.1", default-features = false, features = ["use-std"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

@@ -19,7 +19,7 @@ pub const BASE_COMMANDS: [&str; 6] = [
     "dialog_take_input",
     "dialog_close",
     "dialog_ready",
-    "dialog_fit",
+    "dialog_measure",
     "notifications_post",
     "notifications_list",
 ];
@@ -88,6 +88,52 @@ impl Remembers {
     }
 }
 
+/// What a dialog window does when its content changes (ADR 0043 §1; WPF's `Window.SizeToContent`, closed to what the family needs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SizeMode {
+    /// The window keeps the size it was given (placed, remembered or dragged); only the OS minimum follows the content.
+    Manual,
+    /// The width is fixed (the kind's declared width, or dragged); the height follows the content.
+    Height {
+        /// Whether the height may get smaller than it is.
+        shrink: Shrink,
+    },
+}
+
+/// Whether a `Height` window shrinks when its content does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Shrink {
+    /// It grows and shrinks with the content (decisions, forms).
+    Always,
+    /// It only grows: a result being read does not shrink under the reader (viewers).
+    Never,
+}
+
+impl SizeMode {
+    /// The mode's name in generated TypeScript.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            SizeMode::Manual => "manual",
+            SizeMode::Height { .. } => "height",
+        }
+    }
+
+    /// The height follows the content (not `Manual`).
+    pub const fn follows_content(self) -> bool {
+        matches!(self, SizeMode::Height { .. })
+    }
+
+    /// The window never gets shorter than it is when the content does.
+    pub const fn grows_only(self) -> bool {
+        matches!(
+            self,
+            SizeMode::Height {
+                shrink: Shrink::Never
+            }
+        )
+    }
+}
+
 /// What a kind fixes, independent of any one dialog.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KindPolicy {
@@ -97,10 +143,8 @@ pub struct KindPolicy {
     pub default_width: Width,
     /// The preferred height when the dialog declares none (`None`: measured).
     pub default_height: Option<f64>,
-    /// The window is fitted to its content.
-    pub fits_content: bool,
-    /// A re-fit never makes the window shorter than it is (a result being read does not shrink under the reader).
-    pub grows_only: bool,
+    /// How the window follows its content (ADR 0043 §1). The kind's, never a contract's.
+    pub size_mode: SizeMode,
     /// What it remembers between openings.
     pub remembers: Remembers,
 }
@@ -126,32 +170,34 @@ impl Kind {
                 min_size: None,
                 default_width: Width::Narrow,
                 default_height: None,
-                fits_content: true,
-                grows_only: false,
+                size_mode: SizeMode::Height {
+                    shrink: Shrink::Always,
+                },
                 remembers: Remembers::Offset,
             },
             Kind::Form => KindPolicy {
                 min_size: None,
                 default_width: Width::Medium,
                 default_height: None,
-                fits_content: true,
-                grows_only: false,
-                remembers: Remembers::WidthAndOffset,
+                size_mode: SizeMode::Height {
+                    shrink: Shrink::Always,
+                },
+                remembers: Remembers::Offset,
             },
             Kind::Viewer => KindPolicy {
                 min_size: Some(VIEWER_MIN),
                 default_width: Width::Wide,
                 default_height: Some(VIEWER_MIN.height),
-                fits_content: true,
-                grows_only: true,
-                remembers: Remembers::SizeAndOffset,
+                size_mode: SizeMode::Height {
+                    shrink: Shrink::Never,
+                },
+                remembers: Remembers::Offset,
             },
             Kind::Tool => KindPolicy {
                 min_size: None,
                 default_width: Width::Px(TOOL_DEFAULT.width as u16),
                 default_height: Some(TOOL_DEFAULT.height),
-                fits_content: false,
-                grows_only: false,
+                size_mode: SizeMode::Manual,
                 remembers: Remembers::SizeAndOffset,
             },
         }
@@ -549,13 +595,43 @@ mod tests {
             assert_eq!(serde_json::to_value(m).unwrap(), m.as_str());
         }
         assert_eq!(Kind::Viewer.policy().min_size, Some(VIEWER_MIN));
-        assert!(Kind::Viewer.policy().grows_only && Kind::Viewer.policy().fits_content);
+        assert_eq!(
+            Kind::Viewer.policy().size_mode,
+            SizeMode::Height {
+                shrink: Shrink::Never
+            }
+        );
         assert_eq!(
             (Kind::Tool.default_width(), Kind::Tool.default_height()),
             (TOOL_DEFAULT.width, Some(TOOL_DEFAULT.height))
         );
-        assert!(!Kind::Tool.policy().fits_content);
-        assert!(Kind::Decision.policy().fits_content && !Kind::Decision.policy().grows_only);
+        assert_eq!(Kind::Tool.policy().size_mode, SizeMode::Manual);
+        assert_eq!(
+            Kind::Decision.policy().size_mode,
+            SizeMode::Height {
+                shrink: Shrink::Always
+            }
+        );
+        assert_eq!(
+            Kind::Form.policy().size_mode,
+            SizeMode::Height {
+                shrink: Shrink::Always
+            }
+        );
+        // D3: only a tool remembers its size; the others remember their offset.
+        for k in [Kind::Decision, Kind::Form, Kind::Viewer] {
+            assert_eq!(k.policy().remembers, Remembers::Offset);
+        }
+        assert_eq!(Kind::Tool.policy().remembers, Remembers::SizeAndOffset);
+        assert_eq!(SizeMode::Manual.as_str(), "manual");
+        assert_eq!(Kind::Viewer.policy().size_mode.as_str(), "height");
+        assert!(
+            !SizeMode::Manual.follows_content() && Kind::Form.policy().size_mode.follows_content()
+        );
+        assert!(
+            Kind::Viewer.policy().size_mode.grows_only()
+                && !Kind::Form.policy().size_mode.grows_only()
+        );
         assert_eq!(
             (
                 Kind::Decision.default_width(),
@@ -568,10 +644,7 @@ mod tests {
             .iter()
             .map(|k| k.policy().remembers.as_str())
             .collect();
-        assert_eq!(
-            remembers,
-            ["offset", "widthAndOffset", "sizeAndOffset", "sizeAndOffset"]
-        );
+        assert_eq!(remembers, ["offset", "offset", "offset", "sizeAndOffset"]);
     }
 
     #[test]

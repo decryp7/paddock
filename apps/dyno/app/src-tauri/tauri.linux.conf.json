@@ -5,7 +5,15 @@
     "linux": {
       "deb": {
         "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0", "libayatana-appindicator3-1"],
-        "section": "utils"
+        "recommends": ["polkitd", "pkexec"],
+        "section": "utils",
+        "files": {
+          "/usr/lib/systemd/system/dyno-helper.service": "linux/dyno-helper.service",
+          "/usr/share/polkit-1/rules.d/50-dyno-helper.rules": "linux/50-dyno-helper.rules"
+        },
+        "postInstallScript": "linux/postinst",
+        "preRemoveScript": "linux/prerm",
+        "postRemoveScript": "linux/postrm"
       }
     }
   }

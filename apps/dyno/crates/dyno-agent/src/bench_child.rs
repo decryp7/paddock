@@ -5,6 +5,10 @@
 //! ("Running", "Still working", "Not responding") and, at the end, one [`BenchStatus`]. Nothing here ends a child by itself
 //! because it is slow or quiet: only the person's Cancel and a named safety stop do (ER-19). The real child is
 //! [`ProcessChild`]; the tests drive a scripted one with a manual clock.
+#![cfg_attr(
+    not(test),
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
+)]
 
 use dyno_core::bench::unit::{self, UnitRecord};
 use dyno_core::bench::wire::{liveness, parse_line, Line, Liveness, PhaseProgress, WireError, MAX_LINE, MAX_LINES};
@@ -34,6 +38,16 @@ pub struct ChildRequest {
     pub scratch: PathBuf,
     /// The scratch file size (disk only), MiB.
     pub disk_mib: u32,
+    /// The drive spins (disk only): random patterns measure for a shorter time.
+    pub rotational: bool,
+    /// The CPU kind runs as a sustained run of this many seconds.
+    pub sustained_secs: Option<u32>,
+    /// The sustained write after the disk patterns, MiB (disk only; zero: none).
+    pub sustained_write_mib: u32,
+    /// Memory available at the start, MiB (memory only; the runner sizes its arrays from it).
+    pub available_mib: Option<u64>,
+    /// The graphics adapter to measure (graphics only; `None`: the runner's default).
+    pub gpu_adapter: Option<u32>,
 }
 
 /// Why the loop should end the child now.
@@ -53,6 +67,10 @@ pub trait ChildEvents {
     fn liveness(&self, l: Liveness);
     /// Whether to end the child now. Asked every tick.
     fn stop(&self) -> Option<Stop>;
+    /// One second of a sustained run arrived.
+    fn sample(&self, _secs: u32, _throughput: f64) {}
+    /// A note about how the measurement was made arrived.
+    fn note(&self, _text: &str) {}
 }
 
 /// One thing that arrived from the child.
@@ -114,6 +132,8 @@ pub fn drive(child: &mut dyn ChildProcess, events: &dyn ChildEvents, clock: &dyn
                 match line {
                     Line::Progress(p) => events.progress(&p),
                     Line::Heartbeat => {}
+                    Line::Sample { secs, throughput } => events.sample(secs, throughput),
+                    Line::Note { text } => events.note(&text),
                     Line::Result { status } => {
                         result = Some(status);
                         break;
@@ -230,6 +250,8 @@ impl ProcessChild {
                         Ok(None) | Err(_) => break,
                         Ok(Some(Err(()))) => {
                             n += 1;
+                            // silent: the receiver is gone when the bench was abandoned; nobody reads the line
+                            #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
                             let _ = tx.send(Msg::Line(Err(WireError {
                                 line: n,
                                 reason: format!("longer than {MAX_LINE} bytes"),
@@ -248,9 +270,13 @@ impl ProcessChild {
                         }
                     }
                 }
+                // silent: the receiver is gone when the bench was abandoned; nobody waits for the end
+                #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
                 let _ = tx.send(Msg::Eof);
             })?;
         } else {
+            // silent: the receiver is gone when the bench was abandoned; nobody waits for the end
+            #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
             let _ = tx.send(Msg::Eof);
         }
         if let Some(mut err) = stderr_pipe {

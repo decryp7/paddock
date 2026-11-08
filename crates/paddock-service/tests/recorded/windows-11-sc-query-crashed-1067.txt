@@ -1,0 +1,10 @@
+#! recorded 2026-11-04 on the Windows 11 Arm test VM (build 10.0.26300), as paddock-admin over SSH
+#! command: sc.exe query DynoHelper
+#! state: right after taskkill /F of the service process (ERROR_PROCESS_ABORTED 1067)
+SERVICE_NAME: DynoHelper 
+        TYPE               : 10  WIN32_OWN_PROCESS  
+        STATE              : 1  STOPPED 
+        WIN32_EXIT_CODE    : 1067  (0x42b)
+        SERVICE_EXIT_CODE  : 0  (0x0)
+        CHECKPOINT         : 0x0
+        WAIT_HINT          : 0x0

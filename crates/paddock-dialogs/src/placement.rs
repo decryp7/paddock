@@ -194,7 +194,7 @@ fn inside(mut r: Rect, work: &Rect) -> Rect {
 /// (outer rectangle, physical px) on `monitor`:
 ///
 /// * the size is the remembered one when there is one (never below `min`), else `size` limited to
-///   [`SCREEN_SHARE`] of the work area; either way no larger than the work area;
+///   [`SCREEN_SHARE`] of the work area less the title bar; either way no larger than the work area;
 /// * the remembered offset from the parent is used only when the whole dialog then lies within the parent monitor's
 ///   work area; otherwise the dialog is centred on the parent (a third from its top) and moved into the work area.
 ///
@@ -215,7 +215,10 @@ pub fn place(
         (Some(r), _) => (r.width.max(min.0), r.height.max(min.1)),
         (None, Some(m)) => (
             size.0.min(m.work.width / s * SCREEN_SHARE).max(min.0),
-            size.1.min(m.work.height / s * SCREEN_SHARE).max(min.1),
+            // The cap is on the outer window, so the title bar comes off the inner height (ADR 0043 §1).
+            size.1
+                .min(m.work.height / s * SCREEN_SHARE - TITLE_BAR)
+                .max(min.1),
         ),
         (None, None) => size,
     };
@@ -367,6 +370,26 @@ mod tests {
         })
     }
 
+    #[test]
+    fn a_preferred_size_is_capped_with_the_frame_so_the_outer_window_never_exceeds_the_cap() {
+        // The Windows VM (2026-11-04): a tool declared 620 px tall opened at exactly 75 % of a 720 px work area (540) and so
+        // 31 px over the cap once its title bar was there, because the cap left the frame out.
+        let m = monitor(0.0, 0.0, 1024.0, 720.0, 1.0);
+        let p = place(None, Some(m), None, (880.0, 620.0), (320.0, 200.0));
+        let (_, h) = p.logical_size();
+        assert!(
+            h + TITLE_BAR <= 720.0 * SCREEN_SHARE + 1e-9,
+            "outer {} over the cap {}",
+            h + TITLE_BAR,
+            720.0 * SCREEN_SHARE
+        );
+        assert_eq!(h, 720.0 * SCREEN_SHARE - TITLE_BAR);
+        // The same at 150 %: the cap is in logical px of a 464 px work area.
+        let m = monitor(0.0, 0.0, 1024.0, 696.0, 1.5);
+        let (_, h) = place(None, Some(m), None, (880.0, 620.0), (320.0, 200.0)).logical_size();
+        assert_eq!(h, 696.0 / 1.5 * SCREEN_SHARE - TITLE_BAR);
+    }
+
     /// The whole outer window of `p` lies inside `m`'s work area.
     fn on(p: &Placement, m: &Monitor) -> bool {
         m.work
@@ -506,7 +529,7 @@ mod tests {
         );
         assert_eq!((p.width, p.height), (1920.0, 1080.0 - TITLE_BAR));
         assert!(on(&p, &m), "{p:?}");
-        // A default size is bounded by three quarters of the work area.
+        // A default size is bounded by three quarters of the work area, the title bar included (so 810 less 32).
         let p = place(
             Some(rect(0.0, -1080.0, 1920.0, 1080.0)),
             Some(m),
@@ -514,7 +537,7 @@ mod tests {
             (5000.0, 5000.0),
             (320.0, 200.0),
         );
-        assert_eq!((p.width, p.height), (1440.0, 810.0));
+        assert_eq!((p.width, p.height), (1440.0, 810.0 - TITLE_BAR));
     }
 
     #[test]
@@ -754,8 +777,12 @@ mod tests {
             memory_for(Kind::Decision, r, d),
             rem(10.0, 20.0, 400.0, 300.0)
         );
-        assert_eq!(memory_for(Kind::Form, r, d), rem(10.0, 20.0, 900.0, 300.0));
-        assert_eq!(memory_for(Kind::Viewer, r, d), r);
+        // ADR 0043 D3: only a tool remembers its size; the others remember their offset.
+        assert_eq!(memory_for(Kind::Form, r, d), rem(10.0, 20.0, 400.0, 300.0));
+        assert_eq!(
+            memory_for(Kind::Viewer, r, d),
+            rem(10.0, 20.0, 400.0, 300.0)
+        );
         assert_eq!(memory_for(Kind::Tool, r, d), r);
         assert_eq!(memory_for(Kind::Tool, None, d), None);
     }

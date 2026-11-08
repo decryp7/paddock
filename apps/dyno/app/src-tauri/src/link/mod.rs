@@ -16,6 +16,10 @@
 //! and ends that process, and the service's agent, refused until then, takes the data folder. When it is turned off, the app
 //! asks the former service's agent to exit over its connection (never a kill: it did not start it) and starts its own once
 //! the data folder is free. A Windows `Run` entry starts nothing until the next logon, so there the app keeps its own agent.
+#![cfg_attr(
+    not(test),
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
+)]
 
 pub mod driver;
 #[cfg(any(target_os = "macos", test))]
@@ -51,7 +55,7 @@ use std::time::Duration;
 /// Every request fails after this long.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long the one remaining slow request may take: saving the inventory report (it reads the software list, which runs the
-/// package tools). Everything else that can run long (finding files, reading the system logs, checking the backups, hashing a
+/// package tools). Everything else that can run long (finding files, reading the system logs, hashing a
 /// file, the sleep, boot, app-usage and software reads) is a job: starting it answers at once and it reports progress and
 /// accepts Cancel, so no request waits for it.
 pub const EXTRAS_TIMEOUT: Duration = Duration::from_secs(120);
@@ -59,7 +63,8 @@ pub const EXTRAS_TIMEOUT: Duration = Duration::from_secs(120);
 /// How long to wait for the agent's answer to `request`.
 pub fn timeout_for(request: &Request) -> Duration {
     match request {
-        Request::SaveInventoryReport { .. } => EXTRAS_TIMEOUT,
+        // The agent's report files include the first inventory read, which runs the package and hardware tools.
+        Request::SaveInventoryReport { .. } | Request::DiagnosticsFiles => EXTRAS_TIMEOUT,
         _ => REQUEST_TIMEOUT,
     }
 }
@@ -88,6 +93,15 @@ pub trait Sink: Send + Sync {
     fn job(&self, _status: paddock_jobs::wire::WireSnapshot) {}
     /// A surface's widget layout was edited (by any window).
     fn widget_layout_changed(&self, _surface: dyno_core::widgets::DynoSurface) {}
+    /// The power view changed (a hold started, ended or was ended by the OS).
+    fn power_changed(&self, _view: dyno_core::power::PowerView) {}
+    /// The Wake-on-LAN list changed (a save or remove from any window, or a wake that ended).
+    fn wol_changed(&self, _view: dyno_core::wol::WolView) {}
+    /// The scheduled wakes changed (a save, a cancel, or a schedule that ran).
+    fn wakes_changed(&self, _view: dyno_core::power::schedule::WakesView) {}
+    /// The agent gave up events this connection was too slow to take (its queues are bounded): the sink logs how many and reads the
+    /// activity log, the alerts and the alarms again.
+    fn events_lost(&self, _lost: dyno_core::protocol::LostEvents) {}
     /// The connection state changed.
     fn agent(&self, status: AgentStatus);
     /// A wait for the agent is taking long (`Some`, with its cause), or is over (`None`). The chip shows it with Retry.
@@ -97,7 +111,14 @@ pub trait Sink: Send + Sync {
     fn connection_made(&self) {}
     /// A connection was made: the shell reads what it needs from the agent (settings, for the tray).
     fn connected(&self, _link: &Arc<AgentLink>) {}
+    /// The program files on disk are another build than the one this app started from (`true`): the app was updated while it ran.
+    /// The link uses the agent of the new build, and the chip says to restart Dyno. `false` when that no longer holds.
+    fn app_updated(&self, _updated: bool) {}
 }
+
+/// Tells the build key of the agent file the app would start now (cached by the file's stamp, so a call costs a `stat` unless
+/// the file changed).
+pub type WantedKey = Arc<dyn Fn() -> String + Send + Sync>;
 
 /// Why a wait for the agent has gone on longer than usual. A wait is never given up on (ADR 0031): this is information
 /// for the status chip, with a Retry that acts on the cause ([`AgentLink::retry`]).
@@ -105,6 +126,8 @@ pub trait Sink: Send + Sync {
 pub enum Stall {
     /// The login service is meant to start the agent, and has not.
     WaitingForService,
+    /// A registration of the background service is under way (ADR 0056): the app starts no agent of its own until it ends.
+    RegisteringService,
     /// The agent this app started is running but has not written its discovery file.
     AgentNotAnswering,
     /// Another agent holds the data folder and has not answered.
@@ -115,6 +138,13 @@ pub enum Stall {
     AgentKeepsFailing,
     /// The agent this app started is stopped by the OS or another app (App Tamer): it is waited for, never ended (ADR 0031).
     AgentPaused,
+    /// The app was updated while it ran and the agent is the new build, which it cannot speak to: nothing to retry, restart Dyno.
+    AppUpdated,
+    /// The agent is the installed file of another protocol, yet this app was not updated while it ran (a half-done install, a stale
+    /// development binary): restarting does not help, reinstalling does.
+    AgentMismatch,
+    /// Agents of another build keep coming back after being asked to exit (another install or its login service starts them).
+    OtherBuildKeepsComing,
 }
 
 impl From<StallCause> for Stall {
@@ -138,7 +168,15 @@ pub struct ServiceState {
     /// `Restart=always`), so the app must not run an agent of its own beside it. A Windows `Run` entry only starts it
     /// at the next logon: installed, not supervising.
     pub supervises: bool,
+    /// A registration this app made, or is about to make, is being waited for or is under way (ADR 0056: the plan for a start is
+    /// `Await`, or a replace runs). The job may be absent or not yet answering, and the service's agent will come: the app neither
+    /// starts an agent of its own nor retires one while this is true. False where nothing waits and in every state with no way
+    /// forward (switched off, approval pending, a refused location, the attempts used up), so the app then falls back at once.
+    pub pending: bool,
 }
+
+/// Work that must be done before the link decides anything about an agent.
+pub type FirstLaunchHook = Box<dyn FnOnce() + Send>;
 
 /// Asks the OS about the service (it may be slow: only the link's own thread and background threads call it).
 pub type ServiceProbe = Arc<dyn Fn() -> ServiceState + Send + Sync>;
@@ -154,11 +192,12 @@ pub enum Plan {
     Replace,
 }
 
-/// The decision for the discovery file's content.
+/// The decision for the discovery file's content. `app_version` is the build key (`dyno_agent::build_id::build_key`): the version,
+/// and the build id of the agent file the app would start when it could read it, so another build of the same version is replaced.
 pub fn plan(found: Option<&Discovery>, app_version: &str, protocol: u32) -> Plan {
     match found {
         None => Plan::Spawn,
-        Some(d) if d.version == app_version && d.protocol == protocol => Plan::Connect,
+        Some(d) if d.protocol == protocol && dyno_agent::build_id::matches_key(app_version, &d.version, &d.build) => Plan::Connect,
         Some(_) => Plan::Replace,
     }
 }
@@ -241,6 +280,8 @@ pub struct AgentLink {
     /// The last failed request's name and code, so a repeat is not told again.
     fail_gate: Mutex<steps::KeyedGate>,
     probe: Mutex<Option<ServiceProbe>>,
+    /// Runs once on a worker before the first look at the world (see [`AgentLink::before_first_launch`]).
+    before_first: Mutex<Option<FirstLaunchHook>>,
     events: Sender<Event>,
     inbox: Mutex<Option<Receiver<Event>>>,
     transitions: Transitions<Snapshot>,
@@ -248,6 +289,12 @@ pub struct AgentLink {
     tuning: machine::Tuning,
     /// `quit` was called (its answer is for the first call only).
     quit_called: AtomicBool,
+    /// Where the build key the app wants is read now; without one it is `app_version` for good.
+    wanted: Mutex<Option<WantedKey>>,
+    /// The key the first read gave: the build this app started from.
+    first_key: std::sync::OnceLock<String>,
+    /// The program files changed under the running app (the last answer to [`AgentLink::wanted_key`] differs from the first).
+    updated: AtomicBool,
 }
 
 impl AgentLink {
@@ -284,13 +331,50 @@ impl AgentLink {
             syncing: Mutex::new(()),
             fail_gate: Mutex::new(steps::KeyedGate::default()),
             probe: Mutex::new(None),
+            before_first: Mutex::new(None),
             events,
             inbox: Mutex::new(Some(inbox)),
             transitions: Transitions::new(Supervisor::new().snapshot_now()),
             pace,
             tuning,
             quit_called: AtomicBool::new(false),
+            wanted: Mutex::new(None),
+            first_key: std::sync::OnceLock::new(),
+            updated: AtomicBool::new(false),
         })
+    }
+
+    /// Reads the wanted build key from `source` from now on (it is read on the link's worker threads, never the caller's: it may
+    /// hash a file). The first answer is the build this app started from; a later different one means the app was updated while it
+    /// ran, and the link then uses the agent of the new build instead of evicting it forever (Dyno lesson 2026-11-07).
+    pub fn set_wanted_source(&self, source: WantedKey) {
+        *lock(&self.wanted) = Some(source);
+    }
+
+    /// The build key to compare agents against, now. Tells the sink when the app turns out to be older than the files on disk.
+    pub(crate) fn wanted_key(&self) -> String {
+        let source = lock(&self.wanted).clone();
+        let Some(source) = source else {
+            return self.app_version.clone();
+        };
+        let key = source();
+        // Only keys with a build id (the file was hashed) can tell a replaced file: a version-only key (the file could not be read yet)
+        // is no baseline, and gaining a build id later is not an update.
+        let Some(build) = dyno_agent::build_id::key_build(&key) else {
+            return key;
+        };
+        let first = self.first_key.get_or_init(|| key.clone());
+        // Latched: the files changed once, and this app is outdated from then on, whichever thread reads the key next.
+        if dyno_agent::build_id::key_build(first) != Some(build) && !self.updated.swap(true, Ordering::SeqCst) {
+            log::warn!(Started = first.as_str(), OnDisk = key.as_str(); "Dyno's program files changed while it ran");
+            self.sink.app_updated(true);
+        }
+        key
+    }
+
+    /// Whether the program files on disk are a newer build than this running app.
+    pub fn app_updated(&self) -> bool {
+        self.updated.load(Ordering::SeqCst)
     }
 
     /// Runs the supervisor on its own thread (the owner) and its pace.
@@ -317,7 +401,24 @@ impl AgentLink {
                 None => {}
             },
         )?;
-        let _ = self.events.send(Event::Begin);
+        match lock(&self.before_first).take() {
+            None => driver::deliver(&self.events, Event::Begin),
+            Some(hook) => {
+                // On a worker, never the caller's thread or the owner's: the hook may open System Settings or wait on
+                // systemctl (ER-17). The link looks at the world only after it; a panicking hook still lets it begin.
+                let events = self.events.clone();
+                let worker = std::thread::Builder::new().name("dyno-before-first".into()).spawn(move || {
+                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(hook)).is_err() {
+                        log::error!("The work before the agent link's first look panicked; the link starts without it");
+                    }
+                    driver::deliver(&events, Event::Begin);
+                });
+                if let Err(e) = worker {
+                    log::error!(Error:% = e; "The work before the agent link's first look could not start; the link starts without it");
+                    driver::deliver(&self.events, Event::Begin);
+                }
+            }
+        }
         spawn_ticker(
             "dyno-pace",
             self.pace,
@@ -326,6 +427,13 @@ impl AgentLink {
             self.transitions.clone(),
         )?;
         Ok(owner)
+    }
+
+    /// Work to do on a worker thread before the link's first look at the world and so before its first launch: the first run's
+    /// registration of the login service goes here, so the link finds a supervising service and starts no agent beside it.
+    /// Set before [`AgentLink::spawn`]; the link begins when the hook returns.
+    pub fn before_first_launch(&self, hook: FirstLaunchHook) {
+        *lock(&self.before_first) = Some(hook);
     }
 
     /// What the supervisor published.
@@ -338,7 +446,7 @@ impl AgentLink {
     /// agent holds the data folder). It names the stall shown now, so a Retry for a wait that is over does nothing.
     pub fn retry(&self) {
         let stall = self.transitions.current().stall.map(|(id, _)| id);
-        let _ = self.events.send(Event::Retry { stall });
+        driver::deliver(&self.events, Event::Retry { stall });
     }
 
     /// How to ask the OS about the login service. Without one, no service supervises the agent.
@@ -353,12 +461,12 @@ impl AgentLink {
     /// The login service may have changed (the switch was turned, or a connection was made): the supervisor asks the OS,
     /// then hands the agent over to the service, or takes it back from a service that was removed. Returns at once.
     pub fn refresh_service(&self) {
-        let _ = self.events.send(Event::ServiceChanged);
+        driver::deliver(&self.events, Event::ServiceChanged);
     }
 
     /// Records whether a service keeps the agent alive (decides what quitting does).
     pub fn set_service_installed(&self, installed: bool) {
-        let _ = self.events.send(Event::ServiceInstalled(installed));
+        driver::deliver(&self.events, Event::ServiceInstalled(installed));
     }
 
     /// Whether this app started the agent it talks to.
@@ -381,6 +489,13 @@ impl AgentLink {
     /// Sends one request and returns the reply. A `Subscribe` is not forwarded as is: it is a window's wish
     /// ([`AgentLink::set_detail`]). Never call it on the owner thread: it may wait for the connection.
     pub fn call(&self, request: Request) -> Result<Reply, CommandError> {
+        let timeout = timeout_for(&request);
+        self.call_within(request, timeout)
+    }
+
+    /// [`AgentLink::call`] with the caller's own time limit (an MCP tool must answer inside the server's call limit, or the server
+    /// abandons the call and the thread stays blocked here).
+    pub fn call_within(&self, request: Request, timeout: Duration) -> Result<Reply, CommandError> {
         debug_assert!(
             std::thread::current().name() != Some("dyno-link"),
             "a request on the supervisor's owner thread would block it"
@@ -389,7 +504,6 @@ impl AgentLink {
         let Some(peer) = self.peer_or_wait() else {
             return Err(self.failed(&name, CommandError::unavailable(), None));
         };
-        let timeout = timeout_for(&request);
         let mut chain = None;
         let result = match peer.call(Message::Request(Box::new(request)), timeout) {
             Ok(Message::Reply(r)) => (*r).map_err(CommandError::from),
@@ -457,9 +571,14 @@ impl AgentLink {
     pub fn drop_window(self: &Arc<Self>, window: &str) {
         lock(&self.votes).remove(window);
         let me = self.clone();
-        let _ = std::thread::Builder::new().name("dyno-detail".into()).spawn(move || {
-            let _ = me.sync_detail();
+        let spawned = std::thread::Builder::new().name("dyno-detail".into()).spawn(move || {
+            if let Err(e) = me.sync_detail() {
+                logging::warn(&format!("the detail subscription could not be brought up to date: {}", e.message));
+            }
         });
+        if let Err(e) = spawned {
+            logging::warn(&format!("the detail thread could not be started: {e}"));
+        }
     }
 
     /// Brings the agent's subscription up to what the windows want. Syncs are serialised (one request at a time, so two
@@ -476,7 +595,7 @@ impl AgentLink {
                 let Some(instead) = older_agent_fallback(wanted, &e) else {
                     return Err(e);
                 };
-                logging::info(&format!("the agent cannot read the {wanted:?} live level; asking for {instead:?}"));
+                logging::warn(&format!("the agent cannot read the {wanted:?} live level; asking for {instead:?}"));
                 self.call(Request::Subscribe { detail: instead })?;
             }
         }
@@ -489,7 +608,7 @@ impl AgentLink {
         *lock(&self.sent) = None;
         self.sink.connection_made();
         if let Err(e) = self.sync_detail() {
-            logging::info(&format!("could not subscribe: {}", e.message));
+            logging::warn(&format!("could not subscribe: {}", e.message));
         }
         self.sink.connected(self);
     }
@@ -504,7 +623,7 @@ impl AgentLink {
         if lock(&self.inbox).is_some() {
             return false; // never run: nothing to stop
         }
-        let _ = self.events.send(Event::Quit);
+        driver::deliver(&self.events, Event::Quit);
         let snapshot = self.transitions.wait_until(Snapshot::stopped);
         snapshot.outcome().is_some_and(|o| o.stopped_own)
     }

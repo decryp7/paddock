@@ -213,6 +213,7 @@ pub fn sockets() -> Result<Vec<SocketRow>, String> {
             remote: e.remote.map(|r| (r.ip(), r.port())),
             state: e.state(),
             pid: Some(e.pid),
+            inode: None,
         })
         .collect())
 }

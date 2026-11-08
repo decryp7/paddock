@@ -5,6 +5,14 @@
 //! 3. answers the host's calls with its handler until the connection closes, then returns (the process exits).
 //!
 //! It also exits as soon as its stdin closes ([`lifeline`]): when the host stops it or dies, nothing is left behind.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::error::IpcError;
 use crate::frame::{FrameLimit, ProtocolVersion};
@@ -40,13 +48,16 @@ pub fn connect(bootstrap: &Bootstrap, protocol: ProtocolVersion) -> Result<Conne
 
 /// The lifeline: when the host closes stdin (or dies), exit at once.
 pub fn lifeline() {
-    let _ = std::thread::Builder::new()
-        .name("paddock-ipc-lifeline".into())
-        .spawn(|| {
-            let mut sink = [0u8; 256];
-            while matches!(io::stdin().read(&mut sink), Ok(n) if n > 0) {}
-            std::process::exit(0);
-        });
+    paddock_proc::cleanup::logged(
+        "starting the lifeline thread (the child will not exit when its host dies)",
+        std::thread::Builder::new()
+            .name("paddock-ipc-lifeline".into())
+            .spawn(|| {
+                let mut sink = [0u8; 256];
+                while matches!(io::stdin().read(&mut sink), Ok(n) if n > 0) {}
+                std::process::exit(0);
+            }),
+    );
 }
 
 /// A child process' `main`; see the module docs. `make` builds the handler once the bootstrap is known (it may look at

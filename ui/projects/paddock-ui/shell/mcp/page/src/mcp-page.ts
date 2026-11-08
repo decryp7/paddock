@@ -4,7 +4,7 @@ import { MatCheckbox, type MatCheckboxChange } from '@angular/material/checkbox'
 import { MatSlideToggle, type MatSlideToggleChange } from '@angular/material/slide-toggle';
 import { MatTooltip } from '@angular/material/tooltip';
 import { SuEmptyState, SuErrorState, SuSkeleton, SuStatusPill } from '@decryp7/paddock-ui';
-import { MCP_KEY_DIALOG_ID, MCP_REVOKE_DIALOG_ID, McpStore, type KeyInfo, type ToolInfo } from '@decryp7/paddock-ui/shell/mcp';
+import { MCP_KEY_DIALOG_ID, MCP_REVOKE_DIALOG_ID, McpStore, type KeyInfo, type McpView, type ToolInfo } from '@decryp7/paddock-ui/shell/mcp';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { PdMcpAudit } from './mcp-audit';
 import { MCP_STYLES } from './styles';
@@ -42,6 +42,16 @@ import { MCP_STYLES } from './styles';
           </span>
         </mat-slide-toggle>
       </div>
+
+      @if (store.listener(); as l) {
+        @if (l.kind !== 'unavailable') {
+          <section aria-labelledby="pd-mc-conn" data-testid="mcp-connection">
+            <h3 id="pd-mc-conn">{{ t.connTitle }}</h3>
+            <p [class.pd-mc__warn]="l.kind === 'failed'" data-testid="mcp-listener-state">{{ listenerText(l) }}</p>
+            <p class="pd-mc__muted">{{ t.connHow }}</p>
+          </section>
+        }
+      }
 
       <section aria-labelledby="pd-mc-tools" data-testid="mcp-tools">
         <h3 id="pd-mc-tools">{{ t.toolsTitle }}</h3>
@@ -91,6 +101,12 @@ import { MCP_STYLES } from './styles';
           <button matButton="filled" type="button" data-testid="mcp-add-client" [disabled]="store.atKeyLimit()" disabledInteractive [attr.aria-describedby]="store.atKeyLimit() ? 'pd-mc-limit' : null" (click)="addClient()">{{ t.add }}</button>
         </div>
         <p class="pd-mc__muted">{{ t.clientsLede }}</p>
+        @if (store.keysProblem(); as why) {
+          <div class="pd-mc__notice" role="alert" data-testid="mcp-keys-problem">
+            <strong>{{ t.keysProblemTitle }}</strong>
+            <span>{{ why }}</span>
+          </div>
+        }
         @if (store.atKeyLimit()) {
           <p id="pd-mc-limit" class="pd-mc__muted" data-testid="mcp-keys-limit">{{ limitText() }}</p>
         }
@@ -148,11 +164,28 @@ export class PdMcpPage {
   protected readonly store = inject(McpStore);
   private readonly dialogs = inject(DialogService);
 
+  protected listenerText(l: McpView['listener']): string {
+    switch (l.kind) {
+      case 'listening':
+        return $localize`:@@pd.mcp.conn-listening:Listening on this computer only, port ${l.port}:port:. Clients find it in ${l.discoveryFile}:file:.`;
+      case 'failed':
+        return $localize`:@@pd.mcp.conn-failed:Not listening: ${l.message}:message:`;
+      case 'noKey':
+        return this.t.connNoKey;
+      default:
+        return this.t.connOff;
+    }
+  }
+
   protected readonly t = {
     title: $localize`:@@pd.mcp.title:AI access (MCP)`,
     lede: $localize`:@@pd.mcp.lede:Lets a program on this computer, such as a local AI assistant, ask this app questions over the Model Context Protocol. It is off until you turn it on, it only works on this computer, and every call is logged below.`,
     on: $localize`:@@pd.mcp.on:AI access is on`,
     off: $localize`:@@pd.mcp.off:AI access is off`,
+    connTitle: $localize`:@@pd.mcp.conn-title:Connection`,
+    connOff: $localize`:@@pd.mcp.conn-off:Not listening: AI access is off.`,
+    connNoKey: $localize`:@@pd.mcp.conn-no-key:Not listening yet: add a client below to get a key. Nothing listens until a key exists.`,
+    connHow: $localize`:@@pd.mcp.conn-how:A client connects with its key while this app is running (it can stay in the tray). Programs that start commands, such as Claude Desktop, run the app's command line with the key in the environment. When the app is quit, clients cannot connect.`,
     masterHint: $localize`:@@pd.mcp.master-hint:Clients connect with a key you give them. Tools are read-only: they look at data and never change it.`,
     toolsTitle: $localize`:@@pd.mcp.tools-title:Tools`,
     toolsLede: $localize`:@@pd.mcp.tools-lede:What a connected client may ask. Switch off what you do not want to share.`,
@@ -164,6 +197,7 @@ export class PdMcpPage {
     clientsLede: $localize`:@@pd.mcp.clients-lede:Each client has its own key. Revoke a key to cut that client off.`,
     add: $localize`:@@pd.mcp.add:Add a client…`,
     noClients: $localize`:@@pd.mcp.no-clients:No clients yet`,
+    keysProblemTitle: $localize`:@@pd.mcp.keys-problem-title:The saved keys are not in use, so no client can connect.`,
     noClientsText: $localize`:@@pd.mcp.no-clients-text:Add a client to get a key for it. Nothing can connect without one.`,
     colClient: $localize`:@@pd.mcp.col-client-name:Client`,
     colCreated: $localize`:@@pd.mcp.col-created:Added`,

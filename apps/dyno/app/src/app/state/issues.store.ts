@@ -5,9 +5,8 @@ import { BACKEND } from '../core/backend';
 import { toCommandError } from '../core/command-error';
 import { JobStarter, progressOf, type JobRun } from '../core/job-starter';
 import { JobsStore } from '@decryp7/paddock-ui/shell/jobs';
-import { plural } from '../shared/format';
+import { fileName, plural } from '../shared/format';
 import { Notifier } from '../shared/notifier';
-import { fileName } from './diagnostics.store';
 
 /** The windows the page offers, in days (the engine accepts 1 to 90). */
 export const ISSUE_WINDOWS = [7, 14, 30] as const;

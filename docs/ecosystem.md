@@ -17,7 +17,7 @@ Sighter: docked panes with the layout planner, the activity bar, the Explorer, t
 Images are generated ([`images/src/ecosystem.mjs`](images/src/ecosystem.mjs),
 [`images/src/integrations.mjs`](images/src/integrations.mjs)). PNG exports for places that cannot render SVG:
 hero [light](images/paddock-ecosystem-light.png?v=66869804) and [dark](images/paddock-ecosystem-dark.png?v=386413ff), integrations
-[light](images/paddock-integrations-light.png?v=a9a7c6fa) and [dark](images/paddock-integrations-dark.png?v=38cb6fd5), hand-offs
+[light](images/paddock-integrations-light.png?v=b166f32d) and [dark](images/paddock-integrations-dark.png?v=cb959d02), hand-offs
 [light](images/paddock-handoffs-light.png?v=e754dcb5) and [dark](images/paddock-handoffs-dark.png?v=ce5abde7). PNGs are
 rendered with Playwright's pinned Chrome for Testing, never the installed Google Chrome ([`images/src/chrome.mjs`](images/src/chrome.mjs); set
 `CHROME` to override).

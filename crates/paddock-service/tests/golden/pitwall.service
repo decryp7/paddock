@@ -11,6 +11,9 @@ Environment=PITWALL_SERVICE=1
 Restart=always
 RestartSec=10
 TimeoutStopSec=60
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pitwall
 
 [Install]
 WantedBy=default.target

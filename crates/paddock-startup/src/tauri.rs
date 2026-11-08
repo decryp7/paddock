@@ -28,7 +28,7 @@ use crate::{
 };
 use ::tauri::ipc::Invoke;
 use ::tauri::webview::{PageLoadEvent, PageLoadPayload};
-use ::tauri::{AppHandle, Emitter, Manager, Runtime, Webview};
+use ::tauri::{AppHandle, Emitter, Manager, Runtime, Webview, WebviewWindow};
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -38,11 +38,23 @@ use std::time::Instant;
 /// The commands every dialog may call whatever its contract (the dialog layer adds them to each dialog's base set).
 pub const DIALOG_BASE: &[&str] = &["window_ready", "window_boot_error", "window_pong"];
 
+/// How many times a question's dialog is looked for to take it down, and how long between tries (a dialog may not be up yet).
+pub(crate) const DISMISS_TRIES: u32 = 10;
+pub(crate) const DISMISS_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+pub(crate) const DISMISS_EVERY: std::time::Duration = std::time::Duration::from_millis(100);
+
 /// Called with `true` when the watchdog gives up on a window's page (start-up question, or unresponsive after ready) and
 /// with `false` when the page answers again: `paddock_dialogs::tauri::page_unresponsive` lets a dialog be closed by the
 /// OS close meanwhile (rule 19).
 pub type UnresponsiveHook<R> = dyn Fn(&AppHandle<R>, &str, bool) + Send + Sync;
 /// Restarts the app in Safe Mode for window `label` (the app's relaunch); an error is logged.
+/// Writes a problem report without the stuck window (`StartupBuilder::report`); it shows its own native save dialog, so it runs
+/// off the main thread. Returns what to tell the log.
+pub type ReportHook<R> = dyn Fn(&AppHandle<R>, &str) -> Result<(), String> + Send + Sync;
+/// Whether a window counts as visible to the watchdog (`StartupBuilder::window_visibility`); the default is [`visibility`] over the
+/// window's own answers. A seam for tests: the mock runtime reports every window visible.
+pub type VisibleProbe<R> = dyn Fn(&WebviewWindow<R>) -> bool + Send + Sync;
+/// Restarts in Safe Mode (`StartupBuilder::safe_mode`).
 pub type SafeModeHook<R> = dyn Fn(&AppHandle<R>, &str) -> Result<(), String> + Send + Sync;
 /// Restarts the whole app, keeping its session (the app's relaunch: `|app| app.restart()`, which does not return on
 /// success); an error is reported to the calling page and logged.
@@ -54,13 +66,23 @@ pub type WatchFilter = dyn Fn(&str, &str) -> bool + Send + Sync;
 
 /// Shows the native question for window `label`, owned by that window, and calls `answer` once with the user's choice.
 pub trait Asker<R: Runtime>: Send + Sync + 'static {
+    /// `seq` is the question's identity: the one [`Asker::dismiss`] is later given.
     fn ask(
         &self,
         app: &AppHandle<R>,
         label: &str,
+        seq: u64,
         prompt: Prompt,
         answer: Box<dyn FnOnce(Choice) + Send>,
     );
+
+    /// Takes down question `seq` shown for window `label` because it is no longer needed (the page recovered). Runs on the main
+    /// thread. Returns whether the dialog is gone: `false` when it could not be found or closed (not shown yet, queued behind another
+    /// sheet, or an asker that cannot dismiss, the default). It is then retried a few times; if it stays up, the question stays
+    /// counted as open (the window is not asked a second time) and its answer is ignored.
+    fn dismiss(&self, _app: &AppHandle<R>, _label: &str, _seq: u64) -> bool {
+        false
+    }
 }
 
 /// Why a start-up command failed (the command's error; camelCase on the wire).
@@ -115,6 +137,8 @@ pub struct StartupBuilder<R: Runtime> {
     config: Config,
     watch: Box<WatchFilter>,
     safe_mode: Option<Box<SafeModeHook<R>>>,
+    report: Option<Arc<ReportHook<R>>>,
+    visible_probe: Option<Box<VisibleProbe<R>>>,
     relaunch: Option<Box<RelaunchHook<R>>>,
     unresponsive: Option<Box<UnresponsiveHook<R>>>,
     on_ready: Option<Box<ReadyHook<R>>>,
@@ -181,7 +205,7 @@ impl<R: Runtime> StartupBuilder<R> {
     /// Shows the questions as native message dialogs (`tauri-plugin-dialog`, which the app registers).
     #[cfg(feature = "dialog")]
     pub fn native_dialogs(self) -> Self {
-        self.asker(NativeAsker)
+        self.asker(NativeAsker::default())
     }
 
     /// The run's lifecycle ([`Lifecycle::begin`], called as early as possible in `main`): the running marker, the
@@ -193,12 +217,33 @@ impl<R: Runtime> StartupBuilder<R> {
     }
 
     /// The state to install, or why the timings are inconsistent.
+    /// The app's way to write a problem report without the window: the questions then offer Save a problem report…, whose answer
+    /// calls `write` on its own thread (it asks where to save with a native dialog).
+    pub fn report(
+        mut self,
+        write: impl Fn(&AppHandle<R>, &str) -> Result<(), String> + Send + Sync + 'static,
+    ) -> Self {
+        self.report = Some(Arc::new(write));
+        self
+    }
+
+    /// Another way to decide whether a window is visible (tests; an app with windows the OS cannot report on).
+    pub fn window_visibility(
+        mut self,
+        probe: impl Fn(&WebviewWindow<R>) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        self.visible_probe = Some(Box::new(probe));
+        self
+    }
+
     pub fn build(self) -> Result<Startup<R>, ConfigError> {
         Ok(Startup {
             dog: Mutex::new(Watchdog::new(self.config.checked()?)),
             checkpoints: Mutex::new(Checkpoints::default()),
             watch: self.watch,
             safe_mode: self.safe_mode,
+            report: self.report,
+            visible_probe: self.visible_probe,
             relaunch: self.relaunch,
             unresponsive: self.unresponsive,
             on_ready: self.on_ready,
@@ -217,6 +262,8 @@ pub struct Startup<R: Runtime> {
     checkpoints: Mutex<Checkpoints>,
     watch: Box<WatchFilter>,
     safe_mode: Option<Box<SafeModeHook<R>>>,
+    report: Option<Arc<ReportHook<R>>>,
+    visible_probe: Option<Box<VisibleProbe<R>>>,
     relaunch: Option<Box<RelaunchHook<R>>>,
     unresponsive: Option<Box<UnresponsiveHook<R>>>,
     on_ready: Option<Box<ReadyHook<R>>>,
@@ -240,6 +287,8 @@ impl<R: Runtime> Startup<R> {
             config: Config::default(),
             watch: Box::new(watched_by_default),
             safe_mode: None,
+            report: None,
+            visible_probe: None,
             relaunch: None,
             unresponsive: None,
             on_ready: None,
@@ -284,8 +333,10 @@ impl<R: Runtime> Startup<R> {
             match app.get_webview_window(&label) {
                 None => gone.push(label),
                 Some(window) => {
-                    let visible = window.is_visible().unwrap_or(true)
-                        && !window.is_minimized().unwrap_or(false);
+                    let visible = match &self.visible_probe {
+                        Some(probe) => probe(&window),
+                        None => visibility(window.is_visible().ok(), window.is_minimized().ok()),
+                    };
                     shown.push((label, visible));
                 }
             }
@@ -327,6 +378,10 @@ impl<R: Runtime> Startup<R> {
                 );
                 logged(sent, &label, "Could not ping the window");
             }
+            Action::AskHung(label) => {
+                log::error!(Window = label.as_str(); "Window {label} has not answered for a long time; asking the user");
+                self.ask(app, label, Question::Unresponsive);
+            }
             Action::Unresponsive(label) => {
                 let (n, every) = self.with(|w| {
                     (
@@ -334,9 +389,8 @@ impl<R: Runtime> Startup<R> {
                         w.config().ping_interval.as_millis() as u64,
                     )
                 });
-                log::error!(Window = label.as_str(), MissedPings = n, PingMs = every; "Window {label} stopped responding; asking the user");
+                log::error!(Window = label.as_str(), MissedPings = n, PingMs = every; "Window {label} stopped responding; the user is asked if it stays silent for a long time");
                 self.hook(app, &label, true);
-                self.ask(app, label, Question::Unresponsive);
             }
         }
     }
@@ -346,14 +400,71 @@ impl<R: Runtime> Startup<R> {
             log::warn!(Window = label.as_str(); "No asker is installed; window {label} keeps waiting");
             return;
         };
+        let Some(seq) = self.with(|w| w.question_seq(&label)) else {
+            log::info!(Window = label.as_str(); "Question about window {label} was closed before it was shown");
+            return;
+        };
         let prompt = Prompt::new(question, &app.package_info().name);
+        let prompt = if self.report.is_some() {
+            prompt.with_report()
+        } else {
+            prompt
+        };
         let answer_app = app.clone();
         let answer_label = label.clone();
         let answer: Box<dyn FnOnce(Choice) + Send> =
-            Box::new(move |choice| answered(&answer_app, &answer_label, choice));
+            Box::new(move |choice| answered(&answer_app, &answer_label, seq, choice));
         let app2 = app.clone();
-        let shown = app.run_on_main_thread(move || asker.ask(&app2, &label, prompt, answer));
+        let shown = app.run_on_main_thread(move || {
+            // The page may have recovered while this was queued: then the question is not shown at all.
+            let startup = app2.try_state::<Startup<R>>();
+            if startup.as_ref().and_then(|s| s.with(|w| w.question_seq(&label))) != Some(seq) {
+                log::info!(Window = label.as_str(), Seq = seq; "Question {seq} about window {label} was closed before it was shown");
+                if let Some(s) = startup {
+                    s.with(|w| w.question_dismissed(&label, seq));
+                }
+                return;
+            }
+            asker.ask(&app2, &label, seq, prompt, answer)
+        });
         logged(shown, "", "Could not show the not-responding question");
+    }
+
+    /// The page of window `label` is fine again (`why`): a question about it that is still on screen is closed and taken down. Its
+    /// answer, if the user pressed a button just before, is ignored ([`answered`]).
+    fn question_closed(&self, app: &AppHandle<R>, label: &str, why: &str) {
+        let Some(seq) = self.with(|w| w.close_question(label)) else {
+            return;
+        };
+        log::info!(Window = label, Seq = seq; "Question {seq} about window {label} closed: {why}");
+        let Some(asker) = self.asker.clone() else {
+            self.with(|w| w.question_dismissed(label, seq));
+            return;
+        };
+        // The dialog may not be up yet (the OS shows it from another thread): look for it a few times, off the main thread.
+        let (app, label) = (app.clone(), label.to_string());
+        let spawned = std::thread::Builder::new().name("paddock-startup-dismiss".into()).spawn(move || {
+            for _ in 0..DISMISS_TRIES {
+                let (tx, rx) = std::sync::mpsc::channel();
+                let (app2, label2, asker2) = (app.clone(), label.clone(), asker.clone());
+                let queued = app.run_on_main_thread(move || {
+                    let _ = tx.send(asker2.dismiss(&app2, &label2, seq));
+                });
+                if queued.is_err() {
+                    break;
+                }
+                if rx.recv_timeout(DISMISS_WAIT).unwrap_or(false) {
+                    log::info!(Window = label.as_str(), Seq = seq; "Question {seq} about window {label}: dialog taken down");
+                    if let Some(s) = app.try_state::<Startup<R>>() {
+                        s.with(|w| w.question_dismissed(&label, seq));
+                    }
+                    return;
+                }
+                std::thread::sleep(DISMISS_EVERY);
+            }
+            log::warn!(Window = label.as_str(), Seq = seq; "Question {seq} about window {label} could not be closed; it stays up until answered and its answer is ignored");
+        });
+        logged(spawned, "", "Could not start the dialog dismissal");
     }
 
     /// The page in `webview` reported ready: the reply, the hooks, the log line.
@@ -364,6 +475,7 @@ impl<R: Runtime> Startup<R> {
             self.with(|w| ready_reply(w, &checkpoints, &label, Instant::now()))
         };
         self.hook(webview.app_handle(), &label, false);
+        self.question_closed(webview.app_handle(), &label, "the page is ready");
         if let Some(h) = &self.on_ready {
             h(webview, reply.recovered);
         }
@@ -377,6 +489,7 @@ impl<R: Runtime> Startup<R> {
         if self.with(|w| w.pong(label, seq, Instant::now())) == Pong::Recovered {
             log::info!(Window = label; "Window {label} responds again");
             self.hook(webview.app_handle(), label, false);
+            self.question_closed(webview.app_handle(), label, "the page responds again");
         }
     }
 
@@ -503,12 +616,27 @@ pub fn end_run<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+/// Whether a window is visible, from what the OS said: shown and not minimised. A window the OS cannot report on counts as visible (a
+/// question about a window that is perhaps hidden is better than none about a broken one).
+pub fn visibility(is_visible: Option<bool>, is_minimized: Option<bool>) -> bool {
+    is_visible.unwrap_or(true) && !is_minimized.unwrap_or(false)
+}
+
 /// The user's answer to the question about window `label`.
-fn answered<R: Runtime>(app: &AppHandle<R>, label: &str, choice: Choice) {
-    log::info!(Window = label, Choice = format!("{choice:?}").as_str(); "Not-responding question answered");
+///
+/// `seq` names the question the button belonged to. When that question was closed meanwhile (the page recovered, or answered
+/// already) the answer is stale and does nothing: pressing Reload as the page comes back must not reload a healthy page.
+fn answered<R: Runtime>(app: &AppHandle<R>, label: &str, seq: u64, choice: Choice) {
+    let choice_name = format!("{choice:?}");
     let Some(startup) = app.try_state::<Startup<R>>() else {
+        log::info!(Window = label, Choice = choice_name.as_str(), Seq = seq; "Not-responding question answered");
         return;
     };
+    if !startup.with(|w| w.accept_answer(label, seq, choice)) {
+        log::info!(Window = label, Choice = choice_name.as_str(), Seq = seq; "Answer {choice_name} to question {seq}, which was closed, is ignored");
+        return;
+    }
+    log::info!(Window = label, Choice = choice_name.as_str(), Seq = seq; "Not-responding question answered");
     match choice {
         Choice::Reload => {
             // Waiting again first: if the reload never starts a page, the watchdog still sees it.
@@ -524,6 +652,49 @@ fn answered<R: Runtime>(app: &AppHandle<R>, label: &str, choice: Choice) {
             None => startup.with(|w| w.keep_waiting(label, Instant::now())),
         },
         Choice::Wait => startup.with(|w| w.keep_waiting(label, Instant::now())),
+        Choice::SaveReport => {
+            // The question stays open (the window is not asked again) while the report is written and its save dialog is up; only
+            // when the hook returns does the window go back to waiting, with the longer wait.
+            match startup.report.clone() {
+                Some(write) => {
+                    let (app, label) = (app.clone(), label.to_string());
+                    std::thread::spawn(move || {
+                        // Whatever the hook does, even panic, the window goes back to waiting (drop guard).
+                        let _done = ReportDone {
+                            app: app.clone(),
+                            label: label.clone(),
+                        };
+                        match write(&app, &label) {
+                            Ok(()) => {
+                                log::info!(Window = label.as_str(); "Problem report from the not-responding question finished")
+                            }
+                            Err(e) => {
+                                log::error!(Window = label.as_str(); "Problem report from the not-responding question failed: {e}")
+                            }
+                        }
+                    });
+                }
+                None => startup.with(|w| w.keep_waiting(label, Instant::now())),
+            }
+        }
+    }
+}
+
+/// Ends a question whose answer was Save a problem report… when the report's thread ends in any way: the question is closed and the
+/// window waits again.
+struct ReportDone<R: Runtime> {
+    app: AppHandle<R>,
+    label: String,
+}
+
+impl<R: Runtime> Drop for ReportDone<R> {
+    fn drop(&mut self) {
+        if let Some(startup) = self.app.try_state::<Startup<R>>() {
+            startup.with(|w| {
+                w.question_answered(&self.label);
+                w.keep_waiting(&self.label, Instant::now());
+            });
+        }
     }
 }
 

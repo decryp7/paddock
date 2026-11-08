@@ -187,7 +187,7 @@ linker was 39 %). It agrees with the 2026-10-29 block below: keep Apple's linker
 ### 2026-10-30, agent threads at the gentle level (rule 52, fix/dyno-qos-utility-2)
 
 - **Commit:** A/B: base 1af0b346e (only the disk walk lowered; every other agent thread at the default class) → change: the
-  agent's own threads (sampler, network, hardware, issues, extras, unusual, network change, inventory, boot, backup check,
+  agent's own threads (sampler, network, hardware, issues, extras, unusual, network change, inventory, boot,
   counters, volume list and probes, traffic and name lookups) and the finder's thread and workers at `lower_current_thread`
   (`QOS_CLASS_UTILITY` on macOS); `dyno-server`, its connections and the benchmark thread not lowered
 - **Machine:** Mac mini M4 Pro (Mac16,11), 14 cores, macOS 27.2; rustc 1.99.1
@@ -369,3 +369,99 @@ item (the macOS VM run: Dyno 1.08 % CPU with 32 items), and the saving of the re
 and tooltip did not change returns its last frame without rendering (`an_item_whose_inputs_did_not_change_is_not_rendered_again`
 counts the masks: none for unchanged items). The model alone, 32 graph items all changing every tick, took 0.21 ms per tick with
 the former renderers (the entry in ADR 0028).
+## Bad-IP check: building and querying the range index (`dyno_core::intel`)
+## IP-list check: building and querying the range index (`dyno_core::intel`)
+
+User lists of addresses, CIDR ranges and host names become one in-memory sorted-segment index (ADR 0031, amendment 1). A lookup
+is one binary search; nothing is queried from a database per connection. The test `intel::tests::bench_index`
+(`cargo test -p dyno-core --release --lib -- --ignored --nocapture bench_index`) builds the index from a deterministic
+pseudo-random spread of /16 to /32 IPv4 ranges (nested now and then) in one list, then times 200,000 lookups.
+
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2; rustc 1.99.1; release build; load 15 to 22 from other agents
+- **Memory** is a count from the element sizes (`IntelIndex::approx_bytes`), not an allocator reading.
+
+| Entries | Build (single thread) | Segments | Memory (counted) | Lookup p50 | Lookup p99 |
+|---|---|---|---|---|---|
+| 100,000 (first design, one `u128` index) | 19 ms | 133,085 | about 39 MB | 208 ns | 875 ns |
+| 1,000,000 (first design) | 283 ms | 1,601,926 | about 327 MB | 1,166 ns | 1,708 ns |
+| 100,000 (compact) | 7 ms | 133,085 | about 6 MB | 125 ns | 458 ns |
+| 1,000,000 (compact) | 77 ms | 1,601,926 | about 50 MB | 750 ns | 1,250 ns |
+
+The compact index (rule 51, cheaper): one sorted array per address family (`u32` for IPv4, `u128` for IPv6), segment starts only
+(a gap is a segment with no members), a 4-byte member offset per segment, members as `(slot, list bitmap)`, each distinct range
+stored once with its list bitmap; notes only for the entries that have one; entry text is never resident (shown from the range
+on demand). It is 6.5 times smaller and builds 3.7 times faster than the first design, with faster lookups (smaller arrays fit
+the cache better). The build runs as a job: `IntelIndex::build_with_progress` reports the phase and count and stops when
+cancelled.
+
+Reading: 2,000 rows per look cost about 1.5 ms at the million-entry limit, so no extra thread is needed. The start-up rebuild
+is 77 ms at 1,000,000 entries, under the 200 ms line for persisting a packed index, so none is persisted. Transient peak while
+building is the lists themselves plus a hash map of the distinct ranges (not measured separately).
+## Disk test, first real run (2026-11-03, ADR 0030 WP-B3)
+
+One manual run of the rebuilt disk test to see that direct I/O reaches the device and not memory. It is not a benchmark of the
+drive and not a test: the numbers move with whatever else the machine and the drive are doing.
+
+- **Commit:** `feat/dyno-benchmark-2`, the commit that records this entry
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2; the scratch folder on the external SSD `/Volumes/d7sst7` (APFS)
+- **Load:** 1-minute load about 8 (other agents), so the numbers are indications only
+- **Build:** debug (`target/debug/dyno-bench`), which does not matter for I/O-bound work
+- **Command:** `dyno-bench disk --disk-mib 256 --dir <folder on that drive>` (3 repetitions, ramp at most 1/8 of the file or 1 s); 73 s in all
+
+| Pattern | Median of 3 | Samples |
+|---|---|---|
+| Sequential 1 MiB, 1 thread, read | 511 MB/s | 496, 511, 532 |
+| Sequential 1 MiB, 1 thread, write | 241 MB/s (unsteady, CV 20 %) | 313, 241, 215 |
+| Sequential 1 MiB, 8 threads, read | 508 MB/s | 508, 499, 550 |
+| Sequential 1 MiB, 8 threads, write | 254 MB/s (unsteady, CV 33 %) | 301, 254, 150 |
+| Random 4 KiB, 1 thread, read | 2,400 IOPS (unsteady) | 1,223, 2,756, 2,400 |
+| Random 4 KiB, 1 thread, write | 1,082 IOPS | 1,141, 1,082, 958 |
+| Random 4 KiB, 32 threads, read | 34,337 IOPS (140.6 MB/s) | 34,337, 32,096, 34,758 |
+
+What it shows: reads are in the hundreds of MB/s and 4 KiB single-thread reads in the low thousands of IOPS, the device's order of
+magnitude, where the 1.0 method read the file back from the page cache (memory speed). The `F_NOCACHE` path works on macOS. The
+write medians are marked unsteady by the CV rule, as designed. **Not measured:** Windows and Linux direct I/O (to be checked on the
+runners, WP-B3's remaining item), a spinning disk, a network share, 4 GiB files, and the write budget on a real drive (it is proved
+against a scripted drive in `disk::tests`).
+
+## CPU, memory and GPU kernels, first real runs (2026-11-03, ADR 0030 WP-B4 to B6)
+
+Single runs to see that each kernel gives a plausible number and reaches the hardware. Not benchmarks of the machine and not tests;
+see [Disk test, first real run](#disk-test-first-real-run-2026-11-03-adr-0030-wp-b3) for the setup.
+
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2, load average 8 to 20 from other agents; debug build of the runners
+  (the kernels' dependencies are optimised in the dev profile, the runner crates are not, so CPU numbers from a debug build are
+  lower than a shipped build's; they are recorded only to show the order of magnitude)
+- **GPU, `dyno-bench-gpu --smoke`** (one repetition, Metal, Apple M4 Pro): compute 6,920 GFLOPS, copy 204 GB/s, fill 270 Gpixel/s,
+  geometry 494 Mtri/s, 1.9 s in all. The fill figure is probably high: the off-screen target is discarded after each pass, which a
+  tile-based GPU may skip writing back; the label says "fill rate", not "memory bandwidth". **Not measured:** the five-repetition run,
+  discrete GPUs, DX12, Vulkan, the size of the bundle with wgpu (WP-B6 asks for it).
+
+## Processes of every account through the helper (2026-11-04, helper-wiring WP-PROC)
+
+The process list is a Live reading: the helper's sweep runs on its own worker every 5 s (`SWEEP_PERIOD`, paused 20 s after the
+sampler last took the list), never on the sampling thread (ER-17). The sampling thread only merges the latest finished sweep into
+its table. Pages: up to 16 of 1,024 entries (`MAX_SWEEP` 16,384). The helper reads the machine once per page request, so a machine
+with fewer than 1,025 processes costs one sweep per period.
+
+- **Commit:** `dyno/wp-proc` (the commit that adds this block)
+- **Machine:** Mac mini M4 Pro, 14 cores, macOS 27.2, 1-minute load 3 to 8 from other agents (indications only)
+- **Build:** release
+- **Real sweep, `measure_a_real_sweep`** (`cargo test -p dyno-agent --release --test helper_processes -- --ignored --nocapture`;
+  `SystemSweeper` then `build_page` for one page, three rounds, about 910 processes): sweep 42 to 51 ms, scoping and paging 8 ms.
+- **Merge at the cap, `measure_merge_cost`** (`--lib --release -- --ignored --nocapture`; 16,384 helper entries with rates against
+  an earlier sweep, merged with 8,192 local rows): rates 1.7 ms on the worker, merge 1.0 ms on the sampling thread.
+
+Per sampling tick the sampler thread therefore pays about 1 ms at the largest allowed sweep, and no IPC. The worker pays about 50 ms
+every 5 s on a machine like this one, 0.5 to 1 % of one core. **Not measured:** the Windows and Linux VMs (the VM rows of the
+plan), a machine with several thousand processes, and the wire time of a 1,024-entry page (the IPC rig measures the encoding, not
+the pipe). The period is a constant, not yet a Setting with an "Auto" default (the settings schema is not this package's file).
+
+## macOS disk busy reader: IOKit in process against `ioreg` (2026-11-07)
+
+- **Commit:** `fix/dyno-disk-busy-iokit` (the commit that adds this block)
+- **Machine:** Mac mini M4 Pro, macOS 27.2, 1-minute load 8 to 15 from other agents (indications only); debug test build
+- **`measure_disk_reader_cpu`** (`cargo nextest run -p dyno-platform --run-ignored only measure_disk_reader_cpu --no-capture`): 30
+  readings in 60 s at the 2 s cadence, CPU of the process plus its waited-for children (`getrusage`).
+  `ioreg` child: 529,051 us in total, 17,635 us per reading (about 0.9 % of one core). IOKit in process: 5,991 us in total, 199 us
+  per reading (about 0.01 % of one core), 88 times cheaper.

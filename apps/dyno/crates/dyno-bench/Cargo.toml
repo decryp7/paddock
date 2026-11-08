@@ -17,6 +17,14 @@ dyno-core.workspace = true
 # The clock the repetition driver takes (ManualClock in tests).
 paddock-bench = { path = "../../../../crates/paddock-bench" }
 serde_json.workspace = true
+# Run-time choice of the widest vector unit (AVX-512, AVX2 with FMA, NEON) for the SIMD kernels (MIT OR Apache-2.0; ADR 0030 D8).
+multiversion = "0.9"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_System_SystemInformation"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 tempfile.workspace = true

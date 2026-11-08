@@ -24,6 +24,19 @@ const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown>
 const btn = (el: HTMLElement, text: string) => [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes(text))!;
 
 describe('dy-reports-page', () => {
+  it('lists each disk as one row with its path in a shortening path text, sizes and forecast in their own cells', async () => {
+    const { f, el } = render();
+    await settle(f);
+    const rows = [...el.querySelectorAll<HTMLElement>('[data-testid="report-disk"]')];
+    expect(rows.length).toBeGreaterThanOrEqual(3);
+    for (const r of rows) {
+      expect(r.children).toHaveLength(3);
+      expect(r.children[0]!.querySelector('pd-path-text')).not.toBeNull();
+      expect(r.children[1]!.textContent).toMatch(/free of/);
+    }
+    expect(rows.map((r) => r.querySelector('[data-testid="path-text"]')!.getAttribute('data-full'))).toContain('/Volumes/Spare');
+  });
+
   it('shows every section of the week', async () => {
     const { f, el } = render();
     await settle(f);
@@ -32,7 +45,7 @@ describe('dy-reports-page', () => {
     expect(stats).toContain('Health score');
     expect(stats).toContain('+3 against the week before');
     expect(el.querySelectorAll('[aria-label="Highlights"] li').length).toBeGreaterThan(0);
-    expect(el.querySelector('[aria-label="Health score trend"] dy-sparkline')).not.toBeNull();
+    expect(el.querySelector('[aria-label="Health score trend"] pd-sparkline')).not.toBeNull();
     expect(el.querySelectorAll('[aria-label="Busiest apps"] [role="row"][data-key]')).toHaveLength(5);
     expect(el.querySelector('[aria-label="Disks"]')!.textContent).toContain('Full in ~41 days');
     expect(el.querySelector('[aria-label="Issues"]')!.textContent).toContain('Drive is getting full');

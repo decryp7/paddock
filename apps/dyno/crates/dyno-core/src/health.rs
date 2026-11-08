@@ -7,7 +7,7 @@ use crate::forecast::Forecast;
 use crate::metrics::{derive_pressure, percent, MemoryPressure, SystemSample};
 use crate::startup::{ImpactRating, StartupEntry};
 use crate::time::Timestamp;
-use crate::units::{bytes, duration};
+use crate::units::{bytes, duration, storage};
 use serde::{Deserialize, Serialize};
 
 /// The score in a word.
@@ -164,7 +164,7 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
             };
             add(
                 "lowDisk",
-                format!("{} has {} free ({free:.0}%)", d.name, bytes(d.free)),
+                format!("{} has {} free ({free:.0}%)", d.name, storage(d.free)),
                 "Windows and apps need free space for updates, the page file and temporary files.".into(),
                 impact,
                 severity,

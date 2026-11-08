@@ -1,7 +1,8 @@
 import { readValue } from './measured';
 import type { SuJobSnapshot } from '@decryp7/paddock-ui';
-import type { Alert, BackupReport, BootReport, FinderQuery, FinderResult, JobOutput, JobSpec, ProcessSample, SleepReport, SoftwareInventory, UsageReport } from './api.types';
-import { MockBackend, type MockOptions, applyMockPlatform, mockOptionsFromUrl } from './mock-backend';
+import type { Alert, BootReport, FinderQuery, FinderResult, JobOutput, JobSpec, ProcessSample, SleepReport, SoftwareInventory, UsageReport } from './api.types';
+import { SPARK_CAPACITY, appendSeries, type Series } from '../state/live.store';
+import { LIVE_BACKLOG, MockBackend, type MockOptions, applyMockPlatform, mockOptionsFromUrl } from './mock-backend';
 
 const NOW = 1_700_000_000_000;
 const make = (o: MockOptions = {}) => new MockBackend({ latencyMs: 0, now: () => NOW, ...o });
@@ -22,6 +23,24 @@ const proc = (b: MockBackend, name: string): ProcessSample => b.liveUpdate('proc
 const ref = (p: ProcessSample) => ({ pid: p.pid, started: readValue(p.started) });
 
 describe('mockOptionsFromUrl', () => {
+  it('rows=many makes the firewall and the alarm list taller than a window; without it they stay short', async () => {
+    expect(mockOptionsFromUrl('?rows=many').rowsMany).toBe(true);
+    expect(mockOptionsFromUrl('?rows=few')).not.toHaveProperty('rowsMany');
+    const many = new MockBackend({ latencyMs: 0, rowsMany: true });
+    const view = await many.firewall();
+    expect(view.sources[0]?.rules).toHaveLength(60);
+    expect(view.sources[0]?.ruleCount).toBe(60);
+    expect((await many.alarms({ states: [], minSeverity: null, rule: null, includeShelved: true, limit: 500 })).length).toBeGreaterThan(40);
+    const few = new MockBackend({ latencyMs: 0 });
+    expect((await few.firewall()).sources[0]?.rules).toHaveLength(3);
+  });
+
+  it('reads jobstepms as a whole number of milliseconds and ignores anything else', () => {
+    expect(mockOptionsFromUrl('?jobstepms=600000').jobStepMs).toBe(600000);
+    expect(mockOptionsFromUrl('?jobstepms=0').jobStepMs).toBe(0);
+    for (const bad of ['-1', '2.5', 'slow', '']) expect(mockOptionsFromUrl(`?jobstepms=${bad}`)).not.toHaveProperty('jobStepMs');
+  });
+
   it('reads jobsteps as a whole number from 1 to 100 and ignores anything else', () => {
     expect(mockOptionsFromUrl('?jobsteps=6').jobSteps).toBe(6);
     for (const bad of ['0', '101', '2.5', 'many', '']) expect(mockOptionsFromUrl(`?jobsteps=${bad}`)).not.toHaveProperty('jobSteps');
@@ -130,6 +149,25 @@ describe('OS differences', () => {
 });
 
 describe('live data', () => {
+  it('opens a summary subscriber with a full minute of wandering samples, the same every time for one clock', async () => {
+    const collect = async (): Promise<Series> => {
+      const b = make();
+      const got: Parameters<typeof appendSeries>[1][] = [];
+      const stop = b.onLive('summary', (u) => got.push(u));
+      await new Promise((r) => setTimeout(r, 5));
+      stop();
+      return got.reduce<Series>((s, u) => appendSeries(s, u), { cpu: [], memory: [], diskRead: [], diskWrite: [], diskBusy: [], netRx: [], netTx: [], gpu: [] });
+    };
+    expect(LIVE_BACKLOG + 1).toBe(SPARK_CAPACITY);
+    const a = await collect();
+    for (const key of ['cpu', 'memory', 'diskRead', 'diskWrite', 'netRx', 'netTx'] as const) {
+      expect(a[key].length, key).toBe(SPARK_CAPACITY);
+      expect(new Set(a[key]).size, `${key} wanders`).toBeGreaterThan(5);
+    }
+    expect(a.gpu.length).toBe(SPARK_CAPACITY);
+    expect(await collect()).toEqual(a);
+  });
+
   it('is deterministic for a frozen clock and includes processes only on request', () => {
     const a = make().liveUpdate('summary');
     expect(a).toEqual(make().liveUpdate('summary'));
@@ -169,7 +207,7 @@ describe('live data', () => {
       vi.useRealTimers();
     }
   });
-  it('onLive delivers a first update asynchronously, then on the timer; unsubscribing stops both', () => {
+  it('onLive delivers the last minute and the current update asynchronously, then one a second on the timer; unsubscribing stops both', () => {
     vi.useFakeTimers();
     try {
       const b = make();
@@ -177,12 +215,13 @@ describe('live data', () => {
       const stop = b.onLive('summary', l);
       expect(l).not.toHaveBeenCalled();
       vi.advanceTimersByTime(0);
-      expect(l).toHaveBeenCalledTimes(1);
+      const first = LIVE_BACKLOG + 1;
+      expect(l).toHaveBeenCalledTimes(first);
       vi.advanceTimersByTime(2000);
-      expect(l).toHaveBeenCalledTimes(3);
+      expect(l).toHaveBeenCalledTimes(first + 2);
       stop();
       vi.advanceTimersByTime(5000);
-      expect(l).toHaveBeenCalledTimes(3);
+      expect(l).toHaveBeenCalledTimes(first + 2);
       expect(vi.getTimerCount()).toBe(0);
       const gone = vi.fn();
       b.onLive('summary', gone)();
@@ -272,10 +311,10 @@ describe('process actions', () => {
   it('lockers match by path and validate it', async () => {
     const b = make();
     await expect(b.lockers('  ')).rejects.toMatchObject({ code: 'badRequest' });
-    expect((await b.lockers('/Users/alex/dev/dyno/target')).map((l) => l.name)).toContain('rustc');
-    expect((await b.lockers('/x/Chrome/Cookies'))[0]!.name).toBe('Google Chrome');
-    expect((await b.lockers('/var/some.log'))[0]!.name).toBe('dyno-agent');
-    expect(await b.lockers('/nothing/here')).toEqual([]);
+    expect((await b.lockers('/Users/alex/dev/dyno/target')).lockers.map((l) => l.name)).toContain('rustc');
+    expect((await b.lockers('/x/Chrome/Cookies')).lockers[0]!.name).toBe('Google Chrome');
+    expect((await b.lockers('/var/some.log')).lockers[0]!.name).toBe('dyno-agent');
+    expect(await b.lockers('/nothing/here')).toEqual({ lockers: [], notListed: 0, truncated: false });
   });
   it('openLocation fails for processes without a file', async () => {
     const b = make();
@@ -431,6 +470,13 @@ describe('reports, settings, plugins, tray', () => {
     await expect(b.fitTray(300)).resolves.toBeUndefined();
     await expect(b.quitApp()).resolves.toBeUndefined();
   });
+  it('quit says whether the agent keeps measuring and can quit and stop it', async () => {
+    const b = make();
+    await expect(b.quitKeepsMeasuring()).resolves.toBe(false);
+    b.keepsMeasuring = true;
+    await expect(b.quitKeepsMeasuring()).resolves.toBe(true);
+    await expect(b.quitAndStopAgent()).resolves.toBeUndefined();
+  });
 });
 
 describe('mock CPU layout', () => {
@@ -457,7 +503,7 @@ describe('mock CPU layout', () => {
 
 });
 
-describe('mock extras and backup health', () => {
+describe('mock extras', () => {
   const NOW = new Date(2026, 9, 22, 14, 30).getTime();
   const fresh = (o: ConstructorParameters<typeof MockBackend>[0] = {}) => new MockBackend({ latencyMs: 0, now: () => NOW, ...o });
 
@@ -534,7 +580,7 @@ describe('mock extras and backup health', () => {
       expect(await b.startJob(rescan)).toBe(first);
       await expect(b.startJob({ rescanIssues: { query: { days: 7 } } })).rejects.toMatchObject({ code: 'busy' });
       // Different kinds run side by side.
-      expect(await b.startJob('refreshBackup')).not.toBe(first);
+      expect(await b.startJob('sleepBlockers')).not.toBe(first);
     });
 
     it('pushes every status to the sink in order: queued, running, a phase whose count only grows, done', async () => {
@@ -575,7 +621,7 @@ describe('mock extras and backup health', () => {
       expect(statusOf(b, id)).toMatchObject({ state: 'running', phase: null, seq: 2 });
     });
 
-    it('the four tool reads and the backup check hand over their reports; a check of the backups sets the time only when done', async () => {
+    it('the four tool reads hand over their reports', async () => {
       const b = fresh();
       expect(await runJob(b, 'sleepBlockers')).toMatchObject({ sleep: { blockers: expect.any(Array) } });
       expect(await runJob(b, 'bootAnalysis')).toMatchObject({ boot: { boots: expect.any(Array) } });
@@ -583,12 +629,6 @@ describe('mock extras and backup health', () => {
       expect(await runJob(b, 'softwareInventory')).toMatchObject({ software: { items: expect.any(Array) } });
       b.jobSteps = 2;
       b.jobStepMs = 5;
-      const before = (await b.backup()).checkedAt;
-      const id = await b.startJob('refreshBackup');
-      expect((await b.backup()).checkedAt).toBe(before);
-      await new Promise((r) => setTimeout(r, 40));
-      expect(statusOf(b, id).state).toBe('done');
-      expect((await b.backup()).checkedAt).toBe(NOW);
     });
 
     it('only the last few finished jobs are kept', async () => {
@@ -614,7 +654,7 @@ describe('mock extras and backup health', () => {
     expect(await b.maintenance()).toEqual({ enabled: false, openNow: true, closesAt: null, nextOpensAt: null });
   });
 
-  it('saveSettings refuses a bad maintenance window or backup setting with the engine sentences', async () => {
+  it('saveSettings refuses a bad maintenance window with the engine sentences', async () => {
     const b = fresh();
     const s = structuredClone(await b.settings());
     s.maintenance.windows[0]!.days = [];
@@ -625,40 +665,19 @@ describe('mock extras and backup health', () => {
     s.maintenance.windows = [];
     await expect(b.saveSettings(s)).rejects.toMatchObject({ message: expect.stringContaining('Add a window') });
     s.maintenance.enabled = false;
-    s.backup.staleAfterHours = 0;
-    await expect(b.saveSettings(s)).rejects.toMatchObject({ message: expect.stringContaining('2160') });
-    s.backup = { alertWhenStale: true, staleAfterHours: 24, overrides: [{ tool: 'restic', dirs: ['relative'] }] };
-    await expect(b.saveSettings(s)).rejects.toMatchObject({ message: expect.stringContaining('absolute') });
-    s.backup.overrides[0]!.dirs = ['/opt/restic'];
-    await expect(b.saveSettings(s)).resolves.toMatchObject({ backup: { staleAfterHours: 24 } });
-  });
-
-  it('backup: a mix of verdicts, nothing found as a variant, and a check that stamps the time', async () => {
-    const b = fresh();
-    const r = await b.backup();
-    expect(r.statuses.map((s) => [s.tool, s.state])).toEqual([
-      ['timeMachine', 'healthy'],
-      ['restic', 'stale'],
-      ['borg', 'cannotCheck'],
-    ]);
-    expect(r.statuses[0]!.nextStep).toBeNull();
-    expect(r.statuses[1]!.nextStep).toContain('never starts a backup');
-    expect(r.checkedAt).toBe(NOW - 40 * 60_000);
-    const checked = (await runJob(b, 'refreshBackup')) as { backup: BackupReport };
-    expect(checked.backup.checkedAt).toBe(NOW);
-    expect((await b.backup()).checkedAt).toBe(NOW);
-    const none = await fresh({ backup: 'none' }).backup();
-    expect(none.statuses).toEqual([]);
-  });
-
-  it('the URL option backup=none selects the empty variant', () => {
-    expect(mockOptionsFromUrl('?backup=none').backup).toBe('none');
-    expect(mockOptionsFromUrl('?latency=0').backup).toBeUndefined();
   });
 
 });
 
 describe('hardware: throttling, lifespan and baselines', () => {
+  it('keeps the Overview memory graph at the four rows of Disk activity, not stretched to the CPU beside it', async () => {
+    const view = await make().widgetLayout('dashboard');
+    if (!('dashboard' in view)) throw new Error('not the dashboard');
+    const h = (metric: string) => view.dashboard.layout.placements.find((p) => p.widget.kind === 'graph' && p.widget.metric === metric)?.h;
+    expect(h('memory')).toBe(4);
+    expect(h('memory')).toBe(h('diskActivity'));
+  });
+
   it('answers the throttling overview: fine now, a few episodes in the last 30 days', async () => {
     const t = await make().throttling();
     expect(t.reading.verdict).toBe('fine');
@@ -692,5 +711,39 @@ describe('hardware: throttling, lifespan and baselines', () => {
     const b = make();
     expect((await b.weeklyReport(0)).hardware.length).toBe(2);
     expect((await b.weeklyReport(5)).hardware).toEqual([]);
+  });
+});
+
+describe('MockBackend: the helper', () => {
+  it('reads the state it starts in from ?helper= and ignores anything else', async () => {
+    expect(mockOptionsFromUrl('?helper=foreign').helper).toBe('foreign');
+    expect(mockOptionsFromUrl('?helper=root')).not.toHaveProperty('helper');
+    expect((await make().helperStatus()).state).toBe('off');
+    for (const [variant, state] of [['silent', 'notRunning'], ['starting', 'starting'], ['foreign', 'foreign'], ['outdated', 'outdated'], ['ready', 'ready'], ['notIncluded', 'notIncluded']] as const) {
+      expect((await make({ helper: variant }).helperStatus()).state, variant).toBe(state);
+    }
+  });
+
+  it('turning on ends ready, turning off ends off, and the helper job runs its phases with an uncancellable prompt', async () => {
+    const b = make({ jobSteps: 4 });
+    b.jobStepMs = 1;
+    const id = await b.startJob({ helper: { action: 'turnOn' } });
+    const seen = new Set<string>();
+    for (let i = 0; i < 400 && b.jobStatuses().find((j) => j.id === id)!.state !== 'done'; i++) {
+      const s = b.jobStatuses().find((j) => j.id === id)! as SuJobSnapshot & { phase?: { id: string } | null; cancellable: boolean };
+      if (s.phase) seen.add(s.phase.id);
+      if (s.phase?.id === 'prompt') expect(s.cancellable).toBe(false);
+      await new Promise((r) => setTimeout(r, 1));
+    }
+    expect([...seen]).toContain('prompt');
+    expect((await b.jobResult(id)) as JobOutput).toMatchObject({ helper: { state: 'ready' } });
+    expect((await b.helperStatus()).state).toBe('ready');
+    expect(await runJob(make({ helper: 'ready' }), { helper: { action: 'turnOff' } })).toMatchObject({ helper: { state: 'off' } });
+  });
+
+  it('a declined prompt fails the job with the engine\'s words and changes nothing', async () => {
+    const b = make({ fail: new Set(['helperJob']) });
+    await expect(runJob(b, { helper: { action: 'turnOn' } })).rejects.toMatchObject({ message: expect.stringContaining('declined') });
+    expect((await b.helperStatus()).state).toBe('off');
   });
 });

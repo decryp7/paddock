@@ -1,6 +1,6 @@
 import { PdCell, PdTable, PdTableEmpty, type PdColumn, type PdRowAction, type PdRowActionEvent, type PdRowTree, type PdSort } from '@decryp7/paddock-ui/table';
 import { FullTextTip } from '../../shared/full-text-tip';
-import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, OnDestroy, OnInit, afterNextRender, computed, effect, inject, input, linkedSignal, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, effect, inject, input, linkedSignal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { CommandError } from '../../core/api.types';
 import { errorHint } from '../../core/command-error';
@@ -9,6 +9,7 @@ import { formatBytes, formatCount, formatPercent, formatRate, plural } from '../
 import { bar } from '../../shared/heat';
 import { AsyncState } from '../../shared/async-state';
 import { Icon } from '../../shared/icon';
+import { ReadingSource } from '../../core/reading-source';
 import { LiveStore } from '../../state/live.store';
 import { Lookups } from '../lookup/lookups';
 import { ProcessesStore } from '../../state/processes.store';
@@ -21,13 +22,10 @@ import { SearchField } from '../../shared/search-field';
 import { TreeActions } from '../../shared/tree-actions';
 import { MatMenuModule } from '@angular/material/menu';
 
-/** What the table spends around its rows: its header and its frame. */
-const TABLE_CHROME = 28 + 2 + 16 + 8;
-
 /** The task manager: every app and process, grouped by app, as a tree or flat; sortable, searchable, with a details panel and lookups. Read-only: nothing here changes a process. */
 @Component({
   selector: 'dy-processes-page',
-  imports: [FullTextTip, AsyncState, Icon, FormsModule, PdTable, PdCell, PdTableEmpty, ProcessDetailsPanel, MatMenuModule, SearchField, MatTooltip, SuSegmentedControl, MatButton, MatIconButton, TreeActions],
+  imports: [ReadingSource, FullTextTip, AsyncState, Icon, FormsModule, PdTable, PdCell, PdTableEmpty, ProcessDetailsPanel, MatMenuModule, SearchField, MatTooltip, SuSegmentedControl, MatButton, MatIconButton, TreeActions],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="wrap">
@@ -37,7 +35,7 @@ const TABLE_CHROME = 28 + 2 + 16 + 8;
           <p class="num">{{ summary() }}</p>
         </div>
         <pd-segmented-control label="View" [options]="modeSegs()" [value]="store.mode()" (valueChange)="pickMode($event)" />
-        <dy-search-field label="Filter processes" placeholder="Filter by name, user or PID" [value]="store.query()" (valueChange)="store.setQuery($event)" />
+        <dy-search-field label="Filter processes" placeholder="Filter by name, account or PID" [value]="store.query()" (valueChange)="store.setQuery($event)" />
         <dy-tree-actions what="processes" [disabled]="store.mode() === 'flat'" (expandAll)="store.expandAll()" (collapseAll)="store.collapseAll()" />
         <button type="button" matButton="outlined" (click)="lockers()"><dy-icon name="lock" /> What is locking this file?</button>
       </header>
@@ -52,12 +50,14 @@ const TABLE_CHROME = 28 + 2 + 16 + 8;
 
       @if (store.otherUsers(); as o) {
         <p class="note" data-testid="other-users-note">
-          <dy-icon name="info" /> “Other users” is one row for the {{ num(o.count) }} processes of other accounts on this computer. It adds up only the values Dyno can read.
+          <dy-icon name="info" /> “Other users” is one row for the {{ num(o.count) }} processes of other accounts on this computer.
+          @if (store.via()?.others === 'helper') { It is counted by the administrator helper. } @else { It adds up only the values Dyno can read. }
         </p>
       }
+      <div class="source" data-testid="processes-source"><dy-reading-source [via]="store.via()?.processes" [canRetry]="true" (retry)="retry()" /></div>
 
       <div class="body" [class.open]="!!store.selected()">
-        <section class="table card" #frame>
+        <section class="table">
           @if (agentError(); as e) {
             <dy-async [loaded]="false" [error]="e" what="processes" (retry)="retry()" />
           } @else {
@@ -71,7 +71,7 @@ const TABLE_CHROME = 28 + 2 + 16 + 8;
             [rowKey]="rowKey"
             [filterable]="false"
             [state]="store.connected() ? 'ready' : 'loading'"
-            [maxHeight]="bodyMax()"
+            height="fill"
             [rowActions]="actions"
             [sortClearable]="false"
             [sort]="pdSort()"
@@ -141,6 +141,7 @@ const TABLE_CHROME = 28 + 2 + 16 + 8;
     :host { display: block; height: 100%; }
     .chev { width: 22px; height: 22px; padding: 0; flex: none; --icon-size: 14px; }
     .wrap { height: 100%; display: flex; flex-direction: column; padding: var(--sp-5) var(--sp-6) var(--sp-4); gap: var(--sp-3); min-height: 0; }
+    .source { display: contents; }
     .head { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
     .titles { flex: 1; min-width: 200px; display: grid; gap: 2px; }
     .titles p { color: var(--text-3); }
@@ -149,9 +150,10 @@ const TABLE_CHROME = 28 + 2 + 16 + 8;
     .banner span { flex: 1; } .banner small { display: block; color: var(--text-2); }
     .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
     .body.open { grid-template-columns: minmax(0, 1fr) 380px; }
-    /* Under 1100 px the panel goes below the table (the table needs about 610 px), as on the alarms page. */
-    @media (max-width: 1100px) { .body.open { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(240px, 45%); } }
-    .table { min-height: 0; min-width: 0; overflow: hidden; padding: var(--sp-2); }
+    /* Under 1100 px the panel goes below the table (the table needs about 610 px), as on the alarms page. The table row never gets
+       less than its body's minimum (240 px) plus the table's header and frame, and the pane scrolls when both rows do not fit. */
+    @media (max-width: 1100px) { .body.open { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(300px, 1fr) minmax(240px, 45%); overflow-y: auto; } }
+    .table { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
     .nm-cell { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
     .nm { min-width: 0; }
     .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -207,8 +209,8 @@ export class ProcessesPage implements OnInit, OnDestroy {
     { key: 'cpu', sortStart: 'desc', header: 'CPU', value: (r) => r.cpu, align: 'end', width: '84px' },
     { key: 'memory', sortStart: 'desc', header: 'Memory', value: (r) => r.memory, align: 'end', width: '96px' },
     { key: 'disk', sortStart: 'desc', header: 'Disk', value: (r) => r.disk, align: 'end', width: '96px' },
-    { key: 'user', header: 'User', value: (r) => r.user, width: '130px', hideBelow: 760 },
-    { key: 'pid', header: 'PID', value: (r) => r.pid, text: (r) => (r.pid === null ? '' : String(r.pid)), align: 'end', width: '64px', hideBelow: 680 },
+    { key: 'user', header: 'Account', value: (r) => r.user, text: (r) => r.user ?? '—', width: '130px', hideBelow: 600 },
+    { key: 'pid', header: 'PID', value: (r) => r.pid, text: (r) => (r.pid === null ? '' : String(r.pid)), align: 'end', width: '64px', hideBelow: 760 },
   ];
   /** Apps, processes and their children: the table indents, folds and says the levels. */
   protected readonly tree: PdRowTree<Row> = { level: (r) => r.depth + 1, expanded: (r) => (r.expandable ? r.expanded : null) };
@@ -216,10 +218,6 @@ export class ProcessesPage implements OnInit, OnDestroy {
   /** The highlighted row follows the open details panel (a click on a group folds it and leaves the highlight where it was). */
   protected readonly selectedKey = linkedSignal<string | null>(() => this.rows().find((r) => this.isSelected(r))?.key ?? null);
   private readonly rows = this.store.rows;
-  private readonly frame = viewChild<ElementRef<HTMLElement>>('frame');
-  private readonly frameHeight = signal(0);
-  /** The rows scroll inside the table, which fills the pane: what is left under the table's own toolbar and header. */
-  protected readonly bodyMax = computed(() => Math.max(160, this.frameHeight() - TABLE_CHROME));
   /** The row actions; "Other users" is one row for many accounts and has none. */
   protected readonly actions = (r: Row): PdRowAction[] => {
     if (r.kind === 'other') return [];
@@ -231,12 +229,6 @@ export class ProcessesPage implements OnInit, OnDestroy {
   };
 
   constructor() {
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver((entries) => this.frameHeight.set(Math.round(entries[0]?.contentRect.height ?? 0)));
-    afterNextRender(() => {
-      const el = this.frame()?.nativeElement;
-      if (el) observer?.observe(el);
-    });
-    inject(DestroyRef).onDestroy(() => observer?.disconnect());
     effect(() => {
       const q = this.q();
       if (q !== undefined) this.store.setQuery(q);

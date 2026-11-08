@@ -128,8 +128,21 @@ describe('diskTrendOption', () => {
   it('the tooltip formats the free space', () => {
     const o = diskTrendOption(trend('notFilling'), LIGHT) as { tooltip: { formatter: (r: unknown) => string }; yAxis: { axisLabel: { formatter: (v: number) => string } } };
     expect(o.tooltip.formatter([])).toBe('');
-    expect(o.tooltip.formatter([{ axisValue: day, seriesName: 'Free space', value: [day, 2048] }])).toContain('<b>2 KB</b> free');
-    expect(o.yAxis.axisLabel.formatter(1024)).toBe('1 KB');
+    expect(o.tooltip.formatter([{ axisValue: day, seriesName: 'Free space', value: [day, 2000] }])).toContain('<b>2 KB</b> free');
+    expect(o.yAxis.axisLabel.formatter(1000)).toBe('1 KB');
+  });
+});
+
+describe('diskTrendOption value axis', () => {
+  const day = 24 * 3600 * 1000;
+  it('has three ticks (zero, the middle and the top): a short card never crams five labels', () => {
+    for (const free of [400, 500, 7 * 1024 ** 3, 3]) {
+      const points = [{ at: 0, free }, { at: day, free: free / 2 }];
+      const o = diskTrendOption({ disk: 'C:', total: 1000, points, forecast: 'notFilling' }, LIGHT) as { yAxis: { min: number; max: number; interval: number } };
+      expect(o.yAxis.min).toBe(0);
+      expect(o.yAxis.max).toBeGreaterThanOrEqual(free);
+      expect(o.yAxis.max / o.yAxis.interval).toBe(2);
+    }
   });
 });
 

@@ -3,8 +3,8 @@
 //! types the Dyno types are built on, so the app compiles on its own until it imports them from `@decryp7/paddock-ui`.
 
 use super::popover_values::{
-    AlarmRow, AppRow, BackupValue, BackupVerdict, CounterRow, IssueValue, Level, Navigate, Page, PopoverNoticeKind, PopoverSurfaceValues,
-    PopoverValue, SettingsSection, VolumeRow, WidgetActionId,
+    AlarmRow, AppRow, CounterRow, IssueValue, Level, Navigate, Page, PopoverNoticeKind, PopoverSurfaceValues, PopoverValue,
+    SettingsSection, VolumeRow, WidgetActionId,
 };
 use super::*;
 use paddock_commands::testing::{self, WriteMode};
@@ -29,14 +29,29 @@ fn types() -> String {
         pw::NoteCode::decl(),
         pw::Note::decl(),
         pw::Refresh::decl(),
-        pw::Placement::<Dummy>::decl(),
-        pw::Preset::<Dummy>::decl(),
-        pw::Layout::<Dummy>::decl(),
+        pw::Span::decl(),
+        pw::Cells::decl(),
+        pw::StepsInfo::decl(),
+        pw::KindSize::decl(),
+        pw::Block::decl(),
+        pw::Placed::decl(),
+        pw::Arrangement::decl(),
+        pw::PlacementMoves::decl(),
+        pw::PreviewRequest::decl(),
+        pw::PreviewReply::<Dummy>::decl(),
+        pw::Outcome::decl(),
+        pw::Rect::decl(),
+        pw::Dir::decl(),
+        pw::GridGesture::decl(),
+        pw::Moves::decl(),
+        pw::Placement::<Dummy, Dummy>::decl(),
+        pw::Preset::<Dummy, Dummy>::decl(),
+        pw::Layout::<Dummy, Dummy>::decl(),
         pw::Edit::<Dummy>::decl(),
         pw::SurfaceInfo::<Dummy>::decl(),
         pw::KindInfo::<Dummy>::decl(),
         pw::CatalogueInfo::<Dummy, Dummy>::decl(),
-        pw::LayoutView::<Dummy, Dummy, Dummy>::decl(),
+        pw::LayoutView::<Dummy, Dummy, Dummy, Dummy>::decl(),
         pw::WidgetAction::<Dummy>::decl(),
         pw::Progress::decl(),
         pw::WidgetState::<Dummy, Dummy>::decl(),
@@ -57,6 +72,7 @@ fn types() -> String {
         MenuBarItem::decl(),
         MenuBarKind::decl(),
         crate::widgets::menu_bar::NumberFormat::decl(),
+        crate::widgets::number_support::NumberSupport::decl(),
         // What the popup's widgets show.
         crate::widgets::dashboard::ValueTone::decl(),
         crate::counters::CounterUnit::decl(),
@@ -69,8 +85,6 @@ fn types() -> String {
         VolumeRow::decl(),
         CounterRow::decl(),
         AppRow::decl(),
-        BackupVerdict::decl(),
-        BackupValue::decl(),
         IssueValue::decl(),
         PopoverValue::decl(),
         // What the choosers offer and what a reading says.

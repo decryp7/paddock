@@ -32,6 +32,12 @@ pub trait VolumeLister: Send + Sync {
     fn capacity_now(&self, _volume: &ListedVolume) -> Option<(u64, u64)> {
         None
     }
+    /// Capacity and free bytes of one volume of the last listing, read again for the periodic space refresh. Unlike
+    /// [`VolumeLister::capacity_now`] it also answers for a network volume (on a thread given up after a limit); `None` when the
+    /// volume did not answer in time. The default is `capacity_now`.
+    fn space_now(&self, volume: &ListedVolume) -> Option<(u64, u64)> {
+        self.capacity_now(volume)
+    }
 }
 
 /// Runs `f` on its own thread as `role` (rule 52) and waits at most `limit` for the answer; `None` when it did not come in
@@ -149,6 +155,15 @@ impl VolumeLister for OsVolumes {
             return None;
         }
         dyno_platform::volumes::capacity(&volume.volume.mount)
+    }
+
+    fn space_now(&self, volume: &ListedVolume) -> Option<(u64, u64)> {
+        if !matches!(volume.volume.location, dyno_core::disk::volume::VolumeLocation::Network { .. }) {
+            return dyno_platform::volumes::capacity(&volume.volume.mount);
+        }
+        // Never twice in flight for one mount, and given up after the probe limit (the volume is then "not answering").
+        let rx = probe_network(volume.volume.mount.clone(), &dyno_platform::volumes::capacity, &self.inflight)?;
+        rx.recv_timeout(NETWORK_PROBE).ok().flatten()
     }
 
     fn list(&self) -> Vec<ListedVolume> {

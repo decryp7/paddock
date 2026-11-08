@@ -62,6 +62,7 @@ fn live() -> LiveUpdate {
         processes: None,
         groups: None,
         other_users: None,
+        via: Default::default(),
     }
 }
 
@@ -95,7 +96,6 @@ fn a_source_that_has_not_answered_leaves_the_widget_loading() {
         PopoverWidget::disk(VolumeChoice::All),
         PopoverWidget::CpuMemory,
         PopoverWidget::Network,
-        PopoverWidget::BackupHealth,
         PopoverWidget::LastIssue,
         PopoverWidget::PinnedCounters,
         PopoverWidget::TopApps,
@@ -107,7 +107,7 @@ fn a_source_that_has_not_answered_leaves_the_widget_loading() {
 // ---- active alarms ----
 
 #[test]
-fn alarms_are_the_most_severe_then_newest_one_row_and_a_count() {
+fn alarms_are_listed_most_severe_then_newest_with_nothing_left_out() {
     let list = vec![
         alarm(1, "warning", "active", 5 * MINUTE),
         alarm(2, "critical", "acknowledged", 30 * MINUTE),
@@ -120,10 +120,26 @@ fn alarms_are_the_most_severe_then_newest_one_row_and_a_count() {
         panic!()
     };
     let ids: Vec<u64> = rows.iter().map(|r| r.id).collect();
-    assert_eq!(ids, [2]);
-    assert_eq!(more, 3);
+    assert_eq!(ids, [2, 3, 1, 4]);
+    assert_eq!(more, 0);
     assert!(rows[0].acknowledged);
     assert_eq!(rows[0].level, Level::Critical);
+}
+
+#[test]
+fn a_long_alarm_list_is_cut_at_the_documented_bound_and_the_rest_is_counted() {
+    let list: Vec<Alarm> = (1..=u64::try_from(ALARM_ROWS).unwrap() + 5)
+        .map(|id| alarm(id, "warning", "active", 0))
+        .collect();
+    let PopoverValue::ActiveAlarms { rows, more } = value(run(&PopoverWidget::ActiveAlarms, |i| i.alarms = Source::Ready(&list))) else {
+        panic!()
+    };
+    assert_eq!(
+        ALARM_ROWS, 200,
+        "the bound is documented in the changelog and the UI says \"Showing the latest 200\""
+    );
+    assert_eq!(rows.len(), ALARM_ROWS);
+    assert_eq!(more, 5);
 }
 
 #[test]
@@ -165,18 +181,41 @@ fn volumes() -> Vec<Volume> {
 }
 
 #[test]
-fn all_volumes_show_the_system_one_first_two_rows_and_a_count_with_tones() {
+fn all_volumes_show_the_system_one_first_every_row_with_tones() {
     let v = volumes();
     let PopoverValue::DiskSpace { rows, more } = value(run(&PopoverWidget::disk(VolumeChoice::All), |i| i.volumes = Source::Ready(&v)))
     else {
         panic!()
     };
     let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
-    assert_eq!(names, ["Macintosh HD", "Data"]);
-    assert_eq!(more, 3);
+    assert_eq!(names, ["Macintosh HD", "Data", "Odd", "Backup", "NAS"]);
+    assert_eq!(more, 0);
     assert_eq!(rows[0].used_percent, Some(60.0));
     assert_eq!(rows[0].tone, ValueTone::Ok);
     assert_eq!(rows[1].used_percent, Some(25.0));
+}
+
+#[test]
+fn a_long_volume_list_is_cut_at_the_documented_bound_and_the_rest_is_counted() {
+    let v: Vec<Volume> = (0..VOLUME_ROWS + 3)
+        .map(|n| {
+            volume(
+                &format!("/Volumes/V{n}"),
+                &format!("V{n}"),
+                json!("internal"),
+                Some(1000),
+                Some(500),
+                true,
+            )
+        })
+        .collect();
+    let PopoverValue::DiskSpace { rows, more } = value(run(&PopoverWidget::disk(VolumeChoice::All), |i| i.volumes = Source::Ready(&v)))
+    else {
+        panic!()
+    };
+    assert_eq!(VOLUME_ROWS, 200);
+    assert_eq!(rows.len(), VOLUME_ROWS);
+    assert_eq!(more, 3);
 }
 
 #[test]
@@ -211,6 +250,20 @@ fn a_nearly_full_volume_is_bad_and_an_unanswering_share_says_so() {
         panic!()
     };
     assert!(!rows[0].reachable);
+}
+
+#[test]
+fn a_row_carries_when_its_figures_were_read_and_how_old_the_agent_says_they_are() {
+    use crate::disk::volume::Freshness;
+    let mut v = volumes();
+    v[0].measured_at = Some(1_700_000_000_000);
+    v[0].freshness = Freshness::Stale;
+    let PopoverValue::DiskSpace { rows, .. } = value(run(&PopoverWidget::disk(VolumeChoice::All), |i| i.volumes = Source::Ready(&v)))
+    else {
+        panic!()
+    };
+    let row = rows.iter().find(|r| r.id == v[0].id).unwrap();
+    assert_eq!((row.measured_at, row.freshness), (Some(1_700_000_000_000), Freshness::Stale));
 }
 
 #[test]
@@ -332,7 +385,6 @@ fn which_kinds_come_from_the_live_push() {
         PopoverKind::DiskSpace,
         PopoverKind::CpuMemory,
         PopoverKind::Network,
-        PopoverKind::BackupHealth,
         PopoverKind::LastIssue,
         PopoverKind::PinnedCounters,
         PopoverKind::TopApps,
@@ -341,158 +393,6 @@ fn which_kinds_come_from_the_live_push() {
     .filter(|k| is_live_push(*k))
     .collect();
     assert_eq!(live_kinds, [PopoverKind::CpuMemory, PopoverKind::Network, PopoverKind::TopApps]);
-}
-
-// ---- backup ----
-
-fn backup_report(statuses: serde_json::Value, checked: bool, checking: bool) -> BackupReport {
-    serde_json::from_value(json!({
-        "statuses": statuses, "checkedAt": if checked { json!(NOW.0) } else { json!(null) }, "checking": checking, "loginPathUsed": true
-    }))
-    .unwrap()
-}
-
-fn status(name: &str, state: &str, last: Option<i64>) -> serde_json::Value {
-    json!({"tool": "timeMachine", "name": name, "state": state, "lastBackup": last, "summary": format!("{name} {state}"), "nextStep": null})
-}
-
-#[test]
-fn backup_shows_the_tool_that_needs_attention_most() {
-    let r = backup_report(
-        json!([
-            status("Time Machine", "healthy", Some(NOW.0 - HOUR)),
-            status("restic", "stale", Some(NOW.0 - 90 * HOUR))
-        ]),
-        true,
-        false,
-    );
-    let PopoverValue::BackupHealth(b) = value(run(&PopoverWidget::BackupHealth, |i| {
-        i.backup = Source::Ready(BackupInput { report: &r, job: None })
-    })) else {
-        panic!()
-    };
-    assert_eq!((b.name.as_str(), b.state, b.tools), ("restic", BackupVerdict::Stale, 2));
-    assert_eq!(b.last_backup, Some(NOW.0 - 90 * HOUR));
-}
-
-#[test]
-fn no_backup_set_up_is_an_empty_with_the_setup_action() {
-    for r in [
-        backup_report(json!([]), true, false),
-        backup_report(json!([status("Time Machine", "notConfigured", None)]), true, false),
-    ] {
-        let s = run(&PopoverWidget::BackupHealth, |i| {
-            i.backup = Source::Ready(BackupInput { report: &r, job: None })
-        })
-        .unwrap();
-        let S::Empty { title, next, calm, .. } = s else { panic!("{s:?}") };
-        assert!(!calm);
-        assert_eq!(title, "Know when backups ran");
-        assert_eq!(next.unwrap().action, WidgetActionId::SetUpBackupChecks);
-    }
-}
-
-#[test]
-fn a_running_check_shows_the_jobs_own_progress_and_keeps_the_last_value() {
-    let r = backup_report(json!([status("Time Machine", "healthy", Some(NOW.0))]), true, true);
-    let job = JobProgress {
-        phase: "Time Machine".into(),
-        done: 2,
-        unit: "items".into(),
-    };
-    let s = run(&PopoverWidget::BackupHealth, |i| {
-        i.backup = Source::Ready(BackupInput {
-            report: &r,
-            job: Some(job),
-        })
-    })
-    .unwrap();
-    let S::Working {
-        title,
-        phase,
-        progress,
-        last,
-        cancel,
-    } = s
-    else {
-        panic!("{s:?}")
-    };
-    assert_eq!((title.as_str(), phase.as_str()), ("Checking backup", ""));
-    assert_eq!(
-        progress,
-        Progress::Count {
-            done: 2,
-            unit: "items".into()
-        }
-    );
-    assert!(last.is_some() && cancel.is_none());
-}
-
-#[test]
-fn without_a_job_there_is_no_made_up_progress() {
-    // The report says it is checking, but no job reports a count: the last value stays; with no value yet, it is loading.
-    let r = backup_report(json!([status("Time Machine", "healthy", Some(NOW.0 - HOUR))]), true, true);
-    let s = run(&PopoverWidget::BackupHealth, |i| {
-        i.backup = Source::Ready(BackupInput { report: &r, job: None })
-    })
-    .unwrap();
-    assert!(matches!(s, S::Ready { .. }), "{s:?}");
-    let first = backup_report(json!([]), false, true);
-    assert_eq!(
-        run(&PopoverWidget::BackupHealth, |i| i.backup =
-            Source::Ready(BackupInput { report: &first, job: None })),
-        None
-    );
-}
-
-#[test]
-fn slow_values_carry_the_age_of_their_own_source() {
-    let checked = Timestamp(NOW.0 - 10 * MINUTE);
-    let mut r = backup_report(json!([status("Time Machine", "healthy", Some(NOW.0 - HOUR))]), true, false);
-    r.checked_at = Some(checked);
-    let Some(S::Ready { as_of, .. }) = run(&PopoverWidget::BackupHealth, |i| {
-        i.backup = Source::Ready(BackupInput { report: &r, job: None })
-    }) else {
-        panic!()
-    };
-    assert_eq!(as_of, checked.0);
-    let scanned = Timestamp(NOW.0 - 3 * HOUR);
-    let list = vec![issue(1, HOUR)];
-    let Some(S::Ready { as_of, .. }) = run(&PopoverWidget::LastIssue, |i| {
-        i.issues = Source::Ready(IssuesInput {
-            recent: &list,
-            reading: None,
-            scanned_at: Some(scanned),
-        })
-    }) else {
-        panic!()
-    };
-    assert_eq!(as_of, scanned.0);
-    let rs = vec![reading(r"\A\B", json!({"available": 1.0}))];
-    let read_at = Timestamp(NOW.0 - 2 * MINUTE);
-    let Some(S::Ready { as_of, .. }) = run(&PopoverWidget::PinnedCounters, |i| {
-        i.counters = Source::Ready(CountersInput {
-            pinned: 1,
-            readings: &rs,
-            read_at: Some(read_at),
-        })
-    }) else {
-        panic!()
-    };
-    assert_eq!(as_of, read_at.0);
-}
-
-#[test]
-fn a_check_that_could_not_read_any_tool_is_an_error_that_starts_the_check_again() {
-    let r = backup_report(json!([status("Time Machine", "cannotCheck", None)]), true, false);
-    let s = run(&PopoverWidget::BackupHealth, |i| {
-        i.backup = Source::Ready(BackupInput { report: &r, job: None })
-    })
-    .unwrap();
-    let S::Error { title, cause, next } = s else { panic!("{s:?}") };
-    assert_eq!(title, "Couldn't check");
-    assert_eq!(cause.as_deref(), Some("Time Machine cannotCheck"));
-    assert_eq!(next.unwrap().action, WidgetActionId::StartBackupCheck);
 }
 
 // ---- last issue ----
@@ -729,10 +629,6 @@ fn every_action_has_one_effect() {
         nav(super::Navigate::Page(Page::Issues))
     );
     assert_eq!(WidgetActionId::PinCounters.effect(), nav(super::Navigate::Page(Page::Counters)));
-    assert_eq!(
-        WidgetActionId::SetUpBackupChecks.effect(),
-        nav(super::Navigate::Page(Page::Backups))
-    );
     let settings = nav(super::Navigate::Settings(SettingsSection::PopupWidgets));
     assert_eq!(WidgetActionId::ChooseVolume.effect(), settings);
     assert_eq!(WidgetActionId::CustomizeWidgets.effect(), settings);
@@ -741,7 +637,6 @@ fn every_action_has_one_effect() {
         nav(super::Navigate::Settings(SettingsSection::General))
     );
     assert_eq!(WidgetActionId::Retry(id("x")).effect(), Refresh);
-    assert_eq!(WidgetActionId::StartBackupCheck.effect(), StartBackupCheck);
     assert_eq!(WidgetActionId::RestartAgent.effect(), RestartAgent);
 }
 

@@ -113,39 +113,6 @@ fn a_service_for_another_executable_is_registered_again_and_nothing_is_installed
 }
 
 #[test]
-fn linux_writes_a_unit_and_enables_it() {
-    let dir = tempfile::tempdir().unwrap();
-    let s = Script::default();
-    let mut svc = service(Os::Linux, dir.path(), &s);
-    svc.install().unwrap();
-    assert_eq!(
-        s.calls(),
-        vec!["systemctl --user daemon-reload", "systemctl --user enable --now dyno-agent.service"]
-    );
-    let unit = std::fs::read_to_string(dir.path().join(".config/systemd/user/dyno-agent.service")).unwrap();
-    assert!(unit.contains("ExecStart=/opt/dyno/dyno-agent run"));
-    s.answer("is-active", true, "active\n");
-    assert_eq!(
-        svc.status(),
-        Status::Installed {
-            running: true,
-            current: true
-        }
-    );
-    svc.uninstall().unwrap();
-    assert_eq!(svc.status(), Status::NotInstalled);
-}
-
-#[test]
-fn a_failing_command_is_reported_with_what_failed() {
-    let dir = tempfile::tempdir().unwrap();
-    let s = Script::default();
-    s.answer("enable", false, "");
-    let e = service(Os::Linux, dir.path(), &s).install().unwrap_err();
-    assert!(e.contains("systemctl"), "{e}");
-}
-
-#[test]
 fn windows_uses_the_per_user_run_key() {
     let dir = tempfile::tempdir().unwrap();
     let s = Script::default();
@@ -221,7 +188,7 @@ fn macos_bootstraps_only_after_launchd_dropped_the_old_job_and_the_wait_is_bound
 }
 
 #[test]
-fn launchd_and_systemd_supervise_the_agent_and_a_windows_run_entry_does_not() {
+fn launchd_supervises_the_agent_and_a_windows_run_entry_does_not() {
     // macOS: a bootstrapped launch agent (KeepAlive) is started and restarted by launchd.
     let dir = tempfile::tempdir().unwrap();
     let s = Script::default();
@@ -231,34 +198,6 @@ fn launchd_and_systemd_supervise_the_agent_and_a_windows_run_entry_does_not() {
     assert!(mac.supervised());
     mac.uninstall().unwrap();
     assert!(!mac.supervised());
-
-    // Linux: what systemd is running or about to restart (is-active: active, or activating during RestartSec); a unit that
-    // is merely enabled but stopped, failed or inactive supervises nothing now.
-    let dir = tempfile::tempdir().unwrap();
-    let s = Script::default();
-    let mut linux = service(Os::Linux, dir.path(), &s);
-    for (ok, out) in [(false, "inactive\n"), (false, "failed\n"), (false, "unknown\n")] {
-        s.answers.lock().unwrap().clear();
-        s.answer("is-active", ok, out);
-        assert!(!linux.supervised(), "{out:?}");
-    }
-    s.answers.lock().unwrap().clear();
-    s.answer("is-active", true, "active\n");
-    assert!(linux.supervised());
-    s.answers.lock().unwrap().clear();
-    // `systemctl is-active` exits non-zero while a unit is activating (auto-restart); it is still being restarted.
-    s.answer("is-active", false, "activating\n");
-    assert!(linux.supervised());
-    assert!(
-        s.calls().iter().any(|c| c == "systemctl --user is-active dyno-agent.service"),
-        "{:?}",
-        s.calls()
-    );
-    assert!(
-        !s.calls().iter().any(|c| c.contains("is-enabled")),
-        "enabled is not running: {:?}",
-        s.calls()
-    );
 
     // Windows: the Run entry starts the agent at the next logon only; nothing restarts it now.
     let dir = tempfile::tempdir().unwrap();
@@ -276,6 +215,12 @@ fn inside_a_mac_app_bundle_the_service_commands_are_refused_with_the_way_to_mana
     assert!(m.contains("Login Items") && m.contains("same label"), "{m}");
     // The same path on other systems, and a dyno-agent outside a bundle on a Mac, are not refused.
     assert!(refuse_inside_app_bundle(Os::Linux, inside).is_ok());
+    // On Linux the unit is the shared manager's: `Service` writes nothing there.
+    let dir = tempfile::tempdir().unwrap();
+    let mut linux = service(Os::Linux, dir.path(), &Script::default());
+    assert!(linux.install().is_err() && linux.uninstall().is_err());
+    assert_eq!(linux.status(), Status::NotInstalled);
+    assert!(!linux.supervised());
     assert!(refuse_inside_app_bundle(Os::Windows, inside).is_ok());
     assert!(refuse_inside_app_bundle(Os::Mac, Path::new("/usr/local/bin/dyno-agent")).is_ok());
     assert!(

@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
-import { formatBytes } from '@decryp7/paddock-ui/format';
+import { formatStorage } from '@decryp7/paddock-ui/format';
 import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 import { inSentence } from '@decryp7/paddock-ui/shell/storage';
 
@@ -83,7 +83,7 @@ export class PdStorageConfirmDialog implements DialogContent<boolean> {
 
   /** The facts the heading does not repeat: how much goes. */
   protected question(): string {
-    const size = formatBytes(this.bytes());
+    const size = formatStorage(this.bytes());
     return $localize`:@@pd.storage.confirm-question:Up to ${size}:size: is removed.`;
   }
 

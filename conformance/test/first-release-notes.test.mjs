@@ -111,6 +111,45 @@ test('the fail-fast step does nothing for a later release, even when its section
   assert.equal(r.status, 0, r.stdout + r.stderr);
 });
 
+// notes-from-changelog (Dyno 1.1.0): the notes are the CHANGELOG section of the tagged version for every release, so an earlier tag
+// of the app does not hand over to git-cliff (the history behind Dyno 1.1.0 is landing commits git-cliff cannot tell apart).
+const runFromChangelog = (step, dir) =>
+  spawnSync('bash', ['-c', step.run], {
+    cwd: dir,
+    encoding: 'utf8',
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, FIRST_CHANGELOG: 'CHANGELOG.md', NOTES_FROM_CHANGELOG: 'true', TAG: 'dyno-v1.0.0', PREFIX: 'dyno-', CONFIG: '', PATHS: '' },
+  });
+
+test('with notes-from-changelog an earlier tag still gets the CHANGELOG section, not git-cliff', () => {
+  const dir = repo(GOOD, { earlier: ['dyno-v0.9.0'] });
+  const r = runFromChangelog(notesStep, dir);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(notes(dir), /- Dyno measures\.\n- It explains\./);
+  assert.doesNotMatch(notes(dir), /GIT-CLIFF|older|^## /m);
+});
+
+for (const [what, text, message] of [
+  ['a missing section', '# Changelog\n\n## [0.9.0] - 2026-10-01\n\n- older\n', /no '## \[1\.0\.0\]' section/],
+  ['an Unreleased heading', GOOD.replace('2026-11-01', 'Unreleased'), /still says/],
+  ['an empty section', '## [1.0.0] - 2026-11-01\n\n## [0.9.0] - x\n- older\n', /is empty/],
+]) {
+  test(`with notes-from-changelog a later release fails on ${what}, in both steps (it would have gone to git-cliff before)`, () => {
+    for (const step of [notesStep, failFastStep]) {
+      const r = runFromChangelog(step, repo(text, { earlier: ['dyno-v0.9.0'] }));
+      assert.notEqual(r.status, 0, `${step.name} accepted ${what}`);
+      assert.match(r.stdout + r.stderr, message);
+    }
+  });
+}
+
+test('the workflow passes notes-from-changelog to both steps, and Dyno switches it on in both of its release jobs', () => {
+  assert.match(notesStep.text, /NOTES_FROM_CHANGELOG: \$\{\{ inputs\.notes-from-changelog \}\}/);
+  assert.match(failFastStep.text, /NOTES_FROM_CHANGELOG: \$\{\{ inputs\.notes-from-changelog \}\}/);
+  const dyno = readFileSync(join(PADDOCK, '.gitea/workflows/dyno-release.yml'), 'utf8');
+  assert.equal((dyno.match(/^ {6}notes-from-changelog: true$/gm) ?? []).length, 2);
+  assert.equal((dyno.match(/first-release-changelog: apps\/dyno\/CHANGELOG\.md/g) ?? []).length, 2);
+});
+
 /** A bare "origin" that holds the given tags, and a --depth 1 clone of its tag `at` (what a CI checkout holds). */
 function shallowClone(originTags, at, changelog = GOOD) {
   const work = repo(changelog);

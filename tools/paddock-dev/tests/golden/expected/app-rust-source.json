@@ -1,7 +1,7 @@
 {
  "all": false,
  "crates": false,
- "ui": false,
+ "ui": true,
  "eslint": false,
  "conformance": false,
  "tools": false,
@@ -25,6 +25,9 @@
  "why": {
   "app:x": [
    "apps/x/app/src-tauri/src/main.rs"
+  ],
+  "ui": [
+   "ui cause-codes.spec.ts scans apps/x/app/src-tauri/src/main.rs"
   ]
  }
 }

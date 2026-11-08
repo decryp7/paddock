@@ -1,6 +1,6 @@
-import { provideZonelessChangeDetection } from '@angular/core';
+import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { AppMenu, MENU_MODE, MENU_OS, provideMenus } from './app-menu';
+import { AppMenu, MENU_MODE, MENU_OS, provideMenus, QUIT_TITLE } from './app-menu';
 import { APP_QUIT, provideContributions, ContributionRegistry, provideShellContext, provideShellCore, ShellContextHost } from '@decryp7/paddock-ui/shell';
 import { QUIT_COMMAND } from '../generated/menu';
 import { currentOs, currentPlatform } from './keys';
@@ -81,5 +81,25 @@ describe('Quit in a Windows in-app menu', () => {
       titles[os] = item?.kind === 'item' ? item.label : undefined;
     }
     expect(titles).toEqual({ windows: 'Exit', other: 'Quit' });
+  });
+});
+
+describe('Quit with an app-given title', () => {
+  it('shows the title the app gives (the menu says what Quit does) and falls back to the plain one when it gives none', async () => {
+    const title = signal<string | null>('Quit Demo (keeps running)');
+    TestBed.configureTestingModule({
+      providers: [provideZonelessChangeDetection(), provideShellCore(), provideContributions(QUIT_CONTRIBUTIONS), provideMenus({ appName: 'Demo' }), { provide: MENU_OS, useValue: 'windows' }, { provide: MENU_MODE, useValue: 'in-app' }, { provide: QUIT_TITLE, useValue: title }],
+    });
+    await TestBed.inject(ShellContextHost).load();
+    const menu = TestBed.inject(AppMenu);
+    const label = () => {
+      const item = menu.menus().flatMap((m) => m.items).find((n) => n.kind === 'item' && n.id === QUIT_COMMAND);
+      return item?.kind === 'item' ? item.label : undefined;
+    };
+    expect(label()).toBe('Quit Demo (keeps running)');
+    title.set('Quit Demo');
+    expect(label()).toBe('Quit Demo');
+    title.set(null);
+    expect(label()).toBe('Exit');
   });
 });

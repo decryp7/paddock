@@ -67,6 +67,11 @@ pub fn is_held(dirs: &Dirs) -> bool {
     paddock_proc::is_held(&dirs.instance_lock())
 }
 
+/// [`is_held`] that says "unknown" when the lock could not be looked at (an unreadable folder), instead of "free".
+pub fn held_state(dirs: &Dirs) -> paddock_proc::HeldState {
+    paddock_proc::held_state(&dirs.instance_lock())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

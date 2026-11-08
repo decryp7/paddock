@@ -1,17 +1,17 @@
 import type { FinderResult, FoundFile } from '../../core/api.types';
 import {
-  DEFAULT_MIN_MIB,
+  DEFAULT_MIN_MB,
   MIN_SIZES,
   MODES,
   baseName,
   dirName,
   fileRows,
-  mibToBytes,
+  mbToBytes,
   middleEllipsis,
   scanSentence,
 } from './files-model';
 
-const MB = 1024 * 1024;
+const MB = 1000 * 1000;
 const f = (id: string, path: string, mb: number, modified = 0): FoundFile => ({ id, path, bytes: mb * MB, modified });
 
 function result(over: Partial<FinderResult> = {}): FinderResult {
@@ -34,15 +34,15 @@ function result(over: Partial<FinderResult> = {}): FinderResult {
 describe('files model', () => {
   it('offers sizes, modes and respects the engine floor', () => {
     expect(MIN_SIZES.map((s) => s.label)).toEqual(['50 MB', '100 MB', '500 MB', '1 GB']);
-    expect(MIN_SIZES.some((s) => s.mib === DEFAULT_MIN_MIB)).toBe(true);
+    expect(MIN_SIZES.some((s) => s.mb === DEFAULT_MIN_MB)).toBe(true);
     expect(MODES.map((m) => m.mode)).toEqual(['both', 'large', 'duplicates']);
-    expect(mibToBytes(100)).toBe(100 * MB);
+    expect(mbToBytes(100)).toBe(100_000_000);
   });
 
   it('builds one list of rows: large files, then each group, with collapsing', () => {
     const rows = fileRows(result(), new Set());
     expect(rows.filter((r) => r.kind === 'group').map((r) => (r.kind === 'group' ? r.title : ''))).toEqual(['Large files', '3 copies of site.psd', '2 copies of m.onnx']);
-    expect(rows.find((r) => r.kind === 'group')).toMatchObject({ detail: '2 files, 0.98 GB', open: true });
+    expect(rows.find((r) => r.kind === 'group')).toMatchObject({ detail: '2 files, 1 GB', open: true });
     expect(rows.find((r) => r.kind === 'group' && r.key === 'g:dup0')).toMatchObject({ detail: '100 MB each, 200 MB wasted' });
     const collapsed = fileRows(result(), new Set(['g:large', 'g:dup1']));
     expect(collapsed.filter((r) => r.kind === 'file')).toHaveLength(3);

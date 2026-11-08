@@ -4,7 +4,7 @@
 //! fails, `PADDOCK_WRITE_TS=1` rewrites it), so TypeScript can no longer disagree with Rust on kind, modality, size or
 //! commands.
 
-use crate::contract::{CAP_FRACTION, DIALOG_MIN, Kind, Modality, Remembers};
+use crate::contract::{CAP_FRACTION, DIALOG_MIN, Kind, Modality, Remembers, Shrink, SizeMode};
 use crate::table::{DialogTable, Width};
 use std::fmt::Write;
 
@@ -29,7 +29,7 @@ fn list(items: impl IntoIterator<Item = String>) -> String {
     format!("[{}]", items.join(", "))
 }
 
-/// The kind table as TypeScript: widths, floors, defaults, `fits`, `growsOnly` and what each kind remembers.
+/// The kind table as TypeScript: widths, floors, defaults, `sizeMode`, `shrink` and what each kind remembers.
 pub fn kinds_module(regenerate: &str) -> String {
     let mut out = format!(
         "// Generated from paddock-dialogs (the kind table of ADR 0026 §1). Do not edit: {regenerate}.\n\n\
@@ -40,9 +40,9 @@ export type DialogWidthStep = keyof typeof DIALOG_WIDTH_STEPS;\n\n\
 export const DIALOG_MIN_SIZE = {{ width: {}, height: {} }} as const;\n\n\
 /** The largest share of the work area a dialog's preferred size takes; never below its minimum content. */\n\
 export const DIALOG_CAP_FRACTION = {CAP_FRACTION};\n\n\
-/**\n * What each kind fixes: modalities, the default width and preferred height (`null`: measured), its floor, whether it\n\
-\x20* is fitted to its content (`fits`, the one \"is fitted\" table of ADR 0016 decision 7), whether a refit only grows, and\n\
-\x20* what it remembers between openings.\n */\n\
+/**\n * What each kind fixes: modalities, the default width and preferred height (`null`: measured), its floor, its size mode\n\
+\x20* (`height`: the window follows its content, with `shrink` `always` or `never`; `manual`: it keeps the size it was given; ADR 0043\n\
+\x20* §1, the one table) and what it remembers between openings.\n */\n\
 export const DIALOG_KIND_TABLE = {{\n",
         num(Width::Narrow.px()),
         num(Width::Medium.px()),
@@ -61,13 +61,21 @@ export const DIALOG_KIND_TABLE = {{\n",
         });
         let _ = writeln!(
             out,
-            "  {}: {{ modalities: {}, width: {}, height: {}, minSize: {min}, fits: {}, growsOnly: {}, remembers: {}, rememberHeight: {} }},",
+            "  {}: {{ modalities: {}, width: {}, height: {}, minSize: {min}, sizeMode: {}, shrink: {}, remembers: {}, rememberHeight: {} }},",
             kind.as_str(),
             list(modalities),
             num(kind.default_width()),
             kind.default_height().map_or("null".to_string(), num),
-            p.fits_content,
-            p.grows_only,
+            quoted(p.size_mode.as_str()),
+            match p.size_mode {
+                SizeMode::Height {
+                    shrink: Shrink::Always,
+                } => quoted("always"),
+                SizeMode::Height {
+                    shrink: Shrink::Never,
+                } => quoted("never"),
+                SizeMode::Manual => "null".to_string(),
+            },
             quoted(p.remembers.as_str()),
             p.remembers == Remembers::SizeAndOffset,
         );
@@ -165,13 +173,13 @@ mod tests {
     fn the_kinds_module_is_the_kind_table() {
         let ts = kinds_module("regen");
         assert!(ts.contains("narrow: 400, medium: 560, wide: 720"), "{ts}");
-        assert!(ts.contains("  decision: { modalities: ['modal'], width: 400, height: null, minSize: null, fits: true, growsOnly: false, remembers: 'offset', rememberHeight: false },"), "{ts}");
+        assert!(ts.contains("  decision: { modalities: ['modal'], width: 400, height: null, minSize: null, sizeMode: 'height', shrink: 'always', remembers: 'offset', rememberHeight: false },"), "{ts}");
         assert!(
             ts.contains("  form: { modalities: ['modal', 'modeless'], width: 560,"),
             "{ts}"
         );
-        assert!(ts.contains("  viewer: { modalities: ['modeless'], width: 720, height: 560, minSize: { width: 680, height: 560 }, fits: true, growsOnly: true,"), "{ts}");
-        assert!(ts.contains("  tool: { modalities: ['modeless'], width: 960, height: 680, minSize: null, fits: false,"), "{ts}");
+        assert!(ts.contains("  viewer: { modalities: ['modeless'], width: 720, height: 560, minSize: { width: 680, height: 560 }, sizeMode: 'height', shrink: 'never', remembers: 'offset', rememberHeight: false },"), "{ts}");
+        assert!(ts.contains("  tool: { modalities: ['modeless'], width: 960, height: 680, minSize: null, sizeMode: 'manual', shrink: null,"), "{ts}");
         assert!(ts.contains("DIALOG_CAP_FRACTION = 0.75;"), "{ts}");
     }
 }
