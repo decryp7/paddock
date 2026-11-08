@@ -4,7 +4,7 @@
 
 ### Changed
 
-- Wire: `PROTOCOL_VERSION` is 7 (was 6 in 1.1.0). A job that a limit stopped keeps the limit as a type: `WireState::Failed(String)` became `Failed { message, limit }` inside `Message::Job` and `Reply::Job` (positional postcard, so an older app or agent cannot read it; update both). The bytes are pinned by `crates/dyno-core/tests/protocol_golden.rs`.
+- A job that a limit stopped now says which limit it was. The app and the agent of this version talk a new protocol, so an older Dyno app or agent is replaced at the next start instead of being read wrongly.
 
 ## [1.1.0] - 2026-11-06
 
