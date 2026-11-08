@@ -294,6 +294,27 @@ Quoted by [ADR 0041](adr/0041-deterministic-timing-in-tests.md) §5 (the starved
   and the repo's `.cargo/config.toml` already sets `linker = "rust-lld.exe"` for `x86_64-pc-windows-msvc`.
   Raw output: `/Volumes/d7sst7/dev-targets/linker-bench/` (`results.tsv`, `link-only*.tsv`).
 
+### Deno 2 vs Node for the Angular toolchain (2026-11-08)
+
+Note: [docs/research/2026-11-deno-trial.md](research/2026-11-deno-trial.md). Machine: Apple M4 Pro, 14 cores, 64 GB, macOS
+(Darwin 27.2.0), shared with other agents. Node 24.22.0 / npm 11.19.1; Deno 2.9.8 (V8 15.0, Node compat reports 26.5.1);
+Angular CLI 22.2.4, Vitest 5.0.5, Playwright from the lockfile. App `ui/` shell-demo; commit `a6ec5b419`. Six runs per
+cell, interleaved Node, Deno, Node, ...; warm caches (`.angular` cache and `DENO_DIR` kept); 1-minute load at start of each
+run 7 to 18 (median 9 to 14; the harness waits for load below 20, up to 10 min, then measures anyway; the cold runs started
+at load 12 to 34). Wall = elapsed; CPU = user+system of the process tree. Median (min to max).
+
+| Step | Node wall s | Deno wall s | Node CPU s | Deno CPU s | Check |
+|---|---|---|---|---|---|
+| `ng build shell-demo` | 3.76 (3.18 to 103.7) | 5.06 (4.80 to 11.04) | 8.85 (8.30 to 9.37) | 6.95 (6.65 to 8.12) | identical output hash |
+| `ng test workbench-demo` | 5.4 (3.46 to 21.3) | 8.8 (3.33 to 25.7) | 6.79 (6.23 to 7.68) | 5.69 (4.97 to 6.47) | 2/2 both |
+| `ng test paddock-ui` slice (348 tests) | 12.2 (7.61 to 111.3) | 21.2 (7.67 to 48.5) | 23.3 (19.8 to 27.3) | 31.3 (27.4 to 45.7) | 3 of 6 runs red on each side (load timeouts); green runs 7.6/13.4/11.1 s Node, 7.8/12.4/7.7 s Deno |
+| Playwright, 14 tests | 10.48 (10.23 to 12.93) | 10.55 (9.94 to 12.96) | 13.14 (12.7 to 14.2) | 13.20 (12.5 to 14.0) | 14/14 both |
+| Cold build (cache removed; Deno: new `DENO_DIR`), 1 run | 7.7 | 15.3 | 9.1 | 8.5 | load 32 to 34 |
+| Cold workbench test, 1 run | 27.3 | 87.5 | 8.7 | 8.8 | load 12 |
+
+Wall figures at load above 20 are not comparable; CPU and the minimum are the usable columns. Full `shell/**` slice (1208
+tests) under Deno: fails (see the note); Node 1208 of 1208. Raw logs: `/Volumes/d7sst7/dev-targets/scratch/deno-trial/logs/`.
+
 ## Gaps
 
 These are ordered by impact.
