@@ -525,7 +525,7 @@ class ChooserHost {
   readonly preview = signal(false);
   readonly mode = signal<'edit' | 'add'>('edit');
   readonly err = signal<string | null>(null);
-  readonly describe = signal<(p: Placement<W>) => { title: string; summary: string } | null>(() => null);
+  readonly describe = signal<(p: Placement<W>) => { title: string; summary: string; icon?: string } | null>(() => null);
   readonly widgetFor = (k: string): W => ({ kind: k as W['kind'] });
   edits: Edit<W>[] = [];
 }
@@ -571,10 +571,16 @@ describe('pd-widget-chooser', () => {
 
   it("names a row as the app describes it, in the row, its grip and its menu, and keeps the kind's names otherwise", async () => {
     const f = await setup();
-    f.componentInstance.describe.set((p) => (p.id === 'net' ? { title: 'Upload', summary: 'One picture in every style' } : null));
+    const icons = (fx: typeof f) => qa(fx, 'mat-icon.pd-wc-kicon').map((i) => i.getAttribute('data-mat-icon-name'));
+    const kindIcons = icons(f);
+    f.componentInstance.describe.set((p) =>
+      p.id === 'net' ? { title: 'Upload', summary: 'One picture in every style', icon: 'cpu' } : p.id === 'cpu' ? { title: 'Load', summary: 'Its own name, the kind icon' } : null,
+    );
     await settle(f);
     const titles = qa(f, '.pd-wc-item .pd-wc-txt b').slice(0, 4).map((b) => b.textContent);
-    expect(titles).toEqual(['Active alarms', 'Disk space', 'CPU and memory', 'Upload']);
+    expect(titles).toEqual(['Active alarms', 'Disk space', 'Load', 'Upload']);
+    // The described icon, or the kind's when the description has none.
+    expect(icons(f).slice(0, 4)).toEqual([kindIcons[0], kindIcons[1], kindIcons[2], 'cpu']);
     expect(qa(f, '.pd-wc-item .pd-wc-txt span')[3]!.textContent).toBe('One picture in every style');
     expect(grip(f, 3).getAttribute('aria-label')).toBe('Reorder Upload, position 4 of 4');
     expect(qa(f, '.pd-wc-more').map((b) => b.getAttribute('aria-label'))[3]).toBe('More actions for Upload');

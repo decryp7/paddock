@@ -97,7 +97,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
                   <pd-glyph name="grip" [size]="16" />
                 </button>
                 @if (info) {
-                  <mat-icon class="pd-wc-kicon" [svgIcon]="info.icon" />
+                  <mat-icon class="pd-wc-kicon" [svgIcon]="describe()(p)?.icon ?? info.icon" />
                 }
               </span>
               <div class="pd-wc-body" [class.pd-wc-body--more]="editable()">
@@ -310,10 +310,11 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   /** The engine's message for an edit it refused (`WidgetError`'s display text, which the app gets with the error): shown at the top until the app clears it. Clear it (set null) before sending the next edit; a new value arriving after an edit means that edit was refused. */
   readonly error = input<string | null>(null);
   /**
-   * The title and summary of a shown row when the app's engine names it otherwise than its kind (Dyno: a menu-bar number that
-   * shows the network rate is "Upload"); `null` keeps the kind's. Used in the row, its grip, menu, Undo and announcements.
+   * The title, summary and (optionally) icon of a shown row when the app's engine names it otherwise than its kind (Dyno: a
+   * menu-bar number that shows the network rate is "Upload" with the network icon); `null` keeps the kind's. Used in the row,
+   * its grip, menu, Undo and announcements.
    */
-  readonly describe = input<(p: Placement<W>) => { title: string; summary: string } | null>(() => null);
+  readonly describe = input<(p: Placement<W>) => { title: string; summary: string; icon?: string } | null>(() => null);
   /** Show the preview column (project the preview with `slot="preview"`). */
   readonly preview = input(false);
   /** The app's per-kind option controls. */

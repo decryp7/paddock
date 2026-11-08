@@ -5,7 +5,10 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### `@decryp7/paddock-ui/widgets`: the chooser names a row as the app describes it
-- New input `describe` on `pd-widget-chooser`: `(placement) => { title, summary } | null`. A row the app describes shows that title and summary instead of its kind's, in the row, its grip, its menu, the Undo message and the announcements; `null` keeps the kind's. Dyno names a menu-bar item that draws one picture by its metric ("Download").
+- New input `describe` on `pd-widget-chooser`: `(placement) => { title, summary, icon? } | null`. A row the app describes shows that title, summary and icon instead of its kind's, in the row, its grip, its menu, the Undo message and the announcements; `null` keeps the kind's. Dyno names a menu-bar item that draws one picture by its metric ("Download", with the network icon).
+
+### `@decryp7/paddock-ui/shell/menu`: the key platform follows the shell's `data-platform`
+- `currentOs` and `currentPlatform` (and so `KEY_PLATFORM`'s default) read `data-platform` on `<html>` first (set by Rust before the page boots, or by an app's browser mock for another OS), then the user agent. The widget chooser's keyboard hint says Alt on Windows and Linux and Option on macOS also in a browser mock of another OS.
 
 ### `paddock-widgets`: an edit that changes a placement's kind in place
 - New `Edit::ChangeKind { id, widget }` (wire `changeKind`): the placement keeps its id and its place, so whatever an app keys on the id (Dyno's tray icon identity and its pinned position) survives a change of kind. A span the new kind does not allow becomes its first; on a grid surface a rectangle the new kind does not allow is refused ("resize it first"). The kind's limits are checked as for an add; undo restores the old kind. `Replace` still keeps the kind. Additive on the wire; the generated `Edit` type of `@decryp7/paddock-ui/widgets` gains the variant.

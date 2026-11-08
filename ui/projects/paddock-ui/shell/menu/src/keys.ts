@@ -11,16 +11,28 @@ export type KeyPlatform = 'mac' | 'other';
 /** The operating system of this browser, for key hints and menu wording: macOS and iOS, Windows, or any other. */
 export type MenuOs = 'mac' | 'windows' | 'other';
 
-/** The operating system of this browser (the one place that reads the user agent). */
-export function currentOs(nav: { readonly platform?: string; readonly userAgent?: string } | undefined = globalThis.navigator): MenuOs {
+/** The browser fields `currentOs` reads. */
+type Nav = { readonly platform?: string; readonly userAgent?: string } | undefined;
+/** The document field `currentOs` reads. */
+type Doc = { readonly documentElement?: { readonly dataset?: DOMStringMap } } | undefined;
+
+/**
+ * The operating system of this window (the one place that reads the user agent): the shell's `data-platform` on `<html>` when it
+ * is set (by Rust before the page boots, or by an app's browser mock for another OS), else the user agent.
+ */
+export function currentOs(nav: Nav = globalThis.navigator, doc: Doc = globalThis.document): MenuOs {
+  const set = doc?.documentElement?.dataset?.['platform'];
+  if (set === 'macos') return 'mac';
+  if (set === 'windows') return 'windows';
+  if (set === 'linux') return 'other';
   const p = `${nav?.platform ?? ''} ${nav?.userAgent ?? ''}`;
   if (/Mac|iPhone|iPad/.test(p)) return 'mac';
   return /Win/i.test(p) ? 'windows' : 'other';
 }
 
-/** The platform of this browser (Cmd on macOS and iOS). */
-export function currentPlatform(nav: { readonly platform?: string; readonly userAgent?: string } | undefined = globalThis.navigator): KeyPlatform {
-  return currentOs(nav) === 'mac' ? 'mac' : 'other';
+/** The key platform of this window (Cmd on macOS and iOS), from `currentOs`. */
+export function currentPlatform(nav: Nav = globalThis.navigator, doc: Doc = globalThis.document): KeyPlatform {
+  return currentOs(nav, doc) === 'mac' ? 'mac' : 'other';
 }
 
 /** The part of a keyboard event the helpers read. */

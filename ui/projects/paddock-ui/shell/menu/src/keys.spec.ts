@@ -1,4 +1,4 @@
-import { ariaKeyShortcuts, currentPlatform, eventKey, eventPressed, formatKey, isTextEntry, matchesKey, recordKey, textFieldKeeps, type KeyInput } from './keys';
+import { ariaKeyShortcuts, currentOs, currentPlatform, eventKey, eventPressed, formatKey, isTextEntry, matchesKey, recordKey, textFieldKeeps, type KeyInput } from './keys';
 
 const key = (k: string, mods: Partial<KeyInput> = {}): KeyInput => ({ key: k, code: '', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...mods });
 
@@ -8,6 +8,16 @@ describe('key events', () => {
     expect(currentPlatform({ platform: '', userAgent: 'Mozilla/5.0 (iPad; CPU OS 18_0)' })).toBe('mac');
     expect(currentPlatform({ platform: 'Win32' })).toBe('other');
     expect(currentPlatform(undefined)).toBe('other');
+  });
+
+  it("takes the shell's data-platform before the browser's (the window's real OS, or the mock's)", () => {
+    const doc = (platform?: string) => ({ documentElement: { dataset: platform ? { platform } : {} } as unknown as HTMLElement });
+    expect(currentPlatform({ platform: 'MacIntel' }, doc('windows'))).toBe('other');
+    expect(currentPlatform({ platform: 'Win32' }, doc('macos'))).toBe('mac');
+    expect(currentOs({ platform: 'MacIntel' }, doc('windows'))).toBe('windows');
+    expect(currentOs({ platform: 'MacIntel' }, doc('linux'))).toBe('other');
+    expect(currentOs({ platform: 'Win32' }, doc())).toBe('windows');
+    expect(currentOs({ platform: 'Win32' }, doc('beos'))).toBe('windows');
   });
 
   it('spells event keys as bindings do', () => {
