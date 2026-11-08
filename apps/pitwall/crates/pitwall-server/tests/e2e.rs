@@ -606,6 +606,65 @@ async fn tick_until(h: &common::Harness, what: &str, mut done: impl FnMut(&commo
     panic!("timed out waiting for: {what}");
 }
 
+/// CI run 7775: the first start of a freshly built binary on a busy Mac took longer than the child engine's fixed
+/// budget of 200 health polls (about ten seconds), so the load failed with "did not become healthy" while the engine
+/// was only slow. Like the real engine, the child is waited for until it answers or exits, however long it takes.
+#[tokio::test]
+async fn a_child_engine_that_is_slow_to_start_is_waited_for() {
+    let dir = tempfile::tempdir().unwrap();
+    let exe = common::runnable_server(dir.path());
+    let engine = common::ChildEngine {
+        exe,
+        die_after_ms: 600_000,
+        // Longer than the old budget of 200 polls 50 ms apart.
+        listen_after_ms: 11_000,
+        pids: Default::default(),
+    };
+    let h = common::harness_with(dir, false, Some(std::sync::Arc::new(engine))).await;
+    // The load is awaited in process: an HTTP request would add its own client time budget.
+    let id = pitwall_core::ids::ModelId::parse("tiny-q4_k_m").unwrap();
+    let (busy, cold) = h.st.serving.ensure(&id).await.unwrap_or_else(|e| panic!("{e:?}"));
+    assert!(cold.is_some(), "the model was loaded by this call");
+    drop(busy);
+    assert!(h.st.serving.is_loaded(&id));
+    h.st.serving.release_all();
+}
+
+/// A child engine that exits before it answers is reported at once with what it printed, as the real engine does, so
+/// a taken port reads as one (and the load retries on a fresh port) instead of polling a dead process.
+#[tokio::test]
+async fn a_child_engine_that_exits_before_it_answers_is_reported_with_its_reason() {
+    use pitwall_server::engines::Engine as _;
+    let dir = tempfile::tempdir().unwrap();
+    let engine = common::ChildEngine {
+        exe: common::runnable_server(dir.path()),
+        die_after_ms: 600_000,
+        listen_after_ms: 0,
+        pids: Default::default(),
+    };
+    let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let launch = pitwall_core::llama::Launch {
+        model: "tiny.gguf".into(),
+        mmproj: None,
+        alias: "tiny-q4_k_m".into(),
+        port: held.local_addr().unwrap().port(),
+        context: 4096,
+        gpu_layers: None,
+        threads: 0,
+        parallel: 1,
+        kind: pitwall_core::llama::ServeKind::Chat,
+        cache_ram_mib: 0,
+        slot_save_path: None,
+    };
+    let e = engine
+        .start(&launch)
+        .await
+        .err()
+        .expect("the port is held, so the child cannot listen");
+    let m = e.to_string().to_lowercase();
+    assert!(m.contains("exited") && m.contains("in use"), "{m}");
+}
+
 #[tokio::test]
 async fn a_crashing_engine_is_restarted_with_backoff_then_given_up_on_until_retry() {
     let dir = tempfile::tempdir().unwrap();
@@ -616,6 +675,7 @@ async fn a_crashing_engine_is_restarted_with_backoff_then_given_up_on_until_retr
         Some(std::sync::Arc::new(common::ChildEngine {
             exe,
             die_after_ms: 900,
+            listen_after_ms: 0,
             pids: Default::default(),
         })),
     )
@@ -790,6 +850,7 @@ async fn stopping_serving_unloads_every_model_ends_the_engine_processes_and_resu
     let engine = common::ChildEngine {
         exe,
         die_after_ms: 600_000,
+        listen_after_ms: 0,
         pids: pids.clone(),
     };
     let h = common::harness_with(dir, false, Some(std::sync::Arc::new(engine))).await;

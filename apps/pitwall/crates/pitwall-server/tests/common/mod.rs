@@ -427,6 +427,12 @@ pub async fn real_harness(dir: tempfile::TempDir) -> Harness {
 /// Building the Tauri shell (`pitwall-app`) before these tests overwrites `target/debug/pitwall-server` with an empty
 /// placeholder sidecar (`Permission denied`, then `Exec format error`); the assertion names that cause. Copying the
 /// binary elsewhere does not help and is slow on Windows (virus scanners), so the built file is used in place.
+///
+/// The binary is started once (`--version`) and waited for here, before any test step that has a time budget: macOS
+/// checks a freshly linked program on its first start, and while other jobs on the machine start fresh binaries too
+/// (three CI runners on one Mac, CI run 7775) that check queues behind theirs for many seconds (`syspolicyd` busy, the
+/// child still at `_dyld_start`). Later starts of the same file are not checked again.
+#[allow(clippy::disallowed_methods)] // a test starting its own helper binary and waiting for it to end
 pub fn runnable_server(_dir: &std::path::Path) -> String {
     let exe = env!("CARGO_BIN_EXE_pitwall-server");
     let len = std::fs::metadata(exe).map(|m| m.len()).unwrap_or(0);
@@ -434,6 +440,22 @@ pub fn runnable_server(_dir: &std::path::Path) -> String {
         len > 100_000,
         "{exe} is {len} bytes: the Tauri shell was built first and replaced it with its placeholder sidecar; run these tests before building pitwall-app"
     );
+    let started = std::time::Instant::now();
+    let out = std::process::Command::new(exe)
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap_or_else(|e| panic!("{exe} cannot be started: {e}"));
+    let printed = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success() && printed.starts_with("pitwall-server "),
+        "{exe} --version: {} {printed}{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    if started.elapsed() > Duration::from_secs(2) {
+        eprintln!("the first start of {exe} took {:.1} s", started.elapsed().as_secs_f64());
+    }
     exe.to_string()
 }
 
@@ -442,6 +464,8 @@ pub fn runnable_server(_dir: &std::path::Path) -> String {
 pub struct ChildEngine {
     pub exe: String,
     pub die_after_ms: u64,
+    /// How long the child waits before it listens (0: at once): an engine that is slow to come up.
+    pub listen_after_ms: u64,
     /// The process ids started, so a test can check they ended.
     pub pids: Arc<std::sync::Mutex<Vec<u32>>>,
 }
@@ -453,28 +477,62 @@ impl Engine for ChildEngine {
     fn availability(&self) -> Availability {
         Availability::Available
     }
+    /// Like the real engine (`LlamaCpp::start`), waits until the child answers `/health` or exits, never for a fixed
+    /// number of polls: the first start of a freshly built binary on a loaded Mac can take longer than any small
+    /// budget (CI run 7775), and nextest's slow-timeout bounds a child that hangs. An exit is reported with the tail of
+    /// what the child printed, so a taken port reads as one and the load retries on a fresh port.
     #[allow(clippy::disallowed_methods)] // a test starting its own helper binary
     fn start<'a>(&'a self, l: &'a Launch) -> BoxFuture<'a, Result<Running, EngineError>> {
         Box::pin(async move {
-            let child = tokio::process::Command::new(&self.exe)
+            let mut child = tokio::process::Command::new(&self.exe)
                 .args([
                     "--fake-engine",
                     "--die-after-ms",
                     &self.die_after_ms.to_string(),
+                    "--listen-after-ms",
+                    &self.listen_after_ms.to_string(),
                     "--port",
                     &l.port.to_string(),
                 ])
                 .stdin(std::process::Stdio::null())
+                .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true)
                 .spawn()
                 .map_err(|e| EngineError::Start(e.to_string()))?;
-            if let Some(pid) = child.id() {
+            let pid = child.id();
+            if let Some(pid) = pid {
                 self.pids.lock().unwrap().push(pid);
             }
+            let printed = Arc::new(std::sync::Mutex::new(String::new()));
+            let reader = child.stderr.take().map(|mut err| {
+                let printed = printed.clone();
+                tokio::spawn(async move {
+                    use tokio::io::AsyncReadExt;
+                    let mut buf = [0u8; 1024];
+                    while let Ok(n) = err.read(&mut buf).await {
+                        if n == 0 {
+                            break;
+                        }
+                        let mut g = printed.lock().unwrap();
+                        if g.len() < 4000 {
+                            g.push_str(&String::from_utf8_lossy(&buf[..n]));
+                        }
+                    }
+                })
+            });
             let port = LoopbackPort::new(l.port).ok_or_else(|| EngineError::Start("bad port".into()))?;
             let client = Client::new(port, None);
-            for _ in 0..200 {
-                if client.json("GET", "/health", None, Duration::from_secs(2)).await.is_ok() {
+            let started = std::time::Instant::now();
+            let mut next_note = Duration::from_secs(10);
+            loop {
+                if let Ok(Some(status)) = child.try_wait() {
+                    if let Some(r) = reader {
+                        let _ = r.await;
+                    }
+                    let said = printed.lock().unwrap().trim().to_string();
+                    return Err(EngineError::Start(format!("the child engine exited ({status}): {said}")));
+                }
+                if let Ok((200, _)) = client.json("GET", "/health", None, Duration::from_secs(2)).await {
                     return Ok(Running {
                         child: Some(child),
                         guard: None,
@@ -483,9 +541,16 @@ impl Engine for ChildEngine {
                         props: pitwall_core::llama::Props::default(),
                     });
                 }
+                if started.elapsed() >= next_note {
+                    eprintln!(
+                        "the child engine (pid {pid:?}, port {}) is still starting after {} s; waiting until it answers or exits",
+                        l.port,
+                        started.elapsed().as_secs()
+                    );
+                    next_note += Duration::from_secs(10);
+                }
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
-            Err(EngineError::Start("the child engine did not become healthy".into()))
         })
     }
 }
