@@ -6,29 +6,24 @@ const LIVE = '?mockLive=1&mockLiveRate=40&mockLiveRotateMs=0&mockLiveAlertMs=0';
 const BUTTONS = ['Zoom in', 'Zoom out', 'Timeline menu'] as const;
 
 /**
- * The distinct left edges each button had on every animation frame for `ms`. A button that is clicked must stay put
- * between the mouse press and its release, so each must have exactly one.
+ * The distinct left edges each button had after each of `steps` driven ticks of `stepMs`. The page runs on Playwright's clock
+ * (the mock's live timers are driven by `page.clock.runFor`, not by real time), so the same ticks happen on a loaded runner as on
+ * a quiet one. A button that is clicked must stay put between the mouse press and its release, so each must have exactly one.
  */
-function edgesOver(page: Page, ms: number): Promise<Record<string, number[]>> {
-  return page.evaluate(
-    ([names, span]) =>
-      new Promise<Record<string, number[]>>((resolve) => {
-        const seen: Record<string, Set<number>> = Object.fromEntries(names.map((n) => [n, new Set<number>()]));
-        const began = performance.now();
-        const frame = () => {
-          for (const n of names) {
-            const box = document.querySelector(`debrief-timeline-panel [aria-label="${n}"]`)?.getBoundingClientRect();
-            if (box) seen[n]?.add(Math.round(box.left));
-          }
-          // conformance: hang-guard — a fixed sampling window that measures layout, not a wait on a condition; it ends by itself and the test timeout of 60 s bounds it
-          if (performance.now() - began < span) requestAnimationFrame(frame);
-          else resolve(Object.fromEntries(names.map((n) => [n, [...(seen[n] ?? [])]])));
-        };
-        // conformance: hang-guard — a fixed sampling window that measures layout, not a wait on a condition; it ends by itself and the test timeout of 60 s bounds it
-        requestAnimationFrame(frame);
-      }),
-    [[...BUTTONS], ms] as const,
-  );
+async function edgesOver(page: Page, steps: number, stepMs: number): Promise<Record<string, number[]>> {
+  const seen: Record<string, Set<number>> = Object.fromEntries(BUTTONS.map((n) => [n, new Set<number>()]));
+  for (let i = 0; i < steps; i++) {
+    await page.clock.runFor(stepMs);
+    const lefts = await page.evaluate(
+      (names) => names.map((n) => document.querySelector(`debrief-timeline-panel [aria-label="${n}"]`)?.getBoundingClientRect().left),
+      [...BUTTONS],
+    );
+    BUTTONS.forEach((n, k) => {
+      const left = lefts[k];
+      if (left !== undefined) seen[n]?.add(Math.round(left));
+    });
+  }
+  return Object.fromEntries(BUTTONS.map((n) => [n, [...(seen[n] ?? [])]]));
 }
 
 for (const width of [1100, 760]) {
@@ -36,12 +31,13 @@ for (const width of [1100, 760]) {
     test.use({ viewport: { width, height: 800 } });
 
     test('the zoom and menu buttons stay put while live data loads, counts and pauses following', async ({ page }) => {
+      await page.clock.install();
       await openAppWith(page, LIVE);
       await page.locator('debrief-status-bar').getByRole('button', { name: 'Live tail', exact: true }).click();
       await page.getByRole('combobox', { name: 'Live window' }).selectOption('5m');
       await expect(page.getByTestId('follow-toggle')).toBeVisible();
 
-      const following = await edgesOver(page, 4_000);
+      const following = await edgesOver(page, 40, 100);
       for (const n of BUTTONS) expect(following[n], `${n} while following`).toHaveLength(1);
 
       // Nothing focusable in the left group is clipped by it (a button cut off by the lead's edge would stay tabbable).
@@ -58,7 +54,7 @@ for (const width of [1100, 760]) {
       const before = following['Zoom in']?.[0];
       await page.locator('debrief-timeline-panel').getByRole('button', { name: 'Zoom in' }).click();
       await expect(page.getByTestId('resume-following')).toBeVisible();
-      const paused = await edgesOver(page, 1_500);
+      const paused = await edgesOver(page, 15, 100);
       for (const n of BUTTONS) expect(paused[n], `${n} while paused`).toEqual(following[n]);
       expect(paused['Zoom in']?.[0]).toBe(before);
 

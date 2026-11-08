@@ -232,15 +232,13 @@ describe('JobsStore', () => {
       backend.reads[2]?.resolve([snap(1, 5), snap(2, 1)]);
       await retry;
       backend.reads[1]?.reject(new Error('late failure'));
-      // A macrotask: every promise continuation of the late read has run once it fires (not a count of turns).
-      await new Promise<void>((resolve) => {
-        const channel = new MessageChannel();
-        channel.port1.onmessage = () => {
-          channel.port1.close();
-          resolve();
-        };
-        channel.port2.postMessage(0);
-      });
+      // Fake timers for the flush only: advancing them by 0 runs every promise continuation of the late read (not a count of turns).
+      vi.useFakeTimers();
+      try {
+        await vi.advanceTimersByTimeAsync(0);
+      } finally {
+        vi.useRealTimers();
+      }
       expect(store.requestStatus()).toBe('loaded');
       expect(store.jobs().map((j) => j.seq)).toEqual([5, 1]);
     });

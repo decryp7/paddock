@@ -62,16 +62,15 @@ const Plain = signalStore(
   }),
 );
 
-/** A macrotask: every promise continuation queued before it has run once it fires (not a count of turns). */
-const drained = (): Promise<void> =>
-  new Promise<void>((resolve) => {
-    const channel = new MessageChannel();
-    channel.port1.onmessage = () => {
-      channel.port1.close();
-      resolve();
-    };
-    channel.port2.postMessage(0);
-  });
+/** Fake timers for the flush only: advancing them by 0 runs every promise continuation queued before (not a count of turns). */
+const drained = async (): Promise<void> => {
+  vi.useFakeTimers();
+  try {
+    await vi.advanceTimersByTimeAsync(0);
+  } finally {
+    vi.useRealTimers();
+  }
+};
 
 function bed() {
   const backend = new Backend();
