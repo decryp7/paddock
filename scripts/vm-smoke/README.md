@@ -228,8 +228,10 @@ lines per file, each cut at 2000 characters; `STAMPED=n` says whether the lines 
 `node scripts/vm-smoke/defender-rate.mjs --installer <setup.exe> [--installs 10] [--snapshot <name>] [--out <folder>] [--plan]` is the detection-rate run. LOCAL
 ONLY; it drives only the VM that `scripts/vm-win.sh` allows. It reverts and starts the snapshot, runs an EICAR test file as a positive control, then for
 each install reverts again (installs are independent), notes the guest's clock, installs silently as the administrator over SSH (`/S`: a different path
-from the GUI/UAC install of `run-win.mjs`, so the rate is for this path) and counts only the 1116 events at or after that clock that name the program
-or the installer. A write that Defender blocked counts as a detection when its 1116 is there. If the control's 1116 does not name the file with all five
+from the GUI/UAC install of `run-win.mjs`, so the rate is for this path), then polls the events for a settle period (`--settle`, default 120 s; a cloud or
+ML verdict can come after the installer returns) and counts only the 1116 events at or after that clock that name the program or the installer (a match on
+a `Process Name` of `setup.exe` counts too; on a reverted snapshot nothing else runs one). An install that exited non-zero with no detection is `not
+measured`. A broken control stops the run at once (`::error::` with the next step); `--force` runs the installs anyway. A write that Defender blocked counts as a detection when its 1116 is there. If the control's 1116 does not name the file with all five
 fields, every "no detection" is `check broken` (ER-33). Every phase prints its time and duration. `--plan` prints the schedule and touches nothing. The
 unit tests (`defender-evidence.test.mjs`, `defender-rate.test.mjs`) use a fake guest with one cumulative event log; the guest run is scheduled by the
 coordinator.

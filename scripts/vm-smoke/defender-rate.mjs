@@ -3,7 +3,7 @@
 // positive control first (ER-33: without a control that Defender saw, "no detection" is `check broken`). LOCAL ONLY, never CI; it drives only the VM
 // that scripts/vm-win.sh allows (paddock-win11-test). The control string exists only in the guest command line and the guest.
 //
-//   node scripts/vm-smoke/defender-rate.mjs --installer <Dyno_x_x64-setup.exe> [--installs 10] [--snapshot <name>] [--out <folder>] [--plan]
+//   node scripts/vm-smoke/defender-rate.mjs --installer <Dyno_x_x64-setup.exe> [--installs 10] [--snapshot <name>] [--out <folder>] [--settle 120] [--force] [--plan]
 //
 // --plan prints the schedule and exits (no VM is touched). The install is silent (`/S`) under the administrator account over SSH, not the GUI/UAC path
 // of run-win.mjs: the installer's parent process differs from a user's, so a rate from here is a rate for this path.
@@ -12,9 +12,10 @@ import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { isMain } from '../../conformance/src/util/is-main.mjs';
 import { VMWIN } from './vm-win-path.mjs';
 import { checkWinVmTarget } from './win-vm-target.mjs';
-import { controlPs, eventsPs, nowPs, parseNow, parseEvents, planRateRun, runRate, threatPs, versionsPs, versionsLine, DEFAULT_INSTALLS } from './defender-evidence.mjs';
+import { DEFAULT_SETTLE_S, CONTROL_NEXT_STEP, controlPs, eventsPs, nowPs, parseNow, parseEvents, planRateRun, runRate, threatPs, versionsPs, versionsLine, DEFAULT_INSTALLS } from './defender-evidence.mjs';
 
 const GUEST_DIR = 'C:\\paddock-test\\vmcheck';
 const GUEST_EXE = `${GUEST_DIR}\\setup.exe`;
@@ -24,11 +25,14 @@ export function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     if (k === '--plan') { o.plan = true; continue; }
-    if (!['--installer', '--installs', '--snapshot', '--out'].includes(k)) throw new Error(`unknown option: ${k}`);
+    if (k === '--force') { o.force = true; continue; }
+    if (!['--installer', '--installs', '--snapshot', '--out', '--settle'].includes(k)) throw new Error(`unknown option: ${k}`);
     if (argv[i + 1] === undefined) throw new Error(`${k} needs a value`);
     o[k.slice(2)] = argv[++i];
   }
   o.installs = Number(o.installs);
+  o.settleS = o.settle === undefined ? DEFAULT_SETTLE_S : Number(o.settle);
+  if (!Number.isFinite(o.settleS) || o.settleS < 0 || o.settleS > 900) throw new Error('--settle must be 0 to 900 seconds');
   if (!Number.isInteger(o.installs) || o.installs < 1 || o.installs > 50) throw new Error('--installs must be a whole number from 1 to 50');
   if (!o.installer) throw new Error('--installer <setup.exe> is needed');
   return o;
@@ -63,7 +67,9 @@ export function makeAdapter({ vmwin = VMWIN, snapshot, installer, run = (args, m
     },
     install: async () => {
       const out = admin(`$p = Start-Process '${GUEST_EXE}' -ArgumentList '/S' -Wait -PassThru -ErrorAction Stop; 'EXIT=' + $p.ExitCode; 'DONE'`, 900_000);
-      if (!/EXIT=\d+/.test(out)) throw new Error(`the install did not report an exit code: ${out.slice(-200)}`);
+      const m = /EXIT=(-?\d+)/.exec(out);
+      if (!m) throw new Error(`the install did not report an exit code: ${out.slice(-200)}`);
+      return { exit: Number(m[1]) };
     },
     readEvents: async (_i, since) => parseEvents(admin(eventsPs(50, since))),
     threats: async () => admin(threatPs()),
@@ -73,7 +79,7 @@ export function makeAdapter({ vmwin = VMWIN, snapshot, installer, run = (args, m
 async function main(argv) {
   const o = parseArgs(argv);
   const installer = resolve(o.installer);
-  const plan = planRateRun({ snapshot: o.snapshot, installs: o.installs, installer: basename(installer) });
+  const plan = planRateRun({ snapshot: o.snapshot, installs: o.installs, installer: basename(installer), settleS: o.settleS });
   console.log(JSON.stringify(plan, null, 2));
   if (o.plan) return 0;
   if (!existsSync(installer)) throw new Error(`no such installer: ${installer}`);
@@ -81,7 +87,7 @@ async function main(argv) {
   const sha = createHash('sha256').update(readFileSync(installer)).digest('hex');
   console.log(`installer ${basename(installer)} sha256 ${sha}`);
   const g = makeAdapter({ snapshot: o.snapshot, installer });
-  const res = await runRate({ installs: o.installs, ...g, names: ['paddock-setup.exe', basename(installer), 'setup.exe'] });
+  const res = await runRate({ installs: o.installs, settleS: o.settleS, force: o.force, ...g, names: ['paddock-setup.exe', basename(installer), 'setup.exe'] });
   if (o.out) {
     mkdirSync(o.out, { recursive: true });
     const file = join(o.out, `defender-rate-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
@@ -89,9 +95,10 @@ async function main(argv) {
     console.log(`wrote ${file}`);
   }
   console.log(`VERDICT: ${res.summary.verdict}`);
+  if (res.summary.verdict === 'check broken') console.error(`::error::check broken: ${res.summary.note}. Next step: ${CONTROL_NEXT_STEP}`);
   return res.summary.verdict === 'check broken' || res.summary.verdict === 'not measured' ? 3 : 0;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   main(process.argv.slice(2)).then((c) => process.exit(c), (e) => { console.error(`::error::${e.message}. See the phase lines above for where it stopped; the VM is left as it was (revert it with scripts/vm-win.sh revert <snapshot>).`); process.exit(1); });
 }

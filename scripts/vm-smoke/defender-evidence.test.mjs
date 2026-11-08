@@ -173,9 +173,12 @@ function fakeGuest({ detectAt = [], revertClears = true, controlEvents = 'good' 
     versions: async () => 'v',
     control: async () => { g.calls.push('control'); return { events: controlEvents === 'good' ? parseEvents(raw({ t: T(0), id: 1116, m: msg1116(CTRL) })) : [], out: '' }; },
     now: async () => { clock += 1; return T(10 + clock); },
-    install: async (i) => { g.calls.push(`install${i}`); if (detectAt.includes(i)) log.push({ time: T(10 + clock, 30), id: 1116, text: msg1116(SETUP), fields: parseFields(msg1116(SETUP)) }); },
+    install: async (i) => { g.calls.push(`install${i}`); if (detectAt.includes(i)) log.push({ time: T(10 + clock, 30), id: 1116, text: msg1116(SETUP), fields: parseFields(msg1116(SETUP)) }); return { exit: 0 }; },
     readEvents: async (i, since) => (since ? log.filter((e) => Date.parse(e.time) >= Date.parse(since)) : [...log]),
     names: ['paddock-setup.exe'],
+    sleep: async () => {},
+    settleS: 30,
+    pollS: 10,
     lines: [],
   };
   g.logfn = (l) => g.lines.push(l);
@@ -198,13 +201,44 @@ test('even without a revert clearing the log, only events since the install star
   assert.equal(res.summary.detected, 1, 'a detection at install 3 must not show again in installs 4 to 10');
   assert.match(res.runs[3].origin, /^Defender: no detection event/);
 });
-test('a blind control makes the whole run check broken, and phases are logged with durations', async () => {
+test('a blind control stops the run at once with check broken and the next step; --force runs the installs anyway', async () => {
   const g = fakeGuest({ controlEvents: 'none' });
   const res = await runRate({ ...g, installs: 2, log: g.logfn });
   assert.equal(res.summary.verdict, 'check broken');
+  assert.equal(res.stopped, 'control');
+  assert.equal(res.runs.length, 0);
+  assert.equal(g.calls.filter((c) => c.startsWith('install')).length, 0, 'no revert-and-boot cycles after a broken control');
   assert.ok(g.lines.some((l) => /control verdict: BROKEN/.test(l)));
-  assert.ok(g.lines.some((l) => /install 2\/2 install: done in \d+\.\d s/.test(l)));
-  assert.match(g.lines.at(-1), /summary: check broken/);
+  assert.match(g.lines.at(-1), /stopped after the control: check broken\. Next step: /);
+  const f = fakeGuest({ controlEvents: 'none' });
+  const forced = await runRate({ ...f, installs: 2, force: true, log: f.logfn });
+  assert.equal(forced.runs.length, 2);
+  assert.equal(forced.summary.verdict, 'check broken');
+  assert.ok(f.lines.some((l) => /install 2\/2 install: done in \d+\.\d s/.test(l)));
+  assert.match(f.lines.at(-1), /summary: check broken/);
+});
+test('a delayed verdict is waited for: the events are polled for the settle period and the poll stops at the first 1116', async () => {
+  const g = fakeGuest();
+  let reads = 0;
+  const sleeps = [];
+  const late = parseEvents(raw({ t: T(30), id: 1116, m: msg1116(SETUP) }));
+  const res = await runRate({ ...g, installs: 2, settleS: 120, pollS: 10, sleep: async (ms) => sleeps.push(ms), log: g.logfn, readEvents: async (i) => { reads++; return i === 1 && reads === 3 ? late : []; } });
+  assert.equal(res.runs[0].detected, true, 'the third poll of install 1 sees it');
+  assert.equal(sleeps.slice(0, 2).join(), '10000,10000', 'two waits, then the hit ends the poll');
+  assert.equal(res.runs[1].detected, false);
+  assert.equal(res.runs[1].settledS, 120, 'a clean install waited the whole settle period (12 polls)');
+  assert.equal(reads, 3 + 12);
+});
+test('an install that failed with no detection is not measured; a failed install with a detection is a detection', async () => {
+  const g = fakeGuest({ detectAt: [2] });
+  const base = g.install;
+  g.install = async (i) => { await base(i); return { exit: 1 }; };
+  const res = await runRate({ ...g, installs: 2, log: g.logfn });
+  assert.equal(res.runs[0].detected, null);
+  assert.match(res.runs[0].note, /install failed \(exit 1\)/);
+  assert.equal(res.runs[1].detected, true, 'Defender removing the file makes the installer fail; that is the detection');
+  assert.equal(res.summary.notMeasured, 1);
+  assert.equal(res.summary.measured, 1);
 });
 test('a failing phase is logged with its cause and the run stops', async () => {
   const g = fakeGuest();
@@ -212,9 +246,11 @@ test('a failing phase is logged with its cause and the run stops', async () => {
   await assert.rejects(runRate({ ...g, installs: 2, log: g.logfn }), /did not start/);
   assert.ok(g.lines.some((l) => /install 1\/2 install: FAILED after .*did not start/.test(l)));
 });
-test('plan lists 10 installs by default, each from a reverted snapshot', () => {
+test('plan lists 10 installs by default, each from a reverted snapshot, with the settle period', () => {
   const p = planRateRun({ snapshot: 's', installer: 'i' });
   assert.equal(p.installs, 10);
+  assert.equal(p.settleS, 120);
+  assert.match(p.steps[1], /poll the Defender events since the clock for up to 120 s/);
   assert.ok(p.steps.slice(1, 11).every((s) => /revert, start/.test(s)));
 });
 

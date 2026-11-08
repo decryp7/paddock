@@ -9,6 +9,9 @@ test('arguments: the installer is needed, 10 installs by default, nothing else i
   assert.throws(() => parseArgs(['--installer', 'x', '--installs', '0']), /1 to 50/);
   assert.throws(() => parseArgs(['--installer', 'x', '--bogus']), /unknown/);
   assert.throws(() => parseArgs(['--installer']), /needs a value/);
+  assert.equal(parseArgs(['--installer', 'x']).settleS, 120);
+  assert.equal(parseArgs(['--installer', 'x', '--settle', '30', '--force']).force, true);
+  assert.throws(() => parseArgs(['--installer', 'x', '--settle', '5000']), /0 to 900/);
 });
 
 test('the adapter drives vm-win.sh: revert, start, stage the installer; the install is silent and reports its exit code', async () => {
@@ -26,7 +29,7 @@ test('the adapter drives vm-win.sh: revert, start, stage the installer; the inst
   assert.deepEqual(calls.slice(0, 2).map((a) => a.slice(0, 2)), [['revert', 'snap'], ['start']]);
   assert.deepEqual(calls.find((a) => a[0] === 'put'), ['put', 'paddock-admin', '/tmp/Dyno_setup.exe', 'C:\\paddock-test\\vmcheck\\setup.exe']);
   assert.equal(await g.now(), '2026-11-08T04:00:00.0000000Z');
-  await g.install(1);
+  assert.deepEqual(await g.install(1), { exit: 0 });
   assert.ok(calls.some((a) => a[0] === 'ssh' && a[1] === '--admin' && /-ArgumentList '\/S'/.test(a[2])));
   assert.deepEqual(await g.readEvents(1, '2026-11-08T04:00:00.0000000Z'), []);
   assert.match(calls.at(-1)[2], /StartTime/, 'events are read since the clock');

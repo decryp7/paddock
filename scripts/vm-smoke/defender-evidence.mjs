@@ -1,11 +1,11 @@
 // Windows Defender evidence for the install row (Dyno 1.1.1 WP-4, research note R1). Pure parsers and script builders; the SSH calls stay in win-machine.mjs.
-// What it answers: which Defender layer convicted a file (Detection Origin, Type, Source, Process Name, Signature ID), and how often (a rate over N installs).
+// What it answers: which Defender layer convicted a file (Detection Origin, Type, Source, Process Name, the threat ID), and how often (a rate over N installs).
 // ER-33: a "no detection" counts only when an EICAR positive control, run the same way, showed every field in full; otherwise the verdict is `check broken`.
 
 /**
  * The 1116 fields the origin question needs, in the order they are printed. The rendered 1116 message has Name, ID (the threat id), Severity, Category,
  * Path, Detection Origin, Detection Type, Detection Source, User, Process Name, Security intelligence Version and Engine Version; there is no
- * "Signature ID" line (the review of 2026-11-08), so the threat `ID` and the signature version stand in for it.
+ * signature line (captured on the test VM, 2026-11-08), so the threat `ID` stands in for it; the signature version is in the message text.
  */
 export const FIELDS = ['Detection Origin', 'Detection Type', 'Detection Source', 'Process Name', 'ID'];
 export const NOT_IN_EVENT = '(not in event)';
@@ -59,7 +59,7 @@ export function parseFields(text) {
   return fields;
 }
 
-/** A field's value, or NOT_IN_EVENT. "Signature ID" is also printed by some engines as "Signature ID" only; no other spelling is guessed. */
+/** A field's value, or NOT_IN_EVENT. Labels are matched exactly as Windows prints them; no other spelling is guessed. */
 export const fieldOf = (ev, name) => (ev.fields[name] !== undefined && ev.fields[name] !== '' ? ev.fields[name] : NOT_IN_EVENT);
 
 /** The five fields of one detection event, with NOT_IN_EVENT where missing. */
@@ -180,12 +180,15 @@ export function judgeControl(events, controlOut) {
 
 // --- The rate run -------------------------------------------------------------------------------------------------------------------------------------------
 export const DEFAULT_INSTALLS = 10;
+/** After an install, events are polled this long for a delayed (cloud or ML) verdict, stopping early on a 1116. */
+export const DEFAULT_SETTLE_S = 120;
+export const DEFAULT_POLL_S = 10;
 
 /** The plan, printed before the run so the VM schedule is explicit. Every install starts from a reverted snapshot (installs are independent: no upgrade over an earlier one, no cached verdict). */
-export function planRateRun({ snapshot, installs = DEFAULT_INSTALLS, installer }) {
-  return { snapshot, installs, installer, steps: [
+export function planRateRun({ snapshot, installs = DEFAULT_INSTALLS, installer, settleS = DEFAULT_SETTLE_S }) {
+  return { snapshot, installs, installer, settleS, steps: [
     'revert to snapshot, start; read versions and run the EICAR control (it must be detected, in full)',
-    ...Array.from({ length: installs }, (_, i) => `install ${i + 1}/${installs}: revert, start, copy the installer, note the guest clock, install, read the Defender events since the clock`),
+    ...Array.from({ length: installs }, (_, i) => `install ${i + 1}/${installs}: revert, start, copy the installer, note the guest clock, install, poll the Defender events since the clock for up to ${settleS} s (stop at the first 1116)`),
     'summary: detections/installs, per-run origin lines',
   ] };
 }
@@ -219,14 +222,17 @@ export function summarizeRate(runs, control) {
 }
 
 const stamp = () => new Date().toISOString();
+const realSleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * The run itself, with the VM steps injected so it is testable without a guest: `revert()` (revert the snapshot and start; the guest is then clean),
- * `versions()`, `control()` -> { events, out }, `install(i)`, `now()` (the guest's UTC clock), `readEvents(i, since)`. The control runs first (no point
- * installing if the probe is blind), then each install runs from its own reverted snapshot and only the events at or after the clock taken just before
- * it are counted. Every phase is logged with its time and duration (ER-27).
+ * `versions()`, `control()` -> { events, out }, `install(i)` -> { exit } (the installer's exit code), `now()` (the guest's UTC clock),
+ * `readEvents(i, since)`. The control runs first: with a blind control the run stops there (`force` runs on). Then each install runs from its own
+ * reverted snapshot; only events at or after the clock taken just before it are counted, and they are polled for `settleS` seconds (early stop at the first
+ * 1116 naming the program or installer) because a cloud or ML verdict can come after the install returns. An install that exited non-zero with no
+ * detection is `not measured`. Every phase is logged with its time and duration (ER-27).
  */
-export async function runRate({ installs = DEFAULT_INSTALLS, revert, versions, control, install, now, readEvents, names, log = (l) => console.log(l) }) {
+export async function runRate({ installs = DEFAULT_INSTALLS, revert, versions, control, install, now, readEvents, names, settleS = DEFAULT_SETTLE_S, pollS = DEFAULT_POLL_S, sleep = realSleep, force = false, log = (l) => console.log(l) }) {
   const phase = async (label, fn) => {
     const t0 = Date.now();
     log(`${stamp()} ${label}: start`);
@@ -244,18 +250,40 @@ export async function runRate({ installs = DEFAULT_INSTALLS, revert, versions, c
   const controlRaw = await phase('control', control);
   const verdict = judgeControl(controlRaw.events, controlRaw.out);
   log(`${stamp()} control verdict: ${verdict.ok ? 'ok' : 'BROKEN'}: ${verdict.reason}`);
+  if (!verdict.ok && !force) {
+    const summary = summarizeRate([], verdict);
+    log(`${stamp()} stopped after the control: check broken. Next step: ${CONTROL_NEXT_STEP}`);
+    return { versions: ver, control: verdict, runs: [], summary, stopped: 'control' };
+  }
   const runs = [];
   for (let i = 1; i <= installs; i++) {
-    await phase(`install ${i}/${installs} revert`, revert);
-    const since = await phase(`install ${i}/${installs} clock`, now);
-    await phase(`install ${i}/${installs} install`, () => install(i));
-    const events = await phase(`install ${i}/${installs} events`, () => readEvents(i, since));
+    const tag = `install ${i}/${installs}`;
+    await phase(`${tag} revert`, revert);
+    const since = await phase(`${tag} clock`, now);
+    const done = (await phase(`${tag} install`, () => install(i))) ?? {};
+    const exit = Number.isInteger(done.exit) ? done.exit : null;
+    // Poll for a delayed verdict: stop at the first 1116 naming a target, else after the settle period.
+    const t0 = Date.now();
+    let events = null;
+    let settledS = 0;
+    const polls = Math.max(1, Math.ceil(settleS / pollS));
+    for (let k = 0; k < polls; k++) {
+      events = await phase(`${tag} events (poll ${k + 1}/${polls})`, () => readEvents(i, since));
+      if (detectedName(events, names, since)) break;
+      if (k < polls - 1) await sleep(pollS * 1000);
+      settledS = (k + 1) * pollS;
+    }
     const matched = detectedName(events, names, since);
-    const run = { i, since, detected: matched === undefined ? null : matched !== null, matched: matched ?? null, origin: originLine(events, since) };
-    log(`${stamp()} install ${i}/${installs}: ${run.detected === null ? 'not measured (events unreadable)' : run.detected ? `DETECTED (${run.matched})` : 'no detection'}; ${run.origin}`);
+    const failedNoDetection = !matched && exit !== null && exit !== 0;
+    const detected = matched === undefined || failedNoDetection ? null : matched !== null;
+    const run = { i, since, exit, detected, matched: matched ?? null, settledS: matched ? Math.round((Date.now() - t0) / 1000) : settledS, origin: originLine(events, since) };
+    if (failedNoDetection) run.note = `install failed (exit ${exit}) with no detection`;
+    log(`${stamp()} ${tag}: ${detected === null ? `not measured (${failedNoDetection ? run.note : 'events unreadable'})` : detected ? `DETECTED (${run.matched})` : `no detection after ${settledS} s`}; exit ${exit ?? 'unknown'}; ${run.origin}`);
     runs.push(run);
   }
   const summary = summarizeRate(runs, verdict);
   log(`${stamp()} summary: ${summary.verdict} (${summary.detected}/${summary.measured} measured, ${summary.notMeasured} not measured); ${summary.note}`);
   return { versions: ver, control: verdict, runs, summary };
 }
+
+export const CONTROL_NEXT_STEP = 'the probe cannot see a detection; check that real-time protection is on in the snapshot and that the control file is not excluded, then run again (--force only to see the installs anyway)';
