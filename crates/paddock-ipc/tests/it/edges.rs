@@ -372,3 +372,66 @@ fn a_service_serves_its_link_on_a_fixed_endpoint() {
     let peer = client.wait_connected(GUARD).unwrap();
     assert_eq!(peer.call(b"x".to_vec(), T).unwrap(), b"x");
 }
+
+/// Runs the test child's `mode` (an `out-of-files` mode) and returns what the host and the client saw.
+#[cfg(unix)]
+fn out_of_files(mode: &str) -> (String, String, String) {
+    let out = paddock_proc::command(child_program())
+        .arg(mode)
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(
+        out.status.success(),
+        "{text}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let line = |prefix: &str| {
+        text.lines()
+            .find_map(|l| l.strip_prefix(prefix))
+            .unwrap_or_default()
+            .to_string()
+    };
+    (line("host: "), line("client: "), text)
+}
+
+/// A host that has no file descriptor left for a client's handshake (CI run 7763: the agent of a test that leaked
+/// connections) answers that client with a `busy` refusal that says why, instead of closing the connection without a word
+/// ("the host closed the connection during the handshake", which reads like a crash). Its own process: it lowers the limit.
+#[cfg(unix)]
+#[test]
+fn a_host_out_of_file_descriptors_tells_the_client_why_it_cannot_take_the_connection() {
+    let (host, client, text) = out_of_files("out-of-files");
+    assert!(
+        host.starts_with("Err("),
+        "the host must not welcome a client it cannot serve: {text}"
+    );
+    assert!(
+        client.contains("Fail") && client.contains("busy") && client.contains("open files"),
+        "the client must be told why (a busy refusal naming the cause), not see the stream end: {text}"
+    );
+}
+
+/// With no descriptor left even for the accept, the client is accepted on the listener's reserve one and told why (Linux
+/// keeps it queued otherwise: it waited its whole handshake limit while the host failed the same accept every 50 ms, measured
+/// in the CI image). macOS drops a client whose accept failed before the host sees it, so there it ends without a word.
+#[cfg(unix)]
+#[test]
+fn a_host_with_no_descriptor_left_to_accept_tells_the_waiting_client_why() {
+    let (host, client, text) = out_of_files("out-of-files-at-accept");
+    assert!(
+        host.contains("Too many open files") || host.contains("os error"),
+        "{text}"
+    );
+    if cfg!(target_os = "macos") {
+        assert!(
+            client.contains("Fail") || client.contains("Closed"),
+            "{text}"
+        );
+    } else {
+        assert!(
+            client.contains("Fail") && client.contains("busy") && client.contains("open files"),
+            "the waiting client must be told why: {text}"
+        );
+    }
+}

@@ -119,6 +119,18 @@ fn bounded<T>(
     result
 }
 
+/// The refusal a client gets when this side could not start its handshake: [`bounded`] fails before the hello is read only
+/// when it cannot take a copy of the stream (no file descriptor left) or start its watchdog (no thread left). `None` for the
+/// errors whose check answered the client itself, or whose stream is gone (closed, timed out).
+fn cannot_serve(e: &IpcError) -> Option<String> {
+    match e {
+        IpcError::Spawn(why) | IpcError::Io { message: why, .. } => Some(format!(
+            "the host cannot take a connection now ({why}); try again later"
+        )),
+        _ => None,
+    }
+}
+
 /// Where the user id of the other end of a connection comes from (IP1 item 5): the OS for a [`Stream`], a fake in tests.
 pub trait PeerCredentials {
     /// The user id of the process on the other end where the OS tells (Unix); `None` otherwise.
@@ -215,9 +227,21 @@ impl Authenticator {
             );
             return Err(e);
         }
-        let (protocol, claimed) = bounded(&mut stream, &self.clock, self.timeout, |s| {
+        let checked = bounded(&mut stream, &self.clock, self.timeout, |s| {
             self.check_hello(s, os_pid, pid)
-        })?;
+        });
+        let (protocol, claimed) = match checked {
+            Ok(checked) => checked,
+            Err(e) => {
+                // Every refusal says why (CI run 7763): `check_hello` answers its own; a host that cannot start the
+                // handshake at all (no file descriptor or thread left for it) answers here, else the client only sees the
+                // stream end and cannot tell a busy host from a crashed one.
+                if let Some(why) = cannot_serve(&e) {
+                    self.refuse(&mut stream, codes::BUSY, &why);
+                }
+                return Err(e);
+            }
+        };
         Ok(Connection {
             stream,
             limit: self.limit,
@@ -253,6 +277,12 @@ impl Authenticator {
         );
     }
 
+    /// Tells a client that its hello could not be read, and returns the error for this side.
+    fn refuse_invalid(&self, stream: &mut Stream, why: String) -> IpcError {
+        self.refuse(stream, codes::INVALID, &why);
+        IpcError::Protocol(why)
+    }
+
     fn check_hello(
         &self,
         stream: &mut Stream,
@@ -264,10 +294,10 @@ impl Authenticator {
             Err(FrameError::Closed) => {
                 return Err(IpcError::Closed("the client left before its hello".into()));
             }
-            Err(e) => return Err(IpcError::Protocol(e.to_string())),
+            Err(e) => return Err(self.refuse_invalid(stream, e.to_string())),
         };
         let Some((version, protocol)) = frame::handshake_versions(&body) else {
-            return Err(IpcError::Protocol("the first frame was not a hello".into()));
+            return Err(self.refuse_invalid(stream, "the first frame was not a hello".into()));
         };
         if version != frame::VERSION {
             let m = format!(
@@ -291,7 +321,7 @@ impl Authenticator {
             ..
         }) = frame::decode_body(&body)
         else {
-            return Err(IpcError::Protocol("the hello is not valid".into()));
+            return Err(self.refuse_invalid(stream, "the hello is not valid".into()));
         };
         if !self.token.matches(&token) {
             self.refuse(stream, codes::AUTH, "wrong token");
@@ -446,7 +476,21 @@ impl Host {
             match self.listener.accept(ACCEPT_SLICE) {
                 Ok(accepted) => break accepted,
                 Err(e) if e.kind() == io::ErrorKind::TimedOut => {}
-                Err(e) => return Err(e.into()),
+                Err(e) => {
+                    // No descriptor left for the client: it is told so on the listener's reserve one, instead of waiting
+                    // in the queue for its own limit while this side fails the same accept again and again.
+                    if crate::endpoint::out_of_descriptors(&e)
+                        && let Some(turned_away) = self.listener.accept_on_spare()
+                    {
+                        self.auth.refuse_busy(
+                            turned_away,
+                            &format!(
+                                "the host cannot take a connection now ({e}); try again later"
+                            ),
+                        );
+                    }
+                    return Err(e.into());
+                }
             }
         };
         self.auth.authenticate(stream, os_pid, pid)

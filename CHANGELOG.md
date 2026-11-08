@@ -4,6 +4,16 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-ipc`: every refused handshake says why
+
+- A host that cannot start a client's handshake (no file descriptor or thread left for it) answers with a `busy` refusal that names the
+  cause ("the host cannot take a connection now (Too many open files ...); try again later") instead of closing the stream, which the
+  client read as "the host closed the connection during the handshake" (CI run 7763). A first frame that is not a valid hello gets an
+  `invalid` refusal; a client now reads both as `IpcError::Remote`. A client that leaves or stays silent still gets nothing.
+- A Unix `Listener` keeps one file descriptor in reserve: when an accept fails for lack of descriptors, `Host::accept` accepts the waiting
+  client on it and answers `busy` (Linux queued that client until its own 10 s limit while the host failed the same accept every 50 ms).
+  New: `endpoint::Listener::accept_on_spare` and `endpoint::out_of_descriptors`. macOS drops such a client inside the failed accept.
+
 ### `paddock-limits` (new): limits that explain themselves and replies that report what they left out
 
 - A new shared crate (ADR 0019, Debrief ADR 0065; plan 1.4 and B1), a leaf (serde; ts-rs behind `ts`): `LimitId`, `Quantity` with units, `Scope`,

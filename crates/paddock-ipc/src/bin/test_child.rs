@@ -9,6 +9,10 @@
 //! - `stubborn`: `echo` without a lifeline, and keeps running after the connection closes
 //! - `companion <discovery file> <build>`: a link server for that build until a client calls `stop`; prints `ready` once
 //!   its discovery file is written
+//! - `out-of-files` (Unix): a host and a raw client in this process; the host accepts the client with the last free file
+//!   descriptor, so its handshake cannot take the copies it needs. Prints `host: <its error>` and `client: <the first frame
+//!   or the read error>`. Its own process because it lowers this process's limit of open files.
+//! - `out-of-files-at-accept` (Unix): the same with no descriptor left for the host's accept itself.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use paddock_ipc::link::{LinkServer, ServerConfig};
@@ -101,6 +105,10 @@ fn main() {
             drop(stopped.1.wait_while(guard, |s| !*s).unwrap());
             drop(server);
         }
+        #[cfg(unix)]
+        "out-of-files" => out_of_files(true),
+        #[cfg(unix)]
+        "out-of-files-at-accept" => out_of_files(false),
         _ => {
             let r = child::serve(
                 "host",
@@ -111,4 +119,53 @@ fn main() {
             std::process::exit(if r.is_ok() { 0 } else { 2 });
         }
     }
+}
+
+/// The `out-of-files` modes: see the file header; with `for_accept`, one descriptor is free for the host's accept. Every
+/// step is bounded (the client's read has a limit).
+#[cfg(unix)]
+fn out_of_files(for_accept: bool) {
+    use paddock_ipc::Host;
+    use paddock_ipc::endpoint::Stream;
+    use paddock_ipc::frame::{self, Frame};
+    use std::time::Duration;
+    let limit = FrameLimit::default();
+    let mut host = Host::listen(limit, ProtocolVersion::UNVERSIONED).unwrap();
+    // A low limit keeps filling the table cheap; what this process holds now is far below it.
+    let mut limits = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: plain calls with a valid pointer to a local struct.
+    #[allow(unsafe_code)]
+    unsafe {
+        assert_eq!(libc::getrlimit(libc::RLIMIT_NOFILE, &mut limits), 0);
+        limits.rlim_cur = 64;
+        assert_eq!(libc::setrlimit(libc::RLIMIT_NOFILE, &limits), 0);
+    }
+    let mut fillers = Vec::new();
+    while let Ok(f) = std::fs::File::open("/dev/null") {
+        fillers.push(f);
+    }
+    // One free descriptor for the client, then (`for_accept`) one for the host's accept: none is left for what follows.
+    drop(fillers.pop());
+    let mut client = Stream::connect(host.endpoint(), Duration::from_secs(10)).unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    let hello = Frame::Hello {
+        version: frame::VERSION,
+        protocol: ProtocolVersion::UNVERSIONED,
+        token: *host.token().as_bytes(),
+        pid: std::process::id(),
+    };
+    frame::write_frame(&mut client, &hello, limit).unwrap();
+    if for_accept {
+        drop(fillers.pop());
+    }
+    let host_result = host.accept(Duration::from_secs(10));
+    let answer = frame::read_frame(&mut client, limit);
+    drop(fillers);
+    println!("host: {:?}", host_result.map(|_| "welcomed"));
+    println!("client: {answer:?}");
 }

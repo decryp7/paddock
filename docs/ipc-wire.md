@@ -304,7 +304,12 @@ sequenceDiagram
   (`handshake.rs:209`) and, for a launched child, against the pid it started (`handshake.rs:217`).
 - A refusal is `Fail { id: 0, error }` with code `version` or `auth` (`handshake.rs:157`, codes at `error.rs:28` and
   `error.rs:30`); the client maps them to `IpcError::Version` and `IpcError::Auth` (`handshake.rs:390`). A `LinkServer`
-  over its connection cap answers `busy` the same way (`handshake.rs:132`).
+  over its connection cap answers `busy` the same way (`handshake.rs:132`). A host that cannot start the handshake (no file
+  descriptor or thread left) answers `busy` with the cause, and a first frame that is not a valid hello gets `invalid`
+  (`cannot_serve` and `refuse_invalid` in `handshake.rs`; CI run 7763); the client reads both as `IpcError::Remote`. When the
+  accept itself finds no descriptor, a Unix listener accepts the waiting client on one it keeps in reserve and answers `busy`
+  (`Listener::accept_on_spare`; macOS has already dropped that client). Only a client that left, or stayed silent past the
+  limit, gets no answer.
 - Each handshake is bounded by `HANDSHAKE_TIMEOUT` = 10 s on an injected clock; a watchdog thread closes the stream when
   it passes, so a silent client holds only its own handshake (`handshake.rs:22`, `handshake.rs:81`).
 

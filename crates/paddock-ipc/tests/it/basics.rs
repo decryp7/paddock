@@ -362,15 +362,19 @@ fn a_first_frame_that_is_not_a_hello_or_of_another_frame_version_is_refused() {
         let t = std::thread::spawn(move || {
             let mut s = Stream::connect(&name, GUARD).unwrap();
             s.write_all(&bytes).unwrap();
-            let mut rest = Vec::new();
-            let _ = s.read_to_end(&mut rest);
+            frame::read_frame(&mut s, FrameLimit::default())
         });
         let e = h.accept(GUARD).unwrap_err();
         assert!(
             matches!(e, IpcError::Protocol(_) | IpcError::Version(_)),
             "{e:?}"
         );
-        drop(t.join());
+        // The client is told why, not left with a closed stream.
+        let told = t.join().unwrap();
+        assert!(
+            matches!(&told, Ok(Frame::Fail { id: 0, error }) if error.is(codes::INVALID) || error.is(codes::VERSION)),
+            "{told:?}"
+        );
     }
     // A client that leaves before its hello.
     let name = h.endpoint().to_string();

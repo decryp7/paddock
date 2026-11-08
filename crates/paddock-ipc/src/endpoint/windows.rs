@@ -238,6 +238,11 @@ impl Listener {
         &self.name
     }
 
+    /// Windows has no per-process descriptor table to run out of: nothing is held in reserve.
+    pub(super) fn accept_on_spare(&mut self) -> Option<Stream> {
+        None
+    }
+
     pub(super) fn accept(&mut self, timeout: Duration) -> io::Result<(Stream, Option<u32>)> {
         let pipe = self
             .pipe

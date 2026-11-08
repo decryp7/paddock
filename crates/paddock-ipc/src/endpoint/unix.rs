@@ -25,6 +25,19 @@ pub(super) struct Listener {
     name: String,
     /// What to remove on drop: the private directory, or just the socket file of a fixed endpoint.
     cleanup: Cleanup,
+    /// A file descriptor held in reserve: when the process has none left, it is given up for one accept, so a waiting
+    /// client can be told why it is turned away ([`Listener::accept_on_spare`]) instead of waiting in the queue.
+    spare: Option<std::fs::File>,
+}
+
+/// The reserve descriptor: any file that is always there to open.
+fn spare() -> Option<std::fs::File> {
+    std::fs::File::open("/dev/null").ok()
+}
+
+/// Whether `e` says the process (EMFILE) or the system (ENFILE) has no file descriptor left.
+pub(super) fn out_of_descriptors(e: &io::Error) -> bool {
+    matches!(e.raw_os_error(), Some(libc::EMFILE | libc::ENFILE))
 }
 
 enum Cleanup {
@@ -62,6 +75,7 @@ impl Listener {
                         listener,
                         name: sock.to_string_lossy().into_owned(),
                         cleanup: Cleanup::Dir(dir),
+                        spare: spare(),
                     });
                 }
                 Err(e) => {
@@ -105,6 +119,7 @@ impl Listener {
             listener,
             name: path.to_string(),
             cleanup: Cleanup::File(PathBuf::from(path)),
+            spare: spare(),
         })
     }
 
@@ -112,7 +127,19 @@ impl Listener {
         &self.name
     }
 
+    /// Accepts one waiting client on the reserve descriptor, after an accept failed because none was left; `None` when no
+    /// client waits (on macOS the failed accept has already dropped it) or the reserve is in use. The reserve is taken
+    /// again by the next [`Listener::accept`] once the caller has closed the stream.
+    pub(super) fn accept_on_spare(&mut self) -> Option<Stream> {
+        drop(self.spare.take()?);
+        let (s, _) = self.listener.accept().ok()?;
+        Stream::new(s).ok()
+    }
+
     pub(super) fn accept(&mut self, timeout: Duration) -> io::Result<(Stream, Option<u32>)> {
+        if self.spare.is_none() {
+            self.spare = spare();
+        }
         let deadline = Instant::now() + timeout;
         loop {
             match self.listener.accept() {
