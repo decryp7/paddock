@@ -3,7 +3,7 @@
 // folder and the DHCP leases are invented.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, describe, test } from 'node:test';
@@ -20,6 +20,30 @@ after(() => rmSync(scratch, { recursive: true, force: true }));
 
 const run = (script, args, env = {}) =>
   spawnSync('bash', [join(here, script), ...args], { encoding: 'utf8', env: { ...process.env, ...env } });
+
+const fakeFusion = (label) => {
+  const fusion = join(scratch, `${label}Fusion.app`);
+  const log = join(scratch, `${label}-calls.log`);
+  mkdirSync(join(fusion, 'Contents/Library'), { recursive: true });
+  writeFileSync(join(fusion, 'Contents/Library/vmrun'), `#!/bin/sh\necho "vmrun $*" >> '${log}'\necho "Total running VMs: 0"\n`);
+  chmodSync(join(fusion, 'Contents/Library/vmrun'), 0o755);
+  const bin = join(scratch, `${label}-bin`);
+  mkdirSync(bin, { recursive: true });
+  for (const tool of ['ssh', 'scp', 'security', 'hdiutil']) {
+    writeFileSync(join(bin, tool), `#!/bin/sh\necho "${tool} $*" >> '${log}'\nexit 1\n`);
+    chmodSync(join(bin, tool), 0o755);
+  }
+  return { fusion, log, path: `${bin}:${process.env.PATH}` };
+};
+const calls = (log) => (existsSync(log) ? readFileSync(log, 'utf8') : '');
+// Tests that pass no target still get a refused folder and the logging fake Fusion, so they can never default to the real VM.
+const refusedDir = '/Volumes/no-such-volume-paddock-test/vms/no-target';
+const noTargetRun = (script, args, label) => {
+  const f = fakeFusion(label);
+  const r = run(script, args, { PADDOCK_WIN_VM_DIR: refusedDir, FUSION_APP: f.fusion, PATH: f.path });
+  assert.equal(calls(f.log), '');
+  return r;
+};
 
 describe('autounattend.xml.in', () => {
   const xml = read('vm-win/autounattend.xml.in');
@@ -80,13 +104,13 @@ describe('guard rails', () => {
 
   test('prepare.sh refuses a VM folder under $HOME and unknown options', () => {
     assert.match(run('vm-win/prepare.sh', [], { PADDOCK_WIN_VM_DIR: join(homedir(), 'vms') }).stderr, /must not be under \$HOME/);
-    assert.match(run('vm-win/prepare.sh', ['--key=x']).stderr, /unknown option/);
+    assert.match(noTargetRun('vm-win/prepare.sh', ['--key=x'], 'BadOpt').stderr, /unknown option/);
   });
 
   test('prepare.sh checks the language and needs a keyboard for languages it has no default for', () => {
-    assert.match(run('vm-win/prepare.sh', ['--lang', 'english']).stderr, /--lang must look like en-GB/);
-    assert.match(run('vm-win/prepare.sh', ['--lang', 'de-DE']).stderr, /--input-locale is required for de-DE/);
-    assert.match(run('vm-win/prepare.sh', ['--lang', 'de-DE', '--input-locale', 'qwertz']).stderr, /--input-locale must look like/);
+    assert.match(noTargetRun('vm-win/prepare.sh', ['--lang', 'english'], 'Lang1').stderr, /--lang must look like en-GB/);
+    assert.match(noTargetRun('vm-win/prepare.sh', ['--lang', 'de-DE'], 'Lang2').stderr, /--input-locale is required for de-DE/);
+    assert.match(noTargetRun('vm-win/prepare.sh', ['--lang', 'de-DE', '--input-locale', 'qwertz'], 'Lang3').stderr, /--input-locale must look like/);
   });
 
   test('prepare.sh --vm-only refuses to run without a setup disc and changes nothing else', () => {
@@ -101,7 +125,7 @@ describe('guard rails', () => {
   });
 
   test('vm-win.sh rejects unknown commands with usage', () => {
-    const r = run('vm-win.sh', ['destroy']);
+    const r = noTargetRun('vm-win.sh', ['destroy'], 'Destroy');
     assert.equal(r.status, 2);
     assert.match(r.stderr, /vm-win\.sh start/);
   });
@@ -120,21 +144,6 @@ describe('guard rails', () => {
 // P1 of the 2026-11-08 review: only the test VM can ever be the target. A fake VM is allowed only with a fake Fusion AND a
 // folder under $TMPDIR; every other folder is refused before vmrun, ssh, scp or any file write.
 describe('only paddock-win11-test can be the target', () => {
-  const fakeFusion = (label) => {
-    const fusion = join(scratch, `${label}Fusion.app`);
-    const log = join(scratch, `${label}-calls.log`);
-    mkdirSync(join(fusion, 'Contents/Library'), { recursive: true });
-    writeFileSync(join(fusion, 'Contents/Library/vmrun'), `#!/bin/sh\necho "vmrun $*" >> '${log}'\necho "Total running VMs: 0"\n`);
-    chmodSync(join(fusion, 'Contents/Library/vmrun'), 0o755);
-    const bin = join(scratch, `${label}-bin`);
-    mkdirSync(bin, { recursive: true });
-    for (const tool of ['ssh', 'scp', 'security', 'hdiutil']) {
-      writeFileSync(join(bin, tool), `#!/bin/sh\necho "${tool} $*" >> '${log}'\nexit 1\n`);
-      chmodSync(join(bin, tool), 0o755);
-    }
-    return { fusion, log, path: `${bin}:${process.env.PATH}` };
-  };
-  const calls = (log) => (existsSync(log) ? readFileSync(log, 'utf8') : '');
   const commands = [['status'], ['start', '--no-wait'], ['stop'], ['ssh', 'exit 0'], ['put', 'paddock-test', '/etc/hosts', 'C:\\x'], ['gui-setup'],
     ['snapshot', 'x'], ['revert', 'x'], ['ip'], ['install'], ['baseline']];
 
@@ -193,6 +202,31 @@ describe('only paddock-win11-test can be the target', () => {
       assert.notEqual(r.status, 0, `${args[0]} was not refused`);
       assert.match(r.stderr, /only drives/);
     }
+  });
+
+  test('a .vmx with more than one hard link is refused', () => {
+    const f = fakeFusion('HardLink');
+    const dir = fakeVm(join(scratch, 'hard-link'));
+    const vmDir = join(dir, 'vm/paddock-win11-test.vmwarevm');
+    mkdirSync(vmDir, { recursive: true });
+    const outside = join(scratch, 'hard-link-other.vmx');
+    writeFileSync(outside, 'guestOS = "x"\n');
+    linkSync(outside, join(vmDir, 'paddock-win11-test.vmx'));
+    const r = run('vm-win.sh', ['snapshot', 'x'], { PADDOCK_WIN_VM_DIR: dir, FUSION_APP: f.fusion, PATH: f.path });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /hard link/);
+    assert.equal(calls(f.log), '');
+  });
+
+  test('a fake vmrun script that names the installed Fusion is refused (a wrapper)', () => {
+    const f = fakeFusion('Wrapper');
+    const vmrun = join(f.fusion, 'Contents/Library/vmrun');
+    writeFileSync(vmrun, `#!/bin/sh\nexec "/Applications/VMware Fusion.app/Contents/Public/vmrun" "$@"\n`);
+    chmodSync(vmrun, 0o755);
+    const r = run('vm-win.sh', ['status'], { PADDOCK_WIN_VM_DIR: fakeVm(join(scratch, 'wrapper-vm')), FUSION_APP: f.fusion, PATH: f.path });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /names the installed Fusion/);
+    assert.equal(calls(f.log), '');
   });
 
   test('a fake vmrun that is not a script is refused', () => {
