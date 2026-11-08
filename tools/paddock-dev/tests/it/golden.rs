@@ -16,12 +16,19 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-/// A live comparison that cannot run: a note on a workstation, a failure in CI, where a missing oracle or a shallow clone must not
-/// let the comparison pass unseen.
+/// A live comparison that cannot run. On a workstation a note. In CI on Linux (the paddock-ci image has node and a full clone) a
+/// failure, so a missing oracle or a shallow clone cannot let the comparison pass unseen. In CI on a Windows or macOS host leg, which
+/// has no node of its own, a visible `::notice::` (the Linux leg runs the same comparison).
 fn skip(reason: &str) {
     let ci = ["CI", "GITHUB_ACTIONS"].iter().any(|k| std::env::var(k).is_ok_and(|v| v == "true"));
-    assert!(!ci, "the live comparison cannot run in CI: {reason}");
-    eprintln!("skipped: {reason}");
+    if ci && cfg!(target_os = "linux") {
+        panic!("the live comparison cannot run in CI: {reason}");
+    }
+    if ci {
+        println!("::notice::the live comparison against scripts/affected.mjs was skipped on this host: {reason}. The Linux leg runs it.");
+    } else {
+        eprintln!("skipped: {reason}");
+    }
 }
 
 fn repo_root() -> PathBuf {
