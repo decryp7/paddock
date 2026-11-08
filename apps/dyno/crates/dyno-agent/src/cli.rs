@@ -460,6 +460,10 @@ mod tests {
         fn flush(&self) {}
     }
 
+    /// Reads the line `platforms()` logs, the one function `run()` builds its platform with. It does not start the agent: `run()` also installs the
+    /// agent's own logger, takes the instance lock and blocks until a signal, so a test cannot go through it cheaply; a `run()` that stopped calling
+    /// `platforms()` would not be caught here. The global logger needs one process per test (nextest's default; `cargo test` is fine while no other
+    /// `dyno-agent` lib test installs a logger or builds a platform).
     #[test]
     fn the_agent_logs_one_platform_wired_line_naming_every_port_at_start() {
         static CAPTURE: Capture = Capture(std::sync::Mutex::new(Vec::new()));
