@@ -1882,3 +1882,9 @@ test('a release or installer job never runs a downloaded ./dev: PADDOCK_DEV_DOWN
   }
   assert.equal(tagJobs, 4, 'the four ci.yml jobs that take a host slot');
 });
+
+test('dev-tool.yml publishes only from main, in every job (ADR 0022: the store is written only by main)', () => {
+  const jobs = parseJobs(readFileSync(join(PADDOCK, '.gitea', 'workflows', 'dev-tool.yml'), 'utf8'));
+  assert.ok(jobs.length >= 2, 'the publish jobs');
+  for (const job of jobs) assert.match(job.text, /\n    if: \$\{\{ github\.ref == 'refs\/heads\/main'/, `dev-tool.yml:${job.id}: runs only on refs/heads/main`);
+});
