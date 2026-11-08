@@ -115,11 +115,29 @@ test.describe('chat composer', () => {
     await expect(summary).toHaveAttribute('aria-expanded', 'true');
     expect((await chat.getByTestId('assistant-files').boundingBox())!.height).toBeGreaterThan(folded.height);
     await inPane();
+    // Opened, it still scrolls and says so with a fade at its foot (review 3 P2-5); the log keeps its floor (P2-3).
+    await expect(chat.getByTestId('assistant-files')).toHaveClass(/scrolls/);
+    expect((await chat.getByTestId('assistant-log').boundingBox())!.height).toBeGreaterThanOrEqual(55);
     await summary.click();
     await expect(summary).toHaveAttribute('aria-expanded', 'false');
     // A tall window shows every row, with no summary.
     await page.setViewportSize({ width: 1440, height: 900 });
     await expect(summary).toHaveCount(0);
+  });
+
+  test('in a very short pane the log keeps a floor of about two lines and the question and Send stay in the pane (review 3 P2-3)', async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 600 });
+    const chat = await chatWithFile(page);
+    await chat.getByTestId('assistant-file-input').setInputFiles(photo);
+    await expect(chat.getByTestId('assistant-failure')).toBeVisible();
+    const pane = (await chat.locator('pd-assistant').boundingBox())!;
+    expect(pane.height).toBeLessThan(440);
+    await expect(chat.locator('pd-assistant')).toHaveClass(/short/);
+    expect((await chat.getByTestId('assistant-log').boundingBox())!.height).toBeGreaterThanOrEqual(55);
+    for (const id of ['assistant-input', 'assistant-send']) {
+      const b = (await chat.getByTestId(id).boundingBox())!;
+      expect(b.y + b.height, id).toBeLessThanOrEqual(pane.y + pane.height);
+    }
   });
 
   test('the pane has no axe violations with a file attached, a sent file and the meter, in light and dark', async ({ page }) => {

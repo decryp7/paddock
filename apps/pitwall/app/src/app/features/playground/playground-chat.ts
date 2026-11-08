@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, signal } from '@angular/core';
+import { afterNextRender, ChangeDetectionStrategy, Component, computed, DestroyRef, ElementRef, inject, signal, viewChild } from '@angular/core';
 import { MatButton } from '@angular/material/button';
 import { MatFormField, MatLabel } from '@angular/material/form-field';
 import { MatOptgroup, MatOption, MatSelect } from '@angular/material/select';
@@ -6,7 +6,7 @@ import { MAT_SLIDE_TOGGLE_DEFAULT_OPTIONS, MatSlideToggle } from '@angular/mater
 import { CONFIRM_DIALOG_ID } from '@decryp7/paddock-ui/shell/confirm';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { OPEN_SETTINGS } from '@decryp7/paddock-ui/shell/notify';
-import { AssistantAttachments, AssistantBackend, AssistantSpeech, PdAssistant } from '@decryp7/paddock-ui/workbench/assistant';
+import { ASSISTANT_SHORT_PANE_PX, AssistantAttachments, AssistantBackend, AssistantSpeech, PdAssistant } from '@decryp7/paddock-ui/workbench/assistant';
 import type { ChatModel, ChatModels, CommandError, ConnectedApp } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
@@ -136,9 +136,10 @@ export class PlaygroundChat {
     }
     return out;
   });
-  /** The window is short (under about 760 px tall): the empty chat leaves "Connected apps…" to the bar above it, so the log
-   *  keeps its room (WP-4b review 2). */
+  /** The chat pane is short (the pane's own fold height): the empty chat leaves "Connected apps…" to the bar above it, so the
+   *  log keeps its room (WP-4b reviews 2 and 3). */
   protected readonly short = signal(false);
+  private readonly pane = viewChild(PdAssistant, { read: ElementRef<HTMLElement> });
   /** Some app lends its tools now (the empty chat then needs no "Connected apps…"). */
   protected readonly anyConnected = computed(() => (this.apps() ?? []).some((a) => a.connected));
 
@@ -164,13 +165,14 @@ export class PlaygroundChat {
     const stop = this.backend.onConnectedApps((apps) => this.apps.set(apps));
     const destroy = inject(DestroyRef);
     destroy.onDestroy(stop);
-    if (typeof matchMedia === 'function') {
-      const query = matchMedia('(max-height: 760px)');
-      this.short.set(query.matches);
-      const change = (e: MediaQueryListEvent): void => this.short.set(e.matches);
-      query.addEventListener('change', change);
-      destroy.onDestroy(() => query.removeEventListener('change', change));
-    }
+    // The pane's own height decides, as the pane's folding does (DOM only: a measurement, not a signal).
+    afterNextRender(() => {
+      const pane = this.pane()?.nativeElement;
+      if (!pane || typeof ResizeObserver === 'undefined') return;
+      const watch = new ResizeObserver(() => this.short.set(pane.clientHeight > 0 && pane.clientHeight < ASSISTANT_SHORT_PANE_PX));
+      watch.observe(pane);
+      destroy.onDestroy(() => watch.disconnect());
+    });
   }
 
   async load(): Promise<void> {
