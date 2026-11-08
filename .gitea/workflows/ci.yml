@@ -77,7 +77,7 @@ jobs:
           PLAN_BASE: ${{ github.event.inputs.base }}
           PLAN_APP: ${{ inputs.app }}
           PLAN_WEBKIT: ${{ (inputs.webkit == true || inputs.webkit == 'true') && '1' || '' }}
-        run: ./dev plan --ci
+        run: node scripts/affected.mjs --ci
 
   ui:
     needs: [plan]
@@ -569,8 +569,8 @@ jobs:
           PLAN_BASE: ${{ needs.plan.outputs.base }}
           INPUT_APP: ${{ inputs.app }}
         run: |
-          range="$(./dev plan --commit-range)"
-          flags="$(./dev plan --commit-flags)"
+          range="$(node scripts/affected.mjs --commit-range)"
+          flags="$(node scripts/affected.mjs --commit-flags)"
           echo "commit-lint range: $flags $range"
           if [ "$range" = "skip" ]; then exit 0; fi
           # shellcheck disable=SC2086 # the flags are zero or one fixed option

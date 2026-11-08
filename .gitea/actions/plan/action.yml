@@ -53,6 +53,6 @@ runs:
         GITHUB_OUTPUT="$out" node "${{ github.action_path }}/../../../conformance/ci/plan.mjs"
         run=$(sed -n 's/^run=//p' "$out")
         if [ "$run" = true ] && [ -n "$APP" ]; then
-          run=$(bash "${{ github.action_path }}/../../../dev" plan --ci --app "$APP")
+          run=$(node "${{ github.action_path }}/../../../scripts/affected.mjs" --ci --app "$APP")
         fi
         echo "run=$run" >> "$GITHUB_OUTPUT"

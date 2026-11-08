@@ -746,14 +746,17 @@ fn ci_yml_wires_the_plan_job_outputs_and_the_commits_job_asks_for_its_range() {
     let commits = &wf.jobs.iter().find(|(k, _)| k == "commits").expect("a commits job").1;
     assert!(
         commits.contains("needs: [plan]")
-            && commits.contains("./dev plan --commit-range")
-            && commits.contains("./dev plan --commit-flags")
+            && (commits.contains("./dev plan --commit-range") || commits.contains("node scripts/affected.mjs --commit-range"))
+            && (commits.contains("./dev plan --commit-flags") || commits.contains("node scripts/affected.mjs --commit-flags"))
             && commits.contains("fetch-depth: 0")
     );
     for v in ["EVENT", "REF", "BEFORE", "SHA", "BASE_REF", "PLAN_BASE", "INPUT_APP"] {
         assert!(commits.contains(&format!("{v}: ${{{{")), "{v}");
     }
-    assert!(plan_job.contains("./dev plan --ci"), "the plan job calls dev plan");
+    assert!(
+        plan_job.contains("./dev plan --ci") || plan_job.contains("node scripts/affected.mjs --ci"),
+        "the plan job calls a planner"
+    );
 }
 
 #[test]
