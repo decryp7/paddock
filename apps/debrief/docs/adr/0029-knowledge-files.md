@@ -1,6 +1,6 @@
 # 29. Knowledge files: the user's Markdown notes as background for every AI feature
 
-- Status: accepted (2026-10-21)
+- Status: accepted (2026-10-21); amended by [ADR 0070](0070-pitwall-is-debriefs-only-ai-engine.md) (the context budget is Pitwall's)
 - Related: ADR 0009 (local models), ADR 0012 (jobs), ADR 0016 (one command table, typed errors), ADR 0025 (vision),
   AGENTS.md (engine is the source of truth, versioned persistent state, bounded resources)
 

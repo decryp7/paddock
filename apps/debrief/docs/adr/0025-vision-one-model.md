@@ -1,6 +1,6 @@
 # 25. Vision: one model reads text and images, the engine finds the related logs
 
-- Status: accepted (2026-10-21)
+- Status: accepted (2026-10-21); decisions 1 to 3 amended by [ADR 0070](0070-pitwall-is-debriefs-only-ai-engine.md) (images go to Pitwall, which owns the projector)
 - Related: ADR 0009 (prebuilt llama-server runtimes), ADR 0012 (jobs), ADR 0014 (store ports), ADR 0017 (one IPC:
   the worker protocol), ADR 0006 (clock skew applied on load), ADR 0021 (notes and image annotation, later),
   AGENTS.md (pure core / thin edges, parse don't validate, bounded resources)
