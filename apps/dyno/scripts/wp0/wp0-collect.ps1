@@ -43,13 +43,17 @@ switch ($Step) {
     Control ($manifests -gt 0) "package manifests read ($manifests)"
   }
   'physdisk' {
-    $ms = @(); $disks = $null
-    1..10 | ForEach-Object { $sw = [Diagnostics.Stopwatch]::StartNew()
-      try { $disks = Get-CimInstance -Namespace 'root\Microsoft\Windows\Storage' -ClassName MSFT_PhysicalDisk } catch { "ERROR $($_.Exception.Message)"; break }
-      $sw.Stop(); $ms += $sw.ElapsedMilliseconds }
+    $ms = @(); $disks = $null; $denied = $null
+    foreach ($i in 1..10) {
+      $sw = [Diagnostics.Stopwatch]::StartNew()
+      try { $disks = Get-CimInstance -Namespace 'root\Microsoft\Windows\Storage' -ClassName MSFT_PhysicalDisk } catch { $denied = $_.Exception.Message; break }
+      $sw.Stop(); $ms += $sw.ElapsedMilliseconds
+    }
+    if ($denied) { "ERROR $denied" }
     foreach ($d in $disks) { "disk | $($d.FriendlyName) | HealthStatus=$($d.HealthStatus) | OperationalStatus=$($d.OperationalStatus)" }
     if ($ms.Count) { $s = $ms | Sort-Object; "MS median=$($s[[int]($s.Count / 2)]) all=$($ms -join ',')" }
-    Control (@($disks).Count -gt 0) 'MSFT_PhysicalDisk returned a row (as this user)'
+    # A denial is a result (the query answered), an empty answer without one is not: say which.
+    if ($denied) { "CONTROL ok: the query answered with an error for this user ($denied)" } else { Control (@($disks).Count -gt 0) 'MSFT_PhysicalDisk returned a row (as this user)' }
   }
   'rm-probe' {
     if (-not $Path) { throw 'pass -Path <a file held open by some process>' }
@@ -110,7 +114,9 @@ public static class Rm {
       try { $svc.GetFolder("\$id").DeleteTask("$id-task", 0) } catch {}
       try { $svc.GetFolder('\').DeleteFolder($id, 0) } catch {}
     }
-    Control ((Get-ScheduledTask -TaskName "$id-task" -ErrorAction SilentlyContinue) -eq $null) 'nothing of ours is left'
+    # Cleanup is verified by wp0-run.sh as paddock-admin (schtasks /query, after a known task proves the query can see). A standard user's
+    # Get-ScheduledTask answers access denied, which looks like "nothing there", so it is not a control.
+    'CONTROL ok: the step ran to its end; wp0-run.sh checks that nothing of ours is left'
   }
   'power-overlay' {
     Add-Type -TypeDefinition @'

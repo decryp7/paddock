@@ -33,7 +33,7 @@ Sources to fetch and date before the code relies on them (ADR "Not yet fetched")
 KNOWNFOLDERID, ITaskService / TASK_TRIGGER_TYPE2 / ILogonTrigger::UserId / IExecAction, RM_PROCESS_INFO / RM_APP_TYPE,
 RtlGetVersion, MSFT_PhysicalDisk, PowerGetActiveScheme / PowerGetEffectiveOverlayScheme, MSIX uap5:StartupTask.
 
-Run: `./wp0-run.sh --host <guest ip> --step <name>` per step (it refuses any VM but the pinned one, reverts, copies the script, runs
+Run: `./wp0-run.sh --step <name>` per step (it refuses any VM but the pinned one, reverts, copies the script, runs
 it over SSH with the right user, fetches the output, and reverts again unless `--keep`). Results go to
-`$WP0_OUT/<step>/` (default `./wp0-out/`, outside the repository) and are then summarised in ADR 0033 "WP-0 results" with the
+`$WP0_OUT/<step>/` (default `$TMPDIR/dyno-wp0-out`; the script refuses a folder inside the repository) and are then summarised in ADR 0033 "WP-0 results" with the
 build number and date; benchmarks (items 10, 11) also as a results block in `apps/dyno/docs/performance.md` (rule 48).
