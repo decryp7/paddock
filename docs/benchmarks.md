@@ -58,6 +58,27 @@ that quotes a result links to the block instead of carrying the only copy.
 - **Notes:** noise, anomalies, what is not measured, where the raw output is kept
 ```
 
+## Results of shared tooling
+
+### 2026-11-08, `./dev gates check` (feat/gates-c100)
+
+- **Commit:** the tip of `feat/gates-c100` before the app clippy fixes (see the branch)
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 41 to 47 during the runs (other agents' builds were running)
+- **Build:** release (`cargo build --release` in `tools/paddock-dev`); yaml-rust2 0.13, toml 1
+- **Corpus:** this repository: 12,328 tracked files, 3,192 `.rs` files, 25 workflow and action files, 9 app contracts, 328 checks
+- **Command:** `target/release/paddock-dev gates check --root . --base HEAD` (includes one `node conformance/bin/paddock-conformance.mjs list --json` and two `git` calls)
+- **Runs:** 5 runs, single; wall time as `time -p` reports it
+- **Numbers:**
+
+  | Measure | Result | Budget | Verdict |
+  |---|---|---|---|
+  | C100's own report (without start-up) | 1,248 to 1,586 ms | a few seconds (ADR 0060 section "Parallelism and cost") | within |
+  | wall time | 1.25 to 2.03 s | | within |
+  | debug build, the same command | 8 to 18 s | | not what CI runs |
+
+- **Notes:** one thread, no parallelism needed at this size; the cheaper scan (a byte-string test before parsing Rust and TypeScript, one parse per YAML file) is in. The debug figure is for a debug `./dev` on this loaded machine. How the wrapper builds `./dev` in CI (profile, cold cache) is not measured here.
+
 ## All benchmarks
 
 The CI column names the workflow and job. "No" means nobody runs it unless they choose to. Details, env vars and
@@ -298,25 +319,6 @@ Quoted by [ADR 0041](adr/0041-deterministic-timing-in-tests.md) §5 (the starved
 ## Gaps
 
 These are ordered by impact.
-
-### 2026-11-08, `./dev gates check` (feat/gates-c100)
-
-- **Commit:** the tip of `feat/gates-c100` before the app clippy fixes (see the branch)
-- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2
-- **Load:** 1-minute load 41 to 47 during the runs (other agents' builds were running)
-- **Build:** release (`cargo build --release` in `tools/paddock-dev`); yaml-rust2 0.13, toml 1
-- **Corpus:** this repository: 12,328 tracked files, 3,192 `.rs` files, 25 workflow and action files, 9 app contracts, 328 checks
-- **Command:** `target/release/paddock-dev gates check --root . --base HEAD` (includes one `node conformance/bin/paddock-conformance.mjs list --json` and two `git` calls)
-- **Runs:** 5 runs, single; wall time as `time -p` reports it
-- **Numbers:**
-
-  | Measure | Result | Budget | Verdict |
-  |---|---|---|---|
-  | C100's own report (without start-up) | 1,248 to 1,586 ms | a few seconds (ADR 0060 section "Parallelism and cost") | within |
-  | wall time | 1.25 to 2.03 s | | within |
-  | debug build, the same command | 8 to 18 s | | not what CI runs |
-
-- **Notes:** one thread, no parallelism needed at this size; the cheaper scan (a byte-string test before parsing Rust and TypeScript, one parse per YAML file) is in. The debug figure is for a debug `./dev` on this loaded machine. How the wrapper builds `./dev` in CI (profile, cold cache) is not measured here.
 
 1. **Rule 16 is met only by Debrief, and only partly.**
    - The shared harness (`paddock-bench`, the `bench-nightly.yml` template) is used by no app.
