@@ -579,6 +579,26 @@ test('stable-workspace ends a hung phase with one ::error:: line naming it, and 
   assert.ok(!lstatSync(join(root, 'work', 'abc', 'hostexecutor')).isSymbolicLink());
 });
 
+// Runs 7706 to 7761 (d7-mac-mini, work folder on the internal disk, CI home on d7): `mv` across volumes copies the whole
+// checkout, which took 7 to 293 s and nine times hit the 300 s bound, failing the job. On the runners whose work folder is on
+// the CI home's volume the move took 0 to 4 s.
+test('stable-workspace never copies the checkout to another volume: it says why and builds in place', () => {
+  const root = stableFixture();
+  const bin = join(root, 'bin');
+  mkdirSync(bin);
+  // The work folder and the CI home on two volumes (stat's device number; both the GNU and the BSD form end in the path).
+  writeFileSync(join(bin, 'stat'), '#!/bin/sh\nfor a; do p="$a"; done\ncase "$p" in */work/*) echo 16777230 ;; *) echo 16777245 ;; esac\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'mv'), '#!/bin/sh\necho "mv must not run" >&2\nexit 1\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'git'), '#!/bin/sh\necho "git must not run" >&2\nexit 1\n', { mode: 0o755 });
+  const r = runStableWorkspace('macOS', root, { PATH: `${bin}:/usr/bin:/bin` });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /::warning::stable-workspace: the work folder .* is on another volume than .*decryp7_paddock-crate-s1/);
+  assert.match(r.stdout, /workdir_parent/, 'the warning names the runner setting that fixes it');
+  assert.doesNotMatch(r.stdout + r.stderr, /must not run/);
+  assert.ok(!lstatSync(join(root, 'work', 'abc', 'hostexecutor')).isSymbolicLink(), 'the checkout stays where it was');
+  assert.ok(!existsSync(join(root, 'github-env')) || !/PADDOCK_WORKSPACE/.test(readFileSync(join(root, 'github-env'), 'utf8')), 'later steps build in the work folder');
+});
+
 test('stable-workspace logs the duration of the phases of a successful move', () => {
   const root = stableFixture();
   const r = runStableWorkspace('macOS', root);

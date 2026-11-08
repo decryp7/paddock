@@ -72,6 +72,14 @@ runs:
           echo "PADDOCK_WORKSPACE=$p" >> "$GITHUB_ENV"
           echo "stable-workspace: building from $p"
         }
+        # The move is a rename only on one volume. Across volumes `mv` (and a clone) copies the whole checkout, which took 7 to
+        # 293 s on a loaded Mac and hit the bound nine times (runs 7706 to 7761): build in place instead, and say how to fix it.
+        volume_of() { stat -c %d "$1" 2>/dev/null || stat -f %d "$1"; }
+        same_volume() { mkdir -p "$root" && [ "$(volume_of "$ws")" = "$(volume_of "$root")" ]; }
+        if ! bounded "compare the volumes of $ws and $root" same_volume; then
+          echo "::warning::stable-workspace: the work folder $ws is on another volume than the kept folder $stable (or one could not be read: $(tail -c 300 "$scratch/err" | tr '\r\n' '  ')), so moving it would copy the whole checkout; building from the work folder (sccache misses the workspace crates). Next step: put the runner's workdir_parent (config.yaml, container section) on the CI home's volume."
+          exit 0
+        fi
         move_checkout() { mkdir -p "$root" && cd "$root" && rm -rf "$stable" && mv "$ws" "$stable"; }
         # Under act on Windows the runner keeps a handle on the work folder, so it cannot move. Keep a clone at the stable
         # path instead and bring it to this commit (a local clone and fetch: hard links, no network), with every file
