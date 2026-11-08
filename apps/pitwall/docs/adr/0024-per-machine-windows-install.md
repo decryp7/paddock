@@ -45,7 +45,7 @@ it can see the thing):
 | PW-6 | Paddock-setup.exe deleted from a trusted install folder, then Uninstall: the service is removed with `sc.exe` and the user is told | `paddock-setup.exe` absent; HKLM names the folder |
 | PW-7 | A corrupt or truncated `pitwall-server.exe` in the install folder (the verb exits non-zero) while the service is registered, then while it is not: the first aborts with level 43 and "uninstall Pitwall first"; the second continues (`sc query` answers 1060) | The server program damaged by hand; `sc query Pitwall` shows the registration state before each run |
 | PW-8 | The installer run with `/D=C:\PROGRA~1\Pitwall` (8.3 spelling of Program Files) and with forward slashes: both are refused at install time with level 41 and nothing is installed; the normal path installs and uninstalls | The short name exists on the VM volume (`dir /x C:\`) |
-| PW-9 | The HKLM uninstall key deleted by hand, then `uninstall.exe` run from the install folder: it ends at level 44 with "run the Pitwall installer again, then uninstall"; running the installer again restores the key and the uninstall then works | The key is gone (`reg query`), the program files are still there |
+| PW-9 | The HKLM uninstall key deleted by hand, then `uninstall.exe` run from the install folder: it ends at level 45 with "run the Pitwall installer again, then uninstall"; running the installer again restores the key and the uninstall then works | The key is gone (`reg query`), the program files are still there |
 
 ## Notes and family follow-ups
 
