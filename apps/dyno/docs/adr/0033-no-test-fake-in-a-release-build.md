@@ -1,22 +1,36 @@
 # 33. No test fake in a release build; real Windows readers for startup items, facts and file locks
 
-- Status: Proposed (2026-11-08), for Dyno 1.1.1. Waits for an independent review and the user's decisions D1 to D6.
+- Status: Proposed (2026-11-08), for Dyno 1.1.1. Waits for a delta review and the user's decisions D1 to D9.
 - Date: 2026-11-08
+- Revision 2 (2026-11-08): answers the independent review of `350e351d9` (7 P1, 15 P2).
+  - P1 fixes:
+    - the shipped list comes from `tauri.conf.json` and includes `dyno-helper`; the assertion lives in the test CI runs;
+    - a non-test build on the Windows and macOS legs, and a corrected claim about pushes to main;
+    - no WinTrust code exists, so publisher reading is deferred (D8);
+    - D2 is split: `MemorySecrets` has a production user;
+    - Health lists the facts it could not check (§4.5);
+    - packaged-app startup tasks are a new source, and the sources that are not read are named (§4.1).
+  - The P2 answers are inline, marked "(review P2-n)".
 - Trigger: the investigation of 2026-11-08 (Windows tray work, evidence in the coordinator's scratch folder `win-tray/`:
-  `vm/startup-page.png`, `vm/logs.txt` and the notes). In a Windows 11 VM running Dyno 1.1.0, Health showed **100, Good,
-  "Nothing needs your attention"** and the startup card said **"No startup items. Nothing is set to start when you sign
-  in."** That was on a machine where Dyno's own agent starts from the HKCU `Run` key (`dyno-agent/src/service/spec.rs`,
-  `WINDOWS_RUN_KEY`). The user decided the same day that this is fixed in Dyno 1.1.1.
+  `vm/startup-page.png`, `vm/logs.txt` and the notes). Dyno 1.1.0 ran in a Windows 11 VM where its own agent starts from the
+  HKCU `Run` key (`dyno-agent/src/service/spec.rs`, `WINDOWS_RUN_KEY`). There:
+  - Health showed **100, Good, "Nothing needs your attention"**;
+  - the startup card said **"No startup items. Nothing is set to start when you sign in."**
+
+  The user decided the same day that this is fixed in Dyno 1.1.1.
 - Related:
-  - ER-21 / rule 40 (a recurring bug means a missing design rule), ER-11 (failing test first), ER-14 / rule 7 (tests never
-    touch the user's machine), ER-27 / rule 56 (logs explain every failure), ER-33 (a check counts only if its probe can
-    see), ER-20 / rule 51 (more threads or a cheaper operation), rule 53 / family ADR 0033 (processes by identity), rule 55
-    / family ADR 0034 (one implementation per mechanism), family ADR 0039 (release gates inspect the artifacts), family
-    ADR 0040 (the Windows GUI test session) and ADR 0042 (one owner per harness).
-  - Dyno ADR [0021](0021-monitoring-only.md) (monitoring only: Dyno does not enable or disable a startup entry) and
-    ADR [0027](0027-helper-for-1-1-0.md) (the helper answers scoped reads).
+  - Engineering rules: ER-21 / rule 40 (a recurring bug means a missing design rule), ER-11 (failing test first), ER-14 / rule 7
+    (tests never touch the user's machine), ER-27 / rule 56 (logs explain every failure), ER-33 (a check counts only if its
+    probe can see), ER-20 / rule 51 (more threads or a cheaper operation), ER-22 / rule 42 (share first).
+  - Paddock rules: rule 53 / family ADR 0033 (processes by identity), rule 54 (an installer build before landing a
+    release-path change), rule 55 / family ADR 0034 (one implementation per mechanism).
+  - Family ADRs: 0039 (release gates inspect the artifacts), 0040 (the Windows GUI test session), 0042 (one owner per
+    harness), 0051 (`paddock-tools`: a `WinVerifyTrust` Authenticode check, accepted 2026-11-04, on
+    `origin/docs/paddock-tools-design-v2`) and 0054 (`wiring.toml` edges).
+  - Dyno ADRs: [0021](0021-monitoring-only.md) (monitoring only: Dyno does not enable or disable a startup entry) and
+    [0027](0027-helper-for-1-1-0.md) (the helper answers scoped reads).
   - The macOS fixes for the same symptom: `a935f3c00`, `f5497766c` and `79a31a415` (launch agents, `sfltool dumpbtm`
-    through the helper, a partial list that says what it could not read). They never covered Windows.
+    through the helper, and a partial list that says what it could not read). They never covered Windows.
 
 ## Context
 
@@ -36,335 +50,571 @@ pub fn platform(secrets_dir: &std::path::Path) -> Platform {
 }
 ```
 
-The struct-update spread `..f` fills the three fields the Windows wiring does not name, `locks`, `startup` and `facts`,
-from `fake::Fake`. Every Dyno release since the first commit (`be400ed05`) has shipped these to Windows users:
+The struct-update spread `..f` fills three fields the Windows wiring does not name (`locks`, `startup` and `facts`) from
+`fake::Fake`. Every Dyno release since the first commit (`be400ed05`, the same lines) has shipped them to Windows users:
 
 | Port | What the fake answers (`fake.rs`) | What the user saw |
 | --- | --- | --- |
-| `StartupItems` | `Ok(vec![])`, `unavailable()` empty | "No startup items. Nothing is set to start when you sign in." |
-| `FactsSource` | `SystemFacts::unknown("Fake OS 1.0")`: every fact "Not checked yet" | No disk-health, restart-pending or update reason can appear, so Health reads 100 Good; Fake OS 1.0 is the OS name in the facts |
+| `StartupItems` | `Ok(vec![])`; `unavailable()` is empty | "No startup items. Nothing is set to start when you sign in." |
+| `FactsSource` | `SystemFacts::unknown("Fake OS 1.0")`: every fact "Not checked yet" | Health cannot raise a disk-health, restart-pending or update reason, so it reads 100 Good; the facts name the OS "Fake OS 1.0" |
 | `FileLocks` | `Ok(vec![])` for every path | "What is locking this file?" says nothing holds it |
 
-The gap was known: `docs/architecture.md:42` says "the Windows platform still uses the in-memory fakes for them, so those
-screens are empty on Windows", and `features.md` says "not wired yet" in three places. The product did not say so. A fake
-answers in the shape of real data: an empty list, unknown facts. So the page could not tell "nothing there" from "never
-read". The parsers for the missing readers already exist and are tested: `parse/startup_approved.rs` (`approved_state`),
-`parse/lnk.rs` (`parse_lnk`), `parse/win_facts.rs`, `parse/powercfg.rs`. No reader calls them.
+The gap was known. `docs/architecture.md:42` says "the Windows platform still uses the in-memory fakes for them, so those
+screens are empty on Windows", and `features.md` says "not wired yet" in three places. The product never said so to the
+user. A fake answers in the shape of real data (an empty list, unknown facts), so neither the page nor the Health score
+could tell "nothing there" from "never read". Four parsers already exist and are tested, but nothing calls them:
+
+- `parse/startup_approved.rs` (`approved_state`);
+- `parse/lnk.rs` (`parse_lnk`);
+- `parse/win_facts.rs`;
+- `parse/powercfg.rs`.
 
 ### Why this is a pattern, not one bug (ER-21)
 
-The same shape recurs at three levels. Each time, a test double was available in production code and a production path
-used it:
+The same shape appears at three levels: a test double was reachable from production code, and production code used it.
 
-1. **`windows::platform()`**: `..f`, above.
-2. **`hardware::battery_capacity()`** on an OS that is not macOS, Linux or Windows (`hardware.rs:62`) returns
+1. **`windows::platform()`** uses `..f`, shown above.
+2. **`hardware::battery_capacity()`** (`hardware.rs:62`), on an OS that is not macOS, Linux or Windows, returns
    `FakeBattery(Reading::unavailable(...))`. The answer is honest, but the type is a test fake chosen because it was at
    hand.
-3. **Test doubles are public in every build:** `dyno_platform::fake` (the whole `Fake` platform, `FakePowerActions`,
-   `FakeIdleSignals`), `counters::FakeCounters`, `hardware::{FakeThrottle, FakeWear, FakeBattery}`,
-   `wol::{FakeWakeTimer, WolPorts::fake}`, `dyno_core::wol::fake::*`, and in the family crates
-   `paddock_power::{FakePower, FakeEvents}` and `paddock_secrets::MemorySecrets` ("In-memory `Secrets` for tests"). Only
-   `linux/tools.rs` `fake`, `dyno-agent`'s `cache::testing` and `disk::testing`, and `dyno-bench`'s `fakes` are behind
-   `#[cfg(test)]`.
+3. **Test doubles are public in every build.** In Dyno:
+   - `dyno_platform::fake`;
+   - `counters::FakeCounters`;
+   - `hardware::{FakeThrottle, FakeWear, FakeBattery}`;
+   - `wol::{FakeWakeTimer, WolPorts::fake}`;
+   - `dyno_core::wol::fake`.
 
-Rule 7 makes every Dyno test use the fakes, and the fakes are what every test sees. So no test, on any OS, could notice that
-the shipped wiring also used them. The macOS fix added real readers but left the mechanism in place: a new port, or a new
-OS, gets a fake by default, silently.
+   In the family crates: `paddock_power::{FakePower, FakeEvents}`. Only these are behind `#[cfg(test)]`:
+   `linux/tools.rs` `fake`, `dyno-agent`'s `cache::testing`, `disk::testing` and `issues::testing`, and `dyno-bench`'s
+   `fakes`.
+
+Rule 7 makes every Dyno test use the fakes, so no test on any OS could notice that the shipped wiring used them too. The
+macOS fix added real readers but left the mechanism in place: a new port or a new OS still gets a fake by default, and
+nothing says so.
 
 ### The same check on macOS, Linux and other systems
 
-- `macos/mod.rs` and `linux/mod.rs` name all 14 `Platform` fields explicitly; no spread, no fake.
-- `other.rs` (an OS that is not Windows, macOS or Linux) names all fields and uses honest `Unsupported` adapters that
-  answer `PlatformError::Unsupported("Not supported on this OS yet.")`. That is the pattern this record keeps.
-- Other struct-update spreads in Dyno's production code (`discovery.rs`, `geo_db.rs`, `nt.rs`, `readability.rs` and
-  more) copy data values, not port bundles. The agent destructures `Platform` field by field (`agent.rs:663`), so a new
-  port is a compile error there.
+- `macos/mod.rs` and `linux/mod.rs` name all 14 `Platform` fields; there is no spread and no fake.
+- `other.rs` names all fields too. Its honest `Unsupported` adapters answer `PlatformError::Unsupported("Not supported on
+  this OS yet.")`, and that is the pattern this record keeps.
+- The other struct-update spreads in production code (`discovery.rs`, `geo_db.rs`, `nt.rs`, `readability.rs` and more)
+  copy data values, not port bundles.
+- The agent destructures `Platform` field by field (`agent.rs:663`), so a new port is a compile error there.
 - `dyno-agent`'s `DiskPorts::none()` (`Running::start`) is an honest stub ("This agent has no system to ask."). The real
-  binaries call `Running::start_os` (`cli.rs:263`), which wires `DiskPorts::os()`. That is not a fake, but the same
-  temptation; §2 covers it.
-- Windows process details are `NoDetails`. This honest stub adds nothing, and the lists say why. It is a known, documented
-  gap (`features.md`), not a fake. It is out of scope here (D6).
+  binaries call `Running::start_os` (`cli.rs:263`), which wires `DiskPorts::os()`.
+- Windows process details use `NoDetails`. It is an honest, documented stub, not a fake, and it is out of scope (D6).
 
 ## Decision
 
 ### 1. The mechanism: a fake does not exist in a build that ships
 
-1. **Every test double is compiled only for tests.** `dyno_platform::fake`, `counters::FakeCounters`,
-   `hardware::{FakeThrottle, FakeWear, FakeBattery}`, `wol::FakeWakeTimer` with `WolPorts::fake()` and
-   `dyno_core::wol::fake` are behind `#[cfg(any(test, feature = "test-support"))]`. `dyno-platform` and `dyno-core` get
-   a `test-support` feature (empty, or enabling the other crate's). Consumers enable it **only in `[dev-dependencies]`**:
-   `dyno-agent`, `dyno-cli` and `app/src-tauri` (which already lists `dyno-platform` there, "Tests start an in-process
-   agent over the fake platform"). With Cargo's resolver 2, dev-dependency features are not unified into a build that
-   compiles no test target, so `tauri build` and `cargo build --profile dist` compile `dyno-platform` without the fakes.
-2. **A release build therefore cannot name a fake.** The compiler resolves every path, alias and re-export, so
-   `..crate::fake::Fake::new().platform()`, `use crate::fake as f` or a new `FakeX` used outside a test is an error in
-   the shipped build of that OS. This is the build-time assertion the brief asks for, and it is the check D1 chooses (§3).
-3. **Every platform names every port.** Each `windows/`, `macos/`, `linux/` and `other` `platform()` lists all fields
-   of `Platform` and its sub-structs (`NetworkPorts`, `HardwareReaders`, `PowerPorts`, `WolPorts`) with no `..`. A port
-   that an OS cannot read yet gets an honest adapter that names its gap. The existing `other::Unsupported` becomes the
-   shared `unsupported::NotReadHere { what, why }`: `list()` answers `PlatformError::Unsupported(why)`, and `facts()` answers
-   the real OS name with every other fact `Reading::unavailable(why)`. A gap is then a sentence on the page, never an
-   empty list. `Platform`'s doc comment states this. No `Default` is derived for `Platform` or its sub-structs, so the only
-   value a spread could take is another full platform, and every full platform is either per-OS (`cfg`'d away on the
-   others) or the fake (absent in a release build).
-4. **`FakeBattery` in `battery_capacity()`** becomes `NotReadHere` (the same answer under an honest name).
-5. **The family crates' test doubles** (`paddock_power::{FakePower, FakeEvents}`, `paddock_secrets::MemorySecrets`) get
-   the same gate in the same change (D2). Today only Dyno's tests and `paddock-pitwall`'s own `#[cfg(test)]` modules use
-   them (`git grep`, 2026-11-08), so the adoption is three `[dev-dependencies]` lines. This is a shared change (rules 39
-   and 43): the integrating agent lands it, with the CHANGELOG entry.
-6. **The fake's doc example** (`fake.rs:4-12`) moves into a unit test: a doctest compiles against the library without
-   its own `test-support`.
+1. **Every test double is compiled only for tests.** The doubles of the Context list sit behind
+   `#[cfg(any(test, feature = "test-support"))]`: `dyno_platform::fake`, `counters::FakeCounters`,
+   `hardware::{FakeThrottle, FakeWear, FakeBattery}`, `wol::FakeWakeTimer` with `WolPorts::fake()`, and
+   `dyno_core::wol::fake`.
+   - `dyno-platform` and `dyno-core` each get a `test-support` feature. `dyno-platform`'s also enables
+     `dyno-core/test-support` and, with D2, `paddock-power/test-support`.
+   - Consumers enable these features **only in `[dev-dependencies]`**. Today that is `dyno-agent`, `dyno-cli` (whose normal
+     dependencies do not include `dyno-platform`: "the CLI never links the platform adapters"), `dyno-helper` and
+     `app/src-tauri`.
+   - With Cargo's resolver 2 (`apps/dyno/Cargo.toml`), dev-dependency features are not unified into a build that compiles
+     no test target. So `tauri build` and `sidecar.mjs`'s single `cargo build -p dyno-agent -p dyno-cli -p dyno-bench
+     -p dyno-bench-gpu -p dyno-helper --profile dist` compile `dyno-platform` without the fakes.
+2. **So a build without test targets cannot name a fake.** The compiler resolves every path, alias and re-export.
+   `..crate::fake::Fake::new().platform()`, `use crate::fake as f` and a new `FakeX` used outside a test are all compile
+   errors in such a build for the OS that code compiles on. §3 says which builds those are on a branch.
+3. **Every platform names every port.** Each `platform()` (Windows, macOS, Linux and other) lists every field of
+   `Platform` and of its sub-structs (`NetworkPorts`, `HardwareReaders`, `PowerPorts`, `WolPorts`), with no `..`.
+   - A port an OS cannot read yet gets an honest adapter that names its gap. `other::Unsupported` becomes the shared
+     `unsupported::NotReadHere { what, why }`:
+     - `list()` answers `PlatformError::Unsupported(why)`;
+     - `facts()` answers the real OS name, with every other fact `Reading::unavailable(why)`.
+   - No `Default` is derived for `Platform` or its sub-structs. The only value a spread could take is another whole
+     platform, and each of those is either per-OS (compiled out on the other OSes) or the fake (absent without test
+     targets).
+4. **`FakeBattery` in `battery_capacity()`** becomes `NotReadHere`: the same answer under an honest name.
+5. **The family doubles `paddock_power::{FakePower, FakeEvents}`** get the same gate in the same change (D2). Their users
+   (`git grep` at `origin/main`, 2026-11-08) are:
+   - Dyno's `fake.rs` and its tests `dyno-agent/tests/{power,wakes}.rs`;
+   - `paddock-power`'s own integration tests `tests/it/{events,keep_awake}.rs`. These compile the library without
+     `cfg(test)`, so they need a self dev-dependency: `paddock-power = { path = ".", features = ["test-support"] }`.
+
+   The crate doc's "no test in the family may call the real adapters" stays, with one sentence added: "building them is
+   inert; calling them is not" (review P2-9). It is a shared change (rules 39 and 43), so the integrating agent lands it
+   with a CHANGELOG entry.
+6. **`paddock_secrets::MemorySecrets` stays public** (D2b). `apps/workbench-demo/src-tauri/src/lib.rs:97` uses it in
+   production, as a demo that must not touch the user's credential store. That makes it a legitimate ephemeral store, not
+   only a test double. Its doc line changes from "In-memory `Secrets` for tests" to "an in-memory store that forgets on
+   exit (tests, demos)". Dyno's only production path to it, `WolPorts::fake()`, is gated by item 1.
+7. **The fake's doc example** (`fake.rs:4-12`) moves into a unit test, because a doctest compiles against the library
+   without its own `test-support`.
+8. **`approved_value`** (`parse/startup_approved.rs:17`) writes what Task Manager writes to turn an entry off, and has no
+   use under ADR 0021. It moves under `#[cfg(test)]`, where it builds fixtures for §5 (review P2-12).
 
 ### 2. The test that fails today, and wiring visible in the logs
 
-- **`adapter()` on Dyno's port traits.** Every port trait in `dyno_core::ports` and `dyno_core::wol` gets a provided method:
+- **`adapter()`.** A provided method is added to every trait that a `Platform` field holds (review P2-3):
+  - `dyno_core::ports`: `SystemSensors`, `ProcessSource`, `FileLocks`, `StartupItems`, `FactsSource`, `UserActivity`,
+    `NetworkLinks`, `CounterSource`, `NetworkSockets`, `ReverseDns`, `ProcessTraffic`, `ThrottleSignals`,
+    `DiskWearSource`, `BatteryCapacitySource`, `PowerActions`, `IdleSignals`;
+  - `dyno_core::issues::IssueSource`;
+  - the `dyno_core::wol` traits that `WolPorts` holds, including the wake scheduler.
 
   ```rust
   /// The concrete adapter behind this port (for the wiring test and the agent's start log).
   fn adapter(&self) -> &'static str { std::any::type_name::<Self>() }
   ```
 
-  A provided method is monomorphised for each implementation, so through a `Box<dyn Port>` it returns the concrete type,
-  for example `dyno_platform::fake::Fake`. Nobody overrides it. `Platform::adapters()` returns `(port, adapter)` for
-  every field, including the sub-structs and the vector of issue sources, with a destructuring `let Platform { .. }` that
-  names every field: a new port that is not listed is a compile error (no `..` there either).
-- **The no-fake test** in each OS module: `windows::tests::the_windows_platform_wires_no_fake`, and the same for
-  `macos` and `linux`. It builds the real `platform()` with a temporary secrets folder and calls **no port method**. It
-  asserts that no adapter path contains `::fake::` or `::testing::` and that no last segment starts with `Fake`. On
-  `origin/main` the Windows test fails and names `locks`, `startup` and `facts` → `dyno_platform::fake::Fake`. The macOS
-  and Linux tests pass and guard against regressions. ER-14: the WP checks that every constructor `platform()` calls is
-  inert (no OS state changed, no file outside the temporary folder). `PowerPorts::os()` and `NetworkPorts::os()` build
-  unit structs. `WolPorts::os` builds its store under the given folder. A constructor that is not inert becomes lazy.
-  The Linux end-to-end test (`linux/mod.rs`) already builds the real platform the same way.
-- **ER-27:** the agent logs one `Platform wired` line at start with every `port=adapter` pair. Dyno's diagnostic
-  bundle would have shown `startup=dyno_platform::fake::Fake` on the first Windows report. Type names are not user
-  content.
-- The shared traits (`paddock_power::PowerOs`, `SleepWakeSource`, `paddock_secrets::Secrets`) get no `adapter()` (that
-  would be a family API change for a test). For them, §1.5's gate is the guarantee, and the test lists them as
-  `(unnamed)`.
+  - A provided method is monomorphised per implementation, so through a `Box<dyn Port>` it returns the concrete type, for
+    example `dyno_platform::fake::Fake`. Nobody overrides it.
+  - A wrapper that holds another `Box<dyn Port>` reports its own name and hides the inner adapter, so the test sees only
+    the top-level wiring. That is enough for `Platform`: today no `platform()` wraps a port in another.
+  - The zone is a value (`Arc<SystemZone>`), not a trait object, and is listed by its type.
+  - `Platform::adapters()` returns a `(port, adapter)` pair for every field. It uses a destructuring
+    `let Platform { .. }` that names each field, so a new port it does not list is a compile error.
+- **The no-fake test** lives in each OS module: `windows::tests::the_windows_platform_wires_no_fake`, and the same for
+  `macos` and `linux`.
+  - It builds the real `platform()` with a temporary secrets folder and calls **no port method**.
+  - It asserts that no adapter path contains `::fake::` or `::testing::`, and that no last segment starts with `Fake`.
+  - On `origin/main` the Windows test fails and names `locks`, `startup` and `facts` → `dyno_platform::fake::Fake`. The
+    macOS and Linux tests pass and guard against a regression.
+  - ER-14: the WP checks that every constructor `platform()` calls is inert, and makes any that is not lazy. Inert means
+    no OS state changed and no file written outside the temporary folder. `PowerPorts::os()` builds unit structs
+    (`paddock-power` `native.rs`) and `WolPorts::os` builds its store under the given folder. The Linux end-to-end test
+    already builds the real platform.
+- **A declaration check (review P2-2).** A `syn` scan in the style of `dyno-agent/tests/helper_wiring.rs` reads the
+  non-test sources of the shipped crates: `dyno-core`, `dyno-platform`, `dyno-agent`, `dyno-helper` and
+  `app/src-tauri/src`. It fails on:
+  - a public item named `Fake*`;
+  - a `mod fake` or `mod testing`;
+  - an `impl` of a port trait for a type named `Fake*`, `Stub*` or `Scripted*`;
 
-### 3. The check that keeps it true (D1): the build-time assertion, kept honest by the feature graph
+  unless the item sits under `cfg(test)` or `cfg(any(test, feature = "test-support"))`. Its fixture tests (sources that
+  must fail and sources that must pass) run every time. This is a declaration check, not the use-site grep §3 rejects. It
+  catches a new ungated double on any OS, before anyone wires it.
+- **ER-27.** The agent logs one `Platform wired` line at start with every `port=adapter` pair. A Dyno diagnostic bundle
+  would have shown `startup=dyno_platform::fake::Fake` in the first Windows report. Type names are not user content.
+- The shared traits (`paddock_power::PowerOs` and `SleepWakeSource`, `paddock_secrets::Secrets`) get no `adapter()`: it
+  would change the family API just for a test. For `PowerOs` and `SleepWakeSource`, §1.5's gate and the declaration check
+  of `paddock-power` are the guarantee. The test lists them as `(unnamed)`.
 
-Chosen: **§1's `cfg` gate**, so the shipped build of each OS does not compile when production code names a fake. Two
-small checks keep the gate meaningful:
+### 3. The checks that keep it true (D1)
 
-- **The feature never reaches a shipped binary.** `scripts/check-shipped.mjs` already runs `cargo tree -e normal
-  --target all` for every shipped package (`SHIPPED`) to keep `dyno-helper` out. It gains a second assertion over
-  `cargo tree -e normal --target all -f '{p} {f}'`: no shipped package's normal (non-dev) graph enables
-  `dyno-platform/test-support`, `dyno-core/test-support`, `paddock-power/test-support` or `paddock-secrets/test-support`
-  on any target. Resolution is static, so the Linux `checks` leg covers the Windows and macOS graphs too. Its unit test
-  feeds a fixture tree with the feature on and expects the failure.
-- **A non-test build on branches.** CI's Rust gates on every OS compile test targets (`clippy --all-targets`,
-  `nextest`), and those unify the dev features in. So Dyno's `rustChecks` (Linux) gains `cargo check --locked -p
-  dyno-platform -p dyno-agent -p dyno-cli --lib --bins`, which catches any non-OS-specific production reference on the
-  branch. A Windows-only or macOS-only reference is caught by the no-fake test on that OS's runner (for the platform
-  wiring), by the build brief's local `cargo xwin check -p dyno-platform --target x86_64-pc-windows-msvc` (ER-9), and at
-  the latest by `dyno-release.yml`'s installer build, which runs on every push to main. The cost of the extra check is
-  measured in WP-1 and recorded (rule 48). If it is over two minutes on the Linux leg, it moves to the nightly run.
+The guarantee is **§1's `cfg` gate**: no build without test targets can name a fake. It is kept honest by three checks,
+each of which covers what the others cannot see:
+
+1. **The feature never reaches a shipped binary (all targets, Linux leg)** (review P1-1).
+   - `SHIPPED` in `scripts/check-shipped.mjs` is derived instead of hand-kept: `dyno-app` plus every
+     `bundle.externalBin` of `app/src-tauri/tauri.conf.json`, mapped to its package (`dyno` → `dyno-cli`). The result is
+     `dyno-app`, `dyno-agent`, `dyno-cli`, `dyno-bench`, `dyno-bench-gpu` and `dyno-helper`. The hand list misses the
+     helper, which is shipped since 1.1.
+   - The existing "no shipped binary depends on `dyno-helper`" assertion becomes "no shipped binary other than the helper
+     depends on it".
+   - A new assertion: no shipped package's `cargo tree -p <pkg> -e normal --target all -f '{p} {f}'` enables
+     `test-support` on `dyno-platform`, `dyno-core` or `paddock-power`.
+   - A positive control (ER-33, review P2-1): the same probe with dev edges, `cargo tree -p dyno-agent -e normal,dev -f
+     '{p} {f}'`, must **show** `dyno-platform` with `test-support`. If it does not, the probe or the feature name has
+     changed, and the check reports `check broken` instead of passing.
+   - Both live in `scripts/check-shipped.test.mjs`, the file `paddock.ci.json` `checks` runs on the Linux leg. The script's
+     own `main` runs them too, for a local run.
+2. **A non-test build of the shipped packages on every OS leg, on branches** (review P1-2).
+   - `cargo check --locked --lib --bins -p dyno-platform -p dyno-agent -p dyno-app -p dyno-helper` runs on all three legs.
+     These are the packages that link `dyno-platform` in their normal dependencies. `dyno-cli` does not.
+   - On Linux this is Dyno's `rustChecks`.
+   - On Windows and macOS it needs a new contract field, `hostRustChecks`, which the shared `app-gates` action runs on the
+     non-Linux legs after clippy and with the same preparation (WP-1b; `.gitea/` is a shared integration point, so the
+     integrating agent changes it). Today `rustChecks` runs on Linux only (`.gitea/actions/README.md:55`), and the Windows
+     and macOS legs run only `clippy --all-targets` and `nextest`, which unify `test-support` in.
+   - WP-1 measures the cost per leg and records it (rule 48). It recompiles only `dyno-platform` and its dependents with
+     different features.
+3. **The installers are built before WP-1 and WP-2 land** (rule 54).
+   - The gate changes exactly what the dist build compiles, so the batch dispatches `dyno-release.yml` with gates on and
+     bundles built for all three OSes.
+   - Correction of revision 1: `dyno-release.yml` does not run on a push to main. Its triggers are tags and
+     `workflow_dispatch` (`dyno-release.yml:5`, "push to main — nothing: the nightly builds the installers"). The nightly is
+     detection after a merge, not a branch gate.
+
+The build brief adds a local `cargo xwin check` of the same packages for `x86_64-pc-windows-msvc` before every push
+(ER-9).
 
 Rejected:
 
-- **Clippy `disallowed-types` / `disallowed-methods`.** Clippy cannot exempt test code from these lints. About 30 test
-  files and every new one would carry an `#[allow]`, and an allow-list that grows with every test hides a production
-  `#[allow]` among them. Clippy also lints Windows code only on the Windows leg, and it is a lint over `--all-targets`, not
-  over the shipped build.
-- **A source-text conformance check** (`grep` for `fake::` or `..`). It misses aliases and re-exports, and it cannot tell
-  a data spread (`..raw()`, many in production) from a port spread.
-- **Only the no-fake test.** It sees the platform's ports, not a fake used elsewhere in production code (for example in the
-  agent), and it relies on a naming convention. It stays as the readable failure for the wiring, not as the guarantee.
+- **Clippy `disallowed-types` / `disallowed-methods`.** The cost of the allows is small: one
+  `#![cfg_attr(test, allow(clippy::disallowed_types))]` per crate root, the pattern `lib.rs:8` already uses for `unwrap`,
+  plus one per integration-test crate (review P2-14). But Clippy lints `--all-targets`, which unifies `test-support` in,
+  so it never sees the build that ships. And a crate-wide allow under `cfg(test)` does not stop a production reference
+  inside a `test-support`-gated module.
+- **A source-text conformance check at use sites** (a grep for `fake::` or `..`). It misses aliases and re-exports, and it
+  cannot tell a data spread (`..raw()`, common in production) from a port spread. §2's declaration check is a different
+  thing: it inspects where doubles are declared, not where they are used.
+- **The no-fake test alone.** It sees the platform's ports, not a fake used elsewhere in production code (the agent, the
+  app), and it relies on a naming convention. It stays as the readable failure for the wiring, not as the guarantee.
 
 ### 4. Real Windows readers
 
-All three run with the user's rights. Dyno changes no startup entry (ADR 0021), so nothing here needs the helper. The
-`StartupLocation` doc comments that say "disabling needs the privileged helper" date from before ADR 0021 and are reworded
-("written for every user"). Each reader is a thin adapter over small OS traits (`RegistryView`, `FolderList`,
-`LogonTasks`, `RestartManager`) and a pure `assemble` function. The tests run `assemble` on every OS (§5).
+All readers run with the user's rights. Dyno changes no startup entry (ADR 0021), so nothing here needs the helper. The
+`StartupLocation` doc comments that say "disabling needs the privileged helper" predate ADR 0021 and are reworded ("written
+for every user").
+
+Each reader is a thin adapter over small OS traits (`RegistryView`, `FolderList`, `LogonTasks`, `PackagedStartup`,
+`RestartManager`) and a pure `assemble` function. The tests run `assemble` on every OS (§5). The new FFI modules
+(`windows/startup.rs`, `windows/facts.rs`, `windows/locks.rs` and the task and package adapters) are added to
+`apps/dyno/wiring.toml` `[edges] modules` in the same change (family ADR 0054, review P2-11).
 
 #### 4.1 Startup items (`windows/startup.rs`, `parse/win_startup.rs`)
 
-| Source | Where | `StartupLocation` | State from |
-| --- | --- | --- | --- |
-| HKCU Run | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, 64-bit and 32-bit views | `UserRunKey` | HKCU `…\Explorer\StartupApproved\Run` |
-| HKCU RunOnce | `…\RunOnce`, both views | `UserRunOnceKey` (new, D3) | always Enabled (runs at the next sign-in, then Windows removes it) |
-| HKLM Run, 64-bit | `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run` (`KEY_WOW64_64KEY`) | `MachineRunKey` | HKLM `…\StartupApproved\Run` |
-| HKLM Run, 32-bit | the same key with `KEY_WOW64_32KEY` (`WOW6432Node`) | `MachineRunKey` | HKLM `…\StartupApproved\Run32` |
-| HKLM RunOnce | both views | `MachineRunOnceKey` (new, D3) | always Enabled |
-| User Startup folder | `FOLDERID_Startup` (`SHGetKnownFolderPath`) | `UserStartupFolder` | HKCU `…\StartupApproved\StartupFolder` |
-| Common Startup folder | `FOLDERID_CommonStartup` | `CommonStartupFolder` | HKLM `…\StartupApproved\StartupFolder` |
-| Logon tasks | Task Scheduler 2.0 COM: `ITaskService::Connect`, a recursive walk from `\` with `GetTasks(TASK_ENUM_HIDDEN)`, tasks with a `TASK_TRIGGER_LOGON` trigger | `ScheduledTask` | `IRegisteredTask::Enabled` and the trigger's `Enabled` |
+| # | Source | Where | `StartupLocation` | State from |
+| --- | --- | --- | --- | --- |
+| 1 | HKCU Run | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, 64-bit and 32-bit views | `UserRunKey` | HKCU `…\Explorer\StartupApproved\Run` |
+| 2 | HKCU RunOnce | `…\RunOnce`, both views | `UserRunOnceKey` (new, D3) | always Enabled (runs at the next sign-in, then Windows removes it) |
+| 3 | HKLM Run, 64-bit | `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run` (`KEY_WOW64_64KEY`) | `MachineRunKey` | HKLM `…\StartupApproved\Run` |
+| 4 | HKLM Run, 32-bit | the same key with `KEY_WOW64_32KEY` (`WOW6432Node`) | `MachineRunKey` | HKLM `…\StartupApproved\Run32` |
+| 5 | HKLM RunOnce | both views | `MachineRunOnceKey` (new, D3) | always Enabled |
+| 6 | User Startup folder | `FOLDERID_Startup` (`SHGetKnownFolderPath`) | `UserStartupFolder` | HKCU `…\StartupApproved\StartupFolder` |
+| 7 | Common Startup folder | `FOLDERID_CommonStartup` | `CommonStartupFolder` | HKLM `…\StartupApproved\StartupFolder` |
+| 8 | Logon tasks | Task Scheduler 2.0 COM: `ITaskService::Connect`, a recursive walk from `\` with `GetTasks(TASK_ENUM_HIDDEN)`, tasks with a `TASK_TRIGGER_LOGON` trigger | `ScheduledTask` | `IRegisteredTask::Enabled` and the trigger's `Enabled` |
+| 9 | Packaged-app startup tasks (MSIX/AppX `StartupTask`: Teams, Windows Terminal, Store apps) | per-user state under `HKCU\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData\<PackageFamilyName>\<TaskId>` (`State`), the name from the package's display name where the package API gives it | `PackagedApp` (new, D3) | the `State` value, mapped as WP-0 measures it |
 
-- **Values:** `REG_SZ` and `REG_EXPAND_SZ` (expanded with `ExpandEnvironmentStringsW` into a bounded buffer). Other
-  types are skipped and counted. The id is `<hive>:<key>:<view>:<value name>`. `HKCU\Software` is not redirected under
-  WOW64, so its 32-bit view is the same key: entries with the same hive, key, name and command are merged, and a test
-  covers it.
-- **StartupApproved:** the value of the same name, read with the existing `approved_state`. A missing value or one it
-  cannot read means Enabled (that is what Windows does). The table's mapping (which approved key governs which source,
-  HKCU or HKLM) is what Task Manager writes on Windows 10 and 11. WP-0 confirms it in the VM by turning off one entry of
-  each kind in Task Manager and diffing the keys (ER-28: measured, not assumed). The parsing tests then use the measured
-  bytes.
-- **Startup folders:** at most `MAX_FOLDER_FILES` (1,000) per folder. `desktop.ini` is skipped. A `.lnk` is read
-  (at most `MAX_LNK_BYTES`) and resolved with the existing `parse_lnk` to its target and arguments. A shortcut with no path
-  (for example a Store app) is shown as the `.lnk` itself, as `parse/lnk.rs` documents. Other files are listed as their
-  path.
-- **Tasks:** at most `MAX_TASKS` (10,000) tasks visited and a folder depth of 16. Each action is an `IExecAction`
-  (`Path` and `Arguments`), and a task with only COM-handler actions shows its handler's CLSID as the command. The name
-  is the task path (`\Microsoft\Windows\…`), which `is_os_owned` already treats as the OS's. COM is initialised for the
-  calling thread with the helper that `windows/firewall_com.rs` uses (rule 55: no second copy). A standard user does
-  not see tasks whose security descriptor hides them from that user. The API returns no error and no count for them, so
-  the user guide says so, rather than a sentence on every list.
-- **Partial lists:** each of the nine sources is read on its own. A failure goes into `unavailable()` as one sentence
-  ("The all-users Run key (32-bit) could not be read: access denied.") and the other sources still list their entries.
-  When all of them fail, `list()` returns the error (the macOS reader's rule). The list is kept between `list()` calls
-  until `refresh()`, as on macOS: tasks are the slow part.
-- **Publisher:** the signer, through the existing WinTrust code that the process signer uses, when the executable is a
-  local file. Otherwise `None`.
+- **Packaged apps (review P1-6, D7).** Task Manager lists them under Startup apps, and a machine whose only startup items
+  are packaged apps would otherwise show "No startup items" again.
+  - WP-0 measures the key layout and the `State` values (enabled, turned off by the user, turned off by policy) on Windows
+    10 and 11 by toggling each in Task Manager.
+  - The executable comes from the package's manifest when the install location can be read; otherwise `exe` is `None`
+    and the command is `<PackageFamilyName>!<TaskId>`.
+  - If WP-0 finds the state cannot be read reliably, the fallback is the permanent sentence below, not silence.
+- **What is deliberately not read** (review P1-6, D5). The startup card states its coverage once, under the list, on
+  Windows: "Lists registry Run and RunOnce entries, Startup folders, sign-in tasks and Store apps. Not listed: services,
+  tasks that start with Windows, policy Run keys and Winlogon entries."
+  - The things not read: services and drivers; boot-trigger tasks (D5); `…\Policies\Explorer\Run` (HKCU and HKLM);
+    Winlogon `Userinit` and `Shell`; Active Setup; shell extensions; WMI event subscriptions.
+  - The sentence is coverage, not a failure, so it is not part of `unavailable()`. The user guide carries the same list.
+- **Values.** `REG_SZ` and `REG_EXPAND_SZ`; the latter is expanded with `ExpandEnvironmentStringsW` into a bounded buffer.
+  - Bounds (review P2-6):
+    - at most `MAX_RUN_VALUES` (1,000) values per key;
+    - each value at most `MAX_VALUE_BYTES` (32 KiB), checked against `RegQueryInfoKey`'s longest value before any read;
+    - longer values, other types and values past the cap are skipped and counted (`Skipped` in the log).
+  - Ids (review P2-5):
+    - registry: `reg:<HKCU|HKLM>:<run|runonce>:<64|32>:<value name>`;
+    - folders: `folder:<user|common>:<file name>`;
+    - tasks: `task:<task path>` (for example `task:\Microsoft\Windows\…`);
+    - packaged apps: `appx:<PackageFamilyName>!<TaskId>`.
+
+    A test checks that `is_os_owned` classes a `\Microsoft\Windows\` task as the OS's, and an HKLM Run id or an
+    `…\Microsoft\Windows\CurrentVersion\Run` path as not the OS's.
+  - `HKCU\Software` is not redirected under WOW64, so its 32-bit view is the same key. Entries with the same hive, key,
+    name and command are merged.
+- **StartupApproved.** The value with the entry's name, read with the existing `approved_state`. A missing or unreadable
+  value means Enabled, which is what Windows does.
+  - The table's mapping (which approved key governs which source) is what Task Manager writes on Windows 10 and 11.
+  - WP-0 confirms it in the VM: it turns off one entry of each kind in Task Manager and diffs the keys (ER-28: measured,
+    not assumed). The parsing tests use the measured bytes, built with the `cfg(test)` `approved_value`.
+- **Startup folders.**
+  - At most `MAX_FOLDER_FILES` (1,000) files per folder; `desktop.ini` is skipped.
+  - A `.lnk` is read (at most `MAX_LNK_BYTES`) and resolved to its target and arguments with the existing `parse_lnk`. A
+    shortcut with no path, such as a Store app's, shows as the `.lnk` itself.
+  - Any other file is listed as its path.
+- **Tasks** (review P2-7).
+  - Bounds: at most `MAX_TASKS` (10,000) tasks visited, at a folder depth of at most 16.
+  - A folder whose `GetFolders` or `GetTasks` fails with `E_ACCESSDENIED` is counted. `unavailable()` then says "N task
+    folders could not be read without administrator rights."
+  - A logon trigger counts only when its `UserId` is empty (any user) or names the current user. A trigger for another
+    account does not run for this user.
+  - The command is the `IExecAction` `Path` and `Arguments`. A task with only COM-handler actions shows its handler's
+    CLSID.
+  - COM is initialised with the helper that `windows/firewall_com.rs` uses (rule 55: no second copy).
+  - `GetTasks` documents only `TASK_ENUM_HIDDEN` and an `HRESULT` (Microsoft Learn, fetched 2026-11-08). It says nothing
+    about which tasks a standard user cannot see. WP-0 measures that: with no error, there is no count, and the user
+    guide says so.
+- **Partial lists.** Each source is read on its own. A failure goes into `unavailable()` as one sentence ("The all-users
+  Run key (32-bit) could not be read: access denied."), and the other sources still list their entries. When every source
+  fails, `list()` returns the error, as the macOS reader does. The list is kept between `list()` calls until `refresh()`;
+  tasks are the slow part.
+- **Publisher (review P1-3, D8).** Revision 1 claimed an existing WinTrust signer reader. There is none: Windows process
+  details are `NoDetails` (`SignatureInfo::Unknown`), and `git grep` finds only the `windows` crate's feature names.
+  - In 1.1.1 `publisher` stays `None` on Windows, and the startup filter's "Hide signed apps" says "Signer not read on
+    Windows yet" and is disabled there.
+  - "Hide system entries" still works: `is_os_owned` uses the path and the task name.
+  - A signer reader (embedded Authenticode plus catalog signatures, bounded by file size and time, rule 51) is a later item.
+    It should be shared with family ADR 0051's `WinVerifyTrust` check (ER-22 / rule 42), which also gives Windows process
+    details a signer.
 
 #### 4.2 Facts (`windows/facts.rs`)
 
 | Fact | Source | Notes |
 | --- | --- | --- |
-| `os` (required) | `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion`: `ProductName`, `EditionID`, `DisplayVersion` (or `ReleaseId`), `CurrentBuildNumber`, `UBR`, `InstallationType`; the build cross-checked with `RtlGetVersion` (not shimmed by the manifest) | `ProductName` still says "Windows 10" on Windows 11. A client build ≥ 22000 is named "Windows 11" (a pure `win_os_name()` in `parse/win_facts.rs`). Example: "Windows 11 Pro 24H2 (build 26100.2314)". A server keeps its `ProductName`. |
-| `restart_pending` | the keys `…\WindowsUpdate\Auto Update\RebootRequired` and `…\Component Based Servicing\RebootPending` exist | `PendingFileRenameOperations` is left out: many installers set it, and it would raise false "restart needed" reasons. A key that cannot be read is unavailable with its reason. |
-| `power_plan` | `PowerGetActiveScheme` and `PowerReadFriendlyName` | the GUID mapping (`POWER_SAVER_GUID`) is reused from `parse/powercfg.rs`. No `powercfg` process, no locale parsing. |
-| `visual_effects_full`, `background_apps` | HKCU `VisualEffects\VisualFXSetting`, `BackgroundAccessApplications` | the existing parsers in `parse/win_facts.rs` |
+| `os` (required) | `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion`: `ProductName`, `EditionID`, `DisplayVersion` (or `ReleaseId`), `CurrentBuildNumber`, `UBR`, `InstallationType`; the build cross-checked with `RtlGetVersion` (not shimmed by the manifest) | `ProductName` still says "Windows 10" on Windows 11, so a client build ≥ 22000 is named "Windows 11" by a pure `win_os_name()` in `parse/win_facts.rs`. Example: "Windows 11 Pro 24H2 (build 26100.2314)". A server keeps its `ProductName`. |
+| `restart_pending` | the keys `…\WindowsUpdate\Auto Update\RebootRequired` and `…\Component Based Servicing\RebootPending` exist | `PendingFileRenameOperations` is left out because many installers set it, which would give false "restart needed" reasons. A key that cannot be read is unavailable with its reason. |
+| `power_plan` | `PowerGetActiveScheme` and `PowerReadFriendlyName`, plus the Windows 11 power mode from `PowerGetEffectiveOverlayScheme` | The fact is the **effective** mode (review P2-10). Power saver is true for the Power saver scheme or the "Best power efficiency" overlay. WP-0 confirms the overlay GUIDs. The GUID mapping (`POWER_SAVER_GUID`) is reused from `parse/powercfg.rs`; no `powercfg` process and no locale parsing. |
+| `visual_effects_full` | HKCU `VisualEffects\VisualFXSetting` | the existing parser |
+| `background_apps` | HKCU `BackgroundAccessApplications` | WP-0 checks that the value still means something on Windows 11 23H2 and later. If not, the fact is unavailable ("Windows no longer keeps one switch for this") (review P2-10). |
 | `dev_folders` | `dev_folders::scan(%USERPROFILE%)` | as on macOS |
-| `disks` | WMI `root\Microsoft\Windows\Storage`, `MSFT_PhysicalDisk` (`FriendlyName`, `HealthStatus` 0/1/2/5) through the `wmi` crate already linked | WP-0 confirms a standard user can read it. If not, it is unavailable with "needs the helper" until a later helper read. |
+| `disks` | WMI `root\Microsoft\Windows\Storage`, `MSFT_PhysicalDisk` (`FriendlyName`, `HealthStatus` 0/1/2/5) through the `wmi` crate already linked | WP-0 confirms a standard user can read it. If not, the fact is unavailable ("needs the helper"), and Health shows it as not checked (§4.5). |
 | `pending_updates` | not read: "Dyno does not ask Windows Update (the search is slow and contacts Microsoft). Settings > Windows Update shows them." | the macOS stance (`softwareupdate` is not run) |
-| `last_boot_secs` | not read in 1.1.1: "Windows keeps boot times in a log only administrators can read." | WP-0 confirms the channel's access. A later helper read can fill it. |
+| `last_boot_secs` | not read in 1.1.1: "Windows keeps boot times in a log Dyno does not read yet." | Decided now (review P2-10): WP-0 does not measure it; a later helper read can fill it. |
 
 Each fact is timed and read on its own. A failure is that fact's `Reading::unavailable`, never an error for the whole
 (`FactsSource` contract).
 
 #### 4.3 File locks (`windows/locks.rs`)
 
-Restart Manager: `RmStartSession`, then `RmRegisterResources` with the one path, then `RmGetList` (grown once on
-`ERROR_MORE_DATA`, capped at `MAX_HOLDERS` = 4,096 with `truncated`), then `RmEndSession` in a guard on every path.
+The reader uses Restart Manager:
 
-- Each `RM_PROCESS_INFO` gives `Process.dwProcessId` and `Process.ProcessStartTime`. These map to `ProcessRef { pid,
-  started }` through `parse/time.rs` (the identity rule 53 asks for). `strAppName` gives the name, falling back to the
-  process table's name, and `ApplicationType` gives the kind: `RmMainWindow` and `RmOtherWindow` are "Application",
-  `RmService` is "Service", `RmExplorer` is "Explorer", `RmConsole` is "Console", `RmCritical` is "System". This mapping
-  is a pure function and tested.
-- Folders: Restart Manager reports holders of files, not folders. A folder path answers
-  `PlatformError::Unsupported("Pick a file: Windows reports which programs hold a file, not a folder.")`. A missing path
-  answers `NotFound`. Dyno's own process is filtered out as on macOS.
-- Rights: a standard user's Restart Manager sees processes of every account, but other accounts' names may be empty.
-  Those rows keep the pid and say "another account".
+1. `RmStartSession`.
+2. `RmRegisterResources` with the one path.
+3. `RmGetList`. On `ERROR_MORE_DATA` it retries with the size `pnProcInfoNeeded` reports, at most 3 times, because the
+   list can grow between calls (review P2-7). The total is capped at `MAX_HOLDERS` = 4,096, with `truncated` set.
+4. `RmEndSession`, in a guard that runs on every path.
+
+- **Identity.** Each `RM_PROCESS_INFO` gives `Process.dwProcessId` and `Process.ProcessStartTime`. These map to
+  `ProcessRef { pid, started }` through `parse/time.rs` (`started_from_filetime`, `same_start`), the identity rule 53 asks
+  for.
+- **Name and kind.** `strAppName` gives the name, falling back to the process table's. `ApplicationType` gives the kind:
+
+  | `ApplicationType` | Kind |
+  | --- | --- |
+  | `RmMainWindow`, `RmOtherWindow` | Application |
+  | `RmService` | Service |
+  | `RmExplorer` | Explorer |
+  | `RmConsole` | Console |
+  | `RmCritical` | System |
+
+  The mapping is a pure function and is tested.
+- **Folders.** `RmGetList` returns `ERROR_ACCESS_DENIED` when "a path registered to the Restart Manager session is a
+  directory" (Microsoft Learn, fetched 2026-11-08). A folder path therefore answers `PlatformError::Unsupported("Pick a
+  file: Windows reports which programs hold a file, not a folder.")` before any session starts.
+- **Other cases.** A missing path answers `NotFound`. Dyno's own process is filtered out, as on macOS.
+- **Rights.** The page does not say what a standard user sees of other accounts' processes. WP-0 measures it. Rows without
+  a name keep the pid and say "another account".
 
 #### 4.4 Logging (ER-27)
 
-- Startup: one line per source, `Startup source read` with `Source=hklm-run-32`, `Count`, `Skipped`, `DurationMs`,
-  `Outcome`. A failure logs at `warn` with the raw Win32 error or HRESULT and the sentence shown. A summary line logs the
-  total, the number of unavailable sources and the duration. Entry names and commands are not logged by default (they can
-  hold user paths).
-- Facts: one line per fact, with `Fact`, `Outcome` and `DurationMs`. The OS name is logged (the agent's start line
-  already logs `OsVersion`).
-- Locks: `Lockers read` with `Count`, `Truncated`, `DurationMs` and each Restart Manager call's error code. The path is
-  user content and is not logged.
-- The `Platform wired` line of §2.
+- **Startup.**
+  - One line per source, `Startup source read`, with `Source=hklm-run-32`, `Count`, `Skipped`, `DurationMs` and `Outcome`.
+  - A failure is logged at `warn` with the raw Win32 error or HRESULT and the sentence shown, and with the denied task-folder
+    count.
+  - A summary line gives the total, the number of unavailable sources and the duration.
+  - Entry names and commands are not logged by default: they can hold user paths.
+- **Facts.** One line per fact, with `Fact`, `Outcome` and `DurationMs`. The OS name is logged; the agent's start line
+  already logs `OsVersion`.
+- **Locks.** `Lockers read`, with `Count`, `Truncated`, `DurationMs`, `Retries` and each Restart Manager call's error code.
+  The path is user content and is not logged.
+- **Wiring.** The `Platform wired` line of §2.
+
+#### 4.5 Health says what it could not check (review P1-5)
+
+Today `health::assess` adds reasons only for facts that have a value: `disks`, `restart_pending` and `pending_updates`
+(`health.rs:140,261,271`). The hero prints "Nothing needs your attention." whenever there are no reasons
+(`health-hero.ts:32-33`). An unread fact is therefore an all-clear: the same false all-clear this record exists to remove,
+on the most visible card, and on macOS too, where pending updates are never read.
+
+- **Engine.** `HealthReport` gains `not_checked: Vec<NotChecked { what, why }>`. `assess` fills it for every fact it scores
+  whose reading is unavailable, with the reading's own sentence ("disk health: needs administrator rights").
+  - The field is appended at the end of the struct.
+  - The `Reply::Health` wire is postcard (`protocol.rs:1-5`), and appending a struct field is not the variant append that
+    rule allows. So WP-H follows the protocol rule: a `PROTOCOL_VERSION` bump unless the protocol golden test shows the
+    appended field decodes in an older reader.
+  - The app, agent and CLI ship in one installer.
+- **UI.** When `reasons` is empty and `not_checked` is not, the hero says "Nothing found in what Dyno could check" and
+  lists "Not checked: …" under it. "Nothing needs your attention" stays only when both lists are empty. The score is
+  unchanged, so a gap is said, not guessed.
+- **Tests (failing first).**
+  - `assess` over `SystemFacts::unknown(..)` returns the three scored facts in `not_checked`. It fails today: the field
+    does not exist.
+  - A spec of the hero with an empty `reasons` and a non-empty `not_checked`.
+  - The mock backend's Health answer gains a `notChecked` row.
+- **WP-1.** After WP-1 alone, Windows shows "Not checked: disk health, restart needed, pending updates — not read on
+  Windows yet" until WP-3 lands.
 
 ### 5. Tests (failing first, ER-11)
 
 | Test | Where | Fails today because |
 | --- | --- | --- |
-| The no-fake test (§2), per OS | `windows/mod.rs`, `macos/mod.rs`, `linux/mod.rs` | Windows: `locks`, `startup`, `facts` are `dyno_platform::fake::Fake` |
-| The shipped-feature check (§3) and its fixture test | `scripts/check-shipped.mjs`, `.test.mjs` | the feature does not exist yet, so the fixture test fails |
-| `assemble` over fake registry, folder and task shapes, on every OS: an enabled HKCU Run value; a value turned off by StartupApproved (the bytes WP-0 measured); an HKLM 32-bit (`WOW6432Node`) entry governed by `Run32` and not by `Run`; the same name in the 64-bit view with a different state; HKCU 64/32 duplicates merged; RunOnce always enabled; `REG_EXPAND_SZ` expanded through a fake environment; a non-string value skipped and counted; a `.lnk` in the user folder resolved, and one turned off by `StartupFolder`; a `.lnk` with no path; `desktop.ini` skipped; a logon task enabled, one turned off, and a boot-only task left out; one failing source giving one sentence while the others list; all failing giving an error; every cap | `parse/win_startup.rs` | the module does not exist |
-| `win_os_name` cases: Windows 10, Windows 11 with "Windows 10" in `ProductName`, a server, no `DisplayVersion`, no `UBR` | `parse/win_facts.rs` | the function does not exist |
-| Restart Manager mapping from `RM_PROCESS_INFO`-shaped values to `Locker`, and the folder and missing-path answers | `windows/locks.rs` (pure part on every OS) | the module does not exist |
-| Windows runner only: the reader lists the holder of a temporary file the test itself holds open (its own child process), and the startup reader lists entries the test writes to a **temporary** registry key and folder through the `RegistryView` and `FolderList` traits pointed at them. The real HKCU `Run` key is never written (ER-14). | `windows/locks.rs`, `windows/startup.rs` | the modules do not exist |
+| The no-fake test (§2), per OS | `windows/mod.rs`, `macos/mod.rs`, `linux/mod.rs` | Windows: `locks`, `startup` and `facts` are `dyno_platform::fake::Fake` |
+| The declaration check (§2) and its fixtures | `dyno-platform/tests/no_ungated_doubles.rs` | `fake`, `FakeCounters`, `FakeThrottle`, `FakeWear`, `FakeBattery`, `FakeWakeTimer` and `dyno_core::wol::fake` are ungated |
+| The shipped-feature check, its positive control and the derived `SHIPPED` (§3.1) | `scripts/check-shipped.test.mjs` | `dyno-helper` is missing from `SHIPPED`; the feature does not exist, so the positive control reports `check broken` |
+| `assess` fills `not_checked`; the hero spec (§4.5) | `dyno-core/src/health.rs`, `health-hero.spec.ts` | the field and the line do not exist |
+| `assemble` over fake registry, folder, task and package shapes, on every OS (case list below) | `parse/win_startup.rs` | the module does not exist |
+| `is_os_owned` over the new ids (§4.1) | `dyno-core/src/startup.rs` | the id formats do not exist |
+| `win_os_name` cases: Windows 10; Windows 11 with "Windows 10" in `ProductName`; a server; no `DisplayVersion`; no `UBR` | `parse/win_facts.rs` | the function does not exist |
+| Restart Manager mapping from `RM_PROCESS_INFO`-shaped values to `Locker`; the retry on `ERROR_MORE_DATA`; the folder and missing-path answers | `windows/locks.rs` (the pure part on every OS) | the module does not exist |
+| On the Windows runner only, the readers against temporary state the test creates (hygiene below) | `windows/locks.rs`, `windows/startup.rs` | the modules do not exist |
+| `StartupLocation` postcard: the new variants decode as appended | `dyno-core` protocol golden | the variants do not exist |
 
-**The VM row (local only; family ADR 0040).** A `startup-facts-locks` row in `scripts/vm-smoke/win-rows.mjs` is added on
+The `assemble` cases:
+
+- **Run keys:** an enabled HKCU Run value; a value turned off by StartupApproved (the bytes WP-0 measured); an HKLM
+  32-bit (`WOW6432Node`) entry governed by `Run32`, not by `Run`; the same name in the 64-bit view with a different state;
+  HKCU 64-bit and 32-bit duplicates merged; RunOnce always enabled.
+- **Values:** `REG_EXPAND_SZ` expanded through a fake environment; a non-string value skipped and counted; a value over
+  `MAX_VALUE_BYTES` skipped and counted.
+- **Folders:** a `.lnk` in the user folder resolved, and one turned off by `StartupFolder`; a `.lnk` with no path;
+  `desktop.ini` skipped.
+- **Tasks:** a logon task enabled, one turned off, a boot-only task left out, a logon trigger for another user left out,
+  and a denied folder counted into one sentence.
+- **Packaged apps:** a packaged task enabled, one turned off by the user, one turned off by policy.
+- **Failures and bounds:** one failing source gives one sentence while the others still list; every source failing gives
+  an error; every cap holds.
+
+**Windows-runner test hygiene (ER-14, review P2-8).** Nothing the tests create may run, persist or touch the real user's
+entries:
+
+- Every object the tests create carries the prefix `DynoTest-<uuid>`, and each test first sweeps leftovers with that
+  prefix. Cleanup is an RAII guard that also runs on panic.
+- The startup reader runs over a temporary key `HKCU\Software\DynoTest-<uuid>\…` and a temporary folder, through the
+  `RegistryView` and `FolderList` traits pointed at them. The real `Run` key is never written.
+- The task test registers its task **disabled**, with an action pointing at a path that does not exist in the test's
+  temporary folder, in the root folder under the prefix. WP-0 checks whether a standard user can create a task folder; if
+  so, the task goes in its own folder.
+- The locks test's child process holds a temporary file. It is started and ended through `paddock_proc` (rule 53) and
+  cannot outlive the test.
+
+**The VM row (local only; family ADR 0040).** A `startup-facts-locks` row is added to `scripts/vm-smoke/win-rows.mjs` on
 the harness's home branch `test/dyno-vm-harness-1.1-win`, by its owner or through it (family ADR 0042). It runs on the
 merged harness:
 
-1. Seed over the harness's admin SSH session, then verify every seed with `reg query`, `schtasks /query` and `dir`
-   before any assertion (ER-33: the precondition is checked). The seeds are: an HKCU `Run` value, an HKCU `Run` value
-   marked off in `StartupApproved\Run` with the bytes WP-0 measured, an HKLM `Run` value in the 32-bit view, a `.lnk`
-   in the user Startup folder, and a logon task (`schtasks /create /sc onlogon`).
-2. **Positive control:** Dyno's own agent entry (HKCU `Run`, `dyno-agent.exe`) must be listed. If it is missing, the
-   row reports `check broken`, not "fail" (ER-33).
-3. Assert through the app (`startupEntries` over CDP, as `startup.mjs` does in the investigation) and on the Health
-   page's text: each seed is listed with its location label and its state (the turned-off one as off), and
-   `unavailable()` is empty.
+1. Seed over the harness's admin SSH session, then verify every seed with `reg query`, `schtasks /query`, `dir` and
+   `Get-AppxPackage` before any assertion (ER-33: the precondition is checked). The seeds:
+   - an HKCU `Run` value;
+   - an HKCU `Run` value marked off in `StartupApproved\Run`;
+   - an HKLM `Run` value in the 32-bit view;
+   - a `.lnk` in the user Startup folder;
+   - a logon task (`schtasks /create /sc onlogon`);
+   - a packaged app with a startup task, if the image has one (Windows Terminal declares one).
+2. **Positive control.** Dyno's own agent entry (HKCU `Run`, `dyno-agent.exe`) must be listed. If it is not, the row
+   reports `check broken`, not "fail" (ER-33).
+3. Assert through the app (`startupEntries` over CDP, as `startup.mjs` does in the investigation) and on the Health page's
+   text. Each seed is listed with its location label and its state (the turned-off one as off). `unavailable()` is empty
+   or names only denied task folders. The coverage sentence is shown.
 4. Facts: the OS name in the agent's facts equals `Get-CimInstance Win32_OperatingSystem` `Caption` and `BuildNumber`
-   (mapped), and is never "Fake OS".
+   (mapped), and is never "Fake OS". The Health card shows "Not checked: pending updates".
 5. Locks: a PowerShell job in the guest holds a file open, and Dyno's "What is locking this file?" lists `powershell`.
-6. The VM snapshot is reverted afterwards. Seeds never reach the host (ER-14).
+6. The VM snapshot is reverted afterwards. The seeds never reach the host (ER-14).
 
 ## Work packages
 
-Agent-days for one agent. WP-1 can land on its own: it removes the fakes and makes the three Windows gaps say so
-honestly, ahead of the readers.
+The days are agent-days for one agent. WP-1 and WP-H can land on their own: together they remove the fakes and make the
+Windows gaps and the Health card say so honestly, ahead of the readers.
 
 | WP | Package | Depends on | Days |
 | --- | --- | --- | --- |
-| WP-0 | VM measurements (local): the StartupApproved key and bytes per source kind (Task Manager toggles, key diff); `MSFT_PhysicalDisk` and the Diagnostics-Performance log as a standard user; the Task Scheduler walk's time and task count on a fresh Windows 11 | – | 0.5 |
-| WP-1 | The mechanism: the failing no-fake tests and the `check-shipped` feature check first; `adapter()` and `Platform::adapters()`; `test-support` gates in `dyno-platform` and `dyno-core`; dev-dependency features in `dyno-agent`, `dyno-cli` and the app; `NotReadHere` replacing `Unsupported` and `FakeBattery`; Windows `platform()` names every port, with `NotReadHere` for the three gaps until WP-3 to WP-6; the `Platform wired` log line; the doctest moved; the `rustChecks` line with its cost measured; `cargo xwin check` clean | – | 1.5–2 |
-| WP-2 | Family: the `test-support` gate in `paddock-power` and `paddock-secrets`, their CHANGELOG entries, the dev-dependency lines in Dyno and `paddock-pitwall` (integrating agent; D2) | WP-1 | 0.5 |
-| WP-3 | Windows facts: `win_os_name` and its tests first, then the registry, power-plan, WMI and folder reads, per-fact logging | WP-0, WP-1 | 1.5–2 |
-| WP-4 | Startup from the registry and folders: `assemble` and its tests first, `RegistryView` and `FolderList` adapters, StartupApproved, RunOnce variants on the wire (D3: `dyno-core`, `api.types.ts`, labels, the mock), per-source logging, the temporary-key Windows test | WP-0, WP-1 | 2–2.5 |
-| WP-5 | Startup from logon tasks: the `LogonTasks` trait, the COM walk with caps, its pure mapping tests, its Windows-runner test against a task the test registers under its own temporary folder and removes | WP-4 | 1.5–2 |
-| WP-6 | File locks through Restart Manager: the mapping tests first, the session guard, the Windows-runner test on its own temporary file | WP-1 | 1–1.5 |
-| WP-7 | The VM row on the harness branch, run on the merged harness with screenshots of the Health page and the startup card, and an independent review of the screenshots (ER-23) | WP-3 to WP-6 | 1–1.5 |
-| WP-8 | Docs: `architecture.md` and `features.md` (the platform table: Windows startup, facts and locks built, process details still not), the user guide (hidden tasks, what is not read), CHANGELOG 1.1.1, a lessons entry (the pattern and the check), `docs/known-copies.toml` if the COM init helper is shared | all | 0.5 |
+| WP-0 | VM measurements (local) and source reading: the StartupApproved keys and bytes per source kind (Task Manager toggles, key diff); the packaged-app `SystemAppData` layout and `State` values; `MSFT_PhysicalDisk` as a standard user; Restart Manager's view of other accounts as a standard user; hidden and denied task folders as a standard user; task-folder creation rights; the power overlay GUIDs; `BackgroundAccessApplications` on 23H2+; the Task Scheduler walk's time and count on a fresh Windows 11. The remaining Microsoft Learn pages are fetched and dated in Sources. | – | 1 |
+| WP-1 | The mechanism. Tests first: the no-fake tests, the declaration check, and the `check-shipped` changes (derived `SHIPPED` with `dyno-helper`, the feature assertion, the positive control). Then: `adapter()` and `Platform::adapters()`; the `test-support` gates in `dyno-platform` and `dyno-core`; dev-dependency features in `dyno-agent`, `dyno-cli`, `dyno-helper` and the app; `NotReadHere` in place of `Unsupported` and `FakeBattery`; Windows `platform()` naming every port, with `NotReadHere` for the three gaps; the `Platform wired` log line; the doctest moved; `approved_value` under `cfg(test)`; the Linux `rustChecks` line with its cost measured; `cargo xwin check` clean; the rule 54 installer dispatch. | – | 2–2.5 |
+| WP-1b | Shared CI contract: the `hostRustChecks` field in `app-gates` and its README, Dyno's entry, a run on the Windows and macOS legs with the cost recorded (integrating agent: `.gitea/`) | WP-1 | 0.5–1 |
+| WP-2 | Family: the `test-support` gate in `paddock-power` with its self dev-dependency for `tests/it`, the "inert to build" doc sentence, the `MemorySecrets` doc line, the CHANGELOG entries, and Dyno's dev-dependency lines (integrating agent; D2) | WP-1 | 0.5–1 |
+| WP-H | Health `not_checked`: the engine field and the failing test, the protocol decision and golden, the hero line and spec, the mock, `api.types.ts` | WP-1 | 1–1.5 |
+| WP-3 | Windows facts: `win_os_name` and its tests first, then the registry, power (overlay included), WMI and folder reads, with per-fact logging | WP-0, WP-1 | 1.5–2 |
+| WP-4 | Startup from the registry and folders: `assemble` and its tests first; the `RegistryView` and `FolderList` adapters with bounds; StartupApproved; the new location variants appended on the wire (D3: `dyno-core`, `api.types.ts`, `labels.ts`, the mock, the filter, `is_os_owned` tests); the coverage sentence; the disabled "signed apps" filter (D8); per-source logging; the temporary-key Windows test | WP-0, WP-1 | 2.5–3 |
+| WP-5 | Startup from logon tasks: the `LogonTasks` trait, the COM walk with caps, the user filter and the denied-folder count, the pure mapping tests, the Windows-runner test with the hygiene of §5 | WP-4 | 1.5–2 |
+| WP-5b | Startup from packaged apps: the `PackagedStartup` trait, the `SystemAppData` read, the state mapping WP-0 measured, its `assemble` cases (D7) | WP-0, WP-4 | 1–1.5 |
+| WP-6 | File locks through Restart Manager: the mapping and retry tests first, the session guard, the Windows-runner test on its own temporary file | WP-0, WP-1 | 1–1.5 |
+| WP-7 | The VM row on the harness branch, run on the merged harness; screenshots of the Health page and the startup card, independently reviewed (ER-23) | WP-3 to WP-6, WP-H | 1–1.5 |
+| WP-8 | Docs: `architecture.md`, `features.md` (Windows startup, facts and locks built; process details and signer not yet), the `windows/mod.rs` module doc, the user guide (coverage list, hidden tasks, what is not read), CHANGELOG 1.1.1, a lessons entry (the pattern and the checks), `wiring.toml` edges, and `docs/known-copies.toml` if the COM helper is shared | all | 0.5–1 |
+| CI | Windows-leg round trips: there is no local Windows host apart from the VM, and each Windows CI iteration is long | – | 1 |
 
-**Total: 10 to 12.5 agent-days.** The critical path is WP-0 → WP-1 → WP-4 → WP-5 → WP-7, about 6.5 to 8.5 days. WP-3 and
-WP-6 run beside WP-4.
+**Total: 16 to 21.5 agent-days** (revision 1 had 10 to 12.5). The increase comes from:
+
+- the packaged-app source;
+- Health `not_checked`;
+- the CI contract field;
+- the real D2 adoption;
+- the declaration check;
+- the broader WP-0;
+- an explicit allowance for Windows CI round trips.
+
+The critical path is WP-0 → WP-1 → WP-4 → WP-5 → WP-7, about 8 to 10.5 days. WP-1b, WP-2, WP-H, WP-3, WP-5b and WP-6 run
+beside it. Deferring the signer reader (D8) avoids about 1 to 1.5 days of FFI work in this release. If the user wants it
+in 1.1.1, it is a shared package with family ADR 0051 and its own estimate.
 
 ### Parallelism and cost (ER-20)
 
-- Startup: about ten registry reads and two folder listings take milliseconds. The Task Scheduler walk is the slow part
-  (WP-0 measures it). The sources run one after another on the agent's startup job thread, which is never the UI
-  thread. A parallel COM walk would need one apartment per thread for a gain of a few hundred milliseconds at most, so it
-  is not done. The list is cached until `refresh()`, so the work is done once per refresh, not per page view.
-- Facts run every few minutes off the sampling path. The WMI disk query is the slowest read. If WP-0 measures it over
-  250 ms, disk health is kept for 30 minutes (disk health changes slowly), the same caching `smart_reader` does.
-- Locks: one Restart Manager session per question, bounded by `MAX_HOLDERS`. Nothing to parallelise.
+- **Startup.**
+  - The registry reads (about ten) and two folder listings take milliseconds. The Task Scheduler walk and the
+    packaged-app lookup are the slow parts; WP-0 measures them.
+  - The sources run one after another on the agent's startup job thread, which is never the UI thread. A parallel COM walk
+    would need one apartment per thread for a gain of a few hundred milliseconds at most, so it is not done.
+  - The list is cached until `refresh()`.
+- **Facts.** They run every few minutes, off the sampling path. The WMI disk query is the slowest read. If WP-0 measures it
+  over 250 ms, disk health is kept for 30 minutes, the way `smart_reader` caches.
+- **Locks.** One Restart Manager session per question, bounded by `MAX_HOLDERS` and three retries.
+- **CI.** The non-test `cargo check` adds one partial rebuild per leg. It is measured in WP-1 and WP-1b, and if it runs over
+  two minutes on a leg, it moves to the nightly run.
 
 ## Decisions for the user
 
-- **D1. The check.** Recommended: the build-time assertion (§1's `cfg` gate), kept honest by the `check-shipped`
-  feature-graph check and the Linux non-test `cargo check`, plus the no-fake test for a readable failure (§3). The
-  alternatives are a Clippy entry (allow-lists in about 30 test files) and a source grep (misses aliases).
-- **D2. The family test doubles** (`paddock-power`, `paddock-secrets`) are gated in the same change. Recommended: yes.
-  It is three lines of adoption, and otherwise a Dyno port can still be wired to `FakePower` in a release.
-- **D3. RunOnce.** Recommended: two new `StartupLocation` variants, `UserRunOnceKey` ("Registry, next sign-in only
-  (this user)") and `MachineRunOnceKey`. This is a wire change mirrored in `api.types.ts` in the same change. The
-  alternative folds RunOnce into `UserRunKey` and `MachineRunKey` and loses the "once" fact.
-- **D4. The facts in 1.1.1.** Recommended: all rows of §4.2 (the OS name, restart pending, power plan, visual effects,
-  background apps, developer folders, disk health), with pending updates and boot time honestly unavailable. The minimum
-  alternative is the OS name only, with every other fact `NotReadHere` (WP-3 at about 0.5 days).
-- **D5. Boot-trigger tasks** (`TASK_TRIGGER_BOOT`). Recommended: not listed in 1.1.1. They run before anyone signs in,
-  like services, and the page is "what slows your sign-in". This can be revisited with a services view.
-- **D6. Windows process details** (`NoDetails`). Recommended: out of scope. It is an honest, documented gap, not a fake.
-  It is a separate item for a later release.
+- **D1. The checks.** Recommended:
+  - the `cfg` gate as the guarantee;
+  - the `check-shipped` feature-graph check over the derived shipped list, with a positive control;
+  - a non-test `cargo check` of `dyno-platform`, `dyno-agent`, `dyno-app` and `dyno-helper` on all three legs. Windows and
+    macOS need the new shared `hostRustChecks` field.
+  - an installer build before WP-1 and WP-2 land (rule 54);
+  - the no-fake test and the declaration check as the readable failures.
+
+  Alternatives:
+  - (b) `cargo xwin check` on the Linux leg, if the CI image can carry xwin;
+  - (c) no host-leg check, with nightly detection accepted as a residual risk.
+- **D2a. Gate `paddock_power::{FakePower, FakeEvents}` in the same change.** Recommended: yes. They are pure doubles, and
+  adopting the gate takes the self dev-dependency plus Dyno's lines.
+- **D2b. `MemorySecrets`.** Recommended: it stays public, documented as an ephemeral store, because the workbench demo uses
+  it in production. The alternative is a new `EphemeralSecrets` for the demo and gating `MemorySecrets`: more change, for
+  no gain to Dyno.
+- **D3. New `StartupLocation` variants.** Recommended: `UserRunOnceKey` ("Registry, next sign-in only (this user)"),
+  `MachineRunOnceKey` and `PackagedApp` ("Store app").
+  - They are **appended after `LoginItem`** (`protocol.rs:1-5`: append only), mirrored in `api.types.ts`, `labels.ts`,
+    the mock and the filter.
+  - An older app or CLI that receives a new variant cannot decode the whole startup reply. The app, agent and CLI ship in
+    one installer, so this happens only if an old CLI talks to a new agent. The CLI then shows its usual "could not read
+    that reply" with the version hint. No fallback is built.
+- **D4. The facts in 1.1.1.** Recommended: all rows of §4.2, with pending updates and boot time honestly unavailable and
+  shown as not checked (§4.5).
+- **D5. Boot-trigger tasks and services.** Recommended: not listed in 1.1.1, and named in the coverage sentence.
+- **D6. Windows process details (`NoDetails`).** Recommended: out of scope. It is an honest, documented gap.
+- **D7. Packaged-app startup tasks.** Recommended: read as a ninth source (WP-5b). The alternative is a permanent
+  coverage sentence, "Store apps that start at sign-in are not listed yet".
+- **D8. The signer of startup entries.** Recommended: not read in 1.1.1. The "Hide signed apps" filter is disabled on
+  Windows with a sentence. A later shared reader goes with family ADR 0051's `WinVerifyTrust` check, and also serves
+  Windows process details.
+- **D9. Health's "not checked" line (§4.5).** Recommended: in 1.1.1, on every OS, because it is the symptom that triggered
+  this record. Deferring it would leave "100, Good, Nothing needs your attention" on any machine where a scored fact cannot
+  be read.
 
 ## Consequences
 
-- A Windows user sees their real startup entries, a Health score that can drop for a failing disk or a pending restart,
-  and real answers to "what is locking this file". A source Dyno cannot read is a sentence, not an empty list.
-- A new port, or a new OS, without a real reader does not compile into a release unless it is given an honest
-  `NotReadHere`. Once the fakes are gated, the "every platform names every port" rule needs no lint of its own.
+- A Windows user sees:
+  - their real startup entries, Store apps included, with a stated coverage;
+  - a Health card that names what it could not check;
+  - real answers to "what is locking this file".
+
+  A source Dyno cannot read is a sentence, not an empty list or a silent all-clear.
+- A new port, double or OS without a real reader cannot ship as a fake:
+  - the gate stops a build without test targets from naming it;
+  - the declaration check stops it from being declared ungated;
+  - the non-test check on every leg finds a reference on the branch.
 - Test-only code moves behind a feature. Every test crate's `[dev-dependencies]` names `test-support` once. A test that
-  forgets it fails to compile with "could not find `fake` in `dyno_platform`", which is easy to fix.
+  forgets it fails to compile with "could not find `fake` in `dyno_platform`", which is quick to fix.
 - The agent's log names every adapter at start, so a support bundle shows what is wired.
-- The macOS and Linux wiring is unchanged apart from the `NotReadHere` rename and the new test.
-- Cost: 10 to 12.5 agent-days in Dyno 1.1.1, and one extra `cargo check` on the Linux leg (measured in WP-1).
+- The macOS and Linux wiring is unchanged apart from the `NotReadHere` rename and the new test. macOS gains the Health "not
+  checked" line for pending updates.
+- Cost: 16 to 21.5 agent-days in Dyno 1.1.1, one shared CI contract field, and one extra `cargo check` per leg (measured).
 
 ## Sources
 
-Microsoft Learn, as remembered at the time of writing. They were not fetched in this session. WP-0 re-reads each one and
-records the date before the code relies on it.
-
-- "Run and RunOnce Registry Keys" (the four keys, RunOnce deletion, the 260-character value limit).
-- "Registry Keys Affected by WOW64" and "Accessing an Alternate Registry View" (`KEY_WOW64_32KEY`, `KEY_WOW64_64KEY`;
-  `HKCU\Software` not redirected).
-- "KNOWNFOLDERID" (`FOLDERID_Startup`, `FOLDERID_CommonStartup`) and `SHGetKnownFolderPath`.
-- Task Scheduler 2.0: `ITaskService`, `ITaskFolder::GetTasks` (`TASK_ENUM_HIDDEN`), `ITriggerCollection`,
-  `TASK_TRIGGER_TYPE2` (`TASK_TRIGGER_LOGON` = 9, `TASK_TRIGGER_BOOT` = 8), `IExecAction`.
-- Restart Manager: `RmStartSession`, `RmRegisterResources`, `RmGetList`, `RM_PROCESS_INFO`, `RM_APP_TYPE`,
-  `RmEndSession` (at most 64 sessions per user at once).
-- `RtlGetVersion`; `MSFT_PhysicalDisk` (`HealthStatus`); `PowerGetActiveScheme`, `PowerReadFriendlyName`.
-- StartupApproved values: the format in `parse/startup_approved.rs` (Dyno's own, tested). The per-source key mapping is
-  measured in WP-0, not taken from a source.
+- **Fetched 2026-11-08 (Microsoft Learn):**
+  - "RmGetList function": `ERROR_MORE_DATA` with `pnProcInfoNeeded`; `ERROR_ACCESS_DENIED` when "a path registered to
+    the Restart Manager session is a directory". The page says nothing about other accounts' processes, so WP-0 measures
+    that.
+  - "ITaskFolder::GetTasks": `TASK_ENUM_HIDDEN` returns hidden tasks too; the method returns an `HRESULT`. The page says
+    nothing about rights or about what is filtered, so WP-0 measures that.
+- **Not yet fetched (WP-0 fetches and dates each one before the code relies on it):**
+  - "Run and RunOnce Registry Keys";
+  - "Registry Keys Affected by WOW64" and "Accessing an Alternate Registry View";
+  - "KNOWNFOLDERID";
+  - `ITaskService`, `TASK_TRIGGER_TYPE2`, `ILogonTrigger::UserId`, `IExecAction`;
+  - `RM_PROCESS_INFO`, `RM_APP_TYPE`;
+  - `RtlGetVersion`;
+  - `MSFT_PhysicalDisk`;
+  - `PowerGetActiveScheme`, `PowerGetEffectiveOverlayScheme`;
+  - the MSIX `uap5:StartupTask` extension.
+- **Measured, not sourced:**
+  - StartupApproved values: the format is in `parse/startup_approved.rs` (Dyno's own, tested); the per-source key mapping
+    is measured in WP-0.
+  - The packaged-app `SystemAppData` `State` layout is not documented by Microsoft; WP-0 measures it.
