@@ -603,6 +603,45 @@ in 1.1.1, it is a shared package with family ADR 0051 and its own estimate.
 - **CI.** The non-test `cargo check` adds a rebuild of the Tauri and shell crates without their test features on each leg
   (re-review P2-C). It runs on every branch run (D10), and WP-1 and WP-1b measure and report its cost.
 
+### WP-0 results (measured 2026-11-09, partial)
+
+Local VM only (ER-14): `paddock-win11-test` (VMware Fusion, Windows 11 Pro Arm64, `DisplayVersion` 26H2, build 26300.9711, stable channel),
+reverted to its `gui-session-tools` snapshot before and after, started headless. Callers: `paddock-test` (standard user) and `paddock-admin` over
+SSH, so every reading below is from a **network logon in session 0**; no interactive token was used. Probes: `wp0-collect.ps1` (one PowerShell
+script, a positive control per step; a control that said `BROKEN` is reported as such). Raw outputs are in the coordinator's scratch folder
+(`wp0/out/`), not in the repository. Two steps had a broken control on the first run and were redone (the Restart Manager holder died with its SSH
+session; the first quoting mangled the path); only the corrected runs are reported.
+
+| # | Question | Result |
+| --- | --- | --- |
+| 1 | StartupApproved bytes per source kind | **Not measured**: the toggles need Task Manager (a GUI session), which this run did not have. Read only: HKLM `StartupApproved\Run` has `SecurityHealth` = `04 00 00 00 00 00 00 00 00 00 00 00` (first byte even = enabled by §4.1's rule, here `0x04`, not `0x02`/`0x06`); HKCU `StartupApproved\{Run,Run32,StartupFolder}` and HKLM `Run32`, `StartupFolder` do not exist on this image. So a missing key or value must be read as Enabled, and `0x04` must parse as enabled (a test input for `approved_state`). |
+| 2 | Packaged-app `SystemAppData` keys on a fresh image | The task keys exist **without any toggle**: `…\SystemAppData\<PackageFamilyName>\<TaskId>` for `MSTeams_8wekyb3d8bbwe\TeamsTfwStartupTask` (`State=2`), `Microsoft.WindowsTerminal_8wekyb3d8bbwe\StartTerminalOnLoginTask` (`State=0`) and `Microsoft.MicrosoftOfficeHub_8wekyb3d8bbwe\WebViewHostStartupId` (`State=2`). The manifests of the 122 installed packages (read from `AppxManifest.xml`) declare exactly these three `StartupTask` entries, with `Enabled` = true, false, true, which matches `State` 2, 0, 2 (the `StartupTaskState` values: 0 disabled, 1 disabled by user, 2 enabled, 3 disabled by policy, 4 enabled by policy). Other subkeys (`PSR`, `Schemas`, `SplashScreen`, `HAM`) carry no `State` and are not tasks. **Not compared with Task Manager's Startup apps list** (no GUI). Consequence: on this image the registry alone lists every task; the manifest enumeration (WP-5b base) is still the safer source for a machine whose tasks have never been touched, and is not proven necessary. |
+| 3 | `State` after toggles (user, policy) | **Not measured** (no Task Manager; no policy set). Only the three states seen above (0, 2) are measured. |
+| 4 | `MSFT_PhysicalDisk` as a standard user | **Access denied** (`Get-CimInstance`, network logon). As `paddock-admin`: one row, `HealthStatus=0` (healthy), `OperationalStatus=2`. So the disks fact **needs the helper** for a standard user (at least in a non-interactive logon); with no helper it is `unavailable("needs the helper")`, as §4.2 plans. |
+| 5 | Restart Manager as a standard user | **`RmGetList` returns `ERROR_ACCESS_DENIED` (5) for a standard user on every path tried, including a file that user's own process holds open** (network logon). As `paddock-admin` the same call works: `ERROR_MORE_DATA` (234) with the needed count, then the holder (`Windows PowerShell`, `ApplicationType` 5 = `RmConsole`, session 0), for a file held by either account. So WP-6 cannot assume a standard user can list holders; **measure again in an interactive session (the `PaddockRunner` task) before WP-6 relies on it**, and plan the answer "needs administrator rights" (helper) for the denied case. A folder path also answered 5 for the standard user (the folder case could not be told apart). |
+| 6 | Hidden and denied task folders as a standard user | The walk (`GetFolders(0)`, `GetTasks(TASK_ENUM_HIDDEN)`, recursive) raised **no error** for the standard user and still saw fewer tasks: **176 tasks in 141 folders (33 hidden) as `paddock-test` against 252 in 142 folders (56 hidden) as `paddock-admin`**. So there is no denied count to report, as the ADR expected: the 76 missing tasks are filtered silently, and the user guide must say standard users do not see all tasks. |
+| 7 | May a standard user register a logon task or create a task folder | Create a task folder in the root: **allowed**. Register a task with a logon trigger: **denied** (`0x80070005`). So the Windows-runner test registers its task only where the runner account is an administrator, and skips with a message otherwise (§5 hygiene). The cleanup check afterwards (`schtasks /query`, as admin) found no `DynoTest-` task or folder. (The step's own control used `Get-ScheduledTask`, which also answers access denied for a standard user, so it is not a valid control; use `schtasks /query` as admin.) |
+| 8 | Power overlay GUIDs, effective mode | `PowerGetEffectiveOverlayScheme` after `powercfg /overlaysetactive`: `OVERLAY_SCHEME_MIN` (Best power efficiency) `961cc777-2547-4f9d-8174-7d86181b8a7a`; `OVERLAY_SCHEME_HIGH` (Better performance) `3af9b8d9-7c97-431d-ad78-34a8bfea439f`; `OVERLAY_SCHEME_MAX` (Best performance) `ded574b5-45a0-4f42-8737-46345c09c238`; `OVERLAY_SCHEME_NONE` (Balanced) all zeros. The call needs no rights (standard user, `rc=0`); actual and effective were equal in every case. "Power saver" for the fact is the Power saver scheme **or** `961cc777-…`. |
+| 9 | `BackgroundAccessApplications` on 23H2+ | The key exists with a value `Migrated=4` and one subkey per package (44 here), but **no subkey has `Disabled` or `DisabledByUser`** on this image. So the per-app flags are absent when nothing was set; whether Settings writes them on 26H2 was not measured. The fact stays unavailable ("Windows no longer keeps one switch for this") unless a toggle in Settings is shown to write them. |
+| 10 | Task Scheduler walk time and count | Standard user: **34.5 s** for the first walk (176 tasks, cold, emulated Arm); administrator: 4.8 s (252 tasks) a minute later. A single cold sample each, so an order of magnitude only. A standard-user first read of tens of seconds is why the startup list is cached until `refresh()` and the tasks source reads last and reports on its own. |
+| 11 | WMI disk query time | Administrator, 10 runs: first 2,395 ms (cold), then 20 to 33 ms, median 28 ms. Over the 250 ms rule only on the first call, so the 30-minute cache is not needed; the first call must not run on the sampling path. (Standard user: denied, see 4.) |
+
+Also seen: the registry `ProductName` says `Windows 10 Pro` on this build-26300 Windows 11, and `Win32_OperatingSystem.Caption` says `Microsoft Windows 11
+Pro`, as §4.2 expects of `win_os_name()`. What `sysinfo::long_os_version()` (the interim `NotReadHere` facts) prints here was **not measured**.
+
+**Not measured, and why:** the Task Manager toggles of items 1 and 3 and the Startup apps comparison of item 2 (no interactive session driven in
+this run); Restart Manager and the disk query from an interactive token (item 5); the sysinfo OS name. The remaining Microsoft Learn pages were
+not fetched in this run.
+
+### Windows red and green run of the no-fake test (2026-11-09)
+
+On the same VM, the same snapshot, a standard user over SSH; both binaries were cross-built with `cargo xwin test --no-run` (x86-64, run under
+emulation). Red: the tip with only `windows::platform()` put back to the old `..fake.platform()` spread (the new test and wiring kept): `windows::tests::the_windows_platform_wires_no_fake` fails with
+`the Windows platform wires test doubles: ["locks=dyno_platform::fake::Fake", "startup=dyno_platform::fake::Fake", "facts=dyno_platform::fake::Fake"]`.
+Green: the tip (`008969752`): the same test passes. Two other tests of `windows::` fail in **both** runs and are environmental, not this change:
+`windows::counters::…::the_real_catalog_lists_memory_and_a_real_counter_reads_back_after_two_collections` (PDH status `0xc0000bc8`) and
+`windows::pdh::tests::reads_counters_on_this_machine` ("This OS reports no disk busy time"); a network logon has no performance counter objects.
+
 ## Decisions (accepted by the user, 2026-11-08)
 
 - **D1. The checks.** Recommended:
