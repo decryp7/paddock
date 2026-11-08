@@ -44,7 +44,10 @@ import { isMac } from '../extensions/keybinding';
         <!-- How to zoom and pan, behind a (?) rather than always on the title row. -->
         <debrief-help class="hint-help" label="Zoom and pan" i18n-label="@@timeline.hint.helpLabel" [text]="gestures" />
       }
-      @if (src.loading()) { <span class="spinner" role="status" aria-label="Loading" i18n-aria-label="@@timeline.panel.loading"></span> }
+      <!-- The slot is always there: a spinner that came and went moved the buttons right of it by its width and gap. -->
+      <span class="loading-slot">
+        @if (src.loading()) { <span class="spinner" role="status" aria-label="Loading" i18n-aria-label="@@timeline.panel.loading"></span> }
+      </span>
       <span class="spacer"></span>
       @if (src.main) { <debrief-live-window-controls /> }
       <div class="zoom" role="group" debriefRoving="button" rovingAxis="horizontal" aria-label="Zoom" i18n-aria-label="@@timeline.panel.zoom">
@@ -107,7 +110,8 @@ import { isMac } from '../extensions/keybinding';
     .config .select { height: 24px; }
     .config .ql { flex: 1 1 260px; min-width: 160px; height: 24px; padding: 0 6px; }
     .spacer { flex: 1; }
-    .spinner { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--border-3); border-top-color: var(--accent); animation: spin 0.8s linear infinite; flex: none; }
+    .loading-slot { flex: none; width: 10px; height: 10px; }
+    .spinner { display: block; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--border-3); border-top-color: var(--accent); animation: spin 0.8s linear infinite; flex: none; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .zoom { display: flex; align-items: center; gap: 2px; }
     .zoom .icon-btn:disabled { opacity: 0.35; cursor: default; }
