@@ -643,6 +643,7 @@ async fn a_child_engine_that_is_slow_to_become_ready_is_waited_for() {
 }
 
 fn launch_on_a_free_port() -> pitwall_core::llama::Launch {
+    // conformance: freed-port — the test engine takes this port itself (take_first_port) or the product retries on a fresh one; no other listener is expected to need it
     let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
     pitwall_core::llama::Launch {
         model: "tiny.gguf".into(),

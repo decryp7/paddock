@@ -667,6 +667,7 @@ impl Engine for ChildEngine {
                     );
                     next_note += Duration::from_secs(10);
                 }
+                // conformance: hang-guard — the loop ends when the child answers /health or exits; CHILD_HANG_GUARD (45 s) bounds it and never decides a verdict
                 tokio::time::sleep(self.poll_every).await;
             };
             if let Some(h) = held {
