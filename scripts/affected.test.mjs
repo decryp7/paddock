@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { tmpdir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
 import { describe, test } from 'node:test';
+import { lint, messagesInRange } from '../conformance/src/commit-lint.mjs';
 import { affected, appOfWorkflow, cargoGraph, changedJobs, chooseBase, ciOutputs, commitLintRange, planFor, scriptImporters, workflowJobs, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
 
 /**
@@ -389,7 +390,8 @@ describe('.gitea changes are narrowed to the jobs they reach', () => {
     const Z = '0'.repeat(40);
     assert.equal(commitLintRange({ event: 'pull_request', baseRef: 'main' }), 'origin/main..HEAD');
     assert.equal(commitLintRange({ event: 'pull_request' }), null);
-    assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/main', before: 'aaa', sha: 'bbb' }), 'aaa..bbb');
+    assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/main', before: 'aaa', sha: 'bbb' }), '--first-parent aaa..bbb', 'main: what main itself adds');
+    assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/x', before: 'aaa', sha: 'bbb' }), 'aaa..bbb', 'another branch: every commit it adds');
     assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/x', before: Z, sha: 'bbb' }), 'bbb^!', 'a new branch: the head commit');
     assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/x', before: '', sha: 'bbb' }), 'bbb^!');
     assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/main', before: 'gone', sha: 'bbb', known: () => false }), 'bbb^!', 'a force push: before is not in the clone');
@@ -399,6 +401,35 @@ describe('.gitea changes are narrowed to the jobs they reach', () => {
     assert.equal(commitLintRange({ event: 'push', ref: 'refs/tags/dyno-v1.0.0', before: 'aaa', sha: 'bbb' }), null);
     assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/main', before: 'aaa', sha: 'bbb', app: 'dyno' }), null, 'an app tag call');
     assert.equal(commitLintRange({ event: 'schedule', sha: 'bbb' }), null);
+  });
+
+  test('a push to main lints the commits made on main, not the ones a merge brought in from a branch', () => {
+    const sh = (cwd, ...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...a], { cwd, encoding: 'utf8' });
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'commit-range-')));
+    try {
+      sh(dir, 'init', '-q', '-b', 'main');
+      sh(dir, 'commit', '-q', '--allow-empty', '-m', 'chore: start');
+      const before = sh(dir, 'rev-parse', 'HEAD').trim();
+      sh(dir, 'checkout', '-q', '-b', 'feature');
+      sh(dir, 'commit', '-q', '--allow-empty', '-m', 'wip: half done');
+      sh(dir, 'checkout', '-q', 'main');
+      sh(dir, 'merge', '-q', '--no-ff', '-m', 'Merge feature: the work', 'feature');
+      const sha = sh(dir, 'rev-parse', 'HEAD').trim();
+      const problems = (range) => messagesInRange(range, dir).flatMap((m) => lint(m.message));
+      const range = commitLintRange({ event: 'push', ref: 'refs/heads/main', before, sha });
+      assert.deepEqual(problems(range), [], 'the branch\'s wip commit was linted on its pull request; main adds the merge');
+      assert.equal(problems(`${before}..${sha}`).length, 1, 'without --first-parent the merged-in wip commit would be flagged');
+      // A commit made directly on main is still linted.
+      sh(dir, 'commit', '-q', '--allow-empty', '-m', 'wip: straight on main');
+      const sha2 = sh(dir, 'rev-parse', 'HEAD').trim();
+      const direct = problems(commitLintRange({ event: 'push', ref: 'refs/heads/main', before: sha, sha: sha2 }));
+      assert.equal(direct.length, 1, direct.join('; '));
+      assert.match(direct[0], /wip: straight on main/);
+      // A pull request still lints every commit it holds.
+      assert.equal(problems(`${before}..${sha}`).length, 1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('ci.yml has a commits job that asks commitLintRange for its range', () => {

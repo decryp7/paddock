@@ -534,7 +534,8 @@ jobs:
 
   # Conventional Commits and no AI attribution (rules 4, 8) for every commit of a change, whichever project it touches.
   # Only the commits a change adds are linted (scripts/affected.mjs commitLintRange): a pull request since its target
-  # branch, a push `before..sha`, a manual run from the plan's base. Tags and an app's tag gates skip it (ER-15).
+  # branch, a push `before..sha` (on main `--first-parent`: the commits of a branch were linted on its pull request, and landing
+  # it adds only the merge, so a branch's old subjects never keep main red), a manual run from the plan's base. Tags and an app's tag gates skip it (ER-15).
   commits:
     name: commit messages
     needs: [plan]

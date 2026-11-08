@@ -34,9 +34,9 @@ export function lint(message) {
   return problems;
 }
 
-/** [{ id, message }] for a git revision range, run in `cwd`. */
+/** [{ id, message }] for a git revision range (it may start with options such as `--first-parent`), run in `cwd`. */
 export function messagesInRange(range, cwd = process.cwd(), git = (args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 << 20 })) {
-  return git(['log', '--no-merges', '--format=%H%x00%B%x01', range])
+  return git(['log', '--no-merges', '--format=%H%x00%B%x01', ...range.trim().split(/\s+/)])
     .split('\x01')
     .map((s) => s.trim())
     .filter(Boolean)
