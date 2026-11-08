@@ -75,16 +75,13 @@ impl Site {
 impl Drop for Site {
     fn drop(&mut self) {
         // Windows Defender may still be scanning a program that was just started; remove with a bounded retry.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-        while self.0.exists() && std::time::Instant::now() < deadline {
+        paddock_testkit::holds_within(std::time::Duration::from_secs(20), || {
             let _ = Command::new("cmd")
                 .args(["/c", "rmdir", "/s", "/q"])
                 .arg(&self.0)
                 .output();
-            if self.0.exists() {
-                std::thread::sleep(std::time::Duration::from_millis(500));
-            }
-        }
+            !self.0.exists()
+        });
         if self.0.exists() {
             eprintln!("could not remove the test folder {}", self.0.display());
         }
@@ -901,11 +898,8 @@ fn apply_update_starts_the_signed_installer_with_fixed_arguments_and_a_protected
     assert_eq!(runs.len(), 1, "one run folder: {runs:?}");
     let run_dir = &runs[0];
     let record = run_dir.join("tmp").join("fake-installer.txt");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    // A wait on the file the child writes, not a fixed sleep: the loop ends when it exists (bounded).
-    while !record.exists() && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
+    // A wait on the file the child writes, not a fixed sleep: it ends when the file exists (bounded).
+    paddock_testkit::holds_within(std::time::Duration::from_secs(30), || record.exists());
     let text = std::fs::read_to_string(&record)
         .unwrap_or_else(|e| panic!("the installer did not run: {e}\n{}", site.log()));
     let tmp = run_dir.join("tmp").to_string_lossy().to_lowercase();
@@ -969,12 +963,9 @@ fn hold_installing_logs_and_releases_when_its_parent_ends() {
         .status()
         .unwrap();
     assert!(status.success());
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    while !site.log().contains("the installer ended; lock released")
-        && std::time::Instant::now() < deadline
-    {
-        std::thread::sleep(std::time::Duration::from_millis(200));
-    }
+    paddock_testkit::holds_within(std::time::Duration::from_secs(30), || {
+        site.log().contains("the installer ended; lock released")
+    });
     let log = site.log();
     for needle in [
         "phase=hold-installing the lock was made",
@@ -1246,14 +1237,16 @@ fn an_installer_that_ends_before_it_holds_the_lock_is_exit_31_and_what_is_left_i
             "{left}"
         );
     }
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    while !leftovers(&site).is_empty() && std::time::Instant::now() < deadline {
+    paddock_testkit::holds_within(std::time::Duration::from_secs(30), || {
+        if leftovers(&site).is_empty() {
+            return true;
+        }
         let _ = run(
             &site.setup(),
             &["clean-staging", "--dir", &site.0.to_string_lossy()],
         );
-        std::thread::sleep(std::time::Duration::from_millis(500));
-    }
+        leftovers(&site).is_empty()
+    });
     assert_eq!(leftovers(&site), Vec::<String>::new(), "{}", site.log());
 }
 
@@ -1303,10 +1296,8 @@ fn a_second_update_during_a_hand_off_is_busy_and_does_not_touch_the_first_run() 
             .is_file()
     );
     // The first installer ends (its parent, the fake, exits): the lock and the signal go with it, then an update goes through.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     let mut third = (busy, String::new());
-    while third.0 == 21 && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(500));
+    paddock_testkit::holds_within(std::time::Duration::from_secs(60), || {
         third = apply_env(
             &site.setup(),
             &installer,
@@ -1317,6 +1308,7 @@ fn a_second_update_during_a_hand_off_is_busy_and_does_not_touch_the_first_run() 
                 ("PADDOCK_FAKE_SECONDS", "1"),
             ],
         );
-    }
+        third.0 != 21
+    });
     assert_eq!(third.0, 0, "{}\n{}", third.1, site.log());
 }
