@@ -1476,3 +1476,11 @@ Symptom: after replacing Dyno.app, an agent started on 5 Nov kept running and th
 Fix: the discovery file carries a build id (SHA-256 prefix of the agent file), the app compares it with the id of the agent file it would start, and the agent exits (code 0, logged) when its own file was replaced or removed on two looks 30 s apart; signals others send are `StoppedFromOutside`, no crash and no stability points. Logs: the connect line now carries the agent's version and build and the app's key. Class: identity by a label that releases share; compare content.
 
 - A test fake built from the real agent carries its self-healing (the discovery guard writes `agent.json` again at the 30 s watch): tests that tamper with a live agent's files must hold only the lock and start the agent when told (`SlowHolder`; CI run 7672, Dyno link test connected at 94 of 100 looks).
+
+## `read -t N` is not a sleep (2026-10-31, family)
+Two scripts "waited" with `read -t 20 < /dev/zero` (an agent's loop) and `read -t 1 _ </dev/null` (the embedded shell of a Rust
+test helper). `/dev/zero` is always readable and `/dev/null` is at EOF, so `read` returned at once and the loop spun a CPU core.
+The same holds for a here-string, a closed stdin or a pipe from `:`/`echo`. **Check:** conformance C60 flags these forms in
+shell, YAML and Rust/TS/JS shell strings (rule 40). Agent scratch scripts outside the repo cannot be checked, so a brief
+for such a script says: wait with `sleep N`, or `perl -e 'select(undef,undef,undef,N)'` where sleep is unavailable, never
+`read -t`. Lesson only; no rule change.
