@@ -1484,14 +1484,20 @@ The same holds for a here-string, a closed stdin or a pipe from `:`/`echo`. **Ch
 shell, YAML and Rust/TS/JS shell strings (rule 40). Agent scratch scripts outside the repo cannot be checked, so a brief
 for such a script says: wait with `sleep N`, or `perl -e 'select(undef,undef,undef,N)'` where sleep is unavailable, never
 `read -t`. Lesson only; no rule change.
-## 2026-10-30: an interrupted socket read is not a closed connection (paddock-chromium, spotter-render, Debrief's driver)
+## 2026-10-30: an interrupted socket read is not a closed connection (paddock-chromium, spotter-render; Debrief's driver still open)
 
 Three copies of the DevTools reader treated only `WouldBlock` and `TimedOut` as "idle, read again". Linux ends a socket read that
 has a timeout (`SO_RCVTIMEO`) with `EINTR` after a stop and continue or a handled signal (signal(7)), so a stalled CI container
-made every page report closed. Debrief's copy was fixed first; this fixed the other two.
+made every page report closed. This fixes `paddock-chromium`. Spotter's copy no longer reads with a timeout at all (its socket is
+non-blocking, so a Windows receive cannot end mid-message) and treats `Interrupted` like `WouldBlock` and `TimedOut` through its
+own `is_transient`. **Debrief's `chromium-driver` is not fixed:** it still matches only `WouldBlock | TimedOut`; it is waived
+(`Copies-waived: browser-driver`) and goes with the consolidation ADR (its register entry is deleted by `debrief-v1.2.0`).
 **Rule:** an I/O loop on a socket with a timeout treats `Interrupted` like `WouldBlock` and `TimedOut` (`is_transient`), for reads,
 sends and flushes; EOF and reset errors still end the connection. tungstenite's `read` flushes only pongs and close frames, so
-each loop turn also calls `flush`, and the write buffer has a bound. A test that stops and continues a child process guards it
-so a failing parent still ends the child's own children (a process group of its own is not reached by a signal to the group).
-**Open (ER-21):** the same reader exists three times. A shared `is_transient` and a conformance check for `WouldBlock | TimedOut`
-without `Interrupted` belong to the driver consolidation ADR, not to this fix.
+each loop turn also calls `flush`, and the write buffer has a bound: tungstenite 0.30 defaults `max_write_buffer_size` to
+`usize::MAX`, so each connection sets 8 MiB (`MAX_WRITE_BUFFER` in `paddock-chromium` and `spotter-render`, with a test). A test
+that stops and continues a child process guards it so a failing parent still ends the child's own children (a process group of
+its own is not reached by a signal to the group).
+**Open (ER-21):** the same reader exists three times and the two fixed copies differ (blocking with a timeout vs non-blocking).
+A shared `is_transient` and a conformance check for `WouldBlock | TimedOut` without `Interrupted` belong to the driver
+consolidation ADR, not to this fix.

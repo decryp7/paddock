@@ -15,6 +15,9 @@ use tungstenite::Message;
 
 const MAX_MESSAGE: usize = 32 << 20;
 const MAX_EVENTS: usize = 1024;
+/// The most the write buffer may hold while the socket cannot take a frame (commands are small). tungstenite 0.30
+/// defaults the bound to `usize::MAX`, and this loop's non-blocking socket queues frames there.
+const MAX_WRITE_BUFFER: usize = 8 << 20;
 
 /// How [`Connection::wait_event_or_lost`] ended.
 #[derive(Debug, Clone)]
@@ -70,10 +73,8 @@ impl Connection {
         let req = format!("ws://127.0.0.1:{port}{path}")
             .into_client_request()
             .map_err(|e| Error::Connection(e.to_string()))?;
-        let mut cfg = WebSocketConfig::default();
-        cfg.max_message_size = Some(MAX_MESSAGE);
-        cfg.max_frame_size = Some(MAX_MESSAGE);
-        let (ws, _) = tungstenite::client::client_with_config(req, stream, Some(cfg)).map_err(|e| Error::Connection(e.to_string()))?;
+        let (ws, _) =
+            tungstenite::client::client_with_config(req, stream, Some(ws_config())).map_err(|e| Error::Connection(e.to_string()))?;
         // Never a read timeout (see `io_loop`): the socket does not block, and the thread idles on its outgoing queue.
         ws.get_ref().set_nonblocking(true).map_err(|e| Error::Connection(e.to_string()))?;
         let inner = Arc::new(Inner {
@@ -240,6 +241,15 @@ fn io_loop(mut ws: Ws, rx: Receiver<String>, inner: Arc<Inner>) {
     let _ = ws.flush();
 }
 
+/// The WebSocket limits: message and frame size, and a bounded write buffer.
+fn ws_config() -> WebSocketConfig {
+    let mut cfg = WebSocketConfig::default();
+    cfg.max_message_size = Some(MAX_MESSAGE);
+    cfg.max_frame_size = Some(MAX_MESSAGE);
+    cfg.max_write_buffer_size = MAX_WRITE_BUFFER;
+    cfg
+}
+
 /// A socket read or write that ended without an error of the connection: nothing to do now (a non-blocking socket), a
 /// timeout, or a signal. EOF and reset errors are not transient.
 pub(crate) fn is_transient(kind: std::io::ErrorKind) -> bool {
@@ -289,6 +299,32 @@ fn dispatch(inner: &Inner, text: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression: tungstenite 0.30 defaults the write buffer bound to `usize::MAX`, and this loop's non-blocking socket
+    /// queues frames there while the kernel buffer is full, so a stalled browser grew memory without limit.
+    #[test]
+    fn the_write_buffer_is_bounded() {
+        let cfg = ws_config();
+        assert_eq!(cfg.max_write_buffer_size, MAX_WRITE_BUFFER);
+        assert!(cfg.max_write_buffer_size < usize::MAX);
+        assert!(
+            cfg.max_write_buffer_size > cfg.write_buffer_size,
+            "tungstenite needs a bound above the flush size"
+        );
+        assert_eq!(cfg.max_message_size, Some(MAX_MESSAGE));
+    }
+
+    /// Regression: `EINTR` ended the connection. A timeout, nothing-to-do-now or a signal is transient; EOF and resets are not.
+    #[test]
+    fn interrupted_is_transient_and_eof_and_reset_are_not() {
+        use std::io::ErrorKind::*;
+        for k in [WouldBlock, TimedOut, Interrupted] {
+            assert!(is_transient(k), "{k:?}");
+        }
+        for k in [UnexpectedEof, ConnectionReset, BrokenPipe] {
+            assert!(!is_transient(k), "{k:?}");
+        }
+    }
 
     #[test]
     fn only_documents_network_events_are_kept() {
