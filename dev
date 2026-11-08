@@ -85,7 +85,11 @@ if ! vv=$(cd "$tool" && "${rustc_cmd:-rustc}" -vV 2>/dev/null | tr -d '\r') || [
   # Without a compiler the hash cannot be computed, but a binary built earlier still works.
   newest=$(ls -t "$home"/bin/*/paddock-dev-*"$exe" 2>/dev/null | head -n 1)
   if [ -n "$newest" ] && runs "$newest"; then
-    echo "dev: rustc is not available; running the newest cached tool binary ($newest)." >&2
+    if [ "${GITHUB_ACTIONS:-}" = true ]; then
+      echo "::warning::./dev: rustc is not available on this runner, so the tool's hash cannot be computed; running the newest cached binary ($newest), which may not match this commit's inputs." >&2
+    else
+      echo "dev: rustc is not available; running the newest cached tool binary ($newest)." >&2
+    fi
     exec "$newest" "$@"
   fi
   echo "dev: rustc was not found (${rustc_cmd:-rustc}). Install Rust with rustup (https://rustup.rs), then run ./dev again." >&2
@@ -177,13 +181,16 @@ download_enabled() {
 download_prebuilt() {
   _base=${PADDOCK_DEV_PACKAGES:-https://dev.decryptology.net/api/packages/paddock-build-inputs/generic}
   _tmo=${PADDOCK_DEV_DOWNLOAD_TIMEOUT:-60}
-  _url="$_base/paddock-dev/$hash/$name"
   command -v curl >/dev/null 2>&1 || {
     echo "::notice::./dev cannot download the prebuilt paddock-dev: curl is not installed. Building it." >&2
     return 1
   }
-  mkdir -p "$cache" || return 1
-  _dl=$(mktemp -d "$cache/.download.XXXXXX") || return 1
+  if ! mkdir -p "$cache" || ! _dl=$(mktemp -d "$cache/.download.XXXXXX"); then
+    echo "::notice::./dev cannot write the cache folder $cache, so it cannot keep a download. Building it." >&2
+    return 1
+  fi
+  # Whether a token exists, without its value ever reaching a trace (a subshell with tracing off).
+  _tokinfo=$({ set +x; } 2>/dev/null; if [ -n "${PADDOCK_DEV_TOKEN:-${GITHUB_TOKEN:-}}" ]; then echo 'a read token was sent'; else echo 'no read token is set: export PADDOCK_DEV_TOKEN'; fi)
   _t0=$(date +%s)
   for _f in "$name.sha256" "$name"; do
     # The token goes in through curl's config on stdin (so no process list shows it) and tracing is off while it is written.
@@ -198,7 +205,7 @@ download_prebuilt() {
         return 1
         ;;
       *)
-        echo "::warning::./dev could not download $_base/paddock-dev/$hash/$_f (HTTP $_code after $(($(date +%s) - _t0)) s, timeout ${_tmo} s, $([ -n "${PADDOCK_DEV_TOKEN:-${GITHUB_TOKEN:-}}" ] && echo 'a read token was sent' || echo 'no read token is set: export PADDOCK_DEV_TOKEN')): $(head -c 300 "$_dl/curl.err" 2>/dev/null | tr '\n' ' ') Building it instead." >&2
+        echo "::warning::./dev could not download $_base/paddock-dev/$hash/$_f (HTTP $_code after $(($(date +%s) - _t0)) s, timeout ${_tmo} s, $_tokinfo): $(head -c 300 "$_dl/curl.err" 2>/dev/null | tr '\n' ' ') Building it instead." >&2
         rm -rf "$_dl"
         return 1
         ;;
@@ -221,9 +228,16 @@ download_prebuilt() {
     rm -rf "$_dl"
     return 1
   fi
-  mv -f "$_dl/$name" "$cache/$name"
+  # The marker says where this copy came from: a run that never downloads (a release job) ignores such a copy. It is written first;
+  # a marker without a binary is harmless.
+  : >"$cache/$name.downloaded" 2>/dev/null || true
+  if ! mv -f "$_dl/$name" "$cache/$name"; then
+    echo "::warning::./dev could not move the downloaded $name into $cache. Building it instead." >&2
+    rm -rf "$_dl" "$cache/$name.downloaded"
+    return 1
+  fi
   rm -rf "$_dl"
-  echo "dev: downloaded paddock-dev $hash for $host in $(($(date +%s) - _t0)) s, checksum and embedded hash verified." >&2
+  echo "dev: downloaded paddock-dev $hash for $host in $(($(date +%s) - _t0)) s, transport checks passed (checksum, embedded hash)." >&2
   return 0
 }
 
@@ -243,6 +257,11 @@ if [ -n "$dirty" ]; then
 fi
 
 cache="$home/bin/$hash"
+# A run that never downloads (PADDOCK_DEV_DOWNLOAD=0: release and tag jobs) never runs a copy an earlier run downloaded.
+if [ "${PADDOCK_DEV_DOWNLOAD:-}" = 0 ] && [ -e "$cache/$name.downloaded" ]; then
+  echo "dev: the cached tool binary was downloaded earlier and this run does not download; building it from source." >&2
+  rm -f "$cache/$name" "$cache/$name.downloaded"
+fi
 # A cached binary must run: an empty or damaged file (a copy that was cut short) is removed and rebuilt.
 if [ -e "$cache/$name" ] && ! runs "$cache/$name"; then
   echo "dev: the cached tool binary $cache/$name does not run; rebuilding it." >&2
@@ -273,6 +292,7 @@ if [ ! -x "$cache/$name" ]; then
       echo "::error::./dev built a paddock-dev that is not for hash $hash (another job replaced the build folder, or the build ignored PADDOCK_DEV_HASH). Run ./dev again; if it repeats, delete $target." >&2
       exit 1
     fi
+    rm -f "$cache/$name.downloaded"
     mv -f "$tmp" "$cache/$name"
     echo "dev: built paddock-dev $hash in $(($(date +%s) - _b0)) s (not downloaded)." >&2
   fi

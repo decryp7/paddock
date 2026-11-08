@@ -1,5 +1,5 @@
 //! The `./dev` wrapper and `dev self hash` compute one value, in shell and in Rust, from the same inputs.
-#![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::input_hash::{Real, compute, is_hashed_var};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -8,6 +8,10 @@ fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().to_path_buf()
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 fn git(dir: &Path, args: &[&str]) {
     let st = Command::new("git")
         .arg("-C")
@@ -78,6 +82,10 @@ impl Fixture {
         v
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+    )]
     fn shell(&self, env: &[(String, String)]) -> (String, bool) {
         let mut cmd = Command::new("sh");
         cmd.arg(self.root().join("dev"))
@@ -211,6 +219,10 @@ fn a_new_untracked_file_under_an_input_path_makes_the_wrapper_build() {
     assert!(f.both(&[]).1);
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[test]
 fn the_wrapper_finds_the_root_from_a_subfolder_and_refuses_to_run_outside_a_repository() {
     let f = Fixture::new();
@@ -311,6 +323,10 @@ pub(crate) fn shim_cargo(slow: u32) -> String {
 }
 
 /// Runs the whole wrapper (not just `--wrapper-hash`) with a scratch cache and a stand-in `cargo` that "builds" a script.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 fn run_wrapper(f: &Fixture, home: &Path, extra_env: &[(&str, String)]) -> (i32, String, String) {
     let shims = f.cargo_home.path().join("shims");
@@ -437,6 +453,10 @@ fn only_the_five_newest_cached_tools_are_kept() {
     assert_eq!(kept, 5);
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 #[test]
 fn a_trace_of_the_wrapper_never_prints_what_a_config_holds() {
@@ -472,6 +492,10 @@ fn a_trace_of_the_wrapper_never_prints_what_a_config_holds() {
     assert_ne!(f.both(&[]).0, before);
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 #[test]
 fn on_a_ci_runner_with_a_kept_mount_the_tool_is_cached_there_and_an_explicit_home_still_wins() {
@@ -532,6 +556,10 @@ fn barrier_cargo() -> String {
 }
 
 /// Starts one wrapper per compiler against one kept mount; returns once `expected` builds are inside `cargo`, then lets them all go.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 fn run_overlapping(rustcs: &[&str], expected: usize) -> (tempfile::TempDir, Vec<std::process::Output>, Fixture) {
     let f = Fixture::new();
@@ -579,6 +607,10 @@ fn rustcs(dir: &Path) -> (String, String) {
     )
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 fn assert_cached(mount: &Path, hash: &str) {
     let bin = mount.join("paddock-dev/bin").join(hash);
@@ -688,6 +720,10 @@ impl SpawnPiped for Command {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 #[test]
 fn a_failed_build_names_the_hash_and_the_next_step_in_an_annotation() {
@@ -713,6 +749,10 @@ fn a_failed_build_names_the_hash_and_the_next_step_in_an_annotation() {
     );
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 #[test]
 fn a_ci_run_without_a_kept_mount_says_so() {

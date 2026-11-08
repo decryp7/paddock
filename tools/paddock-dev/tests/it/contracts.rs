@@ -1,7 +1,7 @@
 //! The repository contracts `scripts/affected.test.mjs` also held, moved so the script can be retired (ADR 0022 R4): the
 //! apps' CI contracts (`paddock.ci.json`) and the host-cleanup process patterns they hand to `job-isolation.sh`, the markdown
 //! that code reads (declared doc inputs), CODEOWNERS, Renovate and the one npm workspace.
-#![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::plan::{is_declared_doc_input, is_docs, read_graph};
 use paddock_repo_graph::GitHistory;
 use regex::Regex;
@@ -15,6 +15,10 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().to_path_buf()
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 fn tracked() -> Vec<String> {
     let out = Command::new("git").current_dir(root()).args(["ls-files"]).output().unwrap();
     String::from_utf8_lossy(&out.stdout).lines().map(String::from).collect()
@@ -105,6 +109,10 @@ const OTHER_TMP: &str = "/Users/x/gitea-runner/work/fedcba9876543210/tmp";
 /// A paddock.ci.json process pattern as host-cleanup runs it: `{tmp}`, `{build}` and `{slot}` filled in by the real
 /// `conformance/ci/job-isolation.sh` for a sample job (slot s1, its runner folder, its build folder), as a regular expression;
 /// `None` when the script refuses it (not anchored on a folder of the job).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 fn scoped(pattern: &str, app: &str, os: &str) -> Option<Regex> {
     let win = if os == "Windows" { "C:" } else { "" };
     let out = Command::new("bash")
@@ -302,6 +310,10 @@ fn pitwalls_and_dynos_patterns_never_reach_an_installed_app_another_job_or_the_u
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[test]
 fn job_isolation_refuses_a_process_pattern_that_names_no_folder_of_the_job() {
     assert!(
@@ -323,6 +335,10 @@ fn job_isolation_refuses_a_process_pattern_that_names_no_folder_of_the_job() {
     assert!(!out.status.success(), "no job temp folder: nothing to anchor on");
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[test]
 fn every_markdown_file_that_code_reads_is_a_declared_doc_input() {
     // include_str!("rel.md") is resolved from its file; quoted repo paths ('docs/x.md', "apps/a/README.md") are taken as is.

@@ -9,6 +9,8 @@
 # PADDOCK_DEV_PACKAGES (default below), GITHUB_STEP_SUMMARY (optional). The token reaches curl through its stdin config, never a
 # command line, and is never printed.
 set -euo pipefail
+# No shell trace from here on (a runner may start the script with bash -x): the write token is expanded in this script.
+set +x
 
 base=${PADDOCK_DEV_PACKAGES:-https://dev.decryptology.net/api/packages/paddock-build-inputs/generic}
 root=$(git rev-parse --show-toplevel)
@@ -63,13 +65,21 @@ printf '%s  %s\n' "$sum" "$name" >"$work/$name.sha256"
 phase "verified ($(wc -c <"$work/$name" | tr -d ' ') bytes, sha256 $sum)"
 
 # `-T` (not `--data-binary`, which labels the body as a form and makes Gitea answer 500 "isn't multipart/form-data", run 7769).
-# Binary first, checksum last: a consumer (and the check above) treats the checksum as "complete". 409 means another run won.
+# Binary first, checksum last: a consumer (and the check above) treats the checksum as "complete". A 409 means the file exists (another
+# run won, or an earlier run stopped half way): it counts only when the stored file is the one this job built, so a checksum is never
+# paired with a binary it does not describe.
+sha_of() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'; else shasum -a 256 "$1" | awk '{print $1}'; fi; }
 for f in "$name" "$name.sha256"; do
   code=$(curl_auth -o "$work/put.out" -w '%{http_code}' -T "$work/$f" "$base/paddock-dev/$hash/$f") || code=000
   case "$code" in
     201 | 200) ;;
-    409) echo "::notice::dev-tool: $f already exists under $hash (another run published it first)." ;;
-    *) err "upload of $f failed (HTTP $code: $(head -c 200 "$work/put.out" | tr '\n' ' ')). 401 or 403: the token lacks write:package; 404: the package owner in PADDOCK_DEV_PACKAGES is wrong; 500: read the server's text above." ;;
+    409)
+      scode=$(curl_auth -o "$work/stored" -w '%{http_code}' "$base/paddock-dev/$hash/$f") || scode=000
+      [ "$scode" = 200 ] || err "$f already exists under $hash but reading it back failed (HTTP $scode), so it cannot be checked."
+      [ "$(sha_of "$work/stored")" = "$(sha_of "$work/$f")" ] || err "$f already exists under $hash and differs from the one this job built (another toolchain or a half-finished run): not publishing a checksum for it. Delete the version $hash from the package paddock-dev, then run again."
+      echo "::notice::dev-tool: $f already exists under $hash and is identical (another run published it first)."
+      ;;
+    *) err "upload of $f failed (HTTP $code: $(head -c 200 "$work/put.out" | tr '\n' ' ')). 401 or 403: the token lacks write:package; 404: the package owner in PADDOCK_DEV_PACKAGES is wrong; 5xx: the server's own text is in the parentheses." ;;
   esac
 done
 phase "uploaded $name"

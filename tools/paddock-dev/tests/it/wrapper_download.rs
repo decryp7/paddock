@@ -1,6 +1,6 @@
 //! The `./dev` wrapper's prebuilt download (ADR 0022 R0b): a hit, a 404, a bad checksum, a binary for another hash and a server that
 //! never answers, against a small HTTP server in the test. The wrapper never trusts what it fetched and always falls back to a build.
-#![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 #![cfg(unix)]
 use super::wrapper::{Fixture, fake_rustc, shim_cargo, write_script};
 use std::io::{Read, Write};
@@ -99,6 +99,10 @@ fn published_tool(hash: &str) -> Vec<u8> {
         .into_bytes()
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the shell script under test; paddock-proc is the production kill path, nothing here is killed"
+)]
 fn sha256_of(bytes: &[u8], scratch: &Path) -> String {
     let p = scratch.join("sum-input");
     std::fs::write(&p, bytes).unwrap();
@@ -144,6 +148,10 @@ impl Setup {
     }
 
     /// Runs `./dev hello` with a stand-in cargo. `env` is added to a base that downloads from `server`.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a test starts the shell script under test; paddock-proc is the production kill path, nothing here is killed"
+    )]
     fn run(&self, server: &Server, env: &[(&str, &str)]) -> (i32, String, String) {
         let shims = self.f.cargo_home.path().join("shims");
         write_script(&shims.join("cargo"), &shim_cargo(0));
@@ -186,7 +194,13 @@ impl Setup {
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
-        assert_eq!(names, ["paddock-dev-test-host"], "leftovers: {names:?}");
+        let mut want = vec!["paddock-dev-test-host".to_string()];
+        if self.cached().with_extension("downloaded").exists() || names.iter().any(|n| n.ends_with(".downloaded")) {
+            want.push("paddock-dev-test-host.downloaded".to_string());
+        }
+        let mut names = names;
+        names.sort();
+        assert_eq!(names, want, "leftovers: {names:?}");
     }
 }
 
@@ -200,7 +214,7 @@ fn a_published_tool_is_downloaded_checked_cached_and_run_without_a_build() {
     assert_eq!((code, out.trim()), (0, "downloaded-binary"), "{err}");
     assert!(!s.built(), "a hit must not build: {err}");
     assert!(
-        err.contains("downloaded paddock-dev") && err.contains(&s.hash) && err.contains("verified"),
+        err.contains("downloaded paddock-dev") && err.contains(&s.hash) && err.contains("transport checks passed"),
         "phases are logged: {err}"
     );
     s.assert_clean();
@@ -335,4 +349,84 @@ fn a_refused_read_says_whether_a_token_was_sent_and_the_tool_is_built() {
         err.contains("HTTP 401") && err.contains("a read token was sent") && !err.contains("t0k"),
         "{err}"
     );
+}
+
+#[test]
+fn a_run_that_never_downloads_does_not_use_a_tool_an_earlier_run_downloaded() {
+    let s = setup();
+    let body = published_tool(&s.hash);
+    let sha = sha256_of(&body, s.scratch.path());
+    let server = Server::start(s.published(&body, &sha));
+    let (code, out, err) = s.run(&server, &[("PADDOCK_DEV_DOWNLOAD", "1")]);
+    assert_eq!((code, out.trim()), (0, "downloaded-binary"), "{err}");
+    // A release job (PADDOCK_DEV_DOWNLOAD=0) on the same cache builds from source and replaces the downloaded copy.
+    let (code, out, err) = s.run(&server, &[("PADDOCK_DEV_DOWNLOAD", "0")]);
+    assert_eq!((code, out.trim()), (0, "built-by-shim"), "{err}");
+    assert!(err.contains("downloaded earlier"), "{err}");
+    assert!(
+        !s.cached().with_extension("downloaded").exists()
+            && !s.cached().parent().unwrap().join("paddock-dev-test-host.downloaded").exists()
+    );
+    // And what it built is what the next run uses, whatever its download setting.
+    let (code, out, _) = s.run(&server, &[("PADDOCK_DEV_DOWNLOAD", "1")]);
+    assert_eq!((code, out.trim()), (0, "built-by-shim"));
+}
+
+#[test]
+fn a_server_error_and_a_binary_that_404s_while_its_checksum_exists_both_fall_back_to_a_build() {
+    let s = setup();
+    let server = Server::start(vec![(
+        s.route("paddock-dev-test-host.sha256"),
+        Reply::Status("503 Service Unavailable"),
+    )]);
+    let (code, out, err) = s.run(&server, &[("PADDOCK_DEV_DOWNLOAD", "1")]);
+    assert_eq!((code, out.trim()), (0, "built-by-shim"), "{err}");
+    assert!(err.contains("::warning::") && err.contains("HTTP 503"), "{err}");
+    s.assert_clean();
+
+    let s = setup();
+    let body = published_tool(&s.hash);
+    let sha = sha256_of(&body, s.scratch.path());
+    let only_sum: Vec<_> = s
+        .published(&body, &sha)
+        .into_iter()
+        .filter(|(p, _)| p.ends_with(".sha256"))
+        .collect();
+    let server = Server::start(only_sum);
+    let (code, out, err) = s.run(&server, &[("PADDOCK_DEV_DOWNLOAD", "1")]);
+    assert_eq!((code, out.trim()), (0, "built-by-shim"), "{err}");
+    assert!(
+        err.contains("::notice::") && err.contains("HTTP 404 for paddock-dev-test-host)"),
+        "{err}"
+    );
+    s.assert_clean();
+}
+
+#[test]
+fn a_shell_trace_of_a_download_never_prints_the_token() {
+    let s = setup();
+    let server = Server::start(vec![(s.route("paddock-dev-test-host.sha256"), Reply::Status("401 Unauthorized"))]);
+    let shims = s.f.cargo_home.path().join("shims");
+    write_script(&shims.join("cargo"), &shim_cargo(0));
+    let path = format!("{}:{}", shims.display(), std::env::var("PATH").unwrap());
+    #[expect(clippy::disallowed_methods, reason = "a test starts the wrapper under test with sh -x")]
+    let out = Command::new("sh")
+        .arg("-x")
+        .arg(s.f.root().join("dev"))
+        .arg("hello")
+        .current_dir(s.f.root())
+        .env("PATH", path)
+        .env("PADDOCK_DEV_HOME", s.scratch.path().join("home"))
+        .env("PADDOCK_DEV_TARGET_DIR", s.f.cargo_home.path().join("target"))
+        .env("CARGO_HOME", s.f.cargo_home.path())
+        .env("RUSTC", &s.rustc)
+        .env("PADDOCK_DEV_PACKAGES", server.base())
+        .env("PADDOCK_DEV_DOWNLOAD", "1")
+        .env("PADDOCK_DEV_TOKEN", "trace-secret-token-9876")
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    assert!(err.contains("HTTP 401") && err.contains("a read token was sent"), "{err}");
+    assert!(!err.contains("trace-secret-token-9876"), "the token reached the trace");
 }

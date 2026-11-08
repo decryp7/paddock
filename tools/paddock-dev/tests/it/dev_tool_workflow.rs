@@ -1,6 +1,6 @@
 //! `dev-tool.yml` (ADR 0022 R0b) publishes the tool for every kind of runner CI uses, and its push filter covers the tool's inputs:
 //! a runner kind added to a CI workflow without a published binary would build the tool on every run, silently.
-#![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::input_hash::parse_inputs;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
