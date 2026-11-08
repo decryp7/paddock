@@ -207,6 +207,7 @@ pub fn only_app(plan: &Value, app: &str) -> Value {
         "ui",
         "eslint",
         "conformance",
+        "c99",
         "tools",
         "icons",
         "ciImage",
@@ -302,6 +303,7 @@ pub fn ci_outputs(plan: &Value, legs: &[Value], base: Option<&str>) -> Vec<(Stri
         ("ui".into(), b("ui")),
         ("eslint".into(), b("eslint")),
         ("conformance".into(), b("conformance")),
+        ("c99".into(), b("c99")),
         ("tools".into(), b("tools")),
         ("icons".into(), b("icons")),
         ("paddock_dev".into(), b("paddockDev")),
@@ -323,7 +325,7 @@ pub fn summary(plan: &Value, reason: &str, legs: &[Value]) -> String {
         "| Project | Runs |".into(),
         "|---|---|".into(),
     ];
-    for p in ["crates", "ui", "eslint", "conformance", "tools", "paddockDev"] {
+    for p in ["crates", "ui", "eslint", "conformance", "c99", "tools", "paddockDev"] {
         lines.push(format!("| {p} | {} |", yes(plan[p].as_bool().unwrap_or(false))));
     }
     for l in legs {

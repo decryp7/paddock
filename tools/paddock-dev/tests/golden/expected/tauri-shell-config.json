@@ -4,6 +4,7 @@
  "ui": false,
  "eslint": false,
  "conformance": true,
+ "c99": false,
  "tools": false,
  "icons": false,
  "ciImage": false,

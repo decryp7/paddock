@@ -6,6 +6,7 @@
   "ui": true,
   "eslint": false,
   "conformance": false,
+  "c99": true,
   "tools": false,
   "icons": false,
   "ciImage": false,
@@ -30,6 +31,9 @@
   "why": {
    "app:x": [
     "cargo apps/x/app/src-tauri reaches crates/b"
+   ],
+   "c99": [
+    "C99 reads crates/b/src/lib.rs"
    ],
    "crates": [
     "crates/b/src/lib.rs"

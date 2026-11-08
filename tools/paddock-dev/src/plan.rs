@@ -16,7 +16,17 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 const TIMEOUT: Duration = Duration::from_secs(120);
-const PROJECTS: [&str; 8] = ["crates", "ui", "eslint", "conformance", "tools", "icons", "ci-image", "paddock-dev"];
+const PROJECTS: [&str; 9] = [
+    "crates",
+    "ui",
+    "eslint",
+    "conformance",
+    "tools",
+    "icons",
+    "ci-image",
+    "paddock-dev",
+    "c99",
+];
 
 fn re(pattern: &str) -> Regex {
     // The patterns are literals of this file, checked by the tests below.
@@ -65,6 +75,24 @@ fn truthy(v: &Value) -> bool {
         _ => true,
     }
 }
+
+/// What conformance C99 (no macOS Keychain in a shipped build, ADR 0057 §3.4) reads; they run the dedicated `c99` job. Mirrors
+/// `C99_INPUT` in `scripts/affected.mjs` (from branch `pitwall/1.1-c99c`): every Cargo.toml and Cargo.lock under apps/ and crates/,
+/// the sources the check scans, the Tauri capability files, the paddock.ci.json files, the cargo registry configuration, the
+/// waivers and the check's code.
+static C99_INPUT: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+    [
+        r"^(apps|crates)/(.+/)?Cargo\.(toml|lock)$",
+        r"^(apps|crates)/.+\.(rs|c|cc|cpp|m|mm|h|swift)$",
+        r"^(.+/)?(app/src|ui/projects)/.+\.ts$",
+        r"(^|/)src-tauri/capabilities/[^/]+\.json$",
+        r"(^|/)paddock\.ci\.json$",
+        r"^conformance/(src|bin)/",
+        r"^(\.cargo/config\.toml|paddock\.waivers\.toml)$",
+    ]
+    .map(re)
+    .into()
+});
 
 /// Inputs of the Rust builds only (cargo registry and linker config, the shared clippy and workspace lint presets).
 static RUST_INPUTS: LazyLock<Vec<Regex>> = LazyLock::new(|| [r"^\.cargo/", r"^lint/"].map(re).into());
@@ -330,6 +358,9 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
         if META.iter().any(|r| r.is_match(f)) {
             continue;
         }
+        if C99_INPUT.iter().any(|r| r.is_match(f)) {
+            st.mark(Some("c99".to_string()), format!("C99 reads {f}"));
+        }
         let ci_file = f.starts_with(".gitea/");
         if ci_file || TRACED_SCRIPT.is_match(f) {
             // `.gitea` runs the conformance checks over workflows and actions; the rest is narrowed per job or user. The shared
@@ -575,6 +606,7 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
         ("ui", "ui"),
         ("eslint", "eslint"),
         ("conformance", "conformance"),
+        ("c99", "c99"),
         ("tools", "tools"),
         ("icons", "icons"),
         ("ciImage", "ci-image"),
@@ -1427,5 +1459,50 @@ mod tests {
         let unknown = affected(&["ui/projects/x/generated/other.json".to_string()], &sample(), &opts).unwrap();
         assert_eq!(unknown["crates"], true);
         assert_eq!(unknown["packages"]["crates"], json!(["paddock-core", "paddock-k", "paddock-kit"]));
+    }
+}
+
+#[cfg(test)]
+mod c99_tests {
+    use super::*;
+
+    #[test]
+    fn c99_inputs_plan_the_c99_job_and_a_docs_change_does_not() {
+        let plan = |f: &str| {
+            affected(
+                &[f.to_string()],
+                &RepoGraph {
+                    cargo: Graph::new(),
+                    npm: Graph::new(),
+                    apps: ["dyno"].map(String::from).into(),
+                    configs: BTreeMap::new(),
+                },
+                &Options::default(),
+            )
+            .unwrap()
+        };
+        for f in [
+            "apps/dyno/Cargo.lock",
+            "apps/dyno/crates/dyno-core/Cargo.toml",
+            "apps/dyno/crates/dyno-core/src/lib.rs",
+            "crates/paddock-secrets/Cargo.toml",
+            "apps/dyno/app/src-tauri/capabilities/default.json",
+            "apps/dyno/paddock.ci.json",
+            "apps/dyno/app/src/app/a.ts",
+            "conformance/src/checks/C99-no-keychain.mjs",
+            "paddock.waivers.toml",
+        ] {
+            assert_eq!(plan(f)["c99"], json!(true), "{f}");
+        }
+        // Markdown paths are built, not quoted: affected.test.mjs fails on a quoted repo markdown path that no DOC_INPUTS entry declares.
+        let docs = [
+            format!("docs/{}.md", "benchmarks"),
+            format!("apps/dyno/{}", "README.md"),
+            "README.md".to_string(),
+            "conformance/test/c99-graph.test.mjs".to_string(),
+        ];
+        for f in &docs {
+            assert_eq!(plan(f)["c99"], json!(false), "{f}");
+        }
     }
 }
