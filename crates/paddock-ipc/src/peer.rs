@@ -383,12 +383,12 @@ impl Peer {
 
     /// Closes the connection: pending calls fail, served calls see a cancel, the other side sees the end of the stream.
     pub fn close(&self) {
-        self.mark_closed(IpcError::Closed(format!(
+        // The outgoing queue shuts first, as in a failure: a served call that answers its cancel at once must find it shut,
+        // or its "cancelled" answer reaches the caller before the end of the stream (CI run 7761, Windows).
+        self.fail(IpcError::Closed(format!(
             "the connection to {} was closed by this side",
             self.label()
         )));
-        self.inner.out.shutdown();
-        self.inner.closer.close();
     }
 
     /// Pushes this side dropped because its push callback fell behind.
