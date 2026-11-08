@@ -1,5 +1,5 @@
-import { readdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, readdirSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { commitLintMain } from './commit-lint.mjs';
 import { checks } from './checks/index.mjs';
@@ -85,7 +85,17 @@ export async function main(argv, { log = console.log, err = console.error, env =
       }
       return windowWeightMain(parseArgs(flags), kinds, { log, err });
     }
-    if (cmd === 'sync') return syncMain(parseArgs(rest), { log, err });
+    if (cmd === 'sync') {
+      const o = parseArgs(rest);
+      // In the monorepo `sync --write` from the root writes the per-repository template baseline (renovate.json, lefthook.yml, deny.toml,
+      // licences, ...) over the repository's own root files: it is for an app's folder (`--root apps/<app>`), never for the root.
+      const root = resolve(o.root ?? '.');
+      if (o.write && existsSync(join(root, 'apps')) && existsSync(join(root, '.gitea')) && existsSync(join(root, 'tools', 'paddock-dev'))) {
+        err(`paddock-conformance: sync --write would overwrite the monorepo's own root files with the per-repository baseline. Fix: run it for an app's folder, --root apps/<app>, or edit the AGENTS.md blocks by hand (docs/blocks).`);
+        return 2;
+      }
+      return syncMain(o, { log, err });
+    }
     if (cmd === 'commit-lint') return commitLintMain(rest, process.cwd(), err);
     if (cmd === 'run') {
       const dash = rest.indexOf('--');

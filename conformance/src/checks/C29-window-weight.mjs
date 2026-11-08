@@ -8,7 +8,9 @@ import { budgetKb, measure } from '../window-weight/measure.mjs';
 export default {
   id: 'C29',
   scope: 'both',
-  mode: 'gate',
+  // Every outcome on the repository's own run is a warning: windowWeight is configured nowhere and the conformance job builds no stats
+  // (docs/benchmarks.md). C100 must not count it as a gate; it becomes 'gate' when an app's budgets and stats are wired (ADR 0060 P1-3).
+  mode: 'report-only',
   title: 'Each window stays within its initial JS budget',
   rule: 35,
   run(ctx) {
