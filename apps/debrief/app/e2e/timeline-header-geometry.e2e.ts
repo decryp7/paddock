@@ -36,6 +36,8 @@ for (const width of [1100, 760]) {
       await page.locator('debrief-status-bar').getByRole('button', { name: 'Live tail', exact: true }).click();
       await page.getByRole('combobox', { name: 'Live window' }).selectOption('5m');
       await expect(page.getByTestId('follow-toggle')).toBeVisible();
+      // Freeze time a little ahead (time keeps running until the pause lands, so leave room): from here only `runFor` moves it.
+      await page.clock.pauseAt(await page.evaluate(() => Date.now() + 5000));
 
       const following = await edgesOver(page, 40, 100);
       for (const n of BUTTONS) expect(following[n], `${n} while following`).toHaveLength(1);
@@ -53,6 +55,8 @@ for (const width of [1100, 760]) {
       // The first zoom pauses following and the chip becomes "Paused — Resume following", about 150 px wider.
       const before = following['Zoom in']?.[0];
       await page.locator('debrief-timeline-panel').getByRole('button', { name: 'Zoom in' }).click();
+      // The page's timers only move with the driven clock.
+      await page.clock.runFor(300);
       await expect(page.getByTestId('resume-following')).toBeVisible();
       const paused = await edgesOver(page, 15, 100);
       for (const n of BUTTONS) expect(paused[n], `${n} while paused`).toEqual(following[n]);
