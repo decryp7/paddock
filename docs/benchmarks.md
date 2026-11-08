@@ -73,6 +73,7 @@ corpora are in each app's file.
 | [`crates/paddock-bench`](../crates/paddock-bench) + [`bench-nightly.yml` template](../.gitea/workflow-templates/bench-nightly.yml) | The harness for rule 16: `Recorder`, `bench/<app>.results.json`, `bench/budgets.toml` (limit, tolerance, regression), `paddock-bench check` | see [crates/README.md](../crates/README.md#paddock-bench-plan-x26) | — | Whatever an app's `budgets.toml` says | **No app uses it yet** | — |
 | `perf/proc-per-pid`: `crates/paddock-proc/examples/watch_cpu.rs` (branch, not on main) | A process watcher's own CPU: whole process table against one pid | `cargo run --release -p paddock-proc --example watch_cpu -- 60` (Unix) | A `sleep` child | none (ADR 0024 D7: ≤ 0.5% of a core) | No | branch CHANGELOG |
 | C29 window weight ([`conformance/src/window-weight`](../conformance/src/window-weight)) | JS each window loads before first paint (rule 35) | `ng build --stats-json`, then `paddock-conformance window-weight [kind] [--max kB] [--record]` | The build | `windowWeight` in `paddock.conformance.json`, **not configured anywhere** (C29 warns) | `ci.yml` conformance (warns) | — |
+| `./dev gates check` (C100, [ADR 0060](adr/0060-every-check-runs-somewhere.md)) | Run time of the meta-check: 328 checks, the CI model, 3,192 Rust files scanned, the docs | `./dev gates check` (release build of `tools/paddock-dev`) | This repository | none (ADR 0060: quote it only from here; a few seconds at most) | `ci.yml` conformance job, `nightly.yml` c100 job | [results](#2026-11-08-dev-gates-check) |
 | Angular build budgets in `ui/angular.json` | Initial chunk size | `npm run build -w ui` (and each demo's build) | — | gallery 1.5 MB / 3 MB; shell-demo 500 kB / 1 MB; workbench-demo 580 kB / 1 MB (warn / error) | `ci.yml` ui jobs, through `ng build` | — |
 | [`scripts/ci-timings.mjs`](../scripts/ci-timings.mjs) | CI wall time, queueing, runners, per-step and compile/test phases, critical path (Gitea API, read-only) | `GITEA_TOKEN=… node scripts/ci-timings.mjs [--repos …] [--limit 30] [--out docs/research/2026-10-ci-timings.md] [--json F]` | Gitea run history | none | No (manual) | [research/2026-10-ci-timings.md](research/2026-10-ci-timings.md) |
 
@@ -297,6 +298,25 @@ Quoted by [ADR 0041](adr/0041-deterministic-timing-in-tests.md) §5 (the starved
 ## Gaps
 
 These are ordered by impact.
+
+### 2026-11-08, `./dev gates check` (feat/gates-c100)
+
+- **Commit:** the tip of `feat/gates-c100` before the app clippy fixes (see the branch)
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 41 to 47 during the runs (other agents' builds were running)
+- **Build:** release (`cargo build --release` in `tools/paddock-dev`); yaml-rust2 0.13, toml 1
+- **Corpus:** this repository: 12,328 tracked files, 3,192 `.rs` files, 25 workflow and action files, 9 app contracts, 328 checks
+- **Command:** `target/release/paddock-dev gates check --root . --base HEAD` (includes one `node conformance/bin/paddock-conformance.mjs list --json` and two `git` calls)
+- **Runs:** 5 runs, single; wall time as `time -p` reports it
+- **Numbers:**
+
+  | Measure | Result | Budget | Verdict |
+  |---|---|---|---|
+  | C100's own report (without start-up) | 1,248 to 1,586 ms | a few seconds (ADR 0060 section "Parallelism and cost") | within |
+  | wall time | 1.25 to 2.03 s | | within |
+  | debug build, the same command | 8 to 18 s | | not what CI runs |
+
+- **Notes:** one thread, no parallelism needed at this size; the cheaper scan (a byte-string test before parsing Rust and TypeScript, one parse per YAML file) is in. The debug figure is for a debug `./dev` on this loaded machine. How the wrapper builds `./dev` in CI (profile, cold cache) is not measured here.
 
 1. **Rule 16 is met only by Debrief, and only partly.**
    - The shared harness (`paddock-bench`, the `bench-nightly.yml` template) is used by no app.
