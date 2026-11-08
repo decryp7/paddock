@@ -13,6 +13,7 @@ async fn main() {
     }
     let mut args = std::env::args().skip(1);
     let (mut port, mut dir, mut fake, mut die_after) = (None::<u16>, None::<String>, false, None::<u64>);
+    let mut ready_when = None::<std::path::PathBuf>;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--port" => port = args.next().and_then(|p| p.parse().ok()),
@@ -20,6 +21,13 @@ async fn main() {
             // Test fixture: act as an OpenAI-compatible engine with canned answers (used by the crash and restart tests).
             "--fake-engine" => fake = true,
             "--die-after-ms" => die_after = args.next().and_then(|p| p.parse().ok()),
+            "--ready-when" => match pitwall_server::fake_engine::parse_ready_when(args.next()) {
+                Ok(p) => ready_when = Some(p),
+                Err(e) => {
+                    eprintln!("{e}");
+                    std::process::exit(2);
+                }
+            },
             "--host" | "--model" => {
                 args.next();
             }
@@ -38,7 +46,7 @@ async fn main() {
         }
     }
     if fake {
-        if let Err(e) = pitwall_server::fake_engine::serve(port.unwrap_or(0), die_after).await {
+        if let Err(e) = pitwall_server::fake_engine::serve(port.unwrap_or(0), die_after, ready_when).await {
             eprintln!("fake engine: {e}");
             std::process::exit(1);
         }

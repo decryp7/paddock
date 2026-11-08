@@ -427,6 +427,12 @@ pub async fn real_harness(dir: tempfile::TempDir) -> Harness {
 /// Building the Tauri shell (`pitwall-app`) before these tests overwrites `target/debug/pitwall-server` with an empty
 /// placeholder sidecar (`Permission denied`, then `Exec format error`); the assertion names that cause. Copying the
 /// binary elsewhere does not help and is slow on Windows (virus scanners), so the built file is used in place.
+///
+/// The binary is started once (`--version`) and waited for here, before any test step that has a time budget: macOS
+/// checks a freshly linked program on its first start, and while other jobs on the machine start fresh binaries too
+/// (three CI runners on one Mac, CI run 7775) that check queues behind theirs for many seconds (`syspolicyd` busy, the
+/// child still at `_dyld_start`). Later starts of the same file are not checked again.
+#[allow(clippy::disallowed_methods)] // a test starting its own helper binary and waiting for it to end
 pub fn runnable_server(_dir: &std::path::Path) -> String {
     let exe = env!("CARGO_BIN_EXE_pitwall-server");
     let len = std::fs::metadata(exe).map(|m| m.len()).unwrap_or(0);
@@ -434,16 +440,122 @@ pub fn runnable_server(_dir: &std::path::Path) -> String {
         len > 100_000,
         "{exe} is {len} bytes: the Tauri shell was built first and replaced it with its placeholder sidecar; run these tests before building pitwall-app"
     );
+    let started = std::time::Instant::now();
+    let out = std::process::Command::new(exe)
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap_or_else(|e| panic!("{exe} cannot be started: {e}"));
+    let printed = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success() && printed.starts_with("pitwall-server "),
+        "{exe} --version: {} {printed}{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    eprintln!("the first start of {exe} took {:.2} s", started.elapsed().as_secs_f64());
     exe.to_string()
 }
 
+/// How long [`ChildEngine`] waits for a child that neither answers nor exits before it reports a hang. Never a verdict
+/// on a slow start: it only turns a hang into a message (pid, port, what the child printed) before the runner's kill
+/// (nextest `ci`: 60 s), and bounds a run under plain `cargo test`.
+pub const CHILD_HANG_GUARD: Duration = Duration::from_secs(45);
+
 /// An engine that is a real child process: `pitwall-server --fake-engine`, which exits `die_after_ms` after it starts
-/// serving (a crashing engine). Used to test restarts and crash-loop detection against a real process.
+/// serving (a crashing engine). Used to test restarts, crash-loop detection and port races against a real process.
+/// Build it with [`ChildEngine::new`] and override what a test needs.
 pub struct ChildEngine {
     pub exe: String,
     pub die_after_ms: u64,
+    /// The child's `/health` answers 503 "loading" until this file exists (`--ready-when`): an engine that is slow
+    /// to become ready, released by the test on an event instead of after a duration.
+    pub ready_when: Option<std::path::PathBuf>,
+    /// The first start finds its port taken (held by the test process until that start ends): another program took
+    /// the probed port before the engine bound it.
+    pub take_first_port: bool,
+    /// The pause between two health polls.
+    pub poll_every: Duration,
+    /// Counts the health polls of all starts together, so a test can act after a given number of them.
+    pub polls: Option<tokio::sync::watch::Sender<usize>>,
+    /// How each start ended, in order.
+    pub outcomes: Arc<std::sync::Mutex<Vec<StartOutcome>>>,
     /// The process ids started, so a test can check they ended.
     pub pids: Arc<std::sync::Mutex<Vec<u32>>>,
+    /// The port of every start, in order.
+    pub ports: Arc<std::sync::Mutex<Vec<u16>>>,
+}
+
+impl ChildEngine {
+    /// A child that serves at once and does not crash on its own.
+    pub fn new(exe: String) -> Self {
+        Self {
+            exe,
+            die_after_ms: 600_000,
+            ready_when: None,
+            take_first_port: false,
+            poll_every: Duration::from_millis(50),
+            polls: None,
+            outcomes: Default::default(),
+            pids: Default::default(),
+            ports: Default::default(),
+        }
+    }
+}
+
+/// How one [`ChildEngine`] start ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartOutcome {
+    /// The child answered `/health` with 200.
+    Healthy,
+    /// The child exited before it answered.
+    Exited,
+    /// [`CHILD_HANG_GUARD`] ran out: neither of the above.
+    HangGuard,
+}
+
+/// Takes `port` on 127.0.0.1 until the handle is aborted, closing every connection at once (so a health poll fails
+/// fast instead of waiting for an answer that never comes). `None` when the bind fails: then someone else already has
+/// the port, which is the state the test wants anyway.
+async fn hold_port(port: u16) -> Option<tokio::task::JoinHandle<()>> {
+    let l = tokio::net::TcpListener::bind(("127.0.0.1", port)).await.ok()?;
+    Some(tokio::spawn(async move {
+        while let Ok((s, _)) = l.accept().await {
+            drop(s);
+        }
+    }))
+}
+
+/// Runs `fut` (a start or a load of `engine`, whose `polls` sender belongs to `polled`) and fails at once if the first
+/// child has ended but the double keeps polling it instead of reporting the exit: a missed exit would otherwise show
+/// only as a slow test ending in the hang guard. Allows a few polls for the child's end to be seen.
+pub async fn noticing_the_first_exit<F: std::future::Future>(
+    engine: &ChildEngine,
+    mut polled: tokio::sync::watch::Receiver<usize>,
+    fut: F,
+) -> F::Output {
+    const SLACK: usize = 5;
+    let (pids, outcomes) = (engine.pids.clone(), engine.outcomes.clone());
+    let watch = async move {
+        let seen = loop {
+            if polled.changed().await.is_err() {
+                return std::future::pending().await;
+            }
+            let first = pids.lock().unwrap().first().copied();
+            if first.is_some_and(|pid| !pitwall_server::system::pid_alive(pid)) {
+                break *polled.borrow();
+            }
+        };
+        let _ = polled.wait_for(|n| *n > seen + SLACK).await;
+        if outcomes.lock().unwrap().is_empty() {
+            panic!("the first child ended, yet the double polled it {SLACK} more times without reporting the exit");
+        }
+        std::future::pending::<()>().await
+    };
+    tokio::select! {
+        r = fut => r,
+        () = watch => unreachable!(),
+    }
 }
 
 impl Engine for ChildEngine {
@@ -453,29 +565,79 @@ impl Engine for ChildEngine {
     fn availability(&self) -> Availability {
         Availability::Available
     }
+    /// Waits for health or exit, like `LlamaCpp::start`, never for a fixed number of polls: the first start of a
+    /// freshly built binary on a busy Mac took longer than such a budget (CI run 7775). Instead of the product's
+    /// 5-minute deadline it has [`CHILD_HANG_GUARD`], and the runner's kill bounds everything. An exit is reported with
+    /// what the child printed, so a taken port reads as one and the load retries on a fresh port. The child's stderr
+    /// goes to the test's own stderr as it comes, the last 4000 bytes kept for that report (as `engines.rs` does).
     #[allow(clippy::disallowed_methods)] // a test starting its own helper binary
     fn start<'a>(&'a self, l: &'a Launch) -> BoxFuture<'a, Result<Running, EngineError>> {
         Box::pin(async move {
-            let child = tokio::process::Command::new(&self.exe)
-                .args([
-                    "--fake-engine",
-                    "--die-after-ms",
-                    &self.die_after_ms.to_string(),
-                    "--port",
-                    &l.port.to_string(),
-                ])
+            self.ports.lock().unwrap().push(l.port);
+            let first = self.ports.lock().unwrap().len() == 1;
+            let held = if self.take_first_port && first {
+                hold_port(l.port).await
+            } else {
+                None
+            };
+            let mut args = vec![
+                "--fake-engine".to_string(),
+                "--die-after-ms".into(),
+                self.die_after_ms.to_string(),
+                "--port".into(),
+                l.port.to_string(),
+            ];
+            if let Some(gate) = &self.ready_when {
+                args.extend(["--ready-when".to_string(), gate.to_string_lossy().into_owned()]);
+            }
+            let mut child = tokio::process::Command::new(&self.exe)
+                .args(&args)
                 .stdin(std::process::Stdio::null())
+                .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true)
                 .spawn()
                 .map_err(|e| EngineError::Start(e.to_string()))?;
-            if let Some(pid) = child.id() {
+            let pid = child.id();
+            if let Some(pid) = pid {
                 self.pids.lock().unwrap().push(pid);
             }
+            let tail = Arc::new(std::sync::Mutex::new(String::new()));
+            let reader = child.stderr.take().map(|mut err| {
+                let tail = tail.clone();
+                tokio::spawn(async move {
+                    use tokio::io::AsyncReadExt;
+                    let mut buf = [0u8; 1024];
+                    while let Ok(n) = err.read(&mut buf).await {
+                        if n == 0 {
+                            break;
+                        }
+                        let text = String::from_utf8_lossy(&buf[..n]);
+                        eprint!("{text}");
+                        let mut g = tail.lock().unwrap();
+                        g.push_str(&text);
+                        if g.len() > 4000 {
+                            let cut = g.char_indices().map(|(i, _)| i).find(|i| *i >= g.len() - 4000).unwrap_or(0);
+                            g.drain(..cut);
+                        }
+                    }
+                })
+            });
+            let said = |tail: &Arc<std::sync::Mutex<String>>| tail.lock().unwrap().trim().to_string();
             let port = LoopbackPort::new(l.port).ok_or_else(|| EngineError::Start("bad port".into()))?;
             let client = Client::new(port, None);
-            for _ in 0..200 {
-                if client.json("GET", "/health", None, Duration::from_secs(2)).await.is_ok() {
-                    return Ok(Running {
+            let started = std::time::Instant::now();
+            let mut next_note = Duration::from_secs(10);
+            let outcome = loop {
+                if let Ok(Some(status)) = child.try_wait() {
+                    if let Some(r) = reader {
+                        let _ = r.await;
+                    }
+                    self.outcomes.lock().unwrap().push(StartOutcome::Exited);
+                    break Err(EngineError::Start(format!("the child engine exited ({status}): {}", said(&tail))));
+                }
+                if let Ok((200, _)) = client.json("GET", "/health", None, Duration::from_secs(2)).await {
+                    self.outcomes.lock().unwrap().push(StartOutcome::Healthy);
+                    break Ok(Running {
                         child: Some(child),
                         guard: None,
                         client,
@@ -483,9 +645,34 @@ impl Engine for ChildEngine {
                         props: pitwall_core::llama::Props::default(),
                     });
                 }
-                tokio::time::sleep(Duration::from_millis(50)).await;
+                if let Some(p) = &self.polls {
+                    p.send_modify(|n| *n += 1);
+                }
+                let waited = started.elapsed();
+                if waited >= CHILD_HANG_GUARD {
+                    // Deliberately without the child's output (it is in the test's stderr above): its words, such as a
+                    // bind error, must not make the product read a hang as a taken port.
+                    self.outcomes.lock().unwrap().push(StartOutcome::HangGuard);
+                    break Err(EngineError::Start(format!(
+                        "hang guard: the child engine (pid {pid:?}, port {}) neither answered /health nor ended within {} s; its output is in the test's stderr",
+                        l.port,
+                        CHILD_HANG_GUARD.as_secs()
+                    )));
+                }
+                if waited >= next_note {
+                    eprintln!(
+                        "the child engine (pid {pid:?}, port {}) is still starting after {} s; waiting until it answers or exits",
+                        l.port,
+                        waited.as_secs()
+                    );
+                    next_note += Duration::from_secs(10);
+                }
+                tokio::time::sleep(self.poll_every).await;
+            };
+            if let Some(h) = held {
+                h.abort();
             }
-            Err(EngineError::Start("the child engine did not become healthy".into()))
+            outcome
         })
     }
 }

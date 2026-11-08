@@ -12,8 +12,29 @@ pub const SSE: &str = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\
 
 /// The router.
 pub fn router() -> Router {
+    router_with(None)
+}
+
+/// The router; with `ready_when`, `/health` answers 503 "loading" (as llama-server does while it loads a model) until
+/// that file exists, then 200.
+pub fn router_with(ready_when: Option<std::path::PathBuf>) -> Router {
     Router::new()
-        .route("/health", get(|| async { axum::Json(json!({"status": "ok"})) }))
+        .route(
+            "/health",
+            get(move || {
+                let ready = ready_when.as_ref().is_none_or(|p| p.exists());
+                async move {
+                    if ready {
+                        (axum::http::StatusCode::OK, axum::Json(json!({"status": "ok"})))
+                    } else {
+                        (
+                            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                            axum::Json(json!({"error": {"code": 503, "message": "Loading model"}})),
+                        )
+                    }
+                }
+            }),
+        )
         .route(
             "/props",
             get(|| async {
@@ -30,9 +51,18 @@ pub fn router() -> Router {
         )
 }
 
+/// Parses the value of `--ready-when`: a file path, not empty, not another option, at most 4096 bytes.
+pub fn parse_ready_when(value: Option<String>) -> Result<std::path::PathBuf, String> {
+    match value {
+        Some(v) if !v.is_empty() && !v.starts_with("--") && v.len() <= 4096 => Ok(v.into()),
+        _ => Err("--ready-when takes the path of the file whose existence makes /health answer 200 (at most 4096 bytes)".into()),
+    }
+}
+
 /// Serve on 127.0.0.1:`port` until the process ends; with `die_after_ms` the process exits that long after it started
-/// listening (a crashing engine, for the restart and crash-loop tests).
-pub async fn serve(port: u16, die_after_ms: Option<u64>) -> std::io::Result<()> {
+/// listening (a crashing engine, for the restart and crash-loop tests); with `ready_when` it reports itself loading
+/// until that file exists (an engine that is slow to become ready, released by the test on an event).
+pub async fn serve(port: u16, die_after_ms: Option<u64>, ready_when: Option<std::path::PathBuf>) -> std::io::Result<()> {
     let l = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     if let Some(ms) = die_after_ms {
         tokio::spawn(async move {
@@ -40,5 +70,18 @@ pub async fn serve(port: u16, die_after_ms: Option<u64>) -> std::io::Result<()> 
             std::process::exit(3);
         });
     }
-    axum::serve(l, router()).await
+    axum::serve(l, router_with(ready_when)).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ready_when_takes_a_path_and_refuses_anything_else() {
+        assert_eq!(parse_ready_when(Some("/tmp/x/ready".into())), Ok("/tmp/x/ready".into()));
+        for bad in [None, Some(String::new()), Some("--port".into()), Some("a".repeat(4097))] {
+            assert!(parse_ready_when(bad.clone()).is_err(), "{bad:?}");
+        }
+    }
 }

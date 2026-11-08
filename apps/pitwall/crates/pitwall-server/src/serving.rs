@@ -1315,8 +1315,9 @@ pub fn caps_of(s: &Settings) -> Caps {
     }
 }
 
-/// Whether a failed start was the engine's port being taken by someone else in the meantime.
-fn port_taken(e: &EngineError) -> bool {
+/// Whether a failed start was the engine's port being taken by someone else in the meantime (the load then retries on
+/// a fresh port). Public so the child-process tests check a real OS message against this one classification.
+pub fn port_taken(e: &EngineError) -> bool {
     let EngineError::Start(m) = e else { return false };
     let m = m.to_lowercase();
     m.contains("address already in use") || m.contains("address in use") || m.contains("only one usage of each socket address")

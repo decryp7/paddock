@@ -606,6 +606,115 @@ async fn tick_until(h: &common::Harness, what: &str, mut done: impl FnMut(&commo
     panic!("timed out waiting for: {what}");
 }
 
+/// CI run 7775: the first start of a freshly built binary on a busy Mac took longer than the child engine's fixed
+/// budget of 200 health polls, so the load failed with "did not become healthy" while the engine was only slow. Like
+/// the real engine, the child is waited for until it is ready or exits. The child reports itself loading (503) until
+/// the test creates its ready file, which the test does only after more polls than that old budget: the verdict does
+/// not depend on the host's speed.
+#[tokio::test]
+async fn a_child_engine_that_is_slow_to_become_ready_is_waited_for() {
+    const OLD_BUDGET: usize = 200;
+    let dir = tempfile::tempdir().unwrap();
+    let ready = dir.path().join("engine-ready");
+    let (polls, mut polled) = tokio::sync::watch::channel(0usize);
+    let engine = common::ChildEngine {
+        ready_when: Some(ready.clone()),
+        poll_every: std::time::Duration::from_millis(1),
+        polls: Some(polls),
+        ..common::ChildEngine::new(common::runnable_server(dir.path()))
+    };
+    let h = common::harness_with(dir, false, Some(std::sync::Arc::new(engine))).await;
+    // The load is awaited in process: an HTTP request would add its own client time budget.
+    let id = pitwall_core::ids::ModelId::parse("tiny-q4_k_m").unwrap();
+    let load = h.st.serving.ensure(&id);
+    tokio::pin!(load);
+    let loaded = tokio::select! {
+        r = &mut load => panic!("the load ended before the engine was ready: {:?}", r.map(|(_, cold)| cold)),
+        _ = polled.wait_for(|n| *n > OLD_BUDGET) => {
+            std::fs::write(&ready, b"").unwrap();
+            load.await
+        }
+    };
+    let (busy, cold) = loaded.unwrap_or_else(|e| panic!("{e:?}"));
+    assert!(cold.is_some(), "the model was loaded by this call");
+    drop(busy);
+    assert!(h.st.serving.is_loaded(&id));
+    h.st.serving.release_all();
+}
+
+fn launch_on_a_free_port() -> pitwall_core::llama::Launch {
+    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    pitwall_core::llama::Launch {
+        model: "tiny.gguf".into(),
+        mmproj: None,
+        alias: "tiny-q4_k_m".into(),
+        port,
+        context: 4096,
+        gpu_layers: None,
+        threads: 0,
+        parallel: 1,
+        kind: pitwall_core::llama::ServeKind::Chat,
+        cache_ram_mib: 0,
+        slot_save_path: None,
+    }
+}
+
+/// A child engine whose port was taken exits; that is reported at once with what it printed, and the product's own
+/// classification reads it as a taken port on this OS ("Address already in use" on Unix, "Only one usage of each
+/// socket address" on Windows).
+#[tokio::test]
+async fn a_child_engine_that_exits_before_it_answers_is_reported_with_its_reason() {
+    use pitwall_server::engines::Engine as _;
+    let dir = tempfile::tempdir().unwrap();
+    let (polls, polled) = tokio::sync::watch::channel(0usize);
+    let engine = common::ChildEngine {
+        take_first_port: true,
+        polls: Some(polls),
+        ..common::ChildEngine::new(common::runnable_server(dir.path()))
+    };
+    let launch = launch_on_a_free_port();
+    let e = common::noticing_the_first_exit(&engine, polled, engine.start(&launch))
+        .await
+        .err()
+        .expect("the port is held, so the child cannot listen");
+    assert_eq!(*engine.outcomes.lock().unwrap(), [common::StartOutcome::Exited]);
+    assert!(
+        e.to_string().starts_with("the engine failed to start: the child engine exited ("),
+        "{e}"
+    );
+    assert!(pitwall_server::serving::port_taken(&e), "not read as a taken port: {e}");
+}
+
+/// The whole path: the first start finds its port taken, the child exits, and the load retries on a fresh port and
+/// succeeds, as one load.
+#[tokio::test]
+async fn a_load_whose_child_finds_its_port_taken_retries_on_a_fresh_port() {
+    let dir = tempfile::tempdir().unwrap();
+    let (polls, polled) = tokio::sync::watch::channel(0usize);
+    let engine = std::sync::Arc::new(common::ChildEngine {
+        take_first_port: true,
+        polls: Some(polls),
+        ..common::ChildEngine::new(common::runnable_server(dir.path()))
+    });
+    let ports = engine.ports.clone();
+    let h = common::harness_with(dir, false, Some(engine.clone())).await;
+    let id = pitwall_core::ids::ModelId::parse("tiny-q4_k_m").unwrap();
+    let (busy, cold) = common::noticing_the_first_exit(&engine, polled, h.st.serving.ensure(&id))
+        .await
+        .unwrap_or_else(|e| panic!("{e:?}"));
+    assert_eq!(
+        *engine.outcomes.lock().unwrap(),
+        [common::StartOutcome::Exited, common::StartOutcome::Healthy],
+        "the first start ended by the child's exit, the retry by health"
+    );
+    assert!(cold.is_some());
+    drop(busy);
+    let ports = ports.lock().unwrap().clone();
+    assert_eq!(ports.len(), 2, "one taken port, one retry: {ports:?}");
+    assert_ne!(ports[0], ports[1], "the retry asked for a fresh port");
+    h.st.serving.release_all();
+}
+
 #[tokio::test]
 async fn a_crashing_engine_is_restarted_with_backoff_then_given_up_on_until_retry() {
     let dir = tempfile::tempdir().unwrap();
@@ -614,9 +723,8 @@ async fn a_crashing_engine_is_restarted_with_backoff_then_given_up_on_until_retr
         dir,
         false,
         Some(std::sync::Arc::new(common::ChildEngine {
-            exe,
             die_after_ms: 900,
-            pids: Default::default(),
+            ..common::ChildEngine::new(exe)
         })),
     )
     .await;
@@ -788,9 +896,8 @@ async fn stopping_serving_unloads_every_model_ends_the_engine_processes_and_resu
     let exe = common::runnable_server(dir.path());
     let pids: std::sync::Arc<std::sync::Mutex<Vec<u32>>> = Default::default();
     let engine = common::ChildEngine {
-        exe,
-        die_after_ms: 600_000,
         pids: pids.clone(),
+        ..common::ChildEngine::new(exe)
     };
     let h = common::harness_with(dir, false, Some(std::sync::Arc::new(engine))).await;
     let key = h.make_key("Quit Test").await;
