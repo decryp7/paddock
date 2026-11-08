@@ -1,6 +1,14 @@
 // C13: the Rust lint preset (plan X11, lint/). The workspace's `[workspace.lints]` has every lint of lint/workspace-lints.toml
 // at that level or stricter, every member crate opts in with `[lints] workspace = true`, and the root clippy.toml lists
 // every `disallowed-methods` and `disallowed-types` path of lint/clippy.toml (an app may add paths and reword reasons, not drop a path).
+//
+// C13 IS NOT GATED IN CI: ci.yml runs only the checks listed in its `--only`, from the repository root, where C13 has no
+// root Cargo.toml to read, and the apps' own runs do not call it. Run by hand (`--app <app> --root apps/<app> --paddock .`) it
+// reports drift that predates the Keychain entries (measured 2026-11-08): Dyno, Pitcrew and Spotter lack disallowed-methods
+// tokio::process::Command::new, std::env::temp_dir and reqwest::Client::new (Debrief lacks the last two); Debrief's
+// workspace lints and member opt-ins are far from the preset; and Debrief, Pitcrew and Spotter omit the two
+// keyring::Entry / keyring_core::Entry type entries on purpose, until their secrets move to paddock-secrets files
+// (their C99 waivers in paddock.waivers.toml). Fix the drift before adding C13 to the gate.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { error, warn } from '../finding.mjs';

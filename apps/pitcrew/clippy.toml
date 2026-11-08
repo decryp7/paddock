@@ -96,7 +96,7 @@ disallowed-methods = [
 ]
 
 # ADR 0057 (rule 72, C99): the Keychain types; most of the real API is their inherent methods. keyring::Entry and
-# keyring_core::Entry are left out here until this app moves its secrets to paddock-secrets files (C13 waiver, paddock.waivers.toml). keyring's entries need no
+# keyring_core::Entry are left out here until this app moves its secrets to paddock-secrets files (its C99 waivers in the root paddock.waivers.toml end with it; C13 would report them, but it is not gated in CI: see its header). keyring's entries need no
 # allow-invalid: Clippy does not report a path into a crate that is not in the graph (measured 2026-11-08), and once keyring
 # is back in the graph the path resolves and the ban bites.
 disallowed-types = [
