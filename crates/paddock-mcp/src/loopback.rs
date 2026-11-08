@@ -25,9 +25,10 @@ use std::time::{Duration, Instant};
 const HANDSHAKE_MAX: usize = 512;
 /// A client that does not send its key within this is dropped.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
-/// Refused clients drained at once. Not tied to `max_connections`: a drain ends only after the refused client's key line is
-/// read, which is after the client has seen the refusal and the end, so with one drain place a client that refused again at
-/// once found the place still taken, its connection was closed with the key line unread and it was reset (macOS, 2026-11-09).
+/// Refused clients drained by a thread at once. Not tied to `max_connections`: a drain ends only when the client closes (which
+/// it does after it has seen the refusal and the end), at [`DRAIN_MAX_BYTES`], after [`HANDSHAKE_TIMEOUT`] or on a stop, so
+/// with one drain place a client that was refused again at once found the place still taken, its connection was closed with
+/// the key line unread and it was reset (macOS, 2026-11-09).
 const MAX_DRAINING: usize = 64;
 /// Most bytes read from a refused client before it is closed anyway (a client that sends more than its key line and a first
 /// request is not waiting to read the refusal).
@@ -339,6 +340,8 @@ fn spawn_named(name: String, work: Box<dyn FnOnce() + Send>) -> io::Result<JoinH
 enum DrainEnd {
     /// The client closed its side: nothing more can arrive.
     ClientClosed,
+    /// A whole line (the key line) was read and nothing more is queued: the protocol has nothing more to send.
+    KeyLine,
     /// More than [`DRAIN_MAX_BYTES`] arrived: closed anyway.
     ByteCap,
     /// The client neither sent nor closed within [`HANDSHAKE_TIMEOUT`].
@@ -355,6 +358,7 @@ impl DrainEnd {
     fn describe(&self) -> String {
         match self {
             DrainEnd::ClientClosed => "the client closed its side".into(),
+            DrainEnd::KeyLine => "its key line was read and nothing more was queued".into(),
             DrainEnd::ByteCap => format!("more than {DRAIN_MAX_BYTES} bytes arrived"),
             DrainEnd::TimedOut => "the client sent nothing more in time".into(),
             DrainEnd::Stopped => "the listener stopped".into(),
@@ -365,8 +369,9 @@ impl DrainEnd {
 }
 
 /// Reads what is queued on a refused client's socket without waiting, up to [`DRAIN_MAX_BYTES`]: closing a socket with
-/// unread data resets it, and the key line is normally queued already, so this usually costs no thread. Returns the bytes
-/// read and why it stopped.
+/// unread data resets it. No thread is needed when the client has already closed or its whole key line is read and nothing
+/// more is queued; a client still connected with no line yet (most well-behaved ones close only after reading the refusal)
+/// is `StillOpen` and gets a drain thread. Returns the bytes read and why it stopped.
 fn drain_queued(stream: &TcpStream) -> (usize, DrainEnd) {
     let read = stream.set_nonblocking(true).map_or_else(
         |e| (0, DrainEnd::Failed(e.kind())),
@@ -380,17 +385,28 @@ fn drain_queued(stream: &TcpStream) -> (usize, DrainEnd) {
 /// Reads from a non-blocking source until nothing more is queued, it ends, fails or [`DRAIN_MAX_BYTES`] were read.
 fn read_queued(source: &mut impl Read) -> (usize, DrainEnd) {
     let mut total = 0;
+    let mut line = false;
     let mut buf = [0u8; 512];
     loop {
         match source.read(&mut buf) {
             Ok(0) => return (total, DrainEnd::ClientClosed),
             Ok(n) => {
+                line |= buf[..n].contains(&b'\n');
                 total += n;
                 if total >= DRAIN_MAX_BYTES {
                     return (total, DrainEnd::ByteCap);
                 }
             }
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => return (total, DrainEnd::StillOpen),
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                return (
+                    total,
+                    if line {
+                        DrainEnd::KeyLine
+                    } else {
+                        DrainEnd::StillOpen
+                    },
+                );
+            }
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
             Err(e) => return (total, DrainEnd::Failed(e.kind())),
         }
@@ -1107,11 +1123,11 @@ mod tests {
     /// With no drain place left, the refused client's queued bytes are still read inline and the log says what happened.
     #[test]
     fn a_refused_client_beyond_the_drains_is_read_inline_and_logged() {
-        let (serving, holder, hello) = full_listener(1);
+        let (serving, holder, _) = full_listener(1);
         // The first refused client keeps the one drain busy: it sends nothing and stays connected.
         let silent = TcpStream::connect(serving.addr()).unwrap();
-        let mut extra = TcpStream::connect(serving.addr()).unwrap();
-        extra.write_all(hello.as_bytes()).unwrap();
+        // It sends nothing, so nothing is queued at the inline read and it is still connected: the pool decides.
+        let extra = TcpStream::connect(serving.addr()).unwrap();
         let lines: Vec<String> =
             std::io::BufRead::lines(BufReader::new(extra.try_clone().unwrap()))
                 .map_while(Result::ok)
@@ -1175,10 +1191,9 @@ mod tests {
     /// The OS has no thread for a drain: the refused client is read inline, the socket closed, the cause logged; no panic.
     #[test]
     fn a_refused_client_is_still_read_when_no_drain_thread_can_start() {
-        let (serving, holder, hello) =
-            full_listener_spawning(MAX_DRAINING, no_thread_to_drain_with);
-        let mut extra = TcpStream::connect(serving.addr()).unwrap();
-        extra.write_all(hello.as_bytes()).unwrap();
+        let (serving, holder, _) = full_listener_spawning(MAX_DRAINING, no_thread_to_drain_with);
+        // It sends nothing, so nothing is queued at the inline read and it is still connected: the pool decides.
+        let extra = TcpStream::connect(serving.addr()).unwrap();
         let lines: Vec<String> =
             std::io::BufRead::lines(BufReader::new(extra.try_clone().unwrap()))
                 .map_while(Result::ok)
@@ -1245,6 +1260,27 @@ mod tests {
         );
     }
 
+    /// A whole key line with nothing more queued is enough to close without a thread; a part of one is not.
+    #[test]
+    fn a_whole_key_line_with_nothing_more_queued_needs_no_drain_thread() {
+        struct Queue(Vec<&'static [u8]>);
+        impl Read for Queue {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                if self.0.is_empty() {
+                    return Err(io::ErrorKind::WouldBlock.into());
+                }
+                let chunk = self.0.remove(0);
+                buf[..chunk.len()].copy_from_slice(chunk);
+                Ok(chunk.len())
+            }
+        }
+        let whole = read_queued(&mut Queue(vec![b"{\"key\":", b"\"k\"}\n"]));
+        assert_eq!(whole, (12, DrainEnd::KeyLine));
+        let part = read_queued(&mut Queue(vec![b"{\"key\":"]));
+        assert_eq!(part, (7, DrainEnd::StillOpen));
+        assert_eq!(read_queued(&mut Queue(vec![])), (0, DrainEnd::StillOpen));
+    }
+
     #[test]
     fn a_drain_stops_at_the_byte_cap() {
         let (server_end, mut client) = pair();
@@ -1289,6 +1325,7 @@ mod tests {
         );
         for end in [
             DrainEnd::ClientClosed,
+            DrainEnd::KeyLine,
             DrainEnd::ByteCap,
             DrainEnd::TimedOut,
             DrainEnd::Stopped,
