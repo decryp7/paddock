@@ -1,7 +1,7 @@
 # 61. Jobs carry the instance that runs them
 
-- Status: Proposed (2026-11-08; ER-21 redesign, user decision 2026-11-08 "do all redesigns now"; revision 2 answers the first
-  independent review: P1-1 to P1-4 and P2 1 to 12)
+- Status: Accepted 2026-11-08: user-approved redesign, independent review (ER-21; user decision 2026-11-08 "do all redesigns
+  now"; revision 2 answered the first review, P1-1 to P1-4 and P2 1 to 12; revision 3 the second, the Forget P1 and five P2s)
 - Date: 2026-11-08
 - Related: ER-21 / rule 40 (recurring bugs mean a missing design rule), ER-17 to ER-19 (long operations: off the UI thread,
   labelled progress, no UI timeouts), ER-22 / rule 42 (share first), ER-27 (logs explain every failure), ER-28 (causes
@@ -53,6 +53,19 @@ places one by one would leave every other holder of such an id (the Dyno stores 
 list, status item, follow helper and updates dialog, the CLI) to meet it next (ER-21).
 
 ### Causes, measured where the evidence allows (ER-28)
+
+The four lines of the Windows app log that decide instance 2, copied here because the VM evidence folder is temporary (fields
+other than these dropped; no user data in them):
+
+```json
+{"@t": "2026-11-08T16:51:23.221748Z", "@m": "Agent connection closed", "ConnectedMs": 842501}
+{"@t": "2026-11-08T16:52:03.040644Z", "@m": "connected to the agent to use it: handshake 55 ms", "AgentRun": "3e9b8e89", "AgentPid": 4468}
+{"@t": "2026-11-08T16:55:25.420244Z", "@m": "Action", "Operation": "startJob", "OperationId": "r117", "Outcome": "ok"}
+{"@t": "2026-11-08T16:55:25.424618Z", "@m": "Agent request failed", "Request": "JobResult", "ErrorCode": "NotFound", "Shown": "That job has no result: it is still running, was cancelled or failed, or is too old to be kept."}
+```
+
+Neither the `startJob` line nor the `JobResult` line names the job; J4 and J5 add the job ref (instance and id) to both, so the
+next such report shows the ids without inference (ER-27).
 
 | Instance | Cause | Observation | Result |
 | --- | --- | --- | --- |
@@ -195,11 +208,16 @@ In `@decryp7/paddock-ui/shell/jobs`:
   `lost`, the page stops showing the run as running and says "The run stopped: Dyno's agent restarted. Nothing was saved."
   The overview poll also stops treating a `running` of another instance as current (T4).
 - **Disk scans.** `DiskScanStatus` gains `instance`; the requests that name a scan take `ScanRef { instance, scan }`
-  (`StartDiskScan.replaces`, `CancelDiskScan`, `DiskChildren`, `DiskPath`, `DiskRings`, `RetryDiskScan`, `DiskReveal`) and the
-  agent answers `OtherInstance` for another instance. The disk-map store keys by `ScanRef`; on a new instance it re-reads
+  (`StartDiskScan.replaces`, `CancelDiskScan`, `DiskChildren`, `DiskPath`, `DiskRings`, `RetryDiskScan`, `DiskReveal`, and
+  `ForgetSavedDiskMap`) and the agent answers `OtherInstance` for another instance. `ForgetSavedDiskMap` matters most: kept maps
+  get new ids in every run, so a Forget clicked on a map of the old run would otherwise delete whichever map holds that id in
+  the new run (data loss); with the `ScanRef` it is refused and the page re-reads the kept maps. `DiskScanStatus.replaces`
+  stays a bare scan id: it names a scan of the same instance as the status that carries it (an agent only replaces its own
+  kept scans), which the agent test asserts. The disk-map store keys by `ScanRef`; on a new instance it re-reads
   `DiskScans` (the kept maps come back with new refs) and moves the screen to the kept map of the same target, or says the
   scan stopped. The disk centre uses the agent's one instance; scans are not jobs, so they reach the store through their own
-  `Message::DiskScan`, and the holder register has an entry for them.
+  `Message::DiskScan`, and the holder register has an entry for them, with an extra case: Forget on a kept map after a restart
+  deletes no map of the new run.
 
 ### 5. The check
 
@@ -220,7 +238,7 @@ In `@decryp7/paddock-ui/shell/jobs`:
   `seq` only rises; disconnect then a list re-read then a same-instance reconnect ends none and fires no
   `jobs-instances`; a relay of an ended instance is dropped; a `lost` `JobRef` never revives (A→B→A); a cancel for a non-live
   instance is `OtherInstance`. `paddock-jobs` tests: every snapshot carries its registry's instance; two registries in one
-  process differ; `try_from` refuses `Lost`. Dyno agent tests: `CancelJob`, `JobResult` and every `ScanRef` request with another
+  process differ; `try_from` refuses `Lost`. Dyno agent tests: `CancelJob`, `JobResult` and every `ScanRef` request (all eight, `ForgetSavedDiskMap` included) with another
   instance answer `OtherInstance`; a start sent as the first request on a new connection delivers its first snapshot to that
   connection (the `Sub` fix).
 - **On the real OS.** A VM row on macOS and Windows (Linux if the round runs): restart the agent during a Sleep read, a
@@ -258,7 +276,7 @@ paid anyway, everything that names an agent-issued id moves in the same version.
 | `Reply::Jobs` | `Vec<WireSnapshot>` becomes `AgentJobs { instance, jobs }` | breaking, in 7 |
 | `BenchProgress` | `+ job: Option<JobRef>` | breaking, in 7 |
 | `DiskScanStatus` | `+ instance: u64` | breaking, in 7 |
-| `StartDiskScan.replaces`, `CancelDiskScan`, `DiskChildren`, `DiskPath`, `DiskRings`, `RetryDiskScan`, `DiskReveal` | `scan: u64` becomes `ScanRef` | breaking, in 7 |
+| `StartDiskScan.replaces`, `CancelDiskScan`, `DiskChildren`, `DiskPath`, `DiskRings`, `RetryDiskScan`, `DiskReveal`, `ForgetSavedDiskMap` | `scan: u64` becomes `ScanRef` (`DiskScanStatus.replaces` stays a bare id of the carrying status's instance) | breaking, in 7 |
 | `Message::Hello { instance }` | only in the fallback of section 6, appended | additive |
 | `ErrorCode` | `+ OtherInstance`, appended | additive |
 | `paddock_jobs::JobSnapshot` (JSON to the webview) | `+ instance`, `+ registeredAt`, `+ state: "lost"` | breaking shared JSON: every app on the shell adopts in the same change (rules 39, 42, 43) |
@@ -296,8 +314,8 @@ over its range before landing. After ADR 0058 (WP-1 of the 1.1.1 plan) lands, be
 | J1 | `paddock-jobs` core: `InstanceId`, `JobRef`, registry instance, stamped snapshots with `registered_at`, `JobState::Lost`, `CancelOutcome`, `wire.rs` with `try_from`; `start_ids_at` deleted | `crates/paddock-jobs/src/{model,job,reporter,wire}.rs`, its tests | implementer | ADR accepted | the `paddock-jobs` tests of section 5; coverage >= 99 % | 1-1.5 |
 | J2 | Adapter: `RemoteJobs`, `SourceHandle` (`connected`, `listed`, `relay`, `ended`), `live`, ending, tombstones, the hold, `JobsList`, routed `job_cancel`, `paddock://jobs-instances`, logs; shell wiring; the handshake check of section 6 and, if it holds, the `paddock-ipc` field | `crates/paddock-jobs/src/tauri.rs` (+ a pure `remote.rs` core), `crates/paddock-shell/src/builder.rs` (one declared line), `crates/paddock-ipc/src/handshake.rs` (if section 6 allows) | designer (model) + implementer | J1 | the model test of section 5; generated `jobs-commands.ts` check green; `paddock-ipc` tests for an old reader | 2-3 |
 | J3 | Shell UI: wire parse, backend API, `MemoryJobsBackend.restart/disconnect/reconnect`, store keyed by `JobRef` with `live`, `seed`, backstop, list and status (no Cancel on lost, "Cancel <title>"), `SuJob` renders `lost`, follow, updates dialog, the storage backend's parse, demos, CHANGELOG | `ui/projects/paddock-ui/shell/jobs/src/*`, `src/lib/job-view.ts`, `src/lib/job.ts` (100 % coverage), `shell/about/src/updates-dialog.ts`, `shell/storage/src/backend.ts`, the two demos' `demo-jobs.ts`, `apps/dyno/app/src/testing/job-test-support.ts`, `CHANGELOG.md` (the shell entry) | implementer | J2 | T1 and T2 red on today's code, green after; the shell holders' spec (three scenarios); axe shows distinct Cancel names; gallery and demo e2e green | 2.5-3.5 |
-| J4 | Dyno core, agent, CLI: protocol 7 (table above), the agent's one instance (registry and disk centre) and its start log line, `OtherInstance`, `ScanRef`, the `Sub` registered before serving (`server.rs`) with its test, `Message::Hello` if section 6 falls back, CLI on `JobRef` | `apps/dyno/crates/dyno-core/src/{protocol,jobs,bench}.rs`, `dyno-core/src/disk/scan.rs`, `dyno-agent/src/{jobs,handlers,bench,server}.rs`, `dyno-agent/src/disk/centre.rs`, `dyno-cli/src/lib.rs`, `dyno-agent/src/cli.rs`, wire tests | implementer | J1 | agent tests of section 5; round-trip samples for every changed type; Windows type-check (xwin) | 2.5-4 |
-| J5 | Dyno app link: `RemoteJobs` over the link, `connected` from the handshake (or `Hello`), `listed` from `Request::Jobs`, `relay` of `Message::Job` and every `Reply::Job`, `ended` from the held child or the verified `ProcessId`, stall words for refusals and waits, `dynoJobsIpc` deleted | `apps/dyno/app/src-tauri/src/{link/mod.rs,link/ports.rs,link/driver.rs,shell.rs,commands.rs}`, `app/src/app/shell/engines.ts` | implementer | J2, J4 | link tests with a fake agent: new instance ends the jobs, same instance keeps them, a proven-gone process ends them, a start reply is relayed; log lines present (ER-27) | 2-3 |
+| J4 | Dyno core, agent, CLI: protocol 7 (table above), the agent's one instance (registry and disk centre) and its start log line, `OtherInstance`, `ScanRef`, the `Sub` registered before serving (`server.rs`) with its test, `Message::Hello` if section 6 falls back, CLI on `JobRef`, the agent's job log lines name the job ref | `apps/dyno/crates/dyno-core/src/{protocol,jobs,bench}.rs`, `dyno-core/src/disk/scan.rs`, `dyno-agent/src/{jobs,handlers,bench,server}.rs`, `dyno-agent/src/disk/centre.rs`, `dyno-cli/src/lib.rs`, `dyno-agent/src/cli.rs`, wire tests | implementer | J1 | agent tests of section 5; round-trip samples for every changed type; Windows type-check (xwin) | 2.5-4 |
+| J5 | Dyno app link: `RemoteJobs` over the link, `connected` from the handshake (or `Hello`), `listed` from `Request::Jobs`, `relay` of `Message::Job` and every `Reply::Job`, `ended` from the held child or the verified `ProcessId`, stall words for refusals and waits, the job ref (instance and id) on the `startJob` and `JobResult` Action and failure lines, `dynoJobsIpc` deleted | `apps/dyno/app/src-tauri/src/{link/mod.rs,link/ports.rs,link/driver.rs,shell.rs,commands.rs}`, `app/src/app/shell/engines.ts` | implementer | J2, J4 | link tests with a fake agent: new instance ends the jobs, same instance keeps them, a proven-gone process ends them, a start reply is relayed; log lines present (ER-27) | 2-3 |
 | J6 | Dyno UI holders: `JobStarter` (`JobRef`, seed, outcome union, required `onLost`, waits for `connected` on reads), extras, issues, lookup, tool, wol, helper, intel, bench store (T4), disk-map store (`ScanRef`); the holder register and its spec; mock `restart` | `apps/dyno/app/src/app/core/{job-starter,backend,tauri-backend,mock-backend,api.types}.ts`, `app/src/app/state/{extras,issues,lookup,tool,wol,helper,intel,bench,disk-map}.store.ts`, `features/benchmarks/`, `features/disk-map/`, `src/testing/job-ref-holders.ts` | implementer | J3, J5 | T3 and T4 red on today's code, green after; every-holder spec green (three scenarios); Dyno affected e2e (Chromium) incl. "restart during a Sleep read" on the mock | 2.5-4 |
 | J7 | The conformance check over holders, the rule 53 sentence (proposed), lessons entry | `conformance/` (one check), `docs/rules.md` (one line, after the user's OK), `docs/lessons.md` | implementer | J3, J6 | the check fails on a holder removed from a register and on a new unlisted `startJob(` call; C-number registered | 0.5-1 |
 | J8 | VM rows on macOS and Windows (section 5), with the rule 71 precondition | `scripts/vm-smoke/` Dyno rows | implementer + VM agent | J1 to J6 on the 1.1.1 candidate | rows PASS or recorded `not measured` with the reason | 0.5-1 |
@@ -305,9 +323,9 @@ over its range before landing. After ADR 0058 (WP-1 of the 1.1.1 plan) lands, be
 No J0: instance 2's cause is measured from the VM app log above, and T2 reproduces it before J1.
 
 **Total: 13.5-21 raw agent-days** (1 + 2 + 2.5 + 2.5 + 2 + 2.5 + 0.5 + 0.5 to 1.5 + 3 + 3.5 + 4 + 3 + 4 + 1 + 1). Revision 1
-said 10.5-17; the added scope is the disk scans, the `Sub` fix, `ended`, tombstones and the handshake. **Critical path** J1, J2,
-J3, J6, J8 (J4 and J5 run beside J2 and J3): 1 + 2 + 2.5 + 2.5 + 0.5 = **8.5** to 1.5 + 3 + 3.5 + 4 + 1 = **13 days** with two
-builders. The 1.1.1 plan guessed 3-6 days for WP-8 before this design, so **WP-8 grows the plan by about 10.5-15 raw days**
+said 10.5-17; the added scope is the disk scans, the `Sub` fix, `ended`, tombstones and the handshake. **Critical path** with two
+builders: J1, J2, J3, J6, J8 takes 1 + 2 + 2.5 + 2.5 + 0.5 = 8.5 to 1.5 + 3 + 3.5 + 4 + 1 = 13 days, and J1, J4, J5, J6, J8 takes
+1 + 2.5 + 2 + 2.5 + 0.5 = 8.5 to 1.5 + 4 + 3 + 4 + 1 = 13.5 days (J5 also waits for J2), so **8.5 to 13.5 days**. The 1.1.1 plan guessed 3-6 days for WP-8 before this design, so **WP-8 grows the plan by about 10.5-15 raw days**
 (the review's 7.5-11 was measured on revision 1's 10.5-17). A Dyno-only fix (about 4-6 days) is rejected below.
 
 **First failing tests (written against today's API, so they are red before J1):**
@@ -318,8 +336,7 @@ builders. The 1.1.1 plan guessed 3-6 days for WP-8 before this design, so **WP-8
 - T3 (Dyno): a job accepted by instance A, A replaced by B, no event of the job ever arrives: the holder shows `lost` (the
   stopped message), not "Starting…". Red today.
 - T4 (bench store): the overview says `running`, the agent restarts, the new instance's overview has no run: the page must not
-  keep showing the run as running, and says it stopped. Red today if the page keeps the old `running` or shows nothing about
-  the lost run.
+  keep showing the run as running, and says it stopped. Red today.
 
 ## Consequences
 
