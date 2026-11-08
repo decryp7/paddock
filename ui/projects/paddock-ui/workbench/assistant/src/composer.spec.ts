@@ -302,30 +302,53 @@ describe('PdAssistant composer (ADR 0023 WP-4b)', () => {
     expect(text(r, 'assistant-context-new')).toBe('Start a new chat');
   });
 
-  describe('on a short window (review 2 P2-A)', () => {
+  describe('in a short pane (review 2 P2-A, review 3 P2-2: the pane\'s own height, not the window\'s)', () => {
     afterEach(() => {
       vi.restoreAllMocks();
       vi.unstubAllGlobals();
     });
 
-    /** A window `height` px tall, and a files tray whose chips need `rows` rows (jsdom does no layout). */
-    const shortWindow = (height: number, rows: () => number): void => {
-      vi.stubGlobal('matchMedia', (q: string) => ({ matches: q === '(max-height: 760px)' && height <= 760, media: q, addEventListener: () => undefined, removeEventListener: () => undefined }));
+    /** Every observed element, so a test can say the pane was resized (jsdom has no ResizeObserver and no layout). */
+    let observers: { cb: ResizeObserverCallback; els: Element[] }[] = [];
+    const resized = (): void => observers.forEach((o) => o.cb([], o as unknown as ResizeObserver));
+
+    /** A pane `height()` px tall, and a files tray whose chips need `rows()` rows. */
+    const shortPane = (height: () => number, rows: () => number): void => {
+      observers = [];
+      vi.stubGlobal(
+        'ResizeObserver',
+        class {
+          private readonly o: { cb: ResizeObserverCallback; els: Element[] };
+          constructor(cb: ResizeObserverCallback) {
+            this.o = { cb, els: [] };
+            observers.push(this.o);
+          }
+          observe(el: Element): void {
+            this.o.els.push(el);
+            this.o.cb([], this as unknown as ResizeObserver);
+          }
+          disconnect(): void {
+            observers = observers.filter((o) => o !== this.o);
+          }
+        },
+      );
       vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (this: HTMLElement) {
         return this.classList.contains('files-tray') ? rows() * 28 : 0;
       });
       vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+        if (this.classList.contains('pd-assistant')) return height();
         return this.classList.contains('files-tray') ? Math.min(rows(), this.classList.contains('folded') ? 2 : 3) * 28 : 0;
       });
     };
 
     it('folds many files to two rows behind an "N files" chip that opens and closes the tray', async () => {
       let rows = 1;
-      shortWindow(700, () => rows);
+      shortPane(() => 360, () => rows);
       const { r } = await open();
       await pick(r, [file('a.txt', 'a'), file('b.txt', 'b')]);
       expect(r.one('[data-testid=assistant-files]').classList.contains('folded')).toBe(true);
       expect(r.all('[data-testid=assistant-files-summary]')).toHaveLength(0);
+      expect(r.one('[data-testid=assistant-files]').classList.contains('scrolls')).toBe(false);
       rows = 4;
       await pick(r, Array.from({ length: 10 }, (_, i) => file(`part-${i}.txt`, `${i}`)));
       const summary = r.one<HTMLButtonElement>('[data-testid=assistant-files-summary]');
@@ -335,6 +358,8 @@ describe('PdAssistant composer (ADR 0023 WP-4b)', () => {
       summary.click();
       await settleAll(r);
       expect(r.one('[data-testid=assistant-files]').classList.contains('folded')).toBe(false);
+      // Opened, it still holds more than it shows (three rows of four): it says it scrolls with a fade at its foot (review 3 P2-5).
+      expect(r.one('[data-testid=assistant-files]').classList.contains('scrolls')).toBe(true);
       expect(r.one('[data-testid=assistant-files-summary]').getAttribute('aria-expanded')).toBe('true');
       expect(r.one('[data-testid=assistant-files-summary]').getAttribute('title')).toBe('Show fewer attached files');
       r.one<HTMLButtonElement>('[data-testid=assistant-files-summary]').click();
@@ -342,12 +367,24 @@ describe('PdAssistant composer (ADR 0023 WP-4b)', () => {
       expect(r.one('[data-testid=assistant-files]').classList.contains('folded')).toBe(true);
     });
 
-    it('never folds on a tall window', async () => {
-      shortWindow(900, () => 4);
+    it('never folds in a tall pane, and folds when the pane itself gets short (a docked pane in a tall window too)', async () => {
+      let height = 600;
+      shortPane(() => height, () => 4);
       const { r } = await open();
       await pick(r, Array.from({ length: 12 }, (_, i) => file(`part-${i}.txt`, `${i}`)));
       expect(r.one('[data-testid=assistant-files]').classList.contains('folded')).toBe(false);
       expect(r.all('[data-testid=assistant-files-summary]')).toHaveLength(0);
+      expect(r.fixture.nativeElement.classList.contains('short')).toBe(false);
+      height = 360;
+      resized();
+      await settleAll(r);
+      expect(r.fixture.nativeElement.classList.contains('short')).toBe(true);
+      expect(r.one('[data-testid=assistant-files]').classList.contains('folded')).toBe(true);
+      expect(r.one<HTMLTextAreaElement>('[data-testid=assistant-input]').rows).toBe(2);
+      height = 600;
+      resized();
+      await settleAll(r);
+      expect(r.fixture.nativeElement.classList.contains('short')).toBe(false);
     });
   });
 

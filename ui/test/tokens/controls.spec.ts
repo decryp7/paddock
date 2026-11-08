@@ -247,3 +247,32 @@ describe('control styles and the Material bridge (plan X37)', () => {
     });
   });
 });
+
+describe('the disabled primary button (WP-4b reviews 2 and 3)', () => {
+  const rule = /\.pd-btn--primary:disabled,\s*\.pd-btn--primary\[aria-disabled=['"]?true['"]?\]\s*\{([^}]*)\}/.exec(controls)?.[1] ?? '';
+  const mixed = /color:\s*color-mix\(in srgb, var\(--pd-text-subtle\) (\d+)%, transparent\)/.exec(rule);
+  const guide = readFileSync(join(scss, '..', '..', '..', '..', 'docs', 'design-guide.md'), 'utf8');
+
+  it('drops the fill, keeps the plain border-strong outline and dims the label (the CSS and the design guide say the same)', () => {
+    expect(rule).toMatch(/border-color:\s*var\(--pd-border-strong\);/);
+    expect(rule).toMatch(/background:\s*transparent;/);
+    expect(mixed, rule).not.toBeNull();
+    expect(guide).toContain(`keeps a faint \`border-strong\` outline with its label in subtle text at ${mixed?.[1]} %`);
+  });
+
+  it.each([
+    ['dark', 'standard'],
+    ['dark', 'more'],
+    ['light', 'standard'],
+    ['light', 'more'],
+  ] as const)('keeps its label at 3:1 or better on the pane, %s, %s contrast', (scheme, mode) => {
+    const v = resolve(rules, scheme, 'debrief', mode);
+    const c = (name: string) => parseColor(v[name] ?? '');
+    const k = Number(mixed?.[1] ?? 0) / 100;
+    for (const surface of ['--pd-surface-1', '--pd-surface-2']) {
+      const [fg, bg] = [c('--pd-text-subtle'), c(surface)];
+      const label = { r: fg.r * k + bg.r * (1 - k), g: fg.g * k + bg.g * (1 - k), b: fg.b * k + bg.b * (1 - k), a: 1 };
+      expect(contrast(label, bg), surface).toBeGreaterThanOrEqual(3);
+    }
+  });
+});
