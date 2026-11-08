@@ -43,6 +43,8 @@ struct Inner {
     read_error: Option<std::io::ErrorKind>,
     spawn_error: Option<String>,
     effects: Vec<(String, PathBuf, String)>,
+    cpu_times: BTreeMap<u32, Duration>,
+    run_states: BTreeMap<u32, paddock_proc::RunState>,
 }
 
 /// A recording [`System`]. Clones share one state, so a test keeps a handle while the backend owns another. Commands
@@ -140,6 +142,52 @@ impl FakeSystem {
         self
     }
 
+    /// Makes the service manager remember what `sc create` registered: `sc qc` reads back the `binPath=` written (as the real
+    /// `BINARY_PATH_NAME`), and `sc delete` forgets it (`sc qc` then exits 1060, no such service). A later `answer("sc qc", ..)`
+    /// still wins, so a test can show a registration that reads back as something else.
+    pub fn emulate_scm(&self) -> &Self {
+        let held: Arc<Mutex<BTreeMap<String, String>>> = Arc::default();
+        let store = held.clone();
+        self.on("sc create", move |args, _| {
+            let path = args
+                .iter()
+                .position(|a| a == "binPath=")
+                .and_then(|i| args.get(i + 1));
+            if let (Some(name), Some(path)) = (args.get(2), path) {
+                store
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .insert(name.clone(), path.clone());
+            }
+            Ok(Output::code(0))
+        });
+        let store = held.clone();
+        self.on("sc delete", move |args, _| {
+            if let Some(name) = args.get(2) {
+                store
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .remove(name);
+            }
+            Ok(Output::code(0))
+        });
+        self.on("sc qc", move |args, _| {
+            let path = args.get(2).and_then(|name| {
+                held.lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .get(name)
+                    .map(|p| (name.clone(), p.clone()))
+            });
+            Ok(match path {
+                Some((name, path)) => Output::ok(&format!(
+                    "[SC] QueryServiceConfig SUCCESS\r\n\r\nSERVICE_NAME: {name}\r\n        TYPE               : 10  WIN32_OWN_PROCESS\r\n        START_TYPE         : 2   AUTO_START  (DELAYED)\r\n        ERROR_CONTROL      : 1   NORMAL\r\n        BINARY_PATH_NAME   : {path}\r\n"
+                )),
+                None => Output::code(1060),
+            })
+        });
+        self
+    }
+
     /// Puts a file on the fake disk.
     pub fn put_file(&self, path: impl Into<PathBuf>, text: &str) -> &Self {
         self.lock().files.insert(path.into(), text.to_string());
@@ -190,6 +238,18 @@ impl FakeSystem {
     /// Makes every detached start fail.
     pub fn fail_spawns(&self, why: Option<&str>) -> &Self {
         self.lock().spawn_error = why.map(str::to_string);
+        self
+    }
+
+    /// Makes `pid` have used `cpu` of CPU time (what [`System::cpu_time`] answers; other pids are not known).
+    pub fn set_cpu_time(&self, pid: u32, cpu: Duration) -> &Self {
+        self.lock().cpu_times.insert(pid, cpu);
+        self
+    }
+
+    /// Makes `pid` have the run state `state` (what [`System::run_state`] answers; other pids are `Unknown`).
+    pub fn set_run_state(&self, pid: u32, state: paddock_proc::RunState) -> &Self {
+        self.lock().run_states.insert(pid, state);
         self
     }
 
@@ -314,6 +374,18 @@ impl System for FakeSystem {
         let mut inner = self.lock();
         inner.calls.push(Call::Pause(how_long));
         inner.now += how_long;
+    }
+
+    fn cpu_time(&mut self, pid: u32) -> Option<Duration> {
+        self.lock().cpu_times.get(&pid).copied()
+    }
+
+    fn run_state(&mut self, pid: u32) -> paddock_proc::RunState {
+        self.lock()
+            .run_states
+            .get(&pid)
+            .copied()
+            .unwrap_or(paddock_proc::RunState::Unknown)
     }
 }
 

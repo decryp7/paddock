@@ -31,6 +31,7 @@ use crate::paths::{is_appimage_path, launchd_plist_path, systemd_unit_path};
 use crate::port::{AppServiceStatus, RegisterError};
 use crate::spec::{Kind, ServiceSpec};
 use paddock_env::{Os, Vars};
+use paddock_proc::RunState;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -344,6 +345,41 @@ impl std::fmt::Display for UnregisterError {
 
 impl std::error::Error for UnregisterError {}
 
+/// What a backend sees of a starting job on one poll (see [`Backend::observe_start`]): the facts a
+/// [`StartWatch`](crate::StartWatch) judges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StartFacts {
+    /// The job. A job that is not running is `NotRunning` here, also when it stopped with an error: how it ended is
+    /// `last_exit`.
+    pub job: Job,
+    /// The job's process while it runs, by identity (pid and start time, rule 53) so a restarted job is told from the last
+    /// one even when the pid is handed on; `None` when it does not run or the OS did not name it.
+    pub pid: Option<paddock_proc::ProcessId>,
+    /// How often the OS has started the job.
+    pub runs: Option<u32>,
+    /// The exit code the job last ended with (`None`: never, a signal ended it, or not known).
+    pub last_exit: Option<i32>,
+    /// The job process's CPU time so far, when it could be read.
+    pub cpu: Option<Duration>,
+    /// Whether the OS has stopped the job's process ([`RunState::Stopped`]: App Tamer, a signal); `Unknown` when the OS
+    /// does not say (Windows, no pid, a process of another user).
+    pub run_state: RunState,
+}
+
+impl StartFacts {
+    /// Nothing known: the OS did not say.
+    pub fn unknown() -> StartFacts {
+        StartFacts {
+            job: Job::Unknown,
+            pid: None,
+            runs: None,
+            last_exit: None,
+            cpu: None,
+            run_state: RunState::Unknown,
+        }
+    }
+}
+
 /// What a backend allows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Capabilities {
@@ -398,6 +434,12 @@ pub trait Backend: Send {
     /// Opens the OS page where the user allows or switches it; false when there is none.
     fn open_login_items(&mut self) -> bool {
         false
+    }
+    /// One cheap look at a service that is starting, for a [`StartWatch`](crate::StartWatch): the job's state, pid, run
+    /// count, last exit and CPU time. `None` (the default) when the mechanism cannot say more than [`inspect`](Self::inspect)
+    /// does (systemd, Windows): its repair then keeps the fixed wait of [`Timings::start_wait`](crate::Timings).
+    fn observe_start(&mut self) -> Option<StartFacts> {
+        None
     }
     /// The definition this copy registers (plist, unit, `Run` value), when the mechanism has one.
     fn definition(&self) -> Option<String> {

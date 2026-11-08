@@ -1,7 +1,7 @@
 //! Registering the Pitwall server with the OS from the app. Elevation and approval are always the OS's own: UAC on
 //! Windows (the installer does this once; the app can repeat it), the Login Items approval on macOS (`SMAppService`
-//! with the launch agent inside the app bundle); on Linux nothing is elevated (a systemd user unit written by
-//! `pitwall-server install`). Pitwall never asks for or handles a password. Adapted from Pitcrew's service_install.
+//! with the launch agent inside the app bundle); on Linux nothing is elevated (a systemd user unit). All three go through
+//! the shared manager. Pitwall never asks for or handles a password.
 
 use crate::commands::SharedClient;
 use paddock_service::{RepairOutcome, ServiceStatus, Started};
@@ -100,6 +100,30 @@ pub fn server_exe() -> Result<PathBuf, CommandError> {
     server_exe_in(dir)
 }
 
+/// What the user is told when the app is not in a folder the elevated service verbs may run from.
+pub const ONLY_FROM_PROGRAM_FILES: &str = "Pitwall's service can only be changed from Pitwall installed in Program Files";
+
+/// Runs `then` only when `program_dir` (the folder of the server program) is one the elevated verbs may run from: a direct child of
+/// Program Files, no link above it, owned and protected by administrators (`check-dir`'s rule, over `facts`). Otherwise nothing
+/// runs, not the unelevated `check-install` and not the prompt (plan B6b, review P1-2: the verbs trust the program they are about
+/// to run, so the folder is checked first, for Remove as well as Install and Repair).
+pub fn from_protected_folder<T>(
+    facts: &dyn paddock_setup::checkdir::DirFacts,
+    program_dir: &Path,
+    then: impl FnOnce() -> Result<T, CommandError>,
+) -> Result<T, CommandError> {
+    match paddock_setup::wiring::install_dir_ok(facts, &program_dir.to_string_lossy()) {
+        Ok(()) => then(),
+        Err(why) => {
+            log::warn!(
+                "the service is not changed: {} is not an accepted install folder: {why}",
+                program_dir.display()
+            );
+            Err(CommandError::new(ErrorCode::Forbidden, ONLY_FROM_PROGRAM_FILES))
+        }
+    }
+}
+
 /// What the OS says about the registration.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct OsState {
@@ -154,6 +178,21 @@ pub const PLATFORM: &str = if cfg!(windows) {
     "linux"
 };
 
+/// The words `pitwall-server check-install` refused with (its standard error), as the UI shows them: trimmed, at most 600
+/// characters, and a plain sentence when it said nothing.
+pub fn refusal_words(stderr: &str) -> String {
+    // The refusal is the last line; anything before it is not for the user (the OS-log fallback's lines).
+    let t = stderr.lines().map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("");
+    if t.is_empty() {
+        return "Pitwall's service cannot be registered for this copy of Pitwall. Uninstall Pitwall, then install it again into Program Files.".into();
+    }
+    let mut out: String = t.chars().take(600).collect();
+    if t.chars().count() > 600 {
+        out.push('…');
+    }
+    out
+}
+
 /// The OS state from the shared manager's status.
 pub fn os_state_of(s: &ServiceStatus) -> OsState {
     OsState {
@@ -166,120 +205,16 @@ pub fn os_state_of(s: &ServiceStatus) -> OsState {
     }
 }
 
-#[cfg(windows)]
 mod imp {
-    //! SCM queries are safe wrappers; elevation is `ShellExecuteExW` with the "runas" verb, the one unsafe call.
-    #![allow(unsafe_code)]
-
-    use super::*;
-    use windows::core::HSTRING;
-    use windows::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
-    use windows::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
-    use windows::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
-    use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
-    use windows_service::service::{ServiceAccess, ServiceState};
-    use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
-
-    /// The service's name in the Service Control Manager (`pitwall_server::service::spec::WINDOWS_SERVICE_NAME`).
-    const SERVICE_NAME: &str = "Pitwall";
-
-    /// Whether the service is registered.
-    pub fn os_state(_client: &SharedClient) -> OsState {
-        let Ok(manager) = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT) else {
-            return OsState {
-                installed: false,
-                message: Some("the Service Control Manager cannot be asked".into()),
-                ..OsState::default()
-            };
-        };
-        match manager.open_service(SERVICE_NAME, ServiceAccess::QUERY_STATUS) {
-            Ok(s) => {
-                let running = s
-                    .query_status()
-                    .map(|st| st.current_state == ServiceState::Running)
-                    .unwrap_or(false);
-                OsState {
-                    installed: true,
-                    message: (!running).then(|| "installed but not running; Windows restarts it, or start it from Services".to_string()),
-                    ..OsState::default()
-                }
-            }
-            Err(_) => OsState::default(),
-        }
-    }
-
-    /// Runs `pitwall-server <verb>` with Windows' elevation prompt and waits for it (two minutes at most).
-    fn elevated(verb: &str) -> Result<(), CommandError> {
-        const ERROR_CANCELLED: i32 = 1223;
-        let exe = server_exe()?;
-        let op = HSTRING::from("runas");
-        let file = HSTRING::from(exe.as_os_str());
-        let params = HSTRING::from(verb);
-        let mut info = SHELLEXECUTEINFOW {
-            cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
-            fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC,
-            lpVerb: windows::core::PCWSTR(op.as_ptr()),
-            lpFile: windows::core::PCWSTR(file.as_ptr()),
-            lpParameters: windows::core::PCWSTR(params.as_ptr()),
-            nShow: SW_HIDE.0,
-            ..Default::default()
-        };
-        // SAFETY: every pointer in `info` refers to an HSTRING that outlives the call.
-        match unsafe { ShellExecuteExW(&mut info) } {
-            Ok(()) => {}
-            Err(e) if e.code().0 & 0xFFFF == ERROR_CANCELLED => {
-                return Err(CommandError::new(ErrorCode::Forbidden, "Windows' permission prompt was declined"));
-            }
-            Err(e) => {
-                return Err(CommandError::new(
-                    ErrorCode::Internal,
-                    format!("the server program could not be started: {e}"),
-                ))
-            }
-        }
-        if info.hProcess.is_invalid() {
-            return Ok(());
-        }
-        // SAFETY: a valid process handle we own; waited on and closed once.
-        let code = unsafe {
-            let waited = WaitForSingleObject(info.hProcess, 120_000);
-            let mut code = 1u32;
-            if waited == WAIT_OBJECT_0 {
-                let _ = GetExitCodeProcess(info.hProcess, &mut code);
-            }
-            let _ = CloseHandle(info.hProcess);
-            code
-        };
-        if code == 0 {
-            Ok(())
-        } else {
-            Err(CommandError::new(
-                ErrorCode::Internal,
-                format!("pitwall-server {verb} failed (exit code {code}); the service log in %ProgramData%\\Pitwall\\logs has details"),
-            ))
-        }
-    }
-
-    /// Registers and starts the service (the OS asks the user).
-    pub fn install(_client: &SharedClient) -> Result<(), CommandError> {
-        elevated("install")
-    }
-
-    /// Stops and removes the service.
-    pub fn uninstall(_client: &SharedClient) -> Result<(), CommandError> {
-        elevated("uninstall")
-    }
-}
-
-#[cfg(target_os = "macos")]
-mod imp {
-    //! The launch agent inside the app bundle (`SMAppService`), looked after by the shared manager
-    //! ([`crate::service_manager`]): status, install, repair, removal and the check at every start.
+    //! Every OS goes through the shared manager ([`crate::service_manager`], ADR 0056): the launch agent inside the app bundle
+    //! (`SMAppService`) on macOS, a systemd user unit on Linux and the Windows service, changed through Windows' own prompt
+    //! (the elevated child is `pitwall-server install` or `uninstall`, UAC, never a password), on Windows. Status, install,
+    //! repair, removal and the check at every start are the manager's on all three.
     use super::*;
     use crate::service_manager::{command_error, manager};
     use paddock_service::Timings;
 
-    /// What the OS says about the registration, with the repair's progress and the Login Items switch.
+    /// What the OS says about the registration, with the repair's progress and (macOS) the Login Items switch.
     pub fn os_state(client: &SharedClient) -> OsState {
         match manager(client, Timings::default()) {
             Ok(mut m) => os_state_of(&m.status()),
@@ -291,139 +226,196 @@ mod imp {
     }
 
     /// Opens System Settings > General > Login Items. The user switches the item; Pitwall never does it for them.
+    #[cfg(target_os = "macos")]
     pub fn open_login_items(client: &SharedClient) -> Result<(), CommandError> {
         manager(client, Timings::default())?.open_login_items();
         Ok(())
     }
 
+    /// Login Items exist on macOS only.
+    #[cfg(not(target_os = "macos"))]
+    pub fn open_login_items(_client: &SharedClient) -> Result<(), CommandError> {
+        Err(CommandError::new(ErrorCode::NotAvailable, "Login Items exist on macOS only"))
+    }
+
+    /// On Windows the elevated `pitwall-server install` refuses a program outside Program Files, a folder or program other
+    /// accounts can change, and another copy's registration (plan B6), but the elevated run cannot hand its words back. The
+    /// same checks run first without elevation (`pitwall-server check-install`), so a refusal is shown in its own words before
+    /// Windows asks for permission. Elsewhere there is nothing to check.
+    #[cfg(windows)]
+    fn check_install_first() -> Result<(), CommandError> {
+        use std::time::Duration;
+        let mut check = paddock_proc::command(&server_exe()?);
+        check.arg("check-install");
+        let out = paddock_proc::run_bounded(check, paddock_proc::Limits::new(Duration::from_secs(30)).max_output(8 * 1024))
+            .map_err(|e| CommandError::new(ErrorCode::Internal, format!("the server program could not be run: {e}")))?;
+        if out.success() {
+            Ok(())
+        } else {
+            Err(CommandError::new(ErrorCode::Forbidden, refusal_words(&out.stderr_text())))
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn check_install_first() -> Result<(), CommandError> {
+        Ok(())
+    }
+
+    /// On Windows every elevated verb (and the unelevated check before it) runs only from a checked folder.
+    #[cfg(windows)]
+    fn checked<T>(then: impl FnOnce() -> Result<T, CommandError>) -> Result<T, CommandError> {
+        let exe = server_exe()?;
+        let dir = exe
+            .parent()
+            .ok_or_else(|| CommandError::new(ErrorCode::Internal, "the app's folder cannot be found"))?;
+        super::from_protected_folder(&paddock_setup::native::RealDirs, dir, then)
+    }
+
+    #[cfg(not(windows))]
+    fn checked<T>(then: impl FnOnce() -> Result<T, CommandError>) -> Result<T, CommandError> {
+        then()
+    }
+
     /// Registers the service (replacing what is there) and waits for it to answer; the OS asks the user where it must.
     pub fn install(client: &SharedClient) -> Result<(), CommandError> {
-        let cancel = AtomicBool::new(false);
-        manager(client, Timings::default())?
-            .install(&cancel)
-            .map(drop)
-            .map_err(command_error)
+        checked(|| {
+            check_install_first()?;
+            let cancel = AtomicBool::new(false);
+            manager(client, Timings::default())?
+                .install(&cancel)
+                .map(drop)
+                .map_err(command_error)
+        })
     }
 
     /// Stops and removes the service.
     pub fn uninstall(client: &SharedClient) -> Result<(), CommandError> {
-        manager(client, Timings::default())?.uninstall().map_err(command_error)
+        checked(|| manager(client, Timings::default())?.uninstall().map_err(command_error))
     }
 
     /// The Repair the user pressed, as a job body: runs on the calling (blocking) thread; `cancel` is asked between steps
     /// and while waiting. Refused when the user switched the item off in Login Items, and while another repair works.
     pub fn repair_blocking(client: &SharedClient, cancel: &AtomicBool) -> Result<RepairOutcome, CommandError> {
-        manager(client, Timings::default())?.repair(cancel).map_err(command_error)
+        // On Windows a repair is the elevated `install` again: the folder check, then the same check first, in its own words.
+        checked(|| {
+            check_install_first()?;
+            manager(client, Timings::default())?.repair(cancel).map_err(command_error)
+        })
     }
 
     /// The check at every start (rule 24): replaces a stale registration while the service is down and once after every
-    /// version change; never installs unasked, never touches what the user switched off.
+    /// version change; never installs unasked, never touches what the user switched off, and never opens a prompt (a
+    /// mechanism that is not automatic, the Windows service, only offers).
     pub fn on_start(client: &SharedClient, cancel: &AtomicBool) -> Result<Option<Started>, CommandError> {
         Ok(Some(manager(client, Timings::default())?.on_start(cancel)))
     }
 }
 
-#[cfg(not(any(windows, target_os = "macos")))]
-mod imp {
-    //! A systemd **user** service: the app runs `pitwall-server install` / `uninstall` (as the user, no elevation),
-    //! which writes `~/.config/systemd/user/pitwall.service` and runs `systemctl --user`. The server program has the
-    //! timeouts; this side only bounds the wait for it.
-    use super::*;
-    use std::time::Duration;
-
-    const UNIT: &str = "pitwall.service";
-
-    fn unit_file() -> Option<PathBuf> {
-        let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
-        env("XDG_CONFIG_HOME")
-            .filter(|p| p.is_absolute())
-            .or_else(|| env("HOME").map(|h| h.join(".config")))
-            .map(|c| c.join("systemd").join("user").join(UNIT))
-    }
-
-    /// Whether the unit file exists.
-    pub fn os_state(_client: &SharedClient) -> OsState {
-        OsState {
-            installed: unit_file().is_some_and(|p| p.exists()),
-            message: None,
-            ..OsState::default()
-        }
-    }
-
-    /// Runs `pitwall-server <verb>`, waiting at most 90 s; its standard error becomes the message. The wait, the timeout and
-    /// ending the program's whole tree are `paddock_proc`'s (rule 53), not a poll loop here.
-    fn run_verb(verb: &str) -> Result<(), CommandError> {
-        let exe = server_exe()?;
-        let mut cmd = paddock_proc::command(&exe);
-        cmd.arg(verb);
-        let out = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(Duration::from_secs(90)).max_output(2048))
-            .map_err(|e| CommandError::new(ErrorCode::Internal, format!("the server program could not be run: {e}")))?;
-        match out.outcome {
-            paddock_proc::Outcome::TimedOut => Err(CommandError::new(
-                ErrorCode::Internal,
-                format!("pitwall-server {verb} took too long and was stopped"),
-            )),
-            _ if out.success() => Ok(()),
-            _ => {
-                let message = out.stderr_text();
-                let reason = message.trim();
-                Err(CommandError::new(
-                    ErrorCode::Internal,
-                    if reason.is_empty() {
-                        format!("pitwall-server {verb} failed")
-                    } else {
-                        reason.to_string()
-                    },
-                ))
-            }
-        }
-    }
-
-    /// Registers and starts the service (as the user).
-    pub fn install(_client: &SharedClient) -> Result<(), CommandError> {
-        run_verb("install")
-    }
-
-    /// Stops and removes the service.
-    pub fn uninstall(_client: &SharedClient) -> Result<(), CommandError> {
-        run_verb("uninstall")
-    }
-}
-
-pub use imp::{install, os_state, uninstall};
-
-#[cfg(target_os = "macos")]
-pub use imp::{on_start, open_login_items, repair_blocking};
-
-/// Opens System Settings > General > Login Items, where the user switches the background item on. Only macOS has one.
-#[cfg(not(target_os = "macos"))]
-pub fn open_login_items(_client: &SharedClient) -> Result<(), CommandError> {
-    Err(CommandError::new(ErrorCode::NotAvailable, "Login Items exist on macOS only"))
-}
-
-/// Repair exists on macOS only; elsewhere the service is installed or removed from the app.
-#[cfg(not(target_os = "macos"))]
-pub fn repair_blocking(_client: &SharedClient, _cancel: &AtomicBool) -> Result<RepairOutcome, CommandError> {
-    Err(CommandError::new(ErrorCode::NotAvailable, "Repair exists on macOS only"))
-}
-
-/// The check at every start exists on macOS only (the other systems keep their registration right themselves).
-#[cfg(not(target_os = "macos"))]
-pub fn on_start(_client: &SharedClient, _cancel: &AtomicBool) -> Result<Option<Started>, CommandError> {
-    Ok(None)
-}
+pub use imp::{install, on_start, open_login_items, os_state, repair_blocking, uninstall};
 
 pub use crate::service_manager::repair_step;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use paddock_service::{Condition, Mechanism};
+    use paddock_setup::checkdir::{DirFacts, DirInspect};
 
-    #[cfg(not(target_os = "macos"))]
-    fn client() -> SharedClient {
-        std::sync::Arc::new(crate::server_client::fake::FakeServer::new())
+    struct Facts {
+        canonical: &'static str,
+        protection: Result<(), String>,
     }
+
+    impl DirFacts for Facts {
+        fn program_files(&self) -> Vec<String> {
+            vec![r"C:\Program Files".into()]
+        }
+        fn inspect(&self, _dir: &str) -> Result<DirInspect, String> {
+            Ok(DirInspect {
+                canonical: self.canonical.into(),
+                exists: true,
+                reparse_component: false,
+                owner_sid: Some("S-1-5-32-544".into()),
+            })
+        }
+        fn protection(&self, _i: &DirInspect) -> Result<(), String> {
+            self.protection.clone()
+        }
+    }
+
+    /// Review P1-2 of B6b: a refused folder runs nothing of what `then` stands for (the unelevated check-install, the elevator,
+    /// the manager), for Install, Repair and Remove alike; an accepted folder runs it once.
+    #[test]
+    fn a_refused_folder_runs_neither_the_check_nor_the_elevated_verb() {
+        let accepted = Facts {
+            canonical: r"C:\Program Files\Pitwall",
+            protection: Ok(()),
+        };
+        let ran = std::cell::Cell::new(0);
+        let out = from_protected_folder(&accepted, Path::new(r"C:\Program Files\Pitwall"), || {
+            ran.set(ran.get() + 1);
+            Ok(7)
+        });
+        assert_eq!(out.unwrap(), 7);
+        assert_eq!(ran.get(), 1);
+
+        let refused = [
+            (
+                Facts {
+                    canonical: r"C:\Users\Ann\Pitwall",
+                    protection: Ok(()),
+                },
+                r"C:\Users\Ann\Pitwall",
+            ),
+            (
+                Facts {
+                    canonical: r"C:\Program Files\Pitwall",
+                    protection: Err("Users can change it".into()),
+                },
+                r"C:\Program Files\Pitwall",
+            ),
+            (
+                Facts {
+                    canonical: r"C:\Program Files\Pitwall",
+                    protection: Ok(()),
+                },
+                "Pitwall",
+            ),
+            (
+                Facts {
+                    canonical: r"C:\Program Files\Pitwall",
+                    protection: Ok(()),
+                },
+                "",
+            ),
+        ];
+        for (facts, dir) in refused {
+            ran.set(0);
+            let e = from_protected_folder(&facts, Path::new(dir), || {
+                ran.set(ran.get() + 1);
+                Ok(())
+            })
+            .unwrap_err();
+            assert_eq!(ran.get(), 0, "`{dir}`: nothing ran");
+            assert_eq!(e.code, ErrorCode::Forbidden);
+            assert_eq!(e.message, ONLY_FROM_PROGRAM_FILES);
+        }
+    }
+
+    #[test]
+    fn a_refusal_is_shown_in_its_own_words_bounded_with_a_plain_fallback() {
+        let words = "The Pitwall service runs as the system, so Pitwall must be installed in C:\\Program Files; it is in D:\\x.";
+        assert_eq!(refusal_words(&format!("  {words}\r\n")), words);
+        assert!(refusal_words("").contains("Uninstall Pitwall, then install it again"));
+        // B6 re-review P2-3: lines the OS-log fallback wrote before the refusal are not shown, only the refusal.
+        let with_fallback = format!(
+            "the OS log could not be opened (RegisterEventSourceW failed); lines go to standard error\ninstall refused: x\n{words}\n"
+        );
+        assert_eq!(refusal_words(&with_fallback), words);
+        let long = refusal_words(&"y".repeat(700));
+        assert_eq!(long.chars().count(), 601);
+        assert!(long.ends_with('…'));
+    }
+    use paddock_service::{Condition, Mechanism};
 
     fn status(condition: Condition, running: bool, can_repair: bool) -> ServiceStatus {
         ServiceStatus {
@@ -504,21 +496,6 @@ mod tests {
             (json["startFailed"].clone(), json["notInLoginItems"].clone()),
             (false.into(), false.into())
         );
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn repair_exists_on_macos_only() {
-        assert_eq!(
-            repair_blocking(&client(), &AtomicBool::new(false)).unwrap_err().code,
-            ErrorCode::NotAvailable
-        );
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn login_items_exist_on_macos_only() {
-        assert_eq!(open_login_items(&client()).unwrap_err().code, ErrorCode::NotAvailable);
     }
 
     #[test]

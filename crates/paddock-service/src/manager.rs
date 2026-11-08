@@ -10,6 +10,7 @@ use crate::error::ServiceError;
 use crate::plan::{Facts, Hold, MAX_ATTEMPTS, Plan, Reason, Refusal, plan};
 use crate::record::{Phase, RecordFile, Recorded, State};
 use crate::repair::{Bounds, RepairOutcome, Step, Timings, replace_bounded};
+use crate::start_wait::StartWatch;
 use crate::status::{Seen, ServiceStatus, compose};
 use crate::tracker::RepairTracker;
 use paddock_health::{Clock, SystemClock};
@@ -55,6 +56,8 @@ pub struct Manager {
     timings: Timings,
     tracker: Arc<RepairTracker>,
     answers: Box<dyn FnMut() -> bool + Send>,
+    /// Judges the wait for the service after a registration ([`Manager::with_start_watch`]).
+    start_watch: Option<Box<dyn StartWatch>>,
     cover: Box<dyn FnMut() -> bool + Send>,
     wanted: Box<dyn FnMut() -> Option<bool> + Send>,
     /// The app said what its switch is ([`Manager::with_app_state`]).
@@ -91,6 +94,7 @@ impl Manager {
             timings: Timings::default(),
             tracker: Arc::new(RepairTracker::new()),
             answers: Box::new(answers),
+            start_watch: None,
             cover: Box::new(|| false),
             wanted: Box::new(|| Some(true)),
             app_state: false,
@@ -107,6 +111,24 @@ impl Manager {
     pub fn with_record(mut self, record: RecordFile) -> Self {
         self.record = record;
         self
+    }
+
+    /// Judges the wait for the service after a registration by what the OS shows of the job instead of a fixed time
+    /// ([`Timings::start_wait`]): a slow start is waited for, a job that vanished, restarts in a loop or is stuck fails
+    /// early with what was observed, a refused one goes round another cycle. [`StartWait`](crate::StartWait) is the
+    /// recommended watch. It only applies to a backend that can observe the job ([`Backend::observe_start`]; launchd);
+    /// the others, and a manager without a watch, keep the fixed wait.
+    #[must_use]
+    pub fn with_start_watch(mut self, watch: Box<dyn StartWatch>) -> Self {
+        self.start_watch = Some(watch);
+        self
+    }
+
+    /// Whether a start watch judges the wait for the service ([`Manager::with_start_watch`]); a backend that cannot observe the
+    /// job keeps the fixed wait all the same.
+    #[must_use]
+    pub fn watches_start(&self) -> bool {
+        self.start_watch.is_some()
     }
 
     /// Asks whether the app's own agent holds the data folder: it keeps a refused job from being replaced while the app
@@ -462,6 +484,7 @@ impl Manager {
             &mut || answers(),
             &bounds,
             &self.timings,
+            self.start_watch.as_deref_mut(),
             &mut release,
             &mut retake,
             &mut |step| {
@@ -751,20 +774,11 @@ impl Manager {
                 "Nothing was changed, because the service state cannot be saved: {e}"
             )));
         }
-        let unregistered = self.backend.unregister();
-        if let Err(e) = self.backend.evict() {
-            log::info!(error:% = e; "removing the service's job did not succeed");
-        }
-        let mut polled = Duration::ZERO;
-        while !self.backend.job_gone()
-            && polled.max(since(self.clock.as_ref())) < self.timings.gone_wait
-        {
-            self.backend.pause(self.timings.gone_poll);
-            polled += self.timings.gone_poll;
-        }
-        if let Err(e) = unregistered
-            && self.backend.inspect().present()
-        {
+        let clock = self.clock.clone();
+        let removed = crate::elevated::remove(self.backend.as_mut(), &self.timings, &|| {
+            since(clock.as_ref())
+        });
+        if let Err(e) = removed {
             // Not removed (declined, failed): back to what it was, so the next start does not finish a removal that never was.
             if let Err(w) = self.write_state(before) {
                 log::warn!(error:% = w; "the state before the removal could not be restored");

@@ -12,8 +12,8 @@
 
 use super::{
     Backend, Capabilities, DisabledMark, Inspection, Job, LastExit, LoginItemFacts, Mechanism,
-    Registration, Target, UnitFile, UnitFileState, UnitOrigin, UnregisterError, as_written,
-    with_failure,
+    Registration, StartFacts, Target, UnitFile, UnitFileState, UnitOrigin, UnregisterError,
+    as_written, with_failure,
 };
 use crate::launchctl::{bootout, job_report};
 use crate::parse::{JobReport, parse_print_disabled, plist_program};
@@ -22,6 +22,7 @@ use crate::port::{AppService, AppServiceStatus, RegisterError, System};
 use crate::render::{LaunchdProgram, launchd_plist};
 use crate::spec::ServiceSpec;
 use crate::stop::StopMechanism;
+use paddock_proc::RunState;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -32,6 +33,27 @@ fn job_of(report: Option<JobReport>) -> Job {
         Some(r) if r.stale() => Job::Refused,
         Some(r) if r.running => Job::Running,
         Some(r) => with_failure(Job::NotRunning, last_exit_of(&r)),
+    }
+}
+
+/// What launchd says about a starting job (one `launchctl print`), plus the CPU time and the run state of its process while it
+/// runs. A job that stopped with an error reads `NotRunning` here: how it ended is `last_exit`.
+fn start_facts(sys: &mut dyn System, target: &str) -> StartFacts {
+    let Some(report) = job_report(sys, target) else {
+        return StartFacts::unknown();
+    };
+    let running_pid = report.pid.filter(|_| report.running);
+    let job = match job_of(Some(report)) {
+        Job::Failed(_) => Job::NotRunning,
+        job => job,
+    };
+    StartFacts {
+        job,
+        pid: running_pid.and_then(|pid| sys.process(pid)),
+        runs: report.runs,
+        last_exit: report.last_exit_code,
+        cpu: running_pid.and_then(|pid| sys.cpu_time(pid)),
+        run_state: running_pid.map_or(RunState::Unknown, |pid| sys.run_state(pid)),
     }
 }
 
@@ -223,6 +245,11 @@ impl Backend for LaunchdBundled {
     fn job_gone(&mut self) -> bool {
         let target = self.target();
         gone(self.sys.as_mut(), &target)
+    }
+
+    fn observe_start(&mut self) -> Option<StartFacts> {
+        let target = self.target();
+        Some(start_facts(self.sys.as_mut(), &target))
     }
 
     fn pause(&mut self, how_long: Duration) {
@@ -430,6 +457,11 @@ impl Backend for LaunchdFile {
     fn job_gone(&mut self) -> bool {
         let target = self.launchd_target();
         gone(self.sys.as_mut(), &target)
+    }
+
+    fn observe_start(&mut self) -> Option<StartFacts> {
+        let target = self.launchd_target();
+        Some(start_facts(self.sys.as_mut(), &target))
     }
 
     fn pause(&mut self, how_long: Duration) {

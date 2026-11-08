@@ -57,6 +57,9 @@ function UninstallWait($dir, [int]$lockMs = 0) {
 Remove-Item (Join-Path $env:TEMP 'PaddockHarness-setup-refused.log') -ErrorAction SilentlyContinue   # a leftover of an older include
 Remove-Item -Recurse -Force (Join-Path $Root 'run') -ErrorAction SilentlyContinue
 $base = Join-Path $Root 'run'; New-Item -ItemType Directory -Force $base | Out-Null
+# The uninstaller trusts a folder only when it is the registered one directly under Program Files; the harness installs below $base, so it names that
+# folder as the root (compiled into the include only with PADDOCK_TEST_HARNESS). A folder outside $base is untrusted by this rule too.
+[Environment]::SetEnvironmentVariable('PADDOCK_STUB_ROOT', $base)
 $key = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PaddockHarness'
 $key32 = 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\PaddockHarness'   # the 32-bit harness installer writes here
 if ($Cold) {
@@ -102,7 +105,7 @@ $r = Run "$a\uninstall.exe" "/S" @{ PADDOCK_STUB_EXIT_SAME_FOLDER = '1' }
 WaitGone $a
 $lines = @(Get-Content $log -ErrorAction SilentlyContinue)
 Check 'F uninstall removed the folder' (-not (Test-Path $a)) (Get-ChildItem $a -Name -ErrorAction SilentlyContinue)
-Check 'F uninstall calls' (($lines -match '^same-folder') -and ($lines -match '^stop-all') -and ($lines -match 'clean-run --dir .* --scope all')) ($lines -join '|')
+Check 'F uninstall calls' (($lines -match '^same-folder') -and ($lines -match '^check-dir') -and ($lines -match '^SERVER uninstall') -and ($lines -match '^stop-all') -and ($lines -match 'clean-run --dir .* --scope all')) ($lines -join '|')
 Check 'F uninstall removed the key' (-not (Test-Path $key)) 'key still there'
 
 # H: the uninstaller without paddock-setup.exe next to it (deleted by hand): the uninstall still works, says what it skipped,
@@ -127,6 +130,55 @@ $u = UninstallWait $h
 Check 'H no setup: the uninstaller reached its last step' ($null -eq $u.Why) $u.Why
 Check 'H no setup: a real uninstall removes the folder (removed, or removed after retries)' ((-not (Test-Path $h)) -and $u.Outcome -in 'removed', 'removed-after-retries') "outcome $($u.Outcome); left: $((Get-ChildItem $h -Force -Name -ErrorAction SilentlyContinue) -join ',')"
 Remove-Item $key -ErrorAction SilentlyContinue
+
+# P: a copied uninstaller (P1-1 of the B6b review, P2-2 of its re-review). The attacker's folder holds a copy of uninstall.exe, a
+# planted paddock-setup.exe (the logging stub: it exits 0 and would "accept" anything) and a planted service program. Run elevated,
+# nothing of that folder may run (not the tool, not the service verb), the uninstaller ends with level 44 before it deletes anything,
+# and the real install keeps its HKLM key and its updates folder. The folder is not the one HKLM registers (and not under the root).
+$p = Join-Path $base 'p'
+$r = Run $installer "/S /D=$p" @{}
+New-Item -ItemType Directory -Force "$p\updates" | Out-Null; 'x' | Set-Content "$p\updates\setup.log"
+$planted = Join-Path $Root 'planted'
+Remove-Item -Recurse -Force $planted -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force $planted | Out-Null
+Copy-Item "$p\uninstall.exe", "$p\paddock-setup.exe", "$p\harness-server.exe" $planted
+# In place (the uninstaller does not copy itself): the exit code is the uninstaller's own.
+$r = Run "$planted\uninstall.exe" "/S _?=$planted" @{}
+Check 'P copied uninstaller (in place): ends with level 44' ($r.Code -eq 44) "code $($r.Code)"
+Check 'P copied uninstaller (in place): the planted tool never ran' (-not ($r.Lines -match '^(hold-installing|check-dir|same-folder|stop-all|clean-run|clean-staging|guard)')) ($r.Lines -join '|')
+Check 'P copied uninstaller (in place): the planted service program never ran' (-not ($r.Lines -match '^SERVER')) ($r.Lines -join '|')
+Check 'P copied uninstaller (in place): says it trusts nothing there' ($r.Lines -match '^NOTE untrusted uninstall folder') ($r.Lines -join '|')
+# As a user starts it: the uninstaller copies itself and the copy runs; the line is the copy's refusal.
+Remove-Item $log -ErrorAction SilentlyContinue
+[Environment]::SetEnvironmentVariable('PADDOCK_STUB_LOG', $log)
+$null = Start-Process -FilePath "$planted\uninstall.exe" -ArgumentList '/S' -PassThru
+$why = WaitUntil { (Test-Path $log) -and (@(Get-Content $log -ErrorAction SilentlyContinue) -match '^ABORT level 44').Count -gt 0 } 'the copied uninstaller to refuse (level 44)' 90
+[Environment]::SetEnvironmentVariable('PADDOCK_STUB_LOG', $null)
+$lines = @(Get-Content $log -ErrorAction SilentlyContinue)
+Check 'P copied uninstaller (copy): refused at level 44' ($null -eq $why) $why
+Check 'P copied uninstaller (copy): nothing of the folder ran' (-not ($lines -match '^(hold-installing|check-dir|same-folder|stop-all|clean-run|clean-staging|guard|SERVER)')) ($lines -join '|')
+Check 'P the real install keeps its HKLM key, its updates folder and its files' (((Test-Path $key) -or (Test-Path $key32)) -and (Test-Path "$p\updates\setup.log") -and (Test-Path "$p\harness.txt")) "key $((Test-Path $key) -or (Test-Path $key32)); updates $(Test-Path "$p\updates\setup.log")"
+Remove-Item -Recurse -Force $planted -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force $p -ErrorAction SilentlyContinue
+Remove-Item $key, $key32 -ErrorAction SilentlyContinue
+
+# Q: the tool refuses the folder (check-dir exits 3): the service verb must not run, and the uninstall goes on.
+$q = Join-Path $base 'q'
+$r = Run $installer "/S /D=$q" @{}
+[Environment]::SetEnvironmentVariable('PADDOCK_STUB_EXIT_CHECK_DIR', '3')
+try { $u = UninstallWait $q } finally { [Environment]::SetEnvironmentVariable('PADDOCK_STUB_EXIT_CHECK_DIR', $null) }
+Check 'Q refused folder: reached the last step' ($null -eq $u.Why) $u.Why
+Check 'Q refused folder: asked check-dir' ($u.Lines -match '^check-dir') ($u.Lines -join '|')
+Check 'Q refused folder: the service program never ran' (-not ($u.Lines -match '^SERVER')) ($u.Lines -join '|')
+Remove-Item $key, $key32 -ErrorAction SilentlyContinue
+
+# R: the installer and the uninstaller agree on the folder's spelling (review of B6b): a folder the tool would accept but that is not
+# written as <root>\<one name> (forward slashes here; an 8.3 short path on a real PC, VM row PW-8) is refused at install time with the
+# folder's own level (41), because the uninstaller would trust nothing there.
+$rr = (Join-Path $base 'r') -replace '\\', '/'
+$r = Run $installer "/S /D=$rr" @{}
+Check 'R forward-slash spelling refused at install time (level 41)' ($r.Code -eq 41) "code $($r.Code)"
+Check 'R nothing installed' (-not (Test-Path (Join-Path $base 'r\uninstall.exe'))) 'uninstall.exe exists'
 
 # B: check-dir refused
 $b = Join-Path $base 'b'

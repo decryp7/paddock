@@ -1310,6 +1310,7 @@ fn the_windows_service_is_created_with_sc_and_its_errors_are_read_by_number() {
         .unwrap();
     const EVENT_KEY: &str = r"HKLM\SYSTEM\CurrentControlSet\Services\EventLog\Application\Pitwall";
     let exe = r"C:\Program Files\Pitwall\pitwall-server.exe";
+    sys.emulate_scm();
     let mut b = WindowsService::new(svc.clone(), Target::exe(exe), Box::new(sys.clone()));
     b.register().unwrap();
     assert_eq!(
@@ -1326,6 +1327,8 @@ fn the_windows_service_is_created_with_sc_and_its_errors_are_read_by_number() {
             "sc failure Pitwall reset= 86400 actions= restart/10000/restart/60000/restart/300000"
                 .to_string(),
             "sc failureflag Pitwall 1".to_string(),
+            // Read back before the start: a registration that is not what was written never runs (ADR 0054 section 1.1).
+            "sc qc Pitwall".to_string(),
             "sc start Pitwall".to_string(),
             // The read-back (ADR 0054 section 1.1).
             "sc query Pitwall".to_string(),
@@ -1415,6 +1418,55 @@ impl crate::port::Elevator for MarksInstalled {
             self.1.store(true, std::sync::atomic::Ordering::SeqCst);
         }
         Ok(code)
+    }
+}
+
+/// Security review P2 (B1b/B6): the elevated install writes no record any more, so the first start after the installer finds a
+/// registration and no record. This program's running service is taken over (MarkCurrent: `Started::Marked`); a registration of
+/// another program is offered for Repair (`Moved`). Neither prompts or elevates, and nothing is changed.
+#[test]
+fn an_installer_made_service_without_a_record_is_taken_over_or_offered_never_prompted() {
+    let svc = ServiceSpec::builder(LABEL, "Pitwall", "pitwall-server")
+        .kind(Kind::SystemService)
+        .build()
+        .unwrap();
+    let exe = PathBuf::from(r"C:\Program Files\Pitwall\pitwall-server.exe");
+    let other = r"C:\Program Files\Pitwall Old\pitwall-server.exe";
+    for (registered, want) in [
+        (exe.display().to_string(), Started::Marked),
+        (other.to_string(), Started::Offered(Reason::Moved)),
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        assert!(
+            crate::record::RecordFile::new(d.path(), LABEL)
+                .load()
+                .registered_version
+                .is_none(),
+            "no record: the installer wrote none"
+        );
+        let sys = FakeSystem::new();
+        sys.put_program(&exe);
+        sys.put_program(other);
+        sys.answer("sc query", Output::ok("STATE : 4  RUNNING"));
+        sys.answer(
+            "sc qc",
+            Output::ok(&format!(
+                "START_TYPE : 2 AUTO_START\r\nBINARY_PATH_NAME : \"{registered}\" --service\r\n"
+            )),
+        );
+        let b = ElevatedWindowsService::new(
+            svc.clone(),
+            exe.clone(),
+            Box::new(sys.clone()),
+            Box::new(FakeElevator::new(&sys)),
+        );
+        let mut m = Manager::new("Pitwall", Box::new(b), d.path(), LABEL, "1.1.0", || true);
+        assert_eq!(m.on_start(&no_cancel()), want, "{registered}");
+        assert!(
+            changes(&sys).is_empty(),
+            "{registered}: no prompt, no elevation, no change: {:?}",
+            changes(&sys)
+        );
     }
 }
 
@@ -1951,4 +2003,194 @@ fn a_first_registration_with_nothing_to_remove_starts_at_registering_not_at_a_re
         "{:?}",
         record.load().state
     );
+}
+
+// ------------------------------------------------------------------------------------------------ start watch
+
+/// A manager over the bundled backend whose `launchctl print` follows `print` (called with the number of looks so far)
+/// and whose service answers from the `answers_after`th ask.
+fn watched_manager(
+    sys: &FakeSystem,
+    dir: &Path,
+    print: impl Fn(u32) -> Output + Send + 'static,
+    answers_after: u32,
+    watch: bool,
+) -> Manager {
+    let looks = Arc::new(Mutex::new(0u32));
+    let l = looks.clone();
+    sys.on("/bin/launchctl print gui", move |_, _| {
+        let mut n = l.lock().unwrap();
+        *n += 1;
+        Ok(print(*n))
+    });
+    let app = FakeAppService::new(sys);
+    let backend = LaunchdBundled::new(pitwall(), 501, Box::new(app), Box::new(sys.clone()));
+    let asked = Arc::new(Mutex::new(0u32));
+    let m = Manager::new(
+        "Pitwall",
+        Box::new(backend),
+        dir,
+        LABEL,
+        "1.0.4",
+        move || {
+            let mut a = asked.lock().unwrap();
+            *a += 1;
+            *a > answers_after
+        },
+    );
+    assert!(!m.watches_start());
+    if watch {
+        let m = m.with_start_watch(Box::new(crate::StartWait::new()));
+        assert!(m.watches_start());
+        m
+    } else {
+        m
+    }
+}
+
+fn pending_print() -> Output {
+    Output::ok("\tstate = spawn scheduled\n\truns = 1\n\tproperties = keepalive | has LWCR\n")
+}
+
+#[test]
+fn a_late_start_is_waited_for_past_the_old_fixed_limit_only_with_a_watch() {
+    // launchd needs about 4 minutes to start the job (about 80 polls of 3 s); the old fixed wait gave up after 2.
+    let late = |n: u32| {
+        if n < 100 {
+            pending_print()
+        } else {
+            Output::ok(
+                "\tstate = running\n\tpid = 41\n\truns = 1\n\tproperties = keepalive | has LWCR\n",
+            )
+        }
+    };
+    let d = tempfile::tempdir().unwrap();
+    let sys = FakeSystem::new();
+    sys.set_cpu_time(41, Duration::from_secs(1));
+    let mut m = watched_manager(&sys, d.path(), late, 90, false);
+    assert_eq!(m.install(&no_cancel()).unwrap(), RepairOutcome::Registered);
+    let d = tempfile::tempdir().unwrap();
+    let sys = FakeSystem::new();
+    sys.set_cpu_time(41, Duration::from_secs(1));
+    let mut m = watched_manager(&sys, d.path(), late, 90, true);
+    assert_eq!(m.install(&no_cancel()).unwrap(), RepairOutcome::Recovered);
+    assert!(sys.now() > Timings::default().start_wait, "{:?}", sys.now());
+}
+
+#[test]
+fn a_crash_looping_job_fails_the_repair_early_with_what_launchd_said() {
+    let looping = |n: u32| {
+        Output::ok(&format!(
+            "\tstate = not running\n\truns = {}\n\tlast exit code = 3\n\tproperties = keepalive | has LWCR\n",
+            n
+        ))
+    };
+    let d = tempfile::tempdir().unwrap();
+    let sys = FakeSystem::new();
+    let mut m = watched_manager(&sys, d.path(), looping, u32::MAX, true);
+    let Err(ServiceError::Failed(why)) = m.install(&no_cancel()) else {
+        panic!()
+    };
+    assert!(
+        why.contains("keeps exiting") && why.contains("last exit code 3"),
+        "{why}"
+    );
+    assert!(sys.now() < Duration::from_secs(60), "{:?}", sys.now());
+}
+
+#[test]
+fn a_launchctl_that_cannot_be_asked_is_not_a_job_that_is_gone() {
+    let d = tempfile::tempdir().unwrap();
+    let sys = FakeSystem::new();
+    let slow = |n: u32| {
+        // The first 70 looks fail (a timeout shows as a non-zero exit), then the job runs.
+        if n < 70 {
+            Output::code(1)
+        } else {
+            Output::ok("\tstate = running\n\tpid = 41\n")
+        }
+    };
+    sys.set_cpu_time(41, Duration::from_secs(1));
+    let mut m = watched_manager(&sys, d.path(), slow, 60, true);
+    assert_eq!(m.install(&no_cancel()).unwrap(), RepairOutcome::Recovered);
+}
+
+#[test]
+fn the_other_backends_cannot_observe_a_start_and_keep_the_fixed_wait() {
+    use crate::backend::Backend;
+    let sys = FakeSystem::new();
+    assert!(systemd(&sys, "/p").observe_start().is_none());
+    let mut win = WindowsRun::new(pitwall(), Target::exe("C:\\p.exe"), Box::new(sys.clone()));
+    assert!(win.observe_start().is_none());
+}
+
+#[test]
+fn a_launchd_file_job_is_observed_with_its_pid_runs_exit_and_cpu() {
+    use crate::backend::{Backend, Job};
+    let sys = FakeSystem::new();
+    sys.answer(
+        "/bin/launchctl print gui",
+        Output::ok("\tstate = running\n\tpid = 41\n\truns = 2\n\tlast exit code = 3\n"),
+    );
+    sys.set_cpu_time(41, Duration::from_millis(1500));
+    let started = paddock_proc::ProcessId::new(41, paddock_proc::StartTime::from_micros(5));
+    sys.put_process(started);
+    let mut b = LaunchdFile::new(
+        pitwall(),
+        501,
+        PathBuf::from("/p.plist"),
+        Target::exe("/p"),
+        Box::new(sys.clone()),
+    );
+    let f = b.observe_start().unwrap();
+    assert_eq!(
+        (f.job, f.pid, f.runs, f.last_exit, f.cpu),
+        (
+            Job::Running,
+            Some(started),
+            Some(2),
+            Some(3),
+            Some(Duration::from_millis(1500))
+        )
+    );
+    // Not running: no CPU is read (the pid of a past run is not asked about).
+    sys.answer(
+        "/bin/launchctl print gui",
+        Output::ok("\tstate = waiting\n\tpid = 41\n"),
+    );
+    assert_eq!(b.observe_start().unwrap().cpu, None);
+    // Not answerable: unknown, not gone.
+    sys.answer("/bin/launchctl print gui", Output::code(1));
+    assert_eq!(b.observe_start().unwrap().job, Job::Unknown);
+}
+
+#[test]
+fn a_job_with_flat_cpu_is_waited_for_when_its_process_is_stopped_or_unreadable_and_fails_when_it_runs()
+ {
+    use paddock_proc::RunState;
+    let flat = |_: u32| {
+        Output::ok(
+            "\tstate = running\n\tpid = 41\n\truns = 1\n\tproperties = keepalive | has LWCR\n",
+        )
+    };
+    let run = |state: Option<RunState>| {
+        let d = tempfile::tempdir().unwrap();
+        let sys = FakeSystem::new();
+        sys.set_cpu_time(41, Duration::from_secs(1));
+        if let Some(s) = state {
+            sys.set_run_state(41, s);
+        }
+        // The service answers on the 100th ask, far past the idle patience (20 polls) of a flat CPU time.
+        let mut m = watched_manager(&sys, d.path(), flat, 100, true);
+        m.install(&no_cancel())
+    };
+    assert_eq!(
+        run(Some(RunState::Stopped)).unwrap(),
+        RepairOutcome::Recovered
+    );
+    assert_eq!(run(None).unwrap(), RepairOutcome::Recovered);
+    let Err(ServiceError::Failed(why)) = run(Some(RunState::Running)) else {
+        panic!()
+    };
+    assert!(why.contains("done nothing"), "{why}");
 }

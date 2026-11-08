@@ -3462,6 +3462,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-setup"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "paddock-proc",
+ "paddock-service",
+ "paddock-updater",
+ "paddock-workspace-hack",
+ "semver",
+ "thiserror 2.0.21",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "paddock-shell"
 version = "0.3.0"
 dependencies = [
@@ -3832,6 +3846,7 @@ dependencies = [
  "paddock-proc",
  "paddock-secrets",
  "paddock-service",
+ "paddock-setup",
  "paddock-shell",
  "paddock-siblings",
  "paddock-startup",
@@ -3841,6 +3856,7 @@ dependencies = [
  "paddock-window",
  "pitwall-core",
  "pitwall-loopback",
+ "pitwall-service",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -3853,8 +3869,6 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "webview2-com",
- "windows 0.62.2",
- "windows-service",
  "winreg",
 ]
 
@@ -3922,8 +3936,10 @@ dependencies = [
  "paddock-env",
  "paddock-log",
  "paddock-proc",
+ "paddock-service",
  "pitwall-core",
  "pitwall-loopback",
+ "pitwall-service",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",
@@ -3936,8 +3952,14 @@ dependencies = [
  "tokio",
  "toml 0.9.12+spec-1.1.0",
  "windows 0.62.2",
- "windows-service",
  "zip",
+]
+
+[[package]]
+name = "pitwall-service"
+version = "1.1.0"
+dependencies = [
+ "paddock-service",
 ]
 
 [[package]]

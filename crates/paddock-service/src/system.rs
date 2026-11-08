@@ -116,6 +116,15 @@ impl System for RealSystem {
     fn pause(&mut self, how_long: Duration) {
         std::thread::sleep(how_long);
     }
+
+    fn cpu_time(&mut self, pid: u32) -> Option<Duration> {
+        paddock_proc::ProcessId::of(pid).and_then(paddock_proc::tree_cpu_time)
+    }
+
+    fn run_state(&mut self, pid: u32) -> paddock_proc::RunState {
+        paddock_proc::ProcessId::of(pid)
+            .map_or(paddock_proc::RunState::Unknown, paddock_proc::run_state)
+    }
 }
 
 /// Copies `exe` to `<data>/bin/<file name>` (atomically, executable) and returns the copy: an AppImage's own files
@@ -193,6 +202,23 @@ mod tests {
             .unwrap();
         // It finished (no timeout) and the output is kept up to the cap.
         assert_eq!((o.code, o.stdout.len()), (Some(0), MAX_HELPER_OUTPUT));
+    }
+
+    #[test]
+    fn the_cpu_time_and_run_state_of_a_process_are_read_by_identity_and_a_missing_one_is_not_known()
+    {
+        let mut sys = RealSystem::new();
+        // Only this test process is looked at (read-only).
+        assert!(sys.cpu_time(std::process::id()).is_some());
+        assert_eq!(sys.cpu_time(u32::MAX), None);
+        // Windows reads no run state of a process (`cpu_sample` has `stopped: None`), so there it is not known.
+        let own = if cfg!(windows) {
+            paddock_proc::RunState::Unknown
+        } else {
+            paddock_proc::RunState::Running
+        };
+        assert_eq!(sys.run_state(std::process::id()), own);
+        assert_eq!(sys.run_state(u32::MAX), paddock_proc::RunState::Unknown);
     }
 
     #[test]

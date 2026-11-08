@@ -14,7 +14,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
-use tauri_plugin_autostart::ManagerExt;
 
 fn internal(m: impl Into<String>) -> CommandError {
     CommandError::new(ErrorCode::Internal, m)
@@ -76,9 +75,7 @@ pub async fn decline_service() -> Result<(), CommandError> {
 #[tauri::command]
 pub async fn get_autostart(app: AppHandle) -> Result<bool, CommandError> {
     blocking("reading start at log-in", move || {
-        app.autolaunch()
-            .is_enabled()
-            .map_err(|e| internal(format!("start at log-in could not be read: {e}")))
+        crate::start_at_login::is_enabled(&app).map_err(|e| internal(format!("start at log-in could not be read: {e}")))
     })
     .await?
 }
@@ -87,12 +84,7 @@ pub async fn get_autostart(app: AppHandle) -> Result<bool, CommandError> {
 #[tauri::command]
 pub async fn set_autostart(app: AppHandle, enabled: bool) -> Result<bool, CommandError> {
     blocking("changing start at log-in", move || {
-        let launch = app.autolaunch();
-        let done = if enabled { launch.enable() } else { launch.disable() };
-        done.map_err(|e| internal(format!("start at log-in could not be changed: {e}")))?;
-        launch
-            .is_enabled()
-            .map_err(|e| internal(format!("start at log-in could not be read: {e}")))
+        crate::start_at_login::set_enabled(&app, enabled).map_err(|e| internal(format!("start at log-in could not be changed: {e}")))
     })
     .await?
 }

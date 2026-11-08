@@ -9,6 +9,30 @@ Paddock family key (`9a20012beece5338`). **Install 1.1.0 once by hand** from the
 in-app updater of 1.0.x cannot see or verify it. Your settings, keys, models and history are kept. From 1.1.0 on, updates
 arrive in the app as usual.
 
+### Security
+
+- Windows: the Pitwall service, which runs as the system, is registered only for a Pitwall installed directly in Program
+  Files and protected from other accounts, and never for another copy. The installer shows why when it refuses, and what to do
+  (uninstall Pitwall, then install it again into Program Files).
+- Windows: the Pitwall service no longer writes `%ProgramData%\Pitwall\logs\service.log`. A standard user who made that
+  folder first could have had the system delete any file through it (1.0.x shipped this). The service writes to the
+  Application event log instead (Event Viewer, source Pitwall). Settings > Service shows why an install or Repair is
+  refused before Windows asks for permission, and a registration of another copy that is not safe to run as the system is removed.
+
+- Windows: the installer checks the install folder before it runs any program of it. A Pitwall chosen into a folder other
+  accounts can write (the directory page, `/D=` or passive mode) is refused before the service is touched, and so is a fresh
+  install over a copy installed for one user only. The uninstaller runs a program of its folder only when that is the folder the
+  installer registered, directly under Program Files, so a copied `uninstall.exe` does nothing elevated. Settings > Service
+  (Install, Repair, Remove) works only from Pitwall installed in Program Files.
+- If you still have Pitwall 1.0.x installed in a folder other than Program Files, uninstall it first: its own uninstaller runs
+  before any of this.
+
+### Changed
+
+- Windows: Pitwall installs once for every user, into Program Files, on the family's shared installer (ADR 0053). An update or
+  uninstall closes Pitwall for every signed-in user. Updates install through one Windows administrator prompt; "install when
+  Pitwall quits" is gone on Windows. Start at log-in is always the user's own entry, never the machine-wide one.
+
 ### Added
 
 - Report a problem (Help menu, command palette): a diagnostics zip you review file by file and save where you choose;
