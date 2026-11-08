@@ -28,6 +28,21 @@ Section
     FileWrite $2 "$0$\r$\n"
     FileClose $2
   ${EndIf}
+  ; Test hook for a tool that Windows Security removed: after the command named by PADDOCK_STUB_REMOVE_AFTER, PADDOCK_STUB_REMOVE_PATH
+  ; is deleted ("self": this program is renamed to <name>.removed, which Windows allows while it runs).
+  !insertmacro GET $R6 PADDOCK_STUB_REMOVE_AFTER
+  ${If} $R6 != ""
+    StrLen $R7 $R6
+    StrCpy $R8 $0 $R7
+    ${If} $R8 == $R6
+      !insertmacro GET $R9 PADDOCK_STUB_REMOVE_PATH
+      ${If} $R9 == "self"
+        Rename "$EXEPATH" "$EXEPATH.removed"
+      ${ElseIf} $R9 != ""
+        Delete "$R9"
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
   StrCpy $R0 $0 9
   StrCpy $R1 $0 5
   StrCpy $R2 $0 8

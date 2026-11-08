@@ -23,6 +23,13 @@
 ; $EXEDIR with $INSTDIR itself, programs are asked to close through Restart Manager (best effort: it ends nothing while another
 ; session holds a file), the start-at-login clean-up is skipped, and the uninstall goes on.
 ;
+; Windows Security can delete the unsigned paddock-setup.exe (a machine-learning false detection), from $PLUGINSDIR or from
+; $INSTDIR. The installer never reports a success then: every _PADDOCK_RUN checks the file before and (on a failure code) after the
+; call, PADDOCK_INSTALLING right after the extraction, and PADDOCK_FINISH_INSTALL as the last step of POSTINSTALL;
+; a missing file ends the install with PADDOCK_LEVEL_TOOL_MISSING (44) and the message in PADDOCK_REMOVED_MSG
+; (PADDOCK_REMOVED_INSTALLED_MSG when only the installed copy is missing at the end). The uninstaller skips
+; and says so instead (above).
+;
 ; Command line contract with paddock-setup.exe (exit 0 = done unless stated):
 ;   check-dir --dir <dir>                                       3 = refused
 ;   guard --product <name> --main <exe> --dir <dir> [--update] [--restart]
@@ -45,7 +52,7 @@
 
 !ifndef PADDOCK_PER_MACHINE_INCLUDED
 !define PADDOCK_PER_MACHINE_INCLUDED
-!define PADDOCK_INCLUDE_VERSION "3"
+!define PADDOCK_INCLUDE_VERSION "4"
 ; Readable in the built installer's version resource: the artifact gate (ADR 0039) compares it with this file.
 !ifndef PADDOCK_TEST_HARNESS ; Tauri's template sets VIProductVersion; the harness has none
   VIAddVersionKey "PaddockInclude" "${PADDOCK_INCLUDE_VERSION}"
@@ -70,15 +77,20 @@
 
 ; Error levels of a refusal. The reason is also written to $INSTDIR\updates\setup.log through `paddock-setup note` (nothing is ever
 ; written to %TEMP% while elevated: it can be user-writable); for a refused folder (level 41) there is no safe folder, so the
-; message and the level are all there is.
+; message and the level are all there is. The same for a removed tool (level 44): there is no tool to write the note.
 ; Their own numbers: NSIS itself ends with 1 (cancelled) and 2 (aborted or failed), and `paddock-setup apply-update` has its own
 ; refusal codes from 20 up, so a silent /S run (or a log) can tell the causes apart.
 !define PADDOCK_LEVEL_PER_USER 40
 !define PADDOCK_LEVEL_BAD_DIR 41
 !define PADDOCK_LEVEL_STILL_RUNNING 42
 !define PADDOCK_LEVEL_TOOL_FAILED 43
+; Windows Security (Defender's machine-learning detection) can delete the unsigned paddock-setup.exe, from $PLUGINSDIR or from
+; $INSTDIR, after the installer wrote it. The installer then ends here instead of reporting a success with steps that never ran.
+!define PADDOCK_LEVEL_TOOL_MISSING 44
 
 !define PADDOCK_SETUP "$PLUGINSDIR\paddock-setup.exe"
+!define PADDOCK_REMOVED_INSTALLED_MSG "${PRODUCTNAME} is installed, but Windows Security removed paddock-setup.exe, a part of ${PRODUCTNAME}, as a false detection. Open Windows Security > Protection history, restore it or allow it, then run the installer again."
+!define PADDOCK_REMOVED_MSG "Windows Security removed paddock-setup.exe, a part of ${PRODUCTNAME}, as a false detection. Open Windows Security > Protection history, restore it or allow it, then run the installer again."
 
 Var PaddockHaveSetup
 
@@ -91,17 +103,39 @@ Var PaddockHaveSetup
   ${EndIf}
 !macroend
 
+; The tool is gone from where it ran from. Installer: it ends with PADDOCK_LEVEL_TOOL_MISSING and the guidance (never a success).
+; Uninstaller: a stated skip, the uninstall goes on without the steps that need it (see the header). _WHERE says which check saw it.
+!macro _PADDOCK_TOOL_GONE _WHERE
+  DetailPrint "paddock-setup.exe is missing (${_WHERE}): $PLUGINSDIR\paddock-setup.exe"
+  !ifndef __UNINSTALL__
+    !insertmacro PADDOCK_ABORT "${PADDOCK_REMOVED_MSG}" ${PADDOCK_LEVEL_TOOL_MISSING} ""
+  !else
+    !insertmacro _PADDOCK_TEST_LOG "NOTE paddock-setup.exe is missing (${_WHERE}): Windows Security may have removed it; steps skipped"
+    StrCpy $PaddockHaveSetup 0
+  !endif
+!macroend
+
 ; Runs paddock-setup.exe with the arguments and leaves its exit code in $0 (the details show the line and the code); with the
 ; folders as $R5 ($INSTDIR) and $R4 ($EXEDIR), already safe inside quotes. Without the program, $0 is "nosetup" and nothing runs.
 !macro _PADDOCK_RUN _ARGS
   !insertmacro _PADDOCK_ARG $R5 "$INSTDIR"
   !insertmacro _PADDOCK_ARG $R4 "$EXEDIR"
   ${If} $PaddockHaveSetup == 1
+  ${AndIfNot} ${FileExists} "${PADDOCK_SETUP}"
+    !insertmacro _PADDOCK_TOOL_GONE "before a call"
+  ${EndIf}
+  ${If} $PaddockHaveSetup == 1
     DetailPrint 'paddock-setup ${_ARGS}'
     nsExec::ExecToLog '"${PADDOCK_SETUP}" ${_ARGS}'
     Pop $0
     DetailPrint "paddock-setup exit code: $0"
-  ${Else}
+    ; Removed while it ran (or at start): a failure code with the file gone is the removal, not a failure of the tool.
+    ${If} $0 != 0
+    ${AndIfNot} ${FileExists} "${PADDOCK_SETUP}"
+      !insertmacro _PADDOCK_TOOL_GONE "after a call"
+    ${EndIf}
+  ${EndIf}
+  ${If} $PaddockHaveSetup != 1
     StrCpy $0 "nosetup"
   ${EndIf}
 !macroend
@@ -138,14 +172,17 @@ Var PaddockHaveSetup
   !ifndef __UNINSTALL__
     File "/oname=$PLUGINSDIR\paddock-setup.exe" "${PADDOCK_SETUP_DIR}\paddock-setup.exe"
     StrCpy $PaddockHaveSetup 1
+    ${IfNot} ${FileExists} "${PADDOCK_SETUP}"
+      !insertmacro _PADDOCK_TOOL_GONE "after extraction"
+    ${EndIf}
   !else
     ClearErrors
     CopyFiles /SILENT "$INSTDIR\paddock-setup.exe" "$PLUGINSDIR\paddock-setup.exe"
     ${IfNot} ${Errors}
       StrCpy $PaddockHaveSetup 1
     ${Else}
-      DetailPrint "NOTE paddock-setup.exe is missing from $INSTDIR: its steps are skipped (see the include's header for the fallbacks)"
-      !insertmacro _PADDOCK_TEST_LOG "NOTE paddock-setup.exe is missing from the uninstaller's folder: steps skipped"
+      DetailPrint "NOTE paddock-setup.exe is missing from $INSTDIR, perhaps removed by Windows Security as a false detection (Protection history): its steps are skipped (see the include's header for the fallbacks)"
+      !insertmacro _PADDOCK_TEST_LOG "NOTE paddock-setup.exe is missing from the uninstaller's folder (Windows Security may have removed it): steps skipped"
     ${EndIf}
   !endif
   ${If} $PaddockHaveSetup == 1
@@ -178,12 +215,19 @@ Var PaddockHaveSetup
       ${EndIf}
     ${EndIf}
     ClearErrors
+    ${IfNot} ${FileExists} "${PADDOCK_SETUP}"
+      !insertmacro _PADDOCK_TOOL_GONE "before guard"
+    ${EndIf}
     !insertmacro _PADDOCK_ARG $R5 "$INSTDIR"
     DetailPrint "paddock-setup guard"
     nsExec::ExecToStack '"${PADDOCK_SETUP}" guard --product "${PRODUCTNAME}" --main "${MAINBINARYNAME}.exe" --dir "$R5"$2'
     Pop $0
     Pop $1
     DetailPrint "paddock-setup exit code: $0"
+    ${If} $0 != 0
+    ${AndIfNot} ${FileExists} "${PADDOCK_SETUP}"
+      !insertmacro _PADDOCK_TOOL_GONE "after a call"
+    ${EndIf}
     ${If} $0 == 2
       ; $1 is the message, then optionally a last line RESTART:<program>.
       StrCpy $2 ""
@@ -220,28 +264,35 @@ Var PaddockHaveSetup
 ; Stops every listed program in every session by handle (ADR 3). Exit code 11 of stop-all is the answer to "still running".
 ; In an uninstaller without paddock-setup.exe: Restart Manager is asked to close them (best effort, no abort) and the uninstall
 ; goes on; the template's own check of the main binary is the safety net there.
+!macro _PADDOCK_STOP_FALLBACK
+  DetailPrint "NOTE paddock-setup.exe is missing (Windows Security may have removed it): programs are asked to close through Restart Manager only"
+  !insertmacro _PADDOCK_TEST_LOG "NOTE paddock-setup.exe is missing: Restart Manager fallback"
+  !insertmacro RestartManager_StartSession $R8
+  ${If} $R8 != ""
+    !define _PADDOCK_LIST "${PADDOCK_STOP_IMAGES},"
+    !insertmacro _PADDOCK_REGISTER_STEP
+    !ifdef _PADDOCK_LIST
+      !undef _PADDOCK_LIST
+    !endif
+    System::Call 'RSTRTMGR::RmShutdown(i $R8, i ${RmForceShutdown}, p 0) i .r0'
+    DetailPrint "Restart Manager shutdown: code $0"
+    !insertmacro RestartManager_EndSession $R8
+  ${EndIf}
+!macroend
+
 !macro PADDOCK_STOP_ALL
   ${If} $PaddockHaveSetup == 1
     !insertmacro _PADDOCK_RUN 'stop-all --dir "$R5" --images "${PADDOCK_STOP_IMAGES}"'
-    ${If} $0 == 11
+    ${If} $0 == "nosetup"
+      ; The tool vanished before the call (uninstaller only; the installer ended in _PADDOCK_RUN).
+      !insertmacro _PADDOCK_STOP_FALLBACK
+    ${ElseIf} $0 == 11
       !insertmacro PADDOCK_ABORT "${PRODUCTNAME} could not be closed for every signed-in user. Ask them to quit ${PRODUCTNAME}, then run this installer again." ${PADDOCK_LEVEL_STILL_RUNNING} "$INSTDIR\${MAINBINARYNAME}.exe"
     ${ElseIf} $0 != 0
       !insertmacro PADDOCK_ABORT "${PRODUCTNAME} could not be closed (code $0). The reason is in $INSTDIR\updates\setup.log" ${PADDOCK_LEVEL_TOOL_FAILED} "$INSTDIR\${MAINBINARYNAME}.exe"
     ${EndIf}
   ${Else}
-    DetailPrint "NOTE paddock-setup.exe is missing: programs are asked to close through Restart Manager only"
-    !insertmacro _PADDOCK_TEST_LOG "NOTE paddock-setup.exe is missing: Restart Manager fallback"
-    !insertmacro RestartManager_StartSession $R8
-    ${If} $R8 != ""
-      !define _PADDOCK_LIST "${PADDOCK_STOP_IMAGES},"
-      !insertmacro _PADDOCK_REGISTER_STEP
-      !ifdef _PADDOCK_LIST
-        !undef _PADDOCK_LIST
-      !endif
-      System::Call 'RSTRTMGR::RmShutdown(i $R8, i ${RmForceShutdown}, p 0) i .r0'
-      DetailPrint "Restart Manager shutdown: code $0"
-      !insertmacro RestartManager_EndSession $R8
-    ${EndIf}
+    !insertmacro _PADDOCK_STOP_FALLBACK
   ${EndIf}
 !macroend
 
@@ -256,7 +307,9 @@ Var PaddockHaveSetup
       DetailPrint "reinstall: treated as an update"
       !insertmacro _PADDOCK_TEST_LOG "NOTE reinstall: treated as an update"
     ${EndIf}
-  ${Else}
+  ${EndIf}
+  ; The tool was never there or vanished before the call ($0 is "nosetup"): never let a reinstall run as a full uninstall.
+  ${If} $PaddockHaveSetup != 1
     ${If} $EXEDIR == $INSTDIR
       StrCpy $UpdateMode 1
       DetailPrint "reinstall: treated as an update (folders compared by the installer itself)"
@@ -318,6 +371,7 @@ Var PaddockHaveSetup
   ; install removes only an empty $INSTDIR, and the folder holding the log stays). Not for a refused folder (nothing safe to
   ; write to) and not without the tool. Never a path under %TEMP% from this elevated process.
   !if ${_LEVEL} != ${PADDOCK_LEVEL_BAD_DIR}
+  !if ${_LEVEL} != ${PADDOCK_LEVEL_TOOL_MISSING}
     ${If} $PaddockHaveSetup == 1
       !insertmacro _PADDOCK_ARG $R5 "$INSTDIR"
       !if ${_LEVEL} == ${PADDOCK_LEVEL_PER_USER}
@@ -330,6 +384,7 @@ Var PaddockHaveSetup
       Pop $R7
       DetailPrint "The reason is also in $INSTDIR\updates\setup.log (note exit code $R7)"
     ${EndIf}
+  !endif
   !endif
   !insertmacro _PADDOCK_TEST_LOG "ABORT level ${_LEVEL}: ${_MSG}"
   !ifndef __UNINSTALL__
@@ -357,6 +412,15 @@ Var PaddockHaveSetup
   Quit
 !macroend
 
+; The installed copy must still be there at the very end of POSTINSTALL (last step of PADDOCK_FINISH_INSTALL), so the app's own steps
+; (helper refresh, clean-run, clean-staging) have finished first; the files are installed then and the message says so.
+!macro _PADDOCK_CHECK_INSTALLED
+  ${IfNot} ${FileExists} "$INSTDIR\paddock-setup.exe"
+    DetailPrint "paddock-setup.exe is missing from $INSTDIR after it was written"
+    !insertmacro PADDOCK_ABORT "${PADDOCK_REMOVED_INSTALLED_MSG}" ${PADDOCK_LEVEL_TOOL_MISSING} ""
+  ${EndIf}
+!macroend
+
 ; POSTINSTALL: the installed copy of paddock-setup.exe (the updater's elevated hand-off and the uninstaller use it).
 !macro PADDOCK_INSTALL_SETUP
   File "/oname=$INSTDIR\paddock-setup.exe" "${PADDOCK_SETUP_DIR}\paddock-setup.exe"
@@ -375,6 +439,7 @@ Var PaddockHaveSetup
 ; Last in POSTINSTALL: delete the staged update that is not in use (the next apply-update removes the rest).
 !macro PADDOCK_FINISH_INSTALL
   !insertmacro _PADDOCK_RUN 'clean-staging --dir "$R5" --keep "$R4"'
+  !insertmacro _PADDOCK_CHECK_INSTALLED
 !macroend
 
 ; Last in NSIS_HOOK_POSTUNINSTALL (the template runs it after its own `Delete "$INSTDIR\uninstall.exe"` and `RMDir "$INSTDIR"`):

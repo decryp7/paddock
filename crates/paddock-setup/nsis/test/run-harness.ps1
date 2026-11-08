@@ -164,6 +164,42 @@ $r = Run $installer "/S /D=$d" @{ PADDOCK_STUB_EXIT_STOP_ALL = '5' }
 Check 'D2 tool failure exit 43' ($r.Code -eq 43) "code $($r.Code)"
 
 Remove-Item $key -ErrorAction SilentlyContinue
+# M: Windows Security removed paddock-setup.exe (ADR 0053, the Dyno 1.1.0 false detection): the installer must end with level 44 and never
+# report a success. The stub removes itself (a rename, allowed while it runs) or the installed copy after the named command.
+$m = Join-Path $base 'm'
+$r = Run $installer "/S /D=$m" @{ PADDOCK_STUB_REMOVE_AFTER = 'check-dir'; PADDOCK_STUB_REMOVE_PATH = 'self' }
+Check 'M1 extracted tool gone before guard: exit 44' ($r.Code -eq 44) "code $($r.Code)"
+Check 'M1 says what to do' ($r.Lines -match 'ABORT level 44: Windows Security removed paddock-setup.exe') ($r.Lines -join '|')
+Check 'M1 no later call reached the tool' (-not ($r.Lines -match '^(guard|stop-all|clean-run|clean-staging)')) ($r.Lines -join '|')
+Check 'M1 no install was registered' (-not (Test-Path $key)) 'uninstall key exists'
+$r = Run $installer "/S /D=$m" @{ PADDOCK_STUB_REMOVE_AFTER = 'stop-all'; PADDOCK_STUB_REMOVE_PATH = 'self' }
+Check 'M2 extracted tool gone before the POSTINSTALL calls: exit 44' ($r.Code -eq 44) "code $($r.Code)"
+Check 'M2 reports the abort, not a success' (($r.Lines -match 'ABORT level 44') -and -not ($r.Lines -match '^clean-staging')) ($r.Lines -join '|')
+Check 'M2 state after the abort: files and uninstall key are there (the abort comes in POSTINSTALL)' ((Test-Path "$m\harness.txt") -and ((Test-Path $key) -or (Test-Path $key32))) (Get-ChildItem $m -Name -ErrorAction SilentlyContinue)
+$r = Run $installer "/S /D=$m" @{ PADDOCK_STUB_REMOVE_AFTER = 'clean-run'; PADDOCK_STUB_REMOVE_PATH = "$m\paddock-setup.exe" }
+Check 'M3 installed copy gone after it was written: exit 44' ($r.Code -eq 44) "code $($r.Code)"
+Check 'M3 reports the abort, after clean-run and clean-staging finished' (($r.Lines -match 'ABORT level 44: .* is installed, but Windows Security removed paddock-setup.exe') -and ($r.Lines -match '^clean-staging')) ($r.Lines -join '|')
+Check 'M3 state after the abort: files and uninstall key are there' ((Test-Path "$m\harness.txt") -and ((Test-Path $key) -or (Test-Path $key32))) (Get-ChildItem $m -Name -ErrorAction SilentlyContinue)
+Remove-Item $key -ErrorAction SilentlyContinue
+# M4: a real uninstall whose copy of the tool vanishes after its first call: it says so, skips the steps that need the tool, uses the
+# Restart Manager fallback and still uninstalls (folder and key gone)
+$r = Run $installer "/S /D=$m" @{}
+Check 'M4 clean install for the uninstaller case' ($r.Code -eq 0) "code $($r.Code)"
+$env:PADDOCK_STUB_REMOVE_AFTER = 'same-folder'; $env:PADDOCK_STUB_REMOVE_PATH = 'self'
+try { $u = UninstallWait $m } finally { $env:PADDOCK_STUB_REMOVE_AFTER = $null; $env:PADDOCK_STUB_REMOVE_PATH = $null }
+Check 'M4 the uninstaller reached its last step' ($null -eq $u.Why) $u.Why
+Check 'M4 says Windows Security may have removed it' ($u.Lines -match '^NOTE paddock-setup.exe is missing \((before|after) a call\).*Windows Security') ($u.Lines -join '|')
+Check 'M4 uses the Restart Manager fallback and no call reached the missing program' (($u.Lines -match '^NOTE paddock-setup.exe is missing: Restart Manager fallback') -and -not ($u.Lines -match '^(stop-all|clean-run)')) ($u.Lines -join '|')
+Check 'M4 the folder and the uninstall key are gone' ((-not (Test-Path $m)) -and -not (Test-Path $key) -and -not (Test-Path $key32)) "folder: $(Test-Path $m)"
+Remove-Item $key -ErrorAction SilentlyContinue
+# M5: an in-place run (_?=, the reinstall page of a manual upgrade) whose copy of the tool vanished after the copy is still a reinstall:
+# update mode, and the helper is not removed (the harness hook logs HELPER_UNINSTALL where Dyno runs dyno-helper uninstall)
+$r = Run $installer "/S /D=$m" @{}
+$r = Run "$m\uninstall.exe" "/S _?=$m" @{ PADDOCK_TEST_DROP_TOOL = '1'; PADDOCK_STUB_EXIT_SAME_FOLDER = '1' }
+Check 'M5 in-place run exit 0' ($r.Code -eq 0) "code $($r.Code)"
+Check 'M5 treated as an update by the folder compare' ($r.Lines -match '^NOTE reinstall: treated as an update') ($r.Lines -join '|')
+Check 'M5 the helper is not uninstalled' (-not ($r.Lines -match '^HELPER_UNINSTALL')) ($r.Lines -join '|')
+Remove-Item $key -ErrorAction SilentlyContinue
 # U: the post-uninstall retry (PADDOCK_FINISH_UNINSTALL)
 foreach ($c in @(
   @{ Name = 'U0 no lock'; Lock = 0 },
