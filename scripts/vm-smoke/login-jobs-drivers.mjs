@@ -134,10 +134,18 @@ export function jobsPanelText(tree) {
   return inside.join('\n');
 }
 
-export function linuxLoginJobsDriver(atspi, parseSwitchState) {
+export function linuxLoginJobsDriver(atspi, parseSwitchState, { settle = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
   const SW = '"Start Dyno at login" "check box|toggle button|switch"';
   return {
-    async readSwitch() { const r = atspi(`state dyno ${SW}`); return r.code === 0 ? parseSwitchState(r.stdout) : 'unknown'; },
+    // Read in place; when the page is not there (Settings was closed to look at the Jobs list), Settings is opened the way a person does and read again.
+    async readSwitch() {
+      const read = () => { const r = atspi(`state dyno ${SW}`); return r.code === 0 ? parseSwitchState(r.stdout) : 'unknown'; };
+      const first = read();
+      if (first !== 'unknown') return first;
+      atspi('press dyno "^File$" "menu item"'); await settle(1000); atspi('press dyno "^Settings…$" "menu item"'); await settle(4000); atspi('press dyno "^Dyno$" "push button"'); await settle(1500);
+      for (let i = 0; i < 3; i++) { const v = read(); if (v !== 'unknown') return v; await settle(2000); }
+      return 'unknown';
+    },
     async pressSwitch() {
       if (atspi(`press dyno ${SW}`).code === 0) return true;
       atspi('press dyno "^File$" "menu item"'); await new Promise((r) => setTimeout(r, 1000)); atspi('press dyno "^Settings…$" "menu item"'); await new Promise((r) => setTimeout(r, 4000)); atspi('press dyno "^Dyno$" "push button"'); await new Promise((r) => setTimeout(r, 1500));

@@ -28,3 +28,25 @@ test('opening the Jobs list twice does not close it again (the status button tog
   assert.equal(open, true, 'still open after the second call');
   assert.equal(presses, 1);
 });
+
+test('a switch that cannot be read because Settings was closed is read again after Settings is opened the way a person does', async () => {
+  let settingsOpen = false; const calls = [];
+  const atspi = (args) => {
+    calls.push(args);
+    if (/File/.test(args)) return { code: 0, stdout: 'pressed' };
+    if (/Settings…/.test(args)) { settingsOpen = true; return { code: 0, stdout: 'pressed' }; }
+    if (/\^Dyno\$/.test(args)) return { code: settingsOpen ? 0 : 1, stdout: '' };
+    if (args.startsWith('state')) return settingsOpen ? { code: 0, stdout: 'states: checked\nchecked: yes' } : { code: 1, stdout: 'not found' };
+    return { code: 1, stdout: '' };
+  };
+  const d = linuxLoginJobsDriver(atspi, (t) => (/checked: yes/.test(t) ? 'on' : 'off'), { settle: async () => {} });
+  assert.equal(await d.readSwitch(), 'on');
+  assert.ok(calls.some((c) => /Settings…/.test(c)), 'Settings was opened');
+});
+test('a switch that is readable is read in place, Settings is not reopened', async () => {
+  const calls = [];
+  const atspi = (args) => { calls.push(args); return args.startsWith('state') ? { code: 0, stdout: 'checked: no' } : { code: 0, stdout: '' }; };
+  const d = linuxLoginJobsDriver(atspi, () => 'off', { settle: async () => {} });
+  assert.equal(await d.readSwitch(), 'off');
+  assert.equal(calls.length, 1);
+});
