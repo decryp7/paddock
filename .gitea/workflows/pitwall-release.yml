@@ -93,6 +93,8 @@ jobs:
         crates/paddock-service/**
         crates/paddock-jobs/**
         crates/paddock-proc/**
+        crates/paddock-setup/**
+        crates/paddock-updater/**
         ui/**
       # --version: pitwall-server has no --self-test; its --version starts the binary from the built app and exits 0 (the old
       # macos-verify-bundle.sh ran the same).
