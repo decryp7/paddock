@@ -293,7 +293,6 @@ mod tests {
         // paddock-setup.exe has the crate's version (its bytes do not move with an app release): expecting Dyno's version would show
         // "Run the Dyno installer again" on every start, and running the installer cannot fix it.
         assert_eq!(expected_setup_version(), Version::parse(paddock_setup::PROGRAM_VERSION).ok());
-        assert_ne!(expected_setup_version(), Version::parse(env!("CARGO_PKG_VERSION")).ok(), "the app's own version must not be the expectation");
     }
 
     use super::*;

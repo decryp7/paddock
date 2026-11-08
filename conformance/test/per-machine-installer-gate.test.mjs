@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
-import { checkInstaller, checkNsisVersion, nsisVersionOf, checkSetupSubsystem, subsystemOf, checkSelfTest, find7z, checkSignatureName, trustedCommentOf, findInstallers, hasAdministratorManifest, includeVersionOf, listedFiles, checkSetupDescribed, resourceStringOf, crateVersion, checkReleasedHash } from '../release/check-per-machine-installer.mjs';
+import { checkInstaller, checkNsisVersion, nsisVersionOf, checkSetupSubsystem, subsystemOf, checkSelfTest, find7z, checkSignatureName, trustedCommentOf, findInstallers, hasAdministratorManifest, includeVersionOf, listedFiles, checkSetupDescribed, resourceStringOf, crateVersion, checkReleasedHash, previousTag, previousProgramVersion } from '../release/check-per-machine-installer.mjs';
 
 const utf16 = (s) => Buffer.from(s, 'utf16le');
 const installer = ({ admin = true, version = '1' } = {}) =>
@@ -177,9 +177,52 @@ test('the same version with other bytes fails; a version without a record only n
   assert.deepEqual(checkReleasedHash({ ...a, records: { 'net.x.dyno': { '1.2.0': sha } } }), { problems: [], notes: [] });
   const bad = checkReleasedHash({ ...a, records: { 'net.x.dyno': { '1.2.0': 'ab'.repeat(32) } } });
   assert.match(bad.problems.join(''), /changed without a version bump.*Bump the version/);
-  const none = checkReleasedHash({ ...a, records: {} });
+  const none = checkReleasedHash({ ...a, records: {}, previousVersion: '0.1.0' });
   assert.deepEqual(none.problems, []);
   assert.match(none.notes.join(''), new RegExp(sha));
   // another app's record or another version is not this one's
   assert.deepEqual(checkReleasedHash({ ...a, records: { 'net.x.other': { '1.2.0': 'ff' } } }).problems, []);
+});
+
+test('an already released version without a record is not measured (fails); a new or unknown one only warns', () => {
+  const bytes = described();
+  const a = { bytes, name: 'i.exe', identifier: 'net.x.dyno', version: '1.2.0', records: {} };
+  const same = checkReleasedHash({ ...a, previousVersion: '1.2.0' });
+  assert.match(same.problems.join(''), /not measured.*already released.*released-hashes\.json/);
+  assert.deepEqual(checkReleasedHash({ ...a, previousVersion: '0.1.0' }).problems, [], 'the previous release shipped another version');
+  assert.match(checkReleasedHash({ ...a, previousVersion: '0.1.0' }).notes.join(''), /previous release shipped 0\.1\.0/);
+  assert.match(checkReleasedHash({ ...a, previousVersion: null }).notes.join(''), /no previous release/);
+  assert.match(checkReleasedHash({ ...a, previousVersion: undefined }).notes.join(''), /could not be read.*never released. is not shown/);
+  // with a record the previous version does not matter
+  const sha = createHash('sha256').update(bytes).digest('hex');
+  assert.deepEqual(checkReleasedHash({ ...a, records: { 'net.x.dyno': { '1.2.0': sha } }, previousVersion: '1.2.0' }).problems, []);
+});
+
+const fakeGit = ({ tags = [], head = 'h2', commits = {}, ancestors = [], files = {}, fail = false } = {}) => (args) => {
+  if (fail) return { status: 128, stdout: '' };
+  if (args[0] === 'tag') return { status: 0, stdout: tags.join('\n') };
+  if (args[0] === 'rev-parse' && args[1] === 'HEAD') return { status: 0, stdout: `${head}\n` };
+  if (args[0] === 'rev-parse') return commits[args[1].replace('^{commit}', '')] ? { status: 0, stdout: `${commits[args[1].replace('^{commit}', '')]}\n` } : { status: 1, stdout: '' };
+  if (args[0] === 'merge-base') return { status: ancestors.includes(args[2]) ? 0 : 1, stdout: '' };
+  if (args[0] === 'show') return files[args[1]] !== undefined ? { status: 0, stdout: files[args[1]] } : { status: 128, stdout: '' };
+  return { status: 1, stdout: '' };
+};
+test('the previous tag skips the tag on HEAD and any tag that is not an ancestor', () => {
+  const git = fakeGit({ tags: ['dyno-v1.2.0', 'dyno-v1.1.1', 'dyno-v1.1.0'], commits: { 'dyno-v1.2.0': 'h2', 'dyno-v1.1.1': 'h9', 'dyno-v1.1.0': 'h1' }, ancestors: ['dyno-v1.1.0'] });
+  assert.equal(previousTag({ prefix: 'dyno-v', git }), 'dyno-v1.1.0');
+  assert.equal(previousTag({ prefix: 'dyno-v', git: fakeGit({ tags: ['dyno-v1.2.0'], commits: { 'dyno-v1.2.0': 'h2' } }) }), null, 'only the tag on HEAD: tags exist, none before');
+  assert.equal(previousTag({ prefix: 'dyno-v', git: fakeGit({ tags: [] }) }), undefined, 'no tags at all: could be a clone without tags');
+  assert.equal(previousTag({ prefix: 'dyno-v', git: fakeGit({ fail: true }) }), undefined);
+});
+test("the program's version at the previous tag is read from its Cargo.toml there", () => {
+  const files = { 'dyno-v1.1.0:crates/paddock-setup/Cargo.toml': '[package]\nname = "paddock-setup"\nversion = "1.2.0"\n' };
+  const base = { tags: ['dyno-v1.1.0'], commits: { 'dyno-v1.1.0': 'h1' }, ancestors: ['dyno-v1.1.0'] };
+  assert.equal(previousProgramVersion({ prefix: 'dyno-v', git: fakeGit({ ...base, files }) }), '1.2.0');
+  assert.equal(previousProgramVersion({ prefix: 'dyno-v', git: fakeGit(base) }), null, 'the file did not exist at that tag');
+  assert.equal(previousProgramVersion({ prefix: 'dyno-v', git: fakeGit({ fail: true }) }), undefined);
+});
+test('the source-path check does not take a drive letter and a later .rs in one NUL-free run for a path', () => {
+  const noise = Buffer.from('error: C:\\ is not a drive; see the file lib.rs for details, and Cargo.toml too');
+  assert.deepEqual(checkSetupDescribed(args(Buffer.concat([described(), noise]))), []);
+  assert.match(checkSetupDescribed(args(described({ extra: 'C:\\Program Files\\x\\src\\lib.rs' }))).join(''), /build path/);
 });

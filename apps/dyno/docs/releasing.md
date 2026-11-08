@@ -158,9 +158,11 @@ to keep its bytes:
    as a **software developer**, choosing "Incorrectly detected as malware/malicious", with the detection name seen in the evidence, the file's
    sha256 and a one-line description ("per-machine installer helper of the Dyno desktop app, built from a public tag").
 3. Submit the setup installer (`Dyno_<version>_x64-setup.exe`) the same way.
-4. Record the submission ids, the date and Microsoft's determination in the release log (the release's engineering notes, as `release-1.1.0-engineering-notes.md` was) when
+4. Add the sha256 of step 1 to `crates/paddock-setup/released-hashes.json` under the app's identifier and the program's version. The next release's gate
+   reads the program version at the previous `dyno-v*` tag: the same version without a record **fails** ("not measured"), a new version only warns.
+5. Record the submission ids, the date and Microsoft's determination in the release log (the release's engineering notes, as `release-1.1.0-engineering-notes.md` was) when
    it arrives (days, not hours). Also read VirusTotal's tags for both files ("obfuscated", "detect-debug-environment") and note them.
-5. The VM harness (branch `tools/vm-smoke-defender`, which lands before this one) prints the full Defender evidence on every Windows install row
+6. The VM harness (branch `tools/vm-smoke-defender`, which lands before this one) prints the full Defender evidence on every Windows install row
    and has `node scripts/vm-smoke/defender-rate.mjs --installer <setup.exe>` (10 installs, each from a reverted snapshot, with an EICAR control): run it on the final installer and keep the
    rate with the submission ids.
 
