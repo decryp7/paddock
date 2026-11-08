@@ -60,4 +60,9 @@ describe('health cause codes', () => {
     expect(emitted.get('a.one')).toBe('c/a/src/x.rs');
     expect(unlisted).toEqual(['c/b/src/y.rs: .code(format!("{x}"))']);
   });
+
+  it('reads the service status table as the service.<name> codes', () => {
+    const { emitted } = scanEmitted(['c/paddock-service/src/status.rs'], ['const NAMES: [&str; 2] = [\n    "switchedOff",\n    "needsApproval",\n];\nx.code("service.other");']);
+    expect([...emitted.keys()].sort()).toEqual(['service.needsApproval', 'service.other', 'service.switchedOff']);
+  });
 });

@@ -37,7 +37,7 @@ describe('the graph of this tree', () => {
   test('a shared crate marks crates and every app whose Cargo graph reaches it, Rust half only', () => {
     const r = run('crates/paddock-jobs/src/lib.rs');
     assert.ok(r.crates);
-    assert.ok(r.ui, 'ui cause-codes.spec.ts scans the shared crates for health cause codes'); // only its own tests, not the UI half of any app
+    assert.ok(r.ui, 'ui cause-codes.scan.test.mjs scans the shared crates for health cause codes'); // only its own tests, not the UI half of any app
     // Debrief's store worker and Spotter's renderer depend on paddock-proc by path (the memory figure and the supervised child),
     // so the shared crates reach Debrief and Spotter too; Dyno takes the shell crates by path.
     assert.deepEqual(r.apps, ['debrief', 'dyno', 'shell-demo', 'spotter', 'workbench-demo']);
@@ -57,7 +57,7 @@ describe('the graph of this tree', () => {
 
   test('an app crate marks only its app, with its reverse dependencies as packages', () => {
     const r = run('apps/shell-demo/src-tauri/agent/src/main.rs');
-    assert.deepEqual([r.apps, r.crates, r.ui], [['shell-demo'], false, true]); // ui: the cause-codes spec scans every app's Rust
+    assert.deepEqual([r.apps, r.crates, r.ui], [['shell-demo'], false, true]); // ui: the cause-codes scan checks every app's Rust
     assert.deepEqual(r.packages['apps/shell-demo/src-tauri'], ['paddock-shell-demo', 'shell-demo-agent']);
   });
 
@@ -142,7 +142,7 @@ describe('the graph of this tree', () => {
 
   test("an app's Rust source can emit a health cause code the UI's chip table checks, so it marks ui, the app keeps its halves", () => {
     const r = run('apps/dyno/app/src-tauri/src/health.rs');
-    assert.ok(r.ui, 'ui cause-codes.spec.ts reads apps/**/*.rs');
+    assert.ok(r.ui, 'ui cause-codes.scan.test.mjs reads apps/**/*.rs');
     assert.ok(r.apps.includes('dyno') && r.kinds.dyno.includes('rust'), JSON.stringify(r.kinds));
     assert.ok(!run('apps/dyno/app/src-tauri/Cargo.toml').ui, 'only the Rust sources are scanned');
     // Exactly what the spec scans: every .rs under crates/ and apps/, but not tests.rs or tests/, benches/, target/ folders.

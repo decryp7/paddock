@@ -35,7 +35,7 @@
    "cargo crates/b reaches crates/a"
   ],
   "ui": [
-   "ui cause-codes.spec.ts scans crates/a/src/lib.rs"
+   "ui cause-codes.scan.test.mjs scans crates/a/src/lib.rs"
   ]
  }
 }

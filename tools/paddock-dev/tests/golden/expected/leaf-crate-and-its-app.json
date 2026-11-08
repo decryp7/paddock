@@ -33,7 +33,7 @@
    "crates/b/src/lib.rs"
   ],
   "ui": [
-   "ui cause-codes.spec.ts scans crates/b/src/lib.rs"
+   "ui cause-codes.scan.test.mjs scans crates/b/src/lib.rs"
   ]
  }
 }

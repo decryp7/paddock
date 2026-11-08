@@ -270,7 +270,7 @@ export const DOC_INPUTS = [
 ];
 
 /**
- * The Rust sources that can emit a health cause code: ui's cause-codes.spec.ts (`rustSources`) reads every `.rs` file under `crates/`
+ * The Rust sources that can emit a health cause code: ui's cause-codes.scan.test.mjs (`rustSources`, run by `test:scripts`) reads every `.rs` file under `crates/`
  * and `apps/` against the chip's table (service-status-text.ts), skipping folders named target, node_modules, tests and benches and
  * files named tests.rs. A change to one marks ui too (the owner keeps its own halves). Same as `is_cause_code_source` in plan.rs.
  */
@@ -663,7 +663,7 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
       for (const d of owners_.length ? owners_ : [...cargo].filter(([, x]) => x.workspace === 'crates').map(([d]) => d)) changedCrates.add(d);
     }
     if (isCauseCodeSource(f)) {
-      mark('ui', `ui cause-codes.spec.ts scans ${f}`); // ui's own tests; not its dependents (the spec reads sources, not ui output)
+      mark('ui', `ui cause-codes.scan.test.mjs scans ${f}`); // ui's own tests; not its dependents (the check reads sources, not ui output)
     }
     // ui/ is one Angular workspace: a change anywhere in it can change every output built from it.
     if (own.includes('ui') && f.startsWith('ui/')) changedPkgs.add('ui');

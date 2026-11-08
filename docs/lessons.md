@@ -1514,7 +1514,19 @@ test is the regression test. Rule: a limit on a resource that is released only a
 limit of the thing it protects. (2) The paddock-ui shell slice timed out in 3 of 6 Node and 2 of 6 Deno runs under load, always in
 `cause-codes.spec.ts` "the Rust sources and the chip table agree": a walk and read of about 2k Rust files judged against the
 5 s unit-test limit. It now runs as a `node --test` check (`npm run test:scripts`, 0.7 s warm) and the unit spec keeps only pure
-logic on fixtures. A unit slice holds no whole-repo disk scans. The Deno-only failure of `overrides.spec.ts` (`__proto__` key
-kept by `JSON.parse` handling) is a runtime difference, not load. The `shell-demo-theme` reduced-motion e2e test passed 15 of 15
-under load 30 and never reproduced; its one weak step (asserting "no data-motion" on a page that had not started) now waits for
-the app first: unconfirmed hardening, not a confirmed cause.
+logic on fixtures. A unit slice holds no whole-repo disk scans. The Deno-only failure of `overrides.spec.ts` (`__proto__` key kept by `JSON.parse` handling) is a runtime difference, not load.
+
+Follow-up on (1), after review: the 1000-attempt loop cannot be the regression guard (on Linux the client reads the end even when a
+reset follows it, so the old code probably never fails there). The guard is `a_silent_refused_client_does_not_stop_the_next_one_from_being_drained`:
+a refused client that sends nothing holds a drain place, a second sends its key line, and the log must show the second was drained;
+it failed 3 of 3 on the pre-fix `loopback.rs` (instrumented only with the drain log line) and passes on the new code. The loop
+stays as an extra check (0.09 s native for 1000 attempts). The fix went further: what a refused client sent is read inline first
+(no thread when it has closed), the drain thread reads until the client closes (4096 bytes, 10 s, or stop at most), threads are
+named and a failed spawn falls back to the inline read, and every drain logs how it ended. Rule: a test for a close-with-unread-data
+bug judges the drain in the log, never the client's socket read.
+
+(3) The `shell-demo-theme` reduced-motion e2e failure stays OPEN. Known: it failed once; the failing run, its CI run id and its
+assertion message were not kept, so the cause could not be listed. 15 of 15 repeats passed under load 30 and the whole file passed
+3 of 3. The only change is a wait for the app after the reload before asserting the absence of `data-motion`; a vacuous assertion
+cannot fail, so this does not explain the failure and must not be read as a fix. Next time it fails, keep the run id, the assertion
+message and the trace, and list the causes from them (ER-28). The test is still to be tracked as a flaky test.

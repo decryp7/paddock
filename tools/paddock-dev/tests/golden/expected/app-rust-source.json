@@ -27,7 +27,7 @@
    "apps/x/app/src-tauri/src/main.rs"
   ],
   "ui": [
-   "ui cause-codes.spec.ts scans apps/x/app/src-tauri/src/main.rs"
+   "ui cause-codes.scan.test.mjs scans apps/x/app/src-tauri/src/main.rs"
   ]
  }
 }

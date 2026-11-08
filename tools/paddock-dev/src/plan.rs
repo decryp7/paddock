@@ -84,7 +84,7 @@ enum Marks {
     Reviewed,
 }
 
-/// The Rust sources that can emit a health cause code: ui's cause-codes.spec.ts reads every `.rs` file under `crates/` and `apps/`
+/// The Rust sources that can emit a health cause code: ui's cause-codes.scan.test.mjs reads every `.rs` file under `crates/` and `apps/`
 /// against the chip's table, skipping folders named target, node_modules, tests and benches and files named tests.rs. A change to one
 /// marks ui too (the owner keeps its own halves). Same as `isCauseCodeSource` in scripts/affected.mjs.
 fn is_cause_code_source(f: &str) -> bool {
@@ -365,7 +365,7 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
             st.kind(Some(p), half);
         }
         if is_cause_code_source(f) {
-            st.mark(Some("ui".to_string()), format!("ui cause-codes.spec.ts scans {f}")); // ui's own tests, not its dependents
+            st.mark(Some("ui".to_string()), format!("ui cause-codes.scan.test.mjs scans {f}")); // ui's own tests, not its dependents
         }
         if c.is_none() && own.iter().any(|p| p == "crates") {
             for (d, x) in graph.cargo.iter() {
@@ -687,7 +687,7 @@ mod tests {
         assert_eq!(plan(&["apps/dyno/REVIEWED.md"])["apps"], json!(["dyno"]));
         assert_eq!(plan(&["icons/REVIEWED.md"])["conformance"], true);
         let src = plan(&["apps/dyno/app/src-tauri/src/health.rs"]);
-        assert_eq!(src["ui"], true, "ui's cause-codes spec scans the apps' Rust sources");
+        assert_eq!(src["ui"], true, "ui's cause-codes check reads the apps' Rust sources");
         assert!(src["kinds"]["dyno"].as_array().unwrap().contains(&json!("rust")));
         assert_ne!(plan(&["apps/dyno/app/src-tauri/Cargo.toml"])["ui"], true);
         // Exactly what the spec scans: every .rs under crates/ and apps/, but not tests.rs or tests/, benches/, target/ folders.
