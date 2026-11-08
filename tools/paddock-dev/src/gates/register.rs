@@ -172,6 +172,8 @@ pub struct Register {
     pub docs_exclude: Vec<String>,
     /// Harnesses.
     pub harness: Vec<Harness>,
+    /// Globs of the files whose results blocks record measurements (rule 48): `docs/benchmarks.md`, each app's `docs/performance.md`.
+    pub measurements: Vec<String>,
     /// Checks that are not gated, on purpose.
     pub not_gated: Vec<Entry>,
     /// Checks that run only under a condition on branches.
@@ -265,6 +267,9 @@ pub fn parse(src: &str) -> (Register, Vec<String>) {
     if let Some(d) = table.get("docs").and_then(|v| v.as_table()) {
         r.docs_include = strings(d, "include");
         r.docs_exclude = strings(d, "exclude");
+    }
+    if let Some(m) = table.get("measurements").and_then(|v| v.as_table()) {
+        r.measurements = strings(m, "files");
     }
     for h in tables(&table, "harness") {
         r.harness.push(Harness {

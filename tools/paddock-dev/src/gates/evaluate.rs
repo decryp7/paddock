@@ -245,14 +245,15 @@ pub fn evaluate(input: &Input) -> Outcome {
     };
 
     let ids: BTreeSet<String> = all.iter().map(|c| c.id.clone()).collect();
-    let bench = ["docs/benchmarks.md"]
+    let measurement_globs: Vec<_> = reg.measurements.iter().map(|g| glob_regex(g)).collect();
+    let bench = input
+        .tree
+        .files()
         .iter()
-        .map(|s| s.to_string())
-        .chain(input.tree.files().iter().filter(|f| f.ends_with("/docs/performance.md")).cloned())
-        .filter_map(|p| input.tree.read(&p))
+        .filter(|f| any_glob(&measurement_globs, f))
+        .filter_map(|p| input.tree.read(p))
         .collect::<Vec<_>>()
         .join("\n");
-
     for check in all {
         let g = gating::gating(&check, &env);
         let want = required(&check, &reg);
@@ -382,7 +383,7 @@ pub fn evaluate(input: &Input) -> Outcome {
                                 None,
                                 &check.id,
                                 format!(
-                                    "[[ignored]] {file}: {name} is registered as a measurement, but no results block in docs/benchmarks.md or an app's docs/performance.md names it"
+                                    "[[ignored]] {file}: {name} is registered as a measurement, but no results block in the register's [measurements] files names it"
                                 ),
                                 "Record the measurement (rule 48), or register the test as not-gated with an owner.",
                             );
@@ -638,7 +639,7 @@ mod tests {
 
     const LIST: &str = r#"[{"id":"C06","scope":"root","mode":"gate","needs":"all","file":"conformance/src/checks/C06.mjs"},{"id":"C13","scope":"apps","mode":"gate","needs":"rust","file":"conformance/src/checks/C13.mjs"}]"#;
     const CI: &str = "on:\n  pull_request:\njobs:\n  c:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06\n      - run: ./dev gates check\n";
-    const REG_HEAD: &str = "version = 1\n[docs]\ninclude = [\"AGENTS.md\"]\nexclude = []\n";
+    const REG_HEAD: &str = "version = 1\n[docs]\ninclude = [\"AGENTS.md\"]\nexclude = []\n[measurements]\nfiles = [\"notes/*.txt\"]\n";
 
     fn run(register: Option<&str>, files: &[(&str, &str)], contracts: &[(&str, &str)]) -> Outcome {
         let tree = MemTree::new(files);
@@ -742,7 +743,7 @@ mod tests {
             "{REG_HEAD}\n[[ignored]]\npath = \"crates/a/tests/it.rs\"\ntests = [\"vm_one\"]\ngate = \"not-gated\"\nreason = \"vm\"\nowner = \"o\"\nsince = 2026-11-08\nreview_by = 2026-12-06\napproved = \"coordinator\"\n\n[[ignored]]\npath = \"crates/a/tests/it.rs\"\ntests = [\"bench_one\"]\ngate = \"measurement\"\nreason = \"bench\"\nowner = \"o\"\nsince = 2026-11-08\nreview_by = 2026-12-06\napproved = \"coordinator\"\n"
         );
         let mut with_bench = files.to_vec();
-        with_bench.push(("docs/benchmarks.md", "results: crates/a/tests/it.rs bench_one 12 ms"));
+        with_bench.push(("notes/bench.txt", "results: crates/a/tests/it.rs bench_one 12 ms"));
         assert!(run(Some(&reg), &with_bench, &[]).findings.is_empty());
         // bad: the measurement nobody records
         let m = messages(&run(Some(&reg), &files, &[]));
@@ -767,9 +768,14 @@ mod tests {
     #[test]
     fn what_cannot_be_measured_is_reported_not_passed() {
         // a ratchet with no base to compare against, and a shallow checkout
-        let reg = format!("{REG_HEAD}\n[[ratchet]]\nid = \"C13\"\napp = \"debrief\"\nnot_yet = [\"x\"]\nowner = \"o\"\ntarget = \"debrief-v1.3.0\"\napproved = \"user\"\n");
+        let reg = format!(
+            "{REG_HEAD}\n[[ratchet]]\nid = \"C13\"\napp = \"debrief\"\nnot_yet = [\"x\"]\nowner = \"o\"\ntarget = \"debrief-v1.3.0\"\napproved = \"user\"\n"
+        );
         let m = messages(&run(Some(&reg), &[], &[]));
-        assert!(m.iter().any(|x| x.contains("not measured: the register at the base revision")), "{m:?}");
+        assert!(
+            m.iter().any(|x| x.contains("not measured: the register at the base revision")),
+            "{m:?}"
+        );
     }
 
     #[test]

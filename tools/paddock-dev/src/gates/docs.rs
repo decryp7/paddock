@@ -147,7 +147,7 @@ fn dev_path_exists(known: &Known, words: &[&str]) -> Option<String> {
     // Walk the command tree word by word.
     let mut path = String::new();
     for w in words {
-        if w.starts_with('-') || w.starts_with('<') || w.starts_with('[') {
+        if w.starts_with('-') || w.starts_with('<') || w.starts_with('[') || w.contains('|') {
             break;
         }
         let next = if path.is_empty() { w.to_string() } else { format!("{path} {w}") };
@@ -343,10 +343,10 @@ mod tests {
     fn node_paths_and_npm_scripts() {
         let files = [
             (
-                "apps/dyno/README.md",
+                "apps/zz/README.md",
                 "```sh\nnode scripts/check-wording.mjs\nnode scripts/missing.mjs\nnpm run test:tokens -w ui\nnpm run nope -w ui\n```\n",
             ),
-            ("apps/dyno/scripts/check-wording.mjs", ""),
+            ("apps/zz/scripts/check-wording.mjs", ""),
             ("ui/package.json", r#"{"name":"@decryp7/paddock-ui","scripts":{"test:tokens":"x"}}"#),
         ];
         let p = problems(&files);

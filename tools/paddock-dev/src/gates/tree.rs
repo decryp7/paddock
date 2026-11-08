@@ -88,7 +88,7 @@ mod tests {
         assert!(glob_regex("**/check-*.mjs").is_match("check-x.mjs"));
         assert!(!glob_regex("scripts/*.mjs").is_match("scripts/a/b.mjs"));
         assert!(glob_regex("docs/adr/**").is_match("docs/adr/0001-x.md"));
-        assert!(glob_regex("apps/*/AGENTS.md").is_match("apps/dyno/AGENTS.md"));
-        assert!(!glob_regex("apps/*/AGENTS.md").is_match("apps/dyno/x/AGENTS.md"));
+        assert!(glob_regex("apps/*/AGENTS.md").is_match("apps/zz/AGENTS.md"));
+        assert!(!glob_regex("apps/*/AGENTS.md").is_match("apps/zz/x/AGENTS.md"));
     }
 }
