@@ -72,7 +72,9 @@ export async function scopingStep() {
   checks.push({ ok: top.length > 50 && !/owner-secret-probe/i.test(both), detail: /owner-secret-probe/i.test(both) ? 'D6 VIOLATION: the second account sees the owner\'s process name owner-secret-probe in its views' : 'the second account does not see the owner\'s process name' });
   checks.push({ ok: !/paddock-test/i.test(both.replace(/C:\\Users\\Public[^"\s]*/gi, '')), detail: /paddock-test/i.test(both) ? 'the second account\'s views name the owner account paddock-test' : 'the second account\'s views name no other account' });
   const other = hasOtherUsersTotal(both);
-  checks.push({ ok: other, detail: other ? 'the views carry an "other users" total' : 'no "other users" total in the second account\'s views (processes of other accounts are not summarised)' });
+  // The CLI's views cannot carry the total: `dyno snapshot` is { system, processes } and `dyno top` lists app groups (dyno-cli lib.rs, render.rs); the "Other users" row (others.rs,
+  // LiveUpdate.other_users) goes only to the app window. Not seeing it here is the probe's limit, never a product fail (ER-33); it is read where it exists, in a window of that account.
+  checks.push({ ok: other, ...(other ? {} : { kind: 'check' }), detail: other ? 'the views carry an "other users" total' : 'no "other users" total can be read here: the CLI views (snapshot, top) do not carry it, only the account\'s own app window does (not measured)' });
   evidence.push(`traffic in the snapshot: ${/traffic|bytes/i.test(snap) ? 'present' : 'not carried by `dyno snapshot`; Network > By program as a second account needs its own window'}`);
   // Clean up what this step made.
   ssh(`schtasks /delete /tn Dyno2 /f 2>$null | Out-Null; Get-Process owner-secret-probe -ErrorAction SilentlyContinue | Stop-Process -Force; schtasks /delete /tn VmOwnerProbe /f 2>$null | Out-Null; Remove-Item "C:\\Users\\paddock-test\\owner-secret-probe.exe","${PUB}\\dyno2*" -Recurse -Force -ErrorAction SilentlyContinue; net user paddock-user2 /delete 2>$null | Out-Null`, { admin: true });

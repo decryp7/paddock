@@ -183,7 +183,7 @@ export async function installRows() {
   for (let i = 0; i < 20 && facts().key !== 'no'; i++) await sleep(3000);
   // The kill is made in the guest at a fixed point (killWatcherScript), not timed from here.
   const WATCH = 'C:\\paddock-test\\vmcheck\\kill-watch';
-  ssh(`Remove-Item '${PROG}\\updates\\setup_log.txt' -Force -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Force '${WATCH}' | Out-Null; Set-Content '${WATCH}\\w.ps1' '${killWatcherScript({ log: `${PROG}\\updates\\setup_log.txt`, out: `${WATCH}\\k.txt` }).replace(/'/g, "''")}'; Remove-Item '${WATCH}\\k.txt' -ErrorAction SilentlyContinue; schtasks /create /tn DynoKillWatch /sc once /st 00:00 /ru SYSTEM /rl HIGHEST /f /tr "powershell -NoProfile -ExecutionPolicy Bypass -File ${WATCH}\\w.ps1" | Out-Null; schtasks /run /tn DynoKillWatch | Out-Null`, { admin: true });
+  ssh(`Remove-Item '${PROG}\\updates\\setup.log' -Force -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Force '${WATCH}' | Out-Null; Set-Content '${WATCH}\\w.ps1' '${killWatcherScript({ log: `${PROG}\\updates\\setup.log`, out: `${WATCH}\\k.txt` }).replace(/'/g, "''")}'; Remove-Item '${WATCH}\\k.txt' -ErrorAction SilentlyContinue; schtasks /create /tn DynoKillWatch /sc once /st 00:00 /ru SYSTEM /rl HIGHEST /f /tr "powershell -NoProfile -ExecutionPolicy Bypass -File ${WATCH}\\w.ps1" | Out-Null; schtasks /run /tn DynoKillWatch | Out-Null`, { admin: true });
   startInstaller();
   const uacK = await answerUac('kill-installer');
   let watched = '';
@@ -235,7 +235,7 @@ export async function winHung() {
   const actor = new Actor(); actor.start(); await sleep(6000);
   const r = await hungPageStep({
     now: () => Date.now() / 1000, sleep,
-    suspend: async () => { const out = ssh(`${NT}${renderers}foreach ($i in $ids) { [void][N.P]::NtSuspendProcess((Get-Process -Id $i).Handle) }; $ids.Count`); if (!(Number(out.trim().split('\\n').at(-1)) > 0)) throw new Error(`no WebView2 renderer of dyno-app was found (WebView2 processes: ${ssh(WEBVIEW_LISTING_PS).replace(/\s*\n\s*/g, ' | ').slice(0, 600) || 'none'})`); },
+    suspend: async () => { const out = ssh(`${NT}${renderers}foreach ($i in $ids) { [void][N.P]::NtSuspendProcess((Get-Process -Id $i).Handle) }; $ids.Count`); if (!(Number(out.trim().split('\\n').at(-1)) > 0)) throw new Error(`no WebView2 renderer of dyno-app was found (dyno processes: ${ssh("Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^dyno' } | ForEach-Object { $_.Name + ' pid=' + $_.ProcessId + ' session=' + $_.SessionId + ' ' + $_.CommandLine }").replace(/\s*\n\s*/g, ' | ').slice(0, 500) || 'none'}; WebView2 processes: ${ssh(WEBVIEW_LISTING_PS).replace(/\s*\n\s*/g, ' | ').slice(0, 600) || 'none'})`); },
     resume: async () => { ssh(`${NT}${renderers}foreach ($i in $ids) { [void][N.P]::NtResumeProcess((Get-Process -Id $i).Handle) }`); },
     logLines: async () => ssh(APP_LOG_PS).split('\\n'),
     questions: async (phase) => { const n = (await actor.send('windows').catch(() => '')).split('\\n').filter((l) => /not responding|Keep Waiting/i.test(l)).length; return phase === 'open' && n === 0 ? null : n; },

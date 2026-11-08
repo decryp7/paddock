@@ -19,6 +19,10 @@ Add-Type -Namespace W -Name A -MemberDefinition '
 [System.Runtime.InteropServices.DllImport("user32.dll", CharSet=System.Runtime.InteropServices.CharSet.Unicode)] public static extern int GetWindowText(System.IntPtr h, System.Text.StringBuilder s, int n);
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr h, out uint pid);
 [System.Runtime.InteropServices.DllImport("user32.dll", CharSet=System.Runtime.InteropServices.CharSet.Unicode)] public static extern int GetClassName(System.IntPtr h, System.Text.StringBuilder s, int n);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern System.IntPtr SendMessage(System.IntPtr h, uint m, System.IntPtr w, System.IntPtr l);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern int GetMenuItemCount(System.IntPtr m);
+[System.Runtime.InteropServices.DllImport("user32.dll", CharSet=System.Runtime.InteropServices.CharSet.Unicode)] public static extern int GetMenuString(System.IntPtr m, uint pos, System.Text.StringBuilder s, int n, uint flags);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool GetMenuItemRect(System.IntPtr h, System.IntPtr m, uint pos, out RECT r);
 public delegate bool EnumCb(System.IntPtr h, System.IntPtr l);
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }'
 [void][W.A]::SetProcessDPIAware()
@@ -52,6 +56,15 @@ function Menu-Windows {
 # whole-desktop MenuItem search of the older probe is tried as well. Rows are "name<TAB>cx,cy".
 function Menu-Items {
   $rows = @(); $seenNames = @{}
+  # First reader: the menu's own items through Win32 (MN_GETHMENU on the #32768 window, then GetMenuString and GetMenuItemRect per item); UI Automation read none in 0ad round 4.
+  foreach ($w in @(Menu-Windows)) {
+    $h = [IntPtr][int64](($w -split "`t")[0])
+    try {
+      $hm = [W.A]::SendMessage($h, 0x1E1, [IntPtr]::Zero, [IntPtr]::Zero)
+      if ($hm -ne [IntPtr]::Zero) { $cnt = [W.A]::GetMenuItemCount($hm); for ($i = 0; $i -lt $cnt; $i++) { $sb = New-Object System.Text.StringBuilder 128; [void][W.A]::GetMenuString($hm, [uint32]$i, $sb, 128, 0x400); $r = New-Object W.A+RECT; [void][W.A]::GetMenuItemRect($h, $hm, [uint32]$i, [ref]$r); $nm = $sb.ToString(); if ($nm) { $rows += "$($nm -replace '&','')`t$([int](($r.L + $r.R) / 2)),$([int](($r.T + $r.B) / 2))" } } }
+    } catch { }
+  }
+  if ($rows.Count -gt 0) { return ($rows -join "`n") }
   foreach ($w in @(Menu-Windows)) {
     $h = ($w -split "`t")[0]
     try {

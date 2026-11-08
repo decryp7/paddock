@@ -23,19 +23,23 @@ export async function closeMenus(actor) {
  * win-suite.ps1 start-tray). The host saves one made-up computer through the Power page, by hand (the app's own form), and says what it did.
  */
 export async function addWakeDevice(browser) {
+  let stage = 'start';
+  let main = null;
   try {
-    const main = browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id='));
-    await main.evaluate(() => { location.hash = '#/power'; });
-    await sleep(2500);
-    await main.getByRole('tab', { name: /wake devices|wake/i }).first().click({ timeout: 10_000 });
-    await main.getByRole('button', { name: /Add by hand/ }).first().click({ timeout: 10_000 });
-    await main.getByLabel('Name of the computer').fill('vm-check-device');
-    await main.getByLabel('Hardware address').fill('02:00:00:aa:bb:cc');
-    await main.getByRole('button', { name: 'Add computer' }).click({ timeout: 10_000 });
+    main = browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id='));
+    stage = 'open #/power'; await main.evaluate(() => { location.hash = '#/power'; }); await sleep(2500);
+    stage = 'tab Wake devices'; await main.getByRole('tab', { name: /^Wake devices$/ }).click({ timeout: 10_000 }); await sleep(1500);
+    stage = 'button Add by hand'; await main.getByRole('button', { name: /Add by hand/ }).first().click({ timeout: 10_000 });
+    stage = 'fill name'; await main.getByLabel('Name of the computer').fill('vm-check-device', { timeout: 10_000 });
+    stage = 'fill address'; await main.getByLabel('Hardware address').fill('02:00:00:aa:bb:cc', { timeout: 10_000 });
+    stage = 'button Add computer'; await main.getByRole('button', { name: 'Add computer' }).click({ timeout: 10_000 });
     await sleep(2500);
     const listed = /vm-check-device/.test(await main.evaluate(() => document.body.innerText));
     return listed ? 'saved the computer "vm-check-device" (02:00:00:aa:bb:cc) on the Power page, Wake devices' : 'pressed Add computer but the page does not list "vm-check-device"';
-  } catch (e) { return `could not save a wake device through the Power page: ${String(e.message).split('\n')[0]}`; }
+  } catch (e) {
+    const text = main ? await main.evaluate(() => document.body.innerText.replace(/\s+/g, ' ').slice(0, 500)).catch(() => '') : '';
+    return `could not save a wake device through the Power page at "${stage}": ${String(e.message).split('\n')[0]}; the page says: ${text}`;
+  }
 }
 
 /** The control icon's own menu (win-menu-control.ps1): started in the console session, promoted to the taskbar, right-clicked; always removed afterwards. */
