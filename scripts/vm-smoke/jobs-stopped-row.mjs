@@ -9,7 +9,7 @@ const BAD = /jobs could not be read/i;
 const chk = (ok, detail, kind) => ({ ok, detail, ...(kind ? { kind } : {}) });
 
 /**
- * @param {{quitApp:()=>Promise<void>, killAgentAndStopNew:()=>Promise<{pid:number,start:string}|null>, launchApp:()=>Promise<void>, openJobs:()=>Promise<boolean>,
+ * @param {{quitApp:()=>Promise<void>, killLaunchAndStop:()=>Promise<{pid:number,start:string}|null>, openJobs:()=>Promise<boolean>,
  *   jobsText:()=>Promise<string>, cont:(a:{pid:number,start:string})=>Promise<void>, guestClock:()=>Promise<string>}} d
  */
 export async function jobsStoppedStep(d, c, { holdMs = 10_000, clearMaxMs = 10_000, stepMs = 1000, flashWatchMs = 5000 } = {}) {
@@ -18,10 +18,9 @@ export async function jobsStoppedStep(d, c, { holdMs = 10_000, clearMaxMs = 10_0
   let agent = null;
   try {
     await d.quitApp();
-    agent = await d.killAgentAndStopNew();
-    if (!agent) return out([chk(false, 'precondition NOT met: the supervisor\'s new agent could not be found and stopped', 'check')]);
+    agent = await d.killLaunchAndStop(); // kills the old agent, launches the app, stops the agent that appears (nothing respawns an agent while the app is quit)
+    if (!agent) return out([chk(false, 'precondition NOT met: no new agent appeared after the launch to be stopped', 'check')]);
     ev.push(`new agent ${agent.pid} (started ${agent.start}) stopped at guest time ${await d.guestClock()}`);
-    await d.launchApp();
     const opened = await d.openJobs();
     const t0 = c.now(); let errorAt = null; let samples = [];
     while (c.now() - t0 < holdMs) {

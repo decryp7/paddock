@@ -450,12 +450,11 @@ async function main(argv) {
           const stopStep = await jobsStoppedStep({
             quitApp: async () => { await exec(`osascript -e 'quit app "Dyno"'; pkill -x dyno-app; true`); await sleepMs(4000); },
             // kill the agent, then stop the supervisor's NEW agent the moment its pid appears; the identity (pid and start time) is read in the same command
-            killAgentAndStopNew: async () => {
-              const r = await exec('old=$(pgrep -x dyno-agent | head -1); [ -n "$old" ] && kill -9 $old; for i in $(seq 1 500); do n=$(pgrep -x dyno-agent | head -1); if [ -n "$n" ] && [ "$n" != "$old" ]; then kill -STOP $n; echo "$n|$(ps -o lstart= -p $n)|$(ps -o stat= -p $n)"; exit 0; fi; sleep 0.02; done; exit 1', { timeoutMs: 60_000 });
+            killLaunchAndStop: async () => {
+              const r = await exec('old=$(pgrep -x dyno-agent | head -1); [ -n "$old" ] && kill -9 $old; open -a ' + bundle + '; for i in $(seq 1 500); do n=$(pgrep -x dyno-agent | head -1); if [ -n "$n" ] && [ "$n" != "$old" ]; then kill -STOP $n; echo "$n|$(ps -o lstart= -p $n)|$(ps -o stat= -p $n)"; exit 0; fi; sleep 0.02; done; exit 1', { timeoutMs: 60_000 });
               const m = r.code === 0 ? /^(\d+)\|(.+)\|(.*)$/m.exec(r.stdout) : null;
               return m ? { pid: Number(m[1]), start: m[2].trim() } : null;
             },
-            launchApp: async () => { await exec(`open -a ${bundle}`); await sleepMs(3000); },
             openJobs: () => ld.openJobs(), jobsText: () => ld.jobsText(),
             // rule 53: continue only the process whose pid AND start time are the ones that were stopped
             cont: async ({ pid, start }) => { await exec(`[ "$(ps -o lstart= -p ${pid} | sed 's/^ *//')" = '${start}' ] && kill -CONT ${pid}; echo "state after CONT: $(ps -o stat= -p ${pid})" >> /tmp/jobs-stopped.log`); },

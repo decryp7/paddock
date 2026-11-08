@@ -8,8 +8,7 @@ function world({ errorFrom = 1, clearAfterCont = 3, flashAt = null, stopOk = tru
   let t = 0, contAt = null; const log = [];
   const d = {
     quitApp: async () => log.push('quit'),
-    killAgentAndStopNew: async () => (stopOk ? { pid: 777, start: 'Sun Nov  8 10:00:00 2026' } : null),
-    launchApp: async () => log.push('launch'),
+    killLaunchAndStop: async () => (stopOk ? { pid: 777, start: 'Sun Nov  8 10:00:00 2026' } : null),
     openJobs: async () => openOk,
     jobsText: async () => {
       if (contAt === null) return t >= errorFrom ? BAD : '';
