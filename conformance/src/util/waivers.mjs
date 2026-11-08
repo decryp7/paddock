@@ -27,7 +27,8 @@ export function parseWaivers(text) {
 /**
  * Splits findings into kept and waived, and adds findings for bad waivers: a waiver without a reason or a valid date is
  * W002, one past its date is W001 (and waives nothing). With `checksRun`, a live waiver for one of those checks that
- * waived no finding is a W003 warning (the finding was fixed: delete the waiver).
+ * waived no finding is a W003 warning (the finding was fixed: delete the waiver). A finding with `unwaivable: true` (a check
+ * that could not run, "check broken" or "not measured") is never waived.
  */
 export function applyWaivers({ findings, waivers, problems = [], now = new Date(), file = 'paddock.waivers.toml', pathMatches, checksRun = null }) {
   const today = now.toISOString().slice(0, 10);
@@ -49,7 +50,7 @@ export function applyWaivers({ findings, waivers, problems = [], now = new Date(
   const waived = [];
   const used = new Set();
   for (const f of findings) {
-    const w = live.find((x) => x.check === f.check && pathMatches(x.path, f.file ?? ''));
+    const w = f.unwaivable ? undefined : live.find((x) => x.check === f.check && pathMatches(x.path, f.file ?? ''));
     if (w) {
       used.add(w);
       waived.push({ ...f, waiver: { reason: w.reason, expires: w.expires } });

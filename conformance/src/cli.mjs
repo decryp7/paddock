@@ -9,7 +9,7 @@ import { syncMain } from './sync/main.mjs';
 import { windowWeightMain } from './window-weight/cli.mjs';
 
 const USAGE = `usage: paddock-conformance --app <name> [--root <dir>] [--only C04,C06] [--json] [--out file] [--summary file]
-                           [--strict C30,C36] [--bundle <dir>] [--artifacts <dir>] [--paddock <dir>] [--version vX.Y.Z]
+                           [--strict C30,C36] [--no-graph] [--bundle <dir>] [--artifacts <dir>] [--paddock <dir>] [--version vX.Y.Z]
                            [--preflight vX.Y.Z [--api url --repo owner/name]]
        paddock-conformance run [--allow-home a,b] [--keep] -- <command> [args]
        paddock-conformance commit-lint --file <path> | --range <rev-range>
@@ -26,7 +26,7 @@ export function parseArgs(argv) {
     const a = argv[i];
     if (!a.startsWith('--')) throw new Error(`unexpected argument: ${a}`);
     const k = a.slice(2);
-    if (k === 'json' || k === 'keep' || k === 'write' || k === 'record') o[k] = true;
+    if (k === 'json' || k === 'keep' || k === 'write' || k === 'record' || k === 'no-graph') o[k] = true;
     else if (VALUE.has(k)) {
       if (argv[i + 1] === undefined) throw new Error(`--${k} needs a value`);
       o[k] = argv[++i];
@@ -83,6 +83,8 @@ export async function main(argv, { log = console.log, err = console.error, env =
         api: o.api,
         repo: o.repo,
         token: env.GITEA_TOKEN,
+        // Offline local runs only (C99 layers 3 and 4 need the registry); CI never passes it. The run says so (a warning).
+        graph: o['no-graph'] ? 'skipped' : undefined,
       },
     });
     writeOutputs(result, { out: o.out, summary: o.summary, env });

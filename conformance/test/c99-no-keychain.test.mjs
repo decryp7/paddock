@@ -85,6 +85,10 @@ test('C99: a file that cannot be read is a broken check, not a pass (ER-33)', as
   const f = await findingsOf('C99', root, { options: { graph: 'off', readFile: (p) => (p === 'src/gone.rs' ? null : undefined) } });
   assert.deepEqual(f.map((x) => [x.file, x.severity]), [['src/gone.rs', 'error']]);
   assert.match(f[0].message, /check broken: .*could not be read/);
+  // A waiver for the file never hides it: a check that could not look cannot be waived.
+  const waived = makeApp({ 'Cargo.toml': app('[dependencies]\n'), 'src/lib.rs': 'pub fn f() {}\n', 'src/gone.rs': 'x\n', 'paddock.waivers.toml': '[[waiver]]\ncheck = "C99"\npath = "src/*"\nreason = "r"\nexpires = "2099-01-01"\n' });
+  const w = await findingsOf('C99', waived, { options: { graph: 'off', readFile: (p) => (p === 'src/gone.rs' ? null : undefined) } });
+  assert.ok(w.some((x) => x.file === 'src/gone.rs' && /check broken/.test(x.message)));
 });
 
 // The chat branch's pasted-key store (origin/pitwall/1.1-wp3b, apps/pitwall/app/src-tauri/Cargo.toml): plain
