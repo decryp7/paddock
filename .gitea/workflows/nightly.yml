@@ -36,6 +36,7 @@ jobs:
     needs: [gate]
     if: ${{ needs.gate.outputs.run == 'true' }}
     uses: ./.gitea/workflows/ci.yml
+    secrets: inherit
     with:
       webkit: true
 

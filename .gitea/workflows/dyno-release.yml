@@ -61,6 +61,7 @@ jobs:
     needs: [plan]
     if: ${{ needs.plan.outputs.run == 'true' && (startsWith(github.ref, 'refs/tags/dyno-v') || github.event.inputs.gates == 'true') }}
     uses: ./.gitea/workflows/ci.yml
+    secrets: inherit
     with:
       app: dyno
       # A manual run with gates is the "one CI build with bundles" before a tag: WebKit included.

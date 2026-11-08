@@ -38,15 +38,14 @@ on:
         description: "Only this app's legs, every half, whatever changed: the gates of an app's own tag (<app>-release.yml)"
         type: string
         default: ""
+    secrets:
+      BUILD_INPUTS_TOKEN:
+        description: "Read token of the private package store, for ./dev's prebuilt download (ADR 0022 R0b); callers pass `secrets: inherit`."
+        required: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
-
-env:
-  # The read credential of ./dev's prebuilt download (ADR 0022 R0b): a run showed the job token is not in GITHUB_TOKEN of the host steps, and the
-  # package store answers 401 without it. Read only; the wrapper sends it through curl's stdin, never on a command line.
-  PADDOCK_DEV_TOKEN: ${{ github.token }}
 
 jobs:
   # Which projects this run tests. The script's own tests run first: a wrong plan would hide failures.
@@ -412,6 +411,8 @@ jobs:
         working-directory: crates
         shell: bash
     env:
+      # Read credential for ./dev's prebuilt download (ADR 0022 R0b), only in the jobs that run ./dev (job-isolation).
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       CARGO_TERM_COLOR: always
       # Root in the Linux container: Chromium needs the opt-in to start without its sandbox (ignored when not root).
       PADDOCK_BROWSER_NO_SANDBOX: "1"
@@ -601,6 +602,8 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.apps) }}
     env:
+      # Read credential for ./dev's prebuilt download (ADR 0022 R0b), only in the jobs that run ./dev (job-isolation).
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
@@ -750,6 +753,8 @@ jobs:
         working-directory: tools/paddock-dev
         shell: bash
     env:
+      # Read credential for ./dev's prebuilt download (ADR 0022 R0b), only in the jobs that run ./dev (job-isolation).
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
