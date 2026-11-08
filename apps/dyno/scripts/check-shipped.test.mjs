@@ -53,6 +53,10 @@ test('the feature probe sees test-support when the dev edges are in, and reports
   assert.doesNotThrow(() => assertProbeSees(root, withIt));
   // A tree without the feature (the probe changed, or the feature was renamed): never a silent pass.
   const without = 'dyno-agent v1.1.0 (/x/a)\ndyno-platform v1.1.0 (/x/p)\ndyno-core v1.1.0 (/x/c) ts\n';
+  // dyno-platform alone is not enough: the forwarding to dyno-core and paddock-power must be seen too.
+  assert.throws(() => assertProbeSees(root, 'dyno-platform v1.1.0 (/x/p) test-support\ndyno-core v1.1.0 (/x/c) ts\n'), /dyno-core, paddock-power/);
+  // A dedupe marker after the features is stripped.
+  assert.deepEqual(testSupportEnabledIn('dyno-core v1.1.0 (/x/c) test-support,ts (*)\n'), ['dyno-core']);
   assert.deepEqual(testSupportEnabledIn(without), []);
   assert.throws(() => assertProbeSees(root, without), /check broken/);
   // The feature on an unrelated crate does not count, and a path with a space still parses.

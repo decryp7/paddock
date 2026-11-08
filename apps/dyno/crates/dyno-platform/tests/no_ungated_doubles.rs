@@ -10,6 +10,8 @@
 //!
 //! The shipped set is not hand-kept: `dyno-app` plus the package of every `bundle.externalBin` of `tauri.conf.json` (the helper
 //! included), plus their normal path dependencies inside `apps/dyno` (read from `cargo metadata`). Family crates are out of scope.
+//! Known limits: it does not look into inherent `impl` blocks (`impl X { pub fn fake() }`) or `macro_rules!` output, and family
+//! crates (`paddock_jobs::FakeClock`, `FakeSystemd`, `FakeWire`, `FakeToaster`) are a follow-up (ADR 0033 review P2-4).
 //! This is a declaration check, not a grep for use sites: it catches a new ungated double on any OS, before anyone wires it. The
 //! no-fake tests in each OS module and `scripts/check-shipped.test.mjs` cover the rest.
 
@@ -18,22 +20,68 @@ use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------- the scan
 
-/// Whether the attributes gate the item to tests: `#[test]`, `cfg(test)`, `cfg(any(test, feature = "test-support"))`, `cfg(all(test, ..))`.
+/// What a `cfg` condition can be when `test` and the `test-support` feature are off (the build that ships).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Tri {
+    /// Never true in that build: the item is not compiled there.
+    False,
+    /// Always true.
+    True,
+    /// Depends on the target, another feature or a flag: it may be compiled in the build that ships.
+    Maybe,
+}
+
+fn not(t: Tri) -> Tri {
+    match t {
+        Tri::False => Tri::True,
+        Tri::True => Tri::False,
+        Tri::Maybe => Tri::Maybe,
+    }
+}
+
+/// Evaluates one `cfg` predicate: `test` and `feature = "test-support"` are off; `any`, `all` and `not` combine; anything else
+/// (`windows`, `target_os`, another feature, `debug_assertions`) is `Maybe`.
+fn eval_cfg(meta: &syn::Meta) -> Tri {
+    match meta {
+        syn::Meta::Path(p) if p.is_ident("test") => Tri::False,
+        syn::Meta::NameValue(nv) if nv.path.is_ident("feature") => match &nv.value {
+            syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. }) if s.value() == "test-support" => Tri::False,
+            _ => Tri::Maybe,
+        },
+        syn::Meta::List(l) if l.path.is_ident("any") || l.path.is_ident("all") || l.path.is_ident("not") => {
+            use syn::punctuated::Punctuated;
+            let Ok(args) = l.parse_args_with(Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated) else {
+                return Tri::Maybe;
+            };
+            let vals: Vec<Tri> = args.iter().map(eval_cfg).collect();
+            if l.path.is_ident("not") {
+                return vals.first().map_or(Tri::Maybe, |t| not(*t));
+            }
+            let any = l.path.is_ident("any");
+            let (decisive, neutral) = if any { (Tri::True, Tri::False) } else { (Tri::False, Tri::True) };
+            if vals.contains(&decisive) {
+                decisive
+            } else if vals.iter().all(|t| *t == neutral) {
+                neutral
+            } else {
+                Tri::Maybe
+            }
+        }
+        _ => Tri::Maybe,
+    }
+}
+
+/// Whether the attributes keep the item out of the build that ships: `#[test]`, or a `cfg` that is false with `test` and the
+/// `test-support` feature off. `cfg(any(test, windows))` is not a gate (it is compiled on Windows); neither is `feature = "test"`.
 fn gated(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|a| {
         if a.path().is_ident("test") {
             return true;
         }
-        let syn::Meta::List(l) = &a.meta else { return false };
         if !a.path().is_ident("cfg") {
             return false;
         }
-        let text = l.tokens.to_string();
-        let ok = text
-            .split(|c: char| !c.is_alphanumeric() && c != '_' && c != '-')
-            .any(|w| w == "test" || w == "test-support")
-            || text.contains("\"test-support\"");
-        ok && !text.contains("not")
+        a.parse_args::<syn::Meta>().is_ok_and(|m| eval_cfg(&m) == Tri::False)
     })
 }
 
@@ -80,12 +128,33 @@ fn child_dir(file: &Path) -> PathBuf {
     }
 }
 
-/// Reads the file a `mod x;` names: `(folder, name)` to `(file, source)`. A fixture test supplies its own.
-type Loader = dyn Fn(&Path, &str) -> Option<(PathBuf, String)>;
+/// Reads the file a `mod x;` names: `(folder of x.rs, folder of the declaring file, name, #[path])` to `(file, source)`. A fixture
+/// test supplies its own.
+type Loader = dyn Fn(&Path, &Path, &str, Option<&str>) -> Option<(PathBuf, String)>;
+
+/// What a scan found and what it saw (the counts are the positive control, ER-33).
+#[derive(Default)]
+struct Report {
+    offences: Vec<String>,
+    /// Source files parsed.
+    files: usize,
+    /// The files that declare a `mod fake` or `mod testing` that is gated, i.e. doubles the scan met and passed.
+    gated_double_mods: Vec<String>,
+}
 
 struct Scan<'a> {
     load: &'a Loader,
-    offences: Vec<String>,
+    report: Report,
+}
+
+fn path_attr(attrs: &[syn::Attribute]) -> Option<String> {
+    attrs.iter().find(|a| a.path().is_ident("path")).and_then(|a| match &a.meta {
+        syn::Meta::NameValue(nv) => match &nv.value {
+            syn::Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. }) => Some(s.value()),
+            _ => None,
+        },
+        _ => None,
+    })
 }
 
 impl Scan<'_> {
@@ -110,12 +179,17 @@ impl Scan<'_> {
             _ => &[],
         };
         if gated(attrs) {
+            if let syn::Item::Mod(m) = item {
+                if m.ident == "fake" || m.ident == "testing" {
+                    self.report.gated_double_mods.push(file.display().to_string());
+                }
+            }
             return;
         }
         let at = file.display();
         if let Some((vis, name)) = pub_item_name(item) {
             if is_pub(vis) && is_double_name(&name) {
-                self.offences.push(format!(
+                self.report.offences.push(format!(
                     "{at}: public item {name} is a test double outside cfg(test) or the test-support feature"
                 ));
             }
@@ -124,26 +198,27 @@ impl Scan<'_> {
             syn::Item::Mod(m) => {
                 let name = m.ident.to_string();
                 if name == "fake" || name == "testing" {
-                    self.offences
+                    self.report
+                        .offences
                         .push(format!("{at}: `mod {name}` is not gated by cfg(test) or the test-support feature"));
                     return;
                 }
                 if let Some((_, inner)) = &m.content {
                     self.items(inner, file, &dir.join(&name));
-                } else if let Some((path, src)) = (self.load)(dir, &name) {
-                    match syn::parse_file(&src) {
-                        Ok(f) => {
-                            let child = child_dir(&path);
-                            self.items(&f.items, &path, &child);
-                        }
-                        Err(e) => self.offences.push(format!("{}: cannot parse: {e}", path.display())),
+                } else {
+                    let file_dir = file.parent().unwrap_or(Path::new("."));
+                    match (self.load)(dir, file_dir, &name, path_attr(&m.attrs).as_deref()) {
+                        Some((path, src)) => self.file(&src, &path),
+                        None => self.report.offences.push(format!(
+                            "{at}: `mod {name};` has no source file, so the scan cannot see what it declares"
+                        )),
                     }
                 }
             }
             syn::Item::Impl(i) if i.trait_.is_some() => {
                 if let Some(name) = type_name(&i.self_ty) {
                     if is_double_impl_name(&name) {
-                        self.offences.push(format!(
+                        self.report.offences.push(format!(
                             "{at}: trait impl for {name}, a test double outside cfg(test) or the test-support feature"
                         ));
                     }
@@ -154,34 +229,50 @@ impl Scan<'_> {
     }
 }
 
-/// The offences in one source text, where `mod x;` is resolved by `load`.
-fn offences_in(src: &str, file: &Path, load: &Loader) -> Vec<String> {
-    let mut scan = Scan {
-        load,
-        offences: Vec::new(),
-    };
-    match syn::parse_file(src) {
-        Ok(f) => scan.items(&f.items, file, &child_dir(file)),
-        Err(e) => scan.offences.push(format!("{}: cannot parse: {e}", file.display())),
+impl Scan<'_> {
+    /// Parses one file and scans its items, following its `mod x;` declarations.
+    fn file(&mut self, src: &str, path: &Path) {
+        self.report.files += 1;
+        match syn::parse_file(src) {
+            Ok(f) => self.items(&f.items, path, &child_dir(path)),
+            Err(e) => self.report.offences.push(format!("{}: cannot parse: {e}", path.display())),
+        }
     }
-    scan.offences
 }
 
-/// The disk loader: `dir/name.rs`, else `dir/name/mod.rs`.
-fn load_from_disk(dir: &Path, name: &str) -> Option<(PathBuf, String)> {
-    [dir.join(format!("{name}.rs")), dir.join(name).join("mod.rs")]
+/// The report for one source text, where `mod x;` is resolved by `load`.
+fn report_in(src: &str, file: &Path, load: &Loader) -> Report {
+    let mut scan = Scan {
+        load,
+        report: Report::default(),
+    };
+    scan.file(src, file);
+    scan.report
+}
+
+fn offences_in(src: &str, file: &Path, load: &Loader) -> Vec<String> {
+    report_in(src, file, load).offences
+}
+
+/// The disk loader: `#[path]` relative to the declaring file's folder, else `dir/name.rs`, else `dir/name/mod.rs`.
+fn load_from_disk(dir: &Path, file_dir: &Path, name: &str, path: Option<&str>) -> Option<(PathBuf, String)> {
+    let candidates = match path {
+        Some(p) => vec![file_dir.join(p)],
+        None => vec![dir.join(format!("{name}.rs")), dir.join(name).join("mod.rs")],
+    };
+    candidates
         .into_iter()
         .find_map(|p| std::fs::read_to_string(&p).ok().map(|s| (p, s)))
 }
 
-fn offences_of_root(root: &Path) -> Vec<String> {
+fn report_of_root(root: &Path) -> Report {
     let src = std::fs::read_to_string(root).unwrap();
-    offences_in(&src, root, &load_from_disk)
+    report_in(&src, root, &load_from_disk)
 }
 
 // ------------------------------------------------------- the fixtures (they run every time)
 
-fn none(_: &Path, _: &str) -> Option<(PathBuf, String)> {
+fn none(_: &Path, _: &Path, _: &str, _: Option<&str>) -> Option<(PathBuf, String)> {
     None
 }
 
@@ -235,13 +326,77 @@ fn gated_doubles_pass() {
 }
 
 #[test]
+fn a_cfg_that_can_be_true_in_the_shipped_build_is_not_a_gate() {
+    for cfg in [
+        "any(test, windows)",
+        "any(test, target_os = \"macos\")",
+        "any(test, feature = \"testdb\")",
+        "feature = \"test\"",
+        "feature = \"testing\"",
+        "not(feature = \"test-support\")",
+        "debug_assertions",
+        "any(test, not(test))",
+    ] {
+        let found = scan(&format!("#[cfg({cfg})] pub struct FakeA;"));
+        assert_eq!(found.len(), 1, "cfg({cfg}) must not hide a double: {found:?}");
+    }
+}
+
+#[test]
+fn a_cfg_that_is_false_without_test_and_test_support_is_a_gate() {
+    for cfg in [
+        "test",
+        "feature = \"test-support\"",
+        "any(test, feature = \"test-support\")",
+        "all(test, windows)",
+        "all(feature = \"test-support\", unix)",
+        "not(not(test))",
+    ] {
+        assert!(scan(&format!("#[cfg({cfg})] pub struct FakeA;")).is_empty(), "cfg({cfg}) is a gate");
+    }
+}
+
+#[test]
+fn a_missing_mod_file_is_an_offence_and_a_path_attribute_is_followed() {
+    let found = scan("mod ghost;");
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(found[0].contains("`mod ghost;` has no source file"));
+    let load = |_: &Path, file_dir: &Path, name: &str, path: Option<&str>| -> Option<(PathBuf, String)> {
+        match (name, path) {
+            ("rig", Some("common/rig.rs")) => Some((file_dir.join("common/rig.rs"), "pub struct FakeRig;".into())),
+            _ => None,
+        }
+    };
+    let found = offences_in("#[path = \"common/rig.rs\"] mod rig;", Path::new("fixture/lib.rs"), &load);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(found[0].contains("rig.rs") && found[0].contains("FakeRig"), "{found:?}");
+    // A gated mod with no file is not an offence: it is not compiled.
+    assert!(scan("#[cfg(test)] mod ghost;").is_empty());
+}
+
+#[test]
+fn the_report_counts_files_and_the_gated_double_modules_it_met() {
+    let load = |dir: &Path, _: &Path, name: &str, _: Option<&str>| -> Option<(PathBuf, String)> {
+        (name == "inner").then(|| (dir.join("inner.rs"), "pub fn f() {}".into()))
+    };
+    let r = report_in(
+        "mod inner; #[cfg(any(test, feature = \"test-support\"))] pub mod fake;",
+        Path::new("fixture/lib.rs"),
+        &load,
+    );
+    assert!(r.offences.is_empty(), "{:?}", r.offences);
+    assert_eq!(r.files, 2);
+    assert_eq!(r.gated_double_mods, vec!["fixture/lib.rs".to_string()]);
+}
+
+#[test]
 fn a_negated_gate_is_not_a_gate() {
     assert_eq!(scan("#[cfg(not(test))] pub struct FakeA;").len(), 1);
 }
 
 #[test]
 fn a_file_module_is_followed_and_a_gated_one_is_not() {
-    let load = |dir: &Path, name: &str| -> Option<(PathBuf, String)> {
+    let load = |dir: &Path, _: &Path, name: &str, _: Option<&str>| -> Option<(PathBuf, String)> {
         match name {
             "bad" => Some((dir.join("bad.rs"), "pub struct FakeInFile;".into())),
             "good" => Some((dir.join("good.rs"), "pub struct FakeNeverRead;".into())),
@@ -359,13 +514,21 @@ fn the_shipped_set_includes_the_helper_and_its_path_dependencies() {
     assert!(!set.contains("paddock-power"), "family crates are out of scope");
 }
 
+/// Fewer files than this means the scan lost most of the tree (today about 180; the margin is for deletions).
+const MIN_FILES: usize = 100;
+
 #[test]
 fn no_shipped_crate_declares_an_ungated_test_double() {
     let (_, packages) = workspace();
     let mut offences = Vec::new();
+    let mut files = 0;
+    let mut gated = Vec::new();
     for name in shipped_set() {
         for root in &packages[&name].roots {
-            offences.extend(offences_of_root(root));
+            let r = report_of_root(root);
+            offences.extend(r.offences);
+            files += r.files;
+            gated.extend(r.gated_double_mods);
         }
     }
     assert!(
@@ -373,4 +536,15 @@ fn no_shipped_crate_declares_an_ungated_test_double() {
         "test doubles outside cfg(test) or the test-support feature:\n{}",
         offences.join("\n")
     );
+    // The positive control (ER-33): a clean result counts only if the scan read the tree and met the doubles it must pass.
+    assert!(
+        files >= MIN_FILES,
+        "check broken: the scan parsed only {files} files (expected at least {MIN_FILES})"
+    );
+    for want in ["dyno-platform/src/lib.rs", "dyno-core/src/wol/mod.rs"] {
+        assert!(
+            gated.iter().any(|f| f.replace('\\', "/").ends_with(want)),
+            "check broken: the scan never met the gated `mod fake` in {want}; met {gated:?}"
+        );
+    }
 }

@@ -67,7 +67,7 @@ export function forbiddenIn(treeOutput, pkg) {
 export function testSupportEnabledIn(treeOutput) {
   const found = new Set();
   for (const line of treeOutput.split('\n')) {
-    const m = /^(\S+) v\S+(?: \([^)]*\))?(?: (.*))?$/.exec(line.trim());
+    const m = /^(\S+) v\S+(?: \([^)]*\))?(?: (.*?))?(?: \(\*\))?$/.exec(line.trim());
     if (!m || !TEST_SUPPORT_CRATES.includes(m[1])) continue;
     if ((m[2] ?? '').split(',').map((f) => f.trim()).includes(TEST_SUPPORT_FEATURE)) found.add(m[1]);
   }
@@ -85,13 +85,15 @@ export function featureTree(root, pkg, edges) {
 }
 
 /**
- * The probe's positive control (ER-33): with dev edges, `dyno-agent` must show `dyno-platform` with `test-support`. Otherwise the probe
+ * The probe's positive control (ER-33): with dev edges, `dyno-agent` must show `dyno-platform`, `dyno-core` and `paddock-power` with `test-support`. Otherwise the probe
  * or the feature name has changed and a clean result of the real check would mean nothing: throw `check broken`.
  */
 export function assertProbeSees(root, treeOutput = featureTree(root, 'dyno-agent', 'normal,dev')) {
-  if (!testSupportEnabledIn(treeOutput).includes('dyno-platform')) {
+  const seen = testSupportEnabledIn(treeOutput);
+  const missing = TEST_SUPPORT_CRATES.filter((c) => !seen.includes(c));
+  if (missing.length) {
     throw new Error(
-      `check broken: \`cargo tree -p dyno-agent -e normal,dev\` does not show dyno-platform with ${TEST_SUPPORT_FEATURE}, so the probe cannot see the feature. ` +
+      `check broken: \`cargo tree -p dyno-agent -e normal,dev\` does not show ${missing.join(', ')} with ${TEST_SUPPORT_FEATURE} (dyno-platform's feature must enable all three), so the probe cannot see the feature. ` +
         'Fix the probe in scripts/check-shipped.mjs, or the feature name, before trusting this check.',
     );
   }
