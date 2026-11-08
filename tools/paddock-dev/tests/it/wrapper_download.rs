@@ -17,6 +17,8 @@ enum Reply {
     Body(Vec<u8>),
     /// Accepts the connection and never answers.
     Hang,
+    /// Answers with this status line (for example `401 Unauthorized`) and no body.
+    Status(&'static str),
 }
 
 /// A one-thread HTTP server: serves the routes it was given, 404 for the rest, and records every request's head.
@@ -55,6 +57,9 @@ impl Server {
                         let _ = c.write_all(&body);
                     }
                     Some(Reply::Hang) => hung.push(c),
+                    Some(Reply::Status(line)) => {
+                        let _ = write!(c, "HTTP/1.1 {line}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                    }
                     None => {
                         let _ = write!(c, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
                     }
@@ -307,4 +312,24 @@ fn a_release_style_fresh_build_never_downloads() {
     let (code, out, err) = s.run(&server, &[("PADDOCK_DEV_DOWNLOAD", "1"), ("PADDOCK_DEV_FRESH", "1")]);
     assert_eq!((code, out.trim()), (0, "built-by-shim"), "{err}");
     assert!(server.requests().is_empty());
+}
+
+#[test]
+fn a_refused_read_says_whether_a_token_was_sent_and_the_tool_is_built() {
+    let s = setup();
+    let server = Server::start(vec![(s.route("paddock-dev-test-host.sha256"), Reply::Status("401 Unauthorized"))]);
+    let (code, out, err) = s.run(&server, &[("PADDOCK_DEV_DOWNLOAD", "1")]);
+    assert_eq!((code, out.trim()), (0, "built-by-shim"), "{err}");
+    assert!(
+        err.contains("::warning::") && err.contains("HTTP 401") && err.contains("no read token is set"),
+        "{err}"
+    );
+    let s = setup();
+    let server = Server::start(vec![(s.route("paddock-dev-test-host.sha256"), Reply::Status("401 Unauthorized"))]);
+    let (code, _, err) = s.run(&server, &[("PADDOCK_DEV_DOWNLOAD", "1"), ("PADDOCK_DEV_TOKEN", "t0k")]);
+    assert_eq!(code, 0, "{err}");
+    assert!(
+        err.contains("HTTP 401") && err.contains("a read token was sent") && !err.contains("t0k"),
+        "{err}"
+    );
 }

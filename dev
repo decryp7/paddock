@@ -189,7 +189,7 @@ download_prebuilt() {
         return 1
         ;;
       *)
-        echo "::warning::./dev could not download $_base/paddock-dev/$hash/$_f (HTTP $_code after $(($(date +%s) - _t0)) s, timeout ${_tmo} s): $(head -c 300 "$_dl/curl.err" 2>/dev/null | tr '\n' ' ') Building it instead." >&2
+        echo "::warning::./dev could not download $_base/paddock-dev/$hash/$_f (HTTP $_code after $(($(date +%s) - _t0)) s, timeout ${_tmo} s, $([ -n "${PADDOCK_DEV_TOKEN:-${GITHUB_TOKEN:-}}" ] && echo 'a read token was sent' || echo 'no read token is set: export PADDOCK_DEV_TOKEN')): $(head -c 300 "$_dl/curl.err" 2>/dev/null | tr '\n' ' ') Building it instead." >&2
         rm -rf "$_dl"
         return 1
         ;;
