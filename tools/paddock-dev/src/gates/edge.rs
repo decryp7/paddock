@@ -111,34 +111,35 @@ pub fn register_history(root: &Path, base: &str) -> Result<Vec<Version>, String>
             None,
         )
         .map_err(|e| e.message)?;
-    let mut out: Vec<Version> = list
-        .lines()
-        .filter_map(|sha| {
-            let text = register_at(root, sha)?;
-            let mut message = Real.run("git", &["log", "-1", "--format=%B", sha], root, None).ok()?;
-            // A merge is one version: it carries the messages of the register commits it brings in (`sha^1..sha`).
-            if Real
-                .run("git", &["rev-parse", "--verify", "-q", &format!("{sha}^2")], root, None)
-                .is_ok()
-            {
-                let brought = Real
-                    .run(
-                        "git",
-                        &["log", "--format=%B", &format!("{sha}^1..{sha}"), "--", "docs/gates.toml"],
-                        root,
-                        None,
-                    )
-                    .ok()?;
-                message.push('\n');
-                message.push_str(&brought);
-            }
-            Some(Version {
-                sha: sha.to_string(),
-                message,
-                text,
-            })
-        })
-        .collect();
+    let mut out: Vec<Version> = Vec::new();
+    for sha in list.lines() {
+        // A commit that deleted the register has no version.
+        let Some(text) = register_at(root, sha) else { continue };
+        let mut message = Real
+            .run("git", &["log", "-1", "--format=%B", sha], root, None)
+            .map_err(|e| format!("git log {sha}: {}", e.message))?;
+        // A merge is one version: it carries the messages of the register commits it brings in (`sha^1..sha`).
+        if Real
+            .run("git", &["rev-parse", "--verify", "-q", &format!("{sha}^2")], root, None)
+            .is_ok()
+        {
+            let brought = Real
+                .run(
+                    "git",
+                    &["log", "--format=%B", &format!("{sha}^1..{sha}"), "--", "docs/gates.toml"],
+                    root,
+                    None,
+                )
+                .map_err(|e| format!("git log {sha}^1..{sha}: {}", e.message))?;
+            message.push('\n');
+            message.push_str(&brought);
+        }
+        out.push(Version {
+            sha: sha.to_string(),
+            message,
+            text,
+        });
+    }
     if !out.is_empty() {
         let messages = Real
             .run(

@@ -573,35 +573,101 @@ pub fn check_ratchets(r: &Register, base: Option<&Register>, release_tag: Option
                 });
             }
         }
-        if let Some(tag) = release_tag
-            && !(rt.not_yet.is_empty() && rt.clippy_not_yet.is_empty())
-            && version_at_least(tag, &rt.target)
-        {
+    }
+    if let Some(tag) = release_tag {
+        out.extend(ratchet_release_problems(r, tag));
+    }
+    out
+}
+
+/// Splits a release tag `debrief-v1.2.0-rc.1` into the app and the numeric core of its version (`[1, 2, 0]`); `None` when it has no
+/// `<app>-v<numbers>` shape. A pre-release suffix (`-rc.1`, `+build`) is dropped: a pre-release of a release counts as that release.
+fn parse_tag(tag: &str) -> Option<(String, Vec<u64>)> {
+    let (app, v) = tag.rsplit_once("-v")?;
+    let core = v.split(['-', '+']).next()?;
+    let nums = core.split('.').map(|p| p.parse().ok()).collect::<Option<Vec<u64>>>()?;
+    (!app.is_empty() && !nums.is_empty()).then(|| (app.to_string(), nums))
+}
+
+/// The problems a release tag has with the ratchets of its app: a tag of the target release or a later one is refused while a list
+/// is not empty, and a tag or target that cannot be read is refused (fail closed). Other apps' ratchets are not looked at.
+fn ratchet_release_problems(r: &Register, tag: &str) -> Vec<Problem> {
+    let mut out = Vec::new();
+    let Some((app, version)) = parse_tag(tag) else {
+        return vec![Problem {
+            message: format!(
+                "tag {tag} is refused: it is not of the form <app>-v<major>.<minor>.<patch>, so it cannot be compared with a ratchet's target"
+            ),
+            fix: "Tag as <app>-vX.Y.Z (a pre-release suffix such as -rc.1 is allowed).".into(),
+        }];
+    };
+    for rt in r.ratchet.iter().filter(|rt| rt.app == app) {
+        let Some((_, target)) = parse_tag(&rt.target) else {
             out.push(Problem {
                 message: format!(
-                    "tag {tag} is refused: [[ratchet]] {} {} still lists {} members in not_yet (target {})",
+                    "tag {tag} is refused: [[ratchet]] {} {} has a target `{}` that is not <app>-vX.Y.Z",
+                    rt.id, rt.app, rt.target
+                ),
+                fix: "Fix the target in docs/gates.toml.".into(),
+            });
+            continue;
+        };
+        let open = !rt.not_yet.is_empty() || !rt.clippy_not_yet.is_empty();
+        if open && version >= target {
+            let mut left = rt.not_yet.clone();
+            left.extend(rt.clippy_not_yet.iter().map(|p| format!("clippy path {p}")));
+            out.push(Problem {
+                message: format!(
+                    "tag {tag} is refused: [[ratchet]] {} {} still lists {} entries (target {}): {}",
                     rt.id,
                     rt.app,
-                    rt.not_yet.len(),
-                    rt.target
+                    left.len(),
+                    rt.target,
+                    left.join(", ")
                 ),
-                fix: "Opt the remaining members in (each clippy-clean under the preset) before tagging this release.".into(),
+                fix: "Opt the remaining members in (each clippy-clean under the preset) and clean up the listed clippy paths before tagging this release.".into(),
             });
         }
     }
     out
 }
 
-/// Whether `tag` (`debrief-v1.3.1`) names the same app as `target` (`debrief-v1.3.0`) and a version at least as new.
-fn version_at_least(tag: &str, target: &str) -> bool {
-    let split = |s: &str| -> Option<(String, Vec<u64>)> {
-        let (app, v) = s.rsplit_once("-v")?;
-        Some((app.to_string(), v.split('.').map(|p| p.parse().ok()).collect::<Option<Vec<u64>>>()?))
+/// Whether the release tag is refused by the ratchets, from the register text and the register at the base (ADR 0060 3.2). Only the
+/// ratchets of the tag's app count; an unrelated expired entry, another app's gap or a docs finding never refuses a release (ER-31).
+/// Returns the reasons it is refused; empty means the tag may be made.
+pub fn release_refusals(register: Option<&str>, base: Option<&str>, tag: &str) -> Vec<String> {
+    let line = |p: Problem| format!("{} Fix: {}", p.message, p.fix);
+    let Some(text) = register else {
+        return vec![format!(
+            "tag {tag} is refused: docs/gates.toml could not be read. Fix: restore the register."
+        )];
     };
-    match (split(tag), split(target)) {
-        (Some((a, v)), Some((b, w))) => a == b && v >= w,
-        _ => false,
+    let (reg, errors) = parse(text);
+    if !errors.is_empty() {
+        return errors
+            .into_iter()
+            .map(|e| format!("tag {tag} is refused: the register does not parse: {e}. Fix: repair docs/gates.toml."))
+            .collect();
     }
+    let Some((app, _)) = parse_tag(tag) else {
+        return ratchet_release_problems(&reg, tag).into_iter().map(line).collect();
+    };
+    let mine = Register {
+        ratchet: reg.ratchet.iter().filter(|r| r.app == app).cloned().collect(),
+        ..Register::default()
+    };
+    if mine.ratchet.is_empty() {
+        return Vec::new();
+    }
+    let Some(base_text) = base else {
+        return vec![format!(
+            "tag {tag} is refused: not measured, the register at the base revision could not be read, so a ratchet list cannot be compared. Fix: fetch the full history (fetch-depth: 0)."
+        )];
+    };
+    let base_reg = parse(base_text).0;
+    let mut out = check_ratchets(&mine, Some(&base_reg), None);
+    out.extend(ratchet_release_problems(&mine, tag));
+    out.into_iter().map(line).collect()
 }
 
 #[cfg(test)]
@@ -770,5 +836,88 @@ approved = "user"
         assert!(!check_ratchets(&parse(&clippy_only).0, None, Some("debrief-v1.3.0")).is_empty());
         let empty = GOOD.replace("[\"xtask\", \"examples/x\"]", "[]");
         assert!(check_ratchets(&parse(&empty).0, None, Some("debrief-v1.3.0")).is_empty());
+    }
+
+    const RATCHET: &str = r#"
+version = 1
+[[not_gated]]
+id = "C99"
+reason = "r"
+owner = "o"
+since = 2026-01-01
+review_by = 2026-02-01
+approved = "coordinator"
+
+[[ratchet]]
+id = "C13"
+app = "debrief"
+not_yet = ["xtask", "crates/a"]
+clippy_not_yet = ["std::env::temp_dir"]
+owner = "Debrief 1.2"
+target = "debrief-v1.2.0"
+approved = "user"
+"#;
+
+    #[test]
+    fn a_tag_is_refused_only_by_the_ratchets_of_its_app() {
+        // an unrelated entry that expired long ago does not refuse a patch tag below the target
+        assert!(release_refusals(Some(RATCHET), Some(RATCHET), "debrief-v1.1.5").is_empty());
+        // another app's tag is not looked at
+        assert!(release_refusals(Some(RATCHET), None, "dyno-v9.0.0").is_empty());
+        // the target release and later ones are refused while a list is not empty, naming what is left
+        for tag in ["debrief-v1.2.0", "debrief-v1.2.0-rc.1", "debrief-v1.2.1", "debrief-v2.0.0"] {
+            let r = release_refusals(Some(RATCHET), Some(RATCHET), tag);
+            assert_eq!(r.len(), 1, "{tag}: {r:?}");
+            assert!(
+                r[0].contains("xtask") && r[0].contains("crates/a") && r[0].contains("clippy path std::env::temp_dir"),
+                "{r:?}"
+            );
+        }
+        // good: both lists empty
+        let empty = RATCHET
+            .replace("not_yet = [\"xtask\", \"crates/a\"]", "not_yet = []")
+            .replace("clippy_not_yet = [\"std::env::temp_dir\"]", "clippy_not_yet = []");
+        assert!(release_refusals(Some(&empty), Some(RATCHET), "debrief-v1.2.0").is_empty());
+    }
+
+    #[test]
+    fn what_cannot_be_read_refuses_the_tag() {
+        assert!(release_refusals(None, Some(RATCHET), "debrief-v1.1.5")[0].contains("could not be read"));
+        assert!(release_refusals(Some("not = toml = at all"), Some(RATCHET), "debrief-v1.1.5")[0].contains("does not parse"));
+        // a ratchet of the app and no base: not measured
+        assert!(release_refusals(Some(RATCHET), None, "debrief-v1.1.5")[0].contains("not measured"));
+        // a tag that is not <app>-v<numbers>, or whose version is not numeric
+        for tag in ["v1.2.0", "debrief-vx.y", "debrief"] {
+            assert!(
+                release_refusals(Some(RATCHET), Some(RATCHET), tag)[0].contains("not of the form"),
+                "{tag}"
+            );
+        }
+        // growth against the base refuses too
+        let grown = RATCHET.replace("\"crates/a\"]", "\"crates/a\", \"crates/new\"]");
+        assert!(release_refusals(Some(&grown), Some(RATCHET), "debrief-v1.1.5")[0].contains("was added to not_yet"));
+    }
+
+    #[test]
+    fn the_committed_register_holds_debriefs_ratchet() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/gates.toml");
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let (r, errors) = parse(&text);
+        assert!(errors.is_empty(), "{errors:?}");
+        let rt = r
+            .ratchet
+            .iter()
+            .find(|x| x.id == "C13" && x.app == "debrief")
+            .expect("the register has Debrief's C13 [[ratchet]]");
+        assert_eq!(rt.target, "debrief-v1.2.0");
+        // approved by the user; the lists only shrink, so they hold at most the 46 members and the two paths of 2026-11-09
+        assert!(rt.not_yet.len() <= 46 && rt.clippy_not_yet.len() <= 2);
+        // Debrief runs C13 in debrief.yml, so it must not also be waived by a [[not_gated]]
+        assert!(
+            r.not_gated
+                .iter()
+                .filter(|e| e.id == "C13")
+                .all(|e| !e.apps.iter().any(|a| a == "debrief"))
+        );
     }
 }

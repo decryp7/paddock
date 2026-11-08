@@ -82,6 +82,21 @@ enum GatesCommand {
     List(GatesListArgs),
     /// The globs whose files change C100's answer (the planner's inputs).
     Inputs,
+    /// Refuse a release tag while the lint-adoption ratchets of its app are not empty (nothing else of C100 can refuse it).
+    Ratchet(GatesRatchetArgs),
+}
+
+#[derive(Args)]
+struct GatesRatchetArgs {
+    /// The repository root.
+    #[arg(long)]
+    root: Option<PathBuf>,
+    /// The release tag about to be made, `<app>-v<major>.<minor>.<patch>[-pre]`.
+    #[arg(long)]
+    release_tag: String,
+    /// The revision the register may only shrink against.
+    #[arg(long, default_value = "origin/main")]
+    base: String,
 }
 
 #[derive(Args)]
@@ -201,6 +216,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Gates {
             command: GatesCommand::Inputs,
         } => gates::command::inputs(),
+        Command::Gates {
+            command: GatesCommand::Ratchet(a),
+        } => gates::command::ratchet(a.root.as_deref(), &a.base, &a.release_tag),
         Command::Graph {
             command: GraphCommand::Affected(a),
         } => plan::command(&plan::Request {
