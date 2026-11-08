@@ -747,10 +747,11 @@ pub fn apply<O: IconOps>(ops: &mut O, state: &TrayState, cmd: TrayCommand) -> Re
         TrayCommand::Sync { specs, initial } => {
             let plan = plan_sync(&lock(&state.items), &specs);
             logging::info(&format!(
-                "tray sync: {} item(s) wanted, removing {:?}, making {:?}",
+                "tray sync: {} item(s) wanted, removing {:?}, making {:?}, keeping {:?} with a new style or metric",
                 specs.len(),
                 plan.remove,
-                plan.create.iter().map(|s| s.id.as_str()).collect::<Vec<_>>()
+                plan.create.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+                plan.update.iter().map(|s| s.id.as_str()).collect::<Vec<_>>()
             ));
             for id in &plan.remove {
                 logging::info(&format!("tray icon {}: removing it (it is no longer in the layout)", tray_id(id)));
@@ -759,6 +760,17 @@ pub fn apply<O: IconOps>(ops: &mut O, state: &TrayState, cmd: TrayCommand) -> Re
                 ops.remove(id);
                 forget(state, id);
                 lock(&state.wanted).remove(id);
+            }
+            for spec in &plan.update {
+                // The icon stays: its new spec is recorded and its first frame painted at once (with the tooltip sent again), so
+                // the new style shows without waiting for the next reading.
+                let first = initial.iter().find(|(id, _)| id == &spec.id).map(|(_, f)| f.clone());
+                lock(&state.wanted).insert(spec.id.clone(), (spec.clone(), first.clone()));
+                lock(&state.items).insert(spec.id.clone(), spec.clone());
+                lock(&state.drawn).remove(&spec.id);
+                if let Some(frame) = first {
+                    paint_one(ops, state, &spec.id, &frame);
+                }
             }
             let mut first_error = None;
             for spec in &plan.create {
@@ -1308,6 +1320,31 @@ mod tests {
         let specs = items(n);
         let initial = frames(&specs);
         apply(ops, state, TrayCommand::Sync { specs, initial })
+    }
+
+    #[test]
+    fn a_new_style_on_the_same_id_keeps_the_os_icon_and_repaints_it() {
+        let state = TrayState::default();
+        let mut ops = FakeOps::new();
+        sync(&mut ops, &state, 2).unwrap();
+        let (made, removed, pictures) = (ops.made, ops.removed, ops.pictures);
+        // The first item becomes a graph: same id, another style.
+        let mut specs = items(2);
+        specs[0].glyph = crate::tray_model::Glyph::Graph;
+        let initial = frames(&specs);
+        apply(
+            &mut ops,
+            &state,
+            TrayCommand::Sync {
+                specs: specs.clone(),
+                initial,
+            },
+        )
+        .unwrap();
+        assert_eq!((ops.made, ops.removed), (made, removed), "no icon removed or made");
+        assert_eq!(ops.pictures, pictures + 1, "the changed item is repainted at once");
+        assert_eq!(lock(&state.items).get("cpu-0"), Some(&specs[0]), "its new spec is recorded");
+        assert_eq!(ops.live.len(), 2);
     }
 
     #[test]

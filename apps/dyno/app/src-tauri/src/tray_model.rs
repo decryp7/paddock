@@ -161,26 +161,31 @@ pub fn parse_items(text: &str) -> Vec<ItemSpec> {
     out
 }
 
-/// What changing the icons from `current` to `wanted` takes: only items that are gone or differ are removed, only items that are new
-/// or differ are made, so an unchanged item keeps its native icon (and with it its place in the bar).
+/// What changing the icons from `current` to `wanted` takes. The OS icon belongs to the item's id (its identity, and on Windows
+/// its pin and its place among the pinned icons; on macOS its saved position), and nothing else of the spec is native: only items
+/// that are gone are removed, only new ids are made, and an item whose style, format, label or metric changed keeps its icon and
+/// is repainted with its next frame.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SyncPlan {
     /// Ids to remove, sorted.
     pub remove: Vec<String>,
     /// Specs to make, in `wanted` order.
     pub create: Vec<ItemSpec>,
+    /// Specs that changed on an icon that stays, in `wanted` order.
+    pub update: Vec<ItemSpec>,
 }
 
 /// The [`SyncPlan`] from the icons now there to the wanted specs.
 pub fn plan_sync(current: &std::collections::HashMap<String, ItemSpec>, wanted: &[ItemSpec]) -> SyncPlan {
-    let mut remove: Vec<String> = current
-        .iter()
-        .filter(|(id, old)| wanted.iter().find(|w| &w.id == *id).is_none_or(|w| w != *old))
-        .map(|(id, _)| id.clone())
-        .collect();
+    let mut remove: Vec<String> = current.keys().filter(|id| !wanted.iter().any(|w| &w.id == *id)).cloned().collect();
     remove.sort();
-    let create = wanted.iter().filter(|w| current.get(&w.id) != Some(*w)).cloned().collect();
-    SyncPlan { remove, create }
+    let create = wanted.iter().filter(|w| !current.contains_key(&w.id)).cloned().collect();
+    let update = wanted
+        .iter()
+        .filter(|w| current.get(&w.id).is_some_and(|old| old != *w))
+        .cloned()
+        .collect();
+    SyncPlan { remove, create, update }
 }
 
 /// What one drawn frame costs the native icon. The picture is set in ONE call when it changed (a second call renders the
@@ -544,12 +549,19 @@ impl TrayItems {
                 changed.push((self.specs[i].id.clone(), frame));
             }
         }
-        // Kept for graphs made later; the process table is the large part and no item reads it (they read the top lists).
-        let mut kept = u.clone();
-        kept.processes = None;
-        kept.groups = None;
-        kept.other_users = None;
-        self.recent.push_back(kept);
+        // Kept for graphs made later, without the process table, the groups and the other users (the large parts, which no item
+        // reads: they read the top lists); they are never cloned.
+        self.recent.push_back(LiveUpdate {
+            system: u.system.clone(),
+            pressure: u.pressure,
+            top_cpu: u.top_cpu.clone(),
+            top_memory: u.top_memory.clone(),
+            overhead: u.overhead,
+            processes: None,
+            groups: None,
+            other_users: None,
+            via: u.via.clone(),
+        });
         while self.recent.len() > HISTORY {
             self.recent.pop_front();
         }
@@ -782,13 +794,11 @@ mod tests {
         let (old, new) = (items_from_settings(&before.placements), items_from_settings(&after.placements));
         let current: std::collections::HashMap<String, ItemSpec> = old.iter().map(|s| (s.id.clone(), s.clone())).collect();
         let plan = plan_sync(&current, &new);
-        assert_eq!(plan.remove, [id.to_string()], "only the changed item goes");
-        assert_eq!(
-            plan.create.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
-            [id.as_str()],
-            "and comes back with the same id"
-        );
-        assert_eq!(PlacementId::new(&plan.create[0].id).expect("an id"), id);
+        // The OS icon stays (on Windows its pin and its place among the pinned icons go with the icon, not with a new one made
+        // with the same GUID): nothing is removed or made, the changed item is repainted.
+        assert!(plan.remove.is_empty() && plan.create.is_empty(), "{plan:?}");
+        assert_eq!(plan.update.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), [id.as_str()]);
+        assert_eq!(PlacementId::new(&plan.update[0].id).expect("an id"), id);
         for env in [win_env(16), win_env(24), mac_env()] {
             let picture = |specs: &[ItemSpec]| {
                 let mut t = TrayItems::new(specs.to_vec(), env.clone());
@@ -1156,7 +1166,7 @@ mod tests {
     }
 
     #[test]
-    fn only_changed_items_are_removed_and_made() {
+    fn only_items_that_come_or_go_are_made_or_removed_and_a_changed_one_keeps_its_icon() {
         use std::collections::HashMap;
         let a = ItemSpec::new("cpu-1", Metric::CpuTotal, Glyph::Ring);
         let b = ItemSpec::new("memory-2", Metric::Memory, Glyph::Number);
@@ -1168,10 +1178,13 @@ mod tests {
             "nothing changed"
         );
         let b2 = ItemSpec::new("memory-2", Metric::Memory, Glyph::Graph);
+        let mut a2 = a.clone();
+        a2.metric = Metric::GpuLoad;
         let d = ItemSpec::new("gpu-4", Metric::GpuLoad, Glyph::Ring);
-        let plan = plan_sync(&current, &[a.clone(), b2.clone(), d.clone()]);
-        assert_eq!(plan.remove, ["memory-2", "swap-3"]);
-        assert_eq!(plan.create, [b2, d]);
+        let plan = plan_sync(&current, &[a2.clone(), b2.clone(), d.clone()]);
+        assert_eq!(plan.remove, ["swap-3"], "only the item that is gone");
+        assert_eq!(plan.create, [d], "only the new item");
+        assert_eq!(plan.update, [a2, b2], "a new style or metric on the same id keeps the icon");
         assert_eq!(plan_sync(&HashMap::new(), std::slice::from_ref(&a)).create, [a]);
     }
 
