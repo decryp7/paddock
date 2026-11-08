@@ -275,4 +275,15 @@ mod tests {
             TransportErrorKind::Connect
         );
     }
+
+    #[test]
+    fn the_shared_agent_builds_with_and_without_a_proxy_and_takes_the_configs_limits() {
+        let config = HttpConfig::default();
+        assert!(ureq_agent(&config, None).is_ok());
+        let proxy = ProxyServer::new(ProxyScheme::Http, "proxy.example", 3128)
+            .with_credentials("alice", "s3cret");
+        assert!(ureq_agent(&config, Some(&proxy)).is_ok());
+        let cfg = ureq_config(&config, Some(&proxy)).unwrap();
+        assert_eq!(cfg.max_redirects(), config.max_redirects);
+    }
 }

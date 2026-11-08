@@ -2,6 +2,10 @@
 //! (`pcblist_n`, Dyno ADR 0026: no descriptor of another program is touched), Linux `netstat2` (`/proc/net` with the
 //! inode-to-pid map). Read-only. Another user's processes cannot be resolved without elevation on Linux: those sockets
 //! come back with no pid and the page says so; Dyno never asks for root for this.
+#![cfg_attr(
+    not(test),
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
+)]
 
 use dyno_core::network::SocketRow;
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -58,8 +62,9 @@ impl NetworkSockets for OsSockets {
         // One socket can come back once per holder (macOS) or once with all its holders (Linux); a child holds its
         // parent's sockets between fork and exec and keeps one it inherited. Rows are merged per socket and listed once
         // per owner, never once per holder or for whichever holder the OS listed first. Rows with the same tuple
-        // (protocol, local address and port, peer, state) and no visible pid (another user's sockets without elevation)
-        // collapse into one row: the OS gives nothing that would tell them apart.
+        // (protocol, local address and port, peer, state, inode) and no visible pid (another user's sockets without elevation)
+        // collapse into one row. The inode stays in the row so the agent can ask the helper who holds it; the agent folds rows
+        // that differ only by inode back together once it has (or has not) learned the owners.
         let mut holders: Vec<(SocketRow, Vec<u32>)> = Vec::new();
         let mut seen: std::collections::HashMap<SocketRow, usize> = std::collections::HashMap::new();
         for i in infos {
@@ -73,6 +78,7 @@ impl NetworkSockets for OsSockets {
                         remote: (st != SocketState::Listen).then_some((t.remote_addr, t.remote_port)),
                         state: st,
                         pid: None,
+                        inode: socket_inode(i.inode),
                     }
                 }
                 ProtocolSocketInfo::Udp(u) => SocketRow {
@@ -82,6 +88,7 @@ impl NetworkSockets for OsSockets {
                     remote: None,
                     state: SocketState::Listen,
                     pid: None,
+                    inode: socket_inode(i.inode),
                 },
             };
             match seen.get(&row) {
@@ -106,10 +113,16 @@ impl NetworkSockets for OsSockets {
     }
 }
 
+/// The inode of a socket, `None` for the kernel's placeholder 0 (a `TIME_WAIT` entry belongs to no socket).
+#[cfg(all(unix, not(target_os = "macos")))]
+fn socket_inode(inode: u32) -> Option<u64> {
+    (inode != 0).then_some(u64::from(inode))
+}
+
 /// The parents of `pids` (the holders of shared sockets: usually none, so usually nothing is read). A holder whose parent cannot
 /// be read yet is listed on its own until the next listing.
 #[cfg(all(unix, not(target_os = "macos")))]
-fn parents_of(pids: impl Iterator<Item = u32>) -> std::collections::HashMap<u32, u32> {
+pub fn parents_of(pids: impl Iterator<Item = u32>) -> std::collections::HashMap<u32, u32> {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
     let pids: Vec<Pid> = pids.map(Pid::from_u32).collect();
     if pids.is_empty() {
@@ -157,19 +170,19 @@ impl ProcessTraffic for OsTraffic {
 
     #[cfg(target_os = "linux")]
     fn counters(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
-        let _ = NETTOP_TIMEOUT;
+        let _: Duration = NETTOP_TIMEOUT;
         crate::linux::traffic::LinuxTraffic::new(crate::linux::paths::HostPaths::host()).counters()
     }
 
     #[cfg(windows)]
     fn counters(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
-        let _ = NETTOP_TIMEOUT;
+        let _: Duration = NETTOP_TIMEOUT;
         crate::windows::traffic::WinTraffic.counters()
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     fn counters(&self) -> Result<Vec<TrafficCounter>, PlatformError> {
-        let _ = NETTOP_TIMEOUT;
+        let _: Duration = NETTOP_TIMEOUT;
         Err(PlatformError::Unsupported(
             "Traffic per program is not available on this system.".into(),
         ))

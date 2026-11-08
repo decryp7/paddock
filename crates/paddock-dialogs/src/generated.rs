@@ -27,6 +27,10 @@ fn text() -> String {
         crate::DialogRequest::decl(),
         crate::DialogInfo::decl(),
         crate::DialogStart::decl(),
+        crate::DialogReadyWire::decl(),
+        crate::SizeModeName::decl(),
+        crate::DialogSizeModeEvent::decl(),
+        crate::DialogRemeasureEvent::decl(),
         crate::DialogResult::decl(),
         crate::DialogShown::decl(),
         crate::DialogClosed::decl(),
@@ -44,13 +48,15 @@ fn text() -> String {
         .join(", ");
     format!(
         "{header}{types}\
-/** The events of the dialog layer: to the opener (`result`, `shown`, `closed`) and to the dialog (`closeRequested`, `inputs`). */
+/** The events of the dialog layer: to the opener (`result`, `shown`, `closed`) and to the dialog (`closeRequested`, `inputs`, `sizeMode`, `remeasure`). */
 export const DIALOG_EVENTS = {{
   result: '{}',
   shown: '{}',
   closed: '{}',
   closeRequested: '{}',
   inputs: '{}',
+  sizeMode: '{}',
+  remeasure: '{}',
 }} as const;
 
 /** The commands every dialog window may call whatever its contract says. */
@@ -61,6 +67,8 @@ export const DIALOG_BASE_COMMANDS = [{base}] as const;
         crate::CLOSED_EVENT,
         crate::CLOSE_REQUESTED_EVENT,
         crate::INPUTS_EVENT,
+        crate::SIZE_MODE_EVENT,
+        crate::REMEASURE_EVENT,
     )
 }
 

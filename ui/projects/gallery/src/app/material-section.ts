@@ -91,6 +91,11 @@ const RUNS: Run[] = [
       <p>The shared Material 3 theme mapped to the tokens: follows the theme, accent and density chosen above.</p>
 
       <h3>Buttons (matButton)</h3>
+      <!-- A label beside a long text in a tight row: the button keeps its label on one line (no button label wraps). -->
+      <div class="gal-tight" data-testid="material-tight-row">
+        <span>Deletes the saved maps now. The next scan is kept again if saving is on, and this line is long on purpose.</span>
+        <button matButton="outlined">Forget saved maps</button>
+      </div>
       <div class="gal-row gal-row--center">
         <button matButton="filled">Save changes</button>
         <button matButton="outlined">Cancel</button>

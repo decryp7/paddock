@@ -21,14 +21,20 @@ The `.deb` depends on `libwebkit2gtk-4.1-0`, `libgtk-3-0` and `libayatana-appind
 sudo apt install ./Dyno_<version>_amd64.deb      # or run the AppImage
 ```
 
-Open Dyno; in **Settings** turn on **Launch at login**: Dyno installs a systemd **user** unit
+Open Dyno; **Launch at login** is on by default (Settings can turn it off) and the first run installs a systemd **user** unit
 (`~/.config/systemd/user/dyno-agent.service`: `Restart=always`, `RestartSec=5`, `Nice=10`, `CPUWeight=20`,
 `IOSchedulingClass=best-effort`, `IOSchedulingPriority=7`, `MemoryHigh=256M`) and enables it with `systemctl --user enable --now`. No root is needed. To keep the
 agent measuring when nobody is logged in, run `loginctl enable-linger $USER` once; that is your decision, Dyno never runs it.
 
+Registering, updating and removing the unit is the shared service manager's (`paddock_service::Manager` over its systemd backend, ADR 0056): the unit
+is written again once after an update when its text changed, and what you switched yourself is never undone. If you ran `systemctl --user disable dyno-agent`,
+Dyno leaves the unit disabled and says which command switches it on (`systemctl --user enable --now dyno-agent.service`); a unit you stopped is
+left stopped until the next start of Dyno brings back what **Quit and stop measuring** stopped. Without lingering the user's systemd
+manager, and so the agent, ends with your last logout (the unit stays enabled and starts at the next login).
+
 Without systemd (or when the unit is not installed) the app starts the agent itself and it stops with your session.
 
-The tray needs a status-notifier host (GNOME: the AppIndicator extension). Without a tray, closing the window quits the app.
+The tray needs a status-notifier host (GNOME: the AppIndicator extension, package `gnome-shell-extension-appindicator`). Dyno reads the host from the session bus (`org.kde.StatusNotifierWatcher`, `IsStatusNotifierHostRegistered`) at the start and then on its D-Bus signals (`NameOwnerChanged` of the watcher, `StatusNotifierHostRegistered`/`Unregistered`; a look every 60 seconds only as a safety net): without one, Settings > Menu bar and the status bar say what to turn on, a start at login opens the window, and closing the window quits the app; when a host appears the missing icons are added again and the note goes. The log lines start with `tray host:`.
 
 ## 3. Verify
 
@@ -62,7 +68,7 @@ any command in the same container; `--clean-volumes` deletes its two named volum
 ## After updating Dyno
 
 Install the new package; the app asks the old agent to exit and `Restart=always` starts the new one. If the unit points at a
-removed AppImage path, `dyno-agent service ensure` rewrites it.
+removed AppImage path, `dyno-agent service ensure` rewrites it (a unit you disabled stays disabled; `dyno-agent service install` says what to run).
 
 ## Logs and files
 
@@ -70,7 +76,7 @@ removed AppImage path, `dyno-agent service ensure` rewrites it.
 
 ## What Dyno can read without root
 
-Dyno 1.0 installs no helper and no system service. With `hidepid=0` (the default) `/proc` gives CPU and owner for every
+Dyno installs no helper and no system service unless you turn on Administrator readings (the `.deb` ships `dyno-helper.service` disabled, with a polkit rule; the AppImage has no helper). With `hidepid=0` (the default) `/proc` gives CPU and owner for every
 process (memory for other accounts' processes is resident memory only, which overstates shared memory, so it says *Unavailable* with that reason); disk I/O and the program path need ptrace rights, so for system processes and other accounts they say *Unavailable: Linux
 shows this only for your own processes*. System processes (uid below `UID_MIN` in `/etc/login.defs`, default 1000) are listed one
 by one; other accounts' processes are one **Other users** row with the number of processes and CPU. With `hidepid=1` or `2` the

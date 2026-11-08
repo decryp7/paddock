@@ -214,6 +214,8 @@ pub fn main_with(args: &[String], dirs: &AppDirs, version: &str) -> i32 {
             .map_err(|e| e.to_string())
             .and_then(|mut m| f(&mut m))
     };
+    // Ctrl-C ends this one-shot process: the record is written before each OS step, so that is a crash the next start recovers from
+    // (ADR 0056); nothing else cancels it.
     let cancel = std::sync::atomic::AtomicBool::new(false);
     match args.first().map(String::as_str) {
         Some("check") => say(with_manager(&mut |m| {

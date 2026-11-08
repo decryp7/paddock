@@ -539,11 +539,26 @@
       <trans-unit id="pd.diag.lede" datatype="html">
         <source>Nothing is sent anywhere. This makes a file on your computer that you can look through, and attach to your report yourself.</source>
       </trans-unit>
+      <trans-unit id="pd.diag.may-remain" datatype="html">
+        <source>File names outside your home folder may remain, and so may other computers' names and text the app imported or showed.</source>
+      </trans-unit>
       <trans-unit id="pd.diag.no-preview" datatype="html">
         <source>The report could not be put together.</source>
       </trans-unit>
       <trans-unit id="pd.diag.no-preview-title" datatype="html">
         <source>The report could not be put together.</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.not-in" datatype="html">
+        <source>Not in the report</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.not-in-contents" datatype="html">
+        <source>The contents of your documents and files.</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.not-in-personal" datatype="html">
+        <source>Your user name, home folder, machine name, e-mail addresses and IP addresses (they are replaced).</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.not-in-secrets" datatype="html">
+        <source>Passwords, tokens and keys (they are replaced where the app can recognise them).</source>
       </trans-unit>
       <trans-unit id="pd.diag.not-saved" datatype="html">
         <source>The report was not saved.</source>
@@ -553,6 +568,9 @@
       </trans-unit>
       <trans-unit id="pd.diag.open" datatype="html">
         <source>Report a problem…</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.public" datatype="html">
+        <source>Issue reports are public. Look through the zip first.</source>
       </trans-unit>
       <trans-unit id="pd.diag.removed" datatype="html">
         <source>Removed from the files: <x id="list"/>.</source>
@@ -830,6 +848,12 @@
       <trans-unit id="pd.health.see-what-happened" datatype="html">
         <source>See what happened</source>
       </trans-unit>
+      <trans-unit id="pd.health.state.agent-mismatch" datatype="html">
+        <source>needs a reinstall</source>
+      </trans-unit>
+      <trans-unit id="pd.health.state.busy" datatype="html">
+        <source>busy</source>
+      </trans-unit>
       <trans-unit id="pd.health.state.degraded" datatype="html">
         <source>limited</source>
       </trans-unit>
@@ -860,6 +884,9 @@
       <trans-unit id="pd.health.state.not-running" datatype="html">
         <source>not running</source>
       </trans-unit>
+      <trans-unit id="pd.health.state.other-build-returns" datatype="html">
+        <source>another build keeps starting</source>
+      </trans-unit>
       <trans-unit id="pd.health.state.other-holds" datatype="html">
         <source>held by another agent</source>
       </trans-unit>
@@ -878,8 +905,14 @@
       <trans-unit id="pd.health.state.refused" datatype="html">
         <source>refused by the system</source>
       </trans-unit>
+      <trans-unit id="pd.health.state.registering-service" datatype="html">
+        <source>waiting for the background service</source>
+      </trans-unit>
       <trans-unit id="pd.health.state.repairing" datatype="html">
         <source>repairing</source>
+      </trans-unit>
+      <trans-unit id="pd.health.state.setup-version" datatype="html">
+        <source>out of date</source>
       </trans-unit>
       <trans-unit id="pd.health.state.still-starting" datatype="html">
         <source>still starting</source>
@@ -890,8 +923,14 @@
       <trans-unit id="pd.health.state.system-silent" datatype="html">
         <source>system not answering</source>
       </trans-unit>
+      <trans-unit id="pd.health.state.tray-hidden" datatype="html">
+        <source>not shown</source>
+      </trans-unit>
       <trans-unit id="pd.health.state.unavailable" datatype="html">
         <source>not available</source>
+      </trans-unit>
+      <trans-unit id="pd.health.state.updated-restart" datatype="html">
+        <source>updated: restart to finish</source>
       </trans-unit>
       <trans-unit id="pd.health.state.waiting-service" datatype="html">
         <source>waiting for the login service</source>
@@ -1085,6 +1124,24 @@
       <trans-unit id="pd.mcp.col-tool" datatype="html">
         <source>Tool</source>
       </trans-unit>
+      <trans-unit id="pd.mcp.conn-failed" datatype="html">
+        <source>Not listening: <x id="message"/></source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.conn-how" datatype="html">
+        <source>A client connects with its key while this app is running (it can stay in the tray). Programs that start commands, such as Claude Desktop, run the app's command line with the key in the environment. When the app is quit, clients cannot connect.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.conn-listening" datatype="html">
+        <source>Listening on this computer only, port <x id="port"/>. Clients find it in <x id="file"/>.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.conn-no-key" datatype="html">
+        <source>Not listening yet: add a client below to get a key. Nothing listens until a key exists.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.conn-off" datatype="html">
+        <source>Not listening: AI access is off.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.conn-title" datatype="html">
+        <source>Connection</source>
+      </trans-unit>
       <trans-unit id="pd.mcp.dismiss" datatype="html">
         <source>Dismiss</source>
       </trans-unit>
@@ -1135,6 +1192,9 @@
       </trans-unit>
       <trans-unit id="pd.mcp.keys-limit" datatype="html">
         <source><x id="max"/> keys are in use, the most there can be. Revoke one you no longer need before adding another.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.keys-problem-title" datatype="html">
+        <source>The saved keys are not in use, so no client can connect.</source>
       </trans-unit>
       <trans-unit id="pd.mcp.lede" datatype="html">
         <source>Lets a program on this computer, such as a local AI assistant, ask this app questions over the Model Context Protocol. It is off until you turn it on, it only works on this computer, and every call is logged below.</source>
@@ -1333,6 +1393,15 @@
       </trans-unit>
       <trans-unit id="pd.notifications.select-all" datatype="html">
         <source>Select all notifications</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.select-all-label" datatype="html">
+        <source>Select all</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.select-mode" datatype="html">
+        <source>Select</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.select-mode-done" datatype="html">
+        <source>Done</source>
       </trans-unit>
       <trans-unit id="pd.notifications.show" datatype="html">
         <source>Show in Notifications</source>
@@ -2429,6 +2498,9 @@
       <trans-unit id="pd.ui.sparkline" datatype="html">
         <source>Trend</source>
       </trans-unit>
+      <trans-unit id="pd.ui.sparkline.second" datatype="html">
+        <source>Second line</source>
+      </trans-unit>
       <trans-unit id="pd.ui.sunburst.error" datatype="html">
         <source>Could not draw the chart</source>
       </trans-unit>
@@ -2537,8 +2609,17 @@
       <trans-unit id="pd.updates.idle" datatype="html">
         <source>Not checked yet.</source>
       </trans-unit>
+      <trans-unit id="pd.updates.install" datatype="html">
+        <source>Install</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.install-again" datatype="html">
+        <source>Install again</source>
+      </trans-unit>
       <trans-unit id="pd.updates.install-on-quit" datatype="html">
         <source>Install when the app quits</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.installer-running" datatype="html">
+        <source>An update is being installed. This window updates when the installer is done.</source>
       </trans-unit>
       <trans-unit id="pd.updates.installing" datatype="html">
         <source>Installing version <x id="version"/>…</source>

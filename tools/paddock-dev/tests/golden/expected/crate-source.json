@@ -1,7 +1,7 @@
 {
  "all": false,
  "crates": true,
- "ui": false,
+ "ui": true,
  "eslint": false,
  "conformance": false,
  "tools": false,
@@ -33,6 +33,9 @@
   "crates": [
    "crates/a/src/lib.rs",
    "cargo crates/b reaches crates/a"
+  ],
+  "ui": [
+   "ui cause-codes.spec.ts scans crates/a/src/lib.rs"
   ]
  }
 }

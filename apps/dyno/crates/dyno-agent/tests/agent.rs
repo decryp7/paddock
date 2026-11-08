@@ -105,6 +105,30 @@ impl Harness {
         ask(&peer, Request::Subscribe { detail }).unwrap();
         (peer, rx)
     }
+
+    /// A connection that keeps every alarm, alert and activity push it receives.
+    fn event_pushes(&self) -> (BodyPeer<Message>, Receiver<Message>) {
+        let d = dyno_agent::discovery::Discovery::read(&self.dirs.discovery()).unwrap();
+        let conn = dyno_agent::wire::connect(&d.endpoint, &d.token().unwrap()).unwrap();
+        let (tx, rx) = channel();
+        let peer = BodyPeer::start(
+            conn,
+            BodyOptions::new("the agent").on_push(move |m| {
+                if matches!(m, Message::Alarm(_) | Message::Alert(_) | Message::Activity(_)) {
+                    let _ = tx.send(m);
+                }
+            }),
+        )
+        .unwrap();
+        ask(
+            &peer,
+            Request::Subscribe {
+                detail: LiveDetail::Summary,
+            },
+        )
+        .unwrap();
+        (peer, rx)
+    }
 }
 
 /// Waits for the data folder's lock to be free again. A test that forks (the child that has not exec'd yet) holds a copy of
@@ -357,6 +381,7 @@ fn the_network_page_shows_the_platforms_sockets_and_nothing_of_the_machine() {
                     remote: None,
                     state: SocketState::Listen,
                     pid: Some(100),
+                    inode: None,
                 });
             });
         },
@@ -399,6 +424,7 @@ fn the_inventory_is_read_once_and_cached() {
 fn a_low_disk_alert_raises_one_alarm_that_can_be_acknowledged_noted_shelved_and_muted() {
     use dyno_core::alarms::{AlarmFilter, AlarmState, ShelveFor};
     let h = Harness::start();
+    let (_watching, pushes) = h.event_pushes();
     h.fake.push_sample(full_disk_sample());
     let peer = h.client();
     ask(
@@ -410,6 +436,18 @@ fn a_low_disk_alert_raises_one_alarm_that_can_be_acknowledged_noted_shelved_and_
     .unwrap();
     let alarm = wait_for_alarm(&peer);
     assert_eq!(alarm.rule, "alert:lowDisk");
+    // Every connected window is told: the alert, and the alarm's raise with its notification.
+    let (mut alert, mut raised) = (false, false);
+    while !(alert && raised) {
+        match pushes
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the alert and the alarm are pushed")
+        {
+            Message::Alert(a) => alert |= a.kind == dyno_core::alerts::AlertKind::LowDisk,
+            Message::Alarm(c) => raised |= c.alarm.id == alarm.id && c.notify && c.kind == dyno_core::alarms::ChangeKind::Raised,
+            _ => {}
+        }
+    }
     assert_eq!(alarm.state, AlarmState::Active);
     assert_eq!(alarm.severity, dyno_core::health::Severity::Critical);
 
@@ -597,35 +635,22 @@ fn the_flight_recorder_captures_on_request_and_when_an_alarm_fires() {
 }
 
 #[test]
-fn the_diagnostics_bundle_previews_and_saves_a_redacted_zip() {
+fn the_agent_hands_over_its_data_files_for_the_report() {
     let h = Harness::start();
     let peer = h.client();
-    let Reply::DiagnosticsPreview(p) = ask_within(&peer, Request::DiagnosticsPreview, SLOW).unwrap() else {
-        panic!("preview")
+    let Reply::DiagnosticsFiles(f) = ask_within(&peer, Request::DiagnosticsFiles, SLOW).unwrap() else {
+        panic!("files")
     };
-    let names: Vec<&str> = p.files.iter().map(|f| f.path.as_str()).collect();
-    assert!(names.contains(&"system/inventory.json") && names.contains(&"settings.json") && names.contains(&"manifest.json"));
-    assert!(p.total_bytes > 0);
-    let dest = h._tmp.path().join("diag.zip");
-    let Reply::DiagnosticsSaved(saved) = ask(
-        &peer,
-        Request::SaveDiagnostics {
-            path: dest.to_string_lossy().into_owned(),
-        },
-    )
-    .unwrap() else {
-        panic!("saved")
-    };
-    assert_eq!(saved.files as usize, p.files.len());
-    assert!(std::fs::metadata(&dest).unwrap().len() == saved.bytes);
-    // Refused: relative path, wrong extension, missing folder.
-    for bad in [
-        "diag.zip".to_string(),
-        h._tmp.path().join("diag.txt").to_string_lossy().into_owned(),
-        h._tmp.path().join("nope").join("d.zip").to_string_lossy().into_owned(),
-    ] {
-        assert!(ask(&peer, Request::SaveDiagnostics { path: bad }).is_err());
-    }
+    let names: Vec<&str> = f.files.iter().map(|f| f.name.as_str()).collect();
+    assert!(
+        names.contains(&"system/inventory.json") && names.contains(&"alarms/open.json"),
+        "{names:?}"
+    );
+    assert!(names.iter().all(|n| !n.starts_with("logs/") && *n != "manifest.json"), "{names:?}");
+    assert!(f
+        .files
+        .iter()
+        .all(|f| !f.text.is_empty() && dyno_core::diagnostics::MAX_PATH_CHARS >= f.name.len()));
 }
 
 // ------------------------------------------------------------------------------------------------------- disk map
@@ -777,6 +802,14 @@ fn shared(h: &Harness) -> std::sync::Arc<dyno_agent::agent::Shared> {
     h.running.as_ref().unwrap().shared.clone()
 }
 
+/// The code the agent refused a request with.
+fn ask_code(peer: &BodyPeer<Message>, request: Request) -> dyno_core::protocol::ErrorCode {
+    match peer.call(Message::Request(Box::new(request)), Duration::from_secs(15)) {
+        Ok(Message::Reply(r)) => (*r).expect_err("the request is refused").code,
+        other => panic!("not a reply: {other:?}"),
+    }
+}
+
 fn alarm_rules(peer: &BodyPeer<Message>) -> Vec<String> {
     let Reply::Alarms(list) = ask(
         peer,
@@ -920,6 +953,16 @@ fn lifespan_forecasts_come_from_stored_readings_and_a_worn_battery_raises_an_ala
     assert!(alarm_rules(&peer).contains(&"lifespan:battery".to_string()));
 }
 
+/// A wear reader that waits for the test to let it answer, so the test controls when the slow read ends.
+struct GatedWear(std::sync::mpsc::Receiver<()>);
+
+impl dyno_core::ports::DiskWearSource for GatedWear {
+    fn read(&mut self) -> dyno_core::metrics::Reading<Vec<dyno_core::hardware::DiskWear>> {
+        let _ = self.0.recv();
+        dyno_core::metrics::Reading::unavailable("the tool is gone; wear is not read")
+    }
+}
+
 #[test]
 fn the_agent_records_and_logs_the_first_sighting_at_start_without_a_baselines_request() {
     let _ = captured();
@@ -937,6 +980,45 @@ fn the_agent_records_and_logs_the_first_sighting_at_start_without_a_baselines_re
             && r.contains("Rule=")),
         "{records:?}"
     );
+}
+
+#[test]
+fn removing_the_own_tool_answers_at_once_and_reads_the_ssd_wear_again_in_the_background() {
+    use dyno_core::metrics::Reading;
+    use dyno_platform::hardware::{FakeBattery, FakeThrottle};
+    let h = Harness::start();
+    let peer = h.client();
+    let s = shared(&h);
+    let (release, gate) = std::sync::mpsc::channel();
+    s.hardware.replace_sources(
+        Box::new(FakeThrottle(vec![Reading::unavailable("none")])),
+        Box::new(GatedWear(gate)),
+        Box::new(FakeBattery(Reading::unavailable("none"))),
+    );
+    let reason = |peer: &_| {
+        let Reply::Lifespan(o) = ask(peer, Request::Lifespan).unwrap() else {
+            panic!("lifespan")
+        };
+        o.forecasts
+            .iter()
+            .find(|f| f.subject == dyno_core::lifespan::LifeSubject::Ssd)
+            .unwrap()
+            .explanation
+            .clone()
+    };
+    assert!(reason(&peer).contains("Not read yet"), "nothing has read the wear yet");
+    // The read is blocked, yet Remove answers: the request does not wait for it.
+    assert_eq!(ask(&peer, Request::RemoveTool).unwrap(), Reply::Ok);
+    assert!(reason(&peer).contains("Not read yet"), "the slow read has not ended");
+    release.send(()).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while !reason(&peer).contains("the tool is gone") {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the background read never updated the reading"
+        );
+        std::thread::yield_now();
+    }
 }
 
 #[test]
@@ -1233,7 +1315,7 @@ mod widget_layouts {
         let (_watching, changed) = watcher(&h);
         let peer = h.client();
         let edit = SurfaceEdit::Popover(Edit::Remove { id: id("cpu-memory") });
-        let Reply::WidgetLayout(after) = ask(&peer, Request::EditWidgetLayout { edit }).unwrap() else {
+        let Reply::WidgetLayout(after) = ask(&peer, Request::EditWidgetLayout { edit, base_revision: None }).unwrap() else {
             panic!("a layout")
         };
         assert_eq!(popover_ids(&after), ["active-alarms", "disk-space"]);
@@ -1260,7 +1342,7 @@ mod widget_layouts {
             span: None,
             at: None,
         });
-        let e = ask(&peer, Request::EditWidgetLayout { edit }).unwrap_err();
+        let e = ask(&peer, Request::EditWidgetLayout { edit, base_revision: None }).unwrap_err();
         assert!(!e.is_empty() && !e.contains("internal"), "{e}");
         assert_eq!(popover_ids(&view(&peer, DynoSurface::Popover)).len(), 3);
         // Events arrive in order: the first one after a refused edit and a good one is the good one's.
@@ -1268,6 +1350,7 @@ mod widget_layouts {
             &peer,
             Request::EditWidgetLayout {
                 edit: SurfaceEdit::MenuBar(Edit::ResetToDefaults),
+                base_revision: None,
             },
         )
         .unwrap();
@@ -1276,6 +1359,77 @@ mod widget_layouts {
             DynoSurface::MenuBar,
             "no change event for the refused edit"
         );
+    }
+
+    #[test]
+    fn an_edit_on_an_old_revision_is_refused_and_a_dashboard_gesture_saves_a_new_revision() {
+        let h = Harness::start();
+        let peer = h.client();
+        let SurfaceView::Dashboard(before) = view(&peer, DynoSurface::Dashboard) else {
+            panic!()
+        };
+        let first = before.layout.placements[0].id.clone();
+        let nudge = |revision| Request::EditWidgetLayout {
+            edit: SurfaceEdit::Dashboard(Edit::Arrange {
+                gesture: paddock_widgets::GridGesture::Nudge {
+                    id: first.clone(),
+                    dir: paddock_widgets::Dir::Right,
+                },
+            }),
+            base_revision: Some(revision),
+        };
+        let Reply::WidgetLayout(after) = ask(&peer, nudge(before.revision)).unwrap() else {
+            panic!("a layout")
+        };
+        let SurfaceView::Dashboard(after) = *after else { panic!() };
+        assert_eq!(after.revision, before.revision + 1);
+        let e = ask(&peer, nudge(before.revision)).unwrap_err();
+        assert!(e.contains("another window"), "{e}");
+        assert_eq!(ask_code(&peer, nudge(before.revision)), dyno_core::protocol::ErrorCode::Stale);
+    }
+
+    #[test]
+    fn a_dyno_1_0_dashboard_is_upgraded_at_start_written_at_once_and_logged() {
+        let mut h = Harness::start();
+        h.running.take().unwrap().stop();
+        wait_until_free(&h.dirs);
+        let v1 = serde_json::json!({ "version": 1, "placements": [
+            { "id": "graph", "span": 6, "widget": { "kind": "graph", "metric": "memory" } },
+            { "id": "ring", "span": 6, "widget": { "kind": "ring", "metric": "battery" } },
+        ], "presets": [] });
+        std::fs::write(h.dirs.settings(), serde_json::json!({ "dashboard": v1 }).to_string()).unwrap();
+        let again = Running::start(h.dirs.clone(), h.fake.platform(), Box::new(h.fake.clone()), Box::new(|_| Ok(()))).unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(h.dirs.settings()).unwrap()).unwrap();
+        assert_eq!(saved["dashboardGrid"]["version"], 2, "written at once, before any edit");
+        assert_eq!(saved["dashboard"], v1, "Dyno 1.0 still finds its own layout");
+        let peer = connect(&h.dirs).unwrap().0;
+        let Reply::Activities(entries) = ask(&peer, Request::Activity { limit: 50 }).unwrap() else {
+            panic!("activities")
+        };
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.title.contains("Dashboard layout upgraded") && e.detail.contains("2 placements, 0 dropped")),
+            "{entries:?}"
+        );
+        // The first dashboard edit drops the old value.
+        let SurfaceView::Dashboard(d) = view(&peer, DynoSurface::Dashboard) else {
+            panic!()
+        };
+        let edit = SurfaceEdit::Dashboard(Edit::Remove {
+            id: d.layout.placements[0].id.clone(),
+        });
+        ask(
+            &peer,
+            Request::EditWidgetLayout {
+                edit,
+                base_revision: Some(d.revision),
+            },
+        )
+        .unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(h.dirs.settings()).unwrap()).unwrap();
+        assert!(saved["dashboard"].is_null());
+        again.stop();
     }
 
     #[test]
@@ -1289,6 +1443,7 @@ mod widget_layouts {
             &peer,
             Request::EditWidgetLayout {
                 edit: SurfaceEdit::MenuBar(Edit::ResetToDefaults),
+                base_revision: None,
             },
         )
         .unwrap();
@@ -1296,6 +1451,7 @@ mod widget_layouts {
             &peer,
             Request::EditWidgetLayout {
                 edit: SurfaceEdit::Popover(Edit::Remove { id: id("disk-space") }),
+                base_revision: None,
             },
         )
         .unwrap();
@@ -1328,4 +1484,100 @@ mod widget_layouts {
         assert!(all.iter().all(|p| matches!(p.state, WidgetState::Empty { .. })), "{all:?}");
         assert!(ask_for(&[]).is_empty());
     }
+}
+
+#[test]
+fn asking_for_the_tool_offer_reads_the_disks_again_at_once_and_not_more_than_every_30_seconds() {
+    use dyno_core::hardware::DiskWear;
+    use dyno_core::metrics::Reading;
+    use dyno_core::ports::DiskWearSource;
+    use dyno_platform::hardware::{FakeBattery, FakeThrottle};
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+    struct Counting(Arc<AtomicU32>);
+    impl DiskWearSource for Counting {
+        fn read(&mut self) -> Reading<Vec<DiskWear>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Reading::unavailable("counted")
+        }
+    }
+    let h = Harness::start();
+    let peer = h.client();
+    let s = shared(&h);
+    let reads = Arc::new(AtomicU32::new(0));
+    s.hardware.replace_sources(
+        Box::new(FakeThrottle(vec![Reading::unavailable("none")])),
+        Box::new(Counting(reads.clone())),
+        Box::new(FakeBattery(Reading::unavailable("none"))),
+    );
+    let before = reads.load(Ordering::SeqCst);
+    assert!(matches!(ask(&peer, Request::ToolOffer).unwrap(), Reply::ToolOffer(_)));
+    // The re-read runs on its own thread: wait on the condition, bounded.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while reads.load(Ordering::SeqCst) == before && std::time::Instant::now() < deadline {
+        std::thread::yield_now();
+    }
+    assert_eq!(reads.load(Ordering::SeqCst), before + 1, "\"Check again\" reads the disks again");
+    // Asked again at once: no second read (rate limit), and never two at the same time.
+    assert!(matches!(ask(&peer, Request::ToolOffer).unwrap(), Reply::ToolOffer(_)));
+    assert!(!dyno_agent::hardware::request_reread(&s, std::time::Duration::from_secs(30)));
+    assert_eq!(reads.load(Ordering::SeqCst), before + 1);
+}
+
+/// Waits (a condition, with the family hang guard) until `agent.json` reads as `want`.
+fn wait_for_discovery(dirs: &Dirs, want: &dyno_agent::discovery::Discovery) {
+    let end = std::time::Instant::now() + Duration::from_secs(40);
+    while std::time::Instant::now() < end {
+        if dyno_agent::discovery::Discovery::read(&dirs.discovery()).as_ref() == Some(want) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    panic!(
+        "agent.json was never written again: {:?}",
+        dyno_agent::discovery::Discovery::read(&dirs.discovery())
+    );
+}
+
+#[test]
+fn a_deleted_discovery_file_is_written_again_by_the_agent_that_holds_the_lock() {
+    let _ = captured(); // installs the log capture before the agent starts
+    dyno_agent::build_id::set_watch_every_for_tests(Duration::from_millis(40));
+    let h = Harness::start();
+    let mine = h.running.as_ref().unwrap().discovery.clone();
+    assert_eq!(dyno_agent::discovery::Discovery::read(&h.dirs.discovery()).as_ref(), Some(&mine));
+    std::fs::remove_file(h.dirs.discovery()).unwrap();
+    wait_for_discovery(&h.dirs, &mine);
+    // The new file works: a client finds the agent by it.
+    let peer = h.client();
+    assert!(ask(&peer, Request::Settings).is_ok());
+    // The line follows the write: wait for it as a condition.
+    let end = std::time::Instant::now() + Duration::from_secs(40);
+    while !captured()
+        .iter()
+        .any(|l| l.contains("Discovery file written again") && l.contains("missing"))
+    {
+        assert!(std::time::Instant::now() < end, "the rewrite was not logged with its reason");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn a_discovery_file_naming_another_process_is_replaced_while_this_agent_holds_the_lock() {
+    dyno_agent::build_id::set_watch_every_for_tests(Duration::from_millis(40));
+    let h = Harness::start();
+    let mine = h.running.as_ref().unwrap().discovery.clone();
+    let other = dyno_agent::discovery::Discovery {
+        pid: mine.pid + 1,
+        build: "other".into(),
+        ..mine.clone()
+    };
+    other.write(&h.dirs.discovery()).unwrap();
+    wait_for_discovery(&h.dirs, &mine);
+    let dirs = h.dirs.clone();
+    drop(h);
+    assert!(
+        dyno_agent::discovery::Discovery::read(&dirs.discovery()).is_none(),
+        "a stopped agent leaves no file, and the guard does not write one behind it"
+    );
 }

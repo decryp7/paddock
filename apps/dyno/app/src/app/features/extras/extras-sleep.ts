@@ -4,25 +4,27 @@ import { AsyncState } from '../../shared/async-state';
 import { plural } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { ExtrasStore } from '../../state/extras.store';
-import type { SleepBlocker, WakeEvent } from '../../core/api.types';
+import type { ReadVia, SleepBlocker, WakeEvent } from '../../core/api.types';
+import { ReadingSource } from '../../core/reading-source';
 import { type Numbered, PREVENTS_LABEL, heldForText, numberKey, numbered, wakeTimeText } from './extras-model';
 import { EXTRAS_STYLES } from './extras-styles';
 
 /** Why the computer will not sleep (what holds it awake and for how long) and what woke it recently. */
 @Component({
   selector: 'dy-extras-sleep',
-  imports: [AsyncState, Icon, PdTable],
+  imports: [AsyncState, Icon, PdTable, ReadingSource],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <dy-async [loaded]="!!data()" [error]="store.sleep().error" what="sleep information" [rows]="5" (retry)="store.loadSleep()">
       @if (data(); as s) {
         <h2 class="sec">Keeping this computer awake @if (!s.blockersUnavailable) { <span class="faint muted">{{ plural(s.blockers.length, 'program') }}</span> }</h2>
+        <dy-reading-source [via]="s.blockersVia" [canRetry]="true" (retry)="store.loadSleep()" />
         @if (s.blockersUnavailable; as why) {
-          <div class="none"><dy-icon name="info" /><strong>Could not read what keeps this computer awake</strong><span>{{ why }}</span></div>
+          <div class="none"><dy-icon name="info" /><strong>Could not read what keeps this computer awake</strong>@if (!needsHelper(s.blockersVia)) { <span>{{ why }}</span> }</div>
         } @else if (s.blockers.length === 0) {
           <div class="none"><dy-icon name="check" /><strong>Nothing is keeping this computer awake</strong><span>It can go to sleep when it is idle.</span></div>
         } @else {
-          <pd-table [toolbar]="false" label="Keeping this computer awake" [rows]="blockerRows()" [columns]="blockerColumns" [rowKey]="rowNo" [filterable]="false" [maxHeight]="620" />
+          <pd-table [toolbar]="false" label="Keeping this computer awake" [rows]="blockerRows()" [columns]="blockerColumns" [rowKey]="rowNo" [filterable]="false" height="window" />
         }
 
         <h2 class="sec">Recent wakes @if (!s.wakesUnavailable) { <span class="faint muted">{{ plural(s.wakes.length, 'wake') }}</span> }</h2>
@@ -31,7 +33,7 @@ import { EXTRAS_STYLES } from './extras-styles';
         } @else if (s.wakes.length === 0) {
           <div class="none"><dy-icon name="clock" /><strong>No wakes recorded</strong><span>The system log holds no wake events for the recent past.</span></div>
         } @else {
-          <pd-table [toolbar]="false" label="Recent wakes" [rows]="wakeRows()" [columns]="wakeColumns" [rowKey]="rowNo" [filterable]="false" [maxHeight]="620" />
+          <pd-table [toolbar]="false" label="Recent wakes" [rows]="wakeRows()" [columns]="wakeColumns" [rowKey]="rowNo" [filterable]="false" height="window" />
         }
       }
     </dy-async>
@@ -42,6 +44,8 @@ export class ExtrasSleep implements OnInit {
   protected readonly store = inject(ExtrasStore);
   protected readonly data = computed(() => this.store.sleep().data);
   protected readonly plural = plural;
+  /** The reading source already says why and offers the button, so the empty state does not repeat the reason. */
+  protected readonly needsHelper = (via: ReadVia): boolean => typeof via === 'object' && 'needsHelper' in via;
   protected readonly prevents = (p: keyof typeof PREVENTS_LABEL) => PREVENTS_LABEL[p];
   protected readonly held = heldForText;
   protected readonly when = wakeTimeText;

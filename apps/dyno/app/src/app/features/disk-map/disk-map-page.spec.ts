@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { BACKEND } from '../../core/backend';
-import { formatBytes } from '../../shared/format';
+import { formatStorage } from '../../shared/format';
 import { MockBackend } from '../../core/mock-backend';
 import { provideIcons } from '../../shared/icons';
 import { Notifier } from '../../shared/notifier';
@@ -506,7 +506,7 @@ describe('dy-disk-map-page', () => {
     await settle(r.f);
     const foot = r.el.querySelector('tfoot tr, tr.mat-mdc-footer-row')!;
     expect(foot.textContent).toContain('Files directly in this folder');
-    expect(foot.textContent).toContain(formatBytes(loose.bytes));
+    expect(foot.textContent).toContain(formatStorage(loose.bytes));
     const input = r.el.querySelector<HTMLInputElement>('input[type="search"]')!;
     input.value = 'ale';
     input.dispatchEvent(new Event('input'));
@@ -615,7 +615,7 @@ describe('dy-disk-map-page', () => {
       expect(text(el, '.page-head p')).toContain('scanned 3 days ago (saved)');
       const note = text(el, '[data-testid="saved-map"]')!;
       expect(note).toContain('Saved map, scanned 3 days ago.');
-      expect(note).toContain(`Net change in used space since: +${formatBytes(12_000_000_000)}`);
+      expect(note).toContain(`Net change in used space since: +${formatStorage(12_000_000_000)}`);
       expect(note).toContain('a net figure');
       expect(names(el)).toContain('Users');
       expect(btn(el, 'Forget this map')).toBeDefined();
@@ -697,7 +697,7 @@ describe('dy-disk-map-page', () => {
       expect(note).not.toContain('Net change');
       store.receive({ ...store.status()!, seq: store.status()!.seq + 1, changedBytes: -2_000_000_000 });
       await settle(f);
-      expect(text(el, '[data-testid="saved-map"]')).toContain(`\u2212${formatBytes(2_000_000_000)}`);
+      expect(text(el, '[data-testid="saved-map"]')).toContain(`\u2212${formatStorage(2_000_000_000)}`);
     });
 
     it('says the Rescan stopped and keeps the map', async () => {

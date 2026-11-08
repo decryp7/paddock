@@ -13,6 +13,8 @@ pub const MAX_LINE: usize = 16 * 1024;
 pub const MAX_LINES: usize = 50_000;
 /// The longest phase id or label, characters.
 pub const MAX_PHASE_TEXT: usize = 120;
+/// The longest note, characters.
+pub const MAX_NOTE: usize = 200;
 /// How often a child writes its heartbeat.
 pub const HEARTBEAT_EVERY: Duration = Duration::from_secs(1);
 /// A heartbeat this long overdue means the child is not responding.
@@ -45,6 +47,18 @@ pub enum Line {
     Progress(PhaseProgress),
     /// The child is alive.
     Heartbeat,
+    /// One second of a sustained run: the work done in that second, in the metric's unit.
+    Sample {
+        /// Seconds since the run began.
+        secs: u32,
+        /// The throughput that second.
+        throughput: f64,
+    },
+    /// A fact about how the measurement was made, in words (for example that the cache was bypassed), kept with the result.
+    Note {
+        /// The words.
+        text: String,
+    },
     /// How the kind ended; the last line.
     Result {
         /// The outcome.
@@ -97,6 +111,16 @@ pub fn parse_line(text: &str, line_no: usize) -> Result<Line, WireError> {
             return Err(bad("a count beyond its total".into()));
         }
     }
+    if let Line::Note { text } = &line {
+        if text.is_empty() || text.chars().count() > MAX_NOTE || text.chars().any(char::is_control) {
+            return Err(bad("a note that is empty, too long or has control characters".into()));
+        }
+    }
+    if let Line::Sample { throughput, .. } = &line {
+        if !throughput.is_finite() || *throughput < 0.0 {
+            return Err(bad("a sample that is not a finite, non-negative number".into()));
+        }
+    }
     Ok(line)
 }
 
@@ -124,13 +148,35 @@ pub fn liveness(now: Duration, started: Duration, last_beat: Duration, bound: Du
     }
 }
 
+/// The slowest drive the plan bound allows for, bytes per second (a slow USB stick).
+pub const SLOW_DRIVE_BYTES_PER_S: u64 = 10_000_000;
+/// What a flush after a write pass may take on that drive, seconds (a pass moves at most what the slow drive moves in its time limit).
+pub const FLUSH_ALLOWANCE_SECS: u64 = 6;
+
+/// The time the disk test takes on one drive at the slowest speed the bound allows: the fill at that speed, plus for each
+/// repetition and each of the eight measurements its ramp and measured time limits and a flush allowance. Phases end on bytes or
+/// time, whichever comes first, so the time limits cap what a slow drive can take.
+pub fn disk_duration(file_mib: u32, reps: u32) -> Duration {
+    use crate::bench::disk::{MEASURE_MAX_MILLIS, MIB, PATTERNS, RAMP_MAX_MILLIS};
+    let fill = Duration::from_secs_f64((u64::from(file_mib) * MIB) as f64 / SLOW_DRIVE_BYTES_PER_S as f64);
+    let per_phase = Duration::from_millis(RAMP_MAX_MILLIS + MEASURE_MAX_MILLIS) + Duration::from_secs(FLUSH_ALLOWANCE_SECS);
+    fill + per_phase * (u32::try_from(PATTERNS.len() * 2).unwrap_or(8) * reps)
+}
+
 /// The time the method itself takes for one kind: warm-up, the timed sections of every repetition and the gaps between them.
 pub fn kind_duration(kind: BenchKind) -> Duration {
+    kind_duration_with(kind, crate::bench::DISK_DEFAULT_MIB)
+}
+
+/// [`kind_duration`] with the disk file's size given.
+pub fn kind_duration_with(kind: BenchKind, disk_mib: u32) -> Duration {
     let sections = match kind {
-        // Single core and all cores; copy and latency.
-        BenchKind::Cpu | BenchKind::Memory => 2,
-        // Disk and GPU phases are sized by their own work packages (B3, B6).
-        BenchKind::Disk | BenchKind::Gpu => return Duration::ZERO,
+        // Four kernels, each on one core and on all cores.
+        BenchKind::Cpu => 8,
+        // Four STREAM kernels on one thread and on all, and the latency sweep (about 16 points of 0.2 s, counted as 3 sections).
+        BenchKind::Memory => 11,
+        BenchKind::Disk => return disk_duration(disk_mib, crate::bench::disk::REPETITIONS),
+        BenchKind::Gpu => return Duration::from_secs(crate::bench::estimate::GPU_SECONDS),
     };
     let reps = u64::from(REPETITIONS);
     Duration::from_millis(WARMUP_MILLIS + reps * sections * SECTION_MILLIS + (reps - 1) * GAP_MILLIS)
@@ -138,7 +184,40 @@ pub fn kind_duration(kind: BenchKind) -> Duration {
 
 /// The plan's bound: the sum of each kind's time plus 50 %. Past it with a heartbeat the run shows "Still working".
 pub fn plan_bound(kinds: &[BenchKind]) -> Duration {
-    let sum: Duration = kinds.iter().map(|k| kind_duration(*k)).sum();
+    plan_bound_with(kinds, crate::bench::DISK_DEFAULT_MIB, 1)
+}
+
+/// [`plan_bound`] for a disk file of `disk_mib` MiB on each of `drives` drives (the disk test runs once per drive).
+pub fn plan_bound_with(kinds: &[BenchKind], disk_mib: u32, drives: usize) -> Duration {
+    plan_bound_full(kinds, disk_mib, drives, None, 0)
+}
+
+/// [`plan_bound_with`] where the CPU kind may be a sustained run of `sustained_secs` seconds.
+pub fn plan_bound_full(
+    kinds: &[BenchKind],
+    disk_mib: u32,
+    drives: usize,
+    sustained_secs: Option<u32>,
+    sustained_write_gib: u32,
+) -> Duration {
+    let sum: Duration = kinds
+        .iter()
+        .map(|k| {
+            let one = match (k, sustained_secs) {
+                (BenchKind::Cpu, Some(s)) => Duration::from_secs(u64::from(s)),
+                // The sustained write ends by its own time limit at the latest.
+                (BenchKind::Disk, _) if sustained_write_gib > 0 => {
+                    kind_duration_with(*k, disk_mib) + Duration::from_secs(crate::bench::disk::SUSTAINED_WRITE_MAX_SECS)
+                }
+                _ => kind_duration_with(*k, disk_mib),
+            };
+            if *k == BenchKind::Disk {
+                one * u32::try_from(drives.max(1)).unwrap_or(1)
+            } else {
+                one
+            }
+        })
+        .sum();
     // Even a kind with no timed phase (GPU unavailable) gets time to start and answer.
     (sum + Duration::from_secs(10)).mul_f64(1.5)
 }
@@ -261,13 +340,27 @@ mod tests {
     }
 
     #[test]
+    fn the_disk_bound_is_the_fill_at_ten_mb_per_s_plus_every_phase_at_its_time_limits() {
+        // 1 GiB fill at 10 MB/s = 107.4 s; 3 repetitions x 8 measurements x (1 s ramp + 5 s measure + 6 s flush) = 288 s.
+        let d = disk_duration(1024, 3);
+        assert!((d.as_secs_f64() - (107.374_182_4 + 288.0)).abs() < 1e-6, "{d:?}");
+        assert!(disk_duration(4096, 3) > d && disk_duration(256, 3) < d);
+        // Two drives take twice as long; no drive chosen still bounds one.
+        let one = plan_bound_with(&[BenchKind::Disk], 1024, 1);
+        assert!(plan_bound_with(&[BenchKind::Disk], 1024, 2) > one);
+        assert_eq!(plan_bound_with(&[BenchKind::Disk], 1024, 0), one);
+    }
+
+    #[test]
     fn the_plan_bound_grows_with_the_kinds() {
         let cpu = plan_bound(&[BenchKind::Cpu]);
         assert!(cpu > kind_duration(BenchKind::Cpu));
         assert!(plan_bound(&[BenchKind::Cpu, BenchKind::Memory]) > cpu);
         assert!(plan_bound(&[BenchKind::Gpu]) > Duration::ZERO);
-        // 1 s warm-up, 5 repetitions of two 1 s sections and four 2 s gaps: 19 s.
-        assert_eq!(kind_duration(BenchKind::Cpu), Duration::from_secs(19));
+        // 1 s warm-up, 5 repetitions of eight 1 s sections (four kernels, one core and all) and four 2 s gaps: 49 s.
+        assert_eq!(kind_duration(BenchKind::Cpu), Duration::from_secs(49));
+        // The same for memory with eleven sections: 64 s.
+        assert_eq!(kind_duration(BenchKind::Memory), Duration::from_secs(64));
     }
 
     #[test]

@@ -3,6 +3,14 @@
 //! however it ends, so a lock is never stale and nothing reclaims it. This is the authority for "is one running here?"
 //! (rule 53: hold the thing itself, never trust a pid read earlier). A discovery file ([`crate::hint`]) only says how to
 //! reach the holder.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::start::Pace;
 use std::fs::{File, OpenOptions, TryLockError};
@@ -138,6 +146,26 @@ fn judge(answer: Result<(), TryLockError>) -> std::io::Result<Verdict> {
 /// (unsupported, an error) is `false`.
 pub fn is_held(path: &Path) -> bool {
     matches!(InstanceLock::claim(path), Ok(Claim::Held))
+}
+
+/// What a look at the lock on `path` found: [`is_held`] with the third answer kept apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeldState {
+    /// Some process holds it.
+    Held,
+    /// Nobody holds it.
+    Free,
+    /// It could not be told (the lock file cannot be opened, or locking is unsupported here).
+    Unknown,
+}
+
+/// [`is_held`] that says "unknown" instead of "free" when the lock could not be looked at.
+pub fn held_state(path: &Path) -> HeldState {
+    match InstanceLock::claim(path) {
+        Ok(Claim::Held) => HeldState::Held,
+        Ok(Claim::Acquired(_)) => HeldState::Free,
+        Ok(Claim::Unsupported) | Err(_) => HeldState::Unknown,
+    }
 }
 
 #[cfg(test)]
@@ -352,5 +380,26 @@ mod tests {
                 .to_string()
                 .contains("folder.lock")
         );
+    }
+
+    #[test]
+    fn a_lock_that_cannot_be_looked_at_is_unknown_not_free() {
+        let dir = std::env::temp_dir().join(format!("paddock-proc-held-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("plain");
+        std::fs::write(&file, "x").unwrap();
+        // a path below a regular file cannot be opened
+        assert_eq!(held_state(&file.join("agent.lock")), HeldState::Unknown);
+        assert!(
+            !is_held(&file.join("agent.lock")),
+            "is_held keeps its old answer for other callers"
+        );
+        let lock = dir.join("agent.lock");
+        assert_eq!(held_state(&lock), HeldState::Free);
+        let Ok(Claim::Acquired(_held)) = InstanceLock::claim(&lock) else {
+            panic!("the test takes the lock")
+        };
+        assert_eq!(held_state(&lock), HeldState::Held);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

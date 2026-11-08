@@ -14,6 +14,19 @@ use tauri::{AppHandle, Manager, Runtime};
 /// The Dyno agent.
 pub const AGENT: &str = "dy.agent";
 
+/// The tray icons: whether the desktop shows them (Linux needs a StatusNotifier host). A line on the chip, with nothing to retry:
+/// it clears by itself when a host appears.
+pub const TRAY: &str = "dy.tray";
+
+/// The installer's helper program `paddock-setup.exe` (per-machine Windows installs, ADR 0053): a line on the chip when it is not
+/// the version of this Dyno, which means the installer could not replace it while it ran. Nothing to retry; running the
+/// installer again clears it at the next start.
+pub const SETUP: &str = "dy.setup";
+
+/// Dyno itself: a line on the chip when its files were replaced while it ran (Restart Dyno to finish). Nothing to retry; it ends with
+/// the restart. Its own row, so clearing it never clears the installer program's mismatch.
+pub const UPDATE: &str = "dy.update";
+
 /// How long a repair waits for the link to come back before it says it did not.
 const REPAIR_WAIT: Duration = Duration::from_secs(8);
 
@@ -46,6 +59,13 @@ pub fn stall_problem(stall: Stall) -> Cause {
                  or the dyno-agent user service (Linux).",
             )
             .code("dy.agent.waiting-service"),
+        Stall::RegisteringService => Cause::new("Waiting for the background service.")
+            .hint(
+                "Dyno is setting it up and starts no agent of its own until that ends, which can take a couple of minutes. If macOS asks, \
+                 allow Dyno in System Settings, General, Login Items. Choose Retry to look again; if the service does not come, Dyno starts \
+                 its own agent by itself.",
+            )
+            .code("dy.agent.registering-service"),
         Stall::AgentNotAnswering => Cause::new("The Dyno agent is still starting.")
             .hint("A slow disk or a busy computer can take a minute. If it stays, choose Retry to end it and start it again.")
             .code("dy.agent.starting"),
@@ -63,14 +83,83 @@ pub fn stall_problem(stall: Stall) -> Cause {
                 "It may still be starting. If it stays, choose Retry; if the data folder is shared with another computer, quit Dyno there.",
             )
             .code("dy.agent.other-holds"),
+        Stall::AppUpdated => updated_problem(),
+        Stall::AgentMismatch => Cause::new("The Dyno agent on this computer does not match this Dyno.")
+            .hint("It speaks another protocol, and Dyno was not updated while it ran. Reinstall Dyno, then choose Retry.")
+            .code("dy.agent.mismatch"),
+        Stall::OtherBuildKeepsComing => Cause::new("Another Dyno install keeps starting another build of the agent.")
+            .hint(
+                "Dyno stopped asking it to exit. Quit the other Dyno or switch off its login service, then choose Retry. \
+                 Reinstalling Dyno does not help while the other one runs.",
+            )
+            .code("dy.agent.other-build-returns"),
     }
 }
 
 /// What the chip offers for a stall: Retry, except for a paused agent (nothing to retry: it continues by itself, ADR 0031).
 pub fn stall_repair(stall: Stall) -> Option<RepairAction> {
     match stall {
-        Stall::AgentPaused => None,
+        Stall::AgentPaused | Stall::AppUpdated => None,
         _ => Some(RepairAction::Retry),
+    }
+}
+
+/// Why the tray icons are not shown, or `None` when they are: the engine's note, split into what is wrong and what to do.
+pub fn tray_problem(availability: &dyno_core::tray_host::TrayAvailability) -> Option<Cause> {
+    use dyno_core::tray_host::{TrayAvailability, NO_HOST_ADVICE, NO_HOST_SUMMARY};
+    match availability {
+        TrayAvailability::Shown => None,
+        TrayAvailability::NoHost { .. } => Some(Cause::new(NO_HOST_SUMMARY).hint(NO_HOST_ADVICE).code("dy.tray.no-host")),
+    }
+}
+
+/// The line for a `paddock-setup.exe` of another version, or `None` when it matches.
+pub fn setup_problem(check: &paddock_setup::versioncheck::VersionCheck) -> Option<Cause> {
+    check.is_problem().then(|| {
+        Cause::new(check.sentence())
+            .hint("Run the Dyno installer again.")
+            .code("dy.setup.version")
+    })
+}
+
+/// The line when Dyno's files were replaced while it ran: the new agent is used, the window is the old one.
+pub fn updated_problem() -> Cause {
+    Cause::new("Dyno was updated.")
+        .hint("Restart Dyno to finish: quit it and open it again.")
+        .code("dy.update.restart")
+}
+
+/// Checks the installed `paddock-setup.exe` against this Dyno's version (Windows, at start) and reports a mismatch.
+#[cfg(windows)]
+pub fn check_setup_version<R: Runtime>(app: &AppHandle<R>, install_dir: &std::path::Path) {
+    let expected = paddock_setup::versioncheck::Version::parse(env!("CARGO_PKG_VERSION")).ok();
+    let found = paddock_setup::native::fileversion::file_version(&install_dir.join("paddock-setup.exe"));
+    if let Err(why) = &found {
+        crate::logging::info(&format!("paddock-setup.exe: the version could not be read: {why}"));
+    }
+    let Some(expected) = expected else { return };
+    let check = paddock_setup::versioncheck::compare(found.as_ref().ok(), &expected);
+    crate::logging::info(&format!("paddock-setup.exe version check: {}", check.sentence()));
+    if let (Some(cause), Some(health)) = (setup_problem(&check), app.try_state::<Arc<Health>>()) {
+        health.down(SETUP, cause, None);
+    }
+}
+
+/// Reports the tray's availability to the chip: the line while no host shows the icons, cleared when one does.
+pub fn report_tray<R: Runtime>(app: &AppHandle<R>, availability: &dyno_core::tray_host::TrayAvailability) {
+    let Some(health) = app.try_state::<Arc<Health>>().map(|h| h.inner().clone()) else {
+        crate::logging::info("tray host: the health chip is not set up yet, so it is not told");
+        return;
+    };
+    match tray_problem(availability) {
+        Some(cause) => {
+            health.down(TRAY, cause, None);
+        }
+        None => {
+            if health.is_in_outage(TRAY) {
+                health.ok(TRAY);
+            }
+        }
     }
 }
 
@@ -102,7 +191,14 @@ impl<R: Runtime> Hub<R> {
     /// The services, in the order the status bar lists them.
     pub fn services(&self) -> Vec<ServiceSpec> {
         let hub = self.clone();
-        vec![ServiceSpec::new(AGENT, "the Dyno agent").repair(move || hub.reconnect())]
+        // The installer program is reported on Windows only (the per-machine install); the UI lists the service everywhere
+        // (the manifest is one file for every OS), so Rust registers it everywhere and it stays quiet elsewhere.
+        vec![
+            ServiceSpec::new(AGENT, "the Dyno agent").repair(move || hub.reconnect()),
+            ServiceSpec::new(TRAY, "the tray icons"),
+            ServiceSpec::new(SETUP, "the installer program"),
+            ServiceSpec::new(UPDATE, "Dyno itself"),
+        ]
     }
 
     /// The repair: the link reconnects with backoff on its own, so this waits (bounded) for it and says what it found.
@@ -121,6 +217,18 @@ impl<R: Runtime> Hub<R> {
         Err(Cause::new("The Dyno agent did not answer.")
             .hint("Dyno keeps trying to start it. If it does not come back, reinstall Dyno.")
             .code("dy.agent.failed"))
+    }
+
+    /// Tells the chip that Dyno was updated while it ran (its program files are a newer build). It stays until Dyno restarts.
+    pub fn report_updated(&self, updated: bool) {
+        let Some(health) = self.app.get().and_then(|a| a.try_state::<Arc<Health>>().map(|h| h.inner().clone())) else {
+            return;
+        };
+        if updated {
+            health.down(UPDATE, updated_problem(), None);
+        } else if health.is_in_outage(UPDATE) {
+            health.ok(UPDATE);
+        }
     }
 
     /// Reports a long wait to the chip (with Retry), or that it is over.
@@ -160,10 +268,43 @@ impl<R: Runtime> Hub<R> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_setup_program_of_another_version_is_a_line_with_the_next_step() {
+        use paddock_setup::versioncheck::{compare, Version};
+        let new = Version::new(1, 1, 0);
+        assert!(super::setup_problem(&compare(Some(&new), &new)).is_none());
+        let cause = super::setup_problem(&compare(Some(&Version::new(1, 0, 0)), &new)).expect("a mismatch is reported");
+        let text = format!("{cause:?}");
+        assert!(text.contains("1.0.0") && text.contains("Run the Dyno installer again"), "{text}");
+        assert!(
+            super::setup_problem(&compare(None, &new)).is_some(),
+            "an unreadable version is reported too"
+        );
+    }
+
     use super::*;
 
     fn status(state: AgentState, message: Option<&str>) -> AgentStatus {
         AgentStatus::new(state, message.map(str::to_string))
+    }
+
+    #[test]
+    fn an_app_updated_while_it_runs_is_told_to_restart_with_its_own_cause_code() {
+        let cause = updated_problem();
+        assert_eq!(cause.code.as_deref(), Some("dy.update.restart"));
+        assert!(cause.message.contains("updated") && cause.hint.as_deref().is_some_and(|h| h.contains("Restart Dyno")));
+    }
+
+    #[test]
+    fn the_updated_notice_has_its_own_service_row_apart_from_the_installer_program() {
+        assert_ne!(
+            UPDATE, SETUP,
+            "clearing the update notice must not clear a paddock-setup.exe mismatch"
+        );
+        let hub = Hub::<tauri::test::MockRuntime>::default();
+        let services = hub.services();
+        let ids: Vec<&str> = services.iter().map(ServiceSpec::id).collect();
+        assert!(ids.contains(&UPDATE) && ids.contains(&SETUP), "{ids:?}");
     }
 
     #[test]
@@ -176,10 +317,13 @@ mod tests {
     fn a_long_wait_is_shown_with_its_cause_and_a_way_out_but_is_not_an_error_state_of_its_own() {
         for (stall, code, word) in [
             (Stall::WaitingForService, "dy.agent.waiting-service", "login"),
+            (Stall::RegisteringService, "dy.agent.registering-service", "background service"),
             (Stall::AgentNotAnswering, "dy.agent.starting", "Retry"),
             (Stall::OtherAgentHolds, "dy.agent.other-holds", "data folder"),
             (Stall::ServiceNotAnswering, "dy.agent.system-silent", "system"),
             (Stall::AgentKeepsFailing, "dy.agent.keeps-failing", "failing"),
+            (Stall::OtherBuildKeepsComing, "dy.agent.other-build-returns", "another build"),
+            (Stall::AgentMismatch, "dy.agent.mismatch", "Reinstall Dyno"),
         ] {
             let cause = stall_problem(stall);
             assert_eq!(cause.code.as_deref(), Some(code));
@@ -195,9 +339,27 @@ mod tests {
         assert!(paused.message.contains("Paused by macOS or another app"), "{paused:?}");
         assert!(!paused.hint.as_deref().unwrap_or("").contains("Retry"), "{paused:?}");
         assert_eq!(stall_repair(Stall::AgentPaused), None);
+        let updated = stall_problem(Stall::AppUpdated);
+        assert_eq!(updated.code.as_deref(), Some("dy.update.restart"));
+        assert!(updated.hint.as_deref().is_some_and(|h| h.contains("Restart Dyno")) && !updated.hint.as_deref().unwrap().contains("Retry"));
+        assert_eq!(stall_repair(Stall::AppUpdated), None, "an update has nothing to retry");
+        assert_eq!(stall_repair(Stall::OtherBuildKeepsComing), Some(RepairAction::Retry));
         assert_eq!(stall_repair(Stall::AgentNotAnswering), Some(RepairAction::Retry));
         // The plain "still starting" status stays no outage: only the stall the link reports after a while is one.
         assert!(agent_problem(&status(AgentState::Starting, Some("still starting"))).is_none());
+    }
+
+    #[test]
+    fn a_desktop_without_a_tray_host_gets_a_chip_line_with_the_extension_to_turn_on() {
+        use dyno_core::tray_host::TrayAvailability;
+        assert!(tray_problem(&TrayAvailability::Shown).is_none());
+        let cause = tray_problem(&TrayAvailability::no_host()).unwrap();
+        assert_eq!(cause.message, "Your desktop isn't showing tray icons.");
+        assert!(cause
+            .hint
+            .as_deref()
+            .is_some_and(|h| h.contains("gnome-shell-extension-appindicator")));
+        assert_eq!(cause.code.as_deref(), Some("dy.tray.no-host"));
     }
 
     #[test]

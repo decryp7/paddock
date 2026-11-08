@@ -59,7 +59,7 @@ pub use plugin_hook::{PluginHookScope, after_plugin_hook, in_plugin_hook, plugin
 pub use popover::{PopoverSpec, Popovers, close_popover, fit_popover, toggle_popover};
 pub use tray::{
     HeadlessTray, Tray, TrayBackend, create_tray, icon_clicked, menu_chosen, refresh_tray,
-    tray_available,
+    set_tray_available, tray_available,
 };
 
 #[cfg(test)]

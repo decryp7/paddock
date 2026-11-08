@@ -4,7 +4,7 @@ import { MatProgressBar } from '@angular/material/progress-bar';
 import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 import type { Saved } from '../generated/diagnostics';
 import { DiagnosticsStore } from './diagnostics.store';
-import { formatBytes, truncateMiddle } from './format';
+import { formatStorage, truncateMiddle } from './format';
 import { DIAGNOSTICS_STYLES } from './styles';
 
 /**
@@ -20,6 +20,7 @@ import { DIAGNOSTICS_STYLES } from './styles';
   imports: [MatButton, MatProgressBar],
   template: `
     <p class="pd-diag__lede">{{ t.lede }}</p>
+    <p class="pd-diag__title" role="note" data-testid="diag-public">{{ t.public }}</p>
 
     <div class="pd-diag__field">
       <label for="pd-diag-description">{{ t.describe }}</label>
@@ -35,6 +36,16 @@ import { DIAGNOSTICS_STYLES } from './styles';
       ></textarea>
       <p id="pd-diag-hint" class="pd-diag__muted">{{ t.hint }}</p>
     </div>
+
+    <section aria-labelledby="pd-diag-not-title" class="pd-diag__field" data-testid="diag-not-in">
+      <h3 id="pd-diag-not-title">{{ t.notIn }}</h3>
+      <ul class="pd-diag__muted">
+        <li>{{ t.notInContents }}</li>
+        <li>{{ t.notInSecrets }}</li>
+        <li>{{ t.notInPersonal }}</li>
+      </ul>
+      <p class="pd-diag__muted">{{ t.mayRemain }}</p>
+    </section>
 
     <section aria-labelledby="pd-diag-files-title" class="pd-diag__field">
       <h3 id="pd-diag-files-title">{{ t.contains }}</h3>
@@ -117,6 +128,12 @@ import { DIAGNOSTICS_STYLES } from './styles';
 export class PdReportProblemDialog implements DialogContent<Saved> {
   protected readonly t = {
     lede: $localize`:@@pd.diag.lede:Nothing is sent anywhere. This makes a file on your computer that you can look through, and attach to your report yourself.`,
+    public: $localize`:@@pd.diag.public:Issue reports are public. Look through the zip first.`,
+    notIn: $localize`:@@pd.diag.not-in:Not in the report`,
+    notInContents: $localize`:@@pd.diag.not-in-contents:The contents of your documents and files.`,
+    notInSecrets: $localize`:@@pd.diag.not-in-secrets:Passwords, tokens and keys (they are replaced where the app can recognise them).`,
+    notInPersonal: $localize`:@@pd.diag.not-in-personal:Your user name, home folder, machine name, e-mail addresses and IP addresses (they are replaced).`,
+    mayRemain: $localize`:@@pd.diag.may-remain:File names outside your home folder may remain, and so may other computers' names and text the app imported or showed.`,
     describe: $localize`:@@pd.diag.describe:What went wrong? (optional)`,
     hint: $localize`:@@pd.diag.hint:What you were doing, what you expected, what happened instead. It goes into the report as you write it.`,
     contains: $localize`:@@pd.diag.contains:What the report contains`,
@@ -142,7 +159,7 @@ export class PdReportProblemDialog implements DialogContent<Saved> {
 
   protected readonly total = computed(() => {
     const files = this.store.files().length;
-    const bytes = formatBytes(this.store.totalBytes());
+    const bytes = formatStorage(this.store.totalBytes());
     return $localize`:@@pd.diag.total:${files}:files: files, ${bytes}:bytes: before compression`;
   });
   protected readonly removedText = computed(() => {
@@ -161,7 +178,7 @@ export class PdReportProblemDialog implements DialogContent<Saved> {
     const s = this.savedResult();
     if (!s) return '';
     const files = s.files;
-    const size = formatBytes(s.bytes);
+    const size = formatStorage(s.bytes);
     return $localize`:@@pd.diag.saved-detail:${files}:files: files, ${size}:size:`;
   });
   protected readonly saveError = computed(() => {
@@ -170,7 +187,7 @@ export class PdReportProblemDialog implements DialogContent<Saved> {
   });
 
   protected size(bytes: number): string {
-    return formatBytes(bytes);
+    return formatStorage(bytes);
   }
 
   protected shortName(name: string): string {

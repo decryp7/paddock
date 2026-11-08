@@ -2,11 +2,11 @@ import { ChangeDetectionStrategy, Component, computed, inject, viewChild } from 
 import { PdCell, PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import type { FoundFile } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
-import { formatBytes, formatDate, plural } from '../../shared/format';
+import { formatStorage, formatDate, plural } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { JobProgressCard } from '../../shared/job-progress';
 import { ExtrasStore } from '../../state/extras.store';
-import { MIN_SIZES, MODES, baseName, dirName, fileRows, middleEllipsis, scanSentence } from './files-model';
+import { MIN_SIZES, MODES, mbToBytes, baseName, dirName, fileRows, middleEllipsis, scanSentence } from './files-model';
 import { EXTRAS_STYLES } from './extras-styles';
 import { MatButton } from '@angular/material/button';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
@@ -36,7 +36,7 @@ interface FileLine {
       }
       <span class="grow"></span>
       <pd-segmented-control label="Look for" [options]="modeSegs" [value]="store.mode()" (valueChange)="pickMode($event)" />
-      <pd-segmented-control label="At least this big" [options]="sizeSegs" [value]="store.minMib() + ''" (valueChange)="store.setMinMib(+$event)" />
+      <pd-segmented-control label="At least this big" [options]="sizeSegs" [value]="store.minMb() + ''" (valueChange)="store.setMinMb(+$event)" />
     </div>
 
     @if (!store.folder() && !store.finder().error) {
@@ -66,7 +66,7 @@ interface FileLine {
             </div>
           } @else {
             <div class="bar"><dy-tree-actions what="groups" (expandAll)="gridRef()?.expandAllGroups()" (collapseAll)="gridRef()?.collapseAllGroups()" /></div>
-            <pd-table #pdgrid [toolbar]="false" label="Large and duplicate files" [rows]="fileList()" [columns]="columns" [rowKey]="fileKey" [filterable]="false" [maxHeight]="620" groupBy="group" [groupSummary]="groupSummary">
+            <pd-table #pdgrid [toolbar]="false" label="Large and duplicate files" [rows]="fileList()" [columns]="columns" [rowKey]="fileKey" [filterable]="false" height="window" groupBy="group" [groupSummary]="groupSummary">
               <ng-template pdCell="file" let-f><span class="fcell"><strong class="fname">{{ base(f.file.path) }}</strong><span class="dir path">{{ short(dir(f.file.path), 56) }}</span></span></ng-template>
             </pd-table>
             <p class="faint muted">{{ scanned() }} @if (r.duplicates.length > 0) { Copies are listed oldest first. }</p>
@@ -91,7 +91,7 @@ export class ExtrasFiles {
   protected readonly modes = MODES;
   protected readonly sizes = MIN_SIZES;
   protected readonly modeSegs: SuSegment[] = MODES.map((m) => ({ value: m.mode, label: m.label }));
-  protected readonly sizeSegs: SuSegment[] = MIN_SIZES.map((s) => ({ value: String(s.mib), label: s.label }));
+  protected readonly sizeSegs: SuSegment[] = MIN_SIZES.map((s) => ({ value: String(s.mb), label: s.label }));
   protected pickMode(value: string): void {
     const m = MODES.find((x) => x.mode === value);
     if (m) void this.store.setMode(m.mode);
@@ -115,17 +115,17 @@ export class ExtrasFiles {
   protected readonly columns: PdColumn<FileLine>[] = [
     { key: 'group', header: 'Group', value: (f) => f.group, hidden: true, sortable: false },
     { key: 'file', header: 'File', value: (f) => f.file.path, required: true, sortable: false, width: 'minmax(0, 1fr)' },
-    { key: 'size', header: 'Size', value: (f) => f.file.bytes, text: (f) => formatBytes(f.file.bytes), align: 'end', sortable: false, width: '230px' },
+    { key: 'size', header: 'Size', value: (f) => f.file.bytes, text: (f) => formatStorage(f.file.bytes), align: 'end', sortable: false, width: '230px' },
     { key: 'modified', header: 'Modified', value: (f) => f.file.modified, text: (f) => formatDate(f.file.modified, Date.now()), align: 'end', sortable: false, width: '110px', hideBelow: 560 },
   ];
-  protected readonly minLabel = computed(() => MIN_SIZES.find((s) => s.mib === this.store.minMib())?.label ?? formatBytes(this.store.minMib() * 1024 * 1024));
+  protected readonly minLabel = computed(() => MIN_SIZES.find((s) => s.mb === this.store.minMb())?.label ?? formatStorage(mbToBytes(this.store.minMb())));
   protected readonly scanned = computed(() => {
     const r = this.result();
     return r ? scanSentence(r) : '';
   });
 
   protected readonly plural = plural;
-  protected readonly bytes = formatBytes;
+  protected readonly bytes = formatStorage;
   protected readonly base = baseName;
   protected readonly dir = dirName;
   protected readonly short = (p: string, max = 48): string => middleEllipsis(p, max);

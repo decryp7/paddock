@@ -15,6 +15,8 @@ export interface MemoryMcpOptions {
   readonly tools?: readonly MemoryTool[];
   /** The settings at the start (default: switched off). */
   readonly settings?: McpSettings;
+  /** The reason the saved keys are not in use, as the engine words it (default none). */
+  readonly keysProblem?: string;
   /** `get` rejects this many times before it answers (to show the inline error and Retry). */
   readonly getFailures?: number;
   /** `save` rejects with this error. */
@@ -73,9 +75,16 @@ export class MemoryMcpBackend extends McpBackend {
     return t.action ? s.allowedActions.includes(t.name) : true;
   }
 
+  /** The listener the page would show: off, waiting for a key, or listening on a made-up port. */
+  private listener(): McpView['listener'] {
+    if (!this.settings.enabled) return { kind: 'off' };
+    if (!this.keys.some((k) => !k.revoked)) return { kind: 'noKey' };
+    return { kind: 'listening', port: 49152, discoveryFile: 'mcp-listener.json' };
+  }
+
   private view(): McpView {
     const tools: ToolInfo[] = this.tools.map((t) => ({ name: t.name, title: t.title ?? null, description: t.description, action: t.action === true, exposed: this.exposed(t) }));
-    return { settings: this.settings, tools, keys: this.keys.map((k) => ({ ...k })), maxKeys: MAX_KEYS };
+    return { settings: this.settings, tools, keys: this.keys.map((k) => ({ ...k })), maxKeys: MAX_KEYS, listener: this.listener(), keysProblem: this.options.keysProblem ?? null };
   }
 
   private emit(): void {

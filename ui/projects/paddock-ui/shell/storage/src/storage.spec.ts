@@ -381,12 +381,12 @@ describe('the size tree', () => {
   });
 
   it('writes a lower bound rounded down, never up', () => {
-    expect(floorBytes(Math.floor(3.96 * 1024 ** 3))).toBe(`${new Intl.NumberFormat(undefined, { minimumFractionDigits: 1 }).format(3.9)} GB`);
-    expect(floorBytes(4 * 1024 ** 3)).toContain('4');
+    expect(floorBytes(Math.floor(3.96 * 1000 ** 3))).toBe(`${new Intl.NumberFormat(undefined, { minimumFractionDigits: 1 }).format(3.9)} GB`);
+    expect(floorBytes(4 * 1000 ** 3)).toContain('4');
     expect(floorBytes(0)).toBe('0 B');
-    expect(floorBytes(1023)).toBe('1023 B');
-    expect(floorBytes(1536)).toContain('KB');
-    expect(floorBytes(5 * 1024 ** 5)).toContain('TB');
+    expect(floorBytes(999)).toBe('999 B');
+    expect(floorBytes(1500)).toContain('KB');
+    expect(floorBytes(5 * 1000 ** 4)).toContain('TB');
     expect(floorBytes(-1)).toBe('—');
     expect(floorBytes(Number.NaN)).toBe('—');
   });

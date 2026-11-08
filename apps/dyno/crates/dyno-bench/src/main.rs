@@ -1,5 +1,5 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
-//! `dyno-bench <cpu|memory|disk|gpu> [--dir <folder>] [--disk-mib <n>] [--millis <n>] [--reps <n>] [--warmup-ms <n>] [--gap-ms <n>] [--wait-go]`
+//! `dyno-bench <cpu|memory|disk|gpu> [--dir <folder>] [--disk-mib <n>] [--rotational] [--sustained-secs <n>] [--sustained-write-mib <n>] [--avail-mib <n>] [--millis <n>] [--reps <n>] [--warmup-ms <n>] [--gap-ms <n>] [--wait-go]`
 //!
 //! Runs one benchmark and writes JSON lines on stdout (ADR 0030 section 2): `progress` events as it goes, a `heartbeat` once a
 //! second from a thread of its own, and exactly one `result` last (`dyno_core::bench::wire`). The agent starts it on the person's
@@ -20,6 +20,12 @@ use std::time::Duration;
 /// How long `--wait-go` waits for the agent's `go`.
 const GO_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// Disk: the ramp is its warm-up, three repetitions, no gap (ADR 0030 section 3).
+const DISK_REPEATS: Repeats = Repeats {
+    warmup: Duration::ZERO,
+    reps: dyno_core::bench::disk::REPETITIONS,
+    gap: Duration::ZERO,
+};
 /// The longest time budget per timed section a caller may ask for, ms.
 const MAX_MILLIS: u64 = 5_000;
 /// The most repetitions a caller may ask for.
@@ -27,7 +33,7 @@ const MAX_REPS: u32 = 20;
 /// The longest warm-up or gap a caller may ask for, ms.
 const MAX_PAUSE_MILLIS: u64 = 10_000;
 const USAGE: &str =
-    "usage: dyno-bench <cpu|memory|disk|gpu> [--dir <folder>] [--disk-mib <n>] [--millis <n>] [--reps <n>] [--warmup-ms <n>] [--gap-ms <n>] [--wait-go]";
+    "usage: dyno-bench <cpu|memory|disk|gpu> [--dir <folder>] [--disk-mib <n>] [--rotational] [--millis <n>] [--reps <n>] [--warmup-ms <n>] [--gap-ms <n>] [--wait-go]";
 
 /// What the command line asked for.
 #[derive(Debug, PartialEq)]
@@ -38,6 +44,10 @@ struct Args {
     millis: u64,
     repeats: Repeats,
     wait_go: bool,
+    rotational: bool,
+    sustained_secs: Option<u32>,
+    sustained_write_mib: u32,
+    avail_mib: Option<u64>,
 }
 
 fn number<T: std::str::FromStr>(flag: &str, value: &str) -> Result<T, String> {
@@ -51,8 +61,12 @@ fn parse(args: &[String]) -> Result<Args, String> {
         dir: None,
         mib: DISK_DEFAULT_MIB,
         millis: SECTION_MILLIS,
-        repeats: Repeats::STANDARD,
+        repeats: if kind == BenchKind::Disk { DISK_REPEATS } else { Repeats::STANDARD },
         wait_go: false,
+        rotational: false,
+        sustained_secs: None,
+        sustained_write_mib: 0,
+        avail_mib: None,
     };
     let mut it = args[1..].iter();
     while let Some(flag) = it.next() {
@@ -60,8 +74,15 @@ fn parse(args: &[String]) -> Result<Args, String> {
             out.wait_go = true;
             continue;
         }
+        if flag == "--rotational" {
+            out.rotational = true;
+            continue;
+        }
         let value = it.next().ok_or(format!("{flag} needs a value"))?;
         match flag.as_str() {
+            "--sustained-secs" => out.sustained_secs = Some(number::<u32>(flag, value)?.clamp(1, dyno_bench::cpu::sustained::MAX_SECS)),
+            "--sustained-write-mib" => out.sustained_write_mib = number::<u32>(flag, value)?.min(64 * 1024),
+            "--avail-mib" => out.avail_mib = Some(number(flag, value)?),
             "--dir" => out.dir = Some(PathBuf::from(value)),
             "--disk-mib" => out.mib = number(flag, value)?,
             "--millis" => out.millis = number::<u64>(flag, value)?.clamp(10, MAX_MILLIS),
@@ -105,6 +126,10 @@ fn main() -> ExitCode {
         repeats: parsed.repeats,
         dir: parsed.dir.as_deref(),
         disk_mib: parsed.mib,
+        rotational: parsed.rotational,
+        sustained_secs: parsed.sustained_secs,
+        sustained_write_mib: parsed.sustained_write_mib,
+        available_memory: parsed.avail_mib.map(|m| m.saturating_mul(1024 * 1024)),
     };
     let status = match run(parsed.kind, &settings, &*emitter) {
         Ok(metrics) => BenchStatus::Done { metrics },
@@ -188,7 +213,13 @@ mod tests {
             (p.kind, p.dir, p.mib, p.millis),
             (BenchKind::Disk, Some(PathBuf::from("/x")), 32, MAX_MILLIS)
         );
-        assert_eq!(p.repeats, Repeats::STANDARD, "the method's repetitions unless asked otherwise");
+        assert_eq!(p.repeats, DISK_REPEATS, "disk: the ramp is its warm-up, three repetitions, no gap");
+        assert_eq!(
+            parse(&a(&["cpu"])).unwrap().repeats,
+            Repeats::STANDARD,
+            "the method's repetitions unless asked otherwise"
+        );
+        assert!(parse(&a(&["disk", "--rotational"])).unwrap().rotational);
         let r = parse(&a(&["cpu", "--reps", "99", "--warmup-ms", "0", "--gap-ms", "99999999"]))
             .unwrap()
             .repeats;

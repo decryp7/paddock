@@ -27,3 +27,12 @@ export function bar(value: number, full: number, accent = false): string | null 
   const colour = accent ? accentWash(26) : 'color-mix(in srgb, var(--text-3) 22%, transparent)';
   return `linear-gradient(to right, ${colour} ${pct}%, transparent ${pct}%)`;
 }
+
+/**
+ * An opaque per-core cell colour for a load of 0 to 100: from a neutral (the subtle text colour) to the accent's control colour,
+ * both at least 3:1 on a card in either scheme (WCAG 1.4.11), so even the lowest step is a visible cell. The number is in the tooltip.
+ */
+export function coreHeat(load: number): string {
+  const level = Number.isFinite(load) ? Math.min(100, Math.max(0, load)) : 0;
+  return `color-mix(in srgb, var(--pd-accent-control) ${Math.round(25 + level * 0.75)}%, var(--pd-text-subtle))`;
+}

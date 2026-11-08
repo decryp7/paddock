@@ -20,6 +20,8 @@ describe('WidgetChoicesStore', () => {
     expect(store.dashboardMetrics('heatmap').map((m) => m.title)).toEqual(['CPU per core']);
     expect(store.dashboardMetrics('ring').map((m) => m.metric)).not.toContain('fan');
     expect(store.title('networkDown')).toBe('Network down');
+    expect(store.title('networkBoth')).toBe('Network (up and down)');
+    expect(store.dashboardMetrics('graph').map((m) => m.metric)).toContain('networkBoth');
     expect(store.title({ process: 'chrome' })).toBe('Process chrome');
   });
 

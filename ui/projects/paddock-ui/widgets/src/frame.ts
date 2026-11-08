@@ -1,5 +1,5 @@
 import { NgTemplateOutlet } from '@angular/common';
-import { ChangeDetectionStrategy, Component, computed, inject, Injector, input, LOCALE_ID, output, TemplateRef, ViewEncapsulation } from '@angular/core';
+import { afterNextRender, ChangeDetectionStrategy, Component, computed, DestroyRef, ElementRef, inject, Injector, input, LOCALE_ID, output, signal, TemplateRef, viewChild, ViewEncapsulation } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import { MatProgressBar } from '@angular/material/progress-bar';
 import { MatButton } from '@angular/material/button';
@@ -30,7 +30,7 @@ interface Meta {
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   imports: [NgTemplateOutlet, MatIcon, MatProgressBar, MatButton, PdGlyph, PdStatusGlyph],
-  host: { class: 'pd-widget-frame', '[style.grid-column]': '"span " + span()' },
+  host: { class: 'pd-widget-frame', '[class.pd-widget-frame--card]': "variant() === 'card'", '[style.grid-column]': '"span " + span()' },
   template: `
     <section class="pd-w" [class.pd-w--loading]="loading()" [attr.aria-labelledby]="titleId" [attr.aria-busy]="loading() ? 'true' : null">
       <header class="pd-w-head">
@@ -46,59 +46,93 @@ interface Meta {
           }
         }
       </header>
-      @let s = state();
-      @if (s?.state === 'empty') {
-        @if (s.calm && s.next) {
-          <button type="button" class="pd-w-calm" [attr.aria-label]="s.title + ', ' + s.detail + '. ' + s.next.label" (click)="action.emit(s.next.action)">
-            <pd-glyph class="pd-w-ok" name="check-circle" [size]="16" />
-            <span class="pd-w-calm-text"><span>{{ s.title }}</span><span class="pd-w-subtle">&nbsp;· {{ s.detail }}</span></span>
-            <pd-glyph class="pd-w-chev" name="chevron-right" [size]="14" />
-          </button>
-        } @else {
-          <div class="pd-w-st">
-            <pd-status-glyph status="info" [size]="16" />
-            <span class="pd-w-t">{{ s.title }}</span>
-            <span class="pd-w-d">{{ s.detail }}</span>
-            @if (s.next; as n) {
-              <button matButton="text" type="button" class="pd-w-act" (click)="action.emit(n.action)">{{ n.label }}</button>
+      <div
+        #bodyEl
+        class="pd-w-body"
+        [class.pd-w-body--scroll]="scrollable()"
+        [attr.tabindex]="scrollable() ? 0 : null"
+        [attr.role]="scrollable() ? 'group' : null"
+        [attr.aria-label]="scrollable() ? title() : null"
+      >
+        <div #contentEl class="pd-w-content">
+          @let s = state();
+          @if (s?.state === 'empty') {
+            @if (s.calm && s.next) {
+              <button type="button" class="pd-w-calm" [attr.aria-label]="s.title + ', ' + s.detail + '. ' + s.next.label" (click)="action.emit(s.next.action)">
+                <pd-glyph class="pd-w-ok" name="check-circle" [size]="16" />
+                <span class="pd-w-calm-text"><span>{{ s.title }}</span><span class="pd-w-subtle">&nbsp;· {{ s.detail }}</span></span>
+                <pd-glyph class="pd-w-chev" name="chevron-right" [size]="14" />
+              </button>
+            } @else {
+              <div class="pd-w-st" role="status">
+                <pd-status-glyph status="info" [size]="16" />
+                <span class="pd-w-t">{{ s.title }}</span>
+                <span class="pd-w-d">{{ s.detail }}</span>
+                @if (s.next; as n) {
+                  <button matButton="text" type="button" class="pd-w-act" (click)="action.emit(n.action)">{{ n.label }}</button>
+                }
+              </div>
             }
-          </div>
-        }
-      } @else if (s?.state === 'error') {
-        <div class="pd-w-st pd-w-st--error">
-          <pd-status-glyph class="pd-w-bad" status="error" [size]="16" />
-          <span class="pd-w-t">{{ s.title }}</span>
-          @if (s.cause) {
-            <span class="pd-w-d">{{ s.cause }}</span>
-          }
-          @if (s.next; as n) {
-            <button matButton="text" type="button" class="pd-w-act" (click)="action.emit(n.action)"><pd-glyph name="refresh" [size]="16" />{{ n.label }}</button>
+          } @else if (s?.state === 'error') {
+            <div class="pd-w-st pd-w-st--error" role="alert">
+              <pd-status-glyph class="pd-w-bad" status="error" [size]="16" />
+              <span class="pd-w-t">{{ s.title }}</span>
+              @if (s.cause) {
+                <span class="pd-w-d">{{ s.cause }}</span>
+              }
+              @if (s.next; as n) {
+                <button matButton="text" type="button" class="pd-w-act" (click)="action.emit(n.action)"><pd-glyph name="refresh" [size]="16" />{{ n.label }}</button>
+              }
+            </div>
+          } @else if (s?.state === 'working') {
+            <div class="pd-w-st">
+              <pd-glyph name="refresh" [size]="16" />
+              <span class="pd-w-t">{{ s.title }}</span>
+              @let detail = detailOf(s.phase, s.progress, locale);
+              @if (detail) {
+                <span class="pd-w-d">{{ detail }}</span>
+              }
+              <mat-progress-bar class="pd-w-prog" [mode]="percent(s.progress) === null ? 'indeterminate' : 'determinate'" [value]="percent(s.progress) ?? 0" [attr.aria-label]="s.title" />
+              @if (s.cancel; as c) {
+                <button matButton="text" type="button" class="pd-w-act" (click)="action.emit(c.action)">{{ c.label }}</button>
+              }
+            </div>
+            @if (s.last !== null && template(); as tpl) {
+              <ng-container *ngTemplateOutlet="tpl; context: { $implicit: s.last, loading: false, stale: false }; injector: readyInjector" />
+            }
+          } @else if (template(); as tpl) {
+            <ng-container *ngTemplateOutlet="tpl; context: readyContext(); injector: readyInjector" />
           }
         </div>
-      } @else if (s?.state === 'working') {
-        <div class="pd-w-st">
-          <pd-glyph name="refresh" [size]="16" />
-          <span class="pd-w-t">{{ s.title }}</span>
-          @let detail = detailOf(s.phase, s.progress, locale);
-          @if (detail) {
-            <span class="pd-w-d">{{ detail }}</span>
-          }
-          <mat-progress-bar class="pd-w-prog" [mode]="percent(s.progress) === null ? 'indeterminate' : 'determinate'" [value]="percent(s.progress) ?? 0" [attr.aria-label]="s.title" />
-          @if (s.cancel; as c) {
-            <button matButton="text" type="button" class="pd-w-act" (click)="action.emit(c.action)">{{ c.label }}</button>
-          }
-        </div>
-        @if (s.last !== null && template(); as tpl) {
-          <ng-container *ngTemplateOutlet="tpl; context: { $implicit: s.last, loading: false, stale: false }; injector: readyInjector" />
-        }
-      } @else if (template(); as tpl) {
-        <ng-container *ngTemplateOutlet="tpl; context: readyContext(); injector: readyInjector" />
-      }
+      </div>
     </section>
   `,
   styles: `
     .pd-widget-frame { display: block; min-width: 0; }
     .pd-w { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-content: start; min-width: 0; padding: var(--pd-space-2) var(--pd-space-3); border-radius: var(--pd-radius-card); background: var(--pd-surface-2); color: var(--pd-text); }
+    .pd-widget-frame--card { height: 100%; }
+    /* The body is the part that scrolls (a widget whose content does not fit its slot scrolls vertically inside its body, head fixed). The slot of a card is its grid cell; a tile (popup) has no cell, so its body is capped at --pd-widget-tile-body-max (the app may set it on the frame or an ancestor) and taller content scrolls. */
+        /* The bottom padding clears the grid's corner resize grip (24 px at 4 px from the corner) so it never covers the last line. */
+    .pd-widget-frame--card .pd-w { box-sizing: border-box; height: 100%; padding: var(--pd-space-3) var(--pd-space-3) calc(var(--pd-space-3) + var(--pd-widget-grip-clear, 16px)); overflow: hidden; align-content: start; grid-template-rows: auto minmax(0, 1fr); }
+    /* The padding gives the rows' hover bleed and focus rings room inside the clip. Thin themed scrollbar; overscroll stays auto so the wheel chains to the dashboard once the body reaches its end (never trapped). */
+    .pd-w-body { display: block; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: auto; margin: -2px calc(-1 * var(--pd-space-2)); padding: 2px var(--pd-space-2); scrollbar-width: thin; scrollbar-color: var(--pd-border-strong) transparent; }
+    .pd-widget-frame:not(.pd-widget-frame--card) .pd-w-body { max-height: var(--pd-widget-tile-body-max, 220px); }
+    .pd-w-content { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; align-content: start; min-width: 0; }
+    /* A sign that more exists even where scrollbars are overlays (macOS): a soft edge shadow at the side that has more, drawn with local backgrounds so it follows the scroll position. */
+    .pd-w-body--scroll {
+      background:
+        linear-gradient(var(--pd-surface-2) 30%, transparent) top / 100% 24px no-repeat local,
+        linear-gradient(transparent, var(--pd-surface-2) 70%) bottom / 100% 24px no-repeat local,
+        linear-gradient(color-mix(in srgb, var(--pd-text) 16%, transparent), transparent) top / 100% 8px no-repeat scroll,
+        linear-gradient(transparent, color-mix(in srgb, var(--pd-text) 16%, transparent)) bottom / 100% 8px no-repeat scroll;
+    }
+    .pd-w-body:focus-visible { outline: var(--pd-focus-width) solid var(--pd-focus-ring); outline-offset: 2px; border-radius: var(--pd-radius-control); }
+    /* An inert body (the grid while editing) reads as inactive: a filled primary or accent text button loses its emphasis, so the page's own primary action stays the only one. */
+    .pd-widget-frame[inert] .mat-mdc-unelevated-button:not(:disabled) { background-color: transparent; color: var(--pd-text-muted); }
+    .pd-widget-frame[inert] .mat-mdc-button:not(:disabled), .pd-widget-frame[inert] .pd-w-act { color: var(--pd-text-muted); }
+    /* The other body controls (segmented and toggle buttons, checkboxes, selects, switches) read at reduced emphasis too: the chosen state stays visible (ring, tick, label) at 0.7 so it still clears 3:1. */
+    .pd-widget-frame[inert] :is(.mat-button-toggle-group, .mat-mdc-checkbox, .mat-mdc-select, .mat-mdc-form-field, .mat-mdc-slide-toggle, .mat-mdc-radio-button, select, input:not([class*='mdc-'])) { opacity: 0.7; }
+    .pd-widget-frame[inert] .mat-button-toggle-checked .mat-button-toggle-label-content { color: var(--pd-text-muted); }
     .pd-w-head { display: flex; align-items: center; gap: 6px; height: 16px; font-size: var(--pd-text-label); line-height: var(--pd-lh-label); font-weight: var(--pd-weight-medium); color: var(--pd-text-muted); white-space: nowrap; }
     .pd-w-icon.mat-icon { width: 14px; height: 14px; flex: none; }
     .pd-w-title { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -140,6 +174,8 @@ export class PdWidgetFrame<V = unknown, A = unknown> {
   readonly state = input<WidgetState<V, A> | null | undefined>(null);
   /** The app's template for the kind (`PdWidget.template`). */
   readonly template = input<TemplateRef<PdWidgetContext<V>> | null>(null);
+  /** `tile`: a popup tile that sizes to its content. `card`: fills its grid cell (the widget grid, ADR 0044), head and body clipped to the cell. */
+  readonly variant = input<'tile' | 'card'>('tile');
   /** Columns spanned in the area's grid. */
   readonly span = input(2);
   /** A live kind says "Paused at 14:28" when stale; the others say "Updated 4 min ago". */
@@ -155,6 +191,11 @@ export class PdWidgetFrame<V = unknown, A = unknown> {
   readonly action = output<A>();
 
   protected readonly titleId = `pd-widget-${nextId++}`;
+
+  private readonly bodyEl = viewChild<ElementRef<HTMLElement>>('bodyEl');
+  private readonly contentEl = viewChild<ElementRef<HTMLElement>>('contentEl');
+  /** A card whose content is taller than its body: the body then scrolls and is a focusable, named region (keyboard scrolling). */
+  protected readonly scrollable = signal(false);
   protected readonly loading = computed(() => this.state() == null);
   protected readonly readyInjector = Injector.create({ parent: this.injector, providers: [{ provide: PD_WIDGET_LOADING, useValue: this.loading }] });
 
@@ -177,6 +218,21 @@ export class PdWidgetFrame<V = unknown, A = unknown> {
   });
 
   protected readonly locale = inject(LOCALE_ID);
+
+  constructor() {
+    const destroy = inject(DestroyRef);
+    afterNextRender(() => {
+      const body = this.bodyEl()?.nativeElement;
+      const content = this.contentEl()?.nativeElement;
+      if (!body || !content || typeof ResizeObserver === 'undefined') return;
+      const measure = () => this.scrollable.set(body.scrollHeight > body.clientHeight + 1);
+      const observer = new ResizeObserver(measure);
+      observer.observe(body);
+      observer.observe(content);
+      measure();
+      destroy.onDestroy(() => observer.disconnect());
+    });
+  }
   protected detailOf = detailOf;
   protected percent = percent;
 }

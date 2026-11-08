@@ -164,6 +164,7 @@ mod tests {
             Sampling {
                 interval_ms: 10_000,
                 process_interval_ms: 30_000,
+                helper_sweep_ms: None,
             },
             Load {
                 own_cpu: 50.0,

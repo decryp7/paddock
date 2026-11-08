@@ -1,6 +1,7 @@
 import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
+import { jobsProviders, mockWithJobs } from '../../../testing/job-test-support';
 import { provideIcons } from '../../shared/icons';
 import { Notifier } from '../../shared/notifier';
 import { SettingsStore } from '../../state/settings.store';
@@ -25,8 +26,8 @@ async function settle(f: ComponentFixture<unknown>) {
 }
 
 async function make() {
-  const mock = new MockBackend({ latencyMs: 0, now: () => NOW });
-  TestBed.configureTestingModule({ providers: [provideIcons(), { provide: BACKEND, useValue: mock }] });
+  const { mock, jobs } = mockWithJobs({ now: () => NOW });
+  TestBed.configureTestingModule({ providers: [provideIcons(), jobsProviders(jobs), { provide: BACKEND, useValue: mock }] });
   const f = TestBed.createComponent(SettingsPage);
   await settle(f);
   const el = f.nativeElement as HTMLElement;
@@ -94,8 +95,8 @@ describe('SettingsPage', () => {
     Element.prototype.scrollIntoView = () => undefined;
     const scroll = vi.spyOn(Element.prototype, 'scrollIntoView');
     const anchor = signal<SettingsAnchor | null>({ id: 'popup-widgets', at: 1 });
-    const mock = new MockBackend({ latencyMs: 0, now: () => NOW });
-    TestBed.configureTestingModule({ providers: [provideIcons(), { provide: BACKEND, useValue: mock }, { provide: SETTINGS_ANCHOR, useValue: anchor }] });
+    const { mock, jobs } = mockWithJobs({ now: () => NOW });
+    TestBed.configureTestingModule({ providers: [provideIcons(), jobsProviders(jobs), { provide: BACKEND, useValue: mock }, { provide: SETTINGS_ANCHOR, useValue: anchor }] });
     const f = TestBed.createComponent(SettingsPage);
     await settle(f);
     await vi.waitFor(() => {
@@ -165,67 +166,6 @@ describe('SettingsPage', () => {
     expect(el.querySelector('section[aria-label="Appearance"]')).toBeNull();
   });
 
-  it('has a Backup health section: switch, hours and folders for the tools found by name', async () => {
-    const { f, el, saveButton, store } = await make();
-    const section = el.querySelector('section[aria-label="Backup health"]')!;
-    expect(section).not.toBeNull();
-    expect(section.textContent).toContain('never runs or manages a backup');
-    expect(section.querySelectorAll('textarea')).toHaveLength(3);
-    expect(section.textContent).toContain('Where restic is installed');
-    toggle(el, 'Tell me when a backup is out of date').click();
-    await vi.waitFor(() => {
-      f.detectChanges();
-      expect(store.settings()!.backup.alertWhenStale).toBe(true);
-      expect(saveButton()).toBeDefined();
-    });
-  });
-
-  it('keeps what is typed in a folder box, validates it like the engine and saves it', async () => {
-    const { f, el, saveButton, store } = await make();
-    const box = el.querySelector<HTMLTextAreaElement>('textarea[aria-label="restic folders"]')!;
-    box.value = 'tools/restic';
-    box.dispatchEvent(new Event('input'));
-    await settle(f);
-    expect(el.querySelector('section[aria-label="Backup health"] .problem')!.textContent).toContain('not a full path');
-    expect(saveButton()!.disabled).toBe(true);
-    box.value = '/opt/restic\n';
-    box.dispatchEvent(new Event('input'));
-    await settle(f);
-    expect(box.value).toBe('/opt/restic\n');
-    expect(el.querySelector('section[aria-label="Backup health"] .problem')).toBeNull();
-    const hours = el.querySelector<HTMLInputElement>('input[aria-label="Hours until a backup is out of date"]')!;
-    hours.value = '24';
-    hours.dispatchEvent(new Event('input'));
-    await settle(f);
-    saveButton()!.click();
-    await settle(f);
-    expect(store.settings()!.backup).toEqual({ alertWhenStale: true, staleAfterHours: 24, overrides: [{ tool: 'restic', dirs: ['/opt/restic'] }] });
-    expect(saveButton()).toBeUndefined();
-    expect(el.querySelector<HTMLTextAreaElement>('textarea[aria-label="restic folders"]')!.value).toBe('/opt/restic');
-  });
-
-  it('shows the engine sentence when it refuses the backup settings, and discard restores the boxes', async () => {
-    const { f, el, mock, saveButton, discardButton } = await make();
-    const hours = el.querySelector<HTMLInputElement>('input[aria-label="Hours until a backup is out of date"]')!;
-    hours.value = '0';
-    hours.dispatchEvent(new Event('input'));
-    await settle(f);
-    expect(saveButton()!.disabled).toBe(true);
-    hours.value = '30';
-    hours.dispatchEvent(new Event('input'));
-    await settle(f);
-    vi.spyOn(mock, 'saveSettings').mockRejectedValueOnce({ code: 'badRequest', message: 'restic: not allowed.' });
-    saveButton()!.click();
-    await settle(f);
-    expect(el.querySelector('.save-error')!.textContent).toBe('restic: not allowed.');
-    const box = el.querySelector<HTMLTextAreaElement>('textarea[aria-label="Duplicati folders"]')!;
-    box.value = '/x';
-    box.dispatchEvent(new Event('input'));
-    await settle(f);
-    discardButton()!.click();
-    await settle(f);
-    expect(el.querySelector<HTMLTextAreaElement>('textarea[aria-label="Duplicati folders"]')!.value).toBe('');
-  });
   it('shows the hardware and baselines section with the defaults when the settings hold none', async () => {
     const { el } = await make();
     const section = el.querySelector('section[aria-label="Hardware and baselines"]')!;
@@ -355,5 +295,22 @@ describe('SettingsPage', () => {
     expect(input.disabled).toBe(true);
     expect(input.closest('.row')!.classList.contains('off')).toBe(true);
     expect(saveButton()).toBeDefined();
+  });
+
+  it('has a Network ▸ Online data section: the two switches on by default, the first-run note, the credit, and no Offline mode', async () => {
+    const { f, el, mock } = await make();
+    const section = el.querySelector<HTMLElement>('section#online-data')!;
+    expect(section.getAttribute('aria-label')).toContain('Online data');
+    await vi.waitFor(() => expect(section.querySelector('[data-testid="first-run-note"]')).not.toBeNull());
+    expect(section.querySelector('[data-testid="first-run-note"]')!.textContent).toContain('Cloudflare');
+    expect(section.querySelector('[data-testid="attribution"]')!.textContent).toContain('DB-IP');
+    const databases = section.querySelector<HTMLInputElement>('[data-testid="switch-databases"] input')!;
+    const own = section.querySelector<HTMLInputElement>('[data-testid="switch-own-location"] input')!;
+    expect([databases.checked, own.checked]).toEqual([true, true]);
+    expect(section.textContent).not.toMatch(/offline mode/i);
+    own.click();
+    await vi.waitFor(() => expect(mock.intel.status().geo.switches.ownLocation).toBe(false));
+    expect(mock.intel.status().geo.switches.locationDatabases).toBe(true);
+    f.detectChanges();
   });
 });

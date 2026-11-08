@@ -40,7 +40,6 @@ paddock-log = { path = "../../../crates/paddock-log" }
 paddock-health = { path = "../../../crates/paddock-health", features = ["tauri", "os-notify"] }
 tauri-plugin-notification = "2.7"
 paddock-mcp = { path = "../../../crates/paddock-mcp", features = ["tauri"] }
-paddock-secrets = { path = "../../../crates/paddock-secrets", features = ["keyring"] }
 paddock-jobs = { path = "../../../crates/paddock-jobs", features = ["tauri"] }
 paddock-packs = { path = "../../../crates/paddock-packs", features = ["tauri", "watch"] }
 paddock-service = { path = "../../../crates/paddock-service", features = ["tauri"] }

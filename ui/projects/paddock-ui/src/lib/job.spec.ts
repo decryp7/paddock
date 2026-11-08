@@ -6,7 +6,7 @@ const base = { id: 7, kind: 'import', title: 'Import logs', subject: '3 folders'
 const running = (phase: unknown, extra: Partial<SuJobSnapshot> = {}): SuJobSnapshot =>
   ({ ...base, state: 'running', phase, ...extra }) as SuJobSnapshot;
 const discovering = running({ id: 'walk', label: 'Finding files', unit: 'items', total: null, done: 12345 });
-const download = running({ id: 'dl', label: 'Downloading', unit: 'bytes', total: 118 * 1024 * 1024, done: 42 * 1024 * 1024 }, { etaMs: 90_000 });
+const download = running({ id: 'dl', label: 'Downloading', unit: 'bytes', total: 118 * 1000 * 1000, done: 42 * 1000 * 1000 }, { etaMs: 90_000 });
 
 function render(job: SuJobSnapshot, stalled = false) {
   const f = TestBed.createComponent(SuJob);
@@ -26,9 +26,9 @@ describe('formatters', () => {
   it('formats sizes', () => {
     expect(formatBytes(0)).toBe('0 bytes');
     expect(formatBytes(512)).toBe('512 bytes');
-    expect(formatBytes(4.2 * 1024 * 1024)).toBe('4.2 MB');
-    expect(formatBytes(118 * 1024 * 1024)).toBe('118 MB');
-    expect(formatBytes(5 * 1024 ** 5)).toBe('5 PB');
+    expect(formatBytes(4.2 * 1000 * 1000)).toBe('4.2 MB');
+    expect(formatBytes(118 * 1000 * 1000)).toBe('118 MB');
+    expect(formatBytes(5 * 1000 ** 5)).toBe('5 PB');
     expect(formatBytes(NaN)).toBe('0 bytes');
   });
   it('formats time left', () => {

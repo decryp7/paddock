@@ -459,11 +459,104 @@ describe('selecting and deleting notifications', () => {
       await f.whenStable();
     };
     const titles = () => all(el, '.pd-notice .pd-title').map((t) => t.textContent?.trim());
-    return { f, el, centre, posted, pick, titles, asked };
+    const toggle = async () => {
+      one(el, '[data-testid=notices-select-toggle]').click();
+      await settle();
+      await f.whenStable();
+    };
+    const select = async () => {
+      await toggle();
+    };
+    return { f, el, centre, posted, pick, titles, asked, select, toggle };
   }
 
+  it('shows no checkboxes by default; Select shows them, Done hides them and clears the selection', async () => {
+    const { f, el, posted, pick, select, toggle } = await panel();
+    expect(el.querySelector('mat-checkbox')).toBeNull();
+    expect(el.querySelector('[data-testid=notices-select-all]')).toBeNull();
+    const button = one(el, '[data-testid=notices-select-toggle]');
+    expect(button.textContent).toContain('Select');
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+    await select();
+    expect(all(el, '[data-testid^=notice-select-]').length).toBe(4);
+    expect(el.querySelector('[data-testid=notices-select-all]')).not.toBeNull();
+    expect(button.textContent).toContain('Done');
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+    // The focus moves to the first checkbox on entry.
+    expect(document.activeElement).toBe(one(el, `[data-testid=notice-select-${posted[3]!.id}] input`));
+    await pick(posted[3]!.id);
+    expect(one(el, '[data-testid=notices-delete-selected]').textContent).toContain('(1)');
+    await toggle();
+    expect(el.querySelector('mat-checkbox')).toBeNull();
+    expect(el.querySelector('[data-testid=notices-delete-selected]')).toBeNull();
+    expect(document.activeElement).toBe(button);
+    // Selecting again starts empty.
+    await toggle();
+    expect(el.querySelector('[data-testid=notices-delete-selected]')).toBeNull();
+    expect(f.componentInstance).toBeTruthy();
+  });
+
+  it('a click on a message text toggles its checkbox in selection mode, and does nothing there outside it', async () => {
+    const { f, el, posted, select } = await panel();
+    const title = one(el, `[data-testid=notice-${posted[3]!.id}] .pd-title`);
+    title.click();
+    await settle();
+    await f.whenStable();
+    expect(el.querySelector('[data-testid=notices-delete-selected]')).toBeNull();
+    await select();
+    title.click();
+    await settle();
+    await f.whenStable();
+    expect(one(el, '[data-testid=notices-delete-selected]').textContent).toContain('(1)');
+    title.click();
+    await settle();
+    await f.whenStable();
+    expect(el.querySelector('[data-testid=notices-delete-selected]')).toBeNull();
+  });
+
+  it('hides Select with no messages and leaves selection mode when the list empties', async () => {
+    const { f, el, posted, select } = await panel();
+    await select();
+    for (const p of posted) {
+      one(el, `[data-testid=notice-dismiss-${p.id}]`).click();
+      await settle();
+      await f.whenStable();
+    }
+    expect(el.querySelector('[data-testid=notices-select-toggle]')).toBeNull();
+    expect(el.querySelector('mat-checkbox')).toBeNull();
+  });
+
+  it('a click on a message button in selection mode does not pick it; Select with nothing listed focuses the toolbar', async () => {
+    const { f, el, posted, select, centre } = await panel();
+    await select();
+    one(el, `[data-testid=notice-read-${posted[3]!.id}]`).click();
+    await settle();
+    await f.whenStable();
+    expect(el.querySelector('[data-testid=notices-delete-selected]')).toBeNull();
+    await select();
+    // Every message read and the Unread filter on: Select is still offered, with no row to focus.
+    for (const p of posted) await centre.markRead(p.id);
+    (all(el, '[role=radio]')[1] as HTMLButtonElement).click();
+    await f.whenStable();
+    expect(all(el, '.pd-notice').length).toBe(0);
+    await select();
+    expect(one(el, '[data-testid=notices-select-toggle]').textContent).toContain('Done');
+    expect(el.contains(document.activeElement)).toBe(true);
+  });
+
+  it('keeps the focus on the Select button area after deleting the last selected message', async () => {
+    const { f, el, posted, select, pick } = await panel();
+    await select();
+    for (const p of posted) await pick(p.id);
+    one(el, '[data-testid=notices-delete-selected]').click();
+    await settle();
+    await f.whenStable();
+    expect(el.contains(document.activeElement)).toBe(true);
+  });
+
   it('deletes the selected messages with a shift-click range, from the keyboard-reachable checkboxes', async () => {
-    const { f, el, posted, pick, titles } = await panel();
+    const { f, el, posted, pick, titles, select } = await panel();
+    await select();
     expect(el.querySelector('[data-testid=notices-delete-selected]')).toBeNull();
     // Newest first: D C B A. Pick D, then Shift-pick B: D, C and B.
     await pick(posted[3]!.id);
@@ -480,7 +573,8 @@ describe('selecting and deleting notifications', () => {
   });
 
   it('range-selects from the keyboard with Shift+Space', async () => {
-    const { f, el, posted } = await panel();
+    const { f, el, posted, select } = await panel();
+    await select();
     const first = one(el, `[data-testid=notice-select-${posted[3]!.id}] input`);
     const last = one(el, `[data-testid=notice-select-${posted[1]!.id}] input`);
     first.click();
@@ -530,7 +624,8 @@ describe('selecting and deleting notifications', () => {
   });
 
   it('selects all and clears it again', async () => {
-    const { f, el } = await panel();
+    const { f, el, select } = await panel();
+    await select();
     const all1 = one(el, '[data-testid=notices-select-all] input') as HTMLInputElement;
     all1.click();
     await settle();
@@ -540,6 +635,17 @@ describe('selecting and deleting notifications', () => {
     await settle();
     await f.whenStable();
     expect(el.querySelector('[data-testid=notices-delete-selected]')).toBeNull();
+  });
+
+  it('Delete all is a text button (not outlined, not filled, no danger class), like Mark all read', async () => {
+    const { el } = await panel();
+    for (const id of ['notices-delete-all', 'notices-mark-all']) {
+      const b = one(el, `[data-testid=${id}]`);
+      expect(b.classList.contains('mat-mdc-button'), id).toBe(true);
+      for (const not of ['mat-mdc-outlined-button', 'mat-mdc-unelevated-button', 'mat-mdc-raised-button', 'pd-danger', 'pd-button-danger']) {
+        expect(b.classList.contains(not), `${id} ${not}`).toBe(false);
+      }
+    }
   });
 
   it('deletes everything only after the decision dialog is answered', async () => {

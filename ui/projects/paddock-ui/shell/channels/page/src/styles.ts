@@ -47,7 +47,6 @@ export const CHANNELS_STYLES = `
   .pd-ch__hint { color: var(--pd-text-muted); font-weight: normal; font-size: var(--pd-text-caption); }
   .pd-ch__hint--bad { color: var(--pd-danger-text, var(--pd-text)); }
   .pd-ch__check { font-weight: var(--pd-weight-medium); }
-  mat-checkbox.pd-ch__check { margin-inline-start: calc((var(--pd-control-height) - 18px) / -2); }
   .pd-ch__lan { display: flex; flex-direction: column; gap: var(--pd-space-1); }
   /* The help text starts where the switch's label does: the track and the gap before the label (Material's own tokens). */
   :host { --pd-ch-switch-indent: calc(var(--mat-slide-toggle-track-width, 52px) + var(--mat-slide-toggle-label-spacing, var(--pd-space-3))); }

@@ -1,0 +1,60 @@
+# The shared crates' OS-edge modules and their escape-hatch cap (family ADR 0054 section 2.1 and 2.2; ADR 0052's reader).
+# An OS-edge module holds a `Backend` or another adapter, calls an OS API through FFI, or runs an OS tool through
+# `paddock_proc`. C93 fails on a discarded result in the non-test code of these modules, and also finds unlisted edge modules
+# by their imports. Each listed file starts with the inner `deny(clippy::let_underscore_must_use, ...)` attribute once E-3 lands.
+# Paths are relative to `crates/`. A new edge module is added here in the change that makes it.
+
+[edges]
+modules = [
+  # paddock-service: the backends, the Windows service host, the protected-file and trust adapters.
+  "paddock-service/src/backend/mod.rs",
+  "paddock-service/src/backend/systemd.rs",
+  "paddock-service/src/backend/launchd.rs",
+  "paddock-service/src/backend/windows.rs",
+  "paddock-service/src/native.rs",
+  "paddock-service/src/system.rs",
+  "paddock-service/src/launchctl.rs",
+  "paddock-service/src/scm_host.rs",
+  "paddock-service/src/supervised.rs",
+  "paddock-service/src/login.rs",
+  "paddock-service/src/record.rs",
+  "paddock-service/src/privileged/files.rs",
+  "paddock-service/src/privileged/trust.rs",
+  "paddock-service/src/privileged/elevate.rs",
+  "paddock-service/src/privileged/windows_acl.rs",
+  "paddock-service/src/privileged/trust_real/mod.rs",
+  "paddock-service/src/privileged/trust_real/unix.rs",
+  "paddock-service/src/privileged/trust_real/windows.rs",
+  # paddock-proc: the process runner and its OS calls.
+  "paddock-proc/src/command.rs",
+  "paddock-proc/src/console.rs",
+  "paddock-proc/src/hint.rs",
+  "paddock-proc/src/instance.rs",
+  "paddock-proc/src/job.rs",
+  "paddock-proc/src/login.rs",
+  "paddock-proc/src/run.rs",
+  "paddock-proc/src/start.rs",
+  "paddock-proc/src/supervised.rs",
+  "paddock-proc/src/sys.rs",
+  "paddock-proc/src/tree.rs",
+  "paddock-proc/src/watch.rs",
+  # paddock-ipc: the pipe and socket endpoints, the launch and the peer's I/O.
+  "paddock-ipc/src/child.rs",
+  "paddock-ipc/src/handshake.rs",
+  "paddock-ipc/src/launch.rs",
+  "paddock-ipc/src/peer.rs",
+  "paddock-ipc/src/endpoint/mod.rs",
+  "paddock-ipc/src/endpoint/unix.rs",
+  "paddock-ipc/src/endpoint/unix_peer.rs",
+  "paddock-ipc/src/endpoint/windows.rs",
+  "paddock-ipc/src/endpoint/windows_peer.rs",
+  "paddock-ipc/src/link/client.rs",
+  "paddock-ipc/src/link/discovery.rs",
+  "paddock-ipc/src/link/server.rs",
+]
+
+# `// silent: <why>` lines allowed in the shared crates (ADR 0054 section 2.2). Measured by E-3's first report run over the
+# modules above after E-4's fixes: 11 remain, all of them a send to a receiver that is gone at shutdown or a wake-up that
+# arrives as `Err(Cancelled)`, plus one Windows sizing call that fails by design. Raising it needs an `Escape-hatch:` trailer.
+[caps]
+silent = 11

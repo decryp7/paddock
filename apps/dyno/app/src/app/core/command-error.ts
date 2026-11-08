@@ -10,6 +10,7 @@ const CODES: ReadonlySet<ErrorCode> = new Set<ErrorCode>([
   'busy',
   'needsConsent',
   'internal',
+  'stale',
 ]);
 
 /** Any rejection from a command as a typed error (unknown shapes become `internal` with their text). */
@@ -35,6 +36,8 @@ export function errorHint(code: ErrorCode): string | null {
       return 'The request took too long. Try again.';
     case 'busy':
       return 'Dyno is busy with another task. Try again when it finishes.';
+    case 'stale':
+      return 'The layout changed in another window. It was reloaded; try again.';
     case 'notFound':
       return 'It no longer exists (the process may have exited).';
     default:

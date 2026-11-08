@@ -27,7 +27,7 @@ const ALERT_RULE_DIALOG_ID = 'dy.alert-rule';
         <button type="button" matButton="filled" [disabled]="!settings.settings()" (click)="edit(null)"><dy-icon name="plus" /> Add rule</button>
       </div>
       <dy-async [loaded]="!!settings.settings()" [error]="settings.error()" [empty]="rules().length === 0" emptyTitle="No custom rules" emptyText="Add a rule to be told when the CPU, memory, disk or temperature crosses your own limit." emptyIcon="bell" what="alert rules" [rows]="3" (retry)="settings.load()">
-        <pd-table [toolbar]="false" label="Custom alert rules" [rows]="rules()" [columns]="columns" [rowKey]="ruleKey" [filterable]="false" [rowActions]="actions" [maxHeight]="480" (action)="run($event)">
+        <pd-table [toolbar]="false" label="Custom alert rules" [rows]="rules()" [columns]="columns" [rowKey]="ruleKey" [filterable]="false" [rowActions]="actions" height="window" (action)="run($event)">
           <ng-template pdCell="severity" let-r><span class="dot" [attr.data-tone]="tone(r)" aria-hidden="true"></span><span [class.muted]="r.severity !== 'critical'">{{ word(r) }}</span></ng-template>
           <ng-template pdCell="enabled" let-r><mat-slide-toggle [checked]="r.enabled" [disabled]="alarms.saving()" [aria-label]="'Enable ' + r.name" (change)="toggle(r, $event.checked)" /></ng-template>
         </pd-table>

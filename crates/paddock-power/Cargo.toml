@@ -1,0 +1,23 @@
+[package]
+name = "paddock-power"
+version = "0.1.0"
+description = "Power for the Paddock apps: a keep-awake guard that holds the OS's own sleep-prevention object (macOS power assertion, Windows power request, Linux logind inhibitor; released when the process ends), and sleep and wake notifications, behind two small ports with a fake for tests."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[dependencies]
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Power", "Win32_System_Threading"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5", features = ["blocking-api"] }
+
+[dev-dependencies]
+serde_json = "1"

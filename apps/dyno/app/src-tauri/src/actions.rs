@@ -11,8 +11,6 @@ pub trait ActionPorts {
     fn navigate(&self, to: Navigate) -> Result<(), CommandError>;
     /// Asks for the popup's slow values again.
     fn refresh(&self);
-    /// Starts the backup check job in the agent.
-    fn start_backup_check(&self) -> Result<(), CommandError>;
     /// Restarts the agent through the app's own supervisor, never through the agent.
     fn restart_agent(&self);
 }
@@ -25,7 +23,6 @@ pub fn run(effect: Effect, ports: &dyn ActionPorts) -> Result<(), CommandError> 
             ports.refresh();
             Ok(())
         }
-        Effect::StartBackupCheck => ports.start_backup_check(),
         Effect::RestartAgent => {
             ports.restart_agent();
             Ok(())
@@ -41,7 +38,7 @@ mod tests {
     use std::sync::Mutex;
 
     #[derive(Default)]
-    struct Recorder(Mutex<Vec<String>>, bool);
+    struct Recorder(Mutex<Vec<String>>);
 
     impl Recorder {
         fn log(&self, what: &str) {
@@ -59,14 +56,6 @@ mod tests {
         }
         fn refresh(&self) {
             self.log("refresh");
-        }
-        fn start_backup_check(&self) -> Result<(), CommandError> {
-            self.log("backup");
-            if self.1 {
-                Err(CommandError::unavailable())
-            } else {
-                Ok(())
-            }
         }
         fn restart_agent(&self) {
             self.log("restart");
@@ -87,13 +76,6 @@ mod tests {
             run_action(WidgetActionId::Retry(PlacementId::new("disk-space").unwrap())),
             ["refresh"]
         );
-        assert_eq!(run_action(WidgetActionId::StartBackupCheck), ["backup"]);
         assert_eq!(run_action(WidgetActionId::RestartAgent), ["restart"]);
-    }
-
-    #[test]
-    fn a_failed_backup_check_start_is_reported_not_swallowed() {
-        let r = Recorder(Mutex::new(Vec::new()), true);
-        assert!(run(WidgetActionId::StartBackupCheck.effect(), &r).is_err());
     }
 }

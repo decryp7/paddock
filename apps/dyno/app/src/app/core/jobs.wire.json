@@ -7,14 +7,6 @@
         "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
       }
     },
-    {
-      "backup": {
-        "checkedAt": null,
-        "checking": false,
-        "loginPathUsed": false,
-        "statuses": []
-      }
-    },
     true
   ],
   "requests": [
@@ -40,11 +32,6 @@
             }
           }
         }
-      }
-    },
-    {
-      "startJob": {
-        "spec": "refreshBackup"
       }
     },
     {
@@ -92,6 +79,25 @@
         "spec": "softwareInventory"
       }
     },
+    {
+      "startJob": {
+        "spec": {
+          "helper": {
+            "action": "turnOn"
+          }
+        }
+      }
+    },
+    {
+      "startJob": {
+        "spec": {
+          "helper": {
+            "action": "turnOff"
+          }
+        }
+      }
+    },
+    "helperStatus",
     "jobs",
     {
       "cancelJob": {
@@ -116,7 +122,8 @@
         "maxMb": 1024,
         "refreshOnOpen": "off"
       },
-      "scanFolders": 2000000
+      "scanFolders": 2000000,
+      "spaceRefreshSecs": 0
     },
     "diskFixed": {
       "finderDepth": 48,
@@ -131,7 +138,8 @@
         "maxMb": 1024,
         "refreshOnOpen": "off"
       },
-      "scanFolders": 2000000
+      "scanFolders": 2000000,
+      "spaceRefreshSecs": 0
     },
     "jobs": {
       "workers": "auto"

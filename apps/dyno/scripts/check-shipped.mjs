@@ -7,7 +7,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 /** The binaries the installers carry. */
-export const SHIPPED = ['dyno-app', 'dyno-agent', 'dyno-cli', 'dyno-bench'];
+export const SHIPPED = ['dyno-app', 'dyno-agent', 'dyno-cli', 'dyno-bench', 'dyno-bench-gpu'];
 /** The crates that must not be in any shipped binary's dependency tree. */
 export const FORBIDDEN_CRATES = ['dyno-helper'];
 /** Calls and phrases that ask the OS to run something with administrator rights. */
@@ -75,7 +75,7 @@ export function startedByAgent(root) {
 }
 
 /** The folders of the shipped crates. */
-export const SHIPPED_DIRS = ['crates/dyno-core', 'crates/dyno-platform', 'crates/dyno-agent', 'crates/dyno-cli', 'crates/dyno-bench', 'app/src-tauri/src'];
+export const SHIPPED_DIRS = ['crates/dyno-core', 'crates/dyno-platform', 'crates/dyno-agent', 'crates/dyno-cli', 'crates/dyno-bench', 'crates/dyno-bench-gpu', 'app/src-tauri/src'];
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop())) {
   const root = new URL('..', import.meta.url).pathname;

@@ -4,5 +4,6 @@
 mod support;
 
 mod never_panics;
+mod per_machine;
 mod pure;
 mod updater;

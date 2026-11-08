@@ -1,4 +1,4 @@
-//! Maintenance windows: the times when Dyno's heavier background work (reading the OS logs, backup checks, inventory
+//! Maintenance windows: the times when Dyno's heavier background work (reading the OS logs, inventory
 //! snapshots) may run. With no windows configured everything may run at any time. Work the user starts with a click
 //! always runs: a window limits only what Dyno starts by itself.
 

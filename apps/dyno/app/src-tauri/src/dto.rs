@@ -68,6 +68,8 @@ pub enum ErrorCode {
     Internal,
     /// The person has to agree first (a benchmark on battery): ask, then send the request again with the consent.
     NeedsConsent,
+    /// An edit computed on an older revision of a layout: the UI reloads the view and tries once more.
+    Stale,
 }
 
 /// `CommandError`: what every failed command rejects with.
@@ -121,6 +123,7 @@ impl From<AgentError> for CommandError {
             AgentCode::Busy => ErrorCode::Busy,
             AgentCode::Internal => ErrorCode::Internal,
             AgentCode::NeedsConsent => ErrorCode::NeedsConsent,
+            AgentCode::Stale => ErrorCode::Stale,
         };
         CommandError { code, message: e.message }
     }

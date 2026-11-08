@@ -1,6 +1,10 @@
 //! Reading the memory layout: pure parsers for what each OS reports ([`windows`] CIM rows as JSON, [`macos`]
 //! `system_profiler` JSON, [`linux`] SMBIOS tables), and [`read_memory_layout`], the thin reader that runs the
 //! right one. Called at agent start and on demand, never from the sampling loop.
+#![cfg_attr(
+    not(test),
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
+)]
 
 pub mod linux;
 pub mod macos;
@@ -34,7 +38,7 @@ fn read_impl(total: u64) -> MemoryLayout {
 #[cfg(target_os = "linux")]
 fn read_impl(total: u64) -> MemoryLayout {
     use std::io::Read;
-    let _ = TOOL_TIMEOUT;
+    let _: Duration = TOOL_TIMEOUT;
     let file = match std::fs::File::open("/sys/firmware/dmi/tables/DMI") {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
@@ -81,7 +85,7 @@ fn read_impl(total: u64) -> MemoryLayout {
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 fn read_impl(total: u64) -> MemoryLayout {
-    let _ = TOOL_TIMEOUT;
+    let _: Duration = TOOL_TIMEOUT;
     MemoryLayout::TotalOnly {
         total,
         reason: Unavailable::failed("Memory details are not available on this operating system."),

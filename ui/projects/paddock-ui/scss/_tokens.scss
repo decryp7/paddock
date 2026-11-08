@@ -1,3 +1,4 @@
+@use 'sass:list';
 @use 'sass:map';
 // paddock-ui design tokens. The only place that names a raw colour, size or duration.
 // Guide: the Paddock design guide (sections 2-9). Every text/background pair and the chart palette are measured by
@@ -96,6 +97,8 @@
   --pd-content-max: 1440px;
   --pd-form-max: 880px;
   --pd-chart-lane: 14px;
+  // Material draws a checkbox's box 18 px square whatever its touch target; the shared pull in _material.scss and layouts that line up with the box read this.
+  --pd-checkbox-box-size: 18px;
 
   // Density: Standard is the default.
   --pd-row-height: 32px;
@@ -104,6 +107,12 @@
   --pd-control-height: 28px;
   --pd-button-height: 32px;
   --pd-hit-min: 24px;
+  // The widget grid's row unit (ADR 0044): a widget of h rows is h x 24 + (h - 1) x gap px, so every height is on the 8 px snap.
+  --pd-widget-row: 24px;
+  // Extra bottom padding of a grid widget's card, so the corner resize grip (24 px at 4 px from the corner) never covers its last line.
+  --pd-widget-grip-clear: 16px;
+  // The widget grid's snapping guides: the accent at 70 %.
+  --pd-snap-guide: color-mix(in srgb, var(--pd-accent) 70%, transparent);
   // The resting colour of a row's "..." button: subtle text mixed 75 % into the surface, 3:1 or better (SC 1.4.11); hover, focus and
   // open use the text colour.
   --pd-row-action-rest: color-mix(in srgb, var(--pd-text-subtle) 75%, var(--pd-surface-1));
@@ -307,7 +316,10 @@ $accents: (
   'debrief': (dark: #5b9bff, light: #1d5fd1, fill: #2f6fe0),
   'pitcrew': (dark: #ff7a45, light: #bf3a0c, fill: #d2420f),
   'pitwall': (dark: #a58bfa, light: #6d3fd6, fill: #7546e0),
-  'dyno': (dark: #f063a8, light: #b01e6e, fill: #c2287c),
+  // count-dark / count-light: the five-step count ramp (--pd-count-1 to -5, fewest to most) of an app that draws counts as fills
+  // (Dyno's connections map). Only an accent with a measured ramp defines the tokens; see the design guide, section 4.
+  'dyno': (dark: #f063a8, light: #b01e6e, fill: #c2287c,
+    count-dark: (#9c378a, #b05e9b, #d87ab4, #f4a8ce, #ffdae0), count-light: (#df59c8, #b747a0, #97356a, #6a2241, #3d0f1c)),
   'spotter': (dark: #2cc4b0, light: #0b7a6e, fill: #0e8577),
   'pacenotes': (dark: #8da74e, light: #576d07, fill: #657c1f),
   'sighter': (dark: #c488cf, light: #884f92, fill: #975ea2),
@@ -316,6 +328,16 @@ $accents: (
   // the light scheme and inverted in the dark one (light fill, near-black text), as neutral prominent buttons are.
   'graphite': (dark: #a6a8ad, light: #4f5764, fill: #4f5764, fill-dark: #a6a8ad, on-fill-dark: #16181c),
 );
+
+// The count ramp of an accent in one scheme (`dark` or `light`), when the accent has one.
+@mixin count-ramp($a, $scheme) {
+  @if map.has-key($a, 'count-#{$scheme}') {
+    $ramp: map.get($a, 'count-#{$scheme}');
+    @for $i from 1 through list.length($ramp) {
+      --pd-count-#{$i}: #{list.nth($ramp, $i)};
+    }
+  }
+}
 
 // Ink on a control fill in the dark scheme (the page colour).
 $on-control-dark: #0e0f12;
@@ -369,20 +391,24 @@ $on-control-dark: #0e0f12;
 @each $name, $a in $accents {
   :root[data-accent='#{$name}'] {
     @include accent-vars(map.get($a, dark), dark-fill($a), dark-on-fill($a), map.get($a, dark), $on-control-dark);
+    @include count-ramp($a, dark);
   }
 
   @media (prefers-color-scheme: light) {
     :root:not([data-theme='dark'])[data-accent='#{$name}'] {
       @include accent-vars(map.get($a, light), map.get($a, fill));
+      @include count-ramp($a, light);
     }
   }
 
   :root[data-theme='light'][data-accent='#{$name}'] {
     @include accent-vars(map.get($a, light), map.get($a, fill));
+    @include count-ramp($a, light);
   }
 
   :root[data-theme='dark'][data-accent='#{$name}'] {
     @include accent-vars(map.get($a, dark), dark-fill($a), dark-on-fill($a), map.get($a, dark), $on-control-dark);
+    @include count-ramp($a, dark);
   }
 }
 

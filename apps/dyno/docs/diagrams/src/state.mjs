@@ -4,25 +4,63 @@ const st = (d, id, x, y, w, h, name, desc) => d.node(id, x, y, w, h, 'accent', {
 const E = (d, a, sa, ta, b, sb, tb, via = [], o = {}) => d.edge(a, b, d.port(a, sa, ta), d.port(b, sb, tb), { via, ...o });
 
 // ---------- service registration ----------
+// ADR 0056 (revision 4): the record holds one state; a hold is derived from the attempts, never stored.
 {
-  const d = P({ title: 'Service registration', kind: 'UML · State machine', w: 1344,
-    desc: 'Status as dyno_agent::service reports it: not installed, or installed with two flags (running, points at this executable). ensure repairs a stale registration but never installs one unasked.' });
-  const W = 232, H = 104, G = 144, X0 = 96, cx = (i) => X0 + i * (W + G), R0 = 216, R1 = R0 + H + 88;
+  const d = P({ title: 'Service registration', kind: 'UML · State machine', w: 1552, date: '2026-11-06',
+    desc: 'One record state; every start, install, repair, resume and uninstall passes one transition function.' });
+  // 13 arrows and the start arrow, over the kit's 12: ADR 0056 declares this one machine, and a split would hide it.
+  const W = 232, H = 104, G = 152, X0 = 96, cx = (i) => X0 + i * (W + G), R0 = 292, R1 = R0 + H + 104;
+  const gAt = cx(1) - 24, gR = cx(3) + W + 24, gTop = R0 - 64, gBot = R1 + H + 64;
+  const oTop = gTop - 80, oBot = gBot + 24, oL = cx(0) - 24, oR = gR + 24;
+  d.group('outer', oL, oTop, oR - oL, oBot - oTop, 'Any state but Removing');
+  d.group('att', gAt, gTop, gR - gAt, gBot - gTop, 'Attempting (version, attempts)');
   dot(d, 'ini', 48, R0 + H / 2 - 8, 'start');
-  st(d, 'none', cx(0), R0, W, H, 'Not installed', 'No plist, unit or Run value.');
-  st(d, 'run', cx(1), R0, W, H, 'Registered, running', 'Points at the current executable.');
-  st(d, 'stale', cx(2), R0, W, H, 'Registered, stale', 'Names another executable, as after an update.');
-  st(d, 'stop', cx(1), R1, W, H, 'Registered, not running', 'Points at the current executable.');
-  E(d, 'ini', 'R', 0.5, 'none', 'L', 0.5);
-  pair(d, 'none', 'run', 'Install', 'Uninstall');
-  pair(d, 'run', 'stale', 'App update', 'Ensure');
-  const x1 = Math.round(cx(1) + W * 0.3), x2 = Math.round(cx(1) + W * 0.7);
-  d.edge('run', 'stop', [x1, R0 + H], [x1, R1], {}); d.lbl('Crash or stop', x1, (R0 + H + R1) / 2, 'l');
-  d.edge('stop', 'run', [x2, R1], [x2, R0 + H], {}); d.lbl('OS restarts it', x2, (R0 + H + R1) / 2, 'r');
-  E(d, 'stop', 'L', 0.5, 'none', 'B', 0.5, [[Math.round(cx(0) + W / 2), R1 + H / 2]]);
-  d.lbl('Uninstall', cx(0) + W / 2 + 8, R1 + H / 2 - 4, 'ar', { maxw: 120 });
-  const ny = R1 + H + 56;
-  d.note('n', cx(0), ny, 3 * W + 2 * G, 'macOS: launchctl bootout then bootstrap on every install. Linux: systemctl --user enable --now. Windows: an HKCU Run value; no manager restarts a crashed agent, the app or the next logon does.');
+  st(d, 'idle', cx(0), R0, W, H, 'Idle', 'The last version that saw the service answer, if any.');
+  st(d, 'old', cx(1), R0, W, H, 'Removing old', 'Written before removal. After a crash: still there, replace; gone, just register.');
+  st(d, 'reg', cx(2), R0, W, H, 'Registering', 'Written before register. After a crash: absent, just register; there, wait.');
+  st(d, 'await', cx(3), R0, W, H, 'Awaiting answer', 'The OS accepted it; the lock is free while we wait.');
+  st(d, 'fail', cx(2), R1, W, H, 'Register failed', 'Other, or not as written. Retried only under 3 attempts.');
+  st(d, 'held', cx(3), R1, W, H, 'Held', 'Derived, not stored: unanswered, refused or register failed 3 times.');
+  st(d, 'unin', cx(0), oBot + 72, W, 88, 'Removing (uninstall)', 'Written before the first OS step.');
+  const at = (id, side, t) => d.port(id, side, t);
+  const ym = R0 + H / 2;
+  // Start, and Idle's two ways out.
+  E(d, 'ini', 'R', 0.5, 'idle', 'L', 0.5);
+  d.edge('idle', 'old', [cx(0) + W, ym], [cx(1), ym], {});
+  d.lbl('New version or Repair', Math.round((cx(0) + W + gAt) / 2), ym, 'a', { maxw: 100 });
+  const yI = R0 + H + 26, xI = cx(2) - 44, xi = Math.round(cx(0) + W * 0.9), yR = Math.round(R0 + H * 0.8);
+  d.edge('idle', 'reg', [xi, R0 + H], [cx(2), yR], { via: [[xi, yI], [xI, yI], [xI, yR]] });
+  d.lbl('First install, switch on', Math.round((cx(1) + W / 2 + xI) / 2), yI, 'b', { maxw: 200 });
+  // The replace.
+  d.edge('old', 'reg', [cx(1) + W, ym - 24], [cx(2), ym - 24], {});
+  d.lbl('Gone or timed out', (cx(1) + W + cx(2)) / 2, ym - 24, 'a', { maxw: 140 });
+  d.edge('reg', 'await', [cx(2) + W, ym], [cx(3), ym], {});
+  d.lbl('OS accepted', (cx(2) + W + cx(3)) / 2, ym, 'a', { maxw: 140 });
+  const x1 = Math.round(cx(2) + W * 0.3), x2 = Math.round(cx(2) + W * 0.7), my = (R0 + H + R1) / 2;
+  d.edge('reg', 'fail', [x1, R0 + H], [x1, R1], {}); d.lbl('[Other, not as written]', x1, my + 18, 'l', { maxw: 200 });
+  d.edge('fail', 'reg', [x2, R1], [x2, R0 + H], {}); d.lbl('Retry [attempts < 3]', x2, my + 18, 'r', { maxw: 200 });
+  // No answer: another cycle under the cap, a hold at it.
+  const xa = Math.round(cx(3) + W * 0.3), xo = Math.round(cx(1) + W * 0.7), yT = R0 - 26;
+  d.edge('await', 'old', [xa, R0], [xo, R0], { via: [[xa, yT], [xo, yT]] });
+  d.lbl('[attempts < 3] no answer', Math.round((xa + xo) / 2), yT, 'a', { maxw: 220 });
+  d.edge('await', 'held', [cx(3) + W / 2, R0 + H], [cx(3) + W / 2, R1], {});
+  d.lbl('[attempts = 3]', cx(3) + W / 2, my + 18, 'r', { maxw: 120 });
+  d.edge('fail', 'held', [cx(2) + W, R1 + H / 2], [cx(3), R1 + H / 2], {});
+  d.lbl('[attempts = 3]', (cx(2) + W + cx(3)) / 2, R1 + H / 2, 'a', { maxw: 140 });
+  // A hold ends by Repair or a new version (or by the service answering, below).
+  const yB = R1 + H + 32, xh = Math.round(cx(3) + W * 0.3), xb = Math.round(cx(1) + W / 2);
+  d.edge('held', 'old', [xh, R1 + H], [xb, R0 + H], { via: [[xh, yB], [xb, yB]] });
+  d.lbl('New version, Repair or Install', Math.round((xh + xb) / 2), yB, 'a', { maxw: 240 });
+  // The service answers (Awaiting or Held): back to Idle, from the group's border.
+  const xg = Math.round(cx(3) + W * 0.85), yA = gTop - 30, xd = Math.round(cx(0) + W / 2);
+  d.edge('att', 'idle', [xg, gTop], [xd, R0], { via: [[xg, yA], [xd, yA]] });
+  d.lbl('Answers', Math.round((cx(1) + cx(2)) / 2), yA, 'a', { maxw: 100 });
+  // Uninstall from any state: from the border of the outer group.
+  const xu = Math.round(cx(0) + W * 0.7), xr = Math.round(cx(0) + W * 0.3);
+  d.edge('outer', 'unin', [xu, oBot], [xu, oBot + 72], {}); d.lbl('Uninstall, switch off', xu, oBot + 36, 'r', { maxw: 200 });
+  d.edge('unin', 'idle', [xr, oBot + 72], [xr, R0 + H], {}); d.lbl('Removed', xr, oBot + 36, 'l', { maxw: 100 });
+  const ny = oBot + 72 + 88 + 48;
+  d.note('n', cx(0), ny, 4 * W + 3 * G, 'New version replaces on macOS; on Linux and Windows only when the definition differs, and a current one only updates the record. Declined, cancelled, needs approval or elevation, or unavailable: back to the state before. The job of an old build never settles during Removing old. A hold has these ways out: the service answers, a new version, Repair or Install (they run past 3 attempts, and a failed Repair returns to Held). Windows Dyno has no agent service.');
   d.legend([{ kind: 'accent', label: 'State' }, { kind: 'line', label: 'Event' }]);
   save('uml-state-service', d, ny + d.rect.n[3]);
 }

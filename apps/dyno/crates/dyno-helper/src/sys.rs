@@ -1,54 +1,8 @@
-//! The few operating-system calls the helper makes itself: which program a process is, and whether this process
-//! is elevated. Each is a small function with a `SAFETY` comment on every `unsafe` block (AGENTS.md).
+//! The few operating-system calls the helper makes itself: whether this process is elevated, and which groups
+//! administer the machine. (Which program a process is has no place here: a caller is its account, never a pid.) Each is a small function with a `SAFETY` comment on every `unsafe` block (AGENTS.md).
 #![allow(unsafe_code)]
 
-use std::path::PathBuf;
-
-/// The program file of process `pid`, when the OS tells (Linux `/proc/<pid>/exe`).
-#[cfg(target_os = "linux")]
-pub fn process_image(pid: u32) -> Option<PathBuf> {
-    std::fs::read_link(format!("/proc/{pid}/exe")).ok()
-}
-
-/// The program file of process `pid`, when the OS tells (`proc_pidpath`).
-#[cfg(target_os = "macos")]
-pub fn process_image(pid: u32) -> Option<PathBuf> {
-    use std::os::unix::ffi::OsStrExt;
-    // PROC_PIDPATHINFO_MAXSIZE is 4 * MAXPATHLEN.
-    let mut buf = vec![0u8; 4096];
-    // SAFETY: `buf` is writable for the length passed; the call writes at most that many bytes.
-    let n = unsafe { libc::proc_pidpath(i32::try_from(pid).ok()?, buf.as_mut_ptr().cast(), buf.len() as u32) };
-    let n = usize::try_from(n).ok().filter(|n| *n > 0)?;
-    Some(PathBuf::from(std::ffi::OsStr::from_bytes(buf.get(..n)?)))
-}
-
-/// The program file of process `pid`, when the OS tells (`QueryFullProcessImageNameW`).
-#[cfg(windows)]
-pub fn process_image(pid: u32) -> Option<PathBuf> {
-    use std::os::windows::ffi::OsStringExt;
-    use windows::core::PWSTR;
-    use windows::Win32::Foundation::CloseHandle;
-    use windows::Win32::System::Threading::{
-        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
-    };
-    // SAFETY: a plain query for a handle; the result is checked and closed below.
-    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
-    let mut buf = vec![0u16; 4096];
-    let mut len = buf.len() as u32;
-    // SAFETY: `buf` is writable for `len` UTF-16 units; `len` is updated to the number written.
-    let ok = unsafe { QueryFullProcessImageNameW(handle, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len) }.is_ok();
-    // SAFETY: the handle was opened above and is not used after this.
-    unsafe {
-        let _ = CloseHandle(handle);
-    }
-    ok.then(|| PathBuf::from(std::ffi::OsString::from_wide(buf.get(..len as usize).unwrap_or_default())))
-}
-
-/// Other systems: unknown (the caller then refuses, failing closed).
-#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
-pub fn process_image(_: u32) -> Option<PathBuf> {
-    None
-}
+use paddock_ipc::AdminRule;
 
 /// Whether this process runs as root.
 #[cfg(unix)]
@@ -61,4 +15,25 @@ pub fn is_elevated() -> bool {
 #[cfg(windows)]
 pub fn is_elevated() -> bool {
     true
+}
+
+/// The groups whose members administer a Unix machine, resolved by name once at start (macOS `admin`; Linux `sudo`,
+/// `wheel` and `admin` where they exist). Windows decides from the caller's token, so the rule is empty there.
+#[cfg(unix)]
+pub fn admin_rule() -> AdminRule {
+    let gids = ["admin", "sudo", "wheel"].into_iter().filter_map(|name| {
+        let c = std::ffi::CString::new(name).ok()?;
+        // SAFETY: `c` is a valid NUL-terminated string; getgrnam returns null or a pointer to static storage that is read
+        // here, on one thread, before any other call.
+        let group = unsafe { libc::getgrnam(c.as_ptr()) };
+        // SAFETY: a non-null result points at a valid `group`.
+        (!group.is_null()).then(|| unsafe { (*group).gr_gid })
+    });
+    AdminRule::new(gids.collect::<Vec<_>>())
+}
+
+/// See the Unix version.
+#[cfg(not(unix))]
+pub fn admin_rule() -> AdminRule {
+    AdminRule::default()
 }

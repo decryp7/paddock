@@ -28,12 +28,14 @@
 //! - [`Collected`] → [`Report`] → [`Preview`] / zip: the preview and the zip are built from the same list of files, so the
 //!   preview equals the zip. The zip replaces the destination atomically at the end (cancel leaves no partial file).
 //! - [`logging`]: the "Diagnostics > Logging" settings section over `paddock-log`'s `LogSettings`.
+//! - [`export`]: the same report without a window (`--export-diagnostics`), for a window that failed to start.
 //! - `tauri` (feature): the adapter the shell plugin installs: state, the preview/save/cancel commands, the save as a job
 //!   with a native picker, the `paddock://diagnostics` outcome event, and the webview's log command.
 //!
 //! The core is pure Rust with no Tauri dependency, so services and command-line tools can write the same report.
 
 mod error;
+pub mod export;
 pub mod logging;
 mod manifest;
 mod personal;

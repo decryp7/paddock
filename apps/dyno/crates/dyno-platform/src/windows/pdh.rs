@@ -1,6 +1,10 @@
 //! Windows-only sensor readings: performance counters (PDH) for disk queue and busy time, GPU engines and memory and
 //! the effective CPU frequency; commit charge (GetPerformanceInfo); the GPU's name and memory size (DXGI); and the
 //! reasons temperatures and fans are not available.
+#![cfg_attr(
+    not(test),
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
+)]
 
 use crate::parse::gpu::busiest_engine;
 use crate::sensors::{clamp_pct, SensorProbe, NO_TEMPERATURES};
@@ -31,7 +35,7 @@ impl Drop for Query {
     fn drop(&mut self) {
         // SAFETY: the query was opened by PdhOpenQueryW and is closed once.
         unsafe {
-            let _ = PdhCloseQuery(self.0);
+            paddock_proc::cleanup::logged("closing the performance query", super::counters::result_of(PdhCloseQuery(self.0)));
         }
     }
 }
@@ -131,7 +135,10 @@ impl Counters {
         };
         // Rate counters need a first collection to compare against.
         // SAFETY: the query is open.
-        unsafe { PdhCollectQueryData(c.query.0) };
+        let status = unsafe { PdhCollectQueryData(c.query.0) };
+        if status != 0 {
+            log::debug!(status = status; "the first performance collection failed; rate counters start one sample late");
+        }
         Some(c)
     }
 }

@@ -102,7 +102,7 @@ describe('ProcessDetailsPanel', () => {
     await store.select({ pid: chrome.pid, started: readValue(chrome.started) });
     f.detectChanges();
     await settle();
-    const snap = await mock.network({ showLoopback: true, proto: null, state: null, exposedOnly: false, search: '' });
+    const snap = await mock.network({ showLoopback: true, proto: null, state: null, exposedOnly: false, search: '', country: null });
     const own = { kind: 'process' as const, pid: chrome.pid, name: 'chrome', path: null };
     vi.spyOn(mock, 'network').mockResolvedValue({
       ...snap,

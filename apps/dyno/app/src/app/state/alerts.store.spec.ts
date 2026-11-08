@@ -21,6 +21,13 @@ describe('mergeAlert', () => {
     const out = mergeAlert([alert('a', 3), alert('b', 1)], alert('b', 5, 'again'));
     expect(out.map((a) => a.title)).toEqual(['again', 'a']);
   });
+  it('keeps as many alerts as the board loads: a pushed one does not cut a list of 200 to 100', () => {
+    const loaded = Array.from({ length: 200 }, (_, i) => alert(`l${i}`, 1000 - i));
+    const out = mergeAlert(loaded, alert('new', 5000));
+    expect(out).toHaveLength(200);
+    expect(out[0]!.id).toBe('new');
+    expect(mergeAlert(loaded.slice(0, 150), alert('new', 5000))).toHaveLength(151);
+  });
   it('caps the list', () => {
     expect(mergeAlert([alert('a', 3), alert('b', 2)], alert('c', 1), 2).map((a) => a.id)).toEqual(['a', 'b']);
   });

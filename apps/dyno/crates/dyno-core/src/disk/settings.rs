@@ -11,6 +11,20 @@ const GIB: u64 = 1024 * MIB;
 /// The most threads that read folders at once, whatever the setting says.
 pub const MAX_READ_THREADS: u8 = 16;
 
+/// Seconds between two readings of the volumes' free space when the Setting is Auto.
+pub const SPACE_REFRESH_AUTO_SECS: u32 = 60;
+/// The shortest and longest `disk.spaceRefreshSecs`.
+pub const SPACE_REFRESH_RANGE_SECS: (u32, u32) = (10, 600);
+
+/// Seconds between two readings of the volumes' free space for the Setting value `secs` (`0` is Auto: 60), kept in 10 to 600.
+pub fn space_refresh_secs(secs: u32) -> u32 {
+    if secs == 0 {
+        SPACE_REFRESH_AUTO_SECS
+    } else {
+        secs.clamp(SPACE_REFRESH_RANGE_SECS.0, SPACE_REFRESH_RANGE_SECS.1)
+    }
+}
+
 /// When the disk map refreshes a saved map by itself (`disk.savedMaps.refreshOnOpen`): never by default. Scanning a volume is the
 /// heaviest thing Dyno does and it is a monitor; the page shows the net change in used space instead and the person decides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -81,6 +95,9 @@ pub struct DiskSettings {
     pub finder_hash_gib: u32,
     /// The disk maps kept for the next time (`disk.savedMaps`).
     pub saved_maps: SavedMapsSettings,
+    /// Seconds between two readings of the volumes' free space (`disk.spaceRefreshSecs`): 0 is Auto (60), else 10 to 600. The agent
+    /// reads it whether or not any window is open; every fifth reading lists the mounts again.
+    pub space_refresh_secs: u32,
 }
 
 impl Default for DiskSettings {
@@ -94,6 +111,7 @@ impl Default for DiskSettings {
             finder_depth: MAX_DEPTH,
             finder_hash_gib: u32::try_from(MAX_HASH_BYTES / GIB).unwrap_or(64),
             saved_maps: SavedMapsSettings::default(),
+            space_refresh_secs: 0,
         }
     }
 }
@@ -109,6 +127,11 @@ impl DiskSettings {
             finder_depth: self.finder_depth.clamp(1, 256),
             finder_hash_gib: self.finder_hash_gib.clamp(1, 4_096),
             saved_maps: self.saved_maps.clamped(),
+            space_refresh_secs: if self.space_refresh_secs == 0 {
+                0
+            } else {
+                space_refresh_secs(self.space_refresh_secs)
+            },
         }
     }
 
@@ -141,6 +164,21 @@ impl DiskSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_interval_setting_auto_is_60s_and_bounds_are_enforced() {
+        assert_eq!(DiskSettings::default().space_refresh_secs, 0, "Auto by default");
+        for (setting, want) in [(0, 60), (1, 10), (10, 10), (45, 45), (600, 600), (86_400, 600)] {
+            assert_eq!(space_refresh_secs(setting), want, "setting {setting}");
+        }
+        let s = DiskSettings {
+            space_refresh_secs: 5,
+            ..DiskSettings::default()
+        }
+        .clamped();
+        assert_eq!(s.space_refresh_secs, 10);
+        assert_eq!(DiskSettings::default().clamped().space_refresh_secs, 0, "Auto stays Auto");
+    }
 
     #[test]
     fn defaults_match_the_engines_limits() {

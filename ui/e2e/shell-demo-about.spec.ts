@@ -36,7 +36,7 @@ test('Help ▸ Check for updates… finds, downloads and verifies an update, and
   await expect(dialog.getByTestId('updates-current')).toHaveText(`You have version ${VERSION}.`);
   await expect(dialog).toHaveAttribute('aria-modal', 'false');
   await dialog.getByRole('button', { name: 'Check now' }).click();
-  await expect(dialog.getByTestId('updates-phase')).toContainText('Version 99.0.0 is available (39 MB).');
+  await expect(dialog.getByTestId('updates-phase')).toContainText('Version 99.0.0 is available (41 MB).');
   await expect(app.notifications.toasts).toContainText('Version 99.0.0 is available');
   await dialog.getByRole('button', { name: 'Download' }).click();
   await expect(dialog.getByTestId('updates-phase')).toContainText('downloaded and its signature verified');
@@ -83,7 +83,7 @@ test('the download shows a determinate Material progress bar, and an indetermina
   await expect(bar).toHaveCount(0);
   await page.evaluate(() => (window as unknown as { sdUpdatesDownload: { progress(d: number, t: number | null): void } }).sdUpdatesDownload.progress(20_500_000, 41_000_000));
   await expect(bar).toHaveAttribute('aria-valuenow', '50');
-  await expect(bar).toHaveAccessibleName('Downloading: 20 MB of 39 MB');
+  await expect(bar).toHaveAccessibleName('Downloading: 21 MB of 41 MB');
   expect(await axeViolations(page, { idsOnly: true })).toEqual([]);
   await page.evaluate(() => (window as unknown as { sdUpdatesDownload: { progress(d: number, t: number | null): void } }).sdUpdatesDownload.progress(1000, null));
   await expect(dialog.locator('mat-progress-bar')).toHaveAttribute('mode', 'indeterminate');
@@ -105,7 +105,8 @@ test('a build without an update key says updates are not available, with nothing
 });
 
 /** The engine's updater status (`updates_status`) with `phase`, as `paddock-updater` reports it. */
-const status = (phase: unknown) => ({
+const PER_USER = { scope: 'perUser', installOnQuitAvailable: true, administratorNotice: null };
+const status = (phase: unknown, install: unknown = PER_USER) => ({
   currentVersion: VERSION,
   phase,
   lastChecked: null,
@@ -114,6 +115,7 @@ const status = (phase: unknown) => ({
   channels: [{ id: 'stable', label: 'Stable' }],
   endpointHost: 'updates.test',
   releasesPage: null,
+  install,
 });
 const INFO = { version: '99.0.0', currentVersion: VERSION, notes: 'From the fake server.', pubDate: null, size: 1_000 };
 
@@ -140,7 +142,7 @@ test('over Tauri: the Updates window follows the engine’s events and shows its
   await page.getByRole('button', { name: 'Check now' }).click();
   await expect.poll(() => ipc.names()).toContain('updates_check');
   expect(await ipc.emit('paddock://updates', status({ kind: 'available', info: INFO }))).toBeGreaterThan(0);
-  await expect(page.getByTestId('updates-phase')).toContainText('Version 99.0.0 is available (1,000 bytes).');
+  await expect(page.getByTestId('updates-phase')).toContainText('Version 99.0.0 is available (1 KB).');
   await page.getByRole('button', { name: 'Download' }).click();
   await expect.poll(() => ipc.names()).toContain('updates_download');
   await ipc.emit(
@@ -160,4 +162,37 @@ test('over Tauri: the Updates window follows the engine’s events and shows its
   const calls = await ipc.names();
   expect(calls).toEqual(expect.arrayContaining(['window_ready', 'updates_status', 'updates_check', 'updates_download']));
   expect(calls.filter((c) => c.startsWith('updates_') || c.startsWith('about_')).every((c) => ['updates_status', 'updates_check', 'updates_download'].includes(c))).toBe(true);
+});
+
+test('over Tauri: a per-machine copy shows Install, the administrator text and no install on quit, and a declined prompt offers Install again', async ({ app, page }) => {
+  const notice = "An administrator must install this update. Windows will ask for an administrator's name and password.";
+  const perMachine = { scope: 'perMachine', installOnQuitAvailable: false, administratorNotice: notice };
+  const ipc = await installTauriFake(page, {
+    otherwise: 'null',
+    replies: {
+      updates_status: status({ kind: 'ready', info: INFO, installOnQuit: false }, perMachine),
+      dialog_take_input: { dialogId: 'pd.updates', title: 'Updates', kind: 'tool', modality: 'modeless', requiredChoice: false, input: {} },
+    },
+  });
+  await app.dialogs.openWindow('pd.updates');
+  await expect(page.getByTestId('updates-phase')).toContainText('downloaded and its signature verified');
+  await expect(page.getByTestId('updates-administrator')).toHaveText(notice);
+  await expect(page.getByRole('button', { name: 'Install', exact: true })).toBeVisible();
+  await expect(page.getByText('Install when the app quits')).toHaveCount(0);
+  // The old version starts again after a declined prompt and says so.
+  await ipc.emit(
+    'paddock://updates',
+    status(
+      {
+        kind: 'failed',
+        info: null,
+        error: { kind: 'declined', message: 'Not installed: Windows permission was declined.', nextStep: 'Click Install again and choose Yes in the Windows prompt.', detail: null },
+      },
+      perMachine,
+    ),
+  );
+  await expect(page.getByTestId('updates-error')).toContainText('Windows permission was declined');
+  await expect(page.getByRole('button', { name: 'Install again' })).toBeVisible();
+  await ipc.emit('paddock://updates', status({ kind: 'installerRunning', version: '99.0.0' }, perMachine));
+  await expect(page.getByTestId('updates-installer-running')).toContainText('An update is being installed');
 });

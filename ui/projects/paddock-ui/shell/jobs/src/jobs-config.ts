@@ -3,6 +3,15 @@ import { InjectionToken } from '@angular/core';
 /** After this long without an event, a running job shows "Still working" (never an error, never a timeout). */
 export const DEFAULT_STILL_WORKING_AFTER_MS = 10_000;
 
+/**
+ * While the list is in error, the store re-reads it on its own: after these delays in turn (a manual Retry starts over),
+ * then every `JOBS_RETRY_STEADY_MS`. Bounded, so a persisting failure costs one read per 15 s at most.
+ */
+export const JOBS_RETRY_BACKOFF_MS: readonly number[] = [2_000, 4_000, 8_000];
+
+/** The delay between retries once `JOBS_RETRY_BACKOFF_MS` is used up. */
+export const JOBS_RETRY_STEADY_MS = 15_000;
+
 /** The shell's jobs settings for a window (`provideShellJobs`). */
 export interface JobsConfig {
   /** How long a running job may be silent before it shows "Still working". */
@@ -22,6 +31,8 @@ export interface JobsClock {
   now(): number;
   /** Calls `tick` every `ms` until the returned function is called. */
   every(ms: number, tick: () => void): () => void;
+  /** Calls `fire` once after `ms` unless the returned function is called first. */
+  after(ms: number, fire: () => void): () => void;
 }
 
 export const JOBS_CLOCK = new InjectionToken<JobsClock>('PADDOCK_JOBS_CLOCK', {
@@ -31,6 +42,10 @@ export const JOBS_CLOCK = new InjectionToken<JobsClock>('PADDOCK_JOBS_CLOCK', {
     every: (ms, tick) => {
       const handle = setInterval(tick, ms);
       return () => clearInterval(handle);
+    },
+    after: (ms, fire) => {
+      const handle = setTimeout(fire, ms);
+      return () => clearTimeout(handle);
     },
   }),
 });

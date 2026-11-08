@@ -1,4 +1,4 @@
-import { axeViolations, dialogContracts, dialogFitProblems, measureDialogWindow, openEveryDialog, expect, expectNoHorizontalScroll, test, THEMES } from '@decryp7/paddock-e2e';
+import { axeViolations, bodyIndentProblems, checkboxLayoutProblems, rowPinProblems, dialogContracts, dialogFitProblems, measureDialogWindow, openEveryDialog, expect, expectNoHorizontalScroll, test, THEMES } from '@decryp7/paddock-e2e';
 
 // The shell demo is the reference consumer of @decryp7/paddock-ui/shell (ADR 0012 §7); each work package adds its checks.
 // It uses only the test kit (@decryp7/paddock-e2e, plan S16); the static source checks are in shell/testing's specs.
@@ -151,14 +151,19 @@ test.describe('contributions (plan S2)', () => {
 
 test.describe('jobs (plan S9)', () => {
   test('a job reports its phases in the status item and the list, and stops on Cancel', async ({ app, page, pageErrors }) => {
-    await page.goto('/');
+    // Ticks are fired by the test (`?jobs-step=manual`), so each phase is held for as long as the assertions need.
+    await page.goto('/?jobs-step=manual');
+    const tick = (n: number) => page.evaluate((count) => (window as unknown as { __sdJobsTick: (n: number) => void }).__sdJobsTick(count), n);
     const status = app.statusBar.jobs;
     await expect(status).toHaveText('Jobs');
     await page.getByRole('button', { name: 'Start sample job' }).click();
     // The item names the lead job; its phase is in the tooltip.
     // The lead's phase and value follow its name (rule 11).
-    await expect(status).toHaveText(/^1 running: Importing logs · (Finding files [\d,]+ so far|Reading \d+%)$/);
-    await expect(status).toHaveAttribute('title', /^Importing logs: (Finding files|Reading)$/);
+    await tick(1); // the first tick brings the first count
+    await expect(status).toHaveText(/^1 running: Importing logs · Finding files [\d,]+ so far$/);
+    await expect(status).toHaveAttribute('title', 'Importing logs: Finding files');
+    await tick(29);
+    await expect(status).toHaveText(/^1 running: Importing logs · Reading \d+%$/);
 
     await status.click();
     await expect(status).toHaveAttribute('aria-expanded', 'true');
@@ -169,6 +174,7 @@ test.describe('jobs (plan S9)', () => {
     await expect(job.getByRole('progressbar')).toHaveAttribute('aria-valuenow', /\d+/);
     await expect(job).toContainText('Reading');
     await job.getByRole('button', { name: 'Cancel' }).click();
+    await tick(1); // the engine honours the request on its next tick
     await expect(job).toContainText('Cancelled');
     await expect(job).toContainText('Stopped at your request.');
     await expect(status).toHaveText('Jobs');
@@ -181,18 +187,19 @@ test.describe('jobs (plan S9)', () => {
   });
 
   test('a job that finishes is announced; the step that cannot be stopped says so', async ({ app, page }) => {
-    await page.clock.install();
-    await page.goto('/');
+    // The demo engine runs on ticks the test fires (`?jobs-step=manual`, 100 ms of job time each), not on the wall clock.
+    await page.goto('/?jobs-step=manual');
     await page.getByRole('button', { name: 'Start sample job' }).click();
     await app.statusBar.jobs.click();
     const job = app.jobs.items;
-    // Finding files (2 s) and reading (5 s) pass; writing the index cannot be interrupted.
-    await page.clock.runFor(7_100);
+    const tick = (n: number) => page.evaluate((count) => (window as unknown as { __sdJobsTick: (n: number) => void }).__sdJobsTick(count), n);
+    // Finding files (2 s) and reading (5 s) pass; writing the index cannot be interrupted and is held until the test steps on.
+    await tick(70);
     await expect(job).toContainText('Writing the index');
     // Cancel works in every phase (rule 11): this step stops when it ends, and the card says so.
     await expect(job.getByRole('button', { name: 'Cancel' })).toBeEnabled();
     await expect(job).toContainText('Cancel takes effect when this step ends');
-    await page.clock.runFor(1_000);
+    await tick(10);
     await expect(job).toContainText('Done');
     await expect(app.notifications.toasts).toContainText('Importing logs: done');
   });
@@ -442,6 +449,49 @@ test.describe('notifications and service health (plan S4)', () => {
     await expect(centre).toContainText('The disk is almost full (×3)');
   });
 
+  test('the centre lists checkboxes that are not clipped or covered, line up with their titles, and keep bodies under the title', async ({ app, page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Notify three times' }).click();
+    await page.getByRole('button', { name: 'Start sample job' }).click();
+    // A message with a body (the failure's hint) under its title.
+    await page.getByRole('button', { name: 'Break the search index' }).click();
+    const centre = await app.notifications.openCentre();
+    await expect(centre.locator('.pd-notice .pd-body').first()).toBeVisible();
+    // No checkboxes until Select; Done hides them again.
+    await expect(centre.locator('[data-testid^=notice-select-]')).toHaveCount(0);
+    await expect(centre.getByTestId('notices-select-all')).toHaveCount(0);
+    const toggle = centre.getByTestId('notices-select-toggle');
+    await toggle.click();
+    await expect(toggle).toHaveText('Done');
+    await expect(centre.locator('[data-testid^=notice-select-]').first()).toBeVisible();
+    for (const density of ['comfortable', 'standard', 'compact'] as const) {
+      await page.evaluate((d) => document.documentElement.setAttribute('data-density', d), density);
+      expect(await checkboxLayoutProblems(centre), `density ${density}`).toEqual([]);
+      expect(await bodyIndentProblems(centre), `density ${density}`).toEqual([]);
+      // A title that wraps (the health message does, at this width) keeps the box, dot and time on its first line.
+      const pin = await rowPinProblems(centre);
+      expect(pin.wrapped, `density ${density}: a wrapped title is part of this check`).toBeGreaterThan(0);
+      expect(pin.problems, `density ${density}`).toEqual([]);
+    }
+    // Select all sits in the items' checkbox column, labelled; picking one shows "Delete selected (1)" on one line.
+    const all = centre.getByTestId('notices-select-all');
+    await expect(all).toContainText('Select all');
+    const boxLeft = (l: typeof all) => l.locator('.mdc-checkbox__background').evaluate((e) => Math.round(e.getBoundingClientRect().left));
+    expect(await boxLeft(all)).toBe(await boxLeft(centre.locator('[data-testid^=notice-select-]').first()));
+    await centre.locator('[data-testid^=notice-select-] input').first().check();
+    const del1 = centre.getByTestId('notices-delete-selected');
+    await expect(del1).toBeVisible();
+    expect((await del1.boundingBox())!.height).toBeLessThan(40);
+    await toggle.click();
+    await expect(centre.locator('[data-testid^=notice-select-]')).toHaveCount(0);
+    await expect(del1).toHaveCount(0);
+    // Delete all is not a loud filled or outlined danger button: destructive actions are not the visual default.
+    const del = centre.getByTestId('notices-delete-all');
+    expect(await del.evaluate((e) => getComputedStyle(e).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
+    expect(await del.evaluate((e) => e.classList.contains('mat-mdc-button'))).toBe(true);
+    expect(await del.evaluate((e) => getComputedStyle(e).borderTopWidth)).toBe('0px');
+  });
+
   test('a toast’s "Show in Notifications" opens the centre at its message', async ({ app, page }) => {
     await page.goto('/');
     await page.getByRole('button', { name: 'Fail on purpose' }).click();
@@ -506,16 +556,18 @@ test.describe('dialogs (plan S6)', () => {
     });
   }
 
-  for (const [id] of Object.entries(CONTRACTS).filter(([, c]) => c.kind === 'decision')) {
+  for (const [id, contract] of Object.entries(CONTRACTS).filter(([, c]) => c.kind === 'decision')) {
     test(`the ${id} decision is fitted once to its content: no scrollbar and no gap`, async ({ app, page }) => {
       const d = app.dialogs;
-      await page.setViewportSize({ width: 480, height: 700 });
+      // The window is as wide as its contract says (Rust keeps the width of a `Height` window); at another width the content
+      // would wrap differently and the loop would rightly measure again (ADR 0043 §2).
+      await page.setViewportSize({ width: contract.width, height: 700 });
       await d.openWindow(id);
       await expect(d.shell.getByTestId('dialog-loading')).toHaveCount(0);
       await expect.poll(() => d.fitHistory()).not.toEqual([]);
       const history = await d.fitHistory();
       expect(history, `fitted more than once: ${history.join(' -> ')}`).toHaveLength(1);
-      await page.setViewportSize({ width: 480, height: history[0] as number });
+      await page.setViewportSize({ width: contract.width, height: history[0] as number });
       const m = await d.shell.locator('main').evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight }));
       expect(m.scroll).toBeLessThanOrEqual(m.client);
     });

@@ -1218,11 +1218,153 @@ fonts (same content height in the later fit). Found on the way: tao resizes the 
 so a refit inside that event is overwritten (now scheduled); and a hand-resized window must stop being fitted. **Lesson:** a change detector's baseline is what was last sent, never what
 is measured now; and a fix for a user report is claimed only after the report's own scene (Windows, 100 % and 150 %) is run.
 Follow-up: Spotter and Pitwall have no dialog-fit e2e like Dyno's and the shell demo's.
+## `maxminddb` `Reader::verify` never returns on a search tree with a cycle (2026-11-03, Dyno)
+
+Dyno's location databases are downloaded, so their bytes are untrusted. A byte-damage scan over a tiny valid file (every
+position, four values) hung on one case: the first record of the root node set to 0, which makes the root its own child.
+`Reader::verify` (`maxminddb` 0.27.3) then loops and grows memory until the process is killed (SIGKILL after 5 minutes); a
+property test showed the same as a test that "ran for over 60 seconds" with nothing printed. In debug builds the same crate also
+panics on arithmetic overflow in `resolve_data_pointer` for a damaged pointer (release wraps and its next bounds check rejects
+it). **Fix** (`dyno-agent/src/geo_db.rs`): before `verify`, a bounded walk of our own proves the tree is acyclic and no deeper
+than 128 bits (one byte of state per node, `O(nodes)`); opening and lookups run under `catch_unwind`; tests pin both; a fuzz
+target (`apps/dyno/fuzz`) runs the open-and-verify path. **Lesson:** a library's "verify" is not a safe parser for untrusted
+bytes; scan single-byte damage of a valid file with a time limit per case, and do not trust a green proptest that never
+finishes.
+
+## A window's size is a state with one owner, not a sequence of events (2026-11-04, ADR 0043)
+
+Sixteen dialog-size fixes in two weeks each closed one gap between two baselines (a handshake measure, a watch started later, a
+scale-change hook). The class is "nothing states what the size should be at any moment". ADR 0043 makes the size a pure state
+machine (`paddock_dialogs::size`) fed by numbered measures `(epoch, seq)` and the OS's own events, carried out on the main
+thread; the page has one measure loop with a last-sent baseline and a guard of two sends per change. **Lessons:** (1) an
+echo of our own `set_size` is told from the user's resize by a queue of what was asked, and by the OS's signal where it has one
+(`WM_SIZING`, live resize), never by comparing sizes alone; (2) anything that touches a native window (`ns_window`) must be
+left out under the mock runtime, which hands out a dangling pointer (SIGSEGV, not an error); (3) an e2e that fixes the
+viewport to a width other than the contract's asserts the wrong thing: at another width the content wraps differently and
+the loop rightly measures again.
+
+## Tests never wait on `requestAnimationFrame`; they wait on a state the page exposes (2026-11-04, ADR 0043)
+
+The dialog size e2e declared the page quiet after two animation frames. WebKit withholds frames from an occluded window, and
+with four parallel workers a window can get none for seconds: 32 of 200 runs saw one height sent and the loop already quiet,
+then hung waiting for frames that did not come. Refuted first: an oscillating loop (the height history was a single value)
+and load alone. **Fix:** the page exposes `data-fit-pending` (the follow-up frames still owed) and `quiet()` waits for 0
+pending and a sequence number that moved past its value before the change and then held (0 of 200). **Lesson:** a test
+that waits on a rendering callback depends on whether the browser renders that window; wait on a condition the page states
+itself (ER-12), and measure the failure rate before and after (ER-28).
 
 ## A fix to a cfg-gated test file went out unformatted (2026-11-04, Dyno; CI runs 7475 and 7476)
 
 I rewrote three lines of `apps/dyno/crates/dyno-agent/tests/bench_units.rs` (a `#![cfg(target_os = "linux")]` file) and checked it with clippy and nextest on the Mac, which skip the file, and never ran `cargo fmt --all --check` after the edit; the local gates I ran were clippy, tests and conformance, not the formatter. The Linux job's fmt step found the long command chains. **Lesson:** after editing a Rust file, run `cargo fmt --all --check` in that workspace (rustfmt formats cfg-gated files too); a green local clippy or test run says nothing about a file the host does not compile.
 
+## land-f's first CI run: eight causes, none visible on the Mac (2026-11-04; runs 7485 and 7486)
+
+Everything below passed locally on the macOS dev machine and failed on the Linux or Windows runners. **Lesson:** a Mac-only local run
+proves little for code that depends on the user id, the path separator, the font or the rasteriser; the checks that would have
+caught each one are named.
+- `paddock-dialogs` `any_interleaving_keeps_the_size_rules` (proptest, seed `ef445c8e`): the OS echoes requests A, B, A in order, but the
+  echo of the first A matched the newest A (`rposition`) and took B and the second A off the queue, so B's echo arrived with nothing
+  pending and was read as the user resizing. The state now remembers the requests an equal-sized echo took off the queue (`late`) and
+  explains their own echoes. Regression: `the_late_echo_of_an_older_request_after_an_identical_newer_one_is_not_the_user`.
+  A proptest with a random seed is a flaky test until its counterexample is a fixed test; run it with `PROPTEST_CASES=30000` after a change.
+- `paddock-ipc` `a_client_finding_no_folder_...`: the second half assumed the test user is not root; the CI containers run as root,
+  where a folder the client owns is the service's folder. Guarded as the test above it already was (`geteuid() != 0`).
+- `paddock-service` and `dyno-agent` tests built paths with a hard-coded `/` (`"/Library/LaunchDaemons/x.plist"`, `rsplit('/')`),
+  which differ from the code's `Path::join` on Windows: use `Path::join` and `file_name` in tests that compare paths.
+- `dyno-plugin-host`: a plugin that exits at once may be gone before the bootstrap line is written ("exited before it took its
+  bootstrap") or after ("exited before it connected"): a race, so the test accepts both.
+- Clippy `assertions_on_constants` (Linux-only `edge/linux.rs`), `-webkit-user-select` missing on one rule (`webkit-prefix` test),
+  `THIRD_PARTY_NOTICES.md` out of date for Dyno (`scripts/notices.sh dyno`): run the CI's cheap checks (`notices.sh <app> --check`,
+  `node --test scripts/*.test.mjs`) before pushing a batch that adds crates or CSS.
+- Dyno e2e at 500 and 900x600: the "Is this normal?" sentence ended in an ellipsis with its tooltip on the parent, and the network
+  row's `flagged` and country chips could not shrink inside a clipping cell. The sentence now wraps and both chips ellipsize with their
+  titles. Both pass on the Mac with the old CSS (narrower font): layout checks need the Linux run.
+- `widget-grid.spec` "frame budget": ADR 0044 §7 sets 16.7 ms for the CI Mac; the Linux runner's software rasteriser measured 31.6 ms
+  for the same drag. The budget is now asserted on macOS and only recorded (annotation) elsewhere.
+
+## The real-window probe is outside the coverage gate (2026-11-04, paddock-dialogs)
+
+`paddock-dialogs/src/probe.rs` (feature `probe`, 554 lines) is the ADR 0026 section 6 harness that opens real webview windows. It runs only
+with `PADDOCK_REAL_WINDOWS=1` where there is a window system, so the line-coverage gate of the `crates` job (98.67% with it, over the 99%
+line) never sees it, like the other harnesses it joins in the ignore regex (`paddock-proc` test child, `paddock-chromium` fake browser,
+`paddock-ipc` test child). Its check is the `dialog-window-probe` job instead. **Lesson:** a harness is excluded by name with its reason beside
+the regex, never by lowering the gate; and a job that stops at its first failing step (here coverage, before `cargo deny check`) hides the
+steps after it: read a red job's later steps as not run, not as passed.
+
+## Windows-only assumptions in tests that came in with land-f (2026-11-04, Dyno gates run 7494)
+
+Five Dyno tests failed only on the Windows leg (2147 passed, 5 failed); each was a Unix assumption in the test, and one was a real checkout bug.
+- `dyno-helper-service` unit, maintainer-script and polkit tests read `app/src-tauri/linux/*`; `* text=auto` checked them out with CRLF on
+  Windows (`#!/bin/sh\r`, a unit that differs from its render). The packaging files are now `text eol=lf` in `.gitattributes`
+  (`/apps/*/app/src-tauri/linux/**`, the macOS plists). The same files built on a Windows checkout would ship scripts that sh cannot run.
+- `bench::export::tests::the_destination_is_checked_before_anything_is_written`: `/Users/x/results.csv` is not absolute on Windows (no drive). The product
+  is right; the test now builds its paths from `std::env::temp_dir()` and adds a real `C:\...` case and a drive-less one on Windows.
+- `the_helper_installs_and_removes_itself_on_linux_from_the_package` models Linux paths with the fake system's string keys: `Path::join` spells them
+  with backslashes on Windows. `#[cfg(unix)]`, with the reason beside it.
+- `helper_counters::a_sysfs_tree_...`: the fake sysfs tree has `intel-rapl:0`; a colon is not valid in a Windows file name. `#[cfg(unix)]`, with the reason.
+**Lesson:** a test that builds a fake Linux or macOS tree runs on all three runners: build paths from the OS (`temp_dir`, `Path::join`), keep
+test inputs LF in `.gitattributes`, and gate a test by `cfg` only with the reason (never `#[ignore]`). The check before pushing is `cargo xwin clippy
+--all-targets` (an import used only by a gated test is an unused-import error on Windows).
+
+## The macOS runner's stable-workspace step copies the checkout across volumes (2026-11-04, Dyno gates run 7501, job 28671)
+
+`stable-workspace` timed out after 300 s on the Mac runner and its message blamed "a process left from an earlier job holds a file or lock". That guess
+was wrong for this run: the step `mv`s the checkout from `/Users/decryp7/gitea-runner/work/...` to `/Volumes/d7sst7/ci/home/src/...`, and across volumes
+`mv` is a full copy, which is slow while other jobs copy their checkouts at the same time (the same `mv` was running for another leg when this one timed
+out). **Lesson:** a timeout message that names one cause needs the step to log the other likely one (bytes and time of the move, the source and target
+volume); until then read "did not finish within N s" on the Mac runner as "check for a cross-volume copy under load" first. Runner fix: with the user.
+
+## Two Dyno vitest specs that lose to a loaded runner (2026-11-04, Dyno gates runs 7494 and 7501)
+
+- `widget-choosers.spec` "disables every add button once the menu bar holds its 32 items" added 28 items through the page, re-rendering a growing list
+  of 5 to 32 rows of Material fields each time (5254 ms against the 5 s limit on the runner). The engine now takes items 5 to 31 directly and the
+  page's button adds the last one: work that scales with the item count belongs in the arrangement, not in the step under test.
+- `processes-page-actions.spec` "opens the row menu with Shift+F10 ...": the row's context menu is disabled while a row has no actions
+  (`matContextMenuTriggerDisabled`) and live updates redraw the rows, so one key press sent at that moment is lost and a `vi.waitFor` after it never
+  succeeds. The test now sends the key again to the row that is there, inside the `vi.waitFor`, until the menu is open. A real person's key press may be lost
+  in the same way (the focused row replaced by a redraw, or a row whose actions have not arrived): **unverified, a follow-up** to check that live updates keep
+  the focused row's DOM node and that Shift+F10 on a row without actions says why instead of doing nothing; not fixed here.
+Proof, honestly (Linux, OrbStack `paddock-gate-arm`, 6 cores, 12 busy loops started and stopped by pid, 50 runs of each test):
+- 32 items: the old test passed 50 of 50 but took 94.97 s (1.9 s a run); the fixed one passed 50 of 50 in 23.5 s (0.47 s a run). It was **not reproduced as a failure**
+  (the CI runner needed 5.25 s), but the old test costs four times the work, which is what the 5 s limit trips on; the cause is the cost that grows with the item count.
+- Shift+F10: old and fixed both passed 50 of 50 (15.4 s and 15.7 s); the failure was **not reproduced and the lost-key cause is from reading the code and the CI log, not proven**.
+  The resend is harmless to keep, but if this spec fails again the cause is something else: record the row's `disabled` state and the actions at the moment of the key before guessing again.
+## A CDK virtual viewport measures its height once; a body that grows later is blank (2026-11-04, paddock-ui `pd-table`, Dyno 1.1.0 RC)
+Dyno's Processes page (458 rows) showed blank space under the last drawn row. `CdkVirtualScrollViewport` measures its own
+height at start and on a window resize only; `pd-table`'s body height follows its frame (`maxHeight`) and its rows, so a body
+that grew after the first measure drew only the rows its old height plus the buffer cover. Confirmed: a gallery spec grows
+the body to 1600 px and found an 800 px gap before the fix and none after. **Rule:** whatever sizes a CDK viewport from
+outside re-measures it when it resizes (`pd-table` calls `checkViewportSize()` from its body ResizeObserver); a virtual
+list spec asserts the last drawn row meets the body's bottom edge after the body changed height.
+
+## A request's answer was visible before its slot was freed: a phantom Busy (2026-11-04, Dyno `counters::tests::requests_and_the_pinned_reading_run_as_live_work`)
+The test failed once in a full nextest run in 0.010 s (so not a timeout) and passed 6 of 6 alone. Causes listed, each with what rules it out:
+- Thread roles shared across tests (a global registry or a leaked thread-local): ruled out by reading `priority.rs`: the role is a `thread_local` set inside each spawned thread, and the test reads only its own three threads.
+- Other tests creating threads the test reads: ruled out, the `Roles` source belongs to this test's own `CounterCentre`.
+- An ordering assumption between tests: ruled out, the test shares nothing with the others.
+- The hang-guard loop leaving early on a stale value: ruled out, the loop only runs after `poll_pinned` returned; the failure came before any sleep.
+- **Confirmed:** `CounterCentre::start` sent a request's result (`within`'s channel, the listing's `notify_all`) inside the thread's closure, and freed the `Slot` after it. A caller that had its answer could still see `in_flight` at 1, so with the catalog thread and the values thread not yet released, `poll_pinned` met `MAX_IN_FLIGHT` and returned false. The real effect: the page's next request, or the pinned reading, can get a Busy right after another request answered.
+Fix: `start` frees the slot first, then runs a hand-over closure that publishes the result. Failing-first test: `an_answered_request_has_already_freed_its_slot` (3000 calls, `in_flight` must be 0 after each).
+Proof (macOS, 8 `yes` loops started and stopped by pid, built once, 100 runs of all `counters::` tests at 8 threads, 100 of the new test, 300 of the original): before the fix, the new test failed 100 of 100 with and without load, and the original test failed 0 of 300 without load and 18 of 300 under load; after the fix 0 failures in every row.
+**Rule:** whatever tells a waiter "done" is published after the resource it counts is released. Class check: no other slot or semaphore in Dyno or the shared crates (`paddock-jobs`, `paddock-ipc` permits, `paddock-download` hosts, the disk engine queue) sends before it releases.
+
+## A test counted every job as a finished one; the agent has its own start-up job (2026-11-04, Dyno gates run 7510, Windows)
+
+`only_the_last_few_finished_jobs_are_kept_and_an_unknown_id_is_not_found` listed 17 jobs against `KEPT_FINISHED` 16 (1 of 2166 on the Windows leg).
+The agent's network watcher starts a job of its own at start (`JobSpec::RebuildIntel`, the match index of the user's lists), and `Request::Jobs`
+lists the jobs that have not ended besides the last 16 that have: on a slow machine that job is still running when the test counts. Code reading,
+not a reproduction (0 of 60 on the Mac under load): the first line of defence in the test was the assumption that no other job exists. The test now
+registers a job that has not ended on purpose (it failed first with the same 17 against 16), counts only the ended jobs against `KEPT_FINISHED` and
+asserts the live one is listed. **Lesson:** a count over a shared list names what it counts (`is_terminal`), and a feature that starts work at
+start-up (here the network watcher) invalidates every test that assumed an empty agent: arrange the other work instead of hoping it is done.
+
+## A missing-folder test failed because the CI Mac's temp folder is on an external volume (2026-11-04, Spotter `folder::tests::missing_folders_files_and_shares_explain_themselves`)
+
+Runs 7509 and 7515 (macOS): the test expected `NotFound` for `<tempdir>/nope`, got `Unreachable`. Not the permission problem it looked like: the runner's job
+temp folder sits under `/Volumes/d7sst7/...`, and `is_network_path` treats everything under `/Volumes/` as a mount point, where a missing folder means "not
+mounted" by design. The test now uses a path that is not under a mount point. **Lesson:** a temp folder's location is an environment input: a test of
+path classification must not take its path from `temp_dir()`. (A re-run of an old macOS job after the runner's workdir moved failed differently: "failed to
+read action.yml ... no such file": a stale `hostexecutor` path, so re-dispatch instead of re-running after a runner change.)
 ## TCC blocked self-responsible processes on the external work volume (2026-11-04, Mac runner)
 
 With the runner's work folder on the USB volume `/Volumes/d7sst7`, Pitcrew's disclaim and supervision tests failed with
@@ -1259,3 +1401,92 @@ reverted a memory fix, a redaction and test fixes; git saw no conflict and the m
 hand. **Lesson (class: a clean merge that goes backwards):** after merging, run `node scripts/merge-regression-check.mjs
 <merge-commit>` (or `--branch <b> --target <t>` before merging); it lists files the merge changed that the branch never
 touched, and files where the result removes most of what one earlier commit added. Read each flagged file's diff.
+
+## A delayed service looked like a broken one (2026-11-04, Dyno helper after a Windows restart)
+
+After a restart the Dyno helper card said "installed but did not answer, Repair" until the person ran Repair (UAC), though nothing was damaged. By the code, four things added up: the service was `delayed-auto` (it starts a minute or two after the boot), the agent turned "program present, pipe absent" straight into Silent and Repair, nothing started a stopped service although its security descriptor already lets interactive users start it, and the card read the state once and never again. A start that is merely late, or a service that is merely stopped, is not damage. **Lesson (class: a state that fixes itself is not a fault):** a status that can be transient is polled with a backoff and says "starting", an unelevated start is tried before an elevated repair is offered, and Repair is for a service that stopped with an error, with the service's exit code and reason in the detail. `paddock_service::start::revive` is the one implementation; a refusal at the service's start leaves its reason in the Event Log and in its service-specific exit code (ER-27), because a service that stops silently can only be repaired by guessing.
+## The Linux "Turn off" reported done and nothing proved it: a result dropped at the OS edge, a removal with no read-back (2026-11-04, ADR 0054 RC-2 and E-3/E-4)
+
+The Dyno 1.1.0 review found `Systemd::unregister` running `let _ = self.ctl(&["disable", "--now", ..])` and returning `Ok(())` for a packaged unit
+without looking, and `plan_uninstall_self` (the daemon removing itself after the `Uninstall` request) with no `ConfirmGone`: the app was told `Bye`
+whatever systemd did afterwards. Both are defects in the code and each now has a test that failed first (`cargo nextest run -p paddock-service --lib -E
+'test(packaged_unit) | test(service_removing_itself)'` on `a391ebda5` plus the tests: 7 run, 3 failed). The reported symptom (75 s later still `active`
+and `enabled`, restart counter 1, `/var/lib/dyno-helper` left) was **not reproduced** (ER-28): on the OrbStack `paddock-gate-arm` machine (Ubuntu 24.04,
+systemd 255) the base code with the real hardened unit, the real `dyno-helper serve` and the real `Uninstall` request, and the elevated
+`dyno-helper uninstall`, both left the unit `inactive`/`disabled` with `NRestarts=0` and the data folder gone, and `disable --now` called from inside a
+`ProtectSystem=strict` unit works (PID 1 edits `/etc`, not the caller). Plausible causes still open, each with the observation that rules it out:
+`disable --now` failing on the Tart GNOME image (its journal line from the same run); the daemon exiting non-zero before the removal thread reached
+`disable` (the unit's `Result=` and `ExecMainStatus`); the elevated path taken instead of the daemon's (the app log's "turning the helper off" line).
+The fix makes every one of them visible: `unregister` fails with the tool's words or `StillPresent(inspection)` and logs the read-back, the self-removal
+ends in `ConfirmGone`, and the next lifecycle run (ADR 0054 L7) shows which it was. **Lesson (class: errors discarded at OS edges):** a removal is
+judged by what the OS says afterwards, never by the call's exit status or by a reply sent before the work; C93 (ADR 0054) lists the edge modules
+(`crates/wiring.toml`, `apps/dyno/wiring.toml`) and the `// silent:` hatches that remain are counted. The helper-log race (`68889a16e`, a log thread
+recreating `helper.log` between the unlink and the folder's removal) is on this line and its test passes.
+
+## Retracted: A guessed fix made the missing menu-bar items worse; the measured cause was an activation gate (2026-11-05, Dyno 1.1.0, macOS 26)
+
+Symptom: after a login start Dyno's menu-bar items were missing. First hypothesis (65c4c8fc4, "Verify"): the add was dropped, so check and re-make. It was refuted by the VM runs: the items were made every time, and the re-make after ControlCenter was up re-hid them and crashed Dyno with SIGTRAP 1 of 2 times on a fresh guest. Cause (12 of 12 runs red without it, 6 of 6 green with it, ER-28): on macOS 26 ControlCenter keeps status items an app makes after ControlCenter started off screen (`.ephemeral`) until the app has been active once in the session; a hidden login start is never active. Adopted at ControlCenter start: shown. The AppKit calls `activate()` and `activateIgnoringOtherApps` are refused for a background launch; an Apple event `activate` (osascript) works. Fix: activate once at a hidden start, give focus back, no re-make on macOS. The logs did not show it before: "created" was logged, never whether ControlCenter showed it; now a window-list test per autosave name, ControlCenter's pid/start and a diagnose line 5 s after creation say so. **Class:** a call that succeeds is not proof the OS shows the result; log the OS's own view, and never add a "repair" before the cause is measured.
+
+**Retracted:** follow-up to the entry above (review of `fix/dyno-tray-login`): the sequence runs only on macOS 26 or later (`activate()` and `yieldActivationToApplication` are macOS 14+ and the minimum is 13: an unrecognized selector raises on the main thread; both are also guarded with `respondsToSelector`). It first looks about 2 s at whether ControlCenter already shows the items (window list matched by ControlCenter's pid, not its localized name) and activates only if they are parked, so a login where ControlCenter adopted the items keeps its focus. Focus goes back only to the same process (pid, launch time, bundle id), only if Dyno is still active and no Dyno window is open. Logs carry pids, never app names. **To look for on a real Mac** (the VM guest cannot show a TCC prompt): at a hidden login start, (1) the menu-bar items appear within a few seconds; (2) the menu bar and focus switch for about a second and return; (3) no "Dyno wants to control ..." Automation prompt - if one appears, the log line `tray activation: attempt apple_event: call failed (...)` says so, and the items stay hidden until Dyno is opened by hand; the Info.plist carries `NSAppleEventsUsageDescription` so such a prompt would at least explain itself. The `tray diagnose:` lines in the Dyno log give the rest.
+
+## Retraction: the menu-bar activation "cause" was a guest without a menu bar (2026-11-05, Dyno 1.1.0, macOS)
+
+The two entries above (2026-11-05, "A guessed fix made the missing menu-bar items worse…" and its follow-up) are **retracted**. They said ControlCenter keeps status items that an app makes after it started off screen until the app is activated, "12 of 12 runs red without it, 6 of 6 green with it", and the fix activated Dyno once at a hidden start. That claim was wrong, and the activation was removed.
+
+What was measured: every failing run was in a guest session whose whole menu bar was off screen (0 Control Center windows and 0 Window Server `Menubar` windows; `AccessibilityUIServer` frontmost). The parked frame y=768 was the menu bar being away, not Dyno being held back. Activating any regular app, Finder included, brought the bar up, and with it Dyno's items, so the "green" runs showed that a menu bar appeared, not that activating Dyno helped. With a menu bar present, Dyno shows its items at a hidden start and at a login-item start without any activation, as Stats and a plain AppKit probe do. The user's real-machine symptom is **not reproduced**; the Tart guest's missing menu bar is unexplained and may not exist on a real Mac. The activation code, its tests and the `NSAppleEventsUsageDescription` plist key are gone. The autosave name set before the status item connects stays as housekeeping, with no measured effect.
+
+What stays true: Verify's remove-and-re-make on macOS was removed (the check reads the local window, which is wrong while the menu bar or ControlCenter is not ready, and it re-made all four items one second after a good login; one test run then crashed after the re-make: a candidate for the real symptom, not a confirmed cause, no stack was captured). For the next real failing login the log now says: whether a `Menubar` window exists, ControlCenter's pid and start, the shown test by ControlCenter's pid with the status item's own window as a diagnostic fallback, a line before every icon removal, the start signal, and the system's crash reports for Dyno by name and time (Report a problem includes them too).
+
+**Lesson (class: a cause confirmed against an unchecked precondition, ER-28):** before calling a cause confirmed, check that the failing state is the state under study (here: is there a menu bar at all?) and run a known-good peer (another status-item app) in the same state; a fix that "works" must be shown to work through the cause, not through anything else the step also does (activating an app also brings up the menu bar).
+
+## The first run registered the login service after the app had started its own agent: three agents in 20 s (2026-11-05, Dyno 1.1.0 VM checks on build 7538)
+
+The macOS cold-start check saw 2 to 3 distinct `dyno-agent` processes where 1 is allowed; the Linux check saw the agent under `systemd --user`, not the app. Hypotheses and what refuted them: a respawn loop in the supervisor (the app log shows one launch, one `Shutdown`, one launch, no loop); a duplicate from the login item (one `dyno-app` pid in every run); a check that counts wrongly (partly: see below, but the logs show the extra processes). Cause, from the app and agent logs of a 7538 run: start at login became on by default (`91d703d81`), and the first run registered the agent service from `settings_changed`, i.e. after the app had started and connected to its own agent. The registration started the service's agent at once, which exited 3 because the app's agent held the lock; the repair then saw a "stale" registration and re-registered it, the app asked its own agent to exit (the documented hand-over, Dyno ADR 0010 section 11), waited for the service (launchd's 10 s throttle, systemd's `RestartSec`), and on macOS fell back to its own agent after the fallback wait, with the service agent refused every 10 s until Quit. Fix: the first run is decided before the link starts any agent, from the settings file the app already reads (`login::apply_first_run_at_start`), so the link finds a supervising service and starts none. Verified on a macOS VM with a local build: one `Agent starting`, no `Agent refused`, no hand-over. Review follow-up (same day): the registration can open System Settings (SMAppService) or wait on `systemctl` for up to 40 s, so it does not run on the setup thread: `AgentLink::before_first_launch` runs it on a worker and the link begins when it returns (a test fixes the order, red against a link that begins first); one function (`login::run_first_run`) serves the start and the first sight of the settings, once per process (`FirstRunAttempt`), so a failed try is not repeated in the same run; a damaged settings file is logged. The Linux check on the updated vm-smoke checks (`00760d0e5`) was run against the 7538 package only: a package of this branch (CI) is needed to see the systemd side without the exit-3 restart.
+
+Not product bugs, found on the way (the checks, branch `test/dyno-release-vm-checks-v2`): (1) `instancesOf` matches processes by the bundle path in `ps` args, but the agent that SMAppService starts shows as `dyno-agent run` without a path, so a service-started agent is invisible (cold start "not ready", discovery file "stale", Quit "agent.json still there" while the service's agent keeps running by design); (2) the Linux check expects the agent to be the app's child, but with Launch at login on (the default) systemd supervises it (`dyno-agent.service`, `ppid` of `systemd --user`) and Quit leaves it running (user guide: the agent keeps measuring until you stop it). **Lesson (class: an ordering decision taken after the thing it governs has started; a check written for a mode the default no longer is):** decide who supervises a process before the first one is started, and when a default changes, re-read every check that assumed the old mode.
+
+## A report that cannot explain the failure it was made for: the Dyno bundle audit (2026-11-05, Dyno 1.1.0, ER-27)
+
+An independent audit fed 38 invented hostile lines and a broken helper to Dyno's two bundles. Findings, with their class. (1) **Two bundles, two redactors (class: copies drift).**
+The Diagnostics page's "Save bundle" used Dyno's own redactor and zip writer, which had none of the secret layer Report a problem has; the register already said
+the copy should be gone by 1.1.0 (`personal-data-redaction`). Now there is one report: the agent hands over plain files, `paddock-diag` redacts, previews and zips.
+(2) **A fix that reads the environment cannot work in a GUI app (class: the test machine is not the user's machine).** `Redactor::for_machine` read `HOSTNAME`, which
+a macOS GUI app does not have; the host name now comes from the OS. (3) **A root-only log explains nothing to a user-run report.** `helper.log` is 0600 root, so a
+broken helper left no evidence; the helper now writes a small world-readable lifecycle file with no user content, and the report adds the OS's view of the
+service, the Event Log entries of its source and the helper's own status and detail. (4) **A partial failure said the wrong thing.** An unreadable log folder reported
+"There are no log files yet"; a log tail with no newline was dropped; a crash marker was never cleared. Each now says what happened. (5) **A verdict for every hostile
+line** (`crates/paddock-diag/tests/it/hostile.rs`): a line is either removed or listed as deliberately left, and a stale "left" fails, so the list the dialog shows
+stays true. Deliberately left: file and folder names in paths, other machines' names and identifiers, text an app imported or showed. Not reproduced before the fix:
+the red run of the hostile table is the audit's own probe log (20 of the lines leaked); the other new tests were written with their fix (ER-11 gap, noted in the PR).
+
+## sysinfo's macOS available memory includes active pages, so "used" read 17 % for 54 % (2026-11-05, Dyno 1.1.0, macOS)
+
+Dyno computed used as total minus `available_memory()`. On macOS sysinfo 0.39 defines available as active + inactive + free pages (`unix/apple/system.rs`), which counts memory apps are using, so used came out as roughly wired + compressed (4.3 + 6.2 of 64 GB) where Activity Monitor said 34.8 GB. sysinfo's `used_memory()` there is internal - purgeable + wired + compressor, which is what Activity Monitor shows. Fix: `split_memory` in `dyno-platform/src/sensors.rs` takes used from `used_memory()` on macOS and keeps total minus available elsewhere (Linux reads `MemAvailable`, Windows available physical memory: both right). Class: a library's "available" is not "not used" on every OS; check what a cross-platform figure means on each OS before subtracting. Other users of `available_memory()` (Debrief, Pitwall, `paddock-metrics`) have the same macOS reading; not changed here.
+
+## A first import of an external package can time out whichever test is running (2026-11-06, Dyno 1.1.0, Mac)
+
+Symptom: Dyno's `opens the shared chooser` spec reported "Test timed out in 5000ms" at 5569 ms and 6228 ms on a busy machine, then passed on repeat runs. First hypothesis: a real hang in the chooser or side sheet. The `vi.waitFor` limits (1 s each) and the late timeout refuted a pending promise, and CPU profiles of a failing run showed about 7.1 s of 8.1 s in the module loader's file reads.
+
+Root cause: `dy-chart` runs `import('./echarts-setup')` on first render. The Angular test builder keeps packages external, so Node reads about 688 ECharts files (6.5 MB) synchronously in one event-loop turn, inside the running test. A slow disk or a starved CPU stretches that past the test timeout. The spec's `PD_ECHARTS` fake did not help, because `dy-chart` does not use that token.
+
+Fix: `src/test-setup.ts` imports `echarts-setup`, so the read happens before any test starts. `chart.spec.ts` fails if a test run reads a module for that import.
+
+Logs: the run output showed only the timeout, and the one clue was a duration well past 5000 ms. Class: lazy imports in specs are blocking disk reads, so preload heavy ones in setup. `PD_ECHARTS`'s default `import('echarts')` in `ui/projects/paddock-ui/chart` has the same exposure wherever a spec has no fake.
+
+## Service repair was an undeclared state machine; three review rounds patched instances (2026-11-05, Dyno 1.1.0, ADR 0056)
+
+Moving Dyno's macOS service code into `paddock-service` took three review rounds that each found the same kind of bug in a different entry point: a registration the OS accepted but had not answered was forgotten and replaced (a second "Background Items Added"); a quit during the 120 s wait left no record; a job that stayed refused was re-registered at every start; the resume marker could be lost behind a refused location; a crash between unregister and register lost the service. State was spread over a version file, an attempt counter, a marker file and a lock; five entry points decided for themselves; it was saved after long waits, not before. The cure is structural (ER-21): one persisted state with phases, written before each OS step; one pure transition function; one executor; holds derived from the attempts; the model explorer as the guard.
+
+- Write the record before the OS call, never after the wait; a thread that waits dies with the app.
+- Never hold a mutex across a wait the user can press a button during: `ServiceControl::run` and the health repair now try the manager and answer Busy at once, with words.
+- Every hold names what happened and a next step that exists for that state: unanswered, refused and register failed are three facts with three messages, and a failed register is not "not installed".
+- A start that cannot save its record changes nothing and tells the UI, with the way out (Repair goes on, loudly).
+- Tests that only restate what the explorer proves are deleted, not rewritten; the ones that pin exact commands, files and words stay.
+
+## A newer Dyno kept talking to an older agent of the same version (2026-11-07, Dyno 1.1.0)
+
+Symptom: after replacing Dyno.app, an agent started on 5 Nov kept running and the new app used it; killing agents by hand then showed "crashed 3 times, Restart loop". First hypothesis: the app never asks an old agent to exit. Refuted: the link already asks an agent of another version or protocol to exit (`Request::Shutdown`), waits for the data folder and starts its own. Root cause: "another build" meant a different `CARGO_PKG_VERSION`, and a release candidate and the release carry the same version. Contributing: nothing watched the agent's own file, so an agent whose bundle was replaced ran on (on Linux a deb upgrade, on macOS a replaced bundle); the issue readers called any `.ips` report a crash, so a SIGKILL or SIGTERM counted toward the crash loop.
+
+Fix: the discovery file carries a build id (SHA-256 prefix of the agent file), the app compares it with the id of the agent file it would start, and the agent exits (code 0, logged) when its own file was replaced or removed on two looks 30 s apart; signals others send are `StoppedFromOutside`, no crash and no stability points. Logs: the connect line now carries the agent's version and build and the app's key. Class: identity by a label that releases share; compare content.
+
+- A test fake built from the real agent carries its self-healing (the discovery guard writes `agent.json` again at the 30 s watch): tests that tamper with a live agent's files must hold only the lock and start the agent when told (`SlowHolder`; CI run 7672, Dyno link test connected at 94 of 100 looks).

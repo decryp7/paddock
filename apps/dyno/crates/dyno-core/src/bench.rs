@@ -1,6 +1,12 @@
 //! Benchmarks: what is measured, how a run is recorded and how two runs are compared. Pure types and functions; the
 //! measuring itself runs out of process (`dyno-bench`) and is started by the agent only when the user clicks.
 
+pub mod cpu;
+pub mod disk;
+pub mod estimate;
+pub mod export;
+pub mod gpu;
+pub mod memory;
 pub mod unit;
 pub mod wire;
 
@@ -9,14 +15,14 @@ use serde::{Deserialize, Serialize};
 use wire::{Liveness, PhaseProgress};
 
 /// Largest scratch file the disk benchmark may write, in MiB. The agent refuses a bigger request.
-pub const DISK_MAX_MIB: u32 = 512;
+pub const DISK_MAX_MIB: u32 = 4096;
 /// Scratch file size when the user doesn't choose, in MiB.
-pub const DISK_DEFAULT_MIB: u32 = 128;
+pub const DISK_DEFAULT_MIB: u32 = disk::DEFAULT_MIB;
 /// Smallest scratch file, in MiB (smaller numbers only measure the cache).
 pub const DISK_MIN_MIB: u32 = 16;
-/// Whether the disk test may run. Off until ADR 0030 WP-B3 replaces the 1.0 method, whose reads came from the page cache
-/// (D10: the 1.0 disk test is never shipped). Turn it on in the same change that lands the rebuilt test.
-pub const DISK_TEST_ENABLED: bool = false;
+/// Whether the disk test may run. It was off while the 1.0 method (reads from the page cache) stood (D10: that test is never
+/// shipped); ADR 0030 WP-B3 replaced it, so it is on.
+pub const DISK_TEST_ENABLED: bool = true;
 /// What the person is told while [`DISK_TEST_ENABLED`] is false.
 pub const DISK_TEST_OFF: &str =
     "The disk test is being rebuilt to measure the drive and not the memory cache; it returns in a later Dyno 1.1 update.";
@@ -73,10 +79,13 @@ impl BenchKind {
     /// handling), and only runs of the same version are compared (ADR 0030 section 3). Version 1 is the 1.0 method.
     pub fn method_version(self) -> u32 {
         match self {
-            // 1.1: a 1 s warm-up and five repetitions, median and spread.
-            BenchKind::Cpu | BenchKind::Memory => 2,
-            // The disk method is rebuilt by WP-B3; the test stays off until then.
-            BenchKind::Disk | BenchKind::Gpu => LEGACY_METHOD,
+            // 3 (1.1): a 1 s warm-up and five repetitions, median and spread; CPU has four kernels and a sustained run, memory the
+            // four STREAM kernels and a latency sweep.
+            BenchKind::Cpu | BenchKind::Memory => 3,
+            // Disk 2: direct I/O, four patterns, ramps, three repetitions (WP-B3).
+            BenchKind::Disk => 2,
+            // GPU 2: wgpu compute, copy, fill rate and geometry (WP-B6); nothing was measured before.
+            BenchKind::Gpu => 2,
         }
     }
 
@@ -291,6 +300,30 @@ pub struct KindResult {
     /// The method version it was measured with ([`BenchKind::method_version`]); 1.0 runs have [`LEGACY_METHOD`].
     #[serde(default = "legacy_method")]
     pub method: u32,
+    /// The sustained CPU run's trace, one point a second (empty for every other result).
+    #[serde(default)]
+    pub trace: Vec<cpu::TracePoint>,
+    /// How this was measured, in words: the drive's file system and bus, whether the cache was bypassed, the vector width.
+    #[serde(default)]
+    pub details: Vec<String>,
+    /// The drive's top is not writable: the page offers to choose a folder on it and run again.
+    #[serde(default)]
+    pub needs_folder: bool,
+    /// The device measured, for a kind that runs once per device (the drive's name for the disk test); `None` otherwise.
+    #[serde(default)]
+    pub device: Option<String>,
+}
+
+impl KindResult {
+    /// Rewrites Dyno 1.0's stored "runner missing ... reinstall Dyno" reason as a past fact ([`LEGACY_RUNNER_MISSING`]);
+    /// the runner may be present now, so the stored advice would be wrong. Other reasons are untouched.
+    fn restate_legacy_reason(&mut self) {
+        if let BenchStatus::Unavailable { reason } = &mut self.status {
+            if reason.contains("dyno-bench") && reason.contains("missing") {
+                *reason = LEGACY_RUNNER_MISSING.to_string();
+            }
+        }
+    }
 }
 
 fn legacy_method() -> u32 {
@@ -382,6 +415,16 @@ impl BenchRun {
     }
 }
 
+/// A folder the person chose, through the shell's folder dialog, for the scratch file of a drive whose top is not writable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskFolder {
+    /// The volume's id (its mount point), as in `disk_volumes`.
+    pub volume: String,
+    /// The folder, a path as the dialog gave it. The agent canonicalises it and checks it is on that volume.
+    pub folder: String,
+}
+
 /// What a request to start a run may ask, after parsing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunPlan {
@@ -389,10 +432,85 @@ pub struct RunPlan {
     pub kinds: Vec<BenchKind>,
     /// Scratch file size, MiB.
     pub disk_mib: u32,
+    /// The volumes to test (their ids, which are their mount points); empty means the system drive.
+    pub drives: Vec<String>,
+    /// Network drives may be tested in this run (the person agreed).
+    pub allow_network: bool,
+    /// Folders chosen for drives whose top is not writable.
+    pub folders: Vec<DiskFolder>,
+    /// The graphics adapter to measure, by index (`None`: the default).
+    pub gpu_adapter: Option<u32>,
+    /// Minutes of the sustained CPU run (`None`: the usual short CPU test).
+    pub sustained_minutes: Option<u32>,
+    /// The sustained disk write (past the drive's cache) was confirmed for this run, in GiB; `None` when it was not.
+    pub sustained_write_gib: Option<u32>,
     /// Label, trimmed.
     pub label: String,
     /// Group, trimmed.
     pub group: Option<String>,
+}
+
+/// The most drives one run may test.
+pub const MAX_DRIVES: usize = 16;
+
+impl RunPlan {
+    /// Sets the drives to test and whether network drives may be included. The ids are the volumes' mount points as the list
+    /// gave them; the agent checks each against the list it has, so an id that names no volume is refused there. Here only the
+    /// shape is checked: a bounded count, printable and not empty, without repeats.
+    pub fn with_drives(mut self, drives: &[String], allow_network: bool) -> Result<RunPlan, String> {
+        let mut unique: Vec<String> = Vec::new();
+        for d in drives {
+            if d.is_empty() || d.chars().count() > 512 || d.chars().any(char::is_control) {
+                return Err("A drive to test has an unusable name.".into());
+            }
+            if !unique.contains(d) {
+                unique.push(d.clone());
+            }
+        }
+        if unique.len() > MAX_DRIVES {
+            return Err(format!("Choose at most {MAX_DRIVES} drives."));
+        }
+        self.drives = unique;
+        self.allow_network = allow_network;
+        Ok(self)
+    }
+}
+
+impl RunPlan {
+    /// Sets the folders chosen for drives that are in the plan; one that names a drive not in it, or an unusable path, is refused.
+    pub fn with_folders(mut self, folders: &[DiskFolder]) -> Result<RunPlan, String> {
+        for f in folders {
+            if f.folder.is_empty() || f.folder.chars().count() > 1024 || f.folder.chars().any(char::is_control) {
+                return Err("A chosen folder has an unusable path.".into());
+            }
+            if !self.drives.contains(&f.volume) {
+                return Err("A chosen folder belongs to a drive that is not in the run.".into());
+            }
+        }
+        self.folders = folders.to_vec();
+        Ok(self)
+    }
+
+    /// Sets the sustained CPU run (minutes, one of the offered lengths; the sensor limit is checked when the run starts, where the
+    /// sensors are known) and the sustained disk write (GiB per drive, bounded by [`disk::SUSTAINED_WRITE_MAX_GIB`]).
+    pub fn with_sustained(mut self, minutes: Option<u32>, write_gib: Option<u32>) -> Result<RunPlan, String> {
+        if let Some(m) = minutes {
+            if !cpu::SUSTAINED_MINUTES.contains(&m) {
+                return Err(format!("The sustained run lasts 2, 5, 10 or 20 minutes, not {m}."));
+            }
+        }
+        if let Some(g) = write_gib {
+            if !(1..=disk::SUSTAINED_WRITE_MAX_GIB).contains(&g) {
+                return Err(format!(
+                    "The sustained write must be between 1 and {} GiB.",
+                    disk::SUSTAINED_WRITE_MAX_GIB
+                ));
+            }
+        }
+        self.sustained_minutes = minutes;
+        self.sustained_write_gib = write_gib;
+        Ok(self)
+    }
 }
 
 fn clean(s: &str) -> String {
@@ -439,6 +557,12 @@ pub fn plan_with(
     Ok(RunPlan {
         kinds: unique,
         disk_mib,
+        drives: Vec::new(),
+        allow_network: false,
+        folders: Vec::new(),
+        gpu_adapter: None,
+        sustained_minutes: None,
+        sustained_write_gib: None,
         label: if label.is_empty() { "Benchmark".into() } else { label },
         group,
     })
@@ -600,6 +724,9 @@ pub struct BenchProgress {
     pub liveness: Liveness,
     /// Set when the run could not have full-confidence conditions (see [`BenchRun::limited`]).
     pub limited: Option<String>,
+    /// The sustained CPU run's points so far (the page draws them live); empty otherwise.
+    #[serde(default)]
+    pub trace: Vec<cpu::TracePoint>,
 }
 
 /// What the benchmarks page shows.
@@ -612,6 +739,9 @@ pub struct BenchOverview {
     pub runs: Vec<BenchRun>,
     /// Whether the disk test can be chosen ([`DISK_TEST_ENABLED`]); the page shows it as off otherwise.
     pub disk_test_enabled: bool,
+    /// What the picker shows before a run: about how long each kind takes and what the disk test writes per drive.
+    #[serde(default)]
+    pub estimates: estimate::Estimates,
 }
 
 /// The saved run history: versioned, bounded and tolerant of damage.
@@ -623,6 +753,9 @@ pub struct BenchHistory {
     /// Runs, newest first.
     pub runs: Vec<BenchRun>,
 }
+
+/// What a 1.0 "runner missing" reason is rewritten to when its history is read: a fact about that run, not advice for now.
+pub const LEGACY_RUNNER_MISSING: &str = "The benchmark runner was missing from the Dyno 1.0 installation.";
 
 /// Current [`BenchHistory::version`].
 /// (2: repetitions with spread and method versions; version 1 files are read and their runs marked as measured the old way.)
@@ -650,6 +783,7 @@ impl BenchHistory {
                 // Dyno 1.0's runs are kept and marked (ADR 0030 D9); they are never compared with the current method.
                 for r in &mut h.runs {
                     r.old_way = true;
+                    r.results.iter_mut().for_each(KindResult::restate_legacy_reason);
                     r.normalise();
                 }
                 h.version = HISTORY_VERSION;
@@ -712,6 +846,10 @@ mod tests {
                 kind: BenchKind::Cpu,
                 millis: 10,
                 method: 2,
+                device: None,
+                trace: Vec::new(),
+                details: Vec::new(),
+                needs_folder: false,
                 status: BenchStatus::Done {
                     metrics: values
                         .iter()
@@ -734,6 +872,58 @@ mod tests {
             assert_eq!(BenchKind::parse(k.name()), Some(k));
         }
         assert_eq!(BenchKind::parse("nope"), None);
+    }
+
+    #[test]
+    fn chosen_folders_must_belong_to_drives_in_the_plan() {
+        let base = plan_with(&[BenchKind::Disk], None, "", None, true)
+            .unwrap()
+            .with_drives(&["/Volumes/A".into()], false)
+            .unwrap();
+        let ok = DiskFolder {
+            volume: "/Volumes/A".into(),
+            folder: "/Volumes/A/Bench".into(),
+        };
+        assert_eq!(
+            base.clone().with_folders(std::slice::from_ref(&ok)).unwrap().folders,
+            vec![ok.clone()]
+        );
+        let stray = DiskFolder {
+            volume: "/Volumes/B".into(),
+            ..ok.clone()
+        };
+        assert!(base.clone().with_folders(&[stray]).is_err());
+        assert!(base
+            .with_folders(&[DiskFolder {
+                folder: "a\nb".to_string(),
+                ..ok
+            }])
+            .is_err());
+    }
+
+    #[test]
+    fn sustained_choices_are_validated() {
+        let base = plan_with(&[BenchKind::Cpu], None, "", None, true).unwrap();
+        assert_eq!(base.clone().with_sustained(Some(5), Some(8)).unwrap().sustained_minutes, Some(5));
+        assert!(base.clone().with_sustained(Some(7), None).is_err());
+        assert!(base.clone().with_sustained(None, Some(0)).is_err());
+        assert!(base.with_sustained(None, Some(disk::SUSTAINED_WRITE_MAX_GIB + 1)).is_err());
+    }
+
+    #[test]
+    fn drives_are_bounded_unique_and_printable() {
+        let base = plan_with(&[BenchKind::Disk], None, "", None, true).unwrap();
+        assert!(base.drives.is_empty(), "no drive chosen means the system drive");
+        let p = base
+            .clone()
+            .with_drives(&["/Volumes/A".into(), "/Volumes/A".into(), "/Volumes/B".into()], true)
+            .unwrap();
+        assert_eq!(p.drives, vec!["/Volumes/A", "/Volumes/B"]);
+        assert!(p.allow_network);
+        assert!(base.clone().with_drives(&["".into()], false).is_err());
+        assert!(base.clone().with_drives(&["a\nb".to_string()], false).is_err());
+        let many: Vec<String> = (0..=MAX_DRIVES).map(|i| format!("/v{i}")).collect();
+        assert!(base.with_drives(&many, false).is_err());
     }
 
     #[test]
@@ -816,6 +1006,10 @@ mod tests {
             kind: BenchKind::Gpu,
             millis: 0,
             method: 1,
+            device: None,
+            trace: Vec::new(),
+            details: Vec::new(),
+            needs_folder: false,
             status: BenchStatus::Unavailable { reason: "none".into() },
         });
         assert_eq!(r.metrics().count(), 1);
@@ -827,6 +1021,10 @@ mod tests {
             kind: BenchKind::Cpu,
             millis: 1,
             method,
+            device: None,
+            trace: Vec::new(),
+            details: Vec::new(),
+            needs_folder: false,
             status: BenchStatus::Done {
                 metrics: vec![BenchMetric::measured("cpu-single", "Single core", samples, "u", true)],
             },
@@ -907,6 +1105,27 @@ mod tests {
         // New runs are not marked.
         assert!(!measured_run("n", 2, &[1.0]).old_way);
         assert!(BenchKind::Cpu.method_version() > LEGACY_METHOD && BenchKind::Memory.method_version() > LEGACY_METHOD);
+    }
+
+    #[test]
+    fn a_1_0_runner_missing_reason_is_kept_as_a_past_fact_without_reinstall_advice() {
+        let v1 = r#"{"version":1,"runs":[{"id":"1","startedAt":5,"label":"Benchmark","group":null,"phase":null,
+            "load":{"cpuPercent":3.0,"memoryPercent":40.0,"onBattery":null},"machine":"m",
+            "results":[{"kind":"cpu","millis":0,"status":{"state":"unavailable","reason":"The benchmark runner (dyno-bench) is missing from the installation; reinstall Dyno."}},
+            {"kind":"disk","millis":0,"status":{"state":"unavailable","reason":"No volume to test."}}]}]}"#;
+        let (h, _) = BenchHistory::parse(v1);
+        let reasons: Vec<String> = h.runs[0]
+            .results
+            .iter()
+            .map(|r| match &r.status {
+                BenchStatus::Unavailable { reason } => reason.clone(),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(reasons[0], LEGACY_RUNNER_MISSING);
+        assert!(!reasons[0].contains("reinstall"));
+        // Any other reason is left as it was written.
+        assert_eq!(reasons[1], "No volume to test.");
     }
 
     #[test]

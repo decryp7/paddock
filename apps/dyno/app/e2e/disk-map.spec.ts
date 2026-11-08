@@ -79,7 +79,7 @@ test.describe('disk map', () => {
     await page.goto(url('&saved=3&gate=scans'));
     await expect(page.getByText('scanned 3 days ago (saved)')).toBeVisible();
     const note = page.getByTestId('saved-map');
-    await expect(note).toContainText('Net change in used space since: +12.4 GB');
+    await expect(note).toContainText('Net change in used space since: +13 GB');
     await expect(note).toContainText('a net figure');
     const list = page.getByRole('region', { name: 'In this folder' }).or(page.locator('section.list'));
     await expect(list.getByRole('button', { name: /^Open Users/ })).toBeVisible();

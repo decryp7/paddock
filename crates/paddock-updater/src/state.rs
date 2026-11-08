@@ -56,6 +56,11 @@ pub enum UpdatePhase {
     Installing {
         info: UpdateInfo,
     },
+    /// A per-machine installer started by this app (or by hand) is still running; its version is `version`. Nothing else
+    /// can start until it ends (ADR 0053 section 4.1 step 4).
+    InstallerRunning {
+        version: String,
+    },
     /// `info` is kept when there is something to retry.
     Failed {
         #[cfg_attr(test, ts(as = "crate::error::UpdateErrorDto"))]
@@ -80,6 +85,9 @@ pub enum Event {
     InstallFailed(UpdateError),
     /// Forget the update found (the channel changed).
     Reset,
+    /// The installer that was running ended without the update being installed (the record still named a newer version): the
+    /// failure to show.
+    InstallerEnded(UpdateError),
 }
 
 fn busy(detail: &str) -> UpdateError {
@@ -100,8 +108,17 @@ impl UpdatePhase {
             (P::Checking { .. }, Event::Check) => {
                 return Err(busy("The app is already checking for updates."));
             }
-            (P::Downloading { .. } | P::Ready { .. } | P::Installing { .. }, Event::Check) => {
+            (
+                P::Downloading { .. }
+                | P::Ready { .. }
+                | P::Installing { .. }
+                | P::InstallerRunning { .. },
+                Event::Check,
+            ) => {
                 return Err(busy("An update is already being downloaded or installed."));
+            }
+            (P::InstallerRunning { .. }, Event::InstallerEnded(error)) => {
+                P::Failed { error, info: None }
             }
 
             (P::Checking { .. }, Event::Job(id)) => P::Checking { job: Some(id) },
@@ -165,7 +182,8 @@ impl UpdatePhase {
                 | Event::Checked(_)
                 | Event::CheckCancelled
                 | Event::Downloaded(_)
-                | Event::InstallFailed(_),
+                | Event::InstallFailed(_)
+                | Event::InstallerEnded(_),
             ) => {
                 return Err(busy("This step no longer applies."));
             }

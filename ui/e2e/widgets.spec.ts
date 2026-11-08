@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@decryp7/paddock-e2e';
+import { expect, stablePressPoint, test, type Page } from '@decryp7/paddock-e2e';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -162,6 +162,43 @@ test('Widgets: dragging a handle moves the row', async ({ page }) => {
   await page.mouse.move((to?.x ?? 0) + 10, (to?.y ?? 0) + 30, { steps: 10 });
   await page.mouse.up();
   await expect.poll(async () => (await shownTitles(page))[0]).not.toBe('Active alarms');
+});
+
+test('Widgets: the drag ghost is the row, at its width and sizes, without the kind icon', async ({ page }) => {
+  await open(page, 'dark');
+  const row = chooser(page).locator('li.pd-wc-item').first();
+  const rowBox = await row.boundingBox();
+  const { x, y } = await stablePressPoint(page, grips(page).nth(0), '.pd-wc-grip');
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 6, y + 10, { steps: 4 });
+  await page.mouse.move(x + 20, y + 70, { steps: 8 });
+  const ghost = page.locator('.cdk-drag-preview');
+  await expect(ghost).toHaveCount(1);
+  const box = await ghost.boundingBox();
+  expect(Math.abs((box?.width ?? 0) - (rowBox?.width ?? 0)), 'the ghost is the row width').toBeLessThanOrEqual(2);
+  expect(await ghost.locator('.pd-wc-kicon').evaluate((e) => getComputedStyle(e).visibility), 'the kind icon is left out').toBe('hidden');
+  const biggest = await ghost.evaluate((e) => Math.max(0, ...[...e.querySelectorAll('svg')].map((v) => v.getBoundingClientRect().width)));
+  expect(biggest, 'a symbol in the ghost is drawn huge').toBeLessThanOrEqual(32);
+  await page.mouse.up();
+});
+
+test('Widgets: an inert widget dims its controls but not a checkbox\'s invisible native input', async ({ page }) => {
+  await open(page, 'dark');
+  const opacities = await page.locator('.pd-widget-frame').first().evaluate((frame) => {
+    frame.setAttribute('inert', '');
+    const host = document.createElement('div');
+    host.innerHTML =
+      '<div class="mat-mdc-checkbox"><input type="checkbox" class="mdc-checkbox__native-control"></div>' +
+      '<div class="mat-mdc-form-field"><input class="mat-mdc-input-element"></div>';
+    frame.appendChild(host);
+    const op = (sel: string): string => getComputedStyle(host.querySelector(sel)!).opacity;
+    const out = [op('.mat-mdc-checkbox'), op('.mdc-checkbox__native-control'), op('.mat-mdc-form-field')];
+    host.remove();
+    frame.removeAttribute('inert');
+    return out;
+  });
+  expect(opacities, "checkbox and form field dimmed, the checkbox's native input not dimmed").toEqual(['0.7', '1', '0.7']);
 });
 
 test('Widgets: the row menu opens beside its button and never covers its focus ring', async ({ page }) => {
@@ -330,4 +367,50 @@ test('Widgets: the preset name field has 13 px text and the height of its Save b
   const button = await c.getByRole('button', { name: 'Save as preset' }).boundingBox();
   expect(Math.round(field!.height)).toBe(Math.round(button!.height));
   expect(await c.locator('.pd-wc-save input').evaluate((e) => getComputedStyle(e).fontSize)).toBe('13px');
+});
+
+test('Widgets: a card whose content does not fit scrolls inside its body, reaches its last item, keeps the head and chains the wheel', async ({ page }) => {
+  await open(page, 'dark');
+  const frame = page.getByTestId('wgt-scroll-cell').locator('.pd-w');
+  const body = frame.locator('.pd-w-body');
+  await expect(body).toHaveCount(1);
+  const m = await body.evaluate((e) => ({ scrolls: e.scrollHeight > e.clientHeight, overflowY: getComputedStyle(e).overflowY, chain: getComputedStyle(e).overscrollBehaviorY, tab: e.tabIndex }));
+  expect(m.scrolls).toBe(true);
+  expect(m.overflowY).toBe('auto');
+  expect(m.chain).toBe('auto');
+  // Keyboard focus can scroll it, and a screen reader hears what it is.
+  expect(m.tab).toBe(0);
+  expect(await body.getAttribute('role')).toBe('group');
+  expect(await body.getAttribute('aria-label')).toBe('What holds it back');
+  // The head stays where it is while the body scrolls, and the last item becomes reachable.
+  const head = frame.locator('.pd-w-head');
+  const before = (await head.boundingBox())!.y - (await frame.boundingBox())!.y;
+  await body.focus();
+  await page.keyboard.press('End');
+  const last = body.getByText('Reason 12 of 12');
+  await expect(last).toBeInViewport();
+  const box = (await last.boundingBox())!;
+  const cellBox = (await frame.boundingBox())!;
+  expect(box.y + box.height).toBeLessThanOrEqual(cellBox.y + cellBox.height);
+  expect((await head.boundingBox())!.y - (await frame.boundingBox())!.y).toBe(before);
+});
+
+test('Widgets: a card whose content fits has no scrollable body and no extra tab stop', async ({ page }) => {
+  await open(page, 'dark');
+  const bodies = page.getByTestId('widgets').locator('.pd-w-body');
+  expect(await bodies.count()).toBeGreaterThan(0);
+  const offenders = await bodies.evaluateAll((els) =>
+    els.filter((e) => e.closest('[data-testid^="wgt-scroll"]') === null && (e.scrollHeight > e.clientHeight + 1 || e.getAttribute('tabindex') !== null)).map((e) => `${e.closest('pd-widget-frame')?.querySelector('.pd-w-title')?.textContent}: ${e.scrollHeight} > ${e.clientHeight}`),
+  );
+  expect(offenders).toEqual([]);
+});
+
+test('Widgets: a popup tile taller than its cap scrolls inside its body and its last item is reachable', async ({ page }) => {
+  await open(page, 'light');
+  const body = page.getByTestId('wgt-scroll-tile').locator('.pd-w-body');
+  const m = await body.evaluate((e) => ({ scrolls: e.scrollHeight > e.clientHeight, overflowY: getComputedStyle(e).overflowY, chain: getComputedStyle(e).overscrollBehaviorY, tab: e.tabIndex }));
+  expect(m).toEqual({ scrolls: true, overflowY: 'auto', chain: 'auto', tab: 0 });
+  await body.focus();
+  await page.keyboard.press('End');
+  await expect(body.getByText('Reason 12 of 12')).toBeInViewport();
 });
