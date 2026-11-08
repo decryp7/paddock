@@ -313,7 +313,7 @@ async function main(argv) {
             },
           });
         };
-        const readings = o.reboot ? [macRebootCheck({ waitReady }), macQuitStopRestart] : readingSteps('macos', async () => macDriver(gui)); // WP-VMH: one step per helper reading
+        const readings = o.only ? [] : o.reboot ? [macRebootCheck({ waitReady }), macQuitStopRestart] : readingSteps('macos', async () => macDriver(gui)); // WP-VMH: one step per helper reading
         // Release rows of the power suite (rule 71 MCP, the lifecycle log) and the rows not driven yet, with their reasons.
         const bundle = `/Applications/${config.bundle}`;
         let killNext = false;
@@ -370,8 +370,11 @@ async function main(argv) {
           const reopen = rowStep(ROW_TITLES.macReopen, judgeMacReopen({ agentBack: back, notificationSeen: /^\d+$/.test(notice) ? Number(notice) > 0 : null, loginItemWasOff: wasState === 'unreadable' ? null : wasState === 'off', loginItemNowOff: nowState === 'unreadable' ? null : nowState === 'off' }), 'the agent is back, the Login Items choice held');
           reopen.evidence = [...(reopen.evidence ?? []), `login item before Quit and stop: ${wasState} (${switchedOff ? 'switched off with Dyno\'s own switch and saved' : 'not switched by this row'}); after the reopen: ${nowState}`];
           // Put Start at login back on for the rows after this one.
-          if (switchedOff && (await ld.readSwitch()) === 'off' && (await ld.pressSwitch())) await ld.apply();
+          const sw0 = switchedOff ? await ld.readSwitch() : 'n/a';
+          const restored = switchedOff && sw0 === 'off' && (await ld.pressSwitch()) ? (await ld.apply()).ok : false;
           await gui.closeSettings();
+          const afterRestore = await btm();
+          reopen.evidence = [...(reopen.evidence ?? []), `login item restore: switch read ${sw0}, pressed and saved ${restored}; sfltool dumpbtm then: ${afterRestore}`];
           // Hung or paused page: the WebContent process is stopped; the question is read through AX.
           const hung = !rowWanted(o.only, 'hung-page') ? null : await hungPageStep({
             now: () => Date.now() / 1000, sleep: sleepMs,
