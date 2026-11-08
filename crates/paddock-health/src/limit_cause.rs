@@ -227,4 +227,33 @@ mod tests {
         // A limit above its row's maximum cannot be raised to anything the row allows.
         assert_eq!(suggested(u64::MAX), None);
     }
+
+    #[test]
+    fn a_bytes_limit_on_a_row_whose_maximum_is_not_in_bytes_suggests_up_to_the_largest_cap() {
+        // A malformed row (a count maximum on a limit measured in bytes) must not panic or offer a cap above the `u32` range.
+        static ODD: [LimitRow; 1] = [LimitRow {
+            id: LimitId::new("odd.memory"),
+            unit: Unit::Bytes,
+            default: Quantity::Bytes(1 << 30),
+            min: Quantity::Bytes(1),
+            max: Quantity::Count(5),
+            value: RowValue::Setting {
+                path: SettingPath::new("performance.oddMb"),
+            },
+            kind: RowKind::Stop,
+            selections: &[],
+            remedy: Remedy::RaiseSetting {
+                path: SettingPath::new("performance.oddMb"),
+            },
+        }];
+        let limit = LimitExceeded::new(
+            LimitId::new("odd.memory"),
+            Quantity::Bytes(1 << 30),
+            Scope::Plugin,
+        );
+        let cap = Cause::from_limit(&limit, &Registry::new(&ODD), None, "p")
+            .raise_cap
+            .expect("a cap is still offered");
+        assert_eq!(cap.suggested_mb, 2048);
+    }
 }

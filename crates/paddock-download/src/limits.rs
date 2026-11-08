@@ -76,6 +76,20 @@ mod tests {
     }
 
     #[test]
+    fn an_error_that_is_not_a_size_limit_is_no_limit() {
+        for err in [
+            DownloadError::DiskFull,
+            DownloadError::Throttled { host: "h".into() },
+            DownloadError::SizeMismatch {
+                expected: 2,
+                actual: 1,
+            },
+        ] {
+            assert!(err.limit().is_none(), "{err:?}");
+        }
+    }
+
+    #[test]
     fn the_registry_is_well_formed() {
         REGISTRY.check().unwrap();
     }
