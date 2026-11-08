@@ -130,7 +130,10 @@ test.describe('popup widgets', () => {
     await page.goto(POPUP('&popup=diskSpace:loading,cpuMemory:stale&agent=stopped'));
     await expect(page.getByRole('alert')).toHaveCount(1);
     await expect(page.getByRole('button', { name: 'Restart agent' })).toBeVisible();
-    await expect(page.locator('pd-widget-frame').filter({ hasText: 'CPU and memory' })).toContainText(/Updated|Paused/);
+    // A stale live widget says when its readings stopped (the shared frame's "As of HH:MM"): the same moment the agent notice gives.
+    const paused = /Readings paused at (\d{2}:\d{2})/.exec((await page.getByRole('alert').textContent()) ?? '')?.[1];
+    expect(paused, 'the agent notice names the time the readings stopped').toBeTruthy();
+    await expect(page.locator('pd-widget-frame').filter({ hasText: 'CPU and memory' })).toContainText(`As of ${paused}`);
   });
 
   test('the footer menu icons are 16 px and sit on their text', async ({ page }) => {
