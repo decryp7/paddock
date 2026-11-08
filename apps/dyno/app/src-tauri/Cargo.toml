@@ -17,9 +17,8 @@ name = "dyno_app_lib"
 crate-type = ["rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.7.3", features = [] }
-# build.rs patches TAURI_CONFIG (no externalBin copy while the sidecars are placeholders).
-serde_json.workspace = true
+# The shared build step: manifest, sidecar placeholders, no externalBin copy over the real program (paddock-build).
+paddock-build = { path = "../../../../crates/paddock-build", features = ["tauri-build"] }
 
 [dependencies]
 dyno-core.workspace = true
