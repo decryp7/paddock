@@ -1500,13 +1500,13 @@ A redaction default in a shared crate was widened for one app's problem report. 
 
 An agent looking for a narrower CI token found that a Gitea token cannot create a token with fewer rights, and the only other route was creating a bot user. Agents must not create users. The user creates scoped CI tokens (one per purpose, least privilege) and the agent is given the one it needs; if none exists, the agent stops and asks.
 
-## `disk::centre::tests::the_cached_volumes_never_list_on_the_request` failed once in CI (2026-11-09)
+## A background-lister test asserted a call count that a second trigger can change (2026-11-09)
 
-Symptom: in `ci.yml` run 7767 (Linux Dyno leg, nextest), `assertion left == right failed: a cached read within the freshness window never asks the system
-again`, left 2, right 1, at `crates/dyno-agent/src/disk/centre.rs:1616`. It passed five times in a row on the author's Mac and failed again on the retry. Not
-fixed here (routed by the coordinator); the cause is **not yet confirmed** (ER-28), so the candidates and the observation that rules each out are:
-(1) the test counts `lister` calls after `wait_cached` returns, but the centre's background list may be started twice (the first request and the mount-event thread's
-first trigger): rule out by logging each call's trigger and thread in the failing run; (2) the fake clock is not advanced, but the freshness window is read from the real clock
-somewhere on Linux only: rule out by grepping the window's `Instant`/`SystemTime` use in `centre.rs`; (3) a second listing started by the volume watcher that exists only on
-Linux (`mount_events`): rule out by running the test with the watcher stubbed out; (4) test order or a shared static between tests in one nextest process: rule out by running
-the test alone, 200 times, under the CI container. No sleep or raised timeout (ER-12).
+Symptom: `disk::centre::tests::the_cached_volumes_never_list_on_the_request` failed in CI (`ci.yml` run 7767, Linux Dyno leg, nextest, twice): `a cached read within the
+freshness window never asks the system again`, left 2, right 1 (`crates/dyno-agent/src/disk/centre.rs:1616`). It passed five times in a row on a Mac. The cause is **not yet
+confirmed** (ER-28), so it is an open bug, routed by the coordinator, not a fix. Lesson so far: a test that counts calls into a fake after waiting for a background job must
+wait for the job to end, not only for its first result, and must name every trigger that can start another job. Candidates and the observation that would rule each out:
+(1) the first request and the mount-event thread's first trigger each start a listing: log each call's trigger and thread in the failing run; (2) the freshness window reads the
+real clock somewhere while the test advances only the fake: grep the window's `Instant` and `SystemTime` use in `centre.rs`; (3) a second listing from the volume watcher
+(`mount_events` has macOS, Linux and Windows adapters, so this is not Linux-only): run the test with the watcher stubbed out; (4) a shared static between tests in one process:
+run it alone 200 times in the CI container. No sleep or raised timeout (ER-12).
