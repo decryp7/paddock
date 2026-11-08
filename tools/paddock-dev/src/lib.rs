@@ -15,6 +15,8 @@ mod cli;
 mod fds;
 pub mod input_hash;
 pub mod plan;
+pub mod plan_gitea;
+pub mod plan_repo;
 pub mod slots;
 pub mod wait;
 
