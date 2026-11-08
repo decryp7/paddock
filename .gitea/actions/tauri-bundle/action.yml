@@ -44,6 +44,7 @@ runs:
         BUILD_INPUTS_TOKEN: ${{ inputs.build-inputs-token }}
         # ADR 0062 section 6: a nightly or manual run refuses every fetch outside the store and the registries (a tag run does not, yet).
         PADDOCK_DEAD_PROXY: ${{ github.event_name != 'push' && '1' || '' }}
+        PADDOCK_DEAD_PROXY_CONTROL: ${{ github.event_name != 'push' && '1' || '' }}
       run: |
         args=(--app-dir "$APP_DIR" --root "${ROOT:-$APP_DIR}")
         if [ -n "$PREPARE" ]; then args+=(--prepare "$PREPARE"); fi

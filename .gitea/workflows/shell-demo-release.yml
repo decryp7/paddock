@@ -70,6 +70,7 @@ jobs:
           cargo clippy --all-targets -- -D warnings
           cargo nextest run --workspace --config-file ../../../crates/.config/nextest-demos.toml --profile ci
           cargo test --workspace --doc
+          node ../../../conformance/ci/live-data.mjs advisory-db  # ADR 0062 section 3a: a tag run fails on a mirror over 7 days old
           cargo deny check
 
   bundle:

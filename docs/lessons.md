@@ -1499,3 +1499,7 @@ A redaction default in a shared crate was widened for one app's problem report. 
 ## Gitea tokens cannot mint narrower tokens, and agents must not create bot users (2026-11-08)
 
 An agent looking for a narrower CI token found that a Gitea token cannot create a token with fewer rights, and the only other route was creating a bot user. Agents must not create users. The user creates scoped CI tokens (one per purpose, least privilege) and the agent is given the one it needs; if none exists, the agent stops and asks.
+
+## A secret reaches a reusable workflow only when the caller passes it (2026-11-08)
+
+`ci.yml` read `secrets.BUILD_INPUTS_TOKEN` while its callers (the app releases and the nightly) passed nothing, so the secret would have been empty in the called gates and the cargo-about install would have failed on the first tag. The independent review caught it; no run had shown it. Rule: a secret that a reusable workflow reads is declared under its `workflow_call.secrets` and passed by every caller, as `app-release.yml` already did; the gates run on the branch shows the install step succeed.

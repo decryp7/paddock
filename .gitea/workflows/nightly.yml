@@ -38,9 +38,35 @@ jobs:
     uses: ./.gitea/workflows/ci.yml
     with:
       webkit: true
+    secrets:
+      BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
-  # ADR 0026 §3 (D4): every command a dialog contract declares was sent by some run, or is listed as unexercised with a
-  # reason, and every dialog opened. It needs the union of the runs, so it runs here only, never in affected-only CI.
+  # ADR 0062 D2 (a): setup-rust no longer installs `stable` in every job, so each host updates it here, once a night, with the union of
+  # the components and targets the jobs use. A failure names the host and the command. Every job's summary logs its rustc.
+  rust-warmup:
+    name: Rust warm-up (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.gitea/actions/job-tmpdir
+
+      - name: Update stable, with its components
+        run: |
+          set -uo pipefail
+          run() { if ! timeout 1200 "$@"; then echo "::error::rust warm-up on $RUNNER_OS: '$*' failed or took over 20 minutes. Next: run it by hand on this runner."; exit 1; fi; }
+          run rustup update stable --no-self-update
+          run rustup component add clippy rustfmt --toolchain stable
+          run rustup default stable
+          echo "rust warm-up on $RUNNER_OS: $(rustc --version)" | tee -a "$GITHUB_STEP_SUMMARY"
+
   # ADR 0062 section 3a: the nightly npm audit record (a release run accepts one at most 48 hours old for its lockfile) and the age
   # of the RustSec advisory mirror.
   live-data:
@@ -57,6 +83,8 @@ jobs:
           BUILD_INPUTS_WRITE_TOKEN: ${{ secrets.BUILD_INPUTS_WRITE_TOKEN }}
         run: node conformance/ci/live-data.mjs npm-audit-record --level high
 
+  # ADR 0026 §3 (D4): every command a dialog contract declares was sent by some run, or is listed as unexercised with a
+  # reason, and every dialog opened. It needs the union of the runs, so it runs here only, never in affected-only CI.
   dialog-commands:
     name: dialog commands (declared but never sent)
     needs: [gate]

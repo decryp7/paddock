@@ -969,6 +969,7 @@ status = "planned"
 
   [[mechanism.copy]]
   paths = [".gitea/actions/setup-rust/action.yml"]
+  symbols = ["text:sccache"]
   owner = "paddock"
   delete_by = "v0.5.0"
   note = "The sccache step: download, SHA-256, tool cache. WP-4 replaces it with `./dev inputs ensure`."
@@ -976,19 +977,19 @@ status = "planned"
   [[mechanism.copy]]
   paths = ["apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh"]
   owner = "debrief"
-  delete_by = "debrief-v1.2.0"
+  delete_by = "debrief-v1.3.0"
   note = "libduckdb, CI copy (with `apps/debrief/scripts/ci/libduckdb-env.sh`). WP-4: from the store on every leg."
 
   [[mechanism.copy]]
   paths = ["apps/debrief/xtask/src/libduckdb.rs"]
   owner = "debrief"
-  delete_by = "debrief-v1.2.0"
+  delete_by = "debrief-v1.3.0"
   note = "libduckdb, developer copy (xtask). WP-4."
 
   [[mechanism.copy]]
   paths = ["apps/debrief/app/scripts/libduckdb.mjs"]
   owner = "debrief"
-  delete_by = "debrief-v1.2.0"
+  delete_by = "debrief-v1.3.0"
   note = "libduckdb, bundle copy. WP-4."
 
   [[mechanism.copy]]

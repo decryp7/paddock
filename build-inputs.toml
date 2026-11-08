@@ -75,14 +75,14 @@ used_by = "conformance/ci/tauri-bundle.sh scripts/demo/bundle.sh"
   url = "https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage"
   size = 16488952
   sha256 = "49d6a17160675a6bd1781699aae6bdf7692d98552e02a3671d2183d10547842e"
-  checked = "snapshot of the moving `continuous` release, taken 2026-11-08"
+  checked = "snapshot of the moving `continuous` release, taken 2026-11-08; upstream commit 536b068787179ea901964bd7dabc7bf61e4941c3"
 
 [[input]]
 id = "appimage-type2-runtime"
 kind = "bundler-helper"
 version = "2026-11-08"
 source = "https://github.com/AppImage/type2-runtime"
-licence = "MIT AND LGPL-2.1-or-later"
+licence = "MIT AND LGPL-2.1-only"
 ships = true
 redistribute = true
 package = "appimage-type2-runtime"
@@ -96,7 +96,7 @@ used_by = "conformance/ci/tauri-bundle.sh scripts/demo/bundle.sh"
   url = "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64"
   size = 944632
   sha256 = "617aa77314d57c8b8e4fae9c3f0b35af7b30d5529cb69e98f64f92510ed98a46"
-  checked = "snapshot of the moving `continuous` release, taken 2026-11-08"
+  checked = "snapshot of the moving `continuous` release (published 2026-10-19), taken 2026-11-08; upstream commit fedfad51acc2860b2916a1eef32ba4a500ff31ef; its source tarball (SHA-256 e27ea3c837e9c660e1a9a2993b673ae93bbb53077330efba8654031e302d4e8e) is in the private store as appimage-type2-runtime-source/fedfad51acc2/. libfuse is fetched by that commit's own build at its pinned version: record that version with the notices (WP: notices for ships entries)"
 
 [[input]]
 id = "nsis"
@@ -104,7 +104,7 @@ kind = "bundler-helper"
 version = "3.13"
 source = "https://github.com/tauri-apps/binary-releases"
 licence = "Zlib"
-ships = false
+ships = true
 redistribute = true
 package = "nsis"
 file = "nsis-3.13.zip"

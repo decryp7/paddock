@@ -31,3 +31,9 @@ Local smoke test: `docker build --platform linux/amd64 -t paddock-ci-smoke ci-im
 
 Change the version ARG, download each asset, `shasum -a 256` it (machete publishes `.sha256` files to compare), put the sums in the
 matching `*_SHA256_*` ARGs. A mismatch makes the build fail rather than trust an unverified file.
+
+## Playwright and the image (ADR 0062)
+
+The demo release workflows take Node and the Playwright browsers from this image instead of downloading them. A bump of
+`@playwright/test` in `package-lock.json` therefore needs an image rebuild (the browsers in `/ms-playwright` must match); without
+one the demo gates fail at the browser launch.

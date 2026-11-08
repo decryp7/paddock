@@ -52,11 +52,12 @@ eval "$(node "$here/../release/strip-keys.mjs")"
 # An unset secret arrives as an empty variable, which Tauri lets override signingIdentity "-" (codesign: `Signing with identity ""`).
 [ -n "${APPLE_SIGNING_IDENTITY:-}" ] || unset APPLE_SIGNING_IDENTITY
 
+# ADR 0062 section 6: nightly and manual runs refuse every fetch outside the store and the registries, `npm ci` included.
+. "$here/tauri-build-lib.sh"
+dead_proxy_on
 (cd "$root" && npm ci)
 if [ -n "$prepare" ]; then (cd "$root" && bash -euo pipefail -c "$prepare"); fi
 # ADR 0062: nothing here reaches GitHub: seed Tauri's tools folder and the AppImage runtime from the private store.
-. "$here/tauri-build-lib.sh"
-dead_proxy_on   # nightly and manual runs: any other fetch is refused (ADR 0062 section 6)
 seed_build_inputs
 tauri_verbose "$bundles"
 (
@@ -96,6 +97,17 @@ mkdir -p dist
 find "$dir/dist/bundle" -type f \( -name '*-setup.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' \
   -o -name '*.app.tar.gz' -o -name '*.sig' \) -exec cp {} dist/ \;
 ls -la dist
+# The dead-proxy run's negative control (ADR 0062 section 6, ER-33; Linux AppImage leg, nightly and manual runs): with a seeded helper
+# removed, the same `tauri build` must try to download it and be refused, naming the GitHub URL. Run after the installers are copied.
+if [ "${PADDOCK_DEAD_PROXY:-}" = 1 ] && [ "${PADDOCK_DEAD_PROXY_CONTROL:-}" = 1 ] && [ "$(uname -s)" = Linux ]; then
+  case ",$bundles," in
+    *,appimage,*)
+      rm -f "${XDG_CACHE_HOME:-$HOME/.cache}/tauri/AppRun-x86_64"
+      (cd "$app_dir" && dead_proxy_control npx tauri build --verbose --bundles appimage -- --profile dist)
+      ;;
+  esac
+fi
+
 # Every versioned installer must carry this build's version (the .app.tar.gz has none in its name).
 version="$(node -p "require('./$app_dir/src-tauri/tauri.conf.json').version")"
 stale="$(ls dist | grep -E '_[0-9]+\.[0-9]+\.[0-9]+' | grep -v "_${version}_" || true)"

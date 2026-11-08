@@ -75,7 +75,6 @@ runs:
       shell: bash
       env:
         COMMANDS: ${{ inputs.checks }}
-        BUILD_INPUTS_TOKEN: ${{ inputs.build-inputs-token }}
       run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
 
     # Third-party notices (Rust through cargo-about, npm through the root lock) are generated output: the committed file must equal
@@ -158,6 +157,8 @@ runs:
       shell: bash
       env:
         COMMANDS: ${{ inputs.ui-checks }}
+        # The npm audit record (ADR 0062 section 3a) is read where the app's UI commands run `live-data.mjs npm-audit`.
+        BUILD_INPUTS_TOKEN: ${{ inputs.build-inputs-token }}
       run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
 
     - name: End-to-end tests (${{ inputs.app }} ${{ inputs.e2e-shard }})

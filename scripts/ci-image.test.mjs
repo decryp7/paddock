@@ -129,7 +129,10 @@ describe('the workflow and ci.yml', () => {
 
   test('the setup-rust action skips the toolchain install when the toolchain, components and targets are there (ADR 0062 D2)', () => {
     const action = read('.gitea/actions/setup-rust/action.yml');
-    assert.ok(action.includes('rustup toolchain list') && action.includes('no download'));
+    assert.ok(action.includes('rustup toolchain list') && action.includes('no download of the toolchain'));
+    // A missing component is added alone; the install of `stable` (which upgrades it under other jobs) only runs when it is absent.
+    assert.ok(action.includes('rustup component add "$c" --toolchain') && action.includes('rustup target add "$t" --toolchain'));
+    assert.ok(action.indexOf('rustup component add') < action.indexOf('rustup toolchain install "$TOOLCHAIN"'));
   });
 });
 

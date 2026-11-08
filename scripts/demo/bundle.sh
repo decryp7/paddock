@@ -16,10 +16,10 @@ if command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
 rm -rf "$dir/release/bundle"
 
 # One npm workspace for the repo (ADR 0014 §1): the root install brings the UI's packages and the app's Tauri CLI.
-[ -d node_modules ] || npm ci
 here="$PWD/conformance/ci"
 . "$here/tauri-build-lib.sh"
-dead_proxy_on  # nightly and manual runs: any other fetch is refused (ADR 0062 section 6)
+dead_proxy_on  # nightly and manual runs: any other fetch is refused, `npm ci` included (ADR 0062 section 6)
+[ -d node_modules ] || npm ci
 seed_build_inputs  # ADR 0062: Tauri's helpers come from the private store, never from GitHub
 tauri_verbose "$bundles"
 (cd apps/$app && tauri_build npx tauri build ${verbose[@]+"${verbose[@]}"} --bundles "$bundles")

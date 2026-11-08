@@ -7,9 +7,6 @@ inputs:
   audit-level:
     description: npm audit level that fails the job.
     default: high
-  build-inputs-token:
-    description: "BUILD_INPUTS_TOKEN (a secret): a read-only token for the private build-inputs store (ADR 0062); a release run accepts a stored npm audit record from it."
-    default: ""
 runs:
   using: composite
   steps:
@@ -18,15 +15,10 @@ runs:
       shell: bash
       run: node "${{ github.action_path }}/../../../conformance/bin/paddock-conformance.mjs" commit-lint --range "origin/${{ github.base_ref }}..HEAD"
     # The binary, not the Docker-based action: no image to pull on every run. Every workspace crate, not just the root package.
-    - name: Advisory database is fresh
-      shell: bash
-      run: node "${{ github.action_path }}/../../../conformance/ci/live-data.mjs" advisory-db
     - name: Licences, advisories and sources
       shell: bash
       run: cargo deny --all-features --workspace check
     - name: npm audit (production dependencies)
       shell: bash
       working-directory: ${{ inputs.app-dir }}
-      env:
-        BUILD_INPUTS_TOKEN: ${{ inputs.build-inputs-token }}
-      run: node "${{ github.action_path }}/../../../conformance/ci/live-data.mjs" npm-audit --level ${{ inputs.audit-level }}
+      run: npm audit --omit=dev --audit-level=${{ inputs.audit-level }}

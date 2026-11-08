@@ -18,21 +18,21 @@ import { fileURLToPath } from 'node:url';
 import { isMain } from '../src/util/is-main.mjs';
 
 const STORE = 'https://dev.decryptology.net/api/packages/paddock-build-inputs/generic';
-const MIRROR_API = 'https://dev.decryptology.net/api/v1/repos/paddock-mirrors/advisory-db';
+const MIRROR_API = 'https://dev.decryptology.net/api/v1/repos/paddock-mirrors/advisory-db/branches/main';
 const DAY = 86400000;
 
 /** Age policy of the advisory mirror: `{ days, level: 'ok' | 'warn' | 'fail', message }`. */
 export function advisoryAge({ updated, now = Date.now(), release }) {
   const t = Date.parse(updated);
   if (Number.isNaN(t)) {
-    return { days: NaN, level: release ? 'fail' : 'warn', message: `the advisory mirror reports no usable last-sync time (${JSON.stringify(updated)}). Next: open https://dev.decryptology.net/paddock-mirrors/advisory-db and trigger "Synchronize now" in its settings.` };
+    return { days: NaN, level: release ? 'fail' : 'warn', message: `the advisory mirror reports no usable newest-commit time (${JSON.stringify(updated)}). Next: open https://dev.decryptology.net/paddock-mirrors/advisory-db and trigger "Synchronize now" in its settings.` };
   }
   const days = (now - t) / DAY;
   const shown = days.toFixed(1);
   const next = 'Next: sync the mirror (https://dev.decryptology.net/paddock-mirrors/advisory-db, Settings, "Synchronize now"; Gitea refreshes it on its own schedule), then re-run.';
-  if (release && days > 7) return { days, level: 'fail', message: `the RustSec advisory mirror was last synced ${shown} days ago (a release run allows 7). ${next}` };
-  if (days > 2) return { days, level: 'warn', message: `the RustSec advisory mirror was last synced ${shown} days ago (a warning above 2). ${next}` };
-  return { days, level: 'ok', message: `the RustSec advisory mirror was synced ${shown} days ago` };
+  if (release && days > 7) return { days, level: 'fail', message: `the RustSec advisory mirror has a newest commit ${shown} days old (the advisory database gets commits most days, so an old one means the mirror's sync fails) (a release run allows 7). ${next}` };
+  if (days > 2) return { days, level: 'warn', message: `the RustSec advisory mirror has a newest commit ${shown} days old (the advisory database gets commits most days, so an old one means the mirror's sync fails) (a warning above 2). ${next}` };
+  return { days, level: 'ok', message: `the RustSec advisory mirror's newest commit is ${shown} days old` };
 }
 
 export const lockHash = (text) => createHash('sha256').update(text).digest('hex');
@@ -142,7 +142,7 @@ async function main(argv, env = process.env) {
     try {
       const res = await fetch(MIRROR_API, { signal: AbortSignal.timeout(30000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      updated = (await res.json()).mirror_updated;
+      updated = (await res.json()).commit?.timestamp; // the newest commit, not the sync time: a sync that silently fails shows up
     } catch (err) {
       console.log(`::${release ? 'error' : 'warning'} title=advisory mirror::could not read the advisory mirror's last sync from ${MIRROR_API}: ${err.message}. Next: check that dev.decryptology.net is reachable and paddock-mirrors/advisory-db exists.`);
       return release ? 1 : 0;
@@ -158,5 +158,11 @@ async function main(argv, env = process.env) {
 }
 
 if (isMain(import.meta.url)) {
-  main(process.argv.slice(2)).then((c) => { process.exitCode = c; });
+  main(process.argv.slice(2)).then(
+    (c) => { process.exitCode = c; },
+    (err) => {
+      console.log(`::error title=live data::${err?.message ?? err}${err?.cause ? ` (${err.cause.code ?? err.cause.message})` : ''}. Next: check that dev.decryptology.net is reachable and BUILD_INPUTS_TOKEN / BUILD_INPUTS_WRITE_TOKEN are valid, then re-run.`);
+      process.exitCode = 1;
+    },
+  );
 }

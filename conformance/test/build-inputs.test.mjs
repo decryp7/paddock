@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -202,28 +202,136 @@ test('installTool rejects an archive whose hash is not the pin', async () => {
   await assert.rejects(installTool({ id: 'mytool', inventory: inv, binDir: join(tmp(), 'bin'), store: store.base, token: 't' }), /SHA-256 mismatch/);
 });
 
-test('dead_proxy_on is off unless asked, and then refuses a non-exempt fetch', () => {
-  assert.equal(sh('dead_proxy_on; echo "[${HTTPS_PROXY:-}]"').stdout.trim(), '[]');
-  const r = sh('dead_proxy_on; echo "$HTTPS_PROXY $NODE_USE_ENV_PROXY"', { PADDOCK_DEAD_PROXY: '1', PADDOCK_DEAD_PROXY_PROBE: 'https://nothing-should-resolve.example.invalid/' });
-  assert.equal(r.status, 0, r.stderr + r.stdout);
-  assert.match(r.stdout, /dead-proxy run: on/);
-  assert.match(r.stdout, /http:\/\/127\.0\.0\.1:9 1/);
-});
-
-test('the dead-proxy probe reports "check broken" when a non-exempt fetch gets through (ER-33)', async () => {
+const localServer = async () => {
   const server = createServer((req, res) => res.writeHead(200).end('ok'));
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  return { server, url: `http://127.0.0.1:${server.address().port}/` };
+};
+const shAsync = (script, env) =>
+  new Promise((resolve) => {
+    const p = spawn('bash', ['-c', `set -euo pipefail; here=${lib}; . ${lib}/tauri-build-lib.sh; ${script}`], { env: { PATH: process.env.PATH, ...env } });
+    let out = '';
+    p.stdout.on('data', (d) => (out += d));
+    p.stderr.on('data', (d) => (out += d));
+    p.on('close', (code) => resolve({ code, out }));
+  });
+
+test('dead_proxy_on is off unless asked', () => {
+  assert.equal(sh('dead_proxy_on; echo "[${HTTPS_PROXY:-}]"').stdout.trim(), '[]');
+});
+
+test('dead_proxy_on: a probe that is reachable directly and refused by the dead proxy (curl exit 7, Node ECONNREFUSED 127.0.0.1:9) passes', async () => {
+  const { server, url } = await localServer();
   try {
-    // 127.0.0.1 is exempt, so a probe on it is not refused: the check cannot see anything.
-    const r = await new Promise((resolve) => {
-      const p = spawn('bash', ['-c', `set -euo pipefail; here=${lib}; . ${lib}/tauri-build-lib.sh; dead_proxy_on`], { env: { PATH: process.env.PATH, PADDOCK_DEAD_PROXY: '1', PADDOCK_DEAD_PROXY_PROBE: `http://127.0.0.1:${server.address().port}/` } });
-      let out = '';
-      p.stdout.on('data', (d) => (out += d));
-      p.on('close', (code) => resolve({ code, out }));
-    });
+    // The default exempt list names 127.0.0.1, so the test narrows it: the local server is then a non-exempt host.
+    const r = await shAsync('dead_proxy_on; echo "$HTTPS_PROXY $NODE_USE_ENV_PROXY"', { PADDOCK_DEAD_PROXY: '1', PADDOCK_DEAD_PROXY_PROBE: url, PADDOCK_DEAD_PROXY_EXEMPT: 'dev.decryptology.net' });
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /dead-proxy run: on .*refused by 127\.0\.0\.1:9/);
+    assert.match(r.out, /http:\/\/127\.0\.0\.1:9 1/);
+  } finally {
+    server.close();
+  }
+});
+
+test('dead_proxy_on: a probe that gets through the proxy variables is "check broken" (ER-33)', async () => {
+  const { server, url } = await localServer();
+  try {
+    const r = await shAsync('dead_proxy_on', { PADDOCK_DEAD_PROXY: '1', PADDOCK_DEAD_PROXY_PROBE: url }); // 127.0.0.1 is exempt by default
     assert.equal(r.code, 1);
     assert.match(r.out, /::error title=dead-proxy run::check broken/);
   } finally {
     server.close();
   }
+});
+
+test('dead_proxy_on: a probe unreachable even without the proxy is "not measured", not a pass', async () => {
+  const r = await shAsync('dead_proxy_on', { PADDOCK_DEAD_PROXY: '1', PADDOCK_DEAD_PROXY_PROBE: 'http://127.0.0.1:1/', PADDOCK_DEAD_PROXY_EXEMPT: 'dev.decryptology.net' });
+  assert.equal(r.code, 1);
+  assert.match(r.out, /not measured: http:\/\/127\.0\.0\.1:1\/ is not reachable even without the proxy/);
+});
+
+test('dead_proxy_control: the Tauri control must fail naming a GitHub URL, else the check is broken', () => {
+  const ok = sh(`PADDOCK_DEAD_PROXY=1 dead_proxy_control bash -c 'echo Downloading https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64; exit 1'`);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, /Tauri's downloader was refused for https:\/\/github\.com\/tauri-apps/);
+  const succeeded = sh(`PADDOCK_DEAD_PROXY=1 dead_proxy_control true`);
+  assert.equal(succeeded.status, 1);
+  assert.match(succeeded.stdout, /check broken: the control build/);
+  const noUrl = sh(`PADDOCK_DEAD_PROXY=1 dead_proxy_control bash -c 'echo boom; exit 1'`);
+  assert.equal(noUrl.status, 1);
+  assert.match(noUrl.stdout, /named no GitHub download URL/);
+  assert.equal(sh('dead_proxy_control false').status, 0, 'off unless the dead-proxy run is on');
+});
+
+test('tauri_build fails a build that succeeded but downloaded something', () => {
+  const r = sh(`tauri_build bash -c 'echo Downloading https://github.com/x/y/z.AppImage; exit 0'`);
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /::error title=tauri build downloaded::.*https:\/\/github\.com\/x\/y\/z\.AppImage/);
+});
+
+test('PADDOCK_BUILD_INPUTS_SKIP is refused in CI', () => {
+  const r = sh('seed_build_inputs', { PADDOCK_BUILD_INPUTS_SKIP: '1', GITHUB_ACTIONS: 'true' });
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /::error title=build inputs::PADDOCK_BUILD_INPUTS_SKIP=1 is set in CI/);
+});
+
+// --- Windows NSIS seeding (ADR 0062 review P1-2): driven on any OS with the system tar, which reads zip archives.
+function nsisFixture(top = 'nsis-9.99') {
+  const src = tmp();
+  const base = join(src, top);
+  mkdirSync(join(base, 'Plugins', 'x86-unicode', 'additional'), { recursive: true });
+  writeFileSync(join(base, 'NSIS.exe'), 'nsis-exe');
+  writeFileSync(join(base, 'makensis.exe'), 'makensis');
+  const zip = join(src, 'nsis.zip');
+  assert.equal(spawnSync('zip', ['-qr', zip, top], { cwd: src }).status, 0);
+  const zipBytes = readFileSync(zip);
+  const dll = Buffer.from('verified-dll');
+  const inv = readInventory(
+    `format = 1\n[[input]]\nid = "nsis"\nversion = "9.99"\npackage = "nsis"\nfile = "nsis.zip"\n\n  [[input.platform]]\n  key = "windows-x86_64"\n  url = "https://example.invalid/z"\n  size = ${zipBytes.length}\n  sha256 = "${sha(zipBytes)}"\n\n[[input]]\nid = "nsis-tauri-utils"\nversion = "1"\npackage = "nsis-tauri-utils"\nfile = "nsis_tauri_utils.dll"\n\n  [[input.platform]]\n  key = "windows-x86_64"\n  url = "https://example.invalid/d"\n  size = ${dll.length}\n  sha256 = "${sha(dll)}"\n`,
+  );
+  return { inv, served: { 'nsis.zip': zipBytes, 'nsis_tauri_utils.dll': dll } };
+}
+const hasZip = spawnSync('zip', ['-v']).status === 0;
+
+test('NSIS: a folder Tauri filled (no marker) is replaced by the verified zip, whatever its top folder is called', { skip: !hasZip && 'needs zip' }, async () => {
+  const { inv, served } = nsisFixture();
+  const store = await fakeStore(served);
+  const local = tmp();
+  const nsis = join(local, 'tauri', 'NSIS');
+  mkdirSync(join(nsis, 'Plugins', 'x86-unicode', 'additional'), { recursive: true });
+  writeFileSync(join(nsis, 'NSIS.exe'), 'from-github');
+  writeFileSync(join(nsis, 'makensis.exe'), 'from-github');
+  const out = await seedTauri({ platform: 'win32', env: { LOCALAPPDATA: local }, inventory: inv, store: store.base, token: 't' });
+  assert.equal(readFileSync(join(nsis, 'NSIS.exe'), 'utf8'), 'nsis-exe');
+  assert.equal(readFileSync(join(nsis, 'Plugins', 'x86-unicode', 'additional', 'nsis_tauri_utils.dll'), 'utf8'), 'verified-dll');
+  assert.ok(existsSync(join(nsis, '.paddock-build-input')));
+  assert.equal(out.summary.length, 2);
+  assert.deepEqual(readdirSync(join(local, 'tauri')), ['NSIS'], 'no work or aside folders are left behind');
+});
+
+test('NSIS: a folder this reader built from the pinned files is kept, with no fetch', { skip: !hasZip && 'needs zip' }, async () => {
+  const { inv, served } = nsisFixture();
+  const store = await fakeStore(served);
+  const local = tmp();
+  await seedTauri({ platform: 'win32', env: { LOCALAPPDATA: local }, inventory: inv, store: store.base, token: 't' });
+  const before = store.seen.length;
+  const again = await seedTauri({ platform: 'win32', env: { LOCALAPPDATA: local }, inventory: inv, store: store.base, token: 't' });
+  assert.equal(store.seen.length, before);
+  assert.match(again.summary[0], /kept-folder/);
+});
+
+test('NSIS: a zip with more than one top folder is refused with a named error', { skip: !hasZip && 'needs zip' }, async () => {
+  const src = tmp();
+  mkdirSync(join(src, 'a'));
+  mkdirSync(join(src, 'b'));
+  writeFileSync(join(src, 'a', 'x'), '1');
+  writeFileSync(join(src, 'b', 'y'), '2');
+  const zip = join(src, 'two.zip');
+  spawnSync('zip', ['-qr', zip, 'a', 'b'], { cwd: src });
+  const bytes = readFileSync(zip);
+  const inv = readInventory(
+    `format = 1\n[[input]]\nid = "nsis"\nversion = "1"\npackage = "nsis"\nfile = "two.zip"\n\n  [[input.platform]]\n  key = "windows-x86_64"\n  url = "https://example.invalid/z"\n  size = ${bytes.length}\n  sha256 = "${sha(bytes)}"\n\n[[input]]\nid = "nsis-tauri-utils"\nversion = "1"\npackage = "u"\nfile = "u.dll"\n\n  [[input.platform]]\n  key = "windows-x86_64"\n  url = "https://example.invalid/d"\n  size = 1\n  sha256 = "${'0'.repeat(64)}"\n`,
+  );
+  const store = await fakeStore({ 'two.zip': bytes });
+  await assert.rejects(seedTauri({ platform: 'win32', env: { LOCALAPPDATA: tmp() }, inventory: inv, store: store.base, token: 't' }), /::error title=build input nsis::.*one top folder/);
 });

@@ -36,7 +36,7 @@ test('the advisory mirror: fresh is ok, over 2 days warns, over 7 days fails onl
   assert.equal(advisoryAge({ updated: ago(3), now: NOW, release: true }).level, 'warn');
   const old = advisoryAge({ updated: ago(8), now: NOW, release: true });
   assert.equal(old.level, 'fail');
-  assert.match(old.message, /8\.0 days ago.*allows 7.*Synchronize now/);
+  assert.match(old.message, /8\.0 days old.*allows 7.*Synchronize now/);
   assert.equal(advisoryAge({ updated: ago(8), now: NOW, release: false }).level, 'warn');
 });
 

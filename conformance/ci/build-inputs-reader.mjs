@@ -5,7 +5,7 @@
 // NSIS toolset. It never contacts a publisher; a miss is a named error (ER-27), not a fallback.
 //
 //   node conformance/ci/build-inputs-reader.mjs seed-tauri     prints `export NAME='value'` lines for `eval` (LDAI_RUNTIME_FILE) and
-//                                                       one summary line per input (stderr); appends to $GITHUB_ENV when set
+//                                                       one summary line per input (stderr)
 //   node conformance/ci/build-inputs-reader.mjs install-tool <id>   installs a prebuilt tool (git-cliff, ...) and prints `export PATH=...`
 //   node conformance/ci/build-inputs-reader.mjs scan <logfile> prints the last `Downloading https://...` URL of a failed build
 //
@@ -99,7 +99,7 @@ export async function ensureInput(e, platformKey, dest, { store = DEFAULT_STORE,
       throw fail(e, `could not get ${e.id} ${e.version} (${e.file}): the private store answered HTTP ${res.status} for ${e.package}/${e.version}; the token in BUILD_INPUTS_TOKEN is refused or lacks read:package. Next: replace the secret with a read-only token of an account that reads the paddock-build-inputs organisation.`);
     }
     if (res.status === 404) {
-      throw fail(e, `could not get ${e.id} ${e.version} (${e.file}): not in the kept folder, not in the image, the private store answered HTTP 404 for ${e.package}/${e.version}. Next: ${mirror}.`);
+      throw fail(e, `could not get ${e.id} ${e.version} (${e.file}): the private store answered HTTP 404 for ${e.package}/${e.version}. Next: ${mirror}.`);
     }
     if (!res.ok) {
       last = `the private store answered HTTP ${res.status} for ${e.package}/${e.version}`;
@@ -115,7 +115,9 @@ export async function ensureInput(e, platformKey, dest, { store = DEFAULT_STORE,
       throw fail(e, `${e.id} ${e.version} (${e.file}) SHA-256 mismatch: expected ${p.sha256}, got ${got}. Next: the stored file is not the pinned one; re-upload it from ${p.url} after checking it against build-inputs.toml.`);
     }
     mkdirSync(join(dest, '..'), { recursive: true });
-    writeFileSync(dest, bytes);
+    const part = `${dest}.part-${process.pid}`;
+    writeFileSync(part, bytes);
+    renameSync(part, dest);
     return { tier: 'private-store', bytes: bytes.length, ms: Date.now() - started };
   }
   throw fail(e, `could not get ${e.id} ${e.version} (${e.file}): ${last}, after 3 tries. Next: check that ${new URL(url).host} is reachable from this runner (the store is not a publisher; the dead-proxy run exempts it), then re-run this job.`);
@@ -126,6 +128,13 @@ export function tauriToolsDir({ platform = process.platform, env = process.env }
   if (platform === 'win32') return join(env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'tauri');
   if (platform === 'darwin') return join(env.HOME ?? homedir(), 'Library', 'Caches', 'tauri');
   return join(env.XDG_CACHE_HOME || join(env.HOME ?? homedir(), '.cache'), 'tauri');
+}
+
+/** Unpacks a zip with the system bsdtar (Windows 10+ and macOS read zips; Git Bash's GNU tar does not). */
+function extractZip(zipPath, into, e, env) {
+  const tar = process.platform === 'win32' ? join(env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
+  const x = spawnSync(tar, ['-xf', zipPath, '-C', into], { encoding: 'utf8' });
+  if (x.status !== 0) throw fail(e, `could not extract ${e.file}: ${tar} exited ${x.status}: ${(x.stderr ?? '').slice(-300)}. Next: check that tar.exe is in System32.`);
 }
 
 const byId = (inventory, id) => {
@@ -166,21 +175,48 @@ export async function seedTauri({ platform = process.platform, env = process.env
     const nsisDir = join(dir, 'NSIS');
     const zip = byId(inventory, 'nsis');
     const utils = byId(inventory, 'nsis-tauri-utils');
-    if (!(existsSync(join(nsisDir, 'NSIS.exe')) && existsSync(join(nsisDir, 'makensis.exe')))) {
-      const zipPath = join(dir, 'inputs', zip.file);
-      const r = await ensureInput(zip, 'windows-x86_64', zipPath, opts);
-      out.summary.push(line(zip, r));
-      rmSync(nsisDir, { recursive: true, force: true });
-      rmSync(join(dir, 'nsis-3.13'), { recursive: true, force: true });
-      // bsdtar (Windows 10+, macOS) reads zip archives; Git Bash's tar is GNU tar, so name the system one on Windows.
-      const tar = process.platform === 'win32' ? join(env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
-      const x = spawnSync(tar, ['-xf', zipPath, '-C', dir], { encoding: 'utf8' });
-      if (x.status !== 0) throw fail(zip, `could not extract ${zip.file}: ${tar} exited ${x.status}: ${(x.stderr ?? '').slice(-300)}. Next: check that tar.exe is in System32.`);
-      renameSync(join(dir, 'nsis-3.13'), nsisDir);
+    const zipPin = zip.platforms.find((x) => x.key === 'windows-x86_64')?.sha256;
+    const dllPin = utils.platforms.find((x) => x.key === 'windows-x86_64')?.sha256;
+    const marker = join(nsisDir, '.paddock-build-input');
+    const stamp = `nsis ${zip.version} ${zipPin}\nnsis-tauri-utils ${utils.version} ${dllPin}\n`;
+    // A folder this reader built from the pinned, verified files carries the marker and is kept (a concurrent job may be running
+    // makensis from it). Any other folder (Tauri's own, unverified, filled from GitHub) is replaced by a fresh one: extract into a
+    // new folder, add the verified DLL, then swap it in with renames. The old folder is renamed aside and removed, never edited.
+    if (existsSync(marker) && readFileSync(marker, 'utf8') === stamp) {
+      out.summary.push(`${zip.id} ${zip.version} kept-folder 0 bytes 0 ms`);
+      return out;
     }
-    const dll = join(nsisDir, 'Plugins', 'x86-unicode', 'additional', 'nsis_tauri_utils.dll');
-    const r = await ensureInput(utils, 'windows-x86_64', dll, opts);
-    out.summary.push(line(utils, r));
+    const work = join(dir, `NSIS.new-${process.pid}`);
+    rmSync(work, { recursive: true, force: true });
+    mkdirSync(work, { recursive: true });
+    const zipPath = join(work, zip.file);
+    const r = await ensureInput(zip, 'windows-x86_64', zipPath, opts);
+    out.summary.push(line(zip, r));
+    const unpacked = join(work, 'unpacked');
+    mkdirSync(unpacked);
+    extractZip(zipPath, unpacked, zip, env);
+    const tops = readdirSync(unpacked);
+    if (tops.length !== 1 || !statSync(join(unpacked, tops[0])).isDirectory()) {
+      throw fail(zip, `${zip.file} should hold one top folder, found: ${tops.join(', ') || 'nothing'}. Next: the pinned zip is not the one Tauri expects; re-read the entry.`);
+    }
+    const fresh = join(unpacked, tops[0]);
+    const dll = join(fresh, 'Plugins', 'x86-unicode', 'additional', 'nsis_tauri_utils.dll');
+    const d = await ensureInput(utils, 'windows-x86_64', dll, opts);
+    out.summary.push(line(utils, d));
+    for (const needed of ['NSIS.exe', 'makensis.exe']) {
+      if (!existsSync(join(fresh, needed))) throw fail(zip, `the unpacked ${zip.file} has no ${needed}. Next: the pinned zip is not the one Tauri expects.`);
+    }
+    writeFileSync(join(fresh, '.paddock-build-input'), stamp);
+    const aside = join(dir, `NSIS.old-${process.pid}`);
+    rmSync(aside, { recursive: true, force: true });
+    try {
+      if (existsSync(nsisDir)) renameSync(nsisDir, aside);
+      renameSync(fresh, nsisDir);
+    } catch (err) {
+      throw fail(zip, `could not swap the verified NSIS folder into ${nsisDir}: ${err.code ?? err.message}. Next: another job on this runner is probably running makensis from it; re-run when it has finished.`);
+    }
+    rmSync(aside, { recursive: true, force: true });
+    rmSync(work, { recursive: true, force: true });
   }
   return out;
 }
@@ -253,7 +289,7 @@ async function main(argv) {
     if (url) console.log(url);
     return url ? 0 : 1;
   }
-  console.error('usage: build-inputs-reader.mjs seed-tauri | scan <logfile>');
+  console.error('usage: build-inputs-reader.mjs seed-tauri | install-tool <id> | scan <logfile>');
   return 2;
 }
 

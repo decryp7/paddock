@@ -63,6 +63,8 @@ jobs:
     uses: ./.gitea/workflows/ci.yml
     with:
       app: pitcrew
+    secrets:
+      BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
   # Installers for a manual run: they need only the plan, never `gates`.
   # Gitea 28.2 skips a reusable-workflow job whose need was skipped, whatever its `if` says (125 of 133 green release runs

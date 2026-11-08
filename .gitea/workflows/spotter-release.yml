@@ -65,6 +65,8 @@ jobs:
       app: spotter
       # A manual run with gates is the "one CI build with bundles" before a tag: WebKit included, as the old bundles run was.
       webkit: ${{ github.event_name == 'workflow_dispatch' }}
+    secrets:
+      BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
   # Installers for a manual run: they need only the plan, never `gates`.
   # Gitea 28.2 skips a reusable-workflow job whose need was skipped, whatever its `if` says (125 of 133 green release runs
