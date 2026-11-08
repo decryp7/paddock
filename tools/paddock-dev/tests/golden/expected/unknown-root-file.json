@@ -4,6 +4,7 @@
  "ui": true,
  "eslint": true,
  "conformance": true,
+ "c99": true,
  "tools": true,
  "icons": true,
  "ciImage": true,
@@ -37,6 +38,9 @@
    "unknown root file Mystery"
   ],
   "app:z": [
+   "unknown root file Mystery"
+  ],
+  "c99": [
    "unknown root file Mystery"
   ],
   "ci-image": [

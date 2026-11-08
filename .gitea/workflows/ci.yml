@@ -55,6 +55,7 @@ jobs:
       ui: ${{ steps.plan.outputs.ui }}
       eslint: ${{ steps.plan.outputs.eslint }}
       conformance: ${{ steps.plan.outputs.conformance }}
+      c99: ${{ steps.plan.outputs.c99 }}
       tools: ${{ steps.plan.outputs.tools }}
       icons: ${{ steps.plan.outputs.icons }}
       paddock_dev: ${{ steps.plan.outputs.paddock_dev }}
@@ -254,8 +255,26 @@ jobs:
       # waiver (paddock.waivers.toml).
       - name: Paddock itself (applicable checks)
         working-directory: .
-        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C48,C53,C54,C56,C57,C59,C99 --strict C36
+        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C48,C53,C54,C56,C57,C59 --strict C36
 
+  # Conformance C99 (ADR 0057 §3, rule 72): no shipped process uses the macOS Keychain. Its own job, planned on its inputs
+  # (every Cargo.toml and Cargo.lock under apps/ and crates/, the scanned sources, capabilities, paddock.ci.json, the check's
+  # code; scripts/affected.mjs C99_INPUT), because it needs cargo and the registry (`cargo fetch`, `cargo tree` for both Apple
+  # triples) and the conformance job above does not. app-release.yml runs the same command before an app is released.
+  c99:
+    name: C99 (no Keychain in a macOS build)
+    needs: [plan]
+    if: ${{ needs.plan.outputs.c99 == 'true' }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    env:
+      RUSTC_WRAPPER: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: C99
+        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C99
 
   # The shared CI actions' scripts and the dev and host tools (plan X10, X47): every script runs in a scratch folder with a
   # PATH of shims, so no launchd, systemd, Docker or installed app is touched. New-app templates are covered by scripts/.

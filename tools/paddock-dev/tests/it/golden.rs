@@ -82,6 +82,15 @@ const SAMPLES: &[&[&str]] = &[
     &["conformance/ci/build-folder.sh"],
     &["conformance/src/util/is-main.mjs"],
     &[".gitignore", "crates/paddock-cli/CHANGELOG.md"],
+    // C99's inputs (ADR 0057 §3.4) plan the `c99` job; a docs-only change does not.
+    &["apps/debrief/Cargo.lock"],
+    &["apps/pitwall/crates/pitwall-server/Cargo.toml"],
+    &["apps/pitwall/crates/pitwall-server/src/lib.rs"],
+    &["crates/paddock-secrets/Cargo.toml"],
+    &["apps/dyno/app/src-tauri/capabilities/default.json"],
+    &["apps/pitwall/paddock.ci.json"],
+    &["conformance/src/checks/C99-no-keychain.mjs"],
+    &["diagrams/paddock.xml"],
 ];
 
 #[test]

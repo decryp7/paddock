@@ -4,6 +4,7 @@
  "ui": false,
  "eslint": false,
  "conformance": false,
+ "c99": true,
  "tools": false,
  "icons": false,
  "ciImage": false,
@@ -29,6 +30,9 @@
  "why": {
   "app:x": [
    "cargo apps/x/app/src-tauri reaches crates/a, crates/b"
+  ],
+  "c99": [
+   "C99 reads crates/Cargo.toml"
   ],
   "crates": [
    "crates/Cargo.toml"

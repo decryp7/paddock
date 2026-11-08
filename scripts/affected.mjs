@@ -100,6 +100,7 @@ export const CI_JOBS = {
   e2e: ['ui'],
   'e2e-webkit': ['ui'], // runs on push to main, tags and manual runs only, never on a pull request
   conformance: ['conformance'],
+  c99: ['c99'],
   tools: ['tools'],
   icons: ['icons'],
   'eslint-preset': ['eslint'],
@@ -302,6 +303,23 @@ const OWNERS = [
   [/^(renovate\/|renovate\.json$|CODEOWNERS$|AGENTS\.md$)/, ['tools']], // checked by scripts/affected.test.mjs
 ];
 
+/**
+ * What conformance C99 (no macOS Keychain in a shipped build, ADR 0057 §3.4) reads: every Cargo.toml and Cargo.lock under apps/
+ * and crates/ (the manifest scan and the macOS graph probe), the sources it scans (.rs .c .cc .cpp .m .mm .h .swift, and the
+ * .ts under app/src and ui/projects), the Tauri capability files, the paddock.ci.json files that name the workspaces to probe,
+ * the cargo registry configuration, the waivers and the check's own code. They run the dedicated `c99` job (ci.yml), not the
+ * conformance job; the release workflow runs it too (app-release.yml). Same as `C99_INPUT` in tools/paddock-dev/src/plan.rs.
+ */
+export const C99_INPUT = [
+  /^(apps|crates)\/(.+\/)?Cargo\.(toml|lock)$/,
+  /^(apps|crates)\/.+\.(rs|c|cc|cpp|m|mm|h|swift)$/,
+  /^(.+\/)?(app\/src|ui\/projects)\/.+\.ts$/,
+  /(^|\/)src-tauri\/capabilities\/[^/]+\.json$/,
+  /(^|\/)paddock\.ci\.json$/,
+  /^conformance\/(src|bin)\//,
+  /^(\.cargo\/config\.toml|paddock\.waivers\.toml)$/,
+];
+
 /** An app's `src-tauri/Cargo.toml` and `capabilities/`, which conformance C48 reads (the app itself is marked as their owner). */
 export const APP_CAPABILITY_INPUT = /^apps\/[^/]+\/(app\/)?src-tauri\/(Cargo\.toml|capabilities\/)/;
 
@@ -491,7 +509,7 @@ export function lockDiff(before, after) {
 
 // ------------------------------------------------------------------------------------------------------------- plan
 
-const PROJECTS = ['crates', 'ui', 'eslint', 'conformance', 'tools', 'icons', 'ci-image', 'paddock-dev'];
+const PROJECTS = ['crates', 'ui', 'eslint', 'conformance', 'tools', 'icons', 'ci-image', 'paddock-dev', 'c99'];
 
 /**
  * The [project, reason] pairs a changed `.gitea` file or shared script reaches, or null when that cannot be told (fail safe:
@@ -531,7 +549,7 @@ export function giteaTargets(f, gitea) {
 
 /**
  * The plan for a list of changed files. `graph` is { cargo, npm, apps } from the readers above; `all` selects everything.
- * Result: { all, crates, ui, eslint, conformance, tools, icons, ciImage, paddockDev, docs, apps: [name], kinds: { app: ['rust','ui'] },
+ * Result: { all, crates, ui, eslint, conformance, c99, tools, icons, ciImage, paddockDev, docs, apps: [name], kinds: { app: ['rust','ui'] },
  * packages: { workspace: [crate] } } and `why` with `explain`.
  */
 export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockAfter = null, all = false, explain = false, gitea = null, perMachine = () => false } = {}) {
@@ -577,6 +595,7 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
       continue;
     }
     if (META.some((r) => r.test(f))) continue;
+    if (C99_INPUT.some((r) => r.test(f))) mark('c99', `C99 reads ${f}`);
     if (f.startsWith('.gitea/')) {
       // Anything under .gitea runs the conformance checks over workflows and actions; the rest is narrowed per job or user.
       const hit = gitea ? giteaTargets(f, gitea) : null;
@@ -729,6 +748,7 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
     ui: set.has('ui'),
     eslint: set.has('eslint'),
     conformance: set.has('conformance'),
+    c99: set.has('c99'),
     tools: set.has('tools'),
     icons: set.has('icons'),
     ciImage: set.has('ci-image'),
@@ -845,6 +865,7 @@ export function onlyApp(plan, app) {
     ui: false,
     eslint: false,
     conformance: false,
+    c99: false,
     tools: false,
     icons: false,
     ciImage: false,
@@ -963,6 +984,7 @@ export function ciOutputs(plan, legs, base = null) {
     ui: plan.ui,
     eslint: plan.eslint,
     conformance: plan.conformance,
+    c99: plan.c99,
     tools: plan.tools,
     icons: plan.icons,
     paddock_dev: plan.paddockDev,
@@ -1000,7 +1022,7 @@ export function summary(plan, reason, legs) {
     '',
     '| Project | Runs |',
     '|---|---|',
-    ...['crates', 'ui', 'eslint', 'conformance', 'tools', 'paddockDev'].map((p) => `| ${p} | ${yes(plan[p])} |`),
+    ...['crates', 'ui', 'eslint', 'conformance', 'c99', 'tools', 'paddockDev'].map((p) => `| ${p} | ${yes(plan[p])} |`),
     ...legs.map((l) => `| app ${l.app}${l.os === LINUX ? '' : ` (${l.os})`} | ${l.e2e_leg ? `${l.e2e_leg.replace('-', ' ')}${l.e2e_shard ? ` ${l.e2e_shard}` : ''}` : [l.rust && 'rust', l.ui && 'ui'].filter(Boolean).join(' + ') || 'checks only'}${l.filter ? ` (\`${l.filter}\`)` : ''} |`),
   ];
   if (plan.docs && !legs.length && !plan.crates && !plan.ui) lines.push('', 'Docs only: nothing to build.');
