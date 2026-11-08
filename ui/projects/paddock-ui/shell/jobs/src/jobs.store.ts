@@ -127,18 +127,20 @@ export const JobsStore = signalStore(
       patchState(store, setLoaded());
     };
 
+    /** Reads the list (also the Retry of a failed load). Never notifies: these jobs did not just end. */
+    const load = async (): Promise<void> => {
+      patchState(store, setLoading());
+      try {
+        const jobs = await backend.snapshot();
+        // Merged in a sync step of its own: the state is read fresh there, not across the await (rule 29).
+        applyList(jobs);
+      } catch (e) {
+        patchState(store, setError(message(e)));
+      }
+    };
+
     return {
-      /** Reads the list (also the Retry of a failed load). Never notifies: these jobs did not just end. */
-      async load(): Promise<void> {
-        patchState(store, setLoading());
-        try {
-          const jobs = await backend.snapshot();
-          // Merged in a sync step of its own: the state is read fresh there, not across the await (rule 29).
-          applyList(jobs);
-        } catch (e) {
-          patchState(store, setError(message(e)));
-        }
-      },
+      load,
 
       /** Asks job `id` to stop; its events tell when it did. A failed request is a notice, not a thrown error. */
       async cancel(id: number): Promise<boolean> {
@@ -169,6 +171,9 @@ export const JobsStore = signalStore(
       /** A snapshot from the engine's event. A job that just ended is announced unless someone waits for it. */
       _receive(job: SuJobSnapshot): void {
         const before = store.jobs().find((j) => j.id === job.id);
+        // An event proves the link is back, but the list may lack jobs from before it: read it again. A list that still
+        // cannot be read keeps its error (`load` sets it again); `load` shows "loading", so events do not stack reads.
+        if (store.requestError() !== null) void load();
         if (!merge([job]).length) return;
         const waited = settle(job);
         const justEnded = !isActiveJob(job) && (!before || isActiveJob(before));
