@@ -517,6 +517,7 @@ mod names {
             Via::Parts,
             Via::Alias,
             Via::Prefix,
+            Via::Abbreviation,
             Via::Fuzzy,
         ];
         for w in ways {
@@ -531,6 +532,7 @@ mod names {
             (How::Parts, Via::Parts),
             (How::Prefix, Via::Prefix),
             (How::Alias, Via::Alias),
+            (How::Abbreviation, Via::Abbreviation),
             (How::Typo, Via::Fuzzy),
         ];
         for (h, v) in hows {

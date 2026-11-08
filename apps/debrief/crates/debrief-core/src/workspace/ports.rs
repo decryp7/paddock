@@ -172,6 +172,8 @@ impl Ingest for WorkspaceStore {
             deleted: r.deleted,
             held: Vec::new(),
             first_new: None,
+            notices: Vec::new(),
+            order_incomplete: false,
         })
     }
 }
@@ -281,6 +283,9 @@ impl Positions for WorkspaceStore {
         Err(unsupported("positions"))
     }
     fn positioned(&self) -> StoreResult<u64> {
+        Err(unsupported("positions"))
+    }
+    fn order_complete(&self) -> StoreResult<bool> {
         Err(unsupported("positions"))
     }
 }

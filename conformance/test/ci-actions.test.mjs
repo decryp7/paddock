@@ -86,7 +86,7 @@ test('the scripts the actions run are executable programs of this package', () =
 const workflows = readdirSync(WORKFLOWS).filter((f) => f.startsWith('app-') && f.endsWith('.yml')).sort();
 
 test('the reusable workflows are workflow_call workflows that use only actions, inputs and secrets that exist', () => {
-  assert.deepEqual(workflows, ['app-release.yml']);
+  assert.deepEqual(workflows, ['app-fuzz.yml', 'app-release.yml']);
   for (const w of workflows) {
     const text = read(join(WORKFLOWS, w));
     assert.match(text, /^on:\n {2}workflow_call:/m, `${w}: workflow_call`);
@@ -1853,4 +1853,16 @@ test('the plan job guard keeps CI green under the documented C100 rollback (--wa
   const gone = run('        run: echo nothing');
   assert.equal(gone.status, 1);
   assert.match(gone.stdout, /::error file=.*C100 is not wired/);
+});
+
+// libFuzzer writes the inputs it finds to the FIRST corpus folder; the cached folder must come first or the corpus never grows.
+// Two fuzz dirs with the same lock hash (or none) must not restore each other's caches: both keys name the fuzz dir.
+test('app-fuzz.yml writes new inputs to the cached corpus and keys its caches by fuzz dir', () => {
+  const text = read(join(WORKFLOWS, 'app-fuzz.yml'));
+  const run = text.match(/cargo fuzz run "\$target" (\S+) (\S+) --/);
+  assert.ok(run, 'the fuzz run step is found');
+  assert.equal(run[1], '"corpus/$target"', 'the first corpus folder is the cached one (libFuzzer writes new inputs there)');
+  const keys = [...text.matchAll(/^\s+(?:key|restore-keys): (.*)$/gm)].map((m) => m[1]);
+  assert.ok(keys.length >= 4, 'the build and corpus caches have keys and restore keys');
+  for (const k of keys) assert.match(k, /inputs\.fuzz-dir/, `cache key without the fuzz dir: ${k}`);
 });

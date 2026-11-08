@@ -19,6 +19,7 @@ fn state_machine_allows_the_documented_path_only() {
         JobState::Done,
         JobState::Failed {
             message: "x".into(),
+            limit: None,
         },
         JobState::Cancelled {
             reason: CancelReason::User,
@@ -48,7 +49,8 @@ fn state_machine_allows_the_documented_path_only() {
     assert!(
         JobState::Queued
             .transition(JobState::Failed {
-                message: String::new()
+                message: String::new(),
+                limit: None,
             })
             .is_err()
     );
@@ -103,6 +105,7 @@ fn snapshot_json_is_camel_case_and_round_trips() {
         JobState::Done,
         JobState::Failed {
             message: "m".into(),
+            limit: None,
         },
         JobState::Cancelled {
             reason: CancelReason::Deadline,

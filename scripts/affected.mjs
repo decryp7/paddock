@@ -1040,20 +1040,40 @@ export function ciOutputs(plan, legs, base = null) {
   };
 }
 
+const COMMIT_ID = /^[0-9a-f]{7,40}$/;
+const BRANCH = /^[A-Za-z0-9_][A-Za-z0-9._/-]*$/;
+const sha = (value, what) => {
+  if (value !== 'HEAD' && !COMMIT_ID.test(value)) throw new Error(`commit range: ${what} "${value}" is not a commit id (7 to 40 lower-case hex digits)`);
+  return value;
+};
+
 /**
- * The commits the commit lint checks, as a git revision range, or null to skip it. Only what a change adds is linted, so an
- * old bad commit never keeps main red: a pull request lints since its target branch, a push the commits it added
- * (`before..sha`; a new branch, an all-zero `before`, lints the head commit only), a manual run from the plan's base (the
- * head commit alone without one); `known(commit)` says whether a commit is in the clone. Tags and a call with an `app` (an app's tag gates, ER-15) and every other event skip it:
- * a release must not fail on an old commit's subject.
+ * The commits the commit lint checks, as `{ flags, range }` (git log options and one revision range, kept apart so no value is
+ * ever split into arguments), or null to skip it. Only what a change adds is linted, so an old bad commit never keeps main red:
+ * a pull request lints since its target branch, a push the commits it added (`before..sha`; a new branch, an all-zero `before`,
+ * lints the head commit only), a manual run from the plan's base (the head commit alone without one). On main a push lints only
+ * the first-parent commits (`--first-parent`: what main itself adds, the landing merge included; the commits a merge brought in
+ * from a branch were linted when the branch landed). `known(commit)` says whether a commit is in the clone. Tags and a call with
+ * an `app` (an app's tag gates, ER-15) and every other event skip it: a release must not fail on an old commit's subject.
+ * `before`, `sha` and `base` must be commit ids and `baseRef` a branch name: they come from the event and end up as git arguments.
  */
-export function commitLintRange({ event, ref = '', before = '', sha = 'HEAD', base = '', baseRef = '', app = '', known = () => true }) {
+export function commitLintRange({ event, ref = '', before = '', sha: head_ = 'HEAD', base = '', baseRef = '', app = '', known = () => true }) {
   if (app || ref.startsWith('refs/tags/')) return null;
-  const head = `${sha}^!`;
-  if (event === 'pull_request') return baseRef ? `origin/${baseRef}..HEAD` : null;
+  const tip = sha(head_, 'sha');
+  const head = { flags: [], range: `${tip}^!` };
+  if (event === 'pull_request') {
+    if (!baseRef) return null;
+    if (!BRANCH.test(baseRef)) throw new Error(`commit range: base ref "${baseRef}" is not a branch name`);
+    return { flags: [], range: `origin/${baseRef}..HEAD` };
+  }
   // A `before` missing from the history (after a force push) lints the head commit only.
-  if (event === 'push') return before && !/^0+$/.test(before) && known(before) ? `${before}..${sha}` : head;
-  if (event === 'workflow_dispatch') return base ? `${base}..${sha}` : head;
+  if (event === 'push') {
+    if (!before || /^0+$/.test(before)) return head;
+    sha(before, 'before');
+    if (!known(before)) return head;
+    return { flags: ref === 'refs/heads/main' ? ['--first-parent'] : [], range: `${before}..${tip}` };
+  }
+  if (event === 'workflow_dispatch') return base ? { flags: [], range: `${sha(base, 'base')}..${tip}` } : head;
   return null;
 }
 
@@ -1156,7 +1176,7 @@ export function parseArgs(args) {
 
 if (isMain(import.meta.url)) {
   try {
-    if (process.argv[2] === '--commit-range') {
+    if (process.argv[2] === '--commit-range' || process.argv[2] === '--commit-flags') {
       const e = process.env;
       const gitHas = (c) => {
         try {
@@ -1166,8 +1186,8 @@ if (isMain(import.meta.url)) {
           return false;
         }
       };
-      const range = commitLintRange({ event: e.EVENT, ref: e.REF, before: e.BEFORE, sha: e.SHA, base: e.PLAN_BASE, baseRef: e.BASE_REF, app: e.INPUT_APP, known: gitHas });
-      console.log(range ?? 'skip');
+      const r = commitLintRange({ event: e.EVENT, ref: e.REF, before: e.BEFORE, sha: e.SHA, base: e.PLAN_BASE, baseRef: e.BASE_REF, app: e.INPUT_APP, known: gitHas });
+      console.log(process.argv[2] === '--commit-flags' ? (r?.flags ?? []).join(' ') : r === null ? 'skip' : r.range);
       process.exit(0);
     }
     const { files, base, head, all, ci: isCi, app, explain } = parseArgs(process.argv.slice(2));

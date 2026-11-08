@@ -9,6 +9,7 @@ publish = ["decryp7"]
 
 [dependencies]
 paddock-jobs = { workspace = true }
+paddock-limits = { workspace = true }
 flate2 = "1.1"
 lzma-rs = "0.3"
 tar = { version = "0.4", default-features = false }
@@ -17,3 +18,4 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
 tempfile = "3"
+paddock-testkit = { workspace = true }

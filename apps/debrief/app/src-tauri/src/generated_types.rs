@@ -150,6 +150,7 @@ fn files() -> Vec<(&'static str, String)> {
                 FrameRef::decl(),
                 NoteRequest::decl(),
                 FramesRequest::decl(),
+                DescribePlan::decl(),
                 ExplainRangeRequest::decl(),
                 AddFrameRequest::decl(),
                 IncludeRequest::decl(),

@@ -386,9 +386,72 @@ jobs:
           path: .nightly-installers
           key: nightly-installers-${{ github.sha }}-${{ hashFiles('ci-image/**', 'rust-toolchain*', '.nvmrc') }}
 
+  # IP1 item 6 (plan 1.2): every shared crate's fuzz targets run for a bounded time each, through the reusable app-fuzz workflow
+  # (rule 55: one implementation of the fuzz run). A crash fails its job, uploads the reproducer and keeps the night from being
+  # marked green. Each crate's fuzz folder is its own workspace (`crates/<crate>/fuzz`).
+  fuzz-ipc:
+    name: fuzz (paddock-ipc)
+    needs: [gate]
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    uses: ./.gitea/workflows/app-fuzz.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      fuzz-dir: crates/paddock-ipc/fuzz
+      shards: '[{"shard":1,"targets":"frame plugin_request"}]'
+      seconds: "120"
+      timeout-minutes: 45
+
+  fuzz-plugin-package:
+    name: fuzz (paddock-plugin-package)
+    needs: [gate]
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    uses: ./.gitea/workflows/app-fuzz.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      fuzz-dir: crates/paddock-plugin-package/fuzz
+      shards: '[{"shard":1,"targets":"manifest package"}]'
+      seconds: "120"
+      timeout-minutes: 45
+
+  fuzz-view:
+    name: fuzz (paddock-view)
+    needs: [gate]
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    uses: ./.gitea/workflows/app-fuzz.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      fuzz-dir: crates/paddock-view/fuzz
+      shards: '[{"shard":1,"targets":"decode"}]'
+      seconds: "120"
+      timeout-minutes: 45
+
+  fuzz-archive:
+    name: fuzz (paddock-archive)
+    needs: [gate]
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    uses: ./.gitea/workflows/app-fuzz.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      fuzz-dir: crates/paddock-archive/fuzz
+      shards: '[{"shard":1,"targets":"archive"}]'
+      seconds: "120"
+      timeout-minutes: 45
+
+  fuzz-testplan:
+    name: fuzz (paddock-testplan)
+    needs: [gate]
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    uses: ./.gitea/workflows/app-fuzz.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      fuzz-dir: crates/paddock-testplan/fuzz
+      shards: '[{"shard":1,"targets":"formats"}]'
+      seconds: "120"
+      timeout-minutes: 45
+
   mark:
     name: mark the green nightly
-    needs: [ci, dialog-commands]
+    needs: [ci, dialog-commands, fuzz-ipc, fuzz-plugin-package, fuzz-view, fuzz-archive, fuzz-testplan]
     if: ${{ github.event_name == 'schedule' && success() }}
     runs-on: ubuntu-latest
     container:

@@ -182,7 +182,7 @@ pub fn run_job(peer: &BodyPeer<Message>, spec: dyno_core::jobs::JobSpec, within:
         };
         match all.iter().find(|s| s.id == job.id).map(|s| &s.state) {
             Some(WireState::Done) => break,
-            Some(WireState::Failed(message)) => return Err(message.clone()),
+            Some(WireState::Failed { message, .. }) => return Err(message.clone()),
             Some(WireState::Cancelled(_)) => return Err("The job was cancelled.".into()),
             Some(_) => {}
             None => return Err("The agent forgot the job.".into()),

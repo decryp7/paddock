@@ -1119,7 +1119,8 @@ mod tests {
         assert_eq!(
             failed.state,
             JobState::Failed {
-                message: "needs approval".into()
+                message: "needs approval".into(),
+                limit: None
             }
         );
     }
