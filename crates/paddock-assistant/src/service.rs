@@ -35,8 +35,12 @@ pub struct AssistantConfig {
     pub system: String,
     /// The limits of a turn.
     pub budgets: Budgets,
-    /// How much of the conversation the model reads, in characters.
+    /// How much of the conversation the model reads, in characters; `usize::MAX` sends the whole conversation (the model's
+    /// window then decides, and a question that would not fit is refused in words before it is sent).
     pub history_chars: usize,
+    /// About how many tokens an attachment takes in the prompt, for the context meter and the check before sending (the app
+    /// keeps the bytes, so it knows). The default counts none.
+    pub attachment_tokens: Arc<dyn Fn(&Attachment) -> u64 + Send + Sync>,
     /// Which tool calls wait for the user's choice; [`DefaultPolicy`] unless the app sets its own.
     pub policy: Arc<dyn ApprovalPolicy>,
 }
@@ -60,6 +64,7 @@ impl AssistantConfig {
             system: system.into(),
             budgets: Budgets::default(),
             history_chars: 12_000,
+            attachment_tokens: Arc::new(|_: &Attachment| 0),
             policy: Arc::new(DefaultPolicy),
         }
     }
@@ -254,14 +259,23 @@ impl Assistant {
         self.store.summaries()
     }
 
-    /// How full the model's context is for the conversation `id` (none, or one that does not exist: a new chat), for the
-    /// composer's meter (ADR 0023 WP-4b). After a turn of this session it is the engine's count of the last model call
-    /// (prompt plus answer); otherwise an estimate over the system prompt, every tool offered (an action's definition is
-    /// sent once the user may allow it) and the history the model would read.
-    pub fn context(&self, id: Option<&str>) -> ContextUse {
-        let limit = self.provider.context_length() as u64;
+    /// How full the model's context is for the conversation `id` (none, or one that does not exist: a new chat) with the
+    /// `pending` attachments of the next question, for the composer's meter (ADR 0023 WP-4b). After a turn of this session it
+    /// is the engine's count of the last model call (prompt plus answer); otherwise an estimate over the system prompt, every
+    /// tool offered (an action's definition is sent once the user may allow it), the history the model would read and its
+    /// attachments ([`AssistantConfig::attachment_tokens`]). Pending attachments are added either way. The room is the model's
+    /// window less the answer's reserve ([`Budgets::max_answer_tokens`]).
+    pub fn context(&self, id: Option<&str>, pending: &[Attachment]) -> ContextUse {
+        let window = self.provider.context_length() as u64;
+        let reserve = self.cfg.budgets.max_answer_tokens as u64;
+        let files = |list: &[Attachment]| -> u64 {
+            list.iter()
+                .map(|a| (self.cfg.attachment_tokens)(a))
+                .fold(0u64, u64::saturating_add)
+        };
+        let waiting = files(pending);
         if let Some(used) = id.and_then(|id| lock(&self.measured).get(id).copied()) {
-            return ContextUse::new(used, limit, true);
+            return ContextUse::new(used.saturating_add(waiting), window, reserve, true);
         }
         let tools: usize = self
             .tools()
@@ -271,15 +285,59 @@ impl Assistant {
                 t.name.len() + t.description.chars().count() + t.input_schema.to_string().len()
             })
             .sum();
-        let history: usize = id.map_or(0, |id| {
-            self.store
-                .history(id, self.cfg.history_chars)
-                .iter()
-                .map(|m| m.content.chars().count())
-                .sum()
+        let history = id.map_or_else(Vec::new, |id| {
+            self.store.history(id, self.cfg.history_chars)
         });
-        let chars = self.cfg.system.chars().count() + tools + history;
-        ContextUse::new(estimate_tokens(chars), limit, false)
+        let chars: usize = history.iter().map(|m| m.content.chars().count()).sum();
+        let attached: u64 = history
+            .iter()
+            .map(|m| files(&m.attachments))
+            .fold(0, u64::saturating_add);
+        let text = estimate_tokens(self.cfg.system.chars().count() + tools + chars);
+        ContextUse::new(
+            text.saturating_add(attached).saturating_add(waiting),
+            window,
+            reserve,
+            false,
+        )
+    }
+
+    /// Refuses a question that would not fit the model's window with its answer's reserve, in words, before anything is kept
+    /// or sent (user decision 2026-11-08: the whole chat is sent and nothing is dropped silently).
+    fn check_fits(
+        &self,
+        req: &SendRequest,
+        text: &str,
+        context: &[ContextItem],
+    ) -> Result<(), AssistantError> {
+        let id = req
+            .conversation_id
+            .as_deref()
+            .filter(|id| self.store.get(id).is_some());
+        let used = self.context(id, &req.attachments);
+        let question = estimate_tokens(
+            text.chars().count()
+                + context
+                    .iter()
+                    .map(|c| c.text.chars().count())
+                    .sum::<usize>(),
+        );
+        if used.fits(question) {
+            return Ok(());
+        }
+        let need = used.used_tokens.saturating_add(question);
+        let room = used.limit_tokens;
+        Err(AssistantError::Invalid(if id.is_some() {
+            format!(
+                "This chat is too long for the model: it needs about {need} tokens and {room} fit (the rest is kept for the \
+                 answer). Start a new chat to go on."
+            )
+        } else {
+            format!(
+                "This question and its files are too long for the model: about {need} tokens and {room} fit (the rest is kept \
+                 for the answer). Remove a file or shorten the question."
+            )
+        }))
     }
 
     fn remember_measure(&self, id: &str, used: Option<u64>) {
@@ -397,6 +455,7 @@ impl Assistant {
         sink: Arc<dyn EventSink>,
     ) -> Result<SendAck, AssistantError> {
         let (text, context) = Self::check(&req)?;
+        self.check_fits(&req, &text, &context)?;
         // A store that does not make room by itself says so before anything is kept (nothing is dropped silently).
         self.store
             .admits(req.conversation_id.as_deref(), req.save)

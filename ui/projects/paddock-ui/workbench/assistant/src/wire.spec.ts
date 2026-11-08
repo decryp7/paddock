@@ -16,7 +16,7 @@ describe('the wire', () => {
   });
 
   it('reads the context meter and refuses anything else (ADR 0023 WP-4b)', () => {
-    const good = { usedTokens: 1200, limitTokens: 8192, exact: true, level: 'ok' };
+    const good = { usedTokens: 1200, limitTokens: 7168, reserveTokens: 1024, exact: true, level: 'ok' };
     expect(parseContext(good)).toEqual(good);
     for (const bad of [null, 'x', {}, { ...good, usedTokens: '1' }, { ...good, level: 'huge' }, { ...good, exact: 1 }, { ...good, limitTokens: -1 }]) {
       expect(parseContext(bad)).toBeNull();

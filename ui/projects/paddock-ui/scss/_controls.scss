@@ -64,10 +64,11 @@
     background: var(--pd-accent-fill-hover);
   }
 
-  // Disabled drops the fill (outline + subtle text), so it never looks like an enabled grey primary (review X50 P2-12).
+  // Disabled drops the fill (outline + subtle text), so it never looks like an enabled grey primary (review X50 P2-12); its
+  // outline is the faint border-strong, not the control border of an enabled secondary button (WP-4b review P2-19).
   &:disabled,
   &[aria-disabled='true'] {
-    border-color: var(--pd-border-control);
+    border-color: var(--pd-border-strong);
     background: transparent;
     color: var(--pd-text-subtle);
     opacity: 1;

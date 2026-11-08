@@ -68,9 +68,9 @@ const LEVELS = new Set(['unknown', 'ok', 'high', 'full']);
 
 /** The context meter as the engine sends it, or `null`. */
 export function parseContext(raw: unknown): ContextUse | null {
-  if (!isObject(raw) || !isNumber(raw['usedTokens']) || !isNumber(raw['limitTokens']) || typeof raw['exact'] !== 'boolean') return null;
-  if (raw['usedTokens'] < 0 || raw['limitTokens'] < 0 || !isString(raw['level']) || !LEVELS.has(raw['level'])) return null;
-  return { usedTokens: raw['usedTokens'], limitTokens: raw['limitTokens'], exact: raw['exact'], level: raw['level'] as ContextUse['level'] };
+  if (!isObject(raw) || !isNumber(raw['usedTokens']) || !isNumber(raw['limitTokens']) || !isNumber(raw['reserveTokens']) || typeof raw['exact'] !== 'boolean') return null;
+  if (raw['usedTokens'] < 0 || raw['limitTokens'] < 0 || raw['reserveTokens'] < 0 || !isString(raw['level']) || !LEVELS.has(raw['level'])) return null;
+  return { usedTokens: raw['usedTokens'], limitTokens: raw['limitTokens'], reserveTokens: raw['reserveTokens'], exact: raw['exact'], level: raw['level'] as ContextUse['level'] };
 }
 
 /** The sentence for a failed command: the engine's `CommandError.message`, else the fallback. */

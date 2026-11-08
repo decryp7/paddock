@@ -281,7 +281,8 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
 - **Toolbars**: 44 px, ghost buttons by default (no border until hover), one primary (filled accent) at the far right,
   groups separated by a 1 px divider, segmented controls for 2-4 mutually exclusive options (time range).
 - **Buttons**: primary (accent fill), secondary (surface-2 + border-strong), ghost, danger (danger fill only in
-  confirmation dialogs). Height is `--pd-button-height`: 32 px in Standard and Comfortable, 28 px Compact (taller than an unlabelled field, `--pd-control-height` 28/32/24; `.pd-field-row` centres a row that mixes them). Max one primary per view region.
+  confirmation dialogs). Disabled: a primary drops its fill and keeps a faint `border-strong` outline with subtle text, so it
+  never reads as an enabled secondary; other buttons fade to half opacity; the cursor is `not-allowed`. Height is `--pd-button-height`: 32 px in Standard and Comfortable, 28 px Compact (taller than an unlabelled field, `--pd-control-height` 28/32/24; `.pd-field-row` centres a row that mixes them). Max one primary per view region.
 - **Popovers/menus**: surface-3, radius 10, shadow-2, 4 px padding, items 28 px radius 6, shortcut right-aligned
   muted, CDK menu for focus management, 120 ms fade+4 px translate.
 - **Tray popups**: 360 px wide; header (icon, name, one status pill), the widget area (the user's layout of widgets, below),

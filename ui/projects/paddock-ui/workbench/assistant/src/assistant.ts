@@ -201,14 +201,18 @@ const SCROLL_STICK_PX = 24;
     }
 
     @if (store.failure(); as failure) {
-      <p class="error" role="alert" data-testid="assistant-failure">{{ failure }} <button type="button" class="pd-btn pd-btn--ghost pd-btn--sm" (click)="store.dismissFailure()">{{ t.dismiss }}</button></p>
+      <div class="banner error" role="alert" data-testid="assistant-failure">
+        <pd-status-glyph class="banner-glyph" status="error" [size]="16" />
+        <span class="banner-text" data-testid="assistant-failure-text">{{ failure }}</span>
+        <button type="button" class="pd-btn pd-btn--sm" data-testid="assistant-failure-dismiss" (click)="store.dismissFailure()">{{ t.dismiss }}</button>
+      </div>
     }
 
     @if (store.context()?.level === 'full') {
-      <div class="ctx-full" role="status" data-testid="assistant-context-full">
-        <pd-status-glyph status="warning" [size]="14" />
-        <span>{{ t.contextFull }}</span>
-        <button type="button" class="pd-btn pd-btn--sm" data-testid="assistant-context-new" [disabled]="store.busy()" (click)="store.newConversation()">{{ t.newChat }}</button>
+      <div class="banner full" role="status" data-testid="assistant-context-full">
+        <pd-status-glyph class="banner-glyph" status="error" [size]="16" />
+        <span class="banner-text">{{ t.contextFull }}</span>
+        <button type="button" class="pd-btn pd-btn--sm" data-testid="assistant-context-new" [disabled]="store.busy()" (click)="store.newConversation()">{{ t.startNewChat }}</button>
       </div>
     }
 
@@ -225,7 +229,7 @@ const SCROLL_STICK_PX = 24;
         <p class="drop-hint" aria-hidden="true">{{ t.dropHere }}</p>
       }
       @if (store.attached().length || store.attaching()) {
-        <ul class="chips" [attr.aria-label]="t.files" data-testid="assistant-files">
+        <ul class="chips files-tray" [attr.aria-label]="t.files" data-testid="assistant-files">
           @for (chip of store.attached(); track chip.attachment.sha256) {
             <li class="chip file" data-testid="assistant-file" [attr.title]="chipTitle(chip)">
               <pd-glyph [name]="glyphOf(chip.attachment)" [size]="14" />
@@ -234,7 +238,7 @@ const SCROLL_STICK_PX = 24;
                 <span class="chip-detail">{{ chip.detail }}</span>
               }
               <button type="button" class="chip-x" data-testid="assistant-file-remove" [attr.aria-label]="removeLabel(chip.label)" [attr.title]="t.removeFile" (click)="detach(chip)">
-                <pd-glyph name="close" [size]="12" />
+                <pd-glyph name="close" [size]="14" />
               </button>
             </li>
           }
@@ -302,9 +306,23 @@ const SCROLL_STICK_PX = 24;
           }
           @default {
             @if (store.context(); as used) {
-              <span class="ctx" [attr.data-level]="used.level" data-testid="assistant-context" [attr.title]="meterTitle(used)">
+              <span
+                class="ctx"
+                [attr.data-level]="used.level"
+                data-testid="assistant-context"
+                [attr.title]="meterTitle(used)"
+                [attr.role]="used.limitTokens > 0 ? 'meter' : null"
+                [attr.aria-label]="used.limitTokens > 0 ? t.contextUsed : null"
+                [attr.aria-valuemin]="used.limitTokens > 0 ? 0 : null"
+                [attr.aria-valuemax]="used.limitTokens > 0 ? used.limitTokens : null"
+                [attr.aria-valuenow]="used.limitTokens > 0 ? used.usedTokens : null"
+                [attr.aria-valuetext]="used.limitTokens > 0 ? meterSpoken(used) : null"
+              >
                 @if (used.limitTokens > 0) {
                   <span class="ctx-bar" aria-hidden="true"><span class="ctx-fill" [style.width.%]="fillPercent(used)"></span></span>
+                }
+                @if (used.level === 'high' || used.level === 'full') {
+                  <pd-status-glyph class="ctx-glyph" [status]="used.level === 'full' ? 'error' : 'warning'" [size]="14" />
                 }
                 <span class="ctx-text">{{ meterText(used) }}</span>
               </span>
@@ -323,7 +341,7 @@ const SCROLL_STICK_PX = 24;
             <pd-glyph name="stop" [size]="14" /> {{ t.stop }}
           </button>
         } @else {
-          <button type="submit" class="pd-btn" [class.pd-btn--primary]="!blocked()" data-testid="assistant-send" [disabled]="!store.canSend() || blocked()">
+          <button type="submit" class="pd-btn" [class.pd-btn--primary]="!blocked()" data-testid="assistant-send" [disabled]="!store.canSend() || blocked()" [attr.title]="store.full() ? t.contextFull : null">
             <pd-glyph name="play" [size]="14" /> {{ t.send }}
           </button>
         }
@@ -371,7 +389,10 @@ const SCROLL_STICK_PX = 24;
     .attached, .chips { list-style: none; margin: var(--pd-space-1) 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--pd-space-1); }
     .answer { display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; }
     .note { margin: 0; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
-    .error { margin: 0; color: var(--pd-danger); overflow-wrap: anywhere; padding: 0 var(--pd-space-3); }
+    .banner { display: flex; align-items: center; gap: var(--pd-space-2); margin: 0 var(--pd-space-3) var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-3); border: 1px solid var(--pd-danger); background: var(--pd-danger-tint); border-radius: var(--pd-radius-card); }
+    .banner-glyph { flex: none; color: var(--pd-danger); }
+    .banner-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .banner .pd-btn { flex: none; }
     .pulse { display: inline-flex; gap: 3px; align-items: center; height: 14px; }
     .pulse i { width: 5px; height: 5px; border-radius: 50%; background: var(--pd-text-muted); animation: pd-pulse 1.2s ease-in-out infinite; }
     .pulse i:nth-child(2) { animation-delay: 0.2s; }
@@ -403,31 +424,35 @@ const SCROLL_STICK_PX = 24;
     .send-row { display: flex; align-items: center; gap: var(--pd-space-2); flex-wrap: wrap; }
     .allow { display: inline-flex; align-items: center; gap: var(--pd-space-1); font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     .chip.file { cursor: default; padding-right: 2px; }
+    /* Many files wrap into rows; past about three rows the tray scrolls, so the question box and the log keep their room. */
+    .files-tray { max-height: 92px; overflow-y: auto; padding-block: 1px; }
     .chip.static.file { padding-right: var(--pd-space-2); }
     .chip-detail { color: var(--pd-text-muted); white-space: nowrap; }
-    .chip-x { all: unset; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: var(--pd-radius-pill); color: var(--pd-text-muted); cursor: pointer; }
+    .chip-x { all: unset; display: inline-grid; place-items: center; width: 24px; height: 24px; margin-block: -1px; border-radius: var(--pd-radius-pill); color: var(--pd-text-muted); cursor: pointer; }
     .chip-x:hover { background: var(--pd-hover); color: var(--pd-text); }
     .chip-x:focus-visible { outline: 2px solid var(--pd-focus-ring); }
     .chip.busy { color: var(--pd-text-muted); gap: var(--pd-space-2); }
     .composer { position: relative; }
-    .composer.dropping { background: var(--pd-accent-tint); box-shadow: inset 0 0 0 2px var(--pd-accent); }
+    .composer.dropping { background: var(--pd-accent-tint); box-shadow: inset 0 0 0 2px var(--pd-accent); border-radius: inherit; }
     .drop-hint { position: absolute; inset: 0; margin: 0; display: grid; place-items: center; color: var(--pd-accent); font-weight: var(--pd-weight-semibold); pointer-events: none; z-index: 1; }
     .composer.dropping > :not(.drop-hint) { opacity: 0.25; }
     .compose-btn { min-width: 28px; padding-inline: var(--pd-space-1); }
-    .mic.recording { color: var(--pd-danger); }
+    /* Pressed while recording (a red tint, unlike a hover); back to a plain ghost button the moment recording stops. */
+    .mic.recording, .mic.recording:hover { color: var(--pd-danger); background: var(--pd-danger-tint); }
     .speech { display: inline-flex; align-items: center; gap: var(--pd-space-2); font-size: var(--pd-text-label); color: var(--pd-text-muted); font-variant-numeric: tabular-nums; }
     .speech.rec { color: var(--pd-text); }
     .rec-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pd-danger); animation: pd-pulse 1.2s ease-in-out infinite; }
     .ctx { display: inline-flex; align-items: center; gap: var(--pd-space-2); min-width: 0; font-size: var(--pd-text-label); color: var(--pd-text-muted); font-variant-numeric: tabular-nums; }
     .ctx-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .ctx-bar { flex: none; width: 48px; height: 4px; border-radius: 2px; background: var(--pd-hairline); overflow: hidden; }
+    .ctx-bar { flex: none; width: 48px; height: 4px; border-radius: 2px; background: var(--pd-border-strong); overflow: hidden; }
     .ctx-fill { display: block; height: 100%; background: var(--pd-text-muted); border-radius: inherit; }
     .ctx[data-level='high'] { color: var(--pd-text); }
     .ctx[data-level='high'] .ctx-fill { background: var(--pd-warning); }
     .ctx[data-level='full'] { color: var(--pd-danger); }
     .ctx[data-level='full'] .ctx-fill { background: var(--pd-danger); }
-    .ctx-full { display: flex; align-items: center; gap: var(--pd-space-2); margin: 0 var(--pd-space-3); padding: var(--pd-space-2) var(--pd-space-3); border: 1px solid var(--pd-warning); background: var(--pd-warning-tint); border-radius: var(--pd-radius-card); }
-    .ctx-full span { flex: 1; min-width: 0; }
+    .ctx-glyph { flex: none; }
+    .ctx[data-level='high'] .ctx-glyph { color: var(--pd-warning); }
+    .ctx[data-level='full'] .ctx-glyph { color: var(--pd-danger); }
     @media (prefers-reduced-motion: reduce) { .rec-dot { animation: none; } }
     @container (max-width: 360px) { .log { padding: var(--pd-space-2); } .user { max-width: 100%; } }
   `,
@@ -525,7 +550,10 @@ export class PdAssistant {
     micHint: $localize`:@@pd.wb.assistant.mic.hint:Speak your question (press again to stop; Escape cancels)`,
     micStop: $localize`:@@pd.wb.assistant.mic.stop:Stop recording`,
     transcribing: $localize`:@@pd.wb.assistant.transcribing:Writing down what you said…`,
-    contextFull: $localize`:@@pd.wb.assistant.context.full-note:This chat fills what the model can read. Start a new chat to go on.`,
+    contextFull: $localize`:@@pd.wb.assistant.context.full-note:This chat fills what the model can read.`,
+    closeToLimit: $localize`:@@pd.wb.assistant.context.close:close to the limit`,
+    startNewChat: $localize`:@@pd.wb.assistant.context.start-new:Start a new chat`,
+    contextUsed: $localize`:@@pd.wb.assistant.context.label:Context used`,
   };
 
   /** The user is at (within 24 px of) the bottom of the log: new text keeps it there. */
@@ -808,18 +836,35 @@ export class PdAssistant {
     return used.limitTokens > 0 ? Math.min(100, (used.usedTokens / used.limitTokens) * 100) : 0;
   }
 
-  /** The meter's words: the engine's count (or "about" for its estimate) out of the model's window. */
-  protected meterText(used: ContextUse): string {
+  /** The count: the engine's own (or "about" for its estimate) out of the room the conversation has. */
+  private count(used: ContextUse): string {
     const n = this.tokens(used.usedTokens);
     if (used.limitTokens <= 0) return used.exact ? $localize`:@@pd.wb.assistant.context.tokens:${n}:n: tokens` : $localize`:@@pd.wb.assistant.context.about-tokens:About ${n}:n: tokens`;
     const of = this.tokens(used.limitTokens);
     return used.exact ? $localize`:@@pd.wb.assistant.context.of:${n}:n: of ${of}:of: tokens` : $localize`:@@pd.wb.assistant.context.about-of:About ${n}:n: of ${of}:of: tokens`;
   }
 
+  /** The meter's words, its level included (never colour alone): "6.9k of 7.2k tokens · close to the limit", "Full: …". */
+  protected meterText(used: ContextUse): string {
+    if (used.level === 'full') {
+      const of = this.tokens(used.limitTokens);
+      const over = used.usedTokens - used.limitTokens;
+      return over > 0 ? $localize`:@@pd.wb.assistant.context.over:Full: over by ${this.tokens(over)}:over: of ${of}:of: tokens` : $localize`:@@pd.wb.assistant.context.full:Full: ${of}:n: of ${of}:of: tokens`;
+    }
+    if (used.level === 'high') return `${this.count(used)} · ${this.t.closeToLimit}`;
+    return this.count(used);
+  }
+
+  /** What a screen reader says for the meter: the same words, with a comma for the dot. */
+  protected meterSpoken(used: ContextUse): string {
+    return this.meterText(used).replace(' · ', ', ');
+  }
+
   /** The meter's tooltip: what the count is, and what its level means. */
   protected meterTitle(used: ContextUse): string {
     const base = $localize`:@@pd.wb.assistant.context.title:What the next question carries before its own text: the conversation the model reads and the tools' definitions.`;
     if (used.level === 'high') return `${base} ${$localize`:@@pd.wb.assistant.context.high:Close to what the model can read.`}`;
+    if (used.reserveTokens > 0) return `${base} ${$localize`:@@pd.wb.assistant.context.reserve:${this.tokens(used.reserveTokens)}:n: more are kept for the answer.`}`;
     if (used.level === 'full') return `${base} ${this.t.contextFull}`;
     return base;
   }

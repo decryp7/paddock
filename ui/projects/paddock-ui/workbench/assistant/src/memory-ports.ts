@@ -1,3 +1,4 @@
+import type { Attachment } from '../generated/assistant';
 import type { Unlisten } from './backend';
 import { AssistantAttachments, AssistantSpeech, type AttachmentChip, type AttachRules, type AttachSource, type SpeechState } from './composer-ports';
 
@@ -18,6 +19,8 @@ export class MemoryAssistantAttachments extends AssistantAttachments {
   private open: (() => void) | null = null;
   /** Every file handed over, by name. */
   readonly added: string[] = [];
+  /** Every file taken off a question, by name. */
+  readonly removed: string[] = [];
 
   constructor(private readonly limits: Partial<AttachRules> = {}) {
     super();
@@ -34,6 +37,11 @@ export class MemoryAssistantAttachments extends AssistantAttachments {
 
   rules(): Promise<AttachRules> {
     return Promise.resolve({ maxFileBytes: 256 * 1024, maxCount: 16, accept: '.txt,.md,.rs,.ts,.json,text/*', hint: 'Attach text or code files (UTF-8, up to 256 KiB each)', ...this.limits });
+  }
+
+  override remove(attachment: Attachment): Promise<void> {
+    this.removed.push(attachment.kind === 'file' ? attachment.name : attachment.sha256);
+    return Promise.resolve();
   }
 
   async add(file: AttachSource): Promise<AttachmentChip> {
@@ -56,6 +64,8 @@ export class MemoryAssistantSpeech extends AssistantSpeech {
   private readonly listeners = new Set<(s: SpeechState) => void>();
   private state: SpeechState = { kind: 'idle' };
   private failure: string | null = null;
+  private gate: Promise<void> | null = null;
+  private open: (() => void) | null = null;
 
   constructor(private transcript = 'How busy is this computer right now?') {
     super();
@@ -81,6 +91,16 @@ export class MemoryAssistantSpeech extends AssistantSpeech {
     if (this.state.kind === 'recording') this.set({ kind: 'recording', elapsedMs: this.state.elapsedMs + ms });
   }
 
+  /** Keeps the next `finish` transcribing until `release()` (so a test or a screenshot can see "Writing down…"). */
+  hold(): void {
+    this.gate = new Promise((resolve) => (this.open = resolve));
+  }
+
+  release(): void {
+    this.open?.();
+    this.gate = null;
+  }
+
   /** What the next `finish` hears. */
   hear(transcript: string): void {
     this.transcript = transcript;
@@ -99,7 +119,7 @@ export class MemoryAssistantSpeech extends AssistantSpeech {
 
   async finish(): Promise<string> {
     this.set({ kind: 'transcribing' });
-    await Promise.resolve();
+    await (this.gate ?? Promise.resolve());
     this.set({ kind: 'idle' });
     return this.transcript;
   }

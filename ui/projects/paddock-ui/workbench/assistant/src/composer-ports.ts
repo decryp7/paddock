@@ -45,6 +45,11 @@ export abstract class AssistantAttachments {
   abstract rules(): Promise<AttachRules>;
   /** Hands one file to the engine; resolves with its chip or rejects with the engine's words. */
   abstract add(file: AttachSource): Promise<AttachmentChip>;
+  /** The user took a file off the question before sending it: the engine may forget it (default: nothing to do). */
+  remove(attachment: Attachment): Promise<void> {
+    void attachment;
+    return Promise.resolve();
+  }
   /** The chip of an attachment a stored question carries (for a reopened conversation); a host may say more. */
   chipOf(attachment: Attachment): AttachmentChip {
     return attachmentChip(attachment);

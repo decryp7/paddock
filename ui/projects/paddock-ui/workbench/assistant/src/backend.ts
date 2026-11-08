@@ -5,6 +5,7 @@ import {
   type ApprovalChoice,
   type AssistantEvent,
   type AssistantInfo,
+  type Attachment,
   type ContextUse,
   type Conversation,
   type ConversationSummary,
@@ -48,11 +49,12 @@ export abstract class AssistantBackend {
   /** Every event until the returned function is called. */
   abstract listen(handler: (event: Envelope) => void): Promise<Unlisten>;
   /**
-   * How full the model's context is for a conversation (`null`: a new one), as the engine measures it (ADR 0023 WP-4b, the
-   * composer's meter). `null` when this backend does not measure: the pane then shows no meter.
+   * How full the model's context is for a conversation (`null`: a new one) with the files waiting in the composer, as the
+   * engine measures it (ADR 0023 WP-4b, the composer's meter). `null` when this backend does not measure: no meter then.
    */
-  context(id: string | null): Promise<ContextUse | null> {
+  context(id: string | null, attachments: readonly Attachment[] = []): Promise<ContextUse | null> {
     void id;
+    void attachments;
     return Promise.resolve(null);
   }
 }
@@ -97,8 +99,8 @@ export class TauriAssistantBackend extends AssistantBackend {
     await this.ipc.invoke<unknown>('assistant_approve_tool', { conversationId: id, callId, choice });
   }
 
-  override async context(id: string | null): Promise<ContextUse | null> {
-    return parseContext(await this.ipc.invoke<unknown>('assistant_context', { conversationId: id }));
+  override async context(id: string | null, attachments: readonly Attachment[] = []): Promise<ContextUse | null> {
+    return parseContext(await this.ipc.invoke<unknown>('assistant_context', { conversationId: id, attachments: [...attachments] }));
   }
 
   listen(handler: (event: Envelope) => void): Promise<Unlisten> {
@@ -111,7 +113,7 @@ export class TauriAssistantBackend extends AssistantBackend {
 
 /** What the fake engine of [`MemoryAssistantBackend`] answers to a question. */
 export interface MemoryAssistantOptions {
-  /** The answer to a question (default: a short markdown answer, see `DEMO_ANSWER`); the slash inputs of the class doc run the demo tools. */
+  /** The answer to a plain question (default: a short markdown answer, see `DEMO_ANSWER`); the slash inputs of the class doc keep their scripts. */
   readonly reply?: (text: string) => string;
   /** The info (default: a read-only tool `find` and a writing tool `erase`). */
   readonly info?: AssistantInfo;
@@ -257,12 +259,14 @@ export class MemoryAssistantBackend extends AssistantBackend {
   }
 
   /** A plausible meter for the demo (about four characters a token over the conversation); the engine's rule is Rust's. */
-  override context(id: string | null): Promise<ContextUse | null> {
+  override context(id: string | null, attachments: readonly Attachment[] = []): Promise<ContextUse | null> {
     const limit = this.options.contextTokens ?? 8192;
     const c = id ? this.store.get(id) : undefined;
-    const used = 40 + Math.ceil((c?.messages ?? []).reduce((n, m) => n + m.text.length, 0) / 4);
+    // A plausible 250 tokens a file, sent or waiting (an engine knows the real sizes).
+    const files = attachments.length + (c?.messages ?? []).reduce((n, m) => n + (m.attachments?.length ?? 0), 0);
+    const used = 40 + Math.ceil((c?.messages ?? []).reduce((n, m) => n + m.text.length, 0) / 4) + 250 * files;
     const level = limit === 0 ? 'unknown' : used >= limit ? 'full' : used * 100 >= limit * 80 ? 'high' : 'ok';
-    return Promise.resolve({ usedTokens: used, limitTokens: limit, exact: c !== undefined, level });
+    return Promise.resolve({ usedTokens: used, limitTokens: limit, reserveTokens: 0, exact: c !== undefined && !attachments.length, level });
   }
 
   listen(handler: (event: Envelope) => void): Promise<Unlisten> {
@@ -363,7 +367,8 @@ export class MemoryAssistantBackend extends AssistantBackend {
       this.emit(id, { type: 'phase', phase: { kind: 'loading', elapsedMs: 12_000 } });
       this.emit(id, { type: 'phase', phase: { kind: 'generating' } });
     }
-    const answer = this.options.reply
+    // A host's reply answers plain questions; the slash commands keep their scripts.
+    const answer = this.options.reply && !text.startsWith('/')
       ? this.options.reply(text)
       : command === '/tool'
         ? 'Found item 7 for you.'
