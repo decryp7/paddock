@@ -16,6 +16,14 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
+/// A live comparison that cannot run: a note on a workstation, a failure in CI, where a missing oracle or a shallow clone must not
+/// let the comparison pass unseen.
+fn skip(reason: &str) {
+    let ci = ["CI", "GITHUB_ACTIONS"].iter().any(|k| std::env::var(k).is_ok_and(|v| v == "true"));
+    assert!(!ci, "the live comparison cannot run in CI: {reason}");
+    eprintln!("skipped: {reason}");
+}
+
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().to_path_buf()
 }
@@ -89,7 +97,7 @@ const SAMPLES: &[&[&str]] = &[
 #[test]
 fn live_plan_matches_affected_mjs_on_sample_change_sets() {
     if !repo_root().join("scripts/affected.mjs").exists() || Command::new("node").arg("--version").output().is_err() {
-        eprintln!("skipped: scripts/affected.mjs or node is not available (the recorded cases still run)");
+        skip("scripts/affected.mjs or node is not available (the recorded cases still run)");
         return;
     }
     for files in SAMPLES {
@@ -331,7 +339,7 @@ fn recorded_command_line_cases_match_what_affected_mjs_answered_on_the_fixture_r
 #[test]
 fn live_command_line_matches_affected_mjs_on_a_copy_of_the_fixture_repository() {
     if !repo_root().join("scripts/affected.mjs").exists() || Command::new("node").arg("--version").output().is_err() {
-        eprintln!("skipped: scripts/affected.mjs or node is not available (the recorded cases still run)");
+        skip("scripts/affected.mjs or node is not available (the recorded cases still run)");
         return;
     }
     let (_keep, root) = fixture_with_origin();
@@ -362,7 +370,7 @@ fn live_command_line_matches_affected_mjs_on_a_copy_of_the_fixture_repository() 
 #[test]
 fn live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history() {
     if !repo_root().join("scripts/affected.mjs").exists() || Command::new("node").arg("--version").output().is_err() {
-        eprintln!("skipped: scripts/affected.mjs or node is not available");
+        skip("scripts/affected.mjs or node is not available");
         return;
     }
     let log = Command::new("git")
@@ -372,7 +380,10 @@ fn live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history(
         .unwrap();
     let shas: Vec<String> = String::from_utf8_lossy(&log.stdout).lines().map(String::from).collect();
     if shas.len() < 12 {
-        eprintln!("skipped: only {} first-parent commits are available (a shallow clone)", shas.len());
+        skip(&format!(
+            "only {} first-parent commits are available (a shallow clone: give the job fetch-depth: 0)",
+            shas.len()
+        ));
         return;
     }
     for i in (0..shas.len() - 6).step_by(6) {

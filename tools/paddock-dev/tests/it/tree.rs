@@ -744,7 +744,12 @@ fn ci_yml_wires_the_plan_job_outputs_and_the_commits_job_asks_for_its_range() {
         assert!(names.contains(&w), "dev plan --ci writes {w}, which the plan job does not declare");
     }
     let commits = &wf.jobs.iter().find(|(k, _)| k == "commits").expect("a commits job").1;
-    assert!(commits.contains("needs: [plan]") && commits.contains("./dev plan --commit-range") && commits.contains("fetch-depth: 0"));
+    assert!(
+        commits.contains("needs: [plan]")
+            && commits.contains("./dev plan --commit-range")
+            && commits.contains("./dev plan --commit-flags")
+            && commits.contains("fetch-depth: 0")
+    );
     for v in ["EVENT", "REF", "BEFORE", "SHA", "BASE_REF", "PLAN_BASE", "INPUT_APP"] {
         assert!(commits.contains(&format!("{v}: ${{{{")), "{v}");
     }

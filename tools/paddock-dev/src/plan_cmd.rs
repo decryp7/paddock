@@ -29,8 +29,15 @@ use std::time::Duration;
 
 const TIMEOUT: Duration = Duration::from_secs(120);
 
+/// A planner failure. In a workflow (`GITHUB_ACTIONS`) an `::error::` annotation with the cause and the next step goes first (ER-27).
 fn fail(message: impl Into<String>) -> CliError {
-    CliError::failure(format!("affected: {}\n{USAGE}", message.into()))
+    let message = message.into();
+    if std::env::var("GITHUB_ACTIONS").is_ok_and(|v| v == "true") {
+        eprintln!(
+            "::error::dev plan: {message}. Run `./dev plan` with the same arguments and environment locally to see it again; the usage is in the log below."
+        );
+    }
+    CliError::failure(format!("affected: {message}\n{USAGE}"))
 }
 
 /// The newest ci.yml runs on main (Gitea API), or `None` with a warning when they cannot be read.
@@ -155,7 +162,8 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     let plan_app = env("PLAN_APP").filter(|a| !a.is_empty());
     let mut http = CurlHttp;
     let runs = if event == "push" && reference == "refs/heads/main" {
-        ci_runs(&mut http, env, &mut |w| log(w))
+        // A workflow command is read from standard output; with `--app` standard output is the answer, so it goes to the log.
+        ci_runs(&mut http, env, &mut |w| if app.is_some() { log(w) } else { println!("{w}") })
     } else {
         None
     };
@@ -168,6 +176,12 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
         contains: &contains,
         merge_base: &merge_base,
     });
+    if base.as_deref().is_some_and(|b| b.starts_with('-')) {
+        return Err(fail(format!(
+            "the base {:?} is not a revision (it starts with '-')",
+            base.unwrap_or_default()
+        )));
+    }
     let history = GitHistory::new(root, TIMEOUT);
     let req = Request {
         files: Vec::new(),

@@ -215,3 +215,21 @@ fn plan_commit_range_and_flags_lint_only_what_main_itself_adds_and_refuse_values
     assert_eq!(code, 1);
     assert!(err.contains("is not a commit id"), "{err}");
 }
+
+#[test]
+fn plan_refuses_json_mentions_commit_flags_in_its_usage_and_annotates_errors_in_a_workflow() {
+    let (code, _, err) = dev(&["--json", "plan", "--all"]);
+    assert_eq!(code, 2);
+    assert!(err.contains("no --json mode"), "{err}");
+    let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+        .args(["plan", "--nope"])
+        .env("GITHUB_ACTIONS", "true")
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        err.contains("::error::dev plan: unknown option --nope") && err.contains("--commit-flags"),
+        "{err}"
+    );
+}

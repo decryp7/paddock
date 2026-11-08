@@ -485,7 +485,8 @@ pub fn commit_lint_range(i: &LintInput, known: &dyn Fn(&str) -> bool) -> Result<
 // ------------------------------------------------------------------------------------------------------ command line
 
 /// The usage line printed under an argument error.
-pub const USAGE: &str = "usage: dev plan <base> [<head>] | --files a,b | --all | --ci [--app <app>]  [--explain] | --commit-range";
+pub const USAGE: &str =
+    "usage: dev plan <base> [<head>] | --files a,b | --all | --ci [--app <app>]  [--explain] | --commit-range | --commit-flags";
 
 /// A parsed command line of `dev plan`.
 #[derive(Debug, PartialEq)]
