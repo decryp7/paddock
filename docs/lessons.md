@@ -1483,3 +1483,19 @@ Symptom: after replacing Dyno.app, an agent started on 5 Nov kept running and th
 Fix: the discovery file carries a build id (SHA-256 prefix of the agent file), the app compares it with the id of the agent file it would start, and the agent exits (code 0, logged) when its own file was replaced or removed on two looks 30 s apart; signals others send are `StoppedFromOutside`, no crash and no stability points. Logs: the connect line now carries the agent's version and build and the app's key. Class: identity by a label that releases share; compare content.
 
 - A test fake built from the real agent carries its self-healing (the discovery guard writes `agent.json` again at the 30 s watch): tests that tamper with a live agent's files must hold only the lock and start the agent when told (`SlowHolder`; CI run 7672, Dyno link test connected at 94 of 100 looks).
+
+## A brief without a named scratch folder let an agent clobber the shared scratchpad (2026-11-08)
+
+Symptom: an agent told to "clean up" its scratch files removed the shared scratchpad, including other agents' files (the same shape as the 2026-10-31 reviewer incident). Root cause: the brief named no folder, so the agent chose the root. Fix: every brief names the agent's own subfolder of the scratch area and tells it to touch nothing else; an agent never globs the root. Class: a cleanup without a named path deletes more than it made.
+
+## Agents ran git in the main checkout after a failed cd (2026-11-08)
+
+Twice, a `cd` into a worktree failed and the next git command ran in the main checkout: once a sparse checkout and a merge, once a fast-forward of local main. Root cause: the shell stays where it was when `cd` fails, and git does not care where it runs. Fix for now: check `git rev-parse --show-toplevel` before every git command and use absolute paths. A guard (a hook that refuses mutating git in the main checkout) is an ER-21 candidate, not built yet.
+
+## A shared redaction default changed for one app silently changed another app's outgoing text (2026-11-08)
+
+A redaction default in a shared crate was widened for one app's problem report. Another app's web-search text, which leaves the machine, then changed with it and nothing failed. Root cause: the shared default was the only switch. Fix: a shared behaviour change that alters what leaves the machine is opt-in per caller; the new behaviour is a parameter the one app sets, and each other caller keeps its test of what it sends.
+
+## Gitea tokens cannot mint narrower tokens, and agents must not create bot users (2026-11-08)
+
+An agent looking for a narrower CI token found that a Gitea token cannot create a token with fewer rights, and the only other route was creating a bot user. Agents must not create users. The user creates scoped CI tokens (one per purpose, least privilege) and the agent is given the one it needs; if none exists, the agent stops and asks.
