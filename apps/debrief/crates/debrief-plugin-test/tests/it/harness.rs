@@ -2,7 +2,6 @@
 //! error and not a hang, a hang is cut off, and a contained plugin cannot read the user's files.
 
 use debrief_ipc::peer::code;
-#[cfg(windows)]
 use debrief_plugin_test::Launch;
 use debrief_plugin_test::PluginUnderTest;
 use std::time::Duration;
@@ -39,17 +38,39 @@ fn a_panic_is_a_typed_error_and_the_plugin_keeps_serving() {
 }
 
 #[test]
-fn a_hung_import_is_cut_off_and_fails_the_cancellation_check() {
+fn a_hung_import_is_cut_off_and_the_conformance_checks_report_it() {
     let p = PluginUnderTest::launch(FIXTURE).unwrap();
-    // The verdict is that a plugin which never answers is given up on, whatever the timeout; no elapsed time is asserted.
+    // The verdict is that a plugin which never answers is given up on, whatever the timeout; no elapsed time is asserted,
+    // the message names the timeout the call was given.
     let e = p.import_within("fixture", "a.log", b"hang\n", Duration::from_secs(1)).unwrap_err();
-    assert!(e.to_string().contains("did not answer"), "{e}");
+    assert!(e.to_string().contains("did not answer within 1 s"), "{e}");
     let hang = tempfile::NamedTempFile::new().unwrap();
     std::fs::write(hang.path(), b"hang\n").unwrap();
-    let fresh = PluginUnderTest::launch(FIXTURE).unwrap();
-    // Only the cancellation check runs: the full set would also wait out the hang in `bounded-output` (20 s of real time).
-    let cancel = fresh.cancellation_check(&[hang.path().to_path_buf()]);
-    assert!(!cancel.passed, "{cancel:?}");
+    // The whole set against the hung plugin ends with a report (what `cargo debrief-plugin` relies on); the import
+    // timeout is the one wall-clock wait in it, so the test shortens it.
+    let fresh = PluginUnderTest::launch_with(
+        FIXTURE,
+        Launch {
+            import_timeout: Duration::from_secs(1),
+            ..Launch::default()
+        },
+    )
+    .unwrap();
+    let report = fresh.conformance_with(&[hang.path().to_path_buf()]);
+    let by_name = |n: &str| {
+        report
+            .checks
+            .iter()
+            .find(|c| c.name == n)
+            .unwrap_or_else(|| panic!("no check {n}: {report}"))
+    };
+    assert_eq!(report.checks.len(), 6, "{report}");
+    let bounded = by_name("bounded-output");
+    assert!(!bounded.passed && bounded.detail.contains("did not answer within 1 s"), "{report}");
+    // The bounded-output check before it waited for the hang too; cancellation is what the importer's ignoring of it fails.
+    let cancel = by_name("cancellation");
+    assert!(!cancel.passed && cancel.detail.contains("kept running"), "{report}");
+    assert!(by_name("manifest").passed && by_name("typed-errors").passed, "{report}");
 }
 
 #[cfg(windows)]

@@ -54,6 +54,14 @@ pub const SNIFF_BYTES: usize = 64 * 1024;
 /// Items an import may have in flight (as Debrief grants).
 const CREDIT: u32 = 4;
 
+/// Writes one phase line to stderr with the time since the first one in this process (ER-27): a nextest-terminated test
+/// still prints its captured stderr, so a stall shows which phase it was in.
+pub(crate) fn phase(what: impl std::fmt::Display) {
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    let ms = START.get_or_init(Instant::now).elapsed().as_millis();
+    eprintln!("[debrief-plugin-test +{ms} ms] {what}");
+}
+
 /// How [`PluginUnderTest::launch_with`] starts the plugin.
 #[derive(Debug, Clone)]
 pub struct Launch {
@@ -66,6 +74,9 @@ pub struct Launch {
     pub max_frame: usize,
     /// The timestamp settings importers receive (default: no extra formats, UTC).
     pub timestamps: TimestampSettings,
+    /// How long the conformance checks wait for one import before they call the plugin hung (default 20 s). A plugin that
+    /// hangs makes the checks wait this long, so the harness's own tests shorten it.
+    pub import_timeout: Duration,
 }
 
 impl Default for Launch {
@@ -79,6 +90,7 @@ impl Default for Launch {
                 zone: "UTC".into(),
                 day_first: None,
             },
+            import_timeout: Duration::from_secs(20),
         }
     }
 }
@@ -143,6 +155,8 @@ impl PluginUnderTest {
     /// contained plugin can only run from folders granted to it, as in Debrief's plugin folder).
     pub fn launch_with(exe: impl AsRef<Path>, launch: Launch) -> Result<PluginUnderTest> {
         let exe = exe.as_ref();
+        let began = Instant::now();
+        phase(format_args!("launching {}", exe.display()));
         let home = tempfile::Builder::new().prefix("debrief-plugin-test-").tempdir()?;
         let bin = home.path().join("bin");
         let data = home.path().join("data");
@@ -162,7 +176,13 @@ impl PluginUnderTest {
             .granted
             .clone()
             .unwrap_or_else(|| manifest.permissions.iter().map(|p| p.permission).collect());
+        phase(format_args!(
+            "manifest read after {} ms, starting with {} permissions",
+            began.elapsed().as_millis(),
+            granted.len()
+        ));
         let child = start(&copied, &manifest, &granted, &launch, home.path(), &host)?;
+        phase(format_args!("connected after {} ms", began.elapsed().as_millis()));
         Ok(PluginUnderTest {
             child,
             host,
@@ -327,7 +347,14 @@ impl PluginUnderTest {
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
-                let _ = stream.cancel_and_wait();
+                phase(format_args!("no answer within {} s: cancelling the call", timeout.as_secs()));
+                let cancelled = Instant::now();
+                let outcome = stream.cancel_and_wait();
+                phase(format_args!(
+                    "cancel_and_wait ended after {} ms: {:?}",
+                    cancelled.elapsed().as_millis(),
+                    outcome.as_ref().map(|_| "ended").map_err(|e| e.to_string())
+                ));
                 bail!("the plugin did not answer within {} s", timeout.as_secs());
             }
             match stream.next(Some(left.min(Duration::from_millis(200)))).map_err(ipc)? {
@@ -410,11 +437,6 @@ impl PluginUnderTest {
     /// input when empty). See [`conformance`].
     pub fn conformance_with(&self, samples: &[PathBuf]) -> Report {
         conformance::run(self, samples)
-    }
-
-    /// Runs only the `cancellation` check (see [`conformance::run_cancellation`]).
-    pub fn cancellation_check(&self, samples: &[PathBuf]) -> Check {
-        conformance::run_cancellation(self, samples)
     }
 
     /// [`PluginUnderTest::conformance_with`] without samples.
