@@ -311,3 +311,35 @@ check = "C23"
 path = "commit eecea633fa"
 reason = "wip: subject from an unshared branch; history cannot be rewritten (no force)"
 expires = "2026-12-31"
+
+# Five 28-31 October commits of the Debrief 1.2 branches whose first line is over 100 characters (pre-landing check, rule 50(f)).
+
+[[waiver]]
+check = "C23"
+path = "commit c5dfbb695e"
+reason = "first line over 100 characters on an unshared branch; history cannot be rewritten (no force)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C23"
+path = "commit f0f5ec91e8"
+reason = "first line over 100 characters on an unshared branch; history cannot be rewritten (no force)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C23"
+path = "commit 9e3bb4a7f4"
+reason = "first line over 100 characters on an unshared branch; history cannot be rewritten (no force)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C23"
+path = "commit 30b9deca5c"
+reason = "first line over 100 characters on an unshared branch; history cannot be rewritten (no force)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C23"
+path = "commit 08cf9f0363"
+reason = "first line over 100 characters on an unshared branch; history cannot be rewritten (no force)"
+expires = "2026-12-31"

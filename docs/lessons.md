@@ -1245,3 +1245,10 @@ peer. **Lesson (class: a check that cannot fail):** before calling a cause confi
 precondition (the menu bar exists, the helper runs, at least one step ran), give the probe a positive control (show it sees
 a thing known to be there), and compare with a known-good peer. Otherwise the result is `not measured` or `check broken`
 and the release does not pass (rule 71, ER-33).
+
+## First-parent lint on main needs a pre-landing branch lint (2026-11-08, Debrief 1.2 batch 1)
+A push to main lints only the commits main itself gets (`--first-parent`), so a branch's own subjects and trailers (two `wip:`
+commits, five first lines over 100 characters) were never checked once the branch landed without a pull request.
+**Lesson (class: a check that skips what it cannot see):** lint the branch before landing it (`commit-lint --range
+origin/main..<branch>`, rule 50(f)); C23 in the conformance run is the backstop. Waivers for commits are exact per commit
+(`commit <10 or 40 hex>`, no patterns) and expire.
