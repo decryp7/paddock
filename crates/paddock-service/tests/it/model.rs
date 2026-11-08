@@ -2521,6 +2521,7 @@ fn lock_holder_child() {
     };
     println!("LOCK-HELD");
     std::io::stdout().flush().expect("stdout");
+    // conformance: hang-guard — 120 s bound: the child holds the lock until the parent kills it; the sleep is the hold, not a settle
     std::thread::sleep(Duration::from_secs(120));
     drop(lock);
 }
