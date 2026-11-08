@@ -50,8 +50,12 @@ export type ReadPolicy =
    * change), and the store runs its read through `store._reads.define(...)`.
    */
   | { readonly retry: true; readonly clock?: ProviderToken<ReadRetryClock> }
-  /** The status is not a read of engine state (a search, a validation, an action), or the store recovers in its own way: `why` says which. */
-  | { readonly retry: false; readonly why: string };
+  /**
+   * The status is not a read of engine state (a search, a validation, an action), or the store recovers in its own way:
+   * `why` says which. A temporary opt-out (`why` starting "not adopted yet") names `until`, the date (YYYY-MM-DD) by which
+   * the store adopts the retry; the spec fails once it has passed.
+   */
+  | { readonly retry: false; readonly why: string; readonly until?: string };
 
 /** A store's one read of engine state, declared once in its `withMethods`. */
 export interface ReadSpec<T> {

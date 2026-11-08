@@ -257,8 +257,34 @@ describe('every store with a request status (ADR 0058)', () => {
       .sort();
     expect(users).toEqual(Object.keys(cases).sort());
     for (const file of users) {
-      const declared = /withRequestStatus\(\{\s*retry:\s*(true|false)\b/.exec(fs.readFileSync(`${ROOT}/${file}`, 'utf8'))?.[1];
-      expect(`${file}: retry ${declared}`).toBe(`${file}: retry ${String(cases[file]?.retry)}`);
+      // Every call in the file, not only the first: each must declare the policy of the row.
+      const text = fs.readFileSync(`${ROOT}/${file}`, 'utf8');
+      const calls = text.split('withRequestStatus(').length - 1;
+      const declared = [...text.matchAll(/withRequestStatus\(\{\s*retry:\s*(true|false)\b/g)].map((m) => m[1]);
+      expect(`${file}: ${calls} call(s), retry ${declared.join(', ')}`).toBe(`${file}: ${calls} call(s), retry ${Array(calls).fill(String(cases[file]?.retry)).join(', ')}`);
+    }
+  });
+
+  it('keeps a retrying store off setLoading and setLoaded: its read changes the status only through the declared handle', async () => {
+    const fs = await nodeFs();
+    for (const [file, c] of Object.entries(cases)) {
+      if (!c.retry) continue;
+      const imports = [...fs.readFileSync(`${ROOT}/${file}`, 'utf8').matchAll(/import\s*\{([^}]*)\}\s*from\s*'@decryp7\/paddock-ui\/shell\/store'/g)].map((m) => m[1] ?? '').join(',');
+      const used = imports.split(',').map((s) => s.trim()).filter((s) => s === 'setLoading' || s === 'setLoaded');
+      expect(`${file}: ${used.join(', ') || 'none'}`).toBe(`${file}: none`);
+    }
+  });
+
+  it('gives a temporary opt-out ("not adopted yet") a removal date that has not passed', async () => {
+    const fs = await nodeFs();
+    const today = new Date().toISOString().slice(0, 10);
+    for (const [file, c] of Object.entries(cases)) {
+      if (c.retry) continue;
+      const text = fs.readFileSync(`${ROOT}/${file}`, 'utf8');
+      if (!/why:\s*(['`])not adopted yet/.test(text)) continue;
+      const until = /until:\s*'(\d{4}-\d{2}-\d{2})'/.exec(text)?.[1];
+      const verdict = until === undefined ? 'no until date' : until < today ? `until ${until} has passed: adopt the retry or move the date with a reason` : 'dated';
+      expect(`${file}: ${verdict}`).toBe(`${file}: dated`);
     }
   });
 
