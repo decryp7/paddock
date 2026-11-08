@@ -182,6 +182,11 @@ jobs:
     needs: [plan]
     if: ${{ needs.plan.outputs.ui == 'true' && (inputs.webkit == true || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))) }}
     runs-on: macos-latest
+    env:
+      # A run for a tag builds the tool from source (ADR 0022: release and tag jobs bypass every cache); other runs may download it.
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+      # Read credential for ./dev's prebuilt download (ADR 0022 R0b).
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
     defaults:
       run:
         working-directory: ui
@@ -411,6 +416,8 @@ jobs:
         working-directory: crates
         shell: bash
     env:
+      # A run for a tag builds the tool from source (ADR 0022: release and tag jobs bypass every cache); other runs may download it.
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
       # Read credential for ./dev's prebuilt download (ADR 0022 R0b), only in the jobs that run ./dev (job-isolation).
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       CARGO_TERM_COLOR: always
@@ -603,6 +610,8 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.apps) }}
     env:
+      # A run for a tag builds the tool from source (ADR 0022: release and tag jobs bypass every cache); other runs may download it.
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
       # Read credential for ./dev's prebuilt download (ADR 0022 R0b), only in the jobs that run ./dev (job-isolation).
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       CARGO_TERM_COLOR: always
@@ -754,6 +763,8 @@ jobs:
         working-directory: tools/paddock-dev
         shell: bash
     env:
+      # A run for a tag builds the tool from source (ADR 0022: release and tag jobs bypass every cache); other runs may download it.
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
       # Read credential for ./dev's prebuilt download (ADR 0022 R0b), only in the jobs that run ./dev (job-isolation).
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       CARGO_TERM_COLOR: always
