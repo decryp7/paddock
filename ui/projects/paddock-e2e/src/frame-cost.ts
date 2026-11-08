@@ -24,6 +24,9 @@ export async function startFrameCost(page: Page): Promise<void> {
 
 /** Stops the sampler [`startFrameCost`] started and returns the frame costs in milliseconds, in frame order. */
 export async function stopFrameCost(page: Page): Promise<number[]> {
-  await page.evaluate(() => ((window as unknown as { __stop: boolean }).__stop = true));
-  return page.evaluate(() => (window as unknown as { __frames: number[] }).__frames);
+  return page.evaluate(() => {
+    const w = window as unknown as { __frames: number[]; __stop: boolean };
+    w.__stop = true;
+    return w.__frames;
+  });
 }

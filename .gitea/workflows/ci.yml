@@ -236,6 +236,8 @@ jobs:
         working-directory: conformance
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Tests
         run: npm test
@@ -251,7 +253,8 @@ jobs:
       # C24 needs every docs/images file reviewed (docs/images/REVIEWED.md). C37 needs one test binary per crate and every
       # crate tested here and on the workspace hack (paddock.conformance.json). C14 (hermetic wrapper), C29 and C30 (wall clock)
       # report warnings; C36 (parser hardening) is strict here (a new parser needs its never-panics test); C15 has a dated
-      # waiver (paddock.waivers.toml).
+      # waiver (paddock.waivers.toml). C71 (tests do not settle on real time) compares its baseline with the merge base's with origin/main, so
+      # the checkout above has the full history (a one-commit clone has no merge base and C71 would only warn that it did not measure).
       - name: Paddock itself (applicable checks)
         working-directory: .
         run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C48,C53,C54,C56,C57,C71 --strict C36

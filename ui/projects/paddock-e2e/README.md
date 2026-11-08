@@ -74,6 +74,7 @@ for (const colorScheme of THEMES) {
 | `expectHeaderOnTop(grid, parts?)`, `headerCovers`, `isOpaqueColor` | A grid's sticky header stays on top: scrolls the body (or the page the header sticks to), hovers the row under the header and probes `elementFromPoint` across the header row; fails on a cover, a translucent header or a body that never scrolled (ADR 0027) |
 | `installTauriFake(page, options)` | A fake `__TAURI_INTERNALS__`: replies by command, held until released, recorded calls, events delivered to the page's listeners, a played platform (`mac` has the native menu bar). The shell plugin's commands (`plugin:paddock-shell\|<command>`, `SHELL_PLUGIN_PREFIX`) are recorded and answered by their plain names |
 | `waitForStableFrame`, `captureStable` | Screenshots once the fonts are loaded, nothing animates and the layout held still between two looks (works under `page.clock`) |
+| `startFrameCost(page)`, `stopFrameCost(page)` | Frame cost while something happens (a drag): per frame, from its `requestAnimationFrame` callback to the first task after rendering; the sampler is a measurement, not a wait (C71) |
 | `readVersion(path)`, `RELEASE_VERSION` | The app's version from its single source (`package.json` or `Cargo.toml`), checked for a release-number shape (rule 6) |
 | `@decryp7/paddock-e2e/retried-reporter` | Lists tests that passed only after a retry (console, `playwright-retried.md`, `$GITHUB_STEP_SUMMARY`); never changes the exit code |
 
