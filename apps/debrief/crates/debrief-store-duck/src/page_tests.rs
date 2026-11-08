@@ -77,3 +77,64 @@ fn a_time_range_is_pushed_into_the_segment_scan() {
          segments' min/max statistics and reads every segment's ts column:\n{plan}"
     );
 }
+
+/// The instance key's per-source counts are scanned once per source (WP-1: the grouped count over every event was
+/// 1.2 s at 56M events on the first page after each change). Another import scans only its own sources, and the
+/// key equals the one a fresh store computes from scratch.
+#[test]
+fn the_instance_key_scans_only_new_sources_and_equals_a_full_recount() {
+    let dir = Dir::new("key-incremental");
+    let store = DuckStore::create(&dir.0, Profile::default_profile(), PluginRegistry::new()).unwrap();
+    let scans = |s: &DuckStore| lock(&s.inner.presence).scans();
+    let key = |s: &DuckStore| {
+        let conn = s.inner.conn().unwrap();
+        let ctx = s.inner.ctx(&conn).unwrap();
+        (ctx.default_group_by.clone(), format!("{:?}", ctx.key_scopes))
+    };
+    store.open(&samples()[..1]).unwrap().wait().unwrap();
+    let _ = key(&store);
+    let after_first = scans(&store);
+    assert!(after_first > 0, "the first page counts the sources it has");
+    let _ = key(&store);
+    assert_eq!(scans(&store), after_first, "the same sources are not counted twice");
+    store.open(&samples()[1..]).unwrap().wait().unwrap();
+    let both = key(&store);
+    let fresh_dir = Dir::new("key-fresh");
+    let fresh = DuckStore::create(&fresh_dir.0, Profile::default_profile(), PluginRegistry::new()).unwrap();
+    fresh.open(&samples()).unwrap().wait().unwrap();
+    let from_scratch = key(&fresh);
+    assert!(scans(&store) > after_first, "the second import's sources were counted");
+    assert_eq!(
+        scans(&store),
+        scans(&fresh),
+        "every source and candidate was counted exactly once, as often as a store that counts them in one go"
+    );
+    assert_eq!(
+        from_scratch, both,
+        "the incremental key equals the key of a store counted from scratch"
+    );
+}
+
+/// Removing a source drops its counts: a source that later takes the same id is counted again.
+#[test]
+fn a_removed_sources_counts_are_dropped() {
+    let dir = Dir::new("key-forget");
+    let store = DuckStore::create(&dir.0, Profile::default_profile(), PluginRegistry::new()).unwrap();
+    store.open(&samples()).unwrap().wait().unwrap();
+    {
+        let conn = store.inner.conn().unwrap();
+        store.inner.ctx(&conn).unwrap();
+    }
+    let before = lock(&store.inner.presence).scans();
+    store.inner.forget_events().unwrap();
+    store.open(&samples()).unwrap().wait().unwrap();
+    {
+        let conn = store.inner.conn().unwrap();
+        store.inner.ctx(&conn).unwrap();
+    }
+    assert_eq!(
+        lock(&store.inner.presence).scans(),
+        2 * before,
+        "after forgetting every event the sources are counted again"
+    );
+}

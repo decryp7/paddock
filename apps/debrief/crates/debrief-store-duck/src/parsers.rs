@@ -148,7 +148,7 @@ impl Inner {
         s.parsers = set.clone();
         s.profile = set.base().clone();
         drop(s);
-        *crate::lock(&self.derived) = None;
+        self.clear_derived();
         Ok(set)
     }
 

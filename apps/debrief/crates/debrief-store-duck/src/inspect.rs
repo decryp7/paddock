@@ -459,7 +459,7 @@ impl Maintain for DuckStore {
                 let conn = self.inner.conn()?;
                 let n = conn.execute("DELETE FROM analysis_cache", []).map_err(engine)?;
                 conn.execute_batch(&crate::lanes::prune_sql(u64::MAX)).map_err(engine)?;
-                *lock(&self.inner.derived) = None;
+                self.inner.clear_derived();
                 format!("Cleared {n} cached analyses; they are computed again when next used.")
             }
             MaintenanceAction::OrderEvents => {

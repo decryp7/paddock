@@ -288,6 +288,13 @@ impl Inner {
         })
     }
 
+    /// Forgets the field list, the instance key and the per-source counts behind it (the profile, the parsers or the
+    /// cached analyses changed).
+    pub(crate) fn clear_derived(&self) {
+        *crate::lock(&self.derived) = None;
+        crate::lock(&self.presence).clear();
+    }
+
     /// The field list and default instance key of the current events (cached per generation).
     fn derived(&self, conn: &Connection) -> StoreResult<Arc<Derived>> {
         let generation = self.generation.load(std::sync::atomic::Ordering::SeqCst);
@@ -296,6 +303,7 @@ impl Inner {
                 return Ok(d.clone());
             }
         }
+        let started = std::time::Instant::now();
         let profile = self.profile();
         // Computed once per data version and profile, and kept in the database (a reopened project does
         // not scan its fields again).
@@ -309,6 +317,10 @@ impl Inner {
                     key_scopes: Arc::new(key_scopes),
                 });
                 *crate::lock(&self.derived) = Some((generation, d.clone()));
+                log::debug!(
+                    "derived source=database-cache total={:.1}ms",
+                    started.elapsed().as_secs_f64() * 1000.0
+                );
                 return Ok(d);
             }
         }
@@ -341,6 +353,7 @@ impl Inner {
                 e.3.extend(top.into_iter().map(|(v, _)| v));
             }
         }
+        let t_segments = started.elapsed();
         // Keys with more values than a segment lists: counted exactly in one statement while the store is
         // small, else estimated (the segments' estimates summed: high-cardinality values rarely repeat
         // across segments).
@@ -359,6 +372,7 @@ impl Inner {
                 exact.insert(k.clone(), n as u64);
             }
         }
+        let t_exact = started.elapsed();
         let fields: Vec<(String, (u64, u64, u64))> = acc
             .into_iter()
             .map(|(k, (rows, numeric, summed, values, listed))| {
@@ -387,7 +401,17 @@ impl Inner {
             })
             .collect();
         infos.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.name.cmp(&b.name)));
+        let t_infos = started.elapsed();
         let (default_group_by, key_scopes) = self.instance_key(conn, &profile, &infos)?;
+        let t_key = started.elapsed();
+        log::debug!(
+            "derived source=computed segments={:.1}ms exact_distinct={:.1}ms infos={:.1}ms instance_key={:.1}ms total={:.1}ms",
+            t_segments.as_secs_f64() * 1000.0,
+            (t_exact - t_segments).as_secs_f64() * 1000.0,
+            (t_infos - t_exact).as_secs_f64() * 1000.0,
+            (t_key - t_infos).as_secs_f64() * 1000.0,
+            t_key.as_secs_f64() * 1000.0
+        );
         let d = Arc::new(Derived {
             fields: infos,
             default_group_by,
@@ -415,9 +439,10 @@ impl Inner {
         }
         // The identity fields each source's importer and parser (ADR 0026) declare, by source id.
         let mut declared: Vec<(u32, String, Vec<String>)> = Vec::new();
+        let mut ready: Vec<(u32, u64)> = Vec::new();
         {
             let mut stmt = conn
-                .prepare("SELECT id, name, importer, parser_id FROM sources WHERE ready ORDER BY id")
+                .prepare("SELECT id, name, importer, parser_id, events FROM sources WHERE ready ORDER BY id")
                 .map_err(engine)?;
             let rows = stmt
                 .query_map([], |r| {
@@ -426,13 +451,15 @@ impl Inner {
                         r.get::<_, String>(1)?,
                         r.get::<_, Option<String>>(2)?,
                         r.get::<_, Option<String>>(3)?,
+                        r.get::<_, u64>(4)?,
                     ))
                 })
                 .map_err(engine)?;
             let importers = self.registry().importers();
             let set = self.parser_set();
             for row in rows {
-                let (id, name, importer, parser) = row.map_err(engine)?;
+                let (id, name, importer, parser, events) = row.map_err(engine)?;
+                ready.push((id, events));
                 let mut fields = match importer.as_deref() {
                     Some(i) => match importers.find(i) {
                         Some(imp) => imp.identity_fields(),
@@ -474,13 +501,55 @@ impl Inner {
         let mut names: Vec<String> = Vec::new();
         let mut presence = Presence::default();
         if !counted.is_empty() {
-            let select: String = counted.iter().map(|(_, x)| format!(", count(nullif({x}, ''))")).collect();
-            let sql = format!("SELECT e.source, count(*){select} FROM {FROM} GROUP BY e.source ORDER BY e.source");
-            let mut stmt = conn.prepare(&sql).map_err(engine)?;
-            let mut rows = stmt.query([]).map_err(engine)?;
-            while let Some(r) = rows.next().map_err(engine)? {
-                let i = events.len();
-                let source = r.get::<_, u32>(0).map_err(engine)?;
+            // Per ready source and candidate, counted once: the cache holds the counts of the sources counted before, so
+            // after an import only the new sources are read (rule 51: cheaper work, not more threads; exact, not stale).
+            let columns: Vec<String> = counted.iter().map(|(n, x)| format!("{n}={x}")).collect();
+            let groups = crate::lock(&self.presence).missing(&ready, &columns);
+            let started = std::time::Instant::now();
+            let mut scanned = 0;
+            for g in &groups {
+                scanned += g.sources.len();
+                let select: String = g
+                    .columns
+                    .iter()
+                    .map(|k| format!(", count(nullif({}, ''))", counted[*k].1))
+                    .collect();
+                let ids: String = g.sources.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+                let sql =
+                    format!("SELECT e.source, count(*){select} FROM {FROM} WHERE e.source IN ({ids}) GROUP BY e.source ORDER BY e.source");
+                let mut stmt = conn.prepare(&sql).map_err(engine)?;
+                let mut rows = stmt.query([]).map_err(engine)?;
+                let mut found: Vec<(u32, crate::presence::SourceCounts)> = Vec::new();
+                while let Some(r) = rows.next().map_err(engine)? {
+                    let source = r.get::<_, u32>(0).map_err(engine)?;
+                    let declared_events = ready.iter().find(|(id, _)| *id == source).map(|(_, n)| *n).unwrap_or(0);
+                    let mut present = BTreeMap::new();
+                    for (j, k) in g.columns.iter().enumerate() {
+                        present.insert(columns[*k].clone(), r.get::<_, u64>(j + 2).map_err(engine)?);
+                    }
+                    found.push((
+                        source,
+                        crate::presence::SourceCounts {
+                            declared_events,
+                            events: r.get::<_, u64>(1).map_err(engine)?,
+                            present,
+                        },
+                    ));
+                }
+                let mut cache = crate::lock(&self.presence);
+                for (id, c) in found {
+                    cache.insert(id, c);
+                }
+            }
+            log::debug!(
+                "instance key counts statements={} scanned_sources={scanned} ready_sources={} counted_since_open={} scan={:.1}ms",
+                groups.len(),
+                ready.len(),
+                crate::lock(&self.presence).scans(),
+                started.elapsed().as_secs_f64() * 1000.0
+            );
+            let cache = crate::lock(&self.presence);
+            for (i, (source, c)) in cache.rows(&ready).into_iter().enumerate() {
                 names.push(
                     declared
                         .iter()
@@ -488,10 +557,11 @@ impl Inner {
                         .map(|(_, n, _)| n.clone())
                         .unwrap_or_default(),
                 );
-                events.push(r.get::<_, u64>(1).map_err(engine)? as usize);
+                events.push(c.events as usize);
                 for (k, (name, _)) in counted.iter().enumerate() {
-                    let n = r.get::<_, u64>(k + 2).map_err(engine)? as usize;
-                    presence.0.insert(((*name).to_string(), i), n);
+                    presence
+                        .0
+                        .insert(((*name).to_string(), i), c.present.get(&columns[k]).copied().unwrap_or(0) as usize);
                 }
             }
         } else {

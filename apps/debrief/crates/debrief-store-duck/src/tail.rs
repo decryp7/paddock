@@ -245,6 +245,7 @@ impl Inner {
             "BEGIN TRANSACTION; DELETE FROM diagnostics WHERE source IN ({list}); DELETE FROM tail_offsets WHERE source IN ({list}); DELETE FROM sources WHERE id IN ({list}); COMMIT;"
         ))
         .map_err(engine)?;
+        crate::lock(&self.presence).forget(ids);
         if let Some(f) = &self.fts {
             for id in ids {
                 if let Err(e) = f.delete_source(*id) {

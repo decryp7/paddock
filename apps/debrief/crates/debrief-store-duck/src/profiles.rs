@@ -97,7 +97,7 @@ impl Inner {
         s.parsers = Arc::new(parsers);
         drop(s);
         // The field list and instance key depend on the profile.
-        *crate::lock(&self.derived) = None;
+        self.clear_derived();
     }
 }
 

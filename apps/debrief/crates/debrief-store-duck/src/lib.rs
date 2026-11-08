@@ -20,6 +20,7 @@ mod lanes;
 mod mining;
 mod parsers;
 mod pos;
+mod presence;
 mod profiles;
 mod progress;
 mod project;
@@ -332,6 +333,8 @@ pub(crate) struct Inner {
     options: RwLock<StoreOptions>,
     pub(crate) progress: Arc<ImportProgress>,
     pub(crate) derived: Mutex<Option<(u64, Arc<read::Derived>)>>,
+    /// Per-source counts of the instance key's candidate fields (kept across generations; see `presence`).
+    pub(crate) presence: Mutex<presence::PresenceCache>,
     /// Analyses being computed now, by kind and query: a second identical request waits for the first and reads its
     /// cached result instead of computing the same thing again (Home, the health check and the headline ask together).
     pub(crate) flights: Mutex<std::collections::HashMap<String, Arc<Mutex<()>>>>,
@@ -650,6 +653,7 @@ impl Inner {
             }
         }
         write_lock(&self.state).unrecognized.clear();
+        lock(&self.presence).clear();
         self.generation.fetch_add(1, Ordering::SeqCst);
         self.bump_version(&conn)
     }
@@ -1015,6 +1019,7 @@ impl DuckStore {
                 options: RwLock::new(opts),
                 progress: Arc::new(ImportProgress::default()),
                 derived: Mutex::new(None),
+                presence: Mutex::new(presence::PresenceCache::default()),
                 flights: Mutex::new(std::collections::HashMap::new()),
                 preaggregate_above: AtomicU64::new(PREAGGREGATE_ABOVE),
                 import_jitter: AtomicU64::new(0),
@@ -1195,6 +1200,7 @@ impl Ingest for DuckStore {
                 ))
                 .map_err(engine)?;
                 catalogue::forget(&conn, Some(&list)).map_err(engine)?;
+                lock(&self.inner.presence).forget(&gone);
                 if let Some(f) = &self.inner.fts {
                     for id in &gone {
                         if let Err(e) = f.delete_source(*id) {
@@ -1232,6 +1238,7 @@ impl Ingest for DuckStore {
         ] {
             conn.execute(sql, params![id.0]).map_err(engine)?;
         }
+        lock(&self.inner.presence).forget(&[id.0]);
         for sql in catalogue::DELETE_SQL {
             conn.execute(sql, params![id.0]).map_err(engine)?;
         }
