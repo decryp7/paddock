@@ -233,6 +233,35 @@ These measure tooling, not a product. They are kept where they are.
   0.53–1.77 ms of that. Windows is not measured.
 - [Lessons](lessons.md): test-binary consolidation, 239 → 99 binaries, nextest 301 s → 196 s.
 
+### 2026-11-09, CI share on the shared Mac (three runners)
+
+Quoted by `conformance/ci/build-jobs.sh` (the macOS layout) and the fix/main-after-7761 report (CI run 7775).
+- **Commit:** b51c72509 (origin/main); test binaries built by CI for dyno-app (`dyno_app_lib-65bdd936c62ef7f2`) and
+  dyno-bench, copied to a scratch folder and run there with TMPDIR in it.
+- **Machine:** Mac mini M4 Pro, 14 cores (10 performance, 4 efficiency), 64 GB, macOS 27.2; the three CI runners idle.
+- **Load:** 1-minute load 2.7–17 (agents on the same Mac).
+- **Build:** debug, as CI builds the tests.
+- **Corpus:** none; CPU-bound probe = `link::model::the_machine_keeps_every_invariant_in_every_interleaving_up_to_the_ci_bound`
+  (about 11.5 CPU-seconds on up to 15 threads); busy threads = `yes > /dev/null` processes.
+- **Command:** `TMPDIR=<scratch> /usr/bin/time -p ./dyno_app_lib-… --exact <probe>` beside the stated load.
+- **Runs:** single runs, three for the probe beside three test runs; wall seconds.
+- **Numbers:**
+
+  | Measure | Result |
+  |---|---|
+  | Probe alone | 2.6–4.1 s |
+  | Probe beside 11 / 23 / 41 busy threads | 3.2 / 4.0 / 5.9 s |
+  | Probe beside 3 dyno lib test runs at 14 threads, or at 4 threads | 2.6–2.7 s, 2.6–2.8 s |
+  | Probe beside dyno-bench's two all-core tests (cpu kernels, memory sweep) | 3.6–3.9 s |
+  | dyno lib tests (439, without the model tests) at 14 / 8 / 4 test threads | 20.8 / 15.7 / 47.8 s wall, about 1 s CPU |
+  | The probe in CI, from job logs of runs 7690–7782 | 7–27 s; 60 s TIMEOUT in run 7775 (job 32410) |
+
+- **Notes:** 3 jobs × 4 rustc plus about 10 agent threads is 22 busy threads, which slowed the probe by about 1.5 times, not
+  the 20 times seen in run 7775; so the share is not what timed it out, and that timeout is not reproduced here. In the
+  job logs the probe took 15–26 s every time its run overlapped dyno-bench's all-core tests (4 of 4) and about 7 s when it
+  did not (3 of 3); run beside them here it did not slow down. The dyno lib tests mostly wait, so 4 test threads instead of
+  14 made that run 2.3 times longer, while 8 matched 14. Raw output: the fix/main-after-7761 report.
+
 ### 2026-11-03, starving a test process by OS priority on macOS
 
 Quoted by [ADR 0041](adr/0041-deterministic-timing-in-tests.md) §5 (the starved run).

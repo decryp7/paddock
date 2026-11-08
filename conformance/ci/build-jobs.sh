@@ -25,10 +25,18 @@
 #        Windows  -          -           -        decryp7ology-dev, two jobs at once; 8 cores, 16 GB (its job log of
 #                                                 2026-10-30). Left unset: cargo's default is its 8 cores, the 8 the
 #                                                 workflows spelled before; the share (4 each) waits for the same A/B.
-#        macOS    1          10          32 GB    d7-mac-mini, capacity 1, on the developer Mac its agents share: up to 5
-#                                                 agents with CARGO_BUILD_JOBS=2 each (ER-24) keep 10 of its 14 cores, so
-#                                                 CI gets 4, as before. PADDOCK_CI_RESERVED_CORES=1 when the Mac is CI's
-#                                                 alone (13).
+#        macOS    3          2           32 GB    d7-mac-mini, -2 and -3 (2026-11-08), three runners of capacity 1 on the
+#                                                 developer Mac its agents share: (14 - 2) / 3 = 4 build jobs and 4 test
+#                                                 threads per job, the 4 build jobs each job had before. Measured
+#                                                 2026-11-09 (docs/benchmarks.md, "CI share on the shared Mac"): 23 busy
+#                                                 threads besides a CPU-bound test (3 x 4 rustc plus 10 for the agents)
+#                                                 slowed it from 2.7 to 4.0 s; the 60 s timeouts of run 7775 came from
+#                                                 all-core benchmarks in the same job, not from the share.
+#
+# NEXTEST_TEST_THREADS: the job's core share ((cores - kept) / jobs per host, not capped by RAM: that ceiling is per rustc)
+# divided by <split>, written with CARGO_BUILD_JOBS wherever that is computed from the share; PADDOCK_CI_TEST_THREADS (a
+# runner's runner.envs) replaces the share, PADDOCK_CI_BUILD_JOBS stands in for it. Left unset where CARGO_BUILD_JOBS is
+# (nextest then runs the profile's num-cpus).
 #      A Linux or Windows runner that sets PADDOCK_CI_JOBS_PER_HOST gets the formula (0 cores and 2 GB kept unless set).
 #
 # Cores: nproc (Linux and Git Bash; honours the container's cpuset), else sysctl hw.ncpu (macOS), else NUMBER_OF_PROCESSORS,
@@ -94,7 +102,8 @@ class_default() { # <share|cores|ram>
   case "${RUNNER_OS:-}:$1" in
     Linux:share) echo - ;;
     Windows:share) echo - ;;
-    macOS:cores) echo 10 ;;
+    macOS:share) echo 3 ;;
+    macOS:cores) echo 2 ;;
     macOS:ram) echo 32768 ;;
     *:share) echo 1 ;;
     *:cores) echo 0 ;;
@@ -102,13 +111,28 @@ class_default() { # <share|cores|ram>
   esac
 }
 
-emit() { # <jobs> <why>
-  say "CARGO_BUILD_JOBS=$1 ($2)"
-  if [ -n "${GITHUB_ENV:-}" ]; then echo "CARGO_BUILD_JOBS=$1" >>"$GITHUB_ENV"; else echo "CARGO_BUILD_JOBS=$1"; fi
+put() { # <name> <value> <why>
+  say "$1=$2 ($3)"
+  if [ -n "${GITHUB_ENV:-}" ]; then echo "$1=$2" >>"$GITHUB_ENV"; else echo "$1=$2"; fi
+}
+emit() { put CARGO_BUILD_JOBS "$@"; }
+# emit_threads <threads> <why>: nextest's test threads (NEXTEST_TEST_THREADS overrides the profile's num-cpus), or the
+# runner's PADDOCK_CI_TEST_THREADS divided by the split.
+emit_threads() {
+  local t="$1" why="$2"
+  if [ -n "${PADDOCK_CI_TEST_THREADS:-}" ]; then
+    t=$((PADDOCK_CI_TEST_THREADS / split))
+    why="the runner's PADDOCK_CI_TEST_THREADS / $split test runs at once"
+  fi
+  [ "$t" -ge 1 ] || t=1
+  put NEXTEST_TEST_THREADS "$t" "$why"
 }
 
 split="${1:-1}"
 is_count "$split" || fail "the split (builds at once in this job) must be a whole number >= 1, not '$split'"
+if [ -n "${PADDOCK_CI_TEST_THREADS:-}" ]; then
+  is_count "$PADDOCK_CI_TEST_THREADS" || fail "PADDOCK_CI_TEST_THREADS must be a whole number >= 1, not '$PADDOCK_CI_TEST_THREADS'"
+fi
 n=$(cores)
 mem=$(ram_mb)
 say "this host: ${n:-unknown} cores, ${mem:-unknown} MB of RAM, runner class ${RUNNER_OS:-unknown}"
@@ -118,6 +142,7 @@ if [ -n "${PADDOCK_CI_BUILD_JOBS:-}" ]; then
   jobs=$((PADDOCK_CI_BUILD_JOBS / split))
   [ "$jobs" -ge 1 ] || jobs=1
   emit "$jobs" "the runner's PADDOCK_CI_BUILD_JOBS / $split builds at once"
+  emit_threads "$jobs" "the runner's PADDOCK_CI_BUILD_JOBS / $split test runs at once"
   exit 0
 fi
 
@@ -152,6 +177,9 @@ if [ "$reserved" -ge "$n" ]; then
 fi
 jobs=$(((n - reserved) / share))
 why="($n cores - $reserved kept) / $share jobs per host"
+# The tests' share is the cores alone: the memory ceiling below is per rustc, not per test.
+threads=$((jobs / split))
+threads_why="$why / $split test runs at once"
 if is_count "$mem"; then
   by_ram=$(((mem - ram_kept) / (share * per_rustc)))
   if [ "$by_ram" -lt "$jobs" ]; then
@@ -164,3 +192,4 @@ fi
 jobs=$((jobs / split))
 [ "$jobs" -ge 1 ] || jobs=1
 emit "$jobs" "$why / $split builds at once"
+emit_threads "$threads" "$threads_why"

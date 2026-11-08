@@ -58,7 +58,8 @@ test-group = 'app-plugin-processes'
 fail-fast = false
 retries = 0
 failure-output = "immediate-final"
-# A CI job has its runner to itself.
+# Every core, where a CI job has its host to itself. On a shared host (three macOS runners on one Mac) build-jobs.sh
+# sets NEXTEST_TEST_THREADS to the job's core share, which overrides this (conformance/ci/build-jobs.sh).
 test-threads = "num-cpus"
 # The time budget of one test (Paddock rule 40, as crates/.config/nextest.toml): reported SLOW after 30 s and stopped,
 # failing the run, after 90 s, so a hung test costs a minute and a half instead of five (CI 6381: a hang in long_ops held

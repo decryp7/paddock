@@ -9,7 +9,8 @@ slow-timeout = { period = "30s", terminate-after = 10 }
 fail-fast = false
 retries = 0
 failure-output = "immediate-final"
-# A CI job has its runner to itself.
+# Every core, where a CI job has its host to itself. On a shared host (three macOS runners on one Mac) build-jobs.sh
+# sets NEXTEST_TEST_THREADS to the job's core share, which overrides this (conformance/ci/build-jobs.sh).
 test-threads = "num-cpus"
 # Reported SLOW after 30 s and stopped, failing the run, after 60 s, so a test that waits on a timeout fails CI instead of
 # slowing it down. A test that needs longer is a waiver below (an override with a `# waiver:` line saying why).
