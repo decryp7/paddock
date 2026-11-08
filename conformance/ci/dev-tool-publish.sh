@@ -5,12 +5,12 @@
 # compiler finds the file. The job ends early when the package already holds this runner's checksum file (uploaded last, so its
 # presence means the binary is complete). The build is in a fresh target folder without a compiler wrapper (RUSTC_WRAPPER unset).
 #
-# Environment: PUBLISH_TOKEN (a Gitea token with write:package; the workflow passes DEV_TOOL_PUBLISH_TOKEN or the job token),
+# Environment: PUBLISH_TOKEN (a Gitea token with write:package; the workflow passes the secret DEV_TOOL_PUBLISH_TOKEN),
 # PADDOCK_DEV_PACKAGES (default below), GITHUB_STEP_SUMMARY (optional). The token reaches curl through its stdin config, never a
 # command line, and is never printed.
 set -euo pipefail
 
-base=${PADDOCK_DEV_PACKAGES:-https://dev.decryptology.net/api/packages/decryp7/generic}
+base=${PADDOCK_DEV_PACKAGES:-https://dev.decryptology.net/api/packages/paddock-build-inputs/generic}
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 
@@ -19,7 +19,7 @@ phase_t0=$(date +%s)
 phase() { local now; now=$(date +%s); echo "dev-tool: $1 ($((now - phase_t0)) s since the last phase)"; phase_t0=$now; }
 summary() { [ -z "${GITHUB_STEP_SUMMARY:-}" ] || echo "$*" >>"$GITHUB_STEP_SUMMARY"; }
 
-[ -n "${PUBLISH_TOKEN:-}" ] || err "no write token. Create the Gitea secret DEV_TOOL_PUBLISH_TOKEN (a token with write:package, ADR 0022 section 3.3); the workflow falls back to the job token, which this Gitea refused or did not provide."
+[ -n "${PUBLISH_TOKEN:-}" ] || err "no write token. Create the Gitea secret DEV_TOOL_PUBLISH_TOKEN (a token with write:package, ADR 0022 section 3.3);"
 
 # curl with the token in a stdin config: curl_auth <curl args...>
 curl_auth() { { set +x; } 2>/dev/null; printf 'header = "Authorization: token %s"\n' "$PUBLISH_TOKEN" | curl -sS -K - --connect-timeout 10 --max-time 300 "$@"; }

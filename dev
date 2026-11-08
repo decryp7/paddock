@@ -8,7 +8,7 @@
 # PADDOCK_DEV_HOME (cache, default ~/.paddock-dev), PADDOCK_CI_MOUNT (a CI runner's kept mount, default /sccache),
 # PADDOCK_DEV_FRESH=1 (build from source in a fresh folder without a compiler wrapper, as release jobs do).
 # Download: PADDOCK_DEV_DOWNLOAD (1 on, 0 off; default on only when GITHUB_ACTIONS=true), PADDOCK_DEV_PACKAGES (the Gitea generic
-# package base, default https://dev.decryptology.net/api/packages/decryp7/generic), PADDOCK_DEV_TOKEN (read token, else the job's
+# package base, default https://dev.decryptology.net/api/packages/paddock-build-inputs/generic), PADDOCK_DEV_TOKEN (read token, else the job's
 # GITHUB_TOKEN; sent through curl's stdin config, never on a command line), PADDOCK_DEV_DOWNLOAD_TIMEOUT (seconds per file, default 60).
 set -eu
 
@@ -167,7 +167,7 @@ download_enabled() {
   [ "${GITHUB_ACTIONS:-}" = true ]
 }
 download_prebuilt() {
-  _base=${PADDOCK_DEV_PACKAGES:-https://dev.decryptology.net/api/packages/decryp7/generic}
+  _base=${PADDOCK_DEV_PACKAGES:-https://dev.decryptology.net/api/packages/paddock-build-inputs/generic}
   _tmo=${PADDOCK_DEV_DOWNLOAD_TIMEOUT:-60}
   _url="$_base/paddock-dev/$hash/$name"
   command -v curl >/dev/null 2>&1 || {
