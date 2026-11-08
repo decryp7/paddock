@@ -42,13 +42,14 @@ export const BINDING_PARENTS = {
 };
 
 /**
- * Crates that ship prebuilt binaries which cannot hold a Keychain call (reviewed 2026-11-08): ring's pregenerated assembler
- * objects of its crypto routines, evtx's and vcpkg's sample Windows DLLs. Any other crate with a binary is listed as "binary, not scanned".
+ * Crates reviewed to ship prebuilt binaries that cannot hold a Keychain call (2026-11-08), at the reviewed series: ring's
+ * pregenerated assembler objects of its crypto routines, evtx's and vcpkg's sample Windows DLLs. Any other crate or series
+ * with a binary is an error "binary, not scanned" (waivable by its exact path, `Cargo.lock#bin:<name>@<version>`).
  */
-export const REVIEWED_BINARIES = new Set(['ring', 'evtx', 'vcpkg']);
+export const REVIEWED_BINARIES = { ring: '0.17', evtx: '0.15', vcpkg: '0.2' };
 
-/** An objc2-security feature that switches a Keychain item on (the crate gates each Sec* item behind its own feature). */
-export const KEYCHAIN_FEATURE = /^Sec|Keychain/;
+/** The objc2-security features that switch a Keychain item on (ADR 0057 §3.2); the crate gates each Sec* item behind its own. */
+export const KEYCHAIN_FEATURE = /^(SecItem|SecKeychain|SecKeychainItem|SecKeychainSearch|SecImportExport|SecIdentitySearch)$/;
 
 /** The reviewed series of a version: 0.y.z gives "0.y", x.y.z gives "x". */
 export const series = (version) => (version.startsWith('0.') ? version.split('.').slice(0, 2).join('.') : version.split('.')[0]);
@@ -102,7 +103,7 @@ export function readGraph(meta, tree) {
     if (byKey.has(k) && byKey.get(k).id !== p.id) return { broken: `two packages are named ${k} (${byKey.get(k).id} and ${p.id}), so the tree cannot say which one it means` };
     byKey.set(k, p);
   }
-  const members = new Set((meta?.workspace_members ?? []).map((id) => packages.find((p) => p.id === id)?.name).filter(Boolean));
+  const members = new Set((meta?.workspace_members ?? []).map((id) => packages.find((p) => p.id === id)).filter(Boolean).map(label));
   if (members.size === 0) return { broken: 'the metadata lists no workspace member' };
   const stack = [];
   const parents = new Map();
@@ -122,8 +123,8 @@ export function readGraph(meta, tree) {
     const f = features.get(key) ?? features.set(key, new Set()).get(key);
     for (const x of m[4].split(',').filter(Boolean)) f.add(x);
   }
-  if (![...seen.values()].some((p) => members.has(p.name))) return { broken: 'the cargo tree contains no workspace member' };
-  return { crates: [...seen.values()].filter((p) => !members.has(p.name)), parents, features, members: [...members] };
+  if (![...seen.keys()].some((k) => members.has(k))) return { broken: 'the cargo tree contains no workspace member' };
+  return { crates: [...seen.values()].filter((p) => !members.has(label(p))), parents, features, members: [...members] };
 }
 
 /**
@@ -167,8 +168,8 @@ export function sourceScan(graph, { readSources = defaultReadSources, listBinari
   let read = 0;
   const unfetched = [];
   for (const p of graph.crates) {
-    const bins = REVIEWED_BINARIES.has(p.name) ? [] : listBinaries(p.manifest_path);
-    if (bins.length) binaries.push(`${label(p)}: ${bins.slice(0, 3).join(', ')}${bins.length > 3 ? ` and ${bins.length - 3} more` : ''}`);
+    const bins = REVIEWED_BINARIES[p.name] === series(p.version) ? [] : listBinaries(p.manifest_path);
+    if (bins.length) binaries.push({ key: `bin:${label(p)}`, what: `${label(p)}: ${bins.slice(0, 3).join(', ')}${bins.length > 3 ? ` and ${bins.length - 3} more` : ''}` });
     if (!scanBindings && MACOS_ONLY_BANNED.has(p.name)) continue; // their parents are reviewed in graphFindings
     const files = readSources(p.manifest_path);
     if (files.length === 0) {
