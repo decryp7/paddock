@@ -126,6 +126,8 @@ on:
         required: false
       RELEASE_TOKEN:
         required: false
+      BUILD_INPUTS_TOKEN:
+        required: false
 
 jobs:
   bundle:
@@ -265,6 +267,7 @@ jobs:
           signing-private-key: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           signing-key-password: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           updater-pubkey: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+          build-inputs-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
       # The app's own look at what was built (run paths and the executables a package must carry), before the seal check.
       - name: The app's own bundle check

@@ -927,6 +927,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
+          BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
           # Installers use the size-optimised `dist` profile (thin LTO, one codegen unit, stripped); the sidecars match.
           DEBRIEF_CARGO_PROFILE: dist
         run: |
@@ -937,6 +938,11 @@ jobs:
           if command -v cygpath >/dev/null; then target="$(cygpath -u "$target")"; fi
           rm -rf "$target/dist/bundle"
           bundles='${{ matrix.bundles }}'
+          # ADR 0062: the NSIS toolset (Windows) and the AppImage helpers come from the private store, never from GitHub.
+          here="$(cd ../../../conformance/ci && pwd)"
+          . "$here/tauri-build-lib.sh"
+          seed_build_inputs
+          tauri_verbose "$bundles"
           # Secrets pasted into Gitea often carry a trailing newline or a line break; both keys are single-line base64.
           if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then export TAURI_SIGNING_PRIVATE_KEY="$(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | tr -d ' \t\r\n')"; fi
           if [ -n "${TAURI_UPDATER_PUBKEY:-}" ]; then export TAURI_UPDATER_PUBKEY="$(printf '%s' "$TAURI_UPDATER_PUBKEY" | tr -d ' \t\r\n')"; fi
@@ -953,11 +959,11 @@ jobs:
             if [ "$RUNNER_OS" = macOS ]; then bundles="app,$bundles"; fi
             mkdir -p ../target
             node -e 'process.stdout.write(JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY } } }))' > ../target/updater.conf.json
-            npx tauri build --bundles "$bundles" --config src-tauri/tauri.sidecars.conf.json --config ../target/updater.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
+            tauri_build npx tauri build ${verbose[@]+"${verbose[@]}"} --bundles "$bundles" --config src-tauri/tauri.sidecars.conf.json --config ../target/updater.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
           else
             echo '::warning::No updater signing secrets: this build cannot update itself.'
             unset TAURI_UPDATER_PUBKEY TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-            npx tauri build --bundles "$bundles" --config src-tauri/tauri.sidecars.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
+            tauri_build npx tauri build ${verbose[@]+"${verbose[@]}"} --bundles "$bundles" --config src-tauri/tauri.sidecars.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
           fi
 
       # ADR 0032: no binary the installer carries (the app, its sidecars, duckdb.dll, named by the Tauri configuration) imports

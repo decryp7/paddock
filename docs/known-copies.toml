@@ -943,3 +943,68 @@ status = "planned"
   owner = "dyno"
   delete_by = "dyno-v1.1.1"
   note = "The pattern is copied from RAW_TEXT_RULES of the VM harness's screenshot check, which is on test/dyno-release-vm-checks-v2 and not yet on this line. Import it from there once it lands."
+
+# =====================================================================================================================
+# Build inputs (ADR 0062): fetch, verify, cache
+# =====================================================================================================================
+
+[[mechanism]]
+id = "build-input-fetch"
+title = "Getting an outside file for a build or release step: resolve, verify size and SHA-256, place it, name a failure"
+canonical = "tools/paddock-dev"
+paths = ["tools/paddock-dev/src/inputs/**"]
+status = "planned"
+
+  [[mechanism.copy]]
+  paths = ["ci-image/fetch-verified.sh"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "Stays only for the image build (ADR 0062 section 4); WP-4 reduces it to the image build's pins from `./dev inputs dockerfile-args`."
+
+  [[mechanism.copy]]
+  paths = [".gitea/actions/host-tools/action.yml"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "cargo-nextest: download, SHA-256, kept `tools` folder. WP-4 replaces it with `./dev inputs ensure`."
+
+  [[mechanism.copy]]
+  paths = [".gitea/actions/setup-rust/action.yml"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "The sccache step: download, SHA-256, tool cache. WP-4 replaces it with `./dev inputs ensure`."
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "libduckdb, CI copy (with `apps/debrief/scripts/ci/libduckdb-env.sh`). WP-4: from the store on every leg."
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/xtask/src/libduckdb.rs"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "libduckdb, developer copy (xtask). WP-4."
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/scripts/libduckdb.mjs"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "libduckdb, bundle copy. WP-4."
+
+  [[mechanism.copy]]
+  paths = [".gitea/actions/install-test-browser/action.yml"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "Chrome for Testing, CI copy (with `conformance/ci/install-test-browser.mjs`). WP-4."
+
+  [[mechanism.copy]]
+  paths = ["apps/spotter/scripts/install-test-browser.mjs"]
+  owner = "spotter"
+  delete_by = "spotter-v1.2.0"
+  note = "Chrome for Testing, Spotter's own copy. WP-4."
+
+  [[mechanism.copy]]
+  paths = ["conformance/ci/build-inputs.mjs"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "The interim reader of build-inputs.toml (WP-1); WP-3's `./dev inputs` replaces it."

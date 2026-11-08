@@ -1,0 +1,141 @@
+# Build inputs (ADR 0062): every file a build, test or release step needs from outside this repository, pinned by size and
+# SHA-256 and served from the private store (the Gitea organisation `paddock-build-inputs`, generic packages at
+# /api/packages/<org>/generic/<package>/<version>/<file>). A `url` is provenance only: no step fetches it; only a person
+# (or the mirror workflow) contacts a publisher, once per version, and uploads the verified file.
+#
+# Interim file of ADR 0062 WP-1: it holds the Tauri bundler helpers. WP-2 completes it with every other input and the
+# parser shared with paddock-runtime's catalogue; conformance/ci/build-inputs.mjs (the interim reader, registered in
+# docs/known-copies.toml) reads the subset below line by line and WP-3's `./dev inputs` replaces it.
+#
+# Entry keys: id, kind, version, source, licence (SPDX), ships (bytes end up inside an installer, so notices list it),
+# redistribute (false: never in a Gitea package), package, file (the name in the store), release_path, used_by,
+# tied_to (a lockfile package whose version decides the entry; "<npm package>@<version>").
+# Platform keys: key (linux-x86_64, windows-x86_64, ...), url, size, sha256, and `checked` (how the pin was first taken).
+
+format = 1
+
+[[input]]
+id = "apprun"
+kind = "bundler-helper"
+version = "apprun-old"
+source = "https://github.com/tauri-apps/binary-releases"
+licence = "MIT"
+ships = true
+redistribute = true
+package = "apprun"
+file = "AppRun-x86_64"
+release_path = true
+tied_to = "@tauri-apps/cli@2.12.3"
+used_by = "conformance/ci/tauri-bundle.sh scripts/demo/bundle.sh"
+
+  [[input.platform]]
+  key = "linux-x86_64"
+  url = "https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64"
+  size = 31552
+  sha256 = "f30140a43a0a59e46db21bdefdf749b9e9f2c6946e92afabbacf98b8ae73fb4f"
+  checked = "downloaded 2026-11-08, no upstream hash published"
+
+[[input]]
+id = "linuxdeploy"
+kind = "bundler-helper"
+version = "07333c6"
+source = "https://github.com/tauri-apps/binary-releases"
+licence = "MIT AND GPL-3.0-or-later"
+ships = false
+redistribute = true
+package = "linuxdeploy"
+file = "linuxdeploy-x86_64.AppImage"
+release_path = true
+tied_to = "@tauri-apps/cli@2.12.3"
+used_by = "conformance/ci/tauri-bundle.sh scripts/demo/bundle.sh"
+
+  [[input.platform]]
+  key = "linux-x86_64"
+  url = "https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy-07333c6/linuxdeploy-x86_64.AppImage"
+  size = 19810808
+  sha256 = "36a2d7e274d12e1050d0e9ecfe11d339ed54720b2bec464c286d53f8b07f5c62"
+  checked = "downloaded 2026-11-08, no upstream hash published"
+
+[[input]]
+id = "linuxdeploy-plugin-appimage"
+kind = "bundler-helper"
+version = "2026-11-08"
+source = "https://github.com/linuxdeploy/linuxdeploy-plugin-appimage"
+licence = "MIT AND GPL-2.0-only AND Artistic-2.0"
+ships = false
+redistribute = true
+package = "linuxdeploy-plugin-appimage"
+file = "linuxdeploy-plugin-appimage-x86_64.AppImage"
+release_path = true
+tied_to = "@tauri-apps/cli@2.12.3"
+used_by = "conformance/ci/tauri-bundle.sh scripts/demo/bundle.sh"
+
+  [[input.platform]]
+  key = "linux-x86_64"
+  url = "https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage"
+  size = 16488952
+  sha256 = "49d6a17160675a6bd1781699aae6bdf7692d98552e02a3671d2183d10547842e"
+  checked = "snapshot of the moving `continuous` release, taken 2026-11-08"
+
+[[input]]
+id = "appimage-type2-runtime"
+kind = "bundler-helper"
+version = "2026-11-08"
+source = "https://github.com/AppImage/type2-runtime"
+licence = "MIT AND LGPL-2.1-or-later"
+ships = true
+redistribute = true
+package = "appimage-type2-runtime"
+file = "runtime-x86_64"
+release_path = true
+tied_to = "@tauri-apps/cli@2.12.3"
+used_by = "conformance/ci/tauri-bundle.sh scripts/demo/bundle.sh"
+
+  [[input.platform]]
+  key = "linux-x86_64"
+  url = "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64"
+  size = 944632
+  sha256 = "617aa77314d57c8b8e4fae9c3f0b35af7b30d5529cb69e98f64f92510ed98a46"
+  checked = "snapshot of the moving `continuous` release, taken 2026-11-08"
+
+[[input]]
+id = "nsis"
+kind = "bundler-helper"
+version = "3.13"
+source = "https://github.com/tauri-apps/binary-releases"
+licence = "Zlib"
+ships = false
+redistribute = true
+package = "nsis"
+file = "nsis-3.13.zip"
+release_path = true
+tied_to = "@tauri-apps/cli@2.12.3"
+used_by = "conformance/ci/tauri-bundle.sh scripts/demo/bundle.sh .gitea/workflows/debrief.yml"
+
+  [[input.platform]]
+  key = "windows-x86_64"
+  url = "https://github.com/tauri-apps/binary-releases/releases/download/nsis-3.13/nsis-3.13.zip"
+  size = 2363925
+  sha256 = "ba63dffc4410ee89193e1cb5a41989991bd77c61068da17e3156d136b7b0b3d8"
+  checked = "downloaded 2026-11-08; SHA-1 db14f8af2ea346b786c6ae19343f61aaf5e09b8e equals Tauri 2.10.3's pin"
+
+[[input]]
+id = "nsis-tauri-utils"
+kind = "bundler-helper"
+version = "0.5.3"
+source = "https://github.com/tauri-apps/nsis-tauri-utils"
+licence = "MIT OR Apache-2.0"
+ships = true
+redistribute = true
+package = "nsis-tauri-utils"
+file = "nsis_tauri_utils.dll"
+release_path = true
+tied_to = "@tauri-apps/cli@2.12.3"
+used_by = "conformance/ci/tauri-bundle.sh scripts/demo/bundle.sh .gitea/workflows/debrief.yml"
+
+  [[input.platform]]
+  key = "windows-x86_64"
+  url = "https://github.com/tauri-apps/nsis-tauri-utils/releases/download/nsis_tauri_utils-v0.5.3/nsis_tauri_utils.dll"
+  size = 34304
+  sha256 = "5ba143b5db4a87d32d6e7802e033330aae56cbceabe0d1e3ba41948385ad4709"
+  checked = "downloaded 2026-11-08; SHA-1 75197fee3c6a814fe035788d1c34ead39349b860 equals Tauri 2.10.3's pin"

@@ -17,7 +17,11 @@ rm -rf "$dir/release/bundle"
 
 # One npm workspace for the repo (ADR 0014 §1): the root install brings the UI's packages and the app's Tauri CLI.
 [ -d node_modules ] || npm ci
-(cd apps/$app && npx tauri build --bundles "$bundles")
+here="$PWD/conformance/ci"
+. "$here/tauri-build-lib.sh"
+seed_build_inputs  # ADR 0062: Tauri's helpers come from the private store, never from GitHub
+tauri_verbose "$bundles"
+(cd apps/$app && tauri_build npx tauri build ${verbose[@]+"${verbose[@]}"} --bundles "$bundles")
 
 # ADR 0032: no binary the Windows installer carries imports the VC++ runtime (the list comes from the Tauri configuration).
 case ",$bundles," in

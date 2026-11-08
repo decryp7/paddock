@@ -53,7 +53,10 @@ eval "$(node "$here/../release/strip-keys.mjs")"
 [ -n "${APPLE_SIGNING_IDENTITY:-}" ] || unset APPLE_SIGNING_IDENTITY
 
 (cd "$root" && npm ci)
-if [ -n "$prepare" ]; then (cd "$root" && bash -euo pipefail -c "$prepare"); fi
+# ADR 0062: nothing here reaches GitHub: seed Tauri's tools folder and the AppImage runtime from the private store.
+. "$here/tauri-build-lib.sh"
+seed_build_inputs
+tauri_verbose "$bundles"
 (
   cd "$app_dir"
   # Ad-hoc builds ship WITHOUT the hardened runtime (tauri.macos.conf.json, rule 23): ad-hoc code under it cannot load a
@@ -66,11 +69,11 @@ if [ -n "$prepare" ]; then (cd "$root" && bash -euo pipefail -c "$prepare"); fi
   fi
   if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ] && [ -n "${TAURI_UPDATER_PUBKEY:-}" ]; then
     node -e 'process.stdout.write(JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY } } }))' > ../target/updater.conf.json
-    npx tauri build --bundles "$bundles" --config ../target/updater.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
+    tauri_build npx tauri build ${verbose[@]+"${verbose[@]}"} --bundles "$bundles" --config ../target/updater.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
   else
     echo '::warning::No updater signing secrets: this build cannot update itself.'
     unset TAURI_UPDATER_PUBKEY TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-    npx tauri build --bundles "$bundles" ${extra[@]+"${extra[@]}"} -- --profile dist
+    tauri_build npx tauri build ${verbose[@]+"${verbose[@]}"} --bundles "$bundles" ${extra[@]+"${extra[@]}"} -- --profile dist
   fi
 )
 

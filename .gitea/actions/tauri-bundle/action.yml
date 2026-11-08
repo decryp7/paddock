@@ -25,6 +25,9 @@ inputs:
   updater-pubkey:
     description: TAURI_UPDATER_PUBKEY (a secret); stripped of whitespace first.
     default: ""
+  build-inputs-token:
+    description: "BUILD_INPUTS_TOKEN (a secret): a read-only token for the private build-inputs store (ADR 0062), from which the Tauri helpers are seeded."
+    default: ""
 runs:
   using: composite
   steps:
@@ -38,6 +41,7 @@ runs:
         TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.signing-private-key }}
         TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.signing-key-password }}
         TAURI_UPDATER_PUBKEY: ${{ inputs.updater-pubkey }}
+        BUILD_INPUTS_TOKEN: ${{ inputs.build-inputs-token }}
       run: |
         args=(--app-dir "$APP_DIR" --root "${ROOT:-$APP_DIR}")
         if [ -n "$PREPARE" ]; then args+=(--prepare "$PREPARE"); fi

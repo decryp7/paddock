@@ -138,6 +138,7 @@ jobs:
       - name: Build the installers
         env:
           CI: "true"
+          BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         run: |
           bash scripts/demo/bundle.sh workbench-demo "${{ matrix.bundles }}"
 
