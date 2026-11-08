@@ -70,13 +70,14 @@ mod request;
 mod resume;
 mod transport;
 
+pub mod limits;
 #[cfg(feature = "tauri")]
 pub mod tauri;
 
-pub use config::{Config, MAX_CONNECTIONS};
+pub use config::{Config, DEFAULT_MAX_BYTES, MAX_CONNECTIONS};
 pub use engine::{Downloaded, Downloader, FreeSpace, phases};
 pub use error::{DownloadError, TransportError, TransportErrorKind, human_bytes};
-pub use fetch::Fetch;
+pub use fetch::{DEFAULT_FETCH_BYTES, Fetch};
 pub use hosts::{DEFAULT_HOST_CAP, HostCaps, MAX_HOST_CAP};
 #[cfg(feature = "http")]
 pub use http::{HttpConfig, HttpTransport, ProxyMode, ureq_agent, ureq_config};

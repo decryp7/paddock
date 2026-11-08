@@ -14,6 +14,7 @@ default = ["http"]
 http = ["dep:ureq", "dep:rustls", "paddock-download/http"]
 
 [dependencies]
+paddock-limits = { workspace = true }
 paddock-jobs = { workspace = true }
 # The workspace entry has no default features: `http` (ureq and rustls) comes only with this crate's own `http` feature.
 paddock-download = { workspace = true }

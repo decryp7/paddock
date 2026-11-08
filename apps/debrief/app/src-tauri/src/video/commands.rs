@@ -442,6 +442,16 @@ fn frame_indices(requested: &[u32], r: &VideoRecord, redo: bool) -> CmdResult<Ve
         .collect())
 }
 
+/// What describing these frames would cost (their count and a rough time), so the window can confirm first.
+#[tauri::command]
+pub async fn video_describe_plan<R: Runtime>(app: AppHandle<R>, win: CurrentWindow, request: FramesRequest) -> CmdResult<DescribePlan> {
+    let w = win.arc().clone();
+    let key = key_of_request(&request.key)?.to_string();
+    let record = folder_of(&w)?.load(&key).map_err(cmd)?;
+    let todo = frame_indices(&request.indices, &record, request.redo)?;
+    Ok(debrief_video::describe::describe_plan(todo.len(), &state(&app)?.describe_rate()))
+}
+
 /// The assistant for a job of this window (loaded model, the job's cancel flag).
 fn assistant<R: Runtime>(
     app: &AppHandle<R>,
@@ -467,6 +477,7 @@ pub async fn video_describe<R: Runtime>(app: AppHandle<R>, win: CurrentWindow, r
         let todo = frame_indices(&request.indices, &first, request.redo)?;
         let a = assistant(&h, &w, ctx)?;
         let (mut failed, mut last_error) = (0usize, None);
+        let (started, mut described) = (std::time::Instant::now(), 0usize);
         for (n, i) in todo.iter().enumerate() {
             if ctx.is_cancelled() {
                 break;
@@ -476,8 +487,8 @@ pub async fn video_describe<R: Runtime>(app: AppHandle<R>, win: CurrentWindow, r
             let r = st.edit(|| folder.load(&key)).map_err(cmd)?;
             let path = folder.frame_path(&r, *i).map_err(cmd)?;
             let ms = r.frames[*i].video_ms;
-            let described = load_frame(&path).and_then(|img| describe_frame(&a, &img, &r.name, *i + 1, r.frames.len(), ms));
-            match described {
+            let outcome = load_frame(&path).and_then(|img| describe_frame(&a, &img, &r.name, *i + 1, r.frames.len(), ms));
+            match outcome {
                 Ok(text) => {
                     edit_record(&st, &folder, &key, |r| {
                         if let Some(f) = r.frames.get_mut(*i).filter(|f| f.video_ms == ms) {
@@ -485,6 +496,7 @@ pub async fn video_describe<R: Runtime>(app: AppHandle<R>, win: CurrentWindow, r
                         }
                         Ok(())
                     })?;
+                    described += 1;
                 }
                 // The model cannot see, is gone or was cancelled: stop and say so.
                 Err(e @ (debrief_video::VideoError::AiUnavailable { .. } | debrief_video::VideoError::Cancelled)) => {
@@ -498,6 +510,10 @@ pub async fn video_describe<R: Runtime>(app: AppHandle<R>, win: CurrentWindow, r
                     last_error = Some(e);
                 }
             }
+        }
+        // Only a run that was not cut short says how long a frame takes.
+        if !ctx.is_cancelled() {
+            st.record_describe(described, started.elapsed().as_secs_f32());
         }
         if failed > 0 && failed == todo.len() {
             return Err(last_error

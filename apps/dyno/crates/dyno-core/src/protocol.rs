@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 /// 3: `Settings` lost `tray` and `tray_items` and holds the dashboard, menu bar and popup layouts as `paddock-widgets`
 /// layouts (family ADR 0035); `WidgetLayout`, `EditWidgetLayout`, `PopoverValues` and `WidgetLayoutChanged` are new.
 ///
-/// 4 (unreleased; one bump for everything below; the protocol is positional postcard, so an older peer reads these wrongly):
+/// 4 (Dyno 1.1.0; one bump for everything below; the protocol is positional postcard, so an older peer reads these wrongly):
 /// - learning: `baseline::Learning::Learning` holds `day`, `days_needed`, `since` and `ready_at` (was `days_done`, `days_needed`);
 /// - saved disk maps (ADR 0029): `DiskScanStatus` gained `origin`, `changed_bytes`, `replaces` and `not_saved`, `StartDiskScan`
 ///   gained `replaces`; `ForgetSavedDiskMap` and `ForgetSavedDiskMaps` are new;
@@ -37,7 +37,11 @@ use serde::{Deserialize, Serialize};
 ///   `ErrorCode::NeedsConsent` is new;
 /// - tray: `AlertSettings` gained `tray_alert_percent`. (`MenuBarItem::Number` also gained `format`, but it travels inside the
 ///   JSON widget layouts, not positionally.)
-pub const PROTOCOL_VERSION: u32 = 4;
+///
+/// 5 (the limits registry, package 1.4b; positional postcard again): `paddock_jobs::wire::WireState::Failed(String)` became
+/// `Failed { message, limit }` (`limit: Option<LimitExceeded>`), inside `Message::Job` and `Reply::Job`. The bytes are pinned by
+/// `tests/protocol_golden.rs`.
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// The major version the IPC handshake carries between the app (or the command line) and the agent: [`PROTOCOL_VERSION`], so a
 /// client of another protocol is refused at the handshake with "update the older one" (the minor stays 0: new variants go at the

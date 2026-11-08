@@ -49,7 +49,13 @@ function imageLib(s, version) {
   const dir = join(s.root, 'opt-libduckdb');
   mkdirSync(dir, { recursive: true });
   const [ma, mi, pa] = version.split('.');
-  writeFileSync(join(dir, 'duckdb.h'), `#define DUCKDB_API_VERSION_MAJOR ${ma}\n#define DUCKDB_API_VERSION_MINOR ${mi}\n#define DUCKDB_API_VERSION_PATCH ${pa}\n`);
+  if (Number(ma) >= 2) {
+    // DuckDB 2.x: duckdb.h keeps the stable C API's version (1.5.6); the library's own is in duckdb_v2.h.
+    writeFileSync(join(dir, 'duckdb.h'), '#define DUCKDB_API_VERSION_MAJOR 1\n#define DUCKDB_API_VERSION_MINOR 5\n#define DUCKDB_API_VERSION_PATCH 6\n');
+    writeFileSync(join(dir, 'duckdb_v2.h'), `#define DUCKDB_V2_API_VERSION_MAJOR ${ma}\n#define DUCKDB_V2_API_VERSION_MINOR ${mi}\n#define DUCKDB_V2_API_VERSION_PATCH ${pa}\n`);
+  } else {
+    writeFileSync(join(dir, 'duckdb.h'), `#define DUCKDB_API_VERSION_MAJOR ${ma}\n#define DUCKDB_API_VERSION_MINOR ${mi}\n#define DUCKDB_API_VERSION_PATCH ${pa}\n`);
+  }
   return dir;
 }
 
@@ -61,6 +67,18 @@ test('the CI image libduckdb is used when it has the pinned version, without a d
     assert.ok(!existsSync(join(s.root, 'fetched')), 'nothing fetched');
     assert.match(env, new RegExp(`^DUCKDB_LIB_DIR=${lib}$`, 'm'));
     assert.match(env, new RegExp(`^LD_LIBRARY_PATH=${lib}$`, 'm'));
+  } finally {
+    s.done();
+  }
+});
+
+test('a DuckDB 2.x image is recognised by duckdb_v2.h, not by the 1.5.6 in its duckdb.h', () => {
+  const s = scratch();
+  try {
+    const lib = imageLib(s, '2.0.0');
+    const { env } = run(s, 'libduckdb-env.sh', { RUNNER_OS: 'Linux', PADDOCK_CI_IMAGE: '1', DUCKDB_LIB_DIR: lib, DUCKDB_INCLUDE_DIR: lib, DEBRIEF_FETCH_LIBDUCKDB: fakeFetch(s, '2.0.0') });
+    assert.match(env, new RegExp(`^DUCKDB_LIB_DIR=${lib}$`, 'm'));
+    assert.ok(!existsSync(join(s.root, 'fetched')), 'nothing fetched');
   } finally {
     s.done();
   }

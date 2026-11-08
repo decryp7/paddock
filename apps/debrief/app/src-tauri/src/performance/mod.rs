@@ -50,8 +50,10 @@ pub struct PerformanceSettings {
     pub parse_threads: u32,
     /// DuckDB query threads.
     pub query_threads: u32,
-    /// Full-text index writer threads.
-    pub index_threads: u32,
+    /// Full-text index writer threads; 0: automatic (the usable cores, as many as fit their heaps in the import memory).
+    pub index_writer_threads: u32,
+    /// The heap of each full-text index writer thread.
+    pub index_heap_per_thread_mb: u32,
     /// The plugins' CPU share, percent.
     pub plugin_cpu_percent: u32,
     /// Cores no thread pool of Debrief's uses.
@@ -82,7 +84,8 @@ impl Default for PerformanceSettings {
             return_memory_at_once: false,
             parse_threads: 0,
             query_threads: 4,
-            index_threads: 2,
+            index_writer_threads: 0,
+            index_heap_per_thread_mb: section::DEFAULT_INDEX_HEAP_PER_THREAD_MB,
             plugin_cpu_percent: 100,
             leave_cores_free: 1,
             duck_memory_limit_mb: 0,
@@ -178,6 +181,37 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn an_older_file_with_the_old_index_threads_gets_the_automatic_writer() {
+        let d = temp("index-threads");
+        std::fs::write(
+            d.join(FILE),
+            json!({"version": 2, "indexThreads": 2, "queryThreads": 8}).to_string(),
+        )
+        .unwrap();
+        let s = load(Some(&d));
+        assert_eq!(
+            (s.index_writer_threads, s.query_threads),
+            (0, 8),
+            "the old key is dropped, the others kept"
+        );
+        assert_eq!(s.index_heap_per_thread_mb, section::DEFAULT_INDEX_HEAP_PER_THREAD_MB);
+        std::fs::write(
+            d.join(FILE),
+            json!({"version": 2, "indexWriterThreads": 6, "indexHeapPerThreadMb": 128}).to_string(),
+        )
+        .unwrap();
+        let s = load(Some(&d));
+        assert_eq!((s.index_writer_threads, s.index_heap_per_thread_mb), (6, 128));
+        std::fs::write(d.join(FILE), json!({"version": 2, "indexHeapPerThreadMb": 4}).to_string()).unwrap();
+        assert_eq!(
+            load(Some(&d)).index_heap_per_thread_mb,
+            section::DEFAULT_INDEX_HEAP_PER_THREAD_MB,
+            "below Tantivy's floor"
+        );
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

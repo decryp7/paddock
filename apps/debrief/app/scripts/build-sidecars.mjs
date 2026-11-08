@@ -12,8 +12,8 @@
 // libduckdb.dylib already has the install name `@rpath/libduckdb.dylib`, so it is copied as is.
 //
 // Run by the release build (`npx tauri build --config src-tauri/tauri.sidecars.conf.json` chains it after the
-// UI build). Tauri passes the target in TAURI_ENV_TARGET_TRIPLE; `universal-apple-darwin` builds both macOS
-// architectures and joins them with lipo.
+// UI build). Tauri passes the target in TAURI_ENV_TARGET_TRIPLE. macOS is Apple silicon only: Debrief supports Apple
+// silicon Macs only (a product decision, not a DuckDB limit), so Intel and universal macOS targets are refused.
 // Usage: node scripts/build-sidecars.mjs [--target <triple>] [--debug]
 // DEBRIEF_CARGO_PROFILE names another cargo profile (e.g. `dist` for releases); it must match the app's `--profile`.
 import { execFileSync } from 'node:child_process';
@@ -48,12 +48,15 @@ export function libduckdbFile(target) {
 /**
  * What to build and where cargo puts it. A build for the host itself runs without `--target`, into
  * `<targetDir>/<profile>`, where `tauri build` (without `--target`) builds the app: with `--target`, cargo
- * used `<targetDir>/<triple>/<profile>` and compiled every dependency a second time. Other targets, and both
- * halves of `universal-apple-darwin` (which Tauri also builds per triple), keep `--target` and their folder.
+ * used `<targetDir>/<triple>/<profile>` and compiled every dependency a second time. Other targets
+ * keep `--target` and their folder. Intel and universal macOS targets are refused (Debrief ships for Apple silicon only).
  */
 export function sidecarPlan({ target, host, profile, targetDir }) {
+  if (target === 'universal-apple-darwin' || target === 'x86_64-apple-darwin') {
+    throw new Error(`${target} is not supported: Debrief ships for Apple silicon (aarch64-apple-darwin) only, since DuckDB 2.x`);
+  }
   const native = target === host;
-  const triples = target === 'universal-apple-darwin' ? ['aarch64-apple-darwin', 'x86_64-apple-darwin'] : [target];
+  const triples = [target];
   const select = SIDECARS.flatMap((s) => ['-p', s, '--bin', s]);
   const release = profile === 'release' ? ['--release'] : profile === 'debug' ? [] : ['--profile', profile];
   const builds = native ? [['build', ...select, ...release]] : triples.map((t) => ['build', ...select, '--target', t, ...release]);
@@ -98,8 +101,7 @@ async function main() {
   for (const argv of builds) run('cargo', argv);
   for (const { file, built } of binaries) {
     const out = join(outDir, file);
-    if (built.length > 1) run('lipo', ['-create', '-output', out, ...built]);
-    else copyFileSync(built[0], out);
+    copyFileSync(built[0], out);
     if (!ext) chmodSync(out, 0o755);
     console.log(`sidecar: ${out}`);
   }

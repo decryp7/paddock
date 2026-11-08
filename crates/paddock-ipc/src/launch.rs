@@ -225,7 +225,9 @@ fn bootstrap_failure(label: &str, e: &io::Error) -> IpcError {
 /// Starts the child of `spec`, writes its bootstrap, and waits up to `spec.start_timeout` for it to connect (giving up
 /// at once if it exits). On any failure the child's tree is ended.
 pub fn launch(spec: &ChildSpec, handler: Arc<dyn Handler>) -> Result<Child, IpcError> {
-    let mut host = Host::listen(spec.limit, spec.protocol)?.named(spec.host_name.clone());
+    let mut host = Host::listen(spec.limit, spec.protocol)?
+        .named(spec.host_name.clone())
+        .same_account_only();
     let mut cmd = paddock_proc::command(&spec.program);
     if spec.clean_env {
         paddock_proc::clean_env(&mut cmd, KEPT_ENV);

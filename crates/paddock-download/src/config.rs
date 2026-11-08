@@ -5,6 +5,9 @@ use std::time::Duration;
 /// Most connections one download may use, whatever the setting says.
 pub const MAX_CONNECTIONS: usize = 16;
 
+/// The size limit of a file unless a request sets its own (64 GiB).
+pub const DEFAULT_MAX_BYTES: u64 = 64 * 1024 * 1024 * 1024;
+
 /// How downloads are run. `Config::default()` suits large files from CDNs; tests shorten the waits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -48,7 +51,7 @@ impl Default for Config {
             min_block: 256 * 1024,
             max_block: 8 * 1024 * 1024,
             max_buffer: 64 * 1024 * 1024,
-            max_bytes: 64 * 1024 * 1024 * 1024,
+            max_bytes: DEFAULT_MAX_BYTES,
             attempts: 5,
             backoff: Duration::from_millis(500),
             max_wait: Duration::from_secs(60),

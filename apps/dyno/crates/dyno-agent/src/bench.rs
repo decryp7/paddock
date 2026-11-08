@@ -1153,7 +1153,7 @@ mod tests {
         // The job names the safety stop; it is not shown as the person's cancel.
         let end = env.snapshot_where(env.job_id(), |s| s.state.is_terminal());
         assert!(
-            matches!(&end.state, paddock_jobs::JobState::Failed { message } if message.starts_with("Stopped for safety")),
+            matches!(&end.state, paddock_jobs::JobState::Failed { message, .. } if message.starts_with("Stopped for safety")),
             "{:?}",
             end.state
         );

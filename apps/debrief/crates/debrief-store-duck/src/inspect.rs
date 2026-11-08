@@ -419,7 +419,13 @@ impl Maintain for DuckStore {
                         }
                     })?;
                     if c.replaced > 0 {
-                        crate::pos::rebuild(&conn).map_err(engine)?;
+                        if let Some(notice) = self.inner.reorder(&conn) {
+                            self.changed();
+                            return Err(StoreError::Engine(format!(
+                                "Compacted {} segments into {}. {notice}",
+                                c.replaced, c.written
+                            )));
+                        }
                         conn.execute_batch("CHECKPOINT").map_err(engine)?;
                     }
                     c
@@ -455,6 +461,23 @@ impl Maintain for DuckStore {
                 conn.execute_batch(&crate::lanes::prune_sql(u64::MAX)).map_err(engine)?;
                 *lock(&self.inner.derived) = None;
                 format!("Cleared {n} cached analyses; they are computed again when next used.")
+            }
+            MaintenanceAction::OrderEvents => {
+                {
+                    let _writing = lock(&self.inner.write_lock);
+                    let conn = self.inner.conn()?;
+                    let notice = self.inner.reorder(&conn);
+                    // Cancel interrupted the ordering: it rolled back, the old positions and their mark are kept.
+                    if debrief_core::ql::QueryControl::current().is_some_and(|c| c.is_cancelled()) {
+                        return Err(StoreError::Cancelled);
+                    }
+                    if let Some(notice) = notice {
+                        return Err(StoreError::Engine(notice));
+                    }
+                    conn.execute_batch("CHECKPOINT").map_err(engine)?;
+                }
+                self.changed();
+                "The events are in time order.".to_string()
             }
         };
         Ok(MaintenanceReport { action, message })

@@ -88,6 +88,10 @@ pub(crate) struct LiveSlot {
     /// `flush_wanted` with the answer of whichever finished first, and a held event could wait for nothing.
     refreshing: Mutex<()>,
     annotating: Mutex<(Option<debrief_core::plugin::annotate::RecordCursor>, Option<std::time::Instant>)>,
+    /// What refreshes said the user should know (the store's notices), posted by the refresh's caller.
+    notices: Mutex<Vec<String>>,
+    /// A refresh found the events' time order incomplete: the refresh's caller starts the ordering job.
+    order_wanted: AtomicBool,
 }
 
 impl LiveSlot {
@@ -313,6 +317,7 @@ pub(crate) fn set<R: Runtime>(app: &AppHandle<R>, state: &Arc<WindowState>, enab
             if let Some(report) = apply_unless_stopped(&state, &paths, &batch_stop) {
                 emit_report(&handle, &owner, &report);
             }
+            post_notices(&handle, &owner, &state);
             if state.live.flush_wanted.load(Ordering::SeqCst) {
                 schedule_flush(&handle, &weak, &owner, &batch_stop);
             }
@@ -369,6 +374,37 @@ pub(crate) fn stop<R: Runtime>(app: &AppHandle<R>, label: &str) {
     emit_to_window(app, label, STOPPED_EVENT, ());
 }
 
+/// Posts what refreshes said the user should know as messages, each once (a refresh repeats it while it holds), and starts
+/// the ordering job when a refresh found the time order incomplete (at most one per window).
+fn post_notices<R: Runtime>(app: &AppHandle<R>, label: &str, state: &WindowState) {
+    use crate::notification_centre::centre::{NewNotice, NoticeScope, NoticeSeverity, NoticeSource};
+    let notices = std::mem::take(&mut *crate::sync::lock(&state.live.notices));
+    let mut unique: Vec<String> = Vec::new();
+    for n in notices {
+        if !unique.contains(&n) {
+            unique.push(n);
+        }
+    }
+    for text in unique {
+        let notice = NewNotice::new(
+            format!("live:notice:{text}"),
+            NoticeSource::Workspace,
+            NoticeSeverity::Warning,
+            "Live follow needs attention",
+            NoticeScope::Project,
+        )
+        .body(text)
+        .once();
+        crate::notification_centre::post(app, Some(label), notice, None);
+    }
+    if state.live.order_wanted.swap(false, Ordering::SeqCst) {
+        match crate::windows::CurrentWindow::of(app, label) {
+            Ok(win) => crate::store_pane::order_events_if_incomplete(app, &win),
+            Err(e) => log::warn!("the ordering job could not start: {}", e.message),
+        }
+    }
+}
+
 /// [`apply_changes`] unless the session stopped. `None`: stopped, nothing applied.
 fn apply_unless_stopped(state: &WindowState, paths: &[PathBuf], stop: &StopToken) -> Option<TailReport> {
     if stop.is_stopped() {
@@ -406,6 +442,11 @@ pub(crate) fn apply_changes(state: &WindowState, paths: &[PathBuf]) -> TailRepor
     let options = tail_options(state);
     let done = state.engine.store().map_err(|e| e.message).and_then(|store| {
         let appended = store.append_tail(paths).map_err(|e| e.to_string())?;
+        // E.g. the new events could not be put in time order: the store marked it and the ordering job repairs it.
+        crate::sync::lock(&state.live.notices).extend(appended.notices.iter().cloned());
+        if appended.order_incomplete {
+            state.live.order_wanted.store(true, Ordering::SeqCst);
+        }
         let report = state.live.session().after_refresh(&*store, &appended, &options);
         let annotating_later = {
             let mut a = crate::sync::lock(&state.live.annotating);
@@ -450,6 +491,7 @@ fn schedule_flush<R: Runtime>(app: &AppHandle<R>, state: &Weak<WindowState>, lab
         if let Some(report) = apply_unless_stopped(&win, &[], &stop) {
             emit_report(&app, &label, &report);
         }
+        post_notices(&app, &label, &win);
         if !win.live.flush_wanted.load(Ordering::SeqCst) {
             win.live.flush_scheduled.store(false, Ordering::SeqCst);
             // A refresh may have asked in between.

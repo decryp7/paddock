@@ -133,8 +133,7 @@ impl ScreenFacts {
             return Err("the answer is far too long".into());
         }
         let raw: ScreenFacts = serde_json::from_str(t).map_err(|e| {
-            let mut m = e.to_string();
-            m.truncate(200);
+            let m: String = e.to_string().chars().take(200).collect();
             format!("not valid JSON for the schema: {m}")
         })?;
         Ok(raw.bounded())
@@ -310,6 +309,16 @@ mod tests {
         #[test]
         fn parsing_never_panics(text in ".{0,600}") {
             let _ = ScreenFacts::parse(&text);
+        }
+    }
+
+    /// Fuzz crash 2026-11-05: the serde error quotes the bad value, so cutting it at a byte offset split a multibyte character.
+    #[test]
+    fn parse_error_message_is_cut_on_a_char_boundary() {
+        for pad in 0..4 {
+            let bad = format!("{{\"screen_kind\": \"{}{}\"}}", "a".repeat(pad), "\u{e9}".repeat(300));
+            let err = ScreenFacts::parse(&bad).unwrap_err();
+            assert!(err.starts_with("not valid JSON for the schema: "), "{err}");
         }
     }
 }

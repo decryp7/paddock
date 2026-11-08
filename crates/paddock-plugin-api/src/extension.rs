@@ -41,6 +41,12 @@ pub trait Contract: 'static {
     type Request: Serialize + DeserializeOwned;
     /// What the plugin answers.
     type Reply: Serialize + DeserializeOwned;
+    /// The minor that introduced `request`'s variant (default 0: always known). The host refuses to send a request
+    /// newer than the minor the plugin declared, before anything is sent (IP1 item 4), instead of letting an older plugin
+    /// fail to decode it.
+    fn introduced_in(_request: &Self::Request) -> u16 {
+        0
+    }
 }
 
 /// What a contract handler sees of the call.
@@ -53,6 +59,12 @@ impl ExtCtx<'_> {
     /// Whether the app cancelled the call; long work stops early when it is.
     pub fn is_cancelled(&self) -> bool {
         (self.cancelled)()
+    }
+
+    /// The failure a handler returns when it stopped because the app cancelled the call (`codes::CANCELLED`). A plugin
+    /// needs no dependency on `paddock-ipc` for it.
+    pub fn cancelled_error(&self) -> RemoteError {
+        paddock_ipc::CallCtx::cancelled_error()
     }
 
     /// The app's services (host files, reports, output).
