@@ -31,6 +31,9 @@ concurrency:
   group: dev-tool-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  PADDOCK_DEV_TOKEN: ${{ github.token }}
+
 jobs:
   publish:
     name: publish (${{ matrix.os }})
@@ -55,7 +58,8 @@ jobs:
 
       - uses: ./.gitea/actions/build-jobs
 
-      - uses: ./.gitea/actions/job-tmpdir
+      # A slot of the host (job isolation): its kept folders (the compile cache) and temp folder are this job's alone.
+      - uses: ./.gitea/actions/job-isolation
 
       - uses: ./.gitea/actions/setup-rust
 
@@ -64,7 +68,7 @@ jobs:
           PUBLISH_TOKEN: ${{ secrets.DEV_TOOL_PUBLISH_TOKEN || github.token }}
         run: bash conformance/ci/dev-tool-publish.sh
 
-      - uses: ./.gitea/actions/job-tmpdir
+      - uses: ./.gitea/actions/job-isolation
         if: always()
         with:
-          mode: remove
+          mode: release
