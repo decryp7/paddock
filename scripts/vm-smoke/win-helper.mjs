@@ -410,12 +410,20 @@ export async function jobsAfterAgentRestart(browser) {
   let killed = ''; loop.stdout.on('data', (b) => { killed += b; });
   const loopDone = new Promise((r) => loop.on('close', r));
   let gapTicks = 0;
-  for (let t = 0; t < 40 && loop.exitCode === null; t++) { await sleep(500); if (t % 4 === 3) { await p.keyboard.press('Escape').catch(() => {}); await d.openJobs().catch(() => {}); gapTicks++; } }
+  // A page loaded while the agent is gone asks for the jobs at once and fails (a list loaded earlier is kept as it is): the page is reloaded once, 3 s into the gap, then the panel is
+  // opened; the message is looked for by the host every 500 ms as well, because the page's observer is lost with the reload.
+  let hostSeen = false;
+  for (let t = 0; t < 60 && loop.exitCode === null; t++) {
+    await sleep(500);
+    if (t === 6) { await p.reload({ waitUntil: 'domcontentloaded', timeout: 20_000 }).catch(() => {}); await sleep(2500); await d.openJobs().catch(() => {}); gapTicks++; }
+    else if (t % 4 === 3) { await p.keyboard.press('Escape').catch(() => {}); await d.openJobs().catch(() => {}); gapTicks++; }
+    if ((await probe()) === true) hostSeen = true;
+  }
   await loopDone;
   let agentBack = false;
   for (let i = 0; i < 45 && !agentBack; i++) { await sleep(2000); const pid = ssh('(Get-Process dyno-agent -ErrorAction SilentlyContinue | Select-Object -First 1).Id', { admin: true }).trim().split('\n').at(-1); agentBack = /^\d+$/.test(pid) && pid !== oldPid && /^\s*\S/.test(ssh('& "$env:ProgramFiles\\Dyno\\dyno.exe" status 2>&1 | Select-Object -First 1')) && /Cpu|CPU|Memory/i.test(ssh('& "$env:ProgramFiles\\Dyno\\dyno.exe" status 2>&1 | Out-String')); }
   const backAt = Date.now();
-  const everShown = await p.evaluate(() => window.__jobsSeen === true).catch(() => false);
+  const everShown = hostSeen || (await p.evaluate(() => window.__jobsSeen === true).catch(() => false));
   await d.openJobs();
   let shownAfterBack = null; let secondsToClear = null;
   for (let i = 0; i < 30; i++) { shownAfterBack = await probe(); if (shownAfterBack === false) { secondsToClear = Math.round((Date.now() - backAt) / 1000); break; } await sleep(2000); }
