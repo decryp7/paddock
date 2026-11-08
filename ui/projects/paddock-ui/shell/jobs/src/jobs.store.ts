@@ -87,7 +87,7 @@ export const JobsStore = signalStore(
     lead: computed(() => store.jobs().find((j) => j.state === 'running') ?? null),
     _hasRunning: computed(() => store.jobs().some((j) => j.state === 'running')),
   })),
-  withMethods((store, backend = inject(JobsBackend), ports = inject(SHELL_PORTS), clock = inject(JOBS_CLOCK)) => {
+  withMethods((store, backend = inject(JobsBackend), ports = inject(SHELL_PORTS), clock = inject(JOBS_CLOCK), config = inject(JOBS_CONFIG)) => {
     const waiters = new Set<Waiter>();
 
     /** Merges snapshots under the highest-`seq` rule; returns the ones that changed the store. */
@@ -127,15 +127,41 @@ export const JobsStore = signalStore(
       patchState(store, setLoaded());
     };
 
+    /** Counts reads; a read that finishes after a newer one started is dropped, so it cannot overwrite the newer result. */
+    let generation = 0;
+    let refreshing = false;
+    let lastRefreshFailedAt = Number.NEGATIVE_INFINITY;
+
     /** Reads the list (also the Retry of a failed load). Never notifies: these jobs did not just end. */
     const load = async (): Promise<void> => {
+      const mine = ++generation;
       patchState(store, setLoading());
       try {
         const jobs = await backend.snapshot();
         // Merged in a sync step of its own: the state is read fresh there, not across the await (rule 29).
-        applyList(jobs);
+        if (mine === generation) applyList(jobs);
       } catch (e) {
-        patchState(store, setError(message(e)));
+        if (mine === generation) patchState(store, setError(message(e)));
+      }
+    };
+
+    /**
+     * The re-read a job event starts while the list is in error: the link is back, but the list may lack older jobs. It
+     * keeps the error up until a read succeeds (no "loading" in between, so the alert is not removed and announced again),
+     * runs at most one read at a time and, after a failed one, waits `stillWorkingAfterMs` before the next.
+     */
+    const refresh = async (): Promise<void> => {
+      if (refreshing || clock.now() - lastRefreshFailedAt < config.stillWorkingAfterMs) return;
+      refreshing = true;
+      const mine = ++generation;
+      try {
+        const jobs = await backend.snapshot();
+        if (mine === generation) applyList(jobs);
+      } catch (e) {
+        lastRefreshFailedAt = clock.now();
+        if (mine === generation) patchState(store, setError(message(e)));
+      } finally {
+        refreshing = false;
       }
     };
 
@@ -171,9 +197,8 @@ export const JobsStore = signalStore(
       /** A snapshot from the engine's event. A job that just ended is announced unless someone waits for it. */
       _receive(job: SuJobSnapshot): void {
         const before = store.jobs().find((j) => j.id === job.id);
-        // An event proves the link is back, but the list may lack jobs from before it: read it again. A list that still
-        // cannot be read keeps its error (`load` sets it again); `load` shows "loading", so events do not stack reads.
-        if (store.requestError() !== null) void load();
+        // An event proves the link is back: read the list again (see `refresh`).
+        if (store.requestError() !== null) void refresh();
         if (!merge([job]).length) return;
         const waited = settle(job);
         const justEnded = !isActiveJob(job) && (!before || isActiveJob(before));
