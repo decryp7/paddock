@@ -23,6 +23,7 @@ Add-Type -Namespace W -Name A -MemberDefinition '
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern int GetMenuItemCount(System.IntPtr m);
 [System.Runtime.InteropServices.DllImport("user32.dll", CharSet=System.Runtime.InteropServices.CharSet.Unicode)] public static extern int GetMenuString(System.IntPtr m, uint pos, System.Text.StringBuilder s, int n, uint flags);
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool GetMenuItemRect(System.IntPtr h, System.IntPtr m, uint pos, out RECT r);
+[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern System.IntPtr GetSubMenu(System.IntPtr m, int pos);
 public delegate bool EnumCb(System.IntPtr h, System.IntPtr l);
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }'
 [void][W.A]::SetProcessDPIAware()
@@ -54,6 +55,19 @@ function Menu-Windows {
 }
 # The items of the native menus that are open. Read per menu window (AutomationElement.FromHandle of each #32768 window, its MenuItem descendants); when that finds nothing, the
 # whole-desktop MenuItem search of the older probe is tried as well. Rows are "name<TAB>cx,cy".
+# One menu's items by position; a submenu is read without opening it (GetSubMenu) and its items are named "Parent > Item" (no coordinates: 0,0).
+function Read-Menu($h, $hm, $prefix, $depth) {
+  $out = @(); $cnt = [W.A]::GetMenuItemCount($hm)
+  for ($i = 0; $i -lt $cnt; $i++) {
+    $sb = New-Object System.Text.StringBuilder 128; [void][W.A]::GetMenuString($hm, [uint32]$i, $sb, 128, 0x400); $nm = ($sb.ToString() -replace '&', '')
+    $r = New-Object W.A+RECT; [void][W.A]::GetMenuItemRect($h, $hm, [uint32]$i, [ref]$r)
+    $at = if ($prefix) { '0,0' } else { "$([int](($r.L + $r.R) / 2)),$([int](($r.T + $r.B) / 2))" }
+    if ($nm) { $out += "$prefix$nm`t$at" }
+    $sub = [W.A]::GetSubMenu($hm, $i)
+    if ($sub -ne [IntPtr]::Zero -and $depth -lt 2) { $out += Read-Menu $h $sub "$prefix$nm > " ($depth + 1) }
+  }
+  return $out
+}
 function Menu-Items {
   $rows = @(); $seenNames = @{}
   # First reader: the menu's own items through Win32 (MN_GETHMENU on the #32768 window, then GetMenuString and GetMenuItemRect per item); UI Automation read none in 0ad round 4.
@@ -61,7 +75,7 @@ function Menu-Items {
     $h = [IntPtr][int64](($w -split "`t")[0])
     try {
       $hm = [W.A]::SendMessage($h, 0x1E1, [IntPtr]::Zero, [IntPtr]::Zero)
-      if ($hm -ne [IntPtr]::Zero) { $cnt = [W.A]::GetMenuItemCount($hm); for ($i = 0; $i -lt $cnt; $i++) { $sb = New-Object System.Text.StringBuilder 128; [void][W.A]::GetMenuString($hm, [uint32]$i, $sb, 128, 0x400); $r = New-Object W.A+RECT; [void][W.A]::GetMenuItemRect($h, $hm, [uint32]$i, [ref]$r); $nm = $sb.ToString(); if ($nm) { $rows += "$($nm -replace '&','')`t$([int](($r.L + $r.R) / 2)),$([int](($r.T + $r.B) / 2))" } } }
+      if ($hm -ne [IntPtr]::Zero) { $rows += Read-Menu $h $hm '' 0 }
     } catch { }
   }
   if ($rows.Count -gt 0) { return ($rows -join "`n") }

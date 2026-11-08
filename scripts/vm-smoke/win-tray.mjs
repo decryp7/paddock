@@ -106,19 +106,18 @@ export async function trayMenuStep(actor, { browser = null } = {}) {
   checks.push(...judgeNativeMenu({ control: control.watch, controlIcon: control.icon, attempts }));
   checks.push(...(metrics.length ? [] : [{ ok: false, kind: 'check', detail: 'the app log names no tray icon it created (metrics = 0), so the icons cannot be recognised' }]));
   checks.push({ ok: icons.length > 0, detail: icons.length ? `${icons.length} Dyno tray icon(s) on the taskbar${promoted ? ' (only after promoting them)' : ''}` : 'no Dyno icon found on the taskbar through UI Automation' });
-  const keep = menu.find((m) => /Keep awake/i.test(m.name));
+  // The submenus are read from the menu's own structure (win-act.ps1 Read-Menu: "Parent > Item"), without opening them: the click on an item did not open a readable submenu in 0ad round 5.
+  const top = menu.filter((m) => !m.name.includes(' > '));
+  const keep = top.find((m) => /^Keep awake$/i.test(m.name));
   checks.push({ ...(menu.length ? {} : { kind: 'check' }), ok: Boolean(keep), detail: keep ? `the menu has "${keep.name}"` : 'the menu has no Keep awake entry' });
-  if (keep) {
-    await actor.send(`click ${keep.at}`); await sleep(1500);
-    const sub = items(await actor.send('menu'));
-    evidence.push(`Keep awake submenu: ${sub.map((m) => m.name).join(' | ')}`);
-    checks.push({ ok: sub.some((m) => /hour|minutes|Until/i.test(m.name)), detail: sub.some((m) => /hour|minutes|Until/i.test(m.name)) ? 'the Keep awake submenu lists durations' : 'the Keep awake submenu lists no durations' });
-    await actor.send('key ESC'); await sleep(600);
-  }
-  const { menu: menu2 } = await openMenu(actor);
-  const wake = menu2.find((m) => /Wake device|Wake/i.test(m.name));
-  checks.push({ ...(menu2.length ? {} : { kind: 'check' }), ok: Boolean(wake), detail: wake ? `the menu has "${wake.name}"` : 'the menu has no Wake device entry' });
-  if (wake) { await actor.send(`click ${wake.at}`); await sleep(1500); evidence.push(`Wake device submenu: ${items(await actor.send('menu')).map((m) => m.name).join(' | ')}`); }
+  const keepSub = menu.filter((m) => /^Keep awake > /.test(m.name)).map((m) => m.name.replace(/^Keep awake > /, ''));
+  evidence.push(`Keep awake submenu: ${keepSub.join(' | ')}`);
+  if (keep) checks.push({ ok: keepSub.some((n) => /hour|minutes|Until/i.test(n)), detail: keepSub.some((n) => /hour|minutes|Until/i.test(n)) ? 'the Keep awake submenu lists durations' : 'the Keep awake submenu lists no durations' });
+  const wake = top.find((m) => /^Wake device$/i.test(m.name));
+  const wakeSub = menu.filter((m) => /^Wake device > /.test(m.name)).map((m) => m.name.replace(/^Wake device > /, ''));
+  evidence.push(`Wake device submenu: ${wakeSub.join(' | ')}`);
+  checks.push({ ...(menu.length ? {} : { kind: 'check' }), ok: Boolean(wake), detail: wake ? `the menu has "${wake.name}"` : 'the menu has no Wake device entry' });
+  if (wake) checks.push({ ok: wakeSub.includes('vm-check-device'), detail: wakeSub.includes('vm-check-device') ? 'the Wake device submenu lists the saved computer' : `the Wake device submenu does not list the saved computer (${wakeSub.join(', ') || 'empty'})` });
   await closeMenus(actor);
   await actor.shot('tray-menu');
   return result('Windows: tray right-click menu with the Keep awake and Wake device submenus', checks, evidence, 'both submenus are in the tray menu');

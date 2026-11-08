@@ -60,8 +60,9 @@ export function setupExeFacts(label) {
 export function defenderEvidence() {
   const det = ssh("Get-MpThreatDetection -ErrorAction SilentlyContinue | ForEach-Object { '' + $_.InitialDetectionTime + ' threat ' + $_.ThreatID + ' action ' + $_.ActionSuccess + ' ' + ($_.Resources -join ',') }; 'END'", { admin: true });
   const ev = ssh("Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Windows Defender/Operational'; Id = 1116,1117,1006 } -MaxEvents 20 -ErrorAction SilentlyContinue | ForEach-Object { $_.TimeCreated.ToString('s') + ' id=' + $_.Id + ': ' + (($_.Message -replace '\\s+',' ').Substring(0, [Math]::Min(400, $_.Message.Length))) }; 'END'", { admin: true });
+  const ver = ssh("$s = Get-MpComputerStatus; 'AMEngineVersion=' + $s.AMEngineVersion + ' AMProductVersion=' + $s.AMProductVersion + ' AntivirusSignatureVersion=' + $s.AntivirusSignatureVersion + ' signatures updated ' + $s.AntivirusSignatureLastUpdated", { admin: true }).trim();
   const lines = (t) => t.replace(/END\s*$/, '').trim().split('\n').map((l) => l.trim()).filter(Boolean);
-  return ['--- Defender Get-MpThreatDetection', ...(/END\s*$/.test(det) ? (lines(det).length ? lines(det) : ['(no detections)']) : ['(unreadable)']), '--- Defender Operational 1116/1117/1006', ...(/END\s*$/.test(ev) ? (lines(ev).length ? lines(ev) : ['(no events)']) : ['(unreadable)'])];
+  return [`--- Defender versions: ${ver || '(unreadable)'}`, '--- Defender Get-MpThreatDetection', ...(/END\s*$/.test(det) ? (lines(det).length ? lines(det) : ['(no detections)']) : ['(unreadable)']), '--- Defender Operational 1116/1117/1006', ...(/END\s*$/.test(ev) ? (lines(ev).length ? lines(ev) : ['(no events)']) : ['(unreadable)'])];
 }
 
 export function sameVersionRefused() {
@@ -231,7 +232,10 @@ const renderers = RENDERERS_PS;
 /** A hung or paused visible page on Windows: the WebView2 renderer of dyno-app is suspended (NtSuspendProcess, no debugger); the question is read from the window list. Keep Waiting cannot be pressed here (no button lookup in the actor), so the doubling stays a broken check. */
 export async function winHung() {
   ssh('Set-Content C:\\paddock-test\\vmcheck\\launch-hung.ps1 \'Start-Process "$env:ProgramFiles\\Dyno\\dyno-app.exe"\'; schtasks /create /tn DynoHungLaunch /sc once /st 00:00 /ru paddock-test /it /f /tr "cmd /c powershell -NoProfile -ExecutionPolicy Bypass -File C:\\paddock-test\\vmcheck\\launch-hung.ps1" | Out-Null; schtasks /run /tn DynoHungLaunch | Out-Null');
-  await sleep(30_000);
+  // Condition wait (up to 90 s) for the app and a WebView2 renderer under it, never a fixed sleep; when none comes, what the launch task did is the evidence.
+  let up = false;
+  for (let i = 0; i < 30 && !up; i++) { await sleep(3000); up = Number(ssh(`${NT}${renderers}$ids.Count`).trim().split('\n').at(-1)) > 0; }
+  const launchDiag = up ? 'a WebView2 renderer of dyno-app was up' : `no renderer after 90 s; task: ${ssh("schtasks /query /tn DynoHungLaunch /v /fo list | Select-String 'Last Result|Status|Last Run'").replace(/\s*\n\s*/g, ' | ')}; script: ${ssh('Get-Content C:\\paddock-test\\vmcheck\\launch-hung.ps1 -ErrorAction SilentlyContinue')}; dyno processes: ${ssh("(Get-Process dyno* -ErrorAction SilentlyContinue | ForEach-Object { $_.Name + ':' + $_.Id }) -join ','")}`;
   const actor = new Actor(); actor.start(); await sleep(6000);
   const r = await hungPageStep({
     now: () => Date.now() / 1000, sleep,
@@ -243,6 +247,7 @@ export async function winHung() {
   }, ROW_TITLES.hungPage);
   await actor.send('quit', 5000).catch(() => {});
   ssh('Get-Process dyno-app,dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force');
+  r.evidence = [...(r.evidence ?? []), `launch: ${launchDiag}`];
   return r;
 }
 
