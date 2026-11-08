@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseEvents, parseFields, originLine, eventLines, fieldOf, NOT_IN_EVENT, FIELDS, mpLogWindow, mpLogPs, mpLogLines, judgeControl, summarizeRate, planRateRun, runRate, installDetected, detectedName, EICAR, controlPs, eventsPs, nowPs, parseNow, versionsLine, threatPs, detectionTime } from './defender-evidence.mjs';
 
-// The shape of Defender's rendered 1116 (labels as Windows prints them: Name, ID, Severity, Category, Path, Detection Origin, Detection Type,
-// Detection Source, User, Process Name, Security intelligence Version, Engine Version; there is no "Signature ID" line). Values are invented.
+// The shape of Defender's rendered 1116 and 1117 as captured from the Paddock test VM on 2026-11-08 (an EICAR drop; labels exactly as Windows prints
+// them: Name, ID, Severity, Category, Path, Detection Origin, Detection Type, Detection Source, User, Process Name, [1117: Action, Action Status, Error
+// Code, Error description,] Security intelligence Version, Engine Version; there is no "Signature ID" line). The values are invented.
 const msg1116 = (path, extra = '') => `Microsoft Defender Antivirus has detected malware or other potentially unwanted software.
  For more information please see the following:
  https://go.microsoft.com/fwlink/?linkid=37020&name=Trojan:Win32/Example.A!ml&threatid=2147000000&enterprise=0
@@ -19,6 +20,25 @@ const msg1116 = (path, extra = '') => `Microsoft Defender Antivirus has detected
  	Process Name: C:\\Windows\\System32\\cmd.exe
  	Security intelligence Version: AV: 1.463.99.0, AS: 1.463.99.0, NIS: 1.463.99.0
  	Engine Version: AM: 1.1.24000.1, NIS: 1.1.24000.1${extra}`;
+const msg1117 = (path) => `Microsoft Defender Antivirus has detected malware or potentially unwanted software using Defender security intelligence and applied the remediation action defined in the security settings.
+ For more information please see the following:
+https://go.microsoft.com/fwlink/?linkid=37020&name=Trojan:Win32/Example.A!ml&threatid=2147000000&enterprise=0
+ 	Name: Trojan:Win32/Example.A!ml
+ 	ID: 2147000000
+ 	Severity: Severe
+ 	Category: Trojan
+ 	Path: file:_${path}
+ 	Detection Origin: Local machine
+ 	Detection Type: Concrete
+ 	Detection Source: Real-Time Protection
+ 	User: NT AUTHORITY\\SYSTEM
+ 	Process Name: C:\\Windows\\System32\\cmd.exe
+ 	Action: Quarantine
+ 	Action Status:  No additional actions required
+ 	Error Code: 0x00000000
+ 	Error description: The operation completed successfully.
+ 	Security intelligence Version: AV: 1.463.99.0, AS: 1.463.99.0, NIS: 1.463.99.0
+ 	Engine Version: AM: 1.1.24000.1, NIS: 1.1.24000.1`;
 const raw = (...evs) => evs.map((e) => `@@EVENT ${e.t} id=${e.id}\n${e.m}\n@@END`).join('\n') + '\nDONE';
 const T = (min, sec = 0) => `2026-11-08T04:${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}.0000000Z`;
 const SETUP = 'C:\\Program Files\\Dyno\\paddock-setup.exe';
@@ -196,4 +216,26 @@ test('plan lists 10 installs by default, each from a reverted snapshot', () => {
   const p = planRateRun({ snapshot: 's', installer: 'i' });
   assert.equal(p.installs, 10);
   assert.ok(p.steps.slice(1, 11).every((s) => /revert, start/.test(s)));
+});
+
+test('the real event order (newest first, the 1117 before its 1116) still finds the detection and its fields', () => {
+  const ev = parseEvents(raw({ t: T(3, 51), id: 1117, m: msg1117(SETUP) }, { t: T(3, 50), id: 1116, m: msg1116(SETUP) }));
+  assert.deepEqual(ev.map((e) => e.id), [1117, 1116]);
+  assert.equal(fieldOf(ev[0], 'Action'), 'Quarantine');
+  assert.equal(fieldOf(ev[0], 'Action Status'), 'No additional actions required');
+  assert.match(originLine(ev), /threat id 2147000000/);
+  assert.equal(detectionTime(ev), T(3, 50));
+  assert.equal(detectedName(ev), 'paddock-setup.exe');
+});
+test('MPLog lines as the guest writes them: a 23-character UTC ISO stamp, then the text; continuation lines have none', () => {
+  // Captured shape (2026-11-08): "2026-11-08T21:49:01.910 SDN:Issuing SDN query for ...", "Resource Path:C:\\..." with no stamp.
+  const w = mpLogWindow('2026-11-08T21:49:02.717Z', 30);
+  const stamp = '2026-11-08T21:49:01.910';
+  assert.equal(stamp.length, 23);
+  assert.ok(stamp >= w.lo && stamp <= w.hi, 'a line 1 s before the detection is inside the window');
+  assert.ok('2026-11-08T21:50:02.000' > w.hi && '2026-11-08T21:48:00.000' < w.lo);
+  const out = `@@LOG MPLog-20261029-174420.log\n${stamp} [RTP] [Mini-filter] Blocked file(#1): \\Device\\HarddiskVolume3\\x\n2026-11-08T21:49:02.717 DETECTIONEVENT MPSOURCE_REALTIME Virus:DOS/Example file:C:\\x;\nSTAMPED=5666\nDONE`;
+  const lines = mpLogLines(out, w);
+  assert.equal(lines.length, 4);
+  assert.match(lines[3], /DETECTIONEVENT MPSOURCE_REALTIME/);
 });
