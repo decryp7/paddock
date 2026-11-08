@@ -218,8 +218,15 @@ fn loggable_args(cli: &Cli, args: &[String]) -> Vec<String> {
     };
     args.iter()
         .map(|a| {
+            let masked = |v: &str| format!("<text: {} chars>", v.chars().count());
             if !a.starts_with("--") && free.contains(&a.as_str()) {
-                format!("<text: {} chars>", a.chars().count())
+                masked(a)
+            } else if let Some((flag, value)) = a.split_once('=')
+                && flag.starts_with("--")
+                && free.contains(&value)
+            {
+                // The `--title=Text` form of a free-text flag.
+                format!("{flag}={}", masked(value))
             } else {
                 a.clone()
             }

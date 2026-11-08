@@ -677,7 +677,24 @@ fn the_run_log_masks_free_text_and_a_failed_run_names_its_log_file() {
         &ctx,
     );
     assert_eq!(code, 0);
+    // The `--flag=value` form of the same flags.
+    let (code, _, _) = cli_in(
+        &[
+            "new",
+            "topic-two",
+            "--title=Equals Secret Title",
+            "--summary=equals hidden summary",
+            "--source=equals private source",
+            "--wiki",
+            &w,
+        ],
+        &ctx,
+    );
+    assert_eq!(code, 0);
     let all = read_logs();
+    for secret in ["Equals Secret Title", "equals hidden summary", "equals private source"] {
+        assert!(!all.contains(secret), "{secret} reached the log");
+    }
     for secret in ["secret subject text", "Top Secret Title", "hidden summary", "private source"] {
         assert!(!all.contains(secret), "`{secret}` reached the log");
     }

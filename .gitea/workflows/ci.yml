@@ -357,8 +357,30 @@ jobs:
       - name: Lint the wiki
         if: ${{ !cancelled() }}
         run: |
-          cargo run --locked -- --repo ../.. lint --er ../../engineering-rules/RULES.md | tee wiki-lint.out
-          echo "- wiki lint: $(tail -1 wiki-lint.out)" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          # The summary line is written whether the lint passes or fails; the step then ends with the lint's own exit code.
+          set +e
+          cargo run --locked -- --repo ../.. lint --er ../../engineering-rules/RULES.md 2>&1 | tee wiki-lint.out
+          rc=${PIPESTATUS[0]}
+          echo "- wiki lint (exit $rc): $(tail -1 wiki-lint.out)" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          exit "$rc"
+
+      # The tools build with a plain Rust toolchain: no GTK -sys crate may reach them through the shared crates (the workspace
+      # hack once pulled gtk-sys into paddock-proc on x86_64 Linux, so `cargo install` of wiki and heavy needed GTK headers). The
+      # check reads the dependency graph for the Linux target, so it holds on an image that happens to have GTK installed.
+      - name: No GTK in the tools' Linux build
+        if: ${{ !cancelled() }}
+        working-directory: .
+        run: |
+          rc=0
+          for tool in wiki heavy; do
+            hits=$(cd "tools/$tool" && cargo tree --locked --target x86_64-unknown-linux-gnu -e normal,build --prefix none \
+              | grep -E '^(gtk|gdk|gio|glib|gobject|pango|cairo|atk|gdk-pixbuf|soup|webkit2gtk|javascriptcore-rs)[a-z0-9-]*-(sys|sys-rs) ' | sort -u)
+            if [ -n "$hits" ]; then
+              echo "::error::tools/$tool depends on GTK -sys crates on x86_64 Linux: $(echo "$hits" | tr '\n' ' '). Add them to crates/.config/hakari.toml traversal-excludes, run cargo hakari generate and refresh the lockfiles."
+              rc=1
+            fi
+          done
+          exit "$rc"
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
