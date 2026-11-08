@@ -76,6 +76,6 @@ fn a_generated_video_is_analysed_by_the_real_ffmpeg() {
     assert!(frames.windows(2).all(|w| w[0].video_ms < w[1].video_ms));
     for f in &frames {
         let bytes = std::fs::read(&f.path).unwrap();
-        assert!(debrief_ai::vision::sanitize(&bytes, 1_000_000, &Default::default()).is_ok());
+        assert!(debrief_image::sanitize(&bytes, 1_000_000, &Default::default()).is_ok());
     }
 }

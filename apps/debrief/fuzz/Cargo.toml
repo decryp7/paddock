@@ -18,6 +18,7 @@ debrief-notes = { path = "../crates/debrief-notes" }
 debrief-plugin-api = { path = "../crates/debrief-plugin-api" }
 debrief-plugin-package = { path = "../crates/debrief-plugin-package" }
 debrief-ai = { path = "../crates/debrief-ai" }
+debrief-image = { path = "../crates/debrief-image" }
 debrief-plugin-registry = { path = "../crates/debrief-plugin-registry" }
 debrief-plugin-windows = { path = "../crates/debrief-plugin-windows" }
 debrief-plugin-web = { path = "../crates/debrief-plugin-web" }

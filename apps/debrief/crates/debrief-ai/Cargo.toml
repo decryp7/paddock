@@ -11,6 +11,7 @@ description = "AI assistant for Debrief on Pitwall: engine-validated proposals, 
 [dependencies]
 debrief-core = { path = "../debrief-core" }
 debrief-collect = { path = "../debrief-collect" }
+debrief-image = { path = "../debrief-image" }
 base64.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }
@@ -22,8 +23,6 @@ log.workspace = true
 regex.workspace = true
 getrandom.workspace = true
 url = "2"
-# Decoding untrusted images for the model (ADR 0025): only these formats, no others compiled in.
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "gif", "webp"] }
 percent-encoding = "2"
 ureq = { version = "3", default-features = false, features = ["rustls", "gzip", "platform-verifier"] }
 # The TLS stack ureq already uses; named here only to recognise certificate errors (`net::classify`).

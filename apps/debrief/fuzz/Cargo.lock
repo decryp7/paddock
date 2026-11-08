@@ -497,8 +497,8 @@ dependencies = [
  "base64",
  "debrief-collect",
  "debrief-core",
+ "debrief-image",
  "getrandom 0.4.3",
- "image",
  "libc",
  "log",
  "percent-encoding",
@@ -608,6 +608,7 @@ dependencies = [
  "debrief-core",
  "debrief-dump",
  "debrief-etw",
+ "debrief-image",
  "debrief-ipc",
  "debrief-notes",
  "debrief-plugin-api",
@@ -625,6 +626,15 @@ dependencies = [
  "debrief-symbols",
  "libfuzzer-sys",
  "serde_json",
+]
+
+[[package]]
+name = "debrief-image"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "serde",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

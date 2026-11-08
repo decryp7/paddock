@@ -4,7 +4,7 @@
 
 use super::*;
 use base64::Engine as _;
-use debrief_ai::vision::image::testing::{claimed_png, screenshot_png};
+use debrief_image::testing::{claimed_png, screenshot_png};
 
 fn vision(replies: Vec<Reply>) -> Arc<dyn LlmProvider> {
     Arc::new(ScriptedProvider::new(replies).with_vision())
@@ -52,7 +52,7 @@ fn images_open_as_clean_copies_within_limits() {
         (Some(2400), Some(1350))
     );
     let (w, h) = (img["width"].as_u64().unwrap(), img["height"].as_u64().unwrap());
-    assert!(w * h <= debrief_ai::vision::image::DEFAULT_TARGET_PIXELS && w < 2400, "{w}x{h}");
+    assert!(w * h <= debrief_image::DEFAULT_TARGET_PIXELS && w < 2400, "{w}x{h}");
     assert!(img["dataUrl"].as_str().unwrap().starts_with("data:image/png;base64,"));
     assert_eq!(img["sourceFormat"], "png");
     // Not an image, a bomb's header, an unsupported extension: typed refusals.

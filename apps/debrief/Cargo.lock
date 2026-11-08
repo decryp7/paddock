@@ -1600,9 +1600,9 @@ dependencies = [
  "base64 0.23.1",
  "debrief-collect",
  "debrief-core",
+ "debrief-image",
  "debrief-store-duck",
  "getrandom 0.4.3",
- "image",
  "libc",
  "log",
  "percent-encoding",
@@ -1647,6 +1647,7 @@ dependencies = [
  "debrief-collect",
  "debrief-core",
  "debrief-dump",
+ "debrief-image",
  "debrief-ipc",
  "debrief-notes",
  "debrief-pdf",
@@ -1853,6 +1854,16 @@ dependencies = [
  "anyhow",
  "debrief-plugin-api",
  "debrief-plugin-test",
+]
+
+[[package]]
+name = "debrief-image"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "proptest",
+ "serde",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2284,6 +2295,7 @@ dependencies = [
  "chrono",
  "debrief-ai",
  "debrief-core",
+ "debrief-image",
  "debrief-ipc",
  "log",
  "lzma-rs",

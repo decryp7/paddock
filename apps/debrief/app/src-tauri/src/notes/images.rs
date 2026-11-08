@@ -4,7 +4,7 @@
 //! image opens from a shared project without the original file. Keys are the SHA-256 of the original file.
 
 use crate::error::{CmdError, CmdResult, ErrorCode};
-use debrief_ai::vision::image::{sanitize, ImageLimits, SanitizedImage};
+use debrief_image::{sanitize, ImageLimits, SanitizedImage};
 use debrief_notes::{image_key, is_image_key, ImageRef};
 use serde::Serialize;
 use std::collections::VecDeque;
@@ -106,7 +106,7 @@ impl NoteImages {
     }
 }
 
-fn bad_image(e: debrief_ai::vision::ImageError) -> CmdError {
+fn bad_image(e: debrief_image::ImageError) -> CmdError {
     CmdError::invalid(e.to_string())
 }
 

@@ -5,8 +5,8 @@
 //! capture time in the EXIF data is the one fact kept. Decoders are third-party code: a panic in one is caught
 //! and reported as a damaged image.
 
-use super::exif::{capture_time, ExifTime};
-use crate::llm::{ImageInput, ImageMime};
+use crate::exif::{capture_time, ExifTime};
+use crate::input::{ImageInput, ImageMime};
 use ::image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader, Limits, RgbImage};
 use std::io::Cursor;
 use thiserror::Error;
@@ -366,7 +366,7 @@ mod tests {
     fn metadata_is_dropped_but_the_capture_time_is_kept() {
         let img = RgbImage::from_fn(16, 16, |_, _| Rgb([10, 200, 10]));
         let jpeg = encode_with(&img, ::image::ImageFormat::Jpeg);
-        let tiff = crate::vision::exif::tests::tiff(Some("2026:10:21 09:14:03"), None, Some("+02:00"));
+        let tiff = crate::exif::tests::tiff(Some("2026:10:21 09:14:03"), None, Some("+02:00"));
         let with = with_exif(&jpeg, &tiff);
         let s = clean(&with).unwrap();
         let t = s.capture.unwrap();

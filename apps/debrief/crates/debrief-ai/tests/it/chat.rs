@@ -568,10 +568,10 @@ fn provider_trait_objects_work_with_chat() {
 }
 
 fn screenshot() -> debrief_ai::llm::ImageInput {
-    debrief_ai::vision::image::sanitize(
-        &debrief_ai::vision::image::testing::screenshot_png(200, 120),
+    debrief_image::sanitize(
+        &debrief_image::testing::screenshot_png(200, 120),
         1 << 20,
-        &debrief_ai::vision::image::ImageLimits::default(),
+        &debrief_image::ImageLimits::default(),
     )
     .unwrap()
     .image

@@ -128,7 +128,7 @@ pub fn self_test(tools: &Tools, scratch: &Path, cancel: &AtomicBool) -> Result<S
         }
         for f in &frames {
             let bytes = std::fs::read(&f.path)?;
-            debrief_ai::vision::image::sanitize(&bytes, 64 * 48, &Default::default())
+            debrief_image::sanitize(&bytes, 64 * 48, &Default::default())
                 .map_err(|e| failed("reading the extracted frames", e.to_string()))?;
         }
         Ok(report)

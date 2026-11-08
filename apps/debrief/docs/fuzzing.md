@@ -69,7 +69,7 @@ inputs only to the first directory, so `fuzz/corpus/` stays small (seeds copied 
 | `fuzz_dotnet_ipc` | .NET diagnostics IPC replies (`debrief-plugin-dotnet`, without the plugin feature); its ETW events are `debrief-etw`'s and fuzzed by `fuzz_native_etw` |
 | `fuzz_native_etw` | ETW events of a native capture (kernel, stack walks, context switches, images, heap provider, CLR) through `debrief-etw`'s converter and `.etl` scanner, symbols for the collected addresses, then the nettrace importer (ADR 0022) |
 | `fuzz_native_pe` | PE headers and the CodeView PDB identity (`debrief_symbols::pe`), and the symbol-cache path a PDB name becomes |
-| `fuzz_image` | The AI's image sanitiser (ADR 0025): any bytes through signature sniffing, the claimed-size guard, the decoders (PNG, JPEG, BMP, GIF, WebP) and the re-encoding, within small limits |
+| `fuzz_image` | The image sanitiser (ADR 0025, `debrief-image`): any bytes through signature sniffing, the claimed-size guard, the decoders (PNG, JPEG, BMP, GIF, WebP) and the re-encoding, within small limits |
 | `fuzz_vision_facts` | What a model writes about a screenshot (strict JSON, bounded) and the EXIF capture-time reader |
 | `fuzz_dump_minidump` | the dumps plugin's minidump reader (`debrief-plugin-dumps` without the plugin feature: ranges, full-dump compaction, stack walks), then the dump engine's findings, views and wire round trip |
 | `fuzz_dump_umdh` | the UMDH snapshot/diff reader, then growth, grouping, tree and leak findings |

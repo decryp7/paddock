@@ -9,10 +9,10 @@ use crate::jobs::{JobCtx, JobLink, JobProgress};
 use crate::windows::{CurrentWindow, WindowState};
 use debrief_ai::assistant::{Assistant, Narrative};
 use debrief_ai::llm::LlmProvider;
-use debrief_ai::vision::image::{sanitize, ImageLimits, SanitizedImage, SourceFormat};
 use debrief_ai::vision::{RelatedOutcome, RelatedStage};
 use debrief_ai::{AiError, StoreAccess, StoreRef};
 use debrief_core::related::{find_related, ExifStamp, QuerySource, RelatedRequest, RelatedResult, TimeEvidence};
+use debrief_image::{sanitize, ImageLimits, SanitizedImage, SourceFormat};
 use serde::Serialize;
 use std::collections::VecDeque;
 use std::path::Path;
@@ -137,7 +137,7 @@ fn clean_name(name: &str) -> String {
     }
 }
 
-fn image_error(e: debrief_ai::vision::ImageError) -> AiCmdError {
+fn image_error(e: debrief_image::ImageError) -> AiCmdError {
     AiCmdError::invalid(e.to_string())
 }
 
@@ -173,7 +173,7 @@ pub async fn ai_image_open<R: Runtime>(
     let w = win.arc().clone();
     let granted = grants.read_or_listed(&path, SourceFormat::EXTENSIONS, |raw| listed_in_workspace(&w, raw))?;
     let file = granted.path().to_path_buf();
-    let target = debrief_ai::vision::image::DEFAULT_TARGET_PIXELS;
+    let target = debrief_image::DEFAULT_TARGET_PIXELS;
     crate::sync::blocking("opening the image", move || {
         let meta = std::fs::metadata(&file).map_err(|e| AiCmdError::not_found(format!("cannot read {}: {e}", file.display())))?;
         let limit = ImageLimits::default().max_file_bytes as u64;
@@ -214,7 +214,7 @@ pub async fn ai_image_paste<R: Runtime>(app: AppHandle<R>, win: CurrentWindow, d
         )));
     }
     let w = win.arc().clone();
-    let target = debrief_ai::vision::image::DEFAULT_TARGET_PIXELS;
+    let target = debrief_image::DEFAULT_TARGET_PIXELS;
     crate::sync::blocking("reading the image", move || {
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(data.trim())
@@ -284,7 +284,7 @@ pub(crate) fn link_of(img: &OpenImage) -> Option<JobLink> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use debrief_ai::vision::image::testing::screenshot_png;
+    use debrief_image::testing::screenshot_png;
 
     fn clean() -> SanitizedImage {
         sanitize(&screenshot_png(64, 40), 1 << 20, &ImageLimits::default()).unwrap()
@@ -309,7 +309,7 @@ mod tests {
     fn the_ui_gets_the_clean_copy_only() {
         let c = ImageCache::default();
         let mut img = clean();
-        img.capture = Some(debrief_ai::vision::exif::ExifTime {
+        img.capture = Some(debrief_image::exif::ExifTime {
             local: "2026-10-21 09:14:03".into(),
             offset: None,
         });
