@@ -13,7 +13,7 @@
 //! Panics: a panic in a plugin's code is answered as a typed `PANIC` error and the process keeps serving. That is
 //! the SDK's behaviour for every plugin; the harness's own tests check it with a fixture that panics on request.
 
-use crate::{Launch, PluginUnderTest};
+use crate::{phase, Launch, PluginUnderTest};
 use debrief_ipc::peer::{code, CANCEL_GRACE};
 use debrief_ipc::{IpcError, StreamEvent};
 use debrief_plugin_api::protocol::{FileInfo, HostFileRef, PluginRequest, MAX_EVENTS_PER_ITEM};
@@ -66,6 +66,20 @@ impl std::fmt::Display for Report {
     }
 }
 
+/// Runs one check, writing its start and end to stderr and adding its duration to the detail (ER-27).
+fn timed(name: &'static str, f: impl FnOnce() -> Result<String, String>) -> Check {
+    phase(format_args!("check {name}: start"));
+    let began = Instant::now();
+    let r = f();
+    let ms = began.elapsed().as_millis();
+    let c = check(name, r.map(|d| format!("{d} ({ms} ms)")).map_err(|d| format!("{d} ({ms} ms)")));
+    phase(format_args!(
+        "check {name}: {} after {ms} ms",
+        if c.passed { "passed" } else { "FAILED" }
+    ));
+    c
+}
+
 fn check(name: &'static str, r: Result<String, String>) -> Check {
     match r {
         Ok(detail) => Check {
@@ -94,24 +108,9 @@ fn synthetic(lines: usize) -> Vec<u8> {
     s.into_bytes()
 }
 
-/// Runs every check against `p` (see the module docs); `samples` are files its importers should read.
-pub fn run(p: &PluginUnderTest, samples: &[PathBuf]) -> Report {
-    let mut r = Report::default();
-    r.checks.push(check("manifest", manifest(p)));
-    r.checks.push(check(
-        "permissions",
-        Ok(format!(
-            "ran with {:?} ({})",
-            p.granted(),
-            if p.launch_options().third_party {
-                "contained as a third-party plugin"
-            } else {
-                "as Debrief's own plugin"
-            }
-        )),
-    ));
-    r.checks.push(check("typed-errors", typed_errors(p)));
-    let inputs: Vec<(String, Vec<u8>)> = if samples.is_empty() {
+/// The inputs the import checks run over: the samples, or a synthetic log when there are none.
+fn inputs(samples: &[PathBuf]) -> Vec<(String, Vec<u8>)> {
+    if samples.is_empty() {
         vec![("synthetic.log".into(), synthetic(2000))]
     } else {
         samples
@@ -122,10 +121,29 @@ pub fn run(p: &PluginUnderTest, samples: &[PathBuf]) -> Report {
                     .map(|b| (s.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), b))
             })
             .collect()
-    };
-    r.checks.push(check("bounded-output", bounded(p, &inputs)));
-    r.checks.push(check("cancellation", cancellation(p, &inputs)));
-    r.checks.push(check("oversized-frames", oversized(p, &inputs)));
+    }
+}
+
+/// Runs every check against `p` (see the module docs); `samples` are files its importers should read.
+pub fn run(p: &PluginUnderTest, samples: &[PathBuf]) -> Report {
+    let mut r = Report::default();
+    r.checks.push(timed("manifest", || manifest(p)));
+    r.checks.push(timed("permissions", || {
+        Ok(format!(
+            "ran with {:?} ({})",
+            p.granted(),
+            if p.launch_options().third_party {
+                "contained as a third-party plugin"
+            } else {
+                "as Debrief's own plugin"
+            }
+        ))
+    }));
+    r.checks.push(timed("typed-errors", || typed_errors(p)));
+    let inputs = inputs(samples);
+    r.checks.push(timed("bounded-output", || bounded(p, &inputs)));
+    r.checks.push(timed("cancellation", || cancellation(p, &inputs)));
+    r.checks.push(timed("oversized-frames", || oversized(p, &inputs)));
     r
 }
 
@@ -218,7 +236,7 @@ fn bounded(p: &PluginUnderTest, inputs: &[(String, Vec<u8>)]) -> Result<String, 
                 continue;
             }
             let out = p
-                .import_within(&i.id, name, bytes, IMPORT_TIMEOUT)
+                .import_within(&i.id, name, bytes, p.launch_options().import_timeout)
                 .map_err(|e| format!("importer \"{}\" on {name}: {e:#}", i.id))?;
             if let Some(n) = out.items.iter().find(|n| **n > MAX_EVENTS_PER_ITEM) {
                 return Err(format!(
@@ -262,6 +280,11 @@ fn cancellation(p: &PluginUnderTest, inputs: &[(String, Vec<u8>)]) -> Result<Str
     } else {
         debrief_plugin_api::text::decode(&big).map(String::into_bytes).unwrap_or(big)
     };
+    phase(format_args!(
+        "cancellation: lending {} bytes to importer \"{}\"",
+        content.len(),
+        importer.id
+    ));
     let id = p.host.lend_file(content.clone());
     let req = PluginRequest::Import {
         importer: importer.id.clone(),
@@ -278,39 +301,83 @@ fn cancellation(p: &PluginUnderTest, inputs: &[(String, Vec<u8>)]) -> Result<Str
     };
     let result = (|| -> Result<String, String> {
         let mut stream = p.child.peer().stream_request(&req, 1).map_err(|e| e.to_string())?;
-        // Give up on it once it has read the whole file (the SDK stops reads at a cancel itself): what is checked
-        // is that the importer's own work ends.
-        let read_before = p.host.bytes_read.load(std::sync::atomic::Ordering::Relaxed);
         // Waits for the host's signal that the whole file was read (a loaded machine reads it late, and cancelling
         // before the importer has it all ends the read, not the importer's own work). The slice only bounds how
-        // long to wait before looking at the stream again; the hang guard only reports a plugin that never reads it.
-        let hang_guard = Instant::now();
-        while !p
-            .host
-            .wait_bytes_read(read_before + content.len() as u64, Duration::from_millis(20))
-        {
+        // long to wait before looking at the stream again. The guard fails a plugin whose read made no progress for
+        // the read stall limit (the bytes read so far are in the message), so the check ends with a cause long before a
+        // test runner's kill; a slow read that keeps advancing is waited for.
+        let read_before = p.host.bytes_read.load(std::sync::atomic::Ordering::Relaxed);
+        let target = read_before + content.len() as u64;
+        let stall = p.launch_options().read_stall;
+        let mut seen = read_before;
+        let mut moved = Instant::now();
+        let mut reported = Instant::now();
+        let waiting = Instant::now();
+        while !p.host.wait_bytes_read(target, Duration::from_millis(20)) {
             if let Ok(StreamEvent::Done(_)) = stream.next(Some(Duration::from_millis(1))) {
+                phase("cancellation: the import ended before it could be cancelled");
                 return Ok("the import ended before it could be cancelled".into());
             }
-            if hang_guard.elapsed() >= READ_HANG_GUARD {
+            let now = p.host.bytes_read.load(std::sync::atomic::Ordering::Relaxed);
+            if now != seen {
+                seen = now;
+                moved = Instant::now();
+            }
+            if reported.elapsed() >= Duration::from_secs(2) {
+                reported = Instant::now();
+                phase(format_args!(
+                    "cancellation: read {} of {} bytes after {} ms",
+                    seen - read_before,
+                    content.len(),
+                    waiting.elapsed().as_millis()
+                ));
+            }
+            if moved.elapsed() >= stall {
+                phase(format_args!(
+                    "cancellation: read stalled at {} of {} bytes",
+                    seen - read_before,
+                    content.len()
+                ));
                 return Err(format!(
-                    "importer \"{}\" did not read the whole file within {} s (hung)",
+                    "importer \"{}\" read {} of {} bytes and then made no progress for {} s (hung)",
                     importer.id,
-                    READ_HANG_GUARD.as_secs()
+                    seen - read_before,
+                    content.len(),
+                    stall.as_millis() as f64 / 1000.0
                 ));
             }
         }
+        phase(format_args!(
+            "cancellation: whole file read after {} ms, sending the cancel",
+            waiting.elapsed().as_millis()
+        ));
         let started = Instant::now();
         stream.cancel();
+        let outcome = |what: &str| {
+            phase(format_args!(
+                "cancellation: {what} {} ms after the cancel",
+                started.elapsed().as_millis()
+            ))
+        };
         loop {
             match stream.next(Some(Duration::from_millis(100))) {
-                Ok(StreamEvent::Done(_)) => break,
+                Ok(StreamEvent::Done(_)) => {
+                    outcome("import done");
+                    break;
+                }
                 Ok(_) => {}
-                Err(IpcError::Remote(e)) if e.code == code::CANCELLED => break,
-                Err(IpcError::Remote(_)) => break,
+                Err(IpcError::Remote(e)) if e.code == code::CANCELLED => {
+                    outcome("import ended as cancelled");
+                    break;
+                }
+                Err(IpcError::Remote(e)) => {
+                    outcome(&format!("import failed with {}", e.code));
+                    break;
+                }
                 Err(e) => return Err(format!("the import broke instead of ending: {e}")),
             }
             if started.elapsed() > CANCEL_GRACE + Duration::from_secs(1) {
+                outcome("still running");
                 return Err(format!(
                     "importer \"{}\" kept running {} s after it was cancelled (Debrief allows {} s)",
                     importer.id,
@@ -328,12 +395,6 @@ fn cancellation(p: &PluginUnderTest, inputs: &[(String, Vec<u8>)]) -> Result<Str
     }
     Ok(detail)
 }
-
-/// How long one import of a sample may take in the checks.
-/// Reports a plugin that never reads its whole input; never the condition for passing (the host signals that).
-const READ_HANG_GUARD: Duration = Duration::from_secs(300);
-
-const IMPORT_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// The frame limit of the `oversized-frames` check.
 const SMALL_FRAME: usize = 64 * 1024;
@@ -356,10 +417,12 @@ fn oversized(p: &PluginUnderTest, inputs: &[(String, Vec<u8>)]) -> Result<String
     }
     // Its reads and answer cannot fit in 64 KiB frames: a typed error (or an import that produced nothing) is fine, a crash or
     // a hang is not. The request itself is small: the content is read back through the host in chunks.
-    let started = Instant::now();
-    let r = small.import_within(&importer.id, &name, &big, IMPORT_TIMEOUT);
-    if started.elapsed() > IMPORT_TIMEOUT + CANCEL_GRACE {
-        return Err("the import hung on a small frame limit".into());
+    let r = small.import_within(&importer.id, &name, &big, p.launch_options().import_timeout);
+    // Hung is what the call says (it did not answer), never a stopwatch reading taken around it.
+    if let Err(e) = &r {
+        if e.to_string().contains("did not answer") {
+            return Err(format!("the import hung on a small frame limit: {e:#}"));
+        }
     }
     if !small.alive() {
         return Err(format!("the plugin died when its answer did not fit a frame ({:?})", r.err()));

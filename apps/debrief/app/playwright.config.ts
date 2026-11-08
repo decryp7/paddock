@@ -31,7 +31,9 @@ export default defineConfig({
   testMatch: '**/*.e2e.ts',
   fullyParallel: true,
   forbidOnly: CI,
-  retries: CI ? 2 : 0,
+  // ER-12: at most one retry, and a test that needed it fails the run (the report marks it flaky), so a retry never turns red into green.
+  retries: CI ? 1 : 0,
+  failOnFlakyTests: true,
   // Multi-step flows (tour, live tail) outlast 30 s of wall clock on a shared WebKit runner without being broken.
   timeout: CI ? 60_000 : 30_000,
   // Two on CI: each shard's container shares a runner host with other jobs; three made WebKit tests time out.
@@ -39,7 +41,7 @@ export default defineConfig({
   reporter: [['html', { open: 'never' }], ['list'], ['./e2e/retried-reporter.mjs']],
   use: {
     baseURL: `http://localhost:${PORT}`,
-    trace: 'on-first-retry',
+    trace: 'retain-on-failure',
     viewport: { width: 1440, height: 900 },
   },
   projects: [

@@ -7,7 +7,7 @@ use debrief_ipc::RemoteError;
 use debrief_plugin_api::protocol::{HostRequest, WireViewRecord, READ_CHUNK};
 use debrief_plugin_api::tools::ToolTask;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -54,9 +54,23 @@ pub(crate) struct FakeHost {
     pub(crate) bytes_read: AtomicU64,
     /// Signalled after every read, so a waiter wakes on the bytes arriving instead of polling a clock.
     read_signal: (Mutex<()>, Condvar),
+    /// Fault hook (see `Launch::stall_reads_after`): reads past this many bytes wait until released.
+    stall_after: AtomicU64,
+    released: AtomicBool,
 }
 
 impl FakeHost {
+    pub(crate) fn stall_reads_after(&self, bytes: Option<u64>) {
+        self.stall_after.store(bytes.unwrap_or(u64::MAX), Ordering::Release);
+    }
+
+    /// Lets stalled reads go (the plugin is being dropped).
+    pub(crate) fn release_reads(&self) {
+        self.released.store(true, Ordering::Release);
+        drop(lock(&self.read_signal.0));
+        self.read_signal.1.notify_all();
+    }
+
     fn id(&self) -> u64 {
         self.next.fetch_add(1, Ordering::Relaxed) + 1
     }
@@ -91,6 +105,19 @@ impl FakeHost {
         self.bytes_read.load(Ordering::Acquire) >= target
     }
 
+    /// The fault hook: holds a read until released once `stall_after` bytes were served.
+    fn wait_while_stalled(&self) {
+        let (mutex, cv) = &self.read_signal;
+        let guard = lock(mutex);
+        drop(
+            cv.wait_while(guard, |_| {
+                self.bytes_read.load(Ordering::Acquire) >= self.stall_after.load(Ordering::Acquire)
+                    && !self.released.load(Ordering::Acquire)
+            })
+            .unwrap_or_else(|p| p.into_inner()),
+        );
+    }
+
     fn view(&self, ticket: u64) -> Result<Arc<Vec<WireViewRecord>>, RemoteError> {
         lock(&self.views)
             .get(&ticket)
@@ -104,6 +131,7 @@ impl Handler for FakeHost {
         let req: HostRequest = decode_request(body)?;
         match req {
             HostRequest::ReadFile { id, offset, len } => {
+                self.wait_while_stalled();
                 let data = lock(&self.files)
                     .get(&id)
                     .cloned()
