@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { ensureInput, installTool, readInventory, seedTauri, storeUrl, tauriToolsDir } from '../ci/build-inputs-reader.mjs';
+import { ensureInput, installTool, lastDownload, readInventory, seedTauri, storeUrl, tauriToolsDir } from '../ci/build-inputs-reader.mjs';
 
 const sha = (b) => createHash('sha256').update(b).digest('hex');
 const root = fileURLToPath(new URL('../..', import.meta.url));
@@ -334,4 +334,11 @@ test('NSIS: a zip with more than one top folder is refused with a named error', 
   );
   const store = await fakeStore({ 'two.zip': bytes });
   await assert.rejects(seedTauri({ platform: 'win32', env: { LOCALAPPDATA: tmp() }, inventory: inv, store: store.base, token: 't' }), /::error title=build input nsis::.*one top folder/);
+});
+
+test('lastDownload reads both log forms: plain and the --verbose form with a module tag (run 7728 control)', () => {
+  assert.equal(lastDownload('x\nDownloading https://a.example/one\n'), 'https://a.example/one');
+  const verbose = ' Downloading [tauri_bundler::utils::http_utils] https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64\n       Debug [ureq::run] GET https://github.com/******\n';
+  assert.equal(lastDownload(verbose), 'https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64');
+  assert.equal(lastDownload('Downloading crates ...'), null);
 });

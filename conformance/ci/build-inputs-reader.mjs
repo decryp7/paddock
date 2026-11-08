@@ -256,7 +256,7 @@ export async function installTool({ id, inventory, binDir, platformKey = 'linux-
 
 /** The last `Downloading https://...` URL in a build log, or null (ADR 0062 section 5: a failed build names the fetch). */
 export function lastDownload(log) {
-  const urls = [...log.matchAll(/Downloading (https?:\/\/\S+)/g)].map((m) => m[1]);
+  const urls = [...log.matchAll(/Downloading(?:\s+\[[^\]]*\])?\s+(https?:\/\/\S+)/g)].map((m) => m[1]);
   return urls.length ? urls[urls.length - 1] : null;
 }
 
