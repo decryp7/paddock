@@ -24,7 +24,12 @@ pub const CACHE_DDL: &str = "CREATE TABLE IF NOT EXISTS analysis_cache (
 /// `source_encodings` (how each source file was decoded, by path; a `manual` row is the user's choice and is read
 /// with again on every re-import), `clock_offsets` (a source file's clock-skew correction in ms, already applied to its events) and `tail_offsets`
 /// (where live tail reads each followed file next: the byte and the line it continues at, the size it saw, whether
-/// it is read whole when it changes and why, whether its last event is held back and when it last grew).
+/// it is read whole when it changes and why, whether its last event is held back and when it last grew) and
+/// `segment_blocks` (ADR 0062: the id blocks `first_id .. end_id` each segment file holds; blocks are reserved
+/// exclusively, so they never overlap whatever file holds them, and a rewrite moves them to the new file; clearing the
+/// store deletes them. A reload sets `segments` aside but not yet this table (ADR 0062 WP-4 adds it to the aside
+/// tables): until then the blocks of files a reload dropped stay until [`BLOCKS_BACKFILL`] removes them on the next
+/// open, and nothing reads a block without joining `segments`).
 pub const ADDED_DDL: &str = "CREATE TABLE IF NOT EXISTS source_encodings (path VARCHAR PRIMARY KEY, label VARCHAR NOT NULL, confidence UTINYINT NOT NULL, origin VARCHAR NOT NULL);
 CREATE TABLE IF NOT EXISTS clock_offsets (path VARCHAR PRIMARY KEY, offset_ms BIGINT NOT NULL);
 CREATE TABLE IF NOT EXISTS tail_offsets (
@@ -36,7 +41,19 @@ CREATE TABLE IF NOT EXISTS catalogue (
 CREATE TABLE IF NOT EXISTS catalogue_trigrams (source UINTEGER NOT NULL, tri VARCHAR NOT NULL, scope VARCHAR NOT NULL, name VARCHAR NOT NULL);
 CREATE TABLE IF NOT EXISTS catalogue_sources (
   source UINTEGER PRIMARY KEY, names UBIGINT NOT NULL, dropped UBIGINT NOT NULL, guids UBIGINT NOT NULL, version UINTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS source_fingerprints (source UINTEGER PRIMARY KEY, size UBIGINT NOT NULL, hash UBIGINT NOT NULL);";
+CREATE TABLE IF NOT EXISTS source_fingerprints (source UINTEGER PRIMARY KEY, size UBIGINT NOT NULL, hash UBIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS ord (pos UBIGINT NOT NULL, id UBIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS segment_blocks (file VARCHAR NOT NULL, first_id UBIGINT NOT NULL, end_id UBIGINT NOT NULL);";
+
+/// Run when a store opens, after [`ADDED_DDL`] (ADR 0062 section 6): drops the blocks of files no longer listed, and
+/// gives a segment without blocks (listed before `segment_blocks` existed) its id range as its one block when that
+/// range overlaps no other segment's: every never-compacted segment, and compacted ones whose range is clear (ids in
+/// its gaps belonged to removed rows and are never reused). A segment whose range overlaps another's is left
+/// without blocks for the scan of its runs of consecutive ids (ADR 0062 WP-4).
+pub const BLOCKS_BACKFILL: &str = "DELETE FROM segment_blocks WHERE file NOT IN (SELECT file FROM segments);
+INSERT INTO segment_blocks SELECT s.file, s.first_id, s.end_id FROM segments s
+WHERE NOT EXISTS (SELECT 1 FROM segment_blocks b WHERE b.file = s.file)
+  AND NOT EXISTS (SELECT 1 FROM segments o WHERE o.file <> s.file AND o.first_id < s.end_id AND s.first_id < o.end_id);";
 
 /// The DuckDB type of a declared column.
 fn sql_type(t: ColumnType) -> &'static str {

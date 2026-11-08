@@ -1,4 +1,5 @@
 use paddock_jobs::{CancelReason, Cancelled, JobError};
+use paddock_limits::LimitExceeded;
 use std::fmt;
 use std::path::PathBuf;
 
@@ -27,13 +28,9 @@ pub enum ArchiveError {
         /// Why it is refused.
         reason: String,
     },
-    /// A limit was exceeded.
-    Limit {
-        /// Which one (entries, file size, total size, expansion ratio, path length, depth).
-        what: &'static str,
-        /// The limit's value.
-        limit: u64,
-    },
+    /// A limit was exceeded: entries, file size, total size, expansion ratio, path length or depth. The id is in
+    /// [`crate::limits`]; the type is kept by the job the unpack ran in ([`JobError::Limit`]).
+    Limit(LimitExceeded),
     /// Two entries have the same path (or differ only in case, which a case-insensitive disk cannot hold).
     Duplicate(String),
     /// Stopped on request or at the deadline.
@@ -58,9 +55,10 @@ impl fmt::Display for ArchiveError {
             ArchiveError::Unsafe { entry, reason } => {
                 write!(f, "the archive is refused: {entry:?} {reason}.")
             }
-            ArchiveError::Limit { what, limit } => write!(
+            ArchiveError::Limit(l) => write!(
                 f,
-                "the archive is refused: it exceeds the limit on {what} ({limit})."
+                "the archive is refused. {}",
+                l.for_person(&crate::limits::REGISTRY)
             ),
             ArchiveError::Duplicate(name) => {
                 write!(f, "the archive is refused: {name:?} appears twice.")
@@ -82,6 +80,10 @@ impl From<ArchiveError> for JobError {
     fn from(e: ArchiveError) -> Self {
         match e {
             ArchiveError::Cancelled(r) => JobError::Cancelled(r),
+            ArchiveError::Limit(l) => JobError::Limit {
+                limit: l,
+                message: ArchiveError::Limit(l).to_string(),
+            },
             other => JobError::Failed(other.to_string()),
         }
     }

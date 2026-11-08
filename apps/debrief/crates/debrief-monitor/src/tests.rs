@@ -342,9 +342,21 @@ fn run_loop_samples_until_stopped_and_flushes_exits() {
     assert!(m[0].starts_with("Now monitoring") && m[1].starts_with("Process stats"));
     assert_eq!(m.iter().filter(|m| m.starts_with("Process stats")).count(), 3);
     assert_eq!(
-        *m.last().unwrap(),
+        m[m.len() - 2],
         "Application exited: svc (1) after 100s",
         "pending exit flushed on stop"
+    );
+    // Every run ends with the event that says how long it ran, why it stopped and what it wrote (the fake clock
+    // advances 2 s per reading: start, two samples, the exit flush, the end).
+    let end = recs.last().unwrap();
+    assert_eq!(end.template.as_deref(), Some(STOPPED_TEMPLATE));
+    assert_eq!(
+        end.message,
+        "Monitoring stopped after 8000 ms (stop requested) with 2 samples and 3 stats events"
+    );
+    assert_eq!(
+        (end.level, &end.fields["MachineName"]),
+        (Level::Information, &serde_json::Value::from("HOST"))
     );
     assert_eq!(src.calls, 2);
 }
@@ -370,7 +382,11 @@ fn run_loop_does_not_sample_when_already_stopped() {
     )
     .unwrap();
     assert_eq!(src.calls, 0);
-    assert!(sink.records.lock().unwrap().is_empty());
+    let recs = sink.records.lock().unwrap();
+    assert_eq!(
+        msgs(&recs),
+        ["Monitoring stopped after 4000 ms (stop requested) with 0 samples and 0 stats events"]
+    );
 }
 
 #[test]
@@ -405,6 +421,53 @@ impl EventSink for FailingSink {
     fn write(&self, _: &[Record]) -> Result<()> {
         anyhow::bail!("disk full")
     }
+}
+
+/// Fails its `fail_on`-th write (1-based) and records every other one.
+struct FailOnceSink {
+    records: Mutex<Vec<Record>>,
+    writes: AtomicUsize,
+    fail_on: usize,
+}
+impl EventSink for FailOnceSink {
+    fn write(&self, r: &[Record]) -> Result<()> {
+        if self.writes.fetch_add(1, Ordering::SeqCst) + 1 == self.fail_on {
+            anyhow::bail!("disk full");
+        }
+        self.records.lock().unwrap().extend_from_slice(r);
+        Ok(())
+    }
+}
+
+#[test]
+fn a_failed_run_still_ends_with_the_stopped_event_naming_the_error() {
+    let stop = AtomicBool::new(false);
+    let sink = FailOnceSink {
+        records: Mutex::new(vec![]),
+        writes: AtomicUsize::new(0),
+        fail_on: 2,
+    };
+    let mut src = FakeSource {
+        script: vec![vec![sample(1, "svc", 1)], vec![sample(1, "svc", 3)]],
+        calls: 0,
+    };
+    let e = run_loop(
+        &base_cfg(),
+        &mut src,
+        Probes::default(),
+        Duration::from_millis(5),
+        &sink,
+        &stop,
+        &clock(),
+    )
+    .unwrap_err();
+    assert_eq!(e.to_string(), "disk full", "the original error is returned");
+    let recs = sink.records.lock().unwrap();
+    let end = recs.last().unwrap();
+    assert_eq!(end.template.as_deref(), Some(STOPPED_TEMPLATE));
+    assert_eq!(end.level, Level::Error);
+    assert_eq!(end.fields["StopReason"], "error: disk full");
+    assert_eq!((&end.fields["Samples"], &end.fields["StatsEvents"]), (&2.into(), &1.into()));
 }
 
 #[test]

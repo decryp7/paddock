@@ -445,7 +445,9 @@ fn describe_failure(err: &IpcError, status: Option<String>, what: &str, timeout:
         ),
         IpcError::Remote(r) => (ErrorKind::Crashed, format!("panicked: {}", r.message)),
         IpcError::Protocol(m) => (ErrorKind::Protocol, format!("sent an invalid message ({m}) and was stopped")),
-        IpcError::TooLarge { .. } => (
+        // Our own request over the frame limit, or the plugin's answer over ours (`paddock-ipc` IP1): a Dyno plugin is only
+        // asked small requests, so either is the plugin's doing.
+        IpcError::TooLarge { .. } | IpcError::ReplyTooLarge { .. } => (
             ErrorKind::Protocol,
             format!("sent a message over the size limit and was stopped ({err})"),
         ),
@@ -686,5 +688,14 @@ mod tests {
         assert!(host.start_all().is_empty());
         assert_eq!(state(&host, "p").state, PluginState::Running);
         let _ = Policy::default();
+    }
+
+    #[test]
+    fn an_oversized_message_in_either_direction_is_the_plugins_protocol_failure() {
+        for err in [IpcError::TooLarge { len: 10, max: 5 }, IpcError::ReplyTooLarge { len: 10, max: 5 }] {
+            let (kind, message) = describe_failure(&err, None, "failed", Duration::from_secs(1));
+            assert_eq!(kind, ErrorKind::Protocol, "{err:?}");
+            assert!(message.contains("over the size limit"), "{message}");
+        }
     }
 }

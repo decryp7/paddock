@@ -1834,3 +1834,15 @@ test('every workflow step that runs the ui Playwright config provides every port
   }
   assert.ok(checked >= 2, 'the check found the release workflows\' ui Playwright steps');
 });
+
+// libFuzzer writes the inputs it finds to the FIRST corpus folder; the cached folder must come first or the corpus never grows.
+// Two fuzz dirs with the same lock hash (or none) must not restore each other's caches: both keys name the fuzz dir.
+test('app-fuzz.yml writes new inputs to the cached corpus and keys its caches by fuzz dir', () => {
+  const text = read(join(WORKFLOWS, 'app-fuzz.yml'));
+  const run = text.match(/cargo fuzz run "\$target" (\S+) (\S+) --/);
+  assert.ok(run, 'the fuzz run step is found');
+  assert.equal(run[1], '"corpus/$target"', 'the first corpus folder is the cached one (libFuzzer writes new inputs there)');
+  const keys = [...text.matchAll(/^\s+(?:key|restore-keys): (.*)$/gm)].map((m) => m[1]);
+  assert.ok(keys.length >= 4, 'the build and corpus caches have keys and restore keys');
+  for (const k of keys) assert.match(k, /inputs\.fuzz-dir/, `cache key without the fuzz dir: ${k}`);
+});

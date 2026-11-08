@@ -1,30 +1,344 @@
 [
- {"name": "ci-pull-request-reaches-an-app", "args": ["--ci"], "env": {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_REF": "refs/pull/1/merge", "GITHUB_BASE_REF": "main"}},
- {"name": "ci-pull-request-without-the-target-branch", "args": ["--ci"], "env": {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_REF": "refs/pull/1/merge", "GITHUB_BASE_REF": "gone"}},
- {"name": "ci-manual-run-with-a-base", "args": ["--ci"], "env": {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/topic", "PLAN_BASE": "fixture-base"}},
- {"name": "ci-manual-run-with-a-base-and-webkit", "args": ["--ci"], "env": {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/topic", "PLAN_BASE": "fixture-base", "PLAN_WEBKIT": "1"}},
- {"name": "ci-manual-run-without-a-base", "args": ["--ci"], "env": {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/topic"}},
- {"name": "ci-tag-runs-everything", "args": ["--ci"], "env": {"GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/tags/x-v1.0.0"}},
- {"name": "ci-nightly", "args": ["--ci"], "env": {"GITHUB_EVENT_NAME": "schedule", "GITHUB_REF": "refs/heads/main"}},
- {"name": "ci-one-apps-tag-gates", "args": ["--ci"], "env": {"GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/tags/x-v1.0.0", "PLAN_APP": "x"}},
- {"name": "ci-unknown-app-in-the-gates", "args": ["--ci"], "env": {"GITHUB_EVENT_NAME": "push", "GITHUB_REF": "refs/tags/q-v1.0.0", "PLAN_APP": "nope"}},
- {"name": "ci-an-apps-own-workflow-is-reached", "args": ["--ci", "--app", "x"], "env": {"GITHUB_EVENT_NAME": "pull_request", "GITHUB_REF": "refs/pull/1/merge", "GITHUB_BASE_REF": "main"}},
- {"name": "ci-an-apps-own-workflow-is-not-reached", "args": ["--ci", "--app", "y"], "env": {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/topic", "PLAN_BASE": "fixture-base"}},
- {"name": "ci-an-unknown-app-in-its-own-workflow", "args": ["--ci", "--app", "nope"], "env": {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/topic"}},
- {"name": "commit-range-pull-request", "args": ["--commit-range"], "env": {"EVENT": "pull_request", "BASE_REF": "main"}},
- {"name": "commit-range-pull-request-without-a-target", "args": ["--commit-range"], "env": {"EVENT": "pull_request"}},
- {"name": "commit-range-push-to-main", "args": ["--commit-range"], "env": {"EVENT": "push", "REF": "refs/heads/main", "BEFORE": "__HEAD__", "SHA": "bbbbbbb"}},
- {"name": "commit-range-push-with-an-unknown-before", "args": ["--commit-range"], "env": {"EVENT": "push", "REF": "refs/heads/main", "BEFORE": "abcdef1234", "SHA": "bbbbbbb"}},
- {"name": "commit-range-new-branch", "args": ["--commit-range"], "env": {"EVENT": "push", "REF": "refs/heads/x", "BEFORE": "0000000000000000000000000000000000000000", "SHA": "bbbbbbb"}},
- {"name": "commit-range-manual-run", "args": ["--commit-range"], "env": {"EVENT": "workflow_dispatch", "PLAN_BASE": "ccccccc", "SHA": "bbbbbbb"}},
- {"name": "commit-range-tag-and-app-gates-skip", "args": ["--commit-range"], "env": {"EVENT": "push", "REF": "refs/tags/v1.0.0", "SHA": "bbbbbbb"}},
- {"name": "commit-range-app-gates-skip", "args": ["--commit-range"], "env": {"EVENT": "push", "REF": "refs/heads/main", "BEFORE": "aaaaaaa", "SHA": "bbbbbbb", "INPUT_APP": "dyno"}},
- {"name": "arguments-a-range-with-explain", "args": ["fixture-base", "fixture-head", "--explain"], "env": {}},
- {"name": "arguments-files-and-explain", "args": ["--files", "crates/b/src/lib.rs", "--explain"], "env": {}},
- {"name": "arguments-all", "args": ["--all"], "env": {}},
- {"name": "arguments-nothing", "args": [], "env": {}},
- {"name": "arguments-ci-with-a-commit", "args": ["--ci", "fixture-base"], "env": {}},
- {"name": "arguments-unknown-option", "args": ["--nope"], "env": {}},
- {"name": "arguments-files-without-a-value", "args": ["--files"], "env": {}},
- {"name": "arguments-too-many-commits", "args": ["a", "b", "c"], "env": {}}
+ {
+  "name": "ci-pull-request-reaches-an-app",
+  "args": [
+   "--ci"
+  ],
+  "env": {
+   "GITHUB_EVENT_NAME": "pull_request",
+   "GITHUB_REF": "refs/pull/1/merge",
+   "GITHUB_BASE_REF": "main"
+  }
+ },
+ {
+  "name": "ci-pull-request-without-the-target-branch",
+  "args": [
+   "--ci"
+  ],
+  "env": {
+   "GITHUB_EVENT_NAME": "pull_request",
+   "GITHUB_REF": "refs/pull/1/merge",
+   "GITHUB_BASE_REF": "gone"
+  }
+ },
+ {
+  "name": "ci-manual-run-with-a-base",
+  "args": [
+   "--ci"
+  ],
+  "env": {
+   "GITHUB_EVENT_NAME": "workflow_dispatch",
+   "GITHUB_REF": "refs/heads/topic",
+   "PLAN_BASE": "fixture-base"
+  }
+ },
+ {
+  "name": "ci-manual-run-with-a-base-and-webkit",
+  "args": [
+   "--ci"
+  ],
+  "env": {
+   "GITHUB_EVENT_NAME": "workflow_dispatch",
+   "GITHUB_REF": "refs/heads/topic",
+   "PLAN_BASE": "fixture-base",
+   "PLAN_WEBKIT": "1"
+  }
+ },
+ {
+  "name": "ci-manual-run-without-a-base",
+  "args": [
+   "--ci"
+  ],
+  "env": {
+   "GITHUB_EVENT_NAME": "workflow_dispatch",
+   "GITHUB_REF": "refs/heads/topic"
+  }
+ },
+ {
+  "name": "ci-tag-runs-everything",
+  "args": [
+   "--ci"
+  ],
+  "env": {
+   "GITHUB_EVENT_NAME": "push",
+   "GITHUB_REF": "refs/tags/x-v1.0.0"
+  }
+ },
+ {
+  "name": "ci-nightly",
+  "args": [
+   "--ci"
+  ],
+  "env": {
+   "GITHUB_EVENT_NAME": "schedule",
+   "GITHUB_REF": "refs/heads/main"
+  }
+ },
+ {
+  "name": "ci-one-apps-tag-gates",
+  "args": [
+   "--ci"
+  ],
+  "env": {
+   "GITHUB_EVENT_NAME": "push",
+   "GITHUB_REF": "refs/tags/x-v1.0.0",
+   "PLAN_APP": "x"
+  }
+ },
+ {
+  "name": "ci-unknown-app-in-the-gates",
+  "args": [
+   "--ci"
+  ],
+  "env": {
+   "GITHUB_EVENT_NAME": "push",
+   "GITHUB_REF": "refs/tags/q-v1.0.0",
+   "PLAN_APP": "nope"
+  }
+ },
+ {
+  "name": "ci-an-apps-own-workflow-is-reached",
+  "args": [
+   "--ci",
+   "--app",
+   "x"
+  ],
+  "env": {
+   "GITHUB_EVENT_NAME": "pull_request",
+   "GITHUB_REF": "refs/pull/1/merge",
+   "GITHUB_BASE_REF": "main"
+  }
+ },
+ {
+  "name": "ci-an-apps-own-workflow-is-not-reached",
+  "args": [
+   "--ci",
+   "--app",
+   "y"
+  ],
+  "env": {
+   "GITHUB_EVENT_NAME": "workflow_dispatch",
+   "GITHUB_REF": "refs/heads/topic",
+   "PLAN_BASE": "fixture-base"
+  }
+ },
+ {
+  "name": "ci-an-unknown-app-in-its-own-workflow",
+  "args": [
+   "--ci",
+   "--app",
+   "nope"
+  ],
+  "env": {
+   "GITHUB_EVENT_NAME": "workflow_dispatch",
+   "GITHUB_REF": "refs/heads/topic"
+  }
+ },
+ {
+  "name": "commit-range-pull-request",
+  "args": [
+   "--commit-range"
+  ],
+  "env": {
+   "EVENT": "pull_request",
+   "BASE_REF": "main"
+  }
+ },
+ {
+  "name": "commit-range-pull-request-without-a-target",
+  "args": [
+   "--commit-range"
+  ],
+  "env": {
+   "EVENT": "pull_request"
+  }
+ },
+ {
+  "name": "commit-range-push-to-main",
+  "args": [
+   "--commit-range"
+  ],
+  "env": {
+   "EVENT": "push",
+   "REF": "refs/heads/main",
+   "BEFORE": "__HEAD__",
+   "SHA": "bbbbbbb"
+  }
+ },
+ {
+  "name": "commit-range-push-with-an-unknown-before",
+  "args": [
+   "--commit-range"
+  ],
+  "env": {
+   "EVENT": "push",
+   "REF": "refs/heads/main",
+   "BEFORE": "abcdef1234",
+   "SHA": "bbbbbbb"
+  }
+ },
+ {
+  "name": "commit-range-new-branch",
+  "args": [
+   "--commit-range"
+  ],
+  "env": {
+   "EVENT": "push",
+   "REF": "refs/heads/x",
+   "BEFORE": "0000000000000000000000000000000000000000",
+   "SHA": "bbbbbbb"
+  }
+ },
+ {
+  "name": "commit-range-manual-run",
+  "args": [
+   "--commit-range"
+  ],
+  "env": {
+   "EVENT": "workflow_dispatch",
+   "PLAN_BASE": "ccccccc",
+   "SHA": "bbbbbbb"
+  }
+ },
+ {
+  "name": "commit-range-tag-and-app-gates-skip",
+  "args": [
+   "--commit-range"
+  ],
+  "env": {
+   "EVENT": "push",
+   "REF": "refs/tags/v1.0.0",
+   "SHA": "bbbbbbb"
+  }
+ },
+ {
+  "name": "commit-range-app-gates-skip",
+  "args": [
+   "--commit-range"
+  ],
+  "env": {
+   "EVENT": "push",
+   "REF": "refs/heads/main",
+   "BEFORE": "aaaaaaa",
+   "SHA": "bbbbbbb",
+   "INPUT_APP": "dyno"
+  }
+ },
+ {
+  "name": "arguments-a-range-with-explain",
+  "args": [
+   "fixture-base",
+   "fixture-head",
+   "--explain"
+  ],
+  "env": {}
+ },
+ {
+  "name": "arguments-files-and-explain",
+  "args": [
+   "--files",
+   "crates/b/src/lib.rs",
+   "--explain"
+  ],
+  "env": {}
+ },
+ {
+  "name": "arguments-all",
+  "args": [
+   "--all"
+  ],
+  "env": {}
+ },
+ {
+  "name": "arguments-nothing",
+  "args": [],
+  "env": {}
+ },
+ {
+  "name": "arguments-ci-with-a-commit",
+  "args": [
+   "--ci",
+   "fixture-base"
+  ],
+  "env": {}
+ },
+ {
+  "name": "arguments-unknown-option",
+  "args": [
+   "--nope"
+  ],
+  "env": {}
+ },
+ {
+  "name": "arguments-files-without-a-value",
+  "args": [
+   "--files"
+  ],
+  "env": {}
+ },
+ {
+  "name": "arguments-too-many-commits",
+  "args": [
+   "a",
+   "b",
+   "c"
+  ],
+  "env": {}
+ },
+ {
+  "name": "commit-flags-push-to-main",
+  "args": [
+   "--commit-flags"
+  ],
+  "env": {
+   "EVENT": "push",
+   "REF": "refs/heads/main",
+   "BEFORE": "__HEAD__",
+   "SHA": "bbbbbbb"
+  }
+ },
+ {
+  "name": "commit-flags-push-to-a-branch",
+  "args": [
+   "--commit-flags"
+  ],
+  "env": {
+   "EVENT": "push",
+   "REF": "refs/heads/x",
+   "BEFORE": "__HEAD__",
+   "SHA": "bbbbbbb"
+  }
+ },
+ {
+  "name": "commit-flags-pull-request",
+  "args": [
+   "--commit-flags"
+  ],
+  "env": {
+   "EVENT": "pull_request",
+   "BASE_REF": "main"
+  }
+ },
+ {
+  "name": "commit-flags-tag-skips",
+  "args": [
+   "--commit-flags"
+  ],
+  "env": {
+   "EVENT": "push",
+   "REF": "refs/tags/v1.0.0",
+   "SHA": "bbbbbbb"
+  }
+ },
+ {
+  "name": "commit-range-refuses-a-bad-base",
+  "args": [
+   "--commit-range"
+  ],
+  "env": {
+   "EVENT": "workflow_dispatch",
+   "PLAN_BASE": "--output=x",
+   "SHA": "bbbbbbb"
+  }
+ }
 ]

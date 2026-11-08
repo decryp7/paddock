@@ -99,6 +99,23 @@ pub(crate) fn retry_import<R: Runtime>(app: &AppHandle<R>, job: &crate::jobs::mo
     Ok(None)
 }
 
+/// What the store says the user should know although the import worked (e.g. the events could not be put in time
+/// order, which the next open or import tries again) becomes a warning message, one per text.
+pub(crate) fn report_notices<R: Runtime>(app: &AppHandle<R>, label: &str, notices: &[String]) {
+    use crate::notification_centre::centre::{NewNotice, NoticeScope, NoticeSeverity, NoticeSource};
+    for text in notices {
+        let notice = NewNotice::new(
+            format!("import:notice:{text}"),
+            NoticeSource::Import,
+            NoticeSeverity::Warning,
+            "The import needs attention",
+            NoticeScope::Project,
+        )
+        .body(text.clone());
+        crate::notification_centre::post(app, Some(label), notice, None);
+    }
+}
+
 /// Files of an import that Debrief could not use (not crashed: those are engine errors) become one message
 /// with "Set up format".
 fn report_not_imported<R: Runtime>(app: &AppHandle<R>, label: &str, files: &[debrief_core::api::UnrecognizedFile]) {
@@ -225,6 +242,7 @@ pub(crate) fn after_import<R: Runtime>(
     log_unrecognized(&report.unrecognized);
     report_not_imported(app, state.label(), &report.unrecognized);
     report_timestamp_issues(app, state.label(), &report.sources);
+    report_notices(app, state.label(), &report.notices);
     // Counts only: file names and contents stay out of the logs.
     log::info!(
         Sources = report.sources.len() as u64,
@@ -678,6 +696,8 @@ pub(crate) async fn open_project<R: Runtime>(
             win.set_project(Some(path.clone()));
             crate::recent::opened_project(&handle, &path, &opened.name);
         }
+        // Last, once the project is open (and annotated): an incomplete time order is repaired by its own job.
+        crate::store_pane::order_events_after_open(&handle, &win);
         Ok(crate::jobs::Done::new(opened).with_result(crate::jobs::JobResult::workspace()))
     })
 }

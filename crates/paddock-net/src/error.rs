@@ -22,7 +22,8 @@ pub enum NetError {
         why: Refusal,
     },
     /// More redirects than allowed.
-    TooManyRedirects,
+    /// More redirects than the policy allowed (the number it allowed).
+    TooManyRedirects(u32),
     /// A redirect to a forbidden place (plain http from https, a farther network, a host off the allow-list).
     BadRedirect(String),
     /// The body is larger than the limit (bytes).
@@ -61,7 +62,7 @@ impl fmt::Display for NetError {
                 write!(f, "{host} is not one of the hosts this app may contact.")
             }
             NetError::Refused { host, why } => write!(f, "{host} was not contacted: {why}."),
-            NetError::TooManyRedirects => f.write_str("The server redirected too many times."),
+            NetError::TooManyRedirects(_) => f.write_str("The server redirected too many times."),
             NetError::BadRedirect(why) => write!(f, "A redirect was refused: {why}."),
             NetError::TooLarge(limit) => {
                 write!(f, "The answer is larger than the {limit} byte limit.")

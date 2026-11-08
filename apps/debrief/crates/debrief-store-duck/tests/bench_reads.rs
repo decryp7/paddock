@@ -347,7 +347,15 @@ fn read_operations_meet_the_budget() {
             over.push(*name);
         }
     }
-    eprintln!("peak RSS while querying: {peak_mb} MB (budget {QUERY_RSS_MB} MB)");
+    let interactive_mb = results.iter().filter(|r| r.2).map(|r| r.3).max().unwrap_or(0);
+    let enforced = if strict {
+        "enforced"
+    } else {
+        "not enforced: set DEBRIEF_BENCH_STRICT=1"
+    };
+    // The resident size of this process (import leftovers and the batch analyses included), not the worker's PSS.
+    eprintln!("peak RSS while querying: {peak_mb} MB, interactive calls only {interactive_mb} MB (budget {QUERY_RSS_MB} MB, {enforced})");
+    eprintln!("over the 0.5 s budget ({enforced}): {over:?}");
     assert!(failed.is_empty(), "failed: {failed:?}");
     if strict {
         assert!(over.is_empty(), "over the 0.5 s budget: {over:?}");

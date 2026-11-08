@@ -200,6 +200,8 @@ pub struct StoreTuning {
     pub duck_threads: Option<usize>,
     /// DuckDB's memory limit, MB.
     pub memory_limit_mb: Option<u64>,
+    /// DuckDB's memory limit while an import compacts and orders the events, MB (the import memory).
+    pub import_memory_limit_mb: Option<u64>,
     /// The full-text index writer's heap, MB (shared by its threads).
     pub index_heap_mb: Option<u64>,
     /// The full-text index writer's threads.
@@ -269,6 +271,7 @@ impl StoreTuning {
             parse_threads: threads(self.parse_threads),
             duck_threads: threads(self.duck_threads),
             memory_limit_mb: mb(self.memory_limit_mb),
+            import_memory_limit_mb: mb(self.import_memory_limit_mb),
             index_heap_mb: mb(self.index_heap_mb),
             index_threads: threads(self.index_threads),
             spill_dir: self.spill_dir.filter(|d| d.is_absolute()),

@@ -2,7 +2,10 @@
 // (AGENTS.md, rule 8). Exported as a library, a CLI sub-command (`paddock-conformance commit-lint`) and used by C23.
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { pathMatches } from './util/fs.mjs';
+import { applyWaivers, parseWaivers } from './util/waivers.mjs';
 
 export const TYPES = ['feat', 'fix', 'perf', 'refactor', 'test', 'docs', 'ci', 'chore', 'build', 'style', 'revert'];
 const HEADER = new RegExp(`^(${TYPES.join('|')})(\\([a-z0-9][a-z0-9._/-]*(?:,[a-z0-9][a-z0-9._/-]*)*\\))?!?: \\S.*$`);
@@ -34,9 +37,17 @@ export function lint(message) {
   return problems;
 }
 
-/** [{ id, message }] for a git revision range, run in `cwd`. */
-export function messagesInRange(range, cwd = process.cwd(), git = (args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 << 20 })) {
-  return git(['log', '--no-merges', '--format=%H%x00%B%x01', range])
+/**
+ * [{ id, message }] for a git revision range, run in `cwd`. `flags` are git log options (only `--first-parent` is known); the
+ * range is one argument and must be a revision range or a count such as `-200`. Merge commits are left out, except with
+ * `--first-parent`: there the commits on main are listed as they are, the landing merge among them (its "Merge" header is
+ * exempt from the header rule, its message is not from the attribution rule).
+ */
+export function messagesInRange(range, cwd = process.cwd(), git = (args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 << 20 }), flags = []) {
+  const unknown = flags.filter((f) => f !== '--first-parent');
+  if (unknown.length) throw new Error(`unknown option ${unknown[0]}`);
+  if (range.startsWith('-') && !/^-\d+$/.test(range)) throw new Error(`"${range}" is not a revision range`);
+  return git(['log', ...(flags.includes('--first-parent') ? flags : ['--no-merges', ...flags]), '--format=%H%x00%B%x01', range])
     .split('\x01')
     .map((s) => s.trim())
     .filter(Boolean)
@@ -46,27 +57,56 @@ export function messagesInRange(range, cwd = process.cwd(), git = (args) => exec
     });
 }
 
-/** CLI: `commit-lint --file <path>` (commit-msg hook) or `--range <rev-range>` (CI). Returns the exit status. */
-export function commitLintMain(argv, cwd = process.cwd(), log = console.error) {
-  const [flag, value] = argv;
+/** The C23 waivers of `paddock.waivers.toml` in `cwd`, read by the loader the conformance run uses. */
+function c23Waivers(cwd) {
+  const file = join(cwd, 'paddock.waivers.toml');
+  const parsed = existsSync(file) ? parseWaivers(readFileSync(file, 'utf8')) : { waivers: [], problems: [] };
+  return { waivers: parsed.waivers.filter((w) => w.check === 'C23'), problems: parsed.problems };
+}
+
+/**
+ * CLI: `commit-lint --file <path>` (commit-msg hook) or `--range <rev-range>` (CI). Returns the exit status. With `--range`, a
+ * commit named by a live C23 waiver in paddock.waivers.toml is printed as "waived: ..." and does not fail; an expired or
+ * malformed waiver applies to nothing and only warns, and a waiver for a commit outside the range is ignored.
+ */
+export function commitLintMain(argv, cwd = process.cwd(), log = console.error, now = new Date()) {
+  const flags = argv[0] === '--first-parent' ? ['--first-parent'] : [];
+  const [flag, value] = flags.length ? argv.slice(1) : argv;
   let items;
   try {
     if (flag === '--file' && value) items = [{ id: value, message: readFileSync(value, 'utf8') }];
-    else if (flag === '--range' && value) items = messagesInRange(value, cwd);
+    else if (flag === '--range' && value) items = messagesInRange(value, cwd, undefined, flags);
     else {
-      log('usage: paddock-conformance commit-lint --file <path> | --range <rev-range>');
+      log('usage: paddock-conformance commit-lint --file <path> | [--first-parent] --range <rev-range>');
       return 2;
     }
   } catch (e) {
     log(`commit-lint: ${e.message}`);
     return 2;
   }
-  let bad = 0;
+  const findings = [];
+  const subjects = new Map();
   for (const { id, message } of items) {
-    for (const p of lint(message)) {
-      log(`${id}: ${p}`);
-      bad++;
+    subjects.set(id, message.split('\n')[0].trim());
+    for (const p of lint(message)) findings.push({ check: 'C23', severity: 'error', file: flag === '--range' ? `commit ${id}` : id, id, message: p });
+  }
+  let bad = 0;
+  let kept = findings;
+  if (flag === '--range') {
+    const { waivers, problems } = c23Waivers(cwd);
+    const applied = applyWaivers({ findings, waivers, problems, now, pathMatches });
+    kept = applied.findings.filter((f) => f.check === 'C23');
+    for (const f of applied.findings.filter((f) => f.check !== 'C23')) log(`warning: ${f.file}:${f.line}: ${f.message}`);
+    const seen = new Set();
+    for (const f of applied.waived) {
+      if (seen.has(f.id)) continue;
+      seen.add(f.id);
+      log(`waived: ${f.id} ${subjects.get(f.id)} (${f.waiver.reason})`);
     }
+  }
+  for (const f of kept) {
+    log(`${f.id}: ${f.message}`);
+    bad++;
   }
   return bad ? 1 : 0;
 }

@@ -21,6 +21,7 @@ mod mining;
 mod parsers;
 mod pos;
 mod profiles;
+mod progress;
 mod project;
 pub mod promote;
 mod qlang;
@@ -29,11 +30,13 @@ mod redaction;
 mod reuse;
 mod schema;
 pub mod segments;
+mod shutdown;
 mod skew;
 mod spans;
 mod sql;
 pub mod stats;
 mod tail;
+mod turns;
 mod writer;
 
 pub use compact::Compaction;
@@ -59,6 +62,10 @@ use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuar
 /// DuckDB's memory limit (ADR 0014 memory budget); it spills to the store's `tmp` folder beyond it.
 pub const MEMORY_LIMIT: &str = "192MB";
 
+/// DuckDB's memory limit while an import compacts and orders the events (the import memory budget: parsing is over, so
+/// the import may use it; the limit goes back to [`MEMORY_LIMIT`] afterwards).
+pub const IMPORT_MEMORY_LIMIT: &str = "768MB";
+
 /// Allocations DuckDB's allocator may keep cached after a task (`allocator_flush_threshold`).
 pub const ALLOCATOR_FLUSH: &str = "32MiB";
 
@@ -77,6 +84,8 @@ pub struct StoreOptions {
     pub memory_limit: String,
     /// The full-text index writer's heap and threads (applies when the store opens).
     pub index: fts::WriterBudget,
+    /// DuckDB's memory limit while an import compacts and orders the events ([`IMPORT_MEMORY_LIMIT`]).
+    pub import_memory_limit: String,
     /// Where DuckDB spills beyond its memory limit: a folder per store below this one (see [`spill_folder`]);
     /// `None`: the store folder's `tmp` (applies when the store opens).
     pub spill_dir: Option<PathBuf>,
@@ -96,12 +105,90 @@ impl Default for StoreOptions {
             duck_threads: DUCK_THREADS,
             memory_limit: MEMORY_LIMIT.to_string(),
             index: fts::WriterBudget::default(),
+            import_memory_limit: IMPORT_MEMORY_LIMIT.to_string(),
             spill_dir: None,
             max_spill: None,
             allocator_flush: ALLOCATOR_FLUSH.to_string(),
             allocator_background_threads: true,
         }
     }
+}
+
+/// DuckDB's memory limit raised while it lives; dropping it (also when the work fails or panics) sets the limit to what
+/// `normal` returns then, so a `configure` that ran meanwhile is not undone. Such a `configure` sets its limit at once,
+/// so the rest of the raised work runs with it (lower than the import memory, as the user asked).
+struct RaisedMemory<'c, N: Fn() -> String> {
+    conn: &'c Connection,
+    normal: N,
+}
+
+fn set_memory_limit(conn: &Connection, limit: &str) -> duckdb::Result<()> {
+    conn.execute_batch(&format!("SET memory_limit = '{}'", limit.replace('\'', "''")))
+}
+
+impl<'c, N: Fn() -> String> RaisedMemory<'c, N> {
+    fn new(conn: &'c Connection, raised: &str, normal: N) -> Self {
+        if let Err(e) = set_memory_limit(conn, raised) {
+            log::warn!("could not raise DuckDB's memory limit to {raised}: {e}");
+        }
+        RaisedMemory { conn, normal }
+    }
+}
+
+impl<N: Fn() -> String> Drop for RaisedMemory<'_, N> {
+    fn drop(&mut self) {
+        let normal = (self.normal)();
+        if let Err(e) = set_memory_limit(self.conn, &normal) {
+            log::error!("could not set DuckDB's memory limit back to {normal}: {e}");
+        }
+    }
+}
+
+/// Runs `f` with DuckDB's memory limit at `raised`, then sets it to what `normal` returns at that moment, also when `f`
+/// fails or panics (the limit is the database's, so every connection sees it while `f` runs).
+pub(crate) fn with_memory<T>(conn: &Connection, raised: &str, normal: impl Fn() -> String, f: impl FnOnce(&Connection) -> T) -> T {
+    let _raised = RaisedMemory::new(conn, raised, normal);
+    f(conn)
+}
+
+/// Runs `f` (the ordering) while the import's stage reads "Ordering events by time (N%)" from DuckDB's progress
+/// estimate of the statement on `conn` (the Store pane's ordering job gets it through the run's control instead).
+fn with_ordering_percent<T>(conn: &Connection, progress: &ImportProgress, f: impl FnOnce() -> T) -> T {
+    if conn.set_query_progress_tracking(true).is_err() {
+        return f();
+    }
+    let handle = conn.progress_handle();
+    let (stop, stopped) = std::sync::mpsc::channel::<()>();
+    let out = std::thread::scope(|s| {
+        s.spawn(move || {
+            // Never backwards: DuckDB's estimate starts again with each statement (and a retry).
+            let mut best = 0;
+            while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(crate::progress::POLL) {
+                if let Some(p) = crate::progress::from_duckdb(&handle.query_progress()) {
+                    best = ordering_percent(best, p.done, p.total);
+                    progress.set_stage(Some(&format!("Ordering events by time ({best}%)")));
+                }
+            }
+        });
+        let out = f();
+        drop(stop);
+        out
+    });
+    let _ = conn.set_query_progress_tracking(false);
+    out
+}
+
+/// The ordering's percentage from `done` of `total`, never below `best` and never above 100.
+fn ordering_percent(best: u64, done: u64, total: u64) -> u64 {
+    best.max(done.min(total).saturating_mul(100) / total.max(1))
+}
+
+/// What the user is told when the events could not be put in time order.
+pub(crate) fn reorder_notice(e: &dyn std::fmt::Display) -> String {
+    format!(
+        "Debrief could not put the events in time order ({e}), so the event list may be incomplete. It tries again \
+         when the project opens and after the next import."
+    )
 }
 
 /// The spill folder of the store in `dir` below the chosen spill folder `base`: one folder per store (stores never
@@ -134,6 +221,7 @@ impl StoreOptions {
                 heap: 16 << 20,
                 threads: 1,
             },
+            import_memory_limit: LOW_MEMORY_LIMIT.to_string(),
             ..StoreOptions::default()
         }
     }
@@ -144,6 +232,13 @@ pub const PREAGGREGATE_ABOVE: u64 = 1_000_000;
 
 /// File name of the database in a store folder.
 pub const DB_FILE: &str = "data.duckdb";
+
+/// The DuckDB storage version new catalogs are written in (`storage_compatibility_version`, set when the database is
+/// opened: the main file is created in it, a later `SET` does not change it). DuckDB 2.0 would otherwise write a
+/// format DuckDB 1.x cannot open, so a project shared from this Debrief would not open in the previous release. The
+/// catalog is small and needs none of the newer storage features. Lift it only with a `FORMAT_VERSION` bump that
+/// rebuilds the catalog (`COPY FROM DATABASE`, then swap).
+pub(crate) const STORAGE_VERSION: &str = "v1.5.0";
 
 /// Idle connections kept for reuse.
 const POOL: usize = 8;
@@ -159,6 +254,17 @@ fn classify(message: String) -> StoreError {
     // Linux/macOS (a POSIX lock) and Windows (a sharing violation).
     if lower.contains("could not set lock on file") || lower.contains("conflicting lock") || lower.contains("file is already open in") {
         StoreError::Locked(format!("this project is open in another Debrief window or program ({message})"))
+    } else if lower.contains("database file with version number") || lower.contains("created with a newer version of duckdb") {
+        // DuckDB fails before `meta` is read, so the format-version check of `open_with` never runs: say it the same way.
+        let found = lower
+            .split("version number ")
+            .nth(1)
+            .map(|rest| rest.chars().take_while(char::is_ascii_digit).collect::<String>())
+            .filter(|n| !n.is_empty())
+            .map_or(String::new(), |n| format!(" (database format {n})"));
+        StoreError::Invalid(format!(
+            "this project was saved by a newer Debrief{found}; update Debrief to open it"
+        ))
     } else if lower.contains("no magic bytes found")
         || lower.contains("too small to be a parquet file")
         || (lower.contains("parquet") && (lower.contains("corrupt") || lower.contains("invalid footer")))
@@ -204,10 +310,15 @@ pub(crate) struct Inner {
     /// Bumped by every change to the events (keys read caches).
     pub(crate) generation: Arc<AtomicU64>,
     pub(crate) importing: AtomicBool,
+    /// A bulk import runs (not a live refresh, which also sets `importing` for its brief hold of the store).
+    pub(crate) bulk_import: Arc<AtomicBool>,
     /// The time window later imports read (ADR 0047).
     pub(crate) import_window: RwLock<debrief_core::ingest::ImportWindow>,
     /// Held by whatever rewrites the catalog (an import, compaction, positions, removal).
     pub(crate) write_lock: Arc<Mutex<()>>,
+    /// Held by the heavy DuckDB work that must not share the memory limit: an import's compaction and ordering, and the
+    /// catalogue's per-source aggregate, so the catalogue never starves the ordering of the memory limit.
+    pub(crate) heavy: Arc<Mutex<()>>,
     /// The full-text index and its indexing thread (`None` when the index cannot be opened: search then
     /// fails with the reason, everything else works).
     fts: Option<fts::FtsService>,
@@ -256,6 +367,10 @@ pub(crate) struct Conn<'a> {
     conn: Option<Connection>,
     /// Interrupts this connection's statement when the thread's current control (`QueryControl::scope`) is cancelled.
     _interrupt: Option<debrief_core::ql::HookGuard>,
+    /// Relays DuckDB's query progress to the same control while the connection is borrowed.
+    relay: Option<progress::Relay>,
+    /// Counts this connection as running, for the exit handler (`shutdown`).
+    _active: shutdown::Active,
 }
 
 impl std::ops::Deref for Conn<'_> {
@@ -268,6 +383,9 @@ impl std::ops::Deref for Conn<'_> {
 impl Drop for Conn<'_> {
     fn drop(&mut self) {
         if let Some(c) = self.conn.take() {
+            if let Some(relay) = self.relay.take() {
+                relay.finish(&c);
+            }
             let mut pool = lock(&self.inner.pool);
             if pool.len() < POOL {
                 pool.push(c);
@@ -295,18 +413,30 @@ impl Inner {
     ///
     /// `progress` names each stage and is polled for Cancel: a cancelled import skips the compaction (only an
     /// optimisation; the next change retries) but still orders the events, so what was read stays usable.
-    fn maintain(&self, conn: &Connection, progress: Option<&ImportProgress>) {
+    fn maintain(&self, conn: &Connection, progress: Option<&ImportProgress>) -> Vec<String> {
         let stage = |label: &str| {
             if let Some(p) = progress {
                 p.set_stage(Some(label));
             }
         };
+        let mut notices = Vec::new();
         let tc = std::time::Instant::now();
+        // No catalogue query runs beside the compaction and the ordering, which get the import's memory: the ordering
+        // ran out of memory beside eight catalogue workers once, leaving the events unordered.
+        let _heavy = lock(&self.heavy);
+        // Cancel may have come while waiting for the lock: then only the ordering runs (what was read stays usable).
         if progress.is_some_and(|p| p.cancel_flag().load(Ordering::SeqCst)) {
             log::info!("import cancelled: segment compaction skipped");
         } else {
             stage("Compacting segments");
-            match compact::compact(conn, &self.dir, &self.schema) {
+            let raised = read_lock(&self.options).import_memory_limit.clone();
+            let compacted = with_memory(
+                conn,
+                &raised,
+                || read_lock(&self.options).memory_limit.clone(),
+                |conn| compact::compact(conn, &self.dir, &self.schema),
+            );
+            match compacted {
                 Ok(c) if c.replaced > 0 => log::info!("compacted {} segments into {}", c.replaced, c.written),
                 Ok(_) => {}
                 Err(e) => log::warn!("segment compaction failed: {e:#}"),
@@ -314,9 +444,10 @@ impl Inner {
         }
         stage("Ordering events by time");
         log::debug!("import: compact {:?}", tc.elapsed());
-        if let Err(e) = pos::rebuild(conn) {
-            log::warn!("time-order positions could not be rebuilt: {e}");
-        }
+        notices.extend(match progress {
+            Some(p) => with_ordering_percent(conn, p, || self.reorder_holding_heavy(conn)),
+            None => self.reorder_holding_heavy(conn),
+        });
         log::debug!("import: pos {:?}", tc.elapsed());
         stage("Saving the index");
         // Write the catalog into the database file now, so a reopen does not replay the WAL.
@@ -332,18 +463,48 @@ impl Inner {
         }
         // The burst's free pages go back to the OS now: the process may idle afterwards.
         debrief_alloc::release();
+        notices
+    }
+
+    /// Puts the events in time order again: the one way the positions are rebuilt (imports, live refreshes,
+    /// compaction, removals, skew corrections, the Store pane). Under the `heavy` lock, with the import memory as
+    /// DuckDB's limit, tried twice and marked stale when both fail ([`pos::rebuild_or_mark`]). `None` when the
+    /// positions are complete, else what to tell the user.
+    pub(crate) fn reorder(&self, conn: &Connection) -> Option<String> {
+        let _heavy = lock(&self.heavy);
+        self.reorder_holding_heavy(conn)
+    }
+
+    /// [`Inner::reorder`] for a caller that holds the `heavy` lock.
+    fn reorder_holding_heavy(&self, conn: &Connection) -> Option<String> {
+        let raised = read_lock(&self.options).import_memory_limit.clone();
+        match with_memory(
+            conn,
+            &raised,
+            || read_lock(&self.options).memory_limit.clone(),
+            pos::rebuild_or_mark,
+        ) {
+            Ok(()) => None,
+            Err(e) => {
+                log::error!("time-order positions could not be rebuilt: {e}");
+                Some(reorder_notice(&e))
+            }
+        }
     }
 
     pub(crate) fn conn(&self) -> StoreResult<Conn<'_>> {
+        let active = shutdown::Active::enter().ok_or(StoreError::Cancelled)?;
         let pooled = lock(&self.pool).pop();
         let conn = match pooled {
             Some(c) => c,
             None => lock(&self.db).try_clone().map_err(engine)?,
         };
+        let mut relay = None;
         let interrupt = match debrief_core::ql::QueryControl::current() {
             Some(control) if control.is_cancelled() => return Err(StoreError::Cancelled),
             Some(control) => {
                 let handle = conn.interrupt_handle();
+                relay = progress::Relay::start(&conn, control.clone(), progress::POLL);
                 Some(control.on_cancel(Box::new(move || handle.interrupt())))
             }
             None => None,
@@ -352,6 +513,8 @@ impl Inner {
             inner: self,
             conn: Some(conn),
             _interrupt: interrupt,
+            relay,
+            _active: active,
         })
     }
 
@@ -384,6 +547,13 @@ impl Inner {
         conn.execute("DELETE FROM analysis_cache WHERE version < ?", params![next])
             .map_err(engine)?;
         conn.execute_batch(&lanes::prune_sql(next)).map_err(engine)?;
+        // The background loops wait for news, not for the clock: every change of the data is news.
+        if let Some(f) = &self.fts {
+            f.wake();
+        }
+        if let Some(c) = &self.catalogue {
+            c.wake();
+        }
         Ok(())
     }
 
@@ -464,7 +634,7 @@ impl Inner {
         let _writing = lock(&self.write_lock);
         let files = writer::segment_files(&conn, &self.dir).map_err(|e| engine(format!("{e:#}")))?;
         conn.execute_batch(
-            "BEGIN TRANSACTION; DELETE FROM segments; DELETE FROM segment_fields; DELETE FROM histogram; DELETE FROM ord; DELETE FROM diagnostics; DELETE FROM tail_offsets; DELETE FROM source_encodings; DELETE FROM source_fingerprints; DELETE FROM sources; COMMIT;",
+            "BEGIN TRANSACTION; DELETE FROM segments; DELETE FROM segment_fields; DELETE FROM segment_blocks; DELETE FROM histogram; DELETE FROM ord; DELETE FROM diagnostics; DELETE FROM tail_offsets; DELETE FROM source_encodings; DELETE FROM source_fingerprints; DELETE FROM sources; COMMIT;",
         )
         .map_err(engine)?;
         catalogue::forget(&conn, None).map_err(engine)?;
@@ -563,10 +733,13 @@ impl Inner {
         parsers::record(&conn, &parser_set).map_err(engine)?;
         record_fingerprints(&conn, &fingerprints);
         let t2 = t0.elapsed();
-        self.maintain(&conn, Some(progress));
+        let maintenance_notices = self.maintain(&conn, Some(progress));
         self.bump_version(&conn)?;
         log::debug!("import: parse {t1:?} finish {t2:?} maintained {:?}", t0.elapsed());
-        let mut report = ImportReport::default();
+        let mut report = ImportReport {
+            notices: maintenance_notices,
+            ..ImportReport::default()
+        };
         let mut unrecognized = Vec::new();
         for o in outcomes {
             match o {
@@ -612,6 +785,7 @@ pub struct DuckStore {
 }
 
 fn open_db(dir: &Path, opts: &StoreOptions) -> StoreResult<Connection> {
+    shutdown::install();
     let tmp = match &opts.spill_dir {
         Some(base) => spill_folder(base, dir),
         None => dir.join("tmp"),
@@ -621,6 +795,10 @@ fn open_db(dir: &Path, opts: &StoreOptions) -> StoreResult<Connection> {
     let config = Config::default()
         .max_memory(&opts.memory_limit)
         .and_then(|c| c.threads(opts.duck_threads.max(1) as i64))
+        // DuckDB 2.0 reads Parquet through a pool of I/O threads that defaults to four per core and does not follow
+        // `threads`; bound it by the same Performance setting (rule 13) so the worker's memory budget holds.
+        .and_then(|c| c.with("async_threads", opts.duck_threads.max(1).to_string()))
+        .and_then(|c| c.with("storage_compatibility_version", STORAGE_VERSION))
         .and_then(|c| c.with("temp_directory", tmp.to_string_lossy()))
         .and_then(|c| c.enable_autoload_extension(false))
         // The catalog is small; a checkpoint at the end of each change is enough.
@@ -752,6 +930,16 @@ impl DuckStore {
         conn.execute_batch(schema::CACHE_DDL).map_err(engine)?;
         conn.execute_batch(lanes::DDL).map_err(engine)?;
         conn.execute_batch(schema::ADDED_DDL).map_err(engine)?;
+        // Rebuildable: a store whose blocks cannot be filled in still opens (its blockless segments are not compacted
+        // and keep their search entries through a clock offset).
+        if let Err(e) = conn.execute_batch(schema::BLOCKS_BACKFILL) {
+            log::warn!("the id blocks of older segments could not be filled in: {e}");
+        }
+        // Positions a failed ordering left stale (pos::STALE) or that are missing are not rebuilt here, inside the
+        // open call: the app sees `positioned() < total` and runs MaintenanceAction::OrderEvents as a job.
+        if pos::is_stale(&conn) {
+            log::warn!("the events' time order is stale; it is rebuilt by the next ordering");
+        }
         Ok(Self::with(dir, conn, schema, parsers, registry, opts))
     }
 
@@ -780,10 +968,12 @@ impl DuckStore {
         };
         let parsers = Arc::new(parsers);
         let write_lock = Arc::new(Mutex::new(()));
+        let heavy = Arc::new(Mutex::new(()));
+        let bulk_import = Arc::new(AtomicBool::new(false));
         let started = conn
             .try_clone()
             .map_err(anyhow::Error::from)
-            .and_then(|c| fts::FtsService::start(dir, c, write_lock.clone(), opts.index));
+            .and_then(|c| fts::FtsService::start(dir, c, write_lock.clone(), bulk_import.clone(), opts.index));
         let (fts, fts_error) = match started {
             Ok(f) => (Some(f), None),
             Err(e) => {
@@ -794,7 +984,7 @@ impl DuckStore {
         let catalogue = conn
             .try_clone()
             .map_err(anyhow::Error::from)
-            .and_then(|c| catalogue::CatalogueService::start(c, write_lock.clone()))
+            .and_then(|c| catalogue::CatalogueService::start(c, write_lock.clone(), heavy.clone()))
             .map_err(|e| log::warn!("the catalogue is unavailable: {e:#}"))
             .ok();
         DuckStore {
@@ -813,8 +1003,10 @@ impl DuckStore {
                 }),
                 generation: Arc::new(AtomicU64::new(0)),
                 importing: AtomicBool::new(false),
+                bulk_import,
                 import_window: RwLock::new(Default::default()),
                 write_lock,
+                heavy,
                 fts,
                 catalogue,
                 fts_error,
@@ -839,20 +1031,31 @@ impl DuckStore {
     pub fn configure(&self, opts: StoreOptions) -> StoreResult<()> {
         let conn = self.inner.conn()?;
         let limit = sql::lit(&opts.memory_limit).ok_or_else(|| StoreError::Invalid("bad memory limit".into()))?;
-        conn.execute_batch(&format!("SET memory_limit = {limit}; SET threads = {};", opts.duck_threads.max(1)))
-            .map_err(|e| StoreError::Invalid(format!("{e}")))?;
+        conn.execute_batch(&format!(
+            "SET memory_limit = {limit}; SET threads = {n}; SET async_threads = {n};",
+            n = opts.duck_threads.max(1)
+        ))
+        .map_err(|e| StoreError::Invalid(format!("{e}")))?;
         *write_lock(&self.inner.options) = opts;
         Ok(())
     }
 
-    /// Merges small segments and drops rows of removed sources now (normally done after each change).
+    /// Merges small segments and drops rows of removed sources now (normally done after each change), then orders the
+    /// events again through the one guarded path when segments were rewritten (as the Store pane's Compact does).
     pub fn compact(&self) -> StoreResult<Compaction> {
         self.idle()?;
         let _writing = lock(&self.inner.write_lock);
         let conn = self.inner.conn()?;
         let c = compact::compact(&conn, &self.inner.dir, &self.inner.schema).map_err(|e| engine(format!("{e:#}")))?;
+        let notice = if c.replaced > 0 { self.inner.reorder(&conn) } else { None };
         self.changed();
-        Ok(c)
+        match notice {
+            None => Ok(c),
+            Some(n) => Err(StoreError::Engine(format!(
+                "Compacted {} segments into {}. {n}",
+                c.replaced, c.written
+            ))),
+        }
     }
 
     /// From how many events on timelines are answered from the histogram (tests lower it).
@@ -881,11 +1084,21 @@ impl DuckStore {
     }
 }
 
-/// Clears the "import running" flag when the job ends, however it ends.
+/// Clears the "import running" flag (and the bulk import's) when the job ends, however it ends.
 pub(crate) struct Importing(pub(crate) Arc<Inner>);
+
+impl Importing {
+    /// A bulk import (open, reload, open at the end): it also sets `bulk_import`, for which the index writer gives its
+    /// heaps back (an import's memory budget and the writer's never add up). The caller set `importing`.
+    pub(crate) fn bulk(inner: Arc<Inner>) -> Importing {
+        inner.bulk_import.store(true, Ordering::SeqCst);
+        Importing(inner)
+    }
+}
 
 impl Drop for Importing {
     fn drop(&mut self) {
+        self.0.bulk_import.store(false, Ordering::SeqCst);
         self.0.importing.store(false, Ordering::SeqCst);
     }
 }
@@ -919,7 +1132,7 @@ impl Ingest for DuckStore {
         if self.inner.importing.swap(true, Ordering::SeqCst) {
             return Err(StoreError::Busy("an import is running; wait for it or cancel it".into()));
         }
-        let guard = Importing(self.inner.clone());
+        let guard = Importing::bulk(self.inner.clone());
         let canonical = paths
             .iter()
             .map(|p| std::fs::canonicalize(p).map_err(|e| StoreError::Io(format!("{}: {e}", p.display()))))
@@ -1027,14 +1240,17 @@ impl Ingest for DuckStore {
                 log::warn!("could not remove source {id} from the full-text index: {e:#}");
             }
         }
-        self.inner.maintain(&conn, None);
+        let notices = self.inner.maintain(&conn, None);
         let mut s = write_lock(&self.inner.state);
         let p = PathBuf::from(&path);
         s.roots.retain(|r| *r != p);
         s.removed.insert(p);
         drop(s);
         self.changed();
-        Ok(())
+        match notices.first() {
+            None => Ok(()),
+            Some(n) => Err(StoreError::Engine(format!("The source was removed. {n}"))),
+        }
     }
 
     fn clear(&self) -> StoreResult<()> {
@@ -1208,6 +1424,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn low_memory_mode_shrinks_every_memory_knob() {
+        let low = StoreOptions::low_memory();
+        let normal = StoreOptions::default();
+        assert_eq!(low.memory_limit, LOW_MEMORY_LIMIT);
+        assert_eq!(low.import_memory_limit, LOW_MEMORY_LIMIT);
+        assert_eq!(low.duck_threads, 2);
+        assert!((1..=LOW_MEMORY_PARSE_THREADS).contains(&low.parse_threads), "{}", low.parse_threads);
+        assert_eq!((low.index.heap, low.index.threads), (16 << 20, 1));
+        assert!(low.parse_threads <= normal.parse_threads && low.index.heap < normal.index.heap);
+        assert_ne!(low.import_memory_limit, normal.import_memory_limit);
+    }
+
+    #[test]
     fn database_failures_become_typed_errors() {
         let locked = classify("IO Error: Could not set lock on file \"x/catalog.duckdb\": Conflicting lock is held".into());
         assert!(
@@ -1237,6 +1466,117 @@ mod tests {
         );
     }
 
+    /// The storage version DuckDB wrote into a database file's header (8 bytes of checksum, "DUCK", then the version).
+    fn storage_version(file: &Path) -> u64 {
+        let bytes = std::fs::read(file).unwrap();
+        assert_eq!(&bytes[8..12], b"DUCK", "not a DuckDB file");
+        u64::from_le_bytes(bytes[12..20].try_into().unwrap())
+    }
+
+    #[test]
+    fn a_new_catalog_is_written_in_the_storage_format_the_previous_release_reads() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("pin");
+        let conn = open_db(&dir, &StoreOptions::default()).unwrap();
+        conn.execute_batch("CREATE TABLE t(x INTEGER); INSERT INTO t VALUES (1); CHECKPOINT")
+            .unwrap();
+        drop(conn);
+        // DuckDB 1.5 reads storage versions 64 to 68; a file created by 2.0 without the pin is version 69.
+        let pinned = storage_version(&dir.join(DB_FILE));
+        assert!((64..=68).contains(&pinned), "storage version {pinned}");
+        // The control: the same file created without the pin is newer, so the test would notice the pin going.
+        let unpinned_file = dir.join("unpinned.duckdb");
+        let latest = Config::default().with("storage_compatibility_version", "latest").unwrap();
+        let unpinned = Connection::open_with_flags(&unpinned_file, latest).unwrap();
+        unpinned.execute_batch("CREATE TABLE t(x INTEGER); CHECKPOINT").unwrap();
+        drop(unpinned);
+        assert!(
+            storage_version(&unpinned_file) > 68,
+            "the control file is not newer than DuckDB 1.5 reads"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn duckdbs_newer_storage_version_error_is_not_an_engine_failure() {
+        // The text DuckDB 1.5.6 prints for a catalog that DuckDB 2.0 created without the pin (captured from its CLI).
+        let e = classify(
+            "IO Error: Trying to read a database file with version number 69, but we can only read versions between 64 and 68.\n\
+             The database file was created with a newer version of DuckDB.\n\n\
+             Newer DuckDB version might introduce backward incompatible changes (possibly guarded by compatibility settings).\n\
+             See the storage page for migration strategy and more information: https://duckdb.org/internals/storage"
+                .into(),
+        );
+        assert!(
+            matches!(&e, StoreError::Invalid(m) if m.contains("saved by a newer Debrief") && m.contains("update Debrief") && m.contains("69")),
+            "{e:?}"
+        );
+        assert!(!e.is_retryable());
+        // A later DuckDB's own wording of the same failure.
+        let e = classify("IO Error: The database file was created with a newer version of DuckDB.".into());
+        assert!(
+            matches!(&e, StoreError::Invalid(m) if m.contains("saved by a newer Debrief")),
+            "{e:?}"
+        );
+    }
+
+    #[test]
+    fn a_borrowed_connection_relays_duckdbs_progress_to_the_runs_control() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = DuckStore::create(&tmp.path().join("s"), Profile::default_profile(), PluginRegistry::new()).unwrap();
+        let control = debrief_core::ql::QueryControl::new();
+        control.scope(|| {
+            let conn = store.inner.conn().unwrap();
+            conn.execute_batch("CREATE TEMP TABLE big AS SELECT range AS i FROM range(100000000)")
+                .unwrap();
+            let sum: i64 = conn
+                .query_row("SELECT sum(hash(i) % 7) FROM big WHERE i % 3 <> 5", [], |r| r.get(0))
+                .unwrap();
+            assert!(sum > 0);
+        });
+        let p = control.progress();
+        assert_eq!(p.stage, debrief_core::ql::QueryStage::Evaluating);
+        assert!(p.total > 0 && p.done <= p.total, "{p:?}");
+        // Pooled connections go back with tracking off, and a run without a control starts no relay.
+        let conn = store.inner.conn().unwrap();
+        assert!(conn.relay.is_none());
+    }
+
+    #[test]
+    fn async_threads_follow_the_chosen_threads_instead_of_four_per_core() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("async");
+        let opts = StoreOptions {
+            duck_threads: 3,
+            ..StoreOptions::default()
+        };
+        let conn = open_db(&dir, &opts).unwrap();
+        let setting = |name: &str| -> String {
+            conn.query_row(&format!("SELECT CAST(current_setting('{name}') AS VARCHAR)"), [], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(setting("async_threads"), "3");
+        drop(conn);
+        // Changing the limits at run time moves both together.
+        let store_dir = dir.join("s");
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = DuckStore::create_with(&store_dir, Profile::default_profile(), PluginRegistry::new(), opts).unwrap();
+        store
+            .configure(StoreOptions {
+                duck_threads: 5,
+                ..StoreOptions::default()
+            })
+            .unwrap();
+        let conn = store.inner.conn().unwrap();
+        let value: String = conn
+            .query_row("SELECT CAST(current_setting('async_threads') AS VARCHAR)", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(value, "5");
+        drop(conn);
+        drop(store);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn the_database_gives_freed_memory_back_and_keeps_its_limit() {
         let dir = std::env::temp_dir().join(format!("debrief-open-db-{}", std::process::id()));
@@ -1245,7 +1585,7 @@ mod tests {
             conn.query_row(&format!("SELECT CAST(current_setting('{name}') AS VARCHAR)"), [], |r| r.get(0))
                 .unwrap()
         };
-        assert_eq!(setting("allocator_flush_threshold"), "32.0 MiB");
+        assert_eq!(setting("allocator_flush_threshold"), "32MiB");
         assert_eq!(setting("allocator_background_threads"), "true");
         assert_eq!(setting("threads"), DUCK_THREADS.to_string());
         assert_eq!(setting("temp_directory"), dir.join("tmp").to_string_lossy());
@@ -1273,7 +1613,7 @@ mod tests {
                 .unwrap()
         };
         assert_eq!(setting("threads"), "3");
-        assert_eq!(setting("allocator_flush_threshold"), "8.0 MiB");
+        assert_eq!(setting("allocator_flush_threshold"), "8MiB");
         assert_eq!(setting("allocator_background_threads"), "false");
         assert!(
             setting("max_temp_directory_size").starts_with("1.8 GiB"),

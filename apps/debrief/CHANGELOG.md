@@ -5,16 +5,33 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 ## Unreleased
 
+### Added
+
+- **Names:** Searching for an abbreviation of a program name now finds it: "rptbldr" finds Report Builder and "netmon" finds Network Monitor, with the reason "abbreviation: letters of report builder", without any AI model
+
+### Removed
+
+- **Names:** Debrief no longer asks the AI model for human names in the background. "Learning human names" after an import, and the Settings ▸ AI switch "AI aliases for names", are gone, so opening logs no longer loads or runs a model. Aliases an earlier version already learned stay, labelled AI-generated, and you can still remove any of them
+
 ### Changed
 
+- **Search:** The word-search index of a large import is split over up to four threads (at a lowered priority, so Debrief stays responsive) instead of two. In a first measurement on a busy machine, word searches for common words answered faster once it was built ([performance notes](docs/performance.md#index-writer-threads-and-heap-one-round-on-a-busy-machine-2026-10-30)); building it does not get faster yet. Settings ▸ Performance ▸ Search index threads (0 is Auto, the default) and Search index memory per thread (64 MB by default) set them; a value you chose for the old Search index threads setting is not kept
+
+- **Database engine:** Debrief now runs on DuckDB 2.0. Searches for text in messages use about half the processor time and queries need less memory. The database of an existing project keeps its format, and a new project is written in a format the previous Debrief can still open. A project saved by a newer Debrief than yours now says so and asks you to update, instead of showing a database error
+- **SQL console:** DuckDB 2.0 changed some SQL rules that affect your own queries: `~` and `!~` match anywhere in the text (a partial match), `!` binds tighter than other operators, `X'...'` and `B'...'` are binary and bit-string literals, integer division and remainder by zero are errors, and `SHOW name` prints a setting when no table has that name
+- **SQL console:** `SHOW` statements are no longer accepted (DuckDB 2.0 lists databases and settings with them); use `DESCRIBE`, or query the views events, sources, fields and notes.
+- **macOS:** Debrief now supports Apple silicon Macs only (DuckDB drops Intel Macs in 2.1 and Debrief follows it). Intel Macs can keep using Debrief 1.1.1, which no longer receives updates
 - **Updates:** Debrief now updates from the Paddock repository's releases, signed with the Paddock family's update key. A copy installed before this release cannot update itself to it: download this release once by hand and install it over the old one; later releases update as usual
 
 ### Fixed
 
+- **Event list:** After a large import the events could be left without their time order when the database ran out of memory, and the event list then missed events until the next import. The import now gives that step its memory, says so if it still fails, and orders the events again as a job when the project opens
 - **Browser on Windows:** the page browser Debrief downloads (Chrome for Testing) no longer starts its network service twice, which could make the first page it opened fail to load
 - **Event Log follower:** the status no longer shows more queued events than the queue holds while the writer is busy
 - **Research profile:** clearing the kept research profile right after the AI browser closed no longer fails with "in use"
 - **Process monitor:** a new run's live charts wait until its output is open instead of briefly charting the earlier runs; when the output cannot be opened the panel and the monitor say so, and a failed first load stays shown until you retry
+- **Process monitor:** every monitoring run (the debrief-monitor command and the agent's monitor action) now ends its log with "Monitoring stopped after … ms", the reason (stopped, or the error) and how many samples and stats events it wrote, so a short or empty monitor log says why
+- **Clock offsets:** After you set a file's clock offset, search results came back in the old time order. The moved events are now indexed again with their new times: until that is done (the Store pane shows indexing) word search does not find them. In a project from an earlier Debrief, data files whose event ranges overlap (after an earlier compaction) keep their old times in search until the index is rebuilt
 
 ## 1.1.1 (2026-10-24)
 

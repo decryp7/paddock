@@ -541,8 +541,11 @@ jobs:
           mode: release
 
   # Conventional Commits and no AI attribution (rules 4, 8) for every commit of a change, whichever project it touches.
-  # Only the commits a change adds are linted (scripts/affected.mjs commitLintRange): a pull request since its target
-  # branch, a push `before..sha`, a manual run from the plan's base. Tags and an app's tag gates skip it (ER-15).
+  # Only the commits a change adds are linted (scripts/affected.mjs commitLintRange): a pull request since its target branch,
+  # a push `before..sha`, a manual run from the plan's base. On a push to main that is `--first-parent`: only the commits main
+  # itself gets (the landing merge, a direct commit), not the ones a merge brought in. A branch's commits are linted by the
+  # integrator before landing (`commit-lint --range origin/main..<branch>`, docs/rules.md rule 50(g)); C23 in the conformance
+  # run is the backstop for a branch that landed without that. Tags and an app's tag gates skip it (ER-15).
   commits:
     name: commit messages
     needs: [plan]
@@ -567,9 +570,11 @@ jobs:
           INPUT_APP: ${{ inputs.app }}
         run: |
           range="$(./dev plan --commit-range)"
-          echo "commit-lint range: $range"
+          flags="$(./dev plan --commit-flags)"
+          echo "commit-lint range: $flags $range"
           if [ "$range" = "skip" ]; then exit 0; fi
-          node conformance/bin/paddock-conformance.mjs commit-lint --range "$range"
+          # shellcheck disable=SC2086 # the flags are zero or one fixed option
+          node conformance/bin/paddock-conformance.mjs commit-lint $flags --range "$range"
 
   # One leg per affected app and operating system (ADR 0014 §6): the app's CI contract (apps/<app>/paddock.ci.json) through
   # the shared app-gates action, only the halves the change reaches (rust, ui). Linux (the paddock-ci image) carries the

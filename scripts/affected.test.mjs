@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { tmpdir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
 import { describe, test } from 'node:test';
+import { lint, messagesInRange } from '../conformance/src/commit-lint.mjs';
 import { adoptsPerMachine, affected, appOfWorkflow, cargoGraph, changedJobs, chooseBase, ciOutputs, commitLintRange, planFor, scriptImporters, workflowJobs, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
 
 /**
@@ -433,18 +434,70 @@ describe('.gitea changes are narrowed to the jobs they reach', () => {
 
   test('commitLintRange lints only what a change adds, and skips tags and app gates', () => {
     const Z = '0'.repeat(40);
-    assert.equal(commitLintRange({ event: 'pull_request', baseRef: 'main' }), 'origin/main..HEAD');
+    const [A, B, C] = ['aaaaaaa', 'bbbbbbb', 'ccccccc'];
+    assert.deepEqual(commitLintRange({ event: 'pull_request', baseRef: 'main' }), { flags: [], range: 'origin/main..HEAD' });
     assert.equal(commitLintRange({ event: 'pull_request' }), null);
-    assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/main', before: 'aaa', sha: 'bbb' }), 'aaa..bbb');
-    assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/x', before: Z, sha: 'bbb' }), 'bbb^!', 'a new branch: the head commit');
-    assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/x', before: '', sha: 'bbb' }), 'bbb^!');
-    assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/main', before: 'gone', sha: 'bbb', known: () => false }), 'bbb^!', 'a force push: before is not in the clone');
-    assert.equal(commitLintRange({ event: 'workflow_dispatch', base: 'ccc', sha: 'bbb' }), 'ccc..bbb');
-    assert.equal(commitLintRange({ event: 'workflow_dispatch', sha: 'bbb' }), 'bbb^!');
-    assert.equal(commitLintRange({ event: 'push', ref: 'refs/tags/v1.0.0', before: Z, sha: 'bbb' }), null, 'a tag');
-    assert.equal(commitLintRange({ event: 'push', ref: 'refs/tags/dyno-v1.0.0', before: 'aaa', sha: 'bbb' }), null);
-    assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/main', before: 'aaa', sha: 'bbb', app: 'dyno' }), null, 'an app tag call');
-    assert.equal(commitLintRange({ event: 'schedule', sha: 'bbb' }), null);
+    assert.deepEqual(commitLintRange({ event: 'push', ref: 'refs/heads/main', before: A, sha: B }), { flags: ['--first-parent'], range: `${A}..${B}` }, 'main: what main itself adds');
+    assert.deepEqual(commitLintRange({ event: 'push', ref: 'refs/heads/x', before: A, sha: B }), { flags: [], range: `${A}..${B}` }, 'another branch: every commit it adds');
+    assert.deepEqual(commitLintRange({ event: 'push', ref: 'refs/heads/x', before: Z, sha: B }), { flags: [], range: `${B}^!` }, 'a new branch: the head commit');
+    assert.deepEqual(commitLintRange({ event: 'push', ref: 'refs/heads/x', before: '', sha: B }), { flags: [], range: `${B}^!` });
+    assert.deepEqual(commitLintRange({ event: 'push', ref: 'refs/heads/main', before: 'abcdef0', sha: B, known: () => false }), { flags: [], range: `${B}^!` }, 'a force push: before is not in the clone');
+    assert.deepEqual(commitLintRange({ event: 'workflow_dispatch', base: C, sha: B }), { flags: [], range: `${C}..${B}` });
+    assert.deepEqual(commitLintRange({ event: 'workflow_dispatch', sha: B }), { flags: [], range: `${B}^!` });
+    assert.equal(commitLintRange({ event: 'push', ref: 'refs/tags/v1.0.0', before: Z, sha: B }), null, 'a tag');
+    assert.equal(commitLintRange({ event: 'push', ref: 'refs/tags/dyno-v1.0.0', before: A, sha: B }), null);
+    assert.equal(commitLintRange({ event: 'push', ref: 'refs/heads/main', before: A, sha: B, app: 'dyno' }), null, 'an app tag call');
+    assert.equal(commitLintRange({ event: 'schedule', sha: B }), null);
+  });
+
+  test('commitLintRange refuses values that are not commits or branch names (they become git arguments)', () => {
+    const B = 'bbbbbbb';
+    for (const bad of ['HEAD --output=/tmp/x', '--output=/tmp/x', 'abc', 'zzzzzzz', 'a..b']) {
+      assert.throws(() => commitLintRange({ event: 'workflow_dispatch', base: bad, sha: B }), /not a commit/, bad);
+      assert.throws(() => commitLintRange({ event: 'push', ref: 'refs/heads/main', before: bad, sha: B }), /not a commit/, bad);
+      assert.throws(() => commitLintRange({ event: 'push', ref: 'refs/heads/main', before: B, sha: bad }), /not a commit/, bad);
+    }
+    assert.throws(() => commitLintRange({ event: 'pull_request', baseRef: '--output=/tmp/x' }), /not a branch/);
+    assert.throws(() => commitLintRange({ event: 'pull_request', baseRef: 'a b' }), /not a branch/);
+    assert.deepEqual(commitLintRange({ event: 'workflow_dispatch', base: 'a'.repeat(40), sha: 'HEAD' }), { flags: [], range: `${'a'.repeat(40)}..HEAD` });
+  });
+
+  test('a push to main lints the commits made on main, not the ones a merge brought in from a branch', () => {
+    const sh = (cwd, ...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', ...a], { cwd, encoding: 'utf8' });
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'commit-range-')));
+    try {
+      sh(dir, 'init', '-q', '-b', 'main');
+      sh(dir, 'commit', '-q', '--allow-empty', '-m', 'chore: start');
+      const before = sh(dir, 'rev-parse', 'HEAD').trim();
+      sh(dir, 'checkout', '-q', '-b', 'feature');
+      sh(dir, 'commit', '-q', '--allow-empty', '-m', 'wip: half done');
+      sh(dir, 'checkout', '-q', 'main');
+      sh(dir, 'merge', '-q', '--no-ff', '-m', 'Merge feature: the work', 'feature');
+      const sha = sh(dir, 'rev-parse', 'HEAD').trim();
+      const problems = (r) => messagesInRange(r.range, dir, undefined, r.flags).flatMap((m) => lint(m.message));
+      const range = commitLintRange({ event: 'push', ref: 'refs/heads/main', before, sha });
+      assert.deepEqual(problems(range), [], 'the branch wip commit was linted on its pull request; main adds the merge');
+      assert.equal(problems({ flags: [], range: `${before}..${sha}` }).length, 1, 'without --first-parent the merged-in wip commit would be flagged');
+      // A commit made directly on main is still linted.
+      sh(dir, 'commit', '-q', '--allow-empty', '-m', 'wip: straight on main');
+      const sha2 = sh(dir, 'rev-parse', 'HEAD').trim();
+      const direct = problems(commitLintRange({ event: 'push', ref: 'refs/heads/main', before: sha, sha: sha2 }));
+      assert.equal(direct.length, 1, direct.join('; '));
+      assert.match(direct[0], /wip: straight on main/);
+      // A pull request still lints every commit it holds.
+      assert.equal(problems({ flags: [], range: `${before}..${sha}` }).length, 1);
+      // The landing merge itself is linted: attribution in its message fails, its "Merge" header does not.
+      sh(dir, 'checkout', '-q', '-b', 'feature2', before);
+      sh(dir, 'commit', '-q', '--allow-empty', '-m', 'feat: two');
+      sh(dir, 'checkout', '-q', 'main');
+      const prior = sh(dir, 'rev-parse', 'HEAD').trim();
+      sh(dir, 'merge', '-q', '--no-ff', '-m', 'Merge feature2\n\nClaude-Session: https://claude.ai/code/session_x', 'feature2');
+      const landed = problems(commitLintRange({ event: 'push', ref: 'refs/heads/main', before: prior, sha: sh(dir, 'rev-parse', 'HEAD').trim() }));
+      assert.ok(landed.length >= 1, 'the landing merge message is linted');
+      assert.match(landed.join('; '), /Claude-Session/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('ci.yml has a commits job that asks commitLintRange for its range', () => {
@@ -452,6 +505,7 @@ describe('.gitea changes are narrowed to the jobs they reach', () => {
     assert.ok(job, 'a commits job');
     assert.match(job, /needs: \[plan\]/);
     assert.match(job, /\.\/dev plan --commit-range/);
+    assert.match(job, /\.\/dev plan --commit-flags/);
     assert.match(job, /fetch-depth: 0/);
     for (const v of ['EVENT', 'REF', 'BEFORE', 'SHA', 'BASE_REF', 'PLAN_BASE', 'INPUT_APP']) assert.match(job, new RegExp(`${v}: \\$\\{\\{`), v);
   });

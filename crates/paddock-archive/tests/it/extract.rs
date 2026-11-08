@@ -312,10 +312,7 @@ fn limits_are_enforced_while_writing() {
         assert!(
             matches!(
                 e,
-                ArchiveError::Limit {
-                    what: "entries",
-                    limit: 5
-                }
+                ArchiveError::Limit(l) if l.id.as_str() == "archive.entries" && l.limit == paddock_limits::Quantity::Count(5)
             ),
             "{name}: {e:?}"
         );
@@ -335,10 +332,7 @@ fn limits_are_enforced_while_writing() {
         assert!(
             matches!(
                 e,
-                ArchiveError::Limit {
-                    what: "file size",
-                    limit: 1000
-                }
+                ArchiveError::Limit(l) if l.id.as_str() == "archive.file_bytes" && l.limit == paddock_limits::Quantity::Bytes(1000)
             ),
             "{name}: {e:?}"
         );
@@ -355,10 +349,7 @@ fn limits_are_enforced_while_writing() {
         assert!(
             matches!(
                 e,
-                ArchiveError::Limit {
-                    what: "total size",
-                    limit: 1000
-                }
+                ArchiveError::Limit(l) if l.id.as_str() == "archive.total_bytes" && l.limit == paddock_limits::Quantity::Bytes(1000)
             ),
             "{name}: {e:?}"
         );
@@ -380,11 +371,62 @@ fn limits_are_enforced_while_writing() {
     .unwrap_err();
     assert!(matches!(
         e,
-        ArchiveError::Limit {
-            what: "folder depth",
-            ..
-        }
+        ArchiveError::Limit(l) if l.id.as_str() == "archive.depth"
     ));
+}
+
+#[test]
+fn a_limit_is_reached_exactly_and_only_a_value_over_it_is_refused() {
+    let d = tempfile::tempdir().unwrap();
+    let opts = |l: Limits| Options {
+        limits: l,
+        ..Options::default()
+    };
+    let five: Vec<E> = ["f0", "f1", "f2", "f3", "f4"]
+        .iter()
+        .map(|n| E::File(n, b"x"))
+        .collect();
+    let payload = vec![1u8; 1000];
+    let one = [E::File("abcde", &payload)];
+    let nested = [E::File("a/b", b"x")];
+    let cases: [(&[E], Limits); 4] = [
+        (
+            &five,
+            Limits {
+                max_entries: 5,
+                ..Limits::default()
+            },
+        ),
+        (
+            &one,
+            Limits {
+                max_file_bytes: 1000,
+                ..Limits::default()
+            },
+        ),
+        (
+            &one,
+            Limits {
+                max_path_len: 5,
+                ..Limits::default()
+            },
+        ),
+        (
+            &nested,
+            Limits {
+                max_depth: 2,
+                ..Limits::default()
+            },
+        ),
+    ];
+    for (i, (entries, limits)) in cases.iter().enumerate() {
+        for (name, bytes) in all_formats(entries) {
+            let a = write(d.path(), name, &bytes);
+            let out = d.path().join(format!("o{i}-{name}"));
+            run(&a, &out, &opts(limits.clone()))
+                .unwrap_or_else(|e| panic!("case {i} {name}: at the limit is allowed: {e:?}"));
+        }
+    }
 }
 
 #[test]
@@ -409,14 +451,14 @@ fn an_expansion_bomb_is_stopped_by_the_ratio_in_every_format() {
         assert!(
             matches!(
                 e,
-                ArchiveError::Limit {
-                    what: "expansion ratio",
-                    limit: 50
-                }
+                ArchiveError::Limit(l) if l.id.as_str() == "archive.ratio" && l.limit == paddock_limits::Quantity::Ratio(50)
             ),
             "{name}: {e:?}"
         );
-        assert!(e.to_string().contains("expansion ratio"));
+        assert!(
+            !e.to_string().contains("archive.ratio") && e.to_string().contains("50:1"),
+            "{e}"
+        );
     }
     assert!(!d.path().join("o").exists());
     // The xz reader stops while expanding (it is stored here: the test encoder does not compress), and removes the expanded tar.
@@ -434,10 +476,7 @@ fn an_expansion_bomb_is_stopped_by_the_ratio_in_every_format() {
     assert!(
         matches!(
             e,
-            ArchiveError::Limit {
-                what: "total size",
-                limit: 1000
-            }
+            ArchiveError::Limit(l) if l.id.as_str() == "archive.total_bytes" && l.limit == paddock_limits::Quantity::Bytes(1000)
         ),
         "{e:?}"
     );
@@ -579,10 +618,7 @@ fn a_copied_link_counts_against_the_size_cap() {
     };
     assert!(matches!(
         run(&a, &d.path().join("o"), &opts),
-        Err(ArchiveError::Limit {
-            what: "total size",
-            ..
-        })
+        Err(ArchiveError::Limit(l)) if l.id.as_str() == "archive.total_bytes"
     ));
 }
 
@@ -901,14 +937,29 @@ fn error_messages_say_what_to_do() {
             .to_string()
             .contains("twice")
     );
+    let limit = ArchiveError::Limit(paddock_limits::LimitExceeded::new(
+        paddock_limits::LimitId::new("archive.entries"),
+        paddock_limits::Quantity::Count(3),
+        paddock_limits::Scope::File,
+    ));
+    // A person reads the message: the archive context, the limit's value, no dotted id.
     assert!(
-        ArchiveError::Limit {
-            what: "entries",
-            limit: 3
-        }
-        .to_string()
-        .contains("entries")
+        limit.to_string().starts_with("the archive is refused."),
+        "{limit}"
     );
+    assert!(limit.to_string().contains("the limit is 3."), "{limit}");
+    assert!(!limit.to_string().contains("archive.entries"), "{limit}");
+    // The job it ran in keeps the type, and its failed message is the same person-facing text (never the raw id).
+    let as_job = paddock_jobs::JobError::from(limit);
+    assert!(!as_job.to_string().contains("archive.entries"), "{as_job}");
+    assert!(
+        as_job.to_string().starts_with("the archive is refused."),
+        "{as_job}"
+    );
+    assert!(matches!(
+        as_job,
+        paddock_jobs::JobError::Limit { limit: l, .. } if l.id.as_str() == "archive.entries"
+    ));
     let j: paddock_jobs::JobError = ArchiveError::Cancelled(CancelReason::Deadline).into();
     assert!(matches!(
         j,
