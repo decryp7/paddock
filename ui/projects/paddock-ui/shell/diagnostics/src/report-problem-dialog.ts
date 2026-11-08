@@ -132,7 +132,7 @@ export class PdReportProblemDialog implements DialogContent<Saved> {
     notIn: $localize`:@@pd.diag.not-in:Not in the report`,
     notInContents: $localize`:@@pd.diag.not-in-contents:The contents of your documents and files.`,
     notInSecrets: $localize`:@@pd.diag.not-in-secrets:Passwords, tokens and keys (they are replaced where the app can recognise them).`,
-    notInPersonal: $localize`:@@pd.diag.not-in-personal:Your user name, home folder, machine name, e-mail addresses and IP addresses (they are replaced).`,
+    notInPersonal: $localize`:@@pd.diag.not-in-personal:Your user name, home folder, machine name, e-mail addresses and public IP addresses (they are replaced). Local and private network addresses are kept for diagnosis.`,
     mayRemain: $localize`:@@pd.diag.may-remain:File names outside your home folder may remain, and so may other computers' names and text the app imported or showed.`,
     describe: $localize`:@@pd.diag.describe:What went wrong? (optional)`,
     hint: $localize`:@@pd.diag.hint:What you were doing, what you expected, what happened instead. It goes into the report as you write it.`,
