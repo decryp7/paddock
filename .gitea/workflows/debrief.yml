@@ -826,6 +826,9 @@ jobs:
           - os: macos-latest
             bundles: dmg
     runs-on: ${{ matrix.os }}
+    env:
+      # A release or installer job builds the tool from source: it never runs a prebuilt binary (ADR 0022, release jobs bypass every cache).
+      PADDOCK_DEV_DOWNLOAD: "0"
     # Linux legs run in the paddock-ci image; Windows and macOS run on the host.
     container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
     defaults:

@@ -1856,3 +1856,29 @@ test('no workflow passes every secret on (`secrets: inherit`): a called workflow
     assert.ok(!lines.some((l) => /^\s*secrets:\s*inherit\b/.test(l)), `${f}: \`secrets: inherit\` hands the signing keys to every called job; name each secret`);
   }
 });
+
+test('a release or installer job never runs a downloaded ./dev: PADDOCK_DEV_DOWNLOAD is "0" in each, and in ci.yml on a tag', () => {
+  const dir = join(PADDOCK, '.gitea', 'workflows');
+  const jobsOf = (file) => parseJobs(readFileSync(join(dir, file), 'utf8'));
+  // Every job of a *-release.yml that takes a host slot (builds installers), plus the named ones.
+  const named = { 'app-release.yml': ['bundle', 'release'], 'shell-demo-release.yml': ['bundle'], 'workbench-demo-release.yml': ['bundle'], 'debrief.yml': ['bundle'] };
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('-release.yml'))) {
+    for (const job of jobsOf(file)) if (job.text.includes('actions/job-isolation')) (named[file] ??= []).push(job.id);
+  }
+  let checked = 0;
+  for (const [file, ids] of Object.entries(named)) {
+    for (const id of new Set(ids)) {
+      const job = jobsOf(file).find((j) => j.id === id);
+      assert.ok(job, `${file}: job ${id} exists`);
+      assert.match(job.text, /\n    env:\n(?:      .*\n|\s*\n)*?      PADDOCK_DEV_DOWNLOAD: "0"/, `${file}:${id}: release and installer jobs set PADDOCK_DEV_DOWNLOAD: "0" (ADR 0022: they bypass every cache)`);
+      checked += 1;
+    }
+  }
+  assert.ok(checked >= 5, `found the release jobs (${checked})`);
+  let tagJobs = 0;
+  for (const job of jobsOf('ci.yml').filter((j) => j.text.includes('\n      PADDOCK_DEV_TOKEN:'))) {
+    assert.match(job.text, /PADDOCK_DEV_DOWNLOAD: \$\{\{ startsWith\(github\.ref, 'refs\/tags\/'\) && '0' \|\| '' \}\}/, `ci.yml:${job.id}: a run for a tag builds the tool from source`);
+    tagJobs += 1;
+  }
+  assert.equal(tagJobs, 4, 'the four ci.yml jobs that take a host slot');
+});

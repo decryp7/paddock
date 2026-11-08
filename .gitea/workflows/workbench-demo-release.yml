@@ -89,6 +89,9 @@ jobs:
           - os: macos-latest
             bundles: app,dmg
     runs-on: ${{ matrix.os }}
+    env:
+      # A release or installer job builds the tool from source: it never runs a prebuilt binary (ADR 0022, release jobs bypass every cache).
+      PADDOCK_DEV_DOWNLOAD: "0"
     # Linux runs in the garage image (Tauri's libraries pre-installed); Windows and macOS run on the host.
     container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5' || '' }}
     defaults:
