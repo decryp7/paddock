@@ -63,6 +63,10 @@ fn machine() -> Vec<RawProcess> {
     ]
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test builds its scratch path from the OS temp folder and removes it"
+)]
 fn run(
     caller: Caller,
 ) -> (

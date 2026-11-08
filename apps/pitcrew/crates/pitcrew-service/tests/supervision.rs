@@ -75,6 +75,10 @@ impl Harness {
     }
 
     /// `state_json` is written as the service's `state.json` before it starts.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn build(test: &str, fake: &str, registered: bool, runner_toml: &str, state_json: Option<&str>) -> Harness {
         pitcrew_service::launch::set_stop_helper(PathBuf::from(env!("CARGO_BIN_EXE_pitcrew-service")));
         let root = std::env::temp_dir().join(format!("pitcrew-it-{test}-{}", std::process::id()));

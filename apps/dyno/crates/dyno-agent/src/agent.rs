@@ -539,6 +539,10 @@ impl Shared {
 
     /// [`Shared::build_with`] with the helper given (`None`: the system's). Readings are composed over the helper when it is the
     /// real one for this data folder or a given one; a test agent with neither never asks a helper (ER-14).
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the benchmark centre's scratch folder for the benchmarks' working files"
+    )]
     pub fn build_with_helper(
         dirs: Dirs,
         platform: Platform,

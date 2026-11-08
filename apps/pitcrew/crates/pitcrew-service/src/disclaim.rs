@@ -205,6 +205,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn the_disclaim_attribute_is_applied_when_the_function_exists_and_the_child_runs_as_configured() {
         let dir = std::env::temp_dir();
         let script = "echo out:$PWD; echo err >&2; echo var:$PITCREW_TEST_VAR; read x < /dev/stdin; echo stdin:[$x]; ps -o pgid= -p $$ | tr -d ' ' ; exit 7";
@@ -223,12 +227,20 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn without_the_function_the_runner_still_starts_just_not_disclaimed() {
         let (out, _, code, disclaimed) = run(None, "echo hi", &[], &std::env::temp_dir());
         assert_eq!((out.trim(), code, disclaimed), ("hi", 0, false));
     }
 
     #[test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn the_real_function_exists_on_this_macos_and_works() {
         assert!(disclaim_supported(), "libSystem has responsibility_spawnattrs_setdisclaim");
         let (out, _, code, disclaimed) = run(find_disclaim(), "echo real", &[], &std::env::temp_dir());
@@ -240,7 +252,7 @@ mod tests {
         unix,
         expect(
             clippy::disallowed_methods,
-            reason = "ADR 0033 WP-6 (test): killpg on a recorded pid; use paddock_proc"
+            reason = "ADR 0033 WP-6 (test): killpg on a recorded pid; use paddock_proc. Its scratch path is the OS temp folder"
         )
     )]
     fn the_child_leads_its_own_process_group_and_a_bad_program_is_an_error() {

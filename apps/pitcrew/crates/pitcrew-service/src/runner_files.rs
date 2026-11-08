@@ -98,6 +98,10 @@ pub fn save(path: &Path, text: &str, now: Timestamp) -> Result<Saved, Error> {
 mod tests {
     use super::*;
 
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn dir(test: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("pitcrew-it-files-{test}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);

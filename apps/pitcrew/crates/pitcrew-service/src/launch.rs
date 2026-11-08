@@ -361,6 +361,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn runs_a_child_and_reads_both_streams() {
         let (sink, got) = collect();
         let spec = if cfg!(windows) {
@@ -397,6 +401,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn a_missing_binary_is_a_message() {
         let (sink, _) = collect();
         let err = spawn_child(

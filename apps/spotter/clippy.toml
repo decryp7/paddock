@@ -2,6 +2,9 @@
 # console window on Windows, clears what must not leak and always has a timeout. Tests and build scripts may allow this.
 disallowed-methods = [
     { path = "std::process::Command::new", reason = "the action runner in app/src-tauri/src/notifier.rs: no console window, always bounded" },
+    { path = "tokio::process::Command::new", allow-invalid = true, reason = "use the app's process helper (paddock-proc): no console window on Windows, always bounded" },
+    { path = "std::env::temp_dir", reason = "tests use a scratch folder from the test kit and production code uses paddock-env: nothing is left in the shared temp folder" },
+    { path = "reqwest::Client::new", allow-invalid = true, reason = "build the client with paddock-net's policy (https only, caps, redirects, timeouts)" },
     # ADR 0033: nothing is ended by a bare pid. A pid may name another process by the time it is signalled; end it through
     # paddock-proc with a ProcessId, or through a handle or job this process owns. A justified site carries
     # #[expect(clippy::disallowed_methods, reason = "...")].

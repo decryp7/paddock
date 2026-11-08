@@ -340,6 +340,10 @@ fn view() -> Result<(), String> {
     Err("the socket view is a macOS check".into())
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "`dyno-agent once` is a diagnostic command: its platform is rooted at a scratch folder"
+)]
 fn once() -> Result<(), String> {
     let mut p = dyno_platform::platform(&std::env::temp_dir());
     let t = crate::agent::now();
@@ -423,6 +427,10 @@ fn bench(seconds: u64, who: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the bench command's own scratch folder, removed when the command ends"
+)]
 fn tempfile_dir() -> Result<std::path::PathBuf, String> {
     let dir = std::env::temp_dir().join(format!("dyno-bench-{}", std::process::id()));
     std::fs::create_dir_all(&dir).map_err(|e| format!("Could not create {}: {e}", dir.display()))?;

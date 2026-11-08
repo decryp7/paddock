@@ -236,6 +236,10 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn sees_its_own_process_and_the_machine() {
         let mut p = Probe::new();
         // Other processes may run this test binary at the same time (nextest runs every test in its own process), so

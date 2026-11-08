@@ -532,6 +532,10 @@ pub struct WindowsBattery;
 
 #[cfg(windows)]
 impl BatteryCapacitySource for WindowsBattery {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the Windows battery report is written to a scratch folder and read back"
+    )]
     fn read(&mut self) -> Reading<BatteryCapacity> {
         let windir = std::env::var_os("WINDIR").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
         let dir = std::env::temp_dir().join("Dyno");
@@ -592,6 +596,10 @@ impl BatteryCapacitySource for FakeBattery {
 mod tests {
     use super::*;
 
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn temp(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("dyno-it-hw-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);

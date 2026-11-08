@@ -268,6 +268,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn checks_downloads_and_refuses_disagreeing_checksums() {
         let v = RunnerVersion::parse("5.2.0").unwrap();
         let asset = "gitea-runner-5.2.0-linux-amd64";
@@ -324,6 +328,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn swaps_and_restores_binaries() {
         let dir = std::env::temp_dir().join(format!("pitcrew-it-swap-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);

@@ -236,6 +236,10 @@ fn the_finder_lists_large_files_and_duplicates_and_moves_nothing() {
 }
 
 #[test]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test builds its scratch path from the OS temp folder and removes it"
+)]
 fn the_finder_refuses_a_folder_that_is_not_there() {
     let h = Harness::start();
     let peer = h.client();

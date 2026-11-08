@@ -58,6 +58,7 @@ impl LinuxStartup {
     }
 
     /// The real folders: `$XDG_CONFIG_HOME/autostart` (or `~/.config/autostart`) and `/etc/xdg/autostart`.
+    #[expect(clippy::disallowed_methods, reason = "the last-resort config folder when the user has no home")]
     pub fn for_this_user(tools: Arc<dyn Tools>) -> Self {
         let config = std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
