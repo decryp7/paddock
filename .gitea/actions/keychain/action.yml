@@ -18,6 +18,10 @@ runs:
       run: |
         set -euo pipefail
         args=(--app paddock --root . --only C99)
+        if [ -n "$SCOPE" ] && [ "${SCOPE#apps/}" = "$SCOPE" ]; then
+          echo "::error::C99 scope '$SCOPE' is not an app folder: use apps/<app> (or a path below it), or leave it empty for the whole repository."
+          exit 1
+        fi
         # A workspace in a subfolder of the app (apps/<app>/app/src-tauri) is still the app's: the scope is the app folder.
         SCOPE=$(printf '%s' "$SCOPE" | sed -E 's#^(apps/[^/]+).*#\1#')
         if [ -n "$SCOPE" ]; then args+=(--scope "$SCOPE"); fi

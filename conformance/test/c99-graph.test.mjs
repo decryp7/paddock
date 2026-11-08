@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { parseArgs } from '../src/cli.mjs';
 import { crateBinaries, crateSources, graphFindings, MACOS_TARGETS, probeWorkspace, readGraph, series, sourceScan } from '../src/util/keychain-graph.mjs';
+import { runChecks } from '../src/runner.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
 
 // A probe result: `crates` is { name: { deps: [names], features: 'a,b', version } }; the first is the workspace member. The
@@ -278,6 +279,11 @@ test('C99 --scope reads the UI the app ships (ui/projects/<app>, paddock-ui) but
   assert.deepEqual(w.filter((f) => f.check === 'W003').map((f) => f.message), ['waiver for C99 apps/mine/Cargo.toml waives nothing']);
   const all = await findingsOf('C99', waived, { options: { graph: 'off' } });
   assert.equal(all.filter((f) => f.check === 'W003').length, 2, 'unscoped: both are reported');
+  // The skip is for C99 waivers only: another check's unused waiver is still reported under a scope.
+  const other = makeApp({ ...files, 'paddock.waivers.toml': '[[waiver]]\ncheck = "C57"\npath = "apps/other/x"\nreason = "r"\nexpires = "2099-01-01"\n' });
+  t.after(() => rmSync(other, { recursive: true, force: true }));
+  const o = await runChecks({ root: other, app: 'demo', only: ['C57'], options: { scope: 'apps/mine' } });
+  assert.equal(o.findings.filter((f) => f.check === 'W003').length, 1, 'C57 waiver still reported');
 });
 
 test('C99 fails closed: with no security-framework in any probed graph the control never ran, and that is a broken check no waiver covers', async (t) => {
