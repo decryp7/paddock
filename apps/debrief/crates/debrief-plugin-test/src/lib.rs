@@ -412,6 +412,11 @@ impl PluginUnderTest {
         conformance::run(self, samples)
     }
 
+    /// Runs only the `cancellation` check (see [`conformance::run_cancellation`]).
+    pub fn cancellation_check(&self, samples: &[PathBuf]) -> Check {
+        conformance::run_cancellation(self, samples)
+    }
+
     /// [`PluginUnderTest::conformance_with`] without samples.
     pub fn conformance(&self) -> Report {
         conformance::run(self, &[])

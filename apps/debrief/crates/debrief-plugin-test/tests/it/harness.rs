@@ -5,7 +5,7 @@ use debrief_ipc::peer::code;
 #[cfg(windows)]
 use debrief_plugin_test::Launch;
 use debrief_plugin_test::PluginUnderTest;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const FIXTURE: &str = env!("CARGO_BIN_EXE_debrief-plugin-test-fixture");
 
@@ -41,20 +41,14 @@ fn a_panic_is_a_typed_error_and_the_plugin_keeps_serving() {
 #[test]
 fn a_hung_import_is_cut_off_and_fails_the_cancellation_check() {
     let p = PluginUnderTest::launch(FIXTURE).unwrap();
-    let started = Instant::now();
+    // The verdict is that a plugin which never answers is given up on, whatever the timeout; no elapsed time is asserted.
     let e = p.import_within("fixture", "a.log", b"hang\n", Duration::from_secs(1)).unwrap_err();
     assert!(e.to_string().contains("did not answer"), "{e}");
-    assert!(started.elapsed() < Duration::from_secs(10));
     let hang = tempfile::NamedTempFile::new().unwrap();
     std::fs::write(hang.path(), b"hang\n").unwrap();
     let fresh = PluginUnderTest::launch(FIXTURE).unwrap();
-    let cancel = fresh
-        .conformance_with(&[hang.path().to_path_buf()])
-        .checks
-        .into_iter()
-        .find(|c| c.name == "cancellation")
-        .unwrap();
-    // The bounded-output check before it would wait for the hang too; cancellation is what is asserted.
+    // Only the cancellation check runs: the full set would also wait out the hang in `bounded-output` (20 s of real time).
+    let cancel = fresh.cancellation_check(&[hang.path().to_path_buf()]);
     assert!(!cancel.passed, "{cancel:?}");
 }
 

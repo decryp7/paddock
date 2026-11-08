@@ -94,6 +94,28 @@ fn synthetic(lines: usize) -> Vec<u8> {
     s.into_bytes()
 }
 
+/// The inputs the import checks run over: the samples, or a synthetic log when there are none.
+fn inputs(samples: &[PathBuf]) -> Vec<(String, Vec<u8>)> {
+    if samples.is_empty() {
+        vec![("synthetic.log".into(), synthetic(2000))]
+    } else {
+        samples
+            .iter()
+            .filter_map(|s| {
+                std::fs::read(s)
+                    .ok()
+                    .map(|b| (s.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), b))
+            })
+            .collect()
+    }
+}
+
+/// Runs only the `cancellation` check (the others, `bounded-output` among them, wait out an importer that hangs, which
+/// takes tens of seconds of real time that decide nothing about this check).
+pub fn run_cancellation(p: &PluginUnderTest, samples: &[PathBuf]) -> Check {
+    check("cancellation", cancellation(p, &inputs(samples)))
+}
+
 /// Runs every check against `p` (see the module docs); `samples` are files its importers should read.
 pub fn run(p: &PluginUnderTest, samples: &[PathBuf]) -> Report {
     let mut r = Report::default();
@@ -111,18 +133,7 @@ pub fn run(p: &PluginUnderTest, samples: &[PathBuf]) -> Report {
         )),
     ));
     r.checks.push(check("typed-errors", typed_errors(p)));
-    let inputs: Vec<(String, Vec<u8>)> = if samples.is_empty() {
-        vec![("synthetic.log".into(), synthetic(2000))]
-    } else {
-        samples
-            .iter()
-            .filter_map(|s| {
-                std::fs::read(s)
-                    .ok()
-                    .map(|b| (s.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), b))
-            })
-            .collect()
-    };
+    let inputs = inputs(samples);
     r.checks.push(check("bounded-output", bounded(p, &inputs)));
     r.checks.push(check("cancellation", cancellation(p, &inputs)));
     r.checks.push(check("oversized-frames", oversized(p, &inputs)));
