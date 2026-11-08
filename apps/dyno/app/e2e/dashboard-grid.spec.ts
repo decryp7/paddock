@@ -208,9 +208,9 @@ test.describe('dashboard grid', () => {
     await open(page, 500, 1200);
     const rows = page.locator('dy-normal-card li');
     await expect(rows.first()).toBeVisible();
-    const n = await rows.count();
-    for (let i = 0; i < n; i++) {
-      const li = rows.nth(i);
+    // The rows as they are now (one query), not a count read once and indexed later.
+    const all = await rows.all();
+    for (const [i, li] of all.entries()) {
       const [row, vals] = await Promise.all([box(li), box(li.locator('.vals'))]);
       expect(vals.x + vals.width, `row ${i} value inside the card`).toBeLessThanOrEqual(row.x + row.width + 0.5);
       expect(await li.locator('.vals').evaluate((v) => v.scrollWidth <= v.clientWidth + 1)).toBe(true);

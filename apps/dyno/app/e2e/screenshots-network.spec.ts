@@ -1,5 +1,5 @@
 import { mkdirSync } from 'node:fs';
-import { dialogWindowUrl, test } from '@decryp7/paddock-e2e';
+import { dialogWindowUrl, settleTransitions, test } from '@decryp7/paddock-e2e';
 
 // The map, the IP lists and the firewall page, light and dark, in their states, for the independent review (rule 22). Only on request:
 // `SCREENSHOTS=1 NETWORK_SHOTS_DIR=<dir> PW_PORT=<port> npx playwright test --project=screenshots e2e/screenshots-network.spec.ts`.
@@ -12,7 +12,7 @@ test.describe('Dyno network screenshots', () => {
       test.use({ colorScheme: scheme });
       const shot = async (page: import('@playwright/test').Page, name: string) => {
         mkdirSync(OUT, { recursive: true });
-        await page.waitForTimeout(800);
+        await settleTransitions(page);
         await page.screenshot({ path: `${OUT}/${name}-${scheme}.png`, fullPage: true });
       };
 
@@ -46,7 +46,7 @@ test.describe('Dyno network screenshots', () => {
       test('map, loading', async ({ page }) => {
         await page.goto('/?latency=4000#/map');
         await page.getByRole('heading', { level: 1, name: 'Connections map' }).waitFor();
-        await page.waitForTimeout(300);
+        await settleTransitions(page);
         mkdirSync(OUT, { recursive: true });
         await page.screenshot({ path: `${OUT}/map-loading-${scheme}.png`, fullPage: true });
       });
@@ -141,7 +141,7 @@ test.describe('Dyno network screenshots', () => {
         await section.scrollIntoViewIfNeeded();
         await section.waitFor();
         mkdirSync(OUT, { recursive: true });
-        await page.waitForTimeout(800);
+        await settleTransitions(page);
         await section.screenshot({ path: `${OUT}/settings-online-data-${scheme}.png` });
       });
     });
