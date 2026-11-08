@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Health no longer says "Nothing needs your attention" when it could not read a fact the score looks at (disk health, a pending restart, pending updates). It says "Nothing found in what Dyno could check" and lists what was not checked; facts Dyno never reads on this OS are listed once as coverage. The score is unchanged. This is another protocol version (8), so an older app or agent is replaced at the next start.
 - A job that a limit stopped now says which limit it was. The app and the agent of this version talk a new protocol, so an older Dyno app or agent is replaced at the next start instead of being read wrongly.
 
 ## [1.1.0] - 2026-11-06

@@ -56,6 +56,39 @@ pub struct DevFolder {
     pub av_excluded: Option<bool>,
 }
 
+/// A fact in [`SystemFacts`] that a source may declare it never reads on its OS.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FactKind {
+    /// `disks`.
+    Disks,
+    /// `restart_pending`.
+    RestartPending,
+    /// `pending_updates`.
+    PendingUpdates,
+    /// `power_plan`.
+    PowerPlan,
+    /// `visual_effects_full`.
+    VisualEffects,
+    /// `background_apps`.
+    BackgroundApps,
+    /// `last_boot_secs`.
+    LastBoot,
+}
+
+impl FactKind {
+    /// Every fact, for a source that reads none of them.
+    pub const ALL: [FactKind; 7] = [
+        FactKind::Disks,
+        FactKind::RestartPending,
+        FactKind::PendingUpdates,
+        FactKind::PowerPlan,
+        FactKind::VisualEffects,
+        FactKind::BackgroundApps,
+        FactKind::LastBoot,
+    ];
+}
+
 /// Everything slow-changing that health and tuning look at.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -78,6 +111,8 @@ pub struct SystemFacts {
     pub dev_folders: Vec<DevFolder>,
     /// Seconds the last boot took (from firmware hand-off to the desktop), when the OS reports it.
     pub last_boot_secs: Reading<f32>,
+    /// Facts this OS's source never reads, by design (as opposed to one that failed this time). Health tells the two apart.
+    pub not_read_here: Vec<FactKind>,
 }
 
 impl SystemFacts {
@@ -96,6 +131,7 @@ impl SystemFacts {
             background_apps: r(),
             dev_folders: Vec::new(),
             last_boot_secs: r(),
+            not_read_here: Vec::new(),
         }
     }
 }

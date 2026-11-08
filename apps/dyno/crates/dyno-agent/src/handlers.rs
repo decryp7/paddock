@@ -676,6 +676,15 @@ fn health(shared: &Shared) -> Result<dyno_core::health::HealthReport, AgentError
     });
     // Bookkeeping for the weekly report's trend (one row per hour; a failed write loses one point, nothing else).
     let _ = core.store.put_score(t, report.score);
+    use dyno_core::health::NotCheckedKind;
+    let count = |k: NotCheckedKind| report.not_checked.iter().filter(|n| n.kind == k).count();
+    log::info!(
+        "dyno-agent: health scored {} with {} reasons; not checked: {} could not be read now, {} not read here by design",
+        report.score,
+        report.reasons.len(),
+        count(NotCheckedKind::CouldNotRead),
+        count(NotCheckedKind::NotReadHere)
+    );
     Ok(report)
 }
 

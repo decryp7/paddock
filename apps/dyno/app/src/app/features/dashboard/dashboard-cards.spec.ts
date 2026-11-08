@@ -137,7 +137,7 @@ const reason = (id: string, impact: number): HealthReason => ({
 });
 const report = (reasons: HealthReason[]): HealthReport => {
   const score = 100 - reasons.reduce((a, r) => a + r.impact, 0);
-  return { at: NOW, score, grade: 'good', performanceScore: score, cappedBy: null, reasons };
+  return { at: NOW, score, grade: 'good', performanceScore: score, cappedBy: null, reasons, notChecked: [] };
 };
 
 describe('HealthHero', () => {
@@ -163,7 +163,7 @@ describe('HealthHero', () => {
   it('names each active alarm with its severity and start, ahead of performance reasons, and says when alarms cap the grade', async () => {
     const { mock } = env();
     const alarm: HealthReason = { id: 'alarm:7', title: 'Disk is failing', detail: 'Back up now.', impact: 0, severity: 'critical', since: NOW - 2 * 3_600_000 };
-    vi.spyOn(mock, 'health').mockResolvedValue({ at: NOW, score: 59, grade: 'poor', performanceScore: 100, cappedBy: 'critical', reasons: [alarm] });
+    vi.spyOn(mock, 'health').mockResolvedValue({ at: NOW, score: 59, grade: 'poor', performanceScore: 100, cappedBy: 'critical', reasons: [alarm], notChecked: [] });
     const f = TestBed.createComponent(HealthHero);
     await TestBed.inject(HealthStore).loadReport();
     await settle(f);
@@ -186,5 +186,38 @@ describe('HealthHero', () => {
     await settle(f);
     expect((f.nativeElement as HTMLElement).querySelector('.clear')?.textContent).toContain('Nothing needs your attention');
   });
-});
 
+  it('does not say nothing needs attention when a scored fact could not be read, and lists what was not checked', async () => {
+    const { mock } = env();
+    vi.spyOn(mock, 'health').mockResolvedValue({
+      ...report([]),
+      notChecked: [
+        { what: 'Disk health', why: 'Needs administrator rights', kind: 'couldNotRead' },
+        { what: 'Pending updates', why: 'Dyno does not check for updates', kind: 'notReadHere' },
+      ],
+    });
+    const f = TestBed.createComponent(HealthHero);
+    await TestBed.inject(HealthStore).loadReport();
+    await settle(f);
+    const el = f.nativeElement as HTMLElement;
+    expect(el.querySelector('.clear')?.textContent).toContain('Nothing found in what Dyno could check');
+    expect(el.querySelector('.clear')?.textContent).not.toContain('needs your attention');
+    expect(el.querySelector('.gap')?.textContent).toBe('Not checked: disk health (Needs administrator rights)');
+    expect(el.querySelector('.cover')?.textContent).toBe('Dyno does not check pending updates on this OS.');
+  });
+
+  it('keeps the all-clear when only facts Dyno never reads here are missing, with the coverage line under it', async () => {
+    const { mock } = env();
+    vi.spyOn(mock, 'health').mockResolvedValue({
+      ...report([]),
+      notChecked: [{ what: 'Pending updates', why: 'Dyno does not check for updates', kind: 'notReadHere' }],
+    });
+    const f = TestBed.createComponent(HealthHero);
+    await TestBed.inject(HealthStore).loadReport();
+    await settle(f);
+    const el = f.nativeElement as HTMLElement;
+    expect(el.querySelector('.clear')?.textContent).toContain('Nothing needs your attention');
+    expect(el.querySelector('.gap')).toBeNull();
+    expect(el.querySelector('.cover')?.textContent).toContain('pending updates');
+  });
+});

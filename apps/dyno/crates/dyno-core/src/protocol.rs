@@ -69,7 +69,11 @@ use serde::{Deserialize, Serialize};
 /// Version 7 (the limits registry, package 1.4b; positional postcard again): `paddock_jobs::wire::WireState::Failed(String)` became
 /// `Failed { message, limit }` (`limit: Option<LimitExceeded>`), inside `Message::Job` and `Reply::Job`. The bytes are pinned by
 /// `tests/protocol_golden.rs`.
-pub const PROTOCOL_VERSION: u32 = 7;
+///
+/// Version 8 (Health says what it could not check, ADR 0033 section 4.5; positional postcard): `HealthReport` gained `not_checked`
+/// (`NotChecked { what, why, kind }`) and `SystemFacts` gained `not_read_here`. Neither is persisted: the report exists only in
+/// `Reply::Health`, and the app, agent and command line ship in one installer.
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// The major version the IPC handshake carries between the app (or the command line) and the agent: [`PROTOCOL_VERSION`], so a
 /// client of another protocol is refused at the handshake with "update the older one" (the minor stays 0: new variants go at the

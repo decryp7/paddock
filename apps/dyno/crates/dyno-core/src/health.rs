@@ -2,9 +2,9 @@
 
 use crate::alarms::{Alarm, AlarmState};
 use crate::anomaly::Anomaly;
-use crate::facts::{DiskHealthStatus, SystemFacts};
+use crate::facts::{DiskHealthStatus, FactKind, SystemFacts};
 use crate::forecast::Forecast;
-use crate::metrics::{derive_pressure, percent, MemoryPressure, SystemSample};
+use crate::metrics::{derive_pressure, percent, MemoryPressure, Reading, SystemSample};
 use crate::startup::{ImpactRating, StartupEntry};
 use crate::time::Timestamp;
 use crate::units::{bytes, duration, storage};
@@ -63,6 +63,28 @@ pub struct HealthReason {
     pub since: Option<Timestamp>,
 }
 
+/// Why a scored fact is missing from the report. The engine decides it, never the UI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NotCheckedKind {
+    /// The read failed or was denied this time (for example "needs administrator rights").
+    CouldNotRead,
+    /// Dyno does not read this fact on this OS, by design.
+    NotReadHere,
+}
+
+/// A fact the score looks at that has no value, so the score says nothing about it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotChecked {
+    /// What was not checked, as a short noun phrase ("Pending updates").
+    pub what: String,
+    /// The reading's own sentence for why.
+    pub why: String,
+    /// Which of the two cases it is.
+    pub kind: NotCheckedKind,
+}
+
 /// The report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -79,6 +101,32 @@ pub struct HealthReport {
     pub capped_by: Option<Severity>,
     /// Reasons: each active alarm first (most severe, then oldest), then performance reasons, biggest impact first.
     pub reasons: Vec<HealthReason>,
+    /// Scored facts that had no value, so an empty `reasons` is not an all-clear for them.
+    pub not_checked: Vec<NotChecked>,
+}
+
+/// The scored facts without a value, each with the kind the facts source declared for it.
+fn not_checked(facts: &SystemFacts) -> Vec<NotChecked> {
+    fn gap<T>(facts: &SystemFacts, kind: FactKind, what: &str, reading: &Reading<T>) -> Option<NotChecked> {
+        let Reading::Unavailable(why) = reading else { return None };
+        Some(NotChecked {
+            what: what.into(),
+            why: why.clone(),
+            kind: if facts.not_read_here.contains(&kind) {
+                NotCheckedKind::NotReadHere
+            } else {
+                NotCheckedKind::CouldNotRead
+            },
+        })
+    }
+    [
+        gap(facts, FactKind::Disks, "Disk health", &facts.disks),
+        gap(facts, FactKind::RestartPending, "Pending restart", &facts.restart_pending),
+        gap(facts, FactKind::PendingUpdates, "Pending updates", &facts.pending_updates),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 /// Everything the score looks at.
@@ -364,6 +412,7 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
         performance_score,
         capped_by,
         reasons,
+        not_checked: not_checked(i.facts),
     }
 }
 
@@ -396,6 +445,37 @@ mod tests {
             lifespans: &[],
             alarms: &[],
         })
+    }
+
+    #[test]
+    fn unknown_facts_are_listed_as_not_checked_and_the_score_stays() {
+        let r = run(&sample(0), &SystemFacts::unknown("w"), &[], &[], 0, &[]);
+        assert_eq!(r.score, 100, "the score is unchanged: a gap is said, not guessed");
+        let what: Vec<&str> = r.not_checked.iter().map(|n| n.what.as_str()).collect();
+        assert_eq!(what, ["Disk health", "Pending restart", "Pending updates"]);
+        assert!(r.not_checked.iter().all(|n| n.kind == NotCheckedKind::CouldNotRead));
+        assert!(r.not_checked.iter().all(|n| n.why == "Not checked yet"));
+    }
+
+    #[test]
+    fn a_fact_the_source_declares_not_read_here_is_told_apart_from_one_that_failed() {
+        let mut f = SystemFacts::unknown("w");
+        f.pending_updates = Reading::unavailable("Dyno does not check for updates");
+        f.not_read_here = vec![FactKind::PendingUpdates, FactKind::BackgroundApps];
+        let r = run(&sample(0), &f, &[], &[], 0, &[]);
+        let kind = |what: &str| r.not_checked.iter().find(|n| n.what == what).map(|n| n.kind);
+        assert_eq!(kind("Pending updates"), Some(NotCheckedKind::NotReadHere));
+        assert_eq!(kind("Disk health"), Some(NotCheckedKind::CouldNotRead));
+        assert_eq!(r.not_checked.len(), 3, "a fact Dyno does not score is never listed");
+    }
+
+    #[test]
+    fn facts_with_values_are_not_listed() {
+        let mut f = SystemFacts::unknown("w");
+        f.disks = Reading::Available(vec![]);
+        f.restart_pending = Reading::Available(false);
+        f.pending_updates = Reading::Available(0);
+        assert!(run(&sample(0), &f, &[], &[], 0, &[]).not_checked.is_empty());
     }
 
     #[test]

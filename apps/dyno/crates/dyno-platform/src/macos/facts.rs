@@ -4,7 +4,7 @@
 use crate::dev_folders::{scan, ScanLimits};
 use crate::parse::launchd::parse_smart_status;
 use crate::parse::mac_tools::{parse_pmset_low_power, parse_sw_vers};
-use dyno_core::facts::{DiskHealth, DiskHealthStatus, PowerPlan, SystemFacts};
+use dyno_core::facts::{DiskHealth, DiskHealthStatus, FactKind, PowerPlan, SystemFacts};
 use dyno_core::metrics::Reading;
 use dyno_core::ports::FactsSource;
 use std::path::PathBuf;
@@ -90,6 +90,7 @@ impl FactsSource for MacFacts {
             f.dev_folders = scan(h, ScanLimits::default());
         }
         f.last_boot_secs = Reading::unavailable("Boot time is not measured yet");
+        f.not_read_here = vec![FactKind::RestartPending, FactKind::PendingUpdates, FactKind::BackgroundApps];
         f
     }
 }

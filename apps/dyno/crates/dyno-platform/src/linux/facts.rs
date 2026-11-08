@@ -7,7 +7,7 @@ use super::tools::Tools;
 use crate::dev_folders::{scan, ScanLimits};
 use crate::parse::linux_proc::os_pretty_name;
 use crate::parse::linux_tools::{boot_secs, cpufreq_plan, power_profile};
-use dyno_core::facts::SystemFacts;
+use dyno_core::facts::{FactKind, SystemFacts};
 use dyno_core::metrics::Reading;
 use dyno_core::ports::FactsSource;
 use std::path::PathBuf;
@@ -105,6 +105,12 @@ impl FactsSource for LinuxFacts {
         facts.visual_effects_full = Reading::unavailable("Desktop effects are set per desktop environment");
         facts.background_apps = Reading::unavailable("Linux has no background-apps list");
         facts.last_boot_secs = self.last_boot();
+        facts.not_read_here = vec![
+            FactKind::Disks,
+            FactKind::PendingUpdates,
+            FactKind::VisualEffects,
+            FactKind::BackgroundApps,
+        ];
         if let Some(home) = &self.files.home {
             facts.dev_folders = scan(home, ScanLimits::default());
         }

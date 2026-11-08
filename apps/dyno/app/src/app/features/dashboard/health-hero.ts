@@ -30,7 +30,11 @@ import { MatTooltip } from '@angular/material/tooltip';
       <div class="reasons">
         <span class="eyebrow">What holds it back</span>
         @if (top().length === 0) {
-          <p class="clear"><dy-icon name="check" /> Nothing needs your attention.</p>
+          @if (couldNotRead().length > 0) {
+            <p class="clear"><dy-icon name="check" /> Nothing found in what Dyno could check.</p>
+          } @else {
+            <p class="clear"><dy-icon name="check" /> Nothing needs your attention.</p>
+          }
         }
         <ul>
           @for (x of top(); track x.id) {
@@ -49,6 +53,12 @@ import { MatTooltip } from '@angular/material/tooltip';
             </li>
           }
         </ul>
+        @if (couldNotRead().length > 0) {
+          <p class="gap">Not checked: {{ notCheckedText() }}</p>
+        }
+        @if (notReadHere().length > 0) {
+          <p class="cover">Dyno does not check {{ coverageText() }} on this OS.</p>
+        }
       </div>
     }
   `,
@@ -71,6 +81,8 @@ import { MatTooltip } from '@angular/material/tooltip';
     .t .badge { margin-right: 4px; vertical-align: 1px; }
     .d { color: var(--text-3); font-size: var(--fs-xs); display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .imp { color: var(--text-3); font-size: var(--fs-sm); min-width: 28px; text-align: right; }
+    .gap { color: var(--warn); font-size: var(--fs-sm); }
+    .cover { color: var(--text-3); font-size: var(--fs-xs); }
     .clear { display: flex; align-items: center; gap: var(--sp-2); color: var(--ok); }
   `,
 })
@@ -93,6 +105,10 @@ export class HealthHero {
     const all = this.store.report()?.reasons ?? [];
     return [...all.filter((x) => x.since !== null), ...all.filter((x) => x.since === null).sort((a, b) => b.impact - a.impact).slice(0, this.reasons())];
   });
+  protected readonly couldNotRead = computed(() => (this.store.report()?.notChecked ?? []).filter((n) => n.kind === 'couldNotRead'));
+  protected readonly notReadHere = computed(() => (this.store.report()?.notChecked ?? []).filter((n) => n.kind === 'notReadHere'));
+  protected readonly notCheckedText = computed(() => this.couldNotRead().map((n) => `${n.what.toLowerCase()} (${n.why})`).join('; '));
+  protected readonly coverageText = computed(() => this.notReadHere().map((n) => n.what.toLowerCase()).join(', '));
   protected readonly trend = computed(() => {
     const w = this.store.weekly();
     const r = this.store.report();

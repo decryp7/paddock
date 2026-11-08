@@ -77,6 +77,7 @@ pub fn facts_not_read(os: String, why: &str) -> SystemFacts {
         background_apps: Reading::unavailable(why),
         dev_folders: Vec::new(),
         last_boot_secs: Reading::unavailable(why),
+        not_read_here: dyno_core::facts::FactKind::ALL.to_vec(),
     }
 }
 
