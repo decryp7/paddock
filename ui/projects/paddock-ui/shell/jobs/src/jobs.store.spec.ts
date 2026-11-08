@@ -57,42 +57,74 @@ describe('JobsStore', () => {
     expect(store.jobs()).toHaveLength(1);
   });
 
-  it('clears a failed load when a job event shows the link is back, and lists the jobs the event missed', async () => {
-    let calls = 0;
-    class FlakyBackend extends ControlledBackend {
+  describe('a failed read followed by job events', () => {
+    /** Every snapshot() call waits for the test to answer it; `calls` counts them. */
+    class QueuedBackend extends ControlledBackend {
+      reads: { resolve: (v: readonly SuJobSnapshot[]) => void; reject: (e: unknown) => void }[] = [];
       override snapshot(): Promise<readonly SuJobSnapshot[]> {
-        return ++calls === 1 ? Promise.reject(new Error('agent unavailable')) : Promise.resolve([snap(1, 2), snap(2, 1)]);
+        return new Promise((resolve, reject) => this.reads.push({ resolve, reject }));
       }
     }
-    const backend = new FlakyBackend();
-    jobsBed({ backend });
-    const store = TestBed.inject(JobsStore);
-    await settle();
-    expect(store.requestError()).toBe('agent unavailable');
-    backend.handler?.(snap(1, 3, 'running', { phase: phase('Running benchmarks', 1) }));
-    await settle();
-    expect(store.requestError()).toBeNull();
-    expect(store.requestStatus()).toBe('loaded');
-    expect(store.jobs().map((j) => [j.id, j.seq])).toEqual([
-      [1, 3],
-      [2, 1],
-    ]);
-  });
+    const start = async (stillWorkingAfterMs = 10_000) => {
+      const backend = new QueuedBackend();
+      const bed = jobsBed({ backend, stillWorkingAfterMs });
+      const store = TestBed.inject(JobsStore);
+      await vi.waitFor(() => expect(backend.reads).toHaveLength(1));
+      backend.reads[0]?.reject(new Error('agent unavailable'));
+      await vi.waitFor(() => expect(store.requestError()).toBe('agent unavailable'));
+      return { ...bed, backend, store };
+    };
 
-  it('keeps the error while the list still cannot be read, whatever events arrive', async () => {
-    class DownBackend extends ControlledBackend {
-      override snapshot(): Promise<readonly SuJobSnapshot[]> {
-        return Promise.reject(new Error('agent unavailable'));
-      }
-    }
-    const backend = new DownBackend();
-    jobsBed({ backend });
-    const store = TestBed.inject(JobsStore);
-    await settle();
-    backend.handler?.(snap(1, 1));
-    await settle();
-    expect(store.requestError()).toBe('agent unavailable');
-    expect(store.jobs()).toHaveLength(1);
+    it('clears the error and lists the jobs the event missed, once the re-read succeeds', async () => {
+      const { backend, store } = await start();
+      backend.handler?.(snap(1, 3, 'running', { phase: phase('Running benchmarks', 1) }));
+      expect(backend.reads).toHaveLength(2);
+      expect(store.requestError()).toBe('agent unavailable');
+      backend.reads[1]?.resolve([snap(1, 2), snap(2, 1)]);
+      await vi.waitFor(() => expect(store.requestStatus()).toBe('loaded'));
+      expect(store.jobs().map((j) => [j.id, j.seq])).toEqual([
+        [1, 3],
+        [2, 1],
+      ]);
+    });
+
+    it('starts one re-read for many events during a slow one, and never hides the error meanwhile', async () => {
+      const { backend, store } = await start();
+      for (let seq = 1; seq <= 5; seq++) backend.handler?.(snap(1, seq));
+      expect(backend.reads).toHaveLength(2);
+      expect(store.requestError()).toBe('agent unavailable');
+      expect(store.isLoading()).toBe(false);
+      backend.reads[1]?.resolve([snap(1, 1)]);
+      await vi.waitFor(() => expect(store.requestError()).toBeNull());
+    });
+
+    it('keeps the error for a read that keeps failing, and re-reads at most once per time limit', async () => {
+      const { backend, store, clock } = await start(3_000);
+      backend.handler?.(snap(1, 1));
+      backend.reads[1]?.reject(new Error('still down'));
+      await vi.waitFor(() => expect(store.requestError()).toBe('still down'));
+      for (let seq = 2; seq <= 6; seq++) backend.handler?.(snap(1, seq));
+      expect(backend.reads).toHaveLength(2);
+      clock.advance(3_000);
+      backend.handler?.(snap(1, 7));
+      expect(backend.reads).toHaveLength(3);
+      expect(store.requestError()).toBe('still down');
+      expect(store.jobs()).toHaveLength(1);
+    });
+
+    it('drops a stale read that finishes after a newer one (Retry)', async () => {
+      const { backend, store } = await start();
+      backend.handler?.(snap(1, 1));
+      const retry = store.load();
+      expect(backend.reads).toHaveLength(3);
+      backend.reads[2]?.resolve([snap(1, 5), snap(2, 1)]);
+      await retry;
+      backend.reads[1]?.reject(new Error('late failure'));
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(store.requestStatus()).toBe('loaded');
+      expect(store.jobs().map((j) => j.seq)).toEqual([5, 1]);
+    });
   });
 
   it.each([
