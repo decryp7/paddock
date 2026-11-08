@@ -13,7 +13,7 @@ import { swapNotDriven } from './upgrade-swap-row.mjs';
 import { winSwapRow } from './win-swap.mjs';
 import { hiddenStartStep } from './login-start-rows.mjs';
 import { makeResult } from './verdict.mjs';
-import { parseEvents, eventsPs, threatPs, versionsPs, eventLines, detectionTime, mpLogWindow, mpLogPs, mpLogLines } from './defender-evidence.mjs';
+import { parseEvents, eventsPs, threatPs, versionsPs, versionsLine, eventLines, eventsSince, detectionTime, mpLogWindow, mpLogPs, mpLogLines } from './defender-evidence.mjs';
 import { judgeUninstall as judgeUninstallFacts, triState } from './win-judges.mjs';
 
 /** What the uninstall left, judged from tri-state facts (yes, no, unreadable): see win-judges.mjs. */
@@ -61,15 +61,15 @@ export function setupExeFacts(label) {
  * Windows Defender: the full 1116/1117/1006 text (never cut), one origin line, Get-MpThreatDetection, Get-MpComputerStatus versions and the MPLog lines
  * around the newest detection (defender-evidence.mjs holds the parsing; WP-4).
  */
-export function defenderEvidence() {
-  const ev = parseEvents(ssh(eventsPs(20), { admin: true }));
+export function defenderEvidence({ since = null } = {}) {
+  const ev = parseEvents(ssh(eventsPs(20, since), { admin: true }));
   const det = ssh(threatPs(), { admin: true });
-  const ver = ssh(versionsPs(), { admin: true }).replace(/DONE\s*$/, '').trim();
+  const ver = versionsLine(ssh(versionsPs(), { admin: true }));
   const lines = (t) => t.replace(/DONE\s*$/, '').trim().split('\n').map((l) => l.trim()).filter(Boolean);
-  const when = detectionTime(ev);
+  const when = detectionTime(eventsSince(ev, since));
   const window = when ? mpLogWindow(when) : null;
   const mp = window ? mpLogLines(ssh(mpLogPs(window), { admin: true, ms: 180_000 }), window) : ['--- Defender MPLog', '(no detection, nothing to read)'];
-  return [`--- Defender versions: ${ver || '(unreadable)'}`, '--- Defender Get-MpThreatDetection', ...(/DONE\s*$/.test(det) ? (lines(det).length ? lines(det) : ['(no detections)']) : ['(unreadable)']), ...eventLines(ev), ...mp];
+  return [`--- Defender versions: ${ver ?? '(unreadable or partial)'}`, '--- Defender Get-MpThreatDetection', ...(/DONE\s*$/.test(det) ? (lines(det).length ? lines(det) : ['(no detections)']) : ['(unreadable)']), ...eventLines(ev, since), ...mp];
 }
 
 export function sameVersionRefused() {

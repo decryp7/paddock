@@ -217,12 +217,19 @@ PASS only with all seven runs present, not partial, passed, of the same CI run a
   differs from the new, the helper was on) are checked; no older build given or not installable is NOT MEASURED. Windows is not driven (1.0.0 cannot be updated in place by
   1.1.0; no older RC setup driver yet). The version reads come from `dyno status` / the helper's `--version` and are unverified on a live guest.
 
-## Defender evidence (`defender-evidence.mjs`, Dyno 1.1.1 WP-4)
+## Defender evidence (`defender-evidence.mjs`, `defender-rate.mjs`, Dyno 1.1.1 WP-4)
 
-The Windows install row prints the full 1116/1117/1006 text (never cut), one line `Defender: origin / type / source / process / signature` (a field the
-event lacks prints `(not in event)`), `Get-MpThreatDetection`, the engine, product and signature versions with the cloud and behaviour switches, and the
-`MPLog-*.log` lines within 30 s of the newest detection.
+The Windows install row prints the full 1116/1117/1006 text (never cut), one line `Defender: origin / type / source / process / threat id`
+(a field the event lacks prints `(not in event)`; the line says when it is the newest detection in the log rather than one since a run started),
+`Get-MpThreatDetection` (at most 50, long lines cut with a visible mark), the engine, product and signature versions with the cloud and behaviour
+switches (a partial output is printed as unreadable), and the `MPLog-*.log` lines within 30 s of the newest detection (streamed, UTF-16, at most 300
+lines per file, each cut at 2000 characters; `STAMPED=n` says whether the lines carried an ISO timestamp at all).
 
-A detection-rate run (`runRate`, `planRateRun`) reverts to the snapshot, drops an EICAR test file as a positive control, then installs N times (default 10)
-and reads the events after each. If the control's 1116 does not name the file with all five fields, every "no detection" is `check broken` (ER-33). The
-module is unit-tested against a fake guest; the guest run is scheduled by the coordinator and not part of the unit tests.
+`node scripts/vm-smoke/defender-rate.mjs --installer <setup.exe> [--installs 10] [--snapshot <name>] [--out <folder>] [--plan]` is the detection-rate run. LOCAL
+ONLY; it drives only the VM that `scripts/vm-win.sh` allows. It reverts and starts the snapshot, runs an EICAR test file as a positive control, then for
+each install reverts again (installs are independent), notes the guest's clock, installs silently as the administrator over SSH (`/S`: a different path
+from the GUI/UAC install of `run-win.mjs`, so the rate is for this path) and counts only the 1116 events at or after that clock that name the program
+or the installer. A write that Defender blocked counts as a detection when its 1116 is there. If the control's 1116 does not name the file with all five
+fields, every "no detection" is `check broken` (ER-33). Every phase prints its time and duration. `--plan` prints the schedule and touches nothing. The
+unit tests (`defender-evidence.test.mjs`, `defender-rate.test.mjs`) use a fake guest with one cumulative event log; the guest run is scheduled by the
+coordinator.
