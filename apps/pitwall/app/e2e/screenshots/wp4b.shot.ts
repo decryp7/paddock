@@ -98,11 +98,11 @@ test.describe('WP-4b screenshots', () => {
           let pane = await chat(page, `${Q}&mock-context=unknown`);
           await expect(pane.getByTestId('assistant-context')).toHaveAttribute('data-level', 'unknown');
           await shot(page, '4a-meter-unknown', 'The context meter', 'A model whose window is not known: the count alone');
-          pane = await chat(page, `${Q}&mock-context=88`);
+          pane = await chat(page, `${Q}&mock-context=1112`);
           await send(pane, 'How busy is this computer?');
           await expect(pane.getByTestId('assistant-context')).toHaveAttribute('data-level', 'high');
           await shot(page, '4b-meter-high', 'The context meter', 'Close to the limit: words, a glyph and amber');
-          pane = await chat(page, `${Q}&mock-context=70`);
+          pane = await chat(page, `${Q}&mock-context=1094`);
           await send(pane, 'How busy is this computer?');
           await expect(pane.getByTestId('assistant-context-full')).toBeVisible();
           await pane.getByTestId('assistant-input').fill('And the disks?');
@@ -123,7 +123,15 @@ test.describe('WP-4b screenshots', () => {
           const many = Array.from({ length: 16 }, (_, i) => ({ name: `part-${i + 1}.txt`, mimeType: 'text/plain', buffer: Buffer.from(`part ${i + 1}\n`) }));
           await pane.getByTestId('assistant-file-input').setInputFiles(many);
           await expect(pane.getByTestId('assistant-failure')).toContainText('at most 16 attachments');
-          await shot(page, '6b-too-many', 'Refusals', 'Too many files: the sixteenth is the last');
+          await page.mouse.move(0, 0);
+          await shot(page, '6b-too-many', 'Refusals', 'Too many files: the sixteenth is the last (under 760 px tall the tray folds to two rows)');
+          if (size.height <= 760) {
+            await pane.getByTestId('assistant-failure-dismiss').click();
+            await pane.getByTestId('assistant-files-summary').click();
+            await expect(pane.getByTestId('assistant-files-summary')).toHaveAttribute('aria-expanded', 'true');
+            await page.mouse.move(0, 0);
+            await shot(page, '6b2-files-open', 'Refusals', 'The folded tray opened from its "16 files" chip');
+          }
           pane = await chat(page, `${Q}&mock-speech`);
           await pane.getByTestId('assistant-file-input').setInputFiles({ name: 'huge.log', mimeType: 'text/plain', buffer: Buffer.alloc(300 * 1024, 120) });
           await expect(pane.getByTestId('assistant-failure')).toContainText('larger than 256 KiB');
@@ -161,6 +169,9 @@ test.describe('WP-4b screenshots', () => {
             form.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: data }));
           });
           await expect(pane.getByTestId('assistant-composer')).toHaveClass(/dropping/);
+          await expect(pane.locator('.drop-hint')).toBeVisible();
+          // Let the failure banner's removal and the highlight settle: two frames after the class is set (review 2 P2-E).
+          await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
           await shot(page, '8-dropping', 'Dropping files', 'Files dragged over the composer');
         });
       }

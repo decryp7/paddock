@@ -1550,8 +1550,20 @@ export class MockBackend implements PitwallBackend {
       let h = 0;
       for (let i = 0; i < text.length; i++) h = (Math.imul(h, 31) + text.charCodeAt(i)) >>> 0;
       const lines = text.split(/\r?\n/).filter((l, i, all) => l || i < all.length - 1).length;
-      return { attachment: { kind: 'file' as const, sha256: h.toString(16).padStart(8, '0').repeat(8), name }, bytes: bytes.length, lines };
+      const sha256 = h.toString(16).padStart(8, '0').repeat(8);
+      // Bounded like Rust's staging: the oldest size goes first.
+      if (this.attachedBytes.size >= 1024) this.attachedBytes.delete(this.attachedBytes.keys().next().value as string);
+      this.attachedBytes.set(sha256, bytes.length);
+      return { attachment: { kind: 'file' as const, sha256, name }, bytes: bytes.length, lines };
     });
+  }
+
+  /** Sizes of the files taken, by digest (the browser build's context meter counts them, as Rust does). */
+  private readonly attachedBytes = new Map<string, number>();
+
+  /** The size of a file `chatAttach` took (`undefined`: not known); browser build only. */
+  chatAttachedBytes(sha256: string): number | undefined {
+    return this.attachedBytes.get(sha256);
   }
 
   /** Files taken off a question (tests read it). */

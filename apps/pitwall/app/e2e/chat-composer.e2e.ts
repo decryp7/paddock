@@ -85,6 +85,43 @@ test.describe('chat composer', () => {
     });
   }
 
+  test('on a short window many files fold to two rows behind an "N files" chip, and the log keeps its room (review 2 P2-A)', async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 700 });
+    const chat = await chatWithFile(page);
+    // The bar above has "Connected apps…": the empty chat does not repeat it on a short window.
+    await expect(chat.getByTestId('assistant-empty-action')).toHaveCount(0);
+    const many = Array.from({ length: 15 }, (_, i) => ({ name: `part-${i + 1}.txt`, mimeType: 'text/plain', buffer: Buffer.from(`part ${i + 1}\n`) }));
+    await chat.getByTestId('assistant-file-input').setInputFiles(many);
+    await expect(chat.getByTestId('assistant-file')).toHaveCount(16);
+    const summary = chat.getByTestId('assistant-files-summary');
+    await expect(summary).toHaveText('16 files');
+    await expect(summary).toHaveAttribute('aria-expanded', 'false');
+    const folded = (await chat.getByTestId('assistant-files').boundingBox())!;
+    expect(folded.height).toBeLessThanOrEqual(56);
+    expect((await chat.getByTestId('assistant-log').boundingBox())!.height).toBeGreaterThanOrEqual(119);
+    // The question and Send are inside the pane (its frame clips what overflows), opened or folded, with a refusal on screen.
+    const inPane = async (): Promise<void> => {
+      const pane = (await chat.locator('pd-assistant').boundingBox())!;
+      for (const id of ['assistant-input', 'assistant-send']) {
+        const b = (await chat.getByTestId(id).boundingBox())!;
+        expect(b.y + b.height).toBeLessThanOrEqual(pane.y + pane.height);
+      }
+    };
+    await inPane();
+    await chat.getByTestId('assistant-file-input').setInputFiles({ name: 'one-more.txt', mimeType: 'text/plain', buffer: Buffer.from('x\n') });
+    await expect(chat.getByTestId('assistant-failure')).toContainText('at most 16 attachments');
+    await inPane();
+    await summary.click();
+    await expect(summary).toHaveAttribute('aria-expanded', 'true');
+    expect((await chat.getByTestId('assistant-files').boundingBox())!.height).toBeGreaterThan(folded.height);
+    await inPane();
+    await summary.click();
+    await expect(summary).toHaveAttribute('aria-expanded', 'false');
+    // A tall window shows every row, with no summary.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(summary).toHaveCount(0);
+  });
+
   test('the pane has no axe violations with a file attached, a sent file and the meter, in light and dark', async ({ page }) => {
     const chat = await chatWithFile(page);
     await chat.getByTestId('assistant-input').fill('What happened?');

@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { MemoryAssistantBackend, TauriAssistantBackend, type SendRequest } from '@decryp7/paddock-ui/workbench/assistant';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { BACKEND } from '../../core/backend';
 import { browserReply, ChatSaving, createChatBackend, createChatSpeech, resetChatBackend, SavingAssistantBackend } from './chat-backend';
 
 const create = () => {
@@ -51,6 +52,15 @@ describe('createChatBackend', () => {
     const saved = await backend.send({ text: 'kept', context: [], allowWrite: false });
     expect(sent[2]!.save).toBe(true);
     expect(saving.started.get(saved.conversationId)).toBe(true);
+  });
+
+  it("measures the browser build's meter like the app: 8192 less a 1024 reserve, a file at about four bytes a token (review 2 P2-F)", async () => {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({ providers: [ChatSaving, { provide: BACKEND, useValue: { chatAttachedBytes: (sha: string) => (sha === 'a'.repeat(64) ? 4000 : undefined) } }] });
+    const backend = TestBed.runInInjectionContext(() => createChatBackend());
+    const file = (c: string) => ({ kind: 'file' as const, sha256: c.repeat(64), name: `${c}.txt` });
+    expect(await backend.context(null, [file('a')])).toEqual({ usedTokens: 1040, limitTokens: 7168, reserveTokens: 1024, exact: false, level: 'ok' });
+    expect((await backend.context(null, [file('b')]))?.usedTokens).toBe(290);
   });
 
   it("passes the context meter's question to the engine (ADR 0023 WP-4b)", async () => {
