@@ -677,6 +677,20 @@ status = "built"
 # =====================================================================================================================
 
 [[mechanism]]
+id = "request-status"
+title = "Request status of a store and the retry of a failed read (withRequestStatus, rule 30, ADR 0058)"
+canonical = "@decryp7/paddock-ui"
+paths = ["ui/projects/paddock-ui/shell/store/src/request-status.ts", "ui/projects/paddock-ui/shell/store/src/read-retry.ts"]
+status = "built"
+adr = "docs/adr/0058-failed-reads-retry.md"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src/app/shared/store/with-request-status.ts"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "Debrief's own feature (11 stores, no read retry). User decision D1 (2026-11-08): Debrief 1.2 moves onto the shared one, service-health first, and deletes this file."
+
+[[mechanism]]
 id = "native-feel"
 title = "Native feel in the page: text selection, context menu, drag and keyboard defaults of a desktop app"
 canonical = "@decryp7/paddock-ui"

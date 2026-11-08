@@ -1,7 +1,8 @@
 # 58. A failed read ends on its own: the declared read retry of `withRequestStatus`
 
-- Status: Proposed (2026-11-08; revision 2 answers the first independent review: P1-1, P1-2 and P2 1-6). The user
-  approved the work on 2026-11-08 as the first shared item after the Dyno 1.1.0 tag (Dyno 1.1.1 plan WP-1).
+- Status: Accepted (2026-11-08, by the user, with decision D1 = (a), after the independent review and its re-review of
+  revision 2). The user approved the work on 2026-11-08 as the first shared item after the Dyno 1.1.0 tag (Dyno 1.1.1
+  plan WP-1).
 - Date: 2026-11-08
 - Related: ER-21 / rule 40 (recurring bugs mean a missing design rule), rule 30 (one shared `withRequestStatus`), rule 29
   (signal reads before the first `await`), rule 34 (the engine is the single source of truth), rule 49 (no fixed turn
@@ -178,7 +179,8 @@ temporary opt-out its removal date (ADR 0058).**" The check is the spec above, s
    together).
 3. The workbench assistant and the live feed adopt it in a follow-up; until then they declare `retry: false` with
    "not adopted yet" and `until: '2026-12-31'`, which the spec allows until that date.
-4. **Decision D1 (for the user): Debrief's own `withRequestStatus`.** (a) Move Debrief's 11 stores onto the shared
+4. **Decision D1: Debrief's own `withRequestStatus`. Decided 2026-11-08 by the user: (a).** The copy is registered in
+   `docs/known-copies.toml` (mechanism `request-status`, delete by `debrief-v1.2.0`). The options were: (a) Move Debrief's 11 stores onto the shared
    feature in Debrief 1.2, `service-health` first (it has the bug), and delete the copy; until then register it in
    `docs/known-copies.toml` (mechanism `request-status`, canonical `@decryp7/paddock-ui`, owner `debrief`, delete by
    `debrief-v1.2.0`). (b) Register it only, and leave Debrief's stores as they are. **Recommended: (a).** Debrief's own
