@@ -108,16 +108,18 @@ impl Drop for Scratch {
     }
 }
 
-/// The next step shown when the data folder cannot be resolved.
-const NEXT_STEP: &str = "Set DEBRIEF_DATA_DIR to a folder you own and restart Debrief.";
+/// The data folder video support needs, or why it stays unavailable (no fallback folder).
+fn data_folder(data: tauri::Result<std::path::PathBuf>) -> Result<std::path::PathBuf, String> {
+    crate::app_dirs::require_data(data, "Video support")
+}
 
 /// Registers the video state (call from `setup`). Never fails: without a data folder video support stays unavailable
 /// (the commands answer "not ready"), never a fixed folder in the shared temp folder that another local user could plant.
 pub fn init<R: Runtime>(app: &AppHandle<R>) {
-    let data = match crate::app_dirs::data(app) {
+    let data = match data_folder(crate::app_dirs::data(app)) {
         Ok(d) => d,
-        Err(e) => {
-            log::error!("Video support is unavailable: Debrief's data folder cannot be resolved ({e}). {NEXT_STEP}");
+        Err(message) => {
+            log::error!("{message}");
             return;
         }
     };

@@ -610,3 +610,11 @@ fn a_generated_clip_is_analysed_end_to_end_when_ffmpeg_is_installed() {
     assert_eq!(Some(source.id), view.source_id);
     let _ = samples();
 }
+
+/// Without a data folder video support stays unavailable and says what to do; it never falls back to the shared temp folder.
+#[test]
+fn without_a_data_folder_video_is_unavailable_with_the_next_step() {
+    let m = super::data_folder(Err(tauri::Error::WindowNotFound)).unwrap_err();
+    assert!(m.starts_with("Video support is unavailable"), "{m}");
+    assert!(m.contains("DEBRIEF_DATA_DIR"), "{m}");
+}

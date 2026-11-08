@@ -77,6 +77,20 @@ pub fn data<R: Runtime, M: Manager<R>>(app: &M) -> tauri::Result<PathBuf> {
     resolve(app, AppDir::Data)
 }
 
+/// The message of a feature that cannot work without the data folder: what is unavailable, why and the next step. There is
+/// no fallback folder: a fixed or guessable folder in the shared temp folder could be planted by another local user.
+pub fn data_missing_message(feature: &str, cause: &dyn std::fmt::Display) -> String {
+    format!(
+        "{feature} is unavailable: Debrief's data folder cannot be resolved ({cause}). Set DEBRIEF_DATA_DIR to a folder you own and restart Debrief."
+    )
+}
+
+/// `data` as a folder, or the [`data_missing_message`] for `feature`: the one place that decides what a missing data folder
+/// means (fail closed).
+pub fn require_data(data: tauri::Result<PathBuf>, feature: &str) -> Result<PathBuf, String> {
+    data.map_err(|e| data_missing_message(feature, &e))
+}
+
 /// Debrief's config folder (settings, profiles, window state).
 pub fn config<R: Runtime, M: Manager<R>>(app: &M) -> tauri::Result<PathBuf> {
     resolve(app, AppDir::Config)
@@ -96,6 +110,15 @@ pub fn window_state_file(root: Option<&Path>) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// No data folder: the feature is unavailable with the next step, and no folder in the shared temp folder is offered.
+    #[test]
+    fn a_missing_data_folder_is_reported_with_the_next_step_never_replaced() {
+        let m = require_data(Err(tauri::Error::WindowNotFound), "Video support").unwrap_err();
+        assert!(m.starts_with("Video support is unavailable"), "{m}");
+        assert!(m.contains("DEBRIEF_DATA_DIR"), "{m}");
+        assert_eq!(require_data(Ok(PathBuf::from("/data")), "x"), Ok(PathBuf::from("/data")));
+    }
 
     #[test]
     fn an_override_root_holds_every_folder() {

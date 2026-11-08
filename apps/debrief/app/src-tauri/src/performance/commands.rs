@@ -28,17 +28,18 @@ fn ai_model_bytes<R: Runtime>(app: &AppHandle<R>) -> u64 {
     })
 }
 
+/// The folder whose disk the probe measures; without a data folder the command is unavailable (never the temp folder).
+fn suggest_data_folder(data: tauri::Result<std::path::PathBuf>) -> CmdResult<std::path::PathBuf> {
+    crate::app_dirs::require_data(data, "Measuring this computer").map_err(CmdError::unavailable)
+}
+
 /// Suggested values for this computer, next to the current ones.
 #[tauri::command]
 pub async fn performance_suggest<R: Runtime>(app: AppHandle<R>, state: State<'_, AppState>) -> CmdResult<Proposal> {
     let live = live(&state);
     let current = live.settings();
     // The probe measures the disk of the data folder; without one there is nothing to measure (never the shared temp folder).
-    let data = crate::app_dirs::data(&app).map_err(|e| {
-        CmdError::unavailable(format!(
-            "Debrief's data folder cannot be found ({e}), so the disk cannot be measured. Set DEBRIEF_DATA_DIR to a folder you own and restart Debrief."
-        ))
-    })?;
+    let data = suggest_data_folder(crate::app_dirs::data(&app))?;
     let env = probe(&data, ai_model_bytes(&app));
     Ok(proposal(Some(env.clone()), &current, &suggest(&env, &current)))
 }
@@ -125,6 +126,14 @@ pub async fn performance_set_plugin_memory(
 mod tests {
     use super::*;
     use crate::performance::PerformanceSettings;
+
+    /// Without a data folder the suggestion is unavailable with the next step; it never measures the shared temp folder.
+    #[test]
+    fn suggest_without_a_data_folder_is_unavailable_with_the_next_step() {
+        let e = suggest_data_folder(Err(tauri::Error::WindowNotFound)).unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::Unavailable);
+        assert!(e.message.contains("DEBRIEF_DATA_DIR"), "{}", e.message);
+    }
 
     #[test]
     fn memory_lists_the_worker_the_ai_and_each_plugin_with_their_caps() {

@@ -87,16 +87,21 @@ impl Drop for WindowAi {
     }
 }
 
+/// The data folder the AI needs, or why the assistant stays unavailable (no fallback folder).
+fn data_folder(data: tauri::Result<std::path::PathBuf>) -> Result<std::path::PathBuf, String> {
+    crate::app_dirs::require_data(data, "The AI assistant")
+}
+
 /// Creates the AI runtime and registers Settings → AI. Call from `setup` after `settings::init`.
 /// Never fails: problems leave the AI unavailable with a reason the UI shows.
 pub fn init<R: Runtime>(app: &AppHandle<R>, safe_mode: bool) {
     let dir = crate::app_dirs::config(app).ok().map(|d| d.join("ai"));
     // No data folder: the AI stays unavailable (its commands answer so) instead of using a fixed folder in the shared temp
     // folder, which another local user could plant.
-    let data = match crate::app_dirs::data(app) {
+    let data = match data_folder(crate::app_dirs::data(app)) {
         Ok(d) => d,
-        Err(e) => {
-            log::error!("AI assistant unavailable: Debrief's data folder cannot be resolved ({e}). Set DEBRIEF_DATA_DIR to a folder you own and restart Debrief.");
+        Err(message) => {
+            log::error!("{message}");
             return;
         }
     };

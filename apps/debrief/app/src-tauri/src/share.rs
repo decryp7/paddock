@@ -37,19 +37,30 @@ pub(crate) fn bundles_root() -> Option<PathBuf> {
 #[cfg(not(test))]
 static BUNDLES_ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
+/// The folder of extracted bundles for a data folder, or the message that opening bundles is unavailable.
+pub(crate) fn bundles_under(data: tauri::Result<PathBuf>) -> Result<PathBuf, String> {
+    crate::app_dirs::require_data(data, "Opening bundles").map(|d| d.join("bundles"))
+}
+
 /// Fixes the folder of extracted bundles under the app's data folder (call from `setup`).
 pub(crate) fn init_bundles_root<R: Runtime>(app: &AppHandle<R>) {
     #[cfg(not(test))]
-    match crate::app_dirs::data(app) {
-        Ok(d) => {
-            let _ = BUNDLES_ROOT.set(d.join("bundles"));
+    match bundles_under(crate::app_dirs::data(app)) {
+        Ok(root) => {
+            let _ = BUNDLES_ROOT.set(root);
         }
-        Err(e) => log::error!(
-            "Opening bundles is unavailable: Debrief's data folder cannot be resolved ({e}). Set DEBRIEF_DATA_DIR to a folder you own and restart Debrief."
-        ),
+        Err(message) => log::error!("{message}"),
     }
     #[cfg(test)]
     let _ = app;
+}
+
+/// The error of a command that needs the bundle folder when there is none.
+fn bundles_unavailable() -> CmdError {
+    CmdError::unavailable(crate::app_dirs::data_missing_message(
+        "Opening bundles",
+        &"no data folder was resolved at start-up",
+    ))
 }
 
 /// Tests extract into a folder of the test process, removed when it exits.
@@ -354,11 +365,7 @@ pub(crate) async fn open_bundle<R: Runtime>(
     let (handle, win) = (app.clone(), state.clone());
     crate::jobs::start_value(&app, spec, controls, move |ctx: &crate::jobs::JobCtx| {
         ctx.message("Unpacking and checking the bundle");
-        let root = bundles_root().ok_or_else(|| {
-            CmdError::unavailable(
-                "Debrief has no data folder to unpack the bundle into. Set DEBRIEF_DATA_DIR to a folder you own and restart Debrief.",
-            )
-        })?;
+        let root = bundles_root().ok_or_else(bundles_unavailable)?;
         let extracted = debrief_core::bundle::extract(&source, &root).map_err(err)?;
         // Debrief's own folder: what the bundle holds may be opened from this window.
         grants.grant(&extracted.dir, crate::paths::Access::Read, crate::paths::GrantSource::Output)?;
@@ -400,6 +407,23 @@ pub(crate) async fn open_bundle<R: Runtime>(
 mod tests {
     use super::*;
     use crate::test_support::Json as _;
+
+    /// No data folder: no bundle folder (opening a bundle is refused with the next step), and a data folder gives
+    /// `<data>/bundles`, never a folder in the shared temp folder.
+    #[test]
+    fn without_a_data_folder_bundles_cannot_be_opened() {
+        let m = bundles_under(Err(tauri::Error::WindowNotFound)).unwrap_err();
+        assert!(m.starts_with("Opening bundles is unavailable"), "{m}");
+        assert!(m.contains("DEBRIEF_DATA_DIR"), "{m}");
+        assert_eq!(
+            bundles_under(Ok(PathBuf::from("/data"))),
+            Ok(PathBuf::from("/data").join("bundles"))
+        );
+        let e = bundles_unavailable();
+        assert_eq!(e.code, crate::error::ErrorCode::Unavailable);
+        assert!(e.message.contains("DEBRIEF_DATA_DIR"), "{}", e.message);
+    }
+
     use crate::test_support::Now as _;
     use crate::test_support::{block, job_done, main_window, samples, test_app, TempDir};
     use serde_json::json;

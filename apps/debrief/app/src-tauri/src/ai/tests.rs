@@ -2238,3 +2238,11 @@ fn the_light_status_is_the_full_status_without_the_memory_scan() {
         (full.state, full.model.clone(), full.available)
     );
 }
+
+/// Without a data folder the AI stays unavailable and says what to do; it never falls back to the shared temp folder.
+#[test]
+fn without_a_data_folder_the_ai_is_unavailable_with_the_next_step() {
+    let m = super::data_folder(Err(tauri::Error::WindowNotFound)).unwrap_err();
+    assert!(m.starts_with("The AI assistant is unavailable"), "{m}");
+    assert!(m.contains("DEBRIEF_DATA_DIR"), "{m}");
+}
