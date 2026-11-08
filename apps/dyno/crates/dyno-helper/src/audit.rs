@@ -167,8 +167,9 @@ mod tests {
             // the size is read once more.
             let after_quiesce = attempts.load(Ordering::SeqCst);
             paddock_testkit::wait_until("the worker to try again after the quiesce", || {
-                attempts.load(Ordering::SeqCst) >= after_quiesce + 3
+                attempts.load(Ordering::SeqCst) >= after_quiesce + 3 || worker.is_finished()
             });
+            assert!(!worker.is_finished(), "round {round}: the worker is still recording");
             assert_eq!(
                 std::fs::metadata(&path).map_or(0, |m| m.len()),
                 size,

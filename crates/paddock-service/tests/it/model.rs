@@ -2507,7 +2507,7 @@ fn replay_one_path_from_the_environment() {
 const LOCK_CHILD: &str = "MODEL_LOCK_CHILD";
 
 /// Runs in the child: the test binary again, with the lock file in the environment. It takes the lock, says so on stdout and
-/// holds it until it is killed (or, as a safety net for a failed run, two minutes).
+/// holds it until its stdin ends (the parent kills it, or the parent died).
 #[test]
 fn lock_holder_child() {
     use paddock_proc::{Claim, InstanceLock};
@@ -2521,8 +2521,8 @@ fn lock_holder_child() {
     };
     println!("LOCK-HELD");
     std::io::stdout().flush().expect("stdout");
-    // conformance: hang-guard — 120 s bound: the child holds the lock until the parent kills it; the sleep is the hold, not a settle
-    std::thread::sleep(Duration::from_secs(120));
+    // Holds the lock until the parent closes our stdin (it kills us, or it died): EOF, no timer, and no process left behind.
+    let _ = std::io::Read::read_to_end(&mut std::io::stdin(), &mut Vec::new());
     drop(lock);
 }
 
@@ -2556,6 +2556,7 @@ fn a_lock_held_by_a_killed_process_is_free_again() {
             "--test-threads=1",
         ])
         .env(LOCK_CHILD, &path)
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()

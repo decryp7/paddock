@@ -959,7 +959,7 @@ mod tests {
         worker
             .start(ops, register_switch(registry), move |cancel| {
                 begun.send(()).unwrap();
-                paddock_testkit::holds_within(std::time::Duration::from_secs(5), || cancel.is_cancelled());
+                let _ = paddock_testkit::poll_until_within(std::time::Duration::from_secs(5), || cancel.is_cancelled());
                 Ok(())
             })
             .unwrap();
@@ -973,9 +973,7 @@ mod tests {
         start_a_waiting_change(&worker, &ops, &registry, begun);
         wake.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
         worker.cancel();
-        while worker.busy.load(std::sync::atomic::Ordering::SeqCst) {
-            std::thread::yield_now();
-        }
+        paddock_testkit::wait_until("the cancelled change to end", || !worker.busy.load(std::sync::atomic::Ordering::SeqCst));
         let (done, seen) = std::sync::mpsc::channel();
         worker
             .start(&ops, register_switch(&registry), move |cancel| {
@@ -1060,18 +1058,20 @@ mod tests {
     fn quit_waits_for_the_start_repair_up_to_its_bound() {
         let ops = ServiceOps::default();
         let done = ops.track_repair();
-        // The repair ends when the test says so (a signal, not a sleep) and records that it ended before it reports done.
+        // The repair ends when the test says so. Quit waits on its own thread: once it has taken the tracked operation over it must
+        // still be waiting, because the repair is blocked until `finish`; a Quit that did not wait would already have answered.
         let (finish, finished_rx) = std::sync::mpsc::channel::<()>();
-        let ended = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let ended_by_repair = ended.clone();
         let slow = std::thread::spawn(move || {
             finished_rx.recv().unwrap();
-            ended_by_repair.store(true, std::sync::atomic::Ordering::SeqCst);
             done.send(()).ok();
         });
-        finish.send(()).unwrap();
-        assert!(ops.join_repair(std::time::Duration::from_secs(5)), "it ended within the bound");
-        assert!(ended.load(std::sync::atomic::Ordering::SeqCst), "quit returned only after the repair reported done");
+        std::thread::scope(|s| {
+            let joiner = s.spawn(|| ops.join_repair(paddock_testkit::HANG_GUARD));
+            paddock_testkit::wait_until("quit to begin waiting", || ops.tracked() == 0);
+            assert!(!joiner.is_finished(), "quit is waiting for the repair that has not ended");
+            finish.send(()).unwrap();
+            assert!(joiner.join().unwrap(), "it ended within the bound");
+        });
         slow.join().unwrap();
         // A repair that does not end within the bound is given up on, and nothing registered is nothing to wait for.
         let _kept = ops.track_repair();

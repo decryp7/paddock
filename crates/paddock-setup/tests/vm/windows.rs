@@ -17,6 +17,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// How often an action that changes things (a delete, a clean-up, a whole fake update) is tried again: not a fast poll.
+const RETRY_EVERY: std::time::Duration = std::time::Duration::from_millis(500);
+
 /// Why these tests do not run by default: they create folders in Program Files and values in HKLM (ER-14).
 const VM_ONLY: &str = "creates folders under Program Files and HKLM values: runs only on the Windows test VM with PADDOCK_SETUP_VM=1";
 
@@ -75,7 +78,7 @@ impl Site {
 impl Drop for Site {
     fn drop(&mut self) {
         // Windows Defender may still be scanning a program that was just started; remove with a bounded retry.
-        paddock_testkit::holds_within(std::time::Duration::from_secs(20), || {
+        let _ = paddock_testkit::retry_within(std::time::Duration::from_secs(20), RETRY_EVERY, || {
             let _ = Command::new("cmd")
                 .args(["/c", "rmdir", "/s", "/q"])
                 .arg(&self.0)
@@ -899,7 +902,7 @@ fn apply_update_starts_the_signed_installer_with_fixed_arguments_and_a_protected
     let run_dir = &runs[0];
     let record = run_dir.join("tmp").join("fake-installer.txt");
     // A wait on the file the child writes, not a fixed sleep: it ends when the file exists (bounded).
-    paddock_testkit::holds_within(std::time::Duration::from_secs(30), || record.exists());
+    let _ = paddock_testkit::poll_until_within(std::time::Duration::from_secs(30), || record.exists());
     let text = std::fs::read_to_string(&record)
         .unwrap_or_else(|e| panic!("the installer did not run: {e}\n{}", site.log()));
     let tmp = run_dir.join("tmp").to_string_lossy().to_lowercase();
@@ -963,7 +966,7 @@ fn hold_installing_logs_and_releases_when_its_parent_ends() {
         .status()
         .unwrap();
     assert!(status.success());
-    paddock_testkit::holds_within(std::time::Duration::from_secs(30), || {
+    let _ = paddock_testkit::poll_until_within(std::time::Duration::from_secs(30), || {
         site.log().contains("the installer ended; lock released")
     });
     let log = site.log();
@@ -1237,7 +1240,7 @@ fn an_installer_that_ends_before_it_holds_the_lock_is_exit_31_and_what_is_left_i
             "{left}"
         );
     }
-    paddock_testkit::holds_within(std::time::Duration::from_secs(30), || {
+    let _ = paddock_testkit::retry_within(std::time::Duration::from_secs(30), RETRY_EVERY, || {
         if leftovers(&site).is_empty() {
             return true;
         }
@@ -1297,7 +1300,7 @@ fn a_second_update_during_a_hand_off_is_busy_and_does_not_touch_the_first_run() 
     );
     // The first installer ends (its parent, the fake, exits): the lock and the signal go with it, then an update goes through.
     let mut third = (busy, String::new());
-    paddock_testkit::holds_within(std::time::Duration::from_secs(60), || {
+    let _ = paddock_testkit::retry_within(std::time::Duration::from_secs(60), RETRY_EVERY, || {
         third = apply_env(
             &site.setup(),
             &installer,

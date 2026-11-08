@@ -116,7 +116,7 @@ impl Rig {
     /// The network snapshot once the background traffic read has filled it (the first answer says it is still reading).
     fn network(&self) -> NetworkSnapshot {
         let mut last = None;
-        paddock_testkit::holds_within(Duration::from_secs(30), || {
+        let _ = paddock_testkit::poll_until_within(Duration::from_secs(30), || {
             let peer = connect(&self.dirs).unwrap().0;
             let Reply::Network(n) = ask_within(
                 &peer,

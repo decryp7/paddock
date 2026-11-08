@@ -14,6 +14,8 @@ const FRAME_MS = 16;
 
 /**
  * Installs the fake clock for the describe it is called in (`now` is the wall clock the spec pins), restored after each test.
+ * `Date` moves with it: each `settle` round moves it at least one frame and `untilResolved` by as much as the mock's latency, so a
+ * spec that asserts a relative time ("23 s ago") must read it after the call, not before.
  * Replies of the mock backend that are scheduled with a zero delay, and animation frames, run when `settle` moves the clock.
  */
 export function useSettleClock(now: number): void {
@@ -36,6 +38,8 @@ export async function settle(f: Settleable, rounds = 6): Promise<void> {
       stable = true;
     });
     for (let frame = 0; frame < MAX_FRAMES && !stable; frame++) await vi.advanceTimersByTimeAsync(FRAME_MS);
+    // A verdict, not a hang: Angular that is not stable after the frames has a timer that keeps re-arming.
+    if (!stable) throw new Error(`not stable after ${MAX_FRAMES} frames: a timer keeps re-arming, or work never ends`);
     await waiting;
     f.detectChanges();
   }
@@ -51,5 +55,6 @@ export async function untilResolved<T>(promise: Promise<T>, limitMs = 120_000, s
     done = true;
   });
   for (let at = 0; at < limitMs && !done; at += stepMs) await vi.advanceTimersByTimeAsync(stepMs);
+  if (!done) throw new Error(`not resolved after ${limitMs} ms of fake time`);
   return tracked;
 }

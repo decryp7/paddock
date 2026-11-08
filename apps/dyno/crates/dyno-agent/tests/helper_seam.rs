@@ -163,7 +163,7 @@ impl Rig {
     fn network_when(&self, done: impl Fn(&dyno_core::network::NetworkSnapshot) -> bool) -> dyno_core::network::NetworkSnapshot {
         // The last snapshot is returned when the condition never holds, so the caller's assertion shows what it saw.
         let mut last = None;
-        paddock_testkit::holds_within(SLOW, || {
+        let _ = paddock_testkit::poll_until_within(SLOW, || {
             let n = self.network();
             let ok = done(&n);
             last = Some(n);
@@ -558,7 +558,7 @@ fn the_cached_inventory_reads_the_memory_slots_again_when_the_helper_comes_up() 
     rig.up.store(true, Ordering::SeqCst);
     // The readiness answer is kept a few seconds: wait on the condition, not on a fixed time.
     let mut latest = None;
-    paddock_testkit::holds_within(SLOW, || {
+    let _ = paddock_testkit::poll_until_within(SLOW, || {
         let inv = rig.inventory();
         let ready = inv.memory_via == ReadVia::Helper;
         latest = Some(inv);

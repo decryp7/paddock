@@ -197,7 +197,7 @@ mod tests {
             while start.elapsed() < Duration::from_secs(60) {
                 read();
                 n += 1;
-                // conformance: hang-guard — 60 s observation window: the measurement is the reader's cost at its real 2 s cadence (an ignored benchmark, not a gate)
+                // conformance: hang-guard — 60 s observation window (not a hang guard, the only label C71 has for a measurement): the reader's CPU cost at its real 2 s cadence, in an #[ignore]d benchmark that gates nothing
                 std::thread::sleep(Duration::from_secs(2));
             }
             let used = cpu_micros() - before;

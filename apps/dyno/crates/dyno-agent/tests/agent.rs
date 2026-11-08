@@ -1526,7 +1526,7 @@ fn asking_for_the_tool_offer_reads_the_disks_again_at_once_and_not_more_than_eve
 
 /// Waits (a condition, with the family hang guard) until `agent.json` reads as `want`.
 fn wait_for_discovery(dirs: &Dirs, want: &dyno_agent::discovery::Discovery) {
-    let held = paddock_testkit::holds_within(Duration::from_secs(40), || {
+    let held = paddock_testkit::poll_until_within(Duration::from_secs(40), || {
         dyno_agent::discovery::Discovery::read(&dirs.discovery()).as_ref() == Some(want)
     });
     assert!(

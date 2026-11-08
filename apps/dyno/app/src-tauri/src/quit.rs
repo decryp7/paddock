@@ -71,6 +71,12 @@ fn record(root: &Path) -> paddock_service::record::RecordFile {
 /// Writes the marker (before anything is stopped, so a crash in between still tells the truth). It waits for the repair lock a
 /// start repair may hold (its steps write the same record), up to 30 s, so the two writes never race.
 pub fn write_marker(root: &Path, now_ms: i64) -> std::io::Result<()> {
+    write_marker_with(root, now_ms, || std::thread::sleep(Duration::from_millis(100)))
+}
+
+/// [`write_marker`] with the pause between two looks at the lock given (the seam a test uses to release the lock when the
+/// writer has seen it taken and is about to wait).
+fn write_marker_with(root: &Path, now_ms: i64, mut pause: impl FnMut()) -> std::io::Result<()> {
     std::fs::create_dir_all(root)?;
     let record = record(root);
     let mut lock = record.lock();
@@ -78,7 +84,7 @@ pub fn write_marker(root: &Path, now_ms: i64) -> std::io::Result<()> {
         if lock.is_some() {
             break;
         }
-        std::thread::sleep(Duration::from_millis(100));
+        pause();
         lock = record.lock();
     }
     if lock.is_none() {
@@ -238,6 +244,8 @@ pub struct LiveAgent {
     target: Option<paddock_proc::ProcessId>,
     /// How long a held lock with no usable discovery file is waited on (an agent that is already exiting) before it is an error.
     wait: Duration,
+    /// The pause between two looks at a held lock (a seam: a test releases the lock in it).
+    pause: Box<dyn FnMut() + Send>,
 }
 
 impl LiveAgent {
@@ -247,12 +255,13 @@ impl LiveAgent {
             dirs,
             target: None,
             wait: StopTimings::default().gone_wait,
+            pause: Box::new(|| std::thread::sleep(Duration::from_millis(100))),
         }
     }
 
     /// No usable discovery file (missing, unreadable, or naming a process that is gone): what the lock says. An agent that is
     /// already exiting has removed its file and may hold the lock a little longer, so a held lock is waited on for `wait` first.
-    fn without_a_named_agent(&self, file_present: bool) -> Result<bool, String> {
+    fn without_a_named_agent(&mut self, file_present: bool) -> Result<bool, String> {
         use paddock_proc::HeldState;
         let began = std::time::Instant::now();
         loop {
@@ -267,9 +276,17 @@ impl LiveAgent {
                 HeldState::Held if began.elapsed() >= self.wait => {
                     return Err("An agent holds this data folder, but the discovery file that names it is missing or unreadable, so Dyno cannot ask it to exit. End dyno-agent in Activity Monitor or Task Manager.".into());
                 }
-                HeldState::Held => std::thread::sleep(Duration::from_millis(100)),
+                HeldState::Held => (self.pause)(),
             }
         }
+    }
+
+    /// The same with another pause between two looks at a held lock.
+    #[cfg(test)]
+    #[must_use]
+    fn with_pause(mut self, pause: impl FnMut() + Send + 'static) -> LiveAgent {
+        self.pause = Box::new(pause);
+        self
     }
 
     /// The same with another wait for a lock that is held while no discovery file names the agent.
@@ -438,15 +455,15 @@ mod tests {
         let dir = temp("lockwait");
         std::fs::create_dir_all(&dir).unwrap();
         let held = record(&dir).lock().unwrap();
-        // The lock is let go when the writer has started (a signal, not a guessed time); the write has to wait for it.
-        let (starting, started) = std::sync::mpsc::channel::<()>();
-        let release = std::thread::spawn(move || {
-            started.recv().unwrap();
-            drop(held);
-        });
-        starting.send(()).unwrap();
-        write_marker(&dir, 7).unwrap();
-        release.join().unwrap();
+        // The lock is let go by the writer's own pause: the writer has seen it taken and is about to wait, so it must wait.
+        let mut held = Some(held);
+        let mut pauses = 0;
+        write_marker_with(&dir, 7, || {
+            pauses += 1;
+            drop(held.take());
+        })
+        .unwrap();
+        assert!(pauses >= 1, "the writer saw the lock taken and waited");
         assert_eq!(peek_marker(&dir), Some(7));
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -914,18 +931,20 @@ mod tests {
         let dir = temp("exiting");
         let dirs = dyno_agent::paths::Dirs::at(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        // the agent removed its discovery file and still holds the lock for a moment, longer than the lock check's own 400 ms
+        // the agent removed its discovery file and still holds the lock for a moment (the lock is released in the app's pause)
         let held = dyno_agent::instance::InstanceLock::acquire(&dirs).unwrap();
-        // the agent lets go when the app has begun waiting for it (a signal from the test, not a guessed time)
-        let (waiting, wake) = std::sync::mpsc::channel::<()>();
-        let ender = std::thread::spawn(move || {
-            wake.recv().unwrap();
-            drop(held);
+        // the agent lets go in the app's own pause: the app has seen the lock held and is waiting for it
+        let pauses = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (counted, held) = (pauses.clone(), std::sync::Mutex::new(Some(held)));
+        let mut live = LiveAgent::new(dirs.clone()).with_wait(Duration::from_secs(10)).with_pause(move || {
+            counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            drop(held.lock().unwrap().take());
         });
-        waiting.send(()).unwrap();
-        let mut live = LiveAgent::new(dirs.clone()).with_wait(Duration::from_secs(10));
         assert_eq!(live.ask_to_exit(), Ok(false), "it left while waited for: none found");
-        ender.join().unwrap();
+        assert!(
+            pauses.load(std::sync::atomic::Ordering::SeqCst) >= 1,
+            "the held lock was waited on before the answer"
+        );
         // one that stays is the error
         let _stays = dyno_agent::instance::InstanceLock::acquire(&dirs).unwrap();
         let e = LiveAgent::new(dirs.clone())

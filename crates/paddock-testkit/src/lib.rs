@@ -12,8 +12,7 @@
 //! - [`net::HeldPort`]: a loopback port held for the test where every connection is closed or reset, instead of a
 //!   port read off a listener that was then dropped (ADR 0023).
 //! - [`FakeClock`]: the deterministic clock of `paddock_jobs::time`, re-exported so a test needs one dependency.
-//!
-//! - [`wait`]: `wait_until` / `wait_for` / `poll_for` / `holds_within`, a bounded poll on a condition instead of a sleep.
+//! - [`wait`]: `wait_until` / `wait_for` / `poll_for` / `poll_until_within` / `retry_within`, a bounded poll on a condition instead of a sleep.
 //!
 //! Nothing here touches the user's folders or starts a process; the only real time is [`wait`]'s poll interval.
 
@@ -31,4 +30,4 @@ pub use hostile::{assert_never_panics, corpus, never_panics};
 pub use paddock_jobs::time::{Clock, FakeClock};
 pub use runner::{Call, FakeRunner, Reply};
 pub use scratch::{Leftovers, Scratch, ScratchError};
-pub use wait::{HANG_GUARD, holds_within, poll_for, wait_for, wait_until, wait_until_within};
+pub use wait::{HANG_GUARD, poll_for, poll_until_within, retry_within, wait_for, wait_for_within, wait_until, wait_until_within};
