@@ -649,7 +649,7 @@ impl Shared {
         );
         let power_marker = dirs.root().join("keep-awake.active");
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-        let own_folder = dirs.root() == Dirs::current().root();
+        let own_folder = Dirs::try_current().is_ok_and(|current| dirs.root() == current.root());
         let own_tools = dirs.tools();
         let helper_first = own_folder || wiring.is_some();
         let (helper_centre, local_memory) = match wiring {

@@ -597,6 +597,12 @@ pub fn run() {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX)),
     );
+    // The data folder must be usable before anything reads it: later `Dirs::current()` calls then cannot fail.
+    if let Err(e) = dyno_agent::paths::Dirs::try_current() {
+        log::error!("Dyno cannot start: no usable data folder ({e})");
+        eprintln!("Dyno cannot start: {e}. {}", dyno_agent::paths::NEXT_STEP);
+        std::process::exit(78);
+    }
     let cwd = std::env::current_dir().ok();
     #[allow(unused_mut)]
     let mut launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &[]);

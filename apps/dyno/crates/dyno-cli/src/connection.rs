@@ -47,7 +47,7 @@ impl Env {
                 match found {
                     Some(d) => d,
                     None => paddock_env::private_fallback_dir(temp, "Dyno")
-                        .map_err(|e| format!("no data folder for this user ({e}); set HOME or DYNO_DATA_DIR"))?,
+                        .map_err(|e| format!("no data folder for this user ({e}). Set HOME or DYNO_DATA_DIR to a folder you own"))?,
                 }
             }
         };
@@ -77,11 +77,32 @@ pub struct Discovery {
 }
 
 impl Discovery {
-    /// Reads the file; `None` when it is missing, too big or damaged.
+    /// Reads the file; `None` when it is missing, too big, damaged or in a folder that is not trusted.
     pub fn read(env: &Env) -> Option<Discovery> {
+        Discovery::read_checked(env).ok().flatten()
+    }
+
+    /// [`Discovery::read`] that says when the folder is not trusted: a hint from a folder another account owns or can change is
+    /// not used at all (rule 53). A link to the user's own folder is followed.
+    ///
+    /// # Errors
+    /// The reason the data folder is not trusted, with the next step.
+    pub fn read_checked(env: &Env) -> Result<Option<Discovery>, String> {
         let path = env.discovery();
-        // A hint from a folder another user owns (or a link) is not trusted at all (rule 53).
-        paddock_env::check_private_dir(&env.data_dir).ok()?;
+        if env.data_dir.exists() {
+            paddock_env::check_data_folder(&env.data_dir, "the agent's discovery file").map_err(|e| {
+                format!(
+                    "the data folder is not safe to use ({}); it must belong to this account and not be writable by others. \
+                     Run dyno as the account that runs Dyno, or set DYNO_DATA_DIR to a folder you own",
+                    e.reason()
+                )
+            })?;
+        }
+        Ok(Discovery::read_trusted(&path))
+    }
+
+    fn read_trusted(path: &std::path::Path) -> Option<Discovery> {
+        let path = path.to_path_buf();
         if std::fs::metadata(&path).ok()?.len() > 16 * 1024 {
             return None;
         }
@@ -177,7 +198,7 @@ pub struct IpcAgent {
 impl IpcAgent {
     /// Connects to the agent named in the discovery file after checking its protocol version.
     pub fn connect(env: &Env) -> Result<IpcAgent, Problem> {
-        let d = Discovery::read(env).ok_or(Problem::NotRunning)?;
+        let d = Discovery::read_checked(env).map_err(Problem::Failed)?.ok_or(Problem::NotRunning)?;
         check_version(&d, PROTOCOL_VERSION)?;
         let token = Token::from_hex(&d.token).ok_or_else(|| Problem::Failed("The discovery file is damaged; restart Dyno.".into()))?;
         let conn = Client::connect(&d.endpoint, &token, FrameLimit::new(MAX_FRAME), ProtocolVersion::new(WIRE_MAJOR, 0)).map_err(|e| {
@@ -314,7 +335,7 @@ mod tests {
         match Env::resolve(&none, tmp.path()) {
             Ok(env) => {
                 assert_ne!(env.data_dir, tmp.path().join("Dyno"));
-                assert_eq!(paddock_env::check_private_dir(&env.data_dir), Ok(()));
+                assert_eq!(paddock_env::check_own_folder(&env.data_dir, paddock_env::Links::Follow), Ok(()));
             }
             Err(why) => assert!(cfg!(windows) && why.contains("DYNO_DATA_DIR"), "{why}"),
         }
@@ -322,7 +343,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_discovery_file_in_a_linked_folder_is_not_trusted() {
+    fn a_discovery_file_behind_a_link_to_the_users_own_folder_is_read_and_one_in_a_foreign_folder_says_why() {
         let tmp = tempfile::tempdir().unwrap();
         let real = tmp.path().join("real");
         std::fs::create_dir(&real).unwrap();
@@ -330,8 +351,14 @@ mod tests {
         std::fs::write(real.join("agent.json"), body).unwrap();
         let link = tmp.path().join("link");
         std::os::unix::fs::symlink(&real, &link).unwrap();
-        assert!(Discovery::read(&Env { data_dir: real }).is_some());
-        assert!(Discovery::read(&Env { data_dir: link }).is_none());
+        assert_eq!(Discovery::read(&Env { data_dir: link }).unwrap().pid, 7);
+        if paddock_env::current_uid() != 0 {
+            // `/` is root's: a data folder that leads there is not trusted, and the CLI says so instead of "not running".
+            let foreign = Env { data_dir: "/".into() };
+            let why = Discovery::read_checked(&foreign).unwrap_err();
+            assert!(why.contains("belongs to another user") && why.contains("DYNO_DATA_DIR"), "{why}");
+            assert!(matches!(IpcAgent::connect(&foreign), Err(Problem::Failed(_))));
+        }
     }
 
     #[test]

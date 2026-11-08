@@ -94,17 +94,38 @@ pub fn check_pipe_owner(owner_sid: &str) -> Result<(), Untrusted> {
     }
 }
 
-/// The socket's folder must belong to `expected_uid` (root for a system service) and have no group or world write bit.
+/// The socket's folder must belong to `expected_uid` (root for a system service) and have no group or world write bit. The
+/// decision is the family's one folder-trust rule, `paddock_env::decide`.
 pub fn check_socket_folder(owner_uid: u32, mode: u32, expected_uid: u32) -> Result<(), Untrusted> {
-    if owner_uid != expected_uid {
-        return Err(Untrusted::FolderOwner { uid: owner_uid });
+    paddock_env::decide(
+        paddock_env::FolderFacts {
+            uid: owner_uid,
+            mode,
+        },
+        expected_uid,
+    )
+    .map_err(Untrusted::from)
+}
+
+impl From<paddock_env::Refusal> for Untrusted {
+    fn from(r: paddock_env::Refusal) -> Untrusted {
+        use paddock_env::Refusal;
+        match r {
+            Refusal::OtherOwner { uid } => Untrusted::FolderOwner { uid },
+            Refusal::OpenToOthers { mode } => Untrusted::FolderWritable {
+                mode: mode & 0o7777,
+            },
+            Refusal::Unreadable { what, cause } => Untrusted::Unreadable { what, cause },
+            Refusal::Symlink => Untrusted::Unreadable {
+                what: "open the socket's folder",
+                cause: "it is a symbolic link".into(),
+            },
+            Refusal::NotAFolder => Untrusted::Unreadable {
+                what: "open the socket's folder",
+                cause: "it is not a folder".into(),
+            },
+        }
     }
-    if mode & 0o022 != 0 {
-        return Err(Untrusted::FolderWritable {
-            mode: mode & 0o7777,
-        });
-    }
-    Ok(())
 }
 
 /// The account holding the listening socket must be `expected_uid`.

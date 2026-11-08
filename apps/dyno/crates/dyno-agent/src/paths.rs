@@ -3,6 +3,19 @@
 
 use std::path::{Path, PathBuf};
 
+/// What to do when no data folder can be used (the same words for the agent and the CLI).
+pub const NEXT_STEP: &str = "Set HOME or DYNO_DATA_DIR to a folder you own";
+
+/// The reason an error gives, without the path (ER-27: no user paths in logs beyond what is already shown).
+fn why(e: &paddock_env::EnvError) -> &'static str {
+    match e {
+        paddock_env::EnvError::NoHome(_) => "no home folder is known",
+        paddock_env::EnvError::Io { op, .. } if *op == "use folder" => "the fallback folder is not safe to use",
+        paddock_env::EnvError::Io { .. } => "the fallback folder could not be made",
+        _ => "the data folder could not be chosen",
+    }
+}
+
 /// The agent's files.
 #[derive(Debug, Clone)]
 pub struct Dirs {
@@ -22,8 +35,8 @@ impl Dirs {
     /// Use [`Dirs::try_current`] to handle the error instead.
     pub fn current() -> Dirs {
         Dirs::try_current().unwrap_or_else(|e| {
-            eprintln!("dyno: {e}");
-            log::error!(Why = e.to_string().as_str(); "No usable data folder; stopping");
+            eprintln!("dyno: {e}. {NEXT_STEP}");
+            log::error!(Why = why(&e); "No usable data folder; stopping");
             std::process::exit(78)
         })
     }
@@ -204,7 +217,14 @@ impl Dirs {
     /// (the app's child, the login item, the Windows `Run` entry) must log "user data folder".
     pub fn kind(&self) -> &'static str {
         let overridden = std::env::var_os("DYNO_DATA_DIR").is_some_and(|v| !v.is_empty());
-        folder_kind(&self.root, overridden, Dirs::current().root(), &std::env::temp_dir())
+        // A label for the logs must never end the process: a folder that cannot be chosen is none of the known kinds.
+        let current = Dirs::try_current().ok();
+        folder_kind(
+            &self.root,
+            overridden,
+            current.as_ref().map_or(Path::new(""), Dirs::root),
+            &std::env::temp_dir(),
+        )
     }
 }
 
@@ -236,6 +256,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn no_env(_: &str) -> Option<PathBuf> {
         None
     }
@@ -249,7 +270,7 @@ mod tests {
         assert_ne!(d.root(), tmp.path().join("Dyno"));
         assert!(d.root().starts_with(tmp.path()));
         assert_eq!(std::fs::metadata(d.root()).unwrap().permissions().mode() & 0o777, 0o700);
-        assert_eq!(paddock_env::check_private_dir(d.root()), Ok(()));
+        assert_eq!(paddock_env::check_own_folder(d.root(), paddock_env::Links::Refuse), Ok(()));
     }
 
     #[cfg(unix)]
@@ -264,6 +285,23 @@ mod tests {
         std::os::unix::fs::symlink(&attacker, tmp.path().join(name)).unwrap();
         assert!(Dirs::resolve(&no_env, tmp.path()).is_err());
         assert_eq!(std::fs::read_dir(&attacker).unwrap().count(), 0, "nothing was written there");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_world_writable_temp_folder_without_the_sticky_bit_holds_no_fallback() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o777)).unwrap();
+        let e = Dirs::resolve(&no_env, tmp.path()).unwrap_err();
+        assert!(e.to_string().contains("use folder"), "{e}");
+        assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0, "nothing was made there");
+    }
+
+    #[test]
+    fn the_refusal_gives_the_same_next_step_for_the_agent_and_the_cli() {
+        assert!(NEXT_STEP.contains("HOME") && NEXT_STEP.contains("DYNO_DATA_DIR"));
+        assert_eq!(why(&paddock_env::EnvError::NoHome("x")), "no home folder is known");
     }
 
     #[test]

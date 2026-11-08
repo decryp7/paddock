@@ -1499,3 +1499,7 @@ A redaction default in a shared crate was widened for one app's problem report. 
 ## Gitea tokens cannot mint narrower tokens, and agents must not create bot users (2026-11-08)
 
 An agent looking for a narrower CI token found that a Gitea token cannot create a token with fewer rights, and the only other route was creating a bot user. Agents must not create users. The user creates scoped CI tokens (one per purpose, least privilege) and the agent is given the one it needs; if none exists, the agent stops and asks.
+
+## A popover test failed once under load because the disk list was not cached yet (2026-11-08)
+
+Dyno's `widget_layouts::popover_values_answer_only_the_slow_kinds_the_layout_has` (apps/dyno/crates/dyno-agent/tests/agent.rs) failed once, right after a heavy build, with `disk-space` missing from the answer (`["active-alarms"]` instead of `["active-alarms", "disk-space"]`), and passed on the same code three times after and on a clean origin/main. The popover answers a disk widget only from the cached volume list (`shared.disk.cached_volumes()`), which is empty until the first listing finishes, and the test asks at once. Root cause (read from the code, not yet measured): the test does not wait for the cache. Fix to make later, not here: wait on the condition (the cache has a list) before asking, never a sleep (ER-12). Class: a test that asks a cached answer before its cache is filled.

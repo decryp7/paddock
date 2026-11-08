@@ -526,7 +526,73 @@ impl BatteryCapacitySource for SysfsBattery {
     }
 }
 
-/// Windows: `powercfg /batteryreport /xml` into a folder only Dyno writes to.
+/// The most of a battery report that is read (a real one is a few tens of kilobytes).
+#[cfg(any(windows, test))]
+const MAX_REPORT_BYTES: u64 = 4 * 1024 * 1024;
+
+/// A name nobody can guess ahead of time: the standard library's per-process random hash keys over the pid and the clock.
+#[cfg(any(windows, test))]
+fn unguessable_suffix() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u32(std::process::id());
+    h.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos()),
+    );
+    format!("{:016x}", h.finish())
+}
+
+/// Makes a folder under `temp` that did not exist before (an unguessable name, created with `create_dir`, which refuses an existing
+/// path, link or junction), so another user cannot have planted it or what is in it. The temp folder itself may be shared
+/// (`C:\Windows\Temp` when Dyno runs elevated), so no fixed name is ever used there.
+#[cfg(any(windows, test))]
+fn fresh_private_folder(temp: &Path) -> std::io::Result<PathBuf> {
+    let mut last = None;
+    for _ in 0..8 {
+        let dir = temp.join(format!("Dyno-{}", unguessable_suffix()));
+        #[cfg_attr(not(unix), allow(unused_mut))]
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        match builder.create(&dir) {
+            Ok(()) => return Ok(dir),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = Some(e),
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last.unwrap_or_else(|| std::io::Error::other("no free folder name")))
+}
+
+/// Reads the report through one open handle: a regular file (not a link), at most [`MAX_REPORT_BYTES`].
+#[cfg(any(windows, test))]
+fn read_report(path: &Path) -> Option<String> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).ok()?;
+    let meta = file.metadata().ok()?;
+    if !meta.is_file() || meta.len() > MAX_REPORT_BYTES {
+        return None;
+    }
+    let mut text = String::new();
+    file.take(MAX_REPORT_BYTES).read_to_string(&mut text).ok()?;
+    Some(text)
+}
+
+/// Runs `produce` with the path of a report file inside a fresh private folder under `temp`, reads the file back, and removes the
+/// folder.
+#[cfg(any(windows, test))]
+fn with_report<T>(temp: &Path, produce: impl FnOnce(&Path) -> T) -> std::io::Result<(T, Option<String>)> {
+    let dir = fresh_private_folder(temp)?;
+    let file = dir.join("battery-report.xml");
+    let made = produce(&file);
+    let text = read_report(&file);
+    paddock_proc::cleanup::remove_dir_all(&dir);
+    Ok((made, text))
+}
+
+/// Windows: `powercfg /batteryreport /xml` into a fresh folder under the temp folder that only this run made (never a fixed name in
+/// a folder other users can write to), read back through one handle.
 #[cfg(windows)]
 pub struct WindowsBattery;
 
@@ -534,23 +600,19 @@ pub struct WindowsBattery;
 impl BatteryCapacitySource for WindowsBattery {
     fn read(&mut self) -> Reading<BatteryCapacity> {
         let windir = std::env::var_os("WINDIR").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
-        let dir = std::env::temp_dir().join("Dyno");
-        if std::fs::create_dir_all(&dir).is_err() {
-            return Reading::unavailable("Dyno could not create a temporary folder for the battery report.");
-        }
-        let file = dir.join("battery-report.xml");
-        paddock_proc::cleanup::remove_file(&file);
-        let mut cmd = crate::process::command(windir.join("System32").join("powercfg.exe"));
-        cmd.arg("/batteryreport").arg("/xml").arg("/output").arg(&file);
-        let ran = crate::process::run_with_timeout(cmd, TOOL_TIMEOUT);
-        let text = std::fs::read_to_string(&file);
-        paddock_proc::cleanup::remove_file(&file);
-        match (ran, text) {
-            (Err(e), _) => Reading::unavailable(e.to_string()),
-            (Ok(_), Ok(xml)) => {
+        let powercfg = windir.join("System32").join("powercfg.exe");
+        let run = |file: &Path| {
+            let mut cmd = crate::process::command(&powercfg);
+            cmd.arg("/batteryreport").arg("/xml").arg("/output").arg(file);
+            crate::process::run_with_timeout(cmd, TOOL_TIMEOUT)
+        };
+        match with_report(&std::env::temp_dir(), run) {
+            Err(_) => Reading::unavailable("Dyno could not create a temporary folder for the battery report."),
+            Ok((Err(e), _)) => Reading::unavailable(e.to_string()),
+            Ok((Ok(_), Some(xml))) => {
                 crate::parse::hardware::parse_powercfg_battery(&xml).map_or_else(|| Reading::unavailable(NO_BATTERY), Reading::Available)
             }
-            (Ok(_), Err(_)) => Reading::unavailable(NO_BATTERY),
+            Ok((Ok(_), None)) => Reading::unavailable(NO_BATTERY),
         }
     }
 }
@@ -591,6 +653,51 @@ impl BatteryCapacitySource for FakeBattery {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_battery_report_goes_into_a_fresh_folder_that_is_gone_afterwards_never_a_fixed_name() {
+        let root = temp("battery-fresh");
+        // A planted folder with the old fixed name is never used or touched.
+        std::fs::create_dir(root.join("Dyno")).unwrap();
+        std::fs::write(root.join("Dyno").join("battery-report.xml"), "planted").unwrap();
+        let (path, text) = with_report(&root, |f| {
+            assert!(f.parent().unwrap().starts_with(&root));
+            assert_ne!(f.parent().unwrap(), root.join("Dyno"));
+            std::fs::write(f, "real").unwrap();
+            f.to_path_buf()
+        })
+        .unwrap();
+        assert_eq!(text.as_deref(), Some("real"));
+        assert!(!path.parent().unwrap().exists(), "the folder is removed");
+        assert_eq!(
+            std::fs::read_to_string(root.join("Dyno").join("battery-report.xml")).unwrap(),
+            "planted"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn two_report_folders_never_share_a_name() {
+        let root = temp("battery-unique");
+        let a = fresh_private_folder(&root).unwrap();
+        let b = fresh_private_folder(&root).unwrap();
+        assert_ne!(a, b);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_report_is_not_read_when_it_is_not_a_file_or_is_too_big() {
+        let root = temp("battery-read");
+        let real = root.join("real.xml");
+        std::fs::write(&real, "x").unwrap();
+        assert_eq!(read_report(&real).as_deref(), Some("x"));
+        assert_eq!(read_report(&root), None, "a folder is not a report");
+        let big = root.join("big.xml");
+        std::fs::File::create(&big).unwrap().set_len(MAX_REPORT_BYTES + 1).unwrap();
+        assert_eq!(read_report(&big), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     fn temp(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("dyno-it-hw-{name}-{}", std::process::id()));
