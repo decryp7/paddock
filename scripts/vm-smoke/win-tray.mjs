@@ -127,20 +127,24 @@ export async function trayMenuStep(actor, { browser = null } = {}) {
 export async function trayCountdownStep(actor, { idleRuleSeeded = true } = {}) {
   const checks = [];
   const evidence = [];
-  let running = false;
-  for (let i = 0; i < 50 && !running; i++) { running = /Counting down/.test(ssh('& "$env:ProgramFiles\\Dyno\\dyno.exe" idle 2>&1 | Out-String')); if (!running) await sleep(4000); }
+  // The countdown ends on any input (the clicks and Escape of the earlier steps and of a failed try are input), so it is waited for again before every try.
+  const counting = () => /Counting down/.test(ssh('& "$env:ProgramFiles\\Dyno\\dyno.exe" idle 2>&1 | Out-String'));
+  const waitCountdown = async (tries = 50) => { for (let i = 0; i < tries; i++) { if (counting()) return true; await sleep(4000); } return false; };
+  let running = await waitCountdown();
   checks.push({ ok: running, detail: running ? 'an idle countdown is running' : `no idle countdown within 200 s${idleRuleSeeded ? '' : ' (no idle rule seeded)'}` });
   if (!running) return result('Windows: tray menu during an idle countdown (Cancel, Snooze)', checks, evidence);
   // Up to three tries: the countdown re-arms on input and the menu from an earlier click may still be closing (0ad round 5: an empty read with the countdown running).
   let menu = [];
   for (let k = 1; k <= 3 && !menu.length; k++) {
-    await closeMenus(actor);
+    if (k > 1) { await closeMenus(actor); if (!(await waitCountdown())) { evidence.push(`try ${k}: the countdown did not come back within 200 s`); break; } }
     const o = await openMenu(actor);
     menu = o.menu;
     evidence.push(`try ${k}: native menu ${o.watch.seen ? `seen after ${o.watch.ms} ms` : 'NOT seen in 6 s'}; app log right click ${o.logged ? 'logged' : 'NOT logged'}; ${o.menu.length} item(s)`);
     if (!menu.length) await sleep(2000);
   }
-  evidence.push(`menu: ${menu.map((m) => m.name).join(' | ')}`);
+  // The countdown must still run when the menu is judged: a menu that shows no countdown because the click ended it is the probe's, not the product's.
+  const stillCounting = counting();
+  evidence.push(`menu: ${menu.map((m) => m.name).join(' | ')}`, `dyno idle right after the menu was read: ${stillCounting ? 'still counting down' : 'no countdown (the click was input and ended it)'}`);
   checks.push({ ...(menu.length ? {} : { kind: 'check' }), ok: menu.some((m) => /Will sleep in|Counting down/i.test(m.name)), detail: 'the menu shows the countdown line ("Will sleep in ...")' });
   const snooze = menu.find((m) => /Snooze/i.test(m.name));
   const cancel = menu.find((m) => /^Cancel/i.test(m.name));

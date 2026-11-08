@@ -116,7 +116,7 @@ while ((Get-Date) -lt $end) {
       'rclickwatch' { # right click at X Y, then look for a native menu every 100 ms for 6 s (guest side: no round trip between the click and the look); screenshot and items at first sight
         $p = $a[1].Split(' '); [void][W.A]::SetCursorPos([int]$p[0], [int]$p[1]); Start-Sleep -Milliseconds 250; [W.A]::mouse_event(8, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 90; [W.A]::mouse_event(16, 0, 0, 0, [UIntPtr]::Zero)
         $sw = [Diagnostics.Stopwatch]::StartNew(); $seen = @(); while ($sw.ElapsedMilliseconds -lt 6000 -and $seen.Count -eq 0) { Start-Sleep -Milliseconds 100; $seen = @(Menu-Windows) }
-        if ($seen.Count -gt 0) { $t = $sw.ElapsedMilliseconds; Start-Sleep -Milliseconds 500; Shot-To 'rcw-open'; $items = Menu-Items; $out = "SEEN $t`n--windows`n$($seen -join "`n")`n--items`n$items" } else { Shot-To 'rcw-none'; $out = "NONE 6000" } }
+        if ($seen.Count -gt 0) { $t = $sw.ElapsedMilliseconds; $items = ''; for ($k = 0; $k -lt 8 -and -not $items; $k++) { Start-Sleep -Milliseconds 250; $items = Menu-Items }; Shot-To 'rcw-open'; $out = "SEEN $t`n--windows`n$($seen -join "`n")`n--items`n$items" } else { Shot-To 'rcw-none'; $out = "NONE 6000" } }
       'menuwin' { $out = (Menu-Windows) -join "`n" }
       'windows' { $out = (Windows-List) -join "`n" }
       'shot' { $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bm = New-Object System.Drawing.Bitmap $b.Width, $b.Height; $g = [System.Drawing.Graphics]::FromImage($bm); $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size); $bm.Save("$Dir\$($a[1]).png"); $out = "shot $($a[1])" }
