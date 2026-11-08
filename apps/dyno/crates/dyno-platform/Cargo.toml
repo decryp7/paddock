@@ -86,6 +86,8 @@ tempfile.workspace = true
 # The unit tests compile this crate with cfg(test); the doubles of the crates below do not, so they ask for them.
 dyno-core = { workspace = true, features = ["test-support"] }
 paddock-power = { path = "../../../../crates/paddock-power", features = ["test-support"] }
+# tests/no_ungated_doubles.rs: the declaration scan of the shipped crates (MIT OR Apache-2.0), as in dyno-agent/tests/helper_wiring.rs.
+syn = { version = "2", features = ["full"] }
 
 [lints]
 workspace = true
