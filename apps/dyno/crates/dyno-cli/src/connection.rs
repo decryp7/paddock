@@ -92,7 +92,7 @@ impl Discovery {
         if env.data_dir.exists() {
             paddock_env::check_data_folder(&env.data_dir, "the agent's discovery file").map_err(|e| {
                 format!(
-                    "the data folder is not safe to use ({}); it must belong to this account and not be writable by others. \
+                    "the data folder is not safe to use ({}); it must belong to this account and not be writable by others (chmod go-w on it). \
                      Run dyno as the account that runs Dyno, or set DYNO_DATA_DIR to a folder you own",
                     e.reason()
                 )

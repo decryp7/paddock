@@ -281,4 +281,6 @@ holds file contents or command lines.
 | A tile or column says "Unavailable" | Read the reason: the OS or hardware does not provide it (no battery, no sensor), or shows it only to administrators or to the owner of a process. |
 | macOS: the agent does not start after an update | Dyno registers it again by itself; or `dyno-agent service ensure`; see macos.md |
 | Linux: no tray icon | Install a status-notifier host (GNOME: the AppIndicator extension) |
+| `dyno` says "the data folder is not safe to use" or cannot find the agent after `sudo` | Dyno trusts a data folder only when it belongs to the account that runs it and nobody else can change it. Run `dyno` as that account, not with `sudo`; if the folder is writable by others, run `chmod go-w` on it |
+| macOS: the data folder is on a disk where "Ignore ownership on this volume" is on | Every file there shows an owner (uid 99) that is not you, so Dyno refuses the folder. Keep the data folder on a disk that keeps ownership, or turn that option off; `DYNO_DATA_DIR` can name another folder |
 | Windows: details, locks and startup are empty | Those adapters are not built yet (roadmap G8) |

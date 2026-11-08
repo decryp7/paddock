@@ -544,6 +544,45 @@ fn unguessable_suffix() -> String {
     format!("{:016x}", h.finish())
 }
 
+/// Makes one folder that must not exist yet, readable and writable by its owner only: mode 0700, or on Windows a protected
+/// security descriptor that grants only the owner (`D:P(A;OICI;FA;;;OW)`), so no inherited right from a shared temp folder remains.
+#[cfg(any(windows, test))]
+#[allow(unsafe_code)] // the Win32 security-descriptor calls; each unsafe block says why it is sound
+fn create_owner_only(dir: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::core::{w, PCWSTR};
+        use windows::Win32::Foundation::{LocalFree, HLOCAL};
+        use windows::Win32::Security::Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
+        use windows::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
+        use windows::Win32::Storage::FileSystem::CreateDirectoryW;
+        let os_error = |e: windows::core::Error| std::io::Error::from_raw_os_error(e.code().0 & 0xFFFF);
+        let mut descriptor = PSECURITY_DESCRIPTOR::default();
+        // SAFETY: the SDDL text is a constant; the descriptor it allocates is freed below with LocalFree after the call that uses it.
+        unsafe { ConvertStringSecurityDescriptorToSecurityDescriptorW(w!("D:P(A;OICI;FA;;;OW)"), SDDL_REVISION_1, &mut descriptor, None) }
+            .map_err(os_error)?;
+        let attributes = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: descriptor.0,
+            bInheritHandle: false.into(),
+        };
+        let wide: Vec<u16> = dir.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        // SAFETY: `wide` is NUL-terminated and outlives the call; `attributes` points at the live descriptor.
+        let made = unsafe { CreateDirectoryW(PCWSTR(wide.as_ptr()), Some(&attributes)) };
+        // SAFETY: the descriptor came from the conversion above and is not used after this.
+        unsafe { LocalFree(Some(HLOCAL(descriptor.0))) };
+        made.map_err(os_error)
+    }
+    #[cfg(not(windows))]
+    {
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+        builder.create(dir)
+    }
+}
+
 /// Makes a folder under `temp` that did not exist before (an unguessable name, created with `create_dir`, which refuses an existing
 /// path, link or junction), so another user cannot have planted it or what is in it. The temp folder itself may be shared
 /// (`C:\Windows\Temp` when Dyno runs elevated), so no fixed name is ever used there.
@@ -552,11 +591,7 @@ fn fresh_private_folder(temp: &Path) -> std::io::Result<PathBuf> {
     let mut last = None;
     for _ in 0..8 {
         let dir = temp.join(format!("Dyno-{}", unguessable_suffix()));
-        #[cfg_attr(not(unix), allow(unused_mut))]
-        let mut builder = std::fs::DirBuilder::new();
-        #[cfg(unix)]
-        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
-        match builder.create(&dir) {
+        match create_owner_only(&dir) {
             Ok(()) => return Ok(dir),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = Some(e),
             Err(e) => return Err(e),
@@ -565,7 +600,8 @@ fn fresh_private_folder(temp: &Path) -> std::io::Result<PathBuf> {
     Err(last.unwrap_or_else(|| std::io::Error::other("no free folder name")))
 }
 
-/// Reads the report through one open handle: a regular file (not a link), at most [`MAX_REPORT_BYTES`].
+/// Reads the report through one open handle: what the handle names must be a regular file (the open follows a link, so the target
+/// is what is checked), at most [`MAX_REPORT_BYTES`].
 #[cfg(any(windows, test))]
 fn read_report(path: &Path) -> Option<String> {
     use std::io::Read;
@@ -673,6 +709,16 @@ mod tests {
             std::fs::read_to_string(root.join("Dyno").join("battery-report.xml")).unwrap(),
             "planted"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_report_folder_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = temp("battery-mode");
+        let d = fresh_private_folder(&root).unwrap();
+        assert_eq!(std::fs::metadata(&d).unwrap().permissions().mode() & 0o777, 0o700);
         let _ = std::fs::remove_dir_all(&root);
     }
 

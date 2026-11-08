@@ -599,7 +599,7 @@ pub fn run() {
     );
     // The data folder must be usable before anything reads it: later `Dirs::current()` calls then cannot fail.
     if let Err(e) = dyno_agent::paths::Dirs::try_current() {
-        log::error!("Dyno cannot start: no usable data folder ({e})");
+        log::error!(Why = dyno_agent::paths::why(&e); "Dyno cannot start: no usable data folder");
         eprintln!("Dyno cannot start: {e}. {}", dyno_agent::paths::NEXT_STEP);
         std::process::exit(78);
     }

@@ -71,7 +71,7 @@ fn record(root: &Path) -> paddock_service::record::RecordFile {
 /// Writes the marker (before anything is stopped, so a crash in between still tells the truth). It waits for the repair lock a
 /// start repair may hold (its steps write the same record), up to 30 s, so the two writes never race.
 pub fn write_marker(root: &Path, now_ms: i64) -> std::io::Result<()> {
-    std::fs::create_dir_all(root)?;
+    paddock_env::create_private_dir_all(root)?;
     let record = record(root);
     let mut lock = record.lock();
     for _ in 0..300 {

@@ -46,7 +46,7 @@ impl Discovery {
     /// Writes the file atomically with owner-only permissions.
     pub fn write(&self, path: &Path) -> std::io::Result<()> {
         if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-            std::fs::create_dir_all(dir)?;
+            paddock_env::create_private_dir_all(dir)?;
         }
         trusted_folder(path).map_err(|e| std::io::Error::new(std::io::ErrorKind::PermissionDenied, e))?;
         let body = serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?;
