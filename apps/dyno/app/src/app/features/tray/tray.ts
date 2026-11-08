@@ -1,11 +1,9 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, OnInit, afterNextRender, computed, inject, viewChild } from '@angular/core';
-import { MatMenu, MatMenuItem, MatMenuTrigger } from '@angular/material/menu';
 import { MatTooltip } from '@angular/material/tooltip';
-import { SuTrayPopover, type SuTrayPlatform } from '@decryp7/paddock-ui';
+import { SuTrayPopover, type SuTrayMenuEntry, type SuTrayPlatform } from '@decryp7/paddock-ui';
 import { PdWidgetArea } from '@decryp7/paddock-ui/widgets';
 import { BACKEND } from '../../core/backend';
 import type { WidgetActionId } from '../../core/generated/widgets';
-import { Icon } from '../../shared/icon';
 import { GRADE_LABEL, GRADE_TONE } from '../../shared/labels';
 import { observeHeight } from '../../shared/observe-height';
 import { PlatformService } from '../../core/platform';
@@ -17,19 +15,18 @@ import { shortcutLabel } from './popover-shortcuts';
 import { HealthStore } from '../../state/health.store';
 import { LiveStore } from '../../state/live.store';
 import { QUIT_STOP, QuitStore } from '../../state/quit.store';
-import { MatButton, MatIconButton } from '@angular/material/button';
 
 /**
  * The tray dropdown (360 wide, frameless): the health pill and agent state, the person's widgets on `pd-widget-area`
- * (family ADR 0035: the layout and every value come from the engine), and the footer with Open Dyno and the ⋯ menu. The
+ * (family ADR 0035: the layout and every value come from the engine), and the shared footer of `pd-tray-popover` with Open Dyno and the ⋯ menu. The
  * tray / menu-bar icon itself is drawn by the shell.
  */
 @Component({
   selector: 'dy-tray',
-  imports: [MatButton, MatIconButton, MatMenu, MatMenuItem, MatMenuTrigger, Icon, SuTrayPopover, MatTooltip, PdWidgetArea, DynoPopoverWidgets],
+  imports: [SuTrayPopover, MatTooltip, PdWidgetArea, DynoPopoverWidgets],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <pd-tray-popover label="Dyno" [platform]="platform" (dismissed)="close()">
+    <pd-tray-popover label="Dyno" [platform]="platform" primaryLabel="Open Dyno" [menu]="menu()" (primary)="openMain()" (menuAction)="choose($event)" (dismissed)="close()">
       <div slot="header" class="head">
         <img src="brand/dyno-16.svg" alt="" width="16" height="16" />
         <strong>Dyno</strong>
@@ -49,18 +46,6 @@ import { MatButton, MatIconButton } from '@angular/material/button';
         }
         <dy-popover-widgets (action)="run($event)" />
       </main>
-      <div slot="footer" class="foot">
-        <span class="spacer"></span>
-        <button type="button" matButton="filled" (click)="openMain()"><dy-icon name="arrow-right" /> Open Dyno</button>
-        <button type="button" matIconButton class="more" #trigger="matMenuTrigger" [class.open]="trigger.menuOpen" [matMenuTriggerFor]="more" aria-label="More actions" matTooltip="More actions" matTooltipPosition="left"><dy-icon name="more" /></button>
-        <mat-menu #more="matMenu" yPosition="above" xPosition="before">
-          <button mat-menu-item type="button" (click)="run('customizeWidgets')"><dy-icon name="sliders" />Customize widgets…</button>
-          <button mat-menu-item type="button" (click)="run('openSettings')"><dy-icon name="settings" />Settings…@if (settingsKey; as k) {<kbd aria-hidden="true">{{ k }}</kbd>}</button>
-          <hr class="sep" />
-          <button mat-menu-item type="button" (click)="quit()"><dy-icon name="power" />{{ quitText.title() }}@if (quitKey; as k) {<kbd aria-hidden="true">{{ k }}</kbd>}</button>
-          <button mat-menu-item type="button" (click)="quitAndStop()"><dy-icon name="power" />{{ quitStopText }}</button>
-        </mat-menu>
-      </div>
     </pd-tray-popover>
   `,
   styles: `
@@ -76,13 +61,6 @@ import { MatButton, MatIconButton } from '@angular/material/button';
     .grade-pill { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 var(--sp-2); border-radius: var(--r-pill); font-size: var(--fs-xs); background: var(--ok-soft); color: var(--ok); }
     .grade-pill[data-tone='warn'] { background: var(--warn-soft); color: var(--warn); }
     .grade-pill[data-tone='bad'] { background: var(--bad-soft); color: var(--bad); }
-    /* The shared menu icon size: 16 px. */
-    .mat-mdc-menu-item dy-icon { flex: none; width: 16px; height: 16px; --icon-size: 16px; margin: 0 12px 0 0; vertical-align: middle; }
-    /* The ⋯ trigger shows while its menu is open: a tint and a ring, so it is clear what the menu belongs to. */
-    .more.open { background: var(--pd-hover); box-shadow: inset 0 0 0 var(--pd-focus-width) var(--pd-focus-ring); }
-    .sep { border: 0; border-top: 1px solid var(--pd-hairline); margin: 4px 0; }
-    kbd { margin-left: auto; padding: 0 4px; border: 1px solid var(--pd-border-strong); border-radius: 4px; font: inherit; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
-    .foot { display: flex; align-items: center; gap: var(--sp-1); flex: 1; }
   `,
 })
 export class Tray implements OnInit {
@@ -91,16 +69,23 @@ export class Tray implements OnInit {
   protected readonly layout = inject(WidgetLayouts);
   protected readonly values = inject(PopoverValues);
   private readonly backend = inject(BACKEND);
-  protected readonly quitText = inject(QuitStore);
-  protected readonly quitStopText = QUIT_STOP;
+  private readonly quitText = inject(QuitStore);
   private readonly host = inject(ElementRef<HTMLElement>);
   private readonly destroy = inject(DestroyRef);
   private readonly platformService = inject(PlatformService);
   protected readonly templates = viewChild.required(DynoPopoverWidgets);
 
   protected readonly platform: SuTrayPlatform = this.platformService.platform === 'browser' ? 'macos' : this.platformService.platform;
-  protected readonly settingsKey = shortcutLabel(this.platform, 'settings');
-  protected readonly quitKey = shortcutLabel(this.platform, 'quit');
+  private readonly settingsKey = shortcutLabel(this.platform, 'settings');
+  private readonly quitKey = shortcutLabel(this.platform, 'quit');
+  /** The footer's more-actions menu: Customize widgets, Settings, then the two ways to quit (their words come from the engine). */
+  protected readonly menu = computed<readonly SuTrayMenuEntry[]>(() => [
+    { kind: 'item', id: 'customizeWidgets', label: 'Customize widgets…', icon: 'dy:sliders' },
+    { kind: 'item', id: 'openSettings', label: 'Settings…', icon: 'dy:settings', keyHint: this.settingsKey },
+    { kind: 'separator' },
+    { kind: 'item', id: 'quit', label: this.quitText.title(), icon: 'dy:power', keyHint: this.quitKey },
+    { kind: 'item', id: 'quitAndStop', label: QUIT_STOP, icon: 'dy:power' },
+  ]);
   protected readonly meta = popoverMeta;
   /** The agent is away: the header says so, with no health score and no "Monitoring". */
   protected readonly stopped = computed(() => this.live.agent().state === 'failed' || this.values.values()?.noticeKind === 'agentStopped');
@@ -137,11 +122,18 @@ export class Tray implements OnInit {
     void this.backend.showMainWindow().catch(() => undefined);
   }
 
-  protected quit(): void {
+  /** What a footer menu item does. */
+  protected choose(id: string): void {
+    if (id === 'quit') this.quit();
+    else if (id === 'quitAndStop') this.quitAndStop();
+    else if (id === 'customizeWidgets' || id === 'openSettings') this.run(id);
+  }
+
+  private quit(): void {
     void this.backend.quitApp().catch(() => undefined);
   }
 
-  protected quitAndStop(): void {
+  private quitAndStop(): void {
     void this.backend.quitAndStopAgent().catch(() => undefined);
   }
 }

@@ -83,6 +83,16 @@ describe('TrayPage', () => {
     expect(backend.calls.filter((c) => c === 'hideTray')).toHaveLength(2);
   });
 
+  it('uses the shared popover footer: Mark all seen at the start, Open Spotter right-aligned as the one primary, no menu', async () => {
+    const { f } = await make();
+    const el = f.nativeElement as HTMLElement;
+    expect(el.querySelector('.foot'), 'no hand-built footer').toBeNull();
+    const foot = el.querySelector('pd-tray-popover footer.pd-footer')!;
+    expect(Array.from(foot.children).map((c) => text(c as HTMLElement))).toEqual(['Mark all seen', '', 'Open Spotter']);
+    expect(foot.querySelector('.pd-tray-primary')?.textContent?.trim()).toBe('Open Spotter');
+    expect(foot.querySelector('.pd-tray-more')).toBeNull();
+  });
+
   it('does not hide itself when the main window could not be shown, or when hiding fails', async () => {
     const { f, backend } = await make();
     vi.spyOn(backend, 'showMainWindow').mockRejectedValue(new Error('x'));

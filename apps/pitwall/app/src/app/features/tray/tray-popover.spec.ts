@@ -142,9 +142,10 @@ describe('the tray popup', () => {
   });
 
   describe('the footer', () => {
-    it('has Open Pitwall right-aligned beside one more-actions button, and opens the dashboard', async () => {
+    it('is the shared popover footer: Open Pitwall right-aligned beside one more-actions button, and opens the dashboard', async () => {
       const { el, openMain } = await mount();
-      const foot = el.querySelector('.foot')!;
+      expect(el.querySelector('.foot'), 'no hand-built footer').toBeNull();
+      const foot = el.querySelector('pd-tray-popover footer.pd-footer')!;
       expect(Array.from(foot.children).map((c) => c.tagName.toLowerCase() + ':' + (c.getAttribute('aria-label') ?? c.textContent!.trim()))).toEqual(['span:', 'button:Open Pitwall', 'button:More actions', 'mat-menu:']);
       (foot.querySelector('button.mat-mdc-unelevated-button') as HTMLButtonElement).click();
       expect(openMain).toHaveBeenCalledWith('/');
@@ -154,7 +155,9 @@ describe('the tray popup', () => {
       const { menu } = await mount();
       const items = await menu();
       expect(items.map((b) => b.textContent!.trim())).toEqual(['Customize widgets…', 'Pause serving', 'Release memory', 'Settings…', 'Quit Pitwall']);
-      const sep = document.querySelector('.mat-mdc-menu-panel hr.sep');
+      expect(items.map((b) => b.querySelector('mat-icon')?.getAttribute('data-mat-icon-name'))).toEqual(['sliders', 'pause', 'release', 'settings', 'power']);
+      expect(document.querySelectorAll('.mat-mdc-menu-panel hr.pd-tray-sep')).toHaveLength(1);
+      const sep = document.querySelector('.mat-mdc-menu-panel hr.pd-tray-sep');
       expect(sep?.previousElementSibling?.textContent).toContain('Settings…');
       expect(sep?.nextElementSibling?.textContent).toContain('Quit Pitwall');
     });

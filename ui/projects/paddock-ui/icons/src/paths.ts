@@ -61,6 +61,8 @@ export const PD_ICON_PATHS = {
   sort: 'M8 9l4-4 4 4M8 15l4 4 4-4',
   'arrow-up': 'M12 19V5M6 11l6-6 6 6',
   'arrow-down': 'M12 5v14M6 13l6 6 6-6',
+  // "Open <app>": the tray popup's primary action (pd-tray-popover's footer).
+  'arrow-right': 'M5 12h14M13 6l6 6-6 6',
   'to-top': 'M5 4.5h14M12 20V9M6.5 14.5 12 9l5.5 5.5',
   'to-bottom': 'M5 19.5h14M12 4v11M6.5 9.5 12 15l5.5-5.5',
   // A drag handle (ADR 0035): six filled dots, no lines.

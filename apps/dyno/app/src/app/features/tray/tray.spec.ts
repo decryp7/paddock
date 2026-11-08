@@ -87,6 +87,22 @@ describe('dy-tray', () => {
     f.detectChanges();
   });
 
+  it('uses the shared popover footer: Open Dyno shows the main window, the ⋯ menu has its icons and one separator before Quit', async () => {
+    const { f, mock, el } = await make();
+    expect(el.querySelector('.foot')).toBeNull();
+    const open = el.querySelector<HTMLButtonElement>('pd-tray-popover footer .pd-tray-primary')!;
+    expect(open.textContent?.trim()).toBe('Open Dyno');
+    const show = vi.spyOn(mock, 'showMainWindow');
+    open.click();
+    await vi.waitFor(() => expect(show).toHaveBeenCalledTimes(1));
+    el.querySelector<HTMLButtonElement>('pd-tray-popover footer .pd-tray-more')!.click();
+    f.detectChanges();
+    const panel = document.querySelector('.mat-mdc-menu-panel')!;
+    expect([...panel.querySelectorAll('[role="menuitem"] mat-icon')].map((i) => i.getAttribute('data-mat-icon-name'))).toEqual(['sliders', 'settings', 'power', 'power']);
+    expect(panel.querySelectorAll('hr.pd-tray-sep')).toHaveLength(1);
+    expect(panel.querySelector('hr.pd-tray-sep')!.nextElementSibling?.textContent?.trim()).toBe('Quit Dyno');
+  });
+
   it('has a footer menu with Customize widgets, Settings and Quit, and shows no shortcuts the popover does not bind', async () => {
     const { f, mock, el } = await make();
     const more = el.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!;

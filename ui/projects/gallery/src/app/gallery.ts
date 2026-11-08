@@ -19,6 +19,7 @@ import {
   SuSparkline,
   SuStatusPill,
   SuTrayPopover,
+  type SuTrayMenuEntry,
   applyPaddockAppearance,
   areaGradient,
   eventLaneFragment,
@@ -174,7 +175,7 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
       <section class="gal-section" data-testid="tray-popover" aria-labelledby="h-tray">
         <h2 id="h-tray">Tray popover</h2>
         <div class="gal-tray-stage">
-          <pd-tray-popover [label]="appName()" platform="macos">
+          <pd-tray-popover [label]="appName()" platform="macos" [primaryLabel]="'Open ' + appName()" [menu]="trayMenu()">
             <div slot="header" class="gal-inline">
               <strong>{{ appName() }}</strong>
               <pd-status-pill status="success" label="Good" />
@@ -188,10 +189,6 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
               <li><span class="grow">WindowServer</span><span class="gal-num">11 %</span></li>
               <li><span class="grow">Safari</span><span class="gal-num">6 %</span></li>
             </ul>
-            <div slot="footer" class="gal-inline">
-              <button type="button" class="gal-btn gal-btn--primary">Open {{ appName() }}</button>
-              <button type="button" class="gal-btn gal-btn--icon" aria-label="Pause monitoring">II</button>
-            </div>
           </pd-tray-popover>
         </div>
       </section>
@@ -382,6 +379,13 @@ export class Gallery {
   /** The app the selected accent belongs to: the tray popover is named after it (accents never meet another app's name). */
   protected readonly appName = computed(() => ({ debrief: 'Debrief', pitcrew: 'Pitcrew', pitwall: 'Pitwall', dyno: 'Dyno', spotter: 'Spotter', pacenotes: 'Pacenotes', sighter: 'Sighter' })[this.accent()] ?? 'Shell demo');
   protected readonly retries = signal(0);
+  /** The tray popover's more-actions menu (its shared footer), named after the app like the popover. */
+  protected readonly trayMenu = computed<readonly SuTrayMenuEntry[]>(() => [
+    { kind: 'item', id: 'pause', label: 'Pause monitoring' },
+    { kind: 'item', id: 'settings', label: 'Settings…' },
+    { kind: 'separator' },
+    { kind: 'item', id: 'quit', label: `Quit ${this.appName()}` },
+  ]);
 
   private readonly chartEl = viewChild.required<ElementRef<HTMLElement>>('chart');
   private chart: echarts.ECharts | null = null;

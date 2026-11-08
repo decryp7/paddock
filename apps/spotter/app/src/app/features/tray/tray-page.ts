@@ -9,13 +9,16 @@ import { Avatar } from '../../shared/ui/avatar';
 import { Version } from '../../shared/ui/version';
 import { WatchesStore } from '../../state/watches.store';
 
-/** The tray popup: unseen releases at a glance. Frameless and transparent; the shell draws the OS material behind. */
+/**
+ * The tray popup: unseen releases at a glance, and the shared footer of `pd-tray-popover` (Open Spotter; Mark all seen at its
+ * start). Frameless and transparent; the shell draws the OS material behind.
+ */
 @Component({
   selector: 'sp-tray-page',
   imports: [MatIcon, SuTrayPopover, AgoShortPipe, Avatar, Version],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <pd-tray-popover label="Spotter" [platform]="platform" (dismissed)="close()">
+    <pd-tray-popover label="Spotter" [platform]="platform" primaryLabel="Open Spotter" (primary)="openMain()" (dismissed)="close()">
       <div slot="header" class="head">
         <img src="brand/spotter-16.svg" alt="" width="16" height="16" />
         <strong>Spotter</strong>
@@ -59,13 +62,9 @@ import { WatchesStore } from '../../state/watches.store';
           <span class="muted">You have seen every release.</span>
         </div>
       }
-      <div slot="footer" class="foot">
-        @if (unseen().length > 1) {
-          <button type="button" class="btn ghost sm" (click)="store.acknowledgeAll()">Mark all seen</button>
-        }
-        <span class="spacer"></span>
-        <button type="button" class="btn primary sm" (click)="openMain()">Open Spotter</button>
-      </div>
+      @if (unseen().length > 1) {
+        <button slot="footer" type="button" class="btn ghost sm" (click)="store.acknowledgeAll()">Mark all seen</button>
+      }
     </pd-tray-popover>
   `,
   styles: `
@@ -150,15 +149,6 @@ import { WatchesStore } from '../../state/watches.store';
     }
     .error {
       color: var(--pd-danger);
-    }
-    .foot {
-      display: flex;
-      align-items: center;
-      width: 100%;
-      gap: var(--pd-space-2);
-    }
-    .spacer {
-      flex: 1;
     }
   `,
 })

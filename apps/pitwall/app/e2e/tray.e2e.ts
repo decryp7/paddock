@@ -138,9 +138,9 @@ test.describe('the tray popup', () => {
     await expect(popup.getByRole('region', { name: 'Memory' })).toBeVisible();
   });
 
-  test('the footer: Open Pitwall right-aligned beside one more-actions button; the menu has a separator before Quit', async ({ page }) => {
+  test('the shared footer: Open Pitwall right-aligned beside one more-actions button; the menu has a separator before Quit', async ({ page }) => {
     const popup = await openTray(page);
-    const foot = popup.locator('.foot');
+    const foot = popup.locator('footer.pd-footer');
     const open = foot.getByRole('button', { name: 'Open Pitwall' });
     const more = foot.getByRole('button', { name: 'More actions' });
     const [o, m, f] = await Promise.all([open.boundingBox(), more.boundingBox(), foot.boundingBox()]);
@@ -149,7 +149,13 @@ test.describe('the tray popup', () => {
     await more.click();
     const items = page.getByRole('menuitem');
     await expect(items).toHaveText(['Customize widgets…', 'Pause serving', 'Release memory', 'Settings…', 'Quit Pitwall']);
-    await expect(page.locator('.mat-mdc-menu-panel hr.sep')).toHaveCount(1);
+    await expect(page.locator('.mat-mdc-menu-panel hr.pd-tray-sep')).toHaveCount(1);
+    // The trigger shows that the menu is its own while open; Escape closes it and gives the focus back.
+    await expect(more).toHaveClass(/pd-tray-more--open/);
+    await page.keyboard.press('Escape');
+    await expect(items).toHaveCount(0);
+    await expect(more).toBeFocused();
+    await expect(more).not.toHaveClass(/pd-tray-more--open/);
   });
 
   test('pausing serving from the menu changes the pill and the menu', async ({ page }) => {
