@@ -28,7 +28,7 @@ import { NAV } from './nav';
  */
 export const SETTINGS_DIALOG = defineDialog(DIALOG_CONTRACTS['pd.settings'], {
   title: msg('pd.settings.title', 'Settings'),
-  providers: () => import('./settings-window').then((m) => m.SETTINGS_WINDOW),
+  providers: () => import('./settings-window').then((m) => m.settingsWindow()),
   load: () => import('@decryp7/paddock-ui/shell/settings/window').then((m) => m.PdSettingsWindow),
 });
 
@@ -42,6 +42,14 @@ export const SETTINGS_PAGES = [
     load: () => import('../features/settings/settings-page').then((m) => m.SettingsPage),
   }),
   // Which widgets the tray popup shows (family ADR 0035); "Customize widgets…" in the popup opens Settings here.
+  // The apps whose tools the Playground chat may use (ADR 0023 Decision 7). In a build without the chat it says so.
+  defineSettingsPage({
+    id: 'pw.connected-apps',
+    group: 'application',
+    title: msg('pw.settings.connected-apps', 'Connected apps'),
+    order: 15,
+    load: () => import('../features/connected-apps/connected-apps-page').then((m) => m.ConnectedAppsPage),
+  }),
   defineSettingsPage({
     id: 'pw.tray',
     group: 'application',
@@ -56,6 +64,13 @@ export const CREATE_APP_DIALOG = defineDialog(DIALOG_CONTRACTS['pw.create-app'],
   title: msg('pw.create-app.title', 'New app'),
   result: type<string>(),
   load: () => import('../features/apps/create-app-dialog').then((m) => m.CreateAppDialog),
+});
+
+/** "Connect <app>" (a modal form): the AI access key the user pastes. Answers the key, trimmed. */
+export const MCP_KEY_DIALOG = defineDialog(DIALOG_CONTRACTS['pw.mcp-key'], {
+  title: msg('pw.mcp-key.title', 'Connect app'),
+  result: type<string>(),
+  load: () => import('../features/connected-apps/mcp-key-dialog').then((m) => m.McpKeyDialog),
 });
 
 /** A new key, shown once (a required choice). Answers true once the user saved it. */
@@ -90,7 +105,7 @@ export const CONFIRM_DIALOG = defineConfirmDialog({
 /** Report a problem (Help menu, command palette): shows every file with its size before saving; its window boots the diagnostics providers. */
 export const REPORT_PROBLEM_DIALOG = defineDiagnosticsDialog({ providers: () => import('./diagnostics.providers').then((m) => m.DIAGNOSTICS_PROVIDERS) });
 
-export const DIALOGS = [CONFIRM_DIALOG, SETTINGS_DIALOG, CREATE_APP_DIALOG, KEY_SECRET_DIALOG, QUIT_DIALOG, CONSENT_DIALOG, ...ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG] as const;
+export const DIALOGS = [CONFIRM_DIALOG, SETTINGS_DIALOG, CREATE_APP_DIALOG, MCP_KEY_DIALOG, KEY_SECRET_DIALOG, QUIT_DIALOG, CONSENT_DIALOG, ...ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG] as const;
 
 /** Report a problem's command, Help menu item and the Logging settings page. */
 export const DIAGNOSTICS_CONTRIBUTIONS = diagnosticsContributions([]);

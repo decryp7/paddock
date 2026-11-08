@@ -16,11 +16,12 @@ export const INPUTS = {
   'pd.confirm': { heading: 'Delete Qwen3.5 9B?', message: 'qwen3.5-9b-q4_k_m.gguf (5.6 GB) is removed from disk. You can download it again later.', confirm: { label: 'Delete model', destructive: true } },
   'pw.key-secret': { appName: 'Raycast', secret: 'pw_live_8f3a9c2e7b1d4f6a0c5e9b2d7f1a3c8e', prefix: 'pw_live_8f3a' },
   'pw.service-consent': { platform: 'macos' },
+  'pw.mcp-key': { app: 'Dyno' },
 };
 
 describe('Pitwall dialogs boot as their windows do', () => {
-  it('are the shared confirmation, the Settings window, the four own dialogs and the shell’s About, Updates, What’s New and Report a problem', () => {
-    expect(ALL.map((d) => d.id).sort()).toEqual(['pd.about', 'pd.confirm', 'pd.report-problem', 'pd.settings', 'pd.updates', 'pd.whats-new', 'pw.create-app', 'pw.key-secret', 'pw.quit', 'pw.service-consent']);
+  it('are the shared confirmation, the Settings window, the five own dialogs and the shell’s About, Updates, What’s New and Report a problem', () => {
+    expect(ALL.map((d) => d.id).sort()).toEqual(['pd.about', 'pd.confirm', 'pd.report-problem', 'pd.settings', 'pd.updates', 'pd.whats-new', 'pw.create-app', 'pw.key-secret', 'pw.mcp-key', 'pw.quit', 'pw.service-consent']);
   });
 
   for (const def of ALL) {

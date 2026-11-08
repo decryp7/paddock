@@ -47,10 +47,23 @@ paddock_dialogs::dialogs! {
             app::start_check_updates,
             app::app_job_cancel,
             app::app_job_stop_waiting,
+            // Connected apps (ADR 0023 Decision 7): whether the chat is built in (the page shows only then), the apps, a pasted
+            // key (from `pw.mcp-key`), Refresh, Forget, Open and Ask again.
+            app::chat_enabled,
+            app::connected_apps,
+            app::set_app_key,
+            app::connect_app,
+            app::forget_app,
+            app::revoke_tool_approval,
+            app::open_connected_app,
         ],
     },
     // "New app": the name (Create app is disabled until it is valid); the window that opened it creates the app.
     "pw.create-app" => Form(Modal) {
+        width: Some(Narrow),
+    },
+    // "Connect Dyno": the AI access key the user pastes; the Settings page that opened it keeps it (`set_app_key`).
+    "pw.mcp-key" => Form(Modal) {
         width: Some(Narrow),
     },
     // The new key, shown once: Copy, then "I've saved it". No Cancel; Escape and the window's close do nothing.
@@ -79,16 +92,30 @@ mod tests {
         let c = paddock_dialogs::Contracts::from_tables(&[&DIALOGS]).unwrap();
         for (id, width) in [
             ("pw.create-app", 400.0),
+            ("pw.mcp-key", 400.0),
             ("pw.key-secret", 400.0),
             ("pw.quit", 560.0),
             ("pw.service-consent", 560.0),
         ] {
             assert_eq!(c.get(id).map(|r| r.width), Some(width), "{id}");
-            for command in ["create_app", "quit_app", "start_install_service", "save_settings"] {
+            for command in ["create_app", "quit_app", "start_install_service", "save_settings", "set_app_key"] {
                 assert!(!c.allows(id, command), "{id} may not call {command}");
             }
         }
-        for command in ["settings", "save_settings", "clear_cache", "start_install_service", "set_autostart"] {
+        for command in [
+            "settings",
+            "save_settings",
+            "clear_cache",
+            "start_install_service",
+            "set_autostart",
+            "chat_enabled",
+            "connected_apps",
+            "set_app_key",
+            "connect_app",
+            "forget_app",
+            "revoke_tool_approval",
+            "open_connected_app",
+        ] {
             assert!(c.allows("pd.settings", command), "the Settings window may call {command}");
         }
         assert!(!c.allows("pd.settings", "delete_model") && !c.allows("pd.settings", "chat"));

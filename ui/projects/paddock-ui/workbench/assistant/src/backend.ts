@@ -1,6 +1,8 @@
 import type { AssistantCommand } from '../generated/assistant-commands';
 import {
   ASSISTANT_EVENT,
+  type Approval,
+  type ApprovalChoice,
   type AssistantEvent,
   type AssistantInfo,
   type Conversation,
@@ -40,8 +42,8 @@ export abstract class AssistantBackend {
   abstract send(request: SendRequest): Promise<SendAck>;
   /** Stops the conversation's turn; false when none runs. */
   abstract stop(id: string): Promise<boolean>;
-  /** Answers the write waiting in the conversation's turn. */
-  abstract approve(id: string, callId: string, approved: boolean): Promise<void>;
+  /** Answers the call waiting in the conversation's turn with the user's choice (`alwaysAllow` only when its card offers it). */
+  abstract approve(id: string, callId: string, choice: ApprovalChoice): Promise<void>;
   /** Every event until the returned function is called. */
   abstract listen(handler: (event: Envelope) => void): Promise<Unlisten>;
 }
@@ -82,8 +84,8 @@ export class TauriAssistantBackend extends AssistantBackend {
     return (await this.ipc.invoke<unknown>('assistant_stop', { conversationId: id })) === true;
   }
 
-  async approve(id: string, callId: string, approved: boolean): Promise<void> {
-    await this.ipc.invoke<unknown>('assistant_approve_tool', { conversationId: id, callId, approved });
+  async approve(id: string, callId: string, choice: ApprovalChoice): Promise<void> {
+    await this.ipc.invoke<unknown>('assistant_approve_tool', { conversationId: id, callId, choice });
   }
 
   listen(handler: (event: Envelope) => void): Promise<Unlisten> {
@@ -124,7 +126,11 @@ export const DEMO_ANSWER =
  * - `/tool [what]`: a read-only tool call (`find`) that finishes with a citation (`item 7`), then the answer.
  * - `/tool-slow`: a `find` call that stays running until `stop()`; the turn then ends as cancelled, with no answer.
  * - `/tool-fail`: a `find` call that fails with a reason ("The index is locked by another process."), then a short answer about it.
- * - `/write`: asks for the user's approval of a writing tool (`erase`) and waits for it (needs "Allow actions").
+ * - `/write`: asks for the user's approval of a writing tool (`erase`) and waits for it (needs "Allow actions"); it asks every
+ *   call, without "Always allow", as the engine's default policy does.
+ * - `/look`: a read-only `find` call that asks first, offering "Always allow" (as Pitwall's policy does); after Always
+ *   allow, later `/look` calls run without asking and say they were allowed earlier.
+ * - `/cold`: reports the phases of a cold start (queued, loading the model at 0 s and 12 s, generating), then the answer.
  * - `/fail`: streams a few words and then ends the turn with an error event of kind `failed`.
  * - `/slow`: streams its first words and then waits until `stop()` (a running turn with Stop visible).
  * - anything else: just the answer.
@@ -134,16 +140,18 @@ export const DEMO_ANSWER =
 export class MemoryAssistantBackend extends AssistantBackend {
   private readonly listeners = new Set<(e: Envelope) => void>();
   private readonly store = new Map<string, Conversation>();
-  private readonly running = new Map<string, { stopped: boolean; decision: ((approved: boolean) => void) | null; call: string | null; halt: (() => void) | null }>();
+  private readonly running = new Map<string, { stopped: boolean; decision: ((choice: ApprovalChoice) => void) | null; call: string | null; remember: boolean; halt: (() => void) | null }>();
   private gate: Promise<void> | null = null;
   private open: (() => void) | null = null;
   private counter = 0;
   /** Every request sent, in order. */
   readonly sent: SendRequest[] = [];
-  /** Every approval answered: [callId, approved]. */
-  readonly approvals: [string, boolean][] = [];
+  /** Every approval answered: [callId, choice]. */
+  readonly approvals: [string, ApprovalChoice][] = [];
   /** The engine's tool is `erase`; how often it ran. */
   erased = 0;
+  /** The user chose Always allow for `find` (the `/look` calls). */
+  lookRemembered = false;
 
   constructor(private readonly options: MemoryAssistantOptions = {}) {
     super();
@@ -208,7 +216,7 @@ export class MemoryAssistantBackend extends AssistantBackend {
       this.store.set(id, { id, title: text.slice(0, 60), createdMs: now, updatedMs: now, messages: [user] });
     }
     const conversationId = id;
-    this.running.set(conversationId, { stopped: false, decision: null, call: null, halt: null });
+    this.running.set(conversationId, { stopped: false, decision: null, call: null, remember: false, halt: null });
     void Promise.resolve().then(() => this.run(conversationId, text, request.allowWrite));
     return Promise.resolve({ conversationId });
   }
@@ -217,17 +225,19 @@ export class MemoryAssistantBackend extends AssistantBackend {
     const run = this.running.get(id);
     if (!run) return Promise.resolve(false);
     run.stopped = true;
-    run.decision?.(false);
+    run.decision?.('deny');
     run.halt?.();
     this.release();
     return Promise.resolve(true);
   }
 
-  approve(id: string, callId: string, approved: boolean): Promise<void> {
+  approve(id: string, callId: string, choice: ApprovalChoice): Promise<void> {
     const run = this.running.get(id);
     if (!run || run.call !== callId || !run.decision) return Promise.reject(new Error('No action waits for a decision.'));
-    this.approvals.push([callId, approved]);
-    run.decision(approved);
+    // As the engine: Always allow only where the card offered it (the write asks every time).
+    if (choice === 'alwaysAllow' && !run.remember) return Promise.reject(new Error('This tool asks every time it is used, so it cannot be always allowed.'));
+    this.approvals.push([callId, choice]);
+    run.decision(choice);
     return Promise.resolve();
   }
 
@@ -257,9 +267,9 @@ export class MemoryAssistantBackend extends AssistantBackend {
       this.emit(id, { type: 'toolStarted', callId: id_, name, summary, write, destructive });
       kept.push({ role: 'assistant', text: '', toolCalls: [{ id: id_, name, input: {} }], atMs: at() });
     };
-    const finishCall = (name: string, ok: boolean, summary: string, data?: unknown, how?: 'declined' | 'stopped'): void => {
+    const finishCall = (name: string, ok: boolean, summary: string, data?: unknown, how?: 'declined' | 'stopped', approval?: Approval): void => {
       const started = call as NonNullable<typeof call>;
-      this.emit(id, { type: 'toolFinished', callId: started.id, name, ok, summary, ...(data === undefined ? {} : { data }), ...(how ? { outcome: how } : {}) });
+      this.emit(id, { type: 'toolFinished', callId: started.id, name, ok, summary, ...(data === undefined ? {} : { data }), ...(how ? { outcome: how } : {}), ...(approval ? { approval } : {}) });
       kept.push({
         role: 'tool',
         text: summary,
@@ -271,9 +281,20 @@ export class MemoryAssistantBackend extends AssistantBackend {
         ...(started.write ? { write: true } : {}),
         ...(started.destructive ? { destructive: true } : {}),
         ...(how ? { outcome: how } : {}),
+        ...(approval ? { approval } : {}),
         ...(data === undefined ? {} : { data }),
         atMs: at(),
       });
+    };
+    /** Waits for the user's choice on the running call. */
+    const ask = async (callId: string, remember: boolean): Promise<ApprovalChoice> => {
+      run.call = callId;
+      run.remember = remember;
+      const choice = await new Promise<ApprovalChoice>((resolve) => (run.decision = resolve));
+      run.decision = null;
+      run.call = null;
+      run.remember = false;
+      return choice;
     };
     const command = text.split(/\s/, 1)[0] ?? '';
     if (command === '/tool' || command === '/tool-fail' || command === '/tool-slow') {
@@ -289,18 +310,34 @@ export class MemoryAssistantBackend extends AssistantBackend {
         finishCall('find', false, 'The index is locked by another process.');
         outcome = 'I could not look that up: the index is locked by another process. Try again in a moment.';
       } else {
-        finishCall('find', true, '2 things found', { citations: [{ text: 'item 7', target: 'record:7', title: 'Item 7' }] });
+        finishCall('find', true, '2 things found', { citations: [{ text: 'item 7', target: 'record:7', title: 'Item 7' }] }, undefined, 'notAsked');
+      }
+    } else if (command === '/look') {
+      startCall('call_1', 'find', 'Find everything', false, false);
+      const choice: ApprovalChoice | 'remembered' = this.lookRemembered ? 'remembered' : await (async () => {
+        this.emit(id, { type: 'approvalNeeded', callId: 'call_1', name: 'find', summary: 'Find everything', destructive: false, remember: true, input: { what: 'everything' } });
+        return ask('call_1', true);
+      })();
+      if (choice === 'deny') {
+        finishCall('find', false, 'Declined by the user', undefined, run.stopped ? 'stopped' : 'declined');
+        outcome = 'I did not look anything up.';
+      } else {
+        if (choice === 'alwaysAllow') this.lookRemembered = true;
+        finishCall('find', true, '2 things found', undefined, undefined, choice === 'remembered' ? 'remembered' : choice === 'alwaysAllow' ? 'always' : 'once');
+        outcome = 'Found two things.';
       }
     } else if (command === '/write' && allowWrite) {
-      run.call = 'call_2';
       startCall('call_2', 'erase', 'Erase everything', true, true);
-      this.emit(id, { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 'Erase everything', destructive: true, input: {} });
-      const approved = await new Promise<boolean>((resolve) => (run.decision = resolve));
-      run.decision = null;
-      run.call = null;
+      this.emit(id, { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 'Erase everything', destructive: true, remember: false, input: { scope: 'everything', keepBackups: false } });
+      const approved = (await ask('call_2', false)) !== 'deny';
       if (approved) this.erased++;
-      finishCall('erase', approved, approved ? 'Erased' : 'Declined by the user', undefined, approved ? undefined : run.stopped ? 'stopped' : 'declined');
+      finishCall('erase', approved, approved ? 'Erased' : 'Declined by the user', undefined, approved ? undefined : run.stopped ? 'stopped' : 'declined', approved ? 'once' : undefined);
       outcome = approved ? 'Done. I erased everything.' : 'I did not erase anything.';
+    } else if (command === '/cold') {
+      this.emit(id, { type: 'phase', phase: { kind: 'queued' } });
+      this.emit(id, { type: 'phase', phase: { kind: 'loading', elapsedMs: 0 } });
+      this.emit(id, { type: 'phase', phase: { kind: 'loading', elapsedMs: 12_000 } });
+      this.emit(id, { type: 'phase', phase: { kind: 'generating' } });
     }
     const answer = this.options.reply
       ? this.options.reply(text)

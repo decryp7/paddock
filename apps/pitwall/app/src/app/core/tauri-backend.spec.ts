@@ -85,6 +85,15 @@ const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<st
   ['packs without a tag', (b) => b.packs(), 'packs', { tag: null }],
   ['quitApp', (b) => b.quitApp(true, false), 'quit_app', { stopServing: true, rememberChoice: false }],
   ['takeQuitAsk', (b) => b.takeQuitAsk(), 'take_quit_ask', undefined],
+  ['chatEnabled', (b) => b.chatEnabled(), 'chat_enabled', undefined],
+  ['connectedApps', (b) => b.connectedApps(), 'connected_apps', undefined],
+  ['setAppKey', (b) => b.setAppKey('dyno', 'pmk_x'), 'set_app_key', { appId: 'dyno', key: 'pmk_x' }],
+  ['connectApp', (b) => b.connectApp('dyno'), 'connect_app', { appId: 'dyno' }],
+  ['forgetApp', (b) => b.forgetApp('dyno'), 'forget_app', { appId: 'dyno' }],
+  ['openConnectedApp', (b) => b.openConnectedApp('dyno'), 'open_connected_app', { appId: 'dyno' }],
+  ['revokeToolApproval', (b) => b.revokeToolApproval('dyno', 'disks'), 'revoke_tool_approval', { appId: 'dyno', tool: 'disks' }],
+  ['chatModels', (b) => b.chatModels(), 'chat_models_list', undefined],
+  ['setChatModel', (b) => b.setChatModel('m1'), 'set_chat_model', { modelId: 'm1' }],
   ['removeLeftover', (b) => b.removeLeftover('pack-llamafile'), 'remove_leftover', { id: 'pack-llamafile' }],
   ['retryEngineSetup', (b) => b.retryEngineSetup(), 'retry_engine_setup', undefined],
   ['installBuild', (b) => b.installBuild('cuda-13'), 'install_build', { buildId: 'cuda-13' }],
@@ -147,7 +156,7 @@ describe('TauriBackend', () => {
 
   it('covers every request/response method of the backend interface', () => {
     const methods = Object.getOwnPropertyNames(TauriBackend.prototype).filter((m) => m !== 'constructor' && m !== 'run' && m !== 'job');
-    const pinned = new Set([...TABLE.map((r) => r[0]), ...JOBS.map((r) => r[0]), 'subscribe', 'onPopover', 'onQuitAsk', 'chat', 'jobEvents']);
+    const pinned = new Set([...TABLE.map((r) => r[0]), ...JOBS.map((r) => r[0]), 'subscribe', 'onPopover', 'onQuitAsk', 'onConnectedApps', 'chat', 'jobEvents']);
     expect(methods.filter((m) => !pinned.has(m))).toEqual([]);
   });
 
@@ -208,6 +217,19 @@ describe('TauriBackend', () => {
     const failing = new TauriBackend({ ...fakeBridge().bridge, listen: () => Promise.reject(new Error('no ipc')) }).onQuitAsk(() => undefined);
     await Promise.resolve();
     expect(() => failing()).not.toThrow();
+  });
+
+  it("hears every window's connected-apps change, with the apps, and stops on unsubscribe", async () => {
+    const { bridge, listeners, unlistened } = fakeBridge();
+    const seen: unknown[] = [];
+    const stop = new TauriBackend(bridge).onConnectedApps((apps) => seen.push(apps));
+    await Promise.resolve();
+    listeners[0]!([{ id: 'dyno' }]);
+    expect(seen).toEqual([[{ id: 'dyno' }]]);
+    stop();
+    expect(unlistened).toEqual(['pitwall://connected-apps']);
+    const early = new TauriBackend(fakeBridge().bridge).onConnectedApps(() => undefined);
+    early();
   });
 
   it('unlistens at once when unsubscribed before listening resolved', async () => {

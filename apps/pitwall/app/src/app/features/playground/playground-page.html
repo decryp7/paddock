@@ -4,19 +4,36 @@
       <h1>Playground</h1>
       <p class="sub">Try local models. Nothing you type here leaves this computer.</p>
     </div>
-    <div class="actions">
-      <button type="button" matButton="outlined" [attr.aria-pressed]="store.compare()" [class.on]="store.compare()" (click)="store.setCompare(!store.compare())">
-        <mat-icon svgIcon="pw:compare" aria-hidden="true" />Compare
-      </button>
-      <button type="button" matButton [disabled]="store.empty()" (click)="store.clear()"><mat-icon svgIcon="pw:trash" aria-hidden="true" />Clear</button>
-    </div>
+    @if (store.chatEnabled() === false) {
+      <div class="actions">
+        <button type="button" matButton="outlined" [attr.aria-pressed]="store.compare()" [class.on]="store.compare()" (click)="store.setCompare(!store.compare())">
+          <mat-icon svgIcon="pw:compare" aria-hidden="true" />Compare
+        </button>
+      </div>
+    }
   </header>
 
+  @if (store.chatEnabled(); as chat) {
+    <mat-tab-group class="tabs" mat-stretch-tabs="false" mat-align-tabs="start" animationDuration="0ms" [preserveContent]="true" [selectedIndex]="tab()" (selectedIndexChange)="tab.set($event)">
+      <mat-tab label="Chat">
+        <pw-playground-chat class="chat-tab" />
+      </mat-tab>
+      <mat-tab label="Compare">
+        <ng-template matTabContent><ng-container *ngTemplateOutlet="models" /></ng-template>
+      </mat-tab>
+    </mat-tab-group>
+  } @else if (store.chatEnabled() === false) {
+    <!-- A build without the chat (the release, until ADR 0049's switches): the Playground as in 1.0, one model or two. -->
+    <ng-container *ngTemplateOutlet="models" />
+  }
+</div>
+
+<ng-template #models>
   @if (store.error()) {
     <pw-panel heading="Models" icon="models" [error]="store.error()" [ready]="false" (retry)="store.load()" />
   }
 
-  <div class="layout">
+  <div class="layout" data-testid="pg-compare">
     <div class="chat">
       <div class="panes" [class.two]="store.compare()">
         @for (i of store.activePanes(); track i) {
@@ -89,6 +106,7 @@
         </mat-form-field>
         <div class="composer-row">
           <span class="faint hint"><kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> for a new line</span>
+          <button type="button" matButton [disabled]="store.empty()" (click)="store.clear()"><mat-icon svgIcon="pw:trash" aria-hidden="true" />Clear</button>
           @if (store.streaming()) {
             <button type="button" matButton="outlined" (click)="store.stop()"><mat-icon svgIcon="pw:stop" aria-hidden="true" />Stop</button>
           } @else {
@@ -122,4 +140,4 @@
       </pw-panel>
     </aside>
   </div>
-</div>
+</ng-template>

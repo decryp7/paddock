@@ -179,7 +179,7 @@ fn refusals_are_command_errors_with_the_right_code() {
         code(invoke(
             &w,
             "assistant_approve_tool",
-            json!({"conversationId": "x", "callId": "c", "approved": true})
+            json!({"conversationId": "x", "callId": "c", "choice": "allowOnce"})
         )),
         "notFound"
     );
@@ -252,10 +252,18 @@ fn a_write_waits_for_the_approval_command() {
             break;
         }
     }
+    // The default policy asks a write every time: Always allow is an invalid choice, and the call still waits.
+    let refused = invoke(
+        &w,
+        "assistant_approve_tool",
+        json!({"conversationId": ack["conversationId"], "callId": "c1", "choice": "alwaysAllow"}),
+    )
+    .unwrap_err();
+    assert_eq!(refused["code"], "invalid", "{refused}");
     invoke(
         &w,
         "assistant_approve_tool",
-        json!({"conversationId": ack["conversationId"], "callId": "c1", "approved": true}),
+        json!({"conversationId": ack["conversationId"], "callId": "c1", "choice": "allowOnce"}),
     )
     .unwrap();
     loop {
@@ -314,4 +322,42 @@ fn commands_outside_the_table_go_to_the_apps_handler() {
     let w = window(&app, "main");
     let _ = invoke(&w, "app_other", json!({}));
     assert!(seen.load(std::sync::atomic::Ordering::SeqCst));
+}
+
+/// An app may put its own sink around every turn's (Pitwall logs one line per tool call): it sees each event, and the
+/// windows still get them.
+#[test]
+fn a_sink_wrap_sees_every_event_and_passes_it_on() {
+    struct Count(Arc<dyn EventSink>, Arc<std::sync::atomic::AtomicUsize>);
+    impl EventSink for Count {
+        fn emit(&self, e: &Envelope) {
+            self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.0.emit(e);
+        }
+    }
+    let rig = rig_with(vec![Step::Reply(vec!["a"], text("a"))], vec![], |_| {});
+    let app = mock_builder()
+        .invoke_handler(route(handler(), |_invoke| false))
+        .build(mock_context(noop_assets()))
+        .unwrap();
+    let seen = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = seen.clone();
+    let wrap: paddock_assistant::tauri::SinkWrap =
+        Arc::new(move |inner| Arc::new(Count(inner, counter.clone())) as Arc<dyn EventSink>);
+    paddock_assistant::tauri::manage_with(app.handle(), rig.assistant.clone(), Some(wrap));
+    let w = window(&app, "main");
+    let (tx, rx) = mpsc::channel();
+    w.listen(EVENT, move |e| {
+        let v: Value = serde_json::from_str(e.payload()).unwrap();
+        if v["type"] == "done" {
+            let _ = tx.send(());
+        }
+    });
+    invoke(&w, "assistant_send", json!({"request": {"text": "q"}})).unwrap();
+    rx.recv_timeout(std::time::Duration::from_secs(30)).unwrap();
+    assert!(
+        seen.load(std::sync::atomic::Ordering::SeqCst) >= 3,
+        "started, delta and done went through the wrap"
+    );
+    rig.assistant.shutdown();
 }

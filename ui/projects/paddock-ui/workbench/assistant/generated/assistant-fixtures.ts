@@ -49,6 +49,7 @@ export const FIXTURE_CONVERSATION: Conversation = {
           9
         ]
       },
+      "approval": "notAsked",
       "atMs": 3000
     },
     {
@@ -92,7 +93,8 @@ export const FIXTURE_EVENTS: Envelope[] = [
         7,
         9
       ]
-    }
+    },
+    "approval": "notAsked"
   },
   {
     "conversationId": "c1-1",

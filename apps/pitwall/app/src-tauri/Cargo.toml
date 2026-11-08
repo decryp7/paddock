@@ -28,10 +28,22 @@ pitwall-loopback = { path = "../../crates/pitwall-loopback" }
 # The shared executor of long operations (ADR 0020, ADR 0024 rule 3): job registry, phases, progress, cancel tokens.
 paddock-jobs = { path = "../../../../crates/paddock-jobs" }
 paddock-service = { path = "../../../../crates/paddock-service" }
+# The assistant's tool loop and its model port (ADR 0023): Pitwall's chat provider over the management API implements the port.
+paddock-assistant = { path = "../../../../crates/paddock-assistant", features = ["tauri"] }
+# The log facade, as the other apps use it (Dyno: `log` with `kv`); the app's log setup installs the logger.
+log = { version = "0.4", features = ["kv"] }
+# The clock the assistant's conversation store reads.
+paddock-health = { path = "../../../../crates/paddock-health" }
 # Running the server program's install and uninstall verbs bounded (timeout, the tree ended with it): rule 53.
 paddock-proc = { path = "../../../../crates/paddock-proc" }
 # Widget layouts (family ADR 0035): the popup's layout is stored and edited here; its catalogue and values are pitwall-core's.
 paddock-widgets = { path = "../../../../crates/paddock-widgets" }
+# The Playground chat's host (ADR 0023 WP-9a): the MCP client to connected apps.
+paddock-mcp = { path = "../../../../crates/paddock-mcp" }
+# "Open Dyno" (ADR 0023 Decision 7): the family's hand-off starts the app.
+paddock-siblings = { path = "../../../../crates/paddock-siblings" }
+# The pasted MCP keys (ADR 0023 Decision 7): an owner-only file on macOS, the OS store elsewhere (the target section below).
+paddock-secrets = { path = "../../../../crates/paddock-secrets" }
 # Report a problem (plan B4): Pitwall's sections beside paddock-diag's, the app's folders and the log handle its Logging
 # section drives.
 paddock-diag = { path = "../../../../crates/paddock-diag", features = ["tauri"] }
@@ -65,6 +77,14 @@ tauri-plugin-updater = { version = "2.14", default-features = false, features = 
 # The OS credential store (Windows Credential Manager, macOS Keychain, Secret Service) for the app's copy of the
 # admin key; admin.key is the fallback.
 keyring = "4.2"
+
+[features]
+# The Playground's chat (ADR 0023), temporary until ADR 0049's switches: on for the internal proof-of-concept build
+# (`cargo tauri build --features chat`), off by default, so the release workflow builds without it.
+chat = []
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+paddock-secrets = { path = "../../../../crates/paddock-secrets", features = ["keyring"] }
 
 [target.'cfg(windows)'.dependencies]
 # Asking the Service Control Manager whether the service is installed and running (no rights needed).

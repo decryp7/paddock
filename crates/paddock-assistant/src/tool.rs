@@ -113,6 +113,11 @@ pub trait AssistantTool: Send + Sync {
     /// Name, description and the arguments' JSON schema.
     fn spec(&self) -> ToolSpec;
 
+    /// Its name for people ("Top processes"), shown on its card and in lists; `None` (the default) shows the name.
+    fn title(&self) -> Option<String> {
+        None
+    }
+
     /// Whether it only looks or also changes things. Defaults to read-only.
     fn access(&self) -> Access {
         Access::ReadOnly
@@ -238,6 +243,7 @@ impl Tools {
                     description: spec.description,
                     write: t.access().writes(),
                     destructive: t.access().destructive(),
+                    title: t.title(),
                 }
             })
             .collect()
@@ -257,6 +263,10 @@ pub struct ToolInfo {
     pub write: bool,
     /// What it changes cannot be undone (implies `write`): its approval is a danger choice.
     pub destructive: bool,
+    /// Its name for people, when it has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub title: Option<String>,
 }
 
 /// The first problem with `input` against the tool's schema: not an object, or a `required` argument missing. The check is

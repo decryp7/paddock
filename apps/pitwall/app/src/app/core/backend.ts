@@ -1,5 +1,8 @@
 import { InjectionToken } from '@angular/core';
 import type {
+  ChatModels,
+  OpenedApp,
+  ConnectedApp,
   AppInfo,
   CacheClearScope,
   CacheInfo,
@@ -197,6 +200,26 @@ export interface PitwallBackend {
   quitApp(stopServing: boolean, remember: boolean): Promise<void>;
   /** A quit asked for while no window was open is waiting for the dialog: true once. */
   takeQuitAsk(): Promise<boolean>;
+  /** Whether this build has the Playground's chat (Rust decides: the `chat` feature, until ADR 0049's switches). */
+  chatEnabled(): Promise<boolean>;
+  /** Settings > Connected apps: the family apps the chat can use. */
+  connectedApps(): Promise<ConnectedApp[]>;
+  /** Keeps the key pasted for an app and connects with it. */
+  setAppKey(appId: string, key: string): Promise<ConnectedApp>;
+  /** Connects an app again and lists its tools (Refresh). */
+  connectApp(appId: string): Promise<ConnectedApp>;
+  /** Forgets an app: its connection, key and remembered approvals. */
+  forgetApp(appId: string): Promise<ConnectedApp>;
+  /** Opens a family app ("Open Dyno"); the chat connects once it listens. */
+  openConnectedApp(appId: string): Promise<OpenedApp>;
+  /** Asks again for one tool (forgets its Always allow). */
+  revokeToolApproval(appId: string, tool: string): Promise<ConnectedApp>;
+  /** Every change of the connected apps, from any window (`pitwall://connected-apps`). */
+  onConnectedApps(handler: (apps: ConnectedApp[]) => void): Unsubscribe;
+  /** The Chat tab's model picker. */
+  chatModels(): Promise<ChatModels>;
+  /** Chooses the chat's model (one without tools is never chosen). */
+  setChatModel(modelId: string): Promise<ChatModels>;
   /** The app asks the open window to show the "When you quit" dialog. */
   onQuitAsk(handler: () => void): Unsubscribe;
   autostart(): Promise<boolean>;

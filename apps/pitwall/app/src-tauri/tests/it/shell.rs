@@ -247,8 +247,20 @@ fn every_command_is_async() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut written = Vec::new();
     let mut by_macro = Vec::new();
-    for entry in std::fs::read_dir(&dir).unwrap() {
-        let path = entry.unwrap().path();
+    // Every Rust file under src/, module folders included (the chat host is one).
+    let mut files = Vec::new();
+    let mut folders = vec![dir.clone()];
+    while let Some(folder) = folders.pop() {
+        for entry in std::fs::read_dir(&folder).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                folders.push(path);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                files.push(path);
+            }
+        }
+    }
+    for path in files {
         let src = std::fs::read_to_string(&path).unwrap();
         for (i, _) in src.match_indices("#[tauri::command]") {
             let after = src[i..].lines().nth(1).unwrap_or_default().trim().to_string();

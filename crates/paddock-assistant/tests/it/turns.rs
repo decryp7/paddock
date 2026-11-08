@@ -278,16 +278,18 @@ fn a_tool_that_writes_is_offered_only_after_the_click_and_needs_an_approval() {
     );
     assert_eq!(r.provider.tool_names(0), ["echo", "erase"]);
     assert_eq!(
-        r.assistant.approve(&ack.conversation_id, "wrong", true),
+        r.assistant
+            .approve(&ack.conversation_id, "wrong", ApprovalChoice::AllowOnce),
         Err(AssistantError::NotWaiting)
     );
     r.assistant
-        .approve(&ack.conversation_id, "c1", true)
+        .approve(&ack.conversation_id, "c1", ApprovalChoice::AllowOnce)
         .unwrap();
     assert_eq!(done(&until_end(&r.rx)).0, "erased it");
     assert_eq!(runs.load(Ordering::SeqCst), 1);
     assert_eq!(
-        r.assistant.approve(&ack.conversation_id, "c1", true),
+        r.assistant
+            .approve(&ack.conversation_id, "c1", ApprovalChoice::AllowOnce),
         Err(AssistantError::NotWaiting)
     );
 }
@@ -349,7 +351,7 @@ fn a_write_that_can_be_undone_asks_without_the_danger_flag_and_the_tools_say_whi
         }
     )));
     r.assistant
-        .approve(&ack.conversation_id, "c1", true)
+        .approve(&ack.conversation_id, "c1", ApprovalChoice::AllowOnce)
         .unwrap();
     assert_eq!(done(&until_end(&r.rx)).0, "noted it");
     assert_eq!(notes.load(Ordering::SeqCst), 1);
@@ -376,7 +378,7 @@ fn a_declined_write_does_not_run_and_the_model_is_told() {
         matches!(e, AssistantEvent::ApprovalNeeded { .. })
     });
     r.assistant
-        .approve(&ack.conversation_id, "c1", false)
+        .approve(&ack.conversation_id, "c1", ApprovalChoice::Deny)
         .unwrap();
     until_end(&r.rx);
     assert_eq!(runs.load(Ordering::SeqCst), 0);
@@ -400,7 +402,7 @@ fn a_write_nobody_answers_times_out_on_the_clock_and_a_stop_ends_the_wait() {
             Step::Reply(vec![], text("late")),
         ],
         tools.clone(),
-        |b| b.approval_wait = Duration::from_secs(60),
+        |b| b.approval_wait = Some(Duration::from_secs(60)),
     );
     r.send(SendRequest {
         allow_write: true,
@@ -566,7 +568,7 @@ fn the_token_budget_and_the_time_budget_end_the_turn_with_a_message() {
             Arc::new(fake.clone()),
         ));
         let mut cfg = AssistantConfig::new("Demo", "sys");
-        cfg.budgets.max_wall = Duration::from_secs(500);
+        cfg.budgets.max_wall = Some(Duration::from_secs(500));
         let tools = Tools::new(vec![Arc::new(Slow(fake.clone()))]).unwrap();
         let assistant = Assistant::new(provider, tools, store, Arc::new(fake), cfg);
         let (sink, rx) = sink();
@@ -759,7 +761,7 @@ fn conversations_are_listed_loaded_and_deleted_and_a_delete_stops_its_run() {
     r.assistant.delete(&first).unwrap();
     assert!(r.assistant.conversations().is_empty());
     assert_eq!(
-        r.assistant.approve("none", "c", true),
+        r.assistant.approve("none", "c", ApprovalChoice::AllowOnce),
         Err(AssistantError::NotWaiting)
     );
 }
@@ -916,7 +918,7 @@ fn how_a_turn_ended_is_stored_so_a_reopened_conversation_shows_what_the_live_one
         matches!(e, AssistantEvent::ApprovalNeeded { .. })
     });
     r.assistant
-        .approve(&ack.conversation_id, "c1", false)
+        .approve(&ack.conversation_id, "c1", ApprovalChoice::Deny)
         .unwrap();
     let events = until_end(&r.rx);
     assert!(events.iter().any(|e| matches!(

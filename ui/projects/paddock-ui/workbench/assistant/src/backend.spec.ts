@@ -52,10 +52,10 @@ describe('TauriAssistantBackend', () => {
     expect(await b.send({ text: 'q', context: [], allowWrite: false })).toEqual({ conversationId: 'c1' });
     expect(await b.stop('c1')).toBe(true);
     await b.delete('c1');
-    await b.approve('c1', 'call_1', true);
+    await b.approve('c1', 'call_1', 'alwaysAllow');
     expect(calls.map((c) => c[0])).toEqual(['assistant_info', 'assistant_conversations', 'assistant_load', 'assistant_send', 'assistant_stop', 'assistant_delete', 'assistant_approve_tool']);
     expect(calls[3]?.[1]).toEqual({ request: { text: 'q', context: [], allowWrite: false } });
-    expect(calls[6]?.[1]).toEqual({ conversationId: 'c1', callId: 'call_1', approved: true });
+    expect(calls[6]?.[1]).toEqual({ conversationId: 'c1', callId: 'call_1', choice: 'alwaysAllow' });
     for (const [command] of calls) expect(Object.keys(ASSISTANT_COMMANDS)).toContain(command);
   });
 
@@ -122,25 +122,61 @@ describe('MemoryAssistantBackend', () => {
     await settle(5);
     expect(write.events.some((e) => e.type === 'approvalNeeded')).toBe(true);
     expect(b.erased).toBe(0);
-    await expect(b.approve(write.ack.conversationId, 'wrong', true)).rejects.toThrow();
-    await b.approve(write.ack.conversationId, 'call_2', true);
+    await expect(b.approve(write.ack.conversationId, 'wrong', 'allowOnce')).rejects.toThrow();
+    // The demo's write asks every time, like the engine's default policy: Always allow is refused.
+    await expect(b.approve(write.ack.conversationId, 'call_2', 'alwaysAllow')).rejects.toThrow('cannot be always allowed');
+    await b.approve(write.ack.conversationId, 'call_2', 'allowOnce');
     await settle();
     expect(b.erased).toBe(1);
     expect(write.events.at(-1)).toMatchObject({ type: 'done', text: 'Done. I erased everything.' });
     const declined = await ask(b, '/write', true);
     await settle(5);
-    await b.approve(declined.ack.conversationId, 'call_2', false);
+    await b.approve(declined.ack.conversationId, 'call_2', 'deny');
     await settle();
     expect(b.erased).toBe(1);
     expect(declined.events.at(-1)).toMatchObject({ type: 'done', text: 'I did not erase anything.' });
     expect(b.approvals).toEqual([
-      ['call_2', true],
-      ['call_2', false],
+      ['call_2', 'allowOnce'],
+      ['call_2', 'deny'],
     ]);
     // Without "allow actions" the write is not offered at all.
     const plain = await ask(new MemoryAssistantBackend(), '/write');
     await settle();
     expect(plain.events.some((e) => e.type === 'approvalNeeded')).toBe(false);
+  });
+
+  it('asks a read-only call first with Always allow, remembers it, and reports a cold start (ADR 0023 WP-4a)', async () => {
+    const b = new MemoryAssistantBackend();
+    const denied = await ask(b, '/look');
+    await settle(5);
+    expect(denied.events.find((e) => e.type === 'approvalNeeded')).toMatchObject({ remember: true, callId: 'call_1' });
+    await b.approve(denied.ack.conversationId, 'call_1', 'deny');
+    await settle();
+    expect(denied.events.find((e) => e.type === 'toolFinished')).toMatchObject({ ok: false, outcome: 'declined' });
+    const once = await ask(b, '/look');
+    await settle(5);
+    await b.approve(once.ack.conversationId, 'call_1', 'allowOnce');
+    await settle();
+    expect(once.events.find((e) => e.type === 'toolFinished')).toMatchObject({ ok: true, approval: 'once' });
+    const always = await ask(b, '/look');
+    await settle(5);
+    await b.approve(always.ack.conversationId, 'call_1', 'alwaysAllow');
+    await settle();
+    expect(always.events.find((e) => e.type === 'toolFinished')).toMatchObject({ approval: 'always' });
+    const later = await ask(b, '/look');
+    await settle();
+    expect(later.events.some((e) => e.type === 'approvalNeeded')).toBe(false);
+    expect(later.events.find((e) => e.type === 'toolFinished')).toMatchObject({ approval: 'remembered' });
+    expect((await b.load(later.ack.conversationId)).messages.find((m) => m.role === 'tool')?.approval).toBe('remembered');
+    const cold = await ask(b, '/cold');
+    await settle(300);
+    expect(cold.events.filter((e) => e.type === 'phase').map((e) => (e.type === 'phase' ? e.phase : null))).toEqual([
+      { kind: 'queued' },
+      { kind: 'loading', elapsedMs: 0 },
+      { kind: 'loading', elapsedMs: 12_000 },
+      { kind: 'generating' },
+    ]);
+    expect(cold.events.at(-1)).toMatchObject({ type: 'done', end: 'answered' });
   });
 
   it('can be held and stopped, and refuses a question on request', async () => {

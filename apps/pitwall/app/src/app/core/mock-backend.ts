@@ -1,6 +1,9 @@
 import { buildDownloadName } from '../shared/build-download';
 import type {
   AppDetail,
+  ChatModels,
+  OpenedApp,
+  ConnectedApp,
   ModelPreset,
   PresetDraft,
   PresetEntry,
@@ -112,7 +115,8 @@ const JOB_TITLES: Partial<Record<keyof PitwallBackend, string>> = {
 /** The calls the desktop app answers itself, without the server (they keep working when the server is down). */
 const APP_METHODS: ReadonlySet<string> = new Set([
   'serviceState', 'installService', 'uninstallService', 'repairService', 'declineService', 'openLoginItems',
-  'autostart', 'setAutostart', 'quitApp', 'takeQuitAsk',
+  'autostart', 'setAutostart', 'quitApp', 'takeQuitAsk', 'chatEnabled',
+  'connectedApps', 'setAppKey', 'connectApp', 'forgetApp', 'revokeToolApproval', 'openConnectedApp',
   // The popup's widgets are the app's own too (its layout is kept by the app; the values say "server not running" themselves).
   'popoverView', 'popoverValues', 'popoverHeader', 'popoverShape', 'editPopover',
 ]);
@@ -153,6 +157,8 @@ export interface MockOptions {
   noLeftovers?: boolean;
   /** The app asked to quit with "Ask each time" set (the question dialog opens). */
   quitAsk?: boolean;
+  /** This build has the Playground's chat (default: yes; `?mock-nochat` plays a build without it). */
+  chat?: boolean;
   /** What the tray popup's widgets show: the engine's recorded output for a scenario (default: `demo`, or `empty` / `down` with those flags). */
   popover?: PopoverScenario;
 }
@@ -208,6 +214,7 @@ export class MockBackend implements PitwallBackend {
   private updateHidden_ = new Set<string>();
   private cache_: { responses: number; embeddings: number } = { responses: 184, embeddings: 3412 };
   private updateChecked_: { at: number; message: string } | null = null;
+  private readonly chat_: boolean;
 
   constructor(options: MockOptions = {}) {
     this.now = options.now ?? (() => Date.now());
@@ -219,6 +226,7 @@ export class MockBackend implements PitwallBackend {
     this.popoverScenario = options.popover ?? (options.serverDown ? 'down' : options.empty ? 'empty' : 'demo');
     if (options.modelUpdates) this.updateNotices_ = demoUpdateNotices(this.now());
     if (options.quitAsk) this.quitAskPending = true;
+    this.chat_ = options.chat ?? true;
     if (options.installing) {
       // The catalog's suggested build (cuda-13 at its pinned release, its download size, named as the server names it): the first
       // start installs exactly that.
@@ -1395,6 +1403,131 @@ export class MockBackend implements PitwallBackend {
         this.emit({ kind: 'server', server: clone(this.server) });
       }
     });
+  }
+
+  chatEnabled(): Promise<boolean> {
+    return this.reply('chatEnabled', () => this.chat_);
+  }
+
+  /** Dyno as the mock knows it: a key that starts `pmk_` connects, `pmk_wrong` is refused, and Dyno is "open". */
+  private dyno_: ConnectedApp = { id: 'dyno', title: 'Dyno', keySaved: false, connected: false, problem: null, keyRefused: false, reconnecting: false, tools: [], remembered: 0 };
+  private readonly appsHandlers = new Set<(apps: ConnectedApp[]) => void>();
+
+  onConnectedApps(handler: (apps: ConnectedApp[]) => void): Unsubscribe {
+    this.appsHandlers.add(handler);
+    return () => this.appsHandlers.delete(handler);
+  }
+
+  /** As the app does after every change: every window hears the apps. */
+  private appsChanged(): ConnectedApp {
+    for (const h of this.appsHandlers) h([clone(this.dyno_)]);
+    return clone(this.dyno_);
+  }
+
+  connectedApps(): Promise<ConnectedApp[]> {
+    return this.reply('connectedApps', () => [clone(this.dyno_)]);
+  }
+
+  setAppKey(appId: string, key: string): Promise<ConnectedApp> {
+    return this.reply('setAppKey', () => {
+      const k = key.trim();
+      if (appId !== 'dyno') throw { code: 'bad_request', message: `Pitwall does not know an app called ${appId}.` };
+      if (!/^pmk_\S+$/.test(k)) throw { code: 'bad_request', message: 'That is not an AI access key. Copy the key Dyno shows in Settings > AI access (it starts with pmk_).' };
+      this.dyno_ = { ...this.dyno_, keySaved: true };
+      return this.connectDyno(k !== 'pmk_wrong');
+    });
+  }
+
+  connectApp(appId: string): Promise<ConnectedApp> {
+    return this.reply('connectApp', () => {
+      if (appId !== 'dyno') throw { code: 'bad_request', message: `Pitwall does not know an app called ${appId}.` };
+      if (!this.dyno_.keySaved) {
+        this.dyno_ = { ...this.dyno_, problem: "No key is saved for Dyno. Issue one in Dyno's Settings > AI access and paste it here." };
+        return this.appsChanged();
+      }
+      return this.connectDyno(!this.dyno_.keyRefused);
+    });
+  }
+
+  forgetApp(appId: string): Promise<ConnectedApp> {
+    return this.reply('forgetApp', () => {
+      if (appId !== 'dyno') throw { code: 'bad_request', message: `Pitwall does not know an app called ${appId}.` };
+      this.dyno_ = { id: 'dyno', title: 'Dyno', keySaved: false, connected: false, problem: null, keyRefused: false, reconnecting: false, tools: [], remembered: 0 };
+      return this.appsChanged();
+    });
+  }
+
+  /** Dyno "opens" and, as the app's timer does, is connected right after when a key is saved. */
+  openConnectedApp(appId: string): Promise<OpenedApp> {
+    return this.reply('openConnectedApp', () => {
+      if (appId !== 'dyno') return { kind: 'problem', message: `Pitwall does not know an app called ${appId}.` } as OpenedApp;
+      if (this.dyno_.keySaved && !this.dyno_.keyRefused) queueMicrotask(() => this.connectDyno(true));
+      return { kind: 'started' } as OpenedApp;
+    });
+  }
+
+  /** Demo and test hook: Dyno quit (its connection ended); the app retries until it is back. */
+  dynoQuit(): void {
+    this.dyno_ = { ...this.dyno_, connected: false, reconnecting: true, tools: [], problem: 'Dyno closed the connection (the app quit). Trying again when Dyno is back.' };
+    this.appsChanged();
+  }
+
+  revokeToolApproval(appId: string, tool: string): Promise<ConnectedApp> {
+    return this.reply('revokeToolApproval', () => {
+      if (appId !== 'dyno') throw { code: 'bad_request', message: `Pitwall does not know an app called ${appId}.` };
+      const tools = this.dyno_.tools.map((t) => (t.name === tool ? { ...t, remembered: false } : t));
+      this.dyno_ = { ...this.dyno_, tools, remembered: tools.filter((t) => t.remembered).length };
+      return this.appsChanged();
+    });
+  }
+
+  private connectDyno(keyOk: boolean): ConnectedApp {
+    this.dyno_ = keyOk
+      ? {
+          ...this.dyno_,
+          connected: true,
+          problem: null,
+          keyRefused: false,
+          reconnecting: false,
+          tools: [
+            { name: 'alarms', title: 'Alarms', readOnly: true, remembered: false },
+            { name: 'cpu_memory', title: 'CPU and memory', readOnly: true, remembered: false },
+            { name: 'disks', title: 'Disks', readOnly: true, remembered: false },
+            // One tool always allowed already (as after a chat), so Settings shows "Ask again".
+            { name: 'system_summary', title: 'System summary', readOnly: true, remembered: true },
+            { name: 'top_processes', title: 'Top processes', readOnly: true, remembered: false },
+            { name: 'keep_awake', title: 'Keep this Mac awake', readOnly: false, remembered: false },
+          ],
+          remembered: 1,
+        }
+      : { ...this.dyno_, connected: false, keyRefused: true, tools: [], problem: 'Dyno refused the key. Issue a new key in Dyno\'s Settings > AI access and paste it here.' };
+    return this.appsChanged();
+  }
+
+  private chatModel_: string | null = null;
+
+  chatModels(): Promise<ChatModels> {
+    return this.reply('chatModels', () => this.picker(this.chatModel_));
+  }
+
+  setChatModel(modelId: string): Promise<ChatModels> {
+    return this.reply('setChatModel', () => this.picker(modelId));
+  }
+
+  /** The picker as Rust builds it (`chat_host::models`): tool models first, the others disabled with the reason. */
+  private picker(wanted: string | null): ChatModels {
+    const chat = this.library.filter((m) => m.capabilities.includes('chat'));
+    const models = chat
+      .map((m) => ({ id: m.id, name: m.name, loaded: m.loaded, disabled: m.capabilities.includes('tools') ? null : "Can't use tools" }))
+      .sort((a, b) => Number(a.disabled !== null) - Number(b.disabled !== null) || Number(!a.loaded) - Number(!b.loaded) || a.name.localeCompare(b.name));
+    // The starter catalog's tool models not downloaded yet (as Rust lists them).
+    models.push({ id: 'qwen3.8-27b', name: 'Qwen3.8 27B', loaded: false, disabled: 'Not downloaded' });
+    const usable = (id: string | null) => models.some((m) => m.id === id && m.disabled === null);
+    const selected = usable(wanted) ? wanted : (models.find((m) => m.disabled === null)?.id ?? null);
+    this.chatModel_ = selected;
+    const notes: Record<string, string> = { 'Not downloaded': 'Starter models that can use tools: download one in Models, then choose it here.' };
+    if (models.some((m) => m.disabled === "Can't use tools")) notes["Can't use tools"] = '"Can\'t use tools": the model\'s chat template has no tool calls, so it can\'t use a connected app\'s tools.';
+    return { models, selected, notes };
   }
 
   takeQuitAsk(): Promise<boolean> {

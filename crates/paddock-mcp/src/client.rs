@@ -1,5 +1,19 @@
-//! The client side, for hosts such as Pitwall: request builders and typed results over the same types the server uses. A host
-//! treats every tool result as untrusted data (ADR 0007 rule 8).
+//! The client side, for hosts such as Pitwall: request builders and typed results over the same types the server uses, the
+//! one loopback handshake ([`connect_loopback`], which [`crate::bridge::run`] uses too) and a [`Connection`] that lists and
+//! calls tools with ids, timeouts and cancel (ADR 0023 WP-8). A host treats every tool result as untrusted data (ADR 0007
+//! rule 8).
+
+mod connect;
+mod connection;
+
+pub(crate) use connect::AGAIN;
+pub use connect::{
+    ConnectError, ConnectLimits, LoopbackLink, SharedStream, connect_loopback,
+    connect_loopback_with,
+};
+pub use connection::{
+    Canceller, ClientError, Connection, ConnectionConfig, MAX_LIST_PAGES, PendingCall,
+};
 
 use crate::jsonrpc::{Id, notification_line, request_line};
 use crate::types::{CallToolResult, InitializeResult, ListToolsResult, PROTOCOL_VERSIONS};

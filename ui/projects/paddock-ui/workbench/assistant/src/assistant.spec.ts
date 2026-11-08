@@ -24,7 +24,7 @@ interface Options extends MemoryAssistantOptions {
   readonly custom?: boolean;
 }
 
-async function open(options: Options = {}) {
+async function open(options: Options = {}, inputs: Readonly<Record<string, unknown>> = {}) {
   const backend = new MemoryAssistantBackend(options);
   const pitwall = options.pitwall === undefined ? new MemoryPitwallBackend({ state: { kind: 'ready', model: 'q', vision: false, contextTokens: 8192 } }) : options.pitwall;
   TestBed.resetTestingModule();
@@ -43,7 +43,7 @@ async function open(options: Options = {}) {
       }),
     ],
   });
-  const r = await render(PdAssistant);
+  const r = await render(PdAssistant, inputs);
   await settle(r.fixture);
   return { r, backend, pitwall };
 }
@@ -482,16 +482,17 @@ describe('PdAssistant', () => {
       r.one<HTMLInputElement>('[data-testid=assistant-allow-actions]').click();
       await press(r, await type(r, '/write'), { key: 'Enter' });
       expect(text(r, 'assistant-approval-tool')).toBe('erase');
-      expect(text(r, 'assistant-approval-args')).toBe('No arguments');
+      // The demo's action has real arguments, shown open.
+      expect(text(r, 'assistant-approval-args')).toContain('"keepBackups": false');
       expect(r.one('[data-testid=assistant-allow]').classList.contains('pd-btn--sm')).toBe(false);
       expect(r.one('[data-testid=assistant-decline]').classList.contains('pd-btn--sm')).toBe(false);
-      backend.emit('m1', { type: 'approvalNeeded', destructive: false, callId: 'call_2', name: 'erase', summary: 's', input: { path: '/x' } });
+      backend.emit('m1', { type: 'approvalNeeded', destructive: false, remember: false, callId: 'call_2', name: 'erase', summary: 's', input: { path: '/x' } });
       await settle(r.fixture);
       expect(text(r, 'assistant-approval-args')).toContain('"path": "/x"');
-      backend.emit('m1', { type: 'approvalNeeded', destructive: false, callId: 'call_2', name: 'erase', summary: 's', input: { big: 'y'.repeat(3000) } });
+      backend.emit('m1', { type: 'approvalNeeded', destructive: false, remember: false, callId: 'call_2', name: 'erase', summary: 's', input: { big: 'y'.repeat(3000) } });
       await settle(r.fixture);
       expect(text(r, 'assistant-approval-args').endsWith('…')).toBe(true);
-      backend.emit('m1', { type: 'approvalNeeded', destructive: false, callId: 'call_2', name: 'erase', summary: 's', input: undefined });
+      backend.emit('m1', { type: 'approvalNeeded', destructive: false, remember: false, callId: 'call_2', name: 'erase', summary: 's', input: undefined });
       await settle(r.fixture);
       expect(text(r, 'assistant-approval-args')).toBe('No arguments');
     });
@@ -529,7 +530,7 @@ describe('PdAssistant', () => {
       const { r, backend } = await open();
       r.one<HTMLInputElement>('[data-testid=assistant-allow-actions]').click();
       await press(r, await type(r, '/write'), { key: 'Enter' });
-      backend.emit('m1', { type: 'approvalNeeded', destructive: false, callId: 'call_2', name: 'erase', summary: 'Erase everything', input: {} });
+      backend.emit('m1', { type: 'approvalNeeded', destructive: false, remember: false, callId: 'call_2', name: 'erase', summary: 'Erase everything', input: {} });
       await settle(r.fixture);
       const allow = r.one('[data-testid=assistant-allow]');
       const decline = r.one('[data-testid=assistant-decline]');
@@ -647,9 +648,9 @@ describe('PdAssistant', () => {
     });
 
     it('draws the Details disclosure with a 14 px chevron glyph that rotates when open (P3-13)', async () => {
+      // A read-only call's details start closed; an action's start open (ADR 0023 D2: its exact arguments are shown).
       const { r } = await open();
-      r.one<HTMLInputElement>('[data-testid=assistant-allow-actions]').click();
-      await press(r, await type(r, '/write'), { key: 'Enter' });
+      await press(r, await type(r, '/look'), { key: 'Enter' });
       const glyph = r.one('[data-testid=assistant-approval-details] summary pd-glyph');
       expect(glyph.getAttribute('name') ?? glyph.outerHTML).toContain('chevron-right');
       expect(glyph.outerHTML).toMatch(/14/);
@@ -667,6 +668,116 @@ describe('PdAssistant', () => {
       await settle(r.fixture);
       await settle(r.fixture);
       expect(document.activeElement).toBe(r.one('[data-testid=assistant-undo-button]'));
+    });
+  });
+
+  describe('phases and approvals (ADR 0023 WP-4a)', () => {
+    it('shows where the answer is before its words: queued, then loading the model with the time so far', async () => {
+      const { r, backend } = await open();
+      backend.hold();
+      await press(r, await type(r, 'q'), { key: 'Enter' });
+      backend.emit('m1', { type: 'phase', phase: { kind: 'queued' } });
+      await settle(r.fixture);
+      expect(text(r, 'assistant-phase')).toBe('Waiting for the model…');
+      expect(r.all('[data-testid=assistant-thinking]')).toHaveLength(0);
+      backend.emit('m1', { type: 'phase', phase: { kind: 'loading', elapsedMs: 400 } });
+      await settle(r.fixture);
+      expect(text(r, 'assistant-phase')).toBe('Loading the model…');
+      backend.emit('m1', { type: 'phase', phase: { kind: 'loading', elapsedMs: 12_400 } });
+      await settle(r.fixture);
+      expect(text(r, 'assistant-phase')).toBe('Loading the model… 12 s');
+      backend.emit('m1', { type: 'delta', text: 'Hi' });
+      await settle(r.fixture);
+      expect(r.all('[data-testid=assistant-phase]')).toHaveLength(0);
+      backend.release();
+    });
+
+    it('offers Always allow when the engine does, sends that choice, and says how each call ran', async () => {
+      const { r, backend } = await open();
+      await press(r, await type(r, '/look'), { key: 'Enter' });
+      await settle(r.fixture);
+      const buttons = r.all('[data-testid=assistant-approval] .actions button').map((b) => b.textContent?.trim());
+      expect(buttons).toEqual(['Allow once', 'Always allow', 'Decline']);
+      expect(r.one<HTMLDetailsElement>('[data-testid=assistant-approval-details]').open).toBe(false);
+      r.one<HTMLButtonElement>('[data-testid=assistant-always]').click();
+      await settle(r.fixture);
+      await settle(r.fixture);
+      expect(backend.approvals).toEqual([['call_1', 'alwaysAllow']]);
+      expect(text(r, 'assistant-tool-approval')).toBe('Always allowed');
+      // The next call of that tool runs without asking, and says so.
+      await press(r, await type(r, '/look'), { key: 'Enter' });
+      await settle(r.fixture);
+      expect(r.all('[data-testid=assistant-approval]')).toHaveLength(0);
+      expect(r.all('[data-testid=assistant-tool-approval]').map((e) => e.textContent?.trim())).toEqual(['Always allowed', 'Allowed earlier']);
+    });
+
+    it("drops the Allow actions tick when the host gates every action per call, and offers the writing tools", async () => {
+      const { r, backend } = await open({}, { actionsGate: 'per-call' });
+      expect(r.all('[data-testid=assistant-allow-actions]')).toHaveLength(0);
+      await press(r, await type(r, '/write'), { key: 'Enter' });
+      await settle(r.fixture);
+      expect(backend.sent[0]?.allowWrite).toBe(true);
+      // The action still asks for this call.
+      expect(r.all('[data-testid=assistant-approval]')).toHaveLength(1);
+      const tick = await open();
+      expect(tick.r.all('[data-testid=assistant-allow-actions]')).toHaveLength(1);
+      await press(tick.r, await type(tick.r, 'q'), { key: 'Enter' });
+      expect(tick.backend.sent[0]?.allowWrite).toBe(false);
+    });
+
+    it('draws an empty state with a title, an icon and a next step when the host gives them', async () => {
+      const { r } = await open({ pitwall: null }, { emptyTitle: 'Chat with a local model', emptyAction: 'Connected apps…' });
+      expect(text(r, 'assistant-empty-title')).toBe('Chat with a local model');
+      expect(r.all('[data-testid=assistant-empty] pd-glyph')).toHaveLength(1);
+      let clicked = 0;
+      (r.fixture.componentInstance as PdAssistant).emptyActionClick.subscribe(() => clicked++);
+      r.one<HTMLButtonElement>('[data-testid=assistant-empty-action]').click();
+      expect(clicked).toBe(1);
+      const plain = await open();
+      expect(plain.r.all('[data-testid=assistant-empty-title]')).toHaveLength(0);
+      expect(plain.r.all('[data-testid=assistant-empty-action]')).toHaveLength(0);
+    });
+
+    it('moves a pulse with the phase line, and shows a tool by its title with the approval after a separator', async () => {
+      const { r, backend } = await open();
+      backend.hold();
+      await press(r, await type(r, 'q'), { key: 'Enter' });
+      backend.emit('m1', { type: 'phase', phase: { kind: 'queued' } });
+      await settle(r.fixture);
+      expect(r.all('[data-testid=assistant-phase] .pulse')).toHaveLength(1);
+      backend.emit('m1', { type: 'toolStarted', callId: 'c9', name: 'dyno_top_processes', title: 'Top processes', summary: 'Read top processes from Dyno', write: false, destructive: false });
+      backend.emit('m1', { type: 'toolFinished', callId: 'c9', name: 'dyno_top_processes', ok: true, summary: '1. build', approval: 'once' });
+      await settle(r.fixture);
+      const card = r.all('[data-testid=assistant-tool-card]').at(-1)!;
+      expect(card.querySelector('.name')?.textContent?.trim()).toBe('Top processes');
+      // Result · approval: the separator sits in the card's gap, between the two parts.
+      expect(card.querySelector('.sep')?.textContent).toBe('·');
+      expect(card.querySelector('.sep')?.getAttribute('aria-hidden')).toBe('true');
+      backend.release();
+    });
+
+    it("takes the host app's own words for the empty state and the likely cause of a failure (an app that is the engine)", async () => {
+      const own = { emptyHint: 'Ask a local model. Connected apps lend it their tools.', failedCause: 'Likely cause: the model stopped. Try again, or pick another model.' };
+      const { r } = await open({ pitwall: null }, own);
+      expect(text(r, 'assistant-empty')).toBe(own.emptyHint);
+      await press(r, await type(r, '/fail'), { key: 'Enter' });
+      await settle(r.fixture);
+      expect(text(r, 'assistant-error-cause')).toBe(own.failedCause);
+      const plain = await open();
+      expect(text(plain.r, 'assistant-empty')).toBe('Ask a question. The assistant can look things up with the tools of this app.');
+    });
+
+    it('shows an action with its arguments open and without Always allow; Allow once is said on its card', async () => {
+      const { r } = await open();
+      r.one<HTMLInputElement>('[data-testid=assistant-allow-actions]').click();
+      await press(r, await type(r, '/write'), { key: 'Enter' });
+      await settle(r.fixture);
+      expect(r.all('[data-testid=assistant-always]')).toHaveLength(0);
+      expect(r.one<HTMLDetailsElement>('[data-testid=assistant-approval-details]').open).toBe(true);
+      r.one<HTMLButtonElement>('[data-testid=assistant-allow]').click();
+      await settle(r.fixture);
+      await settle(r.fixture);
+      expect(text(r, 'assistant-tool-approval')).toBe('Allowed once');
     });
   });
 });

@@ -4,6 +4,29 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-assistant`: the conversation store is a port, with a store in memory (ADR 0023 WP-2b)
+- New `Conversations` trait (summaries, get, create, append, delete, history, `take_problem` defaulting to none); `ConversationStore` implements it. `Assistant::with_conversations` takes any implementation; `Assistant::new` is unchanged.
+- `ConversationStore::in_memory` and `in_memory_with`: the same bounds, nothing ever written (a chat the user does not save leaves no file, even after a crash); `is_saved` tells the two apart.
+- Message parts: `Attachment` (`image` with SHA-256, type and size; `audio` with its length; `file` with its name), by reference, never bytes. `SendRequest.attachments` (optional, at most `MAX_ATTACHMENTS` = 16, each checked: a 64-hex SHA-256, PNG/JPEG/WebP/GIF images, a plain file name), kept on the user's `StoredMessage` and given to the provider on `ChatMessage.attachments` (`with_attachments`). Additive; the TypeScript is regenerated.
+- `Assistant::store()` now returns `&Arc<dyn Conversations>` (it returned the concrete store; nothing in the family called it for more than `take_problem`, which the trait keeps).
+
+### `paddock-assistant` and `workbench/assistant`: phases, Always allow and how each call ran (ADR 0023 WP-4a)
+- New `ProviderPhase` (`queued`, `loading` with `elapsedMs`, `generating`) and `LlmProvider::chat_phased` (default: no phases, calls `chat`); the loop forwards a provider's phases as `AssistantEvent::Phase`. Additive.
+- The pane shows "Waiting for the model…" and "Loading the model… 12 s" until the words arrive, instead of "Thinking…".
+- An approval card that offers it has Allow once, Always allow and Decline; an action's arguments are shown open. Each tool card says how its call ran: "Allowed once", "Always allowed" or "Allowed earlier" (nothing for a call the policy did not ask about).
+- `MemoryAssistantBackend`: `/look` (asks first with Always allow, then remembered) and `/cold` (the phases of a cold start).
+- `<pd-assistant>` gains `actionsGate` (`'tick'`, the default: "Allow actions" per message; `'per-call'`: no tick, tools that write are always offered and the engine's policy asks on every call; new type `ActionsGate`).
+- `<pd-assistant>` gains `emptyHint` and `failedCause` inputs, for a host whose words differ from the workbench's (Pitwall is the engine itself, so "check that Pitwall is running" does not fit).
+
+### `paddock-assistant`: the tool path for Pitwall's chat (ADR 0023 WP-2a)
+- New `ApprovalPolicy` port (`approval.rs`): per call, `check` says `Verdict::Run`, `Remembered`, `AskEveryTime` or `AskOrRemember`, and `record` hears the user's `ApprovalChoice` (`allowOnce`, `alwaysAllow`, `deny`). `DefaultPolicy` keeps today's behaviour (a write asks every call, a read-only tool runs unasked); an app sets its own in `AssistantConfig::policy`. Malformed calls, unknown tools and bad arguments are refused before the policy sees them.
+- `ApprovalNeeded` gains `remember` (the card offers Always allow); `ToolFinished` and the stored tool message gain `approval` (`notAsked`, `once`, `always`, `remembered`) for a call that ran.
+- `Budgets::max_wall` and `approval_wait` are `Option<Duration>`: `None` means no wall limit (ER-19, ADR 0031); the defaults are unchanged.
+- `Assistant::set_tools` replaces the tool set from the next turn on; a running turn keeps the set it started with.
+- `ToolCall::native(id, name, arguments)` reads an engine's native tool call strictly (blank arguments are `{}`; text that is not one JSON value, or too long, is the unreadable-call marker and never runs).
+- Fixed: tool-call ids are unique over a conversation. The prompted protocol numbers calls per answer, so a second tool round reused `call_1` and its card overwrote the first round's; an empty or repeated id now becomes the first free `call_<n>`.
+- Breaking (before v1): `Assistant::approve` and the `assistant_approve_tool` command take a `choice` (`ApprovalChoice`) instead of `approved: bool`; `AssistantBackend.approve` of `@decryp7/paddock-ui/workbench/assistant` takes the choice too; `Gate::decide` returns `Result<(), Refused>`; `Decision` is `Chosen(ApprovalChoice)`, `Cancelled` or `TimedOut`. New `AssistantError::NotOffered` (an `invalid` command error) for Always allow on a card that did not offer it.
+
 ### `@decryp7/paddock-ui`: the status chip has words for Dyno's update and agent-mismatch causes
 - `service-status-text.ts`: `dy.setup.updated` is now `dy.update.restart` ("updated: restart to finish"); new `dy.agent.other-build-returns` ("another build keeps starting") and `dy.agent.mismatch` ("needs a reinstall"). The planner marks ui when an app's `src-tauri/src/**/*.rs` changes, since `cause-codes.spec.ts` scans those sources against the table.
 

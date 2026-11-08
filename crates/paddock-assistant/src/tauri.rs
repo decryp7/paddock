@@ -17,6 +17,7 @@
 // `CommandError` is the family's one command error (plan X28); its size is its business, not this adapter's.
 #![allow(clippy::result_large_err)]
 
+use crate::approval::ApprovalChoice;
 use crate::conversation::{Conversation, ConversationSummary};
 use crate::event::{EVENT as EVENT_NAME, Envelope, EventSink};
 use crate::service::{Assistant, AssistantError, AssistantInfo, SendAck, SendRequest};
@@ -45,15 +46,27 @@ impl<R: Runtime> EventSink for Emit<R> {
     }
 }
 
+/// What an app puts around the event sink of every turn (a log line per tool call, say).
+pub type SinkWrap = Arc<dyn Fn(Arc<dyn EventSink>) -> Arc<dyn EventSink> + Send + Sync>;
+
 /// The managed state the commands read.
-pub struct Managed(Arc<Assistant>);
+pub struct Managed(Arc<Assistant>, Option<SinkWrap>);
 
 /// Manages `assistant`. A second call keeps the first and returns it.
 pub fn manage<R: Runtime>(app: &AppHandle<R>, assistant: Arc<Assistant>) -> Arc<Assistant> {
+    manage_with(app, assistant, None)
+}
+
+/// [`manage`], with `wrap` put around each turn's sink: every event still reaches the windows through what `wrap` returns.
+pub fn manage_with<R: Runtime>(
+    app: &AppHandle<R>,
+    assistant: Arc<Assistant>,
+    wrap: Option<SinkWrap>,
+) -> Arc<Assistant> {
     if let Some(m) = app.try_state::<Managed>() {
         return m.0.clone();
     }
-    app.manage(Managed(assistant.clone()));
+    app.manage(Managed(assistant.clone(), wrap));
     assistant
 }
 
@@ -64,6 +77,7 @@ fn error(e: AssistantError) -> CommandError {
         AssistantError::NotFound => CommandError::not_found(message),
         AssistantError::Busy => CommandError::busy(message),
         AssistantError::NotWaiting => CommandError::not_found(message),
+        AssistantError::NotOffered => CommandError::invalid(message),
         AssistantError::Failed(_) => CommandError::failed(message),
     }
 }
@@ -93,7 +107,11 @@ pub async fn assistant_send<R: Runtime>(
     app: AppHandle<R>,
     request: SendRequest,
 ) -> Result<SendAck, CommandError> {
-    let sink: Arc<dyn EventSink> = Arc::new(Emit::new(app.clone()));
+    let emit: Arc<dyn EventSink> = Arc::new(Emit::new(app.clone()));
+    let sink = match app.try_state::<Managed>().and_then(|m| m.1.clone()) {
+        Some(wrap) => wrap(emit),
+        None => emit,
+    };
     blocking(assistant_of(&app)?, move |a| a.send(request, sink)).await
 }
 
@@ -106,16 +124,16 @@ pub async fn assistant_stop<R: Runtime>(
     Ok(assistant_of(&app)?.stop(&conversation_id))
 }
 
-/// Answers the write waiting in the conversation's run.
+/// Answers the call waiting in the conversation's run with the user's choice (`allowOnce`, `alwaysAllow`, `deny`).
 #[::tauri::command]
 pub async fn assistant_approve_tool<R: Runtime>(
     app: AppHandle<R>,
     conversation_id: String,
     call_id: String,
-    approved: bool,
+    choice: ApprovalChoice,
 ) -> Result<(), CommandError> {
     assistant_of(&app)?
-        .approve(&conversation_id, &call_id, approved)
+        .approve(&conversation_id, &call_id, choice)
         .map_err(error)
 }
 
