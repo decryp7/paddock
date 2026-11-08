@@ -1,7 +1,8 @@
 # 62. No release depends on a live third-party download: one inventory of build inputs, pinned by hash, served from our own private store, and a check over every fetch
 
-- Status: Proposed (2026-11-08; ER-21 redesign, user decision 2026-11-08 "do all redesigns now"; revision 2 answers the
-  first independent review: P1-1 to P1-4 and the P2s, see "Revision 2")
+- Status: Accepted 2026-11-08: user-approved redesign, independent review; decisions D1–D9 pending the user. (ER-21;
+  user decision 2026-11-08 "do all redesigns now". Revision 2 answered the first review, revision 3 the re-review; see
+  "Revision 2" and "Revision 3".)
 - Date: 2026-11-08
 - Related: ER-21 / rule 40 (recurring bugs mean a missing design rule), ER-27 / rule 56 (logs explain every failure; one
   `::error::` per failing step), ER-33 / rule 71 (a check counts only if its probe can see the thing), ER-14 (tests never
@@ -85,8 +86,8 @@ impossible on release paths and detected everywhere else.
   the runtime from `github.com/AppImage/type2-runtime/releases/download/continuous/runtime-<arch>` on every build when it
   is not given `--runtime-file`. It neither caches nor verifies it. The runtime is the start-up code of every AppImage we
   ship, so it can change between two builds of the same commit. The plugin passes `LDAI_RUNTIME_FILE` to appimagetool as
-  `--runtime-file` (read from `linuxdeploy-plugin-appimage/src/main.cpp`, 2026-11-08; appimagetool also reads
-  `APPIMAGETOOL_RUNTIME_FILE`). The runtime's notices name libfuse (LGPL-2.1), which is linked into it.
+  `--runtime-file` (read from `linuxdeploy-plugin-appimage/src/main.cpp`, 2026-11-08), so `LDAI_RUNTIME_FILE` alone
+  points it at a local file. The runtime's notices name libfuse (LGPL-2.1), which is linked into it.
 - **What the helpers carry (licences).** linuxdeploy bundles patchelf and binutils' strip (GPL-3.0). The AppImage plugin
   bundles mksquashfs and desktop-file-validate (GPL-2.0) and zsyncmake (Artistic-2.0). Redistributing these files, which
   a public mirror would do, brings the GPL's source obligations with it. Only AppRun and the type-2 runtime end up in our
@@ -138,7 +139,7 @@ not fetch the file again.
 | E1 | npm packages | `npm ci` (root lock, sha512 integrity) | registry.npmjs.org | lock | sha512 | kept npm cache | yes (on a lock change) |
 | E2 | Rust crates | cargo (lock checksums) | index.crates.io, static.crates.io | lock | SHA-256 | cargo home on hosts; **none in containers** (every run) | **yes** |
 | E3 | apt packages | `setup-rust:195` (outside the image) | Ubuntu archive | **no** | archive signatures | no | rarely |
-| L1 | RustSec advisory database | `cargo deny check` (licences action; `debrief.yml:409`; `publish.yml:43`; demo releases `:76`) clones it | github.com/rustsec/advisory-db | **no** (live data) | git | cargo-deny's folder (host) | **yes** |
+| L1 | RustSec advisory database | `cargo deny check` (licences action; `app-gates/action.yml:139`; `ci.yml:386`, `:803`; `debrief.yml:409`; `publish.yml:43`; demo releases `:76`) clones it | github.com/rustsec/advisory-db | **no** (live data) | git | cargo-deny's folder (host) | **yes** |
 | L2 | npm audit advisories | `npm audit --omit=dev` (licences action `:24`; `debrief.yml:455`; Dyno, Pitcrew and Pitwall `paddock.ci.json`) | registry.npmjs.org audit endpoint | **no** (live data) | none | none | **yes** |
 | F1 | smartmontools 7.5 (Dyno helper's download) | VM harness rows (`win-helper.mjs`) | github.com | yes | SHA-256 and size | **no** (every round) | VM release rows |
 | F2 | VM base packages | base build scripts (`scratch/dyno-vm-checks/linux-base-*.sh`) | distribution archives | no | archive signatures | snapshot | base build only |
@@ -227,7 +228,7 @@ Rules for entries:
 
 | Tier | What | Who fills it |
 | --- | --- | --- |
-| 1. Kept folder | Content-addressed `tools/inputs/<sha256>/<file>` in each host runner's shared kept `tools` folder (ADR 0025, `job-isolation.sh path tools`). For Linux containers, the runner's existing host mount gets an `inputs/` subfolder beside `npm/` and `angular/`; this needs a runner `config.yaml` change, which is shown to the user first. | `./dev inputs ensure`, when tiers 2 and 3 miss. |
+| 1. Kept folder | Content-addressed `tools/inputs/<sha256>/<file>` in each host runner's shared kept `tools` folder (ADR 0025, `job-isolation.sh path tools`). For Linux containers, an `inputs/` subfolder of the runner's existing, writable host mount `/sccache`, beside `npm/` and `angular/`. The jobs create the subfolder themselves, as `node-caches` does for `npm/`, so no runner `config.yaml` change is needed. | `./dev inputs ensure`, when tiers 2 and 3 miss. |
 | 2. CI image | Linux tools baked in at fixed paths, each checked by `paddock-ci-verify`. The image's ARG pins are generated from the inventory (`./dev inputs dockerfile-args`), and a test checks that they agree. | The image build (`image-build` class). |
 | 3. Private Gitea mirror | Generic packages owned by a **private** Gitea organisation (D3), one package per input: `/api/packages/<private-org>/generic/<id>/<version>/<file>`. CI reads with a read-only token kept as a secret. Each version is uploaded once and never re-uploaded (the lesson from Sighter's weights). | `./dev inputs mirror <id>`, run by a person or by a manually dispatched workflow. |
 
@@ -246,13 +247,17 @@ them, for every version we keep. That is extra work and an obligation, for no ga
 Advisory databases are meant to change, so they cannot be pinned. Each `live-data` entry declares a refresh job and a
 maximum age.
 
-- **RustSec advisory database (L1).** The store keeps a git mirror of `rustsec/advisory-db`, as a Gitea pull mirror in
-  the private organisation. A nightly job refreshes it. CI points cargo-deny at the store copy (`db-urls` set to the
-  mirror) instead of github.com.
+- **RustSec advisory database (L1).** A Gitea pull mirror of `rustsec/advisory-db` under a **public** owner: the
+  database is CC0-1.0, so publishing it carries no obligation, and cargo-deny can clone it without a token. Gitea
+  refreshes the mirror on its own schedule, and a nightly job checks the mirror's last update. `db-urls` points at the
+  mirror in all twelve `deny.toml` files (`crates/`, `tools/paddock-dev/`, `templates/repo/`, each app's, and the two
+  demos' `src-tauri/`), so no `cargo deny` site reaches github.com.
   - On a release run, a mirror older than 7 days **fails** the run with an `::error::` that names the age and the
     refresh job. A mirror older than 2 days gives a warning.
 - **npm audit (L2).** The npm registry's audit endpoint has no offline form. So the nightly job runs
-  `npm audit --omit=dev --audit-level=high` for each lockfile and records the result with the lockfile's hash.
+  `npm audit --omit=dev --audit-level=high` for each lockfile and records the result with the lockfile's hash. The
+  record is a small JSON file (lockfile hash, time, audit level, outcome, advisory count) in a generic package of the
+  private organisation, `npm-audit-records`, one version per lockfile hash.
   - A release run accepts a passing record for the **same lockfile hash** that is at most 48 hours old.
   - Without such a record, the release run tries a live audit once. If the endpoint cannot be reached, the run fails
     with an `::error::` that names it, and the next step is to wait for, or dispatch, the nightly audit. A live audit
@@ -271,8 +276,7 @@ commands:
   - On Linux it copies AppRun, linuxdeploy and the AppImage plugin into the folder Tauri reads, computed the way
     `dirs::cache_dir()` does and logged. It makes a **fresh copy on every run**, because Tauri patches the cached
     linuxdeploy in place (see Context) and a reused copy can no longer be verified.
-  - It sets `LDAI_RUNTIME_FILE` (and `APPIMAGETOOL_RUNTIME_FILE`) to the verified type-2 runtime, so appimagetool never
-    fetches it.
+  - It sets `LDAI_RUNTIME_FILE` to the verified type-2 runtime, so appimagetool never fetches it.
   - On Windows it seeds `%LOCALAPPDATA%\tauri\NSIS` the same way, for both NSIS paths (`tauri-bundle.sh` and
     `debrief.yml:956`), so neither a fresh runner nor a CLI bump fetches NSIS during a release.
   - It sets no mirror-template variable. Tauri's downloader sends no token, so it cannot read a private store, and a
@@ -309,7 +313,8 @@ Every failed input prints one annotation in one format, then exits non-zero:
   SHA-256 mismatch (expected and got), a missing or refused token, or the missing tier.
 - **Timeouts are bounded:** connect 15 s; a read that stalls for 30 s fails, and long reads print progress lines. Each
   tier gets at most two retries, with backoff, on a 5xx or a timeout.
-- **`tauri build` runs with `--verbose` in CI,** so linuxdeploy's and appimagetool's own downloads appear in the log.
+- **`tauri build` runs with `--verbose` on the Linux AppImage leg,** so linuxdeploy's and appimagetool's own downloads
+  appear in the log. The other legs keep their normal output.
 - **Fetches Tauri adds later are named too.** When `tauri build` fails, the build step scans the tail of its output for
   the last `Downloading https://...` line (the form in jobs 31430 and 31446) or an appimagetool download line, and names
   that URL in its `::error::`. A fetch that a later Tauri version adds is then named on its first failure.
@@ -376,42 +381,56 @@ The estimates are raw agent-days, without review rounds; add about 20 % for thos
 first slice is no longer needed for Dyno's tag. It lands now, because Pitwall, Pitcrew and Spotter build AppImages and
 Debrief builds NSIS installers on their next release runs.
 
-### First slice: no live fetch on any release path (about 4–6 days)
+### First slice: no live fetch on any release path, with named residuals (about 5.5–8.5 days)
 
 | WP | What | Days |
 | --- | --- | --- |
-| **WP-1** | **AppImage and NSIS helpers for every Tauri app's bundles.** (a) Pin `AppRun-x86_64`, linuxdeploy `07333c6`, a snapshot of `linuxdeploy-plugin-appimage` and a snapshot of the type-2 runtime for tauri-cli 2.12.3, with size, SHA-256 and licence checked. These are the first `build-inputs.toml` entries, already in the final format; the runtime and AppRun carry `ships = true`. (b) Create the private Gitea organisation and its CI read token (with the user), and upload the entries. (c) Make `tauri-bundle.sh` seed a fresh, verified copy into the Tauri tools folder before `tauri build`, and set `LDAI_RUNTIME_FILE` and `APPIMAGETOOL_RUNTIME_FILE`. Until `./dev inputs` exists, a small shell step reads the entries; it is registered in known-copies, and WP-3 replaces it. (d) Run `tauri build --verbose` in CI, and add the `::error::` URL scan of a failed build. (e) Seed NSIS on Windows for both NSIS paths: `tauri-bundle.sh` and Debrief's `debrief.yml:956`. (f) Add the `tied_to` test against the lock. (g) Measure the runners' default actions host (the question WP-7 acts on), and record it in the inventory. (h) Register the five existing fetch copies and the interim reader in `docs/known-copies.toml`. (i) Rule 54: before landing, dispatch the release workflows, with bundles, of Pitwall, Pitcrew, Spotter, Dyno, both demos and Debrief. | 2–3 |
-| WP-1b | **Release tools as hashed prebuilt binaries.** git-cliff, cargo-cyclonedx and cargo-about from their published release archives (SHA-256 pinned, in the private store and the kept folder), replacing `cargo install` (B4, B5) and `taiki-e/install-action` (B6, B9) on release paths; `@cyclonedx/cyclonedx-npm` pinned in the root lock as a dev dependency and run from it, replacing `npx --yes` (B10). | 1–1.5 |
-| WP-1c | **The live-data policy** (section 3a): the RustSec pull mirror and cargo-deny's `db-urls`, the nightly audit record per lockfile hash, the release-run rules. | 0.5–1 |
-| WP-1d | **The dead-proxy run** (section 6) with its probe, nightly and in every rule-54 dispatch. | 0.5 |
-| | **First slice total** | **4–6** |
+| **WP-1** | **AppImage and NSIS helpers for every Tauri app's bundles.** (a) Pin `AppRun-x86_64`, linuxdeploy `07333c6`, a snapshot of `linuxdeploy-plugin-appimage` and a snapshot of the type-2 runtime for tauri-cli 2.12.3, with size, SHA-256 and licence checked. These are the first `build-inputs.toml` entries, already in the final format; the runtime and AppRun carry `ships = true`. (b) Create the private Gitea organisation and its CI read token (with the user), and upload the entries. (c) Make `tauri-bundle.sh` seed a fresh, verified copy into the Tauri tools folder before `tauri build`, and set `LDAI_RUNTIME_FILE`. Until `./dev inputs` exists, a small shell step reads the entries; it is registered in known-copies, and WP-3 replaces it. (d) Run `tauri build --verbose` on the Linux AppImage leg, and add the `::error::` URL scan of a failed build on every leg. (e) Seed NSIS on Windows for both NSIS paths: `tauri-bundle.sh` and Debrief's `debrief.yml:956`. (f) Add the `tied_to` test against the lock. (g) Measure the runners' default actions host (the question WP-7 acts on), and record it in the inventory. (h) Register the five existing fetch copies and the interim reader in `docs/known-copies.toml`. (i) Rule 54: before landing, dispatch the release workflows, with bundles, of Pitwall, Pitcrew, Spotter, Dyno, both demos and Debrief. | 3–4 |
+| WP-1b | **Release tools as hashed prebuilt binaries.** git-cliff, cargo-cyclonedx and cargo-about from their published release archives (SHA-256 pinned, in the private store and the kept folder), replacing `cargo install` (B4, B5) and `taiki-e/install-action` (B6, B9) on release paths; `@cyclonedx/cyclonedx-npm` pinned in the root lock as a dev dependency and run from it, replacing `npx --yes` (B10). | 0.75–1.25 |
+| WP-1c | **The live-data policy** (section 3a): the public RustSec pull mirror and `db-urls` in all twelve `deny.toml` files; the nightly audit record per lockfile hash in the private `npm-audit-records` package; the release-run rules. | 0.5–1 |
+| WP-1d | **The dead-proxy run** (section 6) with its probe, nightly and in every rule-54 dispatch. | 0.25–0.5 |
+| WP-1e | **A cargo cache for Linux containers.** Each container job takes one of a fixed number of slots under the existing `/sccache` mount, `/sccache/cargo-home/<n>`, by holding an `flock` on `<n>.lock` for the whole job (a held lock, rule 53), and sets `CARGO_HOME` to it. The whole `CARGO_HOME` is per slot, not only `registry/`, because cargo's `.package-cache` lock sits at its root and would otherwise serialise every concurrent job. `PATH` keeps the image's cargo `bin` folder, and the image's cargo configuration is copied into the slot if the image has one. No runner `config.yaml` change is needed: the mount already exists and is writable (`node-caches` uses it for npm). This closes the crate downloads of every Linux release run (job 31430, line 1066), except on a lockfile change. | 0.5–1 |
+| WP-1f | **Demo releases and host toolchains.** Both demo release workflows (`shell-demo-release.yml`, `workbench-demo-release.yml`): Node from the image on the Linux legs (`setup-node: false`, as `app-release.yml` does), and the Playwright browsers from the image instead of `npx playwright install --with-deps chromium`. `setup-rust` skips `rustup toolchain install` when the toolchain and components are present (D2 (a)), and the demos' Windows and macOS legs use `setup-rust` instead of `dtolnay/rust-toolchain`. | 0.5–1 |
+| | **First slice total** | **5.5–8.5** |
+
+**Named residuals after the first slice.** These are still live fetches on a release path or in a tag's gates. Each is
+listed in the inventory and has the WP that closes it:
+
+| Residual | Rows | Closed by |
+| --- | --- | --- |
+| The actions themselves (`actions/checkout`, `upload-artifact`, ...), fetched by the runner at job set-up, from a host the first slice measures | D1 | WP-7 |
+| Debrief's tag gates: libduckdb on a Linux container when the image's version differs, tauri-driver by `cargo install`, msedgedriver for the runner's WebView2 | C5, B7, C4 | WP-4 (C5, B7), WP-8 (C4) |
+| Node through `actions/setup-node` on host legs (kept in the tool cache; fetched only when a new Node release appears) | D2 | WP-4 |
+| npm and crates.io on a lockfile change (exempt as `registry`, D1) | E1, E2 | D1 (b) if ever needed |
+| The floating Rust `stable` (fetched by the warm-up job only, D2) | B3 | (by design) |
 
 ### Hardening (after the first slice)
 
 | WP | What | Days |
 | --- | --- | --- |
 | WP-2 | The inventory: the format; the parser, sharing `paddock-runtime`'s catalogue types; every row of "Inventory today" as an entry with its licence and `used_by`; the `ships` list handed to `paddock-deps`. | 2–3 |
-| WP-3 | `./dev inputs ensure`, `seed`, `mirror` and `list`; the three tiers; the error format and job summary; the kept-folder entry in `kept-folders.txt`; the runner mount change, shown to the user first; the private mirror of every entry; the interim reader of WP-1 deleted. | 3–5 |
+| WP-3 | `./dev inputs ensure`, `seed`, `mirror` and `list`; the three tiers (tier 1 on the `/sccache` mount for containers, no runner change); the error format and job summary; the kept-folder entry in `kept-folders.txt`; the private mirror of every entry; the interim reader of WP-1 deleted. | 2.5–4.5 |
 | WP-5 | The conformance check (section 7) with its ratchet baseline, its markers and a test per historical instance. | 2–3 |
-| WP-4 | Adoption on the remaining paths. Replace the five copies (each known-copies entry leaves with its files). Pin tauri-driver, cargo-mutants and cargo-fuzz as prebuilt, hashed binaries. Replace `dtolnay/rust-toolchain`; `setup-rust` skips `rustup toolchain install` when the toolchain is present (D2). Serve the Playwright browsers from the store (`PLAYWRIGHT_BROWSERS_PATH`). Keep apt in the image only. | 3–5 |
+| WP-4 | Adoption on the remaining paths. Replace the five copies (each known-copies entry leaves with its files). libduckdb from the store on every leg (C5). Pin tauri-driver, cargo-mutants and cargo-fuzz as prebuilt, hashed binaries. Replace the remaining `dtolnay/rust-toolchain` uses (Debrief's nightly workflows). Node from the store on host legs. Serve the Playwright browsers from the store on host runners (`PLAYWRIGHT_BROWSERS_PATH`). Keep apt in the image only. | 2.5–4.5 |
 | WP-7 | Actions and images: mirror the actions we use into the private organisation and pin them by commit; for the image build's base, use a pinned digest from our registry instead of `catthehacker/ubuntu:act-latest`. Needs the user for the Gitea and runner settings. | 1–2 |
 | WP-9 | VM harness: smartmontools pre-staged from a host-side store (D4); the VM base inputs listed (`base-build`). | 1–2 |
 | WP-10 | The rule text, a lessons entry, an ER line proposal for `engineering-rules` (next free ER number), and the docs (`ci-image/README.md`, `.gitea/actions/README.md`). | 0.5–1 |
-| | **Hardening total** | **12.5–21** |
+| | **Hardening total** | **11.5–20** |
 
 ### Deferred
 
 | WP | What | Days |
 | --- | --- | --- |
 | WP-6 | The full egress guard (logging proxy, per-step hosts, `refuse` mode), only on section 6's "revisit if". | 2–4 |
-| WP-8 | msedgedriver against a pinned WebView2 Fixed Version runtime for the Debrief Windows e2e (D5). Until then, C4 stays on Debrief's full runs and is listed as a known live fetch outside the release bundles. | 1.5–3 |
+| WP-8 | msedgedriver against a pinned WebView2 Fixed Version runtime for the Debrief Windows e2e (D5). Until then, C4 stays a named residual of Debrief's tag gates. | 1.5–3 |
 | (D9) | CI image v3 with the build-input tools, after the current releases. | (in WP-4 then) |
 
-**Total:** first slice 4–6, hardening 12.5–21, deferred 3.5–7 raw days; about 20–34 with review rounds for everything.
+**Total:** first slice 5.5–8.5, hardening 11.5–20, deferred 3.5–7 raw days; about 25–43 with review rounds for
+everything.
 
 Order:
 
-1. The first slice now: WP-1, then WP-1b, WP-1c and WP-1d in parallel.
+1. The first slice now: WP-1, with WP-1b to WP-1f in parallel beside it.
 2. WP-2 and WP-3.
 3. WP-5 and WP-4 in parallel.
 4. WP-7 and WP-9 beside WP-4, once WP-3 is in. WP-10 lands with WP-5.
@@ -420,9 +439,9 @@ Order:
 
 | # | Question | Options | Recommendation |
 | --- | --- | --- | --- |
-| D1 | npm and crates.io | (a) Exempt them as `registry`: lockfile hashes, with the kept caches on hosts. Linux containers download every crate on every run today (job 31430), so a crates.io outage still blocks a Linux release until WP-3's mount gives containers a cargo cache. (b) Run a pull-through proxy for npm and cargo on the home network. | (a) now, with the container cargo cache in WP-3; revisit if a registry outage blocks a release |
-| D2 | ADR 0022's floating Rust `stable` on host runners | (a) Gates and releases use the installed `stable`: `setup-rust` skips `rustup toolchain install` when the toolchain and components are present. A nightly warm-up job updates each host. (b) Keep updating in every job. | (a): the fetch leaves the gates, and ADR 0022's floating `stable` stays |
-| D3 | Where the Gitea store lives | (a) A **private** Gitea organisation that owns the generic packages (visibility follows the owner), read by CI with a read-only token; private storage of the GPL tools we run in CI is our own use, not redistribution. (b) A public organisation, which then has to offer the corresponding sources of the GPL-3.0 and GPL-2.0 binaries (A1, A3) next to each stored version. | **(a)** |
+| D1 | npm and crates.io | (a) Exempt them as `registry`: lockfile hashes, with kept caches on hosts and, from WP-1e, a cargo cache per slot in Linux containers. A registry outage then blocks a release only on a lockfile change. (b) Run a pull-through proxy for npm and cargo on the home network. | (a); revisit if a registry outage blocks a release |
+| D2 | ADR 0022's floating Rust `stable` on host runners | (a) Gates and releases use the installed `stable`: `setup-rust` skips `rustup toolchain install` when the toolchain and components are present (in the first slice, WP-1f). A nightly warm-up job updates each host. (b) Keep updating in every job. | (a): the fetch leaves the gates, and ADR 0022's floating `stable` stays |
+| D3 | Where the Gitea store lives | (a) A **private** Gitea organisation that owns the generic packages (visibility follows the owner), read by CI with a read-only token; private storage of the GPL tools we run in CI is our own use, not redistribution. The RustSec mirror is the one public exception (CC0-1.0, section 3a). (b) A public organisation, which then has to offer the corresponding sources of the GPL-3.0 and GPL-2.0 binaries (A1, A3) next to each stored version. | **(a)** |
 | D4 | smartmontools in the VM harness (GPL; Dyno ADR 0027 §7 says Dyno never bundles or mirrors it) | (a) Keep it out of Gitea, even the private store (`redistribute = false`). The harness keeps the pinned installer in a host-side store on the VM host and pre-stages smartmontools in the VM before the reading rows, so those rows no longer depend on a download. One "Download and install" row still exercises the product's own download from upstream. The harness first checks that upstream is reachable from the VM, and reports the row `not measured` when it is not (ER-33). The VM tests release builds, so no product switch is involved. (b) Keep the live download for every row, and report the rows `not measured` when it fails. | (a) |
 | D5 | msedgedriver | (a) Gates use a pinned WebView2 Fixed Version runtime (`WEBVIEW2_BROWSER_EXECUTABLE_FOLDER`) and its matching driver, both inventory entries. The evergreen runtime runs nightly, with the driver fetched for its version. (b) Keep following the runner's WebView2. | (a), deferred (WP-8) |
 | D6 | Sighter's DirectML (decided 2026-10-30: fetched from nuget.org, not mirrored) | (a) Keep that decision: a `redistribute = false` entry in the host-side store, filled by `./dev inputs mirror`, so the release still never fetches live. (b) Store it in the private Gitea organisation. | (a) |
@@ -481,3 +500,18 @@ Order:
   present; WP-1 measures the actions host; WP-1 registers the five copies and its interim reader in known-copies.
 - **Found while revising:** Linux release containers download every crate on every run (job 31430, line 1066), so E2
   and D1 now say so.
+
+## Revision 3 (answers the re-review, 2026-11-08)
+
+- **P1, the first slice overclaimed "no live fetch on any release path":** the cheap closures are now in the slice
+  (option (b)). WP-1e adds a cargo cache per slot for Linux containers on the existing `/sccache` mount (the whole
+  `CARGO_HOME`, because of the `.package-cache` lock; no runner configuration change, so WP-3 no longer needs one).
+  WP-1f takes the demo releases' Node and Playwright browsers from the image, moves the `setup-rust` skip (D2 (a)) into
+  the slice, and replaces `dtolnay/rust-toolchain` on the demos' Windows and macOS legs. The actions host (D1 row), Node
+  on host legs (D2 row) and Debrief's tag-gate fetches (C5, B7, C4) are named residuals with their WPs. The slice is
+  now about 5.5–8.5 days.
+- **P2s:** the `APPIMAGETOOL_RUNTIME_FILE` claim is dropped (`LDAI_RUNTIME_FILE` is enough); the RustSec mirror is under
+  a public owner (CC0-1.0), `db-urls` is set in all twelve `deny.toml` files, and L1 lists `app-gates/action.yml:139`
+  and `ci.yml:386`, `:803`; the npm audit record lives in the private `npm-audit-records` generic package; `--verbose`
+  runs only on the Linux AppImage leg; WP-1 is 3–4 days.
+- **Status:** accepted on 2026-11-08 as a user-approved redesign after independent review; D1–D9 are pending the user.
