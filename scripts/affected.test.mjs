@@ -39,7 +39,8 @@ describe('the graph of this tree', () => {
     assert.ok(r.ui, 'ui cause-codes.spec.ts scans the shared crates for health cause codes'); // only its own tests, not the UI half of any app
     // Debrief's store worker and Spotter's renderer depend on paddock-proc by path (the memory figure and the supervised child),
     // so the shared crates reach Debrief and Spotter too; Dyno takes the shell crates by path.
-    assert.deepEqual(r.apps, ['debrief', 'dyno', 'shell-demo', 'spotter', 'workbench-demo']);
+    // Pitwall's app depends on paddock-jobs by path (its long operations run on the shared job registry, ADR 0024).
+    assert.deepEqual(r.apps, ['debrief', 'dyno', 'pitwall', 'shell-demo', 'spotter', 'workbench-demo']);
     assert.deepEqual(r.kinds['shell-demo'], ['rust']);
     assert.deepEqual(r.kinds.debrief, ['rust']);
     assert.ok(r.packages.crates.includes('paddock-jobs'));
@@ -71,8 +72,9 @@ describe('the graph of this tree', () => {
   test('a ui change marks the Tauri shells that embed a ui build (frontendDist), both halves', () => {
     const r = run('ui/projects/paddock-ui/shell/src/public-api.ts');
     assert.ok(r.ui);
-    // Spotter and Dyno map @decryp7/paddock-ui to ui/dist in their tsconfig (a path edge, no npm edge).
-    assert.deepEqual(r.apps, ['dyno', 'shell-demo', 'spotter', 'workbench-demo']);
+    // Spotter and Dyno map @decryp7/paddock-ui to ui/dist in their tsconfig (a path edge, no npm edge); Pitwall loads its CSS.
+    assert.deepEqual(r.apps, ['dyno', 'pitwall', 'shell-demo', 'spotter', 'workbench-demo']);
+    assert.deepEqual(r.kinds.pitwall, ['ui']);
     assert.deepEqual(r.kinds.spotter, ['ui']);
     assert.deepEqual(r.kinds.dyno, ['ui']);
     assert.deepEqual(r.kinds['shell-demo'], ['rust', 'ui']);
@@ -98,6 +100,33 @@ describe('the graph of this tree', () => {
     }
     assert.ok(!run('apps/shell-demo/src-tauri/src/lib.rs').conformance);
     assert.ok(!run('apps/shell-demo/README.md').conformance);
+  });
+
+  test('every input of conformance C99 plans the c99 job (ADR 0057 §3.4), and a docs-only or unrelated change does not', () => {
+    for (const f of [
+      'apps/debrief/Cargo.lock',
+      'apps/debrief/Cargo.toml',
+      'apps/dyno/crates/dyno-core/Cargo.toml',
+      'apps/dyno/crates/dyno-core/src/lib.rs',
+      'apps/shell-demo/src-tauri/Cargo.lock',
+      'crates/paddock-secrets/Cargo.toml',
+      'crates/Cargo.lock',
+      'apps/shell-demo/src-tauri/src/main.m',
+      'apps/debrief/app/src/app/a.ts',
+      'ui/projects/paddock-ui/src/public-api.ts',
+      'apps/shell-demo/src-tauri/capabilities/dialog.json',
+      'apps/debrief/paddock.ci.json',
+      'conformance/src/checks/C99-no-keychain.mjs',
+      'conformance/src/util/keychain-graph.mjs',
+      'conformance/bin/paddock-conformance.mjs',
+      'paddock.waivers.toml',
+      '.cargo/config.toml',
+    ]) {
+      const r = run(f);
+      assert.ok(r.c99, f);
+    }
+    for (const f of ['docs/benchmarks.md', 'README.md', 'apps/debrief/README.md', 'conformance/test/c99-graph.test.mjs', 'apps/debrief/app/src/styles.scss']) assert.ok(!run(f).c99, f);
+    assert.equal(onlyApp(run('crates/Cargo.lock'), 'debrief').c99, false);
   });
 
   test("a per-machine app's Tauri config, per-machine.json and installer files run C91 and the shared crates' sync test", () => {
@@ -415,14 +444,14 @@ describe('.gitea changes are narrowed to the jobs they reach', () => {
   test('ci.yml wires the plan job outputs: every needs.plan.outputs.X is declared, and every declared output is one --ci writes', () => {
     const ci = readFileSync(join(ROOT, CI_FILE), 'utf8');
     const planJob = workflowJobs(ci).jobs.get('plan');
-    const declared = [...planJob.matchAll(/^ {6}([a-z_]+): \$\{\{ steps\.plan\.outputs\.([a-z_]+) \}\}/gm)];
+    const declared = [...planJob.matchAll(/^ {6}([a-z0-9_]+): \${{ steps\.plan\.outputs\.([a-z0-9_]+) }}/gm)];
     const written = Object.keys(ciOutputs({ paddockDev: false }, []));
     for (const [, name, step] of declared) {
       assert.equal(name, step, `output ${name} reads steps.plan.outputs.${step}`);
       assert.ok(written.includes(step), `--ci writes ${step}`);
     }
     const names = declared.map((d) => d[1]);
-    for (const [, used] of ci.matchAll(/needs\.plan\.outputs\.([a-z_]+)/g)) assert.ok(names.includes(used), `ci.yml uses needs.plan.outputs.${used}, which the plan job does not declare`);
+    for (const [, used] of ci.matchAll(/needs\.plan\.outputs\.([a-z0-9_]+)/g)) assert.ok(names.includes(used), `ci.yml uses needs.plan.outputs.${used}, which the plan job does not declare`);
     for (const w of written) assert.ok(names.includes(w), `--ci writes ${w}, which the plan job does not declare`);
     assert.equal(ciOutputs({}, []).any_app, false);
     assert.equal(ciOutputs({}, [{ app: 'x' }]).any_app, true);
@@ -766,6 +795,21 @@ describe('contracts', () => {
     }
   });
 
+  test('an app whose UI imports @decryp7/paddock-ui builds ui/dist before its UI and e2e commands (rule 54)', () => {
+    for (const [name, app] of graph.apps) {
+      if (!app.angularDir || !app.ui?.length) continue;
+      const tsconfig = join(ROOT, app.dir, app.angularDir, 'tsconfig.json');
+      if (!existsSync(tsconfig) || !readFileSync(tsconfig, 'utf8').includes('ui/dist/paddock-ui')) continue;
+      const lists = { ui: app.ui, e2e: app.e2e, e2eWebkit: app.e2eWebkit };
+      for (const [k, cmds] of Object.entries(lists)) {
+        if (!cmds?.length) continue;
+        const build = cmds.indexOf('npm run build -w ui');
+        const first = cmds.findIndex((c) => /\b(ng|playwright)\b/.test(c));
+        assert.ok(build >= 0 && build < first, `${name}: \`${k}\` must run "npm run build -w ui" before its first ng/playwright command`);
+      }
+    }
+  });
+
   test('rust checks reach only the Linux leg, and run only when the change reaches the Rust half', () => {
     const [leg] = matrix(run('apps/pitwall/crates/pitwall-core/src/lib.rs'), graph).filter((l) => l.os === LINUX);
     assert.match(leg.rust_checks, /cargo llvm-cov nextest -p pitwall-core/);
@@ -788,14 +832,16 @@ describe('contracts', () => {
     }
     const pitwall = graph.apps.get('pitwall');
     const legsOf = () => matrix(run('apps/pitwall/crates/pitwall-core/src/lib.rs'), graph).filter((l) => l.app === 'pitwall');
-    assert.ok(legsOf().every((l) => l.notices === 'false'), 'no block, no check');
-    pitwall.notices = { name: 'Pitwall', manifests: [] };
+    assert.ok(pitwall.notices, 'Pitwall has a notices block (1.1)');
+    const legs = legsOf();
+    assert.ok(legs.length > 1, 'Pitwall has host legs too');
+    for (const l of legs) assert.equal(l.notices, l.os === LINUX ? 'true' : 'false', l.os);
+    const block = pitwall.notices;
+    delete pitwall.notices;
     try {
-      const legs = legsOf();
-      assert.ok(legs.length > 1, 'Pitwall has host legs too');
-      for (const l of legs) assert.equal(l.notices, l.os === LINUX ? 'true' : 'false', l.os);
+      assert.ok(legsOf().every((l) => l.notices === 'false'), 'no block, no check');
     } finally {
-      delete pitwall.notices;
+      pitwall.notices = block;
     }
     assert.match(readFileSync(join(ROOT, '.gitea/actions/app-gates/action.yml'), 'utf8'), /scripts\/notices\.sh" "\$APP" --check/, 'app-gates runs the shared check');
   });
