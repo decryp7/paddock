@@ -134,6 +134,7 @@ paddock_commands::command_table! {
     Mutation [WINDOW] => chat_host::commands::open_connected_app,
     Query [WINDOW] => chat_host::commands::chat_models_list,
     Mutation [WINDOW] => chat_host::commands::set_chat_model,
+    Mutation [WINDOW] => chat_host::commands::chat_refresh_window,
     Query [WINDOW] => chat_host::commands::chat_storage,
     Mutation [WINDOW] => chat_host::commands::set_chat_save_new,
     Query [WINDOW] => chat_host::commands::chat_saved,

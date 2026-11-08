@@ -94,6 +94,7 @@ const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<st
   ['revokeToolApproval', (b) => b.revokeToolApproval('dyno', 'disks'), 'revoke_tool_approval', { appId: 'dyno', tool: 'disks' }],
   ['chatModels', (b) => b.chatModels(), 'chat_models_list', undefined],
   ['setChatModel', (b) => b.setChatModel('m1'), 'set_chat_model', { modelId: 'm1' }],
+  ['chatRefreshWindow', (b) => b.chatRefreshWindow(), 'chat_refresh_window', undefined],
   ['chatStorage', (b) => b.chatStorage(), 'chat_storage', undefined],
   ['setChatSaveNew', (b) => b.setChatSaveNew(false), 'set_chat_save_new', { save: false }],
   ['chatSaved', (b) => b.chatSaved('c1'), 'chat_saved', { conversationId: 'c1' }],

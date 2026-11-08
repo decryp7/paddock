@@ -120,7 +120,7 @@ const APP_METHODS: ReadonlySet<string> = new Set([
   'serviceState', 'installService', 'uninstallService', 'repairService', 'declineService', 'openLoginItems',
   'autostart', 'setAutostart', 'quitApp', 'takeQuitAsk', 'chatEnabled',
   'connectedApps', 'setAppKey', 'connectApp', 'forgetApp', 'revokeToolApproval', 'openConnectedApp',
-  'chatStorage', 'setChatSaveNew', 'chatSaved', 'setChatSaved', 'deleteAllChats', 'chatAttachRules', 'chatAttach', 'chatDetach',
+  'chatStorage', 'setChatSaveNew', 'chatSaved', 'setChatSaved', 'deleteAllChats', 'chatAttachRules', 'chatAttach', 'chatDetach', 'chatRefreshWindow',
   // The popup's widgets are the app's own too (its layout is kept by the app; the values say "server not running" themselves).
   'popoverView', 'popoverValues', 'popoverHeader', 'popoverShape', 'editPopover',
 ]);
@@ -1633,6 +1633,11 @@ export class MockBackend implements PitwallBackend {
 
   setChatModel(modelId: string): Promise<ChatModels> {
     return this.reply('setChatModel', () => this.picker(modelId));
+  }
+
+  /** The browser build's memory engine keeps its own window (`?mock-context`), so there is nothing to read again. */
+  chatRefreshWindow(): Promise<number> {
+    return this.reply('chatRefreshWindow', () => 8192);
   }
 
   /** The picker as Rust builds it (`chat_host::models`): tool models first, the others disabled with the reason. */
