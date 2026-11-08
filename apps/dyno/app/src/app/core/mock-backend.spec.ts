@@ -153,9 +153,14 @@ describe('live data', () => {
     const collect = async (): Promise<Series> => {
       const b = make();
       const got: Parameters<typeof appendSeries>[1][] = [];
-      const stop = b.onLive('summary', (u) => got.push(u));
-      await new Promise((r) => setTimeout(r, 5));
-      stop();
+      vi.useFakeTimers();
+      try {
+        const stop = b.onLive('summary', (u) => got.push(u));
+        await vi.advanceTimersByTimeAsync(5);
+        stop();
+      } finally {
+        vi.useRealTimers();
+      }
       return got.reduce<Series>((s, u) => appendSeries(s, u), { cpu: [], memory: [], diskRead: [], diskWrite: [], diskBusy: [], netRx: [], netTx: [], gpu: [] });
     };
     expect(LIVE_BACKLOG + 1).toBe(SPARK_CAPACITY);
@@ -725,15 +730,21 @@ describe('MockBackend: the helper', () => {
   });
 
   it('turning on ends ready, turning off ends off, and the helper job runs its phases with an uncancellable prompt', async () => {
+    vi.useFakeTimers();
     const b = make({ jobSteps: 4 });
     b.jobStepMs = 1;
     const id = await b.startJob({ helper: { action: 'turnOn' } });
     const seen = new Set<string>();
-    for (let i = 0; i < 400 && b.jobStatuses().find((j) => j.id === id)!.state !== 'done'; i++) {
-      const s = b.jobStatuses().find((j) => j.id === id)! as SuJobSnapshot & { phase?: { id: string } | null; cancellable: boolean };
-      if (s.phase) seen.add(s.phase.id);
-      if (s.phase?.id === 'prompt') expect(s.cancellable).toBe(false);
-      await new Promise((r) => setTimeout(r, 1));
+    try {
+      // The job steps on the fake clock: one fake millisecond per look, until it is done (a bound on the looks, not a delay).
+      for (let i = 0; i < 400 && b.jobStatuses().find((j) => j.id === id)!.state !== 'done'; i++) {
+        const s = b.jobStatuses().find((j) => j.id === id)! as SuJobSnapshot & { phase?: { id: string } | null; cancellable: boolean };
+        if (s.phase) seen.add(s.phase.id);
+        if (s.phase?.id === 'prompt') expect(s.cancellable).toBe(false);
+        await vi.advanceTimersByTimeAsync(1);
+      }
+    } finally {
+      vi.useRealTimers();
     }
     expect([...seen]).toContain('prompt');
     expect((await b.jobResult(id)) as JobOutput).toMatchObject({ helper: { state: 'ready' } });

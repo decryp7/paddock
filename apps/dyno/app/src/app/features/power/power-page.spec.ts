@@ -3,6 +3,7 @@ import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { provideIcons } from '../../shared/icons';
 import { PowerPage } from './power-page';
+import { settle, useSettleClock } from '../../../testing/settle';
 
 const NOW = new Date(2026, 9, 22, 14, 30).getTime();
 
@@ -14,20 +15,12 @@ async function render(options: ConstructorParameters<typeof MockBackend>[0] = {}
   await settle(f);
   return { f, el: f.nativeElement as HTMLElement, mock };
 }
-const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown> }) => {
-  for (let i = 0; i < 4; i++) {
-    await f.whenStable();
-    await new Promise((r) => setTimeout(r, 2));
-    f.detectChanges();
-  }
-};
 const btn = (el: HTMLElement, text: string) => [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes(text))!;
 const status = (el: HTMLElement) => el.querySelector('[aria-label="Keep awake status"]')!;
 const head = (el: HTMLElement) => status(el).querySelector('h2')?.textContent;
 
 describe('dy-power-page', () => {
-  beforeEach(() => vi.useFakeTimers({ now: NOW, toFake: ['Date'] }));
-  afterEach(() => vi.useRealTimers());
+  useSettleClock(NOW);
 
   it('says what the tab is for, with one subtitle per tab', async () => {
     const { f, el } = await render();

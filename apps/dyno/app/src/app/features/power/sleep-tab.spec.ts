@@ -3,6 +3,7 @@ import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { provideIcons } from '../../shared/icons';
 import { SleepTab } from './sleep-tab';
+import { settle, useSettleClock } from '../../../testing/settle';
 
 const NOW = new Date(2026, 9, 22, 14, 30).getTime();
 
@@ -14,21 +15,13 @@ async function render(options: ConstructorParameters<typeof MockBackend>[0] = {}
   await settle(f);
   return { f, el: f.nativeElement as HTMLElement, mock };
 }
-const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown> }) => {
-  for (let i = 0; i < 4; i++) {
-    await f.whenStable();
-    await new Promise((r) => setTimeout(r, 2));
-    f.detectChanges();
-  }
-};
 const btn = (el: HTMLElement, text: string) => [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes(text))!;
 /** Whether the "Act when idle" switch is on. */
 const ruleOn = (el: HTMLElement) => el.querySelector('button[aria-label="Act when the computer is idle"]')!.getAttribute('aria-checked') === 'true';
 const head = (el: HTMLElement) => el.querySelector('[aria-label="Sleep and shut down status"] h2')?.textContent;
 
 describe('dy-sleep-tab', () => {
-  beforeEach(() => vi.useFakeTimers({ now: NOW, toFake: ['Date'] }));
-  afterEach(() => vi.useRealTimers());
+  useSettleClock(NOW);
 
   it('says the rules are off and that Dyno never acts unless asked', async () => {
     const { el } = await render();
