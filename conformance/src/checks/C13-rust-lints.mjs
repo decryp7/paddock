@@ -67,6 +67,22 @@ export function ratchetNotYet(register, app) {
   return out;
 }
 
+/**
+ * The clippy `disallowed-methods` paths the app's clippy.toml may lack while its ratchet lists them in `clippy_not_yet` (ADR 0060
+ * 3.2). clippy.toml applies to the whole workspace, so a path whose call sites are not cleaned up yet (Debrief's `temp_dir`) cannot
+ * be added without failing every member that is not opted in; the list may only shrink (C100 checks that).
+ */
+export function ratchetClippyNotYet(register, app) {
+  const out = [];
+  for (const block of register.split(/^\[\[/m).slice(1)) {
+    if (!block.startsWith('ratchet]]')) continue;
+    if (!/^id\s*=\s*"C13"/m.test(block) || !new RegExp(`^app\\s*=\\s*"${app}"`, 'm').test(block)) continue;
+    const list = /^clippy_not_yet\s*=\s*\[([^\]]*)\]/m.exec(block);
+    if (list) out.push(...[...list[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]));
+  }
+  return out;
+}
+
 export default {
   id: 'C13',
   scope: 'apps',
@@ -83,6 +99,7 @@ export default {
     const at = (f) => `${base}${f}`;
     const register = ctx.options.gatesText ?? (existsSync(join(paddock, 'docs', 'gates.toml')) ? readFileSync(join(paddock, 'docs', 'gates.toml'), 'utf8') : '');
     const notYet = ratchetNotYet(register, ctx.app);
+    const clippyNotYet = ratchetClippyNotYet(register, ctx.app);
     const preset = readFileSync(join(paddock, 'lint', 'workspace-lints.toml'), 'utf8');
     const root = ctx.read(at('Cargo.toml'));
     if (root === null) return [error('C13', 40, at('Cargo.toml'), 1, `there is no workspace Cargo.toml at the repository root${base ? ` of ${base}` : ''}`, 'Add the workspace manifest with the [workspace.lints] tables from paddock/lint/workspace-lints.toml.')];
@@ -112,7 +129,7 @@ export default {
     if (clippy === null) out.push(error('C13', 40, at('clippy.toml'), 1, 'clippy.toml is missing', 'Copy paddock/lint/clippy.toml and word the reasons for this app.'));
     else {
       for (const p of disallowedPaths(readFileSync(join(paddock, 'lint', 'clippy.toml'), 'utf8'))) {
-        if (!have.has(p)) out.push(error('C13', 40, at('clippy.toml'), 1, `disallowed-methods lacks ${p}`, 'Add the entry from paddock/lint/clippy.toml (the reason may name this app\'s helper).'));
+        if (!have.has(p) && !clippyNotYet.includes(p)) out.push(error('C13', 40, at('clippy.toml'), 1, `disallowed-methods lacks ${p}`, 'Add the entry from paddock/lint/clippy.toml (the reason may name this app\'s helper).'));
       }
     }
     return out;

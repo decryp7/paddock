@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { findingsOf, makeApp, messages, PADDOCK } from './helpers.mjs';
-import { disallowedPaths, lintLevels, ratchetNotYet } from '../src/checks/C13-rust-lints.mjs';
+import { disallowedPaths, lintLevels, ratchetClippyNotYet, ratchetNotYet } from '../src/checks/C13-rust-lints.mjs';
 
 const opts = { options: { paddock: PADDOCK } };
 const preset = (f) => readFileSync(join(PADDOCK, 'lint', f), 'utf8');
@@ -99,4 +99,21 @@ test('ratchetNotYet reads the entry of this check and app only', () => {
   assert.deepEqual(ratchetNotYet(REGISTER, 'other'), []);
   assert.deepEqual(ratchetNotYet(REGISTER.replace('id = "C13"', 'id = "C99"'), 'demo'), []);
   assert.deepEqual(ratchetNotYet('', 'demo'), []);
+});
+
+test('C13 ratchet: clippy paths listed in clippy_not_yet may be missing from clippy.toml, any other missing path still fails', async () => {
+  const files = { ...good(), 'paddock.ci.json': ci('.') };
+  files['clippy.toml'] = preset('clippy.toml').split('\n').filter((l) => !/std::env::temp_dir|reqwest::Client::new/.test(l)).join('\n');
+  const reg = (list) => `[[ratchet]]\nid = "C13"\napp = "demo"\nnot_yet = []\nclippy_not_yet = [${list}]\nowner = "o"\ntarget = "demo-v9.0.0"\napproved = "user"\n`;
+  // bad: no exemption, the missing paths fail
+  assert.match(messages(await findingsOf('C13', makeApp(files), { options: { paddock: PADDOCK, gatesText: reg('') } })), /lacks std::env::temp_dir/);
+  // good: exactly the exempt paths missing
+  const exempt = reg('"std::env::temp_dir", "reqwest::Client::new"');
+  assert.deepEqual(await findingsOf('C13', makeApp(files), { options: { paddock: PADDOCK, gatesText: exempt } }), []);
+  // bad: a path outside the list is still required
+  const m = messages(await findingsOf('C13', makeApp(files), { options: { paddock: PADDOCK, gatesText: reg('"std::env::temp_dir"') } }));
+  assert.match(m, /lacks reqwest::Client::new/);
+  assert.doesNotMatch(m, /lacks std::env::temp_dir/);
+  assert.deepEqual(ratchetClippyNotYet(exempt, 'demo'), ['std::env::temp_dir', 'reqwest::Client::new']);
+  assert.deepEqual(ratchetClippyNotYet(exempt, 'other'), []);
 });
