@@ -315,8 +315,10 @@ The user accepted the reviewer's recommendations on 2026-11-03. The delta re-rev
     that stopped early), `precondition:vm-capability` 34 (no sleep state, no wake settings, virtio NIC, no SSD wear),
     `precondition:install` 32, target-not-found 21, `precondition:build-commit` 16 (runs started without
     `--expect-commit`), `precondition:second-session` 13 (a fast-user switch the driver cannot do), parse 6,
-    `precondition:definition` 5, unclassified 3, `precondition:scriptable` 2, probe-timeout 1, kit-error 1. The
-    reviewer's figure of 119 missing steps is not reproduced by this count; the difference is not explained here.
+    `precondition:definition` 5, unclassified 3, `precondition:scriptable` 2, probe-timeout 1, kit-error 1. The other
+    119 steps of the step lists are neither pass, fail, check-broken nor not-measured: 84 manual, 20 skip, 10
+    not-applicable and 5 info. Copies of the 111 reports with their SHA-256 and the recount:
+    `/Volumes/d7sst7/dev-targets/scratch/adr-vm-harness/durable/` (rule 48).
 
 ### A second pattern: probes that cannot see what they judge
 
@@ -353,20 +355,26 @@ hold never runs its body. (e) The harness has one line: §1-§2, built now. (f) 
    `CHANGELOG.md`, a lesson) lands with C71 from `feat/test-timing-and-screenshot-checks` (`b726d56de`). Until then the GUI
    tours that load `screenshot-check.ts` at run time report "the shared screenshot rules are not in this checkout" (check
    broken). The affected plan of the home then marks `tools`, `ui` (the `scripts/` rule), `docs` (`docs/testing/`) and app
-   `dyno` (`apps/dyno/vm-smoke.json`), and no crate, conformance or ESLint job.
+   `dyno` (`apps/dyno/vm-smoke.json`, so Dyno's Rust and UI legs run), and no crate, conformance or ESLint job.
 4. **One target (review P1-1).** The harness and the driver can drive only `/Volumes/d7sst7/vms/paddock-win11-test`:
    - `scripts/vm-win/target.sh`, sourced by `vm-win.sh` and `prepare.sh`, resolves the folder (and the `.vmx`, so a link
-     inside the folder cannot point out) and refuses anything else before `vmrun`, `ssh`, `scp` or a file write. The only
-     other case is **fake mode** for the scripts' own tests: a `FUSION_APP` that is not the installed VMware Fusion and a
-     folder under `$TMPDIR`.
+     inside the folder cannot point out) and refuses anything else before `vmrun`, `ssh`, `scp` or a file write; the
+     `$HOME` guard applies to the resolved path. The only other case is **fake mode** for the scripts' own tests, which no
+     environment variable can switch on by itself: the folder resolves under the per-user temp root (`getconf
+     DARWIN_USER_TEMP_DIR`, `/tmp` where there is none; never the caller's `$TMPDIR`), carries a `.paddock-fake-vm` marker
+     the test created, and `FUSION_APP`'s `vmrun` resolves outside the installed Fusion, under that root, and is a script
+     (`#!`). `PADDOCK_VM_LEASES` counts only in fake mode.
    - `scripts/vm-smoke/win-vm-target.mjs` holds the folder as a constant, derives the `.vmx`, checks both with `realpath`
      right before acting (rule 53), and gives the shell scripts the checked path (`--vmx`). There is no `PADDOCK_WIN_VMX`
      and no harness-side `PADDOCK_WIN_VM_DIR`.
-   - `PADDOCK_VM_WIN` is test-only: honoured for a fake driver under `$TMPDIR`, refused otherwise.
+   - `PADDOCK_VM_WIN` is test-only: honoured for a fake driver under the same temp root, refused otherwise.
    - Tests: every `vm-win.sh` command and `prepare.sh` refuse another folder with no `vmrun`, `ssh` or `scp` call and no
-     folder created; a link out of `$TMPDIR` and a `.vmx` link are refused; the real Fusion with a fake folder is refused.
-   The macOS and Linux runners clone a named Tart base and delete the clone; the same rule for Tart (a fixed base list,
-   refuse any other VM name) is part of WP-V2's guest port.
+     folder created; a caller-set `TMPDIR` with a Fusion whose `Contents` links to the real one is refused, and `prepare.sh`
+     in that setup creates nothing; a folder without the marker, a non-script `vmrun`, a link out of the temp root, a link
+     into `$HOME` and a `.vmx` link are refused; the real Fusion with a fake folder is refused.
+   The macOS and Linux runners clone a named Tart base and delete the clone. WP-V2's guest port gives Tart the same rule:
+   clones are named `paddock-vmsmoke-<run>`, `stop` and `delete` refuse any other name, bases come from a fixed list, and
+   `run.mjs`'s `TART_HOME` default moves to the d7 Tart home (`/Volumes/d7sst7/dev-targets/tart-home`, as `run-linux.mjs`).
 5. **Land** the home on `main` as its own batch (rule 50). Under §3 and ADR 0049's caps it is one waived batch, with the
    trailer on its merge commit: `Batch-size-waived: vm-smoke consolidation of seven harness lines (ADR 0042 amendment
    2026-11-08); approved: coordinator`.
@@ -481,7 +489,7 @@ runner adds. The manifest's title regexes stay only for reading older reports.
 |---|---|---|
 | `precondition:<id>` | a named precondition did not hold within its budget; `<id>` is from `kit/preconditions.mjs` | 71 |
 | `probe-timeout` | an `until` ran out with no product evidence; the observations are attached | 9 |
-| `target-not-found` | the thing to act on or read was not there (a menu item, a window, a process at the moment of acting, a respawned child) | 83 |
+| `target-not-found` | the thing to act on or read was not there (a menu item, a window, a process at the moment of acting, a respawned child). It is product evidence, and the row a product `fail`, only when the row's own precondition proved the thing should be there (a positive control on the same reader passed in the same row: the harness's own icon's menu read, then the app's menu not found) and the app's declared contract lists it | 83 |
 | `undo-not-undone:<label>` | a deferred undo failed, here or in an earlier row | 2 |
 | `kit-error` | the kit itself failed (a guest command missing, a transport error) | 6 |
 | `parse` | the guest answered and the kit could not read the answer | 7 |
@@ -521,19 +529,24 @@ A `paddock-conformance` check (C100 is ADR 0060's "every check runs somewhere").
 `scripts/vm-smoke/**` and `scripts/vm-win*` (`.mjs`, `.sh`, `.ps1`, `.psm1`, `.py`, `.swift`). **Kit files:**
 `scripts/vm-smoke/kit/**`, and `scripts/vm-win.sh` with `scripts/vm-win/**` as the Windows transport. **Row files:**
 `scripts/vm-smoke/rows/**`; until WP-V6 has moved a module there, every other non-kit module is treated as a row file.
-In JS files C101 scans **every string literal** (plain, template and the shell, PowerShell or AppleScript text inside
+**Runner files:** `scripts/vm-smoke/run*.mjs` and `scripts/vm-smoke/chain-release.sh` start guests and the driver, so the
+process-launch and driver rows do not apply to them; every other row does. In JS files C101 scans **every string literal** (plain, template and the shell, PowerShell or AppleScript text inside
 them) as well as the code; other files are scanned whole.
 
 | Flagged outside kit files | Allowed when |
 |---|---|
 | A process launch: an import or call of `node:child_process` (`spawn`, `spawnSync`, `exec`, `execSync`, `execFile`, `execFileSync`, `fork`) | never; rows call the guest port |
 | A driver use: `VMWIN`, `vm-win.sh`, `tart`, `vmrun`, `PADDOCK_VM_WIN` | never |
-| A kill verb in code or in any string: `process.kill`, `kill`, `pkill`, `killall`, `taskkill`, `Stop-Process`, `TerminateProcess` | never (rows use `end`, `signal`, `endSupervised`) |
+| A kill verb in command position (start of a shell or PowerShell command, after `;`, `&&`, `\|\|`, `\|`, `$(` or a newline, or the call `process.kill(`): `kill`, `pkill`, `killall`, `taskkill`, `Stop-Process`, `TerminateProcess` | a waiver comment on the line, `// vm-smoke: kill-word — <why it is not a kill>` (prose that names the verb) |
 | A fixed wait: a `setTimeout` promise, `sleep <n>`, `Start-Sleep`, `time.sleep`, `usleep`, `Thread.sleep` | an `observe(window, reason, probe)` call (ADR 0041 §1 (b)) |
 | A truncated log read: `tail -n`, `head -n` on a log, `log show --last`, `Get-Content -Tail`, `journalctl -n` | never (`linesSince`) |
 | The host clock judging guest events: `Date.now()`, `new Date()` in a row file | never (`ctx.clock()`) |
 | A one-shot read of changing state: a row file calling `ctx.guest.exec` instead of a kit probe | the line carries `// vm-smoke: one-shot — <why the value cannot change>` (a file hash, an installed version) |
 | A creation verb in a row file without a `ctx.defer` in the same row function | never |
+
+The last two rows are **review-only** where the static match cannot decide (an `exec` whose output is not used to judge,
+a creation done through a helper the row calls): C101 lists them as notes for the reviewer, never as errors, so the
+check stays exact for the rows above them.
 
 **Creation verbs** (a list in the check, extended by adding lines): `schtasks /create`, `Register-ScheduledTask`,
 `New-ItemProperty`/`Set-ItemProperty`/`reg add` on a `Run` or `RunOnce` key or on the app's settings, `New-LocalUser`,
@@ -580,8 +593,8 @@ WP-V2 lands.
 ### State of WP-V1 (2026-11-08)
 
 Built on `tools/vm-smoke`, not landed: the merges (`433ac6493`, `79f2bea14`, `35dc99284`, `44f3ef61d`, `f29310160`), the
-driver path into the repo (`86110ceff`), the single target (`c8bc7d9bc`), the revert of `edd17937e` (`51108914e`) and the
-counting script (`7735f1bbd`); 329 harness tests pass. Left for WP-V1: the register entry and the CODEOWNERS line (after
+driver path into the repo (`86110ceff`), the single target (`c8bc7d9bc`, hardened in `f857083c0`), the revert of `edd17937e` (`51108914e`) and the
+counting script (`7735f1bbd`); 333 harness tests pass. Left for WP-V1: the register entry and the CODEOWNERS line (after
 the review), and the landing.
 
 ### Work packages after this amendment
@@ -650,4 +663,7 @@ kit depends on there being one line.
   long pole before Pitwall's check; porting its unique files onto the kit costs about the same and lands the result on the
   kit. Rejected for V1.
 - **Keep the target overrides and document them.** A documented override still lets one wrong environment variable start,
-  revert or rewrite the user's own VM. Rejected; fake mode needs both a fake Fusion and a folder under `$TMPDIR`.
+  revert or rewrite the user's own VM. Rejected. Revision 2's fake mode (a fake Fusion plus a folder under `$TMPDIR`) was
+  still switchable from the environment (the re-review set `TMPDIR` and linked a fake `Contents` to the real Fusion);
+  fake mode now needs the per-user temp root from `getconf`, a marker the test wrote, and a `vmrun` script outside the
+  installed Fusion.
