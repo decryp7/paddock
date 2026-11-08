@@ -62,13 +62,14 @@ if command -v sha256sum >/dev/null 2>&1; then sum=$(sha256sum "$work/$name" | aw
 printf '%s  %s\n' "$sum" "$name" >"$work/$name.sha256"
 phase "verified ($(wc -c <"$work/$name" | tr -d ' ') bytes, sha256 $sum)"
 
+# `-T` (not `--data-binary`, which labels the body as a form and makes Gitea answer 500 "isn't multipart/form-data", run 7769).
 # Binary first, checksum last: a consumer (and the check above) treats the checksum as "complete". 409 means another run won.
 for f in "$name" "$name.sha256"; do
-  code=$(curl_auth -o "$work/put.out" -w '%{http_code}' -X PUT --data-binary "@$work/$f" "$base/paddock-dev/$hash/$f") || code=000
+  code=$(curl_auth -o "$work/put.out" -w '%{http_code}' -T "$work/$f" "$base/paddock-dev/$hash/$f") || code=000
   case "$code" in
     201 | 200) ;;
     409) echo "::notice::dev-tool: $f already exists under $hash (another run published it first)." ;;
-    *) err "upload of $f failed (HTTP $code: $(head -c 200 "$work/put.out" | tr '\n' ' ')). 401 or 403: the token lacks write:package; 404: the package owner in PADDOCK_DEV_PACKAGES is wrong." ;;
+    *) err "upload of $f failed (HTTP $code: $(head -c 200 "$work/put.out" | tr '\n' ' ')). 401 or 403: the token lacks write:package; 404: the package owner in PADDOCK_DEV_PACKAGES is wrong; 500: read the server's text above." ;;
   esac
 done
 phase "uploaded $name"
