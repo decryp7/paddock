@@ -716,7 +716,9 @@ fn files_mode_an_uncommitted_change_is_narrowed_a_committed_one_marks_everything
 
 #[test]
 fn ci_yml_wires_the_plan_job_outputs_and_the_commits_job_asks_for_its_range() {
-    let ci = std::fs::read_to_string(root().join(".gitea/workflows/ci.yml")).unwrap();
+    let ci = std::fs::read_to_string(root().join(".gitea/workflows/ci.yml"))
+        .unwrap()
+        .replace("\r\n", "\n");
     let wf = paddock_dev::plan_gitea::workflow_jobs(&ci).unwrap();
     let plan_job = &wf.jobs.iter().find(|(k, _)| k == "plan").unwrap().1;
     let declared = regex::Regex::new(r"(?m)^ {6}([a-z0-9_]+): \$\{\{ steps\.plan\.outputs\.([a-z0-9_]+) \}\}").unwrap();
@@ -761,8 +763,12 @@ fn ci_yml_wires_the_plan_job_outputs_and_the_commits_job_asks_for_its_range() {
 
 #[test]
 fn ci_yml_passes_every_field_of_a_matrix_leg_to_app_gates() {
-    let ci = std::fs::read_to_string(root().join(".gitea/workflows/ci.yml")).unwrap();
-    let gates = std::fs::read_to_string(root().join(".gitea/actions/app-gates/action.yml")).unwrap();
+    let ci = std::fs::read_to_string(root().join(".gitea/workflows/ci.yml"))
+        .unwrap()
+        .replace("\r\n", "\n");
+    let gates = std::fs::read_to_string(root().join(".gitea/actions/app-gates/action.yml"))
+        .unwrap()
+        .replace("\r\n", "\n");
     let leg = legs(&plan_of(&[], true), MatrixOpts::default()).remove(0);
     let job = &ci[ci.find("\n  app:\n").unwrap()..];
     for key in leg.as_object().unwrap().keys().filter(|k| *k != "dir") {

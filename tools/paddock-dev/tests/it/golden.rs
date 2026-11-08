@@ -264,10 +264,14 @@ fn run_cli(program: &mut Command, root: &Path, case: &Value) -> Value {
     .unwrap()
     .trim()
     .to_string();
-    program.current_dir(root).env_clear();
-    for k in ["PATH", "HOME"] {
-        if let Ok(v) = std::env::var(k) {
-            program.env(k, v);
+    // The planner reads the workflow's environment; everything else (PATH, RUSTUP_HOME, SystemRoot, ...) stays as the runner has it.
+    program.current_dir(root);
+    for (k, _) in std::env::vars() {
+        if k.starts_with("GITHUB_")
+            || k.starts_with("PLAN_")
+            || ["EVENT", "REF", "BEFORE", "SHA", "BASE_REF", "INPUT_APP"].contains(&k.as_str())
+        {
+            program.env_remove(k);
         }
     }
     program

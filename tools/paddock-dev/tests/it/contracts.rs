@@ -21,7 +21,8 @@ fn tracked() -> Vec<String> {
 }
 
 fn read(path: &str) -> String {
-    std::fs::read_to_string(root().join(path)).unwrap()
+    // A Windows checkout may turn line ends into CRLF; the contracts are about the text.
+    std::fs::read_to_string(root().join(path)).unwrap().replace("\r\n", "\n")
 }
 
 fn json(path: &str) -> Value {
@@ -118,9 +119,12 @@ fn scoped(pattern: &str, app: &str, os: &str) -> Option<Regex> {
         .env("PADDOCK_BUILD_FOLDER", format!("{win}/Users/x/.paddock-ci/target-{app}-app-s1"))
         .output()
         .unwrap();
-    out.status
-        .success()
-        .then(|| Regex::new(String::from_utf8_lossy(&out.stdout).trim()).unwrap())
+    // The script prints a separator class as `[/\\]`; where one backslash reaches it (`[/\]`) JavaScript took that for the class
+    // closing, so it is read here as the same separator class.
+    out.status.success().then(|| {
+        let text = String::from_utf8_lossy(&out.stdout).trim().replace("[/\\]", "[/\\\\]");
+        Regex::new(&text).unwrap()
+    })
 }
 
 fn scoped_all(app: &str, patterns: &[&str]) -> Vec<Option<Regex>> {
