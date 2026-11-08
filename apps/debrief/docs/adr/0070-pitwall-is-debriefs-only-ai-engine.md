@@ -518,7 +518,7 @@ after T.
 **Order.** AI-1, AI-2 and AI-4 are app-only and start now, before T, on the integration branch. That way M2c and M3b are
 built Pitwall-only from their first line (Q8). AI-3 follows M2c, because it renders the shared `<pd-needs-ai>` from
 `paddock-pitwall`'s snapshot and adds `state_for` there. Between AI-1 and AI-3, the integration branch shows Debrief 1.1's
-existing Pitwall messages (no release is cut from it).
+existing Pitwall messages (no release is cut from it). **AI-4 must land before any Debrief 1.2 release is cut**: until then the old model and runtime files are invisible in Settings ▸ Storage and the interim "Connect to Pitwall…" entry points stand in for the state cards.
 
 ## Plan delta (Debrief 1.2 plan, `ac85e26c7`)
 

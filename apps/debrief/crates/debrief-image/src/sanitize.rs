@@ -35,7 +35,7 @@ impl Default for ImageLimits {
     }
 }
 
-/// Default pixel budget of the copy sent to the model when its projector does not say (`ProjectorInfo::max_image_pixels`).
+/// Default pixel budget of the copy sent to the model (Pitwall's projector is not asked).
 pub const DEFAULT_TARGET_PIXELS: u64 = 1024 * 1024;
 /// Longest side of the copy, whatever the pixel budget (a very long, thin image is cut down too).
 pub const MAX_OUTPUT_SIDE: u32 = 4096;
@@ -243,6 +243,7 @@ fn encode(rgb: &RgbImage) -> Result<ImageInput, ImageError> {
 }
 
 /// Test images, made programmatically (never checked-in binaries).
+#[doc(hidden)]
 pub mod testing {
     use ::image::{ExtendedColorType, ImageEncoder, Rgb, RgbImage, Rgba, RgbaImage};
 

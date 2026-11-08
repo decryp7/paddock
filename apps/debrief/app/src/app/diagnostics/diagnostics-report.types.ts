@@ -40,7 +40,7 @@ export interface ReportManifest {
 }
 
 /** Kind of a child process Debrief supervises. */
-export type ChildKind = 'plugin-host' | 'plugin' | 'store-worker';
+export type ChildKind = 'plugin-host' | 'plugin' | 'store-worker' | 'unknown';
 
 /** `running`: alive when the report was made; `unknown`: the log ended without an exit line (Debrief itself stopped). */
 export type ChildRunState = 'running' | 'exited' | 'stopped' | 'crashed' | 'quarantined' | 'unknown';

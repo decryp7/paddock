@@ -13,7 +13,7 @@ export const AI_CHAT_EVENT = 'debrief://ai-chat';
 export type AiErrorCode =
   | 'unavailable'
   | 'noModel'
-  /** The active model cannot read images: install its image projector or choose a "Text + images" model. */
+  /** The model Pitwall serves cannot read images: choose a model that reads images in Pitwall. */
   | 'noVision'
   | 'busy'
   | 'cancelled'

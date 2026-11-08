@@ -17,7 +17,7 @@ pub struct RuntimeAsset {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeBuild {
     pub id: String,
-    /// The llama-server archive first, then runtimes unpacked next to it (CUDA's cudart).
+    /// The main archive first, then any archives unpacked next to it.
     pub assets: Vec<RuntimeAsset>,
 }
 

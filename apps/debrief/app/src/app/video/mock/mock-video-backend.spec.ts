@@ -147,7 +147,7 @@ describe('MockVideoBackend frames', () => {
     const b = new MockVideoBackend({ vision: false });
     const key = (await open(b)).record.key;
     for (const f of [() => b.generateDescriptions({ key, indices: [], redo: false }), () => b.explainFrames({ key, indices: [0] }), () => b.alignFromClock({ key, index: 0 })]) {
-      await expect(f()).rejects.toMatchObject({ code: 'noVision', hint: expect.stringContaining('Settings ▸ AI') });
+      await expect(f()).rejects.toMatchObject({ code: 'noVision', hint: expect.stringContaining('Pitwall') });
     }
   });
 

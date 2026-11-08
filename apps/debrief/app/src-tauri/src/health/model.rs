@@ -63,7 +63,7 @@ pub enum RepairAction {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RaiseCap {
-    /// Which process: the app's own id (`storeWorker`, `ai`, `plugin:<id>`).
+    /// Which process: the app's own id (`storeWorker`, `plugin:<id>`).
     pub target: String,
     pub suggested_mb: u32,
 }

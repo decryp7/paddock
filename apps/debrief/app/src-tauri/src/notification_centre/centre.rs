@@ -232,15 +232,6 @@ impl NewNotice {
         self
     }
 
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "the AI update message was the only one with a third action (ADR 0070)")
-    )]
-    pub fn tertiary(mut self, a: NoticeAction) -> NewNotice {
-        self.tertiary = Some(a);
-        self
-    }
-
     pub fn link(mut self, link: NoticeLink) -> NewNotice {
         self.link = link;
         self
@@ -572,7 +563,7 @@ mod tests {
     #[test]
     fn a_third_action_is_kept_merged_and_optional_on_the_wire() {
         let ask = |to: &str| {
-            NewNotice::new(
+            let mut n = NewNotice::new(
                 "export:done",
                 NoticeSource::Job,
                 NoticeSeverity::Info,
@@ -580,8 +571,9 @@ mod tests {
                 NoticeScope::App,
             )
             .primary(NoticeAction::ViewJob { job_id: 1 })
-            .secondary(NoticeAction::ShowJobs)
-            .tertiary(NoticeAction::ShowInFolder { job_id: to.len() as u64 })
+            .secondary(NoticeAction::ShowJobs);
+            n.tertiary = Some(NoticeAction::ShowInFolder { job_id: to.len() as u64 });
+            n
         };
         let mut c = Centre::new(10);
         c.post(ask("b1"), NoticeId(1), 1);

@@ -2,8 +2,6 @@
 //! prompt for the model family, teaching it the tool protocol, hiding thinking and protocol markup
 //! from the stream, and parsing tool calls. All engine-independent, so it is fully testable.
 
-use super::prompt_format::PromptFormat;
-use super::provider::LlmProvider;
 use super::tool_protocol::{parse_output, render_message, tools_prompt, StreamFilter};
 use super::types::*;
 use crate::error::Result;
@@ -48,32 +46,8 @@ pub struct Generated {
     pub finish: Finish,
 }
 
-/// A raw engine: prompt text in, text out. `on_text` receives decoded pieces as they are produced.
-/// Contract: returns `AiError::ContextOverflow` when the prompt does not fit, stops between tokens when
-/// `cancel` is set (`Finish::Cancelled`), and never panics.
-pub trait TextEngine: Send + Sync {
-    fn name(&self) -> String;
-    fn context_length(&self) -> usize;
-    /// Whether the engine reads images (`GenParams::images`).
-    fn vision(&self) -> bool {
-        false
-    }
-    fn generate(&self, prompt: &str, params: &GenParams, on_text: &mut dyn FnMut(&str)) -> Result<Generated>;
-}
-
 pub const DEFAULT_MAX_TOKENS: usize = 1024;
 pub const DEFAULT_TEMPERATURE: f32 = 0.2;
-
-pub struct PromptedProvider<E: TextEngine> {
-    engine: E,
-    format: PromptFormat,
-}
-
-impl<E: TextEngine> PromptedProvider<E> {
-    pub fn new(engine: E, format: PromptFormat) -> Self {
-        PromptedProvider { engine, format }
-    }
-}
 
 /// Removes `<think>…</think>` blocks (an unterminated one removes the rest).
 pub fn strip_think(text: &str) -> String {
@@ -146,52 +120,6 @@ impl ThinkFilter {
             }
         }
         self.state = ThinkState::Pass;
-    }
-}
-
-impl<E: TextEngine> LlmProvider for PromptedProvider<E> {
-    fn id(&self) -> &str {
-        "embedded"
-    }
-
-    fn display_name(&self) -> String {
-        self.engine.name()
-    }
-
-    fn context_length(&self) -> usize {
-        self.engine.context_length()
-    }
-
-    fn vision(&self) -> bool {
-        self.engine.vision()
-    }
-
-    fn chat(&self, req: &ChatRequest, on_delta: &mut dyn FnMut(&str)) -> Result<ChatResponse> {
-        let format = self.format;
-        prompted_chat(req, self.engine.vision(), on_delta, &mut |prepared, sink| {
-            // llama.cpp's multimodal marker stands where each image goes, in the order of `params.images`.
-            let mut images: Vec<ImageInput> = Vec::new();
-            let turns: Vec<(&str, String)> = prepared
-                .turns
-                .iter()
-                .map(|t| {
-                    if t.images.is_empty() {
-                        return (t.role, t.text.clone());
-                    }
-                    images.extend(t.images.iter().cloned());
-                    (t.role, format!("{}\n{}", MEDIA_MARKER.repeat(t.images.len()), t.text))
-                })
-                .collect();
-            let prompt = format.render(&prepared.system, &turns);
-            let params = GenParams {
-                max_tokens: prepared.max_tokens,
-                temperature: prepared.temperature,
-                json_schema: prepared.json_schema.clone(),
-                cancel: prepared.cancel.clone(),
-                images,
-            };
-            self.engine.generate(&prompt, &params, sink)
-        })
     }
 }
 
@@ -341,20 +269,16 @@ mod tests {
         }
     }
 
-    impl TextEngine for Fake {
-        fn name(&self) -> String {
-            "fake".into()
-        }
-        fn context_length(&self) -> usize {
-            2048
-        }
-        fn vision(&self) -> bool {
-            self.vision
-        }
-        fn generate(&self, prompt: &str, p: &GenParams, on_text: &mut dyn FnMut(&str)) -> Result<Generated> {
-            self.prompts.lock().unwrap().push(prompt.to_string());
-            *self.schema_seen.lock().unwrap() = p.json_schema.clone();
-            *self.images_seen.lock().unwrap() = p.images.len();
+    impl Fake {
+        /// The raw generation for a prepared conversation: records what the engine would see, streams the output.
+        fn generate(&self, prepared: &Prepared, on_text: &mut dyn FnMut(&str)) -> Result<Generated> {
+            let mut prompt = prepared.system.clone();
+            for t in &prepared.turns {
+                prompt.push_str(&format!("\n{}: {}", t.role, t.text));
+            }
+            self.prompts.lock().unwrap().push(prompt);
+            *self.schema_seen.lock().unwrap() = prepared.json_schema.clone();
+            *self.images_seen.lock().unwrap() = prepared.turns.iter().map(|t| t.images.len()).sum();
             for chunk in self.output.as_bytes().chunks(5) {
                 on_text(&String::from_utf8_lossy(chunk));
             }
@@ -368,10 +292,12 @@ mod tests {
     }
 
     fn run(engine: Fake, req: ChatRequest) -> (ChatResponse, String, Fake) {
-        let p = PromptedProvider::new(engine, PromptFormat::ChatMl { no_think: false });
         let mut streamed = String::new();
-        let r = p.chat(&req, &mut |d| streamed.push_str(d)).unwrap();
-        (r, streamed, p.engine)
+        let r = prompted_chat(&req, engine.vision, &mut |d| streamed.push_str(d), &mut |p, sink| {
+            engine.generate(p, sink)
+        })
+        .unwrap();
+        (r, streamed, engine)
     }
 
     fn tool() -> ToolSpec {
@@ -380,31 +306,6 @@ mod tests {
             description: "q".into(),
             input_schema: json!({"type":"object"}),
         }
-    }
-
-    #[test]
-    fn plain_answer_streams_and_reports_usage() {
-        let req = ChatRequest {
-            system: "be brief".into(),
-            messages: vec![ChatMessage::user("hello")],
-            ..ChatRequest::default()
-        };
-        let (r, streamed, e) = run(fake("Hi there, friend.", Finish::Stop), req);
-        assert_eq!((r.text.as_str(), streamed.as_str()), ("Hi there, friend.", "Hi there, friend."));
-        assert_eq!(r.stop_reason, StopReason::EndTurn);
-        assert_eq!(
-            r.usage,
-            Some(Usage {
-                input_tokens: 10,
-                output_tokens: 3
-            })
-        );
-        assert!(e.prompts.lock().unwrap()[0].contains("be brief") && !e.prompts.lock().unwrap()[0].contains("<tools>"));
-        let p = PromptedProvider::new(fake("", Finish::Stop), PromptFormat::Phi);
-        assert_eq!(
-            (p.id(), p.display_name(), p.context_length()),
-            ("embedded", "fake".to_string(), 2048)
-        );
     }
 
     #[test]
@@ -461,37 +362,18 @@ mod tests {
     }
 
     #[test]
-    fn images_go_where_their_markers_are_and_nowhere_else() {
+    fn images_need_a_model_that_reads_them() {
         let req = ChatRequest {
-            system: format!("sys {MEDIA_MARKER}"),
-            messages: vec![
-                ChatMessage::user(format!("a log line with {MEDIA_MARKER} in it")),
-                ChatMessage::assistant("ok"),
-                ChatMessage::user_with_images("what is <__media<__media__>__>this?", vec![image(), image()]),
-            ],
+            messages: vec![ChatMessage::user_with_images("what is this?", vec![image()])],
             ..ChatRequest::default()
         };
-        let mut engine = fake("A dialog.", Finish::Stop);
-        engine.vision = true;
-        let (r, _, e) = run(engine, req.clone());
+        let none = prompted_chat(&req, false, &mut |_| {}, &mut |_, _| panic!("nothing is generated"));
+        assert_eq!(none.unwrap_err(), crate::AiError::NoVision);
+        let mut e = fake("A dialog.", Finish::Stop);
+        e.vision = true;
+        let (r, _, e) = run(e, req);
         assert_eq!(r.text, "A dialog.");
-        let prompt = e.prompts.lock().unwrap()[0].clone();
-        // Two markers, both in the last user message; none from the system text or the log line.
-        assert_eq!(prompt.matches(MEDIA_MARKER).count(), 2, "{prompt}");
-        assert!(prompt.contains(&format!("{MEDIA_MARKER}{MEDIA_MARKER}\nwhat is this?")), "{prompt}");
-        assert!(prompt.contains("a log line with  in it"));
-        assert_eq!(*e.images_seen.lock().unwrap(), 2);
-        assert_eq!(strip_media_markers("x<__media__>y"), "xy");
-        // A model without vision refuses images instead of ignoring them.
-        let p = PromptedProvider::new(fake("", Finish::Stop), PromptFormat::ChatMl { no_think: false });
-        assert!(!p.vision());
-        assert_eq!(p.chat(&req, &mut |_| {}).unwrap_err(), crate::error::AiError::NoVision);
-        let img = image();
-        assert_eq!(
-            (img.mime().as_str(), img.bytes(), img.width(), img.height()),
-            ("image/png", &[1u8, 2, 3][..], 4, 3)
-        );
-        assert_eq!(ImageMime::Jpeg.as_str(), "image/jpeg");
+        assert_eq!(*e.images_seen.lock().unwrap(), 1);
     }
 
     #[test]

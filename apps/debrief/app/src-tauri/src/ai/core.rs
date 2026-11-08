@@ -236,6 +236,12 @@ impl AiCore {
     /// Applies new settings from the Settings screen. Pitwall is told what Debrief's prompts need.
     pub fn apply_settings(&self, next: AiSettings) -> AiResult<()> {
         let next = next.clamp();
+        // Unchanged settings write nothing: a 1.1 `ai.json` keeps the keys of the removed engine (the folders the user
+        // chose) until the old-files notice has been answered (ADR 0070 D6).
+        if next == self.settings() {
+            self.pitwall_needs();
+            return Ok(());
+        }
         self.update_settings(|s| *s = next.clone())?;
         self.pitwall_needs();
         Ok(())

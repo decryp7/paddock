@@ -70,7 +70,6 @@ pub fn wire<R: Runtime>(app: &AppHandle<R>, jobs: &Jobs) {
             crate::store_pane::ordering_job_finished(&handle, &f.job);
             finished(&handle, f)
         }
-        JobsEvent::Paused { kind, reason } => log::info!(Kind = format!("{kind:?}").as_str(); "A queue of jobs is paused: {reason}"),
     });
 }
 

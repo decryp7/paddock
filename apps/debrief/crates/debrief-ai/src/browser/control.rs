@@ -208,12 +208,6 @@ impl ChatBrowser {
     }
 }
 
-/// Agent mode works best with a model of 7 billion parameters or more; smaller ones lose track on long
-/// tasks. The UI shows a hint (never a block) when this is true.
-pub fn small_for_agent(params_b: Option<f64>) -> bool {
-    params_b.is_some_and(|p| p > 0.0 && p < 6.5)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,12 +302,5 @@ mod tests {
         assert_eq!(c.pace_wait(t), None);
         c.record_action(t);
         assert!(c.pace_wait(t).is_some());
-    }
-
-    #[test]
-    fn small_models_get_a_hint() {
-        assert!(small_for_agent(Some(4.0)) && small_for_agent(Some(1.5)));
-        assert!(!small_for_agent(Some(7.0)) && !small_for_agent(Some(8.2)) && !small_for_agent(Some(70.0)));
-        assert!(!small_for_agent(None) && !small_for_agent(Some(0.0)));
     }
 }

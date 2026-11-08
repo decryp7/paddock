@@ -130,9 +130,6 @@ const CONTEXT_MODES: readonly ContextMode[] = ['selection', 'view', 'none'];
             <span class="mi-text">
               <span class="mi-label">{{ browserLabel(m) }}</span>
               <span class="desc">{{ browserHint(m) }}</span>
-              @if (m === 'agent' && browserStatus()?.smallModel) {
-                <span class="desc warn" i18n="@@browser.chatBar.smallModel">Agent mode works best with a 7B or larger model; yours may lose track on long tasks.</span>
-              }
             </span>
           </button>
         }

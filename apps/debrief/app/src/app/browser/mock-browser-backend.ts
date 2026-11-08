@@ -55,7 +55,6 @@ export class MockWeb {
   readonly external: string[] = [];
   /** The step limit of a new task (Settings ▸ Web browser). */
   stepLimit = 25;
-  smallModel = false;
   /** Settings ▸ Web browser ▸ "Let the AI research the web automatically" (`?mockResearch=off` turns it off). */
   researchAuto = typeof window === 'undefined' || new URLSearchParams(window.location.search).get('mockResearch') !== 'off';
   /** "Open and let AI read it" hands the page to the chat; the mock AI backend sets this to ask the follow-up. */
@@ -90,7 +89,7 @@ export class MockWeb {
   status(sessionId: string): ChatBrowserStatus {
     let s = this.statuses.get(sessionId);
     if (!s) {
-      s = { sessionId, readAlong: false, agent: false, stepsUsed: 0, stepLimit: this.stepLimit, paused: false, sites: [], smallModel: this.smallModel, modelParamsB: this.smallModel ? 4 : 9, researchAuto: this.researchAuto };
+      s = { sessionId, readAlong: false, agent: false, stepsUsed: 0, stepLimit: this.stepLimit, paused: false, sites: [], researchAuto: this.researchAuto };
       this.statuses.set(sessionId, s);
     }
     return s;

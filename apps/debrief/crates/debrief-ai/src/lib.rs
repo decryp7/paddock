@@ -18,5 +18,8 @@ pub mod settings;
 pub mod vision;
 pub mod web;
 
+#[cfg(test)]
+mod removed_phrases;
+
 pub use access::{StoreAccess, StoreRef};
 pub use error::{AiError, Result};

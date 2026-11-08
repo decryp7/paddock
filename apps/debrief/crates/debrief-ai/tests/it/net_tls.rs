@@ -105,7 +105,7 @@ fn nothing_listening_is_offline_and_an_unreachable_proxy_is_the_proxy() {
     let err = via.get("https://huggingface.co/").call().unwrap_err();
     let e = net::classify(err, "huggingface.co", true);
     assert!(matches!(&e, AiError::Connection(n) if n.kind == NetKind::Proxy), "{e:?}");
-    assert!(e.to_string().contains("Download proxy"));
+    assert!(e.to_string().contains("proxy settings"));
 }
 
 #[test]

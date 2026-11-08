@@ -56,7 +56,7 @@ fn hello() -> ChatRequest {
 }
 
 #[test]
-fn a_paired_pitwall_answers_and_background_work_goes_behind_the_user() {
+fn a_paired_pitwall_answers_with_interactive_priority_and_nothing_is_sent_in_the_background() {
     let w = world("pw-paired", paired(), Some("pw_ok"));
     assert_eq!(w.core.status().state, EngineStateDto::NoModel, "before the first look");
     w.pw.probe();
@@ -76,7 +76,7 @@ fn a_paired_pitwall_answers_and_background_work_goes_behind_the_user() {
         .into_iter()
         .filter_map(|(_, h, _)| h.into_iter().find(|(n, _)| n == "x-pitwall-priority").map(|(_, v)| v))
         .collect();
-    assert_eq!(prio, ["interactive"]);
+    assert_eq!(prio, ["interactive"], "no feature sends background requests (rule 46)");
 }
 
 #[test]

@@ -5,7 +5,7 @@
 //!   (`rustls-platform-verifier`), so a corporate TLS-inspecting proxy (Zscaler, Netskope, ...) whose root
 //!   certificate IT installed in Windows works like in the browser. ureq's default would be the built-in
 //!   Mozilla list, which such proxies always fail. Certificate checking is never switched off.
-//! * A proxy is used only when the user configured one (the *Download proxy* setting), never from the
+//! * A proxy is used only when the user configured one (never read from the environment here), never from the
 //!   environment.
 //! * [`classify`] turns a transport error into an [`AiError::Connection`] with a [`NetKind`]: a certificate
 //!   problem, a proxy that wants a sign-in, an unreachable proxy, no network, a timeout or an HTTP status.
@@ -47,6 +47,24 @@ pub fn agent(cfg: &HttpConfig) -> Result<ureq::Agent> {
         .tls_config(tls_config())
         .build()
         .into())
+}
+
+/// The proxy the system prescribes for `url` under `rules` (`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` and `NO_PROXY`, then the
+/// operating system's), or `None` for a direct connection. Rules come from [`paddock_download::ProxyRules::detect`].
+pub fn system_proxy_for(url: &str, rules: &paddock_download::ProxyRules) -> Option<paddock_download::ProxyServer> {
+    rules.for_url(url).cloned()
+}
+
+/// Like [`agent`], through `proxy` (its login, if any, is applied by `paddock-download` and never printed).
+pub fn agent_via(cfg: &HttpConfig, proxy: &paddock_download::ProxyServer) -> Result<ureq::Agent> {
+    let dl = paddock_download::HttpConfig {
+        proxy: paddock_download::ProxyMode::Direct,
+        user_agent: "debrief-ai/0.1".into(),
+        connect_timeout: cfg.connect_timeout,
+        response_timeout: cfg.timeout,
+        max_redirects: 0,
+    };
+    paddock_download::ureq_agent(&dl, Some(proxy)).map_err(|e| AiError::Invalid(format!("invalid proxy: {e}")))
 }
 
 /// Why a request failed, in the user's terms. The UI shows a headline and next steps per kind.
@@ -100,19 +118,17 @@ impl fmt::Display for NetError {
             ),
             NetKind::ProxyAuth => write!(
                 f,
-                "the proxy asks for a sign-in ({}): put the user name and password in the Download proxy setting \
-                 (http://user:password@proxy:port), or download the file manually",
+                "the proxy asks for a sign-in ({}): sign in to it, or download the file manually",
                 self.detail
             ),
             NetKind::Proxy => write!(
                 f,
-                "the download proxy could not be used ({}): check the Download proxy setting in Settings → AI",
+                "the proxy could not be used ({}): check your system's proxy settings, or download the file manually",
                 self.detail
             ),
             NetKind::Offline => write!(
                 f,
-                "cannot reach {host} ({}): check that this computer is online; if your network needs a proxy, set Download \
-                 proxy in Settings → AI",
+                "cannot reach {host} ({}): check that this computer is online; if your network needs a proxy, check your system's proxy settings or download the file manually",
                 self.detail
             ),
             NetKind::Timeout => write!(
@@ -244,6 +260,32 @@ pub fn status_error(status: u16, host: &str, detail: &str) -> AiError {
 
 #[cfg(test)]
 mod tests {
+    fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |n| pairs.iter().find(|(k, _)| *k == n).map(|(_, v)| v.to_string())
+    }
+
+    /// The runtime download follows the system proxy (it used the AI download proxy before ADR 0070).
+    #[test]
+    fn the_system_proxy_applies_and_no_proxy_is_respected() {
+        let rules =
+            |pairs: &[(&str, &str)]| paddock_download::ProxyRules::detect_with(&env(pairs), &paddock_download::ProxyRules::none).unwrap();
+        let url = "https://github.com/ggml-org/x.zip";
+        let with = rules(&[("HTTPS_PROXY", "http://proxy.corp:3128")]);
+        let p = system_proxy_for(url, &with).expect("HTTPS_PROXY applies");
+        assert_eq!((p.host(), p.port()), ("proxy.corp", 3128));
+        let skipped = rules(&[("HTTPS_PROXY", "http://proxy.corp:3128"), ("NO_PROXY", "github.com")]);
+        assert_eq!(system_proxy_for(url, &skipped), None, "NO_PROXY is respected");
+        assert_eq!(system_proxy_for(url, &rules(&[])), None, "no proxy configured: direct");
+        let client = HttpConfig {
+            proxy: None,
+            connect_timeout: Duration::from_secs(5),
+            timeout: Duration::from_secs(10),
+        };
+        let agent = agent_via(&client, &p).unwrap();
+        assert!(agent.config().proxy().is_some(), "the client is built with the proxy");
+        assert!(super::agent(&client).unwrap().config().proxy().is_none());
+    }
+
     use super::*;
     use std::io::{Error as IoError, ErrorKind};
 
@@ -347,8 +389,8 @@ mod tests {
         let tls = m(NetKind::Tls);
         assert!(!tls.contains("secret") && tls.contains("https://cdn.hf.co/x failed"), "{tls}");
         assert!(tls.contains(trust_store()));
-        assert!(m(NetKind::ProxyAuth).contains("user:password"));
-        assert!(m(NetKind::Proxy).contains("Download proxy"));
+        assert!(m(NetKind::ProxyAuth).contains("sign-in"));
+        assert!(m(NetKind::Proxy).contains("proxy settings"));
         assert!(m(NetKind::Offline).contains("online"));
         assert!(m(NetKind::Timeout).contains("in time"));
         assert!(m(NetKind::Http(403)).contains("block"));

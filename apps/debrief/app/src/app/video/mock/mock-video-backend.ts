@@ -368,7 +368,7 @@ export class MockVideoBackend extends VideoBackend {
 
   async generateDescriptions(request: FramesRequest): Promise<VideoView> {
     const r = this.get(request.key);
-    if (!this.vision) throw fail('noVision', 'The active model reads text only.', { hint: 'Add its image support or choose a model that reads images in Settings ▸ AI.' });
+    if (!this.vision) throw fail('noVision', 'The active model reads text only.', { hint: 'Choose a model that reads images in Pitwall.' });
     const wanted = request.indices.length ? request.indices : r.frames.map((_, i) => i);
     for (const i of wanted) {
       const f = r.frames[i];
@@ -391,7 +391,7 @@ export class MockVideoBackend extends VideoBackend {
 
   async explainFrames(request: ExplainRangeRequest): Promise<FrameExplanation> {
     const r = this.get(request.key);
-    if (!this.vision) throw fail('noVision', 'The active model reads text only.', { hint: 'Add its image support or choose a model that reads images in Settings ▸ AI.' });
+    if (!this.vision) throw fail('noVision', 'The active model reads text only.', { hint: 'Choose a model that reads images in Pitwall.' });
     if (!request.indices.length || request.indices.length > 4) throw fail('invalid', 'Choose one to four frames.');
     return { text: `In ${r.name}, the shopper fills in the payment form and the payment then fails (${request.indices.length} frames read).` };
   }
@@ -414,7 +414,7 @@ export class MockVideoBackend extends VideoBackend {
 
   async alignFromClock(frame: FrameRef): Promise<VideoView> {
     const { r, f } = this.frameOf(frame);
-    if (!this.vision) throw fail('noVision', 'The active model reads text only.', { hint: 'Add its image support or choose a model that reads images in Settings ▸ AI.' });
+    if (!this.vision) throw fail('noVision', 'The active model reads text only.', { hint: 'Choose a model that reads images in Pitwall.' });
     // The demo screens show a clock reading 10:42:07 at 12 s.
     const text = new Date(SESSION_START + 2 * 60_000 + 7_000 + (f.videoMs - 12_000)).toISOString().slice(11, 19);
     r.clock = { frameMs: f.videoMs, shown: [{ text, hasDate: false }] };

@@ -10,6 +10,7 @@ mod assistant_usecases;
 mod browser;
 mod chat;
 mod find_names;
+mod github_releases;
 mod incident_ai;
 mod net_tls;
 mod parser_generation;

@@ -49,6 +49,9 @@ pub enum ChildKind {
     Plugin,
     /// The store worker (DuckDB and the full-text indexes of every window, ADR 0014).
     StoreWorker,
+    /// A kind this version does not know (a log written by an older Debrief: its AI worker and llama-server).
+    #[serde(other)]
+    Unknown,
 }
 
 impl ChildKind {
@@ -57,6 +60,7 @@ impl ChildKind {
             ChildKind::PluginHost => "plugin-host",
             ChildKind::Plugin => "plugin",
             ChildKind::StoreWorker => "store-worker",
+            ChildKind::Unknown => "unknown",
         }
     }
 
@@ -66,6 +70,7 @@ impl ChildKind {
             ChildKind::PluginHost => "Isolated plugin",
             ChildKind::Plugin => "Plugin process",
             ChildKind::StoreWorker => "Store worker",
+            ChildKind::Unknown => "Earlier component",
         }
     }
 }
@@ -327,6 +332,9 @@ pub fn summarize(name: &str, text: &str) -> Option<ProcessSummary> {
             continue;
         }
         let kind = line.kind.unwrap_or(ChildKind::Plugin);
+        if kind == ChildKind::Unknown {
+            log::debug!(Child = name; "A child log of a component this version no longer has is summarised as unknown");
+        }
         summary.get_or_insert_with(|| ProcessSummary::new(name, kind)).apply(&line);
     }
     if let Some(s) = summary.as_mut() {
@@ -935,6 +943,16 @@ mod tests {
             assert_eq!(Exit::parse_wire(&e.wire()), e);
         }
         assert_eq!(Exit::parse_wire("code x"), Exit::Unknown);
+    }
+
+    #[test]
+    fn a_log_of_a_removed_component_is_still_summarised() {
+        // A 1.1 diagnostic bundle: the AI worker's lines (ADR 0070) carry a kind this version does not have.
+        let text = "{\"@t\":\"2026-10-14T13:01:00.000Z\",\"Event\":\"start\",\"ChildKind\":\"ai-worker\",\"Pid\":7}\n\
+                    {\"@t\":\"2026-10-14T13:02:00.000Z\",\"Event\":\"crash\",\"ChildKind\":\"ai-worker\",\"Pid\":7,\"Exit\":\"exit code 3\"}\n";
+        let s = summarize("ai-worker", text).expect("not silently skipped");
+        assert_eq!(s.kind, ChildKind::Unknown);
+        assert_eq!(s.state, ChildRunState::Crashed);
     }
 
     #[test]

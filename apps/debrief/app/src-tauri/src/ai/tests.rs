@@ -177,6 +177,30 @@ fn proposal_samples_come_from_the_ui_or_the_selected_event() {
 }
 
 #[test]
+fn applying_unchanged_settings_keeps_the_keys_of_a_1_1_file() {
+    let f = Fixture::new("keeps-old-keys");
+    let dir = f.tmp.0.join("ai");
+    std::fs::create_dir_all(&dir).unwrap();
+    let old = r#"{"version":1,"context_length":8192,"max_tokens":1024,"temperature":0.2,"models_dir":"/chosen/models","llama_server_path":"/chosen/llama-server"}"#;
+    std::fs::write(dir.join("ai.json"), old).unwrap();
+    let core = f.core();
+    // What Settings does at start: it applies the section's values, here the very same ones.
+    core.apply_settings(core.settings()).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(dir.join("ai.json")).unwrap(),
+        old,
+        "AI-4 still finds the chosen folders"
+    );
+    // A real change writes the file (and drops the keys of the removed engine).
+    let mut next = core.settings();
+    next.max_tokens = 512;
+    core.apply_settings(next).unwrap();
+    let saved: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("ai.json")).unwrap()).unwrap();
+    assert_eq!(saved["max_tokens"], 512);
+    assert!(saved.get("models_dir").is_none());
+}
+
+#[test]
 fn safe_mode_and_a_missing_pitwall_are_typed_errors() {
     let f = Fixture::new("unavailable");
     // Safe mode: AI is off, every command says so.

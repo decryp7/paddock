@@ -20,8 +20,8 @@ pub enum AiError {
     Browser(String),
     #[error("the conversation does not fit the model's context window ({prompt} of {limit} tokens)")]
     ContextOverflow { prompt: usize, limit: usize },
-    /// Images were given to a model that cannot read them (no image projector installed for it).
-    #[error("the active model cannot read images: install its image support (projector) or choose a model marked \"Text + images\"")]
+    /// Images were given to a model that cannot read them.
+    #[error("the model Pitwall serves for Debrief cannot read images: choose a model that reads images in Pitwall")]
     NoVision,
     /// Pitwall has no model that fits the memory (or the request does not fit the model's memory).
     #[error("not enough memory: {0}")]

@@ -38,9 +38,6 @@ import { BrowserLauncher } from './provide-browser';
       }
       @if (status()?.agent) {
         <p class="note small" i18n="@@browser.chatBar.agentNote">A real browser window will open next to the app, and the AI may drive it one step at a time. New sites, typing and forms need your approval; it stops for logins, payments and CAPTCHAs.</p>
-        @if (status()?.smallModel) {
-          <p class="hint small" role="note" data-testid="chat-small-model" i18n="@@browser.chatBar.smallModel">Agent mode works best with a 7B or larger model; yours may lose track on long tasks.</p>
-        }
       }
       @if (store.researchBrowserKept()) {
         <p class="note small row" role="status" data-testid="research-browser-kept">

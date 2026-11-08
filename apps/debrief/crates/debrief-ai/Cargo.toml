@@ -12,6 +12,8 @@ description = "AI assistant for Debrief on Pitwall: engine-validated proposals, 
 debrief-core = { path = "../debrief-core" }
 debrief-collect = { path = "../debrief-collect" }
 debrief-image = { path = "../debrief-image" }
+# The system proxy rules (HTTPS_PROXY, NO_PROXY, the operating system's) and the TLS/proxy agent set-up (ER-22).
+paddock-download = { path = "../../../../crates/paddock-download" }
 base64.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }

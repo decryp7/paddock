@@ -1,6 +1,6 @@
 //! Images through the AI commands (ADR 0025): opening and pasting images (decoded in Rust, the clean copy
 //! only), the no-vision refusal, explaining an image, "find related logs" end to end with a scripted model that
-//! reads images (the engine searches the samples), the chat's image turns, and image support for a model.
+//! reads images (the engine searches the samples), the chat's image turns.
 
 use super::*;
 use base64::Engine as _;
