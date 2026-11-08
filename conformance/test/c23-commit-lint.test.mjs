@@ -121,3 +121,36 @@ test('commit-lint: waivers of other checks are ignored, and the conformance run 
   assert.equal(res.errors, 0, JSON.stringify(res.findings));
   assert.equal(res.waived.length, 1);
 });
+
+test('C23 commit waivers match exactly: 10 or 40 hex characters, any case; a glob or other form warns and waives nothing', async () => {
+  for (const form of [(sha) => sha, (sha) => sha.toUpperCase()]) {
+    const w = waiverRepo((sha) => W(`commit ${form(sha)}`));
+    assert.equal(run(w.dir).code, 0, 'commit-lint: a full sha, in any case');
+    const res = await runChecks({ root: w.dir, app: 'demo', only: ['C23'] });
+    assert.equal(res.errors, 0, JSON.stringify(res.findings));
+    assert.equal(res.waived.length, 1, 'the conformance run agrees');
+  }
+  for (const bad of ['commit *', 'commit 5*', 'commit abc', 'commit 0123456789abcdef']) {
+    const w = waiverRepo(() => W(bad));
+    const r = run(w.dir);
+    assert.equal(r.code, 1, bad);
+    assert.match(r.out, /commit waiver/, bad);
+  }
+  const star = waiverRepo((sha) => W(`commit ${sha.slice(0, 5)}*`));
+  assert.equal((await runChecks({ root: star.dir, app: 'demo', only: ['C23'] })).errors > 0, true, 'a glob waives nothing in the conformance run either');
+});
+
+test('commit-lint --first-parent also lints the merge commit itself (its Merge header is exempt, its attribution is not)', () => {
+  const dir = repo(['feat: one']);
+  const git = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.test', '-c', 'commit.gpgsign=false', ...a], { cwd: dir, stdio: 'pipe', encoding: 'utf8' });
+  const base = git('rev-parse', 'HEAD').trim();
+  git('checkout', '-q', '-b', 'f');
+  git('commit', '-q', '--allow-empty', '-m', 'wip: branch work');
+  git('checkout', '-q', '-');
+  git('merge', '-q', '--no-ff', '-m', 'Merge f\n\nClaude-Session: https://claude.ai/code/session_x', 'f');
+  const log = [];
+  assert.equal(commitLintMain(['--first-parent', '--range', `${base}..HEAD`], dir, (l) => log.push(l)), 1);
+  assert.match(log.join('\n'), /Claude-Session/);
+  assert.doesNotMatch(log.join('\n'), /wip: branch work/);
+  assert.equal(commitLintMain(['--range', `${base}..HEAD`], dir, () => {}), 1, 'without the flag the wip commit and the merge fail');
+});
