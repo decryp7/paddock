@@ -1070,3 +1070,36 @@ owner = "Dyno security fix (fix/dyno-no-shared-tmp-fallback)"
 since = 2026-11-08
 review_by = 2026-11-22
 approved = "coordinator"
+
+[[not_gated]]
+id = "C62"
+reason = "warnings only until the Debrief limit list is reasoned (ADR 0019 phases it); no CI line runs it"
+owner = "Debrief 1.2 (ADR 0019 limits)"
+since = 2026-11-09
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-store-duck/tests/import_ready.rs"
+tests = ["import_until_search_is_ready"]
+gate = "not-gated"
+reason = "import-until-search-ready measurement on a real log folder (DEBRIEF_READY_CORPUS, DEBRIEF_READY_STORE): its results block (rule 48) is in apps/debrief/docs/performance.md, run by hand"
+owner = "Debrief 1.2"
+since = 2026-11-09
+review_by = 2027-01-07
+approved = "coordinator"
+
+# Debrief never adopted the lint preset (ADR 0060 3.2, 7): a release's worth of work, so a ratchet, not a 60-day exception. The
+# workspace tables are in apps/debrief/Cargo.toml, C13 runs in debrief.yml with these members exempt from the opt-in and these
+# clippy.toml paths allowed to be missing (clippy.toml applies to the whole workspace, so a path with uncleaned call sites cannot be
+# added yet), and `./dev gates ratchet --release-tag` refuses a debrief-v1.2.0 tag (or a later one) while either list is not
+# empty. Both lists only shrink. The whole cleanup (both clippy paths and all 46 members) stays in Debrief 1.2.
+# approved: user 2026-11-08 (target debrief-v1.2.0, not v1.3.0); scope decided again by the user 2026-11-09.
+[[ratchet]]
+id = "C13"
+app = "debrief"
+not_yet = ["app/src-tauri", "crates/cargo-debrief-plugin", "crates/chromium-driver", "crates/debrief-agent", "crates/debrief-ai", "crates/debrief-ai-worker", "crates/debrief-alloc", "crates/debrief-batch", "crates/debrief-cli", "crates/debrief-collect", "crates/debrief-core", "crates/debrief-dump", "crates/debrief-etw", "crates/debrief-ipc", "crates/debrief-monitor", "crates/debrief-notes", "crates/debrief-pdf", "crates/debrief-plugin-api", "crates/debrief-plugin-dotnet", "crates/debrief-plugin-dumps", "crates/debrief-plugin-e2e", "crates/debrief-plugin-formats", "crates/debrief-plugin-host", "crates/debrief-plugin-native", "crates/debrief-plugin-otel", "crates/debrief-plugin-package", "crates/debrief-plugin-profiling", "crates/debrief-plugin-registry", "crates/debrief-plugin-syslog", "crates/debrief-plugin-test", "crates/debrief-plugin-tools", "crates/debrief-plugin-web", "crates/debrief-plugin-windows", "crates/debrief-plugins", "crates/debrief-profile", "crates/debrief-store-client", "crates/debrief-store-duck", "crates/debrief-store-worker", "crates/debrief-symbols", "crates/debrief-video", "examples/plugins/annotator-example", "examples/plugins/collector-example", "examples/plugins/importer-example", "examples/plugins/tool-example", "examples/plugins/transform-example", "xtask"]
+clippy_not_yet = ["std::env::temp_dir", "reqwest::Client::new"]
+owner = "Debrief 1.2 DBR-LINT (docs/plans/debrief-1-2.md)"
+target = "debrief-v1.2.0"
+approved = "user"

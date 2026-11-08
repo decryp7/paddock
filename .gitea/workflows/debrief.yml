@@ -113,14 +113,15 @@ jobs:
           fi
           echo "run=$run" >> "$GITHUB_OUTPUT"
 
-      # ADR 0060 3.2: the lint-adoption list of Debrief (docs/gates.toml [[ratchet]] C13) must be empty before the release it names
-      # (debrief-v1.2.0) or any later one is tagged. A tag run refuses at once, before anything is built.
+      # ADR 0060 3.2: the lint-adoption ratchet of Debrief (docs/gates.toml [[ratchet]] C13) must be empty before the release it names
+      # (debrief-v1.2.0) or a later one is tagged. A tag run refuses at once, before anything is built. Only the ratchets of this
+      # tag's app can refuse it: no other C100 finding (a register date, another app's gap) blocks a Debrief release (ER-31).
       - uses: ./.gitea/actions/setup-rust
         if: startsWith(github.ref, 'refs/tags/debrief-v')
-      - name: Refuse the tag while members have not adopted the lint preset (C100)
+      - name: Refuse the tag while the lint adoption list is not empty (C100 ratchet)
         if: startsWith(github.ref, 'refs/tags/debrief-v')
         working-directory: .
-        run: ./dev gates check --release-tag "$GITHUB_REF_NAME"
+        run: ./dev gates ratchet --release-tag "$GITHUB_REF_NAME"
 
   # The checks run as parallel jobs; the installers and smoke tests (full runs only) wait for rust-lint. Each Rust job ends
   # with sccache-stats (the hit rate in its log).
