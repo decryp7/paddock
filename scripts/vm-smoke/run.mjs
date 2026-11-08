@@ -353,6 +353,8 @@ async function main(argv) {
           if ((await ld.readSwitch()) === 'on' && (await ld.pressSwitch())) { const a = await ld.apply(); switchedOff = a.ok; }
           await gui.closeSettings();
           const wasState = await btm();
+          const btmDyno = async () => (await exec('sudo sfltool dumpbtm 2>&1 | grep -i -B3 -A14 dyno | head -120')).stdout;
+          const dumpBefore = await btmDyno();
           if (o.only && wasState !== 'off') { // ER-33: the precondition is checked first; the Quit and the reopen are not run on a bad start
             if (switchedOff && (await ld.readSwitch()) === 'off' && (await ld.pressSwitch())) await ld.apply();
             await gui.closeSettings();
@@ -367,8 +369,12 @@ async function main(argv) {
           const back = (await exec('pgrep -x dyno-agent >/dev/null')).code === 0;
           const notice = (await exec(`log show --start "${t0}" --info --style compact --predicate 'eventMessage CONTAINS[c] "Background Items Added" OR eventMessage CONTAINS[c] "background item" AND eventMessage CONTAINS[c] "dyno"' 2>&1 | grep -c -i "background item"`)).stdout.trim();
           const nowState = await btm();
+          const dumpAfter = await btmDyno();
+          // Source of any "Background Items Added" line: the process, subsystem and message, so the notice can be told from Dyno re-registering its item.
+          const noticeLines = (await exec(`log show --start "${t0}" --info --debug --style syslog --predicate 'eventMessage CONTAINS[c] "Background Items Added" OR eventMessage CONTAINS[c] "background item" OR subsystem == "com.apple.backgroundtaskmanagement" OR process == "backgroundtaskmanagementd" OR eventMessage CONTAINS[c] "SMAppService"' 2>&1 | tail -n 120`)).stdout;
           const reopen = rowStep(ROW_TITLES.macReopen, judgeMacReopen({ agentBack: back, notificationSeen: /^\d+$/.test(notice) ? Number(notice) > 0 : null, loginItemWasOff: wasState === 'unreadable' ? null : wasState === 'off', loginItemNowOff: nowState === 'unreadable' ? null : nowState === 'off' }), 'the agent is back, the Login Items choice held');
           reopen.evidence = [...(reopen.evidence ?? []), `login item before Quit and stop: ${wasState} (${switchedOff ? 'switched off with Dyno\'s own switch and saved' : 'not switched by this row'}); after the reopen: ${nowState}`];
+          reopen.evidence.push(`sfltool dumpbtm (Dyno entries) BEFORE Quit and stop:\n${dumpBefore}`, `sfltool dumpbtm (Dyno entries) AFTER the reopen:\n${dumpAfter}`, `unified log since ${t0} (background task management, SMAppService, Background Items):\n${noticeLines}`);
           // Put Start at login back on for the rows after this one.
           const sw0 = switchedOff ? await ld.readSwitch() : 'n/a';
           const restored = switchedOff && sw0 === 'off' && (await ld.pressSwitch()) ? (await ld.apply()).ok : false;
