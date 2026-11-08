@@ -50,3 +50,9 @@ export function firstBrokenPrecondition(facts, rows) {
   for (const p of PRE) if ((p.rows === null || rows.some((n) => p.rows.includes(n))) && !(p.unless && rows.includes(p.unless)) && !facts[p.key]) return p.name;
   return null;
 }
+
+/** True when the Jobs list evidence (the lines before the Dyno log section) shows the heading "The jobs could not be read". */
+export function staleJobsReadError(evidence) {
+  const cut = evidence.findIndex((l) => /^--- Dyno log lines/.test(l));
+  return (cut < 0 ? evidence : evidence.slice(0, cut)).some((l) => /jobs could not be read/i.test(l));
+}

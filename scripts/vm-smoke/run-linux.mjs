@@ -26,7 +26,7 @@ import { mcpStep, quitStopStep } from './mcp-judges.mjs';
 import { hungPageStep } from './hung-page.mjs';
 import { diskSpaceStep, unixAdapter } from './disk-space-row.mjs';
 import { discoveryStep, unixDiscoveryPrims } from './discovery-row.mjs';
-import { firstBrokenPrecondition, onlyRequired, parseOnly } from './only-rows.mjs';
+import { firstBrokenPrecondition, onlyRequired, parseOnly, staleJobsReadError } from './only-rows.mjs';
 import { NOT_DRIVEN, ROW_TITLES, judgeLinuxHelperLogDir, notDriven, rowStep } from './release-rows.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -334,6 +334,8 @@ async function main(argv) {
       // ER-27: Dyno's own log lines about jobs (app and agent logs, with their time), so a "The jobs could not be read" in the list has its cause beside it.
       const jobLog = g('for f in $(find ~/.local ~/.cache -name "*.log" -path "*yno*" 2>/dev/null); do echo "== $f"; grep -i -E "job" "$f" | tail -n 60; done; echo "== now: $(date +%T)"').stdout.split('\n');
       s19.evidence = [...(s19.evidence ?? []), '--- Dyno log lines about jobs (every Dyno log in the guest)', ...jobLog];
+      // The Jobs-list fix (shared store): after the MCP row's agent kill and relaunch the panel must not keep the read error once the agent is back.
+      if (want(17)) push(result('Jobs panel after the agent was killed and the app relaunched: no stale read error', [{ ok: !staleJobsReadError(s19.evidence), detail: staleJobsReadError(s19.evidence) ? 'the Jobs panel still shows "The jobs could not be read" with the agent back' : 'the Jobs panel shows no "The jobs could not be read" after the relaunch' }], s19.evidence.slice(0, 6), 'no stale read error'));
       press('^Dyno$'); await sleep(1000);
     }
 

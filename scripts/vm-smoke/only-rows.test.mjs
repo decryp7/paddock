@@ -61,3 +61,10 @@ test('run-linux.mjs --only makes a partial run, and the restart rows switch the 
   assert.throws(() => parseArgs([...base, '--only']), /needs a value/);
   assert.throws(() => parseArgs([...base, '--only', '99']), /no such row/);
 });
+
+test('the stale "jobs could not be read" heading is found in the Jobs list evidence, not in the log lines after it', async () => {
+  const { staleJobsReadError } = await import('./only-rows.mjs');
+  assert.equal(staleJobsReadError(['jobs list: heading  The jobs could not be read | list item  X', '--- Dyno log lines about jobs (every Dyno log in the guest)']), true);
+  assert.equal(staleJobsReadError(['jobs list: list item  X', '--- Dyno log lines about jobs (every Dyno log in the guest)', 'The jobs could not be read']), false);
+  assert.equal(staleJobsReadError([]), false);
+});
