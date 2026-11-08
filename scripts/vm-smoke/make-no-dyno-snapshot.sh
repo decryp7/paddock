@@ -4,10 +4,11 @@
 #   PLOCK_DIR=/private/tmp/claude-501/vm-lock PLOCK_PAR_LOAD=0 plock run <name> -- scripts/vm-smoke/make-no-dyno-snapshot.sh
 # The VM is reverted to gui-session-tools, started, cleaned over SSH, stopped, snapshotted; nothing edits the vmx.
 set -euo pipefail
-VMWIN="${PADDOCK_VM_WIN:-$(cd "$(dirname "$0")/.." && pwd)/vm-win.sh}" # the repo copy unless overridden (ADR 0040 §1)
+HERE="$(cd "$(dirname "$0")" && pwd)"
+VMWIN="$HERE/../vm-win.sh" # the repo driver; it refuses any VM but paddock-win11-test itself (ADR 0040 §1)
 FROM=gui-session-tools; NEW=gui-session-tools-no-dyno
 VMRUN="/Applications/VMware Fusion.app/Contents/Public/vmrun"
-VMX="${PADDOCK_WIN_VMX:-/Volumes/d7sst7/vms/paddock-win11-test/vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx}"
+VMX="$(node "$HERE/win-vm-target.mjs" --vmx)" || exit 2 # only paddock-win11-test, checked before vmrun (review P1-1)
 if "$VMRUN" listSnapshots "$VMX" | grep -qx "$NEW"; then echo "snapshot $NEW already exists: nothing to do"; exit 0; fi
 if bash "$VMWIN" status | grep -q running; then echo "::error::the Windows test VM is running (another job?); not touching it"; exit 2; fi
 trap 'bash "$VMWIN" stop >/dev/null 2>&1 || true' ERR

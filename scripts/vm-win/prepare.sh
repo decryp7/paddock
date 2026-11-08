@@ -22,7 +22,8 @@
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
-dir=${PADDOCK_WIN_VM_DIR:-/Volumes/d7sst7/vms/paddock-win11-test}
+. "$here/target.sh"
+dir=${PADDOCK_WIN_VM_DIR:-$WIN_VM_DIR}
 fusion=${FUSION_APP:-/Applications/VMware Fusion.app}
 lib="$fusion/Contents/Library"
 name=paddock-win11-test
@@ -55,6 +56,7 @@ fi
 [[ $input_locale =~ ^[0-9a-fA-F]{4}:[0-9a-fA-F]{8}$ ]] || die "--input-locale must look like 0809:00000809, got $input_locale"
 
 case "$dir/" in "$HOME"/*) die "PADDOCK_WIN_VM_DIR must not be under \$HOME (ER-14): $dir" ;; esac
+check_target "$dir" "$fusion"
 [ -d "$lib" ] || die "VMware Fusion not found at $fusion (set FUSION_APP)"
 load=$(sysctl -n vm.loadavg | awk '{print $2}')
 awk -v l="$load" -v m="$max_load" 'BEGIN{exit !(l<m)}' || die "1-minute load $load is not under $max_load; try again later"

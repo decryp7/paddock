@@ -29,7 +29,7 @@ COMMIT="${COMMIT:0:12}"
 # Windows: a snapshot with the session tools and NO Dyno (a per-user Dyno makes the per-machine installer refuse). Made once by make-no-dyno-snapshot.sh.
 export PADDOCK_WIN_SNAPSHOT="${PADDOCK_WIN_SNAPSHOT:-gui-session-tools-no-dyno}"
 VMRUN="/Applications/VMware Fusion.app/Contents/Public/vmrun"
-VMX="${PADDOCK_WIN_VMX:-/Volumes/d7sst7/vms/paddock-win11-test/vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx}"
+VMX="$(node "$HERE/win-vm-target.mjs" --vmx)" || exit 2 # only paddock-win11-test, checked before vmrun (review P1-1)
 "$VMRUN" listSnapshots "$VMX" 2>/dev/null | grep -qx "$PADDOCK_WIN_SNAPSHOT" || { echo "::error::the Windows snapshot '$PADDOCK_WIN_SNAPSHOT' does not exist: run scripts/vm-smoke/make-no-dyno-snapshot.sh under the VM lock first"; exit 2; }
 FOLDER="$OUT/run-$RUN"
 mkdir -p "$FOLDER"

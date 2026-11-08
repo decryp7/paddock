@@ -10,9 +10,10 @@ import { spawn, spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { VMWIN } from './vm-win-path.mjs';
+import { WIN_VM_DIR } from './win-vm-target.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const VMDIR = process.env.PADDOCK_WIN_VM_DIR ?? '/Volumes/d7sst7/vms/paddock-win11-test';
+const VMDIR = WIN_VM_DIR; // no override (review P1-1)
 const LOCAL = 19222;
 
 /** The SSH tunnel to the guest's DevTools port; returns { close }. Bounded by the caller's lifetime. */

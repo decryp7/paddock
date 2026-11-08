@@ -3,7 +3,7 @@
 // folder and the DHCP leases are invented.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, describe, test } from 'node:test';
@@ -102,9 +102,85 @@ describe('guard rails', () => {
   });
 
   test('vm-win.sh says what to do when the VM is not prepared', () => {
-    const r = run('vm-win.sh', ['status'], { PADDOCK_WIN_VM_DIR: join(scratch, 'none') });
+    const fusion = join(scratch, 'NoneFusion.app');
+    mkdirSync(join(fusion, 'Contents/Library'), { recursive: true });
+    const r = run('vm-win.sh', ['status'], { PADDOCK_WIN_VM_DIR: join(scratch, 'none'), FUSION_APP: fusion });
     assert.notEqual(r.status, 0);
     assert.match(r.stderr, /run scripts\/vm-win\/prepare\.sh first/);
+  });
+});
+
+// P1 of the 2026-11-08 review: only the test VM can ever be the target. A fake VM is allowed only with a fake Fusion AND a
+// folder under $TMPDIR; every other folder is refused before vmrun, ssh, scp or any file write.
+describe('only paddock-win11-test can be the target', () => {
+  const fakeFusion = (label) => {
+    const fusion = join(scratch, `${label}Fusion.app`);
+    const log = join(scratch, `${label}-calls.log`);
+    mkdirSync(join(fusion, 'Contents/Library'), { recursive: true });
+    writeFileSync(join(fusion, 'Contents/Library/vmrun'), `#!/bin/sh\necho "vmrun $*" >> '${log}'\necho "Total running VMs: 0"\n`);
+    chmodSync(join(fusion, 'Contents/Library/vmrun'), 0o755);
+    const bin = join(scratch, `${label}-bin`);
+    mkdirSync(bin, { recursive: true });
+    for (const tool of ['ssh', 'scp', 'security', 'hdiutil']) {
+      writeFileSync(join(bin, tool), `#!/bin/sh\necho "${tool} $*" >> '${log}'\nexit 1\n`);
+      chmodSync(join(bin, tool), 0o755);
+    }
+    return { fusion, log, path: `${bin}:${process.env.PATH}` };
+  };
+  const calls = (log) => (existsSync(log) ? readFileSync(log, 'utf8') : '');
+  const commands = [['status'], ['start', '--no-wait'], ['stop'], ['ssh', 'exit 0'], ['put', 'paddock-test', '/etc/hosts', 'C:\\x'], ['gui-setup'],
+    ['snapshot', 'x'], ['revert', 'x'], ['ip'], ['install'], ['baseline']];
+
+  test('another VM folder outside $TMPDIR is refused by every command, even with a fake Fusion, before any call', () => {
+    const f = fakeFusion('Other');
+    const other = '/Volumes/no-such-volume-paddock-test/vms/someone-elses-vm'; // not creatable, so a regression cannot leave a folder behind
+    for (const args of commands) {
+      const r = run('vm-win.sh', args, { PADDOCK_WIN_VM_DIR: other, FUSION_APP: f.fusion, PATH: f.path, PADDOCK_VM_MAX_LOAD: '100000' });
+      assert.notEqual(r.status, 0, `${args[0]} was not refused`);
+      assert.match(r.stderr, /only drives \/Volumes\/d7sst7\/vms\/paddock-win11-test/, `${args[0]}: ${r.stderr}`);
+    }
+    assert.equal(calls(f.log), '');
+    assert.equal(existsSync(other), false);
+  });
+
+  test('a fake folder under $TMPDIR is refused with the real Fusion (no fake mode without a fake Fusion)', () => {
+    const dir = join(scratch, 'real-fusion');
+    mkdirSync(join(dir, 'vm/paddock-win11-test.vmwarevm'), { recursive: true });
+    writeFileSync(join(dir, 'vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx'), '.encoding = "UTF-8"\n');
+    const r = run('vm-win.sh', ['status'], { PADDOCK_WIN_VM_DIR: dir, FUSION_APP: '/Applications/VMware Fusion.app' });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /only drives/);
+  });
+
+  test('a folder under $TMPDIR that links to a folder outside it is refused', () => {
+    const f = fakeFusion('Link');
+    const link = join(scratch, 'link-out');
+    symlinkSync('/usr', link);
+    const r = run('vm-win.sh', ['status'], { PADDOCK_WIN_VM_DIR: link, FUSION_APP: f.fusion, PATH: f.path });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /only drives/);
+    assert.equal(calls(f.log), '');
+  });
+
+  test('a .vmx that links out of the fake folder is refused', () => {
+    const f = fakeFusion('VmxLink');
+    const dir = join(scratch, 'vmx-link');
+    mkdirSync(join(dir, 'vm/paddock-win11-test.vmwarevm'), { recursive: true });
+    symlinkSync('/etc/hosts', join(dir, 'vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx'));
+    const r = run('vm-win.sh', ['snapshot', 'x'], { PADDOCK_WIN_VM_DIR: dir, FUSION_APP: f.fusion, PATH: f.path });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /only drives/);
+    assert.equal(calls(f.log), '');
+  });
+
+  test('prepare.sh refuses another VM folder before it creates anything', () => {
+    const f = fakeFusion('Prep');
+    const other = '/Volumes/no-such-volume-paddock-test/vms/someone-elses-vm'; // not creatable, so a regression cannot leave a folder behind
+    const r = run('vm-win/prepare.sh', ['--vm-only'], { PADDOCK_WIN_VM_DIR: other, FUSION_APP: f.fusion, PATH: f.path, PADDOCK_VM_MAX_LOAD: '100000' });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /only drives \/Volumes\/d7sst7\/vms\/paddock-win11-test/);
+    assert.equal(existsSync(other), false);
+    assert.equal(calls(f.log), '');
   });
 });
 

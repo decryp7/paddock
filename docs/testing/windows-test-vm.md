@@ -2,8 +2,11 @@
 
 A dedicated, throw-away Windows 11 on Arm VM in VMware Fusion on the Mac mini, for the tests CI cannot do: install,
 update, services, login items. **Local only, never CI** (decision 2026-10-28). It is not the user's own Fusion VM: that
-one is personal and encrypted and no script here ever starts, stops or changes it (`scripts/vm-win.sh` acts only on the
-VM under `PADDOCK_WIN_VM_DIR`).
+one is personal and encrypted and no script here ever starts, stops or changes it: `scripts/vm-win.sh`, `prepare.sh` and the
+`vm-smoke` harness act only on `/Volumes/d7sst7/vms/paddock-win11-test` (links resolved) and refuse any other folder before
+`vmrun`, `ssh` or any file write (`scripts/vm-win/target.sh`, `scripts/vm-smoke/win-vm-target.mjs`). `PADDOCK_WIN_VM_DIR` may
+name another folder only in the scripts' own tests: a fake `FUSION_APP` with a folder under `$TMPDIR`. `PADDOCK_VM_WIN` (a
+fake driver for the harness's tests) is honoured only under `$TMPDIR`.
 
 Background and the hypervisor choice: the research note
 `/Volumes/d7sst7/dev-targets/research/2026-10-local-linux-windows-vms.md` (section 4).
@@ -22,7 +25,7 @@ Background and the hypervisor choice: the research note
 
 ## Files
 
-Everything lives on d7, never under `~` (ER-14). Default `PADDOCK_WIN_VM_DIR=/Volumes/d7sst7/vms/paddock-win11-test`:
+Everything lives on d7, never under `~` (ER-14), in `/Volumes/d7sst7/vms/paddock-win11-test`:
 
 ```
 keys/       paddock-test, paddock-admin (SSH key pairs), setup-passwords, known_hosts   (all private, mode 600/700)

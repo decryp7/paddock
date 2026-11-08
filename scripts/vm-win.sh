@@ -14,12 +14,14 @@
 #   scripts/vm-win.sh install                 one-time: install Windows headless, wait for setup to power off
 #   scripts/vm-win.sh baseline                one-time: check setup finished, detach the discs, take clean-baseline
 #
-# Only ever acts on the VM under PADDOCK_WIN_VM_DIR (default /Volumes/d7sst7/vms/paddock-win11-test); any other VM on
-# this Mac is never started, stopped or changed. Only if the VM is encrypted (option A, virtual TPM) is its password read
+# Only ever acts on /Volumes/d7sst7/vms/paddock-win11-test: any other folder in PADDOCK_WIN_VM_DIR is refused before vmrun,
+# ssh or scp run (vm-win/target.sh), except a fake VM under $TMPDIR with a fake FUSION_APP, for this script's own tests.
+# Any other VM on this Mac is never started, stopped or changed. Only if the VM is encrypted (option A, virtual TPM) is its password read
 # from the login keychain (service paddock-win11-test-vm, account vmrun) and passed to vmrun as -vp.
 set -euo pipefail
+. "$(cd "$(dirname "$0")" && pwd)/vm-win/target.sh"
 
-dir=${PADDOCK_WIN_VM_DIR:-/Volumes/d7sst7/vms/paddock-win11-test}
+dir=${PADDOCK_WIN_VM_DIR:-$WIN_VM_DIR}
 fusion=${FUSION_APP:-/Applications/VMware Fusion.app}
 lib="$fusion/Contents/Library"
 name=paddock-win11-test
@@ -36,6 +38,7 @@ usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; }
 
 guard() {
   case "$dir/" in "$HOME"/*) die "PADDOCK_WIN_VM_DIR must not be under \$HOME (ER-14): $dir" ;; esac
+  check_target "$dir" "$fusion"
   [ -f "$vmx" ] || die "no test VM at $vmx; run scripts/vm-win/prepare.sh first"
   [ -x "$lib/vmrun" ] || die "vmrun not found in $lib (set FUSION_APP)"
 }

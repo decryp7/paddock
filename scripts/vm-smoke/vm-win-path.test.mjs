@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
-import { basename, dirname } from 'node:path';
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join } from 'node:path';
 import { VM_WIN_IN_REPO, vmWinPath } from './vm-win-path.mjs';
 
 test('the default driver is the repo copy next to scripts/vm-smoke, and it exists', () => {
@@ -11,9 +12,19 @@ test('the default driver is the repo copy next to scripts/vm-smoke, and it exist
   assert.equal(vmWinPath({}), VM_WIN_IN_REPO);
 });
 
-test('PADDOCK_VM_WIN overrides the driver; an empty value does not', () => {
-  assert.equal(vmWinPath({ PADDOCK_VM_WIN: '/tmp/fake-vm-win.sh' }), '/tmp/fake-vm-win.sh');
-  assert.equal(vmWinPath({ PADDOCK_VM_WIN: '' }), VM_WIN_IN_REPO);
+test('PADDOCK_VM_WIN is for tests only: a fake driver under $TMPDIR; anything else is refused; an empty value is unset', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'vm-win-path-'));
+  const fake = join(dir, 'fake-vm-win.sh');
+  writeFileSync(fake, '#!/bin/sh\n');
+  try {
+    assert.equal(vmWinPath({ PADDOCK_VM_WIN: fake }), realpathSync(fake));
+    assert.equal(vmWinPath({ PADDOCK_VM_WIN: '' }), VM_WIN_IN_REPO);
+    assert.throws(() => vmWinPath({ PADDOCK_VM_WIN: '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh' }), /PADDOCK_VM_WIN is for tests only/);
+    assert.throws(() => vmWinPath({ PADDOCK_VM_WIN: '/usr/bin/true' }), /PADDOCK_VM_WIN is for tests only/);
+    assert.throws(() => vmWinPath({ PADDOCK_VM_WIN: join(dir, 'missing.sh') }), /PADDOCK_VM_WIN is for tests only/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('no harness module keeps a driver path outside the repo', async () => {

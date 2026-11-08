@@ -22,18 +22,19 @@ import { afterQuitSteps, afterRowSteps } from './win-machine.mjs';
 import { runRebootPhase } from './win-reboot.mjs';
 import { stripVnc, withVnc, fixDiskName, vmxCheck } from './vmx-edit.mjs';
 import { VMWIN } from './vm-win-path.mjs';
+import { WIN_VM_DIR, WIN_VMX, checkWinVmTarget } from './win-vm-target.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
-const VMDIR = process.env.PADDOCK_WIN_VM_DIR ?? '/Volumes/d7sst7/vms/paddock-win11-test';
+const VMDIR = WIN_VM_DIR; // no override: win-vm-target.mjs (review P1-1)
 const SNAPSHOT = process.env.PADDOCK_WIN_SNAPSHOT ?? 'gui-session-tools';
-const VMX = process.env.PADDOCK_WIN_VMX ?? '/Volumes/d7sst7/vms/paddock-win11-test/vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx';
+const VMX = WIN_VMX;
 export const VNC_PORT = 5995;
 const GUEST = 'C:\\paddock-test\\vmcheck';
 const VNC_PW = process.env.PADDOCK_VNC_PW ?? Math.random().toString(36).slice(2, 10); // a per-run password, never printed
 process.env.PADDOCK_VNC_PW ??= VNC_PW; // win-vnc.mjs reads it
 /** The vmx is never edited in place: a temporary file next to it, then a rename (the VM is stopped when this is called). */
-const writeVmx = (text) => { const tmp = `${VMX}.tmp-${process.pid}`; writeFileSync(tmp, text); renameSync(tmp, VMX); };
+const writeVmx = (text) => { checkWinVmTarget(); const tmp = `${VMX}.tmp-${process.pid}`; writeFileSync(tmp, text); renameSync(tmp, VMX); };
 const log = (m) => console.error(`vm-smoke(win): ${m}`);
 
 export function parseArgs(argv) {
@@ -81,6 +82,8 @@ async function download(run, name, dest) {
 
 async function main(argv) {
   const o = parseArgs(argv);
+  checkWinVmTarget(); // only paddock-win11-test, before anything is started, reverted or written (review P1-1)
+  log(`VM ${WIN_VMX}; driver ${VMWIN}`);
   const out = resolve(o.out ?? process.env.PADDOCK_VM_SMOKE_OUT ?? join(REPO, 'vm-smoke-results'));
   mkdirSync(out, { recursive: true });
   const scratch = mkdtempSync(join(tmpdir(), 'vm-smoke-win-'));
