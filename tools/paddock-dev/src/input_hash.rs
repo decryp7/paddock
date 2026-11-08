@@ -81,10 +81,41 @@ pub fn flag_lines(vars: &[(String, String)], config_digests: &[String]) -> Strin
     out
 }
 
-/// Git's blob id of a config's text with carriage returns dropped.
-fn config_digest(exec: &dyn Exec, root: &Path, text: &str) -> Result<String, CliError> {
-    let out = exec.run("git", &["hash-object", "--stdin"], root, Some(text.replace('\r', "").as_bytes()))?;
-    Ok(out.trim().to_string())
+/// What a config says about the compiled code, as the wrapper's `config_code` reduces it: carriage returns, comment and blank
+/// lines and the `target-dir` and `build-dir` keys dropped (the build folder the build-folder action writes to the git-ignored
+/// `ci.toml` is not part of the code, so a runner with that file and one without hash alike). `None` when only section headers
+/// are left: such a file adds no line to the hash.
+pub fn config_code_text(text: &str) -> Option<String> {
+    let blank = |c: char| matches!(c, ' ' | '\t');
+    let kept: Vec<&str> = text
+        .lines()
+        .map(|l| l.trim_end_matches('\r'))
+        .filter(|l| {
+            let t = l.trim_start_matches(blank);
+            if t.is_empty() || t.starts_with('#') {
+                return false;
+            }
+            let folder_key = ["target-dir", "build-dir"]
+                .iter()
+                .any(|k| t.strip_prefix(k).is_some_and(|r| r.trim_start_matches(blank).starts_with('=')));
+            !folder_key
+        })
+        .collect();
+    let is_header = |l: &str| {
+        let t = l.trim_matches(blank);
+        t.len() >= 2 && t.starts_with('[') && t.ends_with(']') && !t[1..t.len() - 1].contains(']')
+    };
+    if kept.iter().all(|l| is_header(l)) {
+        return None;
+    }
+    Some(kept.iter().map(|l| format!("{l}\n")).collect())
+}
+
+/// Git's blob id of a config's reduced text ([`config_code_text`]); `None` for a config that adds no line.
+fn config_digest(exec: &dyn Exec, root: &Path, text: &str) -> Result<Option<String>, CliError> {
+    let Some(code) = config_code_text(text) else { return Ok(None) };
+    let out = exec.run("git", &["hash-object", "--stdin"], root, Some(code.as_bytes()))?;
+    Ok(Some(out.trim().to_string()))
 }
 
 /// The `rustc = "..."` of a `[build]` table (or a top-level dotted `build.rustc = `) in a cargo config, read line by line
@@ -280,7 +311,10 @@ pub fn compute(
     let digests = configs
         .iter()
         .map(|c| config_digest(exec, root, c))
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
     let flags = flag_lines(vars, &digests);
     let hash = exec
         .run(
@@ -328,6 +362,23 @@ pub fn command() -> Result<Report, CliError> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_config_is_reduced_to_what_can_change_the_code() {
+        use super::config_code_text;
+        assert_eq!(config_code_text("[build]\ntarget-dir = \"/k\"\n"), None, "only the build folder");
+        assert_eq!(config_code_text("# c\r\n\r\n[build]\r\n  build-dir=\"x\"\r\n"), None);
+        assert_eq!(
+            config_code_text("[build]\ntarget-dir = \"/k\"\nrustflags = [\"-D\"]\n").as_deref(),
+            Some("[build]\nrustflags = [\"-D\"]\n")
+        );
+        assert_eq!(
+            config_code_text("[[bin]]\n").as_deref(),
+            Some("[[bin]]\n"),
+            "a table array is content, as in the wrapper"
+        );
+        assert_eq!(config_code_text(""), None);
+    }
+
     use super::*;
     use std::cell::RefCell;
 

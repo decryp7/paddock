@@ -796,3 +796,21 @@ fn a_cached_tool_touched_in_the_last_minutes_is_never_pruned() {
         "a job on the same mount may be about to run them"
     );
 }
+
+#[test]
+fn a_config_that_only_names_the_build_folder_or_adds_comments_does_not_change_the_hash() {
+    // The build-folder action writes `.cargo/ci.toml` (git-ignored) on a host runner: only `build.target-dir`, which does not change
+    // the compiled code. A binary published by a runner without that file must match a consumer with it (ADR 0022 hash inputs).
+    let f = Fixture::new();
+    std::fs::write(f.root().join(".git/info/exclude"), "/tools/paddock-dev/.cargo/ci.toml\n").unwrap();
+    std::fs::create_dir_all(f.root().join("tools/paddock-dev/.cargo")).unwrap();
+    let without = f.both(&[]).0;
+    let ci = f.root().join("tools/paddock-dev/.cargo/ci.toml");
+    std::fs::write(&ci, "[build]\ntarget-dir = \"/kept/target-paddock-dev-s1\"\n").unwrap();
+    assert_eq!(f.both(&[]).0, without, "a build folder is not part of the compiled code");
+    std::fs::write(&ci, "# written by build-folder\r\n[build]\r\ntarget-dir = \"/other\"\r\n").unwrap();
+    assert_eq!(f.both(&[]).0, without, "neither are comments, line ends or another folder");
+    // A key that does change the code still does, in the same file.
+    std::fs::write(&ci, "[build]\ntarget-dir = \"/kept\"\nrustflags = [\"-D\", \"warnings\"]\n").unwrap();
+    assert_ne!(f.both(&[]).0, without);
+}

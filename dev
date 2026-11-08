@@ -104,15 +104,23 @@ host=$(printf '%s\n' "$vv" | sed -n 's/^host: //p')
 
 # What else changes the compiled code: the environment variables RUSTFLAGS, CARGO_ENCODED_RUSTFLAGS, CARGO_BUILD_*,
 # CARGO_PROFILE_* and CARGO_TARGET_* (not the build folder, the job count or the compiler, which the `-vV` lines already name)
-# when they are not empty, sorted as lines, then one `config-file <digest>` line per config file above, the digest being git's
-# blob id of the file with carriage returns dropped. A config file can hold registry tokens, so it is streamed into git and only
-# its digest is ever held in a variable (which `sh -x` would print).
+# when they are not empty, sorted as lines, then one `config-file <digest>` line per config file above that has anything to say about
+# the code: its text with carriage returns, comment and blank lines and the `target-dir` and `build-dir` keys dropped (the build
+# folder the build-folder action writes to the git-ignored ci.toml is not part of the compiled code, so a runner with that file
+# and one without hash alike), the digest being git's blob id of what is left; a file that is then only section headers adds no
+# line. A config file can hold registry tokens, so it is streamed into git and only its digest is ever held in a variable (which
+# `sh -x` would print). The same reduction is `config_code_text` in the tool's input_hash.rs.
+config_code() {
+  tr -d '\r' <"$1" | grep -v -E '^[ 	]*(#|$)' | grep -v -E '^[ 	]*(target-dir|build-dir)[ 	]*=' || true
+}
 flags=$(
   env | grep -E '^(RUSTFLAGS|CARGO_ENCODED_RUSTFLAGS|CARGO_BUILD_[A-Za-z0-9_]*|CARGO_PROFILE_[A-Za-z0-9_]*|CARGO_TARGET_[A-Za-z0-9_]*)=' |
     grep -v -E '^(CARGO_TARGET_DIR|CARGO_BUILD_JOBS|CARGO_BUILD_TARGET_DIR|CARGO_BUILD_RUSTC)=' | grep -v '=$' | LC_ALL=C sort || true
   if [ -n "$configs" ]; then
     while IFS= read -r cfg; do
-      printf 'config-file %s\n' "$(tr -d '\r' <"$cfg" | git -C "$root" hash-object --stdin)"
+      if config_code "$cfg" | grep -q -v -E '^[ 	]*\[[^]]*\][ 	]*$'; then
+        printf 'config-file %s\n' "$(config_code "$cfg" | git -C "$root" hash-object --stdin)"
+      fi
     done <<EOF
 $configs
 EOF
