@@ -108,7 +108,15 @@ export function macLoginJobsDriver(gui) {
       await gui.waitFor(() => gui.press(gui.app, '^Processes$', 'AXLink'), 10_000);
       return { ok: true, detail: `benchmark running: ${text}` };
     },
-    async stopLongJob() { await gui.press(gui.app, '^Benchmarks$', 'AXLink'); await gui.press(gui.app, '^Cancel$', 'AXButton'); },
+    // Ends the fallback benchmark so it does not block the next row: Cancel is pressed until the Jobs list no longer shows it running (bounded).
+    async stopLongJob() {
+      await gui.press(gui.app, '^Benchmarks$', 'AXLink'); await gui.press(gui.app, '^Cancel$', 'AXButton');
+      for (let i = 0; i < 15; i++) {
+        const t = (await gui.texts()).map((x) => x.text).join(' | ');
+        if (!/\d+ running: Running benchmarks/.test(t)) return;
+        await gui.press(gui.app, '^Cancel', 'AXButton'); await new Promise((r) => setTimeout(r, 1000));
+      }
+    },
     async jobsText() { return (await gui.texts()).map((t) => t.text).filter((x) => /Start Dyno at login|Running benchmarks|Cancell?ed|Working|Cancel$|jobs could not be read/i.test(x)).join(' | '); },
     async pressCancel() { return gui.press(gui.app, '^Cancel', 'AXButton'); },
   };

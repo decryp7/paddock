@@ -79,3 +79,19 @@ test('draft model: the job starts only when the change is saved; the row presses
   assert.deepEqual(calls.slice(0, 2), ['press', 'save']);
   assert.equal(saved, 'on');
 });
+
+// 2026-11-08: the list can show the job a moment before the agent marks it cancellable; Cancel is waited for (bounded), not pressed once.
+test('a Cancel button that appears a moment after the job is listed is still pressed', async () => {
+  const r = rig({});
+  let tries = 0; const real = r.d.pressCancel;
+  r.d.pressCancel = async () => (++tries < 4 ? false : real());
+  const s = await loginJobsRow(r.d, r.clock);
+  assert.equal(s.status, 'pass', s.summary);
+  assert.ok(tries >= 4);
+});
+
+test('a Cancel that never appears stays NOT MEASURED after the bounded wait', async () => {
+  const r = rig({ cancelWorks: false });
+  const s = await loginJobsRow(r.d, r.clock);
+  assert.equal(s.status, 'not-measured');
+});

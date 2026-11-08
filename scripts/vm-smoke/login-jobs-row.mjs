@@ -16,7 +16,7 @@ export const LONG_JOB = /Running benchmarks/i;
  * @param d driver: { readSwitch() -> 'on'|'off'|'unknown', pressSwitch() -> bool, openJobs() -> bool, jobsText() -> string, pressCancel() -> bool }
  * @param c clock: { now(), sleep(ms) } (guest time)
  */
-export async function loginJobsRow(d, c, { seenGuardMs = 20_000, endGuardMs = 30_000, intervalMs = 400 } = {}) {
+export async function loginJobsRow(d, c, { seenGuardMs = 20_000, endGuardMs = 30_000, intervalMs = 400, cancelWaitMs = 4000 } = {}) {
   const checks = [];
   const evidence = [];
   const until = async (fn, guard) => { const t0 = c.now(); for (;;) { const v = await fn(); if (v) return v; if (c.now() - t0 >= guard) return null; await c.sleep(intervalMs); } };
@@ -33,20 +33,21 @@ export async function loginJobsRow(d, c, { seenGuardMs = 20_000, endGuardMs = 30
     await until(async () => (await d.readSwitch()) !== before, endGuardMs);
     const after = await d.readSwitch();
     await restore(d, before, after, until, endGuardMs);
-    const lj = d.startLongJob ? await longJobCancel(d, until, { seenGuardMs, endGuardMs }) : null;
+    const lj = d.startLongJob ? await longJobCancel(d, until, { seenGuardMs, endGuardMs, cancelWaitMs }) : null;
     return { title: TITLE_5A, status: 'not-measured', cls: 'check', summary: 'not measured: the change finished before the Jobs list showed it (a quiet guest answers at once), so Cancel could not be pressed; the row needs a slow login service', checks: [...checks, { ok: false, kind: 'check', detail: `no "${JOB_NAME.source}" job in the Jobs list within ${seenGuardMs / 1000} s` }, ...(lj ? lj.checks.map((c) => ({ ...c, info: true, ok: true, detail: `(long job, information) ${c.detail}` })) : [])], evidence: [...evidence, ...(lj?.evidence ?? [])] };
   }
   if (!seen) return makeResult(TITLE_5A, checks, evidence);
   evidence.push(`jobs list: ${seen.slice(0, 300)}`);
   checks.push({ ok: true, detail: 'the Jobs list shows the Start Dyno at login job' });
-  const cancelled = await d.pressCancel();
+  // The list can show the job a moment before the agent marks it cancellable: wait for the Cancel button (bounded) instead of pressing once.
+  const cancelled = Boolean(await until(() => d.pressCancel(), cancelWaitMs));
   if (!cancelled) {
     // Gone or finished already: it was too quick to cancel. The switch is put back first (the change ran to its end), then Cancel is measured on a job that lasts.
     const text = await d.jobsText();
     await until(async () => (await d.readSwitch()) !== before, endGuardMs);
     await restore(d, before, await d.readSwitch(), until, endGuardMs);
     const final = await d.readSwitch(); // read while Settings is still open (the long job leaves it for the Benchmarks page)
-    const lj = d.startLongJob ? await longJobCancel(d, until, { seenGuardMs, endGuardMs }) : null;
+    const lj = d.startLongJob ? await longJobCancel(d, until, { seenGuardMs, endGuardMs, cancelWaitMs }) : null;
     if (lj && lj.measured) {
       checks.push({ ok: true, info: true, detail: `the Start at login job had ended before Cancel could be pressed: ${String(text).slice(0, 160)}` }, ...lj.checks,
         { ok: final === before, kind: 'check', detail: final === before ? `the switch is back to ${before}` : `the switch could not be put back to ${before} (it reads ${final})` });
@@ -78,7 +79,7 @@ async function restore(d, before, now, until, guard) {
  * The Jobs-list Cancel on a job that lasts: start it, see "Running benchmarks" in the list, press the list's Cancel, see it end as Cancelled. `measured` is false when the job
  * could not be started, never showed, or had no Cancel to press (then it is not evidence either way); a Cancel that does not end the job is a measured failure.
  */
-async function longJobCancel(d, until, { seenGuardMs, endGuardMs }) {
+async function longJobCancel(d, until, { seenGuardMs, endGuardMs, cancelWaitMs }) {
   const checks = [];
   const evidence = [];
   try {
@@ -91,7 +92,7 @@ async function longJobCancel(d, until, { seenGuardMs, endGuardMs }) {
     if (!seen) return { measured: false, why: 'the benchmark job never showed in the Jobs list', checks: [{ ok: false, detail: `no "${LONG_JOB.source}" job in the Jobs list within ${seenGuardMs / 1000} s` }], evidence };
     evidence.push(`jobs list with the benchmark: ${seen.slice(0, 300)}`);
     checks.push({ ok: true, detail: 'a long job (Sustained processor benchmark) shows in the Jobs list' });
-    if (!(await d.pressCancel())) return { measured: false, why: 'the benchmark job had no Cancel button in the Jobs list', checks: [...checks, { ok: false, detail: 'no Cancel button on the benchmark job in the Jobs list' }], evidence };
+    if (!(await until(() => d.pressCancel(), 4 * cancelWaitMs))) return { measured: false, why: 'the benchmark job had no Cancel button in the Jobs list', checks: [...checks, { ok: false, detail: 'no Cancel button on the benchmark job in the Jobs list' }], evidence };
     const ended = await until(async () => { const t = await d.jobsText(); return CANCELLED.test(t) || !LONG_JOB.test(t) ? t : null; }, endGuardMs);
     const cancelled = Boolean(ended && CANCELLED.test(ended));
     checks.push({ ok: cancelled, detail: cancelled ? 'the Jobs list Cancel ended the benchmark job as Cancelled' : ended ? `the benchmark job left the list without saying Cancelled: ${ended.slice(0, 120)}` : `the benchmark job was still running ${endGuardMs / 1000} s after Cancel` });
