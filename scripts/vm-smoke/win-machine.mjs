@@ -13,6 +13,7 @@ import { swapNotDriven } from './upgrade-swap-row.mjs';
 import { winSwapRow } from './win-swap.mjs';
 import { hiddenStartStep } from './login-start-rows.mjs';
 import { makeResult } from './verdict.mjs';
+import { parseEvents, eventsPs, threatPs, versionsPs, eventLines, detectionTime, mpLogWindow, mpLogPs, mpLogLines } from './defender-evidence.mjs';
 import { judgeUninstall as judgeUninstallFacts, triState } from './win-judges.mjs';
 
 /** What the uninstall left, judged from tri-state facts (yes, no, unreadable): see win-judges.mjs. */
@@ -56,13 +57,19 @@ export function setupExeFacts(label) {
   return { present, version, ok: checks.every((c) => c.ok), checks, evidence };
 }
 
-/** Windows Defender: detections and the Operational log's 1116 (detected), 1117 (action taken), 1006 (malware found), newest first. */
+/**
+ * Windows Defender: the full 1116/1117/1006 text (never cut), one origin line, Get-MpThreatDetection, Get-MpComputerStatus versions and the MPLog lines
+ * around the newest detection (defender-evidence.mjs holds the parsing; WP-4).
+ */
 export function defenderEvidence() {
-  const det = ssh("Get-MpThreatDetection -ErrorAction SilentlyContinue | ForEach-Object { '' + $_.InitialDetectionTime + ' threat ' + $_.ThreatID + ' action ' + $_.ActionSuccess + ' ' + ($_.Resources -join ',') }; 'END'", { admin: true });
-  const ev = ssh("Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Windows Defender/Operational'; Id = 1116,1117,1006 } -MaxEvents 20 -ErrorAction SilentlyContinue | ForEach-Object { $_.TimeCreated.ToString('s') + ' id=' + $_.Id + ': ' + (($_.Message -replace '\\s+',' ').Substring(0, [Math]::Min(400, $_.Message.Length))) }; 'END'", { admin: true });
-  const ver = ssh("$s = Get-MpComputerStatus; 'AMEngineVersion=' + $s.AMEngineVersion + ' AMProductVersion=' + $s.AMProductVersion + ' AntivirusSignatureVersion=' + $s.AntivirusSignatureVersion + ' signatures updated ' + $s.AntivirusSignatureLastUpdated", { admin: true }).trim();
-  const lines = (t) => t.replace(/END\s*$/, '').trim().split('\n').map((l) => l.trim()).filter(Boolean);
-  return [`--- Defender versions: ${ver || '(unreadable)'}`, '--- Defender Get-MpThreatDetection', ...(/END\s*$/.test(det) ? (lines(det).length ? lines(det) : ['(no detections)']) : ['(unreadable)']), '--- Defender Operational 1116/1117/1006', ...(/END\s*$/.test(ev) ? (lines(ev).length ? lines(ev) : ['(no events)']) : ['(unreadable)'])];
+  const ev = parseEvents(ssh(eventsPs(20), { admin: true }));
+  const det = ssh(threatPs(), { admin: true });
+  const ver = ssh(versionsPs(), { admin: true }).replace(/DONE\s*$/, '').trim();
+  const lines = (t) => t.replace(/DONE\s*$/, '').trim().split('\n').map((l) => l.trim()).filter(Boolean);
+  const when = detectionTime(ev);
+  const window = when ? mpLogWindow(when) : null;
+  const mp = window ? mpLogLines(ssh(mpLogPs(window), { admin: true, ms: 180_000 }), window) : ['--- Defender MPLog', '(no detection, nothing to read)'];
+  return [`--- Defender versions: ${ver || '(unreadable)'}`, '--- Defender Get-MpThreatDetection', ...(/DONE\s*$/.test(det) ? (lines(det).length ? lines(det) : ['(no detections)']) : ['(unreadable)']), ...eventLines(ev), ...mp];
 }
 
 export function sameVersionRefused() {

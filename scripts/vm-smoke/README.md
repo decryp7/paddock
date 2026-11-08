@@ -216,3 +216,13 @@ PASS only with all seven runs present, not partial, passed, of the same CI run a
   and the helper must report the new version and no process that started before the install may be left (by pid, path and start time). Preconditions (the old version
   differs from the new, the helper was on) are checked; no older build given or not installable is NOT MEASURED. Windows is not driven (1.0.0 cannot be updated in place by
   1.1.0; no older RC setup driver yet). The version reads come from `dyno status` / the helper's `--version` and are unverified on a live guest.
+
+## Defender evidence (`defender-evidence.mjs`, Dyno 1.1.1 WP-4)
+
+The Windows install row prints the full 1116/1117/1006 text (never cut), one line `Defender: origin / type / source / process / signature` (a field the
+event lacks prints `(not in event)`), `Get-MpThreatDetection`, the engine, product and signature versions with the cloud and behaviour switches, and the
+`MPLog-*.log` lines within 30 s of the newest detection.
+
+A detection-rate run (`runRate`, `planRateRun`) reverts to the snapshot, drops an EICAR test file as a positive control, then installs N times (default 10)
+and reads the events after each. If the control's 1116 does not name the file with all five fields, every "no detection" is `check broken` (ER-33). The
+module is unit-tested against a fake guest; the guest run is scheduled by the coordinator and not part of the unit tests.
