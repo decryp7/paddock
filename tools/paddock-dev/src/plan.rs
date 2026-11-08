@@ -1,6 +1,6 @@
 //! `dev graph affected`: which projects a change reaches. The oracle-tested port of the core of `scripts/affected.mjs`
 //! (`affected()`, `owners()`, `appOfWorkflow()` and the rule tables); the graph itself comes from `paddock-repo-graph`.
-//! The CI matrix, the nextest narrowing and `--ci` are R4's; `affected.mjs` stays CI's planner until then.
+//! The CI matrix, the nextest narrowing and `--ci` are in `plan_ci` and `plan_cmd`.
 //!
 //! Paddock's own rules (which paths are global inputs, which markdown is read by code, who owns a folder) live here and not
 //! in `paddock-repo-graph`: they are this repository's, the graph crate is generic (ADR 0022 §6, "CI-only").
@@ -25,9 +25,8 @@ fn re(pattern: &str) -> Regex {
 }
 
 /// Inputs that every project's build or tests read: a change re-runs everything. Mirrors `GLOBAL` in `scripts/affected.mjs`
-/// (its comment table says what each former global reaches). `.gitea/` and `conformance/(ci|release|src/util)/` stay global here: the
-/// script narrows them per job from the file text at two revisions, which this port does not read, so it answers with a
-/// superset (never less than the script; `--files` mode of the script answers everything for them too unless they are dirty).
+/// (its comment table says what each former global reaches). `.gitea/` and `conformance/(ci|release|src/util)/` are narrowed per
+/// job from the file text at two revisions (`plan_gitea`); without a reader for those revisions they plan everything.
 static GLOBAL: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     [
         r"^rust-toolchain(\.toml)?$",
@@ -663,6 +662,11 @@ pub struct Request {
 
 /// The plan for a request against the repository at `root`.
 pub fn plan_for(root: &Path, history: &dyn History, req: &Request) -> Result<Value, GraphError> {
+    plan_with_graph(root, history, req).map(|(_, plan)| plan)
+}
+
+/// The graph the plan was computed from and the plan (the CI matrix reads the apps' contracts from the graph).
+pub fn plan_with_graph(root: &Path, history: &dyn History, req: &Request) -> Result<(RepoGraph, Value), GraphError> {
     let graph = read_graph(root, history)?;
     let files_mode = !req.files.is_empty();
     let gitea = (!req.all).then(|| {
@@ -693,7 +697,8 @@ pub fn plan_for(root: &Path, history: &dyn History, req: &Request) -> Result<Val
             );
         }
     }
-    affected(&changed, &graph, &opts)
+    let plan = affected(&changed, &graph, &opts)?;
+    Ok((graph, plan))
 }
 
 fn cli_error(e: GraphError) -> CliError {

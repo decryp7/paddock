@@ -1,0 +1,7 @@
+{
+ "code": 1,
+ "stdout": null,
+ "outputs": null,
+ "summary": null,
+ "error": "affected: unknown app nope (no apps/nope/paddock.ci.json)"
+}

@@ -1,1 +1,20 @@
-{"cargo":"app/src-tauri"}
+{
+  "cargo": "app/src-tauri",
+  "os": ["ubuntu-latest", "macos-latest"],
+  "nextestConfig": "crates/.config/nextest-x.toml",
+  "prepare": ["npm run x:prepare"],
+  "checks": ["node scripts/x-check.mjs", "node scripts/x-version.mjs"],
+  "rustChecks": ["cargo deny check"],
+  "ui": ["npm test -w apps/x/app"],
+  "angularDir": "app",
+  "e2e": ["npx playwright test --shard=$E2E_SHARD"],
+  "e2eShards": 2,
+  "e2eWebkit": ["npx playwright test --project=webkit"],
+  "e2eArtifacts": "apps/x/app/results",
+  "lastPackages": ["x-agent", "x-core"],
+  "windowsClippy": true,
+  "notices": { "tool": "cargo-about" },
+  "display": true,
+  "processPatterns": ["{build}/debug/x-test", "{tmp}/x-it-[^/]+"],
+  "testBrowser": { "envPrefix": "XDEMO", "catalogue": "apps/x/chromium.toml", "noSandboxOnLinux": true }
+}

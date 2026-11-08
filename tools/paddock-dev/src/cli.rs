@@ -1,4 +1,4 @@
-use crate::{input_hash, plan, slots, wait};
+use crate::{input_hash, plan, plan_cmd, slots, wait};
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
 use std::io::Write;
@@ -30,6 +30,9 @@ enum Command {
     },
     /// Wait, with a limit, for a plock job, a process, a line in a file or a CI run. Use it instead of `pgrep -f` loops.
     Wait(wait::WaitArgs),
+    /// The CI planner: which projects a change reaches, the CI matrix and the commit lint's range (the port of
+    /// scripts/affected.mjs; the arguments are its: <base> [<head>], --files a,b, --all, --ci [--app x], --commit-range, --explain).
+    Plan(PlanArgs),
     /// The project graph.
     Graph {
         #[command(subcommand)]
@@ -71,6 +74,16 @@ enum SlotCommand {
 enum GraphCommand {
     /// The projects a change reaches (the core of scripts/affected.mjs).
     Affected(AffectedArgs),
+}
+
+#[derive(Args)]
+struct PlanArgs {
+    /// The repository root (default: the folder containing .git, found from the current folder).
+    #[arg(long)]
+    root: Option<PathBuf>,
+    /// The planner's own arguments, as scripts/affected.mjs took them.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    args: Vec<String>,
 }
 
 #[derive(Args)]
@@ -134,6 +147,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             SlotCommand::Hold(a) => slots::hold(&a),
         },
         Command::Wait(a) => wait::command(&a),
+        Command::Plan(a) => plan_cmd::command(&a.args, a.root),
         Command::Graph {
             command: GraphCommand::Affected(a),
         } => plan::command(&plan::Request {

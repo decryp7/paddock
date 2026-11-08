@@ -474,10 +474,13 @@ impl Http for CurlHttp {
             .spawn()
             .map_err(|e| format!("cannot start curl: {e}"))?;
         if let Some(mut stdin) = child.stdin.take() {
-            let _ = write!(
-                stdin,
-                "url = \"{url}\"\nheader = \"Authorization: token {token}\"\nheader = \"Accept: application/json\"\n"
-            );
+            // An empty token is an anonymous request (the planner reads public run lists without one).
+            let auth = if token.is_empty() {
+                String::new()
+            } else {
+                format!("header = \"Authorization: token {token}\"\n")
+            };
+            let _ = write!(stdin, "url = \"{url}\"\n{auth}header = \"Accept: application/json\"\n");
         }
         let out = child.wait_with_output().map_err(|e| format!("curl failed: {e}"))?;
         if !out.status.success() {
