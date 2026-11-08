@@ -24,7 +24,7 @@ use pitwall_core::mgmt::{
     PlaygroundToolChoice,
 };
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -43,6 +43,8 @@ pub struct ServerChatProvider {
     runtime: tokio::runtime::Handle,
     model: Mutex<String>,
     context: AtomicUsize,
+    /// The chosen model's image budget in pixels (`LocalModel::image_pixels`); 0: it can't see images.
+    image_pixels: AtomicU64,
     attachments: AttachmentReader,
 }
 
@@ -55,6 +57,7 @@ impl ServerChatProvider {
             runtime,
             model: Mutex::new(model.into()),
             context: AtomicUsize::new(0),
+            image_pixels: AtomicU64::new(0),
             attachments: Arc::new(|_| KeptFile::Gone),
         }
     }
@@ -74,6 +77,16 @@ impl ServerChatProvider {
     /// Tells the provider how many tokens the model holds (0: unknown).
     pub fn set_context_length(&self, tokens: usize) {
         self.context.store(tokens, Ordering::Relaxed);
+    }
+
+    /// Tells the provider the model's image budget (`None`: it can't see images).
+    pub fn set_image_pixels(&self, pixels: Option<u64>) {
+        self.image_pixels.store(pixels.unwrap_or(0), Ordering::Relaxed);
+    }
+
+    /// The model's image budget in pixels; 0 when it can't see images.
+    pub fn image_pixels(&self) -> u64 {
+        self.image_pixels.load(Ordering::Relaxed)
     }
 
     pub(crate) fn model(&self) -> String {

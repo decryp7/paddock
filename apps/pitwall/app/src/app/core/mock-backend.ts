@@ -1515,11 +1515,52 @@ export class MockBackend implements PitwallBackend {
 
   chatAttachRules(): Promise<ChatAttachRules> {
     return this.reply('chatAttachRules', () => ({
-      maxFileBytes: 256 * 1024,
+      maxFileBytes: 25 * MiB,
       maxCount: 16,
-      accept: '.txt,.md,.csv,.json,.log,.rs,.ts,.py,text/*',
-      hint: 'Attach text or code files (UTF-8, up to 256 KiB each)',
+      accept: '.txt,.md,.csv,.json,.log,.rs,.ts,.py,text/*,.png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/webp,image/gif',
+      hint: 'Attach images (PNG, JPEG, WebP or GIF, up to 25 MiB) or text and code files (UTF-8, up to 256 KiB)',
     }));
+  }
+
+  /**
+   * An image as the browser build takes it: its size read by the browser, made smaller to the chosen model's budget and a
+   * preview drawn (Rust's `chat_host::image` is the reference: it decodes with limits, turns the image upright and re-encodes it).
+   * `null` when the bytes are not an image.
+   */
+  private async mockImage(name: string, bytes: Uint8Array): Promise<ChatAttached | null> {
+    const mime = imageMime(bytes);
+    if (!mime) return null;
+    if (bytes.length > 25 * MiB) this.fail('badRequest', `"${name}" is larger than 25 MiB. Attach a smaller image.`);
+    let size: { width: number; height: number } | null = null;
+    let thumbnail: string | null = null;
+    /* v8 ignore start -- the browser's decoder exists only in a real browser (the e2e run), not in the unit tests' DOM. */
+    if (typeof createImageBitmap === 'function') {
+      try {
+        const bitmap = await createImageBitmap(new Blob([bytes as BlobPart], { type: mime }));
+        size = { width: bitmap.width, height: bitmap.height };
+        thumbnail = await previewOf(bitmap);
+      } catch {
+        size = null;
+      }
+    }
+    /* v8 ignore stop */
+    size ??= pngSize(bytes);
+    if (!size) this.fail('badRequest', `"${name}" can't be read as an image; it may be damaged. Attach another copy.`);
+    const model = this.library.find((m) => m.id === this.chatModel_);
+    const budget = Math.min(model?.imagePixels ?? DEFAULT_IMAGE_PIXELS, 2048 * 2048);
+    const kept = fitPixels(size.width, size.height, budget);
+    const sha256 = digest(bytes);
+    const keptBytes = Math.max(1, Math.round((bytes.length * kept.width * kept.height) / (size.width * size.height)));
+    this.attachedBytes.set(sha256, keptBytes);
+    const resized = kept.width !== size.width || kept.height !== size.height;
+    return {
+      attachment: { kind: 'image', sha256, mime: mime === 'image/jpeg' || mime === 'image/webp' ? 'image/jpeg' : 'image/png', width: kept.width, height: kept.height },
+      name,
+      bytes: keptBytes,
+      lines: 0,
+      thumbnail,
+      original: resized ? size : null,
+    };
   }
 
   /** Plausible answers for the browser build; Rust's `chat_host::attach` is the reference. */
@@ -1538,23 +1579,22 @@ export class MockBackend implements PitwallBackend {
 
   async chatAttach(name: string, bytes: Uint8Array): Promise<ChatAttached> {
     if (this.attachGate) await this.attachGate;
+    const image = this.failing.has('chatAttach') ? null : await this.mockImage(name, bytes);
     return this.reply('chatAttach', () => {
-      const png = bytes[0] === 0x89 && bytes[1] === 0x50;
-      if (png) this.fail('badRequest', `"${name}" is an image. The chat can't attach images yet; attach text or code files.`);
+      if (image) return image;
+      if (bytes.length > 256 * 1024) this.fail('badRequest', `"${name}" is larger than 256 KiB. Attach a smaller file, or paste the part that matters.`);
       let text: string;
       try {
         text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
       } catch {
         this.fail('badRequest', `"${name}" isn't a text file. The chat attaches text and code files in UTF-8.`);
       }
-      let h = 0;
-      for (let i = 0; i < text.length; i++) h = (Math.imul(h, 31) + text.charCodeAt(i)) >>> 0;
       const lines = text.split(/\r?\n/).filter((l, i, all) => l || i < all.length - 1).length;
-      const sha256 = h.toString(16).padStart(8, '0').repeat(8);
+      const sha256 = digest(bytes);
       // Bounded like Rust's staging: the oldest size goes first.
       if (this.attachedBytes.size >= 1024) this.attachedBytes.delete(this.attachedBytes.keys().next().value as string);
       this.attachedBytes.set(sha256, bytes.length);
-      return { attachment: { kind: 'file' as const, sha256, name }, bytes: bytes.length, lines };
+      return { attachment: { kind: 'file' as const, sha256, name }, name, bytes: bytes.length, lines, thumbnail: null, original: null };
     });
   }
 
@@ -1694,3 +1734,55 @@ export class MockBackend implements PitwallBackend {
     });
   }
 }
+
+/** Rust's fallback image budget (`gguf::FALLBACK_IMAGE_PIXELS`: 1024 tokens of 28 × 28 pixels). */
+const DEFAULT_IMAGE_PIXELS = 1024 * 28 * 28;
+
+/** The image type `bytes` start with (PNG, JPEG, GIF, WebP), as Rust sniffs it; `null` for anything else. */
+function imageMime(b: Uint8Array): 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp' | null {
+  const ascii = (from: number, to: number) => String.fromCharCode(...b.subarray(from, to));
+  if (b[0] === 0x89 && ascii(1, 4) === 'PNG') return 'image/png';
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  if (ascii(0, 6) === 'GIF87a' || ascii(0, 6) === 'GIF89a') return 'image/gif';
+  if (b.length >= 12 && ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP') return 'image/webp';
+  return null;
+}
+
+/** A PNG's size from its header (where the browser cannot decode); `null` when it has none. */
+function pngSize(b: Uint8Array): { width: number; height: number } | null {
+  if (b.length < 24 || imageMime(b) !== 'image/png') return null;
+  const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const width = v.getUint32(16);
+  const height = v.getUint32(20);
+  return width > 0 && height > 0 ? { width, height } : null;
+}
+
+/** The largest size of the same shape within `budget` pixels, as Rust's `image::fit`. */
+function fitPixels(width: number, height: number, budget: number): { width: number; height: number } {
+  if (width * height <= budget) return { width, height };
+  const scale = Math.sqrt(budget / (width * height));
+  return { width: Math.max(1, Math.floor(width * scale)), height: Math.max(1, Math.floor(height * scale)) };
+}
+
+/** A stable 64-hex-digit stand-in for a SHA-256 of `bytes` (the browser build only). */
+function digest(bytes: Uint8Array): string {
+  let h = 0;
+  for (const b of bytes) h = (Math.imul(h, 31) + b) >>> 0;
+  return `${h.toString(16).padStart(8, '0')}${bytes.length.toString(16).padStart(8, '0')}`.repeat(4);
+}
+
+/* v8 ignore start -- drawing needs a real browser (the e2e run). */
+async function previewOf(bitmap: ImageBitmap): Promise<string | null> {
+  if (typeof OffscreenCanvas !== 'function') return null;
+  const scale = Math.min(1, 96 / Math.max(bitmap.width, bitmap.height));
+  const canvas = new OffscreenCanvas(Math.max(1, Math.round(bitmap.width * scale)), Math.max(1, Math.round(bitmap.height * scale)));
+  canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
+  return await new Promise<string | null>((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(blob);
+  });
+}
+/* v8 ignore stop */

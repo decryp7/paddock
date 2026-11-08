@@ -30,13 +30,13 @@ describe('PlaygroundChat', () => {
     expect(el.querySelector('[data-testid=chat-apps]')?.textContent).toContain('No app connected');
     const picker = await backend.chatModels();
     expect(picker.selected).toBe('qwen3.5-4b-q4_k_m');
-    expect(picker.models.filter((m) => m.disabled).map((m) => m.name)).toContain('Gemma 4 12B');
+    expect(picker.models.filter((m) => m.disabled).map((m) => m.name)).toContain('Gemma 4 E4B');
     const usable = picker.models.filter((m) => !m.disabled).length;
     expect(picker.models.slice(usable).every((m) => m.disabled !== null)).toBe(true);
     (el.querySelector('[data-testid=chat-model] .mat-mdc-select-trigger') as HTMLElement).click();
     await settle(fixture);
     const options = Array.from(document.querySelectorAll<HTMLElement>('mat-option'));
-    const gemma = options.find((o) => o.textContent?.includes('Gemma 4 12B'))!;
+    const gemma = options.find((o) => o.textContent?.includes('Gemma 4 E4B'))!;
     expect(gemma.getAttribute('aria-disabled')).toBe('true');
     expect(gemma.textContent).toContain(" · Can't use tools");
     // The reason in full sits once inside the open list, as the group's label, never under the field.

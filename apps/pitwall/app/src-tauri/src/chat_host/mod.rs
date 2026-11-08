@@ -6,6 +6,7 @@ pub mod apps;
 pub mod attach;
 pub mod chats;
 pub mod commands;
+pub mod image;
 pub mod log_line;
 pub mod models;
 pub mod policy;

@@ -1,10 +1,9 @@
-//! What the chat's composer may attach and how a file is checked (ADR 0023 Decision 4, WP-4b): text and code files, UTF-8
-//! only, up to [`MAX_TEXT_BYTES`] each. The bytes come from the webview and are judged here, never there: the UI may look at
-//! [`AttachRules`] to refuse an obvious misfit before reading it, and this module checks everything again.
-//!
-//! Images are recognised by their magic bytes and refused in words until WP-5 prepares them (decode with limits, downscale to
-//! the projector's budget, strip metadata). TODO(ADR 0023 WP-5): accept images here once `prepare_image` exists.
+//! What the chat's composer may attach and how a file is checked (ADR 0023 Decision 4): text and code files, UTF-8 only, up
+//! to [`MAX_TEXT_BYTES`] each (WP-4b), and images up to [`MAX_IMAGE_BYTES`] (WP-5, prepared by [`super::image`]). The bytes
+//! come from the webview and are judged here, never there: the UI may look at [`AttachRules`] to refuse an obvious misfit
+//! before reading it, and this module checks everything again. An image is told by its magic bytes, never by its name.
 
+use super::image::{prepare_image, PreparedImage, MAX_IMAGE_BYTES};
 use paddock_assistant::{Attachment, MAX_ATTACHMENTS};
 use serde::Serialize;
 
@@ -27,16 +26,30 @@ pub struct AttachRules {
     pub hint: String,
 }
 
-/// The rules of this build.
+/// The rules of this build: the largest file is an image's (a text file over its own limit is refused here, in words).
 pub fn rules() -> AttachRules {
     AttachRules {
-        max_file_bytes: MAX_TEXT_BYTES,
+        max_file_bytes: MAX_IMAGE_BYTES,
         max_count: MAX_ATTACHMENTS,
         accept: ".txt,.md,.markdown,.csv,.tsv,.json,.jsonl,.yaml,.yml,.toml,.ini,.cfg,.conf,.log,.xml,.html,.css,.js,.mjs,.ts,.tsx,\
-.jsx,.rs,.py,.go,.java,.kt,.c,.h,.cpp,.hpp,.cs,.swift,.rb,.php,.sh,.ps1,.sql,text/*"
+.jsx,.rs,.py,.go,.java,.kt,.c,.h,.cpp,.hpp,.cs,.swift,.rb,.php,.sh,.ps1,.sql,text/*,.png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,\
+image/webp,image/gif"
             .into(),
-        hint: format!("Attach text or code files (UTF-8, up to {} KiB each)", MAX_TEXT_BYTES / 1024),
+        hint: format!(
+            "Attach images (PNG, JPEG, WebP or GIF, up to {} MiB) or text and code files (UTF-8, up to {} KiB)",
+            MAX_IMAGE_BYTES >> 20,
+            MAX_TEXT_BYTES / 1024
+        ),
     }
+}
+
+/// An image's size in pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ImageSize {
+    /// Width.
+    pub width: u32,
+    /// Height.
+    pub height: u32,
 }
 
 /// A file the chat took: what the question carries and what its chip shows.
@@ -45,10 +58,35 @@ pub fn rules() -> AttachRules {
 pub struct Attached {
     /// The reference the question carries (the bytes stay in the app).
     pub attachment: Attachment,
-    /// Its size in bytes, as kept.
+    /// The file's name as the chip shows it (an image's reference carries none).
+    pub name: String,
+    /// Its size in bytes, as kept (an image: after preparation).
     pub bytes: usize,
-    /// Its lines.
+    /// Its lines (0 for an image).
     pub lines: usize,
+    /// An image's preview, a `data:` URL; `None` for a text file.
+    pub thumbnail: Option<String>,
+    /// An image's size before it was made smaller for the model; `None` when it was kept at its size.
+    pub original: Option<ImageSize>,
+}
+
+/// What a file the user attached became.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Taken {
+    /// A text or code file.
+    Text(Prepared),
+    /// An image, named as the chip shows it.
+    Image(String, PreparedImage),
+}
+
+/// Checks a file the user attached: an image (by its magic bytes) is prepared for a model whose budget is `budget` pixels
+/// (0: unknown), anything else must be a text file ([`prepare`]). Never panics on any input.
+pub fn take(raw_name: &str, bytes: &[u8], budget: u64) -> Result<Taken, Refused> {
+    let name = clean_name(raw_name);
+    match prepare_image(&name, bytes, budget) {
+        Some(image) => image.map(|i| Taken::Image(name, i)),
+        None => prepare(raw_name, bytes).map(Taken::Text),
+    }
 }
 
 /// A file ready to keep: the text's bytes (a UTF-8 byte-order mark removed) and its shown name.
@@ -89,27 +127,13 @@ pub fn clean_name(raw: &str) -> String {
     format!("…{tail}")
 }
 
-/// Whether `bytes` start like an image the engine could read (PNG, JPEG, GIF, WebP).
-fn looks_like_image(bytes: &[u8]) -> bool {
-    bytes.starts_with(b"\x89PNG\r\n\x1a\n")
-        || bytes.starts_with(&[0xff, 0xd8, 0xff])
-        || bytes.starts_with(b"GIF87a")
-        || bytes.starts_with(b"GIF89a")
-        || (bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP")
-}
-
-/// Checks a file the user attached: a UTF-8 text without NUL bytes, at most [`MAX_TEXT_BYTES`]. Never panics on any input.
+/// Checks a text file the user attached: UTF-8 without NUL bytes, at most [`MAX_TEXT_BYTES`]. Never panics on any input.
 pub fn prepare(raw_name: &str, bytes: &[u8]) -> Result<Prepared, Refused> {
     let name = clean_name(raw_name);
     if bytes.len() > MAX_TEXT_BYTES {
         return Err(Refused(format!(
             "\"{name}\" is larger than {} KiB. Attach a smaller file, or paste the part that matters.",
             MAX_TEXT_BYTES / 1024
-        )));
-    }
-    if looks_like_image(bytes) {
-        return Err(Refused(format!(
-            "\"{name}\" is an image. The chat can't attach images yet; attach text or code files."
         )));
     }
     let body = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes);
@@ -150,7 +174,7 @@ pub fn with_files(text: &str, attachments: &[Attachment], read: &dyn Fn(&str) ->
     let mut out = text.to_string();
     for a in attachments {
         let Attachment::File { sha256, name } = a else {
-            // TODO(ADR 0023 WP-5, WP-7): images and audio go to the engine as their own parts, not as text.
+            // Images go to the engine as their own parts (`chat_provider`); audio waits for WP-7.
             continue;
         };
         out.push_str("\n\n");
@@ -217,16 +241,6 @@ mod tests {
             "{words}"
         );
         assert!(prepare("ok.txt", &vec![b'a'; MAX_TEXT_BYTES]).is_ok(), "exactly the limit is fine");
-
-        for image in [
-            b"\x89PNG\r\n\x1a\n....".to_vec(),
-            vec![0xff, 0xd8, 0xff, 0xe0],
-            b"GIF89a..".to_vec(),
-            b"RIFF\0\0\0\0WEBPVP8 ".to_vec(),
-        ] {
-            let words = prepare("photo", &image).unwrap_err().0;
-            assert!(words.contains("is an image") && words.contains("text or code"), "{words}");
-        }
         for binary in [vec![0xc3, 0x28], b"text\0with a nul".to_vec()] {
             let words = prepare("a.bin", &binary).unwrap_err().0;
             assert!(words.contains("isn't a text file") && words.contains("UTF-8"), "{words}");
@@ -288,9 +302,43 @@ mod tests {
     #[test]
     fn the_rules_name_the_limits() {
         let r = rules();
-        assert_eq!((r.max_file_bytes, r.max_count), (MAX_TEXT_BYTES, MAX_ATTACHMENTS));
+        assert_eq!((r.max_file_bytes, r.max_count), (MAX_IMAGE_BYTES, MAX_ATTACHMENTS));
         assert!(r.accept.contains(".rs") && r.accept.contains("text/*"));
-        assert!(r.hint.contains("256 KiB"), "{}", r.hint);
+        assert!(r.accept.contains(".png") && r.accept.contains("image/webp"));
+        assert!(r.hint.contains("256 KiB") && r.hint.contains("25 MiB"), "{}", r.hint);
+    }
+
+    /// WP-5: an image is told by its magic bytes (whatever its name) and prepared, with its own size limit; a text file keeps
+    /// its own. A damaged image is refused as an image, never read as text.
+    #[test]
+    fn an_image_is_taken_as_an_image_and_a_text_file_as_text() {
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(300, 200)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        let mut big_png = png.into_inner();
+        let Taken::Image(name, img) = take("C:\\shots\\notes.txt", &big_png, 0).unwrap() else {
+            panic!("an image whatever its name");
+        };
+        assert_eq!((name.as_str(), img.width, img.height), ("notes.txt", 300, 200));
+        // An image may be larger than a text file; a text file over its limit is refused with the text limit.
+        big_png.extend(vec![0u8; MAX_TEXT_BYTES]);
+        assert!(
+            matches!(take("big.png", &big_png, 0), Ok(Taken::Image(..))),
+            "trailing bytes after the image end are ignored"
+        );
+        let words = take("big.log", &vec![b'a'; MAX_TEXT_BYTES + 1], 0).unwrap_err().0;
+        assert!(words.contains("256 KiB"), "{words}");
+        assert!(matches!(take("a.md", b"# hi", 0), Ok(Taken::Text(_))));
+        for damaged in [
+            b"\x89PNG\r\n\x1a\n....".to_vec(),
+            vec![0xff, 0xd8, 0xff, 0xe0],
+            b"GIF89a..".to_vec(),
+            b"RIFF\0\0\0\0WEBPVP8 ".to_vec(),
+        ] {
+            let words = take("photo", &damaged, 0).unwrap_err().0;
+            assert!(words.contains("can't be read as a") && words.contains("damaged"), "{words}");
+        }
     }
 
     /// Many pseudo-random names and byte strings (a fixed seed, so a failure repeats), with the magic numbers and a byte-order
@@ -313,6 +361,7 @@ mod tests {
                 .filter_map(|_| char::from_u32((next() % 0x11_0000) as u32))
                 .collect();
             let _ = prepare(&name, &bytes);
+            let _ = take(&name, &bytes, next());
             let _ = clean_name(&name);
         }
     }

@@ -525,3 +525,69 @@ fn the_chat_reads_the_whole_conversation_and_counts_files_by_their_size() {
     assert_eq!((cfg.attachment_tokens)(&gone), 0);
     assert_eq!(cfg.budgets.max_wall, None);
 }
+
+/// ADR 0023 WP-5: an image attached to a chat marked "Don't save" is prepared and kept in memory only, through the attach
+/// command's own path and the assistant: nothing is written, not even a temporary file; the same image in a saved chat is
+/// written beside it.
+#[test]
+fn an_image_in_a_chat_marked_dont_save_never_reaches_the_disk() {
+    let data = tempfile::tempdir().unwrap();
+    let c = clock();
+    let chats = Arc::new(ChatStores::new(data.path(), Arc::new(c.clone())));
+    let assistant = Assistant::with_conversations(
+        Arc::new(Ok1),
+        Tools::none(),
+        chats.clone(),
+        Arc::new(c.clone()),
+        AssistantConfig::new("Pitwall", "s"),
+    );
+    let (tx, rx) = channel();
+    let sink: Arc<dyn EventSink> = Arc::new(Sink(Mutex::new(tx)));
+    let ended = |rx: &std::sync::mpsc::Receiver<Envelope>| loop {
+        let e = rx.recv_timeout(Duration::from_secs(30)).expect("the turn ended");
+        if matches!(e.event, AssistantEvent::Done { .. } | AssistantEvent::Error { .. }) {
+            return e;
+        }
+    };
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::new_rgb8(2400, 1600)
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    let taken = super::commands::take_attachment(&chats, "private-photo.png", png.get_ref(), 0).unwrap();
+    let Attachment::Image { sha256, width, height, .. } = taken.attachment.clone() else {
+        panic!("an image: {taken:?}")
+    };
+    assert!(u64::from(width) * u64::from(height) <= pitwall_core::gguf::FALLBACK_IMAGE_PIXELS);
+    assert!(
+        taken.thumbnail.as_deref().is_some_and(|t| t.starts_with("data:image/jpeg;base64,")),
+        "an opaque preview is a small JPEG"
+    );
+    assert_eq!(files(data.path()), Vec::<String>::new(), "preparing writes nothing");
+    let ack = assistant
+        .send(
+            SendRequest {
+                attachments: vec![taken.attachment.clone()],
+                ..ask("what is in it?", false)
+            },
+            sink.clone(),
+        )
+        .unwrap();
+    ended(&rx);
+    assert_eq!(chats.is_saved(&ack.conversation_id), Some(false));
+    assert!(chats.attachment(&sha256).is_some(), "kept in memory for the session");
+    assert_eq!(files(data.path()), Vec::<String>::new(), "a chat that is not saved leaves no file");
+
+    let again = super::commands::take_attachment(&chats, "private-photo.png", png.get_ref(), 0).unwrap();
+    assistant
+        .send(
+            SendRequest {
+                attachments: vec![again.attachment],
+                ..ask("and saved?", true)
+            },
+            sink.clone(),
+        )
+        .unwrap();
+    ended(&rx);
+    assert!(files(data.path()).iter().any(|f| f.ends_with(&sha256)), "a saved chat writes it");
+    assistant.shutdown();
+}

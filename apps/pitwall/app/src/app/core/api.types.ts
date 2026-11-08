@@ -1151,11 +1151,19 @@ export interface ChatAttachRules {
   hint: string;
 }
 
-/** A file the chat took (`chat_host::attach::Attached`): the reference the question carries, its size and lines. */
+/** A file the chat took (`chat_host::attach::Attached`): the reference the question carries, its name, size and lines, and an image's preview. */
 export interface ChatAttached {
-  attachment: { kind: 'file'; sha256: string; name: string };
+  attachment: { kind: 'file'; sha256: string; name: string } | { kind: 'image'; sha256: string; mime: string; width: number; height: number };
+  /** The file's name as the chip shows it (an image's reference carries none). */
+  name: string;
+  /** Its size in bytes as kept (an image: after it was prepared for the model). */
   bytes: number;
+  /** Its lines (0 for an image). */
   lines: number;
+  /** An image's preview, a `data:` URL; null for a text file. */
+  thumbnail: string | null;
+  /** An image's size before it was made smaller for the model; null when it was kept at its size. */
+  original: { width: number; height: number } | null;
 }
 
 /** One model of the Chat tab's picker (`chat_host::models::ChatModel`). */

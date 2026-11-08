@@ -136,6 +136,14 @@ pub fn chat_models<'a>(locals: impl IntoIterator<Item = Facts<'a>>, catalog: &[C
     ChatModels { models, selected, notes }
 }
 
+/// The image budget of a downloaded model in pixels (ADR 0023 WP-5): its projector's (`LocalModel::image_pixels`, the default
+/// budget from an older server), or `None` when it can't see images (no `vision` capability).
+pub fn image_budget(m: &LocalModel) -> Option<u64> {
+    m.capabilities
+        .contains(&Capability::Vision)
+        .then(|| m.image_pixels.unwrap_or(pitwall_core::gguf::FALLBACK_IMAGE_PIXELS))
+}
+
 /// The chat's window in tokens (ADR 0023 WP-4b): what one request may hold, so the meter and the check before sending use it.
 /// llama-server gives each slot `--ctx-size / --parallel` tokens, so it is the context per slot, never more than the model was
 /// trained for; 0 when neither is known (the engine then says what overflowed).
@@ -149,6 +157,24 @@ pub fn chat_window(context_max: Option<u64>, context_per_slot: Option<u32>) -> u
 
 #[cfg(test)]
 mod tests {
+    /// ADR 0023 WP-5: a model sees images when it has the `vision` capability; its budget is its projector's, or the default
+    /// from an older server that does not send one.
+    #[test]
+    fn a_vision_model_has_its_projectors_budget_and_others_none() {
+        let mut m: LocalModel = serde_json::from_value(serde_json::json!({
+            "id": "m", "repo": "r", "file": "f.gguf", "name": "m", "quant": null, "sizeBytes": 1, "paramsB": null,
+            "contextMax": null, "architecture": null, "capabilities": ["chat", "vision"], "projector": "mmproj.gguf", "addedAt": 0,
+            "lastUsedAt": null, "loaded": false, "pinned": false, "idleSecs": null, "imagePixels": 4096,
+            "fit": {"verdict": "fits", "needRam": 0, "needVram": 0, "haveRam": 0, "haveVram": 0, "offload": "all", "message": ""}
+        }))
+        .unwrap();
+        assert_eq!(image_budget(&m), Some(4096));
+        m.image_pixels = None;
+        assert_eq!(image_budget(&m), Some(pitwall_core::gguf::FALLBACK_IMAGE_PIXELS));
+        m.capabilities = vec![Capability::Chat];
+        assert_eq!(image_budget(&m), None);
+    }
+
     use super::*;
     use Capability::{Chat, Embeddings, Tools};
 

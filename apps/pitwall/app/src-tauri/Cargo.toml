@@ -50,6 +50,11 @@ paddock-diag = { path = "../../../../crates/paddock-diag", features = ["tauri"] 
 paddock-env = { path = "../../../../crates/paddock-env" }
 # The saved chats' attachments are kept by SHA-256 (ADR 0023 Decision 3).
 sha2.workspace = true
+# Images in the chat (ADR 0023 Decision 4, WP-5): decoded with limits, downscaled to the projector's budget and re-encoded
+# (which drops their metadata). Only the four formats the engine reads; no default features (no TIFF, AVIF or EXR decoders).
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+# A prepared image goes to the server as base64 in the chat request (the engine's `image_url` data URL).
+base64.workspace = true
 paddock-log = { path = "../../../../crates/paddock-log" }
 getrandom.workspace = true
 serde.workspace = true
@@ -110,6 +115,8 @@ workspace = true
 # A socket bound but not listening refuses connections on Linux and Windows (not macOS): "nothing listens" with the port held.
 socket2 = { version = "0.6", features = ["all"] }
 tempfile.workspace = true
+# Image preparation never panics on any bytes (ADR 0023 "Bad files").
+proptest.workspace = true
 # The time of a report the tests make (paddock-diag takes a chrono time).
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 # A held loopback port for "nothing answers there" (C39).
