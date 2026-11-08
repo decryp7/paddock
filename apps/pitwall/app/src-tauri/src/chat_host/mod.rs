@@ -3,6 +3,7 @@
 //! never in the server (Decision 1): the service never talks to a user's apps, and approvals have a window to appear in.
 
 pub mod apps;
+pub mod attach;
 pub mod chats;
 pub mod commands;
 pub mod log_line;

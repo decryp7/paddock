@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { MemoryAssistantBackend, TauriAssistantBackend, type SendRequest } from '@decryp7/paddock-ui/workbench/assistant';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ChatSaving, createChatBackend, resetChatBackend, SavingAssistantBackend } from './chat-backend';
+import { ChatSaving, createChatBackend, createChatSpeech, resetChatBackend, SavingAssistantBackend } from './chat-backend';
 
 const create = () => {
   TestBed.resetTestingModule();
@@ -51,5 +51,18 @@ describe('createChatBackend', () => {
     const saved = await backend.send({ text: 'kept', context: [], allowWrite: false });
     expect(sent[2]!.save).toBe(true);
     expect(saving.started.get(saved.conversationId)).toBe(true);
+  });
+
+  it("passes the context meter's question to the engine (ADR 0023 WP-4b)", async () => {
+    const { backend } = create();
+    const used = { usedTokens: 10, limitTokens: 100, exact: true, level: 'ok' as const };
+    const spy = vi.spyOn(backend.inner, 'context').mockResolvedValue(used);
+    expect(await backend.context('c1')).toEqual(used);
+    expect(spy).toHaveBeenCalledWith('c1');
+  });
+
+  it('has no speech input in the app yet (WP-7); the browser build plays it only when asked', () => {
+    expect(createChatSpeech('?mock-fast')).toBeNull();
+    expect(createChatSpeech('?mock-speech')).not.toBeNull();
   });
 });

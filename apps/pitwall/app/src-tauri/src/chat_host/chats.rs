@@ -234,6 +234,25 @@ impl ChatStores {
         Ok(sha)
     }
 
+    /// Keeps a file the user just attached in memory until its question is sent (ADR 0023 WP-4b): the chat may still become
+    /// "Don't save", or the file be removed before sending, so nothing is written yet. A saved chat's question writes it
+    /// ([`Conversations::create_saved`], [`Conversations::append`]). Returns its SHA-256.
+    pub fn stage_attachment(&self, bytes: &[u8]) -> Result<String, ChatsError> {
+        self.put_attachment(false, bytes)
+    }
+
+    /// Writes the staged attachments `messages` refer to beside the saved chats (those already on disk are kept once).
+    fn save_staged(&self, messages: &[StoredMessage]) -> Result<(), SaveError> {
+        for a in messages.iter().flat_map(|m| m.attachments.iter()) {
+            let sha = Attachment::sha256(a);
+            let staged = lock(&self.memory_attachments).get(sha).cloned();
+            if let Some(bytes) = staged {
+                self.saved.put_attachment(&bytes)?;
+            }
+        }
+        Ok(())
+    }
+
     /// An attachment's bytes by its SHA-256, wherever it is kept.
     pub fn attachment(&self, sha: &str) -> Option<Vec<u8>> {
         let kept = lock(&self.memory_attachments).get(sha).cloned();
@@ -293,14 +312,22 @@ impl Conversations for ChatStores {
 
     fn create_saved(&self, first: StoredMessage, save: bool) -> (String, String, Result<(), SaveError>) {
         if save {
-            self.saved.create(first)
+            let staged = self.save_staged(std::slice::from_ref(&first));
+            let (id, title, kept) = self.saved.create(first);
+            // The chat is kept either way; a file that could not be written is said once, with the rest.
+            (id, title, staged.and(kept))
         } else {
             self.memory.create(first)
         }
     }
 
     fn append(&self, id: &str, messages: Vec<StoredMessage>) -> Option<Result<(), SaveError>> {
-        self.holder(id).append(id, messages)
+        let staged = if self.memory.get(id).is_none() && self.saved.is_on_disk(id).is_some() {
+            self.save_staged(&messages)
+        } else {
+            Ok(())
+        };
+        self.holder(id).append(id, messages).map(|kept| staged.and(kept))
     }
 
     fn delete(&self, id: &str) -> Result<bool, SaveError> {

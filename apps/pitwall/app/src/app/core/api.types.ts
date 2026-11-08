@@ -1126,6 +1126,25 @@ export interface ChatStorage {
   unsaved: number;
 }
 
+/** What the chat's composer may attach (`chat_host::attach::AttachRules`, ADR 0023 WP-4b); Rust checks every file again. */
+export interface ChatAttachRules {
+  /** Largest file in bytes. */
+  maxFileBytes: number;
+  /** Most attachments one question carries. */
+  maxCount: number;
+  /** The file picker's filter. */
+  accept: string;
+  /** What can be attached, in a few words. */
+  hint: string;
+}
+
+/** A file the chat took (`chat_host::attach::Attached`): the reference the question carries, its size and lines. */
+export interface ChatAttached {
+  attachment: { kind: 'file'; sha256: string; name: string };
+  bytes: number;
+  lines: number;
+}
+
 /** One model of the Chat tab's picker (`chat_host::models::ChatModel`). */
 export interface ChatModel {
   id: string;

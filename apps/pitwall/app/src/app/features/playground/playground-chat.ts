@@ -6,11 +6,12 @@ import { MAT_SLIDE_TOGGLE_DEFAULT_OPTIONS, MatSlideToggle } from '@angular/mater
 import { CONFIRM_DIALOG_ID } from '@decryp7/paddock-ui/shell/confirm';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { OPEN_SETTINGS } from '@decryp7/paddock-ui/shell/notify';
-import { AssistantBackend, PdAssistant } from '@decryp7/paddock-ui/workbench/assistant';
+import { AssistantAttachments, AssistantBackend, AssistantSpeech, PdAssistant } from '@decryp7/paddock-ui/workbench/assistant';
 import type { ChatModel, ChatModels, CommandError, ConnectedApp } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
-import { ChatSaving, createChatBackend } from './chat-backend';
+import { PitwallAttachments } from './chat-attachments';
+import { ChatSaving, createChatBackend, createChatSpeech } from './chat-backend';
 
 /**
  * The Playground's Chat tab: the family's assistant pane (`<pd-assistant>`: streamed answers, tool cards, approval cards,
@@ -25,6 +26,10 @@ import { ChatSaving, createChatBackend } from './chat-backend';
   providers: [
     ChatSaving,
     { provide: AssistantBackend, useFactory: createChatBackend },
+    // Text and code files (ADR 0023 Decision 4, WP-4b); Rust checks and keeps them.
+    { provide: AssistantAttachments, useClass: PitwallAttachments },
+    // Speech input: none in the app until WP-7 (null: the pane shows no microphone); the browser build can play it.
+    { provide: AssistantSpeech, useFactory: () => createChatSpeech() },
     // The switch moves only when the chat's state does (after "Delete the saved copy?" is answered), never on the click.
     { provide: MAT_SLIDE_TOGGLE_DEFAULT_OPTIONS, useValue: { disableToggleValue: true } },
   ],

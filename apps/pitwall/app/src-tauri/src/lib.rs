@@ -139,6 +139,8 @@ paddock_commands::command_table! {
     Query [WINDOW] => chat_host::commands::chat_saved,
     Mutation [WINDOW] => chat_host::commands::set_chat_saved,
     Mutation [WINDOW] => chat_host::commands::delete_all_chats,
+    Query [WINDOW] => chat_host::commands::chat_attach_rules,
+    Mutation [WINDOW] limit 2 * paddock_commands::MIB => chat_host::commands::chat_attach,
     Query [WINDOW] => commands::benchmarks,
     Query [WINDOW] => commands::settings,
     Mutation [WINDOW] => commands::save_settings,

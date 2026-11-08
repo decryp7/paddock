@@ -41,6 +41,11 @@ export function mockOptionsFrom(search: string): MockOptions {
 /** The query string as the page was opened: the hash router may rewrite the URL once it starts. */
 const OPENED_WITH = typeof window === 'undefined' ? '' : window.location.search;
 
+/** The query string as the page was opened (read by this eagerly loaded module, before the router can change the URL). */
+export function openedWith(): string {
+  return OPENED_WITH;
+}
+
 let browser: PitwallBackend | null = null;
 
 /**

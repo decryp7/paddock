@@ -405,3 +405,44 @@ fn unsaved_chats_past_their_bound_are_refused_in_words_never_dropped() {
     assert!(words.starts_with("This chat holds as many messages as a chat can (400)"), "{words}");
     assistant.shutdown();
 }
+
+/// ADR 0023 WP-4b: a file attached in the composer is staged in memory (the chat may still become "Don't save", or never be
+/// sent); it reaches the disk only with the question of a saved chat, and never for a chat that is not saved.
+#[test]
+fn an_attached_file_is_staged_in_memory_and_saved_only_with_a_saved_chats_question() {
+    let data = tempfile::tempdir().unwrap();
+    let c = clock();
+    let chats = ChatStores::new(data.path(), Arc::new(c.clone()));
+    let file = |sha: &str, name: &str| Attachment::File {
+        sha256: sha.into(),
+        name: name.into(),
+    };
+    let staged = chats.stage_attachment(b"staged notes").unwrap();
+    assert_eq!(chats.attachment(&staged).unwrap(), b"staged notes");
+    assert_eq!(files(data.path()), Vec::<String>::new(), "staging writes nothing");
+
+    // A chat that is not saved: still nothing on disk.
+    let (unsaved, _, kept) = chats.create_saved(user("private").with_attachments(vec![file(&staged, "notes.txt")]), false);
+    kept.unwrap();
+    assert_eq!(files(data.path()), Vec::<String>::new());
+
+    // A saved chat's first question and a later one: the staged files are written beside it.
+    let first = chats.stage_attachment(b"first file").unwrap();
+    let (id, _, kept) = chats.create_saved(user("saved").with_attachments(vec![file(&first, "a.txt")]), true);
+    kept.unwrap();
+    let later = chats.stage_attachment(b"later file").unwrap();
+    chats
+        .append(&id, vec![answer("ok"), user("more").with_attachments(vec![file(&later, "b.txt")])])
+        .unwrap()
+        .unwrap();
+    let on_disk = files(data.path());
+    assert!(on_disk.iter().any(|f| f.ends_with(&first)), "{on_disk:?}");
+    assert!(on_disk.iter().any(|f| f.ends_with(&later)), "{on_disk:?}");
+    assert!(
+        !on_disk.iter().any(|f| f.ends_with(&staged)),
+        "the unsaved chat's file stays in memory: {on_disk:?}"
+    );
+    let again = ChatStores::new(data.path(), Arc::new(c));
+    assert_eq!(again.attachment(&first).unwrap(), b"first file", "it survives a restart");
+    assert_eq!(chats.is_saved(&unsaved), Some(false));
+}

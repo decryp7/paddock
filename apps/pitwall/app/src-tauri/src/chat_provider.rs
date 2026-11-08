@@ -8,9 +8,11 @@
 //! Stop is honoured within [`CANCEL_POLL`], also while the model is still loading or the server is silent; the connection is
 //! dropped then, which makes the server cancel the work.
 //!
-//! The chat's conversations are kept by the assistant's `ConversationStore` in memory (`chat_host::commands::chat_store`);
-//! this module only talks to the server. The saved store, attachments and "Don't save this chat" are WP-3b.
+//! The chat's conversations are kept by `chat_host::chats` (WP-3b); this module only talks to the server. A text file the user
+//! attached (WP-4b) is read by its SHA-256 through the reader given with [`ServerChatProvider::with_attachments`] and sent
+//! after the question's text, fenced and labelled as data (`chat_host::attach::with_files`).
 
+use crate::chat_host::attach::with_files;
 use crate::server_client::{FrameStream, ServerClient};
 use paddock_assistant::protocol::{DEFAULT_MAX_TOKENS, DEFAULT_TEMPERATURE};
 use paddock_assistant::{
@@ -32,12 +34,16 @@ pub const CANCEL_POLL: Duration = Duration::from_millis(50);
 /// this bounds only a server that is not there, never a running job (ER-19).
 const OPEN_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Reads an attachment's bytes by its SHA-256 (none: no longer kept).
+pub type AttachmentReader = Arc<dyn Fn(&str) -> Option<Vec<u8>> + Send + Sync>;
+
 /// The Playground chat as an [`LlmProvider`].
 pub struct ServerChatProvider {
     client: Arc<dyn ServerClient>,
     runtime: tokio::runtime::Handle,
     model: Mutex<String>,
     context: AtomicUsize,
+    attachments: AttachmentReader,
 }
 
 impl ServerChatProvider {
@@ -49,7 +55,15 @@ impl ServerChatProvider {
             runtime,
             model: Mutex::new(model.into()),
             context: AtomicUsize::new(0),
+            attachments: Arc::new(|_| None),
         }
+    }
+
+    /// Reads the files a question carries through `read` (the chats' store); without it a file is said to be gone.
+    #[must_use]
+    pub fn with_attachments(mut self, read: AttachmentReader) -> ServerChatProvider {
+        self.attachments = read;
+        self
     }
 
     /// Changes the model for the next turn.
@@ -69,7 +83,12 @@ impl ServerChatProvider {
 
 /// The wire request for `req`: the system prompt first, tool calls and results as the wire carries them, the tools offered
 /// natively. Structured JSON answers are not part of the Playground chat.
-pub fn playground_request(model: &str, req: &ChatRequest) -> Result<PlaygroundRequest, ProviderError> {
+/// A user message's attached files are read through `read` and sent after its text.
+pub fn playground_request(
+    model: &str,
+    req: &ChatRequest,
+    read: &dyn Fn(&str) -> Option<Vec<u8>>,
+) -> Result<PlaygroundRequest, ProviderError> {
     if req.json_schema.is_some() {
         return Err(ProviderError::Failed(
             "The Playground chat cannot constrain an answer to a JSON schema. Ask without one.".into(),
@@ -79,7 +98,7 @@ pub fn playground_request(model: &str, req: &ChatRequest) -> Result<PlaygroundRe
     if !req.system.is_empty() {
         messages.push(PlaygroundMessage::text(WireRole::System, req.system.clone()));
     }
-    messages.extend(req.messages.iter().map(wire_message));
+    messages.extend(req.messages.iter().map(|m| wire_message(m, read)));
     let max_tokens = if req.max_tokens == 0 { DEFAULT_MAX_TOKENS } else { req.max_tokens };
     Ok(PlaygroundRequest {
         model_id: model.to_string(),
@@ -99,14 +118,19 @@ pub fn playground_request(model: &str, req: &ChatRequest) -> Result<PlaygroundRe
     })
 }
 
-fn wire_message(m: &ChatMessage) -> PlaygroundMessage {
+fn wire_message(m: &ChatMessage, read: &dyn Fn(&str) -> Option<Vec<u8>>) -> PlaygroundMessage {
+    let content = if m.role == Role::User && !m.attachments.is_empty() {
+        with_files(&m.content, &m.attachments, read)
+    } else {
+        m.content.clone()
+    };
     PlaygroundMessage {
         role: match m.role {
             Role::User => WireRole::User,
             Role::Assistant => WireRole::Assistant,
             Role::Tool => WireRole::Tool,
         },
-        content: m.content.clone(),
+        content,
         tool_calls: m
             .tool_calls
             .iter()
@@ -266,7 +290,7 @@ impl ServerChatProvider {
         on_delta: &mut dyn FnMut(&str),
         on_phase: &mut dyn FnMut(ProviderPhase),
     ) -> Result<ChatResponse, ProviderError> {
-        let body = playground_request(model, req)?;
+        let body = playground_request(model, req, self.attachments.as_ref())?;
         let body = serde_json::to_value(&body).map_err(|e| ProviderError::Failed(format!("The app built an unusable request ({e}).")))?;
         let cancel = req.cancel.clone();
         self.runtime.block_on(async {
@@ -460,6 +484,29 @@ mod tests {
         );
     }
 
+    /// ADR 0023 WP-4b: an attached text file reaches the model after the question, fenced and labelled as data; the
+    /// conversation's own text stays as the user typed it.
+    #[test]
+    fn an_attached_file_is_sent_after_the_question_as_data() {
+        let file = paddock_assistant::Attachment::File {
+            sha256: "a".repeat(64),
+            name: "notes.txt".into(),
+        };
+        let req = ChatRequest {
+            messages: vec![ChatMessage::user("Summarise").with_attachments(vec![file])],
+            ..Default::default()
+        };
+        let kept = "a".repeat(64);
+        let read = move |sha: &str| (sha == kept).then(|| b"three lines\nof notes\n".to_vec());
+        let w = playground_request("m", &req, &read).unwrap();
+        let content = &w.messages[0].content;
+        assert!(content.starts_with("Summarise\n\nAttached file \"notes.txt\""), "{content}");
+        assert!(content.contains("```\nthree lines\nof notes\n\n```"), "{content}");
+        assert_eq!(req.messages[0].content, "Summarise");
+        let gone = playground_request("m", &req, &|_| None).unwrap();
+        assert!(gone.messages[0].content.ends_with("is no longer available on this computer."));
+    }
+
     #[test]
     fn the_wire_request_carries_the_system_prompt_tools_calls_and_results() {
         let mut req = ChatRequest {
@@ -485,7 +532,7 @@ mod tests {
             max_tokens: 0,
             ..Default::default()
         };
-        let w = playground_request("m", &req).unwrap();
+        let w = playground_request("m", &req, &|_| None).unwrap();
         assert_eq!(w.model_id, "m");
         assert_eq!((w.temperature, w.max_tokens), (0.5, u32::try_from(DEFAULT_MAX_TOKENS).unwrap()));
         let roles: Vec<_> = w.messages.iter().map(|m| m.role).collect();
@@ -500,10 +547,13 @@ mod tests {
         req.system.clear();
         req.temperature = None;
         req.max_tokens = 99;
-        let w = playground_request("m", &req).unwrap();
+        let w = playground_request("m", &req, &|_| None).unwrap();
         assert_eq!((w.messages.len(), w.temperature, w.max_tokens), (3, DEFAULT_TEMPERATURE, 99));
         req.json_schema = Some(json!({}));
-        assert!(playground_request("m", &req).unwrap_err().to_string().contains("JSON schema"));
+        assert!(playground_request("m", &req, &|_| None)
+            .unwrap_err()
+            .to_string()
+            .contains("JSON schema"));
     }
 
     #[test]
