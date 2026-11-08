@@ -32,3 +32,24 @@ tauri_build() {
   rm -f "$log"
   return 1
 }
+
+# The dead-proxy run (ADR 0062 section 6, ER-33). With PADDOCK_DEAD_PROXY=1 every fetch that goes through the proxy variables
+# is refused at once (a closed local port), except the exempt hosts: the private store, the user's cache server, localhost and
+# the registries (lockfile-pinned, D1). A fetch a tool makes on its own (Tauri's helpers, appimagetool) then fails and the URL
+# scan names it. It is a tripwire, not a sandbox: a program that ignores the proxy variables gets past it. A probe first fetches
+# a non-exempt URL the same way and expects a refusal; when that succeeds the run says `check broken` and fails.
+dead_proxy_on() {
+  [ "${PADDOCK_DEAD_PROXY:-}" = 1 ] || return 0
+  local dead=http://127.0.0.1:9 exempt probe="${PADDOCK_DEAD_PROXY_PROBE:-https://example.com/}"
+  exempt="dev.decryptology.net,172.16.1.188,localhost,127.0.0.1,registry.npmjs.org,index.crates.io,static.crates.io"
+  export HTTPS_PROXY="$dead" HTTP_PROXY="$dead" ALL_PROXY="$dead" https_proxy="$dead" http_proxy="$dead" all_proxy="$dead"
+  export NO_PROXY="$exempt" no_proxy="$exempt" NODE_USE_ENV_PROXY=1
+  if curl -sS --max-time 15 -o /dev/null "$probe" 2>/dev/null \
+    || node -e 'fetch(process.argv[1], { signal: AbortSignal.timeout(15000) }).then(() => process.exit(0), () => process.exit(1))' "$probe" 2>/dev/null; then
+    echo "::error title=dead-proxy run::check broken: $probe was reachable through the proxy variables, so this run cannot show that nothing else is fetched. Next: find which tool ignores HTTPS_PROXY here."
+    [ -z "${GITHUB_STEP_SUMMARY:-}" ] || echo "dead-proxy run: check broken" >> "$GITHUB_STEP_SUMMARY"
+    return 1
+  fi
+  echo "dead-proxy run: on (probe $probe refused; exempt: $exempt)"
+  [ -z "${GITHUB_STEP_SUMMARY:-}" ] || echo "dead-proxy run: on, probe refused" >> "$GITHUB_STEP_SUMMARY"
+}

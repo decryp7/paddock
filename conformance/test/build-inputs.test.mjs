@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -200,4 +200,30 @@ test('installTool rejects an archive whose hash is not the pin', async () => {
   const inv = readInventory(`format = 1\n[[input]]\nid = "mytool"\nversion = "1.0"\npackage = "mytool"\nfile = "mytool.tar.gz"\nbin = "mytool"\n\n  [[input.platform]]\n  key = "linux-x86_64"\n  url = "https://example.invalid/x"\n  size = 3\n  sha256 = "${'0'.repeat(64)}"\n`);
   const store = await fakeStore({ 'mytool.tar.gz': Buffer.from('abc') });
   await assert.rejects(installTool({ id: 'mytool', inventory: inv, binDir: join(tmp(), 'bin'), store: store.base, token: 't' }), /SHA-256 mismatch/);
+});
+
+test('dead_proxy_on is off unless asked, and then refuses a non-exempt fetch', () => {
+  assert.equal(sh('dead_proxy_on; echo "[${HTTPS_PROXY:-}]"').stdout.trim(), '[]');
+  const r = sh('dead_proxy_on; echo "$HTTPS_PROXY $NODE_USE_ENV_PROXY"', { PADDOCK_DEAD_PROXY: '1', PADDOCK_DEAD_PROXY_PROBE: 'https://nothing-should-resolve.example.invalid/' });
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.match(r.stdout, /dead-proxy run: on/);
+  assert.match(r.stdout, /http:\/\/127\.0\.0\.1:9 1/);
+});
+
+test('the dead-proxy probe reports "check broken" when a non-exempt fetch gets through (ER-33)', async () => {
+  const server = createServer((req, res) => res.writeHead(200).end('ok'));
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  try {
+    // 127.0.0.1 is exempt, so a probe on it is not refused: the check cannot see anything.
+    const r = await new Promise((resolve) => {
+      const p = spawn('bash', ['-c', `set -euo pipefail; here=${lib}; . ${lib}/tauri-build-lib.sh; dead_proxy_on`], { env: { PATH: process.env.PATH, PADDOCK_DEAD_PROXY: '1', PADDOCK_DEAD_PROXY_PROBE: `http://127.0.0.1:${server.address().port}/` } });
+      let out = '';
+      p.stdout.on('data', (d) => (out += d));
+      p.on('close', (code) => resolve({ code, out }));
+    });
+    assert.equal(r.code, 1);
+    assert.match(r.out, /::error title=dead-proxy run::check broken/);
+  } finally {
+    server.close();
+  }
 });

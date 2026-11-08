@@ -19,6 +19,7 @@ rm -rf "$dir/release/bundle"
 [ -d node_modules ] || npm ci
 here="$PWD/conformance/ci"
 . "$here/tauri-build-lib.sh"
+dead_proxy_on  # nightly and manual runs: any other fetch is refused (ADR 0062 section 6)
 seed_build_inputs  # ADR 0062: Tauri's helpers come from the private store, never from GitHub
 tauri_verbose "$bundles"
 (cd apps/$app && tauri_build npx tauri build ${verbose[@]+"${verbose[@]}"} --bundles "$bundles")

@@ -55,6 +55,7 @@ eval "$(node "$here/../release/strip-keys.mjs")"
 (cd "$root" && npm ci)
 # ADR 0062: nothing here reaches GitHub: seed Tauri's tools folder and the AppImage runtime from the private store.
 . "$here/tauri-build-lib.sh"
+dead_proxy_on   # nightly and manual runs: any other fetch is refused (ADR 0062 section 6)
 seed_build_inputs
 tauri_verbose "$bundles"
 (

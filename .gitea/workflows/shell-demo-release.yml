@@ -139,6 +139,7 @@ jobs:
         env:
           CI: "true"
           BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+          PADDOCK_DEAD_PROXY: ${{ github.event_name != 'push' && '1' || '' }}
         run: |
           bash scripts/demo/bundle.sh shell-demo "${{ matrix.bundles }}"
 

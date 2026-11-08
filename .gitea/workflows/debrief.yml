@@ -935,6 +935,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
           BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+          # ADR 0062 section 6: a nightly or manual run refuses every fetch outside the store and the registries (a tag run does not, yet).
+          PADDOCK_DEAD_PROXY: ${{ github.event_name != 'push' && '1' || '' }}
           # Installers use the size-optimised `dist` profile (thin LTO, one codegen unit, stripped); the sidecars match.
           DEBRIEF_CARGO_PROFILE: dist
         run: |
@@ -948,6 +950,7 @@ jobs:
           # ADR 0062: the NSIS toolset (Windows) and the AppImage helpers come from the private store, never from GitHub.
           here="$(cd ../../../conformance/ci && pwd)"
           . "$here/tauri-build-lib.sh"
+          dead_proxy_on
           seed_build_inputs
           tauri_verbose "$bundles"
           # Secrets pasted into Gitea often carry a trailing newline or a line break; both keys are single-line base64.
