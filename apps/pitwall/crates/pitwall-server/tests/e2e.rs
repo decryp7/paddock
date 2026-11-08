@@ -642,9 +642,7 @@ async fn a_child_engine_that_is_slow_to_become_ready_is_waited_for() {
     h.st.serving.release_all();
 }
 
-fn launch_on_a_free_port() -> pitwall_core::llama::Launch {
-    // conformance: freed-port — the test engine takes this port itself (take_first_port) or the product retries on a fresh one; no other listener is expected to need it
-    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+fn launch_on(port: u16) -> pitwall_core::llama::Launch {
     pitwall_core::llama::Launch {
         model: "tiny.gguf".into(),
         mmproj: None,
@@ -669,11 +667,12 @@ async fn a_child_engine_that_exits_before_it_answers_is_reported_with_its_reason
     let dir = tempfile::tempdir().unwrap();
     let (polls, polled) = tokio::sync::watch::channel(0usize);
     let engine = common::ChildEngine {
-        take_first_port: true,
         polls: Some(polls),
         ..common::ChildEngine::new(common::runnable_server(dir.path()))
     };
-    let launch = launch_on_a_free_port();
+    // The test holds the port for its whole length, so the child's bind fails on every OS (C39).
+    let (port, held) = common::held_port().await;
+    let launch = launch_on(port);
     let e = common::noticing_the_first_exit(&engine, polled, engine.start(&launch))
         .await
         .err()
@@ -684,6 +683,7 @@ async fn a_child_engine_that_exits_before_it_answers_is_reported_with_its_reason
         "{e}"
     );
     assert!(pitwall_server::serving::port_taken(&e), "not read as a taken port: {e}");
+    held.abort();
 }
 
 /// The whole path: the first start finds its port taken, the child exits, and the load retries on a fresh port and

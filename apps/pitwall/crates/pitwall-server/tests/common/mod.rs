@@ -514,6 +514,19 @@ pub enum StartOutcome {
     HangGuard,
 }
 
+/// Takes a fresh loopback port for the life of the handle, closing every connection at once (so a health poll fails
+/// fast). The port is read off a listener that stays open, never off one that is dropped (C39).
+pub async fn held_port() -> (u16, tokio::task::JoinHandle<()>) {
+    let l = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.expect("bind a loopback port");
+    let port = l.local_addr().expect("the bound address").port();
+    let h = tokio::spawn(async move {
+        while let Ok((s, _)) = l.accept().await {
+            drop(s);
+        }
+    });
+    (port, h)
+}
+
 /// Takes `port` on 127.0.0.1 until the handle is aborted, closing every connection at once (so a health poll fails
 /// fast instead of waiting for an answer that never comes). `None` when the bind fails: then someone else already has
 /// the port, which is the state the test wants anyway.
@@ -667,7 +680,7 @@ impl Engine for ChildEngine {
                     );
                     next_note += Duration::from_secs(10);
                 }
-                // conformance: hang-guard — the loop ends when the child answers /health or exits; CHILD_HANG_GUARD (45 s) bounds it and never decides a verdict
+                // conformance: hang-guard — poll interval for an external process's /health; no in-process event exists
                 tokio::time::sleep(self.poll_every).await;
             };
             if let Some(h) = held {
