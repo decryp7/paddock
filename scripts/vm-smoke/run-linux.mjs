@@ -324,7 +324,13 @@ async function main(argv) {
     if (want(19)) {
       // The Settings section with the switch is the "Dyno" one (the Turn off step used to select it before this row).
       press('^Dyno$'); await sleep(1500);
-      const s19 = push(await loginJobsRow(linuxLoginJobsDriver(atspi, parseSwitchState), { now: () => Date.now(), sleep }));
+      // Steady = the login service's agent has the same pid on two reads 10 s apart and answers `dyno status` (bounded 90 s).
+      const agentSteady = async () => {
+        const pid = () => ses('systemctl --user show -p MainPID --value dyno-agent 2>&1; dyno status >/dev/null 2>&1; echo "status=$?"').stdout.trim().replace(/\s+/g, ' ');
+        for (let i = 0; i < 9; i++) { const a = pid(); await sleep(10_000); const b = pid(); if (a === b && /^[1-9]\d* status=0$/.test(b)) return true; }
+        return false;
+      };
+      const s19 = push(await loginJobsRow(linuxLoginJobsDriver(atspi, parseSwitchState, { agentSteady }), { now: () => Date.now(), sleep }));
       // ER-27: Dyno's own log lines about jobs (app and agent logs, with their time), so a "The jobs could not be read" in the list has its cause beside it.
       const jobLog = g('for f in $(find ~/.local ~/.cache -name "*.log" -path "*yno*" 2>/dev/null); do echo "== $f"; grep -i -E "job" "$f" | tail -n 60; done; echo "== now: $(date +%T)"').stdout.split('\n');
       s19.evidence = [...(s19.evidence ?? []), '--- Dyno log lines about jobs (every Dyno log in the guest)', ...jobLog];

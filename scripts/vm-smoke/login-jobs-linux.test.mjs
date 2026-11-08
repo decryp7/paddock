@@ -50,3 +50,18 @@ test('a switch that is readable is read in place, Settings is not reopened', asy
   assert.equal(await d.readSwitch(), 'off');
   assert.equal(calls.length, 1);
 });
+
+test('the long job starts only after the agent has been steady (the login service change restarts it)', async () => {
+  const order = [];
+  const atspi = (args) => { order.push(args.split(' ').slice(0, 3).join(' ')); return args.startsWith('state') ? { code: 0, stdout: 'checked: yes' } : { code: 0, stdout: 'push button  Cancel' }; };
+  const d = linuxLoginJobsDriver(atspi, () => 'on', { settle: async () => {}, agentSteady: async () => { order.push('STEADY'); return true; } });
+  await d.startLongJob();
+  assert.ok(order.indexOf('STEADY') >= 0, 'steady was awaited');
+  assert.ok(order.indexOf('STEADY') < order.findIndex((o) => /Run benchmarks/.test(o) || o === 'press dyno "Run'), 'before Run benchmarks was pressed');
+});
+test('an agent that never becomes steady makes the long job not start, with the reason', async () => {
+  const d = linuxLoginJobsDriver(() => ({ code: 0, stdout: '' }), () => 'on', { settle: async () => {}, agentSteady: async () => false });
+  const r = await d.startLongJob();
+  assert.equal(r.ok, false);
+  assert.match(r.detail, /agent/);
+});

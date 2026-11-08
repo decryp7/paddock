@@ -134,7 +134,7 @@ export function jobsPanelText(tree) {
   return inside.join('\n');
 }
 
-export function linuxLoginJobsDriver(atspi, parseSwitchState, { settle = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+export function linuxLoginJobsDriver(atspi, parseSwitchState, { settle = (ms) => new Promise((r) => setTimeout(r, ms)), agentSteady = async () => true } = {}) {
   const SW = '"Start Dyno at login" "check box|toggle button|switch"';
   return {
     // Read in place; when the page is not there (Settings was closed to look at the Jobs list), Settings is opened the way a person does and read again.
@@ -171,6 +171,8 @@ export function linuxLoginJobsDriver(atspi, parseSwitchState, { settle = (ms) =>
       return false;
     },
     async startLongJob() {
+      // A Start-at-login change replaces the agent with the login service's one: a benchmark started in that window is lost with the old agent (its Cancel then finds no agent).
+      if (!(await agentSteady())) return { ok: false, detail: 'the agent did not stay up and unchanged for a steady period after the login change, so a benchmark started now could be lost with it' };
       atspi('press dyno "^Close$" "push button"');
       if (atspi('press dyno "^Benchmarks$" "link"').code !== 0) return false;
       let ok = false;
