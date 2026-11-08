@@ -23,13 +23,13 @@ test.describe('chat composer', () => {
     const chat = await chatWithFile(page);
     await expect(chat.getByTestId('assistant-file')).toHaveAttribute('title', 'notes.md (37 B · 2 lines)');
     await expect(chat.getByTestId('assistant-attach')).toHaveAttribute('title', /256 KiB/);
-    await expect(chat.getByTestId('assistant-context')).toContainText(/of 8\.2k tokens/);
+    await expect(chat.getByTestId('assistant-context')).toContainText(/of 7\.2k tokens/);
     await chat.getByTestId('assistant-input').fill('What happened?');
     await chat.getByTestId('assistant-input').press('Enter');
     await expect(chat.getByTestId('assistant-turn-file')).toContainText('notes.md');
     await expect(chat.getByTestId('assistant-file')).toHaveCount(0);
     await expect(chat.getByTestId('assistant-answer').last()).not.toBeEmpty({ timeout: 10_000 });
-    await expect(chat.getByTestId('assistant-context')).toContainText(/^\d+ of 8\.2k tokens$/);
+    await expect(chat.getByTestId('assistant-context')).toContainText(/^\d+ of 7\.2k tokens$/);
   });
 
   test('refuses an image in words and keeps the question usable; a removed file is not sent', async ({ page }) => {
@@ -71,8 +71,10 @@ test.describe('chat composer', () => {
       expect(x!.width).toBeGreaterThanOrEqual(24);
       expect(x!.height).toBeGreaterThanOrEqual(24);
       const log = await chat.getByTestId('assistant-log').boundingBox();
-      const icon = await chat.locator('.empty-icon').boundingBox();
-      expect(icon!.y).toBeGreaterThanOrEqual(log!.y);
+      const empty = await chat.getByTestId('assistant-empty').boundingBox();
+      expect(empty!.y).toBeGreaterThanOrEqual(log!.y);
+      // The log keeps its room under the composer (review 2 P2-A).
+      expect(log!.height).toBeGreaterThanOrEqual(119);
       // The meter has its own room (a page-wide `.meter` style once squeezed it to 0 px wide).
       expect(meter!.width).toBeGreaterThan(100);
       // One row under the question: attach, then the meter, then Send at the right edge; nothing overlaps.

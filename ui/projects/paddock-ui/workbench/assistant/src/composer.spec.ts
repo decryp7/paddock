@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { provideShellTesting, render, settle } from '@decryp7/paddock-ui/shell/testing';
 import { PdAssistant } from './assistant';
 import { AssistantBackend, MemoryAssistantBackend, type MemoryAssistantOptions } from './backend';
@@ -120,7 +120,8 @@ describe('PdAssistant composer (ADR 0023 WP-4b)', () => {
     await pick(r, [file('photo.png', 'png', 'image/png'), file('huge.log', 'x'.repeat(11)), file('ok.txt', 'fine')]);
     const failure = text(r, 'assistant-failure');
     expect(failure).toContain('"photo.png" is an image');
-    expect(failure).toContain('"huge.log" is larger than 10 bytes');
+    // The early size check uses the engine's own words, next step included (review 2 P2-D).
+    expect(failure).toContain('"huge.log" is larger than 10 bytes. Attach a smaller file, or paste the part that matters.');
     expect(attachments?.added).toEqual(['photo.png', 'ok.txt']);
     expect(text(r, 'assistant-file')).toContain('ok.txt');
   });
@@ -261,6 +262,101 @@ describe('PdAssistant composer (ADR 0023 WP-4b)', () => {
     expect(r.all('[data-testid=assistant-turn]')).toHaveLength(0);
     expect(text(r, 'assistant-context')).toBe('About 40 tokens');
     expect(r.one('[data-testid=assistant-context]').getAttribute('role')).toBeNull();
+  });
+
+  it('says the files are too long, with no new chat to start, when files fill a new chat (review 2 P2-C)', async () => {
+    const { r, backend } = await open({ context: use(200, 7168, 'ok', false) });
+    await pick(r, [file('big.log', 'x'.repeat(100))]);
+    backend.used = use(9000, 7168, 'full', false);
+    await r.fixture.componentInstance['store'].refreshContext();
+    await settleAll(r);
+    expect(text(r, 'assistant-context-full')).toBe('These files are too long for the model. Remove a file.');
+    expect(r.all('[data-testid=assistant-context-new]')).toHaveLength(0);
+    await type(r, 'Summarise it');
+    expect(r.one('[data-testid=assistant-send]').getAttribute('title')).toBe('These files are too long for the model. Remove a file.');
+    // Taking the file off ends it.
+    backend.used = use(200, 7168, 'ok', false);
+    r.one<HTMLButtonElement>('[data-testid=assistant-file-remove]').click();
+    await settleAll(r);
+    expect(r.all('[data-testid=assistant-context-full]')).toHaveLength(0);
+  });
+
+  it('says the files are too long when a chat that fits overflows only with them; a chat full on its own offers a new chat', async () => {
+    const { r, backend } = await open();
+    await type(r, 'First');
+    r.one<HTMLButtonElement>('[data-testid=assistant-send]').click();
+    await settleAll(r);
+    // The chat alone fits; with the waiting file it does not: the file is the overflow.
+    let chatAlone = use(3000, 7168, 'ok');
+    backend.used = null;
+    (backend as { context: (id: string | null, a?: readonly Attachment[]) => Promise<ContextUse | null> }).context = (_id, a = []) =>
+      Promise.resolve(a.length ? use(9000, 7168, 'full', false) : chatAlone);
+    await pick(r, [file('big.log', 'x'.repeat(100))]);
+    expect(text(r, 'assistant-context-full')).toBe('These files are too long for the model. Remove a file.');
+    expect(r.all('[data-testid=assistant-context-new]')).toHaveLength(0);
+    // Full on its own: the chat is too long, a new chat is the way on.
+    chatAlone = use(7300, 7168, 'full');
+    await r.fixture.componentInstance['store'].refreshContext();
+    await settleAll(r);
+    expect(text(r, 'assistant-context-full')).toContain('This chat fills what the model can read.');
+    expect(text(r, 'assistant-context-new')).toBe('Start a new chat');
+  });
+
+  describe('on a short window (review 2 P2-A)', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    });
+
+    /** A window `height` px tall, and a files tray whose chips need `rows` rows (jsdom does no layout). */
+    const shortWindow = (height: number, rows: () => number): void => {
+      vi.stubGlobal('matchMedia', (q: string) => ({ matches: q === '(max-height: 760px)' && height <= 760, media: q, addEventListener: () => undefined, removeEventListener: () => undefined }));
+      vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains('files-tray') ? rows() * 28 : 0;
+      });
+      vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains('files-tray') ? Math.min(rows(), this.classList.contains('folded') ? 2 : 3) * 28 : 0;
+      });
+    };
+
+    it('folds many files to two rows behind an "N files" chip that opens and closes the tray', async () => {
+      let rows = 1;
+      shortWindow(700, () => rows);
+      const { r } = await open();
+      await pick(r, [file('a.txt', 'a'), file('b.txt', 'b')]);
+      expect(r.one('[data-testid=assistant-files]').classList.contains('folded')).toBe(true);
+      expect(r.all('[data-testid=assistant-files-summary]')).toHaveLength(0);
+      rows = 4;
+      await pick(r, Array.from({ length: 10 }, (_, i) => file(`part-${i}.txt`, `${i}`)));
+      const summary = r.one<HTMLButtonElement>('[data-testid=assistant-files-summary]');
+      expect(summary.textContent?.trim()).toBe('12 files');
+      expect([summary.getAttribute('aria-expanded'), summary.getAttribute('aria-controls')]).toEqual(['false', 'pd-assistant-files']);
+      expect(summary.getAttribute('title')).toBe('Show all attached files');
+      summary.click();
+      await settleAll(r);
+      expect(r.one('[data-testid=assistant-files]').classList.contains('folded')).toBe(false);
+      expect(r.one('[data-testid=assistant-files-summary]').getAttribute('aria-expanded')).toBe('true');
+      expect(r.one('[data-testid=assistant-files-summary]').getAttribute('title')).toBe('Show fewer attached files');
+      r.one<HTMLButtonElement>('[data-testid=assistant-files-summary]').click();
+      await settleAll(r);
+      expect(r.one('[data-testid=assistant-files]').classList.contains('folded')).toBe(true);
+    });
+
+    it('never folds on a tall window', async () => {
+      shortWindow(900, () => 4);
+      const { r } = await open();
+      await pick(r, Array.from({ length: 12 }, (_, i) => file(`part-${i}.txt`, `${i}`)));
+      expect(r.one('[data-testid=assistant-files]').classList.contains('folded')).toBe(false);
+      expect(r.all('[data-testid=assistant-files-summary]')).toHaveLength(0);
+    });
+  });
+
+  it('counts a waiting file at about four bytes a token when the memory engine is given the port\'s sizes (review 2 P2-F)', async () => {
+    const attachments = new MemoryAssistantAttachments();
+    const { r } = await open({ attachments, attachmentTokens: (a) => attachments.tokensOf(a) });
+    expect(text(r, 'assistant-context')).toBe('About 40 of 7.2k tokens');
+    await pick(r, [file('big.log', 'x'.repeat(4000))]);
+    expect(text(r, 'assistant-context')).toBe('About 1k of 7.2k tokens');
   });
 
   it('asks the engine again with the files waiting in the composer, so the chips move the meter (review P1-2)', async () => {

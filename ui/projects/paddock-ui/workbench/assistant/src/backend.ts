@@ -121,6 +121,11 @@ export interface MemoryAssistantOptions {
   readonly conversations?: readonly Conversation[];
   /** The model's window for the context meter (default 8192 tokens; 0: unknown). */
   readonly contextTokens?: number;
+  /** The tokens kept for the answer, taken off the window (default 1024, the engine's `Budgets::max_answer_tokens`). */
+  readonly reserveTokens?: number;
+  /** About how many tokens a file takes (the engine's `attachment_tokens` hook: a host that keeps the bytes says about four
+   *  bytes a token); default a plausible 250 a file. */
+  readonly attachmentTokens?: (attachment: Attachment) => number;
   /** A question is refused with this message. */
   readonly sendError?: string;
 }
@@ -258,15 +263,21 @@ export class MemoryAssistantBackend extends AssistantBackend {
     return Promise.resolve();
   }
 
-  /** A plausible meter for the demo (about four characters a token over the conversation); the engine's rule is Rust's. */
+  /**
+   * A plausible meter for the demo, measured as the engine does (Rust's `ContextUse::new` is the rule): about four characters a
+   * token over the conversation, files through `attachmentTokens`, and room for the conversation that is the window less the
+   * answer's reserve (at least one token; none for an unknown window).
+   */
   override context(id: string | null, attachments: readonly Attachment[] = []): Promise<ContextUse | null> {
-    const limit = this.options.contextTokens ?? 8192;
+    const window = this.options.contextTokens ?? 8192;
+    const reserve = this.options.reserveTokens ?? 1024;
+    const limit = window === 0 ? 0 : Math.max(1, window - reserve);
     const c = id ? this.store.get(id) : undefined;
-    // A plausible 250 tokens a file, sent or waiting (an engine knows the real sizes).
-    const files = attachments.length + (c?.messages ?? []).reduce((n, m) => n + (m.attachments?.length ?? 0), 0);
-    const used = 40 + Math.ceil((c?.messages ?? []).reduce((n, m) => n + m.text.length, 0) / 4) + 250 * files;
+    const tokensOf = this.options.attachmentTokens ?? (() => 250);
+    const files = [...attachments, ...(c?.messages ?? []).flatMap((m) => m.attachments ?? [])].reduce((n, a) => n + tokensOf(a), 0);
+    const used = 40 + Math.ceil((c?.messages ?? []).reduce((n, m) => n + m.text.length, 0) / 4) + files;
     const level = limit === 0 ? 'unknown' : used >= limit ? 'full' : used * 100 >= limit * 80 ? 'high' : 'ok';
-    return Promise.resolve({ usedTokens: used, limitTokens: limit, reserveTokens: 0, exact: c !== undefined && !attachments.length, level });
+    return Promise.resolve({ usedTokens: used, limitTokens: limit, reserveTokens: reserve, exact: c !== undefined && !attachments.length, level });
   }
 
   listen(handler: (event: Envelope) => void): Promise<Unlisten> {

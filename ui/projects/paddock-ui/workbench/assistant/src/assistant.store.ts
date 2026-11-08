@@ -74,6 +74,9 @@ interface AssistantState {
   attachRules: AttachRules | null;
   /** How full the model's context is for the conversation on screen, as the engine measured it (`null`: not measured). */
   context: ContextUse | null;
+  /** The conversation on screen is full without the files waiting in the composer (then a new chat is the way on; otherwise
+   *  the files are what does not fit). */
+  chatFull: boolean;
   /** Push-to-talk, as the host's engine reports it. */
   speech: SpeechState;
 }
@@ -97,6 +100,7 @@ const initialState: AssistantState = {
   attaching: 0,
   attachRules: null,
   context: null,
+  chatFull: false,
   speech: { kind: 'idle' },
 };
 
@@ -179,6 +183,14 @@ export const AssistantStore = signalStore(
       }),
       /** The chat fills what the model can read: nothing more can be sent in it (the engine refuses it too). */
       full: computed(() => store.context()?.level === 'full'),
+      /**
+       * What fills the model's window: `'chat'` (the conversation itself: start a new one), `'files'` (the files waiting in a
+       * new chat, or the ones that tip a chat that fits: remove a file), `null` when it is not full.
+       */
+      fullBy: computed((): 'chat' | 'files' | null => {
+        if (store.context()?.level !== 'full') return null;
+        return store.attached().length && (!store.activeId() || !store.chatFull()) ? 'files' : 'chat';
+      }),
       canSend: computed(
         () =>
           store.run() === 'idle' &&
@@ -220,9 +232,12 @@ export const AssistantStore = signalStore(
       const files = store.attached().map((c) => c.attachment);
       try {
         const context = await store._backend.context(id, files);
-        if (store.activeId() === id && store.attached().length === files.length) patchState(store, { context });
+        // Full with files waiting in an open chat: is the chat full on its own (start a new one), or do the files tip it (remove
+        // one)? The engine is asked once more, without them.
+        const alone = context?.level === 'full' && id && files.length ? await store._backend.context(id, []) : context;
+        if (store.activeId() === id && store.attached().length === files.length) patchState(store, { context, chatFull: alone?.level === 'full' });
       } catch {
-        patchState(store, { context: null });
+        patchState(store, { context: null, chatFull: false });
       }
     };
     const update = (change: (t: TurnView) => TurnView): void => {
@@ -467,8 +482,8 @@ export const AssistantStore = signalStore(
             const kib = Math.floor(rules.maxFileBytes / 1024);
             refused.push(
               kib > 0
-                ? $localize`:@@pd.wb.assistant.attach.too-big:"${file.name}:name:" is larger than ${kib}:kib: KiB.`
-                : $localize`:@@pd.wb.assistant.attach.too-big-bytes:"${file.name}:name:" is larger than ${rules.maxFileBytes}:bytes: bytes.`,
+                ? $localize`:@@pd.wb.assistant.attach.too-big:"${file.name}:name:" is larger than ${kib}:kib: KiB. Attach a smaller file, or paste the part that matters.`
+                : $localize`:@@pd.wb.assistant.attach.too-big-bytes:"${file.name}:name:" is larger than ${rules.maxFileBytes}:bytes: bytes. Attach a smaller file, or paste the part that matters.`,
             );
             continue;
           }
