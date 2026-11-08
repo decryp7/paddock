@@ -99,7 +99,8 @@ export async function trayMenuStep(actor, { browser = null } = {}) {
   attempts.push({ logged: first.logged, watch: first.watch });
   let { icons, menu, promoted, metrics } = first;
   const menuShot = await actor.fetch(first.watch.seen ? 'rcw-open' : 'rcw-none', 'tray-menu-open');
-  if (icons.length && !first.watch.seen) { await closeMenus(actor); await actor.send('fg Dyno').catch(() => {}); await sleep(1500); const again = await openMenu(actor); attempts.push({ logged: again.logged, watch: again.watch }); if (again.watch.seen) { menu = again.menu; } }
+  // A second and third try when the menu window was seen but its items could not be read (0ad round 7: seen after 114 ms, 0 items), not only when no window came.
+  for (let k = 0; k < 2 && icons.length && !menu.length; k++) { await closeMenus(actor); await actor.send('fg Dyno').catch(() => {}); await sleep(1500); const again = await openMenu(actor); attempts.push({ logged: again.logged, watch: again.watch }); if (again.menu.length) menu = again.menu; }
   evidence.push(`screenshot after the first right click: ${menuShot ?? 'not taken'} (taken in the guest at the first sight of a menu, or after 6 s with none)`, `control menu screenshot: ${control.shot ?? 'not taken'}`,
     ...attempts.map((a, i) => `attempt ${i + 1}: app log "tray click: Right Up" ${a.logged ? 'logged' : 'NOT logged'}; native menu windows: ${a.watch.seen ? `${a.watch.windows.map((w) => `${w.proc} ${w.rect}`).join(', ')} after ${a.watch.ms} ms` : 'none in 6 s'}; items: ${a.watch.items.map((m) => m.name).join(' | ') || '(none)'}`));
   evidence.push(`taskbar icons: ${icons.map((i) => i.name).join(' | ') || '(none found)'}${promoted ? ' (found only after promoting them)' : ''}`, `menu: ${menu.map((m) => m.name).join(' | ') || '(none)'}`);

@@ -69,6 +69,13 @@ export async function hungPageStep(g, title) {
   try { await g.suspend(); } catch (e) { return makeResult(title, [chk(false, `the page process could not be stopped: ${e.message}`, 'check')]); }
   let questionsWhileOpen = null, keepWaitingAt = null, secondAskAt = null, shot = null;
   for (let i = 0; i < 90 && !events.some((e) => e.kind === 'asked'); i++) { await g.sleep(3000); await poll(); }
+  // A question the polls did not return but the log holds (0ad round 7): dated by the log's own @t, moved to the host clock by the offset measured at the stop.
+  if (!events.some((e) => e.kind === 'asked') && g.finalLines) {
+    for (const l of await g.finalLines()) {
+      const m = /"@t":"([^"]+)"/.exec(l);
+      if (eventOf(l) === 'asked' && m && g.clockOffsetMs !== undefined) { const t = (Date.parse(m[1]) + g.clockOffsetMs) / 1000; if (t >= suspendedAt) { events.push({ t, kind: 'asked' }); break; } }
+    }
+  }
   if (events.some((e) => e.kind === 'asked')) {
     await g.sleep(2000);
     questionsWhileOpen = await g.questions('open');
