@@ -296,3 +296,18 @@ check = "C54"
 path = "apps/shell-demo/src-tauri/macos/agent.plist"
 reason = "shell demo: the heartbeat agent's plist (ProcessType Background, LowPriorityIO) as paddock-service renders it; follows the ADR 0020 helper"
 expires = "2026-12-31"
+
+# Two `wip:` commits of the Debrief 1.2 branches, merged into main as they are: history is not rewritten (no force). commit-lint
+# (the ci.yml commits job) and C23 both honour these; once the 200-commit window of C23 has moved past them (about 12 days of
+# commits on main at the recent pace) the lines can go.
+[[waiver]]
+check = "C23"
+path = "commit 8e557a6567"
+reason = "wip: subject from an unshared branch; history cannot be rewritten (no force)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C23"
+path = "commit eecea633fa"
+reason = "wip: subject from an unshared branch; history cannot be rewritten (no force)"
+expires = "2026-12-31"

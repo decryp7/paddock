@@ -926,7 +926,7 @@ export function ciOutputs(plan, legs, base = null) {
 /**
  * The commits the commit lint checks, as a git revision range, or null to skip it. Only what a change adds is linted, so an
  * old bad commit never keeps main red: a pull request lints since its target branch, a push the commits it added
- * (`before..sha`; a new branch, an all-zero `before`, lints the head commit only), a manual run from the plan's base (the
+ * (`before..sha`, on main only the first-parent ones, `--first-parent before..sha`: what main adds, not what a merge brought in from a branch; a new branch, an all-zero `before`, lints the head commit only), a manual run from the plan's base (the
  * head commit alone without one); `known(commit)` says whether a commit is in the clone. Tags and a call with an `app` (an app's tag gates, ER-15) and every other event skip it:
  * a release must not fail on an old commit's subject.
  */
@@ -935,7 +935,11 @@ export function commitLintRange({ event, ref = '', before = '', sha = 'HEAD', ba
   const head = `${sha}^!`;
   if (event === 'pull_request') return baseRef ? `origin/${baseRef}..HEAD` : null;
   // A `before` missing from the history (after a force push) lints the head commit only.
-  if (event === 'push') return before && !/^0+$/.test(before) && known(before) ? `${before}..${sha}` : head;
+  if (event === 'push') {
+    if (!before || /^0+$/.test(before) || !known(before)) return head;
+    // On main only what main itself adds: a branch's commits were linted on its pull request, and landing it adds the merge.
+    return `${ref === 'refs/heads/main' ? '--first-parent ' : ''}${before}..${sha}`;
+  }
   if (event === 'workflow_dispatch') return base ? `${base}..${sha}` : head;
   return null;
 }
