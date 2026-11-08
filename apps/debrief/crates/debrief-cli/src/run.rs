@@ -72,33 +72,17 @@ pub(crate) fn store_message(e: StoreError) -> String {
     e.to_string()
 }
 
-/// A scratch store folder, removed when it goes out of scope.
-struct Scratch(Option<PathBuf>);
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        if let Some(p) = self.0.take() {
-            let _ = std::fs::remove_dir_all(p);
-        }
-    }
-}
-
-fn scratch_folder() -> Result<PathBuf, String> {
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_nanos());
-    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("{BIN_NAME}-cli-{}-{n}-{nanos}", std::process::id()));
-    std::fs::create_dir_all(&dir).map_err(|e| format!("could not make a scratch store in {}: {e}", dir.display()))?;
-    Ok(dir)
+/// A fresh private folder (random name, created atomically, owner only), removed when dropped.
+fn scratch_folder() -> Result<tempfile::TempDir, String> {
+    debrief_ipc::scratch::private_tempdir(&format!("{BIN_NAME}-cli-"))
+        .map_err(|e| format!("could not make a private scratch store: {e}. Pass --store <folder> to keep the store in a folder you choose"))
 }
 
 /// The store a command works on, with its scratch folder (if any) removed when this is dropped. The store is
 /// declared first so it lets go of its files before the folder is removed.
 pub(crate) struct Prepared {
     pub(crate) store: SharedStore,
-    _scratch: Scratch,
+    _scratch: Option<tempfile::TempDir>,
 }
 
 fn canonical(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
@@ -119,11 +103,11 @@ pub(crate) fn open_store(src: &Source, host: &dyn StoreHost) -> Result<Prepared,
     let (dir, scratch) = match &src.store {
         Some(d) => {
             std::fs::create_dir_all(d).map_err(|e| format!("cannot use the store folder {}: {e}", d.display()))?;
-            (d.clone(), Scratch(None))
+            (d.clone(), None)
         }
         None => {
             let d = scratch_folder()?;
-            (d.clone(), Scratch(Some(d)))
+            (d.path().to_path_buf(), Some(d))
         }
     };
     let store = if dir.join(STORE_DB_FILE).is_file() {
@@ -597,4 +581,33 @@ fn write_atomically(target: &Path, bytes: &[u8]) -> Result<(), String> {
         let _ = std::fs::remove_file(&tmp);
         format!("cannot write {}: {e}", target.display())
     })
+}
+
+#[cfg(test)]
+mod scratch_tests {
+    use super::*;
+
+    /// The scratch store is a fresh private folder: unpredictable name, nobody else can read or plant in it, and it goes with the guard.
+    #[test]
+    fn the_scratch_store_is_a_fresh_private_folder_removed_with_its_guard() {
+        let a = scratch_folder().unwrap();
+        let b = scratch_folder().unwrap();
+        assert_ne!(a.path(), b.path(), "every run gets its own folder");
+        assert!(a.path().is_dir());
+        assert!(a
+            .path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with(&format!("{BIN_NAME}-cli-")));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(a.path()).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o700, "owner only, whatever the umask");
+        }
+        let gone = a.path().to_path_buf();
+        drop(a);
+        assert!(!gone.exists());
+    }
 }

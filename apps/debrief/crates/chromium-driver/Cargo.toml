@@ -9,6 +9,7 @@ publish = false
 description = "Self-contained Chromium renderer driver: discovery, supervised launch, a minimal DevTools-protocol client, readiness and challenge detection (no application types; meant to be copied between apps)"
 
 [dependencies]
+tempfile.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -25,7 +26,6 @@ paddock-proc = { path = "../../../../crates/paddock-proc" }
 test-support = []
 
 [dev-dependencies]
-tempfile = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }

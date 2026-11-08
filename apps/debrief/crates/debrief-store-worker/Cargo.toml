@@ -24,6 +24,7 @@ debrief-store-client = { path = "../debrief-store-client" }
 debrief-store-duck = { path = "../debrief-store-duck" }
 debrief-plugin-host = { path = "../debrief-plugin-host" }
 log.workspace = true
+tempfile.workspace = true
 serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order", "float_roundtrip"] }
 
@@ -32,7 +33,6 @@ debrief-ipc = { path = "../debrief-ipc", features = ["test-support"] }
 getrandom.workspace = true
 chrono.workspace = true
 debrief-plugin-api = { path = "../debrief-plugin-api" }
-tempfile.workspace = true
 sysinfo = { workspace = true, features = ["system"] }
 paddock-proc = { path = "../../../../crates/paddock-proc" }
 

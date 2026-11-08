@@ -94,7 +94,7 @@ fn session_start() -> Option<SystemTime> {
 fn folders<'a, R: Runtime>(app: &AppHandle<R>, ai: Option<&'a dyn AiPort>) -> Folders<'a> {
     let log = crate::app_dirs::log(app).ok();
     Folders {
-        bundles: Some(crate::share::bundles_root()),
+        bundles: crate::share::bundles_root(),
         webview: crate::app_dirs::webview_data(app).ok(),
         data: crate::app_dirs::data(app).ok(),
         active_log: log.as_deref().map(crate::logging::active_log_file),

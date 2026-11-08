@@ -104,8 +104,11 @@ struct ScaledFiles {
 
 impl ScaledFiles {
     fn write(lines: usize) -> ScaledFiles {
-        let dir = std::env::temp_dir().join(format!("debrief-bench-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("temporary folder");
+        let dir = tempfile::Builder::new()
+            .prefix("debrief-bench-")
+            .tempdir()
+            .expect("temporary folder")
+            .keep();
         let paths = SAMPLES
             .iter()
             .map(|&(_, rel, _, header)| {

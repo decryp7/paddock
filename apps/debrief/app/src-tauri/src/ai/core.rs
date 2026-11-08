@@ -863,12 +863,14 @@ impl AiCore {
         let settings = self.settings();
         let source = (self.deps.source)(&settings)?;
         let store = self.store();
+        // Without a config folder the settings go to a fresh private folder (random name, owner only) that goes after the call.
         let scratch;
         let settings_path = match self.settings_path() {
             Some(p) => p,
             None => {
-                scratch = std::env::temp_dir().join(format!("debrief-ai-{}.json", std::process::id()));
-                scratch
+                scratch = debrief_ipc::scratch::private_tempdir("debrief-ai-")
+                    .map_err(|e| AiError::Io(format!("cannot make a private scratch folder for the AI settings: {e}")))?;
+                scratch.path().join(SETTINGS_FILE)
             }
         };
         let setup = Setup {

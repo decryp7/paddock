@@ -748,7 +748,8 @@ fn child_spec(manifest: &Manifest, spec: &PluginSpec, granted: &[Permission], el
     };
     let mut s = SpawnSpec::new(spec.exe.clone(), label);
     s.args = spec.args.clone();
-    s.current_dir = Some(std::env::temp_dir());
+    // The plugin's own program folder, never the shared temp folder (another local user could plant files there).
+    s.current_dir = spec.exe.parent().map(std::path::Path::to_path_buf);
     s.endpoint_prefix = debrief_ipc::endpoint::prefix::PLUGIN.into();
     s.connect_window = spec.connect_window;
     s.log = if elevated { None } else { spec.log.clone() };
@@ -795,6 +796,15 @@ mod tests {
             sandbox_status(host, vec![partly.clone(), seccomp.clone()]),
             [partly.message, seccomp.message]
         );
+    }
+
+    /// A plugin without a home of its own starts in its program's folder, never in the shared temp folder.
+    #[test]
+    fn a_plugin_without_a_home_does_not_start_in_the_shared_temp_folder() {
+        let exe = std::path::Path::new("plugins").join("p.exe");
+        let spec = PluginSpec::new(exe.clone(), "p.cwd");
+        let c = child_spec(&manifest_of("p.cwd", None), &spec, &[], false);
+        assert_eq!(c.spawn.current_dir.as_deref(), exe.parent());
     }
 
     fn manifest_of(id: &str, memory: Option<u64>) -> Manifest {

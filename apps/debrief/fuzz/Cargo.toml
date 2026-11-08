@@ -34,6 +34,7 @@ debrief-symbols = { path = "../crates/debrief-symbols", default-features = false
 debrief-plugin-dotnet = { path = "../crates/debrief-plugin-dotnet", default-features = false }
 serde_json = "1"
 chrono = "0.4"
+tempfile = "3"
 
 [profile.release]
 debug = 1

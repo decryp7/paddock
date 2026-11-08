@@ -26,17 +26,25 @@ pub(crate) struct AppState {
     pub(crate) stores: Arc<dyn StoreHost>,
     /// The folder of scratch stores (`<data>/stores`).
     pub(crate) store_root: PathBuf,
+    /// Keeps a private scratch folder alive when there is no data folder (see [`store_root`]).
+    _store_scratch: Option<Arc<tempfile::TempDir>>,
     /// The parser library (ADR 0026), shared by every window.
     pub(crate) parsers: Arc<crate::parsers::ParserLibrary>,
     /// Settings ▸ Performance as the processes get it, and what their memory watchers report (ADR 0031).
     pub(crate) performance: Arc<crate::performance::live::Live>,
 }
 
-/// The folder of scratch stores under Debrief's data folder (the temp folder when there is none).
-pub(crate) fn store_root(data: Option<&std::path::Path>) -> PathBuf {
+/// The folder of scratch stores: `<data>/stores`, or, without a data folder, a fresh private folder (random name, owner
+/// only, created atomically) that is removed when the returned guard is dropped. Never a fixed name in the shared temp folder.
+pub(crate) fn store_root(data: Option<&std::path::Path>) -> anyhow::Result<(PathBuf, Option<Arc<tempfile::TempDir>>)> {
     match data {
-        Some(d) => d.join("stores"),
-        None => std::env::temp_dir().join(format!("debrief-stores-{}", std::process::id())),
+        Some(d) => Ok((d.join("stores"), None)),
+        None => {
+            let dir = debrief_ipc::scratch::private_tempdir("debrief-stores-").map_err(|e| {
+                anyhow::anyhow!("cannot make a private folder for the scratch stores: {e}. Set DEBRIEF_DATA_DIR to a folder you own")
+            })?;
+            Ok((dir.path().to_path_buf(), Some(Arc::new(dir))))
+        }
     }
 }
 
@@ -70,7 +78,9 @@ impl AppState {
         performance.attach_worker(stores.worker());
         let plugins = Arc::new(plugins);
         performance.attach_plugins(plugins.clone());
-        let mut state = AppState::with(profile_dir, safe_mode, plugins, Arc::new(stores), store_root(data_dir.as_deref()));
+        let (root, scratch) = store_root(data_dir.as_deref())?;
+        let mut state = AppState::with(profile_dir, safe_mode, plugins, Arc::new(stores), root);
+        state._store_scratch = scratch;
         state.installed = Arc::new(installed);
         state.performance = performance;
         Ok(state)
@@ -102,6 +112,7 @@ impl AppState {
             installed: Arc::new(crate::plugin_packages::Installed::none()),
             stores,
             store_root,
+            _store_scratch: None,
             parsers: Arc::new(parsers),
             performance,
         }
@@ -133,5 +144,35 @@ impl AppState {
     pub fn factory(&self) -> WindowFactory {
         let shared = self.clone();
         Box::new(move |label| shared.new_window(label))
+    }
+}
+
+#[cfg(test)]
+mod store_root_tests {
+    use super::*;
+
+    #[test]
+    fn the_scratch_stores_live_under_the_data_folder() {
+        let data = tempfile::tempdir().unwrap();
+        let (root, guard) = store_root(Some(data.path())).unwrap();
+        assert_eq!(root, data.path().join("stores"));
+        assert!(guard.is_none());
+    }
+
+    /// Without a data folder the stores go to a fresh private folder, never a fixed name in the shared temp folder that
+    /// another local user could have planted.
+    #[test]
+    fn without_a_data_folder_the_scratch_stores_get_a_private_folder_that_goes_with_the_state() {
+        let (a, ga) = store_root(None).unwrap();
+        let (b, _gb) = store_root(None).unwrap();
+        assert_ne!(a, b, "no predictable name");
+        assert!(a.is_dir());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&a).unwrap().permissions().mode() & 0o777, 0o700);
+        }
+        drop(ga);
+        assert!(!a.exists(), "removed when the state is dropped");
     }
 }

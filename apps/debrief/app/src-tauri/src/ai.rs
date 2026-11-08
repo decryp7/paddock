@@ -91,7 +91,15 @@ impl Drop for WindowAi {
 /// Never fails: problems leave the AI unavailable with a reason the UI shows.
 pub fn init<R: Runtime>(app: &AppHandle<R>, safe_mode: bool) {
     let dir = crate::app_dirs::config(app).ok().map(|d| d.join("ai"));
-    let data = crate::app_dirs::data(app).unwrap_or_else(|_| std::env::temp_dir().join("debrief-data"));
+    // No data folder: the AI stays unavailable (its commands answer so) instead of using a fixed folder in the shared temp
+    // folder, which another local user could plant.
+    let data = match crate::app_dirs::data(app) {
+        Ok(d) => d,
+        Err(e) => {
+            log::error!("AI assistant unavailable: Debrief's data folder cannot be resolved ({e}). Set DEBRIEF_DATA_DIR to a folder you own and restart Debrief.");
+            return;
+        }
+    };
     let models = data.join("models");
     let deps = match app.try_state::<crate::app_state::AppState>().map(|s| s.performance.clone()) {
         Some(perf) => {

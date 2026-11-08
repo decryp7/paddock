@@ -33,7 +33,12 @@ fn ai_model_bytes<R: Runtime>(app: &AppHandle<R>) -> u64 {
 pub async fn performance_suggest<R: Runtime>(app: AppHandle<R>, state: State<'_, AppState>) -> CmdResult<Proposal> {
     let live = live(&state);
     let current = live.settings();
-    let data = crate::app_dirs::data(&app).unwrap_or_else(|_| std::env::temp_dir());
+    // The probe measures the disk of the data folder; without one there is nothing to measure (never the shared temp folder).
+    let data = crate::app_dirs::data(&app).map_err(|e| {
+        CmdError::unavailable(format!(
+            "Debrief's data folder cannot be found ({e}), so the disk cannot be measured. Set DEBRIEF_DATA_DIR to a folder you own and restart Debrief."
+        ))
+    })?;
     let env = probe(&data, ai_model_bytes(&app));
     Ok(proposal(Some(env.clone()), &current, &suggest(&env, &current)))
 }

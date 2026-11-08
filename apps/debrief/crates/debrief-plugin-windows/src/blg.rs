@@ -9,7 +9,6 @@ use crate::perfmon::parse_perfmon;
 use anyhow::{anyhow, bail, Context, Result};
 use debrief_plugin_api::importer::{decode, BinaryImporter, ImportCtx, Imported};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 
 pub const UNSUPPORTED: &str =
     "BLG files can only be read on Windows (Performance Monitor's format). Convert with: relog file.blg -f csv -o file.csv";
@@ -32,12 +31,12 @@ impl BlgImporter {
     }
 
     fn relog(&self, input: &Path) -> Result<Vec<u8>> {
-        static COUNTER: AtomicU32 = AtomicU32::new(0);
-        let tmp: PathBuf = std::env::temp_dir().join(format!(
-            "debrief-blg-{}-{}.csv",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
+        // `relog` writes into a fresh private folder (random name, owner only) that goes when this function returns.
+        let scratch = tempfile::Builder::new()
+            .prefix("debrief-blg-")
+            .tempdir()
+            .context("could not make a private scratch folder")?;
+        let tmp: PathBuf = scratch.path().join("relog.csv");
         let args: Vec<String> = [
             input.to_string_lossy().as_ref(),
             "-f",
@@ -66,7 +65,6 @@ impl BlgImporter {
             }
             std::fs::read(&tmp).map_err(|e| anyhow!("relog produced no CSV: {e}"))
         })();
-        let _ = std::fs::remove_file(&tmp);
         result
     }
 }

@@ -11,9 +11,12 @@ use std::sync::OnceLock;
 fn scratch() -> &'static PathBuf {
     static D: OnceLock<PathBuf> = OnceLock::new();
     D.get_or_init(|| {
-        let d = std::env::temp_dir().join(format!("debrief-fuzz-project-{}", std::process::id()));
-        std::fs::create_dir_all(&d).expect("scratch folder");
-        d
+        // A private folder for the life of the fuzz process (the OS cleans up after a killed fuzzer).
+        tempfile::Builder::new()
+            .prefix("debrief-fuzz-project-")
+            .tempdir()
+            .expect("scratch folder")
+            .keep()
     })
 }
 

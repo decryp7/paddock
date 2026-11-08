@@ -218,14 +218,19 @@ pub struct Chromium {
 
 /// A profile folder no other launch uses: the clock alone is not enough (macOS reads it in microseconds, so two
 /// launches at once got the same folder and one browser's port file was read by the other).
-fn unique_dir() -> PathBuf {
-    static LAUNCHES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let k = LAUNCHES.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("chromium-driver-{}-{n}-{k}", std::process::id()))
+/// A fresh throwaway profile folder: created atomically with a random name and owner-only access (so a name planted by
+/// another local user is never used), removed by [`cleanup`] when the launch ends.
+fn unique_dir() -> std::io::Result<PathBuf> {
+    // Owner-only whatever the umask. (chromium-driver depends on no Debrief crate, so it cannot use
+    // `debrief_ipc::scratch::private_tempdir`; this is its only use.)
+    let mut b = tempfile::Builder::new();
+    b.prefix("chromium-driver-");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        b.permissions(std::fs::Permissions::from_mode(0o700));
+    }
+    Ok(b.tempdir()?.keep())
 }
 
 impl Chromium {
@@ -240,7 +245,10 @@ impl Chromium {
     )]
     fn launch_with(exe: &Browser, opts: &LaunchOptions, sandbox: Sandbox) -> Result<Chromium> {
         let (dir, throwaway) = match &opts.profile {
-            Profile::Throwaway => (unique_dir(), true),
+            Profile::Throwaway => (
+                unique_dir().map_err(|e| Error::Launch(format!("the profile folder could not be created: {e}")))?,
+                true,
+            ),
             Profile::Persistent(p) => (p.clone(), false),
         };
         std::fs::create_dir_all(&dir).map_err(|e| Error::Launch(format!("the profile folder could not be created: {e}")))?;
@@ -569,10 +577,25 @@ fn connect(
 mod tests {
     use super::*;
 
+    /// The throwaway profile is created atomically, owner only and with an unpredictable name: a folder another local user
+    /// planted at a guessable name in the shared temp folder is never reused.
+    #[cfg(unix)]
+    #[test]
+    fn a_throwaway_profile_is_a_private_folder_nobody_else_can_have_planted() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = unique_dir().unwrap();
+        let mode = std::fs::metadata(&d).unwrap().permissions().mode() & 0o777;
+        std::fs::remove_dir_all(&d).unwrap();
+        assert_eq!(mode, 0o700);
+    }
+
     #[test]
     fn every_launch_gets_its_own_profile_folder() {
-        let dirs: std::collections::HashSet<PathBuf> = (0..1000).map(|_| unique_dir()).collect();
-        assert_eq!(dirs.len(), 1000);
+        let dirs: std::collections::HashSet<PathBuf> = (0..100).map(|_| unique_dir().unwrap()).collect();
+        assert_eq!(dirs.len(), 100);
+        for d in &dirs {
+            std::fs::remove_dir_all(d).unwrap();
+        }
     }
 
     #[test]

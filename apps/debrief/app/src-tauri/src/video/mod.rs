@@ -108,10 +108,19 @@ impl Drop for Scratch {
     }
 }
 
-/// Registers the video state (call from `setup`). Never fails: without a data folder the runtime lives in the
-/// temporary one.
+/// The next step shown when the data folder cannot be resolved.
+const NEXT_STEP: &str = "Set DEBRIEF_DATA_DIR to a folder you own and restart Debrief.";
+
+/// Registers the video state (call from `setup`). Never fails: without a data folder video support stays unavailable
+/// (the commands answer "not ready"), never a fixed folder in the shared temp folder that another local user could plant.
 pub fn init<R: Runtime>(app: &AppHandle<R>) {
-    let data = crate::app_dirs::data(app).unwrap_or_else(|_| std::env::temp_dir().join("debrief-data"));
+    let data = match crate::app_dirs::data(app) {
+        Ok(d) => d,
+        Err(e) => {
+            log::error!("Video support is unavailable: Debrief's data folder cannot be resolved ({e}). {NEXT_STEP}");
+            return;
+        }
+    };
     app.manage(VideoState::new(data.join("video")));
 }
 

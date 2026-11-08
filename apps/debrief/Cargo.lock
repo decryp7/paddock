@@ -1727,6 +1727,7 @@ dependencies = [
  "chrono",
  "ctrlc",
  "debrief-core",
+ "debrief-ipc",
  "debrief-pdf",
  "debrief-store-client",
  "debrief-store-duck",
@@ -2140,6 +2141,7 @@ dependencies = [
  "quick-xml",
  "serde",
  "serde_json",
+ "tempfile",
  "windows",
 ]
 
@@ -2171,6 +2173,7 @@ dependencies = [
  "quick-xml",
  "serde",
  "serde_json",
+ "tempfile",
  "windows",
 ]
 
@@ -2231,6 +2234,7 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

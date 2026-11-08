@@ -155,11 +155,12 @@ impl Tool for SetsTool {
                 "install" => {
                     let template = parse_template(&args)?;
                     let xml = template.to_xml()?;
-                    let file = std::env::temp_dir().join(format!("debrief-{}.xml", template.name));
+                    // The template goes into a fresh private folder (0700, random name, removed on drop): a fixed
+                    // name in the shared temp folder could be planted by another local user.
+                    let scratch = tempfile::Builder::new().prefix("debrief-perfmon-").tempdir()?;
+                    let file = scratch.path().join("template.xml");
                     std::fs::write(&file, xml)?;
-                    let imported = c.import(&template.name, &file, true);
-                    let _ = std::fs::remove_file(&file);
-                    imported?;
+                    c.import(&template.name, &file, true)?;
                     self.status(&c, &template.name)
                 }
                 "control" => {
@@ -244,7 +245,8 @@ mod tests {
         let p = t.invoke("presets", json!({}), &ctx()).unwrap();
         assert!(p.as_array().unwrap().iter().any(|x| x["id"] == "memory"));
         assert!(p[0]["counters"][0]["guidance"].is_string());
-        let dir = std::env::temp_dir().join(format!("debrief-tools-perfmon-{}", std::process::id()));
+        let _dir_scratch = tempfile::tempdir().unwrap();
+        let dir = _dir_scratch.path().join(format!("debrief-tools-perfmon-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("t.xml").to_string_lossy().into_owned();
@@ -281,7 +283,8 @@ mod tests {
     fn generated_xml_never_replaces_a_file_without_confirmation() {
         use debrief_core::overwrite::FILE_EXISTS_SUFFIX;
         let t = TemplatesTool;
-        let dir = std::env::temp_dir().join(format!("debrief-tools-perfmon-ow-{}", std::process::id()));
+        let _dir_scratch = tempfile::tempdir().unwrap();
+        let dir = _dir_scratch.path().join(format!("debrief-tools-perfmon-ow-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("mine.xml");

@@ -8,6 +8,7 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+tempfile.workspace = true
 debrief-plugin-api = { path = "../debrief-plugin-api" }
 anyhow.workspace = true
 serde.workspace = true

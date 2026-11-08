@@ -26,22 +26,43 @@ const MAX_VISUAL_BYTES: usize = 32 << 20;
 /// Largest report accepted from the UI (JSON).
 const MAX_REPORT_JSON: usize = 64 << 20;
 
-/// Folder under the system temp folder where bundles are extracted to be opened.
+/// Where bundles are extracted to be opened: `<data>/bundles`, set once by [`init_bundles_root`] at start-up. `None` when
+/// Debrief has no data folder: bundles then cannot be opened (never a fixed folder in the shared temp folder, which
+/// another local user could plant).
 #[cfg(not(test))]
-pub(crate) fn bundles_root() -> PathBuf {
-    std::env::temp_dir().join("debrief-bundles")
+pub(crate) fn bundles_root() -> Option<PathBuf> {
+    BUNDLES_ROOT.get().cloned()
+}
+
+#[cfg(not(test))]
+static BUNDLES_ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Fixes the folder of extracted bundles under the app's data folder (call from `setup`).
+pub(crate) fn init_bundles_root<R: Runtime>(app: &AppHandle<R>) {
+    #[cfg(not(test))]
+    match crate::app_dirs::data(app) {
+        Ok(d) => {
+            let _ = BUNDLES_ROOT.set(d.join("bundles"));
+        }
+        Err(e) => log::error!(
+            "Opening bundles is unavailable: Debrief's data folder cannot be resolved ({e}). Set DEBRIEF_DATA_DIR to a folder you own and restart Debrief."
+        ),
+    }
+    #[cfg(test)]
+    let _ = app;
 }
 
 /// Tests extract into a folder of the test process, removed when it exits.
 #[cfg(test)]
-pub(crate) fn bundles_root() -> PathBuf {
+pub(crate) fn bundles_root() -> Option<PathBuf> {
     static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    ROOT.get_or_init(|| crate::test_support::process_scratch_dir("bundles")).clone()
+    Some(ROOT.get_or_init(|| crate::test_support::process_scratch_dir("bundles")).clone())
 }
 
 /// Refuses to save a project into an opened bundle's folder (bundles open read-only).
 pub(crate) fn refuse_bundle_folder(path: &str) -> CmdResult<()> {
-    let root = std::fs::canonicalize(bundles_root()).unwrap_or_else(|_| bundles_root());
+    let Some(root) = bundles_root() else { return Ok(()) };
+    let root = std::fs::canonicalize(&root).unwrap_or(root);
     let parent = Path::new(path).parent().and_then(|p| std::fs::canonicalize(p).ok());
     if parent.is_some_and(|p| p.starts_with(&root)) {
         return Err("this bundle is opened read-only: save the project somewhere else (Save As)".into());
@@ -333,7 +354,12 @@ pub(crate) async fn open_bundle<R: Runtime>(
     let (handle, win) = (app.clone(), state.clone());
     crate::jobs::start_value(&app, spec, controls, move |ctx: &crate::jobs::JobCtx| {
         ctx.message("Unpacking and checking the bundle");
-        let extracted = debrief_core::bundle::extract(&source, &bundles_root()).map_err(err)?;
+        let root = bundles_root().ok_or_else(|| {
+            CmdError::unavailable(
+                "Debrief has no data folder to unpack the bundle into. Set DEBRIEF_DATA_DIR to a folder you own and restart Debrief.",
+            )
+        })?;
+        let extracted = debrief_core::bundle::extract(&source, &root).map_err(err)?;
         // Debrief's own folder: what the bundle holds may be opened from this window.
         grants.grant(&extracted.dir, crate::paths::Access::Read, crate::paths::GrantSource::Output)?;
         let mut opened = match &extracted.project {
