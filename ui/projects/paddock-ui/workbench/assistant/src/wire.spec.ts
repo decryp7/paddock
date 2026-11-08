@@ -8,6 +8,13 @@ describe('the wire', () => {
     expect(parseConversation(FIXTURE_CONVERSATION)).toEqual(FIXTURE_CONVERSATION);
   });
 
+  // Regression: the phase events (queued, loading the model, generating) were dropped at this edge, so the real app never showed
+  // "Loading the model…" (ER-18); only the memory backend, which skips the parse, did.
+  it('keeps the phase events of a cold start', () => {
+    const phase = { conversationId: 'c', seq: 2, type: 'phase', phase: { kind: 'loading', elapsedMs: 3000 } };
+    expect(parseEnvelope(phase)).toEqual(phase);
+  });
+
   it('refuses events that are not events', () => {
     for (const bad of [null, [], 'x', {}, { conversationId: 'c', seq: 1 }, { conversationId: 'c', seq: 'x', type: 'delta' }, { conversationId: 'c', seq: 1, type: 'teleport' }]) {
       expect(parseEnvelope(bad)).toBeNull();
