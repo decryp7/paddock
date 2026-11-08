@@ -75,6 +75,8 @@ const crateOf = (file) => /^(.*?\/?(?:crates\/)?[^/]+)\/(?:src|tests)\//.exec(fi
 
 export default {
   id: 'C62',
+  scope: 'both',
+  mode: 'report-only', // warnings only until the Debrief limit list is reasoned (ADR 0019 phases it)
   title: 'Every limit row has a case, and limit-shaped constants are in a registry',
   rule: 40,
   run(ctx) {
