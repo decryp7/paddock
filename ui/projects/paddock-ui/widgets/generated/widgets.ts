@@ -410,6 +410,14 @@ id: PlacementId,
 /**
  * The new widget, of the same kind.
  */
+widget: W, } } | { "changeKind": { 
+/**
+ * The placement.
+ */
+id: PlacementId, 
+/**
+ * The new widget, of any kind of the catalogue.
+ */
 widget: W, } } | { "applyPreset": { 
 /**
  * The preset.

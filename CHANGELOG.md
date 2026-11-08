@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-widgets`: an edit that changes a placement's kind in place
+- New `Edit::ChangeKind { id, widget }` (wire `changeKind`): the placement keeps its id and its place, so whatever an app keys on the id (Dyno's tray icon identity and its pinned position) survives a change of kind. A span the new kind does not allow becomes its first; on a grid surface a rectangle the new kind does not allow is refused ("resize it first"). The kind's limits are checked as for an add; undo restores the old kind. `Replace` still keeps the kind. Additive on the wire; the generated `Edit` type of `@decryp7/paddock-ui/widgets` gains the variant.
+
 ### `paddock-service`: the app's own login item per OS, the first run and the old launch agent are shared (from Dyno)
 - New `login::AppItem` (an app's login item described once: name, XDG file stem, `Run` value, arguments) with `for_this_os` (`MainAppItem` on macOS, `UserRunEntry` on Windows, `XdgAutostart` elsewhere; the app passes its executable, its environment and the `System`), `xdg` and `windows_run`; `login::xdg_config_dir` (an absolute `$XDG_CONFIG_HOME`, else `~/.config`); `login::UnavailableItem` (refuses every change with its reason).
 - New `login::apply_first_run_with` and `login::FirstRun`: the first sight of the settings with the switch on and no `FirstRunMarker` registers once; an off switch only leaves the marker; a failure leaves none.

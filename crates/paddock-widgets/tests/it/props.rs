@@ -80,7 +80,8 @@ fn arbitrary_edit() -> impl Strategy<Value = Edit<Gadget>> {
         pid.clone().prop_map(|id| Edit::Remove { id }),
         (pid.clone(), 0u16..8).prop_map(|(id, to)| Edit::Move { id, to }),
         (pid.clone(), 0u8..4).prop_map(|(id, span)| Edit::Resize { id, span }),
-        (pid.clone(), widget).prop_map(|(id, widget)| Edit::Replace { id, widget }),
+        (pid.clone(), widget.clone()).prop_map(|(id, widget)| Edit::Replace { id, widget }),
+        (pid.clone(), widget).prop_map(|(id, widget)| Edit::ChangeKind { id, widget }),
         prop_oneof![Just("compact"), Just("mine"), Just("clock")].prop_map(|s| Edit::ApplyPreset {
             id: PresetId::new(s).expect("a valid id")
         }),

@@ -53,6 +53,15 @@ pub enum Edit<W> {
         /// The new widget, of the same kind.
         widget: W,
     },
+    /// Changes a placement's kind in place: its id and its place stay, so whatever the app keys on the id (a tray icon's
+    /// identity and position) survives. A span the new kind does not allow becomes its first; on a grid surface the
+    /// rectangle must suit the new kind.
+    ChangeKind {
+        /// The placement.
+        id: PlacementId,
+        /// The new widget, of any kind of the catalogue.
+        widget: W,
+    },
     /// Replaces the placements with a preset's (undoable).
     ApplyPreset {
         /// The preset.
@@ -245,6 +254,29 @@ pub fn apply<C: Catalogue>(
                 ));
             }
             next.placements[index].widget = widget;
+            check_edited::<C>(&next.placements, index)?;
+        }
+        Edit::ChangeKind { id, widget } => {
+            let index = position(&layout.placements, &id)?;
+            let widget = widget.clamped();
+            let Some(spec) = spec_of::<C>(widget.kind()) else {
+                return Err(WidgetError::Invalid(
+                    "This widget is not available here.".into(),
+                ));
+            };
+            let mut place = layout.placements[index].place.clone();
+            if place.check(&spec.size, s.columns).is_err() {
+                place = match (place.span(), <C::Place as Place>::initial(&spec.size)) {
+                    (Some(_), Some(first)) => first,
+                    _ => {
+                        return Err(WidgetError::Invalid(
+                            "This widget's size does not suit that kind; resize it first.".into(),
+                        ));
+                    }
+                };
+            }
+            next.placements[index].widget = widget;
+            next.placements[index].place = place;
             check_edited::<C>(&next.placements, index)?;
         }
         Edit::Arrange { gesture } => {

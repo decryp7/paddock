@@ -9,8 +9,8 @@
 //! - [`read`] and [`Stored`]: versioned, lenient reading that never fails the settings file. A damaged or oversized
 //!   layout gives the defaults and one [`Note`]; a newer version's layout is kept unchanged and not edited over; each
 //!   invalid or unknown entry is dropped on its own with a count.
-//! - [`Edit`] and [`apply`]: add, remove, move, resize, replace, presets, reset and one level of undo, each a pure
-//!   function that returns a validated layout or a [`WidgetError`].
+//! - [`Edit`] and [`apply`]: add, remove, move, resize, replace, a change of kind in place, presets, reset and one level
+//!   of undo, each a pure function that returns a validated layout or a [`WidgetError`].
 //! - [`info`], [`view`], [`LayoutView`]: what the chooser draws and limits itself with.
 //! - [`WidgetState`], [`PlacementState`], [`SurfaceValues`]: the ready, working, empty and error envelope.
 //!

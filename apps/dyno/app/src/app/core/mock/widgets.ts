@@ -584,6 +584,15 @@ export class MockWidgets {
       const i = find(edit.replace.id);
       if (kindOf(edit.replace.widget) !== kindOf(placements[i]!.widget)) throw err('A widget keeps its kind; remove it and add another instead.');
       next(st.placements.map((p, j) => (j === i ? ({ ...p, widget: edit.replace.widget } as AnyPlacement) : p)));
+    } else if ('changeKind' in edit) {
+      // The id and the place stay (the tray icon keeps its identity); the engine checks the new kind's limits.
+      const i = find(edit.changeKind.id);
+      const kind = kindOf(edit.changeKind.widget);
+      const k = kindInfo(kind);
+      if (!k) throw err(`The ${noun} has no widget “${kind}”.`);
+      if (placements.filter((p, j) => j !== i && kindOf(p.widget) === kind).length >= k.maxInstances) throw err(`The ${noun} can show ${k.title} only ${k.maxInstances} time${k.maxInstances === 1 ? '' : 's'}; remove one first.`);
+      if (grid && kindOf(placements[i]!.widget) !== kind) throw err("This widget's size does not suit that kind; resize it first.");
+      next(st.placements.map((p, j) => (j === i ? ({ ...p, widget: edit.changeKind.widget } as AnyPlacement) : p)));
     } else if ('applyPreset' in edit) {
       const preset = [...(grid ? builtinPresets() : []), ...(st.presets as Preset<W>[])].find((p) => p.id === edit.applyPreset.id);
       if (!preset) throw err('That preset no longer exists.');
