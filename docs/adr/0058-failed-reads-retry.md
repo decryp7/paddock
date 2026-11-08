@@ -83,9 +83,11 @@ choice of what to do is decision D1 in Rollout, step 4.
 `read-retry.ts`):
 
 - `{ retry: true, clock? }`: the store reads engine state. The feature's private prop `_reads` runs its read.
-- `{ retry: false, why, until? }`: the status is not a read of engine state (a search, a validation, an action's
-  progress), or the store recovers in its own way; `why` says which. A temporary opt-out (`why` starting "not adopted
-  yet") names `until`, the date by which the store adopts the retry; the scan spec fails once that date has passed.
+- `{ retry: false, kind: 'permanent', why }`: the status is not a read of engine state (a search, a validation, an
+  action's progress), or the store recovers in its own way; `why` says which.
+- `{ retry: false, kind: 'temporary', why, until }`: the store reads engine state but has not adopted the retry yet;
+  `until` (YYYY-MM-DD) is the date by which it does. Conformance check C98 fails once that date has passed; the unit suite
+  never reads the calendar.
 
 A store that forgets the argument does not compile.
 
@@ -110,7 +112,9 @@ and then calls three things, never `setLoading`/`setLoaded`/`setError` for that 
 - `reads.event()`: an event that carries part of the state arrived. While in error the store reads the whole state
   again; otherwise nothing.
 - `reads.received()`: the whole state arrived by another path (an event with a snapshot, a command's reply with the full
-  view). An error or a pending load ends as `'loaded'`, the self-retry stops, and a read still running is dropped.
+  view). An error or a pending load ends as `'loaded'`, the self-retry stops, and a read still running is dropped. That
+  includes a quiet `load` (a Retry while data is on screen): it resolves false and its answer is not applied, because the
+  state the event brought is newer.
 
 The behaviour, moved unchanged from the 1.1.0 Jobs store and now shared:
 
@@ -121,10 +125,11 @@ The behaviour, moved unchanged from the 1.1.0 Jobs store and now shared:
   announced again; the same message again is not set again (the status object stays, so assistive technology does not
   announce it twice).
 - **One read at a time:** a timer or event that comes during a re-read of the current generation starts none. A re-read
-  that a newer read (a Retry, a `received`) made stale blocks nothing, even while it still hangs, and a timer that finds
-  the current re-read still running arms the next delay instead of returning: a read that never settles cannot end the
-  retrying (review P1-1; the 1.1.0 Jobs store returned without re-arming, so a hung timer read plus a failed Retry left it
-  in error with no timer).
+  that a newer read (a Retry, a `received`) made stale blocks nothing, even while it still hangs; its clean-up clears only
+  its own in-flight marker. While the current re-read hangs, the timer stays armed (each time it fires it finds the read
+  still running and arms the next delay) but starts no second read; a new read starts once the hung one settles (a
+  failure arms the backoff, a success ends the error) or when the user presses Retry (review P1-1; the 1.1.0 Jobs store
+  returned without re-arming, so a hung timer read plus a failed Retry left it in error with no timer).
 - **Rate limit for events:** after a failed re-read, an event starts the next one only once `eventSpacingMs` has passed
   since that failure (default `READ_RETRY_EVENT_SPACING_MS`, 10 s; the Jobs store keeps its `stillWorkingAfterMs`). The
   timer's own retries are spaced by the backoff instead.
@@ -147,20 +152,27 @@ The behaviour, moved unchanged from the 1.1.0 Jobs store and now shared:
 - **Compile time:** the policy argument is required, so every call site declares one.
 - **`shell/testing/src/request-status-stores.spec.ts`** scans every non-spec source under `ui/projects/paddock-ui` for
   `withRequestStatus(` and requires a row for each file, with the policy the file declares; a store added later without a
-  row fails. Every call in a file is checked, not only the first. Every `retry: false` must give a reason, and a
-  temporary one a removal date that has not passed. A `retry: true` file may not import `setLoading` or `setLoaded`
-  (`setError` stays for action failures). For every `retry: true` row it builds the store over its memory
+  row fails. Every call in a file is checked, not only the first. Every `retry: false` must declare the kind of its row
+  and give a reason, and a temporary one an `until` date (whether that date has passed is C98's, below). A `retry: true`
+  file may not import `setLoading` or `setLoaded` (also under another name), import `shell/store` as a namespace, or patch
+  `requestStatus` itself (`setError` stays for action failures). For every `retry: true` row it builds the store over its memory
   backend with a first read that fails, then checks: the self-retry reads again after 2 s and the error ends; an event
   that carries the whole state ends the error at once without a read; an event that carries a part starts a re-read whose
   success ends the error; destroying the store leaves no timer. On today's main (with the stores declared `retry: false`
   for the run) it fails 23 cases: the self-retry of all 14 stores but Jobs, and the event case of the eight that never
-  clear. After the adoption all its cases pass (49 in revision 2).
+  clear. After the adoption all its cases pass (48 in revision 3).
+- **Conformance check C98** (`conformance/src/checks/C98-read-retry-optouts.mjs`): in `ui/projects/paddock-ui`, a
+  `kind: 'temporary'` opt-out without `until`, or with an `until` before today, is an error. It is the only date-driven
+  part, so a calendar day never turns the unit suite red. It runs in the family conformance step once C98 is in that step's
+  `--only` list.
 - **`shell/store/src/read-retry.spec.ts`** holds the mechanism to the behaviour above, with the Jobs store's two gaps:
   stop on success after an event re-read, and no re-set of an identical error. Seven mutants of `read-retry.ts` (no stop on
   a re-read's success, the identical error set again, `received` keeping the old read, a timer armed after destroy, no
   event rate limit, events ignored, a Retry that keeps the old backoff) each fail at least one case. Revision 2 adds the
   review's two probes as specs: a Retry that fails while a timer re-read hangs still retries on its own, and an older
-  quiet read is dropped when the whole state arrives while loaded.
+  quiet read is dropped when the whole state arrives while loaded. Revision 3 adds the spec that kills the mutant clearing
+  the in-flight marker in every clean-up: a timer re-read hangs, a Retry fails, the next timer read runs, the stale read
+  rejects, and an event after the rate limit starts no read beside the current one.
 - The Jobs store's own specs stay as they were and pass on the shared mechanism, with the same two gaps added and the
   two-microtask wait replaced by one macrotask (rule 49).
 
@@ -168,8 +180,8 @@ The behaviour, moved unchanged from the 1.1.0 Jobs store and now shared:
 
 "Request state is a status union ... from one shared `withRequestStatus` feature, never separate `loading`/`error` flags,
 **and every store declares its read policy: a store that reads engine state declares `retry: true` and runs that read
-through the declared read handle, so a failed read ends on its own; a store that opts out gives the reason, and a
-temporary opt-out its removal date (ADR 0058).**" The check is the spec above, so the rule is not a reminder.
+through the declared read handle, so a failed read ends on its own; a store that opts out declares the kind and gives
+the reason, and a temporary opt-out its removal date (ADR 0058).**" The check is the spec above, so the rule is not a reminder.
 
 ## Rollout
 
@@ -178,7 +190,7 @@ temporary opt-out its removal date (ADR 0058).**" The check is the spec above, s
 2. The 14 other shell stores of the table adopt it in the same branch (rule 39: a shared change and its adoption land
    together).
 3. The workbench assistant and the live feed adopt it in a follow-up; until then they declare `retry: false` with
-   "not adopted yet" and `until: '2026-12-31'`, which the spec allows until that date.
+   `kind: 'temporary'` and `until: '2026-12-31'`; C98 fails after that date.
 4. **Decision D1: Debrief's own `withRequestStatus`. Decided 2026-11-08 by the user: (a).** The copy is registered in
    `docs/known-copies.toml` (mechanism `request-status`, delete by `debrief-v1.2.0`). The options were: (a) Move Debrief's 11 stores onto the shared
    feature in Debrief 1.2, `service-health` first (it has the bug), and delete the copy; until then register it in
