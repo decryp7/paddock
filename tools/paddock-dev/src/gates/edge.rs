@@ -113,10 +113,13 @@ pub fn is_shallow(root: &Path) -> bool {
         .is_ok_and(|o| o.trim() == "true")
 }
 
+/// What the planner said per file, or why it could not.
+type Answers = Result<std::collections::BTreeMap<String, std::collections::BTreeSet<String>>, String>;
+
 /// The planner's answers, from `scripts/affected-marks.mjs` (one node run for every file asked about).
 pub struct NodePlanner {
     root: PathBuf,
-    answers: std::cell::RefCell<Option<Result<std::collections::BTreeMap<String, std::collections::BTreeSet<String>>, String>>>,
+    answers: std::cell::RefCell<Option<Answers>>,
 }
 
 impl NodePlanner {

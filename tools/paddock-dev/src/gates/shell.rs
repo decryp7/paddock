@@ -413,12 +413,12 @@ mod tests {
     fn a_handler_after_or_swallows_the_failure_unless_it_ends_in_one() {
         let o = Opts::CHECKED;
         // bad (swallowed): echo, a brace group without exit, `|| true`
-        assert_eq!(flags("node a.mjs || echo skipped", o)[0].1, true);
-        assert_eq!(flags("node a.mjs || { echo skipped; }", o)[0].1, true);
+        assert!(flags("node a.mjs || echo skipped", o)[0].1);
+        assert!(flags("node a.mjs || { echo skipped; }", o)[0].1);
         // good (fails the step): the handler exits non-zero, or a bare exit, or `false`
-        assert_eq!(flags("node a.mjs || { echo broken; exit 1; }", o)[0].1, false);
-        assert_eq!(flags("node a.mjs || exit", o)[0].1, false);
-        assert_eq!(flags("node a.mjs || false", o)[0].1, false);
+        assert!(!flags("node a.mjs || { echo broken; exit 1; }", o)[0].1);
+        assert!(!flags("node a.mjs || exit", o)[0].1);
+        assert!(!flags("node a.mjs || false", o)[0].1);
     }
 
     #[test]
@@ -431,8 +431,8 @@ mod tests {
         let f = flags("node a.mjs && echo ok\nnode b.mjs", plain);
         assert_eq!(f[0], ("node a.mjs".to_string(), true));
         // good: the last line, and run-commands.sh lines (each is checked)
-        assert_eq!(flags("node b.mjs\nnode a.mjs && echo ok", plain)[1].1, false);
-        assert_eq!(flags("node a.mjs && echo ok\nnode b.mjs", Opts::CHECKED)[0].1, false);
+        assert!(!flags("node b.mjs\nnode a.mjs && echo ok", plain)[1].1);
+        assert!(!flags("node a.mjs && echo ok\nnode b.mjs", Opts::CHECKED)[0].1);
     }
 
     #[test]
@@ -441,8 +441,8 @@ mod tests {
             pipefail: false,
             lines_checked: true,
         };
-        assert_eq!(flags("node a.mjs | tee log", no)[0].1, true);
-        assert_eq!(flags("node a.mjs | tee log", Opts::CHECKED)[0].1, false);
+        assert!(flags("node a.mjs | tee log", no)[0].1);
+        assert!(!flags("node a.mjs | tee log", Opts::CHECKED)[0].1);
         // set -o pipefail inside the script turns it on from there
         let f = flags("node a.mjs | tee x\nset -eo pipefail\nnode b.mjs | tee y", no);
         assert_eq!((f[0].1, f[1].1), (true, false));
