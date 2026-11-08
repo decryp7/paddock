@@ -100,6 +100,7 @@ const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<st
   ['setChatSaved', (b) => b.setChatSaved('c1', false), 'set_chat_saved', { conversationId: 'c1', save: false }],
   ['deleteAllChats', (b) => b.deleteAllChats(), 'delete_all_chats', undefined],
   ['chatAttachRules', (b) => b.chatAttachRules(), 'chat_attach_rules', undefined],
+  ['chatDetach', (b) => b.chatDetach('ab'), 'chat_detach', { sha256: 'ab' }],
   ['chatAttach', (b) => b.chatAttach('a.txt', new Uint8Array([104, 105])), 'chat_attach', { name: 'a.txt', bytes: [104, 105] }],
   ['removeLeftover', (b) => b.removeLeftover('pack-llamafile'), 'remove_leftover', { id: 'pack-llamafile' }],
   ['retryEngineSetup', (b) => b.retryEngineSetup(), 'retry_engine_setup', undefined],

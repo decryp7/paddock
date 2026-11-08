@@ -120,7 +120,7 @@ const APP_METHODS: ReadonlySet<string> = new Set([
   'serviceState', 'installService', 'uninstallService', 'repairService', 'declineService', 'openLoginItems',
   'autostart', 'setAutostart', 'quitApp', 'takeQuitAsk', 'chatEnabled',
   'connectedApps', 'setAppKey', 'connectApp', 'forgetApp', 'revokeToolApproval', 'openConnectedApp',
-  'chatStorage', 'setChatSaveNew', 'chatSaved', 'setChatSaved', 'deleteAllChats', 'chatAttachRules', 'chatAttach',
+  'chatStorage', 'setChatSaveNew', 'chatSaved', 'setChatSaved', 'deleteAllChats', 'chatAttachRules', 'chatAttach', 'chatDetach',
   // The popup's widgets are the app's own too (its layout is kept by the app; the values say "server not running" themselves).
   'popoverView', 'popoverValues', 'popoverHeader', 'popoverShape', 'editPopover',
 ]);
@@ -1523,7 +1523,21 @@ export class MockBackend implements PitwallBackend {
   }
 
   /** Plausible answers for the browser build; Rust's `chat_host::attach` is the reference. */
-  chatAttach(name: string, bytes: Uint8Array): Promise<ChatAttached> {
+  private attachGate: Promise<void> | null = null;
+  private attachOpen: (() => void) | null = null;
+
+  /** Screenshot and test hook: every file handed over waits until `releaseAttachments()`. */
+  holdAttachments(): void {
+    this.attachGate = new Promise((resolve) => (this.attachOpen = resolve));
+  }
+
+  releaseAttachments(): void {
+    this.attachOpen?.();
+    this.attachGate = null;
+  }
+
+  async chatAttach(name: string, bytes: Uint8Array): Promise<ChatAttached> {
+    if (this.attachGate) await this.attachGate;
     return this.reply('chatAttach', () => {
       const png = bytes[0] === 0x89 && bytes[1] === 0x50;
       if (png) this.fail('badRequest', `"${name}" is an image. The chat can't attach images yet; attach text or code files.`);
@@ -1538,6 +1552,13 @@ export class MockBackend implements PitwallBackend {
       const lines = text.split(/\r?\n/).filter((l, i, all) => l || i < all.length - 1).length;
       return { attachment: { kind: 'file' as const, sha256: h.toString(16).padStart(8, '0').repeat(8), name }, bytes: bytes.length, lines };
     });
+  }
+
+  /** Files taken off a question (tests read it). */
+  readonly detached: string[] = [];
+
+  chatDetach(sha256: string): Promise<void> {
+    return this.reply('chatDetach', () => void this.detached.push(sha256));
   }
 
   /** Demo and test hook: Dyno is not installed, so Open Dyno answers that. */

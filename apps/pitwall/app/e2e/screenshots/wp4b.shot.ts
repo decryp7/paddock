@@ -81,6 +81,7 @@ test.describe('WP-4b screenshots', () => {
           await shot(page, '1-attached', 'Files attached to the next question', 'Two files attached, the meter for a new chat');
           await send(pane, 'Why did the backups pause, and is the cleanup script safe to run?');
           await pane.locator('textarea').blur();
+          await page.mouse.move(0, 0);
           await shot(page, '2-sent', 'A sent question with its files', 'The question shows its files; the meter is the engine’s count');
           await pane.getByTestId('assistant-file-input').setInputFiles(photo);
           await expect(pane.getByTestId('assistant-failure')).toBeVisible();
@@ -88,35 +89,81 @@ test.describe('WP-4b screenshots', () => {
         });
       }
 
-      test('the context meter close to the limit and full', async ({ page }) => {
-        let pane = await chat(page, `${Q}&mock-context=165`);
-        await send(pane, 'How busy is this computer?');
-        await expect(pane.getByTestId('assistant-context')).toHaveAttribute('data-level', 'high');
-        await shot(page, '4-meter-high', 'The context meter', 'Close to the model’s limit (amber)');
-        pane = await chat(page, `${Q}&mock-context=130`);
-        await send(pane, 'How busy is this computer?');
-        await expect(pane.getByTestId('assistant-context-full')).toBeVisible();
-        await shot(page, '5-meter-full', 'The context meter', 'The chat fills the model’s context: a note and New conversation');
-      });
-
-      test('push-to-talk recording and the drop highlight', async ({ page }) => {
-        const pane = await chat(page, `${Q}&mock-speech`);
-        await pane.getByTestId('assistant-input').fill('Check the disks:');
-        await pane.getByTestId('assistant-mic').click();
-        await page.evaluate(() => (globalThis as unknown as { __pitwallSpeech: { tick(ms: number): void } }).__pitwallSpeech.tick(7_400));
-        await expect(pane.getByTestId('assistant-recording')).toHaveText('Recording 0:07');
-        await shot(page, '6-recording', 'Push-to-talk (browser build; the app gets it with WP-7)', 'Recording, with the engine’s elapsed time');
-        await pane.getByTestId('assistant-mic').click();
-        await expect(pane.getByTestId('assistant-input')).toHaveValue(/Check the disks: How busy/);
-        await shot(page, '7-transcribed', 'Push-to-talk (browser build; the app gets it with WP-7)', 'The transcript lands after the typed text, to edit before sending');
-        await page.locator('[data-testid=assistant-composer]').evaluate((form) => {
-          const data = new DataTransfer();
-          data.items.add(new File(['x'], 'log.txt', { type: 'text/plain' }));
-          form.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: data }));
+      for (const size of [
+        { width: 1440, height: 900 },
+        { width: 900, height: 700 },
+      ]) {
+        test(`the context meter at each level at ${size.width}`, async ({ page }) => {
+          await page.setViewportSize(size);
+          let pane = await chat(page, `${Q}&mock-context=unknown`);
+          await expect(pane.getByTestId('assistant-context')).toHaveAttribute('data-level', 'unknown');
+          await shot(page, '4a-meter-unknown', 'The context meter', 'A model whose window is not known: the count alone');
+          pane = await chat(page, `${Q}&mock-context=88`);
+          await send(pane, 'How busy is this computer?');
+          await expect(pane.getByTestId('assistant-context')).toHaveAttribute('data-level', 'high');
+          await shot(page, '4b-meter-high', 'The context meter', 'Close to the limit: words, a glyph and amber');
+          pane = await chat(page, `${Q}&mock-context=70`);
+          await send(pane, 'How busy is this computer?');
+          await expect(pane.getByTestId('assistant-context-full')).toBeVisible();
+          await pane.getByTestId('assistant-input').fill('And the disks?');
+          await shot(page, '5-meter-full', 'The context meter', 'Full: the note, Start a new chat, Send off');
         });
-        await expect(pane.getByTestId('assistant-composer')).toHaveClass(/dropping/);
-        await shot(page, '8-dropping', 'Dropping files', 'Files dragged over the composer');
-      });
+
+        test(`attaching, the refusals and push-to-talk at ${size.width}`, async ({ page }) => {
+          await page.setViewportSize(size);
+          let pane = await chat(page, `${Q}&mock-speech`);
+          await page.evaluate(() => (globalThis as unknown as { __pitwallMock: { holdAttachments(): void } }).__pitwallMock.holdAttachments());
+          await pane.getByTestId('assistant-file-input').setInputFiles(notes);
+          await expect(pane.getByTestId('assistant-attaching')).toBeVisible();
+          await pane.getByTestId('assistant-input').fill('What happened last night?');
+          await shot(page, '6a-attaching', 'Attaching', 'A file on its way to Pitwall: Send waits');
+          await page.evaluate(() => (globalThis as unknown as { __pitwallMock: { releaseAttachments(): void } }).__pitwallMock.releaseAttachments());
+          await expect(pane.getByTestId('assistant-file')).toHaveCount(1);
+
+          const many = Array.from({ length: 16 }, (_, i) => ({ name: `part-${i + 1}.txt`, mimeType: 'text/plain', buffer: Buffer.from(`part ${i + 1}\n`) }));
+          await pane.getByTestId('assistant-file-input').setInputFiles(many);
+          await expect(pane.getByTestId('assistant-failure')).toContainText('at most 16 attachments');
+          await shot(page, '6b-too-many', 'Refusals', 'Too many files: the sixteenth is the last');
+          pane = await chat(page, `${Q}&mock-speech`);
+          await pane.getByTestId('assistant-file-input').setInputFiles({ name: 'huge.log', mimeType: 'text/plain', buffer: Buffer.alloc(300 * 1024, 120) });
+          await expect(pane.getByTestId('assistant-failure')).toContainText('larger than 256 KiB');
+          await shot(page, '6c-too-big', 'Refusals', 'A file over 256 KiB, refused before it is read');
+
+          pane = await chat(page, `${Q}&mock-speech`);
+          await pane.getByTestId('assistant-input').fill('Check the disks:');
+          await pane.getByTestId('assistant-mic').click();
+          await page.evaluate(() => (globalThis as unknown as { __pitwallSpeech: { tick(ms: number): void } }).__pitwallSpeech.tick(7_400));
+          await expect(pane.getByTestId('assistant-recording')).toHaveText('Recording 0:07');
+          await page.mouse.move(0, 0);
+          await shot(page, '7a-recording', 'Push-to-talk (browser build; the app gets it with WP-7)', 'Recording, with the engine’s time; Send off');
+          await page.evaluate(() => (globalThis as unknown as { __pitwallSpeech: { hold(): void } }).__pitwallSpeech.hold());
+          await pane.getByTestId('assistant-mic').click();
+          await page.mouse.move(0, 0);
+          await expect(pane.getByTestId('assistant-transcribing')).toBeVisible();
+          await shot(page, '7b-transcribing', 'Push-to-talk (browser build; the app gets it with WP-7)', 'Writing down what was said');
+          await page.evaluate(() => (globalThis as unknown as { __pitwallSpeech: { release(): void } }).__pitwallSpeech.release());
+          await expect(pane.getByTestId('assistant-input')).toHaveValue(/Check the disks: How busy/);
+          await pane.getByTestId('assistant-input').focus();
+          await shot(page, '7c-transcribed', 'Push-to-talk (browser build; the app gets it with WP-7)', 'The transcript after the typed text, to edit before sending');
+          await page.evaluate(() =>
+            (globalThis as unknown as { __pitwallSpeech: { fail(m: string): void } }).__pitwallSpeech.fail(
+              'Pitwall may not use the microphone. Allow it in System Settings > Privacy & Security > Microphone, then try again.',
+            ),
+          );
+          await pane.getByTestId('assistant-mic').click();
+          await page.mouse.move(0, 0);
+          await expect(pane.getByTestId('assistant-failure')).toContainText('Microphone');
+          await shot(page, '7d-speech-failed', 'Push-to-talk (browser build; the app gets it with WP-7)', 'Speech input refused by the OS, in words');
+
+          await page.locator('[data-testid=assistant-composer]').evaluate((form) => {
+            const data = new DataTransfer();
+            data.items.add(new File(['x'], 'log.txt', { type: 'text/plain' }));
+            form.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: data }));
+          });
+          await expect(pane.getByTestId('assistant-composer')).toHaveClass(/dropping/);
+          await shot(page, '8-dropping', 'Dropping files', 'Files dragged over the composer');
+        });
+      }
     });
   }
 });

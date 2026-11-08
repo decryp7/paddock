@@ -454,6 +454,9 @@ export class TauriBackend implements PitwallBackend {
     // Tauri carries a byte array as a JSON list of numbers; Rust bounds the request (2 MiB) and checks the file.
     return this.run('chat_attach', { name, bytes: Array.from(bytes) });
   }
+  chatDetach(sha256: string): Promise<void> {
+    return this.run('chat_detach', { sha256 });
+  }
   onConnectedApps(handler: (apps: ConnectedApp[]) => void): Unsubscribe {
     let stopped = false;
     let unlisten: (() => void) | null = null;
