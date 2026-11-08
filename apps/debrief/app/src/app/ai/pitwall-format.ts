@@ -1,30 +1,23 @@
-import { AiEngineStatus } from './ai.types';
+import { PitwallStatus } from './ai.types';
 
 /** The pairing code as the user compares it in Pitwall: six digits in two groups ("123 456"); anything else as it is. */
 export function groupCode(code: string): string {
   return /^\d{6}$/.test(code) ? `${code.slice(0, 3)} ${code.slice(3)}` : code;
 }
 
-/** One plain sentence about the AI engine and Pitwall, for Settings → AI. */
-export function engineSentence(e: AiEngineStatus): string {
-  const p = e.pitwall;
-  if (e.active === 'pitwall') {
+/** One plain sentence about Pitwall, Debrief's AI engine, for Settings → AI. */
+export function engineSentence(p: PitwallStatus): string {
+  if (p.usable) {
     const version = p.version ? ` ${p.version}` : '';
     return p.model
       ? $localize`:@@ai.engine.pitwallModel:Engine: Pitwall${version}:version: · model ${p.model}:model:`
       : $localize`:@@ai.engine.pitwall:Engine: Pitwall${version}:version:`;
   }
-  if (e.active === 'builtIn') {
-    const base = $localize`:@@ai.engine.builtIn:Engine: built-in`;
-    const hint = pitwallHint(e);
-    return hint ? `${base}. ${hint}` : base;
-  }
-  return $localize`:@@ai.engine.none:Engine: none. Pitwall is chosen but cannot be used right now.`;
+  return $localize`:@@ai.engine.none:Engine: Pitwall. It cannot serve Debrief right now.`;
 }
 
 /** What to do about Pitwall when it is on this computer but not in use; null when there is nothing to say. */
-function pitwallHint(e: AiEngineStatus): string | null {
-  const p = e.pitwall;
+function pitwallHint(p: PitwallStatus): string | null {
   switch (p.found) {
     case 'running':
       return p.paired
@@ -37,15 +30,15 @@ function pitwallHint(e: AiEngineStatus): string | null {
       return $localize`:@@ai.engine.incompatible:Pitwall ${version}:version: speaks a newer connection version; update Debrief.`;
     }
     case 'absent':
-      return null;
+      return $localize`:@@ai.engine.absent:Pitwall is not installed on this computer. Install Pitwall to use the AI assistant.`;
   }
 }
 
-/** The sentence plus what Pitwall reports as the problem, if any. */
-export function engineLines(e: AiEngineStatus): string[] {
-  const lines = [engineSentence(e)];
-  const hint = e.active === null ? pitwallHint(e) : null;
+/** The sentence plus what to do and what Pitwall reports as the problem, if any. */
+export function engineLines(p: PitwallStatus): string[] {
+  const lines = [engineSentence(p)];
+  const hint = p.usable ? null : pitwallHint(p);
   if (hint) lines.push(hint);
-  if (e.pitwall.problem) lines.push(e.pitwall.problem);
+  if (p.problem) lines.push(p.problem);
   return lines;
 }

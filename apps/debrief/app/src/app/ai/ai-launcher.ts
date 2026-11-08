@@ -7,6 +7,7 @@ import { AiBackend, toAiError } from './ai-backend';
 import { Platform } from '../core/platform';
 import { COMMAND_CONTEXT } from '../extensions/command-registry';
 import { imageFilter } from './vision/image-files';
+import { SettingsDialogService } from '../settings/settings-dialog';
 
 /** The image view's id (ADR 0025). */
 export const AI_IMAGE_VIEW = 'ai-image';
@@ -24,8 +25,8 @@ const TITLES: Record<ProposeKind, string> = {
 
 /**
  * Opens the AI dialogs from anywhere (palette, menus, buttons in other views). Small and eager; the
- * dialogs themselves load lazily with the rest of the AI UI. Without a model, every use case opens the
- * set-up wizard instead.
+ * dialogs themselves load lazily with the rest of the AI UI. Without a model from Pitwall, every use case opens
+ * Settings ▸ AI instead.
  */
 @Injectable({ providedIn: 'root' })
 export class AiLauncher {
@@ -37,22 +38,16 @@ export class AiLauncher {
     return import('./ai-lazy');
   }
 
-  /** True when the use case can run; otherwise the set-up wizard was opened. */
+  /** True when the use case can run; otherwise Settings ▸ AI was opened, where Pitwall is connected (ADR 0070). */
   private async ensureModel(): Promise<boolean> {
     if (this.status.hasModel()) return true;
     await this.openSetup();
     return false;
   }
 
-  /** The set-up wizard; `modelId` preselects a catalog model instead of the recommended one. */
-  async openSetup(modelId?: string): Promise<void> {
-    const m = await this.lazy();
-    this.dialogs.open(m.AiSetupWizard, { title: $localize`:@@ai.launcher.title.setup:Set up the AI assistant`, width: 760, inputs: modelId ? { modelId } : {} });
-  }
-
-  async openModels(): Promise<void> {
-    const m = await this.lazy();
-    this.dialogs.open(m.AiModelManager, { title: $localize`:@@ai.launcher.title.models:AI models`, width: 820 });
+  /** Settings ▸ AI: the Pitwall connection (the only engine). */
+  async openSetup(): Promise<void> {
+    await this.injector.get(SettingsDialogService).open('ai');
   }
 
   /** "Explain this event" runs in the background: a toast says so, "Explanation ready · View" opens the answer. */

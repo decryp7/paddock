@@ -11,21 +11,10 @@ use crate::error::{CmdError, CmdResult};
 use crate::notification_centre::centre::ProcessRef;
 use serde::Serialize;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, Runtime, State};
+use tauri::{AppHandle, Runtime, State};
 
 fn live(state: &AppState) -> Arc<Live> {
     state.performance.clone()
-}
-
-/// The active AI model's size with its projector, bytes (0 without one).
-fn ai_model_bytes<R: Runtime>(app: &AppHandle<R>) -> u64 {
-    app.try_state::<crate::ai::AiState>().map_or(0, |ai| {
-        ai.0.models()
-            .into_iter()
-            .filter(|m| m.active)
-            .map(|m| m.size_bytes + m.projector.as_ref().filter(|p| p.problem.is_none()).map_or(0, |p| p.size_bytes))
-            .sum()
-    })
 }
 
 /// Suggested values for this computer, next to the current ones.
@@ -34,7 +23,7 @@ pub async fn performance_suggest<R: Runtime>(app: AppHandle<R>, state: State<'_,
     let live = live(&state);
     let current = live.settings();
     let data = crate::app_dirs::data(&app).unwrap_or_else(|_| std::env::temp_dir());
-    let env = probe(&data, ai_model_bytes(&app));
+    let env = probe(&data);
     Ok(proposal(Some(env.clone()), &current, &suggest(&env, &current)))
 }
 
@@ -79,10 +68,7 @@ pub fn memory(live: &Live) -> Vec<ProcessMemory> {
             override_mb,
         }
     };
-    let mut rows = vec![
-        row(ProcessRef::StoreWorker, None, u64::from(s.store_cap_mb), None),
-        row(ProcessRef::Ai, None, u64::from(s.ai_worker_memory_mb), None),
-    ];
+    let mut rows = vec![row(ProcessRef::StoreWorker, None, u64::from(s.store_cap_mb), None)];
     if let Some(plugins) = live.plugins() {
         for p in plugins.processes() {
             let id = p.id().to_string();
@@ -122,17 +108,13 @@ mod tests {
     use crate::performance::PerformanceSettings;
 
     #[test]
-    fn memory_lists_the_worker_the_ai_and_each_plugin_with_their_caps() {
+    fn memory_lists_the_worker_and_each_plugin_with_their_caps() {
         let mut s = PerformanceSettings::default();
         s.plugin_memory.insert("p.one".into(), 300);
         let live = Live::with(None, s, 8);
         let rows = memory(&live);
-        assert_eq!(rows.len(), 2);
+        assert_eq!(rows.len(), 1);
         assert_eq!((rows[0].process.clone(), rows[0].cap_mb), (ProcessRef::StoreWorker, 2048));
-        assert_eq!(
-            (rows[1].process.clone(), rows[1].cap_mb, rows[1].peak_mb),
-            (ProcessRef::Ai, 1024, None)
-        );
         let m: debrief_plugin_api::manifest::Manifest = serde_json::from_value(serde_json::json!({
             "id": "p.one", "name": "One", "version": "1.0.0", "protocol": debrief_plugin_api::PROTOCOL,
             "permissions": [], "importers": [], "configParsers": [], "markerKinds": [], "annotators": [],

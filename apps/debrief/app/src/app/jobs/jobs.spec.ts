@@ -819,7 +819,6 @@ describe('jobs-text', () => {
     expect(linkLabel({ type: 'path', path: '/var/log/app.log' })).toBe('app.log');
     expect(linkLabel({ type: 'path', path: '/var/log/' })).toBe('/var/log/');
     expect(linkLabel({ type: 'chat', sessionId: 'c' })).toBe('a chat');
-    expect(linkLabel({ type: 'model', id: 'qwen' })).toBe('qwen');
   });
 
   it('words the queue position', () => {
@@ -833,7 +832,7 @@ describe('JobViewer', () => {
 
   function setup() {
     const ctx = new FakeContext();
-    const ai = { showNarrative: vi.fn(async () => undefined), showProposal: vi.fn(async () => undefined), openModels: vi.fn(async () => undefined) };
+    const ai = { showNarrative: vi.fn(async () => undefined), showProposal: vi.fn(async () => undefined) };
     const chat = { select: vi.fn(async () => undefined) };
     const folder = { open: vi.fn(), show: vi.fn() };
     const folderStore = { addRefinement: vi.fn(), showSurvey: vi.fn() };
@@ -935,12 +934,10 @@ describe('JobViewer', () => {
     expect(ctx.last('showView')).toEqual(['jobs']);
   });
 
-  it('shows the events after an import and the model manager after a download', async () => {
-    const { ctx, ai, view } = setup();
+  it('shows the events after an import', async () => {
+    const { ctx, view } = setup();
     await view({ type: 'workspace' });
     expect(ctx.last('showView')).toEqual([PANEL.events]);
-    await view({ type: 'model', fileName: 'q.gguf' });
-    expect(ai.openModels).toHaveBeenCalled();
     ctx.calls.length = 0;
     expect(await view({ type: 'file', path: '/x' }, 'workspace')).toBeNull();
     expect(ctx.calls).toEqual([]);

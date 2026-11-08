@@ -1,6 +1,5 @@
 import { TestBed } from '@angular/core/testing';
 import { settle } from '../../testing/helpers';
-import { MockAiBackend } from '../core/mock/mock-ai-backend';
 import { dialogAppConfig } from './dialog-bootstrap';
 import { DIALOG_BACKEND_COMMANDS, DIALOG_BASE_COMMANDS, DIALOG_BOOT_COMMANDS, DIALOG_SYNC_COMMANDS } from './dialog-def';
 import { DIALOG_IO } from './dialog-io';
@@ -42,7 +41,6 @@ describe('every dialog sends only the commands it declares', () => {
     // The AI backend is loaded lazily on its first call. Loaded here, a window's first AI call (the status store's
     // refresh) goes out while that window's test runs, not when the chunk happens to arrive (in a later test).
     await import('../ai/ai-backend-tauri');
-    ANSWERS['ai_setup_plan'] = await new MockAiBackend({ mode: 'setup' }).setupPlan();
   });
 
   beforeEach(() => {

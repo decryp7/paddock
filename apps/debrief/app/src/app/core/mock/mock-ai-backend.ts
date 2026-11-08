@@ -8,13 +8,8 @@ import { AiBackend, AiError, Unlisten } from '../../ai/ai-backend';
 import {
   AiErrorCode,
   AiImage,
-  AiRuntimeEvent,
-  AiEngineChoice,
-  AiEngineStatus,
   AiStatus,
   PitwallStatus,
-  AiUpdateKind,
-  AiUpdatesStatus,
   ChatContext,
   ChatEnvelope,
   ChatEvent,
@@ -22,40 +17,19 @@ import {
   ChatHistoryRecord,
   ChatRecord,
   Citation,
-  InstalledModel,
-  ManualDownload,
-  ManualKind,
   Narrative,
   Proposal,
   QueryProposal,
   RestoreResult,
   SampleSource,
   SessionInfo,
-  SetupEvent,
   TurnRecord,
 } from '../../ai/ai.types';
-import {
-  demoRecordIds,
-  installedFrom,
-  MOCK_CATALOG,
-  catalogModel,
-  MOCK_HARDWARE,
-  mockExtractorsProposal,
-  mockMarkersProposal,
-  mockPipelineProposal,
-  mockParserProposal,
-  mockRecommendations,
-  mockProjectorInfo,
-  mockRegexProposal,
-  textOnly,
-} from './mock-ai-data';
+import { demoRecordIds, mockExtractorsProposal, mockMarkersProposal, mockPipelineProposal, mockParserProposal, mockRegexProposal } from './mock-ai-data';
 import { mockAsksForRelated, mockExplainImage, mockFormatOf, mockFormatOfPath, mockImage, mockRelatedOutcome } from './mock-ai-vision';
 import { FILE_EXISTS_SUFFIX } from '../api.types';
-import { MOCK_NET_FAILURES, MockNetFailure, mockNetError, MockRuntimeMode, MockRuntimes } from './mock-ai-runtimes';
 import { MockClock, systemMockClock } from './mock-clock';
-import { mockNotifications } from '../../notifications/mock-notifications';
 import { mockWeb } from '../../browser/mock-browser-backend';
-import { MockAiUpdates, MockUpdatesMode } from './mock-ai-updates';
 import { mockBrowserTurn } from './mock-ai-browser';
 import { MockJobCancelled, mockJobs, mockSteps } from '../../jobs/mock-jobs';
 import { JobLink, JobResult } from '../../jobs/jobs.types';
@@ -64,35 +38,26 @@ import { AiStartRequest, DraftArgs, ResearchArgs, ResearchDraft, ResearchStarted
 
 /** Operations `mockAiFail` may name: their calls reject with an engine error. */
 export const AI_FAILABLE = [
-  'setup',
   'chat',
   'nlToQuery',
   'explain',
   'summarize',
   'rootCauses',
   'propose',
-  'models',
-  'runtime',
   'image',
 ] as const;
 export type AiFailable = (typeof AI_FAILABLE)[number];
 
 export interface MockAiOptions {
-  /** `ready` (a model is active), `setup` (nothing set up yet), `off` (no AI in this build/run). */
+  /** `ready` (Pitwall is paired and serves a model, unless `pitwall` says otherwise), `setup` (Pitwall absent unless
+   * `pitwall` says otherwise), `off` (no AI in this build/run). */
   mode?: 'ready' | 'setup' | 'off';
   /** Delay between streamed pieces, ms (0 in unit tests). */
   stepMs?: number;
   fail?: AiFailable[];
-  /** The inference runtimes on disk (default `installed`: Vulkan works, CUDA is suggested). */
-  runtime?: MockRuntimeMode;
-  /** Model and runtime downloads fail like on a corporate network (e.g. `tls`: a TLS-inspecting proxy). */
-  net?: MockNetFailure;
-  /** Runtime and model update checks: `available` (an update with the Ask policy), `automatic`, `manual`. */
-  updates?: MockUpdatesMode;
-  /** Image support of the active model (ADR 0025): `on` (default), `missing` (text only, the catalog projector can be
-   * added), `none` (text only, nothing to add: choose another model). */
+  /** Image support of the model Pitwall serves (ADR 0025): `on` (default) or `none` (text only). */
   vision?: MockVisionMode;
-  /** The clock of every simulated step, download and update check (default: the page's timers). */
+  /** The clock of every simulated step (default: the page's timers). */
   clock?: MockClock;
   /** Pitwall (the family's local LLM server, ADR 0059): `absent` (default), `installed` (not running), `running` (not
    * paired: connecting shows a code and is approved after a moment), `deny` (as `running`, but the request is denied),
@@ -102,27 +67,16 @@ export interface MockAiOptions {
 
 export type MockPitwallMode = 'absent' | 'installed' | 'running' | 'deny' | 'paired';
 
-/** Placeholder only: `currentStatus` always replaces it with the real engine state. */
-const NO_ENGINE: AiEngineStatus = {
-  choice: 'auto',
-  active: 'builtIn',
-  builtInForSession: false,
-  pitwall: { found: 'absent', version: null, paired: false, pairing: null, model: null, usable: false, problem: null },
-};
-
 const MOCK_PITWALL_MODEL = 'qwen3-8b-q4km';
 const MOCK_PITWALL_CODE = '482913';
 
-export type MockVisionMode = 'on' | 'missing' | 'none';
+export type MockVisionMode = 'on' | 'none';
 
 /**
  * Browser-demo switches (never used inside Tauri):
- *   ?mockAi=setup|off        start without a model, or with AI unavailable (hidden)
- *   ?mockAiFail=chat,setup   these operations fail (`runtime`: runtime downloads)
- *   ?mockAiRuntime=none|broken  no inference runtime installed, or one that finds no GPU
- *   ?mockAiNet=tls|proxyAuth|proxy|offline|timeout|httpStatus  downloads fail like behind a corporate proxy
- *   ?mockAiUpdates=available|automatic|manual  a runtime update to find (Ask, or that policy)
- *   ?mockAiVision=missing|none  the active model reads text only (its image support can be added, or not)
+ *   ?mockAi=setup|off        start without Pitwall, or with AI unavailable (hidden)
+ *   ?mockAiFail=chat,image   these operations fail
+ *   ?mockAiVision=none       the model Pitwall serves reads text only
  *   ?mockPitwall=running|deny|installed|paired  Pitwall found on this computer (see MockAiOptions.pitwall)
  *   ?mockAiStepMs=5          streaming speed
  */
@@ -137,14 +91,8 @@ export function mockAiOptionsFromSearch(search: string): MockAiOptions {
     .split(',')
     .filter((f): f is AiFailable => (AI_FAILABLE as readonly string[]).includes(f));
   if (fail.length) o.fail = fail;
-  const runtime = p.get('mockAiRuntime');
-  if (runtime === 'none' || runtime === 'broken' || runtime === 'installed') o.runtime = runtime;
-  const net = p.get('mockAiNet');
-  if ((MOCK_NET_FAILURES as readonly (string | null)[]).includes(net)) o.net = net as MockNetFailure;
-  const updates = p.get('mockAiUpdates');
-  if (updates === 'available' || updates === 'automatic' || updates === 'manual' || updates === 'none') o.updates = updates;
   const vision = p.get('mockAiVision');
-  if (vision === 'on' || vision === 'missing' || vision === 'none') o.vision = vision;
+  if (vision === 'on' || vision === 'none') o.vision = vision;
   const pitwall = p.get('mockPitwall');
   if (pitwall === 'running' || pitwall === 'deny' || pitwall === 'installed' || pitwall === 'paired' || pitwall === 'absent') o.pitwall = pitwall;
   return o;
@@ -158,25 +106,13 @@ interface MockChat {
   cancel: boolean;
 }
 
-/** The AI folder of the demo machine (Windows, like the mock hardware). */
-const MOCK_AI_DIR = 'C:\\Users\\demo\\AppData\\Roaming\\Debrief\\ai';
-
 export class MockAiBackend extends AiBackend {
   private readonly mode: 'ready' | 'setup' | 'off';
   private readonly stepMs: number;
   private readonly clock: MockClock;
   private readonly fails: Set<AiFailable>;
-  private readonly net: MockNetFailure | null;
-  private installed: InstalledModel[];
-  private activeFile: string | null;
-  private backend: string | null;
-  private readonly rt: MockRuntimes;
-  private readonly updates: MockAiUpdates;
-  private setupCancelled = false;
-  private setupRunning = false;
   private readonly chats = new Map<string, MockChat>();
   private counter = 0;
-  private readonly setupHandlers = new Set<(e: SetupEvent) => void>();
   private readonly statusHandlers = new Set<(s: AiStatus) => void>();
   private readonly chatHandlers = new Set<(e: ChatEventEnvelope) => void>();
   private readonly continueHook = (mockWeb().continueChat = (sessionId: string, title: string) => this.chatSend(sessionId, `I opened "${title}" for you: read it and go on with my question.`, {} as ChatContext));
@@ -187,8 +123,6 @@ export class MockAiBackend extends AiBackend {
   private imageCounter = 0;
   private readonly pitwallMode: MockPitwallMode;
   private pitwall: PitwallStatus;
-  private engineChoice: AiEngineChoice = 'auto';
-  private builtInForSession = false;
   /** Bumped by cancel/forget so a pairing that was waiting for approval ends quietly. */
   private pairingEpoch = 0;
 
@@ -198,7 +132,7 @@ export class MockAiBackend extends AiBackend {
     this.stepMs = options.stepMs ?? 25;
     this.clock = options.clock ?? systemMockClock;
     this.fails = new Set(options.fail ?? []);
-    this.pitwallMode = options.pitwall ?? 'absent';
+    this.pitwallMode = options.pitwall ?? (this.mode === 'ready' ? 'paired' : 'absent');
     const found = this.pitwallMode === 'absent' ? 'absent' : this.pitwallMode === 'installed' ? 'installed' : 'running';
     const paired = this.pitwallMode === 'paired';
     this.pitwall = {
@@ -210,24 +144,14 @@ export class MockAiBackend extends AiBackend {
       usable: paired,
       problem: null,
     };
-    this.net = options.net ?? null;
-    const ready = this.mode === 'ready';
-    const active = installedFrom(catalogModel(1), true);
-    const vision = options.vision ?? 'on';
-    this.installed = ready ? [vision === 'on' ? active : textOnly(active, vision === 'missing' ? catalogModel(1) : undefined)] : [];
-    this.activeFile = ready ? catalogModel(1).file : null;
-    this.rt = new MockRuntimes(
-      options.runtime ?? 'installed',
-      this.stepMs,
-      this.net
-        ? mockNetError(this.net, 'github.com')
-        : this.fails.has('runtime')
-          ? new AiError('network', 'network error: the connection to github.com was reset')
-          : null,
-      this.clock,
-    );
-    this.backend = ready ? (this.rt.backendName() ?? 'Vulkan') : null;
-    this.updates = new MockAiUpdates(this.mode === 'off' ? 'none' : (options.updates ?? 'none'), this.stepMs, this.net, this.clock);
+    this.textOnly = options.vision === 'none';
+  }
+
+  private readonly textOnly: boolean;
+
+  /** Pitwall serves a model for Debrief (the only way any AI request can run). */
+  private get hasModel(): boolean {
+    return this.mode !== 'off' && this.pitwall.usable;
   }
 
   private check(op?: AiFailable): void {
@@ -239,16 +163,13 @@ export class MockAiBackend extends AiBackend {
 
   private needModel(op: AiFailable): void {
     this.check(op);
-    if (!this.activeFile)
-      throw new AiError(
-        'noModel',
-        'No AI model is set up yet: choose "Set up AI assistant" first.',
-      );
+    if (!this.hasModel)
+      throw new AiError('noModel', 'Pitwall is not ready to serve Debrief: connect it in Settings ▸ AI.');
   }
 
   /** A use case as an AI job (one at a time, visible in the Jobs pane), like the engine; no model fails at once. */
   private aiJob<T>(op: AiFailable, title: string, link: JobLink | null, f: () => T, result: (v: T) => JobResult | null, doneTitle?: string): Promise<T> {
-    if (this.mode !== 'ready' || !this.activeFile)
+    if (this.mode !== 'ready' || !this.hasModel)
       return this.later(() => {
         this.needModel(op);
         return f();
@@ -271,55 +192,27 @@ export class MockAiBackend extends AiBackend {
   }
 
   private currentStatus(): AiStatus {
-    const s = this.builtInStatus();
-    const usePitwall = this.mode !== 'off' && this.pitwall.usable && this.engineChoice !== 'builtIn' && !this.builtInForSession;
-    const active = usePitwall ? 'pitwall' : this.engineChoice === 'pitwall' && !this.builtInForSession ? null : 'builtIn';
-    const engine = { choice: this.engineChoice, active, builtInForSession: this.builtInForSession, pitwall: structuredClone(this.pitwall) } as const;
-    if (this.mode === 'off') return { ...s, engine };
-    if (usePitwall) return { ...s, state: 'ready', model: this.pitwall.model, reason: null, engine };
-    if (active === null) return { ...s, state: 'failed', reason: this.pitwall.problem ?? 'Pitwall is not available.', engine };
-    return { ...s, engine };
-  }
-
-  private builtInStatus(): AiStatus {
+    const pitwall = structuredClone(this.pitwall);
     if (this.mode === 'off') {
       return {
         available: false,
         state: 'unavailable',
-        reason: 'The AI engine is not installed in this build of Debrief.',
+        reason: 'The AI engine is not available in this run of Debrief.',
         model: null,
-        backend: null,
-        rssBytes: 0,
-        notes: [],
         safeMode: false,
-        setupRunning: false,
         vision: false,
-        engine: NO_ENGINE,
+        pitwall,
       };
     }
+    const usable = this.pitwall.usable;
     return {
       available: true,
-      state: this.activeFile ? 'ready' : 'noModel',
-      reason: null,
-      model: this.activeFile,
-      backend: this.backend,
-      rssBytes: this.activeFile ? 3_400_000_000 : 0,
-      notes: [],
+      state: usable ? 'ready' : 'noModel',
+      reason: usable ? null : (this.pitwall.problem ?? 'Pitwall is not ready to serve Debrief.'),
+      model: usable ? this.pitwall.model : null,
       safeMode: false,
-      setupRunning: this.setupRunning,
-      vision: !!this.installed.find((m) => m.fileName === this.activeFile)?.vision,
-      server: this.activeFile
-        ? {
-            context: 8192,
-            vision: !!this.installed.find((m) => m.fileName === this.activeFile)?.vision,
-            audio: false,
-            mediaMarker: '<__media_mock__>',
-            model: this.activeFile,
-            build: 'b0-mock',
-            chatTemplate: true,
-          }
-        : null,
-      engine: NO_ENGINE,
+      vision: usable && !this.textOnly,
+      pitwall,
     };
   }
 
@@ -328,293 +221,20 @@ export class MockAiBackend extends AiBackend {
     for (const h of this.statusHandlers) h(s);
   }
 
-  private emitSetup(e: SetupEvent): void {
-    for (const h of this.setupHandlers) h(e);
-  }
-
-  // ---- status and set-up ----
+  // ---- status and Pitwall (ADR 0059, ADR 0070) ----
 
   status() {
     return this.later(() => this.currentStatus(), 0);
   }
-  hardware() {
-    return this.later(() => {
-      this.check();
-      return structuredClone(MOCK_HARDWARE);
-    });
-  }
-  recommend() {
-    return this.later(() => {
-      this.check();
-      return mockRecommendations(this.installed.map((m) => m.fileName));
-    });
-  }
-  refineFit() {
-    return this.later(() => {
-      this.check();
-      return mockRecommendations(this.installed.map((m) => m.fileName));
-    });
-  }
-  catalog() {
-    return this.later(() => {
-      this.check();
-      return mockRecommendations(this.installed.map((m) => m.fileName)).ranked;
-    });
-  }
-  setupPlan(modelId?: string | null) {
-    return this.later(() => {
-      this.check();
-      const recs = mockRecommendations(this.installed.map((m) => m.fileName));
-      const chosen =
-        (modelId ? recs.ranked.find((r) => r.model.id === modelId) : recs.best) ?? null;
-      if (modelId && !chosen)
-        throw new AiError('notFound', `'${modelId}' is not in the model list`);
-      return {
-        hardware: structuredClone(MOCK_HARDWARE),
-        recommendations: recs,
-        chosen,
-        license: chosen?.model.license ?? null,
-        gated: false,
-        downloadBytes: chosen && !chosen.installed ? chosen.model.sizeBytes : 0,
-        alreadyInstalled: !!chosen?.installed,
-        note: null,
-      };
-    });
-  }
 
-  async setupRun(modelId: string): Promise<void> {
-    this.check();
-    const m = MOCK_CATALOG.find((c) => c.id === modelId);
-    if (!m) throw new AiError('notFound', `'${modelId}' is not in the model list`);
-    if (this.setupRunning)
-      throw new AiError('busy', 'A model is already being set up; wait for it or cancel it first.');
-    this.setupRunning = true;
-    this.setupCancelled = false;
-    void this.runSetup(m.file, !this.installed.some((i) => i.fileName === m.file), m.sizeBytes, modelId);
-  }
 
-  /** Like the engine: the runtime first when none is installed, then the model, and one message at the end. */
-  async setupBackground(modelId: string): Promise<void> {
-    this.check();
-    const m = MOCK_CATALOG.find((c) => c.id === modelId);
-    if (!m) throw new AiError('notFound', `'${modelId}' is not in the model list`);
-    if (this.setupRunning) throw new AiError('busy', 'A model is already being set up; wait for it or cancel it first.');
-    const overview = this.rt.overview();
-    if (!overview.needsDownload || !overview.suggested) {
-      this.background = true;
-      return this.setupRun(modelId);
-    }
-    // The runtime step, then the model step (this method returns once the first is queued).
-    this.setupRunning = true;
-    const off = this.rt.subscribe((e) => {
-      if (e.stage !== 'ready' && e.stage !== 'failed' && e.stage !== 'cancelled') return;
-      off();
-      this.setupRunning = false;
-      if (e.stage === 'ready') {
-        this.background = true;
-        void this.setupRun(modelId);
-      } else if (e.stage === 'failed') {
-        this.announceSetup(modelId, e.message);
-      }
-    });
-    this.rt.install(overview.suggested);
-  }
-
-  private background = false;
-
-  /** The one message that ends a background set-up: ready (Open the assistant) or failed (Retry). */
-  private announceSetup(modelId: string, failure?: string): void {
-    mockNotifications().post(
-      failure === undefined
-        ? { source: 'ai', severity: 'success', scope: 'app', title: 'AI assistant ready', body: 'The model is set up and runs on this computer.', primary: { type: 'openAssistant' }, cause: 'ai-setup' }
-        : { source: 'ai', severity: 'error', scope: 'app', title: 'The AI assistant could not be set up', body: failure, primary: { type: 'setUpAssistant', modelId }, cause: 'ai-setup' },
-    );
-  }
-
-  private async runSetup(file: string, download: boolean, size: number, modelId = ''): Promise<void> {
-    const background = this.background;
-    this.background = false;
-    const end = (e: SetupEvent) => {
-      this.setupRunning = false;
-      if (background && e.stage === 'ready') this.announceSetup(modelId);
-      else if (background && e.stage === 'failed') this.announceSetup(modelId, e.message);
-      this.emitSetup(e);
-      this.emitStatus();
-    };
-    const step = async (e: SetupEvent) => {
-      if (this.setupCancelled) throw new AiError('cancelled', 'cancelled');
-      this.emitSetup(e);
-      await this.clock.sleep(this.stepMs * 2);
-    };
-    try {
-      await step({ stage: 'probing' });
-      await step({ stage: 'recommending' });
-      if (download) {
-        const steps = 8;
-        for (let i = 0; i <= steps; i++) {
-          const bytes = Math.round((size * i) / steps);
-          await step({
-            stage: 'downloading',
-            bytes,
-            total: size,
-            bytesPerSec: 48_000_000,
-            etaSecs: Math.ceil((size - bytes) / 48_000_000),
-          });
-        }
-        if (this.net) throw mockNetError(this.net, 'huggingface.co');
-        if (this.fails.has('setup'))
-          throw new AiError('network', 'network error: the connection to the model host was reset');
-        await step({ stage: 'verifying', bytes: size, total: size });
-        this.installed = [
-          ...this.installed,
-          installedFrom(
-            MOCK_CATALOG.find((c) => c.file === file)!,
-            false,
-          ),
-        ];
-      }
-      await step({ stage: 'validating' });
-      await step({ stage: 'loading', gpu: true });
-      if (!this.rt.hasRuntime())
-        throw new AiError(
-          'noRuntime',
-          'no inference runtime is installed: download one in the AI set-up',
-        );
-      await step({ stage: 'warmingUp' });
-      const backend = this.rt.backendName() ?? 'CPU';
-      this.activeFile = file;
-      this.backend = backend;
-      this.installed = this.installed.map((i) => ({ ...i, active: i.fileName === file }));
-      end({ stage: 'ready', model: file, backend });
-    } catch (e) {
-      const err = e instanceof AiError ? e : new AiError('engine', String(e));
-      end(
-        err.code === 'cancelled'
-          ? { stage: 'cancelled' }
-          : { stage: 'failed', code: err.code, message: err.message },
-      );
-    }
-  }
-
-  setupCancel() {
-    return this.later(() => {
-      if (!this.setupRunning) return false;
-      this.setupCancelled = true;
-      return true;
-    }, 0);
-  }
-
-  models() {
-    return this.later(() => {
-      this.check('models');
-      return structuredClone(this.installed);
-    });
-  }
-
-  async activateModel(fileName: string): Promise<void> {
-    this.check();
-    if (!this.installed.some((m) => m.fileName === fileName))
-      throw new AiError('notFound', `${fileName} is not installed`);
-    if (this.setupRunning)
-      throw new AiError('busy', 'A model is already being set up; wait for it or cancel it first.');
-    this.setupRunning = true;
-    this.setupCancelled = false;
-    void this.runSetup(fileName, false, 0);
-  }
-
-  deleteModel(fileName: string) {
-    return this.later(() => {
-      this.check();
-      if (!this.installed.some((m) => m.fileName === fileName))
-        throw new AiError('notFound', `not found: ${fileName}`);
-      this.installed = this.installed.filter((m) => m.fileName !== fileName);
-      if (this.activeFile === fileName) {
-        this.activeFile = null;
-        this.backend = null;
-      }
-      this.emitStatus();
-    });
-  }
-
-  addLocalModel(path: string) {
-    return this.later(() => {
-      this.check();
-      if (!/\.gguf$/i.test(path)) throw new AiError('invalid', 'model files end in .gguf');
-      const name = (path.split(/[\\/]/).pop() ?? 'model.gguf').replace(/[^A-Za-z0-9.+_-]/g, '_');
-      // A catalog model downloaded by hand is "verified" and filed under its catalog name, like the engine.
-      const known = MOCK_CATALOG.find((c) => c.file.toLowerCase() === name.toLowerCase());
-      const m: InstalledModel = known
-        ? installedFrom(known, false)
-        : {
-            ...installedFrom(catalogModel(2), false),
-            fileName: name,
-            name: name.replace(/\.gguf$/i, ''),
-            catalogId: null,
-            license: null,
-          };
-      this.installed = [...this.installed.filter((i) => i.fileName !== name), m];
-      return structuredClone(m);
-    });
-  }
-
-  /** "Add image support": the catalog projector of an installed model, downloaded as an app-wide download job. */
-  async installProjector(fileName: string): Promise<number> {
-    this.check('models');
-    const m = this.installed.find((i) => i.fileName === fileName);
-    if (!m) throw new AiError('notFound', `${fileName} is not installed`);
-    if (m.vision) throw new AiError('invalid', `${m.name} already reads images`);
-    const size = m.projectorDownloadBytes;
-    if (size === null) throw new AiError('notFound', `the model list has no image projector for ${m.name}`);
-    const job = mockJobs().start({ kind: 'download', title: `Image support for ${m.name}`, link: { type: 'model', id: m.catalogId ?? fileName }, appWide: true }, async (ctx) => {
-      for (let i = 1; i <= 8; i++) {
-        if (ctx.cancelled()) throw new MockJobCancelled();
-        await this.clock.sleep(this.stepMs * 2);
-        ctx.progress({ fraction: i / 8, done: Math.round((size * i) / 8), total: size });
-      }
-      if (this.net) throw mockNetError(this.net, 'huggingface.co');
-      this.withProjector(fileName, size);
-      return { value: undefined, result: { type: 'model', fileName } };
-    });
-    job.done.catch(() => undefined);
-    return job.id;
-  }
-
-  /** A projector file the user chose (checked like a download: an `mmproj` GGUF that fits the model). */
-  addProjector(fileName: string, path: string) {
-    return this.later(() => {
-      this.check('models');
-      const m = this.installed.find((i) => i.fileName === fileName);
-      if (!m) throw new AiError('notFound', `${fileName} is not installed`);
-      if (!/\.gguf$/i.test(path)) throw new AiError('invalid', 'projector files end in .gguf');
-      if (!/mmproj/i.test(path)) throw new AiError('modelFile', 'this file is a model, not an image projector (mmproj): choose the mmproj file of the same model');
-      return structuredClone(this.withProjector(fileName, m.projectorDownloadBytes ?? 640 * 1024 * 1024));
-    });
-  }
-
-  private withProjector(fileName: string, size: number): InstalledModel {
-    const before = this.installed.find((i) => i.fileName === fileName);
-    if (!before) throw new AiError('notFound', `${fileName} is not installed`);
-    const out: InstalledModel = { ...before, vision: true, projectorDownloadBytes: null, projector: { fileName: `${before.fileName.replace(/\.gguf$/i, '')}.mmproj.gguf`, sizeBytes: size, info: mockProjectorInfo(size), problem: null } };
-    this.installed = this.installed.map((i) => (i.fileName === fileName ? out : i));
-    this.emitStatus();
-    return out;
-  }
-
-  reset() {
-    return this.later(() => this.currentStatus(), 0);
-  }
-
-  // ---- Pitwall (ADR 0059) ----
-
-  async pitwallConnect(useForDebrief: boolean): Promise<PitwallStatus> {
+  async pitwallConnect(): Promise<PitwallStatus> {
     this.check();
     if (this.pitwall.found !== 'running') {
       this.pitwall = { ...this.pitwall, problem: 'Pitwall is not running.' };
       this.emitStatus();
       return structuredClone(this.pitwall);
     }
-    if (useForDebrief) this.engineChoice = 'pitwall';
-    this.builtInForSession = false;
     if (this.pitwall.paired) {
       this.pitwall = { ...this.pitwall, problem: null };
       this.emitStatus();
@@ -651,12 +271,6 @@ export class MockAiBackend extends AiBackend {
   }
 
   async pitwallRefresh(): Promise<AiStatus> {
-    return this.currentStatus();
-  }
-
-  async useBuiltInEngine(): Promise<AiStatus> {
-    this.builtInForSession = true;
-    this.emitStatus();
     return this.currentStatus();
   }
 
@@ -707,108 +321,7 @@ export class MockAiBackend extends AiBackend {
   /** The engine fails an image request of a text-only model (typed `NoVision`). */
   private needVision(): void {
     if (!this.currentStatus().vision)
-      throw new AiError('noVision', 'The active model reads text only: add its image support or choose a model marked "Text + images".');
-  }
-
-  // ---- inference runtimes ----
-
-  runtimes() {
-    return this.later(() => {
-      this.check();
-      return this.rt.overview();
-    });
-  }
-  async runtimeInstall(id: string): Promise<void> {
-    this.check();
-    this.rt.install(id);
-  }
-  async runtimeAddArchives(id: string, paths: string[]): Promise<void> {
-    this.check();
-    this.rt.installFrom(id, paths);
-  }
-  runtimeCancel() {
-    return this.later(() => this.rt.cancel(), 0);
-  }
-
-  // ---- update checks ----
-
-  updatesStatus() {
-    return this.later(() => {
-      this.check();
-      return this.updates.status();
-    }, 0);
-  }
-  async updatesCheck(kind?: AiUpdateKind | null): Promise<AiUpdatesStatus> {
-    this.check();
-    return this.updates.check(kind);
-  }
-  async updatesApply(key: string): Promise<AiUpdatesStatus> {
-    this.check();
-    return this.updates.install(key);
-  }
-  updatesSkip(key: string) {
-    return this.later(() => this.updates.skip(key), 0);
-  }
-  updatesLater(key: string) {
-    return this.later(() => this.updates.later(key), 0);
-  }
-
-  // ---- manual downloads ----
-
-  manualDownload(kind: ManualKind, id: string) {
-    return this.later((): ManualDownload => {
-      this.check();
-      if (kind === 'runtime') {
-        const b = this.rt.overview().builds.find((x) => x.id === id);
-        return {
-          kind,
-          id,
-          name: b?.label ?? id,
-          files: this.rt.manualFiles(id),
-          folder: `${MOCK_AI_DIR}\\runtimes\\b11669\\${id}`,
-        };
-      }
-      const m = MOCK_CATALOG.find((c) => c.id === id);
-      if (!m) throw new AiError('notFound', `'${id}' is not in the model list`);
-      return {
-        kind,
-        id,
-        name: m.name,
-        files: [
-          {
-            name: m.file,
-            url: `https://huggingface.co/${m.hfRepo}/resolve/main/${m.file}?download=true`,
-            sizeBytes: m.sizeBytes,
-            sha256: m.sha256,
-          },
-        ],
-        folder: `${MOCK_AI_DIR}\\models`,
-      };
-    }, 0);
-  }
-  openManualDownload(kind: ManualKind, id: string, index: number) {
-    return this.manualDownload(kind, id).then((d) => {
-      const f = d.files[index];
-      if (!f) throw new AiError('invalid', 'that file is not part of this download');
-      this.opened.push(f.url);
-    });
-  }
-  runtimeDelete(tag: string, id: string) {
-    return this.later(() => {
-      this.check();
-      const wasActive = this.rt.active() === id;
-      this.rt.delete(tag, id);
-      if (wasActive) this.backend = this.rt.backendName();
-      this.emitStatus();
-    });
-  }
-  runtimeChoose(id: string) {
-    return this.later(() => {
-      this.check();
-      this.rt.choose(id);
-      if (this.activeFile) this.backend = this.rt.backendName();
-      this.emitStatus();
-    });
+      throw new AiError('noVision', 'The model Pitwall serves reads text only: choose a model that reads images in Pitwall.');
   }
 
   // ---- use cases ----
@@ -1372,22 +885,12 @@ export class MockAiBackend extends AiBackend {
     set.add(h);
     return Promise.resolve(() => set.delete(h));
   }
-  onSetup(handler: (e: SetupEvent) => void) {
-    return this.subscribe(this.setupHandlers, handler);
-  }
-  onRuntime(handler: (e: AiRuntimeEvent) => void) {
-    return Promise.resolve(this.rt.subscribe(handler));
-  }
   onStatus(handler: (s: AiStatus) => void) {
     return this.subscribe(this.statusHandlers, handler);
   }
   onChat(handler: (e: ChatEventEnvelope) => void) {
     return this.subscribe(this.chatHandlers, handler);
   }
-  onUpdates(handler: (s: AiUpdatesStatus) => void) {
-    return Promise.resolve(this.updates.subscribe(handler));
-  }
-
   /** Test hook: the code an operation rejects with. */
   static codeOf(e: unknown): AiErrorCode | null {
     return e instanceof AiError ? e.code : null;

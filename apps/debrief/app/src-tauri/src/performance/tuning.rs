@@ -87,11 +87,6 @@ pub fn plugin_limits(s: &PerformanceSettings, listener: Option<MemoryListener>) 
     }
 }
 
-/// The AI worker's cap, bytes (none for 0).
-pub fn ai_cap(s: &PerformanceSettings) -> Option<u64> {
-    (s.ai_worker_memory_mb > 0).then(|| u64::from(s.ai_worker_memory_mb) * MB)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,7 +106,6 @@ mod tests {
         assert_eq!((l.memory_cap, l.memory_mode), (Some(2 << 30), MemoryMode::Normal));
         // 16 cores: still 8 parse threads (the automatic maximum and the import budget agree).
         assert_eq!(store_tuning(&d, 16).parse_threads, Some(8));
-        assert_eq!(ai_cap(&d), Some(1024 * MB));
     }
 
     #[test]
@@ -148,13 +142,12 @@ mod tests {
     }
 
     #[test]
-    fn spill_plugins_cpu_and_the_ai_cap_follow_the_settings() {
+    fn spill_plugins_and_cpu_follow_the_settings() {
         let mut s = PerformanceSettings {
             spill_folder: "  /fast/disk ".into(),
             max_spill_mb: 10_240,
             plugin_cpu_percent: 50,
             plugin_memory_mb: 768,
-            ai_worker_memory_mb: 0,
             return_memory_at_once: true,
             ..PerformanceSettings::default()
         };
@@ -172,6 +165,5 @@ mod tests {
             (l.default_memory, l.memory["p"], l.cpu_rate_percent),
             (Some(768 * MB), 300 * MB, Some(50))
         );
-        assert_eq!(ai_cap(&s), None);
     }
 }

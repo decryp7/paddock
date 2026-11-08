@@ -1,7 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { describe, expect, it } from 'vitest';
-import { runtimeProgressText } from '../../ai/runtimes/runtime-view';
 import { progressText } from '../../updates/updates-dialog';
 import { transferSpeed } from './transfer-speed';
 
@@ -26,10 +25,8 @@ describe('transferSpeed', () => {
     expect(speed()).toEqual({ rate: 0, etaSecs: null });
   });
 
-  it('feeds the runtime and update progress lines', () => {
+  it('feeds the update progress lines', () => {
     const speed = { rate: 12 * MB, etaSecs: 150 };
-    const tick = { stage: 'progress' as const, id: 'cpu', bytes: 10 * MB, total: 20 * MB, bytesPerSec: 0, etaSecs: null, verifying: false };
-    expect(runtimeProgressText(tick, speed)).toBe('10 MB of 20 MB · 12 MB/s · about 3 min left');
     expect(progressText(5 * MB, 50 * MB, speed)).toBe('5 MB of 50 MB · 12 MB/s · about 3 min left');
     expect(progressText(5 * MB, 50 * MB)).toBe('5 MB of 50 MB');
     expect(progressText(5 * MB, null)).toBe('5 MB');

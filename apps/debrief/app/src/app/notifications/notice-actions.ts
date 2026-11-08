@@ -1,5 +1,4 @@
 import { inject, Injectable, Injector } from '@angular/core';
-import { AiBackend } from '../ai/ai-backend';
 import { LifecycleBackend } from '../core/tools-backend';
 import { ServiceHealthStore } from '../health/service-health.store';
 import { COMMAND_CONTEXT } from '../extensions/command-registry';
@@ -28,12 +27,6 @@ export function actionLabel(a: NoticeAction): string {
       return $localize`:@@notifications.action.setUpFormat:Set up format`;
     case 'fixTimestamps':
       return $localize`:@@notifications.action.fixTimestamps:Fix timestamps`;
-    case 'resetAi':
-      return $localize`:@@notifications.action.resetAi:Reset AI`;
-    case 'openAssistant':
-      return $localize`:@@notifications.action.openAssistant:Open the assistant`;
-    case 'setUpAssistant':
-      return $localize`:@@notifications.action.setUpAssistant:Retry`;
     case 'installUpdate':
       return $localize`:@@notifications.action.installUpdate:Install update`;
     case 'showAlert':
@@ -42,12 +35,6 @@ export function actionLabel(a: NoticeAction): string {
       return $localize`:@@notifications.action.showJobs:Show in Jobs`;
     case 'showInFolder':
       return $localize`:@@notifications.action.showInFolder:Show in folder`;
-    case 'updateAi':
-      return $localize`:@@notifications.action.updateAi:Update`;
-    case 'laterAiUpdate':
-      return $localize`:@@notifications.action.laterAiUpdate:Later`;
-    case 'skipAiUpdate':
-      return $localize`:@@notifications.action.skipAiUpdate:Skip this version`;
     case 'repairService':
       return $localize`:@@notifications.action.repairService:Try again`;
     case 'openSettings':
@@ -95,9 +82,6 @@ export function actionTarget(a: NoticeAction): NoticeTarget {
     case 'reviewProposals':
     case 'retryJob':
     case 'showJobs':
-    case 'openAssistant':
-    case 'setUpAssistant':
-    case 'updateAi':
     case 'showAlert':
       return 'view';
     case 'setUpFormat':
@@ -106,23 +90,15 @@ export function actionTarget(a: NoticeAction): NoticeTarget {
       return 'window';
     case 'showInFolder':
     case 'resetPlugin':
-    case 'resetAi':
     case 'installUpdate':
-    case 'laterAiUpdate':
-    case 'skipAiUpdate':
     case 'repairService':
       return null;
   }
 }
 
-/** Actions that answer the message: once done it is dismissed (an AI update was installed, put off or skipped). */
-function answers(a: NoticeAction): boolean {
-  return a.type === 'updateAi' || a.type === 'laterAiUpdate' || a.type === 'skipAiUpdate';
-}
-
 /**
  * Runs a message's action with the existing feature (View of the job, Retry, the plugin reset, the format wizard,
- * Reset AI, the update download, the live alert's evidence). Running it marks the message read.
+ * the update download, the live alert's evidence). Running it marks the message read.
  */
 @Injectable({ providedIn: 'root' })
 export class NoticeActions {
@@ -135,7 +111,6 @@ export class NoticeActions {
     if (notice.id > 0) void store.markRead(notice.id);
     try {
       const err = await this.perform(action);
-      if (!err && answers(action) && notice.id > 0) await store.dismiss(notice.id);
       if (!err) this.leaveFor(actionTarget(action));
       return err;
     } catch (e) {
@@ -200,29 +175,10 @@ export class NoticeActions {
         });
         return null;
       }
-      case 'resetAi':
-        await this.injector.get(AiBackend).reset();
-        return null;
-      case 'openAssistant':
-        ctx.showView('ai-chat');
-        return null;
-      case 'setUpAssistant':
-        await this.injector.get(AiBackend).setupBackground(a.modelId);
-        ctx.showView(JOBS_VIEW);
-        return null;
       case 'installUpdate': {
         const { UpdatesStore } = await import('../updates/updates.store');
         await this.injector.get(UpdatesStore).download();
         return null;
-      }
-      case 'updateAi':
-      case 'laterAiUpdate':
-      case 'skipAiUpdate': {
-        const { AiUpdatesStore } = await import('../ai/updates/ai-updates.store');
-        const updates = this.injector.get(AiUpdatesStore);
-        const ok = a.type === 'updateAi' ? await updates.apply(a.key) : a.type === 'laterAiUpdate' ? await updates.later(a.key) : await updates.skip(a.key);
-        if (a.type === 'updateAi' && ok) ctx.showView(JOBS_VIEW);
-        return ok ? null : updates.error();
       }
       case 'repairService':
         await this.injector.get(ServiceHealthStore).repair(a.service);

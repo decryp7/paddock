@@ -353,6 +353,13 @@ impl Jobs {
     }
 
     /// Lets `gate` pause and resume `kind`'s queue (checked before jobs of that kind start).
+    #[cfg_attr(
+        not(test),
+        allow(
+            dead_code,
+            reason = "no kind of job is gated since ADR 0070; a service that needs a pause sets one"
+        )
+    )]
     pub fn set_gate(&self, kind: JobKind, gate: impl Fn() -> Option<String> + Send + Sync + 'static) {
         lock(&self.0.gates).insert(kind, Arc::new(gate));
         self.0.gate_generation.fetch_add(1, Ordering::SeqCst);

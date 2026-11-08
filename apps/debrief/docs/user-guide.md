@@ -142,8 +142,6 @@ the assistant**; if it fails one plain message says why, with **Retry**. Cancel 
 
 ![A modal dialog over a dimmed window](screenshots/dialog-modal.png)
 
-![The first-start AI set-up](screenshots/dialog-ai-setup.png)
-
 ![Share a redacted copy: the buttons stay in view](screenshots/dialog-redacted-copy.png)
 
 ![Export events](screenshots/dialog-export.png)

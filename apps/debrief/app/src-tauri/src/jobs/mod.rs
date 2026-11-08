@@ -65,7 +65,7 @@ pub fn wire<R: Runtime>(app: &AppHandle<R>, jobs: &Jobs) {
             mirror(&handle, &service, &mirrored);
         }
         JobsEvent::Finished(f) => finished(&handle, f),
-        JobsEvent::Paused { kind, reason } => paused(&handle, *kind, reason),
+        JobsEvent::Paused { kind, reason } => log::info!(Kind = format!("{kind:?}").as_str(); "A queue of jobs is paused: {reason}"),
     });
 }
 
@@ -260,16 +260,6 @@ fn finished<R: Runtime>(app: &AppHandle<R>, f: &Finished) {
         (_, false) => Some(NotificationKind::JobFailed),
     };
     crate::notification_centre::post(app, job.window(), notice, os);
-}
-
-/// A paused queue (the AI was quarantined): service health states it once (the Jobs pane shows the pause itself).
-fn paused<R: Runtime>(app: &AppHandle<R>, kind: JobKind, reason: &str) {
-    if kind != JobKind::Ai {
-        return;
-    }
-    if let Some(health) = app.try_state::<std::sync::Arc<crate::health::hub::Health>>() {
-        health.ai(crate::health::hub::AiHealth::Switched, Some(reason));
-    }
 }
 
 /// Runs `f` as a job and hands its value back to the awaiting command. Without the service (some tests)

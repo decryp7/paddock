@@ -87,7 +87,7 @@ async function render(f: ComponentFixture<unknown>) {
 }
 
 const sample = (): Notice[] => [
-  notice({ id: 5, source: 'ai', title: 'AI paused', body: 'The model crashed', severity: 'warning', primary: { type: 'resetAi' }, secondary: { type: 'showJobs' } }),
+  notice({ id: 5, source: 'ai', title: 'AI paused', body: 'The model crashed', severity: 'warning', primary: { type: 'resetPlugin', pluginId: 'p' }, secondary: { type: 'showJobs' } }),
   notice({ id: 4, source: 'job', title: 'Finished: Export', read: true, primary: { type: 'viewJob', jobId: 1 } }),
   notice({ id: 3, source: 'ai', title: 'Earlier AI note', read: true }),
   notice({ id: 2, source: 'update', title: 'Update ready', count: 3, severity: 'success' }),
@@ -174,37 +174,36 @@ describe('NotificationsPanel', () => {
     await render(f);
     const row = el(f, '[data-testid=notice-5]');
     const buttons = [...row.querySelectorAll('.actions button')].map((b) => b.textContent?.trim());
-    expect(buttons).toEqual(['Reset AI', 'Show in Jobs']);
+    expect(buttons).toEqual(['Reset plugin', 'Show in Jobs']);
     expect([...row.querySelectorAll('.row-actions button')].map((b) => b.getAttribute('aria-label'))).toEqual(['Mark read: AI paused', 'Dismiss AI paused']);
     el<HTMLButtonElement>(f, '[data-testid=notice-primary-5]').click();
     await settle(f);
-    expect(actions.run).toHaveBeenLastCalledWith(expect.objectContaining({ id: 5 }), { type: 'resetAi' });
+    expect(actions.run).toHaveBeenLastCalledWith(expect.objectContaining({ id: 5 }), { type: 'resetPlugin', pluginId: 'p' });
     at([...row.querySelectorAll<HTMLButtonElement>('.actions button')], 1).click();
     await settle(f);
     expect(actions.run).toHaveBeenLastCalledWith(expect.objectContaining({ id: 5 }), { type: 'showJobs' });
   });
 
   it('offers a third action when the message has one', async () => {
-    const key = 'runtime:vulkan@b11700';
     const { f, actions } = setup([
-      notice({ id: 9, source: 'ai', title: 'AI runtime update', primary: { type: 'updateAi', key }, secondary: { type: 'laterAiUpdate', key }, tertiary: { type: 'skipAiUpdate', key } }),
+      notice({ id: 9, source: 'job', title: 'Export finished', primary: { type: 'viewJob', jobId: 1 }, secondary: { type: 'showJobs' }, tertiary: { type: 'showInFolder', jobId: 1 } }),
     ]);
     await render(f);
     const buttons = [...el(f, '[data-testid=notice-9]').querySelectorAll('.actions button')].map((b) => b.textContent?.trim());
-    expect(buttons).toEqual(['Update', 'Later', 'Skip this version']);
+    expect(buttons).toEqual(['View', 'Show in Jobs', 'Show in folder']);
     el<HTMLButtonElement>(f, '[data-testid=notice-tertiary-9]').click();
     await settle(f);
-    expect(actions.run).toHaveBeenLastCalledWith(expect.objectContaining({ id: 9 }), { type: 'skipAiUpdate', key });
+    expect(actions.run).toHaveBeenLastCalledWith(expect.objectContaining({ id: 9 }), { type: 'showInFolder', jobId: 1 });
   });
 
   it('shows an action failure inline and clears it after a success', async () => {
     const { f, actions } = setup();
     await render(f);
-    actions.run.mockResolvedValueOnce('The AI could not be reset.');
+    actions.run.mockResolvedValueOnce('The plugin could not be reset.');
     el<HTMLButtonElement>(f, '[data-testid=notice-primary-5]').click();
     await settle(f);
     f.detectChanges();
-    expect(el(f, 'p.err[role=alert]').textContent).toContain('The AI could not be reset.');
+    expect(el(f, 'p.err[role=alert]').textContent).toContain('The plugin could not be reset.');
     el<HTMLButtonElement>(f, '[data-testid=notice-primary-5]').click();
     await settle(f);
     f.detectChanges();
@@ -364,7 +363,7 @@ describe('notification toasts in the host', () => {
   it('runs the primary action and closes the toast on success, but keeps it with the message on failure', async () => {
     const { f, fake, actions } = setup();
     await render(f);
-    const a = notice({ id: 1, primary: { type: 'resetAi' } });
+    const a = notice({ id: 1, primary: { type: 'resetPlugin', pluginId: 'p' } });
     const b = notice({ id: 2, primary: { type: 'showJobs' } });
     fake.push(event([a], a));
     fake.push(event([b, a], b));
@@ -373,7 +372,7 @@ describe('notification toasts in the host', () => {
     at(all<HTMLButtonElement>(f, '[data-testid=notification-action-primary]'), 0).click();
     await settle(f);
     f.detectChanges();
-    expect(actions.run).toHaveBeenLastCalledWith(expect.objectContaining({ id: 1 }), { type: 'resetAi' });
+    expect(actions.run).toHaveBeenLastCalledWith(expect.objectContaining({ id: 1 }), { type: 'resetPlugin', pluginId: 'p' });
     expect(all(f, '[data-testid=notification]')).toHaveLength(2);
     expect(f.nativeElement.textContent).toContain('did not work');
     at(all<HTMLButtonElement>(f, '[data-testid=notification-action-primary]'), 0).click();

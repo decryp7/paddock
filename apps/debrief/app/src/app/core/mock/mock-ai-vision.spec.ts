@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatEventEnvelope } from '../../ai/ai.types';
 import { MockJobs, mockJobs, resetMockJobs } from '../../jobs/mock-jobs';
 import { MockAiBackend, mockAiOptionsFromSearch } from './mock-ai-backend';
-import { demoRecordIds, MOCK_CATALOG } from './mock-ai-data';
+import { demoRecordIds } from './mock-ai-data';
 import { mockAsksForRelated, mockCleanCopy, mockFormatOf, mockFormatOfPath, mockRelatedOutcome, mockScenario } from './mock-ai-vision';
 
 const code = (p: Promise<unknown>) =>
@@ -61,7 +61,7 @@ describe('MockAiBackend images', () => {
   afterEach(() => resetMockJobs());
 
   it('reads the vision switch', () => {
-    expect(mockAiOptionsFromSearch('?mockAiVision=missing').vision).toBe('missing');
+    expect(mockAiOptionsFromSearch('?mockAiVision=missing').vision).toBeUndefined();
     expect(mockAiOptionsFromSearch('?mockAiVision=none').vision).toBe('none');
     expect(mockAiOptionsFromSearch('?mockAiVision=on').vision).toBe('on');
     expect(mockAiOptionsFromSearch('?mockAiVision=odd')).toEqual({});
@@ -106,7 +106,7 @@ describe('MockAiBackend images', () => {
   });
 
   it('fails image requests of a text-only model with NoVision', async () => {
-    const b = new MockAiBackend({ stepMs: 0, vision: 'missing' });
+    const b = new MockAiBackend({ stepMs: 0, vision: 'none' });
     expect((await b.status()).vision).toBe(false);
     const img = await b.imagePaste(PNG64, 'x.png');
     const end = await mockJobs().wait(await b.start({ op: 'explainImage', imageId: img.id, question: 'q' }));
@@ -137,44 +137,5 @@ describe('MockAiBackend images', () => {
     expect(done.citations.some((c) => c.kind === 'record' && c.id === demoRecordIds().fatal)).toBe(true);
     const rec = await b.chatGet(chat.id);
     expect(rec.turns.map((t) => t.user)).toEqual(['[image] what is this?', '[image] find the logs related to this screenshot']);
-  });
-
-  it('adds image support to a text-only model only when asked: download or a chosen file', async () => {
-    const b = new MockAiBackend({ stepMs: 0, vision: 'missing' });
-    const [m] = await b.models();
-    expect(m).toMatchObject({ vision: false, projector: null, projectorDownloadBytes: MOCK_CATALOG[1]!.projector!.sizeBytes });
-    const status: boolean[] = [];
-    void b.onStatus((s) => status.push(s.vision));
-    const id = await b.installProjector(m!.fileName);
-    const end = await mockJobs().wait(id);
-    expect(end).toMatchObject({ state: 'done', result: { type: 'model', fileName: m!.fileName } });
-    expect(status).toEqual([true]);
-    expect((await b.models())[0]).toMatchObject({ vision: true, projectorDownloadBytes: null, projector: { fileName: 'Qwen3.5-4B-Q4_K_M.mmproj.gguf' } });
-    expect(await code(b.installProjector(m!.fileName))).toBe('invalid');
-    expect(await code(b.installProjector('nope.gguf'))).toBe('notFound');
-
-    const none = new MockAiBackend({ stepMs: 0, vision: 'none' });
-    const [t] = await none.models();
-    expect(t!.projectorDownloadBytes).toBeNull();
-    expect(await code(none.installProjector(t!.fileName))).toBe('notFound');
-    expect(await code(none.addProjector(t!.fileName, '/m/a.bin'))).toBe('invalid');
-    expect(await code(none.addProjector(t!.fileName, '/m/model.gguf'))).toBe('modelFile');
-    expect(await code(none.addProjector('nope.gguf', '/m/mmproj.gguf'))).toBe('notFound');
-    expect((await none.addProjector(t!.fileName, '/m/mmproj-F16.gguf')).vision).toBe(true);
-    expect((await none.status()).vision).toBe(true);
-  });
-
-  it('fails a projector download like a model download behind a proxy, and can be cancelled', async () => {
-    const b = new MockAiBackend({ stepMs: 0, vision: 'missing', net: 'tls' });
-    const [m] = await b.models();
-    const end = await mockJobs().wait(await b.installProjector(m!.fileName));
-    expect(end.state).toBe('failed');
-    const slow = new MockAiBackend({ stepMs: 20, vision: 'missing' });
-    const [s] = await slow.models();
-    const id = await slow.installProjector(s!.fileName);
-    await vi.waitFor(async () => expect((await mockJobs().list()).jobs.find((j) => j.id === id)?.state).toBe('running'));
-    await mockJobs().cancel(id);
-    expect((await mockJobs().wait(id)).state).toBe('cancelled');
-    expect((await slow.models())[0]!.vision).toBe(false);
   });
 });

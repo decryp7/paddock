@@ -194,7 +194,6 @@ fn result_type(r: &JobResult) -> &'static str {
         JobResult::Value { .. } => "value",
         JobResult::Workspace { .. } => "workspace",
         JobResult::View { .. } => "view",
-        JobResult::Model { .. } => "model",
         JobResult::FolderSurvey { .. } => "folderSurvey",
         JobResult::Storage { .. } => "storage",
         JobResult::RelatedLogs { .. } => "relatedLogs",

@@ -14,8 +14,6 @@ export function capField(process: ProcessRef): string | null {
   switch (process.kind) {
     case 'storeWorker':
       return 'storeCapMb';
-    case 'ai':
-      return 'aiWorkerMemoryMb';
     case 'plugin':
       return null;
   }
@@ -23,7 +21,7 @@ export function capField(process: ProcessRef): string | null {
 
 /**
  * "Raise the cap…" of a memory message: opens the cap with the suggested value filled in, not applied — Settings ▸
- * Performance for the database and AI workers, the plugin's own cap in the Plugins view for a plugin.
+ * Performance for the database worker, the plugin's own cap in the Plugins view for a plugin.
  */
 export async function raiseMemoryCap(injector: Injector, process: ProcessRef, suggestedMb: number): Promise<void> {
   if (process.kind === 'plugin') {
@@ -38,10 +36,9 @@ export async function raiseMemoryCap(injector: Injector, process: ProcessRef, su
   if (key) settings.edit(PERFORMANCE_SECTION, key, suggestedMb);
 }
 
-/** The process a health cause's `raiseCap.target` names (`storeWorker`, `ai`, `plugin:<id>`). */
+/** The process a health cause's `raiseCap.target` names (`storeWorker`, `plugin:<id>`). */
 export function processOfTarget(target: string): ProcessRef | null {
   if (target === 'storeWorker') return { kind: 'storeWorker' };
-  if (target === 'ai') return { kind: 'ai' };
   return target.startsWith('plugin:') && target.length > 7 ? { kind: 'plugin', pluginId: target.slice(7) } : null;
 }
 

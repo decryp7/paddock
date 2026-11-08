@@ -4,18 +4,16 @@ use crate::test_support::{test_app_with_commands, window, TempDir};
 use crate::tools::tests::ipc;
 use serde_json::json;
 
-fn log_folders(d: &std::path::Path) -> Folders<'static> {
+fn log_folders(d: &std::path::Path) -> Folders {
     Folders {
         bundles: Some(d.join("bundles")),
         webview: None,
         data: None,
         log: Some(d.join("logs")),
         active_log: Some(d.join("logs").join("debrief.2026-10-18.log")),
-        runtime_tag: "b200".into(),
         session_start: None,
         main_instance: true,
         previous_crash: false,
-        ai: None,
     }
 }
 
@@ -46,7 +44,7 @@ fn clearing_several_categories_reports_each_with_progress_and_stops_when_cancell
     let cats = plan::categories(&log_folders(&d.0));
     let ids = [CategoryId::Logs, CategoryId::ErrorSnapshots, CategoryId::Stores];
     let mut seen = Vec::new();
-    let r = clear_all(&cats, &ids, None, &AtomicBool::new(false), &mut |f| seen.push(f));
+    let r = clear_all(&cats, &ids, &AtomicBool::new(false), &mut |f| seen.push(f));
     assert_eq!(r.freed_bytes, 35);
     assert!(!r.cancelled);
     assert_eq!(r.categories.iter().map(|c| c.id).collect::<Vec<_>>(), ids);
@@ -60,7 +58,7 @@ fn clearing_several_categories_reports_each_with_progress_and_stops_when_cancell
 
     write(&d.0.join("logs").join("debrief.2026-10-15.log"), 10);
     let cats = plan::categories(&log_folders(&d.0));
-    let r = clear_all(&cats, &ids, None, &AtomicBool::new(true), &mut |_| {});
+    let r = clear_all(&cats, &ids, &AtomicBool::new(true), &mut |_| {});
     assert!(r.cancelled);
     assert_eq!(r.freed_bytes, 0);
     assert!(d.0.join("logs").join("debrief.2026-10-15.log").is_file());
@@ -124,12 +122,9 @@ fn usage_lists_every_category_through_ipc() {
         .iter()
         .map(|c| c["id"].as_str().unwrap().to_string())
         .collect();
-    for id in &CategoryId::ALL[..8] {
+    for id in &CategoryId::ALL[..5] {
         assert!(ids.contains(&id.as_str().to_string()), "{id:?} in {ids:?}");
     }
-    // No AI engine is managed in this test app: its categories cannot be cleared.
-    let models = u["categories"].as_array().unwrap().iter().find(|c| c["id"] == "ai-models").unwrap();
-    assert_eq!(models["clearable"], false);
     // Without the single-instance flag the sessions belong to another instance.
     let sessions = u["categories"].as_array().unwrap().iter().find(|c| c["id"] == "sessions").unwrap();
     assert_eq!(sessions["clearable"], false);

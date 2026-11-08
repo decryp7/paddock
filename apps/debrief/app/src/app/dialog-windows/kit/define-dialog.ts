@@ -34,7 +34,7 @@ export function instanceKey(inputs: unknown): string {
 
 /** What `defineDialog` takes: the whole contract of one dialog. */
 export interface DialogSpec<Id extends string, Backend extends string, C, R> {
-  /** Stable id (`ai-setup`): the dialog window's route, its remembered bounds' key, its test id. */
+  /** Stable id (`ai-query`): the dialog window's route, its remembered bounds' key, its test id. */
   readonly id: Id;
   readonly kind: DialogKind;
   /** Only a `form` chooses (modal or modeless); every other kind decides. */

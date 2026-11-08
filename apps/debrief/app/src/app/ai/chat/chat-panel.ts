@@ -10,8 +10,6 @@ import { CdkMenu, CdkMenuItem, CdkMenuTrigger } from '@angular/cdk/menu';
 import { AiBackend, toAiError } from '../ai-backend';
 import { AiChatPersistence } from '../ai-chat-persistence';
 import { AiLauncher } from '../ai-launcher';
-import { assistantSetupLine } from '../ai-format';
-import { AiRuntimeStore } from '../runtimes/ai-runtime.store';
 import { AiStatusStore } from '../ai-status.store';
 import { AiProposalCard } from '../proposals/proposal-card';
 import { AgentDecision } from '../../browser/browser.types';
@@ -57,12 +55,10 @@ import { AiRichText } from './rich-text';
       </div>
     </ng-template>
 
-    @if (setupLine(); as line) {
-      <div class="setup" role="status" data-testid="ai-setting-up"><p>{{ line }}</p></div>
-    } @else if (status.needsSetup()) {
+    @if (status.needsSetup()) {
       <div class="setup" role="note">
-        <p i18n="@@ai.chat.setup.note">The assistant needs a local model first. It runs fully on this computer; only the model file is downloaded.</p>
-        <button type="button" class="btn primary" (click)="launcher.openSetup()" i18n="@@ai.chat.setup.button">Set up AI assistant…</button>
+        <p i18n="@@ai.chat.setup.note">The assistant runs on Pitwall, the family's local model server. Connect Debrief to Pitwall first; everything stays on this computer.</p>
+        <button type="button" class="btn primary" (click)="launcher.openSetup()" i18n="@@ai.chat.setup.button">Connect to Pitwall…</button>
       </div>
     }
 
@@ -226,11 +222,6 @@ export class AiChatPanel {
   }
   protected readonly status = inject(AiStatusStore);
   protected readonly launcher = inject(AiLauncher);
-  private readonly runtimes = inject(AiRuntimeStore);
-  /** "Setting up — 1.2 of 5.6 GB" while the first-start set-up runs in the background (no model yet). */
-  protected readonly setupLine = computed(() =>
-    this.status.hasModel() ? null : assistantSetupLine(this.status.setupRunning(), this.status.setup(), this.runtimes.installing()),
-  );
   private readonly citations = inject(AiCitations);
   private readonly backend = inject(AiBackend);
   private readonly platform = inject(Platform);
@@ -246,7 +237,7 @@ export class AiChatPanel {
     if (!s) return '';
     if (!s.available) return $localize`:@@ai.chat.engine.unavailable:AI unavailable`;
     const model = s.model ? s.model.replace(/\.gguf$/i, '') : $localize`:@@ai.chat.engine.noModel:no model`;
-    return `${model} · ${s.state}${s.backend ? ` · ${s.backend}` : ''}`;
+    return `${model} · ${s.state}`;
   });
 
   constructor() {

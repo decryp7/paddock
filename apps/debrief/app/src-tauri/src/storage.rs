@@ -1,8 +1,8 @@
 //! Settings ▸ Storage: what Debrief keeps on disk, and clearing it.
 //!
 //! Categories ([`model::CategoryId`]): temporary copies of opened bundles, the webview's caches and
-//! runtime builds of releases Debrief no longer pins are `cache` (rebuilt when needed, cleared together by
-//! "Clear cache"); the internal browser's profile, the AI runtimes and models, Debrief's logs, error
+//! are `cache` (rebuilt when needed, cleared together by
+//! "Clear cache"); the internal browser's profile, Debrief's logs, error
 //! snapshots, session backups and (once they exist) persistent stores are `data` (each cleared on its own,
 //! after a confirmation in the UI).
 //!
@@ -10,7 +10,7 @@
 //! names category ids, never paths. Sizes are computed off the UI thread with a bounded traversal
 //! ([`walk`]); clearing runs as a background task (progress, stoppable from the tray) and deletes only
 //! inside each category's canonical root, never follows links, skips and reports files in use, and keeps
-//! today's log, this run's sessions and the AI build and model in use ([`plan`]).
+//! today's log and this run's sessions ([`plan`]).
 //!
 //! Commands: `storage_usage`, `storage_clear`, `storage_reveal`. The wire contract is
 //! `app/src/app/settings/storage/storage.types.ts`.
@@ -21,11 +21,10 @@ mod stores;
 mod walk;
 
 use crate::activity::{domain_event, OpId};
-use crate::ai::{AiCore, AiState};
 use crate::jobs::{Controls, Done, JobKind, JobProgress, JobResult, JobSpec};
 use crate::{err, CmdResult};
 use model::{CategoryClearResult, CategoryId, StorageClearResult, StorageUsage};
-use plan::{AiPort, Category, Folders};
+use plan::{Category, Folders};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -33,65 +32,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, Runtime};
 use walk::Budget;
 
-/// The AI engine as the storage view sees it.
-struct AiAdapter(Arc<AiCore>);
-
-impl AiAdapter {
-    fn state(&self) -> String {
-        serde_json::to_value(self.0.status().state)
-            .ok()
-            .and_then(|v| v.as_str().map(String::from))
-            .unwrap_or_default()
-    }
-}
-
-impl AiPort for AiAdapter {
-    fn engine_busy(&self) -> Option<String> {
-        if self.0.setup_running() {
-            return Some("a model is being set up; wait for it to finish".into());
-        }
-        matches!(self.state().as_str(), "ready" | "loading")
-            .then(|| "in use by the AI engine: remove it in Settings ▸ AI, which stops the engine first".into())
-    }
-
-    fn setup_busy(&self) -> Option<String> {
-        self.0
-            .setup_running()
-            .then(|| "a model is being set up; wait for it to finish".into())
-    }
-
-    fn custom_server(&self) -> Option<PathBuf> {
-        self.0.settings().llama_server_path.map(PathBuf::from)
-    }
-
-    fn models_dir(&self) -> PathBuf {
-        self.0.models_dir()
-    }
-
-    fn models(&self) -> Vec<(String, bool)> {
-        self.0.models().into_iter().map(|m| (m.file_name, m.active)).collect()
-    }
-
-    fn delete_runtime(&self, tag: &str, id: &str) -> Result<(), String> {
-        self.0.delete_runtime(tag, id).map_err(|e| e.message)
-    }
-
-    fn delete_model(&self, file_name: &str) -> Result<(), String> {
-        self.0.delete_model(file_name).map_err(|e| e.message)
-    }
-}
-
-fn ai_port<R: Runtime>(app: &AppHandle<R>) -> Option<AiAdapter> {
-    app.try_state::<AiState>().map(|s| AiAdapter(s.0.clone()))
-}
-
 /// When this process started (whole seconds, rounded down), so files of this run are recognised.
 fn session_start() -> Option<SystemTime> {
     crate::lifecycle::os_probe(std::process::id()).map(|secs| UNIX_EPOCH + Duration::from_secs(secs))
 }
 
 /// Resolves every folder of the categories (see the module docs).
-fn folders<'a, R: Runtime>(app: &AppHandle<R>, ai: Option<&'a dyn AiPort>) -> Folders<'a> {
+fn folders<R: Runtime>(app: &AppHandle<R>) -> Folders {
     let log = crate::app_dirs::log(app).ok();
     Folders {
         bundles: Some(crate::share::bundles_root()),
@@ -99,12 +46,10 @@ fn folders<'a, R: Runtime>(app: &AppHandle<R>, ai: Option<&'a dyn AiPort>) -> Fo
         data: crate::app_dirs::data(app).ok(),
         active_log: log.as_deref().map(crate::logging::active_log_file),
         log,
-        runtime_tag: debrief_ai::runtimes::RuntimeCatalog::embedded().tag,
         session_start: session_start(),
         main_instance: app.try_state::<crate::instance::SingleInstance>().is_some_and(|s| s.0),
         // Without the lifecycle (tests) assume the worst: keep the previous run's sessions.
         previous_crash: app.try_state::<crate::lifecycle::Lifecycle>().is_none_or(|l| l.previous_crash),
-        ai,
     }
 }
 
@@ -119,13 +64,7 @@ fn usage_of(categories: &[Category], budget: &mut Budget) -> StorageUsage {
 }
 
 /// Clears `ids` among `categories` in order; `progress` gets the fraction done after each item.
-fn clear_all(
-    categories: &[Category],
-    ids: &[CategoryId],
-    ai: Option<&dyn AiPort>,
-    cancel: &AtomicBool,
-    progress: &mut dyn FnMut(f32),
-) -> StorageClearResult {
+fn clear_all(categories: &[Category], ids: &[CategoryId], cancel: &AtomicBool, progress: &mut dyn FnMut(f32)) -> StorageClearResult {
     let chosen: Vec<&Category> = ids.iter().filter_map(|id| categories.iter().find(|c| c.id == *id)).collect();
     let total = chosen.iter().map(|c| c.items.len()).sum::<usize>().max(1);
     let mut done = 0usize;
@@ -135,7 +74,7 @@ fn clear_all(
             break;
         }
         let result = match chosen.iter().find(|c| c.id == *id) {
-            Some(c) => plan::clear(c, ai, cancel, &mut || {
+            Some(c) => plan::clear(c, cancel, &mut || {
                 done += 1;
                 progress(done as f32 / total as f32);
             }),
@@ -194,8 +133,7 @@ impl<R: Runtime> Drop for Job<R> {
 pub async fn storage_usage<R: Runtime>(app: AppHandle<R>) -> CmdResult<StorageUsage> {
     crate::error::lift(
         tauri::async_runtime::spawn_blocking(move || {
-            let ai = ai_port(&app);
-            let folders = folders(&app, ai.as_ref().map(|a| a as &dyn AiPort));
+            let folders = folders(&app);
             usage_of(&plan::categories(&folders), &mut Budget::standard())
         })
         .await
@@ -220,10 +158,8 @@ pub async fn storage_clear<R: Runtime>(app: AppHandle<R>, op: OpId, ids: Vec<Str
             spec,
             Controls::cancel(move || flag.store(true, Ordering::Relaxed)),
             move |ctx| {
-                let ai = ai_port(&job.app);
-                let port = ai.as_ref().map(|a| a as &dyn AiPort);
-                let folders = folders(&job.app, port);
-                let r = clear_all(&plan::categories(&folders), &ids, port, &job.cancel, &mut |f| {
+                let folders = folders(&job.app);
+                let r = clear_all(&plan::categories(&folders), &ids, &job.cancel, &mut |f| {
                     ctx.progress(JobProgress::fraction(f))
                 });
                 let freed = r.freed_bytes.to_string();
@@ -267,8 +203,7 @@ fn cleared_line(freed: u64, skipped: u64) -> String {
 pub async fn storage_reveal<R: Runtime>(app: AppHandle<R>, id: String) -> CmdResult<String> {
     let id = CategoryId::parse(&id).ok_or_else(|| "unknown storage category".to_string())?;
     let dir = tauri::async_runtime::spawn_blocking(move || {
-        let ai = ai_port(&app);
-        let folders = folders(&app, ai.as_ref().map(|a| a as &dyn AiPort));
+        let folders = folders(&app);
         plan::categories(&folders).into_iter().find(|c| c.id == id).and_then(|c| c.shown)
     })
     .await

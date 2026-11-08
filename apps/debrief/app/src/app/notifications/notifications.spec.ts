@@ -1,6 +1,5 @@
 import { TestBed } from '@angular/core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AiBackend } from '../ai/ai-backend';
 import { FakeContext } from '../analysis/test-setup';
 import { LifecycleBackend } from '../core/tools-backend';
 import { Logger } from '../core/logger';
@@ -15,7 +14,6 @@ import { UI_STATE_CONTRIBUTIONS } from '../lifecycle/ui-state';
 import { LiveAlerts } from '../live/live-alerts';
 import { AlertsStore } from '../live/alerts.store';
 import { UpdatesStore } from '../updates/updates.store';
-import { AiUpdatesStore } from '../ai/updates/ai-updates.store';
 import { DialogService } from '../ui/dialog.service';
 import { DockService } from '../dock/dock.service';
 import { FakeDock, MemoryLogger, settle } from '../../testing/helpers';
@@ -478,14 +476,7 @@ describe('NoticeActions', () => {
     const notices = new FakeNotices();
     const lifecycle = { pluginReset: vi.fn(async () => undefined) };
     const dialogs = { open: vi.fn() };
-    const ai = { reset: vi.fn(async () => ({})), setupBackground: vi.fn(async () => undefined) };
     const updates = { download: vi.fn(async () => undefined) };
-    const aiUpdates = {
-      apply: vi.fn(async (_key: string) => true),
-      later: vi.fn(async (_key: string) => true),
-      skip: vi.fn(async (_key: string) => true),
-      error: vi.fn(() => 'that update is no longer offered' as string | null),
-    };
     const alertEntries = [{ alert: { id: 'a1', title: 'Spike' } }];
     const alerts = { alerts: () => alertEntries };
     const live = { show: vi.fn() };
@@ -497,9 +488,7 @@ describe('NoticeActions', () => {
         { provide: COMMAND_CONTEXT, useValue: ctx },
         { provide: LifecycleBackend, useValue: lifecycle },
         { provide: DialogService, useValue: dialogs },
-        { provide: AiBackend, useValue: ai },
         { provide: UpdatesStore, useValue: updates },
-        { provide: AiUpdatesStore, useValue: aiUpdates },
         { provide: AlertsStore, useValue: alerts },
         { provide: LiveAlerts, useValue: live },
         { provide: Logger, useFactory: () => new MemoryLogger() },
@@ -507,7 +496,7 @@ describe('NoticeActions', () => {
     });
     const actions = TestBed.inject(NoticeActions);
     const run = (action: NoticeAction, n = notice({ id: 11 })) => actions.run(n, action);
-    return { actions, ctx, jobsBackend, notices, lifecycle, dialogs, ai, updates, aiUpdates, alertEntries, live, run, alerts };
+    return { actions, ctx, jobsBackend, notices, lifecycle, dialogs, updates, alertEntries, live, run, alerts };
   }
 
   it('shows a job result with its title and result type through the JobViewer', async () => {
@@ -570,41 +559,12 @@ describe('NoticeActions', () => {
     expect(ctx.last('showView')).toEqual(['jobs']);
   });
 
-  it('resets a plugin, resets the AI and installs an update with the existing features', async () => {
-    const { run, lifecycle, ai, updates } = setup();
+  it('resets a plugin and installs an update with the existing features', async () => {
+    const { run, lifecycle, updates } = setup();
     expect(await run({ type: 'resetPlugin', pluginId: 'acme' })).toBeNull();
     expect(lifecycle.pluginReset).toHaveBeenCalledWith('acme');
-    expect(await run({ type: 'resetAi' })).toBeNull();
-    expect(ai.reset).toHaveBeenCalled();
     expect(await run({ type: 'installUpdate' })).toBeNull();
     expect(updates.download).toHaveBeenCalled();
-  });
-
-  it('opens the assistant after a background set-up and sets it up again from the failure message', async () => {
-    const { run, ai, ctx } = setup();
-    expect(await run({ type: 'openAssistant' })).toBeNull();
-    expect(ctx.last('showView')).toEqual(['ai-chat']);
-    expect(await run({ type: 'setUpAssistant', modelId: 'qwen3.5-9b-q4km' })).toBeNull();
-    expect(ai.setupBackground).toHaveBeenCalledWith('qwen3.5-9b-q4km');
-    expect(ctx.last('showView')).toEqual(['jobs']);
-  });
-
-  it('answers an AI update question and dismisses the message', async () => {
-    const { run, aiUpdates, notices, ctx } = setup();
-    const key = 'runtime:vulkan@b11700';
-    expect(await run({ type: 'updateAi', key }, notice({ id: 31 }))).toBeNull();
-    expect(aiUpdates.apply).toHaveBeenCalledWith(key);
-    expect(ctx.last('showView')).toEqual(['jobs']);
-    expect(notices.dismiss).toHaveBeenCalledWith(31);
-    expect(await run({ type: 'laterAiUpdate', key }, notice({ id: 32 }))).toBeNull();
-    expect(aiUpdates.later).toHaveBeenCalledWith(key);
-    expect(await run({ type: 'skipAiUpdate', key }, notice({ id: 33 }))).toBeNull();
-    expect(aiUpdates.skip).toHaveBeenCalledWith(key);
-    expect(notices.dismiss).toHaveBeenCalledWith(33);
-    // A failed answer keeps the message and says why.
-    aiUpdates.apply.mockResolvedValueOnce(false);
-    expect(await run({ type: 'updateAi', key }, notice({ id: 34 }))).toBe('that update is no longer offered');
-    expect(notices.dismiss).not.toHaveBeenCalledWith(34);
   });
 
   it('opens the format wizard for a file', async () => {
@@ -643,13 +603,13 @@ describe('NoticeActions', () => {
   });
 
   it('returns a message when the action fails', async () => {
-    const { run, jobsBackend, lifecycle, ai } = setup();
+    const { run, jobsBackend, lifecycle } = setup();
     jobsBackend.retry.mockRejectedValueOnce(new Error('cannot retry'));
     expect(await run({ type: 'retryJob', jobId: 1 })).toBe('cannot retry');
     lifecycle.pluginReset.mockRejectedValueOnce('plain text');
     expect(await run({ type: 'resetPlugin', pluginId: 'x' })).toBe('plain text');
-    ai.reset.mockRejectedValueOnce({ odd: true });
-    expect(await run({ type: 'resetAi' })).toBe('That did not work.');
+    lifecycle.pluginReset.mockRejectedValueOnce({ odd: true });
+    expect(await run({ type: 'resetPlugin', pluginId: 'x' })).toBe('That did not work.');
   });
 
   it('labels every action', () => {
@@ -660,16 +620,10 @@ describe('NoticeActions', () => {
       [{ type: 'resetPlugin', pluginId: 'p' }, 'Reset plugin'],
       [{ type: 'setUpFormat', path: 'p' }, 'Set up format'],
       [{ type: 'fixTimestamps', path: 'p', format: null }, 'Fix timestamps'],
-      [{ type: 'resetAi' }, 'Reset AI'],
-      [{ type: 'openAssistant' }, 'Open the assistant'],
-      [{ type: 'setUpAssistant', modelId: 'm' }, 'Retry'],
       [{ type: 'installUpdate' }, 'Install update'],
       [{ type: 'showAlert', alertId: 'a' }, 'Show'],
       [{ type: 'showJobs' }, 'Show in Jobs'],
       [{ type: 'showInFolder', jobId: 1 }, 'Show in folder'],
-      [{ type: 'updateAi', key: 'k' }, 'Update'],
-      [{ type: 'laterAiUpdate', key: 'k' }, 'Later'],
-      [{ type: 'skipAiUpdate', key: 'k' }, 'Skip this version'],
     ];
     for (const [a, label] of labels) expect(actionLabel(a)).toBe(label);
   });

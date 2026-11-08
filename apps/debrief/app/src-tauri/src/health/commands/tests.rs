@@ -74,18 +74,25 @@ fn a_degraded_service_is_a_warning_without_a_button_when_nothing_repairs_it() {
 }
 
 #[test]
-fn the_ai_states_map_to_health() {
-    assert_eq!(ai_health(EngineStateDto::Disabled), AiHealth::Switched);
-    assert_eq!(ai_health(EngineStateDto::Failed), AiHealth::LoadFailed);
-    for ok in [
-        EngineStateDto::Ready,
-        EngineStateDto::Idle,
-        EngineStateDto::Loading,
-        EngineStateDto::NoModel,
-        EngineStateDto::Unavailable,
-    ] {
-        assert_eq!(ai_health(ok), AiHealth::Fine);
-    }
+fn pitwall_problems_map_to_health() {
+    let status = |problem: Option<&str>| crate::ai::AiStatus {
+        available: true,
+        state: crate::ai::EngineStateDto::NoModel,
+        reason: None,
+        model: None,
+        safe_mode: false,
+        vision: false,
+        pitwall: debrief_ai::engine::pitwall::PitwallView {
+            problem: problem.map(String::from),
+            ..Default::default()
+        },
+    };
+    assert_eq!(
+        ai_health_of(&status(None)),
+        AiHealth::Fine,
+        "Pitwall absent is not an outage: AI is optional"
+    );
+    assert_eq!(ai_health_of(&status(Some("Pitwall stopped."))), AiHealth::EngineLost);
 }
 
 #[test]
@@ -109,8 +116,8 @@ fn an_error_names_a_service_outage_only_while_that_service_is_down() {
     let h = Health::new(Box::new(|_, _| {}));
     hub::use_in_this_thread(h.clone());
     let ai = || CmdError::from(debrief_ai::AiError::Engine("the worker exited".into()));
-    assert_eq!(ai().cause, None, "the AI worker works: this error is the request's own");
-    h.ai(AiHealth::Switched, Some("crashed"));
+    assert_eq!(ai().cause, None, "Pitwall answers: this error is the request's own");
+    h.ai(AiHealth::EngineLost, Some("stopped"));
     assert_eq!(ai().cause, Some(crate::error::ServiceCause::Ai));
     assert_eq!(serde_json::to_value(ai()).unwrap()["cause"], "health:ai");
     // Another service's state does not matter, and codes that no service explains never carry a cause.

@@ -1,7 +1,6 @@
 import { PathText } from '../shared/path-text';
 import { Tabs } from '../shared/tabs';
 import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, untracked } from '@angular/core';
-import { AiBackend } from '../ai/ai-backend';
 import { formatDuration } from '../core/format';
 import { formatBytes, formatCount, formatEta, formatRate, TransferMeter } from '../shared/format/units';
 import { TransferSpeed } from '../shared/format/transfer-speed';
@@ -34,9 +33,6 @@ import { kindLabel, linkLabel, phaseText, queuedLabel, stateLabel } from './jobs
       <div class="paused" role="alert" data-testid="jobs-paused">
         <debrief-icon name="alert" [size]="14" />
         <span class="grow">{{ pausedText(p.kind, p.reason) }}</span>
-        @if (p.kind === 'ai') {
-          <button type="button" class="btn small" (click)="resetAi()" i18n="@@jobs.panel.resetAi">Reset AI</button>
-        }
       </div>
     }
     @if (store.error(); as e) {
@@ -152,7 +148,6 @@ import { kindLabel, linkLabel, phaseText, queuedLabel, stateLabel } from './jobs
 export class JobsPanel {
   protected readonly store = inject(JobsStore);
   private readonly viewer = inject(JobViewer);
-  private readonly ai = inject(AiBackend);
   private readonly ctx = inject(COMMAND_CONTEXT);
   protected readonly viewItems = computed(() => this.views.map((v) => ({ id: v.id, label: v.label, count: this.store.viewCounts()[v.id] })));
   protected readonly views: readonly { id: JobsView; label: string }[] = [
@@ -281,15 +276,6 @@ export class JobsPanel {
 
   protected async view(j: JobInfo): Promise<void> {
     this.note.set(await this.viewer.view(j));
-  }
-
-  protected async resetAi(): Promise<void> {
-    try {
-      await this.ai.reset();
-      this.note.set(null);
-    } catch (e) {
-      this.note.set(e instanceof Error ? e.message : String(e));
-    }
   }
 
   protected async openSource(j: JobInfo): Promise<void> {

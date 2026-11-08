@@ -77,6 +77,6 @@ describe('MockStorageBackend (stores)', () => {
     await expect(b.setPolicy({ autoCleanDays: 1 })).rejects.toContain('save');
     expect((await b.stores()).folders).toHaveLength(5);
     // The category calls keep their own switch.
-    expect((await b.usage()).categories).toHaveLength(8);
+    expect((await b.usage()).categories).toHaveLength(5);
   });
 });

@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ChatEventEnvelope, SetupEvent } from '../../ai/ai.types';
+import { ChatEventEnvelope } from '../../ai/ai.types';
 import { AI_FAILABLE, MockAiBackend, mockAiOptionsFromSearch } from './mock-ai-backend';
-import { demoRecordIds, MOCK_CATALOG } from './mock-ai-data';
-import { at } from '../../../testing/must';
+import { demoRecordIds } from './mock-ai-data';
 
 const code = (p: Promise<unknown>) =>
   p.then(
@@ -29,41 +28,12 @@ describe('mockAiOptionsFromSearch', () => {
       mockAiOptionsFromSearch(
         '?mockAi=setup&mockAiStepMs=5&mockAiFail=chat,bogus,setup',
       ),
-    ).toEqual({ mode: 'setup', stepMs: 5, fail: ['chat', 'setup'] });
+    ).toEqual({ mode: 'setup', stepMs: 5, fail: ['chat'] });
     expect(mockAiOptionsFromSearch('?mockAi=weird&mockAiStepMs=x')).toEqual({});
-    expect(mockAiOptionsFromSearch('?mockAiRuntime=none&mockAiFail=runtime')).toEqual({
-      runtime: 'none',
-      fail: ['runtime'],
-    });
-    expect(mockAiOptionsFromSearch('?mockAiRuntime=broken').runtime).toBe('broken');
-    expect(mockAiOptionsFromSearch('?mockAiRuntime=odd')).toEqual({});
     expect(AI_FAILABLE).toContain('propose');
-    expect(mockAiOptionsFromSearch('?mockAiNet=tls').net).toBe('tls');
-    expect(mockAiOptionsFromSearch('?mockAiNet=proxyAuth').net).toBe('proxyAuth');
-    expect(mockAiOptionsFromSearch('?mockAiNet=evil')).toEqual({});
-  });
-});
-
-describe('MockAiBackend runtimes', () => {
-  it('validates deletes and choices like the engine', async () => {
-    const b = new MockAiBackend({ stepMs: 0 });
-    expect(await code(b.runtimeDelete('..', 'cpu'))).toBe('invalid');
-    expect(await code(b.runtimeDelete('b11669', 'cuda-13'))).toBe('notFound');
-    expect(await code(b.runtimeChoose('rocm'))).toBe('notFound');
-    expect(await code(b.runtimeInstall('metal'))).toBe('notFound');
-    expect(await b.runtimeCancel()).toBe(false);
-    await b.runtimeInstall('rocm');
-    expect(await code(b.runtimeInstall('cpu'))).toBe('busy');
-    expect(await code(b.runtimeDelete('b11669', 'rocm'))).toBe('busy');
-    const done = new Promise<void>((r) => void b.onRuntime((e) => e.stage === 'ready' && r()));
-    await done;
-    const rocm = (await b.runtimes()).builds.find((x) => x.id === 'rocm')!;
-    expect(rocm).toMatchObject({ installed: true, usable: false });
-    await b.runtimeChoose('rocm');
-    expect((await b.runtimes()).active).toBe('vulkan');
-    await b.runtimeDelete('b11669', 'vulkan');
-    expect((await b.status()).backend).toBeNull();
-    expect((await b.runtimes()).active).toBeNull();
+    expect(mockAiOptionsFromSearch('?mockAiVision=none').vision).toBe('none');
+    expect(mockAiOptionsFromSearch('?mockAiVision=missing')).toEqual({});
+    expect(mockAiOptionsFromSearch('?mockPitwall=running').pitwall).toBe('running');
   });
 });
 
@@ -72,13 +42,6 @@ describe('MockAiBackend', () => {
     const b = new MockAiBackend({ mode: 'off', stepMs: 0 });
     expect((await b.status()).state).toBe('unavailable');
     const calls = [
-      () => b.hardware(),
-      () => b.recommend(),
-      () => b.refineFit(),
-      () => b.catalog(),
-      () => b.setupPlan(),
-      () => b.setupRun('x'),
-      () => b.models(),
       () => b.chatNew(),
       () => b.chatSessions(),
       () => b.suggestedPrompts(),
@@ -87,64 +50,25 @@ describe('MockAiBackend', () => {
     for (const call of calls) expect(await code(call())).toBe('unavailable');
   });
 
-  it('sets up a model with progress, refuses a second set-up and can be cancelled or fail', async () => {
-    const b = new MockAiBackend({ mode: 'setup', stepMs: 0 });
-    const stages: SetupEvent[] = [];
+  it('serves a model once Pitwall is paired, and says so in its status', async () => {
+    const b = new MockAiBackend({ mode: 'setup', stepMs: 0, pitwall: 'running' });
     const statuses: string[] = [];
-    void b.onSetup((e) => stages.push(e));
     void b.onStatus((s) => statuses.push(s.state));
-    expect((await b.status()).state).toBe('noModel');
-    expect((await b.hardware()).gpus[0]?.vramGb).toBe(8);
-    expect((await b.recommend()).best?.model.id).toBe(MOCK_CATALOG[0]?.id);
-    expect((await b.catalog()).find((r) => r.model.id === 'qwen3.5-32b-q4km')?.assessment.fit).toBe(
-      'tooLarge',
-    );
-    const plan = await b.setupPlan();
-    expect([plan.alreadyInstalled, plan.downloadBytes > 0]).toEqual([false, true]);
-    expect((await b.setupPlan('llama3.2-3b-q4km')).chosen?.model.id).toBe('llama3.2-3b-q4km');
-    expect(await code(b.setupPlan('nope'))).toBe('notFound');
-    expect(await code(b.setupRun('nope'))).toBe('notFound');
-    await b.setupRun('qwen3.5-4b-q4km');
-    expect(await code(b.setupRun('qwen3.5-4b-q4km'))).toBe('busy');
-    expect(await code(b.activateModel('x.gguf'))).toBe('notFound');
-    await vi.waitFor(() => expect(stages.at(-1)?.stage).toBe('ready'));
-    expect(stages.map((s) => s.stage)).toContain('verifying');
-    expect(statuses.at(-1)).toBe('ready');
-    expect((await b.setupPlan('qwen3.5-4b-q4km')).alreadyInstalled).toBe(true);
-    // Cancel.
-    stages.length = 0;
-    expect(await b.setupCancel()).toBe(false);
-    await b.setupRun('qwen3.5-9b-q4km');
-    expect(await code(b.activateModel(at(MOCK_CATALOG, 1).file))).toBe('busy');
-    expect(await b.setupCancel()).toBe(true);
-    await vi.waitFor(() => expect(stages.at(-1)?.stage).toBe('cancelled'));
-    // Re-activating an installed model skips the download.
-    stages.length = 0;
-    await b.activateModel(at(MOCK_CATALOG, 1).file);
-    await vi.waitFor(() => expect(stages.at(-1)?.stage).toBe('ready'));
-    expect(stages.some((s) => s.stage === 'downloading')).toBe(false);
-    const failing = new MockAiBackend({ mode: 'setup', stepMs: 0, fail: ['setup'] });
-    const f: SetupEvent[] = [];
-    void failing.onSetup((e) => f.push(e));
-    await failing.setupRun('qwen3.5-4b-q4km');
-    await vi.waitFor(() => expect(f.at(-1)?.stage).toBe('failed'));
-    expect(f.at(-1)).toMatchObject({ code: 'network' });
+    const before = await b.status();
+    expect([before.state, before.model, before.vision]).toEqual(['noModel', null, false]);
+    expect(await code(b.chatNew())).toBe(null);
+    expect(await code(b.nlToQuery('q'))).toBe('noModel');
+    await b.pitwallConnect();
+    await vi.waitFor(() => expect(statuses.at(-1)).toBe('ready'));
+    const after = await b.status();
+    expect([after.state, after.model, after.vision]).toEqual(['ready', 'qwen3-8b-q4km', true]);
+    expect((await new MockAiBackend({ stepMs: 0, vision: 'none' }).status()).vision).toBe(false);
+    const failing = new MockAiBackend({ mode: 'setup', stepMs: 0, pitwall: 'absent' });
+    expect((await failing.pitwallConnect()).problem).toBe('Pitwall is not running.');
   });
 
-  it('manages installed models and opens only https links', async () => {
+  it('opens only https links', async () => {
     const b = new MockAiBackend({ stepMs: 0 });
-    expect((await b.models())[0]?.active).toBe(true);
-    expect(await code(b.addLocalModel('/x.bin'))).toBe('invalid');
-    const added = await b.addLocalModel('C:\\models\\My Model.gguf');
-    expect(added.fileName).toBe('My_Model.gguf');
-    await b.addLocalModel('/again/My Model.gguf');
-    expect((await b.models()).length).toBe(2);
-    await b.deleteModel('My_Model.gguf');
-    await b.deleteModel(at(MOCK_CATALOG, 1).file);
-    expect((await b.status()).state).toBe('noModel');
-    expect(await code(b.deleteModel('none.gguf'))).toBe('notFound');
-    expect((await b.reset()).state).toBe('noModel');
-    expect(await code(new MockAiBackend({ stepMs: 0, fail: ['models'] }).models())).toBe('engine');
     expect(await code(b.openLink('http://x'))).toBe('refused');
     await b.openLink('https://x');
     expect(b.opened).toEqual(['https://x']);
@@ -277,43 +201,5 @@ describe('MockAiBackend', () => {
     expect((await fresh.chatRestore('junk')).warning).toContain('damaged');
     expect((await fresh.chatRestore({ version: 2, sessions: [] })).warning).toContain('newer');
     expect((await fresh.suggestedPrompts()).length).toBeGreaterThan(2);
-  });
-});
-
-describe('MockAiBackend manual downloads', () => {
-  it('fails downloads like a corporate network and names the files to get by hand', async () => {
-    const b = new MockAiBackend({ stepMs: 0, mode: 'setup', net: 'tls' });
-    const events: { stage: string; code?: string; message?: string }[] = [];
-    void b.onSetup((e) => events.push(e as never));
-    await b.setupRun('qwen3.5-4b-q4km');
-    await vi.waitFor(() => expect(events.at(-1)?.stage).toBe('failed'));
-    expect(events.at(-1)).toMatchObject({ code: 'tls' });
-    expect(events.at(-1)!.message).toContain('Zscaler');
-    const m = await b.manualDownload('model', 'qwen3.5-4b-q4km');
-    expect(m.files[0]!.url).toBe('https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf?download=true');
-    expect(m.folder).toContain('models');
-    const r = await b.manualDownload('runtime', 'cuda-12');
-    expect(r.files.map((f) => f.name)).toEqual(['llama-b11669-bin-win-cuda-12-x64.zip', 'cudart-llama-bin-win-cuda-12-x64.zip']);
-    expect(r.files.every((f) => /^[0-9a-f]{64}$/.test(f.sha256!))).toBe(true);
-    expect(r.name).toBe('CUDA 12 (NVIDIA)');
-    expect(await code(b.manualDownload('model', 'nope'))).toBe('notFound');
-    expect(await code(b.manualDownload('runtime', 'nope'))).toBe('notFound');
-    await b.openManualDownload('runtime', 'cuda-12', 1);
-    expect(b.opened.at(-1)).toContain('cudart');
-    expect(await code(b.openManualDownload('model', 'qwen3.5-4b-q4km', 5))).toBe('invalid');
-    expect(await code(b.runtimeAddArchives('cuda-12', ['/d/llama-b11669-bin-win-cuda-12-x64.zip']))).toBe('invalid');
-    // The catalog model downloaded by hand is recognised.
-    expect((await b.addLocalModel('/d/Qwen3.5-4B-Q4_K_M.gguf')).catalogId).toBe('qwen3.5-4b-q4km');
-  });
-
-  it('classifies every simulated network failure', async () => {
-    for (const net of ['proxyAuth', 'proxy', 'offline', 'timeout', 'httpStatus'] as const) {
-      const b = new MockAiBackend({ stepMs: 0, mode: 'setup', runtime: 'none', net });
-      const events: { stage: string; code?: string }[] = [];
-      void b.onRuntime((e) => events.push(e as never));
-      await b.runtimeInstall('cpu');
-      await vi.waitFor(() => expect(events.at(-1)?.stage).toBe('failed'));
-      expect(events.at(-1)!.code).toBe(net);
-    }
   });
 });

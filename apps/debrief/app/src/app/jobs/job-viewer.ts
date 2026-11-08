@@ -83,8 +83,6 @@ export class JobViewer {
       case 'workspace':
         ctx.showView(PANEL.events);
         return;
-      case 'model':
-        return ai.openModels();
       case 'folderSurvey': {
         const [{ FolderSetupLauncher }, { FolderSetupStore }] = await Promise.all([import('../ai/folder-setup/provide-folder-setup'), import('../ai/folder-setup/folder-setup.store')]);
         this.injector.get(FolderSetupStore).showSurvey(result.outcome as SurveyOutcome);

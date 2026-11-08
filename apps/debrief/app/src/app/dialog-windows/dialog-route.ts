@@ -5,7 +5,7 @@ import { InjectionToken } from '@angular/core';
  * shell in Rust) and boots into the dialog shell.
  */
 export interface DialogRoute {
-  /** Id of the dialog (`ai-setup`). */
+  /** Id of the dialog (`ai-query`). */
   id: string;
   /** Label of the Debrief window the dialog belongs to. */
   host: string;

@@ -239,8 +239,8 @@ pub async fn video_frame_image(win: CurrentWindow, frame: FrameRef) -> CmdResult
 /// Puts a frame into the window's image cache as a clean image whose time evidence is the frame's aligned moment, so
 /// the existing image use cases (Explain with AI, Find related logs) work on it unchanged.
 #[tauri::command]
-pub async fn video_frame_to_image<R: Runtime>(app: AppHandle<R>, win: CurrentWindow, frame: FrameRef) -> CmdResult<ImageDto> {
-    let target = crate::ai::commands::core(&app)?.image_target_pixels();
+pub async fn video_frame_to_image(win: CurrentWindow, frame: FrameRef) -> CmdResult<ImageDto> {
+    let target = debrief_ai::vision::image::DEFAULT_TARGET_PIXELS;
     let w = win.arc().clone();
     crate::sync::blocking("opening the frame", move || {
         let folder = folder_of(&w)?;

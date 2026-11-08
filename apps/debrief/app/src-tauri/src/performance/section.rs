@@ -61,14 +61,6 @@ pub fn schema() -> SettingsSection {
                 .needs_restart(),
         )
         .field(
-            SettingField::new("aiWorkerMemoryMb", "AI worker memory cap", mb(0, 16_384), d.ai_worker_memory_mb)
-                .describe(
-                    "The cap of the AI's helper process. The model itself runs in a separate process and is not counted. \
-                     0 means no cap.",
-                )
-                .needs_restart(),
-        )
-        .field(
             SettingField::new("returnMemoryAtOnce", "Give freed memory back at once", FieldKind::Bool, d.return_memory_at_once)
                 .describe(
                     "The database worker hands memory it no longer needs straight back to the system. Uses less memory \

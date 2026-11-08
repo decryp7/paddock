@@ -44,7 +44,7 @@ test('the palette ranks "AI" matches first, without loose ones or duplicates', a
   const options = page.locator('debrief-command-palette').getByRole('option');
   await expect(options.first()).toBeVisible();
   const texts = (await options.allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim());
-  const setUp = texts.findIndex((t) => t.includes('Set up AI assistant'));
+  const setUp = texts.findIndex((t) => t.includes('Connect to Pitwall'));
   expect(setUp).toBeGreaterThanOrEqual(0);
   expect(setUp).toBeLessThanOrEqual(2);
   expect(texts.some((t) => /Open an image/.test(t) && !/AI/.test(t))).toBe(false);

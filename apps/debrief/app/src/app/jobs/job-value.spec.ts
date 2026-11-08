@@ -16,9 +16,8 @@ describe('jobValue', () => {
     expect(await jobValue(waiting(outcome({ result: { type: 'file', path: '/a' } })), 1)).toBeUndefined();
   });
 
-  it('gives back the detail of the workspace a job opened or the model it added', async () => {
+  it('gives back the detail of the workspace a job opened', async () => {
     expect(await jobValue(waiting(outcome({ result: { type: 'workspace', detail: { total: 3 } } })), 1)).toEqual({ total: 3 });
-    expect(await jobValue(waiting(outcome({ result: { type: 'model', fileName: 'm.gguf', detail: { fileName: 'm.gguf' } } })), 1)).toEqual({ fileName: 'm.gguf' });
     expect(await jobValue(waiting(outcome({ result: { type: 'workspace' } })), 1)).toBeUndefined();
   });
 

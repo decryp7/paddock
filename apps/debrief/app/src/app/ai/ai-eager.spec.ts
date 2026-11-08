@@ -20,9 +20,9 @@ import { AiLauncher } from './ai-launcher';
 import * as lazy from './ai-lazy';
 import { AiStatusStore } from './ai-status.store';
 import { AiStatus, ChatHistoryRecord } from './ai.types';
+import { SettingsDialogService } from '../settings/settings-dialog';
 import { NotificationsStore } from '../notifications/notifications.store';
-import { Injector } from '@angular/core';
-import { aiCommands, aiRecordMenu, aiViews, offerSetupOnFirstRun, provideAi, rangeToSummarize } from './provide-ai';
+import { aiCommands, aiRecordMenu, aiViews, provideAi, rangeToSummarize } from './provide-ai';
 import { at } from '../../testing/must';
 
 function setup(options: MockAiOptions = {}, extra: unknown[] = []) {
@@ -43,15 +43,12 @@ const record = (id: number, message = `m${id}`) => ({ id, message }) as RecordVi
 describe('AiStatusStore', () => {
   afterEach(() => TestBed.resetTestingModule());
 
-  it('reads the status and follows status and set-up events', async () => {
-    const { backend, status } = setup({ mode: 'setup' });
+  it('reads the status and follows status events', async () => {
+    const { backend, status } = setup({ mode: 'setup', pitwall: 'running' });
     await settle();
-    expect([status.available(), status.hasModel(), status.needsSetup(), status.setupRunning()]).toEqual([true, false, true, false]);
-    status.noteSetup({ stage: 'downloading', bytes: 1, total: 2, bytesPerSec: 1, etaSecs: 1 });
-    expect(status.setupRunning()).toBe(true);
-    await backend.setupRun('qwen3.5-4b-q4km');
+    expect([status.available(), status.hasModel(), status.needsSetup()]).toEqual([true, false, true]);
+    await backend.pitwallConnect();
     await vi.waitFor(() => expect(status.status()?.state).toBe('ready'));
-    expect(status.setup()?.stage).toBe('ready');
     expect(status.hasModel()).toBe(true);
   });
 
@@ -60,14 +57,13 @@ describe('AiStatusStore', () => {
     vi.spyOn(backend, 'status').mockRejectedValue(new AiError('unavailable', 'not in this build'));
     expect(await status.refresh()).toBeNull();
     expect([status.status(), status.error(), status.available()]).toEqual([null, 'not in this build', false]);
-    status.setStatus({ available: true, state: 'idle' } as AiStatus);
+    status.setStatus({ available: true, state: 'ready' } as AiStatus);
     expect([status.error(), status.hasModel()]).toEqual([null, true]);
   });
 
   it('survives backends whose event subscriptions fail', async () => {
     const backend = new MockAiBackend({ stepMs: 0 });
     vi.spyOn(backend, 'onStatus').mockRejectedValue(new Error('x'));
-    vi.spyOn(backend, 'onSetup').mockRejectedValue(new Error('x'));
     TestBed.configureTestingModule({ providers: [{ provide: AiBackend, useValue: backend }, { provide: Logger, useClass: MemoryLogger }] });
     const s = TestBed.inject(AiStatusStore);
     await settle();
@@ -116,17 +112,11 @@ describe('AiLauncher', () => {
 
   it('opens each dialog with its inputs', async () => {
     const { l, open } = await launcher();
-    await l.openSetup();
-    await l.openSetup('m1');
-    await l.openModels();
     await l.askQuery('errors');
     await l.propose('markers', { recordId: 3 }, 'timeouts');
     await l.propose('pipeline', { recordId: null }, '', { chooseKind: true });
     const calls = open.mock.calls.map(([c, o]) => [c, o.title, o.inputs]);
     expect(calls).toEqual([
-      [lazy.AiSetupWizard, 'Set up the AI assistant', {}],
-      [lazy.AiSetupWizard, 'Set up the AI assistant', { modelId: 'm1' }],
-      [lazy.AiModelManager, 'AI models', undefined],
       [lazy.AiQueryDialog, 'Ask AI to write a query', { initial: 'errors' }],
       [lazy.AiProposeDialog, 'Propose markers', { kind: 'markers', source: { recordId: 3 }, initialGoal: 'timeouts', chooseKind: false }],
       [lazy.AiProposeDialog, 'Propose profile changes', { kind: 'pipeline', source: { recordId: null }, initialGoal: '', chooseKind: true }],
@@ -170,16 +160,18 @@ describe('AiLauncher', () => {
     expect(await q).toBeNull();
   });
 
-  it('opens the set-up wizard instead of a use case when there is no model', async () => {
+  it('opens Settings ▸ AI instead of a use case when Pitwall serves no model', async () => {
     const { l, open } = await launcher({ mode: 'setup' });
+    const settings = vi.spyOn(TestBed.inject(SettingsDialogService), 'open').mockResolvedValue();
     await l.explainEvent(1);
     await l.summarize(1, 2);
     await l.rootCauses();
     await l.askQuery();
     expect(await l.suggestRegex(['a'])).toBeNull();
     await l.propose('extractors', {});
-    expect(open.mock.calls.every(([c]) => (c as unknown) === lazy.AiSetupWizard)).toBe(true);
-    expect(open).toHaveBeenCalledTimes(6);
+    expect(settings.mock.calls.every(([section]) => section === 'ai')).toBe(true);
+    expect(settings).toHaveBeenCalledTimes(6);
+    expect(open).not.toHaveBeenCalled();
   });
 });
 
@@ -306,7 +298,6 @@ describe('provide-ai', () => {
     const launcher = TestBed.inject(AiLauncher);
     const spies = {
       openSetup: vi.spyOn(launcher, 'openSetup').mockResolvedValue(),
-      openModels: vi.spyOn(launcher, 'openModels').mockResolvedValue(),
       explainEvent: vi.spyOn(launcher, 'explainEvent').mockResolvedValue(),
       summarize: vi.spyOn(launcher, 'summarize').mockResolvedValue(),
       askQuery: vi.spyOn(launcher, 'askQuery').mockResolvedValue(),
@@ -326,7 +317,6 @@ describe('provide-ai', () => {
     byId('ai.chat.show').run(c);
     expect(c.showView).toHaveBeenCalledWith('ai-chat');
     byId('ai.setup').run(c);
-    byId('ai.models').run(c);
     byId('ai.query').run(c);
     byId('ai.rootCauses').run(c);
     // Explain and propose need a selected event; without one, running them does nothing.
@@ -352,7 +342,6 @@ describe('provide-ai', () => {
     byId('ai.summarize').run(c);
     expect(spies.summarize).toHaveBeenCalledTimes(1);
     expect(spies.openSetup).toHaveBeenCalled();
-    expect(spies.openModels).toHaveBeenCalled();
     expect(spies.askQuery).toHaveBeenCalled();
     expect(spies.rootCauses).toHaveBeenCalled();
     expect(spies.explainEvent).toHaveBeenCalledWith(5);
@@ -383,57 +372,6 @@ describe('provide-ai', () => {
     at(menu(record(1), { records: [record(2, 'two'), record(3, 'three')] }), 1).run();
     expect(regex).toHaveBeenLastCalledWith(['two', 'three'], { highlight: true });
     expect(aiViews(status)[0]?.enabled!()).toBe(true);
-  });
-});
-
-describe('offerSetupOnFirstRun', () => {
-  const KEY = 'debrief.ai.setupOffered.v1';
-  afterEach(() => {
-    TestBed.resetTestingModule();
-    localStorage.removeItem(KEY);
-    vi.restoreAllMocks();
-  });
-
-  async function run(options: MockAiOptions, desktop: boolean) {
-    const { status } = setup(options);
-    const launcher = TestBed.inject(AiLauncher);
-    const open = vi.spyOn(launcher, 'openSetup').mockResolvedValue();
-    offerSetupOnFirstRun(status, launcher, TestBed.inject(Injector), desktop);
-    await settle();
-    TestBed.tick();
-    return open;
-  }
-
-  it('does nothing in the browser build', async () => {
-    expect(await run({ mode: 'setup' }, false)).not.toHaveBeenCalled();
-    expect(localStorage.getItem(KEY)).toBeNull();
-  });
-
-  it('offers the set-up once on the desktop when there is no model', async () => {
-    expect(await run({ mode: 'setup' }, true)).toHaveBeenCalledTimes(1);
-    expect(localStorage.getItem(KEY)).toBe('1');
-    TestBed.resetTestingModule();
-    expect(await run({ mode: 'setup' }, true)).not.toHaveBeenCalled();
-  });
-
-  it('does not offer when a model is ready or AI is off', async () => {
-    expect(await run({ mode: 'ready' }, true)).not.toHaveBeenCalled();
-    TestBed.resetTestingModule();
-    expect(await run({ mode: 'off' }, true)).not.toHaveBeenCalled();
-    expect(localStorage.getItem(KEY)).toBeNull();
-  });
-
-  it('tolerates storage that throws', async () => {
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-      throw new Error('blocked');
-    });
-    expect(await run({ mode: 'setup' }, true)).not.toHaveBeenCalled();
-    vi.restoreAllMocks();
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('full');
-    });
-    TestBed.resetTestingModule();
-    expect(await run({ mode: 'setup' }, true)).toHaveBeenCalledTimes(1);
   });
 });
 

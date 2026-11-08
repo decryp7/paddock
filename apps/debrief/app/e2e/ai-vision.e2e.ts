@@ -92,22 +92,16 @@ test.describe('AI vision', () => {
     await expect(page.getByRole('dialog', { name: /^Adjust clock/ })).toBeVisible();
   });
 
-  test('a text-only model offers its image support and never downloads by itself', async ({ page }, testInfo) => {
-    await openAiApp(page, 'mockAiVision=missing');
+  test('a text-only model says so and nothing is attached or downloaded', async ({ page }, testInfo) => {
+    await openAiApp(page, 'mockAiVision=none');
     const chat = await openChat(page);
     await chat.getByRole('button', { name: 'Attach an image' }).click();
-    const offer = chat.getByTestId('ai-no-vision');
-    await expect(offer).toContainText('reads text only');
-    await expect(offer.getByRole('button', { name: 'Add image support (640 MB)' })).toBeVisible();
-    await expect(offer.getByRole('button', { name: 'Choose a model that reads images…' })).toBeVisible();
+    const note = chat.getByTestId('ai-no-vision');
+    await expect(note).toContainText('The model Pitwall serves reads text only');
+    await expect(note.getByRole('button', { name: /Add image support/ })).toHaveCount(0);
     await expect(chat.getByTestId('ai-attachment')).toHaveCount(0);
     await expectNoSeriousViolations(page, testInfo, 'ai-vision-no-vision', 'debrief-ai-chat-panel');
-    // Nothing was downloaded: no projector job ran.
-    await expect(offer.getByTestId('ai-projector-running')).toHaveCount(0);
-    await expect(page.getByTestId('notification').filter({ hasText: 'image support' })).toHaveCount(0);
-
-    await offer.getByRole('button', { name: 'Choose a model that reads images…' }).click();
-    const models = page.getByRole('dialog', { name: 'AI models' });
-    await expect(models.getByTestId('ai-installed-Qwen3.5-4B-Q4_K_M.gguf')).toContainText('Text only');
+    await note.getByRole('button', { name: 'Dismiss' }).click();
+    await expect(note).toHaveCount(0);
   });
 });

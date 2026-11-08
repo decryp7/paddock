@@ -1,13 +1,11 @@
 //! Images for the AI (ADR 0025): opening one (a file the user chose, or pasted or dropped bytes), decoding it in
-//! Rust within limits into a clean copy kept in the window's small image cache, image support for a model (its
-//! projector), and the image use cases (explain, find related logs) that run as AI jobs.
+//! Rust within limits into a clean copy kept in the window's small image cache, and the image use cases (explain, find related logs) that run as AI jobs.
 //!
 //! The webview never decodes the user's image for the AI path: it gets the clean copy as a `data:` URL.
 
 use super::commands::{core, WindowStore};
-use super::core::ModelDto;
 use super::error::{AiCmdError, AiResult};
-use crate::jobs::{self, Controls, Done, JobCtx, JobKind, JobLink, JobProgress, JobResult, JobSpec};
+use crate::jobs::{JobCtx, JobLink, JobProgress};
 use crate::windows::{CurrentWindow, WindowState};
 use debrief_ai::assistant::{Assistant, Narrative};
 use debrief_ai::llm::LlmProvider;
@@ -69,10 +67,10 @@ impl ImageCache {
 
     /// The images `ids`, or which one is gone.
     pub fn get_all(&self, ids: &[u32]) -> Ai<Vec<Arc<OpenImage>>> {
-        if ids.len() > debrief_ai::worker::protocol::MAX_IMAGES {
+        if ids.len() > debrief_ai::vision::MAX_IMAGES_PER_REQUEST {
             return Err(AiCmdError::invalid(format!(
                 "attach at most {} images to one question",
-                debrief_ai::worker::protocol::MAX_IMAGES
+                debrief_ai::vision::MAX_IMAGES_PER_REQUEST
             )));
         }
         ids.iter().map(|id| self.get(*id).ok_or_else(gone)).collect()
@@ -171,11 +169,11 @@ pub async fn ai_image_open<R: Runtime>(
     grants: crate::paths::WindowGrants,
     path: String,
 ) -> Ai<ImageDto> {
-    let core = core(&app)?;
+    core(&app)?;
     let w = win.arc().clone();
     let granted = grants.read_or_listed(&path, SourceFormat::EXTENSIONS, |raw| listed_in_workspace(&w, raw))?;
     let file = granted.path().to_path_buf();
-    let target = core.image_target_pixels();
+    let target = debrief_ai::vision::image::DEFAULT_TARGET_PIXELS;
     crate::sync::blocking("opening the image", move || {
         let meta = std::fs::metadata(&file).map_err(|e| AiCmdError::not_found(format!("cannot read {}: {e}", file.display())))?;
         let limit = ImageLimits::default().max_file_bytes as u64;
@@ -207,7 +205,7 @@ pub async fn ai_image_open<R: Runtime>(
 #[tauri::command]
 pub async fn ai_image_paste<R: Runtime>(app: AppHandle<R>, win: CurrentWindow, data: String, name: Option<String>) -> Ai<ImageDto> {
     use base64::Engine as _;
-    let core = core(&app)?;
+    core(&app)?;
     let max = ImageLimits::default().max_file_bytes;
     if data.len() > max / 3 * 4 + 4 {
         return Err(AiCmdError::invalid(format!(
@@ -216,7 +214,7 @@ pub async fn ai_image_paste<R: Runtime>(app: AppHandle<R>, win: CurrentWindow, d
         )));
     }
     let w = win.arc().clone();
-    let target = core.image_target_pixels();
+    let target = debrief_ai::vision::image::DEFAULT_TARGET_PIXELS;
     crate::sync::blocking("reading the image", move || {
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(data.trim())
@@ -235,64 +233,6 @@ pub async fn ai_image_paste<R: Runtime>(app: AppHandle<R>, win: CurrentWindow, d
 #[tauri::command]
 pub async fn ai_image_close(win: CurrentWindow, id: u32) -> Ai<bool> {
     Ok(win.arc().ai.images.remove(id))
-}
-
-/// "Add image support": downloads the catalog projector of an installed model as a download job (never
-/// automatically). Returns the job.
-#[tauri::command]
-pub async fn ai_model_install_projector<R: Runtime>(app: AppHandle<R>, file_name: String) -> Ai<u64> {
-    let core = core(&app)?;
-    core.built_in_availability()?;
-    // Fails fast for a model the catalog has no projector for.
-    core.projector_download_bytes(&file_name)?;
-    let progress = Arc::new(debrief_ai::models::Progress::new());
-    let (p, q) = (progress.clone(), progress.clone());
-    let controls = Controls::cancel(move || p.cancel()).with_probe(move || {
-        let s = q.snapshot();
-        (s.total > 0).then(|| JobProgress::counts(s.bytes, s.total))
-    });
-    let spec = JobSpec::new(JobKind::Download, format!("Image support for {file_name}")).link(JobLink::Model { id: file_name.clone() });
-    let h = app.clone();
-    let id = jobs::spawn(&app, spec, controls, move |_ctx: &JobCtx| -> Ai<Done<()>> {
-        let r = core.install_projector(&file_name, &progress, &mut |_| {});
-        let _ = tauri::Emitter::emit(&h, super::STATUS_EVENT, core.status());
-        r?;
-        Ok(Done::new(()).with_result(JobResult::Model {
-            detail: None,
-            file_name: Some(file_name.clone()),
-        }))
-    })
-    .map_err(AiCmdError::busy)?;
-    Ok(id.0)
-}
-
-/// Adds a projector file the user chose for an installed model (checked like a download), as a download job.
-#[tauri::command]
-pub async fn ai_model_add_projector<R: Runtime>(
-    app: AppHandle<R>,
-    grants: crate::paths::WindowGrants,
-    file_name: String,
-    path: String,
-) -> Ai<u64> {
-    let core = core(&app)?;
-    core.built_in_availability()?;
-    let file = grants.read_file(&path, &["gguf"])?.path().to_path_buf();
-    let progress = Arc::new(debrief_ai::models::Progress::new());
-    let (p, q) = (progress.clone(), progress.clone());
-    let controls = Controls::cancel(move || p.cancel()).with_probe(move || {
-        let s = q.snapshot();
-        (s.total > 0).then(|| JobProgress::counts(s.bytes, s.total))
-    });
-    let spec = JobSpec::new(JobKind::Download, format!("Checking the image projector for {file_name}")).link(JobLink::Path {
-        path: file.to_string_lossy().into_owned(),
-    });
-    jobs::start_value(&app, spec, controls, move |_ctx: &JobCtx| -> Ai<Done<ModelDto>> {
-        let m = core.add_projector(&file_name, &file, &progress)?;
-        Ok(Done::new(m).with_result(JobResult::Model {
-            detail: None,
-            file_name: Some(file_name.clone()),
-        }))
-    })
 }
 
 // ---- the use cases ----

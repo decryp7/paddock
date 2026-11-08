@@ -180,8 +180,6 @@ pub enum JobLink {
         #[serde(rename = "sessionId")]
         session_id: String,
     },
-    /// A model or runtime of the model manager.
-    Model { id: String },
 }
 
 /// The window a job belongs to (none for app-wide work) and what started it.
@@ -341,14 +339,6 @@ pub enum JobResult {
     },
     /// An analysis view, with the query it ran.
     View { view: String, ql: Option<String> },
-    /// A model ready to activate (model manager).
-    Model {
-        #[serde(rename = "fileName")]
-        file_name: Option<String>,
-        /// What the command that started the job returns to its waiter (the added model); never shown.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<Value>,
-    },
     /// The folder survey's proposals: View reopens the set-up wizard with them.
     FolderSurvey { outcome: Value },
     /// What clearing Debrief's storage freed and kept: View opens Settings ▸ Storage with it.
@@ -366,16 +356,12 @@ impl JobResult {
         }
     }
 
-    /// This result carrying `value` for the waiter of the command that started the job: a file, workspace or model keeps
+    /// This result carrying `value` for the waiter of the command that started the job: a file or workspace keeps
     /// its own kind (View still opens it); any other kind has no room for it and is returned as it is.
     pub fn with_detail(self, value: Value) -> JobResult {
         match self {
             JobResult::File { path, .. } => JobResult::file_with(path, value),
             JobResult::Workspace { .. } => JobResult::workspace_with(value),
-            JobResult::Model { file_name, .. } => JobResult::Model {
-                file_name,
-                detail: Some(value),
-            },
             other => other,
         }
     }
@@ -441,6 +427,7 @@ impl JobSpec {
     }
 
     /// Ends without a message or notification (see [`JobSpec::quiet`]).
+    #[cfg_attr(not(test), allow(dead_code, reason = "the name-alias job was the only quiet job (ADR 0070)"))]
     pub fn quiet(mut self) -> JobSpec {
         self.quiet = true;
         self

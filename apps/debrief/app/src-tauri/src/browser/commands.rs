@@ -165,14 +165,9 @@ pub async fn browser_discard_sources<R: Runtime>(app: AppHandle<R>, win: Current
     Ok(sources_event(&app, win.label(), &chat, &hub))
 }
 
-/// Parameters of the active model in billions, when a model is set up.
-fn active_params_b<R: Runtime>(app: &AppHandle<R>) -> Option<f64> {
-    let core = crate::ai::commands::core(app).ok()?;
-    core.models()
-        .into_iter()
-        .find(|m| m.active)
-        .and_then(|m| m.info)
-        .map(|i| i.params_b)
+/// Parameters of the model in billions: Pitwall does not tell, so none (the UI shows no size hint).
+fn active_params_b<R: Runtime>(_app: &AppHandle<R>) -> Option<f64> {
+    None
 }
 
 pub fn chat_status<R: Runtime>(app: &AppHandle<R>, owner: &str, chat: &str, hub: &BrowserHub) -> ChatStatusDto {

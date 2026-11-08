@@ -14,8 +14,7 @@ export type JobLink =
   | { type: 'range'; from: number; to: number }
   | { type: 'query'; ql: string }
   | { type: 'path'; path: string }
-  | { type: 'chat'; sessionId: string }
-  | { type: 'model'; id: string };
+  | { type: 'chat'; sessionId: string };
 
 export interface JobSource {
   /** The window the job belongs to; null for app-wide work (downloads, storage). */
@@ -64,7 +63,6 @@ export type JobResult =
   /** `detail`: what the command that started the job returns to its waiter (the opened workspace; see `jobValue`). */
   | { type: 'workspace'; detail?: unknown }
   | { type: 'view'; view: string; ql: string | null }
-  | { type: 'model'; fileName: string | null; detail?: unknown }
   | { type: 'folderSurvey'; outcome: unknown }
   | { type: 'storage'; result: unknown }
   /** The logs related to an image (`RelatedOutcome`, ADR 0025). */
