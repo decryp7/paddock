@@ -69,7 +69,25 @@ export function judgeRestartService({ bootBefore, bootAfter, samples }) {
  * `metrics` are the icons the app log says it created: none means the log could not be read, which is a broken check, not a product fail.
  * Pass and fail have their own text.
  */
-export function judgeTrayCount({ metrics, visible, overflow, measured = true, running = true, registered = null }) {
+/**
+ * The app's own Shell_NotifyIcon state after `since` (ISO "s", the boot): its "tray diagnose" lines, which report the shell's answer per icon ("shell holds the icon true")
+ * and the count ("N of M icon(s) shown"). null when there is no such line after `since`.
+ */
+export function parseTrayDiagnosis(lines, since) {
+  const after = [].concat(lines ?? []).map(String).filter((l) => /tray diagnose:/.test(l)).filter((l) => { const t = /(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)/.exec(l)?.[1]; return t && (!since || t > since); });
+  if (!after.length) return null;
+  const counts = after.map((l) => /(\d+) of (\d+) icon\(s\) shown/.exec(l)).filter(Boolean);
+  const last = counts.at(-1);
+  const icons = after.filter((l) => /shell holds the icon (true|false)/.test(l));
+  return { shown: last ? Number(last[1]) : null, of: last ? Number(last[2]) : null, held: icons.filter((l) => /shell holds the icon true/.test(l)).length, notHeld: icons.filter((l) => /shell holds the icon false/.test(l)).length, lines: after.slice(-6) };
+}
+
+export function judgeTrayCount({ metrics, visible, overflow, measured = true, running = true, registered = null, diagnosis = null }) {
+  // Second probe when UI Automation reads nothing: the app's own Shell_NotifyIcon diagnosis after the boot (the shell's answer per icon).
+  if (!measured && diagnosis && diagnosis.of !== null && metrics.length) {
+    const ok = diagnosis.shown === metrics.length && diagnosis.of === metrics.length && diagnosis.notHeld === 0;
+    return [chk(ok, ok ? `the app's Shell_NotifyIcon diagnosis after the boot: ${diagnosis.shown} of ${diagnosis.of} icon(s) shown, the shell holds each (${diagnosis.held} confirmed); UI Automation could not read the notification area on this guest` : `the app's Shell_NotifyIcon diagnosis after the boot: ${diagnosis.shown} of ${diagnosis.of} shown, ${diagnosis.notHeld} not held by the shell, for ${metrics.length} created`)];
+  }
   // The fallback when UI Automation sees no notification-area button at all (the Windows 11 Arm guest): the shell's own registry list of icons
   // (HKCU\Control Panel\NotifyIconSettings) proves only that icons were REGISTERED, not that they are on screen, so it is information and the row stays "not measured".
   if (!measured) return [chk(false, `not measured: the notification area could not be read by UI Automation on this guest (no notification-area button at all)${registered === null ? '' : `; fallback read: ${registered} icon(s) registered with the shell in HKCU NotifyIconSettings for ${metrics.length} created (registered, not seen on screen)`}`, 'check')];

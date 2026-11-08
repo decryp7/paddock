@@ -9,7 +9,7 @@ import { retryOnClosed } from './reconnect.mjs';
 import { APP_LOG_PS, TRAY_ICONS_CMD, dynoTrayIcons, metricsFromLog, notificationAreaButtons, trayLogLines } from './win-tray-icons.mjs';
 import { makeResult } from './verdict.mjs';
 import { quitStopStep } from './mcp-judges.mjs';
-import { judgeAutostart, judgeRestartService, judgeTrayCount, parseProcs, serviceState } from './win-judges.mjs';
+import { judgeAutostart, judgeRestartService, judgeTrayCount, parseProcs, parseTrayDiagnosis, serviceState } from './win-judges.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const HELPER = 'C:\\ProgramData\\Dyno\\Helper';
@@ -186,8 +186,11 @@ async function afterRestartRecord(actor, label) {
   // An autostarted app builds its tray icons a little after it starts: poll up to 60 s when it is running and nothing shows yet.
   for (let i = 0; i < 6 && auto.running && (!tray.measured || tray.visible.length + tray.overflow.length === 0); i++) { await sleep(10_000); tray = await trayRecord(actor); }
   await actor.send('quit', 5000).catch(() => {});
+  // The second tray probe (UI Automation reads nothing on this guest): the app's own Shell_NotifyIcon diagnosis lines after the boot, polled while it writes them (5 s after it makes its icons).
+  let diagnosis = null;
+  for (let i = 0; i < 6 && auto.running && !diagnosis?.of; i++) { diagnosis = parseTrayDiagnosis(ssh(APP_LOG_PS).split('\n'), auto.boot); if (!diagnosis?.of) await sleep(5000); }
   const evidence = [`control: Run-key programs started at this logon: ${auto.control.othersStarted.join(', ') || 'none'}; StartupApproved\\Run "Dyno" first byte: ${auto.control.approvedRaw}`, `logon (explorer started): ${auto.logon}`, `running without a hand start: ${auto.procs || 'nothing'} (Get-Process: ${auto.plain || 'none'})`, '--- Run key', auto.run, `--- Startup folder: ${auto.startup || '(empty)'}`, `--- scheduled tasks naming Dyno: ${auto.tasks || '(none)'}`, `--- actor: ${actorUp === null ? 'did NOT answer after 8 starts' : `answered after ${actorUp + 1} start(s)`}`, '--- tray', ...fmtTray(tray)];
-  return { auto, tray, evidence };
+  return { auto, tray, evidence, diagnosis };
 }
 
 /** `ctx`: { vm(args, ms), waitConsole(), launchDyno(), log }. Returns the steps. */
@@ -260,8 +263,8 @@ async function runRebootSteps(ctx, steps) {
   ], rec1.evidence, expectOn ? 'dyno-app started by itself after the boot with --hidden' : 'Dyno is off at logon as configured'));
   steps.push(result('Windows restart: tray icons after the restart (compared with before)', [
     { ok: true, info: true, detail: `before: ${trayBefore.visible.length} visible, ${trayBefore.overflow.length} overflow; after (no hand start): ${rec1.tray.visible.length} visible, ${rec1.tray.overflow.length} overflow` },
-    ...judgeTrayCount({ metrics: rec1.tray.metrics, visible: rec1.tray.visible.length, overflow: rec1.tray.overflow.length, measured: rec1.tray.measured, registered: rec1.tray.registered, running: rec1.auto.running }),
-  ], fmtTray(rec1.tray), 'every icon the app created is in the notification area'));
+    ...judgeTrayCount({ metrics: rec1.tray.metrics, visible: rec1.tray.visible.length, overflow: rec1.tray.overflow.length, measured: rec1.tray.measured, registered: rec1.tray.registered, running: rec1.auto.running, diagnosis: rec1.diagnosis }),
+  ], [...fmtTray(rec1.tray), '--- the app\'s Shell_NotifyIcon diagnosis after the boot', ...(rec1.diagnosis?.lines ?? ['(none)'])], 'every icon the app created is in the notification area'));
 
   // The helper after the restart, with no Repair. The CDP environment was set for the user BEFORE the restart, so an autostarted Dyno has its
   // DevTools port and is the instance that is read; only when nothing started Dyno is it started by hand, as a user would reopen it.
@@ -315,7 +318,7 @@ async function runRebootSteps(ctx, steps) {
         ...judgeAutostart({ boot: rec2.auto.boot, procs: rec2.auto.rows, expectOn: true, control: rec2.auto.control }),
         ...judgeRestartService({ bootBefore: rs2.bootBefore, bootAfter: rs2.bootAfter, samples: rs2.samples }),
       ], rec2.evidence, 'dyno-app started by itself after the boot with --hidden and the helper service ran'));
-      steps.push(result('Windows restart: tray icons after the restart (Launch at login ON)', judgeTrayCount({ metrics: rec2.tray.metrics, visible: rec2.tray.visible.length, overflow: rec2.tray.overflow.length, measured: rec2.tray.measured, registered: rec2.tray.registered, running: rec2.auto.running }), fmtTray(rec2.tray), 'every icon the app created is in the notification area'));
+      steps.push(result('Windows restart: tray icons after the restart (Launch at login ON)', judgeTrayCount({ metrics: rec2.tray.metrics, visible: rec2.tray.visible.length, overflow: rec2.tray.overflow.length, measured: rec2.tray.measured, registered: rec2.tray.registered, running: rec2.auto.running, diagnosis: rec2.diagnosis }), fmtTray(rec2.tray), 'every icon the app created is in the notification area'));
     } else steps.push(result('Windows restart (Launch at login on): the guest did not come back', [{ ok: false, detail: 'no console session after the second restart' }]));
   }
   // Rule 71: Quit and stop measuring with its reboot half (the release row): File > Quit and stop measuring over the DevTools port, 60 s with no Dyno process, reopen,

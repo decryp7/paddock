@@ -180,13 +180,22 @@ async function main(argv) {
       const boot = () => g('echo "is-enabled: $(systemctl is-enabled dyno-helper.service 2>&1)"; echo "is-active: $(systemctl is-active dyno-helper.service)"; systemctl cat dyno-helper.service 2>&1 | grep -E "^(WantedBy|Restart|RestartSec|ExecStart|\\[)" ; ls -l ~/.config/autostart/ /etc/xdg/autostart/ 2>&1 | grep -i dyno').stdout.trim().split('\n');
       press('^Dyno$');
       // "Start Dyno at login" is ON by default: read the state first, press only when it is OFF, read it again (a blind press turned the default off).
-      const SW = '"Start Dyno at login" "check box|toggle button|switch"';
-      const swBefore = parseSwitchState(atspi(`state dyno ${SW}`).stdout);
-      const pressedSw = swBefore === 'off' ? atspi(`press dyno ${SW}`).code === 0 : false;
-      await sleep(3000);
-      const swAfter = parseSwitchState(atspi(`state dyno ${SW}`).stdout);
+      // Precondition (ER-33): Launch at login is ON before the reboot, shown by the OS entry (~/.config/autostart/Dyno.desktop) and, where AT-SPI can read it, the switch. An
+      // unreadable switch is opened again (File > Settings…, Dyno) and read; an OFF switch is pressed and SAVED (the switch edits a draft).
+      const lj = linuxLoginJobsDriver(atspi, parseSwitchState);
+      const desktop = () => g('test -f "$HOME/.config/autostart/Dyno.desktop" && echo yes || echo no').stdout.trim().endsWith('yes');
+      let swBefore = await lj.readSwitch();
+      if (swBefore === 'unknown') { atspi('press dyno "^File$" "menu item"'); await sleep(1000); atspi('press dyno "^Settings…$" "menu item"'); await sleep(4000); press('^Dyno$'); await sleep(1500); swBefore = await lj.readSwitch(); }
+      let pressedSw = false;
+      if (swBefore === 'off' || (swBefore === 'unknown' && !desktop())) { pressedSw = await lj.pressSwitch(); if (pressedSw) await lj.apply(); }
+      for (let i = 0; i < 10 && !desktop(); i++) await sleep(2000);
+      const swAfter = await lj.readSwitch();
+      const entry = desktop();
       const preBoot = boot();
-      steps.push(result('Restart check: before the reboot (helper on, Launch at login on)', [...judgeLoginSwitch({ before: swBefore, after: swAfter, pressed: pressedSw }), { ok: /is-enabled: enabled/.test(preBoot.join('\n')), detail: `start-at-boot: ${preBoot[0]}; ${preBoot[1]}` }], preBoot, 'enabled at boot'));
+      steps.push(result('Restart check: before the reboot (helper on, Launch at login on)', [
+        ...(swAfter === 'unknown' && entry ? [{ ok: true, info: true, detail: `the switch could not be read over AT-SPI here (before: ${swBefore}), but the OS entry Dyno.desktop is there: Launch at login is on` }] : judgeLoginSwitch({ before: swBefore, after: swAfter, pressed: pressedSw })),
+        { ok: entry, kind: 'check', detail: entry ? 'precondition: ~/.config/autostart/Dyno.desktop is there before the reboot' : 'precondition NOT met: no ~/.config/autostart/Dyno.desktop before the reboot, so the autostart after it proves nothing' },
+        { ok: /is-enabled: enabled/.test(preBoot.join('\n')), detail: `start-at-boot: ${preBoot[0]}; ${preBoot[1]}` }], preBoot, 'enabled at boot, Launch at login on'));
       log('rebooting the guest');
       g('sudo systemctl reboot', 30_000);
       await sleep(40_000);
@@ -225,7 +234,9 @@ async function main(argv) {
       press('^Processes$', 'link');
       let procPage = '';
       for (let i = 0; i < 10 && !/Processes\s+\d+ processes/.test(procPage); i++) { await sleep(3000); procPage = atspi('tree dyno 80').stdout; }
-      steps.push(result('Restart check: card and a helper reading after the reboot', [judgeCard(cardTxt), { ok: /Read by the administrator helper/i.test(procPage), detail: /Read by the administrator helper/i.test(procPage) ? 'Processes shows "Read by the administrator helper"' : 'Processes does not show the helper chip after the reboot' }], [cardTxt], 'card On and a reading works'));
+      // The chip is judged only when the Processes page was read at all; a window that never came up is the measurement's (the tree is kept as evidence).
+      const pageRead = /Processes\s+\d+ processes/.test(procPage);
+      steps.push(result('Restart check: card and a helper reading after the reboot', [judgeCard(cardTxt), { ok: /Read by the administrator helper/i.test(procPage), ...(pageRead ? {} : { kind: 'check' }), detail: !pageRead ? `the Processes page was not read (the window did not come up for AT-SPI): ${atspi('tree dyno 6 2>&1 | head -6').stdout.replace(/\s+/g, ' ').slice(0, 200)}` : /Read by the administrator helper/i.test(procPage) ? 'Processes shows "Read by the administrator helper"' : 'Processes does not show the helper chip after the reboot' }], [cardTxt], 'card On and a reading works'));
       void t0;
     }
     // 5. One step per helper reading (WP-VMH), read through AT-SPI.
@@ -321,7 +332,16 @@ async function main(argv) {
           // The reboot half: after Quit and stop and a reopen, a real reboot must bring the agent back by itself (the service was stopped, not removed).
           // Precondition (ER-33): Launch at login is on, or nothing is promised after a reboot.
           const state = () => g('echo "autostart: $(ls ~/.config/autostart 2>/dev/null | tr "\\n" " ")"; echo "agent unit: $(systemctl --user -M admin@ is-enabled dyno-agent 2>&1) / $(systemctl --user -M admin@ is-active dyno-agent 2>&1)"; ps -eo pid=,etimes=,args= | grep -E "dyno-(app|agent)( |$)" | grep -v grep').stdout.trim();
-          const pre = state(); rebootEv.push('--- before the reboot', ...pre.split('\n'));
+          let pre = state();
+          if (!/Dyno\.desktop/.test(pre)) {
+            // An earlier row left Launch at login off: put it on the way a person does (Settings, the switch, Save changes) and verify the OS entry again.
+            const lj2 = linuxLoginJobsDriver(atspi, parseSwitchState);
+            const sw = await lj2.readSwitch();
+            rebootEv.push(`Launch at login was off before the reboot (switch reads ${sw}): switched on in Settings and saved`);
+            if (sw !== 'on' && (await lj2.pressSwitch())) await lj2.apply();
+            for (let i = 0; i < 10 && !/Dyno\.desktop/.test(pre); i++) { await sleep(2000); pre = state(); }
+          }
+          rebootEv.push('--- before the reboot', ...pre.split('\n'));
           if (!/Dyno\.desktop/.test(pre)) throw new Error('Launch at login was off before the reboot (no ~/.config/autostart/Dyno.desktop): an earlier step left it off, so the reboot proves nothing');
           g('sudo systemctl reboot', 30_000); await sleep(40_000);
           for (let n = 0; n < 75 && g('true', 20_000).code !== 0; n++) await sleep(4000);

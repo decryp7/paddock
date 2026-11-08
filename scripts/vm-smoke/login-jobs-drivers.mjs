@@ -109,7 +109,7 @@ export function macLoginJobsDriver(gui) {
       return { ok: true, detail: `benchmark running: ${text}` };
     },
     async stopLongJob() { await gui.press(gui.app, '^Benchmarks$', 'AXLink'); await gui.press(gui.app, '^Cancel$', 'AXButton'); },
-    async jobsText() { return (await gui.texts()).map((t) => t.text).filter((x) => /Start Dyno at login|Cancell?ed|Working|Cancel$/i.test(x)).join(' | '); },
+    async jobsText() { return (await gui.texts()).map((t) => t.text).filter((x) => /Start Dyno at login|Running benchmarks|Cancell?ed|Working|Cancel$|jobs could not be read/i.test(x)).join(' | '); },
     async pressCancel() { return gui.press(gui.app, '^Cancel', 'AXButton'); },
   };
 }
@@ -127,13 +127,13 @@ export function linuxLoginJobsDriver(atspi, parseSwitchState) {
     async save() { return atspi('press dyno "^Save changes$" "push button"').code === 0; },
     async apply() {
       if (atspi('press dyno "^Save changes$" "push button"').code !== 0) return { ok: false, detail: 'no "Save changes" button' };
-      for (let i = 0; i < 15 && /Applying…|Save changes/.test(atspi('tree dyno 60').stdout); i++) await new Promise((r) => setTimeout(r, 2000));
-      // Reopen Settings (File > Settings…, Dyno) so the switch shows the saved value, not the draft.
-      atspi('press dyno "^Close$" "push button"'); atspi('press dyno "^File$" "menu item"'); await new Promise((r) => setTimeout(r, 1000));
-      atspi('press dyno "^Settings…$" "menu item"'); await new Promise((r) => setTimeout(r, 4000)); atspi('press dyno "^Dyno$" "push button"'); await new Promise((r) => setTimeout(r, 1500));
+      // Saved when "Applying…" and "Save changes" are gone (no draft is left). Read in place: closing and reopening Settings over AT-SPI lost the switch on the 0ad rounds
+      // (rows 6 and 7 read "unknown" right after a reopen while the switch was on the page and Dyno.desktop was there).
+      let pending = true;
+      for (let i = 0; i < 15 && pending; i++) { await new Promise((r) => setTimeout(r, 2000)); pending = /Applying…|push button\s+Save changes/.test(atspi('tree dyno 60').stdout); }
       let v = 'unknown';
-      for (let i = 0; i < 8 && v === 'unknown'; i++) { const r = atspi(`state dyno ${SW}`); v = r.code === 0 ? parseSwitchState(r.stdout) : 'unknown'; if (v === 'unknown') { atspi('press dyno "^Dyno$" "push button"'); await new Promise((res) => setTimeout(res, 2000)); } }
-      return { ok: true, saved: v, detail: v === 'unknown' ? 'saved; the reopened Settings could not be read' : 'saved' };
+      for (let i = 0; i < 5 && v === 'unknown'; i++) { const r = atspi(`state dyno ${SW}`); v = r.code === 0 ? parseSwitchState(r.stdout) : 'unknown'; if (v === 'unknown') await new Promise((res) => setTimeout(res, 2000)); }
+      return { ok: !pending, saved: v, detail: pending ? '"Save changes" or "Applying…" still shown after 30 s' : v === 'unknown' ? 'saved; the switch could not be read afterwards' : 'saved (no draft left)' };
     },
     async openJobs() { atspi('press dyno "^Close$" "push button"'); return atspi(`press dyno ${JSON.stringify(STATUS)} "push button|toggle button"`).code === 0 || /Jobs/.test(atspi('tree dyno 60').stdout); },
     async startLongJob() {
@@ -152,7 +152,7 @@ export function linuxLoginJobsDriver(atspi, parseSwitchState) {
       return { ok: true, detail: `benchmark running: ${text}` };
     },
     async stopLongJob() { atspi('press dyno "^Benchmarks$" "link"'); atspi('press dyno "^Cancel$" "push button"'); },
-    async jobsText() { return atspi('tree dyno 80').stdout.split('\n').filter((l) => /Start Dyno at login|Cancell?ed|Working|Cancel/i.test(l)).map((l) => l.trim()).join(' | '); },
+    async jobsText() { return atspi('tree dyno 80').stdout.split('\n').filter((l) => /Start Dyno at login|Running benchmarks|Cancell?ed|Working|Cancel|jobs could not be read/i.test(l)).map((l) => l.trim()).join(' | '); },
     async pressCancel() { return atspi('press dyno "^Cancel" "push button"').code === 0; },
   };
 }

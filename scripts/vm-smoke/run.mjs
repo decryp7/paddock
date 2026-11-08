@@ -26,7 +26,7 @@ import { discoveryStep, unixDiscoveryPrims } from './discovery-row.mjs';
 import { macRebootCheck } from './mac-reboot.mjs';
 import { makeMcpGuest } from './mcp-guest.mjs';
 import { mcpStep } from './mcp-judges.mjs';
-import { NOT_DRIVEN, ROW_TITLES, btmEnabled, keychainOtherBuildStep, judgeLifecycleLog, judgeMacReopen, notDriven, rowStep } from './release-rows.mjs';
+import { NOT_DRIVEN, ROW_TITLES, btmState, keychainOtherBuildStep, judgeLifecycleLog, judgeMacReopen, notDriven, rowStep } from './release-rows.mjs';
 import { hungPageStep } from './hung-page.mjs';
 import { quitStopStep } from './mcp-judges.mjs';
 import { loginSwitchStep, parseBtm } from './login-start-rows.mjs';
@@ -341,8 +341,14 @@ async function main(argv) {
           const m = /EXIT=(\d+)\s*$/.exec(lg.stdout);
           // Quit and stop measuring, then reopen (menu item over AX), with the Login Items state before and after and the Background Items notice from the unified log.
           const count = async () => Number((await exec('ps -axo comm= | grep -cE "dyno-(app|agent)$"')).stdout.trim()) || 0;
-          const btm = async () => btmEnabled((await exec('sudo sfltool dumpbtm 2>&1 | head -400')).stdout);
-          const wasEnabled = await btm();
+          const btm = async () => btmState((await exec('sudo sfltool dumpbtm 2>&1 | head -600')).stdout);
+          // Precondition of the reopen row: the login item is OFF before Quit and stop. It is switched off the way Dyno offers (Settings > Start Dyno at login, Save changes:
+          // SMAppService unregisters it), not in System Settings, which this driver does not drive; the row then shows whether reopening Dyno turns it back on by itself.
+          const ld = macLoginJobsDriver(gui);
+          let switchedOff = false;
+          if ((await ld.readSwitch()) === 'on' && (await ld.pressSwitch())) { const a = await ld.apply(); switchedOff = a.ok; }
+          await gui.closeSettings();
+          const wasState = await btm();
           const t0 = new Date(Date.now() - 5000).toISOString().replace('T', ' ').slice(0, 19);
           const qs = await quitStopStep({
             now: () => Date.now(), sleep: sleepMs,
@@ -351,8 +357,12 @@ async function main(argv) {
           });
           const back = (await exec('pgrep -x dyno-agent >/dev/null')).code === 0;
           const notice = (await exec(`log show --start "${t0}" --info --style compact --predicate 'eventMessage CONTAINS[c] "Background Items Added" OR eventMessage CONTAINS[c] "background item" AND eventMessage CONTAINS[c] "dyno"' 2>&1 | grep -c -i "background item"`)).stdout.trim();
-          const nowEnabled = await btm();
-          const reopen = rowStep(ROW_TITLES.macReopen, judgeMacReopen({ agentBack: back, notificationSeen: /^\d+$/.test(notice) ? Number(notice) > 0 : null, loginItemWasOff: wasEnabled === null ? null : !wasEnabled, loginItemNowOff: nowEnabled === null ? null : !nowEnabled }), 'the agent is back, the Login Items choice held');
+          const nowState = await btm();
+          const reopen = rowStep(ROW_TITLES.macReopen, judgeMacReopen({ agentBack: back, notificationSeen: /^\d+$/.test(notice) ? Number(notice) > 0 : null, loginItemWasOff: wasState === 'unreadable' ? null : wasState === 'off', loginItemNowOff: nowState === 'unreadable' ? null : nowState === 'off' }), 'the agent is back, the Login Items choice held');
+          reopen.evidence = [...(reopen.evidence ?? []), `login item before Quit and stop: ${wasState} (${switchedOff ? 'switched off with Dyno\'s own switch and saved' : 'not switched by this row'}); after the reopen: ${nowState}`];
+          // Put Start at login back on for the rows after this one.
+          if (switchedOff && (await ld.readSwitch()) === 'off' && (await ld.pressSwitch())) await ld.apply();
+          await gui.closeSettings();
           // Hung or paused page: the WebContent process is stopped; the question is read through AX.
           const hung = await hungPageStep({
             now: () => Date.now() / 1000, sleep: sleepMs,

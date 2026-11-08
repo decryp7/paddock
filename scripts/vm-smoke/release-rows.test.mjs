@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { btmEnabled, judgeKeychainOtherBuild, keychainOtherBuildStep, NOT_DRIVEN, ROW_TITLES, judgeLifecycleLog, judgeLinuxHelperLogDir, judgeMacReopen, notDriven, rowStep } from './release-rows.mjs';
+import { btmEnabled, btmState, judgeKeychainOtherBuild, keychainOtherBuildStep, NOT_DRIVEN, ROW_TITLES, judgeLifecycleLog, judgeLinuxHelperLogDir, judgeMacReopen, notDriven, rowStep } from './release-rows.mjs';
 import { deriveVerdict } from './verdict.mjs';
 
 const bad = (c) => c.filter((x) => !x.ok);
@@ -97,4 +97,12 @@ test('keychain row required mode: a window after the update passes, none fails, 
   const noControl = await keychainOtherBuildStep({ ...mk(true), windowVisible: async () => false }, 3000, true);
   assert.equal(noControl.status, 'not-measured', 'a failed positive control is never a fail of the build');
   assert.equal(noControl.cls, 'check');
+});
+
+test('btmState: an enabled Dyno app item is on; a readable dump without one, or a disabled one, is off; no dump is unreadable', () => {
+  const on = '\n #1: UUID: a\n  Name: Dyno\n  Type: app (0x2)\n  Disposition: [enabled, allowed, notified] (0xb)\n';
+  assert.equal(btmState(on), 'on');
+  assert.equal(btmState(on.replace('enabled, ', 'disabled, ')), 'off');
+  assert.equal(btmState('\n========== Records for UID 501 ==========\n #1: UUID: b\n  Name: Other\n  Type: app\n  Disposition: [enabled]\n'), 'off');
+  assert.equal(btmState(''), 'unreadable');
 });

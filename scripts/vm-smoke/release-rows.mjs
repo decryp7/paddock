@@ -134,6 +134,14 @@ export const NOT_DRIVEN = {
 };
 
 /** `sfltool dumpbtm` text to whether Dyno's login item is enabled: true, false, or null when no Dyno entry (or no disposition) is in the text. */
+/** The Dyno login item in a `sfltool dumpbtm` dump: 'on' (an enabled Dyno app item), 'off' (a readable dump with none, or a disabled one), 'unreadable' (no dump). */
+export function btmState(text) {
+  const t = String(text ?? '');
+  if (!/#\d+:|Records for UID|UUID:/.test(t)) return 'unreadable';
+  const blocks = t.split(/\n\s*(?=#\d+:)/).filter((b) => /Name:\s*Dyno\b/i.test(b) && /Type:\s*app\b/i.test(b));
+  return blocks.some((b) => /Disposition:\s*\[[^\]]*(?<!dis)enabled/.test(b)) ? 'on' : 'off';
+}
+
 export function btmEnabled(text) {
   const blocks = String(text ?? '').split(/\n\s*\n|(?=\n\s*#\d+:)/);
   for (const b of blocks) {

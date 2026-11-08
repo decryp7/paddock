@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { judgeColdUninstall, coldUninstallAccepted, rightClicksInLog, judgeTrayClick, judgeInstallOutcome, attemptProbe, classifyAttempt, judgeAutostart, judgeControl, judgeExploitPrecondition, judgeRefusal, judgeRestartService, judgeServed, parseServed, judgeTrayCount, judgeUninstall, judgeWear, parseProcs, serviceState, triState } from "./win-judges.mjs";
+import { judgeColdUninstall, coldUninstallAccepted, rightClicksInLog, judgeTrayClick, judgeInstallOutcome, attemptProbe, classifyAttempt, judgeAutostart, judgeControl, judgeExploitPrecondition, judgeRefusal, judgeRestartService, judgeServed, parseServed, judgeTrayCount, judgeUninstall, judgeWear, parseProcs, parseTrayDiagnosis, serviceState, triState } from "./win-judges.mjs";
 import { makeResult } from './verdict.mjs';
 
 const BOOT = '2026-11-05T10:00:00';
@@ -170,4 +170,21 @@ test('autostart: no Run-key program started at all is a broken check; others sta
   assert.ok(fail.some((c) => !c.ok && c.kind !== 'check'));
   const off = judgeAutostart({ boot: B, procs: [], expectOn: true, control: { othersStarted: [], approved: 'disabled' } });
   assert.ok(off.some((c) => !c.ok && c.kind !== 'check' && /StartupApproved/.test(c.detail)));
+});
+
+// 2026-11-08: UI Automation reads no notification-area button on this guest after a restart. The second probe is the app's own Shell_NotifyIcon state: its
+// "tray diagnose" lines after the boot ("N of M icon(s) shown", "shell holds the icon true" per icon), which come from the shell's answer, not from the app's wish.
+test('tray after restart: the app\'s own Shell_NotifyIcon diagnosis measures the row when UI Automation cannot', () => {
+  const log = [
+    '2026-11-08T08:18:55.516Z tray diagnose: icon dyno-number shown; shell holds the icon true; TaskbarCreated seen 0 time(s)',
+    '2026-11-08T08:18:55.516Z tray diagnose: icon dyno-number-2 shown; shell holds the icon true; TaskbarCreated seen 0 time(s)',
+    '2026-11-08T08:18:55.516Z tray diagnose: 2 of 2 icon(s) shown 5 s after they were made; taskbar window owned by pid 856',
+  ];
+  const ok = judgeTrayCount({ metrics: ['CPU', 'Memory'], visible: 0, overflow: 0, measured: false, registered: 2, diagnosis: parseTrayDiagnosis(log, '2026-11-08T08:18:28') });
+  assert.ok(ok.every((c) => c.ok), JSON.stringify(ok));
+  const bad = judgeTrayCount({ metrics: ['CPU', 'Memory'], visible: 0, overflow: 0, measured: false, registered: 2, diagnosis: parseTrayDiagnosis([log[0], log[1].replace('true', 'false'), '2026-11-08T08:18:55Z tray diagnose: 1 of 2 icon(s) shown'], '2026-11-08T08:18:28') });
+  assert.ok(bad.some((c) => !c.ok && c.kind !== 'check'));
+  // lines from before the boot do not count: no diagnosis after the boot stays not measured
+  const old = judgeTrayCount({ metrics: ['CPU'], visible: 0, overflow: 0, measured: false, registered: 1, diagnosis: parseTrayDiagnosis(log, '2026-11-08T09:00:00') });
+  assert.ok(old.every((c) => c.ok || c.kind === 'check'));
 });
