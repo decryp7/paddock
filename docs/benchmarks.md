@@ -237,7 +237,7 @@ These measure tooling, not a product. They are kept where they are.
 
 What: the checkout and stable-workspace steps of ci.yml's host jobs (`crate`, `app`, `paddock-dev`) on the real runners, from the
 48 h of job data of the speed research R2 (`/Volumes/d7sst7/dev-targets/scratch/speed-research/data/jobs`, successful host jobs
-with both steps) against ONE dispatched affected run, 7808 (commit a3ad3d78f, 12 host jobs). The tree: 12,367 files, 540 MiB; the
+with both steps) against dispatched affected runs 7808 (commit a3ad3d78f, 12 host jobs) and 7816 (commit 6d0eb0824). The tree: 12,367 files, 540 MiB; the
 lean profile checks out 10,314 files. Synthetic data only; step times from the Gitea API (`steps[].started_at/completed_at`).
 Script: `measure.py` in the scratch folder `/Volumes/d7sst7/dev-targets/scratch/ci-cheap-checkout`.
 
@@ -250,13 +250,34 @@ Script: `measure.py` in the scratch folder `/Volumes/d7sst7/dev-targets/scratch/
 | macOS stable-workspace | 14 | 70 | kept-clone 16 to 59 |
 | macOS both | 41 | 130 | 17 to 67 |
 
-Reading the run, per phase (kept-clone log lines): on Windows the clone is created in 1 to 7 s, the fetch takes 0 to 2 s and the
+Reading run 7808, per phase (kept-clone log lines): on Windows the clone is created in 1 to 7 s, the fetch takes 0 to 2 s and the
 checkout 3 to 5 s, but `clean` took 52 to 111 s: `reset --hard` ran before the sparse patterns were set and wrote the whole tree of
 the new clone's branch. On macOS the slots held clones of the old layout (plain shallow checkouts), which were reused and fetched
-without a partial filter: fetch 12 to 50 s, clean 2 to 10 s. Both are fixed in 5544158b2 (patterns first; only clones this script
-made, marked, are reused). **That fix is not measured**: the brief allowed one dispatch. Expected from the phase times: Windows
-about 10 to 15 s for the two steps, macOS a few seconds when the slot's clone is warm and about 10 to 20 s when it has to
-fetch. Confirm with one more affected run before relying on it. Load was not recorded (shared CI runners).
+without a partial filter: fetch 12 to 50 s, clean 2 to 10 s. Both were fixed in 5544158b2.
+
+**Run 7816 (commit 6d0eb0824, with that fix), Windows, every clone cold** (seconds; the CI VM runs three slots, s1 to s3; bootstrap
+checkout 6 to 7 s in each):
+
+| Job (slot) | create the clone | fetch | check out | kept-clone total | checkout + kept-clone |
+|---|---|---|---|---|---|
+| crate (s2) | 14 | 1 | 25 | 43 | 49 |
+| paddock-dev (s1) | 19 | 1 | 30 | 52 | 58 |
+| app dyno (s3) | 17 | 0 | 29 | 49 | 56 |
+| app pitcrew (s1) | 36 | 1 | 27 | 67 | 72 |
+| app pitwall (s2) | 17 | 1 | 27 | 48 | 54 |
+| app spotter (s3) | 1 | 0 | 29 | 34 | 40 |
+
+Against the 102 s p50 (123 s p90) of the plain checkout plus stable-workspace, a cold clone costs 40 to 72 s (about 55 % of p50,
+the 25 to 30 s being the blobs of the 10,314 lean files). **No clone was warm**: the kept folder was named after the job
+(`<app>-<job>-<os>-<slot>`), so each of the six jobs made its own clone in its slot; the one that was 1 s to create (spotter, s3)
+reused a folder of the same name left by run 7808. The clone is now one per slot, shared by every job (`paddock-checkout-<os>`),
+which a warm job should turn into a fetch of the delta (the fetch phase was 0 to 1 s) plus a checkout of the changed files. That is
+**not measured yet**. The 3-slot VM means three cold clones at first and warm ones after.
+
+**macOS in run 7816 did not run the clone**: all six macOS jobs failed in job-isolation, before kept-clone, because the bootstrap
+lacked `crates/paddock-testkit`, a dev-dependency that cargo loads to build paddock-dev (run 7808 had a cached binary). Fixed in the
+commit that follows this block's parent; macOS numbers are still those of run 7808 above (its first run on legacy clones), so
+neither macOS cold nor warm is measured with the final design.
 
 ### 2026-11-03, starving a test process by OS priority on macOS
 
