@@ -29,7 +29,7 @@ const BOUND = /(\d+(?:\.\d+)?)\s*(ms|milliseconds?|min|mins|minutes?|s|secs?|sec
 const FAKE_SEAM = /\b(?:FakeClock|ManualPace|TestSeams)\b/;
 const TS_CLOCK = /\b(?:useTestClock|frozenClock)\s*\(/;
 const TS_TEST = /(?:\.(?:spec|test)\.(?:ts|mts|cts|js|mjs|cjs)$|(?:^|\/)(?:e2e|selftest)\/.+\.(?:ts|mjs|js)$)/;
-const SKIP_PATH = /^conformance\/test\/|(?:^|\/)(?:node_modules|dist|target|fixtures|vendor)\/|(?:^|\/)crates\/paddock-testkit\//;
+const SKIP_PATH = /^conformance\/test\/|(?:^|\/)(?:node_modules|dist|target|fixtures)\/|^apps\/[^/]+\/vendor\/|(?:^|\/)crates\/paddock-testkit\//;
 const RUST_TEST_FILE = /(?:^|\/)(?:tests|benches)\/.+\.rs$|(?:^|\/)tests\.rs$|_tests?\.rs$/;
 const SLEEP_FN = /\b(?:std::)?thread::sleep\s*\(|\b(?:tokio::)?time::sleep\s*\(/;
 
