@@ -993,8 +993,9 @@ mod tests {
         port
     }
 
-    /// The renderers, a page over them, the cues it sent, and the folder its throwaway profiles go below (removed last).
-    type Live = (Arc<Renderers>, ChromiumPage, Arc<Mutex<Vec<Cue>>>, tempfile::TempDir);
+    /// The folder throwaway profiles go below, the renderers, a page over them and the cues it sent. The folder is first so
+    /// that its binding, declared first, is dropped last: after the browsers that write into it.
+    type Live = (tempfile::TempDir, Arc<Renderers>, ChromiumPage, Arc<Mutex<Vec<Cue>>>);
 
     fn live_page() -> Option<Live> {
         chromium_driver::find_for_tests()?;
@@ -1014,12 +1015,12 @@ mod tests {
             notify: Arc::new(move |c| s2.lock().unwrap().push(c)),
             lease: Lease::default(),
         };
-        Some((renderers, page, seen, dir))
+        Some((dir, renderers, page, seen))
     }
 
     #[test]
     fn reads_a_scripted_page_through_the_ports_with_nothing_of_ours_in_it() {
-        let Some((renderers, page, seen, _dir)) = live_page() else { return };
+        let Some((_dir, renderers, page, seen)) = live_page() else { return };
         let port = serve();
         let url = WebUrl::parse(&format!("http://127.0.0.1:{port}/")).unwrap();
         page.navigate(&url).expect("navigate");
@@ -1065,7 +1066,7 @@ mod tests {
 
     #[test]
     fn a_challenge_page_comes_to_the_front_and_the_work_continues_when_it_is_solved() {
-        let Some((renderers, page, seen, _dir)) = live_page() else { return };
+        let Some((_dir, renderers, page, seen)) = live_page() else { return };
         let port = serve();
         let url = WebUrl::parse(&format!("http://127.0.0.1:{port}/check")).unwrap();
         page.navigate(&url).expect("navigates once the check is gone");
