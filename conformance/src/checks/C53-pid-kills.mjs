@@ -80,7 +80,8 @@ export default {
     const fix =
       'End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`.';
     for (const f of ctx.files()) {
-      if (!f.endsWith('.rs') || IMPLEMENTATION.has(f)) continue;
+      // Vendored third-party code (a `vendor/` folder, e.g. Dyno's patched sysinfo) is its upstream's, not this repository's.
+      if (!f.endsWith('.rs') || IMPLEMENTATION.has(f) || /(?:^|\/)vendor\//.test(f)) continue;
       const text = ctx.read(f);
       if (!text || !/kill|Stop-Process|Terminate(?:Process|JobObject)|ADR 0033 WP-|disallowed_methods/.test(text)) continue;
       for (const k of pidKills(text)) {

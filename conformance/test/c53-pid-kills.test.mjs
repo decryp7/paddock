@@ -49,3 +49,9 @@ test('C53 through the runner: an error per bare-pid kill, none in the one implem
   assert.match(f.find((x) => x.file.endsWith('bad.rs')).fix, /ProcessId/);
   assert.match(f.find((x) => x.file.endsWith('b.rs')).message, /no reason/);
 });
+
+test('C53 leaves vendored third-party code to its own upstream (a vendor/ folder)', async () => {
+  const bad = 'fn a() {\n    Command::new("taskkill");\n}\n';
+  const f = await findingsOf('C53', makeApp({ 'apps/x/vendor/dep/src/win.rs': bad, 'crates/a/src/bad.rs': bad }));
+  assert.deepEqual(f.map((x) => x.file), ['crates/a/src/bad.rs']);
+});
