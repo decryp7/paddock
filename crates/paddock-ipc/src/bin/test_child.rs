@@ -184,6 +184,24 @@ fn fill_descriptors() -> Vec<std::fs::File> {
     while let Ok(f) = std::fs::File::open("/dev/null") {
         fillers.push(f);
     }
+    // A slot another thread held for a moment when the loop above hit EMFILE (Linux's accept4 takes one before it looks
+    // for a client) is free again now: take every slot below the limit, so "no descriptor left" holds. Bounded.
+    let below = libc::c_int::try_from(limits.rlim_cur).unwrap_or(libc::c_int::MAX);
+    // SAFETY: F_GETFD only reads the flags of a descriptor number; a closed one is EBADF.
+    #[allow(unsafe_code)]
+    let free = || {
+        (0..below)
+            .filter(|fd| unsafe { libc::fcntl(*fd, libc::F_GETFD) } == -1)
+            .count()
+    };
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while free() > 0 && std::time::Instant::now() < until {
+        match std::fs::File::open("/dev/null") {
+            Ok(f) => fillers.push(f),
+            Err(_) => std::thread::yield_now(),
+        }
+    }
+    assert_eq!(free(), 0, "the descriptor table could not be filled");
     fillers
 }
 

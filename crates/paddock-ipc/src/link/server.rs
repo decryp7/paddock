@@ -94,14 +94,15 @@ impl ServerConfig {
     }
 }
 
-/// Runs `work` with `stream` on a thread from `spawn`; when no thread can be started, the client is told `busy` with the
-/// cause instead of seeing its connection end (CI run 7763; a stopgap of ADR 0072 for I7).
+/// Runs `work` with `stream` on a thread from `spawn` and returns whether it started; when no thread can be started, the
+/// failure goes to `record` and then the client is told `busy` with the cause instead of seeing its connection end (CI run 7763; a stopgap of ADR 0072 for I7).
 fn hand_over(
     auth: &Authenticator,
     stream: Stream,
     spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> std::io::Result<()>,
     work: impl FnOnce(Stream) + Send + 'static,
-) -> Result<(), IpcError> {
+    record: impl FnOnce(IpcError),
+) -> bool {
     // The stream waits in a slot the thread empties; a thread that never started leaves it there to be answered.
     let slot = Arc::new(Mutex::new(Some(stream)));
     let theirs = slot.clone();
@@ -111,17 +112,18 @@ fn hand_over(
             work(stream);
         }
     }));
-    started.map_err(|e| {
-        let why = format!("cannot start a handshake thread: {e}");
-        let left = lock(&slot).take();
-        if let Some(stream) = left {
-            auth.refuse_busy(
-                stream,
-                &format!("the host cannot take a connection now ({why}); try again later"),
-            );
-        }
-        IpcError::Spawn(why)
-    })
+    let Err(e) = started else { return true };
+    let why = format!("cannot start a handshake thread: {e}");
+    // Recorded before the client is answered, so the server's record never trails what the client was told.
+    record(IpcError::Spawn(why.clone()));
+    let left = lock(&slot).take();
+    if let Some(stream) = left {
+        auth.refuse_busy(
+            stream,
+            &format!("the host cannot take a connection now ({why}); try again later"),
+        );
+    }
+    false
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -210,8 +212,9 @@ impl LinkServer {
                         Ok(accepted) => accepted,
                         Err(e) if e.kind() == std::io::ErrorKind::TimedOut => continue,
                         Err(e) => {
+                            // Recorded before the client is answered, so `refused()` never trails what a client was told.
+                            s.refuse(IpcError::from(std::io::Error::new(e.kind(), e.to_string())));
                             host.turn_away(&e);
-                            s.refuse(e.into());
                             std::thread::sleep(ACCEPT_ERROR_PAUSE);
                             continue;
                         }
@@ -220,11 +223,11 @@ impl LinkServer {
                     if in_progress >= max_handshakes
                         || s.open_peers() + in_progress >= max_connections
                     {
-                        auth.refuse_busy(stream, "too many connections; try again");
                         s.refuse(IpcError::Remote(RemoteError::new(
                             codes::BUSY,
                             "too many connections",
                         )));
+                        auth.refuse_busy(stream, "too many connections; try again");
                         continue;
                     }
                     s.handshakes.fetch_add(1, Ordering::SeqCst);
@@ -250,10 +253,10 @@ impl LinkServer {
                             }
                             s2.handshakes.fetch_sub(1, Ordering::SeqCst);
                         },
+                        |e| s.refuse(e),
                     );
-                    if let Err(e) = spawned {
+                    if !spawned {
                         s.handshakes.fetch_sub(1, Ordering::SeqCst);
-                        s.refuse(e);
                     }
                 }
             })
@@ -375,7 +378,9 @@ mod tests {
         let (stream, _) = listener.accept(Duration::from_secs(10)).unwrap();
         let ran = Arc::new(AtomicBool::new(false));
         let r = ran.clone();
-        let e = hand_over(
+        let recorded = Arc::new(Mutex::new(None));
+        let rec = recorded.clone();
+        let started = hand_over(
             &host.authenticator(),
             stream,
             |_| {
@@ -385,10 +390,12 @@ mod tests {
                 ))
             },
             move |_| r.store(true, Ordering::SeqCst),
-        )
-        .unwrap_err();
+            move |e| *lock(&rec) = Some(e),
+        );
+        assert!(!started);
+        let e = lock(&recorded).take();
         assert!(
-            matches!(&e, IpcError::Spawn(m) if m.contains("no thread left")),
+            matches!(&e, Some(IpcError::Spawn(m)) if m.contains("no thread left")),
             "{e:?}"
         );
         assert!(!ran.load(Ordering::SeqCst));
@@ -408,7 +415,7 @@ mod tests {
         let (stream, _) = listener.accept(Duration::from_secs(10)).unwrap();
         let ran = Arc::new(AtomicBool::new(false));
         let r = ran.clone();
-        hand_over(
+        let started = hand_over(
             &host.authenticator(),
             stream,
             |work| {
@@ -416,8 +423,9 @@ mod tests {
                 Ok(())
             },
             move |_| r.store(true, Ordering::SeqCst),
-        )
-        .unwrap();
+            |e| panic!("nothing to record: {e:?}"),
+        );
+        assert!(started);
         assert!(ran.load(Ordering::SeqCst));
     }
 }
