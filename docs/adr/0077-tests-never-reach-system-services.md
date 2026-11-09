@@ -1,7 +1,6 @@
 # 77. Tests never reach the machine's system services: one reach decision, guarded adapters, a register check and a host probe
 
-- Status: Proposed (2026-11-09). The user approved drafting on 2026-11-09 (ER-21 redesigns). Needs the decisions below
-  and an independent review before any build.
+- Status: Accepted (2026-11-09). The user accepted it as recommended on 2026-11-09 (ER-21 redesigns).
 - Date: 2026-11-09
 - Related: ER-14 / rule 7 (tests never touch the user's machine), ER-21 / rule 40 (recurring bugs mean a missing design
   rule), ER-22 / rules 42, 43 and 55 (share first; one implementation per mechanism), ER-27 (logs explain every failure),

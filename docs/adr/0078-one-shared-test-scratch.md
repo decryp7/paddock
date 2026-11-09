@@ -1,7 +1,6 @@
 # 78. One shared test scratch: one folder type per language, a per-run root, every failed removal reported, a leak check in every test job
 
-- Status: Proposed (2026-11-09). The user approved drafting on 2026-11-09 (ER-21 redesigns). Needs the decisions below
-  and an independent review before any build.
+- Status: Accepted (2026-11-09). The user accepted it as recommended on 2026-11-09 (ER-21 redesigns).
 - Date: 2026-11-09
 - Related: ER-14 / rule 7 (tests leave nothing behind), ER-12 / rule 5 (no retry that turns a red run green), ER-21 /
   rule 40, ER-22 / rules 42, 43 and 55 (share first; one implementation per mechanism, `docs/known-copies.toml`, ADR
