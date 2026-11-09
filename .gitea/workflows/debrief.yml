@@ -170,6 +170,8 @@ jobs:
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     env:
+      # The nightly runs the store tests at the app's own thread counts (debrief-store-duck tests/common::test_options).
+      DEBRIEF_TEST_APP_BUDGETS: ${{ github.event_name == 'schedule' && '1' || '0' }}
       # A missing test browser fails the real-browser tests instead of skipping them.
       DEBRIEF_REQUIRE_TEST_BROWSER: "1"
       # Chromium refuses to run as root, which the job's container is: the explicit root-only opt-in to start without the
