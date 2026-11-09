@@ -31,6 +31,17 @@ fn skip(reason: &str) {
     }
 }
 
+/// The history comparison is platform-independent logic that the Linux leg proves; on a Windows or macOS host leg in CI it costs
+/// minutes of node and graph reads on a loaded runner. There it says so (a `::notice::` in the job log) and stops.
+fn only_on_the_linux_leg(what: &str) -> bool {
+    let ci = ["CI", "GITHUB_ACTIONS"].iter().any(|k| std::env::var(k).is_ok_and(|v| v == "true"));
+    let host_leg = ci && !cfg!(target_os = "linux");
+    if host_leg {
+        println!("::notice::{what} was skipped on this host leg: it is platform-independent and the Linux leg runs it.");
+    }
+    host_leg
+}
+
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().to_path_buf()
 }
@@ -387,6 +398,9 @@ fn live_command_line_matches_affected_mjs_on_a_copy_of_the_fixture_repository() 
 /// Pairs of first-parent commits of this working tree: the range mode on real history, the script as the oracle.
 #[test]
 fn live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history() {
+    if only_on_the_linux_leg("the first-parent history comparison") {
+        return;
+    }
     if !repo_root().join("scripts/affected.mjs").exists() || Command::new("node").arg("--version").output().is_err() {
         skip("scripts/affected.mjs or node is not available");
         return;
