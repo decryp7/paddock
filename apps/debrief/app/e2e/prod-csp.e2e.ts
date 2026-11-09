@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { openApp, openView } from './app';
 
-// Regression guard: the production build must run under the Tauri CSP (see serve-prod.mjs).
+// Regression guard: the production build must run under the Tauri CSP (see ui/projects/paddock-e2e/src/serve-prod.ts).
 // Angular's critical-CSS inlining once emitted an inline handler that this CSP blocked, which
 // left the real app unstyled; any CSP violation or page error here fails the build.
 test('production build loads under the Tauri CSP without violations', async ({ page }) => {
