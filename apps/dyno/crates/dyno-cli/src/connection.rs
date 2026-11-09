@@ -22,6 +22,10 @@ impl Env {
     ///
     /// # Errors
     /// No per-user folder is known and the private fallback is not safe to use; the message says what to fix.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the temp folder is only the base `paddock_env::private_fallback_dir` makes a private per-user folder under; a shared fixed path is never used"
+    )]
     pub fn from_process() -> Result<Env, String> {
         let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
         Env::resolve(&env, &std::env::temp_dir())

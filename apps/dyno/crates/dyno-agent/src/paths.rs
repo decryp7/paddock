@@ -79,6 +79,10 @@ impl Dirs {
     ///
     /// # Errors
     /// No per-user folder is known and the private fallback cannot be made or is not safe to use.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the temp folder is only the base `paddock_env::private_fallback_dir` makes a private per-user folder under; a shared fixed path is never used"
+    )]
     pub fn try_current() -> Result<Dirs, paddock_env::EnvError> {
         Dirs::resolve(
             &|k| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from),

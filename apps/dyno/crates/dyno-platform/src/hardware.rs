@@ -759,10 +759,12 @@ mod tests {
     }
 
     fn temp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("dyno-it-hw-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
+        // A fresh folder the test removes itself (the callers end with `remove_dir_all`).
+        tempfile::Builder::new()
+            .prefix(&format!("dyno-it-hw-{name}-"))
+            .tempdir()
+            .unwrap()
+            .keep()
     }
 
     fn write(path: &Path, text: &str) {
