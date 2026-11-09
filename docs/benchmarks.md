@@ -265,7 +265,7 @@ Quoted by [ADR 0080](adr/0080-ci-at-the-speed-of-the-critical-path.md).
   | `ci.yml` queue of the last job | median 33.8 min, p90 113.4 min |
   | `debrief.yml` wall / no-queue path, 13 runs | median 62.1 / 23.4 min |
   | Run 7821 (`ci.yml`, train) / 7822 (`debrief.yml`) | 47.4 / 21.8 min; Linux 26 jobs, 104 job-min / 11 jobs, 55 job-min; last Linux job of 7821 queued 31.5 min |
-  | Run 7824 at 16.7 min | 19 Linux jobs queued |
+  | Run 7824 at 16.7 min | 19 jobs queued: 17 Linux, 2 macOS |
   | `plan` job | median 34 s, p90 211 s; in 7821 2.9 min (55 s before the first step, 100 s checkout) |
   | Linux job time by phase (6 runs) | Playwright 211 of 453 min (47 %), compile 70 (15 %), nextest run 16 (3 %) |
   | macOS / Windows job time by phase | compile 50 % / 54 %; nextest run 18 % / 13 %; Playwright 5 % / 0 % |
@@ -275,6 +275,8 @@ Quoted by [ADR 0080](adr/0080-ci-at-the-speed-of-the-critical-path.md).
   | Concurrency, last 24 h, share of time at each level | Linux: 0 jobs 35 %, 4 jobs 47 %, more than 4 3 %; Windows: 1 job 59 %, 3 jobs 8 %; macOS: 1 job 37 %, 3 jobs 26 % |
   | Queue wait, last 72 h, p50 / p90 | Linux 7.3 / 35.1 min; Windows 20.7 / 79.9 min; macOS 19.7 / 72.5 min |
   | Mean busy lanes, last 72 h | Linux 1.31, Windows 0.53, macOS 0.70 |
+  | Linux lanes while a Linux job waited, last 72 h (1,523 such minutes) | all 4 busy in 74 %; two or more runs in play in 56 % |
+  | Linux host idle, last 72 h | 61 % of the time; 62 % between 00:00 and 08:00 +08, 61 % between 08:00 and 24:00 |
   | sccache hits / misses (6 runs) | Linux 34,027 / 3,217 (91.4 %); macOS 587 / 1,836 (24.2 %); Windows 583 / 1,580 (27.0 %) |
   | Misses of the same job on two OS (7821 `crate`) | Linux 78, macOS 79 |
   | Cold slot (7810 `app dyno (windows)`, `sccache-s3`) | 1,020 misses, 2 hits |
@@ -284,6 +286,12 @@ Quoted by [ADR 0080](adr/0080-ci-at-the-speed-of-the-critical-path.md).
   | Failed `ci.yml`/`debrief.yml` runs: minutes in failed jobs | 1,394 of 5,724 (24 %); median 9 % of jobs fail |
   | Slowest tests | `debrief-store-duck` suites on macOS 60 to 126 s, three 180 s timeouts in 7822; `paddock-dev` golden 196 s (Windows); tests over 10 s: 150 of 403 test-min |
   | 49 failed jobs in 12 runs | 7 on static checks (seconds locally), 2 on the job-isolation holder, the rest on tests (load- or OS-dependent on macOS and Windows, plus goldens) |
+  | Jobs in the sample | 5,005 listed, 3,957 not skipped, 3,624 with a start and an end (the base of every count here) |
+  | Host test time by class (file of each test; macOS 347, Windows 103 test-min) | adapter package 15 / 34 %; `cfg(os)` file 13 / 11 %; file with a listed OS-touching API 35 / 14 %; unknown package 2 / 13 %; generic 34 / 29 % |
+  | Packages with any `cfg(os)` code | 75 of 134; 73 % (macOS) and 80 % (Windows) of host test time |
+  | Debrief `rust tests (macOS)` (7697, 7822, 7813) | wall 8.3 / 19.1 / 46.0 min; 208 test-min: generic 34 %, `cfg(os)` files 13 %, OS-touching API 51 %, adapters 2 %; 26 of 83 test binaries only generic (2 % of its test time) |
+  | `crate` doc tests and features-off build on hosts (5.5 days) | macOS 83 + 97 min, Windows 71 + 68 min; failed alone: features-off 11 times on Linux, once on macOS, never on Windows; doc tests once on macOS |
+  | Duplicated or input-independent work (5.5 days) | `dyno-release.yml` gates on commits `ci.yml` also ran: 903 job-min; WebKit legs in `ci.yml`: 664; notices, publish dry run, plugin SDK templates: about 290; tiny static jobs 117 and commit lint 71 |
 
 - **Memory:** not measured.
 - **Notes:** the `ci.yml` and `debrief.yml` figures use those workflows' `needs`; the 72-hour queue figures include the
