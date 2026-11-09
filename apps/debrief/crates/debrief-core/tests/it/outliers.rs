@@ -31,8 +31,7 @@ fn store() -> (WorkspaceStore, std::path::PathBuf) {
 
 /// A store over one log file with this text.
 fn store_of(text: &str) -> (WorkspaceStore, std::path::PathBuf) {
-    let dir = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir = crate::scratch::scratch_dir("core-outliers");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("svc.log");
     std::fs::write(&path, text).unwrap();

@@ -177,8 +177,8 @@ fn the_library_reads_each_sample_folder_with_its_parser() {
 
 #[test]
 fn a_mixed_folder_uses_a_parser_per_file_and_a_disabled_parser_is_skipped() {
-    let _dir_scratch = tempfile::tempdir().unwrap();
-    let dir = _dir_scratch.path().join(format!("debrief-parsers-e2e-{}", std::process::id()));
+    let dir_scratch = tempfile::tempdir().unwrap();
+    let dir = dir_scratch.path().join(format!("debrief-parsers-e2e-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     for id in ["serilog-clef", "log4net-csv", "nlog", "android-logcat"] {
@@ -257,8 +257,8 @@ fn lanes_by_source(ws: &Workspace) -> std::collections::BTreeMap<String, std::co
 // workspace and split the timeline of another file that also writes a `Logger` field (log4net's PatternLayout).
 #[test]
 fn a_parsers_identity_fields_split_only_the_sources_it_reads() {
-    let _dir_scratch = tempfile::tempdir().unwrap();
-    let dir = _dir_scratch.path().join(format!("debrief-parsers-identity-{}", std::process::id()));
+    let dir_scratch = tempfile::tempdir().unwrap();
+    let dir = dir_scratch.path().join(format!("debrief-parsers-identity-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     for id in ["hadoop-spark", "log4net-pattern"] {
@@ -304,8 +304,8 @@ fn a_parsers_identity_fields_split_only_the_sources_it_reads() {
 fn plugin_formats_need_their_plugin() {
     // Without the Syslog plugin the syslog sample is the generic parser's (as text).
     let mut ws = Workspace::with_registry(Profile::default_profile(), PluginRegistry::new()).unwrap();
-    let _dir_scratch = tempfile::tempdir().unwrap();
-    let dir = _dir_scratch.path().join(format!("debrief-parsers-plugin-{}", std::process::id()));
+    let dir_scratch = tempfile::tempdir().unwrap();
+    let dir = dir_scratch.path().join(format!("debrief-parsers-plugin-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("syslog.log"), file("syslog").sample).unwrap();
@@ -488,8 +488,8 @@ fn parser_samples_keep_the_details_of_their_format() {
 
 #[test]
 fn a_folder_of_every_parser_sample_splits_by_parser() {
-    let _dir_scratch = tempfile::tempdir().unwrap();
-    let dir = _dir_scratch.path().join(format!("debrief-parsers-mixed-{}", std::process::id()));
+    let dir_scratch = tempfile::tempdir().unwrap();
+    let dir = dir_scratch.path().join(format!("debrief-parsers-mixed-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     for (folder, file, _) in PARSER_SAMPLES {

@@ -12,9 +12,8 @@ use std::time::{Duration, Instant};
 struct TempDir(PathBuf);
 
 impl TempDir {
-    fn new(_tag: &str) -> TempDir {
-        let p = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
-        let _ = std::fs::remove_dir_all(&p);
+    fn new(tag: &str) -> TempDir {
+        let p = crate::scratch::scratch_dir(&format!("discover-{tag}"));
         std::fs::create_dir_all(&p).unwrap();
         TempDir(std::fs::canonicalize(p).unwrap())
     }

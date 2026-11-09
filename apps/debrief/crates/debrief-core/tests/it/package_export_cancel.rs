@@ -5,9 +5,8 @@ use debrief_core::package::{export_phase, part_path, ExportCancelled, ExportPhas
 use debrief_core::ql::QueryControl;
 use std::path::PathBuf;
 
-fn project(_tag: &str, big: usize) -> (PathBuf, ProjectDir) {
-    let root = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
-    let _ = std::fs::remove_dir_all(&root);
+fn project(tag: &str, big: usize) -> (PathBuf, ProjectDir) {
+    let root = crate::scratch::scratch_dir(&format!("export-cancel-{tag}"));
     std::fs::create_dir_all(&root).unwrap();
     let dir = root.join("p.debrief");
     let p = ProjectDir::create(&dir, "p").unwrap();

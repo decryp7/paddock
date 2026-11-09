@@ -32,6 +32,8 @@ pub mod sandbox;
 pub mod scratch;
 pub mod stderr_pipe;
 pub mod supervisor;
+#[cfg(test)]
+pub(crate) mod test_dirs;
 #[cfg(all(unix, feature = "test-support"))]
 pub mod testing;
 pub mod wire;

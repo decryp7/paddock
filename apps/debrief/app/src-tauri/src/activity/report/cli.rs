@@ -277,8 +277,8 @@ mod tests {
 
     #[test]
     fn folders_follow_the_override_root_and_the_identifier() {
-        let _root_scratch = tempfile::tempdir().unwrap();
-        let root = _root_scratch.path().join("debrief-cli-root");
+        let root_scratch = tempfile::tempdir().unwrap();
+        let root = root_scratch.path().join("debrief-cli-root");
         let f = folders(Some(&root)).unwrap();
         assert_eq!(
             (f.data, f.config, f.log),

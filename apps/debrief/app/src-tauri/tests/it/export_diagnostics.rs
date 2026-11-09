@@ -3,11 +3,12 @@
 
 use std::path::{Path, PathBuf};
 
-fn temp(_tag: &str) -> PathBuf {
-    let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
-    let _ = std::fs::remove_dir_all(&d);
-    std::fs::create_dir_all(&d).unwrap();
-    d
+/// A fresh folder for one test, removed when the guard is dropped (also after a failed assert).
+fn temp(tag: &str) -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix(&format!("debrief-export-cli-{tag}-"))
+        .tempdir()
+        .unwrap()
 }
 
 fn run(root: &Path, args: &[&str]) -> std::process::Output {
@@ -25,7 +26,8 @@ fn the_cli_exports_a_report_without_a_window() {
         // Release builds ignore DEBRIEF_DATA_DIR by design.
         return;
     }
-    let root = temp("e2e");
+    let guard = temp("e2e");
+    let root = guard.path().to_path_buf();
     let logs = root.join("logs");
     std::fs::create_dir_all(logs.join("children")).unwrap();
     std::fs::create_dir_all(root.join("config")).unwrap();

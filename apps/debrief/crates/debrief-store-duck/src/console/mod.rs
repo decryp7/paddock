@@ -667,8 +667,8 @@ mod tests {
     /// folder, load or install an extension, or undo the sandbox.
     #[test]
     fn the_sandbox_holds_without_the_checks() {
-        let _dir_scratch = tempfile::tempdir().unwrap();
-        let dir = _dir_scratch.path().join(format!("debrief-sql-sandbox-{}", std::process::id()));
+        let dir_scratch = tempfile::tempdir().unwrap();
+        let dir = dir_scratch.path().join(format!("debrief-sql-sandbox-{}", std::process::id()));
         let seg = dir.join("segments");
         std::fs::create_dir_all(&seg).unwrap();
         let outside = dir.join("secret.csv");

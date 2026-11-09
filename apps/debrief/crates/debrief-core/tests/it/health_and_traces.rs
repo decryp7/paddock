@@ -11,7 +11,7 @@ struct TempDir(PathBuf);
 
 impl TempDir {
     fn new() -> TempDir {
-        let p = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
+        let p = crate::scratch::scratch_dir("health");
         // Opened paths are canonical (e.g. /private/var on macOS).
         TempDir(p.canonicalize().unwrap())
     }

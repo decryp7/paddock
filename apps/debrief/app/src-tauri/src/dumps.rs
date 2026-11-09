@@ -593,7 +593,7 @@ mod tests {
     }
 
     fn tempfile_dir() -> std::path::PathBuf {
-        let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
+        let d = crate::test_support::scratch_dir("dumps-test");
         std::fs::create_dir_all(&d).unwrap();
         d
     }

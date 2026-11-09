@@ -8,9 +8,8 @@ use std::path::{Path, PathBuf};
 
 struct Dir(PathBuf);
 impl Dir {
-    fn new(_tag: &str) -> Dir {
-        let p = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
-        let _ = std::fs::remove_dir_all(&p);
+    fn new(tag: &str) -> Dir {
+        let p = crate::scratch::scratch_dir(&format!("ap-{tag}"));
         std::fs::create_dir_all(&p).unwrap();
         Dir(std::fs::canonicalize(p).unwrap())
     }

@@ -17,8 +17,7 @@ impl Drop for TempDir {
 }
 
 fn noisy_folder() -> TempDir {
-    let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
-    let _ = std::fs::remove_dir_all(&d);
+    let d = crate::scratch::scratch_dir("survey-noise");
     std::fs::create_dir_all(&d).unwrap();
     let mut text = String::new();
     for i in 0..240u32 {

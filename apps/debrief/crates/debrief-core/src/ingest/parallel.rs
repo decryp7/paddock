@@ -393,7 +393,7 @@ mod tests {
     fn temp() -> PathBuf {
         let mut b = [0u8; 8];
         getrandom::fill(&mut b).unwrap();
-        let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
+        let d = crate::test_dirs::scratch_dir("parallel");
         std::fs::create_dir_all(&d).unwrap();
         d
     }

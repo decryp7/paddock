@@ -16,7 +16,7 @@ fn store() -> &'static (dyn LogStore + 'static) {
     static STORE: OnceLock<Box<dyn LogStore>> = OnceLock::new();
     STORE
         .get_or_init(|| {
-            let dir = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
+            let dir = crate::scratch::scratch_dir("cancel");
             std::fs::create_dir_all(&dir).unwrap();
             let mut text = String::with_capacity(RECORDS * 120);
             for i in 0..RECORDS {

@@ -1117,9 +1117,8 @@ mod tests {
         assert!(all[1].inactive_reason.as_deref().unwrap().starts_with("registration failed"));
     }
 
-    fn temp(_tag: &str) -> PathBuf {
-        let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
-        let _ = std::fs::remove_dir_all(&d);
+    fn temp(tag: &str) -> PathBuf {
+        let d = crate::test_support::scratch_dir(&format!("life-{tag}"));
         d
     }
 

@@ -19,11 +19,12 @@ use std::time::Duration;
 struct TempDir(PathBuf);
 
 impl TempDir {
-    fn new(_tag: &str) -> TempDir {
-        let mut b = [0u8; 8];
-        getrandom::fill(&mut b).unwrap();
-        let p = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
-        std::fs::create_dir_all(&p).unwrap();
+    fn new(tag: &str) -> TempDir {
+        let p = tempfile::Builder::new()
+            .prefix(&format!("debrief-parity-{tag}-"))
+            .tempdir()
+            .unwrap()
+            .keep();
         TempDir(p)
     }
 }

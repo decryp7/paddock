@@ -273,9 +273,8 @@ mod tests {
     use super::*;
     use debrief_core::names::group::NameGroup;
 
-    fn temp(_name: &str) -> PathBuf {
-        let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
-        let _ = std::fs::remove_dir_all(&d);
+    fn temp(name: &str) -> PathBuf {
+        let d = crate::test_support::scratch_dir(&format!("it-names-{name}"));
         d
     }
 

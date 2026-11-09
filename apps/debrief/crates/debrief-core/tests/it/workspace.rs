@@ -14,7 +14,7 @@ struct TempDir(PathBuf);
 
 impl TempDir {
     fn new() -> TempDir {
-        let p = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
+        let p = crate::scratch::scratch_dir("test");
         std::fs::create_dir_all(&p).unwrap();
         TempDir(p)
     }

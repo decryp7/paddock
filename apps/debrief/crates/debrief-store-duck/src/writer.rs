@@ -639,10 +639,7 @@ mod tests {
     use debrief_core::batch::{EventBatchBuilder, EventTime, LevelCode, NewEvent};
 
     fn store() -> (PathBuf, Connection) {
-        let mut b = [0u8; 8];
-        getrandom::fill(&mut b).unwrap();
-        let dir = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_dirs::scratch_dir("writer");
         let c = Connection::open(dir.join("data.duckdb")).unwrap();
         c.execute_batch(&crate::schema::ddl(&EventSchema::plain())).unwrap();
         refresh_view(&c, &dir, &EventSchema::plain()).unwrap();

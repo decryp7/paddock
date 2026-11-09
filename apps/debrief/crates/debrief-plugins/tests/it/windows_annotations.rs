@@ -32,9 +32,7 @@ fn ms(t: &str) -> i64 {
 
 #[test]
 fn reboots_and_services_become_spans_and_follow_appends() {
-    let dir = Dir(tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep());
-    let _ = std::fs::remove_dir_all(&dir.0);
-    std::fs::create_dir_all(&dir.0).unwrap();
+    let dir = Dir(tempfile::Builder::new().prefix("debrief-win-annot-").tempdir().unwrap().keep());
     let file = dir.0.join("system.clef");
     let mut text = String::new();
     text += &line("10:00:00", "App", 1, "");

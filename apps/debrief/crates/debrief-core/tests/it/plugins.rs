@@ -131,8 +131,8 @@ fn plugin_contributions_flow_through_the_workspace() {
     assert!(s.plugins.iter().any(|p| p.id == "com.acme.tools"));
 
     // Exporting with the plugin's exporter.
-    let _out_scratch = tempfile::tempdir().unwrap();
-    let out = _out_scratch.path().join(format!("debrief-export-{}.txt", std::process::id()));
+    let out_scratch = tempfile::tempdir().unwrap();
+    let out = out_scratch.path().join(format!("debrief-export-{}.txt", std::process::id()));
     let res = ws
         .export(&ExportRequest {
             query: Query::default(),
@@ -348,8 +348,8 @@ impl Plugin for TsvPlugin {
 
 #[test]
 fn importer_plugins_and_default_hooks_through_the_store_trait() {
-    let _dir_scratch = tempfile::tempdir().unwrap();
-    let dir = _dir_scratch.path().join(format!("debrief-tsv-{}", std::process::id()));
+    let dir_scratch = tempfile::tempdir().unwrap();
+    let dir = dir_scratch.path().join(format!("debrief-tsv-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("a.data"), "TSV\nx\ty\nlong message here\n").unwrap();
     let mut registry = PluginRegistry::new();
@@ -386,10 +386,8 @@ fn importer_plugins_and_default_hooks_through_the_store_trait() {
 
 #[test]
 fn lookup_file_defaults_to_the_first_column() {
-    let _file_scratch = tempfile::tempdir().unwrap();
-    let file = _file_scratch
-        .path()
-        .join(format!("debrief-lookup-first-{}.csv", std::process::id()));
+    let file_scratch = tempfile::tempdir().unwrap();
+    let file = file_scratch.path().join(format!("debrief-lookup-first-{}.csv", std::process::id()));
     std::fs::write(&file, "Machine,Owner\nWEB01,team-a\n").unwrap();
     let toml = format!("[[pipeline]]\nstep='lookup'\nfield='MachineName'\nfile='{}'", file.display());
     let mut ws = Workspace::new(Profile::from_toml(&toml).unwrap()).unwrap();
@@ -441,8 +439,8 @@ impl Plugin for BinPlugin {
 
 #[test]
 fn binary_importers_get_raw_bytes_first() {
-    let _dir_scratch = tempfile::tempdir().unwrap();
-    let dir = _dir_scratch.path().join(format!("debrief-bin-{}", std::process::id()));
+    let dir_scratch = tempfile::tempdir().unwrap();
+    let dir = dir_scratch.path().join(format!("debrief-bin-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("a.dat"), [b'B', b'I', b'N', b'1', 3, 0, 0, 0, 0xff, 0xfe]).unwrap();
     std::fs::write(dir.join("b.dat"), *b"BIN1").unwrap();
@@ -514,8 +512,8 @@ fn collectors_write_to_sinks_that_debrief_can_open() {
     assert_eq!(c.name(), "Heartbeat");
     assert!(r.collector("nope").is_none());
 
-    let _dir_scratch = tempfile::tempdir().unwrap();
-    let dir = _dir_scratch.path().join(format!("debrief-collector-{}", std::process::id()));
+    let dir_scratch = tempfile::tempdir().unwrap();
+    let dir = dir_scratch.path().join(format!("debrief-collector-{}", std::process::id()));
     let sink = debrief_core::export::ClefFileSink::new(&dir, "heartbeat", 1 << 20, 2).unwrap();
     let stop = std::sync::atomic::AtomicBool::new(false);
     c.run(&serde_json::json!({ "max": 4 }), &sink, &stop).unwrap();
@@ -532,8 +530,8 @@ fn collectors_write_to_sinks_that_debrief_can_open() {
 #[test]
 fn contributions_registered_directly_are_built_ins() {
     // Registered outside `install`: not attributed to any plugin, not guarded.
-    let _dir_scratch = tempfile::tempdir().unwrap();
-    let dir = _dir_scratch.path().join(format!("debrief-direct-{}", std::process::id()));
+    let dir_scratch = tempfile::tempdir().unwrap();
+    let dir = dir_scratch.path().join(format!("debrief-direct-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("a.data"), "TSV\nx\ty\n").unwrap();
     std::fs::write(dir.join("b.dat"), [b'B', b'I', b'N', b'1', 2]).unwrap();

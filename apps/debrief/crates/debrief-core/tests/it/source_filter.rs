@@ -12,7 +12,7 @@ struct TempDir(PathBuf);
 
 impl TempDir {
     fn new() -> TempDir {
-        let p = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
+        let p = crate::scratch::scratch_dir("sources");
         TempDir(p)
     }
 }

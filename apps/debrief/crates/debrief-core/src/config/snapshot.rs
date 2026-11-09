@@ -171,9 +171,8 @@ mod tests {
         }
     }
 
-    fn tmp(_tag: &str) -> Dir {
-        let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
-        let _ = std::fs::remove_dir_all(&d);
+    fn tmp(tag: &str) -> Dir {
+        let d = crate::test_dirs::scratch_dir(&format!("snapshot-{tag}"));
         std::fs::create_dir_all(&d).unwrap();
         Dir(d)
     }

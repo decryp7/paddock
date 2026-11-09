@@ -209,8 +209,8 @@ mod tests {
 
     #[test]
     fn hits_are_cached_by_key_and_version_and_deleted_when_evicted() {
-        let _dir_scratch = tempfile::tempdir().unwrap();
-        let dir = _dir_scratch.path().join(format!("debrief-hits-{}", std::process::id()));
+        let dir_scratch = tempfile::tempdir().unwrap();
+        let dir = dir_scratch.path().join(format!("debrief-hits-{}", std::process::id()));
         let cache = HitsCache::new(&dir);
         let many: Vec<u64> = (0..=INLINE as u64).collect();
         let a = file(cache.get_or_write("a", 1, || Ok(Some(many.clone()))).unwrap());

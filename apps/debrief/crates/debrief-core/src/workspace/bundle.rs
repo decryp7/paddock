@@ -305,8 +305,8 @@ mod tests {
 
     #[test]
     fn large_and_binary_files_are_not_redacted() {
-        let _dir_scratch = tempfile::tempdir().unwrap();
-        let dir = _dir_scratch.path().join(format!("debrief-wsbundle-{}", std::process::id()));
+        let dir_scratch = tempfile::tempdir().unwrap();
+        let dir = dir_scratch.path().join(format!("debrief-wsbundle-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("a.clef"), "{\"@t\":\"2026-10-14T10:00:00Z\",\"@m\":\"x\"}\n").unwrap();

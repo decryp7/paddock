@@ -485,8 +485,8 @@ fn every_severity_of_an_import_problem_has_its_word() {
 
 #[test]
 fn a_summary_of_events_without_timestamps_says_so() {
-    let _dir_scratch = tempfile::tempdir().unwrap();
-    let dir = _dir_scratch.path().join(format!("debrief-incident-untimed-{}", std::process::id()));
+    let dir_scratch = tempfile::tempdir().unwrap();
+    let dir = dir_scratch.path().join(format!("debrief-incident-untimed-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(

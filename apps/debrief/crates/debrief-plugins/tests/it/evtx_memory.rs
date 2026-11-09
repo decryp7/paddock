@@ -35,10 +35,12 @@ impl Drop for TempDir {
     }
 }
 
-fn temp(_name: &str) -> TempDir {
-    let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
-    let _ = std::fs::remove_dir_all(&d);
-    std::fs::create_dir_all(&d).unwrap();
+fn temp(name: &str) -> TempDir {
+    let d = tempfile::Builder::new()
+        .prefix(&format!("debrief-evtx-memory-{name}-"))
+        .tempdir()
+        .unwrap()
+        .keep();
     TempDir(d)
 }
 

@@ -393,9 +393,8 @@ mod tests {
     struct Dir(PathBuf);
 
     impl Dir {
-        fn new(_tag: &str) -> Dir {
-            let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
-            let _ = std::fs::remove_dir_all(&d);
+        fn new(tag: &str) -> Dir {
+            let d = crate::test_dirs::scratch_dir(&format!("parser-lib-{tag}"));
             Dir(d)
         }
     }

@@ -904,7 +904,7 @@ fn a_property_folder_whose_removal_fails_is_gone_when_its_process_ends() {
         .unwrap()
         .0
         .to_string();
-    #[allow(
+    #[expect(
         clippy::disallowed_methods,
         reason = "this test checks that nothing is left in the shared temp folder"
     )]

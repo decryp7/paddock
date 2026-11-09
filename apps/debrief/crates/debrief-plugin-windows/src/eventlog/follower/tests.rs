@@ -244,9 +244,8 @@ fn start(log: &FakeLog, cfg: FollowerConfig, sink: &Arc<MemSink>, store: Option<
     Follower::start(Arc::new(log.clone()), cfg, sink.clone(), store, limits(), Box::new(|| {}))
 }
 
-fn temp(_tag: &str) -> PathBuf {
-    let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
-    let _ = std::fs::remove_dir_all(&d);
+fn temp(tag: &str) -> PathBuf {
+    let d = crate::test_dirs::scratch_dir(&format!("follower-{tag}"));
     d
 }
 

@@ -165,13 +165,7 @@ mod tests {
     use super::*;
 
     fn file(tag: &str, text: &[u8]) -> String {
-        // The folder lives as long as the test's thread.
-        thread_local! {
-            static KEPT: std::cell::RefCell<Vec<tempfile::TempDir>> = const { std::cell::RefCell::new(Vec::new()) };
-        }
-        let dir = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap();
-        let p = dir.path().join(format!("debrief-context-{tag}.log"));
-        KEPT.with(|k| k.borrow_mut().push(dir));
+        let p = crate::test_dirs::scratch_dir(&format!("context-{tag}")).join("events.log");
         std::fs::write(&p, text).unwrap();
         p.to_string_lossy().into_owned()
     }

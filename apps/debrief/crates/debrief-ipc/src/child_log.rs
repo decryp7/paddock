@@ -879,9 +879,8 @@ mod tests {
         UNIX_EPOCH + Duration::from_secs(1_791_968_400 + secs)
     }
 
-    fn temp(_tag: &str) -> PathBuf {
-        let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
-        let _ = std::fs::remove_dir_all(&d);
+    fn temp(tag: &str) -> PathBuf {
+        let d = crate::test_dirs::scratch_dir(&format!("child-log-{tag}"));
         d
     }
 

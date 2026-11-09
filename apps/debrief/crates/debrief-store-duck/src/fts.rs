@@ -879,8 +879,8 @@ mod tests {
 
     #[test]
     fn the_writer_is_dropped_only_when_an_import_holds_the_store() {
-        let _dir_scratch = tempfile::tempdir().unwrap();
-        let dir = _dir_scratch.path().join(format!("debrief-fts-drop-{}", std::process::id()));
+        let dir_scratch = tempfile::tempdir().unwrap();
+        let dir = dir_scratch.path().join(format!("debrief-fts-drop-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(&crate::schema::ddl(&debrief_core::batch::EventSchema::plain()))
@@ -957,8 +957,8 @@ mod tests {
         assert_eq!(writer_shape(WriterBudget { heap: mb, threads: 4 }), (4, 15 * mb));
         assert_eq!(writer_shape(WriterBudget { heap: 0, threads: 0 }), (1, 15 * mb));
         // The writer is built with that shape.
-        let _dir_scratch = tempfile::tempdir().unwrap();
-        let dir = _dir_scratch.path().join(format!("debrief-fts-shape-{}", std::process::id()));
+        let dir_scratch = tempfile::tempdir().unwrap();
+        let dir = dir_scratch.path().join(format!("debrief-fts-shape-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let (fts, _) = Fts::open_or_create(
             &dir,
@@ -989,8 +989,7 @@ mod tests {
     impl Indexed {
         fn new(_tag: &str) -> Indexed {
             use debrief_core::ports::Ingest;
-            let dir = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
-            let _ = std::fs::remove_dir_all(&dir);
+            let dir = crate::test_dirs::scratch_dir("fts");
             let logs = dir.join("logs");
             std::fs::create_dir_all(&logs).unwrap();
             std::fs::write(

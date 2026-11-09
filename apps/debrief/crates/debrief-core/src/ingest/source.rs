@@ -428,7 +428,7 @@ mod tests {
     }
 
     fn temp() -> PathBuf {
-        let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
+        let d = crate::test_dirs::scratch_dir("ingest");
         std::fs::create_dir_all(&d).unwrap();
         d
     }

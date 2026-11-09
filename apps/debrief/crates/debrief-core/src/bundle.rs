@@ -369,9 +369,8 @@ mod tests {
     use super::*;
     use zip::write::SimpleFileOptions;
 
-    pub(crate) fn temp(_name: &str) -> PathBuf {
-        let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
-        let _ = std::fs::remove_dir_all(&d);
+    pub(crate) fn temp(name: &str) -> PathBuf {
+        let d = crate::test_dirs::scratch_dir(&format!("bundle-{name}"));
         std::fs::create_dir_all(&d).unwrap();
         d
     }

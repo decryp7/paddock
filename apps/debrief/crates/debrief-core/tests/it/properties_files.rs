@@ -70,8 +70,7 @@ struct TempDir(PathBuf);
 
 impl TempDir {
     fn new() -> TempDir {
-        let p = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
-        let _ = std::fs::remove_dir_all(&p);
+        let p = crate::scratch::scratch_dir("propf");
         std::fs::create_dir_all(&p).unwrap();
         TempDir(p)
     }

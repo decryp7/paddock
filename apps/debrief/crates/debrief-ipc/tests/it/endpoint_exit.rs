@@ -38,7 +38,7 @@ fn an_endpoint_a_host_leaves_on_exit_lands_only_in_the_confined_folder_and_goes_
     // Letters only, so the leak check's endpoint pattern (`debrief-<letters>-<12 hex>`) would catch a leak of it.
     let name = "debrief-exit-test";
     let dir = confined_tmp();
-    #[allow(
+    #[expect(
         clippy::disallowed_methods,
         reason = "this test checks that nothing is left in the shared temp folder"
     )]

@@ -8,8 +8,8 @@ use debrief_core::workspace::ImportProgress;
 use debrief_core::{LogStore, Profile, Workspace};
 use std::sync::atomic::Ordering;
 
-fn store(_tag: &str) -> (Box<dyn LogStore>, std::path::PathBuf) {
-    let dir = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
+fn store(tag: &str) -> (Box<dyn LogStore>, std::path::PathBuf) {
+    let dir = crate::scratch::scratch_dir(&format!("forward-{tag}"));
     std::fs::create_dir_all(&dir).unwrap();
     let text: String = [
         ("Application started", 0),

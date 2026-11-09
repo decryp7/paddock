@@ -146,8 +146,8 @@ mod tests {
 
     #[test]
     fn round_trips_with_relative_paths() {
-        let _dir_scratch = tempfile::tempdir().unwrap();
-        let dir = _dir_scratch.path().join(format!("debrief-project-{}", std::process::id()));
+        let dir_scratch = tempfile::tempdir().unwrap();
+        let dir = dir_scratch.path().join(format!("debrief-project-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("logs")).unwrap();
         let dir = std::fs::canonicalize(dir).unwrap();
         let file = dir.join("incident.debriefproj");
@@ -187,8 +187,8 @@ mod tests {
 
     #[test]
     fn drops_bad_offsets() {
-        let _dir_scratch = tempfile::tempdir().unwrap();
-        let dir = _dir_scratch.path().join(format!("debrief-project-offsets-{}", std::process::id()));
+        let dir_scratch = tempfile::tempdir().unwrap();
+        let dir = dir_scratch.path().join(format!("debrief-project-offsets-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let v2 = dir.join("v2.debriefproj");
         std::fs::write(
@@ -208,8 +208,8 @@ mod tests {
 
     #[test]
     fn rejects_newer_and_invalid_files() {
-        let _dir_scratch = tempfile::tempdir().unwrap();
-        let dir = _dir_scratch.path().join(format!("debrief-project-bad-{}", std::process::id()));
+        let dir_scratch = tempfile::tempdir().unwrap();
+        let dir = dir_scratch.path().join(format!("debrief-project-bad-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let newer = dir.join("newer.debriefproj");
         std::fs::write(&newer, r#"{"version": 99, "name": "x", "sources": [], "profile": ""}"#).unwrap();

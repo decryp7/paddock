@@ -276,9 +276,8 @@ mod tests {
         }
     }
 
-    fn root(_tag: &str) -> Root {
-        let root = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
-        let _ = std::fs::remove_dir_all(&root);
+    fn root(tag: &str) -> Root {
+        let root = crate::test_dirs::scratch_dir(&format!("parsers-{tag}"));
         std::fs::create_dir_all(root.join("logs")).unwrap();
         Root(root)
     }
