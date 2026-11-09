@@ -9,7 +9,7 @@ use paddock_jobs::CancelToken;
 use paddock_jobs::time::{Clock, Deadline, SystemClock};
 use paddock_proc::{
     ExitInfo, Liveness, MemoryCap, Pace, Patience, ProcessId, Sampler, StartProbe, StartState,
-    StartWatch, Supervised, Watched,
+    StartTime, StartWatch, Supervised, Watched,
 };
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
@@ -383,8 +383,15 @@ pub fn profiles_dir(dirs: &paddock_env::AppDirs) -> PathBuf {
     dirs.cache().join("browser-profiles")
 }
 
-/// A profile folder no other launch uses: the process id and a counter (the clock alone is not enough: two launches at
-/// once got the same folder on macOS).
+/// This process by identity, read once (`None` when the OS does not say when it started).
+fn me() -> Option<ProcessId> {
+    static ME: std::sync::OnceLock<Option<ProcessId>> = std::sync::OnceLock::new();
+    *ME.get_or_init(|| ProcessId::of(std::process::id()))
+}
+
+/// A profile folder no other launch uses, named after its owner (this process: its pid and, as `s<µs>`, its start time,
+/// so a later process that got the same pid is not taken for it, rule 53) and a counter (the clock alone is not enough:
+/// two launches at once got the same folder on macOS).
 fn unique_dir(base: &Path) -> PathBuf {
     static LAUNCHES: AtomicU64 = AtomicU64::new(0);
     let k = LAUNCHES.fetch_add(1, Ordering::Relaxed);
@@ -392,30 +399,68 @@ fn unique_dir(base: &Path) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    base.join(format!("{PROFILE_PREFIX}{}-{n}-{k}", std::process::id()))
+    let started = me().map_or(0, |m| m.started().as_micros());
+    base.join(format!(
+        "{PROFILE_PREFIX}{}-s{started}-{n}-{k}",
+        std::process::id()
+    ))
 }
 
-/// Removes throwaway profiles in `base` left by processes that are gone (a crash, a kill). Call at start-up. Returns how
-/// many were removed.
+/// The owner a throwaway profile's name gives: its pid and, when the name has it (`s<µs>`, not 0), its start time.
+fn owner_of(name: &str) -> Option<(u32, Option<StartTime>)> {
+    let mut parts = name.strip_prefix(PROFILE_PREFIX)?.split('-');
+    let pid = parts.next()?.parse::<u32>().ok()?;
+    let started = parts
+        .next()
+        .and_then(|p| p.strip_prefix('s'))
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|s| *s != 0)
+        .map(StartTime::from_micros);
+    Some((pid, started))
+}
+
+/// Whether the owner a profile's name gives still runs: by identity when the name has the start time, else by pid.
+fn owner_alive(pid: u32, started: Option<StartTime>) -> bool {
+    match started {
+        Some(s) => ProcessId::new(pid, s).is_alive(),
+        None => paddock_proc::is_alive(pid),
+    }
+}
+
+/// Removes throwaway profiles in `base` whose owner is gone (a crash, a kill; the owner by pid and start time, rule 53).
+/// Each launch with a throwaway profile calls it; an app may also call it at start-up. Returns how many were removed.
 pub fn sweep_profiles(base: &Path) -> usize {
-    sweep_profiles_with(base, &paddock_proc::is_alive)
+    sweep_profiles_with(base, me(), &owner_alive)
 }
 
-fn sweep_profiles_with(base: &Path, alive: &dyn Fn(u32) -> bool) -> usize {
+fn sweep_profiles_with(
+    base: &Path,
+    me: Option<ProcessId>,
+    alive: &dyn Fn(u32, Option<StartTime>) -> bool,
+) -> usize {
     let Ok(rd) = std::fs::read_dir(base) else {
         return 0;
     };
-    let me = std::process::id();
-    rd.flatten()
+    let my_pid = std::process::id();
+    let removed = rd
+        .flatten()
         .filter(|e| {
-            let name = e.file_name().to_string_lossy().into_owned();
-            let pid = name
-                .strip_prefix(PROFILE_PREFIX)
-                .and_then(|r| r.split('-').next())
-                .and_then(|p| p.parse::<u32>().ok());
-            pid.is_some_and(|p| p != me && !alive(p)) && std::fs::remove_dir_all(e.path()).is_ok()
+            let Some((pid, started)) = owner_of(&e.file_name().to_string_lossy()) else {
+                return false;
+            };
+            // This process's own: by identity when both are known, else by pid.
+            let mine = pid == my_pid
+                && match (started, me) {
+                    (Some(s), Some(m)) => s == m.started(),
+                    _ => true,
+                };
+            !mine && !alive(pid, started) && std::fs::remove_dir_all(e.path()).is_ok()
         })
-        .count()
+        .count();
+    if removed > 0 {
+        log::info!("Removed {removed} browser profile folder(s) left by processes that are gone");
+    }
+    removed
 }
 
 /// Why a launched browser can no longer be used. Each is final: the browser is ended and a new one started.
@@ -524,7 +569,10 @@ impl Chromium {
             std::env::var(k).ok()
         })?;
         let (dir, throwaway) = match &opts.profile {
-            Profile::Throwaway(base) => (unique_dir(base), true),
+            Profile::Throwaway(base) => {
+                sweep_profiles(base);
+                (unique_dir(base), true)
+            }
             Profile::Persistent(p) => (p.clone(), false),
         };
         std::fs::create_dir_all(&dir)
@@ -542,13 +590,19 @@ impl Chromium {
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(stderr);
-        let spawned = match opts.memory_cap {
-            Some(limit) => {
-                let mut cap = MemoryCap::new(limit, "the browser");
-                cap.sampler = opts.memory_sampler.clone();
-                Supervised::spawn_capped(cmd, cap)
+        let cap = opts.memory_cap.map(|limit| {
+            let mut cap = MemoryCap::new(limit, "the browser");
+            cap.sampler = opts.memory_sampler.clone();
+            cap
+        });
+        // A throwaway profile goes with the browser even when this process is killed (its orphan guard); a kept one stays.
+        let spawned = if throwaway {
+            Supervised::spawn_owning_folder(cmd, cap, &dir)
+        } else {
+            match cap {
+                Some(cap) => Supervised::spawn_capped(cmd, cap),
+                None => Supervised::spawn(cmd),
             }
-            None => Supervised::spawn(cmd),
         };
         let process = match spawned {
             Ok(p) => Arc::new(Mutex::new(p)),

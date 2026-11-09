@@ -243,6 +243,10 @@ pub struct Supervised {
     registry: Registry,
     watcher: Option<Watcher>,
     shared: Arc<Shared>,
+    /// Unix: ends the child's group (and removes its folder) if this process dies without ending it
+    /// ([`crate::guardian`]); disarmed before the child is ended here.
+    #[cfg(unix)]
+    guard: Option<crate::guardian::Guard>,
 }
 
 impl Supervised {
@@ -262,7 +266,18 @@ impl Supervised {
         cmd: Command,
         cap: Option<MemoryCap>,
     ) -> std::io::Result<Supervised> {
-        Supervised::spawn_identified(registry, cmd, cap, ProcessId::of)
+        Supervised::spawn_identified(registry, cmd, cap, ProcessId::of, None)
+    }
+
+    /// Like [`Supervised::spawn`], optionally with a memory cap, for a child that works in `folder` (a throwaway browser
+    /// profile): if this process dies without ending the child (a SIGKILL, a crash), the child's group is ended and then
+    /// `folder` is removed (Unix, [`crate::guardian`]). Every child gets the group end; only this start removes a folder.
+    pub fn spawn_owning_folder(
+        cmd: Command,
+        cap: Option<MemoryCap>,
+        folder: &std::path::Path,
+    ) -> std::io::Result<Supervised> {
+        Supervised::spawn_identified(global_registry(), cmd, cap, ProcessId::of, Some(folder))
     }
 
     /// [`Supervised::spawn_in`] with the way the child's identity is read (tests: a child whose start time is unknown).
@@ -271,12 +286,28 @@ impl Supervised {
         mut cmd: Command,
         cap: Option<MemoryCap>,
         identify: fn(u32) -> Option<ProcessId>,
+        folder: Option<&std::path::Path>,
     ) -> std::io::Result<Supervised> {
         crate::sys::own_group(&mut cmd);
         let child = cmd.spawn()?;
         let pid = child.id();
         // Not reaped yet, so the pid is still this child's.
         let process = identify(pid);
+        // Not reaped yet, so its group is still its own.
+        #[cfg(unix)]
+        let guard = match crate::guardian::Guard::start(pid, folder) {
+            Ok(g) => Some(g),
+            Err(e) => {
+                log::warn!(
+                    "The orphan guard of child {pid} could not be started ({e}): if this process is killed, the child's tree \
+                     is left running"
+                );
+                None
+            }
+        };
+        // Windows: the kill-on-close job ends the tree when this process dies; the folder is the caller's to sweep.
+        #[cfg(not(unix))]
+        let _: Option<&std::path::Path> = folder;
         #[cfg(windows)]
         let job = {
             let hard = cap.as_ref().filter(|c| c.hard_commit).map(|c| c.limit);
@@ -328,6 +359,8 @@ impl Supervised {
             registry: registry.clone(),
             watcher,
             shared,
+            #[cfg(unix)]
+            guard,
         })
     }
 
@@ -432,6 +465,9 @@ impl Supervised {
 
     /// Ends the whole process tree now and reaps it. Idempotent.
     pub fn kill(&mut self) {
+        // The guard first: this process ends the tree itself.
+        #[cfg(unix)]
+        drop(self.guard.take());
         if let Some(mut c) = self.child.take() {
             // Windows: the job's members are the tree (each identified through a handle that checks it is in the job), and
             // the job ends them all at once, by handle, with no pid to go stale.
@@ -471,6 +507,8 @@ impl Supervised {
     }
 
     fn release(&mut self) {
+        #[cfg(unix)]
+        drop(self.guard.take());
         // Windows: closing the job ends whatever of the tree is left (helpers that left it included).
         #[cfg(windows)]
         drop(self.job.take());
@@ -613,7 +651,8 @@ mod tests {
         let reg = Registry::new();
         let cap = MemoryCap::new(u64::MAX, "x");
         let mut s =
-            Supervised::spawn_identified(&reg, piped(Mode::Tree), Some(cap), |_| None).unwrap();
+            Supervised::spawn_identified(&reg, piped(Mode::Tree), Some(cap), |_| None, None)
+                .unwrap();
         let mut r = BufReader::new(s.take_stdout().unwrap());
         let grand = pid_line(&mut r);
         assert!(s.process().is_none() && reg.pids().is_empty() && s.watcher.is_none());
@@ -626,7 +665,7 @@ mod tests {
         );
         // Reaped and without an identity: nothing more is signalled.
         let mut gone =
-            Supervised::spawn_identified(&reg, child(Mode::Exit3), None, |_| None).unwrap();
+            Supervised::spawn_identified(&reg, child(Mode::Exit3), None, |_| None, None).unwrap();
         // conformance: hang-guard — the child exits at once; the bound only keeps a broken run from hanging
         let end = Instant::now() + Duration::from_secs(60);
         while gone.is_running() {

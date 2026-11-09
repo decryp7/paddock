@@ -276,30 +276,52 @@ fn profiles_are_unique_and_leftovers_of_dead_processes_are_swept() {
         (0..1000).map(|_| unique_dir(base.path())).collect();
     assert_eq!(dirs.len(), 1000);
     let me = std::process::id();
+    let mine = ProcessId::new(me, StartTime::from_micros(500));
     for name in [
         "chromium-1-1-1",
         "chromium-2-1-1",
         &format!("chromium-{me}-1-1"),
+        // By identity: pid 3 runs, but the one that started at 7 µs is gone (its pid was handed on).
+        "chromium-3-s7-1-1",
+        "chromium-3-s9-1-1",
+        // This process's own (same start time), and an earlier process that had this pid.
+        &format!("chromium-{me}-s500-1-1"),
+        &format!("chromium-{me}-s400-1-1"),
         "chromium-x-1",
         "other",
     ] {
         std::fs::create_dir_all(base.path().join(name)).unwrap();
     }
-    assert_eq!(sweep_profiles_with(base.path(), &|pid| pid == 2), 1);
+    let alive = |pid: u32, started: Option<StartTime>| match started {
+        Some(s) => pid == 3 && s == StartTime::from_micros(9),
+        None => pid == 2,
+    };
+    assert_eq!(sweep_profiles_with(base.path(), Some(mine), &alive), 3);
     let left: std::collections::BTreeSet<String> = std::fs::read_dir(base.path())
         .unwrap()
         .flatten()
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
-    assert!(
-        !left.contains("chromium-1-1-1")
-            && left.contains("chromium-2-1-1")
-            && left.contains("other")
-    );
-    assert!(
-        left.contains(&format!("chromium-{me}-1-1")),
-        "this process's own profiles stay"
-    );
+    for gone in [
+        "chromium-1-1-1",
+        "chromium-3-s7-1-1",
+        &format!("chromium-{me}-s400-1-1"),
+    ] {
+        assert!(!left.contains(gone), "{gone} was left");
+    }
+    for kept in [
+        "chromium-2-1-1",
+        "chromium-3-s9-1-1",
+        "other",
+        "chromium-x-1",
+        &format!("chromium-{me}-1-1"),
+        &format!("chromium-{me}-s500-1-1"),
+    ] {
+        assert!(left.contains(kept), "{kept} was removed");
+    }
+    let name = unique_dir(base.path());
+    let (pid, started) = owner_of(&name.file_name().unwrap().to_string_lossy()).unwrap();
+    assert_eq!((pid, started), (me, super::me().map(|m| m.started())));
     assert_eq!(sweep_profiles(&base.path().join("none")), 0);
     let vars = paddock_env::MapVars::new()
         .with("HOME", base.path().as_os_str())

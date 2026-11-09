@@ -173,6 +173,27 @@ One line each. The dated records are in the app files.
 
 Results of shared crates (rule 48: shared code records here), newest first.
 
+### 2026-11-09, paddock-proc: the orphan guard's cost per child (fix/chromium-orphan-guard)
+
+- **Commit:** the guard of `fix/chromium-orphan-guard` (on 8d8424805), with a temporary timing test in
+  `crates/paddock-proc/src/guardian/tests.rs` (not committed).
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2.
+- **Load:** 1-minute load 8.8 to 10.3; other agents' jobs running.
+- **Build:** debug, `cargo nextest run -p paddock-proc --no-capture`.
+- **Runs:** 3 runs of 60 iterations; each: start `/bin/sleep 5` in its own group, `Guard::start` on it, drop the guard
+  (disarm), end the child. p50 / p95 per run.
+- **Numbers:**
+
+  | Measure | p50 (3 runs) | p95 (3 runs) |
+  |---|---|---|
+  | the child's own spawn | 0.30, 0.45, 0.39 ms | 0.47, 1.43, 0.54 ms |
+  | `Guard::start` (keeper and guardian shells) | 5.8, 7.0, 6.1 ms | 7.9, 13.0, 7.6 ms |
+  | disarm (`done`, end and reap the keeper) | 0.33, 0.34, 0.32 ms | 0.69, 1.45, 0.99 ms |
+
+- **Notes:** the start is mostly the wait for the guardian's starting shell to exit. Every `Supervised` child pays it
+  once; the production starters are browsers, IPC workers and plugins (seconds-long starts) and Dyno's tool runs.
+  Two small `sh` processes per running child (the keeper and the guardian). Not measured: memory per shell.
+
 ### 2026-11-03, paddock-widgets: grid engine, 32 placements (feat/widgets-grid)
 
 - **What:** `cargo bench -p paddock-widgets` (`crates/paddock-widgets/benches/grid.rs`): ADR 0044 §7 budgets, a 32-widget board of 3 by 4 cells; each line is the fastest of 15 batches (the machine is shared).

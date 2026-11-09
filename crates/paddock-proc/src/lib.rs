@@ -29,6 +29,8 @@
 pub mod cleanup;
 mod command;
 pub mod console;
+#[cfg(unix)]
+mod guardian;
 pub mod hint;
 mod identity;
 pub mod installed;

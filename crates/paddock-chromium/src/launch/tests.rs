@@ -109,6 +109,73 @@ impl Fixture {
 
 // ---- launching (a fake browser; never a real one) ----
 
+/// The base folder of [`browser_owner_process`]'s launch.
+const OWNER_ENV: &str = "PADDOCK_CHROMIUM_TEST_OWNER_BASE";
+
+/// Not a test: a process that launches the fake browser with a throwaway profile, names it, and blocks until it is killed
+/// (or its standard input ends, when the test has gone).
+#[test]
+fn browser_owner_process() {
+    let Ok(base) = std::env::var(OWNER_ENV) else {
+        return;
+    };
+    let base = PathBuf::from(base);
+    let fake = FakeBrowser::install(&base, FAKE, Mode::Obey, 1).unwrap();
+    let b = Chromium::launch_with(
+        &Browser::chromium(&fake.exe),
+        &opts(&base.join("profiles")),
+        Sandbox::On,
+    )
+    .unwrap();
+    println!("browser {} {}", b.pid().unwrap(), b.profile_dir().display());
+    let _ = std::io::stdin().read_line(&mut String::new());
+    std::process::exit(0);
+}
+
+#[test]
+fn a_browser_whose_owner_is_killed_is_ended_and_its_throwaway_profile_removed() {
+    use std::io::BufRead;
+    let d = tempfile::tempdir().unwrap();
+    let mut owner = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "launch::tests::browser_owner_process",
+            "--exact",
+            "--nocapture",
+        ])
+        .env(OWNER_ENV, d.path())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut out = std::io::BufReader::new(owner.stdout.take().unwrap());
+    let mut line = String::new();
+    let (browser, profile) = loop {
+        line.clear();
+        assert!(
+            out.read_line(&mut line).unwrap() > 0,
+            "the owner ended before naming its browser"
+        );
+        if let Some((pid, dir)) = line
+            .trim()
+            .strip_prefix("browser ")
+            .and_then(|r| r.split_once(' '))
+        {
+            break (
+                ProcessId::of(pid.parse().unwrap()).unwrap(),
+                PathBuf::from(dir),
+            );
+        }
+    };
+    assert!(profile.exists() && browser.is_alive());
+    // SIGKILL through the handle of this process's own child: none of the owner's own clean-up runs.
+    owner.kill().unwrap();
+    owner.wait().unwrap();
+    paddock_testkit::wait::wait_until("the orphaned browser to end and its profile to go", || {
+        paddock_proc::run_state(browser) == paddock_proc::RunState::Exited && !profile.exists()
+    });
+}
+
 #[test]
 fn the_launch_command_line_is_the_one_built_and_the_profile_goes_with_the_browser() {
     let f = Fixture::new(Mode::Obey, 1);
