@@ -63,7 +63,8 @@ test.describe('shared settings and panels keep the family density under a host t
     await app.settings.open({ page: 'pd.appearance' });
     await dropFieldRules(page);
     await page.addStyleTag({ content: HOSTILE });
-    const limit = await px(page, 'height', 'var(--pd-control-height)');
+    // A labelled field is the control height plus the label's room, the family token --pd-field-height (117710c8e); not the bare control height.
+    const limit = await px(page, 'height', 'var(--pd-field-height)');
     for (const key of ['theme', 'density']) {
       const box = await app.settings.field(key).locator('mat-form-field').boundingBox();
       expect(box!.height, key).toBeLessThanOrEqual(limit + 2);
