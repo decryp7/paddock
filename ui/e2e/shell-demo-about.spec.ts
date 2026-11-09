@@ -100,7 +100,8 @@ test('a build without an update key says updates are not available, with only Op
   await app.dialogs.openWindow('pd.updates', {}, { query: '?updates=unavailable' });
   await expect(page.getByTestId('updates-phase')).toHaveText('Updates are not available in this build.');
   await expect(page.getByText('without an update signing key')).toBeVisible();
-  await expect(page.locator('pd-updates-dialog').getByRole('button')).toHaveText(['Open releases page']);
+  // The actions are the window frame's footer, outside the dialog's own element: Close, then the primary.
+  await expect(page.getByRole('main', { name: 'pd.updates' }).getByRole('button')).toHaveText(['Close', 'Open releases page']);
   expect(await axeViolations(page, { idsOnly: true })).toEqual([]);
 });
 
