@@ -503,8 +503,10 @@ mod tests {
         tokio::time::advance(Duration::from_secs(5)).await;
         settle().await;
         finish.send(()).unwrap();
-        // The job ends: wait for its terminal event, not for a count of turns.
+        // The job ends: wait for its terminal event, bounded only as a hang guard.
+        let guard = std::time::Instant::now() + Duration::from_secs(10);
         while !kinds(&events).iter().any(|k| k == "done") {
+            assert!(std::time::Instant::now() < guard, "the job never ended: {:?}", kinds(&events));
             tokio::task::yield_now().await;
         }
         assert_eq!(kinds(&events).iter().filter(|k| *k == "done").count(), 1);
