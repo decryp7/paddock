@@ -100,7 +100,8 @@ fn a_model_resolves_the_name_then_queries_the_exact_value() {
             _ => None,
         })
         .collect();
-    assert_eq!(summaries, ["1 matching values", "2 events"]);
+    // Both values a bare find_values call returns: the process name and the same name in the first event's text.
+    assert_eq!(summaries, ["2 matching values", "2 events"]);
 }
 
 #[test]

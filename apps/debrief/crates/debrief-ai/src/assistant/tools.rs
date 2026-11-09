@@ -505,9 +505,10 @@ impl<'a> EngineTools<'a> {
     }
 
     fn find_values(&self, s: &dyn Store, a: FindArg) -> ToolOutcome {
-        let found = self.with_layer(&a.text, |layer| {
-            debrief_core::find::resolve_names(s, &a.text, a.limit.unwrap_or(0), layer)
-        });
+        // No `limit` (or 0) means every value up to the cap, as in find_events: `resolve_names` keeps at least one, so
+        // a bare call got only the best match and an exact name in event text hid the field value the query needs.
+        let limit = a.limit.filter(|&n| n > 0).unwrap_or(debrief_core::find::MAX_VALUES);
+        let found = self.with_layer(&a.text, |layer| debrief_core::find::resolve_names(s, &a.text, limit, layer));
         match found {
             Ok(r) => {
                 let n = r.values.len();
