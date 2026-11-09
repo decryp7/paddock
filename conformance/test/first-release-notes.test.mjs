@@ -29,6 +29,7 @@ function repo(changelog, { earlier = [] } = {}) {
   const dir = join(scratch, `r${n++}`);
   mkdirSync(join(dir, 'release'), { recursive: true });
   symlinkSync(PADDOCK, join(dir, '.paddock'));
+  symlinkSync(join(PADDOCK, 'conformance'), join(dir, 'conformance')); // the bundle job runs the kit's scripts from its own commit
   const git = (...a) => execFileSync('git', a, { cwd: dir, stdio: 'pipe' });
   git('init', '-q');
   git('config', 'user.email', 't@example.invalid');
@@ -166,6 +167,7 @@ function shallowClone(originTags, at, changelog = GOOD) {
   execFileSync('git', ['clone', '-q', '--depth', '1', '--branch', at, `file://${origin}`, dir], { stdio: 'pipe' });
   mkdirSync(join(dir, 'release'), { recursive: true });
   symlinkSync(PADDOCK, join(dir, '.paddock'));
+  symlinkSync(join(PADDOCK, 'conformance'), join(dir, 'conformance')); // the bundle job runs the kit's scripts from its own commit
   return dir;
 }
 const runIn = (step, dir, tag) =>

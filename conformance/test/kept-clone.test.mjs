@@ -458,3 +458,133 @@ function jobBlock(text, id) {
   for (let i = at + 1; i < lines.length; i++) if (/^  [A-Za-z0-9_-]+:\s*$/.test(lines[i])) { end = i; break; }
   return lines.slice(at, end).join('\n');
 }
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// The release workflow's bundle job (app-release.yml) on the kept clone: runs 7848-7853 wrote the whole tree three times per host job
+// (checkout, `.paddock`, then a clone when the move failed) and made a degraded Windows host much worse.
+
+const RELEASE = join(PADDOCK, '.gitea', 'workflows', 'app-release.yml');
+const CALLERS = ['dyno', 'pitcrew', 'pitwall', 'spotter'].map((a) => join(PADDOCK, '.gitea', 'workflows', `${a}-release.yml`));
+
+/** The paths a profile text excludes for `profile`. */
+const excludesOf = (text, profile) => text.split('\n').filter((l) => l.trim() && !l.startsWith('#')).map((l) => l.trim().split(/\s+/)).filter((p) => p[0] === 'exclude' && p[1] === profile).map((p) => p[2].replace(/\/$/, ''));
+
+/** Every path the bundle step reads, from the callers' inputs, each app's tauri.conf.json and the step's own scripts. */
+function bundleReads() {
+  const reads = new Set(['.nvmrc', 'package.json', 'package-lock.json', 'rust-toolchain.toml', 'ui/projects', 'ui/package.json', 'scripts/stage-paddock-setup.mjs',
+    'conformance/ci/tauri-bundle.sh', 'conformance/release', 'crates']);
+  for (const file of CALLERS) {
+    const text = read(file);
+    for (const m of text.matchAll(/^\s+(?:app-dir|cargo-dir): (\S+)$/gm)) reads.add(m[1]);
+    for (const m of text.matchAll(/^\s+(?:first-release-changelog|cliff-config): (\S+)$/gm)) reads.add(m[1]);
+    for (const m of text.matchAll(/^\s+(?:bundle-check|windows-bundle-check|windows-pre-bundle|windows-installer-check): (.+)$/gm)) {
+      for (const w of m[1].split(/\s+/)) if (/^(?:apps|scripts|conformance)\//.test(w) && !w.startsWith('--')) reads.add(w);
+      const conf = /--conf (\S+)/.exec(m[1])?.[1];
+      if (conf) reads.add(conf);
+    }
+  }
+  for (const app of readdirSync(join(PADDOCK, 'apps'))) {
+    const src = join('apps', app, 'app', 'src-tauri');
+    const confFile = join(PADDOCK, src, 'tauri.conf.json');
+    if (!existsSync(confFile)) continue;
+    reads.add(`${src}/icons`);
+    reads.add(`${src}/tauri.conf.json`);
+    const conf = JSON.parse(read(confFile));
+    for (const r of Object.keys(conf.bundle?.resources ?? {})) reads.add(`${src}/${r}`);
+  }
+  return [...reads];
+}
+
+/** The reads a profile excludes (a read is hit by an excluded path equal to it, above it or below it, `*` one folder name). */
+function excludedReads(profileText, profile, reads) {
+  const ex = excludesOf(profileText, profile);
+  return reads.filter((r) => ex.some((e) => toRe(e).test(r) || toRe(r).test(e)));
+}
+
+test('the bundle profile is declared, mirrors the lean exclusions, and leaves out no path the bundle step reads', () => {
+  const text = read(PROFILES);
+  const bundle = excludesOf(text, 'bundle');
+  assert.ok(bundle.length > 0, 'an `exclude bundle <path>` line');
+  assert.deepEqual([...bundle].sort(), [...excludesOf(text, 'lean')].sort(), 'the bundle job leaves out what lean does (screenshots, review and design sheets): a change of one is a change of both');
+  const reads = bundleReads();
+  assert.ok(reads.includes('apps/dyno/app/src-tauri/icons') && reads.includes('apps/dyno/app/src-tauri/tauri.conf.json') && reads.length > 25, `the reads were found (${reads.length})`);
+  assert.deepEqual(excludedReads(text, 'bundle', reads), [], 'the bundle profile excludes a path the bundle step reads');
+});
+
+test('the profile cross-check flags a bundle profile that leaves out a path the bundle step reads', () => {
+  const reads = bundleReads();
+  const base = read(PROFILES);
+  for (const bad of ['apps/dyno/app/src-tauri/icons', 'ui/projects', 'apps/*/app/src-tauri', 'conformance/release', 'apps/pitwall/CHANGELOG.md']) {
+    const hit = excludedReads(`${base}\nexclude bundle ${bad} test\n`, 'bundle', reads);
+    assert.ok(hit.length > 0, `excluding ${bad} is caught`);
+  }
+});
+
+/** What the bundle job must look like; throws on the first thing that is not. */
+function assertBundleJob(text) {
+  const job = jobBlock(text, 'bundle');
+  const steps = parseSteps(job);
+  assert.match(job, /PADDOCK_DEV_DOWNLOAD: "0"/, 'a release job builds the tool from source (ADR 0022)');
+  assert.ok(!/actions\/stable-workspace/.test(job), 'the kept clone replaces stable-workspace');
+  assert.ok(!/path: \.paddock|repository: decryp7\/paddock|\.paddock\//.test(job), 'no second checkout of the tree under .paddock: the kit is this commit');
+  const checkouts = steps.filter((s) => /uses: actions\/checkout@v4/.test(s.text));
+  assert.equal(checkouts.length, 2, 'a plain checkout for Linux and a sparse one for the hosts, nothing else');
+  const plain = checkouts.find((s) => /if: runner\.os == 'Linux'/.test(s.text));
+  assert.ok(plain && !/sparse-checkout/.test(plain.text), 'Linux keeps the plain checkout');
+  const host = checkouts.find((s) => /if: runner\.os != 'Linux'/.test(s.text));
+  assert.ok(host, 'the hosts check out');
+  assert.match(host.text, /filter: blob:none/, 'a partial clone');
+  const sparse = /sparse-checkout: \|\n((?:\s{12}\S[^\n]*\n)+)/.exec(`${host.text}\n`);
+  assert.ok(sparse, 'a sparse-checkout list');
+  const boot = declared().filter((d) => d.kind === 'bootstrap').map((d) => d.parts[0]);
+  assert.deepEqual(sparse[1].split('\n').map((l) => l.trim()).filter(Boolean), boot, 'the sparse set is the declared bootstrap');
+  const clone = steps.find((s) => /uses: \.\/\.gitea\/actions\/kept-clone/.test(s.text));
+  assert.ok(clone, 'uses the kept-clone action');
+  assert.match(clone.text, /if: runner\.os != 'Linux'/, 'host runners only');
+  assert.match(clone.text, /name: paddock-checkout-\$\{\{ runner\.os \}\}\n/, 'one kept clone per slot');
+  assert.match(clone.text, /profile: bundle\n/, 'the bundle profile');
+  const at = (re) => steps.findIndex((s) => re.test(s.text));
+  assert.ok(at(/actions\/kept-clone/) > at(/actions\/job-isolation/), 'after the slot is taken');
+  assert.ok(at(/actions\/kept-clone/) < at(/actions\/build-folder/), 'before the build folder');
+  assert.ok(at(/actions\/kept-clone/) < at(/actions\/tauri-bundle/), 'before the build');
+  // The work folder is only the bootstrap on Windows: every read of the tree goes through PADDOCK_WORKSPACE.
+  const bare = job.split('\n').filter((l) => /github\.workspace/.test(l) && !/PADDOCK_WORKSPACE \|\| github\.workspace/.test(l) && !/^\s*#/.test(l));
+  assert.deepEqual(bare, [], 'github.workspace without PADDOCK_WORKSPACE would read the bootstrap tree on Windows');
+  for (const name of ['The tag names the app\'s version']) {
+    const s = steps.find((st) => st.text.includes(name));
+    assert.match(s.text, /working-directory: \$\{\{ env\.PADDOCK_WORKSPACE \|\| github\.workspace \}\}/, `${name}: reads the app's files from the kept clone`);
+  }
+  const notes = steps.find((st) => st.text.includes("The first release's CHANGELOG section is ready"));
+  assert.match(notes.text, /runner\.os == 'Linux'/, "the CHANGELOG check lists the server's tags with the checkout's credentials, which the kept clone never keeps: Linux only (the release job checks again)");
+}
+
+test('app-release.yml: the bundle job checks out sparse and partial on the hosts and uses the kept clone (no second tree, no stable-workspace)', () => {
+  assertBundleJob(read(RELEASE));
+});
+
+test('the bundle job check rejects a full actions/checkout of the hosts, a .paddock checkout, stable-workspace and a missing profile', () => {
+  const good = read(RELEASE);
+  const mutations = {
+    'a full checkout on the hosts': good.replace(/      - uses: actions\/checkout@v4\n        if: runner\.os != 'Linux'\n        with:\n(?:          .*\n|            .*\n)+?(?=\n)/, "      - uses: actions/checkout@v4\n        if: runner.os != 'Linux'\n"),
+    'the .paddock checkout back': good.replace('      - uses: ./.gitea/actions/build-jobs', "      - uses: actions/checkout@v4\n        with:\n          repository: decryp7/paddock\n          path: .paddock\n\n      - uses: ./.gitea/actions/build-jobs"),
+    'stable-workspace instead of the clone': good.replace('./.gitea/actions/kept-clone', './.gitea/actions/stable-workspace'),
+    'the lean profile': good.replace('profile: bundle', 'profile: lean'),
+    'no profile name': good.replace('profile: bundle', 'profile: full'),
+    'a download allowed': good.replace(/PADDOCK_DEV_DOWNLOAD: "0"/, 'PADDOCK_DEV_DOWNLOAD: ""'),
+  };
+  for (const [what, text] of Object.entries(mutations)) {
+    assert.notEqual(text, good, `the mutation "${what}" changed the workflow`);
+    assert.throws(() => assertBundleJob(text), undefined, `${what} is caught`);
+  }
+});
+
+test('app-release.yml: the kit of the bundle job is this very commit (paddock-ref is checked, not trusted)', () => {
+  const job = jobBlock(read(RELEASE), 'bundle');
+  assert.match(job, /name: The kit is this commit\n(?:.*\n)*?\s+PADDOCK_REF: \$\{\{ inputs\.paddock-ref \}\}\n(?:.*\n)*?\s+SHA: \$\{\{ github\.sha \}\}\n[\s\S]*?::error::/, 'a step that fails with an ::error:: when paddock-ref is not github.sha');
+});
+
+test('node-caches links the Angular cache inside the kept clone, not the Windows bootstrap folder', () => {
+  const action = read(join(PADDOCK, '.gitea', 'actions', 'node-caches', 'action.yml'));
+  assert.match(action, /\$\{PADDOCK_WORKSPACE:-\$GITHUB_WORKSPACE\}/, 'the workspace is PADDOCK_WORKSPACE when set');
+  assert.doesNotMatch(action.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n'), /"\$GITHUB_WORKSPACE\/\$ANGULAR_DIR/, 'no path built on GITHUB_WORKSPACE alone');
+});
