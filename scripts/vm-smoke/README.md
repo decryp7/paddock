@@ -170,7 +170,7 @@ commit the `build-env` action embeds (`option_env!("PADDOCK_BUILD_COMMIT")`). Dy
 About page shows the commit, but no CLI prints it: see "What the checks need from the product" in the hand-off.
 
 **The release set for one CI run:** `scripts/vm-smoke/chain-release.sh <ci run id> [results folder]` runs windows-ui, windows-restart, linux-reboot,
-macos-start, macos-power, macos-helper and macos-helper-restart (hold the host's VM lock around it). Results go to a stable folder
+macos-start, macos-power, macos-helper and macos-helper-restart. It takes the host's interim VM lock itself (`scripts/vm-lock.sh`) for the whole chain, so a second chain or a `vm-win.sh` call fails at once with `::error::` naming the holder; the old plock lane is gone (the Linux and macOS steps are covered only by this lock). Results go to a stable folder
 `<folder>/run-<id>/` (a `.md` and a `.json` per run, screenshots in `evidence/`); `release-verdict.mjs <folder>` prints the release verdict:
 PASS only with all seven runs present, not partial, passed, of the same CI run and one installer per OS.
 

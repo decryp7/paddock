@@ -12,6 +12,7 @@ import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { holdVmLock } from './vm-lock-reexec.mjs';
 import { isMain } from '../../conformance/src/util/is-main.mjs';
 import { VMWIN } from './vm-win-path.mjs';
 import { checkWinVmTarget } from './win-vm-target.mjs';
@@ -100,5 +101,5 @@ async function main(argv) {
 }
 
 if (isMain(import.meta.url)) {
-  main(process.argv.slice(2)).then((c) => process.exit(c), (e) => { console.error(`::error::${e.message}. See the phase lines above for where it stopped; the VM is left as it was (revert it with scripts/vm-win.sh revert <snapshot>).`); process.exit(1); });
+  (process.argv.includes('--plan') ? undefined : holdVmLock('defender-rate')) ?? main(process.argv.slice(2)).then((c) => process.exit(c), (e) => { console.error(`::error::${e.message}. See the phase lines above for where it stopped; the VM is left as it was (revert it with scripts/vm-win.sh revert <snapshot>).`); process.exit(1); });
 }

@@ -23,6 +23,7 @@ import { runRebootPhase } from './win-reboot.mjs';
 import { stripVnc, withVnc, fixDiskName, vmxCheck } from './vmx-edit.mjs';
 import { VMWIN } from './vm-win-path.mjs';
 import { WIN_VM_DIR, WIN_VMX, checkWinVmTarget } from './win-vm-target.mjs';
+import { holdVmLock } from './vm-lock-reexec.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -259,4 +260,4 @@ async function main(argv) {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main(process.argv.slice(2)).then((c) => process.exit(c));
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) holdVmLock('run-win') ?? main(process.argv.slice(2)).then((c) => process.exit(c));

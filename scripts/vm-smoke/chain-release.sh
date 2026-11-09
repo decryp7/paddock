@@ -34,6 +34,8 @@ VMX="$(node "$HERE/win-vm-target.mjs" --vmx)" || exit 2 # only paddock-win11-tes
 FOLDER="$OUT/run-$RUN"
 mkdir -p "$FOLDER"
 # One VM at a time through the host's interim lock (scripts/vm-lock.sh), held for the whole chain: the steps and vm-win.sh inherit PADDOCK_VM_LOCK_HELD.
+# The plock lane that used to wrap every step is gone: the Linux and macOS steps no longer queue behind plock (they use Tart's own VM slots, tools/macos-vm-smoke.sh),
+# so while the chain runs they are covered only by this lock, which also serialises them against other chains.
 . "$HERE/../vm-lock.sh"; vm_lock_acquire chain-release
 step() { local label="$1"; shift; local t0=$SECONDS; echo "== $label: $*"; "$@"; local code=$?; echo "== $label exit $code after $((SECONDS - t0)) s"; [ "$code" -eq 0 ] || [ "$code" -eq 1 ] || [ "$code" -eq 3 ] || echo "::error::$label ended with exit $code (the tool could not run); read its log above"; }
 step windows-ui           node "$HERE/run-win.mjs"   --app dyno --run "$RUN" --expect-commit "$COMMIT" --vnc --ui --out "$OUT"
