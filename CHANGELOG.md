@@ -17,7 +17,8 @@ Conventional Commits; one semver tag for the whole repo.
 - A binary opts in with `paddock_proc::guardian::run_if_requested();` first thing in `main` (a test binary with
   `enable_in_test_binary(entry)`); one that does not logs once that the guard is off. Conformance check C79 lists the
   mains that reach `paddock-proc` and do not call it first in `main` yet (`ADOPTING`, which only shrinks; `[[bin]] path`
-  included, `#![no_main]` fuzz targets skipped).
+  included, `#![no_main]` fuzz targets skipped; an `async` or `#[tokio::main]` main is refused: call it from a plain
+  `fn main`). The guardian never removes the home folder, its ancestors or a path of two components or fewer.
 - New `Supervised::spawn_owning_folder(cmd, cap, folder)`; `ProcessId::may_be_alive` and `StartTime::is_near` (start times
   within the clock's slack, for decisions that err towards "still there"; kills still compare exactly).
 - `paddock-chromium`: throwaway profiles go with an orphaned browser, are named `chromium-<pid>-s<start µs>-...`, and each

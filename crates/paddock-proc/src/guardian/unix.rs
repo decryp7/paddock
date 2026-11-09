@@ -404,11 +404,23 @@ pub(crate) fn guard(input: impl BufRead, ends: &mut dyn Ends, looks: u32) {
     let mut input = input;
     let mut guarded: Vec<Guarded> = Vec::new();
     let mut buf = Vec::new();
-    loop {
+    'lines: loop {
         buf.clear();
         match std::io::Read::take(&mut input, MAX_LINE as u64).read_until(b'\n', &mut buf) {
             Ok(0) | Err(_) => break,
             Ok(_) => {}
+        }
+        if buf.last() != Some(&b'\n') && buf.len() == MAX_LINE {
+            // Longer than any line the owner sends: skipped up to its newline; the lines after it still count.
+            ends.log(&format!("skipped a line longer than {MAX_LINE} bytes"));
+            loop {
+                buf.clear();
+                match std::io::Read::take(&mut input, MAX_LINE as u64).read_until(b'\n', &mut buf) {
+                    Ok(0) | Err(_) => break 'lines,
+                    Ok(_) if buf.last() == Some(&b'\n') => continue 'lines,
+                    Ok(_) => {}
+                }
+            }
         }
         if buf.last() != Some(&b'\n') {
             ends.log(&format!(
@@ -474,8 +486,15 @@ pub(crate) fn guard(input: impl BufRead, ends: &mut dyn Ends, looks: u32) {
 /// Whether the guardian of `owner` may remove `folder`: an absolute, canonical path (no link on the way), a real folder
 /// (not a link), holding the owner's [`MARKER`]: a regular file of this user that names `owner`. The marker is the
 /// capability: only the owner wrote it, so a forged line cannot name a folder of the user's that is not the owner's.
-pub(crate) fn removable(folder: &Path, owner: ProcessId) -> Result<(), String> {
+pub(crate) fn removable(
+    folder: &Path,
+    owner: ProcessId,
+    home: Option<&Path>,
+) -> Result<(), String> {
     use std::os::unix::fs::MetadataExt;
+    if let Some(why) = never_removed(folder, home) {
+        return Err(format!("refused: {why}"));
+    }
     if std::fs::canonicalize(folder).ok().as_deref() != Some(folder) {
         return Err("refused: not a canonical path to an existing folder".into());
     }
@@ -491,6 +510,22 @@ pub(crate) fn removable(folder: &Path, owner: ProcessId) -> Result<(), String> {
     } else {
         Err("refused: it has no marker of this owner".into())
     }
+}
+
+/// Folders the guardian never removes, marker or not: the home folder and its ancestors, and any path of two components or
+/// fewer (`/`, `/Users`, `/home/u`, `/tmp/x`): a guarded folder is a working folder deep inside some base.
+pub(crate) fn never_removed(folder: &Path, home: Option<&Path>) -> Option<&'static str> {
+    let depth = folder
+        .components()
+        .filter(|c| matches!(c, std::path::Component::Normal(_)))
+        .count();
+    if depth <= 2 {
+        return Some("a path of two components or fewer");
+    }
+    if home.is_some_and(|h| h.starts_with(folder)) {
+        return Some("the home folder or one of its ancestors");
+    }
+    None
 }
 
 /// Whether the process that started the guardian is the owner it names: its parent, alive by identity (rule 53), running
@@ -563,7 +598,11 @@ impl Ends for OsEnds {
         crate::tree::group_exists(group)
     }
     fn remove(&mut self, folder: &Path) -> Result<(), String> {
-        removable(folder, self.owner)?;
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        let home = home
+            .as_deref()
+            .map(|h| std::fs::canonicalize(h).unwrap_or_else(|_| h.to_path_buf()));
+        removable(folder, self.owner, home.as_deref())?;
         std::fs::remove_dir_all(folder).map_err(|e| e.to_string())
     }
     fn pause(&mut self) {

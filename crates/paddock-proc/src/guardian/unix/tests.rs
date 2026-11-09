@@ -171,26 +171,26 @@ fn only_a_canonical_folder_with_the_owners_marker_is_removed() {
     let d = tempfile::tempdir().unwrap();
     let owner = me();
     let good = marked(d.path(), "good", owner);
-    assert_eq!(removable(&good, owner), Ok(()));
+    assert_eq!(removable(&good, owner, None), Ok(()));
     // A folder of the user's without the owner's marker: a forged line cannot name it.
     let plain = std::fs::canonicalize(d.path()).unwrap().join("plain");
     std::fs::create_dir_all(&plain).unwrap();
-    assert!(removable(&plain, owner).is_err());
+    assert!(removable(&plain, owner, None).is_err());
     // The marker of another owner.
     let other = marked(
         d.path(),
         "other",
         ProcessId::new(owner.pid(), crate::StartTime::from_micros(1)),
     );
-    assert!(removable(&other, owner).is_err());
+    assert!(removable(&other, owner, None).is_err());
     // Through a link: the link itself, and a path that goes through one.
     let link = d.path().join("link");
     std::os::unix::fs::symlink(&good, &link).unwrap();
-    assert!(removable(&link, owner).is_err());
+    assert!(removable(&link, owner, None).is_err());
     let canonical_link = std::fs::canonicalize(d.path()).unwrap().join("link");
-    assert!(removable(&canonical_link, owner).is_err());
+    assert!(removable(&canonical_link, owner, None).is_err());
     assert!(
-        removable(&canonical_link.join("..").join("good"), owner).is_err(),
+        removable(&canonical_link.join("..").join("good"), owner, None).is_err(),
         "not canonical"
     );
     // A marker that is a link to a file naming the owner.
@@ -199,10 +199,10 @@ fn only_a_canonical_folder_with_the_owners_marker_is_removed() {
         .join("linked-marker");
     std::fs::create_dir_all(&linked).unwrap();
     std::os::unix::fs::symlink(good.join(MARKER), linked.join(MARKER)).unwrap();
-    assert!(removable(&linked, owner).is_err());
+    assert!(removable(&linked, owner, None).is_err());
     // A path outside any marked folder (the user's home) and a relative one.
-    assert!(removable(Path::new("/"), owner).is_err());
-    assert!(removable(Path::new("good"), owner).is_err());
+    assert!(removable(Path::new("/"), owner, None).is_err());
+    assert!(removable(Path::new("good"), owner, None).is_err());
 }
 
 #[test]
@@ -567,4 +567,67 @@ fn a_test_binary_has_no_default_log() {
     if std::env::var_os(LOG_ENV).is_none() {
         assert_eq!(log_path(), None);
     }
+}
+
+/// Review P2: a line longer than the cap is skipped up to its newline, and the lines after it still count (it is not taken
+/// for the owner's end).
+#[test]
+fn a_line_over_the_cap_is_skipped_and_the_next_lines_count() {
+    let input = [
+        "x".repeat(MAX_LINE + 100),
+        "\n".into(),
+        add(10, None),
+        add(20, None),
+        "del 20\n".into(),
+    ]
+    .concat();
+    let mut s = Script::default();
+    guard(input.as_bytes(), &mut s, 5);
+    assert_eq!(s.ended, [10]);
+    assert!(
+        s.lines
+            .iter()
+            .any(|l| l.starts_with("skipped a line longer than")),
+        "{:?}",
+        s.lines
+    );
+    // Exactly at the cap with no newline after it, then the end: dropped, nothing registered.
+    let mut s = Script::default();
+    guard("y".repeat(MAX_LINE * 2).as_bytes(), &mut s, 5);
+    assert!(s.ended.is_empty());
+}
+
+/// Review P2: the home folder, its ancestors and shallow paths are never removed, even with a marker.
+#[test]
+fn home_its_ancestors_and_shallow_paths_are_never_removed() {
+    let home = Path::new("/Users/someone");
+    for refused in ["/", "/Users", "/Users/someone", "/tmp/x", "/home/u"] {
+        assert!(
+            never_removed(Path::new(refused), Some(home)).is_some(),
+            "{refused}"
+        );
+    }
+    let deep_home = Path::new("/srv/users/someone/home");
+    assert!(
+        never_removed(Path::new("/srv/users/someone"), Some(deep_home)).is_some(),
+        "an ancestor of home"
+    );
+    assert!(
+        never_removed(deep_home, Some(deep_home)).is_some(),
+        "home itself"
+    );
+    assert_eq!(
+        never_removed(
+            Path::new("/srv/users/someone/home/cache/profile-1"),
+            Some(deep_home)
+        ),
+        None
+    );
+    // With a marker of the owner, home is still refused.
+    let d = tempfile::tempdir().unwrap();
+    let owner = me();
+    let folder = marked(d.path(), "home", owner);
+    assert_eq!(removable(&folder, owner, None), Ok(()));
+    assert!(removable(&folder, owner, Some(&folder.join("sub"))).is_err());
+    assert!(removable(&folder, owner, Some(&folder)).is_err());
 }

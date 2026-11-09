@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import C79, { ADOPTING, binPaths, callsFirst, guardedMains, lockGraph, reaches } from '../src/checks/C79-orphan-guard-hooks.mjs';
+import C79, { ADOPTING, binPaths, callsFirst, guardedMains, lockGraph, mainState, reaches } from '../src/checks/C79-orphan-guard-hooks.mjs';
 
 const LOCK = `version = 4
 
@@ -56,9 +56,9 @@ test('C79 finds the mains that reach paddock-proc, hooked or not', () => {
   };
   const t = tree(files);
   assert.deepEqual(guardedMains(t.files(), t.read), [
-    { file: 'w/app/src/main.rs', hooked: true },
-    { file: 'w/app/src/bin/tool.rs', hooked: false },
-    { file: 'w/app/src/bin/two/main.rs', hooked: false },
+    { file: 'w/app/src/main.rs', hooked: true, wrapped: false },
+    { file: 'w/app/src/bin/tool.rs', hooked: false, wrapped: false },
+    { file: 'w/app/src/bin/two/main.rs', hooked: false, wrapped: false },
   ]);
 });
 
@@ -94,7 +94,7 @@ test('C79 matches a listed main from an app folder (paths relative to the checke
 
 test('C79 wants the call as the first statement of main, comments and strings aside', () => {
   assert.ok(callsFirst(HOOK));
-  assert.ok(callsFirst('#[tokio::main]\nasync fn main() -> anyhow::Result<()> {\n    // first\n    /* the guard */ paddock_proc::guardian::run_if_requested();\n    Ok(())\n}\n'));
+  assert.ok(callsFirst('fn main() -> anyhow::Result<()> {\n    // first\n    /* the guard */ paddock_proc::guardian::run_if_requested();\n    Ok(())\n}\n'));
   assert.ok(!callsFirst('fn main() {\n    // paddock_proc::guardian::run_if_requested();\n}\n'), 'a commented-out call');
   assert.ok(!callsFirst('fn main() {\n    let s = "paddock_proc::guardian::run_if_requested();";\n}\n'), 'a string');
   assert.ok(!callsFirst('fn main() {\n    start_app();\n    paddock_proc::guardian::run_if_requested();\n}\n'), 'not first');
@@ -111,5 +111,20 @@ test('C79 also checks the mains a manifest names with [[bin]] path', () => {
     'fuzz/fuzz_targets/f.rs': '#![no_main]\nlibfuzzer_sys::fuzz_target!(|d: &[u8]| {});\n',
   };
   const t = tree(files);
-  assert.deepEqual(guardedMains(t.files(), t.read), [{ file: 'tools/x.rs', hooked: false }]);
+  assert.deepEqual(guardedMains(t.files(), t.read), [{ file: 'tools/x.rs', hooked: false, wrapped: false }]);
+});
+
+const TOKIO = '#[tokio::main]\nasync fn main() -> anyhow::Result<()> {\n    paddock_proc::guardian::run_if_requested();\n    Ok(())\n}\n';
+
+test('C79 refuses an async or attribute-wrapped main with its own message', () => {
+  assert.equal(mainState(TOKIO), 'wrapped');
+  assert.equal(mainState('#[async_std::main]\nasync fn main() {}\n'), 'wrapped');
+  assert.equal(mainState('#[actix_web::main]\npub async fn main() {}\n'), 'wrapped');
+  assert.equal(mainState('async fn main() {}\n'), 'wrapped');
+  assert.equal(mainState('// #[tokio::main] once\nfn main() {\n    paddock_proc::guardian::run_if_requested();\n}\n'), 'hooked');
+  const files = { 'Cargo.lock': LOCK, 'Cargo.toml': '[package]\nname = "app"\n', 'src/main.rs': TOKIO };
+  const f = C79.run(tree(files), new Map());
+  assert.equal(f.length, 1);
+  assert.equal(f[0].severity, 'error');
+  assert.match(f[0].message, /async or wrapped by an attribute/);
 });

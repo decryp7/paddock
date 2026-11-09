@@ -15,12 +15,23 @@ import { maskRust } from './C39-freed-port.mjs';
 const MAIN_FN = /\bfn\s+main\s*\(\s*\)[^{;]*\{/;
 const FIRST_CALL = /^\s*(?:::)?paddock_proc\s*::\s*guardian\s*::\s*run_if_requested\s*\(\s*\)\s*;/;
 
-/** Whether `text`'s `fn main` begins with the call (comments and strings masked, so a commented-out call does not count). */
-export function callsFirst(text) {
+/** An `async fn main`, or a `main` under an attribute that wraps it (`#[tokio::main]`, `#[async_std::main]`, ...). */
+const WRAPPED_MAIN = /(?:#\[[^\]]*\bmain\b[^\]]*\]\s*)+(?:pub\s+)?(?:async\s+)?fn\s+main\b|\basync\s+fn\s+main\b/;
+
+/**
+ * How `text`'s `main` calls the guardian (comments and strings masked, so a commented-out call does not count): `hooked`
+ * (a plain `fn main` whose first statement is the call), `wrapped` (an `async` or attribute-wrapped `main`: a runtime
+ * starts before its body, so the call must move to a plain `fn main`), or `missing`.
+ */
+export function mainState(text) {
   const masked = maskRust(text);
+  if (WRAPPED_MAIN.test(masked)) return 'wrapped';
   const m = MAIN_FN.exec(masked);
-  return m !== null && FIRST_CALL.test(masked.slice(m.index + m[0].length));
+  return m !== null && FIRST_CALL.test(masked.slice(m.index + m[0].length)) ? 'hooked' : 'missing';
 }
+
+/** Whether `text`'s plain `fn main` begins with the call. */
+export const callsFirst = (text) => mainState(text) === 'hooked';
 const MAIN = /(^|\/)src\/(main\.rs|bin\/[^/]+\.rs|bin\/[^/]+\/main\.rs)$/;
 
 /** Mains that reach paddock-proc and do not call the guardian yet, each with why; adoption is per app, in its release window. */
@@ -126,7 +137,8 @@ export function guardedMains(files, read) {
     if (!pkg || !lock) continue;
     if (!graphs.has(lock)) graphs.set(lock, lockGraph(read(lock) ?? ''));
     if (pkg === 'paddock-proc' || !reaches(graphs.get(lock), pkg)) continue;
-    out.push({ file: f, hooked: callsFirst(read(f) ?? '') });
+    const state = mainState(read(f) ?? '');
+    out.push({ file: f, hooked: state === 'hooked', wrapped: state === 'wrapped' });
   }
   return out;
 }
@@ -140,11 +152,12 @@ export default {
     const out = [];
     // Paths are relative to the checked root (the repo, or an app's folder in it): a listed path matches by its end.
     const reason = (file) => adopting.get(file) ?? [...adopting].find(([k]) => k.endsWith(`/${file}`))?.[1];
-    for (const { file, hooked } of guardedMains(ctx.files(), (p) => ctx.read(p))) {
+    for (const { file, hooked, wrapped } of guardedMains(ctx.files(), (p) => ctx.read(p))) {
       const why = reason(file);
       const listed = why !== undefined;
       if (hooked && listed) out.push(error('C79', 53, file, 1, 'calls the orphan guardian but is still on ADOPTING', 'Remove it from ADOPTING in C79 (the list only shrinks).'));
       else if (!hooked && listed) out.push(warn('C79', 53, file, 1, `does not call the orphan guardian yet (${why})`, fix));
+      else if (wrapped) out.push(error('C79', 53, file, 1, '`main` is async or wrapped by an attribute (`#[tokio::main]`, `#[async_std::main]`): a runtime starts before its first statement, so the orphan guardian cannot be called first', 'Write a plain `fn main` that calls `paddock_proc::guardian::run_if_requested();` first, then builds the runtime and runs the async body on it.'));
       else if (!hooked) out.push(error('C79', 53, file, 1, 'can start supervised children but does not call the orphan guardian first in main: if it is killed, they run on', fix));
     }
     return out;

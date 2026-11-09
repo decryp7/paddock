@@ -64,7 +64,8 @@ owner marked:
   (`/bin/cat`, canonical).
 - **Folders**: only an absolute, canonical path (no link on the way), a real folder (not a link), holding the owner's
   marker `.paddock-proc-guardian`: a regular file of this user, written by the owner at registration (`O_NOFOLLOW`, mode
-  0600), naming the owner's identity. The marker is the capability: a forged line can only name a folder the forger could
+  0600), naming the owner's identity. Never, marker or not, the home folder or one of its ancestors, or a path of two
+  components or fewer (`/`, `/Users`, `/home/u`, `/tmp/x`). The marker is the capability: a forged line can only name a folder the forger could
   already write a marker into, which it could already remove. A "folder under the owner's temp root" rule was considered
   and not used: the folders guarded today are browser profiles in the app's cache folder, not in a temporary root, and the
   marker covers any location.
@@ -98,8 +99,11 @@ not expect it) is closed by the opt-in: only a process whose `main` called `run_
 package whose dependency closure in its workspace's `Cargo.lock` reaches `paddock-proc`: 39 on `origin/train/2026-11-08-1`
 (Debrief 22, Dyno 6, Spotter 1, the shell and workbench demos 3, shared crates and tools 7; listed in C79's `ADOPTING`).
 `#![no_main]` binaries (51 fuzz targets) have no `main` and are skipped. **Check C79** reads the lockfiles and fails a main
-that reaches `paddock-proc` without the call as the first statement of `fn main` (comments and strings do not count) and
-is not on `ADOPTING`. `ADOPTING`
+that reaches `paddock-proc` without the call as the first statement of a plain `fn main` (comments and strings do not
+count) and is not on `ADOPTING`. An `async` or attribute-wrapped `main` (`#[tokio::main]`) is refused with its own message:
+its runtime starts before the first statement, so such a binary writes a plain `fn main` that calls the guardian and
+then builds its runtime. Because the Linux CI containers run as root (where the guardian is off), a CI step runs the
+guardian's acting tests as a user (`conformance/ci/guardian-as-user.sh`, through `setpriv`). `ADOPTING`
 only shrinks: a listed main is a warning, a listed main that has the call is an error until it leaves the list. Each app
 adopts in its own release window (rule 1); the shared fixtures and tools with the next shared batch. Test binaries
 (`real_browser.rs` and the unit tests of `paddock-chromium` and `paddock-proc`) opt in through `enable_in_test_binary`
