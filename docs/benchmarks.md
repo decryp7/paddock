@@ -255,7 +255,9 @@ Quoted by [ADR 0080](adr/0080-ci-at-the-speed-of-the-critical-path.md).
   "queue" is start minus ready. Step phases are classified by step name (checkout, npm, browser, tool set-up, upload,
   clean-up, work). Compile, nextest and Playwright phases come from cargo's `Finished ... in`, nextest's `Summary [ N s]`
   and Playwright's `N passed (T)` lines. Concurrency is sampled every 30 or 60 s from job start and end.
-- **Runs:** one pass over history; runs 7824 and 7825 read at 18:38 while still running.
+- **Runs:** one pass over history, fetched from the API on 2026-11-09 before 18:39 +08 (the job lists of runs 7824 and
+  7825 at 18:38, while they were still running; a later fetch counts more jobs for them, which explains small
+  differences in job counts).
 - **Numbers:**
 
   | Measure | Value |
@@ -291,7 +293,8 @@ Quoted by [ADR 0080](adr/0080-ci-at-the-speed-of-the-critical-path.md).
   | Packages with any `cfg(os)` code | 75 of 134; 73 % (macOS) and 80 % (Windows) of host test time |
   | Debrief `rust tests (macOS)` (7697, 7822, 7813) | wall 8.3 / 19.1 / 46.0 min; 208 test-min: generic 34 %, `cfg(os)` files 13 %, OS-touching API 51 %, adapters 2 %; 26 of 83 test binaries only generic (2 % of its test time) |
   | `crate` doc tests and features-off build on hosts (5.5 days) | macOS 83 + 97 min, Windows 71 + 68 min; failed alone: features-off 11 times on Linux, once on macOS, never on Windows; doc tests once on macOS |
-  | Duplicated or input-independent work (5.5 days) | `dyno-release.yml` gates on commits `ci.yml` also ran: 903 job-min; WebKit legs in `ci.yml`: 664; notices, publish dry run, plugin SDK templates: about 290; tiny static jobs 117 and commit lint 71 |
+  | Duplicated or input-independent work (5.5 days) | `dyno-release.yml` gate jobs 903 job-min: 165 on commits with a green `ci.yml` run, 485 on commits with no `ci.yml` run, 254 on commits whose `ci.yml` was not green; WebKit legs in `ci.yml` 664: 173 on `main`, 491 on `dyno/1.1.0-rc`; notices, publish dry run, plugin SDK templates about 290; tiny static jobs 117 and commit lint 71 |
+  | Host job-min of `ci.yml` and `debrief.yml` by head | 3,133 on `main`, train, steward and release-candidate heads; 1,867 on other branches |
 
 - **Memory:** not measured.
 - **Notes:** the `ci.yml` and `debrief.yml` figures use those workflows' `needs`; the 72-hour queue figures include the

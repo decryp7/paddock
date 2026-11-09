@@ -4,7 +4,9 @@
   optimized and intelligent and at the speed of light"). Revision 2 answers the independent review of revision 1
   (`45253615a`) and adds the user's two later requests of the same day: "most of the test should be running on linux,
   only OS specific test running on the specific OS" (§4, D11) and "make the CI really optimized and only do the
-  necessary" (the governing principle and the necessity audit, §3). Needs the user's decisions D1 to D13 before any build.
+  necessary" (the governing principle and the necessity audit, §3). Revision 3 answers the re-review of revision 2
+  (`e14fcc4f8`): D13's saving corrected, D13 named as an amendment to rule 54, the landing run made a D11 option. Needs
+  the user's decisions D1 to D13 before any build.
 - Date: 2026-11-09
 - Related: ER-36 (speed and quality together; engineering-rules `checklists/speed-and-quality.md`), ER-7/ER-8 and rule 3
   (affected tests, full suite once), ER-9/ER-10 and rule 50 (h) and (i) (local checks overlap CI; fix rounds rerun only
@@ -28,7 +30,8 @@ change does not run; the same check never runs twice for one tree. Nothing is dr
 never fails in the window keeps running, made cheaper or moved to the nightly and the release gates, and every move that
 removes coverage from a run is a user decision with a stated reason. Speed never buys a weaker gate (ER-36): the full
 suite on every operating system still runs nightly and in each app's release gates (rule 54, ER-31), and the run that
-lands a change is always a full, ungated run.
+lands a change is never gated by preflight (D3). Whether the landing run also runs the generic tests on macOS and
+Windows is the user's choice in D11: (a) yes, full on every OS (recommended), or (b) Linux first like branch runs.
 
 ## Summary
 
@@ -40,13 +43,14 @@ mostly train pairs (`ci.yml` and `debrief.yml` on one head). Between bursts the 
 day and by night alike. Of 17,597 runner minutes, 59 % went to runs that failed and 20 % to runs that were cancelled;
 inside a failed run only 24 % of the minutes were in the jobs that failed.
 
-The necessity audit (§3) finds about 2,350 job-minutes in 5.5 days (13 % of all runner minutes) spent on duplicates and
-on checks whose inputs had not changed, before any change to fix rounds. Linux-first testing (§4) moves the generic tests
+The necessity audit (§3) finds about 1,130 job-minutes in 5.5 days (6 % of all runner minutes) spent on duplicates and
+on checks whose inputs had not changed, before any change to fix rounds, plus up to 1,534 fuzz minutes on nights when
+the fuzzed crates did not change. Linux-first testing (§4) moves the generic tests
 off the macOS and Windows runners and shortens Debrief's macOS job, the longest one left.
 
 The plan, in order of measured effect: (1) a fix round reruns only the failed jobs and tests (rule 50 (i)), (2) each
 check runs once, where its inputs changed (the audit), (3) the Linux lane gets lighter (Playwright workers, merged tiny
-jobs) and, after a measured spike, wider, (4) generic tests run on Linux only in branch, fix and train runs, (5) nothing is
+jobs) and, after a measured spike, wider, (4) generic tests run on Linux only in branch runs and fix rounds (and in the landing run if the user picks D11 b), (5) nothing is
 downloaded from GitHub during a run.
 
 Targets: a typical fix round **under 10 min** (today a fix round is a new full run, median 45 min; the Debrief macOS
@@ -111,8 +115,8 @@ Savings are estimates derived from the measurements unless marked measured. "Qua
 | **D. Wider Linux lane**: one shared cache service, then 6 lanes, after a spike | 6 lanes turn 159 job-min into a 27 min floor instead of 40 (with C: about 21) | 0.5-day spike, then 2 agent-days and a host action | memory, I/O and flakes at 6 lanes; the WebDAV backend against `bazel-remote` is unverified | pass conditions in D2 |
 | **E. No GitHub at run time** (actions mirror, the build-inputs store, libduckdb and the image) | removes the 4.6 min 504 tails and up to 88 s of action download per job | 1.5 agent-days after `ci/build-inputs-wp1`, with the image rebuild | a mirror that falls behind; Renovate keeps the pins | stronger: pinned, hashed inputs |
 | **F. One preflight job** for the cheap static checks, replacing 7 tiny Linux jobs | 117 job-min of tiny jobs in 5.5 days become one container per run (6 lane slots per run); a red static check stops about 90 Linux job-min in a gated run | 1.5 agent-days | 2 to 3 min before the Linux jobs of a gated run; never gates the run that lands (D3) | failures arrive sooner |
-| **G. Necessity audit: each check once, only when its inputs changed** (§3) | about 2,350 job-min in 5.5 days | 4 agent-days | a declared input list that misses an input; the nightly and release runs are the net | every removal of per-run coverage is a user decision (D11, D12) |
-| **H. Linux first, OS-specific tests on the host runners** (§4) | about 520 host job-min in 5.5 days (12 % of the Rust host jobs); Debrief macOS job from 19 to about 12 to 15 min | 3.5 agent-days | a generic-looking test that only fails on one OS slips to the nightly or the release gates (§4.4) | the full suite still runs on every OS nightly and before each release |
+| **G. Necessity audit: each check once, only when its inputs changed** (§3) | about 1,130 job-min in 5.5 days | 4 agent-days | a declared input list that misses an input; the nightly and release runs are the net | every removal of per-run coverage is a user decision (D11, D12, D13) |
+| **H. Linux first, OS-specific tests on the host runners** (§4) | with a full landing run (D11 a): about 190 host job-min in 5.5 days; with a Linux-first landing run (D11 b): about 520 (12 % of the Rust host jobs). Debrief macOS job from 19 to about 12 to 15 min in the runs where it applies | 3.5 agent-days | a generic-looking test that only fails on one OS slips to the nightly or the release gates (§4.4) | the full suite still runs on every OS nightly and before each release |
 | I. Build once, test many (a nextest archive per OS) | small: on each OS the Rust jobs build different workspaces or profiles; only Debrief's macOS tests had a run phase over 6 min, and H shortens it | 2 days | archive and checkout must match | unchanged |
 | J. Partition the Debrief macOS tests across two Mac slots | after H and the slow-suite fixes, probably not needed | 2 days | nextest has no timing-based partitioning | unchanged |
 | K. Test-level selection from a per-test coverage map | at most the run phase: 3 % of Linux, 13 to 18 % of host job time | 6 to 10 days, plus upkeep | silent misses: tests read files, goldens and environment | weaker |
@@ -134,12 +138,12 @@ flakes; it is evidence that a job can see something, not a count of real bugs.
 
 | Workflow: job | Runs | Job-min | Failed | Last | Catches (examples from the window) | Duplicate of | Verdict |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `ci.yml` `crate (macos / windows / ubuntu)` | 66 / 60 / 66 | 679 / 642 / 108 | 13 / 22 / 13 | 2 / 1 / 1 | macOS: `paddock-chromium` real browser; Windows: `paddock-mcp` listener, `paddock-limits` golden (line ends); Linux: the features-off build (failed alone 11 times) | doc tests and the features-off build run on all three OS; on Windows they never failed alone, on macOS once each | keep; doc tests and features-off on Linux only in branch, fix and train runs (D11) |
+| `ci.yml` `crate (macos / windows / ubuntu)` | 66 / 60 / 66 | 679 / 642 / 108 | 13 / 22 / 13 | 2 / 1 / 1 | macOS: `paddock-chromium` real browser; Windows: `paddock-mcp` listener, `paddock-limits` golden (line ends); Linux: the features-off build (failed alone 11 times) | doc tests and the features-off build run on all three OS; on Windows they never failed alone, on macOS once each | keep; doc tests and features-off on Linux only in branch runs and fix rounds (D11) |
 | `ci.yml` `crates` (fmt, hakari, machete, coverage, deny) | 66 | 114 | 20 | 0 | coverage gate, unused dependencies | — | keep |
-| `ci.yml` `app dyno / spotter / pitcrew / pitwall` on macOS and Windows | 50 to 61 each | 1,061 macOS, 1,029 Windows | 3 to 19 | 33 of them `app spotter (windows)` | OS adapters: Dyno platform locks, Pitwall admin key ACL, Spotter folder watch | their generic tests also run on Linux | keep; OS set only in branch, fix and train runs (D11) |
+| `ci.yml` `app dyno / spotter / pitcrew / pitwall` on macOS and Windows | 50 to 61 each | 1,061 macOS, 1,029 Windows | 3 to 19 | 33 of them `app spotter (windows)` | OS adapters: Dyno platform locks, Pitwall admin key ACL, Spotter folder watch | their generic tests also run on Linux | keep; OS set only in branch runs and fix rounds (D11) |
 | `ci.yml` `app <app> (ubuntu)` (six apps) | 57 to 64 | 1,161 | 1 to 15 | 1 to 3 | C13, wording, nextest failures | `npm run build -w ui` in every Linux leg (14 to 19 s, 9 times a run) | keep |
 | `ci.yml` app and reference e2e legs (Chromium) | 55 to 62 each | 2,035 | 1 to 6 | 1 | Dyno, Pitwall, Spotter, reference apps | — | keep; 3 workers (C) |
-| `ci.yml` WebKit legs (`app * (ubuntu, e2e-webkit)`, `reference apps in WebKit (macOS)`) | 19 to 22 | 664 | 8 | 2 | WebKit-only rendering | the same WebKit legs in `dyno-release.yml` (301) and `nightly.yml` (265) | once per main tree: nightly and release only (D12) |
+| `ci.yml` WebKit legs (`app * (ubuntu, e2e-webkit)`, `reference apps in WebKit (macOS)`) | 19 to 22 | 664: 173 on `main` pushes, 491 on `dyno/1.1.0-rc` (release-candidate runs) | 8 | 2 | WebKit-only rendering | on `main` the nightly runs the same legs (265 job-min in the window); `dyno-release.yml` runs them again (301) | `main` pushes: none, the nightly covers them (D12); release-candidate and release gates: keep |
 | `ci.yml` `paddock-dev (macos / windows / ubuntu)` | 58 / 59 / 68 | 291 / 356 / 74 | 17 / 13 / 5 | 4 / 4 / 2 | planner goldens, wrapper tests | — | keep; the tool's OS set on hosts (D11) |
 | `ci.yml` `ui` | 63 | 134 | 8 | 0 | tokens, components, publish dry run | — | keep; publish dry run only when its inputs change (§3.3) |
 | `ci.yml` `conformance`, `icons`, `eslint preset`, `tools`, `C99`, `endpoint register` | 2 to 73 | 117 | 14 | 3 | C13, C99, C100 | each pays its own container, checkout and npm | merge into one preflight job (F) |
@@ -149,7 +153,7 @@ flakes; it is evidence that a job can see something, not a count of real bugs.
 | `debrief.yml` `end-to-end (shard 1-4/4)` | 17 to 20 | 740 | 6 | 3 | Debrief UI flows | — | keep; already 2 workers |
 | `debrief.yml` `rust tests`, `rust format + clippy`, `frontend`, `plugin SDK templates`, `licences, notices + commits` | 21 each | 475 | 7 | 3 | notices, clippy, plugin SDK | commit lint (above) | keep; plugin SDK templates and notices only when their inputs change (§3.3) |
 | `debrief.yml` `real-app smoke`, `bundle` (3 OS) | 9 to 10 | 581 | 4 | 8 | installers, smoke | — | keep (full runs only, as today) |
-| `dyno-release.yml` gates (`app dyno` ubuntu, macOS, Windows, e2e-1, e2e-2, e2e-webkit) | 19 to 20 | 903 | 29 | 1 | the failures `ci.yml` saw on the same heads | `ci.yml` `app dyno` legs on the same commit | installers only when `ci.yml` was green on the same commit (D13) |
+| `dyno-release.yml` gates (`app dyno` ubuntu, macOS, Windows, e2e-1, e2e-2, e2e-webkit) | 19 to 20 | 903 | 29 | 1 | Dyno failures, mostly on commits `ci.yml` never ran | only 165 job-min ran on a commit that already had a green `ci.yml` run; 485 ran on commits with no `ci.yml` run and 254 on commits whose `ci.yml` was not green (the re-review counted 132 / 490 / 295 with a different job filter) | gates skipped only when the green `ci.yml` run covered every gate the release workflow would run (D13, an amendment to rule 54) |
 | `dyno-release.yml` `bundle` (3 OS) | 35 | 1,304 | 7 | 1 | installers (rule 54) | `nightly.yml` bundles on main | keep (rule 54) |
 | `nightly.yml` (all jobs) | 8 to 40 | 2,285 | 30 | 0 | the full suite and bundles on main | — | keep: it is the net for D11, D12 and §3.3 |
 | `debrief-fuzz.yml` (6 shards) | 6 each | 1,534 | 10 | 6 | fuzz crashes (shards 5 and 6) | — | keep; a shard runs when its target crates changed since its last green night (§3.3) |
@@ -179,20 +183,25 @@ Each check in ADR 0060's register (`docs/gates.toml`) gets an `inputs` list (pat
 OS set, every OS). The planner runs a check only when one of its inputs changed since the last green run of that check
 on the same line, and only where its result can differ. The rules from the audit:
 
-- WebKit e2e: on the nightly and in the release gates, not on every main push (D12).
+- WebKit e2e: on the nightly, release-candidate runs and the release gates, not on every `main` push (D12).
 - Notices (`notices.sh --check`, Debrief's notices step): when a lockfile or a notice template changed.
 - `Publish dry run`: when a `ui/` package manifest or `public-api.ts` changed.
 - `plugin SDK templates`: when the plugin SDK crates or `templates/` changed.
 - Fuzz: a shard runs when its target crates changed since its last green night.
 - Commit lint: once per run, in the preflight job; a release workflow reads that result for the same commit.
-- Doc tests and the features-off build: Linux only in branch, fix and train runs (D11).
-- A release workflow dispatched for rule 54 on a commit whose `ci.yml` run was green builds the installers only (D13).
+- Doc tests and the features-off build: Linux only in branch runs and fix rounds, and in the landing run under D11 (b).
+- A release workflow dispatched for rule 54 skips its gates only on a commit whose green `ci.yml` run covered every gate
+  it would run, compared job by job (D13; the affected plan and D12 can leave legs out of `ci.yml`, and then the release
+  workflow runs those legs itself).
 - Never by input alone: the run that lands a change, the nightly and the release gates run their whole plan.
 
-Estimated saving of §3 over the 5.5 days measured: the duplicated Dyno gates 903 job-min, WebKit on main pushes 664,
-doc tests and features-off on the host runners 319, input-driven skips about 290 (notices, publish dry run, plugin SDK
-templates), merged tiny jobs and one commit lint up to 180: about 2,350 job-min, 13 % of the 17,597 measured. The fuzz rule
-saves up to 1,534 job-min on nights when the fuzzed crates did not change; it is not counted.
+Estimated saving of §3 over the 5.5 days measured: Dyno release gates on commits with a green `ci.yml` about 165 job-min
+(132 by the re-review's count), WebKit on `main` pushes 173, doc tests and features-off on the host runners 319 (in
+branch and fix runs only under D11 a: about 120), input-driven skips about 290 (notices, publish dry run, plugin SDK
+templates), merged tiny jobs and one commit lint up to 180: about 1,130 job-min, 6 % of the 17,597 measured (about 930
+under D11 a). The re-review's figure of about 1,580 keeps all 664 WebKit minutes; here the 491 on the release candidate
+stay, because D12 keeps WebKit in the release gates. The fuzz rule saves up to 1,534 job-min on nights when the fuzzed
+crates did not change; it is not counted.
 
 ### 3.4 Quiet checks are kept
 
@@ -200,17 +209,20 @@ No check is dropped for being quiet. `Lockfile is current`, `Lint`, `Build the l
 `icons`, `eslint preset`, `tools` and `commit messages` jobs never failed in the window; they protect against lockfile
 drift, ESLint rule breaks, broken library entry points, a failing npm publish, stale installed icon copies, a broken lint
 preset, broken shared scripts and bad commit history. They stay, made cheaper (one preflight container) or input-driven.
-The `Memory budget` step is the opposite case: it looks quiet because it cannot fail. It becomes a counted check with
-its budget or moves to `debrief-bench.yml` (WP-10).
+The `Memory budget` step is the opposite case: it looks quiet because it cannot fail. Its comment in `debrief.yml` says
+Debrief 1.2.0 does not ship while it fails; [Debrief 1.2 plan](../plans/debrief-1-2.md) WP D-0 fixes the catalogue's
+memory and removes `continue-on-error`. WP-10 only checks that this happens before the 1.2.0 tag and adds no second fix.
 
 ## 4. Linux first: OS-specific tests on the host runners
 
 ### 4.1 Proposal
 
-Branch runs, fix rounds and train runs run the whole suite on Linux. The macOS and Windows legs run clippy (the
+Branch runs and fix rounds (and, under D11 b, the landing train run) run the whole suite on Linux. The macOS and Windows legs run clippy (the
 OS-specific code only compiles there) and only the OS set of tests. The nightly and each app's release gates run the
-full suite on every OS (rule 54, ER-31), so nothing ships untested on its OS. A generic test's host-OS run therefore
-happens at the next nightly after it reaches main, or at the app's release gates, whichever comes first.
+full suite on every OS (rule 54, ER-31), so nothing ships untested on its OS. The landing run (the train run whose
+result lands on `main`) is D11's choice: (a) full on every OS, so a generic host-only failure never reaches `main`; or
+(b) Linux first too, so such a failure can land on `main` and turn the next nightly red. Under (b) a generic test's
+host-OS run happens at the next nightly after it reaches `main`, or at the app's release gates, whichever comes first.
 
 ### 4.2 How the OS set is selected: declared, then checked
 
@@ -262,9 +274,9 @@ tests, took about 4,300 host job-min):
 
 | Item | Host job-min today | Saved | How |
 | --- | --- | --- | --- |
-| `crate` doc tests and features-off build on macOS and Windows | 319 (macOS 180, Windows 139) | 319 | Linux only in branch, fix and train runs |
+| `crate` doc tests and features-off build on macOS and Windows | 319 (macOS 180, Windows 139) | 319 under D11 (b); about 120 under D11 (a) | Linux only in branch runs and fix rounds, plus the landing run under D11 (b) |
 | Generic tests in the host nextest runs (about 30 % of a run phase that is 13 to 18 % of job time) | part of the 4,300 | about 200 | the filterset; test binaries with only generic tests (26 of 83 in Debrief, 2 % of its test time) are not built |
-| **Total** | | **about 520 host job-min, 12 % of the Rust host jobs** | |
+| **Total** | | **about 520 host job-min, 12 % of the Rust host jobs, if every run is Linux first (D11 b); about 190 if the landing runs stay full (D11 a), because 63 % of the host minutes of `ci.yml` and `debrief.yml` (3,133 of 5,000) were on `main`, train, steward and release-candidate heads** | |
 
 Compile stays: the host jobs still build the workspace for clippy and the OS-set test binaries, and compile is about
 50 % of their time. Linux first is therefore a moderate saving in host minutes; its main value is on the critical path
@@ -274,10 +286,10 @@ of `debrief.yml`.
 under load); compile 6.6 min in 7822. Its test time over the three runs is 208 test-min: 34 % generic by the file rule,
 13 % `cfg(os)` files, 51 % files that start processes or open connections, 2 % adapter packages. The slowest generic
 suites are data logic: `debrief-store-duck::it` `differential` (23 test-min), `large_folder` (10), `analysis` (8),
-`segments` (6), `debrief-core::it` `properties` (7) and `survey` (5). In branch, fix and train runs these run on Linux
+`segments` (6), `debrief-core::it` `properties` (7) and `survey` (5). In branch runs and fix rounds these run on Linux
 only, with one declared large-folder store test kept on macOS for the open-files limit. Estimate: the job drops from 19
-min to about 12 to 15 min, and below 10 min with WP-6's slow-suite fixes. In a fix round it runs only its failed tests
-(D1): compile plus the failed tests, about 8 to 9 min. That is what lets the fix-round target hold; without D11 and D1
+min to about 12 to 15 min in branch runs (and in landing runs under D11 b), and below 10 min with WP-6's slow-suite
+fixes. In a fix round it runs only its failed tests (D1): compile plus the failed tests, about 8 to 9 min. That is what lets the fix-round target hold; without D11 and D1
 the Debrief macOS job alone breaks it.
 
 ### 4.4 Would it still catch today's host-only failures?
@@ -285,7 +297,7 @@ the Debrief macOS job alone breaks it.
 The combined train (`train/2026-11-09-2`) failed on Windows on three generic-looking causes, and the macOS legs on
 load-sensitive tests. Checked against the selection:
 
-| Failure | Where the fix went | Selected by | Caught in a branch, fix or train run? |
+| Failure | Where the fix went | Selected by | Caught before `main` under D11 (a) / in a branch run or fix round? |
 | --- | --- | --- | --- |
 | CRLF checkout in the `per_machine` include test (`44561f6bc`) | `crates/paddock-service/src/per_machine/tests.rs` | rule 3 (`paddock-service` is an adapter) and rule 2 (line-ending comparison) | yes |
 | Windows temp-folder ACL for test secrets (`a0cb3d36f`) | `crates/paddock-secrets/src/file.rs` (33 `cfg(os)` uses), `dyno-platform` | rules 2 and 3 | yes: the test-only ACL path is in an adapter package with `cfg(windows)` code |
@@ -298,8 +310,9 @@ load-sensitive tests. Checked against the selection:
 **What slips.** A generic-looking test whose OS behaviour comes through code no rule names: a new HTTP client crate, a
 new way of starting a process, a library that behaves differently by OS without `cfg` in Paddock's code (DuckDB, case
 sensitivity of the file system, path length limits) and resource limits not declared under rule 4. Such a failure is found
-by the next nightly (within 24 h of the change reaching main; the nightly runs when main changed) or by the app's
-release gates, whichever comes first, never after a release. Each slip found that way adds its pattern to rule 2's list
+under D11 (a) by the landing run, before `main`. Under D11 (b) it can land on `main` and is found by the next nightly
+(within 24 h of the change reaching `main`; the nightly runs when `main` changed), which then turns red, or by the app's
+release gates, whichever comes first: never after a release, but not always before `main`. Each slip found that way adds its pattern to rule 2's list
 or a rule 4 declaration in the same fix (ER-21), and the conformance check keeps the list honest.
 
 ## 5. Decision
@@ -311,8 +324,9 @@ or a rule 4 declaration in the same fix (ER-21), and the conformance check keeps
    runs once on the final tree, and that run is the one that lands.
 2. **Each check runs once, where its inputs changed** (§3): declared `inputs` and `where` in the gate register, the
    planner rules of §3.3, the duplicated jobs removed.
-3. **Linux first** (§4): generic tests on Linux only in branch, fix and train runs; the OS set on the host runners from
-   the declared mechanism and its conformance check; the full suite on every OS nightly and in the release gates.
+3. **Linux first** (§4): generic tests on Linux only in branch runs and fix rounds, and in the landing run only if the
+   user picks D11 (b); the OS set on the host runners from the declared mechanism and its conformance check; the full
+   suite on every OS nightly and in the release gates.
 4. **The Linux lane gets lighter, then wider.** Playwright workers from the host declaration and merged tiny jobs; then,
    after a spike in which a second build hits the shared cache, one cache service and 6 lanes under D2's pass conditions.
 5. **Nothing comes from GitHub during a run**, libduckdb included: actions mirrored, tools from the build-inputs store,
@@ -344,7 +358,7 @@ or a rule 4 declaration in the same fix (ER-21), and the conformance check keeps
 | WP-7 | Package-level selection (`rdeps`) per workspace on branch runs and fix rounds | 2 | 2 | Rust planner |
 | WP-8 | Critical path first: job order experiment, kept only if a measured pair shows it | 2 | 0.5 | WP-0 |
 | WP-9 | Local pre-push parity (ADR 0038 WP-2, WP-3) | 2 | as ADR 0038 | ADR 0038 |
-| WP-10 | Necessity audit into the planner: `inputs` and `where` per check in `docs/gates.toml`, the §3.3 rules, release workflows read `ci.yml`'s verdict for the same commit (D13), WebKit to nightly and release (D12), the `Memory budget` step counted or moved, the always-red store benchmark fixed or quarantined | 1 | 4 | ADR 0060 register, Rust planner |
+| WP-10 | Necessity audit into the planner: `inputs` and `where` per check in `docs/gates.toml`, the §3.3 rules, release workflows compare their gate list with the green `ci.yml` run's jobs on the same commit (D13), WebKit off `main` pushes (D12), a check that the `Memory budget` step counts before the Debrief 1.2.0 tag ([plan](../plans/debrief-1-2.md) WP D-0), the always-red store benchmark fixed or quarantined | 1 | 4 | ADR 0060 register, Rust planner |
 | WP-11 | Linux first: the OS-set generator (rules 1 to 4), `osAdapters` in `paddock.ci.json`, `os-specific` groups in the seven `nextest.toml`, the conformance check, doc tests and features-off Linux-only on branch runs, the Debrief macOS leg on the OS set | 1 | 3.5 | WP-0, Rust planner |
 
 Total new work: about 27.5 agent-days. Phase 0: 5 (WP-0, 1, 2). Phase 1: 16 (WP-3, 4, 5, 10, 11). Phase 2: 6.5
@@ -356,7 +370,7 @@ Total new work: about 27.5 agent-days. Phase 0: 5 (WP-0, 1, 2). Phase 1: 16 (WP-
 | --- | --- | --- | --- |
 | Today (measured) | a new full run: median 45 min | 45 min (no-queue path 20 min) | 17,597 in 5.5 days; 59 % in failed runs |
 | 0: WP-0, 1, 2 | about 8 to 12 min (a Debrief macOS fix round 8 to 9 min) | 40 to 43 min (the 504 tails off the critical path) | fix rounds about 76 % cheaper |
-| 1: WP-3, 4, 5, 10, 11 | under 10 min | about 22 min (Linux floor about 21 min; `debrief.yml` path about 15 min) | about 2,350 job-min (13 %) from the audit, about 200 more host job-min from Linux first |
+| 1: WP-3, 4, 5, 10, 11 | under 10 min | about 22 min (Linux floor about 21 min; `debrief.yml` path about 15 min) | about 1,130 job-min (6 %) from the audit (about 930 under D11 a), plus about 70 (D11 a) or 200 (D11 b) host job-min of generic tests |
 | 2: WP-6, 7, 8, 9 | about 6 to 8 min | about 15 min critical path | fewer test builds on branch runs; fewer CI-only failures |
 
 ## 9. Decisions for the user
@@ -390,24 +404,30 @@ Total new work: about 27.5 agent-days. Phase 0: 5 (WP-0, 1, 2). Phase 1: 16 (WP-
   no further baking (node_modules, Angular caches: measured small). *Recommended.*
 - **D10. Order:** phase 0 now, alongside the in-flight planner and prebuilt `./dev`; phase 1 after the train lands; phase
   2 after Dyno's next tag. Each phase ends with a measured results block. *Recommended.*
-- **D11. Linux first:** branch runs, fix rounds and train runs run generic tests on Linux only and the declared OS set on
-  macOS and Windows; the nightly and the release gates run everything everywhere. It removes per-run coverage of generic
-  tests on the host OS: a generic-looking host-only failure is found up to one nightly later, never after a release.
-  *Recommended*, with the HTTP-client, `paddock-proc` and `paddock-chromium` entries in rule 2 from the start.
-- **D12. WebKit e2e** once per main tree (nightly and release gates), not on every main push or in `dyno-release.yml`'s
-  gates. It removes per-push WebKit coverage; a WebKit regression is found up to one nightly later. Saves about 664
-  job-min in the window (plus 301 inside D13). *Recommended.*
-- **D13. Release workflows dispatched for rule 54** build the installers only when `ci.yml` was green on the same commit
-  (the verdict checks the commit, ER-33); otherwise they run their gates as today. Saves about 903 job-min in the window
-  and removes nothing: the same gates ran on the same commit. *Recommended.*
+- **D11. Linux first:** branch runs and fix rounds run generic tests on Linux only and the declared OS set on macOS and
+  Windows; the nightly and the release gates run everything everywhere. With the HTTP-client, `paddock-proc` and
+  `paddock-chromium` entries in rule 2 from the start. For the landing run (the train run that lands on `main`):
+  - **(a) full on every OS.** A generic host-only failure never reaches `main`. Saves about 190 host job-min in the window;
+    the Debrief macOS job stays on the landing run's critical path. *Recommended.*
+  - **(b) Linux first too.** Saves about 520 host job-min and shortens the landing run's `debrief.yml` path to about 12 to
+    15 min; a generic host-only failure can land on `main` and turn the next nightly red: never after a release, but not
+    always before `main`.
+- **D12. WebKit e2e** on the nightly, release-candidate runs and every release gate, not on every `main` push. It removes
+  per-push WebKit coverage on `main`; a WebKit regression is found up to one nightly later. Saves about 173 job-min in the
+  window (the 491 on `dyno/1.1.0-rc` stay). *Recommended.*
+- **D13. An amendment to rule 54** ("with gates on and the bundle built"): a release workflow dispatched for rule 54
+  skips its gates only when a green `ci.yml` run on the same commit covered every gate it would run, compared job by job
+  (ER-33: the affected plan and D12 can leave legs out of `ci.yml`, and then the release workflow runs those legs); the
+  installers are always built. Saves about 130 to 165 job-min in the window: most Dyno release-gate minutes ran on commits
+  with no `ci.yml` run (485) or a red one (254). *Recommended*, as a user decision because it changes rule 54's wording.
 
 ## 10. Risks
 
 - Parallel Playwright exposes shared state in specs; the switch waits for 20 runs per suite under load (checklist §1).
 - A failed-only fix round misses a regression the fix caused elsewhere; the full run before landing catches it (rule 50
   (i)), so it costs time, not quality.
-- Linux first lets a generic-looking host-only failure reach main; the nightly or the release gates find it (§4.4), and
-  each slip adds its pattern to the declaration.
+- Under D11 (b), Linux first lets a generic-looking host-only failure reach `main` and turn the nightly red; under D11 (a)
+  the landing run stops it. Either way each slip adds its pattern to the declaration (§4.4).
 - Input-driven skips depend on complete `inputs` lists; a missing input skips a check that should have run. The nightly
   and release runs ignore the rules, and C100 checks that every check has a declared input list.
 - More Linux lanes raise CPU, memory and I/O pressure on `d-gtr9`; D2's pass conditions decide, and the change is one
@@ -420,6 +440,7 @@ Total new work: about 27.5 agent-days. Phase 0: 5 (WP-0, 1, 2). Phase 1: 16 (WP-
 ## 11. Consequences
 
 - Rule 50 (i) gets its mechanism; ER-12 breaches in five Playwright configs are fixed on the way.
+- Rule 54 is amended if the user accepts D13.
 - ADR 0060's gate register gains `inputs` and `where` per check; the planner reads them.
 - ADR 0025 §8 ("one job per Linux host") is superseded for Linux by ADR 0074 WP-B3 and, if D4's spike passes, the cache
   service.
