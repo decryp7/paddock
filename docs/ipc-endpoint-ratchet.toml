@@ -164,6 +164,38 @@ blocks_tag = "none"
 note = "The listener logs 'ended after' lines but not the ADR's end line (code, flush, drain); WP-7."
 
 [[ratchet]]
+instance = "I24"
+endpoint = "pitcrew-service"
+scenario = "malformed-first-frame"
+fault = "no-reason"
+blocks_tag = "pitcrew-v*"
+note = "An unreadable hello: `_ => return`, no answer (ipc.rs connection())."
+
+[[ratchet]]
+instance = "I26"
+endpoint = "pitcrew-service"
+scenario = "busy"
+fault = "unanswered"
+blocks_tag = "pitcrew-v*"
+note = "At 32 connections the accept loop waits on the semaphore after accepting: the 33rd client waits unanswered instead of being refused busy."
+
+[[ratchet]]
+instance = "I26"
+endpoint = "pitcrew-service"
+scenario = "stop-with-open-connection"
+fault = "no-reason"
+blocks_tag = "pitcrew-v*"
+note = "A stop drops every connection with no reason."
+
+[[ratchet]]
+instance = "WP-7"
+endpoint = "pitcrew-service"
+scenario = "*"
+fault = "no-end-line"
+blocks_tag = "none"
+note = "No end line yet (ADR 0072 §6, WP-7)."
+
+[[ratchet]]
 instance = "I8"
 endpoint = "ipc-host"
 scenario = "wrong-account"
@@ -226,3 +258,11 @@ blocks_tag = "dyno-v*"
 os = "linux"
 note = "A refused client's bytes after its Hello are not drained: the close resets on Linux (the agent authenticates inline with paddock-ipc's Host)."
 
+[[ratchet]]
+instance = "I25"
+endpoint = "pitcrew-service"
+scenario = "client-keeps-writing"
+fault = "reset"
+blocks_tag = "pitcrew-v*"
+os = "linux"
+note = "The protocol-mismatch error is written, then the stream drops with the client's later bytes unread: a reset on Linux."
