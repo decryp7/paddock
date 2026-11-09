@@ -89,7 +89,7 @@ replaced. **No trust setting is needed.** The certificate stays `CSSMERR_TP_NOT_
 | v2 signed by a different self-signed cert | AX 0, Listen 1 | n/a |
 
 - TCC.db csreq stored and read back: `identifier "net.decryptology.sign-spike" and certificate root = H"617e8ff2dc3c95f5618dd3a17b9099b0c7e89541"`.
-- **Still open:** a real FDA and Removable Volumes click on SIP-enabled 27.2. This is the user step below. Expected
+- **Superseded by the host check below (2026-11-09): FDA measured on 27.2 with SIP on; Removable Volumes covered by FDA, not measured on its own.** Was: **Still open:** a real FDA and Removable Volumes click on SIP-enabled 27.2. This is the user step below. Expected
   result: same behaviour, because TN3127 describes one DR mechanism for all privacy grants (secondary claim). It is
   unverified for FDA on 27.2.
 

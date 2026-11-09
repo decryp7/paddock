@@ -15,6 +15,10 @@
     lifetimes, the DR form and revocation are stated technical choices (§2.8); D8 says it changes the old plan's H5; the
     8-hex check comes before the fingerprint is shown; Linux corrections (openSUSE, Fedora to S1, the EKU already blocks
     TLS); where the root passphrase is kept; an unsourced Finder claim dropped; `paddock-dev` wording fixed.
+- Revision 3 (2026-11-09) answers the re-review of revision 2 (`def852cda`): D3 names what option C does not protect
+  (what gets signed) and adds a clean build, a hash check, an owner confirm and non-admin runner accounts (§6.2); the local
+  identity signs under a lease and also signs the runner identities (§2.3, §2.5, D9); D6 says it can leave Windows
+  unsigned; the Dyno release wording is fixed.
 - Date: 2026-11-09
 - Number: 0079 was free on every `origin` branch on 2026-11-09 (`git ls-tree --name-only <branch> docs/adr/` over all
   `git branch -r`; family ADRs end at 0078 on `origin/docs/adr-test-isolation`).
@@ -193,6 +197,8 @@ in a job of the `paddock` repository (the reasons are in §6.2):
   (Gitea's protected tags; to confirm on the instance in WP-S1). A dispatch from anywhere else signs nothing.
 - It signs, rebuilds the DMG, `.app.tar.gz` and updater `.sig` over the signed bytes, and attaches them to the release.
   The `paddock` verify job (ADR 0039) then checks the published artifacts (§3).
+- Option C protects the **key**, not **what gets signed**; §6.2 lists what it still trusts and the mitigations that go
+  with it (a clean build in the signing account, a hash check, an owner confirm, non-admin runner accounts).
 
 **macOS (Tauri bundles, sidecars and helpers, the Dyno privileged helper, Scrutineer itself).** `./dev`
 (`paddock-dev`) is not signed: it is a content-addressed developer tool (ADR 0022) that never ships to users.
@@ -222,11 +228,17 @@ in a job of the `paddock` repository (the reasons are in §6.2):
 **The search-list window (D9).** Between steps 1 and 3 the keychain is unlocked and on the search list of the account
 that runs the job. **Any other process of that account can sign with it during that window**; a lock that only orders
 signing jobs does not stop a different job from using it. That is why the family key signs only under `paddock-signer`,
-which runs nothing but the signing workflow, one job at a time (runner capacity 1). The local identity (§2.5) uses the
-same recipe on the main runner account; there, every job can use it during the window, which is accepted because it only
-satisfies `.test` identifiers and the runner account already holds the runner's own grants. A killed job can leave an
-entry behind: **`doctor` lists search-list entries that point at a missing file or at a keychain under a job `TMPDIR`**,
-and `ci prepare` refuses to start while such an entry exists (with the command to remove it).
+which runs nothing but the signing workflow, one job at a time (runner capacity 1).
+
+The local identity (§2.5) uses the same recipe on the main runner account, where several jobs run at once. There the
+signing step **holds a lease for its whole window** (the machine lease of ADR 0074, through `./dev ci slot`, lane
+`local-signing`), so no two jobs edit the search list at the same time and the restore check of step 3 sees only its own
+change. Other jobs of the account can still use the unlocked local keychain during the window; that is accepted because
+the local identity satisfies only `.test` identifiers and the runner identities (§2.5), and the runner account already
+holds the runner's grants. A killed job can leave an entry behind: **`doctor` lists search-list entries that point at a
+missing file or at a keychain under a job `TMPDIR`**, and `ci prepare`, once it holds the lease, removes such entries
+whose job is gone (no live lease holder owns them, rule 53) and logs what it removed; it never touches an entry while
+another holder's lease is live.
 
 Signing is waited-for work: normal priority, never a starvable QoS (rule 52).
 
@@ -300,7 +312,9 @@ identifier** would satisfy the family DR and inherit the person's Full Disk Acce
 - Test apps, test binaries and CI runner binaries are signed with the **local root** ("Paddock local", made by
   `ca init --local` on the Mac mini, never trusted anywhere, never in a release).
 - Test identifiers carry a `.test` suffix, so even a leaked local key cannot satisfy a release DR (the DR names both the
-  identifier and the root).
+  identifier and the root). The local root also signs the **runner identities** below, so a leaked local key could make
+  code that inherits the runners' Full Disk Access and Removable Volumes grants; that is why the local key stays on the
+  Mac mini in a file readable only by the runner account and is used only under the lease (§2.3).
 - The runner binaries get `net.decryptology.gitea-runner` (and two siblings), signed after each runner upgrade by a
   `./dev` step (research note, recipe step 5), started from launchd so each is its own responsible process; the person
   grants FDA once. Playwright's `chrome-headless-shell` stays out (a fixed browser path is the remedy, tcc-research
@@ -490,8 +504,39 @@ Recommendation: **C**. It keeps releases automatic (ER-15: still built by CI fro
 and the minisign update key out of reach of every `paddock` branch, and closes the search-list window (§2.3) for the
 family key by giving it its own account. D is the fallback if a second repository is unwanted.
 
+**What option C does not protect: what gets signed.** C keeps the key away from `paddock` branches, but the signing
+account signs whatever the tag's build produced. Code can still reach a family signature, and with it every FDA and
+keychain grant of the family apps, through:
+
+- a poisoned build: the `paddock` release job reuses shared runner caches (the cache server, `CARGO_TARGET_DIR`s kept
+  between tasks, sccache, `node_modules`), which branch jobs also write;
+- anyone who can push a protected tag or push to `main` (today the user and the agents that land on `main`);
+- a runner account that can read another account's files (an administrator, or `SYSTEM` on Windows), which could read the
+  signing account's key or swap a file between the build and the signature.
+
+Mitigations, all recommended with C:
+
+1. **Clean build in the signing account.** The signing workflow builds again from the tag's commit sha, in a fresh
+   checkout with no shared cache (no cache server, no kept build folder, no sccache, `npm ci` from the lockfile), and
+   signs only its own output.
+2. **Hash check.** It compares its unsigned build with the `paddock` release job's unsigned artifacts (file by file,
+   after stripping the ad-hoc signatures). A difference stops the release with both lists of hashes (ER-27). Where a file
+   is not yet reproducible, the signing account's own build is the one signed and the difference is logged, never
+   silently accepted; making the bundles reproducible is follow-up work, measured in WP-S1.
+3. **Owner confirm per release.** The signing workflow waits for the owner's approval before it signs (a manual
+   dispatch or an approval issue the owner closes), showing the tag, the commit, the hash comparison and the files. With
+   tags made only from CI's tested commit (ER-15, ER-16), this is about one minute per release.
+4. **Non-admin runner accounts on every OS (a stated requirement).** Every `paddock` runner runs as a standard, non-admin
+   account: on macOS not in the `admin` group; on Linux not root and not in `sudo` or `wheel`; on Windows **not
+   `LocalSystem` and not an administrator**, because on the Windows CI PC a `SYSTEM` or administrator runner can read the
+   signing account's files. The signing accounts' files are readable only by their own account. **Check:**
+   `scrutineer doctor --runner` (run by WP-SR at setup and by the signing workflow before each signature) reads every
+   runner service's account and group memberships and refuses to sign while any `paddock` runner on that machine has
+   administrator rights.
+
 A leaked intermediate is handled the same way one level up (revoke, reissue from the root, rotate to the standby if code
-under it may have been signed). A leaked local key only satisfies `.test` identifiers.
+under it may have been signed). A leaked local key satisfies `.test` identifiers and the runner identities (§2.5): the
+remedy is a new local root, a re-sign of the runner binaries and one re-grant.
 
 ### 6.3 If a key is lost
 
@@ -529,11 +574,11 @@ Order (2026-11-05 and later): Dyno (1.1.0 tagged 2026-11-08; 1.1.1 in progress),
 
 - **Blocks nothing.** No release waits for Scrutineer. Each app adopts signing at its first release whose freeze comes
   after WP-E2 lands; adoption touches the release path, so that app's installers are built first (rule 54).
-- **When the macOS track can land.** About 26.5–36.5 agent-days of work, with a critical path of about 21.5–30 days for
-  two builders (§10), starting after the decisions. Decided this week, it lands in mid-to-late December 2026 at the
+- **When the macOS track can land.** About 28.5–39.5 agent-days of work, with a critical path of about 23.5–33 days for
+  two builders (§10), starting after the decisions. Decided this week, it lands in late December 2026 at the
   earliest, while the foundation redesigns and three release lines compete for the same builders. **Pitwall 1.1 is
   therefore unlikely to be the first signed release** unless its freeze moves into January. The realistic first signed
-  release is the first Dyno release after 1.1.1, or Debrief 1.2 (D13).
+  release is Dyno 1.1.1 (planned, gated on ADR 0072 M2–M4) or the release after it, or Debrief 1.2 (D13).
 - **Speeds up now:** WP-R0 (runner binaries, half a day after `ca init --local`, or with the spike recipe as an interim
   that costs one more re-grant later) ends the runner's FDA and Removable Volumes losses and the prompts from CI-built
   test apps. It does not touch any app's release path.
@@ -564,17 +609,17 @@ Order (2026-11-05 and later): Dyno (1.1.0 tagged 2026-11-08; 1.1.1 in progress),
 |---|---|---|
 | D1 | Chain: root, intermediate and leaf; or one self-signed leaf as in the spike | **Three tiers**, if WP-S1 shows a leaf and an intermediate rotation keep TCC grants with the root-pinned DR. Fallback: one self-signed 20-year leaf (measured), with grants lost once at each key change |
 | D2 | Passphrases | **Root passphrase in your password manager plus a sealed paper slip stored apart from the key media; intermediate passphrase typed each use** (not the login keychain); YubiKey later |
-| D3 | Where the family key signs (§6.2) | **C: a separate signing repository with its own runners under their own OS accounts**, provenance checked before signing; D (by hand per release) as the fallback; A and B are not controls |
+| D3 | Where the family key signs (§6.2) | **C: a separate signing repository with its own runners under their own OS accounts**, provenance checked before signing, **plus** a clean build from the tag's sha with no shared caches, a hash check against the release job's output, an owner confirm per release, and non-admin `paddock` runner accounts on every OS (checked before each signature). Residual risk: C protects the key, not what gets signed; anyone who can push a protected tag or to `main` can still get code signed, and the owner confirm is the last check. D (by hand per release) as the fallback; A and B are not controls |
 | D4 | Hardened runtime | **Off** in the first signed release; on only after the §5 step-1 pass |
 | D5 | Test apps and runner binaries | **A separate local identity** on the Mac mini with `.test` identifiers (§2.5); it is not a per-app key |
-| D6 | Windows: does a stable publisher still matter (UAC only, root installed, no SmartScreen or Defender gain) | **Build it in the same line** (one adapter, one signing path), ship it only if WP-S1 shows UAC naming the publisher |
+| D6 | Windows: does a stable publisher still matter (UAC only, root installed, no SmartScreen or Defender gain) | **Build it in the same line** (one adapter, one signing path), ship it only if WP-S1 shows UAC naming the publisher. Said plainly: if UAC does not, this recommendation **leaves Windows unsigned**, against your "all OS" decision. Alternative: ship Windows signing regardless, for the verify report, `doctor`, PowerShell `AllSigned` and Trusted Publishers, at the same cost |
 | D7 | Linux | **OpenPGP signatures on `.rpm` and AppImage; the root only as a p11-kit code-signing anchor where WP-S1 shows it stays out of TLS; refused on Debian and Ubuntu**; signed apt repository through Gitea as a Should |
 | D8 | Root install from the app installers | **Windows only, unticked opt-in on the finish page with the 8-hex check, never on update, reference-counted.** This **changes** the old plan, which listed it as H5 "Later, not recommended" (R§7): the user asked for it, and the opt-in, the check and the shared code keep its risk the same as Scrutineer's own install |
-| D9 | The keychain search-list window (§2.3) | **Family key: only under `paddock-signer`, capacity 1** (follows D3). Local identity: accept the window on the main runner account. If D3 is not C, lease the **whole** Mac runner for the signing step (ADR 0074), not only a signing lock |
+| D9 | The keychain search-list window (§2.3) | **Family key: only under `paddock-signer`, capacity 1** (follows D3). Local identity: sign under the `local-signing` machine lease (ADR 0074, `./dev ci slot`) on the main runner account, and accept that other jobs of that account can use the local key during the window. If D3 is not C, lease the **whole** Mac runner for the family signing step, not only a signing lock |
 | D10 | Go back to the login keychain on macOS once signed | **Not now**; keep owner-only files and ADR 0057; revisit after one signed release cycle |
 | D11 | Publisher name in the certificates | **"decryp7"** in CN and O; no e-mail or real name |
 | D12 | Where Scrutineer lives | **`apps/scrutineer/` from its first code (AP1)**, like every family app: it ships installers, has its own release tag and CI contract, and runs on the shared shell; `tools/` holds developer scripts. **Until then the placeholder page stays at `tools/scrutineer/`**, where it was before the drop, because an `apps/<app>/` folder must carry `paddock.ci.json`, a workflow and a CODEOWNERS line (`scripts/affected.test.mjs` checks all three). Alternative: move the placeholder now to `docs/planned/scrutineer/`, as Recce does |
-| D13 | Order of the signing work, and the first signed release | **macOS track first** (S1, A1, A2, B1, B3, C1-macOS, CLI-macOS, SR, E1m, E2-macOS, F1 for one app), Windows and Linux beside it; first signed release: the first app release whose freeze comes after E2, likely Dyno's next after 1.1.1 or Debrief 1.2; Pitwall 1.1 only if its freeze moves into January |
+| D13 | Order of the signing work, and the first signed release | **macOS track first** (S1, A1, A2, B1, B3, C1-macOS, CLI-macOS, SR, E1m, E2-macOS, F1 for one app), Windows and Linux beside it; first signed release: the first app release whose freeze comes after E2, likely Dyno 1.1.1 (planned, gated on ADR 0072 M2–M4) or the release after it, or Debrief 1.2; Pitwall 1.1 only if its freeze moves into January |
 | D14 | Where the Scrutineer app goes in the release order | **After Pitwall 1.1** (after Dyno, Debrief 1.2 and Pitwall 1.1); the command layer the signing account and gate need is not blocked by the app's release. Earlier only if you want the GUI for the first key ceremony (then AP1 to AP7, 12–17.5 days, move ahead) |
 | D15 | Expiry reminders outside the app | **No login item or background service**: reminders when the app opens, in `doctor`, and as CI warnings from 60 days; a login-item check is a later option |
 
@@ -598,7 +643,7 @@ behind target cfgs, so a package marked "macOS" does not wait for the Windows or
 | **C2** | `paddock-trust-store` Linux: p11-kit anchor with purposes, Debian refusal, apt keyring and `rpm --import` | A1, S1 | 1.5–2 |
 | **CLI** | The command layer and CLI: every command of §2.2 (shared by the GUI), the 8-hex-first confirmation, the elevated child for `trust`, `doctor`, `audit show`, `backup --paper`. macOS commands first (2–2.5, needs A2, B3, C1-macOS); Windows and Linux commands as B2, B5, C2 land (1–1.5) | as stated | 3–4 |
 | **G1** | Owner guides: the key ceremony, passphrase and backup places, renewal calendar, "a key leaked" runbook, per-OS trust install | CLI-macOS | 1.5–2 |
-| **SR** | The signing account (D3 C): `decryp7/paddock-signing`, macOS user `paddock-signer` and its runner, provenance check, dispatch, publish, `signing-log.jsonl` (3–4); the Windows signing account and runner (1–2) | CLI-macOS, ceremony done | 4–6 |
+| **SR** | The signing account (D3 C): `decryp7/paddock-signing`, macOS user `paddock-signer` and its runner, provenance check, dispatch, publish, `signing-log.jsonl` (3–4); the Windows signing account and runner (1–2); the clean build, hash check and owner confirm (1.5–2.5); non-admin runner accounts on every OS and the `doctor --runner` check (1–1.5) | CLI-macOS, ceremony done | 6.5–10 |
 | **R0** | Local identity on the Mac mini; `./dev` step that signs the runner binaries after an upgrade; test-app signing in CI with `.test` ids | CLI-macOS (or the spike recipe as an interim) | 0.5–1 |
 | **E1m** | CI macOS: unsigned bundle upload and dispatch from the release workflow; the signing workflow's macOS steps (inside-out re-sign, DMG, tarball, `.sig`) | SR | 2–3 |
 | **E1w** | CI Windows: the signing workflow's Windows steps (signed `tauri build` or payload signing and installer rebuild, `paddock-setup.exe`, `dyno-helper.exe`) | SR, B2 | 1.5–2 |
@@ -622,13 +667,13 @@ behind target cfgs, so a package marked "macOS" does not wait for the Windows or
 
 **Totals.**
 
-- Signing path, Must (bold rows): **44–63 days**. With two builders that is about **4.5–6.5 weeks** of calendar after
+- Signing path, Must (bold rows): **46.5–67 days**. With two builders that is about **5–7 weeks** of calendar after
   the decisions.
 - The app (AP1 to AP7): **12–17.5 days**. Should (F2, F4, H1, L2): **6.5–9.5 days**. Later: 4.5–6 days. All together
-  about **67–96 days**.
+  about **69.5–100 days**.
 - **The macOS track to a first signed app** (S1-macOS 2–3, ADR 1–1.5, A1 4–5.5, A2 1.5–2, B1 3–4, B3 2.5–3.5, C1-macOS
-  2–2.5, CLI-macOS 2–2.5, G1 1.5–2, SR-macOS 3–4, E1m 2–3, E2-macOS 1–1.5, F1 first app 1–1.5): **26.5–36.5 days** of
-  work. Its critical path (S1-macOS, ADR, A1, B1, B3, CLI-macOS, SR-macOS, E1m, E2-macOS, F1) is about **21.5–30 days**;
+  2–2.5, CLI-macOS 2–2.5, G1 1.5–2, SR-macOS 5–7 (with the clean build, hash check, owner confirm and the macOS runner check), E1m 2–3, E2-macOS 1–1.5, F1 first app 1–1.5): **28.5–39.5 days** of
+  work. Its critical path (S1-macOS, ADR, A1, B1, B3, CLI-macOS, SR-macOS, E1m, E2-macOS, F1) is about **23.5–33 days**;
   A2, C1-macOS, G1 and R0 run beside it on a second builder.
 
 **Parallelism and cost (rule 51).** Signing is per file: hashing plus, on Windows, one TSA round trip. `sign` runs
