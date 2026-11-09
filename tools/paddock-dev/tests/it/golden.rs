@@ -490,12 +490,13 @@ fn live_workflow_action_and_script_edits_narrow_exactly_as_affected_mjs_does() {
     let dir = tempfile::tempdir().unwrap();
     let copy = dir.path().join("copy");
     let cloned = Command::new("git")
-        .args(["clone", "-q", "--shared"])
+        .args(["clone", "-q", "--shared", "-c", "core.autocrlf=false", "-c", "core.eol=lf"])
         .arg(repo_root())
         .arg(&copy)
         .status()
         .unwrap();
     assert!(cloned.success(), "git clone of this repository");
+    // LF checkout on every host: the workflow split reads LF text (a CRLF checkout cannot be split by either planner).
     // The jobs of ci.yml that CI_JOBS names, from the script's own table; one action, one reusable workflow, one script of
     // conformance/ci and a helper it imports.
     let jobs: Value = serde_json::from_slice(
