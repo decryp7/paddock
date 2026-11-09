@@ -7,9 +7,9 @@ Chromium and WebKit with their dependencies, sccache) and adds what jobs still f
 | Tool | Pin | Source |
 |---|---|---|
 | sccache | 0.19.0 (same checksums as `.gitea/actions/setup-rust`) | GitHub release, SHA-256 checked |
-| cargo-hakari, cargo-machete | 0.9.39, 0.9.2 | GitHub releases, SHA-256 checked |
+| cargo-hakari, cargo-machete, cargo-about | 0.9.39, 0.9.2, 0.9.2 (cargo-about: the pin of `scripts/notices.sh`) | GitHub releases, SHA-256 checked |
 | shellcheck | 0.11.0 (same pin and checksum as engineering-rules' `ci.yml`) | GitHub release, SHA-256 checked |
-| libduckdb | 1.5.6 (the `duckdb` crate's), in `/opt/libduckdb`, `DUCKDB_LIB_DIR` set | GitHub release, SHA-256 checked |
+| libduckdb | 2.0.0 (the `duckdb` crate's and `fetch-libduckdb.sh`'s asset and checksums; `libduckdb-env.sh` uses it without a download), in `/opt/libduckdb`, `DUCKDB_LIB_DIR` set | GitHub release, SHA-256 checked |
 | Chrome for Testing | 156.0.8078.47 (the build the apps download: `paddock-chromium`'s `chromium.toml`; Playwright keeps its own Chromium), `CHROMIUM_TEST_PATH` set | Google storage, SHA-256 checked (amd64 only) |
 | Node | the major in `/.nvmrc` (checked, not installed) | garage |
 | Playwright | the version the root `package-lock.json` locks | garage, re-installed if absent |
@@ -18,7 +18,7 @@ The last Dockerfile step runs `verify.sh` (`paddock-ci-verify`): the build fails
 `/etc/paddock-ci-release` lists every version. Jobs test `[ -f /etc/paddock-ci-release ]`; the `setup-rust` action then skips its
 toolchain install.
 
-Pending: the next rebuild (v3) will include shellcheck and DuckDB 2.0; the tag is not bumped until then.
+v3 adds shellcheck, DuckDB 2.0.0 and cargo-about 0.9.2. v4 candidates: nextest and sccache downloads on host runners, anything else the measurements show.
 
 ## Building
 

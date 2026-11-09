@@ -2,7 +2,7 @@
 #
 # It builds on the garage image (Rust toolchain with clippy, rustfmt and llvm-tools; cargo-nextest, cargo-llvm-cov and
 # cargo-deny; Tauri's Linux libraries; Xvfb and D-Bus; Node; Playwright's Chromium and WebKit with their dependencies; sccache)
-# and adds what the jobs still fetched on every run: cargo-hakari, cargo-machete, libduckdb, a pinned Chrome for Testing and
+# and adds what the jobs still fetched on every run: cargo-hakari, cargo-machete, cargo-about, libduckdb, a pinned Chrome for Testing and
 # sccache at the exact pin. Every binary added here is downloaded with a pinned SHA-256 (ci-image/fetch-verified.sh), and the
 # last step (ci-image/verify.sh) fails the build when anything a job needs is missing or off its pin, then writes
 # /etc/paddock-ci-release. Jobs test `[ -f /etc/paddock-ci-release ]` to skip their own installs.
@@ -30,11 +30,17 @@ ARG HAKARI_SHA256_ARM64=c92f6c556e84f00da1ea0a26217eea5be3d701f1ee9d24a04066a46b
 ARG MACHETE_VERSION=0.9.2
 ARG MACHETE_SHA256_AMD64=48200087f54c55aabcd4db4af1e25742b49846c02a1b1bfa134711945b35b2e9
 ARG MACHETE_SHA256_ARM64=6f96c3e6026a5bdd241b6ae600c6fb86c9197c6e189a894f91371baa01fd10f5
-# libduckdb must match the `duckdb` crate the apps build (duckdb-rs 1.10506.x = DuckDB 1.5.6).
+# libduckdb must match the `duckdb` crate the apps build (duckdb-rs 1.20000.x = DuckDB 2.0.0) and the pin in
+# apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh (same asset, same checksums; scripts/ci-image.test.mjs checks).
 # renovate: datasource=github-releases depName=duckdb/duckdb
-ARG DUCKDB_VERSION=1.5.6
-ARG DUCKDB_SHA256_AMD64=b845005f5132a7d8180057c35e14a7626632258782f871a90861b19c1c03841b
-ARG DUCKDB_SHA256_ARM64=b72ed9f05003f5e9d2015f7ceada6416b377d9dd33169cdde3c9e33897856eee
+ARG DUCKDB_VERSION=2.0.0
+ARG DUCKDB_SHA256_AMD64=993ad89e7dfca66cd6da994c2cad090c2fc160ddf9f550498a098ab4bb13cfb1
+ARG DUCKDB_SHA256_ARM64=c60eecf91143ca6bbac55c4f4d40dc22520488b0ac257c86e0fe9a2b451cf2b7
+# cargo-about at the pin of scripts/notices.sh and the app-gates action (the committed notices are its output).
+# renovate: datasource=github-releases depName=EmbarkStudios/cargo-about
+ARG ABOUT_VERSION=0.9.2
+ARG ABOUT_SHA256_AMD64=9099a59e820c38a68b9d65f300662a567d56562f9a10f6aa4c7e86c17c2566af
+ARG ABOUT_SHA256_ARM64=af5169282fb6f84e13471493f405437e43ac517744c9ae12fbe2cdf0a6f0e5a8
 # renovate: datasource=github-releases depName=koalaman/shellcheck
 ARG SHELLCHECK_VERSION=0.11.0
 ARG SHELLCHECK_SHA256_AMD64=8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
@@ -75,10 +81,15 @@ RUN set -eu; \
       "$(pick "$SHELLCHECK_SHA256_AMD64" "$SHELLCHECK_SHA256_ARM64")" /tmp/dl/shellcheck.tar.xz; \
     tar -xJf /tmp/dl/shellcheck.tar.xz -C /tmp/dl --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"; \
     install -m 0755 /tmp/dl/shellcheck /out/bin/shellcheck; \
-    # libduckdb (library and header only)
-    fetch-verified "https://github.com/duckdb/duckdb/releases/download/v${DUCKDB_VERSION}/libduckdb-linux-${A}.zip" \
-      "$(pick "$DUCKDB_SHA256_AMD64" "$DUCKDB_SHA256_ARM64")" /tmp/dl/libduckdb.zip; \
-    mkdir -p /out/libduckdb && unzip -q -o /tmp/dl/libduckdb.zip -d /out/libduckdb; \
+    # cargo-about (musl build, one binary in the archive)
+    fetch-verified "https://github.com/EmbarkStudios/cargo-about/releases/download/${ABOUT_VERSION}/cargo-about-${ABOUT_VERSION}-${MUSL}.tar.gz" \
+      "$(pick "$ABOUT_SHA256_AMD64" "$ABOUT_SHA256_ARM64")" /tmp/dl/about.tar.gz; \
+    tar -xzf /tmp/dl/about.tar.gz -C /tmp/dl --strip-components=1 --wildcards '*/cargo-about'; \
+    install -m 0755 /tmp/dl/cargo-about /out/bin/cargo-about; \
+    # libduckdb (the shared-libs archive fetch-libduckdb.sh uses: library and headers)
+    fetch-verified "https://github.com/duckdb/duckdb/releases/download/v${DUCKDB_VERSION}/duckdb-shared-libs-linux-${A}.tar.gz" \
+      "$(pick "$DUCKDB_SHA256_AMD64" "$DUCKDB_SHA256_ARM64")" /tmp/dl/libduckdb.tar.gz; \
+    mkdir -p /out/libduckdb && tar -xzf /tmp/dl/libduckdb.tar.gz -C /out/libduckdb; \
     # Chrome for Testing (amd64 only)
     mkdir -p /out/chrome-for-testing; \
     if [ "$A" = amd64 ]; then \
@@ -96,9 +107,10 @@ ARG TARGETARCH
 ARG NODE_MAJOR=24
 ARG PLAYWRIGHT_VERSION=1.64.1
 ARG CHROME_VERSION=156.0.8078.47
-ARG DUCKDB_VERSION=1.5.6
+ARG DUCKDB_VERSION=2.0.0
 ARG SCCACHE_VERSION=0.19.0
 ARG SHELLCHECK_VERSION=0.11.0
+ARG ABOUT_VERSION=0.9.2
 
 # sccache at the exact pin replaces whatever the base carries; the cargo tools sit beside the base's.
 COPY --from=fetch /out/bin/ /usr/local/bin/
@@ -122,7 +134,7 @@ COPY verify.sh /usr/local/bin/paddock-ci-verify
 # The build fails here when the image is not what the jobs expect; on success the manifest is /etc/paddock-ci-release.
 # (Chrome is checked on amd64 only: Google publishes no Linux arm64 build.)
 RUN EXPECT_NODE_MAJOR="${NODE_MAJOR}" EXPECT_SCCACHE="${SCCACHE_VERSION}" EXPECT_PLAYWRIGHT="${PLAYWRIGHT_VERSION}" \
-    EXPECT_DUCKDB="${DUCKDB_VERSION}" EXPECT_SHELLCHECK="${SHELLCHECK_VERSION}" EXPECT_CHROME="$([ "${TARGETARCH:-amd64}" = amd64 ] && echo "${CHROME_VERSION}")" \
+    EXPECT_DUCKDB="${DUCKDB_VERSION}" EXPECT_SHELLCHECK="${SHELLCHECK_VERSION}" EXPECT_ABOUT="${ABOUT_VERSION}" EXPECT_CHROME="$([ "${TARGETARCH:-amd64}" = amd64 ] && echo "${CHROME_VERSION}")" \
     paddock-ci-verify
 
 LABEL org.opencontainers.image.title="paddock-ci" \

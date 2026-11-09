@@ -5,7 +5,7 @@
 #   paddock-ci-verify [--manifest FILE]
 #
 # Expected values come from the environment the Dockerfile sets: EXPECT_NODE_MAJOR, EXPECT_SCCACHE, EXPECT_CHROME,
-# EXPECT_PLAYWRIGHT, EXPECT_DUCKDB, EXPECT_SHELLCHECK. An expectation that is not set is not checked.
+# EXPECT_PLAYWRIGHT, EXPECT_DUCKDB, EXPECT_SHELLCHECK, EXPECT_ABOUT. An expectation that is not set is not checked.
 set -uo pipefail
 
 manifest=/etc/paddock-ci-release
@@ -76,9 +76,26 @@ if [ -n "${EXPECT_CHROME:-}" ]; then
   fi
 fi
 
+# cargo-about prints "cargo-about 0.9.2".
+if [ -n "${EXPECT_ABOUT:-}" ] && tool cargo-about cargo about --version; then
+  case "$OUT" in *" ${EXPECT_ABOUT}") ;; *) bad "cargo-about is '$OUT', the image pins ${EXPECT_ABOUT}" ;; esac
+fi
+
+# The library and its header version, read the way apps/debrief/scripts/ci/libduckdb-env.sh reads it (duckdb_v2.h from 2.0 on).
 duck=${DUCKDB_LIB_DIR:-}
 if [ -n "${EXPECT_DUCKDB:-}" ]; then
-  if [ -n "$duck" ] && [ -e "$duck/libduckdb.so" ]; then note "libduckdb $EXPECT_DUCKDB: $duck"; else bad "libduckdb.so is missing in '$duck'"; fi
+  if [ -n "$duck" ] && [ -e "$duck/libduckdb.so" ]; then
+    dv=
+    if [ -f "$duck/duckdb_v2.h" ]; then h="$duck/duckdb_v2.h" prefix=DUCKDB_V2_API_VERSION; else h="$duck/duckdb.h" prefix=DUCKDB_API_VERSION; fi
+    if [ -f "$h" ]; then
+      for part in MAJOR MINOR PATCH; do
+        dv="$dv${dv:+.}$(sed -n "s/^#define ${prefix}_$part \([0-9][0-9]*\).*/\1/p" "$h" | head -n 1)"
+      done
+    fi
+    if [ "$dv" = "$EXPECT_DUCKDB" ]; then note "libduckdb $EXPECT_DUCKDB: $duck"; else bad "libduckdb in '$duck' is '${dv:-of no known version}', the image pins $EXPECT_DUCKDB"; fi
+  else
+    bad "libduckdb.so is missing in '$duck'"
+  fi
 fi
 
 if [ "${#problems[@]}" -gt 0 ]; then
