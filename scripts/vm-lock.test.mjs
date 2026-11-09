@@ -2,7 +2,7 @@
 // scratch root; no VM, no vmrun: the "VM script" is a stub that only logs what it would do.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
@@ -17,7 +17,9 @@ after(() => rmSync(scratch, { recursive: true, force: true }));
 let n = 0;
 const fresh = () => {
   const root = join(scratch, `root${++n}`);
-  return { root, log: join(scratch, `log${n}`), env: { ...process.env, PADDOCK_VM_LOCK_ROOT: root, PADDOCK_DEV: DEV, PADDOCK_VM_LOCK_HELD: '' } };
+  const tmp = join(scratch, `tmp${n}`); // the owner folders of killed holders live here and go with the scratch folder (their holders end with them)
+  mkdirSync(tmp, { recursive: true });
+  return { root, log: join(scratch, `log${n}`), env: { ...process.env, TMPDIR: tmp, PADDOCK_VM_LOCK_ROOT: root, PADDOCK_DEV: DEV, PADDOCK_VM_LOCK_HELD: '' } };
 };
 
 /** A stub "VM script": takes the lock as `label`, logs, runs `body` (bash), and logs the end. */
