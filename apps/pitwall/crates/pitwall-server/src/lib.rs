@@ -11,6 +11,7 @@ pub mod egress;
 pub mod engine_pins;
 pub mod engine_setup;
 pub mod engines;
+#[cfg(any(test, feature = "test-support"))]
 pub mod fake_engine;
 pub mod http;
 pub mod leftovers;

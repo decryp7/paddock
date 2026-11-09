@@ -1,5 +1,5 @@
-//! A tiny OpenAI-compatible server for tests (`pitwall-server --fake-engine --port N`): `/health`, streamed chat
-//! completions and embeddings with canned answers. The crash and restart tests launch this binary as an engine, so the
+//! A tiny OpenAI-compatible server for tests (`pitwall-fake-engine --port N`, a test-only bin of this package): `/health`, streamed chat
+//! completions and embeddings with canned answers. The crash and restart tests launch that program as an engine, so the
 //! whole launch, health and request path runs against a real child process.
 
 use axum::response::IntoResponse;
