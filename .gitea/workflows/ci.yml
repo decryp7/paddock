@@ -65,9 +65,9 @@ jobs:
       apps: ${{ steps.plan.outputs.apps }}
       any_app: ${{ steps.plan.outputs.any_app }}
       base: ${{ steps.plan.outputs.base }}
-      # A rerun of a run's failures (the since_run input), empty otherwise: the jobs that rerun (each job's `if` reads an empty
-      # list as its own name, so a normal run gates on the projects alone), and the failed legs of the crate and paddock-dev jobs,
-      # each with the nextest filter of its failed tests (empty: the whole leg).
+      # A rerun of a run's failures (the since_run input): the jobs that rerun (empty otherwise; each job's `if` reads an empty
+      # list as its own name, so a normal run gates on the projects alone). The crate and paddock-dev legs: in a rerun of their
+      # failures the failed ones, each with the nextest filter of its failed tests (empty: the whole leg); otherwise every OS.
       rerun_jobs: ${{ steps.plan.outputs.rerun_jobs }}
       crate_legs: ${{ steps.plan.outputs.crate_legs }}
       paddock_dev_legs: ${{ steps.plan.outputs.paddock_dev_legs }}
@@ -89,8 +89,12 @@ jobs:
           PLAN_WEBKIT: ${{ (inputs.webkit == true || inputs.webkit == 'true') && '1' || '' }}
           # The rerun reads the earlier run's jobs and logs through the API (tools/paddock-dev/src/plan_since.rs).
           PLAN_SINCE_RUN: ${{ github.event.inputs.since_run }}
+          # The crate and paddock-dev legs when the plan names none of its own (every run but a rerun of their failures).
+          PLAN_OS_LEGS: '[{"os":"ubuntu-latest"},{"os":"windows-latest"},{"os":"macos-latest"}]'
         run: |
           if [ -n "$PLAN_SINCE_RUN" ]; then ./dev plan --ci; else node scripts/affected.mjs --ci; fi
+          grep -q '^crate_legs=' "$GITHUB_OUTPUT" || echo "crate_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
+          grep -q '^paddock_dev_legs=' "$GITHUB_OUTPUT" || echo "paddock_dev_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
 
   ui:
     needs: [plan]
@@ -189,7 +193,7 @@ jobs:
   e2e-webkit:
     name: reference apps in WebKit (macOS)
     needs: [plan]
-    if: ${{ needs.plan.outputs.ui == 'true' && (inputs.webkit == true || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))) && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e-webkit"]'), 'e2e-webkit') }}
+    if: ${{ needs.plan.outputs.ui == 'true' && (inputs.webkit == true || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || contains(fromJSON(needs.plan.outputs.rerun_jobs || '[]'), 'e2e-webkit')) && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e-webkit"]'), 'e2e-webkit') }}
     runs-on: macos-latest
     defaults:
       run:
@@ -411,7 +415,7 @@ jobs:
       fail-fast: false
       matrix:
         # Every OS; a rerun of a run's failures (since_run) only the failed legs, each with the filter of its failed tests.
-        include: ${{ fromJSON(needs.plan.outputs.crate_legs || '[{"os":"ubuntu-latest"},{"os":"windows-latest"},{"os":"macos-latest"}]') }}
+        include: ${{ fromJSON(needs.plan.outputs.crate_legs) }}
     runs-on: ${{ matrix.os }}
     # Linux runs in the paddock-ci image (Rust, Tauri's libraries, Node, Playwright, Chrome for Testing, cargo-nextest baked in); Windows and
     # macOS run on the host.
@@ -758,7 +762,7 @@ jobs:
       fail-fast: false
       matrix:
         # Every OS; a rerun of a run's failures (since_run) only the failed legs, each with the filter of its failed tests.
-        include: ${{ fromJSON(needs.plan.outputs.paddock_dev_legs || '[{"os":"ubuntu-latest"},{"os":"windows-latest"},{"os":"macos-latest"}]') }}
+        include: ${{ fromJSON(needs.plan.outputs.paddock_dev_legs) }}
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
     defaults:
