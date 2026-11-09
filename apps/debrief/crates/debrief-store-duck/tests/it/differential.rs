@@ -272,9 +272,34 @@ fn check_anchor(p: &Pair) {
     }
 }
 
+/// Bucket counts the timelines are compared at: every query at the fine count, and the coarse count with the queries of
+/// [`COARSE_TIMELINE_QUERIES`], the ones whose answer interacts with the bucket edges (all events, levels, a scan, and the
+/// two time-bounded windows). Not the full cross product: that cost the most of the test's time, which passed 120 s on a
+/// loaded Mac runner in CI 7825.
+const TIMELINE_BUCKETS: usize = 400;
+/// The coarse bucket count, and the queries it runs with.
+const COARSE_TIMELINE_BUCKETS: usize = 10;
+const COARSE_TIMELINE_QUERIES: [&str; 5] = [
+    "all",
+    "levels",
+    "regex (scan)",
+    "time window",
+    "live window: the last hour before the newest event",
+];
+
+/// Panics when a query named in one of the lists below is no longer in [`queries`] (the list would silently cover nothing).
+fn assert_named_queries(p: &Pair, names: &[&str]) {
+    let all: Vec<_> = queries(p).into_iter().map(|(n, _)| n).collect();
+    for n in names {
+        assert!(all.contains(n), "no query named {n:?} in {all:?}");
+    }
+}
+
 fn check_timelines(p: &Pair) {
+    assert_named_queries(p, &COARSE_TIMELINE_QUERIES);
     for (name, q) in queries(p) {
-        for buckets in [10, 400] {
+        let coarse = COARSE_TIMELINE_QUERIES.contains(&name).then_some(COARSE_TIMELINE_BUCKETS);
+        for buckets in std::iter::once(TIMELINE_BUCKETS).chain(coarse) {
             let req = TimelineRequest {
                 query: q.clone(),
                 buckets,
@@ -389,10 +414,24 @@ fn check_histogram_timelines(p: &Pair) {
     p.duck.set_preaggregate_above(debrief_store_duck::PREAGGREGATE_ABOVE);
 }
 
+/// Facet fields compared with every query: a built-in one and an extracted one.
+const FACET_FIELDS_EVERY_QUERY: [&str; 2] = ["@level", "MachineName"];
+/// Every facet field, compared with the queries of [`FULL_FACET_QUERIES`] (all events, a text search, a time window and a
+/// scan): a subset of the full cross product, which CI 7825 could not afford; the other queries get
+/// [`FACET_FIELDS_EVERY_QUERY`].
+const FACET_FIELDS: [&str; 7] = ["@level", "@source", "@group", "MachineName", "SourceContext", "@line", "nope"];
+const FULL_FACET_QUERIES: [&str; 4] = ["all", "text", "time window", "field filter (scan)"];
+
 fn check_facets(p: &Pair) {
+    assert_named_queries(p, &FULL_FACET_QUERIES);
     for (name, q) in queries(p) {
         let q = ranged(p, q);
-        for field in ["@level", "@source", "@group", "MachineName", "SourceContext", "@line", "nope"] {
+        let fields: &[&str] = if FULL_FACET_QUERIES.contains(&name) {
+            &FACET_FIELDS
+        } else {
+            &FACET_FIELDS_EVERY_QUERY
+        };
+        for &field in fields {
             let req = FacetRequest {
                 query: q.clone(),
                 field: field.into(),
@@ -658,7 +697,12 @@ fn answers_like_the_workspace_with_the_sample_profile() {
 #[test]
 fn answers_like_the_workspace_on_a_file_of_several_products() {
     let apps = common::samples().join("linux/logserver01/apps-20261014.log");
-    let p = common::pair_of(Profile::default_profile(), std::slice::from_ref(&apps));
+    // At the app's own thread counts: the other differential tests use the tests' lean budgets (common::test_options).
+    let p = common::pair_of_with(
+        Profile::default_profile(),
+        std::slice::from_ref(&apps),
+        debrief_store_duck::StoreOptions::default(),
+    );
     check_summary(&p);
     check_pages_of(&p, false);
     check_facets(&p);

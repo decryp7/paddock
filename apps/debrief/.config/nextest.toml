@@ -22,7 +22,7 @@ app-plugin-processes = { max-threads = 6 }
 # beside the heavy suites, starved each other on the loaded Mac runner (CI 7213, 7250 and the run after). The start itself is
 # judged on the browser's run state (ADR 0031); the group keeps them from competing with each other.
 real-browser = { max-threads = 1 }
-# debrief-store-duck's waived suites (the differential, analysis and large-folder tests in profile.ci below) each import
+# debrief-store-duck's waived suites (the differential and analysis tests in profile.ci below) each import
 # whole sample workspaces. Five at once beside the rest of the workspace on a shared Mac runner pushed three past their 180 s
 # waiver (CI 7822, three macOS jobs on one host); two at a time instead of a longer limit (ER-12).
 duck-heavy = { max-threads = 2 }
@@ -80,11 +80,14 @@ filter = 'all()'
 retries = 0
 
 # waiver: the DuckDB store answers every query and analysis of the sample workspaces like the reference engine, one profile
-# per test (47-81 s in CI 6381), and the large-folder import measures progress over a generated folder of many files (89 s).
+# per test (47-81 s in CI 6381).
 # Two at a time (duck-heavy) since CI 7822 stopped three of five at 180 s: under load the slowest took 34-39 s grouped and 48 s
 # all at once (docs/performance.md, "The store's waived suites under load", 2026-11-09).
+# Then made cheaper (CI 7825 still took 84-142 s of them): under load large_folder 46-63 s -> 6 s, differential 23-32 s ->
+# 18-23 s (docs/performance.md, "The store's slow tests made cheaper", 2026-11-09). large_folder left the waiver then: about
+# 6 s under load, well inside the 90 s default.
 [[profile.ci.overrides]]
-filter = "package(debrief-store-duck) & binary(it) & (test(/^differential::answers_like_the_workspace_/) | test(/^analysis::analyses_match_the_workspace_/) | test(/^large_folder::/))"
+filter = "package(debrief-store-duck) & binary(it) & (test(/^differential::answers_like_the_workspace_/) | test(/^analysis::analyses_match_the_workspace_/))"
 slow-timeout = { period = "30s", terminate-after = 6 }
 test-group = 'duck-heavy'
 

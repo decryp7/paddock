@@ -1,6 +1,7 @@
 //! A very large folder imports with live progress from the first moments (phase, counts), and timings of
 //! each phase on a synthetic tree. The tree is generated here (never real data); `DEBRIEF_BENCH_FILES=<n>`
-//! sets its size (default 3,000; the timing run uses 100,000).
+//! sets its size (default 500, which keeps the test's properties at a sixth of the cost that passed 60 s on a
+//! loaded Mac runner, CI 7825; the timing run uses 100,000).
 
 use crate::common;
 
@@ -14,6 +15,9 @@ use std::time::{Duration, Instant};
 
 const LINE: &str = "2026-10-14 10:00:00 INFO synthetic line\n";
 
+/// Lines of each of the three big logs in `tree`.
+const BIG_LINES: usize = 20_000;
+
 /// `n` small logs over nested folders, a few big ones and some zips.
 fn tree(root: &Path, n: usize) {
     for i in 0..n {
@@ -24,7 +28,8 @@ fn tree(root: &Path, n: usize) {
     let big = root.join("big");
     std::fs::create_dir_all(&big).unwrap();
     for i in 0..3 {
-        std::fs::write(big.join(format!("big{i}.log")), LINE.repeat(200_000)).unwrap();
+        // Each spans ten of the parser's chunks (2048 records), so the import goes on well after the walk ended.
+        std::fs::write(big.join(format!("big{i}.log")), LINE.repeat(BIG_LINES)).unwrap();
     }
     for i in 0..5 {
         let f = std::fs::File::create(root.join(format!("arch{i}.zip"))).unwrap();
@@ -41,13 +46,13 @@ fn files() -> usize {
     std::env::var("DEBRIEF_BENCH_FILES")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(3_000)
+        .unwrap_or(500)
 }
 
 fn store(dir: &TempDir, threads: usize) -> DuckStore {
     let opts = StoreOptions {
         parse_threads: threads,
-        ..StoreOptions::default()
+        ..common::test_options()
     };
     DuckStore::create_with(&dir.0, Profile::default_profile(), PluginRegistry::new(), opts).unwrap()
 }

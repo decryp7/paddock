@@ -4,7 +4,7 @@
 use crate::common;
 
 use common::TempDir;
-use debrief_core::ports::{Ingest, Query, Search, SearchRequest};
+use debrief_core::ports::{Ingest, Inspect, Query, Search, SearchRequest};
 use debrief_core::{PluginRegistry, Profile};
 use debrief_store_duck::DuckStore;
 use std::time::Duration;
@@ -225,4 +225,49 @@ fn indexing_many_segments_in_batches_is_complete_and_repeatable() {
         .map(|t| ids(&store, t))
         .collect();
     assert_eq!(first, again, "the rebuilt index holds the same documents");
+}
+
+/// At the app's own thread counts (`StoreOptions::default()`, not the tests' lean budgets), an index built over many
+/// commits is merged into fewer segments, and every document is still found after the merges ended (the store was closed,
+/// which waits for them) and the index was opened again.
+#[test]
+fn the_index_at_the_apps_thread_counts_merges_its_segments_and_keeps_every_document() {
+    let logs = TempDir::new("search-merge-logs");
+    let commits = 12;
+    for f in 0..commits {
+        let text: String = (0..200)
+            .map(|i| format!("2026-10-14 10:{f:02}:{:02} INFO merge{f} request {i} handled\n", i % 60))
+            .collect();
+        std::fs::write(logs.0.join(format!("f{f:02}.log")), text).unwrap();
+    }
+    let dir = TempDir::new("search-merge-store");
+    let opts = debrief_store_duck::StoreOptions::default();
+    let threads = opts.index.threads;
+    {
+        let store = DuckStore::create_with(&dir.0, Profile::default_profile(), PluginRegistry::new(), opts.clone()).unwrap();
+        for f in 0..commits {
+            store.open(&[logs.0.join(format!("f{f:02}.log"))]).unwrap().wait().unwrap();
+            // One import, one commit of the index.
+            assert!(store.wait_for_index(Duration::from_secs(60)).unwrap().ready);
+        }
+        let i = store.store_index().unwrap();
+        assert_eq!(i.writer_threads as usize, threads, "{i:?}");
+    }
+    let store = DuckStore::open_with(&dir.0, Profile::default_profile(), PluginRegistry::new(), opts).unwrap();
+    let status = store.wait_for_index(Duration::from_secs(60)).unwrap();
+    assert!(status.ready, "{status:?}");
+    let i = store.store_index().unwrap();
+    assert!(
+        i.index_segments < commits as u64,
+        "{commits} commits left {} segments: no merge ran",
+        i.index_segments
+    );
+    assert_eq!((i.docs, i.events), ((commits * 200) as u64, (commits * 200) as u64), "{i:?}");
+    let r = store
+        .search(&SearchRequest {
+            text: "handled".into(),
+            limit: 10_000,
+        })
+        .unwrap();
+    assert_eq!(r.total, (commits * 200) as u64);
 }
