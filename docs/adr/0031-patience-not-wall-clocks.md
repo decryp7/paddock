@@ -253,7 +253,7 @@ that decide restarts, failures or quarantine, and their neighbours; section 8's 
 | `paddock-guard` quarantine window | quarantine | C | already on the injected `Clock`: give it the host-tick clock |
 | `paddock-startup` `ready_timeout` (10 s), `terminate_window` (60 s), `dialog_show_deadline` (1 s) | the page-ready handshake of a starting window (ready), the end of a stalled start (terminate), a dialog shown anyway (show) | L; S; U | ADR 0026, 0029 |
 | `paddock-chromium` `START_LIMIT` (20 s), `START_PAGE_WAIT` (5 s), `SELF_TEST_LIMIT` (30 s); `CLOSE_GRACE` (5 s) | the research and test browser | L; S | Chromium is ours to start: judged on its run state |
-| `paddock-service` `HELPER_TIMEOUT` (30 s), `ELEVATED_TIMEOUT` (120 s), `STOP_VERB_TIMEOUT` (10 s) | privileged helper, OS service manager | X | the OS and the user's prompt |
+| `paddock-service` `HELPER_TIMEOUT` (30 s), `ELEVATED_CEILING` (15 min), `STOP_VERB_TIMEOUT` (10 s) | privileged helper, OS service manager | X | the OS and the user's prompt. The elevated step is waited for in 30 s slices with a log line each, and a program still running at the ceiling is reported as such, not as failed. 15 minutes, not the 1 h of `MAX_ELEVATED_CALL`: a UAC consent, a busy runner's service stop and a 1072 (marked for deletion) retry fit well inside 15 minutes, and an hour would leave a hung elevated process invisible for too long |
 | `paddock-mcp` `loopback::HANDSHAKE_TIMEOUT` (10 s) | MCP client | X | |
 | `paddock-channels` `dispatch::DEFAULT_TIMEOUT` (15 s) | notification channels | X | |
 | Dyno app `link` `REQUEST_TIMEOUT` (15 s), `SPAWN_WAIT` (5 s), `CONNECT_GRACE` (8 s); `dyno-ipc` `CONNECT_TIMEOUT`, `PUSH_TIMEOUT` (5 s) | app to agent | L | the agent is our child or service |
@@ -457,7 +457,12 @@ each other (Dyno `link.rs`, Spotter `StartJudge`, `paddock-chromium`'s fixed 20 
 - `StallReport { cause, action, message }`: `StallCause` Slow, Spinning, Idle, Hung, Paused (stopped by the OS or another app: not stuck, Wait), WaitingForSupervisor, HeldByOther;
   `StallAction` Wait, Retry, ShowLog. Apps map it to their health chip and Retry.
 - `InstanceLock::claim(path)` gives `Claim::Acquired | Held | Unsupported` from an OS lock (`File::try_lock`: `flock`,
-  `LockFileEx`); `is_held(path)`. The lock is the authority.
+  `LockFileEx`). A lock seen held is checked `HELD_CHECKS` times `HELD_TICK` apart before `claim` reports `Held` (a
+  spawning child's copy of the descriptor clears; a real holder stays). Two probes: `is_held_settled(path)` does the same
+  re-check (it waits about 400 ms on a held lock) and is for a one-shot decision; `is_held_now(path)` checks once and never
+  waits, and is only for a loop where a held reading leads to waiting and looking again at the caller's own pace (a
+  supervisor), so a false "held" only delays. Never put the settled probe in such a loop (CI run 7257). The lock is the
+  authority.
 - `hint`: a discovery file is only a hint (rule 53). `Hint` (pid, start), `written_since`, `names_live` (new, or
   answers), `remove_if_same`, `remove_if_mine`, `write_private_atomic`, `read_bounded`.
 - `tree_cpu_time_from(source, root)`, `ProcessSource::cpu_micros(pid)`: the CPU time of a tree by identity, one pid at

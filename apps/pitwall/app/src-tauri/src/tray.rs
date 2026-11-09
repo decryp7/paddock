@@ -1,28 +1,37 @@
-//! The tray (Windows notification area, Linux status notifier, macOS menu bar): draws a [`TrayView`] and forwards the
-//! menu's choices. What it shows is decided in `tray_model.rs`; when to open or rebuild the window is decided in
-//! `window.rs`. Icons are the suite's pattern (`icons/tray/`): macOS template images the system tints, and on Windows a
-//! light and a dark variant chosen from the taskbar's theme. Each state has its own shape, not only its own colour.
-//! (Adapted from Pitcrew's tray.)
+//! The tray (Windows notification area, Linux status notifier, macOS menu bar), on the shell's tray (`paddock_window`):
+//! the shell creates the icon at start, redraws it when [`refresh_tray`](paddock_window::tauri::refresh_tray) is called
+//! and runs its own items (Open is the shell's `pd.show`); this module turns Pitwall's [`TrayView`] into the shell's view
+//! and runs Pitwall's own items. What the tray shows is decided in `tray_model.rs`. Icons are the suite's pattern
+//! (`icons/tray/`): macOS template images the system tints, and on Windows a light and a dark variant chosen from the
+//! taskbar's theme. Each state has its own shape, not only its own colour.
 
+use crate::commands::{self, SharedClient};
+use crate::quit::{self, QuitChoice};
 use crate::tray_model::{Entry, TrayAction, TrayState, TrayView};
-use std::sync::Mutex;
+use crate::SharedModel;
+use paddock_window::tauri::{NativeTray, PopoverSpec, Popovers, Tray, TrayBackend};
+use paddock_window::tray::{self as shell_tray, SHOW_ID};
 use tauri::image::Image;
-use tauri::menu::{Menu, MenuBuilder, MenuItem, PredefinedMenuItem};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 
-/// The tray's id.
-pub const TRAY_ID: &str = "pitwall";
+/// The name of a state's icon in the shell's view (and back).
+pub const fn icon_name(state: TrayState) -> &'static str {
+    match state {
+        TrayState::Idle => "idle",
+        TrayState::Busy => "busy",
+        TrayState::Paused => "paused",
+        TrayState::Unavailable => "unavailable",
+    }
+}
 
-/// Marks an app whose tray icon could not be created (Linux without an appindicator): there is no way back to a
-/// closed window, so closing it must exit.
-pub struct NoTray;
+/// The state an icon name stands for.
+pub fn state_of(name: &str) -> Option<TrayState> {
+    [TrayState::Idle, TrayState::Busy, TrayState::Paused, TrayState::Unavailable]
+        .into_iter()
+        .find(|s| icon_name(*s) == name)
+}
 
-/// The view on screen now, so equal views are not redrawn (rebuilding a menu closes it if it is open).
-#[derive(Default)]
-pub struct Drawn(Mutex<Option<TrayView>>);
-
-/// The icon for a state (PNG bytes built into the app).
+/// The PNG bytes for a state: the macOS template image, or the light/dark variant for the taskbar.
 pub fn icon_bytes(state: TrayState, dark_taskbar: bool) -> &'static [u8] {
     macro_rules! icons {
         ($($s:ident => $k:literal),*) => {
@@ -35,13 +44,10 @@ pub fn icon_bytes(state: TrayState, dark_taskbar: bool) -> &'static [u8] {
             }
         };
     }
-    // The family's team-radio glyph (paddock icons/pitwall/tray): normal is the plain glyph, working a ring, paused two
-    // bars, a stopped server a cross.
     icons!(Idle => "normal", Busy => "busy", Paused => "paused", Unavailable => "error")
 }
 
-/// Whether the taskbar is dark (read-only registry lookup on Windows; dark when unknown, the Windows 11 default, and
-/// on Linux where panels are mostly dark).
+/// Whether the taskbar is dark (Windows reads the system setting; elsewhere dark, the common case for menu bars).
 pub fn dark_taskbar() -> bool {
     #[cfg(windows)]
     {
@@ -58,82 +64,103 @@ pub fn dark_taskbar() -> bool {
     }
 }
 
-fn build_menu<R: Runtime>(app: &AppHandle<R>, view: &TrayView) -> tauri::Result<Menu<R>> {
-    let mut menu = MenuBuilder::new(app);
-    for (i, e) in view.entries.iter().enumerate() {
-        menu = match e {
-            Entry::Status(text) => menu.item(&MenuItem::with_id(app, format!("status-{i}"), text, false, None::<&str>)?),
-            Entry::Separator => menu.item(&PredefinedMenuItem::separator(app)?),
-            Entry::Item { action, label, enabled } => menu.item(&MenuItem::with_id(app, action.id(), label, *enabled, None::<&str>)?),
-        };
-    }
-    menu.build()
-}
-
-/// Creates the tray icon. `on_action` runs for every menu choice and for a left click on the icon (Windows, Linux).
-pub fn create<R: Runtime>(
-    app: &AppHandle<R>,
-    view: &TrayView,
-    on_action: impl Fn(&AppHandle<R>, TrayAction) + Send + Sync + 'static,
-) -> tauri::Result<()> {
-    let menu = build_menu(app, view)?;
-    let icon = Image::from_bytes(icon_bytes(view.state, dark_taskbar()))?;
-    let on_action = std::sync::Arc::new(on_action);
-    let on_menu = on_action.clone();
-    TrayIconBuilder::with_id(TRAY_ID)
-        .tooltip(&view.tooltip)
-        .icon(icon)
-        .icon_as_template(cfg!(target_os = "macos"))
-        .menu(&menu)
-        .show_menu_on_left_click(cfg!(target_os = "macos"))
-        .on_menu_event(move |app, event| {
-            if let Some(action) = TrayAction::parse(event.id().as_ref()) {
-                on_menu(app, action);
-            }
-        })
-        .on_tray_icon_event(move |tray, event| {
-            if let TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } = event
-            {
-                if !cfg!(target_os = "macos") {
-                    on_action(tray.app_handle(), TrayAction::Open);
+/// The shell's view of Pitwall's tray: the icon by name, the tooltip, and the menu with Open as the shell's own item.
+pub fn shell_view(view: &TrayView) -> shell_tray::TrayView {
+    let menu = view
+        .entries
+        .iter()
+        .map(|e| match e {
+            Entry::Status(text) => shell_tray::disabled(text),
+            Entry::Separator => shell_tray::TrayEntry::Separator,
+            Entry::Item { action, label, enabled } => {
+                let id = if *action == TrayAction::Open { SHOW_ID } else { action.id() };
+                shell_tray::TrayEntry::Item {
+                    id: id.to_string(),
+                    text: shell_tray::short(label),
+                    enabled: *enabled,
                 }
             }
         })
-        .build(app)?;
-    Ok(())
+        .collect();
+    shell_tray::TrayView::new(&view.tooltip, menu, icon_name(view.state))
 }
 
-/// Draws `view` unless it is what is on screen already.
-pub fn update<R: Runtime>(app: &AppHandle<R>, drawn: &Drawn, view: &TrayView) {
-    {
-        let mut last = drawn.0.lock().unwrap_or_else(|p| p.into_inner());
-        if last.as_ref() == Some(view) {
-            return;
+/// The popover's route in the UI (`main.ts` boots the tray window for it): memory, throughput, loaded models, Pause and
+/// Free memory, Open Pitwall.
+pub const POPOVER_ROUTE: &str = "index.html#/tray";
+/// The popover's width (logical px), the UI's tray layout.
+pub const POPOVER_WIDTH: f64 = 360.0;
+
+/// The native tray icon: Tauri's, with Pitwall's pictures per state. A left click opens the popover on every OS; the
+/// right click (and Control-click) opens the menu.
+pub fn native() -> NativeTray {
+    NativeTray::new(|name| state_of(name).and_then(|s| Image::from_bytes(icon_bytes(s, dark_taskbar())).ok())).menu_on_left_click(false)
+}
+
+/// The shell's tray over `backend`, with its popover: the model reads the facts the live feed keeps, and Pitwall's own items
+/// run here.
+pub fn tray<R: Runtime>(app: &AppHandle<R>, backend: impl TrayBackend<R>) -> Tray<R> {
+    app.manage(Popovers::new().popover(None, PopoverSpec::new(POPOVER_ROUTE, crate::APP_NAME).width(POPOVER_WIDTH)));
+    Tray::new(backend, |app: &AppHandle<R>| {
+        let view = match app.try_state::<SharedModel>() {
+            Some(m) => m.lock().unwrap_or_else(|p| p.into_inner()).view(),
+            None => crate::tray_model::TrayModel::new().view(),
+        };
+        shell_view(&view)
+    })
+    .on_action(|app, id| {
+        if let Some(action) = TrayAction::parse(id) {
+            act(app, action);
         }
-        *last = Some(view.clone());
-    }
-    let Some(tray) = app.tray_by_id(TRAY_ID) else { return };
-    if let Ok(icon) = Image::from_bytes(icon_bytes(view.state, dark_taskbar())) {
-        let _ = tray.set_icon(Some(icon));
-        let _ = tray.set_icon_as_template(cfg!(target_os = "macos"));
-    }
-    let _ = tray.set_tooltip(Some(&view.tooltip));
-    if let Ok(menu) = build_menu(app, view) {
-        let _ = tray.set_menu(Some(menu));
+    })
+    .popover(true)
+}
+
+/// Runs one of Pitwall's tray items (Open is the shell's).
+fn act<R: Runtime>(app: &AppHandle<R>, action: TrayAction) {
+    match action {
+        TrayAction::Open => {
+            if let Err(e) = paddock_window::tauri::reveal(app, "main") {
+                eprintln!("Pitwall: the window could not be shown ({})", e.message);
+            }
+        }
+        TrayAction::Quit | TrayAction::QuitAndStop => {
+            let app = app.clone();
+            let forced = (action == TrayAction::QuitAndStop).then_some(QuitChoice::StopServing);
+            tauri::async_runtime::spawn(async move { quit::request(&app, forced).await });
+        }
+        TrayAction::ToggleServing | TrayAction::ReleaseMemory => {
+            let Some(client) = app.try_state::<SharedClient>().map(|c| c.inner().clone()) else {
+                return;
+            };
+            let paused = app
+                .try_state::<SharedModel>()
+                .is_some_and(|m| m.lock().unwrap_or_else(|p| p.into_inner()).paused());
+            tauri::async_runtime::spawn(async move {
+                let result = match action {
+                    TrayAction::ToggleServing => {
+                        commands::forward(client.as_ref(), "set_serving", serde_json::json!({ "paused": !paused })).await
+                    }
+                    _ => commands::forward(client.as_ref(), "release_memory", serde_json::Value::Null).await,
+                };
+                if let Err(e) = result {
+                    eprintln!("Pitwall: the tray action failed ({:?})", e.code);
+                }
+            });
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tray_model::TrayModel;
+
+    const STATES: [TrayState; 4] = [TrayState::Idle, TrayState::Busy, TrayState::Paused, TrayState::Unavailable];
 
     #[test]
     fn every_state_has_an_icon_for_both_taskbars() {
-        for state in [TrayState::Idle, TrayState::Busy, TrayState::Paused, TrayState::Unavailable] {
+        for state in STATES {
             for dark in [false, true] {
                 let png = icon_bytes(state, dark);
                 assert_eq!(&png[1..4], b"PNG", "{state:?}");
@@ -144,7 +171,7 @@ mod tests {
 
     #[test]
     fn the_states_have_different_pictures() {
-        let all = [TrayState::Idle, TrayState::Busy, TrayState::Paused, TrayState::Unavailable].map(|s| icon_bytes(s, true));
+        let all = STATES.map(|s| icon_bytes(s, true));
         for i in 0..all.len() {
             for j in i + 1..all.len() {
                 assert_ne!(all[i], all[j], "{i} vs {j}");
@@ -153,13 +180,32 @@ mod tests {
     }
 
     #[test]
-    fn an_equal_view_is_not_drawn_twice() {
-        let drawn = Drawn::default();
-        let app = tauri::test::mock_app();
-        let view = crate::tray_model::TrayModel::new().view();
-        update(app.handle(), &drawn, &view);
-        assert_eq!(drawn.0.lock().unwrap().as_ref(), Some(&view));
-        // No tray exists in the mock app; the second call returns early on equality (nothing to assert beyond not panicking).
-        update(app.handle(), &drawn, &view);
+    fn every_state_round_trips_through_its_icon_name() {
+        for s in STATES {
+            assert_eq!(state_of(icon_name(s)), Some(s));
+        }
+        assert_eq!(state_of("nonsense"), None);
+    }
+
+    /// The shell's menu rules hold for the view Pitwall draws (ids, depth, count), Open is the shell's own item and every
+    /// other item comes back to one of Pitwall's actions.
+    #[test]
+    fn the_shell_view_is_valid_and_routes_the_items() {
+        let view = shell_view(&TrayModel::new().view());
+        assert_eq!(paddock_window::tray::validate(&view.menu), Ok(()));
+        assert_eq!(view.icon, "unavailable");
+        let ids: Vec<&str> = view
+            .menu
+            .iter()
+            .filter_map(|e| match e {
+                shell_tray::TrayEntry::Item { id, enabled: true, .. } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(ids.contains(&SHOW_ID), "{ids:?}");
+        for id in ids.iter().filter(|id| **id != SHOW_ID) {
+            assert!(TrayAction::parse(id).is_some(), "{id} is one of Pitwall's actions");
+            assert!(!id.starts_with("pd."), "{id} would be taken by the shell");
+        }
     }
 }

@@ -4,6 +4,7 @@
  "ui": true,
  "eslint": true,
  "conformance": true,
+ "c99": true,
  "tools": true,
  "icons": true,
  "ciImage": true,
@@ -37,6 +38,9 @@
    "global .gitea/workflows/ci.yml"
   ],
   "app:z": [
+   "global .gitea/workflows/ci.yml"
+  ],
+  "c99": [
    "global .gitea/workflows/ci.yml"
   ],
   "ci-image": [

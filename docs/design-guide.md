@@ -19,9 +19,11 @@ product-reference points come from established knowledge (marked "[k]" in Source
    (status or accent fill) appears only when something needs attention. A screen with nothing wrong has at most one
    saturated element: the primary action.
 3. **Three density levels** (user setting, orthogonal to theme): Comfortable (row 36 px), Standard (row 32 px, default),
-   Compact (row 24 px, Debrief grids/Pitcrew logs). Controls (buttons, fields, selects, the dialog footer) follow the
-   density through `--pd-button-height`: 32 px Comfortable, 28 px Standard (default), 24 px Compact. Controls never go
-   below 24 px high; hit targets 24 px minimum (WCAG 2.2 SC 2.5.8). A primary button is as high as the other controls.
+   Compact (row 24 px, Debrief grids/Pitcrew logs). Controls follow the
+   density through two tokens that are not equal: `--pd-control-height` (a field or select without a label, a segmented control,
+   a chip) is 32 px Comfortable, 28 px Standard (default), 24 px Compact; `--pd-button-height` (buttons, the dialog footer) is
+   32 px Comfortable, 32 px Standard, 28 px Compact; a labelled field is `--pd-field-height` (below). A row that mixes them centres
+   its items (`.pd-field-row`). Controls never go below 24 px high; hit targets 24 px minimum (WCAG 2.2 SC 2.5.8). A primary button is as high as the other controls.
 4. **Data-ink first** (Tufte): remove chart chrome that carries no information (box borders, heavy grids, 3D, legends
    that repeat a title). Direct-label rather than legend where possible.
 5. **Every state is designed**: loading (skeleton), empty (what + next step button), error (what failed, why, Retry),
@@ -279,7 +281,8 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
 - **Toolbars**: 44 px, ghost buttons by default (no border until hover), one primary (filled accent) at the far right,
   groups separated by a 1 px divider, segmented controls for 2-4 mutually exclusive options (time range).
 - **Buttons**: primary (accent fill), secondary (surface-2 + border-strong), ghost, danger (danger fill only in
-  confirmation dialogs). Height is `--pd-button-height`: 28 in Standard, 32 Comfortable, 24 Compact. Max one primary per view region.
+  confirmation dialogs). Disabled: a primary drops its fill and keeps a faint `border-strong` outline with its label in subtle text at 75 % (3:1 or
+  better on surface-1 and surface-2), so it never reads as an enabled secondary; other buttons fade to half opacity; the cursor is `not-allowed`. Height is `--pd-button-height`: 32 px in Standard and Comfortable, 28 px Compact (taller than an unlabelled field, `--pd-control-height` 28/32/24; `.pd-field-row` centres a row that mixes them). Max one primary per view region.
 - **Popovers/menus**: surface-3, radius 10, shadow-2, 4 px padding, items 28 px radius 6, shortcut right-aligned
   muted, CDK menu for focus management, 120 ms fade+4 px translate.
 - **Tray popups**: 360 px wide; header (icon, name, one status pill), the widget area (the user's layout of widgets, below),
@@ -290,7 +293,7 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
   2 equal columns of 159 px, 8 px gap, the popover's 16 px inset); a widget spans 1 (half) or 2 (full). A frame has no border
   inside the bordered popover, one token step instead (`--pd-surface-2` on `--pd-surface-3`), radius 10, padding 8 / 12. In high
   contrast it is outlined in `--pd-border-strong`. The head is a 14 px icon, a 12/500 muted title and an optional right-aligned
-  meta ("3 volumes"); a stale reading shows a clock and "Updated 4 min ago" ("Paused at 14:28" only for a live kind; at half
+  meta ("3 volumes"); a stale reading shows a clock and "Updated 4 min ago" ("As of 14:28" only for a live kind; at half
   width the clock and the short time, with the full wording in the tooltip and the accessible name). The body, by state:
   - **Loading**: the ready template with no value; its parts marked `pdSkeleton` are `--pd-skeleton-raised` blocks with the
     `--pd-skeleton-raised-shine` shimmer (static in reduced motion), so the loading height is the ready height.
@@ -369,7 +372,12 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
   button (the next step). **Error states**: icon in danger, what failed in plain words, likely cause, Retry + secondary
   ("Open logs"). Never raw exception text as the headline.
 - **Forms**: every field is a Material outline field (`mat-form-field appearance="outline"` with `floatLabel="always"`, rule 47
-  and decision D1, 2026-10-28): the label 12/500 sits in the outline's notch and stays there, empty or not; helper 12 muted
+  and decision D1, 2026-10-28): the label 12/500 sits in the outline's notch and stays there, empty or not. A labelled field is
+  `--pd-field-height`, the control height plus 8 px above and below its text row (44 px at the standard density; 40 compact, 48 comfortable), so the
+  label never touches the text and the text keeps 8 px from the outline; a textarea has the same padding and grows; a field
+  without a label (a toolbar filter) is the control height. Do not mix a labelled field with a field without a label, or a
+  labelled field with a 32 px button, in one row unless the row centres its items: use `.pd-field-row` (controls.css; items share
+  one vertical centre), and keep fields with a hint or error line in a top-aligned column instead. Helper 12 muted
   under the field, replaced by the error in danger with its icon; validate on blur. Selects are `mat-select`, times
   `mat-timepicker`, a few exclusive choices `mat-button-toggle-group`. Toggles are for immediate effects, checkboxes for form
   submit; group settings by consequence, not by data model. (UI rule 11, "label above the input", is superseded: the label is in the notch.)
@@ -400,7 +408,8 @@ one is declared elsewhere in the file); colour tokens stay in the `:root` block 
   fields:** the floated label sits on the border, so a ring around the box would cross it; the field's own outline is the ring
   instead, in `--pd-focus-ring` at 3 px (the resting 1 px border is part of it, so 2 px of new pixels change, SC 2.4.13).
 - **Measured:** `npm run test:tokens` checks the contrast of every bridged component in both schemes and all accents; the gallery
-  page "Material controls" and its e2e check the rendered sizes (28 px rows, 4 px panel padding, 12 px floated label).
+  page "Material controls" and its e2e check the rendered sizes (28 px rows, 4 px panel padding, 12 px floated label, labelled
+  fields 44 px with the label clear of the text and 8 px from text to outline).
 
 ## 9. Motion
 

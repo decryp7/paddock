@@ -30,6 +30,8 @@ function render(p: AppPermissions = BASE) {
   const type = (i: HTMLInputElement, v: string) => {
     i.value = v;
     i.dispatchEvent(new Event('input'));
+    // Twice: Material's form field reads the input's error state after the first pass.
+    fixture.detectChanges();
     fixture.detectChanges();
   };
   return { fixture, el, saved, btn, input, type };
@@ -45,6 +47,9 @@ describe('parseLimit', () => {
     expect(parseLimit('-3')).toBe('invalid');
     expect(parseLimit('1.5')).toBe('invalid');
     expect(parseLimit('abc')).toBe('invalid');
+    expect(parseLimit('120,000,000')).toBe(120_000_000);
+    expect(parseLimit('1,50')).toBe('invalid');
+    expect(parseLimit(',000')).toBe('invalid');
     expect(parseLimit('99999999999999999999')).toBe('invalid');
     expect(parseLimit('100', 100)).toBe(100);
     expect(parseLimit('101', 100)).toBe('invalid');
@@ -64,7 +69,8 @@ describe('PermissionsEditor', () => {
   it('starts clean and saves only after a change', () => {
     const { fixture, el, saved, btn } = render();
     expect(btn('Save').disabled).toBe(true);
-    expect((el.querySelector('input[type="radio"]') as HTMLInputElement).checked).toBe(true);
+    expect((el.querySelector('mat-radio-button input') as HTMLInputElement).checked).toBe(true);
+    expect(el.querySelector('input[type="checkbox"]:not(.mdc-checkbox__native-control)')).toBeNull();
     btn('Batch').click();
     fixture.detectChanges();
     expect(btn('Save').disabled).toBe(false);
@@ -74,18 +80,18 @@ describe('PermissionsEditor', () => {
 
   it('chooses models, parses limits and blocks saving invalid limits', () => {
     const { fixture, el, saved, btn, input, type } = render();
-    const radios = el.querySelectorAll<HTMLInputElement>('input[type="radio"]');
-    radios[1]!.dispatchEvent(new Event('change'));
+    el.querySelectorAll<HTMLInputElement>('mat-radio-button input')[1]!.click();
     fixture.detectChanges();
-    const boxes = el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
-    expect(boxes.length).toBe(2);
-    boxes[1]!.dispatchEvent(new Event('change'));
-    boxes[0]!.dispatchEvent(new Event('change'));
-    boxes[0]!.dispatchEvent(new Event('change'));
+    const boxes = () => el.querySelectorAll<HTMLInputElement>('mat-checkbox input[type="checkbox"]');
+    expect(boxes().length).toBe(2);
+    boxes()[1]!.click();
+    boxes()[0]!.click();
+    boxes()[0]!.click();
     fixture.detectChanges();
     const rpm = input('input[id$="-requestsPerMin"]');
     type(rpm, 'lots');
-    expect(el.querySelector('[role="alert"]')?.textContent).toContain('whole number');
+    expect(el.querySelector('mat-error [role="alert"]')?.textContent).toContain('whole number');
+    expect(rpm.getAttribute('aria-invalid')).toBe('true');
     expect(btn('Save').disabled).toBe(true);
     type(rpm, '');
     type(input('input[id$="-tokensPerDay"]'), '50000');

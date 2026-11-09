@@ -48,6 +48,10 @@ text: string, };
 
 export type ToolOutcome = "declined" | "stopped";
 
+export type ApprovalChoice = "allowOnce" | "alwaysAllow" | "deny";
+
+export type Approval = "notAsked" | "once" | "always" | "remembered";
+
 export type StoredError = { 
 /**
  * One sentence for the user.
@@ -108,6 +112,10 @@ destructive?: boolean,
  */
 outcome?: ToolOutcome, 
 /**
+ * For a tool message of a call that ran: how it was approved.
+ */
+approval?: Approval, 
+/**
  * For the last assistant message of a turn that failed: why.
  */
 error?: StoredError, 
@@ -119,6 +127,10 @@ endMessage?: string,
  * For a user message: what was attached.
  */
 context?: Array<ContextItem>, 
+/**
+ * For a user message: its attachments, by reference (ADR 0023 WP-2b).
+ */
+attachments?: Array<Attachment>, 
 /**
  * For the last assistant message of a turn: how the turn ended.
  */
@@ -184,7 +196,11 @@ write: boolean,
 /**
  * What it changes cannot be undone (implies `write`): its approval is a danger choice.
  */
-destructive: boolean, };
+destructive: boolean, 
+/**
+ * Its name for people, when it has one.
+ */
+title?: string, };
 
 export type AssistantInfo = { 
 /**
@@ -199,6 +215,65 @@ tools: Array<ToolInfo>,
  * Some tool writes: the composer offers "Allow actions".
  */
 hasWrite: boolean, };
+
+export type ContextLevel = "unknown" | "ok" | "high" | "full";
+
+export type ContextUse = { 
+/**
+ * Tokens the next question carries before its own text.
+ */
+usedTokens: number, 
+/**
+ * Tokens the conversation may take: the model's window less [`reserve_tokens`](Self::reserve_tokens); 0 when the window is
+ * unknown.
+ */
+limitTokens: number, 
+/**
+ * Tokens kept free for the answer.
+ */
+reserveTokens: number, 
+/**
+ * `used_tokens` is the engine's own count, not an estimate.
+ */
+exact: boolean, 
+/**
+ * How full that is.
+ */
+level: ContextLevel, };
+
+export type Attachment = { "kind": "image", 
+/**
+ * SHA-256 of the prepared file, lowercase hex.
+ */
+sha256: string, 
+/**
+ * Its type.
+ */
+mime: string, 
+/**
+ * Its size in pixels.
+ */
+width: number, 
+/**
+ * Its size in pixels.
+ */
+height: number, } | { "kind": "audio", 
+/**
+ * SHA-256 of the clip, lowercase hex.
+ */
+sha256: string, 
+/**
+ * Its length.
+ */
+seconds: number, } | { "kind": "file", 
+/**
+ * SHA-256 of the file, lowercase hex.
+ */
+sha256: string, 
+/**
+ * Its name as the user knows it.
+ */
+name: string, };
 
 export type SendRequest = { 
 /**
@@ -216,7 +291,17 @@ context: Array<ContextItem>,
 /**
  * The user ticked "Allow actions": tools that write are offered (each call still needs approval).
  */
-allowWrite: boolean, };
+allowWrite: boolean, 
+/**
+ * What the question carries besides its text, by reference (ADR 0023 WP-2b; at most [`MAX_ATTACHMENTS`]).
+ */
+attachments?: Array<Attachment>, 
+/**
+ * Whether the conversation this question starts is saved (ADR 0023 D3: "Don't save this chat" sends `false`); a
+ * follow-up keeps its conversation's choice. Left out: `true`. A store that keeps every conversation one way ignores it
+ * ([`Conversations::create_saved`]).
+ */
+save?: boolean, };
 
 export type SendAck = { 
 /**
@@ -224,11 +309,21 @@ export type SendAck = {
  */
 conversationId: string, };
 
+export type ProviderPhase = { "kind": "queued" } | { "kind": "loading", 
+/**
+ * Since the load started.
+ */
+elapsedMs: number, } | { "kind": "generating" };
+
 export type AssistantEvent = { "type": "started", 
 /**
  * The conversation's title.
  */
-title: string, } | { "type": "delta", 
+title: string, } | { "type": "phase", 
+/**
+ * Queued, loading the model (with the time so far) or generating.
+ */
+phase: ProviderPhase, } | { "type": "delta", 
 /**
  * The text.
  */
@@ -245,6 +340,10 @@ name: string,
  * The call as the user reads it.
  */
 summary: string, 
+/**
+ * The tool's name for people ("Top processes"), when it has one; the card shows it instead of `name`.
+ */
+title?: string, 
 /**
  * The tool changes things.
  */
@@ -269,6 +368,10 @@ summary: string,
  * What it would change cannot be undone: the UI makes Decline the default and Allow a danger button.
  */
 destructive: boolean, 
+/**
+ * The card offers "Always allow" besides Allow once and Deny (an action asks every call, so it never does).
+ */
+remember: boolean, 
 /**
  * The arguments.
  */
@@ -296,7 +399,11 @@ data?: unknown,
 /**
  * Set when the user's choice ended the call: they declined it, or stopped the turn while it waited.
  */
-outcome?: ToolOutcome, } | { "type": "notice", 
+outcome?: ToolOutcome, 
+/**
+ * How the call was approved, when it ran (none for a call that was refused, declined or stopped).
+ */
+approval?: Approval, } | { "type": "notice", 
 /**
  * The sentence.
  */
@@ -342,7 +449,11 @@ seq: number, } & ({ "type": "started",
 /**
  * The conversation's title.
  */
-title: string, } | { "type": "delta", 
+title: string, } | { "type": "phase", 
+/**
+ * Queued, loading the model (with the time so far) or generating.
+ */
+phase: ProviderPhase, } | { "type": "delta", 
 /**
  * The text.
  */
@@ -359,6 +470,10 @@ name: string,
  * The call as the user reads it.
  */
 summary: string, 
+/**
+ * The tool's name for people ("Top processes"), when it has one; the card shows it instead of `name`.
+ */
+title?: string, 
 /**
  * The tool changes things.
  */
@@ -383,6 +498,10 @@ summary: string,
  * What it would change cannot be undone: the UI makes Decline the default and Allow a danger button.
  */
 destructive: boolean, 
+/**
+ * The card offers "Always allow" besides Allow once and Deny (an action asks every call, so it never does).
+ */
+remember: boolean, 
 /**
  * The arguments.
  */
@@ -410,7 +529,11 @@ data?: unknown,
 /**
  * Set when the user's choice ended the call: they declined it, or stopped the turn while it waited.
  */
-outcome?: ToolOutcome, } | { "type": "notice", 
+outcome?: ToolOutcome, 
+/**
+ * How the call was approved, when it ran (none for a call that was refused, declined or stopped).
+ */
+approval?: Approval, } | { "type": "notice", 
 /**
  * The sentence.
  */
@@ -448,4 +571,4 @@ needsAi?: AiState, });
 export const ASSISTANT_EVENT = 'paddock://assistant';
 
 /** The limits the engine enforces (the composer shows them; the engine checks again). */
-export const ASSISTANT_LIMITS = { userChars: 8000, contextItems: 8, contextChars: 4000, conversations: 50, messages: 400 } as const;
+export const ASSISTANT_LIMITS = { userChars: 8000, contextItems: 8, contextChars: 4000, conversations: 50, messages: 400, attachments: 16 } as const;

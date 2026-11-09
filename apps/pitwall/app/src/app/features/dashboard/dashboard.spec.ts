@@ -9,14 +9,16 @@ import { LiveStore } from '../../core/live.store';
 import { MockBackend } from '../../core/mock-backend';
 import { Toasts } from '../../core/toasts';
 import { ThemeService } from '../../core/theme';
+import { AppearanceStore, BrowserAppearanceBackend, provideAppearance } from '@decryp7/paddock-ui/shell';
 import { registerIcons } from '../../shared/icons';
 import { FakeChart, fakeChartProvider, settle } from '../../../testing/render';
+import { BROWSER_VERSION } from '../../shell/engines';
 import { Dashboard, PerfMeter, shortModel } from './dashboard';
 
 async function mount(opts: { backend?: MockBackend; load?: boolean; patch?: (o: Overview) => Overview } = {}) {
   const backend = opts.backend ?? new MockBackend();
   FakeChart.all = [];
-  TestBed.configureTestingModule({ imports: [Dashboard], providers: [{ provide: BACKEND, useValue: backend }, provideRouter([]), fakeChartProvider] });
+  TestBed.configureTestingModule({ imports: [Dashboard], providers: [{ provide: BACKEND, useValue: backend }, provideRouter([]), fakeChartProvider, provideAppearance({ accent: 'pitwall', backend: () => new BrowserAppearanceBackend({ storage: null, channel: null }) })] });
   registerIcons(TestBed.inject(MatIconRegistry), TestBed.inject(DomSanitizer));
   const live = TestBed.inject(LiveStore);
   if (opts.load !== false) await live.load();
@@ -29,7 +31,7 @@ async function mount(opts: { backend?: MockBackend; load?: boolean; patch?: (o: 
   const more = async (item: string) => {
     (el.querySelector('button[aria-label="More actions"]') as HTMLButtonElement).click();
     await settle(fixture);
-    Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item')).find((b) => b.textContent!.trim() === item)!.click();
+    Array.from(document.querySelectorAll<HTMLButtonElement>('.mat-mdc-menu-item')).find((b) => b.textContent!.trim() === item)!.click();
     await settle(fixture);
   };
   return { fixture, el, live, backend, btn, more };
@@ -89,18 +91,16 @@ describe('Dashboard', () => {
   it('shows the server version, uptime and connected apps', async () => {
     const { el, live } = await mount();
     const sub = el.querySelector('.sub')!.textContent!.replace(/\s+/g, ' ');
-    expect(sub).toContain('Pitwall 1.0.3');
+    // The version comes from its one source (ER-13): the browser build's, which About shows too.
+    expect(sub).toContain(`Pitwall ${BROWSER_VERSION} `);
+    expect(BROWSER_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
     expect(sub).toMatch(/up 5 h 1\d min/);
     expect(sub).toContain(`${live.apps().filter((a) => a.connected).length} apps connected`);
-    expect(sub).not.toContain('Offline mode');
   });
 
-  it('says it is connecting before the overview arrives and flags offline mode', async () => {
+  it('says it is connecting before the overview arrives', async () => {
     const pre = await mount({ load: false });
     expect(pre.el.querySelector('.sub')!.textContent).toContain('Connecting to the server…');
-    TestBed.resetTestingModule();
-    const off = await mount({ patch: (o) => ({ ...o, server: { ...o.server, offline: true } }) });
-    expect(off.el.querySelector('.offline')!.textContent).toBe('Offline mode');
   });
 
   it('has no quick-link row: the sidebar already goes everywhere', async () => {
@@ -160,9 +160,9 @@ describe('Dashboard', () => {
     const { el, fixture } = await mount({ backend: new MockBackend({ failing: ['overview'] }) });
     (el.querySelector('button[aria-label="More actions"]') as HTMLButtonElement).click();
     await settle(fixture);
-    const items = Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item'));
+    const items = Array.from(document.querySelectorAll<HTMLButtonElement>('.mat-mdc-menu-item'));
     expect(items.map((i) => i.textContent!.trim())).toEqual(['Release memory', 'Pause serving']);
-    expect(items.every((i) => i.getAttribute('aria-disabled') === 'true')).toBe(true);
+    expect(items.every((i) => i.disabled)).toBe(true);
     document.querySelector<HTMLElement>('.cdk-overlay-backdrop')!.click();
     for (const r of Array.from(el.querySelectorAll('[aria-label="Memory preset"] button')) as HTMLButtonElement[]) expect(r.disabled).toBe(true);
   });
@@ -239,7 +239,8 @@ describe('Dashboard', () => {
     await settle(fixture);
     await new Promise((r) => requestAnimationFrame(() => r(null)));
     expect(replaces()).toBe(before + 1);
-    TestBed.inject(ThemeService).set(TestBed.inject(ThemeService).resolved() === 'dark' ? 'light' : 'dark');
+    // The shell's Appearance setting changes the scheme; the charts follow it.
+    TestBed.inject(AppearanceStore).setTheme(TestBed.inject(ThemeService).resolved() === 'dark' ? 'light' : 'dark');
     await settle(fixture);
     await new Promise((r) => requestAnimationFrame(() => r(null)));
     expect(replaces()).toBe(before + 2);
@@ -260,16 +261,22 @@ describe('Dashboard', () => {
     expect(el.querySelectorAll('pw-panel [role="alert"]').length).toBe(0);
   });
 
-  it('names apps and models in the request charts, falling back to a shortened id for unloaded ones', async () => {
+  it('names apps and models in the request charts by their display names', async () => {
     const { fixture } = await mount();
     await settle(fixture);
     await new Promise((r) => requestAnimationFrame(() => r(null)));
-    const legend = (i: number) => ((FakeChart.all[i]!.options.at(-1)!.option as { legend: { data: string[] } }).legend.data);
+    const series = (i: number) => (FakeChart.all[i]!.options.at(-1)!.option as { series: { name: string }[] }).series.map((s) => s.name);
     // chart order: memory, requests by app, tokens per second, latency, requests by model
-    expect(legend(1)).toContain('Debrief');
-    expect(legend(1)).toContain('Spotter');
-    expect(legend(4)).toContain('Qwen3.5 9B');
-    expect(legend(4)).toContain('gemma-4-12b-it');
+    expect(series(1)).toContain('Debrief');
+    expect(series(1)).toContain('Spotter');
+    // A model that is not loaded now still has its display name, from the library; never its raw id.
+    expect(series(4)).toContain('Qwen3.5 9B');
+    expect(series(4)).toContain('Gemma 4 12B');
+    expect(series(4)).not.toContain('gemma-4-12b-it');
+    // The legends are the cards' own, under the charts, in the same names.
+    const legends = Array.from(fixture.nativeElement.querySelectorAll('.series-legend') as NodeListOf<HTMLElement>).map((l) => l.textContent!);
+    expect(legends[0]).toContain('Nightly report script');
+    expect(legends[1]).toContain('Gemma 4 12B');
   });
 
   it('renders the legend with theme colours and hides the perf readout by default', async () => {

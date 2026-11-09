@@ -6,8 +6,8 @@ useCases('uml-use-cases-library', {
 });
 useCases('uml-use-cases-operate', {
   title: 'Use cases — running Pitwall', desc: 'Day to day: who may use it, how much memory it may take, what it has done and how to drive it from a terminal.', bound: 'Pitwall', owner: 'Machine owner',
-  rows: ['Approve or deny a pairing', 'Manage app keys, permissions and limits', 'See usage per app over time', 'Choose a memory preset', 'Pause serving or release memory', 'Turn offline mode on or off', 'Watch the dashboard and requests', 'Try models in the playground', 'Run a benchmark', 'Use the pitwall command line'],
-  hubRow: 1, sats: [{ text: 'Set a token or request limit', from: 1, row: 1, kind: '«extend»' }, { text: 'Compare tokens per second', from: 8, row: 8, kind: '«include»' }],
+  rows: ['Approve or deny a pairing', 'Manage app keys, permissions and limits', 'See usage per app over time', 'Choose a memory preset', 'Pause serving or release memory', 'Watch the dashboard and requests', 'Try models in the playground', 'Run a benchmark', 'Use the pitwall command line'],
+  hubRow: 1, sats: [{ text: 'Set a token or request limit', from: 1, row: 1, kind: '«extend»' }, { text: 'Compare tokens per second', from: 7, row: 7, kind: '«include»' }],
 });
 useCases('uml-use-cases-clients', {
   title: 'Use cases — apps and tools', desc: 'What a suite app or AI tool asks of Pitwall, and what the OS does to keep it running. Included steps are done by Pitwall itself.', bound: 'Pitwall', owner: 'Suite app or AI tool',

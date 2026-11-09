@@ -1,5 +1,12 @@
+import { buildDownloadName } from '../shared/build-download';
 import type {
   AppDetail,
+  ChatModels,
+  ChatAttached,
+  ChatAttachRules,
+  ChatStorage,
+  OpenedApp,
+  ConnectedApp,
   ModelPreset,
   PresetDraft,
   PresetEntry,
@@ -9,7 +16,6 @@ import type {
   CacheClearScope,
   CacheInfo,
   AppPermissions,
-  AppUpdateStatus,
   BenchmarkResult,
   BuildCapabilities,
   CommandError,
@@ -32,6 +38,7 @@ import type {
   HfModel,
   HfRepo,
   Job,
+  JobEvent,
   LiveUpdate,
   LoadedModel,
   LocalModel,
@@ -42,6 +49,7 @@ import type {
   PitwallEvent,
   PlaygroundEvent,
   PlaygroundRequest,
+  Platform,
   Preset,
   QueueSnapshot,
   RequestContent,
@@ -50,14 +58,17 @@ import type {
   UpdateCheckResult,
   UpdateCheckSettings,
   UpdateCheckStatus,
-  UpdateInfo,
   UpdateNotice,
   UpdateSchedule,
   ServerInfo,
   Settings,
   Throughput,
 } from './api.types';
+import { BROWSER_VERSION } from '../shell/engines';
 import type { PitwallBackend, Unsubscribe } from './backend';
+import type { LoadingRows, PopoverHeader } from './generated/widgets';
+import { LOADING_SHAPE, MockPopover, type PopoverScenario } from './mock/mock-popover';
+import type { PopoverEdit, PopoverPush, PopoverValues, PopoverView } from './widgets.types';
 import {
   demoReplyWords,
   wordsThatFit,
@@ -94,10 +105,24 @@ import {
 const DEFAULT_SLOTS = 2;
 const DEFAULT_CONTEXT = 8192;
 
+/** What each job method is called while it runs (the real titles come from the app, `app_commands.rs`). */
+const JOB_TITLES: Partial<Record<keyof PitwallBackend, string>> = {
+  loadModel: 'Loading the model',
+  runBenchmark: 'Running the benchmark',
+  checkUpdatesNow: 'Checking for model updates',
+  installService: 'Installing the service',
+  uninstallService: 'Removing the service',
+  repairService: 'Repairing the service',
+};
+
 /** The calls the desktop app answers itself, without the server (they keep working when the server is down). */
 const APP_METHODS: ReadonlySet<string> = new Set([
   'serviceState', 'installService', 'uninstallService', 'repairService', 'declineService', 'openLoginItems',
-  'autostart', 'setAutostart', 'appUpdateStatus', 'checkAppUpdate', 'installAppUpdate', 'quitApp', 'takeQuitAsk',
+  'autostart', 'setAutostart', 'quitApp', 'takeQuitAsk', 'chatEnabled',
+  'connectedApps', 'setAppKey', 'connectApp', 'forgetApp', 'revokeToolApproval', 'openConnectedApp',
+  'chatStorage', 'setChatSaveNew', 'chatSaved', 'setChatSaved', 'deleteAllChats', 'chatAttachRules', 'chatAttach', 'chatDetach', 'chatRefreshWindow',
+  // The popup's widgets are the app's own too (its layout is kept by the app; the values say "server not running" themselves).
+  'popoverView', 'popoverValues', 'popoverHeader', 'popoverShape', 'editPopover',
 ]);
 
 export interface MockOptions {
@@ -114,6 +139,8 @@ export interface MockOptions {
   seed?: number;
   /** The server is not registered with the OS yet and the user has not been asked (first-run question). */
   askConsent?: boolean;
+  /** The OS the service is registered with (its wording in Settings and the first-run question); default macOS. */
+  platform?: Platform;
   /** macOS: the background item is switched off in Login Items (notice with an "Open Login Items" button). */
   loginItemOff?: boolean;
   /** The server is down: every call except the app's own (service, log-in, updates) fails with `serverUnavailable`. */
@@ -122,8 +149,6 @@ export interface MockOptions {
   startFailed?: boolean;
   /** macOS: a repair of a refused registration is under way (notice with its progress). */
   repairing?: boolean;
-  /** A newer release is available and the build can update itself. */
-  updateAvailable?: boolean;
   /** A model's engine crashed repeatedly and was given up on (dashboard issue with Retry). */
   crashed?: boolean;
   /** Model update notices are already on offer (otherwise "Check now" finds them). */
@@ -136,6 +161,10 @@ export interface MockOptions {
   noLeftovers?: boolean;
   /** The app asked to quit with "Ask each time" set (the question dialog opens). */
   quitAsk?: boolean;
+  /** This build has the Playground's chat (default: yes; `?mock-nochat` plays a build without it). */
+  chat?: boolean;
+  /** What the tray popup's widgets show: the engine's recorded output for a scenario (default: `demo`, or `empty` / `down` with those flags). */
+  popover?: PopoverScenario;
 }
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -153,6 +182,9 @@ export class MockBackend implements PitwallBackend {
   private readonly autoTick: boolean;
   private readonly failing: ReadonlySet<string>;
   private serverDown = false;
+  private readonly popover_ = new MockPopover();
+  private readonly popoverScenario: PopoverScenario;
+  private readonly popoverListeners = new Set<(push: PopoverPush) => void>();
   private readonly rnd: () => number;
   private readonly streamDelay: number;
 
@@ -181,12 +213,12 @@ export class MockBackend implements PitwallBackend {
   private autostart_ = false;
   private issues_: EngineIssue[] = [];
   private engineSetup_: EngineSetup = { state: 'idle', error: null, download: null };
-  private readonly updateAvailable: boolean;
   private updateCheck_: UpdateCheckSettings = { enabled: false, schedule: 'weekly' };
   private updateNotices_: UpdateNotice[] = [];
   private updateHidden_ = new Set<string>();
   private cache_: { responses: number; embeddings: number } = { responses: 184, embeddings: 3412 };
   private updateChecked_: { at: number; message: string } | null = null;
+  private readonly chat_: boolean;
 
   constructor(options: MockOptions = {}) {
     this.now = options.now ?? (() => Date.now());
@@ -195,11 +227,14 @@ export class MockBackend implements PitwallBackend {
     this.failing = new Set(options.failing ?? []);
     this.rnd = prng(options.seed ?? 42);
     this.streamDelay = options.streamDelayMs ?? 0;
-    this.updateAvailable = options.updateAvailable ?? false;
+    this.popoverScenario = options.popover ?? (options.serverDown ? 'down' : options.empty ? 'empty' : 'demo');
     if (options.modelUpdates) this.updateNotices_ = demoUpdateNotices(this.now());
     if (options.quitAsk) this.quitAskPending = true;
+    this.chat_ = options.chat ?? true;
     if (options.installing) {
-      const download: Download = { id: 'eng-0', kind: 'engine', name: 'llama.cpp CUDA 13 (b11669)', host: 'github.com', bytesDone: 212 * MiB, bytesTotal: 388 * MiB, speedBps: 24 * MiB, state: 'downloading', error: null, startedAt: this.now() - 9_000 };
+      // The catalog's suggested build (cuda-13 at its pinned release, its download size, named as the server names it): the first
+      // start installs exactly that.
+      const download: Download = { id: 'eng-0', kind: 'engine', name: 'llama.cpp CUDA 13 (NVIDIA) (b11702)', host: 'github.com', bytesDone: 212 * MiB, bytesTotal: 398 * MiB, speedBps: 24 * MiB, state: 'downloading', error: null, startedAt: this.now() - 9_000 };
       this.engineSetup_ = { state: 'installing', error: null, download };
     }
     if (options.crashed) {
@@ -208,7 +243,7 @@ export class MockBackend implements PitwallBackend {
       ];
     }
     this.service = {
-      platform: 'macos',
+      platform: options.platform ?? 'macos',
       installed: !options.askConsent,
       running: !(options.serverDown || options.startFailed),
       canInstall: true,
@@ -224,13 +259,13 @@ export class MockBackend implements PitwallBackend {
     const empty = options.empty ?? false;
     this.settings_ = demoSettings();
     this.server = {
-      version: '1.0.3',
+      // The browser build's one version (the shell's About and Updates read the same constant), never a second literal.
+      version: BROWSER_VERSION,
       apiVersion: 1,
       pid: 7412,
       port: this.settings_.server.port,
       startedAt: now - 5 * 3_600_000 - 12 * 60_000,
       serving: 'serving',
-      offline: false,
       lan: { enabled: false, url: null, certFingerprint: null },
     };
     this.library = empty ? [] : demoLocalModels(now);
@@ -360,7 +395,7 @@ export class MockBackend implements PitwallBackend {
       const quant = /-(Q\d\w*|F16|BF16)(?:-|\.)/i.exec(d.name)?.[1] ?? null;
       const id = d.name.replace(/\.gguf$/i, '').toLowerCase();
       if (!this.library.some((m) => m.id === id)) {
-        this.library.push({ id, repo: d.host, file: d.name, name: d.name.replace(/\.gguf$/i, '').replace(/-/g, ' '), quant, sizeBytes: d.bytesTotal, paramsB: null, contextMax: null, architecture: null, capabilities: ['chat'], projector: null, addedAt: now, lastUsedAt: null, loaded: false, pinned: false, idleSecs: null, slots: DEFAULT_SLOTS, slotsCustom: false, loadedSlots: null, fit: demoFit(d.bytesTotal) });
+        this.library.push({ id, repo: d.host, file: d.name, name: d.name.replace(/\.gguf$/i, '').replace(/-/g, ' '), quant, sizeBytes: d.bytesTotal, paramsB: null, contextMax: null, architecture: null, capabilities: ['chat'], projector: null, addedAt: now, lastUsedAt: null, loaded: false, pinned: false, idleSecs: null, slots: DEFAULT_SLOTS, slotsCustom: false, loadedSlots: null, contextPerSlot: 8192, fit: demoFit(d.bytesTotal) });
       }
     } else {
       const engine = this.engineOfBuild(d.id.replace(/^eng-\d+-/, ''));
@@ -393,7 +428,79 @@ export class MockBackend implements PitwallBackend {
     }
   }
 
-  private async reply<T>(method: keyof PitwallBackend, value: () => T): Promise<T> {
+  // ---- Jobs (the real backend runs these as background jobs, ADR 0024) -------------------------------------------
+
+  /** Tests: jobs wait until cancelled (or stopped waiting) instead of finishing. */
+  holdJobs = false;
+  /** Tests: Cancel is refused, as for a step that cannot be interrupted; the job then offers "Stop waiting". */
+  refuseCancel = false;
+  private jobSeq = 0;
+  private readonly jobListeners = new Set<(event: JobEvent) => void>();
+  private readonly held = new Map<number, { end: (stoppedWaiting: boolean) => void; canStop: () => boolean }>();
+
+  jobEvents(listener: (event: JobEvent) => void): Unsubscribe {
+    this.jobListeners.add(listener);
+    return () => void this.jobListeners.delete(listener);
+  }
+
+  jobCancel(jobId: number): Promise<boolean> {
+    const job = this.held.get(jobId);
+    if (!job) return Promise.resolve(false);
+    if (this.refuseCancel) {
+      this.emitJob({ kind: 'progress', jobId, phase: 'Cancel did not take effect', done: 1, total: null, unit: 'items', canStopWaiting: true, elapsedSecs: 1, cancellable: true, notCancellableReason: null });
+      return Promise.resolve(true);
+    }
+    job.end(false);
+    return Promise.resolve(true);
+  }
+
+  jobStopWaiting(jobId: number): Promise<boolean> {
+    const job = this.held.get(jobId);
+    if (!job?.canStop()) return Promise.resolve(false);
+    job.end(true);
+    return Promise.resolve(true);
+  }
+
+  private emitJob(event: JobEvent): void {
+    for (const l of [...this.jobListeners]) l(event);
+  }
+
+  private async asJob<T>(method: keyof PitwallBackend, run: () => Promise<T>): Promise<T> {
+    const jobId = ++this.jobSeq;
+    this.emitJob({ kind: 'started', jobId, title: JOB_TITLES[method] ?? 'Working' });
+    this.emitJob({ kind: 'progress', jobId, phase: 'Working on it', done: 1, total: null, unit: 'items', canStopWaiting: false, elapsedSecs: 1, cancellable: true, notCancellableReason: null });
+    try {
+      if (this.holdJobs) {
+        let stopped = false;
+        await new Promise<void>((resolve) => {
+          this.held.set(jobId, {
+            end: (stoppedWaiting) => {
+              stopped = stoppedWaiting;
+              resolve();
+            },
+            canStop: () => this.refuseCancel,
+          });
+        });
+        this.held.delete(jobId);
+        this.emitJob({ kind: 'cancelled', jobId, stoppedWaiting: stopped });
+        const error: CommandError = { code: 'cancelled', message: stopped ? 'Stopped waiting. The server may still be working on it.' : 'Cancelled.' };
+        throw error;
+      }
+      const value = await run();
+      this.emitJob({ kind: 'done', jobId, result: value ?? null });
+      return value;
+    } catch (e) {
+      if ((e as CommandError).code !== 'cancelled') this.emitJob({ kind: 'failed', jobId, error: e as CommandError });
+      throw e;
+    }
+  }
+
+  private reply<T>(method: keyof PitwallBackend, value: () => T): Promise<T> {
+    const run = () => this.replyNow(method, value);
+    return method in JOB_TITLES ? this.asJob(method, run) : run();
+  }
+
+  private async replyNow<T>(method: keyof PitwallBackend, value: () => T): Promise<T> {
     if (this.latency) await new Promise((r) => setTimeout(r, this.latency));
     if (this.failing.has(method) || (this.serverDown && !APP_METHODS.has(method))) {
       const error: CommandError = { code: 'serverUnavailable', message: 'The Pitwall server is not responding. It may still be starting.' };
@@ -463,10 +570,53 @@ export class MockBackend implements PitwallBackend {
     };
   }
 
+  // ---- The tray popup's widgets (the engine's recorded output; see mock/mock-popover.ts) ---------------------------------------
+
+  /** The scenario in force: the chosen one, as `paused` once serving is paused in the demo. */
+  private scenario(): PopoverScenario {
+    return this.popoverScenario === 'demo' && this.server.serving === 'paused' ? 'paused' : this.popoverScenario;
+  }
+
+  private pushPopover(): void {
+    if (!this.popoverListeners.size) return;
+    const push: PopoverPush = { view: this.popover_.view(), values: this.popover_.values(this.scenario(), this.now()), header: this.popover_.header(this.scenario()) };
+    for (const l of [...this.popoverListeners]) l(clone(push));
+  }
+
+  popoverView(): Promise<PopoverView> {
+    return this.reply('popoverView', () => this.popover_.view());
+  }
+
+  popoverValues(): Promise<PopoverValues> {
+    return this.reply('popoverValues', () => this.popover_.values(this.scenario(), this.now()));
+  }
+
+  popoverHeader(): Promise<PopoverHeader> {
+    return this.reply('popoverHeader', () => this.popover_.header(this.scenario()));
+  }
+
+  popoverShape(): Promise<LoadingRows[]> {
+    return this.reply('popoverShape', () => LOADING_SHAPE);
+  }
+
+  editPopover(edit: PopoverEdit): Promise<PopoverView> {
+    return this.reply('editPopover', () => {
+      const view = this.popover_.edit(edit);
+      queueMicrotask(() => this.pushPopover());
+      return view;
+    });
+  }
+
+  onPopover(handler: (push: PopoverPush) => void): Unsubscribe {
+    this.popoverListeners.add(handler);
+    return () => this.popoverListeners.delete(handler);
+  }
+
   setServing(paused: boolean): Promise<void> {
     return this.reply('setServing', () => {
       this.server.serving = paused ? 'paused' : 'serving';
       this.emit({ kind: 'server', server: clone(this.server) });
+      queueMicrotask(() => this.pushPopover());
       this.pushEvent({ kind: 'servingChanged', severity: 'info', message: paused ? 'Serving paused: new requests wait until you resume' : 'Serving resumed', modelId: null, appId: null, reason: null });
     });
   }
@@ -557,7 +707,6 @@ export class MockBackend implements PitwallBackend {
 
   searchModels(query: string): Promise<HfModel[]> {
     return this.reply('searchModels', () => {
-      if (this.server.offline) this.fail('offline', 'Offline mode is on: Pitwall makes no network requests. Turn it off in Settings ▸ Network.');
       return demoSearch(query, this.now());
     });
   }
@@ -713,10 +862,9 @@ export class MockBackend implements PitwallBackend {
 
   installBuild(buildId: string): Promise<Download> {
     return this.reply('installBuild', () => {
-      if (this.server.offline) this.fail('offline', 'Offline mode is on: Pitwall downloads nothing.');
       const engine = this.engineOfBuild(buildId) ?? this.fail('notFound', `No build ${buildId} in the catalog.`);
       const cat = engine.catalog.find((c) => c.id === buildId)!;
-      const d: Download = { id: `eng-${this.nextId++}-${cat.id}`, kind: 'engine', name: `${engine.name} ${cat.label} ${cat.tag}`, host: 'github.com', bytesDone: 0, bytesTotal: cat.downloadBytes, speedBps: 0, state: 'queued', error: null, startedAt: this.now() };
+      const d: Download = { id: `eng-${this.nextId++}-${cat.id}`, kind: 'engine', name: buildDownloadName(engine.name, cat), host: 'github.com', bytesDone: 0, bytesTotal: cat.downloadBytes, speedBps: 0, state: 'queued', error: null, startedAt: this.now() };
       this.downloads_.unshift(d);
       this.emit({ kind: 'download', download: clone(d) });
       return d;
@@ -957,8 +1105,7 @@ export class MockBackend implements PitwallBackend {
       lastCheckedAt: this.updateChecked_?.at ?? null,
       lastAttemptAt: this.updateChecked_?.at ?? null,
       lastMessage: this.updateChecked_?.message ?? null,
-      nextCheckAt: this.server.offline || !this.updateCheck_.enabled ? null : (this.updateChecked_?.at ?? this.now()) + week,
-      offline: this.server.offline,
+      nextCheckAt: !this.updateCheck_.enabled ? null : (this.updateChecked_?.at ?? this.now()) + week,
       running: false,
       notices: this.visibleUpdates().length,
       host: 'huggingface.co',
@@ -980,9 +1127,6 @@ export class MockBackend implements PitwallBackend {
 
   checkUpdatesNow(): Promise<UpdateCheckResult> {
     return this.reply('checkUpdatesNow', () => {
-      if (this.server.offline) {
-        return { outcome: 'offline', message: 'Offline mode is on, so Pitwall did not ask Hugging Face about your models. Turn offline mode off in Settings > Network to check.', reposChecked: 0, notices: 0, retryInSecs: null };
-      }
       const now = this.now();
       if (this.updateChecked_ && now - this.updateChecked_.at < 60_000) {
         const wait = Math.ceil((60_000 - (now - this.updateChecked_.at)) / 1000);
@@ -1140,6 +1284,9 @@ export class MockBackend implements PitwallBackend {
         return;
       }
       let i = 0;
+      const cold = !this.loaded.some((m) => m.modelId === request.modelId);
+      if (cold) onEvent({ kind: 'phase', phase: { kind: 'loading', elapsedMs: 0 } });
+      onEvent({ kind: 'phase', phase: { kind: 'generating' } });
       const step = () => {
         if (stopped) return;
         if (i < limit) {
@@ -1147,7 +1294,7 @@ export class MockBackend implements PitwallBackend {
           timers.push(setTimeout(step, this.streamDelay));
         } else {
           const fast = request.modelId.includes('qwen3.5-4b');
-          onEvent({ kind: 'done', promptTokens: 18 + request.messages.reduce((s, m) => s + Math.ceil(m.content.length / 4), 0), completionTokens: Math.round(limit * 1.3), ttftMs: fast ? 96 : 214, genTps: fast ? 118.4 : 61.8, coldStartMs: this.loaded.some((m) => m.modelId === request.modelId) ? null : 2100 });
+          onEvent({ kind: 'done', finish: limit < words.length ? 'length' : 'stop', promptTokens: 18 + request.messages.reduce((s, m) => s + Math.ceil(m.content.length / 4), 0), completionTokens: Math.round(limit * 1.3), ttftMs: fast ? 96 : 214, genTps: fast ? 118.4 : 61.8, coldStartMs: this.loaded.some((m) => m.modelId === request.modelId) ? null : 2100 });
         }
       };
       timers.push(setTimeout(step, this.streamDelay ? this.streamDelay * 4 : 0));
@@ -1183,7 +1330,6 @@ export class MockBackend implements PitwallBackend {
     return this.reply('saveSettings', () => {
       if (settings.server.port < 1024 || settings.server.port > 65535) this.fail('badRequest', 'The port must be between 1024 and 65535.');
       this.settings_ = clone(settings);
-      this.server.offline = settings.network.offline;
       this.server.port = settings.server.port;
       this.server.lan = settings.network.lanEnabled
         ? { enabled: true, url: `https://192.168.1.42:${settings.network.lanPort}`, certFingerprint: '4F:9A:21:C0:7E:55:B3:18:9D:02:6A:F1:3C:88:E4:57:0B:A9:D6:12:7F:C3:45:8E:91:2D:B0:66:EA:73:19:5C' }
@@ -1193,26 +1339,6 @@ export class MockBackend implements PitwallBackend {
     });
   }
 
-  appUpdateStatus(): Promise<AppUpdateStatus> {
-    return this.reply('appUpdateStatus', () =>
-      this.updateAvailable
-        ? { available: true, reason: null, currentVersion: this.server.version }
-        : { available: false, reason: 'Updates are not configured for this build (no updater key).', currentVersion: this.server.version },
-    );
-  }
-
-  checkAppUpdate(): Promise<UpdateInfo | null> {
-    return this.reply('checkAppUpdate', () => {
-      if (!this.updateAvailable) this.fail('notAvailable', 'Updates are not available in this build.');
-      return { version: '0.2.0', notes: 'Faster model loading and a new dashboard tile.' };
-    });
-  }
-
-  installAppUpdate(): Promise<void> {
-    return this.reply('installAppUpdate', () => {
-      if (!this.updateAvailable) this.fail('notAvailable', 'Updates are not available in this build.');
-    });
-  }
 
   serviceState(): Promise<ServiceInstall> {
     return this.reply('serviceState', () => this.service);
@@ -1283,6 +1409,253 @@ export class MockBackend implements PitwallBackend {
     });
   }
 
+  chatEnabled(): Promise<boolean> {
+    return this.reply('chatEnabled', () => this.chat_);
+  }
+
+  /** Dyno as the mock knows it: a key that starts `pmk_` connects, `pmk_wrong` is refused, and Dyno is "open". */
+  private dyno_: ConnectedApp = { id: 'dyno', title: 'Dyno', keySaved: false, connected: false, problem: null, keyRefused: false, reconnecting: false, needs: null, tools: [], remembered: 0 };
+  private readonly appsHandlers = new Set<(apps: ConnectedApp[]) => void>();
+
+  onConnectedApps(handler: (apps: ConnectedApp[]) => void): Unsubscribe {
+    this.appsHandlers.add(handler);
+    return () => this.appsHandlers.delete(handler);
+  }
+
+  /** As the app does after every change: every window hears the apps. */
+  private appsChanged(): ConnectedApp {
+    for (const h of this.appsHandlers) h([clone(this.dyno_)]);
+    return clone(this.dyno_);
+  }
+
+  connectedApps(): Promise<ConnectedApp[]> {
+    return this.reply('connectedApps', () => [clone(this.dyno_)]);
+  }
+
+  setAppKey(appId: string, key: string): Promise<ConnectedApp> {
+    return this.reply('setAppKey', () => {
+      const k = key.trim();
+      if (appId !== 'dyno') throw { code: 'bad_request', message: `Pitwall does not know an app called ${appId}.` };
+      if (!/^pmk_\S+$/.test(k)) throw { code: 'bad_request', message: 'That is not an AI access key. Copy the key Dyno shows in Settings > AI access (it starts with pmk_).' };
+      this.dyno_ = { ...this.dyno_, keySaved: true };
+      return this.connectDyno(k !== 'pmk_wrong');
+    });
+  }
+
+  connectApp(appId: string): Promise<ConnectedApp> {
+    return this.reply('connectApp', () => {
+      if (appId !== 'dyno') throw { code: 'bad_request', message: `Pitwall does not know an app called ${appId}.` };
+      if (!this.dyno_.keySaved) {
+        this.dyno_ = { ...this.dyno_, problem: "No key is saved for Dyno. Issue one in Dyno's Settings > AI access and paste it here." };
+        return this.appsChanged();
+      }
+      return this.connectDyno(!this.dyno_.keyRefused);
+    });
+  }
+
+  forgetApp(appId: string): Promise<ConnectedApp> {
+    return this.reply('forgetApp', () => {
+      if (appId !== 'dyno') throw { code: 'bad_request', message: `Pitwall does not know an app called ${appId}.` };
+      this.dyno_ = { id: 'dyno', title: 'Dyno', keySaved: false, connected: false, problem: null, keyRefused: false, reconnecting: false, needs: null, tools: [], remembered: 0 };
+      return this.appsChanged();
+    });
+  }
+
+  /** Dyno "opens" and, as the app's timer does, is connected right after when a key is saved. */
+  openConnectedApp(appId: string): Promise<OpenedApp> {
+    return this.reply('openConnectedApp', () => {
+      if (appId !== 'dyno') return { kind: 'problem', message: `Pitwall does not know an app called ${appId}.` } as OpenedApp;
+      if (this.dynoMissing) {
+        // As Rust does: the row's problem is published (it can arrive before this answer), then the same words are answered.
+        const message = "Dyno isn't installed on this computer. Install Dyno, then choose Open Dyno.";
+        this.dyno_ = { ...this.dyno_, connected: false, reconnecting: false, needs: 'install', tools: [], problem: message };
+        this.appsChanged();
+        return { kind: 'problem', message } as OpenedApp;
+      }
+      if (this.dyno_.keySaved && !this.dyno_.keyRefused) queueMicrotask(() => this.connectDyno(true));
+      return { kind: 'started' } as OpenedApp;
+    });
+  }
+
+  /** The chats as the mock knows them: the default for new chats, which chats are not saved, and a few saved ones. */
+  private chatStorage_: ChatStorage = { saveNew: true, chats: 3, bytes: 48_000, attachmentBytes: 0, unsaved: 0 };
+  /** Chats the user marked "Don't save" (tests read it). */
+  readonly unsavedChats = new Set<string>();
+
+  chatStorage(): Promise<ChatStorage> {
+    return this.reply('chatStorage', () => clone({ ...this.chatStorage_, unsaved: this.unsavedChats.size }));
+  }
+
+  setChatSaveNew(save: boolean): Promise<ChatStorage> {
+    return this.reply('setChatSaveNew', () => {
+      this.chatStorage_ = { ...this.chatStorage_, saveNew: save };
+      return clone({ ...this.chatStorage_, unsaved: this.unsavedChats.size });
+    });
+  }
+
+  chatSaved(conversationId: string): Promise<boolean> {
+    return this.reply('chatSaved', () => !this.unsavedChats.has(conversationId));
+  }
+
+  setChatSaved(conversationId: string, save: boolean): Promise<boolean> {
+    return this.reply('setChatSaved', () => {
+      if (save) this.unsavedChats.delete(conversationId);
+      else this.unsavedChats.add(conversationId);
+      return save;
+    });
+  }
+
+  deleteAllChats(): Promise<ChatStorage> {
+    return this.reply('deleteAllChats', () => {
+      this.unsavedChats.clear();
+      this.chatStorage_ = { ...this.chatStorage_, chats: 0, bytes: 0, attachmentBytes: 0 };
+      return clone({ ...this.chatStorage_, unsaved: 0 });
+    });
+  }
+
+  chatAttachRules(): Promise<ChatAttachRules> {
+    return this.reply('chatAttachRules', () => ({
+      maxFileBytes: 256 * 1024,
+      maxCount: 16,
+      accept: '.txt,.md,.csv,.json,.log,.rs,.ts,.py,text/*',
+      hint: 'Attach text or code files (UTF-8, up to 256 KiB each)',
+    }));
+  }
+
+  /** Plausible answers for the browser build; Rust's `chat_host::attach` is the reference. */
+  private attachGate: Promise<void> | null = null;
+  private attachOpen: (() => void) | null = null;
+
+  /** Screenshot and test hook: every file handed over waits until `releaseAttachments()`. */
+  holdAttachments(): void {
+    this.attachGate = new Promise((resolve) => (this.attachOpen = resolve));
+  }
+
+  releaseAttachments(): void {
+    this.attachOpen?.();
+    this.attachGate = null;
+  }
+
+  async chatAttach(name: string, bytes: Uint8Array): Promise<ChatAttached> {
+    if (this.attachGate) await this.attachGate;
+    return this.reply('chatAttach', () => {
+      const png = bytes[0] === 0x89 && bytes[1] === 0x50;
+      if (png) this.fail('badRequest', `"${name}" is an image. The chat can't attach images yet; attach text or code files.`);
+      let text: string;
+      try {
+        text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      } catch {
+        this.fail('badRequest', `"${name}" isn't a text file. The chat attaches text and code files in UTF-8.`);
+      }
+      let h = 0;
+      for (let i = 0; i < text.length; i++) h = (Math.imul(h, 31) + text.charCodeAt(i)) >>> 0;
+      const lines = text.split(/\r?\n/).filter((l, i, all) => l || i < all.length - 1).length;
+      const sha256 = h.toString(16).padStart(8, '0').repeat(8);
+      // Bounded like Rust's staging: the oldest size goes first.
+      if (this.attachedBytes.size >= 1024) this.attachedBytes.delete(this.attachedBytes.keys().next().value as string);
+      this.attachedBytes.set(sha256, bytes.length);
+      return { attachment: { kind: 'file' as const, sha256, name }, bytes: bytes.length, lines };
+    });
+  }
+
+  /** Sizes of the files taken, by digest (the browser build's context meter counts them, as Rust does). */
+  private readonly attachedBytes = new Map<string, number>();
+
+  /** The size of a file `chatAttach` took (`undefined`: not known); browser build only. */
+  chatAttachedBytes(sha256: string): number | undefined {
+    return this.attachedBytes.get(sha256);
+  }
+
+  /** Files taken off a question (tests read it). */
+  readonly detached: string[] = [];
+
+  chatDetach(sha256: string): Promise<void> {
+    return this.reply('chatDetach', () => void this.detached.push(sha256));
+  }
+
+  /** Demo and test hook: Dyno is not installed, so Open Dyno answers that. */
+  dynoUninstalled(): void {
+    this.dynoMissing = true;
+  }
+  private dynoMissing = false;
+
+  /** Demo and test hook: a retry met a Dyno too old for Pitwall; nothing is retried until the user updates it. */
+  dynoTooOld(): void {
+    this.dynoMissing = false;
+    this.dyno_ = { ...this.dyno_, connected: false, reconnecting: false, needs: 'update', tools: [], problem: 'Dyno is too old for AI access from Pitwall. Update Dyno, then choose Refresh tools.' };
+    this.appsChanged();
+  }
+
+  /** Demo and test hook: Dyno quit (its connection ended); the app retries until it is back. */
+  dynoQuit(): void {
+    this.dyno_ = { ...this.dyno_, connected: false, reconnecting: true, tools: [], problem: 'Dyno closed the connection (the app quit). Trying again when Dyno is back.' };
+    this.appsChanged();
+  }
+
+  revokeToolApproval(appId: string, tool: string): Promise<ConnectedApp> {
+    return this.reply('revokeToolApproval', () => {
+      if (appId !== 'dyno') throw { code: 'bad_request', message: `Pitwall does not know an app called ${appId}.` };
+      const tools = this.dyno_.tools.map((t) => (t.name === tool ? { ...t, remembered: false } : t));
+      this.dyno_ = { ...this.dyno_, tools, remembered: tools.filter((t) => t.remembered).length };
+      return this.appsChanged();
+    });
+  }
+
+  private connectDyno(keyOk: boolean): ConnectedApp {
+    this.dyno_ = keyOk
+      ? {
+          ...this.dyno_,
+          connected: true,
+          problem: null,
+          keyRefused: false,
+          reconnecting: false,
+          needs: null,
+          tools: [
+            { name: 'alarms', title: 'Alarms', readOnly: true, remembered: false },
+            { name: 'cpu_memory', title: 'CPU and memory', readOnly: true, remembered: false },
+            { name: 'disks', title: 'Disks', readOnly: true, remembered: false },
+            // One tool always allowed already (as after a chat), so Settings shows "Ask again".
+            { name: 'system_summary', title: 'System summary', readOnly: true, remembered: true },
+            { name: 'top_processes', title: 'Top processes', readOnly: true, remembered: false },
+            { name: 'keep_awake', title: 'Keep this Mac awake', readOnly: false, remembered: false },
+          ],
+          remembered: 1,
+        }
+      : { ...this.dyno_, connected: false, keyRefused: true, tools: [], problem: 'Dyno refused the key. Issue a new key in Dyno\'s Settings > AI access and paste it here.' };
+    return this.appsChanged();
+  }
+
+  private chatModel_: string | null = null;
+
+  chatModels(): Promise<ChatModels> {
+    return this.reply('chatModels', () => this.picker(this.chatModel_));
+  }
+
+  setChatModel(modelId: string): Promise<ChatModels> {
+    return this.reply('setChatModel', () => this.picker(modelId));
+  }
+
+  /** The browser build's memory engine keeps its own window (`?mock-context`), so there is nothing to read again. */
+  chatRefreshWindow(): Promise<number> {
+    return this.reply('chatRefreshWindow', () => 8192);
+  }
+
+  /** The picker as Rust builds it (`chat_host::models`): tool models first, the others disabled with the reason. */
+  private picker(wanted: string | null): ChatModels {
+    const chat = this.library.filter((m) => m.capabilities.includes('chat'));
+    const models = chat
+      .map((m) => ({ id: m.id, name: m.name, loaded: m.loaded, disabled: m.capabilities.includes('tools') ? null : "Can't use tools" }))
+      .sort((a, b) => Number(a.disabled !== null) - Number(b.disabled !== null) || Number(!a.loaded) - Number(!b.loaded) || a.name.localeCompare(b.name));
+    // The starter catalog's tool models not downloaded yet (as Rust lists them).
+    models.push({ id: 'qwen3.8-27b', name: 'Qwen3.8 27B', loaded: false, disabled: 'Not downloaded' });
+    const usable = (id: string | null) => models.some((m) => m.id === id && m.disabled === null);
+    const selected = usable(wanted) ? wanted : (models.find((m) => m.disabled === null)?.id ?? null);
+    this.chatModel_ = selected;
+    const notes: Record<string, string> = { 'Not downloaded': 'Starter models that can use tools: download one in Models, then choose it here.' };
+    if (models.some((m) => m.disabled === "Can't use tools")) notes["Can't use tools"] = '"Can\'t use tools": the model\'s chat template has no tool calls, so it can\'t use a connected app\'s tools.';
+    return { models, selected, notes };
+  }
+
   takeQuitAsk(): Promise<boolean> {
     return this.reply('takeQuitAsk', () => {
       const pending = this.quitAskPending;
@@ -1296,10 +1669,18 @@ export class MockBackend implements PitwallBackend {
     return () => this.quitAskHandlers.delete(handler);
   }
 
-  /** Demo and test hook: the user chose Quit while the setting is "ask" (`windowOpen`: the window is there to answer). */
+  /**
+   * Demo and test hook: the user chose Quit while the setting is "ask" (`windowOpen`: the window is there to answer). As
+   * the app does, the request is left pending first and the event only tells the window to take it.
+   */
   askQuit(windowOpen = true): void {
+    this.quitAskPending = true;
     if (windowOpen) this.quitAskHandlers.forEach((h) => h());
-    else this.quitAskPending = true;
+  }
+
+  /** Test hook: a stale `quit-ask` event with nothing pending (it must not bring the question up). */
+  emitStaleQuitAsk(): void {
+    this.quitAskHandlers.forEach((h) => h());
   }
 
   autostart(): Promise<boolean> {

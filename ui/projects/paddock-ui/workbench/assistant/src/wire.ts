@@ -1,4 +1,4 @@
-import type { AssistantInfo, Conversation, ConversationSummary, Envelope, StoredMessage, ToolInfo } from '../generated/assistant';
+import type { AssistantInfo, ContextUse, Conversation, ConversationSummary, Envelope, StoredMessage, ToolInfo } from '../generated/assistant';
 
 /**
  * Something the answer may link to (a record, a query, a page): the phrase as the model writes it and what activating it
@@ -31,7 +31,7 @@ export function citationsOf(data: unknown): AssistantCitation[] {
   return out;
 }
 
-const EVENT_TYPES = new Set(['started', 'delta', 'toolStarted', 'approvalNeeded', 'toolFinished', 'notice', 'done', 'error']);
+const EVENT_TYPES = new Set(['started', 'phase', 'delta', 'toolStarted', 'approvalNeeded', 'toolFinished', 'notice', 'done', 'error']);
 
 /** An event as the engine sends it, or `null` when it is not one (parse, don't validate: the edge). */
 export function parseEnvelope(raw: unknown): Envelope | null {
@@ -62,6 +62,15 @@ export function parseInfo(raw: unknown): AssistantInfo | null {
   if (!isObject(raw) || !isString(raw['provider']) || !Array.isArray(raw['tools'])) return null;
   const tools = raw['tools'].filter((t): t is ToolInfo => isObject(t) && isString(t['name']) && isString(t['description']) && typeof t['write'] === 'boolean');
   return { provider: raw['provider'], tools, hasWrite: tools.some((t) => t.write) };
+}
+
+const LEVELS = new Set(['unknown', 'ok', 'high', 'full']);
+
+/** The context meter as the engine sends it, or `null`. */
+export function parseContext(raw: unknown): ContextUse | null {
+  if (!isObject(raw) || !isNumber(raw['usedTokens']) || !isNumber(raw['limitTokens']) || !isNumber(raw['reserveTokens']) || typeof raw['exact'] !== 'boolean') return null;
+  if (raw['usedTokens'] < 0 || raw['limitTokens'] < 0 || raw['reserveTokens'] < 0 || !isString(raw['level']) || !LEVELS.has(raw['level'])) return null;
+  return { usedTokens: raw['usedTokens'], limitTokens: raw['limitTokens'], reserveTokens: raw['reserveTokens'], exact: raw['exact'], level: raw['level'] as ContextUse['level'] };
 }
 
 /** The sentence for a failed command: the engine's `CommandError.message`, else the fallback. */

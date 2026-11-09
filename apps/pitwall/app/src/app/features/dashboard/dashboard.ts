@@ -1,16 +1,20 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, isDevMode } from '@angular/core';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatButtonToggle, MatButtonToggleGroup } from '@angular/material/button-toggle';
 import { MatIconModule } from '@angular/material/icon';
+import { MatMenuTrigger } from '@angular/material/menu';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { EChartsCoreOption } from 'echarts/core';
 import type { HistoryRange, Preset } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { ThemeService } from '../../core/theme';
-import { latencyChart, memoryChart, stackedRequestsChart, throughputChart } from '../../shared/charts/chart-options';
+import { latencyChart, memoryChart, stackedLegend, stackedRequestsChart, throughputChart } from '../../shared/charts/chart-options';
 import { EChart } from '../../shared/charts/echart';
 import { duration } from '../../shared/format';
 import { PRESET_HINT, PRESET_LABEL } from '../../shared/labels';
 import { injectNow } from '../../shared/now';
-import { ContextMenuService } from '../../shared/ui/context-menu';
+import { ItemsMenu, type MenuItem } from '../../shared/ui/menu';
 import { Panel } from '../../shared/ui/panel';
 import { UsageCard } from '../usage/usage-card';
 import { AppsCard } from './apps-card';
@@ -51,7 +55,7 @@ export class PerfMeter {
 /** Home: everything Pitwall is doing right now, how it got here, and the actions you need most. */
 @Component({
   selector: 'pw-dashboard',
-  imports: [MatIconModule, MatTooltipModule, Panel, EChart, StatTiles, HotModels, QueueCard, EngineIssues, EngineSetupBanner, EnginesCard, EventsFeed, AppsCard, PairingCard, UsageCard, UpdateBanner],
+  imports: [MatIconModule, MatTooltipModule, MatButton, MatIconButton, MatButtonToggleGroup, MatButtonToggle, MatMenuTrigger, SuSegmentedControl, ItemsMenu, Panel, EChart, StatTiles, HotModels, QueueCard, EngineIssues, EngineSetupBanner, EnginesCard, EventsFeed, AppsCard, PairingCard, UsageCard, UpdateBanner],
   providers: [DashboardStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -62,26 +66,22 @@ export class PerfMeter {
           <p class="sub">
             @if (live.server(); as s) {
               Pitwall {{ s.version }} · up {{ uptime() }} · {{ connectedApps() }} apps connected
-              @if (s.offline) {
-                · <span class="offline">Offline mode</span>
-              }
             } @else {
               Connecting to the server…
             }
           </p>
         </div>
         <div class="actions">
-          <div class="seg" role="radiogroup" aria-label="Memory preset">
+          <mat-button-toggle-group hideSingleSelectionIndicator aria-label="Memory preset" [value]="live.overview()?.preset" [disabled]="live.isBusy()('preset') || !live.overview()" (change)="live.applyPreset($event.value)">
             @for (p of presets; track p) {
-              <button type="button" role="radio" [attr.aria-checked]="live.overview()?.preset === p" [matTooltip]="presetHint[p]" [disabled]="live.isBusy()('preset') || !live.overview()" (click)="live.applyPreset(p)">
-                {{ presetLabel[p] }}
-              </button>
+              <mat-button-toggle [value]="p" [matTooltip]="presetHint[p]">{{ presetLabel[p] }}</mat-button-toggle>
             }
-          </div>
+          </mat-button-toggle-group>
           @if (live.paused()) {
-            <button type="button" class="btn primary" [disabled]="live.isBusy()('serving')" (click)="live.setServing(false)"><mat-icon svgIcon="pw:play" aria-hidden="true" />Resume serving</button>
+            <button type="button" matButton="filled" [disabled]="live.isBusy()('serving')" (click)="live.setServing(false)"><mat-icon svgIcon="pw:play" aria-hidden="true" />Resume serving</button>
           }
-          <button type="button" class="btn ghost icon" aria-label="More actions" aria-haspopup="menu" matTooltip="More actions" (click)="openMore($event)"><mat-icon svgIcon="pw:more" aria-hidden="true" /></button>
+          <button type="button" matIconButton aria-label="More actions" matTooltip="More actions" [matMenuTriggerFor]="moreMenu.menu()" [matMenuTriggerData]="{ items: moreItems() }"><mat-icon svgIcon="pw:more" aria-hidden="true" /></button>
+          <pw-items-menu #moreMenu label="Dashboard actions" />
         </div>
       </header>
 
@@ -123,11 +123,7 @@ export class PerfMeter {
 
       <div class="history-head">
         <h2 class="section">History</h2>
-        <div class="seg small" role="radiogroup" aria-label="History range">
-          @for (r of ranges; track r) {
-            <button type="button" role="radio" [attr.aria-checked]="store.range() === r" (click)="store.select(r)">{{ r }}</button>
-          }
-        </div>
+        <pd-segmented-control label="History range" [options]="rangeSegs" [value]="store.range()" (valueChange)="store.select($any($event))" />
       </div>
 
       <div class="grid">
@@ -152,7 +148,12 @@ export class PerfMeter {
           <pw-apps-card [series]="store.history()?.requestsByApp ?? []" />
         </pw-panel>
         <pw-panel class="c5" heading="Requests by app" icon="requests" [loading]="store.loading()" [error]="store.error()" [ready]="!!store.history()" (retry)="store.select(store.range())">
-          <pw-echart [option]="byAppOption()" [themeKey]="chartKey()" height="226px" label="Requests per interval by app" />
+          <pw-echart [option]="byAppOption()" [themeKey]="chartKey()" height="196px" label="Requests per interval by app" />
+          <ul class="series-legend" aria-label="Apps in the chart">
+            @for (e of byAppLegend(); track e.name) {
+              <li><i [style.background]="e.color"></i>{{ e.name }}</li>
+            }
+          </ul>
         </pw-panel>
 
         <pw-panel class="c4" heading="Tokens per second" icon="bolt" [loading]="store.loading()" [error]="store.error()" [ready]="!!store.history()" (retry)="store.select(store.range())">
@@ -162,7 +163,12 @@ export class PerfMeter {
           <pw-echart [option]="latencyOption()" [themeKey]="chartKey()" height="220px" label="Time to first token, p50 and p95, over time" />
         </pw-panel>
         <pw-panel class="c4" heading="Requests by model" icon="models" [loading]="store.loading()" [error]="store.error()" [ready]="!!store.history()" (retry)="store.select(store.range())">
-          <pw-echart [option]="byModelOption()" [themeKey]="chartKey()" height="220px" label="Requests per interval by model" />
+          <pw-echart [option]="byModelOption()" [themeKey]="chartKey()" height="190px" label="Requests per interval by model" />
+          <ul class="series-legend" aria-label="Models in the chart">
+            @for (e of byModelLegend(); track e.name) {
+              <li><i [style.background]="e.color"></i>{{ e.name }}</li>
+            }
+          </ul>
         </pw-panel>
 
         <pw-usage-card class="c12" />
@@ -177,54 +183,15 @@ export class PerfMeter {
     .page {
       display: flex;
       flex-direction: column;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
     }
     .page-head {
-      margin-bottom: var(--sp-2);
-    }
-    .offline {
-      color: var(--warn);
-      font-weight: var(--fw-medium);
-    }
-    .seg {
-      display: inline-flex;
-      padding: 2px;
-      background: var(--bg-active);
-      border-radius: var(--r-md);
-      button {
-        height: 24px;
-        padding: 0 var(--sp-3);
-        font: inherit;
-        font-size: var(--fs-sm);
-        font-weight: var(--fw-medium);
-        color: var(--text-2);
-        background: none;
-        border: none;
-        border-radius: var(--r-sm);
-        cursor: default;
-        transition: background var(--dur-fast) var(--ease);
-        &:hover:not(:disabled) {
-          color: var(--text);
-        }
-        &[aria-checked='true'] {
-          color: var(--text);
-          background: var(--bg-card);
-          box-shadow: var(--shadow-1);
-        }
-        &:disabled {
-          cursor: default;
-        }
-      }
-      &.small button {
-        height: 22px;
-        min-width: 40px;
-        padding: 0 var(--sp-2);
-      }
+      margin-bottom: var(--pd-space-2);
     }
     .grid {
       display: grid;
       grid-template-columns: repeat(12, minmax(0, 1fr));
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
     }
     /* The three live cards size to their content; they do not stretch to match the tallest. */
     .now {
@@ -251,22 +218,25 @@ export class PerfMeter {
     .events {
       max-height: 383px;
     }
+    /* A section break of 24 px (the page's section step) above History: its heading and its range control read as one row,
+       centred on each other, and at 1440x900 the row starts below the window's fold instead of peeking under the status bar. */
     .history-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-top: var(--sp-4);
+      min-height: 32px;
+      margin-top: var(--pd-space-6);
       .section {
-        font-size: var(--fs-md);
+        font-size: var(--pd-text-body-lg);
       }
     }
     .legend {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
-      gap: var(--sp-3);
-      font-size: var(--fs-xs);
-      color: var(--text-2);
+      gap: var(--pd-space-3);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       span {
         display: inline-flex;
         align-items: center;
@@ -298,19 +268,41 @@ export class PerfMeter {
       .sep {
         width: 1px;
         height: 12px;
-        background: var(--border);
+        background: var(--pd-hairline);
+      }
+    }
+    /* A chart's series, under it: wraps with the card and never runs into the time axis. */
+    .series-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--pd-space-1) var(--pd-space-3);
+      margin: var(--pd-space-2) 0 0;
+      padding: 0;
+      list-style: none;
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
+      li {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        white-space: nowrap;
+      }
+      i {
+        width: 8px;
+        height: 8px;
+        border-radius: 2px;
       }
     }
     .perf {
       position: fixed;
-      right: var(--sp-3);
-      bottom: var(--sp-3);
-      padding: 2px var(--sp-2);
-      font: 11px var(--font-mono);
-      color: var(--text-2);
-      background: var(--bg-raised);
-      border: 1px solid var(--border);
-      border-radius: var(--r-sm);
+      right: var(--pd-space-3);
+      bottom: var(--pd-space-3);
+      padding: 2px var(--pd-space-2);
+      font: 11px var(--pd-font-mono);
+      color: var(--pd-text-muted);
+      background: var(--pd-surface-3);
+      border: 1px solid var(--pd-hairline);
+      border-radius: var(--pd-radius-tag);
     }
     @media (max-width: 1200px) {
       .c3,
@@ -333,9 +325,8 @@ export class Dashboard implements OnInit {
   protected readonly live = inject(LiveStore);
   protected readonly store = inject(DashboardStore);
   private readonly theme = inject(ThemeService);
-  private readonly menu = inject(ContextMenuService);
   protected readonly now = injectNow();
-  protected readonly ranges = RANGES;
+  protected readonly rangeSegs: SuSegment[] = RANGES.map((r) => ({ value: r, label: r }));
   protected readonly presets = PRESETS;
   protected readonly presetLabel = PRESET_LABEL;
   protected readonly presetHint = PRESET_HINT;
@@ -357,14 +348,18 @@ export class Dashboard implements OnInit {
   private readonly appNames = computed(() => new Map(this.live.apps().map((a) => [a.id, a.name])));
   protected readonly byAppOption = computed(() => {
     const h = this.store.history();
-    const names = this.appNames();
-    return stackedRequestsChart(h?.points ?? [], h?.requestsByApp ?? [], this.store.range(), this.tokens(), (k) => names.get(k) ?? k);
+    return stackedRequestsChart(h?.points ?? [], h?.requestsByApp ?? [], this.store.range(), this.tokens(), this.appName);
   });
+  protected readonly byAppLegend = computed(() => stackedLegend(this.store.history()?.requestsByApp ?? [], this.tokens(), this.appName));
+  private readonly appName = (k: string) => this.appNames().get(k) ?? k;
+  /** Models by their display name, from the library (a model need not be loaded now to have served in the range). */
+  private readonly modelNames = computed(() => new Map([...Object.entries(this.store.modelNames()), ...this.live.models().map((m) => [m.modelId, m.name] as const)]));
+  private readonly modelName = (k: string) => this.modelNames().get(k) ?? shortModel(k);
   protected readonly byModelOption = computed(() => {
     const h = this.store.history();
-    const names = new Map(this.live.models().map((m) => [m.modelId, m.name]));
-    return stackedRequestsChart(h?.points ?? [], h?.requestsByModel ?? [], this.store.range(), this.tokens(), (k) => names.get(k) ?? shortModel(k));
+    return stackedRequestsChart(h?.points ?? [], h?.requestsByModel ?? [], this.store.range(), this.tokens(), this.modelName);
   });
+  protected readonly byModelLegend = computed(() => stackedLegend(this.store.history()?.requestsByModel ?? [], this.tokens(), this.modelName));
 
   /** Refreshed with the clock tick, not by the measurement itself. */
   protected readonly perfText = computed(() => (this.now(), `charts ${this.perf.last.toFixed(2)} ms · avg ${this.perf.avg.toFixed(2)} ms · ${this.perf.count} builds · ${this.live.updates()} updates`));
@@ -391,13 +386,13 @@ export class Dashboard implements OnInit {
   }
 
   /** Release memory and Pause serving: occasional actions, kept out of the header's way. */
-  protected openMore(e: Event): void {
+  protected readonly moreItems = computed<MenuItem[]>(() => {
     const busy = !this.live.overview();
-    this.menu.openFrom(e.currentTarget as HTMLElement, [
+    return [
       { label: 'Release memory', run: () => void this.live.releaseMemory(), disabled: busy || this.live.isBusy()('release') },
       { label: this.live.paused() ? 'Resume serving' : 'Pause serving', run: () => void this.live.setServing(!this.live.paused()), disabled: busy || this.live.isBusy()('serving') },
-    ]);
-  }
+    ];
+  });
 }
 
 /** A readable name for a model id the library does not know any more (`gemma-4-12b-it-q4_k_m` → `gemma-4-12b-it`). */

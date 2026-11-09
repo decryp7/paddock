@@ -178,7 +178,7 @@ export class PdWidgetFrame<V = unknown, A = unknown> {
   readonly variant = input<'tile' | 'card'>('tile');
   /** Columns spanned in the area's grid. */
   readonly span = input(2);
-  /** A live kind says "Paused at 14:28" when stale; the others say "Updated 4 min ago". */
+  /** A live kind says "As of 14:28" when stale; the others say "Updated 4 min ago". */
   readonly live = input(false);
   /**
    * The clock (ms since the epoch) for "Updated 4 min ago". Nothing here ticks: the text is computed when `state` or `now` changes, so an
@@ -209,7 +209,7 @@ export class PdWidgetFrame<V = unknown, A = unknown> {
     if (s?.state !== 'ready') return null;
     if (s.staleSince !== null) {
       const ago = relativeAgo(this.now() ?? Date.now(), s.staleSince);
-      const full = this.live() ? `Paused at ${clock(s.staleSince)}` : `Updated ${ago}`;
+      const full = this.live() ? `As of ${clock(s.staleSince)}` : `Updated ${ago}`;
       const short = this.live() ? clock(s.staleSince) : ago.replace(/ ago$/, '');
       return { text: this.span() === 1 ? short : full, full, stale: true };
     }

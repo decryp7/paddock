@@ -15,8 +15,8 @@
 )]
 
 use crate::manager::Manager;
-use crate::parse::reg_value;
-use crate::paths::{REG, WINDOWS_MACHINE_RUN_KEY, WINDOWS_RUN_KEY};
+use crate::parse::{reg_value, startup_switched_off};
+use crate::paths::{REG, WINDOWS_MACHINE_RUN_KEY, WINDOWS_RUN_KEY, WINDOWS_STARTUP_APPROVED_KEY};
 use crate::port::{AppService, AppServiceStatus, RegisterError, System};
 use crate::render::{windows_command_line, windows_program_of};
 use crate::status::LOGIN_SECTION;
@@ -129,6 +129,30 @@ impl UserRunEntry {
             ),
             Err(e) => format!("the machine-wide Run value could not be removed: reg.exe {e}"),
         }
+    }
+}
+
+impl UserRunEntry {
+    /// Whether the per-user value is there and starts this program (a value of another program is not this entry's) and
+    /// was not switched off in Startup apps (`StartupApproved\Run`). Reads only: it is the answer for a Settings switch, so it works elevated too.
+    pub fn is_on(&mut self) -> Result<bool, String> {
+        let found = self.value_of(WINDOWS_RUN_KEY)?;
+        let ours = found.is_some_and(|data| {
+            windows_program_of(&data)
+                .is_some_and(|p| p.eq_ignore_ascii_case(&self.exe.to_string_lossy()))
+        });
+        if !ours {
+            return Ok(false);
+        }
+        // Task Manager > Startup apps and Settings > Apps > Startup switch an entry off in StartupApproved\Run, not in Run itself.
+        let switched_off = match self.sys.run(
+            REG,
+            &["query", WINDOWS_STARTUP_APPROVED_KEY, "/v", &self.name],
+        ) {
+            Ok(o) if o.success() => startup_switched_off(&o.stdout, &self.name),
+            _ => false,
+        };
+        Ok(!switched_off)
     }
 }
 
@@ -695,6 +719,80 @@ mod tests {
         });
         entry(&sys, true).set(true).unwrap_err();
         assert!(!sys.commands().iter().any(|c| c.starts_with("reg delete")));
+    }
+
+    #[test]
+    fn is_on_reads_the_users_value_and_only_for_this_program() {
+        let sys = FakeSystem::new();
+        // No value: off. A value of another program: off. This program's value (any case of the path): on.
+        sys.on(RUN_Q, |_, _| Ok(crate::port::Output::code(1)));
+        assert_eq!(entry(&sys, false).is_on(), Ok(false));
+        sys.on(RUN_Q, |_, _| {
+            Ok(crate::port::Output::ok(
+                "\n    Dyno    REG_SZ    \"C:\\Tools\\other.exe\" --hidden\n",
+            ))
+        });
+        assert_eq!(entry(&sys, false).is_on(), Ok(false));
+        sys.on(RUN_Q, |_, _| {
+            Ok(crate::port::Output::ok(&format!(
+                "\n    Dyno    REG_SZ    \"{}\" --hidden\n",
+                APP.to_uppercase()
+            )))
+        });
+        assert_eq!(entry(&sys, false).is_on(), Ok(true));
+        // Reading writes nothing, elevated or not.
+        assert!(
+            sys.commands().iter().all(|c| c.starts_with("reg query")),
+            "{:?}",
+            sys.commands()
+        );
+        // A registry that cannot be read is an error, not "off".
+        sys.on(RUN_Q, |_, _| {
+            Err(crate::port::RunError::NotStarted("no reg.exe".into()))
+        });
+        assert!(entry(&sys, false).is_on().is_err());
+    }
+
+    /// Review P2-9 of B6b: a Run value the user switched off in Task Manager (StartupApproved\\Run, first byte odd) is off.
+    #[test]
+    fn is_on_is_off_when_the_user_switched_the_entry_off_in_startup_apps() {
+        let sys = FakeSystem::new();
+        sys.on(RUN_Q, |_, _| {
+            Ok(crate::port::Output::ok(&format!(
+                "\n    Dyno    REG_SZ    \"{APP}\" --hidden\n"
+            )))
+        });
+        let approved = |data: &'static str| {
+            move |_: &[String], _: std::time::Duration| {
+                Ok(crate::port::Output::ok(&format!(
+                    "\n    Dyno    REG_BINARY    {data}\n"
+                )))
+            }
+        };
+        sys.on(
+            "reg query HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer",
+            approved("0300000000000000000000"),
+        );
+        assert_eq!(entry(&sys, false).is_on(), Ok(false), "03: switched off");
+        sys.on(
+            "reg query HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer",
+            approved("0600000000000000000000"),
+        );
+        assert_eq!(entry(&sys, false).is_on(), Ok(true), "06: enabled");
+        sys.on(
+            "reg query HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer",
+            |_, _| Ok(crate::port::Output::code(1)),
+        );
+        assert_eq!(
+            entry(&sys, false).is_on(),
+            Ok(true),
+            "no approval entry: on"
+        );
+        assert!(
+            sys.commands().iter().all(|c| c.starts_with("reg query")),
+            "{:?}",
+            sys.commands()
+        );
     }
 
     #[test]

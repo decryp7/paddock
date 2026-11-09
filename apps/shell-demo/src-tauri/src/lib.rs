@@ -277,9 +277,11 @@ pub fn shell_with_log<R: Runtime>(place: Place, log: Option<LogHandle>) -> Build
 }
 
 /// Updates, About and What's New with this app's changelog. Without the CI's updater key the build cannot update
-/// itself and says so ("Updates are not available in this build"); the demo is released unsigned for now.
+/// itself and says so ("Updates are not available in this build"); the demo is released unsigned for now, so it declares
+/// `no_install`: it has no `PluginInstaller` (no signed package to verify), and the Updates dialog would offer no install.
 fn updater(test_dir: Option<PathBuf>) -> UpdatesBuilder {
     let b = UpdatesBuilder::new(APP_NAME)
+        .no_install()
         .public_key(option_env!("TAURI_UPDATER_PUBKEY"))
         .releases_page(RELEASES_PAGE)
         .homepage("https://dev.decryptology.net/decryp7/paddock")

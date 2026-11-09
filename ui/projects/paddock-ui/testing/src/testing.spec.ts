@@ -1,7 +1,13 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { TestBed } from '@angular/core/testing';
+import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
 import { FakeChart, FakeECharts } from './fake-chart';
 import { all, at, buttonByText, byText, manualFrames, must, one, press, text, typeInto } from './dom';
 import { installTestKit } from './setup';
+
+/** The smallest TestBed component, for the tests of what the kit does around TestBed's own clean-up. */
+@Component({ selector: 'pd-kit-probe', template: '<p>probe</p>', changeDetection: ChangeDetectionStrategy.OnPush })
+class KitProbe {}
 
 function dom(html: string): HTMLElement {
   const root = document.createElement('div');
@@ -79,6 +85,66 @@ describe('installTestKit', () => {
       expect(sessionStorage.getItem('pd-leftover')).toBeNull();
     });
   });
+
+  // Regression (CI runs 7257, 7274 and 7276): a spy on the faked setTimeout keeps the fake as its original, and Vitest
+  // restores it at every restoreAllMocks, even after mockRestore. Once the clock was uninstalled that wrote back a fake
+  // whose timers never fire, so every later spec in the worker that waited on a real timer (the panel snapshot's "too
+  // slow" case, the notify reference app's repairs) hung until the 5 s test timeout.
+  describe('a spy on a faked timer', () => {
+    const realSetTimeout = globalThis.setTimeout;
+    it('is left behind with the fake clock', () => {
+      vi.useFakeTimers();
+      vi.spyOn(globalThis, 'setTimeout');
+      expect(vi.isFakeTimers()).toBe(true);
+    });
+    it('is gone, and the real setTimeout fires, before the next test starts', async () => {
+      expect(globalThis.setTimeout).toBe(realSetTimeout);
+      await new Promise<void>((resolve) => setTimeout(resolve, 1));
+    });
+  });
+
+  // The failure is raised after every afterEach (onTestFinished), not inside the chain: a throw there skipped Angular's
+  // TestBed clean-up, and the next TestBed test failed with "Cannot configure the test module when the test module has
+  // already been instantiated".
+  describe('a spy on a faked timer outliving a spec’s own switch to real timers, in TestBed tests', () => {
+    const realSetTimeout = globalThis.setTimeout;
+    const failure = { message: '' };
+    // As in a spec whose afterEach calls vi.useRealTimers(): it runs before the kit's, so the kit finds the dead fake.
+    afterEach(() => vi.useRealTimers());
+    it.fails('leaves a restored spy on the faked setTimeout behind, and fails by name', () => {
+      // Runs after onTestFinished, before it.fails flips the result: the kit's own message.
+      onTestFailed(({ task }) => void (failure.message = task.result?.errors?.map((e) => e.message).join('\n') ?? ''));
+      TestBed.configureTestingModule({ imports: [KitProbe] });
+      TestBed.createComponent(KitProbe).detectChanges();
+      vi.useFakeTimers();
+      vi.spyOn(globalThis, 'setTimeout').mockRestore();
+    });
+    it('configures the next TestBed test cleanly, with the real setTimeout back', async () => {
+      expect(failure.message).toContain('This test left setTimeout replaced');
+      TestBed.configureTestingModule({ imports: [KitProbe] });
+      const fixture = TestBed.createComponent(KitProbe);
+      fixture.detectChanges();
+      expect((fixture.nativeElement as HTMLElement).textContent).toBe('probe');
+      expect(globalThis.setTimeout).toBe(realSetTimeout);
+      await new Promise<void>((resolve) => setTimeout(resolve, 1));
+    });
+  });
+
+  describe('a spy on the real timer made before fake timers', () => {
+    const realSetTimeout = globalThis.setTimeout;
+    it('is left behind by the uninstalled clock and put back without failing the test', () => {
+      vi.spyOn(globalThis, 'setTimeout');
+      vi.useFakeTimers();
+      const ran = vi.fn();
+      setTimeout(ran, 10);
+      vi.advanceTimersByTime(10);
+      expect(ran).toHaveBeenCalledTimes(1);
+    });
+    it('finds the real setTimeout, whose timers fire', async () => {
+      expect(globalThis.setTimeout).toBe(realSetTimeout);
+      await new Promise<void>((resolve) => setTimeout(resolve, 1));
+    });
+  });
 });
 
 describe('DOM helpers', () => {
@@ -124,7 +190,9 @@ describe('DOM helpers', () => {
   });
 
   describe('manualFrames', () => {
-    const frames = manualFrames();
+    // Installed per test: the kit puts the real timer globals back before every test.
+    let frames: ReturnType<typeof manualFrames>;
+    beforeEach(() => (frames = manualFrames()));
     afterEach(() => frames.restore());
     it('runs requested frames only when flushed, and forgets cancelled ones', () => {
       const ran: number[] = [];

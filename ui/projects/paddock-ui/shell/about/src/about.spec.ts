@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { DISMISSED, provideContributions, SHELL_IDLE, SHELL_PORTS, type ShellNotice } from '@decryp7/paddock-ui/shell';
 import { assertContributionsValid, createFramed } from '@decryp7/paddock-ui/shell/testing';
 import { MemoryJobsBackend, provideShellJobs } from '@decryp7/paddock-ui/shell/jobs';
-import type { AboutInfo, UpdatePhase, UpdateStatus, WhatsNew } from '../generated/about';
+import type { AboutInfo, UpdateErrorKind, UpdatePhase, UpdateStatus, WhatsNew } from '../generated/about';
 import { ABOUT_COMMANDS } from '../generated/about-commands';
 import { FILES_COMMANDS } from '../../files/generated/files-commands';
 import {
@@ -53,11 +53,11 @@ async function settle(rounds = 6): Promise<void> {
   for (let i = 0; i < rounds; i++) await Promise.resolve();
 }
 
-function bed(server: MemoryUpdatesOptions['server'], extra: unknown[] = [], main = false, install?: MemoryUpdatesOptions['install']) {
+function bed(server: MemoryUpdatesOptions['server'], extra: unknown[] = [], main = false, canInstall = true, install?: MemoryUpdatesOptions['install']) {
   const notices: ShellNotice[] = [];
   const opened: string[] = [];
   const about = new MemoryAboutBackend(INFO, { notices: '# Third-party notices\n\nlong list', mit: 'MIT License' }, NOTES, 'show');
-  const updates = new MemoryUpdatesBackend({ currentVersion: INFO.version, server, release: RELEASE, channels: [{ id: 'stable', label: 'Stable' }, { id: 'beta', label: 'Beta' }], install });
+  const updates = new MemoryUpdatesBackend({ currentVersion: INFO.version, server, release: RELEASE, channels: [{ id: 'stable', label: 'Stable' }, { id: 'beta', label: 'Beta' }], canInstall, install });
   TestBed.configureTestingModule({
     providers: [
       provideZonelessChangeDetection(),
@@ -90,12 +90,13 @@ describe('the wire', () => {
     channels: [],
     endpointHost: null,
     releasesPage: null,
+    canInstall: true,
     install: { scope: 'perUser', installOnQuitAvailable: true, administratorNotice: null },
   };
 
   it('accepts what the engine sends and refuses anything else', () => {
     expect(parseUpdateStatus(status)).toBe(status);
-    for (const bad of [null, [], {}, { ...status, phase: { kind: 'exploded' } }, { ...status, phase: null }, { ...status, channels: 3 }, { ...status, phase: { kind: 1 } }, { ...status, install: null }, { ...status, install: { scope: 'elsewhere', installOnQuitAvailable: true } }]) {
+    for (const bad of [null, [], {}, { ...status, phase: { kind: 'exploded' } }, { ...status, phase: null }, { ...status, channels: 3 }, { ...status, canInstall: undefined }, { ...status, phase: { kind: 1 } }, { ...status, install: null }, { ...status, install: { scope: 'elsewhere', installOnQuitAvailable: true } }]) {
       expect(parseUpdateStatus(bad)).toBeNull();
     }
     expect(parseAboutInfo(INFO)).toBe(INFO);
@@ -160,6 +161,8 @@ describe('the wire', () => {
     ]) {
       expect(await run()).toBe(status);
     }
+    await updates.openReleases();
+    expect(calls.at(-1)).toEqual(['updates_open_releases', undefined]);
     const seen: UpdateStatus[] = [];
     await updates.listen((s) => seen.push(s));
     handler?.(status);
@@ -428,13 +431,15 @@ describe('the dialogs', () => {
     await fixture.whenStable();
     expect(about.openedUrls).toEqual(['https://updates.example/releases']);
     expect(el.querySelector('[data-testid="about-open-failed"]')).toBeNull();
-    vi.spyOn(about, 'openUrl').mockRejectedValue(new Error('only http, https and mailto addresses open'));
+    vi.spyOn(about, 'openUrl').mockRejectedValue({ code: 'invalid', message: 'only http, https and mailto addresses open', retryable: false, hint: 'Check the address.' });
     el.querySelector<HTMLAnchorElement>('[data-testid="about-releases"]')!.click();
     await fixture.whenStable();
     const failed = el.querySelector('[data-testid="about-open-failed"]');
     expect(failed?.getAttribute('role')).toBe('alert');
     expect(text(failed as HTMLElement)).toContain('The releases page could not be opened');
     expect(text(failed as HTMLElement)).toContain('only http, https and mailto addresses open');
+    expect(text(failed as HTMLElement)).toContain('Check the address.');
+    expect(text(failed as HTMLElement)).not.toContain('[object Object]');
   });
 
   it('says the operating system and architecture in words', () => {
@@ -545,7 +550,7 @@ describe('the dialogs', () => {
 
   it('Updates for a per-machine copy has an Install button, the administrator text, no install on quit, and waits while an installer runs', async () => {
     const notice = 'An administrator must install this update. Windows will ask for an administrator\'s name and password.';
-    const { updates } = bed('release', [], false, { scope: 'perMachine', installOnQuitAvailable: false, administratorNotice: notice });
+    const { updates } = bed('release', [], false, true, { scope: 'perMachine', installOnQuitAvailable: false, administratorNotice: notice });
     const fixture = createFramed(PdUpdatesDialog);
     await settle();
     await fixture.whenStable();
@@ -568,7 +573,7 @@ describe('the dialogs', () => {
   });
 
   it('Updates offers Install again after a declined or failed hand-off, and it looks for the update and downloads it again', async () => {
-    const { updates } = bed('release', [], false, { scope: 'perMachine', installOnQuitAvailable: false, administratorNotice: null });
+    const { updates } = bed('release', [], false, true, { scope: 'perMachine', installOnQuitAvailable: false, administratorNotice: null });
     const fixture = createFramed(PdUpdatesDialog);
     await settle();
     await fixture.whenStable();
@@ -585,7 +590,7 @@ describe('the dialogs', () => {
     expect(['downloading', 'ready']).toContain((await updates.status()).phase.kind);
   });
 
-  it('Updates shows a refused signature with its next step, and nothing to press without a key', async () => {
+  it('Updates shows a refused signature with its next step, and only Open releases page without a key', async () => {
     bed('bad-signature');
     const fixture = createFramed(PdUpdatesDialog);
     await settle();
@@ -610,8 +615,170 @@ describe('the dialogs', () => {
     const o: HTMLElement = off.nativeElement;
     expect(text(o)).toContain('Updates are not available in this build.');
     expect(text(o)).toContain('without an update signing key');
-    // Nothing to press but the frame's Close.
-    expect([...o.querySelectorAll('button')].map((b) => text(b))).toEqual(['Close']);
+    // The releases page and the frame's Close.
+    expect([...o.querySelectorAll('button')].map((b) => text(b))).toEqual(['Close', 'Open releases page']);
+  });
+
+  it('Updates of a build that cannot install offers the releases page first, then Check again, and no download, restart or install on quit', async () => {
+    const { updates } = bed('release', [], false, false);
+    const fixture = createFramed(PdUpdatesDialog);
+    await settle();
+    await fixture.whenStable();
+    const el: HTMLElement = fixture.nativeElement;
+    button(el, 'Check now').click();
+    await settle();
+    await fixture.whenStable();
+    expect(text(el)).toContain('is available');
+    expect(el.querySelector('[data-testid="updates-manual"]')?.textContent).toContain('releases page');
+    const names = [...el.querySelectorAll('button')].map((b) => text(b));
+    expect(names).not.toContain('Download');
+    expect(button(el, 'Open releases page').dataset['role']).toBe('primary');
+    expect(button(el, 'Check again').dataset['role']).toBe('secondary');
+    button(el, 'Open releases page').click();
+    await settle();
+    expect(updates.openedUrls).toEqual(['https://updates.example/releases']);
+    // The engine refuses the download; the install steps are out of turn (busy) first, as in the engine.
+    await expect(updates.download()).rejects.toMatchObject({ kind: 'installFailed' });
+    const idle = new MemoryUpdatesBackend({ currentVersion: '1.0.0', server: 'release', canInstall: false });
+    await expect(idle.download()).rejects.toMatchObject({ kind: 'busy' });
+    await expect(updates.restart()).rejects.toMatchObject({ kind: 'busy' });
+    await expect(updates.installOnQuit(true)).rejects.toMatchObject({ kind: 'busy' });
+  });
+
+  it('Updates says so when the releases page did not open', async () => {
+    const { updates } = bed('release', [], false, false);
+    updates.openReleases = () => Promise.reject({ kind: 'invalid', message: 'No browser.', nextStep: 'Open the releases page by hand.', detail: null });
+    const fixture = createFramed(PdUpdatesDialog);
+    await settle();
+    await fixture.whenStable();
+    const el: HTMLElement = fixture.nativeElement;
+    button(el, 'Check now').click();
+    await settle();
+    await fixture.whenStable();
+    button(el, 'Open releases page').click();
+    await settle();
+    await fixture.whenStable();
+    expect(el.querySelector('[data-testid="updates-open-failed"]')?.textContent).toContain('No browser.');
+    expect(el.querySelector('[data-testid="updates-open-failed"]')?.textContent).toContain('Open the releases page by hand.');
+    expect(el.querySelector('[data-testid="updates-open-failed"]')?.textContent).not.toContain('[object Object]');
+    expect(el.querySelector('[data-testid="updates-open-failed"]')?.classList.contains('pd-problem')).toBe(true);
+  });
+
+  it('Updates in a build without a key offers only Open releases page', async () => {
+    const { updates } = bed('unavailable');
+    const fixture = createFramed(PdUpdatesDialog);
+    await settle();
+    await fixture.whenStable();
+    const el: HTMLElement = fixture.nativeElement;
+    expect([...el.querySelectorAll('button')].map((b) => text(b))).toEqual(['Close', 'Open releases page']);
+    expect(button(el, 'Open releases page').dataset['role']).toBe('primary');
+    button(el, 'Open releases page').click();
+    await settle();
+    expect(updates.openedUrls).toEqual(['https://updates.example/releases']);
+  });
+
+  describe('against a status the engine could send', () => {
+    const engine = (patch: Partial<UpdateStatus>) => {
+      const backend = new (class extends MemoryUpdatesBackend {
+        override status(): Promise<UpdateStatus> {
+          return Promise.resolve({ ...this.statusNow(), ...patch });
+        }
+        statusNow(): UpdateStatus {
+          return {
+            currentVersion: '1.4.0',
+            phase: { kind: 'idle' },
+            lastChecked: null,
+            autoCheck: false,
+            channel: 'stable',
+            channels: [{ id: 'stable', label: 'Stable' }],
+            endpointHost: 'updates.example',
+            releasesPage: 'https://updates.example/releases',
+            canInstall: true,
+            install: { scope: 'perUser', installOnQuitAvailable: true, administratorNotice: null },
+          };
+        }
+      })({ currentVersion: '1.4.0', server: 'release', release: RELEASE });
+      TestBed.configureTestingModule({
+        providers: [provideZonelessChangeDetection(), provideShellAbout({ about: () => new MemoryAboutBackend(INFO), updates: () => backend })],
+      });
+      return backend;
+    };
+    const info = { version: '1.5.0', currentVersion: '1.4.0', notes: '', pubDate: null, size: null };
+
+    it('a ready update in a build that cannot install offers neither Restart nor install on quit', async () => {
+      engine({ phase: { kind: 'ready', info, installOnQuit: false }, canInstall: false });
+      const fixture = createFramed(PdUpdatesDialog);
+      await settle();
+      await fixture.whenStable();
+      const el: HTMLElement = fixture.nativeElement;
+      expect(text(el)).toContain('is downloaded');
+      const names = [...el.querySelectorAll('button')].map((b) => text(b));
+      expect(names).not.toContain('Restart to update');
+      expect(names).toContain('Discard');
+      expect(text(el)).not.toContain('Install when the app quits');
+      TestBed.resetTestingModule();
+      engine({ phase: { kind: 'ready', info, installOnQuit: false }, canInstall: true });
+      const able = createFramed(PdUpdatesDialog);
+      await settle();
+      await able.whenStable();
+      const e2: HTMLElement = able.nativeElement;
+      expect(button(e2, 'Restart to update')).toBeTruthy();
+      expect(text(e2)).toContain('Install when the app quits');
+    });
+
+    it('Download is offered only for a build that can install, and a failed step with its update retries only when it can', async () => {
+      const failed = (kind: UpdateErrorKind) => ({ kind: 'failed' as const, info, error: { kind, message: 'm', nextStep: 'n.', detail: null } });
+      const can = (patch: Partial<UpdateStatus>) => {
+        engine(patch);
+        return TestBed.inject(UpdatesStore);
+      };
+      let store = can({ phase: { kind: 'available', info }, canInstall: false });
+      await settle();
+      expect(store.canDownload()).toBe(false);
+      TestBed.resetTestingModule();
+      store = can({ phase: { kind: 'available', info }, canInstall: true });
+      await settle();
+      expect(store.canDownload()).toBe(true);
+      TestBed.resetTestingModule();
+      store = can({ phase: failed('unreachable'), canInstall: true });
+      await settle();
+      expect(store.canDownload()).toBe(true);
+      TestBed.resetTestingModule();
+      store = can({ phase: failed('unreachable'), canInstall: false });
+      await settle();
+      expect(store.canDownload()).toBe(false);
+      for (const kind of ['signatureInvalid', 'tooLarge'] as const) {
+        TestBed.resetTestingModule();
+        store = can({ phase: failed(kind), canInstall: true });
+        await settle();
+        expect(store.canDownload(), kind).toBe(false);
+      }
+      TestBed.resetTestingModule();
+      store = can({ phase: { kind: 'failed', info: null, error: failed('unreachable').error }, canInstall: true });
+      await settle();
+      expect(store.canDownload()).toBe(false);
+    });
+
+    it('a failed step with its update offers Try again, or the releases page when the build cannot install', async () => {
+      const failed = { kind: 'failed' as const, info, error: { kind: 'unreachable' as const, message: 'm', nextStep: 'n.', detail: null } };
+      engine({ phase: failed, canInstall: true });
+      let f = createFramed(PdUpdatesDialog);
+      await settle();
+      await f.whenStable();
+      expect(button(f.nativeElement, 'Try again')).toBeTruthy();
+      TestBed.resetTestingModule();
+      engine({ phase: failed, canInstall: false });
+      f = createFramed(PdUpdatesDialog);
+      await settle();
+      await f.whenStable();
+      const names = [...(f.nativeElement as HTMLElement).querySelectorAll('button')].map((b) => text(b));
+      expect(names).toContain('Open releases page');
+      expect(names).not.toContain('Try again');
+      expect(names).toContain('Check again');
+      const el = f.nativeElement as HTMLElement;
+      expect(button(el, 'Open releases page').dataset['role']).toBe('primary');
+      expect(button(el, 'Check again').dataset['role']).toBe('secondary');
+    });
   });
 
   it('Updates offers Stop checking while checking and a Retry when the updater does not answer', async () => {

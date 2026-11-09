@@ -1,0 +1,268 @@
+//! The loopback handshake, once for the family (rule 55): read the app's discovery file, prove that the process it names is
+//! the one that started when the file says (rule 53: the file is only a hint, and a key is never sent to a port nobody
+//! proved), connect to 127.0.0.1, send the key line and read the one answer line. [`crate::bridge::run`] and Pitwall's host
+//! both start here.
+
+use crate::client::Connection;
+use crate::client::ConnectionConfig;
+use crate::listener::Discovery;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{Shutdown, TcpStream};
+use std::path::Path;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+/// The longest answer to the key line that is read.
+const MAX_ANSWER: u64 = 4096;
+
+/// The next step after the app ended or refused a connection for a reason that is not the key.
+pub(crate) const AGAIN: &str =
+    "It may be restarting; check that it is open with AI access on, then start this again.";
+
+/// How long each step of the handshake may take. A connect or an answer on 127.0.0.1 is not a running job (ER-19): a
+/// listener that does not answer in time is not an MCP listener.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConnectLimits {
+    /// The TCP connect.
+    pub connect: Duration,
+    /// The wait for the answer to the key line.
+    pub answer: Duration,
+}
+
+impl Default for ConnectLimits {
+    fn default() -> Self {
+        ConnectLimits {
+            connect: Duration::from_secs(5),
+            answer: Duration::from_secs(10),
+        }
+    }
+}
+
+/// Why the handshake failed. `Display` says what to do; [`ConnectError::KeyRefused`] is the only one that may tell the user to
+/// look at the key (anything else sent users to issue a new key for nothing, 2026-11-07).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConnectError {
+    /// No discovery file, a stale one, or nothing accepted the connection: the app is not open, AI access is off, or no key
+    /// exists. `app` is the name from the file, or "The app" when there was none.
+    NotOpen {
+        /// The app's name.
+        app: String,
+    },
+    /// The key line could not be sent, or the app did not answer it in time.
+    NoAnswer {
+        /// The app's name.
+        app: String,
+        /// The OS error.
+        cause: String,
+    },
+    /// The app closed the connection before answering the key.
+    ClosedEarly {
+        /// The app's name.
+        app: String,
+    },
+    /// The answer was not an MCP listener's.
+    NotListener {
+        /// The app's name.
+        app: String,
+    },
+    /// The listener said the key is wrong or revoked.
+    KeyRefused {
+        /// The app's name.
+        app: String,
+        /// The listener's reason.
+        why: String,
+    },
+    /// The listener turned the connection down for another reason (too many clients, a handshake problem).
+    Refused {
+        /// The app's name.
+        app: String,
+        /// The listener's reason.
+        why: String,
+    },
+}
+
+impl std::fmt::Display for ConnectError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConnectError::NotOpen { app } => write!(
+                f,
+                "{app} isn't open, or AI access is off or has no key. Open the app and turn on Settings > AI access with a key, then start this again."
+            ),
+            ConnectError::NoAnswer { app, cause } => {
+                write!(f, "{app} did not answer the key ({cause}). {AGAIN}")
+            }
+            ConnectError::ClosedEarly { app } => {
+                write!(
+                    f,
+                    "{app} closed the connection before answering the key. {AGAIN}"
+                )
+            }
+            ConnectError::NotListener { app } => {
+                write!(f, "{app} did not answer like an MCP listener.")
+            }
+            ConnectError::KeyRefused { app, why } => write!(f, "{app} refused the key: {why}."),
+            ConnectError::Refused { app, why } => {
+                write!(f, "{app} turned the connection down: {why}.")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ConnectError {}
+
+/// One TCP connection that several owners read, write and end: `&TcpStream` reads and writes, so no duplicate handle (and no
+/// failure to make one) is needed.
+#[derive(Debug, Clone)]
+pub struct SharedStream(Arc<TcpStream>);
+
+impl SharedStream {
+    /// Ends one or both directions of the connection.
+    pub fn shutdown(&self, how: Shutdown) {
+        let _ = self.0.shutdown(how);
+    }
+}
+
+impl Read for SharedStream {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        (&*self.0).read(buf)
+    }
+}
+
+impl Write for SharedStream {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        (&*self.0).write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        (&*self.0).flush()
+    }
+}
+
+/// A connection past the key handshake: the app has accepted the key and the next line is the protocol's.
+#[derive(Debug)]
+pub struct LoopbackLink {
+    stream: SharedStream,
+    reader: BufReader<SharedStream>,
+    app: String,
+    version: String,
+}
+
+impl LoopbackLink {
+    /// The app's name, from its discovery file.
+    pub fn app(&self) -> &str {
+        &self.app
+    }
+
+    /// The app's version, from its discovery file.
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
+    /// The socket and a buffered reader of it (which may already hold bytes past the answer), for a caller that carries lines
+    /// itself, as the stdio bridge does.
+    pub fn into_parts(self) -> (SharedStream, BufReader<SharedStream>) {
+        (self.stream, self.reader)
+    }
+
+    /// A [`Connection`] over this link; dropping it ends the connection.
+    pub fn into_connection(self, config: ConnectionConfig) -> Connection {
+        let stream = self.stream;
+        Connection::new(
+            Box::new(self.reader),
+            Box::new(stream.clone()),
+            Some(Box::new(move || stream.shutdown(Shutdown::Both))),
+            config,
+        )
+    }
+}
+
+/// Connects with the default limits; see [`connect_loopback_with`].
+///
+/// # Errors
+/// A [`ConnectError`] whose text says what to do.
+pub fn connect_loopback(discovery: &Path, key: &str) -> Result<LoopbackLink, ConnectError> {
+    connect_loopback_with(discovery, key, ConnectLimits::default())
+}
+
+/// Reads the discovery file at `discovery`, checks that its writer is the running process, connects to the port on 127.0.0.1,
+/// sends `key` and reads the answer. The key is never logged.
+///
+/// # Errors
+/// A [`ConnectError`] whose text says what to do.
+pub fn connect_loopback_with(
+    discovery: &Path,
+    key: &str,
+    limits: ConnectLimits,
+) -> Result<LoopbackLink, ConnectError> {
+    let started = Instant::now();
+    let hint = Discovery::read(discovery)
+        .filter(Discovery::writer_alive)
+        .ok_or_else(|| {
+            log::info!(
+                "paddock_mcp client: no live discovery file at {}",
+                discovery.display()
+            );
+            ConnectError::NotOpen {
+                app: "The app".into(),
+            }
+        })?;
+    let app = hint.app.clone();
+    let tcp = TcpStream::connect_timeout(&([127, 0, 0, 1], hint.port).into(), limits.connect)
+        .map_err(|e| {
+            log::warn!(
+                "paddock_mcp client: connect to {app} on port {} failed: {e}",
+                hint.port
+            );
+            ConnectError::NotOpen { app: app.clone() }
+        })?;
+    let _ = tcp.set_nodelay(true);
+    let stream = SharedStream(Arc::new(tcp));
+    let mut reader = BufReader::new(stream.clone());
+    // The key line and its answer are bounded in time and size; the protocol that follows has its own limits.
+    let mut first = String::new();
+    let read = (|| {
+        stream.0.set_read_timeout(Some(limits.answer))?;
+        writeln!(stream.clone(), "{}", serde_json::json!({"key": key}))?;
+        let n = reader.by_ref().take(MAX_ANSWER).read_line(&mut first)?;
+        stream.0.set_read_timeout(None)?;
+        Ok::<usize, std::io::Error>(n)
+    })()
+    .map_err(|e| {
+        log::warn!("paddock_mcp client: {app} gave no answer to the key: {e}");
+        ConnectError::NoAnswer {
+            app: app.clone(),
+            cause: e.to_string(),
+        }
+    })?;
+    if read == 0 {
+        log::warn!("paddock_mcp client: {app} closed the connection before answering the key");
+        return Err(ConnectError::ClosedEarly { app });
+    }
+    let answer: serde_json::Value = serde_json::from_str(first.trim())
+        .map_err(|_| ConnectError::NotListener { app: app.clone() })?;
+    if answer["ok"] != true {
+        let why = answer["error"]
+            .as_str()
+            .unwrap_or("no reason given")
+            .to_string();
+        let code = answer["code"].as_str().unwrap_or("").to_string();
+        log::warn!("paddock_mcp client: {app} turned the handshake down (code {code:?})");
+        return Err(if code == "key" {
+            ConnectError::KeyRefused { app, why }
+        } else {
+            ConnectError::Refused { app, why }
+        });
+    }
+    log::info!(
+        "paddock_mcp client: connected to {app} {} on port {} in {} ms",
+        hint.version,
+        hint.port,
+        started.elapsed().as_millis()
+    );
+    Ok(LoopbackLink {
+        stream,
+        reader,
+        app,
+        version: hint.version,
+    })
+}

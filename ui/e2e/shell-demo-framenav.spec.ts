@@ -11,6 +11,10 @@ for (const colorScheme of THEMES) {
 
     test('Up, Down, Home and End move focus through the page links, wrapping, with the focus ring visible', async ({ app, page, pageErrors }) => {
       await app.frame.open();
+      // Until the app's context is loaded every page is offered (ShellPages.visible): the page `when` predicates (the Lab page needs a greeting)
+      // settle after that, so the links are counted only once the context is loaded and the Lab page (not offered yet) is gone.
+      await expect(page.getByTestId('app-context')).toHaveText('App context: loaded');
+      await expect(app.sidebar.link('Lab')).toHaveCount(0);
       const links = app.sidebar.links;
       await links.first().focus();
       await page.keyboard.press('ArrowDown');
@@ -79,6 +83,10 @@ for (const colorScheme of THEMES) {
 
     test('the page lists are lists inside one labelled navigation landmark, and axe (best practice too) finds nothing', async ({ app, page }) => {
       await app.frame.open();
+      // Until the app's context is loaded every page is offered (ShellPages.visible): the page `when` predicates (the Lab page needs a greeting)
+      // settle after that, so the links are counted only once the context is loaded and the Lab page (not offered yet) is gone.
+      await expect(page.getByTestId('app-context')).toHaveText('App context: loaded');
+      await expect(app.sidebar.link('Lab')).toHaveCount(0);
       await expect(page.getByRole('navigation')).toHaveCount(1);
       // The top and the bottom group are each a list (not navigation landmarks of their own) of list items holding the links.
       await expect(page.getByRole('list').filter({ has: page.locator('a[data-page-link]') })).toHaveCount(2);

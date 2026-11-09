@@ -9,7 +9,8 @@
 //!   untouched, older versions go through a migration chain once.
 //! - [`check_folder`] and [`private_fallback_dir`]: the one folder-trust check (owner and mode from a handle) and the last-resort
 //!   folder, which is per user and verified, never a shared fixed path.
-//! - [`write_atomic`]: the atomic replace under it, for files that are not JSON state.
+//! - [`write_atomic`]: the atomic replace under it, for files that are not JSON state; [`write_atomic_created`] where
+//!   the caller creates the temporary file (an owner-only, unshared file for a secret on Windows).
 //!
 //! Tests use temporary folders only and never read or write the user's real folders.
 
@@ -22,7 +23,7 @@ mod private;
 mod versioned;
 
 pub use app::AppId;
-pub use atomic::write_atomic;
+pub use atomic::{write_atomic, write_atomic_created};
 pub use dirs::{AppDirs, MapVars, Os, PORTABLE_FLAG, ProcessVars, Source, Vars};
 pub use error::{EnvError, Result};
 pub use folder::{

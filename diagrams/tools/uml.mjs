@@ -42,9 +42,10 @@ export function cls(d, id, x, y, w, { name, stereotype, attrs = [], ops = [], ro
 
 /**
  * Sequence diagram. parts: [{ id, name, tech, role }]. Returns an object whose methods advance a cursor downwards;
+ * `selfLeftOnLast` (default off) draws a self-message on the last lifeline to its left, so a wide note keeps the page narrow.
  * call done() last: it draws the lifelines behind everything and returns the bottom y.
  */
-export function sequence(d, parts, { top = 144, pw = 160, gap = 40, x0 = 48 } = {}) {
+export function sequence(d, parts, { top = 144, pw = 160, gap = 40, x0 = 48, selfLeftOnLast = false } = {}) {
   const px = (i) => x0 + i * (pw + gap) + pw / 2;
   const idx = Object.fromEntries(parts.map((p, i) => [p.id, i]));
   const headH = Math.max(...parts.map((p) => d.fit(pw, { name: p.name, tech: p.tech })));
@@ -69,16 +70,21 @@ export function sequence(d, parts, { top = 144, pw = 160, gap = 40, x0 = 48 } = 
       d.line([xa, ly], [xb, ly], { dash: reply, arrow: reply ? 'open' : 'block' });
       y = ly + 16;
     },
-    self(p, label) {
+    /** A message to itself: the loop and its text go right (left on the last lifeline with `selfLeftOnLast`). */
+    self(p, label, maxw) {
+      const slack = maxw === undefined ? 8 : 24; // a text given its own width gets room so the browser never re-wraps it
+      maxw ??= pw + gap - 44;
       const x = px(idx[p]);
-      const room = pw + gap - 44;
-      const lines = wrap(label, 12, room);
+      const left = selfLeftOnLast && idx[p] === parts.length - 1 && parts.length > 1;
+      const lines = wrap(label, 12, maxw);
       const lh = lines.length * 16;
       const h = Math.max(28, lh + 4);
-      d.line([x, y], [x, y + h], { via: [[x + 24, y], [x + 24, y + h]] });
-      const sw = Math.max(...lines.map((l) => tw(l, 12))) + 8;
-      d.text(d.id(), [x + 32, y + (h - lh) / 2, sw, lh], lines.join(' '), {});
-      gaps.push([x + 28, x + 36 + sw, y + (h - lh) / 2 - 4, y + (h + lh) / 2 + 6]);
+      const sw = Math.max(...lines.map((l) => tw(l, 12))) + slack;
+      const s = left ? -1 : 1;
+      d.line([x, y], [x, y + h], { via: [[x + s * 24, y], [x + s * 24, y + h]] });
+      const tx = left ? x - 32 - sw : x + 32;
+      d.text(d.id(), [tx, y + (h - lh) / 2, sw, lh], lines.join(' '), {});
+      gaps.push([tx - 4, tx + sw + 4, y + (h - lh) / 2 - 4, y + (h + lh) / 2 + 6]);
       y += h + 16;
     },
     note(p, text, w = 280) {

@@ -362,6 +362,9 @@
       <trans-unit id="pd.channels.save-failed-title" datatype="html">
         <source>The channel was not saved.</source>
       </trans-unit>
+      <trans-unit id="pd.channels.save-to-apply" datatype="html">
+        <source>The channel is applied when you save it.</source>
+      </trans-unit>
       <trans-unit id="pd.channels.secret-missing" datatype="html">
         <source>No secret yet</source>
       </trans-unit>
@@ -1904,6 +1907,9 @@
       <trans-unit id="pd.settings.no-match" datatype="html">
         <source>No settings match “<x id="query"/>”.</source>
       </trans-unit>
+      <trans-unit id="pd.settings.not-saved.close" datatype="html">
+        <source>Close anyway</source>
+      </trans-unit>
       <trans-unit id="pd.settings.notifications" datatype="html">
         <source>Notifications</source>
       </trans-unit>
@@ -1940,6 +1946,9 @@
       <trans-unit id="pd.settings.saved-live" datatype="html">
         <source>Changes are saved as you make them.</source>
       </trans-unit>
+      <trans-unit id="pd.settings.saving" datatype="html">
+        <source>Saving <x id="setting"/>…</source>
+      </trans-unit>
       <trans-unit id="pd.settings.search" datatype="html">
         <source>Search settings</source>
       </trans-unit>
@@ -1972,6 +1981,12 @@
       </trans-unit>
       <trans-unit id="pd.settings.show-advanced" datatype="html">
         <source>Show advanced</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.still-saving" datatype="html">
+        <source>Still saving <x id="setting"/>.</source>
+      </trans-unit>
+      <trans-unit id="pd.settings.still-saving.keep" datatype="html">
+        <source>Keep waiting</source>
       </trans-unit>
       <trans-unit id="pd.settings.storage" datatype="html">
         <source>Storage</source>
@@ -2393,6 +2408,9 @@
       <trans-unit id="pd.testing.framed" datatype="html">
         <source>Dialog</source>
       </trans-unit>
+      <trans-unit id="pd.trayPopover.more" datatype="html">
+        <source>More actions</source>
+      </trans-unit>
       <trans-unit id="pd.ui.elapsed.hours" datatype="html">
         <source><x id="hours"/> h</source>
       </trans-unit>
@@ -2627,6 +2645,9 @@
       <trans-unit id="pd.updates.last-checked" datatype="html">
         <source>Last checked <x id="when"/></source>
       </trans-unit>
+      <trans-unit id="pd.updates.manual" datatype="html">
+        <source>This build does not install updates itself. Download the new version from the releases page.</source>
+      </trans-unit>
       <trans-unit id="pd.updates.no-answer" datatype="html">
         <source>The updater did not answer.</source>
       </trans-unit>
@@ -2641,6 +2662,9 @@
       </trans-unit>
       <trans-unit id="pd.updates.open" datatype="html">
         <source>Check for updates…</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.open-releases" datatype="html">
+        <source>Open releases page</source>
       </trans-unit>
       <trans-unit id="pd.updates.progress" datatype="html">
         <source><x id="phase"/>: <x id="done"/></source>
@@ -3056,6 +3080,12 @@
       <trans-unit id="pd.wb.assistant.approve.allow-tool" datatype="html">
         <source>Allow <x id="tool"/></source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.always" datatype="html">
+        <source>Always allow</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.always-hint" datatype="html">
+        <source>Run this tool from now on without asking. Every call still shows in the chat.</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.approve.arguments" datatype="html">
         <source>Arguments</source>
       </trans-unit>
@@ -3070,6 +3100,9 @@
       </trans-unit>
       <trans-unit id="pd.wb.assistant.approve.no-arguments" datatype="html">
         <source>No arguments</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.once" datatype="html">
+        <source>Allow once</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.approve.tool" datatype="html">
         <source>Tool</source>
@@ -3164,6 +3197,15 @@
       <trans-unit id="pd.wb.assistant.no-conversations" datatype="html">
         <source>No conversations yet.</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.phase.loading" datatype="html">
+        <source>Loading the model…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.phase.loading-for" datatype="html">
+        <source>Loading the model… <x id="seconds"/> s</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.phase.queued" datatype="html">
+        <source>Waiting for the model…</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.placeholder" datatype="html">
         <source>Ask the assistant (Enter sends, Shift+Enter adds a line)</source>
       </trans-unit>
@@ -3184,6 +3226,15 @@
       </trans-unit>
       <trans-unit id="pd.wb.assistant.thinking" datatype="html">
         <source>Thinking…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.approval.always" datatype="html">
+        <source>Always allowed</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.approval.once" datatype="html">
+        <source>Allowed once</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.approval.remembered" datatype="html">
+        <source>Allowed earlier</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.awaiting" datatype="html">
         <source>Waiting for your decision</source>

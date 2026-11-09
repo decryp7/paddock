@@ -4,6 +4,29 @@
 
 use crate::types::{ChatRequest, ChatResponse};
 use paddock_pitwall::AiState;
+use serde::Serialize;
+
+/// Where a provider's answer is before its first word (ER-18: a live label from the first moment). Reported only by a
+/// provider that knows it ([`LlmProvider::chat_phased`]); the windows hear it as `AssistantEvent::Phase`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ProviderPhase {
+    /// Waiting behind other requests for the engine.
+    Queued,
+    /// The model is being loaded; reported again as time passes (a growing count, never a fixed total).
+    Loading {
+        /// Since the load started.
+        #[cfg_attr(test, ts(type = "number"))]
+        elapsed_ms: u64,
+    },
+    /// The model is generating.
+    Generating,
+}
 
 /// Why a provider could not answer.
 #[derive(Debug, Clone, PartialEq)]
@@ -51,4 +74,17 @@ pub trait LlmProvider: Send + Sync {
         req: &ChatRequest,
         on_delta: &mut dyn FnMut(&str),
     ) -> Result<ChatResponse, ProviderError>;
+
+    /// Streams one answer and reports its phases before and between the words (queued, loading the model, generating).
+    /// The loop calls this one; the default reports no phase and calls [`chat`](LlmProvider::chat). A provider that knows
+    /// its phases implements this and lets `chat` call it with a sink that drops them. Same contract as `chat`.
+    fn chat_phased(
+        &self,
+        req: &ChatRequest,
+        on_delta: &mut dyn FnMut(&str),
+        on_phase: &mut dyn FnMut(ProviderPhase),
+    ) -> Result<ChatResponse, ProviderError> {
+        let _ = on_phase;
+        self.chat(req, on_delta)
+    }
 }

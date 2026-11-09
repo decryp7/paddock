@@ -84,6 +84,7 @@ export const SHELL_COMMANDS = {
   updates_check: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
   updates_download: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
   updates_install_on_quit: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
+  updates_open_releases: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
   updates_restart: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
   updates_set_preferences: { kind: 'mutation', windows: ['main', 'dialog'], limit: 262144 },
   updates_status: { kind: 'query', windows: ['main', 'popout', 'dialog'], limit: 262144 },

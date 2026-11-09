@@ -1,9 +1,10 @@
-import { mockOptionsFrom } from '../app.config';
+import { mockOptionsFrom } from './backend-factory';
 import type { LiveUpdate, PlaygroundEvent } from './api.types';
 import { isTauri } from './backend';
 import { toCommandError } from './command-error';
 import { MockBackend } from './mock-backend';
-import { demoLimitStatuses, demoFit, demoHistory, demoRepo, demoRequests, demoSearch, presetMemory, prng, GiB } from './mock-data';
+import { BROWSER_VERSION } from '../shell/engines';
+import { demoEngines, demoLimitStatuses, demoFit, demoHistory, demoRepo, demoRequests, demoSearch, presetMemory, prng, GiB } from './mock-data';
 
 const NOW = new Date(2026, 9, 22, 14, 30).getTime();
 
@@ -54,7 +55,6 @@ describe('MockBackend', () => {
     expect((await mock.requests(10)).length).toBe(10);
     expect((await mock.benchmarks()).length).toBeGreaterThan(0);
     expect((await mock.settings()).memory.preset).toBe('balanced');
-    expect((await mock.appUpdateStatus()).available).toBe(false);
     expect((await mock.diskUsage()).unused).toContain('qwen3.5-2b-q8_0');
   });
 
@@ -123,14 +123,12 @@ describe('MockBackend', () => {
     await expect(mock.installBuild('nope')).rejects.toMatchObject({ code: 'notFound' });
   });
 
-  it('refuses network work in offline mode', async () => {
+  it('shows the LAN address only while LAN serving is on', async () => {
     const mock = new MockBackend({ now: clock });
     const s = await mock.settings();
-    await mock.saveSettings({ ...s, network: { ...s.network, offline: true, lanEnabled: true } });
+    await mock.saveSettings({ ...s, network: { ...s.network, lanEnabled: true } });
     expect((await mock.overview()).server.lan.url).toContain('https://');
-    await expect(mock.searchModels('x')).rejects.toMatchObject({ code: 'offline' });
-    await expect(mock.installBuild('cpu')).rejects.toMatchObject({ code: 'offline' });
-    await mock.saveSettings({ ...s, network: { ...s.network, offline: false, lanEnabled: false } });
+    await mock.saveSettings({ ...s, network: { ...s.network, lanEnabled: false } });
     expect((await mock.overview()).server.lan.enabled).toBe(false);
     await expect(mock.saveSettings({ ...s, server: { ...s.server, port: 80 } })).rejects.toMatchObject({ code: 'badRequest' });
   });
@@ -313,7 +311,7 @@ describe('MockBackend', () => {
     const r = await mock.runBenchmark('qwen3.5-4b-q4_k_m');
     expect(r.genTps).toBeGreaterThan(0);
     await expect(mock.runBenchmark('nope')).rejects.toMatchObject({ code: 'notFound' });
-    expect((await mock.applyPreset('performance')).memory.maxHotModels).toBe(4);
+    expect((await mock.applyPreset('performance')).memory.maxHotModels).toBe(6);
     expect((await mock.applyPreset('custom')).memory.preset).toBe('custom');
     await mock.cancelJob('job-42');
     await expect(mock.cancelJob('job-42')).rejects.toMatchObject({ code: 'notFound' });
@@ -531,16 +529,11 @@ describe('MockBackend model updates', () => {
     expect((await mock.updateCheckStatus()).lastCheckedAt).not.toBeNull();
   });
 
-  it('turns the schedule on, reports the next check, and does nothing offline', async () => {
+  it('turns the schedule on, reports the next check', async () => {
     const mock = new MockBackend();
     const on = await mock.setUpdateCheck(true, 'daily');
     expect(on.settings).toEqual({ enabled: true, schedule: 'daily' });
     expect(on.nextCheckAt).not.toBeNull();
-    const s = await mock.settings();
-    await mock.saveSettings({ ...s, network: { ...s.network, offline: true } });
-    const off = await mock.updateCheckStatus();
-    expect(off).toMatchObject({ offline: true, nextCheckAt: null });
-    expect(await mock.checkUpdatesNow()).toMatchObject({ outcome: 'offline', notices: 0 });
     expect(await mock.updateNotices()).toEqual([]);
   });
 
@@ -562,5 +555,28 @@ describe('MockBackend model updates', () => {
     await mock.unloadModel('qwen3.5-4b-q4_k_m');
     await mock.deleteModel('qwen3.5-4b-q4_k_m');
     expect((await mock.updateNotices()).map((n) => n.modelId)).toEqual(['qwen3.5-9b-q4_k_m']);
+  });
+});
+
+describe('MockBackend first start', () => {
+  it('installs the build the catalog suggests, at its release and download size', async () => {
+    const mock = new MockBackend({ installing: true });
+    const download = (await mock.overview()).engineSetup.download!;
+    const suggested = demoEngines(Date.now())[0]!.catalog.find((c) => c.suggested)!;
+    expect(download.name).toContain(suggested.tag);
+    expect(download.bytesTotal).toBe(suggested.downloadBytes);
+  });
+
+  it('reports the browser build version as the server version (one source, never a literal)', async () => {
+    expect((await new MockBackend().overview()).server.version).toBe(BROWSER_VERSION);
+  });
+});
+
+describe('MockBackend chat attachments', () => {
+  it("keeps each taken file's size for the browser build's context meter (WP-4b review 2 P2-F)", async () => {
+    const mock = new MockBackend({ latencyMs: 0 });
+    const taken = await mock.chatAttach('notes.txt', new TextEncoder().encode('x'.repeat(4000)));
+    expect(mock.chatAttachedBytes(taken.attachment.sha256)).toBe(4000);
+    expect(mock.chatAttachedBytes('0'.repeat(64))).toBeUndefined();
   });
 });

@@ -24,7 +24,7 @@ export function parseUpdateStatus(v: unknown): UpdateStatus | null {
   if (!isObject(v) || typeof v['currentVersion'] !== 'string' || !isObject(v['phase'])) return null;
   const kind = v['phase']['kind'];
   if (typeof kind !== 'string' || !PHASES.has(kind as UpdatePhase['kind'])) return null;
-  if (!Array.isArray(v['channels']) || typeof v['channel'] !== 'string' || typeof v['autoCheck'] !== 'boolean') return null;
+  if (!Array.isArray(v['channels']) || typeof v['channel'] !== 'string' || typeof v['autoCheck'] !== 'boolean' || typeof v['canInstall'] !== 'boolean') return null;
   const install = v['install'];
   if (!isObject(install) || typeof install['installOnQuitAvailable'] !== 'boolean' || (install['scope'] !== 'perUser' && install['scope'] !== 'perMachine')) return null;
   return v as unknown as UpdateStatus;
@@ -60,6 +60,10 @@ export function asUpdateError(e: unknown): UpdateErrorDto | null {
 export function toUpdateError(e: unknown): UpdateErrorDto {
   const known = asUpdateError(e);
   if (known) return known;
+  // The files adapter's `CommandError` ({ code, message, hint? }) is not an Error either.
+  if (isObject(e) && typeof e['message'] === 'string' && e['message']) {
+    return { kind: 'unreachable', message: e['message'], nextStep: typeof e['hint'] === 'string' && e['hint'] ? e['hint'] : 'Try again.', detail: null };
+  }
   const message = e instanceof Error ? e.message : typeof e === 'string' && e ? e : 'The updater did not answer.';
   return { kind: 'unreachable', message, nextStep: 'Try again.', detail: null };
 }

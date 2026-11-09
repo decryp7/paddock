@@ -16,10 +16,23 @@
 ; until the installer is closed by hand; the agent's stop is a local request that answers at once or fails), and when a standard
 ; user types an administrator's credentials, this elevated process belongs to the administrator, so the agent it reaches is the
 ; administrator's, not the one of the user at the keyboard; that one, like everyone else's, is ended by handle in stop-all.
+; The uninstaller runs no program of $INSTDIR unless the include trusts the folder and `check-dir` accepts it ($DynoDirOk, set once in
+; PREUNINSTALL by PADDOCK_DIR_ACCEPTED): an uninstall.exe copied to a folder the user controls runs elevated (include v5). The
+; installer's PREINSTALL has passed PADDOCK_CHECK_DIR before this runs.
+Var DynoDirOk
+
 !macro _DYNO_GRACEFUL_STOP
-  IfFileExists "$INSTDIR\dyno-agent.exe" 0 +3
-    nsExec::ExecToLog '"$INSTDIR\dyno-agent.exe" stop'
-    Pop $0
+  !ifdef __UNINSTALL__
+    ${If} $DynoDirOk == 1
+      IfFileExists "$INSTDIR\dyno-agent.exe" 0 +3
+        nsExec::ExecToLog '"$INSTDIR\dyno-agent.exe" stop'
+        Pop $0
+    ${EndIf}
+  !else
+    IfFileExists "$INSTDIR\dyno-agent.exe" 0 +3
+      nsExec::ExecToLog '"$INSTDIR\dyno-agent.exe" stop'
+      Pop $0
+  !endif
 !macroend
 
 !macro NSIS_HOOK_PREINSTALL
@@ -68,18 +81,37 @@
 !macro NSIS_HOOK_PREUNINSTALL
   !insertmacro PADDOCK_INSTALLING
   !insertmacro PADDOCK_REINSTALL_AS_UPDATE
+  StrCpy $DynoDirOk 0
+  !insertmacro PADDOCK_DIR_ACCEPTED
+  ${If} $0 == 0
+    StrCpy $DynoDirOk 1
+  ${EndIf}
   !insertmacro _DYNO_GRACEFUL_STOP
   !insertmacro PADDOCK_STOP_ALL
   ; The administrator readings (Dyno ADR 0027): when the helper's service is there, the bundled helper's `uninstall` removes
   ; the service, the protected copy in Program Files and the helper's data. The bundled copy does it, not the installed one:
   ; Windows cannot delete a program that is running. This uninstaller is elevated already, so there is no second prompt. Only
   ; on a real uninstall: a manual upgrade (an in-place uninstall treated as an update) keeps the helper, its owner and its data.
+  ; With paddock-setup.exe missing from a folder the include trusts, no program of the folder is run (check-dir cannot be asked), so
+  ; the service is removed with sc.exe from System32 and the user is told what is left (the helper's folder and data stay).
   ${If} $UpdateMode <> 1
     ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Services\DynoHelper" "ImagePath"
     ${If} $0 != ""
-      nsExec::ExecToLog '"$INSTDIR\dyno-helper.exe" uninstall'
-      Pop $0
-      DetailPrint "dyno-helper uninstall: exit code $0"
+      ${If} $DynoDirOk == 1
+        nsExec::ExecToLog '"$INSTDIR\dyno-helper.exe" uninstall'
+        Pop $0
+        DetailPrint "dyno-helper uninstall: exit code $0"
+      ${ElseIf} $PaddockTrusted == 1
+      ${AndIf} $PaddockHaveSetup == 0
+        nsExec::ExecToLog '"$SYSDIR\sc.exe" stop DynoHelper'
+        Pop $0
+        nsExec::ExecToLog '"$SYSDIR\sc.exe" delete DynoHelper'
+        Pop $0
+        DetailPrint "NOTE paddock-setup.exe is missing: the DynoHelper service was removed with sc.exe (delete: exit code $0)"
+        ${IfNot} ${Silent}
+          MessageBox MB_ICONINFORMATION|MB_OK "The Dyno helper service was removed without the installer's checking tool (it was missing). Its folder, Dyno Helper in Program Files, and its data were not removed; delete them by hand if you do not need them."
+        ${EndIf}
+      ${EndIf}
     ${EndIf}
   ${EndIf}
   !insertmacro PADDOCK_CLEAN_RUN_VALUES

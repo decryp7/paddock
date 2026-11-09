@@ -4,8 +4,8 @@
 // contrast with no per-app overrides. Nothing here has a colour of its own: every value is a var(--pd-…) or a size from the
 // tokens. Material's own theme (`mat.theme`, density -3) is included once by entry-material.scss, which loads this file; an app carries no theme of its own.
 //
-// Compact density: the form field and select are --pd-control-height; the slide toggle is scaled as a whole so its handle
-// geometry stays consistent (Pitcrew's rule).
+// Densities: a field and select without a label are --pd-control-height, a labelled one is that plus 16 px (the label's room);
+// the slide toggle is scaled as a whole so its handle geometry stays consistent (Pitcrew's rule).
 
 :root {
   // ---- Colour roles.
@@ -177,8 +177,8 @@
   --mat-radio-label-text-font: var(--pd-font-sans);
   --mat-radio-label-text-size: var(--pd-text-body);
 
-  // ---- Form field and input (outlined, compact).
-
+  // ---- Form field and input (outlined). A labelled field is --pd-field-height (the control height plus 8 px above and below the
+  // text row, so the floated label clears the text); a field without a label stays the control height (.mdc-text-field--no-label, family section).
   --mat-form-field-input-text-color: var(--pd-text);
   --mat-form-field-input-text-placeholder-color: var(--pd-text-subtle);
   --mat-form-field-outlined-input-text-color: var(--pd-text);
@@ -557,7 +557,7 @@ body {
   --mat-chip-container-shape-radius: var(--pd-radius-pill);
   --mat-chip-label-text-font: var(--pd-font-sans);
   --mat-chip-label-text-size: var(--pd-text-label);
-  --mat-form-field-container-height: var(--pd-control-height);
+  --mat-form-field-container-height: var(--pd-field-height);
   --mat-form-field-container-text-font: var(--pd-font-sans);
   --mat-form-field-container-text-line-height: var(--pd-lh-body);
   --mat-form-field-container-text-size: var(--pd-text-body);
@@ -575,6 +575,10 @@ body {
   --mat-select-trigger-text-size: var(--pd-text-body);
   --mat-slide-toggle-label-text-font: var(--pd-font-sans);
   --mat-slide-toggle-label-text-size: var(--pd-text-body);
+}
+// A field without a label (a toolbar filter, the paginator's select) has nothing to clear: it stays the control height.
+body .mat-mdc-form-field .mdc-text-field--no-label {
+  --mat-form-field-container-height: var(--pd-control-height);
 }
 // family-controls:end
 
@@ -685,6 +689,15 @@ html .mat-mdc-menu-item {
   border-radius: var(--pd-radius-control);
 }
 
+// The tray popover's more-actions menu (pd-tray-popover's footer) keeps 6 px clear of its button: the open ring and a gap.
+html .pd-tray-menu.mat-menu-above {
+  margin-bottom: calc(var(--pd-space-1) + var(--pd-space-0));
+}
+
+html .pd-tray-menu.mat-menu-below {
+  margin-top: calc(var(--pd-space-1) + var(--pd-space-0));
+}
+
 // The tooltip: wraps at a readable width, never wider than the window.
 .mat-mdc-tooltip .mdc-tooltip__surface {
   max-width: min(320px, calc(100vw - var(--pd-space-4)));
@@ -723,19 +736,34 @@ html .mat-mdc-form-field-hint {
   color: var(--pd-text-muted);
 }
 
-// Outlined field: the input text is centred in the 28 px box, the floated label is the 12 px label size, and a suffix icon
-// (datepicker, timepicker) is a 16 px glyph with room from the border.
+// Outlined field: the text row (one body line) is centred in the container height above, so it has the same room above and below:
+// 12 px at the standard density with a label (8 px from the outline's inner edge plus the border and the label's reach), 4 px in a
+// 28 px field without one. A textarea keeps the same top and bottom padding and grows from there, so its first line starts below the
+// floated label, never under it. The floated label is the 12 px label size; Material places it on the top border from the same
+// container height, and sizes the notch to it. A suffix icon (datepicker, timepicker) is a 16 px glyph with room from the border.
 html .mat-mdc-form-field .mat-mdc-form-field-infix {
   display: flex;
   align-items: center;
-  min-height: var(--pd-control-height);
-  padding-block: 0;
+  box-sizing: border-box;
+  min-height: var(--mat-form-field-container-height);
+  padding-block: calc((var(--mat-form-field-container-height) - var(--pd-lh-body)) / 2);
 }
 
 html .mat-mdc-form-field input.mat-mdc-input-element {
   line-height: var(--pd-lh-body);
   height: auto;
   padding: 0;
+}
+
+// The select's arrow box is 24 px in Material: one text row here, so a select is exactly as tall as an input beside it.
+html .mat-mdc-form-field .mat-mdc-select-arrow-wrapper {
+  height: var(--pd-lh-body);
+}
+
+html .mat-mdc-form-field textarea.mat-mdc-input-element {
+  line-height: var(--pd-lh-body);
+  padding: 0;
+  margin: 0;
 }
 
 html .mat-mdc-form-field .mat-mdc-form-field-icon-suffix {

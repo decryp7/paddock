@@ -22,9 +22,8 @@ tell, and stop.
   before the user turns the schedule on; turning it on runs the first check right away. "Check now" works whatever the setting
   (it is the user's click), and is rate limited to one a minute. The scheduled loop first looks a minute after start and then every
   five minutes; a check itself runs at most weekly or daily, and an attempt that failed or was refused is retried after an hour.
-- **Offline mode means zero requests.** A check returns a typed `offline` outcome with a message before the library is scanned and
-  before any request is built; the egress client refuses again if offline mode is turned on during a check (the check stops
-  without recording an attempt). A test asserts that the fake Hugging Face saw no request.
+- **Off means zero requests.** Until the user turns the schedule on, nothing is asked. (1.0 also had an Offline mode that stopped
+  checks; it was removed in 1.1.)
 - **Bounded.** At most 40 repositories per check (a daily rotating window, so every repository gets its turn), 30 s per repository,
   a pause of 0.5 s between repositories, three failures in a row or one HTTP 429 end the check, answers are capped at 8 MB. A
   failing repository never loses the notices of the others; a check where nothing could be reached keeps the old notices and says

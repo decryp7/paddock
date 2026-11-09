@@ -5,26 +5,13 @@ import { BACKEND } from '../../core/backend';
 import { LiveStore } from '../../core/live.store';
 import { MockBackend } from '../../core/mock-backend';
 import { Toasts } from '../../core/toasts';
-import { Confirm } from '../../shared/ui/confirm';
+import { dialogsAnswering } from '../../../testing/render';
 import { UpdatesStore, resultToast } from './updates.store';
 
-function setup(backend: PitwallBackend = new MockBackend({ modelUpdates: true }), confirm: boolean | ((o: { title: string; message: string }) => boolean) = true) {
-  const asked: { title: string; message: string }[] = [];
-  TestBed.configureTestingModule({
-    providers: [
-      { provide: BACKEND, useValue: backend },
-      {
-        provide: Confirm,
-        useValue: {
-          ask: (o: { title: string; message: string }) => {
-            asked.push(o);
-            return Promise.resolve(typeof confirm === 'function' ? confirm(o) : confirm);
-          },
-        },
-      },
-    ],
-  });
-  return { store: TestBed.inject(UpdatesStore), toasts: TestBed.inject(Toasts), backend, asked };
+function setup(backend: PitwallBackend = new MockBackend({ modelUpdates: true }), confirm = true) {
+  const dialogs = dialogsAnswering(confirm);
+  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: backend }, dialogs] });
+  return { store: TestBed.inject(UpdatesStore), toasts: TestBed.inject(Toasts), backend, asked: dialogs.opened };
 }
 
 const failing = (...m: (keyof PitwallBackend)[]) => new MockBackend({ modelUpdates: true, failing: m });
@@ -35,7 +22,6 @@ describe('resultToast', () => {
     expect(resultToast({ ...r, outcome: 'checked' })).toEqual({ tone: 'ok', text: 'Checked: your models are up to date.' });
     expect(resultToast({ ...r, outcome: 'checked', notices: 1 }).text).toBe('Checked: 1 update available.');
     expect(resultToast({ ...r, outcome: 'checked', notices: 2 }).text).toBe('Checked: 2 updates available.');
-    expect(resultToast({ ...r, outcome: 'offline', message: 'Offline mode is on' })).toEqual({ tone: 'info', text: 'Offline mode is on' });
   });
 });
 
@@ -81,19 +67,6 @@ describe('UpdatesStore', () => {
     await store.checkNow();
     expect(store.lastResult()?.outcome).toBe('rateLimited');
     expect(toasts.toasts().at(-1)?.message).toContain('moments ago');
-  });
-
-  it('says offline mode stopped the check', async () => {
-    const mock = new MockBackend();
-    const s = await mock.settings();
-    await mock.saveSettings({ ...s, network: { ...s.network, offline: true } });
-    const { store, toasts } = setup(mock);
-    await store.load();
-    expect(store.status()?.offline).toBe(true);
-    await store.checkNow();
-    expect(store.lastResult()?.outcome).toBe('offline');
-    expect(toasts.toasts().at(-1)?.message).toContain('Offline mode is on');
-    expect(store.count()).toBe(0);
   });
 
   it('reports a failing check as an error toast and does not stay busy', async () => {
@@ -159,9 +132,9 @@ describe('UpdatesStore', () => {
     const n = store.notices()[0]!;
     expect(await store.get(n)).toBe(true);
     expect(asked).toHaveLength(1);
-    expect(asked[0]!.title).toBe('Download Qwen3.5-9B-Q4_K_M.gguf?');
-    expect(asked[0]!.message).toContain('from huggingface.co');
-    expect(asked[0]!.message).toContain('replaces the copy you have');
+    expect(asked[0]!.inputs['heading']).toBe('Download Qwen3.5-9B-Q4_K_M.gguf?');
+    expect(asked[0]!.inputs['message']).toContain('from huggingface.co');
+    expect(asked[0]!.inputs['message']).toContain('replaces the copy you have');
     expect(spy).toHaveBeenCalledWith('unsloth/Qwen3.5-9B-GGUF', 'Qwen3.5-9B-Q4_K_M.gguf', null);
     expect(toasts.toasts().at(-1)?.message).toBe('Downloading Qwen3.5-9B-Q4_K_M.gguf.');
     expect(store.notices().some((x) => x.id === n.id)).toBe(false);
@@ -180,10 +153,10 @@ describe('UpdatesStore', () => {
     const { store, asked } = setup();
     await store.load();
     await store.get(store.notices().find((n) => n.kind === 'betterQuant')!);
-    expect(asked[0]!.message).not.toContain('replaces');
+    expect(asked[0]!.inputs['message']).not.toContain('replaces');
   });
 
-  it('shows the error when a download is refused (offline mode)', async () => {
+  it('shows the error when a download is refused', async () => {
     const { store, toasts } = setup(failing('downloadModel'));
     await store.load();
     expect(await store.get(store.notices()[0]!)).toBe(false);

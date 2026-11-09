@@ -229,16 +229,19 @@ pub use win::RunAsElevator;
 
 #[cfg(windows)]
 mod win {
-    use crate::port::{Elevator, RegisterError};
+    use crate::port::{Elevator, RegisterError, Slice, elevated_result, wait_in_slices};
     use std::path::Path;
     use std::time::Duration;
-    use windows::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+    use windows::Win32::Foundation::{CloseHandle, GetLastError, WAIT_OBJECT_0, WAIT_TIMEOUT};
     use windows::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
     use windows::Win32::UI::Shell::{
         SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
     };
     use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
     use windows::core::{HSTRING, PCWSTR};
+
+    /// How long one wait on the elevated process lasts before the log says it is still working.
+    const ELEVATED_SLICE: Duration = Duration::from_secs(30);
 
     /// Windows' elevation prompt (UAC). The app never sees a password.
     pub struct RunAsElevator;
@@ -248,7 +251,7 @@ mod win {
             &mut self,
             program: &Path,
             args: &[&str],
-            timeout: Duration,
+            ceiling: Duration,
         ) -> Result<i32, RegisterError> {
             const ERROR_CANCELLED: i32 = 1223;
             let verb = HSTRING::from("runas");
@@ -279,24 +282,41 @@ mod win {
             if info.hProcess.is_invalid() {
                 return Ok(0);
             }
-            let ms = u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX);
-            // SAFETY: a valid process handle we own; waited on and closed once.
-            let code = unsafe {
-                let waited = WaitForSingleObject(info.hProcess, ms);
-                let mut code = 1u32;
-                if waited == WAIT_OBJECT_0 {
-                    paddock_proc::cleanup::logged(
-                        "reading the elevated program's exit code (reported as 1)",
-                        GetExitCodeProcess(info.hProcess, &mut code),
-                    );
-                }
-                paddock_proc::cleanup::logged(
-                    "closing the elevated program's handle",
-                    CloseHandle(info.hProcess),
-                );
-                code
-            };
-            Ok(i32::try_from(code).unwrap_or(1))
+            // Waits in slices so a long run is said to be still working (ER-19); only the ceiling or a failed wait ends it,
+            // and a program still running then is reported as such, not as failed.
+            let end = wait_in_slices(
+                ceiling,
+                ELEVATED_SLICE,
+                &mut |slice| {
+                    let ms = u32::try_from(slice.as_millis()).unwrap_or(u32::MAX);
+                    // SAFETY: a valid process handle we own, closed once after the loop.
+                    let state = unsafe { WaitForSingleObject(info.hProcess, ms) };
+                    if state == WAIT_OBJECT_0 {
+                        let mut code = 1u32;
+                        paddock_proc::cleanup::logged(
+                            "reading the elevated program's exit code (reported as 1)",
+                            // SAFETY: as above.
+                            unsafe { GetExitCodeProcess(info.hProcess, &mut code) },
+                        );
+                        Slice::Exited(code)
+                    } else if state == WAIT_TIMEOUT {
+                        Slice::Running
+                    } else {
+                        // WAIT_FAILED (or an abandoned/unknown result): the wait itself broke; never spin on it.
+                        // SAFETY: reads the calling thread's last error.
+                        Slice::Failed(unsafe { GetLastError() }.0)
+                    }
+                },
+                &mut |waited| {
+                    log::info!(program = program.display().to_string(), waited_s = waited.as_secs(); "the elevated step is still working");
+                },
+            );
+            paddock_proc::cleanup::logged(
+                "closing the elevated program's handle",
+                // SAFETY: the handle is ours and not used again.
+                unsafe { CloseHandle(info.hProcess) },
+            );
+            elevated_result(program, end)
         }
     }
 }

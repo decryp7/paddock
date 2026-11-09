@@ -46,11 +46,13 @@ test('a pd-field keeps the family field height and text size under a hostile hos
   await page.addStyleTag({ content: ':root:root { --mat-form-field-container-height: 56px; --mat-form-field-container-text-size: 20px; --mat-form-field-container-vertical-padding: 16px; }' });
   const field = page.getByTestId('native-select-field');
   const read = (name: string) => field.evaluate((e, n) => getComputedStyle(e).getPropertyValue(n).trim(), name);
-  const control = await page.evaluate(() => { const d = document.createElement('div'); d.style.height = 'var(--pd-control-height)'; document.body.append(d); const h = getComputedStyle(d).height; d.remove(); return h; });
+  // A labelled field is --pd-field-height (the control height plus room for the floated label); both sides resolved to pixels.
+  const fieldHeight = await page.evaluate(() => { const d = document.createElement('div'); d.style.height = 'var(--pd-field-height)'; document.body.append(d); const h = getComputedStyle(d).height; d.remove(); return h; });
   const bodySize = await page.evaluate(() => { const d = document.createElement('div'); d.style.fontSize = 'var(--pd-text-body)'; document.body.append(d); const h = getComputedStyle(d).fontSize; d.remove(); return h; });
-  expect(await read('--mat-form-field-container-height')).toBe(control);
+  const resolved = await field.evaluate((e) => { const d = document.createElement('div'); d.style.height = 'var(--mat-form-field-container-height)'; e.append(d); const h = getComputedStyle(d).height; d.remove(); return h; });
+  expect(resolved).toBe(fieldHeight);
   expect(await read('--mat-form-field-container-text-size')).toBe(bodySize);
-  expect((await field.locator('.mat-mdc-form-field-infix').boundingBox())!.height).toBeLessThanOrEqual(parseFloat(control) + 2);
+  expect((await field.locator('.mat-mdc-form-field-infix').boundingBox())!.height).toBeLessThanOrEqual(parseFloat(fieldHeight) + 2);
 });
 
 test('a native select in a pd-field draws Material\'s arrow, and a field with no control keeps the classic layout', async ({ page }) => {

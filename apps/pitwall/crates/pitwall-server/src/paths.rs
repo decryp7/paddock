@@ -33,6 +33,10 @@ impl Dirs {
     pub fn at(root: impl Into<PathBuf>) -> Dirs {
         Dirs { root: root.into() }
     }
+    /// The server's log folder when the data directory was moved (`--data-dir`, `PITWALL_HOME`): the logs stay with it.
+    pub fn logs(&self) -> PathBuf {
+        self.root.join("logs")
+    }
     /// `settings.toml`.
     pub fn settings(&self) -> PathBuf {
         self.root.join("settings.toml")

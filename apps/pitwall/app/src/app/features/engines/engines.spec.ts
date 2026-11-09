@@ -1,3 +1,4 @@
+import { dialogsAnswering } from '../../../testing/render';
 import { TestBed } from '@angular/core/testing';
 import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
@@ -7,7 +8,6 @@ import { LiveStore } from '../../core/live.store';
 import { MockBackend } from '../../core/mock-backend';
 import { Toasts } from '../../core/toasts';
 import { registerIcons } from '../../shared/icons';
-import { Confirm } from '../../shared/ui/confirm';
 import { modelLabel } from './engine-card';
 import { EnginesPage } from './engines-page';
 import { EnginesStore } from './engines.store';
@@ -80,7 +80,7 @@ describe('EnginesPage', () => {
       imports: [EnginesPage],
       providers: [
         { provide: BACKEND, useValue: backend },
-        { provide: Confirm, useValue: { ask: () => Promise.resolve(confirm) } },
+        dialogsAnswering(confirm),
       ],
     });
     registerIcons(TestBed.inject(MatIconRegistry), TestBed.inject(DomSanitizer));
@@ -101,9 +101,20 @@ describe('EnginesPage', () => {
   async function menu(el: HTMLElement, settle: () => Promise<void>, build: string, item: string) {
     (el.querySelector(`button[aria-label="More actions for ${build}"]`) as HTMLButtonElement).click();
     await settle();
-    Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item')).find((b) => b.textContent!.trim() === item)!.click();
+    Array.from(document.querySelectorAll<HTMLButtonElement>('.mat-mdc-menu-item')).find((b) => b.textContent!.trim() === item)!.click();
     await settle();
   }
+
+  it('the build the first start installs offers no Install in the catalog; the others do', async () => {
+    const { el, live, settle } = await render(new MockBackend({ installing: true }));
+    await live.load();
+    await settle();
+    const rows = Array.from(el.querySelectorAll('ul.catalog li'));
+    const cuda13 = rows.find((r) => r.textContent!.includes('CUDA 13'))!;
+    expect(cuda13.textContent).toContain('Installing…');
+    expect(cuda13.querySelector('button')).toBeNull();
+    expect(rows.filter((r) => r.querySelector('button')).length).toBe(rows.length - 1);
+  });
 
   it('names models in the process table', () => {
     expect(modelLabel('qwen3.5-9b-q4_k_m')).toBe('qwen3.5-9b');
@@ -114,11 +125,16 @@ describe('EnginesPage', () => {
     const { el } = await render();
     expect(el.querySelector('h1')?.textContent).toContain('llama.cpp');
     expect(el.textContent).toContain('CUDA 13 (NVIDIA)');
-    expect(el.textContent).toContain('Self-test passed');
-    expect(el.textContent).toContain('Not tested');
+    // The Self-test column says the word alone; its header says what passed.
+    const tests = Array.from(el.querySelectorAll('td.mat-column-test .status')).map((c) => c.textContent!.trim());
+    expect(tests).toContain('Passed');
+    expect(tests).toContain('Not tested');
+    // A release tag is a version: sans 600 with tabular figures, never mono (UI review 2 rule 10).
+    expect(el.querySelector('td.mat-column-release .ver')?.textContent).toMatch(/^b\d+$/);
+    expect(el.querySelector('td.mat-column-release .mono')).toBeNull();
     expect(el.querySelector('.catalog')!.querySelectorAll('li').length).toBe(4);
     expect(el.querySelector('.catalog li .rec')?.textContent).toContain('Suggested');
-    expect(Array.from(el.querySelectorAll('.catalog button')).every((b) => !b.classList.contains('primary'))).toBe(true);
+    expect(Array.from(el.querySelectorAll('.catalog button')).every((b) => !b.classList.contains('mat-mdc-unelevated-button'))).toBe(true);
     expect(el.textContent).not.toContain('Healthy');
     expect(el.querySelector('.tag.upd')).toBeNull();
     expect(el.querySelector('.section-head .link')?.textContent).toContain('Update available');
@@ -135,9 +151,9 @@ describe('EnginesPage', () => {
     const { el, settle, live } = await render(backend);
     await live.load();
     expect(el.querySelector('select')).toBeNull();
-    (el.querySelector('#build-choice') as HTMLButtonElement).click();
+    (el.querySelector('#build-choice .mat-mdc-select-trigger') as HTMLElement).click();
     await settle();
-    const opts = Array.from(document.querySelectorAll<HTMLElement>('.cdk-overlay-container .pw-select-list .opt'));
+    const opts = Array.from(document.querySelectorAll<HTMLElement>('.cdk-overlay-container mat-option'));
     expect(opts[0]!.textContent).toContain('Automatic');
     opts.find((o) => o.textContent!.includes('Vulkan'))!.click();
     await settle();
@@ -149,6 +165,9 @@ describe('EnginesPage', () => {
     backend.tick();
     await settle();
     expect(el.querySelector('.installing')?.textContent).toContain('llama.cpp CUDA 13');
+    // The build on its way offers no second Install: its row says it is installing.
+    expect(el.querySelector('button[aria-label="Install CUDA 13 (NVIDIA) b11702"]')).toBeNull();
+    expect(el.querySelector('ul.catalog')?.textContent).toContain('Installing…');
     for (let i = 0; i < 6; i++) backend.tick();
     await settle();
     expect(el.textContent).toContain('b11702');
@@ -173,6 +192,23 @@ describe('EnginesPage', () => {
     await settle();
     expect(el.querySelector('button[aria-label="More actions for CPU (AVX2) b4300"]')).not.toBeNull();
     expect(el.textContent).toContain('Roll back to Vulkan b11669');
+  });
+
+  it('opens the same build menu on a right-click and on Shift+F10 (Material context menu)', async () => {
+    const { el, settle } = await render();
+    const row = el.querySelector('button[aria-label="More actions for CPU (AVX2) b4300"]')!.closest('tr')!;
+    const items = () => Array.from(document.querySelectorAll<HTMLButtonElement>('.mat-mdc-menu-item')).map((b) => b.textContent!.trim());
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }));
+    await settle();
+    expect(items()).toContain('Remove…');
+    expect(document.querySelector('.mat-mdc-menu-item.danger')!.textContent).toContain('Remove…');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    document.querySelector<HTMLElement>('.cdk-overlay-backdrop')?.click();
+    await settle();
+    row.focus();
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }));
+    await settle();
+    expect(items()).toEqual(expect.arrayContaining(['Features', 'Remove…']));
   });
 
   it('shows an error with Retry, and Retry loads again', async () => {

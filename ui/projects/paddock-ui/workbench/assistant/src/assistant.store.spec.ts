@@ -125,6 +125,8 @@ describe('AssistantStore', () => {
     expect(store.turns()).toHaveLength(0);
     expect(store.failure()).toBe('The assistant is answering already.');
     expect(store.run()).toBe('idle');
+    // A refused question never names the conversation (round-5 review): the heading is "New conversation" again.
+    expect(store.title()).toBe('New conversation');
     store.dismissFailure();
     expect(store.failure()).toBeNull();
   });
@@ -158,13 +160,13 @@ describe('AssistantStore', () => {
     await quiet(2);
     expect(store.approval()).toMatchObject({ callId: 'call_2', name: 'erase', summary: 'Erase everything' });
     expect(backend.sent[0]?.allowWrite).toBe(true);
-    await store.approve('call_2', false);
+    await store.approve('call_2', 'deny');
     await quiet();
     expect(store.approval()).toBeNull();
     expect(backend.erased).toBe(0);
-    expect(backend.approvals).toEqual([['call_2', false]]);
+    expect(backend.approvals).toEqual([['call_2', 'deny']]);
     // A decision nobody waits for is the engine's refusal, shown.
-    await store.approve('call_2', true);
+    await store.approve('call_2', 'allowOnce');
     expect(store.failure()).toBe('No action waits for a decision.');
   });
 
@@ -177,7 +179,7 @@ describe('AssistantStore', () => {
       await store.send();
       await quiet(2);
       if (q === '/write') {
-        await store.approve('call_2', false);
+        await store.approve('call_2', 'deny');
         await quiet();
       }
       if (q === '/tool-slow') {

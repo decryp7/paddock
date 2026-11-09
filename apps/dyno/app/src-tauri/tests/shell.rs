@@ -669,3 +669,24 @@ fn a_test_place_composes_the_shell_without_report_a_problem() {
     );
     assert!(!test_shell.diagnostics_installed(), "a test place must not set up Report a problem");
 }
+
+/// Regression (review of the Pitwall 1.1 merge, P2): the manifest lists the commands of the shell's dialogs (About, What's
+/// new, Updates) exactly as their contracts do, so a command the shared contract gains (`updates_open_releases`) cannot be
+/// missing from Dyno's manifest unseen.
+#[test]
+fn the_manifest_lists_the_shared_dialogs_commands_as_their_contracts_do() {
+    let manifest: serde_json::Value = serde_json::from_str(MANIFEST).unwrap();
+    let contracts = paddock_dialogs::Contracts::from_tables(&[&paddock_updater::DIALOGS]).unwrap();
+    for entry in paddock_updater::DIALOGS.entries() {
+        let mut want = contracts.get(entry.id).unwrap().commands.clone();
+        want.sort();
+        let mut listed: Vec<String> = manifest["dialogs"][entry.id]["commands"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{} is in the manifest", entry.id))
+            .iter()
+            .map(|c| c.as_str().unwrap().to_string())
+            .collect();
+        listed.sort();
+        assert_eq!(listed, want, "{} commands", entry.id);
+    }
+}

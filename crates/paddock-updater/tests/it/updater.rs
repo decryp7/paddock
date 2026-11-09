@@ -62,7 +62,9 @@ fn rig_with(
 }
 
 fn rig() -> Rig {
-    rig_with("1.0.0", Some(key()), tempfile::tempdir().unwrap(), |u| u)
+    rig_with("1.0.0", Some(key()), tempfile::tempdir().unwrap(), |u| {
+        u.with_installer(Arc::new(FakeInstaller::default()))
+    })
 }
 
 impl Rig {
@@ -476,7 +478,8 @@ fn an_update_over_the_size_limit_is_refused_before_downloading() {
         downloader(&server),
         Arc::new(RecordStore::new(None)),
         Box::new(|_| {}),
-    );
+    )
+    .with_installer(Arc::new(FakeInstaller::default()));
     server.json(
         MANIFEST_URL,
         &manifest("9.9.9", &signature("update.bin.sig"), true),
@@ -948,17 +951,44 @@ fn services_that_cannot_be_stopped_stop_the_install() {
 }
 
 #[test]
-fn without_an_installer_restart_is_refused_and_install_on_quit_fails_at_exit() {
-    let r = ready_rig(None, None);
-    assert!(matches!(
-        r.updater.prepare_restart(),
-        Err(UpdateError::InstallFailed { .. })
-    ));
-    r.updater.install_on_quit(true).unwrap();
-    assert_eq!(
-        r.updater.install_at_exit(),
-        ExitAction::Failed { relaunch: false }
+fn without_an_installer_nothing_is_downloaded_or_installed_and_the_status_says_so() {
+    let r = rig_with("1.0.0", Some(key()), tempfile::tempdir().unwrap(), |u| u);
+    assert!(!r.updater.can_install() && !r.updater.status().can_install);
+    r.publish("9.9.9", "update.bin.sig");
+    r.check().unwrap();
+    // The engine refuses to download what it could never install, not only the dialog.
+    assert!(
+        matches!(r.updater.begin_download(), Err(UpdateError::InstallFailed { ref detail }) if detail.contains("no installer"))
     );
+    assert!(matches!(r.phase(), UpdatePhase::Available { .. }));
+    assert!(r.downloads().is_empty());
+    assert_eq!(r.server.hits(PACKAGE_URL), 0);
+    // The install steps out of turn answer Busy first, as a download does (nothing is ready to install).
+    for refused in [
+        r.updater.prepare_restart().map(|_| ()),
+        r.updater.install_on_quit(true).map(|_| ()),
+    ] {
+        assert!(
+            matches!(refused, Err(UpdateError::Busy { .. })),
+            "{refused:?}"
+        );
+    }
+    assert_eq!(r.updater.install_at_exit(), ExitAction::Nothing);
+    // A build without a key is not available, which is the better answer.
+    let off = rig_with("1.0.0", None, tempfile::tempdir().unwrap(), |u| u);
+    assert!(matches!(
+        off.updater.begin_download(),
+        Err(UpdateError::NotAvailable)
+    ));
+    // Out of turn is still busy.
+    assert!(matches!(
+        r.updater
+            .begin_check()
+            .and_then(|_| r.updater.begin_download()),
+        Err(UpdateError::Busy { .. })
+    ));
+    let with = ready_rig(Some(Arc::new(FakeInstaller::default())), None);
+    assert!(with.updater.can_install() && with.updater.status().can_install);
     // A verified download deleted meanwhile is reported, not installed.
     let installer = Arc::new(FakeInstaller::default());
     let r = ready_rig(Some(installer.clone()), None);

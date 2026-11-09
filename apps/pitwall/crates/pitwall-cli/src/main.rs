@@ -28,7 +28,14 @@ fn main() {
         Ok(rt) => rt,
         Err(e) => fail(&CliError::failure(format!("could not start: {e}"))),
     };
+    // The log is best effort: the CLI works without one. Only the command's name is logged, never its arguments.
+    let _log = pitwall_cli::logging::install();
+    let command = inv.command.clone();
+    pitwall_cli::logging::started(&command);
+    let started = std::time::Instant::now();
     if let Err(e) = rt.block_on(pitwall_cli::run::run(inv, Env::from_process())) {
+        pitwall_cli::logging::ended(&command, e.exit.code(), started.elapsed().as_millis());
         fail(&e);
     }
+    pitwall_cli::logging::ended(&command, 0, started.elapsed().as_millis());
 }

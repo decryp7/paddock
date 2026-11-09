@@ -1,12 +1,18 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
+import { MatTableModule } from '@angular/material/table';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import type { EChartsCoreOption } from 'echarts/core';
 import type { AppPermissions, LimitStatus, RequestRecord } from '../../core/api.types';
 import { ThemeService } from '../../core/theme';
 import { usageChart, type UsageMetric } from '../../shared/charts/chart-options';
 import { EChart } from '../../shared/charts/echart';
-import { bytes, clock, compact, duration, int } from '../../shared/format';
+import { bytes, clock, compact, int, varies } from '../../shared/format';
+import { LiveStore } from '../../core/live.store';
+import { shortModel } from '../dashboard/dashboard';
+import { secondsCell } from '../requests/request-labels';
 import { LIMIT_LABEL, limitStateLook, statusTone } from '../../shared/labels';
-import { EmptyState } from '../../shared/ui/empty-state';
+import { MatIcon } from '@angular/material/icon';
+import { SuEmptyState, SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import { Panel } from '../../shared/ui/panel';
 import { CacheTiles } from './cache-tiles';
 import { barWidth, limitValue, tokensOf, USAGE_RANGES, USAGE_RANGE_TEXT } from './usage-format';
@@ -21,22 +27,14 @@ const METRICS: { id: UsageMetric; label: string }[] = [
 /** One app's usage over time, where each of its limits stands, and its latest requests (metadata only). */
 @Component({
   selector: 'pw-app-usage',
-  imports: [Panel, EChart, EmptyState, CacheTiles],
+  imports: [Panel, EChart, SuEmptyState, SuSegmentedControl, MatIcon, CacheTiles, MatTableModule, MatTooltipModule],
   providers: [UsageStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pw-panel heading="Usage over time" icon="activity" [sub]="rangeText()" [loading]="store.loading()" [error]="store.error()" [ready]="!!store.series()" [skeletonLines]="6" (retry)="store.reload()">
       <div panel-actions class="controls">
-        <div class="seg" role="radiogroup" aria-label="Metric">
-          @for (m of metrics; track m.id) {
-            <button type="button" role="radio" [attr.aria-checked]="metric() === m.id" (click)="metric.set(m.id)">{{ m.label }}</button>
-          }
-        </div>
-        <div class="seg" role="radiogroup" aria-label="Usage range">
-          @for (r of ranges; track r) {
-            <button type="button" role="radio" [attr.aria-checked]="store.range() === r" (click)="store.select(r)">{{ r }}</button>
-          }
-        </div>
+        <pd-segmented-control label="Metric" [options]="metricSegs" [value]="metric()" (valueChange)="pickMetric($event)" />
+        <pd-segmented-control label="Usage range" [options]="rangeSegs" [value]="store.range()" (valueChange)="store.select($any($event))" />
       </div>
       @if (store.series(); as s) {
         <dl class="figures" aria-label="Totals for the range">
@@ -82,41 +80,41 @@ const METRICS: { id: UsageMetric; label: string }[] = [
       }
     </pw-panel>
 
-    <pw-panel heading="Recent requests" icon="requests" [sub]="recent().length ? recent().length + ' latest' : ''" [flush]="true" [loading]="store.loading() && !store.detail()" [ready]="!!store.detail()">
+    <pw-panel heading="Recent requests" icon="requests" [sub]="recentSub()" [flush]="true" [loading]="store.loading() && !store.detail()" [ready]="!!store.detail()">
       @if (recent().length === 0) {
-        <pw-empty-state icon="requests" heading="No requests yet" text="Requests from this app appear here with their model, status and size. Prompt text is never shown here." />
+        <pd-empty-state heading="No requests yet" description="Requests from this app appear here with their model, status and size. Prompt text is never shown here."><mat-icon slot="icon" svgIcon="pw:requests" aria-hidden="true" /></pd-empty-state>
       } @else {
-        <table class="table recent">
-          <thead>
-            <tr>
-              <th scope="col">Time</th>
-              <th scope="col">Endpoint</th>
-              <th scope="col">Model</th>
-              @if (hasFailures()) {
-                <th scope="col">Status</th>
+        <table mat-table class="recent" [dataSource]="recent()" [trackBy]="byId" [fixedLayout]="true" [attr.aria-label]="'Recent requests of ' + appName()">
+          <ng-container matColumnDef="time">
+            <th mat-header-cell *matHeaderCellDef scope="col">Time</th>
+            <td mat-cell *matCellDef="let r" class="muted num">{{ time(r.at) }}</td>
+          </ng-container>
+          <ng-container matColumnDef="endpoint">
+            <th mat-header-cell *matHeaderCellDef scope="col">Endpoint</th>
+            <td mat-cell *matCellDef="let r" class="mono ep" [matTooltip]="r.endpoint" matTooltipShowDelay="600">{{ r.endpoint }}</td>
+          </ng-container>
+          <ng-container matColumnDef="model">
+            <th mat-header-cell *matHeaderCellDef scope="col">Model</th>
+            <td mat-cell *matCellDef="let r" [matTooltip]="r.modelId ?? ''" matTooltipShowDelay="600">{{ r.modelId ? modelName(r.modelId) : '—' }}</td>
+          </ng-container>
+          <ng-container matColumnDef="status">
+            <th mat-header-cell *matHeaderCellDef scope="col">Status</th>
+            <td mat-cell *matCellDef="let r">
+              @if (r.status >= 400) {
+                <span class="status" [attr.data-tone]="tone(r.status)">{{ r.status }} failed</span>
               }
-              <th scope="col" class="right">Tokens</th>
-              <th scope="col" class="right">Took</th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (r of recent(); track r.id) {
-              <tr>
-                <td class="muted num">{{ time(r.at) }}</td>
-                <td class="mono ep">{{ r.endpoint }}</td>
-                <td>{{ r.modelId ?? '—' }}</td>
-                @if (hasFailures()) {
-                  <td>
-                    @if (r.status >= 400) {
-                      <span class="status" [attr.data-tone]="tone(r.status)">{{ r.status }} failed</span>
-                    }
-                  </td>
-                }
-                <td class="right num">{{ count(tokens(r)) }}</td>
-                <td class="right num">{{ dur(r.totalMs) }}</td>
-              </tr>
-            }
-          </tbody>
+            </td>
+          </ng-container>
+          <ng-container matColumnDef="tokens">
+            <th mat-header-cell *matHeaderCellDef scope="col" class="right">Tokens</th>
+            <td mat-cell *matCellDef="let r" class="right num">{{ count(tokens(r)) }}</td>
+          </ng-container>
+          <ng-container matColumnDef="took">
+            <th mat-header-cell *matHeaderCellDef scope="col" class="right">Took s</th>
+            <td mat-cell *matCellDef="let r" class="right num">{{ secs(r.totalMs) }}</td>
+          </ng-container>
+          <tr mat-header-row *matHeaderRowDef="columns(); sticky: true"></tr>
+          <tr mat-row *matRowDef="let r; columns: columns()"></tr>
         </table>
       }
     </pw-panel>
@@ -125,75 +123,69 @@ const METRICS: { id: UsageMetric; label: string }[] = [
     :host {
       display: flex;
       flex-direction: column;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
+    }
+    .recent {
+      .mat-column-time {
+        width: 72px;
+      }
+      .mat-column-status {
+        width: 120px;
+      }
+      /* "2,213" and "2.2M" whole: numbers are never cut (design guide 3). */
+      .mat-column-tokens,
+      .mat-column-took {
+        width: 88px;
+      }
     }
     .cache {
-      margin-bottom: var(--sp-3);
+      margin-bottom: var(--pd-space-3);
     }
     .controls {
       display: flex;
-      gap: var(--sp-2);
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: var(--pd-space-2);
     }
-    .seg {
-      display: inline-flex;
-      padding: 2px;
-      background: var(--bg-active);
-      border-radius: var(--r-md);
-      button {
-        height: 24px;
-        padding: 0 var(--sp-3);
-        font: inherit;
-        font-size: var(--fs-sm);
-        font-weight: var(--fw-medium);
-        color: var(--text-2);
-        background: none;
-        border: none;
-        border-radius: var(--r-sm);
-        cursor: default;
-        &:hover {
-          color: var(--text);
-        }
-        &[aria-checked='true'] {
-          color: var(--text);
-          background: var(--bg-card);
-          box-shadow: var(--shadow-1);
-        }
-      }
-    }
-    /* The totals are a row of figures on the card, not a boxed grid inside it. */
+    /* The totals are a row of figures that wraps whole figures, never a label inside one ("Completion tokens"). */
     .figures {
-      display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: var(--sp-4);
-      margin: 0 0 var(--sp-3);
-      padding-bottom: var(--sp-3);
-      border-bottom: 1px solid var(--border-soft);
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--pd-space-3) var(--pd-space-6);
+      > div {
+        flex: 1 0 auto;
+      }
+      margin: 0 0 var(--pd-space-3);
+      padding-bottom: var(--pd-space-3);
+      border-bottom: 1px solid var(--pd-hairline);
       dt {
-        font-size: var(--fs-sm);
-        color: var(--text-2);
+        font-size: var(--pd-text-label);
+        color: var(--pd-text-muted);
+        white-space: nowrap;
       }
       dd {
         margin: 2px 0 0;
-        font-size: var(--fs-lg);
-        font-weight: var(--fw-semibold);
+        white-space: nowrap;
+        font-size: var(--pd-text-subtitle);
+        font-weight: var(--pd-weight-semibold);
       }
       .bad {
-        color: var(--bad);
+        color: var(--pd-danger);
       }
     }
     .note {
-      margin: var(--sp-2) 0 0;
-      font-size: var(--fs-sm);
+      margin: var(--pd-space-2) 0 0;
+      font-size: var(--pd-text-label);
     }
     .none {
       margin: 0;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .limits {
       display: flex;
       flex-direction: column;
-      gap: var(--sp-4);
+      gap: var(--pd-space-4);
       margin: 0;
       padding: 0;
       list-style: none;
@@ -201,62 +193,54 @@ const METRICS: { id: UsageMetric; label: string }[] = [
     .head {
       display: flex;
       align-items: center;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       .name {
-        font-weight: var(--fw-medium);
+        font-weight: var(--pd-weight-medium);
       }
       .reset {
         margin-left: auto;
-        font-size: var(--fs-sm);
+        font-size: var(--pd-text-label);
       }
     }
     .bar {
       height: 8px;
-      margin: var(--sp-2) 0 var(--sp-1);
+      margin: var(--pd-space-2) 0 var(--pd-space-1);
       overflow: hidden;
-      background: var(--bg-sunken);
-      border: 1px solid var(--border-soft);
-      border-radius: var(--r-full);
+      background: var(--pd-surface-2);
+      border: 1px solid var(--pd-hairline);
+      border-radius: var(--pd-radius-pill);
       .fill {
         display: block;
         height: 100%;
-        background: var(--text-3);
-        border-radius: var(--r-full);
+        background: var(--pd-text-subtle);
+        border-radius: var(--pd-radius-pill);
       }
     }
     li[data-state='warning'] .fill {
-      background: var(--warn);
+      background: var(--pd-warning);
     }
     li[data-state='exceeded'] .fill {
-      background: var(--bad);
+      background: var(--pd-danger);
     }
     .nums {
       display: flex;
       justify-content: space-between;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .msg {
-      margin: var(--sp-1) 0 0;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      margin: var(--pd-space-1) 0 0;
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .recent {
-      th:first-child,
-      td:first-child {
-        padding-left: var(--sp-4);
-      }
-      th:last-child,
-      td:last-child {
-        padding-right: var(--sp-4);
+      .mat-mdc-header-cell:last-child,
+      .mat-mdc-cell:last-child {
+        padding-right: var(--pd-space-4);
       }
     }
     .ep {
-      max-width: 220px;
-      font-size: var(--fs-sm);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      font-size: var(--pd-text-label);
     }
   `,
 })
@@ -268,9 +252,15 @@ export class AppUsage {
   protected readonly store = inject(UsageStore);
   private readonly theme = inject(ThemeService);
 
-  protected readonly metrics = METRICS;
-  protected readonly ranges = USAGE_RANGES;
+  protected readonly metricSegs: SuSegment[] = METRICS.map((m) => ({ value: m.id, label: m.label }));
+  protected readonly rangeSegs: SuSegment[] = USAGE_RANGES.map((r) => ({ value: r, label: r }));
   protected readonly metric = signal<UsageMetric>('tokens');
+
+  /** The segmented control speaks strings: only a known metric is taken. */
+  protected pickMetric(v: string): void {
+    const m = METRICS.find((x) => x.id === v);
+    if (m) this.metric.set(m.id);
+  }
   protected readonly label = LIMIT_LABEL;
   protected readonly look = (l: LimitStatus) => limitStateLook(l.state);
   protected readonly value = (l: LimitStatus, n: number) => limitValue(l.kind, n);
@@ -280,7 +270,6 @@ export class AppUsage {
   protected readonly count = compact;
   protected readonly intText = int;
   protected readonly size = bytes;
-  protected readonly dur = duration;
   protected readonly tokens = (r: RequestRecord) => r.promptTokens + r.completionTokens;
 
   protected readonly rangeText = computed(() => USAGE_RANGE_TEXT[this.store.range()]);
@@ -288,6 +277,33 @@ export class AppUsage {
   protected readonly recent = computed(() => this.store.detail()?.recent ?? []);
   /** The Status column exists only when something failed: a column of nothing is noise. */
   protected readonly hasFailures = computed(() => this.recent().some((r) => r.status >= 400));
+  /** Endpoint and model only when the requests differ in them (UI review 2 rule 7); a shared one is said in the panel's subtitle. */
+  protected readonly columns = computed(() => {
+    const r = this.recent();
+    return [
+      'time',
+      ...(varies(r, (x) => x.endpoint) ? ['endpoint'] : []),
+      ...(varies(r, (x) => x.modelId) ? ['model'] : []),
+      ...(this.hasFailures() ? ['status'] : []),
+      'tokens',
+      'took',
+    ];
+  });
+  protected readonly recentSub = computed(() => {
+    const r = this.recent();
+    if (!r.length) return '';
+    const cols = this.columns();
+    const shared = [cols.includes('endpoint') || r.length < 2 ? '' : r[0]!.endpoint, cols.includes('model') || r.length < 2 || !r[0]!.modelId ? '' : this.modelName(r[0]!.modelId)].filter(Boolean);
+    return [`${r.length} latest`, ...shared.map((v) => `all ${v}`)].join(' · ');
+  });
+  /** A request's time in seconds, as the request log's Total column: the same unit for every app, whatever its requests took. */
+  protected readonly secs = secondsCell;
+  private readonly live = inject(LiveStore);
+  /** A model by its display name when Pitwall has it loaded, else its id without the quantisation (the tooltip has the id). */
+  protected modelName(id: string): string {
+    return this.live.models().find((m) => m.modelId === id)?.name ?? shortModel(id);
+  }
+  protected readonly byId = (_: number, r: RequestRecord) => r.id;
   protected readonly chartKey = computed(() => `${this.theme.resolved()}:${this.store.range()}:${this.metric()}`);
   protected readonly option = computed<EChartsCoreOption>(() => {
     const s = this.store.series();

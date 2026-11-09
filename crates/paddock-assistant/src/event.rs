@@ -1,7 +1,9 @@
 //! What a running turn tells the windows: the `paddock://assistant` event (deltas, tool calls and results, approvals,
 //! done, error) and the sink that carries it.
 
+use crate::approval::Approval;
 use crate::conversation::ToolOutcome;
+use crate::provider::ProviderPhase;
 use crate::types::Usage;
 use paddock_pitwall::AiState;
 use serde::{Deserialize, Serialize};
@@ -56,6 +58,11 @@ pub enum AssistantEvent {
         /// The conversation's title.
         title: String,
     },
+    /// Where the answer is before its words arrive (reported by providers that know it): the pane's live label.
+    Phase {
+        /// Queued, loading the model (with the time so far) or generating.
+        phase: ProviderPhase,
+    },
     /// A piece of the answer, as text (never HTML).
     Delta {
         /// The text.
@@ -69,12 +76,17 @@ pub enum AssistantEvent {
         name: String,
         /// The call as the user reads it.
         summary: String,
+        /// The tool's name for people ("Top processes"), when it has one; the card shows it instead of `name`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(test, ts(optional))]
+        title: Option<String>,
         /// The tool changes things.
         write: bool,
         /// What it changes cannot be undone (implies `write`).
         destructive: bool,
     },
-    /// A tool that writes waits for the user's decision (`assistant_approve_tool`).
+    /// A call waits for the user's choice (`assistant_approve_tool`): the approval policy asked for it (by default, every
+    /// call of a tool that writes).
     ApprovalNeeded {
         /// The call.
         call_id: String,
@@ -84,6 +96,8 @@ pub enum AssistantEvent {
         summary: String,
         /// What it would change cannot be undone: the UI makes Decline the default and Allow a danger button.
         destructive: bool,
+        /// The card offers "Always allow" besides Allow once and Deny (an action asks every call, so it never does).
+        remember: bool,
         /// The arguments.
         #[cfg_attr(test, ts(type = "unknown"))]
         input: Value,
@@ -106,6 +120,10 @@ pub enum AssistantEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         #[cfg_attr(test, ts(optional))]
         outcome: Option<ToolOutcome>,
+        /// How the call was approved, when it ran (none for a call that was refused, declined or stopped).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(test, ts(optional))]
+        approval: Option<Approval>,
     },
     /// Something the user should know that is not an error (a call that could not be read, a conversation that could not
     /// be saved).

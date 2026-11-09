@@ -2,8 +2,9 @@
 //! backup; a damaged file falls back to defaults with one problem and is kept aside; a newer file is never touched and
 //! saving is refused), bounded in the number of conversations, the messages of each, the size of every text and the file.
 
+use crate::approval::Approval;
 use crate::event::EndReason;
-use crate::types::{ChatMessage, Role, ToolCall};
+use crate::types::{Attachment, ChatMessage, Role, ToolCall};
 use paddock_env::VersionedFile;
 use paddock_health::Clock;
 use serde::{Deserialize, Serialize};
@@ -120,6 +121,10 @@ pub struct StoredMessage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, ts(optional))]
     pub outcome: Option<ToolOutcome>,
+    /// For a tool message of a call that ran: how it was approved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub approval: Option<Approval>,
     /// For the last assistant message of a turn that failed: why.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, ts(optional))]
@@ -131,6 +136,9 @@ pub struct StoredMessage {
     /// For a user message: what was attached.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub context: Vec<ContextItem>,
+    /// For a user message: its attachments, by reference (ADR 0023 WP-2b).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<Attachment>,
     /// For the last assistant message of a turn: how the turn ended.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, ts(optional))]
@@ -155,9 +163,11 @@ impl StoredMessage {
             write: None,
             destructive: None,
             outcome: None,
+            approval: None,
             error: None,
             end_message: None,
             context: vec![],
+            attachments: vec![],
             end: None,
             at_ms,
         }
@@ -221,6 +231,20 @@ impl StoredMessage {
         self
     }
 
+    /// A tool message with how its call was approved (when it ran).
+    #[must_use]
+    pub fn with_approval(mut self, approval: Option<Approval>) -> StoredMessage {
+        self.approval = approval;
+        self
+    }
+
+    /// A user message with its attachments.
+    #[must_use]
+    pub fn with_attachments(mut self, attachments: Vec<Attachment>) -> StoredMessage {
+        self.attachments = attachments;
+        self
+    }
+
     /// The last assistant message of a turn that failed, or ended on a budget: with the reason shown to the user.
     #[must_use]
     pub fn with_ending(
@@ -233,10 +257,19 @@ impl StoredMessage {
         self
     }
 
+    /// The message within the family's bounds ([`MAX_MESSAGE_CHARS`], [`MAX_DATA_BYTES`], [`MAX_CONTEXT_ITEMS`] and the
+    /// rest), as every store keeps it.
+    #[must_use]
+    pub fn bounded(mut self) -> StoredMessage {
+        bound_message(&mut self);
+        self
+    }
+
     /// The message as the model reads it: a user message carries its context first, as data.
     pub fn to_chat(&self) -> ChatMessage {
         match self.role {
-            Role::User => ChatMessage::user(with_context(&self.context, &self.text)),
+            Role::User => ChatMessage::user(with_context(&self.context, &self.text))
+                .with_attachments(self.attachments.clone()),
             Role::Assistant => ChatMessage::assistant(self.text.clone(), self.tool_calls.clone()),
             Role::Tool => ChatMessage::tool_result(
                 self.tool_call_id.clone().unwrap_or_default(),
@@ -337,6 +370,11 @@ fn cut(text: &str, max: usize) -> String {
     out
 }
 
+/// A conversation's title from its first question: its words on one line, at most [`MAX_TITLE_CHARS`].
+pub fn conversation_title(text: &str) -> String {
+    title_of(text)
+}
+
 fn title_of(text: &str) -> String {
     cut(
         &text.split_whitespace().collect::<Vec<_>>().join(" "),
@@ -386,9 +424,9 @@ fn bound_message(m: &mut StoredMessage) {
     }
 }
 
-/// Keeps `conversation` within its message bound; a conversation always starts with a user message.
-fn bound_conversation(c: &mut Conversation) {
-    if c.messages.len() > MAX_MESSAGES {
+/// Keeps `conversation` within its message bound (when the store evicts); a conversation always starts with a user message.
+fn bound_conversation(c: &mut Conversation, overflow: Overflow) {
+    if overflow == Overflow::EvictOldest && c.messages.len() > MAX_MESSAGES {
         c.messages.drain(..c.messages.len() - MAX_MESSAGES);
     }
     let first_user = c
@@ -443,12 +481,93 @@ struct State {
     counter: u64,
 }
 
-/// The assistant's conversations in one file.
+/// Where the assistant keeps its conversations (ADR 0023 WP-2b): the port the service reads and writes. [`ConversationStore`]
+/// is the family's implementation (one file, or memory only); an app may keep its conversations otherwise (one file per
+/// conversation). Implementations keep their own bounds and never panic.
+pub trait Conversations: Send + Sync {
+    /// The conversations, most recently changed first.
+    fn summaries(&self) -> Vec<ConversationSummary>;
+    /// One conversation.
+    fn get(&self, id: &str) -> Option<Conversation>;
+    /// Starts a conversation whose first message is `first`: its id, its title, and whether it was kept.
+    fn create(&self, first: StoredMessage) -> (String, String, Result<(), SaveError>);
+    /// [`create`](Self::create), kept on disk when `save` or only for this session when not (ADR 0023 D3: "Don't save this
+    /// chat" leaves no file, even after a crash). A store that keeps every conversation the same way ignores `save`; that is
+    /// the default.
+    fn create_saved(
+        &self,
+        first: StoredMessage,
+        save: bool,
+    ) -> (String, String, Result<(), SaveError>) {
+        let _ = save;
+        self.create(first)
+    }
+    /// Adds messages to a conversation (`None`: it does not exist).
+    fn append(&self, id: &str, messages: Vec<StoredMessage>) -> Option<Result<(), SaveError>>;
+    /// Deletes a conversation; `Ok(false)` when there is none.
+    fn delete(&self, id: &str) -> Result<bool, SaveError>;
+    /// What the model reads of a conversation, within `history_chars`.
+    fn history(&self, id: &str, history_chars: usize) -> Vec<ChatMessage>;
+    /// Why the saved conversations were not used as they were, once (a damaged file); `None` by default.
+    fn take_problem(&self) -> Option<String> {
+        None
+    }
+    /// Whether the store can take one more question: in the conversation `conversation_id`, or in a new one (`None`, saved
+    /// when `save`). A refusal is in words for the user, and the assistant then refuses the question before a turn starts.
+    /// The default admits everything (a store that makes room by itself).
+    fn admits(&self, conversation_id: Option<&str>, save: bool) -> Result<(), SaveError> {
+        let _ = (conversation_id, save);
+        Ok(())
+    }
+}
+
+/// What a [`ConversationStore`] does at its bounds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Overflow {
+    /// The least recently changed conversations, and a long conversation's oldest messages, make room (the default).
+    #[default]
+    EvictOldest,
+    /// Nothing is ever dropped: a new conversation, a question or a conversation taken in that would pass a bound is
+    /// refused in words ([`Conversations::admits`]); an answer already shown is kept, so a store passes its bounds by at most
+    /// one turn.
+    Refuse,
+}
+
+impl Conversations for ConversationStore {
+    fn summaries(&self) -> Vec<ConversationSummary> {
+        ConversationStore::summaries(self)
+    }
+    fn get(&self, id: &str) -> Option<Conversation> {
+        ConversationStore::get(self, id)
+    }
+    fn create(&self, first: StoredMessage) -> (String, String, Result<(), SaveError>) {
+        ConversationStore::create(self, first)
+    }
+    fn append(&self, id: &str, messages: Vec<StoredMessage>) -> Option<Result<(), SaveError>> {
+        ConversationStore::append(self, id, messages)
+    }
+    fn delete(&self, id: &str) -> Result<bool, SaveError> {
+        ConversationStore::delete(self, id)
+    }
+    fn history(&self, id: &str, history_chars: usize) -> Vec<ChatMessage> {
+        ConversationStore::history(self, id, history_chars)
+    }
+    fn take_problem(&self) -> Option<String> {
+        ConversationStore::take_problem(self)
+    }
+    fn admits(&self, conversation_id: Option<&str>, save: bool) -> Result<(), SaveError> {
+        ConversationStore::admits(self, conversation_id, save)
+    }
+}
+
+/// The assistant's conversations in one file, or in memory only.
 pub struct ConversationStore {
-    file: VersionedFile<Data>,
+    /// `None`: memory only, nothing is ever written.
+    file: Option<VersionedFile<Data>>,
     state: Mutex<State>,
     clock: Arc<dyn Clock>,
     limits: StoreLimits,
+    overflow: Overflow,
 }
 
 impl ConversationStore {
@@ -471,12 +590,12 @@ impl ConversationStore {
         let mut data = loaded.value;
         for c in &mut data.conversations {
             c.messages.iter_mut().for_each(bound_message);
-            bound_conversation(c);
+            bound_conversation(c, Overflow::EvictOldest);
         }
         data.conversations.retain(|c| !c.messages.is_empty());
         bound_data(&mut data, "", limits);
         ConversationStore {
-            file,
+            file: Some(file),
             state: Mutex::new(State {
                 data,
                 problem: loaded
@@ -486,7 +605,83 @@ impl ConversationStore {
             }),
             clock,
             limits,
+            overflow: Overflow::EvictOldest,
         }
+    }
+
+    /// A store that keeps its conversations in memory only (ADR 0023 D3: a chat the user does not save leaves no file, even
+    /// after a crash). Bounded like the file.
+    pub fn in_memory(clock: Arc<dyn Clock>) -> ConversationStore {
+        Self::in_memory_with(clock, StoreLimits::default())
+    }
+
+    /// [`in_memory`](Self::in_memory) with other bounds than the defaults.
+    pub fn in_memory_with(clock: Arc<dyn Clock>, limits: StoreLimits) -> ConversationStore {
+        ConversationStore {
+            file: None,
+            state: Mutex::new(State {
+                data: Data::default(),
+                problem: None,
+                counter: 0,
+            }),
+            clock,
+            limits,
+            overflow: Overflow::EvictOldest,
+        }
+    }
+
+    /// This store with another policy at its bounds than [`Overflow::EvictOldest`].
+    #[must_use]
+    pub fn with_overflow(mut self, overflow: Overflow) -> ConversationStore {
+        self.overflow = overflow;
+        self
+    }
+
+    /// Whether the store can take one more question in `conversation_id`, or a new conversation (`None`): always with
+    /// [`Overflow::EvictOldest`]; with [`Overflow::Refuse`], not past its bounds, in words.
+    /// `save` is not this store's choice (it keeps every conversation one way) and is ignored.
+    pub fn admits(&self, conversation_id: Option<&str>, save: bool) -> Result<(), SaveError> {
+        let _ = save;
+        let state = self.lock();
+        self.fits(&state, conversation_id)
+    }
+
+    fn fits(&self, state: &State, conversation_id: Option<&str>) -> Result<(), SaveError> {
+        if self.overflow == Overflow::EvictOldest {
+            return Ok(());
+        }
+        match conversation_id {
+            None if state.data.conversations.len() >= self.limits.conversations => {
+                return Err(SaveError(format!(
+                    "at most {} conversations are kept; delete one to start another.",
+                    self.limits.conversations
+                )));
+            }
+            Some(id)
+                if state
+                    .data
+                    .conversations
+                    .iter()
+                    .any(|c| c.id == id && c.messages.len() >= MAX_MESSAGES) =>
+            {
+                return Err(SaveError(format!(
+                    "a conversation holds at most {MAX_MESSAGES} messages; start a new one."
+                )));
+            }
+            _ => {}
+        }
+        if size_of(&state.data) >= self.limits.file_bytes {
+            return Err(SaveError(format!(
+                "the conversations take {} KB, the most kept; delete one to go on.",
+                self.limits.file_bytes / 1024
+            )));
+        }
+        Ok(())
+    }
+
+    /// Whether this store writes a file (`false`: memory only).
+    pub fn is_saved(&self) -> bool {
+        self.file.is_some()
     }
 
     /// The bounds this store keeps.
@@ -542,9 +737,17 @@ impl ConversationStore {
     pub fn create(&self, first: StoredMessage) -> (String, String, Result<(), SaveError>) {
         let now = self.now_ms();
         let mut state = self.lock();
-        state.counter += 1;
-        let id = format!("c{now:x}-{}", state.counter);
+        let id = loop {
+            state.counter += 1;
+            let id = format!("c{now:x}-{}", state.counter);
+            if !state.data.conversations.iter().any(|c| c.id == id) {
+                break id;
+            }
+        };
         let title = title_of(&first.text);
+        if let Err(e) = self.fits(&state, None) {
+            return (id, title, Err(e));
+        }
         let mut conversation = Conversation {
             id: id.clone(),
             title: title.clone(),
@@ -568,7 +771,7 @@ impl ConversationStore {
             conversation.messages.push(m);
         }
         conversation.updated_ms = now;
-        bound_conversation(conversation);
+        bound_conversation(conversation, self.overflow);
         Some(self.persist(&mut state, id))
     }
 
@@ -583,47 +786,88 @@ impl ConversationStore {
         self.persist(&mut state, "").map(|()| true)
     }
 
-    /// What the model reads of a conversation: the newest messages that fit `history_chars` (a message is never cut), from
-    /// a user message on, so no tool result is left without its call.
+    /// What the model reads of a conversation ([`history_of`]).
     pub fn history(&self, id: &str, history_chars: usize) -> Vec<ChatMessage> {
         let state = self.lock();
-        let Some(c) = state.data.conversations.iter().find(|c| c.id == id) else {
-            return vec![];
-        };
-        let mut used = 0;
-        let mut from = c.messages.len();
-        for (i, m) in c.messages.iter().enumerate().rev() {
-            used += m.chars();
-            if used > history_chars {
-                break;
-            }
-            from = i;
+        state
+            .data
+            .conversations
+            .iter()
+            .find(|c| c.id == id)
+            .map_or_else(Vec::new, |c| history_of(c, history_chars))
+    }
+
+    /// Takes in a conversation from another store with its id and messages (a chat moved between saved and unsaved). Refused,
+    /// with nothing changed, when the store holds that id already or the conversation has no message.
+    pub fn adopt(&self, conversation: Conversation) -> Result<(), SaveError> {
+        let mut conversation = conversation;
+        conversation.messages.iter_mut().for_each(bound_message);
+        bound_conversation(&mut conversation, self.overflow);
+        if conversation.messages.is_empty() {
+            return Err(SaveError("a conversation needs a question.".into()));
         }
-        // The newest user message is always kept, whatever its size.
-        let newest_user = c
-            .messages
+        let mut state = self.lock();
+        if state
+            .data
+            .conversations
             .iter()
-            .rposition(|m| m.role == Role::User)
-            .unwrap_or(0);
-        let from = from.min(newest_user);
-        let start = c.messages[from..]
-            .iter()
-            .position(|m| m.role == Role::User)
-            .map_or(from, |p| from + p);
-        c.messages[start..]
-            .iter()
-            // A turn's closing note (a failure with nothing generated) says nothing to the model.
-            .filter(|m| {
-                !(m.role == Role::Assistant && m.text.is_empty() && m.tool_calls.is_empty())
-            })
-            .map(StoredMessage::to_chat)
-            .collect()
+            .any(|c| c.id == conversation.id)
+        {
+            return Err(SaveError(format!(
+                "a conversation with the id {} is there already.",
+                conversation.id
+            )));
+        }
+        self.fits(&state, None)?;
+        if self.overflow == Overflow::Refuse && conversation.messages.len() > MAX_MESSAGES {
+            return Err(SaveError(format!(
+                "a conversation holds at most {MAX_MESSAGES} messages."
+            )));
+        }
+        let id = conversation.id.clone();
+        state.data.conversations.push(conversation);
+        self.persist(&mut state, &id)
     }
 
     fn persist(&self, state: &mut State, keep: &str) -> Result<(), SaveError> {
-        bound_data(&mut state.data, keep, self.limits);
-        self.file
-            .save(&state.data)
-            .map_err(|e| SaveError(e.to_string()))
+        if self.overflow == Overflow::EvictOldest {
+            bound_data(&mut state.data, keep, self.limits);
+        }
+        match &self.file {
+            Some(file) => file.save(&state.data).map_err(|e| SaveError(e.to_string())),
+            None => Ok(()),
+        }
     }
+}
+
+/// What the model reads of `conversation`: the newest messages that fit `history_chars` (a message is never cut), from a user
+/// message on, so no tool result is left without its call. Every store answers [`Conversations::history`] with this.
+pub fn history_of(conversation: &Conversation, history_chars: usize) -> Vec<ChatMessage> {
+    let c = conversation;
+    let mut used = 0;
+    let mut from = c.messages.len();
+    for (i, m) in c.messages.iter().enumerate().rev() {
+        used += m.chars();
+        if used > history_chars {
+            break;
+        }
+        from = i;
+    }
+    // The newest user message is always kept, whatever its size.
+    let newest_user = c
+        .messages
+        .iter()
+        .rposition(|m| m.role == Role::User)
+        .unwrap_or(0);
+    let from = from.min(newest_user);
+    let start = c.messages[from..]
+        .iter()
+        .position(|m| m.role == Role::User)
+        .map_or(from, |p| from + p);
+    c.messages[start..]
+        .iter()
+        // A turn's closing note (a failure with nothing generated) says nothing to the model.
+        .filter(|m| !(m.role == Role::Assistant && m.text.is_empty() && m.tool_calls.is_empty()))
+        .map(StoredMessage::to_chat)
+        .collect()
 }

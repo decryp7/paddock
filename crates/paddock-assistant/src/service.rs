@@ -1,18 +1,20 @@
 //! The assistant service: conversations, one run per conversation on a worker thread, Stop, approvals. Commands return at
 //! once (rule 10) and a run reports through [`EventSink`].
 
+use crate::approval::{ApprovalChoice, ApprovalPolicy, DefaultPolicy};
+use crate::context::{ContextUse, estimate_tokens};
 use crate::conversation::{
-    ContextItem, Conversation, ConversationStore, ConversationSummary, MAX_CONTEXT_CHARS,
-    MAX_CONTEXT_ITEMS, SaveError, StoredError, StoredMessage,
+    ContextItem, Conversation, ConversationStore, ConversationSummary, Conversations,
+    MAX_CONTEXT_CHARS, MAX_CONTEXT_ITEMS, SaveError, StoredError, StoredMessage,
 };
 use crate::event::{AssistantEvent, EndReason, Envelope, ErrorKind, EventSink};
-use crate::provider::{LlmProvider, ProviderError};
-use crate::run::{Budgets, Gate, Hooks, Turn, run_turn};
+use crate::provider::{LlmProvider, ProviderError, ProviderPhase};
+use crate::run::{Budgets, Gate, Hooks, Refused, Turn, run_turn};
 use crate::tool::{ToolInfo, Tools};
-use crate::types::{Cancel, Role};
+use crate::types::{Attachment, Cancel, ChatRequest, ChatResponse, MAX_ATTACHMENTS, Role};
 use paddock_health::Clock;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::UNIX_EPOCH;
@@ -21,9 +23,11 @@ use std::time::UNIX_EPOCH;
 pub const MAX_USER_CHARS: usize = 8000;
 /// Most runs at once over all conversations.
 pub const MAX_RUNS: usize = 4;
+/// Most conversations whose last measured context the assistant remembers (past it they are estimated again).
+pub const MAX_MEASURED: usize = 1024;
 
 /// What the app tells the assistant about itself.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AssistantConfig {
     /// The app's display name (in the needs-AI sentences).
     pub app: String,
@@ -31,8 +35,25 @@ pub struct AssistantConfig {
     pub system: String,
     /// The limits of a turn.
     pub budgets: Budgets,
-    /// How much of the conversation the model reads, in characters.
+    /// How much of the conversation the model reads, in characters; `usize::MAX` sends the whole conversation (the model's
+    /// window then decides, and a question that would not fit is refused in words before it is sent).
     pub history_chars: usize,
+    /// About how many tokens an attachment takes in the prompt, for the context meter and the check before sending (the app
+    /// keeps the bytes, so it knows). The default counts none.
+    pub attachment_tokens: Arc<dyn Fn(&Attachment) -> u64 + Send + Sync>,
+    /// Which tool calls wait for the user's choice; [`DefaultPolicy`] unless the app sets its own.
+    pub policy: Arc<dyn ApprovalPolicy>,
+}
+
+impl std::fmt::Debug for AssistantConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AssistantConfig")
+            .field("app", &self.app)
+            .field("system", &self.system)
+            .field("budgets", &self.budgets)
+            .field("history_chars", &self.history_chars)
+            .finish_non_exhaustive()
+    }
 }
 
 impl AssistantConfig {
@@ -43,6 +64,8 @@ impl AssistantConfig {
             system: system.into(),
             budgets: Budgets::default(),
             history_chars: 12_000,
+            attachment_tokens: Arc::new(|_: &Attachment| 0),
+            policy: Arc::new(DefaultPolicy),
         }
     }
 }
@@ -64,6 +87,20 @@ pub struct SendRequest {
     /// The user ticked "Allow actions": tools that write are offered (each call still needs approval).
     #[serde(default)]
     pub allow_write: bool,
+    /// What the question carries besides its text, by reference (ADR 0023 WP-2b; at most [`MAX_ATTACHMENTS`]).
+    #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<Vec<Attachment>>", optional))]
+    pub attachments: Vec<Attachment>,
+    /// Whether the conversation this question starts is saved (ADR 0023 D3: "Don't save this chat" sends `false`); a
+    /// follow-up keeps its conversation's choice. Left out: `true`. A store that keeps every conversation one way ignores it
+    /// ([`Conversations::create_saved`]).
+    #[serde(default = "saved_by_default")]
+    #[cfg_attr(test, ts(as = "Option<bool>", optional))]
+    pub save: bool,
+}
+
+fn saved_by_default() -> bool {
+    true
 }
 
 /// The answer to a send: the turn runs on and reports through events.
@@ -99,6 +136,8 @@ pub enum AssistantError {
     Busy,
     /// No such tool call waits for a decision.
     NotWaiting,
+    /// "Always allow" for a call whose card did not offer it (an action asks every call).
+    NotOffered,
     /// The worker thread could not start, or a file could not be changed.
     Failed(String),
 }
@@ -112,6 +151,9 @@ impl std::fmt::Display for AssistantError {
                 f.write_str("The assistant is answering already. Wait for it or press Stop.")
             }
             AssistantError::NotWaiting => f.write_str("No action waits for a decision."),
+            AssistantError::NotOffered => {
+                f.write_str("This tool asks every time it is used, so it cannot be always allowed.")
+            }
         }
     }
 }
@@ -127,11 +169,13 @@ struct Run {
 /// The assistant of one app.
 pub struct Assistant {
     provider: Arc<dyn LlmProvider>,
-    tools: Tools,
-    store: Arc<ConversationStore>,
+    tools: Mutex<Arc<Tools>>,
+    store: Arc<dyn Conversations>,
     clock: Arc<dyn Clock>,
     cfg: AssistantConfig,
     runs: Mutex<HashMap<String, Arc<Run>>>,
+    /// Each conversation's context as the engine counted it on the last model call of this session (prompt plus answer).
+    measured: Mutex<HashMap<String, u64>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -156,18 +200,30 @@ impl Assistant {
         clock: Arc<dyn Clock>,
         cfg: AssistantConfig,
     ) -> Arc<Assistant> {
+        Self::with_conversations(provider, tools, store, clock, cfg)
+    }
+
+    /// An assistant keeping its conversations behind any [`Conversations`] port (an app's own store, or one in memory).
+    pub fn with_conversations(
+        provider: Arc<dyn LlmProvider>,
+        tools: Tools,
+        store: Arc<dyn Conversations>,
+        clock: Arc<dyn Clock>,
+        cfg: AssistantConfig,
+    ) -> Arc<Assistant> {
         Arc::new(Assistant {
             provider,
-            tools,
+            tools: Mutex::new(Arc::new(tools)),
             store,
             clock,
             cfg,
             runs: Mutex::default(),
+            measured: Mutex::default(),
         })
     }
 
     /// The conversation store.
-    pub fn store(&self) -> &Arc<ConversationStore> {
+    pub fn store(&self) -> &Arc<dyn Conversations> {
         &self.store
     }
 
@@ -178,18 +234,133 @@ impl Assistant {
             .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
     }
 
+    /// Replaces the tools from the next turn on (an MCP connection came or went, a tool list was refreshed). A turn that is
+    /// running keeps the set it started with.
+    pub fn set_tools(&self, tools: Tools) {
+        *lock(&self.tools) = Arc::new(tools);
+    }
+
+    fn tools(&self) -> Arc<Tools> {
+        lock(&self.tools).clone()
+    }
+
     /// The provider's name and the tools.
     pub fn info(&self) -> AssistantInfo {
+        let tools = self.tools();
         AssistantInfo {
             provider: self.provider.display_name(),
-            tools: self.tools.infos(),
-            has_write: self.tools.has_write(),
+            tools: tools.infos(),
+            has_write: tools.has_write(),
         }
     }
 
     /// The conversations, newest first.
     pub fn conversations(&self) -> Vec<ConversationSummary> {
         self.store.summaries()
+    }
+
+    /// How full the model's context is for the conversation `id` (none, or one that does not exist: a new chat) with the
+    /// `pending` attachments of the next question, for the composer's meter (ADR 0023 WP-4b). After a turn of this session, when
+    /// the whole conversation is sent (`history_chars == usize::MAX`), it is the engine's count of the last model call (prompt
+    /// plus answer); otherwise an estimate over the system prompt, every
+    /// tool offered (an action's definition is sent once the user may allow it), the history the model would read and its
+    /// attachments ([`AssistantConfig::attachment_tokens`]). Pending attachments are added either way. The room is the model's
+    /// window less the answer's reserve ([`Budgets::max_answer_tokens`]).
+    pub fn context(&self, id: Option<&str>, pending: &[Attachment]) -> ContextUse {
+        let window = self.provider.context_length() as u64;
+        let reserve = self.cfg.budgets.max_answer_tokens as u64;
+        let files = |list: &[Attachment]| -> u64 {
+            list.iter()
+                .map(|a| (self.cfg.attachment_tokens)(a))
+                .fold(0u64, u64::saturating_add)
+        };
+        let waiting = files(pending);
+        // The last call's count is what the next one carries only when the whole conversation is sent; a bounded history
+        // reads less than that, so it is estimated over what the model would read.
+        let whole = self.cfg.history_chars == usize::MAX;
+        if let Some(used) = id
+            .filter(|_| whole)
+            .and_then(|id| lock(&self.measured).get(id).copied())
+        {
+            return ContextUse::new(used.saturating_add(waiting), window, reserve, true);
+        }
+        let tools: usize = self
+            .tools()
+            .offered(true)
+            .iter()
+            .map(|t| {
+                t.name.len() + t.description.chars().count() + t.input_schema.to_string().len()
+            })
+            .sum();
+        let history = id.map_or_else(Vec::new, |id| {
+            self.store.history(id, self.cfg.history_chars)
+        });
+        let chars: usize = history.iter().map(|m| m.content.chars().count()).sum();
+        let attached: u64 = history
+            .iter()
+            .map(|m| files(&m.attachments))
+            .fold(0, u64::saturating_add);
+        let text = estimate_tokens(self.cfg.system.chars().count() + tools + chars);
+        ContextUse::new(
+            text.saturating_add(attached).saturating_add(waiting),
+            window,
+            reserve,
+            false,
+        )
+    }
+
+    /// Refuses a question that would not fit the model's window with its answer's reserve, in words, before anything is kept
+    /// or sent (user decision 2026-11-08: the whole chat is sent and nothing is dropped silently).
+    fn check_fits(
+        &self,
+        req: &SendRequest,
+        text: &str,
+        context: &[ContextItem],
+    ) -> Result<(), AssistantError> {
+        let id = req
+            .conversation_id
+            .as_deref()
+            .filter(|id| self.store.get(id).is_some());
+        let used = self.context(id, &req.attachments);
+        let question = estimate_tokens(
+            text.chars().count()
+                + context
+                    .iter()
+                    .map(|c| c.text.chars().count())
+                    .sum::<usize>(),
+        );
+        if used.fits(question) {
+            return Ok(());
+        }
+        let need = used.used_tokens.saturating_add(question);
+        let room = used.limit_tokens;
+        Err(AssistantError::Invalid(if id.is_some() {
+            format!(
+                "This chat is too long for the model: it needs about {need} tokens and {room} fit (the rest is kept for the \
+                 answer). Start a new chat to go on."
+            )
+        } else {
+            format!(
+                "This question and its files are too long for the model: about {need} tokens and {room} fit (the rest is kept \
+                 for the answer). Remove a file or shorten the question."
+            )
+        }))
+    }
+
+    fn remember_measure(&self, id: &str, used: Option<u64>) {
+        let mut measured = lock(&self.measured);
+        match used {
+            Some(used) => {
+                if measured.len() >= MAX_MEASURED && !measured.contains_key(id) {
+                    // Bounded (rule: bounded resources): the others fall back to estimates.
+                    measured.clear();
+                }
+                measured.insert(id.to_string(), used);
+            }
+            None => {
+                measured.remove(id);
+            }
+        }
     }
 
     /// One conversation.
@@ -200,6 +371,7 @@ impl Assistant {
     /// Deletes a conversation (stopping its run first).
     pub fn delete(&self, id: &str) -> Result<(), AssistantError> {
         self.stop(id);
+        lock(&self.measured).remove(id);
         match self.store.delete(id) {
             Ok(true) => Ok(()),
             Ok(false) => Err(AssistantError::NotFound),
@@ -217,17 +389,21 @@ impl Assistant {
         })
     }
 
-    /// Answers the write waiting in the conversation's run.
-    pub fn approve(&self, id: &str, call_id: &str, approved: bool) -> Result<(), AssistantError> {
+    /// Answers the call waiting in the conversation's run with the user's choice.
+    pub fn approve(
+        &self,
+        id: &str,
+        call_id: &str,
+        choice: ApprovalChoice,
+    ) -> Result<(), AssistantError> {
         let run = lock(&self.runs)
             .get(id)
             .cloned()
             .ok_or(AssistantError::NotWaiting)?;
-        if run.gate.decide(call_id, approved) {
-            Ok(())
-        } else {
-            Err(AssistantError::NotWaiting)
-        }
+        run.gate.decide(call_id, choice).map_err(|r| match r {
+            Refused::NotWaiting => AssistantError::NotWaiting,
+            Refused::NotOffered => AssistantError::NotOffered,
+        })
     }
 
     /// Stops every run and waits for the threads (the app is closing, or a test ends).
@@ -259,6 +435,14 @@ impl Assistant {
                 "At most {MAX_CONTEXT_ITEMS} context items can be attached."
             )));
         }
+        if req.attachments.len() > MAX_ATTACHMENTS {
+            return Err(AssistantError::Invalid(format!(
+                "A question can carry at most {MAX_ATTACHMENTS} attachments."
+            )));
+        }
+        if let Some(problem) = req.attachments.iter().find_map(Attachment::problem) {
+            return Err(AssistantError::Invalid(problem));
+        }
         let mut context = req.context.clone();
         for c in &mut context {
             if c.id.trim().is_empty() || c.label.trim().is_empty() {
@@ -278,7 +462,13 @@ impl Assistant {
         sink: Arc<dyn EventSink>,
     ) -> Result<SendAck, AssistantError> {
         let (text, context) = Self::check(&req)?;
-        let user = StoredMessage::user(text, context, self.now_ms());
+        self.check_fits(&req, &text, &context)?;
+        // A store that does not make room by itself says so before anything is kept (nothing is dropped silently).
+        self.store
+            .admits(req.conversation_id.as_deref(), req.save)
+            .map_err(|e| AssistantError::Invalid(e.0))?;
+        let user = StoredMessage::user(text, context, self.now_ms())
+            .with_attachments(req.attachments.clone());
         let mut runs = lock(&self.runs);
         if runs.len() >= MAX_RUNS {
             return Err(AssistantError::Busy);
@@ -295,7 +485,7 @@ impl Assistant {
                     .ok_or(AssistantError::NotFound)?;
                 (id, title, saved)
             }
-            None => self.store.create(user),
+            None => self.store.create_saved(user, req.save),
         };
         let run = Arc::new(Run {
             cancel: Cancel::new(),
@@ -305,6 +495,7 @@ impl Assistant {
         let me = self.clone();
         let (thread_run, thread_id) = (run.clone(), id.clone());
         let allow_write = req.allow_write;
+        let tools = self.tools();
         let handle = std::thread::Builder::new()
             .name("paddock-assistant".into())
             .spawn(move || {
@@ -312,7 +503,10 @@ impl Assistant {
                     &thread_id,
                     &title,
                     saved,
-                    allow_write,
+                    Offer {
+                        tools: &tools,
+                        allow_write,
+                    },
                     &thread_run,
                     sink.as_ref(),
                 )
@@ -330,7 +524,7 @@ impl Assistant {
         id: &str,
         title: &str,
         saved: Result<(), SaveError>,
-        allow_write: bool,
+        offer: Offer<'_>,
         run: &Run,
         sink: &dyn EventSink,
     ) {
@@ -354,14 +548,31 @@ impl Assistant {
             });
         }
         let history = self.store.history(id, self.cfg.history_chars);
+        // Every id the conversation holds, not only those in the model's window: cards and results are keyed by them.
+        let taken_ids: HashSet<String> = self
+            .store
+            .get(id)
+            .map(|c| {
+                c.messages
+                    .iter()
+                    .flat_map(|m| m.tool_calls.iter().map(|t| t.id.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let measuring = Measuring {
+            inner: self.provider.as_ref(),
+            last: Mutex::new(None),
+        };
         let turn = Turn {
-            provider: self.provider.as_ref(),
-            tools: &self.tools,
+            provider: &measuring,
+            tools: offer.tools,
+            policy: self.cfg.policy.as_ref(),
+            taken_ids,
             clock: self.clock.as_ref(),
             budgets: self.cfg.budgets,
             system: &self.cfg.system,
             history,
-            allow_write,
+            allow_write: offer.allow_write,
             cancel: &run.cancel,
             gate: &run.gate,
         };
@@ -399,6 +610,8 @@ impl Assistant {
             Ok(end) => end.end,
             Err(_) => EndReason::Failed,
         };
+        let last = lock(&measuring.last).take();
+        self.remember_measure(id, last);
         settle(&mut kept, ended, error, end_message, self.now_ms());
         if let Some(Err(e)) = self.store.append(id, kept)
             && !told
@@ -428,6 +641,59 @@ impl Assistant {
             }),
         }
     }
+}
+
+/// The provider of one turn, keeping the engine's count of its last call (prompt plus answer) for the context meter. A call
+/// without a reported usage leaves no count, so the meter estimates instead of showing a stale number.
+struct Measuring<'a> {
+    inner: &'a dyn LlmProvider,
+    last: Mutex<Option<u64>>,
+}
+
+impl Measuring<'_> {
+    fn note(&self, result: &Result<ChatResponse, ProviderError>) {
+        if let Ok(r) = result {
+            *lock(&self.last) = r.usage.filter(|u| u.total() > 0).map(|u| u.total());
+        }
+    }
+}
+
+impl LlmProvider for Measuring<'_> {
+    fn id(&self) -> &str {
+        self.inner.id()
+    }
+    fn display_name(&self) -> String {
+        self.inner.display_name()
+    }
+    fn context_length(&self) -> usize {
+        self.inner.context_length()
+    }
+    fn chat(
+        &self,
+        req: &ChatRequest,
+        on_delta: &mut dyn FnMut(&str),
+    ) -> Result<ChatResponse, ProviderError> {
+        let result = self.inner.chat(req, on_delta);
+        self.note(&result);
+        result
+    }
+    fn chat_phased(
+        &self,
+        req: &ChatRequest,
+        on_delta: &mut dyn FnMut(&str),
+        on_phase: &mut dyn FnMut(ProviderPhase),
+    ) -> Result<ChatResponse, ProviderError> {
+        let result = self.inner.chat_phased(req, on_delta, on_phase);
+        self.note(&result);
+        result
+    }
+}
+
+/// What a turn may offer the model: the tool set it started with and whether the user allowed tools that write.
+#[derive(Clone, Copy)]
+struct Offer<'a> {
+    tools: &'a Tools,
+    allow_write: bool,
 }
 
 /// Makes the turn's last stored message say how the turn ended: the end reason, the failure and the budget message, so a

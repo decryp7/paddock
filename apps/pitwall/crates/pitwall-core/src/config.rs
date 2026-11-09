@@ -160,8 +160,6 @@ impl Default for MemorySettings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct NetworkSettings {
-    /// No downloads at all.
-    pub offline: bool,
     /// Serve the API on the local network too (TLS, keys required).
     pub lan_enabled: bool,
     /// The LAN port.
@@ -171,7 +169,6 @@ pub struct NetworkSettings {
 impl Default for NetworkSettings {
     fn default() -> Self {
         NetworkSettings {
-            offline: false,
             lan_enabled: false,
             lan_port: 11_443,
         }
@@ -568,6 +565,29 @@ pub fn load(primary: Option<&str>, backup: Option<&str>) -> (Settings, Loaded) {
 
 #[cfg(test)]
 mod tests {
+    /// Offline mode was removed in 1.1: a settings file written by 1.0 still carries `network.offline`; it loads and the
+    /// key is gone from what is written back.
+    #[test]
+    fn a_settings_file_from_1_0_with_network_offline_loads_and_drops_the_key() {
+        let old = serde_json::json!({"network": {"offline": true, "lanEnabled": false, "lanPort": 11_444}});
+        let s: Settings = serde_json::from_value(old).unwrap();
+        assert_eq!(s.network.lan_port, 11_444);
+        let back = serde_json::to_value(&s).unwrap();
+        assert!(back["network"].get("offline").is_none(), "{back}");
+    }
+
+    /// The upgrade path through the real loader: a 1.0 TOML file with `network.offline` loads from the file, and what
+    /// is written back keeps the other keys but not `offline`.
+    #[test]
+    fn a_1_0_toml_file_with_network_offline_loads_from_the_file_and_is_written_back_without_it() {
+        let (s, how) = load(Some("[network]\noffline = true\nlanPort = 11444\n"), None);
+        assert_eq!(how, Loaded::File);
+        assert_eq!(s.network.lan_port, 11_444);
+        let out = s.to_toml();
+        assert!(!out.contains("offline"), "{out}");
+        assert!(out.contains("lanPort = 11444"), "{out}");
+    }
+
     #[test]
     fn cache_settings_have_documented_defaults_expiry_and_limits() {
         use crate::cache::Kind;
@@ -812,7 +832,6 @@ mod tests {
                     network: NetworkSettings {
                         lan_enabled: true,
                         lan_port: DEFAULT_PORT,
-                        ..base.network.clone()
                     },
                     ..base.clone()
                 },

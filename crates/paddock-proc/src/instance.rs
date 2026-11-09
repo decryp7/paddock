@@ -140,15 +140,36 @@ fn judge(answer: Result<(), TryLockError>) -> std::io::Result<Verdict> {
     }
 }
 
-/// Whether some process holds the lock on `path` (held on every one of [`HELD_CHECKS`] checks, so a held lock costs
-/// about `(HELD_CHECKS - 1) * HELD_TICK`). A free lock is taken and dropped at once to find out, so an instance starting at
-/// that very instant may be refused (it exits; the caller finds one on its next pass). Anything that is not a clear "held"
-/// (unsupported, an error) is `false`.
-pub fn is_held(path: &Path) -> bool {
+/// Whether some process holds the lock on `path`, settled: held on every one of [`HELD_CHECKS`] checks, so a held lock
+/// costs about `(HELD_CHECKS - 1) * HELD_TICK` of waiting on the thread. A free lock is taken and dropped at once to find
+/// out, so an instance starting at that very instant may be refused (it exits; the caller finds one on its next pass).
+/// Anything that is not a clear "held" (unsupported, an error) is `false`.
+///
+/// Which check to use: for a one-shot decision on a reading (act now or not), use [`InstanceLock::claim`] or this settled
+/// check. Never call it inside a loop that looks again at its own pace: the wait slows every look (CI run 7257); that loop
+/// uses [`is_held_now`].
+pub fn is_held_settled(path: &Path) -> bool {
     matches!(InstanceLock::claim(path), Ok(Claim::Held))
 }
 
-/// What a look at the lock on `path` found: [`is_held`] with the third answer kept apart.
+/// Whether some process holds the lock on `path` at this one check: no re-check and no wait, so it answers at once. A held
+/// reading may be only a spawning child's copy of the descriptor (see [`HELD_CHECKS`]), so a free lock can read held for a
+/// moment. A free lock is taken and dropped at once, as in [`is_held_settled`]; anything that is not a clear "held" is
+/// `false`.
+///
+/// Which check to use: only where a held reading leads to waiting and looking again (a supervisor judging the lock over
+/// its own repeated looks at its own pace), so a false "held" only delays; never where a held reading leads to a one-shot
+/// action. For a one-shot decision use [`InstanceLock::claim`] or [`is_held_settled`].
+pub fn is_held_now(path: &Path) -> bool {
+    held_at_one_check(path, File::try_lock)
+}
+
+/// [`is_held_now`] with the locking call given.
+fn held_at_one_check(path: &Path, mut lock: impl FnMut(&File) -> Result<(), TryLockError>) -> bool {
+    matches!(InstanceLock::claim_once(path, &mut lock), Ok(Claim::Held))
+}
+
+/// What a look at the lock on `path` found: [`is_held_settled`] with the third answer kept apart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HeldState {
     /// Some process holds it.
@@ -159,7 +180,7 @@ pub enum HeldState {
     Unknown,
 }
 
-/// [`is_held`] that says "unknown" instead of "free" when the lock could not be looked at.
+/// [`is_held_settled`] that says "unknown" instead of "free" when the lock could not be looked at.
 pub fn held_state(path: &Path) -> HeldState {
     match InstanceLock::claim(path) {
         Ok(Claim::Held) => HeldState::Held,
@@ -229,6 +250,37 @@ mod tests {
         assert_eq!(pace.waited, HELD_CHECKS as usize - 1);
     }
 
+    /// Regression (CI run 7257): Dyno's supervisor probed the lock with the settled check on every look, so a held lock cost each
+    /// look the re-check's wait (about 400 ms) and the supervisor's looks stopped following its pace. The one-check probe
+    /// asks the lock once and never waits.
+    #[test]
+    fn the_one_check_probe_asks_the_lock_once_and_never_waits() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("a.lock");
+        let mut calls = 0;
+        let mut answer = held_times(usize::MAX);
+        assert!(held_at_one_check(&path, |f: &File| {
+            calls += 1;
+            answer(f)
+        }));
+        assert_eq!(calls, 1, "a held lock was checked again");
+        let mut calls = 0;
+        assert!(!held_at_one_check(&path, |_: &File| {
+            calls += 1;
+            Ok(())
+        }));
+        assert_eq!(calls, 1);
+        assert!(
+            !held_at_one_check(&path, |_: &File| Err(TryLockError::Error(
+                std::io::Error::from(std::io::ErrorKind::Unsupported)
+            ))),
+            "unsupported is not a holder"
+        );
+        let held = InstanceLock::claim(&path).unwrap();
+        assert!(is_held_now(&path), "a real holder is held at one check");
+        drop(held);
+    }
+
     #[test]
     fn a_cancelled_wait_reports_what_was_seen() {
         let tmp = tempfile::tempdir().unwrap();
@@ -292,7 +344,7 @@ mod tests {
     fn one_holder_per_file_and_the_lock_ends_with_its_holder() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("data").join("a.lock");
-        until(|| !is_held(&path));
+        until(|| !is_held_now(&path));
         let held = std::cell::RefCell::new(None);
         until(|| {
             *held.borrow_mut() = match InstanceLock::claim(&path) {
@@ -302,12 +354,12 @@ mod tests {
             held.borrow().is_some()
         });
         let first = held.take();
-        assert!(is_held(&path));
+        assert!(is_held_settled(&path));
         assert!(matches!(InstanceLock::claim(&path).unwrap(), Claim::Held));
         let other = tmp.path().join("b.lock");
         until(|| matches!(InstanceLock::claim(&other), Ok(Claim::Acquired(_))));
         drop(first);
-        until(|| !is_held(&path));
+        until(|| !is_held_now(&path));
         until(|| matches!(InstanceLock::claim(&path), Ok(Claim::Acquired(_))));
     }
 
@@ -370,7 +422,10 @@ mod tests {
         std::fs::write(&file, b"x").unwrap();
         let err = InstanceLock::claim(&file.join("a.lock")).unwrap_err();
         assert!(err.to_string().contains("a.lock"), "{err}");
-        assert!(!is_held(&file.join("a.lock")), "an error is not a holder");
+        assert!(
+            !is_held_settled(&file.join("a.lock")),
+            "an error is not a holder"
+        );
         // A folder where the lock file should be cannot be opened as one.
         let folder = tmp.path().join("folder.lock");
         std::fs::create_dir(&folder).unwrap();
@@ -391,8 +446,8 @@ mod tests {
         // a path below a regular file cannot be opened
         assert_eq!(held_state(&file.join("agent.lock")), HeldState::Unknown);
         assert!(
-            !is_held(&file.join("agent.lock")),
-            "is_held keeps its old answer for other callers"
+            !is_held_settled(&file.join("agent.lock")),
+            "is_held_settled keeps its old answer for other callers"
         );
         let lock = dir.join("agent.lock");
         assert_eq!(held_state(&lock), HeldState::Free);

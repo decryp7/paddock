@@ -56,7 +56,8 @@ export function press(target: EventTarget, key: string, init: KeyboardEventInit 
 
 /**
  * Animation frames run by hand: `flush()` runs every frame requested so far (a component that coalesces pointer moves per
- * frame is flushed before its result is read); `restore()` puts the real ones back. Call `restore()` in `afterEach`.
+ * frame is flushed before its result is read); `restore()` puts the real ones back. Call it in a test or `beforeEach` (the
+ * kit puts the real timer globals back before every test) and `restore()` in `afterEach`.
  */
 export function manualFrames(): { flush(): void; readonly pending: number; restore(): void } {
   const queue = new Map<number, FrameRequestCallback>();

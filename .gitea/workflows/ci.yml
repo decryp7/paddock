@@ -55,6 +55,7 @@ jobs:
       ui: ${{ steps.plan.outputs.ui }}
       eslint: ${{ steps.plan.outputs.eslint }}
       conformance: ${{ steps.plan.outputs.conformance }}
+      c99: ${{ steps.plan.outputs.c99 }}
       tools: ${{ steps.plan.outputs.tools }}
       icons: ${{ steps.plan.outputs.icons }}
       paddock_dev: ${{ steps.plan.outputs.paddock_dev }}
@@ -266,7 +267,7 @@ jobs:
       # the checkout above has the full history (a one-commit clone has no merge base and C71 would only warn that it did not measure).
       - name: Paddock itself (applicable checks)
         working-directory: .
-        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C45,C48,C53,C54,C56,C57,C71,C98 --strict C36
+        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C45,C48,C53,C54,C56,C57,C59,C71,C98 --strict C36
 
       # ADR 0060, C100: every check the repository defines is run by a reachable CI line, or registered in docs/gates.toml with a
       # reason, an owner and a review date. Rollback: `./dev gates check --warn`. The nightly has a job of its own (nightly.yml).
@@ -278,6 +279,21 @@ jobs:
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 
+  # Conformance C99 (ADR 0057 §3, rule 72): no shipped process uses the macOS Keychain. Its own job, planned on its inputs
+  # (every Cargo.toml and Cargo.lock under apps/ and crates/, the scanned sources, capabilities, paddock.ci.json, the check's
+  # code; scripts/affected.mjs C99_INPUT), because it needs cargo and the registry (`cargo fetch`, `cargo tree` for both Apple
+  # triples) and the conformance job above does not. Every release path runs the same action, scoped to its app.
+  c99:
+    name: C99 (no Keychain in a macOS build)
+    needs: [plan]
+    if: ${{ needs.plan.outputs.c99 == 'true' }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.gitea/actions/keychain
 
   # The shared CI actions' scripts and the dev and host tools (plan X10, X47): every script runs in a scratch folder with a
   # PATH of shims, so no launchd, systemd, Docker or installed app is touched. New-app templates are covered by scripts/.

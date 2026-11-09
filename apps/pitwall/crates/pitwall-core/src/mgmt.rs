@@ -57,14 +57,14 @@ pub enum ErrorCode {
     BadRequest,
     /// The state doesn't allow it now.
     Conflict,
-    /// Offline mode.
-    Offline,
     /// Not enough memory.
     InsufficientMemory,
     /// Busy.
     Busy,
     /// Not available on this machine.
     NotAvailable,
+    /// An outside host (Hugging Face, GitHub) could not be reached, refused, or sent bad data; try again later.
+    Upstream,
     /// Not built yet.
     NotImplemented,
     /// A bug.
@@ -77,12 +77,13 @@ impl ErrorCode {
         match self {
             ErrorCode::ServerUnavailable => 503,
             ErrorCode::Unauthorized => 401,
-            ErrorCode::Forbidden | ErrorCode::Offline => 403,
+            ErrorCode::Forbidden => 403,
             ErrorCode::NotFound => 404,
             ErrorCode::BadRequest => 400,
             ErrorCode::Conflict => 409,
             ErrorCode::InsufficientMemory | ErrorCode::Busy => 503,
             ErrorCode::NotAvailable | ErrorCode::NotImplemented => 501,
+            ErrorCode::Upstream => 502,
             ErrorCode::Internal => 500,
         }
     }
@@ -129,8 +130,6 @@ pub struct ServerInfo {
     pub started_at: Millis,
     /// Serving or paused.
     pub serving: ServingState,
-    /// Offline mode.
-    pub offline: bool,
     /// LAN exposure.
     pub lan: LanStatus,
 }
@@ -649,6 +648,26 @@ pub struct PairingRequest {
     pub requested_at: Millis,
     /// What it asks for.
     pub permissions: AppPermissions,
+    /// A re-pair (ADR 0057 §4): approving it revokes the app's older keys. Only an app that lost its key on purpose sends
+    /// it (Debrief's "re-pair after the update"); a second machine pairing under the same name does not.
+    #[serde(default)]
+    pub re_pair: bool,
+    /// For a re-pair of an app Pitwall has: that app as stored (not the requester's name) and how many keys approving
+    /// revokes. `None` for a plain pairing, or a re-pair of an app Pitwall does not know.
+    #[serde(default)]
+    pub replaces: Option<ReplacedApp>,
+}
+
+/// The app a re-pair replaces the keys of (`ReplacedApp`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplacedApp {
+    /// Its id.
+    pub app_id: String,
+    /// Its name as Pitwall stored it.
+    pub app_name: String,
+    /// How many keys an approval revokes.
+    pub keys: u32,
 }
 
 /// An engine tile (`EngineStatusTile`).
@@ -891,6 +910,10 @@ pub struct LocalModel {
     /// The slots it is loaded with now (`None`: not loaded); a change applies on the next load.
     #[serde(default)]
     pub loaded_slots: Option<u32>,
+    /// The context of one slot, in tokens: what one request may hold (the one it is loaded with, else the one it will be
+    /// loaded with). `None` from an older server.
+    #[serde(default)]
+    pub context_per_slot: Option<u32>,
     /// Fit now, at its context per slot and slots.
     pub fit: Fit,
 }
@@ -1029,14 +1052,74 @@ pub struct RequestContent {
     pub response: String,
 }
 
-/// A playground message (`PlaygroundMessage`).
+/// A tool call the model made, as a playground message carries it (`PlaygroundToolCall`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaygroundToolCall {
+    /// The call's id; the `tool` message that answers it carries the same id.
+    pub id: String,
+    /// The tool's name.
+    pub name: String,
+    /// The arguments as JSON text.
+    pub arguments: String,
+}
+
+/// A playground message (`PlaygroundMessage`). Text only; images and audio come with their own work packages.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaygroundMessage {
-    /// `system`, `user` or `assistant`.
+    /// `system`, `user`, `assistant` or `tool`.
     pub role: crate::chat::Role,
     /// Text.
     pub content: String,
+    /// The tool calls of an assistant message.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<PlaygroundToolCall>,
+    /// The call a `tool` message answers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
+impl PlaygroundMessage {
+    /// A text message without tool calls.
+    pub fn text(role: crate::chat::Role, content: impl Into<String>) -> PlaygroundMessage {
+        PlaygroundMessage {
+            role,
+            content: content.into(),
+            tool_calls: vec![],
+            tool_call_id: None,
+        }
+    }
+}
+
+/// A tool the model may call (`PlaygroundTool`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaygroundTool {
+    /// Its name.
+    pub name: String,
+    /// What it does.
+    pub description: String,
+    /// A JSON schema object for its arguments.
+    pub parameters: serde_json::Value,
+}
+
+/// Whether and which tools the model must call (`PlaygroundToolChoice`).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum PlaygroundToolChoice {
+    /// The model decides.
+    #[default]
+    Auto,
+    /// No tools.
+    None,
+    /// At least one tool.
+    Required,
+    /// This tool.
+    Named {
+        /// The tool's name.
+        name: String,
+    },
 }
 
 /// A playground request (`PlaygroundRequest`).
@@ -1051,25 +1134,83 @@ pub struct PlaygroundRequest {
     pub temperature: f32,
     /// Max tokens.
     pub max_tokens: u32,
+    /// The tools the model may call (none: a plain chat).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<PlaygroundTool>,
+    /// Tool use.
+    #[serde(default)]
+    pub tool_choice: PlaygroundToolChoice,
+}
+
+/// What the engine is doing before the first token (`PlaygroundPhase`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum PlaygroundPhase {
+    /// Waiting for a slot and loading the model; repeated about once a second with the time so far.
+    #[serde(rename_all = "camelCase")]
+    Loading {
+        /// Milliseconds since the request arrived.
+        elapsed_ms: u64,
+    },
+    /// The model is ready and generating.
+    Generating,
+}
+
+/// Why an answer ended (`PlaygroundFinish`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PlaygroundFinish {
+    /// The model finished.
+    Stop,
+    /// The token limit was reached.
+    Length,
+    /// The model called tools; the caller runs them and continues.
+    ToolCalls,
+    /// The request was cancelled.
+    Cancelled,
 }
 
 /// A playground stream event (`PlaygroundEvent`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum PlaygroundEvent {
+    /// What happens before the first token.
+    Phase {
+        /// The phase.
+        phase: PlaygroundPhase,
+    },
     /// Text.
     Delta {
         /// The text.
         text: String,
     },
+    /// Reasoning text the engine separated from the answer.
+    Reasoning {
+        /// The text.
+        text: String,
+    },
+    /// A piece of a tool call; the pieces with one `index` make one call.
+    #[serde(rename_all = "camelCase")]
+    ToolCall {
+        /// Which call.
+        index: u32,
+        /// The id, in the first piece.
+        id: Option<String>,
+        /// The name, in the first piece.
+        name: Option<String>,
+        /// More of the arguments' JSON text.
+        arguments: String,
+    },
     /// The end.
     #[serde(rename_all = "camelCase")]
     Done {
+        /// Why it ended.
+        finish: PlaygroundFinish,
         /// Prompt tokens.
         prompt_tokens: u32,
         /// Generated tokens.
         completion_tokens: u32,
-        /// Time to first token.
+        /// Time from the request to the first token (text, reasoning or tool call), cold load included.
         ttft_ms: u64,
         /// Generated tokens/s.
         gen_tps: f64,
@@ -1285,8 +1426,6 @@ pub enum LiveUpdate {
 pub enum UpdateCheckOutcome {
     /// Hugging Face was asked and the notices are up to date.
     Checked,
-    /// Offline mode is on: nothing was asked.
-    Offline,
     /// Another check ran moments ago.
     RateLimited,
     /// A check is running already.
@@ -1325,10 +1464,8 @@ pub struct UpdateCheckStatus {
     pub last_attempt_at: Option<Millis>,
     /// How the last attempt went.
     pub last_message: Option<String>,
-    /// When the next scheduled check is due (`None`: the schedule is off or offline mode is on).
+    /// When the next scheduled check is due (`None`: the schedule is off).
     pub next_check_at: Option<Millis>,
-    /// Offline mode is on (no check can run).
-    pub offline: bool,
     /// A check is running.
     pub running: bool,
     /// Notices shown now.
@@ -1359,7 +1496,6 @@ mod tests {
         assert_eq!(serde_json::from_value::<UpdateCheckResult>(v).unwrap(), r);
         for (o, w) in [
             (UpdateCheckOutcome::Checked, "checked"),
-            (UpdateCheckOutcome::Offline, "offline"),
             (UpdateCheckOutcome::Busy, "busy"),
             (UpdateCheckOutcome::NothingToCheck, "nothingToCheck"),
             (UpdateCheckOutcome::Failed, "failed"),
@@ -1372,7 +1508,6 @@ mod tests {
             last_attempt_at: Some(5),
             last_message: None,
             next_check_at: None,
-            offline: false,
             running: false,
             notices: 0,
             host: "huggingface.co".into(),
@@ -1399,6 +1534,7 @@ mod tests {
             json!({"state": "notAvailable", "reason": "r"})
         );
         let e = PlaygroundEvent::Done {
+            finish: PlaygroundFinish::Stop,
             prompt_tokens: 1,
             completion_tokens: 2,
             ttft_ms: 3,
@@ -1407,7 +1543,7 @@ mod tests {
         };
         assert_eq!(
             serde_json::to_value(&e).unwrap(),
-            json!({"kind": "done", "promptTokens": 1, "completionTokens": 2, "ttftMs": 3, "genTps": 4.0, "coldStartMs": null})
+            json!({"kind": "done", "finish": "stop", "promptTokens": 1, "completionTokens": 2, "ttftMs": 3, "genTps": 4.0, "coldStartMs": null})
         );
         let err = PlaygroundEvent::Error {
             error: CommandError::new(ErrorCode::InsufficientMemory, "m"),
@@ -1451,17 +1587,56 @@ mod tests {
                 .content,
             "x"
         );
+        // Tool fields are additive: an old request still parses, a new one keeps its tools and choice.
+        let old: PlaygroundRequest =
+            serde_json::from_value(json!({"modelId": "m", "messages": [], "temperature": 0.5, "maxTokens": 8})).unwrap();
+        assert!(old.tools.is_empty() && old.tool_choice == PlaygroundToolChoice::Auto);
+        let new: PlaygroundRequest = serde_json::from_value(json!({
+            "modelId": "m", "messages": [{"role": "tool", "content": "r", "toolCallId": "c1"}], "temperature": 0.5, "maxTokens": 8,
+            "tools": [{"name": "t", "description": "d", "parameters": {"type": "object"}}],
+            "toolChoice": {"kind": "named", "name": "t"}
+        }))
+        .unwrap();
+        assert_eq!(new.tool_choice, PlaygroundToolChoice::Named { name: "t".into() });
+        assert_eq!(new.messages[0].tool_call_id.as_deref(), Some("c1"));
+        assert_eq!(
+            serde_json::to_value(PlaygroundToolChoice::Required).unwrap(),
+            json!({"kind": "required"})
+        );
+        assert_eq!(
+            serde_json::to_value(PlaygroundEvent::Phase {
+                phase: PlaygroundPhase::Loading { elapsed_ms: 7 }
+            })
+            .unwrap(),
+            json!({"kind": "phase", "phase": {"kind": "loading", "elapsedMs": 7}})
+        );
+        assert_eq!(
+            serde_json::to_value(PlaygroundEvent::ToolCall {
+                index: 0,
+                id: Some("c".into()),
+                name: None,
+                arguments: "{".into()
+            })
+            .unwrap(),
+            json!({"kind": "toolCall", "index": 0, "id": "c", "name": null, "arguments": "{"})
+        );
+        assert_eq!(
+            serde_json::to_value(PlaygroundEvent::Reasoning { text: "t".into() }).unwrap()["kind"],
+            "reasoning"
+        );
+        assert_eq!(serde_json::to_value(PlaygroundFinish::ToolCalls).unwrap(), "toolCalls");
+        assert_eq!(PlaygroundMessage::text(crate::chat::Role::User, "x").tool_calls.len(), 0);
         let codes = [
             (ErrorCode::ServerUnavailable, 503),
             (ErrorCode::Unauthorized, 401),
             (ErrorCode::Forbidden, 403),
-            (ErrorCode::Offline, 403),
             (ErrorCode::NotFound, 404),
             (ErrorCode::BadRequest, 400),
             (ErrorCode::Conflict, 409),
             (ErrorCode::InsufficientMemory, 503),
             (ErrorCode::Busy, 503),
             (ErrorCode::NotAvailable, 501),
+            (ErrorCode::Upstream, 502),
             (ErrorCode::NotImplemented, 501),
             (ErrorCode::Internal, 500),
         ];

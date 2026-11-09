@@ -3252,6 +3252,7 @@ name = "paddock-build"
 version = "0.1.0"
 dependencies = [
  "paddock-workspace-hack",
+ "serde_json",
  "tauri-build",
  "tempfile",
 ]
@@ -3820,10 +3821,13 @@ name = "paddock-secrets"
 version = "0.1.0"
 dependencies = [
  "keyring",
+ "libc",
+ "log",
  "paddock-env",
  "paddock-proc",
  "paddock-workspace-hack",
  "tempfile",
+ "windows-sys 0.61.2",
  "zeroize",
 ]
 

@@ -195,6 +195,28 @@ One line each. The dated records are in the app files.
 
 Results of shared crates (rule 48: shared code records here), newest first.
 
+### 2026-11-08, conformance C99: macOS dependency graph probe and source scan (pitwall/1.1-c99b)
+
+- **Commit:** the head of `pitwall/1.1-c99b` (run on c4da1ca25 plus the C99 follow-up commits)
+- **Machine:** Mac mini M4 Pro, 14 cores, macOS 27.2, fast home network
+- **Load:** 1-minute load 4.3 to 5.5 during the runs; nothing else building
+- **Build:** not a build: `cargo fetch`, `cargo metadata` and `cargo tree` (cargo 1.99.1) for the 5 app locks, the 2 demo locks and `crates/`, on both Apple triples, `--all-features` for the apps
+- **Corpus:** this repository's real lockfiles; 8 workspaces
+- **Command:** `RUSTC_WRAPPER= node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C99`
+- **Runs:** warm: 2 runs; cold: 1 run (empty `CARGO_HOME`, registry download of about 1.5 GB)
+- **Numbers:**
+
+  | Measure | Result | Budget | Verdict |
+  |---|---|---|---|
+  | warm cargo cache | 13.0 s, 13.1 s | none set | recorded |
+  | cold cargo cache (download) | 34.3 s | none set | recorded |
+  | CI runner (Linux container, runner cache) | to measure on the first CI run | none set | pending |
+
+- **Memory measure:** not measured
+- **Notes:** measured on macOS, not on the CI image. Check on the first CI run that the Linux host's
+  `cargo tree --target aarch64-apple-darwin` prints the same line shape; a different shape shows as "check broken: the
+  cargo tree output has a line this probe cannot read", never as a pass. No budget until the CI number exists (rule 48).
+
 ### 2026-11-03, paddock-widgets: grid engine, 32 placements (feat/widgets-grid)
 
 - **What:** `cargo bench -p paddock-widgets` (`crates/paddock-widgets/benches/grid.rs`): ADR 0044 §7 budgets, a 32-widget board of 3 by 4 cells; each line is the fastest of 15 batches (the machine is shared).

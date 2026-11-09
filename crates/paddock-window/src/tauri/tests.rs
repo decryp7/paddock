@@ -945,6 +945,54 @@ fn dialogs_get_the_same_feel_and_hooks() {
     assert!(paddock_dialogs::tauri::open(bare.handle(), "main", request).is_ok());
 }
 
+/// Quit and exit end the app without asking a dialog's page (`dialogCanClose`): the page is asked only through a close
+/// request of its own window (`paddock_dialogs::tauri::close_requested`, the OS close), and neither Quit nor the exit
+/// sends one. The exit is never refused for an open dialog; on a real runtime Tauri then ends the event loop and drops
+/// every window without a `CloseRequested` (tauri-runtime-wry 2.12: `Message::RequestExit` sets `ControlFlow::Exit`),
+/// so a page that would refuse a close (unsaved edits, a save still on its way) cannot hold a quit.
+#[test]
+fn quitting_closes_dialogs_without_asking_their_pages() {
+    let contracts = paddock_dialogs::Contracts::from_entries(
+        &[paddock_dialogs::Entry::new(
+            "settings",
+            paddock_dialogs::Shape::Tool,
+        )],
+        &[],
+    )
+    .unwrap();
+    let quits = calls();
+    let app = app_with(windows(multi(), &quits).build());
+    let h = app.handle();
+    app.manage(paddock_dialogs::Dialogs::new(Arc::new(contracts)));
+    let main = create_main(h).unwrap();
+    let request: paddock_dialogs::DialogRequest =
+        serde_json::from_value(json!({ "dialogId": "settings", "title": "Settings" })).unwrap();
+    let info = paddock_dialogs::tauri::open(h, "main", request).unwrap();
+    let dialog = app.get_webview_window(&info.label).unwrap();
+    let asked = heard(&dialog, paddock_dialogs::CLOSE_REQUESTED_EVENT);
+    // The OS close of the dialog asks its page (which may refuse): the window stays.
+    assert!(!paddock_dialogs::tauri::close_requested(h, &info.label));
+    assert_eq!(
+        taken(&asked).len(),
+        1,
+        "a close of the dialog asks its page"
+    );
+    // Quit (the menu, Cmd+Q, the tray) asks no page and goes straight to the exit.
+    invoke(&main, "app_quit", json!({})).unwrap();
+    assert_eq!(taken(&quits), ["exit 0"]);
+    assert!(state(&app).quitting());
+    assert!(
+        !exit_requested(h, Some(0)),
+        "an open dialog never refuses the exit"
+    );
+    on_run_event(h, &RunEvent::Exit);
+    assert!(taken(&asked).is_empty(), "no dialog page was asked");
+    // An exit for a start that cannot go on asks none either.
+    exit_with(h, 2);
+    assert_eq!(taken(&quits), ["exit 2"]);
+    assert!(taken(&asked).is_empty());
+}
+
 #[test]
 fn the_tray_draws_its_model_only_when_it_changed_and_runs_its_items() {
     let quits = calls();

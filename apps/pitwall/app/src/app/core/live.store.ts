@@ -78,6 +78,19 @@ export const LiveStore = signalStore(
         }
       },
 
+      /**
+       * Loads the overview only: the windows whose contract allows no more (the tray popover, the Settings window). Pushed
+       * updates then keep it current once `connect` runs.
+       */
+      async loadOverview(): Promise<void> {
+        patchState(store, { loading: true, error: null });
+        try {
+          patchState(store, { overview: await backend.overview(), loading: false });
+        } catch (e) {
+          patchState(store, { loading: false, error: toCommandError(e) });
+        }
+      },
+
       /** Starts the one live subscription (idempotent). */
       connect(): void {
         if (unsubscribe) return;

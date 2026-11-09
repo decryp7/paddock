@@ -74,7 +74,9 @@ mod uid_tests {
 
 pub use command::{CREATE_NO_WINDOW, KEPT_ENV, clean_env, command, lower_priority};
 pub use identity::{Ending, Holder, ProcessId, StartTime, holder};
-pub use instance::{Claim, HeldState, InstanceError, InstanceLock, held_state, is_held};
+pub use instance::{
+    Claim, HeldState, InstanceError, InstanceLock, held_state, is_held_now, is_held_settled,
+};
 pub use login::{
     MAX_PATH_LEN, SHELL_TIMEOUT, ask_shell, login_path, merge_path, parse_probe_output,
     probe_script, shell_candidates,

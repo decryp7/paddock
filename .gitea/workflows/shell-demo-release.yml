@@ -174,10 +174,24 @@ jobs:
         with:
           mode: release
 
+  # Conformance C99 (ADR 0057 §3.4, rule 72): the shared keychain action, scoped to this app and crates/ (ER-31); the release
+  # waits for it. Tags and manual runs only (this workflow runs on nothing else).
+  keychain:
+    name: C99 (no Keychain in a macOS build)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.gitea/actions/keychain
+        with:
+          scope: apps/shell-demo
+
   release:
     name: release
     if: startsWith(github.ref, 'refs/tags/shell-demo-v')
-    needs: [bundle]
+    needs: [bundle, keychain]
     runs-on: ubuntu-latest
     permissions:
       contents: write

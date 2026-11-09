@@ -155,7 +155,7 @@ fsync and rename; one test uses the real file store and one kills a real child p
 
 **Exploration is to a fixed point within stated bounds.** Per configuration the explorer visits every reachable `(record, simulated OS)`
 state until nothing new appears, but rare events (a fault, an interruption) are limited to a short run of steps on each path
-unless `MODEL_DEEP=1` lifts the limit; the default run covers 5 of the 8 configurations (the other 3 need `MODEL_DEEP=1`),
+unless `MODEL_DEEP=1` lifts the limit; the default run covers 8 of the 11 configurations (the other 3 need `MODEL_DEEP=1`; the judged-wait amendment below added three, all in the default run),
 `model_linux.rs` is bounded by its own alphabet, and the deep run does not finish in an hour on one host in a single process
 (split it with `MODEL_CONFIG=<Caps>/<Resp>`, one configuration per run). The integrator adds the deep run to the nightly workflow
 (`.gitea/workflows/nightly.yml`: one step per configuration, `MODEL_DEEP=1 MODEL_CONFIG=... cargo test --release -p paddock-service
@@ -371,3 +371,72 @@ two looks name the same process (pid and start time, rule 53), or when the servi
 process is left as before. The read under the lock right after a decision is the same look, not a second one, and `await_start`
 starts its own count so its first look is not confirmed by the decision's. `Facts` gains `job_confirmed`. A test sees a job once
 and then not at all: the attempts and the remembered version stay.
+
+## Amendment: the wait for the service is judged, not clocked (Pitwall 1.1 B1; amends section 5 and the alphabet and counts of section 7)
+
+**Pattern.** Pitwall's 1.1 branch (before it took the rc's crate) gave the wait for a registered service a judge: launchd needed
+about a minute and on one Mac four, and a fixed 120 s ended the repair as `Registered` ("did not answer, may still start") while
+the job was alive, or waited the full time for a job that had vanished or was crash-looping. ADR 0031 says a running job is judged
+on what is observed (patience), not on a wall clock. The rc's `Stepper` knew only the fixed `Timings::start_wait`. Pitwall's
+repair waited a fixed 120 s until this landed; porting the judge as a side hook in the executor would be a second place that
+decides how a repair ends (ER-21), so it enters the declared machine.
+
+**Decision.** The judge is an input of the state machine, not a decider beside it.
+
+- `StartWatch` (`start_wait.rs`) is a port: `poll(&StartObservation) -> StartVerdict`, `reset()` per registration. `StartWait` is its
+  one implementation (over `paddock_proc::StartJudge`: spinning, no CPU and no progress, paused by the system, not observable for
+  long; the job vanished, or restarts in a loop). `Backend::observe_start() -> Option<StartFacts>` is the backend's side; launchd
+  implements it (the job's process by identity, pid and start time), systemd and Windows answer `None` and keep the fixed wait.
+  `Manager::with_start_watch` installs a watch.
+- **New input of the transition function:** `OsResult::Looked` gains `verdict: Option<StartVerdict>`. `None` means "not judged"
+  (no watch, a backend that cannot observe, or a caller that must return at once, `Timings::without_start_wait`): the wait is bounded
+  by `Timings::start_wait` exactly as before. The executor (`replace_bounded`) produces the verdict (one `observe_start` and one
+  `poll` per look, also at the look where the service answers: until the answering process is confirmed by a second look the wait
+  must stay a judged one) and calls `reset` at every `WaitingForStart`; it decides nothing. When the watch can see the job, those
+  facts are the look: `inspect` is not asked again, so the OS is read once per look.
+- **What the `Stepper` does with a verdict** (in `Stage::Waiting`, after the service-answers check, which stays first and keeps
+  rule 53's process identity; and a cancel is checked **before** a verdict that ends the wait for the judge, so a user who stopped
+  waiting is never told "did not start"):
+  - `Waiting` or `StillWorking(note)`: keep waiting. **A judged wait is not ended by `start_wait`**; its bounds are the verdicts
+    below, a cancel, and the backstop.
+  - `Refused(seen)`: another cycle, exactly like `Job::Refused` seen at once (`next_cycle`, bounded by `allowed`, so the version's
+    attempts still cap the registers).
+  - `Failed(why)`: the repair ends `Failed("The service was registered but did not start: <why>. <next steps>")`: a job that is
+    stuck, vanished, crash-looping, or **never ran**. The registration stays, the record keeps `Awaiting`, so a hold is derived as before.
+  - `GaveUp(why)`: the judge stops waiting for a job that **ran and is not stuck** (only slow). The repair ends `Registered`
+    ("it may still start") with **no advice to repair again**: a running job is never abandoned as broken (ER-19).
+  - `Up`: a watch is told `answers: false` only (whether the service answers, and by which process, is established by the look
+    itself), so `Up` cannot come from `StartWait`; a watch that says it anyway is one more poll, never a settled service. This keeps
+    section 1's "the service answers" meaning one signal.
+- **Two ceilings, both counted in looks, never in seconds** (a paused or starved machine does not spend them): `StartWait`'s own
+  (`START_CEILING_POLLS`, 200 looks at 3 s, about ten minutes): a job that ran ends `GaveUp`, one that never ran ends `Failed`; and
+  the state machine's **backstop** `Timings::judged_ceiling_polls` (a few looks later), which ends any judged wait whatever the
+  watch says: `Registered` if the job was seen running (apart from an old build's job that answers), else `Failed("never started
+  after N checks")`. So a watch that forgets to end itself cannot hang a repair.
+- **Invariants that must still hold in every state** (section 7): no new **mutating** OS call is added (a judged wait adds the
+  read-only `observe_start`, and removes the `inspect` it replaces); a judged wait changes nothing and the lock is let go as for any
+  wait; the unattended register cap per version is unchanged (a `Refused` verdict spends a cycle, which is an attempt); `Recovered`
+  still needs the service's answer; a cancel ends a judged wait with `Registered`; every judged wait ends within
+  `judged_ceiling_polls` looks of its registration; and the hold and `Idle` writes are those of the verdict's outcome (`Failed` leaves
+  a derived hold, `Recovered` writes `Idle`, `Registered` leaves `Awaiting` like any wait that ran out).
+- **Notes** (ER-18): a wait that is alive and silent says "still working" after 20 looks and **again every 20**, each with the number
+  of checks and the seconds so far.
+
+**The check (amends section 7).** The alphabet grows by the OS behaviours that only a judge tells apart, as three configurations of
+a Mac with a watched manager, in the **default** run (the waits shrunk, `watched_timings` in `model.rs`: a fixed wait of 12 s, a
+backstop of 20 looks, the watch's ceiling 5 looks before it; so no `MODEL_DEEP` run is needed for them):
+`Looping` (the job exits with code 3 and the OS restarts it: the wait fails early with the observation), `WatchedLate` (the job comes
+up 30 s after the register, past the fixed wait: the judge waits for it) and `WatchedNever` (the job only ever shows "not running":
+the ceiling of looks ends the wait, as a `Failed` because nothing ran). With them there are **11 configurations**; the default run
+explores **8** (the original five and these three), each in a test of its own with a floor, and the long run (`MODEL_DEEP=1`) adds
+`Slow`, `Late` and `Linux/Fast`. The state key does not hold the number of looks (it is per wait, reset at each register call and
+bounded by the backstop), so the set of states stays finite for the same reason as before: attempts are at most 3, the clock is
+virtual, and a wait is at most `judged_ceiling_polls` looks. The simulator enforces that bound: it panics when a wait has looked more
+than twice the backstop since the last register, so a ceiling that stops ending waits fails the run with its reason instead of
+hanging it. A positive control (`a_judged_wait_ends_as_the_judge_says_in_each_watched_configuration`) shows each outcome, and a
+lib test shows that looks that only ever show a pending job fail at the 201st poll.
+
+**What was refuted.** Treating `Failed` as a register error (it is not: the OS accepted the register); making `Refused` a new
+`Hold` (a refused job already is `Hold::Refused` through `Job::Refused` and the attempts, one rule for both ways of seeing it);
+keeping the verdict in the executor, which would let two places decide how the wait ends; and ending a running job at the ceiling
+with `Failed` and "Repair again" (it contradicted ER-19 and itself: the job was alive).

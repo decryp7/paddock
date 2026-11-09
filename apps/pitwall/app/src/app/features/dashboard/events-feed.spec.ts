@@ -30,7 +30,7 @@ async function mount(events: PitwallEvent[] | null, inputs: { limit?: number } =
 describe('EventsFeed', () => {
   it('shows the empty state when nothing happened yet', async () => {
     const { el } = await mount(null);
-    expect(el.querySelector('pw-empty-state')!.textContent).toContain('No events yet');
+    expect(el.querySelector('pd-empty-state')!.textContent).toContain('No events yet');
     expect(el.querySelectorAll('li').length).toBe(0);
   });
 
@@ -42,7 +42,7 @@ describe('EventsFeed', () => {
     expect(items[0]!.querySelector('time')!.textContent).toBe('2 min ago');
     expect(items[0]!.querySelector('mat-icon')!.getAttribute('data-mat-icon-name')).toBe('error');
     expect(items[2]!.querySelector('mat-icon')!.getAttribute('data-mat-icon-name')).toBe('models');
-    expect(el.querySelector('pw-empty-state')).toBeNull();
+    expect(el.querySelector('pd-empty-state')).toBeNull();
   });
 
   it('shows the reason an action happened, when there is one', async () => {

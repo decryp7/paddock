@@ -1,11 +1,16 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type {
+  ChatModels,
+  ChatAttached,
+  ChatAttachRules,
+  ChatStorage,
+  OpenedApp,
+  ConnectedApp,
   AppInfo,
   CacheClearScope,
   CacheInfo,
   AppPermissions,
-  AppUpdateStatus,
   BenchmarkResult,
   BuildCapabilities,
   EnginePinState,
@@ -24,6 +29,7 @@ import type {
   PresetPreview,
   History,
   HistoryRange,
+  JobEvent,
   UsageRange,
   UsageSeries,
   HfModel,
@@ -43,15 +49,19 @@ import type {
   Settings,
   UpdateCheckResult,
   UpdateCheckStatus,
-  UpdateInfo,
   UpdateNotice,
   UpdateSchedule,
 } from './api.types';
+import type { LoadingRows, PopoverHeader } from './generated/widgets';
+import type { PopoverEdit, PopoverPush, PopoverValues, PopoverView } from './widgets.types';
 import type { PitwallBackend, Unsubscribe } from './backend';
+import { parseJobEvent } from './job-wire';
 import { toCommandError } from './command-error';
 
 /** The Tauri event the app forwards every live update on. */
 export const LIVE_EVENT = 'pitwall://live';
+/** The Tauri event the app pushes the popup's layout, values and header on after any change. */
+export const POPOVER_EVENT = 'pitwall://popover';
 
 /** The Tauri primitives the backend uses, injectable so a spec can pin every command name and argument shape. */
 export interface TauriBridge {
@@ -78,6 +88,7 @@ const realBridge: TauriBridge = {
  */
 export class TauriBackend implements PitwallBackend {
   constructor(private readonly bridge: TauriBridge = realBridge) {}
+  private readonly jobListeners = new Set<(event: JobEvent) => void>();
 
   // Dashboard
   overview(): Promise<Overview> {
@@ -117,6 +128,40 @@ export class TauriBackend implements PitwallBackend {
   releaseMemory(): Promise<number> {
     return this.run('release_memory');
   }
+  popoverView(): Promise<PopoverView> {
+    return this.run('popover_view');
+  }
+  popoverValues(): Promise<PopoverValues> {
+    return this.run('popover_values');
+  }
+  popoverHeader(): Promise<PopoverHeader> {
+    return this.run('popover_header');
+  }
+  popoverShape(): Promise<LoadingRows[]> {
+    return this.run('popover_shape');
+  }
+  editPopover(edit: PopoverEdit): Promise<PopoverView> {
+    return this.run('edit_popover', { edit });
+  }
+  onPopover(handler: (push: PopoverPush) => void): Unsubscribe {
+    let stopped = false;
+    let unlisten: (() => void) | null = null;
+    this.bridge
+      .listen<PopoverPush>(POPOVER_EVENT, (push) => {
+        if (!stopped) handler(push);
+      })
+      .then(
+        (u) => {
+          if (stopped) u();
+          else unlisten = u;
+        },
+        () => undefined,
+      );
+    return () => {
+      stopped = true;
+      unlisten?.();
+    };
+  }
   cacheInfo(): Promise<CacheInfo> {
     return this.run('cache_info');
   }
@@ -128,6 +173,17 @@ export class TauriBackend implements PitwallBackend {
   }
   cancelJob(id: string): Promise<void> {
     return this.run('cancel_job', { id });
+  }
+
+  jobEvents(listener: (event: JobEvent) => void): Unsubscribe {
+    this.jobListeners.add(listener);
+    return () => void this.jobListeners.delete(listener);
+  }
+  jobCancel(jobId: number): Promise<boolean> {
+    return this.run('app_job_cancel', { id: jobId });
+  }
+  jobStopWaiting(jobId: number): Promise<boolean> {
+    return this.run('app_job_stop_waiting', { id: jobId });
   }
 
   // Models
@@ -153,7 +209,7 @@ export class TauriBackend implements PitwallBackend {
     return this.run('delete_model', { id });
   }
   loadModel(id: string): Promise<void> {
-    return this.run('load_model', { id });
+    return this.job('start_load_model', { id });
   }
   unloadModel(id: string): Promise<void> {
     return this.run('unload_model', { id });
@@ -237,7 +293,7 @@ export class TauriBackend implements PitwallBackend {
     return this.run('update_notices');
   }
   checkUpdatesNow(): Promise<UpdateCheckResult> {
-    return this.run('check_updates_now');
+    return this.job('start_check_updates');
   }
   setUpdateCheck(enabled: boolean, schedule: UpdateSchedule): Promise<UpdateCheckStatus> {
     return this.run('set_update_check', { enabled, schedule });
@@ -313,7 +369,7 @@ export class TauriBackend implements PitwallBackend {
     return this.run('benchmarks');
   }
   runBenchmark(modelId: string): Promise<BenchmarkResult> {
-    return this.run('run_benchmark', { modelId });
+    return this.job('start_benchmark', { modelId });
   }
 
   // Settings
@@ -323,40 +379,101 @@ export class TauriBackend implements PitwallBackend {
   saveSettings(settings: Settings): Promise<Settings> {
     return this.run('save_settings', { settings });
   }
-  appUpdateStatus(): Promise<AppUpdateStatus> {
-    return this.run('app_update_status');
-  }
-  checkAppUpdate(): Promise<UpdateInfo | null> {
-    return this.run('check_app_update');
-  }
-  installAppUpdate(): Promise<void> {
-    return this.run('install_app_update');
-  }
 
   // The server as an OS service, and start at log-in
   serviceState(): Promise<ServiceInstall> {
     return this.run('service_state');
   }
   installService(): Promise<ServiceInstall> {
-    return this.run('install_service');
+    return this.job('start_install_service');
   }
   uninstallService(): Promise<ServiceInstall> {
-    return this.run('uninstall_service');
+    return this.job('start_uninstall_service');
   }
   repairService(): Promise<ServiceInstall> {
-    return this.run('repair_service');
+    return this.job('start_repair_service');
   }
   declineService(): Promise<void> {
     return this.run('decline_service');
   }
   openLoginItems(): Promise<void> {
-    return this.run('open_login_items');
+    return this.run('open_service_login_items');
   }
   quitApp(stopServing: boolean, remember: boolean): Promise<void> {
     return this.run('quit_app', { stopServing, rememberChoice: remember });
   }
   takeQuitAsk(): Promise<boolean> {
     return this.run('take_quit_ask');
+  }
+  chatEnabled(): Promise<boolean> {
+    return this.run('chat_enabled');
+  }
+  connectedApps(): Promise<ConnectedApp[]> {
+    return this.run('connected_apps');
+  }
+  setAppKey(appId: string, key: string): Promise<ConnectedApp> {
+    return this.run('set_app_key', { appId, key });
+  }
+  connectApp(appId: string): Promise<ConnectedApp> {
+    return this.run('connect_app', { appId });
+  }
+  forgetApp(appId: string): Promise<ConnectedApp> {
+    return this.run('forget_app', { appId });
+  }
+  openConnectedApp(appId: string): Promise<OpenedApp> {
+    return this.run('open_connected_app', { appId });
+  }
+  revokeToolApproval(appId: string, tool: string): Promise<ConnectedApp> {
+    return this.run('revoke_tool_approval', { appId, tool });
+  }
+  chatModels(): Promise<ChatModels> {
+    return this.run('chat_models_list');
+  }
+  setChatModel(modelId: string): Promise<ChatModels> {
+    return this.run('set_chat_model', { modelId });
+  }
+  chatRefreshWindow(): Promise<number> {
+    return this.run('chat_refresh_window');
+  }
+  chatStorage(): Promise<ChatStorage> {
+    return this.run('chat_storage');
+  }
+  setChatSaveNew(save: boolean): Promise<ChatStorage> {
+    return this.run('set_chat_save_new', { save });
+  }
+  chatSaved(conversationId: string): Promise<boolean> {
+    return this.run('chat_saved', { conversationId });
+  }
+  setChatSaved(conversationId: string, save: boolean): Promise<boolean> {
+    return this.run('set_chat_saved', { conversationId, save });
+  }
+  deleteAllChats(): Promise<ChatStorage> {
+    return this.run('delete_all_chats');
+  }
+  chatAttachRules(): Promise<ChatAttachRules> {
+    return this.run('chat_attach_rules');
+  }
+  chatAttach(name: string, bytes: Uint8Array): Promise<ChatAttached> {
+    // Tauri carries a byte array as a JSON list of numbers; Rust bounds the request (2 MiB) and checks the file.
+    return this.run('chat_attach', { name, bytes: Array.from(bytes) });
+  }
+  chatDetach(sha256: string): Promise<void> {
+    return this.run('chat_detach', { sha256 });
+  }
+  onConnectedApps(handler: (apps: ConnectedApp[]) => void): Unsubscribe {
+    let stopped = false;
+    let unlisten: (() => void) | null = null;
+    this.bridge.listen<ConnectedApp[]>('pitwall://connected-apps', (apps) => handler(apps)).then(
+      (u) => {
+        if (stopped) u();
+        else unlisten = u;
+      },
+      () => undefined,
+    );
+    return () => {
+      stopped = true;
+      unlisten?.();
+    };
   }
   onQuitAsk(handler: () => void): Unsubscribe {
     let stopped = false;
@@ -378,6 +495,42 @@ export class TauriBackend implements PitwallBackend {
   }
   setAutostart(enabled: boolean): Promise<boolean> {
     return this.run('set_autostart', { enabled });
+  }
+
+  /**
+   * Starts a background job (`start_*` commands, ADR 0024) and resolves with its result when it ends. Phase and progress go
+   * to {@link jobEvents}; there is no timeout (ER-19), a failure rejects with the typed error and a cancelled job rejects
+   * with the `cancelled` code.
+   */
+  private job<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      // The job this call started: the first event names it until `start_*` answers with its id; events of any other job are not ours.
+      let id: number | null = null;
+      const channel = this.bridge.channel<unknown>((raw) => {
+        const event = parseJobEvent(raw);
+        if (event === null) return;
+        id ??= event.jobId;
+        if (event.jobId !== id) return;
+        for (const l of [...this.jobListeners]) {
+          try {
+            l(event);
+          } catch {
+            // A broken listener must not stop the others or the job's own result.
+          }
+        }
+        if (event.kind === 'done') resolve(event.result as T);
+        else if (event.kind === 'failed') reject(event.error);
+        else if (event.kind === 'cancelled') {
+          reject({
+            code: 'cancelled',
+            message: event.stoppedWaiting ? 'Stopped waiting. The server may still be working on it.' : 'Cancelled.',
+          });
+        }
+      });
+      this.run<unknown>(cmd, { ...args, onEvent: channel }).then((started) => {
+        if (typeof started === 'number') id = started;
+      }, reject);
+    });
   }
 
   private async run<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {

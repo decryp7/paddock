@@ -16,10 +16,16 @@ serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 toml.workspace = true
+# Widget layouts (family ADR 0035): the closed catalogue of the tray popup lives here.
+paddock-widgets = { path = "../../../../crates/paddock-widgets" }
+# TypeScript for the catalogue and value types (generated into the UI's core/generated/widgets.ts).
+ts-rs = "11.1"
 
 [dev-dependencies]
 proptest.workspace = true
 tempfile.workspace = true
+# `testing::sync_generated`, the stale-file check of the generated TypeScript and the mock's fixtures.
+paddock-commands = { path = "../../../../crates/paddock-commands" }
 
 [lints]
 workspace = true

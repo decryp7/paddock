@@ -19,6 +19,8 @@ const UNSTYLED_ON_PURPOSE = new Set<string>([
   'needs-ai.ts:pd-btn', 'needs-ai.ts:pd-btn--ghost',
   'activity-page.ts:pd-btn', 'activity-page.ts:pd-btn--sm',
   'setting-field.ts:pd-switch', 'settings-window.ts:pd-check',
+  // The tray footer's menu panel class: the panel is drawn in the overlay, so its gap rule lives in scss/_material.scss.
+  'tray-popover.ts:pd-tray-menu',
   // Structural hooks (selectors in tests, grouping) with no rule of their own.
   'channels-page.ts:pd-ch__namecell', 'report-problem-dialog.ts:pd-diag__what', 'report-problem-dialog.ts:pd-diag__num',
   'sidebar.ts:pd-top', 'sidebar.ts:pd-bottom', 'status-bar.ts:pd-start', 'service-page.ts:pd-service__block',

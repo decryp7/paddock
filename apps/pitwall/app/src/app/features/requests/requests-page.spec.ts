@@ -31,8 +31,8 @@ describe('msCell', () => {
   it('formats table milliseconds compactly', () => {
     expect(msCell(null)).toBe('—');
     expect(msCell(212.4)).toBe('212');
-    expect(msCell(1460)).toBe('1.5 s');
-    expect(msCell(12_400)).toBe('12 s');
+    expect(msCell(1460)).toBe('1,460');
+    expect(msCell(12_400)).toBe('12,400');
   });
 });
 
@@ -55,7 +55,8 @@ describe('request cells', () => {
     const all = layout(new Set(COLUMNS.filter((c) => c.optional).map((c) => c.id)));
     expect(all.cols.length).toBe(COLUMNS.length);
     expect(base.narrow).not.toBe(base.template);
-    expect(base.tiny).toBe('76px minmax(100px, 1fr) 148px 32px');
+    expect(base.compact).toBe('68px minmax(88px, 1fr) minmax(88px, 1fr) 72px 132px 32px');
+    expect(base.tiny).toBe('68px minmax(100px, 1fr) 132px 32px');
   });
 });
 
@@ -76,7 +77,7 @@ describe('RequestsPage', () => {
 
   it('adds a column from the Columns menu', async () => {
     const { fixture, el } = await render();
-    (Array.from(el.querySelectorAll('button')).find((b) => b.textContent!.includes('Columns')) as HTMLButtonElement).click();
+    el.querySelector<HTMLButtonElement>('button[aria-label="Columns"]')!.click();
     await settle(fixture);
     const item = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]')).find((b) => b.textContent!.includes('API'))!;
     item.click();
@@ -97,17 +98,44 @@ describe('RequestsPage', () => {
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText: write } });
     row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
     await settle(fixture);
-    const labels = Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item'));
+    const labels = Array.from(document.querySelectorAll<HTMLButtonElement>('.mat-mdc-menu-panel .mat-mdc-menu-item'));
     expect(labels.map((b) => b.textContent!.trim())).toEqual(['Details', 'Copy request id', 'Copy endpoint', expect.stringContaining('Only requests from')]);
     labels[1]!.click();
     await settle(fixture);
     expect(write).toHaveBeenCalledWith(store.visible()[0]!.id);
     row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     await settle(fixture);
-    Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item')).at(-1)!.click();
+    Array.from(document.querySelectorAll<HTMLButtonElement>('.mat-mdc-menu-panel .mat-mdc-menu-item')).at(-1)!.click();
     await settle(fixture);
     expect(store.filter().app).not.toBe('all');
     vi.unstubAllGlobals();
+  });
+
+  it('opens the row menu from the keyboard (Shift+F10)', async () => {
+    const { fixture, el } = await render();
+    const row = el.querySelector<HTMLElement>('[role="row"][tabindex]')!;
+    const items = () => Array.from(document.querySelectorAll('.mat-mdc-menu-panel .mat-mdc-menu-item')).map((b) => b.textContent!.trim());
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }));
+    await settle(fixture);
+    expect(items()).toEqual(['Details', 'Copy request id', 'Copy endpoint', expect.stringContaining('Only requests from')]);
+  });
+
+  it('opens the same row menu from the row\'s "..." button', async () => {
+    const { fixture, el } = await render();
+    const row = el.querySelector<HTMLElement>('[role="row"][tabindex]')!;
+    row.querySelector<HTMLButtonElement>('button[aria-label^="More actions for the request"]')!.click();
+    await settle(fixture);
+    expect(Array.from(document.querySelectorAll('.mat-mdc-menu-panel .mat-mdc-menu-item')).map((b) => b.textContent!.trim())).toEqual(['Details', 'Copy request id', 'Copy endpoint', expect.stringContaining('Only requests from')]);
+  });
+
+  it('filters by status with a Material segmented control that counts the errors', async () => {
+    const { fixture, el, store } = await render();
+    const group = el.querySelector('mat-button-toggle-group[aria-label="Status"]')!;
+    const errors = Array.from(group.querySelectorAll<HTMLButtonElement>('[role="radio"]')).find((b) => b.textContent!.includes('Errors'))!;
+    expect(errors.textContent).toContain(String(store.errorCount()));
+    errors.click();
+    await settle(fixture);
+    expect(store.filter().status).toBe('errors');
   });
 
   it('renders the filter row and the table header', async () => {
@@ -117,9 +145,10 @@ describe('RequestsPage', () => {
     expect(Array.from(el.querySelectorAll('[role="columnheader"]')).map((h) => h.textContent!.trim())).toEqual(['Time', 'App', 'Model', 'Endpoint', 'TTFT ms', 'Total s', 'Tokens in / out', 'Status', 'Actions']);
     expect(el.querySelector('.shown')?.textContent).toContain(`${store.records().length} requests`);
     expect(el.querySelector('select')).toBeNull();
-    el.querySelector<HTMLButtonElement>('#pw-req-app')!.click();
+    expect(el.querySelector('#pw-req-search')?.closest('mat-form-field')).not.toBeNull();
+    el.querySelector<HTMLElement>('#pw-req-app')!.click();
     await settle(fixture);
-    const options = Array.from(document.querySelectorAll('.cdk-overlay-container .pw-select-list .opt')).map((o) => o.textContent?.trim());
+    const options = Array.from(document.querySelectorAll('.cdk-overlay-container mat-option')).map((o) => o.textContent?.trim());
     expect(options[0]).toBe('All apps');
     expect(options.length).toBeGreaterThan(2);
   });
@@ -129,9 +158,9 @@ describe('RequestsPage', () => {
     const search = el.querySelector('#pw-req-search') as HTMLInputElement;
     search.value = 'embeddings';
     search.dispatchEvent(new Event('input'));
-    el.querySelector<HTMLButtonElement>('#pw-req-app')!.click();
+    el.querySelector<HTMLElement>('#pw-req-app')!.click();
     await settle(fixture);
-    Array.from(document.querySelectorAll<HTMLElement>('.cdk-overlay-container .pw-select-list .opt'))
+    Array.from(document.querySelectorAll<HTMLElement>('.cdk-overlay-container mat-option'))
       .find((o) => o.textContent!.trim().toLowerCase() === 'spotter')!
       .click();
     (Array.from(el.querySelectorAll('[role="radio"]')).find((b) => b.textContent?.includes('Errors')) as HTMLButtonElement).click();

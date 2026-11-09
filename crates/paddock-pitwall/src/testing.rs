@@ -491,7 +491,7 @@ fn serve(mut conn: TcpStream, shared: &Shared) {
             &mut conn,
             200,
             &[],
-            &json!({"ok": true, "name": "pitwall", "version": s.version, "apiVersion": s.api_version, "serving": s.serving, "offline": false, "loadedModels": 0}),
+            &json!({"ok": true, "name": "pitwall", "version": s.version, "apiVersion": s.api_version, "serving": s.serving, "loadedModels": 0}),
         ),
         Some("/x/v1/pair") => {
             let started = {

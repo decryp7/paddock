@@ -9,7 +9,6 @@ const status = (p: Partial<UpdateCheckStatus> = {}): UpdateCheckStatus => ({
   lastAttemptAt: null,
   lastMessage: null,
   nextCheckAt: null,
-  offline: false,
   running: false,
   notices: 0,
   host: 'huggingface.co',
@@ -19,16 +18,15 @@ const status = (p: Partial<UpdateCheckStatus> = {}): UpdateCheckStatus => ({
 
 describe('checkSummary', () => {
   it('says when it last ran and when it runs next', () => {
-    expect(checkSummary(status({ lastCheckedAt: NOW - 3 * HOUR, lastAttemptAt: NOW - 3 * HOUR, nextCheckAt: NOW + 6 * 24 * HOUR }), NOW)).toBe('Last checked 3 h ago. The next check runs in 6 d.');
+    expect(checkSummary(status({ lastCheckedAt: NOW - 3 * HOUR, lastAttemptAt: NOW - 3 * HOUR, nextCheckAt: NOW + 6 * 24 * HOUR }), NOW)).toBe('Last checked 3 h ago. The next check runs in 6 days.');
   });
 
   it('says it was never checked, and that the first check runs soon once on', () => {
     expect(checkSummary(status({ nextCheckAt: NOW }), NOW)).toBe('Never checked. The next check runs soon.');
   });
 
-  it('explains why nothing is scheduled: off, or offline mode', () => {
+  it('explains why nothing is scheduled: off', () => {
     expect(checkSummary(status({ settings: { enabled: false, schedule: 'weekly' } }), NOW)).toBe('Never checked. Scheduled checks are off; Check now still works.');
-    expect(checkSummary(status({ offline: true, nextCheckAt: null }), NOW)).toContain('Offline mode is on, so no check can run.');
   });
 
   it('reports an attempt that did not finish', () => {

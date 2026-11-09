@@ -1,8 +1,8 @@
 # Pitwall roadmap
 
 An honest account of what works, what is partly there and what is only planned. Status words: **works** (implemented
-and covered by tests), **verified** (also run for real on a machine), **partial**, **planned**. Pitwall is
-unreleased; there are no installers yet and nothing is promised for a date.
+and covered by tests), **verified** (also run for real on a machine), **partial**, **planned**. Pitwall 1.0.x is
+released; 1.1 is the current line. Nothing is promised for a date beyond the release in progress.
 
 ## Verified on a real machine
 
@@ -42,7 +42,7 @@ task; CI runs the Rust and UI test suites on Linux, Windows and macOS, which is 
   projector and JSON-schema output on llama.cpp.
 - `/x/v1`: health, pairing, model selection by capability, models, jobs and cancel; provenance headers on every answer.
 - Security: hashed per-app keys, pairing with a six-digit code, per-app permissions and rate and token budgets,
-  admin key, Host and Origin checks, a single audited outbound client, offline mode.
+  admin key, Host and Origin checks, a single audited outbound client.
 - Model catalog packs (declarative, `*.models.toml`). Engine packs and the llamafile pack existed in 1.0.1 and were removed in 1.0.3: llama.cpp is the only engine (ADR 0020).
 - Management API and live feed for the UI; versioned settings with backup; metrics with bounded retention; discovery file.
 
@@ -53,10 +53,12 @@ task; CI runs the Rust and UI test suites on Linux, Windows and macOS, which is 
 - Tauri shell: tray and window lifecycle, admin key in the OS credential store, service install per OS (Windows
   service, macOS launch agent via `SMAppService`, Linux systemd user service), start at login, restart after update.
   **Implemented and unit-tested**; not yet exercised on real Windows and Linux machines.
-- Installers: Windows NSIS, macOS `.dmg`, Linux `.deb` and AppImage; unsigned until the signing secrets are set
+- Installers: Windows NSIS, macOS `.dmg`, Linux `.deb` and AppImage, built by `pitwall-release.yml` from a `pitwall-v*`
+  tag; the macOS app is ad-hoc sealed and not notarised, the Windows installer is not code-signed
   ([releasing.md](releasing.md)).
-- Updater with signed `latest.json`: **planned**, needs the secrets.
-- CI on Linux, the Windows runner and the macOS host: `build.yml` (checks, installers and the gated release job) exists.
+- Updater with signed `latest.json` (the family key, the `pitwall-latest` feed): **works** in 1.1; the VM test plan is in
+  the [testing manual](testing-manual.md#update). 1.0.x copies do not look at that feed and are reinstalled once by hand.
+- CI on Linux, the Windows runner and the macOS host: Pitwall's legs of the monorepo `ci.yml` and `pitwall-release.yml`.
 
 ## Phase 3: the rest of the product brief *(planned)*
 
@@ -79,10 +81,10 @@ task; CI runs the Rust and UI test suites on Linux, Windows and macOS, which is 
 | Dedicated embedding and reranker adapters | Embeddings work through llama.cpp with an embedding model; rerank **planned** |
 | Real-engine automated test (`PITWALL_LLAMA_E2E=1`) | **Planned**; the smoke test is manual |
 | Usage per connected app | **Built.** Requests, prompt and completion tokens, errors and peak memory per app in hourly buckets (7 days) and daily buckets (90 days), stored locally in `usage.json` (versioned, atomic, backup, tolerant of damage). The Apps page has an app detail with a 24 h / 7 d / 30 d chart, limits with progress and the latest requests; the Dashboard has a usage-by-app chart. Optional limits per app: requests per minute and per day, tokens per day and per month, concurrent requests and a memory share, each refused with a typed, explained error, with a warning event at 80 % |
-| Model update notices | **Built.** Off until the user turns it on (weekly or daily, or Check now). Asks `huggingface.co`, through the one egress client, only for the repository ids of models you downloaded, never in offline mode (zero requests, a typed `offline` outcome), at most 40 repositories per check with timeouts, a pause, a rate limit and a stop on HTTP 429. Rules in the core: a newer revision of the same file (by recorded SHA-256, or by size for old entries), a better quantisation that fits, an imatrix build. Notices show as a Models banner, a note on the library row, a dashboard line and a tray entry; Dismiss or Remind me in a week; "Get it" confirms with the host and then uses the normal download, never automatically. A sidecar `<file>.origin.json` records where a model came from. Stored in `model-updates.json` (versioned, atomic, backup, tolerant of damage). Tests use a fake Hugging Face API. ADR 0017 |
+| Model update notices | **Built.** Off until the user turns it on (weekly or daily, or Check now). Asks `huggingface.co`, through the one egress client, only for the repository ids of models you downloaded, at most 40 repositories per check with timeouts, a pause, a rate limit and a stop on HTTP 429. Rules in the core: a newer revision of the same file (by recorded SHA-256, or by size for old entries), a better quantisation that fits, an imatrix build. Notices show as a Models banner, a note on the library row, a dashboard line and a tray entry; Dismiss or Remind me in a week; "Get it" confirms with the host and then uses the normal download, never automatically. A sidecar `<file>.origin.json` records where a model came from. Stored in `model-updates.json` (versioned, atomic, backup, tolerant of damage). Tests use a fake Hugging Face API. ADR 0017 |
 | Model presets and aliases | **Built.** An app asks for a name such as `debrief-explain`; the user decides which model (or capability selection like `auto:chat,fast`) and parameters (context, temperature, top-p, max tokens, system prompt) serve it. Resolved in the core next to capability selection, in the OpenAI, Anthropic and Ollama families; listed in `/v1/models` and `/api/tags`; `X-Pitwall-Alias` and the request record say which alias was used; a removed target model gives a typed `preset_target_unavailable` error. Models has a Presets tab with a live preview from the engine; stored in `presets.json` (versioned, atomic, backup, tolerant of damage). ADR 0014 |
 | Parallel slots per model, with their memory cost | **Built.** Choose 1 to 16 parallel slots per model (default 2); the context is per slot and `--ctx-size` is the total, so each slot adds its own KV cache. Models > Slots shows "adds ~X GB" per step and a fit table from the engine (longest context at 1, 2, 4, 8 slots, the most slots at a context, in words with status colours); Discover shows how many requests a variant allows; the scheduler queues requests beyond a model's slots; a change applies on the next load and never touches a busy model. ADR 0016 |
-| `pitwall` command-line tool | **Built.** A small Rust CLI (`crates/pitwall-cli`) over the local management and standard APIs: `status`, `ps`, `models`, `load`, `unload`, `pull` (progress, resumable, honours offline mode), `keys`, `presets`, `chat` (streaming, per-app key from `PITWALL_API_KEY`) and `bench`; `--json`, timeouts, stable exit codes 0 to 4; no new server surface. Not yet shipped inside the installers: the bundle needs a second `externalBin` and a `PATH` entry (follow-up) |
+| `pitwall` command-line tool | **Built.** A small Rust CLI (`crates/pitwall-cli`) over the local management and standard APIs: `status`, `ps`, `models`, `load`, `unload`, `pull` (progress, resumable), `keys`, `presets`, `chat` (streaming, per-app key from `PITWALL_API_KEY`) and `bench`; `--json`, timeouts, stable exit codes 0 to 4; no new server surface. Not yet shipped inside the installers: the bundle needs a second `externalBin` and a `PATH` entry (follow-up) |
 | Engine version pin, rollback and capability gating | **Built.** Pin a build for all models or per model (strict: a pin to an uninstalled or failed build is a typed error saying to install it on the llama.cpp page); selection is model pin, then global pin, then automatic. One-click rollback goes to the previous installed build that passed its self-test, never a failed one, and says which loaded models switch on their next load (an engine is never swapped under a busy model). A data-driven capability matrix (`capabilities.json`, minimum llama.cpp release and unsupported backends per feature) gates vision, tools, JSON-schema output, embeddings and rerank: a request the build cannot serve gets a typed, explained error naming the build needed (503 `engine_build_too_old`, 400 `capability_unsupported`, 503 `engine_pin_unavailable`) in the OpenAI, Anthropic and Ollama shapes, and `/x/v1/models` and `auto:` selection leave those capabilities out. The llama.cpp page shows a Version pin toggle, a Features list per build in words and Roll back naming its target; Models shows `pinned to` with a menu. Stored in `engine-pins.json` (versioned, atomic, backup, tolerant of damage). ADR 0018 |
 
 Tray popup widgets on paddock-widgets and @decryp7/paddock-ui/widgets (ADR [0035](../../../docs/adr/0035-widget-layouts-are-shared.md)); planned, after the app's current release.
@@ -100,6 +102,51 @@ Pacenotes: toolsets `orient`, `code`, `review`, `diagrams`, `requirements` and `
 - Property tests ("never panics") and fuzz targets for every parser; mutation testing to measure test strength.
 - Below-normal process priority for engines is applied on Windows only; decide the macOS and Linux equivalent.
 - Pin updates for llama.cpp as reviewed changes that pass the end-to-end test.
+
+## 1.1: jobs in the UI (ADR 0024)
+
+- **Done (WP-3).** The UI runs model loads, benchmarks, the model update check, service install, uninstall and Repair and the
+  app update as jobs (`start_*` commands over a channel; `TauriBackend.job`): no UI timeout (`JOB_METHODS` bypass
+  `withTimeout`, ER-19), phase-labelled progress with a growing count, Cancel in every phase, "Stop waiting" while
+  `canStopWaiting` and a "Still working" note after a quiet spell (`JobsService`, `pw-jobs-panel`). A cancelled job rejects
+  with the `cancelled` code, which toasts as information, not as an error.
+- **Deleted.** The old blocking commands (`load_model`, `run_benchmark`, `check_updates_now`, `install_service`,
+  `uninstall_service`, `repair_service`, `install_app_update`, `request_repair`) are gone from the Tauri commands; the
+  server's own methods of the same names are only reached through the jobs. Wire contract: `core/testdata/job-events.json`
+  is checked by a Rust test (every `JobEvent` variant serialises to it) and by `jobs.spec.ts` (every entry parses).
+- **Note.** "Still working" rarely shows: a running job reports every second, so it appears only when the app stops hearing from
+  the job (a stuck step), which is what it is for.
+- **Left for 1.1.** `checkAppUpdate` and `appUpdateStatus` are quick calls and keep a 30 s timeout.
+
+## 1.1: on the shared shell (WP-2, plan `docs/plans/1.1-wp2.md`)
+
+- **Quit gate (code review 2026-10-30): met.** Pitwall uses the shared Quit (`APP_QUIT`, `Builder::menu_quit_without_window` with
+  `quit::request_from_menu`) and `quit_from_the_menu_with_no_window_open_still_quits_or_asks` (`app/src-tauri/tests/it/shell.rs`) is
+  un-ignored and passes.
+
+- **Done (WP-2.1).** The UI uses paddock-ui's `--pd-*` tokens and Material theme (`data-accent="pitwall"`); Pitwall's own
+  scale is gone; the chart colours are derived from the shared tokens (`scripts/ci/tokens.test.mjs`).
+- **Done (WP-2.2).** No layout problem at 900, 1024 and 1280 px in Chromium and WebKit (`e2e/layout.baseline.json` is
+  empty): tables fit their panel, the detail panel lies over a list too narrow for both, forms and toolbars step down.
+- **Done (WP-2.4, Rust).** The app crate runs on `paddock-shell`: the shell opens the tray and the main window (ADR 0029),
+  owns the windows, the exit and its watchdog, and guards Pitwall's commands; start tests on the mock runtime. The main
+  window is opaque (user, 2026-10-30).
+- **Done (WP-2.3).** Every control is Material or paddock-ui (rule 47; `scripts/ci/controls.test.mjs` fails on a native or
+  retired one); one filled primary per region (`e2e/primary.e2e.ts`); the axe baseline is empty.
+- **Done (WP-2.7, first half).** `THIRD_PARTY_NOTICES.md` for the app, the server and the UI, checked in CI; About shows it
+  once the shell's updater is registered.
+- **Done (tables).** Every table is Angular Material's `mat-table` with a sticky header; a column constant across three or
+  more rows is hidden and its value said once; the request log stays a virtual grid.
+- **Done (updater, shared part).** Pitwall moves to the shared updater with WP-2.5.
+- **Done (WP-2.5, WP-2.6, WP-2.7, WP-2.9).** The UI runs on the shell: one bundle, three kinds of window; the pages frame;
+  the Settings window; About, Updates and What's new from the shared updater; the macOS
+  menu's Quit items through Pitwall's quit flow; Pitwall's four dialogs and every confirmation (`pd.confirm`) as OS
+  windows that fit their content.
+- **WP-2.8.** Screenshots recaptured (`docs/screenshots`); the independent review (ER-23) is still to come.
+- **Left.** Mod+Q while no window is open (the shell's native menu runs commands in a window); the Settings window's
+  footer says "saved as you make them" for a page that saves with its own bar (a paddock-ui gap); the tray popover
+  (`#/tray`) is not opened by the native tray yet; the C4 UI diagrams show the 1.0 sidebar; `.changelog()` for What's new
+  once `CHANGELOG.md` lands with the 1.1.0 bump.
 
 ## Next (hand-off, 2026-10-22)
 

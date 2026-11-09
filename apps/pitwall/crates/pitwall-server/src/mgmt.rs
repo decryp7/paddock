@@ -67,6 +67,35 @@ fn arg<T: DeserializeOwned>(a: &Value, name: &str) -> R<T> {
         .map_err(|e| err(mgmt::ErrorCode::BadRequest, format!("argument \"{name}\": {e}")))
 }
 
+/// Runs `work` as an operation the caller can cancel with `cancel_op`, named by the optional `opId` argument. `None`
+/// when it was cancelled (the work is dropped); without an `opId` it runs to the end as before.
+async fn cancellable<T>(st: &AppState, a: &Value, work: impl std::future::Future<Output = R<T>>) -> R<Option<T>> {
+    let Some(op) = arg::<Option<String>>(a, "opId")? else {
+        return work.await.map(Some);
+    };
+    struct Forget<'a>(&'a AppState, String);
+    impl Drop for Forget<'_> {
+        fn drop(&mut self) {
+            lock(&self.0.ops).end(&self.1);
+        }
+    }
+    let notify = lock(&st.ops).begin(&op, now_ms());
+    let _forget = Forget(st, op);
+    tokio::select! {
+        r = work => r.map(Some),
+        () = notify.notified() => Ok(None),
+    }
+}
+
+/// After a load was cancelled: the half-started engine went with the dropped load. A model this very call finished loading
+/// in the same instant is unloaded, so a cancelled load never leaves behind a model it started; one that another request or
+/// job loaded (or is using: `unload` refuses a busy model) is left alone.
+pub fn undo_cancelled_load(st: &AppState, id: &ModelId, loaded_here: bool) {
+    if loaded_here {
+        st.serving.unload(id, pitwall_core::memory::ReleaseReason::Manual);
+    }
+}
+
 fn model(a: &Value, name: &str) -> R<ModelId> {
     let s: String = arg(a, name)?;
     ModelId::parse(&s).map_err(|e| err(mgmt::ErrorCode::BadRequest, e.to_string()))
@@ -199,6 +228,7 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
                     crate::library::to_dto(
                         f,
                         st.serving.loaded_slots(&f.id),
+                        st.serving.context_per_slot(&f.id),
                         &s.prefs(&f.id),
                         (s.models.default_context, s.models.default_slots),
                         &room,
@@ -209,13 +239,17 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         }
         "search_models" => {
             let q: String = arg(a, "query")?;
-            ok(st.library.search(&q).await.map_err(offline_or)?)
+            ok(st.library.search(&q).await.map_err(download_failed)?)
         }
         "repo_files" => {
             let repo: String = arg(a, "repo")?;
             let s = st.cfg();
             let room = crate::system::room_from(&st.serving.memory_now(), &st.hardware, st.serving.hot_ram().0);
-            ok(st.library.repo(&repo, s.models.default_context, &room).await.map_err(offline_or)?)
+            ok(st
+                .library
+                .repo(&repo, s.models.default_context, &room)
+                .await
+                .map_err(download_failed)?)
         }
         "download_model" => {
             let repo: String = arg(a, "repo")?;
@@ -244,16 +278,36 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         "load_model" => {
             let id = model(a, "id")?;
             st.serving.retry(&id);
-            st.serving.ensure(&id).await.map_err(|e| {
-                err(
-                    if e.kind == ErrorKind::InsufficientMemory {
-                        mgmt::ErrorCode::InsufficientMemory
-                    } else {
-                        mgmt::ErrorCode::NotAvailable
-                    },
-                    e.message,
-                )
-            })?;
+            // Set only when this call's own `ensure` started the engine.
+            let loaded_here = std::sync::atomic::AtomicBool::new(false);
+            let load = async {
+                st.serving
+                    .ensure(&id)
+                    .await
+                    .map(|(_busy, cold)| loaded_here.store(cold.is_some(), std::sync::atomic::Ordering::SeqCst))
+                    .map_err(|e| {
+                        err(
+                            if e.kind == ErrorKind::InsufficientMemory {
+                                mgmt::ErrorCode::InsufficientMemory
+                            } else {
+                                mgmt::ErrorCode::NotAvailable
+                            },
+                            e.message,
+                        )
+                    })
+            };
+            match cancellable(st, a, load).await? {
+                Some(()) => ok(()),
+                None => {
+                    undo_cancelled_load(st, &id, loaded_here.load(std::sync::atomic::Ordering::SeqCst));
+                    ok(json!({ "cancelled": true }))
+                }
+            }
+        }
+        "cancel_op" => {
+            let op: String = arg(a, "opId")?;
+            // A cancel can arrive before its operation does: a short-lived permit stops it as it starts (see `Ops`).
+            lock(&st.ops).cancel(&op, now_ms());
             ok(())
         }
         "unload_model" => {
@@ -454,20 +508,22 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
             let id: String = arg(a, "id")?;
             let p: mgmt::AppPermissions = arg(a, "permissions")?;
             p.limits.validate().map_err(|m| err(mgmt::ErrorCode::BadRequest, m))?;
-            if !st.auth.decide_pairing(&id, Some(p), now) {
+            let decided = st.auth.decide_pairing(&id, Some(p), now);
+            st.push(&LiveUpdate::Pairing {
+                pairings: st.auth.pairings(now),
+            });
+            if !decided.map_err(|e| err(mgmt::ErrorCode::Internal, e.to_string()))? {
                 return Err(err(
                     mgmt::ErrorCode::NotFound,
                     "that pairing request expired or was already answered",
                 ));
             }
-            st.push(&LiveUpdate::Pairing {
-                pairings: st.auth.pairings(now),
-            });
             ok(())
         }
         "deny_pairing" => {
             let id: String = arg(a, "id")?;
-            st.auth.decide_pairing(&id, None, now);
+            // A denial changes nothing on disk, so it cannot fail to save.
+            let _ = st.auth.decide_pairing(&id, None, now);
             st.push(&LiveUpdate::Pairing {
                 pairings: st.auth.pairings(now),
             });
@@ -492,11 +548,22 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         "benchmarks" => ok(lock(&st.benchmarks).clone()),
         "run_benchmark" => {
             let id = model(a, "modelId")?;
-            run_benchmark(st, id).await
+            // Dropping the run cancels its generation; nothing is recorded, so the stored results stay as they were.
+            match cancellable(st, a, run_benchmark(st, id)).await? {
+                Some(result) => Ok(result),
+                None => ok(json!({ "cancelled": true })),
+            }
         }
         "update_check_status" => ok(st.update_status()),
         "update_notices" => ok(st.update_notices()),
-        "check_updates_now" => ok(st.run_update_check().await.result),
+        "check_updates_now" => {
+            // Up to 40 repositories are asked one after another: a job on the app side, so it can be cancelled by `opId`.
+            // Dropping the check releases its guard and writes nothing (the state is saved when it finishes).
+            match cancellable(st, a, async { Ok(st.run_update_check().await.result) }).await? {
+                Some(result) => ok(result),
+                None => ok(json!({ "cancelled": true })),
+            }
+        }
         "set_update_check" => {
             let enabled: bool = arg(a, "enabled")?;
             let schedule: mgmt::UpdateSchedule = arg(a, "schedule")?;
@@ -547,17 +614,29 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
         "save_settings" => {
             let ui: UiSettings = arg(a, "settings")?;
             let s = st.cfg().with_ui(ui).map_err(|e| err(mgmt::ErrorCode::BadRequest, e))?;
-            ok(st.save_settings(s).map_err(|e| err(mgmt::ErrorCode::BadRequest, e))?.ui())
+            let saved = st.save_settings(s).map_err(|e| err(mgmt::ErrorCode::BadRequest, e))?.ui();
+            ok(saved)
         }
         _ => Err(err(mgmt::ErrorCode::NotImplemented, format!("unknown call \"{method}\""))),
     }
 }
 
-fn offline_or(e: crate::egress::DownloadError) -> CommandError {
-    match e {
-        crate::egress::DownloadError::Egress(pitwall_core::privacy::EgressError::Offline) => err(mgmt::ErrorCode::Offline, e.to_string()),
-        other => err(mgmt::ErrorCode::ServerUnavailable, other.to_string()),
-    }
+/// A failed outbound call is never "the local server is not running": an unreachable or failing host is "upstream"
+/// (the CLI exits 4), a blocked URL is a bad request, and a local write failure is ours.
+fn download_failed(e: crate::egress::DownloadError) -> CommandError {
+    use crate::egress::DownloadError as D;
+    let code = match &e {
+        D::Egress(_) => mgmt::ErrorCode::BadRequest,
+        D::Network(_) | D::Status(..) | D::Checksum { .. } => mgmt::ErrorCode::Upstream,
+        D::Io(_) => mgmt::ErrorCode::Internal,
+        D::Cancelled => mgmt::ErrorCode::Conflict,
+    };
+    let hint = if matches!(e, D::Egress(_)) {
+        " Use a huggingface.co or github.com address."
+    } else {
+        ""
+    };
+    err(code, format!("{}.{hint}", e.to_string().trim_end_matches('.')))
 }
 
 fn update_prefs(st: &AppState, id: &ModelId, f: impl FnOnce(&mut pitwall_core::config::ModelPrefs)) -> R<()> {
@@ -578,7 +657,11 @@ fn downloads(st: &AppState) -> Vec<Download> {
 async fn download_model(st: &Arc<AppState>, repo: &str, file: &str, projector: Option<&str>) -> R<Value> {
     let s = st.cfg();
     let room = crate::system::room_from(&st.serving.memory_now(), &st.hardware, st.serving.hot_ram().0);
-    let r = st.library.repo(repo, s.models.default_context, &room).await.map_err(offline_or)?;
+    let r = st
+        .library
+        .repo(repo, s.models.default_context, &room)
+        .await
+        .map_err(download_failed)?;
     let q = r
         .variants
         .iter()
@@ -598,9 +681,9 @@ async fn download_model(st: &Arc<AppState>, repo: &str, file: &str, projector: O
     // Rebuild the core variant (parts/sha) from the tree again: the DTO carries only the first file.
     let tree = {
         let id = pitwall_core::hf::RepoId::parse(repo).map_err(|e| err(mgmt::ErrorCode::BadRequest, e))?;
-        let url = pitwall_core::hf::tree_url(&id).map_err(|e| err(mgmt::ErrorCode::Offline, e.to_string()))?;
-        pitwall_core::hf::parse_tree(&st.egress.get_json(&url, 8 << 20).await.map_err(offline_or)?)
-            .map_err(|e| err(mgmt::ErrorCode::ServerUnavailable, e))?
+        let url = pitwall_core::hf::tree_url(&id).map_err(|e| err(mgmt::ErrorCode::BadRequest, e.to_string()))?;
+        pitwall_core::hf::parse_tree(&st.egress.get_json(&url, 8 << 20).await.map_err(download_failed)?)
+            .map_err(|e| err(mgmt::ErrorCode::Upstream, e))?
     };
     let mut want: Vec<&pitwall_core::hf::Variant> = tree.variants.iter().filter(|v| v.file == file).collect();
     if let Some(p) = projector {
@@ -626,7 +709,7 @@ async fn download_model(st: &Arc<AppState>, repo: &str, file: &str, projector: O
                     st2.updates.downloaded(&repo_name, &file_name);
                 }
             })
-            .map_err(offline_or)?;
+            .map_err(download_failed)?;
         if first.is_none() {
             first = st.library.downloads().into_iter().find(|d| d.id == id);
         }
@@ -720,12 +803,6 @@ fn engines(st: &AppState) -> Vec<mgmt::Engine> {
 }
 
 fn install_build(st: &Arc<AppState>, id: &str) -> R<Value> {
-    if st.offline.load(std::sync::atomic::Ordering::SeqCst) {
-        return Err(err(
-            mgmt::ErrorCode::Offline,
-            pitwall_core::privacy::EgressError::Offline.to_string(),
-        ));
-    }
     let platform = st.llama.platform();
     if st.llama.catalog().find(&platform, id).is_none() {
         return Err(err(mgmt::ErrorCode::NotFound, format!("there is no build \"{id}\" for {platform}")));
@@ -757,7 +834,6 @@ fn overview(st: &Arc<AppState>) -> mgmt::Overview {
             } else {
                 mgmt::ServingState::Serving
             },
-            offline: cfg.network.offline,
             lan: mgmt::LanStatus {
                 enabled: false,
                 url: None,
@@ -881,22 +957,122 @@ async fn live(State(st): S, h: HeaderMap) -> Response {
         .unwrap_or_default()
 }
 
-async fn chat(State(st): S, h: HeaderMap, body: Bytes) -> Response {
-    if let Err(r) = admin(&st, &h) {
-        return *r;
-    }
-    let req: PlaygroundRequest = match serde_json::from_slice(&body) {
-        Ok(r) => r,
-        Err(e) => return command_response(&err(mgmt::ErrorCode::BadRequest, e.to_string())),
-    };
-    let chat = ChatRequest {
+/// The neutral chat request for a playground request: text messages (with the tool calls and results of a tool loop), the
+/// tools the caller offers and its tool choice.
+fn playground_chat_request(req: &PlaygroundRequest) -> ChatRequest {
+    use pitwall_core::chat::{Part, Role, Tool, ToolCall, ToolChoice};
+    use pitwall_core::mgmt::PlaygroundToolChoice;
+    ChatRequest {
         model: ModelRef::Named(req.model_id.clone()),
-        messages: req.messages.iter().map(|m| Message::text(m.role, m.content.clone())).collect(),
+        messages: req
+            .messages
+            .iter()
+            .map(|m| Message {
+                role: m.role,
+                parts: if m.content.is_empty() && m.role == Role::Assistant && !m.tool_calls.is_empty() {
+                    vec![]
+                } else {
+                    vec![Part::Text(m.content.clone())]
+                },
+                tool_calls: m
+                    .tool_calls
+                    .iter()
+                    .map(|c| ToolCall {
+                        id: c.id.clone(),
+                        name: c.name.clone(),
+                        arguments: c.arguments.clone(),
+                    })
+                    .collect(),
+                tool_call_id: m.tool_call_id.clone(),
+            })
+            .collect(),
+        tools: req
+            .tools
+            .iter()
+            .map(|t| Tool {
+                name: t.name.clone(),
+                description: t.description.clone(),
+                parameters: t.parameters.clone(),
+            })
+            .collect(),
+        tool_choice: match &req.tool_choice {
+            PlaygroundToolChoice::Auto => ToolChoice::Auto,
+            PlaygroundToolChoice::None => ToolChoice::None,
+            PlaygroundToolChoice::Required => ToolChoice::Required,
+            PlaygroundToolChoice::Named { name } => ToolChoice::Named(name.clone()),
+        },
         temperature: Some(req.temperature),
         max_tokens: Some(req.max_tokens),
         stream: true,
         ..Default::default()
-    };
+    }
+}
+
+fn playground_frame(e: &PlaygroundEvent) -> Bytes {
+    Bytes::from(pitwall_core::sse::data(&serde_json::to_string(e).unwrap_or_default()))
+}
+
+/// How often the loading phase repeats while the model loads or the request waits for a slot.
+const LOADING_TICK: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Runs one playground chat and sends its frames: the response has already started, so the wait for a cold model load is a
+/// labelled phase (ER-18) and not a silent one. Ends when the answer ends or when the client goes away (`tx` closed), which drops
+/// the run and cancels the work.
+async fn drive_playground_chat(st: Arc<AppState>, req: PlaygroundRequest, tx: tokio::sync::mpsc::Sender<Bytes>) {
+    let started = std::time::Instant::now();
+    log::info!(
+        target: "pitwall_chat",
+        "chat started: model {}, {} messages, {} tools",
+        req.model_id,
+        req.messages.len(),
+        req.tools.len()
+    );
+    let model = req.model_id.clone();
+    let mut outcome = ChatOutcome::ClientGone;
+    run_playground_chat(st, req, tx, &mut outcome).await;
+    let ms = started.elapsed().as_millis();
+    match outcome {
+        ChatOutcome::Ended {
+            finish,
+            prompt_tokens,
+            completion_tokens,
+            ttft_ms,
+            cold_start_ms,
+        } => log::info!(
+            target: "pitwall_chat",
+            "chat ended: model {model}, finish {finish:?}, {prompt_tokens} tokens in, {completion_tokens} out, ttft {ttft_ms} ms, cold start {cold_start_ms:?} ms, {ms} ms"
+        ),
+        ChatOutcome::Failed { code, cause } => {
+            log::warn!(target: "pitwall_chat", "chat failed: model {model}, {code:?}, {ms} ms, cause: {cause}")
+        }
+        ChatOutcome::ClientGone => {
+            log::info!(target: "pitwall_chat", "chat stopped: model {model}, the client went away, {ms} ms")
+        }
+    }
+}
+
+/// How a playground chat ended, for its log line (names, counts and times only; never the text).
+enum ChatOutcome {
+    Ended {
+        finish: pitwall_core::mgmt::PlaygroundFinish,
+        prompt_tokens: u32,
+        completion_tokens: u32,
+        ttft_ms: u64,
+        cold_start_ms: Option<u64>,
+    },
+    Failed {
+        code: mgmt::ErrorCode,
+        cause: String,
+    },
+    /// The client closed the stream before the answer ended.
+    ClientGone,
+}
+
+async fn run_playground_chat(st: Arc<AppState>, req: PlaygroundRequest, tx: tokio::sync::mpsc::Sender<Bytes>, outcome: &mut ChatOutcome) {
+    use pitwall_core::chat::Finish;
+    use pitwall_core::mgmt::{PlaygroundFinish, PlaygroundPhase};
+    let started = std::time::Instant::now();
+    let elapsed_ms = || u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     let meta = Meta {
         family: ApiFamily::Extended,
         endpoint: "/mgmt/chat".into(),
@@ -905,9 +1081,33 @@ async fn chat(State(st): S, h: HeaderMap, body: Bytes) -> Response {
         kind: JobKind::Chat,
         no_cache: true,
     };
-    let ev = |e: &PlaygroundEvent| pitwall_core::sse::data(&serde_json::to_string(e).unwrap_or_default());
-    let run = st.start_chat(&Principal::Admin, meta, chat).await;
-    let run = match run {
+    let send = |e: PlaygroundEvent| {
+        let tx = tx.clone();
+        async move { tx.send(playground_frame(&e)).await.is_ok() }
+    };
+    if !send(PlaygroundEvent::Phase {
+        phase: PlaygroundPhase::Loading { elapsed_ms: 0 },
+    })
+    .await
+    {
+        return;
+    }
+    let start = st.start_chat(&Principal::Admin, meta, playground_chat_request(&req));
+    tokio::pin!(start);
+    let mut tick = tokio::time::interval(LOADING_TICK);
+    tick.tick().await;
+    let run = loop {
+        tokio::select! {
+            r = &mut start => break r,
+            _ = tick.tick() => {
+                if !send(PlaygroundEvent::Phase { phase: PlaygroundPhase::Loading { elapsed_ms: elapsed_ms() } }).await {
+                    return;
+                }
+            }
+            () = tx.closed() => return,
+        }
+    };
+    let mut run = match run {
         Ok(r) => r,
         Err(e) => {
             let code = if e.kind == ErrorKind::InsufficientMemory {
@@ -915,56 +1115,119 @@ async fn chat(State(st): S, h: HeaderMap, body: Bytes) -> Response {
             } else {
                 mgmt::ErrorCode::NotAvailable
             };
-            let body = ev(&PlaygroundEvent::Error {
+            *outcome = ChatOutcome::Failed {
+                code,
+                cause: e.message.clone(),
+            };
+            send(PlaygroundEvent::Error {
                 error: err(code, e.message),
-            });
-            return Response::builder()
-                .header(header::CONTENT_TYPE, "text/event-stream")
-                .body(Body::from(body))
-                .unwrap_or_default();
+            })
+            .await;
+            return;
         }
     };
     let cold = run.cold_start_ms;
-    let started = std::time::Instant::now();
-    let stream = futures_util::stream::unfold((run, false), move |(mut r, ended)| async move {
-        if ended {
-            return None;
-        }
-        let item = r.rx.recv().await;
-        let (frame, end) = match item {
-            None => return None,
+    if !send(PlaygroundEvent::Phase {
+        phase: PlaygroundPhase::Generating,
+    })
+    .await
+    {
+        return;
+    }
+    let mut ttft: Option<u64> = None;
+    loop {
+        let item = tokio::select! {
+            item = run.rx.recv() => item,
+            () = tx.closed() => return,
+        };
+        let event = match item {
+            None => return,
             Some(Err(e)) => {
-                r.rec.finish(Default::default(), None, Some(e.0.clone()));
-                (
-                    ev(&PlaygroundEvent::Error {
-                        error: err(mgmt::ErrorCode::Internal, e.0),
-                    }),
-                    true,
-                )
+                run.rec.finish(Default::default(), None, Some(e.0.clone()));
+                *outcome = ChatOutcome::Failed {
+                    code: mgmt::ErrorCode::Internal,
+                    cause: e.0.clone(),
+                };
+                send(PlaygroundEvent::Error {
+                    error: err(mgmt::ErrorCode::Internal, e.0),
+                })
+                .await;
+                return;
             }
-            Some(Ok(e)) => {
-                r.rec.event(&e);
-                match e {
-                    ChatEvent::Delta(t) => (ev(&PlaygroundEvent::Delta { text: t }), false),
-                    ChatEvent::Done { usage, timings, .. } => {
-                        r.rec.finish(usage, timings, None);
-                        let total = started.elapsed().as_millis() as u64;
-                        (
-                            ev(&PlaygroundEvent::Done {
-                                prompt_tokens: usage.prompt_tokens,
-                                completion_tokens: usage.completion_tokens,
-                                ttft_ms: total.min(timings.map_or(total, |_| total)),
-                                gen_tps: timings.map_or(0.0, |t| t.gen_tps),
-                                cold_start_ms: cold,
-                            }),
-                            true,
-                        )
-                    }
-                    _ => (String::new(), false),
+            Some(Ok(e)) => e,
+        };
+        run.rec.event(&event);
+        let out = match event {
+            ChatEvent::Delta(text) => PlaygroundEvent::Delta { text },
+            ChatEvent::Reasoning(text) => PlaygroundEvent::Reasoning { text },
+            ChatEvent::ToolCall {
+                index,
+                id,
+                name,
+                arguments,
+            } => PlaygroundEvent::ToolCall {
+                index,
+                id,
+                name,
+                arguments,
+            },
+            ChatEvent::Done { finish, usage, timings } => {
+                run.rec.finish(usage, timings, None);
+                let done = PlaygroundEvent::Done {
+                    finish: match finish {
+                        Finish::Stop => PlaygroundFinish::Stop,
+                        Finish::Length => PlaygroundFinish::Length,
+                        Finish::ToolCalls => PlaygroundFinish::ToolCalls,
+                        Finish::Cancelled => PlaygroundFinish::Cancelled,
+                    },
+                    prompt_tokens: usage.prompt_tokens,
+                    completion_tokens: usage.completion_tokens,
+                    ttft_ms: ttft.unwrap_or_else(elapsed_ms),
+                    gen_tps: timings.map_or(0.0, |t| t.gen_tps),
+                    cold_start_ms: cold,
+                };
+                if let PlaygroundEvent::Done {
+                    finish,
+                    prompt_tokens,
+                    completion_tokens,
+                    ttft_ms,
+                    cold_start_ms,
+                    ..
+                } = &done
+                {
+                    *outcome = ChatOutcome::Ended {
+                        finish: *finish,
+                        prompt_tokens: *prompt_tokens,
+                        completion_tokens: *completion_tokens,
+                        ttft_ms: *ttft_ms,
+                        cold_start_ms: *cold_start_ms,
+                    };
                 }
+                send(done).await;
+                return;
             }
         };
-        Some((Ok::<_, std::convert::Infallible>(Bytes::from(frame)), (r, end)))
+        if ttft.is_none() {
+            ttft = Some(elapsed_ms());
+        }
+        if !send(out).await {
+            return;
+        }
+    }
+}
+
+async fn chat(State(st): S, h: HeaderMap, body: Bytes) -> Response {
+    if let Err(r) = admin(&st, &h) {
+        return *r;
+    }
+    let req: PlaygroundRequest = match serde_json::from_slice(&body) {
+        Ok(r) => r,
+        Err(e) => return command_response(&err(mgmt::ErrorCode::BadRequest, e.to_string())),
+    };
+    let (tx, rx) = tokio::sync::mpsc::channel::<Bytes>(64);
+    tokio::spawn(drive_playground_chat(st.clone(), req, tx));
+    let stream = futures_util::stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|b| (Ok::<_, std::convert::Infallible>(b), rx))
     });
     Response::builder()
         .header(header::CONTENT_TYPE, "text/event-stream")
@@ -1049,4 +1312,33 @@ fn preview_preset(st: &AppState, draft: mgmt::PresetDraft, editing: Option<&str>
             .map(|e| e.to_string());
     }
     mgmt::PresetPreview { problem, status }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::egress::DownloadError;
+    use pitwall_core::mgmt::ErrorCode;
+
+    #[test]
+    fn download_failures_are_not_reported_as_a_stopped_server() {
+        let net = download_failed(DownloadError::Network("cannot reach huggingface.co: down".into()));
+        assert_eq!(net.code, ErrorCode::Upstream);
+        assert!(net.message.contains("huggingface.co"));
+        assert_eq!(download_failed(DownloadError::Status(503, "")).code, ErrorCode::Upstream);
+        let sum = DownloadError::Checksum {
+            expected: "a".into(),
+            actual: "b".into(),
+        };
+        assert_eq!(download_failed(sum).code, ErrorCode::Upstream);
+        assert_eq!(download_failed(DownloadError::Io("disk".into())).code, ErrorCode::Internal);
+        assert_eq!(download_failed(DownloadError::Cancelled).code, ErrorCode::Conflict);
+        let blocked = download_failed(DownloadError::Egress(pitwall_core::privacy::EgressError::NotAllowed("x".into())));
+        assert_eq!(blocked.code, ErrorCode::BadRequest);
+        assert!(
+            blocked.message.contains("x is not allowed") && blocked.message.contains("huggingface.co"),
+            "{}",
+            blocked.message
+        );
+    }
 }

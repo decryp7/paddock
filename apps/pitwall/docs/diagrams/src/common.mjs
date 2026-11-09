@@ -3,7 +3,7 @@ import { sequence, dot, cls } from '../../../../../diagrams/tools/uml.mjs';
 import { writeFileSync } from 'node:fs';
 export { link, g8, sequence, dot, cls };
 export const OUT = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
-export const P = (o) => new Diagram({ app: 'pitwall', date: '2026-10-23', ...o });
+export const P = (o) => new Diagram({ app: 'pitwall', date: '2026-10-31', ...o });
 export const save = (name, d, bottom) => writeFileSync(`${OUT}/${name}.drawio`, d.finish(bottom));
 /** Port fraction on rect `id` for the vertical centre of rect `other` (for straight links from a tall hub). */
 export function tOf(d, hub, other, axis = 1) {

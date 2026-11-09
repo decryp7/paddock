@@ -1,10 +1,17 @@
+import { NgTemplateOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, ElementRef, OnInit, afterRenderEffect, computed, inject, signal, viewChildren } from '@angular/core';
-import { PwSelect, type SelectOption } from '../../shared/ui/select';
+import { MatButton } from '@angular/material/button';
+import { MatFormField, MatLabel } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
+import { MatInput } from '@angular/material/input';
+import { MatSlider, MatSliderThumb } from '@angular/material/slider';
+import { MatTab, MatTabContent, MatTabGroup } from '@angular/material/tabs';
+import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { LocalModel } from '../../core/api.types';
 import { bytes, duration, int, rate } from '../../shared/format';
 import { Panel } from '../../shared/ui/panel';
+import { PlaygroundChat } from './playground-chat';
 import { PlaygroundStore, type TurnStats } from './playground.store';
 
 const SUGGESTIONS = ['Explain what a KV cache is in two sentences.', 'Write a haiku about a pit stop.', 'Summarise: the service restarted twice after a pool timeout.'];
@@ -16,10 +23,15 @@ export function statsText(s: TurnStats): string {
   return parts.join(' · ');
 }
 
-/** Chat with a local model, or two side by side with the same prompt. */
+/**
+ * The Playground (ADR 0023 Decision 2). In a build with the chat (Rust says so, `chatEnabled`), two tabs: Chat is the full
+ * chat with a connected app's tools (`<pd-assistant>` over the chat engine, every action asked per call); Compare puts two
+ * models side by side on one prompt, text only and without tools. In a build without it, the Playground as before: one
+ * model, or two with the Compare toggle.
+ */
 @Component({
   selector: 'pw-playground-page',
-  imports: [MatIconModule, MatTooltipModule, Panel, PwSelect],
+  imports: [MatButton, MatFormField, MatLabel, MatInput, MatSlider, MatSliderThumb, MatIconModule, MatTooltipModule, MatTabGroup, MatTab, MatTabContent, NgTemplateOutlet, Panel, PdSelect, PlaygroundChat],
   providers: [PlaygroundStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './playground-page.html',
@@ -28,11 +40,13 @@ export function statsText(s: TurnStats): string {
 export class PlaygroundPage implements OnInit {
   protected readonly store = inject(PlaygroundStore);
   protected readonly prompt = signal('');
+  /** The open tab: 0 Chat, 1 Compare. */
+  protected readonly tab = signal(0);
   protected readonly suggestions = SUGGESTIONS;
   protected readonly stats = statsText;
   protected readonly size = bytes;
   private readonly lists = viewChildren<ElementRef<HTMLElement>>('msgs');
-  protected readonly modelOptions = computed<SelectOption[]>(() =>
+  protected readonly modelOptions = computed<PdSelectOption[]>(() =>
     this.store.chatModels().map((m) => ({ value: m.id, label: m.name + (m.quant ? ' · ' + m.quant : '') })),
   );
   protected readonly byId = computed(() => new Map(this.store.models().map((m) => [m.id, m])));

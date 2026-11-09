@@ -77,12 +77,78 @@ Conventional Commits; one semver tag for the whole repo.
 - `paddock-ui`: `SuLimitExceeded` and `SuQuantity` (the UI shape of a limit and its quantity, generated from `paddock-limits`) are exported;
   `JobState` `failed` carries the optional `limit`.
 - Dyno: `PROTOCOL_VERSION` is 5 (was 4 in 1.1.0), because `WireState::Failed` changed inside `Message::Job` and `Reply::Job`.
+### `paddock-ui`: the tray popover draws its own footer (Open <app> and the more-actions menu)
+- `<pd-tray-popover>` gains `primaryLabel` (the one primary action, drawn as a filled Material button with an arrow, right-aligned; `primary` emits on click), `menu` (a `SuTrayMenuEntry[]` model: items with `id`, `label`, an optional `icon` registered with `MatIconRegistry`, an optional `keyHint` and `disabled`, and separators; the ⋯ button and its Material menu above it, `menuAction` emits the chosen id) and `menuLabel` (the ⋯ button's name and tooltip, default "More actions", message `pd.trayPopover.more`). Separators at either end or doubled are dropped; no ⋯ button while the menu has no item. The ⋯ button is tinted and ringed while its menu is open, and the menu keeps 6 px clear of it. `[slot=footer]` content stays at the start of the footer. New exports: `SuTrayMenuEntry`, `SuTrayMenuItem`, `SuTrayMenuSeparator`.
+- The menu is typed by the app's ids: `SuTrayMenuItem<Id>`, `SuTrayMenuEntry<Id>` and `SuTrayPopover<Id>` (inferred from `menu`), so `menuAction` emits `Id` and an app's handler can be exhaustive. When any item has an icon, an item without one keeps a blank gutter so the labels align. The menu keeps 6 px clear of the button above or below it.
+- New glyph `pd:arrow-right`.
+- Dyno, Pitwall and Spotter use it and drop their own footers; the register's `tray-popover-footer` entry is removed. Pitwall's menu icons are 16 px and its ⋯ button shows the open state, as Dyno's did; Spotter's Open Spotter gains the arrow and the family button height, and Spotter now loads the shared Material theme and `@angular/localize`.
 
 ### `paddock-service`: the app's own login item per OS, the first run and the old launch agent are shared (from Dyno)
 - New `login::AppItem` (an app's login item described once: name, XDG file stem, `Run` value, arguments) with `for_this_os` (`MainAppItem` on macOS, `UserRunEntry` on Windows, `XdgAutostart` elsewhere; the app passes its executable, its environment and the `System`), `xdg` and `windows_run`; `login::xdg_config_dir` (an absolute `$XDG_CONFIG_HOME`, else `~/.config`); `login::UnavailableItem` (refuses every change with its reason).
 - New `login::apply_first_run_with` and `login::FirstRun`: the first sight of the settings with the switch on and no `FirstRunMarker` registers once; an off switch only leaves the marker; a failure leaves none.
 - New `login::LegacyLaunchAgent` and `login::LegacyPlist`: recognises exactly the `~/Library/LaunchAgents/<App>.plist` that `tauri-plugin-autostart` wrote, deletes only that file and registers the new item in its place (`migrate`).
 - Moved from Dyno (`login.rs`, `login_item.rs`), which now uses them; Dyno's behaviour is unchanged. The register's two Dyno copies of `launch-at-login` are removed.
+
+### `paddock-assistant` and `workbench/assistant`: the composer's attachments, push-to-talk and context meter (ADR 0023 WP-4b)
+- `Assistant::context(conversation_id)` and the command `assistant_context`: how full the model's context is (`ContextUse`: tokens used, the model's window, whether the count is the engine's own or an estimate, and a `ContextLevel` of `unknown`, `ok`, `high` from 80 %, `full`). After a turn of this session the count is the engine's for the last model call (prompt plus answer, tool definitions included); otherwise about four characters per token over the system prompt, the tools offered and the history the model reads. `context_level`, `estimate_tokens`, `HIGH_PERCENT`. Additive; the TypeScript and `paddock-workbench`'s command list and permissions are regenerated. `ASSISTANT_LIMITS.attachments` (16).
+- `AssistantBackend.context(id)` (default: `null`, no meter), implemented by `TauriAssistantBackend` and `MemoryAssistantBackend`; `parseContext`.
+- Two optional ports beside `AssistantBackend`: `AssistantAttachments` (`rules`, `add`, `chipOf`; new types `AttachSource`, `AttachRules`, `AttachmentChip`, `attachmentChip`) gives `<pd-assistant>` an attach button, paste and drop, the file chips of the next question (removable) and of each sent question; `AssistantSpeech` (`start`, `finish`, `cancel`, `listen` with `SpeechState`) gives it a push-to-talk button whose transcript lands in the question, with the engine's elapsed time, and Escape to throw a recording away. Without them nothing changes. `MemoryAssistantAttachments` and `MemoryAssistantSpeech` for demos and tests.
+- `<pd-assistant>` shows the meter in the composer ("About 1.2k of 8.2k tokens", amber from `high`, red at `full` with a note and New conversation).
+- Fixed: the pane dropped the engine's `phase` events at the wire edge (`parseEnvelope`), so a real app never showed "Loading the model…"; only the memory backend did.
+- New glyphs `paperclip` and `mic`.
+- Review round 1 and the user's decision of 2026-11-08 (nothing is dropped silently): `Assistant::context(id, pending)` counts attachments through the new `AssistantConfig::attachment_tokens` hook (history and the files waiting in the composer; `assistant_context` takes `attachments`); `ContextUse` gains `reserveTokens`, and `limitTokens` is now the room for the conversation (the window less `Budgets::max_answer_tokens`); `Assistant::send` refuses in words a question that would not fit, before anything is kept or sent. `history_chars = usize::MAX` sends the whole conversation (Pitwall does).
+- The pane: the meter is a `role="meter"` with its level in words and a glyph ("6.9k of 7.2k tokens · close to the limit", "Full: over by 132 of 7.2k tokens"); Send is off at full (the note is its reason) and while recording or transcribing; the full note says "Start a new chat"; refusals are one banner (glyph, words, Dismiss); `AssistantAttachments.remove` hears a file taken off the question; a long file tray scrolls; `MemoryAssistantBackend`'s `reply` answers plain questions only (the slash scripts stay); `MemoryAssistantSpeech.hold`/`release`.
+- `.pd-btn--primary:disabled` keeps a faint `border-strong` outline instead of the control border, so it no longer reads as an enabled secondary button (design guide §8).
+- Review round 2: with a bounded `history_chars` the meter and the check before sending estimate over the trimmed history (the last measured count only when the whole conversation is sent). The pane: files that fill a new chat, or tip one that fits, say "These files are too long for the model. Remove a file." with no Start a new chat; the early size refusal ends with the engine's "Attach a smaller file, or paste the part that matters."; in a pane under `ASSISTANT_SHORT_PANE_PX` (440 px, the pane's own height, exported for hosts) the files tray folds to two rows behind an "N files" chip, the question box is two lines and the empty state drops its icon; the log takes 120 px before the rest grows and gives way first in a short pane, down to a 56 px floor; a files tray that scrolls fades at its foot; the drop hint sits on a pill. `MemoryAssistantOptions` gains `reserveTokens` (default 1024) and `attachmentTokens`, and `MemoryAssistantAttachments.tokensOf` gives it the files' sizes (about four bytes a token). `.pd-btn--primary:disabled` keeps its `border-strong` outline and shows its label in subtle text at 75 % (3:1 or better).
+
+### `paddock-assistant` and `workbench/assistant`: "Don't save this chat" (ADR 0023 Decision 3, WP-3b)
+- `SendRequest.save` (optional, default `true`): whether the conversation a question starts is saved. It reaches the port as the new `Conversations::create_saved(first, save)`, whose default calls `create`, so a store that keeps every conversation one way is unchanged. Additive; the TypeScript is regenerated.
+- `ConversationStore::adopt` takes a conversation in with its id (a chat moved between saved and unsaved); it refuses an id it holds and a conversation without a question.
+- Public for any store: `conversation_title`, `StoredMessage::bounded` and `history_of` (what the model reads; `ConversationStore::history` uses it).
+- `Overflow` and `ConversationStore::with_overflow`: `EvictOldest` (the default, unchanged) or `Refuse`, which never drops a conversation or a message to make room and refuses in words instead. New port method `Conversations::admits(conversation_id, save)` (default: admits everything); `Assistant::send` asks it first and refuses a question the store cannot take (`AssistantError::Invalid` with the store's words) before anything is kept or a turn starts. Only the workbench demo uses the evicting default.
+- Fixed: a question the engine refuses no longer leaves its words as the pane's heading; a new conversation is "New conversation" again.
+- `<pd-assistant>` gains the `activeChange` output (the open conversation's id, `null` for a new one), so a host keeps per-chat state beside the pane.
+
+### `paddock-assistant`: the conversation store is a port, with a store in memory (ADR 0023 WP-2b)
+- New `Conversations` trait (summaries, get, create, append, delete, history, `take_problem` defaulting to none); `ConversationStore` implements it. `Assistant::with_conversations` takes any implementation; `Assistant::new` is unchanged.
+- `ConversationStore::in_memory` and `in_memory_with`: the same bounds, nothing ever written (a chat the user does not save leaves no file, even after a crash); `is_saved` tells the two apart.
+- Message parts: `Attachment` (`image` with SHA-256, type and size; `audio` with its length; `file` with its name), by reference, never bytes. `SendRequest.attachments` (optional, at most `MAX_ATTACHMENTS` = 16, each checked: a 64-hex SHA-256, PNG/JPEG/WebP/GIF images, a plain file name), kept on the user's `StoredMessage` and given to the provider on `ChatMessage.attachments` (`with_attachments`). Additive; the TypeScript is regenerated.
+- `Assistant::store()` now returns `&Arc<dyn Conversations>` (it returned the concrete store; nothing in the family called it for more than `take_problem`, which the trait keeps).
+
+### `paddock-assistant` and `workbench/assistant`: phases, Always allow and how each call ran (ADR 0023 WP-4a)
+- New `ProviderPhase` (`queued`, `loading` with `elapsedMs`, `generating`) and `LlmProvider::chat_phased` (default: no phases, calls `chat`); the loop forwards a provider's phases as `AssistantEvent::Phase`. Additive.
+- The pane shows "Waiting for the model…" and "Loading the model… 12 s" until the words arrive, instead of "Thinking…".
+- An approval card that offers it has Allow once, Always allow and Decline; an action's arguments are shown open. Each tool card says how its call ran: "Allowed once", "Always allowed" or "Allowed earlier" (nothing for a call the policy did not ask about).
+- `MemoryAssistantBackend`: `/look` (asks first with Always allow, then remembered) and `/cold` (the phases of a cold start).
+- `<pd-assistant>` gains `actionsGate` (`'tick'`, the default: "Allow actions" per message; `'per-call'`: no tick, tools that write are always offered and the engine's policy asks on every call; new type `ActionsGate`).
+- `<pd-assistant>` gains `emptyHint` and `failedCause` inputs, for a host whose words differ from the workbench's (Pitwall is the engine itself, so "check that Pitwall is running" does not fit).
+
+### `paddock-assistant`: the tool path for Pitwall's chat (ADR 0023 WP-2a)
+- New `ApprovalPolicy` port (`approval.rs`): per call, `check` says `Verdict::Run`, `Remembered`, `AskEveryTime` or `AskOrRemember`, and `record` hears the user's `ApprovalChoice` (`allowOnce`, `alwaysAllow`, `deny`). `DefaultPolicy` keeps today's behaviour (a write asks every call, a read-only tool runs unasked); an app sets its own in `AssistantConfig::policy`. Malformed calls, unknown tools and bad arguments are refused before the policy sees them.
+- `ApprovalNeeded` gains `remember` (the card offers Always allow); `ToolFinished` and the stored tool message gain `approval` (`notAsked`, `once`, `always`, `remembered`) for a call that ran.
+- `Budgets::max_wall` and `approval_wait` are `Option<Duration>`: `None` means no wall limit (ER-19, ADR 0031); the defaults are unchanged.
+- `Assistant::set_tools` replaces the tool set from the next turn on; a running turn keeps the set it started with.
+- `ToolCall::native(id, name, arguments)` reads an engine's native tool call strictly (blank arguments are `{}`; text that is not one JSON value, or too long, is the unreadable-call marker and never runs).
+- Fixed: tool-call ids are unique over a conversation. The prompted protocol numbers calls per answer, so a second tool round reused `call_1` and its card overwrote the first round's; an empty or repeated id now becomes the first free `call_<n>`.
+- Breaking (before v1): `Assistant::approve` and the `assistant_approve_tool` command take a `choice` (`ApprovalChoice`) instead of `approved: bool`; `AssistantBackend.approve` of `@decryp7/paddock-ui/workbench/assistant` takes the choice too; `Gate::decide` returns `Result<(), Refused>`; `Decision` is `Chosen(ApprovalChoice)`, `Cancelled` or `TimedOut`. New `AssistantError::NotOffered` (an `invalid` command error) for Always allow on a card that did not offer it.
+
+### `paddock-secrets`: one owner-only secret file at a chosen path; links, pipes and loose Windows DACLs refused
+- New `SecretFile::new(path)` with `read`, `write` and `delete`: one secret in a file the app names (Pitwall's `admin.key`,
+  ADR 0057 WP-4). `FileSecrets` is now a folder of these, so both share one implementation.
+- Reads open the file with `O_NOFOLLOW | O_NONBLOCK` and check the open handle: a symbolic link, a pipe or any other
+  non-regular file is refused (before, `fs::metadata` followed a link and a planted pipe would block the read). On
+  Windows a reparse point is refused, and so is a file whose DACL grants anyone besides its owner, the user, SYSTEM and
+  Administrators (`InsecureFile`).
+- Writes on Windows create the temporary file with a protected DACL for the user running the process and no sharing,
+  so no other principal can open it at any point (before, the file inherited the folder's access list). A folder where
+  others may create or change files is refused, and on read the owner and DACL come from the open handle: an owner other
+  than the user, SYSTEM or Administrators is refused (a key planted by another user).
+- Unix reads also refuse a file with more than one name (a hard link) and a folder whose owner cannot be checked;
+  tightening a folder to 0700 is logged.
+- Breaking (before v1): a secrets folder that group or others can read (not only write), such as 0750 or 0755, is now
+  made 0700 when it is ours.
+- `paddock-env`: new `write_atomic_created(path, bytes, create)`, where the caller creates the temporary file; a failed
+  creation replaces nothing and leaves no temporary file.
 
 ### `@decryp7/paddock-ui`: the status chip has words for Dyno's update and agent-mismatch causes
 - `service-status-text.ts`: `dy.setup.updated` is now `dy.update.restart` ("updated: restart to finish"); new `dy.agent.other-build-returns` ("another build keeps starting") and `dy.agent.mismatch` ("needs a reinstall"). The planner marks ui when an app's `src-tauri/src/**/*.rs` changes, since `cause-codes.spec.ts` scans those sources against the table.
@@ -409,7 +475,84 @@ An app that did not call `Builder::files` registered `files_open_url` (About's "
 - Settings: the line under a section that hides one advanced setting says "Show it" (it said "Show them" for one).
 - About: the releases row is a link that reads "See all releases" instead of the raw address (the address is still the link's target).
 - `docs/design-guide.md`: principle 3 and the Buttons line say what the family's controls measure now: `--pd-button-height` is 32 px
-  Comfortable, 28 px Standard (default), 24 px Compact.
+  Comfortable and Standard (default), 28 px Compact; an unlabelled field is `--pd-control-height` (32 / 28 / 24).
+### `paddock-diag`: Pitwall and MCP keys are removed wherever they start
+- The prefixed-token rule no longer needs a word boundary before `pw_…` and `pmk_…`: a key URL-encoded in a query (`key%3Dpw_…`), glued to a name (`app_pw_…`) or at the start of a line is now replaced by `[redacted]` too (it kept its value before). The other prefixed tokens (`ghp_`, `AKIA`, `sk-`) still begin at a word boundary.
+
+### Dyno: a Windows copy that cannot hand off updates starts again, and only notifies
+- Since every updater must say how it installs (`InstallError::InstallerUndeclared`, from the Pitwall 1.1 work), Dyno on Windows did not start when the per-machine hand-off was not possible (no install folder, or a copy outside Program Files: a dev or portable copy, the Windows e2e runs): its builder had neither an installer nor `no_install`. That branch now declares `no_install` and says so in the log. New `UpdatesBuilder::declares_install()` (`paddock-updater`) tells whether a builder passes that rule, so an app tests its own branches. Pitwall and the shell demo already declared both branches; no other app wires `paddock-updater`.
+
+### `paddock-service`: `sc` output is read in any display language
+- `parse::sc_state`, `sc_exit_codes`, `sc_pid` and `sc_config` read `sc query`, `sc queryex` and `sc qc` output in any display language: the English labels still win, otherwise the value is taken by its place among the indented `label : value` entries (state the second, the exit codes the third and fourth, the pid the seventh, the start type the second and the program the fourth of `sc qc`), which does not change with the language. Proven with German and French fixtures. From the Pitwall 1.1 work (a84c7fb5f), lost when the merge took ADR 0056's crate, and extended to the exit codes and the pid that crate reads.
+
+### `paddock-service`: the elevated step on Windows is waited for, not timed out
+- The elevated install is no longer given up on after 120 s (the UI reported failure while it still ran). `Elevator::run_elevated` takes a backstop `ceiling` (`ELEVATED_CEILING`, 15 minutes, replaces `ELEVATED_TIMEOUT`; the protected install of `privileged` keeps its `ELEVATION_TIMEOUT` as its ceiling); the Windows adapter waits in 30 s slices and logs that it is still working; new `port::elevated_result` and `ElevatedEnd` turn the end into the exit code, or, for a program still running at the ceiling, an error that says it was not stopped and may still finish (not "exit code 1"). A failed wait (`WAIT_FAILED`) ends it at once with the Windows error code (`ElevatedEnd::WaitFailed`), never spun on; the slice loop is the pure `port::wait_in_slices`, tested on every OS. Declined and a non-zero exit are reported as before. The words are neutral (no app's next step); A run still going at the ceiling, or a wait that broke, is the new `RegisterError::StillRunning` (not retried: another try would ask again; a repair ends with it as `Unavailable`), and `privileged::run_elevated` reports it as the new `ElevationError::StillRunning` ("The elevated step is still running and was not stopped; it may still finish.", neutral: Dyno adds "Look at the helper in Settings again in a few minutes." for turning the helper on and off), kept apart from a missing prompt program, where it used to read exit code 1 as `Failed`. (From the Pitwall 1.1 work, ported onto ADR 0056's crate; `sc.exe` by full path was already in it: `RealSystem::run` resolves every system tool from the system folder.)
+
+### `paddock-proc`: the instance lock re-checks a held lock; `is_held` becomes `is_held_settled`, new `is_held_now`
+- `InstanceLock::claim` reports a lock held only after `HELD_CHECKS` (5) consecutive checks `HELD_TICK` (100 ms) apart, so a lock that only a spawning child's copy of the descriptor holds is not taken for a holder (macOS, any spawn); a held lock now costs about 400 ms to report.
+- Breaking: `is_held(path)` is renamed `is_held_settled(path)` (the same re-check and wait), for a one-shot decision. New `is_held_now(path)`: one check, never waits, only for a loop where a held reading leads to waiting and looking again at the caller's own pace (a supervisor); a false "held" there only delays. With the waiting probe in a supervisor's look, every look waited 400 ms on a held lock and the counted waits stretched twentyfold (Dyno's link, CI 7257). `held_state(path)` (from Dyno 1.1.0) keeps its settled answer and is the third reading, `HeldState::Unknown`. Dyno 1.1.0's `dyno_agent::instance::is_held` and its link still use the settled probe; moving the link to `is_held_now` is Dyno's change.
+
+### `paddock-service`: stop timeout in the spec
+- `SpecBuilder::stop_timeout_secs(u32)` / `ServiceSpec::stop_timeout_secs()` (default 60, 1 to 3600, a typed `SpecError` otherwise): the systemd `TimeoutStopSec=` and the `ExitTimeOut` of a launchd daemon (a user agent's plist has none). A service that must finish a running job before it stops (Pitcrew, ADR 0009) sets 300. A launchd user agent and a Windows service ignore the stop timeout. There is no network-wait option: a system unit already orders after `network-online.target`, and a `systemd --user` instance cannot order after that system target, so a user service retries its own network use. Defaults render the same files as before (goldens unchanged). An AppImage's program is already copied to a stable place before a unit points at it (`backend::choose`, `system::stable_copy`), as Pitcrew's own code did; neither refuses it.
+
+### `paddock-service`: `StartWatch`, the wait for the service is judged by what the OS shows (ADR 0056 amendment)
+- New port `StartWatch` (`reset()`, `poll(&StartObservation) -> StartVerdict { Waiting, StillWorking(note), Up, Refused(seen), Failed(why) }`) and `Manager::with_start_watch(Box<dyn StartWatch>)`. The verdict is an input of the repair's state machine: `OsResult::Looked` carries `verdict: Option<StartVerdict>` and `replace_bounded` takes the watch as an argument (breaking for a direct caller: pass `None`). `None` verdict (no watch, or a backend that cannot observe the job) keeps the fixed `Timings::start_wait`; a judged wait is ended by the judge (or a cancel), never by `start_wait`. `Refused` is another cycle (still bounded by the version's attempts), `Failed` ends the repair `Failed` naming what was observed, the registration stays. `Up` from a watch never settles the service (only the look's own answer, with the process's identity, does).
+- `StartWait` (module `start_wait`, re-exported) is the recommended watch, over `paddock_proc::StartJudge`: patience in polls, not seconds. A job the OS has not started yet spends no patience, a running job with flat CPU for a minute is stuck unless the system has stopped its process (then it is waited for with a note), a job that vanishes fails only after three missing looks in a row, one that restarts three more times with a non-zero exit is a crash loop, an unreadable run state never fails, and `START_CEILING_POLLS` (200) ends a wait that is neither answering nor stuck.
+- `Backend::observe_start() -> Option<StartFacts>` (default `None`: systemd and Windows keep the fixed wait); the launchd backends answer from one `launchctl print` (job, pid, runs, last exit) plus the process's CPU time and run state. New `System::cpu_time(pid)` and `System::run_state(pid)` (defaults `None` and `Unknown`; `RealSystem` reads them through `paddock_proc` by process identity; `FakeSystem::set_cpu_time` and `set_run_state`).
+- The crash model's alphabet grows by the OS behaviours only a judge tells apart: `Mac/Looping` (default run), `Mac/WatchedLate` and `Mac/WatchedNever` (long run).
+
+### `paddock-service`: optional `KillMode` for the systemd unit
+- New `KillMode` (`ControlGroup`, `Mixed`, `Process`, `None`; `KillMode::systemd()` is the unit's word) and `SpecBuilder::kill_mode(mode)` / `ServiceSpec::kill_mode() -> Option<KillMode>`. `render::systemd_unit` writes `KillMode=<value>` after `TimeoutStopSec` only when the spec sets it; a spec that does not renders the same unit as before (no golden changes). The type admits no bad value, so `build()` has nothing to validate. launchd and Windows ignore it. For a service that starts helpers it must not take down with it (`Process`, `Mixed`).
+
+### Pitwall: the tray popup shows widgets you choose (family ADR 0035)
+- The popup is the shared `pd-tray-popover` with the widget area: Server, Activity, Memory, Loaded models, Downloads, Updates and Recent errors. The default shows Server, Activity, Memory and Loaded models and fits the family's 520 px cap whole in its worst state (a CI check, `e2e/tray.e2e.ts`). Models, downloads and errors open their page; a download in progress is a working widget with its progress and Cancel.
+- Every value, tone, row count and the "nothing to do" decision is Rust: `pitwall_core::widgets` (the catalogue, `Facts` fed by the live feed, the builders, the header status and the surface notice for a lost server or apps waiting to pair). The UI only draws; the mock serves the engine's recorded output for the scenarios `demo`, `empty`, `worst`, `down`, `paused` and `connecting` (`popover-fixtures.json`, checked on every test run).
+- The layout is the app's own (`popup-widgets.json` in the data folder, lenient and versioned through `paddock-widgets`, one level of undo). New commands: `popover_view`, `popover_values`, `popover_header`, `popover_shape` (the popup and Settings), `edit_popover` (Settings) and `quit_from_tray`; the app pushes `pitwall://popover` after any change. `cancel_download` is open to the tray.
+- The popup's footer matches Dyno's: "Open Pitwall" right-aligned beside a ⋯ menu (Customize widgets…, Pause or Resume serving, Release memory, Settings…, then Quit Pitwall). It replaces the two banners and the three buttons: apps waiting to pair is the popup's notice, model updates are the Updates widget. "Customize widgets…" opens Settings at the new Tray popup page through the shared dialog re-targeting.
+- Adopting from Dyno's widgets line (no change of its own): `sendDialogInputs` / `followDialogInputs` and the Settings window's `anchor` input in `@decryp7/paddock-ui/shell/dialogs` and `.../shell/settings/window`, as in `dyno/widgets-c2`.
+
+### `@decryp7/paddock-ui/widgets`: a stale live widget says "As of 14:30", not "Paused at 14:30"
+- The frame's stale label for a live kind is "As of <time>" (half width: the time alone). "Paused" read like a paused server or service when the whole feed was lost. Apps asserting the old wording update their specs.
+
+### Pitwall: Offline mode is removed
+- Offline mode is removed; settings saved with it still load. The Settings > Network switch, the "Offline mode" mark on the dashboard and the offline messages are gone, and `pitwall status` no longer prints "(offline mode)". Pitwall's other network behaviour is unchanged: it reaches only Hugging Face and GitHub, only for what you ask for (and the model update check you turn on), and model serving stays local.
+- `pitwall pull`, search and file lists no longer report "server not running" (exit 3) when the network is down: they exit 4 with a message naming the host that could not be reached.
+- Developer note: the diagram kit's `sequence()` takes an opt-in `selfLeftOnLast` that draws a self-message on the last lifeline to its left; Pitwall's diagrams use it, other apps' diagrams are unchanged.
+- Developer note: new management `ErrorCode::Upstream` (wire `upstream`, HTTP 502, CLI exit 4) for an outside host that could not be reached, refused or sent bad data; a blocked download URL is now `badRequest`. `api.types.ts` and the Tauri 502 fallback mirror it.
+- Developer note: `paddock-pitwall`'s `Health` has no `offline` field (an old server's extra field is ignored).
+
+### Outlined Material fields: room for the floated label
+- `@decryp7/paddock-ui` scss (`_material.scss`, built into `css/material.css`): a labelled outlined `mat-form-field` is `--pd-control-height` plus 8 px above and below its text row (40 / 44 / 48 px at compact / standard / comfortable), so the floated label in the notch never overlaps the text and the text keeps at least 8 px from the outline's inner edge. A textarea keeps the same top and bottom padding and grows from there (its first line no longer runs under the label). A field without a label (a toolbar filter, the paginator) stays the control height; a select's arrow box is one text row, so a select is as tall as an input beside it. Material places the label and sizes the notch from the same height. Forms in every app get taller labelled fields; a layout that aligned a labelled field with a 28 px control on one line re-checks its alignment. The gallery's "Material controls" adds a value field, a textarea and an unlabelled field, and `e2e/material.spec.ts` measures the geometry in both themes at standard and compact density.
+- New `.pd-field-row` in `controls.css`: a flex row whose items share one vertical centre, for a row that mixes a labelled field (44 px), a field without a label (28 px) and buttons (32 px); the gallery's "Material controls" shows one and its e2e measures the centres within 1 px at every density. The design guide says not to mix them in one row otherwise. `.pd-btn-row` and `pd-table`'s toolbar already centre their items.
+- Adopting: apps with labelled outlined fields re-capture their documentation screenshots (the fields are taller). Dyno's rule dialog takes its toggles' height from `--mat-form-field-container-height` (the labelled field), and the Manage layouts rename buttons in `@decryp7/paddock-ui/workbench` do the same, so their centres stay on the field's. This change lands after the Dyno and Spotter tags.
+
+### Settings window: a page can set the footer's status line
+- New `settingsPageStatus(text)` and `SettingsStatus` in `@decryp7/paddock-ui/shell/settings/window`: a settings page calls `settingsPageStatus(() => …)` in its injection context, and the Settings window's footer shows that text (read reactively, a signal or computed) instead of "Changes are saved as you make them." while the page is shown; it is cleared when the page leaves, and a null or empty text keeps the default. A notice of the change just made still comes first. `settingsWindowProviders` provides `SettingsStatus`; outside a Settings window the call does nothing. The Notification channels page uses it: while its editor is open the footer says "The channel is applied when you save it."
+
+### Settings window: a page can hold the close until its edit is saved
+- New `settingsPageCloseGuard(guard)` and `SettingsCloseGuards` in `@decryp7/paddock-ui/shell/settings/window` (types `SettingsCloseGuard`, `SettingsCloseVerdict`): a settings page that saves by itself, outside the window's own drafts, says what a close should do each time the window is asked to close (Close, Escape, Cmd/Ctrl+W, the OS). `wait` (with the setting's `label`) keeps the window until the page's save settles and then asks again (a typed value saved after a pause is never lost to a quick close); meanwhile the footer says "Saving <setting>…" (new string `pd.settings.saving`), and after `STILL_SAVING_AFTER_MS` (4 s) the window says "Still saving <setting>." with **Close anyway** and **Keep waiting** (new strings `pd.settings.still-saving`, `pd.settings.still-saving.keep`): the save goes on whatever the user chooses, Close anyway closes, and Keep waiting stays and asks again after the same delay, so a close is never held without bound; `warn` shows "<what> was not saved: <why>" with **Close anyway** and **Keep editing** (new string `pd.settings.not-saved.close`); `close` lets it go. A wait comes before a warning, a guard that throws never keeps the window open, and the window's own unsaved-drafts question still comes first. Quit and the app's exit close dialog windows without asking their pages (a `paddock-window` test pins it). `settingsWindowProviders` provides `SettingsCloseGuards`; outside a Settings window the call does nothing. Pitwall's settings page is the first user.
+
+### `installTestKit`: timer globals are put back after every test, and the test that replaced one fails (`@decryp7/paddock-ui/testing`)
+- The kit now restores spies before switching back to real timers, records the real timer globals (`setTimeout`,
+  `setInterval`, `requestAnimationFrame` and their kin) at the first install in a worker, and after every test puts back any
+  it finds replaced. A leftover that is not a spy fails that test with the names, reported after every `afterEach` (so
+  Angular's TestBed clean-up still runs); a leftover spy (one made on the real timer before `vi.useFakeTimers()`) is put
+  back without failing. A `vi.spyOn(globalThis, 'setTimeout')` made under fake timers left a fake bound to an uninstalled
+  clock behind (Vitest restores a spy again at every `restoreAllMocks`, even after `mockRestore`), and every later spec in
+  the worker that waited on a real timer hung until the 5 s timeout (CI runs 7257, 7274 and 7276).
+- Any timer patch made at collection time or in `beforeAll` (for example `manualFrames()` called in a `describe` body) is
+  undone before each test: make it in the test or in `beforeEach`.
+
+### `rasterizeFitting`: a rasterizer that throws at once is no snapshot (`@decryp7/paddock-ui/workbench/panels`)
+- A rasterizer that throws before returning its promise now gives null, as one that rejects does, instead of an exception.
+
+### `paddock-build`: no empty sidecar copied over a built program (`Build::apply` returns `Applied`; new `sidecars` module)
+- While any `bundle.externalBin` sidecar is an empty placeholder, `Build::run` sets `TAURI_CONFIG` so tauri-build sees no `externalBin`
+  (it copied the placeholder over the `target/<profile>/<name>` that cargo had just linked, leaving a 0-byte program), removes the empty
+  copies older builds left, and reruns when a sidecar file changes. The pure parts are `paddock_build::sidecars::{is_placeholder,
+  any_placeholder, hide_external_bin, profile_dir, copy_paths, stale_copies, remove_files}`; `Build::apply` now returns
+  `Applied { plan, tauri_config, removed }` instead of `Plan`, and `Plan` has `copies`. Pitwall and Pitcrew build through
+  `paddock_build::Build` (their `build.rs` is one call and their `windows-app-manifest.xml` copies are gone). Dyno switches after its 1.0 tag.
 
 ### `DialogFrame`: `contentView`, so a dialog's header, footer and body never show different steps (`@decryp7/paddock-ui/shell/dialogs`)
 - New optional input `contentView` on `DialogFrame` (the mounted content's change detector; `DialogShell` and `DialogHost` set it). `render()` now checks the content together with the frame. Before, a `run` action that changed the content's state (a wizard's Continue) refreshed the header slot and the footer at once while the body, which sits in the host's view, followed on the next tick: for one frame the stepper and the buttons showed the new step over the old, taller body (Pitcrew's register window overflowed its body by 165 px).
@@ -569,11 +712,36 @@ An app that did not call `Builder::files` registered `files_open_url` (About's "
 
 
 
+### `paddock-updater`: every build says how it installs (breaking: `UpdatesBuilder`, `UpdateStatus`)
+- Pitcrew 1.1 built its `UpdatesBuilder` with a key and no `.installer(..)`: an update downloaded, then "Restart to update"
+  failed with "this build has no installer" and "Install when the app quits" recorded a failed install the user met at the next
+  start. A second app had the same wiring trap, so it is closed as a class (ER-21).
+- `tauri::install` refuses a builder that says neither `UpdatesBuilder::installer(..)` nor the new `UpdatesBuilder::no_install()`
+  (`InstallError::InstallerUndeclared`), at the app's start, with or without a key, so the app's own start test fails.
+  `no_install()` is for a build that only notifies (the unsigned shell demo). Conformance check C59 is the static half: a file of an
+  app's `src-tauri/` that calls `UpdatesBuilder::new(` also calls `.installer(` or `.no_install()`.
+- The engine refuses `Updater::begin_download` (and so `updates_download`) in a build without an installer, with `InstallFailed`
+  ("this build has no installer", next step: the releases page), after the out-of-turn and not-available answers: nothing is
+  downloaded that could never be installed.
+- New command `updates_open_releases` (no argument): the engine opens the build's own releases page through the app's `Files`
+  service. The `pd.updates` dialog contract no longer lists `files_open_url` (least privilege: a window cannot name an address).
+  `pd.about` still has `files_open_url` for its releases link (a no-argument `about_open_releases` would narrow it; left for later).
+  `UpdatesBackend.openReleases()` is the new port method.
+- `install_on_quit(true)` and `prepare_restart()` answer Busy first when out of turn, like `begin_download`; the in-memory UI
+  backend follows the same order.
+- Updates dialog: a build that cannot install (no key, or `no_install`) offers "Open releases page" (`UpdateStatus.releasesPage`,
+  through `updates_open_releases`, which replaces `files_open_url` in the `pd.updates` contract) as its primary action, with "Check again" secondary.
+- `UpdateStatus` has `can_install` (TypeScript `canInstall`); `Updater::can_install()`. `Updater::install_on_quit(true)` and
+  `prepare_restart()` refuse without an installer at the request. Shell demo declares `no_install()`.
+### `@decryp7/paddock-ui` (`shell/about`): the Updates dialog follows `canInstall`
+- A build with `canInstall: false` offers no Download, "Restart to update" or "Install when the app quits"; an available update
+  says to download the new version from the releases page. `UpdateStatus.canInstall` is required on the wire.
 ### `@decryp7/paddock-e2e`: `pressMod`, `pageModKey`, `modKey`
 - New keyboard helpers: `pressMod(page, 'Mod+Shift+P')` presses a shortcut with the modifier the page binds `Mod` to (Cmd for a Mac or
   iOS navigator, Ctrl otherwise, the same test as paddock-ui's `currentPlatform`), not the host's like Playwright's `ControlOrMeta`.
   WebKit on a Linux runner emulates a Mac (`devices['Desktop Safari']`), so `ControlOrMeta` pressed Ctrl where the app wanted Cmd and no
   shortcut fired (CI run 7134, Dyno's WebKit leg). `WorkbenchPalette.open` and Dyno's e2e use it.
+
 ### `pd-jobs-status`: a visible heading
 - The Jobs popover has a visible heading (the popover's name, "Jobs") above the list, and the popover region is named by it (`aria-labelledby`), so a picture of it says what it is.
 ### `paddock-chromium`: Chromium builds start without their testing field trials
@@ -617,7 +785,7 @@ An app that did not call `Builder::files` registered `files_open_url` (About's "
 
 ### Quit in the menu bar: `QUIT_CONTRIBUTIONS`, and clicks with no window open (`paddock-menu`, `paddock-shell`, `@decryp7/paddock-ui/shell`)
 - Fix: no shell app had Quit in its menu bar: nothing contributed `pd.app.quit` (only the constant existed), so Cmd+Q did nothing. `provideNativeMenu` (so `provideShellPages` and `provideWorkbench`) now registers `QUIT_CONTRIBUTIONS` (the command `pd.app.quit`, `Mod+Q`, last in the app menu, group `quit`) for every app whose native menu port can quit (`tauriNativeMenuPort(ipc)` now has `quitApp()`, the shell's `app_quit` path); no app registers Quit itself. In the in-app menu on Windows the item reads "Exit" (`MENU_OS`).
-- To change what Quit does, an app provides `APP_QUIT` (Pitwall: its `quit::request`); it never contributes a second `pd.app.quit`. Pitwall's own `pd.app.quit` contribution is dropped when its branch merges. `QUIT_CONTRIBUTIONS` stays exported for manifest specs, which list what the frame adds.
+- To change what Quit does, an app provides `APP_QUIT` (Pitwall: its `quit::request`); it never contributes a second `pd.app.quit`. Pitwall's own `pd.app.quit` contribution is dropped (1.1 branch `pitwall/1.1-quit`): it provides `APP_QUIT` (its quit flow) and `Builder::menu_quit_without_window` (`quit::request_from_menu`), so Quit in the menu bar works with no window open. New `Builder::menu_action_without_window(id, f)` (`paddock-shell`, the name Dyno 1.1.0 gave the same hook; registering an id again replaces it, and the Quit id panics): what a click on an app's own menu item does when no window is open (instead of only bringing the main window back); Pitwall uses it for "Quit Pitwall and stop serving". `QUIT_CONTRIBUTIONS` stays exported for manifest specs, which list what the frame adds.
 - `ShellCore` has a new member `quitApp()`; the UI of a shell app that implements `ShellCore` by hand adds it.
 - Fix: with the last window closed to the tray (destroyed), the menu bar still shows the last model but a click had no target window and was dropped. `paddock-menu` now hands a click on a shown item to a host-side handler when no window is the target (`NativeMenu::on_no_window`, `on_no_window_by_default`, `route::runs_without_window`). The shell installs its policy unless the app set a handler: Quit runs the shell's quit (as the `app_quit` command; `Builder::menu_quit_without_window` replaces it for an app with its own quit path), any other item brings the main window back as a Dock click does (the click itself is not forwarded: the new window is not listening yet).
 

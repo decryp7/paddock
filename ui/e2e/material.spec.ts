@@ -89,7 +89,8 @@ for (const theme of THEMES) {
     }, body);
     expect(label.rendered / label.reference).toBeGreaterThan(0.94);
     expect(label.rendered / label.reference).toBeLessThan(1.06);
-    // Input text is vertically centred in the 28 px box (the two gaps differ by at most 1 px).
+    // Input text is vertically centred in the labelled field's box, the control height plus 8 px above and below (the two gaps differ
+    // by at most 1 px).
     const gaps = await s.locator('input.mat-mdc-input-element').first().evaluate((i) => {
       const w = i.closest('.mat-mdc-text-field-wrapper') as HTMLElement;
       const a = i.getBoundingClientRect();
@@ -97,7 +98,7 @@ for (const theme of THEMES) {
       return { top: a.top - b.top, bottom: b.bottom - a.bottom, box: b.height };
     });
     expect(Math.abs(gaps.top - gaps.bottom)).toBeLessThanOrEqual(1);
-    expect(gaps.box).toBe(await px(page, '--pd-control-height'));
+    expect(gaps.box).toBe((await px(page, '--pd-control-height')) + 2 * (await px(page, '--pd-space-2')));
     // The suffix icon keeps clear of the border.
     const clear = await s.locator('mat-datepicker-toggle button').first().evaluate((b) => {
       const w = b.closest('.mat-mdc-text-field-wrapper') as HTMLElement;
@@ -139,7 +140,10 @@ for (const theme of THEMES) {
       const control = await px(page, '--pd-control-height');
       const row = await px(page, '--pd-row-height');
       const heights = (selector: string) => section(page).locator(selector).evaluateAll((es) => es.map((e) => Math.round((e as HTMLElement).getBoundingClientRect().height)));
-      expect(new Set(await heights('.mat-mdc-text-field-wrapper')), `${density} fields`).toEqual(new Set([control]));
+      // A labelled field has 8 px more above and below its text row for the floated label; one without a label is the control height.
+      const labelled = control + 2 * (await px(page, '--pd-space-2'));
+      expect(new Set(await heights('.mat-mdc-text-field-wrapper:not(.mdc-text-field--no-label):not(:has(textarea))')), `${density} labelled fields`).toEqual(new Set([labelled]));
+      expect(new Set(await heights('.mat-mdc-text-field-wrapper.mdc-text-field--no-label')), `${density} fields without a label`).toEqual(new Set([control]));
       expect(await heights('.mat-mdc-paginator .mat-mdc-text-field-wrapper'), `${density} paginator select`).toEqual([control]);
       expect(new Set(await heights('.mat-mdc-icon-button')), `${density} icon buttons`).toEqual(new Set([control]));
       expect(await heights('tr.mat-mdc-header-row'), `${density} table header`).toEqual([control]);
@@ -430,6 +434,111 @@ test('Material controls: tab nav bar links size to their label, so eight tabs fi
   const widths = await links.evaluateAll((els) => els.map((e) => ({ min: getComputedStyle(e).minWidth, width: e.getBoundingClientRect().width })));
   for (const w of widths) expect(w.min).toBe('0px');
   expect(Math.min(...widths.map((w) => w.width)), 'a short label is narrower than Material\'s own 160 px minimum').toBeLessThan(160);
+});
+
+// Outlined fields with a floated label (the Pitwall 1.1 review): the label in the notch never touches the text, single-line or
+// multi-line, and the text keeps 8 px from the outline's inner edge, at the standard and compact densities in both themes. The
+// geometry is read from the rendered boxes (the label's box is after Material's scale), not from the stylesheet. Review shots
+// (MATERIAL_SHOTS) are taken at 2x.
+test.describe('outlined field geometry', () => {
+  test.use({ deviceScaleFactor: SHOTS ? 2 : 1 });
+  for (const theme of THEMES) {
+    for (const density of ['standard', 'compact'] as const) {
+      test(`Material controls: an outlined field's floated label clears its text, which keeps 8 px from the outline (${theme}, ${density})`, async ({ page }) => {
+        await open(page, theme, 'debrief', density);
+        const control = await px(page, '--pd-control-height');
+        const gap = await px(page, '--pd-space-2');
+        if (SHOTS) {
+          mkdirSync(SHOTS, { recursive: true });
+          // Both rows of fields (the one above has hints, an error, a select and the pickers), with a margin of page.
+          const row = page.getByTestId('material-field-row');
+          await row.scrollIntoViewIfNeeded();
+          const a = (await row.locator('xpath=preceding-sibling::h3[1]').boundingBox())!;
+          const b = (await row.boundingBox())!;
+          // The section is long (the rows can sit below the 4200 px viewport): a full-page shot, clipped in page coordinates.
+          const scroll = await page.evaluate(() => window.scrollY);
+          await page.screenshot({
+            path: join(SHOTS, `fields-${theme}-${density}.png`),
+            fullPage: true,
+            clip: { x: a.x - 16, y: a.y + scroll - 16, width: Math.max(a.width, b.width) + 32, height: b.y + b.height - a.y + 40 },
+          });
+        }
+        for (const id of ['material-field-value', 'material-textarea']) {
+          const field = page.getByTestId(id);
+          await field.scrollIntoViewIfNeeded();
+          const m = await field.evaluate((f) => {
+            const r = (e: Element | null) => e!.getBoundingClientRect();
+            const text = f.querySelector('input.mat-mdc-input-element, textarea.mat-mdc-input-element');
+            const outline = f.querySelector('.mdc-notched-outline');
+            const leading = f.querySelector('.mdc-notched-outline__leading')!;
+            const border = parseFloat(getComputedStyle(leading).borderTopWidth);
+            const label = r(f.querySelector('.mdc-floating-label'));
+            const notch = r(f.querySelector('.mdc-notched-outline__notch'));
+            const t = r(text);
+            const o = r(outline);
+            const intersects = label.left < t.right && t.left < label.right && label.top < t.bottom && t.top < label.bottom;
+            return {
+              intersects,
+              labelBottom: label.bottom - o.top,
+              textTop: t.top - o.top,
+              top: t.top - (o.top + border),
+              bottom: o.bottom - border - t.bottom,
+              notchStart: label.left - notch.left,
+              notchEnd: notch.right - label.right,
+              height: r(f.querySelector('.mat-mdc-text-field-wrapper')).height,
+            };
+          });
+          expect(m.intersects, `${id}: label ${m.labelBottom} px vs text ${m.textTop} px from the outline's top`).toBe(false);
+          expect(m.top, `${id}: text to the outline's inner top edge`).toBeGreaterThanOrEqual(gap);
+          expect(m.bottom, `${id}: text to the outline's inner bottom edge`).toBeGreaterThanOrEqual(gap);
+          // The notch is the label's width plus a small even gap each side (2 to 6 px), so the outline never runs into the label.
+          expect(m.notchStart, `${id}: notch gap before the label`).toBeGreaterThanOrEqual(2);
+          expect(m.notchEnd, `${id}: notch gap after the label`).toBeGreaterThanOrEqual(2);
+          expect(m.notchStart, `${id}: notch gap before the label`).toBeLessThanOrEqual(6);
+          expect(m.notchEnd, `${id}: notch gap after the label`).toBeLessThanOrEqual(6);
+          // A labelled single-line field is the control height plus 8 px above and below the text row (the label's room).
+          if (id === 'material-field-value') expect(m.height).toBe(control + 2 * gap);
+        }
+        // Every labelled single-line field in the section (input, select, pickers) has that height, so a row of them lines up.
+        const labelled = await section(page)
+          .locator('.mat-mdc-text-field-wrapper:not(.mdc-text-field--no-label):not(:has(textarea))')
+          .evaluateAll((es) => es.map((e) => e.getBoundingClientRect().height));
+        expect(new Set(labelled)).toEqual(new Set([control + 2 * gap]));
+        // A field without a label (a toolbar filter, the paginator) stays the control height.
+        expect(await page.getByTestId('material-field-unlabelled').locator('.mat-mdc-text-field-wrapper').evaluate((e) => e.getBoundingClientRect().height)).toBe(control);
+      });
+    }
+  }
+  for (const theme of THEMES) {
+    for (const density of ['standard', 'compact', 'comfortable'] as const) {
+      test(`Material controls: a row of a labelled field, a field without a label and buttons shares one vertical centre (${theme}, ${density})`, async ({ page }) => {
+        await open(page, theme, 'debrief', density);
+        const row = page.getByTestId('material-mixed-row');
+        await row.scrollIntoViewIfNeeded();
+        if (SHOTS) {
+          mkdirSync(SHOTS, { recursive: true });
+          // With a margin: the floated label sits on the field's top border, half above the row's box.
+          const b = (await row.boundingBox())!;
+          await page.screenshot({ path: join(SHOTS, `mixed-row-${theme}-${density}.png`), clip: { x: b.x - 12, y: b.y - 12, width: b.width + 24, height: b.height + 24 } });
+        }
+        // The visible boxes: a field's outlined container (not its host, which also holds the subscript), a button itself.
+        const boxes = await row.evaluate((r) =>
+          [...r.children].map((c) => {
+            const box = (c.querySelector('.mat-mdc-text-field-wrapper') ?? c).getBoundingClientRect();
+            return { name: c.textContent?.trim() || (c.querySelector('input')?.getAttribute('aria-label') ?? ''), height: box.height, centre: box.top + box.height / 2 };
+          }),
+        );
+        expect(boxes.map((b) => Math.round(b.height)), 'the row mixes heights (labelled field, field, buttons)').toEqual([
+          (await px(page, '--pd-control-height')) + 2 * (await px(page, '--pd-space-2')),
+          await px(page, '--pd-control-height'),
+          await px(page, '--pd-button-height'),
+          await px(page, '--pd-button-height'),
+        ]);
+        const centres = boxes.map((b) => b.centre);
+        expect(Math.max(...centres) - Math.min(...centres), JSON.stringify(boxes)).toBeLessThanOrEqual(1);
+      });
+    }
+  }
 });
 
 test('Material: no button label wraps, even in a tight row', async ({ page }) => {

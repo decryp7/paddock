@@ -3,7 +3,7 @@
 //! - [`manage`] puts the app's [`Assistant`] in the app state; every event of a run goes to every window as [`EVENT`]
 //!   (`paddock://assistant`, an [`Envelope`](crate::Envelope)).
 //! - [`COMMANDS`] is the adapter's command table (`<area>_<verb>`, ADR 0012): `assistant_send`, `assistant_stop`,
-//!   `assistant_approve_tool`, `assistant_conversations`, `assistant_load`, `assistant_delete` and `assistant_info`. They are
+//!   `assistant_approve_tool`, `assistant_conversations`, `assistant_load`, `assistant_delete`, `assistant_info` and `assistant_context`. They are
 //!   async and return at once; the turn itself runs on its own worker thread and answers through events (rule 10), the file
 //!   work on the blocking pool. [`invoke_handler`] is their handler without a guard (for a shell plugin that folds
 //!   [`COMMANDS`] into its table); [`handler`] guards it; [`route`] puts it in front of the app's own.
@@ -17,9 +17,12 @@
 // `CommandError` is the family's one command error (plan X28); its size is its business, not this adapter's.
 #![allow(clippy::result_large_err)]
 
+use crate::approval::ApprovalChoice;
+use crate::context::ContextUse;
 use crate::conversation::{Conversation, ConversationSummary};
 use crate::event::{EVENT as EVENT_NAME, Envelope, EventSink};
 use crate::service::{Assistant, AssistantError, AssistantInfo, SendAck, SendRequest};
+use crate::types::Attachment;
 use ::tauri::ipc::Invoke;
 use ::tauri::{AppHandle, Emitter, Manager, Runtime};
 use paddock_commands::CommandError;
@@ -45,15 +48,27 @@ impl<R: Runtime> EventSink for Emit<R> {
     }
 }
 
+/// What an app puts around the event sink of every turn (a log line per tool call, say).
+pub type SinkWrap = Arc<dyn Fn(Arc<dyn EventSink>) -> Arc<dyn EventSink> + Send + Sync>;
+
 /// The managed state the commands read.
-pub struct Managed(Arc<Assistant>);
+pub struct Managed(Arc<Assistant>, Option<SinkWrap>);
 
 /// Manages `assistant`. A second call keeps the first and returns it.
 pub fn manage<R: Runtime>(app: &AppHandle<R>, assistant: Arc<Assistant>) -> Arc<Assistant> {
+    manage_with(app, assistant, None)
+}
+
+/// [`manage`], with `wrap` put around each turn's sink: every event still reaches the windows through what `wrap` returns.
+pub fn manage_with<R: Runtime>(
+    app: &AppHandle<R>,
+    assistant: Arc<Assistant>,
+    wrap: Option<SinkWrap>,
+) -> Arc<Assistant> {
     if let Some(m) = app.try_state::<Managed>() {
         return m.0.clone();
     }
-    app.manage(Managed(assistant.clone()));
+    app.manage(Managed(assistant.clone(), wrap));
     assistant
 }
 
@@ -64,6 +79,7 @@ fn error(e: AssistantError) -> CommandError {
         AssistantError::NotFound => CommandError::not_found(message),
         AssistantError::Busy => CommandError::busy(message),
         AssistantError::NotWaiting => CommandError::not_found(message),
+        AssistantError::NotOffered => CommandError::invalid(message),
         AssistantError::Failed(_) => CommandError::failed(message),
     }
 }
@@ -93,7 +109,11 @@ pub async fn assistant_send<R: Runtime>(
     app: AppHandle<R>,
     request: SendRequest,
 ) -> Result<SendAck, CommandError> {
-    let sink: Arc<dyn EventSink> = Arc::new(Emit::new(app.clone()));
+    let emit: Arc<dyn EventSink> = Arc::new(Emit::new(app.clone()));
+    let sink = match app.try_state::<Managed>().and_then(|m| m.1.clone()) {
+        Some(wrap) => wrap(emit),
+        None => emit,
+    };
     blocking(assistant_of(&app)?, move |a| a.send(request, sink)).await
 }
 
@@ -106,16 +126,16 @@ pub async fn assistant_stop<R: Runtime>(
     Ok(assistant_of(&app)?.stop(&conversation_id))
 }
 
-/// Answers the write waiting in the conversation's run.
+/// Answers the call waiting in the conversation's run with the user's choice (`allowOnce`, `alwaysAllow`, `deny`).
 #[::tauri::command]
 pub async fn assistant_approve_tool<R: Runtime>(
     app: AppHandle<R>,
     conversation_id: String,
     call_id: String,
-    approved: bool,
+    choice: ApprovalChoice,
 ) -> Result<(), CommandError> {
     assistant_of(&app)?
-        .approve(&conversation_id, &call_id, approved)
+        .approve(&conversation_id, &call_id, choice)
         .map_err(error)
 }
 
@@ -151,6 +171,28 @@ pub async fn assistant_info<R: Runtime>(app: AppHandle<R>) -> Result<AssistantIn
     Ok(assistant_of(&app)?.info())
 }
 
+/// How full the model's context is for a conversation (none: a new chat) with the attachments waiting in the composer, for
+/// its meter (ADR 0023 WP-4b).
+#[::tauri::command]
+pub async fn assistant_context<R: Runtime>(
+    app: AppHandle<R>,
+    conversation_id: Option<String>,
+    attachments: Option<Vec<Attachment>>,
+) -> Result<ContextUse, CommandError> {
+    // The estimate reads the conversation's history (a saved store may read its file): off the command threads.
+    let pending = attachments.unwrap_or_default();
+    if pending.len() > crate::types::MAX_ATTACHMENTS {
+        return Err(CommandError::invalid(format!(
+            "A question can carry at most {} attachments.",
+            crate::types::MAX_ATTACHMENTS
+        )));
+    }
+    blocking(assistant_of(&app)?, move |a| {
+        Ok(a.context(conversation_id.as_deref(), &pending))
+    })
+    .await
+}
+
 paddock_commands::command_table! {
     /// The commands of the assistant adapter. Windows and pop-outs only: no dialog reads conversations.
     pub static COMMANDS, macro generated_handler;
@@ -161,6 +203,7 @@ paddock_commands::command_table! {
     Query [MAIN | POPOUT] => assistant_load,
     Mutation [MAIN | POPOUT] => assistant_delete,
     Query [MAIN | POPOUT] => assistant_info,
+    Query [MAIN | POPOUT] => assistant_context,
 }
 
 /// The invoke handler of [`COMMANDS`] without a guard (for a guard of the app's or the shell plugin's own).

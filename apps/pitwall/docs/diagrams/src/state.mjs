@@ -16,7 +16,7 @@ const states = (d, list) => list.forEach(([id, c, r, name, desc, h = H, w = W, r
     ['vf', 2, 0, 'Verifying', 'Models: the file must parse as GGUF. Engine builds: unpack, then --version and --list-devices.', 128],
     ['dn', 3, 0, 'Done', 'The model is in the library, or the build is active.', 128],
     ['cn', 1, 1, 'Cancelled', 'The partial file is kept for a later resume.'],
-    ['fl', 2, 1, 'Failed', 'Offline, gated, disk full, SHA-256 mismatch (file deleted), not a GGUF or failed self-test (build discarded, previous stays).', 128, W + G + W],
+    ['fl', 2, 1, 'Failed', 'Network error, gated, disk full, SHA-256 mismatch (file deleted), not a GGUF or failed self-test (build discarded, previous stays).', 128, W + G + W],
   ]);
   dot(d, 'ini', 48, Y + 56, 'start');
   E(d, 'ini', 'R', 0.5, 'q', 'L', 0.5);

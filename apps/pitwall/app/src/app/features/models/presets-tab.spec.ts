@@ -5,7 +5,7 @@ import type { PitwallBackend } from '../../core/backend';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { registerIcons } from '../../shared/icons';
-import { Confirm } from '../../shared/ui/confirm';
+import { dialogsAnswering } from '../../../testing/render';
 import { ModelsStore } from './models.store';
 import { PREVIEW_DELAY_MS } from './presets.store';
 import { PresetsTab, statusDetail } from './presets-tab';
@@ -17,7 +17,7 @@ const tick = async (n = 6) => {
 async function render(backend: PitwallBackend = new MockBackend(), confirm = true) {
   TestBed.configureTestingModule({
     imports: [PresetsTab],
-    providers: [ModelsStore, { provide: BACKEND, useValue: backend }, { provide: Confirm, useValue: { ask: vi.fn(() => Promise.resolve(confirm)) } }],
+    providers: [ModelsStore, { provide: BACKEND, useValue: backend }, dialogsAnswering(confirm)],
   });
   registerIcons(TestBed.inject(MatIconRegistry), TestBed.inject(DomSanitizer));
   await TestBed.inject(ModelsStore).load();
@@ -49,7 +49,7 @@ async function render(backend: PitwallBackend = new MockBackend(), confirm = tru
   const menu = async (alias: string, item: string) => {
     button(`More actions for ${alias}`).click();
     await settle();
-    Array.from(document.querySelectorAll<HTMLButtonElement>('.pw-menu .pw-menu-item')).find((b) => b.textContent!.trim() === item)!.click();
+    Array.from(document.querySelectorAll<HTMLButtonElement>('.mat-mdc-menu-item')).find((b) => b.textContent!.trim() === item)!.click();
     await settle();
   };
   return { fixture, el, settle, button, type, typeAndPreview, menu };
@@ -116,7 +116,7 @@ describe('PresetsTab', () => {
     await settle();
     expect(el.querySelector('form')).toBeNull();
     const row = Array.from(el.querySelectorAll('tbody tr')).find((r) => r.textContent!.includes('dyno-notes'))!;
-    expect(row.textContent).toContain('temperature 0.4');
+    expect(row.textContent).toMatch(/temperature 0.4/i);
     expect(row.textContent).toContain('system prompt');
   });
 
@@ -199,7 +199,10 @@ describe('PresetsTab', () => {
     const { el, button, settle } = await render();
     button('New preset').click();
     await settle();
-    const options = Array.from(el.querySelectorAll('#pw-preset-targets option')).map((o) => o.getAttribute('value'));
+    const target = el.querySelector('#pw-preset-target') as HTMLInputElement;
+    target.dispatchEvent(new Event('focusin'));
+    await settle();
+    const options = Array.from(document.querySelectorAll('.mat-mdc-option .mono')).map((o) => o.textContent?.trim());
     expect(options).toContain('qwen3.5-9b-q4_k_m');
     expect(options).toContain('auto:chat,fast');
     expect(el.querySelector('#pw-preset-engine')).toBeNull();
@@ -218,14 +221,15 @@ describe('PresetsTab', () => {
   });
 
 describe('PresetsTab caching', () => {
-  it('badges presets that cache answers or keep the prompt warm', async () => {
+  it('says in words which presets cache answers or keep the prompt warm, under the name', async () => {
     const { el } = await render();
     const rows = Array.from(el.querySelectorAll('tbody tr'));
-    const explain = rows.find((r) => r.textContent!.includes('debrief-explain'))!;
-    expect(Array.from(explain.querySelectorAll('.badge')).map((b) => b.textContent)).toEqual(['cache', 'warm']);
-    const triage = rows.find((r) => r.textContent!.includes('pitcrew-triage'))!;
-    expect(Array.from(triage.querySelectorAll('.badge')).map((b) => b.textContent)).toEqual(['warm']);
-    expect(rows.find((r) => r.textContent!.includes('legacy-explain'))!.querySelector('.badge')).toBeNull();
+    const about = (alias: string) => rows.find((r) => r.textContent!.includes(alias))!.querySelector('.alias .sub')!.textContent!.trim();
+    expect(about('debrief-explain')).toMatch(/^Caches answers · warm prompt · /);
+    expect(about('pitcrew-triage')).toMatch(/^Warm prompt · /);
+    expect(about('legacy-explain')).toBe('Request decides every setting');
+    // No pills on a second line (UI review 2 rule 8).
+    expect(el.querySelector('tbody .badge')).toBeNull();
   });
 
   it('edits both toggles and saves them with the preset', async () => {

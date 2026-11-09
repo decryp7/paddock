@@ -5,6 +5,7 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "Pitwall",
         "width": 1200,
         "height": 780,
@@ -18,13 +19,6 @@
         "trafficLightPosition": {
           "x": 18,
           "y": 24
-        },
-        "transparent": true,
-        "windowEffects": {
-          "effects": [
-            "sidebar"
-          ],
-          "state": "followsWindowActiveState"
         }
       }
     ]

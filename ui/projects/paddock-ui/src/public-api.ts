@@ -22,7 +22,7 @@ export {
   type SuJobView,
 } from './lib/job-view';
 export { SuSegmentedControl, type SuSegment } from './lib/segmented-control';
-export { SuTrayPopover, type SuTrayPlatform } from './lib/tray-popover';
+export { SuTrayPopover, type SuTrayMenuEntry, type SuTrayMenuItem, type SuTrayMenuSeparator, type SuTrayPlatform } from './lib/tray-popover';
 export {
   parseCssColor,
   mixColors,

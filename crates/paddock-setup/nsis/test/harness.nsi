@@ -40,6 +40,7 @@ Section Install
   SetOutPath $INSTDIR
   !insertmacro NSIS_HOOK_PREINSTALL
   File "harness.txt"
+  File "harness-server.exe"
   WriteUninstaller "$INSTDIR\uninstall.exe"
   WriteRegStr HKLM "${UNINSTKEY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
   !insertmacro NSIS_HOOK_POSTINSTALL
@@ -48,6 +49,7 @@ SectionEnd
 Section Uninstall
   !insertmacro NSIS_HOOK_PREUNINSTALL
   Delete "$INSTDIR\harness.txt"
+  Delete "$INSTDIR\harness-server.exe"
   Delete "$INSTDIR\uninstall.exe"
   DeleteRegKey HKLM "${UNINSTKEY}"
   RMDir "$INSTDIR"

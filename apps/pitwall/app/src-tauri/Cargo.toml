@@ -17,39 +17,88 @@ name = "pitwall_app_lib"
 crate-type = ["rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.7.3", features = [] }
+paddock-build = { path = "../../../../crates/paddock-build", features = ["tauri-build"] }
 
 # The shell depends on the management contract (pitwall-core) and the loopback-only HTTP client; never on
 # pitwall-server (the server is a separate process) and never on an HTTP client of its own (ADR 0001).
 [dependencies]
 pitwall-core.workspace = true
 pitwall-loopback = { path = "../../crates/pitwall-loopback" }
+# The shared service crate (core only, no tauri feature): the launchctl parser and its stale rule.
+# The shared executor of long operations (ADR 0020, ADR 0024 rule 3): job registry, phases, progress, cancel tokens.
+paddock-jobs = { path = "../../../../crates/paddock-jobs" }
+paddock-service = { path = "../../../../crates/paddock-service" }
+# The assistant's tool loop and its model port (ADR 0023): Pitwall's chat provider over the management API implements the port.
+paddock-assistant = { path = "../../../../crates/paddock-assistant", features = ["tauri"] }
+# The log facade, as the other apps use it (Dyno: `log` with `kv`); the app's log setup installs the logger.
+log = { version = "0.4", features = ["kv"] }
+# The clock the assistant's conversation store reads.
+paddock-health = { path = "../../../../crates/paddock-health" }
+# What Pitwall's service is (the one ServiceSpec the app and the server both build from).
+pitwall-service = { path = "../../crates/pitwall-service" }
+# Running the server program's install and uninstall verbs bounded (timeout, the tree ended with it): rule 53.
+paddock-proc = { path = "../../../../crates/paddock-proc" }
+# Widget layouts (family ADR 0035): the popup's layout is stored and edited here; its catalogue and values are pitwall-core's.
+paddock-widgets = { path = "../../../../crates/paddock-widgets" }
+# The Playground chat's host (ADR 0023 WP-9a): the MCP client to connected apps.
+paddock-mcp = { path = "../../../../crates/paddock-mcp" }
+# "Open Dyno" (ADR 0023 Decision 7): the family's hand-off starts the app.
+paddock-siblings = { path = "../../../../crates/paddock-siblings" }
+# The pasted MCP keys (ADR 0023 Decision 7): an owner-only file on macOS, the OS store elsewhere (the target section below); the
+# server's admin.key is an owner-only secret file too (ADR 0057 WP-4, rule 72: no Keychain).
+paddock-secrets = { path = "../../../../crates/paddock-secrets" }
+# Report a problem (plan B4): Pitwall's sections beside paddock-diag's, the app's folders and the log handle its Logging
+# section drives.
+paddock-diag = { path = "../../../../crates/paddock-diag", features = ["tauri"] }
+paddock-env = { path = "../../../../crates/paddock-env" }
+# The saved chats' attachments are kept by SHA-256 (ADR 0023 Decision 3).
+sha2.workspace = true
+paddock-log = { path = "../../../../crates/paddock-log" }
+getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["time", "sync", "rt", "macros"] }
-# "macos-private-api": the transparent window with vibrancy on macOS (tauri.macos.conf.json `macOSPrivateApi`); a no-op
+# "macos-private-api": the tray popover's transparent window with vibrancy on macOS (tauri.macos.conf.json `macOSPrivateApi`;
+# the main window is opaque, user 2026-10-30); a no-op
 # elsewhere. It must sit here, not under a target table: tauri-build checks only this list against the config.
 tauri = { version = "2.12.4", features = ["tray-icon", "image-png", "macos-private-api"] }
-tauri-plugin-autostart = "2"
+# The Paddock app shell (ADR 0012, ADR 0029): the plugin and the crates whose types the app names itself (path dependencies
+# inside the monorepo). The shell owns the start, the windows, the tray icon, the exit and its watchdog, and the guard in front
+# of Pitwall's commands.
+paddock-shell = { path = "../../../../crates/paddock-shell", features = ["tray", "install"] }
+paddock-commands = { path = "../../../../crates/paddock-commands", features = ["tauri"] }
+paddock-dialogs = { path = "../../../../crates/paddock-dialogs", features = ["tauri"] }
+paddock-startup = { path = "../../../../crates/paddock-startup", features = ["tauri"] }
+paddock-updater = { path = "../../../../crates/paddock-updater", features = ["tauri", "install"] }
+# The per-machine hand-off's contract (which download `apply-update` accepts, its exit codes' sentences) and the installer lock
+# (ADR 0053 section 4), as `paddock_setup::wiring`; `paddock-updater` cannot depend on it, so the app wires it in.
+paddock-setup = { path = "../../../../crates/paddock-setup" }
+paddock-window = { path = "../../../../crates/paddock-window", features = ["tauri", "tray", "wry"] }
 # A second launch focuses the running app instead of starting another one (release builds; see window::second_launch).
 tauri-plugin-single-instance = "2"
 # >= 2.12 fixes GHSA-j38x-g3m3-95fr (downgrade through the unsigned manifest version). No "zip": Pitwall publishes v2
 # updater artifacts (the installers themselves). "rustls-tls" with the platform verifier trusts the OS certificate
 # store. The updater is the only outbound HTTP in the shell, and only when the user asks for an update check.
 tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls", "system-proxy"] }
-# The OS credential store (Windows Credential Manager, macOS Keychain, Secret Service) for the app's copy of the
-# admin key; admin.key is the fallback.
-keyring = "4.2"
+
+[features]
+# The Playground's chat (ADR 0023), temporary until ADR 0049's switches: on for the internal proof-of-concept build
+# (`cargo tauri build --features chat`), off by default, so the release workflow builds without it.
+chat = []
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+paddock-secrets = { path = "../../../../crates/paddock-secrets", features = ["keyring"] }
+
+# Start at log-in on the other systems: the macOS launch agent and the Linux autostart file. Windows uses the per-user Run value
+# (`start_at_login`, ADR 0053 section 6).
+[target.'cfg(not(windows))'.dependencies]
+tauri-plugin-autostart = "2"
 
 [target.'cfg(windows)'.dependencies]
-# Asking the Service Control Manager whether the service is installed and running (no rights needed).
-windows-service = "0.8"
 # The taskbar's light/dark setting (for the tray icon), read only.
 winreg = "0.56"
 webview2-com = "0.39"
-# Starting `pitwall-server install` with Windows' own elevation prompt (ShellExecuteExW "runas").
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Registering the bundled launch agent with SMAppService (macOS 13+).
@@ -61,6 +110,16 @@ objc2-service-management = { version = "0.3", default-features = false, features
 workspace = true
 
 [dev-dependencies]
+# A socket bound but not listening refuses connections on Linux and Windows (not macOS): "nothing listens" with the port held.
+socket2 = { version = "0.6", features = ["all"] }
 tempfile.workspace = true
+# The time of a report the tests make (paddock-diag takes a chrono time).
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# A held loopback port for "nothing answers there" (C39).
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 tokio = { workspace = true, features = ["time", "sync", "rt", "rt-multi-thread", "macros", "net", "io-util", "test-util"] }
 tauri = { version = "2.12.4", features = ["test"] }
+# The shell plugin on Tauri's mock runtime: the start test (ADR 0029, C50) opens no window and touches no user folder.
+paddock-shell = { path = "../../../../crates/paddock-shell", features = ["tray", "mock-runtime"] }
+# The menu bar's no-window route (Quit with the last window closed to the tray) is tested with the shell's NativeMenu state.
+paddock-menu = { path = "../../../../crates/paddock-menu", features = ["tauri"] }

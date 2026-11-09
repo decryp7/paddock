@@ -9,7 +9,7 @@ const W = (check, path) => `[[waiver]]\ncheck = "${check}"\npath = "${path}"\nre
 
 test('waivers: one that waives nothing in a check that ran is a W003 warning; one for a check that did not run is not', () => {
   const finding = { check: 'C16', severity: 'error', file: 'app/mock/a.ts', message: 'm' };
-  const parsed = parseWaivers(`${W('C16', 'app/mock/*')}\n${W('C16', 'app/gone.ts')}\n${W('C99', 'x')}`);
+  const parsed = parseWaivers(`${W('C16', 'app/mock/*')}\n${W('C16', 'app/gone.ts')}\n${W('C00', 'x')}`);
   const r = applyWaivers({ findings: [finding], ...parsed, pathMatches, checksRun: ['C16'] });
   assert.equal(r.waived.length, 1);
   assert.deepEqual(r.findings.map((f) => [f.check, f.severity, f.line]), [['W003', 'warn', 7]]);

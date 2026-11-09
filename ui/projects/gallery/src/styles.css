@@ -49,6 +49,8 @@
 .gal-states-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pd-space-3); }
 
 .gal-row--center { align-items: center; }
+.gal-field-wide { width: 420px; max-width: 100%; }
+.gal-mixed-row { margin-top: var(--pd-card-gap); }
 .gal-states--card { background: var(--pd-surface-1); border: 1px solid var(--pd-hairline); }
 .gal-states--inset { background: var(--pd-surface-2); }
 .gal-path--plain240 { width: 240px; padding: 0; box-sizing: border-box; }
@@ -72,10 +74,6 @@
 .gal-tree .mat-nested-tree-node[aria-expanded='true'] > .mat-tree-node .gal-chevron { transform: rotate(90deg); }
 .mat-mdc-cell.gal-num-col, .mat-mdc-header-cell.gal-num-col { text-align: right; font-variant-numeric: tabular-nums; }
 .gal-num-col.mat-sort-header-sorted .mat-sort-header-container, th.gal-num-col .mat-sort-header-container { justify-content: flex-end; }
-
-/* The popup footer menu keeps 6 px clear of its buttons (the focus ring and a gap). */
-.wg-foot-menu.mat-menu-above { margin-bottom: 6px; }
-.wg-foot-menu.mat-menu-below { margin-top: 6px; }
 
 /* A label beside a long text in a narrow row: the shrinking text must never squeeze the button's label onto two lines. */
 .gal-tight { display: flex; align-items: center; justify-content: space-between; gap: var(--pd-space-4); max-width: 360px; margin-bottom: var(--pd-space-3); }

@@ -45,7 +45,7 @@ export default {
   scope: 'both',
   mode: 'gate',
   title: 'Every app reads the build commit and date under the names build-env sets',
-  rule: 43,
+  rule: 40,
   run(ctx) {
     const names = buildEnvNames();
     const out = [];
@@ -54,7 +54,7 @@ export default {
       const text = ctx.read(f);
       if (!text || !/\.build_info\s*\(|\bAppInfo::new\s*\(/.test(text)) continue;
       for (const p of buildInfoProblems(text, names)) {
-        out.push(error('C56', 43, f, p.line, p.message, `Use option_env!("${names[0]}") for the commit and option_env!("${names[1]}") for the date (build-env sets them).`));
+        out.push(error('C56', 40, f, p.line, p.message, `Use option_env!("${names[0]}") for the commit and option_env!("${names[1]}") for the date (build-env sets them).`));
       }
     }
     return out;

@@ -1,10 +1,15 @@
 import { InjectionToken } from '@angular/core';
 import type {
+  ChatModels,
+  ChatAttached,
+  ChatAttachRules,
+  ChatStorage,
+  OpenedApp,
+  ConnectedApp,
   AppInfo,
   CacheClearScope,
   CacheInfo,
   AppPermissions,
-  AppUpdateStatus,
   BenchmarkResult,
   BuildCapabilities,
   EnginePinState,
@@ -27,6 +32,7 @@ import type {
   UsageSeries,
   HfModel,
   HfRepo,
+  JobEvent,
   LiveUpdate,
   LocalModel,
   Overview,
@@ -42,10 +48,11 @@ import type {
   Settings,
   UpdateCheckResult,
   UpdateCheckStatus,
-  UpdateInfo,
   UpdateNotice,
   UpdateSchedule,
 } from './api.types';
+import type { LoadingRows, PopoverHeader } from './generated/widgets';
+import type { PopoverEdit, PopoverPush, PopoverValues, PopoverView } from './widgets.types';
 
 /** Stops a subscription or a running stream. */
 export type Unsubscribe = () => void;
@@ -66,12 +73,36 @@ export interface PitwallBackend {
   subscribe(listener: (update: LiveUpdate) => void): Unsubscribe;
   setServing(paused: boolean): Promise<void>;
   releaseMemory(): Promise<number>;
+
+  // The tray popup's widgets (family ADR 0035): the layout, the values and the header are the app's, computed in Rust.
+  /** The popup's layout and catalogue as the chooser draws them. */
+  popoverView(): Promise<PopoverView>;
+  /** What the popup's widgets show now. */
+  popoverValues(): Promise<PopoverValues>;
+  /** The status pill and which footer items work now. */
+  popoverHeader(): Promise<PopoverHeader>;
+  /** How many rows each widget draws, so a loading twin has the height of a ready widget. */
+  popoverShape(): Promise<LoadingRows[]>;
+  /** One edit of the layout; the answer is the new layout. */
+  editPopover(edit: PopoverEdit): Promise<PopoverView>;
+  /** Pushed after any change of the layout, the values or the header (no polling). */
+  onPopover(handler: (push: PopoverPush) => void): Unsubscribe;
   /** Entries, size, hits and clean-up time of the response and embeddings caches (ADR 0019). */
   cacheInfo(): Promise<CacheInfo>;
   /** Empties caches; resolves to the number of entries removed. */
   clearCache(scope: CacheClearScope): Promise<number>;
   applyPreset(preset: Preset): Promise<Settings>;
+  /** Cancels a queued or running inference request of the server's queue (the dashboard's queue card; string id). Not for background jobs: see {@link jobCancel}. */
   cancelJob(id: string): Promise<void>;
+  /**
+   * Events of every background job (ADR 0024) until the returned function is called. The methods in {@link JOB_METHODS}
+   * run as jobs: they never time out in the UI (ER-19), they report phase and progress here, and Cancel works in every phase.
+   */
+  jobEvents(listener: (event: JobEvent) => void): Unsubscribe;
+  /** Cancels a background job of the app ({@link JOB_METHODS}; numeric id). Not for queue requests: see {@link cancelJob}. False when it is unknown, finished or in a step that cannot be interrupted. */
+  jobCancel(jobId: number): Promise<boolean>;
+  /** Stops waiting for a job whose Cancel did not take effect (the server may still be working); false when not offered. */
+  jobStopWaiting(jobId: number): Promise<boolean>;
 
   // Models
   localModels(): Promise<LocalModel[]>;
@@ -137,7 +168,7 @@ export interface PitwallBackend {
   // Model update notices (check only; downloading is the user's decision)
   updateCheckStatus(): Promise<UpdateCheckStatus>;
   updateNotices(): Promise<UpdateNotice[]>;
-  /** Asks Hugging Face now about the repositories you downloaded from; refused in offline mode. */
+  /** Asks Hugging Face now about the repositories you downloaded from. */
   checkUpdatesNow(): Promise<UpdateCheckResult>;
   /** Turns the scheduled check on or off (off until you turn it on) and sets how often it runs. */
   setUpdateCheck(enabled: boolean, schedule: UpdateSchedule): Promise<UpdateCheckStatus>;
@@ -157,11 +188,6 @@ export interface PitwallBackend {
   // Settings
   settings(): Promise<Settings>;
   saveSettings(settings: Settings): Promise<Settings>;
-  appUpdateStatus(): Promise<AppUpdateStatus>;
-  /** Looks for a newer release; only when the user asks. Null: this is the latest. */
-  checkAppUpdate(): Promise<UpdateInfo | null>;
-  /** Installs the update the last check found; the app restarts. */
-  installAppUpdate(): Promise<void>;
 
   // The server as an OS service, and start at log-in (app commands, not management calls)
   serviceState(): Promise<ServiceInstall>;
@@ -177,11 +203,59 @@ export interface PitwallBackend {
   quitApp(stopServing: boolean, remember: boolean): Promise<void>;
   /** A quit asked for while no window was open is waiting for the dialog: true once. */
   takeQuitAsk(): Promise<boolean>;
+  /** Whether this build has the Playground's chat (Rust decides: the `chat` feature, until ADR 0049's switches). */
+  chatEnabled(): Promise<boolean>;
+  /** Settings > Connected apps: the family apps the chat can use. */
+  connectedApps(): Promise<ConnectedApp[]>;
+  /** Keeps the key pasted for an app and connects with it. */
+  setAppKey(appId: string, key: string): Promise<ConnectedApp>;
+  /** Connects an app again and lists its tools (Refresh). */
+  connectApp(appId: string): Promise<ConnectedApp>;
+  /** Forgets an app: its connection, key and remembered approvals. */
+  forgetApp(appId: string): Promise<ConnectedApp>;
+  /** Opens a family app ("Open Dyno"); the chat connects once it listens. */
+  openConnectedApp(appId: string): Promise<OpenedApp>;
+  /** Asks again for one tool (forgets its Always allow). */
+  revokeToolApproval(appId: string, tool: string): Promise<ConnectedApp>;
+  /** Every change of the connected apps, from any window (`pitwall://connected-apps`). */
+  onConnectedApps(handler: (apps: ConnectedApp[]) => void): Unsubscribe;
+  /** The Chat tab's model picker. */
+  chatModels(): Promise<ChatModels>;
+  /** Chooses the chat's model (one without tools is never chosen). */
+  setChatModel(modelId: string): Promise<ChatModels>;
+  /** Reads the chat model's window again (its context per slot changes with Settings or a reload); the tokens it holds. */
+  chatRefreshWindow(): Promise<number>;
+  /** Settings > Chats: the default for new chats and what the saved ones take. */
+  chatStorage(): Promise<ChatStorage>;
+  /** "Save new chats" on or off. */
+  setChatSaveNew(save: boolean): Promise<ChatStorage>;
+  /** Whether a chat is saved (the Chat bar's "Don't save this chat"). */
+  chatSaved(conversationId: string): Promise<boolean>;
+  /** Saves a chat, or keeps it until Pitwall closes and deletes its saved copy (ask first). Returns its new state. */
+  setChatSaved(conversationId: string, save: boolean): Promise<boolean>;
+  /** Deletes every chat and attachment (ask first). */
+  deleteAllChats(): Promise<ChatStorage>;
+  /** What the chat's composer may attach (ADR 0023 WP-4b). */
+  chatAttachRules(): Promise<ChatAttachRules>;
+  /** Hands a file to Rust, which checks it and keeps it until its question is sent; a refusal says why. */
+  chatAttach(name: string, bytes: Uint8Array): Promise<ChatAttached>;
+  /** Forgets a file taken off the question before it was sent. */
+  chatDetach(sha256: string): Promise<void>;
   /** The app asks the open window to show the "When you quit" dialog. */
   onQuitAsk(handler: () => void): Unsubscribe;
   autostart(): Promise<boolean>;
   setAutostart(enabled: boolean): Promise<boolean>;
 }
+
+/** The calls that run as background jobs: no timeout, live phase-labelled progress, Cancel (ER-17..19, ADR 0024). */
+export const JOB_METHODS: ReadonlySet<keyof PitwallBackend> = new Set<keyof PitwallBackend>([
+  'loadModel',
+  'runBenchmark',
+  'checkUpdatesNow',
+  'installService',
+  'uninstallService',
+  'repairService',
+]);
 
 export const BACKEND = new InjectionToken<PitwallBackend>('PitwallBackend');
 

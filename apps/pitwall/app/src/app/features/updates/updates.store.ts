@@ -6,7 +6,8 @@ import { toCommandError } from '../../core/command-error';
 import { LiveStore } from '../../core/live.store';
 import { Toasts } from '../../core/toasts';
 import { bytes } from '../../shared/format';
-import { Confirm } from '../../shared/ui/confirm';
+import { confirm } from '@decryp7/paddock-ui/shell/confirm';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 
 interface UpdatesState {
   notices: UpdateNotice[];
@@ -48,7 +49,7 @@ export const UpdatesStore = signalStore(
     noticesFor: computed(() => (modelId: string) => notices().filter((n) => n.modelId === modelId)),
     isBusy: computed(() => (key: string) => key in busy()),
   })),
-  withMethods((store, backend = inject(BACKEND), toasts = inject(Toasts), confirm = inject(Confirm)) => {
+  withMethods((store, backend = inject(BACKEND), toasts = inject(Toasts), dialogs = inject(DialogService)) => {
     const setBusy = (key: string, on: boolean) => {
       const next = { ...store.busy() };
       if (on) next[key] = true;
@@ -85,7 +86,7 @@ export const UpdatesStore = signalStore(
         if (!store.loaded() && !store.loading()) await load();
       },
 
-      /** "Check now": asks Hugging Face about the repositories you downloaded from (never in offline mode). */
+      /** "Check now": asks Hugging Face about the repositories you downloaded from. */
       async checkNow(): Promise<void> {
         if (store.checking()) return;
         patchState(store, { checking: true });
@@ -139,12 +140,12 @@ export const UpdatesStore = signalStore(
        */
       async get(n: UpdateNotice): Promise<boolean> {
         if (store.isBusy()(n.id)) return false;
-        const host = store.status()?.host ?? 'huggingface.co';
+        const host = store.status()?.host || 'huggingface.co';
         const replaces = n.kind === 'newerRevision' ? ' It replaces the copy you have once it finishes and is verified.' : '';
-        const ok = await confirm.ask({
-          title: `Download ${n.file}?`,
+        const ok = await confirm(dialogs, {
+          heading: `Download ${n.file}?`,
           message: `${bytes(n.sizeBytes)} from ${host} (repository ${n.repo}).${replaces} Pitwall downloads nothing until you confirm.`,
-          confirm: 'Download',
+          confirm: { label: 'Download update' },
         });
         if (!ok) return false;
         setBusy(n.id, true);
@@ -164,13 +165,12 @@ export const UpdatesStore = signalStore(
   }),
   withHooks((store, live = inject(LiveStore)) => ({
     onInit() {
-      // A pushed "model update" event, a finished download or a change of offline mode changes what is shown.
+      // A pushed "model update" event, or a finished download changes what is shown.
       let seen = '';
       effect(() => {
         const update = live.events().find((e) => e.kind === 'modelUpdate');
         const done = live.downloads().filter((d) => d.state === 'done').length;
-        // Offline mode flips what a check can do, so the state is read again when it changes.
-        const key = `${update?.id ?? ''}|${done}|${live.server()?.offline ?? ''}`;
+        const key = `${update?.id ?? ''}|${done}`;
         untracked(() => {
           const changed = key !== seen;
           seen = key;

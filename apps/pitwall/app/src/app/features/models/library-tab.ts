@@ -1,19 +1,21 @@
 import { CdkConnectedOverlay, CdkOverlayOrigin } from '@angular/cdk/overlay';
 import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal } from '@angular/core';
+import { MatButton, MatIconButton } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
+import { MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { LocalModel } from '../../core/api.types';
-import { ago, bytes, date, seconds, slotsText } from '../../shared/format';
+import { ago, bytes, bytesIn, bytesUnit, date, seconds, slotsText, varies } from '../../shared/format';
 import { CAPABILITY_ICON, CAPABILITY_LABEL, UPDATE_KIND_LABEL, fitLook } from '../../shared/labels';
-import { Confirm } from '../../shared/ui/confirm';
-import { ContextMenuService, type ContextMenuItem } from '../../shared/ui/context-menu';
+import { confirm } from '@decryp7/paddock-ui/shell/confirm';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { DetailPanel } from '../../shared/ui/detail-panel';
-import { EmptyState } from '../../shared/ui/empty-state';
 import { Fact } from '../../shared/ui/fact';
 import { Panel } from '../../shared/ui/panel';
-import { RowMenu } from '../../shared/ui/row-menu';
-import { PwSelect, type SelectOption } from '../../shared/ui/select';
-import { fromControl, isMenuKey, moveRowFocus } from '../../shared/ui/row-nav';
+import { ItemsMenu, MoreButton, RowMenu, type MenuItem } from '../../shared/ui/menu';
+import { fromControl, moveRowFocus } from '../../shared/ui/row-nav';
+import { SuEmptyState } from '@decryp7/paddock-ui';
+import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 import { ModelsStore } from './models.store';
 import { UpdatesStore } from '../updates/updates.store';
 import { SlotsPanel } from './slots-panel';
@@ -43,19 +45,19 @@ export function contextText(tokens: number | null): string {
 /** The local library: disk usage with clean-up, and every model with load, pin, idle override and delete. */
 @Component({
   selector: 'pw-library-tab',
-  imports: [MatIconModule, MatTooltipModule, CdkConnectedOverlay, CdkOverlayOrigin, Panel, EmptyState, SlotsPanel, DetailPanel, Fact, RowMenu, PwSelect],
+  imports: [MatButton, MatIconButton, MatIconModule, MatTableModule, MatTooltipModule, CdkConnectedOverlay, CdkOverlayOrigin, Panel, SuEmptyState, SlotsPanel, DetailPanel, Fact, ItemsMenu, MoreButton, RowMenu, PdSelect],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pw-panel heading="Disk" icon="disk" [loading]="store.loading()" [error]="store.disk() ? null : store.error()" [ready]="!!store.disk()" [skeletonLines]="2" (retry)="store.load()">
       <div panel-actions>
-        <button type="button" class="btn ghost sm" [disabled]="store.unusedModels().length === 0 || store.isBusy()('cleanup')" (click)="cleanUp()" [matTooltip]="cleanupHint()">
+        <button type="button" matButton [disabled]="store.unusedModels().length === 0 || store.isBusy()('cleanup')" (click)="cleanUp()" [matTooltip]="cleanupHint()">
           <mat-icon svgIcon="pw:broom" aria-hidden="true" />Clean up unused
         </button>
       </div>
       @if (store.disk(); as d) {
         <div class="disk" role="img" [attr.aria-label]="diskLabel()">
           @for (s of segments(); track s.key) {
-            <span class="seg" [attr.data-k]="s.key" [style.flex-grow]="s.bytes"></span>
+            <span class="part" [attr.data-k]="s.key" [style.flex-grow]="s.bytes"></span>
           }
         </div>
         <ul class="disk-labels">
@@ -72,74 +74,83 @@ export function contextText(tokens: number | null): string {
     <div class="with-panel">
       <pw-panel [flush]="true" [loading]="store.loading()" [error]="store.error()" [ready]="store.loaded()" [skeletonLines]="6" (retry)="store.load()">
         @if (store.library().length === 0) {
-          <pw-empty-state icon="models" heading="No models yet" text="Search Hugging Face for a GGUF model; Pitwall tells you which quantisation fits this machine.">
-            <button type="button" class="btn primary sm" (click)="discover.emit()"><mat-icon svgIcon="pw:search" aria-hidden="true" />Discover models</button>
-          </pw-empty-state>
+          <pd-empty-state heading="No models yet" description="Search Hugging Face for a GGUF model; Pitwall tells you which quantisation fits this machine.">
+            <mat-icon slot="icon" svgIcon="pw:models" aria-hidden="true" />
+            <button slot="action" type="button" matButton="filled" (click)="discover.emit()"><mat-icon svgIcon="pw:search" aria-hidden="true" />Discover models</button>
+          </pd-empty-state>
         } @else {
           <div class="toolbar">{{ summary() }}</div>
+          <pw-items-menu #rowMenu label="Model actions" />
           <div class="scroll">
-            <table class="table">
-              <thead>
-                <tr>
-                  <th scope="col">Model</th>
-                  <th scope="col" class="right col-size">Size</th>
-                  <th scope="col" class="right col-params">Params</th>
-                  <th scope="col" class="right col-ctx">Context</th>
-                  <th scope="col">Status</th>
-                  <th scope="col" class="act"><span class="sr-only">Actions</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (m of store.library(); track m.id) {
-                  <tr
-                    tabindex="0"
-                    [id]="'row-' + m.id"
-                    [class.selected]="selectedId() === m.id"
-                    [attr.aria-selected]="selectedId() === m.id"
-                    (click)="onRowClick(m, $event)"
-                    (keydown)="onRowKey(m, $event)"
-                    (contextmenu)="onRowMenu(m, $event)"
-                  >
-                    <td class="model">
-                      <span class="line">
-                        <span class="name" [matTooltip]="m.name" matTooltipShowDelay="600">{{ m.name }}</span>
-                        <span class="glyphs">
-                          @for (c of m.capabilities; track c) {
-                            <mat-icon [svgIcon]="'pw:' + glyph[c]" role="img" [attr.aria-label]="capability[c]" [matTooltip]="capability[c]" />
-                          }
-                          @if (updates.noticesFor()(m.id).length) {
-                            <mat-icon class="upd" svgIcon="pw:download" role="img" [attr.aria-label]="'Update available for ' + m.name" [matTooltip]="'Update available: ' + updateKind[updates.noticesFor()(m.id)[0]!.kind]" />
-                          }
-                        </span>
-                      </span>
-                      <span class="repo" [matTooltip]="m.repo" matTooltipShowDelay="600">{{ m.repo }}</span>
-                    </td>
-                    <td class="right num col-size">{{ size(m.sizeBytes) }}</td>
-                    <td class="right num col-params">{{ params(m.paramsB) }}</td>
-                    <td class="right num col-ctx">{{ ctx(m.contextMax) }}</td>
-                    <td>
-                      @if (m.loaded) {
-                        <span class="status" data-tone="ok">Loaded</span>
-                      } @else {
-                        <span class="status" [attr.data-tone]="fit(m).tone" [matTooltip]="m.fit.message">{{ fit(m).label }}</span>
+            <table mat-table [dataSource]="store.library()" [trackBy]="byId" [fixedLayout]="true" aria-label="Models in the library">
+              <ng-container matColumnDef="model">
+                <th mat-header-cell *matHeaderCellDef scope="col">Model</th>
+                <td mat-cell *matCellDef="let row" class="model">
+                  @let m = asModel(row);
+                  <span class="line">
+                    <span class="name" [matTooltip]="m.name" matTooltipShowDelay="600">{{ m.name }}</span>
+                    <span class="glyphs">
+                      @for (c of m.capabilities; track c) {
+                        <mat-icon [svgIcon]="'pw:' + glyph[c]" role="img" [attr.aria-label]="capability[c]" [matTooltip]="capability[c]" />
                       }
-                      @if (m.pinned) {
-                        <mat-icon class="pinned" svgIcon="pw:pin" role="img" aria-label="Pinned" matTooltip="Pinned: never released automatically" />
+                      @if (updates.noticesFor()(m.id).length) {
+                        <mat-icon class="upd" svgIcon="pw:download" role="img" [attr.aria-label]="'Update available for ' + m.name" [matTooltip]="'Update available: ' + updateKind[updates.noticesFor()(m.id)[0]!.kind]" />
                       }
-                    </td>
-                    <td class="act">
-                      <span class="row-actions">
-                        @if (m.loaded) {
-                          <button type="button" class="btn sm" [disabled]="store.isBusy()('model:' + m.id)" (click)="store.unloadModel(m.id)" [attr.aria-label]="'Unload ' + m.name">Unload</button>
-                        } @else {
-                          <button type="button" class="btn sm" [disabled]="store.isBusy()('model:' + m.id) || m.fit.verdict === 'wontFit'" (click)="store.loadModel(m.id)" [attr.aria-label]="'Load ' + m.name">Load</button>
-                        }
-                        <pw-row-menu [items]="menuItems(m)" [label]="'More actions for ' + m.name" />
-                      </span>
-                    </td>
-                  </tr>
-                }
-              </tbody>
+                    </span>
+                  </span>
+                  <span class="repo" [matTooltip]="m.repo" matTooltipShowDelay="600">{{ m.repo }}</span>
+                </td>
+              </ng-container>
+              <ng-container matColumnDef="size">
+                <th mat-header-cell *matHeaderCellDef scope="col" class="right">Size {{ sizeUnit() }}</th>
+                <td mat-cell *matCellDef="let m" class="right num">{{ sizeIn(m.sizeBytes, sizeUnit()) }}</td>
+              </ng-container>
+              <ng-container matColumnDef="params">
+                <th mat-header-cell *matHeaderCellDef scope="col" class="right">Params</th>
+                <td mat-cell *matCellDef="let m" class="right num">{{ params(m.paramsB) }}</td>
+              </ng-container>
+              <ng-container matColumnDef="context">
+                <th mat-header-cell *matHeaderCellDef scope="col" class="right">Context tokens</th>
+                <td mat-cell *matCellDef="let m" class="right num">{{ ctx(m.contextMax) }}</td>
+              </ng-container>
+              <ng-container matColumnDef="status">
+                <th mat-header-cell *matHeaderCellDef scope="col">Status</th>
+                <td mat-cell *matCellDef="let m">
+                  @if (m.loaded) {
+                    <span class="status" data-tone="ok">Loaded</span>
+                  } @else {
+                    <span class="status" [attr.data-tone]="fit(m).tone" [matTooltip]="m.fit.message">{{ fit(m).label }}</span>
+                  }
+                  @if (m.pinned) {
+                    <mat-icon class="pinned" svgIcon="pw:pin" role="img" aria-label="Pinned" matTooltip="Pinned: never released automatically" />
+                  }
+                </td>
+              </ng-container>
+              <ng-container matColumnDef="act">
+                <th mat-header-cell *matHeaderCellDef scope="col" class="act"><span class="sr-only">Actions</span></th>
+                <td mat-cell *matCellDef="let m" class="act">
+                  @if (m.loaded) {
+                    <button type="button" matIconButton class="reveal" [disabled]="store.isBusy()('model:' + m.id)" (click)="store.unloadModel(m.id)" [attr.aria-label]="'Unload ' + m.name" matTooltip="Unload"><mat-icon svgIcon="pw:release" aria-hidden="true" /></button>
+                  } @else {
+                    <button type="button" matIconButton class="reveal" [disabled]="store.isBusy()('model:' + m.id) || m.fit.verdict === 'wontFit'" (click)="store.loadModel(m.id)" [attr.aria-label]="'Load ' + m.name" matTooltip="Load"><mat-icon svgIcon="pw:play" aria-hidden="true" /></button>
+                  }
+                  <pw-more-button [menu]="rowMenu.menu()" [items]="menuItems(m)" [label]="'More actions for ' + m.name" />
+                </td>
+              </ng-container>
+              <tr mat-header-row *matHeaderRowDef="columns(); sticky: true"></tr>
+              <tr
+                mat-row
+                *matRowDef="let m; columns: columns()"
+                tabindex="0"
+                [id]="'row-' + m.id"
+                [class.selected]="selectedId() === m.id"
+                [attr.aria-selected]="selectedId() === m.id"
+                (click)="onRowClick(m, $event)"
+                (keydown)="onRowKey(m, $event)"
+                pwRowMenu
+                [matContextMenuTriggerFor]="rowMenu.menu()"
+                [matContextMenuTriggerData]="{ items: menuItems(m) }"
+              ></tr>
             </table>
           </div>
         }
@@ -147,15 +158,16 @@ export function contextText(tokens: number | null): string {
 
       @if (selected(); as m) {
         <pw-detail-panel [heading]="m.name" [sub]="m.repo" (closed)="close()">
-          <pw-row-menu panel-actions [items]="menuItems(m)" [label]="'More actions for ' + m.name" />
+          <pw-items-menu #panelMenu label="Model actions" />
+          <pw-more-button panel-actions [menu]="panelMenu.menu()" [items]="menuItems(m)" [label]="'More actions for ' + m.name" />
 
           <div panel-toolbar>
             @if (m.loaded) {
-              <button type="button" class="btn" [disabled]="store.isBusy()('model:' + m.id)" (click)="store.unloadModel(m.id)">Unload</button>
+              <button type="button" matButton="outlined" [disabled]="store.isBusy()('model:' + m.id)" (click)="store.unloadModel(m.id)">Unload</button>
             } @else {
-              <button type="button" class="btn" [disabled]="store.isBusy()('model:' + m.id) || m.fit.verdict === 'wontFit'" (click)="store.loadModel(m.id)">Load</button>
+              <button type="button" matButton="outlined" [disabled]="store.isBusy()('model:' + m.id) || m.fit.verdict === 'wontFit'" (click)="store.loadModel(m.id)">Load</button>
             }
-            <button type="button" class="btn ghost" [disabled]="store.isBusy()('model:' + m.id)" (click)="store.pinModel(m.id, !m.pinned)">
+            <button type="button" matButton [disabled]="store.isBusy()('model:' + m.id)" (click)="store.pinModel(m.id, !m.pinned)">
               <mat-icon [svgIcon]="m.pinned ? 'pw:unpin' : 'pw:pin'" aria-hidden="true" />{{ m.pinned ? 'Unpin' : 'Pin (keep loaded)' }}
             </button>
           </div>
@@ -164,7 +176,7 @@ export function contextText(tokens: number | null): string {
             <div class="callout" role="note">
               <p><b>Update available: {{ updateKind[u.kind] }}</b></p>
               <p>{{ u.summary }}</p>
-              <button type="button" class="btn sm" [disabled]="updates.isBusy()(u.id)" [attr.aria-label]="'Get ' + u.file + ' for ' + m.name" (click)="updates.get(u)">Get it</button>
+              <button type="button" matButton="outlined" [disabled]="updates.isBusy()(u.id)" [attr.aria-label]="'Get ' + u.file + ' for ' + m.name" (click)="updates.get(u)">Get it</button>
             </div>
           }
 
@@ -187,7 +199,7 @@ export function contextText(tokens: number | null): string {
           <section aria-label="Settings" class="settings">
             <div class="field">
               <span>Release when idle</span>
-<pw-select [inputId]="'idle-' + m.id" [options]="idleChoices(m)" [value]="m.idleSecs === null ? '' : '' + m.idleSecs" [disabled]="m.pinned || store.isBusy()('model:' + m.id)" [label]="'Release ' + m.name + ' when idle'" (changed)="setIdle(m, $event)" />
+              <pd-select [inputId]="'idle-' + m.id" [options]="idleChoices(m)" [value]="m.idleSecs === null ? '' : '' + m.idleSecs" [disabled]="m.pinned || store.isBusy()('model:' + m.id)" [ariaLabel]="'Release ' + m.name + ' when idle'" (valueChange)="setIdle(m, $event)" />
               @if (m.pinned) {
                 <span class="hint">Pinned models are never released automatically.</span>
               }
@@ -196,7 +208,7 @@ export function contextText(tokens: number | null): string {
             @if (store.enginePins() && store.pinnableBuilds().length) {
               <div class="field">
                 <span>Engine build</span>
-                <pw-select [inputId]="'pin-' + m.id" [options]="pinChoices()" [value]="store.pinOf()(m.id)?.buildId ?? ''" [disabled]="store.isBusy()('pin:' + m.id)" [label]="'Engine build for ' + m.name" (changed)="setPin(m, $event)" />
+                <pd-select [inputId]="'pin-' + m.id" [options]="pinChoices()" [value]="store.pinOf()(m.id)?.buildId ?? ''" [disabled]="store.isBusy()('pin:' + m.id)" [ariaLabel]="'Engine build for ' + m.name" (valueChange)="setPin(m, $event)" />
                 @if (store.pinOf()(m.id); as pin) {
                   <span class="hint pinned-build" [matTooltip]="m.loaded ? 'Loaded models keep their engine until they are loaded again' : 'Used from the next load'">Pinned to {{ pin.buildId }}{{ pin.tag ? ' ' + pin.tag : '' }}</span>
                 }
@@ -207,7 +219,8 @@ export function contextText(tokens: number | null): string {
               <span>Parallel slots</span>
               <button
                 type="button"
-                class="btn sm slots-btn"
+                matButton="outlined"
+                class="slots-btn"
                 [id]="'slots-' + m.id"
                 cdkOverlayOrigin
                 #slotsOrigin="cdkOverlayOrigin"
@@ -232,43 +245,43 @@ export function contextText(tokens: number | null): string {
   styles: `
     :host {
       display: grid;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
     }
     .disk {
       display: flex;
       gap: 1px;
       height: 8px;
-      border-radius: var(--r-full);
+      border-radius: var(--pd-radius-pill);
       overflow: hidden;
-      .seg {
+      .part {
         flex-basis: 0;
         min-width: 3px;
       }
     }
     [data-k='models'] {
-      --seg: var(--viz-1);
+      --seg: var(--pd-chart-1);
     }
     [data-k='engines'] {
-      --seg: var(--viz-2);
+      --seg: var(--pd-chart-2);
     }
     [data-k='partial'] {
-      --seg: var(--viz-3);
+      --seg: var(--pd-chart-3);
     }
     [data-k='free'] {
-      --seg: var(--track);
+      --seg: var(--pd-surface-2);
     }
-    .disk .seg {
+    .disk .part {
       background: var(--seg);
     }
     /* Direct labels under the bar, in the bar's order; each takes at least its own width. */
     .disk-labels {
       display: flex;
-      gap: var(--sp-4);
-      margin: var(--sp-2) 0 0;
+      gap: var(--pd-space-4);
+      margin: var(--pd-space-2) 0 0;
       padding: 0;
       list-style: none;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       li {
         flex: 1 1 auto;
         display: inline-flex;
@@ -281,101 +294,77 @@ export function contextText(tokens: number | null): string {
         height: 8px;
         border-radius: 2px;
         background: var(--seg);
-        box-shadow: inset 0 0 0 1px var(--border-strong);
+        box-shadow: inset 0 0 0 1px var(--pd-border-strong);
       }
       li:not([data-k='free']) i {
         box-shadow: none;
       }
       b {
-        font-weight: var(--fw-medium);
-        color: var(--text);
+        font-weight: var(--pd-weight-medium);
+        color: var(--pd-text);
       }
     }
     .unused {
-      margin: var(--sp-2) 0 0;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      margin: var(--pd-space-2) 0 0;
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .toolbar {
       display: flex;
       align-items: center;
       height: 44px;
-      padding: 0 var(--sp-4);
-      font-size: var(--fs-sm);
-      color: var(--text-2);
-      border-bottom: 1px solid var(--border-soft);
+      padding: 0 var(--pd-space-4);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
+      border-bottom: 1px solid var(--pd-hairline);
     }
+    /* The list's width (the detail panel open, a small window) decides which columns it keeps. */
     .scroll {
       container-type: inline-size;
-      overflow-x: auto;
-      /* The last row's selected or hover background must not square off the panel's rounded corners. */
-      border-radius: 0 0 calc(var(--r-lg) - 1px) calc(var(--r-lg) - 1px);
     }
-    /* A narrow list (the detail panel is open, or a small window) drops the columns the panel repeats. */
+    .mat-column-size {
+      width: 80px;
+    }
+    .mat-column-params {
+      width: 72px;
+    }
+    .mat-column-context {
+      width: 128px;
+    }
+    .mat-column-status {
+      width: 132px;
+    }
+    /* Load or unload and the "..." button, with the cell's padding. */
+    .mat-column-act {
+      width: 92px;
+    }
+    /* A narrow list drops the columns the detail panel repeats. */
     @container (max-width: 640px) {
-      .col-params,
-      .col-ctx {
+      .mat-column-params,
+      .mat-column-context {
         display: none;
       }
     }
     @container (max-width: 500px) {
-      .col-size {
+      .mat-column-size {
         display: none;
       }
     }
-    /* The action column stays in view whatever the width, so Load / Unload never clip. */
-    .table th.act,
-    .table td.act {
-      position: sticky;
-      right: 0;
-      z-index: 2;
-      width: 1%;
-      background: var(--bg-card);
-      box-shadow: -10px 0 8px -8px color-mix(in srgb, var(--text) 14%, transparent);
-    }
-    /* The action column's header cell sticks both ways (the corner, 4): above the header row (3) and the action cells (2). */
-    .table th.act {
-      z-index: 4;
-    }
-    .table tr:hover td.act {
-      background: color-mix(in srgb, var(--bg-card) 94%, var(--text));
-    }
-    .table tr.selected td.act {
-      background: color-mix(in srgb, var(--bg-card) 90%, var(--accent));
-    }
-    .table th:first-child,
-    .table td:first-child {
-      padding-left: var(--sp-4);
-    }
-    .table th:last-child,
-    .table td:last-child {
-      padding-right: var(--sp-3);
-    }
-    .table td {
-      height: 48px;
-    }
-    .table td.act {
-      min-width: 128px;
-    }
-    .model {
-      width: 100%;
-      max-width: 0;
-      min-width: 180px;
-      overflow: hidden;
-      text-overflow: ellipsis;
+    table {
+      --mat-table-row-item-container-height: 48px;
     }
     .line {
       display: flex;
       align-items: center;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       min-width: 0;
     }
     .name {
       min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
-      font-size: var(--fs-base);
-      font-weight: var(--fw-semibold);
+      font-size: var(--pd-text-body);
+      font-weight: var(--pd-weight-semibold);
     }
     .glyphs {
       display: inline-flex;
@@ -385,42 +374,39 @@ export function contextText(tokens: number | null): string {
       mat-icon {
         width: 14px;
         height: 14px;
-        color: var(--text-3);
+        color: var(--pd-text-subtle);
       }
       .upd {
-        color: var(--accent);
+        color: var(--pd-accent);
       }
     }
     .repo {
       display: block;
       overflow: hidden;
       text-overflow: ellipsis;
-      font-size: var(--fs-xs);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .pinned {
       width: 13px;
       height: 13px;
       margin-left: 6px;
       vertical-align: -2px;
-      color: var(--text-3);
-    }
-    .row-actions .btn.sm:not(.icon) {
-      min-width: 64px;
+      color: var(--pd-text-subtle);
     }
     .callout {
       display: grid;
-      gap: var(--sp-1);
+      gap: var(--pd-space-1);
       justify-items: start;
-      margin-bottom: var(--sp-3);
-      padding: var(--sp-2) var(--sp-3);
-      font-size: var(--fs-sm);
-      color: var(--text-2);
-      background: var(--bg-sunken);
-      border-left: 3px solid var(--info);
-      border-radius: var(--r-sm);
+      margin-bottom: var(--pd-space-3);
+      padding: var(--pd-space-2) var(--pd-space-3);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
+      background: var(--pd-surface-2);
+      border-left: 3px solid var(--pd-info);
+      border-radius: var(--pd-radius-tag);
       b {
-        color: var(--text);
+        color: var(--pd-text);
       }
     }
     .facts {
@@ -428,31 +414,28 @@ export function contextText(tokens: number | null): string {
     }
     .settings {
       display: grid;
-      gap: var(--sp-3);
-      margin-top: var(--sp-4);
-      padding-top: var(--sp-3);
-      border-top: 1px solid var(--border-soft);
+      gap: var(--pd-space-3);
+      margin-top: var(--pd-space-4);
+      padding-top: var(--pd-space-3);
+      border-top: 1px solid var(--pd-hairline);
     }
     .field {
       display: grid;
       gap: 4px;
       justify-items: start;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
-      .select {
-        width: 100%;
-        height: 28px;
-      }
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .hint {
-      color: var(--text-2);
+      color: var(--pd-text-muted);
     }
     .plain {
-      font-size: var(--fs-base);
-      color: var(--text);
+      font-size: var(--pd-text-body);
+      color: var(--pd-text);
     }
-    pw-select {
+    pd-select {
       display: block;
+      width: 100%;
     }
     .slots-btn {
       gap: 2px;
@@ -470,8 +453,7 @@ export class LibraryTab {
   protected readonly store = inject(ModelsStore);
   protected readonly updates = inject(UpdatesStore);
   protected readonly updateKind = UPDATE_KIND_LABEL;
-  private readonly confirm = inject(Confirm);
-  private readonly menu = inject(ContextMenuService);
+  private readonly dialogs = inject(DialogService);
   protected readonly size = bytes;
   protected readonly when = ago;
   protected readonly secs = seconds;
@@ -480,10 +462,10 @@ export class LibraryTab {
   protected readonly idleOptions = idleOptions;
   protected readonly capability = CAPABILITY_LABEL;
   protected readonly glyph = CAPABILITY_ICON;
-  protected idleChoices(m: LocalModel): SelectOption[] {
+  protected idleChoices(m: LocalModel): PdSelectOption[] {
     return [{ value: '', label: 'Global setting' }, ...idleOptions(m.idleSecs).map((s) => ({ value: '' + s, label: `After ${seconds(s)}` }))];
   }
-  protected pinChoices(): SelectOption[] {
+  protected pinChoices(): PdSelectOption[] {
     return [{ value: '', label: 'Follows global choice' }, ...this.store.pinnableBuilds().map((b) => ({ value: b.id, label: `Pin to ${b.label} ${b.tag}` }))];
   }
   protected readonly fit = (m: LocalModel) => fitLook(m.fit.verdict);
@@ -496,8 +478,32 @@ export class LibraryTab {
     const lib = this.store.library();
     if (!lib.length) return '';
     const loaded = lib.filter((m) => m.loaded).length;
-    return `${lib.length} models · ${loaded} loaded`;
+    return [`${lib.length} models · ${loaded} loaded`, ...this.shared()].join(' · ');
   });
+
+  /** What every model shares, said once in the toolbar instead of in a constant column (UI review 2 rule 7): `all 8.2B · all 32k context`. */
+  protected readonly shared = computed(() => {
+    const lib = this.store.library();
+    const cols = this.columns();
+    const first = lib[0];
+    if (!first || lib.length < 3) return [];
+    return [
+      cols.includes('params') || first.paramsB === null ? '' : `all ${paramsText(first.paramsB)}`,
+      cols.includes('context') || first.contextMax === null ? '' : `all ${contextText(first.contextMax)} context`,
+    ].filter(Boolean);
+  });
+
+  /** The columns that say something: parameters and context only when they differ between models (UI review 2 rule 7). */
+  protected readonly columns = computed(() => {
+    const lib = this.store.library();
+    return ['model', 'size', ...(varies(lib, (m) => m.paramsB) ? ['params'] : []), ...(varies(lib, (m) => m.contextMax) ? ['context'] : []), 'status', 'act'];
+  });
+  /** The Size column's unit, in its header. */
+  protected readonly sizeUnit = computed(() => bytesUnit(this.store.library().map((m) => m.sizeBytes)));
+  protected readonly sizeIn = bytesIn;
+  protected readonly byId = (_: number, m: LocalModel) => m.id;
+  /** Material's cell templates are untyped: the row as the model it is. */
+  protected readonly asModel = (row: LocalModel) => row;
 
   protected readonly segments = computed(() => {
     const d = this.store.disk();
@@ -555,8 +561,8 @@ export class LibraryTab {
     return date(m.addedAt);
   }
 
-  /** The one list behind the row's "..." button, its right-click menu and Shift+F10. Delete is only here. */
-  protected menuItems(m: LocalModel): ContextMenuItem[] {
+  /** The one list behind the row's "..." button, its right-click menu and Shift+F10 (`pwRowMenu`). Delete is only here. */
+  protected menuItems(m: LocalModel): MenuItem[] {
     const busy = this.store.isBusy()('model:' + m.id);
     return [
       { label: 'Details', run: () => this.selectedId.set(m.id) },
@@ -585,18 +591,9 @@ export class LibraryTab {
     if (e.key === 'Enter') {
       e.preventDefault();
       this.selectedId.set(m.id);
-    } else if (isMenuKey(e)) {
-      e.preventDefault();
-      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      this.menu.open(r.left + 48, r.bottom - 8, this.menuItems(m));
     } else {
       moveRowFocus(e);
     }
-  }
-
-  protected onRowMenu(m: LocalModel, e: MouseEvent): void {
-    e.preventDefault();
-    this.menu.open(e.clientX, e.clientY, this.menuItems(m));
   }
 
   protected close(): void {
@@ -613,7 +610,7 @@ export class LibraryTab {
   }
 
   protected async remove(m: LocalModel): Promise<void> {
-    const ok = await this.confirm.ask({ title: `Delete ${m.name}?`, message: `${m.file} (${bytes(m.sizeBytes)}) is removed from disk. You can download it again later.`, confirm: 'Delete', danger: true });
+    const ok = await confirm(this.dialogs, { heading: `Delete ${m.name}?`, message: `${m.file} (${bytes(m.sizeBytes)}) is removed from disk. You can download it again later.`, confirm: { label: 'Delete model', destructive: true } });
     if (ok) {
       if (this.selectedId() === m.id) this.selectedId.set(null);
       await this.store.deleteModel(m.id);
@@ -622,11 +619,10 @@ export class LibraryTab {
 
   protected async cleanUp(): Promise<void> {
     const list = this.store.unusedModels();
-    const ok = await this.confirm.ask({
-      title: `Delete ${list.length} unused ${list.length === 1 ? 'model' : 'models'}?`,
+    const ok = await confirm(this.dialogs, {
+      heading: `Delete ${list.length} unused ${list.length === 1 ? 'model' : 'models'}?`,
       message: `${list.map((m) => m.name).join(', ')} — ${bytes(this.store.unusedBytes())} in total. You can download them again later.`,
-      confirm: 'Delete',
-      danger: true,
+      confirm: { label: list.length === 1 ? 'Delete model' : 'Delete models', destructive: true },
     });
     if (ok) await this.store.cleanUnused();
   }

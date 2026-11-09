@@ -27,12 +27,15 @@ pub const MAX_TEXT: usize = 1024;
 pub const MAX_CHAT_MESSAGES: usize = 512;
 /// See [`MAX_CHAT_MESSAGES`].
 pub const MAX_CHAT_BYTES: usize = 8 * 1024 * 1024;
+/// Most tools one chat request offers, and most bytes of their definitions together (names, descriptions, schemas).
+pub const MAX_CHAT_TOOLS: usize = 64;
+/// See [`MAX_CHAT_TOOLS`].
+pub const MAX_CHAT_TOOL_BYTES: usize = 256 * 1024;
 
-/// How long a method may take before the app answers for the server. Short for reads; long for work the server does
-/// itself (loading a big model, a benchmark); the UI shows an inline error with Retry when one fires.
+/// How long a method may take before the app answers for the server. Short for reads; longer for single calls of the server's own work
+/// (long operations are jobs and have no deadline, ADR 0024); the UI shows an inline error with Retry when one fires.
 pub fn timeout_for(method: &str) -> Duration {
     Duration::from_secs(match method {
-        "load_model" | "run_benchmark" => 600,
         "stop_serving" => 30,
         "delete_model" | "install_build" | "remove_build" | "select_build" | "rollback_build" => 120,
         "search_models" | "repo_files" | "download_model" | "release_memory" | "unload_model" => 60,
@@ -128,8 +131,24 @@ impl Validate for PlaygroundRequest {
         if self.messages.len() > MAX_CHAT_MESSAGES {
             return Err(bad(field, "too many messages"));
         }
-        if self.messages.iter().map(|m| m.content.len()).sum::<usize>() > MAX_CHAT_BYTES {
+        let call_bytes =
+            |m: &pitwall_core::mgmt::PlaygroundMessage| m.tool_calls.iter().map(|c| c.arguments.len() + c.name.len()).sum::<usize>();
+        if self.messages.iter().map(|m| m.content.len() + call_bytes(m)).sum::<usize>() > MAX_CHAT_BYTES {
             return Err(bad(field, "the conversation is too large"));
+        }
+        if self.tools.len() > MAX_CHAT_TOOLS {
+            return Err(bad(field, "too many tools"));
+        }
+        let tool_bytes: usize = self
+            .tools
+            .iter()
+            .map(|t| t.name.len() + t.description.len() + t.parameters.to_string().len())
+            .sum();
+        if tool_bytes > MAX_CHAT_TOOL_BYTES {
+            return Err(bad(field, "the tool definitions are too large"));
+        }
+        if self.tools.iter().any(|t| t.name.is_empty() || t.name.len() > MAX_TEXT) {
+            return Err(bad(field, "a tool needs a name of 1 to 1024 characters"));
         }
         if !(0.0..=4.0).contains(&self.temperature) || self.max_tokens == 0 || self.max_tokens > 1_000_000 {
             return Err(bad(field, "temperature must be 0 to 4 and max tokens 1 to 1000000"));
@@ -142,7 +161,7 @@ impl Validate for PlaygroundRequest {
 pub async fn forward(client: &dyn ServerClient, method: &str, args: Value) -> Result<Value, CommandError> {
     let timeout = timeout_for(method);
     // The transport has its own timeout; this one also covers a client that never returns.
-    match tokio::time::timeout(timeout + Duration::from_secs(2), client.call(method, args, timeout)).await {
+    match tokio::time::timeout(timeout + Duration::from_secs(2), client.call(method, args, Some(timeout))).await {
         Ok(r) => r,
         Err(_) => Err(crate::server_client::timed_out(timeout)),
     }
@@ -172,14 +191,11 @@ rpc!(
     /// One app in detail: usage, limits and its latest requests.
     app_detail => "app_detail", app_id: String = "appId");
 rpc!(
-    /// The state of the model update checks (schedule, last check, next check, offline).
+    /// The state of the model update checks (schedule, last check, next check).
     update_check_status => "update_check_status");
 rpc!(
     /// The model updates on offer (newer revisions, better quantisations), not dismissed.
     update_notices => "update_notices");
-rpc!(
-    /// Asks Hugging Face now (repository ids of downloaded models only; refused in offline mode).
-    check_updates_now => "check_updates_now");
 rpc!(
     /// Turns the scheduled update check on or off and sets how often it runs.
     set_update_check => "set_update_check", enabled: bool = "enabled", schedule: UpdateSchedule = "schedule");
@@ -243,9 +259,6 @@ rpc!(
 rpc!(
     /// Deletes a model from disk.
     delete_model => "delete_model", id: String = "id");
-rpc!(
-    /// Loads a model now.
-    load_model => "load_model", id: String = "id");
 rpc!(
     /// Unloads a model.
     unload_model => "unload_model", id: String = "id");
@@ -336,9 +349,6 @@ rpc!(
 rpc!(
     /// Past benchmark results.
     benchmarks => "benchmarks");
-rpc!(
-    /// Runs a benchmark.
-    run_benchmark => "run_benchmark", model_id: String = "modelId");
 rpc!(
     /// The settings.
     settings => "settings");
@@ -455,12 +465,11 @@ mod tests {
     fn request() -> PlaygroundRequest {
         PlaygroundRequest {
             model_id: "m".into(),
-            messages: vec![PlaygroundMessage {
-                role: pitwall_core::chat::Role::User,
-                content: "hi".into(),
-            }],
+            messages: vec![PlaygroundMessage::text(pitwall_core::chat::Role::User, "hi")],
             temperature: 0.7,
             max_tokens: 256,
+            tools: vec![],
+            tool_choice: Default::default(),
         }
     }
 
@@ -496,6 +505,27 @@ mod tests {
         let mut r = request();
         r.model_id = "m".repeat(MAX_TEXT + 1);
         assert!(r.validate("r").is_err());
+        let tool = |name: &str, description: String| pitwall_core::mgmt::PlaygroundTool {
+            name: name.into(),
+            description,
+            parameters: json!({"type": "object"}),
+        };
+        let mut r = request();
+        r.tools = vec![tool("cpu_memory", "d".into())];
+        assert!(r.validate("r").is_ok());
+        r.tools = (0..=MAX_CHAT_TOOLS).map(|i| tool(&format!("t{i}"), "d".into())).collect();
+        assert!(r.validate("r").is_err(), "too many tools");
+        r.tools = vec![tool("big", "x".repeat(MAX_CHAT_TOOL_BYTES + 1))];
+        assert!(r.validate("r").is_err(), "definitions too large");
+        r.tools = vec![tool("", "d".into())];
+        assert!(r.validate("r").is_err(), "a tool without a name");
+        let mut r = request();
+        r.messages[0].tool_calls = vec![pitwall_core::mgmt::PlaygroundToolCall {
+            id: "c".into(),
+            name: "n".into(),
+            arguments: "x".repeat(MAX_CHAT_BYTES),
+        }];
+        assert!(r.validate("r").is_err(), "tool call arguments count toward the size");
         assert!(AppPermissions::default().validate("p").is_ok());
         assert!(pitwall_core::cache::ClearRequest::All.validate("scope").is_ok());
         assert!(pitwall_core::cache::ClearRequest::App { app_id: "debrief".into() }
@@ -543,7 +573,11 @@ mod tests {
     #[test]
     fn every_method_has_a_timeout_and_slow_ones_get_more() {
         assert_eq!(timeout_for("overview"), Duration::from_secs(15));
-        assert!(timeout_for("load_model") >= Duration::from_secs(300));
+        assert_eq!(
+            timeout_for("load_model"),
+            Duration::from_secs(15),
+            "long work is a job and has no entry here"
+        );
         assert!(timeout_for("search_models") > timeout_for("overview"));
         assert!(timeout_for("anything_else") > Duration::ZERO);
     }
@@ -569,7 +603,12 @@ mod tests {
     async fn forward_gives_up_when_a_client_never_answers() {
         struct Never;
         impl ServerClient for Never {
-            fn call<'a>(&'a self, _: &'a str, _: Value, _: Duration) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
+            fn call<'a>(
+                &'a self,
+                _: &'a str,
+                _: Value,
+                _: Option<Duration>,
+            ) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
                 Box::pin(std::future::pending())
             }
             fn open_stream<'a>(
@@ -661,7 +700,12 @@ mod tests {
         }
         struct Client;
         impl ServerClient for Client {
-            fn call<'a>(&'a self, _: &'a str, _: Value, _: Duration) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
+            fn call<'a>(
+                &'a self,
+                _: &'a str,
+                _: Value,
+                _: Option<Duration>,
+            ) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
                 Box::pin(async { Ok(Value::Null) })
             }
             fn open_stream<'a>(
@@ -696,7 +740,12 @@ mod tests {
         }
         struct Client;
         impl ServerClient for Client {
-            fn call<'a>(&'a self, _: &'a str, _: Value, _: Duration) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
+            fn call<'a>(
+                &'a self,
+                _: &'a str,
+                _: Value,
+                _: Option<Duration>,
+            ) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
                 Box::pin(async { Ok(Value::Null) })
             }
             fn open_stream<'a>(
@@ -734,7 +783,12 @@ mod tests {
         }
         struct Client(Arc<AtomicBool>);
         impl ServerClient for Client {
-            fn call<'a>(&'a self, _: &'a str, _: Value, _: Duration) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
+            fn call<'a>(
+                &'a self,
+                _: &'a str,
+                _: Value,
+                _: Option<Duration>,
+            ) -> crate::server_client::BoxFuture<'a, Result<Value, CommandError>> {
                 Box::pin(async { Ok(Value::Null) })
             }
             fn open_stream<'a>(

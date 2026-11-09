@@ -1,8 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { patchState } from '@ngrx/signals';
 import { MockBackend } from '../../core/mock-backend';
-import { Confirm } from '../../shared/ui/confirm';
-import { button, render, settle } from '../../../testing/render';
+import { button, dialogsAnswering, render, settle } from '../../../testing/render';
 import { UpdateBanner } from './update-banner';
 import { UpdatesStore } from './updates.store';
 
@@ -41,15 +40,16 @@ describe('UpdateBanner', () => {
   it('"Get it" confirms with the host before anything downloads', async () => {
     const backend = new MockBackend({ modelUpdates: true });
     const spy = vi.spyOn(backend, 'downloadModel');
-    const ask = vi.fn().mockResolvedValue(false);
-    TestBed.configureTestingModule({ providers: [{ provide: Confirm, useValue: { ask } }] });
+    let yes = false;
+    const dialogs = dialogsAnswering(() => (yes ? true : undefined));
+    TestBed.configureTestingModule({ providers: [dialogs] });
     const { el, fixture } = await render(UpdateBanner, backend);
     button(el, 'Get Qwen3.5-9B-Q4_K_M.gguf').click();
     await settle(fixture);
-    expect(ask).toHaveBeenCalledOnce();
-    expect(ask.mock.calls[0]![0].message).toContain('huggingface.co');
+    expect(dialogs.opened).toHaveLength(1);
+    expect(dialogs.opened[0]!.inputs['message']).toContain('huggingface.co');
     expect(spy).not.toHaveBeenCalled();
-    ask.mockResolvedValue(true);
+    yes = true;
     button(el, 'Get Qwen3.5-9B-Q4_K_M.gguf').click();
     await settle(fixture);
     expect(spy).toHaveBeenCalledWith('unsloth/Qwen3.5-9B-GGUF', 'Qwen3.5-9B-Q4_K_M.gguf', null);

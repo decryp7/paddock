@@ -1,7 +1,16 @@
-import { ChangeDetectionStrategy, Component, computed, effect, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, input, output, signal, untracked, viewChildren } from '@angular/core';
+import { MatButton } from '@angular/material/button';
+import { MatCheckbox } from '@angular/material/checkbox';
+import type { ErrorStateMatcher } from '@angular/material/core';
+import { MatError, MatFormField, MatLabel, MatSuffix } from '@angular/material/form-field';
+import { MatInput } from '@angular/material/input';
+import { MatRadioButton, MatRadioGroup } from '@angular/material/radio';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
+import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
 import type { AppLimits, AppPermissions, LocalModel, Priority } from '../../core/api.types';
 import { PRIORITY_LABEL } from '../../shared/labels';
+import { int } from '../../shared/format';
 
 const PRIORITIES: Priority[] = ['interactive', 'background', 'batch'];
 
@@ -11,11 +20,15 @@ const PRIORITY_HINT: Record<Priority, string> = {
   batch: 'Runs only when nothing else does',
 };
 
-/** A limit field's text as a value: empty is no limit, a positive whole number is the limit, anything else invalid. */
+/**
+ * A limit field's text as a value: empty is no limit, a positive whole number is the limit, anything else invalid. Thousands
+ * separators are accepted as the field shows them (`120,000,000`), but only in their places (`1,50` is invalid).
+ */
 export function parseLimit(text: string, max = Number.MAX_SAFE_INTEGER): number | null | 'invalid' {
-  const t = text.trim();
-  if (t === '') return null;
-  if (!/^\d+$/.test(t)) return 'invalid';
+  const raw = text.trim();
+  if (raw === '') return null;
+  if (!/^\d+$/.test(raw) && !/^\d{1,3}(,\d{3})+$/.test(raw)) return 'invalid';
+  const t = raw.replace(/,/g, '');
   const n = Number(t);
   return n >= 1 && n <= max && Number.isSafeInteger(n) ? n : 'invalid';
 }
@@ -49,16 +62,16 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
 /** Edits an app's permissions locally; Save emits the parsed permissions (the server validates again). */
 @Component({
   selector: 'pw-permissions-editor',
-  imports: [MatSlideToggleModule],
+  imports: [MatButton, MatCheckbox, MatError, MatFormField, MatInput, MatLabel, MatRadioButton, MatRadioGroup, MatSuffix, MatSlideToggleModule, MatTooltipModule, SuSegmentedControl],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <form (submit)="$event.preventDefault(); submit()" [attr.aria-label]="'Permissions of ' + appName()">
       <fieldset class="group">
         <legend>Models</legend>
-        <div class="choice" role="radiogroup" aria-label="Which models">
-          <label class="radio"><input type="radio" [name]="uid + '-models'" [checked]="allModels()" (change)="allModels.set(true)" /> Every model</label>
-          <label class="radio"><input type="radio" [name]="uid + '-models'" [checked]="!allModels()" (change)="allModels.set(false)" /> Only these</label>
-        </div>
+        <mat-radio-group class="choice" aria-label="Which models" [value]="allModels() ? 'all' : 'some'" (change)="allModels.set($event.value === 'all')">
+          <mat-radio-button value="all">Every model</mat-radio-button>
+          <mat-radio-button value="some">Only these</mat-radio-button>
+        </mat-radio-group>
         @if (!allModels()) {
           @if (models().length === 0) {
             <p class="faint hint">No local models yet. Download one in Models.</p>
@@ -66,13 +79,12 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
             <ul class="models">
               @for (m of models(); track m.id) {
                 <li>
-                  <label class="check">
-                    <input type="checkbox" [checked]="chosen().has(m.id)" (change)="toggleModel(m.id)" />
-                    <span class="mname">{{ m.name }}</span>
+                  <mat-checkbox class="check" [checked]="chosen().has(m.id)" (change)="toggleModel(m.id)">
+                    <span class="mname" [matTooltip]="m.name" matTooltipShowDelay="600">{{ m.name }}</span>
                     @if (m.quant) {
                       <span class="tag">{{ m.quant }}</span>
                     }
-                  </label>
+                  </mat-checkbox>
                 </li>
               }
             </ul>
@@ -82,11 +94,7 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
 
       <fieldset class="group">
         <legend>Highest priority</legend>
-        <div class="seg" role="radiogroup" aria-label="Highest priority">
-          @for (p of priorities; track p) {
-            <button type="button" role="radio" [attr.aria-checked]="priority() === p" (click)="priority.set(p)">{{ priorityLabel[p] }}</button>
-          }
-        </div>
+        <pd-segmented-control label="Highest priority" [options]="prioritySegs" [value]="priority()" (valueChange)="setPriority($event)" />
         <p class="faint hint">{{ priorityHint[priority()] }}</p>
       </fieldset>
 
@@ -119,30 +127,28 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
         <legend>Limits</legend>
         <div class="limits">
           @for (l of limitFields; track l.key) {
-            <div class="field">
-              <label [for]="uid + '-' + l.key">{{ l.label }}</label>
-              <div class="with-unit">
-                <input class="input num" [id]="uid + '-' + l.key" inputmode="numeric" placeholder="No limit" autocomplete="off" [value]="limitText()[l.key]" (input)="setLimit(l.key, $any($event.target).value)" [attr.aria-invalid]="invalid().has(l.key)" />
-                <span class="unit">{{ l.unit }}</span>
-              </div>
+            <mat-form-field class="field">
+              <mat-label>{{ l.label }}</mat-label>
+              <input matInput class="num" [id]="uid + '-' + l.key" inputmode="numeric" placeholder="No limit" autocomplete="off" [errorStateMatcher]="matchers[l.key]" [value]="limitText()[l.key]" (input)="setLimit(l.key, $any($event.target).value)" />
+              <span matTextSuffix class="unit">{{ l.unit }}</span>
               @if (invalid().has(l.key)) {
-                <span class="err" role="alert">{{ l.max ? 'A whole number from 1 to ' + l.max + ', or empty.' : 'A whole number of 1 or more, or empty.' }}</span>
+                <mat-error><span role="alert">{{ l.max ? 'A whole number from 1 to ' + l.max + ', or empty.' : 'A whole number of 1 or more, or empty.' }}</span></mat-error>
               }
-            </div>
+            </mat-form-field>
           }
         </div>
       </fieldset>
 
       <div class="foot">
-        <button type="button" class="btn ghost" [disabled]="!dirty() || busy()" (click)="reset()">Reset</button>
-        <button type="submit" class="btn primary" [disabled]="!dirty() || invalid().size > 0 || busy()">Save permissions</button>
+        <button type="button" matButton [disabled]="!dirty() || busy()" (click)="reset()">Reset</button>
+        <button type="submit" matButton="filled" [disabled]="!dirty() || invalid().size > 0 || busy()">Save permissions</button>
       </div>
     </form>
   `,
   styles: `
     form {
       display: grid;
-      gap: var(--sp-5);
+      gap: var(--pd-space-4);
     }
     .group {
       margin: 0;
@@ -152,133 +158,107 @@ const NO_TEXT: Record<LimitKey, string> = { requestsPerMin: '', requestsPerDay: 
     }
     legend {
       padding: 0;
-      margin-bottom: var(--sp-2);
-      font-size: var(--fs-sm);
-      font-weight: var(--fw-semibold);
-      color: var(--text);
+      margin-bottom: var(--pd-space-2);
+      font-size: var(--pd-text-label);
+      font-weight: var(--pd-weight-semibold);
+      color: var(--pd-text);
     }
     .choice {
       display: flex;
-      gap: var(--sp-5);
+      gap: var(--pd-space-4);
     }
-    .radio,
     .check {
+      display: block;
+      max-width: 100%;
+      min-width: 0;
+    }
+    .check ::ng-deep label {
       display: inline-flex;
       align-items: center;
-      gap: var(--sp-2);
-      cursor: default;
-      input {
-        accent-color: var(--accent);
-        margin: 0;
-      }
+      gap: var(--pd-space-2);
+      min-width: 0;
+      overflow: hidden;
     }
     .models {
       list-style: none;
-      margin: var(--sp-3) 0 0;
-      padding: var(--sp-1) var(--sp-3);
+      margin: var(--pd-space-3) 0 0;
+      padding: var(--pd-space-1) var(--pd-space-3);
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 0 var(--sp-4);
-      background: var(--bg-sunken);
-      border: 1px solid var(--border-soft);
-      border-radius: var(--r-md);
+      /* Two columns when there is room for a model's name, else one. */
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 0 var(--pd-space-4);
+      background: var(--pd-surface-2);
+      border: 1px solid var(--pd-hairline);
+      border-radius: var(--pd-radius-control);
       li {
-        padding: 6px 0;
+        min-width: 0;
+      }
+    }
+    /* A long model name ends in an ellipsis inside the checkbox's label instead of pushing it out of its column. */
+    .check {
+      display: block;
+      min-width: 0;
+      ::ng-deep .mdc-form-field {
+        display: flex;
+        max-width: 100%;
+        min-width: 0;
+      }
+      ::ng-deep .mdc-form-field > label {
+        display: flex;
+        align-items: center;
+        gap: var(--pd-space-1);
+        min-width: 0;
+        overflow: hidden;
       }
     }
     .mname {
+      min-width: 0;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
     .hint {
-      margin-top: var(--sp-2);
-      font-size: var(--fs-sm);
-    }
-    .seg {
-      display: inline-flex;
-      padding: 2px;
-      background: var(--bg-active);
-      border-radius: var(--r-md);
-      button {
-        height: 26px;
-        padding: 0 var(--sp-3);
-        font: inherit;
-        font-size: var(--fs-sm);
-        font-weight: var(--fw-medium);
-        color: var(--text-2);
-        background: none;
-        border: none;
-        border-radius: var(--r-sm);
-        cursor: default;
-        &[aria-checked='true'] {
-          color: var(--text);
-          background: var(--bg-card);
-          box-shadow: var(--shadow-1);
-        }
-      }
+      margin-top: var(--pd-space-2);
+      font-size: var(--pd-text-label);
     }
     .toggle-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: var(--sp-4);
-      padding: var(--sp-2) 0;
-      border-top: 1px solid var(--border-soft);
+      gap: var(--pd-space-4);
+      padding: var(--pd-space-2) 0;
+      border-top: 1px solid var(--pd-hairline);
       &:first-of-type {
         border-top: none;
         padding-top: 0;
       }
       .t {
         display: block;
-        font-weight: var(--fw-medium);
+        font-weight: var(--pd-weight-medium);
       }
       .d {
-        font-size: var(--fs-sm);
+        font-size: var(--pd-text-label);
       }
     }
     .limits {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
     }
     .field {
-      display: grid;
-      gap: 6px;
-      label {
-        font-size: var(--fs-sm);
-        color: var(--text-2);
-      }
+      min-width: 0;
     }
-    .with-unit {
-      position: relative;
-      .input {
-        width: 100%;
-        padding-right: 44px;
-      }
-      .unit {
-        position: absolute;
-        right: var(--sp-3);
-        top: 50%;
-        transform: translateY(-50%);
-        font-size: var(--fs-xs);
-        color: var(--text-3);
-        pointer-events: none;
-      }
-    }
-    .input[aria-invalid='true'] {
-      border-color: var(--bad);
-    }
-    .err {
-      font-size: var(--fs-xs);
-      color: var(--bad);
+    .unit {
+      padding-inline-end: var(--pd-space-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-subtle);
     }
     .foot {
       display: flex;
       justify-content: flex-end;
-      gap: var(--sp-2);
-      padding-top: var(--sp-4);
-      border-top: 1px solid var(--border-soft);
+      gap: var(--pd-space-2);
+      padding-top: var(--pd-space-4);
+      border-top: 1px solid var(--pd-hairline);
     }
   `,
 })
@@ -292,10 +272,11 @@ export class PermissionsEditor {
   readonly busy = input(false);
   readonly save = output<AppPermissions>();
 
-  protected readonly priorities = PRIORITIES;
-  protected readonly priorityLabel = PRIORITY_LABEL;
   protected readonly priorityHint = PRIORITY_HINT;
   protected readonly limitFields = LIMITS;
+  protected readonly prioritySegs: SuSegment[] = PRIORITIES.map((p) => ({ value: p, label: PRIORITY_LABEL[p] }));
+  /** A limit field shows Material's error state (red outline, the message under it) while its text is invalid. */
+  protected readonly matchers = Object.fromEntries(LIMITS.map((l) => [l.key, { isErrorState: () => this.invalid().has(l.key) } satisfies ErrorStateMatcher])) as unknown as Record<LimitKey, ErrorStateMatcher>;
 
   protected readonly allModels = signal(true);
   protected readonly chosen = signal<ReadonlySet<string>>(new Set());
@@ -329,8 +310,16 @@ export class PermissionsEditor {
     return v === null || !samePermissions(v, this.permissions());
   });
 
+  private readonly limitInputs = viewChildren(MatInput);
+
   constructor() {
     effect(() => this.load(this.permissions()));
+    // effect-state: a matInput without a form control never asks its matcher by itself; tell it when the invalid set changes.
+    effect(() => {
+      this.invalid();
+      const inputs = this.limitInputs();
+      untracked(() => inputs.forEach((i) => i.updateErrorState()));
+    });
   }
 
   protected reset(): void {
@@ -338,7 +327,8 @@ export class PermissionsEditor {
   }
 
   private load(p: AppPermissions): void {
-    const text = (n: number | null) => (n === null ? '' : String(n));
+    // With separators, as every other count in Pitwall: `120,000,000`, not `120000000`.
+    const text = (n: number | null) => (n === null ? '' : int(n));
     this.allModels.set(p.models === null);
     this.chosen.set(new Set(p.models ?? []));
     this.priority.set(p.maxPriority);
@@ -346,6 +336,11 @@ export class PermissionsEditor {
     this.extended.set(p.extendedApis);
     this.cacheResponses.set(p.cacheResponses);
     this.limitText.set(Object.fromEntries(LIMITS.map((l) => [l.key, text(p.limits[l.key])])) as Record<LimitKey, string>);
+  }
+
+  protected setPriority(p: string): void {
+    const chosen = PRIORITIES.find((x) => x === p);
+    if (chosen) this.priority.set(chosen);
   }
 
   protected toggleModel(id: string): void {

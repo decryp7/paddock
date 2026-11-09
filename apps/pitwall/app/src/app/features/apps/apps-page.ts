@@ -1,33 +1,33 @@
-import { Dialog } from '@angular/cdk/dialog';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { MatButton } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
+import { MatTableModule } from '@angular/material/table';
+import { SuEmptyState } from '@decryp7/paddock-ui';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { ActivatedRoute } from '@angular/router';
-import { firstValueFrom } from 'rxjs';
 import type { AppInfo, AppPermissions } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { ago, compact, date, duration, int } from '../../shared/format';
 import { cacheHitRateText } from '../usage/usage-format';
 import { injectNow } from '../../shared/now';
-import { Confirm } from '../../shared/ui/confirm';
-import { EmptyState } from '../../shared/ui/empty-state';
+import { confirm } from '@decryp7/paddock-ui/shell/confirm';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { AppAvatar } from '../../shared/ui/app-avatar';
-import { ContextMenuService, type ContextMenuItem } from '../../shared/ui/context-menu';
+import { ItemsMenu, MoreButton, RowMenu, type MenuItem } from '../../shared/ui/menu';
 import { Panel } from '../../shared/ui/panel';
-import { RowMenu } from '../../shared/ui/row-menu';
-import { isMenuKey } from '../../shared/ui/row-nav';
-import { limitsText } from '../dashboard/apps-card';
-import { groupCode, permissionSummary } from '../dashboard/pairing-card';
+import { moveRowFocus } from '../../shared/ui/row-nav';
+import { limitsShort, limitsText } from '../dashboard/apps-card';
+import { groupCode, permissionSummary, rePairNote } from '../dashboard/pairing-card';
 import { AppsStore } from './apps.store';
-import { CreateAppDialog } from './create-app-dialog';
-import { KeySecretDialog, type KeySecretData } from './key-secret-dialog';
+import { CREATE_APP_DIALOG_ID } from './create-app-dialog';
+import { KEY_SECRET_DIALOG_ID } from './key-secret-dialog';
 import { AppUsage } from '../usage/app-usage';
 import { PermissionsEditor } from './permissions-editor';
 
 /** Apps & keys: who may use Pitwall, with which models and how much, their keys and pending pairings. */
 @Component({
   selector: 'pw-apps-page',
-  imports: [MatIconModule, MatTooltipModule, Panel, EmptyState, PermissionsEditor, AppUsage, AppAvatar, RowMenu],
+  imports: [MatButton, MatIconModule, MatTableModule, MatTooltipModule, Panel, SuEmptyState, PermissionsEditor, AppUsage, AppAvatar, ItemsMenu, MoreButton, RowMenu],
   providers: [AppsStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -38,7 +38,7 @@ import { PermissionsEditor } from './permissions-editor';
           <p class="sub">Who may use Pitwall, with which models and how much. Pitwall keeps only a hash of each key.</p>
         </div>
         <div class="actions">
-          <button type="button" class="btn" [class.primary]="!live.pairings().length" [disabled]="store.isBusy('create')" (click)="newApp()"><mat-icon svgIcon="pw:plus" aria-hidden="true" />New app</button>
+          <button type="button" [matButton]="live.pairings().length ? 'outlined' : 'filled'" [disabled]="store.isBusy('create')" (click)="newApp()"><mat-icon svgIcon="pw:plus" aria-hidden="true" />New app</button>
         </div>
       </header>
 
@@ -50,11 +50,14 @@ import { PermissionsEditor } from './permissions-editor';
                 <div class="pmain">
                   <p><b>{{ p.appName }}</b>{{ ' ' }}<span class="faint">asked {{ when(p.requestedAt, now()) }}</span></p>
                   <p class="perms" aria-label="Requested permissions">{{ summary(p.permissions).join(' · ') }}</p>
+                  @if (repair(p); as note) {
+                    <p class="perms">{{ note }}</p>
+                  }
                 </div>
                 <div class="code" [attr.aria-label]="'Pairing code ' + p.code"><span class="mono">{{ code(p.code) }}</span></div>
                 <div class="pact">
-                  <button type="button" class="btn ghost" [disabled]="live.isBusy()('pairing:' + p.id)" (click)="live.denyPairing(p.id)">Deny</button>
-                  <button type="button" class="btn primary" [disabled]="live.isBusy()('pairing:' + p.id)" (click)="approve(p.id, p.permissions)">
+                  <button type="button" matButton [disabled]="live.isBusy()('pairing:' + p.id)" (click)="live.denyPairing(p.id)">Deny</button>
+                  <button type="button" matButton="filled" [disabled]="live.isBusy()('pairing:' + p.id)" (click)="approve(p.id, p.permissions)">
                     <mat-icon svgIcon="pw:check" aria-hidden="true" />Approve
                   </button>
                 </div>
@@ -70,9 +73,10 @@ import { PermissionsEditor } from './permissions-editor';
         <div class="layout">
           <pw-panel class="list-panel" [flush]="true" heading="Apps" icon="apps" [sub]="store.loaded() ? store.apps().length + '' : ''" [loading]="store.loading()" [ready]="store.loaded()" [error]="store.loaded() ? store.error() : null" (retry)="store.load()">
             @if (store.apps().length === 0) {
-              <pw-empty-state icon="apps" heading="No apps yet" text="Apps appear when they pair, or when you create one and give it a key.">
-                <button type="button" class="btn sm" (click)="newApp()">New app</button>
-              </pw-empty-state>
+              <pd-empty-state heading="No apps yet" description="Apps appear when they pair, or when you create one and give it a key.">
+                <mat-icon slot="icon" svgIcon="pw:apps" aria-hidden="true" />
+                <button slot="action" type="button" matButton="outlined" (click)="newApp()">New app</button>
+              </pd-empty-state>
             }
             <ul class="apps" aria-label="Apps">
               @for (a of store.apps(); track a.id) {
@@ -99,11 +103,11 @@ import { PermissionsEditor } from './permissions-editor';
                     <h2>{{ a.name }}</h2>
                     <p>
                       <span class="status" [attr.data-tone]="a.connected ? 'ok' : 'muted'">{{ a.connected ? 'Connected' : 'Not connected' }}</span>
-                      <span class="faint">{{ a.connected ? 'active ' : 'last seen ' }}{{ when(a.lastSeenAt, now()) }}</span>
-                      <span class="faint">· {{ limits(a.permissions.limits) }}</span>
+                      <span class="faint seen">{{ a.connected ? 'active ' : 'last seen ' }}{{ when(a.lastSeenAt, now()) }}</span>
+                      <span class="faint lim" [matTooltip]="limits(a.permissions.limits)" matTooltipShowDelay="600">· {{ limitsShort(a.permissions.limits) === 'None' ? 'no limits' : limitsShort(a.permissions.limits) }}</span>
                     </p>
                   </div>
-                  <pw-row-menu [items]="appMenu(a)" [label]="'More actions for ' + a.name" />
+                  <pw-more-button [menu]="appMenuPanel.menu()" [items]="appMenu(a)" [label]="'More actions for ' + a.name" />
                 </div>
                 <dl class="usage" aria-label="Usage today">
                   <div><dt>Requests</dt><dd class="num">{{ intText(a.today.requests) }}</dd></div>
@@ -115,8 +119,8 @@ import { PermissionsEditor } from './permissions-editor';
                 <p class="today faint">Today, since midnight</p>
               </section>
 
-              <pw-panel heading="Cached answers" icon="bolt" [sub]="a.permissions.cacheResponses ? 'on for this app' : 'off for this app'">
-                <button panel-actions type="button" class="btn sm" [disabled]="store.isBusy('cache:' + a.id)" (click)="clearAnswers(a)">Clear this app's cached answers</button>
+              <pw-panel class="cache-panel" heading="Cached answers" icon="bolt" [sub]="a.permissions.cacheResponses ? 'on for this app' : 'off for this app'">
+                <button panel-actions type="button" matButton="outlined" [disabled]="store.isBusy('cache:' + a.id)" (click)="clearAnswers(a)">Clear this app's cached answers</button>
                 <dl class="cache-stats" aria-label="Cache use today">
                   <div><dt>Cache hits</dt><dd class="num">{{ intText(a.today.cacheHits) }}</dd></div>
                   <div><dt>Misses</dt><dd class="num">{{ intText(a.today.cacheMisses) }}</dd></div>
@@ -132,29 +136,29 @@ import { PermissionsEditor } from './permissions-editor';
               <pw-app-usage [appId]="a.id" [appName]="a.name" [permissions]="a.permissions" />
 
               <pw-panel heading="Keys" icon="key" [flush]="true">
-                <button panel-actions type="button" class="btn sm" [disabled]="store.isBusy('app:' + a.id)" (click)="createKey(a)"><mat-icon svgIcon="pw:plus" aria-hidden="true" />Create key</button>
+                <button panel-actions type="button" matButton="outlined" [disabled]="store.isBusy('app:' + a.id)" (click)="createKey(a)"><mat-icon svgIcon="pw:plus" aria-hidden="true" />Create key</button>
                 @if (a.keys.length === 0) {
-                  <pw-empty-state icon="key" heading="No keys" [text]="a.name + ' cannot call Pitwall until it has a key or pairs again.'" />
+                  <pd-empty-state heading="No keys" [description]="a.name + ' cannot call Pitwall until it has a key or pairs again.'"><mat-icon slot="icon" svgIcon="pw:key" aria-hidden="true" /></pd-empty-state>
                 } @else {
-                  <table class="table keys">
-                    <thead>
-                      <tr>
-                        <th scope="col">Key</th>
-                        <th scope="col">Created</th>
-                        <th scope="col">Last used</th>
-                        <th scope="col"><span class="sr-only">Actions</span></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (k of a.keys; track k.id) {
-                        <tr tabindex="0" (keydown)="onKeyRow(a, k, $event)" (contextmenu)="onKeyMenu(a, k, $event)">
-                          <td><span class="mono prefix">{{ k.prefix }}</span></td>
-                          <td class="muted">{{ day(k.createdAt) }}</td>
-                          <td class="muted">{{ when(k.lastUsedAt, now()) }}</td>
-                          <td class="right"><pw-row-menu [items]="keyMenu(a, k)" [label]="'More actions for key ' + k.prefix" /></td>
-                        </tr>
-                      }
-                    </tbody>
+                  <table mat-table class="keys" [dataSource]="a.keys" [trackBy]="byKeyId" [fixedLayout]="true" [attr.aria-label]="'Keys of ' + a.name">
+                    <ng-container matColumnDef="key">
+                      <th mat-header-cell *matHeaderCellDef scope="col">Key</th>
+                      <td mat-cell *matCellDef="let k" [matTooltip]="k.prefix" matTooltipShowDelay="600"><span class="mono prefix">{{ k.prefix }}</span></td>
+                    </ng-container>
+                    <ng-container matColumnDef="created">
+                      <th mat-header-cell *matHeaderCellDef scope="col" class="right">Created</th>
+                      <td mat-cell *matCellDef="let k" class="right muted">{{ day(k.createdAt) }}</td>
+                    </ng-container>
+                    <ng-container matColumnDef="used">
+                      <th mat-header-cell *matHeaderCellDef scope="col" class="right">Last used</th>
+                      <td mat-cell *matCellDef="let k" class="right muted">{{ when(k.lastUsedAt, now()) }}</td>
+                    </ng-container>
+                    <ng-container matColumnDef="act">
+                      <th mat-header-cell *matHeaderCellDef scope="col" class="act"><span class="sr-only">Actions</span></th>
+                      <td mat-cell *matCellDef="let k" class="act"><pw-more-button [menu]="keyMenuPanel.menu()" [items]="keyMenu(a, k)" [label]="'More actions for key ' + k.prefix" /></td>
+                    </ng-container>
+                    <tr mat-header-row *matHeaderRowDef="keyColumns(a); sticky: true"></tr>
+                    <tr mat-row *matRowDef="let k; columns: keyColumns(a)" tabindex="0" (keydown)="onKeyRowKey($event)" pwRowMenu [matContextMenuTriggerFor]="keyMenuPanel.menu()" [matContextMenuTriggerData]="{ items: keyMenu(a, k) }"></tr>
                   </table>
                 }
               </pw-panel>
@@ -169,21 +173,23 @@ import { PermissionsEditor } from './permissions-editor';
         </div>
       }
     </div>
+    <pw-items-menu #appMenuPanel label="App actions" />
+    <pw-items-menu #keyMenuPanel label="Key actions" />
   `,
   styles: `
     .page {
       display: flex;
       flex-direction: column;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
     }
     .pairings {
-      border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
-      background: linear-gradient(90deg, var(--accent-soft), transparent 60%), var(--bg-card);
+      border-color: color-mix(in srgb, var(--pd-accent) 40%, var(--pd-hairline));
+      background: linear-gradient(90deg, var(--pd-accent-tint), transparent 60%), var(--pd-surface-1);
     }
     .perms {
       margin: 2px 0 0;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .pair-list {
       list-style: none;
@@ -193,9 +199,9 @@ import { PermissionsEditor } from './permissions-editor';
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto auto;
         align-items: center;
-        gap: var(--sp-4);
-        padding: var(--sp-3) 0;
-        border-top: 1px solid var(--border-soft);
+        gap: var(--pd-space-4);
+        padding: var(--pd-space-3) 0;
+        border-top: 1px solid var(--pd-hairline);
         &:first-child {
           border-top: none;
           padding-top: 0;
@@ -204,53 +210,84 @@ import { PermissionsEditor } from './permissions-editor';
     }
     .code span {
       display: inline-block;
-      padding: var(--sp-1) var(--sp-3);
-      font-size: var(--fs-3xl);
-      font-weight: var(--fw-semibold);
+      padding: var(--pd-space-1) var(--pd-space-3);
+      font-size: var(--pd-text-display);
+      font-weight: var(--pd-weight-semibold);
       letter-spacing: 0.12em;
       line-height: 1.2;
-      background: var(--bg-sunken);
-      border: 1px solid var(--border);
-      border-radius: var(--r-md);
+      background: var(--pd-surface-2);
+      border: 1px solid var(--pd-hairline);
+      border-radius: var(--pd-radius-control);
     }
     .pact {
       display: flex;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
+    }
+    /* The list beside the app; one column (the list above) when the page is too narrow for both. */
+    .page {
+      container: apps-page / inline-size;
     }
     .layout {
       display: grid;
-      grid-template-columns: 300px minmax(0, 1fr);
-      gap: var(--sp-3);
+      grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+      gap: var(--pd-space-3);
       align-items: start;
+    }
+    @container apps-page (max-width: 760px) {
+      .layout {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .list-panel {
+        position: static;
+      }
+    }
+    .keys {
+      .mat-column-created,
+      .mat-column-used {
+        width: 112px;
+      }
+      /* The "..." button with the cell's padding. */
+      .mat-column-act {
+        width: 56px;
+      }
+    }
+    .seen {
+      white-space: nowrap;
+    }
+    .lim {
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
     }
     .list-panel {
       /* conformance: not-a-header */
       position: sticky;
-      top: var(--sp-4);
+      top: var(--pd-space-4);
     }
     .apps {
       list-style: none;
       margin: 0;
-      padding: var(--sp-1) var(--sp-2) var(--sp-2);
+      padding: var(--pd-space-1) var(--pd-space-2) var(--pd-space-2);
     }
     .app {
       display: flex;
       align-items: center;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
       width: 100%;
-      padding: var(--sp-2);
+      padding: var(--pd-space-2);
       font: inherit;
-      color: var(--text);
+      color: var(--pd-text);
       text-align: left;
       background: none;
       border: none;
-      border-radius: var(--r-md);
+      border-radius: var(--pd-radius-control);
       cursor: default;
       &:hover {
-        background: var(--bg-hover);
+        background: var(--pd-hover);
       }
       &[aria-current='true'] {
-        background: var(--bg-active);
+        background: var(--pd-pressed);
       }
     }
     .ainfo {
@@ -262,8 +299,8 @@ import { PermissionsEditor } from './permissions-editor';
     .aname {
       display: flex;
       align-items: center;
-      gap: var(--sp-2);
-      font-weight: var(--fw-medium);
+      gap: var(--pd-space-2);
+      font-weight: var(--pd-weight-medium);
       .nm {
         white-space: nowrap;
         overflow: hidden;
@@ -271,119 +308,124 @@ import { PermissionsEditor } from './permissions-editor';
       }
     }
     .asub {
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .conn {
       flex: none;
       width: 7px;
       height: 7px;
       border-radius: 50%;
-      border: 1.5px solid var(--text-3);
+      border: 1.5px solid var(--pd-text-subtle);
       &.on {
-        border-color: var(--ok);
-        background: var(--ok);
+        border-color: var(--pd-success);
+        background: var(--pd-success);
       }
     }
     .detail {
       display: flex;
       flex-direction: column;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
       min-width: 0;
     }
     .hero {
-      padding: var(--sp-5);
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--r-lg);
-      box-shadow: var(--shadow-1), var(--card-highlight);
+      padding: var(--pd-space-4);
+      background: var(--pd-surface-1);
+      border: 1px solid var(--pd-hairline);
+      border-radius: var(--pd-radius-card);
+      box-shadow: var(--pd-shadow-1);
     }
     .hero-top {
       display: flex;
       align-items: center;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
     }
     .htitle {
       flex: 1;
       min-width: 0;
       h2 {
-        font-size: var(--fs-lg);
+        font-size: var(--pd-text-subtitle);
       }
       p {
         display: flex;
         align-items: center;
-        gap: var(--sp-2);
+        gap: var(--pd-space-2);
         margin-top: 4px;
-        font-size: var(--fs-sm);
+        font-size: var(--pd-text-label);
       }
     }
     /* The day's figures are a row on the card, set off by one hairline: no boxed grid inside the card. */
+    /* Figures wrap whole: a label never breaks inside ("Completion tokens"), a figure moves to the next line instead. */
+    .usage,
+    .cache-stats {
+      > div {
+        flex: 1 0 auto;
+      }
+      dt,
+      dd {
+        white-space: nowrap;
+      }
+    }
     .usage {
-      display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: var(--sp-4);
-      margin: var(--sp-4) 0 0;
-      padding-top: var(--sp-4);
-      border-top: 1px solid var(--border-soft);
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--pd-space-3) var(--pd-space-6);
+      margin: var(--pd-space-4) 0 0;
+      padding-top: var(--pd-space-4);
+      border-top: 1px solid var(--pd-hairline);
       dt {
-        font-size: var(--fs-sm);
-        color: var(--text-2);
+        font-size: var(--pd-text-label);
+        color: var(--pd-text-muted);
       }
       dd {
         margin: 2px 0 0;
-        font-size: var(--fs-xl);
-        font-weight: var(--fw-semibold);
+        font-size: var(--pd-text-title);
+        font-weight: var(--pd-weight-semibold);
         letter-spacing: -0.01em;
       }
       .bad {
-        color: var(--bad);
+        color: var(--pd-danger);
       }
     }
     .today {
-      margin-top: var(--sp-2);
-      font-size: var(--fs-sm);
+      margin-top: var(--pd-space-2);
+      font-size: var(--pd-text-label);
     }
     .cache-stats {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: var(--sp-4);
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--pd-space-3) var(--pd-space-6);
       margin: 0;
       dt {
-        font-size: var(--fs-sm);
-        color: var(--text-2);
+        font-size: var(--pd-text-label);
+        color: var(--pd-text-muted);
       }
       dd {
         margin: 2px 0 0;
-        font-size: var(--fs-xl);
-        font-weight: var(--fw-semibold);
+        font-size: var(--pd-text-title);
+        font-weight: var(--pd-weight-semibold);
       }
     }
     .cache-note {
-      margin: var(--sp-3) 0 0;
-      font-size: var(--fs-sm);
+      margin: var(--pd-space-3) 0 0;
+      font-size: var(--pd-text-label);
     }
     .keys {
-      margin-top: var(--sp-2);
-      th:first-child,
-      td:first-child {
-        padding-left: var(--sp-4);
-      }
-      th:last-child,
-      td:last-child {
-        padding-right: var(--sp-4);
+      margin-top: var(--pd-space-2);
+      .mat-mdc-header-cell:last-child,
+      .mat-mdc-cell:last-child {
+        padding-right: var(--pd-space-4);
       }
     }
     .prefix {
-      font-size: var(--fs-sm);
+      font-size: var(--pd-text-label);
     }
   `,
 })
 export class AppsPage implements OnInit {
   protected readonly store = inject(AppsStore);
   protected readonly live = inject(LiveStore);
-  private readonly dialog = inject(Dialog);
-  private readonly confirm = inject(Confirm);
-  private readonly menu = inject(ContextMenuService);
+  private readonly dialogs = inject(DialogService);
   protected readonly now = injectNow(15_000);
 
   protected readonly when = ago;
@@ -393,7 +435,9 @@ export class AppsPage implements OnInit {
   protected readonly dur = duration;
   protected readonly code = groupCode;
   protected readonly summary = permissionSummary;
+  protected readonly repair = rePairNote;
   protected readonly limits = limitsText;
+  protected readonly limitsShort = limitsShort;
   protected readonly rateText = cacheHitRateText;
 
   /** `/apps?app=<id>` (from the dashboard's usage legend) opens that app. */
@@ -409,32 +453,29 @@ export class AppsPage implements OnInit {
   }
 
   /** Delete is not a button in the page: it lives in this menu and asks first. */
-  protected appMenu(a: AppInfo): ContextMenuItem[] {
+  protected appMenu(a: AppInfo): MenuItem[] {
     return [
       { label: 'Create key', run: () => void this.createKey(a), disabled: this.store.isBusy('app:' + a.id) },
       { label: 'Delete app…', run: () => void this.remove(a), danger: true, divider: true, disabled: this.store.isBusy('app:' + a.id) },
     ];
   }
 
+  /** The keys table's columns: when each key was made and last used are its own facts, shown for every key. */
+  protected keyColumns(_: AppInfo): string[] {
+    return ['key', 'created', 'used', 'act'];
+  }
+  protected readonly byKeyId = (_: number, k: AppInfo['keys'][number]) => k.id;
+
+  protected onKeyRowKey(e: KeyboardEvent): void {
+    if (e.target === e.currentTarget) moveRowFocus(e);
+  }
+
   /** Revoke is only in the key's menu, in danger text, and names the key. */
-  protected keyMenu(a: AppInfo, k: AppInfo['keys'][number]): ContextMenuItem[] {
+  protected keyMenu(a: AppInfo, k: AppInfo['keys'][number]): MenuItem[] {
     return [
       { label: 'Copy key prefix', run: () => void navigator.clipboard?.writeText(k.prefix).catch(() => undefined) },
       { label: 'Revoke key…', run: () => void this.revoke(a, k.id, k.prefix), danger: true, divider: true, disabled: this.store.isBusy('key:' + k.id) },
     ];
-  }
-
-  protected onKeyRow(a: AppInfo, k: AppInfo['keys'][number], e: KeyboardEvent): void {
-    if (e.target === e.currentTarget && isMenuKey(e)) {
-      e.preventDefault();
-      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      this.menu.open(r.left + 48, r.bottom - 8, this.keyMenu(a, k));
-    }
-  }
-
-  protected onKeyMenu(a: AppInfo, k: AppInfo['keys'][number], e: MouseEvent): void {
-    e.preventDefault();
-    this.menu.open(e.clientX, e.clientY, this.keyMenu(a, k));
   }
 
   protected select(id: string): void {
@@ -442,9 +483,9 @@ export class AppsPage implements OnInit {
   }
 
   protected async newApp(): Promise<void> {
-    const ref = this.dialog.open<string>(CreateAppDialog, { backdropClass: 'pw-backdrop' });
-    const name = await firstValueFrom(ref.closed);
-    if (!name) return;
+    const outcome = await this.dialogs.open<string>(CREATE_APP_DIALOG_ID, { inputs: {}, title: 'New app' }).closed;
+    if (outcome.kind !== 'answered' || !outcome.value) return;
+    const name = outcome.value;
     const app = await this.store.createApp(name);
     if (app) {
       this.selectedId.set(app.id);
@@ -455,37 +496,33 @@ export class AppsPage implements OnInit {
   protected async createKey(app: AppInfo): Promise<void> {
     const created = await this.store.createKey(app.id);
     if (!created) return;
-    const data: KeySecretData = { appName: app.name, created };
-    // The secret lives only in this dialog; a stray click on the backdrop must not lose it.
-    this.dialog.open(KeySecretDialog, { data, backdropClass: 'pw-backdrop', disableClose: true });
+    // The secret lives only in this dialog, a required choice: nothing but "I've saved it" closes it.
+    await this.dialogs.open(KEY_SECRET_DIALOG_ID, { inputs: { appName: app.name, secret: created.secret, prefix: created.key.prefix }, title: `New key for ${app.name}` }).closed;
   }
 
   protected async revoke(app: AppInfo, keyId: string, prefix: string): Promise<void> {
-    const ok = await this.confirm.ask({
-      title: `Revoke ${prefix}?`,
+    const ok = await confirm(this.dialogs, {
+      heading: `Revoke ${prefix}?`,
       message: `${app.name} can no longer use this key: requests with it fail at once. This can't be undone.`,
-      confirm: 'Revoke key',
-      danger: true,
+      confirm: { label: 'Revoke key', destructive: true },
     });
     if (ok) await this.store.revokeKey(app.id, keyId);
   }
 
   protected async remove(app: AppInfo): Promise<void> {
-    const ok = await this.confirm.ask({
-      title: `Delete ${app.name}?`,
+    const ok = await confirm(this.dialogs, {
+      heading: `Delete ${app.name}?`,
       message: `Its keys stop working and its permissions are removed. It can pair again later.`,
-      confirm: 'Delete app',
-      danger: true,
+      confirm: { label: 'Delete app', destructive: true },
     });
     if (ok && (await this.store.deleteApp(app.id))) this.selectedId.set(null);
   }
 
   protected async clearAnswers(app: AppInfo): Promise<void> {
-    const ok = await this.confirm.ask({
-      title: `Clear ${app.name}'s cached answers?`,
+    const ok = await confirm(this.dialogs, {
+      heading: `Clear ${app.name}'s cached answers?`,
       message: 'Repeated requests are answered by the model again until new answers are cached. Nothing else changes.',
-      confirm: 'Clear cached answers',
-      danger: true,
+      confirm: { label: 'Clear cached answers', destructive: true },
     });
     if (ok) await this.store.clearCachedAnswers(app.id);
   }

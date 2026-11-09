@@ -1,17 +1,20 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
-import { PwSelect, type SelectOption } from '../../shared/ui/select';
+import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
+import { SuEmptyState } from '@decryp7/paddock-ui';
 import { MatIconModule } from '@angular/material/icon';
+import { MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import type { BuildCapability, Engine, InstalledBuild } from '../../core/api.types';
+import type { BuildCapability, CatalogBuild, Engine, InstalledBuild } from '../../core/api.types';
+import { buildDownloadName } from '../../shared/build-download';
 import { LiveStore } from '../../core/live.store';
-import { ago, bytes, percent } from '../../shared/format';
-import { availabilityLook, capabilityLook, downloadActive, healthLook, selfTestLook } from '../../shared/labels';
-import { Confirm } from '../../shared/ui/confirm';
-import { ContextMenuService, type ContextMenuItem } from '../../shared/ui/context-menu';
-import { EmptyState } from '../../shared/ui/empty-state';
-import { RowMenu } from '../../shared/ui/row-menu';
-import { isMenuKey } from '../../shared/ui/row-nav';
+import { ago, bytes, bytesIn, bytesUnit, percent, varies } from '../../shared/format';
+import { availabilityLook, capabilityLook, downloadActive, healthLook, SELF_TEST_WORD, selfTestLook } from '../../shared/labels';
+import { confirm } from '@decryp7/paddock-ui/shell/confirm';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
+import { ItemsMenu, MoreButton, RowMenu, type MenuItem } from '../../shared/ui/menu';
 import { EnginesStore } from './engines.store';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatProgressBar } from '@angular/material/progress-bar';
 
 /** A readable model name from its id, for the process table. */
 export function modelLabel(id: string): string {
@@ -29,20 +32,17 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
  */
 @Component({
   selector: 'pw-engine-card',
-  imports: [MatIconModule, MatTooltipModule, EmptyState, RowMenu, PwSelect],
+  imports: [MatProgressBar, MatIconButton, MatButton, MatIconModule, MatTableModule, MatTooltipModule, SuEmptyState, ItemsMenu, MoreButton, RowMenu, PdSelect],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @let e = engine();
     <section class="engine" aria-label="llama.cpp">
       <div class="choice">
-        <div class="field">
-          <label for="build-choice">Build</label>
-          <pw-select inputId="build-choice" label="Build" [options]="buildOptions()" [value]="e.buildChoice" [disabled]="store.isBusy()('select') || e.builds.length === 0" (changed)="store.select($event)" />
-        </div>
+        <pd-select class="build" inputId="build-choice" label="Build" [options]="buildOptions()" [value]="e.buildChoice" [disabled]="store.isBusy()('select') || e.builds.length === 0" (valueChange)="store.select($event)" />
         <p class="hint">Automatic picks the fastest installed build that passed its self-test on this hardware.</p>
         <span class="status" [attr.data-tone]="look().tone">{{ look().label }}</span>
         @if (rollbackTarget(); as t) {
-          <button type="button" class="btn" [disabled]="store.isBusy()('rollback')" (click)="rollback()"><mat-icon svgIcon="pw:rollback" aria-hidden="true" />Roll back to {{ t.label }} {{ t.tag }}</button>
+          <button type="button" matButton="outlined" [disabled]="store.isBusy()('rollback')" (click)="rollback()"><mat-icon svgIcon="pw:rollback" aria-hidden="true" />Roll back to {{ t.label }} {{ t.tag }}</button>
         } @else if (rollbackBlocked(); as why) {
           <p class="hint" data-test="rollback-blocked">Roll back is not available: {{ why }}</p>
         }
@@ -57,87 +57,95 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
 
       <div class="section-head">
         <h3>Installed builds</h3>
+        @if (buildsShare(); as share) {
+          <span class="faint">{{ share }}</span>
+        }
         @if (hasUpdate()) {
           <button type="button" class="link" (click)="toCatalog()" matTooltip="A newer pinned release is in the catalog">Update available</button>
         }
       </div>
       @if (e.builds.length === 0) {
-        <pw-empty-state icon="engines" heading="No build installed" text="Pitwall installs the build suggested for this machine by itself. You can also install another from the catalog below." />
+        <pd-empty-state heading="No build installed" description="Pitwall installs the build suggested for this machine by itself. You can also install another from the catalog below."><mat-icon slot="icon" svgIcon="pw:engines" aria-hidden="true" /></pd-empty-state>
       } @else {
         <div class="surface">
-          <table class="table">
-            <thead>
-              <tr>
-                <th scope="col">Build</th>
-                <th scope="col">Release</th>
-                <th scope="col" class="right">Size</th>
-                <th scope="col">Self-test</th>
-                <th scope="col">Devices</th>
-                <th scope="col"><span class="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (b of e.builds; track b.id + b.tag) {
-                <tr tabindex="0" [attr.aria-expanded]="capsOpen().has(b.id)" (keydown)="onRowKey(b, $event)" (contextmenu)="onRowMenu(b, $event)">
-                  <td>
-                    <span class="bname">{{ b.label }}</span>
-                    @if (b.active) {
-                      <span class="active"><mat-icon svgIcon="pw:check" aria-hidden="true" />Active</span>
-                    }
-                    @if (isPinned(b)) {
-                      <mat-icon class="pinned" svgIcon="pw:pin" role="img" aria-label="Pinned for all models" matTooltip="Pinned for all models: automatic choice is off" />
-                    }
-                  </td>
-                  <td><span class="mono">{{ b.tag }}</span></td>
-                  <td class="right num">{{ size(b.sizeBytes) }}</td>
-                  <td><span class="status" [attr.data-tone]="test(b).tone" [matTooltip]="b.selfTestMessage ?? ''">{{ test(b).label }}</span></td>
-                  <td class="devices"><span class="dev" [matTooltip]="b.devices.join(', ')">{{ b.devices.join(', ') || '—' }}</span></td>
-                  <td class="act">
-                    <span class="row-actions">
-                      @if (canPin()) {
-                        <button
-                          type="button"
-                          class="btn ghost icon sm reveal"
-                          [class.on]="isPinned(b)"
-                          [attr.aria-pressed]="isPinned(b)"
-                          [attr.aria-label]="(isPinned(b) ? 'Unpin ' : 'Pin ') + b.label + ' ' + b.tag + ' for all models'"
-                          [matTooltip]="isPinned(b) ? 'Pinned for all models: automatic choice is off. Click to unpin.' : b.selfTest === 'passed' ? 'Use this build for all models, even when a better one is installed' : 'Only builds that passed their self-test can be pinned'"
-                          [disabled]="store.isBusy()('pin') || (!isPinned(b) && b.selfTest !== 'passed')"
-                          (click)="store.togglePin(b)"
-                        >
-                          <mat-icon [svgIcon]="isPinned(b) ? 'pw:pin' : 'pw:unpin'" aria-hidden="true" />
-                        </button>
-                      }
-                      <button type="button" class="btn ghost icon sm reveal" [attr.aria-expanded]="capsOpen().has(b.id)" [attr.aria-controls]="'caps-' + b.id" [attr.aria-label]="'What ' + b.label + ' ' + b.tag + ' supports'" matTooltip="Features" (click)="toggleCaps(b.id)">
-                        <mat-icon [svgIcon]="capsOpen().has(b.id) ? 'pw:chevron-down' : 'pw:chevron-right'" aria-hidden="true" />
-                      </button>
-                      <pw-row-menu [items]="menuItems(b)" [label]="'More actions for ' + b.label + ' ' + b.tag" />
-                    </span>
-                  </td>
-                </tr>
-                @if (capsOpen().has(b.id)) {
-                  <tr class="caps-row">
-                    <td [id]="'caps-' + b.id" colspan="6">
-                      @if (capsOf(b); as list) {
-                        <ul class="caps" [attr.aria-label]="'Features of ' + b.label + ' ' + b.tag">
-                          @for (c of list; track c.capability) {
-                            <li>
-                              <span class="status" [attr.data-tone]="capLook(c).tone">{{ capLook(c).label }}</span>
-                              <span class="cap-name">{{ c.label }}</span>
-                              @if (c.hint) {
-                                <span class="faint">{{ c.hint }}</span>
-                              }
-                            </li>
-                          }
-                        </ul>
-                      } @else {
-                        <p class="faint">The engine did not report what this build supports.</p>
-                      }
-                    </td>
-                  </tr>
+          <pw-items-menu #rowMenu label="Build actions" />
+          <table mat-table [dataSource]="buildRows()" [trackBy]="byBuild" [multiTemplateDataRows]="true" [fixedLayout]="true" aria-label="Installed builds">
+            <ng-container matColumnDef="build">
+              <th mat-header-cell *matHeaderCellDef scope="col">Build</th>
+              <td mat-cell *matCellDef="let b" [matTooltip]="b.devices.length ? b.label + ' · ' + b.devices.join(', ') : b.label" matTooltipShowDelay="600">
+                <span class="bline">
+                  <span class="bname">{{ b.label }}</span>
+                  @if (b.active) {
+                    <span class="active"><mat-icon svgIcon="pw:check" aria-hidden="true" />Active</span>
+                  }
+                  @if (isPinned(b)) {
+                    <mat-icon class="pinned" svgIcon="pw:pin" role="img" aria-label="Pinned for all models" matTooltip="Pinned for all models: automatic choice is off" />
+                  }
+                </span>
+              </td>
+            </ng-container>
+            <ng-container matColumnDef="release">
+              <th mat-header-cell *matHeaderCellDef scope="col">Release</th>
+              <td mat-cell *matCellDef="let b"><span class="ver">{{ b.tag }}</span></td>
+            </ng-container>
+            <ng-container matColumnDef="size">
+              <th mat-header-cell *matHeaderCellDef scope="col" class="right">Size {{ sizeUnit() }}</th>
+              <td mat-cell *matCellDef="let b" class="right num">{{ sizeIn(b.sizeBytes, sizeUnit()) }}</td>
+            </ng-container>
+            <ng-container matColumnDef="test">
+              <th mat-header-cell *matHeaderCellDef scope="col">Self-test</th>
+              <td mat-cell *matCellDef="let b"><span class="status" [attr.data-tone]="test(b).tone" [matTooltip]="b.selfTestMessage ?? test(b).label">{{ testWord(b) }}</span></td>
+            </ng-container>
+            <ng-container matColumnDef="devices">
+              <th mat-header-cell *matHeaderCellDef scope="col">Devices</th>
+              <td mat-cell *matCellDef="let b" class="devices" [matTooltip]="b.devices.join(', ')">{{ b.devices.join(', ') || '—' }}</td>
+            </ng-container>
+            <ng-container matColumnDef="act">
+              <th mat-header-cell *matHeaderCellDef scope="col" class="act"><span class="sr-only">Actions</span></th>
+              <td mat-cell *matCellDef="let b" class="act">
+                @if (canPin()) {
+                  <button
+                    type="button"
+                    matIconButton class="reveal"
+                    [class.on]="isPinned(b)"
+                    [attr.aria-pressed]="isPinned(b)"
+                    [attr.aria-label]="(isPinned(b) ? 'Unpin ' : 'Pin ') + b.label + ' ' + b.tag + ' for all models'"
+                    [matTooltip]="isPinned(b) ? 'Pinned for all models: automatic choice is off. Click to unpin.' : b.selfTest === 'passed' ? 'Use this build for all models, even when a better one is installed' : 'Only builds that passed their self-test can be pinned'"
+                    [disabled]="store.isBusy()('pin') || (!isPinned(b) && b.selfTest !== 'passed')"
+                    (click)="store.togglePin(b)"
+                  >
+                    <mat-icon [svgIcon]="isPinned(b) ? 'pw:pin' : 'pw:unpin'" aria-hidden="true" />
+                  </button>
                 }
-              }
-            </tbody>
+                <button type="button" matIconButton class="reveal" [class.on]="capsOpen().has(b.id)" [attr.aria-expanded]="capsOpen().has(b.id)" [attr.aria-controls]="'caps-' + b.id" [attr.aria-label]="'What ' + b.label + ' ' + b.tag + ' supports'" matTooltip="Features" (click)="toggleCaps(b.id)">
+                  <mat-icon [svgIcon]="capsOpen().has(b.id) ? 'pw:chevron-down' : 'pw:chevron-right'" aria-hidden="true" />
+                </button>
+                <pw-more-button [menu]="rowMenu.menu()" [items]="menuItems(b)" [label]="'More actions for ' + b.label + ' ' + b.tag" />
+              </td>
+            </ng-container>
+            <!-- A build's features open in a row of their own under it. -->
+            <ng-container matColumnDef="caps">
+              <td mat-cell *matCellDef="let b" [id]="'caps-' + b.id" [attr.colspan]="buildColumns().length">
+                @if (capsOf(b); as list) {
+                  <ul class="caps" [attr.aria-label]="'Features of ' + b.label + ' ' + b.tag">
+                    @for (c of list; track c.capability) {
+                      <li>
+                        <span class="status" [attr.data-tone]="capLook(c).tone">{{ capLook(c).label }}</span>
+                        <span class="cap-name">{{ c.label }}</span>
+                        @if (c.hint) {
+                          <span class="faint">{{ c.hint }}</span>
+                        }
+                      </li>
+                    }
+                  </ul>
+                } @else {
+                  <p class="faint">The engine did not report what this build supports.</p>
+                }
+              </td>
+            </ng-container>
+            <tr mat-header-row *matHeaderRowDef="buildColumns(); sticky: true"></tr>
+            <tr mat-row *matRowDef="let b; columns: buildColumns()" tabindex="0" (keydown)="onRowKey(b, $event)" pwRowMenu [matContextMenuTriggerFor]="rowMenu.menu()" [matContextMenuTriggerData]="{ items: menuItems(b) }"></tr>
+            <tr mat-row *matRowDef="let b; columns: ['caps']; when: capsShown" class="caps-row"></tr>
           </table>
         </div>
       }
@@ -152,7 +160,7 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
             @for (d of installing(); track d.id) {
               <li>
                 <span class="mono">{{ d.name }}</span>
-                <div class="meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="pct(d.bytesDone, d.bytesTotal)" [attr.aria-label]="'Installing ' + d.name"><span [style.width.%]="pct(d.bytesDone, d.bytesTotal)"></span></div>
+                <mat-progress-bar mode="determinate" [value]="pct(d.bytesDone, d.bytesTotal)" [attr.aria-label]="'Installing ' + d.name" />
                 <span class="faint num">{{ size(d.bytesDone) }} / {{ size(d.bytesTotal) }}</span>
               </li>
             }
@@ -162,7 +170,7 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
           @for (c of catalogRows(); track c.id + c.tag) {
             <li>
               <span class="bname">{{ c.label }}</span>
-              <span class="faint num"><span class="mono">{{ c.tag }}</span> · {{ size(c.downloadBytes) }} download</span>
+              <span class="faint num cmeta" [matTooltip]="size(c.downloadBytes) + ' to download'"><span class="ver">{{ c.tag }}</span> · {{ size(c.downloadBytes) }}</span>
               <span class="rec">
                 @if (c.suggested) {
                   <mat-icon svgIcon="pw:sparkles" aria-hidden="true" />Suggested
@@ -170,8 +178,10 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
               </span>
               @if (c.installed) {
                 <span class="status" data-tone="ok">Installed</span>
+              } @else if (installingNames().has(downloadName(c))) {
+                <span class="status" data-tone="info">Installing…</span>
               } @else {
-                <button type="button" class="btn sm" [disabled]="store.isBusy()('install:' + c.id)" [attr.aria-label]="'Install ' + c.label + ' ' + c.tag" (click)="store.install(c)">
+                <button type="button" matButton="outlined" [disabled]="store.isBusy()('install:' + c.id)" [attr.aria-label]="'Install ' + c.label + ' ' + c.tag" (click)="store.install(c)">
                   <mat-icon svgIcon="pw:download" aria-hidden="true" />Install
                 </button>
               }
@@ -187,7 +197,7 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
             <li>
               <span class="bname">{{ l.label }}</span>
               <span class="faint">Pitwall no longer uses it. Nothing is deleted until you remove it.</span>
-              <button type="button" class="btn sm" [disabled]="store.isBusy()('leftover:' + l.id)" (click)="store.removeLeftover(l)">Remove {{ l.label }} ({{ size(l.sizeBytes) }})</button>
+              <button type="button" matButton="outlined" [disabled]="store.isBusy()('leftover:' + l.id)" (click)="store.removeLeftover(l)">Remove {{ l.label }} ({{ size(l.sizeBytes) }})</button>
             </li>
           }
         </ul>
@@ -198,32 +208,34 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
         <p class="faint none">No process running. One starts when a model loads.</p>
       } @else {
         <div class="surface">
-          <table class="table">
-            <thead>
-              <tr>
-                <th scope="col">Model</th>
-                <th scope="col">PID</th>
-                <th scope="col" class="right">Restarts</th>
-                <th scope="col" class="right">Memory</th>
-                <th scope="col">Started</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (p of e.processes; track p.pid) {
-                <tr>
-                  <td>
-                    <span class="bname">{{ model(p.modelId) }}</span>
-                    @if (p.health !== 'healthy') {
-                      <span class="status" [attr.data-tone]="health(p.health).tone">{{ health(p.health).label }}</span>
-                    }
-                  </td>
-                  <td class="mono faint">{{ p.pid }}</td>
-                  <td class="right num" [class.warn]="p.restarts > 0">{{ p.restarts }}</td>
-                  <td class="right num">{{ size(p.rssBytes) }}</td>
-                  <td class="faint">{{ when(p.startedAt, now()) }}</td>
-                </tr>
-              }
-            </tbody>
+          <table mat-table [dataSource]="e.processes" [trackBy]="byPid" [fixedLayout]="true" aria-label="Engine processes">
+            <ng-container matColumnDef="model">
+              <th mat-header-cell *matHeaderCellDef scope="col">Model</th>
+              <td mat-cell *matCellDef="let p" [matTooltip]="model(p.modelId)" matTooltipShowDelay="600">
+                <span class="bname">{{ model(p.modelId) }}</span>
+                @if (p.health !== 'healthy') {
+                  <span class="status" [attr.data-tone]="health(p.health).tone">{{ health(p.health).label }}</span>
+                }
+              </td>
+            </ng-container>
+            <ng-container matColumnDef="pid">
+              <th mat-header-cell *matHeaderCellDef scope="col" class="right">PID</th>
+              <td mat-cell *matCellDef="let p" class="right num faint">{{ p.pid }}</td>
+            </ng-container>
+            <ng-container matColumnDef="restarts">
+              <th mat-header-cell *matHeaderCellDef scope="col" class="right">Restarts</th>
+              <td mat-cell *matCellDef="let p" class="right num" [class.warn]="p.restarts > 0">{{ p.restarts }}</td>
+            </ng-container>
+            <ng-container matColumnDef="memory">
+              <th mat-header-cell *matHeaderCellDef scope="col" class="right">Memory {{ memoryUnit() }}</th>
+              <td mat-cell *matCellDef="let p" class="right num">{{ sizeIn(p.rssBytes, memoryUnit()) }}</td>
+            </ng-container>
+            <ng-container matColumnDef="started">
+              <th mat-header-cell *matHeaderCellDef scope="col" class="right">Started</th>
+              <td mat-cell *matCellDef="let p" class="right faint">{{ when(p.startedAt, now()) }}</td>
+            </ng-container>
+            <tr mat-header-row *matHeaderRowDef="processColumns(); sticky: true"></tr>
+            <tr mat-row *matRowDef="let p; columns: processColumns()"></tr>
           </table>
         </div>
       }
@@ -232,59 +244,85 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
   styles: `
     .engine {
       display: grid;
-      gap: var(--sp-3);
+      gap: var(--pd-space-3);
+    }
+    /* Each column as wide as its header and its widest value (a tag, "Not tested"): the build's name has the rest. */
+    .mat-column-release {
+      width: 84px;
+    }
+    .mat-column-test {
+      width: 112px;
+    }
+    .mat-column-size {
+      width: 80px;
+    }
+    .mat-column-devices {
+      width: 22%;
+    }
+    .mat-column-act {
+      width: 116px;
+    }
+    /* A narrow list keeps the build's name whole: the devices move to its tooltip. */
+    @container (max-width: 760px) {
+      .mat-column-devices {
+        display: none;
+      }
+    }
+    .mat-column-pid,
+    .mat-column-restarts {
+      width: 88px;
+    }
+    .mat-column-memory {
+      width: 104px;
+    }
+    .mat-column-started {
+      width: 112px;
     }
     .surface {
-      overflow-x: auto;
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--r-lg);
-      box-shadow: var(--shadow-1), var(--card-highlight);
+      /* Clips the table to the rounded corners without becoming a scroller, so the header can stick to the page. */
+      overflow: clip;
+      container-type: inline-size;
+      background: var(--pd-surface-1);
+      border: 1px solid var(--pd-hairline);
+      border-radius: var(--pd-radius-card);
+      box-shadow: var(--pd-shadow-1);
     }
     .choice {
       display: flex;
       align-items: flex-end;
       flex-wrap: wrap;
-      gap: var(--sp-4);
-      .field {
-        display: grid;
-        gap: 4px;
-        label {
-          font-size: var(--fs-sm);
-          font-weight: var(--fw-medium);
-          color: var(--text-2);
-        }
-        pw-select {
-          min-width: 300px;
-        }
+      gap: var(--pd-space-4);
+      .build {
+        width: 300px;
+        max-width: 100%;
       }
       .hint {
         flex: 1;
         min-width: 240px;
         padding-bottom: 6px;
-        font-size: var(--fs-sm);
-        color: var(--text-2);
+        font-size: var(--pd-text-label);
+        color: var(--pd-text-muted);
       }
     }
     .section-head {
       display: flex;
       align-items: baseline;
-      gap: var(--sp-3);
-      margin-top: var(--sp-3);
+      gap: var(--pd-space-3);
+      margin-top: var(--pd-space-3);
       h3 {
-        font-size: var(--fs-md);
-        font-weight: var(--fw-semibold);
+        font-size: var(--pd-text-body-lg);
+        font-weight: var(--pd-weight-semibold);
       }
       .faint {
-        font-size: var(--fs-sm);
+        font-size: var(--pd-text-label);
       }
     }
     .link {
       padding: 0;
       font: inherit;
-      font-size: var(--fs-sm);
-      font-weight: var(--fw-medium);
-      color: var(--accent);
+      font-size: var(--pd-text-label);
+      font-weight: var(--pd-weight-medium);
+      color: var(--pd-accent);
       background: none;
       border: none;
       cursor: default;
@@ -292,54 +330,51 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
         text-decoration: underline;
       }
     }
-    .table th:first-child,
-    .table td:first-child {
-      padding-left: var(--sp-4);
-    }
-    .table th:last-child,
-    .table td:last-child {
-      padding-right: var(--sp-3);
+    /* The name, then its markers on the same centre line; the name gives way (ellipsis, tooltip) before a marker does. */
+    .bline {
+      display: flex;
+      align-items: center;
+      gap: var(--pd-space-2);
+      min-width: 0;
+      /* Not the name: the scoped "child of any" selector would outrank .bname's own shrink. */
+      > :not(.bname) {
+        flex: none;
+      }
     }
     .bname {
-      font-weight: var(--fw-semibold);
-      margin-right: var(--sp-2);
+      flex: 0 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-weight: var(--pd-weight-semibold);
     }
     .active {
       display: inline-flex;
       align-items: center;
       gap: 3px;
-      margin-right: var(--sp-2);
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       mat-icon {
         width: 13px;
         height: 13px;
-        color: var(--ok);
+        color: var(--pd-success);
       }
+    }
+    .cmeta {
+      white-space: nowrap;
     }
     .pinned {
       width: 13px;
       height: 13px;
-      vertical-align: -2px;
-      color: var(--accent);
+      color: var(--pd-accent);
     }
     .devices {
-      max-width: 260px;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
-    }
-    .dev {
-      display: block;
-      max-width: 240px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .table td.act {
-      width: 1%;
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .warn {
-      color: var(--warn);
-      font-weight: var(--fw-medium);
+      color: var(--pd-warning);
+      font-weight: var(--pd-weight-medium);
     }
     .leftovers {
       margin: 0;
@@ -349,10 +384,10 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
         display: grid;
         grid-template-columns: 160px minmax(0, 1fr) auto;
         align-items: center;
-        gap: var(--sp-3);
+        gap: var(--pd-space-3);
         min-height: 44px;
-        padding: 0 var(--sp-4);
-        border-top: 1px solid var(--border-soft);
+        padding: 0 var(--pd-space-4);
+        border-top: 1px solid var(--pd-hairline);
         &:first-child {
           border-top: none;
         }
@@ -364,20 +399,21 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
       list-style: none;
       li {
         display: grid;
-        grid-template-columns: minmax(180px, 1fr) minmax(0, 1.4fr) 110px 92px;
+        /* The name has the flex; the release and download size are one short line that never wraps. */
+        grid-template-columns: minmax(0, 1fr) auto 110px 92px;
         align-items: center;
-        gap: var(--sp-3);
+        gap: var(--pd-space-3);
         min-height: 44px;
-        padding: 0 var(--sp-4);
-        border-top: 1px solid var(--border-soft);
+        padding: 0 var(--pd-space-4);
+        border-top: 1px solid var(--pd-hairline);
         &:first-child {
           border-top: none;
         }
       }
       .faint {
-        font-size: var(--fs-sm);
+        font-size: var(--pd-text-label);
       }
-      .btn {
+      .mat-mdc-button-base {
         justify-self: end;
       }
       .status {
@@ -388,8 +424,8 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
       display: inline-flex;
       align-items: center;
       gap: 4px;
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
       mat-icon {
         width: 12px;
         height: 12px;
@@ -397,7 +433,7 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
     }
     .installing {
       display: grid;
-      gap: var(--sp-2);
+      gap: var(--pd-space-2);
       margin: 0;
       padding: 0;
       list-style: none;
@@ -405,39 +441,42 @@ export function ownsDownload(engineName: string, downloadName: string): boolean 
         display: grid;
         grid-template-columns: minmax(0, 260px) 1fr auto;
         align-items: center;
-        gap: var(--sp-3);
-        font-size: var(--fs-sm);
+        gap: var(--pd-space-3);
+        font-size: var(--pd-text-label);
       }
     }
     .none {
-      font-size: var(--fs-sm);
+      font-size: var(--pd-text-label);
     }
     .callout p {
       margin: 0;
     }
-    .caps-row td {
+    table .caps-row > td,
+    table .caps-row:hover > td {
+      height: auto;
       padding-top: 0;
-      background: var(--bg-sunken);
+      white-space: normal;
+      background: var(--pd-surface-2);
     }
     .caps {
       display: grid;
-      gap: var(--sp-2);
-      margin: var(--sp-2) 0;
+      gap: var(--pd-space-2);
+      margin: var(--pd-space-2) 0;
       padding: 0;
       list-style: none;
       li {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
-        gap: var(--sp-3);
-        font-size: var(--fs-sm);
+        gap: var(--pd-space-3);
+        font-size: var(--pd-text-label);
       }
       .status {
         min-width: 150px;
       }
       .cap-name {
         min-width: 200px;
-        font-weight: var(--fw-medium);
+        font-weight: var(--pd-weight-medium);
       }
     }
   `,
@@ -447,15 +486,15 @@ export class EngineCard {
   readonly now = input.required<number>();
   protected readonly store = inject(EnginesStore);
   private readonly live = inject(LiveStore);
-  private readonly confirm = inject(Confirm);
-  private readonly menu = inject(ContextMenuService);
+  private readonly dialogs = inject(DialogService);
   protected readonly size = bytes;
   protected readonly when = ago;
   protected readonly pct = percent;
   protected readonly model = modelLabel;
   protected readonly test = (b: InstalledBuild) => selfTestLook(b.selfTest);
+  protected readonly testWord = (b: InstalledBuild) => SELF_TEST_WORD[b.selfTest];
   protected readonly health = healthLook;
-  protected readonly buildOptions = computed<SelectOption[]>(() => [
+  protected readonly buildOptions = computed<PdSelectOption[]>(() => [
     { value: 'auto', label: 'Automatic' + (this.activeBuild() ? ' — uses ' + this.activeBuild()!.label : '') },
     ...this.engine().builds.map((b) => ({ value: b.id, label: `${b.label} · ${b.tag}`, disabled: b.selfTest === 'failed' })),
   ]);
@@ -466,6 +505,15 @@ export class EngineCard {
   });
   protected readonly activeBuild = computed(() => this.engine().builds.find((b) => b.active) ?? null);
   protected readonly installing = computed(() => this.live.downloads().filter((d) => d.kind === 'engine' && ownsDownload(this.engine().name, d.name) && downloadActive(d.state)));
+  /** The downloads installing a build now, the automatic first install's included: their catalog rows offer no Install. */
+  protected readonly installingNames = computed(() => {
+    const setup = this.live.engineSetup()?.download;
+    const all = [...this.installing(), ...(setup && downloadActive(setup.state) ? [setup] : [])];
+    return new Set(all.map((d) => d.name));
+  });
+  protected downloadName(c: CatalogBuild): string {
+    return buildDownloadName(this.engine().name, c);
+  }
 
   protected readonly capLook = capabilityLook;
   /** Pin controls exist for llama.cpp only (pack engines have a single build), and once the engine reported its pins. */
@@ -473,6 +521,46 @@ export class EngineCard {
   /** The catalog with the build suggested for this machine first. */
   protected readonly catalogRows = computed(() => [...this.engine().catalog].sort((a, b) => Number(b.suggested) - Number(a.suggested)));
   protected readonly capsOpen = signal<ReadonlySet<string>>(new Set());
+  /** The builds as the table's rows: a new list whenever a features row opens or closes, so the table asks `capsShown` again. */
+  protected readonly buildRows = computed(() => {
+    this.capsOpen();
+    return [...this.engine().builds];
+  });
+  protected readonly capsShown = (_: number, b: InstalledBuild) => this.capsOpen().has(b.id);
+  protected readonly byBuild = (_: number, b: InstalledBuild) => b.id + b.tag;
+  protected readonly byPid = (_: number, p: { pid: number }) => p.pid;
+  /** Release, self-test and devices only when the builds differ in them (UI review 2 rule 7). */
+  protected readonly buildColumns = computed(() => {
+    const b = this.engine().builds;
+    const when = (col: string, differs: boolean) => (differs ? [col] : []);
+    return [
+      'build',
+      ...when('release', varies(b, (x) => x.tag)),
+      'size',
+      ...when('test', varies(b, (x) => x.selfTest)),
+      ...when('devices', varies(b, (x) => x.devices.join(', '))),
+      'act',
+    ];
+  });
+  /** What every installed build shares, said once above the table instead of in a constant column. */
+  protected readonly buildsShare = computed(() => {
+    const b = this.engine().builds;
+    if (b.length < 2) return '';
+    const cols = this.buildColumns();
+    const first = b[0]!;
+    return [
+      cols.includes('release') ? '' : `all ${first.tag}`,
+      cols.includes('test') ? '' : selfTestLook(first.selfTest).label.toLowerCase(),
+      cols.includes('devices') || !first.devices.length ? '' : first.devices.join(', '),
+    ]
+      .filter(Boolean)
+      .join(' · ');
+  });
+  /** Restarts only when some process restarted. */
+  protected readonly processColumns = computed(() => ['model', 'pid', ...(this.engine().processes.some((p) => p.restarts > 0) ? ['restarts'] : []), 'memory', 'started']);
+  protected readonly sizeUnit = computed(() => bytesUnit(this.engine().builds.map((b) => b.sizeBytes)));
+  protected readonly memoryUnit = computed(() => bytesUnit(this.engine().processes.map((p) => p.rssBytes)));
+  protected readonly sizeIn = bytesIn;
   protected readonly problems = computed(() => (this.canPin() ? (this.store.pins()?.problems ?? []) : []));
   protected readonly rollbackTarget = computed(() => {
     const t = this.canPin() ? this.store.pins()?.rollbackTo : null;
@@ -497,8 +585,8 @@ export class EngineCard {
   }
 
   /** The one list behind a build's "..." button, right-click and Shift+F10. Remove is only here, and asks first. */
-  protected menuItems(b: InstalledBuild): ContextMenuItem[] {
-    const items: ContextMenuItem[] = [{ label: this.capsOpen().has(b.id) ? 'Hide features' : 'Features', run: () => this.toggleCaps(b.id) }];
+  protected menuItems(b: InstalledBuild): MenuItem[] {
+    const items: MenuItem[] = [{ label: this.capsOpen().has(b.id) ? 'Hide features' : 'Features', run: () => this.toggleCaps(b.id) }];
     if (this.canPin()) {
       const pinned = this.isPinned(b);
       items.push({ label: pinned ? 'Unpin for all models' : 'Pin for all models', run: () => void this.store.togglePin(b), disabled: this.store.isBusy()('pin') || (!pinned && b.selfTest !== 'passed') });
@@ -512,16 +600,7 @@ export class EngineCard {
     if (e.key === 'Enter') {
       e.preventDefault();
       this.toggleCaps(b.id);
-    } else if (isMenuKey(e)) {
-      e.preventDefault();
-      const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      this.menu.open(r.left + 48, r.bottom - 8, this.menuItems(b));
     }
-  }
-
-  protected onRowMenu(b: InstalledBuild, e: MouseEvent): void {
-    e.preventDefault();
-    this.menu.open(e.clientX, e.clientY, this.menuItems(b));
   }
 
   protected isPinned(b: InstalledBuild): boolean {
@@ -539,17 +618,17 @@ export class EngineCard {
   }
 
   protected async remove(b: InstalledBuild): Promise<void> {
-    const ok = await this.confirm.ask({ title: `Remove ${b.label} ${b.tag}?`, message: `Frees ${bytes(b.sizeBytes)}. You can install it again from the catalog.`, confirm: 'Remove', danger: true });
+    const ok = await confirm(this.dialogs, { heading: `Remove ${b.label} ${b.tag}?`, message: `Frees ${bytes(b.sizeBytes)}. You can install it again from the catalog.`, confirm: { label: 'Remove build', destructive: true } });
     if (ok) await this.store.remove(b);
   }
 
   protected async rollback(): Promise<void> {
     const to = this.rollbackTarget();
     if (!to) return;
-    const ok = await this.confirm.ask({
-      title: `Roll back to ${to.label} ${to.tag}?`,
+    const ok = await confirm(this.dialogs, {
+      heading: `Roll back to ${to.label} ${to.tag}?`,
       message: `${to.label} ${to.tag} is pinned for all models until you unpin it. Models that are loaded keep running; they use it from their next load.`,
-      confirm: 'Roll back',
+      confirm: { label: 'Roll back' },
     });
     if (ok) await this.store.rollback();
   }

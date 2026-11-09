@@ -1,0 +1,17 @@
+[package]
+name = "pitwall-service"
+description = "What Pitwall's background service is: one declared ServiceSpec that the app and the server both build from (rule 55)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors = ["decryp7"]
+publish = false
+
+[dependencies]
+# The shared service crate (core only): the spec type and its renderers.
+paddock-service = { path = "../../../../crates/paddock-service" }
+
+[lints]
+workspace = true

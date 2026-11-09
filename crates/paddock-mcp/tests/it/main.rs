@@ -4,6 +4,7 @@
 mod common;
 
 mod behaviour;
+mod client;
 mod contract;
 mod control;
 mod key_file;

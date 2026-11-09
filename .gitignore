@@ -41,4 +41,5 @@ node_modules
 /apps/workbench-demo/dist/
 /vm-smoke-results/
 /apps/dyno/app/src-tauri/windows/paddock-setup.exe
+/apps/pitwall/app/src-tauri/windows/paddock-setup.exe
 /crates/paddock-setup/nsis/test/*.exe

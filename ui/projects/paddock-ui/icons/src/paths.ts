@@ -61,6 +61,8 @@ export const PD_ICON_PATHS = {
   sort: 'M8 9l4-4 4 4M8 15l4 4 4-4',
   'arrow-up': 'M12 19V5M6 11l6-6 6 6',
   'arrow-down': 'M12 5v14M6 13l6 6 6-6',
+  // "Open <app>": the tray popup's primary action (pd-tray-popover's footer).
+  'arrow-right': 'M5 12h14M13 6l6 6-6 6',
   'to-top': 'M5 4.5h14M12 20V9M6.5 14.5 12 9l5.5 5.5',
   'to-bottom': 'M5 19.5h14M12 4v11M6.5 9.5 12 15l5.5-5.5',
   // A drag handle (ADR 0035): six filled dots, no lines.
@@ -72,6 +74,9 @@ export const PD_ICON_PATHS = {
   layers: 'M12 4 20 8.5 12 13 4 8.5zM5.5 12.5 12 16.2l6.5-3.7M5.5 16 12 19.7l6.5-3.7',
   'dock-in': 'M3.5 5h17v14h-17zM12 5v6.5M9 8.5l3 3 3-3M7 15h10',
   file: 'M5.75 3.5h7.75l4.75 5v12H5.75zM13.5 3.5v5h4.75',
+  // The composer (ADR 0023 WP-4b): attach a file, and push-to-talk.
+  paperclip: 'M16.5 8v7.75a4.5 4.5 0 0 1-9 0V7a3 3 0 0 1 6 0v8.5a1.5 1.5 0 0 1-3 0V8',
+  mic: 'M12 3.5a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0v-5a3 3 0 0 1 3-3zM6 11a6 6 0 0 0 12 0M12 17v3.5M9 20.5h6',
   // Code symbols (plan X50, review 2 P3-5): the kind of a symbol in a palette row or an outline, instead of a letter badge.
   'symbol-function': 'M16 4.5h-1.5C12.8 4.5 12 5.4 12 7.2v10.1c0 1.6-.8 2.2-2.3 2.2H8M8.5 10.5h7',
   'symbol-type': 'M9 4.5H8c-1.4 0-2 .7-2 2V10l-1.5 2L6 14v3.5c0 1.3.6 2 2 2h1M15 4.5h1c1.4 0 2 .7 2 2V10l1.5 2-1.5 2v3.5c0 1.3-.6 2-2 2h-1',

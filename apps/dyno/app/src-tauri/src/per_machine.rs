@@ -1,246 +1,61 @@
 //! Dyno's side of the per-machine Windows install (family ADR 0053 section 4): the updater's hand-off to
-//! `$INSTDIR\paddock-setup.exe apply-update`. The contract (which path `apply-update` accepts, the sentence of each exit code) and
-//! the installer lock come from `paddock-setup`, which `paddock-updater` cannot depend on (it depends on the updater for the
-//! signature check), so the app wires them in here (rule 55: one implementation, in `paddock-setup`).
-
-use paddock_updater::SetupContract;
-
-/// What `paddock-setup` says about the download and its exit codes.
-pub struct SetupFacts;
-
-/// The folders of `dir` above the file, nearest last, as `C:\a`, `C:\a\b`: the ones a junction could be hiding in.
-fn folders_above(file: &str) -> Vec<String> {
-    paddock_setup::checkdir::ancestors(file)
-}
-
-/// Refuses a download that has a link or junction anywhere above it (the elevated program refuses it too; saying so before
-/// the Windows prompt saves a prompt that can only end in a refusal). `is_reparse` is the platform's look at one folder.
-pub fn reparse_above(file: &str, is_reparse: &dyn Fn(&str) -> bool) -> Result<(), String> {
-    match folders_above(file).iter().find(|f| is_reparse(f)) {
-        Some(_) => Err("a folder above the download is a link or junction".into()),
-        None => Ok(()),
-    }
-}
-
-/// The platform's look at one folder: a reparse point (a junction or symbolic link).
-#[cfg(windows)]
-fn is_reparse_point(folder: &str) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-    std::fs::symlink_metadata(folder).is_ok_and(|m| m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
-}
-
-#[cfg(not(windows))]
-fn is_reparse_point(folder: &str) -> bool {
-    std::fs::symlink_metadata(folder).is_ok_and(|m| m.file_type().is_symlink())
-}
-
-/// Whether `dir` is a folder the elevated program may be run from, over the facts of the machine: the same rule as the installer's
-/// `check-dir` (a direct child of Program Files, no link above it, owned and protected by administrators).
-pub fn install_dir_ok(facts: &dyn paddock_setup::checkdir::DirFacts, dir: &str) -> Result<(), String> {
-    if paddock_setup::localpath::LocalPath::parse(dir).is_err() {
-        return Err("the install folder is not an absolute drive-letter path".into());
-    }
-    paddock_setup::checkdir::check(facts, dir).map(|_| ()).map_err(|e| e.to_string())
-}
-
-impl SetupContract for SetupFacts {
-    #[cfg(windows)]
-    fn check_install_dir(&self, dir: &str) -> Result<(), String> {
-        install_dir_ok(&paddock_setup::native::RealDirs, dir)
-    }
-
-    #[cfg(not(windows))]
-    fn check_install_dir(&self, _dir: &str) -> Result<(), String> {
-        Err("per-machine installs exist on Windows only".into())
-    }
-
-    fn check_download(&self, path: &str) -> Result<(), String> {
-        paddock_setup::localpath::LocalPath::parse(path).map_err(|e| e.to_string())?;
-        reparse_above(path, &is_reparse_point)
-    }
-
-    /// Only `apply-update`'s own codes: usage (4), failed (5) and its refusals (20 to 31). Other codes belong to other commands
-    /// of the same program or to the installer's error levels (2 to 5 overlap), so an `apply-update` that returns one of them
-    /// has an unknown outcome and the next start settles it.
-    fn sentence(&self, code: i32) -> Option<String> {
-        use paddock_setup::exit::Exit;
-        let exit = match code {
-            4 => Exit::Usage,
-            5 => Exit::Failed,
-            c => Exit::Refused(paddock_setup::apply::Refusal::from_code(c)?),
-        };
-        Some(as_sentence(exit.sentence()))
-    }
-}
-
-/// The program's fragment as a sentence: a capital first letter and a full stop.
-fn as_sentence(text: &str) -> String {
-    let mut chars = text.chars();
-    let first = chars.next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default();
-    let mut s = format!("{first}{}", chars.as_str());
-    if !s.ends_with(['.', '!', '?']) {
-        s.push('.');
-    }
-    s
-}
+//! `$INSTDIR\paddock-setup.exe apply-update`. The contract, the installer lock and the install folder are
+//! `paddock_setup::wiring`, one implementation for every app that adopts the install (rule 55); only the administrator check,
+//! which needs the Tauri adapter of `paddock-updater`, is here.
 
 #[cfg(windows)]
-pub use windows::{administrator, install_dir, SetupLock};
+pub use paddock_setup::wiring::{install_dir, SetupLock};
+pub use paddock_setup::wiring::{install_dir_ok, reparse_above, SetupFacts};
 
+/// Whether this account is an administrator (also with a filtered token).
 #[cfg(windows)]
-mod windows {
-    use paddock_updater::InstallerLock;
-    use std::path::PathBuf;
-    use std::time::Duration;
-
-    /// The installer lock of this app (`paddock_setup::installer_probe`, `wait_for_installer`).
-    pub struct SetupLock {
-        identifier: String,
-    }
-
-    impl SetupLock {
-        /// The lock for the app with this bundle identifier.
-        pub fn new(identifier: &str) -> SetupLock {
-            SetupLock {
-                identifier: identifier.to_string(),
-            }
-        }
-    }
-
-    impl InstallerLock for SetupLock {
-        fn installing(&self) -> bool {
-            paddock_setup::installer_probe(&self.identifier) == paddock_setup::handoff::SignalProbe::Active
-        }
-
-        fn wait(&self, bound: Duration) -> bool {
-            paddock_setup::wait_for_installer(&self.identifier, bound) == paddock_setup::handoff::InstallerState::Gone
-        }
-    }
-
-    /// The folder of the running executable: `$INSTDIR`, where `paddock-setup.exe` is.
-    pub fn install_dir() -> Option<PathBuf> {
-        std::env::current_exe().ok()?.parent().map(PathBuf::from)
-    }
-
-    /// Whether this account is an administrator (also with a filtered token).
-    pub fn administrator() -> bool {
-        paddock_updater::tauri::is_administrator()
-    }
+pub fn administrator() -> bool {
+    paddock_updater::tauri::is_administrator()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    fn macro_body<'a>(hooks: &'a str, name: &str) -> &'a str {
+        hooks
+            .split(&format!("!macro {name}"))
+            .nth(1)
+            .and_then(|m| m.split("!macroend").next())
+            .unwrap_or_else(|| panic!("no macro {name}"))
+    }
 
+    /// Review of B6b (finding A): the uninstaller runs elevated from wherever it was started, so it runs no program of `$INSTDIR`
+    /// (the agent's stop, the helper's uninstall) unless the include trusts the folder and `check-dir` accepts it.
     #[test]
-    fn every_apply_update_refusal_has_a_sentence_for_the_failed_state() {
-        for code in 20..=31 {
-            let s = SetupFacts.sentence(code).unwrap_or_else(|| panic!("no sentence for exit {code}"));
-            assert!(s.ends_with('.') && s.chars().next().unwrap().is_uppercase(), "{code}: {s}");
-        }
-        assert_eq!(
-            SetupFacts.sentence(26).as_deref(),
-            Some("The downloaded update did not pass the signature check. Download it again.")
+    fn the_uninstaller_runs_no_program_of_its_folder_unless_the_folder_is_accepted() {
+        let hooks = include_str!("../windows/installer-hooks.nsh");
+        let pre = macro_body(hooks, "NSIS_HOOK_PREUNINSTALL");
+        let asked = pre.find("PADDOCK_DIR_ACCEPTED").expect("PREUNINSTALL asks the include");
+        let stop = pre.find("_DYNO_GRACEFUL_STOP").expect("the graceful stop is called");
+        assert!(asked < stop, "the question comes before the first program is run: {pre}");
+        let helper = pre.find("dyno-helper.exe").expect("the helper's uninstall");
+        assert!(
+            asked < helper && pre[..helper].rfind("$DynoDirOk == 1").is_some(),
+            "the helper's uninstall is guarded: {pre}"
         );
-        assert_eq!(
-            SetupFacts.sentence(31).unwrap(),
-            paddock_setup::apply::Refusal::InstallerEnded.sentence()
+        let graceful = macro_body(hooks, "_DYNO_GRACEFUL_STOP");
+        let (un, installer) = graceful.split_once("!else").expect("an uninstaller branch and an installer branch");
+        let at_guard = un.find("$DynoDirOk == 1").expect("guarded in the uninstaller");
+        assert!(at_guard < un.find("dyno-agent.exe").unwrap(), "{un}");
+        assert!(
+            !installer.contains("DynoDirOk"),
+            "the installer's PREINSTALL has passed PADDOCK_CHECK_DIR: {installer}"
         );
-        assert_eq!(SetupFacts.sentence(0), None, "success needs no sentence");
-        assert_eq!(SetupFacts.sentence(99), None);
-    }
-
-    #[test]
-    fn only_apply_updates_own_codes_have_sentences_the_others_are_unknown() {
-        assert_eq!(
-            SetupFacts.sentence(4).unwrap(),
-            "The setup program was started with wrong arguments."
+        assert!(!pre.contains("dyno-agent.exe"), "no direct run of the agent in PREUNINSTALL: {pre}");
+        // Trusted folder, tool missing: the helper's service goes with sc.exe, only on a real uninstall, and the user is told.
+        let (_, fallback) = pre
+            .split_once("${ElseIf} $PaddockTrusted == 1")
+            .expect("a fallback for a missing tool");
+        assert!(fallback.contains("$PaddockHaveSetup == 0"), "{fallback}");
+        assert!(
+            fallback.contains("sc.exe\" stop DynoHelper") && fallback.contains("sc.exe\" delete DynoHelper"),
+            "{fallback}"
         );
-        assert_eq!(
-            SetupFacts.sentence(5).unwrap(),
-            "The setup program failed; the reason is in setup.log."
-        );
-        // 2, 3, 11 and 12 belong to guard, check-dir, stop-all and check-version, and 2 to 5 are also the installer's error levels.
-        for code in [1, 2, 3, 11, 12, 32, -1] {
-            assert_eq!(SetupFacts.sentence(code), None, "exit {code}");
-        }
-    }
-
-    struct Facts {
-        roots: Vec<String>,
-        canonical: String,
-        reparse: bool,
-        protection: Result<(), String>,
-    }
-
-    impl paddock_setup::checkdir::DirFacts for Facts {
-        fn program_files(&self) -> Vec<String> {
-            self.roots.clone()
-        }
-        fn inspect(&self, _dir: &str) -> Result<paddock_setup::checkdir::DirInspect, String> {
-            Ok(paddock_setup::checkdir::DirInspect {
-                canonical: self.canonical.clone(),
-                exists: true,
-                reparse_component: self.reparse,
-                owner_sid: Some("S-1-5-32-544".into()),
-            })
-        }
-        fn protection(&self, _i: &paddock_setup::checkdir::DirInspect) -> Result<(), String> {
-            self.protection.clone()
-        }
-    }
-
-    fn facts(canonical: &str) -> Facts {
-        Facts {
-            roots: vec![r"C:\Program Files".into()],
-            canonical: canonical.into(),
-            reparse: false,
-            protection: Ok(()),
-        }
-    }
-
-    #[test]
-    fn the_install_folder_must_pass_the_program_files_rule_before_any_prompt() {
-        assert!(install_dir_ok(&facts(r"C:\Program Files\Dyno"), r"C:\Program Files\Dyno").is_ok());
-        // No folder, a relative name (what `unwrap_or_default` used to make of "no install dir"), or another place.
-        for dir in ["", "Dyno", r"relative\Dyno", r"\\server\share\Dyno"] {
-            assert!(install_dir_ok(&facts(r"C:\Program Files\Dyno"), dir).is_err(), "`{dir}`");
-        }
-        assert!(install_dir_ok(&facts(r"C:\Users\Ann\Dyno"), r"C:\Users\Ann\Dyno").is_err());
-        let mut linked = facts(r"C:\Program Files\Dyno");
-        linked.reparse = true;
-        assert!(install_dir_ok(&linked, r"C:\Program Files\Dyno").is_err());
-        let mut loose = facts(r"C:\Program Files\Dyno");
-        loose.protection = Err("Users can change it".into());
-        assert!(install_dir_ok(&loose, r"C:\Program Files\Dyno")
-            .unwrap_err()
-            .contains("Users can change it"));
-    }
-
-    #[test]
-    fn a_junction_anywhere_above_the_download_is_refused_before_the_prompt() {
-        let file = r"C:\Users\Ann\AppData\Local\net.test.dyno\updates\update-1.1.0-x-setup.exe";
-        assert!(reparse_above(file, &|_| false).is_ok());
-        let e = reparse_above(file, &|f| f == r"C:\Users\Ann\AppData").unwrap_err();
-        assert!(e.contains("link or junction"), "{e}");
-        assert!(reparse_above(file, &|f| f == r"C:\Users").is_err(), "also high up");
-    }
-
-    #[test]
-    fn the_download_must_be_a_plain_local_drive_letter_path() {
-        assert!(SetupFacts
-            .check_download(r"C:\Users\Ann\AppData\Local\net.decryptology.dyno\updates\update-1.1.0-x-setup.exe")
-            .is_ok());
-        for bad in [
-            r"\\server\share\x.exe",
-            r"\\?\C:\x.exe",
-            r"\\.\pipe\x",
-            r"C:\a\..\b.exe",
-            r"relative\x.exe",
-            r"C:\a\b.exe:stream",
-        ] {
-            assert!(SetupFacts.check_download(bad).is_err(), "{bad}");
-        }
+        assert!(fallback.contains("MessageBox") && fallback.contains("${Silent}"), "{fallback}");
+        assert!(pre.contains("${If} $UpdateMode <> 1"), "an update keeps the helper: {pre}");
     }
 }

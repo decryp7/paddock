@@ -7,11 +7,12 @@ const CODES: ReadonlySet<ErrorCode> = new Set<ErrorCode>([
   'notFound',
   'badRequest',
   'conflict',
-  'offline',
   'insufficientMemory',
   'busy',
   'notAvailable',
+  'upstream',
   'notImplemented',
+  'cancelled',
   'internal',
 ]);
 

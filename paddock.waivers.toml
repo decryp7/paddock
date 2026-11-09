@@ -28,12 +28,6 @@ expires = "2026-12-31"
 
 [[waiver]]
 check = "C37"
-path = "apps/pitwall/*"
-reason = "Pitwall's integration tests are still one binary per file (pre-monorepo); moving them into tests/it is a follow-up"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C37"
 path = "apps/spotter/*"
 reason = "Spotter's integration tests are still one binary per file (pre-monorepo); moving them into tests/it is a follow-up"
 expires = "2026-12-31"
@@ -55,24 +49,6 @@ expires = "2026-12-31"
 check = "C39"
 path = "apps/pitcrew/crates/notify-channels/src/tests.rs"
 reason = "Pitcrew: two refused-connection tests on freed ports; to use HeldPort::reset or a mapping test"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C39"
-path = "apps/pitwall/app/src-tauri/src/server_client.rs"
-reason = "Pitwall: a not-running test on a freed port; to use a refusing connector"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C39"
-path = "apps/pitwall/crates/pitwall-cli/tests/cli.rs"
-reason = "Pitwall: a status test on a freed port; to use HeldPort::reset"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C39"
-path = "apps/pitwall/crates/pitwall-loopback/src/lib.rs"
-reason = "Pitwall: a refused-connection test on a freed port; to use a refusing connector"
 expires = "2026-12-31"
 
 [[waiver]]
@@ -189,18 +165,6 @@ expires = "2026-12-31"
 check = "C53"
 path = "apps/pitcrew/crates/pitcrew-service/tests/supervision.rs"
 reason = "ADR 0033 WP-6 (test): a file-wide allow of disallowed_methods and a kill command by pid; use paddock_proc::end"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/pitwall/crates/pitwall-cli/tests/cli.rs"
-reason = "ADR 0033 WP-7 (test): a file-wide allow of disallowed_methods; allow it on the items that start programs"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/pitwall/crates/pitwall-server/src/system.rs"
-reason = "ADR 0033 WP-7: sysinfo kill of an unreaped child by pid (safe today: the child is not reaped); go through paddock_proc"
 expires = "2026-12-31"
 
 [[waiver]]
@@ -325,3 +289,100 @@ check = "C23"
 path = "commit 08cf9f0363"
 reason = "first line over 100 characters on an unshared branch; history cannot be rewritten (no force)"
 expires = "2026-12-31"
+# C99 (ADR 0057, rule 72): the apps whose manifests still name keyring move their secrets to paddock-secrets' files in
+# their own work package (ADR 0057 §3 waiver table); each waiver goes with that work.
+[[waiver]]
+check = "C99"
+path = "apps/debrief/app/src-tauri/Cargo.toml"
+reason = "Debrief: the Pitwall API key still uses keyring::Entry; ADR 0057 WP-5 (Debrief 1.2) moves it to FileSecrets"
+expires = "2027-06-30"
+
+[[waiver]]
+check = "C99"
+path = "apps/pitcrew/app/src-tauri/Cargo.toml"
+reason = "Pitcrew: tokens and channel secrets still use keyring::Entry; ADR 0057 WP-6 (Pitcrew 1.1) moves them to FileSecrets"
+expires = "2027-03-31"
+
+[[waiver]]
+check = "C99"
+path = "apps/spotter/app/src-tauri/Cargo.toml"
+reason = "Spotter: credentials still use keyring::Entry; ADR 0057 WP-3 (Spotter 1.0) moves them to FileSecrets"
+expires = "2027-01-31"
+
+[[waiver]]
+check = "C99"
+path = "apps/dyno/crates/dyno-platform/tests/no_keychain_on_macos.rs"
+reason = "Dyno's own no-Keychain test names the security subcommands it forbids; delete this waiver and the test only after C99 (all five layers) has gated green in CI on main (ADR 0057 WP-2)"
+expires = "2027-03-31"
+
+[[waiver]]
+check = "C99"
+path = "apps/debrief/Cargo.lock#keyring"
+reason = "Debrief: the Pitwall API key still uses keyring::Entry; ADR 0057 WP-5 (Debrief 1.2) moves it to FileSecrets (its macOS graph, C99 layer 4, holds keyring until then)"
+expires = "2027-06-30"
+
+[[waiver]]
+check = "C99"
+path = "apps/debrief/Cargo.lock#keyring-core"
+reason = "Debrief: the Pitwall API key still uses keyring::Entry; ADR 0057 WP-5 (Debrief 1.2) moves it to FileSecrets (its macOS graph, C99 layer 4, holds keyring-core until then)"
+expires = "2027-06-30"
+
+[[waiver]]
+check = "C99"
+path = "apps/debrief/Cargo.lock#apple-native-keyring-store"
+reason = "Debrief: the Pitwall API key still uses keyring::Entry; ADR 0057 WP-5 (Debrief 1.2) moves it to FileSecrets (its macOS graph, C99 layer 4, holds apple-native-keyring-store until then)"
+expires = "2027-06-30"
+
+[[waiver]]
+check = "C99"
+path = "apps/debrief/Cargo.lock#security-framework<-apple-native-keyring-store"
+reason = "Debrief: the Pitwall API key still uses keyring::Entry; ADR 0057 WP-5 (Debrief 1.2) moves it to FileSecrets (its macOS graph, C99 layer 4, holds security-framework until then)"
+expires = "2027-06-30"
+
+[[waiver]]
+check = "C99"
+path = "apps/pitcrew/Cargo.lock#keyring"
+reason = "Pitcrew: tokens and channel secrets still use keyring::Entry; ADR 0057 WP-6 (Pitcrew 1.1) moves them to FileSecrets (its macOS graph, C99 layer 4, holds keyring until then)"
+expires = "2027-03-31"
+
+[[waiver]]
+check = "C99"
+path = "apps/pitcrew/Cargo.lock#keyring-core"
+reason = "Pitcrew: tokens and channel secrets still use keyring::Entry; ADR 0057 WP-6 (Pitcrew 1.1) moves them to FileSecrets (its macOS graph, C99 layer 4, holds keyring-core until then)"
+expires = "2027-03-31"
+
+[[waiver]]
+check = "C99"
+path = "apps/pitcrew/Cargo.lock#apple-native-keyring-store"
+reason = "Pitcrew: tokens and channel secrets still use keyring::Entry; ADR 0057 WP-6 (Pitcrew 1.1) moves them to FileSecrets (its macOS graph, C99 layer 4, holds apple-native-keyring-store until then)"
+expires = "2027-03-31"
+
+[[waiver]]
+check = "C99"
+path = "apps/pitcrew/Cargo.lock#security-framework<-apple-native-keyring-store"
+reason = "Pitcrew: tokens and channel secrets still use keyring::Entry; ADR 0057 WP-6 (Pitcrew 1.1) moves them to FileSecrets (its macOS graph, C99 layer 4, holds security-framework until then)"
+expires = "2027-03-31"
+
+[[waiver]]
+check = "C99"
+path = "apps/spotter/Cargo.lock#keyring"
+reason = "Spotter: credentials still use keyring::Entry; ADR 0057 WP-3 (Spotter 1.0) moves them to FileSecrets (its macOS graph, C99 layer 4, holds keyring until then)"
+expires = "2027-01-31"
+
+[[waiver]]
+check = "C99"
+path = "apps/spotter/Cargo.lock#keyring-core"
+reason = "Spotter: credentials still use keyring::Entry; ADR 0057 WP-3 (Spotter 1.0) moves them to FileSecrets (its macOS graph, C99 layer 4, holds keyring-core until then)"
+expires = "2027-01-31"
+
+[[waiver]]
+check = "C99"
+path = "apps/spotter/Cargo.lock#apple-native-keyring-store"
+reason = "Spotter: credentials still use keyring::Entry; ADR 0057 WP-3 (Spotter 1.0) moves them to FileSecrets (its macOS graph, C99 layer 4, holds apple-native-keyring-store until then)"
+expires = "2027-01-31"
+
+[[waiver]]
+check = "C99"
+path = "apps/spotter/Cargo.lock#security-framework<-apple-native-keyring-store"
+reason = "Spotter: credentials still use keyring::Entry; ADR 0057 WP-3 (Spotter 1.0) moves them to FileSecrets (its macOS graph, C99 layer 4, holds security-framework until then)"
+expires = "2027-01-31"

@@ -3,6 +3,7 @@ import { MatIconModule } from '@angular/material/icon';
 import type { EngineIssue } from '../../core/api.types';
 import { LiveStore } from '../../core/live.store';
 import { countdown } from '../../shared/format';
+import { MatButton } from '@angular/material/button';
 
 /** Text for the right-hand side of an issue: a countdown to the restart, "restarting now", or nothing for a failed model. */
 export function restartText(issue: EngineIssue, now: number): string | null {
@@ -16,7 +17,7 @@ export function restartText(issue: EngineIssue, now: number): string | null {
  */
 @Component({
   selector: 'pw-engine-issues',
-  imports: [MatIconModule],
+  imports: [MatButton, MatIconModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @for (i of issues(); track i.modelId) {
@@ -34,7 +35,7 @@ export function restartText(issue: EngineIssue, now: number): string | null {
           @if (restartText(i, now()); as t) {
             <span class="when num">{{ t }}</span>
           } @else {
-            <button type="button" class="btn" [disabled]="live.isBusy()('model:' + i.modelId)" (click)="live.loadModel(i.modelId)">Retry</button>
+            <button type="button" matButton="outlined" [disabled]="live.isBusy()('model:' + i.modelId)" (click)="live.loadModel(i.modelId)">Retry</button>
           }
         </div>
       </section>
@@ -48,42 +49,42 @@ export function restartText(issue: EngineIssue, now: number): string | null {
       display: grid;
       grid-template-columns: auto minmax(0, 1fr) auto;
       align-items: center;
-      gap: var(--sp-3);
-      padding: var(--sp-3) var(--sp-4);
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-left: 3px solid var(--warn);
-      border-radius: var(--r-md);
-      animation: rise var(--dur-base) var(--ease);
+      gap: var(--pd-space-3);
+      padding: var(--pd-space-3) var(--pd-space-4);
+      background: var(--pd-surface-1);
+      border: 1px solid var(--pd-hairline);
+      border-left: 3px solid var(--pd-warning);
+      border-radius: var(--pd-radius-control);
+      animation: rise var(--pd-duration) var(--pd-ease-move);
       mat-icon {
-        color: var(--warn);
+        color: var(--pd-warning);
       }
       &[data-state='failed'] {
-        border-left-color: var(--bad);
+        border-left-color: var(--pd-danger);
         mat-icon {
-          color: var(--bad);
+          color: var(--pd-danger);
         }
       }
     }
     .title {
-      font-size: var(--fs-sm);
+      font-size: var(--pd-text-label);
       b {
-        font-weight: var(--fw-semibold);
+        font-weight: var(--pd-weight-semibold);
       }
     }
     .count {
-      margin-left: var(--sp-2);
-      color: var(--text-3);
-      font-size: var(--fs-xs);
+      margin-left: var(--pd-space-2);
+      color: var(--pd-text-subtle);
+      font-size: var(--pd-text-label);
     }
     .msg {
       margin-top: 2px;
-      font-size: var(--fs-xs);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     .when {
-      font-size: var(--fs-sm);
-      color: var(--text-2);
+      font-size: var(--pd-text-label);
+      color: var(--pd-text-muted);
     }
     @keyframes rise {
       from {

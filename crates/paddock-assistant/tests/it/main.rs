@@ -2,8 +2,15 @@
 //! Each module is a former `tests/<name>.rs`; run one with `cargo test --test it <name>::`. `tests/tauri.rs`
 //! stays a binary of its own: it needs the `tauri` feature.
 
+mod call_ids;
+mod context;
+mod memory_store;
 mod never_panics;
+mod parts;
+mod phases;
 mod pitwall;
+mod saving;
 mod store;
 mod support;
+mod tool_path;
 mod turns;

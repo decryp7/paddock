@@ -14,6 +14,8 @@ static NEXT_TMP: AtomicU64 = AtomicU64::new(0);
 /// Points in a write where a test can make it fail (a stand-in for a kill or a full disk).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Stage {
+    /// The temporary file exists and is empty.
+    Created,
     /// Half of the bytes are in the temporary file.
     PartlyWritten,
     /// All bytes are flushed; the rename has not happened.
@@ -23,14 +25,28 @@ pub(crate) enum Stage {
 /// Writes `bytes` to `path` atomically, creating its folder; with `private` the file is owner-only (0600) on Unix. One
 /// write at a time per process. On failure the old file is untouched and the temporary file is removed.
 pub fn write_atomic(path: &Path, bytes: &[u8], private: bool) -> Result<()> {
-    write_hooked(path, bytes, private, &mut |_| Ok(()))
+    write_hooked(path, bytes, &mut |tmp| create(tmp, private), &mut |_, _| {
+        Ok(())
+    })
+}
+
+/// [`write_atomic`] where the caller creates the temporary file: `create` gets its path (beside the target, not existing
+/// yet) and must create it new and open it for writing. `paddock-secrets` uses it on Windows to create the file with an
+/// owner-only security descriptor and no sharing, so no other principal can open it at any point. A failed creation fails
+/// the write like any other step: nothing is replaced and no temporary file is left.
+pub fn write_atomic_created(
+    path: &Path,
+    bytes: &[u8],
+    create: &mut dyn FnMut(&Path) -> std::io::Result<std::fs::File>,
+) -> Result<()> {
+    write_hooked(path, bytes, create, &mut |_, _| Ok(()))
 }
 
 pub(crate) fn write_hooked(
     path: &Path,
     bytes: &[u8],
-    private: bool,
-    hook: &mut dyn FnMut(Stage) -> std::io::Result<()>,
+    create: &mut dyn FnMut(&Path) -> std::io::Result<std::fs::File>,
+    hook: &mut dyn FnMut(Stage, &Path) -> std::io::Result<()>,
 ) -> Result<()> {
     let _one = WRITER
         .lock()
@@ -41,7 +57,7 @@ pub(crate) fn write_hooked(
         .unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir).map_err(io("create folder", dir))?;
     let tmp = temp_name(dir, path);
-    let result = write_and_rename(&tmp, path, bytes, private, hook);
+    let result = write_and_rename(&tmp, path, bytes, create, hook);
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
@@ -64,17 +80,18 @@ fn write_and_rename(
     tmp: &Path,
     path: &Path,
     bytes: &[u8],
-    private: bool,
-    hook: &mut dyn FnMut(Stage) -> std::io::Result<()>,
+    create: &mut dyn FnMut(&Path) -> std::io::Result<std::fs::File>,
+    hook: &mut dyn FnMut(Stage, &Path) -> std::io::Result<()>,
 ) -> Result<()> {
-    let mut file = create(tmp, private).map_err(io("write", tmp))?;
+    let mut file = create(tmp).map_err(io("create", tmp))?;
+    hook(Stage::Created, tmp).map_err(io("prepare", tmp))?;
     let (first, rest) = bytes.split_at(bytes.len() / 2);
     file.write_all(first).map_err(io("write", tmp))?;
-    hook(Stage::PartlyWritten).map_err(io("write", tmp))?;
+    hook(Stage::PartlyWritten, tmp).map_err(io("write", tmp))?;
     file.write_all(rest).map_err(io("write", tmp))?;
     file.sync_all().map_err(io("flush", tmp))?;
     drop(file);
-    hook(Stage::Written).map_err(io("write", tmp))?;
+    hook(Stage::Written, tmp).map_err(io("write", tmp))?;
     std::fs::rename(tmp, path).map_err(io("replace", path))?;
     sync_dir(path.parent().unwrap_or(Path::new(".")));
     Ok(())
@@ -132,15 +149,20 @@ mod tests {
             let f = t.path().join("state.json");
             write_atomic(&f, b"old content", false).unwrap();
             let mut seen_old = true;
-            let r = write_hooked(&f, b"new content that is longer", false, &mut |s| {
-                // At the failure point the target is still the complete old file.
-                seen_old &= std::fs::read(&f).unwrap() == b"old content";
-                if s == stage {
-                    Err(std::io::Error::other("killed"))
-                } else {
-                    Ok(())
-                }
-            });
+            let r = write_hooked(
+                &f,
+                b"new content that is longer",
+                &mut |t| create(t, false),
+                &mut |s, _| {
+                    // At the failure point the target is still the complete old file.
+                    seen_old &= std::fs::read(&f).unwrap() == b"old content";
+                    if s == stage {
+                        Err(std::io::Error::other("killed"))
+                    } else {
+                        Ok(())
+                    }
+                },
+            );
             assert!(r.is_err(), "{stage:?}");
             assert!(seen_old);
             assert_eq!(std::fs::read(&f).unwrap(), b"old content");
@@ -155,7 +177,9 @@ mod tests {
     fn a_failure_on_a_new_file_leaves_no_file() {
         let t = tempfile::tempdir().unwrap();
         let f = t.path().join("state.json");
-        let r = write_hooked(&f, b"x", false, &mut |_| Err(std::io::Error::other("full")));
+        let r = write_hooked(&f, b"x", &mut |t| create(t, false), &mut |_, _| {
+            Err(std::io::Error::other("full"))
+        });
         assert!(r.is_err());
         assert!(!f.exists());
     }
@@ -203,5 +227,36 @@ mod tests {
         let got = std::fs::read(&f).unwrap();
         assert_eq!(got.len(), 4096);
         assert!(got.iter().all(|b| *b == got[0]));
+    }
+
+    /// The caller creates the temporary file (`paddock-secrets` creates it with an owner-only security descriptor and no
+    /// sharing on Windows, so no other principal can open it, not even before the value is written).
+    #[test]
+    fn the_caller_creates_the_temporary_file_beside_the_target() {
+        let t = tempfile::tempdir().unwrap();
+        let f = t.path().join("admin.key");
+        let mut seen = Vec::new();
+        write_atomic_created(&f, b"secret", &mut |tmp| {
+            seen.push(tmp.to_path_buf());
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(tmp)
+        })
+        .unwrap();
+        assert_eq!(std::fs::read(&f).unwrap(), b"secret");
+        assert_eq!(seen.len(), 1, "once per write");
+        assert_eq!(
+            seen[0].parent(),
+            Some(t.path()),
+            "the temporary file is beside the target"
+        );
+        assert_ne!(seen[0], f);
+        // A failed creation replaces nothing and leaves no temporary file.
+        let e = write_atomic_created(&f, b"other", &mut |_| Err(std::io::Error::other("no acl")))
+            .unwrap_err();
+        assert!(e.to_string().contains("no acl"), "{e}");
+        assert_eq!(std::fs::read(&f).unwrap(), b"secret");
+        assert!(leftovers(t.path()).is_empty());
     }
 }

@@ -2,6 +2,7 @@
 //! Items, systemd, registry or services (rule 7). The real adapters are [`crate::system::RealSystem`] and the native
 //! glue in `native.rs`; tests use [`crate::testing`], which records every command and file write.
 
+use paddock_proc::RunState;
 use std::path::Path;
 use std::time::Duration;
 
@@ -101,6 +102,16 @@ pub trait System: Send {
     fn is_program(&mut self, path: &Path) -> bool;
     /// Waits (the fake only advances its clock).
     fn pause(&mut self, how_long: Duration);
+    /// The CPU time the process `pid` (and its children) used so far, `None` when the OS did not say or there is no such
+    /// process. For judging a start that is taking long; `pid` was just read from the OS's own report. Not known by default.
+    fn cpu_time(&mut self, _pid: u32) -> Option<Duration> {
+        None
+    }
+    /// Whether the process `pid` is stopped by the OS or another app ([`RunState::Stopped`]), read by process identity.
+    /// [`RunState::Unknown`] when the OS does not say (the default).
+    fn run_state(&mut self, _pid: u32) -> RunState {
+        RunState::Unknown
+    }
 }
 
 /// `SMAppService.status`, without the Objective-C type.
@@ -130,6 +141,9 @@ pub enum RegisterError {
     Unavailable(String),
     /// Anything else, in words; worth another try.
     Other(String),
+    /// The elevated step did not end: it still ran at the backstop ceiling, or the wait on it broke. It was not stopped and
+    /// may still finish, so it is neither a failure nor worth another try now (another try would ask the user again).
+    StillRunning(String),
     /// The write reported success, but reading the registration back shows something else (ADR 0054 section 1.1). It
     /// carries what the OS holds; it is never `Ok`.
     NotAsWritten(crate::backend::Inspection),
@@ -151,7 +165,9 @@ impl std::fmt::Display for RegisterError {
             RegisterError::NeedsApproval => f.write_str("macOS needs approval in Login Items"),
             RegisterError::NeedsElevation => f.write_str("administrator rights are needed"),
             RegisterError::Declined => f.write_str("the permission prompt was declined"),
-            RegisterError::Unavailable(why) | RegisterError::Other(why) => f.write_str(why),
+            RegisterError::Unavailable(why)
+            | RegisterError::Other(why)
+            | RegisterError::StillRunning(why) => f.write_str(why),
             RegisterError::NotAsWritten(look) => write!(
                 f,
                 "the registration was written, but reading it back shows registration {:?}, job {:?}{}",
@@ -179,20 +195,174 @@ pub trait AppService: Send {
     fn open_login_items(&mut self);
 }
 
+/// How the wait for an elevated program ended, as the adapter observed it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ElevatedEnd {
+    /// The program exited with this code.
+    Exited(u32),
+    /// It still ran when the backstop ceiling came; it was not stopped.
+    StillRunning(Duration),
+    /// The wait itself failed (Windows error code): nothing is known about the program.
+    WaitFailed(u32),
+}
+
+/// What one slice of waiting for an elevated program saw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Slice {
+    /// The program exited with this code.
+    Exited(u32),
+    /// It still runs.
+    Running,
+    /// The wait itself failed (Windows error code).
+    Failed(u32),
+}
+
+/// Waits for an elevated program in slices of `slice`, up to `ceiling`: `wait(slice)` waits one slice and says what it saw,
+/// `working(waited)` is called after each slice in which the program still ran (the log's "still working"). A failed wait
+/// ends at once with its error, never spun on. The adapter supplies the OS calls; this is the logic.
+pub fn wait_in_slices(
+    ceiling: Duration,
+    slice: Duration,
+    wait: &mut dyn FnMut(Duration) -> Slice,
+    working: &mut dyn FnMut(Duration),
+) -> ElevatedEnd {
+    let slice = slice.min(ceiling).max(Duration::from_millis(1));
+    let mut waited = Duration::ZERO;
+    loop {
+        let seen = wait(slice);
+        waited += slice;
+        match seen {
+            Slice::Exited(code) => return ElevatedEnd::Exited(code),
+            Slice::Failed(code) => return ElevatedEnd::WaitFailed(code),
+            Slice::Running if waited >= ceiling => return ElevatedEnd::StillRunning(waited),
+            Slice::Running => working(waited),
+        }
+    }
+}
+
+/// What an elevated run's end means for the caller: the exit code, or, for a program still running at the ceiling or a
+/// wait that broke, an error that says so (ER-19: a run that has not ended is not a failed one, and its caller must not
+/// report it failed). The words are the app's own neutral ones; each caller adds its own next step.
+pub fn elevated_result(program: &Path, end: ElevatedEnd) -> Result<i32, RegisterError> {
+    match end {
+        ElevatedEnd::Exited(code) => Ok(i32::try_from(code).unwrap_or(1)),
+        ElevatedEnd::WaitFailed(code) => Err(RegisterError::StillRunning(format!(
+            "waiting for {} failed (Windows error {code})",
+            program.display()
+        ))),
+        ElevatedEnd::StillRunning(waited) => Err(RegisterError::StillRunning(format!(
+            "{} was still running after {} minutes",
+            program.display(),
+            waited.as_secs() / 60
+        ))),
+    }
+}
+
 /// Runs a program with the OS's own elevation prompt (Windows UAC) and waits for it.
 pub trait Elevator: Send {
-    /// Runs `program args…` elevated; `Ok(exit code)`, or [`RegisterError::Declined`] when the user said no.
+    /// Runs `program args…` elevated and waits for it to end, up to `ceiling` (a backstop, not a judge: a program that is
+    /// still running then is reported as such by [`elevated_result`], never as failed; the adapter says it is still working
+    /// in the log while it waits). `Ok(exit code)`, or [`RegisterError::Declined`] when the user said no.
     fn run_elevated(
         &mut self,
         program: &Path,
         args: &[&str],
-        timeout: Duration,
+        ceiling: Duration,
     ) -> Result<i32, RegisterError>;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_elevated_program_still_running_is_not_reported_failed() {
+        let p = Path::new("C:\\app\\server.exe");
+        assert_eq!(elevated_result(p, ElevatedEnd::Exited(0)), Ok(0));
+        assert_eq!(elevated_result(p, ElevatedEnd::Exited(5)), Ok(5));
+        assert_eq!(elevated_result(p, ElevatedEnd::Exited(u32::MAX)), Ok(1));
+        let why = elevated_result(p, ElevatedEnd::StillRunning(Duration::from_secs(900)))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            // What was seen only: the caller's words say it was not stopped and may still finish, once.
+            why.contains("still running after 15 minutes")
+                && !why.contains("may still finish")
+                && !why.contains("failed"),
+            "{why}"
+        );
+    }
+
+    #[test]
+    fn the_wait_in_slices_ends_on_exit_failure_or_the_ceiling_and_never_spins_on_a_failure() {
+        let run = |seen: Vec<Slice>| {
+            let mut seen = seen.into_iter();
+            let mut waits = 0u32;
+            let mut notes = Vec::new();
+            let end = wait_in_slices(
+                Duration::from_secs(90),
+                Duration::from_secs(30),
+                &mut |s| {
+                    waits += 1;
+                    assert_eq!(s, Duration::from_secs(30));
+                    seen.next().unwrap_or(Slice::Running)
+                },
+                &mut |w| notes.push(w.as_secs()),
+            );
+            (end, waits, notes)
+        };
+        assert_eq!(
+            run(vec![Slice::Exited(0)]),
+            (ElevatedEnd::Exited(0), 1, vec![])
+        );
+        assert_eq!(
+            run(vec![Slice::Running, Slice::Exited(3)]),
+            (ElevatedEnd::Exited(3), 2, vec![30])
+        );
+        // A failed wait (WAIT_FAILED) ends the loop at once with its error code.
+        assert_eq!(
+            run(vec![Slice::Running, Slice::Failed(6)]),
+            (ElevatedEnd::WaitFailed(6), 2, vec![30])
+        );
+        // Running to the ceiling: three slices, still working said after the first two.
+        assert_eq!(
+            run(vec![]),
+            (
+                ElevatedEnd::StillRunning(Duration::from_secs(90)),
+                3,
+                vec![30, 60]
+            )
+        );
+        // A ceiling shorter than a slice is one short slice.
+        let mut waited = Vec::new();
+        let mut notes = Vec::new();
+        let end = wait_in_slices(
+            Duration::from_secs(5),
+            Duration::from_secs(30),
+            &mut |s| {
+                waited.push(s);
+                Slice::Running
+            },
+            &mut |w| notes.push(w),
+        );
+        assert_eq!(
+            (end, waited),
+            (
+                ElevatedEnd::StillRunning(Duration::from_secs(5)),
+                vec![Duration::from_secs(5)]
+            )
+        );
+        assert!(notes.is_empty());
+        let why = elevated_result(Path::new("C:\\s.exe"), ElevatedEnd::WaitFailed(6))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            why.contains("Windows error 6")
+                && !why.contains("Repair")
+                && !why.contains("Services window"),
+            "{why}"
+        );
+    }
 
     #[test]
     fn outputs_give_the_tools_own_words() {
@@ -218,6 +388,34 @@ mod tests {
     }
 
     #[test]
+    fn a_system_that_cannot_read_cpu_times_or_run_states_does_not_know_them() {
+        struct Bare;
+        impl System for Bare {
+            fn run(&mut self, _: &str, _: &[&str]) -> Result<Output, RunError> {
+                Ok(Output::default())
+            }
+            fn spawn(&mut self, _: &Path, _: &[String]) -> Result<(), String> {
+                Ok(())
+            }
+            fn read(&mut self, _: &Path) -> std::io::Result<String> {
+                Ok(String::new())
+            }
+            fn write(&mut self, _: &Path, _: &str) -> std::io::Result<()> {
+                Ok(())
+            }
+            fn remove(&mut self, _: &Path) -> std::io::Result<()> {
+                Ok(())
+            }
+            fn is_program(&mut self, _: &Path) -> bool {
+                false
+            }
+            fn pause(&mut self, _: Duration) {}
+        }
+        assert_eq!(Bare.cpu_time(std::process::id()), None);
+        assert_eq!(Bare.run_state(std::process::id()), RunState::Unknown);
+    }
+
+    #[test]
     fn only_other_register_errors_are_retried() {
         assert!(RegisterError::Other("busy".into()).retryable());
         for e in [
@@ -225,6 +423,8 @@ mod tests {
             RegisterError::NeedsElevation,
             RegisterError::Declined,
             RegisterError::Unavailable("x".into()),
+            // A run that has not ended is not tried again: that would ask the user a second time.
+            RegisterError::StillRunning("x".into()),
         ] {
             assert!(!e.retryable());
             assert!(!e.to_string().is_empty());

@@ -28,10 +28,14 @@ describe('playground helpers', () => {
     const a = applyEvent(pane, { kind: 'delta', text: 'ab' });
     const b = applyEvent(a, { kind: 'delta', text: 'c' });
     expect(b.turns[1]!.content).toBe('abc');
-    const done = applyEvent(b, { kind: 'done', promptTokens: 1, completionTokens: 2, ttftMs: 3, genTps: 4, coldStartMs: null });
+    const done = applyEvent(b, { kind: 'done', finish: 'stop', promptTokens: 1, completionTokens: 2, ttftMs: 3, genTps: 4, coldStartMs: null });
     expect(done.turns[1]).toMatchObject({ streaming: false, stats: { promptTokens: 1, completionTokens: 2, ttftMs: 3, genTps: 4, coldStartMs: null } });
     expect(done.turns[1]!.stats).not.toHaveProperty('kind');
     expect(applyEvent(done, { kind: 'delta', text: 'late' })).toBe(done);
+    // Events that only the Chat tab shows leave a Compare pane as it is.
+    for (const ignored of [{ kind: 'phase', phase: { kind: 'generating' } }, { kind: 'reasoning', text: 't' }, { kind: 'toolCall', index: 0, id: 'c', name: 'n', arguments: '{}' }] as const) {
+      expect(applyEvent(pane, ignored)).toBe(pane);
+    }
     const err = applyEvent(pane, { kind: 'error', error: { code: 'internal', message: 'boom' } });
     expect(err.turns[1]).toMatchObject({ streaming: false, error: { message: 'boom' } });
     expect(applyEvent({ modelId: null, turns: [] }, { kind: 'delta', text: 'x' }).turns).toEqual([]);
@@ -46,7 +50,8 @@ describe('playground helpers', () => {
 });
 
 describe('PlaygroundStore', () => {
-  function setup(backend: PitwallBackend = new MockBackend({ streamDelayMs: 0, latencyMs: 0 })) {
+  // A build without the chat: one model, the Compare toggle (the chat build is covered below).
+  function setup(backend: PitwallBackend = new MockBackend({ streamDelayMs: 0, latencyMs: 0, chat: false })) {
     TestBed.configureTestingModule({ providers: [PlaygroundStore, { provide: BACKEND, useValue: backend }] });
     return { store: TestBed.inject(PlaygroundStore), backend };
   }
@@ -65,6 +70,21 @@ describe('PlaygroundStore', () => {
     expect(a.modelId).not.toBeNull();
     expect(b.modelId).not.toBeNull();
     expect(a.modelId).not.toBe(b.modelId);
+  });
+
+  it('asks Rust once whether the chat is built in; with it, Compare shows two models; a backend that cannot say means no chat', async () => {
+    const { store, backend } = setup(new MockBackend({ streamDelayMs: 0, latencyMs: 0 }));
+    const asked = vi.spyOn(backend, 'chatEnabled');
+    await store.load();
+    await store.load();
+    expect(store.chatEnabled()).toBe(true);
+    expect(store.compare()).toBe(true);
+    expect(asked).toHaveBeenCalledTimes(1);
+    TestBed.resetTestingModule();
+    const old = setup({ localModels: () => Promise.resolve([]) } as unknown as PitwallBackend);
+    await old.store.load();
+    expect(old.store.chatEnabled()).toBe(false);
+    expect(old.store.compare()).toBe(false);
   });
 
   it('keeps a model the user already picked when reloading', async () => {
@@ -150,7 +170,7 @@ describe('PlaygroundStore', () => {
 
   it('sends the earlier turns, the system prompt and the parameters with a follow-up', async () => {
     const seen: PlaygroundRequest[] = [];
-    const base = new MockBackend({ streamDelayMs: 0 });
+    const base = new MockBackend({ streamDelayMs: 0, chat: false });
     const spy: PitwallBackend = Object.create(base, {
       chat: {
         value: (r: PlaygroundRequest, on: (e: PlaygroundEvent) => void): Unsubscribe => {

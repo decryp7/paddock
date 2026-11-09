@@ -42,16 +42,10 @@ paths = ["crates/paddock-service/src/parse.rs", "crates/paddock-service/src/plan
 status = "built"
 
   [[mechanism.copy]]
-  paths = ["apps/pitwall/app/src-tauri/src/service_repair.rs"]
-  owner = "pitwall"
-  delete_by = "pitwall-v1.2.0"
-  note = "Pitwall 1.0.x has its own parse_job without nested-block skipping. Pitwall 1.1 switches to paddock_service::parse; plan() and run_repair() stay a copy until 1.2."
-
-  [[mechanism.copy]]
   paths = ["apps/pitcrew/app/src-tauri/src/service_repair.rs"]
   owner = "pitcrew"
   delete_by = "pitcrew-v1.1.0"
-  note = "Both B4 defects (nested state lines, has_lwcr && !running). Pitcrew 1.1 adopts paddock-service."
+  note = "Both B4 defects (nested state lines, has_lwcr && !running). Pitcrew 1.1 adopts paddock-service; its parse_extras is in paddock-service (JobReport pid, runs and last exit code); its start_wait.rs moves in as StartWatch/StartWait only after Pitwall 1.1 B1 (the merge with ADR 0056 left it out). Both are deleted by the adoption."
 
 [[mechanism]]
 id = "service-registration"
@@ -59,11 +53,6 @@ title = "Registering, installing and removing the background service (SMAppServi
 canonical = "paddock-service"
 paths = ["crates/paddock-service/src/backend/**", "crates/paddock-service/src/native.rs", "crates/paddock-service/src/manager.rs"]
 status = "built"
-
-  [[mechanism.copy]]
-  paths = ["apps/pitwall/app/src-tauri/src/service_install.rs"]
-  owner = "pitwall"
-  delete_by = "pitwall-v1.2.0"
 
   [[mechanism.copy]]
   paths = ["apps/pitcrew/app/src-tauri/src/service_install.rs"]
@@ -87,7 +76,7 @@ adr = "0034"
   note = "MacosLauncher::LaunchAgent: translocated path and an unidentified Login Items row (Dyno F1/F3), no restore detection (B3)."
 
   [[mechanism.copy]]
-  paths = ["apps/pitwall/app/src-tauri/src/lib.rs", "apps/pitwall/app/src-tauri/src/app_commands.rs"]
+  paths = ["apps/pitwall/app/src-tauri/src/lib.rs", "apps/pitwall/app/src-tauri/src/start_at_login.rs"]
   symbols = ["text:tauri_plugin_autostart"]
   kind = "wiring"
   owner = "pitwall"
@@ -255,14 +244,6 @@ adr = "0012"
   delete_by = "debrief-v1.2.0"
 
   [[mechanism.copy]]
-  paths = ["apps/pitwall/app/src-tauri/src/lib.rs"]
-  symbols = ["text:tauri_plugin_single_instance::init(|"]
-  kind = "wiring"
-  owner = "pitwall"
-  delete_by = "pitwall-v1.1.0"
-  note = "Pitwall 1.1 uses paddock_window::tauri::second_instance."
-
-  [[mechanism.copy]]
   paths = ["apps/spotter/app/src-tauri/src/lib.rs"]
   symbols = ["text:tauri_plugin_single_instance::init(|"]
   kind = "wiring"
@@ -283,12 +264,6 @@ adr = "0012"
   owner = "debrief"
   delete_by = "debrief-v1.2.0"
   note = "The canonical manager.rs was ported from these files without Debrief's per-window workspaces; the workspace state in windows.rs stays Debrief's."
-
-  [[mechanism.copy]]
-  paths = ["apps/pitwall/app/src-tauri/src/window.rs"]
-  owner = "pitwall"
-  delete_by = "pitwall-v1.1.0"
-  note = "close.rs was ported from this file. Pitwall 1.1 deletes it."
 
 [[mechanism]]
 id = "run-lifecycle"
@@ -332,13 +307,6 @@ adr = "0012"
   owner = "debrief"
   delete_by = "debrief-v1.2.0"
   note = "The canonical tray.rs was ported from this file. Debrief's menu content (windows, recent projects, tasks) stays Debrief's."
-
-  [[mechanism.copy]]
-  paths = ["apps/pitwall/app/src-tauri/src/tray.rs"]
-  symbols = ["item:build_menu", "item:create", "item:update"]
-  owner = "pitwall"
-  delete_by = "pitwall-v1.1.0"
-  note = "Builds the tray by hand with TrayIconBuilder; Pitwall 1.1 builds it through paddock-window and drops these items."
 
   [[mechanism.copy]]
   paths = ["apps/pitwall/app/src-tauri/src/tray_model.rs"]
@@ -502,12 +470,6 @@ adr = "0012"
   paths = ["apps/debrief/app/src-tauri/src/updater.rs", "apps/debrief/app/src-tauri/src/updater/**", "apps/debrief/app/src-tauri/src/legal.rs"]
   owner = "debrief"
   delete_by = "debrief-v1.2.0"
-
-  [[mechanism.copy]]
-  paths = ["apps/pitwall/app/src-tauri/src/updater.rs"]
-  owner = "pitwall"
-  delete_by = "pitwall-v1.1.0"
-  note = "Pitwall 1.1 deletes it."
 
   [[mechanism.copy]]
   paths = ["apps/spotter/app/src-tauri/src/updater.rs"]
@@ -702,12 +664,6 @@ status = "built"
   delete_by = "pitcrew-v1.1.0"
 
   [[mechanism.copy]]
-  paths = ["apps/pitwall/app/src/app/core/native-feel.ts"]
-  owner = "pitwall"
-  delete_by = "pitwall-v1.1.0"
-  note = "Pitwall 1.1 deletes it."
-
-  [[mechanism.copy]]
   paths = ["apps/spotter/app/src/app/core/native-feel.ts"]
   owner = "spotter"
   delete_by = "spotter-v1.0.0"
@@ -743,12 +699,6 @@ status = "built"
   paths = ["apps/pitcrew/app/src/app/shared/ui/sparkline.ts"]
   owner = "pitcrew"
   delete_by = "pitcrew-v1.1.0"
-
-  [[mechanism.copy]]
-  paths = ["apps/pitwall/app/src/app/shared/ui/sparkline.ts"]
-  owner = "pitwall"
-  delete_by = "pitwall-v1.1.0"
-  note = "Pitwall 1.1 deletes it."
 
   [[mechanism.copy]]
   paths = ["apps/debrief/app/src/app/share/dashboard/dashboard-tile.ts"]
@@ -1042,3 +992,28 @@ adr = "0041"
   owner = "debrief"
   delete_by = "debrief-v1.3.0"
   note = "As Pitcrew's."
+# Per-machine Windows install (family ADR 0053)
+# =====================================================================================================================
+
+[[mechanism]]
+id = "per-machine-updater-wiring"
+title = "The updater's per-machine hand-off wired into an app (install_with, adopt_handoff)"
+canonical = "paddock-setup"
+paths = ["crates/paddock-setup/src/wiring.rs"]
+status = "planned"
+
+  [[mechanism.copy]]
+  paths = ["apps/dyno/app/src-tauri/src/lib.rs"]
+  symbols = ["item:install_with", "item:adopt_handoff"]
+  kind = "wiring"
+  owner = "dyno"
+  delete_by = "dyno-v1.2.0"
+  note = "paddock-updater's tauri adapter cannot depend on paddock-setup (paddock-setup depends on the updater for the signature check), so each app wires it in itself; what can be shared is (paddock_setup::wiring: the contract, the lock, the folder and handoff_for, which builds the hand-off), and what is left of the copy is the adapter lines: install_with's builder calls (ShellElevator, is_administrator, install_scope, installer_lock) and adopt_handoff. Follow-up: a builder step in paddock-setup behind a feature that links the adapter, so an app calls one function; Pitcrew is the third member and takes that route, not a third copy."
+
+  [[mechanism.copy]]
+  paths = ["apps/pitwall/app/src-tauri/src/lib.rs"]
+  symbols = ["item:install_with", "item:adopt_handoff"]
+  kind = "wiring"
+  owner = "pitwall"
+  delete_by = "pitwall-v1.2.0"
+  note = "The same wiring as Dyno's (B6b). Follow-up as in Dyno's note."

@@ -16,11 +16,10 @@ Dyno). Like the pit wall in a race, it is where every car radios in.
 
 
 > **Local only.** Nothing you ask and nothing the model answers ever leaves your computer. No cloud models, no
-> telemetry, no crash upload. The only network traffic is downloading engines and models you asked for, and offline
-> mode turns even that off. This is the first architecture decision and is enforced in code and tests:
+> telemetry, no crash upload. The only network traffic is downloading engines and models you asked for. This is the first architecture decision and is enforced in code and tests:
 > [ADR 0001](docs/adr/0001-local-only.md).
 
-**Status: v1.0.4.** The server works end to end on macOS (Apple Silicon): a Metal llama.cpp build was
+**Status: 1.1.0 in progress** (the latest release is 1.0.x, until the `pitwall-v1.1.0` tag exists). The server works end to end on macOS (Apple Silicon): a Metal llama.cpp build was
 installed through the app flow with checksum and self-test, a Hugging Face model downloaded with its SHA-256 verified,
 and OpenAI, Anthropic and Ollama requests (streaming and not, plus JSON-schema output) were answered at about 213
 tokens per second with a 0.5B model on an M4 Pro. The Tauri app ships as installers for Windows, macOS and Linux; the Windows and Linux real-model
@@ -47,7 +46,7 @@ runs have not been done yet; see the [roadmap](docs/roadmap.md) for exactly what
 | Settings, including Model updates | ![settings, light](docs/screenshots/settings-light.png) | ![settings, dark](docs/screenshots/settings-dark.png) |
 | First start: llama.cpp installs itself | ![llama.cpp installing, light](docs/screenshots/engines-install-light.png) | ![llama.cpp installing, dark](docs/screenshots/engines-install-dark.png) |
 | When you quit Pitwall (setting and question) | ![quit setting, light](docs/screenshots/settings-quit-light.png) | ![quit question, dark](docs/screenshots/quit-dialog-dark.png) |
-| Tray popover (360x520) | ![Tray, light](docs/screenshots/tray-light.png) | ![Tray, dark](docs/screenshots/tray-dark.png) |
+| Tray popover (360 wide, widgets you choose) | ![Tray, light](docs/screenshots/tray-light.png) | ![Tray, dark](docs/screenshots/tray-dark.png) |
 
 The screenshots come from the browser build with the mock backend (`npm run screenshots` in `app/`; 1440x900 at 2x, long pages taller); they show the
 design, not measurements from a real machine.
@@ -100,7 +99,7 @@ Every feature, with its status, is in [docs/features.md](docs/features.md).
   clear buttons ([ADR 0019](docs/adr/0019-caching.md), [user guide](docs/user-guide.md#caching)).
 - **Memory management.** Presets (Low memory, Balanced, Performance), idle and deep-idle release, pressure release,
   pinned models, a countdown on the dashboard.
-- **Security.** Per-app keys approved with a six-digit pairing code, per-app permissions and limits (with usage over time per app), an offline mode.
+- **Security.** Per-app keys approved with a six-digit pairing code, per-app permissions and limits (with usage over time per app).
 - **Model catalog packs.** Add model lists with a TOML file, no code ([user guide](docs/user-guide.md#packs-add-a-model-list)).
 - **The app.** Dashboard, models, llama.cpp, apps, requests, playground, benchmarks, settings, tray. Choose what Quit does about serving.
 

@@ -2,6 +2,8 @@ import { EnvironmentProviders, Provider } from '@angular/core';
 import type { SettingsPageDef } from '@decryp7/paddock-ui/shell';
 import { SettingsBackend, SettingsStore, SHELL_SETTINGS_PAGES } from '@decryp7/paddock-ui/shell/settings';
 import { SettingsDrafts } from './settings-drafts';
+import { SettingsStatus } from './settings-status';
+import { SettingsCloseGuards } from './settings-close';
 import { SETTINGS_RESTART, SETTINGS_WINDOW_PAGES } from './settings-window';
 
 export interface SettingsWindowOptions {
@@ -15,7 +17,7 @@ export interface SettingsWindowOptions {
 
 /**
  * The providers of the Settings window (the `providers` of the app's `pd.settings` dialog): the backend, the store, the
- * unsaved edits and the pages. Nothing else of the main window is needed there (rule 34). The window's look is its
+ * unsaved edits, the pages' footer status, the pages' close guards and the pages. Nothing else of the main window is needed there (rule 34). The window's look is its
  * appearance store's (the dialog window's base providers: `provideAppearance` with `provideSettingsAppearance`), never
  * written here.
  */
@@ -28,5 +30,7 @@ export function settingsWindowProviders(options: SettingsWindowOptions): (Provid
     ...(options.restart ? [{ provide: SETTINGS_RESTART, useFactory: options.restart }] : []),
     SettingsStore,
     SettingsDrafts,
+    SettingsStatus,
+    SettingsCloseGuards,
   ];
 }

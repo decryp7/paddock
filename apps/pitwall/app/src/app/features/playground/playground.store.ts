@@ -34,6 +34,8 @@ interface PlaygroundState {
   temperature: number;
   maxTokens: number;
   compare: boolean;
+  /** This build has the chat (Rust decides); `null` until known. */
+  chatEnabled: boolean | null;
   panes: [Pane, Pane];
 }
 
@@ -45,6 +47,7 @@ const initial: PlaygroundState = {
   temperature: 0.7,
   maxTokens: 512,
   compare: false,
+  chatEnabled: null,
   panes: [
     { modelId: null, turns: [] },
     { modelId: null, turns: [] },
@@ -69,7 +72,9 @@ export function applyEvent(pane: Pane, e: PlaygroundEvent): Pane {
   else if (e.kind === 'done') {
     const { kind: _kind, ...stats } = e;
     turns[turns.length - 1] = { ...last, streaming: false, stats };
-  } else turns[turns.length - 1] = { ...last, streaming: false, error: e.error };
+  } else if (e.kind === 'error') turns[turns.length - 1] = { ...last, streaming: false, error: e.error };
+  // Phases, reasoning and tool calls belong to the Chat tab (ADR 0023); Compare is text only and shows none of them.
+  else return pane;
   return { ...pane, turns };
 }
 
@@ -112,6 +117,11 @@ export const PlaygroundStore = signalStore(
     return {
       async load(): Promise<void> {
         patchState(store, { loading: true, error: null });
+        if (store.chatEnabled() === null) {
+          // A build that cannot say has no chat; with the chat, Compare always shows its two models (the one-model chat is the Chat tab).
+          const chatEnabled = await (async () => backend.chatEnabled())().catch(() => false);
+          patchState(store, { chatEnabled, ...(chatEnabled ? { compare: true } : {}) });
+        }
         try {
           const models = await backend.localModels();
           patchState(store, { models, loading: false });

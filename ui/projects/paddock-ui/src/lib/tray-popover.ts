@@ -1,6 +1,44 @@
-import { afterNextRender, ChangeDetectionStrategy, Component, DestroyRef, ElementRef, inject, input, output, signal, viewChild } from '@angular/core';
+import { afterNextRender, ChangeDetectionStrategy, Component, computed, DestroyRef, ElementRef, inject, input, output, signal, viewChild } from '@angular/core';
+import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatIcon } from '@angular/material/icon';
+import { MatMenu, MatMenuItem, MatMenuTrigger } from '@angular/material/menu';
+import { MatTooltip } from '@angular/material/tooltip';
+import { PdGlyph } from '@decryp7/paddock-ui/icons';
 
 export type SuTrayPlatform = 'macos' | 'windows' | 'linux';
+
+/** One action of the tray footer's more-actions menu; `Id` is the app's union of action ids, so its handler can be exhaustive. */
+export interface SuTrayMenuItem<Id extends string = string> {
+  readonly kind: 'item';
+  /** What `menuAction` emits when the item is chosen. */
+  readonly id: Id;
+  /** Sentence case, with "…" when the action asks for more (Settings…). */
+  readonly label: string;
+  /** A registered `MatIconRegistry` name (`dy:power`, `pd:settings`); decorative. */
+  readonly icon?: string;
+  /** The shortcut shown at the end of the row (⌘, or Ctrl+,): only for a key the popover window binds; decorative. */
+  readonly keyHint?: string | null;
+  readonly disabled?: boolean;
+}
+
+/** A hairline between two groups of the menu. */
+export interface SuTrayMenuSeparator {
+  readonly kind: 'separator';
+}
+
+/** The menu model: items and separators in order. */
+export type SuTrayMenuEntry<Id extends string = string> = SuTrayMenuItem<Id> | SuTrayMenuSeparator;
+
+/** The entries as drawn: no separator at either end and never two in a row (an item hidden by its app leaves none behind). */
+function tidy<Id extends string>(entries: readonly SuTrayMenuEntry<Id>[]): readonly SuTrayMenuEntry<Id>[] {
+  const out: SuTrayMenuEntry<Id>[] = [];
+  for (const e of entries) {
+    if (e.kind === 'separator' && (out.length === 0 || out[out.length - 1]!.kind === 'separator')) continue;
+    out.push(e);
+  }
+  if (out[out.length - 1]?.kind === 'separator') out.pop();
+  return out;
+}
 
 /**
  * Layout of a tray / menu-bar popup: 360 px wide, header, content fitted to its height (no empty gap, scrolls past 520 px)
@@ -8,10 +46,16 @@ export type SuTrayPlatform = 'macos' | 'windows' | 'linux';
  * (12 px on macOS, 8 px on Windows 11), hairline border and soft shadow, one 16 px inset for header, content and footer.
  * Escape emits `dismissed`.
  *
+ * The footer (family ADR 0035, the approved Dyno footer): `primaryLabel` draws the one primary action, "Open <app>" with its
+ * arrow, right-aligned (`primary` emits on click); `menu` draws the ⋯ more-actions button beside it with a Material menu that
+ * opens above it (`menuAction` emits the chosen item's id). The trigger is tinted and ringed while its menu is open. An app's
+ * own footer content (`[slot=footer]`, e.g. a secondary "Mark all seen") stays at the start.
+ *
  * Slots: `[slot=header]`, default (content), `[slot=footer]`.
  */
 @Component({
   selector: 'pd-tray-popover',
+  imports: [MatButton, MatIconButton, MatIcon, MatMenu, MatMenuItem, MatMenuTrigger, MatTooltip, PdGlyph],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     role: 'dialog',
@@ -33,7 +77,47 @@ export type SuTrayPlatform = 'macos' | 'windows' | 'linux';
     </div>
     <!-- A fade over the foot of the content while there is more below (the mock's scroll cue); it ends at the bottom. -->
     <div class="pd-fade" aria-hidden="true" [class.pd-fade--on]="scrolls() && !atEnd()"></div>
-    <footer class="pd-footer"><ng-content select="[slot=footer]" /></footer>
+    <footer class="pd-footer">
+      <ng-content select="[slot=footer]" />
+      @if (primaryLabel() || items().length) {
+        <span class="pd-footer-spacer"></span>
+        @if (primaryLabel(); as text) {
+          <button type="button" matButton="filled" class="pd-tray-primary" (click)="primary.emit()"><pd-glyph name="arrow-right" [size]="18" />{{ text }}</button>
+        }
+        @if (items().length) {
+          <button
+            type="button"
+            matIconButton
+            class="pd-tray-more"
+            [class.pd-tray-more--open]="menuOpen()"
+            [matMenuTriggerFor]="moreMenu"
+            [attr.aria-label]="menuLabel()"
+            [matTooltip]="menuLabel()"
+            matTooltipPosition="left"
+            (menuOpened)="menuOpen.set(true)"
+            (menuClosed)="menuOpen.set(false)"
+          >
+            <pd-glyph name="more" [size]="18" />
+          </button>
+          <mat-menu #moreMenu="matMenu" class="pd-tray-menu" yPosition="above" xPosition="before">
+            @for (e of items(); track $index) {
+              @if (e.kind === 'item') {
+                <button mat-menu-item type="button" [disabled]="!!e.disabled" (click)="menuAction.emit(e.id)">
+                  @if (e.icon) {
+                    <mat-icon class="pd-tray-icon" [svgIcon]="e.icon" aria-hidden="true" />
+                  } @else if (iconGutter()) {
+                    <span matMenuItemIcon class="pd-tray-icon pd-tray-icon--blank" aria-hidden="true"></span>
+                  }
+                  <span class="pd-tray-row"><span class="pd-tray-label">{{ e.label }}</span>@if (e.keyHint) {<kbd aria-hidden="true">{{ e.keyHint }}</kbd>}</span>
+                </button>
+              } @else {
+                <hr class="pd-tray-sep" role="separator" />
+              }
+            }
+          </mat-menu>
+        }
+      }
+    </footer>
   `,
   styles: `
     :host {
@@ -64,11 +148,24 @@ export type SuTrayPlatform = 'macos' | 'windows' | 'linux';
     .pd-header:empty, .pd-footer:empty { display: none; }
     .pd-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 var(--pd-space-4) var(--pd-space-3); }
     .pd-footer { display: flex; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-2) var(--pd-space-4); border-top: 1px solid var(--pd-hairline); }
+    .pd-footer-spacer { flex: 1; }
+    /* The primary keeps its one line beside an app's own footer content. */
+    .pd-tray-primary { flex: none; }
+    .pd-tray-more { color: var(--pd-text-muted); }
+    /* The ⋯ trigger shows while its menu is open: a tint and a ring, so it is clear what the menu belongs to. */
+    .pd-tray-more--open { background: var(--pd-hover); box-shadow: inset 0 0 0 var(--pd-focus-width) var(--pd-focus-ring); }
+    /* The menu's rows (drawn in the overlay, still styled here): 16 px icons, the label, a key hint at the end. */
+    .mat-mdc-menu-item .pd-tray-icon { flex: none; width: 16px; height: 16px; margin: 0 var(--pd-space-3) 0 0; }
+    .pd-tray-icon--blank { display: inline-block; }
+    .pd-tray-row { display: flex; align-items: center; gap: var(--pd-space-4); width: 100%; }
+    .pd-tray-label { flex: 1; min-width: 0; }
+    .pd-tray-sep { border: 0; border-top: 1px solid var(--pd-hairline); margin: var(--pd-space-1) 0; }
+    kbd { padding: 0 var(--pd-space-1); border: 1px solid var(--pd-border-strong); border-radius: var(--pd-radius-tag); font: inherit; font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     @keyframes pd-tray-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
     @media (prefers-reduced-motion: reduce) { :host { animation: none; } }
   `,
 })
-export class SuTrayPopover {
+export class SuTrayPopover<Id extends string = string> {
   private readonly content = viewChild.required<ElementRef<HTMLElement>>('content');
   /** True while the content scrolls (past 520 px): the region is then focusable and named, so a keyboard can scroll it (WCAG 2.1.1). */
   protected readonly scrolls = signal(false);
@@ -81,6 +178,21 @@ export class SuTrayPopover {
   /** The shell draws an OS material behind the page; let it show through. */
   readonly translucent = input<boolean>(false);
   readonly dismissed = output<void>();
+  /** The footer's primary action ("Open Dyno"); none without it. */
+  readonly primaryLabel = input<string | null>(null);
+  /** The more-actions menu; no ⋯ button while it has no item. */
+  readonly menu = input<readonly SuTrayMenuEntry<Id>[]>([]);
+  /** The ⋯ button's accessible name and tooltip. */
+  readonly menuLabel = input<string>($localize`:@@pd.trayPopover.more:More actions`);
+  /** The primary action was pressed. */
+  readonly primary = output<void>();
+  /** The id of the menu item chosen. */
+  readonly menuAction = output<Id>();
+  protected readonly items = computed(() => tidy(this.menu()));
+  /** Some item has an icon: an item without one keeps a blank gutter of the icon's size, so the labels align. */
+  protected readonly iconGutter = computed(() => this.items().some((e) => e.kind === 'item' && !!e.icon));
+  /** True while the more-actions menu is open (the trigger is marked). */
+  protected readonly menuOpen = signal(false);
 
   protected measure(): void {
     const el = this.content().nativeElement;

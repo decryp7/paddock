@@ -26,6 +26,14 @@ pub const SIGNATURE_PHASE: &str = "signature";
 pub const CHECK_PHASE: &str = "check";
 /// Longest wait for the release information's body.
 const MANIFEST_TIMEOUT: Duration = Duration::from_secs(60);
+/// Why an install is refused in a build without an [`Installer`].
+const NO_INSTALLER: &str = "this build has no installer";
+fn no_installer() -> UpdateError {
+    UpdateError::InstallFailed {
+        detail: NO_INSTALLER.into(),
+    }
+}
+
 /// How often a blocking request is looked at for a cancel.
 const TICK: Duration = Duration::from_millis(10);
 
@@ -93,6 +101,9 @@ pub struct UpdateStatus {
     /// The host a check contacts (`None` in a build without updates).
     pub endpoint_host: Option<String>,
     pub releases_page: Option<String>,
+    /// Whether this build can install what it downloads (an [`Installer`] is set). The dialog offers Download, "Restart to
+    /// update" and "Install when the app quits" only when it can; a build that only notifies points to the releases page.
+    pub can_install: bool,
     /// What the Updates UI shows about installing (scope, install on quit, the administrator text).
     pub install: InstallInfo,
 }
@@ -350,6 +361,11 @@ impl Updater {
         self
     }
 
+    /// Whether this build can install a downloaded update (an [`Installer`] is set).
+    pub fn can_install(&self) -> bool {
+        self.installer.is_some()
+    }
+
     pub fn with_service_hooks(mut self, hooks: Arc<dyn ServiceHooks>) -> Updater {
         self.hooks = Some(hooks);
         self
@@ -410,6 +426,7 @@ impl Updater {
                 .collect(),
             endpoint_host,
             releases_page: self.config.releases_page.clone(),
+            can_install: self.installer.is_some(),
             install: InstallInfo::of(self.config.scope, self.config.administrator),
         }
     }
@@ -468,9 +485,12 @@ impl Updater {
         self.begin(Event::Check)
     }
 
-    /// Starts downloading the update found: the caller registers a job and runs [`run_download`](Self::run_download).
+    /// Starts downloading the update found (refused with `InstallFailed` in a build without an [`Installer`]): the caller registers a job and runs [`run_download`](Self::run_download).
     /// `None` as the ticket: nothing to run (the update is over the size limit, which the status now says).
     pub fn begin_download(&self) -> Result<(UpdateStatus, Option<Ticket>), UpdateError> {
+        // Out of turn is "busy" (or "not available") before it is "cannot install": nothing is downloaded that this
+        // build could never install.
+        self.require_installer(Event::Download)?;
         let size = self.lock().found.as_ref().and_then(|f| f.platform.size);
         let (status, ticket) = self.begin(Event::Download)?;
         if size.is_some_and(|s| s > self.config.max_download_bytes) {
@@ -743,6 +763,9 @@ impl Updater {
             }
             return Ok(self.status());
         }
+        if enabled {
+            self.require_installer(Event::InstallOnQuit(true))?;
+        }
         self.apply(Event::InstallOnQuit(enabled), |inner| {
             inner.on_exit = if enabled {
                 OnExit::Install
@@ -752,13 +775,20 @@ impl Updater {
         })
     }
 
+    /// Refuses an install this build cannot do, at the request and not only at the exit where the user would meet it at the
+    /// next start. A request out of turn (`event` is refused by the phase) is "busy" or "not available" first, as in
+    /// [`begin_download`](Self::begin_download).
+    fn require_installer(&self, event: Event) -> Result<(), UpdateError> {
+        if self.installer.is_some() {
+            return Ok(());
+        }
+        self.lock().phase.next(event)?;
+        Err(no_installer())
+    }
+
     /// Marks the verified update for installing with a relaunch; the caller then quits the app (its exit hook installs).
     pub fn prepare_restart(&self) -> Result<UpdateStatus, UpdateError> {
-        if self.installer.is_none() {
-            return Err(UpdateError::InstallFailed {
-                detail: "this build has no installer".into(),
-            });
-        }
+        self.require_installer(Event::Install)?;
         self.apply(Event::Install, |inner| {
             inner.on_exit = OnExit::InstallAndRelaunch
         })
@@ -860,12 +890,7 @@ impl Updater {
         }
         let relaunch = on_exit == OnExit::InstallAndRelaunch;
         let result = (|| {
-            let installer = self
-                .installer
-                .as_ref()
-                .ok_or_else(|| UpdateError::InstallFailed {
-                    detail: "this build has no installer".into(),
-                })?;
+            let installer = self.installer.as_ref().ok_or_else(no_installer)?;
             let (Some(file), Some(manifest), Some(platform)) =
                 (file.filter(|f| f.is_file()), manifest, platform)
             else {
@@ -1065,4 +1090,67 @@ fn get_manifest(
 
 fn remove(p: &Path) {
     let _ = std::fs::remove_file(p);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct NoNetwork;
+
+    impl paddock_download::Transport for NoNetwork {
+        fn get(
+            &self,
+            _: &Get<'_>,
+        ) -> Result<paddock_download::Response, paddock_download::TransportError> {
+            unreachable!("nothing is fetched")
+        }
+    }
+
+    /// A ready update in a build without an installer cannot happen through the public steps (a download is refused first),
+    /// so the install guards are defence in depth: forced here to prove they hold.
+    #[test]
+    fn a_ready_update_without_an_installer_is_refused_by_every_install_step() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = UpdateKey::parse(
+            &std::fs::read_to_string(
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/key.pub"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let config = UpdaterConfig::new(
+            "1.0.0",
+            Some(key),
+            vec![Channel::new(
+                "stable",
+                "Stable",
+                "https://updates.test/latest.json",
+            )],
+            dir.path().join("downloads"),
+        );
+        let u = Updater::new(
+            config,
+            Arc::new(Downloader::new(Arc::new(NoNetwork))),
+            Arc::new(RecordStore::new(None)),
+            Box::new(|_| {}),
+        );
+        u.lock().phase = UpdatePhase::Ready {
+            info: UpdateInfo {
+                version: "9.9.9".into(),
+                current_version: "1.0.0".into(),
+                notes: String::new(),
+                pub_date: None,
+                size: None,
+            },
+            install_on_quit: false,
+        };
+        let refused = |r: Result<UpdateStatus, UpdateError>| matches!(r, Err(UpdateError::InstallFailed { detail }) if detail.contains("no installer"));
+        assert!(refused(u.prepare_restart()));
+        assert!(refused(u.install_on_quit(true)));
+        assert!(
+            matches!(u.status().phase, UpdatePhase::Ready { .. }),
+            "nothing moved"
+        );
+    }
 }

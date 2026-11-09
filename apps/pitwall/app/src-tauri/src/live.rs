@@ -43,7 +43,7 @@ pub async fn pump(stream: &mut dyn FrameStream, sink: &mut dyn LiveSink) -> Resu
 
 /// One connection: seeds from `overview`, opens the stream, pumps it. `connected` says whether the stream opened.
 pub async fn session(client: &dyn ServerClient, sink: &mut dyn LiveSink, connected: &mut bool) -> Result<(), CommandError> {
-    let overview = client.call("overview", Value::Null, OPEN_TIMEOUT).await?;
+    let overview = client.call("overview", Value::Null, Some(OPEN_TIMEOUT)).await?;
     if let Ok(o) = serde_json::from_value::<Overview>(overview) {
         sink.seed(&o);
     }
@@ -66,6 +66,8 @@ pub async fn run(client: Arc<dyn ServerClient>, sink: &mut dyn LiveSink) {
             // Connection state only; never content.
             eprintln!("Pitwall: live feed ended ({:?}); reconnecting", e.code);
         }
+        // Reconnect back-off, not a wait for a state: the server is not there, so there is nothing to wait on. Tokio's clock,
+        // so a test with paused time passes the delay at once.
         tokio::time::sleep(reconnect_delay(attempt)).await;
         attempt += 1;
     }

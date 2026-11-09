@@ -1,8 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { resolve } from 'node:path';
+import { dialogContracts, dialogWindowUrl } from '../../../../../ui/projects/paddock-e2e/src/index.ts';
+import { CONTRACT_FILES } from '../dialog-fixtures';
 
 const OUT = resolve(__dirname, '../../../docs/screenshots');
+const CONTRACTS = dialogContracts(...CONTRACT_FILES.map((p) => resolve(__dirname, '../..', p)));
 const WIDTH = 1440;
 const HEIGHT = 900;
 // A fixed clock so countdowns, "5 min ago" and chart axes are the same on every run.
@@ -15,8 +18,17 @@ interface Screen {
   query?: string;
   /** A virtual list that must end on a whole row: the viewport shrinks by the partial row at its bottom. */
   snapList?: string;
+  /** A scroller (a detail panel's body) whose whole content the shot shows: the viewport grows by what it hides. */
+  fitScroller?: string;
   /** Capture only this element (full height, whatever the window shows) instead of the page. */
   element?: string;
+  /** A dialog window (its id) opened by its URL, as Rust loads it in its own OS window, instead of a page of the main window. */
+  window?: string;
+  /** The window's title (as Rust gives it) and its input. */
+  title?: string;
+  input?: unknown;
+  /** The Settings window: the section (its id) scrolled to the top of the page area, so the shot starts at a section. */
+  section?: string;
   /** Waits for the screen and drives it into the state to show. */
   prepare?: (page: Page) => Promise<void>;
 }
@@ -36,7 +48,7 @@ const SCREENS: Screen[] = [
       const panel = p.getByRole('complementary', { name: 'Qwen3.5 9B' });
       await expect(panel).toBeVisible();
       // Pin it to the CUDA build, as a user holding one model on a known-good engine would.
-      await panel.getByRole('button', { name: /^Engine build for Qwen3.5 9B/ }).click();
+      await panel.getByRole('combobox', { name: /^Engine build for Qwen3.5 9B/ }).click();
       await p.getByRole('option', { name: /^Pin to CUDA 13/ }).click();
       await expect(panel.locator('.pinned-build')).toBeVisible();
     },
@@ -47,7 +59,7 @@ const SCREENS: Screen[] = [
     prepare: async (p) => {
       await p.getByRole('row', { name: /Qwen3.5 9B/ }).click();
       await p.getByRole('button', { name: /^Parallel slots for Qwen3.5 9B/ }).click();
-      await expect(p.locator('pw-slots-panel .fit-table tbody tr').first()).toBeVisible();
+      await expect(p.locator('pw-slots-panel table.choices tbody tr').first()).toBeVisible();
     },
   },
   {
@@ -97,12 +109,12 @@ const SCREENS: Screen[] = [
     prepare: (p) => expect(p.getByRole('status', { name: 'Installing llama.cpp' })).toBeVisible(),
   },
   {
+    // The quit question in its own window, as Rust opens it: titled "Quit Pitwall", at the contract's width and fitted height.
     name: 'quit-dialog',
-    path: '/engines',
-    query: 'mock-quit&mock-clean',
-    prepare: async (p) => {
-      await expect(p.getByRole('alertdialog', { name: 'Quit Pitwall?' })).toBeVisible();
-    },
+    path: '',
+    window: 'pw.quit',
+    title: 'Quit Pitwall',
+    prepare: (p) => expect(p.getByRole('alertdialog', { name: 'Keep serving after you quit?' })).toBeVisible(),
   },
   { name: 'apps', path: '/apps', prepare: (p) => expect(p.locator('h1')).toBeVisible() },
   {
@@ -115,13 +127,15 @@ const SCREENS: Screen[] = [
     },
   },
   {
+    // Debrief opted in to cached answers: the app's Cached answers card with today's hits, misses and hit rate.
     name: 'apps-cache',
     path: '/apps',
+    element: 'pw-panel.cache-panel',
     prepare: async (p) => {
       await p.getByRole('button', { name: /Debrief\s+1\.3k requests/ }).click();
       await expect(p.getByRole('heading', { name: 'Debrief', level: 2 })).toBeVisible();
-      await expect(p.getByRole('switch', { name: 'Cache answers' })).toBeChecked();
-      await p.getByRole('switch', { name: 'Cache answers' }).scrollIntoViewIfNeeded();
+      await expect(p.locator('pw-panel.cache-panel')).toContainText('on for this app');
+      await expect(p.locator('pw-panel.cache-panel .cache-stats')).toContainText('Cache hits');
     },
   },
   { name: 'requests', path: '/requests', snapList: 'cdk-virtual-scroll-viewport', prepare: (p) => expect(p.getByRole('row').nth(1)).toBeVisible() },
@@ -156,6 +170,7 @@ const SCREENS: Screen[] = [
     name: 'requests-cache',
     path: '/requests',
     snapList: 'cdk-virtual-scroll-viewport',
+    fitScroller: 'pw-detail-panel .body',
     prepare: async (p) => {
       await p.getByRole('row').filter({ has: p.locator('.cached') }).first().click();
       await expect(p.locator('pw-request-detail')).toContainText('Cache hit');
@@ -164,25 +179,34 @@ const SCREENS: Screen[] = [
   { name: 'benchmarks', path: '/benchmarks', prepare: (p) => expect(p.locator('h1')).toBeVisible() },
   {
     name: 'settings-quit',
-    path: '/settings',
-    element: '#set-general',
+    path: '',
+    window: 'pd.settings',
+    section: '#set-general',
     prepare: async (p) => {
-      await p.getByRole('radio', { name: 'Ask each time' }).click();
-      await expect(p.getByRole('radio', { name: 'Ask each time' })).toHaveAttribute('aria-checked', 'true');
+      await p.locator('#gen-quit').click();
+      await p.getByRole('option', { name: 'Ask each time' }).click();
+      await expect(p.locator('#gen-quit')).toContainText('Ask each time');
     },
   },
   {
     name: 'settings-cache',
-    path: '/settings',
-    element: '#set-cache',
-    prepare: async (p) => {
-      await p.locator('.subnav').getByRole('button', { name: 'Caching' }).click();
-      await expect(p.locator('#set-cache .cache-stats').first()).toBeVisible();
-    },
+    path: '',
+    window: 'pd.settings',
+    section: '#set-cache',
+    prepare: (p) => expect(p.locator('#set-cache .cache-stats').first()).toBeVisible(),
+  },
+  {
+    name: 'settings-service',
+    path: '',
+    window: 'pd.settings',
+    section: '#set-service',
+    prepare: (p) => expect(p.getByTestId('service-pill')).toContainText('Running'),
   },
   {
     name: 'settings',
-    path: '/settings',
+    path: '',
+    window: 'pd.settings',
+    section: '#set-model-updates',
     prepare: async (p) => {
       // Model updates switched on and checked once, as a user who opted in would see it.
       const panel = p.locator('#set-model-updates');
@@ -198,7 +222,7 @@ const ONLY = process.env['SHOT_ONLY']?.split(',');
 
 async function open(page: Page, path: string, theme: 'dark' | 'light', query = '') {
   await page.clock.install({ time: NOW });
-  await page.addInitScript((t) => localStorage.setItem('pitwall.theme', t), theme);
+  // The theme follows the system (the shell's Appearance default), emulated here.
   await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
   await page.goto(`/?mock-static&mock-fast${query ? '&' + query : ''}#${path}`);
 }
@@ -223,12 +247,39 @@ async function fitHeight(page: Page): Promise<number> {
 for (const theme of ['dark', 'light'] as const) {
   for (const s of SCREENS.filter((x) => !ONLY || ONLY.includes(x.name))) {
     test(`${s.name} ${theme}`, async ({ page }) => {
+      if (s.window) {
+        // A window at its own size, as the shell opens it: Settings at the contract's 880x700, a dialog at its contract's
+        // width and the height it fits itself to.
+        const contract = CONTRACTS[s.window]!;
+        const fixed = contract.kind === 'tool';
+        await page.clock.install({ time: NOW });
+        await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
+        await page.setViewportSize({ width: contract.width, height: fixed ? (contract.height ?? 700) : 810 });
+        await page.goto(dialogWindowUrl(s.window, s.input ?? {}, { title: s.title ?? 'Settings', query: `?mock-static&mock-fast${s.query ? '&' + s.query : ''}` }));
+        await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
+        await s.prepare?.(page);
+        // Long enough for the window's own confirmations ("Checking every week.") to go: no toast in a documentation shot.
+        await page.clock.runFor(12_000);
+        for (const close of await page.getByRole('button', { name: /^(Dismiss|Close notification)/ }).all()) await close.click();
+        await page.mouse.move(2, 2);
+        if (!fixed) {
+          const asked = await page.evaluate(() => ({ h: Number(document.documentElement.dataset['fittedHeight'] ?? '0'), min: document.documentElement.dataset['minContent'] ?? '0x0' }));
+          await page.setViewportSize({ width: contract.width, height: Math.max(asked.h, Number(asked.min.split('x')[1] ?? '0')) });
+        }
+        // No focus ring in a documentation shot (a choice just made keeps the focus on its control).
+        await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+        // The shot starts at the top of a section, never mid-card.
+        if (s.section) await page.locator(s.section).evaluate((e) => e.scrollIntoView({ block: 'start' }));
+        await page.waitForTimeout(600);
+        await page.screenshot({ path: `${OUT}/${s.name}-${theme}.png` });
+        return;
+      }
       await open(page, s.path, theme, s.query);
       await expect(page.locator('h1').first()).toBeVisible();
       await s.prepare?.(page);
       await page.clock.runFor(1500);
       // No toast, tooltip or hover state in a documentation shot.
-      for (const close of await page.locator('pw-toast-host button[aria-label="Dismiss"]').all()) await close.click();
+      for (const close of await page.locator('pd-notification-host [data-testid="notification-dismiss"]').all()) await close.click();
       await page.mouse.move(WIDTH - 2, 2);
       // Focusing a control at a card's edge can scroll a table sideways, which slices its first column in the shot.
       await page.evaluate(() => document.querySelectorAll('*').forEach((e) => e.scrollLeft > 0 && (e.scrollLeft = 0)));
@@ -243,6 +294,13 @@ for (const theme of ['dark', 'light'] as const) {
         return;
       }
       await fitHeight(page);
+      if (s.fitScroller) {
+        const hidden = await page.locator(s.fitScroller).evaluate((e) => e.scrollHeight - e.clientHeight);
+        // Plus one list row: snapping the list to whole rows below takes back less than a row.
+        const row = s.snapList ? await page.evaluate((sel) => document.querySelector<HTMLElement>(`${sel} [role="row"]`)?.offsetHeight ?? 0, s.snapList) : 0;
+        if (hidden > 0) await page.setViewportSize({ width: WIDTH, height: (page.viewportSize()?.height ?? HEIGHT) + Math.ceil(hidden) + row });
+        await page.waitForTimeout(250);
+      }
       if (s.snapList) {
         const rest = await page.evaluate((sel) => {
           const vp = document.querySelector<HTMLElement>(sel);
@@ -257,18 +315,22 @@ for (const theme of ['dark', 'light'] as const) {
   }
 
   if (!ONLY || ONLY.includes('tray')) {
-    // The tray popover is 360x520 logical: capture the element itself at its real size.
+    // The tray popover window (`#/tray`, 360 logical px wide, fitted to its content) as the tray opens it: the default widgets in
+    // the demo state (family ADR 0035).
     test(`tray ${theme}`, async ({ page }) => {
-      await page.setViewportSize({ width: 360, height: 520 });
-      await open(page, '/tray', theme);
-      const tray = page.locator('.tray');
-      await expect(tray).toBeVisible();
+      await page.setViewportSize({ width: 372, height: 1000 });
+      await open(page, '/tray', theme, 'mock-popup=demo');
+      const tray = page.locator('pd-tray-popover');
+      await expect(tray.locator('section.pd-w').first()).toBeVisible();
+      await expect(tray.locator('[aria-busy="true"]')).toHaveCount(0);
       await page.clock.runFor(1500);
-      await page.waitForTimeout(400);
+      await page.evaluate(async () => document.fonts.ready);
+      // The window is fitted to the content, as the shell does: the shot is the popover with no empty space.
       const box = await tray.boundingBox();
       expect(box?.width).toBe(360);
-      expect(box?.height).toBe(520);
-      expect(await tray.evaluate((e) => e.scrollHeight <= e.clientHeight)).toBe(true);
+      expect(box?.height).toBeLessThanOrEqual(520);
+      await page.mouse.move(2, 2);
+      await page.waitForTimeout(400);
       await tray.screenshot({ path: `${OUT}/tray-${theme}.png` });
     });
   }

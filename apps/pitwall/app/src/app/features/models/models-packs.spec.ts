@@ -1,3 +1,4 @@
+import { dialogsAnswering } from '../../../testing/render';
 import { TestBed } from '@angular/core/testing';
 import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
@@ -7,7 +8,6 @@ import { LiveStore } from '../../core/live.store';
 import { MockBackend } from '../../core/mock-backend';
 import { Toasts } from '../../core/toasts';
 import { registerIcons } from '../../shared/icons';
-import { Confirm } from '../../shared/ui/confirm';
 import { ModelsPage } from './models-page';
 import { ModelsStore } from './models.store';
 
@@ -67,7 +67,7 @@ describe('Models page: recommendations and engines', () => {
       imports: [ModelsPage],
       providers: [
         { provide: BACKEND, useValue: backend },
-        { provide: Confirm, useValue: { ask: () => Promise.resolve(true) } },
+        dialogsAnswering(true),
       ],
     });
     registerIcons(TestBed.inject(MatIconRegistry), TestBed.inject(DomSanitizer));
@@ -99,11 +99,11 @@ describe('Models page: recommendations and engines', () => {
     const rows = () => r.el.querySelectorAll('pw-discover-tab .rec');
     const all = rows().length;
     expect(all).toBeGreaterThan(3);
-    const chip = (name: string) => Array.from(r.el.querySelectorAll<HTMLButtonElement>('pw-discover-tab .chip')).find((c) => c.textContent?.trim() === name)!;
-    chip('code').click();
+    const chip = (name: string) => Array.from(r.el.querySelectorAll<HTMLElement>('pw-discover-tab mat-chip-option')).find((c) => c.textContent?.trim() === name)!;
+    chip('Code').querySelector<HTMLElement>('[role=option]')!.click();
     await r.settle();
     expect(rows().length).toBeLessThan(all);
-    expect(chip('code').getAttribute('aria-pressed')).toBe('true');
+    expect(chip('Code').querySelector('[role=option]')!.getAttribute('aria-selected')).toBe('true');
     (r.el.querySelector('button[aria-label^="Download Qwen3.6 35B-A3B"]') as HTMLButtonElement).click();
     await r.settle();
     expect((await backend.downloads())[0]!.name).toContain('Qwen3.6-35B-A3B');

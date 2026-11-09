@@ -2150,6 +2150,32 @@ Denies the updates_install_on_quit command without any pre-configured scope.
 <tr>
 <td>
 
+`paddock-shell:allow-updates-open-releases`
+
+</td>
+<td>
+
+Enables the updates_open_releases command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-shell:deny-updates-open-releases`
+
+</td>
+<td>
+
+Denies the updates_open_releases command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `paddock-shell:allow-updates-restart`
 
 </td>

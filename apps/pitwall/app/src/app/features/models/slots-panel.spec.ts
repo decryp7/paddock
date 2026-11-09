@@ -46,9 +46,9 @@ describe('SlotsPanel', () => {
     expect(pick(el, 1).textContent).toContain('baseline');
     expect(pick(el, 4).textContent).toMatch(/adds ~\d+\.\d GB/);
     expect(pick(el, 2).getAttribute('aria-checked')).toBe('true');
-    const rows = el.querySelectorAll('.fit-table tbody tr');
+    const rows = el.querySelectorAll('table.choices tbody tr');
     expect(rows.length).toBe(4);
-    expect(rows[1]!.classList.contains('sel')).toBe(true);
+    expect(rows[1]!.classList.contains('selected')).toBe(true);
     expect(el.querySelector('.answer')?.textContent).toMatch(/Fits|Tight|Won't fit/);
     expect(el.querySelector('.sum')?.textContent).toContain('requests at once');
     expect(el.textContent).toContain('applies the next time the model loads');

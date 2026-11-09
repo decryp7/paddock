@@ -405,14 +405,22 @@ impl<R: Runtime> Builder<R> {
         self
     }
 
-    /// An app's own menu item (`id`) that does its work with no window open: its action runs instead of the window coming
-    /// back. Quit stays [`Builder::menu_quit_without_window`].
+    /// An app's own menu item (`id`) that does its work with no window open (the last one was closed to the tray), such as
+    /// Dyno's "Quit and stop measuring" or Pitwall's "Quit and stop serving": its action runs on the main thread instead of
+    /// the window coming back. The item is shown in the menu bar, so only a shown id reaches it. Registering the same id
+    /// again replaces the earlier action. Quit stays [`Builder::menu_quit_without_window`]: giving the Quit id here is a
+    /// programming error and panics at once (it would silently override that hook).
     pub fn menu_action_without_window(
         mut self,
         id: &str,
         f: impl Fn(&AppHandle<R>) + Send + Sync + 'static,
     ) -> Self {
-        self.menu_actions.push((id.to_string(), Arc::new(f)));
+        assert!(
+            id != paddock_menu::model::QUIT_COMMAND,
+            "Quit without a window is set with `menu_quit_without_window`, not `menu_action_without_window`"
+        );
+        self.menu_actions.retain(|(i, _)| i != id);
+        self.menu_actions.push((id.to_owned(), Arc::new(f)));
         self
     }
 

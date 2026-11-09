@@ -15,11 +15,12 @@ export type ErrorCode =
   | 'notFound'
   | 'badRequest'
   | 'conflict'
-  | 'offline'
   | 'insufficientMemory'
   | 'busy'
   | 'notAvailable'
+  | 'upstream'
   | 'notImplemented'
+  | 'cancelled'
   | 'internal';
 
 export interface CommandError {
@@ -52,7 +53,6 @@ export interface ServerInfo {
   port: number;
   startedAt: number;
   serving: ServingState;
-  offline: boolean;
   lan: LanStatus;
 }
 
@@ -409,6 +409,18 @@ export interface PairingRequest {
   code: string;
   requestedAt: number;
   permissions: AppPermissions;
+  /** A re-pair (ADR 0057 §4): approving it revokes the keys the app had before. */
+  rePair: boolean;
+  /** For a re-pair of an app Pitwall has: that app as stored and how many keys approving revokes. */
+  replaces: ReplacedApp | null;
+}
+
+/** The app a re-pair replaces the keys of. */
+export interface ReplacedApp {
+  appId: string;
+  /** Its name as Pitwall stored it, not the requester's. */
+  appName: string;
+  keys: number;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -574,6 +586,8 @@ export interface LocalModel {
   slotsCustom: boolean;
   /** The slots it is loaded with now (null: not loaded). A different `slots` applies on the next load. */
   loadedSlots: number | null;
+  /** The context of one slot in tokens: what one request may hold (loaded, or as it will load). Null from an older server. */
+  contextPerSlot: number | null;
 }
 
 /** One row of the slots fit table: what `slots` parallel slots mean at the asked context per slot. */
@@ -760,21 +774,54 @@ export interface RequestContent {
 // ---------------------------------------------------------------------------------------------------------------
 // Playground and benchmarks
 
-export interface PlaygroundMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
+export interface PlaygroundToolCall {
+  id: string;
+  name: string;
+  /** The arguments as JSON text. */
+  arguments: string;
 }
+
+export interface PlaygroundMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string;
+  /** The tool calls of an assistant message. */
+  toolCalls?: PlaygroundToolCall[];
+  /** The call a `tool` message answers. */
+  toolCallId?: string;
+}
+
+export interface PlaygroundTool {
+  name: string;
+  description: string;
+  /** A JSON schema object for the arguments. */
+  parameters: Record<string, unknown>;
+}
+
+export type PlaygroundToolChoice = { kind: 'auto' } | { kind: 'none' } | { kind: 'required' } | { kind: 'named'; name: string };
 
 export interface PlaygroundRequest {
   modelId: string;
   messages: PlaygroundMessage[];
   temperature: number;
   maxTokens: number;
+  /** The tools the model may call; none is a plain chat. */
+  tools?: PlaygroundTool[];
+  /** Defaults to `{ kind: 'auto' }`. */
+  toolChoice?: PlaygroundToolChoice;
 }
 
+/** What happens before the first token: waiting for a slot and loading (repeated about once a second), then generating. */
+export type PlaygroundPhase = { kind: 'loading'; elapsedMs: number } | { kind: 'generating' };
+
+export type PlaygroundFinish = 'stop' | 'length' | 'toolCalls' | 'cancelled';
+
 export type PlaygroundEvent =
+  | { kind: 'phase'; phase: PlaygroundPhase }
   | { kind: 'delta'; text: string }
-  | { kind: 'done'; promptTokens: number; completionTokens: number; ttftMs: number; genTps: number; coldStartMs: number | null }
+  | { kind: 'reasoning'; text: string }
+  /** A piece of a tool call; the pieces with one `index` make one call. */
+  | { kind: 'toolCall'; index: number; id: string | null; name: string | null; arguments: string }
+  | { kind: 'done'; finish: PlaygroundFinish; promptTokens: number; completionTokens: number; ttftMs: number; genTps: number; coldStartMs: number | null }
   | { kind: 'error'; error: CommandError };
 
 export interface BenchmarkResult {
@@ -822,8 +869,6 @@ export interface ServerSettings {
 }
 
 export interface NetworkSettings {
-  /** No downloads at all. */
-  offline: boolean;
   lanEnabled: boolean;
   lanPort: number;
 }
@@ -905,18 +950,6 @@ export type CacheClearScope =
   | { kind: 'embeddings' }
   | { kind: 'app'; appId: string }
   | { kind: 'model'; modelId: string };
-
-export interface AppUpdateStatus {
-  available: boolean;
-  reason: string | null;
-  currentVersion: string;
-}
-
-/** An update found by a check (`UpdateInfo` in `app/src-tauri/src/updater.rs`). */
-export interface UpdateInfo {
-  version: string;
-  notes: string | null;
-}
 
 export type Platform = 'windows' | 'macos' | 'linux';
 
@@ -1008,7 +1041,7 @@ export interface UpdateNotice {
   targetSha256: string | null;
 }
 
-export type UpdateCheckOutcome = 'checked' | 'offline' | 'rateLimited' | 'busy' | 'nothingToCheck' | 'failed';
+export type UpdateCheckOutcome = 'checked' | 'rateLimited' | 'busy' | 'nothingToCheck' | 'failed';
 
 export interface UpdateCheckResult {
   outcome: UpdateCheckOutcome;
@@ -1025,12 +1058,123 @@ export interface UpdateCheckStatus {
   lastCheckedAt: number | null;
   lastAttemptAt: number | null;
   lastMessage: string | null;
-  /** Null when the schedule is off or offline mode is on. */
+  /** Null when the schedule is off. */
   nextCheckAt: number | null;
-  offline: boolean;
   running: boolean;
   notices: number;
   /** The only host a check talks to. */
   host: string;
   maxRepos: number;
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Jobs (ADR 0024): long operations the app runs in the background; mirrors `app/src-tauri/src/jobs.rs` (`JobEvent`).
+
+/** What a job's `done` and `total` count. */
+export type JobUnit = 'items' | 'bytes';
+
+/** One event of a job, as the app pushes it on the channel of the command that started the job. */
+export type JobEvent =
+  | { kind: 'started'; jobId: number; title: string }
+  | {
+      kind: 'progress';
+      jobId: number;
+      phase: string;
+      done: number;
+      total: number | null;
+      unit: JobUnit;
+      /** Cancel did not take effect: the UI may also offer "Stop waiting". */
+      canStopWaiting: boolean;
+      elapsedSecs: number;
+      cancellable: boolean;
+      notCancellableReason: string | null;
+    }
+  | { kind: 'done'; jobId: number; result: unknown }
+  | { kind: 'failed'; jobId: number; error: CommandError }
+  | { kind: 'cancelled'; jobId: number; stoppedWaiting: boolean };
+
+/** One tool of a connected app, as Settings lists it (`chat_host::apps::AppTool`). */
+export interface AppTool {
+  name: string;
+  /** Its name for people ("Top processes"). */
+  title: string;
+  /** It only looks: asked once, then remembered when allowed. Otherwise an action, asked every call. */
+  readOnly: boolean;
+  /** The user said Always allow for it. */
+  remembered: boolean;
+}
+
+/** What only the user can do before an app connects (`chat_host::apps::AppNeed`). */
+export type AppNeed = 'install' | 'update';
+
+/** A family app the chat can use, in Settings > Connected apps (`chat_host::apps::ConnectedApp`, ADR 0023 Decision 7). */
+export interface ConnectedApp {
+  id: string;
+  title: string;
+  keySaved: boolean;
+  connected: boolean;
+  /** Why the last connect failed, with the next step. */
+  problem: string | null;
+  /** The app refused the saved key: only a new key helps (Refresh is hidden). */
+  keyRefused: boolean;
+  /** The connection was lost; Pitwall is trying again (the chat answers without the app's tools meanwhile). */
+  reconnecting: boolean;
+  /** What only the user can do before it connects (install it, update it); null otherwise. Pitwall does not retry meanwhile. */
+  needs: AppNeed | null;
+  tools: AppTool[];
+  /** Tools always allowed. */
+  remembered: number;
+}
+
+/** Settings > Chats (`chat_host::chats::ChatStorage`, ADR 0023 Decision 3). */
+export interface ChatStorage {
+  /** New chats are saved unless the user says "Don't save this chat". */
+  saveNew: boolean;
+  /** Saved chats. */
+  chats: number;
+  /** Their files, in bytes. */
+  bytes: number;
+  /** Their attachments, in bytes. */
+  attachmentBytes: number;
+  /** Chats kept until Pitwall closes ("Don't save"). */
+  unsaved: number;
+}
+
+/** What the chat's composer may attach (`chat_host::attach::AttachRules`, ADR 0023 WP-4b); Rust checks every file again. */
+export interface ChatAttachRules {
+  /** Largest file in bytes. */
+  maxFileBytes: number;
+  /** Most attachments one question carries. */
+  maxCount: number;
+  /** The file picker's filter. */
+  accept: string;
+  /** What can be attached, in a few words. */
+  hint: string;
+}
+
+/** A file the chat took (`chat_host::attach::Attached`): the reference the question carries, its size and lines. */
+export interface ChatAttached {
+  attachment: { kind: 'file'; sha256: string; name: string };
+  bytes: number;
+  lines: number;
+}
+
+/** One model of the Chat tab's picker (`chat_host::models::ChatModel`). */
+export interface ChatModel {
+  id: string;
+  name: string;
+  loaded: boolean;
+  /** Why it can't be chosen (no tool calls); null when it can. */
+  disabled: string | null;
+}
+
+/** The Chat tab's picker: tool-capable models first, and the one the chat uses (`chat_host::models::ChatModels`). */
+export interface ChatModels {
+  models: ChatModel[];
+  selected: string | null;
+  /** For each reason a model can't be chosen ("Can't use tools", "Not downloaded"), its full note. */
+  notes: Record<string, string>;
+}
+
+/** What "Open <app>" came to (`chat_host::apps::Opened`): starting, or the words saying why not. */
+export type OpenedApp = { kind: 'started' } | { kind: 'problem'; message: string };

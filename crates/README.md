@@ -65,7 +65,11 @@ let shell = paddock_shell::Builder::new(paddock_shell::AppIdentity::new("pitwall
     .dialogs(&[&dialogs::DIALOGS])                                 // the app's dialog table (ADR 0026 §3); the shell's are built in
     .health(vec![ServiceSpec::new("llm", "the model server").repair(restart_llm)])
     .section(paddock_settings::section(models_section(), apply_models))
-    .updater(|_| UpdatesBuilder::new("Pitwall").public_key(option_env!("TAURI_UPDATER_PUBKEY")).changelog(include_str!("../../CHANGELOG.md")))
+    .updater(|app| {                                                // an updater says how it installs: .installer(..), or .no_install() for a notify-only build
+        let key = option_env!("TAURI_UPDATER_PUBKEY");
+        UpdatesBuilder::new("Pitwall").public_key(key).changelog(include_str!("../../CHANGELOG.md"))
+            .installer(Arc::new(PluginInstaller::new(app.clone(), key.unwrap_or_default())))
+    })
     .windows(|_| Windows::builder(WindowConfig::new("Pitwall")).build())
     .build();
 tauri::Builder::default()
@@ -92,7 +96,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 |---|---|---|
 | `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008); `time`: the family's clock port, fake clock, deadlines, restart back-off (plan X20) | yes (all five apps); built |
 | `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; all built (plan S1-S17), `paddock-shell` is the plugin that wires them |
-| `paddock-secrets` | credentials: `Secrets` port, `Secret` that never prints, keyring adapter, `MemorySecrets`, opt-in owner-only file fallback, naming scheme (D6), one-time rename (plan X5) | yes (Debrief, Pitwall, Pitcrew, Spotter, Sighter PoC); built |
+| `paddock-secrets` | credentials: `Secrets` port, `Secret` that never prints, keyring adapter, `MemorySecrets`, owner-only files (`FileSecrets`, `SecretFile`) and the file fallback, naming scheme (D6), one-time rename (plan X5) | yes (Debrief, Pitwall, Pitcrew, Spotter, Sighter PoC); built |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built (plan section 15, with the loopback HTTP clients of X16) |
 | `paddock-assistant` | the assistant (plan W6): `LlmProvider` port, prompted tool protocol, `AssistantTool` with budgets and an approval step for writes, the bounded cancellable tool loop on an injected clock, versioned bounded conversations, the Pitwall adapter, Tauri commands and the `paddock://assistant` event | yes (Pacenotes, Sighter; Debrief's chat moves onto it); built |
 | `paddock-guard` | crash containment (ADR 0001, plan X51): `catch`, `Quarantine` (3 failures in 10 minutes, shared `Clock`, persisted through paddock-env), `Guard::call` (time budget, hang abandoned, typed refusal) | yes (Debrief, Pacenotes, Dyno plugin hosts); built |
@@ -846,11 +850,21 @@ let header = secrets.get(&name)?.map(|s| format!("Bearer {}", s.expose()));
   what to fix and never contain a value.
 - `Secrets` (port): `get -> Result<Option<Secret>>`, `set`, `delete` (missing is not an error). `Vault` is the raw
   `(service, account)` layer under it (`OsVault`, `MemoryVault`); `VaultSecrets::new(service, vault)` adds the scheme.
-- Fallback: `WithFileFallback::new(primary, FileSecrets::new(dir))` is the opt-in (Pitwall's admin key). The file is used
-  only when the primary is *unavailable* (no Secret Service, locked keychain) or has no value; files are created 0600
-  (written to a 0600 temp file and renamed) and a file with group/other bits is refused (`InsecureFile`). On Windows no mode
-  exists: `dir` must be a per-user folder (the app's data dir under `%LOCALAPPDATA%`), whose ACL is owner, SYSTEM and
-  Administrators only.
+- Files: `FileSecrets::new(dir)` is a folder of owner-only files, one per name; `SecretFile::new(path)` is one at a path the
+  app chooses (Pitwall's `<data>/admin.key`, which its CLI and scripts read: the file holds the value only). Both share one
+  implementation. Unix: written to a unique 0600 temporary file in the same folder and renamed (a link in the target's place
+  is replaced, never followed); the folder is created 0700 and made 0700 when it is ours and group or others have any
+  access (a sticky folder is left alone; a folder of another user is refused). On read the file is opened with
+  `O_NOFOLLOW | O_NONBLOCK` and checked on the open handle: a link, a pipe or anything not a regular file, a group or other
+  bit (`InsecureFile`) or another owner is refused, with the next step and never the value. Windows: the temporary file is
+  created with a protected DACL that grants only the user running the process and with no sharing
+  (`paddock_env::write_atomic_created`); a folder where others may create or change files is refused; on read the owner
+  and DACL of the open handle are checked (owner: the user, SYSTEM or Administrators; entries for nobody else, else
+  `InsecureFile`) and a reparse point is refused. Only the immediate folder is checked, not its parents. Unix also refuses
+  a hard-linked file and a folder whose owner cannot be read. The value is plain text at rest (ADR 0057 §5): any program running as
+  the same user can read it, like `~/.netrc`; other users cannot.
+- Fallback: `WithFileFallback::new(primary, FileSecrets::new(dir))` uses the files only when the primary is *unavailable*
+  (no Secret Service, locked keychain) or has no value.
 - Old entries: `rename_entry(vault, (old_service, old_account), (new_service, new_account))` reads old, writes new, deletes
   old (idempotent, never loses the secret); Pitcrew's `Pitcrew notification channel` / `<key>` becomes `Pitcrew` /
   `channel:<key>`, its `Pitcrew Gitea API` / `<url>` becomes `Pitcrew` / `<url>:read token`, and so on.
@@ -1809,15 +1823,20 @@ let assistant = Assistant::new(provider, tools, store, clock, AssistantConfig::n
 paddock_assistant::tauri::manage(app.handle(), assistant);                  // commands: `paddock_assistant::tauri::COMMANDS`
 ```
 
-- `AssistantTool`: `spec` (name, description, JSON schema), `access` (`ReadOnly` or `Write`), `budget` (calls per turn, result size),
-  `describe` (the call as the user reads it), `call`. A `Write` tool is offered to the model only when the user ticked "Allow
-  actions" for the message and each call waits for `assistant_approve_tool` (timeout on the clock). Tools never panic the turn.
-- `run`: rounds, tool calls, tokens and wall time are budgets (`Budgets`); the last round has tools off; a call that cannot be read,
-  names an unknown tool or misses a required argument is reported to the model and never run; Stop acts within a read slice.
+- `AssistantTool`: `spec` (name, description, JSON schema), `access` (`ReadOnly`, `Write` or `Destructive`), `budget` (calls per
+  turn, result size), `describe` (the call as the user reads it), `call`. A writing tool is offered to the model only when the user
+  ticked "Allow actions" for the message. Tools never panic the turn. `Assistant::set_tools` swaps the set for the next turn.
+- `ApprovalPolicy` (ADR 0023 WP-2a): which calls wait for `assistant_approve_tool` (`allowOnce`, `alwaysAllow` when the card
+  offers it, `deny`). `DefaultPolicy` asks every call of a writing tool and nothing else; Pitwall's asks the first time per tool,
+  remembers, and asks an action every call. Every call that ran says how it was approved (`approval`).
+- `run`: rounds, tool calls and tokens are budgets (`Budgets`), wall time and the approval wait too unless set to `None`; the last
+  round has tools off; a call that cannot be read, names an unknown tool or misses a required argument is reported to the model and
+  never run; call ids are unique over the conversation; calls come from the prompted protocol or natively (`ToolCall::native`);
+  Stop acts within a read slice.
 - `ConversationStore`: `VersionedFile`; a damaged file gives defaults and one problem, a newer file is never touched; bounds on
   conversations, messages, text, data and file size.
 - Commands (`<area>_<verb>`): `assistant_send`, `assistant_stop`, `assistant_approve_tool`, `assistant_conversations`,
-  `assistant_load`, `assistant_delete`, `assistant_info`; event `paddock://assistant`; TypeScript generated by
+  `assistant_load`, `assistant_delete`, `assistant_info`, `assistant_context` (the composer's context meter); event `paddock://assistant`; TypeScript generated by
   `PADDOCK_WRITE_TS=1 cargo test -p paddock-assistant --all-features --lib generated`.
 
 ## `paddock-metrics` (plan X30)
@@ -1917,7 +1936,9 @@ log-extract logic stays in Pitcrew; only the finding and starting moves).
 `paddock-build` is a build-dependency; the build.rs of an app is one line (`paddock_build::Build::new().sidecars(["x-service"]).run()`, feature
 `tauri-build`). It embeds the one Windows application manifest (Common Controls v6) into every binary of the crate, test binaries
 included, and tells tauri-build to add none of its own; it creates an empty `binaries/<name>-<target>[.exe]` for each sidecar that is not
-built yet (a real file is never overwritten); and it reruns on `TAURI_UPDATER_PUBKEY`. The apps' `windows-app-manifest.xml` copies go.
+built yet (a real file is never overwritten) and, while any is such a placeholder, hides `bundle.externalBin` from tauri-build through
+`TAURI_CONFIG` (it would copy the empty file over the program cargo linked into `target/<profile>`) and deletes the empty copies older
+builds left (`paddock_build::sidecars`, pure and tested without Tauri); and it reruns on `TAURI_UPDATER_PUBKEY`. The apps' `windows-app-manifest.xml` copies go.
 App extras (Debrief's commit id) stay in the app's build.rs before the call. `paddock_proc::self_test::handle(name, version, &checks)` is
 the first call in a sidecar's `main`: with `--self-test` it runs the checks, prints one line each and exits 0 or 1 (rule 23; C34 checks
 that every sidecar has it, and `paddock-sidecar self-test` starts them from the built bundle).

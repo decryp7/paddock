@@ -1312,6 +1312,7 @@ dependencies = [
  "objc2-core-text",
  "objc2-foundation",
  "objc2-service-management",
+ "paddock-build",
  "paddock-commands",
  "paddock-diag",
  "paddock-dialogs",
@@ -1338,7 +1339,6 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tauri",
- "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-notification",
  "tauri-plugin-opener",
@@ -3894,6 +3894,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-build"
+version = "0.1.0"
+dependencies = [
+ "paddock-workspace-hack",
+ "serde_json",
+ "tauri-build",
+]
+
+[[package]]
 name = "paddock-channels"
 version = "0.1.0"
 dependencies = [
@@ -4192,9 +4201,12 @@ name = "paddock-secrets"
 version = "0.1.0"
 dependencies = [
  "keyring",
+ "libc",
+ "log",
  "paddock-env",
  "paddock-proc",
  "paddock-workspace-hack",
+ "windows-sys 0.61.2",
  "zeroize",
 ]
 
