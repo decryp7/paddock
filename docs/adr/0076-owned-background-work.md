@@ -1,10 +1,16 @@
 # 76. Owned background work: every thread, task and child process has an owner that ends it within a bound and says so
 
-- Status: Proposed (2026-11-09), revision 2. Revision 1 (`368696bbd`) was reviewed independently (CHANGES, five P1s and
-  six P2s); revision 2 answers all of them: the survey's classifier fixed and rerun with a hand check of every class
-  (P1-1), a non-owning handle for call contexts (P1-2), D1 re-weighed on the real dependencies (P1-3), the soundness of
-  stop, drop and the reaper specified with a model test each (P1-4), the estimate recomputed with per-release days, the
-  coupling to ADR 0072 and a D7 option (c) (P1-5). Needs the user's decisions below before any build.
+- Status: Accepted 2026-11-09 by the user: D1–D10 as recommended (D7 = c). Rule 74. History: Proposed (2026-11-09);
+  revision 1 (`368696bbd`) reviewed independently (CHANGES, five P1s, six P2s); revision 2 (`282a73305`) answered them
+  (the survey's classifier fixed and rerun with a hand check of every class, a non-owning handle for call contexts, D1
+  re-weighed on the real dependencies, the soundness of stop, drop and the reaper with a model test each, the estimate
+  recomputed with per-release days, the coupling to ADR 0072 and D7 option (c)); the re-review said ACCEPTABLE, and
+  revision 3 applies its P2s (per-binding handle tracking with shadowing, two more discards, `run_bounded`'s drain and
+  waiter threads kept in the ratchet with their ending test, children ended inline when the reaper cannot start, the
+  self-join example, `Subscriptions` and the Debrief waiver's `ctx.peer()` uses, the latch wording).
+- Rule: **rule 74**, assigned on acceptance (2026-11-09). `docs/rules.md` on `origin/main` ends at rule 71; the open
+  rule branches use 56–59, 65 and 66; family ADR 0057's branch claims 72 and ADR 0073 took 73 (`a467cdd2e`); ADRs 0071,
+  0072, 0074 and 0075, accepted the same day, assign none. WP-10 adds the text (D9) to `docs/rules.md`.
 - Date: 2026-11-09
 - Related: ER-21 / rule 40 (recurring bugs mean a missing design rule), ER-22 / rules 42, 43 and 55 (share first, shared
   behaviour tested once, one implementation per mechanism), ER-14 / rule 7 (no processes left behind), ER-12 / rule 5 (no
@@ -57,7 +63,7 @@ task, child process or descriptor of it left.
 | 2 | Debrief `debrief-store-duck` tests | "Directory not empty" from `remove_dir_all` at `tests/it/segments.rs:240` (the moved store) and `tests/it/search.rs:220` (`index` right after `drop(store)`), once each under a full nextest run; 30 of 30 green alone (lessons on `origin/fix/debrief-lint-1-temp-client`, `docs/lessons.md:1503`) | **Not measured.** Lesson's probable cause: the store's index threads still write after `drop`. Candidates found for this ADR by reading (ER-28 list in "The failing tests the fixes start with"): (a) the FTS service joins its own thread on drop (`src/fts.rs:685-693`) but its loop leaves on `stop` without `drop_writer` when a turn just worked or segments are pending (`fts.rs:820-834`), and the error path drops the writer with `*s.writer = None` (`fts.rs:828`); the Tantivy `IndexWriter` is then dropped with the shared state, and Tantivy 0.27's `Drop for IndexWriter` only kills the segment updater and joins the indexing workers (`index_writer.rs:821-828`), while merges already scheduled on its `merge_thread_{i}` pool (`segment_updater.rs:312-313`, `:541`) keep writing into `index/` until done; only `wait_merging_threads` waits for them (`index_writer.rs:355-376`). (b) the SQL console's timer thread is bound, inspected for `Err` and dropped, never joined (`src/console/mod.rs:215-222`). | Open; WP-7 starts with the failing test in "The failing tests the fixes start with". |
 | 3 | Test children | A test that fails before it kills its children leaves them running: `paddock-proc` `sys.rs:607-613` starts three `sleep 60` as plain `std::process::Child` in a `Vec` (no guard), Dyno `app/src-tauri/src/quit.rs:831-836` one `sleep 60` (or `ping -n 60`); `std::process::Child` has no `Drop` and is not waited for ([std docs](https://doc.rust-lang.org/std/process/struct.Child.html), read 2026-11-09). The interim VM lock's holder (`scripts/vm-lock.sh` on `origin/fix/vm-smoke-take-vm-lock`) is a detached process that lives as long as an owner folder, which a killed script leaves until the next acquirer removes it. | No owner kills them on a failed assert; the holder's life is tied to a folder, not to a process identity. | The VM holder is replaced by ADR 0074's lease (`--owner-pid`, by identity); the test children are covered by §5. |
 | 4 | Agents | 2026-11-01: a flake researcher's 20 unbounded `sh -c 'while :; do :; done'` burners drove the Mac's load to 130 while the macOS runner ran Dyno's release tests, which timed out (coordinator memory `agent-concurrency.md`, entry "2026-11-01 incident"; outside the repository). 2026-11-09: an agent started one busy process per vCPU in the Windows test VM over SSH; sshd stopped answering and the clean-up in the same session never ran (lessons on `origin/train/2026-11-08-1`, `docs/lessons.md:1543-1549`). | The load had no owner, no deadline of its own and no recorded identity. | §7. |
-| 5 | Debrief start-up sweeps and other detached threads | `apps/debrief/app/src-tauri/src/lib.rs:649` (old logs pruned) and `:687` (scratch stores swept and removed) run in `std::thread::spawn` whose handles are dropped; Quit cuts them wherever they are. 193 fire-and-forget starts in shipped code (survey). | No owner; at best idempotent by luck. | At risk, not seen failing. |
+| 5 | Debrief start-up sweeps and other detached threads | `apps/debrief/app/src-tauri/src/lib.rs:649` (old logs pruned) and `:687` (scratch stores swept and removed) run in `std::thread::spawn` whose handles are dropped; Quit cuts them wherever they are. 200 fire-and-forget starts in shipped code (survey). | No owner; at best idempotent by luck. | At risk, not seen failing. |
 
 Earlier instances of the same class: lessons on `origin/main` line 485 (a CI container whose PID 1 is `sleep` never reaps
 orphans), line 646 (`cmd /c` and login-shell children outliving `taskkill /T`), line 1027 (an orphaned agent after Quit),
@@ -79,9 +85,9 @@ The handle's fate is an enum, not a string, in revision 2:
 
 | Disposition | Meaning | Class |
 | --- | --- | --- |
-| `Discarded` | `spawn(..);`, `let _ = ..`, `.map(drop)`, `if let Err(e) = spawn(..)` | fire-and-forget |
+| `Discarded` | `spawn(..);`, `let _ = ..`, `.map(drop)`, `.map(|_| ())`, `.ok().map(|h| h.thread().id())` (the handle only looked at), `if let Err(e) = spawn(..)` | fire-and-forget |
 | `HeldUnused` | `let _x = spawn(..)`, `_x` never used | fire-and-forget |
-| `BoundNotJoined` | bound to a name that is only inspected (`if let Err(e) = x`) or `drop(x)`ped, never joined or stored | fire-and-forget |
+| `BoundNotJoined` | bound to a name that is only inspected (`if let Err(e) = x`) or `drop(x)`ped, never joined or stored, in the statements after the binding up to a `let` that shadows it | fire-and-forget |
 | `JoinedAtOnce` | `.join()`, `.await`, `.wait()` on the spawn itself | owned and joined |
 | `BoundJoined` | bound (also through `if let Ok(h) = x` or `match x { Ok(h) => .. }`) and joined, awaited, waited for or terminated in the function | owned and joined |
 | `BoundStored`, `Returned`, `InExpr` | stored in a field or list, returned, or passed on | "join in the file" if the file joins or waits anywhere (to read), else owned but detached |
@@ -98,6 +104,16 @@ Dyno `quit.rs:321`, `debrief-store-duck/src/console/mod.rs:215`, `paddock-mcp/sr
 (fire-and-forget, the first four; stored in a list, the last two, to read), `paddock-health/src/notify/writer.rs:56` and
 `paddock-service/src/control.rs:260` (`.map(drop)`: fire-and-forget), `paddock-ipc/src/peer.rs:257` (fire-and-forget).
 
+**Revision 3 (the re-review's P2).** A binding is followed only through the statements after it in its block, up to a
+`let` that shadows the name (whose own initializer still sees the old binding, `let c = c.join()`), instead of the whole
+function body; `.map(|_| ())` and `.ok().map(..)` that only look at the handle are discards. The fixture gained the
+shadowed cases (a joined name shadowed by a dropped one and the reverse, a handle joined by its own shadowing `let`) and
+both new discards: 24 cases, all as expected. Eight shipped sites changed class, all read and correct:
+`paddock-guard/src/guard.rs:215`, `paddock-download/src/engine.rs:879`, `paddock-panels/src/tauri/native.rs:108`,
+Dyno `dyno-agent/src/disk/engine.rs:102`, Debrief `debrief-core/src/plugin/watchdog.rs:51` and
+`app/src-tauri/src/health/hub.rs:363`, Pitcrew `app/src-tauri/src/handoff.rs:185` (to fire-and-forget: `.map(|_| ())` or
+`.ok().map(|_| dog)`), and one test-support site.
+
 **Hand check of every class (revision 2).** 24 sites, 6 per class drawn at random (seed 763) from the final output, read:
 all 24 are in the right class; one has the wrong kind (`pitwall-server/src/engines.rs:650` is a child process started by
 Pitwall's own command helper, counted as a wrapper call). An earlier draw of 32 (seeds 761 and 762) found the three
@@ -105,7 +121,7 @@ misreadings that the `if let Err`, `if let Ok` and `drop(x)` rules now fix (`dyn
 `debrief/app/.../settings.rs:571`, `pitcrew-service/src/launch.rs:52`).
 
 **Remaining limits** (WP-2 removes them): "join in the file" means a join, wait or kill exists somewhere in the file, not
-that it is this handle's (67 sites to read); a call of a project's own wrapper named `spawn` (`self.spawn(..)`,
+that it is this handle's (66 sites to read); a call of a project's own wrapper named `spawn` (`self.spawn(..)`,
 `captures.spawn(..)`) is a site of unknown kind (10); one wrapper may start several threads per call (`peer.rs:254`, three
 per connection); inline `#[cfg(test)]` modules are not counted.
 
@@ -116,29 +132,29 @@ reclassified.)
 
 | Shipped, by kind | Owned and joined | Owned, a join in the file (to read) | Owned but detached | Fire-and-forget | Total |
 | --- | --- | --- | --- | --- | --- |
-| Threads (`thread::spawn`, `Builder::spawn`) | 8 | 60 | 13 | 141 | 222 |
+| Threads (`thread::spawn`, `Builder::spawn`) | 8 | 59 | 8 | 147 | 222 |
 | Scoped threads (`thread::scope`) | 30 | – | – | – | 30 |
 | Blocking tasks (`spawn_blocking`) | 81 (awaited) | – | – | 6 | 87 |
 | Async tasks (tokio, Tauri `async_runtime`) | – | – | 3 | 33 | 36 |
-| Child processes: `.spawn()` | 19 | 7 | 1 | 7 | 34 |
+| Child processes: `.spawn()` | 19 | 7 | – | 8 | 34 |
 | Child processes: `Supervised`, `run_bounded`, `.output()`/`.status()` | 23 | – | – | – | 23 |
 | Calls of a project wrapper named `spawn` | 1 | – | 3 | 6 | 10 |
-| **Total** | **162** | **67** | **20** | **193** | **442** |
+| **Total** | **162** | **66** | **14** | **200** | **442** |
 
 | Shipped, by owner | Owned and joined | A join in the file | Owned but detached | Fire-and-forget | Total | To migrate or register (detached + fire-and-forget) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Shared crates (`crates/`) | 50 | 16 | 8 | 35 | 109 | 43 |
-| Dyno | 19 | 23 | 2 | 49 | 93 | 51 |
+| Shared crates (`crates/`) | 50 | 16 | 5 | 38 | 109 | 43 |
+| Dyno | 19 | 22 | 2 | 50 | 93 | 52 |
 | Pitwall | 15 | 2 | 3 | 23 | 43 | 26 |
-| Debrief | 65 | 23 | 6 | 59 | 153 | 65 |
-| Pitcrew | 4 | 3 | 1 | 17 | 25 | 18 |
+| Debrief | 65 | 23 | 4 | 61 | 153 | 65 |
+| Pitcrew | 4 | 3 | – | 18 | 25 | 18 |
 | Spotter | 8 | – | – | 10 | 18 | 10 |
 | workbench-demo | 1 | – | – | – | 1 | – |
-| **Total** | **162** | **67** | **20** | **193** | **442** | **213** |
+| **Total** | **162** | **66** | **14** | **200** | **442** | **214** |
 
 Notes on the classes:
 - **Only 8 plain threads are joined where they are started.** Most threads that are joined at all are joined from a
-  `Drop` or a stop method elsewhere in the file (the 60 to read).
+  `Drop` or a stop method elsewhere in the file (the 59 to read).
 - **"Owned and joined" is not yet "ended within a bound".** 81 of the 162 are `spawn_blocking(..).await`: if the awaiting
   future is dropped (a cancelled command), the blocking work runs on ([tokio `JoinHandle`](https://docs.rs/tokio/latest/tokio/task/struct.JoinHandle.html):
   "tasks spawned using `spawn_blocking` cannot be aborted"; read 2026-11-09). Most joins have no bound.
@@ -157,8 +173,15 @@ Notes on the classes:
   Pitwall 7. The syn count of threads only (222) is lower, because it skips inline test modules; it is higher for
   Pitwall because it also counts tokio tasks.
 
-The full list of the 213 fire-and-forget and owned-but-detached shipped sites is appendix A; the 67 "join in the file"
+The full list of the 214 fire-and-forget and owned-but-detached shipped sites is appendix A; the 66 "join in the file"
 sites are appendix B and are read in WP-0.
+
+**Known entries that stay in the ratchet for now.** `paddock-proc`'s `run_bounded` starts a drain thread per pipe
+(`src/run.rs:176`) and a waiter thread (`:245`) and drops their handles: when a grandchild inherited the pipe, the drain
+thread blocks until that grandchild exits, after `run_bounded` returned. They stay ratchet entries (they hold a pipe:
+tag-blocking under D7 (c)) until WP-5 makes them members of a group that `run_bounded` ends with the tree; the ending
+test starts a child that leaves a grandchild holding stdout, asserts that `run_bounded` returns at its limit, and that the
+guard finds neither the grandchild nor the drain thread afterwards.
 
 ## Decision
 
@@ -238,8 +261,10 @@ Each rule has a model test in `paddock-jobs` on a `FakeClock` (WP-1), named in b
 
 1. **A completion latch per member, then a join.** `std::thread::JoinHandle` has no timed join. Each member's body runs
    inside a guard whose `Drop` (so also on a panic) sets the member's latch (a mutex and a condvar, or a closed channel)
-   as the very last thing the thread does. `stop` waits on the latches with the clock's deadline; it calls `join` only on
-   a member whose latch is set, which then returns at once. A member whose latch is not set at the bound is `Overran` and
+   as the last thing the member's code does. `stop` waits on the latches with the clock's deadline; it calls `join` only
+   on a member whose latch is set, which then returns nearly at once (the thread still runs its thread-local destructors
+   after the latch; the join waits for those, and a thread-local destructor that blocks is a bug the model test's
+   blocking-destructor case shows as an overrun of the join, logged with the role). A member whose latch is not set at the bound is `Overran` and
    its `JoinHandle` goes to the reaper. [`stop_never_waits_past_its_bound`, `a_panicking_member_is_reported_and_joined`]
 2. **One reaper thread, many deadlines.** The reaper keeps one queue of handed-off groups ordered by deadline and waits on
    one condvar until the earliest deadline or a new hand-off (a fresh wake token per wait, as ADR 0020's scheduler). At a
@@ -250,16 +275,19 @@ Each rule has a model test in `paddock-jobs` on a `FakeClock` (WP-1), named in b
 4. **Children and hooks are ended on the reaper, not in `Drop`.** `Supervised::drop` ends the tree and waits for it
    (`supervised.rs:486`), which can block. In `TaskGroup::drop` the children and the `on_stop` hooks are moved to the
    reaper, which runs the hooks, terminates each child with its grace and records the outcome. In an explicit `stop`
-   (the caller accepted a wait) they run inline, within the bound. Hooks must not block (closing a socket, setting a flag,
+   (the caller accepted a wait) they run inline, within the bound. If the reaper cannot be started (item 5), a dropped
+   group's children are ended inline instead (`Supervised::drop`, which may block for its grace): a blocked drop is the
+   lesser harm than a leaked process tree. Hooks must not block (closing a socket, setting a flag,
    `InterruptHandle::interrupt`); the reaper measures each hook and logs any that takes over 10 ms on its clock, naming the
    owner and role. [`drop_returns_while_a_child_is_still_ending`, `a_slow_hook_is_named_in_the_log`]
 5. **The reaper may fail to start.** It starts at the first hand-off (a library may never need one) or, in an app, at
    composition (ADR 0037), so a failure shows at start. If the thread cannot be spawned (EMFILE, a thread limit), the
-   hand-off logs one `error` line naming the owner and the OS error, counts the group as leaked, and returns; nothing
-   panics and nothing blocks; the next hand-off tries again. [`a_reaper_that_cannot_start_logs_and_leaks_without_panicking`,
+   hand-off logs one `error` line naming the owner and the OS error, ends the group's children inline (item 4), counts its
+   threads as leaked, and returns; nothing panics; the next hand-off tries again. [`a_reaper_that_cannot_start_logs_and_leaks_without_panicking`,
    with an injected spawn failure]
-6. **No self-join.** A member that stops or drops its own group (the reader thread dropping the last `PeerHandle`, a
-   member calling `stop` on an error path) is recognised by its thread id: `stop` does not wait for the calling member
+6. **No self-join.** A member that stops or drops its own group (a `LinkServer`'s accept loop that stops the server
+   when its listener fails; a callback run on a member thread that drops the owner, such as a push callback that drops
+   the app's last handle to its own link) is recognised by its thread id: `stop` does not wait for the calling member
    (it is reported `Ended` when it returns) and hands the others to the reaper if the caller cannot wait; `Drop` from a
    member is a plain hand-off. The reaper itself is never a member of a group it reaps. [`a_member_dropping_its_own_group_does_not_deadlock`]
 7. **`settle` never runs on the Tauri main thread.** Blocking the main thread freezes the windows and can stall webview
@@ -413,7 +441,7 @@ ends with it). A kind is added only by amending this table.
 | M2 | `paddock-ipc`: `Peer`/`BodyPeer` user-handle split, `PeerRef` for call contexts, threads in a group, `wait_released` on the group, `LinkServer` and launch; `paddock-mcp` loopback. **Lands inside ADR 0072's merges** (below) | `dyno-v*` |
 | M3 | **Dyno** (next release after 1.1.0): app, agent, helper, platform, plugin host; the shared crates Dyno ships (`paddock-proc` runners, `paddock-service`, `paddock-window`, `paddock-startup`, `paddock-health`, `paddock-shell`, `paddock-updater`, `paddock-watch`, `paddock-files`, `paddock-dialogs`, `paddock-chromium`) | `dyno-v*` |
 | M4 | **Pitwall 1.1**: `pitwall-server` tokio tasks into groups (`task`, `stop_async`), the app's tray and menu tasks, `pitwall-loopback`; shared crates it ships that M3 did not cover | `pitwall-v1.1*` |
-| M5 | **Debrief 1.2**: store-duck (incident 2, failing test first), app start-up sweeps into an app-lifetime group stopped at Quit, plugin crates, `debrief-ai`, `chromium-driver`; `debrief-ipc` is a registered copy (rule 55) waived until it is replaced by `paddock-ipc` in 1.2 PH1-PH4 | `debrief-v1.2*` |
+| M5 | **Debrief 1.2**: store-duck (incident 2, failing test first), app start-up sweeps into an app-lifetime group stopped at Quit, plugin crates, `debrief-ai`, `chromium-driver`; `debrief-ipc` is a registered copy (rule 55) waived until it is replaced by `paddock-ipc` in 1.2 PH1-PH4. The waiver names the owning `ctx.peer()` uses of that copy in `debrief-plugin-api/src/serve.rs` (lines 118, 155, 156, 179, 193, 252, 264, 282, 304, 319: `HostFile`, `RemoteView` and tool contexts), which become `PeerRef`s with the move to `paddock-ipc` | `debrief-v1.2*` |
 | M6 | Pitcrew 1.1 and Spotter (after its 1.0 tag): the remaining sites | `pitcrew-v1.1*`, `spotter-v1.1*` |
 | M7 | C42 to error mode for every app whose ratchet is empty; rule text, lessons, ADR index | – |
 
@@ -449,21 +477,21 @@ Each merge removes its sites from the ratchet. **Rollback:** each merge reverts 
 
 | WP | Content | Sites | Days |
 | --- | --- | --- | --- |
-| WP-0 (M0) | Read the 67 "join in the file" sites and the 10 wrapper calls; fill what each ratchet entry holds; write the register and the ratchet with `blocks_tag`; nextest `leak-timeout` in seven configs and fix or ratchet what it turns red | 77 to read | 2 |
+| WP-0 (M0) | Read the 66 "join in the file" sites and the 10 wrapper calls; fill what each ratchet entry holds; write the register and the ratchet with `blocks_tag`; nextest `leak-timeout` in seven configs and fix or ratchet what it turns red | 76 to read | 2 |
 | WP-1 (M1) | `paddock_jobs::tasks`: `TaskGroup` with latches, `stop`/`stop_async`, the reaper (one queue, one condvar, hooks and children on the reaper, start failure, self-join), `Detached` with caps, features `proc` and `tokio`, log lines; the model tests of §2a on a `FakeClock`; crate coverage gate | – | 3.5 |
 | WP-2 (M0/M1) | C42 in `paddock-dev`: the syn pass from the prototype (import resolution, macro arguments, per-handle tracking instead of the file heuristic), the register and ratchet comparison, the fixture positive control; the clippy lines in the preset and the seven workspace `clippy.toml` files, and their fixture (D3) | – | 2 |
 | WP-3 (M1) | `paddock-testkit::leaks::Guard` on Linux, macOS and Windows (probe choice measured), the nextest-only guard, settle, the `Broken` controls, the per-test allowance for runtime threads | – | 2 |
-| WP-4 (M2) | `paddock-ipc` and `paddock-mcp` owners: user-handle split, `PeerRef` for `CallCtx` and its adopters (`paddock-plugin-api` `serve.rs`), groups, `wait_released`; their ending tests, the kept-context test; inside ADR 0072's merges | ~15 | 1.5 |
-| WP-5 (M3) | Dyno and the shared crates it ships: 51 Dyno sites and about 35 shared sites to migrate or register, 23 and about 13 to finish from WP-0's reading; ending tests per owner type; Dyno installers built (rule 54) | ~86 | 3.5 |
+| WP-4 (M2) | `paddock-ipc` and `paddock-mcp` owners: user-handle split, `PeerRef` for `CallCtx` and its adopters (`paddock-plugin-api` `serve.rs`; `paddock-ipc` `link/server.rs:263` `Subscriptions`, which today keeps the subscribing `Peer` from `ctx.peer()` and becomes a table of `PeerRef`s that forgets a released one), groups, `wait_released`; their ending tests, the kept-context test; inside ADR 0072's merges | ~15 | 1.5 |
+| WP-5 (M3) | Dyno and the shared crates it ships: 52 Dyno sites and about 35 shared sites to migrate or register, 22 and about 13 to finish from WP-0's reading; ending tests per owner type; Dyno installers built (rule 54) | ~87 | 3.5 |
 | WP-6 (M4) | Pitwall 1.1: 26 sites (mostly tokio tasks, `stop_async`); ending tests | 26 | 1 |
 | WP-7 (M5) | Debrief 1.2: 65 sites plus 23 to finish; incident 2 with its failing test first; start-up sweeps; plugin crates | 65 | 3 |
 | WP-8 (M6) | Pitcrew 1.1 (18 sites, 0.6 days) and Spotter 1.1 (10 sites, 0.4 days); ending tests | 28 | 1 |
 | WP-9 | Agents: `./dev burn` with deadlines and parent-death per OS, `./dev leftovers`, the hook with its test, the checklist line | – | 1.25 |
-| WP-10 (M7) | Proposed rule text and ER candidate, lessons entry, ADR index, CHANGELOGs, ADR 0020/0024/0072 amendment notes | – | 0.5 |
-| | **Total** | **213 + 77 to read** | **21.25** |
+| WP-10 (M7) | Rule 74's text in `docs/rules.md` and the ER candidate, lessons entry, ADR index, CHANGELOGs, ADR 0020/0024/0072 amendment notes | – | 0.5 |
+| | **Total** | **214 + 76 to read** | **21.25** |
 
 **Range 19 to 24 days.** Revision 1 said 17.5 for 158 sites; revision 2's survey has 213 sites to migrate or register
-(55 more, the sites the classifier bug had counted as joined) and the soundness work of §2a. The low end (19.25) holds if
+(revision 3: 214; 55 more than revision 1, the sites the classifier bug had counted as joined) and the soundness work of §2a. The low end (19.25) holds if
 D3 takes clippy alone (WP-2 to 1 day) and D8 keeps agents to the checklist (WP-9 to 0.25); the high end if the Windows
 leak probes need more than one iteration or Pitwall's runtime shutdown needs its own design.
 
@@ -499,7 +527,7 @@ WP-5 to WP-8 follow the release order, one app at a time.
 | D6 | ADR 0072 amendment | Add `OwnerReason::Dropped` to 0072's closing vocabulary, so a peer whose last handle was dropped ends with a reason (`stopping`-class code on the wire, `Dropped` in the log) instead of a bare end. No frame change. | Yes. |
 | D7 | Release gating | (a) Every ratchet entry blocks its app's next listed tag: Dyno's next, Pitwall 1.1, Debrief 1.2, Pitcrew 1.1; Spotter 1.0 is not blocked (it is in flight; its entries block `spotter-v1.1*`). Strictest; adds the full per-release days above. (b) Report only, no tag blocks: fastest, and the class stays open, as it is today. (c) Now: the push check fails every **new** raw spawn from M0 on, so the class cannot grow. Tags are blocked only by entries that hold a descriptor, folder, connection or child (the incident class: EMFILE, "Directory not empty", orphaned children; WP-0 marks each entry); entries that hold nothing (a short thread that logs, a tray menu call) block the same app's following release instead. Faster for each next release by the share of entries that hold nothing (known after WP-0), at the cost of those threads still being cut at Quit for one more release. | (c), since you want speed: it closes the harmful part in each next release, stops new instances at once, and keeps every remaining entry on a dated path to zero. (a) if you prefer one release per app with the whole class gone. |
 | D8 | Agents | (a) `./dev burn` (own deadline, parent-death), `./dev leftovers` and the hook (WP-9). (b) The checklist line only. | (a): two incidents left nothing to clean up with; a hook is what held for `pgrep` waits (ER-32), and `leftovers` covers what the hook misses. |
-| D9 | A binding rule | Propose a Paddock rule (number from the coordinator) and an ER candidate: "every thread, task and child process has one owner that holds its handle; stop signals and waits within a bound and reports; drop hands off to the reaper without blocking; work inside an owner gets only a non-owning handle to it; detached work only through a registered kind with a cap; every owner type has an ending test that finds nothing left". | Yes, with C42 and the leak guard as its checks. |
+| D9 | A binding rule | Rule 74 (assigned on acceptance) and an ER candidate: "every thread, task and child process has one owner that holds its handle; stop signals and waits within a bound and reports; drop hands off to the reaper without blocking; work inside an owner gets only a non-owning handle to it; detached work only through a registered kind with a cap; every owner type has an ending test that finds nothing left". | Yes, with C42 and the leak guard as its checks. |
 | D10 | Scope now | (a) The whole migration, each part in its app's release (21.25 days). (b) The first cut now (15 days; 12.5 to 15 under D7 (c)), the rest in each app's phase. | (b), with D7 (c). |
 
 ## Consequences
@@ -551,7 +579,7 @@ WP-5 to WP-8 follow the release order, one app at a time.
 
 ## Appendix A: shipped sites classified fire-and-forget (F) or owned but detached (D)
 
-Line numbers at `origin/main` `b51c72509` (revision 2's classifier); kind `Thread`, `Task` (tokio or Tauri async),
+Line numbers at `origin/main` `b51c72509` (revision 3's classifier); kind `Thread`, `Task` (tokio or Tauri async),
 `Blocking` (`spawn_blocking`), `Process`, `wrapper` (a call of a project function named `spawn`). WP-0 confirms each row.
 
 | File | Sites (line, class/kind) |
@@ -563,7 +591,7 @@ Line numbers at `origin/main` `b51c72509` (revision 2's classifier); kind `Threa
 | `apps/debrief/app/src-tauri/src/browser/sessions.rs` | 701 F/Thread |
 | `apps/debrief/app/src-tauri/src/drag_ghost/mod.rs` | 401 F/Thread |
 | `apps/debrief/app/src-tauri/src/health/commands.rs` | 235 F/Thread |
-| `apps/debrief/app/src-tauri/src/health/hub.rs` | 363 D/Thread |
+| `apps/debrief/app/src-tauri/src/health/hub.rs` | 363 F/Thread |
 | `apps/debrief/app/src-tauri/src/jobs/service.rs` | 509 F/wrapper, 538 F/Thread, 593 F/Thread |
 | `apps/debrief/app/src-tauri/src/lib.rs` | 649 F/Thread, 687 F/Thread |
 | `apps/debrief/app/src-tauri/src/lifecycle.rs` | 523 F/Thread, 600 F/Thread, 727 F/Process |
@@ -588,7 +616,7 @@ Line numbers at `origin/main` `b51c72509` (revision 2's classifier); kind `Threa
 | `apps/debrief/crates/debrief-collect/src/runner.rs` | 62 F/Thread |
 | `apps/debrief/crates/debrief-core/src/events.rs` | 209 F/Thread |
 | `apps/debrief/crates/debrief-core/src/guard.rs` | 496 F/Thread |
-| `apps/debrief/crates/debrief-core/src/plugin/watchdog.rs` | 51 D/Thread |
+| `apps/debrief/crates/debrief-core/src/plugin/watchdog.rs` | 51 F/Thread |
 | `apps/debrief/crates/debrief-core/src/workspace/tail/watch.rs` | 349 F/Thread |
 | `apps/debrief/crates/debrief-ipc/src/child.rs` | 75 F/Thread |
 | `apps/debrief/crates/debrief-ipc/src/peer.rs` | 185 F/Task, 186 F/Task, 413 F/Blocking |
@@ -618,6 +646,7 @@ Line numbers at `origin/main` `b51c72509` (revision 2's classifier); kind `Threa
 | `apps/dyno/crates/dyno-agent/src/cli.rs` | 64 F/Thread |
 | `apps/dyno/crates/dyno-agent/src/counters.rs` | 219 F/Thread, 395 F/Thread |
 | `apps/dyno/crates/dyno-agent/src/disk/centre.rs` | 603 F/Thread, 705 F/Thread |
+| `apps/dyno/crates/dyno-agent/src/disk/engine.rs` | 102 F/Thread |
 | `apps/dyno/crates/dyno-agent/src/disk/volumes.rs` | 53 F/Thread, 94 F/Thread |
 | `apps/dyno/crates/dyno-agent/src/extras/finder.rs` | 122 D/Thread |
 | `apps/dyno/crates/dyno-agent/src/extras/mod.rs` | 462 F/Thread |
@@ -637,7 +666,7 @@ Line numbers at `origin/main` `b51c72509` (revision 2's classifier); kind `Threa
 | `apps/dyno/crates/dyno-platform/src/windows/wake_timer.rs` | 76 F/Thread |
 | `apps/pitcrew/app/src-tauri/src/channels.rs` | 134 F/Thread |
 | `apps/pitcrew/app/src-tauri/src/events.rs` | 113 F/Thread, 173 F/Thread |
-| `apps/pitcrew/app/src-tauri/src/handoff.rs` | 185 D/Process |
+| `apps/pitcrew/app/src-tauri/src/handoff.rs` | 185 F/Process |
 | `apps/pitcrew/app/src-tauri/src/lib.rs` | 109 F/Thread |
 | `apps/pitcrew/app/src-tauri/src/service_client.rs` | 114 F/Thread |
 | `apps/pitcrew/app/src-tauri/src/service_install.rs` | 366 F/Thread |
@@ -676,9 +705,9 @@ Line numbers at `origin/main` `b51c72509` (revision 2's classifier); kind `Threa
 | `crates/paddock-diag/src/tauri.rs` | 384 F/Blocking |
 | `crates/paddock-dialogs/src/probe.rs` | 474 F/Thread, 483 F/Thread |
 | `crates/paddock-dialogs/src/registry.rs` | 44 F/Thread |
-| `crates/paddock-download/src/engine.rs` | 879 D/Thread |
+| `crates/paddock-download/src/engine.rs` | 879 F/Thread |
 | `crates/paddock-files/src/open.rs` | 309 F/wrapper |
-| `crates/paddock-guard/src/guard.rs` | 215 D/Thread |
+| `crates/paddock-guard/src/guard.rs` | 215 F/Thread |
 | `crates/paddock-health/src/health.rs` | 130 F/Thread |
 | `crates/paddock-health/src/notify/writer.rs` | 56 F/Thread |
 | `crates/paddock-health/src/tauri/native.rs` | 137 F/Process |
@@ -690,7 +719,7 @@ Line numbers at `origin/main` `b51c72509` (revision 2's classifier); kind `Threa
 | `crates/paddock-log/src/child.rs` | 74 D/Thread |
 | `crates/paddock-mcp/src/bridge.rs` | 157 F/Thread |
 | `crates/paddock-mcp/src/server.rs` | 619 F/Thread |
-| `crates/paddock-panels/src/tauri/native.rs` | 108 D/Thread |
+| `crates/paddock-panels/src/tauri/native.rs` | 108 F/Thread |
 | `crates/paddock-pitwall/src/service.rs` | 561 F/Thread |
 | `crates/paddock-proc/src/run.rs` | 176 F/Thread, 245 F/Thread |
 | `crates/paddock-service/src/backend/windows.rs` | 158 F/wrapper |
@@ -737,7 +766,6 @@ Stored, returned or passed on; the file joins, waits for or ends something, mayb
 | `apps/dyno/app/src-tauri/src/supervise/mod.rs` | 188, 214 |
 | `apps/dyno/crates/dyno-agent/src/cache/mod.rs` | 236 |
 | `apps/dyno/crates/dyno-agent/src/counters.rs` | 259 |
-| `apps/dyno/crates/dyno-agent/src/disk/engine.rs` | 102 |
 | `apps/dyno/crates/dyno-agent/src/extras/mod.rs` | 224 |
 | `apps/dyno/crates/dyno-agent/src/lib.rs` | 246, 268, 278, 292, 316, 326, 336, 346, 356, 366, 373, 383, 397, 410 |
 | `apps/dyno/crates/dyno-platform/src/process.rs` | 41, 189 |
