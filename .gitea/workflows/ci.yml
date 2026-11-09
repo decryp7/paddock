@@ -38,6 +38,9 @@ on:
         description: "Only this app's legs, every half, whatever changed: the gates of an app's own tag (<app>-release.yml)"
         type: string
         default: ""
+    secrets:
+      BUILD_INPUTS_TOKEN:
+        required: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
@@ -83,10 +86,12 @@ jobs:
         id: plan
         env:
           PLAN_TOKEN: ${{ github.token }}
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+          PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
           PLAN_BASE: ${{ github.event.inputs.base }}
           PLAN_APP: ${{ inputs.app }}
           PLAN_WEBKIT: ${{ (inputs.webkit == true || inputs.webkit == 'true') && '1' || '' }}
-        run: node scripts/affected.mjs --ci
+        run: ./dev plan --ci
 
   # C102 (ADR 0072): every listen site of the Rust sources is in docs/ipc-endpoints.toml with an ending test or a reason, and the
   # ratchet of connection endings is well formed. Always runs (./dev builds paddock-dev from source here, about a minute; the scan itself takes about 3 s): a listener added anywhere must not
@@ -201,6 +206,11 @@ jobs:
     needs: [plan]
     if: ${{ needs.plan.outputs.ui == 'true' && (inputs.webkit == true || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))) }}
     runs-on: macos-latest
+    env:
+      # A run for a tag builds the tool from source (ADR 0022: release and tag jobs bypass every cache); other runs may download it.
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+      # Read credential for ./dev's prebuilt download (ADR 0022 R0b).
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
     defaults:
       run:
         working-directory: ui
@@ -658,6 +668,10 @@ jobs:
         working-directory: crates
         shell: bash
     env:
+      # A run for a tag builds the tool from source (ADR 0022: release and tag jobs bypass every cache); other runs may download it.
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+      # Read credential for ./dev's prebuilt download (ADR 0022 R0b), only in the jobs that run ./dev (job-isolation).
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       CARGO_TERM_COLOR: always
       # Root in the Linux container: Chromium needs the opt-in to start without its sandbox (ignored when not root).
       PADDOCK_BROWSER_NO_SANDBOX: "1"
@@ -836,9 +850,11 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
           PLAN_BASE: ${{ needs.plan.outputs.base }}
           INPUT_APP: ${{ inputs.app }}
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+          PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
         run: |
-          range="$(node scripts/affected.mjs --commit-range)"
-          flags="$(node scripts/affected.mjs --commit-flags)"
+          range="$(./dev plan --commit-range)"
+          flags="$(./dev plan --commit-flags)"
           echo "commit-lint range: $flags $range"
           if [ "$range" = "skip" ]; then exit 0; fi
           # shellcheck disable=SC2086 # the flags are zero or one fixed option
@@ -864,6 +880,10 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.apps) }}
     env:
+      # A run for a tag builds the tool from source (ADR 0022: release and tag jobs bypass every cache); other runs may download it.
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+      # Read credential for ./dev's prebuilt download (ADR 0022 R0b), only in the jobs that run ./dev (job-isolation).
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       CARGO_TERM_COLOR: always
     steps:
       # Linux: the whole tree in the container. Hosts: only the bootstrap folders (the actions, their scripts, paddock-dev's inputs)
@@ -1030,6 +1050,10 @@ jobs:
         working-directory: tools/paddock-dev
         shell: bash
     env:
+      # A run for a tag builds the tool from source (ADR 0022: release and tag jobs bypass every cache); other runs may download it.
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+      # Read credential for ./dev's prebuilt download (ADR 0022 R0b), only in the jobs that run ./dev (job-isolation).
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       CARGO_TERM_COLOR: always
     steps:
       # Linux: the whole tree in the container. Hosts: only the bootstrap folders (the actions, their scripts, paddock-dev's inputs)

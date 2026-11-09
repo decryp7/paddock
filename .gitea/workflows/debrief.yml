@@ -97,8 +97,10 @@ jobs:
           SHA: ${{ github.sha }}
           GREEN: ${{ steps.green.outputs.cache-hit }}
           PLAN_TOKEN: ${{ github.token }}
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+          PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
         run: |
-          run=$(node scripts/affected.mjs --ci --app debrief)
+          run=$(./dev plan --ci --app debrief)
           if [ "$EVENT" = schedule ] && [ "$GREEN" = true ]; then
             run=false
             echo "::notice::main has not changed since the last green run ($SHA); skipping."
@@ -263,6 +265,10 @@ jobs:
     needs: [plan]
     if: needs.plan.outputs.run == 'true'
     runs-on: macos-latest
+    env:
+      # Read credential and tag rule for ./dev's prebuilt download (ADR 0022 R0b; a tag run builds from source).
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
     timeout-minutes: 120
     defaults:
       run:
@@ -577,6 +583,10 @@ jobs:
         # because no macOS job ever started the sidecars.
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      # Read credential and tag rule for ./dev's prebuilt download (ADR 0022 R0b; a tag run builds from source).
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
     # Linux legs run in the paddock-ci image; Windows and macOS run on the host.
     container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
     timeout-minutes: 60
@@ -842,6 +852,9 @@ jobs:
           - os: macos-latest
             bundles: dmg
     runs-on: ${{ matrix.os }}
+    env:
+      # A release or installer job builds the tool from source: it never runs a prebuilt binary (ADR 0022, release jobs bypass every cache).
+      PADDOCK_DEV_DOWNLOAD: "0"
     # Linux legs run in the paddock-ci image; Windows and macOS run on the host.
     container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
     defaults:

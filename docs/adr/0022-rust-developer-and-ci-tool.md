@@ -1030,6 +1030,40 @@ X (exception) 6 (rows 73, 74, 84, 91, 95 and 97); 97 rows. The 21 rows first cla
 1 to G (row 77), 4 stay as X; rows 95, 96 and 97 are new splits of rows 76, 77, 91 and 74. Line totals by class (copies included): about 4,800 G; about 6,800 S; row 85 alone 5,220. Each
 script's tests (`*.test.mjs`, `*.test.sh`, `tools/test/*`) go with it.
 
+## Progress (2026-11-09)
+
+Status of R0b against this ADR, not a design change:
+
+- **Done on branch `ci/dev-prebuilt` (not yet on `main`):** the `dev` wrapper downloads the binary for its hash and target from the
+  `paddock-dev` generic package, checks the `.sha256` and the embedded hash (transport checks, section 3.3 "What the checks
+  catch"), publishes it into the per-hash cache atomically and builds on any miss or doubt; `dev-tool.yml` publishes from `main`
+  for the Linux container and the Windows and macOS host runners (a manual run can leave macOS out while that runner is busy);
+  release and tag jobs set `PADDOCK_DEV_DOWNLOAD=0` (the `ci.yml` jobs and plan steps and the Debrief host jobs do so for a tag
+  ref), and such a run keeps its tools in its own folder `bin-source/<hash>`, which the download path never writes, so it never runs
+  a downloaded copy; the "hash only the build-affecting keys" item
+  below is implemented as a reduction (comments, line ends and the keys `target-dir`, `build-dir`, `jobs`, `rustc-wrapper` are left
+  out of each config's digest, and a config that is then only section headers adds no line), the same rule in the wrapper and in
+  `input_hash.rs`.
+- **Not yet done:** the `dev-build` job (one build per run for a hash nobody published, shared as a run artifact), and
+  `setup-rust`'s image fast path with `rustup check`. Until `dev-build` exists, a branch that changes the tool builds it in each job
+  that runs `./dev`. The arm64 Linux and Windows ARM rows of the target table are as stated there (no runner).
+- **Not yet proven in CI from `main`:** a download of a binary published by `main`. The first proof run happens after the branch lands.
+
+## Amendment (2026-11-09, Accepted): where the binary lives and who reads it
+
+Status: **Accepted 2026-11-09 by the user.** It changes two sentences of section 3.3 and nothing else.
+
+- **Owner and credentials.** The package `paddock-dev` lives in the private organisation `paddock-build-inputs` (the store that
+  holds the pinned build inputs, ADR 0062 on branch `ci/build-inputs-wp1`), not under the repository owner. Jobs read it with the
+  existing read-only secret `BUILD_INPUTS_TOKEN` (team `ci-readers`), which the workflows give only to the jobs that run `./dev`
+  (job or step environment, never the whole workflow, and `secrets:` passed by name through `workflow_call`, never
+  `secrets: inherit`). `dev-tool.yml` writes with a new secret `DEV_TOOL_PUBLISH_TOKEN`, a bot token (team `ci-writers`) with
+  Packages write on that organisation only. This replaces "the job's read token" and the user-scoped `write:package` token of
+  section 3.3: the write token is no wider than the organisation, and no run on a branch can use it for anything but this
+  workflow, which publishes only from `main`.
+- **No new trust.** Section 3.3's trust model is unchanged: the token holder can replace a version, content addressing and the
+  checksum catch mix-ups and transport errors only, and release and tag jobs never take a binary from the store.
+
 ## Sources
 
 - Features research note: [2026-10-dev-tooling-features.md](../research/2026-10-dev-tooling-features.md)

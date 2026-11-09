@@ -1,5 +1,5 @@
 //! The `./dev` wrapper and `dev self hash` compute one value, in shell and in Rust, from the same inputs.
-#![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::input_hash::{Real, compute, is_hashed_var};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -8,6 +8,10 @@ fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().to_path_buf()
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 fn git(dir: &Path, args: &[&str]) {
     let st = Command::new("git")
         .arg("-C")
@@ -29,14 +33,14 @@ fn git(dir: &Path, args: &[&str]) {
 }
 
 /// A repository with the real wrapper and input list, and a placeholder for every listed path.
-struct Fixture {
+pub(crate) struct Fixture {
     dir: tempfile::TempDir,
     repo: PathBuf,
-    cargo_home: tempfile::TempDir,
+    pub(crate) cargo_home: tempfile::TempDir,
 }
 
 impl Fixture {
-    fn new() -> Fixture {
+    pub(crate) fn new() -> Fixture {
         // The repository sits one folder below the scratch folder, so a test can put a config "above the repository".
         let dir = tempfile::tempdir().unwrap();
         let repo = dir.path().join("repo");
@@ -67,7 +71,7 @@ impl Fixture {
         }
     }
 
-    fn root(&self) -> &Path {
+    pub(crate) fn root(&self) -> &Path {
         &self.repo
     }
 
@@ -78,6 +82,10 @@ impl Fixture {
         v
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+    )]
     fn shell(&self, env: &[(String, String)]) -> (String, bool) {
         let mut cmd = Command::new("sh");
         cmd.arg(self.root().join("dev"))
@@ -109,7 +117,7 @@ impl Fixture {
         (h.hash, h.dirty)
     }
 
-    fn both(&self, extra: &[(&str, String)]) -> (String, bool) {
+    pub(crate) fn both(&self, extra: &[(&str, String)]) -> (String, bool) {
         let env = self.env(extra);
         let (s, r) = (self.shell(&env), self.rust(&env));
         assert_eq!(s, r, "the wrapper and the tool must agree");
@@ -119,7 +127,7 @@ impl Fixture {
 
 /// A "compiler" that prints a chosen `-vV`.
 #[cfg(unix)]
-fn fake_rustc(dir: &Path, name: &str, release: &str, commit: &str, host: &str) -> String {
+pub(crate) fn fake_rustc(dir: &Path, name: &str, release: &str, commit: &str, host: &str) -> String {
     use std::os::unix::fs::PermissionsExt;
     let p = dir.join(name);
     let body = format!(
@@ -211,6 +219,10 @@ fn a_new_untracked_file_under_an_input_path_makes_the_wrapper_build() {
     assert!(f.both(&[]).1);
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[test]
 fn the_wrapper_finds_the_root_from_a_subfolder_and_refuses_to_run_outside_a_repository() {
     let f = Fixture::new();
@@ -350,7 +362,7 @@ fn a_config_that_only_names_the_build_folder_does_not_change_the_hash() {
 
 /// A tiny stand-in for the tool binary: answers `--version`, otherwise prints a marker.
 #[cfg(unix)]
-fn write_script(path: &Path, body: &str) {
+pub(crate) fn write_script(path: &Path, body: &str) {
     use std::os::unix::fs::PermissionsExt;
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
@@ -360,13 +372,17 @@ fn write_script(path: &Path, body: &str) {
 /// A stand-in `cargo` that "builds" a script answering `--version`, `self hash` (the hash it was built for, as the real tool shows)
 /// and a marker, then takes `slow` seconds to return, as a busy build would.
 #[cfg(unix)]
-fn shim_cargo(slow: u32) -> String {
+pub(crate) fn shim_cargo(slow: u32) -> String {
     format!(
         r#"mkdir -p "$CARGO_TARGET_DIR/release"; printf '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 0; exit 0; fi\nif [ "$1" = self ]; then echo "embedded %s"; exit 0; fi\necho built-by-shim\n' "$PADDOCK_DEV_HASH" > "$CARGO_TARGET_DIR/release/paddock-dev"; chmod +x "$CARGO_TARGET_DIR/release/paddock-dev"; sleep {slow}"#
     )
 }
 
 /// Runs the whole wrapper (not just `--wrapper-hash`) with a scratch cache and a stand-in `cargo` that "builds" a script.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 fn run_wrapper(f: &Fixture, home: &Path, extra_env: &[(&str, String)]) -> (i32, String, String) {
     let shims = f.cargo_home.path().join("shims");
@@ -438,6 +454,34 @@ fn without_a_compiler_the_wrapper_runs_a_cached_binary_or_points_at_rustup() {
 
 #[cfg(unix)]
 #[test]
+fn without_a_compiler_a_run_that_never_downloads_does_not_run_a_tool_from_the_shared_cache() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let home = scratch.path().join("home");
+    let no_rustc = scratch.path().join("no-such-rustc").display().to_string();
+    let env = [("RUSTC", no_rustc), ("PADDOCK_DEV_DOWNLOAD", "0".to_string())];
+    // A binary only in bin/ (the shared cache, which downloads write): a release run must not run it.
+    write_script(
+        &home.join("bin/some-hash/paddock-dev-test-host"),
+        r#"if [ "$1" = "--version" ]; then echo 0; else echo "shared ran"; fi"#,
+    );
+    let (code, out, err) = run_wrapper(&f, &home, &env);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(!out.contains("shared ran") && err.contains("rustc was not found"), "{out}{err}");
+    // One a source-only run built is its own, and in CI the fallback is an annotation.
+    write_script(
+        &home.join("bin-source/some-hash/paddock-dev-test-host"),
+        r#"if [ "$1" = "--version" ]; then echo 0; else echo "source ran"; fi"#,
+    );
+    let (code, out, err) = run_wrapper(&f, &home, &env);
+    assert_eq!((code, out.trim()), (0, "source ran"), "{err}");
+    let ci = [env[0].clone(), env[1].clone(), ("GITHUB_ACTIONS", "true".to_string())];
+    let (_, _, err) = run_wrapper(&f, &home, &ci);
+    assert!(err.contains("::warning::./dev: rustc is not available"), "{err}");
+}
+
+#[cfg(unix)]
+#[test]
 fn a_sparse_checkout_without_the_tool_is_told_how_to_add_it() {
     let f = Fixture::new();
     std::fs::remove_file(f.root().join("tools/paddock-dev/inputs.txt")).unwrap();
@@ -495,6 +539,33 @@ fn only_the_five_newest_cached_tools_are_kept() {
 
 #[cfg(unix)]
 #[test]
+fn a_source_only_cache_keeps_the_five_newest_tools_and_leaves_bin_alone() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let home = scratch.path().join("home");
+    for i in 0..7 {
+        write_script(&home.join(format!("bin-source/old-{i}/paddock-dev-test-host")), "exit 0");
+        // Older directories get older times so the order is certain; all are past the one-day window a tool is kept for.
+        let t = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 86_400 + 1000 - i * 100);
+        std::fs::File::open(home.join(format!("bin-source/old-{i}")))
+            .unwrap()
+            .set_modified(t)
+            .unwrap();
+    }
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    let (code, _, err) = run_wrapper(&f, &home, &[("RUSTC", rustc), ("PADDOCK_DEV_DOWNLOAD", "0".to_string())]);
+    assert_eq!(code, 0, "{err}");
+    let kept = std::fs::read_dir(home.join("bin-source")).unwrap().count();
+    assert_eq!(kept, 5);
+    assert!(!home.join("bin").exists(), "a run that never downloads writes only its own cache");
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
+#[cfg(unix)]
+#[test]
 fn a_trace_of_the_wrapper_never_prints_what_a_config_holds() {
     let f = Fixture::new();
     let token = "dummy-registry-token-0123456789";
@@ -528,6 +599,10 @@ fn a_trace_of_the_wrapper_never_prints_what_a_config_holds() {
     assert_ne!(f.both(&[]).0, before);
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 #[test]
 fn on_a_ci_runner_with_a_kept_mount_the_tool_is_cached_there_and_an_explicit_home_still_wins() {
@@ -550,6 +625,7 @@ fn on_a_ci_runner_with_a_kept_mount_the_tool_is_cached_there_and_an_explicit_hom
             .env("CARGO_HOME", f.cargo_home.path())
             .env("RUSTC", &rustc)
             .env("GITHUB_ACTIONS", "true")
+            .env("PADDOCK_DEV_PACKAGES", "http://127.0.0.1:9/generic")
             .env("PADDOCK_CI_MOUNT", &mount);
         cmd.envs(extra.iter().map(|(k, v)| (*k, *v)));
         let out = cmd.output().unwrap();
@@ -583,6 +659,10 @@ fn barrier_cargo() -> String {
 }
 
 /// Starts one wrapper per compiler against one kept mount; returns once `expected` builds are inside `cargo`, then lets them all go.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 fn run_overlapping(rustcs: &[&str], expected: usize) -> (tempfile::TempDir, Vec<std::process::Output>, Fixture) {
     let f = Fixture::new();
@@ -606,6 +686,7 @@ fn run_overlapping(rustcs: &[&str], expected: usize) -> (tempfile::TempDir, Vec<
                 .env("CARGO_HOME", f.cargo_home.path())
                 .env("RUSTC", rustc)
                 .env("GITHUB_ACTIONS", "true")
+                .env("PADDOCK_DEV_PACKAGES", "http://127.0.0.1:9/generic")
                 .env("PADDOCK_CI_MOUNT", &mount)
                 .env("BARRIER", &barrier)
                 .output_child()
@@ -629,6 +710,10 @@ fn rustcs(dir: &Path) -> (String, String) {
     )
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 fn assert_cached(mount: &Path, hash: &str) {
     let bin = mount.join("paddock-dev/bin").join(hash);
@@ -738,6 +823,10 @@ impl SpawnPiped for Command {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 #[test]
 fn a_failed_build_names_the_hash_and_the_next_step_in_an_annotation() {
@@ -763,6 +852,10 @@ fn a_failed_build_names_the_hash_and_the_next_step_in_an_annotation() {
     );
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 #[test]
 fn a_ci_run_without_a_kept_mount_says_so() {
@@ -779,6 +872,7 @@ fn a_ci_run_without_a_kept_mount_says_so() {
         .env("CARGO_HOME", f.cargo_home.path())
         .env("RUSTC", rustc)
         .env("GITHUB_ACTIONS", "true")
+        .env("PADDOCK_DEV_PACKAGES", "http://127.0.0.1:9/generic")
         .env("PADDOCK_CI_MOUNT", scratch.path().join("missing"))
         .env_remove("PADDOCK_DEV_HOME")
         .output()

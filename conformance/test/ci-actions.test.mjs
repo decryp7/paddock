@@ -1998,3 +1998,116 @@ test('app-fuzz.yml writes new inputs to the cached corpus and keys its caches by
   assert.ok(keys.length >= 4, 'the build and corpus caches have keys and restore keys');
   for (const k of keys) assert.match(k, /inputs\.fuzz-dir/, `cache key without the fuzz dir: ${k}`);
 });
+
+test('no workflow passes every secret on (`secrets: inherit`): a called workflow gets the secrets it names, nothing else', () => {
+  const dir = join(PADDOCK, '.gitea', 'workflows');
+  const files = readdirSync(dir).filter((f) => f.endsWith('.yml'));
+  assert.ok(files.length > 10, `found the workflows (${files.length})`);
+  for (const f of files) {
+    const lines = readFileSync(join(dir, f), 'utf8').split('\n').filter((l) => !l.trim().startsWith('#'));
+    assert.ok(!lines.some((l) => /^\s*secrets:\s*inherit\b/.test(l)), `${f}: \`secrets: inherit\` hands the signing keys to every called job; name each secret`);
+  }
+});
+
+test('a release or installer job never runs a downloaded ./dev: PADDOCK_DEV_DOWNLOAD is "0" in each, and in ci.yml on a tag', () => {
+  const dir = join(PADDOCK, '.gitea', 'workflows');
+  const jobsOf = (file) => parseJobs(readFileSync(join(dir, file), 'utf8'));
+  // Every job of a *-release.yml that takes a host slot (builds installers), plus the named ones.
+  const named = { 'app-release.yml': ['bundle', 'release'], 'shell-demo-release.yml': ['bundle'], 'workbench-demo-release.yml': ['bundle'], 'debrief.yml': ['bundle'] };
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('-release.yml'))) {
+    for (const job of jobsOf(file)) if (job.text.includes('actions/job-isolation')) (named[file] ??= []).push(job.id);
+  }
+  let checked = 0;
+  for (const [file, ids] of Object.entries(named)) {
+    for (const id of new Set(ids)) {
+      const job = jobsOf(file).find((j) => j.id === id);
+      assert.ok(job, `${file}: job ${id} exists`);
+      assert.match(job.text, /\n    env:\n(?:      .*\n|\s*\n)*?      PADDOCK_DEV_DOWNLOAD: "0"/, `${file}:${id}: release and installer jobs set PADDOCK_DEV_DOWNLOAD: "0" (ADR 0022: they bypass every cache)`);
+      checked += 1;
+    }
+  }
+  assert.ok(checked >= 5, `found the release jobs (${checked})`);
+  let tagJobs = 0;
+  for (const job of jobsOf('ci.yml').filter((j) => j.text.includes('\n      PADDOCK_DEV_TOKEN:'))) {
+    assert.match(job.text, /PADDOCK_DEV_DOWNLOAD: \$\{\{ startsWith\(github\.ref, 'refs\/tags\/'\) && '0' \|\| '' \}\}/, `ci.yml:${job.id}: a run for a tag builds the tool from source`);
+    tagJobs += 1;
+  }
+  assert.equal(tagJobs, 4, 'the four ci.yml jobs that take a host slot');
+});
+
+test('dev-tool.yml publishes only from main, in every job (ADR 0022: the store is written only by main)', () => {
+  const jobs = parseJobs(readFileSync(join(PADDOCK, '.gitea', 'workflows', 'dev-tool.yml'), 'utf8'));
+  assert.ok(jobs.length >= 2, 'the publish jobs');
+  for (const job of jobs) assert.match(job.text, /\n    if: \$\{\{ github\.ref == 'refs\/heads\/main'/, `dev-tool.yml:${job.id}: runs only on refs/heads/main`);
+});
+
+const TAG_RULE = /PADDOCK_DEV_DOWNLOAD: (?:"0"|\$\{\{ startsWith\(github\.ref, 'refs\/tags\/'\) && '0' \|\| '' \}\})/;
+
+/**
+ * Where a tag run could still download the tool (ADR 0022: tag jobs bypass every cache). Two rules, both on parsed jobs and steps:
+ * (token) the rule sits in the same env block as PADDOCK_DEV_TOKEN, or in the job env when the token is on a step; (usage) every job
+ * that runs ./dev (a `./dev` command, or job-isolation, which runs it) has the rule in its job env, or in the step's own env for a
+ * `./dev` command. The plan action is covered by its own file (token rule) since it sets the rule where it runs ./dev.
+ */
+function tagRuleProblems(file, text, isAction = false) {
+  const problems = [];
+  if (isAction) {
+    if (/PADDOCK_DEV_TOKEN:/.test(text) && !TAG_RULE.test(text)) problems.push(`${file}: PADDOCK_DEV_TOKEN without the tag rule`);
+    return problems;
+  }
+  for (const job of parseJobs(text)) {
+    const head = job.text.split('\n    steps:')[0];
+    const jobRule = TAG_RULE.test(head);
+    if (/\n    env:\n(?:      .*\n|\s*\n)*?      PADDOCK_DEV_TOKEN:/.test(`${head}\n`) && !jobRule) problems.push(`${file}:${job.id}: the job env has PADDOCK_DEV_TOKEN but not the tag rule`);
+    for (const step of parseSteps(job.text)) {
+      const own = TAG_RULE.test(step.text);
+      if (/^\s*PADDOCK_DEV_TOKEN:/m.test(step.text) && !own && !jobRule) problems.push(`${file}:${job.id}:${step.line}: a step env has PADDOCK_DEV_TOKEN but neither it nor the job has the tag rule`);
+      if (/actions\/job-isolation\b/.test(step.text) && !jobRule) problems.push(`${file}:${job.id}:${step.line}: job-isolation runs ./dev, the job env has no tag rule`);
+      if (/(?:^|[\s"(=;&|])\.\/dev\s/m.test(step.text.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n')) && !own && !jobRule) problems.push(`${file}:${job.id}:${step.line}: runs ./dev without the tag rule in the step or job env`);
+    }
+  }
+  return problems;
+}
+
+function workflowTexts() {
+  const root = join(PADDOCK, '.gitea');
+  const out = new Map();
+  for (const f of readdirSync(join(root, 'workflows')).filter((n) => n.endsWith('.yml') && n !== 'dev-tool.yml')) out.set(join('workflows', f), readFileSync(join(root, 'workflows', f), 'utf8'));
+  return out;
+}
+
+test('every place a tag run could download ./dev says it must not (token rule and usage rule, parsed jobs and steps)', () => {
+  const root = join(PADDOCK, '.gitea');
+  const problems = [];
+  for (const [file, text] of workflowTexts()) problems.push(...tagRuleProblems(file, text));
+  for (const d of readdirSync(join(root, 'actions'))) {
+    const f = join(root, 'actions', d, 'action.yml');
+    if (existsSync(f)) problems.push(...tagRuleProblems(join('actions', d), readFileSync(f, 'utf8'), true));
+  }
+  assert.deepEqual(problems, []);
+  // The plan action runs ./dev for every release workflow: it must carry the rule itself.
+  assert.match(readFileSync(join(root, 'actions', 'plan', 'action.yml'), 'utf8'), TAG_RULE, 'the plan action has the tag rule');
+  // The Debrief host jobs that run ./dev through job-isolation get the token and the rule too.
+  const debrief = parseJobs(workflowTexts().get(join('workflows', 'debrief.yml')));
+  for (const id of ['rust-test-macos', 'tauri-smoke']) {
+    const job = debrief.find((j) => j.id === id);
+    assert.ok(job, `debrief.yml:${id} exists`);
+    assert.match(job.text, /PADDOCK_DEV_TOKEN:/, `debrief.yml:${id}: reads the prebuilt tool`);
+  }
+});
+
+test('the tag-rule check sees a mutated workflow: a token without the rule, and a ./dev user without any', () => {
+  const texts = workflowTexts();
+  // Token rule: the rule removed from every env of ci.yml (its plan step and jobs keep the token).
+  const ci = texts.get(join('workflows', 'ci.yml'));
+  const noRule = ci.split('\n').filter((l) => !TAG_RULE.test(l)).join('\n');
+  const tokenProblems = tagRuleProblems('ci.yml', noRule);
+  assert.ok(tokenProblems.some((p) => p.includes('PADDOCK_DEV_TOKEN')), `token rule reports: ${tokenProblems.join(' | ')}`);
+  // Usage rule: a release workflow whose bundle job no longer sets PADDOCK_DEV_DOWNLOAD (it has no token at all).
+  const shell = texts.get(join('workflows', 'shell-demo-release.yml'));
+  const usageProblems = tagRuleProblems('shell-demo-release.yml', shell.replace('      PADDOCK_DEV_DOWNLOAD: "0"\n', ''));
+  assert.ok(usageProblems.some((p) => p.includes('job-isolation runs ./dev')), `usage rule reports: ${usageProblems.join(' | ')}`);
+  // And a direct `./dev` step without the rule.
+  const plan = ci.replace(/^ {10}PADDOCK_DEV_DOWNLOAD:.*\n/gm, '');
+  assert.ok(tagRuleProblems('ci.yml', plan).some((p) => p.includes('runs ./dev')), 'a ./dev step without the rule is reported');
+});

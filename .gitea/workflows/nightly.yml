@@ -30,6 +30,8 @@ jobs:
       - uses: actions/checkout@v4
       - id: plan
         uses: ./.gitea/actions/plan
+        with:
+          dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
   # ADR 0060: C100 with a job of its own, so that deleting the conformance job's line does not also delete the check.
   c100:
@@ -54,6 +56,8 @@ jobs:
     uses: ./.gitea/workflows/ci.yml
     with:
       webkit: true
+    secrets:
+      BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
   # ADR 0026 §3 (D4): every command a dialog contract declares was sent by some run, or is listed as unexercised with a
   # reason, and every dialog opened. It needs the union of the runs, so it runs here only, never in affected-only CI.
@@ -111,6 +115,9 @@ jobs:
         shell: bash
     env:
       CARGO_TERM_COLOR: always
+      # Read credential and tag rule for ./dev's prebuilt download (ADR 0022 R0b; a run for a tag builds from source).
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
     steps:
       - uses: actions/checkout@v4
 

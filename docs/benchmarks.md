@@ -907,4 +907,28 @@ Question: what does a cache miss of the `./dev` wrapper cost a plan job? `cargo 
 | `paddock-ci:v2` image (linux/amd64) under emulation on that Mac, `--cpus=2` | did not finish in 25 minutes; not a measure of a CI host |
 
 A real Linux CI host was not available, so the CI number is still open: measure the first cold plan job once the prebuilt
-binary per hash (R0b) or the kept mount is in use. CI stays on `scripts/affected.mjs` until then.
+binary per hash (R0b) or the kept mount is in use. (Update: the prebuilt binary is measured in the next section, and the CI
+plan steps call `./dev plan` on the `ci/dev-prebuilt` branch.)
+
+## `./dev` prebuilt download (ADR 0022 R0b, 2026-11-08)
+
+Question: what does a cache miss cost with the prebuilt binary compared with building the tool? Cold = `cargo build --release
+--locked` of `tools/paddock-dev`, fresh target folder, `RUSTC_WRAPPER` unset, `CARGO_BUILD_JOBS=2`. Download = `./dev --version`
+with an empty cache and `PADDOCK_DEV_DOWNLOAD=1`, which includes the wrapper's own work (git, `rustc -vV`, hashing).
+
+| Where | Cold build | Download path |
+|---|---|---|
+| Mac mini (arm64), load about 33 | 194 s wall (101 s user), 4.2 MB binary | 0.6 to 1.0 s for the whole `./dev` call, 3 runs, from a local HTTP server on loopback (so no network cost; the 4.2 MB file is not a model of the real link) |
+| CI, `paddock-ci:v2` container on a Linux runner (run 7721, `dev-tool.yml`) | 16 s for the build step: a true cold compile of 146 crates on a 16-core host with all 16 cores (`CARGO_BUILD_JOBS` unset), fresh target folder and `RUSTC_WRAPPER` unset by the publish script, so sccache was not used (warm or cold is moot); 5.4 MB binary | plan job of ci.yml run 7786: `dev: downloaded paddock-dev 2e607335... for x86_64-unknown-linux-gnu in 2 s, checksum and embedded hash verified` (whole seconds; the 5.4 MB file came from the private store, upload took 4 to 5 s) |
+| CI, Windows host runner (run 7723) | `dev: built paddock-dev ... in 9 s` with the host's kept cache | not measured: the download got HTTP 401 (no read token reached the wrapper); fixed in this branch |
+
+The Linux download is measured above (one run). Not measured: a Windows or macOS download (nothing is published for them yet), a cold build on a CI-like Linux host with an
+empty compile cache, and the `paddock-ci:v2` image under emulation on the Mac (the earlier note here: it did not finish in 25
+minutes; this time its test run, including the tool's cold test build, finished in under 8 minutes at `--cpus` default).
+The cold numbers differ by 12x between this Mac (2 jobs, load 33) and the CI step (16 jobs), so the saving per CI job is about
+16 s plus checkout of the crates on a 16-core Linux runner, more on hosts with fewer cores; the ADR's 100 s figure is a 2-job
+figure. The CI download figure needs a measurement once the package is populated.
+
+The first publish attempts failed for two reasons found on the way: `curl --data-binary` makes Gitea answer 500 (fixed with `-T`),
+and a binary published for one hash is a miss after any commit that touches `tools/paddock-dev` (a test file changed between
+publish and consume): the hash is per commit of the tool's inputs, so each such commit needs its own publish.
