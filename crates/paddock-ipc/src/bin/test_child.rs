@@ -13,6 +13,9 @@
 //!   descriptor, so its handshake cannot take the copies it needs. Prints `host: <its error>` and `client: <the first frame
 //!   or the read error>`. Its own process because it lowers this process's limit of open files.
 //! - `out-of-files-at-accept` (Unix): the same with no descriptor left for the host's accept itself.
+//! - `out-of-files-idle` (Unix): with no descriptor left and nobody connecting, the host's accept (Linux fails it with EMFILE
+//!   before it looks for a client) must keep its reserve: prints `free after the idle accept: <bool>`, then the `client:` of
+//!   a client that connects once one descriptor is free.
 //! - `link-out-of-files <discovery file>` (Unix): the same for a `LinkServer`'s accept thread; also prints `refused: <what
 //!   the server recorded>`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -112,6 +115,8 @@ fn main() {
         #[cfg(unix)]
         "out-of-files-at-accept" => out_of_files(false),
         #[cfg(unix)]
+        "out-of-files-idle" => out_of_files_idle(),
+        #[cfg(unix)]
         "link-out-of-files" => link_out_of_files(&arg(2)),
         _ => {
             let r = child::serve(
@@ -205,4 +210,33 @@ fn link_out_of_files(discovery: &str) {
     drop(fillers);
     println!("client: {answer:?}");
     println!("refused: {:?}", server.refused());
+}
+
+/// The `out-of-files-idle` mode: see the file header.
+#[cfg(unix)]
+fn out_of_files_idle() {
+    use paddock_ipc::Host;
+    use paddock_ipc::endpoint::Stream;
+    use paddock_ipc::frame;
+    use std::time::Duration;
+    let limit = FrameLimit::default();
+    let mut host = Host::listen(limit, ProtocolVersion::UNVERSIONED).unwrap();
+    let mut fillers = fill_descriptors();
+    let idle = host.accept(Duration::from_millis(200));
+    // A reserve given up for nobody leaves a descriptor free here.
+    let free = std::fs::File::open("/dev/null");
+    let was_free = free.is_ok();
+    drop(free);
+    drop(fillers.pop());
+    let mut client = Stream::connect(host.endpoint(), Duration::from_secs(10)).unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    let host_result = host.accept(Duration::from_secs(10));
+    let answer = frame::read_frame(&mut client, limit);
+    drop(fillers);
+    println!("idle: {:?}", idle.map(|_| "welcomed"));
+    println!("free after the idle accept: {was_free}");
+    println!("host: {:?}", host_result.map(|_| "welcomed"));
+    println!("client: {answer:?}");
 }

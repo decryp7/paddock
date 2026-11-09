@@ -306,11 +306,13 @@ sequenceDiagram
   `error.rs:30`); the client maps them to `IpcError::Version` and `IpcError::Auth` (`handshake.rs:390`). A `LinkServer`
   over its connection cap answers `busy` the same way (`handshake.rs:132`). A host that cannot start the handshake (no file
   descriptor or thread left) answers `busy` with the cause, and a first frame that is not a valid hello gets `invalid`
-  (`cannot_serve` and `refuse_invalid` in `handshake.rs`; CI run 7763); the client reads both as `IpcError::Remote`. When the
-  accept itself finds no descriptor, `Host::accept` and a `LinkServer`'s accept thread take the waiting client on a descriptor
-  the Unix listener keeps in reserve and answer `busy` (macOS has already dropped that client); a `LinkServer` pauses 50 ms
-  after a failed accept. Both are the ADR 0072 stopgap for I7 (M3/M4 absorb it; M3 maps `invalid` to `protocol`). Only a client that left, or stayed silent past the
-  limit, gets no answer.
+  (`refusal` in `handshake.rs`, decided after the watchdog so nothing is written to a stream it closed; CI run 7763); the
+  client reads both as `IpcError::Remote`. When the accept itself finds no descriptor, `Host::accept` and a `LinkServer`'s
+  accept thread take a client that is waiting on a descriptor the Unix listener keeps in reserve and answer `busy`
+  (`Host::turn_away`; the reserve is given up only when `poll` shows a client, since Linux fails an accept with EMFILE
+  with nobody connecting; macOS has already dropped such a client). A `LinkServer` also answers `busy` when it cannot start
+  a client's handshake thread, and pauses 50 ms after a failed accept. These are the ADR 0072 stopgap for I7 (M3/M4 absorb
+  them; M3 maps `invalid` to `protocol`). Only a client that left, or stayed silent past the limit, gets no answer.
 - Each handshake is bounded by `HANDSHAKE_TIMEOUT` = 10 s on an injected clock; a watchdog thread closes the stream when
   it passes, so a silent client holds only its own handshake (`handshake.rs:22`, `handshake.rs:81`).
 

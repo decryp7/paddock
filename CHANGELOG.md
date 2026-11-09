@@ -12,8 +12,9 @@ Conventional Commits; one semver tag for the whole repo.
   `invalid` refusal; a client now reads both as `IpcError::Remote`. A client that leaves or stays silent still gets nothing.
 - A Unix listener keeps one file descriptor in reserve: when an accept fails for lack of descriptors, `Host::accept` and a `LinkServer`'s
   accept thread accept the waiting client on it and answer `busy` (Linux queued that client until its own 10 s limit while the host
-  failed the same accept every 50 ms). A `LinkServer` also pauses 50 ms after a failed accept instead of retrying in a tight loop.
-  macOS drops such a client inside the failed accept.
+  failed the same accept every 50 ms). The reserve is given up only while a client is waiting: Linux fails an accept with EMFILE with
+  nobody connecting. A `LinkServer` also answers `busy` when it cannot start a client's handshake thread, and pauses 50 ms after a
+  failed accept instead of retrying in a tight loop. macOS drops such a client inside the failed accept.
 - These are the ADR 0072 stopgap for I7, to be absorbed by M3/M4; `invalid` is a stopgap code that M3 maps to `protocol`.
 
 ### `paddock-limits` (new): limits that explain themselves and replies that report what they left out

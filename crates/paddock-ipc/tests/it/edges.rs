@@ -476,3 +476,25 @@ fn a_link_server_with_no_descriptor_left_to_accept_tells_the_waiting_client_why(
         );
     }
 }
+
+/// With no descriptor left and nobody connecting, Linux fails the accept itself (it takes a descriptor before it looks for a
+/// client): the listener must keep its reserve for a client that is really waiting, or the freed descriptor goes to whoever
+/// opens a file next and the next client waits in the queue (16 of 40 runs of the link test in review). The client that
+/// comes later is told `busy` (Linux).
+#[cfg(unix)]
+#[test]
+fn an_accept_with_nobody_waiting_keeps_the_reserve_descriptor() {
+    let (_, client, text) = out_of_files("out-of-files-idle");
+    assert!(
+        text.contains("free after the idle accept: false"),
+        "the reserve was given up with no client waiting: {text}"
+    );
+    if cfg!(target_os = "macos") {
+        assert!(
+            client.contains("Fail") || client.contains("Closed"),
+            "{text}"
+        );
+    } else {
+        assert!(client.contains("Fail") && client.contains("busy"), "{text}");
+    }
+}
