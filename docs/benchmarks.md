@@ -246,7 +246,7 @@ Quoted by [ADR 0076](adr/0076-owned-background-work.md) ("Parallelism and cost",
 - **Command:** `spawnscan <worktree>` (one pass to find `#[cfg(test)] mod x;` files, one pass that parses every file and
   visits every spawn call), output to a file.
 - **Runs:** 3, one after the other, after one untimed warm-up run.
-- **Numbers:** 5.90, 5.95, 6.04 s wall; about 4.9 s user and 1.0 s system per run; 647 sites found, 0 parse failures. No
+- **Numbers:** 5.90, 5.95, 6.04 s wall; about 4.9 s user and 1.0 s system per run; 647 sites found (615 spawn sites plus 32 `thread::scope` calls, ADR 0076 revision 2), 0 parse failures. No
   budget; verdict: cheap enough for CI over the whole tree, and for the push check over the changed files only.
 - **Memory:** not measured.
 
