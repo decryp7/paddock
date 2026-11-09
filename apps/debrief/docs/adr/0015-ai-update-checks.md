@@ -1,6 +1,6 @@
 # 15. Update checks for AI runtimes and models
 
-- Status: accepted
+- Status: accepted; **superseded by [ADR 0070](0070-pitwall-is-debriefs-only-ai-engine.md)** (2026-11-08: no runtimes or models to update)
 - Date: 2026-10-20
 
 ## Context

@@ -10,7 +10,7 @@ use std::path::Path;
 use std::process::Command;
 
 /// The prefixes of the processes tests confine (the store worker's endpoint is made by the app process, not confined).
-const CONFINED_PREFIXES: [&str; 4] = [prefix::DEFAULT, prefix::PLUGIN, prefix::PLUGIN_TEST, prefix::AI];
+const CONFINED_PREFIXES: [&str; 4] = [prefix::DEFAULT, prefix::PLUGIN, prefix::PLUGIN_TEST, prefix::STORE];
 
 fn names(dir: &Path, prefix: &str) -> Vec<String> {
     let mut found: Vec<String> = std::fs::read_dir(dir)

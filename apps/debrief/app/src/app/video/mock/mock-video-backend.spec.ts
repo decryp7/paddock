@@ -17,7 +17,7 @@ describe('MockVideoBackend runtime', () => {
   it('installs, updates, rolls back and deletes a downloaded build', async () => {
     const b = new MockVideoBackend({ runtime: 'windows' });
     expect((await b.getRuntime()).status).toMatchObject({ mode: 'none', pinnedTag: 'autobuild-2026-09-30' });
-    await expect(open(b)).rejects.toMatchObject({ code: 'noRuntime' });
+    await expect(open(b)).rejects.toMatchObject({ code: 'missing' });
     const installed = await b.installRuntime();
     expect(installed.status).toMatchObject({ mode: 'managed', active: { tag: 'autobuild-2026-09-30' } });
     await expect(b.rollbackRuntime()).rejects.toMatchObject({ code: 'notFound' });
@@ -147,7 +147,7 @@ describe('MockVideoBackend frames', () => {
     const b = new MockVideoBackend({ vision: false });
     const key = (await open(b)).record.key;
     for (const f of [() => b.generateDescriptions({ key, indices: [], redo: false }), () => b.explainFrames({ key, indices: [0] }), () => b.alignFromClock({ key, index: 0 })]) {
-      await expect(f()).rejects.toMatchObject({ code: 'noVision', hint: expect.stringContaining('Settings ▸ AI') });
+      await expect(f()).rejects.toMatchObject({ code: 'noVision', hint: expect.stringContaining('Pitwall') });
     }
   });
 

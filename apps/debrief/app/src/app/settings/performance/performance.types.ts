@@ -9,7 +9,7 @@ import { SettingValue } from '../settings.types';
 export const PERFORMANCE_SECTION = 'performance';
 
 /** One of Debrief's capped processes. */
-export type ProcessRef = { kind: 'storeWorker' } | { kind: 'ai' } | { kind: 'plugin'; pluginId: string };
+export type ProcessRef = { kind: 'storeWorker' } | { kind: 'plugin'; pluginId: string };
 
 export type Preset = 'standard' | 'lowMemory';
 

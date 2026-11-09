@@ -19,26 +19,25 @@ async function openStorage(page: Page) {
 test('lists what Debrief stores, clears the cache after a confirmation and reports what stayed', async ({ page }, testInfo) => {
   await openApp(page);
   await openStorage(page);
-  await expect(table(page).locator('tbody tr')).toHaveCount(8);
+  await expect(table(page).locator('tbody tr')).toHaveCount(5);
   await expect(row(page, 'webview-cache')).toContainText('48 MB');
   await expect(row(page, 'logs')).toContainText("Today's log is kept.");
   await expectNoSeriousViolations(page, testInfo, 'settings-storage', '[role=dialog]');
 
   await settingsDialog(page).getByRole('button', { name: 'Clear cache…' }).click();
   const confirm = page.getByRole('dialog', { name: 'Clear cache?' });
-  await expect(confirm.getByTestId('confirm-message')).toContainText('267 MB');
-  await expect(confirm.getByTestId('confirm-detail')).toContainText('Outdated AI runtimes — 210 MB');
+  await expect(confirm.getByTestId('confirm-message')).toContainText('57 MB');
+  await expect(confirm.getByTestId('confirm-detail')).toContainText('Web view cache — 45 MB');
   await confirm.getByRole('button', { name: 'Clear cache' }).click();
   await expect(confirm).toHaveCount(0);
 
   const result = settingsDialog(page).getByTestId('storage-result');
-  await expect(result).toContainText('Freed 267 MB.');
+  await expect(result).toContainText('Freed 57 MB.');
   await expect(result).toContainText('Web view cache: freed 45 MB, kept 1 (in use by a running program).');
   await expect(row(page, 'webview-cache')).toContainText('3 MB');
-  await expect(row(page, 'ai-runtimes-outdated')).toContainText('0 bytes');
   await expect(settingsDialog(page).getByRole('button', { name: 'Clear cache…' })).toBeDisabled();
   // Data is untouched by "Clear cache".
-  await expect(row(page, 'ai-models')).toContainText('4.3 GB');
+  await expect(row(page, 'logs')).toContainText('6 MB');
 });
 
 test('a data category asks on its own; cancelling keeps it, confirming clears it', async ({ page }) => {
@@ -67,7 +66,7 @@ test('a failed measurement shows an inline error with Retry', async ({ page }) =
   const alert = settingsDialog(page).getByRole('alert');
   await expect(alert).toContainText("Could not measure Debrief's storage");
   await alert.getByRole('button', { name: 'Retry' }).click();
-  await expect(table(page).locator('tbody tr')).toHaveCount(8);
+  await expect(table(page).locator('tbody tr')).toHaveCount(5);
   await row(page, 'logs').getByRole('button', { name: 'Show in folder (Debrief logs)' }).click();
   await expect(settingsDialog(page).getByRole('status').filter({ hasText: 'Opened' })).toContainText('logs');
 });

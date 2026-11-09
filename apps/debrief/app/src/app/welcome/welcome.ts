@@ -75,8 +75,8 @@ export function shortPath(path: string): string {
       @if (aiOffer()) {
         <p class="ai-offer" data-testid="welcome-ai-offer">
           <debrief-icon name="ai" [size]="14" />
-          <span i18n="@@welcome.ai.text">Optional: an AI assistant that runs on this computer.</span>
-          <button class="link" type="button" data-testid="welcome-ai-setup" (click)="setUpAi()" i18n="@@welcome.ai.setup">Set it up</button>
+          <span i18n="@@welcome.ai.text">Optional: an AI assistant that runs on this computer, through Pitwall.</span>
+          <button class="link" type="button" data-testid="welcome-ai-setup" (click)="setUpAi()" i18n="@@welcome.ai.setup">Connect to Pitwall</button>
           <button class="link muted" type="button" data-testid="welcome-ai-dismiss" (click)="dismissAi()" i18n="@@welcome.ai.dismiss">Not now</button>
         </p>
       }

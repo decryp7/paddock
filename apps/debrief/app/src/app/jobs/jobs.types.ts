@@ -14,8 +14,7 @@ export type JobLink =
   | { type: 'range'; from: number; to: number }
   | { type: 'query'; ql: string }
   | { type: 'path'; path: string }
-  | { type: 'chat'; sessionId: string }
-  | { type: 'model'; id: string };
+  | { type: 'chat'; sessionId: string };
 
 export interface JobSource {
   /** The window the job belongs to; null for app-wide work (downloads, storage). */
@@ -64,7 +63,6 @@ export type JobResult =
   /** `detail`: what the command that started the job returns to its waiter (the opened workspace; see `jobValue`). */
   | { type: 'workspace'; detail?: unknown }
   | { type: 'view'; view: string; ql: string | null }
-  | { type: 'model'; fileName: string | null; detail?: unknown }
   | { type: 'folderSurvey'; outcome: unknown }
   | { type: 'storage'; result: unknown }
   /** The logs related to an image (`RelatedOutcome`, ADR 0025). */
@@ -109,25 +107,17 @@ export interface JobOutcome {
   message: string | null;
 }
 
-/** A queue the engine paused (the AI after a quarantine). */
-export interface PausedKind {
-  kind: JobKind;
-  reason: string;
-}
-
-/** The window's visible jobs (running, queued in order, then finished newest first) and paused queues. */
+/** The window's visible jobs (running, queued in order, then finished newest first). */
 export interface JobsSnapshot {
   jobs: JobInfo[];
-  paused: PausedKind[];
 }
 
 /** What `debrief://jobs` carries: the change since the window's last event (`version` follows the one before by 1): the jobs
- * in their order by id, those new or changed in full, the paused queues. Mirrors `jobs::JobsDelta`. */
+ * in their order by id, those new or changed in full. Mirrors `jobs::JobsDelta`. */
 export interface JobsDelta {
   version: number;
   order: number[];
   changed: JobInfo[];
-  paused: PausedKind[];
 }
 
 /** The finished jobs saved with the project and session (UI state key `jobs`). */
@@ -141,4 +131,4 @@ export interface RestoredJobs {
   warning: string | null;
 }
 
-export const EMPTY_JOBS: JobsSnapshot = { jobs: [], paused: [] };
+export const EMPTY_JOBS: JobsSnapshot = { jobs: [] };

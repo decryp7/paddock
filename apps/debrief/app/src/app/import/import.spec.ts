@@ -164,7 +164,7 @@ describe('ImportProgressService and its widgets', () => {
     TestBed.inject(WelcomeService).show();
     const seen: string[] = [];
     for (const [done, bytes] of [[120, MB(2)], [4_800, MB(90)], [12_345, GB(3.1)]]) {
-      jobs.apply({ jobs: [importJob(9, { phase: { label: 'Finding files', scale: 'indeterminate' as const }, done, total: 0, bytesDone: 0, bytesTotal: bytes, fraction: null, etaMs: null, current: '/data/logs/2026' })], paused: [] });
+      jobs.apply({ jobs: [importJob(9, { phase: { label: 'Finding files', scale: 'indeterminate' as const }, done, total: 0, bytesDone: 0, bytesTotal: bytes, fraction: null, etaMs: null, current: '/data/logs/2026' })] });
       status.detectChanges();
       toast.detectChanges();
       seen.push(text(status));
@@ -177,7 +177,7 @@ describe('ImportProgressService and its widgets', () => {
     expect(text(toast)).toContain('in 2026');
     expect(toast.nativeElement.querySelector('.bar.indeterminate')).not.toBeNull();
     expect(status.nativeElement.querySelector('[role=progressbar]').getAttribute('aria-valuenow')).toBeNull();
-    jobs.apply({ jobs: [importJob(9, { phase: { label: 'Importing while finding files', scale: 'count' as const }, done: 4000, bytesDone: 1_000_000, bytesTotal: 3_000_000_000, total: 12_345, current: undefined })], paused: [] });
+    jobs.apply({ jobs: [importJob(9, { phase: { label: 'Importing while finding files', scale: 'count' as const }, done: 4000, bytesDone: 1_000_000, bytesTotal: 3_000_000_000, total: 12_345, current: undefined })] });
     toast.detectChanges();
     expect(text(toast)).toContain('4,000 of 12,345 files');
     expect(toast.nativeElement.querySelector('.bar.indeterminate')).toBeNull();
@@ -198,7 +198,7 @@ describe('ImportProgressService and its widgets', () => {
     expect(text(status)).toContain('Finding files… 0 found');
     expect(text(status)).not.toContain('0 of 0');
     // The job's progress (debrief://jobs) drives the widgets: no import_progress polling while it runs.
-    jobs.apply({ jobs: [importJob(5, { done: 1 }, { kind: 'export', title: 'Export' }), importJob(7)], paused: [] });
+    jobs.apply({ jobs: [importJob(5, { done: 1 }, { kind: 'export', title: 'Export' }), importJob(7)] });
     status.detectChanges();
     expect(text(status)).toContain('Importing 3 of 12 files · 23 MB of 76 MB · less than a minute left');
     expect(text(status)).toContain('app.log');
@@ -248,7 +248,7 @@ describe('ImportProgressService and its widgets', () => {
     const status = TestBed.inject(WorkspaceStatusStore);
     status.setBusy({ kind: 'import', label: 'Applying the profile…', jobId: 3 });
     TestBed.tick();
-    jobs.apply({ jobs: [importJob(3, { done: 2, current: '/logs/a.log' }), importJob(4, { done: 9 })], paused: [] });
+    jobs.apply({ jobs: [importJob(3, { done: 2, current: '/logs/a.log' }), importJob(4, { done: 9 })] });
     expect(svc.progress()).toMatchObject({ done: 2, current: '/logs/a.log' });
     // Its job is not listed (yet): the newest running import.
     status.setBusy({ kind: 'import', label: 'Applying the profile…', jobId: 99 });

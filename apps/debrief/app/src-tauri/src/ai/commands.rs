@@ -3,23 +3,19 @@
 //! downloads are download jobs. Set-up stages and chat answers stream as events.
 
 use super::chats::SessionInfo;
-use super::core::{AiCore, AiStatus, ModelDto, SetupEvent};
+use super::core::{AiCore, AiStatus};
 use super::error::{AiCmdError, AiErrorCode, AiResult};
 use super::requests::{self, AiRequest};
-use super::{AiState, CHAT_EVENT, SETUP_EVENT, STATUS_EVENT};
-use crate::jobs::{self, Controls, Done, JobId, JobKind, JobLink, JobProgress, JobResult, JobSpec};
+use super::{AiState, CHAT_EVENT};
 use crate::windows::{emit_to_window, CurrentWindow, WindowState};
 use debrief_ai::chat::{export_markdown, suggested_prompts, ChatContext, ChatEnv, ChatEvent, ChatHistoryRecord, ChatRecord, Envelope};
-use debrief_ai::hardware::Hardware;
-use debrief_ai::recommend::{Recommendation, Recommendations};
-use debrief_ai::setup::{SetupPlan, SetupStage};
 use debrief_ai::{StoreAccess, StoreRef};
 use debrief_core::api::ContextRequest;
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 
 /// Lines on each side of an event used as the sample for profile, pipeline, marker and extractor proposals.
 const SAMPLE_RADIUS: usize = 30;
@@ -29,20 +25,14 @@ const MAX_ID_CHARS: usize = 64;
 type Ai<T> = AiResult<T>;
 
 pub(crate) fn core<R: Runtime>(app: &AppHandle<R>) -> Ai<Arc<AiCore>> {
-    app.try_state::<AiState>().map(|s| s.0.clone()).ok_or_else(|| {
-        // Why it did not start, when it was tried (no data folder); else this build has no AI.
-        let why = app.try_state::<super::AiUnavailable>().map(|u| u.0.clone());
-        AiCmdError::unavailable(why.unwrap_or_else(|| "The AI assistant is not available in this build of Debrief.".into()))
-    })
+    app.try_state::<AiState>()
+        .map(|s| s.0.clone())
+        .ok_or_else(|| AiCmdError::unavailable("The AI assistant is not available in this build of Debrief."))
 }
 
 /// Runs `f` on the blocking pool; a panic becomes an engine error instead of taking the app down.
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Ai<T> + Send + 'static) -> Ai<T> {
     crate::sync::blocking("the AI task", f).await
-}
-
-fn emit_status<R: Runtime>(app: &AppHandle<R>, core: &AiCore) {
-    let _ = app.emit(STATUS_EVENT, core.status());
 }
 
 fn check_session_id(id: &str) -> Ai<&str> {
@@ -99,253 +89,11 @@ pub(super) fn sample_of(store: StoreRef<'_>, record_id: Option<u32>, sample: Opt
     Ok((text, ctx.source_name))
 }
 
-// ---- status, hardware, catalog, set-up ----
+// ---- status ----
 
 #[tauri::command]
 pub async fn ai_status<R: Runtime>(app: AppHandle<R>) -> Ai<AiStatus> {
     Ok(core(&app)?.status())
-}
-
-#[tauri::command]
-pub async fn ai_hardware<R: Runtime>(app: AppHandle<R>) -> Ai<Hardware> {
-    let core = core(&app)?;
-    blocking(move || Ok(core.hardware())).await
-}
-
-#[tauri::command]
-pub async fn ai_recommend<R: Runtime>(app: AppHandle<R>) -> Ai<Recommendations> {
-    let core = core(&app)?;
-    blocking(move || {
-        core.built_in_availability()?;
-        Ok(core.recommendations())
-    })
-    .await
-}
-
-/// As `ai_recommend`, after reading the headers of the models that could fit (the first bytes of each file, no
-/// download) so the verdicts use the real architecture. Slow (network): call it after showing the quick answer.
-#[tauri::command]
-pub async fn ai_refine_fit<R: Runtime>(app: AppHandle<R>) -> Ai<Recommendations> {
-    let core = core(&app)?;
-    blocking(move || core.refine_fit()).await
-}
-
-/// Every catalog model with its fit on this machine, best first.
-#[tauri::command]
-pub async fn ai_catalog<R: Runtime>(app: AppHandle<R>) -> Ai<Vec<Recommendation>> {
-    let core = core(&app)?;
-    blocking(move || Ok(core.recommendations().ranked)).await
-}
-
-#[tauri::command]
-pub async fn ai_setup_plan<R: Runtime>(app: AppHandle<R>, model_id: Option<String>) -> Ai<SetupPlan> {
-    let core = core(&app)?;
-    blocking(move || core.plan(model_id.as_deref())).await
-}
-
-/// The job a set-up or activation runs as (Cancel stops it; a download can be retried).
-pub(super) struct SetupJob {
-    pub(super) title: String,
-    pub(super) model_id: Option<String>,
-    pub(super) file_name: String,
-    /// The first-start "set up the assistant" flow: it tells the user itself when it is ready or failed (see [`super::assistant_setup`]).
-    pub(super) assistant: Option<super::assistant_setup::Assistant>,
-}
-
-pub(super) type SetupWork = Box<dyn FnOnce(&AiCore, &debrief_ai::models::Progress, &mut dyn FnMut(SetupStage)) -> Ai<()> + Send>;
-
-/// Runs a set-up or activation as a download job (Jobs are the one cancel authority: `jobs_cancel` with
-/// the returned id stops it), streaming `debrief://ai-setup`. Returns the job.
-pub(super) fn spawn_setup<R: Runtime>(app: AppHandle<R>, core: Arc<AiCore>, job: SetupJob, work: SetupWork) -> Ai<u64> {
-    let progress = core.begin_setup()?;
-    let run = {
-        let (app, core) = (app.clone(), core.clone());
-        move |on_progress: &dyn Fn(JobProgress)| -> Ai<()> {
-            let a = app.clone();
-            let mut on_stage = |st: SetupStage| {
-                match &st {
-                    SetupStage::Downloading { bytes, total, .. } => {
-                        on_progress(super::runtime_commands::phase_progress(false, *bytes, *total))
-                    }
-                    SetupStage::Verifying { bytes, total } => on_progress(super::runtime_commands::phase_progress(true, *bytes, *total)),
-                    SetupStage::Validating | SetupStage::Loading { .. } | SetupStage::WarmingUp => {
-                        on_progress(JobProgress::in_phase("Testing", jobs::PhaseScale::Indeterminate, 0, 0))
-                    }
-                    _ => {}
-                }
-                let _ = a.emit(SETUP_EVENT, SetupEvent::Stage(st));
-            };
-            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(&core, &progress, &mut on_stage)))
-                .unwrap_or_else(|_| Err(AiCmdError::new(AiErrorCode::Engine, "the set-up stopped unexpectedly")));
-            core.end_setup();
-            if let Err(e) = &r {
-                log::warn!(Code = format!("{:?}", e.code).as_str(); "AI set-up did not finish: {}", e.message);
-            }
-            if let Some(ev) = SetupEvent::from_result(&r) {
-                let _ = app.emit(SETUP_EVENT, ev);
-            }
-            emit_status(&app, &core);
-            r
-        }
-    };
-    let mut spec = JobSpec::new(JobKind::Download, job.title);
-    if let Some(a) = &job.assistant {
-        // Announced by the flow itself (one "ready" or one "failed" message), retried from either as the whole set-up.
-        spec = spec
-            .quiet()
-            .link(JobLink::Model { id: a.model_id.clone() })
-            .retry_with(json!({"op": "assistant", "modelId": a.model_id}));
-    } else if let Some(id) = &job.model_id {
-        spec = spec
-            .link(JobLink::Model { id: id.clone() })
-            .retry_with(json!({"op": "model", "modelId": id}));
-    }
-    let c = core.clone();
-    let controls = Controls::cancel(move || {
-        c.cancel_setup();
-    });
-    let file_name = job.file_name;
-    let assistant = job.assistant;
-    let notify_app = app.clone();
-    let queued = jobs::spawn(&app, spec, controls, move |ctx: &jobs::JobCtx| -> Ai<Done<()>> {
-        let r = run(&|p| ctx.progress(p));
-        if let Some(a) = &assistant {
-            a.finished(&notify_app, &r);
-        }
-        r?;
-        Ok(Done::new(()).with_result(JobResult::Model {
-            detail: None,
-            file_name: Some(file_name.clone()),
-        }))
-    });
-    match queued {
-        Ok(id) => Ok(id.0),
-        Err(e) => {
-            core.end_setup();
-            Err(AiCmdError::busy(e))
-        }
-    }
-}
-
-/// Retry of a model or runtime download job: the download starts again as a new job.
-pub(crate) fn retry_download<R: Runtime>(app: &AppHandle<R>, job: &jobs::model::Job) -> Result<Option<JobId>, String> {
-    let req = job.request.clone().unwrap_or_default();
-    let r = match (req["op"].as_str(), req["modelId"].as_str(), req["runtimeId"].as_str()) {
-        (Some("model"), Some(id), _) => setup_run(app.clone(), id.to_string()),
-        (Some("assistant"), Some(id), _) => super::assistant_setup::start(app.clone(), id.to_string()),
-        (Some("runtime"), _, Some(id)) => super::runtime_commands::install(app.clone(), id.to_string(), vec![]),
-        _ => return Err("this download cannot be run again".into()),
-    };
-    r.map(|id| Some(JobId(id))).map_err(|e| e.message)
-}
-
-/// Downloads (when needed), verifies, loads and warms up a catalog model, then makes it active, as a job
-/// (returned; `jobs_cancel` stops it). Progress arrives as `debrief://ai-setup` events ending in `ready`,
-/// `failed` or `cancelled`.
-#[tauri::command]
-pub async fn ai_setup_run<R: Runtime>(app: AppHandle<R>, model_id: String) -> Ai<u64> {
-    setup_run(app, model_id)
-}
-
-/// The first-start flow: installs the inference runtime when none is installed, then downloads, checks, loads and tests
-/// the model, all as background Download jobs the Jobs pane shows (and `jobs_cancel` stops). The dialog that asked
-/// closes at once; a message says when the assistant is ready or why not. Returns the first job.
-#[tauri::command]
-pub async fn ai_setup_background<R: Runtime>(app: AppHandle<R>, model_id: String) -> Ai<u64> {
-    super::assistant_setup::start(app, model_id)
-}
-
-/// Starts a set-up job (what `ai_setup_run` does).
-pub(crate) fn setup_run<R: Runtime>(app: AppHandle<R>, model_id: String) -> Ai<u64> {
-    let core = core(&app)?;
-    let entry = core
-        .catalog()
-        .find(&model_id)
-        .map(|m| (m.name.clone(), m.file.clone()))
-        .ok_or_else(|| AiCmdError::not_found(format!("'{model_id}' is not in the model list")))?;
-    let installed = core.models().iter().any(|m| m.file_name == entry.1);
-    let job = SetupJob {
-        title: if installed {
-            format!("Loading AI model {}", entry.0)
-        } else {
-            format!("Downloading AI model {}", entry.0)
-        },
-        model_id: (!installed).then(|| model_id.clone()),
-        file_name: entry.1,
-        assistant: None,
-    };
-    spawn_setup(app, core, job, Box::new(move |c, p, on| c.run_setup(&model_id, p, on)))
-}
-
-#[tauri::command]
-pub async fn ai_models<R: Runtime>(app: AppHandle<R>) -> Ai<Vec<ModelDto>> {
-    let core = core(&app)?;
-    blocking(move || Ok(core.models())).await
-}
-
-/// Loads an installed model and makes it active (same events as the set-up), as a job (returned).
-#[tauri::command]
-pub async fn ai_model_activate<R: Runtime>(app: AppHandle<R>, file_name: String) -> Ai<u64> {
-    let core = core(&app)?;
-    if !debrief_ai::catalog::is_safe_file_name(&file_name) {
-        return Err(AiCmdError::invalid(format!("'{file_name}' is not a model file name")));
-    }
-    let job = SetupJob {
-        title: format!("Loading AI model {file_name}"),
-        model_id: None,
-        file_name: file_name.clone(),
-        assistant: None,
-    };
-    spawn_setup(app, core, job, Box::new(move |c, p, on| c.activate(&file_name, p, on)))
-}
-#[tauri::command]
-pub async fn ai_model_delete<R: Runtime>(app: AppHandle<R>, file_name: String) -> Ai<()> {
-    let core = core(&app)?;
-    let c = core.clone();
-    blocking(move || c.delete_model(&file_name)).await?;
-    emit_status(&app, &core);
-    Ok(())
-}
-
-/// Adds a `.gguf` the user picked in the open dialog to the models folder. A catalog model (a manual
-/// download) is checked against its SHA-256 first, as a download job with progress that Cancel stops.
-#[tauri::command]
-pub async fn ai_model_add_local<R: Runtime>(app: AppHandle<R>, grants: crate::paths::WindowGrants, path: String) -> Ai<u64> {
-    let core = core(&app)?;
-    core.built_in_availability()?;
-    // Only a file the user chose in the dialog.
-    let path = grants.read_file(&path, &["gguf"])?.path().to_string_lossy().into_owned();
-    let name = Path::new(&path)
-        .file_name()
-        .map(|n| n.to_string_lossy().chars().take(120).collect::<String>())
-        .unwrap_or_default();
-    let progress = Arc::new(debrief_ai::models::Progress::new());
-    let (p, q) = (progress.clone(), progress.clone());
-    let controls = Controls::cancel(move || p.cancel()).with_probe(move || {
-        let s = q.snapshot();
-        (s.total > 0).then(|| JobProgress::bytes(s.bytes, s.total))
-    });
-    let spec = JobSpec::new(JobKind::Download, format!("Checking the model file {name}")).link(JobLink::Path { path: path.clone() });
-    jobs::start_value(&app, spec, controls, move |_ctx: &jobs::JobCtx| -> Ai<Done<ModelDto>> {
-        let m = core.add_local(&path, &progress)?;
-        let file_name = Some(m.file_name.clone());
-        Ok(Done::new(m).with_result(JobResult::Model { detail: None, file_name }))
-    })
-}
-
-/// Lets the engine run again after it was switched off for the session (quarantine) or a load failed.
-#[tauri::command]
-pub async fn ai_reset<R: Runtime>(app: AppHandle<R>) -> Ai<AiStatus> {
-    let core = core(&app)?;
-    core.reset();
-    // The paused AI queue goes on.
-    if let Some(jobs) = app.try_state::<jobs::Jobs>() {
-        jobs.pump();
-    }
-    emit_status(&app, &core);
-    let status = core.status();
-    crate::health::commands::refresh_ai(&app, status.state, status.reason.as_deref());
-    Ok(status)
 }
 
 // ---- use cases ----

@@ -29,7 +29,7 @@ impl Live {
     pub fn start(dir: Option<PathBuf>, data_dir: Option<&Path>) -> Arc<Live> {
         let settings = match (&dir, super::first_run(dir.as_deref())) {
             (Some(d), true) => {
-                let env = probe(data_dir.unwrap_or(d), 0);
+                let env = probe(data_dir.unwrap_or(d));
                 let s = suggest(&env, &PerformanceSettings::default());
                 log::info!(TotalMb = env.total_memory_mb, Cores = env.cores, StoreCapMb = s.store_cap_mb; "First run: performance settings suggested for this computer");
                 if let Err(e) = super::save(d, &s) {
@@ -66,11 +66,6 @@ impl Live {
     /// The limits of Debrief's plugin processes, with the hub's listener.
     pub fn plugin_limits(&self) -> PluginLimits {
         tuning::plugin_limits(&self.settings(), Some(self.hub.listener()))
-    }
-
-    /// The AI worker's cap now, bytes.
-    pub fn ai_cap(&self) -> Option<u64> {
-        tuning::ai_cap(&self.settings())
     }
 
     /// The store worker to update after a change.
@@ -187,7 +182,6 @@ mod tests {
         });
         let p = plugins.process("p.two").unwrap();
         assert_eq!((p.memory_cap(), p.sandbox().cpu_rate_percent), (768 << 20, Some(30)));
-        assert_eq!(live.ai_cap(), Some(1024 << 20));
         assert_eq!(live.worker_launch().memory_cap, Some(2 << 30));
         live.hub.hear(
             "plugin \"p.one\"",

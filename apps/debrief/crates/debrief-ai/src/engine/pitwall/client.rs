@@ -119,10 +119,8 @@ pub enum PitwallError {
 impl std::fmt::Display for PitwallError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PitwallError::NotRunning(_) => f.write_str("Pitwall is not running. Open Pitwall, or use the built-in engine (Settings ▸ AI)"),
-            PitwallError::Stopped => {
-                f.write_str("Pitwall stopped answering. Open Pitwall again, or use the built-in engine (Settings ▸ AI)")
-            }
+            PitwallError::NotRunning(_) => f.write_str("Pitwall is not running. Open Pitwall, then try again"),
+            PitwallError::Stopped => f.write_str("Pitwall stopped answering. Open Pitwall again, then try again"),
             PitwallError::Timeout(what) => write!(
                 f,
                 "Pitwall did not answer in time ({what}). Try again; if Pitwall is busy, wait for it"

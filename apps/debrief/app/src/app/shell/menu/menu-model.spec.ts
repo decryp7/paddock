@@ -190,7 +190,7 @@ describe('menu model', () => {
     expect(labels(sub(v, 'Live'))).toEqual(['Toggle live tail', '—', 'Alerts', 'Tail status']);
     // Granular profiling views are reached from inside the profiling views (and the palette), not the menu.
     expect(labels(sub(v, 'Profiling'))).toEqual(['Captures', 'Hotspots']);
-    expect(labels(sub(v, 'AI'))).toEqual(['Chat', 'Set up…', 'Models…']);
+    expect(labels(sub(v, 'AI'))).toEqual(['Chat', 'Connect to Pitwall…']);
     // Check marks: open views and the sidebar; the theme as a choice.
     const items = menuItems(v);
     expect(items.find((i) => i.label === 'Explorer')).toMatchObject({ id: 'view.toggleSidebar', checked: true, keybinding: 'Mod+B' });

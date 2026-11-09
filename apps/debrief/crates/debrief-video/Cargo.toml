@@ -17,6 +17,7 @@ test = false
 [dependencies]
 debrief-core = { path = "../debrief-core" }
 debrief-ai = { path = "../debrief-ai" }
+debrief-image = { path = "../debrief-image" }
 debrief-ipc = { path = "../debrief-ipc" }
 chrono.workspace = true
 log.workspace = true

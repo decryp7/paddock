@@ -1,6 +1,6 @@
 //! "Report a problem": one zip the user reviews and saves, to attach to a bug report. Nothing is sent
 //! anywhere. It holds the activity log and a bounded window of Debrief's own logs, the logs of the child
-//! processes Debrief supervises (AI engine, llama-server, plugin processes) with a `processes.json` summary,
+//! processes Debrief supervises (the store worker, plugin processes) with a `processes.json` summary,
 //! the error snapshots (with their breadcrumbs), the steps to reproduce, system information (no secrets),
 //! the last crash marker and recoverable sessions, the user's description, and a versioned `manifest.json`
 //! listing every file with its kind (Debrief opens such a zip as a diagnostics workspace: [`open`]).
@@ -784,7 +784,7 @@ pub(crate) mod tests {
         let mut inputs = inputs_in(&d);
         inputs.snapshots = None;
         let dir = inputs.children_dir().unwrap();
-        let worker = ChildLog::open(Some(&dir), &ChildLogSpec::new("ai-worker", ChildKind::AiWorker));
+        let worker = ChildLog::open(Some(&dir), &ChildLogSpec::new("store-worker", ChildKind::StoreWorker));
         worker.record(&ChildEvent::Start { pid: 10 });
         worker.record(&ChildEvent::Exit {
             pid: Some(10),
@@ -798,17 +798,20 @@ pub(crate) mod tests {
             noisy.record(&ChildEvent::Output(format!("{i} {}", "y".repeat(300))));
         }
         // And a previous session's file.
-        std::fs::write(dir.join("ai-worker.1.log"), "{\"Event\":\"start\",\"Pid\":1}\n").unwrap();
+        std::fs::write(dir.join("store-worker.1.log"), "{\"Event\":\"start\",\"Pid\":1}\n").unwrap();
         std::fs::write(dir.join("../children/not-a-log.txt"), "x").unwrap();
         // The worker runs now: its live state wins over its file.
         inputs.live_children = vec![worker.status()];
         let p = preview(&inputs, "");
         let entry = |n: &str| p.entries.iter().find(|e| e.name == n).cloned();
-        let w = entry("logs/children/ai-worker.log").unwrap();
-        assert_eq!(w.summary, "AI engine: 2 runs, 1 restart, last exit code 3, running");
+        let w = entry("logs/children/store-worker.log").unwrap();
+        assert_eq!(w.summary, "Store worker: 2 runs, 1 restart, last exit code 3, running");
         let noisy_entry = entry("logs/children/plugin-noisy.log").unwrap();
         assert!(noisy_entry.bytes <= children::CHILD_LOG_TAIL, "{}", noisy_entry.bytes);
-        assert!(entry("logs/children/ai-worker.1.log").unwrap().summary.contains("previous session"));
+        assert!(entry("logs/children/store-worker.1.log")
+            .unwrap()
+            .summary
+            .contains("previous session"));
         assert!(entry("logs/children/not-a-log.txt").is_none());
         let total: u64 = p
             .entries
@@ -824,7 +827,7 @@ pub(crate) mod tests {
         write(&inputs, "", &out).unwrap();
         let mut zip = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
         let procs: Vec<ProcessSummary> = serde_json::from_str(&zip_text(&mut zip, "processes.json")).unwrap();
-        let w = procs.iter().find(|p| p.name == "ai-worker").unwrap();
+        let w = procs.iter().find(|p| p.name == "store-worker").unwrap();
         assert_eq!(
             (w.state, w.restarts, w.pid),
             (debrief_ipc::child_log::ChildRunState::Running, 1, Some(11))

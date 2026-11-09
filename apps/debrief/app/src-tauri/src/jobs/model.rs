@@ -23,7 +23,7 @@ impl std::fmt::Display for JobId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum JobKind {
-    /// A request to the local model (one at a time: there is one model in memory).
+    /// A request to the local model (one at a time: Pitwall serves one model).
     Ai,
     /// Web research: search, read the result pages, answer with citations (one at a time: one browser).
     Research,
@@ -33,7 +33,7 @@ pub enum JobKind {
     Import,
     /// Reports, bundles, CSV, visuals, diagnostics archives.
     Export,
-    /// AI models and inference runtimes.
+    /// Downloads (the FFmpeg runtime, the research browser's files).
     Download,
     /// Diagnostics collections started by tools.
     Collection,
@@ -180,8 +180,6 @@ pub enum JobLink {
         #[serde(rename = "sessionId")]
         session_id: String,
     },
-    /// A model or runtime of the model manager.
-    Model { id: String },
 }
 
 /// The window a job belongs to (none for app-wide work) and what started it.
@@ -341,14 +339,6 @@ pub enum JobResult {
     },
     /// An analysis view, with the query it ran.
     View { view: String, ql: Option<String> },
-    /// A model ready to activate (model manager).
-    Model {
-        #[serde(rename = "fileName")]
-        file_name: Option<String>,
-        /// What the command that started the job returns to its waiter (the added model); never shown.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        detail: Option<Value>,
-    },
     /// The folder survey's proposals: View reopens the set-up wizard with them.
     FolderSurvey { outcome: Value },
     /// What clearing Debrief's storage freed and kept: View opens Settings ▸ Storage with it.
@@ -366,16 +356,12 @@ impl JobResult {
         }
     }
 
-    /// This result carrying `value` for the waiter of the command that started the job: a file, workspace or model keeps
+    /// This result carrying `value` for the waiter of the command that started the job: a file or workspace keeps
     /// its own kind (View still opens it); any other kind has no room for it and is returned as it is.
     pub fn with_detail(self, value: Value) -> JobResult {
         match self {
             JobResult::File { path, .. } => JobResult::file_with(path, value),
             JobResult::Workspace { .. } => JobResult::workspace_with(value),
-            JobResult::Model { file_name, .. } => JobResult::Model {
-                file_name,
-                detail: Some(value),
-            },
             other => other,
         }
     }
@@ -424,8 +410,6 @@ pub struct JobSpec {
     pub cancellable: bool,
     /// What Retry runs again (parsed by the producer's retry handler); `None`: not retryable.
     pub request: Option<Value>,
-    /// Background housekeeping nobody waits for: it ends without a message or notification (it still shows in the pane).
-    pub quiet: bool,
 }
 
 impl JobSpec {
@@ -436,14 +420,7 @@ impl JobSpec {
             source: JobSource::default(),
             cancellable: true,
             request: None,
-            quiet: false,
         }
-    }
-
-    /// Ends without a message or notification (see [`JobSpec::quiet`]).
-    pub fn quiet(mut self) -> JobSpec {
-        self.quiet = true;
-        self
     }
 
     pub fn window(mut self, window: &str) -> JobSpec {
@@ -494,9 +471,6 @@ pub struct Job {
     pub seen: bool,
     #[serde(default)]
     pub request: Option<Value>,
-    /// Ends without a message or notification.
-    #[serde(default)]
-    pub quiet: bool,
     /// The job this one retries.
     #[serde(default)]
     pub retry_of: Option<JobId>,
@@ -543,7 +517,6 @@ impl Job {
             error: None,
             seen: false,
             request: spec.request,
-            quiet: spec.quiet,
             retry_of: None,
         }
     }

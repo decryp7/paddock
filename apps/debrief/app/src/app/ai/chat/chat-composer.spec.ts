@@ -125,9 +125,8 @@ describe('ChatComposer', () => {
     expect(el(f, '[data-testid=ai-context-menu]').title).toBe('None: Only your question');
   });
 
-  it('switches the browser mode from its menu and warns about small models for agent mode', async () => {
+  it('switches the browser mode from its menu', async () => {
     const web = resetMockWeb();
-    web.smallModel = true;
     const env = setup();
     const { f, store } = env;
     await ready(env);
@@ -137,7 +136,6 @@ describe('ChatComposer', () => {
     el<HTMLButtonElement>(f, '[data-testid=ai-browser-menu]').click();
     f.detectChanges();
     await until(f, () => !!document.querySelector('[data-testid=ai-browser-agent]'));
-    expect(document.querySelector('[data-testid=ai-browser-agent]')?.textContent).toContain('7B or larger');
     document.querySelector<HTMLButtonElement>('[data-testid=ai-browser-readAlong]')!.click();
     await until(f, () => web.status(id).readAlong);
     await until(f, () => el(f, '[data-testid=ai-browser-menu]').textContent!.includes('Browser: Read along'));

@@ -414,17 +414,6 @@ async function captureAll(page: Page, theme: 'dark' | 'light'): Promise<void> {
     await page.waitForTimeout(800);
   });
 
-  // The first-start AI set-up window (modeless: the app stays usable while the model downloads).
-  await page.goto('/?mockAi=setup&mockAiStepMs=60000');
-  await expect(page.locator('debrief-status-bar')).toContainText('events', { timeout: 20_000 });
-  await command(page, `Colour scheme: ${theme}`);
-  await shot(page, 'dialog-ai-setup', async () => {
-    await need(page, 'Set up AI assistant');
-    await expect(page.getByTestId('ai-hardware')).toBeVisible();
-    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur()); // no focus ring on the close button
-  });
-  await page.keyboard.press('Escape');
-
   // Home: the dashboard (tiles, history by level, findings, activity).
   await fresh(page, theme);
   // Home fits the default window: its first screen is whole, Recent activity collapsed below it.

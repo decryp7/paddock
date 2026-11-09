@@ -1,23 +1,19 @@
-//! Repeatable evaluation of the AI use cases with a real model, through the real worker over the real
-//! transport. Cases live in `evals/cases.toml` (built from /samples) and are judged by the engine, not by
+//! Repeatable evaluation of the AI use cases with a real model served by Pitwall (ADR 0070: the quality guard of the
+//! prompts, run locally against a Pitwall that is running and paired; never in CI). Cases live in `evals/cases.toml` (built from /samples) and are judged by the engine, not by
 //! string comparison: queries by the events they match, regexes by what they match, profiles and pipelines by
 //! parsing and dry-running the sample, answers by whether the record ids they cite exist and a key fact
 //! appears.
 //!
-//!   cargo build --release -p debrief-ai-worker --features metal      # or vulkan; no feature = CPU
-//!   cargo run --release -p debrief-ai --example eval -- --model models/Qwen3.5-4B-Q4_K_M.gguf --out report.json
+//!   DEBRIEF_EVAL_PITWALL_KEY=<an API key Pitwall accepts> \
+//!     cargo run --release -p debrief-ai --example eval -- --out report.json
 //!
-//! Options: `--cases <file>`, `--worker <binary>` (default: DEBRIEF_AI_WORKER or next to the example),
-//! `--context <tokens>` (8192), `--only a,b` (use cases), `--limit N` (cases per use case),
+//! Options: `--key <key>` (default: DEBRIEF_EVAL_PITWALL_KEY), `--cases <file>`, `--context <tokens>` (8192), `--only a,b` (use cases), `--limit N` (cases per use case),
 //! `--samples <dir>` (default: ../../samples).
 
 use debrief_ai::assistant::{Assistant, AssistantConfig, Citation};
 use debrief_ai::chat::{ChatContext, ChatEnv, ChatEvent, ChatSession};
-use debrief_ai::gguf;
-use debrief_ai::hardware::{HardwareProbe, SystemProbe};
+use debrief_ai::engine::pitwall::{Locator, MemoryKeys, Needs, Pitwall, Priority, Tuning};
 use debrief_ai::llm::{ChatRequest, ChatResponse, LlmProvider};
-use debrief_ai::runtime::{GpuMode, LoadRequest, ModelRuntime};
-use debrief_ai::worker::{default_worker_path, FramesLauncher, WorkerConfig, WorkerRuntime};
 use debrief_ai::AiError;
 use debrief_core::api::QueryRequest;
 use debrief_core::ports::Store;
@@ -682,16 +678,8 @@ fn arg(args: &[String], name: &str) -> Option<String> {
     args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned())
 }
 
-struct Sys;
-impl debrief_collect::CommandRunner for Sys {
-    fn run(&self, p: &str, a: &[String], t: Duration) -> Result<debrief_collect::CommandOutput, debrief_collect::CommandError> {
-        debrief_collect::SystemRunner.run(p, a, t)
-    }
-}
-
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let model = PathBuf::from(arg(&args, "--model").expect("--model <file.gguf>"));
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let cases_path = arg(&args, "--cases")
         .map(PathBuf::from)
@@ -704,7 +692,9 @@ fn main() {
     let only: Vec<String> = arg(&args, "--only")
         .map(|v| v.split(',').map(str::to_string).collect())
         .unwrap_or_default();
-    let worker = arg(&args, "--worker").map(PathBuf::from).unwrap_or_else(default_worker_path);
+    let key = arg(&args, "--key")
+        .or_else(|| std::env::var("DEBRIEF_EVAL_PITWALL_KEY").ok())
+        .expect("--key <key> or DEBRIEF_EVAL_PITWALL_KEY (an API key Pitwall accepts)");
 
     let cases: Cases = toml::from_str(&std::fs::read_to_string(&cases_path).unwrap_or_else(|e| panic!("{}: {e}", cases_path.display())))
         .expect("cases.toml");
@@ -712,65 +702,37 @@ fn main() {
     let profile = Profile::from_toml(&profile_text).expect("profile");
     let store = open_store(&samples, &profile, &[]);
 
-    // The real worker, over the real transport.
-    let info = gguf::inspect(&model).unwrap_or_else(|e| panic!("{e}"));
-    let cfg = WorkerConfig::new(Arc::new(FramesLauncher {
-        exe: worker,
-        args: vec![],
-        env: debrief_ai::worker::fixed_env(vec![]),
-    }));
-    let rt = WorkerRuntime::new(cfg, Box::new(|| SystemProbe::new(Sys).probe()));
+    // The real Pitwall on this computer, over its real API.
+    let pitwall = Pitwall::new(Locator::system(), Arc::new(MemoryKeys::with(&key)), Tuning::default());
+    pitwall.set_needs(Needs { context_tokens: context });
     let t0 = Instant::now();
-    let loaded = rt
-        .load(&LoadRequest {
-            path: model.clone(),
-            projector: None,
-            context,
-            info: info.clone(),
-            gpu: GpuMode::Auto,
-            threads: 0,
-        })
-        .unwrap_or_else(|e| panic!("cannot load the model: {e}"));
+    let view = pitwall.probe();
+    if !view.usable {
+        panic!(
+            "Pitwall cannot serve Debrief: {}",
+            view.problem.as_deref().unwrap_or("not running or not paired")
+        );
+    }
+    let provider: Arc<dyn LlmProvider> = Arc::new(pitwall.provider(Priority::Interactive).unwrap_or_else(|e| panic!("{e}")));
     let load_ms = t0.elapsed().as_millis() as u64;
     println!(
-        "loaded {} on {} in {:.1}s (context {})",
-        loaded.provider.display_name(),
-        loaded.backend,
+        "Pitwall serves {} in {:.1}s (context {})",
+        provider.display_name(),
         load_ms as f64 / 1000.0,
-        loaded.provider.context_length()
+        provider.context_length()
     );
 
-    // Peak memory of the worker process, sampled while the cases run.
+    // The model lives in Pitwall's process: its memory is not Debrief's to sample here.
     let rss_peak = Arc::new(AtomicU64::new(0));
     let overall_peak = Arc::new(AtomicU64::new(0));
-    {
-        let (peak, overall) = (rss_peak.clone(), overall_peak.clone());
-        std::thread::spawn(move || {
-            let me = sysinfo::get_current_pid().ok();
-            let mut sys = sysinfo::System::new();
-            loop {
-                sys.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-                let rss = sys
-                    .processes()
-                    .values()
-                    .filter(|p| p.parent() == me && p.name().to_string_lossy().contains("debrief-ai-worker"))
-                    .map(|p| p.memory())
-                    .max()
-                    .unwrap_or(0);
-                peak.fetch_max(rss, Ordering::Relaxed);
-                overall.fetch_max(rss, Ordering::Relaxed);
-                std::thread::sleep(Duration::from_millis(250));
-            }
-        });
-    }
 
     let meter = Arc::new(Mutex::new(Meter::default()));
-    let provider = Measured {
-        inner: loaded.provider.clone(),
+    let measured = Measured {
+        inner: provider.clone(),
         meter: meter.clone(),
     };
     let assistant = Assistant::new(
-        provider,
+        measured,
         AssistantConfig {
             max_tokens: 1024,
             temperature: 0.2,
@@ -847,9 +809,9 @@ fn main() {
         );
     }
     let report = Report {
-        model: loaded.provider.display_name(),
-        file: model.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default(),
-        backend: loaded.backend.clone(),
+        model: provider.display_name(),
+        file: String::new(),
+        backend: "Pitwall".into(),
         context,
         load_ms,
         peak_rss_mb: overall_peak.load(Ordering::Relaxed) / (1024 * 1024),

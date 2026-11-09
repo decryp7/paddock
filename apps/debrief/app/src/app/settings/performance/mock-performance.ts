@@ -37,7 +37,6 @@ export class MockPerformanceBackend implements PerformanceBackend {
   async memory(): Promise<ProcessMemory[]> {
     return [
       { process: { kind: 'storeWorker' }, name: null, capMb: 2048, overrideMb: null, usedMb: 600, peakMb: 700, state: 'ended' },
-      { process: { kind: 'ai' }, name: null, capMb: 1024, overrideMb: null, usedMb: null, peakMb: null, state: null },
       ...this.plugins,
     ];
   }

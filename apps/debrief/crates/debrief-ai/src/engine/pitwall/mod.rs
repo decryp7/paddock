@@ -241,7 +241,7 @@ impl Pitwall {
         v.paired = true;
         if !health.serving() {
             v.problem = Some(format!(
-                "Pitwall is {} at the moment. Resume serving in Pitwall, or use the built-in engine.",
+                "Pitwall is {} at the moment. Resume serving in Pitwall.",
                 if health.serving == "stopped" { "stopped" } else { "paused" }
             ));
             return (v, Some(port), None, 0, false);
@@ -284,7 +284,7 @@ impl Pitwall {
         let i = self.inner();
         let (Some(port), Some(spec), true) = (i.port, i.spec.clone(), i.view.usable) else {
             return Err(AiError::Engine(i.view.problem.clone().unwrap_or_else(|| {
-                "Pitwall is not ready for Debrief. Open Pitwall, or use the built-in engine (Settings ▸ AI).".into()
+                "Pitwall is not ready for Debrief. Open Pitwall, then try again.".into()
             })));
         };
         let me = self.me.clone();

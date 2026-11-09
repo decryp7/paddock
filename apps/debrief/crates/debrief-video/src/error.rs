@@ -6,7 +6,6 @@ use thiserror::Error;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AiUnavailable {
     NoModel,
-    NoRuntime,
     NoVision,
 }
 
@@ -65,16 +64,13 @@ impl From<debrief_ai::AiError> for VideoError {
         match e {
             debrief_ai::AiError::Cancelled => VideoError::Cancelled,
             debrief_ai::AiError::Integrity(m) => VideoError::Integrity(m),
-            e @ (debrief_ai::AiError::NoModel | debrief_ai::AiError::NoRuntime | debrief_ai::AiError::NoVision) => {
-                VideoError::AiUnavailable {
-                    kind: match e {
-                        debrief_ai::AiError::NoModel => AiUnavailable::NoModel,
-                        debrief_ai::AiError::NoRuntime => AiUnavailable::NoRuntime,
-                        _ => AiUnavailable::NoVision,
-                    },
-                    message: e.to_string(),
-                }
-            }
+            e @ (debrief_ai::AiError::NoModel | debrief_ai::AiError::NoVision) => VideoError::AiUnavailable {
+                kind: match e {
+                    debrief_ai::AiError::NoModel => AiUnavailable::NoModel,
+                    _ => AiUnavailable::NoVision,
+                },
+                message: e.to_string(),
+            },
             other => VideoError::Ai(other.to_string()),
         }
     }

@@ -19,7 +19,7 @@ const row = (fixture: Parameters<typeof el>[0], id: string) => el(fixture, `tr[d
 describe('StorageSettings', () => {
   it('lists every category with its kind, size, files and location', async () => {
     const { fixture } = await setup();
-    expect(all(fixture, "table[aria-label=\"Debrief's storage\"] tbody tr")).toHaveLength(8);
+    expect(all(fixture, "table[aria-label=\"Debrief's storage\"] tbody tr")).toHaveLength(5);
     const logs = row(fixture, 'logs');
     expect(logs.textContent).toContain('Debrief logs');
     expect(logs.textContent).toContain('data');
@@ -32,7 +32,7 @@ describe('StorageSettings', () => {
     expect(row(fixture, 'logs').querySelector<HTMLButtonElement>('.act button')?.getAttribute('aria-label')).toBe('Clear… (Debrief logs)');
     // Nothing clearable now: disabled.
     expect(row(fixture, 'sessions').querySelector<HTMLButtonElement>('.act button')?.disabled).toBe(true);
-    expect(el(fixture, 'tfoot').textContent).toContain('GB');
+    expect(el(fixture, 'tfoot').textContent).toContain('70 MB');
   });
 
   it('"Clear cache" confirms what goes and how much, then reports the result', async () => {
@@ -42,15 +42,15 @@ describe('StorageSettings', () => {
     await settle(fixture);
     const dlg = dialogs.stack().at(-1);
     expect(dlg?.options.title).toBe('Clear cache?');
-    expect(String(dlg?.options.inputs?.['message'])).toContain('267 MB');
+    expect(String(dlg?.options.inputs?.['message'])).toContain('57 MB');
     expect(String(dlg?.options.inputs?.['detail'])).toContain('Web view cache — 45 MB');
     expect(String(dlg?.options.inputs?.['detail'])).not.toContain('logs');
     dlg?.ref.close(true);
-    await vi.waitFor(() => expect(clear).toHaveBeenCalledWith(['bundle-extracts', 'webview-cache', 'ai-runtimes-outdated']));
+    await vi.waitFor(() => expect(clear).toHaveBeenCalledWith(['bundle-extracts', 'webview-cache']));
     await vi.waitFor(() => expect(fixture.nativeElement.querySelector('[data-testid=storage-result]')).toBeTruthy());
     await settle(fixture);
     const result = el(fixture, '[data-testid=storage-result]').textContent ?? '';
-    expect(result).toContain('Freed 267 MB.');
+    expect(result).toContain('Freed 57 MB.');
     expect(result).toContain('Web view cache: freed 45 MB, kept 1 (in use by a running program).');
     expect(buttonByText(fixture, 'Clear cache…').disabled).toBe(true);
     buttonByText(fixture, 'Dismiss').click();
@@ -86,7 +86,7 @@ describe('StorageSettings', () => {
     expect(all(fixture, "table[aria-label=\"Debrief's storage\"] tbody tr")).toHaveLength(0);
     buttonByText(fixture, 'Retry').click();
     await settle(fixture);
-    expect(all(fixture, "table[aria-label=\"Debrief's storage\"] tbody tr")).toHaveLength(8);
+    expect(all(fixture, "table[aria-label=\"Debrief's storage\"] tbody tr")).toHaveLength(5);
   });
 
   it('opens a folder and shows a failure inline with Retry', async () => {

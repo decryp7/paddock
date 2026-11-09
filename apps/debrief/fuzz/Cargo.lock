@@ -494,14 +494,11 @@ dependencies = [
 name = "debrief-ai"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "base64",
  "debrief-collect",
  "debrief-core",
- "debrief-ipc",
- "flate2",
+ "debrief-image",
  "getrandom 0.4.3",
- "image",
  "libc",
  "log",
  "percent-encoding",
@@ -511,27 +508,10 @@ dependencies = [
  "serde_json",
  "sha2",
  "sysinfo",
- "tar",
  "thiserror 2.0.21",
- "tokio",
  "toml 1.1.8+spec-1.1.0",
  "ureq",
  "url",
- "windows",
- "zip",
-]
-
-[[package]]
-name = "debrief-ai-worker"
-version = "0.1.0"
-dependencies = [
- "debrief-ai",
- "debrief-core",
- "getrandom 0.4.3",
- "libc",
- "paddock-proc",
- "serde",
- "serde_json",
  "windows",
 ]
 
@@ -625,10 +605,10 @@ version = "0.0.0"
 dependencies = [
  "chrono",
  "debrief-ai",
- "debrief-ai-worker",
  "debrief-core",
  "debrief-dump",
  "debrief-etw",
+ "debrief-image",
  "debrief-ipc",
  "debrief-notes",
  "debrief-plugin-api",
@@ -647,6 +627,15 @@ dependencies = [
  "libfuzzer-sys",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "debrief-image"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "serde",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

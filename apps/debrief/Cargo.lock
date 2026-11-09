@@ -1325,6 +1325,7 @@ checksum = "4b5b023fc2978536bbb2a3b71237964fc4630bec1eb31077b4977127f4cdb9c0"
 dependencies = [
  "chrono",
  "derive_builder",
+ "jiff",
  "strum",
 ]
 
@@ -1588,17 +1589,15 @@ dependencies = [
 name = "debrief-ai"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "base64 0.23.1",
  "debrief-collect",
  "debrief-core",
- "debrief-ipc",
+ "debrief-image",
  "debrief-store-duck",
- "flate2",
  "getrandom 0.4.3",
- "image",
  "libc",
  "log",
+ "paddock-download",
  "percent-encoding",
  "proptest",
  "regex",
@@ -1607,30 +1606,11 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "sysinfo",
- "tar",
  "tempfile",
  "thiserror 2.0.21",
- "tokio",
  "toml 1.1.8+spec-1.1.0",
  "ureq",
  "url",
- "windows",
- "zip",
-]
-
-[[package]]
-name = "debrief-ai-worker"
-version = "0.1.0"
-dependencies = [
- "base64 0.23.1",
- "debrief-ai",
- "debrief-core",
- "getrandom 0.4.3",
- "libc",
- "paddock-proc",
- "serde",
- "serde_json",
- "tempfile",
  "windows",
 ]
 
@@ -1660,6 +1640,7 @@ dependencies = [
  "debrief-collect",
  "debrief-core",
  "debrief-dump",
+ "debrief-image",
  "debrief-ipc",
  "debrief-notes",
  "debrief-pdf",
@@ -1870,6 +1851,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "debrief-image"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "proptest",
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "debrief-ipc"
 version = "0.1.0"
 dependencies = [
@@ -1877,6 +1868,7 @@ dependencies = [
  "getrandom 0.4.3",
  "landlock",
  "libc",
+ "log",
  "paddock-proc",
  "postcard",
  "proptest",
@@ -2305,6 +2297,7 @@ dependencies = [
  "chrono",
  "debrief-ai",
  "debrief-core",
+ "debrief-image",
  "debrief-ipc",
  "log",
  "lzma-rs",
@@ -3540,6 +3533,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
 
 [[package]]
+name = "httpdate"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
+
+[[package]]
 name = "hybrid-array"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3951,6 +3950,7 @@ dependencies = [
  "defmt",
  "jiff-core",
  "jiff-static",
+ "jiff-tzdb",
  "jiff-tzdb-platform",
  "log",
  "portable-atomic",
@@ -5218,6 +5218,54 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2fbd56f7631767e61784dc43f8580f403f4475bd4aaa4da003e6295e1bab4a7e"
 dependencies = [
  "stable_deref_trait",
+]
+
+[[package]]
+name = "paddock-download"
+version = "0.2.0"
+dependencies = [
+ "fs4",
+ "httpdate",
+ "paddock-jobs",
+ "paddock-limits",
+ "paddock-workspace-hack",
+ "rustls",
+ "serde",
+ "serde_json",
+ "ureq",
+]
+
+[[package]]
+name = "paddock-env"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "paddock-jobs"
+version = "0.2.0"
+dependencies = [
+ "croner",
+ "jiff",
+ "log",
+ "paddock-env",
+ "paddock-limits",
+ "paddock-workspace-hack",
+ "serde",
+ "sha2 0.10.9",
+]
+
+[[package]]
+name = "paddock-limits"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-workspace-hack",
+ "serde",
 ]
 
 [[package]]

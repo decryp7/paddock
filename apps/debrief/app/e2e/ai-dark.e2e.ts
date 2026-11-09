@@ -48,21 +48,14 @@ test.describe('AI views in the dark theme', () => {
     await expectNoSeriousViolations(page, testInfo, 'dark-ai-propose', '[role=dialog]');
   });
 
-  test('setup wizard and model manager', async ({ page }, testInfo) => {
-    await openAppWith(page, '?mockAi=setup&mockAiStepMs=5');
-    await runCommand(page, 'Set up AI assistant');
-    const wizard = page.getByRole('dialog', { name: 'Set up the AI assistant' });
-    await expect(wizard.getByTestId('ai-hardware')).toContainText('8 GB video memory');
-    await expectNoSeriousViolations(page, testInfo, 'dark-ai-setup-plan', '[role=dialog]');
-    await wizard.getByTestId('ai-setup-start').click();
-    await expect(wizard).toHaveCount(0);
-    const ready = page.getByTestId('notification').filter({ hasText: 'AI assistant ready' });
-    await expect(ready).toBeVisible({ timeout: 20_000 });
-    await expectNoSeriousViolations(page, testInfo, 'dark-ai-setup-ready', '[data-testid=notification]');
-
-    await runCommand(page, 'AI: Manage models…');
-    const models = page.getByRole('dialog', { name: 'AI models' });
-    await expect(models).toContainText('Qwen3.5 9B');
-    await expectNoSeriousViolations(page, testInfo, 'dark-ai-models', '[role=dialog]');
+  test('Settings AI connection to Pitwall', async ({ page }, testInfo) => {
+    await openAppWith(page, '?mockPitwall=running&mockAi=setup&mockAiStepMs=150');
+    await runCommand(page, 'Connect to Pitwall');
+    const settings = page.getByRole('dialog', { name: 'Settings' });
+    await expect(settings.getByTestId('ai-engine-status')).toContainText('Engine: Pitwall');
+    await expectNoSeriousViolations(page, testInfo, 'dark-ai-settings-connect', '[role=dialog]');
+    await settings.getByTestId('ai-pitwall-connect').click();
+    await expect(settings.getByTestId('ai-pitwall-code')).toBeVisible();
+    await expectNoSeriousViolations(page, testInfo, 'dark-ai-settings-pairing', '[role=dialog]');
   });
 });

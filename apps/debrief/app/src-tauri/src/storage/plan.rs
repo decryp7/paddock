@@ -1,6 +1,5 @@
 //! What each storage category holds, what clearing it may remove, and the clearing itself. Works on
-//! folders resolved by the caller ([`Folders`]) and reaches the AI engine only through [`AiPort`], so it
-//! is tested with temporary folders and a fake engine.
+//! folders resolved by the caller ([`Folders`]), so it is tested with temporary folders.
 
 use super::model::{CategoryClearResult, CategoryId, StorageCategory};
 use super::walk::{confined, remove, size_of, Budget};
@@ -11,23 +10,8 @@ use std::time::SystemTime;
 /// Top-level entries one category lists at most (a folder with more is cleared in several goes).
 pub const MAX_ITEMS: usize = 10_000;
 
-/// What the storage view needs from the AI engine (implemented for `AiCore`; tests pass a fake).
-pub trait AiPort: Send + Sync {
-    /// Why runtime builds of the pinned release cannot be removed now (a model is loaded or being set up).
-    fn engine_busy(&self) -> Option<String>;
-    /// Why models cannot be removed now (a set-up is downloading one).
-    fn setup_busy(&self) -> Option<String>;
-    /// The custom `llama-server` the settings name, if any (never removed).
-    fn custom_server(&self) -> Option<PathBuf>;
-    fn models_dir(&self) -> PathBuf;
-    /// Installed models: file name and whether it is the active one.
-    fn models(&self) -> Vec<(String, bool)>;
-    fn delete_runtime(&self, tag: &str, id: &str) -> Result<(), String>;
-    fn delete_model(&self, file_name: &str) -> Result<(), String>;
-}
-
 /// The folders and facts the categories are computed from. `None` folders could not be resolved.
-pub struct Folders<'a> {
+pub struct Folders {
     /// Where `.debriefz` bundles are extracted (`share::bundles_root`).
     pub bundles: Option<PathBuf>,
     /// The webview's user data folder.
@@ -36,49 +20,25 @@ pub struct Folders<'a> {
     pub log: Option<PathBuf>,
     /// Today's log file (never removed).
     pub active_log: Option<PathBuf>,
-    /// The runtime release Debrief pins (`RuntimeCatalog::embedded().tag`).
-    pub runtime_tag: String,
     /// When this process started; sessions and bundles from this run are kept. `None`: keep them all.
     pub session_start: Option<SystemTime>,
     /// This process is the single (main) instance, which owns the data folder's sessions.
     pub main_instance: bool,
     /// The previous run crashed: its sessions are kept so they can be restored.
     pub previous_crash: bool,
-    /// An internal browser window is open (it holds its profile's files).
-    pub ai: Option<&'a dyn AiPort>,
-}
-
-/// How an item is removed.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum How {
-    /// Deleted from disk (confined to the category's root).
-    Path,
-    /// Through the AI engine, which stops using it first.
-    AiRuntime {
-        tag: String,
-        id: String,
-    },
-    AiModel {
-        file: String,
-    },
 }
 
 /// One top-level thing in a category.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Item {
     pub path: PathBuf,
-    pub how: How,
     /// Why it must stay; `None` when clearing may remove it.
     pub protect: Option<String>,
 }
 
 impl Item {
     fn path(path: PathBuf) -> Item {
-        Item {
-            path,
-            how: How::Path,
-            protect: None,
-        }
+        Item { path, protect: None }
     }
 
     fn protected(mut self, reason: Option<String>) -> Item {
@@ -182,24 +142,15 @@ fn webview_cache_dirs(webview: &Path) -> Vec<PathBuf> {
 }
 
 /// Every category, in display order. The stores entry is listed only when its folder exists.
-pub fn categories(f: &Folders<'_>) -> Vec<Category> {
-    let mut out = vec![
-        bundle_extracts(f),
-        webview_cache(f),
-        ai_runtimes_outdated(f),
-        ai_runtimes(f),
-        ai_models(f),
-        logs(f),
-        error_snapshots(f),
-        sessions(f),
-    ];
+pub fn categories(f: &Folders) -> Vec<Category> {
+    let mut out = vec![bundle_extracts(f), webview_cache(f), logs(f), error_snapshots(f), sessions(f)];
     if let Some(stores) = stores(f) {
         out.push(stores);
     }
     out
 }
 
-fn bundle_extracts(f: &Folders<'_>) -> Category {
+fn bundle_extracts(f: &Folders) -> Category {
     let mut c = Category::new(CategoryId::BundleExtracts, f.bundles.clone(), f.bundles.clone());
     if let Some(root) = &f.bundles {
         c.items = entries(root)
@@ -214,7 +165,7 @@ fn bundle_extracts(f: &Folders<'_>) -> Category {
     c
 }
 
-fn webview_cache(f: &Folders<'_>) -> Category {
+fn webview_cache(f: &Folders) -> Category {
     let mut c = Category::new(CategoryId::WebviewCache, f.webview.clone(), f.webview.clone());
     if let Some(root) = &f.webview {
         c.items = webview_cache_dirs(root)
@@ -231,85 +182,7 @@ fn webview_cache(f: &Folders<'_>) -> Category {
     c
 }
 
-fn runtimes_root(f: &Folders<'_>) -> Option<PathBuf> {
-    f.data.as_ref().map(|d| d.join("ai").join("runtimes"))
-}
-
-fn ai_runtimes_outdated(f: &Folders<'_>) -> Category {
-    let root = runtimes_root(f);
-    let mut c = Category::new(CategoryId::AiRuntimesOutdated, root.clone(), root.clone());
-    if let Some(root) = &root {
-        let custom = f.ai.and_then(|a| a.custom_server());
-        c.items = entries(root)
-            .into_iter()
-            .filter(|p| {
-                let n = name_of(p);
-                is_dir(p) && debrief_ai::runtimes::builds::is_build_id(&n) && n != "downloads" && n != f.runtime_tag
-            })
-            .map(|p| {
-                let keep = custom
-                    .as_ref()
-                    .filter(|s| s.starts_with(&p))
-                    .map(|_| "the settings use its llama-server".to_string());
-                Item::path(p).protected(keep)
-            })
-            .collect();
-    }
-    c
-}
-
-fn ai_runtimes(f: &Folders<'_>) -> Category {
-    let builds = runtimes_root(f).map(|r| r.join(&f.runtime_tag));
-    let mut c = Category::new(CategoryId::AiRuntimes, builds.clone(), builds.clone());
-    let Some(dir) = &builds else { return c };
-    let Some(ai) = f.ai else {
-        c.clearable = Err("the AI assistant is not running in this session".into());
-        return c;
-    };
-    let busy = ai.engine_busy();
-    c.items = entries(dir)
-        .into_iter()
-        .filter(|p| is_dir(p) && debrief_ai::runtimes::builds::is_build_id(&name_of(p)))
-        .map(|p| Item {
-            how: How::AiRuntime {
-                tag: f.runtime_tag.clone(),
-                id: name_of(&p),
-            },
-            path: p,
-            protect: busy.clone(),
-        })
-        .collect();
-    c.note = Some("The AI assistant downloads a runtime again when it needs one.".into());
-    c
-}
-
-fn ai_models(f: &Folders<'_>) -> Category {
-    let Some(ai) = f.ai else {
-        let dir = f.data.as_ref().map(|d| d.join("models"));
-        let mut c = Category::new(CategoryId::AiModels, dir.clone(), dir);
-        c.clearable = Err("the AI assistant is not running in this session".into());
-        return c;
-    };
-    let dir = ai.models_dir();
-    let mut c = Category::new(CategoryId::AiModels, Some(dir.clone()), Some(dir.clone()));
-    let busy = ai.setup_busy();
-    c.items = ai
-        .models()
-        .into_iter()
-        .take(MAX_ITEMS)
-        .map(|(file, active)| Item {
-            path: dir.join(&file),
-            protect: busy
-                .clone()
-                .or_else(|| active.then(|| "the active model: choose another one or remove it in Settings ▸ AI".to_string())),
-            how: How::AiModel { file },
-        })
-        .collect();
-    c.note = Some("The active model is kept.".into());
-    c
-}
-
-fn logs(f: &Folders<'_>) -> Category {
+fn logs(f: &Folders) -> Category {
     let mut c = Category::new(CategoryId::Logs, f.log.clone(), f.log.clone());
     if let Some(dir) = &f.log {
         let prefix = format!("{}.", crate::diagnostics::LOG_NAME);
@@ -330,7 +203,7 @@ fn logs(f: &Folders<'_>) -> Category {
     c
 }
 
-fn error_snapshots(f: &Folders<'_>) -> Category {
+fn error_snapshots(f: &Folders) -> Category {
     let dir = f.log.as_ref().map(|d| d.join("snapshots"));
     let mut c = Category::new(CategoryId::ErrorSnapshots, dir.clone(), dir.clone());
     if let Some(dir) = &dir {
@@ -344,7 +217,7 @@ fn error_snapshots(f: &Folders<'_>) -> Category {
     c
 }
 
-fn sessions(f: &Folders<'_>) -> Category {
+fn sessions(f: &Folders) -> Category {
     let shown = f.data.as_ref().map(|d| d.join("sessions"));
     let mut c = Category::new(CategoryId::Sessions, shown, f.data.clone());
     let Some(data) = &f.data else { return c };
@@ -364,7 +237,7 @@ fn sessions(f: &Folders<'_>) -> Category {
     c
 }
 
-fn stores(f: &Folders<'_>) -> Option<Category> {
+fn stores(f: &Folders) -> Option<Category> {
     let dir = f.data.as_ref().map(|d| d.join("stores")).filter(|d| d.is_dir())?;
     let mut c = Category::new(CategoryId::Stores, Some(dir.clone()), Some(dir.clone()));
     c.items = entries(&dir).into_iter().map(Item::path).collect();
@@ -408,7 +281,7 @@ pub fn usage(c: &Category, budget: &mut Budget) -> StorageCategory {
 
 /// Clears one category: every unprotected item, confined to the canonical root. `step` is called after
 /// each item (progress). Things that stay are reported in the result.
-pub fn clear(c: &Category, ai: Option<&dyn AiPort>, cancel: &AtomicBool, step: &mut dyn FnMut()) -> CategoryClearResult {
+pub fn clear(c: &Category, cancel: &AtomicBool, step: &mut dyn FnMut()) -> CategoryClearResult {
     if let Err(e) = &c.clearable {
         return CategoryClearResult::failed(c.id, e.clone());
     }
@@ -431,36 +304,14 @@ pub fn clear(c: &Category, ai: Option<&dyn AiPort>, cancel: &AtomicBool, step: &
         } else {
             match confined(&root, &item.path) {
                 Err(e) => out.skip(&item.path, e),
-                Ok(path) => clear_item(&path, &item.how, ai, cancel, &mut out),
+                Ok(path) => {
+                    remove(&path, cancel, &mut out);
+                }
             }
         }
         step();
     }
     out
-}
-
-fn clear_item(path: &Path, how: &How, ai: Option<&dyn AiPort>, cancel: &AtomicBool, out: &mut CategoryClearResult) {
-    let engine = |out: &mut CategoryClearResult, run: &dyn Fn(&dyn AiPort) -> Result<(), String>| {
-        let Some(ai) = ai else {
-            out.skip(path, "the AI assistant is not running in this session");
-            return;
-        };
-        let size = size_of(path, &mut Budget::standard());
-        match run(ai) {
-            Ok(()) => {
-                out.freed_bytes += size.bytes;
-                out.removed_files += size.files;
-            }
-            Err(e) => out.skip(path, e),
-        }
-    };
-    match how {
-        How::Path => {
-            remove(path, cancel, out);
-        }
-        How::AiRuntime { tag, id } => engine(out, &|ai| ai.delete_runtime(tag, id)),
-        How::AiModel { file } => engine(out, &|ai| ai.delete_model(file)),
-    }
 }
 
 /// The categories to clear for `ids`: unknown ids are refused, duplicates dropped.

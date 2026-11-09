@@ -56,8 +56,6 @@ export function linkLabel(link: JobLink | null): string | null {
       return link.path.split(/[\\/]/).pop() || link.path;
     case 'chat':
       return $localize`:@@jobs.link.chat:a chat`;
-    case 'model':
-      return link.id;
   }
 }
 

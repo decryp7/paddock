@@ -98,9 +98,9 @@ type Step = 'survey' | 'proposals' | 'review' | 'apply';
                 <p class="facts">{{ n }}</p>
               }
             } @else {
-              <span class="muted" data-testid="ai-off-note" i18n="@@ai.folderSetup.ai.off">These proposals come from the engine's heuristics. Set up the local AI assistant for better names, regexes and formats.</span>
+              <span class="muted" data-testid="ai-off-note" i18n="@@ai.folderSetup.ai.off">These proposals come from the engine's heuristics. Connect the AI assistant to Pitwall for better names, regexes and formats.</span>
               @if (ai.available()) {
-                <button type="button" class="btn ghost" (click)="setupAi()" i18n="@@ai.folderSetup.ai.setup">Set up AI…</button>
+                <button type="button" class="btn ghost" (click)="setupAi()" i18n="@@ai.folderSetup.ai.setup">Connect AI…</button>
               }
             }
           </div>

@@ -1,6 +1,6 @@
 # 9. Inference runs the official prebuilt llama-server, downloaded on demand
 
-- Status: accepted
+- Status: accepted; **superseded by [ADR 0070](0070-pitwall-is-debriefs-only-ai-engine.md)** (2026-11-08: Debrief 1.2 has no built-in engine)
 - Date: 2026-10-17
 
 ## Context

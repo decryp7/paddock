@@ -1,6 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AiBackend } from '../ai/ai-backend';
 import { FakeContext } from '../analysis/test-setup';
 import { Logger } from '../core/logger';
 import { COMMAND_CONTEXT } from '../extensions/command-registry';
@@ -78,20 +77,18 @@ class FakeNotices extends NotificationsBackend {
 function setup(snapshot: JobsSnapshot = EMPTY_JOBS) {
   const fake = new FakeJobs();
   fake.snapshot = snapshot;
-  const ai = { reset: vi.fn(async () => ({})) };
   const viewer = { view: vi.fn(async (_j: unknown): Promise<string | null> => null) };
   const ctx = new FakeContext();
   TestBed.configureTestingModule({
     providers: [
       { provide: JobsBackend, useValue: fake },
-      { provide: AiBackend, useValue: ai },
       { provide: JobViewer, useValue: viewer },
       { provide: COMMAND_CONTEXT, useValue: ctx },
       { provide: Logger, useFactory: () => new MemoryLogger() },
     ],
   });
   const f = TestBed.createComponent(JobsPanel);
-  return { f, fake, ai, viewer, ctx, root: f.nativeElement as HTMLElement };
+  return { f, fake, viewer, ctx, root: f.nativeElement as HTMLElement };
 }
 
 async function render(f: ComponentFixture<unknown>) {
@@ -108,7 +105,6 @@ const sample = (): JobsSnapshot => ({
     jobInfo({ id: 4, kind: 'export', title: 'Export CSV', state: 'done', resultType: 'file', unseen: true }),
     jobInfo({ id: 5, kind: 'import', title: 'Import logs', state: 'failed', retryable: true, error: 'file is locked' }),
   ],
-  paused: [],
 });
 
 describe('JobsPanel', () => {
@@ -120,7 +116,6 @@ describe('JobsPanel', () => {
     vi.spyOn(Date, 'now').mockImplementation(() => now);
     const running = (done: number): JobsSnapshot => ({
       jobs: [jobInfo({ id: 9, kind: 'ai', title: 'Download model', state: 'running', progress: { fraction: done / (100 * MB), done, total: 100 * MB, etaMs: null, unit: 'bytes' } })],
-      paused: [],
     });
     const { f, fake } = setup(running(0));
     await render(f);
@@ -172,7 +167,7 @@ describe('JobsPanel', () => {
   });
 
   it('shows an indeterminate bar while the fraction is unknown', async () => {
-    const { f } = setup({ jobs: [jobInfo({ id: 1, state: 'running', cancellable: true })], paused: [] });
+    const { f } = setup({ jobs: [jobInfo({ id: 1, state: 'running', cancellable: true })] });
     await render(f);
     const bar = el<HTMLProgressElement>(f, '[data-testid=job-1] progress');
     expect(bar.hasAttribute('value')).toBe(false);
@@ -180,14 +175,14 @@ describe('JobsPanel', () => {
 
   it('names the running phase next to the bar, with a growing count when the total is unknown', async () => {
     const phase = (label: string, scale: 'bytes' | 'count' | 'indeterminate', done: number | null) => ({ fraction: null, done, total: null, etaMs: null, unit: 'items' as const, phase: { label, scale } });
-    const { f, fake } = setup({ jobs: [jobInfo({ id: 1, state: 'running', progress: phase('Compacting segments', 'indeterminate', 1234) })], paused: [] });
+    const { f, fake } = setup({ jobs: [jobInfo({ id: 1, state: 'running', progress: phase('Compacting segments', 'indeterminate', 1234) })] });
     await render(f);
     expect(el(f, '[data-testid=job-phase-1]').textContent).toBe('Compacting segments: 1,234');
     expect(el<HTMLProgressElement>(f, '[data-testid=job-1] progress').hasAttribute('value')).toBe(false);
-    fake.push({ jobs: [jobInfo({ id: 1, state: 'running', progress: phase('Unpacking', 'bytes', 10) })], paused: [] });
+    fake.push({ jobs: [jobInfo({ id: 1, state: 'running', progress: phase('Unpacking', 'bytes', 10) })] });
     await settle(f);
     expect(el(f, '[data-testid=job-phase-1]').textContent).toBe('Unpacking');
-    fake.push({ jobs: [jobInfo({ id: 1, state: 'running' })], paused: [] });
+    fake.push({ jobs: [jobInfo({ id: 1, state: 'running' })] });
     await settle(f);
     expect(f.nativeElement.querySelector('[data-testid=job-phase-1]')).toBeNull();
   });
@@ -209,7 +204,7 @@ describe('JobsPanel', () => {
   });
 
   it('offers View only for finished jobs that have a result, and shows why a view failed', async () => {
-    const { f, viewer, root } = setup({ jobs: [jobInfo({ id: 1, resultType: null }), jobInfo({ id: 2, resultType: 'workspace' }), jobInfo({ id: 3, state: 'failed', resultType: 'workspace' })], paused: [] });
+    const { f, viewer, root } = setup({ jobs: [jobInfo({ id: 1, resultType: null }), jobInfo({ id: 2, resultType: 'workspace' }), jobInfo({ id: 3, state: 'failed', resultType: 'workspace' })] });
     await render(f);
     expect(root.querySelector('[data-testid=job-view-1]')).toBeNull();
     expect(root.querySelector('[data-testid=job-view-3]')).toBeNull();
@@ -294,34 +289,6 @@ describe('JobsPanel', () => {
     expect(fake.clearFinished).toHaveBeenCalled();
   });
 
-  it('warns when the AI queue is paused and resets the AI', async () => {
-    const { f, ai, fake } = setup({ jobs: [], paused: [{ kind: 'ai', reason: 'the model crashed' }] });
-    await render(f);
-    expect(el(f, '[data-testid=jobs-paused]').textContent).toContain('AI requests are paused: the model crashed');
-    el<HTMLButtonElement>(f, '[data-testid=jobs-paused] button').click();
-    await settle(f);
-    expect(ai.reset).toHaveBeenCalledTimes(1);
-    f.detectChanges();
-    expect(f.nativeElement.querySelector('p.err')).toBeNull();
-
-    ai.reset.mockRejectedValueOnce(new Error('still broken'));
-    el<HTMLButtonElement>(f, '[data-testid=jobs-paused] button').click();
-    await settle(f);
-    f.detectChanges();
-    expect(el(f, 'p.err').textContent).toContain('still broken');
-
-    ai.reset.mockRejectedValueOnce('as text');
-    el<HTMLButtonElement>(f, '[data-testid=jobs-paused] button').click();
-    await settle(f);
-    f.detectChanges();
-    expect(el(f, 'p.err').textContent).toContain('as text');
-
-    fake.push({ jobs: [], paused: [{ kind: 'export', reason: 'disk full' }] });
-    f.detectChanges();
-    expect(el(f, '[data-testid=jobs-paused]').textContent).toContain('Export jobs are paused: disk full');
-    expect(all(f, '[data-testid=jobs-paused] button')).toHaveLength(0);
-  });
-
   it('shows a request failure inline with Retry and Dismiss', async () => {
     const { f, fake } = setup(sample());
     await render(f);
@@ -347,20 +314,20 @@ describe('JobsPanel', () => {
   });
 
   it('announces a state change to screen readers, but not the first list', async () => {
-    const { f, fake } = setup({ jobs: [jobInfo({ id: 1, title: 'Export CSV', state: 'running' })], paused: [] });
+    const { f, fake } = setup({ jobs: [jobInfo({ id: 1, title: 'Export CSV', state: 'running' })] });
     await render(f);
     expect(el(f, '[data-testid=jobs-live]').textContent).toBe('');
     expect(el(f, '[data-testid=jobs-live]').getAttribute('aria-live')).toBe('polite');
-    fake.push({ jobs: [jobInfo({ id: 1, title: 'Export CSV', state: 'running', elapsedMs: 9 })], paused: [] });
+    fake.push({ jobs: [jobInfo({ id: 1, title: 'Export CSV', state: 'running', elapsedMs: 9 })] });
     await render(f);
     expect(el(f, '[data-testid=jobs-live]').textContent).toBe('');
-    fake.push({ jobs: [jobInfo({ id: 1, title: 'Export CSV', state: 'done' }), jobInfo({ id: 2, title: 'New one', state: 'queued', position: 1 })], paused: [] });
+    fake.push({ jobs: [jobInfo({ id: 1, title: 'Export CSV', state: 'done' }), jobInfo({ id: 2, title: 'New one', state: 'queued', position: 1 })] });
     await render(f);
     expect(el(f, '[data-testid=jobs-live]').textContent).toBe('Export CSV: Done');
   });
 
   it('moves between jobs with the arrow keys', async () => {
-    const { f } = setup({ jobs: [jobInfo({ id: 1, retryable: true, state: 'failed' }), jobInfo({ id: 2, retryable: true, state: 'failed' }), jobInfo({ id: 3, retryable: true, state: 'failed' })], paused: [] });
+    const { f } = setup({ jobs: [jobInfo({ id: 1, retryable: true, state: 'failed' }), jobInfo({ id: 2, retryable: true, state: 'failed' }), jobInfo({ id: 3, retryable: true, state: 'failed' })] });
     await render(f);
     const retry = (id: number) => el<HTMLButtonElement>(f, `[data-testid=job-retry-${id}]`);
     const press = (target: HTMLElement, key: string) => {
@@ -391,8 +358,7 @@ describe('JobsPanel', () => {
   it('opens what started a job', async () => {
     const link = (l: JobInfo['source']['link'], id: number) => jobInfo({ id, title: `T${id}`, source: { window: 'main', link: l } });
     const { f, ctx, viewer } = setup({
-      jobs: [link({ type: 'event', recordId: 42 }, 1), link({ type: 'query', ql: 'level >= error' }, 2), link({ type: 'range', from: 10, to: 20 }, 3), link({ type: 'chat', sessionId: 's' }, 4), link({ type: 'path', path: 'C:\\logs\\app.log' }, 5), link({ type: 'model', id: 'qwen' }, 6)],
-      paused: [],
+      jobs: [link({ type: 'event', recordId: 42 }, 1), link({ type: 'query', ql: 'level >= error' }, 2), link({ type: 'range', from: 10, to: 20 }, 3), link({ type: 'chat', sessionId: 's' }, 4), link({ type: 'path', path: 'C:\\logs\\app.log' }, 5)],
     });
     await render(f);
     const source = (id: number) => el<HTMLButtonElement>(f, `[data-testid=job-${id}] .link`);
@@ -410,7 +376,6 @@ describe('JobsPanel', () => {
     ctx.calls.length = 0;
     expect(source(5).textContent).toBe('app.log');
     source(5).click();
-    source(6).click();
     expect(ctx.calls).toEqual([]);
     expect(all(f, '[data-testid=job-4] .link')).toHaveLength(1);
   });
@@ -421,7 +386,7 @@ describe('StatusJobs', () => {
 
   function setupStatus(jobs: JobInfo[], unread: number) {
     const fake = new FakeJobs();
-    fake.snapshot = { jobs, paused: [] };
+    fake.snapshot = { jobs };
     const notices = new FakeNotices();
     notices.snapshot = { notices: [] as Notice[], unread };
     const ctx = new FakeContext();
@@ -463,10 +428,10 @@ describe('StatusJobs', () => {
     expect(pill.getAttribute('aria-label')).toBe('2 jobs running or waiting');
     pill.click();
     expect(ctx.last('showView')).toEqual(['jobs']);
-    fake.push({ jobs: [jobInfo({ id: 1, state: 'running' })], paused: [] });
+    fake.push({ jobs: [jobInfo({ id: 1, state: 'running' })] });
     f.detectChanges();
     expect(el(f, '[data-testid=status-jobs]').getAttribute('aria-label')).toBe('1 job running or waiting');
-    fake.push({ jobs: [], paused: [] });
+    fake.push({ jobs: [] });
     f.detectChanges();
     expect(f.nativeElement.querySelector('[data-testid=status-jobs]')).toBeNull();
   });

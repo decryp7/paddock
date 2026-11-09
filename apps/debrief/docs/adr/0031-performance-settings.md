@@ -1,6 +1,6 @@
 # 31. Performance settings: memory caps, CPU, DuckDB, warnings and suggested values
 
-- Status: accepted (2026-10-22)
+- Status: accepted (2026-10-22); amended by [ADR 0070](0070-pitwall-is-debriefs-only-ai-engine.md) (the AI worker and its memory cap go)
 - Related: ADR 0014 (DuckDB store, memory budgets), ADR 0017 (out-of-process plugins and workers, sandbox),
   ADR 0012 (jobs, notification centre), ADR 0030 (Store pane, SQL console), AGENTS.md (engine is the source of truth, validate in Rust, versioned
   persistent state, bounded resources)

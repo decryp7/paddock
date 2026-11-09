@@ -3,7 +3,7 @@ import { patchState, signalStore, withComputed, withMethods, withState } from '@
 import { JobFollow } from '../../jobs/job-follow';
 import { AiBackend, toAiError } from '../ai-backend';
 import { AiStatusStore } from '../ai-status.store';
-import { AiImage, InstalledModel, Narrative, RelatedOutcome } from '../ai.types';
+import { AiImage, Narrative, RelatedOutcome } from '../ai.types';
 import { bytesToBase64, MAX_IMAGE_BYTES } from './image-files';
 import { ImageLink, imageLinks, parseNarrative, parseRelatedOutcome } from './related-format';
 
@@ -23,13 +23,6 @@ export interface DetachedOutcome {
   outcome: RelatedOutcome;
 }
 
-/** "Add image support" of the active model: its download job. */
-export interface ProjectorInstall {
-  jobId: number | null;
-  running: boolean;
-  error: string | null;
-}
-
 interface ImageState {
   images: AiImage[];
   currentId: number | null;
@@ -41,11 +34,8 @@ interface ImageState {
   opening: boolean;
   /** Why the last open or paste failed (Retry repeats it). */
   openError: string | null;
-  /** A request was refused because the active model reads text only. */
+  /** A request was refused because the model Pitwall serves reads text only. */
   noVision: boolean;
-  /** The active model as installed (for "Add image support (N MB)"). */
-  activeModel: InstalledModel | null;
-  projector: ProjectorInstall;
 }
 
 const initial: ImageState = {
@@ -58,15 +48,13 @@ const initial: ImageState = {
   opening: false,
   openError: null,
   noVision: false,
-  activeModel: null,
-  projector: { jobId: null, running: false, error: null },
 };
 
 const idle = <T>(): ImageJobState<T> => ({ jobId: null, running: false, error: null, value: null });
 
 /**
  * Images opened for the AI in this window (ADR 0025): the clean copies Rust made, the current one, its explanation
- * and related logs (AI jobs, followed while they run), and the no-vision state with "Add image support". The engine
+ * and related logs (AI jobs, followed while they run), and the no-vision state. The engine
  * decodes, searches and ranks; this keeps what the views show.
  */
 export const AiImageStore = signalStore(
@@ -232,52 +220,15 @@ export const AiImageStore = signalStore(
         return true;
       },
 
-      /** Reads the active model (for the size of its image support). */
-      async loadActiveModel(): Promise<InstalledModel | null> {
-        try {
-          const models = await backend.models();
-          const active = models.find((m) => m.active) ?? null;
-          patchState(store, { activeModel: active });
-          return active;
-        } catch {
-          return null;
-        }
-      },
-
       /** Shows the no-vision message (a text-only model was asked about an image). */
       refuseNoVision(): void {
         patchState(store, { noVision: true });
-        void methods.loadActiveModel();
       },
 
       dismissNoVision(): void {
         patchState(store, { noVision: false });
       },
 
-      /**
-       * "Add image support (N MB)": downloads the active model's catalog projector as a download job (only when the user
-       * asks). Resolves when the job ended; the status then says the model reads images.
-       */
-      async installProjector(): Promise<void> {
-        const m = store.activeModel() ?? (await methods.loadActiveModel());
-        if (!m || store.projector().running) return;
-        patchState(store, { projector: { jobId: null, running: true, error: null } });
-        try {
-          const jobId = await backend.installProjector(m.fileName);
-          patchState(store, { projector: { jobId, running: true, error: null } });
-          follow.started($localize`:@@ai.vision.projector.started:Downloading image support for ${m.name}:name: — running in Jobs`);
-          const end = await follow.follow(jobId, owner);
-          if (end?.state === 'failed') throw new Error(end.error ?? $localize`:@@ai.vision.projector.failed:The download failed.`);
-          patchState(store, { projector: { jobId, running: false, error: null } });
-          if (end?.state === 'done') {
-            await status.refresh();
-            await methods.loadActiveModel();
-            patchState(store, { noVision: false });
-          }
-        } catch (e) {
-          patchState(store, (s) => ({ projector: { jobId: s.projector.jobId, running: false, error: toAiError(e).message } }));
-        }
-      },
     };
     return methods;
   }),

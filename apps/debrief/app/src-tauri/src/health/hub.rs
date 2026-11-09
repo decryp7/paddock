@@ -16,7 +16,7 @@ pub const DOWNLOADS: &str = "downloads";
 /// Every service and what the user calls it, in the order the status bar lists them.
 pub const CATALOG: [(&str, &str); 5] = [
     (STORE, "the log store"),
-    (AI, "the AI worker"),
+    (AI, "the AI assistant"),
     (PLUGINS, "plugins"),
     (BROWSER, "the research browser"),
     (DOWNLOADS, "downloads"),
@@ -55,16 +55,12 @@ pub enum BrowserService {
     LaunchFailed,
 }
 
-/// What the AI worker's state means for health, kept apart from the AI module's DTO so this stays testable.
+/// What the AI assistant's state means for health, kept apart from the AI module's DTO so this stays testable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AiHealth {
-    /// Loaded, loading, idle or no model chosen: nothing is wrong.
+    /// Pitwall serves a model, or nothing was asked of it: nothing is wrong.
     Fine,
-    /// The worker crashed repeatedly and was switched off for the session.
-    Switched,
-    /// The last model load failed.
-    LoadFailed,
-    /// The chosen engine (Pitwall) is not usable or went away mid-session; `reason` says why (ADR 0059).
+    /// Pitwall is not usable or went away mid-session; `reason` says why (ADR 0059, ADR 0070).
     EngineLost,
 }
 
@@ -165,45 +161,28 @@ impl Health {
         lock(&self.extra).store_failure
     }
 
-    // ---- the AI worker ----
+    // ---- the AI assistant (Pitwall) ----
 
     pub fn ai(&self, health: AiHealth, reason: Option<&str>) {
         let reason = reason.unwrap_or("").trim();
-        // A worker the memory cap stopped stays down, with its advice, until it is repaired or reset.
-        if lock(&self.extra).cap_stops.contains_key(AI) {
-            return;
-        }
         match health {
             AiHealth::Fine => {
                 self.registry.ok(AI);
             }
-            AiHealth::Switched => {
-                let cause = Cause::new("The AI worker was switched off after it failed several times in a row.")
-                    .hint("Choose Try again to start it. If it stops again, report the problem and include the details.")
-                    .detail(reason);
-                self.registry
-                    .set(AI, ServiceState::Quarantined, Some(cause), Some(RepairAction::Reset));
-            }
             AiHealth::EngineLost => {
                 let cause = Cause::new("Pitwall is not answering Debrief.")
-                    .hint("Open Pitwall to use it again, or choose Use the fallback to continue with Debrief's built-in engine.")
+                    .hint("Open Pitwall and connect Debrief to it (Settings ▸ AI), then choose Try again.")
                     .detail(reason);
                 self.registry
-                    .set(AI, ServiceState::Degraded, Some(cause), Some(RepairAction::UseFallback));
-            }
-            AiHealth::LoadFailed => {
-                let cause = Cause::new("The AI model could not be loaded.")
-                    .hint("Choose Try again. If it keeps failing, pick another model in Settings ▸ AI.")
-                    .detail(reason);
-                self.registry.set(AI, ServiceState::Down, Some(cause), Some(RepairAction::Reset));
+                    .set(AI, ServiceState::Degraded, Some(cause), Some(RepairAction::Retry));
             }
         }
     }
 
     // ---- memory caps ----
 
-    /// The memory watcher stopped a process over its cap. `cause` carries the "Raise the cap…" advice. The store worker and the
-    /// AI worker are down until repaired (Try again); a plugin joins the plugins service with the advice.
+    /// The memory watcher stopped a process over its cap. `cause` carries the "Raise the cap…" advice. The store worker is
+    /// down until repaired (Try again); a plugin joins the plugins service with the advice.
     pub fn memory_stopped(&self, service: &'static str, plugin: Option<&str>, cause: Cause) {
         match (service, plugin) {
             (PLUGINS, Some(id)) => {
@@ -221,11 +200,6 @@ impl Health {
                     .set(service, ServiceState::Down, Some(cause), Some(RepairAction::Retry));
             }
         }
-    }
-
-    /// The user reset the process the cap stopped: its cause no longer applies.
-    pub fn clear_cap_stop(&self, service: &'static str) {
-        lock(&self.extra).cap_stops.remove(service);
     }
 
     // ---- plugins ----
@@ -405,7 +379,6 @@ impl Health {
             Ok(()) => match id {
                 STORE => self.store_running(),
                 AI => {
-                    lock(&self.extra).cap_stops.remove(AI);
                     self.registry.ok(AI);
                 }
                 PLUGINS => {

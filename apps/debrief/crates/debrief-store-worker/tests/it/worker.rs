@@ -180,7 +180,7 @@ fn a_workers_temp_folder_fits_every_endpoint_and_is_removed_with_its_test() {
         let cfg = confined("/x/worker");
         let path = PathBuf::from(&cfg.env.iter().find(|(k, _)| k == "TMPDIR").unwrap().1);
         assert!(path.is_dir());
-        for p in [prefix::DEFAULT, prefix::PLUGIN, prefix::PLUGIN_TEST, prefix::AI] {
+        for p in [prefix::DEFAULT, prefix::PLUGIN, prefix::PLUGIN_TEST, prefix::STORE] {
             assert!(fits(&path, p), "{p} does not fit in {path:?}");
         }
         (path, cfg.env)

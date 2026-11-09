@@ -70,14 +70,14 @@ describe('AiChatPanel queued turn', () => {
   it('shows the queue position while the chat waits behind another AI request', async () => {
     const { f, chat, jobs, root } = await setup();
     const id = must(chat.activeId());
-    jobs.apply({ jobs: [queuedJob(id, 2)], paused: [] });
+    jobs.apply({ jobs: [queuedJob(id, 2)] });
     f.detectChanges();
     const label = el(f, '[data-testid=ai-chat-queued]');
     expect(label.getAttribute('role')).toBe('status');
     expect(label.textContent).toBe('Queued (position 2) · the AI answers one request at a time');
     expect(root.querySelector('[aria-label=Thinking]')).toBeNull();
 
-    jobs.apply({ jobs: [queuedJob(id, 1)], paused: [] });
+    jobs.apply({ jobs: [queuedJob(id, 1)] });
     f.detectChanges();
     expect(el(f, '[data-testid=ai-chat-queued]').textContent).toContain('Queued (position 1)');
   });
@@ -85,10 +85,10 @@ describe('AiChatPanel queued turn', () => {
   it('shows a plain Queued when the position is unknown and goes back to Thinking when the turn starts', async () => {
     const { f, chat, jobs, root } = await setup();
     const id = must(chat.activeId());
-    jobs.apply({ jobs: [queuedJob(id, null)], paused: [] });
+    jobs.apply({ jobs: [queuedJob(id, null)] });
     f.detectChanges();
     expect(el(f, '[data-testid=ai-chat-queued]').textContent).toBe('Queued · the AI answers one request at a time');
-    jobs.apply({ jobs: [queuedJob(id, null, 'running')], paused: [] });
+    jobs.apply({ jobs: [queuedJob(id, null, 'running')] });
     f.detectChanges();
     expect(root.querySelector('[data-testid=ai-chat-queued]')).toBeNull();
     expect(root.querySelector('[aria-label=Thinking]')).toBeTruthy();
@@ -96,7 +96,7 @@ describe('AiChatPanel queued turn', () => {
 
   it('ignores the queued turn of another chat', async () => {
     const { f, jobs, root } = await setup();
-    jobs.apply({ jobs: [queuedJob('some-other-chat', 1)], paused: [] });
+    jobs.apply({ jobs: [queuedJob('some-other-chat', 1)] });
     f.detectChanges();
     expect(root.querySelector('[data-testid=ai-chat-queued]')).toBeNull();
   });

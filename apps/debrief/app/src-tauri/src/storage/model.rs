@@ -10,11 +10,6 @@ pub enum CategoryId {
     BundleExtracts,
     /// The webview's HTTP, code and GPU caches.
     WebviewCache,
-    /// Inference runtime builds of releases Debrief no longer pins.
-    AiRuntimesOutdated,
-    /// Inference runtime builds of the pinned release.
-    AiRuntimes,
-    AiModels,
     /// Debrief's own rolling logs (never today's file).
     Logs,
     ErrorSnapshots,
@@ -25,12 +20,9 @@ pub enum CategoryId {
 }
 
 impl CategoryId {
-    pub const ALL: [CategoryId; 9] = [
+    pub const ALL: [CategoryId; 6] = [
         CategoryId::BundleExtracts,
         CategoryId::WebviewCache,
-        CategoryId::AiRuntimesOutdated,
-        CategoryId::AiRuntimes,
-        CategoryId::AiModels,
         CategoryId::Logs,
         CategoryId::ErrorSnapshots,
         CategoryId::Sessions,
@@ -41,9 +33,6 @@ impl CategoryId {
         match self {
             CategoryId::BundleExtracts => "bundle-extracts",
             CategoryId::WebviewCache => "webview-cache",
-            CategoryId::AiRuntimesOutdated => "ai-runtimes-outdated",
-            CategoryId::AiRuntimes => "ai-runtimes",
-            CategoryId::AiModels => "ai-models",
             CategoryId::Logs => "logs",
             CategoryId::ErrorSnapshots => "error-snapshots",
             CategoryId::Sessions => "sessions",
@@ -58,7 +47,7 @@ impl CategoryId {
 
     pub fn kind(self) -> Kind {
         match self {
-            CategoryId::BundleExtracts | CategoryId::WebviewCache | CategoryId::AiRuntimesOutdated => Kind::Cache,
+            CategoryId::BundleExtracts | CategoryId::WebviewCache => Kind::Cache,
             _ => Kind::Data,
         }
     }
@@ -68,9 +57,6 @@ impl CategoryId {
         match self {
             CategoryId::BundleExtracts => "Opened bundles (temporary copies)",
             CategoryId::WebviewCache => "Web view cache",
-            CategoryId::AiRuntimesOutdated => "Outdated AI runtimes",
-            CategoryId::AiRuntimes => "AI runtimes",
-            CategoryId::AiModels => "AI models",
             CategoryId::Logs => "Debrief logs",
             CategoryId::ErrorSnapshots => "Error snapshots",
             CategoryId::Sessions => "Session backups",
@@ -200,10 +186,7 @@ mod tests {
             assert_eq!(CategoryId::parse(bad), None, "{bad}");
         }
         let cache: Vec<_> = CategoryId::ALL.into_iter().filter(|c| c.kind() == Kind::Cache).collect();
-        assert_eq!(
-            cache,
-            [CategoryId::BundleExtracts, CategoryId::WebviewCache, CategoryId::AiRuntimesOutdated]
-        );
+        assert_eq!(cache, [CategoryId::BundleExtracts, CategoryId::WebviewCache]);
         assert_eq!(serde_json::to_value(Kind::Data).unwrap(), "data");
     }
 

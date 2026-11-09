@@ -10,7 +10,7 @@ describe('dialog window bootstrap', () => {
   it('builds a small provider set, plus the features the dialog names, loaded on demand', async () => {
     const base = await dialogAppConfig('about'); // tools
     const none = await dialogAppConfig('cheat-sheet');
-    const ai = await dialogAppConfig('ai-setup');
+    const ai = await dialogAppConfig('ai-query');
     expect(none.providers.length).toBe(dialogBaseProviders().length);
     expect(base.providers.length).toBeGreaterThan(none.providers.length);
     expect(ai.providers.length).toBeGreaterThan(none.providers.length);

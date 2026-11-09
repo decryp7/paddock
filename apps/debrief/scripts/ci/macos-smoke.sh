@@ -51,7 +51,6 @@ while IFS= read -r exe; do
   case "$name" in
     debrief-store-worker) args=(--self-test) ;;
     debrief-plugins) args=(--manifests) ;;
-    debrief-ai-worker) args=(--list-builds) ;;
     *) echo "::error::sidecar $name has no self-test in scripts/ci/macos-smoke.sh: add one (every sidecar must be started by the smoke)"; exit 1 ;;
   esac
   echo "-- $name ${args[*]}"

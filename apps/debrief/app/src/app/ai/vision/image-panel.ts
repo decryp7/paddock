@@ -11,7 +11,7 @@ import { AiRichText } from '../chat/rich-text';
 import { AiImageStore } from './ai-image.store';
 import { imageFilter } from './image-files';
 import { ImageViewer } from './image-viewer';
-import { AiNoVisionCard } from './no-vision-card';
+import { AiNoVisionNote } from './no-vision-note';
 import { AiRelatedResults } from './related-results';
 
 /**
@@ -22,7 +22,7 @@ import { AiRelatedResults } from './related-results';
 @Component({
   selector: 'debrief-ai-image-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ImageViewer, AiRichText, AiNoVisionCard, AiRelatedResults],
+  imports: [ImageViewer, AiRichText, AiNoVisionNote, AiRelatedResults],
   template: `
     <div class="bar" role="toolbar" aria-label="Images" i18n-aria-label="@@ai.vision.panel.toolbar">
       @if (store.images().length > 1) {
@@ -101,7 +101,7 @@ import { AiRelatedResults } from './related-results';
         <div class="empty">
           <p class="muted" i18n="@@ai.vision.panel.empty">Open a screenshot to let the local AI explain it and find the log events that belong to it. Images stay on this computer.</p>
           @if (!status.status()?.vision && status.hasModel()) {
-            <p class="muted small" i18n="@@ai.vision.panel.textOnly">The active model reads text only.</p>
+            <p class="muted small" i18n="@@ai.vision.panel.textOnly">The model Pitwall serves reads text only.</p>
           }
         </div>
       }

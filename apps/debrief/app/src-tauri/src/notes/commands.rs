@@ -218,9 +218,7 @@ pub async fn notes_restore(win: CurrentWindow, record: Option<Value>) -> CmdResu
 #[tauri::command]
 pub async fn notes_image_open(win: CurrentWindow, grants: crate::paths::WindowGrants, path: String) -> CmdResult<NoteImage> {
     let w = win.arc().clone();
-    let granted = grants.read_or_listed(&path, debrief_ai::vision::SourceFormat::EXTENSIONS, |raw| {
-        listed_paths(&w).contains(raw)
-    })?;
+    let granted = grants.read_or_listed(&path, debrief_image::SourceFormat::EXTENSIONS, |raw| listed_paths(&w).contains(raw))?;
     let file = granted.path().to_path_buf();
     blocking(move || {
         let img = images::open_file(&file)?;

@@ -20,15 +20,6 @@
       "max": 1
     },
     {
-      "name": "debrief-ai-worker",
-      "role": "helper",
-      "min": 0,
-      "max": 1,
-      "parents": [
-        "app"
-      ]
-    },
-    {
       "name": "debrief-plugins",
       "role": "helper",
       "min": 0,

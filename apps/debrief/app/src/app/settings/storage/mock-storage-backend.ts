@@ -31,9 +31,6 @@ export function mockCategories(): StorageCategory[] {
   return [
     row({ id: 'bundle-extracts', label: 'Opened bundles (temporary copies)', kind: 'cache', bytes: 12 * MB, note: 'Bundles opened in this session are kept.' }),
     row({ id: 'webview-cache', label: 'Web view cache', kind: 'cache', bytes: 48 * MB, clearableBytes: 45 * MB, note: 'Files the running web view holds open are removed after Debrief restarts.' }),
-    row({ id: 'ai-runtimes-outdated', label: 'Outdated AI runtimes', kind: 'cache', bytes: 210 * MB }),
-    row({ id: 'ai-runtimes', label: 'AI runtimes', kind: 'data', bytes: 230 * MB, note: 'The AI assistant downloads a runtime again when it needs one.' }),
-    row({ id: 'ai-models', label: 'AI models', kind: 'data', bytes: 4_400 * MB, clearableBytes: 0, note: 'The active model is kept.' }),
     row({ id: 'logs', label: 'Debrief logs', kind: 'data', bytes: 6 * MB, clearableBytes: 5 * MB, note: "Today's log is kept." }),
     row({ id: 'error-snapshots', label: 'Error snapshots', kind: 'data', bytes: 3 * MB }),
     row({ id: 'sessions', label: 'Session backups', kind: 'data', bytes: 1 * MB, clearableBytes: 0, note: 'Sessions of this run are kept.' }),
@@ -43,7 +40,6 @@ export function mockCategories(): StorageCategory[] {
 /** Why the mock keeps something when clearing it (mirrors the engine's protections). */
 const KEPT: Partial<Record<StorageCategoryId, string>> = {
   'webview-cache': 'in use by a running program',
-  'ai-models': 'the active model: choose another one or remove it in Settings ▸ AI',
   logs: 'Debrief is writing to it',
   sessions: 'saved in this session',
 };

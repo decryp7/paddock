@@ -9,11 +9,9 @@ pub enum AiError {
     Cancelled,
     #[error("{0}")]
     Invalid(String),
-    #[error("no AI model is set up yet: choose \"Set up AI assistant\" first")]
+    /// Pitwall serves no model for Debrief (not installed, not running, not paired, no model fits).
+    #[error("Pitwall serves no model for Debrief yet: connect Debrief to Pitwall in Settings > AI")]
     NoModel,
-    /// No llama-server build is installed (and no custom path is set): the worker cannot run a model.
-    #[error("no inference runtime is installed: download one in the AI set-up")]
-    NoRuntime,
     #[error("the model engine failed: {0}")]
     Engine(String),
     /// The browser (a page of the research or agent browser) failed: not open, not answering, changed under
@@ -22,17 +20,16 @@ pub enum AiError {
     Browser(String),
     #[error("the conversation does not fit the model's context window ({prompt} of {limit} tokens)")]
     ContextOverflow { prompt: usize, limit: usize },
-    /// Images were given to a model that cannot read them (no image projector installed for it).
-    #[error("the active model cannot read images: install its image support (projector) or choose a model marked \"Text + images\"")]
+    /// Images were given to a model that cannot read them.
+    #[error("the model Pitwall serves for Debrief cannot read images: choose a model that reads images in Pitwall")]
     NoVision,
+    /// Pitwall has no model that fits the memory (or the request does not fit the model's memory).
+    #[error("not enough memory: {0}")]
+    Memory(String),
     #[error("the model produced an unusable answer: {0}")]
     Malformed(String),
     #[error("the assistant stopped after {0} tool rounds without an answer")]
     ToolLoopLimit(usize),
-    #[error("not a usable model file: {0}")]
-    ModelFile(String),
-    #[error("not enough memory: {0}")]
-    Memory(String),
     #[error("network error: {0}")]
     Network(String),
     /// A request failed for a reason the user can act on (certificate, proxy, offline, timeout, HTTP status).
@@ -50,10 +47,6 @@ pub enum AiError {
     Refused(String),
     #[error("i/o error: {0}")]
     Io(String),
-    /// A newly downloaded inference runtime failed its self-test with the active model, so Debrief keeps the previous
-    /// one. The message is complete (what failed and what to do).
-    #[error("{0}")]
-    SelfTest(String),
 }
 
 pub type Result<T> = std::result::Result<T, AiError>;

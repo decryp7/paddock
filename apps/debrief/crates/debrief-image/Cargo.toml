@@ -1,0 +1,18 @@
+[package]
+name = "debrief-image"
+license.workspace = true
+repository.workspace = true
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Untrusted images made safe for a model and the webview (ADR 0025): bounded decoding of five formats, downscaling, re-encoding without metadata, the EXIF capture time. Pure."
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+# Decoding untrusted images (ADR 0025): only these formats, no others compiled in.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "gif", "webp"] }
+
+[dev-dependencies]
+proptest.workspace = true

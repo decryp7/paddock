@@ -37,7 +37,7 @@ describe('TauriStorageBackend', () => {
   it('is the mock in a browser, with failures logged', async () => {
     TestBed.configureTestingModule({ providers: [{ provide: Logger, useFactory: () => new MemoryLogger() }] });
     const backend = TestBed.inject(StorageBackend);
-    expect((await backend.usage()).categories.length).toBe(8);
+    expect((await backend.usage()).categories.length).toBe(5);
     await expect(backend.clear([])).rejects.toContain('choose what to clear');
     expect((TestBed.inject(Logger) as MemoryLogger).entries[0]?.props?.['Command']).toBe('clear');
   });
@@ -46,7 +46,7 @@ describe('TauriStorageBackend', () => {
 describe('MockStorageBackend', () => {
   it('lists cache and data categories with a total', async () => {
     const u = await new MockStorageBackend().usage();
-    expect(u.categories.filter((c) => c.kind === 'cache').map((c) => c.id)).toEqual(['bundle-extracts', 'webview-cache', 'ai-runtimes-outdated']);
+    expect(u.categories.filter((c) => c.kind === 'cache').map((c) => c.id)).toEqual(['bundle-extracts', 'webview-cache']);
     expect(u.totalBytes).toBe(mockCategories().reduce((n, c) => n + c.bytes, 0));
   });
 
@@ -77,7 +77,7 @@ describe('MockStorageBackend', () => {
   it('reports a category that cannot be cleared', async () => {
     const b = new MockStorageBackend();
     (b as unknown as { categories: ReturnType<typeof mockCategories> }).categories[4]!.clearable = false;
-    const r = await cleared(b, ['ai-models']);
+    const r = await cleared(b, ['sessions']);
     expect(r.categories[0]?.error).toBeTruthy();
   });
 
@@ -87,6 +87,6 @@ describe('MockStorageBackend', () => {
     await expect(b.reveal('logs')).rejects.toContain('not readable');
     expect(await b.reveal('logs')).toContain('logs');
     await expect(new MockStorageBackend().reveal('stores')).rejects.toContain('unknown');
-    expect((await new MockStorageBackend('?mockStorageFail=x').usage()).categories.length).toBe(8);
+    expect((await new MockStorageBackend('?mockStorageFail=x').usage()).categories.length).toBe(5);
   });
 });

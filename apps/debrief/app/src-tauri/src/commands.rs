@@ -334,7 +334,7 @@ mod tests {
     #[test]
     fn dialog_contracts_name_only_commands_the_table_opens_to_dialogs() {
         let contracts = crate::dialog_windows::debrief_contracts();
-        assert!(contracts.ids().count() >= 50, "the contract file is empty or stale");
+        assert!(contracts.ids().count() >= 40, "the contract file is empty or stale");
         let opens = |name: &str| spec(name).is_some_and(|s| s.windows & DIALOG != 0);
         for name in contracts.base() {
             assert!(opens(name), "base command {name} is not in the table or is not open to dialogs");

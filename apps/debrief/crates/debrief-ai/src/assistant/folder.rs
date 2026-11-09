@@ -45,7 +45,7 @@ fn survey_error(e: SurveyError) -> AiError {
 
 /// Errors that end the whole refinement (the model is gone or the user cancelled); others only skip a step.
 fn fatal(e: &AiError) -> bool {
-    matches!(e, AiError::Cancelled | AiError::NoModel | AiError::NoRuntime)
+    matches!(e, AiError::Cancelled | AiError::NoModel)
 }
 
 /// Distinct items, quoted, for a goal.

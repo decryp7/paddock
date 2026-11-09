@@ -135,9 +135,6 @@ export async function waitForShell(): Promise<void> {
   await $('[role=menubar][aria-label="Application menu"]').waitForDisplayed({ timeout: 60_000 });
   // The lifecycle extras are mounted into the title bar after start-up (the crash check has run by then).
   await $('debrief-title-extras').waitForExist({ timeout: 30_000 });
-  // A build that includes the AI worker offers its set-up once per profile, as a modal dialog window; the main window
-  // shows its modal scrim until it is closed, so close it before any click. Later starts of the same run do not offer it.
-  await dismissDialogWindow('ai-setup', { optional: true, timeout: 5_000 });
 }
 
 /** Waits until the workspace shows events: grid rows, an event count and at least one timeline lane. */

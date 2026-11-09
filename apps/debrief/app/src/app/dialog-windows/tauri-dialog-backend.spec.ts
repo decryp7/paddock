@@ -71,13 +71,13 @@ describe('TauriDialogBackend', () => {
 
   it('resolves undefined when the window closed without a result, and ignores events of other windows and malformed ones', async () => {
     const { io, backend } = setup();
-    const s = backend.show(request('ai-setup'));
+    const s = backend.show(request('ai-query'));
     await tick();
-    io.result('d-main-9', 'ai-setup', 'other');
+    io.result('d-main-9', 'ai-query', 'other');
     io.emit('debrief://dialog-closed', { nonsense: true });
     io.emit('debrief://dialog-result', 5);
-    io.closed('d-main-9', 'ai-setup');
-    io.closed('d-main-1', 'ai-setup');
+    io.closed('d-main-9', 'ai-query');
+    io.closed('d-main-1', 'ai-query');
     expect(await s.closed).toBeUndefined();
     // Rust takes the modality and the required choice from the dialog's contract, not from the webview's request.
     expect(Object.keys(io.opened[0]!)).not.toContain('modality');

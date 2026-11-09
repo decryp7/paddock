@@ -42,8 +42,6 @@ pub struct PerformanceSettings {
     pub query_budget_mb: u32,
     /// The cap of a plugin that declares no need of its own.
     pub plugin_memory_mb: u32,
-    /// The AI worker's own process (not llama-server, which holds the model); 0: no cap.
-    pub ai_worker_memory_mb: u32,
     /// The store worker gives freed memory back to the system at once (the old Low memory mode's allocator).
     pub return_memory_at_once: bool,
     /// Parse threads of an import; 0: automatic.
@@ -80,7 +78,6 @@ impl Default for PerformanceSettings {
             import_budget_mb: 768,
             query_budget_mb: 300,
             plugin_memory_mb: 1024,
-            ai_worker_memory_mb: 1024,
             return_memory_at_once: false,
             parse_threads: 0,
             query_threads: 4,

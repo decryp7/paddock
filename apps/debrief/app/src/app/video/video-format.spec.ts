@@ -132,8 +132,8 @@ describe('removal', () => {
 
 describe('failures', () => {
   it('keeps the engine hint and points the AI codes to Settings', () => {
-    const f = toFailure(new CmdError({ code: 'noVision', message: 'Text only.', hint: 'Add image support.', retryable: false }));
-    expect(f).toEqual({ message: 'Text only.', hint: 'Add image support.', aiSetup: true, retryable: false });
+    const f = toFailure(new CmdError({ code: 'noVision', message: 'Text only.', hint: 'Choose a model that reads images in Pitwall.', retryable: false }));
+    expect(f).toEqual({ message: 'Text only.', hint: 'Choose a model that reads images in Pitwall.', aiSetup: true, retryable: false });
     expect(toFailure(new CmdError({ code: 'notFound', message: 'x', retryable: true })).aiSetup).toBe(false);
     expect(toFailure(new Error('plain'))).toEqual({ message: 'plain', hint: null, aiSetup: false, retryable: true });
     expect(toFailure('odd').message).toBe('odd');

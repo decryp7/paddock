@@ -4,7 +4,7 @@
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
-    let _ = debrief_ai::vision::exif::capture_time(data);
+    let _ = debrief_image::exif::capture_time(data);
     if let Ok(text) = std::str::from_utf8(data) {
         if let Ok(f) = debrief_ai::vision::ScreenFacts::parse(text) {
             assert!(f.ids.len() <= 16 && f.error_texts.len() <= 8 && f.timestamps.len() <= 8);

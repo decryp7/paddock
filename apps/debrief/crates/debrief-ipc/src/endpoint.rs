@@ -62,8 +62,6 @@ pub mod prefix {
     pub const PLUGIN: &str = "debrief-plugin";
     /// A plugin under test (the plugin SDK's test host).
     pub const PLUGIN_TEST: &str = "debrief-plugin-test";
-    /// The AI worker.
-    pub const AI: &str = "debrief-ai";
     /// The store worker, made by the app process (its temp folder is the app's own).
     pub const STORE: &str = "debrief-store";
 }

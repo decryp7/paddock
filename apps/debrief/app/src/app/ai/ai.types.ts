@@ -1,24 +1,19 @@
 /**
  * Wire contract of the local AI assistant (`app/src-tauri/src/ai/**`, `crates/debrief-ai`), camelCase JSON.
- * Commands: `ai_*` (see `ai-backend.ts`). Events: `debrief://ai-setup` (`SetupEvent`, all windows),
- * `debrief://ai-status` (`AiStatus`, all windows), `debrief://ai-chat` (`ChatEventEnvelope`, the chat's window),
- * `debrief://ai-runtime` (`AiRuntimeEvent`, all windows), `debrief://ai-updates` (`AiUpdatesStatus`, all windows).
+ * Commands: `ai_*` (see `ai-backend.ts`). Events: `debrief://ai-status` (`AiStatus`, all windows),
+ * `debrief://ai-chat` (`ChatEventEnvelope`, the chat's window).
  * Every command rejects with `{ code, message }` (`AiErrorPayload`).
  */
 import { AgentApprovalRequest, HandOff, PauseReason, QuerySource, Segment } from '../browser/browser.types';
 import { ExplainNode, InferredGroup, Level, ParsedPreview } from '../core/api.types';
 
-export const AI_SETUP_EVENT = 'debrief://ai-setup';
 export const AI_STATUS_EVENT = 'debrief://ai-status';
 export const AI_CHAT_EVENT = 'debrief://ai-chat';
-export const AI_RUNTIME_EVENT = 'debrief://ai-runtime';
-export const AI_UPDATES_EVENT = 'debrief://ai-updates';
 
 export type AiErrorCode =
   | 'unavailable'
   | 'noModel'
-  | 'noRuntime'
-  /** The active model cannot read images: install its image projector or choose a "Text + images" model. */
+  /** The model Pitwall serves cannot read images: choose a model that reads images in Pitwall. */
   | 'noVision'
   | 'busy'
   | 'cancelled'
@@ -29,8 +24,6 @@ export type AiErrorCode =
   | 'contextOverflow'
   | 'malformed'
   | 'toolLoopLimit'
-  | 'modelFile'
-  | 'memory'
   | 'network'
   /** The server certificate could not be verified (a TLS-inspecting proxy such as Zscaler). */
   | 'tls'
@@ -42,7 +35,6 @@ export type AiErrorCode =
   | 'timeout'
   /** The server (or a proxy in between) answered with an unexpected HTTP status. */
   | 'httpStatus'
-  | 'gated'
   | 'notFound'
   | 'integrity'
   | 'disk'
@@ -52,47 +44,26 @@ export type AiErrorCode =
   /** A path the user did not choose in a dialog (imports and exports). */
   | 'notGranted'
   /** A bounded resource ran out (a knowledge file too large to import). */
-  | 'limit'
-  /** A new inference runtime failed its self-test with the active model; the previous one stays in use. */
-  | 'selfTestFailed';
+  | 'limit';
 
 export interface AiErrorPayload {
   code: AiErrorCode;
   message: string;
 }
 
-// ---- engine status, hardware, catalog ----
+// ---- status (Pitwall is the only engine, ADR 0070) ----
 
-export type EngineState =
-  'unavailable' | 'disabled' | 'noModel' | 'idle' | 'loading' | 'ready' | 'failed';
+export type EngineState = 'unavailable' | 'noModel' | 'ready';
 
 export interface AiStatus {
   available: boolean;
   state: EngineState;
   reason: string | null;
   model: string | null;
-  backend: string | null;
-  rssBytes: number;
-  notes: string[];
   safeMode: boolean;
-  setupRunning: boolean;
-  /** The active model reads images ("Text + images"): its projector is installed (ADR 0025). */
+  /** The model Pitwall serves for Debrief reads images ("Text + images", ADR 0025). */
   vision: boolean;
-  /** What the running inference server reported about itself (`/props`), once a model is loaded. */
-  server?: AiServerInfo | null;
-  /** Which engine answers (the built-in one or Pitwall), and the state of the Pitwall connection (ADR 0059). */
-  engine: AiEngineStatus;
-}
-
-export type AiEngineChoice = 'auto' | 'pitwall' | 'builtIn';
-export type AiEngineKind = 'builtIn' | 'pitwall';
-
-export interface AiEngineStatus {
-  choice: AiEngineChoice;
-  /** The engine requests go to now; null: none (Pitwall chosen but not usable). */
-  active: AiEngineKind | null;
-  /** The user switched this session to the built-in engine after Pitwall went away (until restart or a settings change). */
-  builtInForSession: boolean;
+  /** The state of the Pitwall connection (ADR 0059, ADR 0070). */
   pitwall: PitwallStatus;
 }
 
@@ -118,303 +89,6 @@ export interface PitwallPairing {
   code: string;
   expiresAtMs: number;
 }
-
-/** What a running llama-server reported (ADR 0009); `null` fields were not reported by that build. */
-export interface AiServerInfo {
-  context: number | null;
-  vision: boolean | null;
-  audio: boolean | null;
-  /** `null`: the server named none, so llama.cpp's default `<__media__>` is used. */
-  mediaMarker: string | null;
-  model: string | null;
-  build: string | null;
-  chatTemplate: boolean;
-}
-
-export interface Gpu {
-  name: string;
-  vramGb: number | null;
-  unified: boolean;
-}
-
-export interface Hardware {
-  os: string;
-  arch: string;
-  cpuCores: number;
-  totalRamGb: number;
-  availableRamGb: number;
-  gpus: Gpu[];
-}
-
-export type Fit = 'comfortable' | 'tight' | 'tooLarge';
-export type Speed = 'fast' | 'moderate' | 'slow';
-
-/** What to change when a model does not fit comfortably. */
-export type FitAdvice = { kind: 'shorterContext'; tokens: number } | { kind: 'smallerQuant' } | { kind: 'closeApps'; gb: number };
-
-/** The verdict on one model and the numbers behind it (the engine's `fit::Assessment`). */
-export interface Assessment {
-  /** Total memory the model needs: weights + context. */
-  needGb: number;
-  weightsGb: number;
-  /** KV cache plus compute buffers for `context`. */
-  contextGb: number;
-  /** Context length (tokens) the need was computed for. */
-  context: number;
-  /** The context part is a guess: the model's header has not been read yet. */
-  rough: boolean;
-  /** Never better than either of the two checks below. */
-  fit: Fit;
-  speed: Speed;
-  fitsMachine: Fit;
-  fitsNow: Fit;
-  /** What this machine can hold for a model. */
-  capacityGb: number;
-  /** What is free for a model right now. */
-  availableNowGb: number;
-  /** Memory other programs are using (the capacity that is not free). */
-  inUseGb: number;
-  /** Part of the model runs from system RAM (slower). */
-  spills: boolean;
-  advice: FitAdvice[];
-}
-
-export interface CatalogModel {
-  id: string;
-  name: string;
-  family: string;
-  paramsB: number;
-  activeParamsB?: number | null;
-  quant: string;
-  hfRepo: string;
-  file: string;
-  sha256: string;
-  sizeBytes: number;
-  license: string;
-  toolCalling: boolean;
-  contextDefault: number;
-  minVramGb: number;
-  minRamGb: number;
-  moe: boolean;
-  recommendedFor: string[];
-  notes: string;
-  /** Older files of this entry it replaces (an earlier revision or quantisation); absent when none. */
-  supersedes?: string[];
-  /** The model's image projector (`mmproj`, same repository): present when it reads images (ADR 0025). */
-  projector?: CatalogProjector | null;
-}
-
-/** A model's multimodal projector as the catalog pins it (`debrief_ai::catalog::CatalogProjector`). */
-export interface CatalogProjector {
-  file: string;
-  sha256: string;
-  sizeBytes: number;
-}
-
-export interface Recommendation {
-  model: CatalogModel;
-  assessment: Assessment;
-  installed: boolean;
-  context: number;
-}
-
-export interface Recommendations {
-  hardware: string;
-  budget: { usableGb: number; class: 'discreteGpu' | 'unified' | 'cpuOnly' };
-  best: Recommendation | null;
-  fastest: Recommendation | null;
-  ranked: Recommendation[];
-  message: string;
-}
-
-export interface SetupPlan {
-  hardware: Hardware;
-  recommendations: Recommendations;
-  chosen: Recommendation | null;
-  license: string | null;
-  gated: boolean;
-  downloadBytes: number;
-  alreadyInstalled: boolean;
-  note: string | null;
-}
-
-/** One stage of a set-up or activation; `failed` and `cancelled` end it like `ready`. */
-export type SetupEvent =
-  | { stage: 'probing' }
-  | { stage: 'recommending' }
-  | {
-      stage: 'downloading';
-      bytes: number;
-      total: number;
-      bytesPerSec: number;
-      etaSecs: number | null;
-      /** Parallel connections in use; absent from older events. */
-      connections?: number;
-    }
-  | { stage: 'verifying'; bytes: number; total: number }
-  | { stage: 'validating' }
-  | { stage: 'loading'; gpu: boolean }
-  | { stage: 'fellBackToCpu'; reason: string }
-  | { stage: 'warmingUp' }
-  | { stage: 'ready'; model: string; backend: string }
-  | { stage: 'failed'; code: AiErrorCode; message: string }
-  | { stage: 'cancelled' };
-
-export interface GgufInfo {
-  version: number;
-  architecture: string;
-  name: string | null;
-  quant: string | null;
-  contextLength: number | null;
-  blockCount: number | null;
-  tensorCount: number;
-  fileSize: number;
-  paramsB: number;
-  knownArchitecture: boolean;
-}
-
-export interface InstalledModel {
-  fileName: string;
-  sizeBytes: number;
-  info: GgufInfo | null;
-  problem: string | null;
-  active: boolean;
-  assessment: Assessment | null;
-  catalogId: string | null;
-  name: string;
-  license: string | null;
-  toolCalling: boolean;
-  /** Reads images: its projector is installed and fits it. */
-  vision: boolean;
-  /** The installed projector (also one that cannot be used, with its problem). */
-  projector: InstalledProjector | null;
-  /** Bytes of the catalog projector that would add image support, when it is missing. */
-  projectorDownloadBytes: number | null;
-}
-
-/** What a projector's header says (`debrief_ai::gguf::ProjectorInfo`). */
-export interface ProjectorInfo {
-  name: string | null;
-  projectorType: string | null;
-  projectionDim: number | null;
-  imageSize: number | null;
-  patchSize: number | null;
-  spatialMergeSize: number | null;
-  fileSize: number;
-}
-
-/** A model's projector in the models folder (`debrief_ai::models::store::InstalledProjector`). */
-export interface InstalledProjector {
-  fileName: string;
-  sizeBytes: number;
-  info: ProjectorInfo | null;
-  problem: string | null;
-}
-
-// ---- inference runtimes (prebuilt llama-server builds, ADR 0009; `debrief_ai::runtimes::overview`) ----
-
-/** An accelerator a build reported (`llama-server --list-devices`). */
-export interface AiRuntimeDevice {
-  /** ggml's device name, e.g. `Vulkan0`, `CUDA0`, `MTL0`. */
-  name: string;
-  description: string;
-  totalMib: number;
-  freeMib: number;
-}
-
-/** One build the pinned catalog offers for this platform. */
-export interface AiRuntimeEntry {
-  /** `cpu`, `vulkan`, `cuda-13`, `metal`, ... */
-  id: string;
-  label: string;
-  downloadBytes: number;
-  installed: boolean;
-  installedBytes: number | null;
-  /** `null` when not installed or not checked yet. */
-  usable: boolean | null;
-  problem: string | null;
-  devices: AiRuntimeDevice[];
-  /** The build suggested for this machine. */
-  suggested: boolean;
-  /** The build that runs the model with the current settings. */
-  active: boolean;
-}
-
-/** A build on disk. */
-export interface AiInstalledRuntime {
-  id: string;
-  tag: string;
-  bytes: number;
-  /** Belongs to the release Debrief pins (older ones can be deleted). */
-  current: boolean;
-}
-
-export interface AiRuntimeOverview {
-  release: string;
-  tag: string;
-  platform: string;
-  /** The `inference_build` setting: `auto` or a build id. */
-  choice: string;
-  suggested: string | null;
-  /** The build in use: the chosen one when it works, else the best working one. */
-  active: string | null;
-  /** Set when a custom llama-server replaces the downloaded builds. */
-  customPath: string | null;
-  builds: AiRuntimeEntry[];
-  /** Builds of older releases still on disk. */
-  outdated: AiInstalledRuntime[];
-  /** Nothing is installed (and no custom path is set): offer a download. */
-  needsDownload: boolean;
-  /** Why the builds could not be checked, if they could not. */
-  problem: string | null;
-}
-
-// ---- manual downloads (`ai_manual_download`) ----
-
-/** What is downloaded by hand: a catalog model or an inference runtime build. */
-export type ManualKind = 'model' | 'runtime';
-
-export interface ManualFile {
-  name: string;
-  /** The https address the browser downloads it from (computed by the engine from its catalogs). */
-  url: string;
-  sizeBytes: number;
-  /** The expected SHA-256, when known. */
-  sha256: string | null;
-}
-
-/** The files of a manual download and where Debrief keeps them once checked. */
-export interface ManualDownload {
-  kind: ManualKind;
-  id: string;
-  /** The model's name or the build's label. */
-  name: string;
-  files: ManualFile[];
-  /** The models folder, or the folder the build is unpacked into. */
-  folder: string;
-}
-
-/** Progress of a runtime install (`debrief://ai-runtime`); `ready`, `failed` and `cancelled` end it. */
-export type AiRuntimeEvent =
-  | { stage: 'downloading'; id: string; asset: string; index: number; count: number }
-  | {
-      stage: 'progress';
-      id: string;
-      bytes: number;
-      total: number;
-      bytesPerSec: number;
-      etaSecs: number | null;
-      connections?: number;
-      verifying: boolean;
-    }
-  /** `done` of `total` bytes of all the build's archives. */
-  | { stage: 'unpacking'; id: string; asset: string; done: number; total: number }
-  | { stage: 'finishing'; id: string }
-  /** The unpacked build is checked (it starts here and, with an active model, answers) before Debrief switches to it (ADR 0009). */
-  | { stage: 'testing'; id: string }
-  | { stage: 'ready'; id: string; runtime: AiInstalledRuntime }
-  | { stage: 'failed'; id: string; code: AiErrorCode; message: string }
-  | { stage: 'cancelled'; id: string };
 
 // ---- proposals and narratives ----
 
@@ -839,53 +513,6 @@ export interface ResearchDraft {
   question: string;
   checked: CheckedQuery;
   source: QuerySource;
-}
-
-// ---- update checks (app/src-tauri/src/ai/updates.rs, crates/debrief-ai/src/updates) ----
-
-/** What Debrief does when it finds an update of one kind (Settings → AI). */
-export type AiUpdatePolicy = 'automatic' | 'ask' | 'manual';
-
-export type AiUpdateKind = 'runtime' | 'model';
-
-/** One update from the pinned catalogs. */
-export interface AiUpdate {
-  kind: AiUpdateKind;
-  /** Stable per target version: what "Skip this version" remembers. */
-  key: string;
-  /** The build id or catalog model id (also what "Download manually" takes). */
-  id: string;
-  name: string;
-  /** The installed release tag or model file. */
-  from: string;
-  /** The release tag or model file it updates to. */
-  to: string;
-  downloadBytes: number;
-  skipped: boolean;
-  installing: boolean;
-  /** An automatic install waits for the running chat to end. */
-  waiting: boolean;
-}
-
-export interface AiUpdateKindStatus {
-  kind: AiUpdateKind;
-  policy: AiUpdatePolicy;
-  /** Epoch ms. */
-  lastCheck: number | null;
-  lastSuccess: number | null;
-  /** Why the last check or update failed (quiet: shown in Settings only). */
-  lastError: string | null;
-  /** Offer "Download manually" (certificate interception, proxy sign-in, blocked download). */
-  manualSuggested: boolean;
-  /** Epoch ms of the next automatic check; null with Manual. */
-  nextCheck: number | null;
-  checking: boolean;
-  updates: AiUpdate[];
-}
-
-export interface AiUpdatesStatus {
-  intervalHours: number;
-  kinds: AiUpdateKindStatus[];
 }
 
 /**

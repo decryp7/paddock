@@ -1,7 +1,6 @@
 import { PathText } from '../shared/path-text';
 import { Tabs } from '../shared/tabs';
 import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, untracked } from '@angular/core';
-import { AiBackend } from '../ai/ai-backend';
 import { formatDuration } from '../core/format';
 import { formatBytes, formatCount, formatEta, formatRate, TransferMeter } from '../shared/format/units';
 import { TransferSpeed } from '../shared/format/transfer-speed';
@@ -11,7 +10,7 @@ import { PanelEmpty } from './panel-empty';
 import { JobViewer } from './job-viewer';
 import { KindFilter, KindOption } from '../ui/kind-filter';
 import { JobsStore, JobsView } from './jobs.store';
-import { JOB_KINDS, JobInfo, JobKind, JobState } from './jobs.types';
+import { JOB_KINDS, JobInfo, JobState } from './jobs.types';
 import { kindLabel, linkLabel, phaseText, queuedLabel, stateLabel } from './jobs-text';
 
 /**
@@ -30,15 +29,6 @@ import { kindLabel, linkLabel, phaseText, queuedLabel, stateLabel } from './jobs
       <span class="spacer"></span>
       <button type="button" class="btn ghost small" [disabled]="!store.finished().length" (click)="store.clearFinished()" data-testid="jobs-clear" i18n="@@jobs.panel.clear">Clear finished</button>
     </div>
-    @for (p of store.paused(); track p.kind) {
-      <div class="paused" role="alert" data-testid="jobs-paused">
-        <debrief-icon name="alert" [size]="14" />
-        <span class="grow">{{ pausedText(p.kind, p.reason) }}</span>
-        @if (p.kind === 'ai') {
-          <button type="button" class="btn small" (click)="resetAi()" i18n="@@jobs.panel.resetAi">Reset AI</button>
-        }
-      </div>
-    }
     @if (store.error(); as e) {
       <div class="err" role="alert">
         <span class="grow">{{ e }}</span>
@@ -119,7 +109,7 @@ import { kindLabel, linkLabel, phaseText, queuedLabel, stateLabel } from './jobs
     .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
     .spacer, .grow { flex: 1; }
     .link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
-    .paused, .err { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--lvl-warn); background: color-mix(in srgb, var(--lvl-warn) 12%, transparent); }
+    .err { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--lvl-warn); background: color-mix(in srgb, var(--lvl-warn) 12%, transparent); }
     .err { border-color: var(--lvl-error); background: color-mix(in srgb, var(--lvl-error) 10%, transparent); margin: 0; }
     h3 { margin: 8px 0 2px; font-size: var(--fs-sm); font-weight: 600; color: var(--text-2); }
     ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -152,7 +142,6 @@ import { kindLabel, linkLabel, phaseText, queuedLabel, stateLabel } from './jobs
 export class JobsPanel {
   protected readonly store = inject(JobsStore);
   private readonly viewer = inject(JobViewer);
-  private readonly ai = inject(AiBackend);
   private readonly ctx = inject(COMMAND_CONTEXT);
   protected readonly viewItems = computed(() => this.views.map((v) => ({ id: v.id, label: v.label, count: this.store.viewCounts()[v.id] })));
   protected readonly views: readonly { id: JobsView; label: string }[] = [
@@ -205,12 +194,6 @@ export class JobsPanel {
         seen = new Map(jobs.map((j) => [j.id, j.state]));
       });
     });
-  }
-
-  protected pausedText(kind: JobKind, reason: string): string {
-    return kind === 'ai'
-      ? $localize`:@@jobs.panel.pausedAi:AI requests are paused: ${reason}:reason:. Waiting requests stay queued.`
-      : $localize`:@@jobs.panel.paused:${kindLabel(kind)}:kind: jobs are paused: ${reason}:reason:`;
   }
 
   protected rowLabel(j: JobInfo): string {
@@ -281,15 +264,6 @@ export class JobsPanel {
 
   protected async view(j: JobInfo): Promise<void> {
     this.note.set(await this.viewer.view(j));
-  }
-
-  protected async resetAi(): Promise<void> {
-    try {
-      await this.ai.reset();
-      this.note.set(null);
-    } catch (e) {
-      this.note.set(e instanceof Error ? e.message : String(e));
-    }
   }
 
   protected async openSource(j: JobInfo): Promise<void> {

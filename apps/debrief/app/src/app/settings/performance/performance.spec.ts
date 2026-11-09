@@ -1,7 +1,6 @@
 import { Injector } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { all, buttonByText, el, provideTinyBackend, settle, text } from '../../../testing/helpers';
-import { AiBackend } from '../../ai/ai-backend';
 import { LifecycleBackend } from '../../core/tools-backend';
 import { COMMAND_CONTEXT } from '../../extensions/command-registry';
 import { PluginMemory } from '../../plugins-panel/plugin-memory';
@@ -21,7 +20,6 @@ function setup() {
   const showView = vi.fn();
   const open = vi.fn();
   const pluginReset = vi.fn(async () => undefined);
-  const aiReset = vi.fn(async () => ({}));
   TestBed.configureTestingModule({
     providers: [
       provideTinyBackend(),
@@ -30,10 +28,9 @@ function setup() {
       { provide: SettingsDialogService, useValue: { open } },
       { provide: COMMAND_CONTEXT, useValue: { showView } },
       { provide: LifecycleBackend, useValue: { pluginReset } },
-      { provide: AiBackend, useValue: { reset: aiReset } },
     ],
   });
-  return { perf, settings, showView, open, pluginReset, aiReset };
+  return { perf, settings, showView, open, pluginReset };
 }
 
 describe('Settings ▸ Performance', () => {
@@ -87,7 +84,6 @@ describe('Settings ▸ Performance', () => {
     expect(open).toHaveBeenCalledWith('performance');
     expect(store.valueOf('performance', 'storeCapMb')).toBe(3328);
     expect(store.dirty()).toBe(true);
-    expect(capField({ kind: 'ai' })).toBe('aiWorkerMemoryMb');
     // A plugin's cap is its own, in the Plugins view.
     await raiseMemoryCap(injector, { kind: 'plugin', pluginId: 'net.decryptology.windows' }, 1536);
     expect(showView).toHaveBeenCalledWith('plugins');
@@ -96,7 +92,8 @@ describe('Settings ▸ Performance', () => {
 
   it('a health cause names the process its cap stopped, and "Raise the cap…" opens that cap with the suggestion', async () => {
     const { showView } = setup();
-    expect([processOfTarget('storeWorker'), processOfTarget('ai'), processOfTarget('plugin:net.x')]).toEqual([{ kind: 'storeWorker' }, { kind: 'ai' }, { kind: 'plugin', pluginId: 'net.x' }]);
+    expect([capField({ kind: 'storeWorker' }), capField({ kind: 'plugin', pluginId: 'p' })]).toEqual(['storeCapMb', null]);
+    expect([processOfTarget('storeWorker'), processOfTarget('plugin:net.x')]).toEqual([{ kind: 'storeWorker' }, { kind: 'plugin', pluginId: 'net.x' }]);
     expect([processOfTarget('plugin:'), processOfTarget('nope')]).toEqual([null, null]);
     const injector = TestBed.inject(Injector);
     await raiseCapOfHealth(injector, { target: 'plugin:net.decryptology.windows', suggestedMb: 768 });

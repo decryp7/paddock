@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 // Builds Debrief's helper processes and puts them where Tauri bundles them as sidecars
 // (src-tauri/binaries/<name>-<target-triple>[.exe], listed in src-tauri/tauri.sidecars.conf.json):
-//   debrief-ai-worker    the AI assistant's engine process
 //   debrief-plugins      serves every built-in plugin, each in its own sandboxed process (ADR 0017)
 //   debrief-store-worker hosts every window's DuckDB store and full-text index (ADR 0014)
 // At run time Debrief finds them next to its executable. The store worker links libduckdb (duckdb.dll / libduckdb.so /
@@ -24,7 +23,7 @@ import { cargoTargetDir } from '../../../../conformance/src/sidecar/sidecar.mjs'
 import { isMain } from '../../../../conformance/src/util/is-main.mjs';
 import { fetchLibduckdb } from './libduckdb.mjs';
 
-export const SIDECARS = ['debrief-ai-worker', 'debrief-plugins', 'debrief-store-worker'];
+export const SIDECARS = ['debrief-plugins', 'debrief-store-worker'];
 
 /**
  * Re-signs a bundled macOS dylib ad hoc. DuckDB ships libduckdb.dylib with its own Developer ID signature (a Team ID);

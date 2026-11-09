@@ -157,7 +157,6 @@ pub(crate) fn cmd(e: debrief_video::VideoError) -> CmdError {
         V::AiUnavailable { kind, .. } => CmdError::new(
             match kind {
                 AiUnavailable::NoModel => ErrorCode::NoModel,
-                AiUnavailable::NoRuntime => ErrorCode::NoRuntime,
                 AiUnavailable::NoVision => ErrorCode::NoVision,
             },
             msg,

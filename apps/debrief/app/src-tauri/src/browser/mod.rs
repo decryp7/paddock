@@ -73,10 +73,6 @@ pub struct ChatStatusDto {
     pub session_id: String,
     #[serde(flatten)]
     pub status: ChatBrowserStatus,
-    /// The model may be too small for multi-step browsing (a hint, never a block).
-    pub small_model: bool,
-    /// Parameters of the active model in billions, when known.
-    pub model_params_b: Option<f64>,
     /// The model researches the web by itself (Settings ▸ Web browser); off: it offers a button.
     pub research_auto: bool,
 }

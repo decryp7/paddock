@@ -222,7 +222,7 @@ describe('VideoStore frames', () => {
     const s = store();
     await s.openPaths([MOCK_VIDEO_PATHS[0]!]);
     await s.describe([]);
-    expect(s.errors().frame).toMatchObject({ aiSetup: true, hint: expect.stringContaining('Settings ▸ AI') });
+    expect(s.errors().frame).toMatchObject({ aiSetup: true, hint: expect.stringContaining('Pitwall') });
   });
 
   it('explains frames and uses the AI image use cases', async () => {

@@ -18,18 +18,10 @@ export type NoticeAction =
   | { type: 'resetPlugin'; pluginId: string }
   | { type: 'setUpFormat'; path: string }
   | { type: 'fixTimestamps'; path: string; format: string | null }
-  | { type: 'resetAi' }
-  /** Opens the assistant (a finished background set-up). */
-  | { type: 'openAssistant' }
-  /** Sets the assistant up again with this model (a failed background set-up). */
-  | { type: 'setUpAssistant'; modelId: string }
   | { type: 'installUpdate' }
   | { type: 'showAlert'; alertId: string }
   | { type: 'showJobs' }
   | { type: 'showInFolder'; jobId: number }
-  | { type: 'updateAi'; key: string }
-  | { type: 'laterAiUpdate'; key: string }
-  | { type: 'skipAiUpdate'; key: string }
   /** Repairs a service from the shell (`health_repair`). */
   | { type: 'repairService'; service: string }
   /** Opens Settings at `section` (a service the user fixes there, e.g. Settings ▸ Web browser). */

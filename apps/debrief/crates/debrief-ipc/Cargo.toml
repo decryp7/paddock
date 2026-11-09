@@ -19,6 +19,7 @@ test = false
 test-support = []
 
 [dependencies]
+log.workspace = true
 tempfile.workspace = true
 serde.workspace = true
 serde_json.workspace = true

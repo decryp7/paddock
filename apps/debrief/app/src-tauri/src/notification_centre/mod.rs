@@ -1,5 +1,5 @@
 //! The notification centre: things that happened and may need attention (a long job finished, a live
-//! alert, files not imported, a plugin quarantined, AI proposals to review, the AI paused, an update, a
+//! alert, files not imported, a plugin quarantined, AI proposals to review, an update, a
 //! crash recovered). The Jobs pane shows work; this shows outcomes.
 //!
 //! - [`centre`]: the pure list (dedupe with counts, caps, read state).

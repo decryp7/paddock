@@ -6,7 +6,6 @@
     "name": "Debrief",
     "manifests": [
       "app/src-tauri/Cargo.toml",
-      "crates/debrief-ai-worker/Cargo.toml",
       "crates/debrief-plugins/Cargo.toml",
       "crates/debrief-store-worker/Cargo.toml"
     ],

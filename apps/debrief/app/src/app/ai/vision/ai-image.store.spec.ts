@@ -158,8 +158,8 @@ describe('AiImageStore', () => {
     expect(store.currentRelated()?.error).toContain('no longer open');
   });
 
-  it('does not ask a text-only model about images and offers its image support', async () => {
-    const { store, backend, status } = await setup({ vision: 'missing' });
+  it('does not ask a text-only model about images', async () => {
+    const { store, backend, status } = await setup({ vision: 'none' });
     expect(status.status()?.vision).toBe(false);
     expect(store.visionMissing()).toBe(true);
     const img = (await store.openPath('/shots/dialog.png'))!;
@@ -167,20 +167,10 @@ describe('AiImageStore', () => {
     await store.findRelated(img.id);
     expect(start).not.toHaveBeenCalled();
     expect(store.noVision()).toBe(true);
-    expect((await store.loadActiveModel())?.projectorDownloadBytes).toBe(640 * 1024 * 1024);
-    const install = vi.spyOn(backend, 'installProjector');
-    await store.installProjector();
-    expect(install).toHaveBeenCalledWith('Qwen3.5-4B-Q4_K_M.gguf');
-    expect(store.projector()).toMatchObject({ running: false, error: null });
-    expect(store.noVision()).toBe(false);
-    expect(status.status()?.vision).toBe(true);
-    expect(store.activeModel()?.vision).toBe(true);
-    await store.findRelated(img.id);
-    expect(start).toHaveBeenCalledWith({ op: 'relatedLogs', imageId: img.id });
   });
 
-  it('turns a NoVision refusal into the no-vision state, and reports a failed download', async () => {
-    const { store, backend } = await setup({ vision: 'missing', net: 'tls' });
+  it('turns a NoVision refusal into the no-vision state', async () => {
+    const { store, backend } = await setup({ vision: 'none' });
     const img = (await store.openPath('/shots/dialog.png'))!;
     vi.spyOn(TestBed.inject(AiStatusStore), 'status').mockReturnValue(null);
     vi.spyOn(backend, 'start').mockRejectedValueOnce(new AiError('noVision', 'text only'));
@@ -190,19 +180,5 @@ describe('AiImageStore', () => {
     expect(store.noVision()).toBe(false);
     store.refuseNoVision();
     expect(store.noVision()).toBe(true);
-    await store.installProjector();
-    expect(store.projector().error).toBeTruthy();
-    vi.spyOn(backend, 'installProjector').mockRejectedValueOnce(new AiError('notFound', 'no projector'));
-    await store.installProjector();
-    expect(store.projector().error).toBe('no projector');
-  });
-
-  it('cannot add image support without an active model', async () => {
-    const { store, backend } = await setup({ mode: 'setup' });
-    const install = vi.spyOn(backend, 'installProjector');
-    await store.installProjector();
-    expect(install).not.toHaveBeenCalled();
-    vi.spyOn(backend, 'models').mockRejectedValueOnce(new Error('down'));
-    expect(await store.loadActiveModel()).toBeNull();
   });
 });

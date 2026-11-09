@@ -56,8 +56,6 @@ pub enum RepairAction {
     /// Open the Settings section named by the cause (`settings`): what fixes it is the user's choice there (another
     /// browser, a download), so the UI opens it instead of asking the shell.
     OpenSettings,
-    /// Use the fallback instead of the service that went away (the AI's built-in engine instead of Pitwall).
-    UseFallback,
 }
 
 /// Advice to raise a memory cap that stopped a process: the UI offers "Raise the cap…" (it opens the setting with this value;
@@ -65,7 +63,7 @@ pub enum RepairAction {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RaiseCap {
-    /// Which process: the app's own id (`storeWorker`, `ai`, `plugin:<id>`).
+    /// Which process: the app's own id (`storeWorker`, `plugin:<id>`).
     pub target: String,
     pub suggested_mb: u32,
 }

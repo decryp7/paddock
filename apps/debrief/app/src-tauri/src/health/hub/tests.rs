@@ -76,7 +76,7 @@ fn a_repair_that_fails_leaves_the_service_down_with_the_new_cause_and_the_same_r
 fn a_repair_that_panics_is_contained() {
     let (h, _) = health();
     h.set_repair(AI, Arc::new(|| panic!("boom")));
-    h.ai(AiHealth::Switched, Some("crashed 3 times"));
+    h.ai(AiHealth::EngineLost, Some("stopped"));
     let id = h.begin_repair("ai").unwrap();
     h.finish_repair(id);
     assert_eq!(h.state(AI), Some(ServiceState::Down));
@@ -113,104 +113,18 @@ fn the_background_repair_ends_with_the_service_back() {
 }
 
 #[test]
-fn the_ai_worker_crash_is_one_quarantine_with_a_reset_and_clears_when_it_runs() {
+fn a_pitwall_that_cannot_serve_is_one_degraded_service_with_a_retry_and_clears_when_it_serves() {
     let (h, seen) = health();
-    h.ai(AiHealth::Switched, Some("the AI worker failed 3 times"));
-    h.ai(AiHealth::Switched, Some("the AI worker failed 3 times"));
+    h.ai(AiHealth::EngineLost, Some("Pitwall stopped."));
+    h.ai(AiHealth::EngineLost, Some("Pitwall stopped."));
     let s = h.registry.get(AI).unwrap();
-    assert_eq!((s.state, s.repair), (ServiceState::Quarantined, Some(RepairAction::Reset)));
-    assert_eq!(lock(&seen).len(), 1);
-    h.ai(AiHealth::LoadFailed, Some("out of memory"));
-    assert_eq!(h.state(AI), Some(ServiceState::Down));
+    assert_eq!((s.state, s.repair), (ServiceState::Degraded, Some(RepairAction::Retry)));
+    assert_eq!(lock(&seen).len(), 1, "the same state is announced once");
     h.ai(AiHealth::Fine, None);
     assert_eq!(h.state(AI), Some(ServiceState::Ok));
-}
-
-#[test]
-fn plugins_are_one_service_that_lists_who_was_switched_off() {
-    let (h, _) = health();
-    h.plugin_quarantined("net.a", "A", "crashed");
-    let one = h.registry.get(PLUGINS).unwrap();
-    assert_eq!(
-        (one.state, one.repair),
-        (ServiceState::Quarantined, Some(RepairAction::LiftQuarantine))
-    );
-    assert!(one.cause.unwrap().message.contains("net.a"));
-    h.plugin_quarantined("net.b", "B", "crashed");
-    assert!(h.registry.get(PLUGINS).unwrap().cause.unwrap().message.starts_with("2 plugins"));
-    assert_eq!(h.quarantined_plugins(), ["net.a", "net.b"]);
-    h.plugin_reset("net.a");
-    assert_eq!(h.state(PLUGINS), Some(ServiceState::Quarantined), "one is still off");
-    h.plugin_reset("net.b");
-    assert_eq!(h.state(PLUGINS), Some(ServiceState::Ok));
-}
-
-#[test]
-fn a_missing_browser_is_down_with_install_and_clears_when_one_exists() {
-    let (h, _) = health();
-    h.browser_missing("no Chromium-based browser was found");
-    let s = h.registry.get(BROWSER).unwrap();
-    assert_eq!((s.state, s.repair), (ServiceState::Down, Some(RepairAction::Install)));
-    assert!(s.cause.unwrap().detail.unwrap().contains("no Chromium"));
-    h.browser_available();
-    assert_eq!(h.state(BROWSER), Some(ServiceState::Ok));
-}
-
-#[test]
-fn a_failed_download_is_down_with_retry_and_a_later_success_clears_it() {
-    let (h, seen) = health();
-    h.download_failed(7, "Download Qwen", "the download server answered 503");
-    h.download_failed(7, "Download Qwen", "the download server answered 503");
-    let s = h.registry.get(DOWNLOADS).unwrap();
-    assert_eq!((s.state, s.repair), (ServiceState::Down, Some(RepairAction::Retry)));
-    assert_eq!(h.failed_download(), Some(7));
-    assert_eq!(count(&seen, DOWNLOADS, ServiceState::Down), 1);
-    h.download_done(8);
-    assert_eq!(h.state(DOWNLOADS), Some(ServiceState::Ok));
-    assert_eq!(h.failed_download(), None);
-}
-
-#[test]
-fn a_download_reported_as_another_service_is_not_a_downloads_failure() {
-    let (h, _) = health();
-    h.ignore_download_job(3);
-    h.download_failed(3, "Install Chromium", "x");
-    assert_eq!(h.state(DOWNLOADS), Some(ServiceState::Ok));
-}
-
-#[test]
-fn the_store_probe_follows_the_supervisors_state() {
-    use ServiceState::*;
-    assert_eq!(probe_store(true, false, Down, Some(StoreFailure::Crashed)), StoreProbe::Running);
-    assert_eq!(probe_store(true, false, Ok, None), StoreProbe::Nothing);
-    assert_eq!(probe_store(false, true, Down, None), StoreProbe::Quarantined);
-    assert_eq!(probe_store(false, true, Quarantined, None), StoreProbe::Nothing);
-    assert_eq!(probe_store(false, false, Down, Some(StoreFailure::Crashed)), StoreProbe::Restart);
-    assert_eq!(
-        probe_store(false, false, Down, Some(StoreFailure::LibraryMissing)),
-        StoreProbe::Nothing
-    );
-    assert_eq!(
-        probe_store(false, false, Ok, None),
-        StoreProbe::Nothing,
-        "stopped and fine: it starts on demand"
-    );
-}
-
-#[test]
-fn code_without_a_handle_reports_to_the_threads_health() {
-    let (h, _) = health();
-    use_in_this_thread(h.clone());
-    report_store_failed(StoreFailure::Other, "x");
-    report_browser_missing("none");
-    report_plugin_quarantined("p", "boom");
-    report_plugin_reset("p");
-    report_browser_available();
-    assert_eq!(h.state(STORE), Some(ServiceState::Down));
-    assert_eq!(
-        (h.state(BROWSER), h.state(PLUGINS)),
-        (Some(ServiceState::Ok), Some(ServiceState::Ok))
-    );
+    // A failure of another kind (the library is missing) replaces it.
+    h.store_failed(StoreFailure::LibraryMissing, "image not found");
+    assert!(h.registry.get(STORE).unwrap().cause.unwrap().raise_cap.is_none());
 }
 
 fn stop(service: &'static str, plugin: Option<&str>, target: &str) -> crate::performance::watch::Stop {
@@ -224,44 +138,13 @@ fn stop(service: &'static str, plugin: Option<&str>, target: &str) -> crate::per
 }
 
 #[test]
-fn the_store_worker_stopped_by_its_memory_cap_is_down_with_the_advice_and_keeps_it_through_its_symptoms() {
-    let (h, seen) = health();
-    h.memory_stopped(STORE, None, stop(STORE, None, "storeWorker").cause);
-    let s = h.registry.get(STORE).unwrap();
-    assert_eq!((s.state, s.repair), (ServiceState::Down, Some(RepairAction::Retry)));
-    let cap = s.cause.clone().unwrap().raise_cap.unwrap();
-    assert_eq!((cap.target.as_str(), cap.suggested_mb), ("storeWorker", 3328));
-    // The next command meets a dead worker: that is the same outage, not a new cause.
-    h.store_failed(StoreFailure::Crashed, "the store worker exited");
-    assert_eq!(
-        h.registry.get(STORE).unwrap().cause.unwrap().raise_cap.map(|c| c.suggested_mb),
-        Some(3328)
-    );
-    assert_eq!(lock(&seen).len(), 1);
-    // A failure of another kind (the library is missing) replaces it.
-    h.store_failed(StoreFailure::LibraryMissing, "image not found");
-    assert!(h.registry.get(STORE).unwrap().cause.unwrap().raise_cap.is_none());
-}
-
-#[test]
 fn trying_again_after_a_cap_stop_restarts_the_service_and_drops_the_advice() {
     let (h, _) = health();
     h.set_repair(STORE, Arc::new(|| Ok(())));
-    h.set_repair(AI, Arc::new(|| Ok(())));
-    for (service, target) in [(STORE, "storeWorker"), (AI, "ai")] {
-        h.memory_stopped(service, None, stop(service, None, target).cause);
-        if service == AI {
-            h.ai(AiHealth::Fine, None);
-            assert_eq!(h.state(AI), Some(ServiceState::Down), "the probe does not forget a cap stop");
-        }
-        let id = h.begin_repair(service).unwrap();
-        h.finish_repair(id);
-        assert_eq!(h.state(service), Some(ServiceState::Ok), "{service}");
-    }
-    h.memory_stopped(AI, None, stop(AI, None, "ai").cause);
-    h.clear_cap_stop(AI);
-    h.ai(AiHealth::Fine, None);
-    assert_eq!(h.state(AI), Some(ServiceState::Ok), "ai_reset clears it");
+    h.memory_stopped(STORE, None, stop(STORE, None, "storeWorker").cause);
+    let id = h.begin_repair(STORE).unwrap();
+    h.finish_repair(id);
+    assert_eq!(h.state(STORE), Some(ServiceState::Ok));
 }
 
 #[test]

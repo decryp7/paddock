@@ -1,7 +1,7 @@
 // Generated from the Rust wire types by `cargo test -p debrief-app --lib generated_types` (ts-rs; ADR 0016).
 // Do not edit: change the Rust type and run the test with DEBRIEF_WRITE_TYPES=1.
 
-export type ErrorCode = "failed" | "invalid" | "notFound" | "notGranted" | "busy" | "cancelled" | "io" | "limit" | "unsupported" | "unavailable" | "fileExists" | "denied" | "missing" | "internal" | "noModel" | "noRuntime" | "noVision" | "engine" | "browser" | "contextOverflow" | "malformed" | "toolLoopLimit" | "modelFile" | "memory" | "network" | "tls" | "proxyAuth" | "proxy" | "offline" | "timeout" | "httpStatus" | "gated" | "integrity" | "disk" | "refused" | "selfTestFailed" | "notACapture" | "notAvailable" | "unreachable" | "noRelease" | "noPlatform" | "invalidManifest" | "signatureInvalid" | "tooLarge" | "diskFull" | "installFailed" | "untrusted" | "incompatible";
+export type ErrorCode = "failed" | "invalid" | "notFound" | "notGranted" | "busy" | "cancelled" | "io" | "limit" | "unsupported" | "unavailable" | "fileExists" | "denied" | "missing" | "internal" | "noModel" | "noVision" | "engine" | "browser" | "contextOverflow" | "malformed" | "toolLoopLimit" | "memory" | "network" | "tls" | "proxyAuth" | "proxy" | "offline" | "timeout" | "httpStatus" | "gated" | "integrity" | "disk" | "refused" | "selfTestFailed" | "notACapture" | "notAvailable" | "unreachable" | "noRelease" | "noPlatform" | "invalidManifest" | "signatureInvalid" | "tooLarge" | "diskFull" | "installFailed" | "untrusted" | "incompatible";
 
 export type ServiceCause = "health:store" | "health:ai" | "health:plugins" | "health:browser" | "health:downloads";
 

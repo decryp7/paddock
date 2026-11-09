@@ -49,7 +49,7 @@ describe('AiChatPanel', () => {
     f.detectChanges();
     await until(f, () => !!root.querySelector('.starter'));
     await until(f, () => !el<HTMLTextAreaElement>(f, 'textarea').disabled);
-    expect(el(f, '[data-testid=ai-engine-state]').textContent).toContain('Qwen3.5-4B-Q4_K_M · ready · Vulkan');
+    expect(el(f, '[data-testid=ai-engine-state]').textContent).toContain('qwen3-8b-q4km · ready');
     const record = vi.spyOn(TestBed.inject(AiCitations), 'record').mockResolvedValue();
     const query = vi.spyOn(TestBed.inject(AiCitations), 'query').mockResolvedValueOnce(null).mockResolvedValueOnce('bad');
     at(all<HTMLButtonElement>(f, '.starter'), 0).click();
@@ -214,7 +214,7 @@ describe('AiChatPanel', () => {
     f.detectChanges();
     await until(f, () => !!root.querySelector('.setup'));
     const open = vi.spyOn(TestBed.inject(AiLauncher), 'openSetup').mockResolvedValue();
-    buttonByText(f, 'Set up AI assistant…').click();
+    buttonByText(f, 'Connect to Pitwall…').click();
     expect(open).toHaveBeenCalled();
     expect(el<HTMLTextAreaElement>(f, 'textarea').disabled).toBe(true);
     const reload = vi.spyOn(store, 'reload').mockResolvedValue();
@@ -222,15 +222,12 @@ describe('AiChatPanel', () => {
     await until(f, () => reload.mock.calls.length === 1);
   });
 
-  it('shows the background set-up in the pane ("Setting up — 1.2 of 5.6 GB") instead of the set-up button', async () => {
-    const { f, root, backend } = setup({ mode: 'setup', stepMs: 5 });
+  it('offers to connect Pitwall instead of a set-up when Pitwall serves no model', async () => {
+    const { f, root } = setup({ mode: 'setup', stepMs: 5 });
     f.detectChanges();
     await until(f, () => !!root.querySelector('.setup'));
-    expect(root.querySelector('[data-testid=ai-setting-up]')).toBeNull();
-    await backend.setupBackground('qwen3.5-9b-q4km');
-    await until(f, () => /Setting up — [\d.]+ (MB|GB) of 5\.6 GB/.test(root.querySelector('[data-testid=ai-setting-up]')?.textContent ?? ''));
-    expect(root.textContent).not.toContain('Set up AI assistant…');
-    await until(f, () => !root.querySelector('[data-testid=ai-setting-up]'));
+    expect(root.querySelector('.setup')?.textContent).toContain('Connect Debrief to Pitwall first');
+    expect(root.querySelector('.setup button')?.textContent).toContain('Connect to Pitwall…');
   });
 
   it('shows the engine as unavailable and the store error banner', async () => {

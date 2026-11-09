@@ -7,7 +7,7 @@ use super::{emit, BrowserEvent, BrowserState, ChatStatusDto, SourceInfo};
 use crate::windows::CurrentWindow;
 use crate::{err, CmdResult};
 use debrief_ai::browser::draft::without_flagged;
-use debrief_ai::browser::{check_store_query, query::search_for_event, small_for_agent, PageReader, QuerySource, SearchEngine, WebUrl};
+use debrief_ai::browser::{check_store_query, query::search_for_event, PageReader, QuerySource, SearchEngine, WebUrl};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, Runtime};
@@ -165,29 +165,16 @@ pub async fn browser_discard_sources<R: Runtime>(app: AppHandle<R>, win: Current
     Ok(sources_event(&app, win.label(), &chat, &hub))
 }
 
-/// Parameters of the active model in billions, when a model is set up.
-fn active_params_b<R: Runtime>(app: &AppHandle<R>) -> Option<f64> {
-    let core = crate::ai::commands::core(app).ok()?;
-    core.models()
-        .into_iter()
-        .find(|m| m.active)
-        .and_then(|m| m.info)
-        .map(|i| i.params_b)
-}
-
-pub fn chat_status<R: Runtime>(app: &AppHandle<R>, owner: &str, chat: &str, hub: &BrowserHub) -> ChatStatusDto {
-    let params = active_params_b(app);
+pub fn chat_status(owner: &str, chat: &str, hub: &BrowserHub) -> ChatStatusDto {
     ChatStatusDto {
         session_id: chat.to_string(),
         status: hub.chat(owner, chat).status(),
-        small_model: small_for_agent(params),
-        model_params_b: params,
         research_auto: hub.settings().research.auto,
     }
 }
 
 fn status_changed<R: Runtime>(app: &AppHandle<R>, owner: &str, chat: &str, hub: &BrowserHub) -> ChatStatusDto {
-    let s = chat_status(app, owner, chat, hub);
+    let s = chat_status(owner, chat, hub);
     emit(app, owner, BrowserEvent::ChatStatus(s.clone()));
     s
 }
@@ -196,7 +183,7 @@ fn status_changed<R: Runtime>(app: &AppHandle<R>, owner: &str, chat: &str, hub: 
 pub async fn browser_chat_status<R: Runtime>(app: AppHandle<R>, win: CurrentWindow, session_id: String) -> CmdResult<ChatStatusDto> {
     let chat = chat_of(&win, &session_id)?;
     let hub = hub(&app)?;
-    Ok(chat_status(&app, win.label(), &chat, &hub))
+    Ok(chat_status(win.label(), &chat, &hub))
 }
 
 /// "Let AI read the browser" for one chat (off by default; ends with the chat).

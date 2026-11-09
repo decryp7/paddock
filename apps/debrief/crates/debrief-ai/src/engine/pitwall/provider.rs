@@ -1,5 +1,5 @@
 //! `PitwallProvider`: the chat port over Pitwall's OpenAI-compatible API (ADR 0059). The request goes through the same
-//! preparation and parsing as the built-in engine (`llm::prompted_chat`): Debrief's tool protocol in the system prompt,
+//! preparation and parsing through `llm::prompted_chat`: Debrief's tool protocol in the system prompt,
 //! thinking and markup hidden from the stream. Pitwall applies the model's chat template.
 
 use super::client::{Client, PitwallError, StreamEnd};
