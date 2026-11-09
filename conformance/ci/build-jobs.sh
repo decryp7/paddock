@@ -30,8 +30,10 @@
 #                                                 the 4 each job had before, and 8 test threads (below). Measured
 #                                                 2026-11-09 (docs/benchmarks.md, "CI share on the shared Mac"): 23 busy
 #                                                 threads besides a CPU-bound test (3 x 4 rustc plus 10 for the agents)
-#                                                 slowed it from 2.7 to 4.0 s; the 60 s timeouts of run 7775 came from
-#                                                 all-core benchmarks in the same job, not from the share.
+#                                                 slowed it from 2.7 to 4.0 s, so the share does not explain the 60 s
+#                                                 timeouts of run 7775. In the job logs those tests were slow whenever
+#                                                 they overlapped dyno-bench's all-core tests; that is a correlation, not
+#                                                 reproduced (ER-28), and the cause is still open.
 #
 # NEXTEST_TEST_THREADS, written with CARGO_BUILD_JOBS and divided by <split>: a runner's PADDOCK_CI_TEST_THREADS
 # (runner.envs), else the class's measured number (macOS 8: the tests mostly wait, so the 4 cores of the share made a dyno

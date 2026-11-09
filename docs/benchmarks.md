@@ -261,8 +261,16 @@ Quoted by `conformance/ci/build-jobs.sh` (the macOS layout) and the fix/main-aft
 - **Notes:** 3 jobs × 4 rustc plus about 10 agent threads is 22 busy threads, which slowed the probe by about 1.5 times, not
   the 20 times seen in run 7775; so the share is not what timed it out, and that timeout is not reproduced here. In the
   job logs the probe took 15–26 s every time its run overlapped dyno-bench's all-core tests (4 of 4) and about 7 s when it
-  did not (3 of 3); run beside them here it did not slow down. The dyno lib tests mostly wait, so 4 test threads instead of
-  14 made that run 2.3 times longer, while 8 matched 14. Raw output: the fix/main-after-7761 report.
+  did not (3 of 3); run beside them here it did not slow down, so that correlation is not a confirmed cause (ER-28). The
+  dyno lib tests mostly wait, so 4 test threads instead of 14 made that run 2.3 times longer, while 8 was the fastest.
+- **Per run** (wall seconds; 1-minute load from `sysctl vm.loadavg` before the run):
+  - probe alone: 2.99, 2.66 (load 2.7); 2.70 (2.8); 4.13, 2.66 (4.1)
+  - probe beside 11 / 23 / 41 busy threads: 3.15 (load 3.5), 3.99 (5.0), 5.91 (5.0)
+  - probe ×3 beside 3 dyno lib runs at 14 threads: 2.72, 2.65, 2.62 (load 9.8 before, 6.7 after); at 4 threads: 2.59,
+    2.75, 2.64 (6.7 before, 6.0 after)
+  - probe beside dyno-bench's cpu and memory tests: 3.85, 3.55 (load 4.1 before, 8.1 after)
+  - dyno lib tests without the model tests: 14 threads 20.77 (load 4.3), 4 threads 47.77 (5.9), 8 threads 15.65 (3.8)
+  - The job-log figures (7–27 s, the overlaps) are from the logs of runs 7690–7782 on Gitea.
 
 ### 2026-11-03, starving a test process by OS priority on macOS
 

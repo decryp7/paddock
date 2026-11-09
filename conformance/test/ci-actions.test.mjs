@@ -1778,8 +1778,9 @@ test('build-jobs logs on stderr, prints only the assignments, appends it to GITH
   assert.match(real.stdout, /^CARGO_BUILD_JOBS=[1-9]\d*$/m);
 });
 
-// Run 7775 (dyno link::model, 60 s TIMEOUT): three macOS runners share one 14-core Mac, but every job's nextest ran
-// num-cpus (14) tests at once, as if it had the host to itself. NEXTEST_TEST_THREADS (which overrides the profile's
+// Three macOS runners share one 14-core Mac, but every job's nextest ran num-cpus (14) tests at once, as if it had the
+// host to itself (seen while investigating run 7775's dyno link::model timeouts, which this does not explain: their cause
+// is still open). NEXTEST_TEST_THREADS (which overrides the profile's
 // test-threads) is now the runner class's measured number (macOS: 8), else the job's core share, the share that sets
 // CARGO_BUILD_JOBS (docs/benchmarks.md, "CI share on the shared Mac": the tests mostly wait, so 4 threads made a run 2.3
 // times longer than 14, and 8 matched 14).
