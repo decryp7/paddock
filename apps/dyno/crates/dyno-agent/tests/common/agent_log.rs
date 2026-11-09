@@ -1,6 +1,6 @@
 //! The agent's own log for a test that fails (ER-27). An agent started in the test process (`Running::start*`) installs no
 //! file log, so its lines ("refused a connection: ...", a job's phases) went nowhere and a failure showed only the client's
-//! side (CI run 7763). [`on_failure`] keeps every `log` record of this process in memory (the last [`KEPT`]) and its guard
+//! side (CI run 7763). [`on_failure`] keeps every `log` record of this process up to `Debug` in memory (the last [`KEPT`]) and its guard
 //! prints them to standard error when it is dropped while the test panics; nextest shows that output with the failure.
 //!
 //! One logger per process: nextest runs each test in its own process; under `cargo test` the tests of one file share it, and
@@ -56,7 +56,7 @@ fn keep() -> Option<&'static Keep> {
         let k: &'static Keep = Box::leak(Box::new(Keep(Mutex::new(VecDeque::new()))));
         // Another logger already installed (a test file with its own capture) keeps its place; this guard then prints nothing.
         log::set_logger(k).ok()?;
-        log::set_max_level(log::LevelFilter::Trace);
+        log::set_max_level(log::LevelFilter::Debug);
         Some(k)
     })
 }
@@ -85,7 +85,8 @@ impl Drop for OnFailure {
 }
 
 /// How many files this process has open and may open: running out of them ends connections (CI run 7763).
-fn descriptors() -> String {
+#[allow(dead_code)]
+pub fn descriptors() -> String {
     #[cfg(unix)]
     {
         let dir = if cfg!(target_os = "linux") { "/proc/self/fd" } else { "/dev/fd" };

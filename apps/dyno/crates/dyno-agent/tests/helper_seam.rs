@@ -142,9 +142,13 @@ impl Rig {
 
     /// One request on a connection of its own, closed after the answer: a dropped peer keeps its connection (and the
     /// agent's threads and descriptors for it) open, so a polling test would pile them up (CI run 7763).
+    /// A failure names the open files at that moment (the count at the guard's drop comes after the agent stopped).
     fn ask(&self, request: Request) -> Result<Reply, String> {
-        let peer = connect(&self.dirs).unwrap().0;
-        let reply = ask_within(&peer, request, SLOW);
+        let peer = match connect(&self.dirs) {
+            Ok((peer, _)) => peer,
+            Err(e) => panic!("{e} ({})", agent_log::descriptors()),
+        };
+        let reply = ask_within(&peer, request, SLOW).map_err(|e| format!("{e} ({})", agent_log::descriptors()));
         peer.close();
         reply
     }

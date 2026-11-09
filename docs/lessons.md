@@ -1517,7 +1517,7 @@ Root cause: a test rig that dropped peers instead of closing them, plus a handsh
 silence. Fix: `paddock-ipc` answers a host that cannot start a handshake with `busy` naming the cause, a malformed hello with
 `invalid`, and keeps one descriptor in reserve so a client the accept could not take (Linux queues it; it waited 10 s while the
 host logged a refusal every 50 ms) is told `busy` too; the helper-seam rig closes each connection and prints the agent's log, the
-open files and the limit when a test fails; a 300-connection stress test checks that the agent gives back what a closed
+open files and the limit when a test fails; a 120-connection stress test checks that the agent gives back what a closed
 connection held.
 
 - A test that starts the product in its own process shares its limits: a leak in the test's client exhausts the product.

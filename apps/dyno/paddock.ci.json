@@ -18,6 +18,9 @@
     "{build}[/\\\\]debug[/\\\\](dyno-test-plugin|dyno-bench|dyno-bench-gpu)(\\.exe)?( |$)",
     "{tmp}[/\\\\]dyno-it-plugins-[A-Za-z0-9]+[/\\\\][^/\\\\]+[/\\\\]plugin(\\.exe)?( |$)"
   ],
+  "rustChecks": [
+    "echo \"Open files for the tests (ulimit -n, ER-27; CI run 7763): soft $(ulimit -Sn), hard $(ulimit -Hn)\" | tee -a \"${GITHUB_STEP_SUMMARY:-/dev/null}\""
+  ],
   "checks": [
     "cd apps/dyno",
     "node --test scripts/check-capabilities.test.mjs",
