@@ -3215,6 +3215,7 @@ dependencies = [
  "paddock-dialogs",
  "paddock-env",
  "paddock-jobs",
+ "paddock-limits",
  "paddock-log",
  "paddock-settings",
  "paddock-workspace-hack",
@@ -3249,6 +3250,7 @@ dependencies = [
  "fs4",
  "httpdate",
  "paddock-jobs",
+ "paddock-limits",
  "paddock-workspace-hack",
  "rustls",
  "serde",
@@ -3261,6 +3263,7 @@ dependencies = [
 name = "paddock-env"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "log",
  "paddock-workspace-hack",
  "serde",
@@ -3289,6 +3292,7 @@ dependencies = [
  "log",
  "paddock-commands",
  "paddock-jobs",
+ "paddock-limits",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
@@ -3301,12 +3305,23 @@ version = "0.2.0"
 dependencies = [
  "croner",
  "jiff",
+ "log",
  "paddock-commands",
  "paddock-env",
+ "paddock-limits",
  "paddock-workspace-hack",
  "serde",
  "sha2 0.10.9",
  "tauri",
+]
+
+[[package]]
+name = "paddock-limits"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-workspace-hack",
+ "serde",
 ]
 
 [[package]]
@@ -3362,6 +3377,7 @@ version = "0.1.0"
 dependencies = [
  "paddock-download",
  "paddock-jobs",
+ "paddock-limits",
  "paddock-workspace-hack",
  "rustls",
  "ureq",
@@ -3466,7 +3482,7 @@ dependencies = [
 
 [[package]]
 name = "paddock-setup"
-version = "0.1.0"
+version = "1.2.0"
 dependencies = [
  "base64 0.22.1",
  "paddock-proc",
@@ -3492,9 +3508,11 @@ dependencies = [
  "paddock-files",
  "paddock-health",
  "paddock-jobs",
+ "paddock-limits",
  "paddock-log",
  "paddock-mcp",
  "paddock-menu",
+ "paddock-net",
  "paddock-packs",
  "paddock-pitwall",
  "paddock-service",
@@ -3548,6 +3566,7 @@ dependencies = [
  "paddock-env",
  "paddock-files",
  "paddock-jobs",
+ "paddock-limits",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
@@ -3559,6 +3578,7 @@ name = "paddock-testkit"
 version = "0.1.0"
 dependencies = [
  "paddock-jobs",
+ "paddock-limits",
  "paddock-workspace-hack",
  "socket2",
  "tempfile",
@@ -3576,6 +3596,7 @@ dependencies = [
  "paddock-download",
  "paddock-files",
  "paddock-jobs",
+ "paddock-limits",
  "paddock-workspace-hack",
  "semver",
  "serde",
