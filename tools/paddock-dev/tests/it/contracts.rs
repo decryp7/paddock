@@ -198,7 +198,7 @@ fn an_apps_host_cleanup_patterns_match_its_own_paths_and_never_the_real_runner_o
         ),
         (
             "pitwall",
-            vec!["/Users/x/.paddock-ci/target-pitwall-app-s1/debug/pitwall-server --die-after-ms 500 --port 4455 --fake-engine".into()],
+            vec!["/Users/x/.paddock-ci/target-pitwall-app-s1/debug/pitwall-fake-engine --port 4455".into()],
         ),
         (
             "pitcrew",
@@ -226,7 +226,7 @@ fn an_apps_host_cleanup_patterns_match_its_own_paths_and_never_the_real_runner_o
         ),
         (
             "pitwall",
-            vec!["/Users/x/.paddock-ci/target-pitwall-app-s2/debug/pitwall-server --fake-engine".into()],
+            vec!["/Users/x/.paddock-ci/target-pitwall-app-s2/debug/pitwall-fake-engine".into()],
         ),
         (
             "pitcrew",
@@ -291,15 +291,15 @@ fn pitwalls_and_dynos_patterns_never_reach_an_installed_app_another_job_or_the_u
         .map(String::from)
         .collect::<Vec<_>>();
     let pitwall: Vec<&str> = pitwall.iter().map(String::as_str).collect();
-    let ours = "/Users/x/.paddock-ci/target-pitwall-app-s1/debug/pitwall-server --die-after-ms 500 --port 4455 --fake-engine";
+    let ours = "/Users/x/.paddock-ci/target-pitwall-app-s1/debug/pitwall-fake-engine --port 4455";
     let near = [
         "/Applications/Pitwall.app/Contents/MacOS/pitwall-server --port 8080",
-        "/Applications/Pitwall.app/Contents/MacOS/pitwall-server --fake-engine",
-        "/Users/x/.paddock-ci/target-spotter-app-s1/debug/pitwall-server --fake-engine",
-        "/Users/x/.paddock-ci/target-pitwall-bundle-s1/debug/pitwall-server --fake-engine",
-        "/Users/x/.paddock-ci/target-pitwall-app-s2/debug/pitwall-server --fake-engine",
+        "/Applications/Pitwall.app/Contents/MacOS/pitwall-fake-engine",
+        "/Users/x/.paddock-ci/target-spotter-app-s1/debug/pitwall-fake-engine",
+        "/Users/x/.paddock-ci/target-pitwall-bundle-s1/debug/pitwall-fake-engine",
+        "/Users/x/.paddock-ci/target-pitwall-app-s2/debug/pitwall-fake-engine",
         "/Users/x/.paddock/engines/llama-server --port 8081 -m model.gguf",
-        "/Users/x/dev/pitwall/target/debug/pitwall-server --fake-engine",
+        "/Users/x/dev/pitwall/target/debug/pitwall-fake-engine",
         "/opt/homebrew/bin/llama-server --port 8080",
     ];
     for r in scoped_all("pitwall", &pitwall).into_iter().flatten() {

@@ -6,6 +6,7 @@
   "ui": true,
   "eslint": true,
   "conformance": true,
+  "c99": true,
   "tools": true,
   "icons": true,
   "ciImage": true,

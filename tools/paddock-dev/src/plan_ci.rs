@@ -119,6 +119,10 @@ pub fn matrix(plan: &Value, graph: &RepoGraph, opts: MatrixOpts) -> Result<Vec<V
                 "rust_checks".into(),
                 json!(if linux { join("rustChecks", "\n") } else { String::new() }),
             );
+            leg.insert(
+                "host_rust_checks".into(),
+                json!(if linux { String::new() } else { join("hostRustChecks", "\n") }),
+            );
             leg.insert("ui_checks".into(), json!(if linux { join("ui", "\n") } else { String::new() }));
             leg.insert(
                 "angular_dir".into(),
@@ -207,6 +211,7 @@ pub fn only_app(plan: &Value, app: &str) -> Value {
         "ui",
         "eslint",
         "conformance",
+        "c99",
         "tools",
         "icons",
         "ciImage",
@@ -302,6 +307,7 @@ pub fn ci_outputs(plan: &Value, legs: &[Value], base: Option<&str>) -> Vec<(Stri
         ("ui".into(), b("ui")),
         ("eslint".into(), b("eslint")),
         ("conformance".into(), b("conformance")),
+        ("c99".into(), b("c99")),
         ("tools".into(), b("tools")),
         ("icons".into(), b("icons")),
         ("paddock_dev".into(), b("paddockDev")),
@@ -323,7 +329,7 @@ pub fn summary(plan: &Value, reason: &str, legs: &[Value]) -> String {
         "| Project | Runs |".into(),
         "|---|---|".into(),
     ];
-    for p in ["crates", "ui", "eslint", "conformance", "tools", "paddockDev"] {
+    for p in ["crates", "ui", "eslint", "conformance", "c99", "tools", "paddockDev"] {
         lines.push(format!("| {p} | {} |", yes(plan[p].as_bool().unwrap_or(false))));
     }
     for l in legs {
@@ -883,7 +889,7 @@ mod tests {
 
     #[test]
     fn only_app_keeps_one_app_both_halves_and_no_other_project() {
-        let full = json!({"all": true, "crates": true, "ui": true, "eslint": true, "conformance": true, "tools": true, "icons": true, "ciImage": true, "paddockDev": true, "docs": true, "apps": ["a", "b"], "kinds": {"a": ["rust"]}, "packages": {"p": ["x"]}});
+        let full = json!({"all": true, "crates": true, "ui": true, "eslint": true, "conformance": true, "c99": true, "tools": true, "icons": true, "ciImage": true, "paddockDev": true, "docs": true, "apps": ["a", "b"], "kinds": {"a": ["rust"]}, "packages": {"p": ["x"]}});
         let only = only_app(&full, "b");
         assert_eq!(only["apps"], json!(["b"]));
         assert_eq!(only["kinds"], json!({"b": ["rust", "ui"]}));
@@ -893,6 +899,7 @@ mod tests {
             "ui",
             "eslint",
             "conformance",
+            "c99",
             "tools",
             "icons",
             "ciImage",

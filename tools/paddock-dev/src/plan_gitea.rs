@@ -22,6 +22,7 @@ pub const CI_JOBS: &[(&str, &[&str])] = &[
     ("e2e", &["ui"]),
     ("e2e-webkit", &["ui"]),
     ("conformance", &["conformance"]),
+    ("c99", &["c99"]),
     ("tools", &["tools"]),
     ("icons", &["icons"]),
     ("eslint-preset", &["eslint"]),

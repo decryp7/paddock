@@ -73,7 +73,10 @@ fn a_shared_crate_marks_crates_and_every_app_whose_cargo_graph_reaches_it_rust_h
         r["ui"], true,
         "ui cause-codes.spec.ts scans the shared crates for health cause codes"
     );
-    assert_eq!(names(&r["apps"]), ["debrief", "dyno", "shell-demo", "spotter", "workbench-demo"]);
+    assert_eq!(
+        names(&r["apps"]),
+        ["debrief", "dyno", "pitcrew", "pitwall", "shell-demo", "spotter", "workbench-demo"]
+    );
     assert_eq!(r["kinds"]["shell-demo"], json!(["rust"]));
     assert_eq!(r["kinds"]["debrief"], json!(["rust"]));
     assert!(list(&r["packages"]["crates"]).contains(&"paddock-jobs"));
@@ -124,7 +127,7 @@ fn the_e2e_port_and_build_guard_mark_the_ui_half_of_every_app() {
 fn a_ui_change_marks_the_tauri_shells_that_embed_a_ui_build_both_halves() {
     let r = run(&["ui/projects/paddock-ui/shell/src/public-api.ts"]);
     assert_eq!(r["ui"], true);
-    assert_eq!(names(&r["apps"]), ["dyno", "shell-demo", "spotter", "workbench-demo"]);
+    assert_eq!(names(&r["apps"]), ["dyno", "pitwall", "shell-demo", "spotter", "workbench-demo"]);
     assert_eq!(r["kinds"]["spotter"], json!(["ui"]));
     assert_eq!(r["kinds"]["dyno"], json!(["ui"]));
     assert_eq!(r["kinds"]["shell-demo"], json!(["rust", "ui"]));
@@ -153,7 +156,8 @@ fn an_apps_cargo_toml_and_capabilities_run_conformance_other_app_files_do_not() 
         assert_eq!(r["apps"], json!([f.split('/').nth(1).unwrap()]), "{f}");
     }
     assert_eq!(run(&["apps/shell-demo/src-tauri/src/lib.rs"])["conformance"], false);
-    assert_eq!(run(&["apps/shell-demo/README.md"])["conformance"], false);
+    // C100 (./dev gates check) reads every README.
+    assert_eq!(run(&["apps/shell-demo/README.md"])["conformance"], true);
 }
 
 #[test]

@@ -415,9 +415,6 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
         if META.iter().any(|r| r.is_match(f)) {
             continue;
         }
-        if APP_CAPABILITY_INPUT.is_match(f) {
-            st.mark(Some("conformance".to_string()), format!("C48 reads {f}"));
-        }
         if C99_INPUT.iter().any(|r| r.is_match(f)) {
             st.mark(Some("c99".to_string()), format!("C99 reads {f}"));
         }
