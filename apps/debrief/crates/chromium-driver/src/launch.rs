@@ -594,6 +594,20 @@ mod tests {
         assert!(d.file_name().unwrap().to_string_lossy().starts_with("chromium-driver-"));
     }
 
+    /// The end of a launch removes a throwaway profile (it lives below the caller's cache folder, so a leftover would stay
+    /// for good) and never a kept one.
+    #[test]
+    fn cleanup_removes_a_throwaway_profile_and_never_a_kept_one() {
+        let base = tempfile::tempdir().unwrap();
+        let throwaway = unique_dir(base.path()).unwrap();
+        let kept = base.path().join("kept");
+        std::fs::create_dir(&kept).unwrap();
+        cleanup(&throwaway, true);
+        cleanup(&kept, false);
+        assert!(!throwaway.exists());
+        assert!(kept.exists());
+    }
+
     #[test]
     fn a_launch_without_a_folder_for_throwaway_profiles_is_refused() {
         assert!(unique_dir(Path::new("")).is_err());
