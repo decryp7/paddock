@@ -65,6 +65,8 @@ jobs:
       apps: ${{ steps.plan.outputs.apps }}
       any_app: ${{ steps.plan.outputs.any_app }}
       base: ${{ steps.plan.outputs.base }}
+    env:
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
     steps:
       # The whole history: the base (a merge base, the last green commit of main) can be any older commit.
       - uses: actions/checkout@v4
@@ -101,6 +103,8 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
+    env:
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -267,6 +271,8 @@ jobs:
     defaults:
       run:
         working-directory: conformance
+    env:
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -353,6 +359,8 @@ jobs:
     needs: [plan]
     if: ${{ needs.plan.outputs.tools == 'true' }}
     runs-on: macos-latest
+    env:
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
     steps:
       - uses: actions/checkout@v4
 
