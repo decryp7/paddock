@@ -611,11 +611,10 @@ fn run_overlapping(rustcs: &[&str], expected: usize) -> (tempfile::TempDir, Vec<
                 .output_child()
         })
         .collect();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-    while std::fs::read_dir(&barrier).unwrap().count() < expected {
-        assert!(std::time::Instant::now() < deadline, "the builds never overlapped");
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    assert!(
+        paddock_testkit::poll_until_within(std::time::Duration::from_secs(60), || std::fs::read_dir(&barrier).unwrap().count() >= expected),
+        "the builds never overlapped"
+    );
     std::fs::write(barrier.join("go"), "").unwrap();
     let outs = children.into_iter().map(|c| c.wait_with_output().unwrap()).collect();
     (scratch, outs, f)

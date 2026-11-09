@@ -31,6 +31,7 @@ impl Guard {
             if Instant::now() >= end {
                 return None;
             }
+            // conformance: hang-guard — a poll of the child's exit, bounded by the 40 s limit the caller passes
             std::thread::sleep(Duration::from_millis(20));
         }
     }
@@ -57,6 +58,7 @@ pub fn wait_until(what: &str, mut cond: impl FnMut() -> bool) {
         if cond() {
             return;
         }
+        // conformance: hang-guard — a poll of a condition, bounded by the 40 s DEADLINE
         std::thread::sleep(Duration::from_millis(20));
     }
     panic!("timed out waiting for {what}");

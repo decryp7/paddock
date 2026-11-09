@@ -347,6 +347,25 @@ path = "commit c939d33e820ca1c7b8d44539645a75c11b3f7ec7"
 reason = "body names scripts/notices.sh as the generator of a file, not an AI tool; history cannot be rewritten (no history rewrite)"
 expires = "2026-12-31"
 
+# Three ADR 0022 docs commits of the tooling train whose first line is over 100 characters; the branch is shared, history is not rewritten.
+[[waiver]]
+check = "C23"
+path = "commit 9c1e6810c7e56453e86ab2f2a8ce11a4663e157f"
+reason = "first line over 100 characters on a shared tooling branch; history cannot be rewritten (no history rewrite)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C23"
+path = "commit 47f59e133ab2c61e86061d62aa2c7c5509d698ae"
+reason = "first line over 100 characters on a shared tooling branch; history cannot be rewritten (no history rewrite)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C23"
+path = "commit 27d6782527d83b231388417be7f084be3dd30ec8"
+reason = "first line over 100 characters on a shared tooling branch; history cannot be rewritten (no history rewrite)"
+expires = "2026-12-31"
+
 # C99 (ADR 0057, rule 72): the apps whose manifests still name keyring move their secrets to paddock-secrets' files in
 # their own work package (ADR 0057 §3 waiver table); each waiver goes with that work.
 [[waiver]]
