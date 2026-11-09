@@ -86,8 +86,8 @@ async fn a_cancelled_load_leaves_a_model_that_another_request_loaded_or_is_using
 #[tokio::test]
 async fn cancelling_a_benchmark_stops_it_and_records_nothing() {
     let h = Arc::new(harness(false).await);
-    // The fake model takes "for ever" to answer, so the benchmark is mid-run when the cancel arrives.
-    h.delay_ms.store(10 * 60 * 1000, std::sync::atomic::Ordering::SeqCst);
+    // The fake model never answers until the test says so, so the benchmark is mid-run when the cancel arrives.
+    h.hold.close();
     let id = ModelId::parse(TINY).unwrap();
     let h2 = h.clone();
     let bench = tokio::spawn(async move { h2.rpc("run_benchmark", json!({ "modelId": TINY, "opId": "bench-1" })).await });
@@ -103,7 +103,7 @@ async fn cancelling_a_benchmark_stops_it_and_records_nothing() {
     assert_eq!(r.json(), json!({ "cancelled": true }), "{}", r.body);
     assert_eq!(h.rpc("benchmarks", json!({})).await.json(), json!([]), "no result is stored");
     // The server is consistent: a benchmark without an opId still runs to the end.
-    h.delay_ms.store(0, std::sync::atomic::Ordering::SeqCst);
+    h.hold.release();
     let again = h.rpc("run_benchmark", json!({ "modelId": TINY })).await;
     assert_eq!(again.status, 200, "{}", again.body);
     assert!(again.json()["genTps"].as_f64().unwrap() > 0.0);

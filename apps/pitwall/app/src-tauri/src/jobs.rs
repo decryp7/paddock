@@ -493,14 +493,23 @@ mod tests {
         let jobs = jobs();
         let mut own = spec(None);
         own.own_progress = true;
+        let (finish, finished) = oneshot::channel::<()>();
         start(&jobs, own, sink, |ctx| async move {
             ctx.set(1000);
-            tokio::time::sleep(Duration::from_secs(5)).await;
+            finished.await.ok();
             Ok(Outcome::Done(Value::Null))
         });
         settle().await;
         tokio::time::advance(Duration::from_secs(5)).await;
         settle().await;
+        finish.send(()).unwrap();
+        // The job ends: wait for its terminal event, bounded only as a hang guard.
+        let guard = std::time::Instant::now() + Duration::from_secs(10);
+        while !kinds(&events).iter().any(|k| k == "done") {
+            assert!(std::time::Instant::now() < guard, "the job never ended: {:?}", kinds(&events));
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(kinds(&events).iter().filter(|k| *k == "done").count(), 1);
         let done: Vec<u64> = lock(&events)
             .iter()
             .filter_map(|e| match e {

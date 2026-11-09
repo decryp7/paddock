@@ -30,6 +30,7 @@ function fakePort(opts: { focusFails?: boolean } = {}) {
   const calls: string[] = [];
   const listeners = new Map<string, () => void>();
   let storageHandler: (() => void) | null = null;
+  let unlistened = 0;
   const port: TauriWindowPort = {
     invoke: vi.fn(async (command: string, args?: Record<string, unknown>) => {
       calls.push(`invoke ${command}${args ? ' ' + JSON.stringify(args) : ''}`);
@@ -42,17 +43,15 @@ function fakePort(opts: { focusFails?: boolean } = {}) {
     }),
     listen: vi.fn(async (event: string, handler: () => void) => {
       listeners.set(event, handler);
-      return () => void listeners.delete(event);
+      return () => void (listeners.delete(event), unlistened++);
     }),
     onStorage: (h) => {
       storageHandler = h;
       return () => (storageHandler = null);
     },
   };
-  return { port, calls, ring: (event: string) => listeners.get(event)?.(), storageChanged: () => storageHandler?.(), listening: () => listeners.size };
+  return { port, calls, ring: (event: string) => listeners.get(event)?.(), storageChanged: () => storageHandler?.(), listening: () => listeners.size, unlistened: () => unlistened };
 }
-
-const flush = () => new Promise((r) => setTimeout(r, 0));
 
 describe('PendingRoute', () => {
   it('gives a route once', () => {
@@ -135,7 +134,7 @@ describe('TauriWindowControl', () => {
     const handler = vi.fn();
     const stop = new TauriWindowControl(main.port, new PendingRoute(() => storage)).onNavigate(handler);
     expect(handler).toHaveBeenCalledExactlyOnceWith('/models');
-    await flush();
+    await vi.waitFor(() => expect(main.listening()).toBe(1));
     main.ring(NAVIGATE_EVENT);
     expect(handler).toHaveBeenCalledTimes(1);
     stop();
@@ -148,7 +147,7 @@ describe('TauriWindowControl', () => {
     const handler = vi.fn();
     const control = new TauriWindowControl(main.port, new PendingRoute(() => storage));
     const stop = control.onNavigate(handler);
-    await flush();
+    await vi.waitFor(() => expect(main.listening()).toBe(1));
     expect(handler).not.toHaveBeenCalled();
     new PendingRoute(() => storage).put('/apps');
     main.storageChanged();
@@ -164,7 +163,7 @@ describe('TauriWindowControl', () => {
     const main = fakePort();
     const stop = new TauriWindowControl(main.port, new PendingRoute(() => memoryStorage())).onNavigate(vi.fn());
     stop();
-    await flush();
+    await vi.waitFor(() => expect(main.unlistened()).toBe(1));
     expect(main.listening()).toBe(0);
   });
 
@@ -187,8 +186,7 @@ describe('TauriWindowControl', () => {
     await expect(control.openMain('/apps')).resolves.toBeUndefined();
     const handler = vi.fn();
     control.onNavigate(handler);
-    await flush();
-    expect(handler).toHaveBeenCalledWith('/apps');
+    await vi.waitFor(() => expect(handler).toHaveBeenCalledWith('/apps'));
   });
 });
 

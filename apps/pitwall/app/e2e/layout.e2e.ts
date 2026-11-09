@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { dialogContracts, dialogWindowUrl } from '../../../../ui/projects/paddock-e2e/src/index.ts';
+import { dialogContracts, dialogWindowUrl, waitForStableFrame } from '../../../../ui/projects/paddock-e2e/src/index.ts';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openApp } from './app';
@@ -146,7 +146,7 @@ function measure(rootSelector: string | null): { spill: string[]; scroll: string
 
 async function problems(page: Page, rootSelector: string | null): Promise<Report> {
   await page.evaluate(() => document.fonts.ready);
-  await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+  await waitForStableFrame(page);
   return page.evaluate(measure, rootSelector);
 }
 
@@ -324,7 +324,7 @@ test.describe('tables fill their container and never cut a header, a number or a
         await state.act?.(page);
         await page.waitForLoadState('networkidle');
         await page.evaluate(() => document.fonts.ready);
-        await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+        await waitForStableFrame(page);
         expect(await page.evaluate(measureTables), `${state.id}@${width}`).toEqual([]);
       });
     }

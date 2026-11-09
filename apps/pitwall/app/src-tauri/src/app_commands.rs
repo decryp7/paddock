@@ -1063,9 +1063,10 @@ mod tests {
         assert!(n.bytes().all(|b| b.is_ascii_hexdigit()));
     }
 
-    /// A server that works for `work_takes` on the (paused) clock, or never answers the work.
+    /// A server that answers the work once the test opens `gate` (the job's seconds count runs on the paused clock meanwhile), or
+    /// never answers it.
     struct Timed {
-        work_takes: Option<Duration>,
+        gate: Option<Arc<tokio::sync::Notify>>,
         calls: Mutex<Vec<(String, Option<Duration>)>>,
     }
 
@@ -1073,9 +1074,9 @@ mod tests {
         fn call<'a>(&'a self, method: &'a str, _args: Value, timeout: Option<Duration>) -> BoxFuture<'a, Result<Value, CommandError>> {
             Box::pin(async move {
                 self.calls.lock().unwrap().push((method.to_string(), timeout));
-                match self.work_takes {
-                    Some(d) => {
-                        tokio::time::sleep(d).await;
+                match &self.gate {
+                    Some(gate) => {
+                        gate.notified().await;
                         Ok(serde_json::json!({ "loaded": true }))
                     }
                     None => std::future::pending().await,
@@ -1106,8 +1107,9 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn a_load_that_takes_longer_than_the_old_600_second_limit_still_completes_with_no_deadline_and_no_polling() {
+        let gate = Arc::new(tokio::sync::Notify::new());
         let server = Arc::new(Timed {
-            work_takes: Some(Duration::from_secs(1500)),
+            gate: Some(gate.clone()),
             calls: Mutex::default(),
         });
         let client: SharedClient = server.clone();
@@ -1124,6 +1126,7 @@ mod tests {
         );
         events.until("past 700 s", |e| seconds_counted(e) >= 700).await;
         assert_eq!(jobs.running(), 1, "past 600 s and still working");
+        gate.notify_one();
         events.until_terminal().await;
         assert_eq!(
             events.last(),
@@ -1139,7 +1142,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_job_waiting_for_a_silent_server_for_hours_makes_no_other_call() {
         let server = Arc::new(Timed {
-            work_takes: None,
+            gate: None,
             calls: Mutex::default(),
         });
         let client: SharedClient = server.clone();

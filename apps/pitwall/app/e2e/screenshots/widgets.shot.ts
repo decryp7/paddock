@@ -1,13 +1,14 @@
 import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
-import { dialogWindowUrl } from '../../../../../ui/projects/paddock-e2e/src/index.ts';
+import { resolve } from 'node:path';
+import { dialogWindowUrl, waitForStableFrame } from '../../../../../ui/projects/paddock-e2e/src/index.ts';
 
 /**
  * The tray popup's widgets and their chooser, light and dark at 2x, for the independent review (rule 22) and the docs: the
  * default popup in its calm, empty and worst states, the chooser narrow, and the chooser wide with the live preview. Only on
  * request: `SHOTS_OUT=<folder> npx playwright test -c e2e/screenshots/playwright.config.ts widgets`.
  */
-const OUT = process.env['SHOTS_OUT'] ?? '/Volumes/d7sst7/dev-targets/review/pitwall-widgets-r3/new';
+const OUT = process.env['SHOTS_OUT'] ?? resolve(__dirname, '../../.angular/widgets-shots');
 const NOW = new Date('2026-10-22T14:30:00').getTime();
 
 async function prepare(page: Page, theme: 'dark' | 'light') {
@@ -36,7 +37,7 @@ for (const theme of ['light', 'dark'] as const) {
         await expect(popup.locator('[aria-busy="true"]')).toHaveCount(0);
         await page.evaluate(async () => document.fonts.ready);
         await page.mouse.move(2, 2);
-        await page.waitForTimeout(400);
+        await waitForStableFrame(page);
         await popup.screenshot({ path: `${OUT}/${name}-${theme}.png` });
       });
     }
@@ -49,7 +50,7 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(popup.locator('section.pd-w').first()).toBeVisible();
       await popup.getByRole('button', { name: 'More actions' }).click();
       await expect(page.getByRole('menuitem', { name: 'Quit Pitwall' })).toBeVisible();
-      await page.waitForTimeout(400);
+      await waitForStableFrame(page);
       // Only the popup and its menu, not the empty page around them.
       const [a, b] = await Promise.all([popup.boundingBox(), page.locator('.mat-mdc-menu-panel').boundingBox()]);
       const x = Math.max(0, Math.min(a!.x, b!.x) - 8);
@@ -68,7 +69,7 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(page.locator('pd-skeleton')).toHaveCount(0);
       await page.evaluate(async () => document.fonts.ready);
       await page.mouse.move(2, 2);
-      await page.waitForTimeout(600);
+      await waitForStableFrame(page);
       // The page's own box (title, the chooser and its preview), not the empty window below it.
       await page.locator('.page').first().screenshot({ path: `${OUT}/tray-chooser-${theme}.png` });
     });
@@ -87,7 +88,7 @@ for (const theme of ['light', 'dark'] as const) {
       expect(side!.x, 'the preview is to the right of the lists').toBeGreaterThan(list!.x + 300);
       await page.evaluate(async () => document.fonts.ready);
       await page.mouse.move(2, 2);
-      await page.waitForTimeout(600);
+      await waitForStableFrame(page);
       await page.screenshot({ path: `${OUT}/tray-chooser-preview-${theme}.png` });
     });
   });

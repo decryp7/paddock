@@ -17,6 +17,7 @@ fn enabled() -> bool {
 /// Polls `downloads` until every job has ended (an install shows as the archive's file name); panics when one failed.
 async fn wait_downloads(h: &common::Harness, what: &str, limit: Duration) {
     let start = Instant::now();
+    let mut pause = Duration::from_millis(1);
     loop {
         let d = h.rpc("downloads", json!({})).await.json();
         let jobs = d.as_array().unwrap();
@@ -27,7 +28,9 @@ async fn wait_downloads(h: &common::Harness, what: &str, limit: Duration) {
             return;
         }
         assert!(start.elapsed() < limit, "timed out waiting for {what}: {d}");
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        // conformance: hang-guard — the poll interval of a real download that takes minutes, bounded by the caller's limit of 300 s; manual run only (PITWALL_LLAMA_E2E=1)
+        tokio::time::sleep(pause).await;
+        pause = (pause * 2).min(Duration::from_millis(500));
     }
 }
 

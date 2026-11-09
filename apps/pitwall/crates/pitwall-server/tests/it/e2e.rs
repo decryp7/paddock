@@ -602,15 +602,12 @@ async fn benchmarks_are_kept_and_models_report_their_engine() {
 }
 
 async fn tick_until(h: &common::Harness, what: &str, mut done: impl FnMut(&common::Harness) -> bool) {
-    // Generous: loaded CI runners are slow (docs/suite-lessons.md).
-    for _ in 0..900 {
+    // Each look drives the supervisor's tick itself, then asks whether the condition holds.
+    common::until(what, || {
         h.st.serving.tick();
-        if done(h) {
-            return;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-    panic!("timed out waiting for: {what}");
+        done(h)
+    })
+    .await;
 }
 
 /// CI run 7775: the first start of a freshly built binary on a busy Mac took longer than the child engine's fixed
@@ -942,12 +939,7 @@ async fn stopping_serving_unloads_every_model_ends_the_engine_processes_and_resu
     assert_eq!(stopped.status, 200, "{}", stopped.body);
     assert_eq!(stopped.json()["unloaded"], 1);
     assert!(h.st.serving.loaded().is_empty());
-    for _ in 0..100 {
-        if !pitwall_server::system::pid_alive(pid) {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
+    common::until("the engine process to end", || !pitwall_server::system::pid_alive(pid)).await;
     assert!(!pitwall_server::system::pid_alive(pid), "the engine process ended");
     assert_eq!(h.rpc("overview", json!({})).await.json()["server"]["serving"], "stopped");
     let refused = h

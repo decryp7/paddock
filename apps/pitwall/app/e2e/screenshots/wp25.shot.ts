@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { dialogContracts, dialogWindowUrl, type DialogContractEntry } from '../../../../../ui/projects/paddock-e2e/src/index.ts';
+import { dialogContracts, dialogWindowUrl, waitForStableFrame, type DialogContractEntry } from '../../../../../ui/projects/paddock-e2e/src/index.ts';
 import { FIXTURES } from '../dialog-fixtures';
 
 // Pitwall's windows, for the independent review (rule 22): the tray popover window, every section of the Settings window
@@ -68,7 +68,7 @@ test.describe('WP-2.5 screenshots', () => {
         await page.clock.runFor(1500);
         const height = await page.locator('.tray').evaluate((e) => Math.ceil(e.getBoundingClientRect().height));
         await page.setViewportSize({ width: 360, height });
-        await page.waitForTimeout(400);
+        await waitForStableFrame(page);
         await shot(page, `tray-${scheme}.png`, 'Tray popover window (360 wide, fitted)', `tray popover, ${scheme}`);
       });
       for (const name of [...SECTIONS, 'appearance', 'save-refused']) {
@@ -97,7 +97,7 @@ test.describe('WP-2.5 screenshots', () => {
             await page.locator(`#set-${name}`).evaluate((e) => e.scrollIntoView({ block: 'start' }));
           }
           await page.mouse.move(2, 2);
-          await page.waitForTimeout(900);
+          await waitForStableFrame(page);
           await shot(page, `settings-${name}-${scheme}.png`, 'Settings window (880x700)', `Settings, ${name}, ${scheme}`);
         });
       }
@@ -115,13 +115,13 @@ test.describe('WP-2.5 screenshots', () => {
               const input = id === 'pw.service-consent' ? { platform: os === 'win' ? 'windows' : 'macos' } : (FIXTURES[id]?.[0] ?? {});
               await page.goto(dialogWindowUrl(id, input, { title: TITLES[id] ?? id, query: Q }));
               await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
-              await page.waitForTimeout(900);
+              await waitForStableFrame(page);
               const asked = await page.evaluate(() => ({ h: Number(document.documentElement.dataset['fittedHeight'] ?? '0'), min: document.documentElement.dataset['minContent'] ?? '0x0' }));
               const minH = Number(asked.min.split('x')[1] ?? '0');
               const height = contract.kind === 'tool' ? Math.min(contract.height ?? capH, capH) : Math.max(Math.min(asked.h, capH), minH);
               await page.setViewportSize({ width: contract.width, height });
               await expect(page.locator('[data-testid=dialog-footer]')).toBeVisible();
-              await page.waitForTimeout(300);
+              await waitForStableFrame(page);
               await shot(page, `dialog-${id}-${os}-${scheme}.png`, `Dialog windows (${scheme})`, `${id}, ${os === 'mac' ? 'macOS' : 'Windows'} order, ${contract.width}x${height}`);
             } finally {
               await context.close();

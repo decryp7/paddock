@@ -99,7 +99,9 @@ describe('installTestKit', () => {
     });
     it('is gone, and the real setTimeout fires, before the next test starts', async () => {
       expect(globalThis.setTimeout).toBe(realSetTimeout);
-      await new Promise<void>((resolve) => setTimeout(resolve, 1));
+      let fired = false;
+      setTimeout(() => void (fired = true), 1);
+      await vi.waitFor(() => expect(fired).toBe(true));
     });
   });
 
@@ -126,7 +128,9 @@ describe('installTestKit', () => {
       fixture.detectChanges();
       expect((fixture.nativeElement as HTMLElement).textContent).toBe('probe');
       expect(globalThis.setTimeout).toBe(realSetTimeout);
-      await new Promise<void>((resolve) => setTimeout(resolve, 1));
+      let fired = false;
+      setTimeout(() => void (fired = true), 1);
+      await vi.waitFor(() => expect(fired).toBe(true));
     });
   });
 
@@ -142,7 +146,9 @@ describe('installTestKit', () => {
     });
     it('finds the real setTimeout, whose timers fire', async () => {
       expect(globalThis.setTimeout).toBe(realSetTimeout);
-      await new Promise<void>((resolve) => setTimeout(resolve, 1));
+      let fired = false;
+      setTimeout(() => void (fired = true), 1);
+      await vi.waitFor(() => expect(fired).toBe(true));
     });
   });
 });

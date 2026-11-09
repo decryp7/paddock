@@ -17,6 +17,52 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+/// A gate a test closes to hold the fake engine somewhere and opens when it has seen what it came for: an event in place of a
+/// guessed latency (ADR 0041). Open by default.
+#[derive(Clone)]
+pub struct Latch(Arc<tokio::sync::watch::Sender<bool>>);
+
+impl Latch {
+    pub fn open() -> Self {
+        Self(Arc::new(tokio::sync::watch::channel(true).0))
+    }
+    /// Holds everything that reaches [`Latch::passed`] from now on.
+    pub fn close(&self) {
+        self.0.send_replace(false);
+    }
+    /// Lets the held and the later ones through.
+    pub fn release(&self) {
+        self.0.send_replace(true);
+    }
+    pub fn is_open(&self) -> bool {
+        *self.0.borrow()
+    }
+    /// Returns at once while open, otherwise when the test opens the latch.
+    pub async fn passed(&self) {
+        let mut rx = self.0.subscribe();
+        let _ = rx.wait_for(|open| *open).await;
+    }
+}
+
+/// The bound of [`until`]: a hang guard under CI's 60 s test kill, never a verdict.
+pub const WAIT_GUARD: Duration = Duration::from_secs(40);
+
+/// Waits until `f` holds, polling with a short, growing pause (the async counterpart of `paddock_testkit::wait::wait_until`,
+/// which would block this runtime's thread); panics naming `what` when it never does within [`WAIT_GUARD`].
+pub async fn until(what: &str, mut f: impl FnMut() -> bool) {
+    let end = std::time::Instant::now() + WAIT_GUARD;
+    let mut pause = Duration::from_micros(200);
+    loop {
+        if f() {
+            return;
+        }
+        assert!(std::time::Instant::now() < end, "timed out after {WAIT_GUARD:?} waiting for {what}");
+        // conformance: hang-guard — the poll interval of a condition wait, bounded by the 40 s guard above; the condition is the verdict
+        tokio::time::sleep(pause).await;
+        pause = (pause * 2).min(Duration::from_millis(20));
+    }
+}
+
 pub struct AbortOnDrop(pub tokio::task::JoinHandle<()>);
 impl Drop for AbortOnDrop {
     fn drop(&mut self) {
@@ -44,8 +90,8 @@ pub struct FakeEngine {
     pub contexts: Arc<std::sync::Mutex<Vec<u32>>>,
     /// The `--parallel` each start asked for.
     pub parallels: Arc<std::sync::Mutex<Vec<u32>>>,
-    /// How long a chat request takes (milliseconds), to hold slots busy.
-    pub delay_ms: Arc<AtomicU64>,
+    /// Closed by a test to hold every chat answer (and the slot it occupies) until the test opens it.
+    pub hold: Latch,
     /// Chat requests being served right now and the most that were at once.
     pub live: Arc<AtomicUsize>,
     pub peak: Arc<AtomicUsize>,
@@ -55,12 +101,12 @@ pub struct FakeEngine {
     pub embeds: Arc<std::sync::Mutex<Vec<Vec<String>>>>,
     /// `POST /slots/{n}?action=...` calls: `"{n}:{action}:{body}"`.
     pub slot_calls: Arc<std::sync::Mutex<Vec<String>>>,
-    /// While true, a model load (`start`) waits: a cold load that the test releases when it has seen what it came for.
-    pub start_hold: Arc<std::sync::atomic::AtomicBool>,
+    /// While closed, a model load (`start`) waits: a cold load that the test opens when it has seen what it came for.
+    pub start_hold: Latch,
     /// While true, the chat answer is one tool call instead of text.
     pub tool_call: Arc<std::sync::atomic::AtomicBool>,
-    /// Milliseconds between the first text chunk and the rest of the answer (0: all at once).
-    pub tail_delay_ms: Arc<AtomicU64>,
+    /// While closed, the answer stops after its first text chunk until the test opens it.
+    pub tail_hold: Latch,
 }
 
 fn sse_tool_call() -> String {
@@ -83,9 +129,7 @@ impl Engine for FakeEngine {
     fn start<'a>(&'a self, l: &'a Launch) -> BoxFuture<'a, Result<Running, EngineError>> {
         Box::pin(async move {
             self.attempts.fetch_add(1, Ordering::SeqCst);
-            while self.start_hold.load(Ordering::SeqCst) {
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
+            self.start_hold.passed().await;
             let taken = loop {
                 let n = self.port_taken.load(Ordering::SeqCst);
                 if n == 0 {
@@ -104,14 +148,14 @@ impl Engine for FakeEngine {
             }
             self.contexts.lock().unwrap().push(l.context);
             self.parallels.lock().unwrap().push(l.parallel);
-            let (delay, live, peak) = (self.delay_ms.clone(), self.live.clone(), self.peak.clone());
+            let (hold, live, peak) = (self.hold.clone(), self.live.clone(), self.peak.clone());
             let bodies = self.bodies.clone();
             if self.fail {
                 self.starts.fetch_add(1, Ordering::SeqCst);
                 return Err(EngineError::Start("the fake engine refuses to start".into()));
             }
             let erases = self.erases.clone();
-            let (tool_call, tail_delay) = (self.tool_call.clone(), self.tail_delay_ms.clone());
+            let (tool_call, tail_hold) = (self.tool_call.clone(), self.tail_hold.clone());
             let (cache_n, embeds, slot_calls) = (self.cache_n.clone(), self.embeds.clone(), self.slot_calls.clone());
             let app = Router::new()
                 .route(
@@ -148,12 +192,12 @@ impl Engine for FakeEngine {
                     "/v1/chat/completions",
                     post(move |body: axum::body::Bytes| {
                         let bodies = bodies.clone();
-                        let (delay, live, peak, cache_n) = (delay.clone(), live.clone(), peak.clone(), cache_n.clone());
-                        let (tool_call, tail_delay) = (tool_call.clone(), tail_delay.clone());
+                        let (hold, live, peak, cache_n) = (hold.clone(), live.clone(), peak.clone(), cache_n.clone());
+                        let (tool_call, tail_hold) = (tool_call.clone(), tail_hold.clone());
                         async move {
                             let now = live.fetch_add(1, Ordering::SeqCst) + 1;
                             peak.fetch_max(now, Ordering::SeqCst);
-                            tokio::time::sleep(Duration::from_millis(delay.load(Ordering::SeqCst))).await;
+                            hold.passed().await;
                             live.fetch_sub(1, Ordering::SeqCst);
                             if let Ok(v) = serde_json::from_slice::<Value>(&body) {
                                 bodies.lock().unwrap().push(v);
@@ -162,20 +206,19 @@ impl Engine for FakeEngine {
                                 return ([("content-type", "text/event-stream")], sse_tool_call()).into_response();
                             }
                             let all = sse(cache_n.load(Ordering::SeqCst));
-                            let tail = tail_delay.load(Ordering::SeqCst);
-                            if tail == 0 {
+                            if tail_hold.is_open() {
                                 return ([("content-type", "text/event-stream")], all).into_response();
                             }
-                            // The first chunk now, the rest after `tail` ms: a first token long before the end.
+                            // The first chunk now, the rest once the test opens the tail: a first token long before the end.
                             let (head, rest) = all.split_at(all.find("\n\n").map_or(0, |i| i + 2));
                             let (head, rest) = (head.to_string(), rest.to_string());
                             let body = futures_util::stream::unfold(0u8, move |step| {
-                                let (head, rest) = (head.clone(), rest.clone());
+                                let (head, rest, tail_hold) = (head.clone(), rest.clone(), tail_hold.clone());
                                 async move {
                                     match step {
                                         0 => Some((Ok::<_, std::convert::Infallible>(axum::body::Bytes::from(head)), 1)),
                                         1 => {
-                                            tokio::time::sleep(Duration::from_millis(tail)).await;
+                                            tail_hold.passed().await;
                                             Some((Ok(axum::body::Bytes::from(rest)), 2))
                                         }
                                         _ => None,
@@ -265,14 +308,14 @@ pub struct Harness {
     pub bodies: Arc<std::sync::Mutex<Vec<Value>>>,
     pub contexts: Arc<std::sync::Mutex<Vec<u32>>>,
     pub parallels: Arc<std::sync::Mutex<Vec<u32>>>,
-    pub delay_ms: Arc<AtomicU64>,
+    pub hold: Latch,
     pub peak: Arc<AtomicUsize>,
     pub cache_n: Arc<AtomicU64>,
     pub embeds: Arc<std::sync::Mutex<Vec<Vec<String>>>>,
     pub slot_calls: Arc<std::sync::Mutex<Vec<String>>>,
-    pub start_hold: Arc<std::sync::atomic::AtomicBool>,
+    pub start_hold: Latch,
     pub tool_call: Arc<std::sync::atomic::AtomicBool>,
-    pub tail_delay_ms: Arc<AtomicU64>,
+    pub tail_hold: Latch,
     pub dir: tempfile::TempDir,
 }
 
@@ -314,14 +357,14 @@ pub async fn harness_with(dir: tempfile::TempDir, fail: bool, other: Option<Arc<
     let bodies = Arc::new(std::sync::Mutex::new(vec![]));
     let contexts = Arc::new(std::sync::Mutex::new(vec![]));
     let parallels = Arc::new(std::sync::Mutex::new(vec![]));
-    let delay_ms = Arc::new(AtomicU64::new(0));
+    let hold = Latch::open();
     let peak = Arc::new(AtomicUsize::new(0));
     let cache_n = Arc::new(AtomicU64::new(0));
     let embeds = Arc::new(std::sync::Mutex::new(vec![]));
     let slot_calls = Arc::new(std::sync::Mutex::new(vec![]));
-    let start_hold = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let start_hold = Latch::open();
     let tool_call = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let tail_delay_ms = Arc::new(AtomicU64::new(0));
+    let tail_hold = Latch::open();
     let engine: Arc<dyn Engine> = other.unwrap_or_else(|| {
         Arc::new(FakeEngine {
             starts: starts.clone(),
@@ -333,7 +376,7 @@ pub async fn harness_with(dir: tempfile::TempDir, fail: bool, other: Option<Arc<
             bodies: bodies.clone(),
             contexts: contexts.clone(),
             parallels: parallels.clone(),
-            delay_ms: delay_ms.clone(),
+            hold: hold.clone(),
             live: Arc::new(AtomicUsize::new(0)),
             peak: peak.clone(),
             cache_n: cache_n.clone(),
@@ -341,7 +384,7 @@ pub async fn harness_with(dir: tempfile::TempDir, fail: bool, other: Option<Arc<
             slot_calls: slot_calls.clone(),
             start_hold: start_hold.clone(),
             tool_call: tool_call.clone(),
-            tail_delay_ms: tail_delay_ms.clone(),
+            tail_hold: tail_hold.clone(),
         })
     });
     let st = AppState::open(dirs.clone(), Some(engine)).await;
@@ -371,14 +414,14 @@ pub async fn harness_with(dir: tempfile::TempDir, fail: bool, other: Option<Arc<
         bodies,
         contexts,
         parallels,
-        delay_ms,
+        hold,
         peak,
         cache_n,
         embeds,
         slot_calls,
         start_hold,
         tool_call,
-        tail_delay_ms,
+        tail_hold,
         dir,
     }
 }
@@ -464,14 +507,14 @@ pub async fn real_harness(dir: tempfile::TempDir) -> Harness {
         bodies: Arc::new(std::sync::Mutex::new(vec![])),
         contexts: Arc::new(std::sync::Mutex::new(vec![])),
         parallels: Arc::new(std::sync::Mutex::new(vec![])),
-        delay_ms: Arc::new(AtomicU64::new(0)),
+        hold: Latch::open(),
         peak: Arc::new(AtomicUsize::new(0)),
         cache_n: Arc::new(AtomicU64::new(0)),
         embeds: Arc::new(std::sync::Mutex::new(vec![])),
         slot_calls: Arc::new(std::sync::Mutex::new(vec![])),
-        start_hold: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        start_hold: Latch::open(),
         tool_call: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        tail_delay_ms: Arc::new(AtomicU64::new(0)),
+        tail_hold: Latch::open(),
         dir,
     }
 }

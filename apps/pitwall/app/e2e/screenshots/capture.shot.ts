@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { resolve } from 'node:path';
-import { dialogContracts, dialogWindowUrl } from '../../../../../ui/projects/paddock-e2e/src/index.ts';
+import { dialogContracts, dialogWindowUrl, waitForStableFrame } from '../../../../../ui/projects/paddock-e2e/src/index.ts';
 import { CONTRACT_FILES } from '../dialog-fixtures';
 
 const OUT = resolve(__dirname, '../../../docs/screenshots');
@@ -239,7 +239,7 @@ async function fitHeight(page: Page): Promise<number> {
     if (extra <= 1) break;
     height += Math.ceil(extra);
     await page.setViewportSize({ width: WIDTH, height });
-    await page.waitForTimeout(250);
+    await waitForStableFrame(page);
   }
   return height;
 }
@@ -270,7 +270,7 @@ for (const theme of ['dark', 'light'] as const) {
         await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
         // The shot starts at the top of a section, never mid-card.
         if (s.section) await page.locator(s.section).evaluate((e) => e.scrollIntoView({ block: 'start' }));
-        await page.waitForTimeout(600);
+        await waitForStableFrame(page);
         await page.screenshot({ path: `${OUT}/${s.name}-${theme}.png` });
         return;
       }
@@ -283,12 +283,12 @@ for (const theme of ['dark', 'light'] as const) {
       await page.mouse.move(WIDTH - 2, 2);
       // Focusing a control at a card's edge can scroll a table sideways, which slices its first column in the shot.
       await page.evaluate(() => document.querySelectorAll('*').forEach((e) => e.scrollLeft > 0 && (e.scrollLeft = 0)));
-      await page.waitForTimeout(600);
+      await waitForStableFrame(page);
       if (s.element) {
         // The page scrolls inside <main>: make the window tall enough to show the whole element, then shoot it.
         const box = await page.locator(s.element).boundingBox();
         await page.setViewportSize({ width: WIDTH, height: Math.ceil((box?.height ?? HEIGHT) + 160) });
-        await page.waitForTimeout(300);
+        await waitForStableFrame(page);
         await page.locator(s.element).scrollIntoViewIfNeeded();
         await page.locator(s.element).screenshot({ path: `${OUT}/${s.name}-${theme}.png` });
         return;
@@ -299,7 +299,7 @@ for (const theme of ['dark', 'light'] as const) {
         // Plus one list row: snapping the list to whole rows below takes back less than a row.
         const row = s.snapList ? await page.evaluate((sel) => document.querySelector<HTMLElement>(`${sel} [role="row"]`)?.offsetHeight ?? 0, s.snapList) : 0;
         if (hidden > 0) await page.setViewportSize({ width: WIDTH, height: (page.viewportSize()?.height ?? HEIGHT) + Math.ceil(hidden) + row });
-        await page.waitForTimeout(250);
+        await waitForStableFrame(page);
       }
       if (s.snapList) {
         const rest = await page.evaluate((sel) => {
@@ -308,7 +308,7 @@ for (const theme of ['dark', 'light'] as const) {
           return vp && row ? vp.clientHeight % row.offsetHeight : 0;
         }, s.snapList);
         if (rest > 0) await page.setViewportSize({ width: WIDTH, height: (page.viewportSize()?.height ?? HEIGHT) - rest });
-        await page.waitForTimeout(250);
+        await waitForStableFrame(page);
       }
       await page.screenshot({ path: `${OUT}/${s.name}-${theme}.png` });
     });
@@ -330,7 +330,7 @@ for (const theme of ['dark', 'light'] as const) {
       expect(box?.width).toBe(360);
       expect(box?.height).toBeLessThanOrEqual(520);
       await page.mouse.move(2, 2);
-      await page.waitForTimeout(400);
+      await waitForStableFrame(page);
       await tray.screenshot({ path: `${OUT}/tray-${theme}.png` });
     });
   }

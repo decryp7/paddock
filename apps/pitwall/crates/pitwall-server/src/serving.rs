@@ -333,7 +333,8 @@ impl Serving {
             .unwrap_or_else(|p| p.into_inner().clone())
     }
 
-    fn now(&self) -> u64 {
+    /// The server's clock now, in milliseconds (the injected one under test).
+    pub fn now(&self) -> u64 {
         (self.clock())()
     }
 

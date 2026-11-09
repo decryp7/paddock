@@ -4,9 +4,13 @@ import { MockBackend } from '../../core/mock-backend';
 import { DEFAULT_KINDS, LOADING_SHAPE } from '../../core/mock/mock-popover';
 import { TrayWidgetsStore } from './tray-widgets.store';
 
-const flush = async (n = 6) => {
-  for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0));
-};
+/** Waits until the first read has filled the layout, the values and the header. */
+const loaded = (store: InstanceType<typeof TrayWidgetsStore>) =>
+  vi.waitFor(() => {
+    expect(store.view()).not.toBeNull();
+    expect(store.values()).not.toBeNull();
+    expect(store.header()).not.toBeNull();
+  });
 
 function setup(backend: MockBackend = new MockBackend()) {
   TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: backend }] });
@@ -18,7 +22,7 @@ describe('the tray widgets store', () => {
     const { store } = setup();
     expect([store.view(), store.values(), store.header(), store.shape()]).toEqual([null, null, null, []]);
     store.start();
-    await flush();
+    await loaded(store);
     expect(store.view()!.layout.placements.map((p) => p.widget)).toEqual(DEFAULT_KINDS);
     expect(store.values()!.placements.length).toBe(4);
     expect(store.header()!.status).toEqual({ kind: 'serving', port: 11435 });
@@ -34,7 +38,8 @@ describe('the tray widgets store', () => {
     const listen = vi.spyOn(backend, 'onPopover');
     store.start();
     store.start();
-    await flush();
+    await vi.waitFor(() => expect(listen).toHaveBeenCalled());
+    await loaded(store);
     expect(view).toHaveBeenCalledTimes(1);
     expect(listen).toHaveBeenCalledTimes(1);
   });
@@ -42,7 +47,7 @@ describe('the tray widgets store', () => {
   it('keeps the error of a failed read and clears it with the next success', async () => {
     const { store, backend } = setup(new MockBackend({ failing: ['popoverValues'] }));
     store.start();
-    await flush();
+    await vi.waitFor(() => expect(store.error()).not.toBeNull());
     expect(store.error()!.code).toBe('serverUnavailable');
     expect(store.view()).toBeNull();
     (backend as unknown as { failing: Set<string> }).failing.clear();
@@ -54,7 +59,7 @@ describe('the tray widgets store', () => {
   it('applies an edit: the engine\'s answer replaces the layout and the values follow', async () => {
     const { store } = setup();
     store.start();
-    await flush();
+    await loaded(store);
     const memory = store.view()!.layout.placements.find((p) => p.widget === 'memory')!;
     expect(await store.edit({ remove: { id: memory.id } })).toBe(true);
     expect(store.view()!.layout.placements.map((p) => p.widget)).toEqual(['server', 'activity', 'loadedModels']);
@@ -67,7 +72,7 @@ describe('the tray widgets store', () => {
   it('keeps the layout and says why when the engine refuses an edit', async () => {
     const { store } = setup();
     store.start();
-    await flush();
+    await loaded(store);
     expect(await store.edit({ add: { widget: 'memory', span: null, at: null } })).toBe(false);
     expect(store.error()!.message).toBe('Memory is already shown.');
     expect(store.view()!.layout.placements.length).toBe(4);
@@ -76,11 +81,11 @@ describe('the tray widgets store', () => {
   it('follows what the app pushes: a changed layout, values and header replace the old, and clear an error', async () => {
     const { store, backend } = setup();
     store.start();
-    await flush();
+    await loaded(store);
     await store.edit({ add: { widget: 'memory', span: null, at: null } });
     expect(store.error()).not.toBeNull();
     await backend.setServing(true);
-    await flush();
+    await vi.waitFor(() => expect(store.header()!.status).toEqual({ kind: 'paused' }));
     expect(store.header()!.status).toEqual({ kind: 'paused' });
     expect(store.header()!.serving).toBe('resume');
     expect(store.error()).toBeNull();
@@ -92,20 +97,20 @@ describe('the tray widgets store', () => {
     let release: () => void = () => undefined;
     const gate = new Promise<void>((r) => (release = r));
     const read = backend.popoverValues.bind(backend);
-    vi.spyOn(backend, 'popoverValues').mockImplementation(async () => {
+    const values = vi.spyOn(backend, 'popoverValues').mockImplementation(async () => {
       const older = await read();
       await gate;
       return older;
     });
     store.start();
-    await flush(2);
+    await vi.waitFor(() => expect(values).toHaveBeenCalled());
     await backend.setServing(true); // pushes the paused header and values while the read waits
-    await flush(2);
+    await vi.waitFor(() => expect(store.header()?.status).toEqual({ kind: 'paused' }));
     expect(store.header()!.status).toEqual({ kind: 'paused' });
     release();
-    await flush();
+    // The older read finishes now: its shape arrives, and it must not undo the push.
+    await vi.waitFor(() => expect(store.shape().length).toBe(7));
     expect(store.header()!.status, 'the older read did not undo the push').toEqual({ kind: 'paused' });
-    expect(store.shape().length).toBe(7);
     expect(store.view()).not.toBeNull();
   });
 });

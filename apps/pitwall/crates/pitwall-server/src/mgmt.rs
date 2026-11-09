@@ -1071,8 +1071,9 @@ enum ChatOutcome {
 async fn run_playground_chat(st: Arc<AppState>, req: PlaygroundRequest, tx: tokio::sync::mpsc::Sender<Bytes>, outcome: &mut ChatOutcome) {
     use pitwall_core::chat::Finish;
     use pitwall_core::mgmt::{PlaygroundFinish, PlaygroundPhase};
-    let started = std::time::Instant::now();
-    let elapsed_ms = || u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    // The server's clock, so a test moves time by hand instead of waiting for it.
+    let started = st.serving.now();
+    let elapsed_ms = || st.serving.now().saturating_sub(started);
     let meta = Meta {
         family: ApiFamily::Extended,
         endpoint: "/mgmt/chat".into(),

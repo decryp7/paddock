@@ -7,7 +7,6 @@ use pitwall_core::ids::ModelId;
 use pitwall_core::memory::System;
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;
-use std::time::Duration;
 
 const TINY: &str = "tiny-q4_k_m";
 
@@ -98,10 +97,19 @@ async fn invalid_slots_and_unknown_models_are_refused_with_what_to_fix() {
 async fn requests_beyond_the_slots_queue_and_all_are_answered() {
     let h = fresh().await;
     let key = h.make_key("Queue Probe").await;
-    h.delay_ms.store(250, Ordering::SeqCst);
+    h.hold.close();
     assert_eq!(set_slots(&h, json!(1)).await.status, 200);
     let ask = || h.call("POST", "/v1/chat/completions", Some(&key), Some(chat()), &[]);
-    let (a, b, c) = tokio::join!(ask(), ask(), ask());
+    // The engine holds its answers until one request runs and the other two wait in the queue.
+    let release = async {
+        common::until("one request running and two queued", || {
+            h.st.serving.queue().1 == 1 && h.st.serving.jobs().len() == 3
+        })
+        .await;
+        common::until("the running request reaches the engine", || h.peak.load(Ordering::SeqCst) == 1).await;
+        h.hold.release();
+    };
+    let (a, b, c, ()) = tokio::join!(ask(), ask(), ask(), release);
     assert_eq!([a.status, b.status, c.status], [200, 200, 200]);
     assert_eq!(
         h.peak.load(Ordering::SeqCst),
@@ -113,7 +121,16 @@ async fn requests_beyond_the_slots_queue_and_all_are_answered() {
     h.st.serving.release_all();
     assert_eq!(set_slots(&h, json!(3)).await.status, 200);
     h.peak.store(0, Ordering::SeqCst);
-    let (a, b, c, d) = tokio::join!(ask(), ask(), ask(), ask());
+    h.hold.close();
+    let release = async {
+        common::until("three requests running and one queued", || {
+            h.st.serving.queue().1 == 3 && h.st.serving.jobs().len() == 4
+        })
+        .await;
+        common::until("the three reach the engine", || h.peak.load(Ordering::SeqCst) == 3).await;
+        h.hold.release();
+    };
+    let (a, b, c, d, ()) = tokio::join!(ask(), ask(), ask(), ask(), release);
     assert_eq!([a.status, b.status, c.status, d.status], [200; 4]);
     assert_eq!(h.peak.load(Ordering::SeqCst), 3, "three slots run three, the fourth queues");
     h.st.serving.release_all();
@@ -123,17 +140,15 @@ async fn requests_beyond_the_slots_queue_and_all_are_answered() {
 async fn changing_slots_never_unloads_a_busy_model_and_applies_on_the_next_load() {
     let h = fresh().await;
     let key = h.make_key("Busy Probe").await;
-    h.delay_ms.store(700, Ordering::SeqCst);
+    h.hold.close();
     assert_eq!(set_slots(&h, json!(2)).await.status, 200);
     let ask = h.call("POST", "/v1/chat/completions", Some(&key), Some(chat()), &[]);
     let change = async {
-        // Wait until the request is being served.
-        for _ in 0..100 {
-            if h.st.serving.loaded().first().is_some_and(|m| m.active_requests > 0) {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
+        // Wait until the request is being served (the engine holds its answer).
+        common::until("the request is being served", || {
+            h.st.serving.loaded().first().is_some_and(|m| m.active_requests > 0)
+        })
+        .await;
         assert_eq!(h.st.serving.loaded()[0].active_requests, 1, "busy");
         let r = set_slots(&h, json!(8)).await;
         assert_eq!(r.status, 200, "{}", r.body);
@@ -147,6 +162,7 @@ async fn changing_slots_never_unloads_a_busy_model_and_applies_on_the_next_load(
         );
         assert!(h.st.serving.is_loaded(&model()));
         assert_eq!(h.rpc("unload_model", json!({"id": TINY})).await.status, 409);
+        h.hold.release();
     };
     let (reply, ()) = tokio::join!(ask, change);
     assert_eq!(reply.status, 200);
@@ -155,7 +171,6 @@ async fn changing_slots_never_unloads_a_busy_model_and_applies_on_the_next_load(
     assert_eq!(h.st.serving.slots_for(&model()).get(), 2);
 
     // Reloaded, it uses the new count.
-    h.delay_ms.store(0, Ordering::SeqCst);
     assert_eq!(h.rpc("unload_model", json!({"id": TINY})).await.status, 200);
     let reloaded = h.call("POST", "/v1/chat/completions", Some(&key), Some(chat()), &[]).await;
     assert_eq!(reloaded.status, 200, "{}", reloaded.body);
