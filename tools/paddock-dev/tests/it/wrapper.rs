@@ -398,6 +398,34 @@ fn without_a_compiler_the_wrapper_runs_a_cached_binary_or_points_at_rustup() {
 
 #[cfg(unix)]
 #[test]
+fn without_a_compiler_a_run_that_never_downloads_does_not_run_a_tool_from_the_shared_cache() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let home = scratch.path().join("home");
+    let no_rustc = scratch.path().join("no-such-rustc").display().to_string();
+    let env = [("RUSTC", no_rustc), ("PADDOCK_DEV_DOWNLOAD", "0".to_string())];
+    // A binary only in bin/ (the shared cache, which downloads write): a release run must not run it.
+    write_script(
+        &home.join("bin/some-hash/paddock-dev-test-host"),
+        r#"if [ "$1" = "--version" ]; then echo 0; else echo "shared ran"; fi"#,
+    );
+    let (code, out, err) = run_wrapper(&f, &home, &env);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(!out.contains("shared ran") && err.contains("rustc was not found"), "{out}{err}");
+    // One a source-only run built is its own, and in CI the fallback is an annotation.
+    write_script(
+        &home.join("bin-source/some-hash/paddock-dev-test-host"),
+        r#"if [ "$1" = "--version" ]; then echo 0; else echo "source ran"; fi"#,
+    );
+    let (code, out, err) = run_wrapper(&f, &home, &env);
+    assert_eq!((code, out.trim()), (0, "source ran"), "{err}");
+    let ci = [env[0].clone(), env[1].clone(), ("GITHUB_ACTIONS", "true".to_string())];
+    let (_, _, err) = run_wrapper(&f, &home, &ci);
+    assert!(err.contains("::warning::./dev: rustc is not available"), "{err}");
+}
+
+#[cfg(unix)]
+#[test]
 fn a_sparse_checkout_without_the_tool_is_told_how_to_add_it() {
     let f = Fixture::new();
     std::fs::remove_file(f.root().join("tools/paddock-dev/inputs.txt")).unwrap();
