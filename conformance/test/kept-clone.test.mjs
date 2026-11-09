@@ -3,7 +3,7 @@
 // profile file's contract: nothing a lean job reads is excluded.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
@@ -346,6 +346,55 @@ test('kept-clone: the stderr tail in a phase error is whole lines, not cut in th
   assert.match(w, /kept-clone: git clone failed \(exit \d+\)/, 'the failing command is named');
 });
 
+// Review P1: the clone is shared with branch jobs, so a tag run (FRESH=true) never trusts its objects: a loose object planted in the
+// reused clone changed what `reset --hard` wrote while HEAD still matched the commit.
+test('kept-clone with FRESH=true makes the clone again: a planted object does not reach the tree, and every file matches the commit', () => {
+  const fx = fixture();
+  const sha = git(fx.work, fx.root, 'rev-parse', 'HEAD');
+  const first = job(fx, sha);
+  const k = first.stable();
+  // Plant a loose object with other content under the blob id of crates/a/lib.rs and edit the checked-out file's index entry away.
+  const blob = git(k, fx.root, 'rev-parse', `${sha}:crates/a/lib.rs`);
+  const dir = join(k, '.git', 'objects', blob.slice(0, 2));
+  mkdirSync(dir, { recursive: true });
+  const evil = spawnSync('git', ['hash-object', '-w', '--stdin'], { cwd: k, input: 'evil', encoding: 'utf8', env: ENV(fx.root) }).stdout.trim();
+  const evilFile = join(k, '.git', 'objects', evil.slice(0, 2), evil.slice(2));
+  const target = join(dir, blob.slice(2));
+  rmSync(target, { force: true });
+  writeFileSync(target, readFileSync(evilFile)); // a zlib stream of "evil" stored under the real blob's name
+  chmodSync(target, 0o444);
+  const second = job(fx, sha, { env: { FRESH: 'true' } });
+  assert.equal(second.status, 0, second.out);
+  assert.match(second.out, /\(created, profile lean/, 'a fresh run starts a new clone');
+  assert.doesNotMatch(second.out, /kept-clone: clean: /, 'the old clone is not cleaned and reused');
+  assert.equal(read(join(k, 'crates/a/lib.rs')), 'one', 'the real content');
+  const listed = git(k, fx.root, 'ls-files', '-s').split('\n').map((l) => l.split(/\s+/));
+  for (const [, id, , file] of listed) {
+    if (!existsSync(join(k, file))) continue; // outside the profile
+    const h = spawnSync('git', ['hash-object', file], { cwd: k, encoding: 'utf8', env: ENV(fx.root) }).stdout.trim();
+    assert.equal(h, id, `${file}: the blob on disk is the commit's`);
+  }
+  const reused = job(fx, sha);
+  assert.match(reused.out, /\(reused, profile lean/, 'without FRESH the next job reuses it again');
+});
+
+// Review P2: a job's .angular/cache is a link (a junction on Windows) to a kept folder: cleaning the clone must never reach its target.
+test('kept-clone removes a .angular/cache link by itself before cleaning, and the folder it pointed to survives', () => {
+  const fx = fixture();
+  const sha = git(fx.work, fx.root, 'rev-parse', 'HEAD');
+  const first = job(fx, sha);
+  const k = first.stable();
+  const kept = join(fx.root, 'kept-angular-cache');
+  mkdirSync(kept);
+  writeFileSync(join(kept, 'cached.bin'), 'keep');
+  mkdirSync(join(k, 'ui', '.angular'), { recursive: true });
+  symlinkSync(kept, join(k, 'ui', '.angular', 'cache'));
+  const second = job(fx, sha);
+  assert.equal(second.status, 0, second.out);
+  assert.equal(read(join(kept, 'cached.bin')), 'keep', 'the target of the link is untouched');
+  assert.ok(!existsSync(join(k, 'ui', '.angular', 'cache')), 'the link is gone from the clone');
+});
+
 // ---------------------------------------------------------------------------------------------------------------------------------
 // The profile file and the workflow that uses it.
 
@@ -489,6 +538,13 @@ function bundleReads() {
     if (!existsSync(confFile)) continue;
     reads.add(`${src}/icons`);
     reads.add(`${src}/tauri.conf.json`);
+    for (const os of ['windows', 'macos', 'linux']) reads.add(`${src}/tauri.${os}.conf.json`);
+    const ng = join(PADDOCK, 'apps', app, 'app', 'angular.json');
+    if (existsSync(ng)) {
+      reads.add(`apps/${app}/app/angular.json`);
+      for (const m of read(ng).matchAll(/"(?:input|glob)": "([^"*]+)"/g)) reads.add(join('apps', app, 'app', m[1]).split('\\').join('/'));
+      for (const m of read(ng).matchAll(/"((?:\.\.\/)+[^"*]+)"/g)) reads.add(join('apps', app, 'app', m[1]).split('\\').join('/'));
+    }
     const conf = JSON.parse(read(confFile));
     for (const r of Object.keys(conf.bundle?.resources ?? {})) reads.add(`${src}/${r}`);
   }
@@ -543,6 +599,7 @@ function assertBundleJob(text) {
   assert.match(clone.text, /if: runner\.os != 'Linux'/, 'host runners only');
   assert.match(clone.text, /name: paddock-checkout-\$\{\{ runner\.os \}\}\n/, 'one kept clone per slot');
   assert.match(clone.text, /profile: bundle\n/, 'the bundle profile');
+  assert.match(clone.text, /fresh: \$\{\{ startsWith\(github\.ref, 'refs\/tags\/'\) \}\}/, 'a tag run builds from a fresh clone');
   const at = (re) => steps.findIndex((s) => re.test(s.text));
   assert.ok(at(/actions\/kept-clone/) > at(/actions\/job-isolation/), 'after the slot is taken');
   assert.ok(at(/actions\/kept-clone/) < at(/actions\/build-folder/), 'before the build folder');
