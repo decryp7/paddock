@@ -1,0 +1,155 @@
+# The ratchet of ADR 0072 (D8): what fails today, per instance of the ADR's table (I1 to I27), found by the ending harness
+# (`paddock_ipc::testing::endings`) on main's behaviour. Every ending test is green with this file and red without it
+# (`PADDOCK_ENDINGS_NO_RATCHET=1`), and the file only shrinks: a fault that is not listed is a new failure, and a listed fault
+# that no longer happens fails the run until its entry is removed. `./dev check ipc-endpoints` (C102) checks the file's shape;
+# `./dev check ipc-endpoints --tag <tag>` refuses a release tag that matches a `blocks_tag` pattern while an entry remains.
+#
+# instance    I1..I27 of the ADR, or WP-7 for the missing end line (a logging gap, which blocks no tag)
+# endpoint    the id in docs/ipc-endpoints.toml
+# scenario    a scenario of the harness, or `*` for every scenario that ran
+# fault       the kind the harness reports
+# blocks_tag  the tag pattern a release of which is refused while the entry exists (`none` only for a logging gap)
+# os          only where the fault is not on every OS (linux, macos, windows)
+
+[[ratchet]]
+instance = "I4"
+endpoint = "ipc-host"
+scenario = "silent-client"
+fault = "no-reason"
+blocks_tag = "dyno-v*"
+note = "The handshake watchdog closes the stream when it runs out; the client reads a bare end (handshake.rs bounded)."
+
+[[ratchet]]
+instance = "I1"
+endpoint = "ipc-host"
+scenario = "owner-close-with-calls-in-flight"
+fault = "no-reason"
+blocks_tag = "dyno-v*"
+note = "Peer::close sends no reason; the order is right since 5528ea2b2, the reason is missing."
+
+[[ratchet]]
+instance = "I3"
+endpoint = "ipc-host"
+scenario = "owner-close-with-calls-in-flight"
+fault = "typed-transport"
+blocks_tag = "dyno-v*"
+note = "IpcError::Closed(String): a said end and a broken stream read alike; M1 makes it Closed(Closure)."
+
+[[ratchet]]
+instance = "I1"
+endpoint = "ipc-host"
+scenario = "stop-with-open-connection"
+fault = "no-reason"
+blocks_tag = "dyno-v*"
+note = "Peer::close sends no reason (the owner's stop of an open connection)."
+
+[[ratchet]]
+instance = "I11"
+endpoint = "ipc-host"
+scenario = "listener-stop-with-client-in-backlog"
+fault = "no-reason"
+blocks_tag = "dyno-v*"
+note = "A listener dropped with a connected client in its backlog: the client reads a bare end and never learns why."
+
+[[ratchet]]
+instance = "WP-7"
+endpoint = "ipc-host"
+scenario = "*"
+fault = "no-end-line"
+blocks_tag = "none"
+note = "No end line yet (ADR 0072 §6, WP-7)."
+
+[[ratchet]]
+instance = "I4"
+endpoint = "ipc-link-server"
+scenario = "silent-client"
+fault = "no-reason"
+blocks_tag = "dyno-v*"
+note = "As ipc-host: the handshake limit closes the stream."
+
+[[ratchet]]
+instance = "I12"
+endpoint = "ipc-link-server"
+scenario = "stop-with-open-connection"
+fault = "no-reason"
+blocks_tag = "dyno-v*"
+note = "LinkServer::stop closes every peer with no reason."
+
+[[ratchet]]
+instance = "WP-7"
+endpoint = "ipc-link-server"
+scenario = "*"
+fault = "no-end-line"
+blocks_tag = "none"
+note = "No end line yet (ADR 0072 §6, WP-7)."
+
+[[ratchet]]
+instance = "I14"
+endpoint = "ipc-launcher"
+scenario = "stop-with-open-connection"
+fault = "no-reason"
+blocks_tag = "dyno-v*"
+note = "launch.rs closes the child's peer with no reason."
+
+[[ratchet]]
+instance = "WP-7"
+endpoint = "ipc-launcher"
+scenario = "*"
+fault = "no-end-line"
+blocks_tag = "none"
+note = "No end line yet (ADR 0072 §6, WP-7)."
+
+[[ratchet]]
+instance = "I8"
+endpoint = "ipc-host"
+scenario = "wrong-account"
+fault = "reset"
+blocks_tag = "dyno-v*"
+os = "linux"
+note = "The account refusal is written, then the stream drops with the client's Hello unread: AF_UNIX on Linux resets, so the client may lose the refusal (macOS does not)."
+
+[[ratchet]]
+instance = "I9"
+endpoint = "ipc-host"
+scenario = "busy"
+fault = "reset"
+blocks_tag = "dyno-v*"
+os = "linux"
+note = "refuse_busy: as I8, the Hello is unread when the stream drops."
+
+[[ratchet]]
+instance = "I10"
+endpoint = "ipc-host"
+scenario = "client-keeps-writing"
+fault = "reset"
+blocks_tag = "dyno-v*"
+os = "linux"
+note = "A refused client's bytes after its Hello are not drained: the close resets on Linux."
+
+[[ratchet]]
+instance = "I11"
+endpoint = "ipc-host"
+scenario = "listener-stop-with-client-in-backlog"
+fault = "reset"
+blocks_tag = "dyno-v*"
+os = "linux"
+note = "Closing a listening AF_UNIX socket resets the connections queued in its backlog (Linux): the client reads ECONNRESET."
+
+[[ratchet]]
+instance = "I9"
+endpoint = "ipc-link-server"
+scenario = "busy"
+fault = "reset"
+blocks_tag = "dyno-v*"
+os = "linux"
+note = "LinkServer refuse_busy: the Hello is unread when the stream drops (reset on Linux)."
+
+[[ratchet]]
+instance = "I10"
+endpoint = "ipc-link-server"
+scenario = "client-keeps-writing"
+fault = "reset"
+blocks_tag = "dyno-v*"
+os = "linux"
+note = "As ipc-host: a refused client's later bytes are not drained (reset on Linux)."
+

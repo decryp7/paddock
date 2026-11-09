@@ -31,6 +31,8 @@ pub mod limit_rows;
 pub mod limits;
 pub mod link;
 pub mod peer;
+#[cfg(feature = "testing")]
+pub mod testing;
 pub mod token;
 pub mod trust;
 pub mod wire;

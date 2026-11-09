@@ -12,3 +12,6 @@ mod frame;
 mod link;
 mod peer;
 mod system;
+
+#[cfg(feature = "testing")]
+mod endings;
