@@ -173,3 +173,18 @@ test('an empty --socket-dir fails with 2 on Unix (a missing socket base is never
     temp.done();
   }
 });
+
+test('a deferred-removal marker fails the check and its text (folder, error, what was left) is printed', () => {
+  const s = scratch();
+  try {
+    writeFileSync(join(s.dir, 'debrief-leak-deferred-duck-diff-1-ab'), 'folder: /t/debrief-duck-diff-1-ab\nerror: Directory not empty\nleft (1):\nindex/seg.bin\n');
+    const a = quiet();
+    assert.equal(main(['--dir', s.dir], a.log), 1);
+    const text = a.out.join('\n');
+    assert.match(text, /Deferred removals/);
+    assert.match(text, /error: Directory not empty/);
+    assert.match(text, /index\/seg\.bin/);
+  } finally {
+    s.done();
+  }
+});

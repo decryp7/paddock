@@ -63,7 +63,7 @@ impl TempDir {
 
 impl Drop for TempDir {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        debrief_store_duck::test_scratch::remove_or_defer(&self.0);
     }
 }
 
