@@ -411,6 +411,11 @@ impl Probe for PidProbe {
 pub trait Http {
     /// Fetches `url`; errors are texts without the token.
     fn get_json(&mut self, url: &str, token: &str) -> Result<Value, String>;
+    /// Fetches `url` as text (a job log); errors are texts without the token.
+    fn get_text(&mut self, url: &str, token: &str) -> Result<String, String> {
+        let _ = (url, token);
+        Err("this reader fetches JSON only".into())
+    }
 }
 
 /// Waits for a Gitea Actions run to complete.
@@ -460,14 +465,25 @@ impl Probe for CiRunProbe<'_> {
 /// The real HTTP: `curl`, with the URL and the Authorization header on standard input (`-K -`) so the token is in no argument list.
 pub struct CurlHttp;
 
-impl Http for CurlHttp {
-    fn get_json(&mut self, url: &str, token: &str) -> Result<Value, String> {
+impl CurlHttp {
+    /// One GET through curl: the body, at most `max_bytes`, within `seconds`.
+    fn get(url: &str, token: &str, accept: &str, max_bytes: u64, seconds: u32) -> Result<Vec<u8>, String> {
         use std::process::Stdio;
         if url.contains(['"', '\n', '\\']) || token.contains(['"', '\n', '\\']) {
             return Err("the URL or the token has a character that cannot be sent".into());
         }
+        let (max_bytes, seconds) = (max_bytes.to_string(), seconds.to_string());
         let mut child = paddock_proc::command("curl")
-            .args(["-sS", "--fail-with-body", "--max-time", "20", "-K", "-"])
+            .args([
+                "-sS",
+                "--fail-with-body",
+                "--max-time",
+                &seconds,
+                "--max-filesize",
+                &max_bytes,
+                "-K",
+                "-",
+            ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -480,12 +496,16 @@ impl Http for CurlHttp {
             } else {
                 format!("header = \"Authorization: token {token}\"\n")
             };
-            let _ = write!(stdin, "url = \"{url}\"\n{auth}header = \"Accept: application/json\"\n");
+            let _ = write!(stdin, "url = \"{url}\"\n{auth}header = \"Accept: {accept}\"\n");
         }
         let out = child.wait_with_output().map_err(|e| format!("curl failed: {e}"))?;
         if !out.status.success() {
-            let err = String::from_utf8_lossy(&out.stderr).replace(token, "***");
-            let body = String::from_utf8_lossy(&out.stdout).replace(token, "***");
+            // An empty token would match between every character.
+            let mask = |b: &[u8]| {
+                let t = String::from_utf8_lossy(b).into_owned();
+                if token.is_empty() { t } else { t.replace(token, "***") }
+            };
+            let (err, body) = (mask(&out.stderr), mask(&out.stdout));
             return Err(format!(
                 "curl exited with {}: {} {}",
                 out.status,
@@ -493,7 +513,20 @@ impl Http for CurlHttp {
                 truncate(body.trim(), 200)
             ));
         }
-        serde_json::from_slice(&out.stdout).map_err(|e| format!("the server's answer is not JSON: {e}"))
+        Ok(out.stdout)
+    }
+}
+
+impl Http for CurlHttp {
+    fn get_json(&mut self, url: &str, token: &str) -> Result<Value, String> {
+        let body = CurlHttp::get(url, token, "application/json", 16 << 20, 20)?;
+        serde_json::from_slice(&body).map_err(|e| format!("the server's answer is not JSON: {e}"))
+    }
+
+    fn get_text(&mut self, url: &str, token: &str) -> Result<String, String> {
+        // A job log is a few MB; 64 MiB bounds a runaway one.
+        let body = CurlHttp::get(url, token, "text/plain", 64 << 20, 120)?;
+        Ok(String::from_utf8_lossy(&body).into_owned())
     }
 }
 

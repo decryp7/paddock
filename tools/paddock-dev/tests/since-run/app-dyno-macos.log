@@ -1,0 +1,22 @@
+2026-11-09T07:28:10.5801480Z runner-1(version:v5.2.3)
+2026-11-09T07:28:10.5802720Z ::group::Runner Information
+2026-11-09T07:28:10.5802740Z Runner labels: macos-latest, macos-arm64
+2026-11-09T07:28:10.5802770Z Task: 1
+2026-11-09T07:28:10.5802780Z Job: app
+2026-11-09T07:28:10.5802800Z Repository: ***/paddock
+2026-11-09T07:28:10.5802820Z Triggered by event: workflow_dispatch
+2026-11-09T07:28:10.5802840Z ::endgroup::
+2026-11-09T07:28:10.5802850Z ::group::Inputs
+2026-11-09T07:28:10.5802880Z base: b51c72509
+2026-11-09T07:28:10.5802890Z webkit: false
+2026-11-09T07:28:10.5802900Z ::endgroup::
+2026-11-09T07:29:18.9044830Z ::group::Run ./.gitea/actions/app-gates
+2026-11-09T07:29:19.0398850Z     echo "::error::failed (exit $rc): $*${names:+ | failing tests: $names}"
+2026-11-09T07:39:12.6542780Z [32;1m    Starting[0m [1m2869[0m tests across [1m78[0m binaries ([1m19[0m tests [33;1mskipped[0m)
+2026-11-09T07:40:56.4722440Z [31;1m     TIMEOUT[0m [  60.019s] (1624/2869) [35;1mdyno-app[0m [36mlink::model[0m[36m::[0m[34;1ma_diverging_search_hits_the_ci_cap_in_seconds_and_every_real_scenario_stays_well_inside_it[0m
+2026-11-09T07:41:24.9683780Z [31;1m     Summary[0m [ 132.314s] [1m2869[0m tests run: [1m2868[0m [32;1mpassed[0m ([1m4[0m [33;1mslow[0m), [1m1[0m [31;1mtimed out[0m, [1m19[0m [33;1mskipped[0m
+2026-11-09T07:41:24.9683810Z [31;1m     TIMEOUT[0m [  60.019s] (1624/2869) [35;1mdyno-app[0m [36mlink::model[0m[36m::[0m[34;1ma_diverging_search_hits_the_ci_cap_in_seconds_and_every_real_scenario_stays_well_inside_it[0m
+2026-11-09T07:41:25.0132640Z [31;1merror[0m: test run failed
+2026-11-09T07:41:25.0544850Z ::error::failed (exit 100): cargo nextest run --workspace --profile ci | failing tests: dyno-app link::model::a_diverging_search_hits_the_ci_cap_in_seconds_and_every_real_scenario_stays_well_inside_it
+2026-11-09T07:41:31.2539750Z ##[error]Process completed with exit code 1.
+2026-11-09T07:45:57.0406380Z ##[error]Process completed with exit code 1.

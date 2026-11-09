@@ -485,8 +485,7 @@ pub fn commit_lint_range(i: &LintInput, known: &dyn Fn(&str) -> bool) -> Result<
 // ------------------------------------------------------------------------------------------------------ command line
 
 /// The usage line printed under an argument error.
-pub const USAGE: &str =
-    "usage: dev plan <base> [<head>] | --files a,b | --all | --ci [--app <app>]  [--explain] | --commit-range | --commit-flags";
+pub const USAGE: &str = "usage: dev plan <base> [<head>] | --files a,b | --all | --ci [--app <app>]  [--explain] | --commit-range | --commit-flags | --since-run <run>";
 
 /// A parsed command line of `dev plan`.
 #[derive(Debug, PartialEq)]
@@ -505,13 +504,15 @@ pub struct PlanArgs {
     pub app: Option<String>,
     /// `--explain`.
     pub explain: bool,
+    /// `--since-run <run>`: rerun only what failed in that CI run ([`crate::plan_since`]).
+    pub since_run: Option<u64>,
 }
 
 /// The command line: `--ci [--app x]`, `--files a,b`, `--all`, `--explain` and up to two positional commits, base then head.
 /// Errors (the caller prints the usage and the reason) for anything incomplete, unknown or contradictory, so a typo never plans
 /// nothing.
 pub fn parse_args(args: &[String]) -> Result<PlanArgs, String> {
-    let known = ["--files", "--all", "--ci", "--app", "--explain"];
+    let known = ["--files", "--all", "--ci", "--app", "--explain", "--since-run"];
     let value_of = |name: &str| -> Result<(Option<usize>, Option<String>), String> {
         let Some(i) = args.iter().position(|a| a == name) else {
             return Ok((None, None));
@@ -533,12 +534,13 @@ pub fn parse_args(args: &[String]) -> Result<PlanArgs, String> {
     }
     let (fi, files_arg) = value_of("--files")?;
     let (ai, app) = value_of("--app")?;
+    let (si, since) = value_of("--since-run")?;
     let ci = args.iter().any(|a| a == "--ci");
     let all = args.iter().any(|a| a == "--all");
     if app.is_some() && !ci {
         return Err("--app is only valid with --ci".into());
     }
-    let value_idx: Vec<usize> = [fi, ai].into_iter().flatten().map(|i| i + 1).collect();
+    let value_idx: Vec<usize> = [fi, ai, si].into_iter().flatten().map(|i| i + 1).collect();
     let positional: Vec<&String> = args
         .iter()
         .enumerate()
@@ -547,6 +549,18 @@ pub fn parse_args(args: &[String]) -> Result<PlanArgs, String> {
         .collect();
     let base = positional.first().map(|s| s.to_string());
     let head = positional.get(1).map(|s| s.to_string()).unwrap_or_else(|| "HEAD".into());
+    let since_run = match since {
+        Some(v) => Some(
+            v.parse::<u64>()
+                .ok()
+                .filter(|n| *n > 0)
+                .ok_or_else(|| format!("--since-run needs a run number, not {v:?}"))?,
+        ),
+        None => None,
+    };
+    if since_run.is_some() && (ci || files_arg.is_some() || all || !positional.is_empty()) {
+        return Err("--since-run takes no commits, --files, --all or --ci (in CI, PLAN_SINCE_RUN with --ci)".into());
+    }
     if ci && (files_arg.is_some() || all || !positional.is_empty()) {
         return Err("--ci takes no commits, --files or --all".into());
     }
@@ -574,6 +588,7 @@ pub fn parse_args(args: &[String]) -> Result<PlanArgs, String> {
         ci,
         app,
         explain: args.iter().any(|a| a == "--explain"),
+        since_run,
     })
 }
 
@@ -1145,6 +1160,9 @@ mod tests {
         let a = args(&["--ci", "--app", "debrief"]).unwrap();
         assert_eq!((a.ci, a.app.as_deref(), a.base), (true, Some("debrief"), None));
         assert!(args(&["--ci"]).unwrap().ci);
+        let a = args(&["--since-run", "7821"]).unwrap();
+        assert_eq!((a.since_run, a.base, a.ci), (Some(7821), None, false));
+        assert_eq!(args(&["a"]).unwrap().since_run, None);
     }
 
     #[test]
@@ -1164,6 +1182,17 @@ mod tests {
             (vec!["--files", "x", "a"], "--files cannot be combined with a base or --all"),
             (vec!["--files", "x", "--all"], "--files cannot be combined with a base or --all"),
             (vec!["--all", "a"], "--all cannot be combined with a base"),
+            (vec!["--since-run"], "--since-run needs a value"),
+            (vec!["--since-run", "x"], "--since-run needs a run number, not \"x\""),
+            (vec!["--since-run", "0"], "--since-run needs a run number, not \"0\""),
+            (
+                vec!["--since-run", "7", "a"],
+                "--since-run takes no commits, --files, --all or --ci (in CI, PLAN_SINCE_RUN with --ci)",
+            ),
+            (
+                vec!["--since-run", "7", "--ci"],
+                "--since-run takes no commits, --files, --all or --ci (in CI, PLAN_SINCE_RUN with --ci)",
+            ),
         ] {
             assert_eq!(args(&a).unwrap_err(), why, "{a:?}");
         }
