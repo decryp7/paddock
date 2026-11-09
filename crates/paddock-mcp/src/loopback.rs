@@ -407,6 +407,10 @@ pub fn serve_loopback(
                         drop(stream);
                     });
                     list.push((kept, handle));
+                } else {
+                    log::warn!(
+                        "paddock_mcp: connection #{id} from port {peer}: all {DRAIN_PLACES} drains are busy; closed without reading its key line (the client may see a reset)"
+                    );
                 }
                 continue;
             };
@@ -896,6 +900,7 @@ mod tests {
     /// refusal and the end. Silent clients hold the one place and every drain (each waits for its client's key line).
     #[test]
     fn a_refused_client_beyond_the_drains_still_reads_its_refusal() {
+        capture_logs();
         let keys = Arc::new(crate::keys::KeyStore::new());
         let (_, key) = keys.issue("holder", 1).unwrap();
         let serving = serve_loopback(
@@ -931,6 +936,17 @@ mod tests {
             .collect();
         let extra = TcpStream::connect(serving.addr()).unwrap();
         read_refusal(&extra);
+        // The log says so (ER-27): a client closed without a drain may see a reset, which its own logs cannot explain.
+        let port = format!(" from port {}: ", extra.local_addr().unwrap().port());
+        let said = LOGGED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .any(|l| l.contains(&port) && l.contains("drains are busy"));
+        assert!(
+            said,
+            "no log line about the connection closed without a drain"
+        );
         drop(drained);
         drop(serving);
     }
