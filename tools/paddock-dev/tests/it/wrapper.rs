@@ -503,15 +503,11 @@ fn on_a_ci_runner_with_a_kept_mount_the_tool_is_cached_there_and_an_explicit_hom
     let cached = mount.join("paddock-dev/bin").join(&hash).join("paddock-dev-test-host");
     assert!(cached.exists(), "the tool is kept on the mount: {cached:?}");
     assert!(
-        mount
-            .join(format!("paddock-dev/target-{hash}"))
-            .join("release/paddock-dev")
-            .exists(),
-        "and so is its build folder"
+        !mount.join(format!("paddock-dev/target-{hash}")).exists(),
+        "the build folder (about 465 MB per hash) goes once the verified tool is published"
     );
     assert!(!scratch.path().join("home/.paddock-dev").exists(), "nothing in the runner's home");
     // The next run finds it without building.
-    std::fs::remove_dir_all(mount.join(format!("paddock-dev/target-{hash}"))).unwrap();
     assert_eq!(run(&[]), (0, "built-by-shim".to_string()));
     assert!(!mount.join(format!("paddock-dev/target-{hash}")).exists(), "no second build");
     // An explicit home is used as given.
@@ -787,4 +783,53 @@ fn print_binary_names_the_cached_tool_without_running_it() {
         home.join("bin").join(&hash).join("paddock-dev-test-host").display().to_string()
     );
     assert!(Path::new(&out).exists(), "built and cached, not run");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_tool_used_two_hours_ago_is_kept_beyond_the_five_newest() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let home = scratch.path().join("home");
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 3600);
+    for i in 0..7 {
+        write_script(&home.join(format!("bin/used-{i}/paddock-dev-test-host")), "exit 0");
+        std::fs::File::open(home.join(format!("bin/used-{i}")))
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+    }
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    let (code, _, err) = run_wrapper(&f, &home, &[("RUSTC", rustc)]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(
+        std::fs::read_dir(home.join("bin")).unwrap().count(),
+        8,
+        "a job that started two hours ago still needs its tool"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn print_binary_refuses_a_build_with_uncommitted_inputs() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    std::fs::write(f.root().join("tools/paddock-dev/src/new_module.rs"), "// new\n").unwrap();
+    let out = Command::new("sh")
+        .arg(f.root().join("dev"))
+        .arg("--print-binary")
+        .current_dir(f.root())
+        .env("PADDOCK_DEV_HOME", scratch.path().join("home"))
+        .env("CARGO_HOME", f.cargo_home.path())
+        .env("RUSTC", rustc)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(3), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(out.stdout.is_empty(), "no path to pin");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("uncommitted"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }

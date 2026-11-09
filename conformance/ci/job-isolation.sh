@@ -378,7 +378,11 @@ cmd_acquire() {
   # Pin the tool this job started with. The wrapper's hash covers files a job writes itself (the paddock-dev job's
   # tools/paddock-dev/.cargo/ci.toml), so at the end the release would want another build, with the job's temp folder already
   # gone (sccache then fails); the pinned binary needs none.
-  if bin="$(dev_tool --print-binary 2>/dev/null)" && [ -n "$bin" ]; then echo "PADDOCK_DEV=$bin" >> "$out"; fi
+  if bin="$(dev_tool --print-binary 2>/dev/null)" && [ -n "$bin" ]; then
+    echo "PADDOCK_DEV=$bin" >> "$out"
+  else
+    echo "::warning::job-isolation: the tool could not be pinned (no cached binary: uncommitted inputs, or no build); the release step will run ./dev again, and fails if that needs a build after the job's temp folder is gone. PADDOCK_DEV is not set." >&2
+  fi
   echo "job-isolation: slot $slot (kept folders end in -$slot); temp folders in $temp" >&2
   sweep "$home"
   floor="${PADDOCK_CI_MIN_FREE_GB:-30}"

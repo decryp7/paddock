@@ -163,8 +163,12 @@ if [ "${PADDOCK_DEV_FRESH:-}" = 1 ]; then
 fi
 
 if [ -n "$dirty" ]; then
+  # A build of uncommitted inputs is nobody's cached tool, and a job must not pin one that changes under it.
+  if [ "${1:-}" = --print-binary ]; then
+    echo "dev: --print-binary: the tool's inputs have uncommitted changes, so there is no cached binary to name." >&2
+    exit 3
+  fi
   build "${PADDOCK_DEV_TARGET_DIR:-$tool/target}" dirty
-  if [ "${1:-}" = --print-binary ]; then printf '%s\n' "${PADDOCK_DEV_TARGET_DIR:-$tool/target}/release/paddock-dev$exe"; exit 0; fi
   exec "${PADDOCK_DEV_TARGET_DIR:-$tool/target}/release/paddock-dev$exe" "$@"
 fi
 
@@ -178,7 +182,9 @@ if [ ! -x "$cache/$name" ]; then
   # R0b: download the published binary for this hash (Gitea generic package `paddock-dev`, version <hash>) and check its
   # .sha256 here. Until the publishing workflow exists, every miss builds.
   if [ -n "$kept_target" ]; then
-    target="$home/target-$hash"
+    # A folder of this process: a second job of the same hash on the mount builds in its own, so neither deletes the other's.
+    mkdir -p "$home"
+    target=$(mktemp -d "$home/target-$hash.XXXXXX")
   else
     target=${PADDOCK_DEV_TARGET_DIR:-$tool/target}
     if [ "${GITHUB_ACTIONS:-}" = true ] && [ -z "${PADDOCK_DEV_HOME:-}" ]; then
@@ -198,19 +204,22 @@ if [ ! -x "$cache/$name" ]; then
     exit 1
   fi
   mv -f "$tmp" "$cache/$name"
+  # The per-hash build folder is about 465 MB; the verified tool is all a later run needs.
+  if [ -n "$kept_target" ]; then rm -rf "$target" || true; fi
   # Keep the five newest cached tools (and their build folders); older hashes are rebuilt on demand. A tool used within the last
   # day is never removed: a job on the same mount (several runners share a host's tools folder) runs it again at its end, when its
   # temp folder is already gone and a rebuild cannot work (run 7773, job-isolation release).
   ls -t "$home/bin" | tail -n +6 | while IFS= read -r old; do
     if [ -n "$(find "$home/bin/$old" -maxdepth 0 -mmin +1440 2>/dev/null)" ]; then
-      rm -rf "${home:?}/bin/$old" "${home:?}/target-$old" || true
+      rm -rf "${home:?}/bin/$old" "${home:?}/target-$old" "${home:?}/target-$old".* || true
     fi
   done
   # A build folder whose tool was never published (the build or the hash check failed) goes when an hour old: a build in
   # progress has no tool yet either, and cargo does not touch the folder itself while it runs.
   for t in "$home"/target-*; do
     [ -d "$t" ] || continue
-    [ -d "$home/bin/${t##*/target-}" ] && continue
+    h=${t##*/target-}; h=${h%%.*}
+    [ -d "$home/bin/$h" ] && continue
     if [ -n "$(find "$t" -maxdepth 0 -mmin +60 2>/dev/null)" ]; then rm -rf "$t" || true; fi
   done
 fi

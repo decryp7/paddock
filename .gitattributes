@@ -35,3 +35,6 @@ crates/*/fixtures/** -text
 
 # Generated TypeScript goldens are compared with the generator output: LF on every checkout (a CRLF checkout failed paddock-limits on Windows, run 7706).
 crates/*/tests/golden/** text eol=lf
+
+# The tables job-isolation.sh reads line by line: a CRLF checkout (Windows) gave every last field a carriage return.
+conformance/ci/*.txt text eol=lf

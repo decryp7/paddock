@@ -23,7 +23,7 @@ const read = (p) => readFileSync(p, 'utf8');
 const FAKE_DEV = `#!/usr/bin/env bash
 set -u
 echo "$*" >> "$FAKE_DEV_LOG"
-[ "$1" = --print-binary ] && { echo "$0"; exit 0; }
+[ "$1" = --print-binary ] && { [ -n "\${FAKE_DEV_NO_PIN:-}" ] && { echo "no cached binary" >&2; exit 3; }; echo "$0"; exit 0; }
 [ "$1 $2" = "ci slot" ] || exit 2
 cmd=$3; shift 3
 max= owner= root= slot= token= run=()
@@ -551,4 +551,13 @@ test('acquire pins the tool the job started with, so release never rebuilds it (
   assert.equal(r.status, 0, r.stderr);
   assert.ok(a.exported().PADDOCK_DEV, 'the env lines name the tool binary for the later steps and the release');
   assert.match(h.log(), /--print-binary/);
+});
+
+test('acquire says so, naming the fallback, when the tool cannot be pinned (a build of uncommitted inputs)', () => {
+  const h = host();
+  const a = h.job('d'.repeat(16), { FAKE_DEV_NO_PIN: '1' });
+  const r = a.exec(['acquire']);
+  assert.equal(r.status, 0, 'the job still runs');
+  assert.match(r.stderr, /::warning::job-isolation: the tool could not be pinned.*PADDOCK_DEV/, r.stderr);
+  assert.equal(a.exported().PADDOCK_DEV, undefined, 'nothing pinned');
 });
