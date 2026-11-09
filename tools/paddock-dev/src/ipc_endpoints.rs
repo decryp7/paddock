@@ -10,8 +10,12 @@
 //! fixture site by its call, so a call the parser stops seeing turns that test red.
 //!
 //! The tag refusal: [`blocked_by`] answers which ratchet entries block a tag (`dyno-v1.2.0` against `dyno-v*`). The release
-//! path's tag check (ADR 0034's, C58) is meant to call `./dev check ipc-endpoints --tag <tag>`; C58 does not exist on this
-//! branch, so that wiring is open (see the ADR's progress).
+//! path calls `./dev check ipc-endpoints --tag <tag>` on the tag path of `dyno-release.yml` and `pitcrew-release.yml` (ADR 0072,
+//! "M0 plan" item 2 and D8). C58 (ADR 0034's copies check) does not exist on this branch, so the call is declared in those
+//! workflows directly; it moves into C58's tag check when that lands.
+//!
+//! The scan walks the files git knows (`git ls-files`, tracked and not ignored), not the file system, and fails closed: a
+//! macro whose tokens do not parse as expressions but name a listen identifier is reported as a site of its own kind.
 
 use paddock_cli::{CliError, Report};
 use proc_macro2::Span;
@@ -21,7 +25,7 @@ use std::path::{Path, PathBuf};
 use syn::visit::Visit;
 
 /// The ids of the listen primitives the scan looks for, in the order of the ADR.
-pub const PRIMITIVES: [&str; 15] = [
+pub const PRIMITIVES: [&str; 21] = [
     "std::net::TcpListener::bind",
     "std::os::unix::net::UnixListener::bind",
     "tokio::net::TcpListener::bind",
@@ -37,6 +41,38 @@ pub const PRIMITIVES: [&str; 15] = [
     "paddock_ipc::link::LinkServer::start",
     "paddock_mcp::serve_loopback",
     "paddock_ipc::Accepted::serve_without_handshake",
+    "std::os::unix::net::UnixListener::bind_addr",
+    "std::net::TcpListener::from",
+    "std::os::unix::net::UnixListener::from",
+    "tokio::net::TcpSocket::listen",
+    "tokio::net::UnixSocket::listen",
+    "macro-naming-a-listen-identifier",
+];
+
+/// The id `name` in [`PRIMITIVES`] (a name that is not there is a bug of this file, found by every test at once).
+fn prim(name: &str) -> &'static str {
+    PRIMITIVES.iter().copied().find(|p| *p == name).unwrap_or("unknown-primitive")
+}
+
+/// Identifiers that make a macro suspect when its tokens cannot be read as expressions.
+const LISTEN_IDENTS: [&str; 17] = [
+    "bind",
+    "bind_addr",
+    "bind_in",
+    "bind_fixed",
+    "bind_system",
+    "from_std",
+    "listen",
+    "listen_in",
+    "listen_at",
+    "serve_loopback",
+    "serve_without_handshake",
+    "CreateNamedPipeW",
+    "create_with_security_attributes_raw",
+    "LinkServer",
+    "TcpSocket",
+    "UnixSocket",
+    "named_pipe",
 ];
 
 /// The scenario names of the ratchet file (kept in step with `paddock_ipc::testing::endings` by a test that reads its source).
@@ -213,18 +249,26 @@ fn primitive_of_path(full: &[String]) -> Option<&'static str> {
     let root = full.first()?.as_str();
     let own = matches!(root, "paddock_ipc" | "crate" | "self" | "super");
     Some(match (ty, last) {
-        ("TcpListener", "bind") if root == "std" => PRIMITIVES[0],
-        ("UnixListener", "bind") if root == "std" => PRIMITIVES[1],
-        ("TcpListener", "bind") if root == "tokio" => PRIMITIVES[2],
-        ("UnixListener", "bind") if root == "tokio" => PRIMITIVES[3],
-        ("TcpListener", "from_std") if root == "tokio" => PRIMITIVES[4],
-        ("UnixListener", "from_std") if root == "tokio" => PRIMITIVES[5],
-        ("Socket", "listen") if root == "socket2" => PRIMITIVES[8],
-        (_, "CreateNamedPipeW") => PRIMITIVES[9],
-        ("Listener", "bind" | "bind_in" | "bind_fixed" | "bind_system") if own => PRIMITIVES[10],
-        ("Host", "listen" | "listen_in" | "listen_at") if own => PRIMITIVES[11],
-        ("LinkServer", "start") if own => PRIMITIVES[12],
-        (_, "serve_loopback") if matches!(root, "paddock_mcp" | "crate" | "self" | "super") => PRIMITIVES[13],
+        ("TcpListener", "bind") if root == "std" => prim("std::net::TcpListener::bind"),
+        ("UnixListener", "bind") if root == "std" => prim("std::os::unix::net::UnixListener::bind"),
+        ("UnixListener", "bind_addr") if root == "std" => prim("std::os::unix::net::UnixListener::bind_addr"),
+        ("TcpListener", "from") if root == "std" => prim("std::net::TcpListener::from"),
+        ("UnixListener", "from") if root == "std" => prim("std::os::unix::net::UnixListener::from"),
+        ("TcpListener", "bind") if root == "tokio" => prim("tokio::net::TcpListener::bind"),
+        ("UnixListener", "bind") if root == "tokio" => prim("tokio::net::UnixListener::bind"),
+        ("TcpListener", "from_std") if root == "tokio" => prim("tokio::net::TcpListener::from_std"),
+        ("UnixListener", "from_std") if root == "tokio" => prim("tokio::net::UnixListener::from_std"),
+        ("Socket", "listen") if root == "socket2" => prim("socket2::Socket::listen"),
+        ("TcpSocket", "listen") if root == "tokio" => prim("tokio::net::TcpSocket::listen"),
+        ("UnixSocket", "listen") if root == "tokio" => prim("tokio::net::UnixSocket::listen"),
+        (_, "CreateNamedPipeW") => prim("CreateNamedPipeW"),
+        ("Listener", "bind" | "bind_in" | "bind_fixed" | "bind_system") if own => prim("paddock_ipc::endpoint::Listener::bind*"),
+        ("Host", "listen" | "listen_in" | "listen_at") if own => prim("paddock_ipc::Host::listen*"),
+        ("LinkServer", "start") if own => prim("paddock_ipc::link::LinkServer::start"),
+        // Qualified, or called by its bare name inside its own crate.
+        (_, "serve_loopback") if n == 1 || matches!(root, "paddock_mcp" | "crate" | "self" | "super") => {
+            prim("paddock_mcp::serve_loopback")
+        }
         _ => return None,
     })
 }
@@ -288,15 +332,48 @@ impl<'ast> Visit<'ast> for Walker<'_> {
         }
     }
 
-    fn visit_expr_call(&mut self, c: &'ast syn::ExprCall) {
+    fn visit_path(&mut self, p: &'ast syn::Path) {
+        if self.collect_uses {
+            for seg in &p.segments {
+                self.uses.mentions.insert(seg.ident.to_string());
+            }
+        }
+        syn::visit::visit_path(self, p);
+    }
+
+    /// A path in expression position is a site whether it is called (`TcpListener::bind(a)`) or passed as a value
+    /// (`.map(TcpListener::bind)`).
+    fn visit_expr_path(&mut self, p: &'ast syn::ExprPath) {
         if !self.collect_uses
-            && let syn::Expr::Path(p) = &*c.func
             && let Some(call) = primitive_of_path(&self.resolve(&p.path))
             && let Some(seg) = p.path.segments.last()
         {
             self.add(seg.ident.span(), call);
         }
-        syn::visit::visit_expr_call(self, c);
+        syn::visit::visit_expr_path(self, p);
+    }
+
+    /// A macro's arguments are read as comma-separated expressions where they parse (`vec![..]`, `join!(..)`); where they do
+    /// not (`select!` arms, `vec![x; n]`), a listen identifier among the tokens is a site of its own kind: fail closed.
+    fn visit_macro(&mut self, m: &'ast syn::Macro) {
+        use syn::parse::Parser;
+        if let Some(seg) = m.path.segments.last() {
+            self.uses.mentions.insert(seg.ident.to_string());
+        }
+        let parsed = syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated.parse2(m.tokens.clone());
+        match parsed {
+            Ok(exprs) => {
+                for e in &exprs {
+                    self.visit_expr(e);
+                }
+            }
+            Err(_) if !self.collect_uses => {
+                if let Some(span) = first_listen_ident(m.tokens.clone()) {
+                    self.add(span, prim("macro-naming-a-listen-identifier"));
+                }
+            }
+            Err(_) => {}
+        }
     }
 
     fn visit_expr_method_call(&mut self, m: &'ast syn::ExprMethodCall) {
@@ -304,15 +381,44 @@ impl<'ast> Visit<'ast> for Walker<'_> {
             let name = m.method.to_string();
             let span = m.method.span();
             match name.as_str() {
-                "serve_without_handshake" => self.add(span, PRIMITIVES[14]),
-                "listen" if m.args.len() == 1 && self.uses.mentions.contains("socket2") => self.add(span, PRIMITIVES[8]),
-                "create" if m.args.len() == 1 && self.uses.mentions.contains("named_pipe") => self.add(span, PRIMITIVES[6]),
-                "create_with_security_attributes_raw" if self.uses.mentions.contains("named_pipe") => self.add(span, PRIMITIVES[7]),
+                "serve_without_handshake" => self.add(span, prim("paddock_ipc::Accepted::serve_without_handshake")),
+                "listen" if m.args.len() == 1 && self.uses.mentions.contains("socket2") => self.add(span, prim("socket2::Socket::listen")),
+                "listen" if m.args.len() == 1 && self.uses.mentions.contains("TcpSocket") => {
+                    self.add(span, prim("tokio::net::TcpSocket::listen"))
+                }
+                "listen" if m.args.len() == 1 && self.uses.mentions.contains("UnixSocket") => {
+                    self.add(span, prim("tokio::net::UnixSocket::listen"))
+                }
+                "create" if m.args.len() == 1 && self.uses.mentions.contains("named_pipe") => {
+                    self.add(span, prim("tokio::net::windows::named_pipe::ServerOptions::create"));
+                }
+                "create_with_security_attributes_raw" if self.uses.mentions.contains("named_pipe") => {
+                    self.add(
+                        span,
+                        prim("tokio::net::windows::named_pipe::ServerOptions::create_with_security_attributes_raw"),
+                    );
+                }
                 _ => {}
             }
         }
         syn::visit::visit_expr_method_call(self, m);
     }
+}
+
+/// The span of the first token in `tokens` (searching groups) that is a listen identifier.
+fn first_listen_ident(tokens: proc_macro2::TokenStream) -> Option<Span> {
+    for t in tokens {
+        match t {
+            proc_macro2::TokenTree::Ident(i) if LISTEN_IDENTS.iter().any(|n| i == n) => return Some(i.span()),
+            proc_macro2::TokenTree::Group(g) => {
+                if let Some(s) = first_listen_ident(g.stream()) {
+                    return Some(s);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// A file's sites, `(line, primitive)`, and the module names its `#[cfg(test)] mod x;` lines declare.
@@ -368,14 +474,52 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The Rust files to scan: those git knows under `root` (tracked, and untracked but not ignored, so a file about to be
+/// committed is checked too), without the folders of [`skipped_dir`]; where `root` is not a git checkout (a fixture tree, an
+/// archive of `HEAD`) the files on disk.
+fn source_files(root: &Path) -> Result<Vec<PathBuf>, String> {
+    if !root.join(".git").exists() {
+        let mut files = Vec::new();
+        walk(root, &mut files).map_err(|e| format!("{}: {e}", root.display()))?;
+        return Ok(files);
+    }
+    let listed = crate::input_hash::Exec::run(
+        &crate::input_hash::Real,
+        "git",
+        &["ls-files", "--cached", "--others", "--exclude-standard", "--", "*.rs"],
+        root,
+        None,
+    );
+    // Where git cannot answer (a worktree mounted into a container without its git folder, git not installed) the file system
+    // walk is used: it sees every file git would and more, so it can only add sites, never hide one.
+    let Ok(listed) = listed else {
+        let mut files = Vec::new();
+        walk(root, &mut files).map_err(|e| format!("{}: {e}", root.display()))?;
+        return Ok(files);
+    };
+    let mut files: Vec<PathBuf> = listed
+        .lines()
+        .filter(|l| !l.is_empty())
+        .filter(|l| {
+            !Path::new(l)
+                .parent()
+                .is_some_and(|d| d.components().any(|c| skipped_dir(&c.as_os_str().to_string_lossy())))
+        })
+        .map(|l| root.join(l))
+        .filter(|p| p.is_file())
+        .collect();
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
 /// The listen primitives in the non-test Rust files under `root`, sorted. Files that do not parse are returned in `Err` with
 /// the reason: a file the parser cannot read could hide a site, so the check fails on it.
 ///
 /// # Errors
 /// The folder cannot be read, or a file does not parse (every such file is named).
 pub fn scan(root: &Path) -> Result<Vec<Site>, String> {
-    let mut files = Vec::new();
-    walk(root, &mut files).map_err(|e| format!("{}: {e}", root.display()))?;
+    let files = source_files(root)?;
     let mut per_file: BTreeMap<PathBuf, FileScan> = BTreeMap::new();
     let mut unparsed = Vec::new();
     for f in &files {
@@ -454,6 +598,23 @@ pub struct OutOfScope {
     pub reason: String,
     /// Who answers for it.
     pub owner: String,
+    /// The primitives found in the matching files (all of them together).
+    pub calls: Vec<String>,
+    /// How many sites the matching files have in all.
+    pub sites: usize,
+}
+
+/// One `[[not_applicable]]` entry: a scenario that does not apply to an endpoint, with the reason.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotApplicable {
+    /// The endpoint id.
+    pub endpoint: String,
+    /// The scenario name.
+    pub scenario: String,
+    /// Why it does not apply.
+    pub reason: String,
+    /// The operating systems it holds on (empty: all).
+    pub os: String,
 }
 
 /// The register file.
@@ -463,10 +624,19 @@ pub struct Register {
     pub endpoints: Vec<Endpoint>,
     /// The out-of-scope entries.
     pub out_of_scope: Vec<OutOfScope>,
+    /// The scenarios that do not apply, per endpoint.
+    pub not_applicable: Vec<NotApplicable>,
 }
 
 fn text_of(t: &toml::Table, key: &str) -> String {
     t.get(key).and_then(toml::Value::as_str).unwrap_or_default().to_string()
+}
+
+fn strings_of(t: &toml::Table, key: &str) -> Vec<String> {
+    t.get(key)
+        .and_then(toml::Value::as_array)
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
 }
 
 fn tables<'a>(doc: &'a toml::Table, key: &str) -> Vec<&'a toml::Table> {
@@ -505,9 +675,27 @@ pub fn parse_register(text: &str) -> Result<Register, String> {
             path: text_of(t, "path"),
             reason: text_of(t, "reason"),
             owner: text_of(t, "owner"),
+            calls: strings_of(t, "calls"),
+            sites: t
+                .get("sites")
+                .and_then(toml::Value::as_integer)
+                .map_or(0, |n| usize::try_from(n).unwrap_or(0)),
         })
         .collect();
-    Ok(Register { endpoints, out_of_scope })
+    let not_applicable = tables(&doc, "not_applicable")
+        .into_iter()
+        .map(|t| NotApplicable {
+            endpoint: text_of(t, "endpoint"),
+            scenario: text_of(t, "scenario"),
+            reason: text_of(t, "reason"),
+            os: text_of(t, "os"),
+        })
+        .collect();
+    Ok(Register {
+        endpoints,
+        out_of_scope,
+        not_applicable,
+    })
 }
 
 /// One ratchet entry (`docs/ipc-endpoint-ratchet.toml`).
@@ -671,11 +859,51 @@ pub fn findings(root: &Path, sites: &[Site], register: &Register, ratchet: &[Rat
         }
     }
     for o in &register.out_of_scope {
-        if !o.path.is_empty() && !by_file.keys().any(|f| covers(&o.path, f)) {
+        if o.path.is_empty() {
+            continue;
+        }
+        let matching: Vec<&Site> = by_file
+            .iter()
+            .filter(|(f, _)| covers(&o.path, f))
+            .flat_map(|(_, v)| v.iter().copied())
+            .collect();
+        if matching.is_empty() {
             out.push(format!(
                 "{REGISTER}: out_of_scope `{}` matches no listen site any more. Remove the entry.",
                 o.path
             ));
+            continue;
+        }
+        let calls: BTreeSet<&str> = matching.iter().map(|s| s.call.as_str()).collect();
+        let listed: BTreeSet<&str> = o.calls.iter().map(String::as_str).collect();
+        if calls != listed || matching.len() != o.sites {
+            out.push(format!(
+                "{REGISTER}: out_of_scope `{}` lists calls {:?} and {} site(s); the files have {:?} and {}. Look at the new site, then update the entry (a changed site in a waived file is still a listener).",
+                o.path, listed, o.sites, calls, matching.len()
+            ));
+        }
+    }
+    for n in &register.not_applicable {
+        let at = format!("{REGISTER}: not_applicable {} / {}", n.endpoint, n.scenario);
+        if !ids.contains(&n.endpoint) {
+            out.push(format!("{at}: the endpoint is not registered."));
+        }
+        if !SCENARIOS.contains(&n.scenario.as_str()) {
+            out.push(format!("{at}: unknown scenario."));
+        }
+        if n.reason.trim().is_empty() {
+            out.push(format!("{at}: a scenario that does not apply needs its reason."));
+        }
+        let oses = |text: &str| -> Vec<String> { text.split(',').map(|o| o.trim().to_string()).filter(|o| !o.is_empty()).collect() };
+        let overlap = |a: &str, b: &str| {
+            let (a, b) = (oses(a), oses(b));
+            a.is_empty() || b.is_empty() || a.iter().any(|x| b.contains(x))
+        };
+        if ratchet
+            .iter()
+            .any(|r| r.endpoint == n.endpoint && r.scenario == n.scenario && overlap(&r.os, &n.os))
+        {
+            out.push(format!("{at}: the ratchet lists a fault for a scenario that does not apply."));
         }
     }
     for r in ratchet {

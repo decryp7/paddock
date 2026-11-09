@@ -39,8 +39,9 @@ describe('the graph of this tree', () => {
     assert.ok(r.crates);
     assert.ok(r.ui, 'ui cause-codes.spec.ts scans the shared crates for health cause codes'); // only its own tests, not the UI half of any app
     // Debrief's store worker and Spotter's renderer depend on paddock-proc by path (the memory figure and the supervised child),
-    // so the shared crates reach Debrief and Spotter too; Dyno takes the shell crates by path.
-    assert.deepEqual(r.apps, ['debrief', 'dyno', 'shell-demo', 'spotter', 'workbench-demo']);
+    // so the shared crates reach Debrief and Spotter too; Dyno takes the shell crates by path; Pitcrew's service has paddock-ipc
+    // (which uses paddock-jobs) as a dev-dependency for its ending test (ADR 0072).
+    assert.deepEqual(r.apps, ['debrief', 'dyno', 'pitcrew', 'shell-demo', 'spotter', 'workbench-demo']);
     assert.deepEqual(r.kinds['shell-demo'], ['rust']);
     assert.deepEqual(r.kinds.debrief, ['rust']);
     assert.ok(r.packages.crates.includes('paddock-jobs'));
