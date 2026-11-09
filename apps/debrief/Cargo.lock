@@ -2246,6 +2246,7 @@ dependencies = [
  "debrief-alloc",
  "debrief-core",
  "debrief-store-client",
+ "debrief-store-duck",
  "duckdb",
  "getrandom 0.4.3",
  "libc",

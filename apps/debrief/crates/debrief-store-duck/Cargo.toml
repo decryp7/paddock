@@ -30,7 +30,12 @@ rayon.workspace = true
 # Full-text index (MIT).
 tantivy = { workspace = true, features = ["mmap", "lz4-compression"] }
 
+[features]
+# Test-only helpers (`test_scratch`) for this crate's integration tests; enabled by its own dev-dependency below.
+test-support = []
+
 [dev-dependencies]
+debrief-store-duck = { path = ".", features = ["test-support"] }
 # The worker's allocator environment (`allocator::worker_env`), so the memory budget test measures what ships.
 debrief-store-client = { path = "../debrief-store-client" }
 # Current resident set size on Windows, macOS and Linux (MIT OR Apache-2.0), for the memory budget test.

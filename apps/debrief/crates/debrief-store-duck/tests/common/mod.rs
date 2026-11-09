@@ -4,7 +4,6 @@
 
 pub mod corpus;
 pub mod rss;
-pub mod scratch;
 
 use debrief_core::ports::{Filter, Ingest, Query, StoreResult};
 use debrief_core::Workspace;
@@ -63,7 +62,7 @@ impl TempDir {
 
 impl Drop for TempDir {
     fn drop(&mut self) {
-        scratch::remove_or_defer(&self.0);
+        debrief_store_duck::test_scratch::remove_or_defer(&self.0);
     }
 }
 

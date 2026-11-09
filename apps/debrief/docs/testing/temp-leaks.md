@@ -28,6 +28,12 @@ Tests must not leave `debrief-*` or `imt-*` folders in the OS temp directory. CI
 - **A removal that fails**: a fixture's `Drop` must not ignore a failed removal. `debrief-core`'s integration tests use
   `scratch::remove_or_defer`: it says so on stderr and removes the folder again when the test process exits (CI 7108
   left `debrief-prop-*` folders whose removal had failed silently).
+- **debrief-store-duck's fixtures**: `debrief_store_duck::test_scratch::remove_or_defer` (the `test-support` feature, and
+  `#[cfg(test)]` for the unit tests) removes a scratch folder. A failure is written straight to stderr as `::warning::`
+  (libtest captures `eprintln!`), leaves a marker `debrief-leak-deferred-<folder>` that `check-temp-leaks.mjs` fails on and
+  prints (folder, error, what was left), and the folder is removed again at exit. There is no retry: CI 7813 left
+  `debrief-duck-diff-*` and `debrief-maintain-reorder-skew-*` with all tests passing and the cause is not known (suspected,
+  not reproduced); the marker will say the error and what was in the folder the next time.
 - **The temp folder is shared**: on the Mac runner, CI jobs and agents' local runs use the same user temp folder, so a
   local run killed during a CI job leaves folders the job's check then reports.
 - **Measure locally**: run the tests with `TMPDIR` pointing at an empty folder and list it afterwards:

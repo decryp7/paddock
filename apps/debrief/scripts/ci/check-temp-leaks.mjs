@@ -11,6 +11,9 @@ import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isMain } from '../../../../conformance/src/util/is-main.mjs';
 
+/** The marker a test fixture leaves when it could not remove its folder. */
+export const DEFERRED_MARKER = 'debrief-leak-deferred-';
+
 export const PATTERN = /^(debrief|imt)-/;
 
 /**
@@ -127,6 +130,20 @@ export function main(argv, log = console, shared = sharedDirs, platform = proces
   for (const { pattern, count } of groupLeaks(leaked)) log.error(`  ${String(count).padStart(5)}  ${pattern}`);
   log.error('Folders:');
   for (const n of leaked) log.error(`  ${n}`);
+  // A test folder whose removal failed leaves `debrief-leak-deferred-*` (crates/debrief-store-duck/src/test_scratch.rs): its
+  // text says which folder, which error and what was in it, and it stays after the folder is removed at process exit.
+  const markers = leaked.filter((n) => n.startsWith(DEFERRED_MARKER));
+  if (markers.length > 0) {
+    log.error('Deferred removals (a removal failed; the folder was removed again at exit, the leak is real):');
+    for (const n of markers) {
+      try {
+        log.error(`  ${n}:`);
+        for (const line of readFileSync(`${dir}/${n}`, 'utf8').split('\n')) if (line !== '') log.error(`    ${line}`);
+      } catch (e) {
+        log.error(`    unreadable: ${e.message}`);
+      }
+    }
+  }
   return 1;
 }
 

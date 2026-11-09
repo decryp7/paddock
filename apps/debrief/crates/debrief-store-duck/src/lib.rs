@@ -36,6 +36,9 @@ mod spans;
 mod sql;
 pub mod stats;
 mod tail;
+/// Tests only: removal of a test's scratch folder that cannot hide a leak (`test-support` for the integration tests).
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_scratch;
 mod turns;
 mod writer;
 
