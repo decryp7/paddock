@@ -83,6 +83,8 @@ retries = 0
 # per test (47-81 s in CI 6381), and the large-folder import measures progress over a generated folder of many files (89 s).
 # Two at a time (duck-heavy) since CI 7822 stopped three of five at 180 s: under load the slowest took 34-39 s grouped and 48 s
 # all at once (docs/performance.md, "The store's waived suites under load", 2026-11-09).
+# Then made cheaper (CI 7825 still took 84-142 s of them): under load large_folder 46-63 s -> 6 s, differential 23-32 s ->
+# 18-23 s (docs/performance.md, "The store's slow tests made cheaper", 2026-11-09).
 [[profile.ci.overrides]]
 filter = "package(debrief-store-duck) & binary(it) & (test(/^differential::answers_like_the_workspace_/) | test(/^analysis::analyses_match_the_workspace_/) | test(/^large_folder::/))"
 slow-timeout = { period = "30s", terminate-after = 6 }

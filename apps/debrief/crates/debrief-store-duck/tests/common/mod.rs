@@ -68,8 +68,24 @@ impl Drop for TempDir {
 }
 
 /// A store in `dir` with `paths` imported (`DEBRIEF_PARSE_THREADS` sets the parse threads).
+/// Store options for tests that compare answers, not speed: two parse workers, two DuckDB threads and one index writer
+/// thread instead of the app's budgets (up to 8, 4 and 4 per store). Several such stores run at once beside the rest of the
+/// workspace; at the app's budgets they oversubscribed a shared Mac runner (CI 7822, 7825). Answers do not depend on the
+/// thread counts (streaming_import checks it).
+pub fn test_options() -> debrief_store_duck::StoreOptions {
+    debrief_store_duck::StoreOptions {
+        parse_threads: 2,
+        duck_threads: 2,
+        index: debrief_store_duck::WriterBudget {
+            heap: 15 << 20, // the least Tantivy accepts per thread (fts::MIN_HEAP_PER_THREAD)
+            threads: 1,
+        },
+        ..debrief_store_duck::StoreOptions::default()
+    }
+}
+
 pub fn store_with(dir: &TempDir, profile: Profile, paths: &[PathBuf]) -> StoreResult<(DuckStore, debrief_core::ports::ImportReport)> {
-    let mut opts = debrief_store_duck::StoreOptions::default();
+    let mut opts = test_options();
     if let Some(n) = std::env::var("DEBRIEF_PARSE_THREADS").ok().and_then(|v| v.parse().ok()) {
         opts.parse_threads = n;
     }
