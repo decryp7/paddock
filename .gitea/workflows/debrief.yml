@@ -66,7 +66,7 @@ jobs:
     name: plan
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     defaults:
       run:
         working-directory: .
@@ -132,7 +132,7 @@ jobs:
     if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
       - uses: actions/checkout@v4
 
@@ -168,7 +168,7 @@ jobs:
     if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     env:
       # A missing test browser fails the real-browser tests instead of skipping them.
       DEBRIEF_REQUIRE_TEST_BROWSER: "1"
@@ -347,7 +347,7 @@ jobs:
     if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
       - uses: actions/checkout@v4
 
@@ -390,17 +390,22 @@ jobs:
     if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
       - uses: actions/checkout@v4
         with:
           # Full history so pull requests can check every commit message.
           fetch-depth: 0
 
-      # cargo-deny comes with the image; cargo-about does not. Pinned: the committed notices are its output, and a new
+      # cargo-deny and cargo-about (v3 on) come with the image; the install below is the fallback. Pinned: the committed notices are its output, and a new
       # release can find more licence texts (0.9.3 found five more than 0.9.2 on 2026-10-28); bump it together with
       # scripts/notices/generate.sh's output.
+      - name: Find cargo-about
+        id: about
+        run: |
+          if [ "$(cargo about --version 2>/dev/null | awk '{print $2}')" = 0.9.2 ]; then echo "have=true" >> "$GITHUB_OUTPUT"; fi
       - uses: taiki-e/install-action@v2
+        if: steps.about.outputs.have != 'true'
         with:
           tool: cargo-about@0.9.2
 
@@ -448,7 +453,7 @@ jobs:
     if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     defaults:
       run:
         working-directory: apps/debrief/app
@@ -522,7 +527,7 @@ jobs:
     if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     strategy:
       fail-fast: false
       matrix:
@@ -578,7 +583,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     # Linux legs run in the paddock-ci image; Windows and macOS run on the host.
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v3' || '' }}
     timeout-minutes: 60
     defaults:
       run:
@@ -843,7 +848,7 @@ jobs:
             bundles: dmg
     runs-on: ${{ matrix.os }}
     # Linux legs run in the paddock-ci image; Windows and macOS run on the host.
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v3' || '' }}
     defaults:
       run:
         shell: bash
@@ -1074,7 +1079,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/debrief-v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
       - uses: actions/checkout@v4
 
@@ -1088,7 +1093,7 @@ jobs:
     needs: [plan, bundle, tauri-smoke, rust-lint, rust-test, rust-test-macos, plugin-sdk, licences, frontend, e2e, keychain]
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1174,7 +1179,7 @@ jobs:
     if: github.event_name == 'schedule' && success()
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     defaults:
       run:
         working-directory: .

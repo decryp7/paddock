@@ -74,8 +74,16 @@ runs:
 
     # Third-party notices (Rust through cargo-about, npm through the root lock) are generated output: the committed file must equal
     # what the dependencies produce now (a new dependency or a version bump changes it).
-    - name: Install cargo-about (${{ inputs.app }})
+    # The paddock-ci image carries cargo-about 0.9.2: the download is skipped when it is already there.
+    - name: Find cargo-about (${{ inputs.app }})
+      id: about
       if: ${{ !cancelled() && steps.prepare.outcome != 'failure' && inputs.notices == 'true' && runner.os == 'Linux' }}
+      shell: bash
+      run: |
+        if [ "$(cargo about --version 2>/dev/null | awk '{print $2}')" = 0.9.2 ]; then echo "have=true" >> "$GITHUB_OUTPUT"; fi
+
+    - name: Install cargo-about (${{ inputs.app }})
+      if: ${{ !cancelled() && steps.prepare.outcome != 'failure' && inputs.notices == 'true' && runner.os == 'Linux' && steps.about.outputs.have != 'true' }}
       uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2
       with:
         tool: cargo-about@0.9.2
