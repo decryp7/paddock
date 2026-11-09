@@ -210,82 +210,105 @@ pub trait Exec {
     fn run(&self, program: &str, args: &[&str], cwd: &Path, stdin: Option<&[u8]>) -> Result<String, CliError>;
 }
 
-/// Feeds `bytes` to the child's standard input (on its own thread, so a large input cannot stall the wait) and waits for the
-/// child for at most `limit`; a child still running then is killed and reported as an error.
-fn pipe_in(mut child: std::process::Child, bytes: &[u8], limit: Duration) -> std::io::Result<std::process::Output> {
-    use std::io::Read;
-    let stdin = child.stdin.take();
-    let deadline = std::time::Instant::now() + limit;
-    let input = bytes.to_vec();
-    // Detached threads, not a scope: a grandchild may hold the pipes after the child is killed, and the limit must still end the call.
-    std::thread::spawn(move || {
-        if let Some(mut pipe) = stdin {
-            // The child may end before reading everything; its exit status says what went wrong.
-            let _ = pipe.write_all(&input);
+/// The most one output pipe is read into: a reply past it ends the child's tree and is an error.
+const MAX_REPLY: usize = 64 << 20;
+
+/// Starts `cmd` with all three standard streams piped, leading its own process group (Unix), so that a timeout can end the
+/// whole tree through `paddock_proc::kill_tree`, grandchildren included.
+fn spawn_piped(cmd: &mut std::process::Command) -> std::io::Result<std::process::Child> {
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(cmd, 0);
+    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()
+}
+
+/// Reads `pipe` into `buf` until it closes; past [`MAX_REPLY`] it stops, flags `over` and drops the pipe.
+fn drain(mut pipe: impl std::io::Read, buf: &std::sync::Mutex<Vec<u8>>, over: &std::sync::atomic::AtomicBool) {
+    let mut chunk = [0u8; 8192];
+    while let Ok(n) = pipe.read(&mut chunk) {
+        let mut g = buf.lock().unwrap_or_else(|e| e.into_inner());
+        if n == 0 {
+            return;
         }
-    });
-    // Each reader appends to a shared buffer, so what a stuck child already printed can be shown when the limit ends the call.
-    type Shared = std::sync::Arc<std::sync::Mutex<(Vec<u8>, bool)>>;
-    let reader = |pipe: Option<Box<dyn Read + Send>>| -> Shared {
-        let buf: Shared = Default::default();
-        let mine = buf.clone();
-        std::thread::spawn(move || {
-            if let Some(mut p) = pipe {
-                let mut chunk = [0u8; 8192];
-                while let Ok(n) = p.read(&mut chunk) {
-                    if n == 0 {
-                        break;
-                    }
-                    mine.lock().unwrap_or_else(|e| e.into_inner()).0.extend_from_slice(&chunk[..n]);
-                }
-            }
-            mine.lock().unwrap_or_else(|e| e.into_inner()).1 = true;
-        });
-        buf
-    };
-    let out = reader(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
-    let err = reader(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
-    let tail = |b: &Shared| {
+        if g.len() + n > MAX_REPLY {
+            over.store(true, std::sync::atomic::Ordering::SeqCst);
+            return;
+        }
+        g.extend_from_slice(&chunk[..n]);
+    }
+}
+
+/// Feeds `bytes` to the child's standard input (on its own thread, so a large input cannot stall the wait), reads both outputs
+/// while it runs, and waits for the child for at most `limit`. A child still running then (or one that writes more than
+/// [`MAX_REPLY`]) has its whole tree ended and is reported as an error; the readers end because the pipes close, and are joined.
+/// The child must come from [`spawn_piped`].
+fn pipe_in(mut child: std::process::Child, bytes: &[u8], limit: Duration) -> std::io::Result<std::process::Output> {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let stdin = child.stdin.take();
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let deadline = std::time::Instant::now() + limit;
+    // Taken before the child can be reaped: the tree is ended by identity (ADR 0033).
+    let root = paddock_proc::ProcessId::of(child.id());
+    let (out, err, over) = (Mutex::new(Vec::new()), Mutex::new(Vec::new()), AtomicBool::new(false));
+    let tail = |b: &Mutex<Vec<u8>>| {
         let g = b.lock().unwrap_or_else(|e| e.into_inner());
-        let text = String::from_utf8_lossy(&g.0).trim().to_string();
+        let text = String::from_utf8_lossy(&g).trim().to_string();
         let keep: Vec<&str> = text.lines().rev().take(5).collect();
         keep.into_iter().rev().collect::<Vec<_>>().join(" | ")
     };
-    let timed_out = |limit: Duration, err: &Shared| {
-        let said = tail(err);
-        let said = if said.is_empty() {
-            String::new()
-        } else {
-            format!("; its stderr so far: {said}")
-        };
-        std::io::Error::new(
-            std::io::ErrorKind::TimedOut,
-            format!("it did not finish within {} seconds{said}", limit.as_secs()),
-        )
-    };
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
+    std::thread::scope(|s| {
+        s.spawn(move || {
+            if let Some(mut pipe) = stdin {
+                // The child may end before reading everything; its exit status says what went wrong.
+                let _ = pipe.write_all(bytes);
+            }
+        });
+        if let Some(p) = stdout {
+            s.spawn(|| drain(p, &out, &over));
         }
-        if std::time::Instant::now() >= deadline {
+        if let Some(p) = stderr {
+            s.spawn(|| drain(p, &err, &over));
+        }
+        let end_tree = |child: &mut std::process::Child| {
+            if let Some(id) = root {
+                paddock_proc::kill_tree(id);
+            }
             let _ = child.kill();
             let _ = child.wait();
-            return Err(timed_out(limit, &err));
+        };
+        loop {
+            if over.load(Ordering::SeqCst) {
+                end_tree(&mut child);
+                return Err(std::io::Error::other(format!("it wrote more than {} MiB", MAX_REPLY >> 20)));
+            }
+            if let Some(status) = child.try_wait()? {
+                // The child is gone; whatever it started that still holds a pipe is ended too, or the readers never finish.
+                if let Some(id) = root {
+                    paddock_proc::kill_tree(id);
+                }
+                return Ok(status);
+            }
+            if std::time::Instant::now() >= deadline {
+                end_tree(&mut child);
+                let said = tail(&err);
+                let said = if said.is_empty() {
+                    String::new()
+                } else {
+                    format!("; its stderr so far: {said}")
+                };
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!("it did not finish within {} seconds{said}", limit.as_secs()),
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(5));
         }
-        std::thread::sleep(Duration::from_millis(5));
-    };
-    // The child has ended; a grandchild still holding a pipe gets only what is left of the limit.
-    while !(out.lock().unwrap_or_else(|e| e.into_inner()).1 && err.lock().unwrap_or_else(|e| e.into_inner()).1) {
-        if std::time::Instant::now() >= deadline {
-            return Err(timed_out(limit, &err));
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    let take = |b: &Shared| std::mem::take(&mut b.lock().unwrap_or_else(|e| e.into_inner()).0);
-    Ok(std::process::Output {
+    })
+    .map(|status| std::process::Output {
         status,
-        stdout: take(&out),
-        stderr: take(&err),
+        stdout: std::mem::take(&mut *out.lock().unwrap_or_else(|e| e.into_inner())),
+        stderr: std::mem::take(&mut *err.lock().unwrap_or_else(|e| e.into_inner())),
     })
 }
 
@@ -309,9 +332,7 @@ impl Exec for Real {
                 out.stdout_text()
             }
             Some(bytes) => {
-                cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-                let out = cmd
-                    .spawn()
+                let out = spawn_piped(&mut cmd)
                     .and_then(|child| pipe_in(child, bytes, TIMEOUT))
                     .map_err(|e| fail(e.to_string()))?;
                 if !out.status.success() {
@@ -420,8 +441,7 @@ mod tests {
     fn pipe_in_reads_a_large_reply_while_the_child_runs() {
         let bytes = vec![b'x'; 1 << 20];
         let mut cmd = proc_command("cat");
-        cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        let out = pipe_in(cmd.spawn().unwrap(), &bytes, Duration::from_secs(20)).expect("finishes");
+        let out = pipe_in(spawn_piped(&mut cmd).unwrap(), &bytes, Duration::from_secs(20)).expect("finishes");
         assert_eq!(out.stdout.len(), bytes.len());
     }
 
@@ -627,19 +647,35 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_program_that_reads_its_input_but_never_ends_is_killed_at_the_limit() {
+    fn a_program_that_reads_its_input_but_never_ends_is_killed_at_the_limit_with_its_tree() {
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("grandchild.pid");
+        let script = format!(
+            "echo stuck-here >&2; sleep 30 & echo $! > '{}'; cat >/dev/null; wait",
+            pidfile.display()
+        );
         let mut cmd = proc_command("sh");
-        cmd.args(["-c", "echo stuck-here >&2; cat >/dev/null; sleep 30"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        let child = cmd.spawn().unwrap();
+        cmd.args(["-c", &script]);
+        let child = spawn_piped(&mut cmd).unwrap();
         let started = std::time::Instant::now();
-        let err = pipe_in(child, b"x", Duration::from_millis(200)).unwrap_err();
+        let err = pipe_in(child, b"x", Duration::from_millis(500)).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
         assert!(err.to_string().contains("stuck-here"), "the stderr tail is in the error: {err}");
-        // The `sleep` grandchild keeps the pipes open for 30 s: the limit must still end the call (it did, before readers were added).
+        // The `sleep` grandchild holds the pipes open for 30 s: the limit must still end the call, and end the grandchild too.
         assert!(started.elapsed() < Duration::from_secs(5), "took {:?}", started.elapsed());
+        let pid: u32 = std::fs::read_to_string(&pidfile)
+            .expect("the script wrote its grandchild's pid")
+            .trim()
+            .parse()
+            .unwrap();
+        let gone = (0..100).any(|_| {
+            let alive = paddock_proc::ProcessId::of(pid).is_some_and(|p| p.is_alive());
+            if alive {
+                std::thread::sleep(Duration::from_millis(50)); // conformance: hang-guard — a poll of a condition, 5 s bound
+            }
+            !alive
+        });
+        assert!(gone, "the grandchild (pid {pid}) is still running after the limit");
     }
 
     #[test]
