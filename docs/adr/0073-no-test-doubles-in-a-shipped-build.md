@@ -1,6 +1,6 @@
 # 73. No test double in a shipped build: one gate, one check per app, a dated register
 
-- Status: Proposed (2026-11-09), revision 2. Nothing in "Work packages" starts before the user accepts it.
+- Status: Proposed (2026-11-09), revision 3. Nothing in "Work packages" starts before the user accepts it.
 - Revision 2 (2026-11-09) answers the independent review of revision 1 (`1daeb0fff`, verdict CHANGES, 3 P1 and P2s). The
   review verified the mechanism in a fixture: a self dev-dependency with `required-features` and `CARGO_BIN_EXE_<name>`
   works within one package. It found nothing exploitable in a released app today.
@@ -12,6 +12,11 @@
     1).
   - The mechanism caveats, the controls, the survey corrections, the estimate, the decisions and the P2s are folded in
     where they belong.
+- Revision 3 (2026-11-09) answers the re-review of revision 2 (one security P1, four P2s):
+  - DB9 is class B. Debrief's three sidecar-path overrides pick which executable runs, and `restart_elevated`
+    (`apps/debrief/app/src-tauri/src/system.rs:120`) relaunches Debrief elevated with the user's environment, which
+    `HKCU\Environment` lets the user set without elevation. That makes them an environment-variable UAC bypass (§1.3).
+  - Fix in Debrief 1.2, WP-D first item; user chose no 1.1.x patch on 2026-11-09.
 - Date: 2026-11-09
 - Trigger: the independent review of Pitwall on 2026-11-09 found that its released sidecar `pitwall-server` ships a fake
   LLM engine behind a command-line flag. Dyno's ADR 0033 had fixed the same shape in Dyno alone the day before.
@@ -171,7 +176,7 @@ So today the leak is in **declarations and switches**, not in features.
 | DB6 | `crates/debrief-dump/src/lib.rs:31` | `#[doc(hidden)] pub mod testing` ("Small documents for tests") | R |
 | DB7 | `crates/debrief-symbols/src/lib.rs:28-30` | `pub mod testing`: `FakeServer` (`testing.rs:10`). Its only gate is `feature = "server"`, which is a default and is on in `debrief-app` and `debrief-plugins` (measured). | R |
 | DB8 | `crates/chromium-driver/src/discover.rs:97,104` | `find_for_tests`, `CHROMIUM_TEST_PATH` | R |
-| DB9 | `app/src-tauri/src/engine/mod.rs:96`; `crates/debrief-plugin-host/src/builtins.rs:36`; `crates/debrief-ai/src/worker/frames.rs:538` | `DEBRIEF_STORE_WORKER`, `DEBRIEF_PLUGINS` and `DEBRIEF_AI_WORKER`: development overrides of which sidecar executable runs, honoured in release builds | R (switch) |
+| DB9 | `app/src-tauri/src/engine/mod.rs:96`; `crates/debrief-plugin-host/src/builtins.rs:36`; `crates/debrief-ai/src/worker/frames.rs:538` | `DEBRIEF_STORE_WORKER`, `DEBRIEF_PLUGINS` and `DEBRIEF_AI_WORKER` (3 rows): development overrides of which sidecar executable runs, honoured in release builds and in `debrief-v1.1.1` (re-review). `restart_elevated` (`system.rs:120`) relaunches Debrief through `runas` with the user's environment, and `HKCU\Environment` is writable without elevation, so an unelevated process can choose the program Debrief starts elevated: an environment-variable UAC bypass. | **B (3)** |
 | DB10 | `crates/chromium-driver/src/lib.rs:30` | `DEBRIEF_FAKE_BROWSER`: a guard that makes the app refuse to run as a fake browser; it must ship | E (guard) |
 | DB10b | `crates/debrief-ipc/src/endpoint.rs:95,129` | `PADDOCK_SOCKET_BASE`: a short socket folder that CI's job-tmpdir sets (test isolation) | E (CI opt-in) |
 | DB11 | `crates/debrief-ai/Cargo.toml:13` | `[[bin]] debrief-ai-fake-worker` (`--crash-*`) without `required-features` | N |
@@ -179,7 +184,7 @@ So today the leak is in **declarations and switches**, not in features.
 | DB13 | `crates/debrief-plugin-host/Cargo.toml:13`; `crates/debrief-ipc/Cargo.toml:13`; `crates/debrief-video/Cargo.toml:13` | `debrief-plugin-host-fake`, `debrief-ipc-fake-child`, `debrief-video-fake-ffmpeg`, all in in-scope packages, without `required-features` | N (3) |
 | DB14 | `crates/debrief-plugin-test/src/host.rs:46` | `FakeHost` in a test-only crate | N |
 
-**Debrief: 1 B, 8 R, 2 E and 6 N.** Four of the eight R are in `debrief-ai`, which Debrief 1.2 is to remove in favour of
+**Debrief: 4 B, 7 R, 2 E and 6 N.** Four of the seven R are in `debrief-ai`, which Debrief 1.2 is to remove in favour of
 Pitwall (D8).
 
 Product switches, not counted: `DEBRIEF_SAFE_MODE` (`lib.rs:584`), `DEBRIEF_LLAMA_SERVER`, `_DIR` and `_BUILD`
@@ -269,9 +274,9 @@ The inventory covers the shipped scope: 101 path packages, 251 records.
 - **183 `env::var` reads.** Most are OS variables (`HOME`, `PATH`, `XDG_*`, proxies) or parameters of helper functions
   (`var(k)`). A `var(h)` in the nettrace writers is a false match of a local function named `var`.
 - **The named app and family switches.** 22 names, plus the 6 behind `probe`. They are classified in the tables above:
-  - B: DB1;
+  - B: DB1 and DB9 ×3;
   - L: F12;
-  - R (switch): DB9 ×3, Y7, S1 and S2;
+  - R (switch): Y7, S1 and S2;
   - G: Y9 and G6;
   - E: P7, Y10, S5, DB10b, F13, F15 and DB10;
   - product (not counted): `DEBRIEF_SAFE_MODE`, `DEBRIEF_LLAMA_*`, `DUCKDB_JE_MALLOC_CONF`, `PITWALL_SERVICE`
@@ -285,9 +290,9 @@ The inventory covers the shipped scope: 101 path packages, 251 records.
 
 | Class | Count | Made up of |
 | --- | --- | --- |
-| B | 6 | Pitwall 4 (one on a branch), Debrief 1, Dyno 1 (on main; fixed on the branch) |
+| B | 9 | Pitwall 4 (one on a branch), Debrief 4 (DB1 and the three DB9 variables), Dyno 1 (on main; fixed on the branch) |
 | L | 1 | F12 |
-| R | 32 | Pitwall 2, Debrief 8, Dyno 6, Pitcrew 2, Spotter 4, shared 10 (9 plus latent F11), counted per crate or row |
+| R | 31 | Pitwall 2, Debrief 7, Dyno 6, Pitcrew 2, Spotter 4, shared 10 (9 plus latent F11), counted per crate or row |
 | E | 12 | Pitwall 1, Debrief 2, Dyno 1, Spotter 1, the demos 3, shared 4 |
 | G | 11 | Dyno 2, Pacenotes 3, shared 6 |
 | N | 10 | Debrief 6, Dyno 1, shared 3 |
@@ -350,11 +355,17 @@ The mechanism, in detail:
 3. **Test switches are gated or registered.**
    - DB1, F12, S2, DB9 and Y7 move under `cfg(any(test, feature = "test-support"))`, or become a registered
      `dev-override` with a review date.
-   - The CI-only no-sandbox switches (DB1, F12, S2) **must** be gated, never registered: a sandbox is not overridable
-     from the environment of a shipped build. A root CI container gets a test build or passes the flag through the test
+   - **Never registered:** any switch that picks an executable or library path, or weakens a protection, is gated, or
+     honoured only under `cfg!(debug_assertions)` (as Dyno's `DYNO_AGENT_BIN`, Y9). It is never `ci-opt-in` or
+     `dev-override`. That covers the no-sandbox switches (DB1, F12, S2) and the executable-path overrides (DB9).
+     The environment of a shipped build is user-writable (`HKCU\Environment` on Windows), and it survives an elevation
+     that relaunches the same user, so such a switch is a privilege boundary, not a convenience. A root CI container gets a test build or passes the flag through the test
      harness's launch options instead (`adapter.rs:44` already has `extra_args` for that).
-   - Data-folder overrides used for test isolation (P7, Y10, S5) are `ci-opt-in`. They stay, because the e2e runs drive
-     the shipped app with them (rule 7) and they never weaken a protection.
+   - Data-folder overrides used for test isolation (P7, Y10, S5, DB10b) are `ci-opt-in`. They stay, because the e2e
+     runs drive the shipped app with them (rule 7) and they never weaken a protection.
+   - **No data-folder override is read by an elevated or service process.** A service, a helper or a relaunch through
+     `runas` resolves its folders from the OS (the per-machine location or the service account), never from the
+     environment. WP-0's inventory flags such a read in a crate that a service or elevated entry point links.
 4. **Compositions name every port.** This is Dyno ADR 0033 §1.3, family-wide, and fits ADR 0037's `compose`.
    `NotReadHere` stays in Dyno: it is one implementation, below the rule of three.
 5. **Production in-memory adapters are not doubles.** `MemorySecrets` keeps its name by the user's decision D2b of
@@ -419,7 +430,10 @@ let it go on at once (D7).
    - every helper that passes a parameter on to such a read: the helper is listed, and so is each literal at its call
      sites (F13's `env_is_one`);
    - every `"--…"` literal in a match arm or an `==` comparison;
-   - every clap `#[arg(long …)]` field.
+   - every clap `#[arg(long …)]` field;
+   - every environment value that reaches `Command::new`, a `PathBuf` given to a process start, or a library load
+     (`libloading`, `LoadLibrary*`, `dlopen`), followed within the function and through a returned path. Each is a
+     **candidate** that needs a review: gated, or `cfg!(debug_assertions)` only (§1.3).
 
    A product setting is one the app's `docs/` names, recorded as `product = true` in the same register file, so the list
    is complete in one place. OS variables (`HOME`, `PATH`, `XDG_*`, `TMPDIR`, proxies and similar) are a fixed family
@@ -449,8 +463,9 @@ let it go on at once (D7).
      - layer 3: a crate whose production code names a gated double must fail the non-test `cargo check`, and its fixed
        twin must pass (seconds; once per leg).
    - **Per app** (Dyno's control, generalised):
-     - every in-scope crate that declares `test-support` must show it enabled on the workspace's `-e normal,dev` tree;
-       a feature nobody enables is dead or the probe is broken;
+     - every in-scope crate that declares `test-support` must show it enabled on the `-e normal,dev` tree **of its own
+       workspace**: `crates/` for a shared crate, the app's workspace for an app crate. A feature nobody enables is
+       dead, or the probe is broken;
      - the root set of the normal tree must equal the derived shipped set;
      - every gated double the register names for the app must have been met gated.
    - **Tree coverage: 100 %, reached or listed.** Every `.rs` file under the in-scope crates' `src/` is either parsed
@@ -473,10 +488,15 @@ let it go on at once (D7).
    (`--fake-`, `--mock-`, `--ready-when`, `--die-after-`, `_NO_SANDBOX`) plus each app's own names.
    - `./dev release verify` searches every extracted executable for them.
    - **The control stays in one job.** The release job builds the app's test-switch binary itself, for example
-     `cargo build -p pitwall-server --bin pitwall-fake-engine --features test-support --profile dist`. That recompiles
-     only `pitwall-server` on top of the dist build already in the folder, and the search must find the strings in it.
-     An app with no test-switch binary builds the family fixture binary from `conformance/fixtures/test-doubles/`
-     instead.
+     `cargo build -p pitwall-server --bin pitwall-fake-engine --features test-support --profile dist`, and the search
+     must find the strings in it.
+     - That build changes the feature set of every crate whose `test-support` it enables, so those crates and their
+       dependents recompile, not only `pitwall-server`.
+     - It runs **after the bundle is built and sealed**, or in its own `CARGO_TARGET_DIR`, so it can never replace a
+       binary that the bundle step copies (lesson "tauri-build copies every sidecar over the binary cargo just linked").
+     - Its cost is measured in WP-4.
+     - An app with no test-switch binary builds the family fixture binary from `conformance/fixtures/test-doubles/`
+       instead.
    - No artifact crosses jobs.
 10. **Dyno's own pieces become copies (rule 55).** `no_ungated_doubles.rs` and the `test-support` part of
     `check-shipped.mjs` are entered in `docs/known-copies.toml`, with the shared check as canonical and delete-by Dyno's
@@ -577,9 +597,11 @@ WP-S and WP-G a Pitwall 1.1 tag blocker** (D4, D7).
    - WP-S gates the shared crates, `paddock-setup`'s included.
    - WP-G renames `paddock-pitwall`'s `testing`.
 2. **Debrief 1.2.** WP-D, in this order:
-   - **DB1 first**, as the one wired switch in a released app: gate `DEBRIEF_BROWSER_NO_SANDBOX`, and let the root CI
-     job pass `--no-sandbox` through the test launch options;
-   - DB9 gated or registered as `dev-override`;
+   - **DB9 and DB1 first**, the wired switches of a released app:
+     - DB9: honour the three executable-path overrides only under `cfg!(debug_assertions)`, or gate them. Fix in Debrief
+       1.2, WP-D first item; user chose no 1.1.x patch on 2026-11-09.
+     - DB1: gate `DEBRIEF_BROWSER_NO_SANDBOX`. `chromium-driver` gains a launch option that passes `--no-sandbox` from
+       the test harness, which the root CI job uses instead of the variable;
    - DB6 to DB8 gated;
    - `required-features` on DB11 to DB13;
    - `fake_handle` renamed;
@@ -650,7 +672,7 @@ Estimates are raw days of agent work, before review rounds.
 | WP-P | Pitwall: `pitwall-fake-engine` in the `pitwall-server` package, the three flags moved from `pitwall-server`, tests on `CARGO_BIN_EXE_pitwall-fake-engine`, P5 and P6 gated, the check on | WP-0, `7a73cdc59` landed | 1–1.5 |
 | WP-S | Shared crates, one change (rules 39, 43): `test-support` gates in `paddock-service`, `-jobs` (and the re-exports in `-log`, `-health`, `-testkit`), `-health`, `-channels`, `-net`, `-watch` (and `-packs`), `-commands`, `-mcp`, `-chromium` (F11, and F12 gated); `required-features` on `paddock-ipc-test-child`; the `paddock-secrets` docs; self dev-dependencies for their `tests/`; every consumer's dev-dependencies (Dyno, Pitwall, the demos, the tools); CHANGELOG entries | WP-0; ADR 0033 WP-2 (`paddock-power`) | 2–3 |
 | WP-G | Rename `testing` to `test-support` in `paddock-pitwall` and `paddock-siblings` and in every consumer's dev-dependencies (D3) | – | 0.25–0.5 |
-| WP-D | Debrief: DB1 first, then DB9, DB6 to DB8, `required-features` on DB11 to DB13, `fake_handle`, DB2 to DB5 (or deletion, D8), host legs on | WP-0 | 1.5–2 |
+| WP-D | Debrief: DB9 and DB1 first (the `--no-sandbox` launch option in `chromium-driver` for CI), then DB6 to DB8, `required-features` on DB11 to DB13, `fake_handle`, DB2 to DB5 (or deletion, D8), host legs on | WP-0 | 1.5–2 |
 | WP-Y | Dyno: Y6 and Y7 gated, Y11 `required-features`, Y8 to Y10 registered, the copies deleted, the check on | WP-0, WP-1 | 0.5–0.75 |
 | WP-C | Pitcrew: C1 gated with a parsed-URL host check (its failing test first: `http://127.0.0.1:@evil.host/` must be refused), C2 gated | WP-0 | 0.5–0.75 |
 | WP-T | Spotter: S2 first, then S1, S3 and S4 | WP-0 | 0.5–1 |
@@ -678,14 +700,14 @@ After WP-0, two agents can run in parallel:
 
 | # | Decision | Recommendation |
 | --- | --- | --- |
-| D1 | Make "no test double or test switch ships" a family rule (number assigned on acceptance) for every app and shared crate: Rust now, the UI as phase 2 | **Yes.** Three apps shipped the shape (a wired fake, a fake behind a flag, a sandbox switch), and every app that ships Rust has instances. |
+| D1 | Make "no test double or test switch ships" a family rule (number assigned on acceptance) for every app and shared crate: Rust now, the UI as phase 2 | **Yes.** Three apps shipped the shape (a wired fake, a fake behind a flag, a sandbox switch and executable-path overrides that cross an elevation), and every app that ships Rust has instances. |
 | D2 | Pitwall's fake engine: a separate test-only binary in the `pitwall-server` package (`pitwall-fake-engine`, `required-features`), or the flags kept in `pitwall-server` behind `cfg(feature = "test-support")` | **Separate binary.** `7a73cdc59` lands as is first (ADR 0071); WP-P moves all three flags afterwards. The shipped binary then has the flags in no build. |
 | D3 | One feature name: rename `testing` (`paddock-pitwall`, `paddock-siblings`, `pacenotes-core`, `pacenotes-function-api`) and `test-hooks` (`pacenotes-worker`) to `test-support`; keep `mock-runtime`, `probe` and `testdb` as registered test features | **Yes.** One name everywhere; the three kept names gate different things and are listed in `test_features`. |
 | D4 | Gate the family doubles (WP-S, WP-G) inside Pitwall 1.1, or register them temporary until `pitwall-v1.1.1` | **Inside 1.1.** Pitwall 1.1 links 9 of them, and its per-machine installer embeds `paddock-setup.exe`, which runs as administrator and links F1 to F3 and F7. `trust_fake` is unreachable today; the worst case is a future change that wires a fake machine into the privileged trust check, and that is what the gate rules out. |
 | D5 | The demos' wired `FakeSystem` and `FakeToaster`: (a) a permanent `demo-adapter` exception with `[[feature_edge]]` allowances per demo; (b) named demo adapters in the shared crates; (c) demo-local adapters in each demo's own crate (a small no-op `System` and `Toaster` there) | **(a) now, (c) when a demo is next touched.** (b) adds shared API for two demos (YAGNI). (c) removes the feature edges entirely at about 0.25 day per demo. |
 | D6 | Layer 4 (the artifact string search) now, as part of ADR 0039's verifier | **Yes, after WP-P and ADR 0039 WP-1.** It is small, and it sees switches that name rules cannot. |
 | D7 | Turn the check on at once with dated `temporary` entries per app (a ratchet), or per app as each migrates | **Ratchet now.** No new instance can land from day one. `pitwall-1-1` expires at `pitwall-v1.1.0`, which makes WP-P, WP-S and WP-G **a Pitwall 1.1 tag blocker**: accepting D7 as proposed accepts that. |
-| D8 | Debrief's `debrief-ai` doubles (DB2 to DB5): gate them now, or let the removal of Debrief's own AI in 1.2 delete them | **Register them with remove-by `debrief-v1.2.0`, whichever comes first.** DB1 is gated regardless, first. |
+| D8 | Debrief's `debrief-ai` doubles (DB2 to DB5): gate them now, or let the removal of Debrief's own AI in 1.2 delete them | **Register them with remove-by `debrief-v1.2.0`, whichever comes first.** DB9 and DB1 are fixed regardless, first in WP-D; for DB9 the user chose no 1.1.x patch (2026-11-09). |
 | D9 | Phase 2 (UI mock backends): with each app's next release after Pitwall 1.1, or Pitwall 1.1 included | **Pitwall 1.1 included if WP-11's shared preset is ready by its feature freeze; otherwise each app's next release.** |
 | D10 | Layer 3 on host legs on every branch run for every app (Dyno's D10 generalised), with a return to the user above 3 minutes warm per leg | **Yes.** Dyno measured 46 s (macOS) and 2 min 10 s (Windows) warm; the other apps and the `dist` profile are measured in WP-1. |
 
