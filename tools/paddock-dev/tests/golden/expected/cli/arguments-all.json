@@ -1,0 +1,38 @@
+{
+ "code": 0,
+ "stdout": {
+  "all": true,
+  "crates": true,
+  "ui": true,
+  "eslint": true,
+  "conformance": true,
+  "tools": true,
+  "icons": true,
+  "ciImage": true,
+  "paddockDev": true,
+  "docs": false,
+  "apps": [
+   "x",
+   "y",
+   "z"
+  ],
+  "kinds": {
+   "x": [
+    "rust",
+    "ui"
+   ],
+   "y": [
+    "rust",
+    "ui"
+   ],
+   "z": [
+    "rust",
+    "ui"
+   ]
+  },
+  "packages": {}
+ },
+ "outputs": null,
+ "summary": null,
+ "error": null
+}

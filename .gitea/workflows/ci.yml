@@ -861,6 +861,8 @@ jobs:
       # as a partial clone; the kept-clone step below brings the slot's own clone to this commit (conformance/ci/checkout-profiles.txt).
       - uses: actions/checkout@v4
         if: runner.os == 'Linux'
+        with:
+          fetch-depth: 0
 
       - uses: actions/checkout@v4
         if: runner.os != 'Linux'

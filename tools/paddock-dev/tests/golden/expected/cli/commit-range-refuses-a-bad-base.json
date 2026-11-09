@@ -1,0 +1,7 @@
+{
+ "code": 1,
+ "stdout": "",
+ "outputs": null,
+ "summary": null,
+ "error": "affected: commit range: base \"--output=x\" is not a commit id (7 to 40 lower-case hex digits)"
+}

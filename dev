@@ -1,12 +1,12 @@
 #!/bin/sh
 # ./dev: runs paddock-dev, the Paddock developer and CI tool (ADR 0022). Works from any subfolder: it finds the repository
 # root with git and runs the tool in the folder you are in. The tool is a content-addressed binary: the hash of its inputs
-# (tools/paddock-dev/inputs.txt, from git, plus the compiler cargo will use) names it. Order: the per-user cache, the
-# prebuilt download (R0b: not wired yet), then a local build. A build also happens whenever an input has uncommitted
-# changes, because then HEAD's hash cannot describe it. `./dev --wrapper-hash` prints the hash and stops.
+# (tools/paddock-dev/inputs.txt, from git, plus the compiler cargo will use) names it. Order: the per-user cache (on a CI runner the
+# kept mount, see below), the prebuilt download (R0b: not wired yet), then a local build. A build also happens whenever an input has
+# uncommitted changes, because then HEAD's hash cannot describe it. `./dev --wrapper-hash` prints the hash and stops.
 # Environment: PADDOCK_DEV_TARGET_DIR (build folder, default tools/paddock-dev/target, which is ignored by git),
-# PADDOCK_DEV_HOME (cache, default ~/.paddock-dev), PADDOCK_DEV_FRESH=1 (build from source in a fresh folder without a
-# compiler wrapper, as release jobs do).
+# PADDOCK_DEV_HOME (cache, default ~/.paddock-dev), PADDOCK_CI_MOUNT (a CI runner's kept mount, default /sccache),
+# PADDOCK_DEV_FRESH=1 (build from source in a fresh folder without a compiler wrapper, as release jobs do).
 set -eu
 
 root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "dev: run this inside the Paddock repository." >&2; exit 2; }
@@ -21,6 +21,18 @@ inputs=$(grep -v '^[[:space:]]*#' "$tool/inputs.txt" | grep -v '^[[:space:]]*$' 
 # empty file as an empty script and call that success).
 runs() { [ -x "$1" ] && v=$("$1" --version 2>/dev/null) && [ -n "$v" ]; }
 
+# On a CI runner with a kept mount (a Linux container's /sccache, which the node-caches action also uses) the tool and its build
+# folder live there, so a plan job compiles the tool once per hash and not on every run. An explicit PADDOCK_DEV_HOME or
+# PADDOCK_DEV_TARGET_DIR wins.
+ci_mount="${PADDOCK_CI_MOUNT:-/sccache}"
+kept_target=
+if [ "${GITHUB_ACTIONS:-}" = true ] && [ -d "$ci_mount" ] && [ -w "$ci_mount" ]; then
+  if [ -z "${PADDOCK_DEV_HOME:-}" ]; then
+    PADDOCK_DEV_HOME="$ci_mount/paddock-dev"
+    # One build folder per hash (below): jobs of other hashes on the same mount never replace the binary this job just built.
+    [ -n "${PADDOCK_DEV_TARGET_DIR:-}" ] || kept_target=1
+  fi
+fi
 home="${PADDOCK_DEV_HOME:-${HOME:-/nonexistent}/.paddock-dev}"
 exe=
 case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) exe=.exe ;; esac
@@ -139,7 +151,11 @@ refuse_build_target() {
 
 build() { # build <target dir>: the binary ends up in <target dir>/release/paddock-dev
   refuse_build_target
-  (cd "$tool" && CARGO_TARGET_DIR="$1" PADDOCK_DEV_HASH="${2:-dirty}" cargo build --release --locked --quiet)
+  (cd "$tool" && CARGO_TARGET_DIR="$1" PADDOCK_DEV_HASH="${2:-dirty}" cargo build --release --locked --quiet) || {
+    code=$?
+    echo "::error::./dev could not build paddock-dev (hash ${2:-dirty}, cargo exit $code). Run 'cargo build --release --locked' in tools/paddock-dev to see why; a stale tools/paddock-dev/Cargo.lock is the usual cause." >&2
+    exit 1
+  }
   built_check "$1"
 }
 # A `build.target` in a cargo config (or --target in cargo's own settings) puts the binary under <target>/<triple>/: say so
@@ -162,6 +178,11 @@ if [ "${PADDOCK_DEV_FRESH:-}" = 1 ]; then
 fi
 
 if [ -n "$dirty" ]; then
+  # A build of uncommitted inputs is nobody's cached tool, and a job must not pin one that changes under it.
+  if [ "${1:-}" = --print-binary ]; then
+    echo "dev: --print-binary: the tool's inputs have uncommitted changes, so there is no cached binary to name." >&2
+    exit 3
+  fi
   build "${PADDOCK_DEV_TARGET_DIR:-$tool/target}" dirty
   exec "${PADDOCK_DEV_TARGET_DIR:-$tool/target}/release/paddock-dev$exe" "$@"
 fi
@@ -175,12 +196,51 @@ fi
 if [ ! -x "$cache/$name" ]; then
   # R0b: download the published binary for this hash (Gitea generic package `paddock-dev`, version <hash>) and check its
   # .sha256 here. Until the publishing workflow exists, every miss builds.
-  target=${PADDOCK_DEV_TARGET_DIR:-$tool/target}
+  if [ -n "$kept_target" ]; then
+    # A folder of this process: a second job of the same hash on the mount builds in its own, so neither deletes the other's.
+    mkdir -p "$home"
+    target=$(mktemp -d "$home/target-$hash.XXXXXX")
+  else
+    target=${PADDOCK_DEV_TARGET_DIR:-$tool/target}
+    if [ "${GITHUB_ACTIONS:-}" = true ] && [ -z "${PADDOCK_DEV_HOME:-}" ]; then
+      echo "::notice::./dev builds paddock-dev in this job: the runner has no writable $ci_mount, so nothing is kept between runs (cold build, about a minute or two)." >&2
+    fi
+  fi
   build "$target" "$hash"
   mkdir -p "$cache"
-  cp "$target/release/paddock-dev$exe" "$cache/$name.$$"
-  mv -f "$cache/$name.$$" "$cache/$name"
-  # Keep the five newest cached tools; older hashes are rebuilt on demand.
-  ls -t "$home/bin" | tail -n +6 | while IFS= read -r old; do rm -rf "${home:?}/bin/$old" || true; done
+  # A name of our own in the cache folder (never a PID: the folder may be shared by containers whose PIDs repeat), checked for the
+  # hash it was built for before it replaces anything, then published by an atomic rename.
+  tmp=$(mktemp "$cache/$name.XXXXXX")
+  cp "$target/release/paddock-dev$exe" "$tmp"
+  chmod +x "$tmp"
+  if ! "$tmp" self hash 2>/dev/null | grep -q "^embedded $hash\$"; then
+    rm -f "$tmp"
+    echo "::error::./dev built a paddock-dev that is not for hash $hash (another job replaced the build folder, or the build ignored PADDOCK_DEV_HASH). Run ./dev again; if it repeats, delete $target." >&2
+    exit 1
+  fi
+  mv -f "$tmp" "$cache/$name"
+  # The per-hash build folder is about 465 MB; the verified tool is all a later run needs.
+  if [ -n "$kept_target" ]; then rm -rf "$target" || true; fi
+  # Keep the five newest cached tools (and their build folders); older hashes are rebuilt on demand. A tool used within the last
+  # day is never removed: a job on the same mount (several runners share a host's tools folder) runs it again at its end, when its
+  # temp folder is already gone and a rebuild cannot work (run 7773, job-isolation release).
+  ls -t "$home/bin" | tail -n +6 | while IFS= read -r old; do
+    if [ -n "$(find "$home/bin/$old" -maxdepth 0 -mmin +1440 2>/dev/null)" ]; then
+      rm -rf "${home:?}/bin/$old" "${home:?}/target-$old" "${home:?}/target-$old".* || true
+    fi
+  done
+  # A build folder whose tool was never published (the build or the hash check failed) goes when an hour old: a build in
+  # progress has no tool yet either, and cargo does not touch the folder itself while it runs.
+  for t in "$home"/target-*; do
+    [ -d "$t" ] || continue
+    h=${t##*/target-}; h=${h%%.*}
+    [ -d "$home/bin/$h" ] && continue
+    if [ -n "$(find "$t" -maxdepth 0 -mmin +60 2>/dev/null)" ]; then rm -rf "$t" || true; fi
+  done
 fi
+# A hit counts as use: the prune keeps the newest-used tools, so main's hash outlives a stream of branch hashes.
+touch "$cache" 2>/dev/null || true
+# `--print-binary`: where the tool is (built if need be), without running it. job-isolation pins it for the whole job: the hash
+# covers files the job itself writes (tools/paddock-dev/.cargo/ci.toml), so at the job's end ./dev would want another build.
+if [ "${1:-}" = --print-binary ]; then printf '%s\n' "$cache/$name"; exit 0; fi
 exec "$cache/$name" "$@"

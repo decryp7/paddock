@@ -28,6 +28,7 @@ if [ -n "\${RUSTC_WRAPPER:-}\${RUSTC_WORKSPACE_WRAPPER:-}\${CARGO_BUILD_RUSTC_WR
   echo "error: process didn't exit successfully: sccache rustc -vV (exit status: 2)" >&2; exit 101
 fi
 [ -n "\${FAKE_DEV_FAILS:-}" ] && { echo "error: could not build paddock-dev" >&2; exit 101; }
+[ "$1" = --print-binary ] && { [ -n "\${FAKE_DEV_NO_PIN:-}" ] && { echo "no cached binary" >&2; exit 3; }; echo "$0"; exit 0; }
 [ "$1 $2" = "ci slot" ] || exit 2
 cmd=$3; shift 3
 max= owner= root= slot= token= run=()
@@ -551,4 +552,43 @@ test('the sweep locks a slot only when something of it is due', () => {
   assert.match(h.log(), /^ci slot idle-run --slot s3 /m, 'an aged folder is due');
   assert.doesNotMatch(h.log(), /idle-run --slot s2 /, 's2 still had nothing due');
   assert.ok(!existsSync(join(h.ci, 'target-fresh-s3')) && existsSync(join(h.ci, 'target-fresh-s2')));
+});
+
+test('the tables read the same with Windows line ends (a checkout there turns kept-folders.txt and ports.txt into CRLF)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'paddock-crlf-'));
+  try {
+    const ci = join(dir, 'ci');
+    mkdirSync(ci);
+    for (const f of ['job-isolation.sh', 'ci-home.sh', 'job-tmpdir.sh', 'kept-folders.txt', 'ports.txt']) {
+      const p = join(PADDOCK, 'conformance', 'ci', f);
+      if (existsSync(p)) writeFileSync(join(ci, f), f.endsWith('.txt') ? read(p).replace(/\r?\n/g, '\r\n') : read(p));
+    }
+    const env = { PATH: '/usr/bin:/bin', HOME: dir, RUNNER_OS: 'Windows', PADDOCK_CI_SLOT: 's1' };
+    const run = (...args) => spawnSync('bash', [join(ci, 'job-isolation.sh'), ...args], { env, encoding: 'utf8' });
+    const p = run('pattern', '[/\\\\]test-browser-spotter-{slot}');
+    assert.equal(p.status, 0, `a {slot} pattern is refused with CRLF tables: ${p.stderr}`);
+    assert.match(p.stdout, /test-browser-spotter-s1/);
+    assert.equal(run('port', 'sccache').stdout.trim(), '4227', 'a port block with CRLF tables');
+    assert.equal(run('path', 'target', 'x-app').status, 0, 'a kept folder with CRLF tables');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('acquire pins the tool the job started with, so release never rebuilds it (the job\'s own .cargo/ci.toml changes the wrapper\'s hash)', () => {
+  const h = host();
+  const a = h.job('c'.repeat(16));
+  const r = a.exec(['acquire']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(a.exported().PADDOCK_DEV, 'the env lines name the tool binary for the later steps and the release');
+  assert.match(h.log(), /--print-binary/);
+});
+
+test('acquire says so, naming the fallback, when the tool cannot be pinned (a build of uncommitted inputs)', () => {
+  const h = host();
+  const a = h.job('d'.repeat(16), { FAKE_DEV_NO_PIN: '1' });
+  const r = a.exec(['acquire']);
+  assert.equal(r.status, 0, 'the job still runs');
+  assert.match(r.stderr, /::warning::job-isolation: the tool could not be pinned.*PADDOCK_DEV/, r.stderr);
+  assert.equal(a.exported().PADDOCK_DEV, undefined, 'nothing pinned');
 });

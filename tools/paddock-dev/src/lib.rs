@@ -8,8 +8,11 @@
 //! - `wait`: one bounded wait for a plock job, a process, a log line or a CI run ([`wait`]);
 //! - `check ipc-endpoints`: C102, the register of every listen site and the ratchet of connection endings
 //!   ([`ipc_endpoints`], ADR 0072);
-//! - `graph affected`: the affected closure of a change set, the first consumer of `paddock-repo-graph` ([`plan`]). It is
-//!   the oracle-tested port of `scripts/affected.mjs`'s core; `affected.mjs` stays CI's planner until R4.
+//! - `graph affected`: the affected closure of a change set, the first consumer of `paddock-repo-graph` ([`plan`], with the
+//!   `.gitea` narrowing in [`plan_gitea`] and the git reader in [`plan_repo`]);
+//! - `plan`: the CI planner, the whole command line of `scripts/affected.mjs` (`<base> [<head>]`, `--files`, `--all`, `--ci
+//!   [--app]`, `--commit-range`, `--explain`): the matrix, the base of a run and the commit lint's range in [`plan_ci`], the
+//!   command in [`plan_cmd`]. Oracle-tested against the script until it is retired (ADR 0022 R4).
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
@@ -19,6 +22,10 @@ pub mod gates;
 pub mod input_hash;
 pub mod ipc_endpoints;
 pub mod plan;
+pub mod plan_ci;
+pub mod plan_cmd;
+pub mod plan_gitea;
+pub mod plan_repo;
 pub mod slots;
 pub mod wait;
 

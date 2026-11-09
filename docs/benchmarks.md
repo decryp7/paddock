@@ -799,3 +799,16 @@ These are ordered by impact.
    - Search-perf's per-change A/B, the writer grid, the 10M runs and the Model2Vec throughput are pending.
    - Pitcrew ADR 0021's contention measurement (WP-0) is pending.
    - The Pacenotes measurement plan on real repositories is pending.
+
+## `./dev` cold build (planner port, 2026-11-08)
+
+Question: what does a cache miss of the `./dev` wrapper cost a plan job? `cargo build --release --locked` of
+`tools/paddock-dev`, cold target folder, `CARGO_BUILD_JOBS=2`.
+
+| Where | Result |
+|---|---|
+| Mac mini (arm64, native), machine load about 30, through `heavy.sh` | 103 s wall (105 s user) for the cold release build; the binary is 4.2 MB |
+| `paddock-ci:v2` image (linux/amd64) under emulation on that Mac, `--cpus=2` | did not finish in 25 minutes; not a measure of a CI host |
+
+A real Linux CI host was not available, so the CI number is still open: measure the first cold plan job once the prebuilt
+binary per hash (R0b) or the kept mount is in use. CI stays on `scripts/affected.mjs` until then.

@@ -1,0 +1,7 @@
+{
+ "code": 0,
+ "stdout": "true",
+ "outputs": null,
+ "summary": "### x\n\nBase: merge base with main\n\nAffected: every job runs.\n",
+ "error": null
+}

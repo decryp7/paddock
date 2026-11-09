@@ -3,7 +3,7 @@
 // test (tests/golden.rs) compares against the recorded files, so it keeps working after affected.mjs is gone (ADR 0022 R4).
 // The fixture repository is built the same way in both places: tests/golden/base-overlay over tests/golden/fixture is the
 // commit tagged `fixture-base`, tests/golden/fixture alone (the overlay-only files removed) is the commit tagged `fixture-head`.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
@@ -51,6 +51,44 @@ try {
       out = { error: true };
     }
     writeFileSync(join(here, 'expected', `${c.name}.json`), `${JSON.stringify(out, null, 1)}\n`);
+  }
+
+  // The command line cases (ci-cases.json): `--ci`, `--commit-range` and the argument forms, run through the script itself. The script
+  // finds its repository from its own location, so an untracked copy of it (and of the helper it imports) sits in the fixture repository.
+  // What is recorded is what a caller sees: the exit status, the job outputs and summary of `--ci`, the answer of a mode that answers
+  // on standard output (a ci run without `--app` logs there instead, and the port logs on standard error), and the first line of an error.
+  // Commit ids are masked: they differ per run.
+  mkdirSync(join(root, 'scripts'), { recursive: true });
+  mkdirSync(join(root, 'conformance/src/util'), { recursive: true });
+  cpSync(join(here, '../../../../scripts/affected.mjs'), join(root, 'scripts/affected.mjs'));
+  cpSync(join(here, '../../../../conformance/src/util/is-main.mjs'), join(root, 'conformance/src/util/is-main.mjs'));
+  git(root, 'update-ref', 'refs/remotes/origin/main', 'fixture-base');
+  const headSha = git(root, 'rev-parse', 'fixture-head').trim();
+  const mask = (t) => (t === null ? null : t.replace(/\b[0-9a-f]{40}\b/g, '<sha>'));
+  const canonical = (t) => {
+    if (!t.startsWith('{')) return t.trim();
+    const v = JSON.parse(t);
+    for (const k of Object.keys(v.why ?? {})) v.why[k].sort();
+    return v;
+  };
+  mkdirSync(join(here, 'expected/cli'), { recursive: true });
+  for (const c of JSON.parse(readFileSync(join(here, 'ci-cases.json'), 'utf8'))) {
+    const dir = mkdtempSync(join(tmpdir(), 'paddock-golden-ci-'));
+    const env = { PATH: process.env.PATH, HOME: process.env.HOME, GITHUB_OUTPUT: join(dir, 'out'), GITHUB_STEP_SUMMARY: join(dir, 'summary') };
+    for (const [k, v] of Object.entries(c.env)) env[k] = v === '__HEAD__' ? headSha : v;
+    const r = spawnSync('node', ['scripts/affected.mjs', ...c.args], { cwd: root, env, encoding: 'utf8' });
+    const read = (f) => (existsSync(join(dir, f)) ? mask(readFileSync(join(dir, f), 'utf8')) : null);
+    const logsToStdout = c.args.includes('--ci') && !c.args.includes('--app');
+    const answer = canonical(r.stdout);
+    const rec = {
+      code: r.status,
+      stdout: logsToStdout ? null : typeof answer === 'string' ? mask(answer) : answer,
+      outputs: read('out'),
+      summary: read('summary'),
+      error: r.status === 0 ? null : r.stderr.split('\n')[0],
+    };
+    rmSync(dir, { recursive: true, force: true });
+    writeFileSync(join(here, 'expected/cli', `${c.name}.json`), `${JSON.stringify(rec, null, 1)}\n`);
   }
 } finally {
   rmSync(root, { recursive: true, force: true });

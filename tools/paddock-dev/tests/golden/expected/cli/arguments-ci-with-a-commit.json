@@ -1,0 +1,7 @@
+{
+ "code": 1,
+ "stdout": null,
+ "outputs": null,
+ "summary": null,
+ "error": "affected: --ci takes no commits, --files or --all"
+}

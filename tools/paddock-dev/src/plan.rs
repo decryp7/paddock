@@ -1,10 +1,11 @@
 //! `dev graph affected`: which projects a change reaches. The oracle-tested port of the core of `scripts/affected.mjs`
 //! (`affected()`, `owners()`, `appOfWorkflow()` and the rule tables); the graph itself comes from `paddock-repo-graph`.
-//! The CI matrix, the nextest narrowing and `--ci` are R4's; `affected.mjs` stays CI's planner until then.
+//! The CI matrix, the nextest narrowing and `--ci` are in `plan_ci` and `plan_cmd`.
 //!
 //! Paddock's own rules (which paths are global inputs, which markdown is read by code, who owns a folder) live here and not
 //! in `paddock-repo-graph`: they are this repository's, the graph crate is generic (ADR 0022 §6, "CI-only").
 
+use crate::plan_gitea::{GiteaSource, TRACED_SCRIPT, gitea_targets};
 use paddock_cli::{CliError, Report};
 use paddock_repo_graph::{CargoCli, FileSource, GitHistory, Graph, GraphError, History, cargo_graph, lock_diff, npm_graph, real_path};
 use regex::Regex;
@@ -34,19 +35,16 @@ fn re(pattern: &str) -> Regex {
 }
 
 /// Inputs that every project's build or tests read: a change re-runs everything. Mirrors `GLOBAL` in `scripts/affected.mjs`
-/// (its comment table says what each former global reaches). `.gitea/` and `conformance/(ci|release|src/util)/` stay global here: the
-/// script narrows them per job from the file text at two revisions, which this port does not read, so it answers with a
-/// superset (never less than the script; `--files` mode of the script answers everything for them too unless they are dirty).
+/// (its comment table says what each former global reaches). `.gitea/` and `conformance/(ci|release|src/util)/` are narrowed per
+/// job from the file text at two revisions (`plan_gitea`); without a reader for those revisions they plan everything.
 static GLOBAL: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     [
-        r"^\.gitea/",
         r"^rust-toolchain(\.toml)?$",
         r"^package\.json$",
         r"^\.npmrc$",
         r"^\.nvmrc$",
         r"^\.gitattributes$",
         r"^tsconfig/",
-        r"^conformance/(ci|release|src/util)/",
     ]
     .map(re)
     .into()
@@ -71,6 +69,29 @@ static C99_INPUT: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     .map(re)
     .into()
 });
+
+/// Files every app's playwright.config.ts imports by relative path (the e2e port and build guard of `@decryp7/paddock-e2e`): no
+/// npm or tsconfig edge says so, so a change to one re-runs the UI half of every app.
+static E2E_GUARD_INPUTS: LazyLock<Regex> = LazyLock::new(|| re(r"^ui/projects/paddock-e2e/src/(env|build-guard)\.ts$"));
+
+/// The notices script and the shared cargo-about configuration (and the tool, conformance/src/notices/): inputs of every app with a
+/// `notices` block.
+static NOTICES_INPUTS: LazyLock<Regex> =
+    LazyLock::new(|| re(r"^(scripts/notices\.sh|templates/repo/about\.toml|conformance/src/notices/.*)$"));
+
+/// Generated TypeScript and JSON of the shared crates, written by their tests (a `generated` folder under ui).
+static GENERATED: LazyLock<Regex> = LazyLock::new(|| re(r"^ui/.*/generated/[^/]+\.(ts|json)$"));
+
+/// JavaScript truthiness of a `paddock.ci.json` field.
+fn truthy(v: &Value) -> bool {
+    match v {
+        Value::Null => false,
+        Value::Bool(b) => *b,
+        Value::Number(n) => n.as_f64().is_some_and(|x| x != 0.0),
+        Value::String(s) => !s.is_empty(),
+        _ => true,
+    }
+}
 
 /// Inputs of the Rust builds only (cargo registry and linker config, the shared clippy and workspace lint presets).
 static RUST_INPUTS: LazyLock<Vec<Regex>> = LazyLock::new(|| [r"^\.cargo/", r"^lint/"].map(re).into());
@@ -137,6 +158,16 @@ enum Marks {
     Projects(&'static [&'static str]),
     /// An app's file marks its owner, any other the conformance project (the image reviews).
     Reviewed,
+}
+
+/// Whether `path` is documentation (it marks only the link check unless it is a declared input).
+pub fn is_docs(path: &str) -> bool {
+    DOCS.iter().any(|r| r.is_match(path))
+}
+
+/// Whether `path` is markdown that code or tests read, a declared contract (it marks its project, not the link check).
+pub fn is_declared_doc_input(path: &str) -> bool {
+    DOC_INPUTS.iter().any(|(r, _)| r.is_match(path))
 }
 
 /// The Rust sources that can emit a health cause code: ui's cause-codes.spec.ts reads every `.rs` file under `crates/` and `apps/`
@@ -231,11 +262,24 @@ pub struct RepoGraph {
     pub npm: Graph,
     /// The apps (folders with a `paddock.ci.json`).
     pub apps: BTreeSet<String>,
+    /// Each app's `paddock.ci.json` with its `dir` (`apps/<name>`): the CI contract of a matrix leg.
+    pub configs: BTreeMap<String, Value>,
 }
+
+impl RepoGraph {
+    /// An app's `paddock.ci.json` (JSON null when it has none).
+    pub fn config(&self, app: &str) -> &Value {
+        static NONE: Value = Value::Null;
+        self.configs.get(app).unwrap_or(&NONE)
+    }
+}
+
+/// Finds the Rust files that name a generated file (given its path).
+pub type CratesNaming<'a> = &'a dyn Fn(&str) -> Vec<String>;
 
 /// What changed besides the file list.
 #[derive(Default)]
-pub struct Options {
+pub struct Options<'a> {
     /// Plan everything.
     pub all: bool,
     /// Give the reason for every project.
@@ -247,6 +291,11 @@ pub struct Options {
     pub per_machine_apps: Vec<String>,
     /// The apps whose `paddock.ci.json` `checks` run `paddock-conformance` ([`conformance_apps`]).
     pub conformance_apps: Vec<String>,
+    /// The `.gitea` and `conformance` files at both revisions, to narrow a workflow, action or script change; without it any
+    /// such change plans everything.
+    pub gitea: Option<&'a dyn GiteaSource>,
+    /// The crate folders whose Rust sources name a generated file (by its file name); without it a generated file marks every crate.
+    pub crates_naming: Option<CratesNaming<'a>>,
 }
 
 /// The apps whose Windows installer adopts the shared include: hooks that include `paddock-per-machine.nsh`, or a
@@ -370,17 +419,47 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
         if C99_INPUT.iter().any(|r| r.is_match(f)) {
             st.mark(Some("c99".to_string()), format!("C99 reads {f}"));
         }
+        let ci_file = f.starts_with(".gitea/");
+        if ci_file || TRACED_SCRIPT.is_match(f) {
+            // `.gitea` runs the conformance checks over workflows and actions; the rest is narrowed per job or user. The shared
+            // actions' scripts: conformance, every app's gates, and the jobs of the actions that run the script.
+            let hit = opts.gitea.and_then(|g| gitea_targets(f, g));
+            let Some(hit) = hit else {
+                mark_all(&mut st, &format!("global {f}"), &mut everything);
+                continue;
+            };
+            if ci_file {
+                st.mark(Some("conformance".to_string()), format!("ci files {f}"));
+            }
+            for (p, reason) in hit {
+                if p == "everything" {
+                    mark_all(&mut st, &reason, &mut everything);
+                } else if p == "apps" {
+                    for a in &graph.apps {
+                        st.mark(Some(format!("app:{a}")), reason.clone());
+                        st.kind(Some(&format!("app:{a}")), "all");
+                    }
+                } else if p.starts_with("app:") {
+                    st.mark(Some(p.clone()), reason);
+                    st.kind(Some(&p), "all");
+                } else {
+                    st.mark(Some(p), reason);
+                }
+            }
+            if !ci_file {
+                st.mark(Some("conformance".to_string()), f.clone());
+                for a in &graph.apps {
+                    st.mark(Some(format!("app:{a}")), format!("conformance {f}"));
+                    st.kind(Some(&format!("app:{a}")), "all");
+                }
+            }
+            continue;
+        }
         if PLANNER_FILES.is_match(f) {
             st.mark(
                 Some("paddock-dev".to_string()),
                 format!("its golden test compares {f} (tools/paddock-dev/tests/it/golden.rs)"),
             );
-        }
-        if PER_MACHINE_INPUT.is_match(f) {
-            st.mark(Some("conformance".to_string()), format!("C91 reads {f}"));
-            if f.starts_with("crates/") || opts.per_machine_apps.iter().any(|d| f.starts_with(&format!("{d}/"))) {
-                st.mark(Some("crates".to_string()), format!("the per_machine sync test reads {f}"));
-            }
         }
         if RUST_INPUTS.iter().any(|r| r.is_match(f)) {
             for p in ["crates", "paddock-dev"] {
@@ -390,7 +469,7 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
                 st.mark(Some("conformance".to_string()), format!("C13 reads {f}"));
             }
             for a in &graph.apps {
-                if graph.cargo.iter().any(|(d, _)| d.starts_with(&format!("apps/{a}/"))) {
+                if graph.config(a).get("cargo").is_some_and(truthy) {
                     st.mark(Some(format!("app:{a}")), format!("rust input {f}"));
                     st.kind(Some(&format!("app:{a}")), "rust");
                 }
@@ -400,6 +479,12 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
         if GLOBAL.iter().any(|r| r.is_match(f)) {
             mark_all(&mut st, &format!("global {f}"), &mut everything);
             continue;
+        }
+        if E2E_GUARD_INPUTS.is_match(f) {
+            for a in &graph.apps {
+                st.mark(Some(format!("app:{a}")), format!("e2e guard {f}"));
+                st.kind(Some(&format!("app:{a}")), "ui");
+            }
         }
         if f == "package-lock.json" {
             for ws in lock_diff(opts.lock.0.as_deref(), opts.lock.1.as_deref())? {
@@ -456,15 +541,39 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
         for p in &own {
             st.kind(Some(p), half);
         }
-        if is_cause_code_source(f) {
-            st.mark(Some("ui".to_string()), format!("ui cause-codes.spec.ts scans {f}")); // ui's own tests, not its dependents
-        }
+        // A change to a shared workspace's own config (crates/Cargo.toml, crates/.config/...) reaches all its members.
         if c.is_none() && own.iter().any(|p| p == "crates") {
             for (d, x) in graph.cargo.iter() {
                 if x.workspace == "crates" {
                     push_unique(&mut changed_crates, d);
                 }
             }
+        }
+        // A generated TypeScript or JSON file under ui/ is compared with its Rust source by a crate's test: a stale one must
+        // fail on the branch, so the crates that name the file are tested (all crates when none does).
+        if GENERATED.is_match(f) {
+            st.mark(Some("crates".to_string()), format!("generated file {f}"));
+            let named = opts.crates_naming.map(|g| g(f)).unwrap_or_default();
+            let named: Vec<String> = named
+                .iter()
+                .filter_map(|h| graph.cargo.node_of(h))
+                .filter(|d| graph.cargo.get(d).is_some_and(|x| x.workspace == "crates"))
+                .map(str::to_string)
+                .collect();
+            if named.is_empty() {
+                for (d, x) in graph.cargo.iter() {
+                    if x.workspace == "crates" {
+                        push_unique(&mut changed_crates, d);
+                    }
+                }
+            } else {
+                for d in named {
+                    push_unique(&mut changed_crates, &d);
+                }
+            }
+        }
+        if is_cause_code_source(f) {
+            st.mark(Some("ui".to_string()), format!("ui cause-codes.spec.ts scans {f}")); // ui's own tests, not its dependents
         }
         if own.iter().any(|p| p == "ui") && f.starts_with("ui/") {
             push_unique(&mut changed_pkgs, "ui");
@@ -483,6 +592,29 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
                 st.kind(Some(&format!("app:{a}")), "rust");
             }
         }
+        // An app's Cargo dependencies and capabilities are read by conformance C48.
+        if APP_CAPABILITY_INPUT.is_match(f) {
+            st.mark(Some("conformance".to_string()), format!("C48 reads {f}"));
+        }
+        // A per-machine app's installer files and configuration are read by conformance C91 and by paddock-service's per_machine
+        // sync test, which runs with the shared crates.
+        if PER_MACHINE_INPUT.is_match(f) {
+            st.mark(Some("conformance".to_string()), format!("C91 reads {f}"));
+            if f.starts_with("crates/") || opts.per_machine_apps.iter().any(|d| f.starts_with(&format!("{d}/"))) {
+                st.mark(Some("crates".to_string()), format!("the per_machine sync test reads {f}"));
+            }
+        }
+        // The notices tool and its cargo-about configuration decide the committed THIRD_PARTY_NOTICES.md of every app with a
+        // `notices` block.
+        if NOTICES_INPUTS.is_match(f) {
+            for a in &graph.apps {
+                if graph.config(a).get("notices").is_some_and(truthy) {
+                    st.mark(Some(format!("app:{a}")), format!("notices tool {f}"));
+                    st.kind(Some(&format!("app:{a}")), "all");
+                }
+            }
+        }
+        // The rest of conformance/ (bin, src) runs in every app's gates through the shared actions.
         if f.starts_with("conformance/") && !f.starts_with("conformance/test/") && !f.starts_with("conformance/fixtures/") {
             for a in &graph.apps {
                 st.mark(Some(format!("app:{a}")), format!("conformance {f}"));
@@ -590,10 +722,25 @@ pub fn read_graph(root: &Path, history: &dyn History) -> Result<RepoGraph, Graph
     let disk = DiskFiles(root.to_path_buf());
     let root_text = root.to_string_lossy().replace('\\', "/");
     let cargo = cargo_graph(&files, &disk, &CargoCli::new(root, TIMEOUT), &root_text)?;
+    let apps = apps_of(&files);
+    let mut configs = BTreeMap::new();
+    for app in &apps {
+        let path = format!("apps/{app}/paddock.ci.json");
+        let text = disk.read_to_string(&path)?;
+        let mut config: Value = serde_json::from_str(&text).map_err(|e| GraphError::Read {
+            path: path.clone(),
+            reason: format!("not valid JSON: {e}"),
+        })?;
+        if let Some(map) = config.as_object_mut() {
+            map.insert("dir".into(), json!(format!("apps/{app}")));
+        }
+        configs.insert(app.clone(), config);
+    }
     Ok(RepoGraph {
         cargo,
         npm: npm_graph(&files, &disk)?,
-        apps: apps_of(&files),
+        apps,
+        configs,
     })
 }
 
@@ -615,18 +762,40 @@ pub struct Request {
 
 /// The plan for a request against the repository at `root`.
 pub fn plan_for(root: &Path, history: &dyn History, req: &Request) -> Result<Value, GraphError> {
-    plan_with(root, history, &read_graph(root, history)?, req)
+    plan_with_graph(root, history, req).map(|(_, plan)| plan)
 }
 
-/// [`plan_for`] with the graphs already read by [`read_graph`] (they depend only on the tree, so several requests against one
-/// tree read them once: each read runs `cargo metadata` for every workspace).
-pub fn plan_with(root: &Path, history: &dyn History, graph: &RepoGraph, req: &Request) -> Result<Value, GraphError> {
+/// The graph the plan was computed from and the plan (the CI matrix reads the apps' contracts from the graph).
+pub fn plan_with_graph(root: &Path, history: &dyn History, req: &Request) -> Result<(RepoGraph, Value), GraphError> {
+    let graph = read_graph(root, history)?;
+    let plan = plan_on_graph(root, history, req, &graph)?;
+    Ok((graph, plan))
+}
+
+/// The plan for a request on a graph already read from `root` (reading it runs `cargo metadata` over every workspace). The graph
+/// depends on the tracked files and manifests, not on the text of the changed files, so one reading serves many requests.
+pub fn plan_on_graph(root: &Path, history: &dyn History, req: &Request, graph: &RepoGraph) -> Result<Value, GraphError> {
+    let files_mode = !req.files.is_empty();
+    let gitea = if req.all {
+        None
+    } else {
+        Some(crate::plan_repo::GitGitea::new(
+            root,
+            graph.apps.iter().cloned().collect(),
+            files_mode,
+            req.base.as_deref().unwrap_or("HEAD"),
+            &req.head,
+        )?)
+    };
+    let naming = |f: &str| crate::plan_repo::files_naming_generated(root, f);
     let mut opts = Options {
         all: req.all,
         explain: req.explain,
         lock: (None, None),
         per_machine_apps: per_machine_apps(root),
         conformance_apps: conformance_apps(root),
+        gitea: gitea.as_ref().map(|g| g as &dyn GiteaSource),
+        crates_naming: Some(&naming),
     };
     let mut changed = req.files.clone();
     if let (Some(base), false) = (&req.base, req.all) {
@@ -689,6 +858,10 @@ mod tests {
             cargo,
             npm,
             apps: ["dyno", "debrief"].map(String::from).into(),
+            configs: BTreeMap::from([
+                ("dyno".to_string(), json!({"cargo": "app/src-tauri", "dir": "apps/dyno"})),
+                ("debrief".to_string(), json!({"dir": "apps/debrief"})),
+            ]),
         }
     }
 
@@ -923,6 +1096,26 @@ mod tests {
         assert_eq!(apps_of(&files), BTreeSet::from(["a".to_string(), "d".to_string()]));
     }
 
+    /// A repository with one empty commit: the `.gitea` readers need a real one.
+    fn repo(d: &Path) {
+        for args in [
+            ["init", "-q"].as_slice(),
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.invalid",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "x",
+            ],
+        ] {
+            assert!(crate::plan_repo::git_text(d, args).is_some());
+        }
+    }
+
     /// A history of one commit range that changed the lockfile, with files that are not on disk.
     struct Tracked(Vec<String>);
 
@@ -931,7 +1124,7 @@ mod tests {
             Ok(self.0.clone())
         }
         fn changed_files(&self, base: &str, head: &str) -> Result<Vec<String>, GraphError> {
-            assert_eq!((base, head), ("old", "new"));
+            assert_eq!((base, head), ("old", "HEAD"));
             Ok(vec!["package-lock.json".into()])
         }
         fn file_at(&self, rev: &str, path: &str) -> Result<Option<String>, GraphError> {
@@ -953,17 +1146,20 @@ mod tests {
             explain: false,
             root: None,
             base: base.map(String::from),
-            head: "new".into(),
+            head: "HEAD".into(),
         }
     }
 
     #[test]
     fn a_tracked_file_missing_on_disk_is_a_typed_read_error_naming_the_file() {
         let d = tempfile::tempdir().unwrap();
+        repo(d.path());
         let err = plan_for(d.path(), &Tracked(vec!["ui/package.json".into()]), &request(None))
             .err()
             .unwrap();
         assert!(matches!(err, GraphError::Read { .. }) && err.to_string().contains("ui/package.json"));
+        std::fs::create_dir_all(d.path().join("apps/a")).unwrap();
+        std::fs::write(d.path().join("apps/a/paddock.ci.json"), "{}").unwrap();
         let ok = plan_for(d.path(), &Tracked(vec!["apps/a/paddock.ci.json".into()]), &request(None)).unwrap();
         assert_eq!(
             ok["all"], true,
@@ -975,6 +1171,7 @@ mod tests {
     #[test]
     fn a_base_revision_plans_the_changed_files_and_reads_the_lock_at_both_ends() {
         let d = tempfile::tempdir().unwrap();
+        repo(d.path());
         std::fs::create_dir_all(d.path().join("ui")).unwrap();
         std::fs::write(d.path().join("ui/package.json"), r#"{"name":"ui"}"#).unwrap();
         let history = Tracked(vec!["ui/package.json".into()]);
@@ -1008,5 +1205,375 @@ mod tests {
             head: "HEAD".into(),
         };
         assert_eq!(command(&req).err().map(|e| e.exit), Some(paddock_cli::Exit::Usage));
+    }
+
+    // ---- .gitea changes are narrowed to the jobs they reach (the cases of scripts/affected.test.mjs, on synthetic trees) ----
+
+    use crate::plan_gitea::{Fixed, changed_jobs, script_importers};
+
+    fn ci_text(conf: &str, app: &str) -> String {
+        format!(
+            "name: ci\non:\n  push:\njobs:\n  plan:\n    steps:\n      - uses: ./.gitea/actions/plan-only\n  ui:\n    steps:\n      - uses: ./.gitea/actions/node-caches\n  conformance: # the checks\n    steps:\n      - run: {conf}\n  app:\n    steps:\n      - run: {app}\n      - uses: ./.gitea/actions/app-gates\n  crates:\n    steps:\n      - uses: ./.gitea/actions/build-folder\n      - uses: ./.gitea/actions/install-test-browser\n"
+        )
+    }
+
+    const CI_FILE: &str = ".gitea/workflows/ci.yml";
+
+    fn base_tree() -> BTreeMap<String, String> {
+        [
+            (CI_FILE, ci_text("node a", "node b").as_str()),
+            (
+                ".gitea/workflows/dyno.yml",
+                "jobs:\n  gates:\n    steps:\n      - uses: ./.gitea/actions/node-caches\n",
+            ),
+            (
+                ".gitea/workflows/nightly.yml",
+                "jobs:\n  night:\n    steps:\n      - uses: ./.gitea/actions/nightly-only\n",
+            ),
+            (".gitea/actions/nightly-only/action.yml", "runs: n"),
+            (".gitea/actions/plan-only/action.yml", "runs: x"),
+            (".gitea/actions/node-caches/action.yml", "runs: x"),
+            (".gitea/actions/app-gates/action.yml", "runs: y"),
+            (
+                ".gitea/actions/build-folder/action.yml",
+                "run: bash \"${{ github.action_path }}/../../../conformance/ci/build-folder.sh\"",
+            ),
+            (
+                ".gitea/actions/install-test-browser/action.yml",
+                "run: node \"${{ github.action_path }}/../../../conformance/ci/install-test-browser.mjs\"",
+            ),
+            (
+                ".gitea/actions/README.md",
+                "- uses: decryp7/paddock/.gitea/actions/node-caches@v0.3.0 and .gitea/actions/unused",
+            ),
+            (".gitea/actions/unused/action.yml", "runs: u"),
+            (".gitea/actions/only-commented/action.yml", "runs: c"),
+            (
+                "conformance/ci/install-test-browser.mjs",
+                "import { entryFor } from './runtime-catalogue.mjs';\nimport { isMain } from '../src/util/is-main.mjs';",
+            ),
+            ("conformance/ci/runtime-catalogue.mjs", "export const entryFor = 1;"),
+            ("conformance/src/util/is-main.mjs", "export const isMain = 1;"),
+            ("conformance/ci/unrelated.mjs", "export const x = 1;"),
+            ("conformance/ci/build-folder.sh", "echo"),
+            ("conformance/release/latest-json.mjs", "export const y = 1;"),
+            (
+                ".gitea/actions/nested/action.yml",
+                "steps:\n  - uses: ./.paddock/.gitea/actions/build-folder",
+            ),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+    }
+
+    fn fixed(before: &BTreeMap<String, String>, changes: &[(&str, String)], dirty: Option<&[&str]>) -> Fixed {
+        let mut after = before.clone();
+        for (k, v) in changes {
+            after.insert(k.to_string(), v.clone());
+        }
+        Fixed {
+            apps: vec!["debrief".into(), "dyno".into()],
+            before: before.clone(),
+            after,
+            dirty: dirty.map(|d| d.iter().map(|s| s.to_string()).collect()),
+        }
+    }
+
+    fn gitea_plan(files: &[&str], g: &Fixed) -> Value {
+        let files: Vec<String> = files.iter().map(|s| s.to_string()).collect();
+        affected(
+            &files,
+            &sample(),
+            &Options {
+                explain: true,
+                gitea: Some(g),
+                ..Options::default()
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_ci_yml_change_to_one_job_marks_that_job_only_and_the_app_job_marks_the_app_legs() {
+        let t = base_tree();
+        let r = gitea_plan(&[CI_FILE], &fixed(&t, &[(CI_FILE, ci_text("node a --only C06", "node b"))], None));
+        assert_eq!(
+            (
+                r["all"].clone(),
+                r["conformance"].clone(),
+                r["crates"].clone(),
+                r["ui"].clone(),
+                r["apps"].clone()
+            ),
+            (json!(false), json!(true), json!(false), json!(false), json!([]))
+        );
+        let a = gitea_plan(&[CI_FILE], &fixed(&t, &[(CI_FILE, ci_text("node a", "node c"))], None));
+        assert_eq!(
+            (a["all"].clone(), a["crates"].clone(), a["apps"].clone()),
+            (json!(false), json!(false), json!(["debrief", "dyno"]))
+        );
+    }
+
+    #[test]
+    fn a_change_to_the_plan_job_a_header_an_unknown_job_or_no_reader_marks_everything() {
+        let t = base_tree();
+        let plan_job = ci_text("node a", "node b").replace("plan-only", "plan-only2");
+        let r = gitea_plan(&[CI_FILE], &fixed(&t, &[(CI_FILE, plan_job)], None));
+        assert_eq!(
+            (r["all"].clone(), r["ui"].clone(), r["crates"].clone()),
+            (json!(true), json!(true), json!(true))
+        );
+        let header = ci_text("node a", "node b").replace("  push:", "  pull_request:");
+        assert_eq!(gitea_plan(&[CI_FILE], &fixed(&t, &[(CI_FILE, header)], None))["all"], true);
+        let brand_new = format!("{}  brand-new:\n    steps: []\n", ci_text("node a", "node b"));
+        assert_eq!(gitea_plan(&[CI_FILE], &fixed(&t, &[(CI_FILE, brand_new)], None))["all"], true);
+        let not_a_workflow = "this: [is, not\n  a workflow".to_string();
+        assert_eq!(gitea_plan(&[CI_FILE], &fixed(&t, &[(CI_FILE, not_a_workflow)], None))["all"], true);
+        assert_eq!(plan(&[CI_FILE])["all"], true, "no reader for the revisions: everything");
+        assert_eq!(
+            gitea_plan(&[CI_FILE], &fixed(&t, &[], None))["all"],
+            true,
+            "identical revisions: everything"
+        );
+        assert_eq!(changed_jobs(Some(&ci_text("a", "b")), Some("jobs:\nx: 1")), None);
+    }
+
+    #[test]
+    fn a_job_split_that_could_hide_a_job_is_refused() {
+        let base = ci_text("node a", "node b");
+        let r = gitea_plan(
+            &[CI_FILE],
+            &fixed(&base_tree(), &[(CI_FILE, base.replace("node a", "node a2"))], None),
+        );
+        assert_eq!(
+            (r["all"].clone(), r["conformance"].clone(), r["ui"].clone(), r["crates"].clone()),
+            (json!(false), json!(true), json!(false), json!(false))
+        );
+        let bad = [
+            format!("{base}  \"quoted\": {{}}\n"),
+            format!("{base}  crates2: {{ runs-on: x }}\n"),
+            format!("{base}anchors:\n  x: &rs 1\n"),
+            base.replace("node b", "node *rs"),
+            base.replace(
+                "steps:\n      - uses: ./.gitea/actions/build-folder",
+                "steps: &rs\n      - uses: ./.gitea/actions/build-folder",
+            ),
+        ];
+        for b in bad {
+            assert_eq!(changed_jobs(Some(&base), Some(&b)), None, "{b}");
+            assert_eq!(
+                gitea_plan(&[CI_FILE], &fixed(&base_tree(), &[(CI_FILE, b.clone())], None))["all"],
+                true,
+                "{b}"
+            );
+        }
+        assert_eq!(
+            changed_jobs(
+                Some(&base),
+                Some(&base.replace("  conformance: # the checks", "  conformance: # checks"))
+            ),
+            Some(vec![])
+        );
+    }
+
+    #[test]
+    fn an_action_marks_only_the_jobs_and_app_workflows_that_use_it() {
+        let g = fixed(&base_tree(), &[], None);
+        let ui = gitea_plan(&[".gitea/actions/node-caches/action.yml"], &g);
+        assert_eq!(
+            (ui["all"].clone(), ui["ui"].clone(), ui["crates"].clone(), ui["apps"].clone()),
+            (json!(false), json!(true), json!(false), json!(["dyno"]))
+        );
+        let gates = gitea_plan(&[".gitea/actions/app-gates/action.yml"], &g);
+        assert_eq!(
+            (gates["all"].clone(), gates["crates"].clone(), gates["apps"].clone()),
+            (json!(false), json!(false), json!(["debrief", "dyno"]))
+        );
+        let bf = gitea_plan(&[".gitea/actions/build-folder/action.yml"], &g);
+        assert_eq!(
+            (bf["all"].clone(), bf["crates"].clone(), bf["ui"].clone(), bf["apps"].clone()),
+            (json!(false), json!(true), json!(false), json!([]))
+        );
+        assert_eq!(
+            gitea_plan(&[".gitea/actions/nested/action.yml"], &g)["all"],
+            true,
+            "an action nobody uses"
+        );
+        assert_eq!(
+            gitea_plan(&[".gitea/actions/unused/action.yml"], &g)["all"],
+            true,
+            "a README mention is no use"
+        );
+        let night = gitea_plan(&[".gitea/actions/nightly-only/action.yml"], &g);
+        assert_eq!(
+            (night["all"].clone(), night["tools"].clone(), night["apps"].clone()),
+            (json!(false), json!(true), json!([]))
+        );
+        assert!(
+            night["why"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|w| w.as_str().unwrap().contains("not a pull request"))
+        );
+    }
+
+    #[test]
+    fn a_script_is_traced_through_its_importers_to_the_actions_that_run_it() {
+        let g = fixed(&base_tree(), &[], None);
+        let r = gitea_plan(&["conformance/ci/build-folder.sh"], &g);
+        assert_eq!(
+            (
+                r["all"].clone(),
+                r["crates"].clone(),
+                r["conformance"].clone(),
+                r["ui"].clone(),
+                r["eslint"].clone(),
+                r["apps"].clone()
+            ),
+            (
+                json!(false),
+                json!(true),
+                json!(true),
+                json!(false),
+                json!(false),
+                json!(["debrief", "dyno"])
+            )
+        );
+        let other = gitea_plan(&["conformance/release/latest-json.mjs"], &g);
+        assert_eq!(
+            (other["all"].clone(), other["crates"].clone(), other["ui"].clone()),
+            (json!(false), json!(false), json!(false))
+        );
+        assert_eq!(plan(&["conformance/ci/build-folder.sh"])["all"], true, "no reader: everything");
+        for f in [
+            "conformance/ci/runtime-catalogue.mjs",
+            "conformance/src/util/is-main.mjs",
+            "conformance/ci/install-test-browser.mjs",
+        ] {
+            let r = gitea_plan(&[f], &g);
+            assert_eq!(
+                (r["all"].clone(), r["crates"].clone(), r["ui"].clone()),
+                (json!(false), json!(true), json!(false)),
+                "{f}"
+            );
+        }
+        assert_eq!(gitea_plan(&["conformance/ci/unrelated.mjs"], &g)["crates"], false);
+    }
+
+    #[test]
+    fn importer_tracing_is_transitive() {
+        let mut tree = base_tree();
+        tree.insert(
+            ".gitea/actions/chain/action.yml".into(),
+            "run: node conformance/ci/chain-a.mjs".into(),
+        );
+        tree.insert(CI_FILE.into(), ci_text("node a", "node b").replace("install-test-browser", "chain"));
+        tree.insert("conformance/ci/chain-a.mjs".into(), "import './chain-b.mjs';".into());
+        tree.insert("conformance/ci/chain-b.mjs".into(), "import { c } from './chain-c.mjs';".into());
+        tree.insert("conformance/ci/chain-c.mjs".into(), "export const c = 1;".into());
+        let g = fixed(&tree, &[], None);
+        let mut got = script_importers("conformance/ci/chain-c.mjs", &g);
+        got.sort();
+        assert_eq!(
+            got,
+            [
+                "conformance/ci/chain-a.mjs",
+                "conformance/ci/chain-b.mjs",
+                "conformance/ci/chain-c.mjs"
+            ]
+        );
+        let r = gitea_plan(&["conformance/ci/chain-c.mjs"], &g);
+        assert_eq!((r["all"].clone(), r["crates"].clone()), (json!(false), json!(true)));
+    }
+
+    #[test]
+    fn a_mention_only_in_a_comment_is_no_use_and_a_reusable_workflow_is_followed_to_its_callers() {
+        let mut tree = base_tree();
+        tree.insert(
+            CI_FILE.into(),
+            format!(
+                "# see ./.gitea/actions/only-commented\n{}  # ./.gitea/actions/only-commented\n",
+                ci_text("node a", "node b")
+            ),
+        );
+        let g = fixed(&tree, &[], None);
+        assert_eq!(gitea_plan(&[".gitea/actions/only-commented/action.yml"], &g)["all"], true);
+        let mut tree = base_tree();
+        tree.insert(
+            ".gitea/workflows/app-e2e.yml".into(),
+            "on:\n  workflow_call:\njobs:\n  e2e:\n    steps:\n      - uses: ./.gitea/actions/unused\n".into(),
+        );
+        tree.insert(
+            ".gitea/workflows/dyno-release.yml".into(),
+            "jobs:\n  e2e:\n    uses: ./.gitea/workflows/app-e2e.yml\n".into(),
+        );
+        let r = gitea_plan(&[".gitea/actions/unused/action.yml"], &fixed(&tree, &[], None));
+        assert_eq!(
+            (r["all"].clone(), r["apps"].clone(), r["crates"].clone()),
+            (json!(false), json!(["dyno"]), json!(false))
+        );
+        tree.insert(".gitea/workflows/dyno-release.yml".into(), "jobs: {}\n".into());
+        assert_eq!(
+            gitea_plan(&[".gitea/actions/unused/action.yml"], &fixed(&tree, &[], None))["all"],
+            true,
+            "no caller"
+        );
+    }
+
+    #[test]
+    fn in_files_mode_a_file_that_is_not_dirty_marks_everything() {
+        let t = base_tree();
+        let changed = [(CI_FILE, ci_text("node a --only C06", "node b"))];
+        assert_eq!(gitea_plan(&[CI_FILE], &fixed(&t, &changed, Some(&[CI_FILE])))["all"], false);
+        assert_eq!(gitea_plan(&[CI_FILE], &fixed(&t, &changed, Some(&[])))["all"], true);
+        assert_eq!(
+            gitea_plan(&[".gitea/actions/node-caches/action.yml"], &fixed(&t, &[], Some(&[])))["all"],
+            true
+        );
+        assert_eq!(
+            gitea_plan(&["conformance/ci/build-folder.sh"], &fixed(&t, &[], Some(&[])))["all"],
+            true
+        );
+    }
+
+    #[test]
+    fn app_capability_notices_e2e_guard_and_generated_inputs() {
+        for f in [
+            "apps/dyno/app/src-tauri/Cargo.toml",
+            "apps/debrief/app/src-tauri/capabilities/dialog.json",
+        ] {
+            assert_eq!(plan(&[f])["conformance"], true, "{f}");
+        }
+        assert_eq!(plan(&["apps/dyno/app/src-tauri/src/lib.rs"])["conformance"], false);
+        for f in ["ui/projects/paddock-e2e/src/env.ts", "ui/projects/paddock-e2e/src/build-guard.ts"] {
+            assert_eq!(plan(&[f])["apps"], json!(["debrief", "dyno"]), "{f}");
+        }
+        // Only apps with a `notices` block are inputs of the notices tool.
+        let mut graph = sample();
+        graph.configs.insert(
+            "dyno".into(),
+            json!({"cargo": "app/src-tauri", "notices": {"x": 1}, "dir": "apps/dyno"}),
+        );
+        let n = affected(&["scripts/notices.sh".to_string()], &graph, &Options::default()).unwrap();
+        assert_eq!(n["apps"], json!(["dyno"]));
+        // A generated file marks the crates that name it, or every crate of the workspace when none does.
+        let naming = |f: &str| {
+            if f.ends_with("dialogs.ts") {
+                vec!["crates/core/src/lib.rs".to_string()]
+            } else {
+                Vec::new()
+            }
+        };
+        let opts = Options {
+            crates_naming: Some(&naming),
+            ..Options::default()
+        };
+        let named = affected(&["ui/projects/x/generated/dialogs.ts".to_string()], &sample(), &opts).unwrap();
+        assert_eq!(named["packages"]["crates"], json!(["paddock-core", "paddock-k", "paddock-kit"]));
+        let unknown = affected(&["ui/projects/x/generated/other.json".to_string()], &sample(), &opts).unwrap();
+        assert_eq!(unknown["crates"], true);
+        assert_eq!(unknown["packages"]["crates"], json!(["paddock-core", "paddock-k", "paddock-kit"]));
     }
 }

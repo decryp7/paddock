@@ -657,7 +657,7 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
       // Anything under .gitea runs the conformance checks over workflows and actions; the rest is narrowed per job or user.
       const hit = gitea ? giteaTargets(f, gitea) : null;
       if (!hit) {
-        markAll(`global ${f}`); // the reason matches tools/paddock-dev's port, which has no per-job narrowing
+        markAll(`global ${f}`); // fail safe: the same reason and answer as `./dev plan` (tools/paddock-dev/src/plan_gitea.rs)
         continue;
       }
       mark('conformance', `ci files ${f}`);

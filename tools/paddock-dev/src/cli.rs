@@ -1,4 +1,4 @@
-use crate::{gates, input_hash, ipc_endpoints, plan, slots, wait};
+use crate::{gates, input_hash, ipc_endpoints, plan, plan_cmd, slots, wait};
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
 use std::io::Write;
@@ -40,6 +40,10 @@ enum Command {
         #[command(subcommand)]
         command: CheckCommand,
     },
+    /// The CI planner: which projects a change reaches, the CI matrix and the commit lint's range (the port of
+    /// scripts/affected.mjs; the arguments are its: <base> [<head>], --files a,b, --all, --ci [--app x], --commit-range, --commit-flags, --explain).
+    /// It prints no JSON object: `--json` is refused.
+    Plan(PlanArgs),
     /// The project graph.
     Graph {
         #[command(subcommand)]
@@ -158,6 +162,16 @@ enum GraphCommand {
 }
 
 #[derive(Args)]
+struct PlanArgs {
+    /// The repository root (default: the folder containing .git, found from the current folder).
+    #[arg(long)]
+    root: Option<PathBuf>,
+    /// The planner's own arguments, as scripts/affected.mjs took them.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    args: Vec<String>,
+}
+
+#[derive(Args)]
 struct AffectedArgs {
     /// Changed files, comma separated (instead of a base).
     #[arg(long, value_delimiter = ',', conflicts_with_all = ["all", "base"])]
@@ -199,6 +213,11 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             return finish(format, Err(CliError::usage(first).with_hint(hint)), out, err).code();
         }
     };
+    if cli.json && matches!(cli.command, Command::Plan(_)) {
+        let e = CliError::usage("`dev plan` has no --json mode.")
+            .with_hint("Its output is the planner's own: JSON for a plan, true or false, a range.");
+        return finish(Format::Json, Err(e), out, err).code();
+    }
     let result = dispatch(cli.command);
     finish(if cli.json { Format::Json } else { Format::Text }, result, out, err).code()
 }
@@ -241,6 +260,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Check {
             command: CheckCommand::IpcEndpoints { tag, root },
         } => ipc_endpoints::command(root, tag),
+        Command::Plan(a) => plan_cmd::command(&a.args, a.root),
         Command::Graph {
             command: GraphCommand::Affected(a),
         } => plan::command(&plan::Request {

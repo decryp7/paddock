@@ -1,0 +1,7 @@
+{
+ "code": 0,
+ "stdout": "true",
+ "outputs": null,
+ "summary": "### y\n\nBase: the base input fixture-base\n\nAffected: every job runs.\n",
+ "error": null
+}

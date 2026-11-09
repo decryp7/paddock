@@ -1,0 +1,45 @@
+{
+ "code": 0,
+ "stdout": {
+  "all": false,
+  "crates": true,
+  "ui": true,
+  "eslint": false,
+  "conformance": false,
+  "tools": false,
+  "icons": false,
+  "ciImage": false,
+  "paddockDev": false,
+  "docs": false,
+  "apps": [
+   "x"
+  ],
+  "kinds": {
+   "x": [
+    "rust"
+   ]
+  },
+  "packages": {
+   "crates": [
+    "fx-b"
+   ],
+   "apps/x/app/src-tauri": [
+    "x"
+   ]
+  },
+  "why": {
+   "app:x": [
+    "cargo apps/x/app/src-tauri reaches crates/b"
+   ],
+   "crates": [
+    "crates/b/src/lib.rs"
+   ],
+   "ui": [
+    "ui cause-codes.spec.ts scans crates/b/src/lib.rs"
+   ]
+  }
+ },
+ "outputs": null,
+ "summary": null,
+ "error": null
+}
