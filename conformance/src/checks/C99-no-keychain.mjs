@@ -148,6 +148,8 @@ export default {
   id: 'C99',
   title: 'No shipped process uses the macOS Keychain (rule 72)',
   rule: 72,
+  scope: 'root',
+  mode: 'gate',
   run(ctx) {
     // `options.readFile` lets a test make a file unreadable (it returns null for it, undefined to read as usual).
     const read = (f) => {

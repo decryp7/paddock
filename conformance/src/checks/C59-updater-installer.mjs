@@ -36,6 +36,8 @@ export default {
   id: 'C59',
   title: 'Every app that wires the shared updater says how it installs',
   rule: 40,
+  scope: 'both',
+  mode: 'gate',
   run(ctx) {
     const out = [];
     for (const f of ctx.files()) {
