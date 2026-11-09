@@ -132,20 +132,6 @@ calls = ["tokio::net::TcpListener::bind"]
 sites = 1
 
 [[out_of_scope]]
-path = "apps/debrief/crates/debrief-ai-worker/src/child.rs"
-reason = "A free-port probe (binds port 0, reads the port, drops the listener); it serves nobody."
-owner = "debrief"
-calls = ["std::net::TcpListener::bind"]
-sites = 1
-
-[[out_of_scope]]
-path = "apps/debrief/crates/debrief-ai-worker/src/bin/fake_llama_server.rs"
-reason = "A fake llama server binary for tests; never shipped."
-owner = "debrief"
-calls = ["std::net::TcpListener::bind"]
-sites = 1
-
-[[out_of_scope]]
 path = "apps/debrief/crates/chromium-driver/src/fake.rs"
 reason = "A fake Chrome DevTools server for tests."
 owner = "debrief"
