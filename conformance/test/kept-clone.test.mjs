@@ -3,10 +3,10 @@
 // profile file's contract: nothing a lean job reads is excluded.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import { parseSteps } from '../src/util/workflows.mjs';
 import { PADDOCK } from './helpers.mjs';
 
@@ -32,9 +32,14 @@ function git(cwd, root, ...args) {
   return r.stdout.trim();
 }
 
+// Every fixture's temp root is removed when the file's tests are done (they leaked paddock-kept-* folders in $TMPDIR).
+const roots = [];
+after(() => { for (const r of roots) rmSync(r, { recursive: true, force: true }); });
+
 /** An origin with a commit that has a big folder to leave out, a work repo to commit with, and a fixture profile file. */
 function fixture() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-kept-')));
+  roots.push(root);
   mkdirSync(join(root, 'home'));
   const work = join(root, 'work-repo');
   mkdirSync(work);
@@ -242,6 +247,86 @@ test('kept-clone fails with one ::error:: naming the profile when it does not ex
   const errors = r.out.split('\n').filter((l) => l.startsWith('::error::'));
   assert.equal(errors.length, 1, r.out);
   assert.match(errors[0], /kept-clone: profile 'nope' is not declared in .*Next step:/);
+});
+
+// Review P1: the kept clone's .git survives between jobs, and the clone is shared by every job of the slot (release tag gates too):
+// a hook or a config key planted by one job must have no effect on the next.
+test('kept-clone: a hook and info/attributes left in .git by one job do not run or apply in the next job\'s checkout', () => {
+  const fx = fixture();
+  const first = job(fx, git(fx.work, fx.root, 'rev-parse', 'HEAD'));
+  const k = first.stable();
+  const ran = join(fx.root, 'hook-ran');
+  mkdirSync(join(k, '.git', 'hooks'), { recursive: true });
+  for (const h of ['post-checkout', 'post-merge', 'reference-transaction']) {
+    writeFileSync(join(k, '.git', 'hooks', h), `#!/bin/sh\ntouch '${ran}'\n`);
+    chmodSync(join(k, '.git', 'hooks', h), 0o755);
+  }
+  mkdirSync(join(k, '.git', 'info'), { recursive: true });
+  writeFileSync(join(k, '.git', 'info', 'attributes'), '* text eol=crlf\n');
+  fx.put('crates/a/lib.rs', 'two');
+  const second = job(fx, fx.commit('two'));
+  assert.equal(second.status, 0, second.out);
+  assert.match(second.out, /\(reused, profile lean/);
+  assert.ok(!existsSync(ran), 'the planted hook did not run');
+  assert.deepEqual(readdirSync(join(k, '.git', 'hooks')), [], 'the hooks folder is emptied');
+  assert.ok(!existsSync(join(k, '.git', 'info', 'attributes')), 'info/attributes is removed');
+  assert.equal(read(join(k, 'crates/a/lib.rs')), 'two');
+});
+
+test('kept-clone: a config key the script does not own (core.autocrlf) makes the next job start a new clone, with one warning naming the key', () => {
+  const fx = fixture();
+  const sha = git(fx.work, fx.root, 'rev-parse', 'HEAD');
+  const first = job(fx, sha);
+  const k = first.stable();
+  git(k, fx.root, 'config', '--local', 'core.autocrlf', 'true');
+  git(k, fx.root, 'config', '--local', 'core.fsmonitor', 'touch ' + join(fx.root, 'fsmonitor-ran'));
+  const second = job(fx, sha);
+  assert.equal(second.status, 0, second.out);
+  assert.match(second.out, /\(created, profile lean/);
+  const warns = second.out.split('\n').filter((l) => /::warning::kept-clone:.*core\.autocrlf/.test(l));
+  assert.equal(warns.length, 1, second.out);
+  assert.ok(!existsSync(join(fx.root, 'fsmonitor-ran')));
+  assert.doesNotMatch(git(k, fx.root, 'config', '--local', '--list'), /autocrlf|fsmonitor/);
+});
+
+test('kept-clone: a leftover .git lock is removed and the clone recreated once; the failing git command is named in the log', () => {
+  const fx = fixture();
+  const sha = git(fx.work, fx.root, 'rev-parse', 'HEAD');
+  const first = job(fx, sha);
+  writeFileSync(join(first.stable(), '.git', 'index.lock'), '');
+  fx.put('crates/a/lib.rs', 'two');
+  const second = job(fx, fx.commit('two'));
+  assert.equal(second.status, 0, second.out);
+  assert.match(second.out, /kept-clone: git [a-z-]+ failed/, 'the failing command is named');
+  assert.match(second.out, /\(created, profile lean/, 'the clone was recreated, not abandoned');
+  assert.doesNotMatch(second.out, /building from the work folder/);
+  assert.ok(!existsSync(join(first.stable(), '.git', 'index.lock')));
+});
+
+test('kept-clone: a phase that hangs does not fail the job (the doc says it never does): it builds from the work folder with one warning', () => {
+  const fx = fixture();
+  const sha = git(fx.work, fx.root, 'rev-parse', 'HEAD');
+  const bin = join(fx.root, 'bin');
+  mkdirSync(bin);
+  const real = spawnSync('which', ['git'], { encoding: 'utf8' }).stdout.trim();
+  writeFileSync(join(bin, 'git'), `#!/bin/sh\ncase " $* " in *" fetch "*) exec sleep 30;; esac\nexec '${real}' "$@"\n`);
+  chmodSync(join(bin, 'git'), 0o755);
+  const r = job(fx, sha, { env: { PATH: `${bin}:${process.env.PATH}`, PADDOCK_KEPT_CLONE_TIMEOUT: '1' } });
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /::warning::kept-clone: 'fetch [0-9a-f]+' did not finish within 1 s/);
+  assert.match(r.out, /::warning::kept-clone: [^\n]*building from the work folder/);
+  assert.ok(!lstatSync(r.ws).isSymbolicLink());
+  assert.doesNotMatch(r.out, /::error::/);
+});
+
+test('kept-clone: the stderr tail in a phase error is whole lines, not cut in the middle of a path', () => {
+  const fx = fixture();
+  const sha = git(fx.work, fx.root, 'rev-parse', 'HEAD');
+  const r = job(fx, sha, { url: `file://${fx.root}/a-rather-long-folder-name-that-does-not-exist-anywhere/${'x'.repeat(260)}/origin.git` });
+  assert.equal(r.status, 0, r.out);
+  const w = r.out.split('\n').find((l) => /::warning::kept-clone: could not create the clone/.test(l)) ?? '';
+  assert.match(w, /could not create the clone at \S+ \(fatal: /, 'the tail starts at the beginning of a line, not in the middle of a word or path');
+  assert.match(w, /kept-clone: git clone failed \(exit \d+\)/, 'the failing command is named');
 });
 
 // ---------------------------------------------------------------------------------------------------------------------------------
