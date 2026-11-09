@@ -12,8 +12,9 @@
   - 2026-11-05: dropped, because an own-CA signature does not remove Gatekeeper's or SmartScreen's warnings. Removal on
     main: `b2dd0e88b`, `92b7b6c28`, `87b453c4a` (docs) and `87c9b8449` (icons left on main).
   - 2026-11-09: revived after a spike (§1.2). The same day the user widened the scope to all three OS as peers, with the
-    install functions of the old plan ("include all OS. Install root cert etc functions"), and asked for the functions,
-    placeholder icons and family-doc entries to come back.
+    install functions of the old plan ("include all OS. Install root cert etc functions"), asked for the functions,
+    placeholder icons and family-doc entries to come back, and clarified that Scrutineer is "a gui with command line app":
+    a family app on the shared shell with a full command line (§2.7). The old plan had the GUI as "Later" (P§3 row 23).
 - This ADR replaces the old plan's reasoning. It keeps the old plan's functions (P§2.3, P§3), corrects its D16 (one
   family key, §2.6) and its D9 and macOS keychain handling (the spike, §1.2), and adds Linux as a peer (§4.3).
 - Related:
@@ -100,7 +101,8 @@ Linux it lets a machine that chose to trust the family know a family binary from
 
 ### 2.1 One family signing identity, made and held by Scrutineer
 
-Scrutineer (a tool, not an app, `tools/scrutineer/`, generic: nothing in it names Paddock) generates and keeps **one
+Scrutineer (a family app with a GUI and a full command line, `apps/scrutineer/`, §2.7; generic: nothing in its signing core
+names Paddock) generates and keeps **one
 family signing identity**:
 
 ```text
@@ -257,6 +259,42 @@ identifier** would satisfy the family DR and inherit the person's Full Disk Acce
   usable again; whether to go back is D14, not part of this ADR's work.
 - **ADR 0051 U5.** `paddock-sign` owns the Authenticode verifier; `paddock-tools` calls it (old D14 kept).
 
+### 2.7 Scrutineer is an app: GUI on the shared shell, the same functions as a command line
+
+- **One app, two faces.** A Tauri app on the shared Paddock shell (`paddock-ui`, Angular Material first, rule 47; Angular
+  CDK for behaviour; dialogs are real windows, rule 17), like the other family apps. The same binary run with arguments
+  (`scrutineer <command>`, no window) is the full CLI of §2.2, for CI and scripts; on Windows a bundled console twin
+  `scrutineer-cli.exe` gives a console without a window flash. The installers put the CLI on the PATH on request.
+- **No logic in the UI.** The GUI and the CLI call the same crates (`paddock-pki`, `paddock-sign`, `paddock-trust-store`)
+  through one command layer; the Rust core is the single source of truth (AGENTS.md "Where logic lives"). The Angular
+  side renders what the engine returns; a mock backend exists only for UI tests.
+- **Long work is a job** (rules 10 to 12): signing or verifying many files, generating keys, `trust sync` run as
+  `paddock-jobs` jobs with live phases and Cancel; they never run at a starvable level (rule 52).
+- **Elevation only for the one operation.** The app runs as the user. `trust install | remove | sync` starts the CLI as an
+  elevated child for that one command (Windows UAC; macOS: the OS's own authorisation prompt from `SecTrustSettings` in the
+  admin domain; Linux: `pkexec`), passing the fingerprint the person confirmed; the child re-checks it before acting
+  (rule 53).
+- **Private keys in the GUI.** The root is opened only during a ceremony from its offline file and dropped from memory
+  after; the CI leaf is never loaded by the GUI (it is a CI secret); the intermediate passphrase is typed each use (D4).
+
+Screens (each with its skeleton, empty and error states, as every family page):
+
+| Screen | Shows and does |
+|---|---|
+| **Certificate authority** (home) | The inventory: family root, standby root, intermediate, family leaf, OpenPGP and minisign keys, local root; for each, fingerprint, validity, days left, where it is kept, and a chain view root → intermediate → leaf |
+| **Generate and rotate** | `ca init` (with `--local`), issue a leaf (PKCS#12 out for the CI secret), renew, rotate the intermediate or the root (promote the standby), each as a step-by-step dialog that shows the plan before it acts and says what a root change costs (grants lost once, §6) |
+| **Sign and verify** | Drop files to sign (chooses the format by detection) or to verify; **drag and drop any file to see its verify report**: signer, chain and which root, trusted here or not, timestamp, DR and identifier, nested files, minisign and OpenPGP signatures, with the reason for any failure |
+| **Trust** | Per OS (§2.4): what is installed where, Install and Uninstall. Install shows subject, validity, constraints and SHA-256, then asks for the **first 8 hex digits from the person's own record** before the button enables, then the OS elevation prompt. Debian-style Linux shows why the root is not installed and offers the package keyring instead |
+| **Doctor** | The `doctor` report as a checklist with a next step per row (expiry, chains that do not match the inventory, Smart App Control, TrustedPublisher drift, installed apps whose DR does not name the family root) |
+| **Expiry reminders** | Days left per certificate and key, warn at 60 and fail at 14 (D3); the shell's notifications (ADR 0010) when the app opens; no login item or service (D20); the same thresholds in `sign`, `doctor` and the CI gate |
+| **Key backup** | `ca backup --paper`: the printable sheet (encrypted key lines with checksums, fingerprints, restore steps; never the passphrase), a restore check that reads a sheet back, and the "where is each key" record |
+| Settings, About, Updates | the shell's standard pages; updates through the family minisign key like every app |
+
+As a family app it gets `apps/scrutineer/` with its own `paddock.ci.json`, `.gitea/workflows/scrutineer.yml` (gates on all
+three OS; the signing core needs native adapters on each), a CODEOWNERS line, per-OS installers, and `scrutineer-v*` tags.
+Its own builds are signed with the family identity like every app (it may sign its own release once the ceremony is done).
+Until it has code, its placeholder page stays at `tools/scrutineer/README.md` (D21).
+
 ## 3. Release gate (ADR 0039, rule 54, rule 71)
 
 `scrutineer verify --policy release.toml` runs inside `./dev release verify` on every downloaded artifact and fails
@@ -391,6 +429,10 @@ Order (memory, 2026-11-05 and later): Dyno (1.1.0 tagged; its next tag is gated 
   Volumes losses and the prompts from CI-built test apps, which costs the user attention on every upgrade today. It does
   not touch any app's release path.
 - **Speeds up Dyno:** disk map and file finder keep FDA across updates; the FDA onboarding flow becomes a one-time step.
+- **The app itself (D19).** The signing gate needs only the CLI, which CI builds from the same crates and runs in the job (it
+  is not a released product before the app's own tag; a local build of it is fine for the owner's ceremony, ER-15). So
+  the GUI app is **not on the critical path**: recommended place in the release order **after Pitwall 1.1** (after Dyno,
+  Debrief 1.2 and Pitwall 1.1), with its screens built beside the release work while load allows.
 - **Competes for:** builder slots. The new crates (A, B, C, D) are new code no release depends on, so they may run beside
   the release work while load allows (ER-1, ER-24).
 
@@ -414,8 +456,11 @@ Order (memory, 2026-11-05 and later): Dyno (1.1.0 tagged; its next tag is gated 
 | D14 | Go back to the login keychain on macOS once signed | **Not now**; keep owner-only files and ADR 0057; revisit after one signed release cycle |
 | D15 | Publisher name in the certificates | **"decryp7"** in CN and O; no e-mail or real name |
 | D16 | Update keys | **One family minisign key** (corrects the old D16); Scrutineer inventories and backs it up, never makes per-app keys |
-| D17 | Home | **`tools/scrutineer/`**, own Cargo workspace and lockfile, `scrutineer-v*` releases signed by itself plus minisign |
-| D18 | Order | **macOS track first in time** (S1, A, B3, C1 macOS part, D1, E1m, E2, F1 macOS), Windows and Linux adapters beside it; first signed release Pitwall 1.1 or Dyno's next, whichever freezes later than E2 |
+| D17 | Home | **`apps/scrutineer/`** as a family app (own Cargo workspace and lockfile, `paddock.ci.json`, workflow, CODEOWNERS, installers, `scrutineer-v*` tags); the placeholder page moves there with the first code |
+| D18 | Order of the signing work | **macOS track first in time** (S1, A, B3, C1 macOS part, D1, E1m, E2, F1 macOS), Windows and Linux adapters beside it; first signed release Pitwall 1.1 or Dyno's next, whichever freezes later than E2 |
+| D19 | Where the Scrutineer app goes in the release order | **After Pitwall 1.1** (after Dyno, Debrief 1.2 and Pitwall 1.1); the CLI that the gate needs is built by CI from the same crates and is not blocked by the app's release. Earlier only if you want the GUI for the first key ceremony (then about 12–17.5 days move ahead of Pitwall 1.1) |
+| D20 | Expiry reminders outside the app | **No login item or background service**: reminders when the app opens, in `doctor`, and as CI warnings from 60 days; a login-item check is a later option |
+| D21 | Where Scrutineer lives | **`apps/scrutineer/` from its first code (AP1)**, like every family app, because it ships installers, has its own release tag and CI contract, and runs on the shared shell; `tools/` holds developer scripts, not shipped products. **Until then the placeholder page stays at `tools/scrutineer/`**, where it was before the drop, because an `apps/<app>/` folder must carry `paddock.ci.json`, a workflow and a CODEOWNERS line (`scripts/affected.test.mjs` checks all three), which an app with no code cannot fill. Alternative: move the placeholder now to `docs/planned/scrutineer/`, as Recce does |
 
 ## 10. Work packages
 
@@ -434,8 +479,8 @@ reasons) and contract tests in a `testing` feature (rule 43); real stores only o
 | **B5** | Linux adapter: `.rpm` and AppImage signatures and their verify | B1 | 2.5–3.5 |
 | **C1** | `paddock-trust-store` Windows (Root, TrustedPublisher, Disallowed, usage property) and macOS (`SecTrustSettings`, `codeSign`) | A1 | 4–5.5 |
 | **C2** | `paddock-trust-store` Linux: p11-kit anchor with purposes, Debian refusal, apt keyring and `rpm --import` | A1 | 1.5–2 |
-| **D1** | Scrutineer CLI: every command of §2.2, confirmation flow, Windows self-elevation of `trust`, `doctor`, `audit show`, `backup --paper` | A2, B2, B3, B5, C1, C2 | 3–4 |
-| **D2** | Scrutineer release workflow, README | D1 | 1–1.5 |
+| **D1** | Scrutineer command layer and CLI: every command of §2.2 (shared by the GUI), confirmation flow, the elevated child for `trust`, `doctor`, `audit show`, `backup --paper` | A2, B2, B3, B5, C1, C2 | 3–4 |
+| **D2** | CI build of the CLI for signing jobs (no release; a pinned artifact the signing steps fetch, like `./dev`), README | D1 | 1–1.5 |
 | **G1** | Owner guides: the key ceremony, backup, renewal calendar, "a key leaked" runbook, per-OS trust install | D1 | 1.5–2 |
 | **R0** | Local identity on the Mac mini; `./dev` step that signs the runner binaries after an upgrade; test-app signing in CI with `.test` ids | D1 (or the spike recipe as an interim) | 0.5–1 |
 | **E1m** | CI macOS: `ci prepare`/`cleanup` under the `macos-signing` lock, `APPLE_SIGNING_IDENTITY`, inside-out re-sign, DMG, tarball, `.sig` | D1, ceremony done | 2–3 |
@@ -449,9 +494,17 @@ reasons) and contract tests in a `testing` feature (rule 43); real stores only o
 | F4 | Read-only trust status in the installers and About | C1, ADR 0028 | 1–1.5 |
 | H1 | Dyno helper checks its caller against the family DR | B3, F1 | 1.5–2 |
 | L2 | Signed apt repository through Gitea's Debian registry | E1l | 1–2 |
-| Later | YubiKey/PKCS#11 (2–3), GUI on the shell (5–8), rcodesign adapter (1.5–2), plugin key under `keys` (1) | | 9.5–14 |
+| AP1 | The app: `apps/scrutineer/` on the shared shell, `paddock.ci.json`, `scrutineer.yml`, CODEOWNERS line, installers on three OS, `scrutineer-v*` release | D1 | 2–3 |
+| AP2 | Certificate authority screen and expiry reminders | AP1 | 1.5–2.5 |
+| AP3 | Generate and rotate dialogs, key backup screen | AP1 | 2.5–3.5 |
+| AP4 | Sign and verify with drag and drop and the verify report | AP1 | 1.5–2 |
+| AP5 | Trust screen per OS with the 8-hex confirm and the elevated child | AP1, C1, C2 | 2–2.5 |
+| AP6 | Doctor screen | AP1 | 0.5–1 |
+| AP7 | Mock backend, unit and e2e tests, screenshots and their independent review (rule 22) | AP2–AP6 | 2–3 |
+| Later | YubiKey/PKCS#11 (2–3), rcodesign adapter (1.5–2), plugin key under `keys` (1) | | 4.5–6 |
 
-**Totals:** Must (S1 to K1, bold) **41–58.5 days**; Should (F2, F4, H1, L2) **6.5–9.5 days**; Later 9.5–14 days. The
+**Totals:** signing path, Must (S1 to K1, bold) **41–58.5 days**; the app (AP1 to AP7) **12–17.5 days**; Should (F2, F4,
+H1, L2) **6.5–9.5 days**; Later 4.5–6 days. All together about **64–91.5 days**. The
 macOS track to a first signed app is about **22–30 days** (S1, ADR, A1, A2, B1, B3, the macOS half of C1, D1, G1, E1m,
 E2, F1 for one app). With two builders in parallel (A then B3 and C1; B2, B5, C2 beside them) the calendar is roughly
 three to four weeks after the decisions.
@@ -470,5 +523,5 @@ file; a family installer has tens of files, so seconds are expected (unmeasured)
 - The family gains key custody duties: an offline root, a paper backup, a leaf to renew every two years, a CRL. `doctor`
   and the gate warn ahead of every expiry.
 - A lost root without the standby costs every macOS grant once and a re-install on every trusting Windows machine.
-- The Scrutineer placeholder page, icons and family-doc entries come back with this ADR; the real icon, hero and page are
+- Scrutineer joins the family as an app with a command line; its placeholder page, icons and family-doc entries come back with this ADR; the real icon, hero and page are
   later work (the user, 2026-11-04). The unlanded `chore/remove-scrutineer-icons` must not land.
