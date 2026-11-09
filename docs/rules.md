@@ -182,14 +182,14 @@ changes here, every app's copy is updated in the same change.
     `node conformance/bin/paddock-conformance.mjs commit-lint --range origin/main..<branch>`. A push to main lints only what main
     itself gets (`--first-parent`), so this is where a branch's own subjects and trailers are checked; C23 is the backstop.
     (h) is reserved.
-    (i) After a CI run fails, each fix round reruns the union of (a) every job that failed in the last run and (b) every job
-    the fix's diff reaches, computed against the commit CI last tested: dispatch `ci.yml` (workflow_dispatch) with the input
-    `base` = that sha, not main. A failed job the diff doesn't reach reruns only its failed tests (nextest or vitest filter);
-    a job the diff reaches runs in full, since the fix may break its other tests. Use "rerun failed jobs" on the same commit
-    (`POST /api/v1/repos/{owner}/{repo}/actions/runs/{run}/rerun-failed-jobs`) only to retry a suspected flake, never to turn
-    red green (ER-12). When all rounds are green, run the full affected plan against main once on the final tree (ER-8), then
-    land. The planner is getting a mode for this (`./dev plan --since-run <id>`, a train-3 item); until it exists, the
-    coordinator builds the union by hand from the run's failed jobs.
+    (i) After a CI run fails, each fix round reruns only what failed in the last run: the failed jobs, and inside them only
+    the failed tests (nextest or vitest filter) where the job's runner supports it. Jobs and tests that passed aren't rerun
+    during fix rounds. Dispatch `ci.yml` (workflow_dispatch) with the input `base` = the commit CI last tested, not main; use
+    "rerun failed jobs" on the same commit (`POST /api/v1/repos/{owner}/{repo}/actions/runs/{run}/rerun-failed-jobs`) only to
+    retry a suspected flake, never to turn red green (ER-12). When every round is green, run the full affected plan against
+    main once on the final tree (ER-8); that run catches anything a fix broke elsewhere. Then land. Nothing lands without that
+    full green run. The planner is getting a mode for this (`./dev plan --since-run <id>` lists the failed jobs and tests of
+    a run, a train-3 item); until it exists, the coordinator builds that list by hand.
     *Why:* CI runners are the scarcest resource, and every wasted run delays a release.
 
 ## Performance analysis (user, 2026-10-29)
