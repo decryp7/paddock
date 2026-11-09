@@ -50,9 +50,10 @@ const RETRY_COMPONENTS_EVERY: u64 = 300;
 
 /// The common sensors.
 pub struct SysinfoSensors {
-    sys: System,
-    disks: Disks,
-    networks: Networks,
+    /// Each is `None` when sysinfo could not start it (logged once): that part reads zero or empty.
+    sys: Option<System>,
+    disks: Option<Disks>,
+    networks: Option<Networks>,
     components: Option<Components>,
     battery: BatteryReader,
     probe: Box<dyn SensorProbe>,
@@ -78,12 +79,23 @@ pub const NO_FANS: &str = "This computer reports no fan speeds";
 impl SysinfoSensors {
     /// Sensors with an OS probe.
     pub fn new(probe: Box<dyn SensorProbe>) -> Self {
-        let mut sys = System::new();
-        sys.refresh_cpu_list(CpuRefreshKind::nothing());
+        let sys = System::new()
+            .inspect_err(|why| log::warn!("CPU and memory readings are unavailable (sysinfo): {why}; they read zero"))
+            .ok()
+            .map(|mut sys| {
+                sys.refresh_cpu_list(CpuRefreshKind::nothing());
+                sys
+            });
+        let disks = Disks::new_with_refreshed_list_specifics(DiskRefreshKind::nothing().with_storage().with_io_usage())
+            .inspect_err(|why| log::warn!("the volume list is unavailable (sysinfo): {why}; no volumes are listed"))
+            .ok();
+        let networks = Networks::new_with_refreshed_list()
+            .inspect_err(|why| log::warn!("the network interface list is unavailable (sysinfo): {why}; no interfaces are listed"))
+            .ok();
         SysinfoSensors {
             sys,
-            disks: Disks::new_with_refreshed_list_specifics(DiskRefreshKind::nothing().with_storage().with_io_usage()),
-            networks: Networks::new_with_refreshed_list(),
+            disks,
+            networks,
             components: None,
             battery: BatteryReader::new(BATTERY_EVERY),
             probe,
@@ -97,17 +109,26 @@ impl SysinfoSensors {
     }
 
     fn cpu(&mut self) -> CpuSample {
-        self.sys
-            .refresh_cpu_specifics(CpuRefreshKind::nothing().with_cpu_usage().with_frequency());
-        let cpus = self.sys.cpus();
-        let per_core: Vec<f32> = cpus.iter().map(|c| clamp_pct(c.cpu_usage())).collect();
+        let Some(sys) = self.sys.as_mut() else {
+            return CpuSample {
+                total: 0.0,
+                per_core: Vec::new(),
+                frequency_mhz: 0,
+                base_frequency_mhz: 0,
+                core_kinds: Vec::new(),
+                core_frequency_mhz: Vec::new(),
+            };
+        };
+        sys.refresh_cpu_specifics(CpuRefreshKind::nothing().with_usage().with_frequency());
+        let cpus = sys.cpus();
+        let per_core: Vec<f32> = cpus.iter().map(|c| clamp_pct(c.usage())).collect();
         let freq = if cpus.is_empty() {
             0
         } else {
             cpus.iter().map(|c| c.frequency()).sum::<u64>() / cpus.len() as u64
         };
         CpuSample {
-            total: clamp_pct(self.sys.global_cpu_usage()),
+            total: clamp_pct(sys.global_cpu_usage()),
             per_core,
             frequency_mhz: u32::try_from(freq).unwrap_or(0),
             base_frequency_mhz: 0,
@@ -117,22 +138,27 @@ impl SysinfoSensors {
     }
 
     fn memory(&mut self) -> MemorySample {
-        self.sys
-            .refresh_memory_specifics(MemoryRefreshKind::nothing().with_ram().with_swap());
-        let total = self.sys.total_memory();
-        let (used, available) = split_memory(
-            cfg!(target_os = "macos"),
-            total,
-            self.sys.available_memory(),
-            self.sys.used_memory(),
-        );
+        let (total, sys_available, sys_used, swap_used, swap_total) = match self.sys.as_mut() {
+            Some(sys) => {
+                sys.refresh_memory_specifics(MemoryRefreshKind::nothing().with_ram().with_swap());
+                (
+                    sys.total_memory(),
+                    sys.available_memory(),
+                    sys.used_memory(),
+                    sys.used_swap(),
+                    sys.total_swap(),
+                )
+            }
+            None => (0, 0, 0, 0, 0),
+        };
+        let (used, available) = split_memory(cfg!(target_os = "macos"), total, sys_available, sys_used);
         let mut m = MemorySample {
             total,
             used,
             available,
             commit: Reading::unavailable("Commit charge is a Windows measure"),
-            swap_used: self.sys.used_swap(),
-            swap_total: self.sys.total_swap(),
+            swap_used,
+            swap_total,
             pressure: Reading::unavailable("Not measured"),
         };
         m.pressure = Reading::Available(derive_pressure(&m));
@@ -153,11 +179,17 @@ impl SysinfoSensors {
         if storage_due {
             self.storage_refreshes += 1;
         }
-        self.disks.refresh_specifics(relist, kind);
         let (mut read, mut written) = (0u64, 0u64);
         let mut seen = Vec::new();
         let mut out = Vec::new();
-        for d in self.disks.list() {
+        let listed: &[sysinfo::Disk] = match self.disks.as_mut() {
+            Some(disks) => {
+                disks.refresh_specifics(relist, kind);
+                disks
+            }
+            None => &[],
+        };
+        for d in listed {
             let mount = d.mount_point().to_string_lossy().into_owned();
             let usage = d.usage();
             read = read.saturating_add(usage.read_bytes);
@@ -201,14 +233,15 @@ impl SysinfoSensors {
     }
 
     fn network(&mut self, secs: f64) -> Vec<NetworkSample> {
-        self.networks.refresh(true);
-        let mut out: Vec<NetworkSample> = self
-            .networks
-            .list()
+        let Some(networks) = self.networks.as_mut() else {
+            return Vec::new();
+        };
+        networks.refresh(true);
+        let mut out: Vec<NetworkSample> = networks
             .iter()
             .filter(|(_, n)| n.total_received() > 0 || n.total_transmitted() > 0)
             .map(|(name, n)| NetworkSample {
-                name: name.clone(),
+                name: name.to_string_lossy().into_owned(),
                 rx_bps: rate(n.received(), secs),
                 tx_bps: rate(n.transmitted(), secs),
             })
@@ -225,13 +258,17 @@ impl SysinfoSensors {
         }
         match &mut self.components {
             Some(c) => c.refresh(false),
-            None if retry => self.components = Some(Components::new_with_refreshed_list()),
+            None if retry => {
+                self.components = Components::new_with_refreshed_list()
+                    .inspect_err(|why| log::warn!("the temperature sensor list is unavailable (sysinfo): {why}; retried later"))
+                    .ok();
+            }
             None => {}
         }
         let temps: Vec<Temperature> = self
             .components
             .iter()
-            .flat_map(|c| c.list())
+            .flat_map(|c| c.iter())
             .filter_map(|c| {
                 let t = c.temperature().filter(|t| t.is_finite() && *t > -50.0 && *t < 200.0)?;
                 Some(Temperature {
@@ -275,7 +312,7 @@ impl SystemSensors for SysinfoSensors {
             battery: self.battery.read(),
             temperatures,
             fans: Reading::unavailable(NO_FANS),
-            uptime_secs: System::uptime(),
+            uptime_secs: System::uptime().unwrap_or(0),
         };
         self.probe.enrich(&mut sample);
         self.ticks = self.ticks.wrapping_add(1);

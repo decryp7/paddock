@@ -403,7 +403,10 @@ fn save_inventory(shared: &Shared, path: &str, format: InventoryFormat) -> Resul
 /// Records this boot (once) and finds when the desktop settled after login, so Boot analysis has a history. Runs once at
 /// agent start; a restart of the agent in the middle of a session records nothing.
 fn record_boot(shared: &Shared) {
-    let boot_ms = i64::try_from(sysinfo::System::boot_time()).unwrap_or(0).saturating_mul(SECOND);
+    let boot_secs = sysinfo::System::boot_time()
+        .inspect_err(|why| log::warn!("the boot time is unavailable (sysinfo): {why}; this boot is not recorded"))
+        .unwrap_or(0);
+    let boot_ms = i64::try_from(boot_secs).unwrap_or(0).saturating_mul(SECOND);
     let started = now();
     if boot_ms <= 0 || started.millis() - boot_ms > BOOT_WINDOW_MS || started.millis() < boot_ms {
         return;

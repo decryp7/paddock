@@ -59,7 +59,7 @@ pub fn handle(shared: &Arc<Shared>, request: Request) -> Result<Reply, AgentErro
     match request {
         Request::SearchSeed { text } => {
             let input: String = text.chars().take(MAX_SEED_INPUT).collect();
-            let host = sysinfo::System::host_name();
+            let host = sysinfo::System::host_name().ok();
             let redactor = paddock_diag::Redactor::for_machine_named(&paddock_env::ProcessVars, host.as_deref());
             let redact = seed_redact(&redactor);
             Ok(Reply::SearchSeed(search_seed(&input, &redact)))

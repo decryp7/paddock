@@ -62,7 +62,7 @@ pub fn elapsed_ms() -> u64 {
 
 /// The OS version for the start lines ("unknown" when the OS does not say).
 pub fn os_version() -> String {
-    sysinfo::System::long_os_version().unwrap_or_else(|| "unknown".into())
+    sysinfo::System::long_os_version().unwrap_or_else(|_| "unknown".into())
 }
 
 /// The CPU architecture for the start lines.

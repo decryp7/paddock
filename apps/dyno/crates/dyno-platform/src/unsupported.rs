@@ -46,7 +46,10 @@ impl StartupItems for NotReadHere {
 
 impl FactsSource for NotReadHere {
     fn facts(&mut self) -> SystemFacts {
-        facts_not_read(sysinfo::System::long_os_version().unwrap_or_else(|| "Unknown OS".into()), &self.why)
+        facts_not_read(
+            sysinfo::System::long_os_version().unwrap_or_else(|_| "Unknown OS".into()),
+            &self.why,
+        )
     }
 }
 
