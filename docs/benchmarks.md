@@ -264,7 +264,7 @@ Quoted by `conformance/ci/build-jobs.sh` (the macOS layout) and the fix/main-aft
   did not (3 of 3); run beside them here it did not slow down, so that correlation is not a confirmed cause (ER-28). The
   dyno lib tests mostly wait, so 4 test threads instead of 14 made that run 2.3 times longer, while 8 was the fastest.
 - **Per run** (wall seconds; 1-minute load from `sysctl vm.loadavg` before the run):
-  - probe alone: 2.99, 2.66 (load 2.7); 2.70 (2.8); 4.13, 2.66 (4.1)
+  - probe alone: 2.66 (load 2.7; the other model test, `a_diverging_search_…`, took 2.99); 2.70 (2.8); 4.13, 2.66 (4.1)
   - probe beside 11 / 23 / 41 busy threads: 3.15 (load 3.5), 3.99 (5.0), 5.91 (5.0)
   - probe ×3 beside 3 dyno lib runs at 14 threads: 2.72, 2.65, 2.62 (load 9.8 before, 6.7 after); at 4 threads: 2.59,
     2.75, 2.64 (6.7 before, 6.0 after)
