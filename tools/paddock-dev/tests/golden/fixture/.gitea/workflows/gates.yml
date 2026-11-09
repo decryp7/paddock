@@ -1,0 +1,10 @@
+# A reusable workflow: x.yml and nightly.yml call it.
+name: gates
+on:
+  workflow_call:
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.gitea/actions/node-caches
+      - run: npm test

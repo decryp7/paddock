@@ -1,0 +1,27 @@
+# The fixture's ci.yml: jobs named as in CI_JOBS, the actions they use.
+name: ci
+on:
+  pull_request:
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - run: node scripts/affected.mjs --ci
+  ui:
+    needs: [plan]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.gitea/actions/node-caches
+      - run: npm test -- --reporter=dot
+  crates:
+    needs: [plan]
+    runs-on: ubuntu-latest
+    steps:
+      # .gitea/actions/unused is named only in this comment.
+      - uses: ./.gitea/actions/build-folder
+      - run: cargo nextest run --workspace
+  app:
+    needs: [plan]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.gitea/actions/app-gates

@@ -1,0 +1,67 @@
+{
+ "all": true,
+ "crates": true,
+ "ui": true,
+ "eslint": true,
+ "conformance": true,
+ "tools": true,
+ "icons": true,
+ "ciImage": true,
+ "paddockDev": true,
+ "docs": false,
+ "apps": [
+  "x",
+  "y",
+  "z"
+ ],
+ "kinds": {
+  "x": [
+   "rust",
+   "ui"
+  ],
+  "y": [
+   "rust",
+   "ui"
+  ],
+  "z": [
+   "rust",
+   "ui"
+  ]
+ },
+ "packages": {},
+ "why": {
+  "app:x": [
+   "global .gitea/actions/unused/action.yml"
+  ],
+  "app:y": [
+   "global .gitea/actions/unused/action.yml"
+  ],
+  "app:z": [
+   "global .gitea/actions/unused/action.yml"
+  ],
+  "ci-image": [
+   "global .gitea/actions/unused/action.yml"
+  ],
+  "conformance": [
+   "global .gitea/actions/unused/action.yml"
+  ],
+  "crates": [
+   "global .gitea/actions/unused/action.yml"
+  ],
+  "eslint": [
+   "global .gitea/actions/unused/action.yml"
+  ],
+  "icons": [
+   "global .gitea/actions/unused/action.yml"
+  ],
+  "paddock-dev": [
+   "global .gitea/actions/unused/action.yml"
+  ],
+  "tools": [
+   "global .gitea/actions/unused/action.yml"
+  ],
+  "ui": [
+   "global .gitea/actions/unused/action.yml"
+  ]
+ }
+}

@@ -1,1 +1,7 @@
+# App x's own workflow.
 name: x
+on:
+  pull_request:
+jobs:
+  gates:
+    uses: ./.gitea/workflows/gates.yml

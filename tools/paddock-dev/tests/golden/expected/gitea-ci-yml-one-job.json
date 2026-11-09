@@ -1,0 +1,23 @@
+{
+ "all": false,
+ "crates": false,
+ "ui": true,
+ "eslint": false,
+ "conformance": true,
+ "tools": false,
+ "icons": false,
+ "ciImage": false,
+ "paddockDev": false,
+ "docs": false,
+ "apps": [],
+ "kinds": {},
+ "packages": {},
+ "why": {
+  "conformance": [
+   "ci files .gitea/workflows/ci.yml"
+  ],
+  "ui": [
+   ".gitea/workflows/ci.yml, job ui"
+  ]
+ }
+}

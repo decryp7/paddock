@@ -1,7 +1,8 @@
 //! The graph crate plus Paddock's rules reproduce what `scripts/affected.mjs` answered.
 //!
 //! - `recorded_*`: cases in `tests/golden/cases.json` run on the fixture repository in `tests/golden/fixture` (built in a scratch
-//!   folder with two commits, tagged `fixture-base` and `fixture-head`); the answers of the script were recorded once into `tests/golden/expected/`
+//!   folder with two commits, tagged `fixture-base` and `fixture-head`, and one commit per folder of `tests/golden/steps` on a
+//!   side branch, tagged `step-<folder>`: the `.gitea` and shared-script edits); the answers of the script were recorded once into `tests/golden/expected/`
 //!   by `tests/golden/generate.mjs`. These need no node, so they outlive the script (ADR 0022 R4 deletes it).
 //! - `recorded_command_line_*`: the same for the command line (`--ci`, `--commit-range`, the argument forms) in
 //!   `tests/golden/ci-cases.json`, recorded into `tests/golden/expected/cli/`.
@@ -109,6 +110,7 @@ const SAMPLES: &[&[&str]] = &[
     &["rust-toolchain.toml", "tsconfig/base.json"],
     &["conformance/ci/build-folder.sh"],
     &["conformance/src/util/is-main.mjs"],
+    &[".gitea/actions/app-gates/action.yml", ".gitea/workflows/nightly.yml"],
     &[".gitignore", "crates/paddock-cli/CHANGELOG.md"],
 ];
 
@@ -213,6 +215,20 @@ fn fixture_repo() -> (tempfile::TempDir, PathBuf) {
     git(&root, &["add", "-A"]);
     git(&root, &["commit", "-q", "-m", "head"]);
     git(&root, &["tag", "fixture-head"]);
+    // The steps: one commit each on a side branch, so `main` and HEAD stay at `fixture-head` for the command line cases.
+    git(&root, &["checkout", "-q", "-b", "steps"]);
+    let mut steps: Vec<PathBuf> = std::fs::read_dir(golden_dir().join("steps"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    steps.sort();
+    for step in steps {
+        copy_tree(&step, &root);
+        git(&root, &["add", "-A"]);
+        git(&root, &["commit", "-q", "-m", "step"]);
+        git(&root, &["tag", &format!("step-{}", step.file_name().unwrap().to_string_lossy())]);
+    }
+    git(&root, &["checkout", "-q", "main"]);
     (dir, root)
 }
 
@@ -262,6 +278,12 @@ fn the_recorded_cases_cover_what_the_review_asked_for() {
         "deletion",
         "unknown-base",
         "everything",
+        "gitea-ci-yml-one-job",
+        "gitea-shared-action",
+        "gitea-helper-script",
+        "gitea-reusable-workflow",
+        "gitea-action-named-only-in-a-comment",
+        "gitea-ci-yml-header",
     ] {
         assert!(text.contains(needle), "no recorded case for {needle}");
     }

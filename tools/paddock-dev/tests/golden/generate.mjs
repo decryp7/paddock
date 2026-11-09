@@ -41,6 +41,15 @@ try {
   git(root, 'add', '-A');
   git(root, 'commit', '-q', '-m', 'head');
   git(root, 'tag', 'fixture-head');
+  // The steps (tests/golden/steps/<n>-<name>): one commit each on a side branch, tagged step-<n>-<name>; main stays at fixture-head.
+  git(root, 'checkout', '-q', '-b', 'steps');
+  for (const step of readdirSync(join(here, 'steps')).sort()) {
+    place(join(here, 'steps', step), root);
+    git(root, 'add', '-A');
+    git(root, 'commit', '-q', '-m', 'step');
+    git(root, 'tag', `step-${step}`);
+  }
+  git(root, 'checkout', '-q', 'main');
 
   mkdirSync(join(here, 'expected'), { recursive: true });
   for (const c of JSON.parse(readFileSync(join(here, 'cases.json'), 'utf8'))) {
