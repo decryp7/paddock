@@ -76,7 +76,10 @@ Remove-Item $key -ErrorAction SilentlyContinue
 $a = Join-Path $base 'a'
 $r = Run $installer "/S /D=$a" @{}
 Check 'A fresh install exit 0' ($r.Code -eq 0) "code $($r.Code)"
-Check 'A order of calls' ((Cmds $r) -match '^(hold-installing,)?check-dir,guard,stop-all,clean-run,clean-staging$' -or (Cmds $r) -match 'check-dir,guard,stop-all,clean-run,clean-staging') (Cmds $r)
+$cmdsNoVersion = (Cmds $r) -replace 'check-version,',''
+Check 'A order of calls' ($cmdsNoVersion -match '^(hold-installing,)?check-dir,guard,stop-all,clean-run,clean-staging$' -or $cmdsNoVersion -match 'check-dir,guard,stop-all,clean-run,clean-staging') (Cmds $r)
+# The include reads the embedded program's own version (the stub's 9.8.7), never the installer's: check-version --expect names it.
+Check 'A check-version expects the embedded program version' ($r.Lines -match 'check-version --dir .* --expect 9\.8\.7$') ($r.Lines -join '|')
 Check 'A clean-run machine scope' ($r.Lines -match 'clean-run --dir .* --scope machine') ($r.Lines -join '|')
 Check 'A stop list' ($r.Lines -match 'stop-all --dir .* --images "harness.exe,harness-agent.exe"') ($r.Lines -join '|')
 Check 'A files' ((Test-Path "$a\harness.txt") -and (Test-Path "$a\paddock-setup.exe") -and (Test-Path "$a\uninstall.exe")) (Get-ChildItem $a -Name -ErrorAction SilentlyContinue)

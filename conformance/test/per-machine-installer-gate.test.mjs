@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { checkInstaller, checkNsisVersion, nsisVersionOf, checkSetupSubsystem, subsystemOf, checkSelfTest, find7z, checkSignatureName, trustedCommentOf, findInstallers, hasAdministratorManifest, includeVersionOf, listedFiles } from '../release/check-per-machine-installer.mjs';
+import { createHash } from 'node:crypto';
+import { checkInstaller, checkNsisVersion, nsisVersionOf, checkSetupSubsystem, subsystemOf, checkSelfTest, find7z, checkSignatureName, trustedCommentOf, findInstallers, hasAdministratorManifest, includeVersionOf, listedFiles, checkSetupDescribed, resourceStringOf, crateVersion, checkReleasedHash, previousTag, previousProgramVersion } from '../release/check-per-machine-installer.mjs';
 
 const utf16 = (s) => Buffer.from(s, 'utf16le');
 const installer = ({ admin = true, version = '1' } = {}) =>
@@ -119,4 +120,109 @@ test('the installer must be made by NSIS 3.12 or later (3.11 and earlier can run
   assert.match(checkNsisVersion({ bytes: brand('3.11'), name: 'a-setup.exe' }).join(), /NSIS 3\.11.*3\.12/s);
   assert.match(checkNsisVersion({ bytes: brand('3.08'), name: 'a-setup.exe' }).join(), /NSIS 3\.08/);
   assert.match(checkNsisVersion({ bytes: Buffer.from('MZ'), name: 'a-setup.exe' }).join(), /NSIS version was not measured/, 'no branding: not measured, so not passed (ER-33)');
+});
+
+const described = ({ omit = [], over = {}, extra = '' } = {}) => {
+  const fields = { CompanyName: 'decryptology', FileDescription: 'Dyno update', FileVersion: '1.2.0', InternalName: 'paddock-setup', LegalCopyright: 'Copyright (C) decryptology', OriginalFilename: 'paddock-setup.exe', ProductName: 'Dyno', ProductVersion: '1.2.0', ...over };
+  const parts = [Buffer.from('MZ..')];
+  for (const [k, v] of Object.entries(fields)) if (!omit.includes(k)) parts.push(utf16(k), Buffer.from([0, 0]), utf16(v), Buffer.from([0, 0]));
+  parts.push(Buffer.from('<requestedExecutionLevel level="asInvoker" uiAccess="false"/><supportedOS Id="{x}"/>'), Buffer.from(extra));
+  return Buffer.concat(parts);
+};
+const args = (bytes) => ({ bytes, name: 'Dyno_1.1.1_x64-setup.exe', expectVersion: '1.2.0', product: 'Dyno' });
+
+test('paddock-setup.exe carries every version resource field, its own version and an asInvoker manifest', () => {
+  assert.deepEqual(checkSetupDescribed(args(described())), []);
+  assert.equal(resourceStringOf(described(), 'OriginalFilename'), 'paddock-setup.exe');
+  for (const k of ['CompanyName', 'LegalCopyright', 'OriginalFilename', 'InternalName', 'ProductName', 'FileVersion']) {
+    assert.match(checkSetupDescribed(args(described({ omit: [k] }))).join('\n'), new RegExp(`no ${k}`), k);
+  }
+  assert.match(checkSetupDescribed(args(described({ over: { FileVersion: '1.1.1' } }))).join('\n'), /FileVersion is "1\.1\.1", expected "1\.2\.0".*crate version, not the app version/);
+  assert.match(checkSetupDescribed(args(null)).join(''), /could not be extracted/);
+});
+
+test('the manifest must be asInvoker with supportedOS; a build path in the program fails the gate', () => {
+  const noManifest = Buffer.concat([described().subarray(0, described().indexOf('<requestedExecutionLevel'))]);
+  const msgs = checkSetupDescribed(args(noManifest)).join('\n');
+  assert.match(msgs, /no asInvoker manifest/);
+  assert.match(msgs, /no supportedOS/);
+  assert.match(checkSetupDescribed(args(described({ extra: 'C:\\Users\\decryp7\\.cargo\\registry\\src\\x' }))).join('\n'), /build path \(C:\\Users\\decryp7\)/);
+  assert.match(checkSetupDescribed(args(described({ extra: '/home/x/.cargo/registry/src' }))).join('\n'), /build path/);
+  assert.deepEqual(checkSetupDescribed(args(described({ extra: '/cargo/registry/src/x /rustc/abc/library' }))), []);
+});
+
+test("the expected version is the crate's own, read from its [package] table", () => {
+  assert.equal(crateVersion('[package]\nname = "paddock-setup"\nversion = "1.2.0"\n[dependencies]\nsemver = { version = "1" }\n'), '1.2.0');
+  assert.equal(crateVersion('[package]\nname = "x"\n[dependencies]\nversion = "3"\n'), null);
+});
+
+test('a missing crate version fails the gate instead of skipping the FileVersion check (ER-33)', () => {
+  const msgs = checkSetupDescribed({ ...args(described()), expectVersion: null }).join('\n');
+  assert.match(msgs, /version was not measured.*do not release/);
+  assert.equal(crateVersion('[package]\nname = "x"\nversion.workspace = true\n'), null);
+});
+
+test('a build folder on any drive, or one named by the caller, in the program fails the gate', () => {
+  assert.match(checkSetupDescribed(args(described({ extra: 'D:\\a\\_work\\paddock\\crates\\paddock-setup\\src\\main.rs' }))).join('\n'), /build path/);
+  assert.match(checkSetupDescribed(args(described({ extra: 'C:\\act\\slot3\\paddock\\crates\\x\\Cargo.toml' }))).join('\n'), /build path/);
+  const roots = ['E:\\runner\\target-dyno-3'];
+  assert.match(checkSetupDescribed({ ...args(described({ extra: 'E:/runner/target-dyno-3/release' })), roots }).join('\n'), /build folder E:\/runner\/target-dyno-3/);
+  assert.deepEqual(checkSetupDescribed({ ...args(described({ extra: 'x' })), roots }), []);
+});
+
+test('the same version with other bytes fails; a version without a record only notes its sha256', () => {
+  const bytes = described();
+  const sha = createHash('sha256').update(bytes).digest('hex');
+  const a = { bytes, name: 'i.exe', identifier: 'net.x.dyno', version: '1.2.0' };
+  assert.deepEqual(checkReleasedHash({ ...a, records: { 'net.x.dyno': { '1.2.0': sha } } }), { problems: [], notes: [] });
+  const bad = checkReleasedHash({ ...a, records: { 'net.x.dyno': { '1.2.0': 'ab'.repeat(32) } } });
+  assert.match(bad.problems.join(''), /changed without a version bump.*Bump the version/);
+  const none = checkReleasedHash({ ...a, records: {}, previousVersion: '0.1.0' });
+  assert.deepEqual(none.problems, []);
+  assert.match(none.notes.join(''), new RegExp(sha));
+  // another app's record or another version is not this one's
+  assert.deepEqual(checkReleasedHash({ ...a, records: { 'net.x.other': { '1.2.0': 'ff' } } }).problems, []);
+});
+
+test('an already released version without a record is not measured (fails); a new or unknown one only warns', () => {
+  const bytes = described();
+  const a = { bytes, name: 'i.exe', identifier: 'net.x.dyno', version: '1.2.0', records: {} };
+  const same = checkReleasedHash({ ...a, previousVersion: '1.2.0' });
+  assert.match(same.problems.join(''), /not measured.*already released.*released-hashes\.json/);
+  assert.deepEqual(checkReleasedHash({ ...a, previousVersion: '0.1.0' }).problems, [], 'the previous release shipped another version');
+  assert.match(checkReleasedHash({ ...a, previousVersion: '0.1.0' }).notes.join(''), /previous release shipped 0\.1\.0/);
+  assert.match(checkReleasedHash({ ...a, previousVersion: null }).notes.join(''), /no previous release/);
+  assert.match(checkReleasedHash({ ...a, previousVersion: undefined }).notes.join(''), /could not be read.*never released. is not shown/);
+  // with a record the previous version does not matter
+  const sha = createHash('sha256').update(bytes).digest('hex');
+  assert.deepEqual(checkReleasedHash({ ...a, records: { 'net.x.dyno': { '1.2.0': sha } }, previousVersion: '1.2.0' }).problems, []);
+});
+
+const fakeGit = ({ tags = [], head = 'h2', commits = {}, ancestors = [], files = {}, fail = false } = {}) => (args) => {
+  if (fail) return { status: 128, stdout: '' };
+  if (args[0] === 'tag') return { status: 0, stdout: tags.join('\n') };
+  if (args[0] === 'rev-parse' && args[1] === 'HEAD') return { status: 0, stdout: `${head}\n` };
+  if (args[0] === 'rev-parse') return commits[args[1].replace('^{commit}', '')] ? { status: 0, stdout: `${commits[args[1].replace('^{commit}', '')]}\n` } : { status: 1, stdout: '' };
+  if (args[0] === 'merge-base') return { status: ancestors.includes(args[2]) ? 0 : 1, stdout: '' };
+  if (args[0] === 'show') return files[args[1]] !== undefined ? { status: 0, stdout: files[args[1]] } : { status: 128, stdout: '' };
+  return { status: 1, stdout: '' };
+};
+test('the previous tag skips the tag on HEAD and any tag that is not an ancestor', () => {
+  const git = fakeGit({ tags: ['dyno-v1.2.0', 'dyno-v1.1.1', 'dyno-v1.1.0'], commits: { 'dyno-v1.2.0': 'h2', 'dyno-v1.1.1': 'h9', 'dyno-v1.1.0': 'h1' }, ancestors: ['dyno-v1.1.0'] });
+  assert.equal(previousTag({ prefix: 'dyno-v', git }), 'dyno-v1.1.0');
+  assert.equal(previousTag({ prefix: 'dyno-v', git: fakeGit({ tags: ['dyno-v1.2.0'], commits: { 'dyno-v1.2.0': 'h2' } }) }), null, 'only the tag on HEAD: tags exist, none before');
+  assert.equal(previousTag({ prefix: 'dyno-v', git: fakeGit({ tags: [] }) }), undefined, 'no tags at all: could be a clone without tags');
+  assert.equal(previousTag({ prefix: 'dyno-v', git: fakeGit({ fail: true }) }), undefined);
+});
+test("the program's version at the previous tag is read from its Cargo.toml there", () => {
+  const files = { 'dyno-v1.1.0:crates/paddock-setup/Cargo.toml': '[package]\nname = "paddock-setup"\nversion = "1.2.0"\n' };
+  const base = { tags: ['dyno-v1.1.0'], commits: { 'dyno-v1.1.0': 'h1' }, ancestors: ['dyno-v1.1.0'] };
+  assert.equal(previousProgramVersion({ prefix: 'dyno-v', git: fakeGit({ ...base, files }) }), '1.2.0');
+  assert.equal(previousProgramVersion({ prefix: 'dyno-v', git: fakeGit(base) }), null, 'the file did not exist at that tag');
+  assert.equal(previousProgramVersion({ prefix: 'dyno-v', git: fakeGit({ fail: true }) }), undefined);
+});
+test('the source-path check does not take a drive letter and a later .rs in one NUL-free run for a path', () => {
+  const noise = Buffer.from('error: C:\\ is not a drive; see the file lib.rs for details, and Cargo.toml too');
+  assert.deepEqual(checkSetupDescribed(args(Buffer.concat([described(), noise]))), []);
+  assert.match(checkSetupDescribed(args(described({ extra: 'C:\\Program Files\\x\\src\\lib.rs' }))).join(''), /build path/);
 });

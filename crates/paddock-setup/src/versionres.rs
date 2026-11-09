@@ -10,11 +10,61 @@ pub struct VersionInfo {
     pub description: String,
     /// `ProductName`.
     pub product: String,
-    /// `FileVersion` and `ProductVersion` text, `major.minor.patch`.
+    /// `FileVersion` and `ProductVersion` text, `major.minor.patch`. For `paddock-setup.exe` this is the crate's own version, not the app's:
+    /// the bytes stay the same across app releases, so a Defender verdict on them carries over.
     pub version: String,
+    /// `CompanyName`.
+    pub company: String,
+    /// `InternalName` (the program's name without its extension).
+    pub internal_name: String,
+    /// `OriginalFilename`.
+    pub original_filename: String,
+    /// `LegalCopyright`.
+    pub copyright: String,
 }
 
-/// The `.res` bytes: an empty resource header followed by one `RT_VERSION` resource (id 1, language 0x0409).
+/// The application manifest: run as the invoker (the elevation is the caller's UAC prompt, never this program's own request) and
+/// declare the Windows versions it was written for (Windows 10 and 11, 8.1), so Windows applies no compatibility shims.
+pub fn manifest(version: &str, name: &str) -> String {
+    let (ms, ls) = numeric_version(version);
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\r\n\
+<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">\r\n\
+  <assemblyIdentity type=\"win32\" name=\"{name}\" version=\"{}.{}.{}.0\"/>\r\n\
+  <trustInfo xmlns=\"urn:schemas-microsoft-com:asm.v3\"><security><requestedPrivileges>\r\n\
+    <requestedExecutionLevel level=\"asInvoker\" uiAccess=\"false\"/>\r\n\
+  </requestedPrivileges></security></trustInfo>\r\n\
+  <compatibility xmlns=\"urn:schemas-microsoft-com:compatibility.v1\"><application>\r\n\
+    <supportedOS Id=\"{{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}}\"/>\r\n\
+    <supportedOS Id=\"{{1f676c76-80e1-4239-95bb-83d0f6d0da78}}\"/>\r\n\
+  </application></compatibility>\r\n\
+</assembly>\r\n",
+        ms >> 16,
+        ms & 0xFFFF,
+        ls >> 16,
+    )
+}
+
+/// One resource record of a `.res` file: data size, header size, type, name, version, flags, language, data version, characteristics.
+fn resource(kind: u16, id: u16, flags: u16, data: Vec<u8>) -> Vec<u8> {
+    let mut res = Vec::new();
+    res.extend((data.len() as u32).to_le_bytes());
+    res.extend(32u32.to_le_bytes());
+    res.extend([0xFF, 0xFF]);
+    res.extend(kind.to_le_bytes());
+    res.extend([0xFF, 0xFF]);
+    res.extend(id.to_le_bytes());
+    res.extend(0u32.to_le_bytes());
+    res.extend(flags.to_le_bytes());
+    res.extend(0x0409u16.to_le_bytes());
+    res.extend(0u32.to_le_bytes());
+    res.extend(0u32.to_le_bytes());
+    res.extend(padded(data));
+    res
+}
+
+/// The `.res` bytes: an empty resource header, one `RT_VERSION` resource (id 1) and one `RT_MANIFEST` resource (id 1), language 0x0409.
+/// Same input, same bytes (nothing in it depends on the clock or the machine).
 pub fn to_res(info: &VersionInfo) -> Vec<u8> {
     let (ms, ls) = numeric_version(&info.version);
     let mut fixed = Vec::with_capacity(52);
@@ -39,8 +89,12 @@ pub fn to_res(info: &VersionInfo) -> Vec<u8> {
         |k: &str, v: &str| block(k, &utf16z(v), (v.encode_utf16().count() + 1) as u16, 1, &[]);
     let table = {
         let strings: Vec<u8> = [
+            ("CompanyName", info.company.as_str()),
             ("FileDescription", info.description.as_str()),
             ("FileVersion", info.version.as_str()),
+            ("InternalName", info.internal_name.as_str()),
+            ("LegalCopyright", info.copyright.as_str()),
+            ("OriginalFilename", info.original_filename.as_str()),
             ("ProductName", info.product.as_str()),
             ("ProductVersion", info.version.as_str()),
         ]
@@ -64,16 +118,13 @@ pub fn to_res(info: &VersionInfo) -> Vec<u8> {
     res.extend(0x20u32.to_le_bytes());
     res.extend([0xFF, 0xFF, 0, 0, 0xFF, 0xFF, 0, 0]);
     res.extend([0u8; 16]);
-    // RT_VERSION (16), id 1, language 0x0409.
-    res.extend((data.len() as u32).to_le_bytes());
-    res.extend(32u32.to_le_bytes());
-    res.extend([0xFF, 0xFF, 16, 0, 0xFF, 0xFF, 1, 0]);
-    res.extend(0u32.to_le_bytes());
-    res.extend(0x0030u16.to_le_bytes());
-    res.extend(0x0409u16.to_le_bytes());
-    res.extend(0u32.to_le_bytes());
-    res.extend(0u32.to_le_bytes());
-    res.extend(padded(data));
+    res.extend(resource(16, 1, 0x0030, data));
+    res.extend(resource(
+        24,
+        1,
+        0x0030,
+        manifest(&info.version, &info.internal_name).into_bytes(),
+    ));
     res
 }
 
@@ -129,6 +180,10 @@ mod tests {
             description: "Dyno update".into(),
             product: "Dyno".into(),
             version: "1.1.0".into(),
+            company: "decryptology".into(),
+            internal_name: "paddock-setup".into(),
+            original_filename: "paddock-setup.exe".into(),
+            copyright: "Copyright (C) decryptology".into(),
         }
     }
     fn utf16z(s: &str) -> Vec<u8> {
@@ -165,7 +220,10 @@ mod tests {
         assert_eq!(&r[40..44], &[0xFF, 0xFF, 16, 0]);
         assert_eq!(&r[44..48], &[0xFF, 0xFF, 1, 0]);
         assert_eq!(header % 4, 0);
-        assert_eq!(32 + header + data.next_multiple_of(4), r.len());
+        // The manifest record follows exactly where the version record ends.
+        let end = 32 + header + data.next_multiple_of(4);
+        assert_eq!(u32_at(&r, end + 4), 32);
+        assert_eq!(&r[end + 8..end + 12], &[0xFF, 0xFF, 24, 0]);
         let body = &r[32 + header..32 + header + data];
         // The root block's own length is the data size, and its value is the 52-byte VS_FIXEDFILEINFO.
         assert_eq!(u16::from_le_bytes([body[0], body[1]]) as usize, data);
@@ -181,6 +239,10 @@ mod tests {
             ("ProductName", "Dyno"),
             ("FileVersion", "1.1.0"),
             ("ProductVersion", "1.1.0"),
+            ("CompanyName", "decryptology"),
+            ("InternalName", "paddock-setup"),
+            ("OriginalFilename", "paddock-setup.exe"),
+            ("LegalCopyright", "Copyright (C) decryptology"),
         ] {
             assert!(find(body, &utf16z(key)).is_some(), "{key}");
             assert!(find(body, &utf16z(value)).is_some(), "{value}");
@@ -218,5 +280,53 @@ mod tests {
         let r = to_res(&i);
         let at = find(&r, &0xFEEF04BDu32.to_le_bytes()).unwrap();
         assert_eq!(u32_at(&r, at + 8), 0);
+    }
+
+    #[test]
+    fn the_manifest_resource_is_there_as_invoker_and_declares_the_supported_windows() {
+        let r = to_res(&info());
+        // The RT_MANIFEST record (type 24, name 1) follows the version record.
+        let at = find(&r, &[0xFF, 0xFF, 24, 0, 0xFF, 0xFF, 1, 0]).expect("RT_MANIFEST header");
+        let size = u32_at(&r, at - 8) as usize;
+        let body = &r[at - 8 + u32_at(&r, at - 4) as usize..][..size];
+        let xml = std::str::from_utf8(body).expect("UTF-8 manifest");
+        assert!(xml.contains("level=\"asInvoker\""), "{xml}");
+        assert!(xml.contains("uiAccess=\"false\""));
+        // Windows 10/11 and 8.1.
+        assert!(xml.contains("8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a"));
+        assert!(xml.contains("1f676c76-80e1-4239-95bb-83d0f6d0da78"));
+        assert!(xml.contains("version=\"1.1.0.0\""));
+        assert!(!xml.contains("requireAdministrator"));
+        assert_eq!((at - 8 + 32 + size.next_multiple_of(4)), r.len());
+    }
+
+    #[test]
+    fn every_field_of_the_input_reaches_the_bytes_and_nothing_else_does() {
+        // The resource is a pure function of `VersionInfo`: each field changes the bytes (so none is dropped), and building from the same
+        // fields in a fresh struct gives the same bytes (no clock, no environment, no counter reaches the output).
+        let base = to_res(&info());
+        let changed: [(&str, fn(&mut VersionInfo)); 8] = [
+            ("description", |i| i.description = "Other update".into()),
+            ("product", |i| i.product = "Other".into()),
+            ("version", |i| i.version = "1.2.0".into()),
+            ("company", |i| i.company = "other company".into()),
+            ("internal_name", |i| i.internal_name = "other-setup".into()),
+            ("original_filename", |i| {
+                i.original_filename = "other.exe".into()
+            }),
+            ("copyright", |i| i.copyright = "Copyright other".into()),
+            ("version again", |i| i.version = "1.1.1".into()),
+        ];
+        for (name, change) in changed {
+            let mut i = info();
+            change(&mut i);
+            assert_ne!(to_res(&i), base, "{name} does not reach the bytes");
+        }
+        let fresh = VersionInfo { ..info() };
+        assert_eq!(to_res(&fresh), base);
+        // The manifest names the program, so its identity follows `internal_name`.
+        let mut i = info();
+        i.internal_name = "other-setup".into();
+        assert!(find(&to_res(&i), b"name=\"other-setup\"").is_some());
     }
 }

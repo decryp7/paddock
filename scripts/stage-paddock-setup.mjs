@@ -12,8 +12,15 @@
 //   node scripts/stage-paddock-setup.mjs --app dyno [--require-key] [--target x86_64-pc-windows-msvc] [--root <repo>]
 //
 // A release (a tag ref, or --require-key) without the key is an error: the program would refuse every update.
+//
+// The bytes are stable (Dyno 1.1.1 WP-7): the program has its own version (the crate's, never the app's), the link is deterministic
+// (`/Brepro`, set by the crate's build.rs) and the build account's paths are remapped (`--remap-path-prefix`, passed here for this one
+// build, not in .cargo/config.toml). The same commit and the same app constants give the same sha256 in every app release, so a
+// Defender verdict or false-positive submission on the hash carries over. The sha256 is printed for the submission.
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMain } from '../conformance/src/util/is-main.mjs';
@@ -39,10 +46,33 @@ export function setupEnv(conf, key) {
     PADDOCK_SETUP_IDENTIFIER: conf.identifier,
     PADDOCK_SETUP_PRODUCT: conf.productName,
     PADDOCK_SETUP_MAIN: `${conf.mainBinaryName}.exe`,
-    PADDOCK_SETUP_VERSION: conf.version,
   };
   if (key) env.PADDOCK_SETUP_UPDATE_KEY = key;
   return env;
+}
+
+/** A TOML literal string (no escapes); a path with a quote cannot be one. */
+const toml = (v) => {
+  if (/['\n\r]/.test(v)) throw new Error(`cannot pass the path ${JSON.stringify(v)} to cargo (it holds a quote or a line break)`);
+  return `'${v}'`;
+};
+
+/**
+ * The `--config` that remaps the build account's paths out of the binary: the home folder (any other tool path under it), the cargo home
+ * (registry sources) and the checkout. The last matching prefix wins, so the narrowest comes last. The key is `cfg(windows)`, a
+ * different key from .cargo/config.toml's, so cargo joins both lists and `+crt-static` stays.
+ */
+export function remapConfig({ root, cargoHome, home }) {
+  const pairs = [[home, '/home'], [cargoHome, '/cargo'], [root, '/paddock']].filter(([from]) => from);
+  const flags = pairs.map(([from, to]) => toml(`--remap-path-prefix=${from}=${to}`));
+  return `target.'cfg(windows)'.rustflags=[${flags.join(', ')}]`;
+}
+
+/** Cargo ignores .cargo/config.toml rustflags (including `+crt-static`) when one of these is set: refuse instead of building a different program. */
+export function assertNoRustflagsEnv(env) {
+  for (const k of ['RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS']) {
+    if (k in env) throw new Error(`${k} is set (even empty): cargo would then ignore .cargo/config.toml's rustflags (+crt-static) and this script's path remapping. Unset it for this step, then run it again.`);
+  }
 }
 
 /** The path of the paddock-setup binary in cargo's `--message-format=json` output. */
@@ -89,9 +119,14 @@ export function stage({ app, target, root = REPO, run = defaultRun, env = proces
   if (!key && isRelease(env, requireKey)) {
     throw new Error('no updater public key for a release build: paddock-setup.exe would refuse every update. Set the TAURI_UPDATER_PUBKEY secret (PADDOCK_TAURI_UPDATER_PUBKEY) for this job, then run it again.');
   }
-  const buildEnv = { ...env, ...setupEnv(conf, key) };
+  assertNoRustflagsEnv(env);
+  // Not a build input: the VM tests' override of the program's version must never reach a shipped build.
+  const { PADDOCK_SETUP_TEST_VERSION: _test, ...clean } = env;
+  const buildEnv = { ...clean, CARGO_INCREMENTAL: '0', ...setupEnv(conf, key) };
+  const cargoHome = env.CARGO_HOME || join(homedir(), '.cargo');
   const args = ['build', '-p', 'paddock-setup', '--release', '--message-format=json-render-diagnostics'];
   if (target) args.push('--target', target);
+  args.push('--config', remapConfig({ root: resolve(root), cargoHome, home: homedir() }));
   console.log(`::group::paddock-setup for ${app}: cargo ${args.join(' ')}`);
   const out = run('cargo', args, { cwd: join(root, 'crates'), env: buildEnv });
   console.log('::endgroup::');
@@ -100,6 +135,7 @@ export function stage({ app, target, root = REPO, run = defaultRun, env = proces
   mkdirSync(dirname(dest), { recursive: true });
   copyFileSync(exe, dest);
   console.log(`staged ${exe} -> ${dest}`);
+  console.log(`paddock-setup.exe sha256 ${createHash('sha256').update(readFileSync(dest)).digest('hex')} (submit this file to Microsoft after the tag: apps/dyno/docs/releasing.md)`);
   return dest;
 }
 

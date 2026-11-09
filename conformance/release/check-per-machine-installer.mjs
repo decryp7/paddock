@@ -5,10 +5,13 @@
 // is also run with `self-test`, which must name the app's identifier and say `stop_all=present`.
 //
 //   node conformance/release/check-per-machine-installer.mjs --dir <cargo profile folder holding bundle/nsis> --conf <tauri.conf.json>
-//        [--include crates/paddock-setup/nsis/paddock-per-machine.nsh]
+//        [--include crates/paddock-setup/nsis/paddock-per-machine.nsh] [--setup-manifest crates/paddock-setup/Cargo.toml]
+//        [--hashes crates/paddock-setup/released-hashes.json] [--root <build folder to look for in the program>]... [--tag-prefix <app>-v]
+//        (the roots also come from PADDOCK_BUILD_FOLDER, PADDOCK_WORKSPACE, GITHUB_WORKSPACE and the home folder)
 //
 // Needs 7-Zip (it opens NSIS installers): on PATH or in C:\\Program Files\\7-Zip; without it the gate fails, it never passes unchecked.
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -100,6 +103,61 @@ export function checkSetupSubsystem({ bytes, name }) {
   }
 }
 
+/** One string of a version resource (UTF-16: key, NULs, value), or null. */
+export function resourceStringOf(bytes, key) {
+  const b = Buffer.from(bytes);
+  const k = Buffer.from(key, 'utf16le');
+  for (let at = b.indexOf(k); at >= 0; at = b.indexOf(k, at + 2)) {
+    // A key is preceded by its block header; skip a hit that is inside another string (the key must be followed by its NUL).
+    if (b[at + k.length] !== 0 || b[at + k.length + 1] !== 0) continue;
+    let i = at + k.length;
+    while (i + 1 < b.length && b[i] === 0 && b[i + 1] === 0) i += 2;
+    let end = i;
+    while (end + 1 < b.length && !(b[end] === 0 && b[end + 1] === 0)) end += 2;
+    return b.subarray(i, end).toString('utf16le');
+  }
+  return null;
+}
+
+/**
+ * What a build leaves in a Windows program: any drive's source path (`X:\\...\\file.rs`: the checkout, the target folder, a runner slot such as
+ * `D:\\a\\...` or `C:\\act\\...`), a home folder and the cargo registry. `--remap-path-prefix` removes all of them. The roots a build used
+ * (checkout, target folder, home) are also matched literally, in both slash forms, when the caller passes them.
+ */
+const BUILD_PATH_LEAKS = [/[A-Za-z]:\\(?:[\w .()-]+\\){1,12}[\w.-]+\.(?:rs|toml)\b/, /[A-Za-z]:\\Users\\[^\\\0]+/, /\.cargo[\\/]registry/];
+
+/**
+ * paddock-setup.exe is judged by Defender's machine-learning model, which reads the file's metadata (Dyno 1.1.1 WP-4, WP-7): a full version resource (every
+ * field), an `asInvoker` manifest with `supportedOS`, its own version (the crate's, so the bytes do not move with an app release) and no build
+ * account path in it. The manifest strings are looked for anywhere in the file (not parsed out of RT_MANIFEST); the version resource strings are
+ * read by key.
+ */
+export function checkSetupDescribed({ bytes, name, expectVersion, product, roots = [] }) {
+  if (!bytes) return [`${name}: paddock-setup.exe could not be extracted to check its version resource`];
+  const f = [];
+  // ER-33: without the expected version the FileVersion comparison would be skipped and the gate would pass unchecked.
+  if (!expectVersion) f.push(`${name}: the paddock-setup version was not measured (crates/paddock-setup/Cargo.toml has no literal version = "x.y.z" in [package]); the program's FileVersion is not checked, so do not release until it is`);
+  const want = { ...(expectVersion ? { FileVersion: expectVersion, ProductVersion: expectVersion } : {}), OriginalFilename: 'paddock-setup.exe', InternalName: 'paddock-setup', ProductName: product, FileDescription: `${product} update` };
+  for (const key of new Set(['CompanyName', 'LegalCopyright', 'FileVersion', 'ProductVersion', ...Object.keys(want)])) {
+    const v = resourceStringOf(bytes, key);
+    if (v === null || v === '') f.push(`${name}: paddock-setup.exe has no ${key} in its version resource (crates/paddock-setup/src/versionres.rs)`);
+    else if (key in want && want[key] !== undefined && v !== want[key]) f.push(`${name}: paddock-setup.exe ${key} is "${v}", expected "${want[key]}"${key.endsWith('Version') ? ': it carries the crate version, not the app version' : ''}`);
+  }
+  const text = Buffer.from(bytes).toString('latin1');
+  if (!text.includes('level="asInvoker"')) f.push(`${name}: paddock-setup.exe has no asInvoker manifest`);
+  if (!text.includes('<supportedOS')) f.push(`${name}: paddock-setup.exe manifest has no supportedOS`);
+  for (const root of roots.filter((r) => r && r.length > 3)) {
+    for (const form of new Set([root, root.replaceAll('\\', '/'), root.replaceAll('/', '\\')])) {
+      if (text.includes(form)) f.push(`${name}: paddock-setup.exe contains the build folder ${form}: build it through scripts/stage-paddock-setup.mjs, which remaps paths`);
+    }
+  }
+  for (const re of BUILD_PATH_LEAKS) {
+    const m = re.exec(text);
+    if (m) f.push(`${name}: paddock-setup.exe contains a build path (${m[0]}): build it through scripts/stage-paddock-setup.mjs, which remaps paths`);
+  }
+  return f;
+}
+
 const NSIS_MIN = [3, 12];
 
 /** The NSIS version that made an installer, from the stub's default branding string ("Nullsoft Install System v3.13", ANSI or
@@ -133,6 +191,60 @@ export function checkSelfTest({ stdout, status, identifier, name }) {
   return f;
 }
 
+/**
+ * The program's bytes may only change with its version: `records` is crates/paddock-setup/released-hashes.json ({ "<app identifier>": { "<version>": "<sha256>" } }),
+ * written after each release from the bundle log's `paddock-setup.exe sha256` line. The same version with other bytes means the code (or a dependency,
+ * the lockfile, the toolchain) changed without a bump, so a stale copy of the program would go unnoticed by `check-version`. Returns { problems, notes }.
+ */
+export function checkReleasedHash({ bytes, name, identifier, version, records, previousVersion }) {
+  if (!bytes || !version) return { problems: [], notes: [] };
+  const sha = createHash('sha256').update(bytes).digest('hex');
+  const known = records?.[identifier]?.[version];
+  if (known === undefined) {
+    // No record. If the previous release of the app shipped this very version, its hash should have been recorded after that tag: ER-33, not measured, so no pass.
+    if (previousVersion === version) {
+      return { problems: [`${name}: not measured: paddock-setup ${version} was already released (the previous tag has it) but crates/paddock-setup/released-hashes.json has no sha256 for it under ${identifier}, so a change of the program under the same version cannot be seen. Add the previous release's \`paddock-setup.exe sha256\` bundle log line, then run this again`], notes: [] };
+    }
+    const why = previousVersion === undefined ? 'the previous release could not be read (no tag found or git unavailable), so "never released" is not shown' : previousVersion === null ? 'there is no previous release of this program' : `the previous release shipped ${previousVersion}`;
+    return { problems: [], notes: [`${name}: paddock-setup.exe ${version} has no recorded sha256 yet (${sha}; ${why}); after the release add it to crates/paddock-setup/released-hashes.json under ${identifier}`] };
+  }
+  if (known !== sha) return { problems: [`${name}: paddock-setup.exe is ${sha}, but ${version} was released as ${known}: the program changed without a version bump. Bump the version in crates/paddock-setup/Cargo.toml (and the workspace dependency line), then build again`], notes: [] };
+  return { problems: [], notes: [] };
+}
+
+/**
+ * The newest `<prefix>*` tag that is an ancestor of HEAD but not HEAD itself (a release run on a tag must compare with the release before it).
+ * `git` is injected: (args) => { status, stdout }. Returns the tag, null when there is none, undefined when git could not be read.
+ */
+export function previousTag({ prefix, git }) {
+  const list = git(['tag', '--list', `${prefix}*`, '--sort=-v:refname']);
+  if (list.status !== 0) return undefined;
+  const head = git(['rev-parse', 'HEAD']);
+  if (head.status !== 0) return undefined;
+  const tags = list.stdout.split('\n').map((t) => t.trim()).filter(Boolean);
+  for (const t of tags) {
+    const commit = git(['rev-parse', `${t}^{commit}`]);
+    if (commit.status !== 0 || commit.stdout.trim() === head.stdout.trim()) continue;
+    if (git(['merge-base', '--is-ancestor', t, 'HEAD']).status === 0) return t;
+  }
+  return tags.length === 0 ? undefined : null;
+}
+
+/** The program's version at the previous tag of the app: a version, null (no previous tag, or the file/version did not exist there), undefined (git unreadable). */
+export function previousProgramVersion({ prefix, git, manifestPath = 'crates/paddock-setup/Cargo.toml' }) {
+  const tag = previousTag({ prefix, git });
+  if (tag === undefined) return undefined;
+  if (tag === null) return null;
+  const shown = git(['show', `${tag}:${manifestPath}`]);
+  return shown.status === 0 ? crateVersion(shown.stdout) : null;
+}
+
+/** The `version` of a crate's `[package]` table, or null. */
+export function crateVersion(toml) {
+  const pkg = /^\[package\]\s*$([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(toml)?.[1] ?? '';
+  return /^version\s*=\s*"([^"]+)"/m.exec(pkg)?.[1] ?? null;
+}
+
 /** What is wrong with one installer, one sentence each with the next step. */
 export function checkInstaller({ bytes, files, expectVersion, name }) {
   const f = [];
@@ -144,20 +256,35 @@ export function checkInstaller({ bytes, files, expectVersion, name }) {
   return f;
 }
 
+/** The `--root` values (repeatable). */
+const rootsOf = (o) => o.roots ?? [];
+
 function main(argv) {
   const o = {};
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i].replace(/^--/, '');
     if (k === 'no-sig') o[k] = true;
+    else if (k === 'root') (o.roots ??= []).push(argv[++i]);
     else o[k] = argv[++i];
   }
   if (!o.dir || !o.conf) {
-    console.error('usage: check-per-machine-installer.mjs --dir <folder> --conf <tauri.conf.json> [--include <nsh>]');
+    console.error('usage: check-per-machine-installer.mjs --dir <folder> --conf <tauri.conf.json> [--include <nsh>] [--setup-manifest <Cargo.toml>] [--hashes <json>] [--root <build folder>]... [--tag-prefix <app>-v]');
     return 2;
   }
   const includePath = o.include ?? 'crates/paddock-setup/nsis/paddock-per-machine.nsh';
   const expectVersion = /PADDOCK_INCLUDE_VERSION "([^"]+)"/.exec(readFileSync(includePath, 'utf8'))?.[1];
   const conf = JSON.parse(readFileSync(o.conf, 'utf8'));
+  // paddock-setup has its own version (the crate's), not the app's.
+  const setupVersion = crateVersion(readFileSync(o['setup-manifest'] ?? 'crates/paddock-setup/Cargo.toml', 'utf8'));
+  let records = {};
+  try {
+    records = JSON.parse(readFileSync(o.hashes ?? 'crates/paddock-setup/released-hashes.json', 'utf8'));
+  } catch {
+    // No record file yet: nothing is gated by hash (a note says so below).
+  }
+  const roots = [...rootsOf(o), process.env.PADDOCK_BUILD_FOLDER, process.env.PADDOCK_WORKSPACE, process.env.GITHUB_WORKSPACE, process.env.GITEA_WORKSPACE, process.env.USERPROFILE, process.env.HOME].filter(Boolean);
+  const gitRun = (args) => { const r = spawnSync('git', args, { encoding: 'utf8', timeout: 20000 }); return { status: r.status ?? 1, stdout: r.stdout ?? '' }; };
+  const previousVersion = previousProgramVersion({ prefix: o['tag-prefix'] ?? `${String(conf.productName).toLowerCase()}-v`, git: gitRun });
   const installers = findInstallers(o.dir);
   if (installers.length === 0) {
     console.error(`::error::no *-setup.exe under ${o.dir}: nothing to check`);
@@ -187,6 +314,10 @@ function main(argv) {
         const ex = spawnSync(sevenZip.cmd, ['e', '-y', `-o${tmp}`, path, 'paddock-setup.exe'], { encoding: 'utf8', timeout: 120000 });
         const exe = join(tmp, 'paddock-setup.exe');
         problems.push(...checkSetupSubsystem({ bytes: ex.status === 0 ? readFileSync(exe) : null, name }));
+        problems.push(...checkSetupDescribed({ bytes: ex.status === 0 ? readFileSync(exe) : null, name, expectVersion: setupVersion, product: conf.productName, roots }));
+        const released = checkReleasedHash({ bytes: ex.status === 0 ? readFileSync(exe) : null, name, identifier: conf.identifier, version: setupVersion, records, previousVersion });
+        problems.push(...released.problems);
+        for (const n of released.notes) console.log(`::warning::${n}`);
         // Running it needs Windows. Its output is read through pipes: a GUI-subsystem program still writes to inherited handles.
         if (process.platform === 'win32' && ex.status === 0) {
           const run = spawnSync(exe, ['self-test'], { encoding: 'utf8', timeout: 60000 });
