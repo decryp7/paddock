@@ -1711,3 +1711,7 @@ drove every listen site of the family through the ways a connection ends. What t
 ## Local checks overlap with CI (2026-11-09)
 
 Serial local-then-CI added a full local cycle to every landing, while CI found nothing the local checks could not. Fast static gates now run first and in parallel; CI is dispatched and the slower local checks (affected tests, the `train3-linux-dev:1` container, load runs) run alongside. A local failure cancels the CI run at once and everything is fixed in one push (rule 50h, ER-9).
+
+## Fix rounds after a red CI run rerun only the fix (2026-11-09)
+
+Each full re-run of a combined train cost about 35 minutes of every runner, while the fixes touched a few jobs. The user asked: keep running only the failed tests and builds, then the full CI once everything passed. Rule 50(i): fix rounds dispatch with `base` = the last tested commit; the full affected plan runs once on the final tree before landing.

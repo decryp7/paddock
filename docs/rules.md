@@ -189,6 +189,14 @@ changes here, every app's copy is updated in the same change.
     (`CARGO_BUILD_JOBS=2`) while CI runners share the machine. If a local check fails, cancel that run at once through the Gitea
     API (`POST /api/v1/repos/{owner}/{repo}/actions/runs/{id}/cancel`), fix every failure and push once; this cancel needs no
     further approval. (a) and (b) still hold.
+    (i) After a CI run fails, each fix round reruns only what failed in the last run: the failed jobs, and inside them only
+    the failed tests (nextest or vitest filter) where the job's runner supports it. Jobs and tests that passed aren't rerun
+    during fix rounds. Dispatch `ci.yml` (workflow_dispatch) with the input `base` = the commit CI last tested, not main; use
+    "rerun failed jobs" on the same commit (`POST /api/v1/repos/{owner}/{repo}/actions/runs/{run}/rerun-failed-jobs`) only to
+    retry a suspected flake, never to turn red green (ER-12). When every round is green, run the full affected plan against
+    main once on the final tree (ER-8); that run catches anything a fix broke elsewhere. Then land. Nothing lands without that
+    full green run. The planner is getting a mode for this (`./dev plan --since-run <id>` lists the failed jobs and tests of
+    a run, a train-3 item); until it exists, the coordinator builds that list by hand.
     *Why:* CI runners are the scarcest resource, and every wasted run delays a release.
 
 ## Performance analysis (user, 2026-10-29)
