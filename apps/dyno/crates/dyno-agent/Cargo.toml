@@ -60,6 +60,8 @@ maxminddb = "0.27"
 libc = "0.2"
 
 [dev-dependencies]
+# The ending harness of ADR 0072 (tests/endings.rs): the raw-stream client, the scenarios, the ratchet.
+paddock-ipc = { workspace = true, features = ["testing"] }
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 # The test doubles (ADR 0033): only here, so a build without test targets cannot name them.
 dyno-platform = { workspace = true, features = ["test-support"] }

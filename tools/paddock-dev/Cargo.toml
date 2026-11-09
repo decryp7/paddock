@@ -24,6 +24,9 @@ clap = { version = "4", default-features = false, features = ["std", "derive", "
 # Keep the key order of the JSON the planner prints, as scripts/affected.mjs does.
 serde_json = { version = "1", features = ["preserve_order"] }
 regex = "1"
+# C102 (ipc_endpoints): the syn pass over non-test code and the register/ratchet files.
+syn = { version = "2", default-features = false, features = ["full", "parsing", "visit", "printing"] }
+proc-macro2 = { version = "1", features = ["span-locations"] }
 paddock-cli = { path = "../../crates/paddock-cli" }
 paddock-proc = { path = "../../crates/paddock-proc" }
 paddock-repo-graph = { path = "../../crates/paddock-repo-graph", features = ["git-history", "cargo-metadata"] }
@@ -42,6 +45,13 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_
 [dev-dependencies]
 tempfile = "3"
 paddock-testkit = { path = "../../crates/paddock-testkit" }
+
+# C102 parses every Rust file of the repository (src/ipc_endpoints.rs): optimised parser crates keep that to seconds in a
+# debug build too (27 s in a debug build before, measured 2026-11-09).
+[profile.dev.package.syn]
+opt-level = 3
+[profile.dev.package.proc-macro2]
+opt-level = 3
 
 [lints.rust]
 unsafe_code = "deny"

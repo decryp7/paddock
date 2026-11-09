@@ -35,6 +35,8 @@ tauri = { workspace = true, features = ["test"] }
 # The never-panics test of the parsers (conformance check C36).
 paddock-testkit = { workspace = true }
 tempfile = "3"
+# The ending harness of ADR 0072 (`tests/it/endings.rs`): the raw-stream client, the scenarios, the ratchet.
+paddock-ipc = { workspace = true, features = ["testing"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 # The loopback test that interrupts a read with a real signal (the Linux field case of 2026-11-07).

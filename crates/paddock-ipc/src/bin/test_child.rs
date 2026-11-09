@@ -9,6 +9,8 @@
 //! - `stubborn`: `echo` without a lifeline, and keeps running after the connection closes
 //! - `companion <discovery file> <build>`: a link server for that build until a client calls `stop`; prints `ready` once
 //!   its discovery file is written
+//! - `observe <file>` (feature `testing`): connects, reads the raw stream of its connection to the end and writes what it
+//!   read to `<file>.bin` and how it ended (`eof`, `reset` or `timeout`) to `<file>.end` (the launcher's ending test)
 //! - `out-of-files` (Unix): a host and a raw client in this process; the host accepts the client with the last free file
 //!   descriptor, so its handshake cannot take the copies it needs. Prints `host: <its error>` and `client: <the first frame
 //!   or the read error>`. Its own process because it lowers this process's limit of open files.
@@ -68,6 +70,23 @@ fn main() {
                 ProtocolVersion::UNVERSIONED,
             );
             std::process::exit(if r.is_err() { 0 } else { 1 });
+        }
+        #[cfg(feature = "testing")]
+        "observe" => {
+            use paddock_ipc::testing::endings::raw::{READ_GUARD, RawEndKind, read_to_end};
+            let b = child::read_bootstrap(std::io::stdin().lock()).unwrap();
+            let mut conn = child::connect(&b, ProtocolVersion::UNVERSIONED).unwrap();
+            let end = read_to_end(conn.stream_mut(), READ_GUARD);
+            let file = arg(2);
+            std::fs::write(format!("{file}.bin"), &end.bytes).unwrap();
+            let kind = match end.kind {
+                RawEndKind::Eof => "eof".to_string(),
+                RawEndKind::TimedOut => "timeout".to_string(),
+                k if k.is_reset() => "reset".to_string(),
+                RawEndKind::Error(e) => format!("error {e:?}"),
+            };
+            std::fs::write(format!("{file}.end"), kind).unwrap();
+            std::process::exit(0);
         }
         "stubborn" => {
             let b = child::read_bootstrap(std::io::stdin().lock()).unwrap();

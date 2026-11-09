@@ -6,6 +6,7 @@ mod common;
 mod behaviour;
 mod client;
 mod contract;
+mod endings;
 mod control;
 mod key_file;
 mod listener;

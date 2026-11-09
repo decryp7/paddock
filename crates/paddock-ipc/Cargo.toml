@@ -17,6 +17,11 @@ path = "src/bin/test_child.rs"
 test = false
 doc = false
 
+[features]
+# Test support for other crates (ADR 0072 WP-0): `testing::endings`, the harness that drives an endpoint through every way a
+# connection ends and the raw-stream client that sees what the peer would. Never enabled in a shipped build.
+testing = []
+
 [dependencies]
 paddock-env = { workspace = true }
 paddock-jobs = { workspace = true }

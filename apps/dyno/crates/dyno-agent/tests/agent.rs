@@ -50,7 +50,24 @@ fn captured() -> Vec<String> {
     c.0.lock().unwrap().clone()
 }
 
+/// Prints the agent's log when a test using the [`Harness`] fails (ER-27): an in-process agent installs no file log, so a
+/// failure showed only the client's side (CI run 7763).
+struct LogOnFailure;
+
+impl Drop for LogOnFailure {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            eprintln!("---- the agent's log ----");
+            for line in captured() {
+                eprintln!("{line}");
+            }
+            eprintln!("---- end of the agent's log ----");
+        }
+    }
+}
+
 struct Harness {
+    _log: LogOnFailure,
     running: Option<Running>,
     fake: Fake,
     dirs: Dirs,
@@ -69,6 +86,8 @@ impl Harness {
 
     /// Like [`Harness::start_with`], with `seed` free to set the fake machine up before the agent first looks at it.
     fn start_seeded(seed: impl FnOnce(&Fake), adapt: impl FnOnce(Platform) -> Platform) -> Harness {
+        // Install the capture before the agent starts, so its first lines are kept.
+        let _ = captured();
         let tmp = tempfile::tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         let fake = Fake::new();
@@ -78,6 +97,7 @@ impl Harness {
         seed(&fake);
         let running = Running::start(dirs.clone(), adapt(fake.platform()), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap();
         Harness {
+            _log: LogOnFailure,
             running: Some(running),
             fake,
             dirs,

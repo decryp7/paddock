@@ -1,0 +1,491 @@
+# The endpoint register (ADR 0072 §5, check C102): every place in non-test code that listens or accepts. `./dev check
+# ipc-endpoints` scans the Rust sources (a `syn` pass over everything outside tests/, benches/, examples/ and #[cfg(test)]
+# items) and fails when a listen site is in neither section, when an entry no longer matches its file, or when the ending
+# test it names does not exist.
+#
+# [[endpoint]]   id           the name the ending test and the ratchet use (several files may share one id and one test)
+#                file         the file with the listen sites
+#                calls        the primitives found there (the ids of tools/paddock-dev/src/ipc_endpoints.rs PRIMITIVES)
+#                sites        how many sites the file has; a new listen call in a registered file changes it and so is reviewed
+#                ending_test  `path::function`: the test that drives this endpoint through the scenarios of
+#                             `paddock_ipc::testing::endings` and compares with docs/ipc-endpoint-ratchet.toml
+#                consumers    (free text) who reaches this site through a constructor
+# [[out_of_scope]] path       a file, or `dir/**`; it must match at least one site (a stale entry fails)
+#                reason, owner, and where it applies delete_by / adopt_by (a tag)
+#
+#                calls, sites   what the matching files hold, as for an endpoint (a new listen call in a waived file is still a
+#                               listener and is looked at)
+# [[not_applicable]] endpoint, scenario, reason (and `os`): see the section at the end.
+#
+# The ratchet (docs/ipc-endpoint-ratchet.toml) lists what fails today; this file never does.
+
+[[endpoint]]
+id = "ipc-host"
+file = "crates/paddock-ipc/src/handshake.rs"
+calls = ["paddock_ipc::endpoint::Listener::bind*"]
+sites = 3
+ending_test = "crates/paddock-ipc/tests/it/endings.rs::ipc_host_ends_every_connection_right_or_is_in_the_ratchet"
+consumers = "Host::listen, listen_in and listen_at: paddock-ipc's launcher and link server, the Dyno agent, paddock-plugin-test"
+
+[[endpoint]]
+id = "ipc-host"
+file = "crates/paddock-ipc/src/endpoint/mod.rs"
+calls = ["paddock_ipc::endpoint::Listener::bind*"]
+sites = 4
+ending_test = "crates/paddock-ipc/tests/it/endings.rs::ipc_host_ends_every_connection_right_or_is_in_the_ratchet"
+consumers = "the public Listener::bind, bind_in, bind_fixed and bind_system over the OS endpoint (below); the Dyno helper binds with bind_system"
+
+[[endpoint]]
+id = "ipc-host"
+file = "crates/paddock-ipc/src/endpoint/unix.rs"
+calls = ["std::os::unix::net::UnixListener::bind"]
+sites = 2
+ending_test = "crates/paddock-ipc/tests/it/endings.rs::ipc_host_ends_every_connection_right_or_is_in_the_ratchet"
+consumers = "the Unix socket under every paddock-ipc Listener"
+
+[[endpoint]]
+id = "ipc-host"
+file = "crates/paddock-ipc/src/endpoint/windows.rs"
+calls = ["CreateNamedPipeW"]
+sites = 1
+ending_test = "crates/paddock-ipc/tests/it/endings.rs::ipc_host_ends_every_connection_right_or_is_in_the_ratchet"
+consumers = "the named pipe under every paddock-ipc Listener (Windows)"
+
+[[endpoint]]
+id = "ipc-link-server"
+file = "crates/paddock-ipc/src/link/server.rs"
+calls = ["paddock_ipc::Host::listen*"]
+sites = 3
+ending_test = "crates/paddock-ipc/tests/it/endings.rs::ipc_link_server_ends_every_connection_right_or_is_in_the_ratchet"
+consumers = "LinkServer::start: a companion process serving its link (Pitcrew's capped server model, ADR 0001)"
+
+[[endpoint]]
+id = "ipc-launcher"
+file = "crates/paddock-ipc/src/launch.rs"
+calls = ["paddock_ipc::Host::listen*"]
+sites = 1
+ending_test = "crates/paddock-ipc/tests/it/endings.rs::ipc_launcher_ends_every_connection_right_or_is_in_the_ratchet"
+consumers = "launch(): paddock-plugin-host, Dyno's plugin host (dyno-plugin-host), Dyno's app link to its children"
+
+[[endpoint]]
+id = "dyno-agent"
+file = "apps/dyno/crates/dyno-agent/src/wire.rs"
+calls = ["paddock_ipc::Host::listen*"]
+sites = 1
+ending_test = "apps/dyno/crates/dyno-agent/tests/endings.rs::dyno_agent_ends_every_connection_right_or_is_in_the_ratchet"
+consumers = "the Dyno agent's endpoint (the app and dyno-cli connect)"
+
+[[endpoint]]
+id = "dyno-helper"
+file = "apps/dyno/crates/dyno-helper/src/serve.rs"
+calls = ["paddock_ipc::endpoint::Listener::bind*"]
+sites = 1
+ending_test = "apps/dyno/crates/dyno-helper/src/server.rs::dyno_helper_ends_every_connection_right_or_is_in_the_ratchet"
+consumers = "the Dyno helper service's system endpoint (raw connections, no handshake: ADR 0027)"
+
+[[endpoint]]
+id = "mcp-loopback"
+file = "crates/paddock-mcp/src/listener.rs"
+calls = ["paddock_mcp::serve_loopback", "std::net::TcpListener::bind"]
+sites = 2
+ending_test = "crates/paddock-mcp/tests/it/endings.rs::mcp_loopback_ends_every_connection_right_or_is_in_the_ratchet"
+consumers = "paddock-shell and Dyno's app (the MCP listener, ADR 0007); the stdio bridge in dyno-cli is its client"
+
+[[endpoint]]
+id = "pitcrew-service"
+file = "apps/pitcrew/crates/pitcrew-service/src/ipc.rs"
+calls = ["tokio::net::UnixListener::bind", "tokio::net::windows::named_pipe::ServerOptions::create_with_security_attributes_raw"]
+sites = 2
+ending_test = "apps/pitcrew/crates/pitcrew-service/tests/endings.rs::pitcrew_service_ends_every_connection_right_or_is_in_the_ratchet"
+consumers = "Pitcrew's app-service transport (ADR 0004): a hand-rolled copy of ipc-endpoint and ipc-frames-peer (ADR 0072 §9)"
+
+# --- Not endpoints of the family -------------------------------------------------------------------------------------
+
+[[out_of_scope]]
+path = "apps/debrief/crates/debrief-ipc/**"
+reason = "Debrief's registered copy of the endpoint, peer, launcher and link (docs/known-copies.toml: ipc-endpoint, ipc-frames-peer, ipc-child-launch, companion-link); it is replaced by paddock-ipc in Debrief 1.2 (ADR 0072 §9, D5). Its close order is already right; it sends no reason."
+owner = "debrief"
+delete_by = "debrief-v1.2.0"
+calls = ["std::os::unix::net::UnixListener::bind", "tokio::net::UnixListener::from_std", "tokio::net::windows::named_pipe::ServerOptions::create_with_security_attributes_raw"]
+sites = 3
+
+[[out_of_scope]]
+path = "apps/pitwall/crates/pitwall-server/src/main.rs"
+reason = "Pitwall's HTTP server: it keeps HTTP's own connection semantics (ADR 0072 §5)."
+owner = "pitwall"
+calls = ["tokio::net::TcpListener::bind"]
+sites = 1
+
+[[out_of_scope]]
+path = "apps/pitwall/crates/pitwall-server/src/serving.rs"
+reason = "A free-port probe (binds port 0, reads the port, drops the listener); it serves nobody."
+owner = "pitwall"
+calls = ["tokio::net::TcpListener::bind"]
+sites = 1
+
+[[out_of_scope]]
+path = "apps/pitwall/crates/pitwall-server/src/fake_engine.rs"
+reason = "A fake inference engine for tests and development, today a public module of pitwall-server (so it is compiled into the crate); feat/pitwall-fake-engine-test-bin moves it out into a test binary, and this entry goes with that move."
+owner = "pitwall"
+delete_by = "feat/pitwall-fake-engine-test-bin"
+calls = ["tokio::net::TcpListener::bind"]
+sites = 1
+
+[[out_of_scope]]
+path = "apps/debrief/crates/debrief-ai-worker/src/child.rs"
+reason = "A free-port probe (binds port 0, reads the port, drops the listener); it serves nobody."
+owner = "debrief"
+calls = ["std::net::TcpListener::bind"]
+sites = 1
+
+[[out_of_scope]]
+path = "apps/debrief/crates/debrief-ai-worker/src/bin/fake_llama_server.rs"
+reason = "A fake llama server binary for tests; never shipped."
+owner = "debrief"
+calls = ["std::net::TcpListener::bind"]
+sites = 1
+
+[[out_of_scope]]
+path = "apps/debrief/crates/chromium-driver/src/fake.rs"
+reason = "A fake Chrome DevTools server for tests."
+owner = "debrief"
+calls = ["std::net::TcpListener::bind"]
+sites = 1
+
+[[out_of_scope]]
+path = "apps/debrief/crates/debrief-ai/src/engine/pitwall/fake.rs"
+reason = "A fake Pitwall server for tests."
+owner = "debrief"
+calls = ["std::net::TcpListener::bind"]
+sites = 1
+
+[[out_of_scope]]
+path = "apps/debrief/crates/debrief-symbols/src/testing.rs"
+reason = "A fake symbol server for tests, but compiled whenever the `server` feature is on, and that feature is a default one, so it is in the shipped crate (hidden from the docs; not started by any product code). Move it behind a test-only feature, or register it as an endpoint, before Debrief 1.2."
+owner = "debrief"
+calls = ["std::net::TcpListener::bind"]
+sites = 1
+
+[[out_of_scope]]
+path = "apps/debrief/docs/research/**"
+reason = "Research harnesses written to measure something (2026-10-28 DuckDB server mode); not part of any build."
+owner = "debrief"
+calls = ["std::os::unix::net::UnixListener::bind"]
+sites = 1
+
+[[out_of_scope]]
+path = "crates/paddock-chromium/src/fake.rs"
+reason = "A fake Chrome DevTools server for tests."
+owner = "paddock-chromium"
+calls = ["std::net::TcpListener::bind"]
+sites = 1
+
+[[out_of_scope]]
+path = "crates/paddock-pitwall/src/testing.rs"
+reason = "A fake Pitwall server for tests (compiled only for tests and the testing feature)."
+owner = "paddock-pitwall"
+calls = ["std::net::TcpListener::bind"]
+sites = 1
+
+[[out_of_scope]]
+path = "crates/paddock-plugin-test/src/fake.rs"
+reason = "A fake plugin host for plugin tests; its endpoint is paddock-ipc's Host and ends as ipc-host does."
+owner = "paddock-plugin-test"
+calls = ["paddock_ipc::Host::listen*"]
+sites = 1
+
+[[out_of_scope]]
+path = "crates/paddock-testkit/src/net.rs"
+reason = "Test support: free loopback ports for tests (ADR 0023: tests never free a port they probe)."
+owner = "paddock-testkit"
+calls = ["std::net::TcpListener::bind"]
+sites = 1
+
+[[out_of_scope]]
+path = "crates/paddock-ipc/src/bin/test_child.rs"
+reason = "paddock-ipc's own test child process, never shipped by an app."
+owner = "paddock-ipc"
+calls = ["paddock_ipc::Host::listen*", "paddock_ipc::link::LinkServer::start"]
+sites = 4
+
+[[out_of_scope]]
+path = "crates/paddock-ipc/src/testing/**"
+reason = "The ending harness and its positive-control endpoints (feature `testing`); they exist to end connections right and wrong on purpose."
+owner = "paddock-ipc"
+calls = ["paddock_ipc::Host::listen*", "std::net::TcpListener::bind"]
+sites = 5
+
+# --- Scenarios that do not apply ---------------------------------------------------------------------------------------
+# [[not_applicable]] endpoint, scenario, reason, and `os` where it holds on some OS only. A scenario listed here is not run for
+# that endpoint; one that is not listed must run, and a rig that cannot drive it fails the test (never "not applicable").
+
+[[not_applicable]]
+endpoint = "ipc-host"
+scenario = "wrong-account"
+reason = "The OS gives no user id for a pipe client on Windows; the pipe's access list decides."
+os = "windows"
+
+[[not_applicable]]
+endpoint = "ipc-link-server"
+scenario = "wrong-account"
+reason = "The link server does not check accounts; the Host does (ipc-host)."
+
+[[not_applicable]]
+endpoint = "ipc-link-server"
+scenario = "listener-stop-with-client-in-backlog"
+reason = "The accept loop never leaves a client in the backlog; the Host's listener does (ipc-host)."
+
+[[not_applicable]]
+endpoint = "ipc-link-server"
+scenario = "owner-close-with-calls-in-flight"
+reason = "Served peers close through Peer::close (ipc-host)."
+
+[[not_applicable]]
+endpoint = "ipc-link-server"
+scenario = "owner-close-while-peer-not-reading"
+reason = "Served peers close through Peer::close (ipc-host)."
+
+[[not_applicable]]
+endpoint = "ipc-link-server"
+scenario = "stall"
+reason = "Served peers close through Peer::close (ipc-host)."
+
+[[not_applicable]]
+endpoint = "ipc-link-server"
+scenario = "mixed-version-peer-ignores-fail0"
+reason = "A property of Peer::close (ipc-host)."
+
+[[not_applicable]]
+endpoint = "ipc-launcher"
+scenario = "wrong-token"
+reason = "The launcher's host side is paddock-ipc's Host (ipc-host); its own ending is the owner's stop of the child."
+
+[[not_applicable]]
+endpoint = "ipc-launcher"
+scenario = "wrong-version"
+reason = "The launcher's host side is paddock-ipc's Host (ipc-host); its own ending is the owner's stop of the child."
+
+[[not_applicable]]
+endpoint = "ipc-launcher"
+scenario = "wrong-account"
+reason = "The launcher's host side is paddock-ipc's Host (ipc-host); its own ending is the owner's stop of the child."
+
+[[not_applicable]]
+endpoint = "ipc-launcher"
+scenario = "busy"
+reason = "The launcher's host side is paddock-ipc's Host (ipc-host); its own ending is the owner's stop of the child."
+
+[[not_applicable]]
+endpoint = "ipc-launcher"
+scenario = "silent-client"
+reason = "The launcher's host side is paddock-ipc's Host (ipc-host); its own ending is the owner's stop of the child."
+
+[[not_applicable]]
+endpoint = "ipc-launcher"
+scenario = "malformed-first-frame"
+reason = "The launcher's host side is paddock-ipc's Host (ipc-host); its own ending is the owner's stop of the child."
+
+[[not_applicable]]
+endpoint = "ipc-launcher"
+scenario = "client-keeps-writing"
+reason = "The launcher's host side is paddock-ipc's Host (ipc-host); its own ending is the owner's stop of the child."
+
+[[not_applicable]]
+endpoint = "ipc-launcher"
+scenario = "owner-close-with-calls-in-flight"
+reason = "The launcher's host side is paddock-ipc's Host (ipc-host); its own ending is the owner's stop of the child."
+
+[[not_applicable]]
+endpoint = "ipc-launcher"
+scenario = "owner-close-while-peer-not-reading"
+reason = "The launcher's host side is paddock-ipc's Host (ipc-host); its own ending is the owner's stop of the child."
+
+[[not_applicable]]
+endpoint = "ipc-launcher"
+scenario = "stall"
+reason = "The launcher's host side is paddock-ipc's Host (ipc-host); its own ending is the owner's stop of the child."
+
+[[not_applicable]]
+endpoint = "ipc-launcher"
+scenario = "listener-stop-with-client-in-backlog"
+reason = "The launcher's host side is paddock-ipc's Host (ipc-host); its own ending is the owner's stop of the child."
+
+[[not_applicable]]
+endpoint = "ipc-launcher"
+scenario = "mixed-version-peer-ignores-fail0"
+reason = "The launcher's host side is paddock-ipc's Host (ipc-host); its own ending is the owner's stop of the child."
+
+[[not_applicable]]
+endpoint = "dyno-agent"
+scenario = "silent-client"
+reason = "The agent's handshake runs on the real clock, inline on its accept loop (I15); no injected clock until M3."
+
+[[not_applicable]]
+endpoint = "dyno-agent"
+scenario = "busy"
+reason = "The agent has no connection cap (I15 moves it onto the link server in M3)."
+
+[[not_applicable]]
+endpoint = "dyno-agent"
+scenario = "wrong-account"
+reason = "The agent does not check accounts; its endpoint is owner-only."
+
+[[not_applicable]]
+endpoint = "dyno-agent"
+scenario = "listener-stop-with-client-in-backlog"
+reason = "The accept loop takes a client within 400 ms; no seam holds one in the backlog (the Host does, ipc-host)."
+
+[[not_applicable]]
+endpoint = "dyno-agent"
+scenario = "owner-close-with-calls-in-flight"
+reason = "a property of paddock-ipc's Peer, covered by ipc-host"
+
+[[not_applicable]]
+endpoint = "dyno-agent"
+scenario = "owner-close-while-peer-not-reading"
+reason = "a property of paddock-ipc's Peer, covered by ipc-host"
+
+[[not_applicable]]
+endpoint = "dyno-agent"
+scenario = "stall"
+reason = "a property of paddock-ipc's Peer, covered by ipc-host"
+
+[[not_applicable]]
+endpoint = "dyno-agent"
+scenario = "mixed-version-peer-ignores-fail0"
+reason = "a property of paddock-ipc's Peer, covered by ipc-host"
+
+[[not_applicable]]
+endpoint = "dyno-helper"
+scenario = "wrong-token"
+reason = "No handshake: the helper trusts the caller's OS identity (ADR 0027), so there is no token, version or refusal to read."
+
+[[not_applicable]]
+endpoint = "dyno-helper"
+scenario = "wrong-version"
+reason = "No handshake: the helper trusts the caller's OS identity (ADR 0027), so there is no token, version or refusal to read."
+
+[[not_applicable]]
+endpoint = "dyno-helper"
+scenario = "client-keeps-writing"
+reason = "No handshake: the helper trusts the caller's OS identity (ADR 0027), so there is no token, version or refusal to read."
+
+[[not_applicable]]
+endpoint = "dyno-helper"
+scenario = "wrong-account"
+reason = "Another account is served a smaller view, not refused (the dispatcher's policy)."
+
+[[not_applicable]]
+endpoint = "dyno-helper"
+scenario = "silent-client"
+reason = "No handshake to time out; a silent connection holds a session until SESSION_MAX (I16)."
+
+[[not_applicable]]
+endpoint = "dyno-helper"
+scenario = "stop-with-open-connection"
+reason = "The daemon's stop ends the accept loop only; open sessions end with the process or SESSION_MAX (I16)."
+
+[[not_applicable]]
+endpoint = "dyno-helper"
+scenario = "listener-stop-with-client-in-backlog"
+reason = "The accept loop takes a client within 500 ms; no seam holds one in the backlog."
+
+[[not_applicable]]
+endpoint = "dyno-helper"
+scenario = "owner-close-with-calls-in-flight"
+reason = "a property of paddock-ipc's Peer, covered by ipc-host"
+
+[[not_applicable]]
+endpoint = "dyno-helper"
+scenario = "owner-close-while-peer-not-reading"
+reason = "a property of paddock-ipc's Peer, covered by ipc-host"
+
+[[not_applicable]]
+endpoint = "dyno-helper"
+scenario = "stall"
+reason = "a property of paddock-ipc's Peer, covered by ipc-host"
+
+[[not_applicable]]
+endpoint = "dyno-helper"
+scenario = "mixed-version-peer-ignores-fail0"
+reason = "a property of paddock-ipc's Peer, covered by ipc-host"
+
+[[not_applicable]]
+endpoint = "mcp-loopback"
+scenario = "wrong-version"
+reason = "The loopback line protocol has no versions."
+
+[[not_applicable]]
+endpoint = "mcp-loopback"
+scenario = "wrong-account"
+reason = "The loopback line protocol has no accounts."
+
+[[not_applicable]]
+endpoint = "mcp-loopback"
+scenario = "silent-client"
+reason = "The handshake limit runs on the real clock (no injection until M5)."
+
+[[not_applicable]]
+endpoint = "mcp-loopback"
+scenario = "owner-close-with-calls-in-flight"
+reason = "The listener has no owner-side close of one connection; its end is the stop (stop-with-open-connection)."
+
+[[not_applicable]]
+endpoint = "mcp-loopback"
+scenario = "owner-close-while-peer-not-reading"
+reason = "The listener has no owner-side close of one connection; its end is the stop (stop-with-open-connection)."
+
+[[not_applicable]]
+endpoint = "mcp-loopback"
+scenario = "stall"
+reason = "The listener has no owner-side close of one connection; its end is the stop (stop-with-open-connection)."
+
+[[not_applicable]]
+endpoint = "mcp-loopback"
+scenario = "listener-stop-with-client-in-backlog"
+reason = "The accept thread takes clients at once; a backlog forms only under load (I21), with no seam to hold it."
+
+[[not_applicable]]
+endpoint = "mcp-loopback"
+scenario = "mixed-version-peer-ignores-fail0"
+reason = "The closing line goes only to a bridge that asked for it (D6, M5)."
+
+[[not_applicable]]
+endpoint = "pitcrew-service"
+scenario = "wrong-token"
+reason = "The service has no token; the pipe's access list or the socket's mode decides who connects."
+
+[[not_applicable]]
+endpoint = "pitcrew-service"
+scenario = "wrong-account"
+reason = "The service has no token or account check of its own; the pipe's access list or the socket's mode decides who connects."
+
+[[not_applicable]]
+endpoint = "pitcrew-service"
+scenario = "silent-client"
+reason = "The hello limit runs on the real tokio clock (30 s); its unreadable-hello half is malformed-first-frame."
+
+[[not_applicable]]
+endpoint = "pitcrew-service"
+scenario = "listener-stop-with-client-in-backlog"
+reason = "The accept loop takes a client at once; no seam holds one in the backlog."
+
+[[not_applicable]]
+endpoint = "pitcrew-service"
+scenario = "owner-close-with-calls-in-flight"
+reason = "No owner-side close of one connection and no Peer: the transport is hand-rolled (ADR 0072 section 9)."
+
+[[not_applicable]]
+endpoint = "pitcrew-service"
+scenario = "owner-close-while-peer-not-reading"
+reason = "No owner-side close of one connection and no Peer: the transport is hand-rolled (ADR 0072 section 9)."
+
+[[not_applicable]]
+endpoint = "pitcrew-service"
+scenario = "stall"
+reason = "No owner-side close of one connection and no Peer: the transport is hand-rolled (ADR 0072 section 9)."
+
+[[not_applicable]]
+endpoint = "pitcrew-service"
+scenario = "mixed-version-peer-ignores-fail0"
+reason = "No owner-side close of one connection and no Peer: the transport is hand-rolled (ADR 0072 section 9)."

@@ -4,6 +4,7 @@ mod cli;
 mod golden;
 mod hostile;
 mod inputs;
+mod ipc_endpoints;
 mod isolation;
 mod slots;
 mod wrapper;
