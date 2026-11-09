@@ -7,7 +7,14 @@ use paddock_chromium::discover::find_for_tests;
 use paddock_chromium::{Chromium, LaunchOptions, Outcome, Profile, Window};
 use std::time::Duration;
 
+/// Not a test: the orphan guardian of this binary (`paddock_proc::guardian`): a killed test run ends its browsers.
+#[test]
+fn guardian_entry() {
+    paddock_proc::guardian::run_if_requested();
+}
+
 fn options(base: &std::path::Path) -> LaunchOptions {
+    paddock_proc::guardian::enable_in_test_binary("real_browser::guardian_entry");
     let mut o = LaunchOptions::new(Profile::Throwaway(base.to_path_buf()));
     o.window = Window::Headless;
     o.extra_args = paddock_chromium::discover::TEST_ISOLATION_FLAGS

@@ -21,6 +21,14 @@ impl StartTime {
     pub const fn as_micros(self) -> u64 {
         self.0
     }
+
+    /// Whether two readings of a start time may name the same start: they differ by no more than the clock's slack (on
+    /// Linux a start time is counted from a boot time each process reads once, in whole seconds, so two processes can
+    /// differ by about a second after the clock was stepped). For decisions that err towards "still there" (keeping a
+    /// folder); a kill compares exactly ([`holder`]).
+    pub const fn is_near(self, other: StartTime) -> bool {
+        self.0.abs_diff(other.0) <= CLOCK_SLACK_MICROS
+    }
 }
 
 /// One process: its pid and when it started. Two processes that had the same pid one after the other are different
@@ -59,6 +67,14 @@ impl ProcessId {
     /// When it started.
     pub const fn started(self) -> StartTime {
         self.started
+    }
+
+    /// Whether a process that may be this one runs: its pid is alive and started [near](StartTime::is_near) this start
+    /// time. For decisions that err towards "still there", such as keeping a folder its owner may still use; never for a
+    /// kill ([`ProcessId::is_alive`] compares exactly).
+    pub fn may_be_alive(self) -> bool {
+        crate::sys::start_time(self.pid).is_some_and(|now| now.is_near(self.started))
+            && crate::tree::is_alive(self.pid)
     }
 
     /// Whether this process still runs: its pid is alive and still belongs to it.
@@ -203,6 +219,29 @@ mod tests {
 
     const fn at(us: u64) -> StartTime {
         StartTime::from_micros(us)
+    }
+
+    #[test]
+    fn a_start_time_within_the_clock_slack_may_be_the_same_start() {
+        assert!(at(5_000_000).is_near(at(5_000_000 + CLOCK_SLACK_MICROS)));
+        assert!(at(5_000_000).is_near(at(5_000_000 - CLOCK_SLACK_MICROS)));
+        assert!(!at(5_000_000).is_near(at(5_000_000 + CLOCK_SLACK_MICROS + 1)));
+        let me = ProcessId::of(std::process::id()).unwrap();
+        let off = |d: i64| {
+            ProcessId::new(
+                me.pid(),
+                at(me.started().as_micros().saturating_add_signed(d)),
+            )
+        };
+        assert!(
+            off(500).may_be_alive() && off(-500).may_be_alive(),
+            "a reading off by less than the slack is this process"
+        );
+        assert!(
+            !off(2_000_000).may_be_alive(),
+            "two seconds off is another process"
+        );
+        assert!(!off(500).is_alive(), "a kill still compares exactly");
     }
 
     #[test]

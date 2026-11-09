@@ -109,6 +109,14 @@ impl Fixture {
 
 // ---- launching (a fake browser; never a real one) ----
 
+/// Not a test: the orphan guardian of [`browser_owner_process`] (this binary run again, `paddock_proc::guardian`).
+#[test]
+fn guardian_entry() {
+    paddock_proc::guardian::run_if_requested();
+}
+
+const GUARDIAN: &str = "launch::tests::guardian_entry";
+
 /// The base folder of [`browser_owner_process`]'s launch.
 const OWNER_ENV: &str = "PADDOCK_CHROMIUM_TEST_OWNER_BASE";
 
@@ -119,6 +127,7 @@ fn browser_owner_process() {
     let Ok(base) = std::env::var(OWNER_ENV) else {
         return;
     };
+    paddock_proc::guardian::enable_in_test_binary(GUARDIAN);
     let base = PathBuf::from(base);
     let fake = FakeBrowser::install(&base, FAKE, Mode::Obey, 1).unwrap();
     let b = Chromium::launch_with(
@@ -171,9 +180,14 @@ fn a_browser_whose_owner_is_killed_is_ended_and_its_throwaway_profile_removed() 
     // SIGKILL through the handle of this process's own child: none of the owner's own clean-up runs.
     owner.kill().unwrap();
     owner.wait().unwrap();
-    paddock_testkit::wait::wait_until("the orphaned browser to end and its profile to go", || {
+    let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
         paddock_proc::run_state(browser) == paddock_proc::RunState::Exited && !profile.exists()
     });
+    if !gone {
+        // Ended by identity before the test fails, so a failure leaves no browser behind (ER-14).
+        paddock_proc::kill_tree(browser);
+        panic!("the orphaned browser did not end, or its profile stayed");
+    }
 }
 
 #[test]

@@ -243,10 +243,10 @@ pub struct Supervised {
     registry: Registry,
     watcher: Option<Watcher>,
     shared: Arc<Shared>,
-    /// Unix: ends the child's group (and removes its folder) if this process dies without ending it
-    /// ([`crate::guardian`]); disarmed before the child is ended here.
+    /// Unix: the child's registration with this process's orphan guardian, which ends the child's group (and removes its
+    /// folder) if this process dies without ending it ([`crate::guardian`]); dropped after the tree is ended here.
     #[cfg(unix)]
-    guard: Option<crate::guardian::Guard>,
+    pub(crate) guard: Option<crate::guardian::Registration>,
 }
 
 impl Supervised {
@@ -295,16 +295,7 @@ impl Supervised {
         let process = identify(pid);
         // Not reaped yet, so its group is still its own.
         #[cfg(unix)]
-        let guard = match crate::guardian::Guard::start(pid, folder) {
-            Ok(g) => Some(g),
-            Err(e) => {
-                log::warn!(
-                    "The orphan guard of child {pid} could not be started ({e}): if this process is killed, the child's tree \
-                     is left running"
-                );
-                None
-            }
-        };
+        let guard = crate::guardian::register(pid, folder);
         // Windows: the kill-on-close job ends the tree when this process dies; the folder is the caller's to sweep.
         #[cfg(not(unix))]
         let _: Option<&std::path::Path> = folder;
@@ -465,9 +456,6 @@ impl Supervised {
 
     /// Ends the whole process tree now and reaps it. Idempotent.
     pub fn kill(&mut self) {
-        // The guard first: this process ends the tree itself.
-        #[cfg(unix)]
-        drop(self.guard.take());
         if let Some(mut c) = self.child.take() {
             // Windows: the job's members are the tree (each identified through a handle that checks it is in the job), and
             // the job ends them all at once, by handle, with no pid to go stale.
@@ -507,6 +495,7 @@ impl Supervised {
     }
 
     fn release(&mut self) {
+        // After the tree was ended (or the child ended by itself): the guardian forgets the group and its keeper ends.
         #[cfg(unix)]
         drop(self.guard.take());
         // Windows: closing the job ends whatever of the tree is left (helpers that left it included).

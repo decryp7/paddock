@@ -53,6 +53,14 @@ mod unix {
         unsafe { libc::kill(pid, signal) == 0 }
     }
 
+    /// The process group of `pid` (`getpgid`); `None` when there is no such process.
+    pub fn group_of(pid: u32) -> Option<u32> {
+        let pid = libc::pid_t::try_from(pid).ok()?;
+        // SAFETY: getpgid takes one integer; a process that does not exist makes it fail with ESRCH.
+        let group = unsafe { libc::getpgid(pid) };
+        u32::try_from(group).ok()
+    }
+
     pub const SIGTERM: i32 = libc::SIGTERM;
     pub const SIGKILL: i32 = libc::SIGKILL;
 

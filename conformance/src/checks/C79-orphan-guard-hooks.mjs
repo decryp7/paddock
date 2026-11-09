@@ -1,0 +1,123 @@
+// C79: every binary that can start supervised children calls `paddock_proc::guardian::run_if_requested()` in `main`
+// (ADR 0076 amendment 2026-11-09, the orphan guardian). The guardian is that binary run again with a reserved variable;
+// a binary without the call never starts one (it logs that the guard is off), so if it is killed its children's trees
+// run on (a headless browser left by a killed test process on CI ran for 2.5 h).
+// Which binaries: every `src/main.rs`, `src/bin/*.rs` and `src/bin/*/main.rs` of a package whose dependency closure in its
+// workspace's Cargo.lock reaches `paddock-proc`. Test binaries (whose `main` is the harness) opt in with
+// `enable_in_test_binary` and are not checked here. ADOPTING lists the mains that do not call it yet; it may only shrink:
+// a main missing from it is an error, a listed one is a warning, and a listed one that calls it already is an error until
+// it leaves the list.
+import { error, warn } from '../finding.mjs';
+
+const CALL = /paddock_proc::guardian::run_if_requested\s*\(\s*\)/;
+const MAIN = /(^|\/)src\/(main\.rs|bin\/[^/]+\.rs|bin\/[^/]+\/main\.rs)$/;
+
+/** Mains that reach paddock-proc and do not call the guardian yet, each with why; adoption is per app, in its release window. */
+export const ADOPTING = new Map(
+  [
+    ['apps/debrief/app/src-tauri/src/main.rs', 'Debrief app: adopts in 1.2'],
+    ['apps/debrief/crates/cargo-debrief-plugin/src/main.rs', 'Debrief: adopts in 1.2'],
+    ['apps/debrief/crates/debrief-agent/src/bin/debrief-agent.rs', 'Debrief: adopts in 1.2'],
+    ['apps/debrief/crates/debrief-ai-worker/src/bin/fake_llama_server.rs', 'Debrief test fixture: adopts in 1.2'],
+    ['apps/debrief/crates/debrief-ai-worker/src/main.rs', 'Debrief: adopts in 1.2'],
+    ['apps/debrief/crates/debrief-ai/src/bin/fake_worker.rs', 'Debrief test fixture: adopts in 1.2'],
+    ['apps/debrief/crates/debrief-cli/src/bin/debrief.rs', 'Debrief: adopts in 1.2'],
+    ['apps/debrief/crates/debrief-collect/src/bin/debrief-collect.rs', 'Debrief: adopts in 1.2'],
+    ['apps/debrief/crates/debrief-ipc/src/bin/fake_child.rs', 'Debrief test fixture: adopts in 1.2'],
+    ['apps/debrief/crates/debrief-monitor/src/bin/debrief-monitor.rs', 'Debrief: adopts in 1.2'],
+    ['apps/debrief/crates/debrief-plugin-host/src/bin/fake_plugin.rs', 'Debrief test fixture: adopts in 1.2'],
+    ['apps/debrief/crates/debrief-plugin-test/src/bin/fixture.rs', 'Debrief test fixture: adopts in 1.2'],
+    ['apps/debrief/crates/debrief-plugins/src/main.rs', 'Debrief: adopts in 1.2'],
+    ['apps/debrief/crates/debrief-store-worker/src/main.rs', 'Debrief: adopts in 1.2'],
+    ['apps/debrief/crates/debrief-video/src/bin/fake_ffmpeg.rs', 'Debrief test fixture: adopts in 1.2'],
+    ['apps/debrief/examples/plugins/annotator-example/src/main.rs', 'Debrief example plugin: adopts in 1.2'],
+    ['apps/debrief/examples/plugins/collector-example/src/main.rs', 'Debrief example plugin: adopts in 1.2'],
+    ['apps/debrief/examples/plugins/importer-example/src/main.rs', 'Debrief example plugin: adopts in 1.2'],
+    ['apps/debrief/examples/plugins/tool-example/src/main.rs', 'Debrief example plugin: adopts in 1.2'],
+    ['apps/debrief/examples/plugins/transform-example/src/main.rs', 'Debrief example plugin: adopts in 1.2'],
+    ['apps/dyno/app/src-tauri/src/main.rs', 'Dyno app: adopts in its next release'],
+    ['apps/dyno/crates/dyno-agent/src/main.rs', 'Dyno: adopts in its next release'],
+    ['apps/dyno/crates/dyno-cli/src/main.rs', 'Dyno: adopts in its next release'],
+    ['apps/dyno/crates/dyno-helper/src/main.rs', 'Dyno: adopts in its next release'],
+    ['apps/dyno/crates/dyno-plugin-host/src/bin/test_plugin.rs', 'Dyno test fixture: adopts in its next release'],
+    ['apps/dyno/plugins/dyno-plugin-example/src/main.rs', 'Dyno example plugin: adopts in its next release'],
+    ['apps/shell-demo/src-tauri/agent/src/main.rs', 'shell demo: adopts with the next shared batch'],
+    ['apps/shell-demo/src-tauri/src/main.rs', 'shell demo: adopts with the next shared batch'],
+    ['apps/spotter/app/src-tauri/src/main.rs', 'Spotter app: adopts in its next release'],
+    ['apps/workbench-demo/src-tauri/src/main.rs', 'workbench demo: adopts with the next shared batch'],
+    ['crates/cargo-paddock-plugin/src/main.rs', 'shared tool: adopts with the next shared batch'],
+    ['crates/paddock-ipc/src/bin/test_child.rs', 'shared test fixture: adopts with the next shared batch'],
+    ['crates/paddock-plugin-test/src/bin/fixture.rs', 'shared test fixture: adopts with the next shared batch'],
+    ['crates/paddock-plugin-test/src/bin/fixture_v1.rs', 'shared test fixture: adopts with the next shared batch'],
+    ['crates/paddock-plugin-test/src/bin/misbehaving.rs', 'shared test fixture: adopts with the next shared batch'],
+    ['crates/paddock-setup/src/main.rs', 'shared tool: adopts with the next shared batch'],
+    ['tools/paddock-dev/src/main.rs', 'paddock-dev: adopts with the next shared batch'],
+  ],
+);
+
+/** `{ name: [dependency names] }` from a Cargo.lock text. */
+export function lockGraph(text) {
+  const graph = {};
+  for (const block of text.split(/^\[\[package\]\]\s*$/m).slice(1)) {
+    const name = /^name = "([^"]+)"/m.exec(block)?.[1];
+    if (!name) continue;
+    const deps = /^dependencies = \[([\s\S]*?)\]/m.exec(block)?.[1] ?? '';
+    graph[name] = [...deps.matchAll(/"([^" ]+)[^"]*"/g)].map((m) => m[1]);
+  }
+  return graph;
+}
+
+/** Whether `name` reaches `target` in `graph`. */
+export function reaches(graph, name, target = 'paddock-proc', seen = new Set()) {
+  if (name === target) return true;
+  if (seen.has(name)) return false;
+  seen.add(name);
+  return (graph[name] ?? []).some((d) => reaches(graph, d, target, seen));
+}
+
+const dirOf = (p) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
+
+/** The mains (paths) that must call the guardian: [{ file, hooked }]. `read(path)` gives a file's text or null. */
+export function guardedMains(files, read) {
+  const have = new Set(files);
+  const nearest = (dir, name) => {
+    for (let d = dir; ; d = dirOf(d)) {
+      const p = d ? `${d}/${name}` : name;
+      if (have.has(p)) return p;
+      if (!d) return null;
+    }
+  };
+  const graphs = new Map();
+  const out = [];
+  for (const f of files) {
+    if (!MAIN.test(f) || f.includes('/tests/') || f.includes('/fixture/')) continue;
+    const manifest = nearest(dirOf(f), 'Cargo.toml');
+    const pkg = manifest && /^\[package\][\s\S]*?^name\s*=\s*"([^"]+)"/m.exec(read(manifest) ?? '')?.[1];
+    const lock = manifest && nearest(dirOf(manifest), 'Cargo.lock');
+    if (!pkg || !lock) continue;
+    if (!graphs.has(lock)) graphs.set(lock, lockGraph(read(lock) ?? ''));
+    if (pkg === 'paddock-proc' || !reaches(graphs.get(lock), pkg)) continue;
+    out.push({ file: f, hooked: CALL.test(read(f) ?? '') });
+  }
+  return out;
+}
+
+export default {
+  id: 'C79',
+  title: 'Binaries that start supervised children call the orphan guardian',
+  rule: 53,
+  run(ctx, adopting = ADOPTING) {
+    const fix = 'Call `paddock_proc::guardian::run_if_requested();` first thing in `main` (ADR 0076 amendment 2026-11-09).';
+    const out = [];
+    // Paths are relative to the checked root (the repo, or an app's folder in it): a listed path matches by its end.
+    const reason = (file) => adopting.get(file) ?? [...adopting].find(([k]) => k.endsWith(`/${file}`))?.[1];
+    for (const { file, hooked } of guardedMains(ctx.files(), (p) => ctx.read(p))) {
+      const why = reason(file);
+      const listed = why !== undefined;
+      if (hooked && listed) out.push(error('C79', 53, file, 1, 'calls the orphan guardian but is still on ADOPTING', 'Remove it from ADOPTING in C79 (the list only shrinks).'));
+      else if (!hooked && listed) out.push(warn('C79', 53, file, 1, `does not call the orphan guardian yet (${why})`, fix));
+      else if (!hooked) out.push(error('C79', 53, file, 1, 'can start supervised children but does not call the orphan guardian: if it is killed, they run on', fix));
+    }
+    return out;
+  },
+};

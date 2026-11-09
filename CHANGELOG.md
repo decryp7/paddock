@@ -4,6 +4,20 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-proc`: supervised children end when their owner is killed (Unix; ADR 0076 amendment 2026-11-09)
+- New `paddock_proc::guardian`: one guardian process per owner (this executable run again, started on the first guarded
+  child) and one keeper (`/bin/cat`) per child's process group. When the owner dies without ending a child (a SIGKILL, a
+  crash), the guardian ends every group still registered (after checking its keeper by identity, rule 53), removes the
+  folders they were given and writes a line per step to its log (`PADDOCK_PROC_GUARDIAN_LOG`, else `set_log`, else
+  `paddock-proc-guardian.log` in the temporary folder). N guarded children cost N + 1 processes and about 0.15 ms each.
+- A binary opts in with `paddock_proc::guardian::run_if_requested();` first thing in `main` (a test binary with
+  `enable_in_test_binary(entry)`); one that does not logs once that the guard is off. Conformance check C79 lists the
+  mains that reach `paddock-proc` and do not call it yet (`ADOPTING`, which only shrinks).
+- New `Supervised::spawn_owning_folder(cmd, cap, folder)`; `ProcessId::may_be_alive` and `StartTime::is_near` (start times
+  within the clock's slack, for decisions that err towards "still there"; kills still compare exactly).
+- `paddock-chromium`: throwaway profiles go with an orphaned browser, are named `chromium-<pid>-s<start µs>-...`, and each
+  throwaway launch sweeps profiles whose owner is gone (by pid and start time, within the slack).
+
 ### `@decryp7/paddock-ui`: a failed read ends on its own in every shell store (ADR 0058)
 - Fixed: after one failed read (an engine or agent restarting at start), the Activity, Settings, service-health, notifications, notification channels, AI access (MCP), problem report and updates stores kept "could not be read" for good, even when events later brought data; the set-up, storage, packs, Pitwall, recent files and service stores cleared it only when an event happened to come. Each now reads again on its own while in error (after 2 s, 4 s and 8 s, then every 15 s), keeps the error up without a loading flash until a read succeeds, and ends the error when an event or a command's reply brings the whole state, or re-reads when an event brings a part (at most one read at a time; after a failed re-read, events start the next one only after 10 s).
 - New in `@decryp7/paddock-ui/shell/store`: `ReadPolicy`, `READ_RETRY_CLOCK` (`ReadRetryClock`: `now`, `after`), `READ_RETRY_BACKOFF_MS`, `READ_RETRY_STEADY_MS`, `READ_RETRY_EVENT_SPACING_MS`, and the types `ReadSpec`, `Reads`, `ReadControl`. A store declaring `{ retry: true }` declares its read once with `store._reads.define({ read, apply, message, quiet?, eventSpacingMs? })` and calls `load`, `event` and `received` on the handle.

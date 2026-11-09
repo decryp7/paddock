@@ -419,10 +419,12 @@ fn owner_of(name: &str) -> Option<(u32, Option<StartTime>)> {
     Some((pid, started))
 }
 
-/// Whether the owner a profile's name gives still runs: by identity when the name has the start time, else by pid.
+/// Whether the owner a profile's name gives may still run: by identity when the name has the start time (within the
+/// clock's slack: on Linux two processes can read a start time a second apart, and a live owner's folder must never be
+/// taken for a dead one's), else by pid.
 fn owner_alive(pid: u32, started: Option<StartTime>) -> bool {
     match started {
-        Some(s) => ProcessId::new(pid, s).is_alive(),
+        Some(s) => ProcessId::new(pid, s).may_be_alive(),
         None => paddock_proc::is_alive(pid),
     }
 }
@@ -448,10 +450,10 @@ fn sweep_profiles_with(
             let Some((pid, started)) = owner_of(&e.file_name().to_string_lossy()) else {
                 return false;
             };
-            // This process's own: by identity when both are known, else by pid.
+            // This process's own: by identity (within the clock's slack) when both are known, else by pid.
             let mine = pid == my_pid
                 && match (started, me) {
-                    (Some(s), Some(m)) => s == m.started(),
+                    (Some(s), Some(m)) => s.is_near(m.started()),
                     _ => true,
                 };
             !mine && !alive(pid, started) && std::fs::remove_dir_all(e.path()).is_ok()

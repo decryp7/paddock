@@ -33,8 +33,9 @@ import C61 from './C61-material-bridge.mjs';
 import C62 from './C62-limit-completeness.mjs';
 import C71 from './C71-test-timing.mjs';
 import C78 from './C78-dialog-sizing.mjs';
+import C79 from './C79-orphan-guard-hooks.mjs';
 import C91 from './C91-per-machine.mjs';
 import C98 from './C98-read-retry-optouts.mjs';
 
 /** Every check, in id order. A check is { id, title, rule, run(ctx) -> findings[] | Promise<findings[]> }. */
-export const checks = [C03, C04, C06, C07, C08, C13, C14, C15, C16, C23, C24, C28, C29, C30, C31, C32, C33, C34, C35, C36, C37, C39, C43, C45, C48, C50, C51, C53, C54, C56, C57, C61, C62, C71, C78, C91, C98];
+export const checks = [C03, C04, C06, C07, C08, C13, C14, C15, C16, C23, C24, C28, C29, C30, C31, C32, C33, C34, C35, C36, C37, C39, C43, C45, C48, C50, C51, C53, C54, C56, C57, C61, C62, C71, C78, C79, C91, C98];
