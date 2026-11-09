@@ -698,6 +698,43 @@ fn a_call_the_host_cancelled_is_not_reported_unanswered() {
     );
 }
 
+/// Regression (CI run 7810, Windows, three jobs on one VM): the bridge ended the host's side through a `try_clone`d handle of
+/// a socket it connected with a timeout. Under load that duplicate answered `shutdown` with WSAENOTCONN (10057) on Windows
+/// although writes through it worked, so the app never saw the host's end, never closed, and the bridge waited for it for
+/// ever: on the Windows test VM 21 of 24 bridges started at once hung, none run alone. Many bridges at once are the load.
+#[test]
+fn every_bridge_ends_when_its_host_closes_even_with_many_at_once() {
+    const AT_ONCE: usize = 32;
+    let (done, ended) = std::sync::mpsc::channel();
+    let dirs: Vec<_> = (0..AT_ONCE).map(|_| tempfile::tempdir().unwrap()).collect();
+    for dir in &dirs {
+        let (path, done) = (dir.path().to_path_buf(), done.clone());
+        std::thread::spawn(move || {
+            let peer = peer_that_goes(&path, PeerGoes::AnsweringOnly(&[1]), 0);
+            let input = client::initialize(1, "host", "1") + "\n";
+            let result = bridge::run(
+                &discovery_path(&path),
+                "pmk_x",
+                Cursor::new(input.into_bytes()),
+                &mut Vec::new(),
+            );
+            let _ = done.send((result.map_err(|e| e.to_string()), peer.join().is_ok()));
+        });
+    }
+    drop(done);
+    let mut seen = 0;
+    paddock_testkit::wait_until("every bridge ended after its host closed its input", || {
+        while let Ok((result, peer_ok)) = ended.try_recv() {
+            assert!(
+                result.is_ok() && peer_ok,
+                "{result:?}, the app's side ended cleanly: {peer_ok}"
+            );
+            seen += 1;
+        }
+        seen == AT_ONCE
+    });
+}
+
 /// Requests whose id the server cannot accept (1.5, true, an object) are answered by the server with id null; the bridge
 /// must not wait for them as well and answer them a second time with -32603 (review of 31f2bb60b, P2).
 #[test]

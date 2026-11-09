@@ -33,6 +33,28 @@ impl std::fmt::Display for BridgeError {
 
 impl std::error::Error for BridgeError {}
 
+/// The one handle of the connection to the app, shared by the reader, the writer thread and the end of `run`. Never a
+/// `try_clone`: on Windows a duplicate of a socket connected with a timeout answered `shutdown` with WSAENOTCONN (10057) under
+/// load although writes through it worked, so the host's end never reached the app and the bridge waited for ever (CI run 7810,
+/// 21 of 24 bridges at once on the Windows test VM).
+#[derive(Clone)]
+struct Shared(Arc<TcpStream>);
+
+impl Read for Shared {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        (&*self.0).read(buf)
+    }
+}
+
+impl Write for Shared {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        (&*self.0).write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        (&*self.0).flush()
+    }
+}
+
 fn not_open(app: &str) -> BridgeError {
     BridgeError(format!(
         "{app} isn't open, or AI access is off or has no key. Open the app and turn on Settings > AI access with a key, then start this again."
@@ -114,7 +136,7 @@ pub fn run(
         .filter(Discovery::writer_alive)
         .ok_or_else(|| not_open("The app"))?;
     let app = hint.app.clone();
-    let mut stream =
+    let stream =
         TcpStream::connect_timeout(&([127, 0, 0, 1], hint.port).into(), Duration::from_secs(5))
             .map_err(|e| {
                 log::warn!(
@@ -124,9 +146,10 @@ pub fn run(
                 not_open(&app)
             })?;
     let _ = stream.set_nodelay(true);
-    writeln!(stream, "{}", serde_json::json!({"key": key}))
+    let stream = Shared(Arc::new(stream));
+    writeln!(stream.clone(), "{}", serde_json::json!({"key": key}))
         .map_err(|e| BridgeError(format!("Could not reach {app}: {e}")))?;
-    let mut from_app = BufReader::new(stream.try_clone().map_err(|e| BridgeError(e.to_string()))?);
+    let mut from_app = BufReader::new(stream.clone());
     let mut first = String::new();
     let read = from_app
         .by_ref()
@@ -150,7 +173,7 @@ pub fn run(
         }));
     }
     let pending = Arc::new(Mutex::new(Pending::default()));
-    let writer = stream.try_clone().map_err(|e| BridgeError(e.to_string()))?;
+    let writer = stream.clone();
     // Detached: a host that keeps stdin open must not keep the bridge alive once the app has ended the connection.
     {
         let pending = pending.clone();
@@ -184,7 +207,12 @@ pub fn run(
                 }
             }
             // The host closed its side (or the app's is gone): let the app answer what is pending, then it ends the connection.
-            let _ = writer.shutdown(Shutdown::Write);
+            if let Err(e) = writer.0.shutdown(Shutdown::Write) {
+                // The app would wait for more input and never end the connection (ER-27: say so).
+                log::warn!(
+                    "paddock_mcp bridge: could not pass the host's end of input to the app: {e}"
+                );
+            }
         });
     }
     let mut line = String::new();
@@ -203,13 +231,13 @@ pub fn run(
                     .is_err()
                 {
                     // The host is gone: nobody is left to answer.
-                    let _ = stream.shutdown(Shutdown::Both);
+                    let _ = stream.0.shutdown(Shutdown::Both);
                     return Ok(());
                 }
             }
         }
     };
-    let _ = stream.shutdown(Shutdown::Both);
+    let _ = stream.0.shutdown(Shutdown::Both);
     let (unanswered, host_closed) = {
         let mut p = pending_lock(&pending);
         (std::mem::take(&mut p.ids), p.host_closed)
