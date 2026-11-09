@@ -680,7 +680,7 @@ impl Engine for ChildEngine {
                     );
                     next_note += Duration::from_secs(10);
                 }
-                // conformance: hang-guard — poll interval for an external process's /health; no in-process event exists
+                // conformance: hang-guard — poll interval for an external process's /health; no in-process event exists; bounded by a 45 s hang guard
                 tokio::time::sleep(self.poll_every).await;
             };
             if let Some(h) = held {
