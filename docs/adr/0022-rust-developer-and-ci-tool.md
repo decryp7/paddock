@@ -536,8 +536,9 @@ Status of R0b against this ADR, not a design change:
   `paddock-dev` generic package, checks the `.sha256` and the embedded hash (transport checks, section 3.3 "What the checks
   catch"), publishes it into the per-hash cache atomically and builds on any miss or doubt; `dev-tool.yml` publishes from `main`
   for the Linux container and the Windows and macOS host runners (a manual run can leave macOS out while that runner is busy);
-  release and tag jobs set `PADDOCK_DEV_DOWNLOAD=0`, so they build from source and never run a copy a run downloaded (a
-  `.downloaded` marker beside the cached binary records where a copy came from); the "hash only the build-affecting keys" item
+  release and tag jobs set `PADDOCK_DEV_DOWNLOAD=0` (the `ci.yml` jobs and plan steps and the Debrief host jobs do so for a tag
+  ref), and such a run keeps its tools in its own folder `bin-source/<hash>`, which the download path never writes, so it never runs
+  a downloaded copy; the "hash only the build-affecting keys" item
   below is implemented as a reduction (comments, line ends and the keys `target-dir`, `build-dir`, `jobs`, `rustc-wrapper` are left
   out of each config's digest, and a config that is then only section headers adds no line), the same rule in the wrapper and in
   `input_hash.rs`.
