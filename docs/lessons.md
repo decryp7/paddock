@@ -1499,3 +1499,7 @@ A redaction default in a shared crate was widened for one app's problem report. 
 ## Gitea tokens cannot mint narrower tokens, and agents must not create bot users (2026-11-08)
 
 An agent looking for a narrower CI token found that a Gitea token cannot create a token with fewer rights, and the only other route was creating a bot user. Agents must not create users. The user creates scoped CI tokens (one per purpose, least privilege) and the agent is given the one it needs; if none exists, the agent stops and asks.
+
+## Debrief store tests remove a store folder while its index threads still write into it (2026-11-09)
+
+Under a full nextest run two store-duck tests failed once each with "Directory not empty": `segments::reopening_recovers_from_a_crash_and_refuses_damage` (`tests/it/segments.rs:240`, `remove_dir_all` of the moved store) and `search::indexing_many_segments_in_batches_is_complete_and_repeatable` (`tests/it/search.rs:220`, `remove_dir_all` of the `index` folder right after `drop(store)`). Both passed 30 of 30 times alone under `--stress-count 30 -j 6`, on this branch and on the base, so the cause is not the temp-folder change. Probable cause (not measured): the store's index threads finish writing after `drop`, so the removal races them. Not fixed in the LINT-1 branch: a separate branch should make the store's drop wait for its index threads (or the test wait on the condition), not retry or sleep (ER-12).
