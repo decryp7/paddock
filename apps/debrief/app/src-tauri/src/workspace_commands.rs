@@ -210,6 +210,12 @@ pub(crate) fn open_request<R: Runtime>(app: &AppHandle<R>, window: &str, paths: 
             Err(_) if recents.has_file(raw) => Ok(crate::paths::parse(raw)?.to_path_buf()),
             Err(e) => Err(e),
         })
+        .inspect(|p| {
+            // An opened or restored bundle's folder counts as used now (the start-up sweep goes by last use).
+            if let Ok(p) = p {
+                crate::share::touch_bundle_folder(p);
+            }
+        })
         .collect()
 }
 

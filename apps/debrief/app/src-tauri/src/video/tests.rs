@@ -616,7 +616,7 @@ fn a_generated_clip_is_analysed_end_to_end_when_ffmpeg_is_installed() {
 fn without_a_data_folder_video_is_unavailable_with_the_next_step() {
     let m = super::data_folder(Err(tauri::Error::WindowNotFound)).unwrap_err();
     assert!(m.starts_with("Video support is unavailable"), "{m}");
-    assert!(m.contains("DEBRIEF_DATA_DIR"), "{m}");
+    assert!(m.contains("user profile folder could not be found"), "{m}");
 }
 
 /// The start-up itself takes the fail-closed path: no video state is managed.

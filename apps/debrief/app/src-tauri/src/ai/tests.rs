@@ -2244,7 +2244,7 @@ fn the_light_status_is_the_full_status_without_the_memory_scan() {
 fn without_a_data_folder_the_ai_is_unavailable_with_the_next_step() {
     let m = super::data_folder(Err(tauri::Error::WindowNotFound)).unwrap_err();
     assert!(m.starts_with("The AI assistant is unavailable"), "{m}");
-    assert!(m.contains("DEBRIEF_DATA_DIR"), "{m}");
+    assert!(m.contains("user profile folder could not be found"), "{m}");
 }
 
 /// The start-up itself takes the fail-closed path: no AI state, and the commands answer with the reason, not "not

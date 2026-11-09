@@ -153,6 +153,48 @@ pub fn sweep_old_at(root: &Path, prefix: Option<&str>, max_age: std::time::Durat
     removed
 }
 
+/// Runs [`sweep_old`] on its own thread, off the start-up path (a sweep can remove GB-sized folders, ER-17). Only the
+/// instance that holds the single-instance lock sweeps: a second instance could remove a folder the running one has open
+/// (`main_instance`, the flag Settings ▸ Storage uses). Returns the thread, or `None` when the sweep is skipped.
+pub fn sweep_in_background(
+    root: PathBuf,
+    prefix: Option<&'static str>,
+    max_age: std::time::Duration,
+    what: &'static str,
+    main_instance: bool,
+) -> Option<std::thread::JoinHandle<usize>> {
+    if !main_instance {
+        log::info!("Start-up sweep of {what} skipped: this is not the main instance");
+        return None;
+    }
+    match std::thread::Builder::new()
+        .name(format!("sweep {what}"))
+        .spawn(move || sweep_old(&root, prefix, max_age, what))
+    {
+        Ok(handle) => Some(handle),
+        Err(e) => {
+            log::warn!("Start-up sweep of {what} could not start: {e}");
+            None
+        }
+    }
+}
+
+/// Sets the modification time of a folder (marks it used now, or backdates it in a test).
+pub fn set_folder_mtime(folder: &Path, when: std::time::SystemTime) -> std::io::Result<()> {
+    #[cfg(windows)]
+    let file = {
+        use std::os::windows::fs::OpenOptionsExt;
+        // A folder is opened with backup semantics, for attribute writes only.
+        std::fs::OpenOptions::new()
+            .access_mode(0x100)
+            .custom_flags(0x0200_0000)
+            .open(folder)?
+    };
+    #[cfg(not(windows))]
+    let file = std::fs::File::open(folder)?;
+    file.set_modified(when)
+}
+
 /// Debrief's config folder (settings, profiles, window state).
 pub fn config<R: Runtime, M: Manager<R>>(app: &M) -> tauri::Result<PathBuf> {
     resolve(app, AppDir::Config)
@@ -178,7 +220,7 @@ mod tests {
     fn a_missing_data_folder_is_reported_with_the_next_step_never_replaced() {
         let m = require_data(Err(tauri::Error::WindowNotFound), "Video support").unwrap_err();
         assert!(m.starts_with("Video support is unavailable"), "{m}");
-        assert!(m.contains("DEBRIEF_DATA_DIR"), "{m}");
+        assert!(m.contains("user profile folder could not be found"), "{m}");
         assert_eq!(require_data(Ok(PathBuf::from("/data")), "x"), Ok(PathBuf::from("/data")));
     }
 
@@ -194,6 +236,26 @@ mod tests {
         assert_eq!(data_missing_message("a", &"x").contains("DEBRIEF_DATA_DIR"), cfg!(debug_assertions));
     }
 
+    /// The sweep runs off the start-up path and only in the main instance: a second instance could remove a folder the
+    /// running one has open.
+    #[test]
+    fn the_background_sweep_runs_in_the_main_instance_only() {
+        let root = tempfile::tempdir().unwrap();
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(10 * 24 * 3600);
+        let make = |name: &str| {
+            let p = root.path().join(name);
+            std::fs::create_dir(&p).unwrap();
+            set_folder_mtime(&p, old).unwrap();
+        };
+        make("a");
+        let day = std::time::Duration::from_secs(24 * 3600);
+        assert!(sweep_in_background(root.path().to_path_buf(), None, 7 * day, "test entries", false).is_none());
+        assert!(root.path().join("a").exists(), "a second instance sweeps nothing");
+        let handle = sweep_in_background(root.path().to_path_buf(), None, 7 * day, "test entries", true).expect("main instance");
+        assert_eq!(handle.join().unwrap(), 1);
+        assert!(!root.path().join("a").exists());
+    }
+
     #[test]
     fn the_start_up_sweep_removes_old_entries_with_the_prefix_and_keeps_the_rest() {
         let root = tempfile::tempdir().unwrap();
@@ -203,7 +265,7 @@ mod tests {
             let p = root.path().join(name);
             std::fs::create_dir(&p).unwrap();
             std::fs::write(p.join("f"), b"x").unwrap();
-            std::fs::File::open(&p).unwrap().set_modified(when).unwrap();
+            set_folder_mtime(&p, when).unwrap();
         };
         make("x-old", old);
         make("x-new", now);

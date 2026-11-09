@@ -132,7 +132,7 @@ mod tests {
     fn suggest_without_a_data_folder_is_unavailable_with_the_next_step() {
         let e = suggest_data_folder(Err(tauri::Error::WindowNotFound)).unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::Unavailable);
-        assert!(e.message.contains("DEBRIEF_DATA_DIR"), "{}", e.message);
+        assert!(e.message.contains("user profile folder could not be found"), "{}", e.message);
     }
 
     #[test]

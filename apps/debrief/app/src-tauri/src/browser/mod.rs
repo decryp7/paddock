@@ -237,7 +237,14 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) {
     match crate::app_dirs::webview_data(app) {
         Ok(local) => {
             let base = local.join("browser-profiles");
-            crate::app_dirs::sweep_old(&base, Some("chromium-driver-"), STALE_PROFILE_AGE, "stale browser profiles");
+            let main_instance = app.try_state::<crate::instance::SingleInstance>().is_some_and(|s| s.0);
+            crate::app_dirs::sweep_in_background(
+                base.clone(),
+                Some("chromium-driver-"),
+                STALE_PROFILE_AGE,
+                "stale browser profiles",
+                main_instance,
+            );
             renderers.set_throwaway_base(Some(base));
         }
         Err(e) => log::error!("{}", crate::app_dirs::data_missing_message("The research browser", &e)),

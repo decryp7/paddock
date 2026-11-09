@@ -41,7 +41,7 @@ pub(crate) fn store_root(data: Option<&std::path::Path>) -> anyhow::Result<(Path
         Some(d) => Ok((d.join("stores"), None)),
         None => {
             let dir = debrief_ipc::scratch::private_tempdir("debrief-stores-").map_err(|e| {
-                anyhow::anyhow!("cannot make a private folder for the scratch stores: {e}. Set DEBRIEF_DATA_DIR to a folder you own")
+                anyhow::anyhow!("cannot make a private folder for the scratch stores: {e}. Check the free disk space and the rights on the temp folder, then restart Debrief")
             })?;
             Ok((dir.path().to_path_buf(), Some(Arc::new(dir))))
         }
