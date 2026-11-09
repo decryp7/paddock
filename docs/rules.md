@@ -274,6 +274,10 @@ changes here, every app's copy is updated in the same change.
     not enough.
     (b) Partly enforced: the ci-actions test (added on fix/dyno-bundle-ui) checks that every release workflow whose app
     imports `@decryp7/paddock-ui` builds the UI.
+    (c) Amendment of 2026-11-09 (ADR 0080 D13, accepted by the user): the release workflow dispatched for this rule skips its
+    gates only when a green `ci.yml` run on the same commit covered every gate it would run, compared job by job (the
+    affected plan and ADR 0080 D12 can leave legs out of `ci.yml`, and the release workflow then runs those legs, rule 71);
+    the installers are always built.
     *Why:* Dyno's release workflow had no `prepare: npm run build -w ui`. Tests passed, but every installer build failed
     on a clean runner; a leftover `ui/dist` had hidden it.
 
