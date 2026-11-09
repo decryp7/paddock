@@ -293,6 +293,88 @@ Quoted by `conformance/ci/build-jobs.sh` (the macOS layout) and the fix/main-aft
   - probe beside dyno-bench's cpu and memory tests: 3.85, 3.55 (load 4.1 before, 8.1 after)
   - dyno lib tests without the model tests: 14 threads 20.77 (load 4.3), 4 threads 47.77 (5.9), 8 threads 15.65 (3.8)
   - The job-log figures (7–27 s, the overlaps) are from the logs of runs 7690–7782 on Gitea.
+### 2026-11-09, the first start of a freshly linked program on macOS (docs/adr-0071-ready-or-exit)
+
+Quoted by [ADR 0071](adr/0071-ready-or-exit-never-a-fixed-start-budget.md) (context and "Parallelism and cost").
+- **Commit:** b51c72509 (origin/main); no Paddock code, a synthetic program.
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2; the shared CI host (three runners), agents working on it.
+- **Load:** 1-minute load 8.9 before, 6.6-6.8 after (5-minute 11.5-14.1). An indication only.
+- **Build:** each program is a new one-line C file (`puts` of a fresh `time_ns()` value, so every binary is new to the
+  OS) linked with `cc -O0`; Python 3.12.5.
+- **Corpus:** none.
+- **Command:** `python3 -I measure.py <empty dir> 8`, then three times `python3 -I measure_conc.py <empty dir> 6`:
+
+  ```python
+  # measure.py: times the first and second start of N freshly linked tiny programs, one after another.
+  import subprocess, sys, time, os
+  d, n = sys.argv[1], int(sys.argv[2])
+  rows = []
+  for i in range(n):
+      src = os.path.join(d, f"p{i}.c"); exe = os.path.join(d, f"p{i}_{time.time_ns()}")
+      open(src, "w").write(f'#include <stdio.h>\nint main(){{puts("{time.time_ns()}");return 0;}}\n')
+      subprocess.run(["cc", "-O0", "-o", exe, src], check=True)
+      t = time.perf_counter(); subprocess.run([exe], capture_output=True); first = time.perf_counter() - t
+      t = time.perf_counter(); subprocess.run([exe], capture_output=True); second = time.perf_counter() - t
+      rows.append((first, second)); os.remove(exe); os.remove(src)
+      print(f"{i}: first {first*1000:.0f} ms, second {second*1000:.1f} ms", flush=True)
+  ```
+
+  ```python
+  # measure_conc.py: links N unique tiny programs, starts all N at once (each one's first start), then all N again.
+  import subprocess, sys, time, os, concurrent.futures as cf
+  d, n = sys.argv[1], int(sys.argv[2])
+  exes = []
+  for i in range(n):
+      src = os.path.join(d, f"c{i}.c"); exe = os.path.join(d, f"c{i}_{time.time_ns()}")
+      open(src, "w").write(f'#include <stdio.h>\nint main(){{puts("{time.time_ns()}");return 0;}}\n')
+      subprocess.run(["cc", "-O0", "-o", exe, src], check=True); os.remove(src); exes.append(exe)
+  def run(p):
+      t = time.perf_counter(); subprocess.run([p], capture_output=True); return time.perf_counter() - t
+  for label in ("first", "second"):
+      with cf.ThreadPoolExecutor(n) as ex: r = sorted(ex.map(run, exes))
+      print(f"{label}: n={n} min {r[0]*1000:.0f} median {r[n//2]*1000:.0f} max {r[-1]*1000:.0f} ms", flush=True)
+  for p in exes: os.remove(p)
+  ```
+
+- **Runs:** 8 programs one after another; 3 rounds of 6 programs started together.
+- **Numbers:**
+
+  | Measure | First start | Second start | Budget | Verdict |
+  |---|---|---|---|---|
+  | One at a time (8 programs) | 258-2,864 ms, median 304 ms | 2.4-6.6 ms, median 2.7 ms | none | a new binary's first start carries a check its second start does not, about 100× the start itself on this host |
+  | Six at once (3 rounds) | 322-325, 274-279, 266-340 ms per round | 2-5 ms | none | six concurrent first starts took about as long as one: the checks of different binaries ran in parallel here, they did not queue |
+
+- **Memory measure:** not measured: the quantity is start latency, which memory does not bear on.
+- **Notes:** the tiny programs do not reproduce the 10-17 s first starts seen with `pitwall-server` (Pitwall's
+  [performance record](../apps/pitwall/docs/performance.md), the CI block below); what makes a large binary's check slow
+  on the shared host is not measured.
+
+### 2026-11-09, test durations around the first-start failures of 2026-11-08 (CI job logs)
+
+Quoted by [ADR 0071](adr/0071-ready-or-exit-never-a-fixed-start-budget.md). CI observations, not a benchmark: what the
+job logs say, so the ADR can quote them.
+- **Commit:** the jobs' own heads (Pitwall run 7775 job 32436 and job 32380; Debrief job 32417; the WebKit leg job 32097).
+- **Machine:** the macOS CI host, Mac mini M4 Pro (runners `d7-mac-mini`, `-2`, `-3` on one machine since 2026-11-08).
+- **Load:** not recorded by the jobs.
+- **Build:** debug test builds (`cargo nextest run --workspace --profile ci`); Playwright 1 worker.
+- **Corpus:** none.
+- **Command:** extraction from the downloaded job logs:
+  `sed $'s/\x1b\\[[0-9;]*m//g' <job>.log | grep -E '^\S+\s+(PASS|FAIL) \[' | grep 'pitwall-cli::cli'` (and the same
+  with `debrief-plugin-e2e`, `Summary \[`, `shell-demo-webkit`).
+- **Runs:** one job each.
+- **Numbers:**
+
+  | Measure | Value | Budget | Verdict |
+  |---|---|---|---|
+  | Job 32436: `pitwall-cli::cli` tests (each the first start of the fresh `pitwall`) | 10 of 12 ended at 16.83-16.88 s within 57 ms of each other; the other two at 17.84 and 19.35 s | none | consistent with every start of one binary waiting for one slow check of that binary |
+  | Job 32380 (same day, earlier): the same tests | 10 of 12 at 1.391-1.434 s; the other two at 2.40 and 3.98 s | none | the same tests without the delay |
+  | Job 32436: the two failed `pitwall-server::e2e` child-engine tests | 10.56 and 11.06 s | the double's 200 polls × 50 ms | failed |
+  | Job 32417: the two failed `debrief-plugin-e2e` store-worker tests | 29.97 and 17.14 s ("did not connect within 15 s") | the product's 15 s connect window | failed |
+  | Job 32097: first `shell-demo-webkit` test; the next one; the rest of the a11y file | 5.4 s (failed); 6.3 s; 0.33-0.66 s | the 5 s expect timeout | failed |
+
+- **Memory measure:** not applicable (test durations from logs).
+- **Notes:** the job logs are kept in the coordinator's scratch folders (`main-after-7761/logs`, `pitwall-e2e-health`),
+  not in the repository; Gitea keeps them for its retention period.
 
 ### 2026-11-03, starving a test process by OS priority on macOS
 
