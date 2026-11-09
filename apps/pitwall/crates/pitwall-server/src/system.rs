@@ -9,17 +9,22 @@ use std::time::Duration;
 
 /// Detect the hardware: CPU, RAM and GPUs (NVIDIA through `nvidia-smi` when present, Apple Silicon unified memory).
 pub async fn detect_hardware() -> Hardware {
-    let mut sys = sysinfo::System::new();
-    sys.refresh_memory();
-    sys.refresh_cpu_list(sysinfo::CpuRefreshKind::nothing());
-    let total = sys.total_memory();
+    let sys = sysinfo::System::new()
+        .inspect_err(|why| log::warn!("hardware figures unavailable (sysinfo): {why}; RAM reads as zero and one core"))
+        .ok()
+        .map(|mut sys| {
+            sys.refresh_memory();
+            sys.refresh_cpu_list(sysinfo::CpuRefreshKind::nothing());
+            sys
+        });
+    let total = sys.as_ref().map_or(0, sysinfo::System::total_memory);
     let (os, arch) = (std::env::consts::OS.to_string(), std::env::consts::ARCH.to_string());
     let mut gpus: Vec<Gpu> = hardware::apple_silicon_gpu(&os, &arch, total).into_iter().collect();
     gpus.extend(nvidia_gpus().await);
     Hardware {
         os,
         arch,
-        cpu_cores: sys.cpus().len().max(1),
+        cpu_cores: sys.as_ref().map_or(0, |s| s.cpus().len()).max(1),
         total_ram: total,
         gpus,
     }
@@ -37,11 +42,16 @@ async fn nvidia_gpus() -> Vec<Gpu> {
 /// Live memory for the release policy; `vram_free` comes from the hardware's GPUs when known, the pressure and
 /// foreground flags from the OS signals the release loop keeps current (`os_signals`).
 pub fn read_system(hw: &Hardware) -> System {
-    let mut s = sysinfo::System::new();
-    s.refresh_memory();
+    let s = sysinfo::System::new()
+        .inspect_err(|why| log::warn!("memory figures unavailable (sysinfo): {why}; RAM reads as zero"))
+        .ok()
+        .map(|mut s| {
+            s.refresh_memory();
+            s
+        });
     let sys = System {
-        total: s.total_memory(),
-        available: s.available_memory(),
+        total: s.as_ref().map_or(0, sysinfo::System::total_memory),
+        available: s.as_ref().map_or(0, sysinfo::System::available_memory),
         vram_free: hw.vram_free(),
         os_pressure: false,
         os_critical: false,
@@ -72,10 +82,13 @@ pub fn room_from(sys: &System, hw: &Hardware, releasable: u64) -> Room {
 
 /// Free bytes on the volume holding `path` (0 when unknown).
 pub fn free_disk(path: &std::path::Path) -> u64 {
-    let disks = sysinfo::Disks::new_with_refreshed_list();
+    let Ok(disks) = sysinfo::Disks::new_with_refreshed_list()
+        .inspect_err(|why| log::warn!("the volume list is unavailable (sysinfo): {why}; free space is unknown"))
+    else {
+        return 0;
+    };
     let p = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     disks
-        .list()
         .iter()
         .filter(|d| p.starts_with(d.mount_point()))
         .max_by_key(|d| d.mount_point().as_os_str().len())
@@ -106,7 +119,12 @@ pub fn terminate(id: paddock_proc::ProcessId, force: bool) {
 
 /// Whether a process id is alive.
 pub fn pid_alive(pid: u32) -> bool {
-    let mut s = sysinfo::System::new();
+    // Unknown counts as alive: a process is never declared gone because the process table could not be read.
+    let Ok(mut s) = sysinfo::System::new()
+        .inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; pid {pid} is assumed alive"))
+    else {
+        return true;
+    };
     let p = sysinfo::Pid::from_u32(pid);
     s.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[p]), false);
     // A child that exited but was not reaped yet (a zombie on Linux) is gone for our purposes.

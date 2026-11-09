@@ -149,7 +149,7 @@ impl Harness {
     /// Ends every process the test started: anything running from or inside the harness folder, and their descendants.
     fn kill_leftover_processes(&self) {
         use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
-        let mut sys = System::new();
+        let mut sys = System::new().expect("a System");
         sys.refresh_processes_specifics(
             ProcessesToUpdate::All,
             true,

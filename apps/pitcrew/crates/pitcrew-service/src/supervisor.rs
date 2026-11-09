@@ -2035,7 +2035,15 @@ impl RunnerProcess for Adopted {
     }
 
     fn try_wait(&mut self) -> Option<Option<i32>> {
-        let mut sys = sysinfo::System::new();
+        // Unknown counts as still running: an adopted runner is never reported as exited because the table could not be read.
+        let Ok(mut sys) = sysinfo::System::new().inspect_err(|why| {
+            eprintln!(
+                "pitcrew-service: warning: the OS process table is unavailable (sysinfo): {why}; pid {} is assumed running",
+                self.pid
+            )
+        }) else {
+            return None;
+        };
         let pid = sysinfo::Pid::from_u32(self.pid);
         sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
         if sys.process(pid).is_some() {
