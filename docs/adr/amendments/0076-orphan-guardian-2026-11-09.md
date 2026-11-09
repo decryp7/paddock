@@ -22,10 +22,14 @@ dependency and a kill C53 could not see. The user asked for one guardian per pro
 
 - **One guardian per owner process**, started on the first guarded child: the owner's own executable run again with
   `PADDOCK_PROC_GUARDIAN=1`, in a process group of its own. It reads a pipe whose write end only the owner holds
-  (close-on-exec, so no other child inherits it): `add <group> <keeper pid> <keeper start> <folder>` per guarded child, and
-  `del <group>` when the owner ended that child itself. End of file means the owner is gone. The guardian then ends every
-  group still registered, waits (bounded, 10 s) for it to empty, removes its folder, and exits. A guardian that died is
-  started again on the next child.
+  (close-on-exec, so no other child inherits it): `add <group> <keeper pid> <keeper start> <hex length> <folder as hex>`
+  per guarded child, and `del <group>` when the owner ended that child itself. End of file means the owner is gone. The
+  guardian then ends every group still registered, waits (bounded, 10 s) for it to empty, removes its folder, and exits.
+  A guardian that died is started again on the next child.
+- **Whole lines only.** The owner builds each line in one buffer and sends it with one `write_all`; the guardian reads
+  with `read_until(b'\n')` (at most 16 KiB a line) and drops a last line without its newline and an `add` whose folder hex
+  is not as long as the line declares. A line the owner did not finish (it died while writing) can therefore never name a
+  prefix of its folder, such as an ancestor folder.
 - **One keeper per guarded child**: `/bin/cat`, started by the owner into the child's process group, reading a pipe whose
   write end only the guardian holds. While the keeper is there (alive, or a zombie not yet reaped) the group id cannot be
   handed to another group. The guardian signals a group only after checking that its keeper, by pid and start time, is
@@ -35,12 +39,46 @@ dependency and a kill C53 could not see. The user asked for one guardian per pro
   of a 5 MB debug test binary 6.9 MB resident, a `cat` keeper 1.3 MB).
 - **Generic**: any `Supervised` child gets the group end; `Supervised::spawn_owning_folder` also names a folder to remove.
   Chromium is one user (throwaway profiles); nothing in the guardian knows about browsers.
-- **Trace (ER-27)**: every action of the guardian is one line in its log file (`PADDOCK_PROC_GUARDIAN_LOG` from the owner's
-  environment, else `guardian::set_log`, else `paddock-proc-guardian.log` in the temporary folder): the owner's pid, each
-  group ended or left alone (its keeper gone) and each folder removed or not. The owner logs the guardian's start and, once,
-  when the guard is off and why.
-- **Cost** (docs/benchmarks.md, 2026-11-09): N guarded children cost N + 1 processes; a registration about 0.15 ms p50, an
-  unregistration about 0.04 ms, the first one (which starts the guardian) under 1 ms.
+- **Trace (ER-27)**: every action of the guardian is one line in its log file: the owner's identity, a refusal to serve
+  and why, each line dropped, each group ended or left alone (its keeper gone), and each folder removed or left and why.
+  The owner logs the guardian's start and, once, when the guard is off and why.
+- **Cost** (docs/benchmarks.md, 2026-11-09, measured at load 10 to 12 like the first shape): N guarded children cost N + 1
+  processes; a registration 0.20 to 0.26 ms p50 (0.29 to 0.35 ms with a folder, which writes its marker), an
+  unregistration 0.05 to 0.08 ms, the first one (which starts the guardian) under 1 ms. The first shape (two `sh` per
+  child) took 5.8 to 7.0 ms per child at the same load.
+
+### 1a. Who the guardian obeys (the security review's P1-1)
+
+The guardian can SIGKILL process groups and remove folders, so anyone able to start the binary with
+`PADDOCK_PROC_GUARDIAN=1` and a standard input of their own (a shell, `open --env --stdin` on macOS) could make an app
+with TCC grants, or a root binary, do that for them. It therefore obeys only its owner, and acts only within what the
+owner marked:
+
+- **The owner, by identity.** The owner passes its identity (`PADDOCK_PROC_GUARDIAN_OWNER`, pid and start time). Before it
+  reads a line, the guardian checks that its parent (`getppid`) is that pid, that the pid still names that process (start
+  time, rule 53), and that the parent's executable (`proc_pidpath` on macOS, `/proc/<pid>/exe` on Linux, canonical) is its
+  own (`current_exe`, canonical). Its standard input must be a pipe; on Linux the owner must hold that pipe (its inode among
+  the owner's descriptors); macOS gives no portable way to name a pipe's other end, so there the parent check stands
+  alone. Otherwise it logs the refusal and exits without reading.
+- **Groups**: only a group whose keeper is, by identity, still in it, and whose executable is the keeper program
+  (`/bin/cat`, canonical).
+- **Folders**: only an absolute, canonical path (no link on the way), a real folder (not a link), holding the owner's
+  marker `.paddock-proc-guardian`: a regular file of this user, written by the owner at registration (`O_NOFOLLOW`, mode
+  0600), naming the owner's identity. The marker is the capability: a forged line can only name a folder the forger could
+  already write a marker into, which it could already remove. A "folder under the owner's temp root" rule was considered
+  and not used: the folders guarded today are browser profiles in the app's cache folder, not in a temporary root, and the
+  marker covers any location.
+- **The log** is opened with `O_NOFOLLOW` and mode 0600, only in a folder this user owns that nobody else can write to
+  (never `/tmp` or another shared folder). By default it is `~/Library/Logs/paddock-proc-guardian.log` on macOS and
+  `$XDG_STATE_HOME` (or `~/.local/state`) `/paddock-proc-guardian.log` elsewhere; `guardian::set_log` names another.
+  `PADDOCK_PROC_GUARDIAN_LOG` is ignored for root.
+- **Root: off.** A process running as root does not start a guardian, and a guardian running as root exits at once. No
+  root main may adopt the guardian under this amendment: Dyno's helper (`dyno-helper`, on C79's `ADOPTING`) stays as it is,
+  and a later amendment must review the root case first.
+- **ADR 0073 class E (guards).** `PADDOCK_PROC_GUARDIAN` (turns the binary into the guardian; obeyed only under the checks
+  above), `PADDOCK_PROC_GUARDIAN_OWNER` (the owner's identity, checked against the parent) and `PADDOCK_PROC_GUARDIAN_LOG`
+  (where the guardian logs; checked as above, ignored for root) are deliberate switches of every shipped binary that adopts
+  the guardian. They are listed as class-E guards for ADR 0073's register, accepted together with this amendment.
 - **Windows** keeps `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`; no guardian is started there.
 
 ### 2. How the guardian process starts: a re-exec of the current executable (option a)
@@ -56,10 +94,12 @@ dependency and a kill C53 could not see. The user asked for one guardian per pro
 **Chosen: (a).** It ships nothing new, cannot skew, and costs one line per binary. The danger (re-running an app that does
 not expect it) is closed by the opt-in: only a process whose `main` called `run_if_requested()` starts a guardian.
 
-**The mains that need the call** are every `src/main.rs`, `src/bin/*.rs` and `src/bin/*/main.rs` of a package whose
-dependency closure in its workspace's `Cargo.lock` reaches `paddock-proc`: 37 on `origin/train/2026-11-08-1` (Debrief 20,
-Dyno 6, Spotter 1, the shell and workbench demos 3, shared crates and tools 7; listed in C79's `ADOPTING`). **Check C79**
-reads the lockfiles and fails a main that reaches `paddock-proc` without the call and is not on `ADOPTING`. `ADOPTING`
+**The mains that need the call** are every `src/main.rs`, `src/bin/*.rs`, `src/bin/*/main.rs` and `[[bin]] path` of a
+package whose dependency closure in its workspace's `Cargo.lock` reaches `paddock-proc`: 39 on `origin/train/2026-11-08-1`
+(Debrief 22, Dyno 6, Spotter 1, the shell and workbench demos 3, shared crates and tools 7; listed in C79's `ADOPTING`).
+`#![no_main]` binaries (51 fuzz targets) have no `main` and are skipped. **Check C79** reads the lockfiles and fails a main
+that reaches `paddock-proc` without the call as the first statement of `fn main` (comments and strings do not count) and
+is not on `ADOPTING`. `ADOPTING`
 only shrinks: a listed main is a warning, a listed main that has the call is an error until it leaves the list. Each app
 adopts in its own release window (rule 1); the shared fixtures and tools with the next shared batch. Test binaries
 (`real_browser.rs` and the unit tests of `paddock-chromium` and `paddock-proc`) opt in through `enable_in_test_binary`

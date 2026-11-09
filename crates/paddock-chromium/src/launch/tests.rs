@@ -180,6 +180,17 @@ fn a_browser_whose_owner_is_killed_is_ended_and_its_throwaway_profile_removed() 
     // SIGKILL through the handle of this process's own child: none of the owner's own clean-up runs.
     owner.kill().unwrap();
     owner.wait().unwrap();
+    if running_as_root() {
+        // Root (the Linux CI containers): the guardian is off for root binaries (ADR 0076 amendment 2026-11-09), so the
+        // orphaned browser stays. Asserted, then ended by identity; the guarded path runs as a user.
+        let stayed = paddock_proc::run_state(browser) == paddock_proc::RunState::Running;
+        paddock_proc::kill_tree(browser);
+        assert!(
+            stayed,
+            "a root owner's browser was ended without a guardian"
+        );
+        return;
+    }
     let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
         paddock_proc::run_state(browser) == paddock_proc::RunState::Exited && !profile.exists()
     });

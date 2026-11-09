@@ -2,14 +2,25 @@
 // (ADR 0076 amendment 2026-11-09, the orphan guardian). The guardian is that binary run again with a reserved variable;
 // a binary without the call never starts one (it logs that the guard is off), so if it is killed its children's trees
 // run on (a headless browser left by a killed test process on CI ran for 2.5 h).
-// Which binaries: every `src/main.rs`, `src/bin/*.rs` and `src/bin/*/main.rs` of a package whose dependency closure in its
-// workspace's Cargo.lock reaches `paddock-proc`. Test binaries (whose `main` is the harness) opt in with
+// Which binaries: every `src/main.rs`, `src/bin/*.rs`, `src/bin/*/main.rs` and `[[bin]] path` of a package whose
+// dependency closure in its workspace's Cargo.lock reaches `paddock-proc`. The call must be the first statement of
+// `fn main` (comments do not count): the guardian must start before the app does anything else. Test binaries (whose `main` is the harness) opt in with
 // `enable_in_test_binary` and are not checked here. ADOPTING lists the mains that do not call it yet; it may only shrink:
 // a main missing from it is an error, a listed one is a warning, and a listed one that calls it already is an error until
-// it leaves the list.
+// it leaves the list. A `#![no_main]` binary (a fuzz target) has no `main` and is skipped.
 import { error, warn } from '../finding.mjs';
+import { maskRust } from './C39-freed-port.mjs';
 
-const CALL = /paddock_proc::guardian::run_if_requested\s*\(\s*\)/;
+/** `fn main` (any attributes, `async`, a return type), then its body's first statement. */
+const MAIN_FN = /\bfn\s+main\s*\(\s*\)[^{;]*\{/;
+const FIRST_CALL = /^\s*(?:::)?paddock_proc\s*::\s*guardian\s*::\s*run_if_requested\s*\(\s*\)\s*;/;
+
+/** Whether `text`'s `fn main` begins with the call (comments and strings masked, so a commented-out call does not count). */
+export function callsFirst(text) {
+  const masked = maskRust(text);
+  const m = MAIN_FN.exec(masked);
+  return m !== null && FIRST_CALL.test(masked.slice(m.index + m[0].length));
+}
 const MAIN = /(^|\/)src\/(main\.rs|bin\/[^/]+\.rs|bin\/[^/]+\/main\.rs)$/;
 
 /** Mains that reach paddock-proc and do not call the guardian yet, each with why; adoption is per app, in its release window. */
@@ -25,6 +36,8 @@ export const ADOPTING = new Map(
     ['apps/debrief/crates/debrief-collect/src/bin/debrief-collect.rs', 'Debrief: adopts in 1.2'],
     ['apps/debrief/crates/debrief-ipc/src/bin/fake_child.rs', 'Debrief test fixture: adopts in 1.2'],
     ['apps/debrief/crates/debrief-monitor/src/bin/debrief-monitor.rs', 'Debrief: adopts in 1.2'],
+    ['apps/debrief/crates/debrief-plugin-e2e/src/kv.rs', 'Debrief test plugin: adopts in 1.2'],
+    ['apps/debrief/crates/debrief-plugin-e2e/src/store_worker.rs', 'Debrief test plugin: adopts in 1.2'],
     ['apps/debrief/crates/debrief-plugin-host/src/bin/fake_plugin.rs', 'Debrief test fixture: adopts in 1.2'],
     ['apps/debrief/crates/debrief-plugin-test/src/bin/fixture.rs', 'Debrief test fixture: adopts in 1.2'],
     ['apps/debrief/crates/debrief-plugins/src/main.rs', 'Debrief: adopts in 1.2'],
@@ -38,7 +51,7 @@ export const ADOPTING = new Map(
     ['apps/dyno/app/src-tauri/src/main.rs', 'Dyno app: adopts in its next release'],
     ['apps/dyno/crates/dyno-agent/src/main.rs', 'Dyno: adopts in its next release'],
     ['apps/dyno/crates/dyno-cli/src/main.rs', 'Dyno: adopts in its next release'],
-    ['apps/dyno/crates/dyno-helper/src/main.rs', 'Dyno: adopts in its next release'],
+    ['apps/dyno/crates/dyno-helper/src/main.rs', 'Dyno helper runs as root: the guardian is off for root binaries (ADR 0076 amendment 2026-11-09), so it does not adopt'],
     ['apps/dyno/crates/dyno-plugin-host/src/bin/test_plugin.rs', 'Dyno test fixture: adopts in its next release'],
     ['apps/dyno/plugins/dyno-plugin-example/src/main.rs', 'Dyno example plugin: adopts in its next release'],
     ['apps/shell-demo/src-tauri/agent/src/main.rs', 'shell demo: adopts with the next shared batch'],
@@ -77,6 +90,15 @@ export function reaches(graph, name, target = 'paddock-proc', seen = new Set()) 
 
 const dirOf = (p) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
 
+/** The `[[bin]] path` entries of a Cargo.toml, relative to its folder. */
+export function binPaths(manifest) {
+  return manifest
+    .split(/^\[\[bin\]\]\s*$/m)
+    .slice(1)
+    .map((block) => /^path\s*=\s*"([^"]+)"/m.exec(block.split(/^\[/m)[0])?.[1])
+    .filter((p) => p !== undefined);
+}
+
 /** The mains (paths) that must call the guardian: [{ file, hooked }]. `read(path)` gives a file's text or null. */
 export function guardedMains(files, read) {
   const have = new Set(files);
@@ -89,15 +111,22 @@ export function guardedMains(files, read) {
   };
   const graphs = new Map();
   const out = [];
-  for (const f of files) {
-    if (!MAIN.test(f) || f.includes('/tests/') || f.includes('/fixture/')) continue;
+  // Mains by convention, then those a manifest names with `[[bin]] path`.
+  const named = files
+    .filter((f) => f.endsWith('Cargo.toml'))
+    .flatMap((m) => binPaths(read(m) ?? '').map((p) => (dirOf(m) ? `${dirOf(m)}/${p}` : p).replace(/\/\.\//g, '/')));
+  const mains = [...new Set([...files.filter((f) => MAIN.test(f)), ...named.filter((f) => have.has(f))])];
+  for (const f of mains) {
+    if (f.includes('/tests/') || f.includes('/fixture/')) continue;
+    // A `#![no_main]` binary (a fuzz target: libfuzzer brings `main`) has no `main` to call it from.
+    if (/^\s*#!\[no_main\]/m.test(maskRust(read(f) ?? ''))) continue;
     const manifest = nearest(dirOf(f), 'Cargo.toml');
     const pkg = manifest && /^\[package\][\s\S]*?^name\s*=\s*"([^"]+)"/m.exec(read(manifest) ?? '')?.[1];
     const lock = manifest && nearest(dirOf(manifest), 'Cargo.lock');
     if (!pkg || !lock) continue;
     if (!graphs.has(lock)) graphs.set(lock, lockGraph(read(lock) ?? ''));
     if (pkg === 'paddock-proc' || !reaches(graphs.get(lock), pkg)) continue;
-    out.push({ file: f, hooked: CALL.test(read(f) ?? '') });
+    out.push({ file: f, hooked: callsFirst(read(f) ?? '') });
   }
   return out;
 }
@@ -116,7 +145,7 @@ export default {
       const listed = why !== undefined;
       if (hooked && listed) out.push(error('C79', 53, file, 1, 'calls the orphan guardian but is still on ADOPTING', 'Remove it from ADOPTING in C79 (the list only shrinks).'));
       else if (!hooked && listed) out.push(warn('C79', 53, file, 1, `does not call the orphan guardian yet (${why})`, fix));
-      else if (!hooked) out.push(error('C79', 53, file, 1, 'can start supervised children but does not call the orphan guardian: if it is killed, they run on', fix));
+      else if (!hooked) out.push(error('C79', 53, file, 1, 'can start supervised children but does not call the orphan guardian first in main: if it is killed, they run on', fix));
     }
     return out;
   },

@@ -16,6 +16,10 @@
 //! (rule 53, ADR 0033). It ends when the guardian ends, or when its owner ends the child. A keeper only has to block
 //! on a pipe: `cat` is the cheapest process that does; the owner's executable run again would map megabytes for nothing.
 //!
+//! The guardian obeys only its owner: its parent, by pid and start time, running the same executable, on a pipe (on Linux
+//! one the owner holds). It removes only a canonical folder holding the owner's marker, takes only whole lines, logs only
+//! into a private folder of the user's (`O_NOFOLLOW`, mode 0600), and is off for root (amendment §1a).
+//!
 //! N guarded children cost N + 1 processes. Not done: `PR_SET_PDEATHSIG` (Linux) needs a `pre_exec` hook, which the family
 //! bans (lint/clippy.toml), and it fires when the *thread* that started the child ends (prctl(2)).
 //!

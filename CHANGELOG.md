@@ -8,11 +8,16 @@ Conventional Commits; one semver tag for the whole repo.
 - New `paddock_proc::guardian`: one guardian process per owner (this executable run again, started on the first guarded
   child) and one keeper (`/bin/cat`) per child's process group. When the owner dies without ending a child (a SIGKILL, a
   crash), the guardian ends every group still registered (after checking its keeper by identity, rule 53), removes the
-  folders they were given and writes a line per step to its log (`PADDOCK_PROC_GUARDIAN_LOG`, else `set_log`, else
-  `paddock-proc-guardian.log` in the temporary folder). N guarded children cost N + 1 processes and about 0.15 ms each.
+  folders they were given and writes a line per step to its log (`PADDOCK_PROC_GUARDIAN_LOG`, else `set_log`, else the
+  user's log folder; opened with `O_NOFOLLOW`, mode 0600, only in a folder of this user that nobody else can write to). N
+  guarded children cost N + 1 processes and about 0.2 to 0.35 ms each.
+- The guardian obeys only its owner: its parent, by pid and start time, running the same executable, on a pipe (on Linux
+  one the owner holds). It removes only a canonical folder that holds the owner's marker (`.paddock-proc-guardian`), takes
+  only whole lines (one write each, newline-terminated, length-checked), and is off for root.
 - A binary opts in with `paddock_proc::guardian::run_if_requested();` first thing in `main` (a test binary with
   `enable_in_test_binary(entry)`); one that does not logs once that the guard is off. Conformance check C79 lists the
-  mains that reach `paddock-proc` and do not call it yet (`ADOPTING`, which only shrinks).
+  mains that reach `paddock-proc` and do not call it first in `main` yet (`ADOPTING`, which only shrinks; `[[bin]] path`
+  included, `#![no_main]` fuzz targets skipped).
 - New `Supervised::spawn_owning_folder(cmd, cap, folder)`; `ProcessId::may_be_alive` and `StartTime::is_near` (start times
   within the clock's slack, for decisions that err towards "still there"; kills still compare exactly).
 - `paddock-chromium`: throwaway profiles go with an orphaned browser, are named `chromium-<pid>-s<start µs>-...`, and each

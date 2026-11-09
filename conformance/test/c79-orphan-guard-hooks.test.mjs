@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import C79, { ADOPTING, guardedMains, lockGraph, reaches } from '../src/checks/C79-orphan-guard-hooks.mjs';
+import C79, { ADOPTING, binPaths, callsFirst, guardedMains, lockGraph, reaches } from '../src/checks/C79-orphan-guard-hooks.mjs';
 
 const LOCK = `version = 4
 
@@ -79,9 +79,9 @@ test('C79: a missing hook is an error, an adopting one a warning, and the list o
   assert.deepEqual(by, { 'src/main.rs': 'error', 'src/bin/listed.rs': 'warn', 'src/bin/done.rs': 'error' });
 });
 
-test('C79 ADOPTING names only main files', () => {
+test('C79 ADOPTING names only Rust files with a reason', () => {
   for (const [file, why] of ADOPTING) {
-    assert.match(file, /src\/(main\.rs|bin\/.+\.rs)$/);
+    assert.match(file, /\.rs$/);
     assert.ok(why.length > 5);
   }
 });
@@ -90,4 +90,26 @@ test('C79 matches a listed main from an app folder (paths relative to the checke
   const files = { 'Cargo.lock': LOCK, 'Cargo.toml': '[package]\nname = "app"\n', 'src/main.rs': BARE };
   const f = C79.run(tree(files), new Map([['apps/x/src/main.rs', 'adopts later']]));
   assert.deepEqual(f.map((x) => x.severity), ['warn']);
+});
+
+test('C79 wants the call as the first statement of main, comments and strings aside', () => {
+  assert.ok(callsFirst(HOOK));
+  assert.ok(callsFirst('#[tokio::main]\nasync fn main() -> anyhow::Result<()> {\n    // first\n    /* the guard */ paddock_proc::guardian::run_if_requested();\n    Ok(())\n}\n'));
+  assert.ok(!callsFirst('fn main() {\n    // paddock_proc::guardian::run_if_requested();\n}\n'), 'a commented-out call');
+  assert.ok(!callsFirst('fn main() {\n    let s = "paddock_proc::guardian::run_if_requested();";\n}\n'), 'a string');
+  assert.ok(!callsFirst('fn main() {\n    start_app();\n    paddock_proc::guardian::run_if_requested();\n}\n'), 'not first');
+  assert.ok(!callsFirst('fn helper() {\n    paddock_proc::guardian::run_if_requested();\n}\n'), 'not in main');
+});
+
+test('C79 also checks the mains a manifest names with [[bin]] path', () => {
+  assert.deepEqual(binPaths('[package]\nname = "app"\n\n[[bin]]\nname = "x"\npath = "tools/x.rs"\n\n[[bin]]\nname = "y"\n\n[dependencies]\npath = "no"\n'), ['tools/x.rs']);
+  const files = {
+    'Cargo.lock': LOCK,
+    'Cargo.toml': '[package]\nname = "app"\n\n[[bin]]\nname = "x"\npath = "tools/x.rs"\n',
+    'tools/x.rs': BARE,
+    'fuzz/Cargo.toml': '[package]\nname = "app"\n\n[[bin]]\nname = "f"\npath = "fuzz_targets/f.rs"\n',
+    'fuzz/fuzz_targets/f.rs': '#![no_main]\nlibfuzzer_sys::fuzz_target!(|d: &[u8]| {});\n',
+  };
+  const t = tree(files);
+  assert.deepEqual(guardedMains(t.files(), t.read), [{ file: 'tools/x.rs', hooked: false }]);
 });
