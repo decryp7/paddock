@@ -237,7 +237,7 @@ These measure tooling, not a product. They are kept where they are.
 
 What: the checkout and stable-workspace steps of ci.yml's host jobs (`crate`, `app`, `paddock-dev`) on the real runners, from the
 48 h of job data of the speed research R2 (`/Volumes/d7sst7/dev-targets/scratch/speed-research/data/jobs`, successful host jobs
-with both steps) against dispatched affected runs 7808 (commit a3ad3d78f, 12 host jobs) and 7816 (commit 6d0eb0824). The tree: 12,367 files, 540 MiB; the
+with both steps) against dispatched affected runs 7808 (commit a3ad3d78f, 12 host jobs) 7816 (commit 6d0eb0824) and 7818 (commit 4ebe7db09). The tree: 12,367 files, 540 MiB; the
 lean profile checks out 10,314 files. Synthetic data only; step times from the Gitea API (`steps[].started_at/completed_at`).
 Script: `measure.py` in the scratch folder `/Volumes/d7sst7/dev-targets/scratch/ci-cheap-checkout`.
 
@@ -274,10 +274,35 @@ reused a folder of the same name left by run 7808. The clone is now one per slot
 which a warm job should turn into a fetch of the delta (the fetch phase was 0 to 1 s) plus a checkout of the changed files. That is
 **not measured yet**. The 3-slot VM means three cold clones at first and warm ones after.
 
-**macOS in run 7816 did not run the clone**: all six macOS jobs failed in job-isolation, before kept-clone, because the bootstrap
-lacked `crates/paddock-testkit`, a dev-dependency that cargo loads to build paddock-dev (run 7808 had a cached binary). Fixed in the
-commit that follows this block's parent; macOS numbers are still those of run 7808 above (its first run on legacy clones), so
-neither macOS cold nor warm is measured with the final design.
+**Run 7818 (commit 4ebe7db09, one clone per slot), Windows** (seconds; slots s1 to s3, `paddock-checkout-Windows-s<n>`):
+
+| Job (slot) | bootstrap checkout | create | clean | fetch | check out | kept-clone total | checkout + kept-clone |
+|---|---|---|---|---|---|---|---|
+| crate (s2), cold | 6 | 0 | - | 1 | 26 | 28 | 35 |
+| paddock-dev (s1), cold | 6 | 1 | - | 0 | 25 | 28 | 34 |
+| app dyno (s3), cold | 6 | 1 | - | 0 | 25 | 28 | 34 |
+| app pitcrew (s1), warm | 14 | - | 4 | 1 | 2 | 10 | 24 |
+| app pitwall (s1), warm | 9 | - | 1 | 2 | 1 | 7 | 16 |
+| app spotter (s2), warm | 6 | - | 1 | 2 | 1 | 7 | 13 |
+
+Against 102 s p50 (123 s p90): cold 34 to 35 s (a third), warm 13 to 24 s (an eighth to a quarter). Caveat on "warm": the slot's
+clone was already at the same commit (the same run), so fetch and check out had no delta to carry; a warm clone one commit
+behind adds the changed files. The six jobs repeated only slots s1 and s2, the three-slot VM's first run. The warm bootstrap
+checkout (6 to 14 s) is now the biggest single piece left; the cold check out (25 s) is the blobs of the lean files.
+
+**macOS did not run the clone in run 7816 or 7818.** All six macOS jobs failed in job-isolation, before kept-clone, in both
+runs: paddock-dev has to be built from the bootstrap (a cached `./dev` binary hid this in run 7808), and cargo loads the whole
+workspace around its path dependencies. 7816 lacked `crates/paddock-testkit` (a dev-dependency), 7818 lacked the other members
+of the `crates/` workspace (`failed to load manifest for workspace member crates/cargo-paddock-plugin`, `no matching package
+named paddock-jobs`). The bootstrap is now the whole `crates/` folder (13.7 MiB), checked locally by `cargo metadata --locked` in a
+tree with only the bootstrap folders, and a test requires every member of the workspace. The macOS bootstrap checkout itself took
+24 to 96 s in run 7818 (1 to 8 s in 7808 and 7816; the Mac runners were busy), so macOS has **no measurement of the final
+design**: its figures remain those of run 7808 above, taken on clones of the old layout.
+
+Failures in run 7818 that are not the checkout: `crate` Windows (`paddock-mcp` bridge test timeout), `paddock-dev` Windows (two
+timeouts, `golden::live_plan_matches_affected_mjs_on_sample_change_sets` and `wrapper::compiler_flags_are_part_of_the_hash...`;
+the golden live tests also timed out or failed on Windows in runs 7812 and 7803 of other branches, and the wrapper test works in a
+temporary fixture repository, so load on the three-slot VM is the likelier cause, not shown).
 
 ### 2026-11-03, starving a test process by OS priority on macOS
 
