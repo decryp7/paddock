@@ -10,6 +10,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod adapter;
+mod answer;
 pub mod cdp;
 pub mod challenge;
 pub mod discover;

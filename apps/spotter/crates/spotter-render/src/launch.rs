@@ -1,14 +1,17 @@
 //! Starting a browser: the command line, a throwaway profile and the supervised process with its time and memory
 //! caps. The real user agent and the automation banner are kept on purpose: no stealth.
 
+use crate::answer::{self, Life};
 use crate::cdp::Connection;
 use crate::discover::{Browser, Flavor};
 use crate::page::Page;
 use crate::process::{self, Supervised};
 use crate::{Error, Result};
+use paddock_proc::{ExitInfo, Liveness, Patience, ProcessId};
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 /// How the browser window behaves.
@@ -36,6 +39,9 @@ pub struct LaunchOptions {
     /// Extra command-line flags. Empty in the product; tests use it for the root-in-a-container switches
     /// (see `discover::test_browser_flags_with`).
     pub extra_args: Vec<String>,
+    /// How the browser's answers to the commands that open a page are judged ([`crate::answer`]): while it is alive and
+    /// working, never for a fixed time; `max_lifetime` is the overall bound.
+    pub patience: Patience,
 }
 
 impl LaunchOptions {
@@ -47,6 +53,7 @@ impl LaunchOptions {
             max_lifetime: Duration::from_secs(120),
             memory_cap: Some(2 << 30),
             extra_args: Vec::new(),
+            patience: Patience::default(),
         }
     }
 }
@@ -206,10 +213,12 @@ pub enum EndedBy {
 pub struct Chromium {
     // Field order matters: the connection closes before the process is killed.
     conn: Arc<Connection>,
-    process: Supervised,
+    /// Behind a lock so that a page can be opened through `&self` while the process is looked at ([`BrowserLife`]).
+    process: Mutex<Supervised>,
     dir: PathBuf,
     alive: Arc<AtomicBool>,
     ended_by: Arc<AtomicU8>,
+    patience: Patience,
 }
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -271,10 +280,11 @@ impl Chromium {
         match connect(&dir, &mut process) {
             Ok(conn) => Ok(Chromium {
                 conn: Arc::new(conn),
-                process,
+                process: Mutex::new(process),
                 dir,
                 alive,
                 ended_by,
+                patience: opts.patience,
             }),
             Err(e) => {
                 alive.store(false, Ordering::Release);
@@ -287,12 +297,12 @@ impl Chromium {
 
     /// The process id (while running).
     pub fn pid(&self) -> Option<u32> {
-        self.process.id()
+        lock(&self.process).id()
     }
 
     /// Whether the browser runs and the connection is open.
     pub fn is_running(&mut self) -> bool {
-        self.process.is_running() && !self.conn.is_closed()
+        lock(&self.process).is_running() && !self.conn.is_closed()
     }
 
     /// The throwaway profile folder.
@@ -304,35 +314,46 @@ impl Chromium {
     pub fn ended_by(&self) -> EndedBy {
         match self.ended_by.load(Ordering::Acquire) {
             TIMED_OUT => EndedBy::TimeLimit,
-            _ if self.process.stopped_over_memory().is_some() => EndedBy::MemoryCap,
+            _ if lock(&self.process).stopped_over_memory().is_some() => EndedBy::MemoryCap,
             _ => EndedBy::Nothing,
         }
     }
 
-    /// Opens a page (tab) to drive.
+    /// Opens a page (tab) to drive. Every command of the open (creating the tab, attaching to it, enabling its domains) is
+    /// judged by the browser's liveness, never by a fixed deadline ([`crate::answer`], ADR 0071): it is waited for while the
+    /// process runs and its tree uses CPU, and fails, naming the command, the time waited, the pid and the reason, once the
+    /// browser ended or stopped working. [`LaunchOptions::max_lifetime`]'s watchdog stays the overall bound.
     pub fn new_page(&self) -> Result<Page> {
-        Page::attach(self.conn.clone())
+        let id = lock(&self.process).process();
+        let life = RefCell::new(BrowserLife {
+            process: &self.process,
+            dir: &self.dir,
+            id,
+        });
+        Page::attach(self.conn.clone(), &|session, method, params| {
+            answer::ask(&self.conn, &life, self.patience, session, method, params)
+        })
     }
 
     /// Asks the browser to quit (`Browser.close` over DevTools) and waits up to [`CLOSE_GRACE`] for the process to
     /// end, then ends whatever is left. A browser that is killed while it still starts up can leave a copy of
     /// itself behind on macOS (the code-sign clone), so every normal end goes through here. Idempotent.
     pub fn close(&mut self) {
-        if self.alive.load(Ordering::Acquire) && self.process.is_running() && !self.conn.is_closed() {
+        if self.alive.load(Ordering::Acquire) && lock(&self.process).is_running() && !self.conn.is_closed() {
             let _ = self.conn.call(None, "Browser.close", serde_json::json!({}), Duration::from_secs(2));
             let end = Instant::now() + CLOSE_GRACE;
-            while self.process.is_running() && Instant::now() < end {
+            while lock(&self.process).is_running() && Instant::now() < end {
                 std::thread::sleep(Duration::from_millis(50));
             }
         }
         self.alive.store(false, Ordering::Release);
-        self.process.terminate(Duration::from_millis(500));
+        lock(&self.process).terminate(Duration::from_millis(500));
     }
 
     /// Ends the browser at once.
     pub fn kill(&mut self) {
         self.alive.store(false, Ordering::Release);
-        self.process.kill();
+        lock(&self.process).kill();
     }
 }
 
@@ -340,6 +361,39 @@ impl Drop for Chromium {
     fn drop(&mut self) {
         self.close();
         cleanup(&self.dir);
+    }
+}
+
+/// The supervised process; a panic elsewhere while it was held does not stop the browser from being looked at or ended.
+fn lock(process: &Mutex<Supervised>) -> MutexGuard<'_, Supervised> {
+    process.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The running browser, as [`crate::answer`] looks at it while an answer is owed.
+struct BrowserLife<'a> {
+    process: &'a Mutex<Supervised>,
+    dir: &'a Path,
+    id: Option<ProcessId>,
+}
+
+impl Life for BrowserLife<'_> {
+    fn liveness(&mut self) -> Liveness {
+        if lock(self.process).is_running() {
+            return Liveness::Running;
+        }
+        let stderr_tail = std::fs::read(self.dir.join(STDERR_FILE))
+            .map(|b| stderr_tail(&b))
+            .ok()
+            .filter(|t| !t.is_empty());
+        Liveness::Exited(ExitInfo { status: None, stderr_tail })
+    }
+
+    fn pid(&self) -> Option<ProcessId> {
+        self.id
+    }
+
+    fn cpu_time(&mut self) -> Option<Duration> {
+        paddock_proc::tree_cpu_time(self.id?)
     }
 }
 

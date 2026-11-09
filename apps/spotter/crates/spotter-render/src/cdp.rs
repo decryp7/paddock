@@ -102,32 +102,27 @@ impl Connection {
 
     /// Sends a command and waits for its reply.
     pub fn call(&self, session: Option<&str>, method: &str, params: Value, timeout: Duration) -> Result<Value> {
+        self.send(session, method, params)?
+            .wait(timeout)
+            .unwrap_or(Err(Error::Timeout("a command")))
+    }
+
+    /// Sends a command; its reply is waited for with [`Pending::wait`], for as long as the caller judges right.
+    pub fn send(&self, session: Option<&str>, method: &str, params: Value) -> Result<Pending<'_>> {
         if self.is_closed() {
             return Err(Error::Closed);
         }
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = channel();
         lock(&self.inner.pending).insert(id, tx);
+        // From here on, dropping `pending` forgets the command, also when it could not be sent.
+        let pending = Pending { conn: self, id, rx };
         let mut msg = json!({"id": id, "method": method, "params": params});
         if let Some(s) = session {
             msg["sessionId"] = json!(s);
         }
-        if self.out.send(msg.to_string()).is_err() {
-            lock(&self.inner.pending).remove(&id);
-            return Err(Error::Closed);
-        }
-        match rx.recv_timeout(timeout) {
-            Ok(Ok(v)) => Ok(v),
-            Ok(Err(m)) => Err(Error::Protocol(m)),
-            Err(_) => {
-                lock(&self.inner.pending).remove(&id);
-                if self.is_closed() {
-                    Err(Error::Closed)
-                } else {
-                    Err(Error::Timeout("a command"))
-                }
-            }
-        }
+        self.out.send(msg.to_string()).map_err(|_| Error::Closed)?;
+        Ok(pending)
     }
 
     /// The sequence number to pass to [`Connection::wait_event`] so only later events count.
@@ -176,6 +171,34 @@ impl Connection {
             let left = end.checked_duration_since(Instant::now())?;
             g = self.inner.cv.wait_timeout(g, left).unwrap_or_else(|e| e.into_inner()).0;
         }
+    }
+}
+
+/// A command sent with [`Connection::send`] whose reply has not been taken yet. Dropping it forgets the command (a late
+/// reply is then ignored).
+pub struct Pending<'a> {
+    conn: &'a Connection,
+    id: u64,
+    rx: Receiver<std::result::Result<Value, String>>,
+}
+
+impl Pending<'_> {
+    /// Waits up to `timeout` for the reply: `None` while there is none yet (the command stays pending), else the reply, or
+    /// [`Error::Closed`] once the connection has ended.
+    pub fn wait(&self, timeout: Duration) -> Option<Result<Value>> {
+        match self.rx.recv_timeout(timeout) {
+            Ok(Ok(v)) => Some(Ok(v)),
+            Ok(Err(m)) => Some(Err(Error::Protocol(m))),
+            Err(RecvTimeoutError::Disconnected) => Some(Err(Error::Closed)),
+            Err(RecvTimeoutError::Timeout) if self.conn.is_closed() => Some(Err(Error::Closed)),
+            Err(RecvTimeoutError::Timeout) => None,
+        }
+    }
+}
+
+impl Drop for Pending<'_> {
+    fn drop(&mut self) {
+        lock(&self.conn.inner.pending).remove(&self.id);
     }
 }
 
