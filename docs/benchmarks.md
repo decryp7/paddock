@@ -359,12 +359,13 @@ These are ordered by impact.
    - Pitwall request latency and queueing.
    - Spotter check throughput and Chrome memory: about 17 GB idle was seen on Linux, see the lessons.
    - Windows and Linux runs of anything except CI.
-   - CI build parallelism on Windows: the runner reports 8 cores and 16,316 MB (build-jobs' log, run 7209, job 23225),
-     not the 16 cores and 32 GB the workflows' comments said, and runs two jobs at once, so the workflows' fixed 8 was
-     every core per job. `build-jobs.sh` keeps that (unset: cargo's default is the 8 cores) until an A/B decides the
-     share of 4. Memory is the first thing the A/B should test: two jobs of 8 rustc each on 16 GB, against the
-     1.5 GB per rustc that `PADDOCK_CI_RUSTC_MB` assumes (an estimate, never measured). A single run with 4 (before this was changed back) is not evidence: Debrief's Windows bundle took
-     18.6 min (run 7209) against 14.5 min with 8 (run 7195), on different commits and caches.
+   - CI build parallelism on Windows: the host is being resized to 16 vCPU and 32 GB with runner `capacity: 3`
+     (2026-11-09). `build-jobs.sh` declares the class default of 3 jobs per host: 5 build jobs ((16 - 0) / 3; RAM allows 6)
+     and 8 test threads. Chosen, not measured. Open: an A/B of job durations for the share (3 x 5 rustc against fewer jobs
+     of more), and an A/B of the test threads (8 against the core share of 5), as macOS found 8 matched 14 while the
+     core share ran 2.3 times longer. The 1.5 GB per rustc that `PADDOCK_CI_RUSTC_MB` assumes is still an estimate. The
+     earlier numbers (8 cores, 16,316 MB, run 7209: Debrief's Windows bundle 18.6 min with 4 against 14.5 min with 8,
+     run 7195, different commits and caches) are not evidence.
    - CI build parallelism on Linux: `conformance/ci/build-jobs.sh` leaves `CARGO_BUILD_JOBS` unset on the Linux runner
      (cargo uses every core in each of up to four concurrent containers, as before 2026-10-30) and logs the host's cores:
      16 cores and 127,941 MB in a container on d-gtr9 (run 7211, job 23231).

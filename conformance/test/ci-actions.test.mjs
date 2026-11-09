@@ -1720,17 +1720,18 @@ test('build-jobs leaves Linux on cargo\'s default until its share is measured, a
 
 test('build-jobs gives Windows 3 jobs per host from its class, which a runner env still overrides', () => {
   // The Windows runner (a Proxmox VM) runs capacity 3; the repo declares that, not the runner's runner.envs.
-  // 16 cores, 32 GB: min((16 - 0) / 3 = 5, (32768 - 2048) / (3 x 1536) = 6) = 5 build jobs; tests: the job's core share, 5.
+  // 16 cores, 32 GB: min((16 - 0) / 3 = 5, (32768 - 2048) / (3 x 1536) = 6) = 5 build jobs; tests: the Windows class's 8 threads.
   const big = { RUNNER_OS: 'Windows', PADDOCK_CI_CORES: '16', PADDOCK_CI_RAM_MB: '32768' };
   const r = buildJobs(big);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(jobsOf(r), '5');
-  assert.equal(threadsOf(r), '5');
+  assert.equal(threadsOf(r), '8');
+  assert.match(r.stdout, /::notice::.*Windows runner's capacity is 3/);
   assert.match(r.stderr, /CARGO_BUILD_JOBS=5 \(\(16 cores - 0 kept\) \/ 3 jobs per host.*the Windows class default/);
   // 8 cores, 16 GB: min(8 / 3 = 2, (16316 - 2048) / 4608 = 3) = 2.
   const small = buildJobs({ ...WINDOWS });
   assert.equal(jobsOf(small), '2');
-  assert.equal(threadsOf(small), '2');
+  assert.equal(threadsOf(small), '8');
   // The runner's own number still wins.
   assert.equal(jobsOf(buildJobs({ ...big, PADDOCK_CI_JOBS_PER_HOST: '2' })), '8');
   assert.match(buildJobs({ ...big, PADDOCK_CI_JOBS_PER_HOST: '2' }).stderr, /runner's PADDOCK_CI_JOBS_PER_HOST/);
@@ -1814,7 +1815,7 @@ test('build-jobs gives nextest the class\'s measured test threads on the shared 
   assert.equal(threadsOf(buildJobs(MAC, ['2'])), '4');
   assert.equal(threadsOf(buildJobs(MAC, ['16'])), '1', 'never below one');
   // Elsewhere the job's core share: (8 cores - 0 kept) / 2 jobs per host.
-  const shared = { ...WINDOWS, PADDOCK_CI_JOBS_PER_HOST: '2' };
+  const shared = { ...LINUX, PADDOCK_CI_CORES: '8', PADDOCK_CI_RAM_MB: '16316', PADDOCK_CI_JOBS_PER_HOST: '2' };
   assert.equal(threadsOf(buildJobs(shared)), '4');
   assert.match(buildJobs(shared).stderr, /NEXTEST_TEST_THREADS=4 \(\(8 cores - 0 kept\) \/ 2 jobs per host/);
   // The memory ceiling is for rustc, not for tests: a share capped by RAM still runs the tests on the job's cores.
