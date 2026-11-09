@@ -54,6 +54,7 @@ fn real_wake_timer() -> Option<Arc<dyn dyno_core::wake::WakeScheduler>> {
 }
 
 /// A wake timer that only records (ER-14: a test never sets a real wake). Pending wakes are kept, soonest first.
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Default)]
 pub struct FakeWakeTimer {
     pending: std::sync::Mutex<Vec<dyno_core::wake::WakeEntry>>,
@@ -61,6 +62,7 @@ pub struct FakeWakeTimer {
     pub refuse: std::sync::Mutex<Option<String>>,
 }
 
+#[cfg(any(test, feature = "test-support"))]
 impl dyno_core::wake::WakeScheduler for FakeWakeTimer {
     fn schedule(&self, tag: &dyno_core::wake::WakeTag, at_utc: i64) -> Result<(), dyno_core::ports::PlatformError> {
         if let Some(m) = self.refuse.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone() {
@@ -112,7 +114,8 @@ impl dyno_core::wol::WolClock for RealClock {
 }
 
 impl WolPorts {
-    /// This machine's own adapters. Only the real wiring of each OS uses it, never a test (ER-14).
+    /// This machine's own adapters. Only the real wiring of each OS uses it, and a test only builds it (the no-fake test of each OS
+    /// does): building it is inert, the stores are handles, and no test calls a port (ER-14).
     pub fn os(secrets_dir: &std::path::Path) -> WolPorts {
         let runner = || -> Box<dyn ToolRunner> { Box::new(SystemRunner) };
         WolPorts {
@@ -128,6 +131,7 @@ impl WolPorts {
     }
 }
 
+#[cfg(any(test, feature = "test-support"))]
 impl WolPorts {
     /// Fakes that record and script and touch no socket, table or process (ER-14): one card on a documentation network, no
     /// neighbours, nothing answering ping, nothing readable. The fake platform wires these.

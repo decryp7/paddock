@@ -75,6 +75,18 @@ describe('dy-health-page', () => {
     expect(section.querySelector('[role="alert"]')).not.toBeNull();
   });
 
+  it('a source Dyno does not read here is a neutral note: no alert, no Retry, no "No startup items"', async () => {
+    const { f, el, mock } = render();
+    vi.spyOn(mock, 'startupOverview').mockRejectedValue({ code: 'unsupported', message: 'Dyno does not read Windows startup items yet.' });
+    await TestBed.inject(HealthStore).loadStartup(TestBed.inject(ViewPrefs).startupFilter());
+    await settle(f);
+    const section = el.querySelector('[aria-label="Start-up items"]')!;
+    expect(section.querySelector('[data-testid="startup-not-read"]')?.textContent).toContain('Dyno does not read Windows startup items yet.');
+    expect(section.querySelector('[role="alert"]')).toBeNull();
+    expect(section.textContent).not.toContain('Retry');
+    expect(section.textContent).not.toContain('No startup items');
+  });
+
   describe('the startup filter', () => {
     beforeEach(() => localStorage.clear());
     afterEach(() => localStorage.clear());

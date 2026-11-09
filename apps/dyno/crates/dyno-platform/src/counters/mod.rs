@@ -62,11 +62,13 @@ impl CounterSource for OsCounters {
 
 /// A [`CounterSource`] over fixed entries, for the agent's and the CLI's tests: `fail` makes the next reads fail with
 /// the given reason, as a vanished counter or a refusing OS would.
+#[cfg(any(test, feature = "test-support"))]
 pub struct FakeCounters {
     entries: std::sync::Mutex<Vec<Entry>>,
     catalog_error: std::sync::Mutex<Option<PlatformError>>,
 }
 
+#[cfg(any(test, feature = "test-support"))]
 impl FakeCounters {
     /// A source offering `entries`.
     pub fn new(entries: Vec<Entry>) -> FakeCounters {
@@ -87,6 +89,7 @@ impl FakeCounters {
     }
 }
 
+#[cfg(any(test, feature = "test-support"))]
 impl CounterSource for FakeCounters {
     fn catalog(&self) -> Result<CounterCatalog, PlatformError> {
         if let Some(e) = self.catalog_error.lock().unwrap_or_else(|e| e.into_inner()).clone() {

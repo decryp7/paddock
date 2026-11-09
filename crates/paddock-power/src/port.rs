@@ -7,7 +7,7 @@ pub trait Hold: Send {
     fn os_ref(&self) -> String;
 }
 
-/// Takes OS sleep-prevention objects. The real adapters call the OS; tests use [`FakePower`](crate::FakePower).
+/// Takes OS sleep-prevention objects. The real adapters call the OS; tests use `FakePower` (feature `test-support`).
 ///
 /// Contract: [`acquire`](Self::acquire) either returns a hold that keeps the system awake until it is dropped or returns a
 /// typed error and holds nothing; it never blocks for long (an OS or D-Bus call) and never panics.

@@ -39,8 +39,9 @@ adapter.
 
 - **Everywhere:** sysinfo-based sensors and process table.
 - **Windows:** performance counters (PDH) behind the sensors, network and user activity (idle time, foreground
-  window). Process details (`NoDetails`), file locks (Restart Manager), startup entries and facts are **not wired yet**:
-  the Windows platform still uses the in-memory fakes for them, so those screens are empty on Windows.
+  window). Process details (`NoDetails`), file locks (Restart Manager), startup entries and facts are **not read yet**:
+  the Windows platform names an honest `NotReadHere` gap for each (no fake is compiled into a build that ships, ADR 0033), so
+  those screens say Dyno does not read them on Windows yet.
 - **macOS:** `lsof`, `codesign`, launch agents and login
   items for startup, `pmset`/`sw_vers` facts, CoreGraphics idle time.
 - **Linux:** PSI, `/proc` and `/sys` through `HostPaths` (so tests use temporary trees), hwmon and GPU sensors, process

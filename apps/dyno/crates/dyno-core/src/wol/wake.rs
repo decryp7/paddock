@@ -26,18 +26,30 @@ pub const TEST_TIMEOUT_RANGE: (u32, u32) = (10, 600);
 
 /// Sends one UDP datagram from a card's own address to a broadcast address.
 pub trait UdpBroadcast: Send + Sync {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// Sends `payload` to `dest:port` from a socket bound to `source`. The error is a message for the report.
     fn send(&self, source: Ipv4Addr, dest: Ipv4Addr, port: u16, payload: &[u8]) -> Result<(), String>;
 }
 
 /// Reads the neighbour tables.
 pub trait NeighbourSource: Send + Sync {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// Every entry with a usable hardware address; a refused or missing read is an error that says what would help.
     fn neighbours(&self) -> Result<Vec<Neighbour>, PlatformError>;
 }
 
 /// An unprivileged echo to one address.
 pub trait Prober: Send + Sync {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// Whether `ip` answered one echo (bounded by a short timeout inside); `Err` when the OS cannot ping.
     fn ping(&self, ip: &str) -> Result<bool, String>;
 }

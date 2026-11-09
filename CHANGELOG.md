@@ -32,6 +32,18 @@ Conventional Commits; one semver tag for the whole repo.
 
 ### `paddock-widgets`: an edit that changes a placement's kind in place
 - New `Edit::ChangeKind { id, widget }` (wire `changeKind`): the placement keeps its id and its place, so whatever an app keys on the id (Dyno's tray icon identity and its pinned position) survives a change of kind. A span the new kind does not allow becomes its first; on a grid surface a rectangle the new kind does not allow is refused ("resize it first"). The kind's limits are checked as for an add; undo restores the old kind. `Replace` still keeps the kind. Additive on the wire; the generated `Edit` type of `@decryp7/paddock-ui/widgets` gains the variant.
+### CI contract: `hostRustChecks` (Dyno ADR 0033, WP-1b)
+
+- New field `hostRustChecks` in `paddock.ci.json` (`app-gates` input `host-rust-checks`, matrix key `host_rust_checks`): commands that run on the Windows and
+  macOS legs after the Rust step, only with the Rust half, for a check that needs a build the tests do not make (a non-test `cargo check`:
+  `nextest` and `clippy --all-targets` unify dev-dependency features in). Dyno uses it for `cargo check --locked --lib --bins` of the packages
+  that link `dyno-platform`, and runs the same line on Linux as `rustChecks`.
+
+### `paddock-power`: the doubles exist only for tests (Dyno ADR 0033, D2)
+
+- `FakePower` and `FakeEvents` are behind `cfg(any(test, feature = "test-support"))`; a consumer enables `test-support` in `[dev-dependencies]` only.
+  Breaking: a normal dependency can no longer name them. The crate's own `tests/it` has a self dev-dependency for it. `paddock-secrets`:
+  `MemorySecrets` stays public (the workbench demo uses it in production); its doc now says it is an ephemeral store, not only a test double.
 
 ### `paddock-limits` (new): limits that explain themselves and replies that report what they left out
 

@@ -829,6 +829,20 @@ describe('contracts', () => {
     assert.match(readFileSync(join(ROOT, '.gitea/actions/app-gates/action.yml'), 'utf8'), /if: \$\{\{ !cancelled\(\) && steps\.prepare\.outcome != 'failure' && inputs\.rust-checks != '' && inputs\.rust == 'true' \}\}/, 'the action skips them with the Rust half');
   });
 
+  test('host rust checks reach only the Windows and macOS legs, and run with the Rust half', () => {
+    const legs = matrix(run('apps/dyno/crates/dyno-platform/src/lib.rs'), graph).filter((l) => l.app === 'dyno');
+    const check = /^cd apps\/dyno\ncargo check --locked --lib --bins -p dyno-platform/;
+    assert.ok(legs.some((l) => l.os !== LINUX), 'Dyno has host legs');
+    for (const l of legs) {
+      if (l.os === LINUX) assert.equal(l.host_rust_checks, '', 'the Linux leg runs rustChecks, not hostRustChecks');
+      else assert.match(l.host_rust_checks, check, `${l.os} runs the non-test check`);
+    }
+    assert.match(legs.find((l) => l.os === LINUX).rust_checks, check, 'Linux runs the same line as rustChecks');
+    const action = readFileSync(join(ROOT, '.gitea/actions/app-gates/action.yml'), 'utf8');
+    assert.match(action, /inputs\.host-rust-checks != '' && inputs\.rust == 'true' && runner\.os != 'Linux'/, 'the action runs them on host legs with the Rust half only');
+    assert.ok(action.indexOf('name: Host Rust checks') > action.indexOf('name: Rust (${{ inputs.app }}'), 'they run after the Rust step');
+  });
+
   test('windowsClippy is opt-in: Pitwall lints its Windows-only code, an app without the field keeps the default', () => {
     const win = (app) => matrix(run(`apps/${app}/crates/${app}-core/src/lib.rs`), graph).filter((l) => l.os === 'windows-latest').map((l) => l.windows_clippy);
     assert.deepEqual([...new Set(win('pitwall'))], ['true']);

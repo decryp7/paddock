@@ -1,6 +1,6 @@
 //! Dyno's OS adapters behind `dyno_core::ports`: sysinfo-based sensors and process table for every OS, plus Windows
 //! (performance counters, Win32 process control, Restart Manager, registry, WMI) and macOS (libc signals, `lsof`,
-//! launch agents, `codesign`) specifics, and in-memory [`fake`]s for tests. [`platform`] wires the ports for the
+//! launch agents, `codesign`) specifics, and, for tests only (feature `test-support`), in-memory `fake`s. [`platform`] wires the ports for the
 //! current OS.
 //!
 //! Unsafe code is allowed only in the small OS modules that call the OS (`windows`, `macos`), each unsafe block with
@@ -14,6 +14,7 @@ pub mod build_id;
 pub mod counters;
 pub mod dev_folders;
 pub mod extras;
+#[cfg(any(test, feature = "test-support"))]
 pub mod fake;
 pub mod fileid;
 pub mod firewall_readers;
@@ -43,9 +44,12 @@ pub mod tool_install;
 #[cfg(unix)]
 #[allow(unsafe_code)]
 pub mod unix_proc;
+pub mod unsupported;
 pub mod volumes;
 pub mod wakes;
 pub mod windows_firewall;
+#[cfg(test)]
+mod wiring;
 pub mod wol;
 pub mod zone;
 
@@ -94,6 +98,95 @@ pub struct Platform {
     pub power: PowerPorts,
     /// Wake-on-LAN: the sockets, neighbour tables, echo and this PC's wake settings (ADR 0032).
     pub wol: wol::WolPorts,
+}
+
+/// What a port shows when its trait has no `adapter()` (the family's `paddock_power` and `paddock_secrets` traits, which stay as they
+/// are for the sake of a test: ADR 0033 section 2).
+pub const UNNAMED_ADAPTER: &str = "(unnamed)";
+
+impl Platform {
+    /// The concrete adapter behind every port, as `(port, adapter type)` pairs, in field order. The agent logs it at start (`Platform
+    /// wired`), and each OS's wiring test reads it without calling any port. It destructures `Platform` and its sub-structs by
+    /// name, so a new port that is not listed here is a compile error.
+    pub fn adapters(&self) -> Vec<(String, &'static str)> {
+        let Platform {
+            sensors,
+            processes,
+            locks,
+            startup,
+            facts,
+            activity,
+            issues,
+            links,
+            zone,
+            counters,
+            network,
+            hardware,
+            power,
+            wol,
+        } = self;
+        let NetworkPorts { sockets, dns, traffic } = network;
+        let HardwareReaders { signals, wear, battery } = hardware;
+        let PowerPorts {
+            os: _,
+            actions,
+            signals: idle,
+            events: _,
+        } = power;
+        let wol::WolPorts {
+            udp,
+            interfaces,
+            neighbours,
+            prober,
+            readiness,
+            secrets: _,
+            clock,
+            wake_timer,
+        } = wol;
+        let mut list: Vec<(String, &'static str)> = vec![
+            ("sensors".into(), sensors.adapter()),
+            ("processes".into(), processes.adapter()),
+            ("locks".into(), locks.adapter()),
+            ("startup".into(), startup.adapter()),
+            ("facts".into(), facts.adapter()),
+            ("activity".into(), activity.adapter()),
+        ];
+        list.extend(issues.iter().enumerate().map(|(i, s)| (format!("issues[{i}]"), s.adapter())));
+        list.extend([
+            ("links".into(), links.adapter()),
+            ("zone".into(), zone.adapter()),
+            ("counters".into(), counters.adapter()),
+            ("network.sockets".into(), sockets.adapter()),
+            ("network.dns".into(), dns.adapter()),
+            ("network.traffic".into(), traffic.adapter()),
+            ("hardware.signals".into(), signals.adapter()),
+            ("hardware.wear".into(), wear.adapter()),
+            ("hardware.battery".into(), battery.adapter()),
+            ("power.os".into(), UNNAMED_ADAPTER),
+            ("power.actions".into(), actions.adapter()),
+            ("power.signals".into(), idle.adapter()),
+            ("power.events".into(), UNNAMED_ADAPTER),
+            ("wol.udp".into(), udp.adapter()),
+            ("wol.interfaces".into(), interfaces.adapter()),
+            ("wol.neighbours".into(), neighbours.adapter()),
+            ("wol.prober".into(), prober.adapter()),
+            ("wol.readiness".into(), readiness.adapter()),
+            ("wol.secrets".into(), UNNAMED_ADAPTER),
+            ("wol.clock".into(), clock.adapter()),
+            ("wol.wake_timer".into(), wake_timer.as_ref().map_or("(none)", |t| t.adapter())),
+        ]);
+        list
+    }
+
+    /// [`Platform::adapters`] as one line, `port=adapter, ...`, for the `Platform wired` log line (ER-27). Type names are not user content. It lists the platform as built, before the agent wraps
+    /// a port (a helper-backed reader, for example), so a port may be answered by a wrapper around the adapter named here.
+    pub fn wired_line(&self) -> String {
+        self.adapters()
+            .iter()
+            .map(|(port, adapter)| format!("{port}={adapter}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
 }
 
 /// The power ports of a [`Platform`]: the OS's sleep-prevention object and its sleep and wake notifications.

@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject } from '@angular/core';
+import { isNotBuilt } from '../../core/command-error';
 import { ReadingSource } from '../../core/reading-source';
 import { PdCell, PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import type { ImpactRating, StartupEntry } from '../../core/api.types';
@@ -47,6 +48,9 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
             <mat-checkbox [checked]="filter().hideSigned" (change)="toggle('hideSigned')">Hide signed apps <span class="num">{{ store.startupCounts().signed }}</span></mat-checkbox>
           </div>
         </div>
+        @if (startupGap(); as gap) {
+          <p class="gap" role="status" data-testid="startup-not-read"><dy-icon name="info" /> {{ gap.message }}</p>
+        } @else {
         <dy-async [loaded]="store.startupLoaded()" [error]="store.startupError()" [empty]="store.startup().length === 0" [emptyTitle]="emptyTitle()" [emptyText]="emptyText()" what="startup items" [rows]="4" (retry)="reload()">
           <div class="tablewrap">
             <pd-table [toolbar]="false" label="Programs that start at sign-in" [rows]="sorted()" [columns]="columns" [rowKey]="rowKey" [filterable]="false" [rowHeight]="36" height="window">
@@ -60,6 +64,7 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
           }
           <p class="shown">Showing {{ store.startup().length }} of {{ store.startupCounts().total }} entries@if (hidden() > 0) {, {{ hidden() }} hidden by the filter}.</p>
         </dy-async>
+        }
       </section>
     </div>
   `,
@@ -84,6 +89,7 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
     .dot[data-tone='bad'] { background: var(--bad); }
     .faint { color: var(--text-3); }
     .filters { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+    .gap { display: flex; align-items: center; gap: var(--sp-2); margin: 0 var(--sp-4) var(--sp-3); color: var(--text-2); }
     .shown { margin: 0 var(--sp-4) var(--sp-3); color: var(--text-3); font-size: var(--fs-sm); }
   `,
 })
@@ -91,6 +97,11 @@ export class HealthPage implements OnInit {
   protected readonly store = inject(HealthStore);
   private readonly prefs = inject(ViewPrefs);
   protected readonly filter = this.prefs.startupFilter;
+  /** A startup reader Dyno does not have on this system (the engine says `unsupported`): a note about coverage, not a failure to retry. */
+  protected readonly startupGap = computed(() => {
+    const e = this.store.startupError();
+    return isNotBuilt(e) ? e : null;
+  });
   protected readonly hidden = computed(() => this.store.startupCounts().total - this.store.startup().length);
   protected readonly emptyTitle = computed(() => (this.hidden() > 0 ? 'Everything is hidden by the filter' : 'No startup items'));
   protected readonly emptyText = computed(() =>

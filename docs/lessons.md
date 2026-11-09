@@ -1571,3 +1571,13 @@ connection held.
 - A test that starts the product in its own process shares its limits: a leak in the test's client exhausts the product.
 - Logs explain the failure only if the rig shows them: an in-process agent's `log` lines went nowhere until the rig captured them.
 - Class: a handle whose drop does not release its resource (`BodyPeer`, `Peer`); reported for an ER-21 decision.
+## A background-lister test asserted a call count that a second trigger can change (2026-11-09)
+
+Symptom: `disk::centre::tests::the_cached_volumes_never_list_on_the_request` failed in CI (`ci.yml` run 7767, Linux Dyno leg, nextest, twice): `a cached read within the
+freshness window never asks the system again`, left 2, right 1 (`crates/dyno-agent/src/disk/centre.rs:1616`). It passed five times in a row on a Mac. The cause is **not yet
+confirmed** (ER-28), so it is an open bug, routed by the coordinator, not a fix. Lesson so far: a test that counts calls into a fake after waiting for a background job must
+wait for the job to end, not only for its first result, and must name every trigger that can start another job. Candidates and the observation that would rule each out:
+(1) the first request and the mount-event thread's first trigger each start a listing: log each call's trigger and thread in the failing run; (2) the freshness window reads the
+real clock somewhere while the test advances only the fake: grep the window's `Instant` and `SystemTime` use in `centre.rs`; (3) a second listing from the volume watcher
+(`mount_events` has macOS, Linux and Windows adapters, so this is not Linux-only): run the test with the watcher stubbed out; (4) a shared static between tests in one process:
+run it alone 200 times in the CI container. No sleep or raised timeout (ER-12).

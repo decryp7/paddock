@@ -73,6 +73,13 @@ mod tests {
     use dyno_core::time::Timestamp;
 
     #[test]
+    fn the_linux_platform_wires_no_fake() {
+        let dir = tempfile::tempdir().unwrap();
+        let found = crate::wiring::fakes_in(&platform(dir.path()).adapters());
+        assert!(found.is_empty(), "the Linux platform wires test doubles: {found:?}");
+    }
+
+    #[test]
     fn the_linux_platform_runs_end_to_end_on_this_machine() {
         let mut p = platform(std::path::Path::new("unused"));
         let _ = p.sensors.sample(Timestamp(1));

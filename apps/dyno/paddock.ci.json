@@ -33,6 +33,15 @@
     "node scripts/check-capabilities.mjs",
     "node scripts/check-release-notes.mjs"
   ],
+  "rustChecks": [
+    "cd apps/dyno",
+    "cargo check --locked --lib --bins -p dyno-platform -p dyno-agent -p dyno-app -p dyno-helper",
+    "cargo test --locked -p dyno-platform --test no_ungated_doubles"
+  ],
+  "hostRustChecks": [
+    "cd apps/dyno",
+    "cargo check --locked --lib --bins -p dyno-platform -p dyno-agent -p dyno-app -p dyno-helper"
+  ],
   "ui": [
     "npm run build -w ui",
     "cd apps/dyno/app",

@@ -37,6 +37,10 @@ pub enum PlatformError {
 
 /// The machine's sockets: listening ports and connections with their owning process (observe-only).
 pub trait NetworkSockets: Send + Sync {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// Every socket the OS shows to this user. A socket whose owner the OS will not name has `pid: None`; a refused read
     /// is an error with what would help.
     fn sockets(&self) -> Result<Vec<crate::network::SocketRow>, PlatformError>;
@@ -44,6 +48,10 @@ pub trait NetworkSockets: Send + Sync {
 
 /// The network interfaces and the Wi-Fi network joined, for the timeline's network change events (WP-35).
 pub trait NetworkLinks: Send + Sync {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// One cheap look. Where the OS hides the Wi-Fi name, `ssid` is `None`; a refused read is an error with what would help.
     fn links(&self) -> Result<crate::netchange::NetState, PlatformError>;
 }
@@ -51,6 +59,10 @@ pub trait NetworkLinks: Send + Sync {
 /// Reverse DNS through the OS resolver (so the user's resolver and hosts file apply). Blocking: the agent calls it off
 /// the request thread with a deadline. Observe-only, and only for addresses the user asked about.
 pub trait ReverseDns: Send + Sync {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// The name of `ip`, `Ok(None)` when it has none, an error when the resolver failed.
     fn lookup(&self, ip: std::net::IpAddr) -> Result<Option<String>, PlatformError>;
 }
@@ -58,6 +70,10 @@ pub trait ReverseDns: Send + Sync {
 /// Cumulative network bytes per process, where the OS makes that cheap (macOS `nettop`). Other systems answer
 /// `PlatformError::Unsupported` with the reason.
 pub trait ProcessTraffic: Send + Sync {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// One read of every process's counters.
     fn counters(&self) -> Result<Vec<crate::network_traffic::TrafficCounter>, PlatformError>;
 
@@ -76,6 +92,10 @@ pub trait ProcessTraffic: Send + Sync {
 /// The OS's performance counters (WP-12): what exists and what they read now. Observe-only. Reading is bounded by a
 /// timeout inside the implementation; a counter that disappeared is an error for that counter only.
 pub trait CounterSource: Send + Sync {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// Everything the OS offers, as paths are written (`\Object(Instance)\Counter`). The core bounds the result.
     fn catalog(&self) -> Result<crate::counters::CounterCatalog, PlatformError>;
     /// One raw reading per path, in the same order. A path the OS no longer has fails alone, with the reason.
@@ -84,12 +104,20 @@ pub trait CounterSource: Send + Sync {
 
 /// System-wide sensors. Called once per tick from the sampling thread.
 pub trait SystemSensors: Send {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// Measures everything at `now`. Rates (CPU, disk, network) cover the time since the previous call.
     fn sample(&mut self, now: Timestamp) -> SystemSample;
 }
 
 /// The process table.
 pub trait ProcessSource: Send {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// Every process visible to this user, with CPU and disk rates since the previous call.
     fn processes(&mut self) -> Vec<ProcessSample>;
     /// The details of one process (slow: command line, modules, connections, signature).
@@ -105,6 +133,10 @@ pub trait ProcessSource: Send {
 
 /// "What is locking this file?"
 pub trait FileLocks: Send {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// The processes that hold `path` open (Restart Manager on Windows, `lsof` on macOS).
     fn lockers(&mut self, path: &Path) -> Result<Vec<Locker>, PlatformError>;
     /// The same with what the reader could not list. A reader that always lists everything keeps this default.
@@ -115,6 +147,10 @@ pub trait FileLocks: Send {
 
 /// The startup manager's view of the OS.
 pub trait StartupItems: Send {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// Everything that starts at login (impact is filled in by the agent from its measurements).
     fn list(&mut self) -> Result<Vec<StartupEntry>, PlatformError>;
     /// Forgets anything cached, so the next [`StartupItems::list`] reads the OS again (an explicit refresh; sources that are slow
@@ -135,6 +171,10 @@ pub trait StartupItems: Send {
 
 /// Slow-changing facts (disk health, pending updates, power plan…). Called every few minutes off the sampling path.
 pub trait FactsSource: Send {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// Gathers the facts; each one that fails is an unavailable reading, never an error for the whole.
     fn facts(&mut self) -> SystemFacts;
 }
@@ -144,6 +184,10 @@ pub trait FactsSource: Send {
 /// What the OS itself says about limits on the CPU's speed. Cheap enough to call every few seconds; a system that does
 /// not say answers an unavailable reading with the reason.
 pub trait ThrottleSignals: Send {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// The OS's current speed limit and its reasons.
     fn read(&mut self) -> crate::metrics::Reading<crate::hardware::OsThrottle>;
 }
@@ -151,18 +195,30 @@ pub trait ThrottleSignals: Send {
 /// SSD wear counters (SMART / NVMe health log). Slow and possibly privileged: called every few hours off the sampling
 /// path; a refusal is an unavailable reading that says what would help.
 pub trait DiskWearSource: Send {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// One reading per SSD that reports wear.
     fn read(&mut self) -> crate::metrics::Reading<Vec<crate::hardware::DiskWear>>;
 }
 
 /// Battery capacity and cycles. Slow to read on some systems: called every few hours.
 pub trait BatteryCapacitySource: Send {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// The battery's capacities; unavailable on machines without one.
     fn read(&mut self) -> crate::metrics::Reading<crate::hardware::BatteryCapacity>;
 }
 
 /// Whether someone is using the machine.
 pub trait UserActivity: Send {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// Seconds since the last keyboard or mouse input, when the OS tells.
     fn idle_secs(&mut self) -> Option<u64>;
     /// The process that owns the foreground window, when the OS tells (rules never throttle it).
@@ -172,6 +228,10 @@ pub trait UserActivity: Send {
 /// Puts the computer to sleep, hibernates it or shuts it down, always by the OS's normal path (never forced: an app with unsaved
 /// work may stop a shutdown). Tests never use a real one (ER-14): they use the fake, which records the request.
 pub trait PowerActions: Send + Sync {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// Whether this action can be asked for here: `Available(())`, or why not (shown as is).
     fn can(&self, action: crate::power::idle::IdleAction) -> Reading<()>;
     /// Asks the OS to do it. `Ok` means the OS took the request, not that it happened.
@@ -191,6 +251,10 @@ pub struct IdleSignalsReading {
 
 /// The exceptions of the idle rule. One call may run an external tool, so the agent reads it only when it matters.
 pub trait IdleSignals: Send + Sync {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// Reads every signal now.
     fn read(&self) -> IdleSignalsReading;
 }

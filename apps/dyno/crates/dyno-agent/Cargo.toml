@@ -61,6 +61,8 @@ libc = "0.2"
 
 [dev-dependencies]
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }
+# The test doubles (ADR 0033): only here, so a build without test targets cannot name them.
+dyno-platform = { workspace = true, features = ["test-support"] }
 # The helper rig serves a real dispatcher to the agent (tests/common/helper_rig.rs); no cycle: the helper does not depend on the agent.
 dyno-helper = { path = "../dyno-helper" }
 postcard.workspace = true

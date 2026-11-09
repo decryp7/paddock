@@ -75,8 +75,19 @@ windows = { version = "0.62", features = [
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[features]
+# The test doubles (`fake`, `FakeCounters`, `FakeThrottle`, `FakeWear`, `FakeBattery`, `FakeWakeTimer`, `WolPorts::fake`). Enable it in
+# [dev-dependencies] only (ADR 0033): resolver 2 keeps dev-dependency features out of a build with no test targets, so a shipped binary
+# cannot name a fake. crates/dyno-platform/tests/no_ungated_doubles.rs and scripts/check-shipped.test.mjs keep that true.
+test-support = ["dyno-core/test-support", "paddock-power/test-support"]
+
 [dev-dependencies]
 tempfile.workspace = true
+# The unit tests compile this crate with cfg(test); the doubles of the crates below do not, so they ask for them.
+dyno-core = { workspace = true, features = ["test-support"] }
+paddock-power = { path = "../../../../crates/paddock-power", features = ["test-support"] }
+# tests/no_ungated_doubles.rs: the declaration scan of the shipped crates (MIT OR Apache-2.0), as in dyno-agent/tests/helper_wiring.rs.
+syn = { version = "2", features = ["full"] }
 
 [lints]
 workspace = true

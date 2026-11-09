@@ -25,6 +25,8 @@ ts-rs = { version = "11.1", optional = true }
 
 [features]
 ts = ["dep:ts-rs"]
+# The in-memory Wake-on-LAN doubles (`wol::fake`). Enable it in [dev-dependencies] only (ADR 0033): a build without test targets then cannot name them.
+test-support = []
 
 [dev-dependencies]
 paddock-limits = { path = "../../../../crates/paddock-limits" }

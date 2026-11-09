@@ -2,53 +2,22 @@
 
 use crate::processes::{NoDetails, SysinfoProcesses};
 use crate::sensors::{NoProbe, SysinfoSensors};
+use crate::unsupported::NotReadHere;
 use crate::Platform;
-use dyno_core::facts::SystemFacts;
-use dyno_core::ports::{FactsSource, FileLocks, PlatformError, StartupItems, UserActivity};
-use dyno_core::process::{Locker, Pid};
-use dyno_core::startup::{StartupEntry, StartupState};
+use dyno_core::ports::PlatformError;
 use std::path::Path;
 
 const NOT_YET: &str = "Not supported on this OS yet.";
-
-struct Unsupported;
-
-impl FileLocks for Unsupported {
-    fn lockers(&mut self, _path: &Path) -> Result<Vec<Locker>, PlatformError> {
-        Err(PlatformError::Unsupported(NOT_YET.into()))
-    }
-}
-
-impl StartupItems for Unsupported {
-    fn list(&mut self) -> Result<Vec<StartupEntry>, PlatformError> {
-        Err(PlatformError::Unsupported(NOT_YET.into()))
-    }
-}
-
-impl FactsSource for Unsupported {
-    fn facts(&mut self) -> SystemFacts {
-        SystemFacts::unknown(sysinfo::System::long_os_version().unwrap_or_else(|| "Unknown OS".into()))
-    }
-}
-
-impl UserActivity for Unsupported {
-    fn idle_secs(&mut self) -> Option<u64> {
-        None
-    }
-    fn foreground_pid(&mut self) -> Option<Pid> {
-        None
-    }
-}
 
 /// The ports for this OS.
 pub fn platform(secrets_dir: &std::path::Path) -> Platform {
     Platform {
         sensors: Box::new(SysinfoSensors::new(Box::new(NoProbe))),
         processes: Box::new(SysinfoProcesses::new(Box::new(NoDetails))),
-        locks: Box::new(Unsupported),
-        startup: Box::new(Unsupported),
-        facts: Box::new(Unsupported),
-        activity: Box::new(Unsupported),
+        locks: Box::new(NotReadHere::new("File locks", NOT_YET)),
+        startup: Box::new(NotReadHere::new("Startup items", NOT_YET)),
+        facts: Box::new(NotReadHere::new("System facts", NOT_YET)),
+        activity: Box::new(NotReadHere::new("User activity", NOT_YET)),
         issues: Vec::new(),
         links: Box::new(crate::links::OsLinks::new()),
         zone: std::sync::Arc::new(crate::zone::SystemZone),

@@ -465,3 +465,36 @@ the pipe). The period is a constant, not yet a Setting with an "Auto" default (t
   readings in 60 s at the 2 s cadence, CPU of the process plus its waited-for children (`getrusage`).
   `ioreg` child: 529,051 us in total, 17,635 us per reading (about 0.9 % of one core). IOKit in process: 5,991 us in total, 199 us
   per reading (about 0.01 % of one core), 88 times cheaper.
+
+## The non-test cargo check of the dyno-platform packages (Dyno ADR 0033 section 3.2, 2026-11-09)
+
+- **Commit:** `c87c28aa7` on `fix/dyno-no-fakes-in-release`, `ci.yml` dispatch run 7767 (base `a6ec5b419`).
+- **What:** `cargo check --locked --lib --bins -p dyno-platform -p dyno-agent -p dyno-app -p dyno-helper` (no test targets, so no `test-support`), and
+  `cargo test --locked -p dyno-platform --test no_ungated_doubles` (the declaration scan), both as Dyno's `rustChecks` on the Linux leg.
+- **Linux CI leg (`ubuntu-latest`, container `paddock-ci:v2`, from the job log):** the check 49.6 s (`Finished` line; the leg had just compiled
+  the `cargo fetch` and `prepare` state, build folder not shared with the tests), the scan 46.0 s to build and 0.46 s to run.
+- **Local cold, macOS cross-check for Windows (`cargo xwin check`, 2 jobs, 2026-11-08):** the same four packages in 6 min 24 s cold; the
+  test targets of four packages another 2 min 44 s.
+- **Host legs, `hostRustChecks` (run 7774, commit `b6f2983d4`, base `b51c72509`, 2026-11-09; one sample each, from the job logs' `Finished` lines):**
+  macOS (`macos-latest`) **46 s**, Windows (`windows-latest`) **2 min 10 s**, each after the leg's clippy and nextest in the same job and the same kept
+  build folder, so these are the warm-folder numbers, not cold. The leg's `app-gates` step, measured from the start of its first command to the host check's `Finished` line (not to the step's end, which came 4 s and 10 s later), took 414 s (macOS, which failed on `dyno-bench::process disk_measures_the_mechanics_and_leaves_nothing_behind`: the runner had 277 GB free and that test needs 401 GB; an environment-dependent test, routed to its owner, not touched by this branch)
+  and 415 s (Windows), on the CI runners (hardware and the other jobs running at the same time not recorded by the runner; the logs name neither), so the added check is about 11 % (macOS) and 31 % (Windows) of the Rust step on a leg that already has most of the graph built. A cold
+  build folder was not measured on a host leg (the local cold `cargo xwin check` figure above, 6 min 24 s, is the only cold number). Not large against D10's
+  question, so nothing goes back to the user on cost alone; re-measure cold the next time a runner's build folder is cleared.
+- **The no-fake tests ran green on both hosts in that run:** `windows::tests::the_windows_platform_wires_no_fake` (Windows leg, 0.68 s) and
+  `macos::tests::the_macos_platform_wires_no_fake` (macOS leg, 0.56 s).
+
+## WP-0: Windows task walk and disk query (Dyno ADR 0033, 2026-11-09)
+
+- **Commit:** `fix/dyno-no-fakes-in-release` (the commit that adds this block); script `apps/dyno/scripts/wp0/wp0-collect.ps1`, steps `tasks-walk` and `physdisk`.
+- **Machine:** the local test VM `paddock-win11-test` (VMware Fusion on a Mac mini M4 Pro, Windows 11 Pro Arm64, build 26300.9711, `DisplayVersion` 26H2, stable
+  channel), reverted to its `gui-session-tools` snapshot before the run, started headless; the Mac's 1-minute load was not recorded during the run (7 to 51 at times around it, from other agents), so treat the numbers as indications.
+  A **fresh image**: 176 tasks visible to the standard user, 252 to the administrator.
+- **Callers:** `paddock-test` (standard user) and `paddock-admin` over SSH, i.e. a **network logon in session 0**, not an interactive sign-in. One sample each, not repeated.
+- **`tasks-walk`** (`Schedule.Service`, a recursive `GetFolders(0)` and `GetTasks(1)` from `\`, folder depth 16): standard user **34,455 ms** for 176 tasks in 141 folders
+  (33 hidden), the first walk after boot; administrator **4,756 ms** for 252 tasks in 142 folders (56 hidden), about a minute later.
+- **`physdisk`** (`Get-CimInstance -Namespace root\Microsoft\Windows\Storage -ClassName MSFT_PhysicalDisk`, 10 runs): standard user **access denied**; administrator
+  first run **2,395 ms**, then 21, 20, 20, 21, 28, 26, 30, 33, 28 ms, median 28 ms.
+- **Reading:** the walk and the first WMI call are tens of seconds and seconds on a cold first read: neither runs on the sampling path, and the startup source
+  needs a time bound, progress and Cancel (ADR 0033 WP-5). The timed code is PowerShell calling the Task Scheduler COM service and WMI (native on Arm64), so these are
+  neither upper nor lower bounds for the Rust reader; a used machine has more tasks. Re-measure from the reader itself, interactively, in WP-3 and WP-5.

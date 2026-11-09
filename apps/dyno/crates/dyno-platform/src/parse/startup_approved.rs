@@ -13,7 +13,9 @@ pub fn approved_state(bytes: &[u8]) -> Option<StartupState> {
     })
 }
 
-/// The value Task Manager writes: `0x02` and zeros to enable, `0x03` and the FILETIME of the change to disable.
+/// The value Task Manager writes: `0x02` and zeros to enable, `0x03` and the FILETIME of the change to disable. Dyno never writes it
+/// (ADR 0021), so it exists to build fixtures for the readers' tests.
+#[cfg(test)]
 pub fn approved_value(enabled: bool, now_filetime: u64) -> [u8; 12] {
     let mut v = [0u8; 12];
     if enabled {
