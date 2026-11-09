@@ -741,7 +741,7 @@ impl Chromium {
             } else {
                 LATER_CALL
             };
-            return self.conn.call(session, method, params, bound);
+            return self.call_within(session, method, params, bound);
         }
         let pending = self.conn.send(session, method, params)?;
         let mut life = BrowserLife {
@@ -753,6 +753,35 @@ impl Chromium {
             max_lifetime: self.max_lifetime,
         };
         crate::answer::await_answer(&pending, method, phase, &mut life, self.patience)
+    }
+
+    /// Sends `method` and waits for its answer up to `bound` on the browser's clock ([`LaunchOptions::clock`], so a test
+    /// runs the bound out without waiting). A browser ended by one of its limits meanwhile is named in the log.
+    fn call_within(
+        &self,
+        session: Option<&str>,
+        method: &str,
+        params: Value,
+        bound: Duration,
+    ) -> Result<Value> {
+        let pending = self.conn.send(session, method, params)?;
+        let end = Deadline::after(self.clock.clone(), bound);
+        loop {
+            // pace: a slice of the wait for the reply, which ends at once when it comes; the browser's clock bounds it
+            if let Some(reply) = pending.wait(POLL) {
+                if matches!(reply, Err(Error::Closed)) && self.timed_out.load(Ordering::Acquire) {
+                    log::warn!(
+                        "The browser was ended by its time limit ({} s) while {method} was owed",
+                        self.max_lifetime.as_secs()
+                    );
+                }
+                return reply;
+            }
+            if end.passed() {
+                log::warn!("The browser did not answer {method} within {bound:?} after its start");
+                return Err(Error::Timeout("a command"));
+            }
+        }
     }
 
     fn pages(&self) -> Result<Vec<Value>> {

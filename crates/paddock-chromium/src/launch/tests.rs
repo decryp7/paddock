@@ -383,23 +383,32 @@ fn a_start_ended_by_the_time_limit_says_it_was_the_time_limit() {
 }
 
 #[test]
-fn after_the_start_a_page_list_the_browser_never_answers_fails_within_its_bound() {
+fn after_the_start_a_page_list_the_browser_never_answers_fails_at_its_bound_on_the_clock() {
     let f = Fixture::new(Mode::Obey, 1);
-    let b = f.launch();
+    let clock = FakeClock::new();
+    let b = launch_on(&f, &clock, opts_on(&f, &clock)).unwrap();
     b.start_page().unwrap();
     f.fake.act(UserAction::HoldPageList).unwrap();
-    // The browser stays alive and working; only the fixed bound of a command after the start can end the wait.
+    // The browser stays alive and working; only the bound of a command after the start ends the wait, on its clock.
     let counted = std::thread::scope(|s| {
         let (tx, rx) = std::sync::mpsc::channel();
         let b = &b;
         s.spawn(move || {
             let _ = tx.send(b.page_count());
         });
-        rx.recv_timeout(CLOSE_GUARD)
-            .expect("a command after the start is bounded")
+        wait_until("the fake to hold the answer", || {
+            f.fake.calls().iter().any(|c| c == "held Target.getTargets")
+        });
+        assert!(rx.try_recv().is_err(), "it waits while the clock stands");
+        clock.advance(LATER_LIST);
+        let counted = rx.recv_timeout(CLOSE_GUARD);
+        // Answered before any assert can fail, so a failure never leaves the scope's thread waiting (it would hang the test).
+        f.fake.act(UserAction::ReleaseAnswers).unwrap();
+        counted
     });
+    let counted =
+        counted.expect("a command after the start ends at its bound on the browser's clock");
     assert!(matches!(counted, Err(Error::Timeout(_))), "{counted:?}");
-    f.fake.act(UserAction::ReleaseAnswers).unwrap();
 }
 
 #[test]
