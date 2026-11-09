@@ -20,6 +20,9 @@ crate-type = ["rlib"]
 # Test doubles (the scripted server `server_client::fake`, the fixed admin key `StaticKeys`); enabled only through the
 # self dev-dependency below, never by a normal dependency (ADR 0073 / rule 73).
 test-support = []
+# The Playground's chat (ADR 0023), temporary until ADR 0049's switches: on for the internal proof-of-concept build
+# (`cargo tauri build --features chat`), off by default, so the release workflow builds without it.
+chat = []
 
 [build-dependencies]
 paddock-build = { path = "../../../../crates/paddock-build", features = ["tauri-build"] }
@@ -86,11 +89,6 @@ tauri-plugin-single-instance = "2"
 # updater artifacts (the installers themselves). "rustls-tls" with the platform verifier trusts the OS certificate
 # store. The updater is the only outbound HTTP in the shell, and only when the user asks for an update check.
 tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls", "system-proxy"] }
-
-[features]
-# The Playground's chat (ADR 0023), temporary until ADR 0049's switches: on for the internal proof-of-concept build
-# (`cargo tauri build --features chat`), off by default, so the release workflow builds without it.
-chat = []
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 paddock-secrets = { path = "../../../../crates/paddock-secrets", features = ["keyring"] }
