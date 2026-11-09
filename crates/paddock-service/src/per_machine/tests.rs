@@ -231,10 +231,29 @@ fn every_adopting_app_is_in_sync() {
 }
 
 fn canonical_include() -> String {
-    std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../paddock-setup/nsis/paddock-per-machine.nsh"),
+    include_text(
+        std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../paddock-setup/nsis/paddock-per-machine.nsh"),
+        )
+        .unwrap(),
     )
-    .unwrap()
+}
+
+/// The include's text as the checks below read it, whatever line endings the checkout gave it: LF, so a check that spans lines
+/// reads the same text on a Windows checkout (`* text=auto` gives the file CRLF there).
+fn include_text(raw: String) -> String {
+    raw.replace("\r\n", "\n")
+}
+
+/// CI run 7821: a Windows checkout gives the include CRLF line endings (`* text=auto`), and a check that looks for a text spanning
+/// two lines must still find it there.
+#[test]
+fn the_include_checks_hold_on_a_crlf_checkout() {
+    let crlf = canonical_include()
+        .replace("\r\n", "\n")
+        .replace('\n', "\r\n");
+    untrusted_uninstaller_ends_early(&include_text(crlf));
 }
 
 /// P1-2: the include does no listing of its own (Restart Manager lists system components that only map the files, such as the
@@ -460,7 +479,10 @@ fn the_uninstaller_decides_trust_before_it_copies_anything_of_its_folder() {
 /// longer remove the registered uninstall key of the real install.
 #[test]
 fn an_untrusted_uninstaller_ends_before_it_deletes_anything() {
-    let t = canonical_include();
+    untrusted_uninstaller_ends_early(&canonical_include());
+}
+
+fn untrusted_uninstaller_ends_early(t: &str) {
     let lines: Vec<&str> = t.lines().map(str::trim_end).collect();
     assert!(lines.contains(&"!define PADDOCK_LEVEL_UNTRUSTED 45"));
     let installing = t

@@ -858,7 +858,10 @@ let header = secrets.get(&name)?.map(|s| format!("Bearer {}", s.expose()));
   `O_NOFOLLOW | O_NONBLOCK` and checked on the open handle: a link, a pipe or anything not a regular file, a group or other
   bit (`InsecureFile`) or another owner is refused, with the next step and never the value. Windows: the temporary file is
   created with a protected DACL that grants only the user running the process and with no sharing
-  (`paddock_env::write_atomic_created`); a folder where others may create or change files is refused; on read the owner
+  (`paddock_env::write_atomic_created`); a folder where others may create or change files is refused
+  (`make_folder_private(dir)` makes a folder private first: 0700 on Unix, on Windows a protected DACL for the user, SYSTEM
+  and Administrators that what is created in it inherits; tests call it on their temp folders, whose parent on a CI runner
+  lets other users create files, CI run 7821); on read the owner
   and DACL of the open handle are checked (owner: the user, SYSTEM or Administrators; entries for nobody else, else
   `InsecureFile`) and a reparse point is refused. Only the immediate folder is checked, not its parents. Unix also refuses
   a hard-linked file and a folder whose owner cannot be read. The value is plain text at rest (ADR 0057 §5): any program running as

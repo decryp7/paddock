@@ -2,8 +2,9 @@
 // at that level or stricter, every member crate opts in with `[lints] workspace = true`, and the root clippy.toml lists
 // every `disallowed-methods` and `disallowed-types` path of lint/clippy.toml (an app may add paths and reword reasons, not drop a path).
 //
-// C13 is gated per app (scope `apps`); Debrief, Pitcrew and Spotter omit the two keyring::Entry / keyring_core::Entry type entries on
-// purpose, until their secrets move to paddock-secrets files (their C99 waivers in paddock.waivers.toml).
+// C13 is gated per app (scope `apps`); Debrief omits the two keyring::Entry / keyring_core::Entry type entries on purpose, until its
+// secrets move to paddock-secrets files (its C99 waivers in paddock.waivers.toml). Pitcrew and Spotter carry them since their
+// credential calls go through paddock-secrets' Vault port (ADR 0077 WP-4).
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { error, warn } from '../finding.mjs';

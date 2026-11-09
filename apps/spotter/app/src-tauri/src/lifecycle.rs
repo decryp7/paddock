@@ -105,7 +105,7 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> Result<Shared, String> {
     toast::register(app);
     let clock = Arc::new(spotter_engine::clock::SystemClock::new());
     refresh_local_time(&clock);
-    let mut services = Services::new(Arc::new(credentials::KeyringSecrets));
+    let mut services = Services::new(Arc::new(credentials::KeyringSecrets::<paddock_secrets::OsVault>::default()));
     services.clock = clock.clone();
     services.notifier = Arc::new(notifier.clone());
     services.renderer = Some(Arc::new(ChromiumRenderer::new(&data_dir, data_dir.join("cache").join("render"))));

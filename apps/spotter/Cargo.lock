@@ -3226,6 +3226,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-env"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "log",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "paddock-proc"
 version = "0.1.0"
 dependencies = [
@@ -3235,6 +3246,20 @@ dependencies = [
  "sysinfo",
  "thiserror 2.0.21",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "paddock-secrets"
+version = "0.1.0"
+dependencies = [
+ "keyring",
+ "libc",
+ "log",
+ "paddock-env",
+ "paddock-proc",
+ "paddock-workspace-hack",
+ "windows-sys 0.61.2",
+ "zeroize",
 ]
 
 [[package]]
@@ -4601,7 +4626,7 @@ version = "1.0.0"
 dependencies = [
  "chrono",
  "iana-time-zone",
- "keyring",
+ "paddock-secrets",
  "serde",
  "serde_json",
  "spotter-core",

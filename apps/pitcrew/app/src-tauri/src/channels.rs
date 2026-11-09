@@ -5,6 +5,7 @@
 //! A runner box with no app running gets OS notifications only; that limit is in the ADR.
 
 use notify_channels::{Dispatcher, Message, SecretStore, SendError, Settings, Severity};
+use paddock_secrets::{OsVault, Secret, Vault};
 use pitcrew_core::notify::{Notification, Severity as PcSeverity};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -55,42 +56,66 @@ pub fn save(dir: &Path, settings: &Settings) -> Result<(), String> {
     std::fs::rename(&tmp, dir.join(FILE)).map_err(|e| format!("the settings could not be saved: {e}"))
 }
 
-/// The OS keychain as a [`SecretStore`].
+/// Channel secrets in a credential store (`Pitcrew notification channel` / `<key>`, the entries Pitcrew 1.0 wrote): the OS
+/// one in the app ([`Keychain`]), a `MemoryVault` in tests (ADR 0077 WP-4).
+pub struct ChannelSecrets<'a>(pub &'a dyn Vault);
+
+impl SecretStore for ChannelSecrets<'_> {
+    fn get(&self, key: &str) -> Option<String> {
+        check_key(key).ok()?;
+        self.0.get(SECRET_SERVICE, key).ok().flatten().map(|s| s.expose().to_string())
+    }
+}
+
+impl ChannelSecrets<'_> {
+    /// Stores a secret.
+    pub fn set(&self, key: &str, value: &str) -> Result<(), String> {
+        check_key(key)?;
+        if value.is_empty() || value.len() > MAX_SECRET_LEN || value.contains(['\r', '\n']) {
+            return Err(format!("the secret must be 1-{MAX_SECRET_LEN} characters on one line"));
+        }
+        let value = Secret::new(value).map_err(|e| e.to_string())?;
+        self.0
+            .set(SECRET_SERVICE, key, &value)
+            .map_err(|e| format!("the secret could not be stored: {e}"))
+    }
+
+    /// Deletes a secret (deleting a missing one succeeds).
+    pub fn clear(&self, key: &str) -> Result<(), String> {
+        check_key(key)?;
+        self.0
+            .delete(SECRET_SERVICE, key)
+            .map_err(|e| format!("the secret could not be deleted: {e}"))
+    }
+
+    /// Whether a secret is stored (never reveals it).
+    pub fn has(&self, key: &str) -> bool {
+        self.get(key).is_some()
+    }
+}
+
+/// The OS credential store as a [`SecretStore`].
 pub struct Keychain;
 
 impl SecretStore for Keychain {
     fn get(&self, key: &str) -> Option<String> {
-        keyring::Entry::new(SECRET_SERVICE, key).ok()?.get_password().ok()
+        ChannelSecrets(&OsVault).get(key)
     }
 }
 
-/// Stores a secret.
+/// Stores a secret in the OS credential store.
 pub fn set_secret(key: &str, value: &str) -> Result<(), String> {
-    check_key(key)?;
-    if value.is_empty() || value.len() > MAX_SECRET_LEN || value.contains(['\r', '\n']) {
-        return Err(format!("the secret must be 1-{MAX_SECRET_LEN} characters on one line"));
-    }
-    keyring::Entry::new(SECRET_SERVICE, key)
-        .map_err(|e| format!("the credential store is not available: {e}"))?
-        .set_password(value)
-        .map_err(|e| format!("the secret could not be stored: {e}"))
+    ChannelSecrets(&OsVault).set(key, value)
 }
 
-/// Deletes a secret (deleting a missing one succeeds).
+/// Deletes a secret from the OS credential store (deleting a missing one succeeds).
 pub fn clear_secret(key: &str) -> Result<(), String> {
-    check_key(key)?;
-    match keyring::Entry::new(SECRET_SERVICE, key)
-        .map_err(|e| e.to_string())?
-        .delete_credential()
-    {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("the secret could not be deleted: {e}")),
-    }
+    ChannelSecrets(&OsVault).clear(key)
 }
 
-/// Whether a secret is stored (never reveals it).
+/// Whether a secret is stored in the OS credential store (never reveals it).
 pub fn has_secret(key: &str) -> bool {
-    check_key(key).is_ok() && Keychain.get(key).is_some()
+    ChannelSecrets(&OsVault).has(key)
 }
 
 fn check_key(key: &str) -> Result<(), String> {
@@ -226,11 +251,40 @@ mod tests {
 
     #[test]
     fn secret_names_and_values_are_checked_before_the_keychain_is_touched() {
-        assert!(set_secret("", "x").is_err());
-        assert!(set_secret("bad name", "x").is_err());
-        assert!(set_secret("ok-name", "").is_err());
-        assert!(set_secret("ok-name", "two\nlines").is_err());
-        assert!(clear_secret("../x").is_err());
-        assert!(!has_secret("bad name"));
+        let v = paddock_secrets::MemoryVault::default();
+        v.set_unavailable(true);
+        let c = ChannelSecrets(&v);
+        assert!(c.set("", "x").is_err());
+        assert!(c.set("bad name", "x").is_err());
+        assert!(c.set("ok-name", "").is_err());
+        assert!(c.set("ok-name", "two\nlines").is_err());
+        assert!(c.set("ok-name", &"x".repeat(MAX_SECRET_LEN + 1)).is_err());
+        assert!(c.clear("../x").is_err());
+        assert!(!c.has("bad name"));
+    }
+
+    /// ADR 0077 WP-4: channel secrets stay where Pitcrew 1.0 wrote them, `Pitcrew notification channel` / `<key>`, so a
+    /// stored one is read after the update; a store that cannot be read gives no secret and a message, never the value.
+    #[test]
+    fn channel_secrets_keep_the_entries_pitcrew_wrote() {
+        let v = paddock_secrets::MemoryVault::default();
+        let c = ChannelSecrets(&v);
+        c.set("hook1.secret", "s3cr").unwrap();
+        assert_eq!(
+            v.get("Pitcrew notification channel", "hook1.secret")
+                .unwrap()
+                .map(|s| s.expose().to_string()),
+            Some("s3cr".to_string())
+        );
+        assert!(c.has("hook1.secret"));
+        assert_eq!(SecretStore::get(&c, "hook1.secret").as_deref(), Some("s3cr"));
+        c.clear("hook1.secret").unwrap();
+        c.clear("hook1.secret").unwrap();
+        assert!(!c.has("hook1.secret"));
+        v.set_unavailable(true);
+        let e = c.set("hook1.secret", "s3cr").unwrap_err();
+        assert!(e.starts_with("the secret could not be stored: ") && !e.contains("s3cr"), "{e}");
+        assert!(!c.has("hook1.secret"));
+        assert!(c.clear("hook1.secret").is_err());
     }
 }

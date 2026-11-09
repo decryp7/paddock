@@ -98,11 +98,13 @@ disallowed-methods = [
     { path = "objc2_security::SecPKCS12Import", allow-invalid = true, reason = "the macOS Keychain: no shipped process uses it; keep secrets in an owner-only file through paddock-secrets (ADR 0057, rule 72); allow-invalid: an app builds objc2-security without its Keychain features, so this item does not exist until someone enables them, when the path resolves and the ban bites" },
 ]
 
-# ADR 0057 (rule 72, C99): the Keychain types; most of the real API is their inherent methods. keyring::Entry and
-# keyring_core::Entry are left out here until this app moves its secrets to paddock-secrets files (its C99 waivers in the root paddock.waivers.toml end with it; C13 would report them, but it is not gated in CI: see its header). keyring's entries need no
+# ADR 0057 (rule 72, C99): the Keychain types; most of the real API is their inherent methods. keyring's entries need no
 # allow-invalid: Clippy does not report a path into a crate that is not in the graph (measured 2026-11-08), and once keyring
-# is back in the graph the path resolves and the ban bites.
+# is back in the graph the path resolves and the ban bites. This app reaches the credential store only through
+# paddock-secrets' Vault port (ADR 0077 WP-4), whose keyring adapter is not linted here.
 disallowed-types = [
+    { path = "keyring::Entry", reason = "the macOS Keychain: no shipped process uses it; keep secrets in an owner-only file through paddock-secrets (ADR 0057, rule 72)" },
+    { path = "keyring_core::Entry", reason = "the macOS Keychain: no shipped process uses it; keep secrets in an owner-only file through paddock-secrets (ADR 0057, rule 72)" },
     { path = "security_framework::os::macos::keychain::SecKeychain", allow-invalid = true, reason = "the macOS Keychain: no shipped process uses it; keep secrets in an owner-only file through paddock-secrets (ADR 0057, rule 72); allow-invalid: security-framework is empty off Apple targets, so the path does not resolve on the Linux and Windows legs (it resolves on macOS, measured 2026-11-08)" },
     { path = "security_framework::item::ItemSearchOptions", allow-invalid = true, reason = "the macOS Keychain: no shipped process uses it; keep secrets in an owner-only file through paddock-secrets (ADR 0057, rule 72); allow-invalid: security-framework is empty off Apple targets, so the path does not resolve on the Linux and Windows legs (it resolves on macOS, measured 2026-11-08)" },
     { path = "security_framework::item::ItemAddOptions", allow-invalid = true, reason = "the macOS Keychain: no shipped process uses it; keep secrets in an owner-only file through paddock-secrets (ADR 0057, rule 72); allow-invalid: security-framework is empty off Apple targets, so the path does not resolve on the Linux and Windows legs (it resolves on macOS, measured 2026-11-08)" },
