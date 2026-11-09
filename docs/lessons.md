@@ -1707,3 +1707,7 @@ drove every listen site of the family through the ways a connection ends. What t
   service stops serving, so the 33rd client gets no answer there (ratchet entry I26, `os = "windows"`); on Unix it waits
   unanswered. The Dyno helper's ending test is Unix-only and was not run on Windows. A run through the VM must wait for host
   load under 22: at load 90 `vm-win.sh start` refuses.
+
+## Local checks overlap with CI (2026-11-09)
+
+Serial local-then-CI added a full local cycle to every landing, while CI found nothing the local checks could not. Fast static gates now run first and in parallel; CI is dispatched and the slower local checks (affected tests, the `train3-linux-dev:1` container, load runs) run alongside. A local failure cancels the CI run at once and everything is fixed in one push (rule 50h, ER-9).
