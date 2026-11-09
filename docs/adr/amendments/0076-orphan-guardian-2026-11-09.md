@@ -1,7 +1,6 @@
 # ADR 0076 amendment: the orphan guardian (2026-11-09)
 
-- Status: **proposed**. The user chose the shape (one guardian per process, in Rust, generic); this text goes to the user
-  for acceptance.
+- Status: **Accepted 2026-11-09 (user)**. The user chose the shape (one guardian per process, in Rust, generic) and accepted this text.
 - Amends: ADR 0076 (owned background work), §6 (detached kinds) and §7 (parent-death delivery).
 - Implementation: `fix/chromium-orphan-guard` (`crates/paddock-proc/src/guardian.rs`, conformance check C79).
 
