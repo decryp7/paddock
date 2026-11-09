@@ -79,6 +79,20 @@ jobs:
           PLAN_WEBKIT: ${{ (inputs.webkit == true || inputs.webkit == 'true') && '1' || '' }}
         run: node scripts/affected.mjs --ci
 
+  # C102 (ADR 0072): every listen site of the Rust sources is in docs/ipc-endpoints.toml with an ending test or a reason, and the
+  # ratchet of connection endings is well formed. Always runs (about 3 s once ./dev is built): a listener added anywhere must not
+  # land unregistered, whatever the plan thinks it reaches.
+  ipc-endpoints:
+    name: endpoint register (C102)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Every listen site is registered
+        run: ./dev check ipc-endpoints
+
   ui:
     needs: [plan]
     if: ${{ needs.plan.outputs.ui == 'true' }}
