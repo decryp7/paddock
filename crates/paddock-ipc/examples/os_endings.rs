@@ -107,6 +107,7 @@ fn tcp_backlog() {
         let l = TcpListener::bind("127.0.0.1:0").unwrap();
         let mut c = TcpStream::connect(l.local_addr().unwrap()).unwrap();
         c.set_read_timeout(Some(GUARD)).unwrap();
+        // conformance: freed-port — the case measured is a closed listener with a client in its backlog; nothing connects to the port again
         drop(l);
         let wrote = c
             .write_all(b"HELLO\n")
