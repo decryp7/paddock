@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # One-off: a Windows test VM snapshot `gui-session-tools-no-dyno` = `gui-session-tools` (the session tools: auto-logon, SSH keys, actor) with NO Dyno of any kind
-# (a per-user Dyno in the older snapshot makes the per-machine installer refuse, exit 2). Existing snapshots are never deleted or changed. Run it under the VM lock:
-#   PLOCK_DIR=/private/tmp/claude-501/vm-lock PLOCK_PAR_LOAD=0 plock run <name> -- scripts/vm-smoke/make-no-dyno-snapshot.sh
+# (a per-user Dyno in the older snapshot makes the per-machine installer refuse, exit 2). Existing snapshots are never deleted or changed. It takes the VM lock itself (scripts/vm-lock.sh).
 # The VM is reverted to gui-session-tools, started, cleaned over SSH, stopped, snapshotted; nothing edits the vmx.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 VMWIN="$HERE/../vm-win.sh" # the repo driver; it refuses any VM but paddock-win11-test itself (ADR 0040 §1)
+. "$HERE/../vm-lock.sh"; vm_lock_acquire make-no-dyno-snapshot
 FROM=gui-session-tools; NEW=gui-session-tools-no-dyno
 VMRUN="/Applications/VMware Fusion.app/Contents/Public/vmrun"
 VMX="$(node "$HERE/win-vm-target.mjs" --vmx)" || exit 2 # only paddock-win11-test, checked before vmrun (review P1-1)
