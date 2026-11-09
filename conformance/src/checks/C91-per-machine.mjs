@@ -39,6 +39,9 @@ const json = (ctx, path) => {
 
 export default {
   id: 'C91',
+  scope: 'apps',
+  mode: 'gate',
+  needs: 'rust',
   title: 'Per-machine installers use the shared include',
   rule: 42,
   run(ctx) {

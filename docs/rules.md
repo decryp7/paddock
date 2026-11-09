@@ -278,10 +278,10 @@ changes here, every app's copy is updated in the same change.
     (d) A tag is refused while its app still holds a copy whose delete-by tag it has reached. A delete-by date moves only
     with the trailer `Copies-date: <mechanism-id> <path>: <old> -> <new>: approved: <coordinator|user>: <reason>`; a
     move to a later release line (a higher major or minor version) needs `approved: user`.
-    (e) Enforced by conformance check C58 (follow-up, ADR 0034 WP-1). A register-only change is docs-only and gets no CI
-    run (rule 50), so the steward runs `node conformance/bin/paddock-conformance.mjs copies --check-register` locally
-    before it lands. Batches run `copies --range <base>..HEAD` before pushing, and the steward runs `copies --tag <tag>`
-    before creating a tag. Until C58 exists, the reviewer and the steward check the register by hand.
+    (e) Enforced by conformance check C58 (planned, ADR 0034 WP-1; not built yet). A register-only change is docs-only and
+    gets no CI run (rule 50), so the steward checks the register by hand before it lands. Once C58 exists, batches run
+    `copies --range <base>..HEAD` before pushing, and the steward runs `copies --tag <tag>` before creating a tag. Until
+    C58 exists, the reviewer and the steward check the register by hand.
     *Why:* launchd's job report existed four times. The shared one already skipped nested blocks; Dyno's copy did not and
     replaced its healthy agent at every login (Dyno 1.0 blocker B4). The Windows network-sandbox fix of the browser driver
     sat in the one copy no app used, and the EBADF fix had to be made in two IPC endpoints.

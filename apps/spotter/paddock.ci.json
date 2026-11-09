@@ -17,6 +17,7 @@
     "[/\\\\]test-browser-spotter-{slot}"
   ],
   "checks": [
+    "node conformance/bin/paddock-conformance.mjs --app spotter --root apps/spotter --only C13 --paddock .",
     "cd apps/spotter",
     "node --test scripts/pin-chromium.test.mjs scripts/install-test-browser.test.mjs scripts/style-guard.test.mjs scripts/ci/check-icons.test.mjs",
     "node scripts/ci/check-icons.mjs"

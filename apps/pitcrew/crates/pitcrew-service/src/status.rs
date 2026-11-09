@@ -98,6 +98,10 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn a_stopped_service_is_an_error() {
         let d = std::env::temp_dir().join(format!("pitcrew-it-status-{}", std::process::id()));
         if cfg!(unix) {

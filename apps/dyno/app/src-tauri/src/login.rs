@@ -1130,6 +1130,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn the_switch_as_the_service_manager_reads_it_missing_is_on_damaged_is_unknown() {
         let dir = std::env::temp_dir().join(format!("dyno-wanted-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

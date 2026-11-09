@@ -257,6 +257,24 @@ confirmation that shows the count and the estimated time.
 | N7 | **Synonym suggestions with Model2Vec** (questions only) | implementer | X55 `paddock-embed` (may slip to 1.3) | 1.5 | 7 |
 | N8 | **Docs**: ADR amendments (Debrief ADR 0033 section 6 now: confirmation instead of a cap), rule 46, lessons, user guide | implementer | N1-N6 | 0.5 | 8 |
 
+### Lint preset adoption (DBR-LINT, ADR 0060 section 7)
+
+Debrief never adopted the family lint preset (`lint/workspace-lints.toml`, `lint/clippy.toml`, check C13). The user decided on
+2026-11-08 that it lands in 1.2, and again on 2026-11-09 that the whole cleanup, both clippy paths and the opt-in of all 46 members (about 23.5 agent-days), **stays in Debrief 1.2 and is not split**: `docs/gates.toml` has a `[[ratchet]]` for C13 and Debrief with target **`debrief-v1.2.0`**,
+and `./dev gates ratchet --release-tag` (the first step of the `debrief.yml` plan job on a tag; it looks at nothing but this ratchet) refuses that tag, and any later one, while a member is still on its `not_yet` list or a clippy path on its
+`clippy_not_yet` list. The workspace lint tables and the C13 step in `debrief.yml` are in; both lists only shrink.
+
+| Package | Content | Agent-days (raw) |
+|---|---|---|
+| LINT-1 | The two clippy paths: `std::env::temp_dir` (158 call sites on 2026-11-08, mostly tests: a test builds its scratch folder from `tempfile`/the test kit or carries `#[allow(..., reason)]`; the production ones get a typed folder from `paddock-env`) and `reqwest::Client::new` (no site today; add the path). Then `clippy_not_yet` is empty. | 1.5 |
+| LINT-2 | The opt-in, one member at a time (46 members, the order of `not_yet`): `[lints] workspace = true`, clippy clean under `-D warnings`, the member leaves the list in the same commit. The review of 2026-11-08 counted about 7,165 `unwrap`/`expect` and 244 `unsafe` in non-test code that the preset flags; each `unwrap` on I/O or user data becomes a typed error, each `unsafe` gets a `// SAFETY:` reason. The count per member (from `cargo clippy` after the opt-in) sizes each step; the estimate is about 150 sites a day for the `unwrap`s and 10 an hour for the `unsafe`s. | about 20 |
+| LINT-3 | Review rounds and CI fixes (about 10 %). | 2 |
+| **Total** | | **about 23.5** |
+
+It is a row of the table below (DBR-LINT, 23.5) next to the 164 of the waves. It runs beside the waves, member by member, and every step is small and green on its own;
+the tag is the only deadline. The plan's calendar gains about 5 working days at 5 agents if it runs flat out, so it should be spread
+across the waves from Wave 1 on (a member that a wave rewrites anyway opts in when it is rewritten).
+
 ### Search-ready packages (import folder to search ready), slotted into the waves above
 
 Added 2026-10-30 from the measurements in
@@ -358,7 +376,8 @@ The LLM-use packages N0-N8 (about 10.5 agent-days after dropping the names curat
 | P (performance) | A1, P0-P5, NR1, BP1, J1, B1 | 19 | 3 |
 | SR (search ready, waves 3-5) | SR1, SR3, SR4, SR5 (SR2 superseded, 0) | 6 | 2.5 |
 | IX (index during the import, wave 8 slot) | IX-ADR, IX-B1, IX-B2, IX-C, IX-M, IX-S (IX0 and IX-A merged into SR1, 0) | 13.25 | 5.25 |
-| **Total** | 65 packages + SR and IX | **about 183 agent-days** (164 without SR and IX, plus their 19.25), plus ±20 % for review rounds and CI fixes: **about 210-220** | |
+| DBR-LINT (lint preset, beside the waves) | LINT-1, LINT-2 (46 member steps), LINT-3 | 23.5 | 1.5 (LINT-1; a LINT-2 member step is under a day) |
+| **Total** | 65 packages + SR, IX and DBR-LINT | **about 207 agent-days** (164 without SR, IX and DBR-LINT, plus 19.25 for SR and IX, plus 23.5 for DBR-LINT = 206.75), plus +15-20 % for review rounds and CI fixes on the 183.25 without DBR-LINT (DBR-LINT carries its own review allowance, LINT-3): **about 234-243** | |
 
 Against the first version of this plan (112 agent-days) the plugin move adds PH1-PH4 (11 days, after the 2026-10-30 ADR revision moved the OS sandbox into PH1 and the
 user dropped all legacy support from PH3) and removes the Debrief-only plugin patches it replaces (about 3 days): net +8. The 2026-10-30 re-estimate of package 2.6

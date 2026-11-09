@@ -50,6 +50,8 @@ const dirOf = (f) => (f.includes('/') ? f.slice(0, f.lastIndexOf('/')) : '');
 
 export default {
   id: 'C37',
+  scope: 'root',
+  mode: 'gate',
   title: 'One integration-test binary per crate; every workspace member tested in CI and on the workspace hack',
   rule: 40,
   run(ctx) {

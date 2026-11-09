@@ -22,6 +22,7 @@
     "echo \"Open files for the tests (ulimit -n, ER-27; CI run 7763): soft $(ulimit -Sn), hard $(ulimit -Hn)\" | tee -a \"${GITHUB_STEP_SUMMARY:-/dev/null}\""
   ],
   "checks": [
+    "node conformance/bin/paddock-conformance.mjs --app dyno --root apps/dyno --only C13 --paddock .",
     "cd apps/dyno",
     "node --test scripts/check-capabilities.test.mjs",
     "node --test scripts/check-wording.test.mjs",

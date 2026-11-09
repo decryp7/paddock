@@ -31,6 +31,22 @@ jobs:
       - id: plan
         uses: ./.gitea/actions/plan
 
+  # ADR 0060: C100 with a job of its own, so that deleting the conformance job's line does not also delete the check.
+  c100:
+    name: C100 (every check runs somewhere)
+    needs: [gate]
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.gitea/actions/setup-rust
+      - name: C100
+        run: ./dev gates check
+
   ci:
     name: everything
     needs: [gate]

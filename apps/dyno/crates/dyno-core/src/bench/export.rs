@@ -233,6 +233,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn the_destination_is_checked_before_anything_is_written() {
         // An absolute path is the OS's own: `/Users/x` is not absolute on Windows (no drive), so the cases are built from the temp folder.
         let abs = |rest: &[&str]| {

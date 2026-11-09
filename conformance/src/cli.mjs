@@ -1,4 +1,6 @@
-import { resolve } from 'node:path';
+import { existsSync, readdirSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { commitLintMain } from './commit-lint.mjs';
 import { checks } from './checks/index.mjs';
 import { runHermetic } from './hermetic.mjs';
@@ -15,7 +17,27 @@ const USAGE = `usage: paddock-conformance --app <name> [--root <dir>] [--only C0
        paddock-conformance commit-lint --file <path> | --range <rev-range>
        paddock-conformance sync --app <name> [--root <dir>] [--paddock <dir>] [--write]   # C28 baseline files and C23 doc blocks
        paddock-conformance window-weight [kind...] [--root <dir>] [--stats <file>] [--max <kB>] [--record]   # C29, rule 35
-       paddock-conformance list`;
+       paddock-conformance list [--json]       # --json: id, scope, mode, needs, file of every check (ADR 0060)
+       paddock-conformance commands --json      # the subcommands, for docs that name them (ADR 0060)`;
+
+/** The subcommands, in one place: USAGE, `commands --json` and the docs check read this list. */
+export const COMMANDS = ['list', 'commands', 'window-weight', 'sync', 'commit-lint', 'run'];
+
+const CHECKS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), 'checks');
+
+/** Every check as data: where it runs (`scope`: root, apps or both), whether its findings can fail a run (`mode`: gate or report-only), what an app needs for it to apply (`needs`: all, rust or ui) and its source file. */
+export function listChecks(registry = checks, dir = CHECKS_DIR) {
+  const files = readdirSync(dir);
+  return registry.map((c) => ({
+    id: c.id,
+    title: c.title,
+    rule: c.rule,
+    scope: c.scope,
+    mode: c.mode,
+    needs: c.needs ?? 'all',
+    file: `conformance/src/checks/${files.find((f) => f.startsWith(`${c.id}-`)) ?? ''}`,
+  }));
+}
 
 const VALUE = new Set(['stats', 'max', 'app', 'root', 'only', 'out', 'summary', 'bundle', 'artifacts', 'paddock', 'version', 'preflight', 'api', 'repo', 'allow-home', 'strict']);
 
@@ -44,7 +66,12 @@ export async function main(argv, { log = console.log, err = console.error, env =
       return cmd ? 0 : 2;
     }
     if (cmd === 'list') {
-      for (const c of checks) log(`${c.id}  rule ${c.rule}  ${c.title}`);
+      if (rest.includes('--json')) log(JSON.stringify(listChecks()));
+      else for (const c of checks) log(`${c.id}  rule ${c.rule}  ${c.title}`);
+      return 0;
+    }
+    if (cmd === 'commands') {
+      log(JSON.stringify(COMMANDS));
       return 0;
     }
     if (cmd === 'window-weight') {
@@ -58,7 +85,17 @@ export async function main(argv, { log = console.log, err = console.error, env =
       }
       return windowWeightMain(parseArgs(flags), kinds, { log, err });
     }
-    if (cmd === 'sync') return syncMain(parseArgs(rest), { log, err });
+    if (cmd === 'sync') {
+      const o = parseArgs(rest);
+      // In the monorepo `sync --write` from the root writes the per-repository template baseline (renovate.json, lefthook.yml, deny.toml,
+      // licences, ...) over the repository's own root files: it is for an app's folder (`--root apps/<app>`), never for the root.
+      const root = resolve(o.root ?? '.');
+      if (o.write && existsSync(join(root, 'apps')) && existsSync(join(root, '.gitea')) && existsSync(join(root, 'tools', 'paddock-dev'))) {
+        err(`paddock-conformance: sync --write would overwrite the monorepo's own root files with the per-repository baseline. Fix: run it for an app's folder, --root apps/<app>, or edit the AGENTS.md blocks by hand (docs/blocks).`);
+        return 2;
+      }
+      return syncMain(o, { log, err });
+    }
     if (cmd === 'commit-lint') return commitLintMain(rest, process.cwd(), err);
     if (cmd === 'run') {
       const dash = rest.indexOf('--');

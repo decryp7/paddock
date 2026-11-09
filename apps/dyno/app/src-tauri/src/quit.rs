@@ -469,6 +469,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn the_marker_is_peeked_at_and_removed_only_when_asked() {
         let dir = std::env::temp_dir().join(format!("dyno-quit-marker-{}", std::process::id()));
         assert_eq!(peek_marker(&dir), None);
@@ -687,6 +691,10 @@ mod tests {
         }
     }
 
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn temp(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("dyno-quit-{name}-{}", std::process::id()))
     }

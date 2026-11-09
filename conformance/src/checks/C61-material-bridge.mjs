@@ -30,6 +30,8 @@ export function ownTheme(scss) {
 
 export default {
   id: 'C61',
+  scope: 'both',
+  mode: 'report-only',
   title: 'The app loads the family Material bridge and has no Material theme of its own',
   rule: 47,
   run(ctx) {

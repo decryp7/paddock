@@ -153,6 +153,10 @@ mod tests {
     use pitcrew_core::notify::NotificationKind;
     use pitcrew_core::time::Timestamp;
 
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn temp(name: &str) -> std::path::PathBuf {
         let p = std::env::temp_dir().join(format!("pitcrew-it-channels-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);

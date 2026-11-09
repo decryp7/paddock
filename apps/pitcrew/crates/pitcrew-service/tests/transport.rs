@@ -32,6 +32,10 @@ fn connect(_data: &std::path::Path) -> Box<dyn Stream> {
 }
 
 #[test]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test builds its scratch path from the OS temp folder and removes it"
+)]
 fn a_client_talks_to_the_running_service() {
     let data = std::env::temp_dir().join(format!("pitcrew-it-transport-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&data);

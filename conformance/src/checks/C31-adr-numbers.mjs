@@ -6,6 +6,8 @@ const ADR = /^docs\/adr\/(\d+)-[^/]+\.md$/;
 
 export default {
   id: 'C31',
+  scope: 'root',
+  mode: 'gate',
   title: 'ADR numbers are unique',
   rule: 40,
   run(ctx) {

@@ -1,0 +1,1105 @@
+# The gate register (ADR 0060 section 3): what is deliberately not gated, conditional, report-only, ratcheted or planned.
+# `./dev gates check` (C100) fails on a check that no reachable CI line runs and that is not listed here, on an entry that
+# is no longer needed, on a review_by that has passed (at most 60 days after since) and on a moved date without a
+# `Gates-date:` trailer. Fix the cause and remove the entry; do not extend the date.
+
+version = 1
+
+# Which docs are rule-bearing (section 5). ADRs, research, plans, lessons and changelogs are history: they may name what was planned.
+[docs]
+include = ["AGENTS.md", "apps/*/AGENTS.md", "docs/rules.md", "docs/design-guide.md", "**/README.md", "docs/wiki/**/*.md"]
+exclude = ["docs/adr/**", "apps/*/docs/adr/**", "docs/research/**", "docs/plans/**", "docs/planned/**", "docs/audits/**",
+           "docs/lessons.md", "**/CHANGELOG.md", "**/vendor/**", "**/fixtures/**", "**/spikes/**", "ui/docs/review/**",
+           "**/node_modules/**"]
+
+# Repository variables as CI sets them (section 2.4); a vars.* not listed here makes the line conditional.
+[vars]
+SCCACHE_REDIS_ENDPOINT = "redis://172.16.1.188:6379"
+SCCACHE_REDIS_DB = "5"
+
+# Files whose results blocks record measurements (rule 48): a `gate = "measurement"` test must appear in one of them.
+[measurements]
+files = ["docs/benchmarks.md", "apps/*/docs/performance.md"]
+
+# Harnesses outside CI that run checks (VM rows never run in CI: memory local-test-vms).
+[[harness]]
+name = "vm-smoke"
+paths = ["scripts/vm-smoke/**"]
+
+[[not_gated]]
+id = "C03"
+apps = ["debrief", "dyno", "pitcrew", "pitwall", "shell-demo", "spotter", "workbench-demo"]
+reason = "no CI line runs this check for the apps: the monorepo runs conformance for the repository itself only (ci.yml, root conformance step) and no app leg has a conformance line yet"
+owner = "ADR 0060 WP-6"
+since = 2026-11-08
+review_by = 2026-12-06
+approved = "coordinator"
+
+[[not_gated]]
+id = "C04"
+apps = ["debrief", "dyno", "pitcrew", "pitwall", "shell-demo", "spotter", "workbench-demo"]
+reason = "no CI line runs this check for the apps: the monorepo runs conformance for the repository itself only (ci.yml, root conformance step) and no app leg has a conformance line yet"
+owner = "ADR 0060 WP-6"
+since = 2026-11-08
+review_by = 2026-12-06
+approved = "coordinator"
+
+[[not_gated]]
+id = "C07"
+apps = ["debrief", "dyno", "pitcrew", "pitwall", "shell-demo", "spotter", "workbench-demo"]
+reason = "no CI line runs this check for the apps: the monorepo runs conformance for the repository itself only (ci.yml, root conformance step) and no app leg has a conformance line yet"
+owner = "ADR 0060 WP-6"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[not_gated]]
+id = "C08"
+apps = ["debrief", "dyno", "pitcrew", "pitwall", "shell-demo", "spotter", "workbench-demo"]
+reason = "no CI line runs this check for the apps: the monorepo runs conformance for the repository itself only (ci.yml, root conformance step) and no app leg has a conformance line yet"
+owner = "ADR 0060 WP-6"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[not_gated]]
+id = "C13"
+apps = ["shell-demo", "workbench-demo"]
+reason = "the demos lack the workspace lint tables, their opt-ins and a clippy.toml (unwrap and expect would fail clippy)"
+owner = "ADR 0060 WP-6"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[not_gated]]
+id = "C23"
+apps = ["debrief", "dyno", "pacenotes", "pitcrew", "pitwall", "shell-demo", "sighter", "spotter", "workbench-demo"]
+reason = "the commit-lint half runs in ci.yml (commits job); the doc-blocks half runs in no app leg, so block drift in an app AGENTS.md is not caught"
+owner = "ADR 0060 WP-6"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[not_gated]]
+id = "C28"
+apps = ["debrief", "dyno", "pacenotes", "pitcrew", "pitwall", "shell-demo", "sighter", "spotter", "workbench-demo"]
+reason = "no CI line runs this check for the apps: the monorepo runs conformance for the repository itself only (ci.yml, root conformance step) and no app leg has a conformance line yet"
+owner = "ADR 0060 WP-6"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[not_gated]]
+id = "C32"
+apps = ["dyno", "pitcrew", "pitwall", "spotter"]
+reason = "no CI line runs this check for the apps: the monorepo runs conformance for the repository itself only (ci.yml, root conformance step) and no app leg has a conformance line yet"
+owner = "ADR 0060 WP-6"
+since = 2026-11-08
+review_by = 2026-12-13
+approved = "coordinator"
+
+[[not_gated]]
+id = "C33"
+apps = ["dyno", "pitcrew", "pitwall", "spotter"]
+reason = "no CI line runs this check for the apps: the monorepo runs conformance for the repository itself only (ci.yml, root conformance step) and no app leg has a conformance line yet"
+owner = "ADR 0060 WP-6"
+since = 2026-11-08
+review_by = 2026-12-13
+approved = "coordinator"
+
+[[not_gated]]
+id = "C34"
+apps = ["debrief", "dyno", "pitcrew", "pitwall", "shell-demo", "spotter", "workbench-demo"]
+reason = "no CI line runs this check for the apps: the monorepo runs conformance for the repository itself only (ci.yml, root conformance step) and no app leg has a conformance line yet"
+owner = "ADR 0060 WP-6"
+since = 2026-11-08
+review_by = 2026-12-27
+approved = "coordinator"
+
+[[not_gated]]
+id = "C50"
+reason = "fails on the current tree: apps/dyno/app/src-tauri/Cargo.toml opens its own main window (ADR 0029); fix Dyno, then add C50 to the conformance line"
+owner = "Dyno shell start (ADR 0029)"
+since = 2026-11-08
+review_by = 2026-11-22
+approved = "coordinator"
+
+[[not_gated]]
+id = "C51"
+reason = "report-only by design (ADR 0031 section 8), 41 warnings today; not run in CI"
+owner = "ADR 0031 section 8"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[not_gated]]
+id = "C61"
+reason = "report-only by design (warnings only), 0 warnings today; not run in CI"
+owner = "Material bridge (rule 47)"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[not_gated]]
+id = "C78"
+reason = "fails on the current tree (10 findings: dialog_measure and set_size calls outside the dialog frame, ADR 0043); fix them, then add C78 to the conformance line"
+owner = "ADR 0043 check 3"
+since = 2026-11-08
+review_by = 2026-12-06
+approved = "coordinator"
+
+[[not_gated]]
+id = "C91"
+apps = ["debrief", "dyno", "pitcrew", "pitwall", "shell-demo", "spotter", "workbench-demo"]
+reason = "no CI line runs this check for the apps: the monorepo runs conformance for the repository itself only (ci.yml, root conformance step) and no app leg has a conformance line yet"
+owner = "ADR 0060 WP-6"
+since = 2026-11-08
+review_by = 2026-12-27
+approved = "coordinator"
+
+[[report_only]]
+id = "C14"
+reason = "the hermetic-wrapper check only reports warnings (static part); the root conformance line runs it"
+owner = "Rule 40 follow-up"
+since = 2026-11-08
+review_by = 2026-12-06
+approved = "coordinator"
+
+[[planned]]
+id = "C58"
+adr = "0034"
+reason = "the copies register check, ADR 0034 WP-1 (named in docs/rules.md rule 55 and the AGENTS.md block)"
+owner = "ADR 0034 WP-1"
+since = 2026-11-08
+review_by = 2026-12-06
+approved = "coordinator"
+
+[[not_gated]]
+id = "apps/debrief/scripts/ci/check-smoke-dialogs.mjs"
+reason = "no reachable CI line runs this script"
+owner = "ADR 0060 WP-7"
+since = 2026-11-08
+review_by = 2026-12-27
+approved = "coordinator"
+
+[[level]]
+id = "apps/debrief/scripts/ci/macos-smoke.test.mjs"
+level = "main"
+reason = "macOS only (PlistBuddy) and run with the Debrief bundle on main, nightly and release; a branch run has no macOS bundle"
+owner = "ADR 0060 WP-7 (kept at its level)"
+since = 2026-11-08
+review_by = 2026-12-06
+approved = "coordinator"
+
+[[level]]
+id = "apps/dyno/scripts/check-bundle.sh"
+level = "release"
+reason = "reads the built Tauri bundle (.deb, .app): only the installer jobs build one, on release and nightly"
+owner = "ADR 0060 WP-7 (kept at its level)"
+since = 2026-11-08
+review_by = 2026-12-06
+approved = "coordinator"
+
+[[not_gated]]
+id = "apps/dyno/scripts/check-logon-entry.mjs"
+reason = "no reachable CI line runs this script"
+owner = "ADR 0060 WP-7"
+since = 2026-11-08
+review_by = 2026-12-13
+approved = "coordinator"
+
+[[level]]
+id = "apps/dyno/scripts/check-pe-subsystem.mjs"
+level = "release"
+reason = "reads the built Windows binaries of the release: only the installer jobs build them"
+owner = "ADR 0060 WP-7 (kept at its level)"
+since = 2026-11-08
+review_by = 2026-12-06
+approved = "coordinator"
+
+[[not_gated]]
+id = "apps/dyno/scripts/check-shipped.mjs"
+reason = "no reachable CI line runs this script"
+owner = "ADR 0060 WP-7"
+since = 2026-11-08
+review_by = 2026-12-13
+approved = "coordinator"
+
+[[not_gated]]
+id = "apps/dyno/scripts/check-wording.mjs"
+reason = "no reachable CI line runs this script"
+owner = "ADR 0060 WP-7"
+since = 2026-11-08
+review_by = 2026-12-13
+approved = "coordinator"
+
+[[not_gated]]
+id = "apps/pacenotes/scripts/release/publish.test.mjs"
+reason = "no reachable CI line runs this script"
+owner = "ADR 0060 WP-7"
+since = 2026-11-08
+review_by = 2026-12-13
+approved = "coordinator"
+
+[[not_gated]]
+id = "apps/sighter/scripts/release/publish.test.mjs"
+reason = "no reachable CI line runs this script"
+owner = "ADR 0060 WP-7"
+since = 2026-11-08
+review_by = 2026-12-13
+approved = "coordinator"
+
+[[level]]
+id = "conformance/ci/check-tag.mjs"
+level = "release"
+reason = "checks the tag against the app version in tauri.conf.json: only a tag run has a tag"
+owner = "ADR 0060 WP-7 (kept at its level)"
+since = 2026-11-08
+review_by = 2026-12-06
+approved = "coordinator"
+
+[[level]]
+id = "conformance/release/check-per-machine-installer.mjs"
+level = "release"
+reason = "reads the built NSIS installer: only the installer jobs build one"
+owner = "ADR 0060 WP-7 (kept at its level)"
+since = 2026-11-08
+review_by = 2026-12-06
+approved = "coordinator"
+
+[[level]]
+id = "scripts/demo/check-agent-version.sh"
+level = "nightly"
+reason = "reads the built shell demo agent after the nightly service smoke: no branch run builds the agent bundle"
+owner = "ADR 0060 WP-7 (kept at its level)"
+since = 2026-11-08
+review_by = 2026-12-06
+approved = "coordinator"
+
+[[not_gated]]
+id = "scripts/demo/check-agent-version.test.mjs"
+reason = "no reachable CI line runs this script"
+owner = "ADR 0060 WP-7"
+since = 2026-11-08
+review_by = 2026-12-27
+approved = "coordinator"
+
+[[not_gated]]
+id = "scripts/shell-demo/build-linux-arm64.test.mjs"
+reason = "no reachable CI line runs this script"
+owner = "ADR 0060 WP-7"
+since = 2026-11-08
+review_by = 2026-12-27
+approved = "coordinator"
+
+[[not_gated]]
+id = "scripts/shell-demo/smoke-service-update.test.mjs"
+reason = "no reachable CI line runs this script"
+owner = "ADR 0060 WP-7"
+since = 2026-11-08
+review_by = 2026-12-27
+approved = "coordinator"
+
+[[not_gated]]
+id = "apps/debrief/app:check:dialog-weight"
+reason = "defined, but no reachable CI line runs this npm script or its command in the package folder"
+owner = "ADR 0060 WP-7"
+since = 2026-11-08
+review_by = 2026-12-27
+approved = "coordinator"
+
+[[not_gated]]
+id = "apps/debrief/app:check:window-weight"
+reason = "defined, but no reachable CI line runs this npm script or its command in the package folder"
+owner = "ADR 0060 WP-7"
+since = 2026-11-08
+review_by = 2026-12-27
+approved = "coordinator"
+
+[[level]]
+id = "ui:check:dialog-commands"
+level = "nightly"
+reason = "reads the seen-commands file written by the nightly dialog-commands job (nightly.yml): a branch run does not produce it"
+owner = "ADR 0060 WP-7 (kept at its level)"
+since = 2026-11-08
+review_by = 2026-12-06
+approved = "coordinator"
+
+[[not_gated]]
+id = "action:conformance"
+reason = "no workflow reaches this action (its only callers are the unreachable reusable workflows or nobody)"
+owner = "ADR 0060 WP-7"
+since = 2026-11-08
+review_by = 2026-12-27
+approved = "coordinator"
+
+[[not_gated]]
+id = "action:strip-signing-keys"
+reason = "no workflow reaches this action (its only callers are the unreachable reusable workflows or nobody)"
+owner = "ADR 0060 WP-7"
+since = 2026-11-08
+review_by = 2026-12-27
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/app/src-tauri/src/ai/tests.rs"
+tests = ["real_worker_set_up_with_a_local_model_answers_through_the_commands"]
+gate = "not-gated"
+reason = "a real-model test: needs a local GGUF model (DEBRIEF_TEST_GGUF) and the AI worker binary; run by hand"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/app/src-tauri/src/browser/live.rs"
+tests = ["live_search_every_engine_gives_results_or_a_recognised_hand_off"]
+gate = "not-gated"
+reason = "needs a real runtime, network or sample set: live: needs a browser and the network (manual runs only)"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/app/src-tauri/src/lib.rs"
+tests = ["a_test_process_stopped_by_sigterm_leaves_no_folders_in_a_lone_process", "a_test_process_that_ends_while_a_plugin_starts_leaves_no_endpoint_folder_in_a_lone_process", "plugin_processes_do_not_outlive_the_test_that_started_them_in_a_lone_process"]
+gate = "not-gated"
+reason = "a child probe: its parent test re-runs the binary with DEBRIEF_TEMP_KILL_PROBE set; it returns at once otherwise"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/app/src-tauri/src/lifecycle.rs"
+tests = ["quitting_finishes_with_live_tail_jobs_and_the_tray"]
+gate = "not-gated"
+reason = "ignored or env-gated: macOS creates the tray menu on the main thread only, and the test harness runs tests on worker threads; it runs on Linux and Windows CI"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-ai-worker/tests/it/server_backend.rs"
+tests = ["the_real_llama_server_answers", "the_real_model_reads_an_image"]
+gate = "not-gated"
+reason = "the real llama-server end-to-end test: needs DEBRIEF_LLAMA_E2E=1 (downloads the runtime) or DEBRIEF_LLAMA_SERVER with a model; run by hand"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-ai/tests/it/hf_live.rs"
+tests = ["downloads_and_verifies_the_smallest_catalog_model"]
+gate = "not-gated"
+reason = "needs a real runtime, network or sample set (ignored or env-gated); run by hand"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-ai/tests/it/real_worker.rs"
+tests = ["the_real_worker_loads_a_model_and_answers"]
+gate = "not-gated"
+reason = "needs a real runtime, network or sample set (ignored or env-gated); run by hand"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-ai/tests/it/segmented_download.rs"
+tests = ["benchmark_connections_against_a_throttled_server"]
+gate = "not-gated"
+reason = "a measurement (rule 48) whose results block is not written yet: benchmark_connections_against_a_throttled_server"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-core/tests/it/names_perf.rs"
+tests = ["timings_at_fifty_thousand_entities", "merge_scaling"]
+gate = "not-gated"
+reason = "a measurement (rule 48) whose results block is not written yet: timings_at_fifty_thousand_entities, merge_scaling"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-core/tests/it/patterns_exceptions.rs"
+tests = ["mines_one_million_lines_quickly", "timing_sequential_against_pipelined"]
+gate = "not-gated"
+reason = "a measurement (rule 48) whose results block is not written yet: mines_one_million_lines_quickly, timing_sequential_against_pipelined"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-core/tests/it/properties.rs"
+tests = ["a_property_folder_whose_removal_fails_is_gone_when_its_process_ends_in_a_lone_process"]
+gate = "not-gated"
+reason = "a child probe: its parent test re-runs the binary with DEBRIEF_PROP_LEAK_PROBE set; it returns at once otherwise"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-core/tests/it/stream_bench.rs"
+tests = ["first_event_and_total_time_of_the_streaming_import_against_gather_first"]
+gate = "not-gated"
+reason = "performance test run by hand: timing run"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-core/tests/it/tail.rs"
+tests = ["bench_append_100k_to_1m"]
+gate = "not-gated"
+reason = "a measurement (rule 48) whose results block is not written yet: bench_append_100k_to_1m"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-pdf/tests/it/pdf.rs"
+tests = ["dump_for_review"]
+gate = "not-gated"
+reason = "dump_for_review writes the report PDF for a person to look at; a review aid with no assertion"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-plugin-dotnet/tests/it/real_runtime.rs"
+tests = ["etw_framework_and_core_targets_elevated"]
+gate = "not-gated"
+reason = "needs a real runtime, network or sample set: needs an elevated prompt: DEBRIEF_ETW_TESTS=1 cargo test -p debrief-plugin-dotnet --test it real_runtime:: -- --ignored --nocapture"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-plugin-dumps/tests/it/samples.rs"
+tests = ["regenerate_samples"]
+gate = "not-gated"
+reason = "needs a real runtime, network or sample set: writes samples/dumps/*.dmp and the dump fuzz seeds; run with DEBRIEF_REGENERATE_SAMPLES=1"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-plugin-native/tests/it/real_process.rs"
+tests = ["etw_records_cpu_waits_and_heap_growth"]
+gate = "not-gated"
+reason = "needs a real runtime, network or sample set: needs administrator rights and DEBRIEF_ETW_TESTS=1"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-plugin-profiling/tests/it/gen_json_samples.rs"
+tests = ["regenerate_samples"]
+gate = "not-gated"
+reason = "needs a real runtime, network or sample set: writes samples/profiling/*.json, *.cpuprofile, *.heapsnapshot and the fuzz seeds; run with DEBRIEF_REGENERATE_SAMPLES=1"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-plugin-profiling/tests/it/gen_nettrace.rs"
+tests = ["regenerate_sample", "real_trace"]
+gate = "not-gated"
+reason = "needs a real runtime, network or sample set: writes samples/profiling/orders.nettrace and the fuzz seeds; run with DEBRIEF_REGENERATE_SAMPLES=1; needs DEBRIEF_NETTRACE_FILE"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-plugin-profiling/tests/it/gen_pprof.rs"
+tests = ["regenerate_samples"]
+gate = "not-gated"
+reason = "needs a real runtime, network or sample set: writes samples/profiling; run with DEBRIEF_REGENERATE_SAMPLES=1"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-plugins/tests/it/evtx_memory.rs"
+tests = ["a_256_mb_event_log_imports_within_the_default_plugin_cap", "a_plugin_stopped_at_its_cap_says_so_instead_of_crashed", "idle_baseline", "measure"]
+gate = "not-gated"
+reason = "a measurement (rule 48) whose results block is not written yet: a_256_mb_event_log_imports_within_the_default_plugin_cap, a_plugin_stopped_at_its_cap_says_so_instead_of_crashed"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-plugins/tests/it/perf_plugins.rs"
+tests = ["idle_plugins"]
+gate = "not-gated"
+reason = "performance test run by hand: measurement, run by the bench workflow (--ignored)"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-plugins/tests/it/windows_samples.rs"
+tests = ["regenerate_crash_dump"]
+gate = "not-gated"
+reason = "needs a real runtime, network or sample set: writes samples/windows/WEB02/OrderService.exe.4120.dmp; run with DEBRIEF_REGENERATE_SAMPLES=1"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-store-duck/tests/it/layout_bakeoff.rs"
+tests = ["storage_layouts"]
+gate = "not-gated"
+reason = "storage layout bake-off measurement (DEBRIEF_BENCH_COPIES, DEBRIEF_THREADS): its results block (rule 48) is not written"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-store-duck/tests/perf_idle.rs"
+tests = ["background_phases_and_idle_loops"]
+gate = "not-gated"
+reason = "performance test run by hand: measurement, run by the bench workflow with DEBRIEF_PERF_STORE set (--ignored)"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/app/e2e/screenshots-dialogs.spec.ts"
+tests = ["Dyno dialog screenshots"]
+gate = "not-gated"
+reason = "documentation screenshot capture, skipped without its output folder variable; run by hand to regenerate the images"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/app/e2e/screenshots-helper.spec.ts"
+tests = ["Administrator readings card screenshots"]
+gate = "not-gated"
+reason = "documentation screenshot capture, skipped without its output folder variable; run by hand to regenerate the images"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/app/e2e/screenshots-network.spec.ts"
+tests = ["Dyno network screenshots"]
+gate = "not-gated"
+reason = "documentation screenshot capture, skipped without its output folder variable; run by hand to regenerate the images"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/app/e2e/screenshots-power.spec.ts"
+tests = ["Power page screenshots"]
+gate = "not-gated"
+reason = "documentation screenshot capture, skipped without its output folder variable; run by hand to regenerate the images"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/app/e2e/screenshots-shell.spec.ts"
+tests = ["Dyno shell screenshots"]
+gate = "not-gated"
+reason = "documentation screenshot capture, skipped without its output folder variable; run by hand to regenerate the images"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/app/e2e/tray-widgets.spec.ts"
+tests = ["screenshots for the independent review"]
+gate = "not-gated"
+reason = "documentation screenshot capture, skipped without its output folder variable; run by hand to regenerate the images"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/app/e2e/ui-review-shots.spec.ts"
+tests = ["review shots: button label and Health widget (${theme})"]
+gate = "not-gated"
+reason = "documentation screenshot capture, skipped without its output folder variable; run by hand to regenerate the images"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/app/src-tauri/src/link/model.rs"
+tests = ["the_machine_keeps_every_invariant_in_every_interleaving_up_to_the_full_bound"]
+gate = "not-gated"
+reason = "ignored or env-gated: the full bound takes minutes in a loaded test build; the CI bound runs on every leg"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/app/src-tauri/src/tray_model.rs"
+tests = ["measure_32_graph_items"]
+gate = "not-gated"
+reason = "a measurement (rule 48) whose results block is not written yet: measure_32_graph_items"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/app/src-tauri/src/tray_text.rs"
+tests = ["measure_text"]
+gate = "not-gated"
+reason = "a measurement (rule 48) whose results block is not written yet: measure_text"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/crates/dyno-agent/src/helper_readers/processes.rs"
+tests = ["measure_merge_cost"]
+gate = "not-gated"
+reason = "a measurement (rule 48) whose results block is not written yet: measure_merge_cost"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/crates/dyno-agent/tests/bench_units.rs"
+tests = ["a_unit_run_waits_for_go_runs_at_nice_0_without_a_memory_limit_and_leaves_nothing", "cancel_stops_an_all_core_burner_within_two_seconds_and_nothing_is_left", "a_restart_stops_a_recorded_leftover_unit_and_leaves_a_foreign_one"]
+gate = "tool:apps/dyno/scripts/linux-units-check.sh"
+reason = "systemd unit benchmarks that a CI container cannot run; apps/dyno/scripts/linux-units-check.sh runs them on a Linux host"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/crates/dyno-agent/tests/disk_cache_bench.rs"
+tests = ["the_budgets_hold_at_one_million_nodes", "a_map_at_the_hard_limit"]
+gate = "not-gated"
+reason = "performance test run by hand: asserts wall-clock budgets: run it by hand in release mode on a quiet machine; a measurement at the 5M-node hard limit: run it by hand in release mode"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/crates/dyno-agent/tests/finder_bench.rs"
+tests = ["the_finder_on_a_generated_tree"]
+gate = "not-gated"
+reason = "performance test run by hand: a measurement, not a check: run it by hand in release mode"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/crates/dyno-agent/tests/helper_processes.rs"
+tests = ["measure_a_real_sweep"]
+gate = "not-gated"
+reason = "a measurement (rule 48) whose results block is not written yet: measure_a_real_sweep"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/crates/dyno-agent/tests/helper_vm.rs"
+tests = ["the_helper_state_and_one_action_on_this_machine", "the_helper_readers_on_this_machine"]
+gate = "not-gated"
+reason = "VM-only rows (PADDOCK_VM or PADDOCK_SETUP_VM, a Windows or macOS guest); no harness line runs them yet"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/crates/dyno-agent/tests/helper_wiring.rs"
+tests = ["every_advertised_reading_has_a_production_sender", "the_user_guide_and_the_changelog_claim_what_readings_advertises"]
+gate = "not-gated"
+reason = "red until WP-INT wires every reading (Dyno 1.1.1 list); WP-INT adds the CI line and removes the entry"
+owner = "Dyno WP-INT"
+since = 2026-11-08
+review_by = 2026-11-29
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/crates/dyno-core/src/intel/tests.rs"
+tests = ["bench_index"]
+gate = "not-gated"
+reason = "a measurement (rule 48) whose results block is not written yet: bench_index"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/crates/dyno-platform/src/access.rs"
+tests = ["the_real_probe_answers_without_changing_anything"]
+gate = "not-gated"
+reason = "reads the real machine (Full Disk Access): DYNO_REAL_MACHINE_TESTS=1, run by hand on the Mac"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/crates/dyno-platform/src/build_id.rs"
+tests = ["hash_timing"]
+gate = "not-gated"
+reason = "a measurement (rule 48) whose results block is not written yet: hash_timing"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/crates/dyno-platform/src/macos/iokit_disk.rs"
+tests = ["measure_disk_reader_cpu"]
+gate = "not-gated"
+reason = "a measurement (rule 48) whose results block is not written yet: measure_disk_reader_cpu"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/crates/dyno-platform/src/macos/pcblist.rs"
+tests = ["the_list_agrees_with_netstat_anv"]
+gate = "not-gated"
+reason = "ignored or env-gated: reads every socket of the machine; run by hand"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/crates/dyno-platform/src/macos/startup.rs"
+tests = ["this_macs_startup_items_list_without_changing_anything"]
+gate = "not-gated"
+reason = "ignored or env-gated: runs sfltool and launchctl on this machine"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/crates/dyno-platform/src/volumes.rs"
+tests = ["real_mounts_are_listed"]
+gate = "not-gated"
+reason = "reads the real machine (its mounts): DYNO_REAL_MACHINE_TESTS=1, run by hand"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/crates/dyno-platform/tests/maintenance_bench.rs"
+tests = ["maintenance_status_cost"]
+gate = "not-gated"
+reason = "performance test run by hand: a measurement; run it in release mode"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/crates/dyno-platform/tests/pmset_wakes_vm.rs"
+tests = ["dynos_wake_is_the_only_one_listed_and_cancelled"]
+gate = "not-gated"
+reason = "VM-only rows (PADDOCK_VM or PADDOCK_SETUP_VM, a Windows or macOS guest); no harness line runs them yet"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/crates/dyno-platform/tests/windows_firewall_vm.rs"
+tests = ["a_standard_user_reads_profiles_and_rules", "the_os_resolves_the_firewalls_own_indirect_names"]
+gate = "not-gated"
+reason = "VM-only rows (PADDOCK_VM or PADDOCK_SETUP_VM, a Windows or macOS guest); no harness line runs them yet"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/crates/dyno-platform/tests/windows_wake_timer_vm.rs"
+tests = ["a_wake_timer_is_registered_cancelled_and_fires"]
+gate = "not-gated"
+reason = "VM-only rows (PADDOCK_VM or PADDOCK_SETUP_VM, a Windows or macOS guest); no harness line runs them yet"
+owner = "Dyno 1.1.1"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/spotter/crates/spotter-render/tests/install.rs"
+tests = ["the_real_pinned_archive_extracts_and_runs"]
+gate = "not-gated"
+reason = "ignored or env-gated: needs a downloaded Chrome for Testing archive"
+owner = "Spotter 1.0"
+since = 2026-11-08
+review_by = 2026-12-13
+approved = "coordinator"
+
+[[ignored]]
+path = "crates/paddock-pitwall/tests/contract.rs"
+tests = ["pitwalls_router_still_has_every_route_of_the_contract"]
+gate = "not-gated"
+reason = "wire contract: checks that the router source (PADDOCK_PITWALL_HTTP_RS) has every route of the contract; it returns at once without the variable, so nothing guards the contract in CI (ER-33 question for the coordinator)"
+owner = "ADR 0060 WP-9"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "crates/paddock-secrets/src/os/native.rs"
+tests = ["real_round_trip"]
+gate = "not-gated"
+reason = "ignored or env-gated: uses the real credential store"
+owner = "ADR 0060 WP-9"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "crates/paddock-service/tests/it/model.rs"
+tests = ["the_crash_model_explores_the_configuration_named_in_the_environment", "replay_one_path_from_the_environment"]
+gate = "not-gated"
+reason = "model-check depth knobs (MODEL_DEPTH, MODEL_DEEP, MODEL_REAL_CRASHES): the default depth runs in CI, the deep and real-crash runs are by hand"
+owner = "ADR 0060 WP-9"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "crates/paddock-setup/tests/vm/windows.rs"
+tests = ["self_test_names_the_baked_values", "the_binary_carries_the_update_description_in_its_version_resource", "same_folder_ignores_case_a_trailing_backslash_and_short_names_but_not_a_junction", "check_dir_accepts_a_program_files_child_makes_updates_and_opens_the_log", "check_dir_refuses_the_temp_folder_and_writes_nothing", "check_dir_refuses_a_nested_folder_and_a_junction_in_program_files", "a_hostile_updates_folder_is_renamed_aside", "clean_run_removes_machine_values_that_point_into_the_folder_only", "clean_staging_keeps_only_the_log", "stop_all_without_the_stopper_says_so_and_fails_cleanly", "a_validly_signed_update_of_another_family_app_is_refused_and_leaves_nothing", "apply_update_refuses_a_wrong_key_a_wrong_signed_version_and_garbage_and_leaves_nothing", "apply_update_refuses_an_update_older_than_the_installed_version_and_leaves_nothing", "apply_update_refuses_hostile_file_arguments_before_opening_anything", "apply_update_refuses_a_hard_link_a_symlink_a_junction_and_a_file_larger_than_announced", "apply_update_outside_program_files_is_refused_before_anything_is_written", "a_hostile_programdata_paddock_folder_is_never_touched", "apply_update_starts_the_signed_installer_with_fixed_arguments_and_a_protected_temp", "hold_installing_logs_and_releases_when_its_parent_ends", "clean_staging_keeps_what_is_in_use_and_removes_the_rest", "check_dir_accepts_an_8_3_short_name_and_prints_the_long_one", "check_dir_refuses_a_folder_that_users_can_change", "same_folder_logs_its_answer", "stop_all_ends_a_listed_program_from_the_folder_and_leaves_a_namesake_alone", "guard_blocks_on_the_installer_accounts_uninstall_key_only", "an_installer_that_ends_before_it_holds_the_lock_is_exit_31_and_what_is_left_is_protected_and_cleaned", "a_second_update_during_a_hand_off_is_busy_and_does_not_touch_the_first_run"]
+gate = "not-gated"
+reason = "VM-only rows (PADDOCK_VM or PADDOCK_SETUP_VM, a Windows or macOS guest); no harness line runs them yet"
+owner = "ADR 0053 per-machine install"
+since = 2026-11-08
+review_by = 2026-12-06
+approved = "coordinator"
+
+[[ignored]]
+path = "crates/paddock-slots/tests/it/holder.rs"
+tests = ["killed_holder_child"]
+gate = "not-gated"
+reason = "a child probe: a parent test starts it with PADDOCK_SLOTS_TEST_ROOT and _OWNER set; it returns at once otherwise"
+owner = "ADR 0060 WP-9"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "tools/paddock-dev/src/fds.rs"
+tests = ["last_resort_child"]
+gate = "not-gated"
+reason = "a child probe: a parent test starts it with PADDOCK_DEV_FDS_CHILD set; it returns at once otherwise"
+owner = "ADR 0060 WP-9"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "ui/e2e/material.spec.ts"
+tests = ["Material controls: screenshot (${theme})"]
+gate = "not-gated"
+reason = "documentation screenshot capture, skipped without its output folder variable; run by hand to regenerate the images"
+owner = "ADR 0060 WP-9"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "ui/e2e/widget-grid.spec.ts"
+tests = ["Widget grid: review screenshots (${theme}, ${scale}x)"]
+gate = "not-gated"
+reason = "documentation screenshot capture, skipped without its output folder variable; run by hand to regenerate the images"
+owner = "ADR 0060 WP-9"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "ui/e2e/widgets.spec.ts"
+tests = ["Widgets: review screenshots (${theme})"]
+gate = "not-gated"
+reason = "documentation screenshot capture, skipped without its output folder variable; run by hand to regenerate the images"
+owner = "ADR 0060 WP-9"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[report_only]]
+id = "C29"
+reason = "every outcome on the repository's own run is a warning: windowWeight is configured nowhere and the conformance job builds no stats (docs/benchmarks.md)"
+owner = "ADR 0060 WP-6"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/dyno/app/e2e/dashboard-grid.spec.ts"
+tests = ["dashboard grid screenshots"]
+gate = "not-gated"
+reason = "documentation screenshot capture, skipped without SHOTS_DIR; run by hand to regenerate the images"
+owner = "ADR 0060 WP-9"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "ui/e2e/contact-sheet.spec.ts"
+tests = ["contact sheet"]
+gate = "not-gated"
+reason = "contact-sheet screenshot capture, skipped without its output folder variable; run by hand to regenerate the review images"
+owner = "ADR 0060 WP-9"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "ui/e2e/contact-sheet-x21.spec.ts"
+tests = ["contact sheet: data parts"]
+gate = "not-gated"
+reason = "contact-sheet screenshot capture, skipped without its output folder variable; run by hand to regenerate the review images"
+owner = "ADR 0060 WP-9"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "ui/e2e/contact-sheet-x3x.spec.ts"
+tests = ["contact sheet: files and storage"]
+gate = "not-gated"
+reason = "contact-sheet screenshot capture, skipped without its output folder variable; run by hand to regenerate the review images"
+owner = "ADR 0060 WP-9"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "ui/e2e/contact-sheet-x50.spec.ts"
+tests = ["contact sheet: workbench"]
+gate = "not-gated"
+reason = "contact-sheet screenshot capture, skipped without its output folder variable; run by hand to regenerate the review images"
+owner = "ADR 0060 WP-9"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "ui/e2e/contact-sheet-x51.spec.ts"
+tests = ["contact sheet: pd-view"]
+gate = "not-gated"
+reason = "contact-sheet screenshot capture, skipped without its output folder variable; run by hand to regenerate the review images"
+owner = "ADR 0060 WP-9"
+since = 2026-11-08
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[defect]]
+path = "apps/dyno/crates/dyno-agent/src/paths.rs"
+reason = "the agent falls back to the fixed, shared folder /tmp/Dyno (with its agent.json discovery file) when no user home is known; another local user can create it first (rule 53)"
+owner = "Dyno security fix (fix/dyno-no-shared-tmp-fallback)"
+since = 2026-11-08
+review_by = 2026-11-22
+approved = "coordinator"
+
+[[defect]]
+path = "apps/dyno/crates/dyno-cli/src/connection.rs"
+reason = "the CLI repeats the agent rule: without a home it reads agent.json from /tmp/Dyno, which another local user can create first and point at their own port"
+owner = "Dyno security fix (fix/dyno-no-shared-tmp-fallback)"
+since = 2026-11-08
+review_by = 2026-11-22
+approved = "coordinator"
+
+[[defect]]
+path = "apps/dyno/crates/dyno-platform/src/linux/startup.rs"
+reason = "without a home the Linux autostart folder falls back to the shared /tmp/dyno-no-home"
+owner = "Dyno security fix (fix/dyno-no-shared-tmp-fallback)"
+since = 2026-11-08
+review_by = 2026-11-22
+approved = "coordinator"
+
+[[defect]]
+path = "apps/dyno/crates/dyno-platform/src/hardware.rs"
+reason = "the Windows battery report is written to %TEMP%\\Dyno\\battery-report.xml, a shared folder, and its doc comment wrongly says only Dyno writes there"
+owner = "Dyno security fix (fix/dyno-no-shared-tmp-fallback)"
+since = 2026-11-08
+review_by = 2026-11-22
+approved = "coordinator"
+
+[[not_gated]]
+id = "C62"
+reason = "warnings only until the Debrief limit list is reasoned (ADR 0019 phases it); no CI line runs it"
+owner = "Debrief 1.2 (ADR 0019 limits)"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-store-duck/tests/import_ready.rs"
+tests = ["import_until_search_is_ready"]
+gate = "not-gated"
+reason = "import-until-search-ready measurement on a real log folder (DEBRIEF_READY_CORPUS, DEBRIEF_READY_STORE): its results block (rule 48) is in apps/debrief/docs/performance.md, run by hand"
+owner = "Debrief 1.2"
+since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+# Debrief never adopted the lint preset (ADR 0060 3.2, 7): a release's worth of work, so a ratchet, not a 60-day exception. The
+# workspace tables are in apps/debrief/Cargo.toml, C13 runs in debrief.yml with these members exempt from the opt-in and these
+# clippy.toml paths allowed to be missing (clippy.toml applies to the whole workspace, so a path with uncleaned call sites cannot be
+# added yet), and `./dev gates ratchet --release-tag` refuses a debrief-v1.2.0 tag (or a later one) while either list is not
+# empty. Both lists only shrink. The whole cleanup (both clippy paths and all 46 members) stays in Debrief 1.2.
+# approved: user 2026-11-08 (target debrief-v1.2.0, not v1.3.0); scope decided again by the user 2026-11-09.
+[[ratchet]]
+id = "C13"
+app = "debrief"
+not_yet = ["app/src-tauri", "crates/cargo-debrief-plugin", "crates/chromium-driver", "crates/debrief-agent", "crates/debrief-ai", "crates/debrief-ai-worker", "crates/debrief-alloc", "crates/debrief-batch", "crates/debrief-cli", "crates/debrief-collect", "crates/debrief-core", "crates/debrief-dump", "crates/debrief-etw", "crates/debrief-ipc", "crates/debrief-monitor", "crates/debrief-notes", "crates/debrief-pdf", "crates/debrief-plugin-api", "crates/debrief-plugin-dotnet", "crates/debrief-plugin-dumps", "crates/debrief-plugin-e2e", "crates/debrief-plugin-formats", "crates/debrief-plugin-host", "crates/debrief-plugin-native", "crates/debrief-plugin-otel", "crates/debrief-plugin-package", "crates/debrief-plugin-profiling", "crates/debrief-plugin-registry", "crates/debrief-plugin-syslog", "crates/debrief-plugin-test", "crates/debrief-plugin-tools", "crates/debrief-plugin-web", "crates/debrief-plugin-windows", "crates/debrief-plugins", "crates/debrief-profile", "crates/debrief-store-client", "crates/debrief-store-duck", "crates/debrief-store-worker", "crates/debrief-symbols", "crates/debrief-video", "examples/plugins/annotator-example", "examples/plugins/collector-example", "examples/plugins/importer-example", "examples/plugins/tool-example", "examples/plugins/transform-example", "xtask"]
+clippy_not_yet = ["std::env::temp_dir", "reqwest::Client::new"]
+owner = "Debrief 1.2 DBR-LINT (docs/plans/debrief-1-2.md)"
+target = "debrief-v1.2.0"
+approved = "user"

@@ -417,6 +417,10 @@ mod tests {
     #[cfg(unix)]
     use pitcrew_core::hygiene::CacheReason;
 
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn temp(name: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!("pitcrew-it-hyg-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);

@@ -137,7 +137,7 @@ Rosetta GNOME VM with the polkit prompt).
   `start`, `ssh`); the Dyno runbook rows 24a/24d are still partly manual. A Windows port of this check would reuse `judge.mjs`
   and `checks.mjs` with a PowerShell `exec`. Never the personal Windows Fusion VM.
 - **Linux guests**: `tools/macos-vm-smoke.sh --guest linux` (systemd user session, light X session).
-- No `HKLM` VM marker, `PADDOCK_LIVE_BROWSER` or conformance check C55 exists on main at the time of writing; the macOS guest uses
+- No `HKLM` VM marker, `PADDOCK_LIVE_BROWSER` or conformance check for them exists on main at the time of writing; the macOS guest uses
   `PADDOCK_DISPOSABLE_VM=1`.
 
 ## Tests

@@ -716,7 +716,7 @@ at the edge.
 | `manifest`, `package` | the plugin manifest parser and the `.paddockplugin` archive reader | `crates/paddock-plugin-package/fuzz/fuzz_targets/` |
 
 There is no fuzz target for `PlatformRequest` or `HostCall` bodies yet, and no CI workflow runs the shared crates' fuzz
-targets (`debrief-fuzz.yml` and `app-fuzz.yml` take an app's fuzz folder; nothing passes `crates/paddock-ipc/fuzz`).
+targets (`debrief-fuzz.yml` takes Debrief's fuzz folder; nothing passes `crates/paddock-ipc/fuzz`).
 Property tests cover random bytes through the frame decoder (`tests/it/frame.rs:382`). See section 16.
 
 ### The sandbox

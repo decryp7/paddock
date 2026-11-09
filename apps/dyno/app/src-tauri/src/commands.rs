@@ -589,6 +589,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn the_report_path_and_the_finder_folder_cannot_come_from_the_webview() {
         use serde_json::json;
         // The report is saved only through the dialog command.
@@ -624,6 +628,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn a_disk_scan_of_a_folder_needs_a_picked_folder_but_a_volume_does_not() {
         use serde_json::json;
         let picked = PickedFolders::default();

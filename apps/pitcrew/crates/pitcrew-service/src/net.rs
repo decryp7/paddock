@@ -195,6 +195,10 @@ pub(crate) mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn downloads_and_hashes_and_refuses_plain_http() {
         let base = serve(vec![
             ("/v.json".into(), 200, br#"{"latest":{"version":"5.2.0"}}"#.to_vec()),

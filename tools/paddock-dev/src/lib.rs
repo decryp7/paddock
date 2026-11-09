@@ -13,6 +13,7 @@
 
 mod cli;
 mod fds;
+pub mod gates;
 pub mod input_hash;
 pub mod plan;
 pub mod slots;

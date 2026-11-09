@@ -18,6 +18,10 @@ pub struct Env {
 impl Env {
     /// The folder of the current user, by the same rule as the agent: `DYNO_DATA_DIR`, else `%LOCALAPPDATA%\Dyno`,
     /// `~/Library/Application Support/Dyno` or `$XDG_DATA_HOME/dyno` (`~/.local/share/dyno`).
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "KNOWN DEFECT, not a justification: a shared, predictable folder under the OS temp dir that another local user can create first (Dyno security fix, owner and review date in docs/gates.toml [[defect]])"
+    )]
     pub fn from_process() -> Env {
         let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
         let data_dir = env("DYNO_DATA_DIR").unwrap_or_else(|| {

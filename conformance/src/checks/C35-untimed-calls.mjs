@@ -44,6 +44,8 @@ export function untimedPolicies(source) {
 
 export default {
   id: 'C35',
+  scope: 'both',
+  mode: 'gate',
   title: 'Untimed calls are declared job-starting or user-waiting commands',
   rule: 12,
   run(ctx) {

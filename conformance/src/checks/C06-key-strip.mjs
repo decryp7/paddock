@@ -13,6 +13,8 @@ export function stripsKey(text, key) {
 
 export default {
   id: 'C06',
+  scope: 'both',
+  mode: 'gate',
   title: 'Signing keys are stripped of whitespace before the bundler reads them',
   rule: 25,
   run(ctx) {

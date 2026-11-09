@@ -79,6 +79,9 @@ export function artifactFindings(ctx, dir) {
 
 export default {
   id: 'C08',
+  scope: 'apps',
+  mode: 'gate',
+  needs: 'rust',
   title: 'Shared release scripts used; release artifacts consistent',
   rule: 25,
   run(ctx) {

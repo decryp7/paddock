@@ -24,6 +24,8 @@ export function hiddenConstructorCalls(source) {
 
 export default {
   id: 'C45',
+  scope: 'both',
+  mode: 'gate',
   title: 'Dialog contracts use the dialog_callable markers, never the hidden constructors',
   rule: 40,
   run(ctx) {

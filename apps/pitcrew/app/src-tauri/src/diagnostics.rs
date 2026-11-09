@@ -35,6 +35,10 @@ mod tests {
     use std::io::Read;
 
     #[test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn bundles_are_redacted_zips_with_safe_names() {
         let dir = std::env::temp_dir().join(format!("pitcrew-it-diag-{}", std::process::id()));
         let sections = vec![

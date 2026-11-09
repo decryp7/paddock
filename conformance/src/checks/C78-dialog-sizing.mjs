@@ -43,6 +43,8 @@ export function ratchets(source) {
 
 export default {
   id: 'C78',
+  scope: 'both',
+  mode: 'gate',
   title: 'A dialog window is sized only by paddock-dialogs, over dialog_measure and dialog_ready, and its content has no height that follows the window',
   rule: 40,
   run(ctx) {

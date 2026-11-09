@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
 import { describe, test } from 'node:test';
 import { lint, messagesInRange } from '../conformance/src/commit-lint.mjs';
-import { adoptsPerMachine, affected, appOfWorkflow, cargoGraph, changedJobs, chooseBase, ciOutputs, commitLintRange, planFor, scriptImporters, workflowJobs, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
+import { C100_INPUTS, guardSet, adoptsPerMachine, affected, appOfWorkflow, cargoGraph, changedJobs, chooseBase, ciOutputs, commitLintRange, planFor, scriptImporters, workflowJobs, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
 
 /**
  * A paddock.ci.json process pattern as host-cleanup runs it: {tmp}, {build} and {slot} filled in by the real
@@ -98,7 +98,8 @@ describe('the graph of this tree', () => {
       assert.deepEqual(r.apps, [f.split('/')[1]], f);
     }
     assert.ok(!run('apps/shell-demo/src-tauri/src/lib.rs').conformance);
-    assert.ok(!run('apps/shell-demo/README.md').conformance);
+    assert.ok(run('apps/shell-demo/README.md').conformance, 'a README is a rule-bearing doc C100 reads (ADR 0060)');
+    assert.ok(!run('apps/shell-demo/src-tauri/src/main.rs').conformance);
   });
 
   test("a per-machine app's Tauri config, per-machine.json and installer files run C91 and the shared crates' sync test", () => {
@@ -1124,5 +1125,37 @@ describe('paths from cargo metadata on Windows', () => {
     assert.equal(win('C:\\work\\paddock', 'c:\\WORK\\paddock\\apps\\x\\app\\src-tauri'), 'apps/x/app/src-tauri', 'drive letter and case do not matter on Windows');
     assert.equal(win('C:\\work\\paddock', 'C:\\work\\paddock'), '');
     assert.equal(repoRelative('/r', '/r/crates/a'), 'crates/a');
+  });
+});
+
+describe('C100 inputs (ADR 0060): the planner runs conformance for what `./dev gates check` reads', () => {
+  const globs = [...readFileSync(join(ROOT, 'tools/paddock-dev/src/gates/inputs.rs'), 'utf8').matchAll(/^\s+"([^"]+)",$/gm)].map((m) => m[1]).filter((g) => !g.startsWith('.gitea/'));
+  const sample = (g) => g.replaceAll('**/', '').replaceAll('/**', '/x').replaceAll('*', 'x').replace('check-x.', 'check-x.');
+
+  test('every glob of `./dev gates inputs` marks conformance, and every planner rule is one of the globs', () => {
+    assert.ok(globs.length > 15);
+    for (const g of globs) {
+      const f = sample(g);
+      assert.ok(run(f).conformance, `${g} (${f}) marks conformance`);
+    }
+    for (const re of C100_INPUTS) {
+      assert.ok(globs.some((g) => re.test(sample(g))), `${re} has a glob in inputs.rs`);
+    }
+  });
+
+  test('bad: an ordinary file is not a C100 input', () => {
+    assert.equal(run('crates/paddock-jobs/src/lib.rs').conformance, false);
+    assert.equal(run('docs/plans/x.md').conformance, false);
+  });
+
+  test('a test file that adds or removes an ignore attribute or an environment guard marks conformance (content rule)', () => {
+    const f = 'crates/paddock-jobs/tests/it/x.rs';
+    const plan = (before, after) => affected([f], graph, { content: { before: () => before, after: () => after } });
+    assert.deepEqual([...guardSet('#[test]\n#[ignore = "slow"]\nfn a() {}')], ['#[ignore|a']);
+    assert.equal(plan('#[test]\nfn a() {}', '#[test]\n#[ignore]\nfn a() {}').conformance, true, 'an ignore was added');
+    assert.equal(plan('#[test]\nfn a() { if std::env::var("X").is_err() { return; } }', '#[test]\nfn a() {}').conformance, true, 'a guard was removed');
+    assert.equal(plan('#[test]\nfn a() {}', '#[test]\nfn a() { assert!(true); }').conformance, false, 'an ordinary edit');
+    assert.equal(plan('#[test]\n#[ignore]\nfn a() {}\n#[test]\nfn b() {}', '#[test]\nfn a() {}\n#[test]\n#[ignore]\nfn b() {}').conformance, true, 'an ignore moved to another test: same count, different set');
+    assert.equal(plan('#[test]\n#[ignore]\nfn a() {}', '// moved\n#[test]\n#[ignore]\nfn a() {}').conformance, false, 'the same ignore on the same test');
   });
 });

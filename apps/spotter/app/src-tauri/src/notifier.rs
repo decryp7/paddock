@@ -171,6 +171,10 @@ pub async fn run_command(program: &str, args: &[String]) -> Result<(), String> {
 }
 
 /// [`run_command`] with another time limit.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "this is Spotter's action runner, the one place that starts a program: no shell, no console window on Windows, killed with its handle and bounded by `limit`"
+)]
 pub async fn run_command_for(program: &str, args: &[String], limit: Duration) -> Result<(), String> {
     if !Path::new(program).is_absolute() {
         return Err("The program to run needs its full path.".into());

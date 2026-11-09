@@ -206,6 +206,8 @@ export function tsWallClockAsserts(source) {
 
 export default {
   id: 'C30',
+  scope: 'both',
+  mode: 'gate',
   title: 'Rust tests do not assert on the wall clock',
   rule: 40,
   run(ctx) {

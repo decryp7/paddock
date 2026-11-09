@@ -262,6 +262,7 @@ export const DOC_INPUTS = [
   { re: /(^|\/)(resources|samples|src|tests|test|templates|e2e|fixtures)\/.*\.md$/, why: 'bundled, template or fixture markdown' },
   { re: /^docs\/rules\.md$/, projects: ['conformance', 'tools'], why: 'the rules block of every AGENTS.md (conformance sync, new-app)' },
   { re: /^docs\/blocks\//, projects: ['conformance', 'tools'], why: 'the shared doc blocks (conformance sync, release notes, new-app)' },
+  { re: /^docs\/(design-guide|benchmarks)\.md$/, projects: ['conformance'], why: 'C100 (./dev gates check) reads the rule-bearing docs and the measurement records' },
   { re: /^apps\/(shell-demo|workbench-demo)\/README\.md$/, projects: ['tools'], why: 'new-app.mjs copies its "Start a new app" section' },
   { re: /(^|\/)REVIEWED\.md$/, projects: (f) => (f.startsWith('apps/') ? owners(f) : ['conformance']), why: 'the image reviews conformance C24 checks' },
   { re: /^ui\/projects\/paddock-ui\/format\/src\/storage-cases\.json$/, projects: ['ui', 'app:dyno'], why: "dyno-core units::storage_writes_what_the_ui_writes reads the UI's storage cases" },
@@ -285,6 +286,52 @@ export function isCauseCodeSource(f) {
     !parts.slice(1, -1).some((d) => ['target', 'node_modules', 'tests', 'benches'].includes(d))
   );
 }
+
+/**
+ * What C100 (`./dev gates check`, ADR 0060) reads besides the code it runs on: the register, the contracts, every package.json, the
+ * rule-bearing docs, the measurement records and the files that name a check (scripts and their tests). A change to one marks
+ * conformance, where C100 runs. The same list is `GLOBS` in tools/paddock-dev/src/gates/inputs.rs (a test compares them) and
+ * `C100_INPUTS` in plan.rs. A test file that adds or removes an ignore attribute or an environment guard is a content rule
+ * (`guardsChanged`, files mode and base mode).
+ */
+export const C100_INPUTS = [
+  /^docs\/gates\.toml$/,
+  /^apps\/[^/]+\/paddock\.ci\.json$/,
+  /(^|\/)package\.json$/,
+  /^lefthook\.yml$/,
+  /^(apps\/[^/]+\/)?AGENTS\.md$/,
+  /^apps\/[^/]+\/docs\/performance\.md$/,
+  /(^|\/)README\.md$/,
+  /^docs\/wiki\/.*\.md$/,
+  /^conformance\/src\/(checks\/|cli\.mjs$)/,
+  /^tools\/paddock-dev\/src\/gates\//,
+  /^(scripts|conformance|tools|apps\/[^/]+\/scripts)\/(.*\/)?(check-[^/]*\.(mjs|sh|ps1)|[^/]*\.test\.mjs)$/,
+];
+
+/**
+ * The ignore attributes and environment guards of a test file, each paired with the function (Rust) or test title (TypeScript) it
+ * belongs to: moving an ignore from one test to another changes the set even though the count stays.
+ */
+const GUARD = /#\[ignore|cfg_attr\([^)\n]*ignore|env::var|process\.env/;
+export function guardSet(text) {
+  const set = new Set();
+  if (!text) return set;
+  const lines = text.split('\n');
+  lines.forEach((l, i) => {
+    const m = GUARD.exec(l);
+    if (!m) return;
+    let name = '';
+    for (let k = i; k < Math.min(lines.length, i + 8) && !name; k++) name = /\bfn\s+(\w+)/.exec(lines[k])?.[1] ?? '';
+    for (let k = i; k >= 0 && k > i - 40 && !name; k--) name = /\b(?:test|it)(?:\.\w+)?\(\s*['"`]([^'"`]+)/.exec(lines[k])?.[1] ?? '';
+    set.add(`${m[0]}|${name}`);
+  });
+  return set;
+}
+export const guardsChanged = (before, after) => {
+  const a = guardSet(before);
+  const b = guardSet(after);
+  return a.size !== b.size || [...a].some((x) => !b.has(x));
+};
 
 /** Top-level folders and the projects that own them (apps/<name>/ is app:<name>). */
 const OWNERS = [
@@ -534,7 +581,7 @@ export function giteaTargets(f, gitea) {
  * Result: { all, crates, ui, eslint, conformance, tools, icons, ciImage, paddockDev, docs, apps: [name], kinds: { app: ['rust','ui'] },
  * packages: { workspace: [crate] } } and `why` with `explain`.
  */
-export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockAfter = null, all = false, explain = false, gitea = null, perMachine = () => false } = {}) {
+export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockAfter = null, all = false, explain = false, gitea = null, perMachine = () => false, content = null } = {}) {
   const why = new Map();
   const kinds = new Map();
   const appProjects = [...apps.keys()].map((a) => `app:${a}`);
@@ -575,6 +622,14 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
       mark(`app:${wf}`, `its workflow ${f}`);
       kind(`app:${wf}`, 'all');
       continue;
+    }
+    if (C100_INPUTS.some((r) => r.test(f))) mark('conformance', `C100 reads ${f} (./dev gates inputs)`);
+    if (content && /\.(rs|ts)$/.test(f) && !f.includes('node_modules/') && guardsChanged(content.before(f), content.after(f))) {
+      mark('conformance', `C100: an ignore attribute or an environment guard changed in ${f}`);
+    }
+    // The apps whose own checks run paddock-conformance (C13 and others, ADR 0060) rerun those checks when conformance changes.
+    if (/^conformance\/(src|bin)\//.test(f)) {
+      for (const [name, app] of apps) if (JSON.stringify(app.checks ?? []).includes('paddock-conformance')) mark(`app:${name}`, `its checks run paddock-conformance (${f})`);
     }
     if (META.some((r) => r.test(f))) continue;
     if (f.startsWith('.gitea/')) {
@@ -953,7 +1008,19 @@ export function planFor({ base = null, head = 'HEAD', files = null, all = false,
       lockAfter = show(head);
     }
   }
-  return { graph, changed, plan: affected(changed, graph, { lockBefore, lockAfter, all, explain, gitea, perMachine: (f) => adoptsPerMachine(root, f) }) };
+  // Before and after text of a changed file, for the rules that read content (C100: ignore attributes and environment guards).
+  const content = {
+    before: (f) => showAt(files ? 'HEAD' : base, f),
+    after: (f) => {
+      if (!files) return showAt(head, f);
+      try {
+        return readFileSync(join(root, f), 'utf8');
+      } catch {
+        return null;
+      }
+    },
+  };
+  return { graph, changed, plan: affected(changed, graph, { lockBefore, lockAfter, all, explain, gitea, content, perMachine: (f) => adoptsPerMachine(root, f) }) };
 }
 
 /** The ci.yml job outputs of a plan (the plan job declares and wires exactly these names; a test checks ci.yml against them). */

@@ -10,6 +10,9 @@ const sha = (buf) => createHash('sha256').update(buf).digest('hex');
 
 export default {
   id: 'C03',
+  scope: 'apps',
+  mode: 'gate',
+  needs: 'rust',
   title: 'Icons equal Paddock\'s and fill the canvas; CI checks them',
   rule: 22,
   run(ctx) {

@@ -57,6 +57,10 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn lines_are_appended_bounded_and_rotated() {
         let dir = std::env::temp_dir().join(format!("pitcrew-it-applog-{}", std::process::id()));
         let p = dir.join("app.log");

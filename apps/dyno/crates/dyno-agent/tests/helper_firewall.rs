@@ -32,6 +32,10 @@ fn nft() -> FirewallSource {
     FirewallSource::new(RuleSource::Nftables).with_rules((0..3).map(rule).collect())
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test builds its scratch path from the OS temp folder and removes it"
+)]
 fn view_as(caller: Caller) -> FirewallSource {
     let dir = std::env::temp_dir().join(format!("dyno-helper-firewall-{}-{:?}", std::process::id(), caller));
     std::fs::create_dir_all(&dir).unwrap();

@@ -67,6 +67,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      # ADR 0060: C100 cannot be the only guard of its own wiring (a change that deletes the line deletes the check too), so a plain
+      # grep on every event checks that the conformance job and the nightly still run it.
+      - name: C100 stays wired
+        run: |
+          for f in .gitea/workflows/ci.yml .gitea/workflows/nightly.yml; do
+            grep -Eq '^[[:space:]]*run: \./dev gates check( --warn)?$' "$f" || { echo "::error file=$f::C100 is not wired: no line runs ./dev gates check. Fix: restore the line (ADR 0060 section 4)."; exit 1; }
+          done
+
       - name: The plan's tests
         run: node --test scripts/affected.test.mjs
 
@@ -237,6 +245,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # C100 reads the register's history (the Gates-date trailers) and the base revision.
           fetch-depth: 0
 
       - name: Tests
@@ -257,7 +266,17 @@ jobs:
       # the checkout above has the full history (a one-commit clone has no merge base and C71 would only warn that it did not measure).
       - name: Paddock itself (applicable checks)
         working-directory: .
-        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C48,C53,C54,C56,C57,C71,C98 --strict C36
+        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C45,C48,C53,C54,C56,C57,C71,C98 --strict C36
+
+      # ADR 0060, C100: every check the repository defines is run by a reachable CI line, or registered in docs/gates.toml with a
+      # reason, an owner and a review date. Rollback: `./dev gates check --warn`. The nightly has a job of its own (nightly.yml).
+      - uses: ./.gitea/actions/setup-rust
+      - name: C100 (every check runs somewhere)
+        working-directory: .
+        run: ./dev gates check
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
 
 
   # The shared CI actions' scripts and the dev and host tools (plan X10, X47): every script runs in a scratch folder with a

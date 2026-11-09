@@ -68,6 +68,16 @@ zip = { version = "9", default-features = false, features = ["deflate-flate2-zli
 
 # Dependencies are optimised even in debug builds: parsing, regex and compression run at a usable speed in
 # `tauri dev` and in the tests, and they are compiled once. Workspace crates stay at opt-level 0 for fast rebuilds.
+# The family lint preset (lint/workspace-lints.toml, C13). A member opts in with `[lints] workspace = true`; the members that have
+# not yet are listed in docs/gates.toml ([[ratchet]] C13 debrief, DBR-LINT in docs/plans/debrief-1-2.md) and the list only shrinks.
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+
 [profile.dev.package."*"]
 opt-level = 2
 

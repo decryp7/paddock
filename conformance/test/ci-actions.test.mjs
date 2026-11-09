@@ -86,7 +86,7 @@ test('the scripts the actions run are executable programs of this package', () =
 const workflows = readdirSync(WORKFLOWS).filter((f) => f.startsWith('app-') && f.endsWith('.yml')).sort();
 
 test('the reusable workflows are workflow_call workflows that use only actions, inputs and secrets that exist', () => {
-  assert.deepEqual(workflows, ['app-e2e.yml', 'app-fuzz.yml', 'app-licences.yml', 'app-mutants.yml', 'app-never-panics.yml', 'app-release.yml']);
+  assert.deepEqual(workflows, ['app-fuzz.yml', 'app-release.yml']);
   for (const w of workflows) {
     const text = read(join(WORKFLOWS, w));
     assert.match(text, /^on:\n {2}workflow_call:/m, `${w}: workflow_call`);
@@ -267,7 +267,7 @@ test('the sccache-stats action prints the statistics and tolerates a missing scc
     }
     return found;
   };
-  const rustJobs = ['crates', 'crate', 'app', 'paddock-dev'];
+  const rustJobs = ['conformance', 'crates', 'crate', 'app', 'paddock-dev']; // conformance: ./dev gates check (C100, ADR 0060)
   assert.deepEqual(jobsUsing('setup-rust'), rustJobs, 'setup-rust in every job that builds Rust');
   assert.deepEqual(jobsUsing('sccache-stats'), rustJobs, 'stats after each');
   assert.doesNotMatch(ci, /setup-rust\n\s+if: runner\.os/, 'no OS leg is left out');
@@ -1879,7 +1879,7 @@ test('a job that builds several mutants at once splits its build jobs between th
       assert.equal(split[2], want, `${file} ${job.id}: the split is the --jobs number`);
     }
   }
-  assert.ok(seen >= 2, 'the mutants workflows are found');
+  assert.ok(seen >= 1, 'the mutants workflow is found');
 });
 
 test('every job that runs cargo sets its build jobs (build-jobs or setup-rust); a host job before it takes a slot', () => {
@@ -1921,6 +1921,26 @@ test('every workflow step that runs the ui Playwright config provides every port
     }
   }
   assert.ok(checked >= 2, 'the check found the release workflows\' ui Playwright steps');
+});
+
+test('the plan job guard keeps CI green under the documented C100 rollback (--warn) and fails when the line is gone', () => {
+  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const at = ci.indexOf('- name: C100 stays wired');
+  assert.ok(at > 0, 'the guard step exists');
+  const block = /run: \|\n((?: {10}.*\n|\n)+)/.exec(ci.slice(at))[1].replace(/^ {10}/gm, '');
+  const run = (line) => {
+    const dir = mkdtempSync(join(tmpdir(), 'guard-'));
+    mkdirSync(join(dir, '.gitea', 'workflows'), { recursive: true });
+    for (const f of ['ci.yml', 'nightly.yml']) writeFileSync(join(dir, '.gitea', 'workflows', f), `jobs:\n  x:\n    steps:\n${line}\n`);
+    const r = spawnSync('bash', ['-c', block], { cwd: dir, encoding: 'utf8' });
+    rmSync(dir, { recursive: true, force: true });
+    return r;
+  };
+  assert.equal(run('        run: ./dev gates check').status, 0);
+  assert.equal(run('        run: ./dev gates check --warn').status, 0, 'the rollback of ADR 0060');
+  const gone = run('        run: echo nothing');
+  assert.equal(gone.status, 1);
+  assert.match(gone.stdout, /::error file=.*C100 is not wired/);
 });
 
 // libFuzzer writes the inputs it finds to the FIRST corpus folder; the cached folder must come first or the corpus never grows.

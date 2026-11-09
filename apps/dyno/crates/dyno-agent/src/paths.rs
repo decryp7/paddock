@@ -16,6 +16,10 @@ pub struct Dirs {
 impl Dirs {
     /// The folder for the current user: `%LOCALAPPDATA%\Dyno`, `~/Library/Application Support/Dyno` or
     /// `$XDG_DATA_HOME/dyno` (`~/.local/share/dyno`); `DYNO_DATA_DIR` wins; the temp folder when nothing is known.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "KNOWN DEFECT, not a justification: a shared, predictable folder under the OS temp dir that another local user can create first (Dyno security fix, owner and review date in docs/gates.toml [[defect]])"
+    )]
     pub fn current() -> Dirs {
         let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
         let override_root = env("DYNO_DATA_DIR");
@@ -161,6 +165,10 @@ impl Dirs {
 
     /// Which kind of folder this is, for the logs (never the user's path): every launch path of an installed agent
     /// (the app's child, the login item, the Windows `Run` entry) must log "user data folder".
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "compared with the data folder to tell the logs whether it is the last-resort scratch folder"
+    )]
     pub fn kind(&self) -> &'static str {
         let overridden = std::env::var_os("DYNO_DATA_DIR").is_some_and(|v| !v.is_empty());
         folder_kind(&self.root, overridden, Dirs::current().root(), &std::env::temp_dir())

@@ -21,6 +21,9 @@ export function runPaddockI18n({ root, configFile, appDir }) {
 
 export default {
   id: 'C32',
+  scope: 'apps',
+  mode: 'gate',
+  needs: 'ui',
   title: 'The translation catalogs are current',
   rule: 40,
   async run(ctx) {

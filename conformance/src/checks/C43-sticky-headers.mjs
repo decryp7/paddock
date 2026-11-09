@@ -130,6 +130,8 @@ const groupOf = (f) => /^apps\/[^/]+\//.exec(f)?.[0] ?? /^ui\/projects\/[^/]+\/[
 
 export default {
   id: 'C43',
+  scope: 'both',
+  mode: 'gate',
   title: 'sticky table headers stay above their rows',
   rule: 40,
   run(ctx) {

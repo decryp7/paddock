@@ -70,6 +70,10 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
     fn writes_atomically_with_a_backup_and_sets_damage_aside() {
         let d = std::env::temp_dir().join(format!("pitcrew-it-store-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
