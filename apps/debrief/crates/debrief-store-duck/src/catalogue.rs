@@ -166,6 +166,9 @@ struct Shared {
     /// Checkpoints run under / outside an [`crate::shutdown::Active`] guard (tests: the exit handler must count each).
     #[cfg(test)]
     checkpoints: (AtomicU64, AtomicU64),
+    /// Whether the thread dropped its connection after the process began to exit (tests).
+    #[cfg(test)]
+    dropped_while_exiting: AtomicBool,
 }
 
 /// The catalogue thread of a store; stopped and joined on drop.
@@ -185,12 +188,27 @@ impl CatalogueService {
             heavy,
             #[cfg(test)]
             checkpoints: (AtomicU64::new(0), AtomicU64::new(0)),
+            #[cfg(test)]
+            dropped_while_exiting: AtomicBool::new(false),
         });
         crate::shutdown::interrupt_on_exit(&conn);
         let s = shared.clone();
-        let handle = std::thread::Builder::new()
-            .name("debrief-catalogue".into())
-            .spawn(move || run(&s, &conn, &write_lock))?;
+        let handle = std::thread::Builder::new().name("debrief-catalogue".into()).spawn(move || {
+            run(&s, &conn, &write_lock);
+            if crate::shutdown::down() {
+                // `run` returns at exit too. Dropping the connection then would call duckdb_disconnect (and
+                // duckdb_close for the last handle of the database) while C++ destroys DuckDB's statics: the crash
+                // the exit handler exists to prevent. The process is exiting, so the OS reclaims what is leaked here.
+                std::mem::forget(conn);
+                return;
+            }
+            // A drop that still meets an exit begun since the check above (tests record it).
+            #[cfg(test)]
+            if crate::shutdown::down() {
+                s.dropped_while_exiting.store(true, Ordering::SeqCst);
+            }
+            drop(conn);
+        })?;
         Ok(CatalogueService {
             shared,
             handle: Some(handle),
@@ -439,5 +457,67 @@ mod tests {
         );
         drop(store);
         crate::test_scratch::remove_or_defer(&dir);
+    }
+
+    const EXIT_CHILD: &str = "DEBRIEF_CATALOGUE_EXIT_CHILD";
+
+    /// Runs in the child process only (setting the process's exit state cannot be undone): a store with catalogued
+    /// rows, then the exit handler, then one more turn of the catalogue thread.
+    #[test]
+    fn a_turn_after_exit_began_child() {
+        let Some(dir) = std::env::var_os(EXIT_CHILD) else { return };
+        let store = crate::DuckStore::create(std::path::Path::new(&dir), Profile::default_profile(), PluginRegistry::new()).unwrap();
+        let samples = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../samples/serilog-text");
+        store.open(&[samples]).unwrap().wait().unwrap();
+        assert!(store.wait_for_catalogue(Duration::from_secs(120)).unwrap(), "catalogue built");
+        let service = store.inner.catalogue.as_ref().expect("a catalogue thread");
+        let c = service.shared.clone();
+        let before = c.checkpoints.0.load(Ordering::SeqCst) + c.checkpoints.1.load(Ordering::SeqCst);
+        // Rows to checkpoint, as when the process exits right after a build.
+        c.unsaved.store(true, Ordering::SeqCst);
+        crate::shutdown::begin_exit();
+        service.wake();
+        let started = std::time::Instant::now();
+        while !service.handle.as_ref().is_some_and(std::thread::JoinHandle::is_finished) {
+            assert!(
+                started.elapsed() < Duration::from_secs(60),
+                "the catalogue thread did not end once exit began"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let after = c.checkpoints.0.load(Ordering::SeqCst) + c.checkpoints.1.load(Ordering::SeqCst);
+        assert_eq!(after, before, "a checkpoint ran after exit began");
+        assert!(
+            !c.dropped_while_exiting.load(Ordering::SeqCst),
+            "the catalogue thread dropped its connection after exit began (duckdb_disconnect/duckdb_close during exit)"
+        );
+        // The store is not dropped either: the process is exiting.
+        std::mem::forget(store);
+    }
+
+    /// Regression (review of the CI 7837 fix): once exit has begun, the catalogue thread runs no checkpoint and ends
+    /// without tearing DuckDB down (dropping its connection would disconnect, and close the database if it held the last
+    /// handle, while C++ destroys DuckDB's statics).
+    #[test]
+    fn a_turn_after_exit_began_runs_no_statement_and_keeps_the_connection() {
+        let dir = debrief_ipc::testing::scratch_dir("catalogue-exit-turn");
+        let out = debrief_core::process::quiet_command(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "catalogue::tests::a_turn_after_exit_began_child",
+                "--test-threads=1",
+                "--nocapture",
+            ])
+            .env(EXIT_CHILD, &dir)
+            .output()
+            .unwrap();
+        crate::test_scratch::remove_or_defer(&dir);
+        assert!(
+            out.status.success(),
+            "{:?}\n{}{}",
+            out.status,
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 }

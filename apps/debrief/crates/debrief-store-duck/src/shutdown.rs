@@ -80,6 +80,12 @@ impl Drop for Active {
     }
 }
 
+/// Runs the exit handler now, as `exit()` would (tests, in a child process of their own: it cannot be undone).
+#[cfg(test)]
+pub(crate) fn begin_exit() {
+    at_exit();
+}
+
 extern "C" fn at_exit() {
     DOWN.store(true, Ordering::SeqCst);
     // Never wait for the lock at exit: a thread may hold it (it is only held to push a handle).
