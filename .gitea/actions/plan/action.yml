@@ -47,6 +47,7 @@ runs:
         TAG_PATTERN: ${{ inputs.tag-pattern }}
         PLAN_TOKEN: ${{ inputs.token }}
         PADDOCK_DEV_TOKEN: ${{ inputs.dev-token }}
+        PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
       run: |
         TAGS=""
         if [ "$EVENT" = push ] && [ "$REF" = "$MAIN_REF" ]; then

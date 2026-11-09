@@ -1888,3 +1888,32 @@ test('dev-tool.yml publishes only from main, in every job (ADR 0022: the store i
   assert.ok(jobs.length >= 2, 'the publish jobs');
   for (const job of jobs) assert.match(job.text, /\n    if: \$\{\{ github\.ref == 'refs\/heads\/main'/, `dev-tool.yml:${job.id}: runs only on refs/heads/main`);
 });
+
+test('every place that gives ./dev its read token also says a tag run never downloads (ADR 0022: tag jobs bypass every cache)', () => {
+  const root = join(PADDOCK, '.gitea');
+  const files = [
+    ...readdirSync(join(root, 'workflows')).filter((f) => f.endsWith('.yml')).map((f) => join(root, 'workflows', f)),
+    ...readdirSync(join(root, 'actions')).map((d) => join(root, 'actions', d, 'action.yml')).filter((f) => existsSync(f)),
+  ];
+  const tagRule = /PADDOCK_DEV_DOWNLOAD: (?:"0"|\$\{\{ startsWith\(github\.ref, 'refs\/tags\/'\) && '0' \|\| '' \}\})/;
+  let sites = 0;
+  for (const file of files) {
+    if (basename(file) === 'dev-tool.yml') continue; // publishes from main only; it never runs for a tag
+    const lines = readFileSync(file, 'utf8').split('\n');
+    lines.forEach((line, i) => {
+      if (!/^\s*PADDOCK_DEV_TOKEN:/.test(line)) return;
+      sites += 1;
+      const near = lines.slice(Math.max(0, i - 8), i + 9).join('\n');
+      assert.match(near, tagRule, `${relative(PADDOCK, file)}:${i + 1}: PADDOCK_DEV_TOKEN without a PADDOCK_DEV_DOWNLOAD tag rule beside it`);
+    });
+  }
+  assert.ok(sites >= 8, `found the sites (${sites})`);
+  // The debrief host jobs that run ./dev through job-isolation get the token and the rule too.
+  const debrief = parseJobs(readFileSync(join(root, 'workflows', 'debrief.yml'), 'utf8'));
+  for (const id of ['rust-test-macos', 'tauri-smoke']) {
+    const job = debrief.find((j) => j.id === id);
+    assert.ok(job, `debrief.yml:${id} exists`);
+    assert.match(job.text, tagRule, `debrief.yml:${id}: a tag run builds the tool from source`);
+    assert.match(job.text, /PADDOCK_DEV_TOKEN:/, `debrief.yml:${id}: reads the prebuilt tool`);
+  }
+});

@@ -78,6 +78,7 @@ jobs:
         env:
           PLAN_TOKEN: ${{ github.token }}
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+          PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
           PLAN_BASE: ${{ github.event.inputs.base }}
           PLAN_APP: ${{ inputs.app }}
           PLAN_WEBKIT: ${{ (inputs.webkit == true || inputs.webkit == 'true') && '1' || '' }}
@@ -582,6 +583,7 @@ jobs:
           PLAN_BASE: ${{ needs.plan.outputs.base }}
           INPUT_APP: ${{ inputs.app }}
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+          PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
         run: |
           range="$(./dev plan --commit-range)"
           flags="$(./dev plan --commit-flags)"
