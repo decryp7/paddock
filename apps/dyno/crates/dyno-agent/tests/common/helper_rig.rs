@@ -107,6 +107,9 @@ pub struct Readers {
     /// When set, every counters read waits at this gate until it is opened (the real `powermetrics` read takes seconds and
     /// cannot be interrupted).
     pub counters_gate: Option<Arc<Gate>>,
+    /// When set, the helper sets the scheduled wakes (the agent's own wake timer is taken away, as on macOS and Linux) and every
+    /// wake call waits at this gate until it is opened (a real `pmset` call can take seconds under load and cannot be interrupted).
+    pub wakes_gate: Option<Arc<Gate>>,
     /// The helper's log, oldest first.
     pub log: Vec<String>,
     /// The Wake-on-LAN modes every interface answers; `None` answers like a system that reads none.
@@ -134,6 +137,7 @@ impl Default for Readers {
             holders: Box::new(dyno_core::helper_holders::NoHolders),
             counters: Vec::new(),
             counters_gate: None,
+            wakes_gate: None,
             log: Vec::new(),
             wol: None,
             wake_requests: Vec::new(),
@@ -237,6 +241,23 @@ impl Gate {
     }
 }
 
+/// The helper's scheduled wakes: none pending, every call let through by the gate.
+struct GatedWakes(Arc<Gate>);
+impl dyno_core::wake::WakeScheduler for GatedWakes {
+    fn schedule(&self, _: &dyno_core::wake::WakeTag, _: i64) -> Result<(), PlatformError> {
+        self.0.pass();
+        Ok(())
+    }
+    fn cancel(&self, _: &dyno_core::wake::WakeTag) -> Result<bool, PlatformError> {
+        self.0.pass();
+        Ok(false)
+    }
+    fn list(&self) -> Result<Vec<dyno_core::wake::WakeEntry>, PlatformError> {
+        self.0.pass();
+        Ok(Vec::new())
+    }
+}
+
 struct Counters(Vec<CounterAnswer>, Option<Arc<Gate>>);
 impl CounterReader for Counters {
     fn read(&self, id: CounterId) -> Result<CounterValue, PlatformError> {
@@ -296,7 +317,10 @@ pub fn dispatcher(host: HelperHost, readers: Readers, dir: &std::path::Path) -> 
         smart: Box::new(Smart(readers.smart)),
         firewall: Box::new(Firewall(readers.firewall)),
         tools: Box::new(Tools),
-        wakes: Box::new(dyno_core::wake::NoWakes),
+        wakes: match readers.wakes_gate {
+            Some(gate) => Box::new(GatedWakes(gate)),
+            None => Box::new(dyno_core::wake::NoWakes),
+        },
         wol: Box::new(Wol(readers.wol)),
         log_tail: Box::new(move |n| readers.log[readers.log.len().saturating_sub(n)..].to_vec()),
         on_uninstall: Box::new(|| {}),

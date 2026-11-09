@@ -119,12 +119,17 @@ impl Rig {
             memory: linux::parse(&dmi_table(), TOTAL),
             ..readers
         };
+        // A gated helper wake call needs the wakes set through the helper: the fake's own wake timer goes (as on macOS and Linux).
+        let mut platform = fake.platform();
+        if readers.wakes_gate.is_some() {
+            platform.wol.wake_timer = None;
+        }
         let transport = DispatcherTransport::new(dispatcher(host, readers, tmp.path()), caller);
         transport.up.store(up, Ordering::SeqCst);
         let (up, served) = (transport.up.clone(), transport.served.clone());
         let running = Running::start_with_helper(
             dirs.clone(),
-            fake.platform(),
+            platform,
             Box::new(fake.clone()),
             Box::new(|_| Ok(())),
             wiring(transport, host),
@@ -405,6 +410,55 @@ fn a_stop_does_not_wait_for_a_counters_read_in_progress() {
     assert!(stopped, "the stop waited for the counters read in progress");
     assert!(!dyno_agent::instance::is_held(&rig.dirs), "the agent lock was not released");
     paddock_testkit::wait_until("the read left behind to end and let go of the agent's state", || {
+        std::sync::Arc::strong_count(&shared) == 1
+    });
+    // The read finished after the stop: what it measured is not written (the store holds no CPU energy totals).
+    let saved = shared
+        .core
+        .lock()
+        .unwrap()
+        .store
+        .meta(dyno_agent::helper_readers::counters::META_KEY)
+        .unwrap();
+    assert_eq!(saved, None, "the read left behind wrote to the store after the stop");
+}
+
+/// A stop never waits for a scheduled-wake call to the helper in progress (macOS and Linux set wakes through the helper; a
+/// `pmset` call under load can take seconds and cannot be interrupted). The wake thread left behind ends by itself once let through.
+#[test]
+fn a_stop_does_not_wait_for_a_helper_wake_call_in_progress() {
+    struct OpenOnDrop(std::sync::Arc<helper_rig::Gate>);
+    impl Drop for OpenOnDrop {
+        fn drop(&mut self) {
+            self.0.open();
+        }
+    }
+    let gate = std::sync::Arc::new(helper_rig::Gate::default());
+    let _open = OpenOnDrop(gate.clone());
+    // Linux: no climate reader, so the only helper call that can be in progress is the wake thread's start-up sync.
+    let mut rig = Rig::start_readers(
+        Caller::Owner,
+        HelperHost::Linux,
+        true,
+        Readers {
+            wakes_gate: Some(gate.clone()),
+            ..Readers::default()
+        },
+    );
+    paddock_testkit::wait_until("the wake thread's call to reach the helper", || gate.arrived());
+    let running = rig.running.take().unwrap();
+    let shared = running.shared.clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let stopper = std::thread::spawn(move || {
+        running.stop();
+        let _ = tx.send(());
+    });
+    let stopped = paddock_testkit::poll_until_within(HANG_GUARD, || rx.try_recv().is_ok());
+    gate.open();
+    stopper.join().unwrap();
+    assert!(stopped, "the stop waited for the helper wake call in progress");
+    assert!(!dyno_agent::instance::is_held(&rig.dirs), "the agent lock was not released");
+    paddock_testkit::wait_until("the wake thread left behind to end and let go of the agent's state", || {
         std::sync::Arc::strong_count(&shared) == 1
     });
 }

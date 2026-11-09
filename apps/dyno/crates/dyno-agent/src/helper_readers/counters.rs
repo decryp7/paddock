@@ -295,17 +295,14 @@ pub fn spawn_worker(shared: &std::sync::Arc<crate::agent::Shared>) -> std::io::R
             if shared.climate.due(now) {
                 let zone = crate::agent::lock(&shared.core).zone.clone();
                 let days = shared.climate.refresh(now, zone.as_ref());
-                // The agent may have stopped during the read (a stop does not wait for it): then nothing is written.
-                if shared.stopped() {
-                    break;
-                }
                 if let Some(days) = days {
                     match serde_json::to_string(&days) {
-                        Ok(json) => {
-                            if let Err(e) = crate::agent::lock(&shared.core).store.set_meta(META_KEY, &json) {
-                                log::warn!(target: "dyno::helper", "could not keep the CPU energy totals: {e}");
-                            }
-                        }
+                        // The agent may have stopped during the read (a stop does not wait for it): then nothing is written.
+                        Ok(json) => match shared.write_unless_stopped(|core| core.store.set_meta(META_KEY, &json)) {
+                            None => break,
+                            Some(Err(e)) => log::warn!(target: "dyno::helper", "could not keep the CPU energy totals: {e}"),
+                            Some(Ok(_)) => {}
+                        },
                         Err(e) => log::warn!(target: "dyno::helper", "could not write the CPU energy totals: {e}"),
                     }
                 }

@@ -830,6 +830,17 @@ impl Shared {
         self.stop.load(Ordering::SeqCst)
     }
 
+    /// Runs `write` on the core under its lock unless the agent has been asked to stop (then `None`). A thread the stop does not
+    /// wait for (one that may be inside a helper call) writes to the store only through this: [`crate::Running::stop`] takes the
+    /// lock once after asking to stop, so no such write reaches the store after the stop returns.
+    pub fn write_unless_stopped<R>(&self, write: impl FnOnce(&mut Core) -> R) -> Option<R> {
+        let mut core = lock(&self.core);
+        if self.stopped() {
+            return None;
+        }
+        Some(write(&mut core))
+    }
+
     /// Asks every loop to stop.
     pub fn request_stop(&self) {
         self.stop.store(true, Ordering::SeqCst);
