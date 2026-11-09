@@ -270,6 +270,22 @@ test('checkout profiles: the bootstrap covers the inputs of paddock-dev, which j
   for (const need of ['.gitea', 'conformance', 'tools']) assert.ok(boot.includes(need), `${need}: the actions, their scripts and ./dev`);
 });
 
+// Run 7816 (macOS): cargo loads every path dependency's manifest, dev-dependencies included (paddock-testkit), to build paddock-dev.
+test('checkout profiles: the bootstrap holds every path dependency, dev-dependencies too, of paddock-dev, transitively', () => {
+  const boot = declared().filter((d) => d.kind === 'bootstrap').map((d) => d.parts[0]);
+  const seen = new Set();
+  const walk = (dir) => {
+    if (seen.has(dir)) return;
+    seen.add(dir);
+    for (const m of read(join(PADDOCK, dir, 'Cargo.toml')).matchAll(/path\s*=\s*"([^"]+)"/g)) {
+      const dep = join(dir, m[1]).split('\\').join('/');
+      if (dep.startsWith('crates/') || dep.startsWith('tools/')) walk(dep);
+    }
+  };
+  walk('tools/paddock-dev');
+  for (const dir of seen) assert.ok(boot.some((b) => dir === b || dir.startsWith(`${b}/`)), `${dir} is a path dependency of paddock-dev: add \`bootstrap ${dir}\``);
+});
+
 test('checkout profiles: nothing outside the excluded paths mentions one, unless the file is declared and reasoned (mention)', () => {
   const excluded = declared().filter((d) => d.kind === 'exclude' && d.parts[0] === 'lean').map((d) => d.parts[1].replace(/\/$/, ''));
   const res = excluded.map(toRe);
