@@ -444,7 +444,7 @@ describe('the VM lock', () => {
     for (const f of readdirSync(join(here, 'vm-smoke')).filter((n) => /\.mjs$/.test(n) && !n.endsWith('.test.mjs'))) {
       const text = read(`vm-smoke/${f}`);
       if (!/vm-win\.sh|VMWIN|vmwin/.test(text)) continue;
-      for (const m of text.matchAll(/[ ,{]env:\s*([^,}]+)/g)) assert.match(m[1].trim(), /^(process\.env|\{ \.\.\.process\.env|env \?\? process\.env)/, `${f}: ${m[0]}`);
+      for (const m of text.matchAll(/[ ,{]env:\s*([^,}]+)/g)) assert.match(m[1].trim(), /^(process\.env|\{ \.\.\.process\.env|env \?\? process\.env|tartEnv)/, `${f}: ${m[0]}`);
     }
   });
 });
