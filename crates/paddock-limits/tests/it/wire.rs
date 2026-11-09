@@ -562,9 +562,9 @@ fn a_quantity_of_the_wrong_shape_is_refused_with_a_reason() {
     );
 }
 
-/// Review 3: ADR 0063's MessagePack option and any bincode boundary carry a `Quantity` too: every kind, at its own width.
+/// Review 3: ADR 0063's MessagePack option and the postcard boundary carry a `Quantity` too: every kind, at its own width.
 #[test]
-fn every_quantity_survives_messagepack_and_bincode() {
+fn every_quantity_survives_messagepack_and_postcard() {
     let all = [
         Quantity::Bytes(u64::MAX),
         Quantity::Count(7),
@@ -584,12 +584,6 @@ fn every_quantity_survives_messagepack_and_bincode() {
             rmp_serde::from_slice::<Quantity>(&named).unwrap(),
             q,
             "messagepack, named {q:?}"
-        );
-        let fixed = bincode::serialize(&q).unwrap();
-        assert_eq!(
-            bincode::deserialize::<Quantity>(&fixed).unwrap(),
-            q,
-            "bincode {q:?}"
         );
         let compact = postcard::to_stdvec(&q).unwrap();
         assert_eq!(

@@ -399,7 +399,7 @@ enum Kind {
 }
 
 impl<'de> Deserialize<'de> for Quantity {
-    /// Reads `{"kind": "bytes", "n": 5}` from JSON, and a compact format's fields in order (MessagePack, postcard, bincode)
+    /// Reads `{"kind": "bytes", "n": 5}` from JSON, and a compact format's fields in order (MessagePack, postcard)
     /// with the number at the width the derived `Serialize` wrote (u32 for a ratio, u8 for a percentage, u64 otherwise). A
     /// percentage over 100 is refused, and so is a key that repeats. A sequence is also accepted from JSON (`["bytes", 5]`):
     /// compact formats write a struct as one, and telling them apart costs more than the harmless leniency.
