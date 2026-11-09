@@ -292,6 +292,46 @@ fn compiler_flags_are_part_of_the_hash_in_both_implementations() {
     assert_ne!(with_above, included);
 }
 
+/// CI's build-folder action writes `tools/paddock-dev/.cargo/ci.toml` (only `build.target-dir`, the job slot's folder) after
+/// job-isolation took the slot with `./dev`; the release step's `./dev` then saw another hash and rebuilt the tool after the
+/// job's temp folder was gone (runs 7774, 7810 and 7819, macOS). The build folder never changes the binary, as
+/// `CARGO_TARGET_DIR` does not: a config that names nothing else is not hashed, whatever folder it names.
+#[test]
+fn a_config_that_only_names_the_build_folder_does_not_change_the_hash() {
+    let f = Fixture::new();
+    let ci = f.root().join("tools/paddock-dev/.cargo/ci.toml");
+    std::fs::create_dir_all(ci.parent().unwrap()).unwrap();
+    std::fs::write(
+        f.root().join(".gitignore"),
+        "/tools/paddock-dev/target/\n/tools/paddock-dev/.cargo/ci.toml\n",
+    )
+    .unwrap();
+    git(f.root(), &["commit", "-qam", "chore: ignore ci.toml"]);
+    let plain = f.both(&[]);
+    assert!(!plain.1);
+    for slot in ["s1", "s2"] {
+        std::fs::write(
+            &ci,
+            format!("# Written by build-folder.sh for this CI job (git-ignored).\n[build]\r\ntarget-dir = 'C:/ci/target-paddock-{slot}'\n"),
+        )
+        .unwrap();
+        assert_eq!(f.both(&[]), plain, "a build folder ({slot}) is not part of the hash");
+    }
+    std::fs::write(f.cargo_home.path().join("config.toml"), "build.target-dir = \"/elsewhere\"\n").unwrap();
+    assert_eq!(f.both(&[]), plain, "nor as a dotted key in $CARGO_HOME's config");
+    std::fs::remove_file(f.cargo_home.path().join("config.toml")).unwrap();
+    // Anything else next to the build folder counts, and so does a `target-dir` outside `[build]` (not cargo's key).
+    for other in [
+        "[build]\ntarget-dir = 'x'\nrustflags = [\"-Dx\"]\n",
+        "[build]\ntarget-dir = 'x'\n[profile.release]\nlto = true\n",
+        "[profile.release]\ntarget-dir = 'x'\n",
+        "build = { target-dir = 'x' }\n",
+    ] {
+        std::fs::write(&ci, other).unwrap();
+        assert_ne!(f.both(&[]).0, plain.0, "{other:?} is hashed");
+    }
+}
+
 /// A tiny stand-in for the tool binary: answers `--version`, otherwise prints a marker.
 #[cfg(unix)]
 fn write_script(path: &Path, body: &str) {

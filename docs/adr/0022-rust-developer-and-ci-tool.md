@@ -203,7 +203,10 @@ run of `dev-tool.yml` (below) publishes for the new compiler within a day.
   - the cargo config files cargo reads for the tool: `config.toml` and `config` in every `.cargo` folder from
     `tools/paddock-dev` up to the filesystem root, the other `*.toml` files in the tool's own `.cargo` (what `include`
     pulls in, such as the git-ignored `ci.toml`), then `$CARGO_HOME`'s, closest first and without duplicates. Each file
-    enters the hash as a line `config-file <git blob id of its text without carriage returns>`. The files are streamed
+    enters the hash as a line `config-file <git blob id of its text without carriage returns>`, except a file that sets
+    nothing but the build folder (`target-dir` in `[build]` or a top-level `build.target-dir`, besides comments), which
+    never changes the binary, like `CARGO_TARGET_DIR` (amended 2026-11-09: CI's build-folder action writes such a `ci.toml`
+    mid-job, so the release step rebuilt the tool; runs 7774, 7810, 7819). The files are streamed
     into git and only the digest is held, because a config can hold registry tokens that a shell trace (`sh -x`) would
     print; a wrapper test checks that a dummy token never appears in a trace;
   - the compiler cargo will use: the `release:` and `commit-hash:` lines of its `-vV` output, run after `setup-rust`.

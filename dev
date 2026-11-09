@@ -83,16 +83,31 @@ if ! printf '%s\n' "$compiler" | grep -q '^release:'; then
 fi
 host=$(printf '%s\n' "$vv" | sed -n 's/^host: //p')
 
+# only_build_folder <file>: the config sets nothing but the build folder (`target-dir` in `[build]`, or a top-level
+# `build.target-dir`), besides blank lines and comments. The build folder never changes the binary (CARGO_TARGET_DIR is not
+# hashed either), and CI's build-folder action writes exactly such a ci.toml next to the tool in the middle of a job. Prints
+# nothing, so a trace never shows what the file holds.
+only_build_folder() {
+  tr -d '\r' <"$1" | awk '
+    { line = $0; sub(/^[ \t]+/, "", line) }
+    line == "" || line ~ /^#/ { next }
+    line ~ /^\[/ { sec = line; gsub(/[ \t]/, "", sec); if (sec != "[build]") bad = 1; next }
+    (sec == "[build]" && line ~ /^target-dir[ \t]*=/) || (sec == "" && line ~ /^build\.target-dir[ \t]*=/) { next }
+    { bad = 1 }
+    END { exit bad ? 1 : 0 }'
+}
+
 # What else changes the compiled code: the environment variables RUSTFLAGS, CARGO_ENCODED_RUSTFLAGS, CARGO_BUILD_*,
 # CARGO_PROFILE_* and CARGO_TARGET_* (not the build folder, the job count or the compiler, which the `-vV` lines already name)
-# when they are not empty, sorted as lines, then one `config-file <digest>` line per config file above, the digest being git's
-# blob id of the file with carriage returns dropped. A config file can hold registry tokens, so it is streamed into git and only
-# its digest is ever held in a variable (which `sh -x` would print).
+# when they are not empty, sorted as lines, then one `config-file <digest>` line per config file above (except those that only
+# name the build folder), the digest being git's blob id of the file with carriage returns dropped. A config file can hold
+# registry tokens, so it is streamed into git and only its digest is ever held in a variable (which `sh -x` would print).
 flags=$(
   env | grep -E '^(RUSTFLAGS|CARGO_ENCODED_RUSTFLAGS|CARGO_BUILD_[A-Za-z0-9_]*|CARGO_PROFILE_[A-Za-z0-9_]*|CARGO_TARGET_[A-Za-z0-9_]*)=' |
     grep -v -E '^(CARGO_TARGET_DIR|CARGO_BUILD_JOBS|CARGO_BUILD_TARGET_DIR|CARGO_BUILD_RUSTC)=' | grep -v '=$' | LC_ALL=C sort || true
   if [ -n "$configs" ]; then
     while IFS= read -r cfg; do
+      only_build_folder "$cfg" && continue
       printf 'config-file %s\n' "$(tr -d '\r' <"$cfg" | git -C "$root" hash-object --stdin)"
     done <<EOF
 $configs

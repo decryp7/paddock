@@ -64,7 +64,8 @@ pub fn is_hashed_var(name: &str) -> bool {
 }
 
 /// What else changes the compiled code, as text: the hashed environment variables that are not empty as `NAME=value` lines
-/// in byte order, then one `config-file <digest>` line per config, the digest being [`config_digest`]'s. The wrapper builds
+/// in byte order, then one `config-file <digest>` line per config (except those [`only_names_build_folder`] skips), the digest
+/// being [`config_digest`]'s. The wrapper builds
 /// the same text with `env | grep | sort` and `git hash-object`; trailing newlines are the caller's to trim. Configs are
 /// reduced to digests because they can hold registry tokens, which must not travel in text a trace could print.
 pub fn flag_lines(vars: &[(String, String)], config_digests: &[String]) -> String {
@@ -85,6 +86,37 @@ pub fn flag_lines(vars: &[(String, String)], config_digests: &[String]) -> Strin
 fn config_digest(exec: &dyn Exec, root: &Path, text: &str) -> Result<String, CliError> {
     let out = exec.run("git", &["hash-object", "--stdin"], root, Some(text.replace('\r', "").as_bytes()))?;
     Ok(out.trim().to_string())
+}
+
+/// Whether a config sets nothing but the build folder (`target-dir` in `[build]`, or a top-level dotted `build.target-dir`),
+/// besides blank lines and comments: such a file is not hashed, because the build folder never changes the binary (as
+/// `CARGO_TARGET_DIR` does not), and CI's build-folder action writes one next to the tool in the middle of a job. Read line by
+/// line exactly as the wrapper's awk does (`only_build_folder`), so any other table, key or an inline table counts.
+pub fn only_names_build_folder(config: &str) -> bool {
+    let text = config.replace('\r', "");
+    let mut section = String::new();
+    let assigns = |line: &str, key: &str| {
+        line.strip_prefix(key)
+            .is_some_and(|rest| rest.trim_start_matches([' ', '\t']).starts_with('='))
+    };
+    for line in text.lines().map(|l| l.trim_start_matches([' ', '\t'])) {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.starts_with('[') {
+            section = line.chars().filter(|c| !matches!(c, ' ' | '\t')).collect();
+            if section != "[build]" {
+                return false;
+            }
+            continue;
+        }
+        let build_folder =
+            (section == "[build]" && assigns(line, "target-dir")) || (section.is_empty() && assigns(line, "build.target-dir"));
+        if !build_folder {
+            return false;
+        }
+    }
+    true
 }
 
 /// The `rustc = "..."` of a `[build]` table (or a top-level dotted `build.rustc = `) in a cargo config, read line by line
@@ -279,6 +311,7 @@ pub fn compute(
     let tree = exec.run("git", &git_args, root, None)?;
     let digests = configs
         .iter()
+        .filter(|c| !only_names_build_folder(c))
         .map(|c| config_digest(exec, root, c))
         .collect::<Result<Vec<_>, _>>()?;
     let flags = flag_lines(vars, &digests);
