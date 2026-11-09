@@ -36,7 +36,12 @@ exec docker run --rm --name "$PREFIX-run-$$" --cpus "${DEBRIEF_SMOKE_CPUS:-6}" \
     apt-get install -y -qq libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf cmake \
       webkit2gtk-driver xvfb dbus dbus-x11 >/dev/null
     command -v cargo >/dev/null || { curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain stable -y; }
-    eval "$(bash crates/debrief-store-duck/scripts/fetch-libduckdb.sh "$HOME/.cache/debrief-libduckdb")"
+    # Checked on its own: `eval "$(...)"` would swallow a failed download (CI 7822).
+    if ! duckdb_env=$(bash crates/debrief-store-duck/scripts/fetch-libduckdb.sh "$HOME/.cache/debrief-libduckdb"); then
+      echo "::error::could not fetch the pinned libduckdb (fetch-libduckdb.sh failed; its error is above). Run the smoke test again; if the download keeps failing, check the DuckDB release on GitHub."
+      exit 1
+    fi
+    eval "$duckdb_env"
     export LD_LIBRARY_PATH="$DUCKDB_LIB_DIR:${LD_LIBRARY_PATH:-}"
     command -v tauri-driver || cargo install tauri-driver --locked
     cd app

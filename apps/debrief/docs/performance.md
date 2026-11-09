@@ -719,3 +719,23 @@ variant. Until then, these numbers support the Auto cap of 4 and nothing finer.
 queries 273 MB; anomalies peak 377 MB (+104 MB), Moment +4 MB, compare +1 MB. In CI (run 7102) the RSS before was 224 MB and the
 anomalies peak 330 MB. The absolute peak is reported, not asserted; compare used to run out of the 64 MB limit because both of
 its statements were open at once.
+
+## The store's waived suites under load, two at a time or all at once (2026-11-09)
+
+Why: CI 7822 (macOS, three runner jobs on one Mac) stopped `differential::answers_like_the_workspace_with_{default,sample}_profile`
+and `large_folder::progress_starts_at_once_and_the_found_count_grows` at their 180 s waiver; in CI on a6ec5b419 the same tests
+took 95 to 114 s. The FTS merge wait on the same train was ruled out first: with main's `fts.rs` the three took the same
+24 to 34 s locally (two runs) as with the train's.
+
+Setup: Mac mini (14 cores), `cargo nextest run -p debrief-store-duck --profile ci`, `NEXTEST_TEST_THREADS=5` (one runner's
+core share), ten busy-loop processes in their own process group beside it (stopped after each run), on a machine already
+busy with other work (load average 55 before and after each run). Branch `fix/combined-ci-debrief`.
+
+| run | slowest waived test | differential default / sample | analysis default / sample | crate total |
+|---|---|---|---|---|
+| `duck-heavy` (2 at a time), run 1 | 33.7 s (large folder) | 27.0 / 23.3 s | 19.3 / 17.9 s | 87.5 s |
+| no group (all at once) | 47.7 s (large folder) | 32.9 / 28.0 s | 18.3 / 17.5 s | 77.1 s |
+| `duck-heavy` (2 at a time), run 2 | 39.1 s (large folder) | 29.1 / 24.7 s | 17.9 / 16.7 s | 95.3 s |
+
+Single runs on a loaded machine. The group takes 18 to 29% off the slowest test, and adds 10 to 18 s to the crate's
+wall time (fewer of the heavy suites overlap). The 180 s limit is unchanged (ER-12).

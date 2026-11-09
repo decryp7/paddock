@@ -44,10 +44,21 @@ else
   # A host keeps it in the job slot's kept folder (job isolation), so a concurrent run of the same job never writes it too.
   if [ "${RUNNER_OS:?}" = Linux ]; then keep="${RUNNER_TEMP:-/tmp}/libduckdb"
   else keep="$(bash "$isolation" path libduckdb "${GITHUB_JOB:-job}")"; fi
-  # The script prints `export DUCKDB_LIB_DIR=... DUCKDB_INCLUDE_DIR=...` and the loader path.
-  eval "$(bash "$fetch" "$keep")"
+  # The script prints `export DUCKDB_LIB_DIR=... DUCKDB_INCLUDE_DIR=...` and the loader path. Its status is checked on its
+  # own: `eval "$(...)"` would swallow a failed download and leave the image's DUCKDB_LIB_DIR (another DuckDB) in place.
+  if ! exports=$(bash "$fetch" "$keep"); then
+    echo "::error::could not fetch libduckdb $want ($fetch failed; its error is above). Re-run the job; if the download keeps failing, check https://github.com/duckdb/duckdb/releases/tag/v$want or put libduckdb $want in the CI image."
+    exit 1
+  fi
+  unset DUCKDB_LIB_DIR DUCKDB_INCLUDE_DIR
+  eval "$exports"
   lib=${DUCKDB_LIB_DIR:?$fetch did not set DUCKDB_LIB_DIR}
   loader=$lib
+  got=$(header_version "$lib")
+  if [ "$got" != "$want" ]; then
+    echo "::error::the fetched libduckdb in $lib is ${got:-of no known version}, not the pinned $want: tests would run against another DuckDB than the app ships. Delete that folder and re-run the job."
+    exit 1
+  fi
   echo "libduckdb $want: $lib"
 fi
 
