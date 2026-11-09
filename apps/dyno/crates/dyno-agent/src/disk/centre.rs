@@ -2441,6 +2441,10 @@ mod tests {
         fs.file(&a, "x", 100 * MB);
         fs.file(&b, "y", 100 * MB);
         let r = rig(fs.clone(), vec![vol("V", &root, VolumeLocation::Internal)]);
+        // One reader, so each folder's event follows its own read. With several, the root's first event could be taken after
+        // both folders were read but before either was counted; their own events then came at the same fake time and the
+        // event gate held them back, so no running event had bytes (failed on Linux CI, runs 7831 and 7833).
+        r.centre.set_read_threads(Threads::Fixed(1));
         // Time passes 3 s at every folder read: from the second folder on, a pace is known.
         let c = r.clock.clone();
         fs.on_read(move |_| {
@@ -2472,7 +2476,12 @@ mod tests {
             mid.iter().any(|e| e.items_per_second.is_some()),
             "a pace once enough time has passed"
         );
-        assert!(mid.iter().any(|e| e.eta_seconds.is_some()), "an estimate for a whole volume");
+        // After the first folder (100 MB in 6 s, 500 MB left) and the second (200 MB in 9 s, 400 MB left).
+        assert_eq!(
+            mid.iter().map(|e| e.eta_seconds).collect::<Vec<_>>(),
+            [Some(30), Some(18)],
+            "an estimate for a whole volume"
+        );
         assert!(mid.iter().all(|e| e.hidden_bytes.is_none() && e.scanned_at.is_none()));
     }
 
