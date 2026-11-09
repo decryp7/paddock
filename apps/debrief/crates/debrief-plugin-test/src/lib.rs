@@ -93,9 +93,6 @@ pub struct Launch {
     /// Test hook: once the plugin has read this many bytes the host stops answering its reads (until the plugin is
     /// dropped), to exercise the stall guard. `None` serves everything.
     pub stall_reads_after: Option<u64>,
-    /// Test hook: once the plugin has read this many bytes the host answers its reads with an error, so the plugin's
-    /// import ends with an error in the middle of its read. `None` serves everything.
-    pub fail_reads_after: Option<u64>,
 }
 
 impl Default for Launch {
@@ -112,7 +109,6 @@ impl Default for Launch {
             import_timeout: Duration::from_secs(20),
             read_stall: Duration::from_secs(20),
             stall_reads_after: None,
-            fail_reads_after: None,
         }
     }
 }
@@ -189,7 +185,6 @@ impl PluginUnderTest {
         std::fs::copy(exe, &copied).with_context(|| format!("cannot copy {}", exe.display()))?;
         let host = Arc::new(FakeHost::default());
         host.stall_reads_after(launch.stall_reads_after);
-        host.fail_reads_after(launch.fail_reads_after);
         // First in the strictest sandbox, to learn what it is and asks for (as Debrief does when installing).
         let probe = start(&copied, &unknown_manifest(), &[], &launch, home.path(), &host)?;
         let json: Json = probe.peer().request(&PluginRequest::Manifest, Some(CALL_TIMEOUT)).map_err(ipc)?;

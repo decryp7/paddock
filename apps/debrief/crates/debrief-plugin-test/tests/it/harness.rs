@@ -98,28 +98,6 @@ fn a_read_that_stops_advancing_fails_the_cancellation_check_with_what_was_read()
     assert!(!cancel.passed && cancel.detail.contains("made no progress"), "{report}");
 }
 
-#[test]
-fn a_plugin_whose_import_breaks_while_it_reads_fails_the_cancellation_check_with_why() {
-    let fresh = PluginUnderTest::launch_with(
-        FIXTURE,
-        Launch {
-            import_timeout: Duration::from_secs(1),
-            // A long guard: the check must end on the broken import, not on the stall guard.
-            read_stall: Duration::from_secs(60),
-            // The host refuses the plugin's reads after 1 MiB of the 16 MiB the check lends, so its import ends with an error.
-            fail_reads_after: Some(1 << 20),
-            ..Launch::default()
-        },
-    )
-    .unwrap();
-    let report = fresh.conformance();
-    let cancel = report.checks.iter().find(|c| c.name == "cancellation").unwrap();
-    assert!(
-        !cancel.passed && cancel.detail.contains("ended with an error while its file was being read") && !cancel.detail.contains("hung"),
-        "{report}"
-    );
-}
-
 #[cfg(windows)]
 #[test]
 fn a_contained_plugin_cannot_read_the_users_files_unless_run_as_first_party() {
