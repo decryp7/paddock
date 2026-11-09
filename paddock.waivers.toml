@@ -289,6 +289,56 @@ check = "C23"
 path = "commit 08cf9f0363"
 reason = "first line over 100 characters on an unshared branch; history cannot be rewritten (no force)"
 expires = "2026-12-31"
+# Eight commits of merged Pitwall history whose first line is over 100 characters (pre-landing check, rule 50(g)).
+
+[[waiver]]
+check = "C23"
+path = "commit ce296b04fb6b740d2b6192b82583982204ac3a4c"
+reason = "merged Pitwall history, cannot be rewritten (no history rewrite)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C23"
+path = "commit 1169bcffb3ce247c2a3e62c1917065b7f60a04fd"
+reason = "merged Pitwall history, cannot be rewritten (no history rewrite)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C23"
+path = "commit 3ee8b38f5c30a91bfd29cd8f23c1991ef76b3b35"
+reason = "merged Pitwall history, cannot be rewritten (no history rewrite)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C23"
+path = "commit 734e69ca7ca67d946d07392a3f255db4606c3a7f"
+reason = "merged Pitwall history, cannot be rewritten (no history rewrite)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C23"
+path = "commit 2e7745e5bb9457d4b44a1bc6768acd620411f484"
+reason = "merged Pitwall history, cannot be rewritten (no history rewrite)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C23"
+path = "commit 9e3a1cbcdb4d2cd330c4f030ff4d0d3fee5a4947"
+reason = "merged Pitwall history, cannot be rewritten (no history rewrite)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C23"
+path = "commit efa279846f1e3cb951c66b11ed2cd49481e9a60b"
+reason = "merged Pitwall history, cannot be rewritten (no history rewrite)"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C23"
+path = "commit 89fc9df92215873b7901a7e919e448ed7b0775a5"
+reason = "merged Pitwall history, cannot be rewritten (no history rewrite)"
+expires = "2026-12-31"
+
 # C99 (ADR 0057, rule 72): the apps whose manifests still name keyring move their secrets to paddock-secrets' files in
 # their own work package (ADR 0057 §3 waiver table); each waiver goes with that work.
 [[waiver]]
