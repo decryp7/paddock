@@ -39,7 +39,23 @@ impl Pace for ThreadPace {
 /// The held lock: dropping it (or the process ending) frees the folder.
 #[derive(Debug)]
 pub struct InstanceLock {
-    _file: File,
+    file: File,
+    /// How the lock is let go (`File::unlock`; tests count the calls).
+    unlock: Unlock,
+}
+
+/// The call that lets a held lock go.
+type Unlock = fn(&File) -> std::io::Result<()>;
+
+impl Drop for InstanceLock {
+    /// Unlocks before the file closes. Why: Windows releases a closed handle's locks only when "available system resources"
+    /// allow (LockFileEx remarks, <https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-lockfileex>), so under
+    /// I/O load a probe's instant hold could outlast the checks of a process starting then. On Unix the close releases the
+    /// `flock` at once; the explicit unlock costs one call.
+    fn drop(&mut self) {
+        // A failed unlock leaves the release to the close, as before; nothing else can be done here.
+        (self.unlock)(&self.file).ok();
+    }
 }
 
 /// The result of asking for the lock.
@@ -112,7 +128,10 @@ impl InstanceLock {
             .open(path)
             .map_err(fail)?;
         match judge(lock(&file)) {
-            Ok(Verdict::Free) => Ok(Claim::Acquired(InstanceLock { _file: file })),
+            Ok(Verdict::Free) => Ok(Claim::Acquired(InstanceLock {
+                file,
+                unlock: File::unlock,
+            })),
             Ok(Verdict::Held) => Ok(Claim::Held),
             Ok(Verdict::Unsupported) => Ok(Claim::Unsupported),
             Err(e) => Err(fail(e)),
@@ -192,6 +211,32 @@ pub fn held_state(path: &Path) -> HeldState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A probe that finds the lock free takes it and only closed the file, and Windows unlocks a closed handle's locks when
+    /// "available system resources" allow (LockFileEx remarks), so a probe's hold could outlive the probe. Microsoft recommends
+    /// unlocking explicitly: a lock that is let go, by a probe or by its holder, is unlocked before its file is closed.
+    #[test]
+    fn a_lock_that_is_let_go_is_unlocked_before_its_file_is_closed() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static UNLOCKS: AtomicUsize = AtomicUsize::new(0);
+        fn counted(file: &File) -> std::io::Result<()> {
+            UNLOCKS.fetch_add(1, Ordering::SeqCst);
+            file.unlock()
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("a.lock");
+        let Claim::Acquired(mut lock) = InstanceLock::claim(&path).unwrap() else {
+            panic!("a free lock was not taken");
+        };
+        lock.unlock = counted;
+        drop(lock);
+        assert_eq!(
+            UNLOCKS.load(Ordering::SeqCst),
+            1,
+            "the lock was left for the close to release"
+        );
+        assert!(!is_held_now(&path));
+    }
 
     /// A pace that counts its waits and says "cancelled" once it has waited `limit` times.
     struct Ticks {
