@@ -14,10 +14,10 @@
 )]
 
 use super::discovery::Discovery;
-use crate::endpoint::Access;
+use crate::endpoint::{Access, Stream};
 use crate::error::{IpcError, RemoteError, codes};
 use crate::frame::{FrameLimit, ProtocolVersion};
-use crate::handshake::{HANDSHAKE_TIMEOUT, Host};
+use crate::handshake::{Authenticator, HANDSHAKE_TIMEOUT, Host};
 use crate::peer::{Handler, Peer, PeerOptions};
 use crate::token::Token;
 use paddock_jobs::time::{Clock, SystemClock};
@@ -30,6 +30,8 @@ use std::time::Duration;
 
 /// How long one OS accept waits before the accept thread looks at its stop flag (not a limit of anything).
 const ACCEPT_SLICE: Duration = Duration::from_millis(100);
+/// The pause after an accept that failed (no descriptor left, for example) before the next one, so a failing accept does not spin.
+const ACCEPT_ERROR_PAUSE: Duration = Duration::from_millis(50);
 /// Refused clients remembered for [`LinkServer::refused`].
 const MAX_REFUSED: usize = 64;
 
@@ -90,6 +92,38 @@ impl ServerConfig {
             peer: PeerOptions::new("the app"),
         }
     }
+}
+
+/// Runs `work` with `stream` on a thread from `spawn` and returns whether it started; when no thread can be started, the
+/// failure goes to `record` and then the client is told `busy` with the cause instead of seeing its connection end (CI run 7763; a stopgap of ADR 0072 for I7).
+fn hand_over(
+    auth: &Authenticator,
+    stream: Stream,
+    spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> std::io::Result<()>,
+    work: impl FnOnce(Stream) + Send + 'static,
+    record: impl FnOnce(IpcError),
+) -> bool {
+    // The stream waits in a slot the thread empties; a thread that never started leaves it there to be answered.
+    let slot = Arc::new(Mutex::new(Some(stream)));
+    let theirs = slot.clone();
+    let started = spawn(Box::new(move || {
+        let taken = lock(&theirs).take();
+        if let Some(stream) = taken {
+            work(stream);
+        }
+    }));
+    let Err(e) = started else { return true };
+    let why = format!("cannot start a handshake thread: {e}");
+    // Recorded before the client is answered, so the server's record never trails what the client was told.
+    record(IpcError::Spawn(why.clone()));
+    let left = lock(&slot).take();
+    if let Some(stream) = left {
+        auth.refuse_busy(
+            stream,
+            &format!("the host cannot take a connection now ({why}); try again later"),
+        );
+    }
+    false
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -171,30 +205,44 @@ impl LinkServer {
             .name("paddock-ipc-link-accept".into())
             .spawn(move || {
                 while !s.stop.load(Ordering::SeqCst) {
-                    let accepted = host.accept_raw(ACCEPT_SLICE);
-                    // A timeout is the stop-flag slice; any other error is recorded and the server keeps listening.
-                    let Ok((stream, os_pid)) = accepted.map_err(|e| {
-                        (e.kind() != std::io::ErrorKind::TimedOut).then(|| s.refuse(e.into()))
-                    }) else {
-                        continue;
+                    // A timeout is the stop-flag slice; any other error is recorded and the server keeps listening, after
+                    // telling a client it could not take why (no descriptor left) and a short pause, so an accept that fails
+                    // at once does not spin.
+                    let (stream, os_pid) = match host.accept_raw(ACCEPT_SLICE) {
+                        Ok(accepted) => accepted,
+                        Err(e) if e.kind() == std::io::ErrorKind::TimedOut => continue,
+                        Err(e) => {
+                            // Recorded before the client is answered, so `refused()` never trails what a client was told.
+                            s.refuse(IpcError::from(std::io::Error::new(e.kind(), e.to_string())));
+                            host.turn_away(&e);
+                            std::thread::sleep(ACCEPT_ERROR_PAUSE);
+                            continue;
+                        }
                     };
                     let in_progress = s.handshakes.load(Ordering::SeqCst);
                     if in_progress >= max_handshakes
                         || s.open_peers() + in_progress >= max_connections
                     {
-                        auth.refuse_busy(stream, "too many connections; try again");
                         s.refuse(IpcError::Remote(RemoteError::new(
                             codes::BUSY,
                             "too many connections",
                         )));
+                        auth.refuse_busy(stream, "too many connections; try again");
                         continue;
                     }
                     s.handshakes.fetch_add(1, Ordering::SeqCst);
                     let (s2, auth, handler, opts) =
                         (s.clone(), auth.clone(), handler.clone(), opts.clone());
-                    let spawned = std::thread::Builder::new()
-                        .name("paddock-ipc-link-handshake".into())
-                        .spawn(move || {
+                    let spawned = hand_over(
+                        &auth.clone(),
+                        stream,
+                        |work| {
+                            std::thread::Builder::new()
+                                .name("paddock-ipc-link-handshake".into())
+                                .spawn(work)
+                                .map(drop)
+                        },
+                        move |stream| {
                             match auth
                                 .authenticate(stream, os_pid, None)
                                 .and_then(|c| Peer::start(c, handler, opts))
@@ -204,10 +252,11 @@ impl LinkServer {
                                 Err(e) => s2.refuse(e),
                             }
                             s2.handshakes.fetch_sub(1, Ordering::SeqCst);
-                        });
-                    if let Err(e) = spawned {
+                        },
+                        |e| s.refuse(e),
+                    );
+                    if !spawned {
                         s.handshakes.fetch_sub(1, Ordering::SeqCst);
-                        s.refuse(IpcError::Spawn(e.to_string()));
                     }
                 }
             })
@@ -307,5 +356,76 @@ impl Subscriptions {
             .iter()
             .filter(|p| p.push(body.to_vec()).is_ok())
             .count()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::endpoint::Listener;
+    use crate::frame::{self, Frame};
+    use std::time::Duration;
+
+    /// A handshake thread that cannot start leaves the client told `busy` with the cause, not a connection that just ends.
+    #[test]
+    fn a_client_whose_handshake_thread_cannot_start_is_told_busy_with_the_cause() {
+        let host = Host::listen(FrameLimit::default(), ProtocolVersion::UNVERSIONED).unwrap();
+        let mut listener = Listener::bind().unwrap();
+        let mut client = Stream::connect(listener.name(), Duration::from_secs(10)).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let (stream, _) = listener.accept(Duration::from_secs(10)).unwrap();
+        let ran = Arc::new(AtomicBool::new(false));
+        let r = ran.clone();
+        let recorded = Arc::new(Mutex::new(None));
+        let rec = recorded.clone();
+        let started = hand_over(
+            &host.authenticator(),
+            stream,
+            |_| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::WouldBlock,
+                    "no thread left",
+                ))
+            },
+            move |_| r.store(true, Ordering::SeqCst),
+            move |e| *lock(&rec) = Some(e),
+        );
+        assert!(!started);
+        let e = lock(&recorded).take();
+        assert!(
+            matches!(&e, Some(IpcError::Spawn(m)) if m.contains("no thread left")),
+            "{e:?}"
+        );
+        assert!(!ran.load(Ordering::SeqCst));
+        let told = frame::read_frame(&mut client, FrameLimit::default());
+        assert!(
+            matches!(&told, Ok(Frame::Fail { id: 0, error }) if error.is(codes::BUSY) && error.message.contains("no thread left")),
+            "{told:?}"
+        );
+    }
+
+    /// A thread that starts gets the stream.
+    #[test]
+    fn a_started_handshake_thread_gets_the_stream() {
+        let host = Host::listen(FrameLimit::default(), ProtocolVersion::UNVERSIONED).unwrap();
+        let mut listener = Listener::bind().unwrap();
+        let _client = Stream::connect(listener.name(), Duration::from_secs(10)).unwrap();
+        let (stream, _) = listener.accept(Duration::from_secs(10)).unwrap();
+        let ran = Arc::new(AtomicBool::new(false));
+        let r = ran.clone();
+        let started = hand_over(
+            &host.authenticator(),
+            stream,
+            |work| {
+                work();
+                Ok(())
+            },
+            move |_| r.store(true, Ordering::SeqCst),
+            |e| panic!("nothing to record: {e:?}"),
+        );
+        assert!(started);
+        assert!(ran.load(Ordering::SeqCst));
     }
 }

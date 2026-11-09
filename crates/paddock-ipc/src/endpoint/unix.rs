@@ -25,6 +25,19 @@ pub(super) struct Listener {
     name: String,
     /// What to remove on drop: the private directory, or just the socket file of a fixed endpoint.
     cleanup: Cleanup,
+    /// A file descriptor held in reserve: when the process has none left, it is given up for one accept, so a waiting
+    /// client can be told why it is turned away ([`Listener::accept_on_spare`]) instead of waiting in the queue.
+    spare: Option<std::fs::File>,
+}
+
+/// The reserve descriptor: any file that is always there to open.
+fn spare() -> Option<std::fs::File> {
+    std::fs::File::open("/dev/null").ok()
+}
+
+/// Whether `e` says the process (EMFILE) or the system (ENFILE) has no file descriptor left.
+pub(super) fn out_of_descriptors(e: &io::Error) -> bool {
+    matches!(e.raw_os_error(), Some(libc::EMFILE | libc::ENFILE))
 }
 
 enum Cleanup {
@@ -62,6 +75,7 @@ impl Listener {
                         listener,
                         name: sock.to_string_lossy().into_owned(),
                         cleanup: Cleanup::Dir(dir),
+                        spare: spare(),
                     });
                 }
                 Err(e) => {
@@ -105,6 +119,7 @@ impl Listener {
             listener,
             name: path.to_string(),
             cleanup: Cleanup::File(PathBuf::from(path)),
+            spare: spare(),
         })
     }
 
@@ -112,7 +127,26 @@ impl Listener {
         &self.name
     }
 
+    /// Accepts one waiting client on the reserve descriptor, after an accept failed because none was left; `None` when no
+    /// client waits (on macOS the failed accept has already dropped it) or the reserve is in use. The reserve is taken
+    /// again by the next [`Listener::accept`] once the caller has closed the stream.
+    ///
+    /// Linux's accept takes a descriptor before it looks for a client, so it fails with EMFILE with nobody connecting: the
+    /// reserve is given up only while a client is waiting (`poll` says the listener is readable), else the freed descriptor
+    /// would go to whatever opens a file next and the reserve would be gone when a client comes.
+    pub(super) fn accept_on_spare(&mut self) -> Option<Stream> {
+        if self.spare.is_none() || !client_waiting(&self.listener) {
+            return None;
+        }
+        drop(self.spare.take());
+        let (s, _) = self.listener.accept().ok()?;
+        Stream::new(s).ok()
+    }
+
     pub(super) fn accept(&mut self, timeout: Duration) -> io::Result<(Stream, Option<u32>)> {
+        if self.spare.is_none() {
+            self.spare = spare();
+        }
         let deadline = Instant::now() + timeout;
         loop {
             match self.listener.accept() {
@@ -134,6 +168,16 @@ impl Listener {
             }
         }
     }
+}
+
+/// Whether a client waits in `listener`'s queue now (a `poll` that does not wait).
+fn client_waiting(listener: &UnixListener) -> bool {
+    let mut p = libc::pollfd {
+        fd: listener.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    matches!(sys_poll(&mut p, 0), Ok(n) if n > 0 && p.revents & libc::POLLIN != 0)
 }
 
 /// A system service's socket folder must belong to the account running this process and be closed to others.

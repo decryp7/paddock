@@ -372,3 +372,137 @@ fn a_service_serves_its_link_on_a_fixed_endpoint() {
     let peer = client.wait_connected(GUARD).unwrap();
     assert_eq!(peer.call(b"x".to_vec(), T).unwrap(), b"x");
 }
+
+/// Runs the test child's `mode` (an `out-of-files` mode) and returns what the host and the client saw.
+#[cfg(unix)]
+fn out_of_files(mode: &str) -> (String, String, String) {
+    let out = paddock_proc::command(child_program())
+        .arg(mode)
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(
+        out.status.success(),
+        "{text}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let line = |prefix: &str| {
+        text.lines()
+            .find_map(|l| l.strip_prefix(prefix))
+            .unwrap_or_default()
+            .to_string()
+    };
+    (line("host: "), line("client: "), text)
+}
+
+/// A host that has no file descriptor left for a client's handshake (CI run 7763: the agent of a test that leaked
+/// connections) answers that client with a `busy` refusal that says why, instead of closing the connection without a word
+/// ("the host closed the connection during the handshake", which reads like a crash). Its own process: it lowers the limit.
+#[cfg(unix)]
+#[test]
+fn a_host_out_of_file_descriptors_tells_the_client_why_it_cannot_take_the_connection() {
+    let (host, client, text) = out_of_files("out-of-files");
+    assert!(
+        host.starts_with("Err("),
+        "the host must not welcome a client it cannot serve: {text}"
+    );
+    assert!(
+        client.contains("Fail") && client.contains("busy") && client.contains("open files"),
+        "the client must be told why (a busy refusal naming the cause), not see the stream end: {text}"
+    );
+}
+
+/// With no descriptor left even for the accept, the client is accepted on the listener's reserve one and told why (Linux
+/// keeps it queued otherwise: it waited its whole handshake limit while the host failed the same accept every 50 ms, measured
+/// in the CI image). macOS drops a client whose accept failed before the host sees it, so there it ends without a word.
+#[cfg(unix)]
+#[test]
+fn a_host_with_no_descriptor_left_to_accept_tells_the_waiting_client_why() {
+    let (host, client, text) = out_of_files("out-of-files-at-accept");
+    assert!(
+        host.contains("Too many open files") || host.contains("os error"),
+        "{text}"
+    );
+    if cfg!(target_os = "macos") {
+        assert!(
+            client.contains("Fail") || client.contains("Closed"),
+            "{text}"
+        );
+    } else {
+        assert!(
+            client.contains("Fail") && client.contains("busy") && client.contains("open files"),
+            "the waiting client must be told why: {text}"
+        );
+    }
+}
+
+/// A `LinkServer` whose accept thread finds no descriptor left tells the waiting client why (Linux), records the refusal and
+/// keeps serving; it pauses after a failed accept instead of failing the same accept in a tight loop. The client runs here,
+/// in a process with its own descriptor table (in the child it raced the accept thread for the last slot).
+#[cfg(unix)]
+#[test]
+fn a_link_server_with_no_descriptor_left_to_accept_tells_the_waiting_client_why() {
+    use paddock_ipc::endpoint::Stream;
+    use paddock_ipc::frame;
+    let dir = tempfile::tempdir().unwrap();
+    let mut cmd = paddock_proc::command(child_program());
+    cmd.arg("link-out-of-files")
+        .arg(dir.path().join("link.json"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped());
+    let mut child = paddock_proc::Supervised::spawn(cmd).unwrap();
+    let mut stdin = child.take_stdin().unwrap();
+    let mut out = std::io::BufReader::new(child.take_stdout().unwrap());
+    let mut ready = String::new();
+    out.read_line(&mut ready).unwrap();
+    let endpoint = ready
+        .trim()
+        .strip_prefix("ready ")
+        .unwrap_or_else(|| panic!("{ready:?}"))
+        .to_string();
+    let mut client = Stream::connect(&endpoint, GUARD).unwrap();
+    client.set_read_timeout(Some(GUARD)).unwrap();
+    let answer = frame::read_frame(&mut client, FrameLimit::default());
+    writeln!(stdin, "done").unwrap();
+    let mut rest = String::new();
+    std::io::Read::read_to_string(&mut out, &mut rest).unwrap();
+    assert!(child.wait().is_some_and(|s| s.success()), "{rest}");
+    assert!(
+        rest.contains("refused: ") && rest.contains("Too many open files"),
+        "the server records why: {rest}"
+    );
+    let client = format!("{answer:?}");
+    if cfg!(target_os = "macos") {
+        assert!(
+            client.contains("Fail") || client.contains("Closed"),
+            "{client}"
+        );
+    } else {
+        assert!(
+            client.contains("Fail") && client.contains("busy") && client.contains("open files"),
+            "the waiting client must be told why: {client}"
+        );
+    }
+}
+
+/// With no descriptor left and nobody connecting, Linux fails the accept itself (it takes a descriptor before it looks for a
+/// client): the listener must keep its reserve for a client that is really waiting, or the freed descriptor goes to whoever
+/// opens a file next and the next client waits in the queue (16 of 40 runs of the link test in review). The client that
+/// comes later is told `busy` (Linux).
+#[cfg(unix)]
+#[test]
+fn an_accept_with_nobody_waiting_keeps_the_reserve_descriptor() {
+    let (_, client, text) = out_of_files("out-of-files-idle");
+    assert!(
+        text.contains("free after the idle accept: false"),
+        "the reserve was given up with no client waiting: {text}"
+    );
+    if cfg!(target_os = "macos") {
+        assert!(
+            client.contains("Fail") || client.contains("Closed"),
+            "{text}"
+        );
+    } else {
+        assert!(client.contains("Fail") && client.contains("busy"), "{text}");
+    }
+}

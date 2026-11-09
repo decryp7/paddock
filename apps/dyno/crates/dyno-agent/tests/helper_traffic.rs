@@ -118,16 +118,16 @@ impl Rig {
         let mut last = None;
         let _ = paddock_testkit::poll_until_within(Duration::from_secs(30), || {
             let peer = connect(&self.dirs).unwrap().0;
-            let Reply::Network(n) = ask_within(
+            let reply = ask_within(
                 &peer,
                 Request::Network {
                     query: NetworkQuery::default(),
                 },
                 SLOW,
-            )
-            .unwrap() else {
-                panic!("network")
-            };
+            );
+            // A dropped peer keeps its connection open: a polling loop would pile them up (CI run 7763).
+            peer.close();
+            let Reply::Network(n) = reply.unwrap() else { panic!("network") };
             let reading = n.traffic_note.as_deref().is_some_and(|t| t.starts_with("Reading traffic"));
             last = Some(*n);
             !reading

@@ -119,6 +119,22 @@ fn bounded<T>(
     result
 }
 
+/// The refusal a client gets for `e`, decided after [`bounded`] returned, so nothing is written to a stream its watchdog
+/// closed (that is [`IpcError::Timeout`]): `busy` when this side could not start the handshake ([`bounded`] fails before the
+/// hello is read only when it cannot copy the stream or start its watchdog: no descriptor or thread left), `invalid` for a
+/// hello that could not be read. `None` for the checks that answered the client themselves (version, auth) and for a stream
+/// that is gone. `invalid` is a stopgap of ADR 0072 (I7) that M3 maps to `protocol`.
+fn refusal(e: &IpcError) -> Option<(&'static str, String)> {
+    match e {
+        IpcError::Spawn(why) | IpcError::Io { message: why, .. } => Some((
+            codes::BUSY,
+            format!("the host cannot take a connection now ({why}); try again later"),
+        )),
+        IpcError::Protocol(why) => Some((codes::INVALID, why.clone())),
+        _ => None,
+    }
+}
+
 /// Where the user id of the other end of a connection comes from (IP1 item 5): the OS for a [`Stream`], a fake in tests.
 pub trait PeerCredentials {
     /// The user id of the process on the other end where the OS tells (Unix); `None` otherwise.
@@ -215,9 +231,20 @@ impl Authenticator {
             );
             return Err(e);
         }
-        let (protocol, claimed) = bounded(&mut stream, &self.clock, self.timeout, |s| {
+        let checked = bounded(&mut stream, &self.clock, self.timeout, |s| {
             self.check_hello(s, os_pid, pid)
-        })?;
+        });
+        let (protocol, claimed) = match checked {
+            Ok(checked) => checked,
+            Err(e) => {
+                // Every refusal says why (CI run 7763): `check_hello` answers version and auth itself; the rest is
+                // answered here, else the client only sees the stream end and cannot tell a busy host from a crashed one.
+                if let Some((code, why)) = refusal(&e) {
+                    self.refuse(&mut stream, code, &why);
+                }
+                return Err(e);
+            }
+        };
         Ok(Connection {
             stream,
             limit: self.limit,
@@ -419,6 +446,20 @@ impl Host {
         self.auth.clone()
     }
 
+    /// After an accept failed with `e`: when no file descriptor was left, the waiting client is accepted on the listener's
+    /// reserve one and told `busy` with the cause, instead of waiting in the queue for its own limit while this side fails
+    /// the same accept again (Linux; CI run 7763). A stopgap of ADR 0072 for I7, to be absorbed by M3/M4.
+    pub(crate) fn turn_away(&mut self, e: &io::Error) {
+        if crate::endpoint::out_of_descriptors(e)
+            && let Some(turned_away) = self.listener.accept_on_spare()
+        {
+            self.auth.refuse_busy(
+                turned_away,
+                &format!("the host cannot take a connection now ({e}); try again later"),
+            );
+        }
+    }
+
     /// Waits at most `slice` (OS time) for one client, without authenticating it. A timeout is `ErrorKind::TimedOut`.
     pub fn accept_raw(&mut self, slice: Duration) -> io::Result<(Stream, Option<u32>)> {
         self.listener.accept(slice)
@@ -446,7 +487,10 @@ impl Host {
             match self.listener.accept(ACCEPT_SLICE) {
                 Ok(accepted) => break accepted,
                 Err(e) if e.kind() == io::ErrorKind::TimedOut => {}
-                Err(e) => return Err(e.into()),
+                Err(e) => {
+                    self.turn_away(&e);
+                    return Err(e.into());
+                }
             }
         };
         self.auth.authenticate(stream, os_pid, pid)

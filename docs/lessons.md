@@ -1536,9 +1536,9 @@ the merge base's and errors on an added entry, and the baseline has no expiry (t
 **Lesson:** when a check is added to a codebase with existing violations, make the allowance a shrink-only list keyed by
 what the line says, with a date, and say in the check's fix text how to waive a real case.
 
-## Dyno helper_seam: the agent closed a client's connection in the handshake, cause open (2026-11-09, run 7763)
+## Dyno helper_seam: the agent closed a client's connection in the handshake, cause open (2026-11-09, run 7763; resolved, see the next entry on file descriptors)
 
-Run 7763 (train 1, Linux container): `dyno-agent::helper_seam the_cached_inventory_reads_the_memory_slots_again_when_the_helper_comes_up` failed after 5.25 s at `helper_seam.rs:138` (`connect(&self.dirs).unwrap()`) with "The agent in .../agent.json did not answer (the connection ended (the host closed the connection during the handshake))". It did not reproduce on macOS. A first change (a 100 ms poll cadence, aca067f7f) assumed the fast poll's connection rate was the trigger; the review measured 21,000 back-to-back sequential connect-and-ask calls on macOS (normal priority and starved), 0 failures, so that cause is unproven, and the change was reverted (9a08a1ca2). Candidate causes, none measured yet: the handshake watchdog thread failed to spawn (`bounded`, paddock-ipc `handshake.rs:104-114`, the stream is dropped without an answer); the server's read of the Hello failed and the host closed without a `Fail` frame; the 10 s watchdog fired (unlikely in 5.25 s); a rig artefact (the discovery file rewritten mid-test). The agent's own log line (`dyno-agent: refused a connection: ...`, `server.rs:75`) would decide it, but the rig does not show the agent log on failure. Owner: branch `fix/dyno-agent-handshake-close`. **Lesson:** a test that fails because a product closed a well-formed connection is a product question first; do not slow the client until the cause is measured, and make the rig print the product's own log on failure.
+Run 7763 (train 1, Linux container): `dyno-agent::helper_seam the_cached_inventory_reads_the_memory_slots_again_when_the_helper_comes_up` failed after 5.25 s at `helper_seam.rs:138` (`connect(&self.dirs).unwrap()`) with "The agent in .../agent.json did not answer (the connection ended (the host closed the connection during the handshake))". It did not reproduce on macOS. A first change (a 100 ms poll cadence, aca067f7f) assumed the fast poll's connection rate was the trigger; the review measured 21,000 back-to-back sequential connect-and-ask calls on macOS (normal priority and starved), 0 failures, so that cause is unproven, and the change was reverted (9a08a1ca2). Candidate causes, none measured yet: the handshake watchdog thread failed to spawn (`bounded`, paddock-ipc `handshake.rs:104-114`, the stream is dropped without an answer); the server's read of the Hello failed and the host closed without a `Fail` frame; the 10 s watchdog fired (unlikely in 5.25 s); a rig artefact (the discovery file rewritten mid-test). The agent's own log line (`dyno-agent: refused a connection: ...`, `server.rs:75`) would decide it, but the rig does not show the agent log on failure. Resolved on `fix/dyno-agent-handshake-close`: the cause was the rig running the agent out of file descriptors; the lesson is the entry "A polling test ran its in-process agent out of file descriptors" below. **Lesson:** a test that fails because a product closed a well-formed connection is a product question first; do not slow the client until the cause is measured, and make the rig print the product's own log on failure.
 
 ## A test that kept every vCPU of the Windows test VM busy cut its SSH and left nothing to clean up with (2026-11-09)
 
@@ -1547,3 +1547,27 @@ test VM over SSH, with the cleanup in the same PowerShell session. sshd stopped 
 the cleanup could not run; the VM was later powered off by someone else. The same series without the extra load had
 already reproduced the race (1 in 2,000 runs). Rule of thumb: in the test VM, load at most cores minus one, run the load
 from a scheduled task with its own time limit (not from the SSH session), and stop it by the process ids it recorded.
+
+## A polling test ran its in-process agent out of file descriptors, and the handshake closed without a word (2026-11-09, Dyno 1.1.0)
+
+Symptom: CI run 7763 (Linux), `helper_seam::the_cached_inventory_reads_the_memory_slots_again_when_the_helper_comes_up` failed after
+5.25 s with "the host closed the connection during the handshake"; an independent reviewer could not reproduce it on macOS with
+21,000 sequential connections. First hypotheses: a thread failed to start (container thread or pid limit), the server failed to
+read the hello, or a rig artefact. Measured in the CI image (a synthetic in-process agent and a probe loop of connect, ask, drop): a `BodyPeer` that is dropped
+without `close()` keeps its connection, so each poll leaked 6 descriptors and 5 threads (agent and client share the test process);
+the train's new back-off poll made about 250 connections in 5 s, 1,500 descriptors. Under a 1,024 limit the agent's accept took the
+last descriptor and the handshake's watchdog could not copy the stream: `IpcError::Io(EMFILE)` before the hello was read, the
+stream dropped, the client saw the end of the stream. A thread limit (`--pids-limit 700`) instead failed after the welcome or on the
+client side ("cannot start an IPC thread") in 5 of 5 runs, never with this message; CPU starvation with closed connections gave no
+failure. Not measured: the CI container's own open-files limit (nextest does not raise it on Linux; the local image had 20,480).
+
+Root cause: a test rig that dropped peers instead of closing them, plus a handshake that answered local resource failures with
+silence. Fix: `paddock-ipc` answers a host that cannot start a handshake with `busy` naming the cause, a malformed hello with
+`invalid`, and keeps one descriptor in reserve so a client the accept could not take (Linux queues it; it waited 10 s while the
+host logged a refusal every 50 ms) is told `busy` too; the helper-seam rig closes each connection and prints the agent's log, the
+open files and the limit when a test fails; a 120-connection stress test checks that the agent gives back what a closed
+connection held.
+
+- A test that starts the product in its own process shares its limits: a leak in the test's client exhausts the product.
+- Logs explain the failure only if the rig shows them: an in-process agent's `log` lines went nowhere until the rig captured them.
+- Class: a handle whose drop does not release its resource (`BodyPeer`, `Peer`); reported for an ER-21 decision.

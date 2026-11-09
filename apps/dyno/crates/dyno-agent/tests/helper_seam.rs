@@ -16,6 +16,8 @@ use dyno_platform::inventory::linux;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+#[path = "common/agent_log.rs"]
+mod agent_log;
 #[path = "common/helper_rig.rs"]
 mod helper_rig;
 use helper_rig::{dispatcher, wiring, Caller, DispatcherTransport, Readers};
@@ -73,6 +75,8 @@ struct Rig {
     up: std::sync::Arc<std::sync::atomic::AtomicBool>,
     served: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
     _tmp: tempfile::TempDir,
+    /// The agent's log, printed when the test fails; dropped after the agent has stopped.
+    _log: agent_log::OnFailure,
 }
 
 impl Rig {
@@ -106,6 +110,7 @@ impl Rig {
     }
 
     fn start_full(caller: Caller, host: HelperHost, up: bool, readers: Readers, seed: impl FnOnce(&Fake)) -> Rig {
+        let log = agent_log::on_failure();
         let tmp = tempfile::tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         let fake = Fake::new();
@@ -131,12 +136,25 @@ impl Rig {
             up,
             served,
             _tmp: tmp,
+            _log: log,
         }
     }
 
+    /// One request on a connection of its own, closed after the answer: a dropped peer keeps its connection (and the
+    /// agent's threads and descriptors for it) open, so a polling test would pile them up (CI run 7763).
+    /// A failure names the open files at that moment (the count at the guard's drop comes after the agent stopped).
+    fn ask(&self, request: Request) -> Result<Reply, String> {
+        let peer = match connect(&self.dirs) {
+            Ok((peer, _)) => peer,
+            Err(e) => panic!("{e} ({})", agent_log::descriptors()),
+        };
+        let reply = ask_within(&peer, request, SLOW).map_err(|e| format!("{e} ({})", agent_log::descriptors()));
+        peer.close();
+        reply
+    }
+
     fn inventory(&self) -> SystemInventory {
-        let peer = connect(&self.dirs).unwrap().0;
-        let Reply::Inventory(i) = ask_within(&peer, Request::Inventory, SLOW).unwrap() else {
+        let Reply::Inventory(i) = self.ask(Request::Inventory).unwrap() else {
             panic!("inventory")
         };
         *i
@@ -147,13 +165,12 @@ impl Rig {
     }
 
     fn network_asking(&self, retry_helper: bool) -> dyno_core::network::NetworkSnapshot {
-        let peer = connect(&self.dirs).unwrap().0;
         let query = dyno_core::network::NetworkQuery {
             show_loopback: true,
             retry_helper,
             ..Default::default()
         };
-        let Reply::Network(n) = ask_within(&peer, Request::Network { query }, SLOW).unwrap() else {
+        let Reply::Network(n) = self.ask(Request::Network { query }).unwrap() else {
             panic!("network")
         };
         *n
@@ -179,22 +196,16 @@ impl Rig {
 
     #[cfg(unix)]
     fn locker_list(&self, path: &std::path::Path) -> Result<dyno_core::process::LockerList, String> {
-        let peer = connect(&self.dirs).unwrap().0;
-        match ask_within(
-            &peer,
-            Request::Lockers {
-                path: path.to_string_lossy().into_owned(),
-            },
-            SLOW,
-        )? {
+        match self.ask(Request::Lockers {
+            path: path.to_string_lossy().into_owned(),
+        })? {
             Reply::Lockers(l) => Ok(l),
             other => panic!("{other:?}"),
         }
     }
 
     fn state(&self) -> HelperState {
-        let peer = connect(&self.dirs).unwrap().0;
-        let Reply::HelperStatus(s) = ask_within(&peer, Request::HelperStatus, SLOW).unwrap() else {
+        let Reply::HelperStatus(s) = self.ask(Request::HelperStatus).unwrap() else {
             panic!("status")
         };
         s.state
