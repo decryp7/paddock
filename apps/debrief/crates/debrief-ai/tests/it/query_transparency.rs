@@ -109,8 +109,15 @@ fn errors_from_graphic_builder_resolve_the_name_run_the_query_and_cite_the_event
 
 #[test]
 fn both_spellings_resolve_to_values_the_query_can_use() {
-    // What the model sees from find_values for the user's words and for the joined spelling.
+    // What the model sees from find_values for the user's words and for the joined spelling, once the store has
+    // settled: with the catalogue built, the joined spelling also matches the name in the warning's text exactly
+    // (`@entity graphicbuilder.exe`), and the process name must still be among the values (CI 7843 returned only the
+    // entity: a call without `limit` got one value).
     let f = fixture();
+    assert!(
+        f.store.wait_for_catalogue(std::time::Duration::from_secs(60)).unwrap(),
+        "catalogue built"
+    );
     let mut tools = debrief_ai::assistant::EngineTools::new(f.store(), debrief_ai::assistant::ToolLimits::for_context(8192));
     use debrief_ai::assistant::ToolHost;
     for text in ["graphic builder", "graphicbuilder.exe"] {
