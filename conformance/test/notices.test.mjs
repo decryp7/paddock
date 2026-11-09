@@ -65,18 +65,25 @@ test('render is deterministic, deduplicates texts and does not depend on input o
 });
 
 test('a vendored copy of a third-party crate is listed although it is a path dependency; first-party path crates are not', () => {
-  const doc = {
+  const doc = (root) => ({
     crates: [
-      { package: { name: 'dyno-agent', version: '1.0.0', source: null, manifest_path: '/r/apps/dyno/crates/dyno-agent/Cargo.toml' }, license: 'MIT' },
-      { package: { name: 'paddock-proc', version: '0.1.0', source: null, manifest_path: '/r/crates/paddock-proc/Cargo.toml' }, license: 'MIT' },
-      { package: { name: 'sysinfo', version: '0.39.6', source: null, manifest_path: '/r/apps/dyno/vendor/sysinfo/Cargo.toml' }, license: 'MIT' },
-      { package: { name: 'tray-icon', version: '0.25.1', source: null, manifest_path: 'C:\\r\\apps\\dyno\\vendor\\tray-icon\\Cargo.toml' }, license: 'MIT OR Apache-2.0' },
+      { package: { name: 'dyno-agent', version: '1.0.0', source: null, manifest_path: `${root}/apps/dyno/crates/dyno-agent/Cargo.toml` }, license: 'MIT' },
+      { package: { name: 'paddock-proc', version: '0.1.0', source: null, manifest_path: `${root}/crates/paddock-proc/Cargo.toml` }, license: 'MIT' },
+      { package: { name: 'sysinfo', version: '0.39.6', source: null, manifest_path: `${root}/apps/dyno/vendor/sysinfo/Cargo.toml` }, license: 'MIT' },
     ],
-    licenses: [{ id: 'MIT', text: 'MIT text', used_by: [{ crate: { name: 'sysinfo', version: '0.39.6' } }, { crate: { name: 'tray-icon', version: '0.25.1' } }] }],
-  };
-  const { packages, warnings } = rustCrates([doc]);
-  assert.deepEqual(packages.map((p) => `${p.name} ${p.version}`).sort(), ['sysinfo 0.39.6', 'tray-icon 0.25.1']);
-  assert.deepEqual(warnings, []);
+    licenses: [{ id: 'MIT', text: 'MIT text', used_by: [{ crate: { name: 'sysinfo', version: '0.39.6' } }] }],
+  });
+  const names = (r) => r.packages.map((p) => `${p.name} ${p.version}`).sort();
+  const plain = rustCrates([doc('/r')], '/r/apps/dyno');
+  assert.deepEqual(names(plain), ['sysinfo 0.39.6']);
+  assert.deepEqual(plain.warnings, []);
+  // A checkout under a folder named vendor: only the app's own vendor/ counts, so the first-party crates stay out.
+  assert.deepEqual(names(rustCrates([doc('/home/x/vendor/paddock')], '/home/x/vendor/paddock/apps/dyno')), ['sysinfo 0.39.6']);
+  // Windows paths.
+  const win = doc('C:\\w').crates.map((c) => ({ ...c, package: { ...c.package, manifest_path: c.package.manifest_path.replaceAll('/', '\\') } }));
+  assert.deepEqual(names(rustCrates([{ ...doc('C:\\w'), crates: win }], 'C:\\w\\apps\\dyno')), ['sysinfo 0.39.6']);
+  // Without the app folder nothing is taken for vendored.
+  assert.deepEqual(names(rustCrates([doc('/r')])), []);
 });
 
 test('npm packages: licence files found, dev skipped, a missing file is a warning, declared licence read from package.json', () => {

@@ -16,6 +16,23 @@ use objc2_io_kit::{
     io_registry_entry_t, kIOServicePlane,
 };
 
+/// The iterator of an `IOServiceGetMatchingServices` call, or `None` when the call failed or
+/// found nothing.
+fn matching_services(result: libc::kern_return_t, iterator: io_iterator_t) -> Option<IOReleaser> {
+    if result != libc::KERN_SUCCESS {
+        return None;
+    }
+    // IOServiceGetMatchingServices can return success with a null iterator on some macOS
+    // setups. Never construct a NonZero io_object_t from 0 (debug panic / release UB).
+    match IOReleaser::new(iterator) {
+        Some(iterator) => Some(iterator),
+        None => {
+            sysinfo_debug!("IOServiceGetMatchingServices succeeded but returned a null iterator");
+            None
+        }
+    }
+}
+
 fn iterate_service_tree<T, F>(bsd_name: &[u8], key: &CFString, eval: F) -> Option<T>
 where
     F: Fn(io_registry_entry_t, &CFDictionary) -> Option<T>,
@@ -25,21 +42,9 @@ where
 
     let mut service_iterator: io_iterator_t = 0;
 
-    if unsafe { IOServiceGetMatchingServices(*MAIN_PORT, Some(matching), &mut service_iterator) }
-        != libc::KERN_SUCCESS
-    {
-        return None;
-    }
-
-    // IOServiceGetMatchingServices can return success with a null iterator on some macOS
-    // setups. Never construct a NonZero io_object_t from 0 (debug panic / release UB).
-    let service_iterator = match IOReleaser::new(service_iterator) {
-        Some(iterator) => iterator,
-        None => {
-            sysinfo_debug!("IOServiceGetMatchingServices succeeded but returned a null iterator");
-            return None;
-        }
-    };
+    let result =
+        unsafe { IOServiceGetMatchingServices(*MAIN_PORT, Some(matching), &mut service_iterator) };
+    let service_iterator = matching_services(result, service_iterator)?;
 
     let mut parent_entry: io_registry_entry_t = 0;
 
@@ -138,10 +143,23 @@ pub(crate) fn get_disk_io(bsd_name: &[u8]) -> Option<(u64, u64)> {
     })
 }
 
-// Paddock (apps/dyno/vendor/PATCHES.md): IOKit answers KERN_SUCCESS with a null iterator for a BSD name that has no
-// IOService, which is what a disk image detached between the mount listing and this lookup leaves behind.
+// Paddock (apps/dyno/vendor/PATCHES.md): IOKit can answer KERN_SUCCESS with a null iterator (IOKitLib.h: "If NULL is
+// returned, the iteration was successful but found no matching services"), for example for a disk detached between the
+// mount listing and this lookup.
 #[cfg(test)]
 mod paddock_tests {
+    #[test]
+    fn a_successful_call_with_a_null_iterator_gives_nothing_and_never_panics() {
+        assert!(super::matching_services(libc::KERN_SUCCESS, 0).is_none());
+    }
+
+    #[test]
+    fn a_failed_call_gives_nothing() {
+        assert!(super::matching_services(libc::KERN_FAILURE, 0).is_none());
+    }
+
+    // Through IOKit: on macOS 27.2 a BSD name with no service gets a null iterator; other versions may answer with an
+    // empty one, which this test then cannot tell apart from the fix (the two tests above can).
     #[test]
     fn a_bsd_name_with_no_io_service_gives_nothing_and_never_panics() {
         let gone = b"paddock-no-such-disk\0";

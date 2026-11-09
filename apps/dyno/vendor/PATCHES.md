@@ -90,20 +90,34 @@ Apply with `patch -p1 -d vendor/tray-icon < vendor/tray-icon-autosave-name.patch
 - Source: crates.io `sysinfo` 0.39.6, `.crate` SHA-256 `d2071df9448915b71c4fe6d25deaf1c22f12bd234f01540b77312bb8e41361e6`
   (the checksum in `Cargo.lock`; copied and read 2026-11-10). Repository <https://github.com/GuillaumeGomez/sysinfo>.
 - Licence: `MIT` (kept: `LICENSE` and `license` in its `Cargo.toml`).
-- Dropped from the copy: `Cargo.lock`, `.gitignore` (unanchored rules), `.github/` and `.cirrus.yml` (upstream CI). One patch,
-  nothing else: [`sysinfo-null-iterator.patch`](sysinfo-null-iterator.patch). Check after a change: unpack sysinfo 0.39.6, apply it
-  with `patch -p1`, and `diff -r --strip-trailing-cr -x Cargo.lock -x .gitignore -x .github -x .cirrus.yml` against `vendor/sysinfo`
-  prints nothing (done 2026-11-10; git stores `md_doc/sid.md`, the one CRLF file, with LF). The test it adds runs with `cargo test --manifest-path vendor/sysinfo/Cargo.toml --lib paddock_tests` (macOS;
-  delete the `Cargo.lock` it writes); it fails on the pristine crate with the panic below.
+- Dropped from the copy: `.gitignore` (unanchored rules), `.github/` and `.cirrus.yml` (upstream CI). The crate's own `Cargo.lock`
+  is kept, so its tests build `--locked`. One patch, nothing else: [`sysinfo-null-iterator.patch`](sysinfo-null-iterator.patch).
+  Check after a change: unpack sysinfo 0.39.6, apply it with `patch -p1`, and
+  `diff -r --strip-trailing-cr -x .gitignore -x .github -x .cirrus.yml` against `vendor/sysinfo` prints nothing (done
+  2026-11-10; git stores `md_doc/sid.md`, the one CRLF file, with LF).
+- The patch: upstream's fix, with the null check in a small function, `matching_services(result, iterator)`, so a unit test can
+  give it the null iterator directly (`paddock_tests`, end of `src/unix/apple/macos/disk.rs`). Dyno's macOS CI leg runs them
+  (`hostRustChecks` in `../paddock.ci.json`): `cargo test --locked --manifest-path vendor/sysinfo/Cargo.toml --lib paddock_tests`.
+  `a_successful_call_with_a_null_iterator_gives_nothing_and_never_panics` fails on the pristine code path (the same function
+  with upstream's unchecked `new_unchecked`): debug panics at `utils.rs:19` as in CI, release dies of `SIGTRAP`. A third test
+  asks IOKit for a BSD name with no service; it is red on the pristine crate only where IOKit answers with a null iterator
+  (debug, on the macOS 27.2 build machine, 2026-11-10); where IOKit answers with an empty iterator it passes either way.
+- How the cause was reproduced: Dyno's `cli::tests::the_agent_logs_one_platform_wired_line_naming_every_port_at_start`
+  (which builds the sensors, so lists the disks with I/O counters) under `cargo nextest run --stress-count`, while a 4 MB disk
+  image was attached (`hdiutil attach -nobrowse`) and detached in a loop: 9 of 150 runs failed with the CI panic on the
+  pristine crate, 0 of 150 without the loop, and 300 of 300 passed with the patch under the same loop (105 detaches in the
+  system log during that run). In CI run 7848 the system log shows a disk unmounted and removed at 17:00:46.59 to .64 UTC,
+  inside the failing test's 0.40 s.
 - Why: on macOS, `iterate_service_tree` (`src/unix/apple/macos/disk.rs`, behind `Disk` kind and I/O refreshes) assumed that a
   successful `IOServiceGetMatchingServices` always gives a non-zero iterator and built a `NonZeroU32` from it unchecked. Apple
   documents the opposite (`IOKitLib.h`: "If NULL is returned, the iteration was successful but found no matching services"),
   which is what a BSD name whose disk is gone gets, for example a disk image detached between sysinfo's mount listing and
   this lookup. Debug builds panic (`utils.rs:19`, `assertion left != right failed (left: 0, right: 0)`, CI run 7848); release
-  builds construct a `NonZeroU32` of 0, which is undefined behaviour. The patch is upstream's fix
-  (<https://github.com/GuillaumeGomez/sysinfo/pull/1709>, merged 2026-07-31, first released in 0.40.0) plus a regression test.
+  builds construct a `NonZeroU32` of 0, which is undefined behaviour (in the real lookup it reads nothing and returns `None`,
+  measured; in the unit test's inlined form the optimiser turns it into a trap). The patch is upstream's fix
+  (<https://github.com/GuillaumeGomez/sysinfo/pull/1709>, merged 2026-07-31, first released in 0.40.0) plus regression tests.
 - Removal plan: the family moves to sysinfo 0.40 (a breaking release: `Disks::list` and others removed) in the shared crates,
   Debrief, Spotter and Dyno together; then delete this folder, the patch, this entry and the `sysinfo` line under
-  `[patch.crates-io]` in `../Cargo.toml`. Renovate does not update a vendored copy.
+  `[patch.crates-io]` in `../Cargo.toml`. Renovate does not update a vendored copy (it may still offer lock updates for `vendor/sysinfo/Cargo.lock`; decline them).
 - Scope (ER-22): Debrief and Spotter resolve the same unpatched 0.39.6 (Debrief with the `disk` feature, so it is exposed on
   macOS too). If they need the fix before the 0.40 move, move this folder to the shared place in that change.

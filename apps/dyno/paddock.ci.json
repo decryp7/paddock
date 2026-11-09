@@ -40,7 +40,8 @@
   ],
   "hostRustChecks": [
     "cd apps/dyno",
-    "cargo check --locked --lib --bins -p dyno-platform -p dyno-agent -p dyno-app -p dyno-helper"
+    "cargo check --locked --lib --bins -p dyno-platform -p dyno-agent -p dyno-app -p dyno-helper",
+    "if [ \"$(uname)\" = Darwin ]; then cargo test --locked --manifest-path vendor/sysinfo/Cargo.toml --lib paddock_tests; fi"
   ],
   "ui": [
     "npm run build -w ui",
