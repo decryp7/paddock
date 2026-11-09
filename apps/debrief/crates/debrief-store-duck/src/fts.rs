@@ -616,10 +616,10 @@ impl FtsService {
         };
         let done = f(w).and_then(|()| self.injected_failure()).and_then(|()| fts.commit(w, self.epoch));
         if done.is_err() {
-            // What was queued must not ride along with the next commit (the indexer's).
-            if let Err(e) = w.rollback() {
-                log::warn!("the full-text index writer could not roll back: {e}");
-            }
+            // What was queued must not ride along with the next commit (the indexer's). The writer is ended, not rolled
+            // back: `rollback` builds a new writer and abandons the old one's merges, which go on writing into the folder.
+            drop(slot);
+            drop_writer(&self.shared);
         }
         done
     }
@@ -1177,6 +1177,11 @@ mod tests {
         assert_eq!(t.hits().len(), 4);
         t.fts().shared.fail_writes.store(true, Ordering::SeqCst);
         assert!(t.fts().delete_source(t.source("a.log")).is_err());
+        // Ended, not `rollback`: that abandons the old writer's merges, which go on writing into the folder.
+        assert!(
+            crate::lock(&t.fts().shared.writer).is_none(),
+            "the failed write's writer is gone, its merges ended"
+        );
         t.fts().shared.fail_writes.store(false, Ordering::SeqCst);
         t.fts().delete_source(u32::MAX).unwrap();
         assert_eq!(t.hits().len(), 4, "the failed delete was not committed later");
