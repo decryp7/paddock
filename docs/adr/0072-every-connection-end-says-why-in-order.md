@@ -1,7 +1,9 @@
 # 72. Every connection end says why, in order: one ordered shutdown for the family's transports
 
-- Status: Proposed (2026-11-09; revision 2 answers the first independent review: P1-1 flush policy, P1-2 typestates,
-  P1-3 register check and Pitcrew, and the P2s)
+- Status: Accepted (2026-11-09). Accepted 2026-11-09 by the user: D1–D9 as recommended (D3 = small pure crate, or decide
+  after WP-1 as the ADR states). Revision 2 answered the first independent review (P1-1 flush policy, P1-2 typestates,
+  P1-3 register check and Pitcrew); revision 3 the re-review's four P2s (listen calls, Pitcrew's busy handling,
+  client-side drains, the enforced D8 gate).
 - Date: 2026-11-09
 - Related: ER-21 / rule 40 (recurring bugs mean a missing design rule), ER-27 (logs explain every failure), ER-28 (a cause
   is confirmed only by measurement), ER-33 / rule 71 (a check counts only if its probe can see the thing), rule 5 / ER-11
@@ -151,6 +153,10 @@ The actions of entering `Sealed(r)` are fixed in this order, and no other code p
 records `Closure::Said { by: Remote }`, fails its pending calls with it, discards its own queue, half-closes its write side
 and releases after its own short drain. The closer's drain then ends with `eof` in milliseconds, not at its time cap.
 
+**Client-side drains need no budget.** A client drains only connections it opened itself, so its drains are bounded by
+the number of connections the process opens, which no remote side can raise; the budgets of §7 are for the accepting
+side, where the other side chooses how many connections to open.
+
 `Peer::close` returns at once (its caller never waits for a flush or a drain); `closed()` reports the `Closure` from step 2;
 `Peer::wait_released(timeout)` waits for step 6 (tests and orderly stops). The peer's reader, which already exists, does the
 drain: no new thread for an open connection.
@@ -218,8 +224,12 @@ today's bare end. The `ok` line does not change.
 **The static check** (no build; part of the push check) is syn-based, in `paddock-dev`: it parses every non-test Rust file,
 skips `#[cfg(test)]` items, `tests/`, `benches/` and `examples/`, resolves each file's `use` paths, and finds every listen
 primitive: `std::net::TcpListener::bind`, `std::os::unix::net::UnixListener::bind`, `tokio::net::{TcpListener,
-UnixListener}::bind`, tokio's `named_pipe::ServerOptions::create`, `CreateNamedPipeW`, `paddock_ipc::endpoint::Listener::bind*`,
-`Host::listen*`, `LinkServer::start`, `serve_loopback`, and `Accepted::serve_without_handshake`. A site in neither section,
+UnixListener}::bind`, tokio's `TcpListener::from_std` and `UnixListener::from_std`, tokio's
+`named_pipe::ServerOptions::create` and `create_with_security_attributes_raw` (Pitcrew, `ipc.rs:207`), socket2's
+`Socket::listen`, `CreateNamedPipeW`, `paddock_ipc::endpoint::Listener::bind*`, `Host::listen*`, `LinkServer::start`,
+`serve_loopback`, and `Accepted::serve_without_handshake`. The check's own positive control is a fixture tree with one
+production-style site per listen call above (and one inside a `#[cfg(test)]` module that must be skipped); a test asserts
+that the check reports every fixture site by its call, so a listen call the parser stops seeing turns the test red. A site in neither section,
 an entry whose test does not exist, or an out-of-scope entry without a reason fails the check. A new endpoint is therefore
 covered by construction, and a grep's confusion between test modules and production code does not arise.
 
@@ -358,7 +368,7 @@ async (tokio) while the other two are threads. The options are in D3.
 
 | WP | Content | Days |
 | --- | --- | --- |
-| WP-0 | Harness skeleton, register with the out-of-scope triage, syn-based static check in `paddock-dev` with a ratchet; red runs on main on the three OS (VMs); measure what each OS does when a socket or pipe closes with unread data and what a client of a `CloseHandle`d pipe can still read (AF_UNIX on Linux and macOS, named pipes on Windows: not yet verified) | 3.5 |
+| WP-0 (M0) | Harness skeleton, endpoint register with the out-of-scope triage, syn-based static check with its positive-control fixtures, ratchet with `blocks_tag`; red runs on main on the three OS; the OS measurements below. Plan in "M0 plan" | 3.5 |
 | WP-1 | The core: reasons, `Closure`, the state × event table as `advance`, policies, bounds; exhaustive model test (every event in every state, action order, frames queued before the seal delivered under the cap) | 2 |
 | WP-2 | `WriteQueue::seal`, flush policy with the cap and the reason deadline, `Peer` end sequence, reader drain with the budget, receiving `Fail{0}` and ending promptly, `wait_released` | 3 |
 | WP-3 | `Accepted` on every accept, `RawConnection`, `Connection::raw` behind `testing`, the non-blocking `Drop` hand-off, the sliced `Read` wrapper (no watchdog), one verdict, refusal drains, client side | 3 |
@@ -369,8 +379,35 @@ async (tokio) while the other two are threads. The options are in D3.
 | WP-8 | Consumers across M1 to M4: Dyno agent (onto the `LinkServer` accept model, no sleep, close the peer when `connect` fails), helper (a per-machine service: busy, unidentified, expiry, spawn failures; `serve_without_handshake`), app link, CLI, plugin host and test fake, shell-demo, the `IpcError::Closed` sites; each endpoint's ending test; Dyno installers built for each merge (rule 54) | 4.5 |
 | WP-9 | The four Debrief waivers | 0.5 |
 | WP-10 | Proposed rule text, lessons entry, ADR index, CHANGELOGs, the ADR 0001 / ipc-wire.md amendment | 0.5 |
-| WP-11 | Pitcrew: register its copies; its transport through the core (hello timeout answered, busy refusal instead of waiting, subscription and stop reasons, drains); its ending test on its OS legs | 3 |
+| WP-11 | Pitcrew: register its copies; its transport through the core (hello timeout answered, `busy` refusal at 32 connections instead of waiting on the semaphore, subscription and stop reasons, drains); its ending test on its OS legs. **The app's side of `busy`:** the refusal arrives as the answer to the hello, which `service_client.rs:103` already turns into a `ServiceError` and `dto.rs:292` into `CommandErrorCode::Busy`; reads retry it with the shared bounded backoff of `withRequestStatus` (three tries, 250 ms, 1 s, 4 s), commands that change state never retry and show "The Pitcrew service is busy with other connections. Try again in a moment." with Retry; the event subscription reconnects with its existing backoff; a test per path with a fake service that answers `busy` | 3 |
 | | **Total** | **27.5** |
+
+### M0 plan (WP-0; a plan only, nothing built yet)
+
+M0 adds checks and measurements and changes no product behaviour. It builds:
+
+1. **The endpoint register** `docs/ipc-endpoints.toml`: one `[[endpoint]]` per production listen site found by the sweep
+   (plugin host, link server, child launcher, Dyno agent, Dyno helper, Dyno plugin host, MCP loopback, Pitcrew's service),
+   each naming its ending test; one `[[out_of_scope]]` per other site with reason, owner and delete-by or adopt-by (§5).
+2. **The static check** (C102, `paddock-dev`): the syn pass over non-test code for the listen calls of §5, the register
+   comparison, the positive-control fixture tree and its test, and the ratchet file with `blocks_tag` per entry (D8). It
+   runs in the push check; the tag-check hook for `blocks_tag` is wired with C58's.
+3. **The harness skeleton** `testing::endings` behind `paddock-ipc`'s `testing` feature: the scenario list of §5 as named
+   cases, a raw-stream client that reports the bytes it read and the exact `io::ErrorKind` of the end, a log capture that
+   finds the endpoint's end line, and the `Broken` endpoints as positive controls. Before M1 the end line does not exist, so
+   the scenarios that need it are ratchet entries; the raw-stream assertions run from the start.
+4. **Each registered endpoint's ending test**, calling the harness; today's failures recorded in the ratchet per instance
+   (I1 to I26), so the run is green with the ratchet and red without it.
+5. **The OS measurements**, recorded in `docs/benchmarks.md` (rule 48) and the lessons file, each on Linux, macOS and
+   Windows (the local VMs, never CI): what a client reads when the other side closes with unread received data (TCP,
+   AF_UNIX, a named pipe closed with `CloseHandle`, and with `DisconnectNamedPipe`); whether a client of a `CloseHandle`d
+   pipe can still read what was written before (decides D4's pipe option); what clients in a Unix listener's backlog see
+   when it closes; and the baseline close-to-release time and connect-refuse churn per second.
+6. **Rigs print the product's log on failure** where they start a product (the Dyno helper_seam lesson), so the open run
+   7763 investigation gets the agent's own line on the next failure.
+
+Done when: the check is green on main with the ratchet, red on each `Broken` fixture and each positive-control site
+removed, and the measurements are recorded with their raw values.
 
 **Range: 25 to 28 days.** The low end holds if WP-0 confirms that pipes need no drain (WP-2, WP-4 and WP-6 shrink) and the
 out-of-scope triage is as listed; the high end if Pitcrew's async transport needs more than the pure core's adapter.
@@ -390,7 +427,7 @@ WP-11 need WP-1; WP-8 follows the merge it belongs to.
 | D5 | Debrief's copies (rule 55) | (a) Four waivers until `debrief-v1.2.0` (`ipc-endpoint`, `ipc-frames-peer`, `ipc-child-launch`, `companion-link`; its close order is already right; it is replaced in Debrief 1.2). (b) Port the reason and drain into the copies now (+3 to 4 days). | (a). |
 | D6 | MCP after pairing | (a) The closing line, sent only to a bridge that declared `"caps":["closing"]` in its key line; older bridges get today's bare end. (b) Always send it (an older bridge would forward it to the host). (c) Nothing; the spec's bare transport end. | (a): the bridge can say why, and third parties never see the line, whatever the versions. |
 | D7 | A binding rule | Propose a Paddock rule (number from the coordinator) and an ER candidate: "every end of a connection says why, last; queued frames are flushed under a cap or dropped by the reason's policy; cancellations come after the seal; the peer's input is drained under a bound; every listen site is in the endpoint register and every endpoint passes the ending harness". | Yes, with the check (C102 or the next free number). |
-| D8 | When, and for which release | (a) M0 now; M1 to M4 and M6 target **Pitcrew 1.1** (the first release on the order that ships an in-scope transport: Spotter 1.0 and Pitwall 1.1 use none), and Dyno takes them in its next release after 1.1.0, which must not tag without M2 to M4; M5 lands with them. (b) All after Debrief 1.2's foundation. | (a): the class keeps producing red CI runs, and M0 helps the open Dyno investigation. |
+| D8 | When, and for which release | (a) M0 now; M1 to M4 and M6 target **Pitcrew 1.1** (the first release on the order that ships an in-scope transport: Spotter 1.0 and Pitwall 1.1 use none), and Dyno takes them in its next release after 1.1.0; M5 lands with them. The gate is enforced, not remembered: every ratchet entry of C102 names the tag pattern it blocks (`blocks_tag = "dyno-v*"` for the Dyno instances of M2 to M4, `"pitcrew-v*"` for I24 to I26), and the tag check that already refuses a tag for an expired copy (ADR 0034, C58) refuses a matching tag while such an entry remains; a test of the tag check covers both patterns. (b) All after Debrief 1.2's foundation. | (a): the class keeps producing red CI runs, and M0 helps the open Dyno investigation. |
 | D9 | Pitcrew's transport | (a) In scope now through the pure core (WP-11, 3 days), registered as a copy of `ipc-endpoint` and `ipc-frames-peer` with delete-by `pitcrew-v1.2.0`, when it moves onto `paddock-ipc` as ADR 0001 foresees. (b) Move Pitcrew onto `paddock-ipc` in 1.1 (its own ADR, larger). (c) Out of scope with a waiver to `pitcrew-v1.2.0` (the class stays open in Pitcrew 1.1). | (a). |
 
 ## Consequences
