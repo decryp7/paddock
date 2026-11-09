@@ -26,8 +26,8 @@
 # Secrets: TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD, TAURI_UPDATER_PUBKEY (the updater; without them the
 # build is unsigned and cannot update itself), APPLE_SIGNING_IDENTITY (empty while the apps are ad-hoc sealed, rule 23),
 # RELEASE_TOKEN (a Gitea token with write:repository). Run it by hand (workflow_dispatch in the caller) to build and verify
-# the bundles without releasing: the "one CI build with bundles" of rule 25. An app in its own repository calls it as
-# decryp7/paddock/.gitea/workflows/app-release.yml@<tag> with `paddock-ref: <tag>`, and its own `root` and `cargo-dir`.
+# the bundles without releasing: the "one CI build with bundles" of rule 25. The bundle job takes the actions and scripts from the
+# commit it builds (paddock-ref must be github.sha), so only a caller in this repository works; there is no other-repository caller.
 
 name: app-release
 
@@ -208,6 +208,7 @@ jobs:
         with:
           name: paddock-checkout-${{ runner.os }}
           profile: bundle
+          fresh: ${{ startsWith(github.ref, 'refs/tags/') }}
 
       - uses: ./.gitea/actions/build-folder
         with:
