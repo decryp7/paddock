@@ -126,10 +126,8 @@ fn a_cancelled_download_resumes() {
     let canceller = {
         let p = p.clone();
         std::thread::spawn(move || {
-            let deadline = std::time::Instant::now() + Duration::from_secs(20);
-            while p.snapshot().bytes < 8192 && std::time::Instant::now() < deadline {
-                std::thread::sleep(Duration::from_millis(5));
-            }
+            // A hang guard, not a verdict: the download below fails with its own message if the bytes never arrive.
+            let _ = paddock_testkit::wait::poll_until_within(Duration::from_secs(20), || p.snapshot().bytes >= 8192);
             p.cancel();
         })
     };

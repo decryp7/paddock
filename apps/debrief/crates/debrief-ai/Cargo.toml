@@ -43,3 +43,5 @@ debrief-store-duck = { path = "../debrief-store-duck" }
 # A local HTTPS server with a certificate no trust store knows (tests/it/net_tls.rs).
 rustls = { version = "0.23", default-features = false, features = ["std", "ring", "tls12"] }
 proptest.workspace = true
+# Waits on a condition with a hang guard instead of a sleep (ADR 0041, conformance C71).
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
