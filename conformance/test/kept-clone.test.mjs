@@ -3,7 +3,7 @@
 // profile file's contract: nothing a lean job reads is excluded.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
@@ -167,6 +167,25 @@ test('kept-clone on macOS leaves a link at the work folder, on Windows the work 
   assert.equal(win.status, 0, win.out);
   assert.ok(!lstatSync(win.ws).isSymbolicLink());
   assert.match(readFileSync(win.ghEnv, 'utf8'), new RegExp(`^PADDOCK_WORKSPACE=${win.stable('s2')}$`, 'm'));
+});
+
+// Run 7808: on a freshly created clone `reset --hard` checked out the whole default-branch tree (the sparse patterns were not set yet):
+// 50 to 110 s on the Windows runner. And a clone left by the old layout (a plain shallow checkout) was reused: its first fetch
+// downloaded everything. Only a clone this script made (marker) is reused, and a new clone is not reset or cleaned before its patterns.
+test('kept-clone does not clean a clone it has just created, and does not reuse a clone it did not make', () => {
+  const fx = fixture();
+  const sha = git(fx.work, fx.root, 'rev-parse', 'HEAD');
+  const first = job(fx, sha);
+  assert.doesNotMatch(first.out, /kept-clone: clean/, 'a new clone has nothing to clean');
+  const k = first.stable();
+  assert.ok(existsSync(join(k, '.git', 'paddock-kept-clone')), 'the clone carries the marker');
+  rmSync(join(k, '.git', 'paddock-kept-clone'));
+  const legacy = job(fx, sha);
+  assert.equal(legacy.status, 0, legacy.out);
+  assert.match(legacy.out, /\(created, profile lean/, 'a clone without the marker is made again');
+  const warm = job(fx, sha);
+  assert.match(warm.out, /\(reused, profile lean/);
+  assert.match(warm.out, /kept-clone: clean: done/);
 });
 
 test('kept-clone replaces a clone that is broken or too big, and a clone of another repository', () => {
