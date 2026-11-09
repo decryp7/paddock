@@ -120,26 +120,28 @@ async fn time_to_first_token_is_the_first_tokens_not_the_whole_answers() {
     let h = harness(false).await;
     // Warm the model so the cold load is not in the numbers, then make the answer's tail slow.
     all(open(&h, request(json!({}))).await).await;
+    // Time is moved by hand: the playground reads the server's clock, so nothing here waits for it.
+    let now = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(pitwall_server::paths::now_ms()));
+    let clock = now.clone();
+    h.st.serving.set_clock(std::sync::Arc::new(move || clock.load(Ordering::SeqCst)));
     h.tail_hold.close();
-    let opened = std::time::Instant::now();
     let mut r = open(&h, request(json!({}))).await;
     // The first token reaches the client while the rest of the answer is still held back by the engine.
     let mut seen = vec![];
-    let first_delta = loop {
+    loop {
         let chunk = r.chunk().await.unwrap().expect("the stream ends only after a first token");
         seen.extend(frames(&String::from_utf8_lossy(&chunk)));
         if seen.iter().any(|f| f["kind"] == "delta") {
-            break opened.elapsed().as_millis() as u64;
+            break;
         }
-    };
+    }
     assert!(!seen.iter().any(|f| f["kind"] == "done"), "the end has not been sent yet: {seen:?}");
+    // The answer's tail takes ten seconds more.
+    now.fetch_add(10_000, Ordering::SeqCst);
     h.tail_hold.release();
     seen.extend(frames(&String::from_utf8_lossy(&r.bytes(1 << 20).await.unwrap())));
     let done = seen.last().unwrap();
     assert_eq!(done["kind"], "done", "{seen:?}");
     let ttft = done["ttftMs"].as_u64().unwrap();
-    assert!(
-        ttft <= first_delta,
-        "the first token's time ({ttft} ms) is not the end's (the client saw it at {first_delta} ms): {done}"
-    );
+    assert!(ttft < 10_000, "the first token's time ({ttft} ms) is not the end's: {done}");
 }

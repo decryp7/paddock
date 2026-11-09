@@ -503,7 +503,11 @@ mod tests {
         tokio::time::advance(Duration::from_secs(5)).await;
         settle().await;
         finish.send(()).unwrap();
-        settle().await;
+        // The job ends: wait for its terminal event, not for a count of turns.
+        while !kinds(&events).iter().any(|k| k == "done") {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(kinds(&events).iter().filter(|k| *k == "done").count(), 1);
         let done: Vec<u64> = lock(&events)
             .iter()
             .filter_map(|e| match e {

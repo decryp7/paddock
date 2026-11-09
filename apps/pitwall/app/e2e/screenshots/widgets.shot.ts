@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { dialogWindowUrl, waitForStableFrame } from '../../../../../ui/projects/paddock-e2e/src/index.ts';
 
 /**
@@ -7,7 +8,7 @@ import { dialogWindowUrl, waitForStableFrame } from '../../../../../ui/projects/
  * default popup in its calm, empty and worst states, the chooser narrow, and the chooser wide with the live preview. Only on
  * request: `SHOTS_OUT=<folder> npx playwright test -c e2e/screenshots/playwright.config.ts widgets`.
  */
-const OUT = process.env['SHOTS_OUT'] ?? '/Volumes/d7sst7/dev-targets/review/pitwall-widgets-r3/new';
+const OUT = process.env['SHOTS_OUT'] ?? resolve(__dirname, '../../.angular/widgets-shots');
 const NOW = new Date('2026-10-22T14:30:00').getTime();
 
 async function prepare(page: Page, theme: 'dark' | 'light') {
