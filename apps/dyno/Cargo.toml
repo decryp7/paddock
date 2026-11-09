@@ -73,3 +73,5 @@ expect_used = "warn"
 # tray-icon with a GUID provider (vendor/PATCHES.md, ADR 0028): Windows keeps each tray icon's place by GUID.
 [patch.crates-io]
 tray-icon = { path = "vendor/tray-icon" }
+# sysinfo with upstream's fix for a null IOKit iterator on macOS (vendor/PATCHES.md): a vanished disk panicked or was UB.
+sysinfo = { path = "vendor/sysinfo" }

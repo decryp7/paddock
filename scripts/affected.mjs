@@ -269,6 +269,7 @@ export const DOC_INPUTS = [
   { re: /^ui\/projects\/paddock-ui\/format\/src\/storage-cases\.json$/, projects: ['ui', 'app:dyno'], why: "dyno-core units::storage_writes_what_the_ui_writes reads the UI's storage cases" },
   { re: /^apps\/debrief\/docs\/ai\/sql-views\.md$/, why: 'debrief-ai tests/sql_tool.rs (from the import)' },
   { re: /^apps\/debrief\/docs\/testing\/quarantine\.md$/, why: 'scripts/ci/check-quarantine (from the import)' },
+  { re: /^apps\/[^/]+\/vendor\/.*\.md$/, why: "a vendored crate's own markdown (its lib.rs include_str!s it; vendor/PATCHES.md)" },
 ];
 
 /**

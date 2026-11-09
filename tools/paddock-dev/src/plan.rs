@@ -175,6 +175,7 @@ static DOC_INPUTS: LazyLock<Vec<(Regex, Marks)>> = LazyLock::new(|| {
         ),
         (re(r"^apps/debrief/docs/ai/sql-views\.md$"), Marks::Owner),
         (re(r"^apps/debrief/docs/testing/quarantine\.md$"), Marks::Owner),
+        (re(r"^apps/[^/]+/vendor/.*\.md$"), Marks::Owner),
     ]
 });
 

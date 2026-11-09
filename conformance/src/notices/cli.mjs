@@ -97,7 +97,7 @@ export function main(argv, { log = console.log, err = console.error, exec } = {}
     if (jsonRel.length) docs = jsonRel.map((f) => JSON.parse(readFileSync(resolve(base, f), 'utf8')));
     else if (manifests.length) docs = cargoAbout({ manifests: manifests.map((m) => resolve(base, m)), aboutToml, root: base, exec });
     else throw new Error('no Rust manifest: pass --manifest <Cargo.toml> or --rust-json <file>');
-    const rust = rustCrates(docs);
+    const rust = rustCrates(docs, base);
     const npm = npmPackages(npmDir);
     const { markdown, counts } = render(rust.packages, npm.packages, name);
     for (const w of [...rust.warnings, ...npm.warnings]) err(`warning: ${w}`);

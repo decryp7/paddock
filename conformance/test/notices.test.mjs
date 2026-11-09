@@ -64,6 +64,28 @@ test('render is deterministic, deduplicates texts and does not depend on input o
   assert.doesNotMatch(a.markdown, /\r/);
 });
 
+test('a vendored copy of a third-party crate is listed although it is a path dependency; first-party path crates are not', () => {
+  const doc = (root) => ({
+    crates: [
+      { package: { name: 'dyno-agent', version: '1.0.0', source: null, manifest_path: `${root}/apps/dyno/crates/dyno-agent/Cargo.toml` }, license: 'MIT' },
+      { package: { name: 'paddock-proc', version: '0.1.0', source: null, manifest_path: `${root}/crates/paddock-proc/Cargo.toml` }, license: 'MIT' },
+      { package: { name: 'sysinfo', version: '0.39.6', source: null, manifest_path: `${root}/apps/dyno/vendor/sysinfo/Cargo.toml` }, license: 'MIT' },
+    ],
+    licenses: [{ id: 'MIT', text: 'MIT text', used_by: [{ crate: { name: 'sysinfo', version: '0.39.6' } }] }],
+  });
+  const names = (r) => r.packages.map((p) => `${p.name} ${p.version}`).sort();
+  const plain = rustCrates([doc('/r')], '/r/apps/dyno');
+  assert.deepEqual(names(plain), ['sysinfo 0.39.6']);
+  assert.deepEqual(plain.warnings, []);
+  // A checkout under a folder named vendor: only the app's own vendor/ counts, so the first-party crates stay out.
+  assert.deepEqual(names(rustCrates([doc('/home/x/vendor/paddock')], '/home/x/vendor/paddock/apps/dyno')), ['sysinfo 0.39.6']);
+  // Windows paths.
+  const win = doc('C:\\w').crates.map((c) => ({ ...c, package: { ...c.package, manifest_path: c.package.manifest_path.replaceAll('/', '\\') } }));
+  assert.deepEqual(names(rustCrates([{ ...doc('C:\\w'), crates: win }], 'C:\\w\\apps\\dyno')), ['sysinfo 0.39.6']);
+  // Without the app folder nothing is taken for vendored.
+  assert.deepEqual(names(rustCrates([doc('/r')])), []);
+});
+
 test('npm packages: licence files found, dev skipped, a missing file is a warning, declared licence read from package.json', () => {
   const { packages, warnings } = npmPackages(join(npmApp(), 'app'));
   assert.deepEqual(packages.map((p) => p.name).sort(), ['@scope/chart', 'left-pad', 'nolicense']);
