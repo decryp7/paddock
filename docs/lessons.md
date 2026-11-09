@@ -1619,3 +1619,10 @@ drove every listen site of the family through the ways a connection ends. What t
   yet: open.
 - Class: ADR 0072 (a connection ends without the peer learning why, or in the wrong order); the register and the ratchet make it
   checkable, M1 to M6 remove the entries.
+
+- **Second review round (2026-11-09):** the Windows 11 Arm VM ran the endings of paddock-ipc, paddock-mcp, the Dyno agent
+  and Pitcrew (the MCP and ipc binaries aarch64, the agent and Pitcrew x86_64 under emulation). Only Pitcrew differed: at 32
+  connections the named pipe's instance cap (33) is reached, creating the next instance fails (ERROR_PIPE_BUSY) and the
+  service stops serving, so the 33rd client gets no answer there (ratchet entry I26, `os = "windows"`); on Unix it waits
+  unanswered. The Dyno helper's ending test is Unix-only and was not run on Windows. A run through the VM must wait for host
+  load under 22: at load 90 `vm-win.sh start` refuses.

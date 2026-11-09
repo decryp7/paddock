@@ -177,7 +177,17 @@ endpoint = "pitcrew-service"
 scenario = "busy"
 fault = "unanswered"
 blocks_tag = "pitcrew-v*"
+os = "linux,macos"
 note = "At 32 connections the accept loop waits on the semaphore after accepting: the 33rd client waits unanswered instead of being refused busy."
+
+[[ratchet]]
+instance = "I26"
+endpoint = "pitcrew-service"
+scenario = "busy"
+fault = "no-reason"
+blocks_tag = "pitcrew-v*"
+os = "windows"
+note = "On Windows the 33rd client finds the pipe's instance cap (MAX_CONNECTIONS + 1) reached: creating the next instance fails with ERROR_PIPE_BUSY (231), the service reports a fatal IPC error and stops serving, and the client sees no reason. Measured on the Windows 11 Arm test VM, 2026-11-09."
 
 [[ratchet]]
 instance = "I26"
