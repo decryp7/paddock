@@ -13,6 +13,7 @@ mod logging;
 mod playground_chat;
 mod presets;
 mod privacy;
+mod shipped_binary;
 mod slots;
 mod updates;
 mod usage;

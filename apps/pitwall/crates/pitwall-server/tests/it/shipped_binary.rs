@@ -1,6 +1,5 @@
 //! ADR 0073 / rule 73: the shipped `pitwall-server` carries no test switch. The fake engine is its own test-only
 //! program (`pitwall-fake-engine`); the server's command line does not know its flags.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 /// Hang guard, never a verdict: a server that accepted a test flag would serve forever, so the guard turns that into a
 /// failure (the held child is killed when its future is dropped) instead of a stuck run.
