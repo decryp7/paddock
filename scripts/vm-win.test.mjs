@@ -2,8 +2,8 @@
 // scripts/vm-win.sh and scripts/vm-win/prepare.sh. Nothing here starts a VM or touches Fusion: vmrun is a shim in a scratch
 // folder and the DHCP leases are invented.
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { chmodSync, closeSync, existsSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { chmodSync, closeSync, readdirSync, existsSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, describe, test } from 'node:test';
@@ -18,8 +18,12 @@ const scratch = mkdtempSync(join(tempRoot, 'vm-win-test-'));
 const fakeVm = (dir) => { mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, '.paddock-fake-vm'), 'test\n'); return dir; };
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
+// The interim VM lock (scripts/vm-lock.sh) is always taken under a scratch root, never the host's real one.
+const lockTmp = join(scratch, 'lock-tmp'); // owner folders of the lock's holders live here, so a holder killed by a test ends with the scratch folder
+mkdirSync(lockTmp, { recursive: true });
+const lockEnv = { TMPDIR: lockTmp, PADDOCK_VM_LOCK_ROOT: join(scratch, 'lock-root'), PADDOCK_VM_LOCK_HELD: '', PADDOCK_DEV: join(here, '..', 'dev') };
 const run = (script, args, env = {}) =>
-  spawnSync('bash', [join(here, script), ...args], { encoding: 'utf8', env: { ...process.env, ...env } });
+  spawnSync('bash', [join(here, script), ...args], { encoding: 'utf8', env: { ...process.env, ...lockEnv, ...env } });
 
 const fakeFusion = (label) => {
   const fusion = join(scratch, `${label}Fusion.app`);
@@ -389,5 +393,87 @@ describe('noprompt-iso', () => {
     assert.throws(() => withFile(image({ boot: Buffer.alloc(3 * S, 0x33) }), (fd) => patchNoPrompt(fd, prompt, noprompt)), /neither efisys/);
     assert.throws(() => withFile(image(), (fd) => patchNoPrompt(fd, prompt, Buffer.alloc(S))), /differ in size/);
     assert.throws(() => withFile(Buffer.alloc(40 * S), (fd) => patchNoPrompt(fd, prompt, noprompt)), /not a bootable ISO/);
+  });
+});
+
+// The interim exclusive lock (scripts/vm-lock.sh): two users of the test VM at once loaded every vCPU and a power-off cut the other
+// off (2026-11-08). Every command that changes or loads the guest takes it; status, ip and help stay free.
+describe('the VM lock', () => {
+  const fakeUsable = (label) => {
+    const f = fakeFusion(label);
+    const dir = fakeVm(join(scratch, `${label}-vm`));
+    mkdirSync(join(dir, 'vm/paddock-win11-test.vmwarevm'), { recursive: true });
+    writeFileSync(join(dir, 'vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx'), '.encoding = "UTF-8"\n');
+    return { ...f, env: { PADDOCK_WIN_VM_DIR: dir, FUSION_APP: f.fusion, PATH: f.path, PADDOCK_VM_MAX_LOAD: '100000' } };
+  };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const holding = async (label, body = 'sleep 30') => {
+    const marker = join(scratch, `${label}-held`);
+    const child = spawn('bash', ['-c', `. '${join(here, 'vm-lock.sh')}'; vm_lock_acquire ${label}; touch '${marker}'; ${body}`], { env: { ...process.env, ...lockEnv }, stdio: 'ignore', detached: true });
+    const exited = new Promise((r) => child.on('exit', r));
+    for (let i = 0; i < 100 && !existsSync(marker); i++) await sleep(100);
+    assert.ok(existsSync(marker), `${label} took the lock`);
+    return { stop: async () => { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* gone */ } await exited; } };
+  };
+
+  test('a second vm-win.sh start fails while chain-release.sh holds the lock, names the holder, and never reaches vmrun', async () => {
+    const f = fakeUsable('Locked');
+    const holder = await holding('chain-release');
+    try {
+      const r = run('vm-win.sh', ['start', '--no-wait'], f.env);
+      assert.notEqual(r.status, 0);
+      assert.match(r.stderr, /::error::.*held by chain-release \(pid \d+, started /);
+      assert.equal(calls(f.log), '', 'no vmrun call');
+      const status = run('vm-win.sh', ['status'], f.env);
+      assert.equal(status.status, 0, 'status is read-only and not locked');
+    } finally {
+      await holder.stop();
+    }
+  });
+
+  test('a command run by the holder inherits the lock (PADDOCK_VM_LOCK_HELD) and reaches vmrun; the lock is free afterwards', async () => {
+    const f = fakeUsable('Inherit');
+    const inner = `bash '${join(here, 'vm-win.sh')}' start --no-wait`;
+    const holder = spawn('bash', ['-c', `. '${join(here, 'vm-lock.sh')}'; vm_lock_acquire chain-release; ${inner}`], { env: { ...process.env, ...lockEnv, ...f.env }, stdio: 'ignore' });
+    await new Promise((r) => holder.on('exit', r));
+    assert.match(calls(f.log), /vmrun -T fusion start .* nogui/);
+    const again = run('vm-win.sh', ['start', '--no-wait'], f.env);
+    assert.equal(again.status, 0, again.stderr);
+  });
+
+  test('run-win.mjs --help prints usage and exits 0 without the lock, even while another run holds it', async () => {
+    const holder = await holding('chain-release');
+    try {
+      const r = spawnSync('node', [join(here, 'vm-smoke/run-win.mjs'), '--help'], { encoding: 'utf8', env: { ...process.env, ...lockEnv }, timeout: 60_000 });
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, /run-win\.mjs --app dyno/);
+      assert.doesNotMatch(r.stderr, /vm-lock|::error::/);
+    } finally {
+      await holder.stop();
+    }
+  });
+
+  test('run-win.mjs and defender-rate.mjs take the lock for the whole run: a second one fails at the start (75), before any vm-win call', async () => {
+    const holder = await holding('chain-release');
+    try {
+      for (const [file, args] of [['vm-smoke/run-win.mjs', ['--app', 'dyno', '--installer', '/nonexistent/setup.exe']], ['vm-smoke/defender-rate.mjs', ['--installer', '/nonexistent/setup.exe']]]) {
+        const r = spawnSync('node', [join(here, file), ...args], { encoding: 'utf8', env: { ...process.env, ...lockEnv }, timeout: 60_000 });
+        assert.equal(r.status, 75, `${file}: ${r.stdout}${r.stderr}`);
+        assert.match(r.stderr, /::error::.*held by chain-release/);
+        assert.doesNotMatch(r.stdout + r.stderr, /vm-win|revert|snapshot/i, `${file} did nothing before failing`);
+      }
+    } finally {
+      await holder.stop();
+    }
+  });
+
+  test('make-no-dyno-snapshot.sh and chain-release.sh take the lock; no runner clears the environment it passes to vm-win.sh', () => {
+    for (const f of ['vm-smoke/make-no-dyno-snapshot.sh', 'vm-smoke/chain-release.sh']) assert.match(read(f), /vm_lock_acquire /, f);
+    assert.doesNotMatch(read('vm-smoke/chain-release.sh'), /\$PLOCK|plock run/);
+    for (const f of readdirSync(join(here, 'vm-smoke')).filter((n) => /\.mjs$/.test(n) && !n.endsWith('.test.mjs'))) {
+      const text = read(`vm-smoke/${f}`);
+      if (!/vm-win\.sh|VMWIN|vmwin/.test(text)) continue;
+      for (const m of text.matchAll(/[ ,{]env:\s*([^,}]+)/g)) assert.match(m[1].trim(), /^(process\.env|\{ \.\.\.process\.env|env \?\? process\.env|tartEnv)/, `${f}: ${m[0]}`);
+    }
   });
 });

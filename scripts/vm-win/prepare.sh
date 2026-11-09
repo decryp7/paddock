@@ -99,6 +99,7 @@ echo "== Setup disc"
 stage="$dir/setup-disc"
 rm -rf "$stage"
 trap 'rm -rf "$stage"' EXIT # the staged copy holds the filled answer file
+. "$here/../vm-lock.sh"; vm_lock_acquire vm-win-prepare # after the trap above: the lock's EXIT trap runs it too
 mkdir -p "$stage/setup" "$stage/payload" "$stage/keys" "$stage/\$WinPEDriver\$"
 if $no_tpm; then
   bypass='      <RunSynchronous>

@@ -23,6 +23,7 @@ import { runRebootPhase } from './win-reboot.mjs';
 import { stripVnc, withVnc, fixDiskName, vmxCheck } from './vmx-edit.mjs';
 import { VMWIN } from './vm-win-path.mjs';
 import { WIN_VM_DIR, WIN_VMX, checkWinVmTarget } from './win-vm-target.mjs';
+import { holdVmLock } from './vm-lock-reexec.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -78,6 +79,12 @@ async function download(run, name, dest) {
   const exe = readdirSync(dir).find((f) => f.endsWith('setup.exe'));
   if (!exe) throw new Error(`no *setup.exe in ${name}`);
   return join(dir, exe);
+}
+
+/** --help: the usage lines of this file's header; touches no VM and takes no lock. */
+function usage() {
+  console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').filter((l) => l.startsWith('//   ')).map((l) => l.slice(2)).join('\n'));
+  process.exit(0);
 }
 
 async function main(argv) {
@@ -259,4 +266,4 @@ async function main(argv) {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main(process.argv.slice(2)).then((c) => process.exit(c));
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) (/^(-h|--help)$/.test(process.argv[2] ?? '') ? usage() : holdVmLock('run-win')) ?? main(process.argv.slice(2)).then((c) => process.exit(c));

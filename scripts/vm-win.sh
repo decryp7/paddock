@@ -114,6 +114,11 @@ has_snapshot() { vmrun listSnapshots | tail -n +2 | grep -Fxq "$1"; }
 
 cmd=${1:-}
 [ $# -gt 0 ] && shift
+# One user of the test VM at a time (interim lock, scripts/vm-lock.sh): only the commands that change or load the guest.
+case $cmd in
+  start | stop | ssh | put | get | gui-setup | job | snapshot | revert | install | baseline)
+    . "$(cd "$(dirname "$0")" && pwd)/vm-lock.sh"; vm_lock_acquire "vm-win-$cmd" ;;
+esac
 case $cmd in
   start)
     guard
