@@ -82,8 +82,8 @@ impl Egress {
         Egress::build(&[])
     }
 
-    /// A client whose allow-listed hosts all resolve to a closed local port, so a test's request fails at once without
-    /// leaving the machine.
+    /// A client whose allow-listed hosts all resolve to no address, so a test's request fails at once, on every OS, without
+    /// leaving the machine or trying a connection (a closed local port takes about 2 s to refuse on Windows).
     #[cfg(test)]
     pub fn unreachable() -> Egress {
         Egress::build(pitwall_core::privacy::DOWNLOAD_HOSTS)
@@ -102,7 +102,7 @@ impl Egress {
         });
         let mut builder = reqwest::Client::builder();
         for (host, _) in closed_hosts {
-            builder = builder.resolve(host, std::net::SocketAddr::from(([127, 0, 0, 1], 1)));
+            builder = builder.resolve_to_addrs(host, &[]);
         }
         let client = builder
             .redirect(policy)
@@ -269,5 +269,32 @@ mod tests {
             .await
             .unwrap_err();
         assert!(e.to_string().contains("huggingface.co"), "{e}");
+    }
+
+    /// A test's unreachable client fails before any connection is tried. A refused connection to a closed local port takes
+    /// about 2 s on Windows (it retries the SYN), which ran out the wait of the library's download test (CI run 7821).
+    #[tokio::test]
+    async fn the_unreachable_client_never_tries_a_connection() {
+        for (host, _) in pitwall_core::privacy::DOWNLOAD_HOSTS {
+            let e = Egress::unreachable()
+                .client
+                .get(format!("https://{host}/x"))
+                .send()
+                .await
+                .unwrap_err();
+            let mut kinds = vec![];
+            let mut source = std::error::Error::source(&e);
+            while let Some(s) = source {
+                if let Some(io) = s.downcast_ref::<std::io::Error>() {
+                    kinds.push(io.kind());
+                }
+                source = s.source();
+            }
+            assert_eq!(
+                kinds,
+                [std::io::ErrorKind::NotConnected],
+                "{host}: no address to connect to, so no attempt: {e:?}"
+            );
+        }
     }
 }

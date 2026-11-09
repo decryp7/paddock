@@ -805,10 +805,10 @@ fn check_all(mutant: Mutant, budget: Budget, bound: Bound) -> Vec<(&'static str,
 }
 
 /// Searches every scenario at `bound` and fails on a violation or on a search that hit its state bound; returns the states
-/// visited and the time taken.
-fn assert_clean(bound: Bound) -> (usize, std::time::Duration) {
+/// each scenario visited and the time taken.
+fn assert_clean(bound: Bound) -> (Vec<(&'static str, usize)>, std::time::Duration) {
     let t = std::time::Instant::now();
-    let mut total = 0;
+    let mut visited = vec![];
     for (name, r) in check_all(Mutant::None, BUDGET, bound) {
         assert!(
             !r.truncated,
@@ -819,22 +819,20 @@ fn assert_clean(bound: Bound) -> (usize, std::time::Duration) {
             panic!("{name}: {}\n  {}", v.what, v.trace.join("\n  "));
         }
         eprintln!("  {name}: {} states", r.states);
-        total += r.states;
+        visited.push((name, r.states));
     }
-    (total, t.elapsed())
+    (visited, t.elapsed())
 }
 
-/// The CI bound: every invariant in every interleaving of the scenarios at two or three ticks. It has to stay cheap enough for
-/// every CI leg (nextest's limit is 60 s and a shared runner is slow); the numbers measured on the development Mac are in the
-/// commit that introduced the two bounds.
-/// A test must never spin for an hour: a search that diverges (a machine change that lets looks or waits multiply) has to hit its
-/// state bound within seconds. The largest CI scenario visits about 121 000 states, so the CI cap is a few times that, not the
+/// A test must never spin for an hour: a search that diverges (a machine change that lets looks or waits multiply) has to stop
+/// at the CI cap. The cap is a count of states, so the work a runaway search does is bounded by it on any machine; the time
+/// that takes depends on the runner's load and is not asserted (CI run 7821: a macOS runner at load 80 took over 60 s for what
+/// a Linux runner did in 8 s). The largest CI scenario visits about 121 000 states, so the CI cap is a few times that, not the
 /// full bound's 2 000 000 per scenario (fifteen scenarios in parallel threads cost an hour of CPU at that cap, 2026-10-31).
 #[test]
-fn a_diverging_search_hits_the_ci_cap_in_seconds_and_every_real_scenario_stays_well_inside_it() {
+fn a_diverging_search_stops_at_the_ci_cap() {
     assert!(Bound::Ci.max_states() <= 600_000, "the CI cap is what bounds a runaway search");
     assert!(Bound::Ci.max_states() < Bound::Full.max_states());
-    let t = std::time::Instant::now();
     let r = explore(
         0u64,
         Bound::Ci.max_states(),
@@ -842,21 +840,24 @@ fn a_diverging_search_hits_the_ci_cap_in_seconds_and_every_real_scenario_stays_w
         |n| vec![("up".to_string(), n + 1), ("up2".to_string(), n + 2)],
         |_| None,
     );
-    assert!(r.truncated && r.states >= Bound::Ci.max_states());
-    assert!(t.elapsed() < std::time::Duration::from_secs(30), "{:?}", t.elapsed());
-    for (name, r) in check_all(Mutant::None, BUDGET, Bound::Ci) {
+    assert!(r.truncated && r.violation.is_none());
+    assert_eq!(r.states, Bound::Ci.max_states(), "a runaway search visits exactly the cap, no more");
+}
+
+/// The CI bound: every invariant in every interleaving of the scenarios at two or three ticks, and every scenario stays well
+/// inside the CI cap (so the cap only ever stops a runaway search). The scenarios are searched once per run, here: the cost is
+/// a count of states (measured on the development Mac in the commit that introduced the two bounds), not a time.
+#[test]
+fn the_machine_keeps_every_invariant_in_every_interleaving_up_to_the_ci_bound() {
+    let (visited, took) = assert_clean(Bound::Ci);
+    for (name, states) in &visited {
         assert!(
-            r.states * 3 <= Bound::Ci.max_states(),
-            "{name}: {} states is too close to the CI cap {}",
-            r.states,
+            states * 3 <= Bound::Ci.max_states(),
+            "{name}: {states} states is too close to the CI cap {}",
             Bound::Ci.max_states()
         );
     }
-}
-
-#[test]
-fn the_machine_keeps_every_invariant_in_every_interleaving_up_to_the_ci_bound() {
-    let (total, took) = assert_clean(Bound::Ci);
+    let total: usize = visited.iter().map(|(_, n)| n).sum();
     eprintln!("model check (CI bound): {total} states in {took:?}");
 }
 
@@ -865,7 +866,8 @@ fn the_machine_keeps_every_invariant_in_every_interleaving_up_to_the_ci_bound() 
 #[test]
 #[ignore = "the full bound takes minutes in a loaded test build; the CI bound runs on every leg"]
 fn the_machine_keeps_every_invariant_in_every_interleaving_up_to_the_full_bound() {
-    let (total, took) = assert_clean(Bound::Full);
+    let (visited, took) = assert_clean(Bound::Full);
+    let total: usize = visited.iter().map(|(_, n)| n).sum();
     eprintln!("model check (full bound): {total} states in {took:?}");
 }
 
