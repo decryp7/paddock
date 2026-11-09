@@ -14,6 +14,12 @@ production, through understanding the code and writing a test, to running it on 
 cloud, no account, no telemetry. Optional local AI, served by one app, makes each of them smarter without sending a byte
 anywhere.
 
+## How this is built
+
+Paddock is vibe-coded: AI coding agents write most of the code, under my supervision. I set the direction, make the design decisions, and review what lands; the work goes through independent reviews, tests and CI gates before it is merged or released.
+
+It is a personal, non-commercial project that I build for my own use. It comes with no warranty, support or stability promise; use it at your own risk.
+
 ## The apps
 
 Seven of the eight apps live in this repository under [`apps/`](apps/); Recce, the eighth, is planned and has only a placeholder page so far (plan: branch `docs/pc-search-app-plan`). The old per-app repositories are archived (read-only); their past releases stay downloadable there.
