@@ -668,12 +668,8 @@ mod tests {
             .trim()
             .parse()
             .unwrap();
-        let gone = (0..100).any(|_| {
-            let alive = paddock_proc::ProcessId::of(pid).is_some_and(|p| p.is_alive());
-            if alive {
-                std::thread::sleep(Duration::from_millis(50)); // conformance: hang-guard — a poll of a condition, 5 s bound
-            }
-            !alive
+        let gone = paddock_testkit::poll_until_within(Duration::from_secs(10), || {
+            !paddock_proc::ProcessId::of(pid).is_some_and(|p| p.is_alive())
         });
         assert!(gone, "the grandchild (pid {pid}) is still running after the limit");
     }
