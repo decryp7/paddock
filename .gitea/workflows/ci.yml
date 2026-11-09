@@ -27,6 +27,10 @@ on:
         description: "Also run the WebKit tests (the WebKit job, and an app's WebKit lines)"
         type: boolean
         default: false
+      since_run:
+        description: "Rerun only what failed in this finished ci.yml run (its number): the failed jobs, and inside a job that failed only in nextest only its failed tests (./dev plan --since-run; ER-10). Passed jobs do not run; a full run before landing catches the rest."
+        required: false
+        default: ""
   # nightly.yml: everything, with WebKit.
   workflow_call:
     inputs:
@@ -61,6 +65,12 @@ jobs:
       apps: ${{ steps.plan.outputs.apps }}
       any_app: ${{ steps.plan.outputs.any_app }}
       base: ${{ steps.plan.outputs.base }}
+      # A rerun of a run's failures (the since_run input), empty otherwise: the jobs that rerun (each job's `if` reads an empty
+      # list as its own name, so a normal run gates on the projects alone), and the failed legs of the crate and paddock-dev jobs,
+      # each with the nextest filter of its failed tests (empty: the whole leg).
+      rerun_jobs: ${{ steps.plan.outputs.rerun_jobs }}
+      crate_legs: ${{ steps.plan.outputs.crate_legs }}
+      paddock_dev_legs: ${{ steps.plan.outputs.paddock_dev_legs }}
     steps:
       # The whole history: the base (a merge base, the last green commit of main) can be any older commit.
       - uses: actions/checkout@v4
@@ -77,11 +87,14 @@ jobs:
           PLAN_BASE: ${{ github.event.inputs.base }}
           PLAN_APP: ${{ inputs.app }}
           PLAN_WEBKIT: ${{ (inputs.webkit == true || inputs.webkit == 'true') && '1' || '' }}
-        run: node scripts/affected.mjs --ci
+          # The rerun reads the earlier run's jobs and logs through the API (tools/paddock-dev/src/plan_since.rs).
+          PLAN_SINCE_RUN: ${{ github.event.inputs.since_run }}
+        run: |
+          if [ -n "$PLAN_SINCE_RUN" ]; then ./dev plan --ci; else node scripts/affected.mjs --ci; fi
 
   ui:
     needs: [plan]
-    if: ${{ needs.plan.outputs.ui == 'true' }}
+    if: ${{ needs.plan.outputs.ui == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["ui"]'), 'ui') }}
     name: ui (tokens, contrast, components, entry points, publish dry run)
     runs-on: ubuntu-latest
     container:
@@ -140,7 +153,7 @@ jobs:
   e2e:
     name: reference apps (shard ${{ matrix.shard }}/2)
     needs: [plan]
-    if: ${{ needs.plan.outputs.ui == 'true' }}
+    if: ${{ needs.plan.outputs.ui == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e"]'), 'e2e') }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -176,7 +189,7 @@ jobs:
   e2e-webkit:
     name: reference apps in WebKit (macOS)
     needs: [plan]
-    if: ${{ needs.plan.outputs.ui == 'true' && (inputs.webkit == true || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))) }}
+    if: ${{ needs.plan.outputs.ui == 'true' && (inputs.webkit == true || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))) && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e-webkit"]'), 'e2e-webkit') }}
     runs-on: macos-latest
     defaults:
       run:
@@ -227,7 +240,7 @@ jobs:
   conformance:
     name: conformance (checks, release scripts)
     needs: [plan]
-    if: ${{ needs.plan.outputs.conformance == 'true' }}
+    if: ${{ needs.plan.outputs.conformance == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["conformance"]'), 'conformance') }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -262,7 +275,7 @@ jobs:
   tools:
     name: tools and shared scripts
     needs: [plan]
-    if: ${{ needs.plan.outputs.tools == 'true' }}
+    if: ${{ needs.plan.outputs.tools == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["tools"]'), 'tools') }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -288,7 +301,7 @@ jobs:
   icons:
     name: icons (tests, installed copies)
     needs: [plan]
-    if: ${{ needs.plan.outputs.icons == 'true' }}
+    if: ${{ needs.plan.outputs.icons == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["icons"]'), 'icons') }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -311,7 +324,7 @@ jobs:
   eslint-preset:
     name: eslint preset (rules 27 to 39)
     needs: [plan]
-    if: ${{ needs.plan.outputs.eslint == 'true' }}
+    if: ${{ needs.plan.outputs.eslint == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["eslint-preset"]'), 'eslint-preset') }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -334,7 +347,7 @@ jobs:
   crates:
     name: crates (fmt, workspace hack, unused deps, coverage, deny)
     needs: [plan]
-    if: ${{ needs.plan.outputs.crates == 'true' }}
+    if: ${{ needs.plan.outputs.crates == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["crates"]'), 'crates') }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -393,11 +406,12 @@ jobs:
   crate:
     name: crate (${{ matrix.os }})
     needs: [plan]
-    if: ${{ needs.plan.outputs.crates == 'true' }}
+    if: ${{ needs.plan.outputs.crates == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["crate"]'), 'crate') }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Every OS; a rerun of a run's failures (since_run) only the failed legs, each with the filter of its failed tests.
+        include: ${{ fromJSON(needs.plan.outputs.crate_legs || '[{"os":"ubuntu-latest"},{"os":"windows-latest"},{"os":"macos-latest"}]') }}
     runs-on: ${{ matrix.os }}
     # Linux runs in the paddock-ci image (Rust, Tauri's libraries, Node, Playwright, Chrome for Testing, cargo-nextest baked in); Windows and
     # macOS run on the host.
@@ -475,8 +489,9 @@ jobs:
       # Whole-workspace steps: one build per feature set instead of one per crate (each `-p X --all-features` resolved its own
       # features and rebuilt the shared dependencies). Every step runs even after another failed; nextest and clippy name
       # the crate of every failure. scripts/publish.test.mjs and conformance C37 fail when a workspace member is left out.
+      # A leg with a filter (a rerun of failed tests) runs only the test steps below: its other steps passed in the earlier run.
       - name: Clippy (workspace, every feature)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && !matrix.filter }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
@@ -502,7 +517,11 @@ jobs:
           # Chrome's verbose log of each real-browser test on Windows, kept below when the job fails (ADR 0030: why the
           # network service went away is only in there).
           PADDOCK_TEST_BROWSER_LOG: ${{ runner.os == 'Windows' && format('{0}/chrome-logs', runner.temp) || '' }}
-        run: cargo nextest run --workspace --all-features --profile ci
+          FILTER: ${{ matrix.filter }}
+        run: |
+          filter=()
+          if [ -n "$FILTER" ]; then echo "::notice::nextest reruns only the failed tests: $FILTER"; filter=(-E "$FILTER" --no-tests=warn); fi
+          cargo nextest run --workspace --all-features --profile ci ${filter[@]+"${filter[@]}"}
 
       - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
         if: failure() && runner.os == 'Windows'
@@ -516,7 +535,7 @@ jobs:
       # selected crate depends on with a feature on gets its own run: paddock-shell turns on paddock-diag's, paddock-download's
       # and paddock-updater's `tauri`, and paddock-updater turns on paddock-download's default `http`.
       - name: Tests with the optional features off
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && !matrix.filter }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         run: |
           cargo nextest run -p paddock-shell -p paddock-secrets -p paddock-siblings --profile ci
@@ -528,7 +547,7 @@ jobs:
 
       # nextest (and so the coverage job) does not run doc tests.
       - name: Doc tests (workspace, every feature)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && !matrix.filter }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         run: cargo test --workspace --all-features --doc
 
@@ -549,7 +568,7 @@ jobs:
   commits:
     name: commit messages
     needs: [plan]
-    if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ (github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch') && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["commits"]'), 'commits') }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -588,7 +607,7 @@ jobs:
   app:
     name: app ${{ matrix.app }} (${{ matrix.os }}${{ matrix.e2e_leg != '' && format(', {0}', matrix.e2e_leg) || '' }})
     needs: [plan]
-    if: ${{ needs.plan.outputs.any_app == 'true' }}
+    if: ${{ needs.plan.outputs.any_app == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["app"]'), 'app') }}
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
     strategy:
@@ -694,6 +713,7 @@ jobs:
           windows-clippy: ${{ matrix.windows_clippy }}
           notices: ${{ matrix.notices }}
           filter: ${{ matrix.filter }}
+          tests-only: ${{ matrix.tests_only }}
           display: ${{ matrix.display }}
           e2e-checks: ${{ matrix.e2e_checks }}
           e2e-shard: ${{ matrix.e2e_shard }}
@@ -733,11 +753,12 @@ jobs:
   paddock-dev:
     name: paddock-dev (${{ matrix.os }})
     needs: [plan]
-    if: ${{ needs.plan.outputs.paddock_dev == 'true' }}
+    if: ${{ needs.plan.outputs.paddock_dev == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["paddock-dev"]'), 'paddock-dev') }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Every OS; a rerun of a run's failures (since_run) only the failed legs, each with the filter of its failed tests.
+        include: ${{ fromJSON(needs.plan.outputs.paddock_dev_legs || '[{"os":"ubuntu-latest"},{"os":"windows-latest"},{"os":"macos-latest"}]') }}
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
     defaults:
@@ -782,30 +803,37 @@ jobs:
       - uses: ./.gitea/actions/host-tools
 
       # The tool's lockfile must follow the lockfiles of the crates/ it uses by path (they change dependencies in their own PRs).
+      # A leg with a filter (a rerun of failed tests) runs only the tests: its other steps passed in the earlier run.
       - name: Lockfile is current
+        if: ${{ !matrix.filter }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
         run: |
           cargo metadata --locked --format-version 1 > /dev/null || {
             echo "::error::tools/paddock-dev/Cargo.lock is stale, run cargo update -w in tools/paddock-dev and commit it"; exit 1; }
 
       - name: Format
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && !matrix.filter }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
         run: cargo fmt --check
 
       - name: Clippy
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && !matrix.filter }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
         run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Tests
         if: ${{ !cancelled() }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
-        run: cargo nextest run --profile ci --locked --no-fail-fast
+        env:
+          FILTER: ${{ matrix.filter }}
+        run: |
+          filter=()
+          if [ -n "$FILTER" ]; then echo "::notice::nextest reruns only the failed tests: $FILTER"; filter=(-E "$FILTER" --no-tests=warn); fi
+          cargo nextest run --profile ci --locked --no-fail-fast ${filter[@]+"${filter[@]}"}
 
       # Licences, advisories, sources (tools/paddock-dev/deny.toml, the crates' rules); the image has cargo-deny.
       - name: Deny
-        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        if: ${{ !cancelled() && runner.os == 'Linux' && !matrix.filter }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
         run: cargo deny check
 
