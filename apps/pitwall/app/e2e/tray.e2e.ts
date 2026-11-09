@@ -147,6 +147,10 @@ test.describe('the tray popup', () => {
     expect(o!.x + o!.width).toBeLessThanOrEqual(m!.x);
     expect(m!.x + m!.width).toBeGreaterThan(f!.x + f!.width - 20);
     // Keyboard focus on ⋯ shows its name as a tooltip (after Material's show delay: wait on the tooltip, not a time).
+    // The pointer is parked below the popup first: Playwright's starts at (0, 0), where the CDK creates the tooltip's pane
+    // before it positions it, so Chromium sends the tooltip a mouseenter and, once it moves, a mouseleave, which Material
+    // takes as the pointer leaving and hides it (seen on Linux CI, run 7824).
+    await page.mouse.move(VIEWPORT.width - 1, VIEWPORT.height - 1);
     await open.focus();
     await page.keyboard.press('Tab');
     await expect(more).toBeFocused();

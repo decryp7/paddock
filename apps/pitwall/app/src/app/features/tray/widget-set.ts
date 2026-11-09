@@ -274,7 +274,8 @@ const PRESSURE: Record<MemoryLevel, string | null> = { normal: null, elevated: '
     }
     .meters {
       display: grid;
-      grid-template-columns: 36px max-content minmax(40px, 1fr);
+      /* The label column grows with its word: a wider system font (Linux, Windows) needs more than 36 px for "VRAM". */
+      grid-template-columns: minmax(36px, max-content) max-content minmax(40px, 1fr);
       align-items: center;
       column-gap: var(--pd-space-2);
     }
