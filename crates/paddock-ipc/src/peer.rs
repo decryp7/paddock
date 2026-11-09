@@ -412,6 +412,12 @@ impl Peer {
             lock(&s.state).cancelled = true;
             s.cv.notify_all();
         }
+        #[cfg(test)]
+        tests::AFTER_CANCEL.with(|hook| {
+            if let Some(f) = hook.borrow().as_ref() {
+                f(self);
+            }
+        });
     }
 
     /// Why the connection closed (every close records its reason).
@@ -1131,6 +1137,44 @@ pub fn encode_reply<T: Serialize>(reply: &T) -> Result<Vec<u8>, RemoteError> {
 mod tests {
     use super::*;
     use crate::endpoint;
+
+    /// A test's look at a peer from inside `mark_closed`.
+    type Hook = Box<dyn Fn(&Peer)>;
+
+    std::thread_local! {
+        /// Runs on the closing thread right after `mark_closed` has cancelled the served calls (a test seam).
+        pub(super) static AFTER_CANCEL: std::cell::RefCell<Option<Hook>> = const { std::cell::RefCell::new(None) };
+    }
+
+    /// Regression (CI run 7761, Windows, 1 in 2,000 runs of `closing_fails_pending_calls_on_both_sides` on the test VM):
+    /// `close` cancelled the served calls before it shut the outgoing queue, so a handler that answered its cancel at once
+    /// could queue a "cancelled" reply that reached the caller before the end of the stream. By the time any served call
+    /// can see its cancel, the queue must already be shut; the seam looks at that moment on every OS.
+    #[test]
+    fn close_shuts_the_queue_before_a_served_call_can_see_its_cancel() {
+        let (ours, theirs) = endpoint::pair().unwrap();
+        let peer = Peer::start(
+            Connection::raw(ours, FrameLimit::default()),
+            Arc::new(NoCalls),
+            PeerOptions::new("the other side"),
+        )
+        .unwrap();
+        let seen = Arc::new(Mutex::new(None));
+        let seen2 = seen.clone();
+        AFTER_CANCEL.with(|hook| {
+            *hook.borrow_mut() = Some(Box::new(move |p: &Peer| {
+                *lock(&seen2) = Some(p.inner.out.is_shut());
+            }))
+        });
+        peer.close();
+        AFTER_CANCEL.with(|hook| *hook.borrow_mut() = None);
+        assert_eq!(
+            *lock(&seen),
+            Some(true),
+            "the served calls were cancelled while the outgoing queue was still open"
+        );
+        drop(theirs);
+    }
 
     /// A writer whose every write fails, while the reader is still reading its stream.
     struct Failing;
