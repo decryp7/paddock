@@ -818,6 +818,45 @@ fn since_outputs() -> Vec<String> {
     plan.ci_outputs(&[], &mut |_| {}).into_iter().map(|(k, _)| k).collect()
 }
 
+/// A rerun of a run's failures must be able to run every job that failed and none that passed: every job of ci.yml is in the
+/// planner's job table (or a rerun of it plans everything), and every job but the plan asks `rerun_jobs` for itself.
+#[test]
+fn every_ci_yml_job_is_in_the_job_table_and_asks_rerun_jobs() {
+    let ci = std::fs::read_to_string(root().join(".gitea/workflows/ci.yml"))
+        .unwrap()
+        .replace("\r\n", "\n");
+    let wf = paddock_dev::plan_gitea::workflow_jobs(&ci).unwrap();
+    for (key, text) in &wf.jobs {
+        assert!(
+            paddock_dev::plan_gitea::CI_JOBS.iter().any(|(j, _)| j == key),
+            "ci.yml job {key} is not in plan_gitea::CI_JOBS (and CI_JOBS of scripts/affected.mjs)"
+        );
+        if key == "plan" {
+            continue;
+        }
+        let gate = format!("contains(fromJSON(needs.plan.outputs.rerun_jobs || '[\"{key}\"]'), '{key}')");
+        assert!(text.contains("needs: [plan]"), "job {key} needs the plan");
+        let cond = text
+            .lines()
+            .find(|l| l.starts_with("    if: "))
+            .unwrap_or_else(|| panic!("job {key} has no if"));
+        assert!(cond.contains(&gate), "job {key}: its if asks rerun_jobs ({gate})");
+    }
+    // The WebKit job runs in a rerun of its failure even without the webkit input or a push to main.
+    let webkit = &wf.jobs.iter().find(|(k, _)| k == "e2e-webkit").unwrap().1;
+    assert!(webkit.contains("|| contains(fromJSON(needs.plan.outputs.rerun_jobs || '[]'), 'e2e-webkit')"));
+    // The matrices read their legs from the plan step, which writes every OS when it plans no rerun of them.
+    for (job, output) in [("crate", "crate_legs"), ("paddock-dev", "paddock_dev_legs")] {
+        let text = &wf.jobs.iter().find(|(k, _)| k == job).unwrap().1;
+        assert!(
+            text.contains(&format!("include: ${{{{ fromJSON(needs.plan.outputs.{output}) }}}}")),
+            "{job}"
+        );
+    }
+    let plan = &wf.jobs.iter().find(|(k, _)| k == "plan").unwrap().1;
+    assert!(plan.contains("crate_legs=$PLAN_OS_LEGS") && plan.contains("paddock_dev_legs=$PLAN_OS_LEGS"));
+}
+
 #[test]
 fn ci_yml_passes_every_field_of_a_matrix_leg_to_app_gates() {
     let ci = std::fs::read_to_string(root().join(".gitea/workflows/ci.yml"))
