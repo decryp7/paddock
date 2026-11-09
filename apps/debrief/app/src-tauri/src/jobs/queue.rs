@@ -518,9 +518,7 @@ impl JobQueue {
             .collect();
         jobs.sort_by_key(|j| j.state != JobState::Running);
         jobs.extend(self.history.iter().rev().filter(mine).map(|j| self.info(j, now)));
-        JobsSnapshot {
-            jobs,
-        }
+        JobsSnapshot { jobs }
     }
 
     /// The info of one job (visible or not), e.g. for the chat's "queued (position n)".
