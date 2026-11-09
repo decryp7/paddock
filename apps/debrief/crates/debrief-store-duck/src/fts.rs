@@ -758,7 +758,11 @@ fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>
         s.pending.store(total - n as u64, Ordering::SeqCst)
     });
     if let Err(e) = result {
-        let _ = w.rollback();
+        // Not `rollback`: it builds a new writer and abandons the old one's merges, which go on writing into the folder.
+        // Dropping the writer after its merges ended discards the documents queued since the last commit just the same
+        // (their segments stay unindexed and are indexed again).
+        drop(slot);
+        drop_writer(s);
         if s.stop.load(Ordering::SeqCst) {
             return Ok(Turn::Idle);
         }
@@ -771,7 +775,8 @@ fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>
     // The process is exiting: nothing more is written (the documents added go with the writer and the segments stay
     // unindexed, so they are indexed again next time).
     if crate::shutdown::down() {
-        let _ = w.rollback();
+        drop(slot);
+        drop_writer(s);
         return Ok(Turn::Idle);
     }
     s.fts.commit(w, epoch)?;
@@ -801,14 +806,19 @@ const LOWER_INDEXING_THREAD: bool = !cfg!(windows);
 /// Lets the background merges finish (they hold memory and allocate until they do), drops the index writer and gives its
 /// heaps and its threads' pages back to the OS. The slot stays locked until the writer is gone: a clear or a source
 /// removal in that window would find the slot empty, try to open a second writer and fail on the index's lock.
+/// A wait for the merges longer than this is logged as a warning.
+const SLOW_MERGE_WAIT: std::time::Duration = std::time::Duration::from_secs(1);
+
 fn drop_writer(s: &FtsShared) {
     let mut slot = crate::lock(&s.writer);
     if let Some(w) = slot.take() {
         let started = std::time::Instant::now();
         let waited = w.wait_merging_threads();
-        log::debug!("full-text index merges ended after {:?}", started.elapsed());
-        if let Err(e) = waited {
-            log::warn!("full-text index merges failed after {:?}: {e}", started.elapsed());
+        let took = started.elapsed();
+        match waited {
+            Err(e) => log::warn!("full-text index merges failed after {took:?}: {e}"),
+            Ok(()) if took >= SLOW_MERGE_WAIT => log::warn!("waiting for the full-text index merges took {took:?}"),
+            Ok(()) => log::info!("full-text index merges ended after {took:?}"),
         }
         debrief_alloc::release();
     }
@@ -956,6 +966,66 @@ mod tests {
         assert!(
             crate::lock(&s.writer).is_none(),
             "the writer, and with it its merges, is gone when the thread ends"
+        );
+    }
+
+    /// A shared state over a fresh index in `dir`, with a writer in the slot.
+    fn shared_with_writer(dir: &Path, stop: bool) -> FtsShared {
+        let (fts, _) = Fts::open_or_create(
+            &dir.join(INDEX_DIR),
+            1,
+            WriterBudget {
+                heap: 32 << 20,
+                threads: 1,
+            },
+        )
+        .unwrap();
+        FtsShared {
+            writer: Mutex::new(Some(fts.writer().unwrap())),
+            fts,
+            stop: AtomicBool::new(stop),
+            wake: (Mutex::new(false), Condvar::new()),
+            pending: AtomicU64::new(1),
+            failure: Mutex::new(None),
+            bulk_import: Arc::new(AtomicBool::new(false)),
+            fail_writes: AtomicBool::new(false),
+        }
+    }
+
+    /// A store connection whose catalog lists one unindexed segment file that does not exist.
+    fn conn_with_missing_segment() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&crate::schema::ddl(&debrief_core::batch::EventSchema::plain()))
+            .unwrap();
+        conn.execute_batch("INSERT INTO segments VALUES ('missing.parquet', 1, 2, 1, 1, FALSE, '[]')")
+            .unwrap();
+        conn
+    }
+
+    #[test]
+    fn a_failed_step_ends_its_writer_after_its_merges_instead_of_rolling_it_back() {
+        // `rollback` builds a new writer and abandons the old one's merges, which go on writing into the folder.
+        let dir = tempfile::Builder::new().prefix("debrief-fts-fail-").tempdir().unwrap();
+        let s = shared_with_writer(dir.path(), false);
+        let conn = conn_with_missing_segment();
+        let e = step(&s, &dir.path().join(SEGMENTS_DIR), &conn, &Mutex::new(()), 1).unwrap_err();
+        assert!(format!("{e:#}").contains("missing.parquet"), "{e:#}");
+        assert!(
+            crate::lock(&s.writer).is_none(),
+            "the failed step's writer is gone, its merges ended"
+        );
+    }
+
+    #[test]
+    fn a_step_cut_short_by_the_stop_ends_its_writer_after_its_merges() {
+        let dir = tempfile::Builder::new().prefix("debrief-fts-cut-").tempdir().unwrap();
+        let s = shared_with_writer(dir.path(), true);
+        let conn = conn_with_missing_segment();
+        let turn = step(&s, &dir.path().join(SEGMENTS_DIR), &conn, &Mutex::new(()), 1).unwrap();
+        assert_eq!(turn, Turn::Idle);
+        assert!(
+            crate::lock(&s.writer).is_none(),
+            "the stopped step's writer is gone, its merges ended"
         );
     }
 
