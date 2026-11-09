@@ -255,11 +255,11 @@ fn an_agent_on_a_data_folder_of_its_own_never_asks_this_computers_helper() {
     let tmp = tempfile::tempdir().unwrap();
     let dirs = dyno_agent::paths::Dirs::at(tmp.path().join("data"));
     let child = start(dirs.root());
-    let end = std::time::Instant::now() + HANG_GUARD;
-    while dyno_agent::discovery::Discovery::read(&dirs.discovery()).is_none() {
-        assert!(std::time::Instant::now() < end, "the agent never became ready{}", evidence(&dirs));
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    assert!(
+        paddock_testkit::poll_until_within(HANG_GUARD, || dyno_agent::discovery::Discovery::read(&dirs.discovery()).is_some()),
+        "the agent never became ready{}",
+        evidence(&dirs)
+    );
     let (peer, _) = dyno_agent::cli::connect(&dirs).unwrap();
     let status = match dyno_agent::cli::ask_within(&peer, Request::HelperStatus, HANG_GUARD) {
         Ok(Reply::HelperStatus(s)) => *s,
