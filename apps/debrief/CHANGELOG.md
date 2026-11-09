@@ -9,6 +9,10 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 - **Names:** Searching for an abbreviation of a program name now finds it: "rptbldr" finds Report Builder and "netmon" finds Network Monitor, with the reason "abbreviation: letters of report builder", without any AI model
 
+### Fixed
+
+- **Search:** Closing a log store while its word-search index was still merging could leave the index's background merges writing into the store's folder after it was closed or deleted. Closing now waits for them to end
+
 ### Removed
 
 - **AI:** Pitwall is now the only AI engine. Debrief no longer downloads or runs its own models: the set-up wizard, the model manager, the inference runtimes, their update checks and manual downloads, the engine choice and the AI worker's memory cap are gone, and every AI feature runs on the model Pitwall serves. Install Pitwall and connect Debrief to it in Settings ▸ AI; Debrief's own model and runtime files stay on disk until you remove them. The AI download proxy and connection settings are gone too: the FFmpeg download now follows your system's proxy settings (HTTPS_PROXY, NO_PROXY or the operating system's)
