@@ -4,6 +4,9 @@
   direction came from the family survey `family-redesign-and-sharing-2026-10-31`; round 1 added the counted-files rule,
   the entry guard, the wiring kind and register fixes; round 2 added the copies found in `ui/`, the narrowed tray
   entries, the approver on date moves and the exact commands.
+- Amendment proposed (2026-11-09): [ADR 0075](0075-copy-waivers-are-data-bound-to-the-landing-unit.md) would replace the
+  `Copies-waived:`, `Copies-removed:` and `Copies-date:` trailers of §3 with records in `docs/known-copies.d/`, bound to
+  the branch or landing merge (the unit) instead of the commit. Until it is accepted, §3 below holds.
 - Date: 2026-10-31
 - Related: rule 40 / ER-21 (recurring bugs mean a missing design rule), rules 39, 42 and 43 / ER-22 (share first, shared
   behaviour tested once), rule 1 (one release at a time, the shared-code freeze), rule 50 (CI runs only what a change
