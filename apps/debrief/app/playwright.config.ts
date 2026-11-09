@@ -7,7 +7,7 @@ import { e2ePortOrCiDefault } from '../../../ui/projects/paddock-e2e/src/env.ts'
 appBuildGuard(resolve(__dirname, './'), resolve(__dirname, '../../../ui'));
 
 // End-to-end tests run against the browser build, where the app injects the in-memory MockBackend. Every project uses
-// the one production build, served with the Tauri CSP header (e2e/serve-prod.mjs): one build per run (and per CI shard)
+// the one production build, served with the Tauri CSP header (ui/projects/paddock-e2e/src/serve-prod.ts): one build per run (and per CI shard)
 // instead of a dev server plus a production build, and every spec runs under the CSP the desktop app enforces.
 const CI = !!process.env['CI'];
 // CI must name its port (a fixed default could collide with another job on the host); locally the default is derived from the worktree (offset of 4340, apart from the ui gallery's 4300).
@@ -17,6 +17,7 @@ const PORT = e2ePortOrCiDefault('DEBRIEF_E2E_PORT', 4340);
 // otherwise the run builds first, so it never tests a stale build.
 const PREBUILT = !!process.env['DEBRIEF_E2E_PREBUILT'];
 // The CSP guard spec runs in Chromium only.
+const SERVE = `node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON ../../../ui/projects/paddock-e2e/src/serve-prod.ts . ${PORT}`;
 const PROD_CSP = '**/prod-csp.e2e.ts';
 // The shell baseline (Paddock X50 W0, e2e/shell-baseline.md) is a manual migration baseline: macOS screenshots that the
 // workbench migration (M5) diffs against on the same Mac. It is not part of the default run (CI runs Linux, whose fonts
@@ -65,7 +66,7 @@ export default defineConfig({
       : []),
   ],
   webServer: {
-    command: PREBUILT ? `node e2e/serve-prod.mjs ${PORT}` : `npx ng build && node e2e/serve-prod.mjs ${PORT}`,
+    command: PREBUILT ? SERVE : `npx ng build && ${SERVE}`,
     url: `http://localhost:${PORT}`,
     // Never reuse whatever listens on the port: a stale server would test the wrong build.
     reuseExistingServer: false,
