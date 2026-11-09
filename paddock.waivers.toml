@@ -360,6 +360,12 @@ path = "commit 27d6782527d83b231388417be7f084be3dd30ec8"
 reason = "first line over 100 characters on a shared tooling branch; history cannot be rewritten (no history rewrite)"
 expires = "2026-12-31"
 
+[[waiver]]
+check = "C23"
+path = "commit 3c1072407be6b76aee8dade41810e70aa49f2864"
+reason = "subject names two types (docs(wiki), ci); pushed already, history cannot be rewritten (no history rewrite)"
+expires = "2026-12-31"
+
 # C99 (ADR 0057, rule 72): the apps whose manifests still name keyring move their secrets to paddock-secrets' files in
 # their own work package (ADR 0057 §3 waiver table); each waiver goes with that work.
 [[waiver]]
