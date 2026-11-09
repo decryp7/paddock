@@ -5,7 +5,7 @@
 #   B  `dyno-app --hidden` (what autostart passes): which tray icons were registered (HKCU\Control Panel\NotifyIconSettings), and the
 #      app's own log lines about each icon.
 # Every wait polls for its condition with a bounded deadline; nothing sleeps a fixed time to "let it settle".
-param([string]$Bin = "$env:LOCALAPPDATA\Dyno", [int]$DeadlineSec = 60)
+param([string]$Bin = "$env:ProgramFiles\Dyno", [int]$DeadlineSec = 60)
 $ErrorActionPreference = 'Stop'
 $out = 'C:\paddock-test\probe'
 New-Item -ItemType Directory -Force $out | Out-Null

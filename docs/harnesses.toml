@@ -1,0 +1,21 @@
+# The harness register (ADR 0042 §1, amendment 2026-11-08 §7.6): who may change shared test tooling on branches.
+# Seeded with the `vm-smoke` harness; the rest of ADR 0042 WP-1 (the other harnesses, check C72, C73) is not built yet.
+#
+#   id, title, paths (globs over tracked files), home (the one branch where its files change), mode ("home": every change
+#   here; "additive": others may add new files only), lands (the home lands at least this often while ahead, outside release
+#   windows), note, exceptions (paths an app's own branch may change), users (files that run through the harness but stay
+#   owned elsewhere, outside `paths`).
+# The lease holder (the agent that owns the home for now) is named in the brief, not here; CODEOWNERS names only people.
+
+version = 1
+
+[[harness]]
+id = "vm-smoke"
+title = "VM start, GUI and update checks (macOS Tart, Windows Fusion), including vm-win"
+paths = ["scripts/vm-smoke/**", "scripts/vm-win.sh", "scripts/vm-win/**", "tools/macos-vm-smoke.sh", "apps/*/vm-smoke.json"]
+home = "tools/vm-smoke"
+mode = "home"
+lands = "48h"
+note = "apps/*/vm-smoke.json: an app's own block may change on the app's branch (declared exception)"
+exceptions = ["apps/*/vm-smoke.json"]
+users = ["crates/paddock-setup/nsis/test/run-harness.ps1"]
