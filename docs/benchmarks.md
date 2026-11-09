@@ -375,6 +375,36 @@ job logs say, so the ADR can quote them.
 - **Memory measure:** not applicable (test durations from logs).
 - **Notes:** the job logs are kept in the coordinator's scratch folders (`main-after-7761/logs`, `pitwall-e2e-health`),
   not in the repository; Gitea keeps them for its retention period.
+### 2026-11-09, test-double survey: scan and shipped feature trees
+
+Quoted by [ADR 0073](adr/0073-no-test-doubles-in-a-shipped-build.md) ("Parallelism and cost").
+- **Commit:** b51c72509 (origin/main).
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2.
+- **Load:** 1-minute load 7.3–7.5 at start and end (5-minute 14.8–18.1); other agents were building.
+- **Build:** release; the survey tool (a generalisation of Dyno's `no_ungated_doubles.rs`, `syn` 2.0.119), committed as
+  text in [research/2026-11-09-test-doubles-survey.md](research/2026-11-09-test-doubles-survey.md) (WP-0 of ADR 0073
+  builds the real check); `cargo tree` from the pinned toolchain.
+- **Corpus:** the repository's own Rust sources (no user data): `crates/`, `apps/debrief`, `apps/dyno`, `apps/pitwall`,
+  `apps/spotter`, `apps/pitcrew`.
+- **Command:** `fake-scan <workspace> .` per workspace (it runs `cargo metadata --no-deps --offline`, then parses every
+  lib and bin target); `cargo tree --offline --locked -p <pkg> -e normal --prefix none --target all -f '{p} {f}'` per
+  shipped package.
+- **Runs:** 3 rounds of the scan over the six workspaces, one after another; 3 runs of Dyno's six trees, 1 run of
+  Debrief's four.
+- **Numbers:**
+
+  | Measure | Rounds 1 and 2 | Round 3 | Budget | Verdict |
+  |---|---|---|---|---|
+  | Scan, `apps/debrief` | 0.81, 0.82 s | 35.1 s | – | indication |
+  | Scan, `apps/dyno` | 0.42, 0.43 s | 50.5 s | – | indication |
+  | Scan, `crates` | 0.45, 0.48 s | 6.8 s | – | indication |
+  | Scan, `apps/pitwall`, `apps/pitcrew`, `apps/spotter` | 0.10–0.13 s | 2.7–3.3 s | – | indication |
+  | `cargo tree`, Dyno's 6 shipped packages in a row | 2.65, 1.40, 1.33 s | – | – | indication |
+  | `cargo tree`, Debrief's 4 shipped packages in a row | 1.05 s | – | – | indication |
+
+- **Memory measure:** not measured.
+- **Notes:** round 3 was about 15 to 120 times slower in every workspace at once (2.7 to 50.5 s against 0.10 to 0.82 s). The cause was not diagnosed; most likely
+  `cargo metadata` waited on a Cargo lock held by another agent's build. These are indications under load, not budgets.
 
 ### 2026-11-03, starving a test process by OS priority on macOS
 
