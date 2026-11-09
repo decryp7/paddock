@@ -30,6 +30,8 @@ use std::time::Duration;
 
 /// How long one OS accept waits before the accept thread looks at its stop flag (not a limit of anything).
 const ACCEPT_SLICE: Duration = Duration::from_millis(100);
+/// The pause after an accept that failed (no descriptor left, for example) before the next one, so a failing accept does not spin.
+const ACCEPT_ERROR_PAUSE: Duration = Duration::from_millis(50);
 /// Refused clients remembered for [`LinkServer::refused`].
 const MAX_REFUSED: usize = 64;
 
@@ -171,12 +173,18 @@ impl LinkServer {
             .name("paddock-ipc-link-accept".into())
             .spawn(move || {
                 while !s.stop.load(Ordering::SeqCst) {
-                    let accepted = host.accept_raw(ACCEPT_SLICE);
-                    // A timeout is the stop-flag slice; any other error is recorded and the server keeps listening.
-                    let Ok((stream, os_pid)) = accepted.map_err(|e| {
-                        (e.kind() != std::io::ErrorKind::TimedOut).then(|| s.refuse(e.into()))
-                    }) else {
-                        continue;
+                    // A timeout is the stop-flag slice; any other error is recorded and the server keeps listening, after
+                    // telling a client it could not take why (no descriptor left) and a short pause, so an accept that fails
+                    // at once does not spin.
+                    let (stream, os_pid) = match host.accept_raw(ACCEPT_SLICE) {
+                        Ok(accepted) => accepted,
+                        Err(e) if e.kind() == std::io::ErrorKind::TimedOut => continue,
+                        Err(e) => {
+                            host.turn_away(&e);
+                            s.refuse(e.into());
+                            std::thread::sleep(ACCEPT_ERROR_PAUSE);
+                            continue;
+                        }
                     };
                     let in_progress = s.handshakes.load(Ordering::SeqCst);
                     if in_progress >= max_handshakes

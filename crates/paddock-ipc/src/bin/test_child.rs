@@ -13,6 +13,8 @@
 //!   descriptor, so its handshake cannot take the copies it needs. Prints `host: <its error>` and `client: <the first frame
 //!   or the read error>`. Its own process because it lowers this process's limit of open files.
 //! - `out-of-files-at-accept` (Unix): the same with no descriptor left for the host's accept itself.
+//! - `link-out-of-files <discovery file>` (Unix): the same for a `LinkServer`'s accept thread; also prints `refused: <what
+//!   the server recorded>`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use paddock_ipc::link::{LinkServer, ServerConfig};
@@ -109,6 +111,8 @@ fn main() {
         "out-of-files" => out_of_files(true),
         #[cfg(unix)]
         "out-of-files-at-accept" => out_of_files(false),
+        #[cfg(unix)]
+        "link-out-of-files" => link_out_of_files(&arg(2)),
         _ => {
             let r = child::serve(
                 "host",
@@ -131,22 +135,7 @@ fn out_of_files(for_accept: bool) {
     use std::time::Duration;
     let limit = FrameLimit::default();
     let mut host = Host::listen(limit, ProtocolVersion::UNVERSIONED).unwrap();
-    // A low limit keeps filling the table cheap; what this process holds now is far below it.
-    let mut limits = libc::rlimit {
-        rlim_cur: 0,
-        rlim_max: 0,
-    };
-    // SAFETY: plain calls with a valid pointer to a local struct.
-    #[allow(unsafe_code)]
-    unsafe {
-        assert_eq!(libc::getrlimit(libc::RLIMIT_NOFILE, &mut limits), 0);
-        limits.rlim_cur = 64;
-        assert_eq!(libc::setrlimit(libc::RLIMIT_NOFILE, &limits), 0);
-    }
-    let mut fillers = Vec::new();
-    while let Ok(f) = std::fs::File::open("/dev/null") {
-        fillers.push(f);
-    }
+    let mut fillers = fill_descriptors();
     // One free descriptor for the client, then (`for_accept`) one for the host's accept: none is left for what follows.
     drop(fillers.pop());
     let mut client = Stream::connect(host.endpoint(), Duration::from_secs(10)).unwrap();
@@ -168,4 +157,52 @@ fn out_of_files(for_accept: bool) {
     drop(fillers);
     println!("host: {:?}", host_result.map(|_| "welcomed"));
     println!("client: {answer:?}");
+}
+
+/// Lowers this process's limit of open files (filling the table stays cheap) and opens files until none is left; the
+/// caller frees exactly the descriptors it wants free by dropping fillers.
+#[cfg(unix)]
+fn fill_descriptors() -> Vec<std::fs::File> {
+    // A low limit keeps filling the table cheap; what this process holds now is far below it.
+    let mut limits = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: plain calls with a valid pointer to a local struct.
+    #[allow(unsafe_code)]
+    unsafe {
+        assert_eq!(libc::getrlimit(libc::RLIMIT_NOFILE, &mut limits), 0);
+        limits.rlim_cur = 64;
+        assert_eq!(libc::setrlimit(libc::RLIMIT_NOFILE, &limits), 0);
+    }
+    let mut fillers = Vec::new();
+    while let Ok(f) = std::fs::File::open("/dev/null") {
+        fillers.push(f);
+    }
+    fillers
+}
+
+/// The `link-out-of-files` mode: see the file header.
+#[cfg(unix)]
+fn link_out_of_files(discovery: &str) {
+    use paddock_ipc::endpoint::Stream;
+    use paddock_ipc::frame;
+    use std::time::{Duration, Instant};
+    let server = LinkServer::start(ServerConfig::new(discovery, "b"), Arc::new(echo)).unwrap();
+    let mut fillers = fill_descriptors();
+    // One free descriptor for the client; none for the server's accept.
+    drop(fillers.pop());
+    let mut client = Stream::connect(server.endpoint(), Duration::from_secs(10)).unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    let answer = frame::read_frame(&mut client, FrameLimit::default());
+    // The refusal is recorded after the answer is written: wait for it, bounded.
+    let until = Instant::now() + Duration::from_secs(10);
+    while server.refused().is_empty() && Instant::now() < until {
+        std::thread::yield_now();
+    }
+    drop(fillers);
+    println!("client: {answer:?}");
+    println!("refused: {:?}", server.refused());
 }

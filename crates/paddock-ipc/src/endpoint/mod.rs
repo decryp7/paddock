@@ -129,21 +129,22 @@ impl Listener {
     /// After [`Listener::accept`] failed because the process has no file descriptor left ([`out_of_descriptors`]), accepts
     /// the waiting client on a descriptor the listener keeps in reserve, so the caller can tell it why it is turned away and
     /// close it; otherwise it would wait in the queue until its own limit (Linux). `None` when no client waits, on macOS
-    /// (whose failed accept has already dropped the client) and on Windows (no descriptor table).
-    pub fn accept_on_spare(&mut self) -> Option<Stream> {
+    /// (whose failed accept has already dropped the client) and on Windows (no descriptor table). A stopgap of ADR 0072 for
+    /// I7, to be absorbed by M3/M4.
+    pub(crate) fn accept_on_spare(&mut self) -> Option<Stream> {
         self.0.accept_on_spare().map(Stream)
     }
 }
 
 /// Whether `e` says the process or the system has no file descriptor left (EMFILE, ENFILE); always `false` on Windows.
-pub fn out_of_descriptors(e: &io::Error) -> bool {
+pub(crate) fn out_of_descriptors(e: &io::Error) -> bool {
     #[cfg(unix)]
     {
         sys::out_of_descriptors(e)
     }
     #[cfg(not(unix))]
     {
-        let _ = e;
+        let _: &io::Error = e;
         false
     }
 }

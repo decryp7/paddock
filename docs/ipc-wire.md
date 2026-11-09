@@ -307,8 +307,9 @@ sequenceDiagram
   over its connection cap answers `busy` the same way (`handshake.rs:132`). A host that cannot start the handshake (no file
   descriptor or thread left) answers `busy` with the cause, and a first frame that is not a valid hello gets `invalid`
   (`cannot_serve` and `refuse_invalid` in `handshake.rs`; CI run 7763); the client reads both as `IpcError::Remote`. When the
-  accept itself finds no descriptor, a Unix listener accepts the waiting client on one it keeps in reserve and answers `busy`
-  (`Listener::accept_on_spare`; macOS has already dropped that client). Only a client that left, or stayed silent past the
+  accept itself finds no descriptor, `Host::accept` and a `LinkServer`'s accept thread take the waiting client on a descriptor
+  the Unix listener keeps in reserve and answer `busy` (macOS has already dropped that client); a `LinkServer` pauses 50 ms
+  after a failed accept. Both are the ADR 0072 stopgap for I7 (M3/M4 absorb it; M3 maps `invalid` to `protocol`). Only a client that left, or stayed silent past the
   limit, gets no answer.
 - Each handshake is bounded by `HANDSHAKE_TIMEOUT` = 10 s on an injected clock; a watchdog thread closes the stream when
   it passes, so a silent client holds only its own handshake (`handshake.rs:22`, `handshake.rs:81`).

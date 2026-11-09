@@ -119,14 +119,18 @@ fn bounded<T>(
     result
 }
 
-/// The refusal a client gets when this side could not start its handshake: [`bounded`] fails before the hello is read only
-/// when it cannot take a copy of the stream (no file descriptor left) or start its watchdog (no thread left). `None` for the
-/// errors whose check answered the client itself, or whose stream is gone (closed, timed out).
-fn cannot_serve(e: &IpcError) -> Option<String> {
+/// The refusal a client gets for `e`, decided after [`bounded`] returned, so nothing is written to a stream its watchdog
+/// closed (that is [`IpcError::Timeout`]): `busy` when this side could not start the handshake ([`bounded`] fails before the
+/// hello is read only when it cannot copy the stream or start its watchdog: no descriptor or thread left), `invalid` for a
+/// hello that could not be read. `None` for the checks that answered the client themselves (version, auth) and for a stream
+/// that is gone. `invalid` is a stopgap of ADR 0072 (I7) that M3 maps to `protocol`.
+fn refusal(e: &IpcError) -> Option<(&'static str, String)> {
     match e {
-        IpcError::Spawn(why) | IpcError::Io { message: why, .. } => Some(format!(
-            "the host cannot take a connection now ({why}); try again later"
+        IpcError::Spawn(why) | IpcError::Io { message: why, .. } => Some((
+            codes::BUSY,
+            format!("the host cannot take a connection now ({why}); try again later"),
         )),
+        IpcError::Protocol(why) => Some((codes::INVALID, why.clone())),
         _ => None,
     }
 }
@@ -233,11 +237,10 @@ impl Authenticator {
         let (protocol, claimed) = match checked {
             Ok(checked) => checked,
             Err(e) => {
-                // Every refusal says why (CI run 7763): `check_hello` answers its own; a host that cannot start the
-                // handshake at all (no file descriptor or thread left for it) answers here, else the client only sees the
-                // stream end and cannot tell a busy host from a crashed one.
-                if let Some(why) = cannot_serve(&e) {
-                    self.refuse(&mut stream, codes::BUSY, &why);
+                // Every refusal says why (CI run 7763): `check_hello` answers version and auth itself; the rest is
+                // answered here, else the client only sees the stream end and cannot tell a busy host from a crashed one.
+                if let Some((code, why)) = refusal(&e) {
+                    self.refuse(&mut stream, code, &why);
                 }
                 return Err(e);
             }
@@ -277,12 +280,6 @@ impl Authenticator {
         );
     }
 
-    /// Tells a client that its hello could not be read, and returns the error for this side.
-    fn refuse_invalid(&self, stream: &mut Stream, why: String) -> IpcError {
-        self.refuse(stream, codes::INVALID, &why);
-        IpcError::Protocol(why)
-    }
-
     fn check_hello(
         &self,
         stream: &mut Stream,
@@ -294,10 +291,10 @@ impl Authenticator {
             Err(FrameError::Closed) => {
                 return Err(IpcError::Closed("the client left before its hello".into()));
             }
-            Err(e) => return Err(self.refuse_invalid(stream, e.to_string())),
+            Err(e) => return Err(IpcError::Protocol(e.to_string())),
         };
         let Some((version, protocol)) = frame::handshake_versions(&body) else {
-            return Err(self.refuse_invalid(stream, "the first frame was not a hello".into()));
+            return Err(IpcError::Protocol("the first frame was not a hello".into()));
         };
         if version != frame::VERSION {
             let m = format!(
@@ -321,7 +318,7 @@ impl Authenticator {
             ..
         }) = frame::decode_body(&body)
         else {
-            return Err(self.refuse_invalid(stream, "the hello is not valid".into()));
+            return Err(IpcError::Protocol("the hello is not valid".into()));
         };
         if !self.token.matches(&token) {
             self.refuse(stream, codes::AUTH, "wrong token");
@@ -449,6 +446,20 @@ impl Host {
         self.auth.clone()
     }
 
+    /// After an accept failed with `e`: when no file descriptor was left, the waiting client is accepted on the listener's
+    /// reserve one and told `busy` with the cause, instead of waiting in the queue for its own limit while this side fails
+    /// the same accept again (Linux; CI run 7763). A stopgap of ADR 0072 for I7, to be absorbed by M3/M4.
+    pub(crate) fn turn_away(&mut self, e: &io::Error) {
+        if crate::endpoint::out_of_descriptors(e)
+            && let Some(turned_away) = self.listener.accept_on_spare()
+        {
+            self.auth.refuse_busy(
+                turned_away,
+                &format!("the host cannot take a connection now ({e}); try again later"),
+            );
+        }
+    }
+
     /// Waits at most `slice` (OS time) for one client, without authenticating it. A timeout is `ErrorKind::TimedOut`.
     pub fn accept_raw(&mut self, slice: Duration) -> io::Result<(Stream, Option<u32>)> {
         self.listener.accept(slice)
@@ -477,18 +488,7 @@ impl Host {
                 Ok(accepted) => break accepted,
                 Err(e) if e.kind() == io::ErrorKind::TimedOut => {}
                 Err(e) => {
-                    // No descriptor left for the client: it is told so on the listener's reserve one, instead of waiting
-                    // in the queue for its own limit while this side fails the same accept again and again.
-                    if crate::endpoint::out_of_descriptors(&e)
-                        && let Some(turned_away) = self.listener.accept_on_spare()
-                    {
-                        self.auth.refuse_busy(
-                            turned_away,
-                            &format!(
-                                "the host cannot take a connection now ({e}); try again later"
-                            ),
-                        );
-                    }
+                    self.turn_away(&e);
                     return Err(e.into());
                 }
             }

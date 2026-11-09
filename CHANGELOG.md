@@ -10,9 +10,11 @@ Conventional Commits; one semver tag for the whole repo.
   cause ("the host cannot take a connection now (Too many open files ...); try again later") instead of closing the stream, which the
   client read as "the host closed the connection during the handshake" (CI run 7763). A first frame that is not a valid hello gets an
   `invalid` refusal; a client now reads both as `IpcError::Remote`. A client that leaves or stays silent still gets nothing.
-- A Unix `Listener` keeps one file descriptor in reserve: when an accept fails for lack of descriptors, `Host::accept` accepts the waiting
-  client on it and answers `busy` (Linux queued that client until its own 10 s limit while the host failed the same accept every 50 ms).
-  New: `endpoint::Listener::accept_on_spare` and `endpoint::out_of_descriptors`. macOS drops such a client inside the failed accept.
+- A Unix listener keeps one file descriptor in reserve: when an accept fails for lack of descriptors, `Host::accept` and a `LinkServer`'s
+  accept thread accept the waiting client on it and answer `busy` (Linux queued that client until its own 10 s limit while the host
+  failed the same accept every 50 ms). A `LinkServer` also pauses 50 ms after a failed accept instead of retrying in a tight loop.
+  macOS drops such a client inside the failed accept.
+- These are the ADR 0072 stopgap for I7, to be absorbed by M3/M4; `invalid` is a stopgap code that M3 maps to `protocol`.
 
 ### `paddock-limits` (new): limits that explain themselves and replies that report what they left out
 

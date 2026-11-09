@@ -435,3 +435,44 @@ fn a_host_with_no_descriptor_left_to_accept_tells_the_waiting_client_why() {
         );
     }
 }
+
+/// A `LinkServer` whose accept thread finds no descriptor left tells the waiting client why (Linux), records the refusal and
+/// keeps serving; it pauses after a failed accept instead of failing the same accept in a tight loop.
+#[cfg(unix)]
+#[test]
+fn a_link_server_with_no_descriptor_left_to_accept_tells_the_waiting_client_why() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = paddock_proc::command(child_program())
+        .arg("link-out-of-files")
+        .arg(dir.path().join("link.json"))
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(
+        out.status.success(),
+        "{text}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let line = |prefix: &str| {
+        text.lines()
+            .find_map(|l| l.strip_prefix(prefix))
+            .unwrap_or_default()
+            .to_string()
+    };
+    assert!(
+        line("refused: ").contains("Too many open files"),
+        "the server records why: {text}"
+    );
+    let client = line("client: ");
+    if cfg!(target_os = "macos") {
+        assert!(
+            client.contains("Fail") || client.contains("Closed"),
+            "{text}"
+        );
+    } else {
+        assert!(
+            client.contains("Fail") && client.contains("busy") && client.contains("open files"),
+            "the waiting client must be told why: {text}"
+        );
+    }
+}
