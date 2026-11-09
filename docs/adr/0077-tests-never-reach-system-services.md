@@ -229,7 +229,8 @@ Shared crates (`paddock-env`, `paddock-secrets`, `paddock-service`, `paddock-pow
 so every app that ships them is in the affected plan; the change is additive (a new constructor parameter) and lands with
 its adoption (rule 43). Without the marker and with no override variable set, nothing changes for a user's installed app: portable mode and a
 custom `XDG_DATA_HOME` are not refused (§1). Under D7 (c) Dyno's next tag waits only for the instance fixes
-`c03fb61be` and `3d33217af`; the ratchet entries block other apps from their release after the one in flight.
+on fix branches (`fix/dyno-agent-term-race` `3d33217af`, `fix/dyno-wakes-stop-window` `70d92f27a`), to land before
+the tag; the ratchet entries block other apps from their release after the one in flight.
 
 ## Decisions for the user
 
@@ -241,6 +242,6 @@ custom `XDG_DATA_HOME` are not refused (§1). Under D7 (c) Dyno's next tag waits
 | D4 | Real services in tests | (a) Only explicit test resources (pinned browser, own keychain file, per-run label prefix); no blanket opt-in. (b) A `PADDOCK_TEST_REAL=<kinds>` opt-in on hosts ADR 0074 declares as test machines. | (a); add (b) only when a test needs the installed helper itself, on a leased VM. |
 | D5 | Checks | (a) Register check plus host probe. (b) Register check only. (c) Probe only. | (a): the check stops new clients, the probe catches what the check cannot see (a shell script, a tool). |
 | D6 | Where the decision lives | (a) `paddock-env` (folders and the override already live there). (b) A new small crate. | (a). |
-| D7 | Release gating | (a) Every ratchet entry blocks its app's next tag (adds all 17.5 days to the next tags). (b) Dyno's next tag waits for the first cut (adds 10 days before it). (c) Dyno's next tag waits only for the instance fixes `c03fb61be` and `3d33217af` (already in the combined train, 0 extra days); the first cut (10 days) runs in parallel and new clients fail from its landing; other apps' entries block their release after the one in flight (Spotter 1.0 not blocked). (d) Report only. | (c): the dangerous Dyno paths are already closed by the instance fixes; the mechanism follows without holding the tag. |
+| D7 | Release gating | (a) Every ratchet entry blocks its app's next tag (adds all 17.5 days to the next tags). (b) Dyno's next tag waits for the first cut (adds 10 days before it). (c) Dyno's next tag waits only for the instance fixes on fix branches (`fix/dyno-agent-term-race` `3d33217af`, `fix/dyno-wakes-stop-window` `70d92f27a`), to land before the tag (0 extra days); the first cut (10 days) runs in parallel and new clients fail from its landing; other apps' entries block their release after the one in flight (Spotter 1.0 not blocked). (d) Report only. | (c): the dangerous Dyno paths are already closed by the instance fixes; the mechanism follows without holding the tag. |
 | D8 | Binding rule | Rule text of §7 and an ER-14 amendment candidate. | Yes. |
 | D9 | Scope now | (a) All WPs (17.5 days). (b) The first cut (10 days), the rest per app. | (b). |
