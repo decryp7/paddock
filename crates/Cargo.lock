@@ -3545,6 +3545,7 @@ dependencies = [
  "paddock-commands",
  "paddock-dialogs",
  "paddock-env",
+ "paddock-ipc",
  "paddock-jobs",
  "paddock-log",
  "paddock-proc",

@@ -100,6 +100,30 @@ blocks_tag = "none"
 note = "No end line yet (ADR 0072 §6, WP-7)."
 
 [[ratchet]]
+instance = "I18"
+endpoint = "mcp-loopback"
+scenario = "client-keeps-writing"
+fault = "reset"
+blocks_tag = "dyno-v*"
+note = "The key line is answered and the socket closed with the client's further bytes unread: a reset (macOS and Linux)."
+
+[[ratchet]]
+instance = "I22"
+endpoint = "mcp-loopback"
+scenario = "stop-with-open-connection"
+fault = "no-reason"
+blocks_tag = "dyno-v*"
+note = "Serving::shutdown(Both) after pairing: the bridge reads a bare end."
+
+[[ratchet]]
+instance = "WP-7"
+endpoint = "mcp-loopback"
+scenario = "*"
+fault = "no-end-line"
+blocks_tag = "none"
+note = "The listener logs 'ended after' lines but not the ADR's end line (code, flush, drain); WP-7."
+
+[[ratchet]]
 instance = "I8"
 endpoint = "ipc-host"
 scenario = "wrong-account"
