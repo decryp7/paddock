@@ -117,7 +117,7 @@ cargo build -p pitwall-server --release
 ./target/release/pitwall-server --help
 ```
 
-Requirements: Rust 1.88 or newer. llama.cpp and models are downloaded by Pitwall, never bundled.
+Requirements: Rust 1.89 or newer. llama.cpp and models are downloaded by Pitwall, never bundled.
 
 ## Quick start
 

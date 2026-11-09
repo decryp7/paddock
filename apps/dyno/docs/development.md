@@ -21,7 +21,7 @@ scripts/                 CI guards, release helpers, Linux container tooling
 
 ## Prerequisites
 
-Rust stable (1.88+, `rust-version` in the workspace `Cargo.toml`), Node 24 (`app/.nvmrc`), the
+Rust stable (1.89+, `rust-version` in the workspace `Cargo.toml`), Node 24 (`app/.nvmrc`), the
 [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) (WebView2 on Windows, Xcode command line tools on macOS,
 `libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf` on Linux). Optional: `cargo-deny`,
 `git-cliff`, `lefthook` (`npx lefthook install` for the pre-commit hooks), Docker or OrbStack for the Linux container.
