@@ -100,6 +100,46 @@ blocks_tag = "none"
 note = "No end line yet (ADR 0072 §6, WP-7)."
 
 [[ratchet]]
+instance = "I15"
+endpoint = "dyno-agent"
+scenario = "stop-with-open-connection"
+fault = "no-reason"
+blocks_tag = "dyno-v*"
+note = "The agent's stop closes every peer with no reason (server.rs, after the accept loop)."
+
+[[ratchet]]
+instance = "WP-7"
+endpoint = "dyno-agent"
+scenario = "*"
+fault = "no-end-line"
+blocks_tag = "none"
+note = "No end line in the ADR's form yet (ADR 0072 §6, WP-7); the agent logs Client connected / disconnected."
+
+[[ratchet]]
+instance = "I16"
+endpoint = "dyno-helper"
+scenario = "busy"
+fault = "no-reason"
+blocks_tag = "dyno-v*"
+note = "'too many connections, one was dropped': the 17th connection is dropped with no answer."
+
+[[ratchet]]
+instance = "I2"
+endpoint = "dyno-helper"
+scenario = "malformed-first-frame"
+fault = "no-reason"
+blocks_tag = "dyno-v*"
+note = "A frame the peer cannot decode fails the Peer (Peer::fail) with no reason frame."
+
+[[ratchet]]
+instance = "WP-7"
+endpoint = "dyno-helper"
+scenario = "*"
+fault = "no-end-line"
+blocks_tag = "none"
+note = "No end line yet (ADR 0072 §6, WP-7)."
+
+[[ratchet]]
 instance = "I18"
 endpoint = "mcp-loopback"
 scenario = "client-keeps-writing"
@@ -176,4 +216,13 @@ fault = "reset"
 blocks_tag = "dyno-v*"
 os = "linux"
 note = "As ipc-host: a refused client's later bytes are not drained (reset on Linux)."
+
+[[ratchet]]
+instance = "I10"
+endpoint = "dyno-agent"
+scenario = "client-keeps-writing"
+fault = "reset"
+blocks_tag = "dyno-v*"
+os = "linux"
+note = "A refused client's bytes after its Hello are not drained: the close resets on Linux (the agent authenticates inline with paddock-ipc's Host)."
 

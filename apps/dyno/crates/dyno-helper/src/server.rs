@@ -540,4 +540,102 @@ mod tests {
         assert!(matches!(&e, IpcError::Remote(r) if r.code == paddock_ipc::codes::BUSY), "{e:?}");
         rig.stop();
     }
+
+    /// The helper's log (the `log` facade), routed into a capture for the ending harness; printed if the test fails.
+    fn captured() -> &'static paddock_ipc::testing::endings::log::LogCapture {
+        use paddock_ipc::testing::endings::log::LogCapture;
+        static CAPTURE: std::sync::OnceLock<LogCapture> = std::sync::OnceLock::new();
+        struct Sink(LogCapture);
+        impl log::Log for Sink {
+            fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+                true
+            }
+            fn log(&self, record: &log::Record<'_>) {
+                self.0.push(format!("{} {}", record.level(), record.args()));
+            }
+            fn flush(&self) {}
+        }
+        CAPTURE.get_or_init(|| {
+            let capture = LogCapture::new();
+            if log::set_boxed_logger(Box::new(Sink(capture.clone()))).is_ok() {
+                log::set_max_level(log::LevelFilter::Info);
+            }
+            capture
+        })
+    }
+
+    fn ending(
+        scenario: paddock_ipc::testing::endings::Scenario,
+    ) -> Result<(paddock_ipc::testing::endings::Observed, paddock_ipc::testing::endings::Expect), &'static str> {
+        use paddock_ipc::testing::endings::ipc::decode_frames;
+        use paddock_ipc::testing::endings::raw::{read_to_end, READ_GUARD};
+        use paddock_ipc::testing::endings::{Expect, Observed, Scenario};
+        let limit = FrameLimit::new(MAX_FRAME);
+        let log = captured();
+        let from = log.len();
+        let observe = |mut c: Stream, expect: Expect| {
+            let raw = read_to_end(&mut c, READ_GUARD);
+            let decoded = decode_frames(&raw.bytes, limit);
+            Ok((
+                Observed {
+                    raw: Some(raw),
+                    decoded,
+                    log: log.since(from),
+                    ..Observed::default()
+                },
+                expect,
+            ))
+        };
+        match scenario {
+            Scenario::MalformedFirstFrame => {
+                let rig = Rig::start(HelperUser::Uid(own_uid()), 4);
+                let mut c = Stream::connect(&rig.name, Duration::from_secs(5)).map_err(|_| "connect")?;
+                // A frame with a valid length prefix and a body that is nothing the protocol knows.
+                let mut garbage = 8u32.to_le_bytes().to_vec();
+                garbage.extend_from_slice(&[0xff; 8]);
+                std::io::Write::write_all(&mut c, &garbage).map_err(|_| "write")?;
+                let result = observe(c, Expect::reason(&["protocol", "invalid"]));
+                rig.stop();
+                result
+            }
+            Scenario::Busy => {
+                // The 17th connection finds every session place taken: it is dropped without an answer (I16).
+                let rig = Rig::start(HelperUser::Uid(own_uid()), 4);
+                let held: Vec<Stream> = (0..MAX_SESSIONS)
+                    .map(|_| Stream::connect(&rig.name, Duration::from_secs(5)))
+                    .collect::<Result<_, _>>()
+                    .map_err(|_| "connect")?;
+                let c = Stream::connect(&rig.name, Duration::from_secs(5)).map_err(|_| "connect")?;
+                let result = observe(c, Expect::reason(&["busy"]));
+                drop(held);
+                rig.stop();
+                result
+            }
+            Scenario::WrongToken | Scenario::WrongVersion | Scenario::ClientKeepsWriting => {
+                Err("no handshake: the helper trusts the caller's OS identity (ADR 0027), so there is no token, version or refusal to read")
+            }
+            Scenario::WrongAccount => Err("another account is served a smaller view, not refused (the dispatcher's policy)"),
+            Scenario::SilentClient => Err("no handshake to time out; a silent connection holds a session until SESSION_MAX (I16)"),
+            Scenario::StopWithOpenConnection => {
+                Err("the daemon's stop ends the accept loop only; open sessions end with the process or SESSION_MAX (I16)")
+            }
+            Scenario::ListenerStopWithClientInBacklog => {
+                Err("the accept loop takes a client within 500 ms; no seam holds one in the backlog")
+            }
+            _ => Err("a property of paddock-ipc's Peer, covered by ipc-host"),
+        }
+    }
+
+    /// The ending test of the register's `dyno-helper` entry.
+    #[cfg(unix)]
+    #[test]
+    fn dyno_helper_ends_every_connection_right_or_is_in_the_ratchet() {
+        use paddock_ipc::testing::endings::ratchet::Ratchet;
+        use paddock_ipc::testing::endings::{failure_text, run_all};
+        let reports = run_all("dyno-helper", ending);
+        let ratchet = Ratchet::load_from(env!("CARGO_MANIFEST_DIR")).expect("the ratchet file");
+        if let Err(e) = ratchet.check("dyno-helper", &reports) {
+            panic!("{e}\n\n{}", failure_text(&reports));
+        }
+    }
 }

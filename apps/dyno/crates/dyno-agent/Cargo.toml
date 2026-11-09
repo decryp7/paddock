@@ -60,6 +60,8 @@ maxminddb = "0.27"
 libc = "0.2"
 
 [dev-dependencies]
+# The ending harness of ADR 0072 (tests/endings.rs): the raw-stream client, the scenarios, the ratchet.
+paddock-ipc = { workspace = true, features = ["testing"] }
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 # The helper rig serves a real dispatcher to the agent (tests/common/helper_rig.rs); no cycle: the helper does not depend on the agent.
 dyno-helper = { path = "../dyno-helper" }
