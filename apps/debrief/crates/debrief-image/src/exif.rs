@@ -134,6 +134,7 @@ pub fn capture_time(raw: &[u8]) -> Option<ExifTime> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "test code: a failed unwrap is the failed test")]
 pub(crate) mod tests {
     use super::*;
 

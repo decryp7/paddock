@@ -47,10 +47,15 @@ const JPEG_QUALITY: u8 = 88;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SourceFormat {
+    /// PNG.
     Png,
+    /// JPEG.
     Jpeg,
+    /// BMP.
     Bmp,
+    /// GIF.
     Gif,
+    /// WebP.
     Webp,
 }
 
@@ -84,19 +89,33 @@ impl SourceFormat {
 /// Why an image was refused. Messages say what to do; they never contain the image's content.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ImageError {
+    /// No bytes at all.
     #[error("the image is empty")]
     Empty,
+    /// More bytes than the size limit.
     #[error("the image is {bytes} bytes; images up to {max} bytes are accepted")]
-    TooLarge { bytes: usize, max: usize },
+    TooLarge {
+        /// The size of the image.
+        bytes: usize,
+        /// The largest size accepted.
+        max: usize,
+    },
+    /// The signature is none of the accepted formats.
     #[error("this is not a PNG, JPEG, BMP, GIF or WebP image")]
     Unsupported,
+    /// The header claims more pixels than Debrief decodes.
     #[error("the image claims {width}×{height} pixels, more than Debrief decodes (at most {max_pixels} pixels, {max_side} per side)")]
     TooManyPixels {
+        /// The width the header claims.
         width: u32,
+        /// The height the header claims.
         height: u32,
+        /// The most pixels decoded.
         max_pixels: u64,
+        /// The longest side decoded.
         max_side: u32,
     },
+    /// The decoder could not read it; the text says why.
     #[error("the image cannot be read: {0}")]
     Damaged(String),
 }
@@ -106,8 +125,11 @@ pub enum ImageError {
 pub struct SanitizedImage {
     /// The clean copy: what the model gets and the webview shows.
     pub image: ImageInput,
+    /// The format the original had.
     pub source_format: SourceFormat,
+    /// The original's width in pixels, before downscaling.
     pub original_width: u32,
+    /// The original's height in pixels, before downscaling.
     pub original_height: u32,
     /// When it was taken, from its EXIF data.
     pub capture: Option<ExifTime>,
@@ -319,6 +341,7 @@ pub mod testing {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "test code: a failed unwrap is the failed test")]
 mod tests {
     use super::testing::*;
     use super::*;

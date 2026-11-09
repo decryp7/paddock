@@ -7,11 +7,14 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ImageMime {
+    /// PNG (`image/png`).
     Png,
+    /// JPEG (`image/jpeg`).
     Jpeg,
 }
 
 impl ImageMime {
+    /// The MIME type as the provider's API names it.
     pub fn as_str(self) -> &'static str {
         match self {
             ImageMime::Png => "image/png",
@@ -41,6 +44,7 @@ impl ImageInput {
         }
     }
 
+    /// How the image is encoded.
     pub fn mime(&self) -> ImageMime {
         self.mime
     }
@@ -50,10 +54,12 @@ impl ImageInput {
         &self.bytes
     }
 
+    /// Width in pixels.
     pub fn width(&self) -> u32 {
         self.width
     }
 
+    /// Height in pixels.
     pub fn height(&self) -> u32 {
         self.height
     }
