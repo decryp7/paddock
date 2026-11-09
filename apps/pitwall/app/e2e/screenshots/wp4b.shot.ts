@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { waitForStableFrame } from '../../../../../ui/projects/paddock-e2e/src/index.ts';
 
 // The Chat tab's composer of ADR 0023 WP-4b, for the independent review (rule 22): files attached and sent, a refusal, the
 // context meter at each level, push-to-talk recording (browser build only: the app has no speech input until WP-7) and the
@@ -182,7 +183,7 @@ test.describe('WP-4b screenshots', () => {
           await expect(pane.getByTestId('assistant-composer')).toHaveClass(/dropping/);
           await expect(pane.locator('.drop-hint')).toBeVisible();
           // Let the failure banner's removal and the highlight settle: two frames after the class is set (review 2 P2-E).
-          await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+          await waitForStableFrame(page);
           await shot(page, '8-dropping', 'Dropping files', 'Files dragged over the composer');
         });
       }

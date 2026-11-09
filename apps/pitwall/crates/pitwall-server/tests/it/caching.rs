@@ -324,12 +324,10 @@ async fn keep_warm_saves_the_prefix_when_the_model_unloads_and_restores_it_on_lo
     let body = json!({"model": "warm-chat", "stream": false, "messages": [{"role": "user", "content": "hi"}]});
     post(&h, &key, body.clone(), &[]).await;
     assert!(h.st.serving.release_all() >= 1);
-    for _ in 0..50 {
-        if h.slot_calls.lock().unwrap().iter().any(|c| c.contains(":save:")) {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
+    common::until("the prefix is saved on unload", || {
+        h.slot_calls.lock().unwrap().iter().any(|c| c.contains(":save:"))
+    })
+    .await;
     let saved = h
         .slot_calls
         .lock()

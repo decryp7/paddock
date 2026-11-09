@@ -8,12 +8,12 @@ import { dialogsAnswering } from '../../testing/render';
 import { OPEN_SETTINGS } from '@decryp7/paddock-ui/shell/notify';
 import { startMainWindow } from './main-window';
 
-const flush = async () => {
-  for (let i = 0; i < 4; i++) {
+/** Runs Angular's effects and microtasks until `check` passes (it throws until then). */
+const until = (check: () => void) =>
+  vi.waitFor(() => {
     TestBed.tick();
-    await new Promise((r) => setTimeout(r, 0));
-  }
-};
+    check();
+  });
 
 describe('the main window’s start', () => {
   function setup(backend: MockBackend) {
@@ -44,14 +44,13 @@ describe('the main window’s start', () => {
 
   it('loads the live picture in the background and asks nothing when nothing is pending', async () => {
     const { opened } = setup(new MockBackend());
-    await flush();
-    expect(TestBed.inject(LiveStore).server()).not.toBeNull();
+    await until(() => expect(TestBed.inject(LiveStore).server()).not.toBeNull());
     expect(opened).toEqual([]);
   });
 
   it('asks the first-run service question and the quit question the app asked for before the window loaded', async () => {
     const { opened } = setup(new MockBackend({ askConsent: true, quitAsk: true }));
-    await flush();
+    await until(() => expect(opened.length).toBe(2));
     expect(opened.map((o) => o.id).sort()).toEqual(['pw.quit', 'pw.service-consent']);
   });
 

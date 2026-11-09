@@ -493,13 +493,16 @@ mod tests {
         let jobs = jobs();
         let mut own = spec(None);
         own.own_progress = true;
+        let (finish, finished) = oneshot::channel::<()>();
         start(&jobs, own, sink, |ctx| async move {
             ctx.set(1000);
-            tokio::time::sleep(Duration::from_secs(5)).await;
+            finished.await.ok();
             Ok(Outcome::Done(Value::Null))
         });
         settle().await;
         tokio::time::advance(Duration::from_secs(5)).await;
+        settle().await;
+        finish.send(()).unwrap();
         settle().await;
         let done: Vec<u64> = lock(&events)
             .iter()

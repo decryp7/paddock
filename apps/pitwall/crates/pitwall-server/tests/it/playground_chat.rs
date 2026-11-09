@@ -50,7 +50,7 @@ async fn all(r: pitwall_loopback::Response) -> Vec<Value> {
 #[tokio::test]
 async fn the_stream_starts_and_says_loading_before_a_cold_model_load_finishes() {
     let h = harness(false).await;
-    h.start_hold.store(true, Ordering::SeqCst);
+    h.start_hold.close();
     let mut r = open(&h, request(json!({}))).await;
     assert_eq!(r.status, 200);
     // The first frame arrives while the model has not started: the load is a labelled phase, not a silent wait (ER-18).
@@ -59,7 +59,7 @@ async fn the_stream_starts_and_says_loading_before_a_cold_model_load_finishes() 
     assert_eq!(first[0]["kind"], "phase", "{first:?}");
     assert_eq!(first[0]["phase"]["kind"], "loading", "{first:?}");
     assert_eq!(h.starts.load(Ordering::SeqCst), 0, "the model is still loading");
-    h.start_hold.store(false, Ordering::SeqCst);
+    h.start_hold.release();
     let rest = all(r).await;
     let kinds: Vec<&str> = rest.iter().map(|f| f["kind"].as_str().unwrap()).collect();
     assert!(kinds.contains(&"delta") && kinds.last() == Some(&"done"), "{kinds:?}");
@@ -120,9 +120,26 @@ async fn time_to_first_token_is_the_first_tokens_not_the_whole_answers() {
     let h = harness(false).await;
     // Warm the model so the cold load is not in the numbers, then make the answer's tail slow.
     all(open(&h, request(json!({}))).await).await;
-    h.tail_delay_ms.store(400, Ordering::SeqCst);
-    let events = all(open(&h, request(json!({}))).await).await;
-    let done = events.last().unwrap();
+    h.tail_hold.close();
+    let opened = std::time::Instant::now();
+    let mut r = open(&h, request(json!({}))).await;
+    // The first token reaches the client while the rest of the answer is still held back by the engine.
+    let mut seen = vec![];
+    let first_delta = loop {
+        let chunk = r.chunk().await.unwrap().expect("the stream ends only after a first token");
+        seen.extend(frames(&String::from_utf8_lossy(&chunk)));
+        if seen.iter().any(|f| f["kind"] == "delta") {
+            break opened.elapsed().as_millis() as u64;
+        }
+    };
+    assert!(!seen.iter().any(|f| f["kind"] == "done"), "the end has not been sent yet: {seen:?}");
+    h.tail_hold.release();
+    seen.extend(frames(&String::from_utf8_lossy(&r.bytes(1 << 20).await.unwrap())));
+    let done = seen.last().unwrap();
+    assert_eq!(done["kind"], "done", "{seen:?}");
     let ttft = done["ttftMs"].as_u64().unwrap();
-    assert!(ttft < 300, "the first token came long before the end, ttft {ttft} ms: {done}");
+    assert!(
+        ttft <= first_delta,
+        "the first token's time ({ttft} ms) is not the end's (the client saw it at {first_delta} ms): {done}"
+    );
 }

@@ -5,7 +5,6 @@
 use crate::common;
 use common::{harness_in, Harness, Reply};
 use serde_json::{json, Value};
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 const TINY: &str = "tiny-q4_k_m";
@@ -22,7 +21,7 @@ fn messages() -> Value {
 async fn busy() -> (Harness, String, tokio::task::JoinHandle<Reply>) {
     let h = harness_in(tempfile::tempdir().unwrap(), false).await;
     let key = h.make_key("Owner").await;
-    h.delay_ms.store(800, Ordering::SeqCst);
+    h.hold.close();
     assert_eq!(h.rpc("set_model_slots", json!({"id": TINY, "slots": 1})).await.status, 200);
     let (client, k) = (h.client.clone(), key.clone());
     let running = tokio::spawn(async move {
@@ -46,12 +45,10 @@ async fn busy() -> (Harness, String, tokio::task::JoinHandle<Reply>) {
             body: String::from_utf8_lossy(&raw).into_owned(),
         }
     });
-    for _ in 0..200 {
-        if h.st.serving.loaded().first().is_some_and(|m| m.active_requests > 0) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    common::until("the request holds the slot", || {
+        h.st.serving.loaded().first().is_some_and(|m| m.active_requests > 0)
+    })
+    .await;
     assert_eq!(h.st.serving.loaded()[0].active_requests, 1, "the slot is taken");
     (h, key, running)
 }
@@ -95,6 +92,7 @@ async fn a_queued_stream_answers_at_once_and_is_cancelled_by_id() {
     assert!(body.contains("\"code\":\"cancelled\""), "typed cancelled frame: {body}");
     assert!(!body.contains("[DONE]") || body.contains("cancelled"));
     // The running request is untouched.
+    h.hold.release();
     assert_eq!(running.await.unwrap().status, 200);
     h.st.serving.release_all();
 }
@@ -119,6 +117,7 @@ async fn another_apps_key_cannot_cancel_but_the_admin_can() {
         404,
         "gone"
     );
+    h.hold.release();
     assert_eq!(running.await.unwrap().status, 200);
     h.st.serving.release_all();
 }
@@ -146,6 +145,7 @@ async fn an_uncontended_stream_carries_the_id_with_its_provenance_and_a_queued_o
     let queued = open_stream(&h, "/v1/chat/completions", &key, chat(true)).await;
     assert_eq!(queued.status, 200);
     let _ = job_id(&queued);
+    h.hold.release();
     let body = String::from_utf8_lossy(&queued.bytes(1 << 20).await.unwrap()).into_owned();
     assert!(body.contains("[DONE]"), "{body}");
     assert_eq!(running.await.unwrap().status, 200);

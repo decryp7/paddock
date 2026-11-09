@@ -180,12 +180,10 @@ async fn enabling_the_schedule_runs_the_first_check_then_waits_for_the_interval(
     assert_eq!(st.status, 200, "{}", st.body);
     assert_eq!(st.json()["settings"], json!({"enabled": true, "schedule": "daily"}));
     // The first check is started by enabling it.
-    for _ in 0..100 {
-        if fake.calls.load(Ordering::SeqCst) > 0 && h.st.update_status().last_checked_at.is_some() {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
+    common::until("the first check to finish", || {
+        fake.calls.load(Ordering::SeqCst) > 0 && h.st.update_status().last_checked_at.is_some()
+    })
+    .await;
     assert_eq!(fake.calls.load(Ordering::SeqCst), 1);
     assert!(h.st.scheduled_update_tick().await.is_none(), "not due again for a day");
     assert_eq!(fake.calls.load(Ordering::SeqCst), 1);
