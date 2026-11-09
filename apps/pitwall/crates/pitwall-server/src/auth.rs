@@ -489,8 +489,11 @@ fn unique_id(apps: &[AppRecord], base: AppId) -> AppId {
 mod tests {
     use super::*;
 
+    /// An `Auth` over a temporary data folder made private like the real per-user one (a Windows CI runner's TMP inherits a
+    /// drive root's entries, where `admin.key` is not stored; CI run 7821).
     fn auth() -> (tempfile::TempDir, Auth) {
         let d = tempfile::tempdir().unwrap();
+        paddock_secrets::make_folder_private(d.path()).unwrap();
         let a = Auth::open(Dirs::at(d.path()));
         (d, a)
     }
