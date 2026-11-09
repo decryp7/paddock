@@ -1,7 +1,8 @@
 # 74. Declared hosts and machine leases: one inventory of every runner, a live check against it, a lease for shared test machines
 
 - Status: Proposed (2026-11-09; drafted at the user's request of 2026-11-09 to write the redesign ADRs 0071 to 0074 now.
-  Revision 2 answers the independent review of revision 1 (`8080eb707`): P1-1 to P1-5 and its P2s. Needs the user's
+  Revision 2 answers the independent review of revision 1 (`8080eb707`): P1-1 to P1-5 and its P2s. Revision 3 applies
+  the re-review of revision 2 (`e954827e0`): the D2 evidence corrected to two measured pairs, and its P2s. Needs the user's
   decisions below before any build; WP-0, the interim Windows VM lock, is being done separately by the coordinator)
 - Date: 2026-11-09
 - Related: ER-21 / rule 40 (recurring bugs mean a missing design rule), ER-20 / rule 51 (parallelism and cost), ER-24 /
@@ -55,7 +56,7 @@ the hand-off log; "reported" means stated in a hand-off line that I could not ch
 | I4 | `stable-workspace` hit its 300 s bound on `d7-mac-mini` because the runner's work folder was on the internal disk and the CI home on `/Volumes/d7sst7`, so `mv` copied the whole checkout (7 to 293 s; nine timeouts in runs 7706 to 7761). The same cause was already recorded on 2026-11-04 (run 7501) and left as "runner fix: with the user". | Verified: `c2179dba0` message (measurements), `docs/lessons.md` "The macOS runner's stable-workspace step copies the checkout across volumes (2026-11-04)"; runner moved at 03:35 +08 (hand-off). Guard added in `c2179dba0`. | Which volume each runner folder lives on, and the rule that work folder and CI home share one |
 | I5 | A Dyno disk benchmark test needed 401 GB free: the default margin is 10 % of the volume, and the CI volume is 4 TB with 266 GB free. | Verified: `2c7c8891e` (on `fix/dyno-bench-disk-size`, `train/2026-11-08-1`): the test now passes an explicit `--free-margin-mib`. | A test that reads the host's volume size |
 | I6 | Two agents used the Paddock Windows test VM (`paddock-win11-test`) at once: one loaded all 4 vCPUs from an SSH session and lost SSH, another powered the VM off. | Verified: overnight log line 1474 ("INCIDENT"), `9c738b1ad` lesson; the VM's `.vmx` declares `numvcpus = "4"`, `memsize = "8192"`. `scripts/vm-win.sh` (on `origin/tools/vm-smoke-defender`) has a load check but no lock. | Who holds the VM; how much of it a user may load |
-| I7 | Up to four sccache servers can share one local disk cache on the Linux host: `d-gtr9` ran four container jobs at once for 67 % of its busy time, every Linux job starts its own sccache server on the local backend at `/sccache`, and sccache's docs say concurrent servers on one local cache race. | Verified: the Gitea job list (D2); jobs 32663, 32665 and 32666 each logged `sccache: local disk /sccache` and ran at the same time (23:46:28 to 23:47:01Z on 2026-11-08). That the containers' `/sccache` is one host folder is ADR 0025 §8's statement, not re-checked (the host is not reachable from the Mac). No failure has been traced to it yet. | The Linux host's jobs at once, against ADR 0025 §8's one job per Linux host |
+| I7 | Up to four sccache servers can share one local disk cache on the Linux host: `d-gtr9` ran four container jobs at once for 67 % of its busy time, every Linux job starts its own sccache server on the local backend at `/sccache`, and sccache's `docs/Local.md` (line 7, the same at the pinned `v0.19.0` and at `main`): "The local storage only supports a single sccache server at a time. Multiple concurrent servers will race and cause spurious build failures" (https://github.com/mozilla/sccache/blob/v0.19.0/docs/Local.md). | Verified: the Gitea job list (D2); in their job logs two pairs of sccache servers ran at once, each on `sccache: local disk /sccache`: jobs 32663 and 32664 (both servers up from 23:44:47 to 23:45:32Z on 2026-11-08) and jobs 32665 and 32666 (23:47:36 to 23:48:32Z), from each server's start to the stats step that stops it. That `/sccache` is one host folder shared by the containers is ADR 0025 §8's statement and is indicated by the warm cache (job 32663, a fresh container, hit 1,312 of 1,320 compiles); it was not read on the host. No failure has been traced to it yet; one would look like a flaky Linux compile (ER-28). | The Linux host's jobs at once, against ADR 0025 §8's one job per Linux host |
 | I8 | Dyno's `link::model` probe timed out at 60 s in run 7775; in the job logs it took 15 to 26 s whenever it overlapped `dyno-bench`'s all-core tests in the same job, about 7 s otherwise. Correlated; the cause is open and was not reproduced locally. | Verified: `docs/benchmarks.md` block "2026-11-09, CI share on the shared Mac" on `deb01e7ca`; overnight log line 1474. | Tests that may size their own load from the host's core count, not the job's share |
 | I9 | Earlier, same class: a Spotter test expected `NotFound` under `temp_dir()` and got `Unreachable` because the CI Mac's temp folder sat under `/Volumes/` (2026-11-04); launchd runners on `/Volumes/d7sst7` failed with exit 78 (TCC, removable volumes) until their program moved to the internal disk (2026-11-04 and 2026-11-09 01:19). | Verified: `docs/lessons.md` (two 2026-11-04 entries); hand-off 2026-11-09 01:19. | The volume and its kind (internal or removable) of each runner folder |
 
@@ -103,7 +104,16 @@ fact that will drift; "fine" reads the machine or a declared list.
 
 **WP-0 (interim, being done separately by the coordinator, not part of this ADR's build).** `vm-win.sh`'s mutating
 commands, `chain-release.sh` and `make-no-dyno-snapshot.sh` take the existing `./dev ci slot` (one slot, one fixed root),
-the pattern the Tart scripts already use. It stops I6 now. The lease below replaces it.
+the pattern the Tart scripts already use. It is `origin/fix/vm-smoke-take-vm-lock` (`22e048c7c`: `vm-lock.sh`, a ci slot,
+taken by those three scripts). It stops I6 for the scripts on that branch now; the lease below replaces it.
+
+**Branches that still carry unlocked VM scripts** (read 2026-11-09; each has Windows VM scripts that call `vm-win.sh` or
+`vmrun` without WP-0's lock, some with the old optional plock line): `origin/feat/dev-vm-broker`,
+`origin/tools/win-test-vm`, `origin/tools/win-update-test`, and the Dyno test branches `origin/test/dyno-release-vm-checks-v2`,
+`test/dyno-service-model` (and `-2`, `-3`), `test/dyno-tray-icons`, `test/dyno-vm-harness-1.1` (and `-linux`, `-mac`,
+`-r2`, `-win`), `test/dyno-vm-reset-and-seed`, `test/dyno-widget-lists-race`, `test/dyno-win-screens`,
+`test/dyno-wire-roundtrip`. Running a VM script from any of them bypasses WP-0; they take it when they merge main, and the
+hook below covers the meantime.
 
 **The machines list.** Part A has its own small declared list, `conformance/ci/machines.toml`, so it does not wait for
 the host inventory (Part B later reads it rather than repeating it):
@@ -157,8 +167,10 @@ already use; the kernel frees it when its holder dies, so nothing is reclaimed b
   expiry, owner death or `break` leaves it `dirty` in the lease record; the next `acquire` reports it, and the driver
   accepts only `revert` to `clean_state` (or, for Tart, deleting leftover clones of the old lease's prefix) or a read-only
   `verify` (the VM's power state, its current snapshot, the guest's processes) until one of them has run.
-- **Priority and waiting.** Waiters queue in order; `--priority release` goes to the head of the queue (ER-24: tests never
-  crowd out a release). A held lease is never pre-empted; its holder sees "a release run is waiting" on its next check.
+- **Priority and waiting.** `flock` has no queue or fairness, so the lease adds one: a ticket file per waiter in
+  `<lease_root>/<machine>.queue/` (`<priority>-<sequence>-<pid>-<start time>`, created atomically; a ticket whose owner is
+  gone by identity is removed). A waiter tries the lock only when its ticket is first in order, release tickets before
+  all others (ER-24: tests never crowd out a release). A held lease is never pre-empted; its holder sees "a release run is waiting" on its next check.
   Every wait is bounded (`--wait`, ER-32) and its message names the holder's purpose and age.
 - **Status and break.** `status` lists holders, purpose, age, last activity and state. `break <machine> --reason` ends
   the holder through `paddock_proc` by identity and logs the reason and the broken lease's purpose. Any process of the
@@ -177,8 +189,8 @@ already use; the kernel frees it when its holder dies, so nothing is reclaimed b
   so a CI job and a developer's run share one lease.
 - `chain-release.sh` and `make-no-dyno-snapshot.sh` stop calling `vmrun` directly, or call `lease check` first.
 - **A Claude Code `PreToolUse` hook** (`.claude/hooks/vm-lease.sh`, tested by its `.test.sh`, the shape of
-  `no-pgrep-wait.sh`) refuses a Bash command that runs `vmrun`, `tart run|stop|exec|delete`, or `ssh`/`scp` to the test
-  VM's host alias without `PADDOCK_LEASE_TOKEN` in its environment, and says which lease to take. It covers agents that
+  `no-pgrep-wait.sh`) refuses a Bash command that runs `vmrun`, `tart run|stop|exec|delete`, or `ssh`/`scp` as the guest accounts
+  (`paddock-test@`, `paddock-admin@`) or naming the VM (`paddock-win11-test`, its `.vmx`), without `PADDOCK_LEASE_TOKEN` in its environment, and says which lease to take. It covers agents that
   bypass the scripts, which is how I6 happened.
 - Scripts that load a guest on purpose read `max_load` from the machines list.
 
@@ -211,7 +223,7 @@ ci_jobs = 3                         # runners x capacity on this host
 reserved_cores = 2                  # the system, besides the agents' share
 reserved_ram_mb = 32768
 agents = { cores = 10, heavy_jobs = 5, build_jobs_each = 2 }   # rule 41's numbers, now declared here
-cpu_oversubscription = 1.7          # allowed busy threads / cores; see below and D1
+cpu_oversubscription = 1.75         # allowed busy threads / cores; see below and D1
 test_threads = 8                    # per CI job: coordinator decision 2026-11-09 (overnight log 1474); the pushed
                                     # fix/main-after-7761 still computes 4 = (14 - 2) / 3
 open_files_min = 65536              # every CI job's soft limit (I3)
@@ -248,12 +260,13 @@ version = "v5.2.3"
 
 Rules of the file, checked by a conformance test (`hosts`, new) that fails on today's state until migrated:
 
-- **The arithmetic is defined, not hoped for.** Build share per job = `(cores - reserved_cores - agents.cores) /
-  ci_jobs`, at least 1, unless the host declares `cpu_oversubscription`; then the busy threads at peak (`ci_jobs` × build
-  share + `agents.cores` + `reserved_cores`) may reach `cores` × `cpu_oversubscription`. Test threads may exceed the
-  build share for wait-heavy suites and are bounded by the same oversubscription. On the Mac today: 3 × 4 + 10 + 2 = 24
-  busy threads on 14 cores = 1.7, so either `cpu_oversubscription` is 1.7 or a share shrinks; the measured slowdown at
-  22 to 23 busy threads, and its limits, are in "Parallelism and cost" (decision D1).
+- **The arithmetic is defined, not hoped for.** With `os` = `cpu_oversubscription` (1 when not declared): build share per
+  job = max(1, floor((cores × os − agents.cores − reserved_cores) / ci_jobs)), and the check is that the peak,
+  `ci_jobs` × build share + `agents.cores` + `reserved_cores`, is at most `cores` × `os` (the max(1, ...) may exceed it
+  only with a warning). Test threads may exceed the build share for wait-heavy suites, bounded by the same `cores` × `os`
+  minus the agents' and reserved cores. On the Mac today: os = 1.75 gives floor((24.5 − 10 − 2) / 3) = floor(4.17) = 4
+  build jobs, a peak of 3 × 4 + 10 + 2 = 24 ≤ 24.5. The measured slowdown at 22 to 23 busy threads, and its limits, are in
+  "Parallelism and cost" (decision D1).
 - `ci_jobs` equals the sum of its runners' `capacity`; every volume a runner or machine names exists on its host; a
   runner's `work_volume` holds `ci-home` (I4); its `program_volume` is `internal` on macOS (I9).
 - **No secrets or personal data:** no addresses, tokens, user or account names, serial numbers; mounts and labels only
@@ -306,7 +319,10 @@ reads the value and compares it with the declaration:
 | jobs at once | busy slots from `./dev ci slot status` | the job's own slot shows as busy | error when more than `ci_jobs` are busy; in a Linux container: `not measured` (no slots, and a container cannot see its siblings; D2) |
 | runner version | the version the runner prints at job start, if exposed as an env | none possible | warning only; `not measured` when not exposed |
 
-A Linux container reports cores, RAM, open files and free space for its own container, and `not measured` for jobs at
+Which controls prove visibility: the open-files child, the job's own slot and the created file show that the probe sees
+the live thing. The second sources for cores, RAM and free space read the same kernel value on macOS (`hw.ncpu` and
+`available_parallelism`, `hw.memsize` and sysinfo, `statvfs` and `df -k`): they catch a parsing error, not blindness, and
+count as weaker controls (said so in the output). A Linux container reports cores, RAM, open files and free space for its own container, and `not measured` for jobs at
 once and for the host volumes it cannot see. The raw probe values go to the log (ER-26) and a one-line summary to the
 job summary. A mismatch prints one `::error::` per fact with the declared and live value and the next step ("edit
 `conformance/ci/hosts.toml`" or "set NumberOfFiles in the runner's plist: `./dev host runner-config <runner>`"). Rollout:
@@ -403,7 +419,9 @@ The three parts migrate independently.
 
 - **Part A:** WP-0 (separately, now). Then WP-A0 (what an owner is in the harness), WP-A1 (the lease), WP-A2 (every VM
   script, the drivers' token check, the conformance test, the hook, the brief template line); WP-0's slot root becomes the
-  lease root and the plock lines go.
+  lease root and the plock lines go. The brief template line: "name the machine; take its lease; hold it with `lease run`
+  or `lease renew` across long local work between VM steps (an installer build longer than `idle_expiry` otherwise loses
+  the lease and the next holder reverts the VM)".
 - **Part B:** (1) land `deb01e7ca` as it is, the interim fix of I1; (2) `hosts.toml` with today's facts and its test
   (WP-B1); (3) build-jobs reads `hosts.env` (WP-B2) with every runner on the `pending` list, which shrinks as each runner
   gets its name (set when idle, one at a time, through `./dev host runner-config`); (4) the live check in warning mode
@@ -445,7 +463,7 @@ three parts (D0).
 - **D0. One ADR or two?** Part A (the lease) stands alone. Recommendation: **keep it in this ADR as Part A, but let it be
   accepted and built on its own, first;** split it into its own ADR only if you want to decide Part B or C later.
 - **D1. Keep three macOS runners on the shared Mac?** Recommendation: **yes, for now, declared as `ci_jobs = 3`,
-  `reserved_cores = 2`, `agents.cores = 10`, `test_threads = 8` and `cpu_oversubscription = 1.7`, and decide again after
+  `reserved_cores = 2`, `agents.cores = 10`, `test_threads = 8` and `cpu_oversubscription = 1.75`, and decide again after
   one week of queue plus run times per macOS job** from the live check's logs, against the week before. For: the macOS
   runner was the main CI bottleneck (overnight log 01:0x), and three at once ran for only 8.9 % of the Mac's busy time
   so far. Against: the evidence that three are cheap is weak (single local runs, see "Parallelism and cost"; the 60 s
@@ -455,12 +473,14 @@ three parts (D0).
 - **D2. The Linux host runs four jobs at once on one sccache cache.** From the Gitea job list (300 runs, 2026-11-01 to
   2026-11-09, 3,155 jobs on `d-gtr9`): one job at once for 14.6 % of its busy time, two for 10.4 %, three for 7.7 %,
   **four for 66.7 %** (five for 0.5 %, probably the time stamps of cancelled jobs; not checked). Every Linux job runs its
-  own sccache server on the local backend at `/sccache`, three of them at the same time in jobs 32663, 32665 and 32666
-  (I7), against ADR 0025 §8 and sccache's own warning. Options: (a) a cache per job on the mount, taken through the same
+  own sccache server on the local backend at `/sccache`; two pairs of servers ran at once in the four job logs read (32663
+  with 32664, 23:44:47 to 23:45:32Z; 32665 with 32666, 23:47:36 to 23:48:32Z; I7), against ADR 0025 §8 and sccache's `docs/Local.md` (line 7, the same at the pinned `v0.19.0` and at `main`): "The local storage only supports a single sccache server at a time. Multiple concurrent servers will race and cause spurious build failures" (https://github.com/mozilla/sccache/blob/v0.19.0/docs/Local.md). Options: (a) a cache per job on the mount, taken through the same
   slot lock on `/sccache` (ADR 0025 §8's planned follow-up; all containers see one kernel and one file there), (b) the
   Redis backend `setup-rust` already supports (`sccache-backend: auto` with an endpoint; whether a Redis server is live
   for it is not verified), (c) capacity 1, which would queue the 67 % of busy time that runs four at once. Recommendation:
-  **(a) now** (no new service, keeps the parallelism, about a day), (b) later if a cache shared across hosts is wanted,
+  **(a) soon** (no new service, keeps the parallelism, about a day; its cost: one cache, 99 % warm today, becomes up to four
+  colder per-slot caches sharing one size budget, so hit rates drop until each slot is warm; until it lands, a Linux
+  compile error that does not reproduce locally is checked for an overlapping sccache server first), (b) later if a cache shared across hosts is wanted,
   not (c). The mount and capacity are read from `d-gtr9`'s runner configuration by its owner, not by the live check,
   which cannot see sibling containers.
 - **D3. Mismatch: fail or warn?** Recommendation: warn until a host has had a clean week, then fail. The fix is one line
