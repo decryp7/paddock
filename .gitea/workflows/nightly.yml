@@ -332,10 +332,15 @@ jobs:
         crates/paddock-service/**
         crates/paddock-jobs/**
         crates/paddock-proc/**
+        crates/paddock-setup/**
+        crates/paddock-updater/**
         ui/**
       # --version: pitwall-server has no --self-test; its --version starts the binary from the built app and exits 0 (the old
       # macos-verify-bundle.sh ran the same).
       sidecars: pitwall-server:--version
+      # A per-machine app (ADR 0053), as pitwall-release.yml: the installer embeds paddock-setup.exe and is read as an artifact.
+      windows-pre-bundle: node scripts/stage-paddock-setup.mjs --app pitwall
+      windows-installer-check: node conformance/release/check-per-machine-installer.mjs --conf apps/pitwall/app/src-tauri/tauri.conf.json --dir
       setup-node: false
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     secrets:
