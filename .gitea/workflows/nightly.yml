@@ -99,6 +99,9 @@ jobs:
         shell: bash
     env:
       CARGO_TERM_COLOR: always
+      # Read credential and tag rule for ./dev's prebuilt download (ADR 0022 R0b; a run for a tag builds from source).
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
     steps:
       - uses: actions/checkout@v4
 
