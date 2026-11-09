@@ -181,6 +181,12 @@ changes here, every app's copy is updated in the same change.
     (g) Before landing a branch (a merge into main), the integrator lints its commits locally:
     `node conformance/bin/paddock-conformance.mjs commit-lint --range origin/main..<branch>`. A push to main lints only what main
     itself gets (`--first-parent`), so this is where a branch's own subjects and trailers are checked; C23 is the backstop.
+    (h) is reserved.
+    (i) After a CI run fails, each fix round runs only what the fix touches. Dispatch `ci.yml` (workflow_dispatch) with the
+    input `base` set to the commit CI last tested, not main, so the planner sees only the fix's diff. Use "rerun failed jobs"
+    on the same commit (`POST /api/v1/repos/{owner}/{repo}/actions/runs/{run}/rerun-failed-jobs`) only to retry a suspected
+    flake, and never to turn red green (ER-12). Once every fix round is green, run the full affected plan against main once on
+    the final tree (ER-8), and only then land.
     *Why:* CI runners are the scarcest resource, and every wasted run delays a release.
 
 ## Performance analysis (user, 2026-10-29)

@@ -1499,3 +1499,7 @@ A redaction default in a shared crate was widened for one app's problem report. 
 ## Gitea tokens cannot mint narrower tokens, and agents must not create bot users (2026-11-08)
 
 An agent looking for a narrower CI token found that a Gitea token cannot create a token with fewer rights, and the only other route was creating a bot user. Agents must not create users. The user creates scoped CI tokens (one per purpose, least privilege) and the agent is given the one it needs; if none exists, the agent stops and asks.
+
+## Fix rounds after a red CI run rerun only the fix (2026-11-09)
+
+Each full re-run of a combined train cost about 35 minutes of every runner, while the fixes touched a few jobs. The user asked: keep running only the failed tests and builds, then the full CI once everything passed. Rule 50(i): fix rounds dispatch with `base` = the last tested commit; the full affected plan runs once on the final tree before landing.
