@@ -442,12 +442,13 @@ export function readApps(files, root = ROOT) {
   return apps;
 }
 
-/** Rust crates: dir -> { name, workspace, deps: [dir] } from `cargo metadata --no-deps` of every workspace root. */
-export function cargoGraph(files, root = ROOT) {
+/** Rust crates: dir -> { name, workspace, deps: [dir] } from `cargo metadata --no-deps` of every workspace root; `cargoTimings` (an array) gets { manifest, ms } per call. */
+export function cargoGraph(files, root = ROOT, cargoTimings = null) {
   const crates = new Map();
   const roots = files.filter((f) => f.endsWith('Cargo.toml') && /^\[workspace\]/m.test(readFileSync(join(root, f), 'utf8')));
   for (const m of roots) {
     let meta;
+    const t0 = Date.now();
     try {
       meta = JSON.parse(
         execFileSync('cargo', ['metadata', '--format-version', '1', '--no-deps', '--offline', '--manifest-path', join(root, m)], {
@@ -460,6 +461,7 @@ export function cargoGraph(files, root = ROOT) {
     } catch (e) {
       throw new Error(`cargo metadata failed for ${m}: ${String(e.stderr ?? e.message).trim().split('\n').slice(-3).join(' ')}`);
     }
+    cargoTimings?.push({ manifest: m, ms: Date.now() - t0 });
     const workspace = dirname(m);
     for (const p of meta.packages) {
       const dir = repoRelative(root, dirname(p.manifest_path));

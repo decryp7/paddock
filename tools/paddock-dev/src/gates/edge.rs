@@ -183,25 +183,32 @@ impl NodePlanner {
             answers: std::cell::RefCell::new(None),
         }
     }
-
-    /// Why the planner could not answer, if it could not.
-    pub fn failure(&self) -> Option<String> {
-        self.answers.borrow().as_ref().and_then(|r| r.as_ref().err().cloned())
-    }
 }
 
 impl super::gating::Planner for NodePlanner {
     fn prefetch(&self, files: &[String]) {
         let input = serde_json::Value::from(files.to_vec()).to_string();
+        let started = std::time::Instant::now();
         let run = Real
             .run("node", &["scripts/affected-marks.mjs"], &self.root, Some(input.as_bytes()))
-            .map_err(|e| format!("scripts/affected-marks.mjs failed: {} (node must be on PATH)", e.message))
+            .map_err(|e| {
+                format!(
+                    "`node scripts/affected-marks.mjs` for {} files failed after {} ms: {} (node must be on PATH)",
+                    files.len(),
+                    started.elapsed().as_millis(),
+                    e.message
+                )
+            })
             .and_then(|out| {
                 serde_json::from_str::<std::collections::BTreeMap<String, Vec<String>>>(&out)
                     .map_err(|e| format!("scripts/affected-marks.mjs printed no JSON: {e}"))
             })
             .map(|m| m.into_iter().map(|(k, v)| (k, v.into_iter().collect())).collect());
         *self.answers.borrow_mut() = Some(run);
+    }
+
+    fn failure(&self) -> Option<String> {
+        self.answers.borrow().as_ref().and_then(|r| r.as_ref().err().cloned())
     }
 
     fn marks(&self, file: &str) -> Option<std::collections::BTreeSet<String>> {

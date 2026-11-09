@@ -17,13 +17,16 @@ export function outputsOf(plan) {
 }
 
 /** {file: outputs} for a list of files. */
-export function marks(files, root = ROOT) {
+export function marks(files, root = ROOT, timings = null) {
   const tracked = trackedFiles(root);
-  const graph = { cargo: cargoGraph(tracked, root), npm: npmGraph(tracked, root), apps: readApps(tracked, root) };
+  const graph = { cargo: cargoGraph(tracked, root, timings), npm: npmGraph(tracked, root), apps: readApps(tracked, root) };
   return Object.fromEntries(files.map((f) => [f, outputsOf(affected([f], graph, { perMachine: (x) => adoptsPerMachine(root, x) }))]));
 }
 
 if (isMain(import.meta.url)) {
   const files = JSON.parse(readFileSync(0, 'utf8'));
-  process.stdout.write(`${JSON.stringify(marks(files))}\n`);
+  // Each `cargo metadata` call is timed on stderr: a call that waits on cargo's package-cache lock shows as one slow line (C100 prints its tail).
+  const timings = { push: (t) => process.stderr.write(`affected-marks: cargo metadata ${t.manifest} ${t.ms} ms\n`) }; // written as each call ends, so a hang shows the last one that finished
+  const answer = marks(files, ROOT, timings);
+  process.stdout.write(`${JSON.stringify(answer)}\n`);
 }

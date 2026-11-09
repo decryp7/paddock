@@ -5,14 +5,16 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { after, test } from 'node:test';
+import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { warmDev } from './vm-test-support.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const LIB = join(here, 'vm-lock.sh');
 const DEV = join(here, '..', 'dev');
 const scratch = mkdtempSync(join(process.env.PADDOCK_TEST_SCRATCH ?? tmpdir(), 'vm-lock-test-'));
 after(() => rmSync(scratch, { recursive: true, force: true }));
+before(warmDev);
 
 let n = 0;
 /** Kills the holder's whole process group (its sleep too) so nothing outlives the test. */
@@ -45,7 +47,7 @@ test('a second acquirer fails at once with ::error naming the holder (pid, start
     assert.notEqual(second.status, 0);
     assert.match(second.stderr, /::error::.*test machine.*held by first/);
     assert.match(second.stderr, new RegExp(`pid ${holder.pid}\\b`));
-    assert.match(second.stderr, /started [A-Z][a-z]{2} \d/);
+    assert.match(second.stderr, /started [A-Z][a-z]{2} (\d|[A-Z][a-z]{2} +\d)/);
     assert.match(second.stderr, /next step/i);
     assert.ok(!lines(t.log).includes('second start'), 'the second never ran');
   } finally {

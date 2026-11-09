@@ -14,7 +14,7 @@
 // Positive controls (ER-33): a tree that does not parse, that names a package the metadata lacks, two packages with one
 // name@version, no workspace member, or registry crates with no readable source (not fetched) are "check broken", never a pass.
 import { spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 /** The Apple triples the probe resolves (both resolve the same cfgs today; a cfg on the architecture would differ). */
@@ -47,6 +47,13 @@ export const BINDING_PARENTS = {
  * with a binary is an error "binary, not scanned" (waivable by its exact path, `Cargo.lock#bin:<name>@<version>`).
  */
 export const REVIEWED_BINARIES = { ring: '0.17', evtx: '0.15', vcpkg: '0.2' };
+
+/**
+ * Exact files reviewed to be test fixtures, not shipped code (2026-11-09): system-deps 6.x keeps a zero-byte
+ * `src/tests/lib/libteststatic.a` that only its own unit tests point pkg-config at. A fixture is skipped only while the
+ * file is still empty (an archive with content cannot be assumed harmless), at the reviewed series, at that exact path.
+ */
+export const REVIEWED_FIXTURES = { 'system-deps': { series: '6', files: ['src/tests/lib/libteststatic.a'] } };
 
 /** The objc2-security features that switch a Keychain item on (ADR 0057 §3.2); the crate gates each Sec* item behind its own. */
 export const KEYCHAIN_FEATURE = /^(SecItem|SecKeychain|SecKeychainItem|SecKeychainSearch|SecImportExport|SecIdentitySearch)$/;
@@ -168,7 +175,7 @@ export function sourceScan(graph, { readSources = defaultReadSources, listBinari
   let read = 0;
   const unfetched = [];
   for (const p of graph.crates) {
-    const bins = REVIEWED_BINARIES[p.name] === series(p.version) ? [] : listBinaries(p.manifest_path);
+    const bins = REVIEWED_BINARIES[p.name] === series(p.version) ? [] : listBinaries(p.manifest_path).filter((b) => !reviewedEmptyFixture(p, b));
     if (bins.length) binaries.push({ key: `bin:${label(p)}`, what: `${label(p)}: ${bins.slice(0, 3).join(', ')}${bins.length > 3 ? ` and ${bins.length - 3} more` : ''}` });
     if (!scanBindings && MACOS_ONLY_BANNED.has(p.name)) continue; // their parents are reviewed in graphFindings
     const files = readSources(p.manifest_path);
@@ -198,6 +205,17 @@ function defaultReadSources(manifestPath) {
 }
 
 const defaultListBinaries = (manifestPath) => crateBinaries(dirname(manifestPath));
+
+/** True for a binary that is a reviewed fixture of its crate and has no bytes. */
+function reviewedEmptyFixture(p, rel) {
+  const r = REVIEWED_FIXTURES[p.name];
+  if (!r || r.series !== series(p.version) || !r.files.includes(rel)) return false;
+  try {
+    return statSync(join(dirname(p.manifest_path), rel)).size === 0;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Fetches and resolves one workspace for each Apple target: { meta, runs: [{ target, tree }] } or { broken }. `spawn` is

@@ -106,6 +106,20 @@ test('C99 graph: crate files of every language are read, root tests are not, a n
   assert.deepEqual(crateBinaries(root), ['prebuilt/libz.a', 'vendor.framework']);
 });
 
+test('C99 graph: a reviewed empty test fixture (system-deps 6.x src/tests/lib/libteststatic.a) is not a shipped binary; any change to it is', (t) => {
+  const FIX = 'src/tests/lib/libteststatic.a';
+  const scan = (files, version = '6.2.2', name = 'system-deps') => {
+    const root = makeApp(files);
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    return sourceScan({ crates: [{ name, version, source: 'registry+x', manifest_path: join(root, 'Cargo.toml') }] }, { readSources: () => [{ file: 'src/lib.rs', text: '' }] }).binaries;
+  };
+  assert.deepEqual(scan({ [FIX]: '' }), [], 'empty, at the reviewed series, at the reviewed path: nothing to scan');
+  assert.equal(scan({ [FIX]: 'x' }).length, 1, 'the same file with content is a binary again');
+  assert.equal(scan({ [FIX]: '' }, '7.0.0').length, 1, 'another series was not reviewed');
+  assert.equal(scan({ [FIX]: '', 'src/other/libz.a': '' }).length, 1, 'only the reviewed path is skipped, not every archive');
+  assert.equal(scan({ [FIX]: '' }, '6.2.2', 'other-crate').length, 1, 'another crate was not reviewed');
+});
+
 test('C99 graph: an unusable document is broken, an unread dependency is unfetched', () => {
   assert.match(readGraph({ packages: [], workspace_members: [] }, 'x').broken, /no workspace member/);
   assert.match(readGraph(metadata({ app: {} }), 'garbage').broken, /cannot read/);

@@ -6,9 +6,10 @@ import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, closeSync, readdirSync, existsSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { after, describe, test } from 'node:test';
+import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { efiBootImages, patchNoPrompt } from './vm-win/noprompt-iso.mjs';
+import { macOnly, warmDev } from './vm-test-support.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (p) => readFileSync(join(here, p), 'utf8');
@@ -17,6 +18,7 @@ const tempRoot = (() => { const r = spawnSync('getconf', ['DARWIN_USER_TEMP_DIR'
 const scratch = mkdtempSync(join(tempRoot, 'vm-win-test-'));
 const fakeVm = (dir) => { mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, '.paddock-fake-vm'), 'test\n'); return dir; };
 after(() => rmSync(scratch, { recursive: true, force: true }));
+before(warmDev);
 
 // The interim VM lock (scripts/vm-lock.sh) is always taken under a scratch root, never the host's real one.
 const lockTmp = join(scratch, 'lock-tmp'); // owner folders of the lock's holders live here, so a holder killed by a test ends with the scratch folder
@@ -117,7 +119,7 @@ describe('guard rails', () => {
     assert.match(noTargetRun('vm-win/prepare.sh', ['--lang', 'de-DE', '--input-locale', 'qwertz'], 'Lang3').stderr, /--input-locale must look like/);
   });
 
-  test('prepare.sh --vm-only refuses to run without a setup disc and changes nothing else', () => {
+  test('prepare.sh --vm-only refuses to run without a setup disc and changes nothing else', macOnly, () => {
     const dir = fakeVm(join(scratch, 'vm-only'));
     const fusion = join(scratch, 'VmOnlyFusion.app');
     mkdirSync(join(fusion, 'Contents/Library'), { recursive: true });
@@ -208,7 +210,7 @@ describe('only paddock-win11-test can be the target', () => {
     }
   });
 
-  test('a .vmx with more than one hard link is refused', () => {
+  test('a .vmx with more than one hard link is refused', macOnly, () => {
     const f = fakeFusion('HardLink');
     const dir = fakeVm(join(scratch, 'hard-link'));
     const vmDir = join(dir, 'vm/paddock-win11-test.vmwarevm');
@@ -280,7 +282,7 @@ describe('only paddock-win11-test can be the target', () => {
 });
 
 describe('vmrun password', () => {
-  test('an unencrypted VM gets no -vp and never reads the keychain', () => {
+  test('an unencrypted VM gets no -vp and never reads the keychain', macOnly, () => {
     const dir = fakeVm(join(scratch, 'plain'));
     const fusion = join(scratch, 'PlainFusion.app');
     const bin = join(scratch, 'plain-bin');
@@ -316,14 +318,14 @@ describe('ip', () => {
     return { PADDOCK_WIN_VM_DIR: dir, FUSION_APP: fusion, PADDOCK_VM_LEASES: f };
   };
 
-  test('takes the newest lease of the test VM fixed MAC and ignores other VMs', () => {
+  test('takes the newest lease of the test VM fixed MAC and ignores other VMs', macOnly, () => {
     const leases = lease('192.0.2.10', '00:50:56:2a:d0:c7') + lease('192.0.2.11', '00:0c:29:aa:bb:cc') + lease('192.0.2.12', '00:50:56:2A:D0:C7');
     const r = run('vm-win.sh', ['ip'], env(leases));
     assert.equal(r.status, 0, r.stderr);
     assert.equal(r.stdout.trim(), '192.0.2.12');
   });
 
-  test('fails with a message when the VM has no lease yet', () => {
+  test('fails with a message when the VM has no lease yet', macOnly, () => {
     const r = run('vm-win.sh', ['ip'], env(lease('192.0.2.11', '00:0c:29:aa:bb:cc')));
     assert.notEqual(r.status, 0);
     assert.match(r.stderr, /no DHCP lease/);
@@ -416,7 +418,7 @@ describe('the VM lock', () => {
     return { stop: async () => { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* gone */ } await exited; } };
   };
 
-  test('a second vm-win.sh start fails while chain-release.sh holds the lock, names the holder, and never reaches vmrun', async () => {
+  test('a second vm-win.sh start fails while chain-release.sh holds the lock, names the holder, and never reaches vmrun', macOnly, async () => {
     const f = fakeUsable('Locked');
     const holder = await holding('chain-release');
     try {
@@ -431,7 +433,7 @@ describe('the VM lock', () => {
     }
   });
 
-  test('a command run by the holder inherits the lock (PADDOCK_VM_LOCK_HELD) and reaches vmrun; the lock is free afterwards', async () => {
+  test('a command run by the holder inherits the lock (PADDOCK_VM_LOCK_HELD) and reaches vmrun; the lock is free afterwards', macOnly, async () => {
     const f = fakeUsable('Inherit');
     const inner = `bash '${join(here, 'vm-win.sh')}' start --no-wait`;
     const holder = spawn('bash', ['-c', `. '${join(here, 'vm-lock.sh')}'; vm_lock_acquire chain-release; ${inner}`], { env: { ...process.env, ...lockEnv, ...f.env }, stdio: 'ignore' });
