@@ -353,6 +353,56 @@ fn a_browser_that_ends_before_it_answers_fails_the_open_as_closed() {
 }
 
 #[test]
+fn a_start_ended_by_the_time_limit_says_it_was_the_time_limit() {
+    let f = Fixture::new(Mode::Obey, 1);
+    let clock = FakeClock::new();
+    // The limit is out of the launch's reach (it moves the fake time on while it waits) and run out below.
+    let b = launch_on(&f, &clock, opts_on(&f, &clock)).unwrap();
+    f.fake.act(UserAction::HoldPageList).unwrap();
+    let opened = std::thread::scope(|s| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let b = &b;
+        s.spawn(move || {
+            let _ = tx.send(b.start_page());
+        });
+        wait_until("the fake to hold the answer", || {
+            f.fake.calls().iter().any(|c| c == "held Target.getTargets")
+        });
+        // The watchdog's clock runs out while the answer is owed.
+        clock.advance(FAR);
+        rx.recv_timeout(CLOSE_GUARD)
+            .expect("the open ends once the time limit ended the browser")
+    });
+    assert!(
+        matches!(&opened, Err(Error::Launch(m))
+            if m.contains(&format!("time limit ({} s)", FAR.as_secs())) && m.contains("listing the pages")),
+        "{:?}",
+        opened.map(|_| ())
+    );
+    assert_eq!(b.ended_by(), EndedBy::TimeLimit);
+}
+
+#[test]
+fn after_the_start_a_page_list_the_browser_never_answers_fails_within_its_bound() {
+    let f = Fixture::new(Mode::Obey, 1);
+    let b = f.launch();
+    b.start_page().unwrap();
+    f.fake.act(UserAction::HoldPageList).unwrap();
+    // The browser stays alive and working; only the fixed bound of a command after the start can end the wait.
+    let counted = std::thread::scope(|s| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let b = &b;
+        s.spawn(move || {
+            let _ = tx.send(b.page_count());
+        });
+        rx.recv_timeout(CLOSE_GUARD)
+            .expect("a command after the start is bounded")
+    });
+    assert!(matches!(counted, Err(Error::Timeout(_))), "{counted:?}");
+    f.fake.act(UserAction::ReleaseAnswers).unwrap();
+}
+
+#[test]
 fn a_browser_without_a_start_page_gets_a_new_one_after_the_wait_on_its_clock() {
     let f = Fixture::new(Mode::Obey, 0);
     let clock = FakeClock::new();

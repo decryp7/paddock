@@ -29,6 +29,8 @@ pub(crate) trait Life {
     fn pid(&self) -> Option<ProcessId>;
     /// The CPU time of the browser's tree, `None` when the OS does not say.
     fn cpu_time(&mut self) -> Option<Duration>;
+    /// Which of the browser's own limits ended it ("its time limit (1800 s)"), if one did.
+    fn ended_by(&self) -> Option<String>;
 }
 
 /// The reply, once it came (or the connection ended).
@@ -92,7 +94,10 @@ pub(crate) fn await_answer(
     let began = Instant::now();
     let pid = life.pid().map(|p| p.pid());
     let slot: Slot = RefCell::new(None);
-    let probe = Probe { life, slot: &slot };
+    let probe = Probe {
+        life: &mut *life,
+        slot: &slot,
+    };
     let pace = ReplyPace {
         pending,
         slot: &slot,
@@ -116,6 +121,19 @@ pub(crate) fn await_answer(
     drop(watch);
     let secs = began.elapsed().as_secs_f64();
     match seen {
+        // The connection closes when the browser is ended, often before its exit is seen: a limit that ended it is named
+        // either way (its flag is set before the kill).
+        Watched::State(StartState::Ready | StartState::Exited(_))
+            if matches!(&*slot.borrow(), None | Some(Err(Error::Closed)))
+                && let Some(why) = life.ended_by() =>
+        {
+            log::warn!(
+                "The browser (pid {pid:?}) was ended by {why} after {secs:.1} s while {phase} ({method} unanswered)"
+            );
+            Err(Error::Launch(format!(
+                "the browser was ended by {why} while {phase}"
+            )))
+        }
         Watched::State(StartState::Ready) => {
             let reply = slot.into_inner().unwrap_or(Err(Error::Closed));
             match &reply {
