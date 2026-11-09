@@ -13,9 +13,7 @@ One row per image under `docs/images` that passed an independent review. A chang
 | src/icons/sighter.svg | ab71dc5d8983205f54a7f231a115a591b413b44004aaf8d7308cb2b12a73bc9e | small-icons poster review (Opus) | 2026-11-03 |
 | src/icons/spotter.svg | bb7619dff9eae64b84759fa336724dab6e71c1a8237c61b2815f8b22f48adadf | small-icons poster review (Opus) | 2026-11-03 |
 | src/icons/recce-placeholder.svg | 927fe52447104f6b7d0af72fdd53e2c96ff5cd90c217e80862a24f4bfb7ba415 | placeholder review only, not a final icon (Opus) | 2026-11-04 |
-| paddock-ecosystem.svg | bbf5ff4ba5feb82df4ec99a6bb862c0098be45990b4b35f25a6e49f75ff0c21d | independent hero review, tool removed (Opus) | 2026-11-05 |
-| paddock-ecosystem-light.png | 66869804ad6c9f9bcc98d63b29711e92f00110708ef8689e1716f62b6d974a61 | independent hero review, tool removed (Opus) | 2026-11-05 |
-| paddock-ecosystem-dark.png | 386413ffae94a92e0a65d6984407592c27c2b473391dcfbe2ec0ac90be4df59c | independent hero review, tool removed (Opus) | 2026-11-05 |
+| src/icons/scrutineer-placeholder.svg | 0009a2de15fe1b2feaeff80fb7ec58b3d8ad9c958240dd78d74798fdb42a25af | placeholder review only, not a final icon (Opus) | 2026-11-04 |
 | paddock-integrations.svg | 169abd9ab0c3625ec6114e1fdde8640b1ffcc33e8ca9e739eb3af188a6d25252 | independent family-diagrams review 2 (Opus) | 2026-11-04 |
 | paddock-integrations-light.png | b166f32d342293adca4e077987722c8ff54a9024d4d8a9b0efffd682b63d935b | independent family-diagrams review 2 (Opus) | 2026-11-04 |
 | paddock-integrations-dark.png | cb959d0238a9f17c2575d761d911ed44d9e6fa8ae334f09668b089ce893f63a6 | independent family-diagrams review 2 (Opus) | 2026-11-04 |
