@@ -437,42 +437,50 @@ fn a_host_with_no_descriptor_left_to_accept_tells_the_waiting_client_why() {
 }
 
 /// A `LinkServer` whose accept thread finds no descriptor left tells the waiting client why (Linux), records the refusal and
-/// keeps serving; it pauses after a failed accept instead of failing the same accept in a tight loop.
+/// keeps serving; it pauses after a failed accept instead of failing the same accept in a tight loop. The client runs here,
+/// in a process with its own descriptor table (in the child it raced the accept thread for the last slot).
 #[cfg(unix)]
 #[test]
 fn a_link_server_with_no_descriptor_left_to_accept_tells_the_waiting_client_why() {
+    use paddock_ipc::endpoint::Stream;
+    use paddock_ipc::frame;
     let dir = tempfile::tempdir().unwrap();
-    let out = paddock_proc::command(child_program())
-        .arg("link-out-of-files")
+    let mut cmd = paddock_proc::command(child_program());
+    cmd.arg("link-out-of-files")
         .arg(dir.path().join("link.json"))
-        .output()
-        .unwrap();
-    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped());
+    let mut child = paddock_proc::Supervised::spawn(cmd).unwrap();
+    let mut stdin = child.take_stdin().unwrap();
+    let mut out = std::io::BufReader::new(child.take_stdout().unwrap());
+    let mut ready = String::new();
+    out.read_line(&mut ready).unwrap();
+    let endpoint = ready
+        .trim()
+        .strip_prefix("ready ")
+        .unwrap_or_else(|| panic!("{ready:?}"))
+        .to_string();
+    let mut client = Stream::connect(&endpoint, GUARD).unwrap();
+    client.set_read_timeout(Some(GUARD)).unwrap();
+    let answer = frame::read_frame(&mut client, FrameLimit::default());
+    writeln!(stdin, "done").unwrap();
+    let mut rest = String::new();
+    std::io::Read::read_to_string(&mut out, &mut rest).unwrap();
+    assert!(child.wait().is_some_and(|s| s.success()), "{rest}");
     assert!(
-        out.status.success(),
-        "{text}{}",
-        String::from_utf8_lossy(&out.stderr)
+        rest.contains("refused: ") && rest.contains("Too many open files"),
+        "the server records why: {rest}"
     );
-    let line = |prefix: &str| {
-        text.lines()
-            .find_map(|l| l.strip_prefix(prefix))
-            .unwrap_or_default()
-            .to_string()
-    };
-    assert!(
-        line("refused: ").contains("Too many open files"),
-        "the server records why: {text}"
-    );
-    let client = line("client: ");
+    let client = format!("{answer:?}");
     if cfg!(target_os = "macos") {
         assert!(
             client.contains("Fail") || client.contains("Closed"),
-            "{text}"
+            "{client}"
         );
     } else {
         assert!(
             client.contains("Fail") && client.contains("busy") && client.contains("open files"),
-            "the waiting client must be told why: {text}"
+            "the waiting client must be told why: {client}"
         );
     }
 }

@@ -16,8 +16,8 @@
 //! - `out-of-files-idle` (Unix): with no descriptor left and nobody connecting, the host's accept (Linux fails it with EMFILE
 //!   before it looks for a client) must keep its reserve: prints `free after the idle accept: <bool>`, then the `client:` of
 //!   a client that connects once one descriptor is free.
-//! - `link-out-of-files <discovery file>` (Unix): the same for a `LinkServer`'s accept thread; also prints `refused: <what
-//!   the server recorded>`.
+//! - `link-out-of-files <discovery file>` (Unix): a `LinkServer` with no descriptor left; prints `ready <endpoint>`, waits for a
+//!   line on standard input (the test's client got its answer) and prints `refused: <what the server recorded>`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use paddock_ipc::link::{LinkServer, ServerConfig};
@@ -190,25 +190,15 @@ fn fill_descriptors() -> Vec<std::fs::File> {
 /// The `link-out-of-files` mode: see the file header.
 #[cfg(unix)]
 fn link_out_of_files(discovery: &str) {
-    use paddock_ipc::endpoint::Stream;
-    use paddock_ipc::frame;
-    use std::time::{Duration, Instant};
     let server = LinkServer::start(ServerConfig::new(discovery, "b"), Arc::new(echo)).unwrap();
-    let mut fillers = fill_descriptors();
-    // One free descriptor for the client; none for the server's accept.
-    drop(fillers.pop());
-    let mut client = Stream::connect(server.endpoint(), Duration::from_secs(10)).unwrap();
-    client
-        .set_read_timeout(Some(Duration::from_secs(10)))
-        .unwrap();
-    let answer = frame::read_frame(&mut client, FrameLimit::default());
-    // The refusal is recorded after the answer is written: wait for it, bounded.
-    let until = Instant::now() + Duration::from_secs(10);
-    while server.refused().is_empty() && Instant::now() < until {
-        std::thread::yield_now();
-    }
+    // No descriptor left for the server's accept. The client is the test process (a table of its own), so nothing here
+    // competes with the accept thread for a free slot.
+    let fillers = fill_descriptors();
+    println!("ready {}", server.endpoint());
+    // The test writes a line once its client has the answer.
+    let mut line = String::new();
+    let _ = std::io::stdin().read_line(&mut line);
     drop(fillers);
-    println!("client: {answer:?}");
     println!("refused: {:?}", server.refused());
 }
 
