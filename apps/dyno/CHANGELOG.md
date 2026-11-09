@@ -20,7 +20,7 @@
 
 ### Fixed
 
-- Windows: the installer's helper program (`paddock-setup.exe`) is built to be byte-identical from one Dyno release to the next, with a full version description and an `asInvoker` manifest, so a Windows Security verdict on it carries over to later releases. It now has its own version (1.2.0; it showed 1.1.0, Dyno's, before) and no longer carries the build machine's folder names.
+- Windows: the installer's helper program is built to be identical from one Dyno release to the next, with a full version description and a manifest that asks for no extra rights, so a Windows Security verdict on it carries over to later releases. It now has its own version (1.2.0; it showed 1.1.0, Dyno's, before) and no longer carries the build machine's folder names.
 
 ### Fixed
 
