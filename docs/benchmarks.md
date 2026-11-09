@@ -233,6 +233,28 @@ These measure tooling, not a product. They are kept where they are.
   0.53–1.77 ms of that. Windows is not measured.
 - [Lessons](lessons.md): test-binary consolidation, 239 → 99 binaries, nextest 301 s → 196 s.
 
+### 2026-11-09, the first start of a freshly linked program on macOS
+
+Quoted by [ADR 0071](adr/0071-ready-or-exit-never-a-fixed-start-budget.md) (context and "Parallelism and cost").
+- **Commit:** b51c72509 (origin/main); no Paddock code, a synthetic program.
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2; the shared CI host (three runners), agents working on it.
+- **Load:** 1-minute load 8.9 before, 6.6-6.8 after (5-minute 11.5-14.1). An indication only.
+- **Build:** each program is a new one-line C file (`puts` of a fresh `time_ns()` value, so every binary is new to the
+  OS) linked with `cc -O0`; Python 3.12.5 (`python3 -I`) times each start with `time.perf_counter()`.
+- **Corpus:** none.
+- **Command:** `python3 -I measure.py <dir> 8` (serial: link, first start, second start, per program) and three rounds
+  of `python3 -I measure_conc.py <dir> 6` (link six programs, start all six at once, then all six again). The two
+  scripts (15 lines each) stayed in the author's scratch folder; the description above is complete.
+- **Runs:** 8 serial programs; 3 rounds of 6 concurrent programs.
+- **Numbers:** serial first start 258-2,864 ms (median 304 ms), second start 2.4-6.6 ms (median 2.7 ms). Concurrent: in
+  each round the six first starts ended together (322-325, 274-279 and 266-340 ms), second starts 2-5 ms. No budget;
+  verdict: the first start of a new binary carries a check that the second start does not (about 100× the start itself
+  on a lightly loaded host), and concurrent first starts finish together, as if queued behind one another. This matches
+  CI job 32436, where all 11 `pitwall-cli` first starts ended within 50 ms of each other after 16.8 s. The larger
+  figures ADR 0071 cites (first starts up to 27.7 s under CPU burners) come from commit 81c3ac92f and are recorded by
+  that ADR's WP-0.
+- **Memory:** not measured (not relevant to this measurement).
+
 ### 2026-11-03, starving a test process by OS priority on macOS
 
 Quoted by [ADR 0041](adr/0041-deterministic-timing-in-tests.md) §5 (the starved run).
