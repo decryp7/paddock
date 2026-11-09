@@ -121,7 +121,7 @@ impl Rig {
         };
         // A gated helper wake call needs the wakes set through the helper: the fake's own wake timer goes (as on macOS and Linux).
         let mut platform = fake.platform();
-        if readers.wakes_gate.is_some() {
+        if readers.wakes_gate.is_some() || readers.wake_schedule_gate.is_some() {
             platform.wol.wake_timer = None;
         }
         let transport = DispatcherTransport::new(dispatcher(host, readers, tmp.path()), caller);
@@ -820,4 +820,100 @@ fn try_again_on_the_owners_asks_the_helper_for_the_map_now() {
     assert_eq!(asked(), before, "the poll reuses the kept map");
     assert_eq!(rig.network_asking(true).owners_via, ReadVia::Helper);
     assert_eq!(asked(), before + 1, "Try again reads the helper's map at once");
+}
+
+/// A due scheduled wake arms the OS wake for its next time first (a helper call the stop does not wait for), and only then runs its
+/// actions and saves, both together: a stop at that point starts no keep-awake and no job, and leaves the schedule as it was, so
+/// the next start still sees it due (or missed) and arms it again. Before, the actions ran and the next time was saved before the
+/// OS wake was armed, so a stop there left a keep-awake started after the stop and a saved wake the OS did not have.
+#[test]
+fn a_stop_while_a_due_wake_is_being_armed_starts_nothing_and_leaves_the_schedule_due() {
+    use dyno_core::power::awake::AwakeView;
+    use dyno_core::power::schedule::{DynoJob, Repeat, WakeSchedule};
+    struct OpenOnDrop(std::sync::Arc<helper_rig::Gate>);
+    impl Drop for OpenOnDrop {
+        fn drop(&mut self) {
+            self.0.open();
+        }
+    }
+    let gate = std::sync::Arc::new(helper_rig::Gate::default());
+    let _open = OpenOnDrop(gate.clone());
+    let mut rig = Rig::start_readers(
+        Caller::Owner,
+        HelperHost::Linux,
+        true,
+        Readers {
+            wake_schedule_gate: Some(gate.clone()),
+            ..Readers::default()
+        },
+    );
+    // The start-up sync has listed the OS wakes (it had no schedule to set): from here only a tick sets one.
+    paddock_testkit::wait_until("the start-up sync of the scheduled wakes", || {
+        rig.served.lock().unwrap().iter().any(|k| k == "ListWakes")
+    });
+    let shared = rig.running.as_ref().unwrap().shared.clone();
+    let due = dyno_core::time::Timestamp(
+        i64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
+        )
+        .unwrap()
+            - 1_000,
+    );
+    let id = {
+        let mut core = shared.core.lock().unwrap();
+        core.settings.power.wake.enabled = true;
+        core.settings.power.keep_awake.enabled = true;
+        let mut s = WakeSchedule {
+            name: "morning".into(),
+            repeat: Repeat::Daily,
+            stay_awake_minutes: Some(5),
+            job: Some(DynoJob::SoftwareInventory),
+            enabled: true,
+            next_at: Some(due),
+            ..WakeSchedule::default()
+        };
+        core.store.put_wake_schedule(&mut s).unwrap()
+    };
+    shared.wakes.wake();
+    paddock_testkit::wait_until("the due wake's next time to reach the helper", || gate.arrived());
+    let saved = |shared: &dyno_agent::agent::Shared| {
+        let all = shared.core.lock().unwrap().store.wake_schedules().unwrap();
+        all.into_iter().find(|s| s.id == id).unwrap()
+    };
+    assert!(
+        matches!(shared.power.view().awake, AwakeView::Off),
+        "the actions ran before the OS wake was armed"
+    );
+    assert_eq!(
+        saved(&shared).next_at,
+        Some(due),
+        "the next time was saved before the OS wake was armed"
+    );
+    let running = rig.running.take().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let stopper = std::thread::spawn(move || {
+        running.stop();
+        let _ = tx.send(());
+    });
+    let stopped = paddock_testkit::poll_until_within(HANG_GUARD, || rx.try_recv().is_ok());
+    gate.open();
+    stopper.join().unwrap();
+    assert!(stopped, "the stop waited for the helper wake call in progress");
+    paddock_testkit::wait_until("the wake thread left behind to end", || std::sync::Arc::strong_count(&shared) == 1);
+    assert!(
+        matches!(shared.power.view().awake, AwakeView::Off),
+        "a keep-awake started after the stop"
+    );
+    let jobs = shared.jobs.statuses();
+    // (The match index the agent builds at every start is a job of its own, not the schedule's.)
+    assert!(
+        !jobs.iter().any(|j| j.kind == "software-inventory"),
+        "the schedule's job started after the stop: {jobs:?}"
+    );
+    let after = saved(&shared);
+    assert_eq!(after.next_at, Some(due), "the schedule moved on without its actions");
+    assert_eq!(after.last_run, None);
 }

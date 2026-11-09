@@ -132,6 +132,10 @@ impl PowerCentre {
 
     /// Starts a hold. `enabled` is the setting; the agent validates whatever the UI sent.
     pub fn start(&self, shared: &Shared, spec: AwakeSpec, enabled: bool) -> Result<PowerView, String> {
+        // Once the agent stops nothing new is held: the stop releases what is held and must not find a hold started after it.
+        let Some(_pass) = shared.stop_gate.enter() else {
+            return Err("Dyno is stopping; keep awake was not started.".into());
+        };
         if !enabled {
             return Err("Keep awake is turned off in Settings.".into());
         }

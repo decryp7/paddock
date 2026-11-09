@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- Scheduled wake: when the agent stops just as a wake is due, it now either runs the wake's actions and records that they ran, or does neither and handles the wake at its next start. No keep-awake or job starts after the agent has begun to stop. The computer's next wake is now set before Dyno records it, so a stop in between never leaves a wake that Dyno shows but the system does not have.
 - When the agent stops (at logout, at shutdown or when the app quits), it no longer waits for a temperature and energy reading or a scheduled-wake change that the administrator helper is still working on. Waiting for one could take longer than the system allows, and the agent was then ended without closing its history cleanly. A stop request that arrives while the agent is still starting now lets the start finish before the agent stops.
 - Report a problem: a Windows user folder name made of several words, such as a first and last name, is now removed completely, also when it comes last in a line or is followed by more text. Up to 20 characters of the name are removed, so a word or two after it may go too. On macOS and Linux the first word of the account folder is removed.
 

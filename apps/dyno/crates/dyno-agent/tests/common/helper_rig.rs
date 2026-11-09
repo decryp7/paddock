@@ -110,6 +110,8 @@ pub struct Readers {
     /// When set, the helper sets the scheduled wakes (the agent's own wake timer is taken away, as on macOS and Linux) and every
     /// wake call waits at this gate until it is opened (a real `pmset` call can take seconds under load and cannot be interrupted).
     pub wakes_gate: Option<Arc<Gate>>,
+    /// Like `wakes_gate`, but only the call that sets a wake waits (listing and cancelling pass at once).
+    pub wake_schedule_gate: Option<Arc<Gate>>,
     /// The helper's log, oldest first.
     pub log: Vec<String>,
     /// The Wake-on-LAN modes every interface answers; `None` answers like a system that reads none.
@@ -138,6 +140,7 @@ impl Default for Readers {
             counters: Vec::new(),
             counters_gate: None,
             wakes_gate: None,
+            wake_schedule_gate: None,
             log: Vec::new(),
             wol: None,
             wake_requests: Vec::new(),
@@ -241,19 +244,32 @@ impl Gate {
     }
 }
 
-/// The helper's scheduled wakes: none pending, every call let through by the gate.
-struct GatedWakes(Arc<Gate>);
+/// The helper's scheduled wakes: none pending; every call waits at `all` and a call that sets a wake also at `schedule`.
+struct GatedWakes {
+    all: Option<Arc<Gate>>,
+    schedule: Option<Arc<Gate>>,
+}
+impl GatedWakes {
+    fn pass(&self, setting: bool) {
+        if let Some(g) = &self.all {
+            g.pass();
+        }
+        if let Some(g) = self.schedule.as_ref().filter(|_| setting) {
+            g.pass();
+        }
+    }
+}
 impl dyno_core::wake::WakeScheduler for GatedWakes {
     fn schedule(&self, _: &dyno_core::wake::WakeTag, _: i64) -> Result<(), PlatformError> {
-        self.0.pass();
+        self.pass(true);
         Ok(())
     }
     fn cancel(&self, _: &dyno_core::wake::WakeTag) -> Result<bool, PlatformError> {
-        self.0.pass();
+        self.pass(false);
         Ok(false)
     }
     fn list(&self) -> Result<Vec<dyno_core::wake::WakeEntry>, PlatformError> {
-        self.0.pass();
+        self.pass(false);
         Ok(Vec::new())
     }
 }
@@ -307,7 +323,16 @@ pub fn dispatcher(host: HelperHost, readers: Readers, dir: &std::path::Path) -> 
             reads: std::sync::atomic::AtomicU64::new(0),
         }),
         audit: AuditLog::new(dir.join("audit.jsonl")),
-        clock: Box::new(|| 1_000),
+        // A rig that sets wakes needs the real time: the helper refuses a wake more than 31 days ahead of its clock.
+        clock: if readers.wake_schedule_gate.is_some() {
+            Box::new(|| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(1_000, |d| i64::try_from(d.as_secs()).unwrap_or(1_000))
+            })
+        } else {
+            Box::new(|| 1_000)
+        },
         login_items: Box::new(Items),
         holders: readers.holders,
         extras: Box::new(Extras(readers.wake_requests)),
@@ -317,9 +342,9 @@ pub fn dispatcher(host: HelperHost, readers: Readers, dir: &std::path::Path) -> 
         smart: Box::new(Smart(readers.smart)),
         firewall: Box::new(Firewall(readers.firewall)),
         tools: Box::new(Tools),
-        wakes: match readers.wakes_gate {
-            Some(gate) => Box::new(GatedWakes(gate)),
-            None => Box::new(dyno_core::wake::NoWakes),
+        wakes: match (readers.wakes_gate, readers.wake_schedule_gate) {
+            (None, None) => Box::new(dyno_core::wake::NoWakes),
+            (all, schedule) => Box::new(GatedWakes { all, schedule }),
         },
         wol: Box::new(Wol(readers.wol)),
         log_tail: Box::new(move |n| readers.log[readers.log.len().saturating_sub(n)..].to_vec()),

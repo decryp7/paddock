@@ -252,15 +252,20 @@ impl WakeCentre {
                 return;
             }
             let mut s = s.clone();
-            if on && s.enabled && s.next_at.is_none() {
+            let newly_armed = on && s.enabled && s.next_at.is_none();
+            if newly_armed {
                 s = armed(&s, now(), &*zone);
-                let _ = self.save(shared, &mut s);
             }
             let mut for_os = s.clone();
             if !on {
                 for_os.enabled = false;
             }
+            // The OS wake first, then the saved time: a stop between the two leaves the schedule unarmed in the store, so the next
+            // start arms it again, never a saved time the OS does not have.
             self.sync_one(&for_os);
+            if newly_armed {
+                let _ = self.save(shared, &mut s);
+            }
         }
         if shared.stopped() {
             return;
@@ -298,15 +303,23 @@ impl WakeCentre {
             if what == Fire::NotYet {
                 continue;
             }
+            let mut next = advance(&s, at, &*zone);
+            // The OS wake for the next time first (a helper call the stop does not wait for). A stop during it leaves the schedule
+            // as it was, still due, so the next start acts on it and arms it again.
+            self.sync_one(&next);
+            // Then the actions and the saved next time together, behind the stop gate: a stop either waits for both or finds
+            // neither started.
+            let Some(_pass) = shared.stop_gate.enter() else { return };
+            if shared.stopped() {
+                return;
+            }
             let summary = match what {
                 Fire::Run => self.run_actions(shared, &s),
                 _ => "Missed: the computer was off or Dyno was not running then.".to_string(),
             };
             log::info!(target: "dyno_agent::wakes", "schedule {} due: {}", s.id, summary);
-            let mut next = advance(&s, at, &*zone);
             next.last_run = Some(LastRun { at, summary });
             if self.save(shared, &mut next).is_ok() {
-                self.sync_one(&next);
                 acted = true;
             }
         }

@@ -460,6 +460,10 @@ impl Running {
     pub fn stop(self) {
         self.shared.request_stop();
         let stopping = std::time::Instant::now();
+        // Nothing new starts from here (a keep-awake, a job, a due wake's actions); what already began finishes first, so the
+        // threads joined below (the sampler releases every hold) see it.
+        set_stop_waiting_on("work already started (keep-awake, jobs, due wakes)");
+        self.shared.stop_gate.close();
         let mut slowest = (String::new(), 0u64);
         for t in self.threads {
             let began = std::time::Instant::now();
