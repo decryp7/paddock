@@ -23,7 +23,7 @@ mod vault;
 
 pub use error::SecretsError;
 pub use fallback::WithFileFallback;
-pub use file::{FileSecrets, SecretFile};
+pub use file::{FileSecrets, SecretFile, make_folder_private};
 pub use memory::{MemorySecrets, MemoryVault};
 pub use name::{MAX_NAME_LEN, Name};
 #[cfg(feature = "keyring")]

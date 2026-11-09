@@ -15,11 +15,12 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, GetSecurityInfo,
-    SDDL_REVISION_1, SE_FILE_OBJECT,
+    SDDL_REVISION_1, SE_FILE_OBJECT, SetNamedSecurityInfoW,
 };
 use windows_sys::Win32::Security::{
-    ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, GetAce, GetTokenInformation, INHERIT_ONLY_ACE,
-    IsWellKnownSid, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
+    ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, GetAce, GetSecurityDescriptorDacl,
+    GetTokenInformation, INHERIT_ONLY_ACE, IsWellKnownSid, OWNER_SECURITY_INFORMATION,
+    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
     TOKEN_QUERY, TOKEN_USER, TokenUser, WinBuiltinAdministratorsSid, WinCreatorOwnerRightsSid,
     WinLocalSystemSid,
 };
@@ -172,6 +173,59 @@ pub(crate) fn create_owner_only(tmp: &Path) -> io::Result<fs::File> {
     Ok(fs::File::from(unsafe { OwnedHandle::from_raw_handle(h) }))
 }
 
+/// Replaces the DACL of `path` with the one in `sddl` (a `D:P...` string), protected: nothing is inherited from the parent.
+fn set_protected_dacl(path: &Path, sddl: &str) -> io::Result<()> {
+    let text: Vec<u16> = sddl.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut sd: PSECURITY_DESCRIPTOR = null_mut();
+    // SAFETY: `text` is NUL-terminated and outlives the call; `sd` is freed by `Local`.
+    if unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            text.as_ptr(),
+            SDDL_REVISION_1,
+            &mut sd,
+            null_mut(),
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    let _free = Local(sd);
+    let (mut present, mut defaulted, mut dacl) = (0, 0, null_mut::<ACL>());
+    // SAFETY: `sd` is a valid descriptor; `dacl` points into it and is used while `_free` lives.
+    if unsafe { GetSecurityDescriptorDacl(sd, &mut present, &mut dacl, &mut defaulted) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let name = wide(path);
+    // SAFETY: a NUL-terminated path and a DACL valid for the duration of the call.
+    let rc = unsafe {
+        SetNamedSecurityInfoW(
+            name.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            null_mut(),
+            null_mut(),
+            dacl,
+            null_mut(),
+        )
+    };
+    if rc != 0 {
+        return Err(io::Error::from_raw_os_error(rc as i32));
+    }
+    Ok(())
+}
+
+/// Gives the folder `dir` a protected DACL that lets in only the user running this process, SYSTEM and Administrators, and
+/// is inherited by the files and folders created in it.
+pub(crate) fn make_private(dir: &Path) -> io::Result<()> {
+    set_protected_dacl(
+        dir,
+        &format!(
+            "D:P(A;OICI;FA;;;{})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
+            current_user_sid()?
+        ),
+    )
+}
+
 /// The owner and DACL entries of an open handle (opened with `READ_CONTROL`). A NULL DACL is one entry that lets
 /// everyone do everything.
 fn security(handle: HANDLE) -> io::Result<(Who, Vec<Ace>)> {
@@ -289,43 +343,9 @@ pub(crate) fn open_no_reparse(path: &Path) -> io::Result<Option<fs::File>> {
 mod tests {
     use super::*;
     use crate::acl::{Refusal, file_refusal, folder_refusal};
-    use windows_sys::Win32::Security::Authorization::SetNamedSecurityInfoW;
-    use windows_sys::Win32::Security::{
-        GetSecurityDescriptorDacl, PROTECTED_DACL_SECURITY_INFORMATION,
-    };
 
     fn set_sddl(path: &Path, sddl: &str) {
-        let w: Vec<u16> = sddl.encode_utf16().chain(std::iter::once(0)).collect();
-        let mut sd: PSECURITY_DESCRIPTOR = null_mut();
-        // SAFETY: test-only; a NUL-terminated SDDL and path, the descriptor freed at the end.
-        unsafe {
-            assert_ne!(
-                ConvertStringSecurityDescriptorToSecurityDescriptorW(
-                    w.as_ptr(),
-                    SDDL_REVISION_1,
-                    &mut sd,
-                    null_mut()
-                ),
-                0
-            );
-            let (mut present, mut defaulted, mut dacl) = (0, 0, null_mut::<ACL>());
-            assert_ne!(
-                GetSecurityDescriptorDacl(sd, &mut present, &mut dacl, &mut defaulted),
-                0
-            );
-            let name = wide(path);
-            let rc = SetNamedSecurityInfoW(
-                name.as_ptr(),
-                SE_FILE_OBJECT,
-                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-                null_mut(),
-                null_mut(),
-                dacl,
-                null_mut(),
-            );
-            assert_eq!(rc, 0);
-            LocalFree(sd);
-        }
+        set_protected_dacl(path, sddl).unwrap();
     }
 
     /// Review P1-1: the temporary file is owner-only from its creation and cannot be opened while it is written.
@@ -353,7 +373,7 @@ mod tests {
 
     #[test]
     fn a_written_secret_is_owner_only_and_a_shared_one_is_refused() {
-        let d = tempfile::tempdir().unwrap();
+        let d = crate::file::private_tempdir();
         let f = crate::SecretFile::new(d.path().join("admin.key"));
         f.write(&crate::Secret::new("pw_x").unwrap()).unwrap();
         let (owner, aces) = file_security(&fs::File::open(f.path()).unwrap()).unwrap();
@@ -407,6 +427,40 @@ mod tests {
         crate::SecretFile::new(dir.join("admin.key"))
             .write(&crate::Secret::new("pw_x").unwrap())
             .unwrap();
+    }
+
+    /// CI run 7821: a folder under a parent that lets Authenticated Users create files (a CI runner's job temp folder) inherits
+    /// that entry and is refused; made private, it holds secrets, and what is created in it inherits only trusted entries.
+    #[test]
+    fn a_folder_made_private_holds_secrets_under_a_parent_others_can_write_in() {
+        use crate::Secrets;
+        let d = tempfile::tempdir().unwrap();
+        let me = current_user_sid().unwrap();
+        set_sddl(
+            d.path(),
+            &format!("D:P(A;OICI;FA;;;{me})(A;OICI;0x1301bf;;;AU)"),
+        );
+        let dir = d.path().join("data");
+        fs::create_dir(&dir).unwrap();
+        let (owner, aces) = folder_security(&dir).unwrap();
+        assert_eq!(
+            folder_refusal(owner, &aces),
+            Some(Refusal::OthersWrite),
+            "inherited: {aces:?}"
+        );
+        crate::make_folder_private(&dir).unwrap();
+        let (owner, aces) = folder_security(&dir).unwrap();
+        assert_eq!(folder_refusal(owner, &aces), None, "{aces:?}");
+        let sub = dir.join("sub");
+        let store = crate::FileSecrets::new(&sub);
+        let name = crate::Name::new("scope", "key").unwrap();
+        store
+            .set(&name, &crate::Secret::new("pw_x").unwrap())
+            .unwrap();
+        assert_eq!(
+            store.get(&name).unwrap(),
+            Some(crate::Secret::new("pw_x").unwrap())
+        );
     }
 
     #[test]

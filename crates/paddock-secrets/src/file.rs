@@ -177,6 +177,48 @@ fn secure_folder(dir: &Path) -> Result<(), SecretsError> {
     }
 }
 
+/// Makes `dir` (created if missing) a folder only this user may change, so secrets can be stored in it whatever its parent
+/// allows: mode 0700 on Unix; on Windows a protected access list that lets in only this user, SYSTEM and Administrators and
+/// is inherited by what is created in it (nothing is inherited from the parent any more). For a folder under a parent where
+/// others may create files, such as a test's temporary folder on a CI runner (`C:\gitea-runner\work\...`, run 7821), before
+/// [`FileSecrets`] or [`SecretFile`] is used in it. A symbolic link or junction is refused, never followed.
+pub fn make_folder_private(dir: &Path) -> Result<(), SecretsError> {
+    let failed = |what: &str, e: std::io::Error| {
+        SecretsError::Failed(format!("{} {what}: {e}", dir.display()))
+    };
+    fs::create_dir_all(dir).map_err(|e| failed("could not be created as a folder", e))?;
+    let meta = fs::symlink_metadata(dir).map_err(|e| failed("could not be read", e))?;
+    if !meta.is_dir() {
+        return Err(SecretsError::Failed(format!(
+            "{} is a link or not a folder, so it is not made private; use a real folder",
+            dir.display()
+        )));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o700))
+            .map_err(|e| failed("could not be made private", e))
+    }
+    #[cfg(windows)]
+    {
+        windows::make_private(dir).map_err(|e| failed("could not be made private", e))
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        Ok(())
+    }
+}
+
+/// A temporary folder made private ([`make_folder_private`]): the tests' folder for secrets, whatever the temp folder of
+/// the machine lets others do (CI run 7821: a Windows runner's job temp folder inherits a parent's entry for other users).
+#[cfg(test)]
+pub(crate) fn private_tempdir() -> tempfile::TempDir {
+    let d = tempfile::tempdir().unwrap();
+    make_folder_private(d.path()).unwrap();
+    d
+}
+
 /// Creates the temporary file of a write. Unix: new, 0600, no link followed. Windows: new, with an owner-only security
 /// descriptor from the start and no sharing while it is open, so no other principal can open it at any point.
 fn create_temp(tmp: &Path) -> std::io::Result<fs::File> {
@@ -376,7 +418,7 @@ mod tests {
 
     #[test]
     fn a_secret_round_trips_and_deletes() {
-        let d = tempfile::tempdir().unwrap();
+        let d = private_tempdir();
         let f = FileSecrets::new(d.path().join("sub"));
         assert_eq!(f.dir(), d.path().join("sub"));
         assert_eq!(f.get(&n("token")).unwrap(), None);
@@ -394,6 +436,34 @@ mod tests {
     }
 
     #[test]
+    fn a_folder_is_made_private_and_a_file_or_link_is_refused() {
+        let d = private_tempdir();
+        let dir = d.path().join("a/b");
+        make_folder_private(&dir).unwrap();
+        FileSecrets::new(&dir).set(&n("t"), &s("v")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&dir, fs::Permissions::from_mode(0o777)).unwrap();
+            make_folder_private(&dir).unwrap();
+            assert_eq!(
+                fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+            let link = d.path().join("link");
+            std::os::unix::fs::symlink(&dir, &link).unwrap();
+            assert!(
+                make_folder_private(&link).is_err(),
+                "a link is not followed"
+            );
+        }
+        let plain = d.path().join("plain");
+        fs::write(&plain, "x").unwrap();
+        let e = make_folder_private(&plain).unwrap_err();
+        assert!(e.to_string().contains("plain"), "{e}");
+    }
+
+    #[test]
     fn names_become_safe_file_names() {
         assert_eq!(
             file_name(&n("read token")),
@@ -407,7 +477,7 @@ mod tests {
     #[test]
     fn files_are_owner_only_and_loose_files_are_refused() {
         use std::os::unix::fs::PermissionsExt;
-        let d = tempfile::tempdir().unwrap();
+        let d = private_tempdir();
         let f = FileSecrets::new(d.path());
         f.set(&n("token"), &s("v")).unwrap();
         let p = f.path(&n("token"));
@@ -428,7 +498,7 @@ mod tests {
 
     #[test]
     fn damaged_files_and_io_errors_are_reported_without_values() {
-        let d = tempfile::tempdir().unwrap();
+        let d = private_tempdir();
         let f = FileSecrets::new(d.path());
         let p = f.path(&n("token"));
         f.set(&n("token"), &s("v")).unwrap();
@@ -476,7 +546,7 @@ mod tests {
 
     #[test]
     fn two_threads_setting_one_name_never_leave_a_half_written_file() {
-        let d = tempfile::tempdir().unwrap();
+        let d = private_tempdir();
         let f = FileSecrets::new(d.path());
         let values = ["a".repeat(200), "b".repeat(200)];
         let barrier = std::sync::Barrier::new(2);
@@ -522,7 +592,7 @@ mod tests {
     fn the_folder_is_created_private_and_a_loose_own_folder_is_tightened() {
         use std::os::unix::fs::PermissionsExt;
         let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o7777;
-        let d = tempfile::tempdir().unwrap();
+        let d = private_tempdir();
         let sub = d.path().join("a/b");
         FileSecrets::new(&sub).set(&n("t"), &s("v")).unwrap();
         assert_eq!(mode(&sub), 0o700);
@@ -548,7 +618,7 @@ mod tests {
 
     #[test]
     fn one_secret_file_at_a_chosen_path_round_trips() {
-        let d = tempfile::tempdir().unwrap();
+        let d = private_tempdir();
         let f = SecretFile::new(d.path().join("data/admin.key"));
         assert_eq!(f.path(), d.path().join("data/admin.key"));
         assert_eq!(f.read().unwrap(), None);
@@ -581,7 +651,7 @@ mod tests {
     #[test]
     fn a_symlink_in_place_of_the_secret_is_never_followed() {
         use std::os::unix::fs::PermissionsExt;
-        let d = tempfile::tempdir().unwrap();
+        let d = private_tempdir();
         let outside = d.path().join("outside");
         fs::write(&outside, "theirs").unwrap();
         fs::set_permissions(&outside, fs::Permissions::from_mode(0o600)).unwrap();
@@ -612,7 +682,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_pipe_or_folder_in_place_of_the_secret_is_refused_without_blocking() {
-        let d = tempfile::tempdir().unwrap();
+        let d = private_tempdir();
         let path = d.path().join("admin.key");
         let c = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
         // SAFETY: a valid NUL-terminated path.
@@ -632,7 +702,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_file_is_refused_when_the_user_running_the_app_is_not_its_owner() {
-        let d = tempfile::tempdir().unwrap();
+        let d = private_tempdir();
         let f = FileSecrets::new(d.path());
         f.set(&n("token"), &s("v")).unwrap();
         let p = f.path(&n("token"));
@@ -677,7 +747,7 @@ mod tests {
     #[test]
     fn every_group_or_other_bit_is_refused() {
         use std::os::unix::fs::PermissionsExt;
-        let d = tempfile::tempdir().unwrap();
+        let d = private_tempdir();
         let f = SecretFile::new(d.path().join("admin.key"));
         f.write(&s("pw_x")).unwrap();
         for loose in [0o640, 0o604, 0o660, 0o620, 0o602, 0o610, 0o601] {
@@ -697,7 +767,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_hard_linked_secret_is_refused() {
-        let d = tempfile::tempdir().unwrap();
+        let d = private_tempdir();
         let f = SecretFile::new(d.path().join("admin.key"));
         f.write(&s("pw_x")).unwrap();
         let other = d.path().join("kept");

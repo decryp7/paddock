@@ -66,7 +66,7 @@ mod tests {
         tempfile::TempDir,
         WithFileFallback<MemorySecrets, FileSecrets>,
     ) {
-        let d = tempfile::tempdir().unwrap();
+        let d = crate::file::private_tempdir();
         let f = WithFileFallback::new(MemorySecrets::new("Pitwall"), FileSecrets::new(d.path()));
         (d, f)
     }
@@ -129,7 +129,7 @@ mod tests {
                 Err(SecretsError::Failed("denied".into()))
             }
         }
-        let d = tempfile::tempdir().unwrap();
+        let d = crate::file::private_tempdir();
         let b = WithFileFallback::new(Broken, FileSecrets::new(d.path()));
         assert!(b.get(&n()).is_err() && b.set(&n(), &s("k")).is_err() && b.delete(&n()).is_err());
         assert_eq!(
