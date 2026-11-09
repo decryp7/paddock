@@ -1,7 +1,7 @@
 //! C102 (ADR 0072): the endpoint register check. Its positive control is the fixture tree `tests/fixtures/ipc-endpoints`
 //! (ER-33): one production-style site per listen primitive, the skipped forms and the look-alikes. The scan must report exactly
 //! the expected sites, and removing any fixture file must change that list, so a call the parser stops seeing turns this red.
-#![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::ipc_endpoints::{
     FAULTS, PRIMITIVES, RATCHET, REGISTER, RatchetEntry, SCENARIOS, Site, blocked_by, check, parse_ratchet, scan, tag_matches,
 };
@@ -334,6 +334,7 @@ blocks_tag = "dyno-v*"
         GOOD_REGISTER,
         ratchet,
     );
+    #[allow(clippy::disallowed_methods, reason = "runs the built binary under test as a plain child")]
     let dev = |args: &[&str]| {
         let out = std::process::Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
             .args(["check", "ipc-endpoints", "--root"])
@@ -472,6 +473,10 @@ reason = "no tokens"
 #[test]
 fn the_scan_reads_the_files_git_knows_and_not_the_file_system() {
     let dir = tempfile::tempdir().unwrap();
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "builds a throwaway git repository in a temp folder; the test owns it"
+    )]
     let git = |args: &[&str]| {
         let out = std::process::Command::new("git")
             .args(args)
