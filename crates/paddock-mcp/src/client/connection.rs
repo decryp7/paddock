@@ -657,16 +657,7 @@ mod tests {
 
     /// A logger that listens, so the log lines' arguments are built (they are not when no logger listens).
     fn listen() {
-        struct Quiet;
-        impl log::Log for Quiet {
-            fn enabled(&self, _: &log::Metadata<'_>) -> bool {
-                true
-            }
-            fn log(&self, _: &log::Record<'_>) {}
-            fn flush(&self) {}
-        }
-        let _ = log::set_logger(&Quiet);
-        log::set_max_level(log::LevelFilter::Trace);
+        crate::test_log::install();
     }
 
     fn init_result(version: &str) -> Value {

@@ -688,32 +688,7 @@ mod tests {
         }
     }
 
-    /// The app log, captured, so a test can check what a connection's lines say (ER-27).
-    struct Capture;
-    static LOGGED: Mutex<Vec<String>> = Mutex::new(Vec::new());
-
-    impl log::Log for Capture {
-        fn enabled(&self, _: &log::Metadata<'_>) -> bool {
-            true
-        }
-        fn log(&self, record: &log::Record<'_>) {
-            LOGGED
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push(record.args().to_string());
-        }
-        fn flush(&self) {}
-    }
-
-    fn capture_logs() {
-        static ONCE: std::sync::Once = std::sync::Once::new();
-        ONCE.call_once(|| {
-            let _ = log::set_logger(&Capture);
-            log::set_max_level(log::LevelFilter::Info);
-        });
-        assert!(log::logger().enabled(&log::Metadata::builder().build()));
-        log::logger().flush();
-    }
+    use crate::test_log::{LOGGED, install as capture_logs};
 
     /// The captured line about connection `id` that holds `text`, if any.
     fn logged(id: u64, text: &str) -> Option<String> {

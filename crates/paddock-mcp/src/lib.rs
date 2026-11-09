@@ -84,3 +84,5 @@ pub mod tauri;
 
 #[cfg(test)]
 mod generated;
+#[cfg(test)]
+mod test_log;
