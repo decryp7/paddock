@@ -5,6 +5,7 @@
 //! `docs/ipc-endpoint-ratchet.toml`; the test is red without it.
 
 use paddock_ipc::endpoint::Stream;
+use paddock_ipc::testing::endings::applicability::Applicability;
 use paddock_ipc::testing::endings::ratchet::Ratchet;
 use paddock_ipc::testing::endings::raw::{read_to_end, write_junk};
 use paddock_ipc::testing::endings::{failure_text, run_all, Decoded, Expect, Observed, Scenario, KEEP_WRITING_BYTES};
@@ -99,16 +100,7 @@ fn scenario(s: Scenario) -> Result<(Observed, Expect), &'static str> {
             | Scenario::Busy
             | Scenario::StopWithOpenConnection
     ) {
-        return Err(match s {
-            Scenario::WrongToken | Scenario::WrongAccount => {
-                "the service has no token; the pipe's access list or the socket's mode decides who connects"
-            }
-            Scenario::SilentClient => {
-                "the hello limit runs on the real tokio clock (30 s); its unreadable-hello half is malformed-first-frame"
-            }
-            Scenario::ListenerStopWithClientInBacklog => "the accept loop takes a client at once; no seam holds one in the backlog",
-            _ => "no owner-side close of one connection and no Peer: the transport is hand-rolled (ADR 0072 §9)",
-        });
+        return Err("this scenario is not driven by the service rig; if it does not apply, declare it in [[not_applicable]]");
     }
     let data = std::env::temp_dir().join(format!(
         "pe-{}-{}",
@@ -175,7 +167,8 @@ fn scenario(s: Scenario) -> Result<(Observed, Expect), &'static str> {
 /// The ending test of the register's `pitcrew-service` entry.
 #[test]
 fn pitcrew_service_ends_every_connection_right_or_is_in_the_ratchet() {
-    let reports = run_all("pitcrew-service", scenario);
+    let applicability = Applicability::load_from(env!("CARGO_MANIFEST_DIR")).expect("the register file");
+    let reports = run_all("pitcrew-service", &applicability, scenario);
     let ratchet = Ratchet::load_from(env!("CARGO_MANIFEST_DIR")).expect("the ratchet file");
     if let Err(e) = ratchet.check("pitcrew-service", &reports) {
         panic!("{e}\n\n{}", failure_text(&reports));

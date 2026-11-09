@@ -456,13 +456,18 @@ fn owner_close(
     // Seal: the served calls' answers find the queue shut, so nothing but the queued frames and the reason go out.
     let (mut flushed, mut dropped) = ("flushed", 0usize);
     if fault == Some(MiniFault::FlushWithoutCap) {
-        // No cap: wait for the peer, however long.
+        // No cap: the flush waits for the peer for as long as it takes. Only the client's end of the stream ends the wait (so
+        // a test that drops its client leaves no thread behind); nothing else wakes it, which is the fault.
         while let Some(chunk) = queue.pop_front() {
             let mut rest = &chunk[..];
             while !rest.is_empty() {
                 match sink.write(rest) {
                     Ok(n) => rest = &rest[n..],
-                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => std::thread::park(),
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                        if matches!(rx.recv(), Ok(Ev::Eof) | Err(_)) {
+                            return;
+                        }
+                    }
                     Err(_) => return,
                 }
             }
@@ -564,6 +569,19 @@ fn observe(raw: RawEnd, log: &LogCapture, typed: bool) -> Observed {
     }
 }
 
+/// Whether the mini protocol has a counterpart for `scenario`.
+pub fn applies(scenario: Scenario) -> bool {
+    matches!(
+        scenario,
+        Scenario::WrongToken
+            | Scenario::ClientKeepsWriting
+            | Scenario::OwnerCloseWithCallsInFlight
+            | Scenario::OwnerCloseWhilePeerNotReading
+            | Scenario::ListenerStopWithClientInBacklog
+            | Scenario::StopWithOpenConnection
+    )
+}
+
 /// Runs `scenario` against a fresh endpoint (`None`: the reference). `Err` names why a scenario does not apply to the
 /// mini protocol.
 ///
@@ -573,15 +591,7 @@ pub fn run(
     fault: Option<MiniFault>,
     scenario: Scenario,
 ) -> Result<(Observed, Expect), &'static str> {
-    if !matches!(
-        scenario,
-        Scenario::WrongToken
-            | Scenario::ClientKeepsWriting
-            | Scenario::OwnerCloseWithCallsInFlight
-            | Scenario::OwnerCloseWhilePeerNotReading
-            | Scenario::ListenerStopWithClientInBacklog
-            | Scenario::StopWithOpenConnection
-    ) {
+    if !applies(scenario) {
         return Err("the mini protocol has no counterpart for this scenario");
     }
     let (clock, log) = (FakeClock::new(), LogCapture::new());

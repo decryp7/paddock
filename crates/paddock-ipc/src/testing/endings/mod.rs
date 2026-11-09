@@ -6,6 +6,7 @@
 //! What fails today is recorded per instance in the ratchet ([`ratchet`]), which only shrinks. Before M1 the end line does
 //! not exist, so the scenarios that need it are ratchet entries; the raw-stream assertions run from the start.
 
+pub mod applicability;
 pub mod ipc;
 pub mod log;
 pub mod mini;
@@ -299,8 +300,11 @@ pub fn judge(observed: &Observed, expect: &Expect) -> Vec<Fault> {
 /// The result of one scenario against one endpoint.
 #[derive(Debug, Clone)]
 pub enum Outcome {
-    /// The scenario does not apply to this endpoint; the reason is recorded in the register.
-    NotApplicable(&'static str),
+    /// The scenario does not apply to this endpoint; the register (`[[not_applicable]]`) says why. It was not run.
+    NotApplicable(String),
+    /// The rig itself failed (an endpoint that did not start, a client that could not connect): the test is red, never a
+    /// quiet "not applicable".
+    RigFailure(String),
     /// It ran; these are the faults found (none: the ending is right).
     Ran(Vec<Fault>),
 }
@@ -323,7 +327,7 @@ impl Report {
     pub fn faults(&self) -> &[Fault] {
         match &self.outcome {
             Outcome::Ran(f) => f,
-            Outcome::NotApplicable(_) => &[],
+            Outcome::NotApplicable(_) | Outcome::RigFailure(_) => &[],
         }
     }
 
@@ -334,6 +338,9 @@ impl Report {
                 "{} {}: not applicable ({why})",
                 self.endpoint, self.scenario
             ),
+            Outcome::RigFailure(why) => {
+                format!("{} {}: RIG FAILURE ({why})", self.endpoint, self.scenario)
+            }
             Outcome::Ran(f) if f.is_empty() => format!("{} {}: ok", self.endpoint, self.scenario),
             Outcome::Ran(f) => {
                 format!(
@@ -347,27 +354,36 @@ impl Report {
     }
 }
 
-/// Runs `run` for every scenario of [`Scenario::ALL`] and collects the reports. `run` returns `Err(why)` for a scenario that
-/// does not apply, else the observation and what was expected.
-pub fn run_all(
+/// A failure of the rig, not a finding about the endpoint.
+pub type RigError = String;
+
+/// Runs `run` for every scenario of [`Scenario::ALL`] that the register does not declare not applicable to `endpoint`
+/// (`applicability`), and collects the reports. A scenario the register declares not applicable is not run; one that `run`
+/// cannot drive returns a [`RigError`], which becomes [`Outcome::RigFailure`] and fails [`ratchet::Ratchet::check`].
+pub fn run_all<E: std::fmt::Display>(
     endpoint: &str,
-    mut run: impl FnMut(Scenario) -> Result<(Observed, Expect), &'static str>,
+    applicability: &applicability::Applicability,
+    mut run: impl FnMut(Scenario) -> Result<(Observed, Expect), E>,
 ) -> Vec<Report> {
     Scenario::ALL
         .iter()
-        .map(|&scenario| match run(scenario) {
-            Err(why) => Report {
+        .map(|&scenario| {
+            let report = |outcome, log| Report {
                 endpoint: endpoint.to_string(),
                 scenario,
-                outcome: Outcome::NotApplicable(why),
-                log: Vec::new(),
-            },
-            Ok((observed, expect)) => Report {
-                endpoint: endpoint.to_string(),
-                scenario,
-                outcome: Outcome::Ran(judge(&observed, &expect)),
-                log: observed.log,
-            },
+                outcome,
+                log,
+            };
+            if let Some(why) = applicability.reason(endpoint, scenario) {
+                return report(Outcome::NotApplicable(why), Vec::new());
+            }
+            match run(scenario) {
+                Err(why) => report(Outcome::RigFailure(why.to_string()), Vec::new()),
+                Ok((observed, expect)) => {
+                    let faults = judge(&observed, &expect);
+                    report(Outcome::Ran(faults), observed.log)
+                }
+            }
         })
         .collect()
 }

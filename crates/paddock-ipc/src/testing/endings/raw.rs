@@ -8,7 +8,7 @@ use std::time::Duration;
 /// (an answer, the end of the stream), never a pause to let something finish.
 pub const READ_GUARD: Duration = Duration::from_secs(20);
 
-/// The most bytes a raw client keeps; a peer that writes more is cut off (the read ends as [`RawEndKind::Eof`]).
+/// The most bytes a raw client keeps (the last ones); the read goes on to the end of the stream.
 const KEEP: usize = 4 << 20;
 
 /// A stream the harness can read from and write to, with a read timeout and a half-close where the transport has one.
@@ -100,13 +100,12 @@ pub fn read_to_end(stream: &mut dyn RawStream, guard: Duration) -> RawEnd {
                 };
             }
             Ok(n) => {
-                if bytes.len() < KEEP {
-                    bytes.extend_from_slice(&buf[..n]);
-                } else {
-                    return RawEnd {
-                        bytes,
-                        kind: RawEndKind::Eof,
-                    };
+                // Reads on to the real end of the stream and keeps the last KEEP bytes: the end is what the scenario judges
+                // (a reason is the last thing written), so a long stream must not hide it.
+                bytes.extend_from_slice(&buf[..n]);
+                if bytes.len() > KEEP {
+                    let excess = bytes.len() - KEEP;
+                    bytes.drain(..excess);
                 }
             }
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {}

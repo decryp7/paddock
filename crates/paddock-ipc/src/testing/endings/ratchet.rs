@@ -180,7 +180,14 @@ impl Ratchet {
             .iter()
             .filter(|e| e.endpoint == endpoint && e.applies_here())
             .collect();
-        let mut problems = Vec::new();
+        let mut problems: Vec<String> = reports
+            .iter()
+            .filter(|r| r.endpoint == endpoint)
+            .filter_map(|r| match &r.outcome {
+                super::Outcome::RigFailure(why) => Some(format!("rig failure: {endpoint} / {}: {why} (the rig could not drive the scenario; a scenario that does not apply is declared in the register's [[not_applicable]], never skipped in code)", r.scenario)),
+                _ => None,
+            })
+            .collect();
         for (scenario, fault) in &observed {
             let listed = mine
                 .iter()

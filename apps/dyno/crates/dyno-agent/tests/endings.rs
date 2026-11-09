@@ -7,6 +7,7 @@
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
 use dyno_platform::fake::Fake;
+use paddock_ipc::testing::endings::applicability::Applicability;
 use paddock_ipc::testing::endings::ipc::{self, IpcTarget};
 use paddock_ipc::testing::endings::ratchet::Ratchet;
 use paddock_ipc::testing::endings::{failure_text, run_all, Expect, Observed, Scenario};
@@ -24,13 +25,7 @@ fn scenario(s: Scenario) -> Result<(Observed, Expect), &'static str> {
             | Scenario::StopWithOpenConnection
     );
     if !applies {
-        return Err(match s {
-            Scenario::SilentClient => "the agent's handshake runs on the real clock, inline on its accept loop (I15)",
-            Scenario::Busy => "the agent has no connection cap (I15 moves it onto the link server in M3)",
-            Scenario::WrongAccount => "the agent does not check accounts (its endpoint is owner-only)",
-            Scenario::ListenerStopWithClientInBacklog => "the accept loop takes a client within 400 ms; no seam holds one in the backlog",
-            _ => "a property of paddock-ipc's Peer, covered by ipc-host",
-        });
+        return Err("this scenario is not driven by the agent rig; if it does not apply, declare it in [[not_applicable]]");
     }
     let tmp = tempfile::tempdir().unwrap();
     let dirs = Dirs::at(tmp.path().join("data"));
@@ -60,7 +55,8 @@ fn scenario(s: Scenario) -> Result<(Observed, Expect), &'static str> {
 #[test]
 fn dyno_agent_ends_every_connection_right_or_is_in_the_ratchet() {
     let _log = agent_log::on_failure();
-    let reports = run_all("dyno-agent", scenario);
+    let applicability = Applicability::load_from(env!("CARGO_MANIFEST_DIR")).expect("the register file");
+    let reports = run_all("dyno-agent", &applicability, scenario);
     let ratchet = Ratchet::load_from(env!("CARGO_MANIFEST_DIR")).expect("the ratchet file");
     if let Err(e) = ratchet.check("dyno-agent", &reports) {
         panic!("{e}\n\n{}", failure_text(&reports));

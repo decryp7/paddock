@@ -350,9 +350,7 @@ pub fn in_process(scenario: Scenario) -> Result<(Observed, Expect), &'static str
 /// `wrong_account` (true) refuses a client of another account before its hello is read; otherwise the host is busy. Both
 /// leave the client's hello unread.
 fn account_scenario(wrong_account: bool) -> Result<(Observed, Expect), &'static str> {
-    if wrong_account && !cfg!(unix) {
-        return Err("the OS gives no user id for a pipe client (Windows); the access list decides");
-    }
+    // Not run on Windows: the register declares it not applicable there (the OS gives no user id for a pipe client).
     let limit = FrameLimit::default();
     let host = Host::listen(limit, ProtocolVersion::UNVERSIONED).map_err(|_| "no endpoint")?;
     let mut host = if wrong_account {

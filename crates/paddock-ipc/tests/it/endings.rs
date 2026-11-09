@@ -5,6 +5,7 @@
 //! - `ipc_host_ends_every_connection_right_or_is_in_the_ratchet` drives the crate's host, peer and listener through every
 //!   scenario: green with `docs/ipc-endpoint-ratchet.toml`, red without it.
 
+use paddock_ipc::testing::endings::applicability::Applicability;
 use paddock_ipc::testing::endings::mini::{self, MiniFault};
 use paddock_ipc::testing::endings::ratchet::Ratchet;
 use paddock_ipc::testing::endings::{
@@ -17,7 +18,16 @@ fn kinds(faults: &[Fault]) -> Vec<&'static str> {
 
 #[test]
 fn the_reference_endpoint_passes_every_scenario_it_supports() {
-    let reports = run_all("mini-reference", |s| mini::run(None, s));
+    let not_applicable: Vec<(Scenario, &str)> = Scenario::ALL
+        .iter()
+        .filter(|s| !mini::applies(**s))
+        .map(|s| (*s, "the mini protocol has no counterpart for this scenario"))
+        .collect();
+    let reports = run_all(
+        "mini-reference",
+        &Applicability::of("mini-reference", &not_applicable),
+        |s| mini::run(None, s),
+    );
     let ran = reports
         .iter()
         .filter(|r| matches!(r.outcome, Outcome::Ran(_)))
@@ -129,7 +139,9 @@ note = "why"
 /// The ending test of the register's `ipc-host` entry (and of the listener primitives it stands on).
 #[test]
 fn ipc_host_ends_every_connection_right_or_is_in_the_ratchet() {
-    let reports = run_all("ipc-host", ipc::in_process);
+    let applicability =
+        Applicability::load_from(env!("CARGO_MANIFEST_DIR")).expect("the register file");
+    let reports = run_all("ipc-host", &applicability, ipc::in_process);
     let ratchet = Ratchet::load_from(env!("CARGO_MANIFEST_DIR")).expect("the ratchet file");
     if let Err(e) = ratchet.check("ipc-host", &reports) {
         panic!("{e}\n\n{}", failure_text(&reports));
@@ -258,16 +270,9 @@ mod link {
                 let target = rig.target.clone();
                 ipc::stop_with_open_connection(&target, move || server.stop())
             }
-            Scenario::WrongAccount => {
-                Err("the link server does not check accounts; the Host does (ipc-host)")
-            }
-            Scenario::ListenerStopWithClientInBacklog => Err(
-                "the accept loop never leaves a client in the backlog; the Host's listener does (ipc-host)",
+            _ => Err(
+                "this scenario is not driven by the link-server rig; if it does not apply, declare it in [[not_applicable]]",
             ),
-            Scenario::OwnerCloseWithCallsInFlight
-            | Scenario::OwnerCloseWhilePeerNotReading
-            | Scenario::Stall => Err("served peers close through Peer::close (ipc-host)"),
-            Scenario::MixedVersionPeerIgnoresFail0 => Err("a property of Peer::close (ipc-host)"),
         }
     }
 
@@ -278,7 +283,9 @@ mod link {
 /// The ending test of the register's `ipc-link-server` entry.
 #[test]
 fn ipc_link_server_ends_every_connection_right_or_is_in_the_ratchet() {
-    let reports = run_all("ipc-link-server", link::scenario);
+    let applicability =
+        Applicability::load_from(env!("CARGO_MANIFEST_DIR")).expect("the register file");
+    let reports = run_all("ipc-link-server", &applicability, link::scenario);
     let ratchet = Ratchet::load_from(env!("CARGO_MANIFEST_DIR")).expect("the ratchet file");
     if let Err(e) = ratchet.check("ipc-link-server", &reports) {
         panic!("{e}\n\n{}", failure_text(&reports));
@@ -294,34 +301,43 @@ mod launcher {
     use std::sync::Arc;
     use std::time::Duration;
 
-    pub fn scenario(s: Scenario) -> Result<(endings::Observed, endings::Expect), &'static str> {
+    pub fn scenario(s: Scenario) -> Result<(endings::Observed, endings::Expect), String> {
         if s != Scenario::StopWithOpenConnection {
-            return Err(
-                "the launcher's host side is paddock-ipc's Host (ipc-host); its own ending is the owner's stop of the child",
-            );
+            return Err(format!(
+                "{s} is not driven by the launcher rig; if it does not apply, declare it in [[not_applicable]]"
+            ));
         }
-        let dir = tempfile::tempdir().map_err(|_| "no folder")?;
+        let dir = tempfile::tempdir().map_err(|e| format!("no temporary folder: {e}"))?;
         let file = dir.path().join("seen");
         let spec = ChildSpec::new(child_program(), "the observer")
             .arg("observe")
             .arg(&file);
-        let child = launch(&spec, Arc::new(NoCalls)).map_err(|_| "the child did not connect")?;
+        let child = launch(&spec, Arc::new(NoCalls))
+            .map_err(|e| format!("the observer child did not connect: {e}"))?;
         // The owner stops the child: the connection closes first (`Child::stop` closes the peer, then the lifeline).
         child.peer().close();
         let status = child
             .exit_status(Duration::from_secs(60))
-            .ok_or("the child did not exit")?;
+            .ok_or("the observer child did not exit within 60 s")?;
         if !status.success() {
-            return Err("the observer child failed");
+            return Err(format!("the observer child failed: {status}"));
         }
-        let bytes =
-            std::fs::read(format!("{}.bin", file.display())).map_err(|_| "no bytes file")?;
-        let end = std::fs::read_to_string(format!("{}.end", file.display()))
-            .map_err(|_| "no end file")?;
+        let read = |ext: &str| format!("{}.{ext}", file.display());
+        let bytes = std::fs::read(read("bin"))
+            .map_err(|e| format!("the observer wrote no bytes file: {e}"))?;
+        let end = std::fs::read_to_string(read("end"))
+            .map_err(|e| format!("the observer wrote no end file: {e}"))?;
+        // Every end the child can report has its own arm; anything else is a rig failure, not a quiet "timed out".
         let kind = match end.as_str() {
             "eof" => RawEndKind::Eof,
             "reset" => RawEndKind::Error(std::io::ErrorKind::ConnectionReset),
-            _ => RawEndKind::TimedOut,
+            "timeout" => RawEndKind::TimedOut,
+            other if other.starts_with("error ") => RawEndKind::Error(std::io::ErrorKind::Other),
+            other => {
+                return Err(format!(
+                    "the observer reported an end this rig does not know: {other:?}"
+                ));
+            }
         };
         let decoded = decode_frames(&bytes, FrameLimit::default());
         Ok((
@@ -338,9 +354,66 @@ mod launcher {
 /// The ending test of the register's `ipc-launcher` entry.
 #[test]
 fn ipc_launcher_ends_every_connection_right_or_is_in_the_ratchet() {
-    let reports = run_all("ipc-launcher", launcher::scenario);
+    let applicability =
+        Applicability::load_from(env!("CARGO_MANIFEST_DIR")).expect("the register file");
+    let reports = run_all("ipc-launcher", &applicability, launcher::scenario);
     let ratchet = Ratchet::load_from(env!("CARGO_MANIFEST_DIR")).expect("the ratchet file");
     if let Err(e) = ratchet.check("ipc-launcher", &reports) {
         panic!("{e}\n\n{}", failure_text(&reports));
     }
+}
+
+#[test]
+fn a_rig_that_cannot_drive_a_scenario_turns_the_run_red_and_a_declared_not_applicable_does_not() {
+    let declared = Applicability::of("rigged", &[(Scenario::Stall, "declared in the register")]);
+    let reports = run_all("rigged", &declared, |s| -> Result<_, String> {
+        if s == Scenario::WrongToken {
+            Err("the endpoint did not start".into())
+        } else {
+            Ok((
+                endings::Observed::default(),
+                endings::Expect {
+                    reason: endings::ReasonRule::Optional,
+                    end_line: false,
+                    unread_input: false,
+                },
+            ))
+        }
+    });
+    let stall = reports
+        .iter()
+        .find(|r| r.scenario == Scenario::Stall)
+        .expect("a report");
+    assert!(
+        matches!(stall.outcome, Outcome::NotApplicable(_)),
+        "a declared scenario is not run: {}",
+        stall.summary()
+    );
+    let broken = reports
+        .iter()
+        .find(|r| r.scenario == Scenario::WrongToken)
+        .expect("a report");
+    assert!(
+        matches!(broken.outcome, Outcome::RigFailure(_)),
+        "{}",
+        broken.summary()
+    );
+    let verdict = Ratchet::default().check("rigged", &reports);
+    let message = verdict.expect_err("a rig failure must fail the run, not pass as not applicable");
+    assert!(
+        message.contains("rig failure: rigged / wrong-token: the endpoint did not start"),
+        "{message}"
+    );
+    // Without the broken rig the same run is green.
+    let fine = run_all("rigged", &declared, |_| -> Result<_, String> {
+        Ok((
+            endings::Observed::default(),
+            endings::Expect {
+                reason: endings::ReasonRule::Optional,
+                end_line: false,
+                unread_input: false,
+            },
+        ))
+    });
+    Ratchet::default().check("rigged", &fine).expect("green");
 }

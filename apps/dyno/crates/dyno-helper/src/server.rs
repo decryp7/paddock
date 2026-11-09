@@ -611,18 +611,7 @@ mod tests {
                 rig.stop();
                 result
             }
-            Scenario::WrongToken | Scenario::WrongVersion | Scenario::ClientKeepsWriting => {
-                Err("no handshake: the helper trusts the caller's OS identity (ADR 0027), so there is no token, version or refusal to read")
-            }
-            Scenario::WrongAccount => Err("another account is served a smaller view, not refused (the dispatcher's policy)"),
-            Scenario::SilentClient => Err("no handshake to time out; a silent connection holds a session until SESSION_MAX (I16)"),
-            Scenario::StopWithOpenConnection => {
-                Err("the daemon's stop ends the accept loop only; open sessions end with the process or SESSION_MAX (I16)")
-            }
-            Scenario::ListenerStopWithClientInBacklog => {
-                Err("the accept loop takes a client within 500 ms; no seam holds one in the backlog")
-            }
-            _ => Err("a property of paddock-ipc's Peer, covered by ipc-host"),
+            _ => Err("this scenario is not driven by the helper rig; if it does not apply, declare it in [[not_applicable]]"),
         }
     }
 
@@ -632,7 +621,9 @@ mod tests {
     fn dyno_helper_ends_every_connection_right_or_is_in_the_ratchet() {
         use paddock_ipc::testing::endings::ratchet::Ratchet;
         use paddock_ipc::testing::endings::{failure_text, run_all};
-        let reports = run_all("dyno-helper", ending);
+        let applicability =
+            paddock_ipc::testing::endings::applicability::Applicability::load_from(env!("CARGO_MANIFEST_DIR")).expect("the register file");
+        let reports = run_all("dyno-helper", &applicability, ending);
         let ratchet = Ratchet::load_from(env!("CARGO_MANIFEST_DIR")).expect("the ratchet file");
         if let Err(e) = ratchet.check("dyno-helper", &reports) {
             panic!("{e}\n\n{}", failure_text(&reports));

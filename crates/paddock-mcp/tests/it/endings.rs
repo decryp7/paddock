@@ -3,6 +3,7 @@
 //! in `docs/ipc-endpoint-ratchet.toml`; the test is red without it.
 
 use crate::common::rig;
+use paddock_ipc::testing::endings::applicability::Applicability;
 use paddock_ipc::testing::endings::log::LogCapture;
 use paddock_ipc::testing::endings::ratchet::Ratchet;
 use paddock_ipc::testing::endings::raw::{READ_GUARD, read_to_end, write_junk};
@@ -166,30 +167,18 @@ fn scenario(s: Scenario) -> Result<(Observed, Expect), &'static str> {
             rig.serving.take().ok_or("no serving")?.stop();
             observe(&rig, c, Expect::reason(&["stopping"]))
         }
-        Scenario::WrongVersion | Scenario::WrongAccount => {
-            Err("the loopback line protocol has no versions or accounts")
-        }
-        Scenario::SilentClient => {
-            Err("the handshake limit runs on the real clock (no injection until M5)")
-        }
-        Scenario::OwnerCloseWithCallsInFlight
-        | Scenario::OwnerCloseWhilePeerNotReading
-        | Scenario::Stall => Err(
-            "the listener has no owner-side close of one connection; its end is the stop (stop-with-open-connection)",
+        _ => Err(
+            "this scenario is not driven by the MCP rig; if it does not apply, declare it in [[not_applicable]]",
         ),
-        Scenario::ListenerStopWithClientInBacklog => Err(
-            "the accept thread takes clients at once; a backlog forms only under load (I21), with no seam to hold it",
-        ),
-        Scenario::MixedVersionPeerIgnoresFail0 => {
-            Err("the closing line goes only to a bridge that asked for it (D6, M5)")
-        }
     }
 }
 
 /// The ending test of the register's `mcp-loopback` entry.
 #[test]
 fn mcp_loopback_ends_every_connection_right_or_is_in_the_ratchet() {
-    let reports = run_all("mcp-loopback", scenario);
+    let applicability =
+        Applicability::load_from(env!("CARGO_MANIFEST_DIR")).expect("the register file");
+    let reports = run_all("mcp-loopback", &applicability, scenario);
     let ratchet = Ratchet::load_from(env!("CARGO_MANIFEST_DIR")).expect("the ratchet file");
     if let Err(e) = ratchet.check("mcp-loopback", &reports) {
         panic!("{e}\n\n{}", failure_text(&reports));
