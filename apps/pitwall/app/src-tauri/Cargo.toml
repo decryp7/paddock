@@ -16,6 +16,11 @@ name = "pitwall_app_lib"
 # only for a mobile target.
 crate-type = ["rlib"]
 
+[features]
+# Test doubles (the scripted server `server_client::fake`, the fixed admin key `StaticKeys`); enabled only through the
+# self dev-dependency below, never by a normal dependency (ADR 0073 / rule 73).
+test-support = []
+
 [build-dependencies]
 paddock-build = { path = "../../../../crates/paddock-build", features = ["tauri-build"] }
 
@@ -112,6 +117,8 @@ workspace = true
 [dev-dependencies]
 # A socket bound but not listening refuses connections on Linux and Windows (not macOS): "nothing listens" with the port held.
 socket2 = { version = "0.6", features = ["all"] }
+# The self dev-dependency that turns `test-support` on for this package's tests (ADR 0073 / rule 73).
+pitwall-app = { path = ".", features = ["test-support"] }
 tempfile.workspace = true
 # The time of a report the tests make (paddock-diag takes a chrono time).
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

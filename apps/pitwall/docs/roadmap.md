@@ -151,8 +151,8 @@ Pacenotes: toolsets `orient`, `code`, `review`, `diagrams`, `requirements` and `
 ## Next (hand-off, 2026-10-22)
 
 1. **Linux CI** (`rust tests + core coverage (linux)`): the two end-to-end tests that start a real child process
-   (`a_crashing_engine_is_restarted_with_backoff_then_given_up_on_until_retry` and `stopping_serving_unloads_every_model_ends_the_engine_processes_and_resuming_serves_again`, which use `pitwall-server --fake-engine` as a real child process)
-   fail in the container with `Permission denied (os error 13)` when launching `target/debug/pitwall-server`; the first one
+   (`a_crashing_engine_is_restarted_with_backoff_then_given_up_on_until_retry` and `stopping_serving_unloads_every_model_ends_the_engine_processes_and_resuming_serves_again`, which use the `pitwall-fake-engine` test bin as a real child process)
+   fail in the container with `Permission denied (os error 13)` when launching `target/debug/pitwall-fake-engine`; the first one
    predates the crash-handling work. Probably the workspace/target mount is `noexec` or the binary is not executable for the
    container user: run the tests with `CARGO_TARGET_DIR` on an executable path (or copy the binary to a temp dir inside the
    test), then re-run the whole job. Everything after those tests (core coverage guard >= 99 % lines, which is 99.4 % locally)

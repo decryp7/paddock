@@ -5,7 +5,7 @@ inputs:
     description: The app id; temp folders named <id>-* in the job's own temp folder are removed.
     required: true
   process-patterns:
-    description: "Patterns for `pkill -f`, one per line, each anchored on a folder of this job: {tmp} (its temp folder), {build} (its build folder) or {slot} (its slot, in a kept folder's name), e.g. {build}[/\\\\]debug[/\\\\]pitwall-server. A pattern without one is skipped: it could kill other jobs' processes."
+    description: "Patterns for `pkill -f`, one per line, each anchored on a folder of this job: {tmp} (its temp folder), {build} (its build folder) or {slot} (its slot, in a kept folder's name), e.g. {build}[/\\\\]debug[/\\\\]pitwall-fake-engine. A pattern without one is skipped: it could kill other jobs' processes."
     default: ""
   temp-prefix:
     description: "Start of the temp folders to remove (<job temp>/<prefix>*). Empty: <app-id>-. A kit app passes <app-id>-it-: only folders its tests create, never the installed product's own scratch folders."

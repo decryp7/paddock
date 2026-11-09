@@ -628,7 +628,7 @@ async fn a_child_engine_that_is_slow_to_become_ready_is_waited_for() {
         ready_when: Some(ready.clone()),
         poll_every: std::time::Duration::from_millis(1),
         polls: Some(polls),
-        ..common::ChildEngine::new(common::runnable_server(dir.path()))
+        ..common::ChildEngine::new(common::runnable_fake_engine())
     };
     let h = common::harness_with(dir, false, Some(std::sync::Arc::new(engine))).await;
     // The load is awaited in process: an HTTP request would add its own client time budget.
@@ -671,11 +671,10 @@ fn launch_on(port: u16) -> pitwall_core::llama::Launch {
 #[tokio::test]
 async fn a_child_engine_that_exits_before_it_answers_is_reported_with_its_reason() {
     use pitwall_server::engines::Engine as _;
-    let dir = tempfile::tempdir().unwrap();
     let (polls, polled) = tokio::sync::watch::channel(0usize);
     let engine = common::ChildEngine {
         polls: Some(polls),
-        ..common::ChildEngine::new(common::runnable_server(dir.path()))
+        ..common::ChildEngine::new(common::runnable_fake_engine())
     };
     // The test holds the port for its whole length, so the child's bind fails on every OS (C39).
     let (port, held) = common::held_port().await;
@@ -702,7 +701,7 @@ async fn a_load_whose_child_finds_its_port_taken_retries_on_a_fresh_port() {
     let engine = std::sync::Arc::new(common::ChildEngine {
         take_first_port: true,
         polls: Some(polls),
-        ..common::ChildEngine::new(common::runnable_server(dir.path()))
+        ..common::ChildEngine::new(common::runnable_fake_engine())
     });
     let ports = engine.ports.clone();
     let h = common::harness_with(dir, false, Some(engine.clone())).await;
@@ -726,7 +725,7 @@ async fn a_load_whose_child_finds_its_port_taken_retries_on_a_fresh_port() {
 #[tokio::test]
 async fn a_crashing_engine_is_restarted_with_backoff_then_given_up_on_until_retry() {
     let dir = tempfile::tempdir().unwrap();
-    let exe = common::runnable_server(dir.path());
+    let exe = common::runnable_fake_engine();
     let h = common::harness_with(
         dir,
         false,
@@ -924,7 +923,7 @@ async fn benchmark_results_survive_a_restart_and_tolerate_damage() {
 #[tokio::test]
 async fn stopping_serving_unloads_every_model_ends_the_engine_processes_and_resuming_serves_again() {
     let dir = tempfile::tempdir().unwrap();
-    let exe = common::runnable_server(dir.path());
+    let exe = common::runnable_fake_engine();
     let pids: std::sync::Arc<std::sync::Mutex<Vec<u32>>> = Default::default();
     let engine = common::ChildEngine {
         pids: pids.clone(),

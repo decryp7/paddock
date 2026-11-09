@@ -43,8 +43,9 @@ curl http://127.0.0.1:11436/x/v1/health
 ```
 
 The server binds `127.0.0.1` only. With no `--port` it uses the port in `settings.toml` (11435 by default); with no
-`--data-dir` it uses the per-OS data folder. `--fake-engine` turns the binary into a tiny OpenAI-compatible test
-engine; the crash and restart tests use it as a real child process.
+`--data-dir` it uses the per-OS data folder. The tests start `pitwall-fake-engine`, a tiny OpenAI-compatible
+engine that is a test-only bin of the same package (`required-features = ["test-support"]`, ADR 0073); the shipped
+server has no such flag.
 
 The management API needs the admin key in `<data folder>/admin.key`:
 

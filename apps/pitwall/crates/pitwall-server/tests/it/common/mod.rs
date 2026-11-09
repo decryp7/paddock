@@ -476,24 +476,21 @@ pub async fn real_harness(dir: tempfile::TempDir) -> Harness {
     }
 }
 
-/// The freshly built `pitwall-server`, for tests that launch it as a real child process.
+/// The freshly built `pitwall-fake-engine` (ADR 0073: a test-only bin of this package, built through the self
+/// dev-dependency), for tests that launch an engine as a real child process.
 ///
-/// Building the Tauri shell (`pitwall-app`) before these tests overwrites `target/debug/pitwall-server` with an empty
-/// placeholder sidecar (`Permission denied`, then `Exec format error`); the assertion names that cause. Copying the
-/// binary elsewhere does not help and is slow on Windows (virus scanners), so the built file is used in place.
+/// Building the Tauri shell (`pitwall-app`) overwrites `target/debug/pitwall-server` with an empty placeholder sidecar;
+/// the fake engine is a different file and is not touched by it, but the size check stays to name any such cause.
 ///
 /// The binary is started once (`--version`) and waited for here, before any test step that has a time budget: macOS
 /// checks a freshly linked program on its first start, and while other jobs on the machine start fresh binaries too
 /// (three CI runners on one Mac, CI run 7775) that check queues behind theirs for many seconds (`syspolicyd` busy, the
 /// child still at `_dyld_start`). Later starts of the same file are not checked again.
 #[allow(clippy::disallowed_methods)] // a test starting its own helper binary and waiting for it to end
-pub fn runnable_server(_dir: &std::path::Path) -> String {
-    let exe = env!("CARGO_BIN_EXE_pitwall-server");
+pub fn runnable_fake_engine() -> String {
+    let exe = env!("CARGO_BIN_EXE_pitwall-fake-engine");
     let len = std::fs::metadata(exe).map(|m| m.len()).unwrap_or(0);
-    assert!(
-        len > 100_000,
-        "{exe} is {len} bytes: the Tauri shell was built first and replaced it with its placeholder sidecar; run these tests before building pitwall-app"
-    );
+    assert!(len > 100_000, "{exe} is {len} bytes: it was replaced by a placeholder; rebuild it");
     let started = std::time::Instant::now();
     let out = std::process::Command::new(exe)
         .arg("--version")
@@ -502,7 +499,7 @@ pub fn runnable_server(_dir: &std::path::Path) -> String {
         .unwrap_or_else(|e| panic!("{exe} cannot be started: {e}"));
     let printed = String::from_utf8_lossy(&out.stdout);
     assert!(
-        out.status.success() && printed.starts_with("pitwall-server "),
+        out.status.success() && printed.starts_with("pitwall-fake-engine "),
         "{exe} --version: {} {printed}{}",
         out.status,
         String::from_utf8_lossy(&out.stderr)
@@ -516,7 +513,7 @@ pub fn runnable_server(_dir: &std::path::Path) -> String {
 /// (nextest `ci`: 60 s), and bounds a run under plain `cargo test`.
 pub const CHILD_HANG_GUARD: Duration = Duration::from_secs(45);
 
-/// An engine that is a real child process: `pitwall-server --fake-engine`, which exits `die_after_ms` after it starts
+/// An engine that is a real child process: `pitwall-fake-engine`, which exits `die_after_ms` after it starts
 /// serving (a crashing engine). Used to test restarts, crash-loop detection and port races against a real process.
 /// Build it with [`ChildEngine::new`] and override what a test needs.
 pub struct ChildEngine {
@@ -648,8 +645,7 @@ impl Engine for ChildEngine {
                 None
             };
             let mut args = vec![
-                "--fake-engine".to_string(),
-                "--die-after-ms".into(),
+                "--die-after-ms".to_string(),
                 self.die_after_ms.to_string(),
                 "--port".into(),
                 l.port.to_string(),

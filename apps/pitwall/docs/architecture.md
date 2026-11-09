@@ -85,7 +85,7 @@ Rules the core keeps: no `unwrap`/`expect` on user data, `unsafe` denied, `missi
 | `process.rs` | The only place child processes are started: scrubbed environment, no console window, killed on drop |
 | `paths.rs`, `system.rs` | Data folders and atomic writes; hardware and memory probes (RAM, GPUs, disk, process RSS) |
 | `service/` | Running as an OS service: `spec.rs` (pure functions of a target OS: names, paths, unit text, restart-after-update decision), `systemd.rs`, `windows.rs`, `login_path.rs` (the user's login-shell `PATH` for supervised servers), `watch.rs` (restart itself when its own binary changed and it is idle) |
-| `fake_engine.rs` | A test double: a small OpenAI-compatible server run as `pitwall-server --fake-engine` |
+| `fake_engine.rs` | A test double (behind `test-support`): a small OpenAI-compatible server, run by the tests as the `pitwall-fake-engine` bin of this package |
 
 ### Command line (`crates/pitwall-cli`)
 

@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### Pitwall: no test double or test switch in the shipped build (ADR 0073, rule 73, WP-P)
+- Removes P1 to P6 of ADR 0073's Pitwall survey; the register and the shared crates follow.
+- `pitwall-server` no longer knows `--fake-engine`, `--die-after-ms` or `--ready-when` (it answers `unknown option`, exit 2). The fake OpenAI-compatible engine is the `pitwall-fake-engine` bin of the same package, built only with the `test-support` feature, which only the package's self dev-dependency enables; the `fake_engine` module is behind `cfg(any(test, feature = "test-support"))`. The tests start it through `CARGO_BIN_EXE_pitwall-fake-engine`, and the host-cleanup process pattern follows the new name.
+- In `pitwall-app`, the scripted server `server_client::fake` and the fixed admin key `StaticKeys` are behind the same gate and the same self dev-dependency.
+- Checks: `tests/shipped_binary.rs` (the shipped binary refuses the three flags; a control shows `--version` is accepted) and `scripts/ci/shipped-no-test-support.test.mjs` (`cargo tree --workspace -e normal` has no `test-support`; the dev graph does, so the probe can see it).
+
 ### `@decryp7/paddock-ui`: a failed read ends on its own in every shell store (ADR 0058)
 - Fixed: after one failed read (an engine or agent restarting at start), the Activity, Settings, service-health, notifications, notification channels, AI access (MCP), problem report and updates stores kept "could not be read" for good, even when events later brought data; the set-up, storage, packs, Pitwall, recent files and service stores cleared it only when an event happened to come. Each now reads again on its own while in error (after 2 s, 4 s and 8 s, then every 15 s), keeps the error up without a loading flash until a read succeeds, and ends the error when an event or a command's reply brings the whole state, or re-reads when an event brings a part (at most one read at a time; after a failed re-read, events start the next one only after 10 s).
 - New in `@decryp7/paddock-ui/shell/store`: `ReadPolicy`, `READ_RETRY_CLOCK` (`ReadRetryClock`: `now`, `after`), `READ_RETRY_BACKOFF_MS`, `READ_RETRY_STEADY_MS`, `READ_RETRY_EVENT_SPACING_MS`, and the types `ReadSpec`, `Reads`, `ReadControl`. A store declaring `{ retry: true }` declares its read once with `store._reads.define({ read, apply, message, quiet?, eventSpacingMs? })` and calls `load`, `event` and `received` on the handle.

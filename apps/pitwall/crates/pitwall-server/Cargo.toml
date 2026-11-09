@@ -17,6 +17,18 @@ path = "src/lib.rs"
 name = "pitwall-server"
 path = "src/main.rs"
 
+# The fake LLM engine the tests start as a child process (ADR 0073 / rule 73). It is a bin of this package so that
+# `CARGO_BIN_EXE_pitwall-fake-engine` is set for the tests, and `required-features` keeps it out of every shipped build.
+[[bin]]
+name = "pitwall-fake-engine"
+path = "src/fake_engine_main.rs"
+required-features = ["test-support"]
+
+[features]
+# Test doubles: the fake engine module and its program. Enabled only by the self dev-dependency below, never by a
+# normal dependency (`scripts/ci/shipped-no-test-support.test.mjs` checks `cargo tree -e normal`).
+test-support = []
+
 [dependencies]
 pitwall-core.workspace = true
 pitwall-loopback = { path = "../pitwall-loopback" }
@@ -64,6 +76,8 @@ windows = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
+# The self dev-dependency that turns `test-support` on for this package's tests and builds the fake engine for them.
+pitwall-server = { path = ".", features = ["test-support"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "process", "fs", "io-util", "sync", "signal"] }
 
