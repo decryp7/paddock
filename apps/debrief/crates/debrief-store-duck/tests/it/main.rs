@@ -23,6 +23,7 @@ mod projects;
 mod qlang;
 mod redacted_copy;
 mod runtime_lib;
+mod scratch_removal;
 mod search;
 mod segments;
 mod skew;

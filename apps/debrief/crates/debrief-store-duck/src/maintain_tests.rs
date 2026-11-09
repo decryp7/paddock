@@ -6,6 +6,11 @@ use debrief_core::ports::{Ingest, PageQuery, Positions, Query};
 use debrief_core::ql::{QueryControl, QueryStage};
 use debrief_core::{PluginRegistry, Profile};
 
+// One removal for the integration tests' folders and these (retries a busy folder, defers a stuck one to the exit).
+#[path = "../tests/common/scratch.rs"]
+#[allow(dead_code)]
+mod scratch;
+
 struct Dir(PathBuf);
 
 impl Dir {
@@ -19,7 +24,7 @@ impl Dir {
 
 impl Drop for Dir {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        scratch::remove_or_defer(&self.0);
     }
 }
 
