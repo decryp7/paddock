@@ -1499,3 +1499,27 @@ A redaction default in a shared crate was widened for one app's problem report. 
 ## Gitea tokens cannot mint narrower tokens, and agents must not create bot users (2026-11-08)
 
 An agent looking for a narrower CI token found that a Gitea token cannot create a token with fewer rights, and the only other route was creating a bot user. Agents must not create users. The user creates scoped CI tokens (one per purpose, least privilege) and the agent is given the one it needs; if none exists, the agent stops and asks.
+
+## A polling test ran its in-process agent out of file descriptors, and the handshake closed without a word (2026-11-09, Dyno 1.1.0)
+
+Symptom: CI run 7763 (Linux), `helper_seam::the_cached_inventory_reads_the_memory_slots_again_when_the_helper_comes_up` failed after
+5.25 s with "the host closed the connection during the handshake"; an independent reviewer could not reproduce it on macOS with
+21,000 sequential connections. First hypotheses: a thread failed to start (container thread or pid limit), the server failed to
+read the hello, or a rig artefact. Measured in the CI image (a synthetic in-process agent and a probe loop of connect, ask, drop): a `BodyPeer` that is dropped
+without `close()` keeps its connection, so each poll leaked 6 descriptors and 5 threads (agent and client share the test process);
+the train's new back-off poll made about 250 connections in 5 s, 1,500 descriptors. Under a 1,024 limit the agent's accept took the
+last descriptor and the handshake's watchdog could not copy the stream: `IpcError::Io(EMFILE)` before the hello was read, the
+stream dropped, the client saw the end of the stream. A thread limit (`--pids-limit 700`) instead failed after the welcome or on the
+client side ("cannot start an IPC thread") in 5 of 5 runs, never with this message; CPU starvation with closed connections gave no
+failure. Not measured: the CI container's own open-files limit (nextest does not raise it on Linux; the local image had 20,480).
+
+Root cause: a test rig that dropped peers instead of closing them, plus a handshake that answered local resource failures with
+silence. Fix: `paddock-ipc` answers a host that cannot start a handshake with `busy` naming the cause, a malformed hello with
+`invalid`, and keeps one descriptor in reserve so a client the accept could not take (Linux queues it; it waited 10 s while the
+host logged a refusal every 50 ms) is told `busy` too; the helper-seam rig closes each connection and prints the agent's log, the
+open files and the limit when a test fails; a 300-connection stress test checks that the agent gives back what a closed
+connection held.
+
+- A test that starts the product in its own process shares its limits: a leak in the test's client exhausts the product.
+- Logs explain the failure only if the rig shows them: an in-process agent's `log` lines went nowhere until the rig captured them.
+- Class: a handle whose drop does not release its resource (`BodyPeer`, `Peer`); reported for an ER-21 decision.
