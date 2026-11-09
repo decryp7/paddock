@@ -1708,14 +1708,32 @@ test('build-jobs gives each runner class its share of the host, never the agents
   assert.equal(jobsOf(buildJobs({ ...WINDOWS, PADDOCK_CI_CORES: '2', PADDOCK_CI_JOBS_PER_HOST: '4' })), '1', 'never below one');
 });
 
-test('build-jobs leaves Linux and Windows on cargo\'s default until their share is measured, and names the cores in the log', () => {
-  for (const [host, cores] of [[LINUX, 32], [WINDOWS, 8]]) {
+test('build-jobs leaves Linux on cargo\'s default until its share is measured, and names the cores in the log', () => {
+  for (const [host, cores] of [[LINUX, 32]]) {
     const r = buildJobs(host);
     assert.equal(r.status, 0);
     assert.equal(jobsOf(r), undefined, host.RUNNER_OS);
     assert.match(r.stderr, new RegExp(`${cores} cores`));
     assert.match(r.stderr, /stays unset/);
   }
+});
+
+test('build-jobs gives Windows 3 jobs per host from its class, which a runner env still overrides', () => {
+  // The Windows runner (a Proxmox VM) runs capacity 3; the repo declares that, not the runner's runner.envs.
+  // 16 cores, 32 GB: min((16 - 0) / 3 = 5, (32768 - 2048) / (3 x 1536) = 6) = 5 build jobs; tests: the job's core share, 5.
+  const big = { RUNNER_OS: 'Windows', PADDOCK_CI_CORES: '16', PADDOCK_CI_RAM_MB: '32768' };
+  const r = buildJobs(big);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(jobsOf(r), '5');
+  assert.equal(threadsOf(r), '5');
+  assert.match(r.stderr, /CARGO_BUILD_JOBS=5 \(\(16 cores - 0 kept\) \/ 3 jobs per host.*the Windows class default/);
+  // 8 cores, 16 GB: min(8 / 3 = 2, (16316 - 2048) / 4608 = 3) = 2.
+  const small = buildJobs({ ...WINDOWS });
+  assert.equal(jobsOf(small), '2');
+  assert.equal(threadsOf(small), '2');
+  // The runner's own number still wins.
+  assert.equal(jobsOf(buildJobs({ ...big, PADDOCK_CI_JOBS_PER_HOST: '2' })), '8');
+  assert.match(buildJobs({ ...big, PADDOCK_CI_JOBS_PER_HOST: '2' }).stderr, /runner's PADDOCK_CI_JOBS_PER_HOST/);
 });
 
 test('build-jobs caps the share by memory: (RAM - kept) / (jobs per host x MB per rustc)', () => {
@@ -1809,7 +1827,7 @@ test('build-jobs gives nextest the class\'s measured test threads on the shared 
   assert.equal(threadsOf(buildJobs({ ...MAC, PADDOCK_CI_TEST_THREADS: '6' })), '6');
   assert.notEqual(buildJobs({ ...MAC, PADDOCK_CI_TEST_THREADS: '0' }).status, 0);
   // Where the runner class keeps cargo's default, nextest keeps the profile's too.
-  for (const host of [LINUX, WINDOWS]) assert.equal(threadsOf(buildJobs(host)), undefined, host.RUNNER_OS);
+  assert.equal(threadsOf(buildJobs(LINUX)), undefined, 'Linux');
   const dir = mkdtempSync(join(tmpdir(), 'build-jobs-'));
   const envFile = join(dir, 'env');
   writeFileSync(envFile, '');
