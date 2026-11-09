@@ -251,6 +251,13 @@ impl Dirs {
         self.root.join("plugins")
     }
 
+    /// Whether this is the user's own data folder: the one this process would use, not moved by `DYNO_DATA_DIR`. Only an agent
+    /// on it uses this computer's helper and runs the background checks; a test's or a development agent's folder is not it (ER-14).
+    pub fn is_users_own(&self) -> bool {
+        let overridden = std::env::var_os("DYNO_DATA_DIR").is_some_and(|v| !v.is_empty());
+        users_own(&self.root, overridden, Dirs::current().root())
+    }
+
     /// Which kind of folder this is, for the logs (never the user's path): every launch path of an installed agent
     /// (the app's child, the login item, the Windows `Run` entry) must log "user data folder".
     #[expect(
@@ -268,6 +275,11 @@ impl Dirs {
             &std::env::temp_dir(),
         )
     }
+}
+
+/// [`Dirs::is_users_own`] with the environment passed in.
+fn users_own(root: &Path, overridden: bool, current: &Path) -> bool {
+    root == current && !overridden
 }
 
 /// [`Dirs::kind`] with the environment passed in.
@@ -407,6 +419,15 @@ mod tests {
         let home = tmp.path().join("home");
         let env = |k: &str| (k == "DYNO_DATA_DIR").then(|| home.clone());
         assert_eq!(Dirs::resolve(&env, tmp.path()).unwrap().root(), home);
+    }
+
+    #[test]
+    fn only_the_folder_no_one_moved_is_the_users_own() {
+        let cur = Path::new("/u/dyno");
+        assert!(users_own(cur, false, cur));
+        // Moved by DYNO_DATA_DIR (tests, development agents): this process's folder, but not the user's (ER-14).
+        assert!(!users_own(cur, true, cur));
+        assert!(!users_own(Path::new("/x"), false, cur));
     }
 
     #[test]

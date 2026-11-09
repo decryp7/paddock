@@ -103,10 +103,12 @@ impl WakeCentre {
             .map_err(|e| internal(format!("The scheduled wakes could not be read: {e}")))
     }
 
+    /// Saves `s`, unless the agent has been asked to stop: the wake thread may be inside a helper call the stop does not wait for,
+    /// and writes nothing after the stop.
     fn save(&self, shared: &Shared, s: &mut WakeSchedule) -> Result<(), AgentError> {
-        lock(&shared.core)
-            .store
-            .put_wake_schedule(s)
+        shared
+            .write_unless_stopped(|core| core.store.put_wake_schedule(s))
+            .ok_or_else(|| internal("Dyno is stopping; the schedule was not saved.".to_string()))?
             .map(|_| ())
             .map_err(|e| internal(format!("The schedule could not be saved: {e}")))
     }
@@ -246,6 +248,9 @@ impl WakeCentre {
         let on = Self::enabled(shared);
         let zone = lock(&shared.core).zone.clone();
         for s in &all {
+            if shared.stopped() {
+                return;
+            }
             let mut s = s.clone();
             if on && s.enabled && s.next_at.is_none() {
                 s = armed(&s, now(), &*zone);
@@ -257,11 +262,17 @@ impl WakeCentre {
             }
             self.sync_one(&for_os);
         }
+        if shared.stopped() {
+            return;
+        }
         if let Some((sched, _)) = self.scheduler() {
             let owned: Vec<String> = all.iter().filter(|s| on && s.enabled).map(|s| tag_of(s.id)).collect();
             match sched.list() {
                 Ok(pending) => {
                     for WakeEntry { tag, .. } in pending.into_iter().filter(|w| !owned.iter().any(|o| o == w.tag.as_str())) {
+                        if shared.stopped() {
+                            return;
+                        }
                         let _ = sched.cancel(&tag);
                     }
                 }
@@ -280,6 +291,9 @@ impl WakeCentre {
         let zone = lock(&shared.core).zone.clone();
         let mut acted = false;
         for s in all {
+            if shared.stopped() {
+                return;
+            }
             let what = fire(&s, at);
             if what == Fire::NotYet {
                 continue;

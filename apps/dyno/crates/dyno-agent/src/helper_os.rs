@@ -239,6 +239,48 @@ impl crate::helper_peer::Revive for ServiceReviver {
     }
 }
 
+/// Why an agent on a data folder of its own has no helper (ER-14): it is a test's or a development agent, and this computer's
+/// helper belongs to the user's own agent.
+pub const NOT_FOR_THIS_FOLDER: &str = "This agent runs on a data folder of its own (DYNO_DATA_DIR, as tests and development \
+agents do), so it does not use this computer's helper.";
+
+/// A transport that finds no helper: every call answers [`TransportError::Absent`] without leaving the process.
+struct NoHelper;
+
+impl HelperTransport for NoHelper {
+    fn call(
+        &self,
+        _: dyno_core::helper_wire::HelperRequest,
+    ) -> Result<dyno_core::helper_wire::HelperReply, crate::helper_link::TransportError> {
+        Err(crate::helper_link::TransportError::Absent)
+    }
+}
+
+/// An installer that refuses: an agent on a data folder of its own never installs or removes this computer's helper.
+struct NoInstaller;
+
+impl HelperInstaller for NoInstaller {
+    fn install(&mut self, _: HelperAction) -> Result<(), String> {
+        Err(NOT_FOR_THIS_FOLDER.into())
+    }
+
+    fn uninstall(&mut self) -> Result<(), String> {
+        Err(NOT_FOR_THIS_FOLDER.into())
+    }
+}
+
+/// The helper centre of an agent on a data folder of its own: it never reaches this computer's helper (no call, no prompt, no
+/// owner lookup), and its status is "not included" with [`NOT_FOR_THIS_FOLDER`] as the reason.
+pub fn off_centre() -> HelperCentre<Box<dyn HelperTransport>> {
+    HelperCentre::new(
+        HelperLink::new(Box::new(NoHelper) as Box<dyn HelperTransport>, Arc::new(SystemClock)),
+        host(),
+        Err(NOT_FOR_THIS_FOLDER.into()),
+        env!("CARGO_PKG_VERSION"),
+        Box::new(NoInstaller),
+    )
+}
+
 /// The helper centre for this machine.
 pub fn centre() -> HelperCentre<Box<dyn HelperTransport>> {
     let host = host();

@@ -100,11 +100,40 @@ pub struct Running {
     /// The shared state.
     pub shared: Arc<Shared>,
     threads: Vec<std::thread::JoinHandle<()>>,
+    /// Threads that may be inside a helper call that cannot be interrupted (the climate's `powermetrics` read takes seconds; the
+    /// scheduled wakes call `pmset` through the helper on macOS and Linux): a stop asks them to end but does not wait for them,
+    /// and they write to the store only through [`agent::Shared::write_unless_stopped`], so nothing after the stop.
+    helper_threads: Vec<std::thread::JoinHandle<()>>,
     /// What the app needs to connect.
     pub discovery: discovery::Discovery,
     /// The data folder's agent lock, held until the agent has stopped (`None` only when the folder cannot hold a lock
     /// file, in which case it cannot hold the history either and the agent keeps it in memory).
     instance: Option<instance::InstanceLock>,
+}
+
+/// What a stop in progress is waiting for (a thread's name, "the benchmark"); empty when none.
+static STOP_WAITING_ON: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// What a stop in progress is waiting for, for the line the signal watch writes when the stop takes too long (ER-27); "nothing"
+/// when no stop is waiting.
+pub fn stop_waiting_on() -> String {
+    let now = STOP_WAITING_ON.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+    if now.is_empty() {
+        "nothing".into()
+    } else {
+        now
+    }
+}
+
+fn set_stop_waiting_on(what: &str) {
+    let mut now = STOP_WAITING_ON.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    now.clear();
+    now.push_str(what);
+}
+
+/// Whole milliseconds of `d`, saturating.
+fn millis(d: std::time::Duration) -> u64 {
+    u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
 }
 
 impl Running {
@@ -250,8 +279,10 @@ impl Running {
                 })
                 .map_err(|e| format!("could not start the sampler: {e}"))?,
         );
+        let mut helper_threads = Vec::new();
         if shared.climate.active() {
-            threads.push(helper_readers::counters::spawn_worker(&shared).map_err(|e| format!("could not start the sensor reader: {e}"))?);
+            helper_threads
+                .push(helper_readers::counters::spawn_worker(&shared).map_err(|e| format!("could not start the sensor reader: {e}"))?);
         }
         inventory::warm(&shared);
         // The volume list is asked for once now, off every request path, so the first page or scan never waits for it.
@@ -367,7 +398,7 @@ impl Running {
                 .map_err(|e| format!("could not start the power watcher: {e}"))?,
         );
         let s = shared.clone();
-        threads.push(
+        helper_threads.push(
             std::thread::Builder::new()
                 .name("dyno-wakes".into())
                 .spawn(move || wakes::run(&s))
@@ -413,6 +444,7 @@ impl Running {
         Ok(Running {
             shared,
             threads,
+            helper_threads,
             discovery,
             instance,
         })
@@ -423,14 +455,46 @@ impl Running {
         self.shared.stopped()
     }
 
-    /// Stops and waits for the threads (the sampler releases everything it applied first), then frees the data folder.
+    /// Stops and waits for the threads (the sampler releases everything it applied first), then frees the data folder. A
+    /// thread inside a helper call is not waited for (it writes nothing once stopped): a stop after TERM has a bounded grace.
     pub fn stop(self) {
         self.shared.request_stop();
+        let stopping = std::time::Instant::now();
+        let mut slowest = (String::new(), 0u64);
         for t in self.threads {
+            let began = std::time::Instant::now();
+            let name = t.thread().name().unwrap_or("unnamed").to_string();
+            set_stop_waiting_on(&name);
             let _ = t.join();
+            let ms = millis(began.elapsed());
+            if ms > slowest.1 {
+                slowest = (name, ms);
+            }
         }
+        let mut left = 0usize;
+        for r in self.helper_threads {
+            if r.is_finished() {
+                let _ = r.join();
+            } else {
+                left += 1;
+                // Rule 56 (ER-27): a stop that leaves a helper call behind says which thread, so a slow or late stop can be explained.
+                log::info!(Thread = r.thread().name().unwrap_or("unnamed"); "Agent left a helper call in progress to end by itself");
+            }
+        }
+        // A write that began before the stop was asked for ends before this lock is taken; any later one sees the stop and is not
+        // made (`Shared::write_unless_stopped`): nothing reaches the store once the folder is released below.
+        drop(agent::lock(&self.shared.core));
         // A benchmark in progress is cancelled and its child (and Linux unit) ended before the agent goes.
+        set_stop_waiting_on("the benchmark");
         self.shared.bench.shutdown(std::time::Duration::from_secs(5));
         drop(self.instance);
+        set_stop_waiting_on("");
+        log::info!(
+            ElapsedMs = millis(stopping.elapsed()),
+            SlowestThread = slowest.0.as_str(),
+            SlowestMs = slowest.1,
+            HelperCallsLeft = left;
+            "Agent threads stopped"
+        );
     }
 }

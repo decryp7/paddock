@@ -72,8 +72,17 @@ mod tests {
         }
     }
 
+    /// Writes one phase line with the time since `began` straight to the standard error handle (ER-27): libtest keeps a test's
+    /// `eprintln!` in memory, which is lost when nextest kills a test that hangs (CI job 33005 showed only "test timed out"), while
+    /// what reaches the handle is shown.
+    fn phase(began: std::time::Instant, what: &str) {
+        use std::io::Write;
+        let _ = writeln!(std::io::stderr(), "[+{} ms] {what}", began.elapsed().as_millis());
+    }
+
     #[test]
     fn finds_a_dummy_that_holds_a_temp_file_and_nobody_for_a_free_one() {
+        let began = std::time::Instant::now();
         let dir = tempfile::tempdir().unwrap();
         let held = dir.path().join("held.txt");
         std::fs::write(&held, b"x").unwrap();
@@ -87,10 +96,13 @@ mod tests {
                 .spawn()
                 .unwrap(),
         );
+        phase(began, "the dummy started; waiting for its \"ready\"");
         let mut ready = String::new();
         BufReader::new(dummy.0.stdout.take().unwrap()).read_line(&mut ready).unwrap();
         assert_eq!(ready.trim(), "ready");
+        phase(began, "the dummy holds the file; first lookup");
         let found = LsofLocks.lockers(&held).unwrap();
+        phase(began, "first lookup done");
         // The name is whatever the process is called at that moment (the shell announces "ready" just before it execs `tail`).
         assert!(
             found.iter().any(|l| l.process.pid == dummy.0.id() && !l.name.is_empty()),
@@ -100,14 +112,17 @@ mod tests {
         let link = dir.path().join("link.txt");
         std::fs::hard_link(&held, &link).unwrap();
         let by_link = LsofLocks.lockers(&link).unwrap();
+        phase(began, "lookup by the hard link done");
         assert!(by_link.iter().any(|l| l.process.pid == dummy.0.id()), "{by_link:?}");
         // And asking by the original name still works once the link exists (the kernel may now report either name as the
         // path, so a match on the path string would miss it).
         let again = LsofLocks.lockers(&held).unwrap();
+        phase(began, "second lookup by the name done");
         assert!(again.iter().any(|l| l.process.pid == dummy.0.id()), "{again:?}");
         let free = dir.path().join("free.txt");
         std::fs::write(&free, b"y").unwrap();
         assert!(LsofLocks.lockers(&free).unwrap().is_empty());
+        phase(began, "lookup of the free file done");
         assert!(matches!(
             LsofLocks.lockers(&dir.path().join("missing")),
             Err(PlatformError::NotFound(_))

@@ -646,15 +646,19 @@ impl Shared {
         );
         let power_marker = dirs.root().join("keep-awake.active");
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-        let own_folder = Dirs::try_current().is_ok_and(|current| dirs.root() == current.root());
+        // The user's own folder, not one moved by `DYNO_DATA_DIR` (tests, development agents): only the user's agent uses this
+        // computer's helper and runs the background checks (ER-14).
+        let own_folder = dirs.is_users_own();
         let own_tools = dirs.tools();
         let helper_first = own_folder || wiring.is_some();
+        let local_memory = || Box::new(dyno_platform::inventory::read_memory_layout) as crate::helper_readers::memory::LocalMemory;
         let (helper_centre, local_memory) = match wiring {
             Some(w) => (w.centre, w.local_memory),
-            None => (
-                crate::helper_os::centre(),
-                Box::new(dyno_platform::inventory::read_memory_layout) as crate::helper_readers::memory::LocalMemory,
-            ),
+            None if own_folder => (crate::helper_os::centre(), local_memory()),
+            None => {
+                log::info!(Folder = dirs.kind(); "Helper not used: this agent runs on a data folder of its own");
+                (crate::helper_os::off_centre(), local_memory())
+            }
         };
         let host = helper_centre.host();
         let Platform {
@@ -821,6 +825,17 @@ impl Shared {
     /// Whether the agent should stop.
     pub fn stopped(&self) -> bool {
         self.stop.load(Ordering::SeqCst)
+    }
+
+    /// Runs `write` on the core under its lock unless the agent has been asked to stop (then `None`). A thread the stop does not
+    /// wait for (one that may be inside a helper call) writes to the store only through this: [`crate::Running::stop`] takes the
+    /// lock once after asking to stop, so no such write reaches the store after the stop returns.
+    pub fn write_unless_stopped<R>(&self, write: impl FnOnce(&mut Core) -> R) -> Option<R> {
+        let mut core = lock(&self.core);
+        if self.stopped() {
+            return None;
+        }
+        Some(write(&mut core))
     }
 
     /// Asks every loop to stop.
