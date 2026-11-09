@@ -12,7 +12,7 @@ and installs certificates where the system and your builds will trust them.
 
 </div>
 
-![Placeholder hero for Scrutineer: certified before it ships. A concept mock-up of the certificate authority screen: the family root, intermediate and code-signing leaf with their expiry, the other keys, the chain, and a reminder to renew the leaf](docs/images/scrutineer-placeholder-hero.svg?v=25c9f102)
+![Placeholder hero for Scrutineer: certified before it ships. A concept mock-up of the certificate authority screen: the family root, intermediate and code-signing leaf with their expiry, the other keys, the chain, and a reminder to renew the leaf](docs/images/scrutineer-placeholder-hero.svg?v=814cbf00)
 
 > **Status: planned, not released.** There is no code yet. Scrutineer was dropped on 2026-11-05 and revived on 2026-11-09: one
 > family signing identity keeps macOS privacy grants (Full Disk Access and others) and keychain access across updates, which
@@ -25,7 +25,7 @@ and installs certificates where the system and your builds will trust them.
 
 ## What it will do
 
-![Placeholder feature panels for Scrutineer: rotate the intermediate step by step with what is kept; drop a file to see its verify report; install the family root after typing the first 8 hex digits of its fingerprint; the doctor checklist with a leaf to renew](docs/images/scrutineer-placeholder-features.svg?v=ef8125b8)
+![Placeholder feature panels for Scrutineer: rotate the intermediate step by step with what is kept; drop a file to see its verify report; install the family root after typing the first 8 hex digits of its fingerprint; the doctor checklist with a leaf to renew](docs/images/scrutineer-placeholder-features.svg?v=ea5a473e)
 
 - **Certificate authority:** the family root, intermediate and code-signing leaf, the package and update keys, and when
   each expires.

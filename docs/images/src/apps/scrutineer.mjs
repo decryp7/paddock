@@ -3,6 +3,8 @@ export default {
   // 2026-11-09 (ADR 0079). PLACEHOLDER art (the user, 2026-11-04): the real icon, hero and page come later. Its placeholder page
   // stays in tools/scrutineer until the app has code under apps/scrutineer.
   id: 'scrutineer', name: 'Scrutineer', icon: 'scrutineer-placeholder', stem: 'scrutineer-placeholder', home: 'tools/scrutineer', planned: true, status: 'Planned',
+  // Review 2026-11-09: a plain Planned pill, concept captions on every image, the social window inside the card, less empty top.
+  pill: 'Planned', conceptCaptions: true, heroShift: 40, social: { fw: 600, fx: 640, fy: 150 },
   platforms: 'macOS, Windows and Linux',
   accent: { dark: '#E07CC8', light: '#840070', fill: '#840070' },
   headline: ['Certified before', 'it ships.'],

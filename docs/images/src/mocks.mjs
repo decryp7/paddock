@@ -202,10 +202,11 @@ function scrutineerPanel(kind) {
         t(284, 96 + i * 30, k, 'mm') + t(612, 96 + i * 30, v, 'mt', 'end')).join('');
   }
   if (kind === 'trust') {
+    // The person types first; the fingerprint appears only after their digits match the certificate and the pinned value.
     return r(40, 24, 592, 232, 'mc', 12) + t(60, 58, 'Install the family root on this machine', 'mt') +
-      t(60, 86, 'SHA-256  4F2A 91C0 7B3E … 0D6E', 'mm') + t(60, 108, 'Trusted for code signing only. Needs an administrator.', 'mm') +
-      t(60, 144, 'Type the first 8 hex digits from your own record', 'mt') +
-      r(60, 156, 220, 34, 'mfield', 8) + t(74, 178, '4F2A91C0', 'mt') + stateChip(292, 162, 'Matches', true) +
+      t(60, 84, 'Type the first 8 hex digits of its SHA-256 from your own record', 'mm') +
+      r(60, 98, 220, 34, 'mfield', 8) + t(74, 120, '4F2A91C0', 'mt') + stateChip(292, 104, 'Matches', true) +
+      t(60, 160, 'Shown after the match: SHA-256 4F2A 91C0 7B3E … 0D6E', 'mm') + t(60, 182, 'Code signing only. Needs an administrator.', 'mm') +
       r(400, 206, 104, 32, 'mfield', 8) + t(452, 227, 'Cancel', 'mt', 'middle') + r(512, 206, 100, 32, 'maccf', 8) + t(562, 227, 'Install', 'mtw', 'middle');
   }
   // doctor

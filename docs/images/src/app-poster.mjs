@@ -151,18 +151,20 @@ function heroSvg(d, S, { W = 900 * 16 / 9, H = 900 } = {}) {
   const lines = d.headline.map((l, i) => `<text class="h1" x="96" y="${372 + i * 66}">${esc(l)}</text>`).join('');
   const sub = d.sub.map((l, i) => `<text class="sub" x="96" y="${372 + (d.headline.length - 1) * 66 + 58 + i * 34}">${esc(l)}</text>`).join('');
   const subEnd = 372 + (d.headline.length - 1) * 66 + 26 + d.sub.length * 34;
-  const tag = d.planned ? pill(96, subEnd + 46, 'Planned · coming soon') : pill(96, subEnd + 46, STATUS[d.id]?.text ?? d.status, false, STATUS[d.id]?.tone === 'muted');
+  const tag = d.planned ? pill(96, subEnd + 46, d.pill ?? 'Planned · coming soon') : pill(96, subEnd + 46, STATUS[d.id]?.text ?? d.status, false, STATUS[d.id]?.tone === 'muted');
   const note = d.planned || d.concept ? 'Concept: the screen is a mock-up, not a product screenshot.' : d.illustrated ? 'Illustration of the app, not a product screenshot.' : '';
   const mockNote = note ? `<text class="small" x="${fx}" y="${fy + fbh + 54}" style="font-size:17px">${note}</text>` : '';
+  // d.heroShift moves the content up (px) when the top margin reads empty; the background stays.
+  const up = d.heroShift ? `<g transform="translate(0 ${-d.heroShift})">` : '<g>';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="t d">
 <title id="t">${d.name}: ${esc(d.headline.join(' '))}</title><desc id="d">${esc(d.sub.join(' '))}</desc>
 ${css(a)}<defs>${defs}</defs>
 ${glow(1600, 900, 1180, 430, 760)}${glow(1600, 900, 140, 840, 520, 'g2')}${tracks(1600, 900)}
-${back}${front}${mockNote}
+${up}${back}${front}${mockNote}
 ${iconSvg(d.icon ?? d.id, 96, 196, 72)}
 <text class="name" x="186 " y="242">${d.name}</text>
 ${lines}${sub}${tag}
-<text class="small" x="96" y="${subEnd + 112}">${esc(d.platforms)}. Local only.</text>
+<text class="small" x="96" y="${subEnd + 112}">${esc(d.platforms)}. Local only.</text></g>
 </svg>`;
 }
 
@@ -189,7 +191,9 @@ function featuresSvg(d, S) {
     return `<g transform="translate(${x} ${sy + 24})">${iconSvg(w.app, 0, 0, 52)}<text class="wname" x="66" y="22">${names[w.app]}</text><text class="wnote" x="66" y="46">${esc(w.note)}</text></g>`;
   }).join('');
   // No "Works with" strip for a member that names no partner apps yet (a planned tool).
-  const H = ww.length ? sy + 24 + 52 + 48 : sy - 28;
+  // d.conceptCaptions: say under the panels that the screens are mock-ups (planned apps whose page asks for it).
+  const H0 = ww.length ? sy + 24 + 52 + 48 : sy - 28, cap = d.planned && d.conceptCaptions, H = cap ? H0 + 44 : H0;
+  const capText = cap ? `<text class="small" x="80" y="${H0 + 20}" style="font-size:17px">Concept: the screens are mock-ups, not product screenshots.</text>` : '';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="t d">
 <title id="t">${d.name} features</title><desc id="d">${esc(d.features.panels.map((p) => `${p.title}: ${p.text}`).join(' '))}</desc>
 ${css(a)}<defs>${defs.join('')}</defs>${glow(W, 900, 800, 0, 900)}
@@ -198,6 +202,7 @@ ${d.planned ? pill(150 + d.name.length * 15.5 + 16, 94, 'Planned', true) : ''}
 <text class="h2" x="80" y="196">${esc(d.features.heading)}</text>
 ${panels}
 ${ww.length ? `<line x1="80" x2="${W - 80}" y1="${sy - 28}" y2="${sy - 28}" stroke="var(--line)"/>\n${works}` : ''}
+${capText}
 </svg>`;
 }
 
@@ -248,8 +253,9 @@ ${items}
 
 // ---- social (1280x640) ---------------------------------------------------------------------------------------------------
 function socialSvg(d, S) {
-  // d.social = { fx, fy } moves the bleeding window so the right and bottom edges cut between columns and rows, not through text.
-  const a = d.accent, fw = 880, fbh = 550, fx = d.social?.fx ?? 600, fy = d.social?.fy ?? 118;
+  // d.social = { fx, fy } moves the bleeding window so the right and bottom edges cut between columns and rows, not through text;
+  // d.social.fw shrinks the window (aspect kept) so it fits inside the card instead of bleeding.
+  const a = d.accent, fw = d.social?.fw ?? 880, fbh = Math.round(fw / 1.6), fx = d.social?.fx ?? 600, fy = d.social?.fy ?? 118;
   const defs = drawn(d) ? '' : imgDef('hero-l', S.hero.light, fw, fbh) + imgDef('hero-d', S.hero.dark, fw, fbh);
   const win = windowFrame(fx, fy, fw, fbh, drawn(d) ? mockBody(mock.hero(d.id), fw, 960, 600) : shotBody('hero-l', 'hero-d', fw, fbh));
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="t">
@@ -259,7 +265,8 @@ ${win}
 ${iconSvg(d.icon ?? d.id, 72, 84, 76)}<text class="name" x="164" y="136" style="font-size:34px">${d.name}</text>
 ${d.headline.map((l, i) => `<text class="h1" x="72" y="${268 + i * 62}" style="font-size:50px">${esc(l)}</text>`).join('')}
 ${d.sub.map((l, i) => `<text class="sub" x="72" y="${268 + d.headline.length * 62 + 12 + i * 30}" style="font-size:20px">${esc(l)}</text>`).join('')}
-${d.planned ? pill(72, 568, 'Planned · coming soon') : pill(72, 568, STATUS[d.id]?.text ?? d.status, false, STATUS[d.id]?.tone === 'muted')}
+${d.planned && d.conceptCaptions ? `<text class="small" x="${fx}" y="${fy + fbh + 32}" style="font-size:15px">Concept: the screen is a mock-up.</text>` : ''}
+${d.planned ? pill(72, 568, d.pill ?? 'Planned · coming soon') : pill(72, 568, STATUS[d.id]?.text ?? d.status, false, STATUS[d.id]?.tone === 'muted')}
 </svg>`;
 }
 
