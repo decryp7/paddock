@@ -265,7 +265,7 @@ ${win}
 ${iconSvg(d.icon ?? d.id, 72, 84, 76)}<text class="name" x="164" y="136" style="font-size:34px">${d.name}</text>
 ${d.headline.map((l, i) => `<text class="h1" x="72" y="${268 + i * 62}" style="font-size:50px">${esc(l)}</text>`).join('')}
 ${d.sub.map((l, i) => `<text class="sub" x="72" y="${268 + d.headline.length * 62 + 12 + i * 30}" style="font-size:20px">${esc(l)}</text>`).join('')}
-${d.planned && d.conceptCaptions ? `<text class="small" x="${fx}" y="${fy + fbh + 32}" style="font-size:15px">Concept: the screen is a mock-up.</text>` : ''}
+${d.planned && d.conceptCaptions ? `<text class="small" x="${fx}" y="${fy + fbh + 54}" style="font-size:15px">Concept: the screen is a mock-up.</text>` : ''}
 ${d.planned ? pill(72, 568, d.pill ?? 'Planned · coming soon') : pill(72, 568, STATUS[d.id]?.text ?? d.status, false, STATUS[d.id]?.tone === 'muted')}
 </svg>`;
 }

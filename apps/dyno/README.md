@@ -13,10 +13,10 @@ A dynamometer measures an engine under load and shows where the power goes: Dyno
 
 </div>
 
-![Dyno: See why your PC is slow](docs/images/dyno-hero.svg?v=3af1d14e)
+![Dyno: See why your PC is slow](docs/images/dyno-hero.svg?v=05f7b0bc)
 
 
-> **Status: 1.0.0 released, 1.1.0 in progress.** Dyno is a monitor: live and history, processes and why it is slow,
+> **Status: 1.1.0 released (tag `dyno-v1.1.0`, 2026-11-08), 1.1.1 in progress.** Dyno is a monitor: live and history, processes and why it is slow,
 > alarms, issues, a disk map, counters, extras, benchmarks and the command line, plus opt-in keep awake, Wake-on-LAN, scheduled wakes, sleep, hibernate (Windows and Linux) or shut-down after idle or at a set time, and the administrator helper (an optional, off-by-default AI access page also lets a local MCP client read these values and, only if you allow each one, wake a saved computer or keep this one awake for up to 12 hours). Taming, cleanup and tuning are dropped, not postponed
 > ([ADR 0021](docs/adr/0021-monitoring-only.md)). [docs/features.md](docs/features.md) says exactly what is real and
 > [docs/roadmap.md](docs/roadmap.md) lists what is left.
