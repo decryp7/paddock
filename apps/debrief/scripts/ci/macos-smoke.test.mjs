@@ -26,7 +26,6 @@ function stubApp(root, { main, extra = {} }) {
   put('debrief-app', main);
   put('debrief-store-worker', 'echo self-test ok');
   put('debrief-plugins', 'echo "[]"');
-  put('debrief-ai-worker', 'echo "{}"');
   for (const [n, b] of Object.entries(extra)) put(n, b);
   return app;
 }
@@ -69,6 +68,13 @@ test('a sidecar without a self-test entry fails', { skip: !mac }, () => {
   withApp({ main: 'sleep 5', extra: { 'debrief-new-thing': 'true' } }, (r) => {
     assert.equal(r.status, 1);
     assert.match(r.stdout, /debrief-new-thing has no self-test/);
+  });
+});
+
+test('the AI worker is gone: a bundle that still ships one fails (two sidecars, ADR 0070)', { skip: !mac }, () => {
+  withApp({ main: 'sleep 5', extra: { 'debrief-ai-worker': 'true' } }, (r) => {
+    assert.equal(r.status, 1);
+    assert.match(r.stdout, /debrief-ai-worker has no self-test/);
   });
 });
 

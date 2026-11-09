@@ -11,7 +11,7 @@ import { AiLauncher } from '../ai-launcher';
 import { AiStatusStore } from '../ai-status.store';
 import { AiImage } from '../ai.types';
 import { AiImageStore } from '../vision/ai-image.store';
-import { AiNoVisionCard } from '../vision/no-vision-card';
+import { AiNoVisionNote } from '../vision/no-vision-note';
 import { dragHasFiles, imageFilesOf, imageFilter, MAX_IMAGES_PER_QUESTION } from '../vision/image-files';
 import { ContextMode, contextModeLabel, describeContext } from './chat-model';
 import { ChatStore } from './chat.store';
@@ -36,7 +36,7 @@ const CONTEXT_MODES: readonly ContextMode[] = ['selection', 'view', 'none'];
 @Component({
   selector: 'debrief-chat-composer',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [Icon, CdkMenu, CdkMenuItemRadio, CdkMenuTrigger, AiNoVisionCard],
+  imports: [Icon, CdkMenu, CdkMenuItemRadio, CdkMenuTrigger, AiNoVisionNote],
   template: `
     @if (images.noVision()) {
       <debrief-ai-no-vision class="no-vision" />
@@ -130,9 +130,6 @@ const CONTEXT_MODES: readonly ContextMode[] = ['selection', 'view', 'none'];
             <span class="mi-text">
               <span class="mi-label">{{ browserLabel(m) }}</span>
               <span class="desc">{{ browserHint(m) }}</span>
-              @if (m === 'agent' && browserStatus()?.smallModel) {
-                <span class="desc warn" i18n="@@browser.chatBar.smallModel">Agent mode works best with a 7B or larger model; yours may lose track on long tasks.</span>
-              }
             </span>
           </button>
         }

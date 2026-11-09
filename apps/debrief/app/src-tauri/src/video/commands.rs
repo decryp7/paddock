@@ -10,8 +10,8 @@ use crate::error::{CmdError, CmdResult, ErrorCode};
 use crate::jobs::{self, Controls, Done, JobCtx, JobKind, JobLink, JobProgress, JobResult, JobSpec};
 use crate::paths::WindowGrants;
 use crate::windows::{CurrentWindow, WindowState};
-use debrief_ai::vision::{sanitize, ImageLimits};
 use debrief_core::related::{ExifStamp, TimeEvidence};
+use debrief_image::{sanitize, ImageLimits};
 use debrief_video::api::*;
 use debrief_video::describe::{describe_frame, explain_range, load_frame, read_clock, utc_stamp};
 use debrief_video::ingest::{add_frame, analyse, media_file, Ingest, Stage};
@@ -239,8 +239,8 @@ pub async fn video_frame_image(win: CurrentWindow, frame: FrameRef) -> CmdResult
 /// Puts a frame into the window's image cache as a clean image whose time evidence is the frame's aligned moment, so
 /// the existing image use cases (Explain with AI, Find related logs) work on it unchanged.
 #[tauri::command]
-pub async fn video_frame_to_image<R: Runtime>(app: AppHandle<R>, win: CurrentWindow, frame: FrameRef) -> CmdResult<ImageDto> {
-    let target = crate::ai::commands::core(&app)?.image_target_pixels();
+pub async fn video_frame_to_image(win: CurrentWindow, frame: FrameRef) -> CmdResult<ImageDto> {
+    let target = debrief_image::DEFAULT_TARGET_PIXELS;
     let w = win.arc().clone();
     crate::sync::blocking("opening the frame", move || {
         let folder = folder_of(&w)?;

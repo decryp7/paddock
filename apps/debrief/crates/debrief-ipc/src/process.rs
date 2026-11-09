@@ -151,7 +151,7 @@ impl OsChild {
     }
 
     /// Ends the child's whole process group (Unix: every child is the leader of its own group, see
-    /// [`ChildProcess::spawn`]), so what it started (llama-server under the AI worker) ends with it even when its
+    /// [`ChildProcess::spawn`]), so what it started (a grandchild of the worker) ends with it even when its
     /// own clean-up never runs. Windows children are in a job object that does the same.
     #[cfg_attr(
         unix,
@@ -746,7 +746,7 @@ mod tests {
         assert!(running(std::process::id() as i32), "this process runs");
     }
 
-    /// A child killed after its grace period takes what it started with it (the AI worker's llama-server, which on
+    /// A child killed after its grace period takes what it started with it (a worker's own child, which on
     /// macOS has no parent-death signal and whose exit hook never runs under SIGKILL).
     #[cfg(unix)]
     #[test]
@@ -761,7 +761,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let pid_file = d.path().join("grandchild.pid");
         let script = d.path().join("worker.sh");
-        // A fake worker: starts a grandchild (the fake llama-server), ignores its lifeline and SIGTERM, and stays.
+        // A fake worker: starts a grandchild (the fake grandchild), ignores its lifeline and SIGTERM, and stays.
         std::fs::write(
             &script,
             format!(

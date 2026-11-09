@@ -119,10 +119,10 @@ export class MockSnapshotBackend extends SnapshotBackend {
       { name: 'breadcrumbs.json', bytes: 2048, summary: `${crumbs.length} recent operations (no file contents)` },
       { name: 'system-info.json', bytes: 1536, summary: 'OS, Debrief version and build, memory, plugins, settings without secrets' },
       { name: 'manifest.json', bytes: 900, summary: 'What the report contains' },
-      { name: 'processes.json', bytes: 700, summary: 'AI engine: 2 runs, 1 restart, last exit code 3' },
+      { name: 'processes.json', bytes: 700, summary: 'Isolated plugin: 2 runs, 1 restart, last exit code 3' },
       { name: 'session-recovery.json', bytes: 300, summary: 'Previous run: closed properly, no recoverable session' },
-      { name: 'logs/children/ai-worker.log', bytes: 4096, summary: 'AI worker: 1 run, no restarts' },
-      { name: 'logs/children/llama-server.log', bytes: 8192, summary: 'AI engine: 2 runs, 1 restart, last exit code 3' },
+      { name: 'logs/children/store-worker.log', bytes: 4096, summary: 'Store worker: 1 run, no restarts' },
+      { name: 'logs/children/plugin-host.log', bytes: 8192, summary: 'Isolated plugin: 2 runs, 1 restart, last exit code 3' },
       { name: 'logs/activity.log', bytes: 4096, summary: `${crumbs.length} activity entries` },
       { name: 'logs/debrief.log', bytes: 65536, summary: "Debrief's own log (recent part)" },
       ...this.items.flatMap((i) => [

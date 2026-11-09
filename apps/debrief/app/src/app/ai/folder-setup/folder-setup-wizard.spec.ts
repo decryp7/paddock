@@ -66,7 +66,7 @@ describe('FolderSetupWizard', () => {
     expect(el.querySelector('[aria-current="step"]')!.textContent).toContain('Proposals');
     expect(el.querySelectorAll('fieldset legend')[0]!.textContent).toBe('Instances and lanes');
     // Without AI: the note says how to get better proposals.
-    expect(q('ai-off-note')!.textContent).toContain('local AI assistant');
+    expect(q('ai-off-note')!.textContent).toContain('AI assistant');
     // Each proposal has a checkbox, its summary and the engine's preview (a mini lane preview for keys).
     const key = q('proposal-instance:MachineName')!;
     expect(key.querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked).toBe(true);

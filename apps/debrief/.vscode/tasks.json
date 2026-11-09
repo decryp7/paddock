@@ -40,11 +40,10 @@
     },
     {
       "label": "Debrief: build app (debug binary)",
-      "detail": "cargo build of the desktop app and its AI worker; the UI comes from the dev server",
+      "detail": "cargo build of the desktop app; the UI comes from the dev server",
       "type": "cargo",
       "command": "build",
-      // debrief-ai-worker is the AI assistant's process (target/debug/debrief-ai-worker next to debrief-app).
-      "args": ["-p", "debrief-app", "-p", "debrief-ai-worker"],
+      "args": ["-p", "debrief-app"],
       "problemMatcher": ["$rustc"],
       "group": { "kind": "build", "isDefault": true }
     },

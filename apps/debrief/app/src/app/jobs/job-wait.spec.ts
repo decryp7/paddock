@@ -68,13 +68,13 @@ describe('JobWait', () => {
 
   it('shows the queue position while queued and the job message while it runs', () => {
     const { f, store, line } = setup();
-    store.apply({ jobs: [jobInfo({ id: 5, state: 'queued', position: 2 })], paused: [] });
+    store.apply({ jobs: [jobInfo({ id: 5, state: 'queued', position: 2 })] });
     f.detectChanges();
     expect(line()).toBe('Queued (position 2)');
-    store.apply({ jobs: [jobInfo({ id: 5, message: 'Reading 40 of 80 lines' })], paused: [] });
+    store.apply({ jobs: [jobInfo({ id: 5, message: 'Reading 40 of 80 lines' })] });
     f.detectChanges();
     expect(line()).toBe('Reading 40 of 80 lines');
-    store.apply({ jobs: [jobInfo({ id: 9, message: 'another job' })], paused: [] });
+    store.apply({ jobs: [jobInfo({ id: 9, message: 'another job' })] });
     f.detectChanges();
     expect(line()).toBe('The local model proposes…');
   });

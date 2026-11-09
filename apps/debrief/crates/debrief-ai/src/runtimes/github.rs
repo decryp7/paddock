@@ -1,4 +1,4 @@
-//! Downloads runtime assets from the llama.cpp GitHub releases, as a [`ModelSource`] so the resumable,
+//! Downloads runtime assets from pinned GitHub releases (the FFmpeg runtime's), as a [`ModelSource`] so the resumable,
 //! verified [`crate::models::Downloader`] does the rest. Only assets listed in the pinned
 //! [`RuntimeCatalog`] are fetched, only over https, only from GitHub and its release CDN; the bytes are
 //! fetched in `Range` chunks so a download resumes and a stalled chunk times out.
@@ -22,8 +22,10 @@ const MAX_HOPS: usize = 6;
 
 #[derive(Debug, Clone)]
 pub struct ReleaseConfig {
-    /// HTTP(S) proxy for downloads only (the AI download proxy setting).
+    /// An explicit HTTP(S) proxy for downloads only.
     pub proxy: Option<String>,
+    /// Without an explicit `proxy`, use the system's (environment, then the operating system's, `NO_PROXY` respected).
+    pub system_proxy: bool,
     pub connect_timeout: Duration,
     pub chunk_bytes: u64,
     pub chunk_timeout: Duration,
@@ -36,6 +38,7 @@ impl Default for ReleaseConfig {
     fn default() -> Self {
         ReleaseConfig {
             proxy: None,
+            system_proxy: false,
             connect_timeout: Duration::from_secs(15),
             chunk_bytes: 32 * 1024 * 1024,
             chunk_timeout: Duration::from_secs(180),
@@ -62,11 +65,28 @@ fn is_loopback(host: &str) -> bool {
 
 impl GithubReleases {
     pub fn new(cfg: ReleaseConfig, catalog: RuntimeCatalog) -> Result<Self> {
-        let agent = net::agent(&HttpConfig {
+        let http = HttpConfig {
             proxy: cfg.proxy.clone(),
             connect_timeout: cfg.connect_timeout,
             timeout: cfg.chunk_timeout,
-        })?;
+        };
+        let system = if cfg.proxy.is_none() && cfg.system_proxy {
+            // Every host of a release download (github.com and its CDN) is judged by the one rule set; a malformed
+            // variable is logged and the download goes direct rather than failing.
+            match paddock_download::ProxyRules::detect() {
+                Ok(rules) => net::system_proxy_for("https://github.com/", &rules),
+                Err(e) => {
+                    log::warn!("the system proxy settings are not usable ({e}); downloading directly");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let agent = match &system {
+            Some(p) => net::agent_via(&http, p)?,
+            None => net::agent(&http)?,
+        };
         Ok(GithubReleases {
             agent,
             cfg,

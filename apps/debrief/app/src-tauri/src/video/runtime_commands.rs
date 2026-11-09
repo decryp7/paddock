@@ -63,12 +63,10 @@ pub async fn video_runtime_install<R: Runtime>(app: AppHandle<R>) -> CmdResult<u
             .hint("Install FFmpeg yourself (on macOS: brew install ffmpeg) and choose it in Settings ▸ Video."));
         }
     }
-    let (proxy, connections) = crate::ai::commands::core(&app)
-        .ok()
-        .map(|c| c.settings())
-        .map_or((None, DownloadOptions::default().connections), |s| {
-            (s.download_proxy, s.download_connections as usize)
-        });
+    // The AI download settings (proxy, connections) left with the built-in engine (ADR 0070): the download follows the
+    // system proxy (environment, then the operating system's) with the default connections until it moves onto
+    // `paddock-download` (M2c).
+    let connections = DownloadOptions::default().connections;
     let progress = Arc::new(Progress::new());
     let (p, q) = (progress.clone(), progress.clone());
     let controls = Controls::cancel(move || p.cancel()).with_probe(move || {
@@ -80,7 +78,7 @@ pub async fn video_runtime_install<R: Runtime>(app: AppHandle<R>) -> CmdResult<u
         let st = state(&h)?;
         let source = GithubReleases::new(
             ReleaseConfig {
-                proxy,
+                system_proxy: true,
                 ..ReleaseConfig::default()
             },
             st.catalog.as_runtime_catalog(),

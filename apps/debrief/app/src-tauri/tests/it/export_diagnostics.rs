@@ -35,9 +35,9 @@ fn the_cli_exports_a_report_without_a_window() {
     )
     .unwrap();
     std::fs::write(
-        logs.join("children").join("ai-worker.log"),
-        "{\"@t\":\"2026-10-14T13:01:00.000Z\",\"@l\":\"Information\",\"@m\":\"Started ai-worker (pid 7, run 1)\",\"Event\":\"start\",\"ChildKind\":\"ai-worker\",\"Pid\":7}\n\
-         {\"@t\":\"2026-10-14T13:02:00.000Z\",\"@l\":\"Fatal\",\"@m\":\"Crashed: ai-worker (pid 7) ended with exit code 3\",\"Event\":\"crash\",\"ChildKind\":\"ai-worker\",\"Pid\":7,\"Exit\":\"exit code 3\"}\n",
+        logs.join("children").join("store-worker.log"),
+        "{\"@t\":\"2026-10-14T13:01:00.000Z\",\"@l\":\"Information\",\"@m\":\"Started store-worker (pid 7, run 1)\",\"Event\":\"start\",\"ChildKind\":\"store-worker\",\"Pid\":7}\n\
+         {\"@t\":\"2026-10-14T13:02:00.000Z\",\"@l\":\"Fatal\",\"@m\":\"Crashed: store-worker (pid 7) ended with exit code 3\",\"Event\":\"crash\",\"ChildKind\":\"store-worker\",\"Pid\":7,\"Exit\":\"exit code 3\"}\n",
     )
     .unwrap();
     // A corrupt settings file does not stop the export.
@@ -58,7 +58,7 @@ fn the_cli_exports_a_report_without_a_window() {
         "processes.json",
         "system-info.json",
         "steps-to-reproduce.txt",
-        "logs/children/ai-worker.log",
+        "logs/children/store-worker.log",
     ] {
         assert!(names.iter().any(|n| n == want), "{want} missing from {names:?}");
     }

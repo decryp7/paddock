@@ -1,6 +1,6 @@
 # 33. Video sources with a downloadable FFmpeg runtime
 
-- Status: accepted (2026-10-22)
+- Status: accepted (2026-10-22); amended by [ADR 0070](0070-pitwall-is-debriefs-only-ai-engine.md) (llama.cpp's runtime is gone; the FFmpeg runtime keeps the shared downloader until M2c moves it onto `paddock-download`)
 - Date: 2026-10-22
 - Related: ADR 0009 (prebuilt runtimes downloaded on demand), ADR 0012 (jobs), ADR 0014 (store ports, projects),
   ADR 0017 (child processes and their sandbox), ADR 0006 (clock skew), ADR 0025 (vision on the one model),

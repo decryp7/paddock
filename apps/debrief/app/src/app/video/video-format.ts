@@ -207,7 +207,7 @@ export function parseOffsetSeconds(value: string): number | null {
 // ---- Failures ----
 
 /** Error codes that mean the AI cannot do this now: the fix is in Settings ▸ AI. */
-const AI_SETUP_CODES = new Set(['noModel', 'noRuntime', 'noVision', 'engine', 'memory', 'modelFile']);
+const AI_SETUP_CODES = new Set(['noModel', 'noVision', 'engine']);
 
 /** A failure for the panel: its message, the engine's next step and whether Settings ▸ AI is the place to fix it. */
 export interface VideoFailure {

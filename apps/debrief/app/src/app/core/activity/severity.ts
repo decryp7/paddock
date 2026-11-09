@@ -38,7 +38,6 @@ const EXPECTED: Record<ErrorCode, boolean> = {
   missing: true,
   internal: false,
   noModel: true,
-  noRuntime: true,
   noVision: true,
   engine: false,
   // A page of the research or agent browser failing (not open, slow, changed) is the web's, not a Debrief bug.
@@ -46,7 +45,6 @@ const EXPECTED: Record<ErrorCode, boolean> = {
   contextOverflow: true,
   malformed: false,
   toolLoopLimit: true,
-  modelFile: false,
   memory: true,
   network: true,
   tls: true,

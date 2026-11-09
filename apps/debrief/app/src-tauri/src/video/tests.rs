@@ -125,13 +125,6 @@ fn engine_errors_become_typed_command_errors() {
             },
             C::NoModel,
         ),
-        (
-            V::AiUnavailable {
-                kind: AiUnavailable::NoRuntime,
-                message: "x".into(),
-            },
-            C::NoRuntime,
-        ),
         (V::Ai("x".into()), C::Engine),
     ];
     for (e, want) in cases {

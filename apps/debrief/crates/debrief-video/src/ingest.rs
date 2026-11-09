@@ -12,7 +12,7 @@ use crate::record::{key_of, FrameRecord, VideoFolder, VideoRecord, FRAMES_DIR, M
 use crate::run::Tools;
 use crate::select::{select, SelectOptions, MAX_CAP};
 use debrief_ai::llm::ImageMime;
-use debrief_ai::vision::{sanitize, ImageLimits};
+use debrief_image::{sanitize, ImageLimits};
 use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::{Path, PathBuf};

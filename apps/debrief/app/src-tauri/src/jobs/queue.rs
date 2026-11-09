@@ -4,12 +4,11 @@
 //! - One FIFO queue per [`JobKind`]; at most [`JobKind::limit`] run at once (imports: per window).
 //! - At most [`QUEUE_CAP`] jobs wait per kind; more are refused with a message.
 //! - Queued AI jobs can be moved up and down.
-//! - A paused kind (the AI after its worker was quarantined) keeps its queue but starts nothing.
 //! - Finished jobs go to the history (the last [`HISTORY_CAP`]); quick ones that never showed are dropped.
 
 use super::model::{IllegalTransition, Job, JobEvent, JobId, JobKind, JobLink, JobProgress, JobResult, JobSource, JobSpec, JobState};
 use serde::Serialize;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 
 /// A job appears in the pane once it has existed this long: quick work never flickers in.
 pub const VISIBLE_AFTER_MS: i64 = 2_000;
@@ -95,14 +94,6 @@ pub struct Finished {
     pub kept: bool,
 }
 
-/// A paused queue, for the pane ("AI paused: … Reset AI").
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PausedKind {
-    pub kind: JobKind,
-    pub reason: String,
-}
-
 /// A job as the pane shows it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -133,12 +124,11 @@ pub struct JobInfo {
     pub retry_of: Option<JobId>,
 }
 
-/// Everything the pane needs: the visible jobs and the paused queues.
+/// Everything the pane needs: the visible jobs.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JobsSnapshot {
     pub jobs: Vec<JobInfo>,
-    pub paused: Vec<PausedKind>,
 }
 
 fn clean(s: &str, max: usize) -> String {
@@ -153,9 +143,6 @@ fn clean(s: &str, max: usize) -> String {
 /// Whether a finished job asks for attention: a success that took a while, or a failure the user cares
 /// about (a quick analysis failure is shown by its own view).
 pub fn needs_attention(job: &Job) -> bool {
-    if job.quiet {
-        return false;
-    }
     match job.state() {
         // A research answer is always news ("Research finished · View answer").
         // So is an AI answer started in the background (explain, summarise, root causes): nobody waits for it.
@@ -194,7 +181,6 @@ fn result_type(r: &JobResult) -> &'static str {
         JobResult::Value { .. } => "value",
         JobResult::Workspace { .. } => "workspace",
         JobResult::View { .. } => "view",
-        JobResult::Model { .. } => "model",
         JobResult::FolderSurvey { .. } => "folderSurvey",
         JobResult::Storage { .. } => "storage",
         JobResult::RelatedLogs { .. } => "relatedLogs",
@@ -225,7 +211,6 @@ pub struct JobQueue {
     /// Finished jobs, oldest first.
     history: VecDeque<Job>,
     next_id: u64,
-    paused: BTreeMap<JobKind, String>,
 }
 
 impl JobQueue {
@@ -235,7 +220,6 @@ impl JobQueue {
             active: Vec::new(),
             history: VecDeque::new(),
             next_id: 1,
-            paused: BTreeMap::new(),
         }
     }
 
@@ -279,7 +263,6 @@ impl JobQueue {
             error: None,
             seen: false,
             request: spec.request,
-            quiet: spec.quiet,
             retry_of: None,
         });
         Ok(id)
@@ -299,15 +282,11 @@ impl JobQueue {
             .count()
     }
 
-    /// The queued jobs that may start now, in order: FIFO per kind, within each kind's limit, none of a
-    /// paused kind.
+    /// The queued jobs that may start now, in order: FIFO per kind, within each kind's limit.
     pub fn startable(&self) -> Vec<JobId> {
         let mut chosen: Vec<(JobKind, Option<&str>)> = Vec::new();
         let mut out = Vec::new();
         for j in self.active.iter().filter(|j| j.state() == JobState::Queued) {
-            if self.paused.contains_key(&j.kind) {
-                continue;
-            }
             let window = if j.kind.per_window() { j.window() } else { None };
             let already = chosen.iter().filter(|(k, w)| *k == j.kind && *w == window).count();
             if self.running(j.kind, window) + already < j.kind.limit(self.cores) {
@@ -413,20 +392,6 @@ impl JobQueue {
         let o = other.ok_or(QueueError::NotMovable)?;
         self.active.swap(i, o);
         Ok(())
-    }
-
-    /// Stops starting jobs of `kind` (its queue is kept).
-    pub fn pause(&mut self, kind: JobKind, reason: &str) {
-        self.paused.insert(kind, clean(reason, MAX_MESSAGE));
-    }
-
-    /// Lets a paused kind start jobs again. False when it was not paused.
-    pub fn resume(&mut self, kind: JobKind) -> bool {
-        self.paused.remove(&kind).is_some()
-    }
-
-    pub fn paused(&self, kind: JobKind) -> Option<&str> {
-        self.paused.get(&kind).map(String::as_str)
     }
 
     /// Ends every queued and running job as interrupted (Debrief is closing). Returns them.
@@ -555,14 +520,6 @@ impl JobQueue {
         jobs.extend(self.history.iter().rev().filter(mine).map(|j| self.info(j, now)));
         JobsSnapshot {
             jobs,
-            paused: self
-                .paused
-                .iter()
-                .map(|(kind, reason)| PausedKind {
-                    kind: *kind,
-                    reason: reason.clone(),
-                })
-                .collect(),
         }
     }
 
@@ -724,27 +681,6 @@ mod tests {
     }
 
     #[test]
-    fn a_paused_kind_keeps_its_queue_and_starts_nothing() {
-        let mut q = JobQueue::new(4);
-        let a = q.submit(ai("a"), 0).unwrap();
-        let x = q.submit(JobSpec::new(JobKind::Analysis, "x"), 0).unwrap();
-        q.pause(JobKind::Ai, "The AI worker crashed repeatedly");
-        assert_eq!(q.startable(), vec![x], "other kinds go on");
-        assert_eq!(q.paused(JobKind::Ai), Some("The AI worker crashed repeatedly"));
-        let snap = q.snapshot(Some("main"), 0);
-        assert_eq!(
-            snap.paused,
-            vec![PausedKind {
-                kind: JobKind::Ai,
-                reason: "The AI worker crashed repeatedly".into()
-            }]
-        );
-        assert!(q.resume(JobKind::Ai));
-        assert!(!q.resume(JobKind::Ai));
-        assert_eq!(q.startable(), vec![a, x]);
-    }
-
-    #[test]
     fn visibility_and_attention_thresholds() {
         let mut q = JobQueue::new(2);
         let quick = q.submit(JobSpec::new(JobKind::Analysis, "quick").window("main"), 0).unwrap();
@@ -778,26 +714,6 @@ mod tests {
         assert!(q.mark_seen(long));
         assert!(!q.info_of(long, 40_000).unwrap().unseen);
         assert!(!q.mark_seen(JobId(999)));
-    }
-
-    #[test]
-    fn quiet_jobs_never_ask_for_attention_but_still_show() {
-        let mut q = JobQueue::new(2);
-        let long = q
-            .submit(JobSpec::new(JobKind::Maintenance, "learn").window("main").quiet(), 0)
-            .unwrap();
-        q.start(long, 0).unwrap();
-        let f = q.finish(long, JobEnd::Done(None), ATTENTION_AFTER_MS * 2).unwrap();
-        assert!(f.kept && !f.attention && f.job.seen, "long and finished, yet no message");
-        let failed = q
-            .submit(JobSpec::new(JobKind::Maintenance, "learn").window("main").quiet(), 0)
-            .unwrap();
-        q.start(failed, 0).unwrap();
-        let f = q.finish(failed, JobEnd::Failed("model stopped".into()), 100).unwrap();
-        assert!(!f.attention, "a failure of background housekeeping is logged, not announced");
-        let loud = q.submit(JobSpec::new(JobKind::Maintenance, "clean").window("main"), 0).unwrap();
-        q.start(loud, 0).unwrap();
-        assert!(q.finish(loud, JobEnd::Failed("disk".into()), 100).unwrap().attention);
     }
 
     #[test]

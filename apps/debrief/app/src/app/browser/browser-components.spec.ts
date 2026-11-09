@@ -329,8 +329,7 @@ describe('ChatBrowserBar', () => {
     await until(f, () => !root.querySelector('[data-testid=research-browser-kept]'));
   });
 
-  it('shows what agent mode may do, the small-model hint and the pages', async () => {
-    web.smallModel = true;
+  it('shows what agent mode may do and the pages', async () => {
     const f = TestBed.createComponent(ChatBrowserBar);
     f.componentRef.setInput('sessionId', 'chat-1');
     f.detectChanges();
@@ -341,7 +340,6 @@ describe('ChatBrowserBar', () => {
     f.detectChanges();
     expect(root.textContent).toContain('A real browser window will open next to the app');
     expect(root.textContent).toContain('New sites, typing and forms need your approval');
-    expect(el(f, '[data-testid=chat-small-model]').textContent).toContain('7B or larger');
     // Pages for the next question.
     web.show('https://e.org/a');
     await TestBed.inject(ChatBrowserStore).capture('chat-1');

@@ -1,10 +1,10 @@
 //! Images through the AI commands (ADR 0025): opening and pasting images (decoded in Rust, the clean copy
 //! only), the no-vision refusal, explaining an image, "find related logs" end to end with a scripted model that
-//! reads images (the engine searches the samples), the chat's image turns, and image support for a model.
+//! reads images (the engine searches the samples), the chat's image turns.
 
 use super::*;
 use base64::Engine as _;
-use debrief_ai::vision::image::testing::{claimed_png, screenshot_png};
+use debrief_image::testing::{claimed_png, screenshot_png};
 
 fn vision(replies: Vec<Reply>) -> Arc<dyn LlmProvider> {
     Arc::new(ScriptedProvider::new(replies).with_vision())
@@ -52,7 +52,7 @@ fn images_open_as_clean_copies_within_limits() {
         (Some(2400), Some(1350))
     );
     let (w, h) = (img["width"].as_u64().unwrap(), img["height"].as_u64().unwrap());
-    assert!(w * h <= debrief_ai::vision::image::DEFAULT_TARGET_PIXELS && w < 2400, "{w}x{h}");
+    assert!(w * h <= debrief_image::DEFAULT_TARGET_PIXELS && w < 2400, "{w}x{h}");
     assert!(img["dataUrl"].as_str().unwrap().starts_with("data:image/png;base64,"));
     assert_eq!(img["sourceFormat"], "png");
     // Not an image, a bomb's header, an unsupported extension: typed refusals.
@@ -228,49 +228,4 @@ fn chat_turns_show_images_and_a_related_request_runs_the_search() {
         code(ipc(&main, "ai_chat_send", json!({"sessionId": sid, "text": "x", "images": [77]})).unwrap_err()),
         "notFound"
     );
-}
-
-#[test]
-fn image_support_is_added_to_an_installed_model_and_reported() {
-    let f = Fixture::new("vision-projector");
-    let core = f.core();
-    let app = f.app(core);
-    let main = window(&app, "main");
-    crate::paths::allow_under(app.handle(), "main", &f.tmp.0);
-    let src = f.tmp.0.join("model.gguf");
-    std::fs::write(&src, model_bytes()).unwrap();
-    let added = ipc(&main, "ai_model_add_local", json!({"path": src.to_string_lossy()})).unwrap();
-    assert_eq!((added["vision"].as_bool(), added["projector"].is_null()), (Some(false), true));
-    // The test catalog's model has no projector: "Add image support" says so instead of downloading anything.
-    let e = ipc(&main, "ai_model_install_projector", json!({"fileName": TEST_FILE})).unwrap_err();
-    assert_eq!(code(e.clone()), "notFound");
-    assert!(e["message"].as_str().unwrap().contains("Text + images"), "{e}");
-    // A projector file the user picked: one of another model is refused, the right one pairs.
-    let wrong = f.tmp.0.join("other-mmproj.gguf");
-    std::fs::write(&wrong, debrief_ai::testing::gguf::projector_like(4096)).unwrap();
-    let e = ipc(
-        &main,
-        "ai_model_add_projector",
-        json!({"fileName": TEST_FILE, "path": wrong.to_string_lossy()}),
-    )
-    .unwrap_err();
-    assert!(e["message"].as_str().unwrap().contains("another model"), "{e}");
-    let proj = f.tmp.0.join("mmproj-F16.gguf");
-    std::fs::write(&proj, debrief_ai::testing::gguf::projector_like(2560)).unwrap();
-    let m = ipc(
-        &main,
-        "ai_model_add_projector",
-        json!({"fileName": TEST_FILE, "path": proj.to_string_lossy()}),
-    )
-    .unwrap();
-    assert_eq!(m["vision"], true);
-    assert_eq!(m["projector"]["fileName"], "Test-4B-Q4_K_M.mmproj.gguf");
-    assert_eq!(
-        ipc(&main, "ai_models", json!({})).unwrap().as_array().unwrap().len(),
-        1,
-        "the projector is not a model"
-    );
-    // The model's load request now carries the projector.
-    ipc(&main, "ai_model_activate", json!({"fileName": TEST_FILE})).unwrap();
-    wait_until("loaded with the projector", || f.runtime.projectors().iter().any(Option::is_some));
 }

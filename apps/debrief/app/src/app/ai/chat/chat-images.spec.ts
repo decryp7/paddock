@@ -157,16 +157,15 @@ describe('AiChatPanel images', () => {
     expect(store.attachments()).toEqual([]);
   });
 
-  it('shows the no-vision offer instead of attaching to a text-only model', async () => {
-    const env = setup({ vision: 'missing' });
+  it('shows the no-vision note instead of attaching to a text-only model', async () => {
+    const env = setup({ vision: 'none' });
     const { f, root, platform, images } = env;
     await ready(env);
     await TestBed.inject(AiStatusStore).refresh();
     el<HTMLButtonElement>(f, '[data-testid=ai-attach]').click();
     await until(f, () => !!root.querySelector('[data-testid=ai-no-vision]'));
     expect(platform.pickOpenPath).not.toHaveBeenCalled();
-    await until(f, () => !!root.querySelector('[data-testid=ai-add-image-support]'));
-    expect(el(f, '[data-testid=ai-add-image-support]').textContent).toContain('640 MB');
+    expect(el(f, '[data-testid=ai-no-vision]').textContent).toContain('The model Pitwall serves reads text only');
     images.dismissNoVision();
     el<HTMLTextAreaElement>(f, 'textarea').dispatchEvent(withFiles('paste', [png()]));
     await until(f, () => images.noVision());
@@ -241,7 +240,7 @@ describe('AiChatPanel images', () => {
   });
 
   it('claims a desktop drop for a text-only model and shows the offer instead', async () => {
-    const env = setup({ vision: 'missing' });
+    const env = setup({ vision: 'none' });
     await ready(env);
     const composer = el(env.f, 'form.card');
     const target = TestBed.inject(DropTargets).at({ x: 0, y: 0 }, { elementFromPoint: () => composer });

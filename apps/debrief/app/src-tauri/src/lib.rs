@@ -421,23 +421,10 @@ command_table! {
     Query [WINDOW] => browser::driving::browser_driving,
     Mutation [WINDOW] => browser::commands::browser_open_and_read,
     Query [WINDOW] => ai::commands::ai_status,
-    Query [WINDOW] => ai::commands::ai_hardware,
-    Query [WINDOW] => ai::commands::ai_recommend,
-    Query [WINDOW] => ai::commands::ai_refine_fit,
-    Query [WINDOW] => ai::commands::ai_catalog,
-    Query [WINDOW] => ai::commands::ai_setup_plan,
-    Mutation [WINDOW] => ai::commands::ai_setup_run,
-    Mutation [WINDOW] => ai::commands::ai_setup_background,
-    Query [WINDOW] => ai::commands::ai_models,
-    Mutation [WINDOW] => ai::commands::ai_model_activate,
-    Mutation [WINDOW] => ai::commands::ai_model_delete,
-    Mutation [WINDOW] => ai::commands::ai_model_add_local,
-    Mutation [WINDOW] => ai::commands::ai_reset,
     Mutation [WINDOW] => ai::pitwall::ai_pitwall_connect,
     Mutation [WINDOW] => ai::pitwall::ai_pitwall_cancel,
     Mutation [WINDOW] => ai::pitwall::ai_pitwall_forget,
     Query [WINDOW] => ai::pitwall::ai_pitwall_refresh,
-    Mutation [WINDOW] => ai::pitwall::ai_engine_use_built_in,
     Mutation [WINDOW] => ai::commands::ai_start,
     Mutation [WINDOW] => ai::commands::ai_cancel,
     Query [WINDOW] => ai::folder_setup::folder_survey,
@@ -474,8 +461,6 @@ command_table! {
     Mutation [WINDOW] => ai::vision::ai_image_open,
     Mutation [WINDOW] limit 48 * MIB => ai::vision::ai_image_paste,
     Mutation [WINDOW] => ai::vision::ai_image_close,
-    Mutation [WINDOW] => ai::vision::ai_model_install_projector,
-    Mutation [WINDOW] => ai::vision::ai_model_add_projector,
     Mutation [WINDOW] => browser::commands::browser_open,
     Query [WINDOW] => browser::commands::browser_event_query,
     Mutation [WINDOW] => browser::commands::browser_capture,
@@ -495,18 +480,6 @@ command_table! {
     Query [WINDOW] => browser::runtime::browser_runtime_status,
     Mutation [WINDOW] => browser::runtime::browser_runtime_install,
     Mutation [WINDOW] => browser::runtime::browser_runtime_remove,
-    Query [WINDOW] => ai::runtime_commands::ai_runtimes,
-    Mutation [WINDOW] => ai::runtime_commands::ai_runtime_install,
-    Mutation [WINDOW] => ai::runtime_commands::ai_runtime_add_archives,
-    Query [WINDOW] => ai::manual::ai_manual_download,
-    Mutation [WINDOW] => ai::manual::ai_manual_download_open,
-    Mutation [WINDOW] => ai::runtime_commands::ai_runtime_delete,
-    Mutation [WINDOW] => ai::runtime_commands::ai_runtime_choose,
-    Query [WINDOW] => ai::update_commands::ai_updates_status,
-    Mutation [WINDOW] => ai::update_commands::ai_updates_check,
-    Mutation [WINDOW] => ai::update_commands::ai_updates_apply,
-    Mutation [WINDOW] => ai::update_commands::ai_updates_skip,
-    Mutation [WINDOW] => ai::update_commands::ai_updates_later,
     Mutation [WINDOW] => share::set_redacted_view,
     Query [WINDOW] => share::preview_redaction,
     Query [WINDOW] => share::redaction_summary,
@@ -1198,7 +1171,6 @@ pub(crate) mod test_support {
             (jobs::JobState::Done, Some(jobs::JobResult::Value { value })) => Ok(value),
             (jobs::JobState::Done, Some(jobs::JobResult::File { detail: Some(value), .. })) => Ok(value),
             (jobs::JobState::Done, Some(jobs::JobResult::Workspace { detail: Some(value) })) => Ok(value),
-            (jobs::JobState::Done, Some(jobs::JobResult::Model { detail: Some(value), .. })) => Ok(value),
             (state, result) => Err(end
                 .error
                 .unwrap_or_else(|| format!("the job ended {state:?} without a value ({result:?})"))),
@@ -1219,8 +1191,6 @@ pub(crate) mod test_support {
         "open_project",
         "open_bundle",
         "paste_log",
-        "ai_model_add_local",
-        "ai_model_add_projector",
     ];
 
     /// A reply from the IPC of `cmd` as the UI sees it once the job it started has ended: for the commands that start a
@@ -1237,7 +1207,6 @@ pub(crate) mod test_support {
         let end = m.state::<jobs::Jobs>().wait_end(jobs::JobId(id));
         match (end.state, end.result) {
             (jobs::JobState::Done, Some(jobs::JobResult::Workspace { detail: Some(v) })) => Ok(v),
-            (jobs::JobState::Done, Some(jobs::JobResult::Model { detail: Some(v), .. })) => Ok(v),
             (jobs::JobState::Done, Some(jobs::JobResult::Value { value })) => Ok(value),
             // A failed job has its message only (not the command error's code), as `jobValue` gives the UI.
             (state, result) => Err(serde_json::json!({

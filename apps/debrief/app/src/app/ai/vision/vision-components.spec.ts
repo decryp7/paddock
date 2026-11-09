@@ -10,7 +10,6 @@ import { ClockDialogService } from '../../skew/clock-section';
 import { TimelineZoom } from '../../timeline/zoom';
 import { all, buttonByText, el, settle } from '../../../testing/helpers';
 import { AiBackend } from '../ai-backend';
-import { AiLauncher } from '../ai-launcher';
 import { AiStatusStore } from '../ai-status.store';
 import { AiImage, RelatedOutcome } from '../ai.types';
 import { ChatStore } from '../chat/chat.store';
@@ -18,7 +17,7 @@ import { AiCitations } from '../chat/citation-actions';
 import { AiImageStore } from './ai-image.store';
 import { AiImagePanel } from './image-panel';
 import { ImageViewer } from './image-viewer';
-import { AiNoVisionCard } from './no-vision-card';
+import { AiNoVisionNote } from './no-vision-note';
 import { AiRelatedResults } from './related-results';
 
 function setup(options: MockAiOptions = {}, pick: string | null = '/shots/dialog.png') {
@@ -150,66 +149,18 @@ describe('AiRelatedResults', () => {
   });
 });
 
-describe('AiNoVisionCard', () => {
-  beforeEach(() => resetMockJobs(new MockJobs({ visibleMs: 0, attentionMs: 0, failOnce: new Set() })));
-  afterEach(() => {
-    TestBed.resetTestingModule();
-    resetMockJobs();
-  });
+describe('AiNoVisionNote', () => {
+  afterEach(() => TestBed.resetTestingModule());
 
-  it('offers the image support of the active model, downloaded only when asked', async () => {
-    const { backend } = setup({ vision: 'missing', stepMs: 5 });
-    const install = vi.spyOn(backend, 'installProjector');
-    const models = vi.spyOn(TestBed.inject(AiLauncher), 'openModels').mockResolvedValue();
-    const f = TestBed.createComponent(AiNoVisionCard);
-    f.detectChanges();
-    await until(f, () => !!f.nativeElement.querySelector('[data-testid=ai-add-image-support]'));
-    expect(install).not.toHaveBeenCalled();
-    expect(el(f, '[data-testid=ai-no-vision]').textContent).toContain('Qwen3.5 4B reads text only');
-    expect(el(f, '[data-testid=ai-add-image-support]').textContent).toContain('Add image support (640 MB)');
-    el<HTMLButtonElement>(f, '[data-testid=ai-choose-vision-model]').click();
-    expect(models).toHaveBeenCalled();
-    el<HTMLButtonElement>(f, '[data-testid=ai-add-image-support]').click();
-    await until(f, () => !!f.nativeElement.querySelector('[data-testid=ai-projector-running]'));
-    expect(install).toHaveBeenCalledWith('Qwen3.5-4B-Q4_K_M.gguf');
-    expect(el(f, '[data-testid=ai-projector-running]').textContent).toContain('Downloading image support');
-    const store = TestBed.inject(AiImageStore);
-    await until(f, () => !store.projector().running);
-    expect(TestBed.inject(AiStatusStore).status()?.vision).toBe(true);
-  });
-
-  it('offers only another model when there is no image support to add, and dismisses', async () => {
+  it('says the model Pitwall serves reads text only, and dismisses', async () => {
     setup({ vision: 'none' });
     const store = TestBed.inject(AiImageStore);
     store.refuseNoVision();
-    const f = TestBed.createComponent(AiNoVisionCard);
+    const f = TestBed.createComponent(AiNoVisionNote);
     f.detectChanges();
-    await until(f, () => !!store.activeModel());
-    expect(f.nativeElement.querySelector('[data-testid=ai-add-image-support]')).toBeNull();
-    expect(el(f, '[data-testid=ai-choose-vision-model]')).toBeTruthy();
+    expect(el(f, '[data-testid=ai-no-vision]').textContent).toContain('The model Pitwall serves reads text only');
     buttonByText(f, 'Dismiss').click();
     expect(store.noVision()).toBe(false);
-  });
-
-  it('shows a failed download with Retry, and the generic message without a model', async () => {
-    setup({ vision: 'missing', net: 'offline' });
-    const store = TestBed.inject(AiImageStore);
-    const f = TestBed.createComponent(AiNoVisionCard);
-    f.detectChanges();
-    await until(f, () => !!f.nativeElement.querySelector('[data-testid=ai-add-image-support]'));
-    el<HTMLButtonElement>(f, '[data-testid=ai-add-image-support]').click();
-    await until(f, () => !!store.projector().error);
-    f.detectChanges();
-    expect(el(f, '.err').textContent).toContain('Retry');
-    const again = vi.spyOn(store, 'installProjector').mockResolvedValue();
-    buttonByText(f, 'Retry').click();
-    expect(again).toHaveBeenCalled();
-    TestBed.resetTestingModule();
-    setup({ mode: 'setup' });
-    const g = TestBed.createComponent(AiNoVisionCard);
-    g.detectChanges();
-    await settle(g);
-    expect(el(g, '[data-testid=ai-no-vision]').textContent).toContain('The active model reads text only');
   });
 });
 
@@ -298,9 +249,9 @@ describe('AiImagePanel', () => {
     expect(root.textContent).toContain('Open a screenshot');
   });
 
-  it('shows a Jobs result whose image was closed, and the no-vision offer of a text-only model', async () => {
-    const { f, store, root } = await panel({ vision: 'missing' });
-    expect(root.textContent).toContain('The active model reads text only');
+  it('shows a Jobs result whose image was closed, and the no-vision note of a text-only model', async () => {
+    const { f, store, root } = await panel({ vision: 'none' });
+    expect(root.textContent).toContain('The model Pitwall serves reads text only');
     store.showOutcome(9, mockRelatedOutcome('dialog.png'));
     f.detectChanges();
     expect(el(f, '[data-testid=ai-image-detached]').textContent).toContain('The image is no longer open');

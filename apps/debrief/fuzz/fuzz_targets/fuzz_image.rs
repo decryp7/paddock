@@ -1,7 +1,7 @@
 #![no_main]
-//! The AI's image sanitiser (ADR 0025): any bytes, with or without a valid signature, decode into a bounded clean
+//! The image sanitiser (ADR 0025, `debrief-image`): any bytes, with or without a valid signature, decode into a bounded clean
 //! copy or a typed error. Never panics, never allocates past its limits, never keeps more than the budget.
-use debrief_ai::vision::image::{sanitize, ImageLimits};
+use debrief_image::{sanitize, ImageLimits};
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {

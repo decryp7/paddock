@@ -17,7 +17,6 @@ const MB: u64 = 1 << 20;
 pub fn process_of(label: &str) -> Option<ProcessRef> {
     match label {
         "the store worker" => Some(ProcessRef::StoreWorker),
-        "the AI engine" => Some(ProcessRef::Ai),
         _ => {
             let id = label.strip_prefix("plugin \"")?.strip_suffix('"')?;
             (!id.is_empty() && !id.contains('"')).then(|| ProcessRef::Plugin { plugin_id: id.into() })
@@ -40,16 +39,14 @@ pub fn suggested_cap_mb(peak_bytes: u64, max_mb: u32) -> u32 {
 pub fn max_cap_mb(process: &ProcessRef) -> u32 {
     match process {
         ProcessRef::StoreWorker => 65_536,
-        ProcessRef::Ai => 16_384,
         ProcessRef::Plugin { .. } => super::section::MAX_PLUGIN_MB,
     }
 }
 
-/// How a message names the process: "The database worker", "The AI worker", "Plugin 'Event logs'".
+/// How a message names the process: "The database worker", "Plugin 'Event logs'".
 pub fn display_name(process: &ProcessRef, plugin_name: Option<&str>) -> String {
     match process {
         ProcessRef::StoreWorker => "The database worker".into(),
-        ProcessRef::Ai => "The AI worker".into(),
         ProcessRef::Plugin { plugin_id } => format!("Plugin '{}'", plugin_name.unwrap_or(plugin_id)),
     }
 }
@@ -57,7 +54,6 @@ pub fn display_name(process: &ProcessRef, plugin_name: Option<&str>) -> String {
 fn key(process: &ProcessRef) -> String {
     match process {
         ProcessRef::StoreWorker => "storeWorker".into(),
-        ProcessRef::Ai => "ai".into(),
         ProcessRef::Plugin { plugin_id } => format!("plugin:{plugin_id}"),
     }
 }
@@ -109,7 +105,6 @@ pub fn stop(process: &ProcessRef, name: &str, u: &MemoryUse) -> Stop {
     };
     let (service, plugin) = match process {
         ProcessRef::StoreWorker => (crate::health::hub::STORE, None),
-        ProcessRef::Ai => (crate::health::hub::AI, None),
         ProcessRef::Plugin { plugin_id } => (crate::health::hub::PLUGINS, Some(plugin_id.clone())),
     };
     let cause = Cause::new(format!("{name} was stopped: it used more than its {} MB memory cap", mb(u.limit)))
@@ -245,7 +240,6 @@ mod tests {
     #[test]
     fn watcher_labels_name_the_process() {
         assert_eq!(process_of("the store worker"), Some(ProcessRef::StoreWorker));
-        assert_eq!(process_of("the AI engine"), Some(ProcessRef::Ai));
         assert_eq!(
             process_of("plugin \"net.x\""),
             Some(ProcessRef::Plugin { plugin_id: "net.x".into() })
@@ -303,7 +297,6 @@ mod tests {
         );
         assert_eq!((p.service, p.plugin.as_deref()), ("plugins", Some("net.x")));
         assert_eq!(p.cause.raise_cap.unwrap().target, "plugin:net.x");
-        assert_eq!(stop(&ProcessRef::Ai, "The AI worker", &usage(1, 1, 1)).service, "ai");
     }
 
     #[test]
@@ -311,7 +304,7 @@ mod tests {
         let hub = MemoryHub::new();
         let listener = hub.listener();
         // Before the app is up: the peak is kept, nothing is posted.
-        listener.tell("the AI engine", MemoryEvent::Ended(usage(10, 300, 1024)));
+        listener.tell("the store worker", MemoryEvent::Ended(usage(10, 300, 1024)));
         let posted: Arc<Mutex<Vec<NewNotice>>> = Arc::default();
         let p = posted.clone();
         hub.attach(Box::new(move |n| p.lock().unwrap().push(n)));
@@ -327,8 +320,8 @@ mod tests {
         );
         let seen = hub.seen();
         assert_eq!(seen.len(), 2);
-        let ai = seen.iter().find(|s| s.process == ProcessRef::Ai).unwrap();
-        assert_eq!((ai.peak_mb, ai.cap_mb, ai.state), (300, 1024, MemoryState::Ended));
+        let store = seen.iter().find(|s| s.process == ProcessRef::StoreWorker).unwrap();
+        assert_eq!((store.peak_mb, store.cap_mb, store.state), (300, 1024, MemoryState::Ended));
         let plugin = seen.iter().find(|s| matches!(s.process, ProcessRef::Plugin { .. })).unwrap();
         assert_eq!((plugin.used_mb, plugin.peak_mb, plugin.state), (530, 530, MemoryState::Stopped));
         // A listener outliving its hub does nothing.

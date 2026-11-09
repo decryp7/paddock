@@ -1,4 +1,4 @@
-//! Logs of the child processes Debrief supervises (the AI worker and its llama-server, `debrief-plugin-host` per
+//! Logs of the child processes Debrief supervises (the store worker, `debrief-plugin-host` per
 //! isolated plugin, out-of-process plugins), for "Report a problem".
 //!
 //! Each child has one [`ChildLog`]: its standard error (scrubbed of obvious secrets, lines capped at
@@ -12,8 +12,7 @@
 //! The folder is set once by the app ([`set_dir`]); before that (and in tests) logs are kept in memory only,
 //! bounded to [`RING_BYTES`].
 //!
-//! Never logged: the child's environment (the llama-server API key is passed there), its arguments, file
-//! contents or prompts. Children must not print those either (llama-server runs with errors-only logging).
+//! Never logged: the child's environment, its arguments, file contents or prompts. Children must not print those either.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
@@ -31,11 +30,11 @@ pub const KEEP_RUNS: usize = 3;
 pub const MAX_LINE: usize = 4096;
 /// In-memory tail per child (when there is no folder, and for live summaries).
 pub const RING_BYTES: usize = 64 * 1024;
-/// Most children tracked at once (one per plugin process at most, plus the AI engine).
+/// Most children tracked at once (one per plugin process at most, plus the store worker).
 pub const MAX_CHILDREN: usize = 256;
-/// Prefix of the lines a child forwards from its own child (`[llama-server] text`).
+/// Prefix of the lines a child forwards from its own child (`[plugin] text`).
 pub const FORWARD_OPEN: char = '[';
-/// Marker inside a forwarded line that carries a lifecycle event (`[llama-server] @debrief start 42`).
+/// Marker inside a forwarded line that carries a lifecycle event (`[plugin] @debrief start 42`).
 pub const EVENT_TAG: &str = "@debrief ";
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -46,33 +45,32 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ChildKind {
-    AiWorker,
-    LlamaServer,
     PluginHost,
     Plugin,
     /// The store worker (DuckDB and the full-text indexes of every window, ADR 0014).
     StoreWorker,
+    /// A kind this version does not know (a log written by an older Debrief: its AI worker and llama-server).
+    #[serde(other)]
+    Unknown,
 }
 
 impl ChildKind {
     pub fn as_str(self) -> &'static str {
         match self {
-            ChildKind::AiWorker => "ai-worker",
-            ChildKind::LlamaServer => "llama-server",
             ChildKind::PluginHost => "plugin-host",
             ChildKind::Plugin => "plugin",
             ChildKind::StoreWorker => "store-worker",
+            ChildKind::Unknown => "unknown",
         }
     }
 
-    /// Words for summaries ("AI engine: 2 runs").
+    /// Words for summaries ("Store worker: 2 runs").
     pub fn title(self) -> &'static str {
         match self {
-            ChildKind::AiWorker => "AI engine",
-            ChildKind::LlamaServer => "llama-server",
             ChildKind::PluginHost => "Isolated plugin",
             ChildKind::Plugin => "Plugin process",
             ChildKind::StoreWorker => "Store worker",
+            ChildKind::Unknown => "Earlier component",
         }
     }
 }
@@ -248,7 +246,7 @@ impl ProcessSummary {
         }
     }
 
-    /// "AI engine: 2 runs, 1 restart, last exit code 3, quarantined".
+    /// "Store worker: 2 runs, 1 restart, last exit code 3, quarantined".
     pub fn describe(&self) -> String {
         let mut s = format!(
             "{}: {} run{}",
@@ -334,6 +332,9 @@ pub fn summarize(name: &str, text: &str) -> Option<ProcessSummary> {
             continue;
         }
         let kind = line.kind.unwrap_or(ChildKind::Plugin);
+        if kind == ChildKind::Unknown {
+            log::debug!(Child = name; "A child log of a component this version no longer has is summarised as unknown");
+        }
         summary.get_or_insert_with(|| ProcessSummary::new(name, kind)).apply(&line);
     }
     if let Some(s) = summary.as_mut() {
@@ -945,8 +946,18 @@ mod tests {
     }
 
     #[test]
+    fn a_log_of_a_removed_component_is_still_summarised() {
+        // A 1.1 diagnostic bundle: the AI worker's lines (ADR 0070) carry a kind this version does not have.
+        let text = "{\"@t\":\"2026-10-14T13:01:00.000Z\",\"Event\":\"start\",\"ChildKind\":\"ai-worker\",\"Pid\":7}\n\
+                    {\"@t\":\"2026-10-14T13:02:00.000Z\",\"Event\":\"crash\",\"ChildKind\":\"ai-worker\",\"Pid\":7,\"Exit\":\"exit code 3\"}\n";
+        let s = summarize("ai-worker", text).expect("not silently skipped");
+        assert_eq!(s.kind, ChildKind::Unknown);
+        assert_eq!(s.state, ChildRunState::Crashed);
+    }
+
+    #[test]
     fn lines_are_clef_and_marked_by_the_default_profile_words() {
-        let spec = ChildLogSpec::new("ai-worker", ChildKind::AiWorker).with_version("0.1.0");
+        let spec = ChildLogSpec::new("store-worker", ChildKind::StoreWorker).with_version("0.1.0");
         let log = ChildLog::open(None, &spec);
         log.record_at(at(0), &ChildEvent::Start { pid: 42 });
         log.record_at(at(1), &ChildEvent::Output("loading model".into()));
@@ -975,20 +986,20 @@ mod tests {
         );
         let text = log.tail_text();
         let lines: Vec<serde_json::Value> = text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
-        assert_eq!(lines[0]["@m"], "Started ai-worker (pid 42, run 1)");
+        assert_eq!(lines[0]["@m"], "Started store-worker (pid 42, run 1)");
         assert_eq!(lines[0]["@t"], "2026-10-14T09:00:00.000Z");
         assert_eq!(lines[0]["Version"], "0.1.0");
         assert_eq!(lines[2]["@l"], "Fatal");
-        assert_eq!(lines[2]["@m"], "Crashed: ai-worker (pid 42) ended with exit code 3");
+        assert_eq!(lines[2]["@m"], "Crashed: store-worker (pid 42) ended with exit code 3");
         assert_eq!(lines[2]["Crash"], true);
         assert_eq!(lines[3]["Restarts"], 1);
-        assert_eq!(lines[4]["@m"], "Stopped ai-worker (pid 43) by Debrief");
-        assert_eq!(lines[6]["@m"], "Stopped ai-worker (pid 44): exit code 0");
+        assert_eq!(lines[4]["@m"], "Stopped store-worker (pid 43) by Debrief");
+        assert_eq!(lines[6]["@m"], "Stopped store-worker (pid 44): exit code 0");
         assert_eq!(lines[6]["Event"], "exit");
         let live = log.status();
         assert_eq!((live.starts, live.restarts, live.state), (3, 2, ChildRunState::Exited));
         // The same summary from the file text, except that a final start is unknown, not running.
-        assert_eq!(summarize("ai-worker", &text).unwrap(), live);
+        assert_eq!(summarize("store-worker", &text).unwrap(), live);
         assert!(summarize("x", "not json\n{\"Event\":\"output\"}\n").is_none());
     }
 
@@ -1042,26 +1053,26 @@ mod tests {
 
     #[test]
     fn forwarded_lines_go_to_the_grandchilds_log() {
-        let llama = ChildLogSpec::new("llama-server-fwd-test", ChildKind::LlamaServer);
+        let child = ChildLogSpec::new("plugin-fwd-test", ChildKind::Plugin);
         let worker = ChildLog::open(
             None,
-            &ChildLogSpec::new("ai-worker-fwd-test", ChildKind::AiWorker).forwarding(llama),
+            &ChildLogSpec::new("plugin-host-fwd-test", ChildKind::PluginHost).forwarding(child),
         );
-        worker.output("[llama-server-fwd-test] @debrief start 99\n");
-        worker.output("[llama-server-fwd-test] main: loading model");
-        worker.output("[llama-server-fwd-test] @debrief exit 99 signal 11");
-        worker.output("[llama-server-fwd-test] @debrief bogus");
+        worker.output("[plugin-fwd-test] @debrief start 99\n");
+        worker.output("[plugin-fwd-test] main: loading model");
+        worker.output("[plugin-fwd-test] @debrief exit 99 signal 11");
+        worker.output("[plugin-fwd-test] @debrief bogus");
         worker.output("[other] stays with the worker");
-        let llama = find("llama-server-fwd-test").unwrap();
-        let s = llama.status();
+        let child = find("plugin-fwd-test").unwrap();
+        let s = child.status();
         assert_eq!(
             (s.pid, s.state, s.last_exit.as_deref()),
             (Some(99), ChildRunState::Crashed, Some("signal 11"))
         );
-        assert!(llama.tail_text().contains("main: loading model"));
-        assert!(llama.tail_text().contains("@debrief bogus"));
+        assert!(child.tail_text().contains("main: loading model"));
+        assert!(child.tail_text().contains("@debrief bogus"));
         assert!(worker.tail_text().contains("[other] stays"));
-        assert!(statuses().iter().any(|s| s.name == "llama-server-fwd-test"));
+        assert!(statuses().iter().any(|s| s.name == "plugin-fwd-test"));
     }
 
     #[test]

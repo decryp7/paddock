@@ -18,14 +18,12 @@ impl From<AiError> for AiCmdError {
             AiError::Cancelled => AiErrorCode::Cancelled,
             AiError::Invalid(_) => AiErrorCode::Invalid,
             AiError::NoModel => AiErrorCode::NoModel,
-            AiError::NoRuntime => AiErrorCode::NoRuntime,
             AiError::NoVision => AiErrorCode::NoVision,
             AiError::Engine(_) => AiErrorCode::Engine,
             AiError::Browser(_) => AiErrorCode::Browser,
             AiError::ContextOverflow { .. } => AiErrorCode::ContextOverflow,
             AiError::Malformed(_) => AiErrorCode::Malformed,
             AiError::ToolLoopLimit(_) => AiErrorCode::ToolLoopLimit,
-            AiError::ModelFile(_) => AiErrorCode::ModelFile,
             AiError::Memory(_) => AiErrorCode::Memory,
             AiError::Network(_) => AiErrorCode::Network,
             AiError::Connection(n) => match n.kind {
@@ -42,11 +40,10 @@ impl From<AiError> for AiCmdError {
             AiError::Disk(_) => AiErrorCode::Disk,
             AiError::Refused(_) => AiErrorCode::Refused,
             AiError::Io(_) => AiErrorCode::Io,
-            AiError::SelfTest(_) => AiErrorCode::SelfTestFailed,
         };
         // The error is a symptom of an outage only while service health says the service is down.
         let service = match code {
-            AiErrorCode::Engine | AiErrorCode::Memory | AiErrorCode::SelfTestFailed => Some(crate::health::hub::AI),
+            AiErrorCode::Engine | AiErrorCode::Memory => Some(crate::health::hub::AI),
             AiErrorCode::Browser => Some(crate::health::hub::BROWSER),
             AiErrorCode::Network
             | AiErrorCode::Tls
@@ -82,14 +79,12 @@ mod tests {
             (AiError::Cancelled, AiErrorCode::Cancelled),
             (AiError::Invalid("x".into()), AiErrorCode::Invalid),
             (AiError::NoModel, AiErrorCode::NoModel),
-            (AiError::NoRuntime, AiErrorCode::NoRuntime),
             (AiError::NoVision, AiErrorCode::NoVision),
             (AiError::Engine("x".into()), AiErrorCode::Engine),
             (AiError::Browser("The browser could not finish: x".into()), AiErrorCode::Browser),
             (AiError::ContextOverflow { prompt: 2, limit: 1 }, AiErrorCode::ContextOverflow),
             (AiError::Malformed("x".into()), AiErrorCode::Malformed),
             (AiError::ToolLoopLimit(3), AiErrorCode::ToolLoopLimit),
-            (AiError::ModelFile("x".into()), AiErrorCode::ModelFile),
             (AiError::Memory("x".into()), AiErrorCode::Memory),
             (AiError::Network("x".into()), AiErrorCode::Network),
             (net(NetKind::Tls), AiErrorCode::Tls),
@@ -104,7 +99,6 @@ mod tests {
             (AiError::Disk("x".into()), AiErrorCode::Disk),
             (AiError::Refused("x".into()), AiErrorCode::Refused),
             (AiError::Io("x".into()), AiErrorCode::Io),
-            (AiError::SelfTest("The new CPU runtime failed".into()), AiErrorCode::SelfTestFailed),
         ];
         for (e, code) in cases {
             let msg = e.to_string();
@@ -113,11 +107,9 @@ mod tests {
         }
         let json = serde_json::to_value(AiCmdError::from(AiError::NoModel)).unwrap();
         assert_eq!(json["code"], "noModel");
-        assert_eq!(serde_json::to_value(AiErrorCode::NoRuntime).unwrap(), "noRuntime");
         assert_eq!(serde_json::to_value(AiErrorCode::ProxyAuth).unwrap(), "proxyAuth");
         assert_eq!(serde_json::to_value(AiErrorCode::HttpStatus).unwrap(), "httpStatus");
         assert_eq!(serde_json::to_value(AiErrorCode::Browser).unwrap(), "browser");
-        assert_eq!(serde_json::to_value(AiErrorCode::SelfTestFailed).unwrap(), "selfTestFailed");
         assert!(AiErrorCode::Browser.retryable(), "a page that did not answer may answer next time");
         assert_eq!(AiCmdError::busy("b").to_string(), "b");
         let fe = AiCmdError::from(debrief_core::overwrite::FileExists("/x/a.md".into()));

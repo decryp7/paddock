@@ -817,7 +817,7 @@ sub-tracks below the lane's markers, so none hides another; the lane grows by on
   matching events covers the first ones and says so (*Analysed the first ... of ...*);
   external tools run with timeouts; locked files and missing rights produce a message and a next step
   (retry, restart as administrator) instead of an error dialog.
-- **Diagnostics with or without the UI.** *Help ▸ Report a problem…* (and *Save diagnostics…* on the safe-mode and crash banners) and `debrief-app --export-diagnostics [<file.zip>] [--force]` (no window, no plugins; exits 0/1) write one zip with Debrief's logs, each child process's log (AI engine, llama-server, plugin processes; secrets scrubbed), `processes.json`, steps, snapshots, crash marker and a versioned `manifest.json`; opening that zip in Debrief shows it as a diagnostics workspace (one lane per log, crash/restart markers, the *Diagnostics report* panel). Sample: `samples/diagnostics/debrief-diagnostics-sample.zip`.
+- **Diagnostics with or without the UI.** *Help ▸ Report a problem…* (and *Save diagnostics…* on the safe-mode and crash banners) and `debrief-app --export-diagnostics [<file.zip>] [--force]` (no window, no plugins; exits 0/1) write one zip with Debrief's logs, each child process's log (the store worker, plugin processes; secrets scrubbed), `processes.json`, steps, snapshots, crash marker and a versioned `manifest.json`; opening that zip in Debrief shows it as a diagnostics workspace (one lane per log, crash/restart markers, the *Diagnostics report* panel). Sample: `samples/diagnostics/debrief-diagnostics-sample.zip`.
 
 ## Easy to start, hard to get wrong
 

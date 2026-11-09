@@ -401,8 +401,7 @@ function viewMenu(state: MenuState, cmd: Cmd, sub: Sub): MenuNode[] {
     if (c === 'AI') {
       return sub(id, label, [
         ...inCategory(c).map(viewItem),
-        cmd('ai.setup', $localize`:@@shell.menu.view.ai.setup:Set up…`),
-        cmd('ai.models', $localize`:@@shell.menu.view.ai.models:Models…`),
+        cmd('ai.setup', $localize`:@@shell.menu.view.ai.setup:Connect to Pitwall…`),
       ]);
     }
     return sub(id, label, ordered(c, inCategory(c)));

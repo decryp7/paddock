@@ -600,12 +600,6 @@ status = "built"
   delete_by = "debrief-v1.2.0"
   note = "The canonical was extracted from this file."
 
-  [[mechanism.copy]]
-  paths = ["apps/debrief/crates/debrief-ai-worker/src/http.rs"]
-  owner = "debrief"
-  delete_by = "debrief-v1.2.0"
-  note = "Debrief's llama-server client; the canonical's doc says it moves onto the same module (plan X16)."
-
 [[mechanism]]
 id = "personal-data-redaction"
 title = "Removing personal details from diagnostics text: home folders, profiles, machine and user names, e-mail, IP addresses"

@@ -10,7 +10,7 @@ import {
   toAiError,
 } from './ai-backend';
 import { TauriAiBackend } from './ai-backend-tauri';
-import { AI_CHAT_EVENT, AI_RUNTIME_EVENT, AI_SETUP_EVENT, AI_STATUS_EVENT, AI_UPDATES_EVENT } from './ai.types';
+import { AI_CHAT_EVENT, AI_STATUS_EVENT } from './ai.types';
 
 describe('toAiError', () => {
   it('keeps AiErrors, reads {code, message} payloads and wraps anything else', () => {
@@ -67,97 +67,14 @@ describe('TauriAiBackend', () => {
     return cmd;
   });
 
-  it('adds a model file through its download job: the model is the job value, a failure keeps the engine error type', async () => {
-    let outcome: unknown = { state: 'done', result: { type: 'model', fileName: 'm.gguf', detail: { fileName: 'm.gguf' } } };
-    const seen: [string, unknown][] = [];
-    const call = vi.fn(async (cmd: string, args?: unknown) => {
-      seen.push([cmd, args]);
-      return cmd === 'jobs_wait' ? outcome : 11;
-    });
-    const b = new TauriAiBackend(call as never, vi.fn() as never);
-    expect(await b.addLocalModel('/p.gguf')).toEqual({ fileName: 'm.gguf' });
-    expect(await b.addProjector('m.gguf', '/p/mmproj.gguf')).toEqual({ fileName: 'm.gguf' });
-    expect(seen).toEqual([
-      ['ai_model_add_local', { path: '/p.gguf' }],
-      ['jobs_wait', { id: 11 }],
-      ['ai_model_add_projector', { fileName: 'm.gguf', path: '/p/mmproj.gguf' }],
-      ['jobs_wait', { id: 11 }],
-    ]);
-    outcome = { state: 'failed', error: 'the file is damaged' };
-    await expect(b.addLocalModel('/p.gguf')).rejects.toBeInstanceOf(AiError);
-    await expect(b.addProjector('m.gguf', '/q')).rejects.toMatchObject({ message: 'the file is damaged' });
-    outcome = { state: 'cancelled', error: 'cancelled' };
-    await expect(b.addLocalModel('/p.gguf')).rejects.toMatchObject({ code: 'cancelled' });
-  });
-
-  it('cancels the set-up and runtime install it started through their jobs', async () => {
-    const seen: [string, unknown][] = [];
-    const call = vi.fn(async (cmd: string, args?: unknown) => {
-      seen.push([cmd, args]);
-      return cmd === 'ai_setup_run' ? 7 : cmd === 'ai_runtime_install' ? 9 : undefined;
-    });
-    const b = new TauriAiBackend(call as never, vi.fn() as never);
-    expect(await b.setupCancel()).toBe(false);
-    await b.setupRun('m');
-    expect(await b.setupCancel()).toBe(true);
-    expect(await b.setupCancel()).toBe(false);
-    await b.runtimeInstall('cpu');
-    expect(await b.runtimeCancel()).toBe(true);
-    expect(seen.filter(([c]) => c === 'jobs_cancel')).toEqual([
-      ['jobs_cancel', { id: 7 }],
-      ['jobs_cancel', { id: 9 }],
-    ]);
-    expect(seen.filter(([c]) => c !== 'jobs_cancel')).toEqual([
-      ['ai_setup_run', { modelId: 'm' }],
-      ['ai_runtime_install', { id: 'cpu' }],
-    ]);
-    seen.length = 0;
-    await b.activateModel('f.gguf');
-    await b.runtimeAddArchives('cpu', ['/d/a.zip']);
-    expect(seen).toEqual([
-      ['ai_model_activate', { fileName: 'f.gguf' }],
-      ['ai_runtime_add_archives', { id: 'cpu', paths: ['/d/a.zip'] }],
-    ]);
-    const failing = new TauriAiBackend((async (cmd: string) => (cmd === 'jobs_cancel' ? Promise.reject({ code: 'busy', message: 'no' }) : 3)) as never, vi.fn() as never);
-    await failing.runtimeAddArchives('cpu', ['/a.zip']);
-    await expect(failing.runtimeCancel()).rejects.toMatchObject({ code: 'busy' });
-    await failing.activateModel('f.gguf');
-    await expect(failing.setupCancel()).rejects.toMatchObject({ code: 'busy' });
-  });
-
   it('maps every method to its command and arguments', async () => {
     const b = new TauriAiBackend(invoke as never, vi.fn() as never);
     const cases: [() => Promise<unknown>, string, unknown][] = [
       [() => b.status(), 'ai_status', undefined],
-      [() => b.hardware(), 'ai_hardware', undefined],
-      [() => b.recommend(), 'ai_recommend', undefined],
-      [() => b.refineFit(), 'ai_refine_fit', undefined],
-      [() => b.catalog(), 'ai_catalog', undefined],
-      [() => b.setupPlan(), 'ai_setup_plan', { modelId: null }],
-      [() => b.setupPlan('m'), 'ai_setup_plan', { modelId: 'm' }],
-      [() => b.models(), 'ai_models', undefined],
-      [() => b.deleteModel('f.gguf'), 'ai_model_delete', { fileName: 'f.gguf' }],
-      [() => b.reset(), 'ai_reset', undefined],
-      [() => b.pitwallConnect(true), 'ai_pitwall_connect', { useForDebrief: true }],
+      [() => b.pitwallConnect(), 'ai_pitwall_connect', undefined],
       [() => b.pitwallCancel(), 'ai_pitwall_cancel', undefined],
       [() => b.pitwallForget(), 'ai_pitwall_forget', undefined],
       [() => b.pitwallRefresh(), 'ai_pitwall_refresh', undefined],
-      [() => b.useBuiltInEngine(), 'ai_engine_use_built_in', undefined],
-      [() => b.runtimes(), 'ai_runtimes', undefined],
-      [() => b.runtimeDelete('b1', 'cpu'), 'ai_runtime_delete', { tag: 'b1', id: 'cpu' }],
-      [() => b.runtimeChoose('auto'), 'ai_runtime_choose', { id: 'auto' }],
-      [() => b.updatesStatus(), 'ai_updates_status', undefined],
-      [() => b.updatesCheck(), 'ai_updates_check', { kind: null }],
-      [() => b.updatesCheck('model'), 'ai_updates_check', { kind: 'model' }],
-      [() => b.updatesApply('runtime:cpu@b2'), 'ai_updates_apply', { key: 'runtime:cpu@b2' }],
-      [() => b.updatesSkip('runtime:cpu@b2'), 'ai_updates_skip', { key: 'runtime:cpu@b2' }],
-      [() => b.updatesLater('runtime:cpu@b2'), 'ai_updates_later', { key: 'runtime:cpu@b2' }],
-      [() => b.manualDownload('model', 'm'), 'ai_manual_download', { kind: 'model', id: 'm' }],
-      [
-        () => b.openManualDownload('runtime', 'cpu', 1),
-        'ai_manual_download_open',
-        { kind: 'runtime', id: 'cpu', index: 1 },
-      ],
       [() => b.start({ op: 'query', question: 'q' }), 'ai_start', { request: { op: 'query', question: 'q' } }],
       [() => b.start({ op: 'explain', recordId: 3 }), 'ai_start', { request: { op: 'explain', recordId: 3 } }],
       [() => b.start({ op: 'rootCauses' }), 'ai_start', { request: { op: 'rootCauses' } }],
@@ -178,7 +95,6 @@ describe('TauriAiBackend', () => {
         'ai_chat_send',
         { sessionId: 'c', text: 't', context: { selectedIds: [] }, images: [4, 5] },
       ],
-      [() => b.installProjector('m.gguf'), 'ai_model_install_projector', { fileName: 'm.gguf' }],
       [() => b.imageOpen('/s/a.png'), 'ai_image_open', { path: '/s/a.png' }],
       [() => b.imagePaste('iVBO', 'a.png'), 'ai_image_paste', { data: 'iVBO', name: 'a.png' }],
       [() => b.imagePaste('iVBO'), 'ai_image_paste', { data: 'iVBO', name: null }],
@@ -225,48 +141,17 @@ describe('TauriAiBackend', () => {
       return off;
     });
     const b = new TauriAiBackend(invoke as never, listen);
-    const setup = vi.fn();
     const status = vi.fn();
     const chat = vi.fn();
-    const runtime = vi.fn();
-    expect(await b.onSetup(setup)).toBe(off);
-    await b.onStatus(status);
+    expect(await b.onStatus(status)).toBe(off);
     await b.onChat(chat);
-    await b.onRuntime(runtime);
-    for (const bad of [
-      null,
-      'x',
-      [],
-      { stage: 1 },
-      { state: 'ready' },
-      { sessionId: 'c', type: 'delta' },
-    ]) {
-      handlers.get(AI_SETUP_EVENT)!(bad);
+    for (const bad of [null, 'x', [], { stage: 1 }, { state: 'ready' }, { sessionId: 'c', type: 'delta' }]) {
       handlers.get(AI_STATUS_EVENT)!(bad);
       handlers.get(AI_CHAT_EVENT)!(bad);
-      handlers.get(AI_RUNTIME_EVENT)!(bad);
     }
-    expect([setup, status, chat, runtime].map((f) => f.mock.calls.length)).toEqual([0, 0, 0, 0]);
-    handlers.get(AI_SETUP_EVENT)!({ stage: 'probing' });
+    expect([status, chat].map((f) => f.mock.calls.length)).toEqual([0, 0]);
     handlers.get(AI_STATUS_EVENT)!({ state: 'ready', available: true });
     handlers.get(AI_CHAT_EVENT)!({ sessionId: 'c', type: 'delta', seq: 1, text: 'x' });
-    handlers.get(AI_RUNTIME_EVENT)!({ stage: 'finishing', id: 'cpu' });
-    expect([setup, status, chat, runtime].map((f) => f.mock.calls.length)).toEqual([1, 1, 1, 1]);
-  });
-
-  it('listens to the update status and drops malformed payloads', async () => {
-    let handler: ((p: unknown) => void) | undefined;
-    const listen = vi.fn(async (event: string, h: (p: unknown) => void) => {
-      expect(event).toBe(AI_UPDATES_EVENT);
-      handler = h;
-      return () => undefined;
-    });
-    const b = new TauriAiBackend(invoke as never, listen);
-    const got = vi.fn();
-    await b.onUpdates(got);
-    for (const bad of [null, [], { kinds: [] }, { intervalHours: 24 }, { kinds: 'x', intervalHours: 1 }]) handler!(bad);
-    expect(got).not.toHaveBeenCalled();
-    handler!({ kinds: [], intervalHours: 24 });
-    expect(got).toHaveBeenCalledOnce();
+    expect([status, chat].map((f) => f.mock.calls.length)).toEqual([1, 1]);
   });
 });

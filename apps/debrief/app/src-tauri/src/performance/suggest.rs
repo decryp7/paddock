@@ -28,8 +28,6 @@ pub struct Environment {
     /// Free space where projects are kept, when known.
     pub disk_free_mb: Option<u64>,
     pub disk_kind: Option<DiskKind>,
-    /// The active AI model (with its image projector), 0 when there is none: it is subtracted first.
-    pub ai_model_mb: u64,
 }
 
 /// The system keeps at least this much, MB, and at least a quarter of the memory.
@@ -47,20 +45,15 @@ fn to_u32(n: u64) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
 }
 
-/// The memory Debrief's processes may share, MB: the total less the system's reserve and the AI model, no more than is
-/// free now, at least 1 GB.
+/// The memory Debrief's processes may share, MB: the total less the system's reserve, no more than is free now, at
+/// least 1 GB (the AI model lives in Pitwall, which has its own memory).
 pub fn pool_mb(env: &Environment) -> u64 {
     let reserve = MIN_RESERVE_MB.max(env.total_memory_mb / 4);
-    let ai = env.ai_model_mb * 6 / 5;
-    env.total_memory_mb
-        .saturating_sub(reserve)
-        .saturating_sub(ai)
-        .min(env.free_memory_mb)
-        .max(1024)
+    env.total_memory_mb.saturating_sub(reserve).min(env.free_memory_mb).max(1024)
 }
 
 /// The suggested settings for `env`, over `current` (what the suggestion does not cover stays: the spill folder, the
-/// AI worker's cap, per-plugin caps, DuckDB's explicit limit is cleared so it follows the query memory).
+/// per-plugin caps, DuckDB's explicit limit is cleared so it follows the query memory).
 pub fn suggest(env: &Environment, current: &PerformanceSettings) -> PerformanceSettings {
     let pool = pool_mb(env);
     let tight = pool < TIGHT_MB;
@@ -143,8 +136,8 @@ pub fn proposal(environment: Option<Environment>, before: &PerformanceSettings, 
     }
 }
 
-/// This computer: its memory and cores (sysinfo), the free space where projects are kept, and the active AI model.
-pub fn probe(data_dir: &Path, ai_model_bytes: u64) -> Environment {
+/// This computer: its memory and cores (sysinfo), and the free space where projects are kept.
+pub fn probe(data_dir: &Path) -> Environment {
     use debrief_ai::models::DiskSpace;
     let mut sys = sysinfo::System::new();
     sys.refresh_memory();
@@ -156,7 +149,6 @@ pub fn probe(data_dir: &Path, ai_model_bytes: u64) -> Environment {
         disk_free_mb: debrief_ai::models::SystemDisk.available_bytes(data_dir).map(mb),
         // sysinfo tells the kind only with its disk feature, which Debrief does not build; unknown is treated as fast.
         disk_kind: None,
-        ai_model_mb: mb(ai_model_bytes),
     }
 }
 
@@ -164,14 +156,13 @@ pub fn probe(data_dir: &Path, ai_model_bytes: u64) -> Environment {
 mod tests {
     use super::*;
 
-    fn env(total_gb: u64, cores: u32, ai_mb: u64) -> Environment {
+    fn env(total_gb: u64, cores: u32) -> Environment {
         Environment {
             total_memory_mb: total_gb * 1024,
             free_memory_mb: total_gb * 1024,
             cores,
             disk_free_mb: Some(500 * 1024),
             disk_kind: Some(DiskKind::Ssd),
-            ai_model_mb: ai_mb,
         }
     }
 
@@ -199,21 +190,17 @@ mod tests {
         let hdd_short = Environment {
             disk_free_mb: Some(10 * 1024),
             disk_kind: Some(DiskKind::Hdd),
-            ..env(32, 16, 0)
+            ..env(32, 16)
         };
         let busy = Environment {
             free_memory_mb: 4096,
-            ..env(16, 8, 0)
+            ..env(16, 8)
         };
         let table: [(&str, Environment, Expected); 5] = [
-            // 8 GB, 4 cores and a 4.5 GB model: the floor everywhere, memory given back at once.
-            (
-                "8 GB / 4 cores with AI",
-                env(8, 4, 4600),
-                (1024, 384, 236, 512, true, 0, 2, 1, 1, 0, 8),
-            ),
+            // 8 GB, 4 cores: 6 GB to share (the AI model lives in Pitwall, not here).
+            ("8 GB / 4 cores", env(8, 4), (1536, 576, 236, 1536, false, 0, 2, 0, 1, 0, 32)),
             // 16 GB, 8 cores: 12 GB to share.
-            ("16 GB / 8 cores", env(16, 8, 0), (3072, 1152, 450, 3072, false, 0, 3, 0, 1, 0, 32)),
+            ("16 GB / 8 cores", env(16, 8), (3072, 1152, 450, 3072, false, 0, 3, 0, 1, 0, 32)),
             // 32 GB, 16 cores, a spinning disk with 10 GB free: 4 parse threads, spilling capped.
             (
                 "32 GB / 16 cores, HDD",
@@ -221,11 +208,7 @@ mod tests {
                 (6144, 2304, 900, 4096, false, 4, 7, 0, 2, 2560, 32),
             ),
             // 64 GB: the store worker's suggestion stops at 8 GB.
-            (
-                "64 GB / 32 cores",
-                env(64, 32, 0),
-                (8192, 3072, 1200, 4096, false, 0, 8, 0, 2, 0, 32),
-            ),
+            ("64 GB / 32 cores", env(64, 32), (8192, 3072, 1200, 4096, false, 0, 8, 0, 2, 0, 32)),
             // 16 GB but only 4 GB free now: sized by what is free.
             ("16 GB, 4 GB free", busy, (1024, 384, 236, 1024, false, 0, 3, 0, 1, 0, 32)),
         ];
@@ -242,29 +225,28 @@ mod tests {
     }
 
     #[test]
-    fn the_ai_model_is_subtracted_first_and_unrelated_settings_stay() {
-        assert_eq!(pool_mb(&env(16, 8, 0)), 12 * 1024);
-        assert_eq!(pool_mb(&env(16, 8, 4096)), 12 * 1024 - 4915);
-        assert_eq!(pool_mb(&env(4, 2, 8000)), 1024, "never below 1 GB");
+    fn the_pool_keeps_the_reserve_and_unrelated_settings_stay() {
+        assert_eq!(pool_mb(&env(16, 8)), 12 * 1024);
+        assert_eq!(pool_mb(&env(1, 2)), 1024, "never below 1 GB");
         let mut current = PerformanceSettings {
             spill_folder: "/fast".into(),
-            ai_worker_memory_mb: 2048,
+            store_cap_mb: 3072,
             duck_memory_limit_mb: 500,
             ..PerformanceSettings::default()
         };
         current.plugin_memory.insert("p".into(), 300);
-        let s = suggest(&env(16, 8, 0), &current);
-        assert_eq!((s.spill_folder.as_str(), s.ai_worker_memory_mb), ("/fast", 2048));
+        let s = suggest(&env(16, 8), &current);
+        assert_eq!(s.spill_folder.as_str(), "/fast");
         assert_eq!(s.plugin_memory["p"], 300);
         assert_eq!(s.duck_memory_limit_mb, 0, "follows the query memory");
-        assert_eq!(suggest(&env(16, 1, 0), &current).leave_cores_free, 0);
+        assert_eq!(suggest(&env(16, 1), &current).leave_cores_free, 0);
     }
 
     #[test]
     fn the_proposal_lists_only_what_changes() {
         let before = PerformanceSettings::default();
-        let after = suggest(&env(16, 8, 0), &before);
-        let p = proposal(Some(env(16, 8, 0)), &before, &after);
+        let after = suggest(&env(16, 8), &before);
+        let p = proposal(Some(env(16, 8)), &before, &after);
         let keys: Vec<&str> = p.rows.iter().map(|r| r.key.as_str()).collect();
         assert_eq!(
             keys,
@@ -282,9 +264,8 @@ mod tests {
 
     #[test]
     fn the_probe_reads_this_computer() {
-        let e = probe(&std::env::temp_dir(), 3 << 20);
+        let e = probe(&std::env::temp_dir());
         assert!(e.total_memory_mb > 0 && e.cores >= 1);
         assert!(e.free_memory_mb <= e.total_memory_mb);
-        assert_eq!(e.ai_model_mb, 3);
     }
 }

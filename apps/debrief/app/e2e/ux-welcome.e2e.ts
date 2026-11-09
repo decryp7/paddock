@@ -13,7 +13,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test('the activity bar offers the AI set-up before a model exists', async ({ page }) => {
+test('the activity bar offers the Pitwall connect step before Pitwall is paired', async ({ page }) => {
   await openAppWith(page, '?mockAi=setup&mockAiStepMs=5');
   await expect(page.locator('debrief-activity-bar [data-activity-id="ai-setup"]')).toBeVisible();
   await expect(page.locator('debrief-activity-bar [data-activity-id="ai"]')).toHaveCount(0);
@@ -44,7 +44,7 @@ test('the palette ranks "AI" matches first, without loose ones or duplicates', a
   const options = page.locator('debrief-command-palette').getByRole('option');
   await expect(options.first()).toBeVisible();
   const texts = (await options.allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').trim());
-  const setUp = texts.findIndex((t) => t.includes('Set up AI assistant'));
+  const setUp = texts.findIndex((t) => t.includes('Connect to Pitwall'));
   expect(setUp).toBeGreaterThanOrEqual(0);
   expect(setUp).toBeLessThanOrEqual(2);
   expect(texts.some((t) => /Open an image/.test(t) && !/AI/.test(t))).toBe(false);

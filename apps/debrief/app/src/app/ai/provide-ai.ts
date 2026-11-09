@@ -1,5 +1,4 @@
-import { effect, EnvironmentProviders, inject, Injector, makeEnvironmentProviders, provideEnvironmentInitializer } from '@angular/core';
-import { isTauri } from '../core/platform';
+import { EnvironmentProviders, inject, makeEnvironmentProviders } from '@angular/core';
 import { TimeCursor } from '../analysis/time-cursor';
 import { RecordView } from '../core/api.types';
 import { WorkspaceStore } from '../core/workspace.store';
@@ -63,8 +62,7 @@ export function aiCommands(
   const selected = (): RecordView | null => store.selected();
   return [
     { id: 'ai.chat.show', title: $localize`:@@ai.provide.cmd.chat:AI: Open the assistant chat`, category: $localize`:@@ai.provide.category:AI`, when: available, view: AI_CHAT_VIEW, run: (ctx) => ctx.showView(AI_CHAT_VIEW) },
-    { id: 'ai.setup', title: $localize`:@@ai.provide.cmd.setup:Set up AI assistant`, category: $localize`:@@ai.provide.category:AI`, when: available, run: () => launcher.openSetup() },
-    { id: 'ai.models', title: $localize`:@@ai.provide.cmd.models:AI: Manage models…`, category: $localize`:@@ai.provide.category:AI`, when: available, run: () => launcher.openModels() },
+    { id: 'ai.setup', title: $localize`:@@ai.provide.cmd.setup:AI: Connect to Pitwall…`, category: $localize`:@@ai.provide.category:AI`, when: available, run: () => launcher.openSetup() },
     { id: 'ai.image.open', title: $localize`:@@ai.vision.cmd.open:AI: Open an image…`, category: $localize`:@@ai.provide.category:AI`, when: available, run: () => void launcher.openImage() },
     {
       id: 'ai.image.related',
@@ -131,38 +129,6 @@ export function aiRecordMenu(launcher: AiLauncher, status: InstanceType<typeof A
   };
 }
 
-const FIRST_RUN_KEY = 'debrief.ai.setupOffered.v1';
-
-/**
- * First run of the desktop app: when AI can be used but no model is set up, the set-up wizard is offered
- * once (the browser build never opens it by itself, so UI tests stay deterministic).
- */
-export function offerSetupOnFirstRun(status: InstanceType<typeof AiStatusStore>, launcher: AiLauncher, injector: Injector, desktop = isTauri()): void {
-  if (!desktop) return;
-  let offered: boolean;
-  try {
-    offered = localStorage.getItem(FIRST_RUN_KEY) === '1';
-  } catch {
-    offered = true; // no storage: never nag on every start
-  }
-  if (offered) return;
-  const ref = effect(
-    () => {
-      const s = status.status();
-      if (!s) return;
-      ref.destroy();
-      if (!s.available || s.state !== 'noModel') return;
-      try {
-        localStorage.setItem(FIRST_RUN_KEY, '1');
-      } catch {
-        /* storage unavailable: the offer may repeat, which is harmless */
-      }
-      void launcher.openSetup();
-    },
-    { injector, manualCleanup: true },
-  );
-}
-
 /** One line in `app.config.ts`: the AI chat view, its commands and menu items, saved chats, the backend. */
 export function provideAi(): EnvironmentProviders {
   return makeEnvironmentProviders([
@@ -172,7 +138,6 @@ export function provideAi(): EnvironmentProviders {
     { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => aiCommands(inject(AiLauncher), inject(AiStatusStore), inject(WorkspaceStore), inject(TimeCursor)) },
     { provide: DEBRIEF_RECORD_MENU_ITEMS, multi: true, useFactory: () => aiRecordMenu(inject(AiLauncher), inject(AiStatusStore)) },
     { provide: UI_STATE_CONTRIBUTIONS, multi: true, useFactory: () => [inject(AiChatPersistence).contribution, inject(KnowledgePersistence).contribution] },
-    provideEnvironmentInitializer(() => offerSetupOnFirstRun(inject(AiStatusStore), inject(AiLauncher), inject(Injector))),
   ]);
 }
 

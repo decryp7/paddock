@@ -41,18 +41,6 @@ expires = "2026-12-31"
 # C39 (ADR 0023): the apps' ports read off dropped listeners, one waiver per file so a new one in an app is still caught.
 [[waiver]]
 check = "C39"
-path = "apps/debrief/crates/debrief-ai-worker/src/child.rs"
-reason = "Debrief: free_port() picks a port for llama-server and retries on a taken one; to get an inline freed-port waiver"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C39"
-path = "apps/debrief/crates/debrief-ai-worker/src/http.rs"
-reason = "Debrief: a refused-connection test on a freed port; to use a refusing connector or a mapping test"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C39"
 path = "apps/debrief/crates/debrief-ai/src/engine/pitwall/http.rs"
 reason = "Debrief: a refused-connection test on a freed port; to use a refusing connector or a mapping test"
 expires = "2026-12-31"
@@ -111,12 +99,6 @@ expires = "2026-12-31"
 check = "C53"
 path = "apps/debrief/crates/chromium-driver/src/process.rs"
 reason = "ADR 0033 WP-5: killpg and taskkill /T after try_wait may have reaped the leader, and a signal-0 liveness probe; replace with paddock_proc::Supervised"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/debrief/crates/debrief-ai-worker/src/child.rs"
-reason = "ADR 0033 WP-5: the exit reaper SIGKILLs registered pids that try_wait may have reaped; register ProcessIds"
 expires = "2026-12-31"
 
 [[waiver]]

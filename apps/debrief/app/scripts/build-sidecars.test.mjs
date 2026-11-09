@@ -6,10 +6,6 @@ import { adhocSign, libduckdbFile, sidecarPlan } from './build-sidecars.mjs';
 
 const select = [
   '-p',
-  'debrief-ai-worker',
-  '--bin',
-  'debrief-ai-worker',
-  '-p',
   'debrief-plugins',
   '--bin',
   'debrief-plugins',
@@ -21,13 +17,20 @@ const select = [
 const host = 'x86_64-pc-windows-msvc';
 const targetDir = join('ci', 'target');
 
+test('the sidecars are the plugin host and the store worker: two, no AI engine process (ADR 0070)', () => {
+  const plan = sidecarPlan({ target: host, host, profile: 'release', targetDir });
+  assert.deepEqual(
+    plan.binaries.map((b) => b.file),
+    ['debrief-plugins-x86_64-pc-windows-msvc.exe', 'debrief-store-worker-x86_64-pc-windows-msvc.exe'],
+  );
+});
+
 test('a host build runs without --target and reads target/<profile>, where tauri build puts its own', () => {
   const plan = sidecarPlan({ target: host, host, profile: 'release', targetDir });
   assert.deepEqual(plan.builds, [['build', ...select, '--release']]);
   assert.deepEqual(
     plan.binaries.map((b) => [b.file, b.built]),
     [
-      ['debrief-ai-worker-x86_64-pc-windows-msvc.exe', [join(targetDir, 'release', 'debrief-ai-worker.exe')]],
       ['debrief-plugins-x86_64-pc-windows-msvc.exe', [join(targetDir, 'release', 'debrief-plugins.exe')]],
       ['debrief-store-worker-x86_64-pc-windows-msvc.exe', [join(targetDir, 'release', 'debrief-store-worker.exe')]],
     ],
@@ -38,20 +41,20 @@ test('a debug host build has no --release and reads target/debug', () => {
   const plan = sidecarPlan({ target: 'x86_64-unknown-linux-gnu', host: 'x86_64-unknown-linux-gnu', profile: 'debug', targetDir });
   assert.deepEqual(plan.builds, [['build', ...select]]);
   assert.equal(plan.ext, '');
-  assert.deepEqual(plan.binaries[0].built, [join(targetDir, 'debug', 'debrief-ai-worker')]);
+  assert.deepEqual(plan.binaries[0].built, [join(targetDir, 'debug', 'debrief-plugins')]);
 });
 
 test('a custom profile (dist) passes --profile and reads target/<profile>', () => {
   const plan = sidecarPlan({ target: host, host, profile: 'dist', targetDir });
   assert.deepEqual(plan.builds, [['build', ...select, '--profile', 'dist']]);
-  assert.deepEqual(plan.binaries[0].built, [join(targetDir, 'dist', 'debrief-ai-worker.exe')]);
+  assert.deepEqual(plan.binaries[0].built, [join(targetDir, 'dist', 'debrief-plugins.exe')]);
 });
 
 test('a cross build keeps --target and its own folder', () => {
   const plan = sidecarPlan({ target: 'aarch64-pc-windows-msvc', host, profile: 'release', targetDir });
   assert.deepEqual(plan.builds, [['build', ...select, '--target', 'aarch64-pc-windows-msvc', '--release']]);
-  assert.deepEqual(plan.binaries[1].built, [join(targetDir, 'aarch64-pc-windows-msvc', 'release', 'debrief-plugins.exe')]);
-  assert.equal(plan.binaries[1].file, 'debrief-plugins-aarch64-pc-windows-msvc.exe');
+  assert.deepEqual(plan.binaries[0].built, [join(targetDir, 'aarch64-pc-windows-msvc', 'release', 'debrief-plugins.exe')]);
+  assert.equal(plan.binaries[0].file, 'debrief-plugins-aarch64-pc-windows-msvc.exe');
 });
 
 test('Intel and universal macOS targets are refused: DuckDB 2.x is Apple silicon only here', () => {

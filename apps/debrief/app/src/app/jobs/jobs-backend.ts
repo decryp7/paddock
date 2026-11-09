@@ -38,7 +38,7 @@ export abstract class JobsBackend {
 
 
 const isDelta = (p: unknown): p is JobsDelta =>
-  !!p && typeof p === 'object' && typeof (p as JobsDelta).version === 'number' && Array.isArray((p as JobsDelta).order) && Array.isArray((p as JobsDelta).changed) && Array.isArray((p as JobsDelta).paused);
+  !!p && typeof p === 'object' && typeof (p as JobsDelta).version === 'number' && Array.isArray((p as JobsDelta).order) && Array.isArray((p as JobsDelta).changed);
 
 /** Talks to the Rust shell; `call` is Tauri's `invoke`, tests pass fakes. */
 export class TauriJobsBackend implements JobsBackend {
@@ -107,7 +107,7 @@ export class TauriJobsBackend implements JobsBackend {
       const ordered = p.order.map((id) => jobs.get(id));
       if (ordered.some((j) => !j)) return resync(p.version);
       known = { version: p.version, jobs: new Map(ordered.map((j) => [j!.id, j!])) };
-      handler({ jobs: ordered as JobInfo[], paused: p.paused });
+      handler({ jobs: ordered as JobInfo[] });
     });
   }
 }

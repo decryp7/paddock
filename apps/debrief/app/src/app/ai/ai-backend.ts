@@ -3,27 +3,15 @@ import { Logger, withFailureLogging } from '../core/logger';
 import { isTauri } from '../core/platform';
 import {
   AiErrorCode,
-  AiRuntimeEvent,
-  AiRuntimeOverview,
   AiStatus,
   PitwallStatus,
-  AiUpdateKind,
-  AiUpdatesStatus,
   ChatContext,
-  ManualDownload,
-  ManualKind,
   ChatEnvelope,
   ChatEventEnvelope,
   ChatHistoryRecord,
   ChatRecord,
-  Hardware,
-  InstalledModel,
-  Recommendation,
-  Recommendations,
   RestoreResult,
   SessionInfo,
-  SetupEvent,
-  SetupPlan,
   AiStartRequest,
   AiImage,
   DraftArgs,
@@ -66,71 +54,15 @@ export type Unlisten = () => void;
 @Injectable({ providedIn: 'root', useFactory: () => lazyAiBackend(loadAiBackend) })
 export abstract class AiBackend {
   abstract status(): Promise<AiStatus>;
-  abstract hardware(): Promise<Hardware>;
-  abstract recommend(): Promise<Recommendations>;
-  /** As `recommend`, after the engine has read the model headers (slow, network): exact context sizes. */
-  abstract refineFit(): Promise<Recommendations>;
-  abstract catalog(): Promise<Recommendation[]>;
-  abstract setupPlan(modelId?: string | null): Promise<SetupPlan>;
-  /** Starts a set-up; progress arrives through `onSetup`. */
-  abstract setupRun(modelId: string): Promise<void>;
-  /**
-   * The first-start set-up as a background job: the inference runtime when none is installed, then the model. Resolves
-   * once it is queued; progress is in the Jobs pane, the status bar and `onSetup`, and a message says how it ended.
-   */
-  abstract setupBackground(modelId: string): Promise<void>;
-  abstract setupCancel(): Promise<boolean>;
-  abstract models(): Promise<InstalledModel[]>;
-  /** Loads an installed model and makes it active; progress arrives through `onSetup`. */
-  abstract activateModel(fileName: string): Promise<void>;
-  abstract deleteModel(fileName: string): Promise<void>;
-  abstract addLocalModel(path: string): Promise<InstalledModel>;
-  /** "Add image support": downloads the catalog projector of an installed model as a download job (resolves with its
-   * id). Never called without the user asking. */
-  abstract installProjector(fileName: string): Promise<number>;
-  /** Adds a projector file the user chose for an installed model (checked like a download). */
-  abstract addProjector(fileName: string, path: string): Promise<InstalledModel>;
-  abstract reset(): Promise<AiStatus>;
-
-  /** Starts pairing with Pitwall (or, when already paired, just chooses it when `useForDebrief`); returns at once with
-   * the code to compare while the pairing waits for approval. Changes also arrive through `onStatus`. */
-  abstract pitwallConnect(useForDebrief: boolean): Promise<PitwallStatus>;
+  /** Starts pairing with Pitwall; returns at once with the code to compare while the pairing waits for approval.
+   * Changes also arrive through `onStatus`. */
+  abstract pitwallConnect(): Promise<PitwallStatus>;
   /** Stops a pairing that waits for approval. */
   abstract pitwallCancel(): Promise<boolean>;
   /** Deletes the stored Pitwall key. */
   abstract pitwallForget(): Promise<AiStatus>;
   /** Probes Pitwall now. */
   abstract pitwallRefresh(): Promise<AiStatus>;
-  /** Switches this session to the built-in engine. */
-  abstract useBuiltInEngine(): Promise<AiStatus>;
-
-  /** The inference runtimes (llama-server builds) for this platform: installed, usable, suggested, active. */
-  abstract runtimes(): Promise<AiRuntimeOverview>;
-  /** Starts downloading a build; progress arrives through `onRuntime`. */
-  abstract runtimeInstall(id: string): Promise<void>;
-  abstract runtimeCancel(): Promise<boolean>;
-  abstract runtimeDelete(tag: string, id: string): Promise<void>;
-  /** Makes an installed build (or `auto`) the one that runs the model; the engine restarts with it. */
-  abstract runtimeChoose(id: string): Promise<void>;
-  /** Installs a build from its archives downloaded by hand (checked against the pinned SHA-256); progress
-   * arrives through `onRuntime` like a download. */
-  abstract runtimeAddArchives(id: string, paths: string[]): Promise<void>;
-
-  /** The runtime and model update checks: policies, last check, what is available. */
-  abstract updatesStatus(): Promise<AiUpdatesStatus>;
-  /** "Check now" for one kind, or both; resolves when the check is done. */
-  abstract updatesCheck(kind?: AiUpdateKind | null): Promise<AiUpdatesStatus>;
-  /** "Update": installs an update now, as a download job. */
-  abstract updatesApply(key: string): Promise<AiUpdatesStatus>;
-  /** "Skip this version". */
-  abstract updatesSkip(key: string): Promise<AiUpdatesStatus>;
-  /** "Later": asked again at the next check. */
-  abstract updatesLater(key: string): Promise<AiUpdatesStatus>;
-
-  /** The files to download by hand for a model or runtime build ("Download manually"). */
-  abstract manualDownload(kind: ManualKind, id: string): Promise<ManualDownload>;
-  /** Opens file `index` of that download in the system browser (the engine computes the address). */
-  abstract openManualDownload(kind: ManualKind, id: string, index: number): Promise<void>;
 
   /** Starts a use case (explain, a proposal, a query...) as a background AI job and resolves with its id at once.
    * Its answer is the job's result: a dialog that is open follows it (`JobFollow`), otherwise its message ("Explanation
@@ -173,10 +105,7 @@ export abstract class AiBackend {
   /** Opens a web source an answer showed in the system browser (anything else is refused by the engine). */
   abstract openLink(url: string): Promise<void>;
 
-  abstract onSetup(handler: (e: SetupEvent) => void): Promise<Unlisten>;
-  abstract onRuntime(handler: (e: AiRuntimeEvent) => void): Promise<Unlisten>;
   abstract onStatus(handler: (s: AiStatus) => void): Promise<Unlisten>;
-  abstract onUpdates(handler: (s: AiUpdatesStatus) => void): Promise<Unlisten>;
   abstract onChat(handler: (e: ChatEventEnvelope) => void): Promise<Unlisten>;
 }
 

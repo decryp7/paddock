@@ -3,7 +3,6 @@
 
 use super::hub::{self, AiHealth, Health, StoreProbe, AI, BROWSER, DOWNLOADS, PLUGINS, STORE};
 use super::model::{cause_key, Cause, Change, RepairAction, ServiceState, Snapshot, SERVICE_HEALTH_EVENT};
-use crate::ai::EngineStateDto;
 use crate::app_state::AppState;
 use crate::notification_centre::centre::{NewNotice, NoticeAction, NoticeScope, NoticeSeverity, NoticeSource};
 use crate::notify::NotificationKind;
@@ -83,14 +82,6 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) {
     spawn_probe(app.clone(), health);
 }
 
-/// The AI worker's health after the user reset it (`ai_reset`), without waiting for the next probe.
-pub fn refresh_ai<R: Runtime>(app: &AppHandle<R>, state: EngineStateDto, reason: Option<&str>) {
-    if let Some(h) = app.try_state::<Arc<Health>>() {
-        h.clear_cap_stop(AI);
-        h.ai(ai_health(state), reason);
-    }
-}
-
 fn wire_repairs<R: Runtime>(app: &AppHandle<R>, health: &Arc<Health>) {
     let h = app.clone();
     health.set_repair(STORE, Arc::new(move || repair_store(&h)));
@@ -123,22 +114,18 @@ fn restart_store_worker(worker: &debrief_store_client::StoreWorker) -> Result<()
     })
 }
 
-/// Lets the AI worker run again (the engine's own reset) and checks it is no longer switched off. When Pitwall was lost, the
-/// repair is the fallback: the built-in engine for the session (it never depends on Pitwall, ADR 0059).
+/// Looks at Pitwall again and checks it serves Debrief now (ADR 0070: the AI's only repair is Pitwall's own step).
 fn repair_ai<R: Runtime>(app: &AppHandle<R>) -> Result<(), Cause> {
     let core = crate::ai::commands::core(app).map_err(|e| Cause::new(e.message))?;
-    if core.engine_kind().is_none() {
-        core.use_built_in_for_session();
-        crate::ai::pitwall::announce(app, &core);
-        return Ok(());
+    if let Some(pw) = core.pitwall() {
+        pw.probe();
     }
-    core.reset();
-    if let Some(jobs) = app.try_state::<crate::jobs::Jobs>() {
-        jobs.pump();
-    }
-    match core.quarantine_reason() {
-        Some(reason) => Err(Cause::new("The AI worker is still switched off.").detail(reason)),
-        None => Ok(()),
+    crate::ai::pitwall::announce(app, &core);
+    let status = core.status();
+    if status.pitwall.usable {
+        Ok(())
+    } else {
+        Err(Cause::new("Pitwall does not serve Debrief yet.").detail(status.reason.unwrap_or_default()))
     }
 }
 
@@ -168,16 +155,16 @@ fn repair_downloads<R: Runtime>(app: &AppHandle<R>, health: &Health) -> Result<(
     }
 }
 
-/// The AI's health from its status: a lost engine (Pitwall) first, else the worker's state (ADR 0059).
+/// The AI's health from its status: a Pitwall that cannot serve Debrief, once the user connected it or it served before.
 pub fn ai_health_of(status: &crate::ai::AiStatus) -> AiHealth {
-    if status.engine.active.is_none() {
+    if status.pitwall.problem.is_some() {
         AiHealth::EngineLost
     } else {
-        ai_health(status.state)
+        AiHealth::Fine
     }
 }
 
-/// The AI's health after the engine changed (Pitwall found, lost, connected), without waiting for the next probe.
+/// The AI's health after Pitwall changed (found, lost, connected), without waiting for the next probe.
 pub fn refresh_ai_engine<R: Runtime>(app: &AppHandle<R>, status: &crate::ai::AiStatus) {
     if !status.available {
         return;
@@ -187,16 +174,7 @@ pub fn refresh_ai_engine<R: Runtime>(app: &AppHandle<R>, status: &crate::ai::AiS
     }
 }
 
-/// What the AI worker's state means for health.
-pub fn ai_health(state: EngineStateDto) -> AiHealth {
-    match state {
-        EngineStateDto::Disabled => AiHealth::Switched,
-        EngineStateDto::Failed => AiHealth::LoadFailed,
-        _ => AiHealth::Fine,
-    }
-}
-
-/// One look at the supervisors: the store worker and the AI worker.
+/// One look at the supervisors: the store worker, and Pitwall for the AI assistant.
 fn probe<R: Runtime>(app: &AppHandle<R>, health: &Health) {
     if let Some(worker) = app.try_state::<AppState>().and_then(|s| s.performance.worker()) {
         use debrief_ipc::supervisor::ChildState;

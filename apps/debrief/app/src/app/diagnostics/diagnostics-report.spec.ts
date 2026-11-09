@@ -78,9 +78,9 @@ describe('mock diagnostics report', () => {
     const { backend } = setup();
     const { report } = await backend.diagnosticsReport();
     expect(report?.name).toBe('debrief-diagnostics-sample.zip');
-    expect(report?.processes.map((p) => p.kind)).toEqual(expect.arrayContaining(['ai-worker', 'llama-server', 'plugin']));
-    const llama = report?.processes.find((p) => p.name === 'llama-server');
-    expect([llama?.state, llama?.restarts, llama?.lastExit]).toEqual(['crashed', 1, 'exit code 3']);
+    expect(report?.processes.map((p) => p.kind)).toEqual(expect.arrayContaining(['store-worker', 'plugin-host', 'plugin']));
+    const host = report?.processes.find((p) => p.name === 'plugin-host');
+    expect([host?.state, host?.restarts, host?.lastExit]).toEqual(['crashed', 1, 'exit code 3']);
     expect(report?.processes.some((p) => p.state === 'quarantined' && p.quarantined)).toBe(true);
     const id = report?.snapshots[0]?.id ?? '';
     expect(await backend.diagnosticsReportImage(id)).toBe(SAMPLE_REPORT_IMAGE);
@@ -96,7 +96,7 @@ describe('mock diagnostics report', () => {
   it('lists the new report files in the preview', async () => {
     const { backend } = setup([]);
     const names = (await backend.reportPreview('')).entries.map((e) => e.name);
-    expect(names).toEqual(expect.arrayContaining(['manifest.json', 'processes.json', 'session-recovery.json', 'logs/children/ai-worker.log', 'logs/children/llama-server.log', 'logs/debrief.log']));
+    expect(names).toEqual(expect.arrayContaining(['manifest.json', 'processes.json', 'session-recovery.json', 'logs/children/store-worker.log', 'logs/children/plugin-host.log', 'logs/debrief.log']));
   });
 
   it('is created by createSnapshotBackend with a lazy workspace lookup', async () => {

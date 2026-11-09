@@ -43,7 +43,7 @@ function slowJobs() {
     wait: vi.fn(() => new Promise<JobOutcome>((r) => (end = r))),
     unwait: vi.fn(async () => undefined),
     cancel: vi.fn(async () => undefined),
-    list: vi.fn(async () => ({ jobs: [], paused: [] })),
+    list: vi.fn(async () => ({ jobs: [] })),
     onChange: vi.fn(async () => () => undefined),
   };
   const outcome = (state: JobOutcome['state'], extra: Partial<JobOutcome> = {}): JobOutcome => ({ id: 41, state, result: null, error: null, message: null, ...extra });

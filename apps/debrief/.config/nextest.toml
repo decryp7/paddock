@@ -32,9 +32,7 @@ slow-timeout = { period = "30s", terminate-after = 10 }
 
 [[profile.default.overrides]]
 filter = '''
-    (package(debrief-ai) & binary(it) & test(/^worker::/))
-    | (package(debrief-ai-worker) & binary(it) & test(/^server_backend::/))
-    | (package(debrief-ipc) & binary(it) & (test(/^launch::/) | test(/^child_log::/)))
+    (package(debrief-ipc) & binary(it) & (test(/^launch::/) | test(/^child_log::/)))
     | (package(debrief-plugin-host) & binary(it) & test(/^remote::/))
     | (package(debrief-plugins) & kind(test))
     | (package(debrief-plugin-windows) & test(eventlog::follower::))

@@ -266,8 +266,8 @@ mod tests {
     use super::*;
     use crate::assistant::AssistantConfig;
     use crate::llm::{Reply, ScriptedProvider};
-    use crate::vision::image::{sanitize, testing::screenshot_png, ImageLimits, DEFAULT_TARGET_PIXELS};
     use debrief_core::related::{Reason, RelatedEvent, RelatedLink};
+    use debrief_image::{sanitize, testing::screenshot_png, ImageLimits, DEFAULT_TARGET_PIXELS};
     use serde_json::json;
 
     fn image() -> ImageInput {

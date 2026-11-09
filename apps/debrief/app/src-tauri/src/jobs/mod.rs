@@ -70,7 +70,6 @@ pub fn wire<R: Runtime>(app: &AppHandle<R>, jobs: &Jobs) {
             crate::store_pane::ordering_job_finished(&handle, &f.job);
             finished(&handle, f)
         }
-        JobsEvent::Paused { kind, reason } => paused(&handle, *kind, reason),
     });
 }
 
@@ -78,7 +77,7 @@ pub fn wire<R: Runtime>(app: &AppHandle<R>, jobs: &Jobs) {
 type Sent = std::collections::HashMap<String, (u64, JobsSnapshot)>;
 
 /// What `debrief://jobs` carries: the window's jobs as a change of the last event (version `version`, the one
-/// before is `version - 1`): the jobs in their order by id, those new or changed in full, the paused queues.
+/// before is `version - 1`): the jobs in their order by id, those new or changed in full.
 /// A window that missed a version asks for the list again (`jobs_list`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -86,7 +85,6 @@ pub struct JobsDelta {
     pub version: u64,
     pub order: Vec<JobId>,
     pub changed: Vec<queue::JobInfo>,
-    pub paused: Vec<queue::PausedKind>,
 }
 
 /// The change from `prev` to `next` as version `version`; `None` when nothing changed (nothing is sent).
@@ -104,7 +102,6 @@ pub fn delta(prev: Option<&JobsSnapshot>, next: &JobsSnapshot, version: u64) -> 
         version,
         order: next.jobs.iter().map(|j| j.id).collect(),
         changed,
-        paused: next.paused.clone(),
     })
 }
 
@@ -265,16 +262,6 @@ fn finished<R: Runtime>(app: &AppHandle<R>, f: &Finished) {
         (_, false) => Some(NotificationKind::JobFailed),
     };
     crate::notification_centre::post(app, job.window(), notice, os);
-}
-
-/// A paused queue (the AI was quarantined): service health states it once (the Jobs pane shows the pause itself).
-fn paused<R: Runtime>(app: &AppHandle<R>, kind: JobKind, reason: &str) {
-    if kind != JobKind::Ai {
-        return;
-    }
-    if let Some(health) = app.try_state::<std::sync::Arc<crate::health::hub::Health>>() {
-        health.ai(crate::health::hub::AiHealth::Switched, Some(reason));
-    }
 }
 
 /// Runs `f` as a job and hands its value back to the awaiting command. Without the service (some tests)

@@ -1,6 +1,6 @@
 //! The AI part of a video (ADR 0033 §6): one request per kept frame with its video time, a clock reading on one
 //! frame for the alignment, and an explanation of a range of frames. The frame is a clean copy the engine made
-//! (`debrief_ai::vision::sanitize`); the text on the screen is untrusted data, so a description only ever becomes event
+//! (`debrief_image::sanitize`); the text on the screen is untrusted data, so a description only ever becomes event
 //! text and is clamped and flattened here.
 
 use crate::align::ClockReading;
@@ -8,7 +8,8 @@ use crate::error::{Result, VideoError};
 use crate::record::clean_text;
 use debrief_ai::assistant::Assistant;
 use debrief_ai::llm::{ImageInput, LlmProvider};
-use debrief_ai::vision::{sanitize, ImageLimits, MAX_IMAGES_PER_REQUEST};
+use debrief_ai::vision::MAX_IMAGES_PER_REQUEST;
+use debrief_image::{sanitize, ImageLimits};
 use std::path::Path;
 
 /// Pixels a frame is reduced to for the model (about 1.3 MP: enough to read a screen).
@@ -191,8 +192,8 @@ mod tests {
     use crate::error::AiUnavailable;
     use debrief_ai::assistant::AssistantConfig;
     use debrief_ai::llm::{Reply, ScriptedProvider};
-    use debrief_ai::vision::image::testing::screenshot_png;
     use debrief_ai::AiError;
+    use debrief_image::testing::screenshot_png;
     use serde_json::json;
 
     fn image() -> ImageInput {

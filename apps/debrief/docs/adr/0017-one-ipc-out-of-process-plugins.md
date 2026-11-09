@@ -1,6 +1,6 @@
 # 17. One IPC: framed postcard over a private local stream; plugins and workers only out of process
 
-- Status: accepted (2026-10-20)
+- Status: accepted (2026-10-20); amended by [ADR 0070](0070-pitwall-is-debriefs-only-ai-engine.md) (the AI worker, its endpoint and its protocol go)
 - Date: 2026-10-20
 - Supersedes: [ADR 0004](0004-stable-plugin-abi.md) (the protobuf/gRPC plugin contract and the C#/.NET SDK) and the
   transport part of [ADR 0002](0002-microkernel-and-process-isolation.md) ("Wire protocol for out-of-process
