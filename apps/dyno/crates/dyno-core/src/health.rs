@@ -2,9 +2,10 @@
 
 use crate::alarms::{Alarm, AlarmState};
 use crate::anomaly::Anomaly;
-use crate::facts::{DiskHealthStatus, SystemFacts};
+use crate::facts::{DiskHealthStatus, FactKind, SystemFacts};
 use crate::forecast::Forecast;
 use crate::metrics::{derive_pressure, percent, MemoryPressure, SystemSample};
+use crate::ports::PlatformError;
 use crate::startup::{ImpactRating, StartupEntry};
 use crate::time::Timestamp;
 use crate::units::{bytes, duration, storage};
@@ -63,6 +64,31 @@ pub struct HealthReason {
     pub since: Option<Timestamp>,
 }
 
+/// Why a scored fact is missing from the report. The engine decides it, never the UI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NotCheckedKind {
+    /// The read failed or was denied this time (for example "needs administrator rights").
+    CouldNotRead,
+    /// Dyno does not read this fact on this OS, by design.
+    NotReadHere,
+    /// Dyno will read this fact, but the reader for this OS does not exist yet (an interim adapter). The app treats it like
+    /// [`NotCheckedKind::CouldNotRead`]: a gap in the check, not a design choice.
+    NotReadYet,
+}
+
+/// A fact the score looks at that has no value, so the score says nothing about it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotChecked {
+    /// What was not checked, as short noun phrases ("Pending updates"); facts with the same kind and reason share one entry.
+    pub what: Vec<String>,
+    /// The reading's own sentence for why.
+    pub why: String,
+    /// Which of the two cases it is.
+    pub kind: NotCheckedKind,
+}
+
 /// The report.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -79,6 +105,49 @@ pub struct HealthReport {
     pub capped_by: Option<Severity>,
     /// Reasons: each active alarm first (most severe, then oldest), then performance reasons, biggest impact first.
     pub reasons: Vec<HealthReason>,
+    /// Scored facts that had no value, so an empty `reasons` is not an all-clear for them.
+    pub not_checked: Vec<NotChecked>,
+}
+
+/// The scored facts without a value, each with the kind the facts source declared for it; entries with the same kind and reason
+/// are merged into one.
+fn not_checked(facts: &SystemFacts) -> Vec<NotChecked> {
+    let kind_of = |kind: FactKind| {
+        if facts.not_read_here.contains(&kind) {
+            NotCheckedKind::NotReadHere
+        } else if facts.not_read_yet.contains(&kind) {
+            NotCheckedKind::NotReadYet
+        } else {
+            NotCheckedKind::CouldNotRead
+        }
+    };
+    let scored = [
+        (FactKind::Disks, "Disk health", facts.disks.unavailable_reason()),
+        (
+            FactKind::RestartPending,
+            "Restart needed",
+            facts.restart_pending.unavailable_reason(),
+        ),
+        (
+            FactKind::PendingUpdates,
+            "Pending updates",
+            facts.pending_updates.unavailable_reason(),
+        ),
+    ];
+    let mut out: Vec<NotChecked> = Vec::new();
+    for (kind, what, why) in scored {
+        let Some(why) = why else { continue };
+        let kind = kind_of(kind);
+        match out.iter_mut().find(|n| n.kind == kind && n.why == why) {
+            Some(n) => n.what.push(what.into()),
+            None => out.push(NotChecked {
+                what: vec![what.into()],
+                why: why.into(),
+                kind,
+            }),
+        }
+    }
+    out
 }
 
 /// Everything the score looks at.
@@ -103,6 +172,8 @@ pub struct HealthInput<'a> {
     pub lifespans: &'a [crate::lifespan::LifeForecast],
     /// The alarm list; those in [`AlarmState::Active`] (condition holds, not acknowledged, not shelved) cap the score.
     pub alarms: &'a [Alarm],
+    /// Why the startup list could not be read (so `startup` is empty for that reason, not because nothing starts).
+    pub startup_unread: Option<&'a PlatformError>,
 }
 
 /// The band an active alarm of `severity` caps the score at, if any (Info does not cap).
@@ -364,6 +435,21 @@ pub fn assess(i: &HealthInput<'_>) -> HealthReport {
         performance_score,
         capped_by,
         reasons,
+        not_checked: {
+            let mut gaps = not_checked(i.facts);
+            if let Some(e) = i.startup_unread {
+                let kind = match e {
+                    PlatformError::Unsupported(_) => NotCheckedKind::NotReadYet,
+                    _ => NotCheckedKind::CouldNotRead,
+                };
+                gaps.push(NotChecked {
+                    what: vec!["Startup items".into()],
+                    why: e.to_string(),
+                    kind,
+                });
+            }
+            gaps
+        },
     }
 }
 
@@ -395,7 +481,86 @@ mod tests {
             crashes_7d: crashes,
             lifespans: &[],
             alarms: &[],
+            startup_unread: None,
         })
+    }
+
+    #[test]
+    fn unknown_facts_are_listed_once_as_not_checked_and_the_score_stays() {
+        let r = run(&sample(0), &SystemFacts::unknown("w"), &[], &[], 0, &[]);
+        assert_eq!(r.score, 100, "the score is unchanged: a gap is said, not guessed");
+        assert_eq!(
+            r.not_checked,
+            [NotChecked {
+                what: vec!["Disk health".into(), "Restart needed".into(), "Pending updates".into()],
+                why: "Not checked yet".into(),
+                kind: NotCheckedKind::CouldNotRead,
+            }],
+            "the same reason is one entry"
+        );
+    }
+
+    #[test]
+    fn a_fact_the_source_declares_not_read_here_is_told_apart_from_one_that_failed() {
+        let mut f = SystemFacts::unknown("w");
+        f.declare_not_read_here(FactKind::PendingUpdates, "Dyno does not check for updates");
+        f.declare_not_read_here(FactKind::BackgroundApps, "No such list");
+        let r = run(&sample(0), &f, &[], &[], 0, &[]);
+        let kind = |what: &str| r.not_checked.iter().find(|n| n.what.iter().any(|w| w == what)).map(|n| n.kind);
+        assert_eq!(kind("Pending updates"), Some(NotCheckedKind::NotReadHere));
+        assert_eq!(kind("Disk health"), Some(NotCheckedKind::CouldNotRead));
+        assert_eq!(r.not_checked.len(), 2, "a fact Dyno does not score is never listed");
+    }
+
+    #[test]
+    fn an_interim_adapter_that_reads_nothing_is_not_read_yet_not_by_design() {
+        let f = crate::facts::fixtures::all_not_read_yet("Dyno does not check this on Windows yet.");
+        let r = run(&sample(0), &f, &[], &[], 0, &[]);
+        assert_eq!(r.score, 100);
+        assert_eq!(r.not_checked.len(), 1, "identical reasons merge");
+        assert_eq!(r.not_checked[0].kind, NotCheckedKind::NotReadYet);
+        assert_eq!(r.not_checked[0].what.len(), 3);
+    }
+
+    #[test]
+    fn startup_items_that_could_not_be_listed_are_a_gap_not_a_silent_absence() {
+        let i = |e: &PlatformError| {
+            let facts = SystemFacts::unknown("w");
+            let s = sample(0);
+            assess(&HealthInput {
+                now: Timestamp(1),
+                sample: &s,
+                facts: &facts,
+                system_disk: "C:",
+                forecasts: &[],
+                startup: &[],
+                anomalies: &[],
+                crashes_7d: 0,
+                lifespans: &[],
+                alarms: &[],
+                startup_unread: Some(e),
+            })
+            .not_checked
+            .into_iter()
+            .find(|n| n.what == ["Startup items"])
+            .map(|n| (n.kind, n.why))
+        };
+        let yet = i(&PlatformError::Unsupported("Dyno does not read Windows startup items yet.".into()));
+        assert_eq!(
+            yet,
+            Some((NotCheckedKind::NotReadYet, "Dyno does not read Windows startup items yet.".into()))
+        );
+        let failed = i(&PlatformError::AccessDenied("denied".into()));
+        assert_eq!(failed, Some((NotCheckedKind::CouldNotRead, "denied".into())));
+    }
+
+    #[test]
+    fn facts_with_values_are_not_listed() {
+        let mut f = SystemFacts::unknown("w");
+        f.disks = Reading::Available(vec![]);
+        f.restart_pending = Reading::Available(false);
+        f.pending_updates = Reading::Available(0);
+        assert!(run(&sample(0), &f, &[], &[], 0, &[]).not_checked.is_empty());
     }
 
     #[test]
@@ -555,6 +720,7 @@ mod tests {
                 crashes_7d: 0,
                 lifespans: l,
                 alarms: &[],
+                startup_unread: None,
             })
         };
         assert_eq!(run(&[ssd.clone()]).score, 100, "a low-confidence hint costs nothing");
@@ -614,6 +780,7 @@ mod tests {
             crashes_7d: 0,
             lifespans: &[],
             alarms,
+            startup_unread: None,
         })
     }
 

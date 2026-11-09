@@ -25,6 +25,14 @@ impl<T> Reading<T> {
         }
     }
 
+    /// Why there is no value, if there is none.
+    pub fn unavailable_reason(&self) -> Option<&str> {
+        match self {
+            Reading::Available(_) => None,
+            Reading::Unavailable(r) => Some(r),
+        }
+    }
+
     /// An unavailable reading with this reason.
     pub fn unavailable(reason: impl Into<String>) -> Self {
         Reading::Unavailable(reason.into())

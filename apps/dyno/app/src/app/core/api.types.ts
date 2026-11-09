@@ -711,6 +711,20 @@ export interface HealthReason {
   since: Timestamp | null;
 }
 
+/**
+ * Why a scored fact is missing: the read failed this time (`couldNotRead`), Dyno does not read it on this OS by design
+ * (`notReadHere`), or its reader does not exist yet (`notReadYet`, treated like `couldNotRead`). The engine decides.
+ */
+export type NotCheckedKind = 'couldNotRead' | 'notReadHere' | 'notReadYet';
+
+export interface NotChecked {
+  /** Short noun phrases, e.g. ["Pending updates"]; facts with the same kind and reason share one entry. */
+  what: string[];
+  /** The reading's own sentence. */
+  why: string;
+  kind: NotCheckedKind;
+}
+
 export interface HealthReport {
   at: Timestamp;
   /** The score after active alarms cap it. */
@@ -721,6 +735,8 @@ export interface HealthReport {
   /** Set when an active alarm of this severity lowered the score (warning caps at Fair, critical at Poor). */
   cappedBy: Severity | null;
   reasons: HealthReason[];
+  /** Scored facts without a value: an empty `reasons` is no all-clear for them. */
+  notChecked: NotChecked[];
 }
 
 export type StartupLocation =

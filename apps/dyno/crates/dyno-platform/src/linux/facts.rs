@@ -7,7 +7,7 @@ use super::tools::Tools;
 use crate::dev_folders::{scan, ScanLimits};
 use crate::parse::linux_proc::os_pretty_name;
 use crate::parse::linux_tools::{boot_secs, cpufreq_plan, power_profile};
-use dyno_core::facts::SystemFacts;
+use dyno_core::facts::{FactKind, SystemFacts};
 use dyno_core::metrics::Reading;
 use dyno_core::ports::FactsSource;
 use std::path::PathBuf;
@@ -70,13 +70,14 @@ impl LinuxFacts {
         }
     }
 
-    fn restart_pending(&self) -> Reading<bool> {
+    /// `None` when this distribution leaves no restart-required marker: not a failed read, so the caller declares it by design.
+    fn restart_pending(&self) -> Option<bool> {
         if self.files.reboot_marker.exists() {
-            Reading::Available(true)
+            Some(true)
         } else if self.files.dpkg_dir.exists() {
-            Reading::Available(false)
+            Some(false)
         } else {
-            Reading::unavailable("This distribution leaves no restart-required marker to check")
+            None
         }
     }
 
@@ -97,13 +98,24 @@ impl FactsSource for LinuxFacts {
             .and_then(|t| os_pretty_name(&t))
             .unwrap_or_else(|| "Linux".to_string());
         let mut facts = SystemFacts::unknown(os);
-        facts.disks = Reading::unavailable("Disk health (SMART) needs smartctl and administrator rights; Dyno doesn't run it");
-        facts.restart_pending = self.restart_pending();
-        facts.pending_updates =
-            Reading::unavailable("Pending updates aren't checked: that would need the package manager to refresh its lists");
+        facts.declare_not_read_here(
+            FactKind::Disks,
+            "Disk health (SMART) needs smartctl and administrator rights; Dyno doesn't run it",
+        );
+        match self.restart_pending() {
+            Some(pending) => facts.restart_pending = Reading::Available(pending),
+            None => facts.declare_not_read_here(
+                FactKind::RestartPending,
+                "This distribution leaves no restart-required marker to check",
+            ),
+        }
+        facts.declare_not_read_here(
+            FactKind::PendingUpdates,
+            "Pending updates aren't checked: that would need the package manager to refresh its lists",
+        );
         facts.power_plan = self.power_plan();
-        facts.visual_effects_full = Reading::unavailable("Desktop effects are set per desktop environment");
-        facts.background_apps = Reading::unavailable("Linux has no background-apps list");
+        facts.declare_not_read_here(FactKind::VisualEffects, "Desktop effects are set per desktop environment");
+        facts.declare_not_read_here(FactKind::BackgroundApps, "Linux has no background-apps list");
         facts.last_boot_secs = self.last_boot();
         if let Some(home) = &self.files.home {
             facts.dev_folders = scan(home, ScanLimits::default());
@@ -164,6 +176,16 @@ mod tests {
         ] {
             assert!(unavailable);
         }
+        assert_eq!(
+            f.not_read_here,
+            [
+                FactKind::Disks,
+                FactKind::PendingUpdates,
+                FactKind::VisualEffects,
+                FactKind::BackgroundApps
+            ],
+            "what Linux never reads, by design; the restart marker was read here"
+        );
         // Nothing heavy is ever run.
         assert_eq!(tools.calls(), ["powerprofilesctl get", "systemd-analyze time"]);
     }
@@ -176,6 +198,10 @@ mod tests {
         assert_eq!(f.os, "Linux");
         assert!(f.power_plan.value().unwrap().power_saver);
         assert_eq!(f.restart_pending.value(), None, "no dpkg and no marker: unknown, not false");
+        assert!(
+            f.not_read_here.contains(&FactKind::RestartPending),
+            "a distribution without the marker is by design, not a failed read"
+        );
         assert!(matches!(&f.last_boot_secs, Reading::Unavailable(m) if m.contains("systemd-analyze")));
         assert!(f.dev_folders.is_empty());
         std::fs::create_dir_all(d.path().join("var/lib/dpkg")).unwrap();

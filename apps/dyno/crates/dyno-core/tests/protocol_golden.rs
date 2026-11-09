@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-//! The positional postcard bytes of the job snapshot inside `Message::Job` (protocol 7). A change to these bytes is a new
+//! The positional postcard bytes of the job snapshot inside `Message::Job` (protocol 7, unchanged in 8; the health report is pinned in `health_wire.rs`). A change to these bytes is a new
 //! `PROTOCOL_VERSION`: the protocol is postcard, so an older peer reads a changed layout wrongly. Update the expected bytes
 //! only together with the version bump and its entry in the doc list at the top of `protocol.rs`.
 
@@ -29,8 +29,11 @@ fn bytes(state: WireState) -> Vec<u8> {
 }
 
 #[test]
-fn the_protocol_version_is_7_since_failed_carries_its_limit() {
-    assert_eq!(PROTOCOL_VERSION, 7, "WireState::Failed became {{ message, limit }} in 7");
+fn the_protocol_version_is_8_since_health_lists_what_it_did_not_check() {
+    assert_eq!(
+        PROTOCOL_VERSION, 8,
+        "WireState::Failed became {{ message, limit }} in 7; HealthReport gained not_checked in 8"
+    );
 }
 
 #[test]
