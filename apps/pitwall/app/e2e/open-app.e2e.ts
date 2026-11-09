@@ -1,0 +1,19 @@
+import { expect, test } from '@playwright/test';
+import { openApp } from './app';
+
+// ci.yml run 7854 (job 34010): a11y.e2e.ts "apps" failed in openApp with only "locator('h1') element(s) not found". The trace
+// showed why: one module of the Apps page (the dev server's pre-bundled @angular/material/radio) got no answer, so the
+// lazy page never loaded and the shell kept its "Loading Apps & keys" placeholder. A screen that does not render must say
+// which requests it is still waiting for (ER-27), so the next occurrence names its cause in the test report.
+test('a page that never renders names the module requests that got no answer', async ({ page }) => {
+  // Held, never answered: the request stays open as the stalled one did.
+  await page.route('**/*material_radio*', () => undefined);
+  const failure = await openApp(page, '/apps').then(
+    () => null,
+    (e: unknown) => (e instanceof Error ? e.message : String(e)),
+  );
+  expect(failure, 'openApp resolved although the Apps page could not load').not.toBeNull();
+  expect(failure).toContain('no answer');
+  expect(failure).toMatch(/material_radio/);
+  await expect(page.getByRole('status', { name: 'Loading Apps & keys' })).toBeVisible();
+});
