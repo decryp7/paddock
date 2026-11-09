@@ -1499,3 +1499,7 @@ A redaction default in a shared crate was widened for one app's problem report. 
 ## Gitea tokens cannot mint narrower tokens, and agents must not create bot users (2026-11-08)
 
 An agent looking for a narrower CI token found that a Gitea token cannot create a token with fewer rights, and the only other route was creating a bot user. Agents must not create users. The user creates scoped CI tokens (one per purpose, least privilege) and the agent is given the one it needs; if none exists, the agent stops and asks.
+
+## Local checks overlap with CI (2026-11-09)
+
+Serial local-then-CI added a full local cycle to every landing, while CI found nothing the local checks could not. Fast static gates now run first and in parallel; CI is dispatched and the slower local checks (affected tests, the `train3-linux-dev:1` container, load runs) run alongside. A local failure cancels the CI run at once and everything is fixed in one push (rule 50h, ER-9).
