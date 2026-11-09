@@ -156,12 +156,15 @@ impl Serving {
     }
 
     fn shutdown(&mut self) {
+        // Runs once: `stop` and then `Drop` both come here, and a second wake connection would go to a port this listener
+        // no longer holds (another process may hold it by then; on Windows a refused loopback connect retries for 2 s).
+        let Some(accept) = self.accept.take() else {
+            return;
+        };
         self.stop.store(true, Ordering::SeqCst);
-        // A blocking accept is woken by connecting to it.
+        // A blocking accept is woken by connecting to it; the accept thread still holds the listener here.
         let _ = TcpStream::connect(self.addr);
-        if let Some(a) = self.accept.take() {
-            let _ = a.join();
-        }
+        let _ = accept.join();
         let conns = std::mem::take(
             &mut *self
                 .conns
@@ -758,6 +761,34 @@ mod tests {
             .map_while(Result::ok)
             .collect();
         (s, lines)
+    }
+
+    /// Stopping wakes the accept with one connection to the listener's own address, and only while the listener is still
+    /// open. `stop` used to run the shutdown a second time from `Drop`, whose wake connection went to the closed port: on
+    /// Windows a refused loopback connect is retried for about 2 s (every listener stop took 2 s there, CI run 7810), and a
+    /// process that had meanwhile taken the port got a stranger's connection.
+    #[test]
+    fn a_stopped_listener_never_connects_to_its_old_port_again() {
+        let serving = serve_loopback(
+            test_server(),
+            Arc::new(crate::keys::KeyStore::new()),
+            TcpListener::bind("127.0.0.1:0").unwrap(),
+            4,
+        )
+        .unwrap();
+        let addr = serving.addr();
+        let mut serving = serving;
+        serving.shutdown();
+        // Whoever binds the freed port next (here the test) must not be reached by this listener's stop.
+        let next_owner =
+            TcpListener::bind(addr).expect("the stopped listener's port is free again");
+        next_owner.set_nonblocking(true).unwrap();
+        drop(serving);
+        let reached = next_owner.accept();
+        assert!(
+            matches!(&reached, Err(e) if e.kind() == io::ErrorKind::WouldBlock),
+            "the stop of a stopped listener connected to its old port: {reached:?}"
+        );
     }
 
     #[test]
