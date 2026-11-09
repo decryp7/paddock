@@ -32,3 +32,6 @@ crates/*/fixtures/** -text
 # byte with a render): LF on every checkout. A Windows checkout with CRLF broke `#!/bin/sh\r` and the unit comparison in CI (run 7494).
 /apps/*/app/src-tauri/linux/** text eol=lf
 /apps/*/app/src-tauri/macos/*.plist text eol=lf
+
+# Generated TypeScript goldens are compared with the generator output: LF on every checkout (a CRLF checkout failed paddock-limits on Windows, run 7706).
+crates/*/tests/golden/** text eol=lf
