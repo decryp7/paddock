@@ -593,10 +593,26 @@ test('stable-workspace never copies the checkout to another volume: it says why 
   const r = runStableWorkspace('macOS', root, { PATH: `${bin}:/usr/bin:/bin` });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /::warning::stable-workspace: the work folder .* is on another volume than .*decryp7_paddock-crate-s1/);
-  assert.match(r.stdout, /workdir_parent/, 'the warning names the runner setting that fixes it');
+  assert.match(r.stdout, /host\.workdir_parent/, 'the warning names the runner setting that fixes it (host mode, not container)');
   assert.doesNotMatch(r.stdout + r.stderr, /must not run/);
   assert.ok(!lstatSync(join(root, 'work', 'abc', 'hostexecutor')).isSymbolicLink(), 'the checkout stays where it was');
   assert.ok(!existsSync(join(root, 'github-env')) || !/PADDOCK_WORKSPACE/.test(readFileSync(join(root, 'github-env'), 'utf8')), 'later steps build in the work folder');
+});
+
+// Review of c2179dba0: when stat cannot read either folder, both device numbers are empty and compared equal, so the step
+// went on to `mv`. A volume that cannot be read is unknown: build in place, never risk the copy.
+test('stable-workspace builds in place when it cannot tell the volumes', () => {
+  const root = stableFixture();
+  const bin = join(root, 'bin');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'stat'), '#!/bin/sh\necho "stat: not available here" >&2\nexit 1\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'mv'), '#!/bin/sh\necho "mv must not run" >&2\nexit 1\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'git'), '#!/bin/sh\necho "git must not run" >&2\nexit 1\n', { mode: 0o755 });
+  const r = runStableWorkspace('macOS', root, { PATH: `${bin}:/usr/bin:/bin` });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /::warning::stable-workspace: .*could not be read/);
+  assert.doesNotMatch(r.stdout + r.stderr, /must not run/);
+  assert.ok(!lstatSync(join(root, 'work', 'abc', 'hostexecutor')).isSymbolicLink(), 'the checkout stays where it was');
 });
 
 test('stable-workspace logs the duration of the phases of a successful move', () => {
