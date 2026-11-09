@@ -54,8 +54,8 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   workflows that use it, following scripts that import or name it (imports built at run time are not seen), reusable
   workflows to their callers, and ignoring mentions in comments and README prose; an action nobody uses marks everything.
   `--files` means working tree against HEAD: a committed change cannot be diffed, so it marks everything. Users that run only
-  nightly, on a tag or manually are named as such in `--explain`; `e2e-webkit` never runs on a pull request. The Rust port
-  in `tools/paddock-dev` keeps `.gitea/` and `conformance/(ci|release|src/util)/` global (a superset of the script).
+  nightly, on a tag or manually are named as such in `--explain`; `e2e-webkit` never runs on a pull request. `./dev plan`
+  (`tools/paddock-dev`) narrows the same way and answers the same plan; its golden test compares it with the script.
 - **Ownership.** [CODEOWNERS](CODEOWNERS) (Go regular expressions, Gitea's syntax) says who owns which paths; a brief
   names the paths its task owns. Shared integration points (`crates/*/src/lib.rs`, `crates/Cargo.toml`, `public-api.ts`,
   `_tokens.scss`, the root `package.json`, `.gitea/`, `renovate.json`, `CODEOWNERS`) are changed by the integrating agent
