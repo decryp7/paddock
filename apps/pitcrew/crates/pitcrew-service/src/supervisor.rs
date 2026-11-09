@@ -2029,28 +2029,63 @@ struct Adopted {
     pid: u32,
 }
 
+/// Whether the adopted runner `pid` has ended (`Some(None)`: gone, its code unknown) or still runs (`None`). Unknown counts
+/// as still running: an adopted runner is never reported as exited because the process table could not be read. That
+/// failure is permanent and this runs every tick, so it is logged once.
+fn adopted_exit(pid: u32, make: impl FnOnce() -> Result<sysinfo::System, sysinfo::Error>) -> Option<Option<i32>> {
+    static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let Ok(mut sys) = make().inspect_err(|why| warn_once(&WARNED, pid, why)) else {
+        return None;
+    };
+    let id = sysinfo::Pid::from_u32(pid);
+    sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[id]), true);
+    if sys.process(id).is_some() {
+        None
+    } else {
+        Some(None)
+    }
+}
+
+/// Logs the unreadable process table on the first call on `flag` only; returns whether it logged.
+fn warn_once(flag: &std::sync::atomic::AtomicBool, pid: u32, why: &sysinfo::Error) -> bool {
+    let first = !flag.swap(true, std::sync::atomic::Ordering::Relaxed);
+    if first {
+        eprintln!(
+            "pitcrew-service: warning: the OS process table is unavailable (sysinfo): {why}; adopted runners (pid {pid}) are assumed running (logged once)"
+        );
+    }
+    first
+}
+
+#[cfg(test)]
+mod adopted_tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn an_unreadable_process_table_leaves_an_adopted_runner_running_and_warns_once() {
+        assert_eq!(adopted_exit(std::process::id(), || Err(sysinfo::Error::Unsupported)), None);
+        let flag = AtomicBool::new(false);
+        let why = sysinfo::Error::Unsupported;
+        assert!(warn_once(&flag, 1, &why));
+        assert!(!warn_once(&flag, 1, &why));
+        assert!(!warn_once(&flag, 2, &why));
+    }
+
+    #[test]
+    fn a_readable_table_says_whether_the_runner_is_there() {
+        assert_eq!(adopted_exit(std::process::id(), sysinfo::System::new), None);
+        assert_eq!(adopted_exit(u32::MAX - 1, sysinfo::System::new), Some(None));
+    }
+}
+
 impl RunnerProcess for Adopted {
     fn pid(&self) -> u32 {
         self.pid
     }
 
     fn try_wait(&mut self) -> Option<Option<i32>> {
-        // Unknown counts as still running: an adopted runner is never reported as exited because the table could not be read.
-        let Ok(mut sys) = sysinfo::System::new().inspect_err(|why| {
-            eprintln!(
-                "pitcrew-service: warning: the OS process table is unavailable (sysinfo): {why}; pid {} is assumed running",
-                self.pid
-            )
-        }) else {
-            return None;
-        };
-        let pid = sysinfo::Pid::from_u32(self.pid);
-        sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
-        if sys.process(pid).is_some() {
-            None
-        } else {
-            Some(None)
-        }
+        adopted_exit(self.pid, sysinfo::System::new)
     }
 
     fn stop_gracefully(&mut self) -> Result<(), String> {

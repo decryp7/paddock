@@ -119,16 +119,32 @@ pub fn terminate(id: paddock_proc::ProcessId, force: bool) {
 
 /// Whether a process id is alive.
 pub fn pid_alive(pid: u32) -> bool {
-    // Unknown counts as alive: a process is never declared gone because the process table could not be read.
-    let Ok(mut s) = sysinfo::System::new()
-        .inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; pid {pid} is assumed alive"))
-    else {
+    pid_alive_with(pid, sysinfo::System::new)
+}
+
+/// [`pid_alive`] over a constructor of the sysinfo `System`. Unknown counts as alive: a process is never declared gone
+/// because the process table could not be read. That failure is permanent and the release loop asks every 50 ms, so it is
+/// logged once.
+fn pid_alive_with(pid: u32, make: impl FnOnce() -> Result<sysinfo::System, sysinfo::Error>) -> bool {
+    static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let Ok(mut s) = make().inspect_err(|why| {
+        warn_table_once(&WARNED, why);
+    }) else {
         return true;
     };
     let p = sysinfo::Pid::from_u32(pid);
     s.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[p]), false);
     // A child that exited but was not reaped yet (a zombie on Linux) is gone for our purposes.
     s.process(p).is_some_and(|proc| proc.status() != sysinfo::ProcessStatus::Zombie)
+}
+
+/// Logs the unreadable process table on the first call on `flag` only; returns whether it logged.
+fn warn_table_once(flag: &std::sync::atomic::AtomicBool, why: &sysinfo::Error) -> bool {
+    let first = !flag.swap(true, std::sync::atomic::Ordering::Relaxed);
+    if first {
+        log::warn!("the OS process table is unavailable (sysinfo): {why}; processes are assumed alive (logged once)");
+    }
+    first
 }
 
 #[cfg(test)]
@@ -140,6 +156,16 @@ mod tests {
         // The reader is the shared one (footprint, PSS); a fake gives a footprint far below the resident size.
         assert_eq!(memory_with(7, |pid| (pid == 7).then_some(535 << 20)), 535 << 20);
         assert_eq!(memory_with(8, |pid| (pid == 7).then_some(535 << 20)), 0);
+    }
+
+    #[test]
+    fn an_unreadable_process_table_counts_as_alive_and_warns_once() {
+        assert!(pid_alive_with(u32::MAX - 1, || Err(sysinfo::Error::Unsupported)));
+        assert!(!pid_alive_with(u32::MAX - 1, sysinfo::System::new));
+        let flag = std::sync::atomic::AtomicBool::new(false);
+        let why = sysinfo::Error::Unsupported;
+        assert!(warn_table_once(&flag, &why));
+        assert!(!warn_table_once(&flag, &why));
     }
 
     #[tokio::test]
