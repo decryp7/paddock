@@ -29,7 +29,7 @@ fail() {
 
 if [ "$(id -u)" = 0 ]; then
   command -v setpriv >/dev/null || fail "setpriv (util-linux) is missing, so the tests cannot run as uid $uid; install util-linux in the image"
-  as_user=(setpriv --reuid="$uid" --regid="$uid" --clear-groups --)
+  as_user=(setpriv --reuid="$uid" --regid="$uid" --clear-groups --no-new-privs --)
 else
   uid="$(id -u)"
   as_user=()
@@ -37,6 +37,7 @@ fi
 
 echo "Building the paddock-proc and paddock-chromium unit tests"
 build_log="$(mktemp)"
+trap 'rm -f "$build_log"' EXIT
 if ! cargo test --no-run --all-features -p paddock-proc -p paddock-chromium >"$build_log" 2>&1; then
   tail -n 40 "$build_log"
   fail "cargo test --no-run failed (output above); fix the build first"
@@ -48,17 +49,23 @@ chromium_bin="$(exe_of paddock_chromium)"
 [ -n "$proc_bin" ] && [ -n "$chromium_bin" ] || fail "the unit test binaries were not found in cargo's output; see $build_log"
 
 private="$(mktemp -d)"
-trap 'rm -rf "$private"' EXIT
+trap 'rm -rf "$private" "$build_log"' EXIT
 [ "${#as_user[@]}" -eq 0 ] || chown "$uid:$uid" "$private"
 chmod 700 "$private"
 
 run() {
   local bin="$1" filter="$2" started=$SECONDS code=0
-  local cmd=("${as_user[@]}" env "TMPDIR=$private" "HOME=$private" "$bin" "$filter")
+  local cmd=("${as_user[@]}" env "TMPDIR=$private" "HOME=$private" "PADDOCK_PROC_GUARDIAN_LOG=$private/guardian.log" "$bin" "$filter")
   echo "Running as uid $uid: ${cmd[*]}"
   "${cmd[@]}" || code=$?
   local took=$((SECONDS - started))
   if [ "$code" != 0 ]; then
+    if [ -f "$private/guardian.log" ]; then
+      echo "The guardian's log:"
+      cat "$private/guardian.log"
+    else
+      echo "The guardian wrote no log ($private/guardian.log)"
+    fi
     echo "| \`$filter\` | uid $uid | failed (exit $code) | ${took} s |" >>"$summary"
     fail "\`$filter\` failed as uid $uid (exit $code, ${took} s): ${cmd[*]}. Run the same command in the CI image to see it"
   fi
