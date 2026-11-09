@@ -279,7 +279,7 @@ test('checkout profiles: the bootstrap holds every path dependency, dev-dependen
     seen.add(dir);
     for (const m of read(join(PADDOCK, dir, 'Cargo.toml')).matchAll(/path\s*=\s*"([^"]+)"/g)) {
       const dep = join(dir, m[1]).split('\\').join('/');
-      if (dep.startsWith('crates/') || dep.startsWith('tools/')) walk(dep);
+      if ((dep.startsWith('crates/') || dep.startsWith('tools/')) && existsSync(join(PADDOCK, dep, 'Cargo.toml'))) walk(dep);
     }
   };
   walk('tools/paddock-dev');
@@ -319,6 +319,9 @@ test('checkout profiles: ci.yml\'s host jobs use the kept clone with a declared 
     assert.ok(clone, `${id}: uses the kept-clone action`);
     assert.match(clone.text, /if: runner\.os != 'Linux'/, `${id}: host runners only`);
     assert.ok(!/actions\/stable-workspace/.test(text), `${id}: the kept clone replaces stable-workspace`);
+    // Run 7816: a clone per job name made every job's clone new (14 to 36 s to create, 25 to 30 s to fill). A slot is held by one
+    // job at a time, so ONE clone per slot serves every job; the profile is re-applied each time.
+    assert.match(clone.text, /name: paddock-checkout-\$\{\{ runner\.os \}\}\n/, `${id}: the same kept clone for every job of the slot`);
     const profile = /profile: (\S+)/.exec(clone.text)?.[1];
     assert.ok(profiles.has(profile) || profile === 'full', `${id}: profile ${profile} is declared in checkout-profiles.txt`);
     const plain = steps.find((st) => /uses: actions\/checkout@v4/.test(st.text) && /if: runner\.os == 'Linux'/.test(st.text));

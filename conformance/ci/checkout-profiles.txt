@@ -21,6 +21,7 @@ bootstrap crates/paddock-cli
 bootstrap crates/paddock-proc
 bootstrap crates/paddock-repo-graph
 bootstrap crates/paddock-slots
+bootstrap crates/paddock-testkit
 bootstrap crates/paddock-workspace-hack
 
 exclude lean ui/docs/review review contact sheets (103 MiB), written by ui/e2e specs on Linux

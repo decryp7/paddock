@@ -429,6 +429,7 @@ jobs:
             crates/paddock-proc
             crates/paddock-repo-graph
             crates/paddock-slots
+            crates/paddock-testkit
             crates/paddock-workspace-hack
           filter: blob:none
 
@@ -467,7 +468,7 @@ jobs:
       - uses: ./.gitea/actions/kept-clone
         if: runner.os != 'Linux'
         with:
-          name: paddock-${{ github.job }}-${{ runner.os }}
+          name: paddock-checkout-${{ runner.os }}
           profile: lean
 
       # A build folder that outlives the job on the hosts (the work folder does not: it is hashed per job), crates/target in
@@ -637,6 +638,7 @@ jobs:
             crates/paddock-proc
             crates/paddock-repo-graph
             crates/paddock-slots
+            crates/paddock-testkit
             crates/paddock-workspace-hack
           filter: blob:none
 
@@ -657,7 +659,7 @@ jobs:
       - uses: ./.gitea/actions/kept-clone
         if: runner.os != 'Linux'
         with:
-          name: ${{ matrix.app }}-${{ github.job }}-${{ runner.os }}
+          name: paddock-checkout-${{ runner.os }}
           profile: lean
 
       # The workspace's .cargo/config.toml must include ci.toml (build-folder checks it): required of an app with host legs.
@@ -806,6 +808,7 @@ jobs:
             crates/paddock-proc
             crates/paddock-repo-graph
             crates/paddock-slots
+            crates/paddock-testkit
             crates/paddock-workspace-hack
           filter: blob:none
 
@@ -826,7 +829,7 @@ jobs:
       - uses: ./.gitea/actions/kept-clone
         if: runner.os != 'Linux'
         with:
-          name: paddock-${{ github.job }}-${{ runner.os }}
+          name: paddock-checkout-${{ runner.os }}
           profile: lean
 
       - uses: ./.gitea/actions/build-folder
