@@ -56,10 +56,6 @@ fn legs(plan: &Value, opts: MatrixOpts) -> Vec<Value> {
     matrix(plan, graph(), opts).unwrap()
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
-)]
 fn tracked() -> Vec<String> {
     let out = paddock_proc::command("git")
         .current_dir(root())
@@ -610,10 +606,6 @@ fn a_tags_gates_keep_one_app_both_halves_and_no_other_project() {
 
 // ----------------------------------------------------------------------------------------- the plan read from git
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
-)]
 fn sh(dir: &Path, args: &[&str]) -> String {
     let out = paddock_proc::command("git")
         .arg("-C")

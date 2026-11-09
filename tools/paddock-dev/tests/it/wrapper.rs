@@ -900,6 +900,10 @@ fn a_cached_tool_touched_in_the_last_minutes_is_never_pruned() {
     );
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (sh); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 #[test]
 fn print_binary_names_the_cached_tool_without_running_it() {
@@ -959,6 +963,10 @@ fn a_tool_used_two_hours_ago_is_kept_beyond_the_five_newest() {
     );
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (sh); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 #[test]
 fn print_binary_refuses_a_build_with_uncommitted_inputs() {
