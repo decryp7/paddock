@@ -1,7 +1,7 @@
 # 71. Ready or exit, never a fixed start budget: tests wait for a started program or page until it answers or ends, warm a fresh binary once, and C71 checks every start wait
 
-- Status: Proposed (2026-11-09), revision 2 after the independent review of revision 1 (verdict CHANGES, 2026-11-09).
-  Not accepted; nothing in "Work packages" except WP-0 (records only) starts before the user accepts (ER-21 step 7).
+- Status: Accepted 2026-11-09 by the user: D1–D6 as recommended. Revision 2 after the independent review of revision 1
+  (CHANGES) and its re-review (ACCEPTABLE, 2026-11-09), with the re-review's P2s applied.
 - Date: 2026-11-09
 - Related: ER-11 / rule 5 (failing test first), ER-12 (no raised timeouts or sleeps; flaky is red), ER-20 / rule 51
   (parallelism and cost), ER-21 / rule 40 (recurring bugs mean a missing design rule), ER-22 / rules 42-43 (share first,
@@ -43,14 +43,16 @@ On 2026-11-08 the macOS CI host went from one runner to three on one Mac. Within
 shared UI kit failed with one shape: a test started a program that had just been built (or opened a page in a cold
 browser) and gave up after a fixed number of polls or a fixed deadline.
 
-**What is confirmed (Pitwall).** The first start of a freshly linked binary on macOS waits for the system's check of that
+**What is confirmed by the fix's author (Pitwall).** The first start of a freshly linked binary on macOS waits for the system's check of that
 binary (`syspolicyd`; a stalled child was sampled in `_dyld_start` with 32 KB resident, using no CPU). With the binary
 copied to a new file before each iteration, the old test double (200 health polls 50 ms apart) left failure logs in 6
 and 3 iterations of two stress runs, both tests failing at 10.7-10.9 s; with the fix, 0 of 8 iterations failed while the
 same binary's first start took 0.49-10.08 s, and the slowest iteration only made the tests slower (37 s) [M3]. On CI, 10
 of the 12 `pitwall-cli` tests, each the first start of the fresh `pitwall` binary, ended within 57 ms of each other at
 16.8 s, against 1.4 s earlier the same day [M2]. Ruled out by the fix's author (commit `81c3ac92f`): a port collision, a
-leftover listener, CPU starvation alone, work before the fake engine starts.
+leftover listener, CPU starvation alone, work before the fake engine starts. The with-and-without comparison is the
+author's; no independent control run (the same stress script with and without re-creating the file, ER-28) is recorded
+yet, so "confirmed" here means confirmed by the fix's author until WP-0b records one.
 
 **What is measured about the check, and what is not.** A new program's first start costs about 100 times its second
 start even on a lightly loaded host (258-2,864 ms against 2.4-6.6 ms for a one-line program), and six different new
@@ -94,7 +96,9 @@ start.
 
 **Method.** The kinds of §4 were prototyped (`scan2.mjs`) and run over an extract of `b51c72509` (`apps`, `crates`,
 `tools`, `ui`, `scripts`); every hit was read in context. The prototype ignores waivers (none exist yet) and is a
-heuristic; the check itself (WP-3) is tested against fixtures and the history controls of §4.
+heuristic; the check itself (WP-3) is tested against fixtures and the history controls of §4. The per-kind waiver column
+is this author's reading; the re-review read two more sites as waivers, so the totals are given as about 15 waivers and
+about 84 migrations.
 
 | Kind | Hits | Of which waived or exempt (expected) | To migrate |
 |---|---|---|---|
@@ -104,7 +108,7 @@ heuristic; the check itself (WP-3) is tested against fixtures and the history co
 | R4 product start-window constructor in a test without its test form | 31 | 5: a program that does not exist (`debrief-ipc` `launch.rs:258`, `debrief-plugin-host` `builtins.rs:243`, `debrief-store-worker` `worker.rs:659`) and two constructions that start nothing (`dyno-plugin-host` `host.rs:555` on a fake launcher and clock, `debrief-ipc` `process.rs:663`) | 26 |
 | T1 a ready-marker selector outside the kit's `ready.ts` | 27 | 0 | 27 |
 | T2 counted attempts in a page-opening function | 0 | 0 | 0 |
-| **Total** | **99** | **13** | **86** |
+| **Total** | **99** | **about 15** | **about 84** |
 
 Revision 1 counted about 44 sites. Its kinds were not limited to starts, so they would have reached about 160 sites (the
 reviewer's scan); revision 2 limits R1, R3 and T2 to functions that start a process or open a page, adds R4 and the new T1,
@@ -116,7 +120,7 @@ first run):
 
 | # | Where | Instance | Status | Kind | Migration |
 |---|---|---|---|---|---|
-| 1 | `apps/pitwall/crates/pitwall-server/tests/common/mod.rs:476` | `ChildEngine::start`: `for _ in 0..200` `/health` polls 50 ms apart, blind to the child's exit | broken (job 32436; cause confirmed [M3]) | R1 | land `fix/pitwall-e2e-engine-health` as is; then move its loop and `runnable_server`'s warm-up onto the kit (WP-4a), keeping the double's `StartOutcome` recording |
+| 1 | `apps/pitwall/crates/pitwall-server/tests/common/mod.rs:476` | `ChildEngine::start`: `for _ in 0..200` `/health` polls 50 ms apart, blind to the child's exit | broken (job 32436; cause confirmed by the fix's author [M3]) | R1 | land `fix/pitwall-e2e-engine-health` as is; then move its loop and `runnable_server`'s warm-up onto the kit (WP-4a), keeping the double's `StartOutcome` recording |
 | 2 | `apps/debrief/crates/debrief-plugin-e2e/tests/it/store_worker.rs:49` and every `WorkerConfig::new`/`StoreWorker::new` in tests (`debrief-store-worker/tests/it/parity.rs`, `worker.rs`, the app's `health/commands/tests.rs`, `debrief-store-client` unit tests) | the product default `connect_window` 15 s (`debrief-ipc/src/process.rs:95`), which `WorkerConfig` cannot change | broken (job 32417; cause probable, not confirmed) | R4 | `WorkerConfig` gains `connect_window`; `WorkerConfig::for_tests(exe)` sets `UNTIL_CONNECTED` and the tests call `warm_first_start`. Failing test first: `assert_eq!(WorkerConfig::for_tests(WORKER).connect_window, UNTIL_CONNECTED)` (the form Debrief's `lib.rs:1116` uses for plugins) |
 | 3 | `ui/projects/paddock-e2e/src/shell.ts:267` (the `pd-dialog-shell` locator) and `:284` (`loaded()`) | the first wait on a new window inherits the 5 s expect timeout | broken (job 32097; cause not confirmed) | T1 | `loaded()` first awaits `readyWindow(page)`; the selector moves into `ready.ts`; the WebKit projects get `warmApp`. Failing test first: a kit unit test runs `loaded()` against a recording locator and `expect` seam and asserts its first wait has no time limit of its own (red today). A spec that reproduces a cold start needs real time and is not written (ADR 0041) |
 | 4 | `apps/debrief/crates/debrief-plugin-test/src/lib.rs:455`, `crates/paddock-plugin-test/src/fake.rs:224` | the plugin test harnesses set a 15 s connect window and a 30 s start timeout for every plugin under test | at risk | R2 | `UNTIL_CONNECTED` (or the kit's test `Patience`) and `warm_first_start` before a program's first launch |
@@ -156,14 +160,18 @@ or exit" (rule 55, ER-22):
 - **`wait_ready_or_exit(child, what, probe) -> StartOutcome<T>`**: returns `StartOutcome::Ready(T)` as soon as `probe`
   gives `Some(T)`, or `StartOutcome::Exited(ExitInfo)` (status and stderr tail, `paddock_proc::ExitInfo`) as soon as the
   child has ended. It drives `paddock_proc::StartWatch` with:
-  - a test `Patience` whose spin and idle bounds equal the guard (so the judge never calls a start stuck before the
-    guard), while the probe reports `Cpu::NotRead` in each `Reading` (no CPU-time reads in tests);
+  - readings with `Cpu::NotRead` (the probe reads no CPU time in tests). With such readings the judge cannot judge spin
+    or idle: it counts the wait as blind and reports `Stalled(Hung)` once `Patience::hang_guard` worth of ticks has
+    passed. The test `Patience` therefore sets `hang_guard` (and `spin`, `idle`) above the wall guard, so that only the
+    `DeadlinePace` below ends a wait. A `Stalled(Paused)` (the child is stopped by the OS) is not an end either: the
+    kit calls `wait` again, and the wall deadline keeps running;
   - a **wall-clock** `Pace` (`DeadlinePace`): it waits `wait.rs`'s backoff (200 µs doubling to 20 ms), and its `wait`
     returns `false` once `HANG_GUARD` has passed on the wall clock since the wait began, so the judge's tick counting
     (which counts a paused host as one tick, ADR 0031 §2) cannot stretch the guard past nextest's kill;
   - its own progress note: the kit prints "<what> (pid N) is still starting after N s" every 10 s of wall time (the
     judge's `note_after` fires once, so the kit does not rely on it).
-  `Watched::Cancelled` from the `DeadlinePace` is reported as a hang: a panic with the pid, whether the process is alive,
+  `Watched::Cancelled` from the `DeadlinePace` (and any `Stalled` other than `Paused`, should one come first) is reported
+  as a hang: a panic with the pid, whether the process is alive,
   a zombie or paused (`paddock_proc::run_state`), the last probe result and the stderr tail, worded "never became ready
   or ended", never as a slow start.
 - **`wait_exit(child, what) -> ExitInfo`**: the same loop with no ready probe, for a test that waits for a child it
@@ -204,8 +212,9 @@ or exit" (rule 55, ER-22):
     duration as an annotation and in the log, and closes the page. A cold browser and a cold bundle are paid there,
     not inside a test's 5 s assertion.
 - **Guard floor.** A project that uses `readyWindow` or `warmApp` has a test timeout of at least 40 s, so the guard is
-  never below `HANG_GUARD`. Pitwall's Playwright config sets no test timeout (Playwright's default, 30 s) and gets one
-  (WP-2); Dyno's is 60 s, Debrief's 60 s on CI, the kit's `config.ts` default 60 s.
+  never below `HANG_GUARD`. Pitwall's Playwright config sets no test timeout (Playwright's default, 30 s) and gets 60 s
+  (WP-2); Debrief's is 60 s on CI but 30 s locally (`CI ? 60_000 : 30_000`) and gets 60 s locally too, so the floor
+  holds in local runs and not only on CI (WP-2); Dyno's is 60 s, the kit's `config.ts` default 60 s.
 - Unit tests in the kit (`*.test.ts`) and a selftest spec whose page sets its ready marker only when the spec releases
   it (the TypeScript twin of `--ready-when`).
 - `pointInShape` (`svg.ts`) is not a start; it moves to `expect.poll` under ADR 0041, not this ADR.
@@ -266,7 +275,7 @@ out: `paddock-ipc`'s handshake bound starts after the client is already running 
 C51's report for ADR 0031's migration; they are not changed by this ADR (D4).
 
 **Errors from day one, only for the start kinds.** R1-R4 and T1-T2 as defined here are errors from the day they land,
-in the same change as the 86 migrations and 13 waivers above, so `conformance/baselines/C71.json` gains no entry.
+in the same change as the about 84 migrations and about 15 waivers above, so `conformance/baselines/C71.json` gains no entry.
 Fixed-count polls that are not starts stay where ADR 0041 put them: C71's existing kinds and its shrink-only ratchet,
 migrated by ADR 0041's WP-6 (D3).
 
@@ -368,7 +377,7 @@ Estimates in agent-days, from the measured counts above (planning estimates, not
 | WP-0 | Rule-48 blocks for every number quoted here | done in this revision ([M1]-[M3]) | 0 |
 | WP-0b | Measure why `pitwall-server`'s first start takes seconds (binary size, scan, contention, load), outside CI's busy hours, without CPU burners; record the block | researcher | 0.5 |
 | WP-1 | `paddock-testkit::start` (`start` feature): `warm_first_start(s)`, `wait_ready_or_exit` (sync on `StartWatch` with `DeadlinePace`; async on `StartJudge`), `wait_exit`, `try_…`, `StartOutcome`, the test `Patience`, the scripted program, tests (a)-(e), 99 % coverage, CHANGELOG | implementer, reviewed by reviewer | 2.5 |
-| WP-2 | `@decryp7/paddock-e2e`: `ready.ts` (`readyWindow`, `warmApp`, the markers), `ShellDialogs.loaded()`; Pitwall's Playwright test timeout; unit tests and the selftest page with a released marker | implementer, reviewed | 1.5 |
+| WP-2 | `@decryp7/paddock-e2e`: `ready.ts` (`readyWindow`, `warmApp`, the markers), `ShellDialogs.loaded()`; the Pitwall and Debrief Playwright test timeouts (60 s, locally too); unit tests and the selftest page with a released marker | implementer, reviewed | 1.5 |
 | WP-3 | C71 start kinds R1-R4, T1-T2 with the widened scopes, `conformance/start-windows.json`, fixtures, the history controls and the scan counts (`check broken` at zero), the `paddock-proc` rule; C51's CONNECT and HELLO; conformance README | implementer, reviewed | 2 |
 | WP-4a | Pitwall: land `fix/pitwall-e2e-engine-health` (in `train/2026-11-08-1`); then `ChildEngine` and `runnable_server` on the kit (row 1) | implementer | 0.75 |
 | WP-4b | Debrief (about 47 sites, waivers included): `WorkerConfig::connect_window` and `for_tests`, `ServerBackend::for_tests`, the plugin-test harness, `debrief-ipc`, AI worker, plugins, chromium-driver, plugin runtimes (rows 2, 4-8, 13-14); a failing test first per broken row (ER-11) | implementer | 3 |
@@ -399,10 +408,10 @@ migration is its own commit and reverts alone.
 - **D2. The nextest setup-script warm-up.** *Recommended: no, not while it is experimental; revisit when stable, as an
   optimisation calling `warm_first_start`* (§6).
 - **D3. Which kinds are errors from day one.** *Recommended:* only the start kinds as defined in §4 (R1 and R3 in start
-  functions, R2, R4, T1, T2 in page-opening functions), with their 86 migrations and 13 waivers in the same change and no
-  baseline growth; fixed-count polls that are not starts stay in ADR 0041's shrink-only ratchet (WP-6). Alternatives:
+  functions, R2, R4, T1, T2 in page-opening functions), with their about 84 migrations and about 15 waivers in the same change and
+  no baseline growth; fixed-count polls that are not starts stay in ADR 0041's shrink-only ratchet (WP-6). Alternatives:
   the start kinds as warnings first, turned to errors app by app as each app migrates; or a user-approved one-time
-  baseline growth by the 86 sites, migrated later.
+  baseline growth by about 84 sites, migrated later.
 - **D4. Widen C51 to CONNECT (window-style names) and HELLO**, report-only, not HANDSHAKE (ADR 0072 keeps that bound) and
   not network `connect_timeout`s. *Recommended: yes.* The product's own 15 s store-worker and plugin windows meet the same
   first-start check on a user's Mac after an update (not measured); *recommended* that the coordinator gives that an

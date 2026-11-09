@@ -307,7 +307,7 @@ job logs say, so the ADR can quote them.
   | Measure | Value | Budget | Verdict |
   |---|---|---|---|
   | Job 32436: `pitwall-cli::cli` tests (each the first start of the fresh `pitwall`) | 10 of 12 ended at 16.83-16.88 s within 57 ms of each other; the other two at 17.84 and 19.35 s | none | consistent with every start of one binary waiting for one slow check of that binary |
-  | Job 32380 (same day, earlier): the same tests | 10 at 1.39-1.40 s | none | the same tests without the delay |
+  | Job 32380 (same day, earlier): the same tests | 10 of 12 at 1.391-1.434 s; the other two at 2.40 and 3.98 s | none | the same tests without the delay |
   | Job 32436: the two failed `pitwall-server::e2e` child-engine tests | 10.56 and 11.06 s | the double's 200 polls × 50 ms | failed |
   | Job 32417: the two failed `debrief-plugin-e2e` store-worker tests | 29.97 and 17.14 s ("did not connect within 15 s") | the product's 15 s connect window | failed |
   | Job 32097: first `shell-demo-webkit` test; the next one; the rest of the a11y file | 5.4 s (failed); 6.3 s; 0.33-0.66 s | the 5 s expect timeout | failed |
