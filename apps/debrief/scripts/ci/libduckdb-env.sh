@@ -50,7 +50,7 @@ else
     echo "::error::could not fetch libduckdb $want ($fetch failed; its error is above). Re-run the job; if the download keeps failing, check https://github.com/duckdb/duckdb/releases/tag/v$want or put libduckdb $want in the CI image."
     exit 1
   fi
-  unset DUCKDB_LIB_DIR
+  unset DUCKDB_LIB_DIR DUCKDB_INCLUDE_DIR
   eval "$exports"
   lib=${DUCKDB_LIB_DIR:?$fetch did not set DUCKDB_LIB_DIR}
   loader=$lib
