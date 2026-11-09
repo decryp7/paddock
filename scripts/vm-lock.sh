@@ -31,7 +31,26 @@ _vm_lock_slot=""; _vm_lock_token=""; _vm_lock_owner=""; _vm_lock_root=""; _vm_lo
 VM_LOCK_BUSY=75
 
 _vm_lock_dev() { if [ -n "${PADDOCK_DEV:-}" ]; then "$PADDOCK_DEV" "$@"; else (cd "$_vm_lock_here/.." && bash ./dev "$@"); fi; }
-_vm_lock_start() { ps -o lstart= -p "$1" 2>/dev/null | sed 's/^ *//; s/ *$//; s/  */ /g'; }
+# The start of a process: `ps lstart` (shown to people), plus on Linux the kernel start tick from /proc/<pid>/stat as " [t<ticks>]". Linux
+# derives lstart from the wall clock, which can move by a second between two calls for one process; the tick never changes, so a live holder
+# is never taken for a dead one (rule 53 identity is pid plus start; compare with _vm_lock_same_start, never with `=`).
+_vm_lock_start() {
+  local s tick
+  s="$(ps -o lstart= -p "$1" 2>/dev/null | sed 's/^ *//; s/ *$//; s/  */ /g')"
+  [ -n "$s" ] || return 0
+  if [ -r "/proc/$1/stat" ]; then
+    tick="$(sed 's/^.*) //' "/proc/$1/stat" 2>/dev/null | awk '{print $20}')"
+    [ -z "$tick" ] || s="$s [t$tick]"
+  fi
+  printf '%s' "$s"
+}
+# 0 when two starts name the same process: equal kernel ticks when both carry one, else equal strings. An empty start never matches.
+_vm_lock_same_start() {
+  local a="$1" b="$2" ta tb
+  [ -n "$a" ] && [ -n "$b" ] || return 1
+  ta="${a##*\[t}"; tb="${b##*\[t}"
+  if [ "$ta" != "$a" ] && [ "$tb" != "$b" ]; then [ "$ta" = "$tb" ]; else [ "$a" = "$b" ]; fi
+}
 _vm_lock_default_root() { printf '%s' "${PADDOCK_VM_LOCK_ROOT:-/Volumes/d7sst7/ci/locks/test-machines}"; }
 
 # The owner folder of the current holder, if the slot is held; retried a few times (status can race a holder starting or ending).
@@ -54,14 +73,14 @@ vm_lock_inherited() {
   [ -n "${PADDOCK_VM_LOCK_HELD:-}" ] || return 1
   IFS=$'\t' read -r pid start owner <<< "$PADDOCK_VM_LOCK_HELD"
   [ -n "$pid" ] && [ -n "$start" ] && [ -n "$owner" ] || return 1
-  now="$(_vm_lock_start "$pid")"; [ -n "$now" ] && [ "$now" = "$start" ] || return 1
+  now="$(_vm_lock_start "$pid")"; _vm_lock_same_start "$now" "$start" || return 1
   root="$(_vm_lock_default_root)"
   cur="$(_vm_lock_holder "$root")" || return 1
   [ "$cur" = "$owner" ] || return 1
   # The pid must be the one that took the lock: the owner folder's who file names it (an unrelated live pid such as $PPID is not).
   local wpid wstart
   IFS=$'\t' read -r wpid wstart _ < "$owner/who" 2>/dev/null || return 1
-  [ "$wpid" = "$pid" ] && [ "$wstart" = "$start" ]
+  [ "$wpid" = "$pid" ] && _vm_lock_same_start "$wstart" "$start"
 }
 
 vm_lock_release() {
@@ -120,7 +139,7 @@ vm_lock_acquire() {
     if [ -n "$other" ] && [ -n "$who" ]; then
       pid="${who%%$'\t'*}"; rest="${who#*$'\t'}"; start="${rest%%$'\t'*}"; olabel="${rest#*$'\t'}"
       now="$(_vm_lock_start "$pid")"
-      if [ -z "$now" ] || [ "$now" != "$start" ]; then
+      if ! _vm_lock_same_start "$now" "$start"; then
         echo "vm-lock: the holder ($olabel, pid $pid, started $start) is no longer running (dead holder); taking over" >&2
         rm -rf "$other" "$other.err"; sleep 1; continue
       fi

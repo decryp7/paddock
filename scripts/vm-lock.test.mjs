@@ -128,7 +128,8 @@ const hold = async (t, label, body = 'sleep 30') => {
   const exited = new Promise((r) => child.on('exit', r));
   return { child, stop: async () => { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* gone */ } await exited; } };
 };
-const lstart = (pid) => spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8' }).stdout.trim().replace(/\s+/g, ' ');
+/** The start the lock records for a pid (vm-lock.sh's own function: `ps lstart`, plus the kernel start tick on Linux). */
+const lstart = (pid) => spawnSync('bash', ['-c', `. '${LIB}'; _vm_lock_start ${Number(pid)}`], { encoding: 'utf8' }).stdout.trim();
 
 test('P1-1: the hold has no time cap: vm-lock.sh passes --max-hold-secs 0, so the default cap paddock-dev would apply never ends it', () => {
   const t = fresh();
@@ -212,4 +213,13 @@ test('P2: a lock that frees between our failed acquire and the status is retried
   const r = bash(stub('retrier', t.log), { ...t.env, PADDOCK_DEV: dev });
   assert.equal(r.status, 0, r.stderr);
   assert.doesNotMatch(r.stderr, /unknown \(no who file\)/);
+});
+
+test('a holder is the same process when its start token matches, even if `ps lstart` drifts by a second (Linux computes it from the clock)', () => {
+  const same = (a, b) => spawnSync('bash', ['-c', `. '${LIB}'; _vm_lock_same_start "$1" "$2"`, 'x', a, b]).status === 0;
+  assert.ok(same('Mon Nov 9 10:47:00 2026 [t4242]', 'Mon Nov 9 10:47:01 2026 [t4242]'), 'a drifting lstart with the same kernel start tick');
+  assert.ok(!same('Mon Nov 9 10:47:00 2026 [t4242]', 'Mon Nov 9 10:47:00 2026 [t4243]'), 'another start tick is another process');
+  assert.ok(same('Mon 9 Nov 17:27:42 2026', 'Mon 9 Nov 17:27:42 2026'), 'no token (macOS): the whole string');
+  assert.ok(!same('Mon 9 Nov 17:27:42 2026', 'Mon 9 Nov 17:27:43 2026'), 'no token: a different string is a different process');
+  assert.ok(!same('', ''), 'an empty start is never a match');
 });
