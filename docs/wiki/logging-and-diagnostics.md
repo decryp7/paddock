@@ -18,7 +18,7 @@ apps onto them. Status as of origin/main `233c1339b`. Steward-log citations are 
 - The audit behind the ADR found that no shipped app's bundle could find a root cause from its logs; the user's decisions on
   the Dyno set, the bundle budget, the default level and the logger replacement are in the ADR's Decisions (user, 2026-10-31) section. Source: src: `git show origin/docs/adr-logging-root-cause:docs/adr/0036-logging-for-root-cause.md` (Decisions section); src: `merge-steward.md:708`.
 - The ADR lists work packages WP-1 to WP-11 (dedupe, OS banner, proc and ipc events, jobs events, a 4 MB log window WP-6a, the secret scanner,
-  conformance checks C63 to C65, per-app adoption WP-9, cost measurement WP-10, merging rule 56 first WP-11). Source: src: `git show origin/docs/adr-logging-root-cause:docs/adr/0036-logging-for-root-cause.md` (Work packages).
+  the logging conformance checks (ADR 0036 section 7), per-app adoption WP-9, cost measurement WP-10, merging rule 56 first WP-11). Source: src: `git show origin/docs/adr-logging-root-cause:docs/adr/0036-logging-for-root-cause.md` (Work packages).
 - The user also asked for logs for CI and tooling failures, and for rules 56 and ER-27 to cover them; ER-27 to ER-29 are on engineering-rules
   main at `a8064e1`. Source: src: `merge-steward.md:703, 713`.
 - Debrief has its own ADR 0036 (dump symbols by PDB identity), numbered per app; the family ADR 0036 above is a different document. Source: src: `git ls-tree origin/docs/adr-logging-root-cause apps/debrief/docs/adr`.

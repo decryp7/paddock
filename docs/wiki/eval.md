@@ -26,7 +26,7 @@ Fix: the shared test-kit timer guard (`onTestFinished` head `d459854a6`, only on
 Sources: [test-isolation](test-isolation.md); src: `merge-steward.md:673, 683, 685`.
 
 ### 3. Which conformance check number is free?
-Expected: C66. On main: C50, C51, C53, C54, C56, C57. Claimed: C49 provider-grants (Spotter line), C52 Pacenotes cargo-metadata, C55 windowed test browser, C58 copies, C59 updater guard, C60 busy-wait-read, C61 the Material bridge (`fix/ui-settings-density`, Pitcrew p8, s28), C62 pipefail-grep, C63 to C65 logging. Check the branches first.
+Expected: the first number above those claimed. On main: C50, C51, C53, C54, C56, C57. Claimed: C58 copies, C59 updater guard, C61 the Material bridge (`fix/ui-settings-density`, Pitcrew p8, s28), C62 pipefail-grep. Planned without a number on main: the Pacenotes cargo-metadata check (plan section 4.3; src: `git show origin/docs/apps-readiness-plan:docs/plans/apps-readiness.md`) and the logging checks (ADR 0036 section 7, which renumbers them at acceptance if taken; src: `git show origin/docs/adr-logging-root-cause:docs/adr/0036-logging-for-root-cause.md`). Check the branches first.
 Sources: [process-starts](process-starts.md); [conformance README](../../conformance/README.md); src: `merge-steward.md:150, 155, 566, 600, 641, 712`.
 
 ### 4. What blocks the Dyno 1.0 tag?
