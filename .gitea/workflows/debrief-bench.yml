@@ -108,7 +108,13 @@ jobs:
       - name: libduckdb (prebuilt, pinned SHA-256)
         shell: bash
         run: |
-          eval "$(bash crates/debrief-store-duck/scripts/fetch-libduckdb.sh "$HOME/.cache/debrief-libduckdb")"
+          # Checked on its own: `eval "$(...)"` would swallow a failed download and go on with no or another libduckdb (CI 7822).
+          if ! duckdb_env=$(bash crates/debrief-store-duck/scripts/fetch-libduckdb.sh "$HOME/.cache/debrief-libduckdb"); then
+            echo "::error::could not fetch the pinned libduckdb (fetch-libduckdb.sh failed; its error is above). Re-run the job; if the download keeps failing, check the DuckDB release on GitHub."
+            exit 1
+          fi
+          unset DUCKDB_LIB_DIR DUCKDB_INCLUDE_DIR
+          eval "$duckdb_env"
           : "${DUCKDB_LIB_DIR:?fetch-libduckdb.sh did not set DUCKDB_LIB_DIR}"
           echo "DUCKDB_LIB_DIR=$DUCKDB_LIB_DIR" >> "$GITHUB_ENV"
           echo "DUCKDB_INCLUDE_DIR=$DUCKDB_INCLUDE_DIR" >> "$GITHUB_ENV"
@@ -167,7 +173,13 @@ jobs:
       - name: libduckdb (prebuilt, pinned SHA-256)
         shell: bash
         run: |
-          eval "$(bash crates/debrief-store-duck/scripts/fetch-libduckdb.sh "$HOME/.cache/debrief-libduckdb")"
+          # Checked on its own: `eval "$(...)"` would swallow a failed download and go on with no or another libduckdb (CI 7822).
+          if ! duckdb_env=$(bash crates/debrief-store-duck/scripts/fetch-libduckdb.sh "$HOME/.cache/debrief-libduckdb"); then
+            echo "::error::could not fetch the pinned libduckdb (fetch-libduckdb.sh failed; its error is above). Re-run the job; if the download keeps failing, check the DuckDB release on GitHub."
+            exit 1
+          fi
+          unset DUCKDB_LIB_DIR DUCKDB_INCLUDE_DIR
+          eval "$duckdb_env"
           : "${DUCKDB_LIB_DIR:?fetch-libduckdb.sh did not set DUCKDB_LIB_DIR}"
           echo "DUCKDB_LIB_DIR=$DUCKDB_LIB_DIR" >> "$GITHUB_ENV"
           echo "DUCKDB_INCLUDE_DIR=$DUCKDB_INCLUDE_DIR" >> "$GITHUB_ENV"
