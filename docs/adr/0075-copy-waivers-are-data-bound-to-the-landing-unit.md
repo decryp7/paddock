@@ -1,6 +1,7 @@
 # 75. Copy waivers are data, bound to the landing unit, not commit trailers
 
-- Status: Proposed (2026-11-09), revision 3 after independent review rounds 1 (P1-1 to P1-5, P2s) and 2 (P2-1 to P2-5, P2-7). Amends
+- Status: Accepted 2026-11-09 by the user: D1–D10 as recommended (revision 3, after independent review rounds 1
+  (P1-1 to P1-5, P2s) and 2 (P2-1 to P2-5, P2-7)). Amends
   ADR 0034 §3 (waivers, the entry guard's trailers, the range check's unit) and the trailer parts of rule 55 (a), (c) and
   (d). Everything else in ADR 0034 (the register, members, counted lines, modes a and c, the freeze rule) stays as it is.
 - Date: 2026-11-09
