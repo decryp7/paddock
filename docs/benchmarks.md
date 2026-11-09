@@ -233,6 +233,23 @@ These measure tooling, not a product. They are kept where they are.
   0.53–1.77 ms of that. Windows is not measured.
 - [Lessons](lessons.md): test-binary consolidation, 239 → 99 binaries, nextest 301 s → 196 s.
 
+### 2026-11-09, a syn scan of every spawn site in the monorepo (docs/adr-0076-owned-background-work)
+
+Quoted by [ADR 0076](adr/0076-owned-background-work.md) ("Parallelism and cost", the cost of check C42).
+- **Commit:** b51c72509 (origin/main), read from a worktree; the prototype is scratch code, not committed
+  (`/Volumes/d7sst7/dev-targets/scratch/adr-0076/scan`, syn 2.0.119 with `full` and `visit`, proc-macro2 span locations).
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2.
+- **Load:** 1-minute load 5.2 (5-minute 5.1) at the start; other agents were working. An indication.
+- **Build:** release, `CARGO_BUILD_JOBS=2`, rustc 1.99.1.
+- **Corpus:** the repository's own sources: 3,222 `.rs` files under `crates/`, `apps/` and `tools/` (no `target`,
+  `node_modules` or dot folders). No user data.
+- **Command:** `spawnscan <worktree>` (one pass to find `#[cfg(test)] mod x;` files, one pass that parses every file and
+  visits every spawn call), output to a file.
+- **Runs:** 3, one after the other, after one untimed warm-up run.
+- **Numbers:** 5.90, 5.95, 6.04 s wall; about 4.9 s user and 1.0 s system per run; 647 sites found, 0 parse failures. No
+  budget; verdict: cheap enough for CI over the whole tree, and for the push check over the changed files only.
+- **Memory:** not measured.
+
 ### 2026-11-03, starving a test process by OS priority on macOS
 
 Quoted by [ADR 0041](adr/0041-deterministic-timing-in-tests.md) §5 (the starved run).
