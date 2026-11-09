@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { describe, expect, it, vi } from 'vitest';
-import { all, buttonByText, el, settle, text, typeInto } from '../../testing/helpers';
+import { all, buttonByText, el, settle, text, typeInto, settleUntil } from '../../testing/helpers';
 import { CmdError } from '../core/cmd-error';
 import { WorkspaceStore } from '../core/workspace.store';
 import { SettingsDialogService } from '../settings/settings-dialog';
@@ -365,7 +365,7 @@ describe('VideoView with videos', () => {
     const fixture = TestBed.createComponent(VideoView);
     fixture.detectChanges();
     const opening = TestBed.inject(VideoStore).openPaths(both.slice(0, 1));
-    await settle(fixture, 3);
+    await settleUntil(fixture, () => expect(release).toBeTypeOf('function'));
     expect(testId(fixture, 'video-opening').textContent).toContain('Analysing the video');
     expect((testId(fixture, 'video-open') as HTMLButtonElement).disabled).toBe(true);
     expect(fixture.nativeElement.querySelector('[data-testid="video-empty"]')).toBeNull();

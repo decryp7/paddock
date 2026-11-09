@@ -1,7 +1,7 @@
 import { FIELDS_OPEN_KEY } from './sidebar-sections';
 import { signal, Type } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { all, buttonByText, el, FakeDock, provideFakeDock, provideTinyBackend, settle, text, tinyBackend } from '../../testing/helpers';
+import { all, buttonByText, el, FakeDock, provideFakeDock, provideTinyBackend, settle, text, tinyBackend, settleUntil } from '../../testing/helpers';
 import { PaletteService } from '../palette/palette.service';
 import { Platform } from '../core/platform';
 import { WorkspaceStore } from '../core/workspace.store';
@@ -160,7 +160,7 @@ describe('TitleBar', () => {
 
   it('hides the in-app menu bar in native mode (macOS) and mirrors the menus to the native menu bar', async () => {
     const sent: NativeMenuModel[] = [];
-    let chosen: (id: string) => void = () => undefined;
+    let chosen: ((id: string) => void) | undefined;
     const port: NativeMenuPort = {
       setAppMenu: async (m) => void sent.push(m),
       onMenu: async (h) => {
@@ -178,7 +178,7 @@ describe('TitleBar', () => {
       ],
     });
     const { fixture, dock } = setup(TitleBar);
-    await settle(fixture);
+    await settleUntil(fixture, () => expect(chosen).toBeTypeOf('function'));
     expect(fixture.nativeElement.querySelector('debrief-menu-bar')).toBeNull();
     expect(fixture.nativeElement.querySelector('[role=menubar]')).toBeNull();
     expect(fixture.nativeElement.querySelector('.palette')).not.toBeNull();
@@ -187,7 +187,7 @@ describe('TitleBar', () => {
     expect(JSON.stringify(sent[0]?.menus[0])).toContain('settings.open');
     // About and Settings are in the app menu only.
     expect(JSON.stringify(at(sent, 0).menus.find((m) => m.id === 'help'))).not.toContain('help.about');
-    chosen('view:metrics');
+    chosen!('view:metrics');
     expect(dock.calls).toContain('toggle:metrics');
     // Unchanged menus are not sent again; a change is.
     TestBed.inject(WorkspaceStore).setScheme('dark');
