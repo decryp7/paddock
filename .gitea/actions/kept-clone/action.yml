@@ -7,6 +7,9 @@ inputs:
   profile:
     description: "The checkout profile of conformance/ci/checkout-profiles.txt: `lean` leaves out screenshots, review sheets and design sheets; `full` leaves nothing out. A job whose steps read a path a profile excludes uses a profile that keeps it (a conformance test cross-checks the file)."
     required: true
+  fresh:
+    description: "`true`: never reuse the slot's clone, make it again (a tag run: the clone is shared with branch jobs, so the release is built from objects fetched for this run)."
+    default: "false"
 runs:
   using: composite
   steps:
@@ -15,4 +18,5 @@ runs:
       env:
         NAME: ${{ inputs.name }}
         PROFILE: ${{ inputs.profile }}
+        FRESH: ${{ inputs.fresh }}
       run: bash "${{ github.action_path }}/../../../conformance/ci/kept-clone.sh"

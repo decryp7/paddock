@@ -129,7 +129,9 @@ clone_kib() { # the clone's object size in KiB
   gq -C "$stable" count-objects -v 2>/dev/null | awk '/^(size|size-pack): / { k += $2 } END { printf "%d", k }'
 }
 mode=reused
-if healthy; then
+# A tag run (FRESH=true) never reuses a clone shared with branch jobs: its objects are not trusted, the release is built from a new one.
+if [ "${FRESH:-false}" = true ]; then mode=created; fi
+if [ "$mode" = reused ] && healthy; then
   kib="$(clone_kib)"
   bad="$(foreign_key)"
   if [ -n "$bad" ]; then
@@ -142,7 +144,17 @@ else
   mode=created
 fi
 
-create_clone() { rm -rf "$stable" && mkdir -p "$(dirname "$stable")" && g clone -q --no-checkout --no-tags --depth=1 --filter=blob:none "$url" "$stable" &&
+# unlink_caches: a job's .angular/cache is a link (a junction on Windows) to a kept folder outside the clone; git clean must never
+# reach the target through it, so each link is removed by itself first (rmdir on a junction removes only the junction).
+unlink_caches() {
+  local l
+  while IFS= read -r l; do
+    if [ -L "$l" ]; then rm -f "$l"
+    elif [ "$RUNNER_OS" = Windows ] && command -v cmd >/dev/null 2>&1 && command -v cygpath >/dev/null 2>&1; then cmd //c rmdir "$(cygpath -w "$l")" >/dev/null 2>&1 || true
+    fi
+  done < <(find "$stable" -maxdepth 6 -path '*/.angular/cache' -not -path '*/node_modules/*' -not -path "$stable/.git/*" 2>/dev/null || true)
+}
+create_clone() { unlink_caches && rm -rf "$stable" && mkdir -p "$(dirname "$stable")" && g clone -q --no-checkout --no-tags --depth=1 --filter=blob:none "$url" "$stable" &&
     echo 1 > "$stable/.git/paddock-kept-clone"; }
 if [ "$mode" = created ]; then
   if ! bounded "create the clone" create_clone; then
@@ -156,6 +168,7 @@ fi
 # Windows). A clone just created has nothing to clean.
 clean_clone() {
   sanitize
+  unlink_caches
   apply_profile "$stable"
   if gq -C "$stable" rev-parse --verify -q HEAD >/dev/null; then g -C "$stable" reset -q --hard HEAD; fi
   g -C "$stable" clean -q -ffdx
