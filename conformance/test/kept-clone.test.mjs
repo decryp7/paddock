@@ -286,11 +286,14 @@ test('checkout profiles: ci.yml\'s host jobs use the kept clone with a declared 
     assert.ok(!/actions\/stable-workspace/.test(text), `${id}: the kept clone replaces stable-workspace`);
     const profile = /profile: (\S+)/.exec(clone.text)?.[1];
     assert.ok(profiles.has(profile) || profile === 'full', `${id}: profile ${profile} is declared in checkout-profiles.txt`);
-    const co = steps.find((s) => /uses: actions\/checkout@v4/.test(s.text));
-    const sparse = /sparse-checkout: \$\{\{ runner\.os != 'Linux' && '([^']*)' \|\| '' \}\}/.exec(co.text);
-    assert.ok(sparse, `${id}: the checkout is sparse on the hosts only`);
-    assert.deepEqual(sparse[1].split('\\n').filter(Boolean), boot, `${id}: the sparse set is the declared bootstrap`);
-    assert.match(co.text, /filter: \$\{\{ runner\.os != 'Linux' && 'blob:none' \|\| '' \}\}/, `${id}: a partial clone on the hosts (the full tree is what costs)`);
+    const plain = steps.find((st) => /uses: actions\/checkout@v4/.test(st.text) && /if: runner\.os == 'Linux'/.test(st.text));
+    assert.ok(plain, `${id}: Linux keeps the plain checkout`);
+    const co = steps.find((st) => /uses: actions\/checkout@v4/.test(st.text) && /if: runner\.os != 'Linux'/.test(st.text));
+    assert.ok(co, `${id}: the hosts check out sparse`);
+    const sparse = /sparse-checkout: \|\n((?:\s{12}\S[^\n]*\n)+)/.exec(co.text + '\n');
+    assert.ok(sparse, `${id}: a sparse-checkout list`);
+    assert.deepEqual(sparse[1].split('\n').map((l) => l.trim()).filter(Boolean), boot, `${id}: the sparse set is the declared bootstrap`);
+    assert.match(co.text, /filter: blob:none/, `${id}: a partial clone on the hosts (the full tree is what costs)`);
     // The work folder is only the bootstrap: every later read of the tree goes through the stable workspace.
     const bare = text.split('\n').filter((l) => /github\.workspace/.test(l) && !/PADDOCK_WORKSPACE \|\| github\.workspace/.test(l) && !/^\s*#/.test(l));
     assert.deepEqual(bare, [], `${id}: github.workspace without PADDOCK_WORKSPACE would read the bootstrap tree on Windows`);

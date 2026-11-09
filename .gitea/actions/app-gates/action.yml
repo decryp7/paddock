@@ -56,6 +56,7 @@ runs:
       id: prepare
       if: inputs.prepare != '' && (inputs.rust == 'true' || inputs.ui == 'true')
       shell: bash
+      working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
       env:
         COMMANDS: ${{ inputs.prepare }}
       run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
@@ -63,6 +64,7 @@ runs:
     - name: Checks (${{ inputs.app }})
       if: inputs.checks != ''
       shell: bash
+      working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
       env:
         COMMANDS: ${{ inputs.checks }}
       run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
@@ -85,6 +87,7 @@ runs:
     - name: Rust checks (${{ inputs.app }})
       if: ${{ !cancelled() && steps.prepare.outcome != 'failure' && inputs.rust-checks != '' && inputs.rust == 'true' }}
       shell: bash
+      working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
       env:
         COMMANDS: ${{ inputs.rust-checks }}
       run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
@@ -142,6 +145,7 @@ runs:
     - name: UI (${{ inputs.app }})
       if: ${{ !cancelled() && steps.prepare.outcome != 'failure' && inputs.ui == 'true' && inputs.ui-checks != '' }}
       shell: bash
+      working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
       env:
         COMMANDS: ${{ inputs.ui-checks }}
       run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
@@ -149,6 +153,7 @@ runs:
     - name: End-to-end tests (${{ inputs.app }} ${{ inputs.e2e-shard }})
       if: ${{ !cancelled() && steps.prepare.outcome != 'failure' && inputs.e2e-checks != '' }}
       shell: bash
+      working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
       env:
         COMMANDS: ${{ inputs.e2e-checks }}
         E2E_SHARD: ${{ inputs.e2e-shard }}

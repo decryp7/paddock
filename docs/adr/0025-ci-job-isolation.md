@@ -169,6 +169,34 @@ Two kinds of per-host state, one mechanism, declared lists:
 3. Watch the first concurrent runs: `bash conformance/ci/job-isolation.sh status` lists the holders; a stalled one
    (its job folder kept) is cleared by deleting that job folder or ending its pid, never by deleting `slots/*.lock`.
 
+## Kept clones (2026-11-09, ci/kept-clone-sparse-checkout)
+
+Measured over 48 h (speed research R2): the checkout and stable-workspace steps were 38 % of a Windows job's step time and 28 % of
+a macOS job's; every job fetched and wrote a 12,367-file, 540 MiB tree, about 330 MiB of it screenshots, review sheets and design
+sheets that no host job reads. The slot already gives each job a kept folder with a stable path, so it also keeps the clone:
+
+1. **The plain checkout becomes a bootstrap** on the hosts: `actions/checkout` sparse (the `bootstrap` folders of
+   `conformance/ci/checkout-profiles.txt`: the actions, their scripts, paddock-dev's inputs, which job-isolation builds) and
+   partial (`filter: blob:none`; the Gitea server allows it, checked 2026-11-09: a root-level partial clone is under a second and
+   2.6 MiB). Linux keeps the whole tree in its container.
+2. **`kept-clone`** (`conformance/ci/kept-clone.sh`) keeps ONE clone per slot (`src/<name>-<slot>`, so two runners of a host
+   never share one), `fetch --depth=1 --filter=blob:none` of the job's exact commit, `reset --hard` and `clean -ffdx` before and
+   after the checkout, `git clean`'s blind spot for untracked files outside the sparse patterns handled by removing the excluded
+   paths by name, and verifies: HEAD is the commit, the tree has no change or stray file, no excluded path exists. A clone that is
+   missing, broken, of another repository or over `PADDOCK_KEPT_CLONE_MAX_MIB` (3072) is created again. Credentials come from
+   the checkout's header through the environment (never a command line, never kept). Every phase is bounded and logs its
+   duration; a failure is one warning and the job builds from the work folder expanded to the profile.
+3. **Profiles** (`lean`: the screenshot, review and design folders; `full`) are declared in the same file and chosen per job in
+   ci.yml. A conformance test (`conformance/test/kept-clone.test.mjs`) fails when a tracked file outside the excluded paths names
+   one, unless a `mention` line explains why no lean job reads it, so a new reader forces the decision. `crate`, `app` and
+   `paddock-dev` use `lean`.
+4. **Where the tree is read.** macOS: the work folder becomes a link to the clone (as stable-workspace did). Windows: act holds the
+   work folder, so it stays the bootstrap and every later step must read the tree through `PADDOCK_WORKSPACE`: a conformance test
+   fails on a bare `github.workspace` in these jobs, and app-gates runs its command lists there.
+
+Not touched: the release workflows' bundle jobs and Debrief's workflow still use `stable-workspace` and a full checkout; `e2e-webkit`
+and the Linux jobs keep a plain checkout. Measurements: [benchmarks](../benchmarks.md).
+
 ## Verified
 
 - On the branch: the conformance, tools and scripts tests (`node --test`); `paddock-slots` and `paddock-dev` tests,
