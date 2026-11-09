@@ -89,7 +89,7 @@ stable="$(cat "$scratch/out")"
 
 # --- the clone ---------------------------------------------------------------------------------------------------------------------
 healthy() { # exit 0 when the kept folder holds a usable clone of this repository
-  [ -d "$stable/.git" ] && git -C "$stable" rev-parse --git-dir >/dev/null 2>&1 &&
+  [ -f "$stable/.git/paddock-kept-clone" ] && git -C "$stable" rev-parse --git-dir >/dev/null 2>&1 &&
     [ "$(git -C "$stable" config remote.origin.url 2>/dev/null)" = "$url" ]
 }
 clone_kib() { # the clone's object size in KiB
@@ -103,7 +103,8 @@ else
   mode=created
 fi
 
-create_clone() { rm -rf "$stable" && mkdir -p "$(dirname "$stable")" && git clone -q --no-checkout --no-tags --depth=1 --filter=blob:none "$url" "$stable"; }
+create_clone() { rm -rf "$stable" && mkdir -p "$(dirname "$stable")" && git clone -q --no-checkout --no-tags --depth=1 --filter=blob:none "$url" "$stable" &&
+    echo 1 > "$stable/.git/paddock-kept-clone"; }
 if [ "$mode" = created ]; then
   if ! bounded "create the clone" create_clone; then
     cat "$scratch/err" >&2
@@ -111,7 +112,11 @@ if [ "$mode" = created ]; then
   fi
 fi
 
+# Only a clone this script made is reused (the marker): an older layout's plain checkout would fetch everything on its first fetch.
+# The sparse patterns come first: before them, reset --hard would write the whole tree of the clone's branch (run 7808: 50 to 110 s on
+# Windows). A clone just created has nothing to clean.
 clean_clone() {
+  apply_profile "$stable"
   if git -C "$stable" rev-parse --verify -q HEAD >/dev/null; then git -C "$stable" reset -q --hard HEAD; fi
   git -C "$stable" clean -q -ffdx
 }
@@ -143,7 +148,10 @@ verify_clone() {
     if compgen -G "$stable/$p" >/dev/null; then echo "excluded path $p exists" >&2; return 1; fi
   done
 }
-if ! bounded "clean" clean_clone || ! bounded "fetch $sha" fetch_commit || ! bounded "check out" checkout_commit || ! bounded "verify" verify_clone; then
+ok=1
+if [ "$mode" != created ]; then bounded "clean" clean_clone || ok=0; fi
+if [ "$ok" = 1 ]; then bounded "fetch $sha" fetch_commit && bounded "check out" checkout_commit && bounded "verify" verify_clone || ok=0; fi
+if [ "$ok" = 0 ]; then
   cat "$scratch/err" >&2
   fallback "the clone at $stable could not be brought to $sha ($(tail -c 200 "$scratch/err" | tr '\r\n' '  '))"
 fi
