@@ -359,6 +359,176 @@ jobs:
         with:
           mode: release
 
+  # `wiki` (tools/wiki, the LLM-wiki lint, log and page tool): its own Cargo workspace; Linux only (it reads text and runs git).
+  # Its tests include a lint of this repository's docs/wiki, so the pilot wiki is checked whenever the tool changes.
+  wiki:
+    name: wiki tool
+    needs: [plan]
+    if: ${{ needs.plan.outputs.tools == 'true' }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    defaults:
+      run:
+        working-directory: tools/wiki
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      # The whole history: the lint reads the rules on origin/main and on the open rule branches (origin/docs/*).
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The engineering rules, one more rules source for the copied-text check. Optional: when the runner's token cannot read
+      # that repository the step fails softly and the lint skips the missing file.
+      - uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          repository: decryp7/engineering-rules
+          path: engineering-rules
+
+      # A Linux container: one job per host and no kept folders or ports, so no job-isolation slot is taken (the action does
+      # nothing there, ADR 0025).
+      - uses: ./.gitea/actions/build-jobs
+
+      # No build-folder action: the job is Linux-container only, so the build folder is tools/wiki/target in the container (git-ignored).
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          components: clippy,rustfmt
+
+      # The engineering rules are optional input of the lint; say loudly when they are missing instead of skipping quietly.
+      - name: Engineering rules present
+        working-directory: .
+        run: |
+          if [ -f engineering-rules/RULES.md ]; then
+            echo "- wiki lint: engineering-rules checked out, so its RULES.md is a rules source" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          else
+            echo "::warning::wiki lint: engineering-rules is not checked out (the runner's token cannot read decryp7/engineering-rules?), so the copied-rule check skips the ER text. Give the job a token that can read it."
+            echo "- wiki lint: engineering-rules NOT checked out; the ER text was not a rules source" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          fi
+
+      - name: Lockfile is current
+        run: |
+          cargo metadata --locked --format-version 1 > /dev/null || {
+            echo "::error::tools/wiki/Cargo.lock is stale, run cargo update -w in tools/wiki and commit it"; exit 1; }
+
+      - name: Format
+        if: ${{ !cancelled() }}
+        run: cargo fmt --check
+
+      - name: Clippy
+        if: ${{ !cancelled() }}
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Tests
+        if: ${{ !cancelled() }}
+        run: cargo nextest run --profile ci --locked --no-fail-fast
+
+      - name: Deny
+        if: ${{ !cancelled() }}
+        run: cargo deny check
+
+      # The tool lints the wiki the way a person runs it (stale pages only warn).
+      - name: Lint the wiki
+        if: ${{ !cancelled() }}
+        env:
+          # The run log in the workspace, not the container's home, so a failed run's log survives the job (uploaded below).
+          WIKI_LOG_DIR: ${{ github.workspace }}/wiki-logs
+        run: |
+          # The summary line is written whether the lint passes or fails; the step then ends with the lint's own exit code.
+          set +e
+          cargo run --locked -- --repo ../.. lint --er ../../engineering-rules/RULES.md 2>&1 | tee wiki-lint.out
+          rc=${PIPESTATUS[0]}
+          echo "- wiki lint (exit $rc): $(tail -1 wiki-lint.out)" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          exit "$rc"
+
+      - uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v3
+        if: failure()
+        with:
+          name: wiki-logs
+          path: wiki-logs
+          if-no-files-found: ignore
+
+      # The tools build with a plain Rust toolchain: no GTK -sys crate may reach them through the shared crates (the workspace
+      # hack once pulled gtk-sys into paddock-proc on x86_64 Linux, so `cargo install` of wiki and heavy needed GTK headers). The
+      # check reads the dependency graph for the Linux target, so it holds on an image that happens to have GTK installed.
+      - name: No GTK in the tools' Linux build
+        if: ${{ !cancelled() }}
+        working-directory: .
+        run: |
+          # bash -e -o pipefail: every command that may legitimately fail is handled by hand. grep exits 1 when it finds nothing,
+          # which is the success case here.
+          rc=0
+          for tool in wiki heavy; do
+            tree=$(cd "tools/$tool" && cargo tree --locked --target x86_64-unknown-linux-gnu -e normal,build --prefix none) || {
+              echo "::error::cargo tree failed for tools/$tool (see the lines above). Run it in tools/$tool with the same arguments."
+              rc=1; continue; }
+            # ER-33: the probe must be able to see the thing. Both tools link paddock-proc, where the hack's GTK crates arrived.
+            echo "$tree" | grep -q '^paddock-proc ' || {
+              echo "::error::check broken: the dependency graph of tools/$tool has no paddock-proc, so a GTK crate there would not be seen."
+              rc=1; continue; }
+            hits=$(echo "$tree" | grep -E '^(gtk|gdk|gio|glib|gobject|pango|cairo|atk|gdk-pixbuf|soup|webkit2gtk|javascriptcore-rs)[a-z0-9-]*-(sys|sys-rs) ' | sort -u || true)
+            if [ -n "$hits" ]; then
+              echo "::error::tools/$tool depends on GTK -sys crates on x86_64 Linux: $(echo "$hits" | tr '\n' ' '). Add them to crates/.config/hakari.toml traversal-excludes, run cargo hakari generate and refresh the lockfiles."
+              rc=1
+            else
+              echo "tools/$tool: no GTK -sys crate in the x86_64 Linux graph"
+            fi
+          done
+          exit "$rc"
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
+
+  # The heavy tool (tools/heavy): the machine-wide heavy-step lock. Its own Cargo workspace; a Linux container, so no build-folder action
+  # (the build folder is tools/heavy/target in the container, git-ignored).
+  heavy:
+    name: heavy tool
+    needs: [plan]
+    if: ${{ needs.plan.outputs.tools == 'true' }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    defaults:
+      run:
+        working-directory: tools/heavy
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.gitea/actions/build-jobs
+
+      - uses: ./.gitea/actions/setup-rust
+        with:
+          components: clippy,rustfmt
+
+      - name: Lockfile is current
+        run: |
+          cargo metadata --locked --format-version 1 > /dev/null || {
+            echo "::error::tools/heavy/Cargo.lock is stale, run cargo update -w in tools/heavy and commit it"; exit 1; }
+
+      - name: Format
+        if: ${{ !cancelled() }}
+        run: cargo fmt --check
+
+      - name: Clippy
+        if: ${{ !cancelled() }}
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Tests
+        if: ${{ !cancelled() }}
+        run: cargo nextest run --profile ci --locked --no-fail-fast
+
+      - name: Deny
+        if: ${{ !cancelled() }}
+        run: cargo deny check
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
+
   # The family icons (icons/): the pipeline's tests (seam scan, coverage, tray shapes, .icns frames, docs copies) and the check that every
   # installed copy in the apps and the docs equals the build. Without the second step a hand edit of an app's icons goes unnoticed.
   icons:

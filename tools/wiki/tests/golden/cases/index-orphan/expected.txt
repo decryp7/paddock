@@ -1,0 +1,6 @@
+exit 1
+exit-strict 1
+error cases/index-orphan/wiki/four.md: orphan: no other page links to it
+error cases/index-orphan/wiki/index.md:5: broken link: nothing.md does not exist
+error cases/index-orphan/wiki/three.md: not listed in index.md
+error cases/index-orphan/wiki/three.md: orphan: no other page links to it

@@ -9,10 +9,32 @@ use std::process::Command;
 /// Files outside the dependency folders that cargo reads for this build.
 const EXTRAS: [&str; 3] = ["tools/paddock-dev", "crates/Cargo.toml", ".cargo/config.toml"];
 
+/// The triple this machine builds for. Metadata is read for it alone: the path dependencies are the same on every platform, and
+/// resolving the others would need registry crates (Windows, Android) that an offline machine never downloaded.
+fn host_triple() -> String {
+    let out = Command::new(std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into()))
+        .arg("-vV")
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .find_map(|l| l.strip_prefix("host: "))
+        .expect("rustc -vV prints the host")
+        .to_string()
+}
+
 fn metadata() -> Value {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let out = Command::new(env!("CARGO"))
-        .args(["metadata", "--format-version", "1", "--locked", "--offline"])
+        .args([
+            "metadata",
+            "--format-version",
+            "1",
+            "--locked",
+            "--offline",
+            "--filter-platform",
+            &host_triple(),
+        ])
         .current_dir(dir)
         .output()
         .unwrap();

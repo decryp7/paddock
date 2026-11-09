@@ -1,0 +1,4 @@
+exit 1
+exit-strict 1
+error cases/empty/wiki/index.md: missing index.md
+error cases/empty/wiki/log.md: missing log.md

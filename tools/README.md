@@ -48,3 +48,8 @@ uncommitted changes. `PADDOCK_DEV_FRESH=1` builds from source in a fresh folder 
 The prebuilt download (the `dev-tool.yml` package) is not wired yet. Commands today: `self hash`, `ci slot
 acquire|release|status|idle-run`, `graph affected`; the rest arrives with R1 and later. When a path dependency in `crates/` changes its
 dependencies, regenerate the tool's lockfile in the same change (`cd tools/paddock-dev && cargo update -w`).
+
+## heavy
+
+`tools/heavy` (package `paddock-heavy`, binary `heavy`): the machine-wide heavy-step lock that replaces the shell `plock`
+and engineering-rules `scripts/heavy.sh` (ER-24). Its own Cargo workspace; see [tools/heavy/README.md](heavy/README.md).

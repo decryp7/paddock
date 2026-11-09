@@ -1,0 +1,10 @@
+# cargo-nextest settings for heavy (its own workspace). Every test is bounded: a test that waits fails, it never hangs.
+[profile.default]
+test-threads = 4
+slow-timeout = { period = "20s", terminate-after = 3 }
+
+[profile.ci]
+fail-fast = false
+retries = 0
+failure-output = "immediate-final"
+slow-timeout = { period = "20s", terminate-after = 3 }

@@ -1,0 +1,35 @@
+exit 1
+exit-strict 1
+error cases/frontmatter/wiki/block.md: orphan: no other page links to it
+error cases/frontmatter/wiki/blockempty.md: orphan: no other page links to it
+error cases/frontmatter/wiki/blockempty.md:1: front matter needs a non-empty `sources:` list
+error cases/frontmatter/wiki/bodyshift.md: orphan: no other page links to it
+error cases/frontmatter/wiki/bodyshift.md:8: bullet names no source (add a link or `src: ...`)
+error cases/frontmatter/wiki/dashes.md: orphan: no other page links to it
+error cases/frontmatter/wiki/dup.md: orphan: no other page links to it
+error cases/frontmatter/wiki/emptyfm.md: orphan: no other page links to it
+error cases/frontmatter/wiki/emptyfm.md:1: front matter needs `verified: YYYY-MM-DD` (a real date)
+error cases/frontmatter/wiki/emptyfm.md:1: front matter needs a non-empty `sources:` list
+error cases/frontmatter/wiki/emptylist.md: orphan: no other page links to it
+error cases/frontmatter/wiki/emptylist.md:1: front matter needs a non-empty `sources:` list
+error cases/frontmatter/wiki/feb30.md: orphan: no other page links to it
+error cases/frontmatter/wiki/feb30.md:1: front matter needs `verified: YYYY-MM-DD` (a real date)
+error cases/frontmatter/wiki/leap.md: orphan: no other page links to it
+error cases/frontmatter/wiki/leap.md:1: verified 2028-02-29 is in the future
+error cases/frontmatter/wiki/listdate.md: orphan: no other page links to it
+error cases/frontmatter/wiki/nofm-unterminated.md: orphan: no other page links to it
+error cases/frontmatter/wiki/nofm-unterminated.md:1: front matter needs `verified: YYYY-MM-DD` (a real date)
+error cases/frontmatter/wiki/nofm-unterminated.md:1: front matter needs a non-empty `sources:` list
+error cases/frontmatter/wiki/notleap.md: orphan: no other page links to it
+error cases/frontmatter/wiki/notleap.md:1: front matter needs `verified: YYYY-MM-DD` (a real date)
+error cases/frontmatter/wiki/scalar.md: orphan: no other page links to it
+error cases/frontmatter/wiki/scalar.md:1: front matter needs a non-empty `sources:` list
+error cases/frontmatter/wiki/shortdate.md: orphan: no other page links to it
+error cases/frontmatter/wiki/shortdate.md:1: front matter needs `verified: YYYY-MM-DD` (a real date)
+error cases/frontmatter/wiki/spaces.md: orphan: no other page links to it
+error cases/frontmatter/wiki/two.md:1: front matter needs `verified: YYYY-MM-DD` (a real date)
+error cases/frontmatter/wiki/two.md:1: front matter needs a non-empty `sources:` list
+error cases/frontmatter/wiki/upper.md: orphan: no other page links to it
+error cases/frontmatter/wiki/upper.md:1: front matter needs `verified: YYYY-MM-DD` (a real date)
+error cases/frontmatter/wiki/year0.md: orphan: no other page links to it
+warning cases/frontmatter/wiki/year0.md:1: stale: verified 0000-01-01, 740285 days ago (limit 30)

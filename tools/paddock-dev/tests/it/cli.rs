@@ -4,7 +4,17 @@ use serde_json::Value;
 use std::process::Command;
 
 fn dev(args: &[&str]) -> (i32, String, String) {
-    let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev")).args(args).output().unwrap();
+    dev_in(None, args)
+}
+
+/// Runs `dev` in `dir` (the process's own folder when `None`): a test that reads a repository gives it one of its own.
+fn dev_in(dir: Option<&std::path::Path>, args: &[&str]) -> (i32, String, String) {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+    cmd.args(args);
+    if let Some(d) = dir {
+        cmd.current_dir(d);
+    }
+    let out = cmd.output().unwrap();
     (
         out.status.code().unwrap(),
         String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -38,47 +48,41 @@ fn a_wrong_command_line_is_usage_exit_2_and_json_mode_gets_one_error_object() {
 
 #[test]
 fn self_hash_prints_one_object_with_the_hash_and_the_compiler() {
-    let (code, out, _) = dev(&["--json", "self", "hash"]);
-    assert_eq!(code, 0);
+    // A repository of its own (ER-14): the checkout may be a worktree whose .git names a path this machine lacks.
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("tools/paddock-dev")).unwrap();
+    std::fs::write(root.join("tools/paddock-dev/inputs.txt"), "# x\ntools/paddock-dev\n").unwrap();
+    crate::golden::git(&root, &["init", "-q", "-b", "main"]);
+    crate::golden::git(&root, &["add", "-A"]);
+    crate::golden::git(&root, &["commit", "-q", "-m", "base"]);
+    let (code, out, err) = dev_in(Some(&root), &["--json", "self", "hash"]);
+    assert_eq!(code, 0, "{err}");
     let v: Value = serde_json::from_str(out.trim()).unwrap();
     assert_eq!(v["ok"], true);
     assert!(v["hash"].as_str().is_some_and(|h| h.len() >= 40));
     assert!(v["compiler"].as_array().is_some_and(|c| c.len() == 2));
     assert!(v["inputs"].as_array().is_some_and(|c| c.iter().any(|p| p == "tools/paddock-dev")));
-    let (code, out, _) = dev(&["self", "hash"]);
+    let (code, out, _) = dev_in(Some(&root), &["self", "hash"]);
     assert_eq!(code, 0);
     assert!(out.starts_with("hash "));
 }
 
 #[test]
 fn graph_affected_prints_the_plan_for_the_repository_it_runs_in_or_is_pointed_at() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .unwrap()
-        .display()
-        .to_string();
-    for args in [
-        vec![
-            "--json",
-            "graph",
-            "affected",
-            "--files",
-            "crates/paddock-cli/src/lib.rs",
-            "--explain",
-        ],
-        vec![
-            "--json",
-            "graph",
-            "affected",
-            "--root",
-            &root,
-            "--files",
-            "crates/paddock-cli/src/lib.rs",
-        ],
+    // The golden fixture repository, built in a scratch folder: no dependence on the checkout this test runs from.
+    let (_keep, fixture) = crate::golden::fixture_repo();
+    let root = fixture.display().to_string();
+    let file = "crates/a/src/lib.rs";
+    for (dir, args) in [
+        (
+            Some(fixture.as_path()),
+            vec!["--json", "graph", "affected", "--files", file, "--explain"],
+        ),
+        (None, vec!["--json", "graph", "affected", "--root", &root, "--files", file]),
     ] {
-        let (code, out, _) = dev(&args);
-        assert_eq!(code, 0);
+        let (code, out, err) = dev_in(dir, &args);
+        assert_eq!(code, 0, "{err}");
         let v: Value = serde_json::from_str(out.trim()).unwrap();
         assert_eq!(
             (v["ok"].clone(), v["crates"].clone(), v["all"].clone()),
@@ -86,7 +90,7 @@ fn graph_affected_prints_the_plan_for_the_repository_it_runs_in_or_is_pointed_at
         );
         assert_eq!(v.get("why").is_some(), args.contains(&"--explain"));
     }
-    let (code, out, _) = dev(&["graph", "affected", "--all"]);
+    let (code, out, _) = dev_in(Some(&fixture), &["graph", "affected", "--all"]);
     assert_eq!(code, 0);
     assert!(out.contains("\"all\":true"));
 }

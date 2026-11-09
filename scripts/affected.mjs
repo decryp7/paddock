@@ -264,6 +264,7 @@ export const DOC_INPUTS = [
   { re: /^docs\/rules\.md$/, projects: ['conformance', 'tools'], why: 'the rules block of every AGENTS.md (conformance sync, new-app)' },
   { re: /^docs\/blocks\//, projects: ['conformance', 'tools'], why: 'the shared doc blocks (conformance sync, release notes, new-app)' },
   { re: /^docs\/(design-guide|benchmarks)\.md$/, projects: ['conformance'], why: 'C100 (./dev gates check) reads the rule-bearing docs and the measurement records' },
+  { re: /^docs\/wiki\//, projects: ['tools'], why: 'the project wiki: tools/wiki lints it on every wiki change (ER-30)' },
   { re: /^apps\/(shell-demo|workbench-demo)\/README\.md$/, projects: ['tools'], why: 'new-app.mjs copies its "Start a new app" section' },
   { re: /(^|\/)REVIEWED\.md$/, projects: (f) => (f.startsWith('apps/') ? owners(f) : ['conformance']), why: 'the image reviews conformance C24 checks' },
   { re: /^ui\/projects\/paddock-ui\/format\/src\/storage-cases\.json$/, projects: ['ui', 'app:dyno'], why: "dyno-core units::storage_writes_what_the_ui_writes reads the UI's storage cases" },
@@ -348,6 +349,7 @@ const OWNERS = [
   [/^icons\//, ['icons']],
   [/^ci-image\//, ['ci-image', 'ui']], // scripts/ci-image.test.mjs checks the image against the lock
   [/^(renovate\/|renovate\.json$|CODEOWNERS$|AGENTS\.md$)/, ['tools']], // checked by scripts/affected.test.mjs
+  [/^wiki-lint\.json$/, ['tools']], // the settings of tools/wiki, which lints docs/wiki (ER-30)
 ];
 
 /**

@@ -245,7 +245,7 @@ fn files_below(dir: &Path, base: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-fn git(dir: &Path, args: &[&str]) {
+pub(crate) fn git(dir: &Path, args: &[&str]) {
     let st = Command::new("git")
         .arg("-C")
         .arg(dir)
@@ -266,7 +266,7 @@ fn git(dir: &Path, args: &[&str]) {
 }
 
 /// The fixture repository: the overlay over the fixture is commit `fixture-base`, the fixture alone (overlay-only files removed) is `fixture-head`.
-fn fixture_repo() -> (tempfile::TempDir, PathBuf) {
+pub(crate) fn fixture_repo() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().canonicalize().unwrap();
     git(&root, &["init", "-q", "-b", "main"]);
