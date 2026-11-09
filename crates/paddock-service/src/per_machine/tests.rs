@@ -233,7 +233,8 @@ fn every_adopting_app_is_in_sync() {
 fn canonical_include() -> String {
     include_text(
         std::fs::read_to_string(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../paddock-setup/nsis/paddock-per-machine.nsh"),
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../paddock-setup/nsis/paddock-per-machine.nsh"),
         )
         .unwrap(),
     )
@@ -249,7 +250,9 @@ fn include_text(raw: String) -> String {
 /// two lines must still find it there.
 #[test]
 fn the_include_checks_hold_on_a_crlf_checkout() {
-    let crlf = canonical_include().replace("\r\n", "\n").replace('\n', "\r\n");
+    let crlf = canonical_include()
+        .replace("\r\n", "\n")
+        .replace('\n', "\r\n");
     untrusted_uninstaller_ends_early(&include_text(crlf));
 }
 
