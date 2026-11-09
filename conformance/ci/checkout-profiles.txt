@@ -45,4 +45,5 @@ mention apps/spotter/app/ the screenshots project writes the folder (SCREENSHOTS
 mention apps/sighter/docs/diagrams/ the diagram script, run by hand
 mention conformance/test/c24-reviewed-images.test.mjs fixture strings of the C24 test (the conformance job, Linux)
 mention docs/images/src/ the diagram generators, run by hand
+mention docs/gates.toml a glob in the register's docs.exclude list; the register is read as text, the review folder itself is not needed
 mention conformance/test/kept-clone.test.mjs fixture strings of this test
