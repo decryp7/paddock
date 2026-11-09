@@ -228,6 +228,10 @@ fn the_wrapper_finds_the_root_from_a_subfolder_and_refuses_to_run_outside_a_repo
     assert!(String::from_utf8_lossy(&out.stderr).contains("inside the Paddock repository"));
 }
 
+// The flag checks are three tests, not one: each `both` runs the shell wrapper (about 35 programs, slow to start under Git bash)
+// and the Rust side, about 4 s on the Windows runner, so twelve in one test took 50 s of its 60 s and timed out in runs 7725,
+// 7812 and 7819; split, nextest runs them side by side.
+
 #[test]
 fn compiler_flags_are_part_of_the_hash_in_both_implementations() {
     let f = Fixture::new();
@@ -235,6 +239,31 @@ fn compiler_flags_are_part_of_the_hash_in_both_implementations() {
     let rustflags = f.both(&[("RUSTFLAGS", "-C target-cpu=native".to_string())]).0;
     let encoded = f.both(&[("CARGO_ENCODED_RUSTFLAGS", "-Ca\u{1f}-Cb".to_string())]).0;
     assert!(plain != rustflags && plain != encoded && rustflags != encoded);
+}
+
+#[test]
+fn build_profile_and_target_variables_count_and_the_job_count_does_not() {
+    let f = Fixture::new();
+    let plain = f.both(&[]).0;
+    for (k, v) in [
+        ("CARGO_BUILD_RUSTFLAGS", "-Ca"),
+        ("CARGO_PROFILE_RELEASE_OPT_LEVEL", "1"),
+        ("CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS", "-Cb"),
+        ("CARGO_BUILD_TARGET", "wasm32-unknown-unknown"),
+    ] {
+        assert_ne!(f.both(&[(k, v.to_string())]).0, plain, "{k}");
+    }
+    assert_eq!(
+        f.both(&[("CARGO_BUILD_JOBS", "3".to_string())]).0,
+        plain,
+        "the job count does not change the binary"
+    );
+}
+
+#[test]
+fn every_cargo_config_the_tool_reads_is_part_of_the_hash_in_both_implementations() {
+    let f = Fixture::new();
+    let plain = f.both(&[]).0;
     // A `rustflags` line in a committed config (a target table) and in $CARGO_HOME's config.
     std::fs::write(
         f.root().join(".cargo/config.toml"),
@@ -260,21 +289,8 @@ fn compiler_flags_are_part_of_the_hash_in_both_implementations() {
     let profile = f.both(&[]).0;
     assert_ne!(profile, committed);
     assert_ne!(profile, with_home);
-    // The dotted key, a profile or target variable, and the git-ignored include next to the tool all count too.
+    // The git-ignored include next to the tool counts too.
     std::fs::remove_file(f.cargo_home.path().join("config.toml")).unwrap();
-    for (k, v) in [
-        ("CARGO_BUILD_RUSTFLAGS", "-Ca"),
-        ("CARGO_PROFILE_RELEASE_OPT_LEVEL", "1"),
-        ("CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS", "-Cb"),
-        ("CARGO_BUILD_TARGET", "wasm32-unknown-unknown"),
-    ] {
-        assert_ne!(f.both(&[(k, v.to_string())]).0, committed, "{k}");
-    }
-    assert_eq!(
-        f.both(&[("CARGO_BUILD_JOBS", "3".to_string())]).0,
-        committed,
-        "the job count does not change the binary"
-    );
     std::fs::create_dir_all(f.root().join("tools/paddock-dev/.cargo")).unwrap();
     std::fs::write(
         f.root().join("tools/paddock-dev/.cargo/ci.toml"),
@@ -290,6 +306,46 @@ fn compiler_flags_are_part_of_the_hash_in_both_implementations() {
     let with_above = f.both(&[]).0;
     std::fs::remove_dir_all(&above).unwrap();
     assert_ne!(with_above, included);
+}
+
+/// CI's build-folder action writes `tools/paddock-dev/.cargo/ci.toml` (only `build.target-dir`, the job slot's folder) after
+/// job-isolation took the slot with `./dev`; the release step's `./dev` then saw another hash and rebuilt the tool after the
+/// job's temp folder was gone (runs 7774, 7810 and 7819, macOS). The build folder never changes the binary, as
+/// `CARGO_TARGET_DIR` does not: a config that names nothing else is not hashed, whatever folder it names.
+#[test]
+fn a_config_that_only_names_the_build_folder_does_not_change_the_hash() {
+    let f = Fixture::new();
+    let ci = f.root().join("tools/paddock-dev/.cargo/ci.toml");
+    std::fs::create_dir_all(ci.parent().unwrap()).unwrap();
+    std::fs::write(
+        f.root().join(".gitignore"),
+        "/tools/paddock-dev/target/\n/tools/paddock-dev/.cargo/ci.toml\n",
+    )
+    .unwrap();
+    git(f.root(), &["commit", "-qam", "chore: ignore ci.toml"]);
+    let plain = f.both(&[]);
+    assert!(!plain.1);
+    for slot in ["s1", "s2"] {
+        std::fs::write(
+            &ci,
+            format!("# Written by build-folder.sh for this CI job (git-ignored).\n[build]\r\ntarget-dir = 'C:/ci/target-paddock-{slot}'\n"),
+        )
+        .unwrap();
+        assert_eq!(f.both(&[]), plain, "a build folder ({slot}) is not part of the hash");
+    }
+    std::fs::write(f.cargo_home.path().join("config.toml"), "build.target-dir = \"/elsewhere\"\n").unwrap();
+    assert_eq!(f.both(&[]), plain, "nor as a dotted key in $CARGO_HOME's config");
+    std::fs::remove_file(f.cargo_home.path().join("config.toml")).unwrap();
+    // Anything else next to the build folder counts, and so does a `target-dir` outside `[build]` (not cargo's key).
+    for other in [
+        "[build]\ntarget-dir = 'x'\nrustflags = [\"-Dx\"]\n",
+        "[build]\ntarget-dir = 'x'\n[profile.release]\nlto = true\n",
+        "[profile.release]\ntarget-dir = 'x'\n",
+        "build = { target-dir = 'x' }\n",
+    ] {
+        std::fs::write(&ci, other).unwrap();
+        assert_ne!(f.both(&[]).0, plain.0, "{other:?} is hashed");
+    }
 }
 
 /// A tiny stand-in for the tool binary: answers `--version`, otherwise prints a marker.

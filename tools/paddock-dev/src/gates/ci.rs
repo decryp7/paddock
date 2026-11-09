@@ -360,6 +360,7 @@ pub const LEG_KEYS: &[&str] = &[
     "prepare",
     "checks",
     "rust_checks",
+    "host_rust_checks",
     "ui_checks",
     "angular_dir",
     "last_packages",
@@ -440,6 +441,14 @@ fn app_legs(app: &str, contract: &Json, webkit: bool) -> Result<Vec<BTreeMap<Str
             (
                 "rust_checks",
                 if linux { join_lines(contract, "rustChecks") } else { String::new() },
+            ),
+            (
+                "host_rust_checks",
+                if linux {
+                    String::new()
+                } else {
+                    join_lines(contract, "hostRustChecks")
+                },
             ),
             ("ui_checks", if linux { join_lines(contract, "ui") } else { String::new() }),
             (
