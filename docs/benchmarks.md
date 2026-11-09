@@ -233,6 +233,37 @@ These measure tooling, not a product. They are kept where they are.
   0.53–1.77 ms of that. Windows is not measured.
 - [Lessons](lessons.md): test-binary consolidation, 239 → 99 binaries, nextest 301 s → 196 s.
 
+### 2026-11-09, C58 prototype: unit walk and mode b (ADR 0075)
+
+Quoted by [ADR 0075](adr/0075-copy-waivers-are-data-bound-to-the-landing-unit.md) (Parallelism and cost).
+
+- **Commit:** register and main-equivalent at `origin/main` `b51c72509`; ranges as in the table (all in git history)
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2; git 2.56.0; Python 3.12.5
+- **Load:** 1-minute load 18.8–26.6 for the three timed passes; 22–41 for the sweep; up to five agents building
+- **Build:** a throwaway Python prototype (not in the repository): the §2 walk, ADR 0034 §2 counted lines with comment and
+  `#[cfg(test)]` masking by line patterns, `item:` spans by a brace walk, judging with trailers honoured; one `git`
+  process per diff and blob, serial
+- **Corpus:** the repository's own history (no user data); the `rev-list` of the main-equivalent is built before timing
+- **Command:** `python3 -I units.py <repo> --main b51c72509 [--base <B>] <tip>`; the sweep is `--sweep 2026-11-02`
+- **Runs:** 3 runs per range, one after another; range reported. Sweep: 1 run
+- **Numbers:**
+
+  | Range | Units | Commits | Time |
+  |---|---|---|---|
+  | `4772dc8ce..2e9ffb7a3` (one-commit topic) | 1 | 1 | 0.12–0.13 s |
+  | `b51c72509..63b1a9016` (handshake topic) | 1 | 7 | 0.30–0.33 s |
+  | `84bcb9732^1..84bcb9732` (one landing merge) | 1 | 1 | 0.13–0.17 s |
+  | `origin/train/2026-11-08-1` from its merge-base | 9 | 83 | 3.65–3.81 s |
+  | `96c2a16ae..e20ae50c3` (`pitwall/1.1-b1b-b6`) | 36 | 206 | 10.1–11.5 s |
+  | sweep: 78 branches reaching registered paths | 1–50 each | — | 161 s total |
+
+  The independent reviewer's raw `git diff -U0` loop over register paths per first-parent commit (no walk, no masking,
+  no judging), same day at load 32: the train 0.42–0.67 s, 90 first-parent commits of `origin/main` 1.46–1.53 s.
+- **Memory measure:** not measured
+- **Notes:** taken under load; an indication only. The time is in per-commit `git diff` and `git show` processes of the
+  two large union units of the Pitwall line (52 and 56 commits); the ADR's WP-3 batches them. Raw output in the change's
+  scratch folder, not kept in the repository.
+
 ### 2026-11-03, starving a test process by OS priority on macOS
 
 Quoted by [ADR 0041](adr/0041-deterministic-timing-in-tests.md) §5 (the starved run).
