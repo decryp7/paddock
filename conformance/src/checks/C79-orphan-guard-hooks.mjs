@@ -65,6 +65,12 @@ export const ADOPTING = new Map(
     ['apps/dyno/crates/dyno-helper/src/main.rs', 'Dyno helper runs as root: the guardian is off for root binaries (ADR 0076 amendment 2026-11-09), so it does not adopt'],
     ['apps/dyno/crates/dyno-plugin-host/src/bin/test_plugin.rs', 'Dyno test fixture: adopts in its next release'],
     ['apps/dyno/plugins/dyno-plugin-example/src/main.rs', 'Dyno example plugin: adopts in its next release'],
+    ['apps/pitcrew/app/src-tauri/src/main.rs', 'Pitcrew app: adopts in 1.1'],
+    ['apps/pitcrew/crates/pitcrew-service/src/main.rs', 'Pitcrew: adopts in 1.1'],
+    ['apps/pitwall/app/src-tauri/src/main.rs', 'Pitwall app: adopts in 1.1'],
+    ['apps/pitwall/crates/pitwall-cli/src/main.rs', 'Pitwall: adopts in 1.1'],
+    ['apps/pitwall/crates/pitwall-server/src/fake_engine_main.rs', 'Pitwall test fixture (async main): adopts in 1.1'],
+    ['apps/pitwall/crates/pitwall-server/src/main.rs', 'Pitwall (async main, needs a plain fn main first): adopts in 1.1'],
     ['apps/shell-demo/src-tauri/agent/src/main.rs', 'shell demo: adopts with the next shared batch'],
     ['apps/shell-demo/src-tauri/src/main.rs', 'shell demo: adopts with the next shared batch'],
     ['apps/spotter/app/src-tauri/src/main.rs', 'Spotter app: adopts in its next release'],
@@ -75,7 +81,9 @@ export const ADOPTING = new Map(
     ['crates/paddock-plugin-test/src/bin/fixture_v1.rs', 'shared test fixture: adopts with the next shared batch'],
     ['crates/paddock-plugin-test/src/bin/misbehaving.rs', 'shared test fixture: adopts with the next shared batch'],
     ['crates/paddock-setup/src/main.rs', 'shared tool: adopts with the next shared batch'],
+    ['tools/heavy/src/main.rs', 'heavy tool: adopts with the next tooling batch'],
     ['tools/paddock-dev/src/main.rs', 'paddock-dev: adopts with the next shared batch'],
+    ['tools/wiki/src/main.rs', 'wiki tool: adopts with the next tooling batch'],
   ],
 );
 
@@ -147,6 +155,8 @@ export default {
   id: 'C79',
   title: 'Binaries that start supervised children call the orphan guardian',
   rule: 53,
+  scope: 'root',
+  mode: 'gate',
   run(ctx, adopting = ADOPTING) {
     const fix = 'Call `paddock_proc::guardian::run_if_requested();` first thing in `main` (ADR 0076 amendment 2026-11-09).';
     const out = [];
