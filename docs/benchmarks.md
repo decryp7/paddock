@@ -233,6 +233,64 @@ These measure tooling, not a product. They are kept where they are.
   0.53–1.77 ms of that. Windows is not measured.
 - [Lessons](lessons.md): test-binary consolidation, 239 → 99 binaries, nextest 301 s → 196 s.
 
+### 2026-11-09, CI baseline: queues, critical path, setup, cache and failures (docs/adr-ci-speed)
+
+Quoted by [ADR 0080](adr/0080-ci-at-the-speed-of-the-critical-path.md).
+- **Commit:** none built; CI history of `decryp7/paddock` runs 7480 to 7825 (main at `b51c72509`, train
+  `train/2026-11-09-2` at `6e57be619`).
+- **Machine:** the CI runners as the Gitea API names them: `Gitea Action Runner (d-gtr9)` (Linux containers,
+  `paddock-ci:v2`), `decryp7ology-dev` (Windows VM, 16 vCPU, 32 GB; 1 job at a time until the afternoon of 2026-11-09,
+  3 after), `d7-mac-mini`, `-2`, `-3` (one Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2, shared with agents; `-2` and
+  `-3` since 2026-11-09 01:03 and 01:16 +08). The analysis ran on the same Mac.
+- **Load:** not controlled: a busy development week (trains, release candidates, the planner port). Run outcomes in the
+  window: 64 success, 87 failure, 63 cancelled, 2 running.
+- **Build:** none.
+- **Corpus:** the API's run, job and step timestamps for 216 runs (3,624 jobs) from 2026-11-04 05:00 to 2026-11-09
+  18:38 +08, and 174 job logs of runs 7696, 7697, 7810, 7813, 7821, 7822 plus the failed jobs of 7774, 7776, 7795,
+  7796, 7797, 7803, 7812 and 7819. No user data; logs kept outside the repository.
+- **Command:** `GET /api/v1/repos/decryp7/paddock/actions/runs?limit=50&page=1..6`, `.../runs/{id}/jobs?limit=100`
+  (paged where `total_count` exceeded the page), `.../actions/jobs/{id}/logs`; parsed with a throwaway Python script (the
+  method of `scripts/ci-timings.mjs` plus log parsing; WP-0 of ADR 0080 makes it `./dev ci timings`).
+  "Ready" is the end of `plan` (or of `rust format + clippy` for Debrief's smoke and bundle jobs, per their `needs`);
+  "queue" is start minus ready. Step phases are classified by step name (checkout, npm, browser, tool set-up, upload,
+  clean-up, work). Compile, nextest and Playwright phases come from cargo's `Finished ... in`, nextest's `Summary [ N s]`
+  and Playwright's `N passed (T)` lines. Concurrency is sampled every 30 or 60 s from job start and end.
+- **Runs:** one pass over history; runs 7824 and 7825 read at 18:38 while still running.
+- **Numbers:**
+
+  | Measure | Value |
+  |---|---|
+  | `ci.yml` wall, 48 completed runs (not cancelled) | median 45.1 min, p90 127.4 min |
+  | `ci.yml` no-queue critical path (plan end + longest job) | median 19.6 min, p90 41.4 min |
+  | `ci.yml` queue of the last job | median 33.8 min, p90 113.4 min |
+  | `debrief.yml` wall / no-queue path, 13 runs | median 62.1 / 23.4 min |
+  | Run 7821 (`ci.yml`, train) / 7822 (`debrief.yml`) | 47.4 / 21.8 min; Linux 26 jobs, 104 job-min / 11 jobs, 55 job-min; last Linux job of 7821 queued 31.5 min |
+  | Run 7824 at 16.7 min | 19 Linux jobs queued |
+  | `plan` job | median 34 s, p90 211 s; in 7821 2.9 min (55 s before the first step, 100 s checkout) |
+  | Linux job time by phase (6 runs) | Playwright 211 of 453 min (47 %), compile 70 (15 %), nextest run 16 (3 %) |
+  | macOS / Windows job time by phase | compile 50 % / 54 %; nextest run 18 % / 13 %; Playwright 5 % / 0 % |
+  | Set-up share of job wall (5.5 days) | Linux 20 %, Windows 43 %, macOS 31 % |
+  | Checkout median / p90 | Linux 10 / 24 s; Windows 105 / 211 s; macOS 57 / 268 s (before the kept clone) |
+  | Linux jobs under 2 min | 54 % of 2,405 |
+  | Concurrency, last 24 h, share of time at each level | Linux: 0 jobs 35 %, 4 jobs 47 %, more than 4 3 %; Windows: 1 job 59 %, 3 jobs 8 %; macOS: 1 job 37 %, 3 jobs 26 % |
+  | Queue wait, last 72 h, p50 / p90 | Linux 7.3 / 35.1 min; Windows 20.7 / 79.9 min; macOS 19.7 / 72.5 min |
+  | Mean busy lanes, last 72 h | Linux 1.31, Windows 0.53, macOS 0.70 |
+  | sccache hits / misses (6 runs) | Linux 34,027 / 3,217 (91.4 %); macOS 587 / 1,836 (24.2 %); Windows 583 / 1,580 (27.0 %) |
+  | Misses of the same job on two OS (7821 `crate`) | Linux 78, macOS 79 |
+  | Cold slot (7810 `app dyno (windows)`, `sccache-s3`) | 1,020 misses, 2 hits |
+  | Linux compile requests in 7821 (10 Rust jobs) | 12,729 |
+  | `cargo-about` via `taiki-e/install-action` | 277, 279, 276 s in 7821/7822 (8 × HTTP 504 each); 1 to 19 s in 5 other runs |
+  | Runner minutes by run outcome | Linux 9,547 (failed runs 59 %, cancelled 20 %, green 20 %); Windows 3,839 (64 / 15 / 21 %); macOS 4,211 (59 / 24 / 16 %) |
+  | Failed `ci.yml`/`debrief.yml` runs: minutes in failed jobs | 1,394 of 5,724 (24 %); median 9 % of jobs fail |
+  | Slowest tests | `debrief-store-duck` suites on macOS 60 to 126 s, three 180 s timeouts in 7822; `paddock-dev` golden 196 s (Windows); tests over 10 s: 150 of 403 test-min |
+  | 49 failed jobs in 12 runs | 7 on static checks (seconds locally), 2 on the job-isolation holder, the rest on tests (load- or OS-dependent on macOS and Windows, plus goldens) |
+
+- **Memory:** not measured.
+- **Notes:** the `ci.yml` and `debrief.yml` figures use those workflows' `needs`; the 72-hour queue figures include the
+  release and nightly workflows with "ready" taken as the end of their plan job or the run's creation, which can overstate
+  their queue. A busy development week; compare later blocks in pairs (the 2026-10 note: load changes timings by up to
+  60 %). The Windows capacity changed during the window, so its queue figures mostly describe the old one-lane set-up.
+
 ### 2026-11-03, starving a test process by OS priority on macOS
 
 Quoted by [ADR 0041](adr/0041-deterministic-timing-in-tests.md) §5 (the starved run).
