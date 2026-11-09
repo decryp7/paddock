@@ -6,6 +6,7 @@ use super::menu_bar::{MenuBarItem, MenuBarKind};
 use super::metric::Metric;
 use super::number_support::{number_support, NumberSupport, TrayPlatform};
 use super::popover::{PopoverKind, PopoverWidget, VolumeChoice};
+use super::style_support::{style_support, StyleSupport};
 use paddock_widgets::Catalogue;
 use serde::{Deserialize, Serialize};
 
@@ -70,6 +71,8 @@ pub struct WidgetChoices {
     pub menu_bar_metrics: Vec<MetricChoice>,
     /// What this platform's tray draws of a number item (its formats, and whether the label fits in the icon).
     pub number: NumberSupport,
+    /// What this platform's tray draws of each style, and what to say after an add.
+    pub styles: StyleSupport,
 }
 
 fn choice(metric: Metric) -> MetricChoice {
@@ -147,6 +150,7 @@ pub fn widget_choices(platform: TrayPlatform, px: u32) -> WidgetChoices {
         menu_bar,
         menu_bar_metrics: Metric::CHOICES.iter().cloned().map(choice).collect(),
         number: number_support(platform, px),
+        styles: style_support(platform),
     }
 }
 

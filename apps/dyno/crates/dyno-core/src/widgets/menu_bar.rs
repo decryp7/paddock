@@ -167,7 +167,7 @@ const KINDS: &[KindSpec<MenuBarKind>] = &[
     spec(
         MenuBarKind::GraphAndNumber,
         "Graph and number",
-        "A line with the number beside it",
+        "A small graph with its number",
         "graph",
     ),
 ];

@@ -17,6 +17,7 @@ pub mod popover;
 pub mod popover_values;
 pub mod reading;
 pub mod stored_wire;
+pub mod style_support;
 pub mod wire;
 
 #[cfg(test)]
@@ -29,6 +30,7 @@ pub use metric::Metric;
 pub use number_support::{number_support, NumberSupport, TrayPlatform};
 pub use popover::{PopoverCatalogue, PopoverKind, PopoverWidget, VolumeChoice};
 pub use reading::{read_all, read_metric, with_dashboard_thresholds, MetricReading, ReadingQuery};
+pub use style_support::{style_support, FixedStyle, StyleChoice, StyleSupport};
 pub use wire::{edit_layout, layout_view, JsonOnLink, SurfaceEdit, SurfaceView};
 
 use serde::{Deserialize, Serialize};

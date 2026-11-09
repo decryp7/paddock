@@ -4,7 +4,7 @@ import type { EditOutcome, FirewallView, GeoSummary, IntelEdit, IntelStatus, Mea
 import { MockIntel } from './mock/intel';
 import type { DynoSurface, MetricReading, Navigate, PreviewReply, PreviewRequest, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
 import gridCases from '../../../../../../ui/projects/paddock-ui/widgets/generated/grid-cases.json';
-import { MockWidgets, mockMetricReading, mockNumberSupport, mockWidgetChoices, mockWidgetOptionsFromUrl, type GridCase, type MockWidgetsOptions } from './mock/widgets';
+import { MockWidgets, mockMetricReading, mockNumberSupport, mockStyleSupport, mockWidgetChoices, mockWidgetOptionsFromUrl, type GridCase, type MockWidgetsOptions } from './mock/widgets';
 import type { DashboardView, PopoverSurfaceValues } from './widget-types';
 import { readValue } from './measured';
 import type {
@@ -1573,7 +1573,7 @@ export class MockBackend implements DynoBackend {
   }
 
   widgetChoices(): Promise<WidgetChoices> {
-    return this.reply('widgetChoices', () => mockWidgetChoices(mockNumberSupport(this.os, this.trayPx)));
+    return this.reply('widgetChoices', () => mockWidgetChoices(mockNumberSupport(this.os, this.trayPx), mockStyleSupport(this.os)));
   }
 
   showMainWindow(): Promise<void> {

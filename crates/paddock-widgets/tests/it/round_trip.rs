@@ -72,6 +72,10 @@ fn every_edit_round_trips() {
             id: id("a"),
             widget: disk("x"),
         },
+        Edit::ChangeKind {
+            id: id("a"),
+            widget: Gadget::Clock,
+        },
         Edit::ApplyPreset { id: pid("a") },
         Edit::SavePreset { name: "n".into() },
         Edit::DeletePreset { id: pid("a") },

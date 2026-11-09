@@ -26,4 +26,6 @@ export const WIDGET_ICONS: Readonly<Record<string, string>> = {
   history: glyph(['M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4.5 9M4.5 4.5V9H9M12 8v4l2.75 1.75']),
   consumers: glyph(['M4 19h16M7 19V9M12 19V5M17 19v-7']),
   meter: glyph(['M3.5 9h17v6h-17z', 'M6 12h8']),
+  // A menu-bar row whose metric draws one picture names it with its metric's icon (`style_support`'s `icon`).
+  temperature: glyph(['M14 14.8V5a2 2 0 1 0-4 0v9.8a4 4 0 1 0 4 0z', 'M12 9v7']),
 };

@@ -161,26 +161,31 @@ pub fn parse_items(text: &str) -> Vec<ItemSpec> {
     out
 }
 
-/// What changing the icons from `current` to `wanted` takes: only items that are gone or differ are removed, only items that are new
-/// or differ are made, so an unchanged item keeps its native icon (and with it its place in the bar).
+/// What changing the icons from `current` to `wanted` takes. The OS icon belongs to the item's id (its identity, and on Windows
+/// its pin and its place among the pinned icons; on macOS its saved position), and nothing else of the spec is native: only items
+/// that are gone are removed, only new ids are made, and an item whose style, format, label or metric changed keeps its icon and
+/// is repainted with its next frame.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SyncPlan {
     /// Ids to remove, sorted.
     pub remove: Vec<String>,
     /// Specs to make, in `wanted` order.
     pub create: Vec<ItemSpec>,
+    /// Specs that changed on an icon that stays, in `wanted` order.
+    pub update: Vec<ItemSpec>,
 }
 
 /// The [`SyncPlan`] from the icons now there to the wanted specs.
 pub fn plan_sync(current: &std::collections::HashMap<String, ItemSpec>, wanted: &[ItemSpec]) -> SyncPlan {
-    let mut remove: Vec<String> = current
-        .iter()
-        .filter(|(id, old)| wanted.iter().find(|w| &w.id == *id).is_none_or(|w| w != *old))
-        .map(|(id, _)| id.clone())
-        .collect();
+    let mut remove: Vec<String> = current.keys().filter(|id| !wanted.iter().any(|w| &w.id == *id)).cloned().collect();
     remove.sort();
-    let create = wanted.iter().filter(|w| current.get(&w.id) != Some(*w)).cloned().collect();
-    SyncPlan { remove, create }
+    let create = wanted.iter().filter(|w| !current.contains_key(&w.id)).cloned().collect();
+    let update = wanted
+        .iter()
+        .filter(|w| current.get(&w.id).is_some_and(|old| old != *w))
+        .cloned()
+        .collect();
+    SyncPlan { remove, create, update }
 }
 
 /// What one drawn frame costs the native icon. The picture is set in ONE call when it changed (a second call renders the
@@ -265,7 +270,7 @@ fn fit_units(text: &str, max: usize) -> String {
 }
 
 /// A picture in device pixels: straight RGBA bytes.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Picture {
     /// Row-major RGBA bytes (`width * height * 4`).
     pub rgba: Vec<u8>,
@@ -360,6 +365,9 @@ pub struct TrayItems {
     policy: AlertPolicy,
     /// The metrics the agent has an open alarm for now.
     alarmed: Vec<Metric>,
+    /// The last [`HISTORY`] live updates (without the process table), oldest first: a graph made now starts from them instead
+    /// of one column.
+    recent: VecDeque<LiveUpdate>,
 }
 
 /// A measurement: where it sits on the 0-100 drawing scale, and how to say it.
@@ -402,6 +410,7 @@ impl TrayItems {
             memo: Default::default(),
             policy: AlertPolicy::default(),
             alarmed: Vec::new(),
+            recent: VecDeque::new(),
         }
     }
 
@@ -457,12 +466,28 @@ impl TrayItems {
         &self.specs
     }
 
-    /// Replaces the items; returns whether they changed.
+    /// Replaces the items; returns whether they changed. An item that keeps its id and metric keeps its history (a change of
+    /// style or of an other item does not empty its graph); every item is drawn again at the next update.
     pub fn set_specs(&mut self, specs: Vec<ItemSpec>) -> bool {
         if specs == self.specs {
             return false;
         }
-        self.state = specs.iter().map(|_| ItemState::default()).collect();
+        let mut old: std::collections::HashMap<String, (Metric, ItemState)> = self
+            .specs
+            .drain(..)
+            .zip(self.state.drain(..))
+            .map(|(spec, st)| (spec.id, (spec.metric, st)))
+            .collect();
+        self.state = specs
+            .iter()
+            .map(|spec| match old.remove(&spec.id) {
+                Some((metric, st)) if metric == spec.metric => ItemState {
+                    history: st.history,
+                    ..ItemState::default()
+                },
+                _ => ItemState::default(),
+            })
+            .collect();
         self.memo.borrow_mut().clear();
         self.specs = specs;
         true
@@ -523,6 +548,22 @@ impl TrayItems {
                 self.state[i].last = Some(frame.clone());
                 changed.push((self.specs[i].id.clone(), frame));
             }
+        }
+        // Kept for graphs made later, without the process table, the groups and the other users (the large parts, which no item
+        // reads: they read the top lists); they are never cloned.
+        self.recent.push_back(LiveUpdate {
+            system: u.system.clone(),
+            pressure: u.pressure,
+            top_cpu: u.top_cpu.clone(),
+            top_memory: u.top_memory.clone(),
+            overhead: u.overhead,
+            processes: None,
+            groups: None,
+            other_users: None,
+            via: u.via.clone(),
+        });
+        while self.recent.len() > HISTORY {
+            self.recent.pop_front();
         }
         changed
     }
@@ -603,6 +644,17 @@ impl TrayItems {
             let tooltip = item_tooltip(&name, &TipState::Unavailable);
             return self.frame(&spec, &Sample::default(), Visual::Unavailable, dark, tooltip);
         };
+        let graph = matches!(spec.glyph, Glyph::Graph | Glyph::GraphNumber);
+        if graph && self.state[i].history.is_empty() {
+            // A graph made now (added, or changed to a graph) starts from the recent updates, not from one column.
+            let seed: Vec<f32> = self
+                .recent
+                .iter()
+                .filter_map(|old| self.measure(old, &spec.metric))
+                .map(|m| m.scale)
+                .collect();
+            self.state[i].history.extend(seed);
+        }
         let history = &mut self.state[i].history;
         history.push_back(m.scale);
         while history.len() > HISTORY {
@@ -617,11 +669,7 @@ impl TrayItems {
         let s = Sample {
             value: Some(shown),
             // Only the graphs draw the history; for the others it must not make the sample (and so the memo key) change every tick.
-            history: if matches!(spec.glyph, Glyph::Graph | Glyph::GraphNumber) {
-                history.iter().copied().collect()
-            } else {
-                Vec::new()
-            },
+            history: if graph { history.iter().copied().collect() } else { Vec::new() },
             // Only the core bars draw the cores (they return above) and only the network items draw up and down: for the
             // others these change every tick on a real machine and would make the memo key miss every time.
             cores: Vec::new(),
@@ -718,6 +766,101 @@ mod tests {
 
     fn item(id: &str, metric: Metric, glyph: Glyph) -> ItemSpec {
         ItemSpec::new(id, metric, glyph)
+    }
+
+    /// The columns of a Windows icon that hold the accent (the graph's fill), left to right.
+    fn accent_columns(look: &Look, dark: bool) -> usize {
+        let accent = pixel::Theme { dark }.accent();
+        let w = look.width as usize;
+        (0..w)
+            .filter(|x| look.pictures[0].rgba.chunks(4).skip(*x).step_by(w).any(|p| p == accent))
+            .count()
+    }
+
+    #[test]
+    fn a_style_change_keeps_the_id_remakes_that_icon_and_its_picture_differs() {
+        use paddock_widgets::{apply, Edit, Layout, PlacementId};
+        let before = Layout::defaults::<MenuBarCatalogue>();
+        let id = before.placements[0].id.clone();
+        let after = apply::<MenuBarCatalogue>(
+            &before,
+            Edit::ChangeKind {
+                id: id.clone(),
+                widget: MenuBarItem::VerticalBars { metric: Metric::CpuTotal },
+            },
+        )
+        .expect("the engine changes the style in place");
+        assert_eq!(after.placements[0].id, id, "the id, and so the tray icon's identity, stays");
+        let (old, new) = (items_from_settings(&before.placements), items_from_settings(&after.placements));
+        let current: std::collections::HashMap<String, ItemSpec> = old.iter().map(|s| (s.id.clone(), s.clone())).collect();
+        let plan = plan_sync(&current, &new);
+        // The OS icon stays (on Windows its pin and its place among the pinned icons go with the icon, not with a new one made
+        // with the same GUID): nothing is removed or made, the changed item is repainted.
+        assert!(plan.remove.is_empty() && plan.create.is_empty(), "{plan:?}");
+        assert_eq!(plan.update.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), [id.as_str()]);
+        assert_eq!(PlacementId::new(&plan.update[0].id).expect("an id"), id);
+        for env in [win_env(16), win_env(24), mac_env()] {
+            let picture = |specs: &[ItemSpec]| {
+                let mut t = TrayItems::new(specs.to_vec(), env.clone());
+                t.frames(&update(37.0), true)
+                    .into_iter()
+                    .find(|(i, _)| i == id.as_str())
+                    .expect("drawn")
+                    .1
+                    .look
+            };
+            assert_ne!(picture(&old), picture(&new), "{:?} {}", env.platform, env.px);
+        }
+    }
+
+    #[test]
+    fn a_new_graph_starts_from_the_recent_updates_not_from_one_column() {
+        let number = item("number", Metric::CpuTotal, Glyph::Number);
+        let mut t = TrayItems::new(vec![number.clone()], win_env(16));
+        for i in 0..12 {
+            t.frames(&update(20.0 + 5.0 * i as f32), true);
+        }
+        let graph = item("line-graph", Metric::CpuTotal, Glyph::Graph);
+        assert!(t.set_specs(vec![number, graph.clone()]));
+        let first = t
+            .frames(&update(40.0), true)
+            .into_iter()
+            .find(|(i, _)| i == "line-graph")
+            .expect("drawn")
+            .1;
+        assert!(
+            accent_columns(&first.look, true) > 1,
+            "the first frame of a new graph has its history"
+        );
+        assert_eq!(accent_columns(&first.look, true), 13, "the twelve updates before it and its own");
+    }
+
+    #[test]
+    fn a_graph_keeps_its_history_when_another_item_changes_and_loses_it_with_its_metric() {
+        let graph = item("line-graph", Metric::CpuTotal, Glyph::Graph);
+        let mut t = TrayItems::new(vec![graph.clone()], win_env(16));
+        for i in 0..5 {
+            t.frames(&update(30.0 + i as f32), true);
+        }
+        t.set_specs(vec![graph.clone(), item("number", Metric::Memory, Glyph::Number)]);
+        let kept = t
+            .frames(&update(50.0), true)
+            .into_iter()
+            .find(|(i, _)| i == "line-graph")
+            .expect("drawn")
+            .1;
+        assert_eq!(accent_columns(&kept.look, true), 6);
+        // Another metric on the same id starts from the recent updates of that metric.
+        let mut memory = graph;
+        memory.metric = Metric::Memory;
+        t.set_specs(vec![memory]);
+        let swapped = t
+            .frames(&update(50.0), true)
+            .into_iter()
+            .find(|(i, _)| i == "line-graph")
+            .expect("drawn")
+            .1;
+        assert_eq!(accent_columns(&swapped.look, true), 7, "six recent updates and this one");
     }
 
     #[test]
@@ -1023,7 +1166,7 @@ mod tests {
     }
 
     #[test]
-    fn only_changed_items_are_removed_and_made() {
+    fn only_items_that_come_or_go_are_made_or_removed_and_a_changed_one_keeps_its_icon() {
         use std::collections::HashMap;
         let a = ItemSpec::new("cpu-1", Metric::CpuTotal, Glyph::Ring);
         let b = ItemSpec::new("memory-2", Metric::Memory, Glyph::Number);
@@ -1035,10 +1178,13 @@ mod tests {
             "nothing changed"
         );
         let b2 = ItemSpec::new("memory-2", Metric::Memory, Glyph::Graph);
+        let mut a2 = a.clone();
+        a2.metric = Metric::GpuLoad;
         let d = ItemSpec::new("gpu-4", Metric::GpuLoad, Glyph::Ring);
-        let plan = plan_sync(&current, &[a.clone(), b2.clone(), d.clone()]);
-        assert_eq!(plan.remove, ["memory-2", "swap-3"]);
-        assert_eq!(plan.create, [b2, d]);
+        let plan = plan_sync(&current, &[a2.clone(), b2.clone(), d.clone()]);
+        assert_eq!(plan.remove, ["swap-3"], "only the item that is gone");
+        assert_eq!(plan.create, [d], "only the new item");
+        assert_eq!(plan.update, [a2, b2], "a new style or metric on the same id keeps the icon");
         assert_eq!(plan_sync(&HashMap::new(), std::slice::from_ref(&a)).create, [a]);
     }
 

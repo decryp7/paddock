@@ -787,3 +787,40 @@ fn the_outcome_names_neighbours_and_resize_limits_and_clears_after_other_edits()
         Err(WidgetError::Blocked(paddock_widgets::Block::Smallest))
     ));
 }
+
+#[test]
+fn change_kind_on_a_grid_keeps_a_rectangle_the_new_kind_allows_and_refuses_one_it_does_not() {
+    // The clock (3 x 3) becomes alarms of the same size rule: the rectangle and the id stay.
+    let one = apply::<Board>(&start(), Edit::Remove { id: id("alarms") }).unwrap();
+    let changed = apply::<Board>(
+        &one,
+        Edit::ChangeKind {
+            id: id("clock"),
+            widget: Gadget::Alarms { rows: 9 },
+        },
+    )
+    .unwrap();
+    assert_eq!(rect(&changed, "clock"), rect(&one, "clock"));
+    assert_eq!(
+        changed
+            .placements
+            .iter()
+            .find(|p| p.id == id("clock"))
+            .unwrap()
+            .widget,
+        Gadget::Alarms { rows: 3 }
+    );
+    // Disk space is 6 or 12 wide: a 3-wide rectangle does not suit it.
+    assert_eq!(
+        apply::<Board>(
+            &one,
+            Edit::ChangeKind {
+                id: id("clock"),
+                widget: disk("x"),
+            },
+        ),
+        Err(WidgetError::Invalid(
+            "This widget's size does not suit that kind; resize it first.".into()
+        ))
+    );
+}

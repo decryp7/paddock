@@ -512,7 +512,7 @@ describe('pd-widget-area', () => {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdWidgetChooser, PdWidgetOption],
   template: `
-    <pd-widget-chooser [view]="v()" [error]="err()" [widgetFor]="widgetFor" [again]="{ disk: 'Add volume' }" [preview]="preview()" [mode]="mode()" (edit)="edits.push($event)">
+    <pd-widget-chooser [view]="v()" [error]="err()" [widgetFor]="widgetFor" [describe]="describe()" [again]="{ disk: 'Add volume' }" [preview]="preview()" [mode]="mode()" (edit)="edits.push($event)">
       <ng-template pdWidgetOption="disk" [pdWidgetOptionOf]="sample" let-p><span class="opt">volume of {{ p.id }}:{{ p.widget.kind }}</span></ng-template>
       <div slot="preview" class="pv">preview</div>
     </pd-widget-chooser>
@@ -525,6 +525,7 @@ class ChooserHost {
   readonly preview = signal(false);
   readonly mode = signal<'edit' | 'add'>('edit');
   readonly err = signal<string | null>(null);
+  readonly describe = signal<(p: Placement<W>) => { title: string; summary: string; icon?: string } | null>(() => null);
   readonly widgetFor = (k: string): W => ({ kind: k as W['kind'] });
   edits: Edit<W>[] = [];
 }
@@ -566,6 +567,23 @@ describe('pd-widget-chooser', () => {
     expect(toggles.map((t) => t.textContent!.trim())).toEqual(['Half', 'Full']);
     expect(qa(f, '.pd-wc-more').map((b) => b.getAttribute('aria-label'))[1]).toBe('More actions for Disk space');
     expect(rows(f).length).toBeGreaterThan(0);
+  });
+
+  it("names a row as the app describes it, in the row, its grip and its menu, and keeps the kind's names otherwise", async () => {
+    const f = await setup();
+    const icons = (fx: typeof f) => qa(fx, 'mat-icon.pd-wc-kicon').map((i) => i.getAttribute('data-mat-icon-name'));
+    const kindIcons = icons(f);
+    f.componentInstance.describe.set((p) =>
+      p.id === 'net' ? { title: 'Upload', summary: 'One picture in every style', icon: 'cpu' } : p.id === 'cpu' ? { title: 'Load', summary: 'Its own name, the kind icon' } : null,
+    );
+    await settle(f);
+    const titles = qa(f, '.pd-wc-item .pd-wc-txt b').slice(0, 4).map((b) => b.textContent);
+    expect(titles).toEqual(['Active alarms', 'Disk space', 'Load', 'Upload']);
+    // The described icon, or the kind's when the description has none.
+    expect(icons(f).slice(0, 4)).toEqual([kindIcons[0], kindIcons[1], kindIcons[2], 'cpu']);
+    expect(qa(f, '.pd-wc-item .pd-wc-txt span')[3]!.textContent).toBe('One picture in every style');
+    expect(grip(f, 3).getAttribute('aria-label')).toBe('Reorder Upload, position 4 of 4');
+    expect(qa(f, '.pd-wc-more').map((b) => b.getAttribute('aria-label'))[3]).toBe('More actions for Upload');
   });
 
   it('emits the Edit for a width change', async () => {

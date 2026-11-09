@@ -72,7 +72,7 @@ ones digit never moves and the width never changes. Measured with CoreText on th
 | VerticalBars, per core | 2 pt column per core, 1 pt gap, 14 pt high | 3 n - 1 pt (10 cores: 29) |
 | LineGraph | label, 30 x 14 pt area graph on a plate, a sample per point | 56 to 60 pt (DSK 57) |
 | GraphAndNumber | 24 x 14 pt graph, 4 pt gap, the stack | 65 pt |
-| Ring | **drawn as the meter on macOS**: the 270-degree gauge read as a spinner at 18 pt and was the weakest format | as the meter |
+| Ring | label, 4 pt gap, a full 14 pt ring (2.5 pt stroke, track at the track alpha) filling clockwise from the top (Dyno 1.1.1; the first round's 270-degree gauge read as a spinner at 18 pt) | label + 18 pt |
 | Network (NetworkUp/Down) | up over down: arrow, `000` field, unit `B/s` to `GB/s` | 50 pt |
 | Temperature | thermometer (1 pt outlined stem filling 20 to 110 °C, solid bulb), `000°` | 40 pt |
 
@@ -87,7 +87,7 @@ ones digit never moves and the width never changes. Measured with CoreText on th
 | Normal | as above |
 | Highlighted (popover or menu open) | the system's highlight behind the template; the image is unchanged |
 | Alert | the number on a solid plate, knocked out; a stack is one full-height plate (room around both lines at 1x: the "1x alert" close-ups); items without a number invert their label. A shape, so it reads in any tint and without colour |
-| Unavailable (not measurable, or the agent away) | an en dash in the field, the item at 45 %; the same width |
+| Unavailable (not measurable, or the agent away) | an en dash in the field, the item at 45 %; the same width. The formats without a number (meter, bar, ring, graph, per-core bars) draw a 2 pt dash where their mark would be (Dyno 1.1.1), so the state is a shape and never reads as 0 % |
 
 - Alert hysteresis: enter at the threshold held for 3 s, leave 5 points below it.
 - No colour mode on macOS (a non-template image stops adapting to the bar; the design guide forbids full colour there).
@@ -135,12 +135,22 @@ ones digit never moves and the width never changes. Measured with CoreText on th
 | 24 | 5-row capitals | 7 x 12, 2 px | 2 px |
 | 32 | 7-row capitals | 9 x 16, 3 px | 3 px |
 
-- Per kind: percent (number and meter), meter, per-core bars (each with a full-height track, so the icon keeps its frame when
-  idle; at least 1 px of fill above 0.5 %), graph (on a faint plate with a baseline track; a sample above 0.5 % rises at
-  least 1 px above the track), gauge with the metric's letter, network (at 16 and 20 two log-scale meters with arrows; from 24
-  small numerals with K, M or G), temperature (at 16 and 20 two digits with a 3 px degree ring in the corner).
-- Ink coverage at 16 px on a dark taskbar (alpha >= 50 %): percent 35 %, "100" 54 %, temperature 37 %, network 25 %,
-  per-core 16 %, gauge 15 %, graph 11 %, alert 48 %. (The family's 18 to 30 % rule is for app glyphs; listed for comparison.)
+- Per kind: percent (number and meter), meter (3/8 of the icon high: 6 rows at 16 px), bar (Dyno 1.1.1: one vertical column
+  half the icon wide, filling from the bottom; centred below 22 px, right-aligned under the label from 22 px), per-core bars
+  (each with a full-height track, so the icon keeps its frame when idle; at least 1 px of fill above 0.5 %), graph (on a faint
+  plate with a baseline track; a sample above 0.5 % rises at least 1 px above the track), graph and number (Dyno 1.1.1: the
+  number at the top right above a graph of the recent values, no label (the tooltip names the metric); at 16 and 20 px the
+  number is in the 7-row numerals so the graph gets 7 and 10 rows; from 22 px the layout's numerals), gauge with the metric's
+  letter, network (at 16 and 20 two log-scale meters with arrows; from 24 small numerals with K, M or G), temperature (at 16
+  and 20 two digits with a 3 px degree ring in the corner). Every style is its own picture at every size: the app's tests
+  require any two styles to differ in at least 10 % of the pixels (the closest pair is the graph and the graph and number at
+  20 px, 10.5 %, which differ by the number).
+- Alert on the value-only kinds: the corner notch plus the danger fill (the graph too since Dyno 1.1.1); unavailable: an ink
+  dash across the mark (bar, meter, graph, gauge's open quarter, per-core bars, the network meters), then the 45 %.
+- Ink coverage at 16 px on a dark taskbar (alpha >= 50 %; Dyno 1.1.1 sheet, value 37 % with a history around it): line graph
+  42 %, bars 16 %, meter 14 %, gauge 14 %, number 32 %, graph and number 31 %; at 24 px 27, 17, 17, 13, 22 and 30 %.
+  The first round measured "100" 54 %, temperature 37 %, network 25 %, per-core 16 %, alert 48 %. (The family's 18 to 30 %
+  rule is for app glyphs; listed for comparison.)
 
 ## 4. Linux appindicator
 
@@ -178,7 +188,7 @@ On top of `feat/dyno-tray-per-metric`:
 
 - `tray_model`: `render_glyph` returns the new pictures through its existing `Rendered { icon, width }`: `menu_bar::render` on
   macOS (two templates, 1x and @2x, at the item's width) and `pixel::render` on Windows and Linux at the taskbar's pixel size.
-  Map `MenuBarItem` to formats (network and temperature get their own; `Ring` is the meter on macOS); make stacked the default
+  Map `MenuBarItem` to formats (network and temperature get their own; `Ring` was the meter on macOS until Dyno 1.1.1, which draws a full ring); make stacked the default
   number layout; add alert hysteresis.
 - `tray.rs`:
   - `paint`: build the image at its own width (not `size, size`); on macOS hand both representations to the new tray-icon call

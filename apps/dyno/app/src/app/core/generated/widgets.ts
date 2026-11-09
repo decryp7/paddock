@@ -410,6 +410,14 @@ id: PlacementId,
 /**
  * The new widget, of the same kind.
  */
+widget: W, } } | { "changeKind": { 
+/**
+ * The placement.
+ */
+id: PlacementId, 
+/**
+ * The new widget, of any kind of the catalogue.
+ */
 widget: W, } } | { "applyPreset": { 
 /**
  * The preset.
@@ -798,6 +806,57 @@ fixed: string | null,
  */
 note: string | null, };
 
+export type StyleChoice = { 
+/**
+ * The style (the item's kind).
+ */
+kind: MenuBarKind, 
+/**
+ * For a number where the tray draws both formats, the format this entry sets; `None` for every other entry.
+ */
+format: NumberFormat | null, 
+/**
+ * What the picker shows ("Line graph", "Number, one line").
+ */
+label: string, };
+
+export type FixedStyle = { 
+/**
+ * The metric.
+ */
+metric: Metric, 
+/**
+ * The row's title, in place of the style's ("Upload").
+ */
+title: string, 
+/**
+ * The row's summary, in place of the style's.
+ */
+summary: string, 
+/**
+ * The row's icon, in place of the style's (a widget icon name: "network", "temperature").
+ */
+icon: string, 
+/**
+ * What its item draws, in words for the row's style field ("Rate with an arrow").
+ */
+drawn: string, };
+
+export type StyleSupport = { 
+/**
+ * The style picker's entries, in the catalogue's order (a number's formats in [`NumberFormat`] order).
+ */
+styles: Array<StyleChoice>, 
+/**
+ * The metrics whose picture does not follow the style.
+ */
+fixed: Array<FixedStyle>, 
+/**
+ * Said once after an item is added: where the new icon appears and how to keep it in view; `None` when it simply
+ * appears.
+ */
+addedNote: string | null, };
+
 export type ValueTone = "ok" | "warn" | "bad";
 
 export type CounterUnit = "percent" | "bytes" | "bytesPerSec" | "perSec" | "count" | "milliseconds" | "seconds" | "number";
@@ -1073,7 +1132,11 @@ menuBarMetrics: Array<MetricChoice>,
 /**
  * What this platform's tray draws of a number item (its formats, and whether the label fits in the icon).
  */
-number: NumberSupport, };
+number: NumberSupport, 
+/**
+ * What this platform's tray draws of each style, and what to say after an add.
+ */
+styles: StyleSupport, };
 
 export type MetricReading = { 
 /**

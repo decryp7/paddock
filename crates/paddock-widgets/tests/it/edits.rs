@@ -312,6 +312,91 @@ fn replace_changes_options_not_the_kind() {
 }
 
 #[test]
+fn change_kind_keeps_the_id_and_the_place_where_the_new_kind_allows_it() {
+    let base = run(&defaults(), Edit::Remove { id: id("clock") });
+    // Alarms (span 1) becomes a clock, which allows 1 and 2: the id and the span stay.
+    let changed = run(
+        &base,
+        Edit::ChangeKind {
+            id: id("alarms"),
+            widget: Gadget::Clock,
+        },
+    );
+    assert_eq!(
+        ids(&changed),
+        ["disk-space", "alarms"],
+        "the id and the order stay"
+    );
+    assert_eq!(changed.placements[1].widget, Gadget::Clock);
+    assert_eq!(changed.placements[1].place.span, 1);
+    // A span the new kind does not allow becomes its first: disk space is only ever 2 wide.
+    let wide = run(
+        &base,
+        Edit::ChangeKind {
+            id: id("alarms"),
+            widget: disk("  x "),
+        },
+    );
+    assert_eq!(
+        wide.placements[1].widget,
+        disk("x"),
+        "the widget is clamped"
+    );
+    assert_eq!(wide.placements[1].place.span, 2);
+    assert_eq!(wide.placements[1].id, id("alarms"));
+    // Undo gives the old kind back.
+    assert_eq!(run(&changed, Edit::Undo).placements, base.placements);
+}
+
+#[test]
+fn change_kind_is_refused_past_a_kind_limit_for_a_hidden_kind_an_invalid_widget_and_an_unknown_id()
+{
+    assert_eq!(
+        fail(
+            &defaults(),
+            Edit::ChangeKind {
+                id: id("alarms"),
+                widget: Gadget::Clock,
+            }
+        ),
+        WidgetError::KindLimit {
+            max: 1,
+            noun: "popup".into()
+        }
+    );
+    assert_eq!(
+        fail(
+            &defaults(),
+            Edit::ChangeKind {
+                id: id("alarms"),
+                widget: Gadget::Hidden,
+            }
+        ),
+        WidgetError::Invalid("This widget is not available here.".into())
+    );
+    assert_eq!(
+        fail(
+            &defaults(),
+            Edit::ChangeKind {
+                id: id("alarms"),
+                widget: disk(""),
+            }
+        ),
+        WidgetError::Invalid("Choose a volume of 1 to 16 characters.".into())
+    );
+    assert_eq!(
+        fail(
+            &defaults(),
+            Edit::ChangeKind {
+                id: id("nope"),
+                widget: Gadget::Clock,
+            }
+        ),
+        WidgetError::UnknownPlacement("nope".into())
+    );
+}
+
+#[test]
 fn apply_a_builtin_preset_and_a_saved_one() {
     let compact = run(&defaults(), Edit::ApplyPreset { id: pid("compact") });
     assert_eq!(ids(&compact), ["clock"]);

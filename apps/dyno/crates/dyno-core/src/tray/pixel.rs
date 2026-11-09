@@ -541,6 +541,11 @@ pub enum Kind {
         /// Up to three capitals.
         label: String,
     },
+    /// One vertical column filled from the bottom, with a label above it from 22 px.
+    Bar {
+        /// Up to three capitals.
+        label: String,
+    },
     /// One column per core.
     Cores,
     /// An area graph, with a label from 22 px.
@@ -548,6 +553,8 @@ pub enum Kind {
         /// Up to three capitals.
         label: String,
     },
+    /// The number over a small area graph of the recent values (the label is in the tooltip).
+    GraphValue,
     /// A 270-degree gauge with the metric's letter.
     Ring {
         /// The letter.
@@ -601,6 +608,51 @@ fn meter_in(cv: &mut Canvas, l: &Layout, v: Option<f32>, track: Rgba, fill: Rgba
         cv.rect(x0, y, x0 + w, y + h, fill);
     }
     let _ = l;
+}
+
+/// An area graph of the newest values on whole pixels: a faint plate from `top` to above the baseline track at row `bot - 1`,
+/// one column per value (newest at the right), each value above 0.5 % at least one pixel above the track.
+#[allow(clippy::too_many_arguments)]
+fn area_graph(cv: &mut Canvas, history: &[f32], x0: i32, x1: i32, top: i32, bot: i32, t: Theme, fill: Option<Rgba>) {
+    cv.rect(x0, top, x1, bot - 1, {
+        let mut c = t.ink();
+        c[3] = 0x18;
+        c
+    });
+    cv.rect(x0, bot - 1, x1, bot, t.track());
+    let Some(fill) = fill else {
+        return;
+    };
+    let cols = (x1 - x0).max(0) as usize;
+    let recent: Vec<f32> = history.iter().rev().take(cols).rev().copied().collect();
+    let start = x1 - recent.len() as i32;
+    for (i, v) in recent.iter().enumerate() {
+        let h = ((bot - top) as f32 * v.clamp(0.0, 100.0) / 100.0).round() as i32;
+        // A sample above zero shows at least one pixel above the baseline track.
+        let h = if *v > 0.5 { h.max(2) } else { h };
+        cv.rect(start + i as i32, bot - h, start + i as i32 + 1, bot, fill);
+    }
+}
+
+/// The width of the single column of [`Kind::Bar`]: half the icon, even, so it centres on whole pixels (8 at 16 px, 16 at 32).
+fn bar_width(size: i32) -> i32 {
+    (size / 2) & !1
+}
+
+/// The unavailable mark (design: "an en dash in the field"): a bar of ink from `x0` to `x1`, `h` rows high and centred on row
+/// `cy`. With it, an item whose agent is away never looks like a reading of 0 that is only dimmer.
+fn dash(cv: &mut Canvas, x0: i32, x1: i32, cy: i32, h: i32, c: Rgba) {
+    let y0 = cy - h / 2;
+    cv.rect(x0, y0, x1, y0 + h, c);
+}
+
+/// The dash's thickness at each size.
+fn dash_h(size: i32) -> i32 {
+    if size >= 32 {
+        3
+    } else {
+        2
+    }
 }
 
 /// A rate as up to three figures and a unit letter at the small sizes.
@@ -712,7 +764,8 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
             bar(&mut cv, value.map(|v| (v - 20.0) / 0.9), l.meter_y, l.meter_h, true);
         }
         Kind::Meter { label: lb } => {
-            let mh = (s / 4).max(4);
+            // Three eighths of the icon high (6 rows at 16 px), so the mark has the weight of the other styles.
+            let mh = (s * 3 + 4) / 8;
             let my = if l.label_rows > 0 {
                 l.label_y + l.label_rows + (s - l.label_rows - mh) / 2
             } else {
@@ -722,6 +775,17 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
                 label(&mut cv, lb, l.label_rows, right, l.label_y, ink);
             }
             bar(&mut cv, value, my, mh, false);
+            if state == State::Unavailable {
+                let w = (right - 1) / 2;
+                dash(
+                    &mut cv,
+                    1 + (right - 1 - w) / 2,
+                    1 + (right - 1 + w) / 2,
+                    my + mh / 2,
+                    dash_h(s),
+                    ink,
+                );
+            }
             if state == State::Alert {
                 notch(&mut cv);
             }
@@ -743,30 +807,94 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
                     cv.rect(x, bot - h, x + w, bot, t.accent());
                 }
             }
+            if state == State::Unavailable {
+                dash(&mut cv, x0, x0 + total, s / 2, dash_h(s), ink);
+            }
         }
         Kind::Graph { label: lb } => {
             let top = if l.label_rows > 0 { l.label_y + l.label_rows + 2 } else { 1 };
             if l.label_rows > 0 {
                 label(&mut cv, lb, l.label_rows, right, l.label_y, ink);
             }
-            let (x0, x1, bot) = (1, right, s - 1);
-            cv.rect(x0, top, x1, bot - 1, {
-                let mut c = t.ink();
-                c[3] = 0x18;
-                c
-            });
-            cv.rect(x0, bot - 1, x1, bot, t.track());
-            if state != State::Unavailable {
-                let cols = (x1 - x0) as usize;
-                let recent: Vec<f32> = r.history.iter().rev().take(cols).rev().copied().collect();
-                let start = x1 - recent.len() as i32;
-                for (i, v) in recent.iter().enumerate() {
-                    let h = ((bot - top) as f32 * v.clamp(0.0, 100.0) / 100.0).round() as i32;
-                    // A sample above zero shows at least one pixel above the baseline track.
-                    let h = if *v > 0.5 { h.max(2) } else { h };
-                    cv.rect(start + i as i32, bot - h, start + i as i32 + 1, bot, t.accent());
+            let fill = match state {
+                State::Unavailable => None,
+                State::Alert => Some(plate),
+                State::Normal => Some(t.accent()),
+            };
+            area_graph(&mut cv, &r.history, 1, right, top, s - 1, t, fill);
+            match state {
+                // The alert as on the meter and the bar: the corner notch (a shape) and the danger fill.
+                State::Alert => notch(&mut cv),
+                State::Unavailable => {
+                    let w = (right - 1) / 2;
+                    dash(
+                        &mut cv,
+                        1 + (right - 1 - w) / 2,
+                        1 + (right - 1 + w) / 2,
+                        (top + s - 2) / 2,
+                        dash_h(s),
+                        ink,
+                    );
                 }
+                State::Normal => {}
             }
+        }
+        Kind::Bar { label: lb } => {
+            // One column, a level standing up, never a meter on its side. Below 22 px it is centred; from 22 px the label sits at
+            // the right as on every other style, and the column stands right-aligned under it.
+            let w = bar_width(s);
+            let (x0, top) = if l.label_rows > 0 {
+                label(&mut cv, lb, l.label_rows, right, l.label_y, ink);
+                (right - w, l.label_y + l.label_rows + 2)
+            } else {
+                ((s - w) / 2, 1)
+            };
+            let bot = s - 1;
+            cv.rect(x0, top, x0 + w, bot, t.track());
+            if let Some(v) = value {
+                let h = ((bot - top) as f32 * v.clamp(0.0, 100.0) / 100.0).round() as i32;
+                let h = if v > 0.5 { h.max(1) } else { h };
+                let fill = if state == State::Alert { plate } else { t.accent() };
+                cv.rect(x0, bot - h, x0 + w, bot, fill);
+            }
+            if state == State::Unavailable {
+                dash(&mut cv, x0 + 1, x0 + w - 1, (top + bot) / 2, dash_h(s), ink);
+            }
+            if state == State::Alert {
+                notch(&mut cv);
+            }
+        }
+        Kind::GraphValue => {
+            // The number at the top right (the newest value, above the graph's newest column), the graph under it. No label:
+            // the tooltip names the metric. At 16 and 20 px the number is in the 7-row numerals, so the graph gets 7 and 10
+            // rows; 1 px margins all round, as on the other styles.
+            let n = if s <= 20 { Numerals { h: 7, w: 4, s: 1 } } else { l.digits };
+            let lg = Layout {
+                digits_y: 1,
+                digits: n,
+                ..l
+            };
+            let text = value.map_or("-".to_string(), |v| format!("{}", v.clamp(0.0, 100.0).round() as u32));
+            if state == State::Alert && small_alert {
+                let f = fit(&text, &lg, right);
+                notch_k.set(f.k);
+                digits(&mut cv, &text, f.n, l.tracking, right, f.y, ink);
+            } else if state == State::Alert {
+                let w = text_width(&text, n, l.tracking) + 2;
+                cv.rounded(right - w - 1, lg.digits_y - 1, right + 1, lg.digits_y + n.h + 1, plate);
+                digits(&mut cv, &text, n, l.tracking, right, lg.digits_y, plate_ink);
+            } else {
+                digits(&mut cv, &text, n, l.tracking, right, lg.digits_y, ink);
+            }
+            // At 16 px the plate starts right under the digits (7 rows of graph); larger icons keep a row between them.
+            let top = lg.digits_y + n.h + if s <= 16 { 0 } else { 1 };
+            let bot = s - 1;
+            let fill = match state {
+                State::Unavailable => None,
+                State::Alert => Some(plate),
+                State::Normal => Some(t.accent()),
+            };
+            area_graph(&mut cv, &r.history, 1, right, top, bot, t, fill);
         }
         Kind::Ring { letter } => {
             let c = s as f32 / 2.0;
@@ -787,6 +915,13 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
                 cv.glyph(&g, gx, gy, plate_ink);
             } else {
                 cv.glyph(&g, gx, gy, ink);
+            }
+            if state == State::Unavailable {
+                // In the gauge's open quarter at the bottom, under the letter.
+                // Below 22 px, 6 px wide; from 22 px a third of the icon less 2 px at each end, 3 rows high, so it floats in the
+                // gap and never touches the arc's ends (which would close the gauge into a cup).
+                let (w, h) = if s <= 20 { (6, dash_h(s)) } else { (((s / 2) & !1) - 4, 3) };
+                dash(&mut cv, (s - w) / 2, (s + w) / 2, s - 1 - h / 2 - 1, h, ink);
             }
         }
         Kind::Network(dir) => {
@@ -815,6 +950,11 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
                     arrow(&mut cv, 0.0, y as f32 + (mh as f32 - ah) / 2.0, aw, up);
                     let v = if state == State::Unavailable { None } else { Some(level(bps)) };
                     meter(&mut cv, &l, v, t, aw as i32 + 1, right, y, mh);
+                    if state == State::Unavailable {
+                        let (x0, x1) = (aw as i32 + 1, right);
+                        let w = (x1 - x0) / 2;
+                        dash(&mut cv, x0 + (x1 - x0 - w) / 2, x0 + (x1 - x0 + w) / 2, y + mh / 2, mh, ink);
+                    }
                 }
             } else {
                 let n = l.small;
@@ -863,6 +1003,7 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tray::NetDir;
 
     fn px(i: &Icon, x: u32, y: u32) -> [u8; 4] {
         let k = ((y * i.size + x) * 4) as usize;
@@ -1208,7 +1349,6 @@ mod tests {
 
     #[test]
     fn a_network_item_draws_only_its_own_direction() {
-        use super::super::NetDir;
         let at = |up: f64, down: f64| Reading {
             value: Some(1.0),
             up,
@@ -1241,6 +1381,128 @@ mod tests {
             assert_ne!(both(&at(5e3, 5e3)), both(&at(7e7, 5e3)), "both follows up at {size}");
             assert_ne!(both(&at(5e3, 5e3)), both(&at(5e3, 7e7)), "both follows down at {size}");
             assert_ne!(both(&at(5e3, 5e3)), draw(NetDir::Up, &at(5e3, 5e3)), "both is not up at {size}");
+        }
+    }
+
+    /// Every kind on Windows and Linux, with the reading each needs.
+    fn every_kind() -> Vec<Kind> {
+        vec![
+            Kind::Percent { label: "CPU".into() },
+            Kind::Meter { label: "CPU".into() },
+            Kind::Bar { label: "CPU".into() },
+            Kind::Graph { label: "CPU".into() },
+            Kind::GraphValue,
+            Kind::Ring { letter: 'C' },
+            Kind::Temperature,
+            Kind::Cores,
+            Kind::Network(NetDir::Up),
+            Kind::Network(NetDir::Down),
+            Kind::Network(NetDir::Both),
+        ]
+    }
+
+    fn reading(v: f32) -> Reading {
+        Reading {
+            value: Some(v),
+            history: (0..64).map(|i| (v - 20.0 + (i % 7) as f32 * 6.0).clamp(0.0, 100.0)).collect(),
+            cores: vec![v; 8],
+            up: f64::from(v) * 1e4,
+            down: f64::from(v) * 2e4,
+        }
+    }
+
+    /// The share of the icon's pixels that differ by more than a faint step (40 of 255 in a channel); `undim` first takes the
+    /// unavailable 45 % off `a`, so what is left is the shape, not the tone.
+    fn differing(a: &Icon, b: &Icon, undim: bool) -> f32 {
+        let n = a.rgba.len() / 4;
+        let d = a
+            .rgba
+            .chunks(4)
+            .zip(b.rgba.chunks(4))
+            .filter(|(p, q)| {
+                let pa = if undim {
+                    (f32::from(p[3]) / 0.45).min(255.0)
+                } else {
+                    f32::from(p[3])
+                };
+                let (pa, qa) = (pa / 255.0, f32::from(q[3]) / 255.0);
+                (0..3).any(|c| (f32::from(p[c]) * pa - f32::from(q[c]) * qa).abs() > 40.0) || (pa - qa).abs() * 255.0 > 40.0
+            })
+            .count();
+        d as f32 / n as f32
+    }
+
+    /// The alert is a change of shape and colour on every kind that can alert (a load, a graph, the temperature), at every size
+    /// and in both themes: at least 3 % of the icon differs from the same reading without it.
+    #[test]
+    fn every_kind_that_can_alert_shows_it_at_every_size_and_theme() {
+        for kind in every_kind().into_iter().filter(|k| !matches!(k, Kind::Network(_) | Kind::Cores)) {
+            for size in [16, 20, 22, 24, 32] {
+                for dark in [true, false] {
+                    let r = reading(93.0);
+                    let normal = render(&kind, &r, State::Normal, size, Theme { dark });
+                    let alert = render(&kind, &r, State::Alert, size, Theme { dark });
+                    let share = differing(&alert, &normal, false);
+                    assert!(
+                        share >= 0.03,
+                        "{kind:?} {size} px dark={dark}: alert differs in {:.1} % of the icon",
+                        share * 100.0
+                    );
+                }
+            }
+        }
+    }
+
+    /// Unavailable is a shape (an en dash), not only a dimmer tone: with the 45 % taken off, at least 3 % of the icon still
+    /// differs from a reading of 0, for every kind at every size and in both themes.
+    #[test]
+    fn unavailable_differs_from_zero_by_its_dash_not_only_its_tone() {
+        for kind in every_kind() {
+            for size in [16, 20, 22, 24, 32] {
+                for dark in [true, false] {
+                    let zero = render(&kind, &reading(0.0), State::Normal, size, Theme { dark });
+                    let away = render(&kind, &reading(0.0), State::Unavailable, size, Theme { dark });
+                    let share = differing(&away, &zero, true);
+                    assert!(
+                        share >= 0.03,
+                        "{kind:?} {size} px dark={dark}: unavailable differs in {:.1} % of the icon",
+                        share * 100.0
+                    );
+                }
+            }
+        }
+    }
+
+    /// The gauge's unavailable dash floats in its open quarter: from 22 px no dash pixel touches (also diagonally) a pixel of the
+    /// arc's track.
+    #[test]
+    fn the_ring_dash_stays_clear_of_the_arc() {
+        for size in [22, 24, 32] {
+            for dark in [true, false] {
+                let t = Theme { dark };
+                let away = render(&Kind::Ring { letter: 'C' }, &Reading::default(), State::Unavailable, size, t);
+                let s = size as u32;
+                let ink = t.ink();
+                let at = |x: i64, y: i64| -> Option<[u8; 4]> {
+                    (x >= 0 && y >= 0 && x < i64::from(s) && y < i64::from(s)).then(|| px(&away, x as u32, y as u32))
+                };
+                // Dash pixels: the bottom rows' ink-coloured pixels (the letter sits in the middle).
+                let dash: Vec<(i64, i64)> = (i64::from(s) * 3 / 4..i64::from(s))
+                    .flat_map(|y| (0..i64::from(s)).map(move |x| (x, y)))
+                    .filter(|(x, y)| at(*x, *y).is_some_and(|p| p[..3] == ink[..3] && p[3] >= 100))
+                    .collect();
+                assert!(!dash.is_empty(), "{size} px: a dash is drawn");
+                for (x, y) in &dash {
+                    for (dx, dy) in [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+                        let n = at(x + dx, y + dy);
+                        let is_dash = dash.contains(&(x + dx, y + dy));
+                        assert!(
+                            is_dash || n.is_none_or(|p| p[3] == 0),
+                            "{size} px dark={dark}: the dash at ({x}, {y}) touches the arc"
+                        );
+                    }
+                }
+            }
         }
     }
 }

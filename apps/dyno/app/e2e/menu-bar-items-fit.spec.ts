@@ -2,10 +2,10 @@ import { expect, test } from '@playwright/test';
 import { dialogWindowUrl } from '@decryp7/paddock-e2e';
 
 /**
- * Settings > Menu bar items: a number row shows its format whole ("Label over value" is neither cut nor wrapped, in the closed
- * select or the open list), and the kind's description keeps a readable width. Waits are on conditions, never sleeps.
+ * Settings > Menu bar items: a number row shows its style whole ("Number" is neither cut nor wrapped, in the
+ * closed select or the open list), and the kind's description keeps a readable width. Waits are on conditions, never sleeps.
  */
-test('a number row shows its format and description whole', async ({ browser, baseURL }) => {
+test('a number row shows its style and description whole', async ({ browser, baseURL }) => {
   const ctx = await browser.newContext({ baseURL, viewport: { width: 980, height: 900 } });
   const page = await ctx.newPage();
   await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings' }));
@@ -13,15 +13,15 @@ test('a number row shows its format and description whole', async ({ browser, ba
   await page.getByRole('navigation', { name: 'Settings pages' }).getByRole('button', { name: 'Dyno', exact: true }).click();
   await page.locator('#menu-bar-items').scrollIntoViewIfNeeded();
   await expect(page.getByText('What the tray / menu-bar icon draws live.'), 'the limit sentence appears once').toHaveCount(1);
-  const trigger = page.locator('mat-select[aria-label^="Format of"]').first();
+  const trigger = page.locator('mat-select[aria-label^="Style of"]').first();
   await expect(trigger).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
   const closed = await trigger.locator('.mat-mdc-select-value-text').evaluate((el) => ({ cut: el.scrollWidth - el.clientWidth, text: el.textContent?.trim() }));
-  expect(closed.text).toBe('Label over value');
+  expect(closed.text).toBe('Number');
   expect(closed.cut, 'the closed select cuts its text').toBeLessThanOrEqual(0);
   const desc = await page.locator('.pd-wc-list').first().locator('.pd-wc-txt span').first().evaluate((el) => el.getBoundingClientRect().width);
   expect(desc, 'the description column is narrow').toBeGreaterThanOrEqual(96);
-  // The row stays one line: the description is not wrapped and the row's "more" button sits beside the format select.
+  // The row stays one line: the description is not wrapped and the row's "more" button sits beside the style select.
   const row = await page.locator('.pd-wc-list').first().locator('li.pd-wc-item').first().evaluate((li) => {
     const top = (sel: string) => li.querySelector(sel)!.getBoundingClientRect();
     const d = li.querySelector('.pd-wc-txt span')!;
@@ -56,8 +56,14 @@ test('a number row shows its format and description whole', async ({ browser, ba
     const tops = new Set([...range.getClientRects()].map((r) => Math.round(r.top)));
     return { text: o.textContent?.trim(), lines: tops.size };
   }));
-  expect(lines.length).toBe(2);
+  // Every style of the catalogue, the number as two (its formats).
+  expect(lines.length).toBe(7);
   for (const o of lines) expect(o.lines, `${o.text} wraps`).toBe(1);
+  // The longest style fits the closed select too (the change goes to the engine and back).
+  await page.getByRole('option', { name: 'Graph and number' }).click();
+  const longest = page.locator('mat-select[aria-label^="Style of"]').first().locator('.mat-mdc-select-value-text');
+  await expect(longest).toHaveText('Graph and number');
+  expect(await longest.evaluate((el) => el.scrollWidth - el.clientWidth), 'the style select cuts "Graph and number"').toBeLessThanOrEqual(0);
   await ctx.close();
 });
 
@@ -67,9 +73,9 @@ test('a number row shows its format and description whole', async ({ browser, ba
  * description's column (never left of it), keeps "more" on the last line of controls, and is one line wide, two at most narrow.
  */
 const PLATFORMS = [
-  { name: 'mac', query: '', note: null, formatSelect: true },
-  { name: 'win16', query: '?mock=windows&tray=16', note: '16 px, too small for a label', formatSelect: false },
-  { name: 'win24', query: '?mock=windows&tray=24', note: 'one number layout', formatSelect: false },
+  { name: 'mac', query: '', note: null },
+  { name: 'win16', query: '?mock=windows&tray=16', note: '16 px, too small for a label' },
+  { name: 'win24', query: '?mock=windows&tray=24', note: 'one number layout' },
 ] as const;
 for (const platform of PLATFORMS) {
   for (const width of [980, 760]) {
@@ -85,8 +91,13 @@ for (const platform of PLATFORMS) {
         await page.getByRole('button', { name: `Add ${kind}`, exact: true }).click();
         await expect(rows).toHaveCount(5 + i);
       }
-      await expect(page.locator('mat-select[aria-label^="Format of"]')).toHaveCount(platform.formatSelect ? 4 : 0);
+      // A style select on every row but the network and temperature ones, which say what they draw.
+      await expect(page.locator('mat-select[aria-label^="Style of"]')).toHaveCount(5);
+      await expect(page.locator('[data-testid="style-fixed"]')).toHaveCount(2);
+      await expect(page.locator('mat-select[aria-label^="Style of"]').first().locator('.mat-mdc-select-value-text')).toHaveText('Number');
       if (platform.note) await expect(page.locator('p.info[role="note"]')).toContainText(platform.note);
+      // The keyboard hint names this OS's modifier (the shell's data-platform; the mock sets it for its OS).
+      await expect(page.locator('dy-menu-bar-items .pd-wc-hint')).toContainText(platform.name === 'mac' ? 'hold Option' : 'hold Alt');
       await expect(rows.first().locator('.fixed'), 'the note says it once; no per-row text').toHaveCount(0);
       const found = await rows.evaluateAll((lis) =>
         lis.map((li) => {
@@ -113,6 +124,11 @@ for (const platform of PLATFORMS) {
         }),
       );
       expect(found).toHaveLength(7);
+      if (width === 980) {
+        // The metric and style columns line up on every row (a number's label and unit come before them).
+        const lefts = await rows.evaluateAll((lis) => lis.map((li) => Math.round(li.querySelector('mat-select[aria-label^="Metric of"]')!.getBoundingClientRect().left)));
+        expect(Math.max(...lefts) - Math.min(...lefts), `${platform.name}: metric columns ${lefts.join(', ')}`).toBeLessThanOrEqual(2);
+      }
       for (const r of found) {
         const at = `${platform.name} ${width} ${r.title}`;
         expect(r.moreLevel, `${at}: "more" is not level with the controls`).toBe(true);
