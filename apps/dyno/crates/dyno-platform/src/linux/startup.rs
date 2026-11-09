@@ -40,9 +40,16 @@ fn plain_unit_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '_' | '.' | '@' | '\\' | '-'))
 }
 
+/// The per-user config folder: `$XDG_CONFIG_HOME` when absolute, else `~/.config`; `None` when neither is known. There is no
+/// shared fallback such as the temp folder: another user could own it.
+fn config_dir(xdg: Option<PathBuf>, home: Option<PathBuf>) -> Option<PathBuf> {
+    xdg.filter(|p| p.is_absolute()).or_else(|| home.map(|h| h.join(".config")))
+}
+
 /// Startup items for Linux.
 pub struct LinuxStartup {
-    user_dir: PathBuf,
+    /// `None` when no per-user config folder is known: there are then no user items (never a shared folder instead).
+    user_dir: Option<PathBuf>,
     system_dirs: Vec<PathBuf>,
     tools: Arc<dyn Tools>,
 }
@@ -51,7 +58,7 @@ impl LinuxStartup {
     /// Startup items with explicit folders (tests use temporary ones).
     pub fn new(user_dir: PathBuf, system_dirs: Vec<PathBuf>, tools: Arc<dyn Tools>) -> Self {
         LinuxStartup {
-            user_dir,
+            user_dir: Some(user_dir),
             system_dirs,
             tools,
         }
@@ -63,12 +70,17 @@ impl LinuxStartup {
         reason = "KNOWN DEFECT, not a justification: a shared, predictable folder under the OS temp dir that another local user can create first (Dyno security fix, owner and review date in docs/gates.toml [[defect]])"
     )]
     pub fn for_this_user(tools: Arc<dyn Tools>) -> Self {
-        let config = std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .filter(|p| p.is_absolute())
-            .or_else(|| home_dir().map(|h| h.join(".config")))
-            .unwrap_or_else(|| std::env::temp_dir().join("dyno-no-home"));
-        LinuxStartup::new(config.join("autostart"), vec![PathBuf::from("/etc/xdg/autostart")], tools)
+        match config_dir(std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from), home_dir()) {
+            Some(config) => LinuxStartup::new(config.join("autostart"), vec![PathBuf::from("/etc/xdg/autostart")], tools),
+            None => {
+                log::warn!("No home folder is known; Dyno lists no per-user startup items");
+                LinuxStartup {
+                    user_dir: None,
+                    system_dirs: vec![PathBuf::from("/etc/xdg/autostart")],
+                    tools,
+                }
+            }
+        }
     }
 
     fn read_entries(dir: &Path) -> Vec<(String, DesktopEntry)> {
@@ -147,7 +159,7 @@ fn display_name(entry: &DesktopEntry, file: &str) -> String {
 impl StartupItems for LinuxStartup {
     fn list(&mut self) -> Result<Vec<StartupEntry>, PlatformError> {
         let mut out = Vec::new();
-        let user = Self::read_entries(&self.user_dir);
+        let user = self.user_dir.as_deref().map(Self::read_entries).unwrap_or_default();
         for (file, e) in user.iter().filter(|(_, e)| e.has_exec) {
             out.push(Self::entry(
                 format!("{USER_PREFIX}{file}"),
@@ -184,6 +196,14 @@ impl StartupItems for LinuxStartup {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn without_a_config_or_home_folder_there_is_no_user_folder_and_never_the_temp_folder() {
+        assert_eq!(config_dir(None, None), None);
+        assert_eq!(config_dir(Some("rel".into()), None), None);
+        assert_eq!(config_dir(None, Some("/h".into())), Some(PathBuf::from("/h/.config")));
+        assert_eq!(config_dir(Some("/x".into()), Some("/h".into())), Some(PathBuf::from("/x")));
+    }
+
     use super::super::tools::fake::FakeTools;
     use super::super::tools::ToolOutput;
     use super::*;

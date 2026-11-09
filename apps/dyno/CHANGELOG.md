@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- When Dyno cannot find your home folder, it no longer falls back to a shared folder in the temporary folder, where another user on the same computer could have put a file for Dyno to trust. It now uses a private folder made for your account only and refuses a folder that belongs to someone else or is a link. If no safe folder exists, the command stops and says what to set. The file that tells the app where the agent is runs is also ignored when its folder is a link or belongs to another user.
+
 ### Changed
 
 - Health no longer says "Nothing needs your attention" when it could not read a fact the score looks at (disk health, a pending restart, pending updates). It says "Nothing found in what Dyno could check" and lists what was not checked; facts Dyno never reads on this OS are listed once as coverage. The score is unchanged. This is another protocol version (8), so an older app or agent is replaced at the next start.

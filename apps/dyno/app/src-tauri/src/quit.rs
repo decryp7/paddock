@@ -77,7 +77,7 @@ pub fn write_marker(root: &Path, now_ms: i64) -> std::io::Result<()> {
 /// [`write_marker`] with the pause between two looks at the lock given (the seam a test uses to release the lock when the
 /// writer has seen it taken and is about to wait).
 fn write_marker_with(root: &Path, now_ms: i64, mut pause: impl FnMut()) -> std::io::Result<()> {
-    std::fs::create_dir_all(root)?;
+    paddock_env::create_private_dir_all(root)?;
     let record = record(root);
     let mut lock = record.lock();
     for _ in 0..300 {

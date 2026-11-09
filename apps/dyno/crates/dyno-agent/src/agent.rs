@@ -549,11 +549,8 @@ impl Shared {
     ) -> Result<Built, String> {
         let t = now();
         let mut notes: Vec<String> = Vec::new();
-        if let Err(e) = std::fs::create_dir_all(dirs.root()) {
-            notes.push(format!(
-                "Dyno could not create {} ({e}); history is kept in memory only.",
-                dirs.root().display()
-            ));
+        if let Err(e) = crate::paths::prepare_root(dirs.root()) {
+            notes.push(format!("{e}; history is kept in memory only."));
         }
         let (store, note, store_kind) = match Store::open(&dirs.database(), t) {
             Ok((s, n)) => (s, n, "file"),
@@ -649,7 +646,7 @@ impl Shared {
         );
         let power_marker = dirs.root().join("keep-awake.active");
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-        let own_folder = dirs.root() == Dirs::current().root();
+        let own_folder = Dirs::try_current().is_ok_and(|current| dirs.root() == current.root());
         let own_tools = dirs.tools();
         let helper_first = own_folder || wiring.is_some();
         let (helper_centre, local_memory) = match wiring {

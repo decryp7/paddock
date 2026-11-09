@@ -500,6 +500,20 @@ impl Host {
 /// The connecting side.
 pub struct Client;
 
+/// The listener must run as `me`; an unreadable uid is a refusal too.
+#[cfg(unix)]
+fn check_same_account(listener_uid: Option<u32>, me: u32) -> Result<(), IpcError> {
+    match listener_uid {
+        Some(uid) if uid == me => Ok(()),
+        Some(_) => Err(IpcError::Auth(
+            "the endpoint is served by another account, so the token was not sent".into(),
+        )),
+        None => Err(IpcError::Auth(
+            "the account serving the endpoint could not be read, so the token was not sent".into(),
+        )),
+    }
+}
+
 impl Client {
     /// Connects to `endpoint` and authenticates with `token`, speaking `protocol`, within [`HANDSHAKE_TIMEOUT`].
     pub fn connect(
@@ -523,6 +537,10 @@ impl Client {
         timeout: Duration,
     ) -> Result<Connection, IpcError> {
         let mut stream = Stream::connect(endpoint, HANDSHAKE_TIMEOUT)?;
+        // Before the token leaves this process: the one answering must run as this account (rule 53: a discovery file only
+        // hints; a listener planted by another account must not receive the token). Windows relies on the pipe's access list.
+        #[cfg(unix)]
+        check_same_account(stream.peer_uid(), paddock_env::current_uid())?;
         let hello = Frame::Hello {
             version: frame::VERSION,
             protocol,
@@ -557,5 +575,25 @@ impl Client {
             peer_uid: None,
             protocol: answer,
         })
+    }
+}
+
+#[cfg(all(test, unix))]
+mod same_account_tests {
+    use super::*;
+
+    #[test]
+    fn only_a_listener_of_the_same_account_may_receive_the_token() {
+        assert!(check_same_account(Some(501), 501).is_ok());
+        let other = check_same_account(Some(0), 501).unwrap_err();
+        assert!(
+            matches!(&other, IpcError::Auth(m) if m.contains("another account")),
+            "{other:?}"
+        );
+        let unknown = check_same_account(None, 501).unwrap_err();
+        assert!(
+            matches!(&unknown, IpcError::Auth(m) if m.contains("could not be read")),
+            "{unknown:?}"
+        );
     }
 }

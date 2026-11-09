@@ -3,6 +3,53 @@
 
 use std::path::{Path, PathBuf};
 
+/// Makes the data folder `root` ready at the agent's start: created private (0700, whatever the umask), and, when an older Dyno made
+/// it with the umask (0775 under umask 002) so only the account's own private group can write to it, that group write removed once.
+/// A folder others can write to is not touched and is refused later by the folder check.
+///
+/// # Errors
+/// The folder cannot be made, or it is open to others; the text ends with the next step.
+pub fn prepare_root(root: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    let others = |gid| paddock_env::group_has_other_members(gid, paddock_env::current_uid());
+    #[cfg(not(unix))]
+    let others = |_| true;
+    prepare_root_with(root, others)
+}
+
+/// [`prepare_root`] with the group-membership lookup passed in (tests).
+///
+/// # Errors
+/// See [`prepare_root`].
+pub fn prepare_root_with(root: &Path, group_has_others: impl FnOnce(u32) -> bool) -> Result<(), String> {
+    paddock_env::create_private_dir_all(root).map_err(|e| format!("Dyno could not create its data folder ({e})"))?;
+    #[cfg(unix)]
+    if let Err(r) = paddock_env::tighten_group_write(root, group_has_others) {
+        log::warn!(Why = r.reason(); "The data folder cannot be made private; run chmod go-w on it");
+        return Err(format!(
+            "the data folder is not safe to use ({}); run chmod go-w {}",
+            r.reason(),
+            root.display()
+        ));
+    }
+    #[cfg(not(unix))]
+    let _ = group_has_others;
+    Ok(())
+}
+
+/// What to do when no data folder can be used (the same words for the agent and the CLI).
+pub const NEXT_STEP: &str = "Set HOME or DYNO_DATA_DIR to a folder you own";
+
+/// The reason an error gives, without the path (ER-27: no user paths in logs beyond what is already shown).
+pub fn why(e: &paddock_env::EnvError) -> &'static str {
+    match e {
+        paddock_env::EnvError::NoHome(_) => "no home folder is known",
+        paddock_env::EnvError::Io { op, .. } if *op == "use folder" => "the fallback folder is not safe to use",
+        paddock_env::EnvError::Io { .. } => "the fallback folder could not be made",
+        _ => "the data folder could not be chosen",
+    }
+}
+
 /// The agent's files.
 #[derive(Debug, Clone)]
 pub struct Dirs {
@@ -15,13 +62,35 @@ pub struct Dirs {
 
 impl Dirs {
     /// The folder for the current user: `%LOCALAPPDATA%\Dyno`, `~/Library/Application Support/Dyno` or
-    /// `$XDG_DATA_HOME/dyno` (`~/.local/share/dyno`); `DYNO_DATA_DIR` wins; the temp folder when nothing is known.
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "KNOWN DEFECT, not a justification: a shared, predictable folder under the OS temp dir that another local user can create first (Dyno security fix, owner and review date in docs/gates.toml [[defect]])"
-    )]
+    /// `$XDG_DATA_HOME/dyno` (`~/.local/share/dyno`); `DYNO_DATA_DIR` wins. When no home folder is known the folder is a private
+    /// per-user one (see [`paddock_env::private_fallback_dir`]); a shared fixed path is never used.
+    ///
+    /// A program with no usable folder cannot work, so this stops it with a message that says what to fix (exit code 78).
+    /// Use [`Dirs::try_current`] to handle the error instead.
     pub fn current() -> Dirs {
-        let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+        Dirs::try_current().unwrap_or_else(|e| {
+            eprintln!("dyno: {e}. {NEXT_STEP}");
+            log::error!(Why = why(&e); "No usable data folder; stopping");
+            std::process::exit(78)
+        })
+    }
+
+    /// [`Dirs::current`] with the failure returned.
+    ///
+    /// # Errors
+    /// No per-user folder is known and the private fallback cannot be made or is not safe to use.
+    pub fn try_current() -> Result<Dirs, paddock_env::EnvError> {
+        Dirs::resolve(
+            &|k| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from),
+            &std::env::temp_dir(),
+        )
+    }
+
+    /// The same choice from an injected environment and temp folder (tests).
+    ///
+    /// # Errors
+    /// See [`Dirs::try_current`].
+    pub fn resolve(env: &dyn Fn(&str) -> Option<PathBuf>, temp: &Path) -> Result<Dirs, paddock_env::EnvError> {
         let override_root = env("DYNO_DATA_DIR");
         let cache_folder = if override_root.is_some() {
             None
@@ -34,23 +103,38 @@ impl Dirs {
                 .map(|d| d.join("dyno"))
                 .or_else(|| env("HOME").map(|h| h.join(".cache").join("dyno")))
         };
-        let root = override_root.unwrap_or_else(|| {
-            let found = if cfg!(windows) {
-                env("LOCALAPPDATA").map(|d| d.join("Dyno"))
-            } else if cfg!(target_os = "macos") {
-                env("HOME").map(|h| h.join("Library").join("Application Support").join("Dyno"))
-            } else {
-                env("XDG_DATA_HOME")
-                    .map(|d| d.join("dyno"))
-                    .or_else(|| env("HOME").map(|h| h.join(".local").join("share").join("dyno")))
-            };
-            found.unwrap_or_else(|| std::env::temp_dir().join("Dyno"))
-        });
-        Dirs {
+        let root = match override_root {
+            Some(r) => r,
+            None => {
+                let found = if cfg!(windows) {
+                    env("LOCALAPPDATA").map(|d| d.join("Dyno"))
+                } else if cfg!(target_os = "macos") {
+                    env("HOME").map(|h| h.join("Library").join("Application Support").join("Dyno"))
+                } else {
+                    env("XDG_DATA_HOME")
+                        .map(|d| d.join("dyno"))
+                        .or_else(|| env("HOME").map(|h| h.join(".local").join("share").join("dyno")))
+                };
+                match found {
+                    Some(r) => r,
+                    None => {
+                        let r = paddock_env::private_fallback_dir(temp, "Dyno");
+                        match &r {
+                            Ok(_) => log::warn!("No home folder is known; using the private per-user fallback data folder"),
+                            Err(e) => {
+                                log::error!(Why = e.to_string().as_str(); "No home folder is known and the fallback data folder is not safe to use")
+                            }
+                        }
+                        r?
+                    }
+                }
+            }
+        };
+        Ok(Dirs {
             root,
             log_folder: None,
             cache_folder,
-        }
+        })
     }
 
     /// A folder chosen by the caller.
@@ -171,7 +255,14 @@ impl Dirs {
     )]
     pub fn kind(&self) -> &'static str {
         let overridden = std::env::var_os("DYNO_DATA_DIR").is_some_and(|v| !v.is_empty());
-        folder_kind(&self.root, overridden, Dirs::current().root(), &std::env::temp_dir())
+        // A label for the logs must never end the process: a folder that cannot be chosen is none of the known kinds.
+        let current = Dirs::try_current().ok();
+        folder_kind(
+            &self.root,
+            overridden,
+            current.as_ref().map_or(Path::new(""), Dirs::root),
+            &std::env::temp_dir(),
+        )
     }
 }
 
@@ -201,6 +292,117 @@ mod tests {
         for p in [d.settings(), d.logs(), d.plugins(), d.instance_lock()] {
             assert!(p.starts_with("/x/dyno"));
         }
+    }
+
+    #[cfg(unix)]
+    fn no_env(_: &str) -> Option<PathBuf> {
+        None
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn with_no_home_the_data_folder_is_a_private_per_user_folder_never_the_shared_fixed_path() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let d = Dirs::resolve(&no_env, tmp.path()).unwrap();
+        assert_ne!(d.root(), tmp.path().join("Dyno"));
+        assert!(d.root().starts_with(tmp.path()));
+        assert_eq!(std::fs::metadata(d.root()).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(paddock_env::check_own_folder(d.root(), paddock_env::Links::Refuse), Ok(()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_planted_fallback_folder_is_refused_not_used() {
+        let tmp = tempfile::tempdir().unwrap();
+        let first = Dirs::resolve(&no_env, tmp.path()).unwrap();
+        let name = first.root().file_name().unwrap().to_owned();
+        std::fs::remove_dir(first.root()).unwrap();
+        let attacker = tmp.path().join("attacker");
+        std::fs::create_dir(&attacker).unwrap();
+        std::os::unix::fs::symlink(&attacker, tmp.path().join(name)).unwrap();
+        assert!(Dirs::resolve(&no_env, tmp.path()).is_err());
+        assert_eq!(std::fs::read_dir(&attacker).unwrap().count(), 0, "nothing was written there");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_data_folder_made_with_umask_002_still_lets_the_agent_write_and_read_agent_json() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("data");
+        // What Dyno 1.1.0 left behind under umask 002: owned by the user, group write set, the user's own group.
+        std::fs::create_dir(&root).unwrap();
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o775)).unwrap();
+        let file = root.join("agent.json");
+        let mine = crate::discovery::Discovery {
+            endpoint: "e".into(),
+            token: paddock_ipc::Token::from_bytes([1; 32]).to_hex(),
+            pid: std::process::id(),
+            started: 1,
+            version: "0.1.0".into(),
+            protocol: 1,
+            build: String::new(),
+        };
+        prepare_root_with(&root, |_| false).unwrap();
+        mine.write(&file).unwrap();
+        assert_eq!(crate::discovery::Discovery::read(&file), Some(mine));
+        assert_eq!(
+            std::fs::metadata(&root).unwrap().permissions().mode() & 0o022,
+            0,
+            "no group or world write is left"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_data_folder_others_can_write_to_is_refused_untouched_with_the_chmod_next_step() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("data");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let e = prepare_root_with(&root, |_| false).unwrap_err();
+        assert!(e.contains("chmod go-w"), "{e}");
+        assert_eq!(std::fs::metadata(&root).unwrap().permissions().mode() & 0o777, 0o777);
+        // A shared group is refused too.
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o775)).unwrap();
+        assert!(prepare_root_with(&root, |_| true).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_new_data_folder_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("a").join("data");
+        prepare_root_with(&root, |_| false).unwrap();
+        assert_eq!(std::fs::metadata(&root).unwrap().permissions().mode() & 0o777, 0o700);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_world_writable_temp_folder_without_the_sticky_bit_holds_no_fallback() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o777)).unwrap();
+        let e = Dirs::resolve(&no_env, tmp.path()).unwrap_err();
+        assert!(e.to_string().contains("use folder"), "{e}");
+        assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0, "nothing was made there");
+    }
+
+    #[test]
+    fn the_refusal_gives_the_same_next_step_for_the_agent_and_the_cli() {
+        assert!(NEXT_STEP.contains("HOME") && NEXT_STEP.contains("DYNO_DATA_DIR"));
+        assert_eq!(why(&paddock_env::EnvError::NoHome("x")), "no home folder is known");
+    }
+
+    #[test]
+    fn a_known_home_wins_over_the_fallback() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let env = |k: &str| (k == "DYNO_DATA_DIR").then(|| home.clone());
+        assert_eq!(Dirs::resolve(&env, tmp.path()).unwrap().root(), home);
     }
 
     #[test]

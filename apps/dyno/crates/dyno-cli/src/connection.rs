@@ -17,26 +17,41 @@ pub struct Env {
 
 impl Env {
     /// The folder of the current user, by the same rule as the agent: `DYNO_DATA_DIR`, else `%LOCALAPPDATA%\Dyno`,
-    /// `~/Library/Application Support/Dyno` or `$XDG_DATA_HOME/dyno` (`~/.local/share/dyno`).
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "KNOWN DEFECT, not a justification: a shared, predictable folder under the OS temp dir that another local user can create first (Dyno security fix, owner and review date in docs/gates.toml [[defect]])"
-    )]
-    pub fn from_process() -> Env {
+    /// `~/Library/Application Support/Dyno` or `$XDG_DATA_HOME/dyno` (`~/.local/share/dyno`); with no home folder a private
+    /// per-user folder (never a shared fixed path).
+    ///
+    /// # Errors
+    /// No per-user folder is known and the private fallback is not safe to use; the message says what to fix.
+    pub fn from_process() -> Result<Env, String> {
         let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
-        let data_dir = env("DYNO_DATA_DIR").unwrap_or_else(|| {
-            let found = if cfg!(windows) {
-                env("LOCALAPPDATA").map(|d| d.join("Dyno"))
-            } else if cfg!(target_os = "macos") {
-                env("HOME").map(|h| h.join("Library").join("Application Support").join("Dyno"))
-            } else {
-                env("XDG_DATA_HOME")
-                    .map(|d| d.join("dyno"))
-                    .or_else(|| env("HOME").map(|h| h.join(".local").join("share").join("dyno")))
-            };
-            found.unwrap_or_else(|| std::env::temp_dir().join("Dyno"))
-        });
-        Env { data_dir }
+        Env::resolve(&env, &std::env::temp_dir())
+    }
+
+    /// The same choice from an injected environment and temp folder (tests).
+    ///
+    /// # Errors
+    /// See [`Env::from_process`].
+    pub fn resolve(env: &dyn Fn(&str) -> Option<PathBuf>, temp: &std::path::Path) -> Result<Env, String> {
+        let data_dir = match env("DYNO_DATA_DIR") {
+            Some(d) => d,
+            None => {
+                let found = if cfg!(windows) {
+                    env("LOCALAPPDATA").map(|d| d.join("Dyno"))
+                } else if cfg!(target_os = "macos") {
+                    env("HOME").map(|h| h.join("Library").join("Application Support").join("Dyno"))
+                } else {
+                    env("XDG_DATA_HOME")
+                        .map(|d| d.join("dyno"))
+                        .or_else(|| env("HOME").map(|h| h.join(".local").join("share").join("dyno")))
+                };
+                match found {
+                    Some(d) => d,
+                    None => paddock_env::private_fallback_dir(temp, "Dyno")
+                        .map_err(|e| format!("no data folder for this user ({e}). Set HOME or DYNO_DATA_DIR to a folder you own"))?,
+                }
+            }
+        };
+        Ok(Env { data_dir })
     }
 
     /// The discovery file.
@@ -62,9 +77,32 @@ pub struct Discovery {
 }
 
 impl Discovery {
-    /// Reads the file; `None` when it is missing, too big or damaged.
+    /// Reads the file; `None` when it is missing, too big, damaged or in a folder that is not trusted.
     pub fn read(env: &Env) -> Option<Discovery> {
+        Discovery::read_checked(env).ok().flatten()
+    }
+
+    /// [`Discovery::read`] that says when the folder is not trusted: a hint from a folder another account owns or can change is
+    /// not used at all (rule 53). A link to the user's own folder is followed.
+    ///
+    /// # Errors
+    /// The reason the data folder is not trusted, with the next step.
+    pub fn read_checked(env: &Env) -> Result<Option<Discovery>, String> {
         let path = env.discovery();
+        if env.data_dir.exists() {
+            paddock_env::check_data_folder(&env.data_dir, "the agent's discovery file").map_err(|e| {
+                format!(
+                    "the data folder is not safe to use ({}); it must belong to this account and not be writable by others (chmod go-w on it). \
+                     Run dyno as the account that runs Dyno, or set DYNO_DATA_DIR to a folder you own",
+                    e.reason()
+                )
+            })?;
+        }
+        Ok(Discovery::read_trusted(&path))
+    }
+
+    fn read_trusted(path: &std::path::Path) -> Option<Discovery> {
+        let path = path.to_path_buf();
         if std::fs::metadata(&path).ok()?.len() > 16 * 1024 {
             return None;
         }
@@ -160,7 +198,7 @@ pub struct IpcAgent {
 impl IpcAgent {
     /// Connects to the agent named in the discovery file after checking its protocol version.
     pub fn connect(env: &Env) -> Result<IpcAgent, Problem> {
-        let d = Discovery::read(env).ok_or(Problem::NotRunning)?;
+        let d = Discovery::read_checked(env).map_err(Problem::Failed)?.ok_or(Problem::NotRunning)?;
         check_version(&d, PROTOCOL_VERSION)?;
         let token = Token::from_hex(&d.token).ok_or_else(|| Problem::Failed("The discovery file is damaged; restart Dyno.".into()))?;
         let conn = Client::connect(&d.endpoint, &token, FrameLimit::new(MAX_FRAME), ProtocolVersion::new(WIRE_MAJOR, 0)).map_err(|e| {
@@ -291,9 +329,42 @@ mod tests {
     }
 
     #[test]
+    fn with_no_home_the_data_folder_is_private_and_never_the_shared_fixed_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let none = |_: &str| None;
+        match Env::resolve(&none, tmp.path()) {
+            Ok(env) => {
+                assert_ne!(env.data_dir, tmp.path().join("Dyno"));
+                assert_eq!(paddock_env::check_own_folder(&env.data_dir, paddock_env::Links::Follow), Ok(()));
+            }
+            Err(why) => assert!(cfg!(windows) && why.contains("DYNO_DATA_DIR"), "{why}"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_discovery_file_behind_a_link_to_the_users_own_folder_is_read_and_one_in_a_foreign_folder_says_why() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real = tmp.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let body = r#"{"endpoint":"e","token":"ab","pid":7,"started":1,"version":"0.1.0","protocol":1}"#;
+        std::fs::write(real.join("agent.json"), body).unwrap();
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert_eq!(Discovery::read(&Env { data_dir: link }).unwrap().pid, 7);
+        if paddock_env::current_uid() != 0 {
+            // `/` is root's: a data folder that leads there is not trusted, and the CLI says so instead of "not running".
+            let foreign = Env { data_dir: "/".into() };
+            let why = Discovery::read_checked(&foreign).unwrap_err();
+            assert!(why.contains("belongs to another user") && why.contains("DYNO_DATA_DIR"), "{why}");
+            assert!(matches!(IpcAgent::connect(&foreign), Err(Problem::Failed(_))));
+        }
+    }
+
+    #[test]
     fn a_data_folder_override_wins() {
         // Not set here (tests never set process-wide variables): the default is a folder named Dyno or dyno.
-        let env = Env::from_process();
+        let env = Env::from_process().unwrap();
         let name = env.data_dir.file_name().unwrap().to_string_lossy().to_lowercase();
         assert!(name == "dyno" || std::env::var_os("DYNO_DATA_DIR").is_some());
         assert!(env.discovery().ends_with("agent.json"));

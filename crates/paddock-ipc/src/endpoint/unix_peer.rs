@@ -16,10 +16,9 @@
 #![allow(unsafe_code)]
 
 use crate::identity::{AccountId, AdminEvidence, AuditHint, PeerError, RawPeer};
-use crate::trust::{Untrusted, check_socket_folder};
+use crate::trust::Untrusted;
 use std::io;
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 
@@ -30,53 +29,27 @@ fn unreadable(what: &'static str) -> PeerError {
     }
 }
 
-/// What the check needs to know about a folder.
-pub(super) struct FolderFacts {
-    uid: u32,
-    mode: u32,
-}
-
-/// An `io::Error` as the reason a server could not be checked.
-fn untrusted_io(what: &'static str) -> impl FnOnce(io::Error) -> Untrusted {
-    move |e| Untrusted::Unreadable {
-        what,
-        cause: e.to_string(),
-    }
-}
-
-/// Opens `folder` by handle (no symlink on the last component) and reads its owner and mode from that handle.
-fn read_folder(folder: &Path) -> Result<FolderFacts, Untrusted> {
-    let handle = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY)
-        .open(folder)
-        .map_err(untrusted_io("open the socket's folder"))?;
-    let meta = handle
-        .metadata()
-        .map_err(untrusted_io("fstat the socket's folder"))?;
-    Ok(FolderFacts {
-        uid: meta.uid(),
-        mode: meta.mode(),
-    })
-}
-
-/// Checks the folder that holds the socket `socket`: it must belong to `expected_uid` and have no group or world write bit.
+/// Checks the folder that holds the socket `socket`: it must belong to `expected_uid` and have no group or world write bit. The
+/// check itself is the family's one folder-trust check, `paddock_env::check_folder`.
 pub(super) fn check_folder_of(socket: &str, expected_uid: u32) -> Result<(), Untrusted> {
-    check_folder_with(socket, expected_uid, read_folder)
+    check_folder_with(socket, expected_uid, paddock_env::read_folder)
 }
 
 /// [`check_folder_of`] with the read of the folder passed in (tests inject folders and failures).
 fn check_folder_with(
     socket: &str,
     expected_uid: u32,
-    read: impl FnOnce(&Path) -> Result<FolderFacts, Untrusted>,
+    read: impl FnOnce(
+        &Path,
+        paddock_env::Links,
+    ) -> Result<paddock_env::FolderFacts, paddock_env::Refusal>,
 ) -> Result<(), Untrusted> {
     let parent = Path::new(socket)
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    let facts = read(parent)?;
-    check_socket_folder(facts.uid, facts.mode, expected_uid)
+    paddock_env::check_folder_with(parent, expected_uid, paddock_env::Links::Refuse, read)
+        .map_err(Untrusted::from)
 }
 
 /// How one call into the OS that fills a buffer ended.
@@ -338,8 +311,12 @@ mod tests {
     use super::*;
     use std::cell::Cell;
 
-    fn facts(uid: u32, mode: u32) -> impl FnOnce(&Path) -> Result<FolderFacts, Untrusted> {
-        move |_| Ok(FolderFacts { uid, mode })
+    fn facts(
+        uid: u32,
+        mode: u32,
+    ) -> impl FnOnce(&Path, paddock_env::Links) -> Result<paddock_env::FolderFacts, paddock_env::Refusal>
+    {
+        move |_, _| Ok(paddock_env::FolderFacts { uid, mode })
     }
 
     #[test]
@@ -353,11 +330,12 @@ mod tests {
             check_folder_with("/var/run/x/h.sock", 0, facts(0, 0o777)),
             Err(Untrusted::FolderWritable { mode: 0o777 })
         );
-        // The folder is the socket's parent, or the current folder for a bare name.
+        // The folder is the socket's parent, or the current folder for a bare name, and links are refused.
         let seen = Cell::new(String::new());
-        let record = |p: &Path| {
+        let record = |p: &Path, links: paddock_env::Links| {
+            assert_eq!(links, paddock_env::Links::Refuse);
             seen.set(p.to_string_lossy().into_owned());
-            Ok(FolderFacts {
+            Ok(paddock_env::FolderFacts {
                 uid: 0,
                 mode: 0o755,
             })
@@ -367,28 +345,30 @@ mod tests {
         check_folder_with("h.sock", 0, record).unwrap();
         assert_eq!(seen.take(), ".");
         // A folder that cannot be read is a refusal that says what failed.
-        let broken = |_: &Path| {
-            Err(untrusted_io("fstat the socket's folder")(io::Error::other(
-                "EIO",
-            )))
+        let broken = |_: &Path, _| {
+            Err(paddock_env::Refusal::Unreadable {
+                what: "fstat the folder",
+                cause: "EIO".into(),
+            })
         };
         let e = check_folder_with("/a/b", 0, broken).unwrap_err();
         assert!(e.to_string().contains("fstat") && e.to_string().contains("EIO"));
     }
 
     #[test]
-    fn a_folder_is_read_by_handle_and_a_file_or_a_missing_folder_is_not_a_folder() {
+    fn a_socket_folder_that_is_a_link_or_missing_is_refused_for_real() {
         let dir = tempfile::tempdir().unwrap();
-        let f = read_folder(dir.path()).unwrap();
-        assert_eq!(f.uid, std::fs::metadata(dir.path()).unwrap().uid());
+        let me = paddock_env::current_uid();
+        let sock = |d: &Path| d.join("h.sock").to_string_lossy().into_owned();
+        assert!(check_folder_of(&sock(dir.path()), me).is_ok());
         assert!(matches!(
-            read_folder(&dir.path().join("nope")),
+            check_folder_of(&sock(&dir.path().join("nope")), me),
             Err(Untrusted::Unreadable { .. })
         ));
-        let file = dir.path().join("file");
-        std::fs::write(&file, b"x").unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(dir.path(), &link).unwrap();
         assert!(matches!(
-            read_folder(&file),
+            check_folder_of(&sock(&link), me),
             Err(Untrusted::Unreadable { .. })
         ));
     }

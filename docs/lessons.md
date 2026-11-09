@@ -1581,3 +1581,13 @@ wait for the job to end, not only for its first result, and must name every trig
 real clock somewhere while the test advances only the fake: grep the window's `Instant` and `SystemTime` use in `centre.rs`; (3) a second listing from the volume watcher
 (`mount_events` has macOS, Linux and Windows adapters, so this is not Linux-only): run the test with the watcher stubbed out; (4) a shared static between tests in one process:
 run it alone 200 times in the CI container. No sleep or raised timeout (ER-12).
+## A popover test failed once under load: disk-space was missing before the volume cache was filled (2026-11-08)
+
+Dyno's `widget_layouts::popover_values_answer_only_the_slow_kinds_the_layout_has` (apps/dyno/crates/dyno-agent/tests/agent.rs) failed once, right after a heavy build, with `disk-space` missing (`["active-alarms"]` instead of `["active-alarms", "disk-space"]`). Rerun alone it passed 3 of 3 times, it passed in the full run, and it passed on a clean origin/main. Not fixed here (ER-12: the fix is to wait on the condition, never a sleep).
+
+Causes considered (ER-28), with what would rule each out:
+- The test asks before the disk list is cached. `popover.rs` answers a disk widget only from `shared.disk.cached_volumes()` and treats an empty cache as "not yet", so the widget is left out. Rules out if: a run that waits for the cache never fails. Not measured yet; this is the leading candidate.
+- The first volume listing was slow under the build's load. Same code path as above, one step earlier; rules out if the listing time in the failing run is short.
+- The branch under test (the data-folder trust change) changed the answer. Ruled out so far: the popover code reads no folder, and the test passed 3 of 3 alone on the same tree.
+Second sighting the next day, same code area: `disk::centre::tests::cached_volumes_refresh_once_they_are_older_than_the_freshness_window` (dyno-agent lib) failed once in a full run (left `Some(589000000000)`, right `Some(1256000000000)`: the refresh had not landed when the test looked) and passed 3 of 3 alone. It is the same shape: the test reads the cache right after asking for a refresh, without waiting for the refresh to finish. Both point at the volume-cache tests racing the background refresh under load.
+Class: a test that asks a cached answer before its cache is filled.
