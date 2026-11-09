@@ -392,7 +392,7 @@ mod tests {
     #[test]
     fn pipe_in_reads_a_large_reply_while_the_child_runs() {
         let bytes = vec![b'x'; 1 << 20];
-        let mut cmd = std::process::Command::new("cat");
+        let mut cmd = proc_command("cat");
         cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         let out = pipe_in(cmd.spawn().unwrap(), &bytes, Duration::from_secs(20)).expect("finishes");
         assert_eq!(out.stdout.len(), bytes.len());
