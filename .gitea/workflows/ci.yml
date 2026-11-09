@@ -425,12 +425,7 @@ jobs:
             conformance
             scripts
             tools
-            crates/paddock-cli
-            crates/paddock-proc
-            crates/paddock-repo-graph
-            crates/paddock-slots
-            crates/paddock-testkit
-            crates/paddock-workspace-hack
+            crates
           filter: blob:none
 
       # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it).
@@ -634,12 +629,7 @@ jobs:
             conformance
             scripts
             tools
-            crates/paddock-cli
-            crates/paddock-proc
-            crates/paddock-repo-graph
-            crates/paddock-slots
-            crates/paddock-testkit
-            crates/paddock-workspace-hack
+            crates
           filter: blob:none
 
       # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it).
@@ -804,12 +794,7 @@ jobs:
             conformance
             scripts
             tools
-            crates/paddock-cli
-            crates/paddock-proc
-            crates/paddock-repo-graph
-            crates/paddock-slots
-            crates/paddock-testkit
-            crates/paddock-workspace-hack
+            crates
           filter: blob:none
 
       - name: Git bash on PATH (Windows)

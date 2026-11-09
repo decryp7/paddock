@@ -17,12 +17,7 @@ bootstrap .gitea
 bootstrap conformance
 bootstrap scripts
 bootstrap tools
-bootstrap crates/paddock-cli
-bootstrap crates/paddock-proc
-bootstrap crates/paddock-repo-graph
-bootstrap crates/paddock-slots
-bootstrap crates/paddock-testkit
-bootstrap crates/paddock-workspace-hack
+bootstrap crates
 
 exclude lean ui/docs/review review contact sheets (103 MiB), written by ui/e2e specs on Linux
 exclude lean ui/docs/screenshots reviewed screenshots of the shared UI (16 MiB), compared by the ui job on Linux
