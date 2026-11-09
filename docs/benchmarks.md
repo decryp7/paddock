@@ -68,6 +68,7 @@ corpora are in each app's file.
 | Benchmark | Measures | Command | Corpus | Budget asserted | CI | Results |
 |---|---|---|---|---|---|---|
 | [`crates/paddock-names/benches/search.rs`](../crates/paddock-names/benches/search.rs) | Catalogue build; search median, p95 and worst per query kind | `cd crates && cargo bench -p paddock-names`; `PADDOCK_BENCH_ENTRIES` (250 000), `PADDOCK_BENCH_BUDGET_MS` (50) | Names generated in the bench | Exits with an error when a full search takes over 50 ms (the palette budget) | No (compiled by `clippy --all-targets` only) | CHANGELOG 0.3.0 |
+| [`crates/paddock-ipc/examples/os_endings.rs`](../crates/paddock-ipc/examples/os_endings.rs) | How a connection ends on the OS: a close with unread input, a pipe closed with `CloseHandle`, a listener closed with a client in its backlog; ordered-close time and refusals per second (ADR 0072 WP-0) | `cargo run --release -p paddock-ipc --example os_endings` (macOS, Linux, Windows) | Synthetic bytes | No (a baseline for ADR 0072, not a budget) | No | [2026-11-09](#2026-11-09-how-a-connection-ends-on-each-os-unread-input-pipe-closehandle-listener-backlog-ordered-close-baseline-feat-ipc-endings-m0) |
 | [`crates/paddock-jobs/benches/walk.rs`](../crates/paddock-jobs/benches/walk.rs) | Parallel against sequential folder walk, warm cache | `cargo bench -p paddock-jobs`; `PADDOCK_BENCH_FILES` (60 000) | A tree generated in a temp folder | none (checks the same files are found) | No | [ADR 0008](adr/0008-long-operations.md) |
 | [`crates/paddock-download/benches/segmented.rs`](../crates/paddock-download/benches/segmented.rs) | One stream against 2, 4 and 8 segmented connections, each connection rate-limited | `cargo bench -p paddock-download --features http`; `PADDOCK_BENCH_MIB` (32), `PADDOCK_BENCH_RATE_MIB` (8) | An in-process server; no network | none | No | [lessons](lessons.md) |
 | [`crates/paddock-bench`](../crates/paddock-bench) + [`bench-nightly.yml` template](../.gitea/workflow-templates/bench-nightly.yml) | The harness for rule 16: `Recorder`, `bench/<app>.results.json`, `bench/budgets.toml` (limit, tolerance, regression), `paddock-bench check` | see [crates/README.md](../crates/README.md#paddock-bench-plan-x26) | — | Whatever an app's `budgets.toml` says | **No app uses it yet** | — |
@@ -332,6 +333,90 @@ Quoted by [ADR 0041](adr/0041-deterministic-timing-in-tests.md) §5 (the starved
   image's rustc 1.99.1 passes `-fuse-ld=lld` and `-B<sysroot>/.../gcc-ld`, checked with `--print link-args` in the image),
   and the repo's `.cargo/config.toml` already sets `linker = "rust-lld.exe"` for `x86_64-pc-windows-msvc`.
   Raw output: `/Volumes/d7sst7/dev-targets/linker-bench/` (`results.tsv`, `link-only*.tsv`).
+
+### 2026-11-09, how a connection ends on each OS: unread input, pipe CloseHandle, listener backlog, ordered-close baseline (feat/ipc-endings-m0)
+
+WP-0 of ADR 0072 (`docs/adr/0072-every-connection-end-says-why-in-order.md` on branch `docs/adr-0072-ordered-close`; the measurements it asks for in "M0 plan" item 5). The
+program uses only the OS's own APIs, not paddock-ipc, so it measures the platform: `cargo run --release -p paddock-ipc --example os_endings`
+([source](../crates/paddock-ipc/examples/os_endings.rs)). Each case runs 200 times (timing: 500); the orchestration waits on the data
+itself (`MSG_PEEK` until the unread bytes arrived), nothing sleeps. A "client" is the side that wrote 4 KiB the "server" never reads.
+- **Commit:** base a03a24725 (origin/train/2026-11-08-1); the example is added by the change that adds this block.
+- **Machines:** macOS 27.2 on a Mac mini M4 Pro (14 cores, 64 GB), the program native; Linux: Debian in a native arm64 container on
+  the same Mac (OrbStack kernel 7.2.12, rustc 1.99.1, run as root with `--ulimit nofile=1024`); Windows: the Paddock test VM
+  (Windows 11 Pro on Arm build 26300, 4 vCPU, 8 GB, VMware Fusion, nothing else running in it), the program cross-built for
+  `aarch64-pc-windows-msvc` with `cargo xwin`.
+- **Load:** macOS 1-minute load 5 to 8 during the macOS and Linux runs (other agents' builds); the VM idle (the program is one thread).
+- **Build:** release. **Corpus:** none (synthetic bytes: 4 KiB of `0x07`, the line `REASON`).
+- **Runs:** single run per OS, 200 repetitions per case (500 for timing). Raw output is kept below; counts are the whole result.
+- **Numbers:**
+
+  | Case (what the client read) | macOS | Linux | Windows |
+  |---|---|---|---|
+  | TCP, server closes with unread input | reason, then `ConnectionReset` (200/200) | reason, then `ConnectionReset` (200/200) | **no reason**, `ConnectionReset` (200/200) |
+  | TCP, server writes the reason, half-closes, drains, then closes | reason, then EOF; 4096 bytes drained (200/200) | the same (200/200) | the same (200/200) |
+  | AF_UNIX, server closes with unread input | reason, then EOF (200/200) | reason, then **`ConnectionReset`** (200/200) | not applicable (std has no AF_UNIX on Windows) |
+  | AF_UNIX, ordered close | reason, EOF, 4096 drained (200/200) | the same | not applicable |
+  | Named pipe, server `CloseHandle` with unread input | not applicable | not applicable | **reason, then broken pipe (109)** (200/200) |
+  | Named pipe, server `DisconnectNamedPipe` then `CloseHandle` | not applicable | not applicable | **no reason**, `ERROR_NO_DATA` (233) (200/200) |
+  | TCP listener closed, client connected and not accepted | client's write fails (`BrokenPipe` 139, `ConnectionReset` 3) or succeeds (58), then `ConnectionReset`, no reason | write `ConnectionReset`, then EOF, no reason (200/200) | write `ConnectionReset`, then `ConnectionReset`, no reason (200/200) |
+  | AF_UNIX listener closed, client connected and not accepted | write `BrokenPipe`, then EOF, no reason (200/200) | write `BrokenPipe`, then **`ConnectionReset`**, no reason (200/200) | not applicable |
+  | Named pipe: the one pending instance closed, client connected and not accepted | not applicable | not applicable | write fails (232), read broken pipe (109), no reason (200/200) |
+  | Ordered close to release (reason, half-close, client reads and closes, server drains), TCP | p50 18 us, p99 42 us, max 67 us | p50 2 us, p99 9 us, max 12 us | p50 32 us, p99 105 us, max 230 us |
+  | Ordered close to release, AF_UNIX / named pipe (reason, client reads and closes, server reads to the end) | p50 1 us, p99 4 us, max 7 us | p50 0 us, p99 1 us, max 5 us | pipe: p50 14 us, p99 46 us, max 58 us |
+  | Refusals per second (connect, read the reason to EOF, drain, close), TCP | 20,712 | 154,804 | 5,022 |
+  | Refusals per second, AF_UNIX / named pipe | 227,260 | 391,903 | pipe: 27,035 |
+
+- **What it decides.** (1) **D4's pipe option is confirmed:** a named pipe closed with `CloseHandle` keeps what was written
+  before it readable by the client (200/200), so on Windows pipes the server may release right after the reason and skip the
+  drain; `DisconnectNamedPipe` discards it (200/200 without the reason), so it must never be called while the client may still
+  read. (2) The unread-input reset is **not the same on every OS**: Linux resets AF_UNIX too (macOS does not), and Windows TCP
+  loses the reason altogether, so a test that passes on the developer's Mac says little about Linux and Windows (ER-9). (3) The
+  reset arrives after the reason on macOS and Linux loopback in this orchestration, but the 2026-11-07 field case quoted in
+  `crates/paddock-mcp/src/loopback.rs` and the harness's own MCP scenario (reason lost on Linux, either order on macOS) show
+  that the order varies under real timing; the harness therefore reports "reason lost to a reset" as one fault
+  (`Expect::unread_input`). (4) The ordered close costs tens of microseconds on loopback; the ADR's bounds (2 s flush cap, 250 ms
+  reason deadline, 2 s drain cap) are for a peer that stopped reading, not for the normal case.
+- **Not measured:** the Windows AF_UNIX case (not in std); an x86_64 Windows host (the VM is Arm; the OS API is the same);
+  loaded machines for this program (the ending tests are rerun under load separately, see the lessons entry); the Dyno helper's
+  system endpoint (it is the same `endpoint` code).
+- **Raw output** (macOS and Linux as printed; Windows from `C:\paddock-test\measure.txt`):
+
+  ```text
+  macOS   RESULT tcp-close-with-unread-input reps=200 reason+error(ConnectionReset)=200
+  macOS   RESULT tcp-ordered-close-with-unread-input reps=200 reason+eof+drained4096=200
+  macOS   RESULT tcp-listener-closed-with-client-in-backlog reps=200 write-BrokenPipe:error(ConnectionReset)-without-reason=139 write-ConnectionReset:error(ConnectionReset)-without-reason=3 write-ok:error(ConnectionReset)-without-reason=58
+  macOS   RESULT tcp-close-to-release reps=500 p50_us=18 p99_us=42 max_us=67
+  macOS   RESULT tcp-refusals-per-second reps=500 per_second=20712
+  macOS   RESULT unix-close-with-unread-input reps=200 reason+eof=200
+  macOS   RESULT unix-ordered-close-with-unread-input reps=200 reason+eof+drained4096=200
+  macOS   RESULT unix-listener-closed-with-client-in-backlog reps=200 write-BrokenPipe:eof-without-reason=200
+  macOS   RESULT unix-close-to-release reps=500 p50_us=1 p99_us=4 max_us=7
+  macOS   RESULT unix-refusals-per-second reps=500 per_second=227260
+  Linux   RESULT tcp-close-with-unread-input reps=200 reason+error(ConnectionReset)=200
+  Linux   RESULT tcp-ordered-close-with-unread-input reps=200 reason+eof+drained4096=200
+  Linux   RESULT tcp-listener-closed-with-client-in-backlog reps=200 write-ConnectionReset:eof-without-reason=200
+  Linux   RESULT tcp-close-to-release reps=500 p50_us=2 p99_us=9 max_us=12
+  Linux   RESULT tcp-refusals-per-second reps=500 per_second=154804
+  Linux   RESULT unix-close-with-unread-input reps=200 reason+error(ConnectionReset)=200
+  Linux   RESULT unix-ordered-close-with-unread-input reps=200 reason+eof+drained4096=200
+  Linux   RESULT unix-listener-closed-with-client-in-backlog reps=200 write-BrokenPipe:error(ConnectionReset)-without-reason=200
+  Linux   RESULT unix-close-to-release reps=500 p50_us=0 p99_us=1 max_us=5
+  Linux   RESULT unix-refusals-per-second reps=500 per_second=391903
+  Windows RESULT tcp-close-with-unread-input reps=200 error(ConnectionReset)-without-reason=200
+  Windows RESULT tcp-ordered-close-with-unread-input reps=200 reason+eof+drained4096=200
+  Windows RESULT tcp-listener-closed-with-client-in-backlog reps=200 write-ConnectionReset:error(ConnectionReset)-without-reason=200
+  Windows RESULT tcp-close-to-release reps=500 p50_us=32 p99_us=105 max_us=230
+  Windows RESULT tcp-refusals-per-second reps=500 per_second=5022
+  Windows RESULT pipe-closehandle-with-unread-input reps=200 reason+broken-pipe(109)=200
+  Windows RESULT pipe-disconnectnamedpipe-with-unread-input reps=200 win32(233)-without-reason=200
+  Windows RESULT pipe-listener-closed-with-client-not-accepted reps=200 write-win32(232):broken-pipe(109)-without-reason=200
+  Windows RESULT pipe-close-to-release reps=500 p50_us=14 p99_us=46 max_us=58
+  Windows RESULT pipe-refusals-per-second reps=500 per_second=27035
+  ```
+
+- **Notes:** the VM was started for this run only, used through `scripts/vm-lock-run.sh` and `vm-win.sh`, stopped and reverted to
+  `clean-baseline` afterwards (139 s with the lock held). The macOS numbers were taken with other builds running (load 5 to 8): the
+  counts do not depend on load, the microsecond figures do; they are a baseline for "before", not a budget.
 
 ## Gaps
 

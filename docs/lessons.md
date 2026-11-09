@@ -1571,3 +1571,51 @@ connection held.
 - A test that starts the product in its own process shares its limits: a leak in the test's client exhausts the product.
 - Logs explain the failure only if the rig shows them: an in-process agent's `log` lines went nowhere until the rig captured them.
 - Class: a handle whose drop does not release its resource (`BodyPeer`, `Peer`); reported for an ER-21 decision.
+
+## ADR 0072 M0: an ending test is only as good as the OSes it ran on, and a reset is a race (2026-11-09)
+
+The ending harness (`paddock_ipc::testing::endings`, register `docs/ipc-endpoints.toml`, ratchet `docs/ipc-endpoint-ratchet.toml`)
+drove every listen site of the family through the ways a connection ends. What the first runs taught, with the measurements in
+`docs/benchmarks.md` (2026-11-09, how a connection ends on each OS):
+
+- **A green run on the developer's Mac hid eight of the ratchet's entries.** macOS does not reset an AF_UNIX socket closed with
+  unread input and delivers the reason; Linux resets it (I8, I9, I10, I11 on `ipc-host` and the link server, the Dyno agent and
+  Pitcrew), and Windows TCP loses the reason altogether. The ratchet has an `os` field for the faults that are not on every OS;
+  the endings were run on the Mac, in the native arm64 Linux container as root with 1,024 open files, and (paddock-ipc) on the
+  Windows 11 Arm VM. The Dyno, MCP and Pitcrew endings were not run on Windows (cross-built only: `cargo xwin clippy`).
+- **"Reset or lost reason" is one fault, not two.** A close with unread input resets, and whether the reason reaches the client
+  before the reset is a race (the MCP scenario read `reset` on one run and `no-reason` on the next, then both at once on Linux).
+  Asserting either would have been a flaky test; the harness reports a missing reason of a client whose input was never read
+  as `reset` (`Expect::unread_input`), and the ratchet records that.
+- **A named pipe closed with `CloseHandle` keeps what was written** (200/200), so Windows pipes need no drain (ADR 0072 D4);
+  `DisconnectNamedPipe` throws it away. Decided by measurement, not by the documentation alone.
+- **The positive controls found a bug in the first harness.** The broken endpoint "drop without a reason" was not seen by the
+  scenario meant to see it: the broken endpoint's reader thread kept a clone of the socket, so the socket never closed and the
+  client waited for its guard instead of reading the end. A control that fails for the wrong reason proves nothing; each control
+  asserts the fault kind it is meant to show (`hang`, `drain-not-eof`, `cancelled-after-owner-close`, `no-reason`).
+- **A guard has a direction.** The reference endpoint failed once in the pre-push run of the committed tree while two other
+  builds ran. Its output was not kept, so the cause is probable, not proven: the only 3-second wait on the reference path was
+  the one meant to detect that a broken endpoint **never** waits on the clock, and a starved thread can miss 3 seconds. With
+  that guard cut to 1 microsecond the reference fails in exactly that scenario with `hang`. A wait for something that will
+  happen is a hang guard (30 s); a short wait to learn that something will not happen belongs to the positive control that
+  expects "never" and nowhere else. Two more defects of the first harness, found by timing each control: it waited for an
+  end line of a connection that was never accepted (30 s for nothing), and its raw client took a refused read timeout (macOS
+  answers `EINVAL` on a reset socket) for the end of the stream instead of reading on and reporting the reset. Stress after all the fixes of this
+  entry: 40 runs of all endings tests with 14 busy loops, 1-minute load 55 to 68 on 14 cores, 0 failures (25 runs before the
+  accept fix: 1 failure).
+- **A `connect` that returned is not an accepted connection.** At load 58 (14 busy loops) the control "drop without a reason"
+  failed once in 25 runs with `unanswered`: the harness accepted "what is in the accept queue" right after the client's
+  `connect` returned, and a loaded kernel had not yet moved the connection there, so nobody ever served the client. The
+  endpoint now accepts exactly the expected number of clients (a bounded poll of that condition), and the listener-stop
+  scenario says how many clients wait in the backlog. AF_UNIX connects are synchronous and had no such race.
+- **Small traps met:** `Deadline::remaining()` is `Some(0)` once passed, not `None` (a cap loop that waited for `None` never
+  ended); on macOS `set_read_timeout` fails with `EINVAL` on a socket the peer has already reset, so set it before anything can
+  close; a Unix socket path under the macOS temp folder is near the 104-byte limit, so a test folder name must be short; the
+  busy loops of a load test must be forked by a supervisor that leads its own process group (a child cannot join the group of a
+  process in another session), or the load cannot be stopped as a group.
+- **Rigs show the product's log now:** the Dyno agent's `agent.rs` harness prints the agent's log when a test fails, as the
+  helper-seam rig does; the ending tests of the agent, the helper and the MCP listener print the product's lines under every
+  scenario that has a fault. Rigs that start the agent without the harness (`extras.rs`, `jobs.rs`, `disk_map.rs` and others) do not
+  yet: open.
+- Class: ADR 0072 (a connection ends without the peer learning why, or in the wrong order); the register and the ratchet make it
+  checkable, M1 to M6 remove the entries.
