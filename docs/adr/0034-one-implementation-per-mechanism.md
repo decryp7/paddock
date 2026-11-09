@@ -4,6 +4,10 @@
   direction came from the family survey `family-redesign-and-sharing-2026-10-31`; round 1 added the counted-files rule,
   the entry guard, the wiring kind and register fixes; round 2 added the copies found in `ui/`, the narrowed tray
   entries, the approver on date moves and the exact commands.
+- Amended (accepted 2026-11-09 by the user): [ADR 0075](0075-copy-waivers-are-data-bound-to-the-landing-unit.md)
+  replaces the `Copies-waived:`, `Copies-removed:` and `Copies-date:` trailers of §3 with records in
+  `docs/known-copies.d/`, bound to the unit (the commits a branch brings to the line it lands on) instead of the commit,
+  and amends mode b and the entry guard accordingly. §3's trailers keep applying until ADR 0075's cutover (§5).
 - Date: 2026-10-31
 - Related: rule 40 / ER-21 (recurring bugs mean a missing design rule), rules 39, 42 and 43 / ER-22 (share first, shared
   behaviour tested once), rule 1 (one release at a time, the shared-code freeze), rule 50 (CI runs only what a change
