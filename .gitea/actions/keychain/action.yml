@@ -10,26 +10,31 @@ inputs:
 runs:
   using: composite
   steps:
-    - shell: bash
+    # The whole repository (ci.yml): one literal command, so the CI model (C100) sees an unconditional gate.
+    - if: ${{ inputs.scope == '' }}
+      shell: bash
+      env:
+        PADDOCK: ${{ inputs.paddock }}
+        RUSTC_WRAPPER: ""
+      run: |
+        set -euo pipefail
+        echo "C99: the whole repository"
+        node "$PADDOCK/conformance/bin/paddock-conformance.mjs" --app paddock --root . --only C99 || { echo '::error::C99 found a way to the macOS Keychain, or could not look (see the findings above). Fix the finding, or read "check broken" / "not measured" as a failed check, not a pass (ADR 0057 section 3).'; exit 1; }
+
+    # One app (a release path, ER-31): the scope is the app folder, so another app's finding cannot block it.
+    - if: ${{ inputs.scope != '' }}
+      shell: bash
       env:
         SCOPE: ${{ inputs.scope }}
         PADDOCK: ${{ inputs.paddock }}
         RUSTC_WRAPPER: ""
       run: |
         set -euo pipefail
-        if [ -n "$SCOPE" ] && [ "${SCOPE#apps/}" = "$SCOPE" ]; then
+        if [ "${SCOPE#apps/}" = "$SCOPE" ]; then
           echo "::error::C99 scope '$SCOPE' is not an app folder: use apps/<app> (or a path below it), or leave it empty for the whole repository."
           exit 1
         fi
         # A workspace in a subfolder of the app (apps/<app>/app/src-tauri) is still the app's: the scope is the app folder.
         SCOPE=$(printf '%s' "$SCOPE" | sed -E 's#^(apps/[^/]+).*#\1#')
-        start=$(date +%s)
-        fail='::error::C99 found a way to the macOS Keychain, or could not look (see the findings above). Fix the finding, or read "check broken" / "not measured" as a failed check, not a pass (ADR 0057 section 3).'
-        if [ -n "$SCOPE" ]; then
-          echo "C99: scope $SCOPE"
-          node "$PADDOCK/conformance/bin/paddock-conformance.mjs" --app paddock --root . --only C99 --scope "$SCOPE" || { echo "$fail"; exit 1; }
-        else
-          echo "C99: the whole repository"
-          node "$PADDOCK/conformance/bin/paddock-conformance.mjs" --app paddock --root . --only C99 || { echo "$fail"; exit 1; }
-        fi
-        echo "C99 took $(( $(date +%s) - start )) s"
+        echo "C99: scope $SCOPE"
+        node "$PADDOCK/conformance/bin/paddock-conformance.mjs" --app paddock --root . --only C99 --scope "$SCOPE" || { echo '::error::C99 found a way to the macOS Keychain, or could not look (see the findings above). Fix the finding, or read "check broken" / "not measured" as a failed check, not a pass (ADR 0057 section 3).'; exit 1; }
