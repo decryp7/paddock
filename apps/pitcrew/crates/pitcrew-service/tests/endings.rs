@@ -8,8 +8,8 @@ use paddock_ipc::endpoint::Stream;
 use paddock_ipc::testing::endings::applicability::Applicability;
 use paddock_ipc::testing::endings::ratchet::Ratchet;
 use paddock_ipc::testing::endings::raw::{read_to_end, write_junk};
-use paddock_ipc::testing::endings::{failure_text, run_all, Decoded, Expect, Observed, Scenario, KEEP_WRITING_BYTES};
-use pitcrew_core::protocol::{decode_body, encode_frame, frame_len, read_frame, write_frame, Request, Response, PROTOCOL_VERSION};
+use paddock_ipc::testing::endings::{Decoded, Expect, KEEP_WRITING_BYTES, Observed, Scenario, failure_text, run_all};
+use pitcrew_core::protocol::{PROTOCOL_VERSION, Request, Response, decode_body, encode_frame, frame_len, read_frame, write_frame};
 use pitcrew_service::host::Host;
 use std::path::Path;
 use std::time::Duration;
@@ -90,6 +90,10 @@ fn observe(mut c: Stream, guard: Duration, expect: Expect) -> Result<(Observed, 
     ))
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test builds its scratch path from the OS temp folder and removes it"
+)]
 fn scenario(s: Scenario) -> Result<(Observed, Expect), &'static str> {
     use std::io::Write;
     if !matches!(
