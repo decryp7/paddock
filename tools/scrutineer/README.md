@@ -12,7 +12,7 @@ and installs certificates where the system and your builds will trust them.
 
 </div>
 
-![Placeholder hero for Scrutineer: certified before it ships. A concept mock-up of a certificate list with release, nightly and test-root certificates, their states, and the chain from the test root to the release certificate](docs/images/scrutineer-placeholder-hero.svg?v=1a51e73b)
+![Placeholder hero for Scrutineer: certified before it ships. A concept mock-up of the certificate authority screen: the family root, intermediate and code-signing leaf with their expiry, the other keys, the chain, and a reminder to renew the leaf](docs/images/scrutineer-placeholder-hero.svg?v=25c9f102)
 
 > **Status: planned, not released.** There is no code yet. Scrutineer was dropped on 2026-11-05 and revived on 2026-11-09: one
 > family signing identity keeps macOS privacy grants (Full Disk Access and others) and keychain access across updates, which
@@ -25,14 +25,19 @@ and installs certificates where the system and your builds will trust them.
 
 ## What it will do
 
-![Placeholder feature panels for Scrutineer: generate a certificate and its key; sign builds and installers; verify a signature and its chain; install a certificate where it will be trusted](docs/images/scrutineer-placeholder-features.svg?v=65204de8)
+![Placeholder feature panels for Scrutineer: rotate the intermediate step by step with what is kept; drop a file to see its verify report; install the family root after typing the first 8 hex digits of its fingerprint; the doctor checklist with a leaf to renew](docs/images/scrutineer-placeholder-features.svg?v=ef8125b8)
 
-- **Generate** a certificate and its key, with the uses code signing needs.
-- **Sign** builds and installers with the certificate you choose.
-- **Verify** a signature and its chain, and say why one fails.
-- **Install** a certificate where the system and your builds will trust it.
+- **Certificate authority:** the family root, intermediate and code-signing leaf, the package and update keys, and when
+  each expires.
+- **Generate and rotate** them, with each step and its cost shown before it acts.
+- **Sign and verify** builds and installers on macOS, Windows and Linux; drop any file to see who signed it, its chain and
+  why a check fails.
+- **Trust, per OS:** install or remove the family root for code signing only, after you type the first 8 hex digits of its
+  fingerprint from your own record.
+- **Doctor, expiry reminders and key backup:** what is installed where, what expires next, and a paper backup of the keys.
+- **The same functions as a command line** for CI, where it also gates every release.
 
-![Placeholder diagram of how Scrutineer works: generate, sign, verify, install](docs/images/scrutineer-placeholder-how-it-works.svg?v=732a3682)
+![Placeholder diagram of how Scrutineer works: generate, sign, verify, install](docs/images/scrutineer-placeholder-how-it-works.svg?v=ce92b1e3)
 
 ## Part of Paddock
 

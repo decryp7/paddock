@@ -163,41 +163,55 @@ function reccePanel(kind) {
       return (i === 0 ? r(144, y - 4, 384, 34, 'mact', 8) : '') + r(160, y + 2, 22, 22, i === 0 ? 'maccf' : 'mfield', 6) + t(171, y + 17.5, g, i === 0 ? 'mtw' : 'mm', 'middle') + t(196, y + 18, s, 'mt') + t(512, y + 18, k, 'mm', 'end'); }).join('');
 }
 
-// ---- Scrutineer (planned code-signing certificate tool): certificates with their state, a chain, sign, verify, install ----
+// ---- Scrutineer (planned code-signing app, ADR 0079): the GUI screens of its §2.7 ----
+// Certificate authority (home), generate and rotate, sign and verify (drop a file for its report), trust with the 8-hex confirm,
+// doctor and expiry reminders. Names and dates are invented for the concept.
 const CERTS = [
-  ['Release signing', 'Code signing · RSA 3072', 'Expires 2027-11-04', 'Trusted', true],
-  ['Nightly builds', 'Code signing · ECDSA P-256', 'Expires in 20 days', 'Renew soon', false],
-  ['Test root', 'Root · self-signed', 'Expires 2031-01-01', 'Installed', true],
+  ['Family root', 'Root CA · RSA 4096 · offline', 'Expires 2046-11-09', 'Offline', true],
+  ['Intermediate', 'CA · RSA 4096 · on this Mac', 'Expires 2031-11-09', 'Valid', true],
+  ['Family code signing', 'Leaf · RSA 3072 · CI secret', 'Expires in 52 days', 'Renew soon', false],
 ];
 const stateChip = (x, y, s, ok) => r(x, y, s.length * 7.4 + 22, 22, ok ? 'mact' : 'mfield', 11) + t(x + 11, y + 15.5, s, ok ? 'mta' : 'mm');
 const chain = (x, y, names) => names.map((n, i) => r(x + i * 14, y + i * 52, 196 - i * 14, 40, i === names.length - 1 ? 'mcon' : 'mfield', 8) + t(x + 14 + i * 14, y + 25 + i * 52, n, 'mt') +
   (i ? `<path class="medge" d="M${x + 4 + i * 14} ${y + i * 52 - 12} L${x + 4 + i * 14} ${y + i * 52}"/>` : '')).join('');
+const CHAIN = ['Family root', 'Intermediate', 'Code signing'];
 function scrutineerHero() {
-  return sidebar(['Certificates', 'Sign', 'Verify', 'Install', 'Settings'], 0) +
-    t(232, 52, 'Certificates', 'mh') + t(232, 70, 'Keys stay on this machine', 'mm') + r(812, 34, 116, 32, 'maccf', 8) + t(870, 55, 'Generate', 'mtw', 'middle') +
+  return sidebar(['Authority', 'Sign and verify', 'Trust', 'Doctor', 'Backup', 'Settings'], 0) +
+    t(232, 52, 'Certificate authority', 'mh') + t(232, 70, 'One family identity on every OS', 'mm') + r(782, 34, 146, 32, 'maccf', 8) + t(855, 55, 'Renew leaf…', 'mtw', 'middle') +
     r(232, 84, 440, 470, 'mc', 10) +
-    CERTS.map(([n, k, e, st, ok], i) => { const y = 102 + i * 96; return (i === 0 ? r(240, y - 10, 424, 88, 'mact', 8) : '') + t(256, y + 16, n, 'mt') + t(256, y + 38, k, 'mm') + t(256, y + 58, e, 'mm') + stateChip(560, y + 2, st, ok); }).join('') +
-    r(692, 84, 236, 470, 'mc', 10) + t(710, 114, 'Chain', 'mt') + chain(710, 132, ['Test root', 'Signing CA', 'Release signing']) +
-    r(710, 304, 200, 1, 'mrule', 0) + t(710, 332, 'Uses', 'mm') + stateChip(710, 344, 'Code signing', true) + stateChip(710, 374, 'Timestamping', true) +
-    r(710, 420, 200, 1, 'mrule', 0) + t(710, 448, 'Last signed', 'mm') + t(710, 470, 'installer.msi · verified', 'mt');
+    CERTS.map(([n, k, e, st, ok], i) => { const y = 102 + i * 96; return (i === 2 ? r(240, y - 10, 424, 88, 'mact', 8) : '') + t(256, y + 16, n, 'mt') + t(256, y + 38, k, 'mm') + t(256, y + 58, e, 'mm') + stateChip(548, y + 2, st, ok); }).join('') +
+    r(248, 400, 408, 1, 'mrule', 0) + t(256, 428, 'Keys', 'mm') + t(256, 452, 'Package key (OpenPGP)', 'mt') + t(640, 452, '2028-11-09', 'mm', 'end') +
+    t(256, 478, 'Update key (minisign)', 'mt') + t(640, 478, 'no expiry', 'mm', 'end') + t(256, 504, 'Local root (test apps)', 'mt') + t(640, 504, 'this Mac only', 'mm', 'end') +
+    r(692, 84, 236, 470, 'mc', 10) + t(710, 114, 'Chain', 'mt') + chain(710, 132, CHAIN) +
+    r(710, 304, 200, 1, 'mrule', 0) + t(710, 332, 'Trusted for', 'mm') + stateChip(710, 344, 'Code signing only', true) +
+    r(710, 390, 200, 1, 'mrule', 0) + t(710, 418, 'Reminder', 'mm') + t(710, 440, 'Renew the leaf in 52 days', 'mt') +
+    r(710, 466, 200, 1, 'mrule', 0) + t(710, 494, 'Last signed', 'mm') + t(710, 516, 'Dyno.app · verified', 'mt');
 }
 function scrutineerPanel(kind) {
   if (kind === 'generate') {
-    const field = (y, label, value) => t(60, y + 4, label, 'mm') + r(200, y - 16, 412, 32, 'mfield', 8) + t(214, y + 5, value, 'mt');
-    return r(40, 24, 592, 232, 'mc', 12) + field(64, 'Name', 'Release signing') + field(110, 'Key', 'RSA 3072') + field(156, 'Uses', 'Code signing, timestamping') + field(202, 'Valid for', '2 years');
-  }
-  if (kind === 'sign') {
-    return r(40, 24, 592, 232, 'mc', 12) + t(60, 58, 'Sign', 'mt') + ['installer.msi', 'app.exe', 'Recce.app'].map((f, i) => r(60, 76 + i * 42, 360, 32, 'mfield', 8) + t(74, 97 + i * 42, f, 'mt') + stateChip(440, 81 + i * 42, i < 2 ? 'Signed' : 'Waiting', i < 2)).join('') +
-      t(60, 222, 'with Release signing · timestamped', 'mm');
+    const step = (y, n, s, on) => r(60, y, 24, 24, on ? 'maccf' : 'mfield', 12) + t(72, y + 17, n, on ? 'mtw' : 'mm', 'middle') + t(96, y + 17, s, on ? 'mt' : 'mm');
+    return r(40, 24, 592, 232, 'mc', 12) + t(60, 58, 'Rotate the intermediate', 'mt') +
+      step(76, '1', 'Open the offline root file', false) + step(110, '2', 'Issue a new intermediate (5 years)', true) + step(144, '3', 'Issue a new code-signing leaf', false) + step(178, '4', 'Update the CI secret', false) +
+      r(392, 76, 220, 126, 'mfield', 8) + t(406, 100, 'macOS grants', 'mm') + t(406, 120, 'kept: the root is the same', 'mt') + t(406, 150, 'Windows signatures', 'mm') + t(406, 170, 'kept: timestamped', 'mt') +
+      r(500, 212, 112, 32, 'maccf', 8) + t(556, 233, 'Continue', 'mtw', 'middle');
   }
   if (kind === 'verify') {
-    return r(40, 24, 592, 232, 'mc', 12) + t(60, 58, 'installer.msi', 'mt') + stateChip(500, 42, 'Valid', true) + chain(60, 78, ['Test root', 'Signing CA', 'Release signing']) +
-      t(300, 110, 'Signature matches the file', 'mm') + t(300, 140, 'Chain ends at a trusted root', 'mm') + t(300, 170, 'Signed before expiry', 'mm');
+    return r(40, 24, 592, 232, 'mc', 12) + `<rect class="mbox" x="60" y="44" width="200" height="192" rx="10"/>` + t(160, 128, 'Drop a file', 'mt', 'middle') + t(160, 150, 'to see its report', 'mm', 'middle') +
+      t(284, 60, 'Dyno.app', 'mt') + stateChip(520, 44, 'Valid', true) +
+      [['Signer', 'Family code signing'], ['Chain', 'ends at the family root'], ['Requirement', 'identifier and family root'], ['Nested code', '7 files, all signed'], ['Update signature', 'minisign: valid']].map(([k, v], i) =>
+        t(284, 96 + i * 30, k, 'mm') + t(612, 96 + i * 30, v, 'mt', 'end')).join('');
   }
-  // install
-  return r(40, 24, 592, 232, 'mc', 12) + t(60, 58, 'Install Test root', 'mt') +
-    [['This user', 'Trusted for code signing', true], ['This machine', 'Needs an administrator', false], ['Build agent', 'Through its settings', false]].map(([w, n, on], i) =>
-      r(60, 76 + i * 50, 552, 40, on ? 'mcon' : 'mfield', 8) + t(78, 101 + i * 50, w, 'mt') + t(596, 101 + i * 50, n, 'mm', 'end')).join('');
+  if (kind === 'trust') {
+    return r(40, 24, 592, 232, 'mc', 12) + t(60, 58, 'Install the family root on this machine', 'mt') +
+      t(60, 86, 'SHA-256  4F2A 91C0 7B3E … 0D6E', 'mm') + t(60, 108, 'Trusted for code signing only. Needs an administrator.', 'mm') +
+      t(60, 144, 'Type the first 8 hex digits from your own record', 'mt') +
+      r(60, 156, 220, 34, 'mfield', 8) + t(74, 178, '4F2A91C0', 'mt') + stateChip(292, 162, 'Matches', true) +
+      r(400, 206, 104, 32, 'mfield', 8) + t(452, 227, 'Cancel', 'mt', 'middle') + r(512, 206, 100, 32, 'maccf', 8) + t(562, 227, 'Install', 'mtw', 'middle');
+  }
+  // doctor
+  return r(40, 24, 592, 232, 'mc', 12) + t(60, 58, 'Doctor', 'mt') + t(612, 58, 'this Mac', 'mm', 'end') +
+    [['Family root trusted for code signing', 'OK', true], ['Installed apps name the family root', '6 of 6', true], ['Code-signing leaf', 'renew in 52 days', false], ['Paper backup checked', '2026-11-09', true]].map(([k, v, ok], i) =>
+      r(60, 74 + i * 42, 552, 34, ok ? 'mfield' : 'mcon', 8) + t(76, 96 + i * 42, k, 'mt') + stateChip(612 - (v.length * 7.4 + 22) - 8, 80 + i * 42, v, ok)).join('');
 }
 
 const glyphDot = (x, y) => `<circle class="maccf" cx="${x}" cy="${y}" r="7"/>`;
