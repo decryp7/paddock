@@ -304,8 +304,12 @@ fn cancellation(p: &PluginUnderTest, inputs: &[(String, Vec<u8>)]) -> Result<Str
         let poll = || match stream.next(Some(Duration::from_millis(1))) {
             Ok(StreamEvent::Done(_)) => Some(Ok("the import ended before it could be cancelled".to_string())),
             Ok(_) => None,
-            Err(IpcError::Remote(e)) => Some(Ok(format!("the import failed with {} before it could be cancelled", e.code))),
-            Err(e) => Some(Err(format!("the import broke before the file was read whole: {e}"))),
+            Err(e) => Some(Err(format!(
+                "importer \"{}\" ended with an error while its file was being read ({} of {} bytes): {e}",
+                importer.id,
+                p.host.read_of(id),
+                content.len()
+            ))),
         };
         let waiting = Instant::now();
         if let Some(early) = wait_read_whole(&p.host, id, content.len() as u64, &importer.id, p.launch_options().read_stall, poll)? {
@@ -464,6 +468,7 @@ mod tests {
     fn host() -> FakeHost {
         let host = FakeHost::default();
         host.stall_reads_after(None);
+        host.fail_reads_after(None);
         host
     }
 
