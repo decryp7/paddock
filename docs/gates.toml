@@ -9,7 +9,7 @@ version = 1
 [docs]
 include = ["AGENTS.md", "apps/*/AGENTS.md", "docs/rules.md", "docs/design-guide.md", "**/README.md", "docs/wiki/**/*.md"]
 exclude = ["docs/adr/**", "apps/*/docs/adr/**", "docs/research/**", "docs/plans/**", "docs/planned/**", "docs/audits/**",
-           "docs/lessons.md", "**/CHANGELOG.md", "**/vendor/**", "**/fixtures/**", "**/spikes/**", "ui/docs/review/**",
+           "docs/lessons.md", "**/CHANGELOG.md", "**/vendor/**", "**/fixtures/**", "tools/wiki/tests/golden/**", "**/spikes/**", "ui/docs/review/**",
            "**/node_modules/**"]
 
 # Repository variables as CI sets them (section 2.4); a vars.* not listed here makes the line conditional.
