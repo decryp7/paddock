@@ -309,6 +309,12 @@ impl Eval<'_> {
                 (Some(a), Some(b)) => Val::Bool(a.to_lowercase().ends_with(&b.to_lowercase())),
                 _ => Val::Unknown,
             },
+            // A JSON array literal stays its text: `contains(fromJSON('["job"]'), 'job')` is then a substring test, which is exact for
+            // the rerun gating of ci.yml (a one-name list).
+            "fromjson" => match args.first() {
+                Some(Val::Str(s)) if s.trim_start().starts_with('[') => Val::Str(s.clone()),
+                _ => Val::Unknown,
+            },
             "contains" => match (text(0), text(1)) {
                 (Some(a), Some(b)) => Val::Bool(a.to_lowercase().contains(&b.to_lowercase())),
                 _ => Val::Unknown,
@@ -323,7 +329,7 @@ impl Eval<'_> {
                 }
                 Val::Str(out)
             }
-            // failure(), fromJSON, toJSON, hashFiles, join: outside the model.
+            // failure(), toJSON, hashFiles, join (and fromJSON of anything but an array literal): outside the model.
             _ => Val::Unknown,
         }
     }
@@ -476,6 +482,19 @@ mod tests {
         };
         let src = "needs.plan.outputs.ui == 'true' && (inputs.webkit == true || (github.event_name == 'push' && github.ref == 'refs/heads/main'))";
         assert_eq!(condition(src, &pr).0, Tri::No);
+    }
+
+    #[test]
+    fn the_rerun_gating_of_ci_yml_is_true_when_no_rerun_names_jobs() {
+        let ctx = |n: &str| match n {
+            "needs.plan.outputs.rerun_jobs" => Val::Null,
+            "needs.plan.outputs.ui" => Val::Planned("ui".into()),
+            _ => Val::Unknown,
+        };
+        let src = "needs.plan.outputs.ui == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '[\"ui\"]'), 'ui')";
+        let (t, planned) = condition(src, &ctx);
+        assert_eq!(t, Tri::Yes);
+        assert!(planned.contains("ui"));
     }
 
     #[test]

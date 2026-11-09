@@ -221,6 +221,17 @@ fn parse_matrix(n: &Node) -> Matrix {
         match k.as_str() {
             "include" => match v.text() {
                 Some(t) if t.contains("fromJSON(needs.plan.outputs.apps)") => m.app_legs = true,
+                // The crate and paddock-dev legs of ci.yml: every OS unless a rerun of the earlier run's failures narrows them (the
+                // plan step writes PLAN_OS_LEGS otherwise), so the model runs them on all three.
+                Some(t)
+                    if t.contains("fromJSON(needs.plan.outputs.crate_legs)")
+                        || t.contains("fromJSON(needs.plan.outputs.paddock_dev_legs)") =>
+                {
+                    m.axes.push((
+                        "os".to_string(),
+                        ["ubuntu-latest", "windows-latest", "macos-latest"].map(String::from).to_vec(),
+                    ));
+                }
                 Some(_) => m.include.push(BTreeMap::from([("__unresolved".to_string(), "true".to_string())])),
                 None => m.include.extend(v.items().iter().map(|i| {
                     i.entries()
@@ -609,6 +620,9 @@ impl Lookup for Scope<'_> {
                         let _ = out;
                         Val::Opaque(name.to_string())
                     }
+                    // The jobs a manual rerun of an earlier run's failures names (`since_run`): empty on every other run, which is
+                    // what the model decides ("a branch run"); each job's `if` then reads its own name from the default list.
+                    (Some(_), Some("outputs"), Some("rerun_jobs")) => Val::Null,
                     (Some(job), Some("outputs"), Some(out)) => match self.planners.get(job).and_then(|o| o.get(out)) {
                         // An output computed from the event alone is evaluated; one read from a step is the planner's mark.
                         Some(e) if !e.contains("steps.") => expr::eval(e.trim().trim_start_matches("${{").trim_end_matches("}}"), self).0,
@@ -1513,6 +1527,14 @@ jobs:
         let win = only(&m, "win.mjs");
         assert_eq!(win.os.as_deref(), Some("windows-latest"));
         assert_eq!(find(&m, "all.mjs").len(), 2);
+    }
+
+    #[test]
+    fn the_plans_os_legs_of_ci_yml_run_on_every_os_and_a_rerun_gate_reads_as_a_normal_run() {
+        let wf = "on:\n  pull_request:\njobs:\n  plan:\n    runs-on: ubuntu-latest\n    outputs:\n      crates: ${{ steps.plan.outputs.crates }}\n      rerun_jobs: ${{ steps.plan.outputs.rerun_jobs }}\n      crate_legs: ${{ steps.plan.outputs.crate_legs }}\n    steps:\n      - id: plan\n        run: node plan.mjs\n  c:\n    needs: [plan]\n    if: ${{ needs.plan.outputs.crates == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '[\"c\"]'), 'c') }}\n    strategy:\n      matrix:\n        include: ${{ fromJSON(needs.plan.outputs.crate_legs) }}\n    runs-on: ${{ matrix.os }}\n    steps:\n      - if: runner.os == 'Windows'\n        run: node win.mjs\n      - run: node all.mjs\n";
+        let m = build(&sources(&[(".gitea/workflows/ci.yml", wf)]));
+        assert_eq!(find(&m, "all.mjs").len(), 3, "ubuntu, windows and macos");
+        assert_eq!(only(&m, "win.mjs").os.as_deref(), Some("windows-latest"));
     }
 
     #[test]
