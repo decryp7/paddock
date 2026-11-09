@@ -733,16 +733,21 @@ fn ci_yml_wires_the_plan_job_outputs_and_the_commits_job_asks_for_its_range() {
         .captures_iter(plan_job)
         .map(|c| (c[1].to_string(), c[2].to_string()))
         .collect();
-    // A rerun of a run's failures (PLAN_SINCE_RUN) writes its own outputs besides these; a normal run leaves them empty.
-    let since = paddock_dev::plan_since::SincePlan {
-        run: 1,
-        workflow: "ci.yml".into(),
-        head: String::new(),
-        reruns: Vec::new(),
-        not_rerun: 0,
-        everything: None,
-    };
-    let since_written: Vec<String> = since.ci_outputs(&[], &mut |_| {}).into_iter().map(|(k, _)| k).collect();
+    // A rerun of a run's failures (PLAN_SINCE_RUN) writes its own outputs besides these; a normal run leaves them empty. A
+    // project boolean matters only when a job of this ci.yml reads it.
+    let since_written: Vec<String> = since_outputs()
+        .into_iter()
+        .filter(|k| {
+            let project = k.replace('_', "-");
+            let is_project = paddock_dev::plan_gitea::CI_JOBS
+                .iter()
+                .any(|(_, ps)| ps.contains(&project.as_str()));
+            !is_project
+                || paddock_dev::plan_gitea::CI_JOBS
+                    .iter()
+                    .any(|(j, ps)| ps.contains(&project.as_str()) && wf.jobs.iter().any(|(k, _)| k == j))
+        })
+        .collect();
     for (name, step) in &declared {
         assert_eq!(name, step, "output {name} reads steps.plan.outputs.{step}");
         assert!(
@@ -783,6 +788,34 @@ fn ci_yml_wires_the_plan_job_outputs_and_the_commits_job_asks_for_its_range() {
         plan_job.contains("./dev plan --ci") || plan_job.contains("node scripts/affected.mjs --ci"),
         "the plan job calls a planner"
     );
+}
+
+/// Every output a since-run plan can write: one with a rerun of every job, the crate and paddock-dev legs known.
+fn since_outputs() -> Vec<String> {
+    use paddock_dev::plan_since::{Leg, Rerun, Scope, SincePlan};
+    let reruns = paddock_dev::plan_gitea::CI_JOBS
+        .iter()
+        .map(|(j, _)| Rerun {
+            id: 1,
+            name: j.to_string(),
+            key: Some(j.to_string()),
+            leg: Leg {
+                os: Some("ubuntu-latest".into()),
+                ..Leg::default()
+            },
+            scope: Scope::Job("x".into()),
+            vitest: vec![],
+        })
+        .collect();
+    let plan = SincePlan {
+        run: 1,
+        workflow: "ci.yml".into(),
+        head: String::new(),
+        reruns,
+        not_rerun: 0,
+        everything: None,
+    };
+    plan.ci_outputs(&[], &mut |_| {}).into_iter().map(|(k, _)| k).collect()
 }
 
 #[test]

@@ -299,15 +299,28 @@ fn write_ci(env: &dyn Fn(&str) -> Option<String>, outputs: &[(String, String)], 
     Ok(())
 }
 
-/// CI with `PLAN_SINCE_RUN`: the outputs that rerun only what failed in that run. When the run cannot be read or its failures
-/// cannot be told job by job, a warning and everything (a rerun never runs less than failed).
+/// CI with `PLAN_SINCE_RUN`: the outputs that rerun only what failed in that run. A run that cannot be read or has not finished
+/// stops the plan with an error (a rerun must not quietly become a full run); a run whose failures cannot be told job by job
+/// plans everything with a warning (a rerun never runs less than failed).
 fn since_ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, run: &str) -> Result<Report, CliError> {
     let id: u64 = run
         .parse()
         .ok()
         .filter(|n| *n > 0)
         .ok_or_else(|| fail(format!("PLAN_SINCE_RUN must be a run number, not {run:?}")))?;
-    let webkit = wants_webkit(env);
+    since_ci_with(root, env, id, read_since_run(root, env, id))
+}
+
+fn since_ci_with(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u64, read: Result<SincePlan, String>) -> Result<Report, CliError> {
+    let plan = read.map_err(|e| fail(format!("the rerun of run {id} cannot be planned: {e}")))?;
+    if !matches!(plan.workflow.as_str(), "ci.yml" | "ci.yaml") {
+        return Err(fail(format!(
+            "run {id} is a run of {}; ci.yml reruns only its own runs (rerun that workflow's failed jobs by hand)",
+            plan.workflow
+        )));
+    }
+    // The WebKit legs too when a WebKit job or leg failed, or the matrix would have no leg to rerun it in.
+    let webkit = wants_webkit(env) || plan.needs_webkit();
     let history = GitHistory::new(root, TIMEOUT);
     let all = Request {
         files: Vec::new(),
@@ -319,25 +332,12 @@ fn since_ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, run: &str) -> Res
     };
     let (graph, everything) = plan_with_graph(root, &history, &all).map_err(|e| fail(e.to_string()))?;
     let legs = matrix(&everything, &graph, MatrixOpts { narrow: false, webkit }).map_err(fail)?;
-    let fallback = |why: String| -> Result<Report, CliError> {
+    if let Some(why) = &plan.everything {
         println!("::warning::dev plan --since-run {id}: {why}; this run tests everything");
         let reason = format!("everything: the rerun of run {id} cannot be narrowed ({why})");
         eprintln!("base: {reason}");
         write_ci(env, &ci_outputs(&everything, &legs, None), &summary(&everything, &reason, &legs))?;
-        Ok(Report::new(serde_json::json!({ "sinceRun": id, "everything": why }), String::new()))
-    };
-    let plan = match read_since_run(root, env, id) {
-        Ok(p) => p,
-        Err(e) => return fallback(e),
-    };
-    if !matches!(plan.workflow.as_str(), "ci.yml" | "ci.yaml") {
-        return Err(fail(format!(
-            "run {id} is a run of {}; ci.yml reruns only its own runs (rerun that workflow's failed jobs by hand)",
-            plan.workflow
-        )));
-    }
-    if let Some(why) = &plan.everything {
-        return fallback(why.clone());
+        return Ok(Report::new(serde_json::json!({ "sinceRun": id, "everything": why }), String::new()));
     }
     let outputs = plan.ci_outputs(&legs, &mut |w| println!("{w}"));
     eprintln!("{}", serde_json::to_string_pretty(&plan.to_json()).unwrap_or_default());
@@ -401,6 +401,15 @@ mod tests {
             urls: vec![],
         };
         assert_eq!(ci_runs(&mut http, &no_env, &mut |_| {}).unwrap().len(), 200, "at most four pages");
+    }
+
+    #[test]
+    fn an_unreadable_or_unfinished_run_stops_the_rerun_plan_with_an_error() {
+        let root = tempfile::tempdir().unwrap();
+        let e = since_ci_with(root.path(), &no_env, 7, Err("run 7 is running: wait until it finishes".into()))
+            .err()
+            .unwrap();
+        assert!(e.text().contains("run 7 is running"), "{}", e.text());
     }
 
     #[test]

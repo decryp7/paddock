@@ -100,7 +100,10 @@ export const CI_JOBS = {
   e2e: ['ui'],
   'e2e-webkit': ['ui'], // runs on push to main, tags and manual runs only, never on a pull request
   conformance: ['conformance'],
+  c99: ['c99'], // the Keychain check (C99); its job reads the c99 output
+  'ipc-endpoints': ['conformance'], // the endpoint register (C102); runs on every run
   tools: ['tools'],
+  'tools-macos': ['tools'], // the VM tooling tests on the Mac host
   icons: ['icons'],
   'eslint-preset': ['eslint'],
   crates: ['crates'],

@@ -375,6 +375,17 @@ fn narrow(job: &RunJob, log: Result<&str, &str>, ci: bool, key: Option<&str>) ->
         return Err(format!("step \"{s}\" failed and takes no test filter"));
     }
     if *composite {
+        // The step that failed inside the composite and the composite itself; a third (notices.sh, the cargo-about install,
+        // which print no ::error:: line) or a missing one means another step failed too.
+        let failed = log
+            .lines()
+            .filter(|l| plain(l).starts_with("##[error]Process completed with exit code"))
+            .count();
+        if failed != 2 {
+            return Err(format!(
+                "{failed} failed steps in the log: app-gates is narrowed only when its Rust step alone failed"
+            ));
+        }
         let errs = errors(log);
         if errs.is_empty() {
             return Err("the step failed without naming a failed command".into());
@@ -444,6 +455,16 @@ impl SincePlan {
         }
     }
 
+    /// Whether the rerun needs the WebKit legs in the matrix: the WebKit job failed, an app's WebKit leg failed, or an app leg
+    /// that cannot be told failed (it may be the WebKit one). Without them a failed WebKit leg would not be found to rerun.
+    pub fn needs_webkit(&self) -> bool {
+        self.reruns.iter().any(|r| match r.key.as_deref() {
+            Some("e2e-webkit") => true,
+            Some("app") => r.leg.e2e_leg.as_deref().is_none_or(|e| e == "e2e-webkit"),
+            _ => false,
+        })
+    }
+
     /// The plan as JSON (`dev plan --since-run`).
     pub fn to_json(&self) -> Value {
         let jobs: Vec<Value> = self
@@ -495,11 +516,22 @@ impl SincePlan {
     /// [`SincePlan::everything`]. The warnings (a failed leg that today's matrix no longer has) go to `warn`.
     pub fn ci_outputs(&self, legs: &[Value], warn: &mut dyn FnMut(String)) -> Vec<(String, String)> {
         let keys: BTreeSet<&str> = self.reruns.iter().filter_map(|r| r.key.as_deref()).collect();
-        let project = |p: &str| {
-            keys.iter()
-                .any(|k| CI_JOBS.iter().any(|(j, ps)| j == k && ps.contains(&p)))
-                .to_string()
-        };
+        // One boolean output per project of the job table (`paddock-dev` is `paddock_dev`); `apps` is the legs below.
+        let mut projects: Vec<&str> = Vec::new();
+        for (_, ps) in CI_JOBS {
+            for p in ps.iter().filter(|p| !matches!(**p, "everything" | "apps")) {
+                if !projects.contains(p) {
+                    projects.push(p);
+                }
+            }
+        }
+        let mut out: Vec<(String, String)> = projects
+            .iter()
+            .map(|p| {
+                let on = keys.iter().any(|k| CI_JOBS.iter().any(|(j, ps)| j == k && ps.contains(p)));
+                (p.replace('-', "_"), on.to_string())
+            })
+            .collect();
         let mut app_legs: Vec<Value> = Vec::new();
         for r in self.reruns.iter().filter(|r| r.key.as_deref() == Some("app")) {
             let matches = |l: &Value| {
@@ -542,7 +574,7 @@ impl SincePlan {
         let os_legs = |key: &str| -> String {
             let runs: Vec<&Rerun> = self.reruns.iter().filter(|r| r.key.as_deref() == Some(key)).collect();
             if runs.is_empty() || runs.iter().any(|r| r.leg.os.is_none()) {
-                return String::new(); // not rerun, or a leg that cannot be told: the job's own list, whole
+                return String::new(); // not rerun, or a leg that cannot be told: the plan step writes every leg, whole
             }
             let legs: Vec<Value> = runs
                 .iter()
@@ -556,22 +588,21 @@ impl SincePlan {
                 .collect();
             serde_json::to_string(&legs).unwrap_or_default()
         };
-        vec![
-            ("crates".into(), project("crates")),
-            ("ui".into(), project("ui")),
-            ("eslint".into(), project("eslint")),
-            ("conformance".into(), project("conformance")),
-            ("tools".into(), project("tools")),
-            ("icons".into(), project("icons")),
-            ("paddock_dev".into(), project("paddock-dev")),
+        out.extend([
             ("apps".into(), serde_json::to_string(&app_legs).unwrap_or_default()),
             ("any_app".into(), (!app_legs.is_empty()).to_string()),
             // The commit lint, when it reruns, lints what came after the failed run.
             ("base".into(), self.head.clone()),
             ("rerun_jobs".into(), serde_json::to_string(&keys).unwrap_or_default()),
-            ("crate_legs".into(), os_legs("crate")),
-            ("paddock_dev_legs".into(), os_legs("paddock-dev")),
-        ]
+        ]);
+        // Written only for a job that reruns with known legs; otherwise the plan step writes every OS (ci.yml).
+        for (name, key) in [("crate_legs", "crate"), ("paddock_dev_legs", "paddock-dev")] {
+            let legs = os_legs(key);
+            if !legs.is_empty() {
+                out.push((name.into(), legs));
+            }
+        }
+        out
     }
 
     /// A Markdown summary for the job summary.
@@ -938,7 +969,7 @@ mod tests {
         assert_eq!(out["paddock_dev"], "false");
         assert_eq!(out["base"], "f1d7e0791f250c88dacd318f7caebf1dcf066cdf");
         assert_eq!(out["rerun_jobs"], r#"["app","conformance","crate","crates","e2e","ui"]"#);
-        assert_eq!(out["paddock_dev_legs"], "");
+        assert!(!out.contains_key("paddock_dev_legs"), "not rerun: the plan step writes every leg");
         let crate_legs: Value = serde_json::from_str(&out["crate_legs"]).unwrap();
         assert_eq!(crate_legs.as_array().unwrap().len(), 2);
         assert_eq!(crate_legs[0]["os"], "macos-latest");
@@ -986,6 +1017,82 @@ mod tests {
         let summary = plan.summary();
         assert!(summary.contains("| crate (macos-latest) | 1 failed test(s) only |"), "{summary}");
         assert!(summary.contains("| ui (tokens, contrast, components, entry points, publish dry run) | the whole job: "));
+    }
+
+    fn rerun(key: &str, leg: Leg) -> Rerun {
+        Rerun {
+            id: 1,
+            name: "x".into(),
+            key: Some(key.into()),
+            leg,
+            scope: Scope::Job("x".into()),
+            vitest: vec![],
+        }
+    }
+
+    fn plan_of(reruns: Vec<Rerun>) -> SincePlan {
+        SincePlan {
+            run: 1,
+            workflow: "ci.yml".into(),
+            head: "h".into(),
+            reruns,
+            not_rerun: 0,
+            everything: None,
+        }
+    }
+
+    #[test]
+    fn a_failed_webkit_job_or_webkit_leg_asks_for_the_webkit_legs() {
+        let app = |e2e: Option<&str>| Leg {
+            os: Some("ubuntu-latest".into()),
+            app: Some("x".into()),
+            e2e_leg: e2e.map(str::to_string),
+        };
+        assert!(plan_of(vec![rerun("e2e-webkit", Leg::default())]).needs_webkit());
+        assert!(plan_of(vec![rerun("app", app(Some("e2e-webkit")))]).needs_webkit());
+        assert!(
+            plan_of(vec![rerun("app", Leg::default())]).needs_webkit(),
+            "an unknown leg may be the WebKit one"
+        );
+        assert!(!plan_of(vec![rerun("app", app(Some(""))), rerun("e2e", Leg::default())]).needs_webkit());
+    }
+
+    #[test]
+    fn app_gates_is_narrowed_only_when_the_rust_step_and_the_composite_are_its_only_failures() {
+        // A third failure (notices.sh or the cargo-about install, which print no ::error::) keeps the whole leg.
+        let third = format!("{APP_DYNO}2026-11-09T07:46:00.0000000Z ##[error]Process completed with exit code 1.\n");
+        assert!(matches!(classify(&job(33275), Ok(&third), true, &templates()).scope, Scope::Job(ref w) if w.contains("3 failed steps")));
+        let one: String = APP_DYNO
+            .lines()
+            .filter(|l| !l.contains("07:45:57"))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        assert!(matches!(classify(&job(33275), Ok(&one), true, &templates()).scope, Scope::Job(ref w) if w.contains("1 failed steps")));
+        assert!(matches!(
+            classify(&job(33275), Ok(APP_DYNO), true, &templates()).scope,
+            Scope::Tests { .. }
+        ));
+    }
+
+    #[test]
+    fn the_project_outputs_are_every_project_of_the_job_table() {
+        let out: Vec<String> = plan_of(vec![rerun("c99", Leg::default())])
+            .ci_outputs(&[], &mut |_| {})
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
+        for (_, projects) in CI_JOBS {
+            for p in projects.iter().filter(|p| !matches!(**p, "everything" | "apps")) {
+                assert!(out.contains(&p.replace('-', "_")), "{p} in {out:?}");
+            }
+        }
+        let c99: BTreeMap<String, String> = plan_of(vec![rerun("c99", Leg::default())])
+            .ci_outputs(&[], &mut |_| {})
+            .into_iter()
+            .collect();
+        assert_eq!(c99["c99"], "true");
+        assert_eq!(c99["rerun_jobs"], r#"["c99"]"#);
+        assert!(!c99.contains_key("crate_legs"), "not rerun: the plan step writes every leg");
     }
 
     #[test]
