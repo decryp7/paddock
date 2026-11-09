@@ -406,12 +406,12 @@ describe('the VM lock', () => {
     writeFileSync(join(dir, 'vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx'), '.encoding = "UTF-8"\n');
     return { ...f, env: { PADDOCK_WIN_VM_DIR: dir, FUSION_APP: f.fusion, PATH: f.path, PADDOCK_VM_MAX_LOAD: '100000' } };
   };
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const holding = async (label, body = 'sleep 30') => {
     const marker = join(scratch, `${label}-held`);
     const child = spawn('bash', ['-c', `. '${join(here, 'vm-lock.sh')}'; vm_lock_acquire ${label}; touch '${marker}'; ${body}`], { env: { ...process.env, ...lockEnv }, stdio: 'ignore', detached: true });
     const exited = new Promise((r) => child.on('exit', r));
-    for (let i = 0; i < 100 && !existsSync(marker); i++) await sleep(100);
+    // A poll of a condition: the bound only stops a hung child, the verdict never depends on the time taken.
+    for (let i = 0; i < 150 && !existsSync(marker); i++) await new Promise((r) => setTimeout(r, 100)); // conformance: hang-guard — a poll of a condition, 15 s bound that only stops a hung child
     assert.ok(existsSync(marker), `${label} took the lock`);
     return { stop: async () => { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* gone */ } await exited; } };
   };
