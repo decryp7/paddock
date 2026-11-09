@@ -2,13 +2,11 @@
 //! apps' CI contracts (`paddock.ci.json`) and the host-cleanup process patterns they hand to `job-isolation.sh`, the markdown
 //! that code reads (declared doc inputs), CODEOWNERS, Renovate and the one npm workspace.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use paddock_dev::plan::{is_declared_doc_input, is_docs, read_graph};
-use paddock_repo_graph::GitHistory;
+use paddock_dev::plan::{is_declared_doc_input, is_docs};
 use regex::Regex;
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().to_path_buf()
@@ -32,16 +30,22 @@ fn json(path: &str) -> Value {
     serde_json::from_str(&read(path)).unwrap()
 }
 
-/// Every app's `paddock.ci.json`, read once for the whole test binary: reading the graph runs `cargo metadata` over every workspace,
-/// and several tests doing that at once queue on cargo's package-cache lock (on the loaded macOS runner they passed 60 s).
+/// Every app's `paddock.ci.json` (with its `dir`, as the planner reads it), straight from the tracked files: no `cargo metadata`,
+/// which on a loaded host runner took most of the 60 s budget by itself.
 fn configs() -> Vec<(String, Value)> {
-    static CONFIGS: std::sync::OnceLock<Vec<(String, Value)>> = std::sync::OnceLock::new();
-    CONFIGS
-        .get_or_init(|| {
-            let g = read_graph(&root(), &GitHistory::new(root(), Duration::from_secs(120))).unwrap();
-            g.apps.iter().map(|a| (a.clone(), g.config(a).clone())).collect()
-        })
-        .clone()
+    let mut out = Vec::new();
+    for f in tracked() {
+        let Some(app) = f.strip_prefix("apps/").and_then(|r| r.strip_suffix("/paddock.ci.json")) else {
+            continue;
+        };
+        if app.contains('/') {
+            continue;
+        }
+        let mut config = json(&f);
+        config["dir"] = Value::String(format!("apps/{app}"));
+        out.push((app.to_string(), config));
+    }
+    out
 }
 
 #[test]
