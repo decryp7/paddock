@@ -239,8 +239,9 @@ Quoted by [ADR 0073](adr/0073-no-test-doubles-in-a-shipped-build.md) ("Paralleli
 - **Commit:** b51c72509 (origin/main).
 - **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2.
 - **Load:** 1-minute load 7.3–7.5 at start and end (5-minute 14.8–18.1); other agents were building.
-- **Build:** release; the survey tool (a generalisation of Dyno's `no_ungated_doubles.rs`, `syn` 2.0.119, kept in the
-  author's scratch folder, not committed; WP-0 of ADR 0073 builds the real check); `cargo tree` from the pinned toolchain.
+- **Build:** release; the survey tool (a generalisation of Dyno's `no_ungated_doubles.rs`, `syn` 2.0.119), committed as
+  text in [research/2026-11-09-test-doubles-survey.md](research/2026-11-09-test-doubles-survey.md) (WP-0 of ADR 0073
+  builds the real check); `cargo tree` from the pinned toolchain.
 - **Corpus:** the repository's own Rust sources (no user data): `crates/`, `apps/debrief`, `apps/dyno`, `apps/pitwall`,
   `apps/spotter`, `apps/pitcrew`.
 - **Command:** `fake-scan <workspace> .` per workspace (it runs `cargo metadata --no-deps --offline`, then parses every
@@ -260,7 +261,7 @@ Quoted by [ADR 0073](adr/0073-no-test-doubles-in-a-shipped-build.md) ("Paralleli
   | `cargo tree`, Debrief's 4 shipped packages in a row | 1.05 s | – | – | indication |
 
 - **Memory measure:** not measured.
-- **Notes:** round 3 was 8 to 100 times slower in every workspace at once. The cause was not diagnosed; most likely
+- **Notes:** round 3 was about 15 to 120 times slower in every workspace at once (2.7 to 50.5 s against 0.10 to 0.82 s). The cause was not diagnosed; most likely
   `cargo metadata` waited on a Cargo lock held by another agent's build. These are indications under load, not budgets.
 
 ### 2026-11-03, starving a test process by OS priority on macOS
