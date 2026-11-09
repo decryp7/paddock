@@ -733,9 +733,22 @@ fn ci_yml_wires_the_plan_job_outputs_and_the_commits_job_asks_for_its_range() {
         .captures_iter(plan_job)
         .map(|c| (c[1].to_string(), c[2].to_string()))
         .collect();
+    // A rerun of a run's failures (PLAN_SINCE_RUN) writes its own outputs besides these; a normal run leaves them empty.
+    let since = paddock_dev::plan_since::SincePlan {
+        run: 1,
+        workflow: "ci.yml".into(),
+        head: String::new(),
+        reruns: Vec::new(),
+        not_rerun: 0,
+        everything: None,
+    };
+    let since_written: Vec<String> = since.ci_outputs(&[], &mut |_| {}).into_iter().map(|(k, _)| k).collect();
     for (name, step) in &declared {
         assert_eq!(name, step, "output {name} reads steps.plan.outputs.{step}");
-        assert!(written.contains(step), "dev plan --ci writes {step}");
+        assert!(
+            written.contains(step) || since_written.contains(step),
+            "dev plan --ci writes {step}"
+        );
     }
     let names: Vec<&String> = declared.iter().map(|(n, _)| n).collect();
     for c in regex::Regex::new(r"needs\.plan\.outputs\.([a-z0-9_]+)").unwrap().captures_iter(&ci) {
@@ -747,6 +760,14 @@ fn ci_yml_wires_the_plan_job_outputs_and_the_commits_job_asks_for_its_range() {
     }
     for w in &written {
         assert!(names.contains(&w), "dev plan --ci writes {w}, which the plan job does not declare");
+    }
+    if plan_job.contains("PLAN_SINCE_RUN") {
+        for w in &since_written {
+            assert!(
+                names.contains(&w),
+                "dev plan --ci --since-run writes {w}, which the plan job does not declare"
+            );
+        }
     }
     let commits = &wf.jobs.iter().find(|(k, _)| k == "commits").expect("a commits job").1;
     assert!(
@@ -792,4 +813,11 @@ fn ci_yml_passes_every_field_of_a_matrix_leg_to_app_gates() {
         assert!(gates.contains(&format!("\n  {input}:\n")), "{input}");
     }
     assert!(job.contains("include: ${{ fromJSON(needs.plan.outputs.apps) }}"));
+    // A since-run leg narrowed to its failed tests adds `tests_only` (plan_since.rs), which app-gates must take.
+    if gates.contains("\n  tests-only:\n") {
+        assert!(
+            job.contains("tests-only: ${{ matrix.tests_only }}"),
+            "ci.yml passes matrix.tests_only"
+        );
+    }
 }

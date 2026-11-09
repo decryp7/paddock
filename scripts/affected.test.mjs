@@ -418,9 +418,12 @@ describe('.gitea changes are narrowed to the jobs they reach', () => {
     const planJob = workflowJobs(ci).jobs.get('plan');
     const declared = [...planJob.matchAll(/^ {6}([a-z_]+): \$\{\{ steps\.plan\.outputs\.([a-z_]+) \}\}/gm)];
     const written = Object.keys(ciOutputs({ paddockDev: false }, []));
+    // A rerun of a run's failures (the since_run input) is planned by `./dev plan --ci` only (tools/paddock-dev/src/plan_since.rs),
+    // which also writes these; a normal run leaves them empty.
+    const sinceRunOnly = ['rerun_jobs', 'crate_legs', 'paddock_dev_legs'];
     for (const [, name, step] of declared) {
       assert.equal(name, step, `output ${name} reads steps.plan.outputs.${step}`);
-      assert.ok(written.includes(step), `--ci writes ${step}`);
+      assert.ok(written.includes(step) || sinceRunOnly.includes(step), `--ci writes ${step}`);
     }
     const names = declared.map((d) => d[1]);
     for (const [, used] of ci.matchAll(/needs\.plan\.outputs\.([a-z_]+)/g)) assert.ok(names.includes(used), `ci.yml uses needs.plan.outputs.${used}, which the plan job does not declare`);
