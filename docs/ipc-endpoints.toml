@@ -1,0 +1,179 @@
+# The endpoint register (ADR 0072 §5, check C102): every place in non-test code that listens or accepts. `./dev check
+# ipc-endpoints` scans the Rust sources (a `syn` pass over everything outside tests/, benches/, examples/ and #[cfg(test)]
+# items) and fails when a listen site is in neither section, when an entry no longer matches its file, or when the ending
+# test it names does not exist.
+#
+# [[endpoint]]   id           the name the ending test and the ratchet use (several files may share one id and one test)
+#                file         the file with the listen sites
+#                calls        the primitives found there (the ids of tools/paddock-dev/src/ipc_endpoints.rs PRIMITIVES)
+#                sites        how many sites the file has; a new listen call in a registered file changes it and so is reviewed
+#                ending_test  `path::function`: the test that drives this endpoint through the scenarios of
+#                             `paddock_ipc::testing::endings` and compares with docs/ipc-endpoint-ratchet.toml
+#                consumers    (free text) who reaches this site through a constructor
+# [[out_of_scope]] path       a file, or `dir/**`; it must match at least one site (a stale entry fails)
+#                reason, owner, and where it applies delete_by / adopt_by (a tag)
+#
+# The ratchet (docs/ipc-endpoint-ratchet.toml) lists what fails today; this file never does.
+
+[[endpoint]]
+id = "ipc-host"
+file = "crates/paddock-ipc/src/handshake.rs"
+calls = ["paddock_ipc::endpoint::Listener::bind*"]
+sites = 3
+ending_test = "crates/paddock-ipc/tests/it/endings.rs::ipc_host_ends_every_connection_right_or_is_in_the_ratchet"
+consumers = "Host::listen, listen_in and listen_at: paddock-ipc's launcher and link server, the Dyno agent, paddock-plugin-test"
+
+[[endpoint]]
+id = "ipc-host"
+file = "crates/paddock-ipc/src/endpoint/mod.rs"
+calls = ["paddock_ipc::endpoint::Listener::bind*"]
+sites = 4
+ending_test = "crates/paddock-ipc/tests/it/endings.rs::ipc_host_ends_every_connection_right_or_is_in_the_ratchet"
+consumers = "the public Listener::bind, bind_in, bind_fixed and bind_system over the OS endpoint (below); the Dyno helper binds with bind_system"
+
+[[endpoint]]
+id = "ipc-host"
+file = "crates/paddock-ipc/src/endpoint/unix.rs"
+calls = ["std::os::unix::net::UnixListener::bind"]
+sites = 2
+ending_test = "crates/paddock-ipc/tests/it/endings.rs::ipc_host_ends_every_connection_right_or_is_in_the_ratchet"
+consumers = "the Unix socket under every paddock-ipc Listener"
+
+[[endpoint]]
+id = "ipc-host"
+file = "crates/paddock-ipc/src/endpoint/windows.rs"
+calls = ["CreateNamedPipeW"]
+sites = 1
+ending_test = "crates/paddock-ipc/tests/it/endings.rs::ipc_host_ends_every_connection_right_or_is_in_the_ratchet"
+consumers = "the named pipe under every paddock-ipc Listener (Windows)"
+
+[[endpoint]]
+id = "ipc-link-server"
+file = "crates/paddock-ipc/src/link/server.rs"
+calls = ["paddock_ipc::Host::listen*"]
+sites = 3
+ending_test = "crates/paddock-ipc/tests/it/endings.rs::ipc_link_server_ends_every_connection_right_or_is_in_the_ratchet"
+consumers = "LinkServer::start: a companion process serving its link (Pitcrew's capped server model, ADR 0001)"
+
+[[endpoint]]
+id = "ipc-launcher"
+file = "crates/paddock-ipc/src/launch.rs"
+calls = ["paddock_ipc::Host::listen*"]
+sites = 1
+ending_test = "crates/paddock-ipc/tests/it/endings.rs::ipc_launcher_ends_every_connection_right_or_is_in_the_ratchet"
+consumers = "launch(): paddock-plugin-host, Dyno's plugin host (dyno-plugin-host), Dyno's app link to its children"
+
+[[endpoint]]
+id = "dyno-agent"
+file = "apps/dyno/crates/dyno-agent/src/wire.rs"
+calls = ["paddock_ipc::Host::listen*"]
+sites = 1
+ending_test = "apps/dyno/crates/dyno-agent/tests/endings.rs::dyno_agent_ends_every_connection_right_or_is_in_the_ratchet"
+consumers = "the Dyno agent's endpoint (the app and dyno-cli connect)"
+
+[[endpoint]]
+id = "dyno-helper"
+file = "apps/dyno/crates/dyno-helper/src/serve.rs"
+calls = ["paddock_ipc::endpoint::Listener::bind*"]
+sites = 1
+ending_test = "apps/dyno/crates/dyno-helper/src/server.rs::dyno_helper_ends_every_connection_right_or_is_in_the_ratchet"
+consumers = "the Dyno helper service's system endpoint (raw connections, no handshake: ADR 0027)"
+
+[[endpoint]]
+id = "mcp-loopback"
+file = "crates/paddock-mcp/src/listener.rs"
+calls = ["paddock_mcp::serve_loopback", "std::net::TcpListener::bind"]
+sites = 2
+ending_test = "crates/paddock-mcp/tests/it/endings.rs::mcp_loopback_ends_every_connection_right_or_is_in_the_ratchet"
+consumers = "paddock-shell and Dyno's app (the MCP listener, ADR 0007); the stdio bridge in dyno-cli is its client"
+
+[[endpoint]]
+id = "pitcrew-service"
+file = "apps/pitcrew/crates/pitcrew-service/src/ipc.rs"
+calls = ["tokio::net::UnixListener::bind", "tokio::net::windows::named_pipe::ServerOptions::create_with_security_attributes_raw"]
+sites = 2
+ending_test = "apps/pitcrew/crates/pitcrew-service/tests/endings.rs::pitcrew_service_ends_every_connection_right_or_is_in_the_ratchet"
+consumers = "Pitcrew's app-service transport (ADR 0004): a hand-rolled copy of ipc-endpoint and ipc-frames-peer (ADR 0072 §9)"
+
+# --- Not endpoints of the family -------------------------------------------------------------------------------------
+
+[[out_of_scope]]
+path = "apps/debrief/crates/debrief-ipc/**"
+reason = "Debrief's registered copy of the endpoint, peer, launcher and link (docs/known-copies.toml: ipc-endpoint, ipc-frames-peer, ipc-child-launch, companion-link); it is replaced by paddock-ipc in Debrief 1.2 (ADR 0072 §9, D5). Its close order is already right; it sends no reason."
+owner = "debrief"
+delete_by = "debrief-v1.2.0"
+
+[[out_of_scope]]
+path = "apps/pitwall/crates/pitwall-server/src/main.rs"
+reason = "Pitwall's HTTP server: it keeps HTTP's own connection semantics (ADR 0072 §5)."
+owner = "pitwall"
+
+[[out_of_scope]]
+path = "apps/pitwall/crates/pitwall-server/src/serving.rs"
+reason = "A free-port probe (binds port 0, reads the port, drops the listener); it serves nobody."
+owner = "pitwall"
+
+[[out_of_scope]]
+path = "apps/pitwall/crates/pitwall-server/src/fake_engine.rs"
+reason = "A fake inference engine for tests and development; never shipped as a server."
+owner = "pitwall"
+
+[[out_of_scope]]
+path = "apps/debrief/crates/debrief-ai-worker/src/child.rs"
+reason = "A free-port probe (binds port 0, reads the port, drops the listener); it serves nobody."
+owner = "debrief"
+
+[[out_of_scope]]
+path = "apps/debrief/crates/debrief-ai-worker/src/bin/fake_llama_server.rs"
+reason = "A fake llama server binary for tests; never shipped."
+owner = "debrief"
+
+[[out_of_scope]]
+path = "apps/debrief/crates/chromium-driver/src/fake.rs"
+reason = "A fake Chrome DevTools server for tests."
+owner = "debrief"
+
+[[out_of_scope]]
+path = "apps/debrief/crates/debrief-ai/src/engine/pitwall/fake.rs"
+reason = "A fake Pitwall server for tests."
+owner = "debrief"
+
+[[out_of_scope]]
+path = "apps/debrief/crates/debrief-symbols/src/testing.rs"
+reason = "A fake symbol server for tests (compiled only for tests and the testing feature)."
+owner = "debrief"
+
+[[out_of_scope]]
+path = "apps/debrief/docs/research/**"
+reason = "Research harnesses written to measure something (2026-10-28 DuckDB server mode); not part of any build."
+owner = "debrief"
+
+[[out_of_scope]]
+path = "crates/paddock-chromium/src/fake.rs"
+reason = "A fake Chrome DevTools server for tests."
+owner = "paddock-chromium"
+
+[[out_of_scope]]
+path = "crates/paddock-pitwall/src/testing.rs"
+reason = "A fake Pitwall server for tests (compiled only for tests and the testing feature)."
+owner = "paddock-pitwall"
+
+[[out_of_scope]]
+path = "crates/paddock-plugin-test/src/fake.rs"
+reason = "A fake plugin host for plugin tests; its endpoint is paddock-ipc's Host and ends as ipc-host does."
+owner = "paddock-plugin-test"
+
+[[out_of_scope]]
+path = "crates/paddock-testkit/src/net.rs"
+reason = "Test support: free loopback ports for tests (ADR 0023: tests never free a port they probe)."
+owner = "paddock-testkit"
+
+[[out_of_scope]]
+path = "crates/paddock-ipc/src/bin/test_child.rs"
+reason = "paddock-ipc's own test child process, never shipped by an app."
+owner = "paddock-ipc"
+
+[[out_of_scope]]
+path = "crates/paddock-ipc/src/testing/**"
+reason = "The ending harness and its positive-control endpoints (feature `testing`); they exist to end connections right and wrong on purpose."
+owner = "paddock-ipc"

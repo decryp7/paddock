@@ -1,4 +1,4 @@
-use crate::{input_hash, plan, slots, wait};
+use crate::{input_hash, ipc_endpoints, plan, slots, wait};
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
 use std::io::Write;
@@ -30,10 +30,29 @@ enum Command {
     },
     /// Wait, with a limit, for a plock job, a process, a line in a file or a CI run. Use it instead of `pgrep -f` loops.
     Wait(wait::WaitArgs),
+    /// Repository checks of the family.
+    Check {
+        #[command(subcommand)]
+        command: CheckCommand,
+    },
     /// The project graph.
     Graph {
         #[command(subcommand)]
         command: GraphCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum CheckCommand {
+    /// C102 (ADR 0072): every listen site is in docs/ipc-endpoints.toml with an ending test or a reason, and the ratchet of
+    /// connection endings is well formed. With `--tag`, also refuses a release tag that a ratchet entry blocks.
+    IpcEndpoints {
+        /// A release tag to check against the ratchet's `blocks_tag` patterns (for example `dyno-v1.2.0`).
+        #[arg(long)]
+        tag: Option<String>,
+        /// The repository root (default: the folder containing .git, found from the current folder).
+        #[arg(long)]
+        root: Option<PathBuf>,
     },
 }
 
@@ -134,6 +153,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             SlotCommand::Hold(a) => slots::hold(&a),
         },
         Command::Wait(a) => wait::command(&a),
+        Command::Check {
+            command: CheckCommand::IpcEndpoints { tag, root },
+        } => ipc_endpoints::command(root, tag),
         Command::Graph {
             command: GraphCommand::Affected(a),
         } => plan::command(&plan::Request {

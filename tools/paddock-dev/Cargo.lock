@@ -1131,9 +1131,12 @@ dependencies = [
  "paddock-repo-graph",
  "paddock-slots",
  "paddock-testkit",
+ "proc-macro2",
  "regex",
  "serde_json",
+ "syn 2.0.119",
  "tempfile",
+ "toml",
  "windows-sys 0.61.2",
 ]
 

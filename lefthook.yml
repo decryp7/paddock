@@ -86,3 +86,7 @@ pre-push:
     pitwall-deny:
       root: "apps/pitwall/"
       run: cargo deny --workspace check
+    # C102 (ADR 0072): every listen site is in docs/ipc-endpoints.toml with an ending test or a reason, and the ratchet of
+    # connection endings is well formed. The release path's tag check calls `./dev check ipc-endpoints --tag <tag>`.
+    ipc-endpoints:
+      run: ./dev check ipc-endpoints
