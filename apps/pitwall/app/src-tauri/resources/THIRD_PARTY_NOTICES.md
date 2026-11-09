@@ -260,7 +260,7 @@ Licence expressions (packages):
 - libdbus-sys 0.2.7 — Apache-2.0 OR MIT [MIT-79, MIT-188]
 - libloading 0.7.4 — ISC [ISC-22]
 - libredox 0.1.25 — MIT [MIT-113]
-- libsqlite3-sys 0.38.2 — MIT [MIT-89]
+- libsqlite3-sys 0.39.1 — MIT [MIT-89]
 - linux-raw-sys 0.12.1 — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT [MIT-43]
 - litemap 0.8.3 — Unicode-3.0 [Unicode-3.0-2]
 - lock_api 0.4.14 — MIT OR Apache-2.0 [MIT-131]
@@ -363,7 +363,7 @@ Licence expressions (packages):
 - reqwest 0.13.5 — MIT OR Apache-2.0 [MIT-168]
 - ring 0.17.14 — Apache-2.0 AND ISC [Apache-2.0-2, Apache-2.0-8, ISC-14, ISC-3, ISC-5, ISC-4, ISC-24, ISC-12, ISC-16, ISC-9, ISC-13, ISC-6, ISC-7, ISC-20, ISC-10, ISC-15, ISC-26, ISC-1]
 - rsqlite-vfs 0.1.1 — MIT [MIT-5]
-- rusqlite 0.40.2 — MIT [MIT-89]
+- rusqlite 0.41.1 — MIT [MIT-89]
 - rustc-hash 2.1.3 — Apache-2.0 OR MIT [MIT-43]
 - rustix 1.1.5 — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT [MIT-43]
 - rustls 0.23.46 — Apache-2.0 OR ISC OR MIT [MIT-152]
@@ -6590,7 +6590,7 @@ Used by (1):
 ### MIT-89
 
 Used by (2):
-  libsqlite3-sys 0.38.2, rusqlite 0.40.2
+  libsqlite3-sys 0.39.1, rusqlite 0.41.1
 
     Copyright (c) 2014 The rusqlite developers
 

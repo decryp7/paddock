@@ -42,7 +42,7 @@ paddock-power = { path = "../../../../crates/paddock-power" }
 # A Wake-on-LAN computer's SecureOn password is kept in an owner-only file on macOS and in the OS credential store elsewhere (ADR 0032, D6, amended 2026-11-05).
 paddock-secrets = { path = "../../../../crates/paddock-secrets" }
 log = { version = "0.4", features = ["kv"] }
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
