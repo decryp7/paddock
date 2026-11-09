@@ -396,8 +396,15 @@ pub fn serve_loopback(
                 // key line is read: a socket closed with unread data is reset, and the reset can reach the client before
                 // the refusal (2026-11-07). The drain has its own thread, at most [`DRAIN_PLACES`] at a time, each ended
                 // by the key line, the client's end, the handshake timeout or a stop.
+                // Logged before the client can see the end of its connection, so the log line is there by the time it does.
+                let drain = Place::take(&drains, DRAIN_PLACES);
+                if drain.is_none() {
+                    log::warn!(
+                        "paddock_mcp: connection #{id} from port {peer}: all {DRAIN_PLACES} drains are busy; closed without reading its key line (the client may see a reset)"
+                    );
+                }
                 let _ = stream.shutdown(Shutdown::Write);
-                if let Some(draining) = Place::take(&drains, DRAIN_PLACES) {
+                if let Some(draining) = drain {
                     let stream = Arc::new(stream);
                     let kept = Arc::downgrade(&stream);
                     let stop = stop2.clone();
@@ -407,10 +414,6 @@ pub fn serve_loopback(
                         drop(stream);
                     });
                     list.push((kept, handle));
-                } else {
-                    log::warn!(
-                        "paddock_mcp: connection #{id} from port {peer}: all {DRAIN_PLACES} drains are busy; closed without reading its key line (the client may see a reset)"
-                    );
                 }
                 continue;
             };
