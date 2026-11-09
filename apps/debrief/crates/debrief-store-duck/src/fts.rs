@@ -989,7 +989,7 @@ mod tests {
     impl Indexed {
         fn new(_tag: &str) -> Indexed {
             use debrief_core::ports::Ingest;
-            let dir = crate::test_dirs::scratch_dir("fts");
+            let dir = debrief_ipc::testing::scratch_dir("fts");
             let logs = dir.join("logs");
             std::fs::create_dir_all(&logs).unwrap();
             std::fs::write(

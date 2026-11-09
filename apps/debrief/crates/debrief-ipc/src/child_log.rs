@@ -880,7 +880,7 @@ mod tests {
     }
 
     fn temp(tag: &str) -> PathBuf {
-        let d = crate::test_dirs::scratch_dir(&format!("child-log-{tag}"));
+        let d = crate::testing::scratch_dir(&format!("child-log-{tag}"));
         d
     }
 

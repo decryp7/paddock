@@ -196,7 +196,7 @@ mod tests {
     }
 
     fn temp(tag: &str) -> PathBuf {
-        let d = crate::test_dirs::scratch_dir(&format!("tools-monitor-{tag}"));
+        let d = debrief_ipc::testing::scratch_dir(&format!("tools-monitor-{tag}"));
         d
     }
 

@@ -125,7 +125,7 @@ fn tool() -> (EventLogTool, Arc<FakeLog>) {
 }
 
 fn temp(tag: &str) -> PathBuf {
-    let d = crate::test_dirs::scratch_dir(&format!("tools-eventlog-{tag}"));
+    let d = debrief_ipc::testing::scratch_dir(&format!("tools-eventlog-{tag}"));
     d
 }
 

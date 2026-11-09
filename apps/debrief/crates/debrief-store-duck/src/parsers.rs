@@ -277,7 +277,7 @@ mod tests {
     }
 
     fn root(tag: &str) -> Root {
-        let root = crate::test_dirs::scratch_dir(&format!("parsers-{tag}"));
+        let root = debrief_ipc::testing::scratch_dir(&format!("parsers-{tag}"));
         std::fs::create_dir_all(root.join("logs")).unwrap();
         Root(root)
     }

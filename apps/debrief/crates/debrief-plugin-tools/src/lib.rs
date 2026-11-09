@@ -31,8 +31,6 @@ pub mod perfmon_template;
 mod perfmon_tools;
 mod run_slot;
 mod settings;
-#[cfg(test)]
-pub(crate) mod test_dirs;
 
 use anyhow::Result;
 use debrief_core::plugin::Collector;

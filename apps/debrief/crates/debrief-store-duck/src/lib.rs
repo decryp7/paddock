@@ -36,8 +36,6 @@ mod spans;
 mod sql;
 pub mod stats;
 mod tail;
-#[cfg(test)]
-pub(crate) mod test_dirs;
 mod turns;
 mod writer;
 

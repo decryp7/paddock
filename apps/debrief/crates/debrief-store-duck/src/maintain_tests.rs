@@ -10,7 +10,7 @@ struct Dir(PathBuf);
 
 impl Dir {
     fn new(tag: &str) -> Dir {
-        let d = crate::test_dirs::scratch_dir(&format!("maintain-{tag}"));
+        let d = debrief_ipc::testing::scratch_dir(&format!("maintain-{tag}"));
         std::fs::create_dir_all(&d).unwrap();
         Dir(d)
     }

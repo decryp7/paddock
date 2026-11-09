@@ -639,7 +639,7 @@ mod tests {
     use debrief_core::batch::{EventBatchBuilder, EventTime, LevelCode, NewEvent};
 
     fn store() -> (PathBuf, Connection) {
-        let dir = crate::test_dirs::scratch_dir("writer");
+        let dir = debrief_ipc::testing::scratch_dir("writer");
         let c = Connection::open(dir.join("data.duckdb")).unwrap();
         c.execute_batch(&crate::schema::ddl(&EventSchema::plain())).unwrap();
         refresh_view(&c, &dir, &EventSchema::plain()).unwrap();

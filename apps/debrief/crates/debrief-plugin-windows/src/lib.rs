@@ -56,8 +56,6 @@ mod nfo;
 pub mod perfmon;
 pub mod procmon;
 pub mod settings;
-#[cfg(test)]
-pub(crate) mod test_dirs;
 
 pub use blg::BlgImporter;
 pub use evtx_import::{is_evtx, read_evtx, to_record, EvtxImporter};
