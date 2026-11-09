@@ -167,10 +167,12 @@ pub fn sweep_in_background(
         log::info!("Start-up sweep of {what} skipped: this is not the main instance");
         return None;
     }
-    match std::thread::Builder::new()
-        .name(format!("sweep {what}"))
-        .spawn(move || sweep_old(&root, prefix, max_age, what))
-    {
+    let work = move || {
+        // Bulk work nobody waits on (rule 52): below the user's own work.
+        debrief_core::threads::lower_priority();
+        sweep_old(&root, prefix, max_age, what)
+    };
+    match std::thread::Builder::new().name(format!("sweep {what}")).spawn(work) {
         Ok(handle) => Some(handle),
         Err(e) => {
             log::warn!("Start-up sweep of {what} could not start: {e}");

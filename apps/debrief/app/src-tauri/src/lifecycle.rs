@@ -312,6 +312,18 @@ impl Lifecycle {
             .collect()
     }
 
+    /// The opened files and folders the autosaved sessions (this run's and the recovered ones) name.
+    #[cfg(not(test))] // used by `share::init_bundles_root`, which tests do not run
+    pub fn session_sources(&self) -> Vec<PathBuf> {
+        let Some(s) = &self.sessions else { return Vec::new() };
+        s.all_files()
+            .into_iter()
+            .filter_map(|f| ProjectFile::load(&f).ok())
+            .flat_map(|p| p.sources)
+            .map(PathBuf::from)
+            .collect()
+    }
+
     /// A window was closed by the user: it is not restored after a crash.
     pub fn forget_session(&self, label: &str) {
         if let Some(s) = &self.sessions {

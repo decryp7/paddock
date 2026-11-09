@@ -69,6 +69,12 @@ pub(crate) fn touch_bundle_folder(path: &Path) {
     touch_folder_under(&root, path, std::time::SystemTime::now());
 }
 
+/// Marks the extraction folders that saved sessions name as in use now, before the sweep can look at them: a window
+/// restored later from such a session finds its sources. Returns how many folders were touched.
+fn touch_session_sources(root: &Path, sources: &[PathBuf], now: std::time::SystemTime) -> usize {
+    sources.iter().filter(|s| touch_folder_under(root, s, now)).count()
+}
+
 /// [`touch_bundle_folder`] for a given root and time; true when a folder was touched.
 fn touch_folder_under(root: &Path, path: &Path, now: std::time::SystemTime) -> bool {
     let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
@@ -87,6 +93,11 @@ pub(crate) fn init_bundles_root<R: Runtime>(app: &AppHandle<R>) {
     #[cfg(not(test))]
     if let Some(root) = resolve_bundles_root(crate::app_dirs::webview_data(app)) {
         let main_instance = app.try_state::<crate::instance::SingleInstance>().is_some_and(|s| s.0);
+        // Folders a saved session names count as used now, before the sweep starts.
+        if let Some(life) = app.try_state::<crate::lifecycle::Lifecycle>() {
+            let touched = touch_session_sources(&root, &life.session_sources(), std::time::SystemTime::now());
+            log::info!(Folders = touched as u64; "Bundle folders named by saved sessions were marked as in use");
+        }
         start_bundle_sweep(root.clone(), main_instance);
         let _ = BUNDLES_ROOT.set(root);
     }
@@ -472,6 +483,24 @@ mod tests {
         crate::app_dirs::sweep_old_at(root.path(), None, STALE_BUNDLE_AGE, now, "extracted bundles");
         assert!(root.path().join("used").exists(), "used lately: kept");
         assert!(!root.path().join("idle").exists(), "idle for 10 days: removed");
+    }
+
+    /// A saved session that names a source in an old extraction keeps that folder from the start-up sweep.
+    #[test]
+    fn a_folder_a_saved_session_names_survives_the_sweep() {
+        let root = tempfile::tempdir().unwrap();
+        let now = std::time::SystemTime::now();
+        let old = now - std::time::Duration::from_secs(10 * 24 * 3600);
+        for name in ["named", "unnamed"] {
+            std::fs::create_dir_all(root.path().join(name).join("logs")).unwrap();
+            crate::app_dirs::set_folder_mtime(&root.path().join(name), old).unwrap();
+        }
+        let sources = vec![root.path().join("named").join("logs"), PathBuf::from("/not/a/bundle/file.log")];
+        assert_eq!(touch_session_sources(root.path(), &sources, now), 1);
+        let handle = start_bundle_sweep(root.path().to_path_buf(), true).unwrap();
+        assert_eq!(handle.join().unwrap(), 1);
+        assert!(root.path().join("named").exists(), "named by a session: kept");
+        assert!(!root.path().join("unnamed").exists());
     }
 
     #[test]

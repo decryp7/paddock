@@ -211,7 +211,8 @@ pub(crate) fn open_request<R: Runtime>(app: &AppHandle<R>, window: &str, paths: 
             Err(e) => Err(e),
         })
         .inspect(|p| {
-            // An opened or restored bundle's folder counts as used now (the start-up sweep goes by last use).
+            // A bundle folder the user opens counts as used now (the start-up sweep goes by last use). The sources of
+            // saved sessions are marked at start-up (`share::init_bundles_root`) and when a project opens.
             if let Ok(p) = p {
                 crate::share::touch_bundle_folder(p);
             }
@@ -785,6 +786,10 @@ pub(crate) fn open_project_file_in_job<R: Runtime>(
 ) -> CmdResult<OpenedProject> {
     ctx.message("Reading the project");
     let project = crate::services::project::load(&file)?;
+    // Opening a project marks the bundle folders its sources are in as used now.
+    for source in &project.sources {
+        crate::share::touch_bundle_folder(std::path::Path::new(source));
+    }
     let profile = Profile::from_toml(&project.profile).map_err(|e| CmdError::invalid(e.message).line(e.line))?;
     let doc = ProfileDoc {
         name: profile.name.clone(),
