@@ -477,14 +477,12 @@ mod tests {
         c.unsaved.store(true, Ordering::SeqCst);
         crate::shutdown::begin_exit();
         service.wake();
-        let started = std::time::Instant::now();
-        while !service.handle.as_ref().is_some_and(std::thread::JoinHandle::is_finished) {
-            assert!(
-                started.elapsed() < Duration::from_secs(60),
-                "the catalogue thread did not end once exit began"
-            );
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        assert!(
+            paddock_testkit::poll_until_within(Duration::from_secs(60), || {
+                service.handle.as_ref().is_some_and(std::thread::JoinHandle::is_finished)
+            }),
+            "the catalogue thread did not end once exit began"
+        );
         let after = c.checkpoints.0.load(Ordering::SeqCst) + c.checkpoints.1.load(Ordering::SeqCst);
         assert_eq!(after, before, "a checkpoint ran after exit began");
         assert!(
