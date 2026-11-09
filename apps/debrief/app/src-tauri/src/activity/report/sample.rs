@@ -334,7 +334,8 @@ mod tests {
 
     #[test]
     fn the_committed_sample_is_reproducible() {
-        let base = std::env::temp_dir().join(format!("debrief-diag-sample-{}", std::process::id()));
+        let base_scratch = tempfile::tempdir().unwrap();
+        let base = base_scratch.path().join(format!("debrief-diag-sample-{}", std::process::id()));
         let a = std::fs::read(build(&base.join("a"))).unwrap();
         let b = std::fs::read(build(&base.join("b"))).unwrap();
         assert!(a == b, "two builds differ");
@@ -359,7 +360,8 @@ mod tests {
             panic!("the sample is not detected as a report")
         };
         assert_eq!(m.created_at, "2026-10-14T13:06:00.000Z");
-        let work = std::env::temp_dir().join(format!("debrief-diag-sample-open-{}", std::process::id()));
+        let work_scratch = tempfile::tempdir().unwrap();
+        let work = work_scratch.path().join(format!("debrief-diag-sample-open-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&work);
         let done = divert_in(&work.join(REPORTS_DIR), vec![zip.to_string_lossy().into_owned()]);
         let o = done.opened.expect("opened as a report");

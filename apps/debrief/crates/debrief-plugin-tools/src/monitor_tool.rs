@@ -196,8 +196,7 @@ mod tests {
     }
 
     fn temp(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("debrief-tools-monitor-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
+        let d = debrief_ipc::testing::scratch_dir(&format!("tools-monitor-{tag}"));
         d
     }
 

@@ -6,7 +6,7 @@
 //! snapshots, session backups and (once they exist) persistent stores are `data` (each cleared on its own,
 //! after a confirmation in the UI).
 //!
-//! Folders come from [`crate::app_dirs`] (and `share::bundles_root` for the bundles); the UI only ever
+//! Folders come from [`crate::app_dirs`] (and `share::bundles_root` for the bundles, below the local data folder); the UI only ever
 //! names category ids, never paths. Sizes are computed off the UI thread with a bounded traversal
 //! ([`walk`]); clearing runs as a background task (progress, stoppable from the tray) and deletes only
 //! inside each category's canonical root, never follows links, skips and reports files in use, and keeps
@@ -41,7 +41,7 @@ fn session_start() -> Option<SystemTime> {
 fn folders<R: Runtime>(app: &AppHandle<R>) -> Folders {
     let log = crate::app_dirs::log(app).ok();
     Folders {
-        bundles: Some(crate::share::bundles_root()),
+        bundles: crate::share::bundles_root(),
         webview: crate::app_dirs::webview_data(app).ok(),
         data: crate::app_dirs::data(app).ok(),
         active_log: log.as_deref().map(crate::logging::active_log_file),

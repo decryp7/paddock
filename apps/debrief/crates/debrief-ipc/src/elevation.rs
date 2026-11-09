@@ -98,22 +98,14 @@ impl ElevatedProcess {
     }
 }
 
-/// A folder removed on drop.
-pub(crate) struct TempDir(std::path::PathBuf);
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
+use tempfile::TempDir;
 
 /// Writes `bootstrap` into a fresh private folder; returns the folder and the file.
 fn write_bootstrap(bootstrap: &Bootstrap) -> Result<(TempDir, std::path::PathBuf), IpcError> {
     let fail = |e: std::io::Error| IpcError::Spawn(format!("cannot prepare the elevated start: {e}"));
-    let dir = std::env::temp_dir().join(format!("debrief-elevate-{}", crate::endpoint::random_hex(8).map_err(fail)?));
-    std::fs::create_dir(&dir).map_err(fail)?;
-    let dir = TempDir(dir);
-    let file = dir.0.join("bootstrap.json");
+    // A fresh private folder (random name, owner only), removed on drop: nothing another local user can plant.
+    let dir = crate::scratch::private_tempdir("debrief-elevate-").map_err(fail)?;
+    let file = dir.path().join("bootstrap.json");
     let json = serde_json::to_vec(bootstrap).map_err(|e| IpcError::Spawn(e.to_string()))?;
     std::fs::write(&file, json).map_err(fail)?;
     Ok((dir, file))
@@ -355,11 +347,11 @@ mod tests {
             role: "elevated".into(),
         };
         let (dir, file) = write_bootstrap(&b).unwrap();
-        assert!(file.starts_with(&dir.0));
+        assert!(file.starts_with(dir.path()));
         assert_eq!(take_bootstrap(&file).unwrap(), b);
         assert!(!file.exists(), "deleted after reading");
         assert!(take_bootstrap(&file).is_err());
-        let folder = dir.0.clone();
+        let folder = dir.path().to_path_buf();
         drop(dir);
         assert!(!folder.exists());
         // Garbage and oversized files are refused.

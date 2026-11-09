@@ -18,3 +18,6 @@ log.workspace = true
 serde.workspace = true
 # Exact floats: replies cross as JSON and must read back bit for bit.
 serde_json = { workspace = true, features = ["preserve_order", "float_roundtrip"] }
+
+[dev-dependencies]
+tempfile.workspace = true

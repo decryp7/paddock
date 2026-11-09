@@ -705,7 +705,8 @@ mod tests {
 
     #[test]
     fn a_missing_database_library_is_a_clear_message_before_anything_starts() {
-        let dir = std::env::temp_dir();
+        let scratch = tempfile::tempdir().unwrap();
+        let dir = scratch.path().to_path_buf();
         assert!(find_library("no-such-library.dll", std::slice::from_ref(&dir)).is_none());
         let mut cfg = WorkerConfig::new(dir.join("debrief-store-worker-test.exe"));
         cfg.library_dirs = Some(vec![dir.join("no-such-folder")]);

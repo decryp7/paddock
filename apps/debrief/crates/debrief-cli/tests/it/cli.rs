@@ -377,7 +377,8 @@ fn watch_imports_settled_files_and_ignores_partial_ones() {
 fn watch_announces_known_issues_once() {
     let dir = tempfile::tempdir().unwrap();
     write_log(dir.path());
-    let know = tempfile::tempdir().unwrap().keep().join("k.md");
+    let know_dir = tempfile::tempdir().unwrap();
+    let know = know_dir.path().join("k.md");
     std::fs::write(
         &know,
         "```known-issue\ntitle: Pool exhausted\npattern: timeout expired\nfix: Raise the pool.\n```\n",

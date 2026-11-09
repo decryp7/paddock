@@ -55,7 +55,8 @@ fn first_event_and_total_time_of_the_streaming_import_against_gather_first() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(100_000);
-    let root = std::env::temp_dir().join(format!("debrief-stream-bench-{}", std::process::id()));
+    let root_scratch = tempfile::tempdir().unwrap();
+    let root = root_scratch.path().join(format!("debrief-stream-bench-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     for i in 0..n {
         let d = root.join(format!("a{}/b{}/c{}", i % 20, (i / 20) % 20, (i / 400) % 50));

@@ -71,27 +71,15 @@ mod windows_impl {
     use debrief_plugin_profiling::nettrace::ext::{ImageLoad, NativeSymbol};
     use debrief_plugin_profiling::nettrace::NettraceImporter;
     use debrief_profile::{Capture, CaptureImporter, Limits, ProfileError};
-    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-
-    /// Temporary files of one import, deleted on drop.
-    struct Temp(Vec<std::path::PathBuf>);
-
-    impl Drop for Temp {
-        fn drop(&mut self) {
-            for p in &self.0 {
-                let _ = std::fs::remove_file(p);
-            }
-        }
-    }
+    use std::sync::atomic::AtomicBool;
 
     pub(super) fn import(knobs: &Knobs, file_name: &str, bytes: &[u8], limits: &Limits) -> debrief_profile::Result<Capture> {
-        static N: AtomicU64 = AtomicU64::new(1);
         let io = |e: std::io::Error| ProfileError::invalid(format!("the .etl file could not be read: {e}"));
-        let n = N.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir();
-        let etl_path = dir.join(format!("debrief-etl-{}-{n}.etl", std::process::id()));
-        let out = dir.join(format!("debrief-etl-{}-{n}.nettrace", std::process::id()));
-        let _temp = Temp(vec![etl_path.clone(), out.clone()]);
+        // Both files live in one fresh folder with a random name, made atomically and removed when the import ends.
+        // Windows only: it inherits the owner-only access of the per-user %TEMP% (not a mode 0700 folder).
+        let scratch = tempfile::Builder::new().prefix("debrief-etl-").tempdir().map_err(io)?;
+        let etl_path = scratch.path().join("input.etl");
+        let out = scratch.path().join("output.nettrace");
         std::fs::write(&etl_path, bytes).map_err(io)?;
         let cancel = AtomicBool::new(false);
         let procs = etl::scan(&etl_path, Order::DotnetFirst, &cancel).map_err(|e| ProfileError::invalid(e.to_string()))?;

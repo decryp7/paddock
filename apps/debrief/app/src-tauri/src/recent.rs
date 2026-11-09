@@ -308,7 +308,8 @@ mod tests {
     use crate::test_support::TempDir;
 
     fn abs(name: &str) -> String {
-        std::env::temp_dir().join(name).to_string_lossy().into_owned()
+        let root = if cfg!(windows) { "C:\\" } else { "/" };
+        std::path::Path::new(root).join(name).to_string_lossy().into_owned()
     }
 
     #[test]

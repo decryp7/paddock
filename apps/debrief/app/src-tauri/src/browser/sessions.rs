@@ -333,6 +333,9 @@ struct Inner {
     generations: AtomicU64,
     /// The kept research profile's folder and setting (none: no data folder, as in tests without one).
     kept: RwLock<Option<KeptProfile>>,
+    /// The folder of throwaway profiles, in Debrief's own local folder (none: no folder, no throwaway browser; never the
+    /// shared temp folder).
+    throwaway_base: RwLock<Option<PathBuf>>,
     /// The window whose browser uses the kept profile now (one browser per profile; others get a throwaway one).
     kept_user: Mutex<Option<String>>,
     /// Why the kept profile was not used last time, until it is fine again or cleared.
@@ -426,6 +429,25 @@ impl Renderers {
     }
 
     /// The kept research profile's folder (`dir`; none when there is no data folder) and whether browsers use it.
+    /// Names the folder throwaway profiles are made in (Debrief's local folder). Without one a browser that needs a
+    /// throwaway profile does not start.
+    pub fn set_throwaway_base(&self, dir: Option<PathBuf>) {
+        *crate::sync::write(&self.inner.throwaway_base) = dir;
+    }
+
+    /// A throwaway profile below the named folder, or why there is none.
+    pub(super) fn throwaway(&self) -> Result<Profile, BrowserError> {
+        crate::sync::read(&self.inner.throwaway_base)
+            .clone()
+            .map(Profile::Throwaway)
+            .ok_or_else(|| {
+                BrowserError::Failed(crate::app_dirs::data_missing_message(
+                    "The research browser",
+                    &"no local folder for browser profiles",
+                ))
+            })
+    }
+
     pub fn set_kept_profile(&self, dir: Option<PathBuf>, keep: bool, max_bytes: u64) {
         *crate::sync::write(&self.inner.kept) = dir.map(|dir| KeptProfile { dir, keep, max_bytes });
         self.inner.profile_changed();
@@ -473,15 +495,15 @@ impl Renderers {
 
     /// The profile for `owner`'s next browser: the kept one when it is on, free and usable; else a throwaway one, with
     /// the reason to tell (once) when the kept one has a problem.
-    fn profile_for(&self, owner: &str) -> (Profile, Option<KeptHold>, Option<String>) {
+    fn profile_for(&self, owner: &str) -> Result<(Profile, Option<KeptHold>, Option<String>), BrowserError> {
         let Some(kept) = crate::sync::read(&self.inner.kept).clone().filter(|k| k.keep) else {
-            return (Profile::Throwaway, None, None);
+            return Ok((self.throwaway()?, None, None));
         };
         let mut user = crate::sync::lock(&self.inner.kept_user);
         if let Some(other) = user.as_deref() {
             // One browser per profile: Chrome locks it. Research runs one at a time, so this is another window's chat.
             log::info!("The research profile is in use by the AI browser of {other}; the one of {owner} gets a throwaway profile");
-            return (Profile::Throwaway, None, None);
+            return Ok((self.throwaway()?, None, None));
         }
         match super::profile::check(&kept.dir, kept.max_bytes) {
             super::profile::Check::Usable => {
@@ -490,12 +512,12 @@ impl Renderers {
                 *crate::sync::lock(&self.inner.kept_problem) = None;
                 self.inner.profile_changed();
                 let hold = KeptHold(Arc::downgrade(&self.inner), owner.to_string());
-                (Profile::Persistent(kept.dir), Some(hold), None)
+                Ok((Profile::Persistent(kept.dir), Some(hold), None))
             }
             bad => {
                 let why = bad.message().unwrap_or_default();
                 drop(user);
-                (Profile::Throwaway, None, self.problem(why))
+                Ok((self.throwaway()?, None, self.problem(why)))
             }
         }
     }
@@ -658,7 +680,7 @@ impl Renderers {
             BrowserError::Failed(why.into())
         })?;
         let placer = crate::sync::read(&self.inner.placer).clone();
-        let (profile, mut kept, mut note) = self.profile_for(owner);
+        let (profile, mut kept, mut note) = self.profile_for(owner)?;
         let opts = LaunchOptions {
             disk_cache_bytes: kept.is_some().then_some(super::profile::DISK_CACHE_BYTES),
             profile,
@@ -675,7 +697,7 @@ impl Renderers {
                     "The browser did not start with the research profile ({e}), so this research used a throwaway profile. Clear it in Settings ▸ Web browser to start a fresh one."
                 ));
                 let throwaway = LaunchOptions {
-                    profile: Profile::Throwaway,
+                    profile: self.throwaway()?,
                     disk_cache_bytes: None,
                     ..opts
                 };

@@ -310,10 +310,7 @@ mod sys {
     use std::time::Duration;
 
     pub(super) fn list() -> Vec<ProcessInfo> {
-        let dir = std::env::var_os("TMPDIR")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(std::env::temp_dir);
-        let Ok(entries) = std::fs::read_dir(dir) else {
+        let Ok(entries) = std::fs::read_dir(eventpipe::runtime_ipc_dir()) else {
             return Vec::new();
         };
         let mut pids: Vec<u32> = entries

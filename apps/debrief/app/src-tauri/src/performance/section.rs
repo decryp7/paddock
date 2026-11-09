@@ -444,8 +444,9 @@ mod tests {
                 "spillFolder"
             ]
         );
+        let scratch = tempfile::tempdir().unwrap();
         let ok = PerformanceSettings {
-            spill_folder: std::env::temp_dir().to_string_lossy().into_owned(),
+            spill_folder: scratch.path().to_string_lossy().into_owned(),
             duck_memory_limit_mb: 200,
             ..PerformanceSettings::default()
         };

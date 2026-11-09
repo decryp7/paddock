@@ -38,18 +38,17 @@ pub fn main() {
 pub fn self_test() -> Result<(), String> {
     use debrief_core::{PluginRegistry, Profile};
     use debrief_store_duck::{DuckStore, StoreOptions};
-    let dir = std::env::temp_dir().join(format!("debrief-store-self-test-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let result = (|| {
+    // A fresh private folder (random name, owner only) that goes when this function returns.
+    let scratch = debrief_ipc::scratch::private_tempdir("debrief-store-self-test-")
+        .map_err(|e| format!("cannot make a private scratch folder: {e}"))?;
+    let dir = scratch.path().to_path_buf();
+    (|| {
         let create = DuckStore::create_with(&dir, Profile::default_profile(), PluginRegistry::new(), StoreOptions::default());
         drop(create.map_err(|e| e.to_string())?);
         DuckStore::open_with(&dir, Profile::default_profile(), PluginRegistry::new(), StoreOptions::default())
             .map(drop)
             .map_err(|e| e.to_string())
-    })();
-    let _ = std::fs::remove_dir_all(&dir);
-    result
+    })()
 }
 
 /// The limits of the worker's plugin processes that `tuning` names (the watcher's events stay in the worker's log).

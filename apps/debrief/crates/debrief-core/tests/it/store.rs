@@ -23,8 +23,7 @@ struct TempDir(PathBuf);
 
 impl TempDir {
     fn new() -> TempDir {
-        static N: AtomicUsize = AtomicUsize::new(0);
-        let p = std::env::temp_dir().join(format!("debrief-store-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+        let p = crate::scratch::scratch_dir("store");
         std::fs::create_dir_all(&p).unwrap();
         TempDir(p)
     }

@@ -97,8 +97,7 @@ mod tests {
     use crate::playbook::templates;
 
     fn dir(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("debrief-playbooks-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
+        let d = crate::test_dirs::scratch_dir(&format!("playbooks-{tag}"));
         d
     }
 

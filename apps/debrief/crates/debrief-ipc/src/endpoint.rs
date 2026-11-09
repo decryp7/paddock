@@ -123,7 +123,7 @@ impl PrivateEndpoint {
         let harden: fn(&std::path::Path) -> io::Result<()> = harden_dir;
         let bases = socket_bases(
             std::env::var_os("XDG_RUNTIME_DIR"),
-            std::env::temp_dir(),
+            shared_temp_base(),
             std::env::var_os(SOCKET_BASE_VAR),
         );
         let mut last = io::Error::other("no place for a private socket");
@@ -178,6 +178,18 @@ impl PrivateEndpoint {
     pub fn dir(&self) -> Option<&std::path::Path> {
         self.dir.as_deref()
     }
+}
+
+/// The system temp folder, as the last-resort base of a private socket folder. Only a base: the socket folder under it is
+/// made with a random name, atomically (`mkdir` fails if the name exists) and with mode 0700, then re-checked by
+/// `harden_dir`, so a name planted by another local user cannot be used. Nothing else is put in the shared folder.
+#[cfg(unix)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a base for an atomically created 0700 folder with a random name (create_in), never a fixed name"
+)]
+fn shared_temp_base() -> PathBuf {
+    std::env::temp_dir()
 }
 
 /// Defends against a permissive umask or an odd file system: the folder is owner-only whatever `mkdir` made of it.
@@ -249,7 +261,7 @@ mod tests {
     fn short_scratch() -> tempfile::TempDir {
         let candidates = [
             std::env::var_os(SOCKET_BASE_VAR).filter(|v| !v.is_empty()).map(PathBuf::from),
-            Some(std::env::temp_dir()),
+            Some(super::shared_temp_base()),
         ];
         let root = candidates
             .into_iter()

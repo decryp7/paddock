@@ -343,7 +343,8 @@ mod tests {
 
     #[test]
     fn finds_vscode_on_path_first() {
-        let dir = std::env::temp_dir().join("debrief-code-bin");
+        let dir_scratch = tempfile::tempdir().unwrap();
+        let dir = dir_scratch.path().join("debrief-code-bin");
         let path = std::env::join_paths([Path::new("relative"), dir.as_path()]).unwrap();
         let path = path.to_string_lossy().into_owned();
         let launcher = dir.join(if Os::CURRENT == Os::Windows { "code.cmd" } else { "code" });

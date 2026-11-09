@@ -394,8 +394,7 @@ mod tests {
 
     impl Dir {
         fn new(tag: &str) -> Dir {
-            let d = std::env::temp_dir().join(format!("debrief-parser-lib-{tag}-{}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&d);
+            let d = crate::test_dirs::scratch_dir(&format!("parser-lib-{tag}"));
             Dir(d)
         }
     }

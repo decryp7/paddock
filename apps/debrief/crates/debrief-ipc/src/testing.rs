@@ -1,15 +1,37 @@
-//! Helpers for tests that kill or abandon a host on purpose (feature `test-support`, Unix).
+//! Helpers for tests (feature `test-support`): [`scratch_dir`], and on Unix the helpers for tests that kill or abandon a
+//! host on purpose.
 //!
 //! A host that ends without running destructors cannot remove the private endpoint folders it made before its children
 //! connected. A test that does this on purpose makes the host (and its children) use a folder of its own, so the folder
 //! goes with the test instead of staying in a shared one.
 
-use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::path::Path;
+use std::path::PathBuf;
+
+thread_local! {
+    static KEPT: std::cell::RefCell<Vec<tempfile::TempDir>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// A fresh empty folder named `debrief-<prefix>-...` in the OS temp folder, removed when the calling (test) thread ends,
+/// also after a panic (thread-local values are dropped on unwind). The one helper of Debrief's crates for a fixture that
+/// hands out a plain path; CI fails on `debrief-*` folders left behind (docs/testing/temp-leaks.md). Test-only: it panics
+/// when the folder cannot be made, which fails the test that asked for it.
+pub fn scratch_dir(prefix: &str) -> PathBuf {
+    let dir = tempfile::Builder::new()
+        .prefix(&format!("debrief-{prefix}-"))
+        .tempdir()
+        .expect("create a scratch folder");
+    let path = dir.path().to_path_buf();
+    KEPT.with(|k| k.borrow_mut().push(dir));
+    path
+}
 
 /// A short folder (in the job's socket base, else under `/tmp`) that is the only place a process started with [`Confined::env`] makes endpoint folders.
 ///
 /// It is short because an endpoint's socket path is limited to [`crate::endpoint::MAX_SOCKET_PATH`] bytes: in macOS' long
 /// temp folder a path does not fit, and `create_named` would go on to `/tmp`, outside the folder. Removed when dropped.
+#[cfg(unix)]
 pub struct Confined {
     dir: tempfile::TempDir,
     path: PathBuf,
@@ -19,11 +41,13 @@ pub struct Confined {
 /// [`crate::endpoint::SOCKET_BASE_VAR`] to a short folder of the job's own), else in `/tmp`. Test-only: it panics (`expect`)
 /// when the folder cannot be made or vanishes, which fails the test that asked for it, the right outcome there; product code
 /// must not call it.
+#[cfg(unix)]
 pub fn confined_tmp() -> Confined {
     confined_tmp_in(&confined_base(std::env::var_os(crate::endpoint::SOCKET_BASE_VAR)))
 }
 
 /// Where [`confined_tmp`] makes its folder: the socket base when it names a folder, else `/tmp`.
+#[cfg(unix)]
 pub fn confined_base(socket_base: Option<std::ffi::OsString>) -> PathBuf {
     socket_base
         .filter(|v| !v.is_empty())
@@ -33,6 +57,7 @@ pub fn confined_base(socket_base: Option<std::ffi::OsString>) -> PathBuf {
 }
 
 /// A [`Confined`] folder in `base` (which must be short: see [`Confined`]).
+#[cfg(unix)]
 pub fn confined_tmp_in(base: &Path) -> Confined {
     let dir = tempfile::Builder::new()
         .prefix("dbw")
@@ -42,6 +67,7 @@ pub fn confined_tmp_in(base: &Path) -> Confined {
     Confined { dir, path }
 }
 
+#[cfg(unix)]
 impl Confined {
     /// The folder, with symlinks resolved (as `create_named` resolves its bases).
     pub fn path(&self) -> &Path {
@@ -62,7 +88,7 @@ impl Confined {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

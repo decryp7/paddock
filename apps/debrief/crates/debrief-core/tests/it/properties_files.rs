@@ -70,10 +70,7 @@ struct TempDir(PathBuf);
 
 impl TempDir {
     fn new() -> TempDir {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        static N: AtomicUsize = AtomicUsize::new(0);
-        let p = std::env::temp_dir().join(format!("debrief-propf-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
-        let _ = std::fs::remove_dir_all(&p);
+        let p = crate::scratch::scratch_dir("propf");
         std::fs::create_dir_all(&p).unwrap();
         TempDir(p)
     }

@@ -171,7 +171,8 @@ fn clones_share_state_across_registries_and_settings_reach_logman() {
     let fake = Arc::new(FakeRunner::new(|_, _| ok("Status: Running\n")));
     let plugin = fake_plugin(fake.clone(), true);
     let (a, b) = (registry(&plugin), registry(&plugin));
-    let dir = std::env::temp_dir().join(format!("debrief-tools-shared-{}", std::process::id()));
+    let dir_scratch = tempfile::tempdir().unwrap();
+    let dir = dir_scratch.path().join(format!("debrief-tools-shared-{}", std::process::id()));
     let started = a
         .tools()
         .invoke(

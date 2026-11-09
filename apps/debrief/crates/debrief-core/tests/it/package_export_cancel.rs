@@ -6,8 +6,7 @@ use debrief_core::ql::QueryControl;
 use std::path::PathBuf;
 
 fn project(tag: &str, big: usize) -> (PathBuf, ProjectDir) {
-    let root = std::env::temp_dir().join(format!("debrief-export-cancel-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
+    let root = crate::scratch::scratch_dir(&format!("export-cancel-{tag}"));
     std::fs::create_dir_all(&root).unwrap();
     let dir = root.join("p.debrief");
     let p = ProjectDir::create(&dir, "p").unwrap();

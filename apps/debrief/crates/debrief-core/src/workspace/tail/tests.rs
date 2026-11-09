@@ -12,8 +12,7 @@ struct Dir(PathBuf);
 
 impl Dir {
     fn new(tag: &str) -> Dir {
-        let p = std::env::temp_dir().join(format!("debrief-tail-unit-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&p);
+        let p = crate::test_dirs::scratch_dir(&format!("tail-unit-{tag}"));
         std::fs::create_dir_all(&p).unwrap();
         Dir(std::fs::canonicalize(p).unwrap())
     }

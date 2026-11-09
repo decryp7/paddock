@@ -459,8 +459,7 @@ mod tests {
     fn global_log_dir() -> &'static Path {
         static DIR: OnceLock<PathBuf> = OnceLock::new();
         DIR.get_or_init(|| {
-            let dir = std::env::temp_dir().join(format!("debrief-app-test-global-log-{}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&dir);
+            let dir = crate::test_support::scratch_dir("app-test-global-log");
             let files = FileSink::new(&dir, &LogLimits::default()).unwrap();
             tracing::subscriber::set_global_default(test_subscriber(vec![Box::new(files)])).expect("no other global subscriber in tests");
             dir

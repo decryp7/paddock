@@ -703,6 +703,8 @@ fn setup(app: &mut tauri::App, launch: &instance::LaunchArgs, safe_mode: bool, s
     step("ai");
     video::init(app.handle());
     step("video");
+    share::init_bundles_root(app.handle());
+    step("bundles");
     browser::init(app.handle());
     step("browser");
     snapshots::prune_on_startup(app.handle());
@@ -846,8 +848,7 @@ pub(crate) mod test_support {
     pub struct TempDir(pub PathBuf);
     impl TempDir {
         pub fn new(tag: &str) -> TempDir {
-            let p = std::env::temp_dir().join(format!("debrief-app-test-{tag}-{}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&p);
+            let p = crate::test_support::scratch_dir(&format!("app-test-{tag}"));
             std::fs::create_dir_all(&p).unwrap();
             own(&p);
             TempDir(p)

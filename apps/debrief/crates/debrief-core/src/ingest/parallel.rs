@@ -393,7 +393,7 @@ mod tests {
     fn temp() -> PathBuf {
         let mut b = [0u8; 8];
         getrandom::fill(&mut b).unwrap();
-        let d = std::env::temp_dir().join(format!("debrief-parallel-{}-{:x}", std::process::id(), u64::from_le_bytes(b)));
+        let d = crate::test_dirs::scratch_dir("parallel");
         std::fs::create_dir_all(&d).unwrap();
         d
     }

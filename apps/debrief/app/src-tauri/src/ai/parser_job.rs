@@ -137,7 +137,8 @@ mod tests {
 
     #[test]
     fn a_source_is_read_bounded_with_its_time_and_the_offsets_of_its_folder() {
-        let dir = std::env::temp_dir().join(format!("debrief-parser-job-{}", std::process::id()));
+        let dir_scratch = tempfile::tempdir().unwrap();
+        let dir = dir_scratch.path().join(format!("debrief-parser-job-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("other")).unwrap();
         let (app, web, far) = (dir.join("app.log"), dir.join("web.log"), dir.join("other/db.log"));

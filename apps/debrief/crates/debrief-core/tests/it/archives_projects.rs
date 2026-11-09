@@ -9,8 +9,7 @@ use std::path::{Path, PathBuf};
 struct Dir(PathBuf);
 impl Dir {
     fn new(tag: &str) -> Dir {
-        let p = std::env::temp_dir().join(format!("debrief-ap-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&p);
+        let p = crate::scratch::scratch_dir(&format!("ap-{tag}"));
         std::fs::create_dir_all(&p).unwrap();
         Dir(std::fs::canonicalize(p).unwrap())
     }

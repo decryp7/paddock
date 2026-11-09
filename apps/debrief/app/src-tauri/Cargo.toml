@@ -20,6 +20,7 @@ crate-type = ["rlib"]
 tauri-build = { version = "2.7.3", features = [] }
 
 [dependencies]
+tempfile.workspace = true
 debrief-alloc = { path = "../../crates/debrief-alloc" }
 debrief-core = { path = "../../crates/debrief-core" }
 debrief-pdf = { path = "../../crates/debrief-pdf" }
@@ -83,7 +84,6 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 tokio = { workspace = true, features = ["sync", "time"] }
 
 [dev-dependencies]
-tempfile.workspace = true
 # A test process stopped by nextest's timeout (SIGTERM) or Ctrl-C removes its temp folders (`test_support::own`).
 ctrlc = { workspace = true, features = ["termination"] }
 # The fake DevTools browser for the research browser's tests (never a real browser).

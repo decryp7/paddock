@@ -1,7 +1,7 @@
 //! Launches a real Chromium-based browser when one is installed (skipped otherwise) against a local server that
 //! serves a page rendered by script.
 
-use chromium_driver::{find_for_tests as find, Chromium, LaunchOptions};
+use chromium_driver::{find_for_tests as find, Chromium, LaunchOptions, Profile};
 use serde_json::json;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -45,7 +45,9 @@ fn renders_a_scripted_page_and_leaves_nothing_behind() {
         return;
     };
     let port = serve();
+    let base = tempfile::tempdir().unwrap();
     let opts = LaunchOptions {
+        profile: Profile::Throwaway(base.path().join("profiles")),
         accent: Some(0x2a7de1),
         ..LaunchOptions::default()
     };
@@ -107,7 +109,12 @@ fn renders_a_scripted_page_and_leaves_nothing_behind() {
 #[test]
 fn dropping_the_browser_ends_the_process() {
     let Some(exe) = browser_or_skip() else { return };
-    let b = Chromium::launch(&exe, &LaunchOptions::default()).expect("launch");
+    let base = tempfile::tempdir().unwrap();
+    let opts = LaunchOptions {
+        profile: Profile::Throwaway(base.path().join("profiles")),
+        ..LaunchOptions::default()
+    };
+    let b = Chromium::launch(&exe, &opts).expect("launch");
     let pid = b.pid().unwrap();
     drop(b);
     #[cfg(unix)]

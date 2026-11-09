@@ -881,8 +881,7 @@ mod tests {
     }
 
     fn temp(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("debrief-child-log-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
+        let d = crate::testing::scratch_dir(&format!("child-log-{tag}"));
         d
     }
 

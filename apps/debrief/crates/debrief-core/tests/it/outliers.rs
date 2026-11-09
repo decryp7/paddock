@@ -31,10 +31,7 @@ fn store() -> (WorkspaceStore, std::path::PathBuf) {
 
 /// A store over one log file with this text.
 fn store_of(text: &str) -> (WorkspaceStore, std::path::PathBuf) {
-    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let dir = std::env::temp_dir().join(format!("debrief-core-outliers-{}-{n}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir = crate::scratch::scratch_dir("core-outliers");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("svc.log");
     std::fs::write(&path, text).unwrap();

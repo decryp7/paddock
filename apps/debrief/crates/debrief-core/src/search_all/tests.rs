@@ -22,9 +22,8 @@ fn joined(parts: &[SnippetPart]) -> String {
 }
 
 /// A workspace over one invented log file `app.log` in a fresh folder.
-fn store_with(name: &str, lines: &str) -> (WorkspaceStore, std::path::PathBuf) {
-    let dir = std::env::temp_dir().join(format!("debrief-search-all-{}-{name}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+fn store_with(_name: &str, lines: &str) -> (WorkspaceStore, std::path::PathBuf) {
+    let dir = crate::test_dirs::scratch_dir("search-all");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("payments-service.log"), lines).unwrap();
     let mut ws = Workspace::new(Profile::default_profile()).unwrap();

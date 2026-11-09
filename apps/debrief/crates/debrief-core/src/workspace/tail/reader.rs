@@ -197,7 +197,8 @@ mod tests {
         assert_eq!(mem.read(2, 100).unwrap(), b"b\nc\n");
         assert!(mem.read(9, 3).unwrap().is_empty());
         assert_eq!(count_lines(&mem, Encoding::Utf8, 6).unwrap(), 3);
-        let dir = std::env::temp_dir().join(format!("debrief-reader-{}", std::process::id()));
+        let dir_scratch = tempfile::tempdir().unwrap();
+        let dir = dir_scratch.path().join(format!("debrief-reader-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("f.log");
         std::fs::write(&p, "0123456789").unwrap();

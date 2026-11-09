@@ -3,14 +3,12 @@
 #[path = "../../build/runtime_lib.rs"]
 mod build_runtime_lib;
 
-use std::path::PathBuf;
-
-/// A fresh folder of its own per test (the crate has no tempfile dependency).
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("debrief-store-duck-runtime-lib-{}-{name}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+/// A fresh folder of its own per test, removed when the guard is dropped (also after a failed assert).
+fn scratch(name: &str) -> tempfile::TempDir {
+    tempfile::Builder::new()
+        .prefix(&format!("debrief-store-duck-runtime-lib-{name}-"))
+        .tempdir()
+        .unwrap()
 }
 
 #[test]
@@ -23,8 +21,8 @@ fn names_the_runtime_library_per_target() {
 #[test]
 fn stages_the_library_into_the_build_folder_and_replaces_a_stale_one() {
     let tmp = scratch("stage");
-    let lib = tmp.join("lib");
-    let out = tmp.join("out");
+    let lib = tmp.path().join("lib");
+    let out = tmp.path().join("out");
     std::fs::create_dir_all(&lib).unwrap();
     std::fs::write(lib.join("duckdb.dll"), b"v1").unwrap();
     let dir = build_runtime_lib::stage(&lib, "duckdb.dll", &out).unwrap().unwrap();
@@ -35,13 +33,14 @@ fn stages_the_library_into_the_build_folder_and_replaces_a_stale_one() {
     std::fs::write(lib.join("duckdb.dll"), b"v2").unwrap();
     build_runtime_lib::stage(&lib, "duckdb.dll", &out).unwrap();
     assert_eq!(std::fs::read(dir.join("duckdb.dll")).unwrap(), b"v2");
-    std::fs::remove_dir_all(&tmp).unwrap();
 }
 
 #[test]
 fn a_missing_library_stages_nothing() {
     let tmp = scratch("missing");
-    assert_eq!(build_runtime_lib::stage(&tmp, "duckdb.dll", &tmp.join("out")).unwrap(), None);
-    assert!(!tmp.join("out").exists());
-    std::fs::remove_dir_all(&tmp).unwrap();
+    assert_eq!(
+        build_runtime_lib::stage(tmp.path(), "duckdb.dll", &tmp.path().join("out")).unwrap(),
+        None
+    );
+    assert!(!tmp.path().join("out").exists());
 }

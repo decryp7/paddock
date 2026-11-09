@@ -58,8 +58,9 @@ fn names_functions_of_this_binary_with_their_source_file() {
     assert_eq!(all.symbols.len(), 1);
     assert_eq!(all.unresolved, 2);
     // A missing image is reported, not fatal.
+    let scratch = tempfile::tempdir().unwrap();
     let gone = Module {
-        path: std::env::temp_dir().join("debrief-no-such-module.dll"),
+        path: scratch.path().join("debrief-no-such-module.dll"),
         base: 0x7700_0000_0000,
         size: 0x1000,
     };

@@ -17,6 +17,8 @@ name = "debrief"
 path = "src/bin/debrief.rs"
 
 [dependencies]
+debrief-ipc = { path = "../debrief-ipc" }
+tempfile.workspace = true
 debrief-core = { path = "../debrief-core" }
 # The store worker's client (no database linked); the CLI starts the worker like the app does.
 debrief-store-client = { path = "../debrief-store-client" }
@@ -29,4 +31,3 @@ serde_json = { workspace = true, features = ["preserve_order"] }
 
 [dev-dependencies]
 debrief-store-duck = { path = "../debrief-store-duck" }
-tempfile.workspace = true

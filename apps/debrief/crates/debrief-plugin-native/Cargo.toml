@@ -9,6 +9,7 @@ publish = false
 description = "Debrief plugin: native (C/C++) profiling by ETW (elevated) or suspend-and-sample (no rights), written as NetTrace with symbols; .etl import (ADR 0022). Nothing is loaded into the target."
 
 [dependencies]
+tempfile.workspace = true
 debrief-plugin-api = { path = "../debrief-plugin-api" }
 debrief-etw = { path = "../debrief-etw" }
 debrief-symbols = { path = "../debrief-symbols", default-features = false, features = ["dbghelp"] }
@@ -37,7 +38,6 @@ symbol-server = ["debrief-symbols/server"]
 
 [dev-dependencies]
 proptest.workspace = true
-tempfile.workspace = true
 
 # The profiling target of the integration tests: a busy loop, lock contention and a growing heap
 # (tests/fixtures/native-busy). Built by `cargo test` like every example.

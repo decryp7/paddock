@@ -117,8 +117,7 @@ mod tests {
     use super::*;
 
     fn temp(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("debrief-evtbm-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
+        let d = debrief_ipc::testing::scratch_dir(&format!("evtbm-{tag}"));
         d
     }
 

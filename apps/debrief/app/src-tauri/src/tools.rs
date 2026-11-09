@@ -833,7 +833,8 @@ pub(crate) mod tests {
 
     #[test]
     fn tool_outputs_are_the_reported_bundle_and_folder() {
-        let abs = std::env::temp_dir().join("out").to_string_lossy().into_owned();
+        let abs_scratch = tempfile::tempdir().unwrap();
+        let abs = abs_scratch.path().join("out").to_string_lossy().into_owned();
         let found = tool_outputs(&json!({ "bundle": abs, "dir": "relative", "other": abs, "manifest": {} }));
         assert_eq!(found, vec![PathBuf::from(&abs)]);
         assert_eq!(

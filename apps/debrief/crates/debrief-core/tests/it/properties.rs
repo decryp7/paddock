@@ -842,9 +842,12 @@ struct TempDir(PathBuf);
 
 impl TempDir {
     fn new() -> TempDir {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        static N: AtomicUsize = AtomicUsize::new(0);
-        let p = std::env::temp_dir().join(format!("debrief-prop-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+        // The probe above finds its leftovers by this process's prefix (`debrief-prop-<pid>-`), so keep it.
+        let p = tempfile::Builder::new()
+            .prefix(&format!("debrief-prop-{}-", std::process::id()))
+            .tempdir()
+            .unwrap()
+            .keep();
         std::fs::create_dir_all(&p).unwrap();
         TempDir(p)
     }
@@ -901,7 +904,12 @@ fn a_property_folder_whose_removal_fails_is_gone_when_its_process_ends() {
         .unwrap()
         .0
         .to_string();
-    let left: Vec<_> = std::fs::read_dir(std::env::temp_dir())
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "this test checks that nothing is left in the shared temp folder"
+    )]
+    let shared_temp = std::env::temp_dir();
+    let left: Vec<_> = std::fs::read_dir(shared_temp)
         .unwrap()
         .filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().into_owned())

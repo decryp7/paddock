@@ -11,6 +11,8 @@
 pub mod protocol;
 mod transport;
 
+#[cfg(unix)]
+pub(crate) use transport::runtime_ipc_dir;
 pub use transport::{Connector, Stream, SystemConnector};
 
 use crate::recording::{Control, ThreadRecording};

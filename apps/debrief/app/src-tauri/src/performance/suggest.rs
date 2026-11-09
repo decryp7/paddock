@@ -264,7 +264,8 @@ mod tests {
 
     #[test]
     fn the_probe_reads_this_computer() {
-        let e = probe(&std::env::temp_dir());
+        let scratch = tempfile::tempdir().unwrap();
+        let e = probe(scratch.path());
         assert!(e.total_memory_mb > 0 && e.cores >= 1);
         assert!(e.free_memory_mb <= e.total_memory_mb);
     }

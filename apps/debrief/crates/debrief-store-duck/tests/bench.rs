@@ -52,9 +52,12 @@ fn interactive_operations_at_scale() {
         eprintln!("skipped: set DEBRIEF_BENCH_EVENTS (e.g. 10000000) to run the benchmark");
         return;
     };
+    // Without `DEBRIEF_BENCH_DIR` the corpus goes into a private folder that is removed at the end (set it to keep and reuse
+    // the corpus between runs).
+    let scratch = tempfile::tempdir().unwrap();
     let base = std::env::var("DEBRIEF_BENCH_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| std::env::temp_dir());
+        .unwrap_or_else(|_| scratch.path().to_path_buf());
     let t = Instant::now();
     let corpus = common::corpus::corpus(&base.join(format!("debrief-corpus-{events}")), events);
     eprintln!("corpus: {:.0} MB in {:.1} s", dir_mb(&corpus), t.elapsed().as_secs_f64());

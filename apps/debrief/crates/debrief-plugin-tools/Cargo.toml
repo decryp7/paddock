@@ -9,6 +9,7 @@ publish = false
 description = "Debrief tools plugin: Performance Monitor collector sets, the process monitor, the Event Log follower, the diagnostics collector and elevation info"
 
 [dependencies]
+tempfile.workspace = true
 debrief-core = { path = "../debrief-core" }
 debrief-plugin-api = { path = "../debrief-plugin-api" }
 debrief-monitor = { path = "../debrief-monitor" }
@@ -22,3 +23,7 @@ serde_json = { workspace = true, features = ["preserve_order"] }
 
 [target.'cfg(windows)'.dependencies]
 windows.workspace = true
+
+[dev-dependencies]
+# The shared scratch_dir for fixtures that hand out a path.
+debrief-ipc = { path = "../debrief-ipc", features = ["test-support"] }

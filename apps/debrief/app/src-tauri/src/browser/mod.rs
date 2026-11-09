@@ -213,6 +213,9 @@ impl ActionLog for ActivityLog {
     }
 }
 
+/// A throwaway browser profile older than this was left by a run that ended badly: removed at start-up.
+const STALE_PROFILE_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+
 /// Manages the hub and the approvals and registers Settings ▸ Web browser. Call from `setup` after
 /// `settings::init`.
 pub fn init<R: Runtime>(app: &AppHandle<R>) {
@@ -226,6 +229,22 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) {
     renderers.listen_profile(Arc::new(move || {
         let _ = tauri::Emitter::emit(&a, RESEARCH_PROFILE_EVENT, ());
     }));
+    // Throwaway browser profiles live in Debrief's own local folder, never in the shared temp folder.
+    match crate::app_dirs::webview_data(app) {
+        Ok(local) => {
+            let base = local.join("browser-profiles");
+            let main_instance = app.try_state::<crate::instance::SingleInstance>().is_some_and(|s| s.0);
+            crate::app_dirs::sweep_in_background(
+                base.clone(),
+                Some("chromium-driver-"),
+                STALE_PROFILE_AGE,
+                "stale browser profiles",
+                main_instance,
+            );
+            renderers.set_throwaway_base(Some(base));
+        }
+        Err(e) => log::error!("{}", crate::app_dirs::data_missing_message("The research browser", &e)),
+    }
     watch_health(app, &renderers);
     let a = app.clone();
     renderers.set_placer(Arc::new(move |owner| placement_of(&a, owner)));

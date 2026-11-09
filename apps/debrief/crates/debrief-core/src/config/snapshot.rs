@@ -172,8 +172,7 @@ mod tests {
     }
 
     fn tmp(tag: &str) -> Dir {
-        let d = std::env::temp_dir().join(format!("debrief-snapshot-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
+        let d = crate::test_dirs::scratch_dir(&format!("snapshot-{tag}"));
         std::fs::create_dir_all(&d).unwrap();
         Dir(d)
     }

@@ -8,6 +8,7 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+tempfile.workspace = true
 debrief-plugin-api = { path = "../debrief-plugin-api" }
 anyhow.workspace = true
 serde.workspace = true
@@ -22,6 +23,8 @@ minidump = "0.27"
 windows = { workspace = true, features = ["Win32_System_EventLog"] }
 
 [dev-dependencies]
+# The shared scratch_dir for fixtures that hand out a path.
+debrief-ipc = { path = "../debrief-ipc", features = ["test-support"] }
 # Snapshot tests of the importers against /samples (tests/samples.rs, snapshots in tests/snapshots/).
 insta.workspace = true
 proptest.workspace = true

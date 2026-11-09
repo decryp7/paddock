@@ -454,13 +454,14 @@ mod tests {
 
     #[test]
     fn stores_take_the_workers_tuning_over_its_mode_and_requests_win_over_both() {
+        let spill = tempfile::tempdir().unwrap();
         let tuning = StoreTuning {
             parse_threads: Some(6),
             duck_threads: Some(3),
             memory_limit_mb: Some(512),
             index_heap_mb: Some(10),
             index_threads: Some(2),
-            spill_dir: Some(std::env::temp_dir().join("spill")),
+            spill_dir: Some(spill.path().join("spill")),
             max_spill_mb: Some(4096),
             allocator_flush_mb: Some(16),
             allocator_background_threads: Some(false),

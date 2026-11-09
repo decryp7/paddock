@@ -274,8 +274,7 @@ mod tests {
     use debrief_core::names::group::NameGroup;
 
     fn temp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("debrief-it-names-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
+        let d = crate::test_support::scratch_dir(&format!("it-names-{name}"));
         d
     }
 

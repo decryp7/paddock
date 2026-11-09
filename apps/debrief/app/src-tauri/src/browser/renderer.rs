@@ -227,6 +227,16 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    /// Without a local folder for browser profiles no throwaway profile is made (never one in the shared temp folder).
+    #[test]
+    fn without_a_folder_for_profiles_no_throwaway_browser_starts() {
+        let r = Renderers::default();
+        let e = r.throwaway().expect_err("no base, no throwaway profile").to_string();
+        assert!(e.contains("user profile folder could not be found"), "{e}");
+        r.set_throwaway_base(Some("/some/profiles".into()));
+        assert!(matches!(r.throwaway(), Ok(chromium_driver::launch::Profile::Throwaway(p)) if p == std::path::Path::new("/some/profiles")));
+    }
+
     #[test]
     fn no_browser_gives_a_message_that_says_what_to_do() {
         let r = Renderers::default();
@@ -283,6 +293,8 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let fake = FakeBrowser::install(dir.path(), "browser::renderer::tests::fake_browser_process", mode, tabs).unwrap();
             let renderers = Arc::new(Renderers::default());
+            // Throwaway profiles go below the test's own folder, as they go below Debrief's local folder in the app.
+            renderers.set_throwaway_base(Some(dir.path().join("browser-profiles")));
             renderers.set_sources(Sources {
                 configured: Some(fake.exe.clone()),
                 installed: None,

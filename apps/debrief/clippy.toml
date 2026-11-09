@@ -3,6 +3,8 @@
 disallowed-methods = [
     { path = "std::process::Command::new", reason = "use debrief_core::process::quiet_command: it opens no console window on Windows" },
     { path = "tokio::process::Command::new", allow-invalid = true, reason = "use debrief_core::process::quiet_command: it opens no console window on Windows" },
+    { path = "std::env::temp_dir", reason = "tests use a tempfile folder and production code a fresh private folder (tempfile::Builder) or Debrief's own data folder: nothing fixed is put in the shared temp folder (C13, DBR-LINT)" },
+    { path = "reqwest::Client::new", allow-invalid = true, reason = "build the client with paddock-net's policy (https only, caps, redirects, timeouts)" },
     # ADR 0033: nothing is ended by a bare pid. A pid may name another process by the time it is signalled; end it through
     # paddock-proc with a ProcessId, or through a handle or job this process owns. A justified site carries
     # #[expect(clippy::disallowed_methods, reason = "...")].

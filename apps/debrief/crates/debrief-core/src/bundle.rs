@@ -370,8 +370,7 @@ mod tests {
     use zip::write::SimpleFileOptions;
 
     pub(crate) fn temp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("debrief-bundle-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
+        let d = crate::test_dirs::scratch_dir(&format!("bundle-{name}"));
         std::fs::create_dir_all(&d).unwrap();
         d
     }

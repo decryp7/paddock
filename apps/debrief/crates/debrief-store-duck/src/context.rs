@@ -165,7 +165,7 @@ mod tests {
     use super::*;
 
     fn file(tag: &str, text: &[u8]) -> String {
-        let p = std::env::temp_dir().join(format!("debrief-context-{tag}-{}.log", std::process::id()));
+        let p = debrief_ipc::testing::scratch_dir(&format!("context-{tag}")).join("events.log");
         std::fs::write(&p, text).unwrap();
         p.to_string_lossy().into_owned()
     }

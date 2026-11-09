@@ -330,8 +330,7 @@ mod tests {
 
     /// A workspace over one text log of `n` events.
     fn workspace(tag: &str, n: usize) -> (Workspace, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!("debrief-insights-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = crate::test_dirs::scratch_dir(&format!("insights-{tag}"));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("app.log");
         let text: String = (0..n)

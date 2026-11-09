@@ -315,7 +315,7 @@ mod tests {
         fn new(files: usize) -> Tree {
             let mut b = [0u8; 8];
             getrandom::fill(&mut b).unwrap();
-            let root = std::env::temp_dir().join(format!("debrief-stream-{}-{:x}", std::process::id(), u64::from_le_bytes(b)));
+            let root = crate::test_dirs::scratch_dir("stream");
             for i in 0..files {
                 let d = root.join(format!("d{}/e{}", i % 6, (i / 6) % 4));
                 std::fs::create_dir_all(&d).unwrap();

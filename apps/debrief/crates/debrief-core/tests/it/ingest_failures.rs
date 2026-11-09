@@ -103,8 +103,7 @@ struct TempDir(PathBuf);
 
 impl TempDir {
     fn new(tag: &str) -> TempDir {
-        let p = std::env::temp_dir().join(format!("debrief-ingest-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&p);
+        let p = crate::scratch::scratch_dir(&format!("ingest-{tag}"));
         std::fs::create_dir_all(&p).unwrap();
         TempDir(p)
     }

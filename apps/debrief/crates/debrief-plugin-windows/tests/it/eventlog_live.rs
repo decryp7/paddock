@@ -122,7 +122,8 @@ mod live {
     #[test]
     fn follows_the_real_event_log() {
         let nonce = format!("debrief-follower-{}-{}", std::process::id(), chrono::Utc::now().timestamp_millis());
-        let dir: PathBuf = std::env::temp_dir().join(&nonce);
+        let dir_scratch = tempfile::tempdir().unwrap();
+        let dir: PathBuf = dir_scratch.path().join(&nonce);
         let store = dir.join("bookmarks.json");
         let sink = Arc::new(Mem::default());
 

@@ -428,15 +428,9 @@ mod tests {
     }
 
     fn temp() -> PathBuf {
-        let d = std::env::temp_dir().join(format!("debrief-ingest-{}-{}", std::process::id(), rand_suffix()));
+        let d = crate::test_dirs::scratch_dir("ingest");
         std::fs::create_dir_all(&d).unwrap();
         d
-    }
-
-    fn rand_suffix() -> u64 {
-        let mut b = [0u8; 8];
-        getrandom::fill(&mut b).unwrap();
-        u64::from_le_bytes(b)
     }
 
     #[test]

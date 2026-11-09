@@ -17,8 +17,7 @@ struct Dir(PathBuf);
 
 impl Dir {
     fn new(tag: &str) -> Dir {
-        let p = std::env::temp_dir().join(format!("debrief-live-session-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&p);
+        let p = crate::scratch::scratch_dir(&format!("live-session-{tag}"));
         std::fs::create_dir_all(&p).unwrap();
         Dir(std::fs::canonicalize(p).unwrap())
     }

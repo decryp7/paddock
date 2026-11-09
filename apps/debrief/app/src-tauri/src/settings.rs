@@ -784,8 +784,7 @@ pub(crate) mod tests {
     struct Temp(PathBuf);
     impl Temp {
         fn new(tag: &str) -> Temp {
-            let d = std::env::temp_dir().join(format!("debrief-settings-{tag}-{}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&d);
+            let d = crate::test_support::scratch_dir(&format!("settings-{tag}"));
             std::fs::create_dir_all(&d).unwrap();
             Temp(d)
         }

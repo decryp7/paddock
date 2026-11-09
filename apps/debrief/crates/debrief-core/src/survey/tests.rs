@@ -389,8 +389,8 @@ fn line_diff_marks_added_and_removed_lines() {
 fn store_with(lines: &str) -> (crate::workspace::WorkspaceStore, std::path::PathBuf) {
     // Unique per call: tests run in parallel and each removes its folder when done.
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let dir = std::env::temp_dir().join(format!("debrief-survey-{}-{n}", std::process::id()));
+    let _n = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let dir = crate::test_dirs::scratch_dir("tests");
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("app.log");
     std::fs::write(&file, lines).unwrap();
@@ -622,7 +622,8 @@ fn composing_refuses_too_many_changes_and_badly_named_saved_queries() {
 
 #[test]
 fn unrecognised_files_are_grouped_with_their_first_lines() {
-    let dir = std::env::temp_dir().join(format!("debrief-survey-unrec-{}", std::process::id()));
+    let dir_scratch = tempfile::tempdir().unwrap();
+    let dir = dir_scratch.path().join(format!("debrief-survey-unrec-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("dump.reg");
     std::fs::write(&path, "Windows Registry Editor\n\n[HKEY_LOCAL_MACHINE]\n").unwrap();

@@ -16,11 +16,11 @@ test = false
 
 [features]
 # `testing::confined_tmp`, for the tests of the crates that kill hosts on purpose.
-test-support = ["dep:tempfile"]
+test-support = []
 
 [dependencies]
 log.workspace = true
-tempfile = { workspace = true, optional = true }
+tempfile.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 getrandom.workspace = true
@@ -41,6 +41,5 @@ windows = { workspace = true, features = ["Win32_System_JobObjects", "Win32_Secu
 
 [dev-dependencies]
 proptest.workspace = true
-tempfile.workspace = true
 debrief-ipc = { path = ".", features = ["test-support"] }
 

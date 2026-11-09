@@ -20,10 +20,11 @@ struct TempDir(PathBuf);
 
 impl TempDir {
     fn new(tag: &str) -> TempDir {
-        let mut b = [0u8; 8];
-        getrandom::fill(&mut b).unwrap();
-        let p = std::env::temp_dir().join(format!("debrief-parity-{tag}-{}-{:x}", std::process::id(), u64::from_le_bytes(b)));
-        std::fs::create_dir_all(&p).unwrap();
+        let p = tempfile::Builder::new()
+            .prefix(&format!("debrief-parity-{tag}-"))
+            .tempdir()
+            .unwrap()
+            .keep();
         TempDir(p)
     }
 }

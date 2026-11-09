@@ -9,7 +9,7 @@ use debrief_core::{LogStore, Profile, Workspace};
 use std::sync::atomic::Ordering;
 
 fn store(tag: &str) -> (Box<dyn LogStore>, std::path::PathBuf) {
-    let dir = std::env::temp_dir().join(format!("debrief-forward-{tag}-{}", std::process::id()));
+    let dir = crate::scratch::scratch_dir(&format!("forward-{tag}"));
     std::fs::create_dir_all(&dir).unwrap();
     let text: String = [
         ("Application started", 0),

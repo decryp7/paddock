@@ -1710,6 +1710,7 @@ dependencies = [
  "chrono",
  "ctrlc",
  "debrief-core",
+ "debrief-ipc",
  "debrief-pdf",
  "debrief-store-client",
  "debrief-store-duck",
@@ -2129,12 +2130,14 @@ dependencies = [
  "chrono",
  "debrief-collect",
  "debrief-core",
+ "debrief-ipc",
  "debrief-monitor",
  "debrief-plugin-api",
  "debrief-plugin-windows",
  "quick-xml",
  "serde",
  "serde_json",
+ "tempfile",
  "windows",
 ]
 
@@ -2158,6 +2161,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "csv",
+ "debrief-ipc",
  "debrief-plugin-api",
  "evtx",
  "insta",
@@ -2166,6 +2170,7 @@ dependencies = [
  "quick-xml",
  "serde",
  "serde_json",
+ "tempfile",
  "windows",
 ]
 
@@ -2226,6 +2231,7 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -2237,6 +2243,7 @@ dependencies = [
  "csv",
  "debrief-alloc",
  "debrief-core",
+ "debrief-ipc",
  "debrief-store-client",
  "duckdb",
  "getrandom 0.4.3",

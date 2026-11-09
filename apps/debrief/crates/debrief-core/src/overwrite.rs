@@ -25,7 +25,8 @@ mod tests {
 
     #[test]
     fn existing_files_need_confirmation() {
-        let dir = std::env::temp_dir().join(format!("debrief-overwrite-{}", std::process::id()));
+        let dir_scratch = tempfile::tempdir().unwrap();
+        let dir = dir_scratch.path().join(format!("debrief-overwrite-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("out.csv");
         let _ = std::fs::remove_file(&file);

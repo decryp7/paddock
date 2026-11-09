@@ -150,14 +150,16 @@ mod tests {
 
     #[test]
     fn a_moved_file_is_reported_not_opened() {
-        let missing = std::env::temp_dir().join("debrief-no-such-dir").join("gone.log");
+        let missing_scratch = tempfile::tempdir().unwrap();
+        let missing = missing_scratch.path().join("debrief-no-such-dir").join("gone.log");
         let e = open(FileAction::Open, &target(&missing.to_string_lossy(), None)).unwrap_err();
         assert!(e.contains("moved or deleted") && e.contains("app.log"), "{e}");
     }
 
     #[test]
     fn an_existing_file_is_handed_to_the_os() {
-        let dir = std::env::temp_dir().join(format!("debrief-open-{}", std::process::id()));
+        let dir_scratch = tempfile::tempdir().unwrap();
+        let dir = dir_scratch.path().join(format!("debrief-open-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("app.log");
         std::fs::write(&file, "x\n").unwrap();
@@ -175,7 +177,8 @@ mod tests {
 
     #[test]
     fn a_file_replaced_by_a_folder_is_reported_not_opened() {
-        let dir = std::env::temp_dir().join(format!("debrief-open-dir-{}", std::process::id()));
+        let dir_scratch = tempfile::tempdir().unwrap();
+        let dir = dir_scratch.path().join(format!("debrief-open-dir-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("app.log")).unwrap();
         let e = open(FileAction::Reveal, &target(&dir.join("app.log").to_string_lossy(), None)).unwrap_err();
         assert!(e.contains("moved or deleted"), "{e}");
@@ -186,7 +189,8 @@ mod tests {
     #[test]
     fn a_locked_file_is_still_opened_and_shown() {
         use std::os::windows::fs::OpenOptionsExt;
-        let dir = std::env::temp_dir().join(format!("debrief-open-locked-{}", std::process::id()));
+        let dir_scratch = tempfile::tempdir().unwrap();
+        let dir = dir_scratch.path().join(format!("debrief-open-locked-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("locked.log");
         std::fs::write(
@@ -211,7 +215,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_link_is_judged_by_the_file_it_points_at() {
-        let dir = std::env::temp_dir().join(format!("debrief-open-link-{}", std::process::id()));
+        let dir_scratch = tempfile::tempdir().unwrap();
+        let dir = dir_scratch.path().join(format!("debrief-open-link-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("run.sh"),

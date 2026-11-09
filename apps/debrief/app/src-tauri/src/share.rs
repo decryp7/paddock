@@ -26,22 +26,112 @@ const MAX_VISUAL_BYTES: usize = 32 << 20;
 /// Largest report accepted from the UI (JSON).
 const MAX_REPORT_JSON: usize = 64 << 20;
 
-/// Folder under the system temp folder where bundles are extracted to be opened.
+/// Where bundles are extracted to be opened: `<local data>/bundles`, set once by [`init_bundles_root`] at start-up. `None`
+/// when Debrief has no local data folder: bundles then cannot be opened (never a fixed folder in the shared temp folder, which
+/// another local user could plant).
 #[cfg(not(test))]
-pub(crate) fn bundles_root() -> PathBuf {
-    std::env::temp_dir().join("debrief-bundles")
+pub(crate) fn bundles_root() -> Option<PathBuf> {
+    BUNDLES_ROOT.get().cloned()
+}
+
+#[cfg(not(test))]
+static BUNDLES_ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// The folder of extracted bundles below the local (not roaming) data folder, or the message that opening bundles is
+/// unavailable.
+pub(crate) fn bundles_under(local: tauri::Result<PathBuf>) -> Result<PathBuf, String> {
+    crate::app_dirs::require_data(local, "Opening bundles").map(|d| d.join("bundles"))
+}
+
+/// An extracted bundle not touched for this long is removed at start-up (they are copies; the bundle file is kept).
+const STALE_BUNDLE_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 3600);
+
+/// Resolves the folder of extracted bundles; `None` without a local folder.
+fn resolve_bundles_root(local: tauri::Result<PathBuf>) -> Option<PathBuf> {
+    match bundles_under(local) {
+        Ok(root) => Some(root),
+        Err(message) => {
+            log::error!("{message}");
+            None
+        }
+    }
+}
+
+/// Starts the sweep of old extractions on its own thread, in the main instance only.
+fn start_bundle_sweep(root: PathBuf, main_instance: bool) -> Option<std::thread::JoinHandle<usize>> {
+    crate::app_dirs::sweep_in_background(root, None, STALE_BUNDLE_AGE, "extracted bundles", main_instance)
+}
+
+/// Marks the extraction folder that holds `path` as in use now, so the start-up sweep counts age from the last use (an
+/// opened or restored bundle), not from the extraction. Anything outside the bundle folder is ignored.
+pub(crate) fn touch_bundle_folder(path: &Path) {
+    let Some(root) = bundles_root() else { return };
+    touch_folder_under(&root, path, std::time::SystemTime::now());
+}
+
+/// Marks the extraction folders that saved sessions name as in use now, before the sweep can look at them: a window
+/// restored later from such a session finds its sources. Returns how many folders were touched.
+fn touch_session_sources(root: &Path, sources: &[PathBuf], now: std::time::SystemTime) -> usize {
+    sources.iter().filter(|s| touch_folder_under(root, s, now)).count()
+}
+
+/// [`touch_bundle_folder`] for a given root and time; true when a folder was touched.
+fn touch_folder_under(root: &Path, path: &Path, now: std::time::SystemTime) -> bool {
+    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let (root, path) = (canon(root), canon(path));
+    let Some(first) = path.strip_prefix(&root).ok().and_then(|rel| rel.components().next()) else {
+        return false;
+    };
+    crate::app_dirs::set_folder_mtime(&root.join(first), now).is_ok()
+}
+
+/// The start-up work on the folder of extracted bundles, in this order: the folders saved sessions name are marked as in
+/// use now, and only then the sweep of old extractions starts (in the background, main instance only). Returns the sweep
+/// thread, when one was started.
+fn prepare_bundles(root: &Path, sources: &[PathBuf], main_instance: bool) -> Option<std::thread::JoinHandle<usize>> {
+    let touched = touch_session_sources(root, sources, std::time::SystemTime::now());
+    log::info!(Folders = touched as u64; "Bundle folders named by saved sessions were marked as in use");
+    start_bundle_sweep(root.to_path_buf(), main_instance)
+}
+
+/// Fixes the folder of extracted bundles under the app's local data folder (call from `setup`, in its own step) and
+/// prepares it ([`prepare_bundles`]).
+pub(crate) fn init_bundles_root<R: Runtime>(app: &AppHandle<R>) {
+    #[cfg(not(test))]
+    use tauri::Manager as _;
+    #[cfg(not(test))]
+    if let Some(root) = resolve_bundles_root(crate::app_dirs::webview_data(app)) {
+        let main_instance = app.try_state::<crate::instance::SingleInstance>().is_some_and(|s| s.0);
+        let sources = app
+            .try_state::<crate::lifecycle::Lifecycle>()
+            .map(|life| life.session_sources())
+            .unwrap_or_default();
+        prepare_bundles(&root, &sources, main_instance);
+        let _ = BUNDLES_ROOT.set(root);
+    }
+    #[cfg(test)]
+    let _ = app;
+}
+
+/// The error of a command that needs the bundle folder when there is none.
+fn bundles_unavailable() -> CmdError {
+    CmdError::unavailable(crate::app_dirs::data_missing_message(
+        "Opening bundles",
+        &"no data folder was resolved at start-up",
+    ))
 }
 
 /// Tests extract into a folder of the test process, removed when it exits.
 #[cfg(test)]
-pub(crate) fn bundles_root() -> PathBuf {
+pub(crate) fn bundles_root() -> Option<PathBuf> {
     static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    ROOT.get_or_init(|| crate::test_support::process_scratch_dir("bundles")).clone()
+    Some(ROOT.get_or_init(|| crate::test_support::process_scratch_dir("bundles")).clone())
 }
 
 /// Refuses to save a project into an opened bundle's folder (bundles open read-only).
 pub(crate) fn refuse_bundle_folder(path: &str) -> CmdResult<()> {
-    let root = std::fs::canonicalize(bundles_root()).unwrap_or_else(|_| bundles_root());
+    let Some(root) = bundles_root() else { return Ok(()) };
+    let root = std::fs::canonicalize(&root).unwrap_or(root);
     let parent = Path::new(path).parent().and_then(|p| std::fs::canonicalize(p).ok());
     if parent.is_some_and(|p| p.starts_with(&root)) {
         return Err("this bundle is opened read-only: save the project somewhere else (Save As)".into());
@@ -333,7 +423,9 @@ pub(crate) async fn open_bundle<R: Runtime>(
     let (handle, win) = (app.clone(), state.clone());
     crate::jobs::start_value(&app, spec, controls, move |ctx: &crate::jobs::JobCtx| {
         ctx.message("Unpacking and checking the bundle");
-        let extracted = debrief_core::bundle::extract(&source, &bundles_root()).map_err(err)?;
+        let root = bundles_root().ok_or_else(bundles_unavailable)?;
+        let extracted = debrief_core::bundle::extract(&source, &root).map_err(err)?;
+        touch_bundle_folder(&extracted.dir);
         // Debrief's own folder: what the bundle holds may be opened from this window.
         grants.grant(&extracted.dir, crate::paths::Access::Read, crate::paths::GrantSource::Output)?;
         let mut opened = match &extracted.project {
@@ -374,6 +466,106 @@ pub(crate) async fn open_bundle<R: Runtime>(
 mod tests {
     use super::*;
     use crate::test_support::Json as _;
+
+    /// An opened or restored bundle counts as used now: the sweep goes by the last use, not by the extraction.
+    #[test]
+    fn touching_a_bundle_folder_protects_it_from_the_sweep() {
+        let root = tempfile::tempdir().unwrap();
+        let now = std::time::SystemTime::now();
+        let old = now - std::time::Duration::from_secs(10 * 24 * 3600);
+        for name in ["used", "idle"] {
+            let p = root.path().join(name);
+            std::fs::create_dir_all(p.join("logs")).unwrap();
+            std::fs::write(p.join("logs").join("a.log"), b"x").unwrap();
+            crate::app_dirs::set_folder_mtime(&p, old).unwrap();
+        }
+        assert!(touch_folder_under(
+            root.path(),
+            &root.path().join("used").join("logs").join("a.log"),
+            now
+        ));
+        assert!(
+            !touch_folder_under(root.path(), std::path::Path::new("/somewhere/else"), now),
+            "outside: ignored"
+        );
+        crate::app_dirs::sweep_old_at(root.path(), None, STALE_BUNDLE_AGE, now, "extracted bundles");
+        assert!(root.path().join("used").exists(), "used lately: kept");
+        assert!(!root.path().join("idle").exists(), "idle for 10 days: removed");
+    }
+
+    /// A saved session that names a source in an old extraction keeps that folder from the start-up sweep.
+    #[test]
+    fn a_folder_a_saved_session_names_survives_the_sweep() {
+        let root = tempfile::tempdir().unwrap();
+        let now = std::time::SystemTime::now();
+        let old = now - std::time::Duration::from_secs(10 * 24 * 3600);
+        for name in ["named", "unnamed"] {
+            std::fs::create_dir_all(root.path().join(name).join("logs")).unwrap();
+            crate::app_dirs::set_folder_mtime(&root.path().join(name), old).unwrap();
+        }
+        let sources = vec![root.path().join("named").join("logs"), PathBuf::from("/not/a/bundle/file.log")];
+        assert_eq!(touch_session_sources(root.path(), &sources, now), 1);
+        let handle = start_bundle_sweep(root.path().to_path_buf(), true).unwrap();
+        assert_eq!(handle.join().unwrap(), 1);
+        assert!(root.path().join("named").exists(), "named by a session: kept");
+        assert!(!root.path().join("unnamed").exists());
+    }
+
+    /// End to end: a saved session on disk names a source in an old extraction; the start-up work keeps that folder and
+    /// removes the old one nobody names.
+    #[test]
+    fn start_up_keeps_the_extraction_a_saved_session_names_and_sweeps_the_rest() {
+        use crate::lifecycle::{Lifecycle, SessionStore};
+        let data = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(10 * 24 * 3600);
+        for name in ["named", "unnamed"] {
+            std::fs::create_dir_all(root.path().join(name).join("logs")).unwrap();
+            crate::app_dirs::set_folder_mtime(&root.path().join(name), old).unwrap();
+        }
+        let project = debrief_core::project::ProjectFile {
+            version: 1,
+            name: "saved".into(),
+            sources: vec![root.path().join("named").join("logs").to_string_lossy().into_owned()],
+            profile: "name = 'x'".into(),
+            ..Default::default()
+        };
+        SessionStore::new(data.path().to_path_buf()).save("main", &project).unwrap();
+        let life = Lifecycle::begin(Some(data.path().to_path_buf()), false);
+        let handle = prepare_bundles(root.path(), &life.session_sources(), true).expect("main instance sweeps");
+        assert_eq!(handle.join().unwrap(), 1);
+        assert!(root.path().join("named").exists(), "named by a saved session: kept");
+        assert!(!root.path().join("unnamed").exists(), "named by nobody: removed");
+    }
+
+    #[test]
+    fn a_second_instance_starts_no_bundle_sweep() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(start_bundle_sweep(root.path().to_path_buf(), false).is_none());
+        assert!(start_bundle_sweep(root.path().to_path_buf(), true).unwrap().join().is_ok());
+    }
+
+    /// No data folder: no bundle folder (opening a bundle is refused with the next step), and a data folder gives
+    /// `<data>/bundles`, never a folder in the shared temp folder.
+    #[test]
+    fn without_a_data_folder_bundles_cannot_be_opened() {
+        assert_eq!(
+            resolve_bundles_root(Err(tauri::Error::WindowNotFound)),
+            None,
+            "start-up: no folder, no bundles"
+        );
+        let m = bundles_under(Err(tauri::Error::WindowNotFound)).unwrap_err();
+        assert!(m.starts_with("Opening bundles is unavailable"), "{m}");
+        assert!(m.contains("user profile folder could not be found"), "{m}");
+        assert_eq!(
+            bundles_under(Ok(PathBuf::from("/data"))),
+            Ok(PathBuf::from("/data").join("bundles"))
+        );
+        let e = bundles_unavailable();
+        assert_eq!(e.code, crate::error::ErrorCode::Unavailable);
+        assert!(e.message.contains("user profile folder could not be found"), "{}", e.message);
+    }
+
     use crate::test_support::Now as _;
     use crate::test_support::{block, job_done, main_window, samples, test_app, TempDir};
     use serde_json::json;

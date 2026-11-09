@@ -45,12 +45,25 @@ impl Connector for SystemConnector {
     }
 }
 
+/// The folder where the .NET runtime puts its diagnostic sockets (`dotnet-diagnostic-<pid>-...-socket`): `$TMPDIR`, else
+/// `/tmp`, exactly as the runtime chooses it. Only read to find a socket; nothing is created there, and it is not the
+/// scratch folder of this program (that is a fresh private folder from `tempfile`).
+#[cfg(unix)]
+pub(crate) fn runtime_ipc_dir() -> std::path::PathBuf {
+    ipc_dir_from(std::env::var_os("TMPDIR"))
+}
+
+#[cfg(unix)]
+fn ipc_dir_from(tmpdir: Option<std::ffi::OsString>) -> std::path::PathBuf {
+    tmpdir
+        .filter(|v| !v.is_empty())
+        .map_or_else(|| std::path::PathBuf::from("/tmp"), std::path::PathBuf::from)
+}
+
 #[cfg(unix)]
 impl Connector for SystemConnector {
     fn connect(&self, pid: u32, timeout: Duration) -> Result<Box<dyn Stream>, DotnetError> {
-        let dir = std::env::var_os("TMPDIR")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(std::env::temp_dir);
+        let dir = runtime_ipc_dir();
         let prefix = format!("dotnet-diagnostic-{pid}-");
         let socket = std::fs::read_dir(&dir)?
             .flatten()
@@ -75,6 +88,15 @@ impl Connector for SystemConnector {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn the_runtime_socket_folder_is_tmpdir_else_slash_tmp_as_the_runtime_chooses() {
+        use std::ffi::OsString;
+        assert_eq!(ipc_dir_from(Some(OsString::from("/var/x"))), std::path::PathBuf::from("/var/x"));
+        assert_eq!(ipc_dir_from(Some(OsString::new())), std::path::PathBuf::from("/tmp"));
+        assert_eq!(ipc_dir_from(None), std::path::PathBuf::from("/tmp"));
+    }
 
     #[test]
     fn a_missing_port_is_not_found() {

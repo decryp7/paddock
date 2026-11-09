@@ -72,6 +72,10 @@ fn a_child_connects_authenticates_and_answers() {
 /// The folders named `prefix-*` where private sockets are made: every base `create_named` tries, from the one list it uses
 /// (the runtime folder, the temp folder, the job's socket base, `/tmp`).
 #[cfg(unix)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "this test looks for leftovers in every base a socket folder may be made in, the shared temp folder included"
+)]
 fn socket_dirs(prefix: &str) -> Vec<std::path::PathBuf> {
     let bases = debrief_ipc::endpoint::socket_bases(
         std::env::var_os("XDG_RUNTIME_DIR"),
@@ -242,7 +246,8 @@ fn the_supervisor_restarts_restores_and_quarantines_real_children() {
 #[cfg(windows)]
 #[test]
 fn a_locked_child_cannot_write_the_users_files_or_start_programs() {
-    let dir = std::env::temp_dir().join(format!("debrief-sandbox-{}", std::process::id()));
+    let dir_scratch = tempfile::tempdir().unwrap();
+    let dir = dir_scratch.path().join(format!("debrief-sandbox-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let target = dir.join("written.txt");
     let open = launch(&spec(&[]), Arc::new(NoCalls)).unwrap();
