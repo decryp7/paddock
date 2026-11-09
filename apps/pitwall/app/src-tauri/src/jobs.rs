@@ -199,7 +199,7 @@ impl EventSink for Router {
                         _ => Value::Null,
                     },
                 },
-                JobState::Failed { message } => JobEvent::Failed {
+                JobState::Failed { message, .. } => JobEvent::Failed {
                     job_id,
                     error: match route.outcome.take() {
                         Some(Err(e)) => e,
@@ -397,7 +397,7 @@ where
             (Err(e), None) => {
                 let message = e.message.clone();
                 jobs.router.set_outcome(id, Err(e));
-                JobState::Failed { message }
+                JobState::Failed { message, limit: None }
             }
         };
         ctx.reporter().finish(end);
