@@ -286,6 +286,16 @@ test('checkout profiles: the bootstrap holds every path dependency, dev-dependen
   for (const dir of seen) assert.ok(boot.some((b) => dir === b || dir.startsWith(`${b}/`)), `${dir} is a path dependency of paddock-dev: add \`bootstrap ${dir}\``);
 });
 
+// Run 7818 (macOS): a crate of a workspace needs the workspace root's manifest, and cargo loads every member of it (and the
+// workspace.dependencies it names): paddock-dev uses crates of the crates/ workspace, so all of its members must be there.
+test('checkout profiles: the bootstrap holds every member of the crates workspace that paddock-dev builds inside', () => {
+  const boot = declared().filter((d) => d.kind === 'bootstrap').map((d) => d.parts[0]);
+  const root = read(join(PADDOCK, 'crates', 'Cargo.toml'));
+  const members = [...root.slice(root.indexOf('members = ['), root.indexOf(']', root.indexOf('members = [')) ).matchAll(/"([^"]+)"/g)].map((m) => `crates/${m[1]}`);
+  assert.ok(members.length > 30, 'the member list was parsed');
+  for (const dir of members) assert.ok(boot.some((b) => dir === b || dir.startsWith(`${b}/`)), `${dir} is a member of the workspace paddock-dev's path dependencies belong to: bootstrap \`crates\` whole`);
+});
+
 test('checkout profiles: nothing outside the excluded paths mentions one, unless the file is declared and reasoned (mention)', () => {
   const excluded = declared().filter((d) => d.kind === 'exclude' && d.parts[0] === 'lean').map((d) => d.parts[1].replace(/\/$/, ''));
   const res = excluded.map(toRe);
