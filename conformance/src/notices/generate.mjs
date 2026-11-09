@@ -119,14 +119,22 @@ export function npmPackages(appDir) {
   return { packages, warnings };
 }
 
-/** Rust crates from cargo-about JSON documents (workspace crates are the app itself and are skipped): { packages, warnings }. */
+/**
+ * True for a path crate that is a patched copy of someone else's crate (an app's `vendor/` folder, `[patch.crates-io]`): it
+ * ships under its own licence like any registry crate. Other path crates (the app's and the shared Paddock crates) are ours.
+ */
+export function isVendored(manifestPath) {
+  return /(^|[/\\])vendor[/\\]/.test(manifestPath ?? '');
+}
+
+/** Rust crates from cargo-about JSON documents (first-party path crates are the app itself and are skipped): { packages, warnings }. */
 export function rustCrates(documents) {
   const crates = new Map();
   const warnings = [];
   for (const j of documents) {
     for (const c of j.crates ?? []) {
       const p = c.package;
-      if (!p.source) continue;
+      if (!p.source && !isVendored(p.manifest_path)) continue;
       const key = `${p.name} ${p.version}`;
       if (!crates.has(key)) crates.set(key, { kind: 'rust', name: p.name, version: p.version, license: c.license || 'UNKNOWN', texts: [], spdx: spdxIds(c.license || '') });
     }

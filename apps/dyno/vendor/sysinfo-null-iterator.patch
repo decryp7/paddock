@@ -1,0 +1,55 @@
+diff -ru a/src/unix/apple/macos/disk.rs b/src/unix/apple/macos/disk.rs
+--- a/src/unix/apple/macos/disk.rs
++++ b/src/unix/apple/macos/disk.rs
+@@ -31,8 +31,15 @@
+         return None;
+     }
+ 
+-    // Safety: We checked for success, so there is always a valid iterator, even if its empty.
+-    let service_iterator = unsafe { IOReleaser::new_unchecked(service_iterator) };
++    // IOServiceGetMatchingServices can return success with a null iterator on some macOS
++    // setups. Never construct a NonZero io_object_t from 0 (debug panic / release UB).
++    let service_iterator = match IOReleaser::new(service_iterator) {
++        Some(iterator) => iterator,
++        None => {
++            sysinfo_debug!("IOServiceGetMatchingServices succeeded but returned a null iterator");
++            return None;
++        }
++    };
+ 
+     let mut parent_entry: io_registry_entry_t = 0;
+ 
+@@ -129,4 +136,16 @@
+             Some((read_bytes, written_bytes))
+         }
+     })
++}
++
++// Paddock (apps/dyno/vendor/PATCHES.md): IOKit answers KERN_SUCCESS with a null iterator for a BSD name that has no
++// IOService, which is what a disk image detached between the mount listing and this lookup leaves behind.
++#[cfg(test)]
++mod paddock_tests {
++    #[test]
++    fn a_bsd_name_with_no_io_service_gives_nothing_and_never_panics() {
++        let gone = b"paddock-no-such-disk\0";
++        assert_eq!(super::get_disk_type(gone), None);
++        assert_eq!(super::get_disk_io(gone), None);
++    }
+ }
+diff -ru a/src/unix/apple/macos/utils.rs b/src/unix/apple/macos/utils.rs
+--- a/src/unix/apple/macos/utils.rs
++++ b/src/unix/apple/macos/utils.rs
+@@ -13,13 +13,6 @@
+         IoObject::new(obj).map(Self)
+     }
+ 
+-    #[cfg(feature = "disk")]
+-    pub(crate) unsafe fn new_unchecked(obj: u32) -> Self {
+-        // Chance at catching in-development mistakes
+-        debug_assert_ne!(obj, 0);
+-        unsafe { Self(IoObject::new_unchecked(obj)) }
+-    }
+-
+     #[inline]
+     pub(crate) fn inner(&self) -> u32 {
+         self.0.get()

@@ -84,3 +84,26 @@ Apply with `patch -p1 -d vendor/tray-icon < vendor/tray-icon-autosave-name.patch
 - Why: a Windows diagnostic bundle must show which step of the ladder the shell refused and with what code (the shell sometimes leaves 0).
 - Not run on Windows: compiled and linted with `cargo xwin clippy` only.
 - Removal: with the GUID patch, when Tauri exposes a GUID builder.
+
+## sysinfo 0.39.6
+
+- Source: crates.io `sysinfo` 0.39.6, `.crate` SHA-256 `d2071df9448915b71c4fe6d25deaf1c22f12bd234f01540b77312bb8e41361e6`
+  (the checksum in `Cargo.lock`; copied and read 2026-11-10). Repository <https://github.com/GuillaumeGomez/sysinfo>.
+- Licence: `MIT` (kept: `LICENSE` and `license` in its `Cargo.toml`).
+- Dropped from the copy: `Cargo.lock`, `.gitignore` (unanchored rules), `.github/` and `.cirrus.yml` (upstream CI). One patch,
+  nothing else: [`sysinfo-null-iterator.patch`](sysinfo-null-iterator.patch). Check after a change: unpack sysinfo 0.39.6, apply it
+  with `patch -p1`, and `diff -r --strip-trailing-cr -x Cargo.lock -x .gitignore -x .github -x .cirrus.yml` against `vendor/sysinfo`
+  prints nothing (done 2026-11-10; git stores `md_doc/sid.md`, the one CRLF file, with LF). The test it adds runs with `cargo test --manifest-path vendor/sysinfo/Cargo.toml --lib paddock_tests` (macOS;
+  delete the `Cargo.lock` it writes); it fails on the pristine crate with the panic below.
+- Why: on macOS, `iterate_service_tree` (`src/unix/apple/macos/disk.rs`, behind `Disk` kind and I/O refreshes) assumed that a
+  successful `IOServiceGetMatchingServices` always gives a non-zero iterator and built a `NonZeroU32` from it unchecked. Apple
+  documents the opposite (`IOKitLib.h`: "If NULL is returned, the iteration was successful but found no matching services"),
+  which is what a BSD name whose disk is gone gets, for example a disk image detached between sysinfo's mount listing and
+  this lookup. Debug builds panic (`utils.rs:19`, `assertion left != right failed (left: 0, right: 0)`, CI run 7848); release
+  builds construct a `NonZeroU32` of 0, which is undefined behaviour. The patch is upstream's fix
+  (<https://github.com/GuillaumeGomez/sysinfo/pull/1709>, merged 2026-07-31, first released in 0.40.0) plus a regression test.
+- Removal plan: the family moves to sysinfo 0.40 (a breaking release: `Disks::list` and others removed) in the shared crates,
+  Debrief, Spotter and Dyno together; then delete this folder, the patch, this entry and the `sysinfo` line under
+  `[patch.crates-io]` in `../Cargo.toml`. Renovate does not update a vendored copy.
+- Scope (ER-22): Debrief and Spotter resolve the same unpatched 0.39.6 (Debrief with the `disk` feature, so it is exposed on
+  macOS too). If they need the fix before the 0.40 move, move this folder to the shared place in that change.

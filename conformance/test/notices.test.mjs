@@ -64,6 +64,21 @@ test('render is deterministic, deduplicates texts and does not depend on input o
   assert.doesNotMatch(a.markdown, /\r/);
 });
 
+test('a vendored copy of a third-party crate is listed although it is a path dependency; first-party path crates are not', () => {
+  const doc = {
+    crates: [
+      { package: { name: 'dyno-agent', version: '1.0.0', source: null, manifest_path: '/r/apps/dyno/crates/dyno-agent/Cargo.toml' }, license: 'MIT' },
+      { package: { name: 'paddock-proc', version: '0.1.0', source: null, manifest_path: '/r/crates/paddock-proc/Cargo.toml' }, license: 'MIT' },
+      { package: { name: 'sysinfo', version: '0.39.6', source: null, manifest_path: '/r/apps/dyno/vendor/sysinfo/Cargo.toml' }, license: 'MIT' },
+      { package: { name: 'tray-icon', version: '0.25.1', source: null, manifest_path: 'C:\\r\\apps\\dyno\\vendor\\tray-icon\\Cargo.toml' }, license: 'MIT OR Apache-2.0' },
+    ],
+    licenses: [{ id: 'MIT', text: 'MIT text', used_by: [{ crate: { name: 'sysinfo', version: '0.39.6' } }, { crate: { name: 'tray-icon', version: '0.25.1' } }] }],
+  };
+  const { packages, warnings } = rustCrates([doc]);
+  assert.deepEqual(packages.map((p) => `${p.name} ${p.version}`).sort(), ['sysinfo 0.39.6', 'tray-icon 0.25.1']);
+  assert.deepEqual(warnings, []);
+});
+
 test('npm packages: licence files found, dev skipped, a missing file is a warning, declared licence read from package.json', () => {
   const { packages, warnings } = npmPackages(join(npmApp(), 'app'));
   assert.deepEqual(packages.map((p) => p.name).sort(), ['@scope/chart', 'left-pad', 'nolicense']);
