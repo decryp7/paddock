@@ -1,6 +1,6 @@
 # 73. No test double in a shipped build: one gate, one check per app, a dated register
 
-- Status: Proposed (2026-11-09), revision 3. Nothing in "Work packages" starts before the user accepts it.
+- Status: Accepted 2026-11-09 by the user: D1–D10 as recommended (revision 3). Rule 73.
 - Revision 2 (2026-11-09) answers the independent review of revision 1 (`1daeb0fff`, verdict CHANGES, 3 P1 and P2s). The
   review verified the mechanism in a fixture: a self dev-dependency with `required-features` and `CARGO_BIN_EXE_<name>`
   works within one package. It found nothing exploitable in a released app today.
@@ -314,10 +314,11 @@ instead of an error. I read this in the code; I neither built a dist nor saw it 
 
 ### 1. The rule and the one mechanism
 
-The proposed rule text for `docs/rules.md`, under a new heading "Shipped builds". Its number is assigned on acceptance:
-73 is the next free one today, and 72 is taken by family ADR 0057's branch.
+The rule text for `docs/rules.md`, under a new heading "Shipped builds", is **rule 73**, assigned on acceptance
+(2026-11-09). Main ends at rule 71, the open rule branches use 56–59, 65 and 66, and family ADR 0057's branch claims
+72, so 73 is the next free number. WP-2 adds the text to `docs/rules.md`.
 
-> **No test double or test switch ships.** A build that ships contains no test double, test-only module or test-only
+> **73. No test double or test switch ships.** A build that ships contains no test double, test-only module or test-only
 > switch:
 > (a) a double inside a crate sits behind `#[cfg(any(test, feature = "test-support"))]`, and `test-support` is enabled
 > only from `[dev-dependencies]` (a crate's own integration tests use a self dev-dependency);
@@ -700,7 +701,7 @@ After WP-0, two agents can run in parallel:
 
 | # | Decision | Recommendation |
 | --- | --- | --- |
-| D1 | Make "no test double or test switch ships" a family rule (number assigned on acceptance) for every app and shared crate: Rust now, the UI as phase 2 | **Yes.** Three apps shipped the shape (a wired fake, a fake behind a flag, a sandbox switch and executable-path overrides that cross an elevation), and every app that ships Rust has instances. |
+| D1 | Make "no test double or test switch ships" a family rule (rule 73) for every app and shared crate: Rust now, the UI as phase 2 | **Yes.** Three apps shipped the shape (a wired fake, a fake behind a flag, a sandbox switch and executable-path overrides that cross an elevation), and every app that ships Rust has instances. |
 | D2 | Pitwall's fake engine: a separate test-only binary in the `pitwall-server` package (`pitwall-fake-engine`, `required-features`), or the flags kept in `pitwall-server` behind `cfg(feature = "test-support")` | **Separate binary.** `7a73cdc59` lands as is first (ADR 0071); WP-P moves all three flags afterwards. The shipped binary then has the flags in no build. |
 | D3 | One feature name: rename `testing` (`paddock-pitwall`, `paddock-siblings`, `pacenotes-core`, `pacenotes-function-api`) and `test-hooks` (`pacenotes-worker`) to `test-support`; keep `mock-runtime`, `probe` and `testdb` as registered test features | **Yes.** One name everywhere; the three kept names gate different things and are listed in `test_features`. |
 | D4 | Gate the family doubles (WP-S, WP-G) inside Pitwall 1.1, or register them temporary until `pitwall-v1.1.1` | **Inside 1.1.** Pitwall 1.1 links 9 of them, and its per-machine installer embeds `paddock-setup.exe`, which runs as administrator and links F1 to F3 and F7. `trust_fake` is unreachable today; the worst case is a future change that wires a fake machine into the privileged trust check, and that is what the gate rules out. |
