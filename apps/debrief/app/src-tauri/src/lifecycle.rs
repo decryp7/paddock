@@ -173,7 +173,9 @@ pub fn previous_run(marker: MarkerFile, own_pid: u32, probe: Probe<'_>) -> Previ
 pub fn os_probe(pid: u32) -> Option<u64> {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
     let pid = Pid::from_u32(pid);
-    let mut sys = System::new();
+    let mut sys = System::new()
+        .inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; the start time of pid {pid} is unknown"))
+        .ok()?;
     sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), false, ProcessRefreshKind::nothing());
     sys.process(pid).map(|p| p.start_time())
 }

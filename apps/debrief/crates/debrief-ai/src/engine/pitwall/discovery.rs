@@ -195,7 +195,12 @@ pub fn pid_alive(pid: u32) -> bool {
     if pid == 0 {
         return false;
     }
-    let mut sys = System::new();
+    // Unknown counts as alive: a discovery file is never judged stale because the process table could not be read.
+    let Ok(mut sys) =
+        System::new().inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; pid {pid} is assumed alive"))
+    else {
+        return true;
+    };
     let p = Pid::from_u32(pid);
     sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[p]), true, ProcessRefreshKind::nothing());
     sys.process(p).is_some()

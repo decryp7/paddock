@@ -382,7 +382,11 @@ pub(crate) fn sweep_scratch(root: &Path, keep: &[PathBuf]) {
         .iter()
         .map(|k| std::fs::canonicalize(k).unwrap_or_else(|_| k.clone()))
         .collect();
-    let mut sys = sysinfo::System::new();
+    let Ok(mut sys) = sysinfo::System::new()
+        .inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; scratch stores are kept"))
+    else {
+        return;
+    };
     for e in entries.flatten() {
         let path = e.path();
         let canonical = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());

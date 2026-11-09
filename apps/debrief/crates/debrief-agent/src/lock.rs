@@ -21,7 +21,9 @@ pub struct SystemProbe;
 
 impl ProcessProbe for SystemProbe {
     fn start_time(&self, pid: u32) -> Option<u64> {
-        let mut sys = System::new();
+        let mut sys = System::new()
+            .inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; the start time of pid {pid} is unknown"))
+            .ok()?;
         let p = Pid::from_u32(pid);
         sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[p]), true, ProcessRefreshKind::nothing());
         sys.process(p).map(|proc| proc.start_time())

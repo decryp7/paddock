@@ -55,7 +55,9 @@ pub struct SystemMemory;
 
 impl MemoryProbe for SystemMemory {
     fn total_ram_mb(&self) -> Option<u64> {
-        let mut sys = sysinfo::System::new();
+        let mut sys = sysinfo::System::new()
+            .inspect_err(|why| log::warn!("installed RAM unavailable (sysinfo): {why}; sizing falls back"))
+            .ok()?;
         sys.refresh_memory();
         let bytes = sys.total_memory();
         (bytes > 0).then_some(bytes / (1024 * 1024))
