@@ -57,9 +57,15 @@ pub(crate) struct FakeHost {
     /// Fault hook (see `Launch::stall_reads_after`): reads past this many bytes wait until released.
     stall_after: AtomicU64,
     released: AtomicBool,
+    /// Fault hook (see `Launch::fail_reads_after`): reads past this many bytes are answered with an error.
+    fail_after: AtomicU64,
 }
 
 impl FakeHost {
+    pub(crate) fn fail_reads_after(&self, bytes: Option<u64>) {
+        self.fail_after.store(bytes.unwrap_or(u64::MAX), Ordering::Release);
+    }
+
     pub(crate) fn stall_reads_after(&self, bytes: Option<u64>) {
         self.stall_after.store(bytes.unwrap_or(u64::MAX), Ordering::Release);
     }
@@ -132,6 +138,9 @@ impl Handler for FakeHost {
         match req {
             HostRequest::ReadFile { id, offset, len } => {
                 self.wait_while_stalled();
+                if self.bytes_read.load(Ordering::Acquire) >= self.fail_after.load(Ordering::Acquire) {
+                    return Err(RemoteError::new(code::INVALID, "the fault hook refuses this read"));
+                }
                 let data = lock(&self.files)
                     .get(&id)
                     .cloned()

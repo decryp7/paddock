@@ -314,9 +314,26 @@ fn cancellation(p: &PluginUnderTest, inputs: &[(String, Vec<u8>)]) -> Result<Str
         let mut reported = Instant::now();
         let waiting = Instant::now();
         while !p.host.wait_bytes_read(target, Duration::from_millis(20)) {
-            if let Ok(StreamEvent::Done(_)) = stream.next(Some(Duration::from_millis(1))) {
-                phase("cancellation: the import ended before it could be cancelled");
-                return Ok("the import ended before it could be cancelled".into());
+            match stream.next(Some(Duration::from_millis(1))) {
+                Ok(StreamEvent::Done(_)) => {
+                    phase("cancellation: the import ended before it could be cancelled");
+                    return Ok("the import ended before it could be cancelled".into());
+                }
+                // The import ended with an error (or the plugin went away) before it had its whole file: the cause is
+                // the error, not a read that stopped advancing, so the check says so at once instead of after the guard.
+                Err(e) => {
+                    let read = p.host.bytes_read.load(std::sync::atomic::Ordering::Relaxed) - read_before;
+                    phase(format_args!(
+                        "cancellation: the import ended with an error after {read} of {} bytes: {e}",
+                        content.len()
+                    ));
+                    return Err(format!(
+                        "importer \"{}\" ended with an error while its file was being read ({read} of {} bytes): {e}",
+                        importer.id,
+                        content.len()
+                    ));
+                }
+                Ok(_) => {}
             }
             let now = p.host.bytes_read.load(std::sync::atomic::Ordering::Relaxed);
             if now != seen {
