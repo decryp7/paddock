@@ -486,19 +486,27 @@ fn source_files(root: &Path) -> Result<Vec<PathBuf>, String> {
     let listed = crate::input_hash::Exec::run(
         &crate::input_hash::Real,
         "git",
-        &["ls-files", "--cached", "--others", "--exclude-standard", "--", "*.rs"],
+        &["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "*.rs"],
         root,
         None,
     );
     // Where git cannot answer (a worktree mounted into a container without its git folder, git not installed) the file system
     // walk is used: it sees every file git would and more, so it can only add sites, never hide one.
-    let Ok(listed) = listed else {
+    // Names are NUL-separated (`-z`), so a path with spaces, quotes or non-ASCII characters is listed verbatim. A name that is not
+    // valid UTF-8 cannot be read back from the lossy text: that too takes the file system walk, never a silent drop.
+    let Ok(listed) = listed.and_then(|l| {
+        if l.contains('\u{fffd}') {
+            Err(paddock_cli::CliError::failure("git listed a path that is not valid UTF-8"))
+        } else {
+            Ok(l)
+        }
+    }) else {
         let mut files = Vec::new();
         walk(root, &mut files).map_err(|e| format!("{}: {e}", root.display()))?;
         return Ok(files);
     };
     let mut files: Vec<PathBuf> = listed
-        .lines()
+        .split('\0')
         .filter(|l| !l.is_empty())
         .filter(|l| {
             !Path::new(l)

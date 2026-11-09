@@ -488,8 +488,10 @@ fn the_scan_reads_the_files_git_knows_and_not_the_file_system() {
     git(&["add", "-A"]);
     // Not added, not ignored: a file about to be committed is checked too. Ignored files and build output are not.
     std::fs::write(dir.path().join("src/untracked.rs"), SERVER).unwrap();
+    // A name git would quote without -z (non-ASCII, a space) is still scanned.
+    std::fs::write(dir.path().join("src/m\u{fc}ller server.rs"), SERVER).unwrap();
     std::fs::write(dir.path().join("ignored.rs"), SERVER).unwrap();
     std::fs::write(dir.path().join("target/built.rs"), SERVER).unwrap();
     let files: Vec<String> = scan(dir.path()).unwrap().into_iter().map(|s| s.file).collect();
-    assert_eq!(files, ["src/tracked.rs", "src/untracked.rs"]);
+    assert_eq!(files, ["src/m\u{fc}ller server.rs", "src/tracked.rs", "src/untracked.rs"]);
 }
