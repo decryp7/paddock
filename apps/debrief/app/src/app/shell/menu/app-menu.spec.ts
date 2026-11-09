@@ -1,6 +1,6 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { FakeDock, provideFakeDock, provideTinyBackend, settle, testLogger } from '../../../testing/helpers';
+import { FakeDock, provideFakeDock, provideTinyBackend, settle, testLogger, settleUntil } from '../../../testing/helpers';
 import { provideToolsBackend } from '../../core/tools-backend';
 import { WorkspaceStore } from '../../core/workspace.store';
 import { PANEL_WINDOWS, PanelWindows } from '../../dock/panel-windows';
@@ -239,22 +239,22 @@ describe('native menu bar', () => {
   });
 
   it('runs chosen items, but not the echo of a shortcut that just ran the same command', async () => {
-    let chosen: (id: string) => void = () => undefined;
+    let chosen: ((id: string) => void) | undefined;
     const { ran } = bridge({
       onMenu: async (h) => {
         chosen = h;
         return () => undefined;
       },
     });
-    await settle();
-    chosen('view:anomalies');
+    await settleUntil(undefined, () => expect(chosen).toBeTypeOf('function'));
+    chosen!('view:anomalies');
     expect(ran).toEqual(['view:anomalies']);
     // Ctrl/Cmd+K runs the palette command from the page; the menu bar's echo of it is ignored.
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, metaKey: false, bubbles: true }));
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: false, metaKey: true, bubbles: true }));
-    chosen('palette.open');
+    chosen!('palette.open');
     expect(ran).toEqual(['view:anomalies']);
-    chosen('file.openFiles');
+    chosen!('file.openFiles');
     expect(ran).toEqual(['view:anomalies', 'file.openFiles']);
   });
 

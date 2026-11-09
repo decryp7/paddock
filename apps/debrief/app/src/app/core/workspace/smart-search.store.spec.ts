@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { provideTinyBackendBare, query, settle, testLogger, tinyBackend } from '../../../testing/helpers';
+import { provideTinyBackendBare, query, settle, testLogger, tinyBackend, settleUntil } from '../../../testing/helpers';
 import { MockBackend } from '../mock/mock-backend';
 import { QueryStore, TEXT_DEBOUNCE_MS } from './query.store';
 import { isWordSearch, SmartSearchStore } from './smart-search.store';
@@ -74,16 +74,16 @@ describe('SmartSearchStore', () => {
 
   it('a stale scan is ignored', async () => {
     const backend = tinyBackend();
-    let release: (v: { added: number; complete: boolean }) => void = () => {};
+    let release: ((v: { added: number; complete: boolean }) => void) | undefined;
     vi.spyOn(backend, 'searchPartial').mockImplementationOnce(() => new Promise((r) => (release = r)));
     const { smart, q } = setup(backend);
     await settle();
     q.patchQuery({ text: 'imeout', textMode: 'words' });
-    await settle();
+    await settleUntil(undefined, () => expect(release).toBeTypeOf('function'));
     expect(smart.scanning()).toBe(true);
     q.patchQuery({ text: 'cache', textMode: 'words' });
     await settle();
-    release({ added: 99, complete: true });
+    release!({ added: 99, complete: true });
     await settle();
     expect(smart.added()).toBe(0);
     expect(q.query().textMode).toBe('words');

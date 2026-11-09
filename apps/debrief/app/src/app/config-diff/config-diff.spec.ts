@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { all, buttonByText, el, MemoryLogger, settle, text, typeInto } from '../../testing/helpers';
+import { all, buttonByText, el, MemoryLogger, settle, text, typeInto, settleUntil } from '../../testing/helpers';
 import { Logger } from '../core/logger';
 import { CHANGE_KINDS, DiffOptions, SnapshotFile } from '../core/config-diff.types';
 import { DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefCommand, DebriefView } from '../extensions/tokens';
@@ -421,7 +421,7 @@ describe('ConfigDiffView', () => {
     await settle(fixture);
     expect(text(fixture)).toContain('No differences to show with these filters');
     store.setMode('folders');
-    let release: () => void = () => undefined;
+    let release: (() => void) | undefined;
     vi.spyOn(backend, 'snapshots').mockImplementationOnce(async (l, r) => {
       await new Promise<void>((res) => (release = res));
       return { left: l, right: r, files: [], truncated: true };
@@ -429,9 +429,9 @@ describe('ConfigDiffView', () => {
     store.setDir('left', '/a');
     store.setDir('right', '/b');
     const done = store.compareFolders();
-    await settle(fixture);
+    await settleUntil(fixture, () => expect(release).toBeTypeOf('function'));
     expect(text(fixture)).toContain('Comparing folders');
-    release();
+    release!();
     await done;
     await settle(fixture);
     expect(text(fixture)).toContain('No configuration files found');

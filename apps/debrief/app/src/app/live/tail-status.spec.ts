@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { all, buttonByText, el, provideTinyBackend, settle, text, tinyDataset } from '../../testing/helpers';
+import { all, buttonByText, el, provideTinyBackend, settle, text, tinyDataset, settleUntil } from '../../testing/helpers';
 import { TailFileState, TailStatus } from '../core/api.types';
 import { MockBackend } from '../core/mock/mock-backend';
 
@@ -147,7 +147,7 @@ describe('tail status', () => {
     let release!: (s: TailStatus) => void;
     vi.spyOn(backend, 'tailStatus').mockImplementationOnce(() => new Promise((r) => (release = r)));
     const fixture = TestBed.createComponent(TailStatusView);
-    await settle(fixture);
+    await settleUntil(fixture, () => expect(release).toBeTypeOf('function'));
     expect(text(fixture)).toContain('Loading…');
     release({ files: [], totals: { files: 0, tailing: 0, errors: 0, bytes: 0, linesPerSec: 0, records: 0 } });
     await settle(fixture);

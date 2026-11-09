@@ -7,7 +7,7 @@ import { MockBackend } from '../../core/mock/mock-backend';
 import { WorkspaceStore } from '../../core/workspace.store';
 import { COMMAND_CONTEXT } from '../../extensions/command-registry';
 import { DIALOG_REF, DialogService } from '../../ui/dialog.service';
-import { buttonByText, MemoryLogger, settle } from '../../../testing/helpers';
+import { buttonByText, MemoryLogger, settle, settleUntil } from '../../../testing/helpers';
 import { AiBackend } from '../ai-backend';
 import { AiStatusStore } from '../ai-status.store';
 import { JobOutcome } from '../../jobs/jobs.types';
@@ -193,7 +193,7 @@ describe('folder set-up hint, command and backends', () => {
     expect(cmd!.when!({} as never)).toBe(true);
     const dialogs = TestBed.inject(DialogService);
     let close!: () => void;
-    vi.spyOn(dialogs, 'open').mockImplementation(() => ({ close: () => undefined, closed: new Promise<undefined>((r) => (close = () => r(undefined))) }));
+    const opened = vi.spyOn(dialogs, 'open').mockImplementation(() => ({ close: () => undefined, closed: new Promise<undefined>((r) => (close = () => r(undefined))) }));
     const store = TestBed.inject(FolderSetupStore);
     const cancel = vi.spyOn(store, 'cancel');
     const detach = vi.spyOn(store, 'detach');
@@ -203,8 +203,9 @@ describe('folder set-up hint, command and backends', () => {
     vi.spyOn(TestBed.inject(FolderSetupBackend), 'survey').mockResolvedValue(5);
     void cmd!.run({} as never);
     expect(store.phase()).toBe('surveying');
-    await settle();
-    expect(store.surveyJob()).toBe(5);
+    // The wizard loads lazily before the dialog opens: wait for that, not for a number of turns (rule 49).
+    await settleUntil(undefined, () => expect(opened).toHaveBeenCalled());
+    await settleUntil(undefined, () => expect(store.surveyJob()).toBe(5));
     close();
     await settle();
     expect(detach).toHaveBeenCalled();
