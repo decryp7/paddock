@@ -69,10 +69,24 @@ pub fn table_from(entries: impl IntoIterator<Item = ProcEntry>) -> Table {
         .collect()
 }
 
+/// An empty sysinfo `System` to refresh process data into. Since sysinfo 0.40 the constructor can fail (a platform whose
+/// process table cannot be opened); that is logged and the caller answers "unknown" instead of panicking.
+pub(crate) fn new_system() -> Option<System> {
+    System::new()
+        .inspect_err(|why| {
+            log::warn!(
+                "the OS process table is unavailable (sysinfo): {why}; the answer is unknown"
+            )
+        })
+        .ok()
+}
+
 /// A look at the OS process table: parents, start times and resident memory only (command lines, environments and
 /// working folders are slow to read on Windows and nothing here needs them).
 pub fn snapshot() -> Table {
-    let mut sys = System::new();
+    let Some(mut sys) = new_system() else {
+        return Table::default();
+    };
     sys.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true,
@@ -330,7 +344,7 @@ fn direct_children(table: &Table, pid: u32) -> Vec<u32> {
 /// only; `None` when it is gone or is a thread entry.
 fn resident(pid: u32) -> Option<u64> {
     let id = Pid::from_u32(pid);
-    let mut sys = System::new();
+    let mut sys = new_system()?;
     sys.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[id]),
         true,
@@ -1245,7 +1259,7 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
             let kids = OsSource::default().children(pid);
             for kid in kids {
                 let id = Pid::from_u32(kid);
-                let mut sys = System::new();
+                let mut sys = System::new().expect("a System");
                 sys.refresh_processes_specifics(
                     ProcessesToUpdate::Some(&[id]),
                     true,

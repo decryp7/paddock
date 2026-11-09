@@ -12,7 +12,7 @@
 use crate::identity::{Ending, Holder, ProcessId, StartTime, holder, warn_not_ours};
 use crate::usage::{self, Table};
 use std::time::{Duration, Instant};
-use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate};
 
 /// How a process ended under [`terminate`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -212,7 +212,9 @@ pub fn end(id: ProcessId) -> Ending {
 /// Whether `pid` is a running process (a zombie that only waits to be reaped is not). Says nothing about which process:
 /// use [`ProcessId::is_alive`] for that.
 pub fn is_alive(pid: u32) -> bool {
-    let mut sys = System::new();
+    let Some(mut sys) = usage::new_system() else {
+        return false;
+    };
     let id = Pid::from_u32(pid);
     sys.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[id]),
@@ -251,7 +253,9 @@ pub fn terminate(id: ProcessId, grace: Duration) -> Terminated {
 /// process that had it first, so ending the result ([`end`]) finds the new holder and leaves it alone.
 pub fn processes_mentioning(needle: &str) -> Vec<ProcessId> {
     let table: Table = usage::snapshot();
-    let mut sys = System::new();
+    let Some(mut sys) = usage::new_system() else {
+        return Vec::new();
+    };
     sys.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true,

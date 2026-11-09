@@ -7,8 +7,14 @@ use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, RefreshKind, System};
 
 /// The mounted volumes now.
 pub(crate) fn mounts() -> Vec<Mount> {
-    Disks::new_with_refreshed_list()
-        .list()
+    let disks = match Disks::new_with_refreshed_list() {
+        Ok(disks) => disks,
+        Err(why) => {
+            log::warn!("the volume list is unavailable (sysinfo): {why}; no volumes are reported");
+            return Vec::new();
+        }
+    };
+    disks
         .iter()
         .map(|d| Mount {
             path: d.mount_point().to_path_buf(),
@@ -20,7 +26,8 @@ pub(crate) fn mounts() -> Vec<Mount> {
 
 /// A [`MachineProbe`] reading this machine.
 pub struct SystemProbe {
-    sys: System,
+    /// `None` when sysinfo could not start (logged once); the readings are then zero, which the sampler treats as unknown.
+    sys: Option<System>,
 }
 
 impl Default for SystemProbe {
@@ -32,27 +39,41 @@ impl Default for SystemProbe {
 impl SystemProbe {
     /// A probe; the first CPU reading is taken at once so the next one covers the time in between.
     pub fn new() -> Self {
-        let mut sys = System::new_with_specifics(
+        let sys = System::new_with_specifics(
             RefreshKind::nothing()
-                .with_cpu(CpuRefreshKind::nothing().with_cpu_usage())
+                .with_cpu(CpuRefreshKind::nothing().with_usage())
                 .with_memory(MemoryRefreshKind::nothing().with_ram()),
-        );
-        sys.refresh_cpu_usage();
+        )
+        .inspect_err(|why| {
+            log::warn!(
+                "the machine sampler is unavailable (sysinfo): {why}; CPU and memory read as zero"
+            )
+        })
+        .ok()
+        .map(|mut sys| {
+            sys.refresh_cpu_usage();
+            sys
+        });
         SystemProbe { sys }
     }
 }
 
 impl MachineProbe for SystemProbe {
     fn cpu_permille(&mut self) -> u32 {
-        self.sys.refresh_cpu_usage();
-        (self.sys.global_cpu_usage().clamp(0.0, 100.0) * 10.0).round() as u32
+        let Some(sys) = self.sys.as_mut() else {
+            return 0;
+        };
+        sys.refresh_cpu_usage();
+        (sys.global_cpu_usage().clamp(0.0, 100.0) * 10.0).round() as u32
     }
 
     fn memory(&mut self) -> (u64, u64) {
-        self.sys
-            .refresh_memory_specifics(MemoryRefreshKind::nothing().with_ram());
-        let total = self.sys.total_memory();
-        (total.saturating_sub(self.sys.available_memory()), total)
+        let Some(sys) = self.sys.as_mut() else {
+            return (0, 0);
+        };
+        sys.refresh_memory_specifics(MemoryRefreshKind::nothing().with_ram());
+        let total = sys.total_memory();
+        (total.saturating_sub(sys.available_memory()), total)
     }
 
     fn mounts(&mut self) -> Vec<Mount> {

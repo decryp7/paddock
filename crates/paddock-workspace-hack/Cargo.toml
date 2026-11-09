@@ -41,7 +41,7 @@ serde = { version = "1", features = ["alloc", "derive"] }
 serde_core = { version = "1", default-features = false, features = ["alloc", "result", "std"] }
 serde_json = { version = "1", features = ["alloc", "float_roundtrip"] }
 subtle = { version = "2" }
-sysinfo = { version = "0.39", default-features = false, features = ["disk", "system"] }
+sysinfo = { version = "0.40", default-features = false, features = ["disk", "system"] }
 thiserror = { version = "2" }
 time = { version = "0.3", features = ["formatting", "macros", "parsing", "serde"] }
 typenum = { version = "1", default-features = false, features = ["const-generics"] }
