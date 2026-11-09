@@ -453,6 +453,29 @@ fn only_the_five_newest_cached_tools_are_kept() {
     assert_eq!(kept, 5);
 }
 
+#[cfg(unix)]
+#[test]
+fn a_source_only_cache_keeps_the_five_newest_tools_and_leaves_bin_alone() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let home = scratch.path().join("home");
+    for i in 0..7 {
+        write_script(&home.join(format!("bin-source/old-{i}/paddock-dev-test-host")), "exit 0");
+        // Older directories get older times so the order is certain.
+        let t = std::time::SystemTime::now() - std::time::Duration::from_secs(1000 - i * 100);
+        std::fs::File::open(home.join(format!("bin-source/old-{i}")))
+            .unwrap()
+            .set_modified(t)
+            .unwrap();
+    }
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    let (code, _, err) = run_wrapper(&f, &home, &[("RUSTC", rustc), ("PADDOCK_DEV_DOWNLOAD", "0".to_string())]);
+    assert_eq!(code, 0, "{err}");
+    let kept = std::fs::read_dir(home.join("bin-source")).unwrap().count();
+    assert_eq!(kept, 5);
+    assert!(!home.join("bin").exists(), "a run that never downloads writes only its own cache");
+}
+
 #[expect(
     clippy::disallowed_methods,
     reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
@@ -518,7 +541,7 @@ fn on_a_ci_runner_with_a_kept_mount_the_tool_is_cached_there_and_an_explicit_hom
             .env("CARGO_HOME", f.cargo_home.path())
             .env("RUSTC", &rustc)
             .env("GITHUB_ACTIONS", "true")
-            .env("PADDOCK_DEV_DOWNLOAD", "0")
+            .env("PADDOCK_DEV_PACKAGES", "http://127.0.0.1:9/generic")
             .env("PADDOCK_CI_MOUNT", &mount);
         cmd.envs(extra.iter().map(|(k, v)| (*k, *v)));
         let out = cmd.output().unwrap();
@@ -583,7 +606,7 @@ fn run_overlapping(rustcs: &[&str], expected: usize) -> (tempfile::TempDir, Vec<
                 .env("CARGO_HOME", f.cargo_home.path())
                 .env("RUSTC", rustc)
                 .env("GITHUB_ACTIONS", "true")
-                .env("PADDOCK_DEV_DOWNLOAD", "0")
+                .env("PADDOCK_DEV_PACKAGES", "http://127.0.0.1:9/generic")
                 .env("PADDOCK_CI_MOUNT", &mount)
                 .env("BARRIER", &barrier)
                 .output_child()
@@ -769,7 +792,7 @@ fn a_ci_run_without_a_kept_mount_says_so() {
         .env("CARGO_HOME", f.cargo_home.path())
         .env("RUSTC", rustc)
         .env("GITHUB_ACTIONS", "true")
-        .env("PADDOCK_DEV_DOWNLOAD", "0")
+        .env("PADDOCK_DEV_PACKAGES", "http://127.0.0.1:9/generic")
         .env("PADDOCK_CI_MOUNT", scratch.path().join("missing"))
         .env_remove("PADDOCK_DEV_HOME")
         .output()
@@ -813,4 +836,20 @@ fn a_config_that_only_names_the_build_folder_or_adds_comments_does_not_change_th
     // A key that does change the code still does, in the same file.
     std::fs::write(&ci, "[build]\ntarget-dir = \"/kept\"\nrustflags = [\"-D\", \"warnings\"]\n").unwrap();
     assert_ne!(f.both(&[]).0, without);
+}
+
+#[test]
+fn a_config_with_the_job_count_and_the_compiler_wrapper_hashes_like_one_without() {
+    // ADR 0022 R0b: `jobs` and `rustc-wrapper` (sccache) are runner-local settings, in neither the hash nor the compiled code.
+    let f = Fixture::new();
+    std::fs::write(f.root().join(".git/info/exclude"), "/tools/paddock-dev/.cargo/ci.toml\n").unwrap();
+    std::fs::create_dir_all(f.root().join("tools/paddock-dev/.cargo")).unwrap();
+    let without = f.both(&[]).0;
+    std::fs::write(
+        f.root().join("tools/paddock-dev/.cargo/ci.toml"),
+        "[build]\njobs = 4\nrustc-wrapper = \"sccache\"\n",
+    )
+    .unwrap();
+    // `both` asserts that the wrapper and the tool agree; the value must also be the one without those lines.
+    assert_eq!(f.both(&[]).0, without);
 }

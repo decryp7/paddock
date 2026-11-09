@@ -194,13 +194,7 @@ impl Setup {
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
-        let mut want = vec!["paddock-dev-test-host".to_string()];
-        if self.cached().with_extension("downloaded").exists() || names.iter().any(|n| n.ends_with(".downloaded")) {
-            want.push("paddock-dev-test-host.downloaded".to_string());
-        }
-        let mut names = names;
-        names.sort();
-        assert_eq!(names, want, "leftovers: {names:?}");
+        assert_eq!(names, ["paddock-dev-test-host"], "leftovers: {names:?}");
     }
 }
 
@@ -352,24 +346,38 @@ fn a_refused_read_says_whether_a_token_was_sent_and_the_tool_is_built() {
 }
 
 #[test]
-fn a_run_that_never_downloads_does_not_use_a_tool_an_earlier_run_downloaded() {
+fn a_download_never_touches_the_source_only_cache() {
     let s = setup();
     let body = published_tool(&s.hash);
     let sha = sha256_of(&body, s.scratch.path());
     let server = Server::start(s.published(&body, &sha));
     let (code, out, err) = s.run(&server, &[("PADDOCK_DEV_DOWNLOAD", "1")]);
     assert_eq!((code, out.trim()), (0, "downloaded-binary"), "{err}");
-    // A release job (PADDOCK_DEV_DOWNLOAD=0) on the same cache builds from source and replaces the downloaded copy.
+    assert!(s.cached().exists());
+    assert!(
+        !s.scratch.path().join("home/bin-source").exists(),
+        "release runs' cache is written by builds only"
+    );
+}
+
+#[test]
+fn a_run_that_never_downloads_builds_into_its_own_cache_whatever_bin_holds() {
+    let s = setup();
+    // An earlier run (or a developer) left a downloaded tool for this very hash in the shared cache.
+    write_script(&s.cached(), "echo downloaded-binary");
+    let server = Server::start(vec![]);
     let (code, out, err) = s.run(&server, &[("PADDOCK_DEV_DOWNLOAD", "0")]);
     assert_eq!((code, out.trim()), (0, "built-by-shim"), "{err}");
-    assert!(err.contains("downloaded earlier"), "{err}");
-    assert!(
-        !s.cached().with_extension("downloaded").exists()
-            && !s.cached().parent().unwrap().join("paddock-dev-test-host.downloaded").exists()
-    );
-    // And what it built is what the next run uses, whatever its download setting.
-    let (code, out, _) = s.run(&server, &[("PADDOCK_DEV_DOWNLOAD", "1")]);
+    let source = s.scratch.path().join("home/bin-source").join(&s.hash).join("paddock-dev-test-host");
+    assert!(source.exists(), "built into bin-source: {err}");
+    assert!(server.requests().is_empty());
+    // The shared cache is untouched, and the source cache serves the next release run without a build.
+    let kept = std::fs::read_to_string(s.cached()).unwrap();
+    assert!(kept.contains("downloaded-binary"));
+    std::fs::remove_dir_all(s.f.cargo_home.path().join("target")).unwrap();
+    let (code, out, _) = s.run(&server, &[("PADDOCK_DEV_DOWNLOAD", "0")]);
     assert_eq!((code, out.trim()), (0, "built-by-shim"));
+    assert!(!s.built(), "the second release run found its own build");
 }
 
 #[test]

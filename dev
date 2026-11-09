@@ -37,6 +37,10 @@ if [ "${GITHUB_ACTIONS:-}" = true ] && [ -d "$ci_mount" ] && [ -w "$ci_mount" ];
   fi
 fi
 home="${PADDOCK_DEV_HOME:-${HOME:-/nonexistent}/.paddock-dev}"
+# A run that never downloads (PADDOCK_DEV_DOWNLOAD=0: release and tag jobs) keeps its tools in its own folder, bin-source, which the
+# download path never writes: what it runs was built from source by a run that also did not download.
+binroot=bin
+[ "${PADDOCK_DEV_DOWNLOAD:-}" = 0 ] && binroot=bin-source
 exe=
 case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) exe=.exe ;; esac
 
@@ -83,7 +87,7 @@ EOF
 fi
 if ! vv=$(cd "$tool" && "${rustc_cmd:-rustc}" -vV 2>/dev/null | tr -d '\r') || [ -z "$vv" ]; then
   # Without a compiler the hash cannot be computed, but a binary built earlier still works.
-  newest=$(ls -t "$home"/bin/*/paddock-dev-*"$exe" 2>/dev/null | head -n 1)
+  newest=$(ls -t "$home/$binroot"/*/paddock-dev-*"$exe" 2>/dev/null | head -n 1)
   if [ -n "$newest" ] && runs "$newest"; then
     if [ "${GITHUB_ACTIONS:-}" = true ]; then
       echo "::warning::./dev: rustc is not available on this runner, so the tool's hash cannot be computed; running the newest cached binary ($newest), which may not match this commit's inputs." >&2
@@ -111,7 +115,7 @@ host=$(printf '%s\n' "$vv" | sed -n 's/^host: //p')
 # line. A config file can hold registry tokens, so it is streamed into git and only its digest is ever held in a variable (which
 # `sh -x` would print). The same reduction is `config_code_text` in the tool's input_hash.rs.
 config_code() {
-  tr -d '\r' <"$1" | grep -v -E '^[ 	]*(#|$)' | grep -v -E '^[ 	]*(target-dir|build-dir)[ 	]*=' || true
+  tr -d '\r' <"$1" | grep -v -E '^[ 	]*(#|$)' | grep -v -E '^[ 	]*(target-dir|build-dir|jobs|rustc-wrapper)[ 	]*=' || true
 }
 flags=$(
   env | grep -E '^(RUSTFLAGS|CARGO_ENCODED_RUSTFLAGS|CARGO_BUILD_[A-Za-z0-9_]*|CARGO_PROFILE_[A-Za-z0-9_]*|CARGO_TARGET_[A-Za-z0-9_]*)=' |
@@ -236,12 +240,9 @@ download_prebuilt() {
     rm -rf "$_dl"
     return 1
   fi
-  # The marker says where this copy came from: a run that never downloads (a release job) ignores such a copy. It is written first;
-  # a marker without a binary is harmless.
-  : >"$cache/$name.downloaded" 2>/dev/null || true
   if ! mv -f "$_dl/$name" "$cache/$name"; then
     echo "::warning::./dev could not move the downloaded $name into $cache. Building it instead." >&2
-    rm -rf "$_dl" "$cache/$name.downloaded"
+    rm -rf "$_dl"
     return 1
   fi
   rm -rf "$_dl"
@@ -264,12 +265,7 @@ if [ -n "$dirty" ]; then
   exec "${PADDOCK_DEV_TARGET_DIR:-$tool/target}/release/paddock-dev$exe" "$@"
 fi
 
-cache="$home/bin/$hash"
-# A run that never downloads (PADDOCK_DEV_DOWNLOAD=0: release and tag jobs) never runs a copy an earlier run downloaded.
-if [ "${PADDOCK_DEV_DOWNLOAD:-}" = 0 ] && [ -e "$cache/$name.downloaded" ]; then
-  echo "dev: the cached tool binary was downloaded earlier and this run does not download; building it from source." >&2
-  rm -f "$cache/$name" "$cache/$name.downloaded"
-fi
+cache="$home/$binroot/$hash"
 # A cached binary must run: an empty or damaged file (a copy that was cut short) is removed and rebuilt.
 if [ -e "$cache/$name" ] && ! runs "$cache/$name"; then
   echo "dev: the cached tool binary $cache/$name does not run; rebuilding it." >&2
@@ -300,15 +296,15 @@ if [ ! -x "$cache/$name" ]; then
       echo "::error::./dev built a paddock-dev that is not for hash $hash (another job replaced the build folder, or the build ignored PADDOCK_DEV_HASH). Run ./dev again; if it repeats, delete $target." >&2
       exit 1
     fi
-    rm -f "$cache/$name.downloaded"
     mv -f "$tmp" "$cache/$name"
     echo "dev: built paddock-dev $hash in $(($(date +%s) - _b0)) s (not downloaded)." >&2
   fi
   # Keep the five newest cached tools (and their build folders); older hashes are rebuilt on demand. A folder touched in the
   # last five minutes is never removed: a job on the same mount may be about to run it.
-  ls -t "$home/bin" | tail -n +6 | while IFS= read -r old; do
-    if [ -n "$(find "$home/bin/$old" -maxdepth 0 -mmin +5 2>/dev/null)" ]; then
-      rm -rf "${home:?}/bin/$old" "${home:?}/target-$old" || true
+  ls -t "$home/$binroot" | tail -n +6 | while IFS= read -r old; do
+    if [ -n "$(find "$home/$binroot/$old" -maxdepth 0 -mmin +5 2>/dev/null)" ]; then
+      rm -rf "${home:?}/$binroot/$old" || true
+      [ -d "$home/bin/$old" ] || [ -d "$home/bin-source/$old" ] || rm -rf "${home:?}/target-$old" || true
     fi
   done
   # A build folder whose tool was never published (the build or the hash check failed) goes when an hour old: a build in
@@ -316,6 +312,7 @@ if [ ! -x "$cache/$name" ]; then
   for t in "$home"/target-*; do
     [ -d "$t" ] || continue
     [ -d "$home/bin/${t##*/target-}" ] && continue
+    [ -d "$home/bin-source/${t##*/target-}" ] && continue
     if [ -n "$(find "$t" -maxdepth 0 -mmin +60 2>/dev/null)" ]; then rm -rf "$t" || true; fi
   done
 fi
