@@ -21,8 +21,9 @@ pub const START_PAGE_WAIT: Duration = Duration::from_millis(300);
 
 #[derive(Debug, Clone)]
 pub enum Profile {
-    /// A fresh directory, deleted when the browser ends.
-    Throwaway,
+    /// A fresh folder below this one (the caller's own cache folder, never the shared temp folder), deleted when the
+    /// browser ends. An empty path is refused at launch.
+    Throwaway(PathBuf),
     /// A per-purpose directory that keeps cookies between runs.
     Persistent(PathBuf),
 }
@@ -56,7 +57,8 @@ pub struct LaunchOptions {
 impl Default for LaunchOptions {
     fn default() -> Self {
         LaunchOptions {
-            profile: Profile::Throwaway,
+            // No base yet: a launch refuses it, so the caller must name its own folder.
+            profile: Profile::Throwaway(PathBuf::new()),
             accent: None,
             max_lifetime: Duration::from_secs(30 * 60),
             patience: Patience::default(),
@@ -216,21 +218,18 @@ pub struct Chromium {
     pub exe: Browser,
 }
 
-/// A profile folder no other launch uses: the clock alone is not enough (macOS reads it in microseconds, so two
-/// launches at once got the same folder and one browser's port file was read by the other).
-/// A fresh throwaway profile folder: created atomically with a random name and owner-only access (so a name planted by
-/// another local user is never used), removed by [`cleanup`] when the launch ends.
-fn unique_dir() -> std::io::Result<PathBuf> {
-    // Owner-only whatever the umask. (chromium-driver depends on no Debrief crate, so it cannot use
-    // `debrief_ipc::scratch::private_tempdir`; this is its only use.)
-    let mut b = tempfile::Builder::new();
-    b.prefix("chromium-driver-");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        b.permissions(std::fs::Permissions::from_mode(0o700));
+/// A fresh throwaway profile folder below `base` (the caller's own cache folder): created atomically with a random name,
+/// removed by [`cleanup`] when the launch ends. Nothing is put in the shared temp folder, where another local user could
+/// plant a name; an empty `base` is an error.
+fn unique_dir(base: &Path) -> std::io::Result<PathBuf> {
+    if base.as_os_str().is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "no folder was given for throwaway profiles",
+        ));
     }
-    Ok(b.tempdir()?.keep())
+    std::fs::create_dir_all(base)?;
+    Ok(tempfile::Builder::new().prefix("chromium-driver-").tempdir_in(base)?.keep())
 }
 
 impl Chromium {
@@ -245,8 +244,8 @@ impl Chromium {
     )]
     fn launch_with(exe: &Browser, opts: &LaunchOptions, sandbox: Sandbox) -> Result<Chromium> {
         let (dir, throwaway) = match &opts.profile {
-            Profile::Throwaway => (
-                unique_dir().map_err(|e| Error::Launch(format!("the profile folder could not be created: {e}")))?,
+            Profile::Throwaway(base) => (
+                unique_dir(base).map_err(|e| Error::Launch(format!("the profile folder could not be created: {e}")))?,
                 true,
             ),
             Profile::Persistent(p) => (p.clone(), false),
@@ -577,25 +576,42 @@ fn connect(
 mod tests {
     use super::*;
 
-    /// The throwaway profile is created atomically, owner only and with an unpredictable name: a folder another local user
-    /// planted at a guessable name in the shared temp folder is never reused.
+    /// Default options with throwaway profiles below `base`.
     #[cfg(unix)]
+    fn opts_in(base: &Path) -> LaunchOptions {
+        LaunchOptions {
+            profile: Profile::Throwaway(base.join("profiles")),
+            ..LaunchOptions::default()
+        }
+    }
+
+    /// A throwaway profile lives below the folder the caller names (its own cache folder), never in the shared temp folder.
     #[test]
-    fn a_throwaway_profile_is_a_private_folder_nobody_else_can_have_planted() {
-        use std::os::unix::fs::PermissionsExt;
-        let d = unique_dir().unwrap();
-        let mode = std::fs::metadata(&d).unwrap().permissions().mode() & 0o777;
-        std::fs::remove_dir_all(&d).unwrap();
-        assert_eq!(mode, 0o700);
+    fn a_throwaway_profile_is_made_below_the_callers_folder_and_never_in_the_shared_temp_folder() {
+        let base = tempfile::tempdir().unwrap();
+        let d = unique_dir(&base.path().join("browser-profiles")).unwrap();
+        assert!(d.starts_with(base.path()) && d.is_dir(), "{d:?}");
+        assert!(d.file_name().unwrap().to_string_lossy().starts_with("chromium-driver-"));
+    }
+
+    #[test]
+    fn a_launch_without_a_folder_for_throwaway_profiles_is_refused() {
+        assert!(unique_dir(Path::new("")).is_err());
+        let browser = Browser {
+            flavor: crate::Flavor::Chromium,
+            path: PathBuf::from("never-started"),
+        };
+        let e = Chromium::launch(&browser, &LaunchOptions::default())
+            .err()
+            .expect("no folder, no launch");
+        assert!(matches!(&e, Error::Launch(m) if m.contains("no folder was given")), "{e:?}");
     }
 
     #[test]
     fn every_launch_gets_its_own_profile_folder() {
-        let dirs: std::collections::HashSet<PathBuf> = (0..100).map(|_| unique_dir().unwrap()).collect();
+        let base = tempfile::tempdir().unwrap();
+        let dirs: std::collections::HashSet<PathBuf> = (0..100).map(|_| unique_dir(base.path()).unwrap()).collect();
         assert_eq!(dirs.len(), 100);
-        for d in &dirs {
-            std::fs::remove_dir_all(d).unwrap();
-        }
     }
 
     #[test]
@@ -827,7 +843,8 @@ mod tests {
             flavor: crate::Flavor::Chromium,
             path: exe,
         };
-        let e = Chromium::launch(&browser, &LaunchOptions::default())
+        let base = tempfile::tempdir().unwrap();
+        let e = Chromium::launch(&browser, &opts_in(base.path()))
             .err()
             .expect("a dead browser fails");
         assert!(matches!(&e, Error::Launch(m) if m.contains("exited")), "{e:?}");
@@ -906,9 +923,10 @@ mod tests {
             flavor: crate::Flavor::Chromium,
             path: exe,
         };
+        let base = tempfile::tempdir().unwrap();
         let opts = LaunchOptions {
             max_lifetime: Duration::from_millis(300),
-            ..LaunchOptions::default()
+            ..opts_in(base.path())
         };
         let e = Chromium::launch(&browser, &opts).err().expect("the watchdog ends the start");
         assert!(matches!(&e, Error::Launch(m) if m.contains("time limit")), "{e:?}");
@@ -954,7 +972,7 @@ mod tests {
             flavor: crate::Flavor::Chromium,
             path: fake.exe.clone(),
         };
-        let b = Chromium::launch(&exe, &LaunchOptions::default()).expect("the fake starts");
+        let b = Chromium::launch(&exe, &opts_in(d.path())).expect("the fake starts");
         (d, fake, b)
     }
 
@@ -1013,7 +1031,7 @@ mod tests {
         };
         let opts = LaunchOptions {
             disk_cache_bytes: Some(1234),
-            ..LaunchOptions::default()
+            ..opts_in(d.path())
         };
         let mut b = Chromium::launch_with(&exe, &opts, Sandbox::Off).expect("the fake starts");
         let args = fake.args();

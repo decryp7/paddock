@@ -729,8 +729,9 @@ fn setup(app: &mut tauri::App, launch: &instance::LaunchArgs, safe_mode: bool, s
     ai::init(app.handle(), safe_mode);
     step("ai");
     video::init(app.handle());
-    share::init_bundles_root(app.handle());
     step("video");
+    share::init_bundles_root(app.handle());
+    step("bundles");
     browser::init(app.handle());
     step("browser");
     snapshots::prune_on_startup(app.handle());
@@ -873,9 +874,8 @@ pub(crate) mod test_support {
     /// process is stopped before the test ends (see [`own`]).
     pub struct TempDir(pub PathBuf);
     impl TempDir {
-        pub fn new(_tag: &str) -> TempDir {
-            let p = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
-            let _ = std::fs::remove_dir_all(&p);
+        pub fn new(tag: &str) -> TempDir {
+            let p = crate::test_support::scratch_dir(&format!("app-test-{tag}"));
             std::fs::create_dir_all(&p).unwrap();
             own(&p);
             TempDir(p)

@@ -646,7 +646,6 @@ dependencies = [
  "debrief-symbols",
  "libfuzzer-sys",
  "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -660,7 +659,6 @@ dependencies = [
  "postcard",
  "serde",
  "serde_json",
- "tempfile",
  "tokio",
  "windows",
 ]

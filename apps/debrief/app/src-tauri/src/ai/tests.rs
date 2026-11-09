@@ -2246,3 +2246,16 @@ fn without_a_data_folder_the_ai_is_unavailable_with_the_next_step() {
     assert!(m.starts_with("The AI assistant is unavailable"), "{m}");
     assert!(m.contains("DEBRIEF_DATA_DIR"), "{m}");
 }
+
+/// The start-up itself takes the fail-closed path: no AI state, and the commands answer with the reason, not "not
+/// available in this build".
+#[test]
+fn ai_init_without_a_data_folder_leaves_no_ai_and_the_commands_say_why() {
+    let app = crate::test_support::test_app(None);
+    super::init_with(app.handle(), false, Err(tauri::Error::WindowNotFound));
+    assert!(app.try_state::<AiState>().is_none());
+    let e = super::commands::core(app.handle()).err().expect("no AI without a data folder");
+    let text = format!("{e:?}");
+    assert!(text.contains("user profile folder could not be found"), "{text}");
+    assert!(!text.contains("not available in this build"), "{text}");
+}

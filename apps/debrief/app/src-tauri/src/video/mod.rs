@@ -116,7 +116,13 @@ fn data_folder(data: tauri::Result<std::path::PathBuf>) -> Result<std::path::Pat
 /// Registers the video state (call from `setup`). Never fails: without a data folder video support stays unavailable
 /// (the commands answer "not ready"), never a fixed folder in the shared temp folder that another local user could plant.
 pub fn init<R: Runtime>(app: &AppHandle<R>) {
-    let data = match data_folder(crate::app_dirs::data(app)) {
+    init_with(app, crate::app_dirs::data(app));
+}
+
+/// [`init`] with the data folder passed in (tests pass a failure): without one the state is not managed, and the
+/// commands answer "not ready yet".
+fn init_with<R: Runtime>(app: &AppHandle<R>, data: tauri::Result<std::path::PathBuf>) {
+    let data = match data_folder(data) {
         Ok(d) => d,
         Err(message) => {
             log::error!("{message}");

@@ -281,6 +281,7 @@ fn live_search_every_engine_gives_results_or_a_recognised_hand_off() {
     std::fs::create_dir_all(&out).unwrap();
     let query = query_from(std::env::var(QUERY_VAR).ok()).unwrap();
     let renderers = Arc::new(Renderers::default());
+    renderers.set_throwaway_base(Some(out.join("profiles")));
     let engines = selected(std::env::var(ENGINES_VAR).ok().as_deref());
     let failed = probe_all(&query, &engines, &out, &SLEEP, &mut |engine| {
         let control = Arc::new(ChatBrowser::new(AgentLimits::default()));

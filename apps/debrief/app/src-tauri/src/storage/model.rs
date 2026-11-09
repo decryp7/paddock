@@ -6,7 +6,7 @@ use serde::Serialize;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CategoryId {
-    /// `.debriefz` bundles extracted to be opened (the system temp folder).
+    /// `.debriefz` bundles extracted to be opened (Debrief's local data folder, `bundles`).
     BundleExtracts,
     /// The webview's HTTP, code and GPU caches.
     WebviewCache,

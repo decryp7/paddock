@@ -6,7 +6,7 @@
 //! snapshots, session backups and (once they exist) persistent stores are `data` (each cleared on its own,
 //! after a confirmation in the UI).
 //!
-//! Folders come from [`crate::app_dirs`] (and `share::bundles_root` for the bundles); the UI only ever
+//! Folders come from [`crate::app_dirs`] (and `share::bundles_root` for the bundles, below the local data folder); the UI only ever
 //! names category ids, never paths. Sizes are computed off the UI thread with a bounded traversal
 //! ([`walk`]); clearing runs as a background task (progress, stoppable from the tray) and deletes only
 //! inside each category's canonical root, never follows links, skips and reports files in use, and keeps

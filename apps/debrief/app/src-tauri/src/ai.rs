@@ -95,13 +95,22 @@ fn data_folder(data: tauri::Result<std::path::PathBuf>) -> Result<std::path::Pat
 /// Creates the AI runtime and registers Settings → AI. Call from `setup` after `settings::init`.
 /// Never fails: problems leave the AI unavailable with a reason the UI shows.
 pub fn init<R: Runtime>(app: &AppHandle<R>, safe_mode: bool) {
-    let dir = crate::app_dirs::config(app).ok().map(|d| d.join("ai"));
-    // No data folder: the AI stays unavailable (its commands answer so) instead of using a fixed folder in the shared temp
+    // No data folder: the AI stays unavailable (its commands answer why) instead of using a fixed folder in the shared temp
     // folder, which another local user could plant.
-    let data = match data_folder(crate::app_dirs::data(app)) {
+    init_with(app, safe_mode, crate::app_dirs::data(app));
+}
+
+/// What the UI shows for the AI when it did not start: why (managed instead of [`AiState`]).
+pub struct AiUnavailable(pub String);
+
+/// [`init`] with the data folder passed in (tests pass a failure).
+fn init_with<R: Runtime>(app: &AppHandle<R>, safe_mode: bool, data: tauri::Result<std::path::PathBuf>) {
+    let dir = crate::app_dirs::config(app).ok().map(|d| d.join("ai"));
+    let data = match data_folder(data) {
         Ok(d) => d,
         Err(message) => {
             log::error!("{message}");
+            app.manage(AiUnavailable(message));
             return;
         }
     };

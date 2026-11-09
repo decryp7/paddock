@@ -26,8 +26,8 @@ const MAX_VISUAL_BYTES: usize = 32 << 20;
 /// Largest report accepted from the UI (JSON).
 const MAX_REPORT_JSON: usize = 64 << 20;
 
-/// Where bundles are extracted to be opened: `<data>/bundles`, set once by [`init_bundles_root`] at start-up. `None` when
-/// Debrief has no data folder: bundles then cannot be opened (never a fixed folder in the shared temp folder, which
+/// Where bundles are extracted to be opened: `<local data>/bundles`, set once by [`init_bundles_root`] at start-up. `None`
+/// when Debrief has no local data folder: bundles then cannot be opened (never a fixed folder in the shared temp folder, which
 /// another local user could plant).
 #[cfg(not(test))]
 pub(crate) fn bundles_root() -> Option<PathBuf> {
@@ -37,19 +37,34 @@ pub(crate) fn bundles_root() -> Option<PathBuf> {
 #[cfg(not(test))]
 static BUNDLES_ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
-/// The folder of extracted bundles for a data folder, or the message that opening bundles is unavailable.
-pub(crate) fn bundles_under(data: tauri::Result<PathBuf>) -> Result<PathBuf, String> {
-    crate::app_dirs::require_data(data, "Opening bundles").map(|d| d.join("bundles"))
+/// The folder of extracted bundles below the local (not roaming) data folder, or the message that opening bundles is
+/// unavailable.
+pub(crate) fn bundles_under(local: tauri::Result<PathBuf>) -> Result<PathBuf, String> {
+    crate::app_dirs::require_data(local, "Opening bundles").map(|d| d.join("bundles"))
 }
 
-/// Fixes the folder of extracted bundles under the app's data folder (call from `setup`).
+/// An extracted bundle not touched for this long is removed at start-up (they are copies; the bundle file is kept).
+const STALE_BUNDLE_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 3600);
+
+/// Resolves the folder of extracted bundles and sweeps the old extractions out of it; `None` without a local folder.
+fn resolve_bundles_root(local: tauri::Result<PathBuf>) -> Option<PathBuf> {
+    match bundles_under(local) {
+        Ok(root) => {
+            crate::app_dirs::sweep_old(&root, None, STALE_BUNDLE_AGE, "extracted bundles");
+            Some(root)
+        }
+        Err(message) => {
+            log::error!("{message}");
+            None
+        }
+    }
+}
+
+/// Fixes the folder of extracted bundles under the app's local data folder (call from `setup`, in its own step).
 pub(crate) fn init_bundles_root<R: Runtime>(app: &AppHandle<R>) {
     #[cfg(not(test))]
-    match bundles_under(crate::app_dirs::data(app)) {
-        Ok(root) => {
-            let _ = BUNDLES_ROOT.set(root);
-        }
-        Err(message) => log::error!("{message}"),
+    if let Some(root) = resolve_bundles_root(crate::app_dirs::webview_data(app)) {
+        let _ = BUNDLES_ROOT.set(root);
     }
     #[cfg(test)]
     let _ = app;
@@ -412,6 +427,11 @@ mod tests {
     /// `<data>/bundles`, never a folder in the shared temp folder.
     #[test]
     fn without_a_data_folder_bundles_cannot_be_opened() {
+        assert_eq!(
+            resolve_bundles_root(Err(tauri::Error::WindowNotFound)),
+            None,
+            "start-up: no folder, no bundles"
+        );
         let m = bundles_under(Err(tauri::Error::WindowNotFound)).unwrap_err();
         assert!(m.starts_with("Opening bundles is unavailable"), "{m}");
         assert!(m.contains("DEBRIEF_DATA_DIR"), "{m}");

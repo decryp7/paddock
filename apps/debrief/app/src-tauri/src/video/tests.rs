@@ -618,3 +618,12 @@ fn without_a_data_folder_video_is_unavailable_with_the_next_step() {
     assert!(m.starts_with("Video support is unavailable"), "{m}");
     assert!(m.contains("DEBRIEF_DATA_DIR"), "{m}");
 }
+
+/// The start-up itself takes the fail-closed path: no video state is managed.
+#[test]
+fn video_init_without_a_data_folder_manages_no_state() {
+    let app = test_app(None);
+    super::init_with(app.handle(), Err(tauri::Error::WindowNotFound));
+    assert!(app.try_state::<VideoState>().is_none());
+    assert!(state(app.handle()).is_err(), "the commands answer not ready");
+}

@@ -29,9 +29,11 @@ const MAX_ID_CHARS: usize = 64;
 type Ai<T> = AiResult<T>;
 
 pub(crate) fn core<R: Runtime>(app: &AppHandle<R>) -> Ai<Arc<AiCore>> {
-    app.try_state::<AiState>()
-        .map(|s| s.0.clone())
-        .ok_or_else(|| AiCmdError::unavailable("The AI assistant is not available in this build of Debrief."))
+    app.try_state::<AiState>().map(|s| s.0.clone()).ok_or_else(|| {
+        // Why it did not start, when it was tried (no data folder); else this build has no AI.
+        let why = app.try_state::<super::AiUnavailable>().map(|u| u.0.clone());
+        AiCmdError::unavailable(why.unwrap_or_else(|| "The AI assistant is not available in this build of Debrief.".into()))
+    })
 }
 
 /// Runs `f` on the blocking pool; a panic becomes an engine error instead of taking the app down.
