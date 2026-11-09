@@ -50,8 +50,10 @@ pub(crate) struct FakeHost {
     views: Mutex<HashMap<u64, Arc<Vec<WireViewRecord>>>>,
     next: AtomicU64,
     pub(crate) tasks: Mutex<Vec<TaskReport>>,
-    /// Bytes the plugin read through `ReadFile`.
-    pub(crate) bytes_read: AtomicU64,
+    /// Bytes the plugin read through `ReadFile`, of all files (what the stall fault hook counts).
+    bytes_read: AtomicU64,
+    /// Bytes the plugin read through `ReadFile`, by lent file: whatever it read before a check began waiting counts.
+    read_of: Mutex<HashMap<u64, u64>>,
     /// Signalled after every read, so a waiter wakes on the bytes arriving instead of polling a clock.
     read_signal: (Mutex<()>, Condvar),
     /// Fault hook (see `Launch::stall_reads_after`): reads past this many bytes wait until released.
@@ -93,16 +95,23 @@ impl FakeHost {
     pub(crate) fn take_back(&self, id: u64) {
         lock(&self.files).remove(&id);
         lock(&self.views).remove(&id);
+        lock(&self.read_of).remove(&id);
     }
 
-    /// Waits up to `slice` for the plugin to have read `target` bytes in total; true once it has. Woken by each read.
-    pub(crate) fn wait_bytes_read(&self, target: u64, slice: Duration) -> bool {
+    /// Bytes the plugin read of lent file `id` so far.
+    pub(crate) fn read_of(&self, id: u64) -> u64 {
+        lock(&self.read_of).get(&id).copied().unwrap_or(0)
+    }
+
+    /// Waits up to `slice` for the plugin to have read `target` bytes of lent file `id`; true once it has. Woken by
+    /// each read.
+    pub(crate) fn wait_read_of(&self, id: u64, target: u64, slice: Duration) -> bool {
         let (mutex, cv) = &self.read_signal;
         let guard = lock(mutex);
         let (_guard, _) = cv
-            .wait_timeout_while(guard, slice, |_| self.bytes_read.load(Ordering::Acquire) < target)
+            .wait_timeout_while(guard, slice, |_| self.read_of(id) < target)
             .unwrap_or_else(|p| p.into_inner());
-        self.bytes_read.load(Ordering::Acquire) >= target
+        self.read_of(id) >= target
     }
 
     /// The fault hook: holds a read until released once `stall_after` bytes were served.
@@ -118,6 +127,23 @@ impl FakeHost {
         );
     }
 
+    /// Serves a plugin's `ReadFile`: up to `len` (at most [`READ_CHUNK`]) bytes of lent file `id` at `offset`.
+    pub(crate) fn read_file(&self, id: u64, offset: u64, len: u32) -> Result<Vec<u8>, RemoteError> {
+        self.wait_while_stalled();
+        let data = lock(&self.files)
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| RemoteError::new(code::INVALID, "unknown file"))?;
+        let start = usize::try_from(offset).unwrap_or(usize::MAX).min(data.len());
+        let end = start.saturating_add(len.min(READ_CHUNK) as usize).min(data.len());
+        self.bytes_read.fetch_add((end - start) as u64, Ordering::Release);
+        *lock(&self.read_of).entry(id).or_default() += (end - start) as u64;
+        // Taking the lock orders this notify after a waiter's check, so no wake-up is lost.
+        drop(lock(&self.read_signal.0));
+        self.read_signal.1.notify_all();
+        Ok(data[start..end].to_vec())
+    }
+
     fn view(&self, ticket: u64) -> Result<Arc<Vec<WireViewRecord>>, RemoteError> {
         lock(&self.views)
             .get(&ticket)
@@ -130,20 +156,7 @@ impl Handler for FakeHost {
     fn call(&self, _ctx: &CallCtx, body: &[u8]) -> Result<Vec<u8>, RemoteError> {
         let req: HostRequest = decode_request(body)?;
         match req {
-            HostRequest::ReadFile { id, offset, len } => {
-                self.wait_while_stalled();
-                let data = lock(&self.files)
-                    .get(&id)
-                    .cloned()
-                    .ok_or_else(|| RemoteError::new(code::INVALID, "unknown file"))?;
-                let start = usize::try_from(offset).unwrap_or(usize::MAX).min(data.len());
-                let end = start.saturating_add(len.min(READ_CHUNK) as usize).min(data.len());
-                self.bytes_read.fetch_add((end - start) as u64, Ordering::Release);
-                // Taking the lock orders this notify after a waiter's check, so no wake-up is lost.
-                drop(lock(&self.read_signal.0));
-                self.read_signal.1.notify_all();
-                encode_reply(&data[start..end].to_vec())
-            }
+            HostRequest::ReadFile { id, offset, len } => encode_reply(&self.read_file(id, offset, len)?),
             HostRequest::ViewSelect { ticket, filter, limit } => {
                 let rows = self.view(ticket)?;
                 encode_reply(&view::select(&rows, &filter.0, limit as usize))
