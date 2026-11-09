@@ -528,7 +528,7 @@ is the first.
   `rustc-wrapper` (sccache), `target-dir` or `jobs`, gives that runner its own hash, and then "download main's binary" never
   matches. Before the download path is switched on (R0b), the hash takes only the keys that change the compiled code (`rustflags`,
   `profile.*`, `linker`, `target`, `rustc`) from the files, parsed once with one rule for both the wrapper and the tool, and the
-  environment and config exclusions are made the same list (`target-dir`, `jobs`, `rustc-wrapper`, `build-dir` are in neither).
+  environment and config exclusions are made the same list (the environment drops `CARGO_TARGET_DIR`, `CARGO_BUILD_TARGET_DIR`, `CARGO_BUILD_JOBS`, `CARGO_BUILD_RUSTC`; a config file is hashed whole unless it sets only the build folder).
   Until then the wrapper only builds locally, so the width costs cache hits, not correctness.
 - **Tests.** Test holders are started with a short `--max-hold-secs`, so one left behind by a failing test ends by itself
   (ER-14).
@@ -1041,9 +1041,7 @@ Status of R0b against this ADR, not a design change:
   release and tag jobs set `PADDOCK_DEV_DOWNLOAD=0` (the `ci.yml` jobs and plan steps and the Debrief host jobs do so for a tag
   ref), and such a run keeps its tools in its own folder `bin-source/<hash>`, which the download path never writes, so it never runs
   a downloaded copy; the "hash only the build-affecting keys" item
-  below is implemented as a reduction (comments, line ends and the keys `target-dir`, `build-dir`, `jobs`, `rustc-wrapper` are left
-  out of each config's digest, and a config that is then only section headers adds no line), the same rule in the wrapper and in
-  `input_hash.rs`.
+  below is implemented as `only_build_folder` (wrapper) and `only_names_build_folder` (input_hash.rs): a config that sets only `target-dir` in `[build]` or `build.target-dir` adds no line; any other config adds the git blob id of its whole text with CRs dropped.
 - **Not yet done:** the `dev-build` job (one build per run for a hash nobody published, shared as a run artifact), and
   `setup-rust`'s image fast path with `rustup check`. Until `dev-build` exists, a branch that changes the tool builds it in each job
   that runs `./dev`. The arm64 Linux and Windows ARM rows of the target table are as stated there (no runner).
