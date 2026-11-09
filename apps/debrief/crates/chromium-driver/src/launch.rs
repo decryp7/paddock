@@ -21,8 +21,10 @@ pub const START_PAGE_WAIT: Duration = Duration::from_millis(300);
 
 #[derive(Debug, Clone)]
 pub enum Profile {
-    /// A fresh folder below this one (the caller's own cache folder, never the shared temp folder), deleted when the
-    /// browser ends. An empty path is refused at launch.
+    /// A fresh folder below this one, deleted when the browser ends. The caller names the base, its own cache folder
+    /// (Debrief: `browser-profiles` in the local data folder); the driver never falls back to the shared temp folder,
+    /// where another local user could plant a name, and refuses an empty path at launch. A profile a crashed run left
+    /// is not removed here: the caller sweeps its base at start-up (Debrief removes the ones older than 24 hours).
     Throwaway(PathBuf),
     /// A per-purpose directory that keeps cookies between runs.
     Persistent(PathBuf),
