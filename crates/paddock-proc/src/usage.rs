@@ -9,6 +9,7 @@
 use crate::identity::{ProcessId, StartTime};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
 /// A CPU time and the start time of the process it was read from, when the OS gave both in one call.
@@ -70,21 +71,42 @@ pub fn table_from(entries: impl IntoIterator<Item = ProcEntry>) -> Table {
 }
 
 /// An empty sysinfo `System` to refresh process data into. Since sysinfo 0.40 the constructor can fail (a platform whose
-/// process table cannot be opened); that is logged and the caller answers "unknown" instead of panicking.
+/// process table cannot be opened); that is logged (once per process, the failure is permanent) and the caller answers
+/// "unknown" instead of panicking.
 pub(crate) fn new_system() -> Option<System> {
-    System::new()
+    new_system_with(System::new)
+}
+
+/// [`new_system`] over a constructor (tests give one that fails).
+pub(crate) fn new_system_with(
+    make: impl FnOnce() -> Result<System, sysinfo::Error>,
+) -> Option<System> {
+    static WARNED: AtomicBool = AtomicBool::new(false);
+    make()
         .inspect_err(|why| {
-            log::warn!(
-                "the OS process table is unavailable (sysinfo): {why}; the answer is unknown"
-            )
+            if first_time(&WARNED) {
+                log::warn!(
+                    "the OS process table is unavailable (sysinfo): {why}; the answer is unknown (logged once)"
+                )
+            }
         })
         .ok()
+}
+
+/// True for the first call on `flag` only: a permanent failure is logged once, not on every call of a tick loop.
+pub(crate) fn first_time(flag: &AtomicBool) -> bool {
+    !flag.swap(true, Ordering::Relaxed)
 }
 
 /// A look at the OS process table: parents, start times and resident memory only (command lines, environments and
 /// working folders are slow to read on Windows and nothing here needs them).
 pub fn snapshot() -> Table {
-    let Some(mut sys) = new_system() else {
+    snapshot_with(System::new)
+}
+
+/// [`snapshot`] over a constructor; an empty table when it fails.
+pub(crate) fn snapshot_with(make: impl FnOnce() -> Result<System, sysinfo::Error>) -> Table {
+    let Some(mut sys) = new_system_with(make) else {
         return Table::default();
     };
     sys.refresh_processes_specifics(
@@ -343,8 +365,13 @@ fn direct_children(table: &Table, pid: u32) -> Vec<u32> {
 /// The resident size of one process (the last resort when its real memory cannot be read), from a refresh of that pid
 /// only; `None` when it is gone or is a thread entry.
 fn resident(pid: u32) -> Option<u64> {
+    resident_with(pid, System::new)
+}
+
+/// [`resident`] over a constructor; `None` when it fails.
+fn resident_with(pid: u32, make: impl FnOnce() -> Result<System, sysinfo::Error>) -> Option<u64> {
     let id = Pid::from_u32(pid);
-    let mut sys = new_system()?;
+    let mut sys = new_system_with(make)?;
     sys.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[id]),
         true,
@@ -1235,6 +1262,26 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
                 .table()
                 .contains_key(&std::process::id())
         );
+    }
+
+    fn broken() -> Result<System, sysinfo::Error> {
+        Err(sysinfo::Error::Unsupported)
+    }
+
+    #[test]
+    fn a_failed_process_table_gives_an_empty_snapshot_no_resident_size_and_no_system() {
+        assert!(snapshot_with(broken).is_empty());
+        assert_eq!(resident_with(std::process::id(), broken), None);
+        assert!(new_system_with(broken).is_none());
+        assert!(new_system_with(System::new).is_some());
+    }
+
+    #[test]
+    fn a_permanent_failure_is_logged_once() {
+        let flag = AtomicBool::new(false);
+        assert!(first_time(&flag));
+        assert!(!first_time(&flag));
+        assert!(!first_time(&flag));
     }
 
     #[test]

@@ -209,11 +209,43 @@ pub fn end(id: ProcessId) -> Ending {
     e
 }
 
+/// What is known of a pid: the answer is three-valued because "could not look" is not "gone" (rule 53).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Presence {
+    /// A running process holds the pid.
+    Running,
+    /// Nothing runs under the pid (a zombie that only waits to be reaped counts as gone).
+    Gone,
+    /// The OS process table could not be read, so nothing is known.
+    Unknown,
+}
+
 /// Whether `pid` is a running process (a zombie that only waits to be reaped is not). Says nothing about which process:
-/// use [`ProcessId::is_alive`] for that.
+/// use [`ProcessId::is_alive`] for that. **Unknown counts as not running**: this is the answer for code that ends or waits
+/// for a process (`terminate`: an unreadable table never makes it kill or wait). Code that deletes anything on "gone" (a
+/// profile folder, a discovery file) must use [`may_be_alive`] or [`presence`] instead.
 pub fn is_alive(pid: u32) -> bool {
-    let Some(mut sys) = usage::new_system() else {
-        return false;
+    presence(pid) == Presence::Running
+}
+
+/// Whether `pid` might be a running process: false only when the OS said it is gone. **Unknown counts as alive**, so a
+/// sweep that removes the files of dead processes removes nothing when the process table cannot be read.
+pub fn may_be_alive(pid: u32) -> bool {
+    presence(pid) != Presence::Gone
+}
+
+/// The three-valued look at `pid` (see [`Presence`]).
+pub fn presence(pid: u32) -> Presence {
+    presence_with(pid, sysinfo::System::new)
+}
+
+/// [`presence`] over a constructor of the sysinfo `System` (tests give one that fails).
+pub(crate) fn presence_with(
+    pid: u32,
+    make: impl FnOnce() -> Result<sysinfo::System, sysinfo::Error>,
+) -> Presence {
+    let Some(mut sys) = usage::new_system_with(make) else {
+        return Presence::Unknown;
     };
     let id = Pid::from_u32(pid);
     sys.refresh_processes_specifics(
@@ -221,12 +253,17 @@ pub fn is_alive(pid: u32) -> bool {
         true,
         ProcessRefreshKind::nothing(),
     );
-    sys.process(id).is_some_and(|p| {
+    let running = sys.process(id).is_some_and(|p| {
         !matches!(
             p.status(),
             sysinfo::ProcessStatus::Zombie | sysinfo::ProcessStatus::Dead
         )
-    })
+    });
+    if running {
+        Presence::Running
+    } else {
+        Presence::Gone
+    }
 }
 
 /// Asks `id` to stop, waits up to `grace` for it, then ends it. For processes that are not our children (the caller
@@ -252,8 +289,16 @@ pub fn terminate(id: ProcessId, grace: Duration) -> Terminated {
 /// identities are read first and the command lines after: a pid handed on between the two keeps the identity of the
 /// process that had it first, so ending the result ([`end`]) finds the new holder and leaves it alone.
 pub fn processes_mentioning(needle: &str) -> Vec<ProcessId> {
-    let table: Table = usage::snapshot();
-    let Some(mut sys) = usage::new_system() else {
+    processes_mentioning_with(needle, sysinfo::System::new)
+}
+
+/// [`processes_mentioning`] over a constructor; empty when it fails (nothing is known, so nothing is ended).
+pub(crate) fn processes_mentioning_with(
+    needle: &str,
+    make: impl Fn() -> Result<sysinfo::System, sysinfo::Error>,
+) -> Vec<ProcessId> {
+    let table: Table = usage::snapshot_with(&make);
+    let Some(mut sys) = usage::new_system_with(&make) else {
         return Vec::new();
     };
     sys.refresh_processes_specifics(
@@ -486,6 +531,25 @@ mod port_tests {
 mod tests {
     use super::*;
     use crate::Supervised;
+
+    fn broken() -> Result<sysinfo::System, sysinfo::Error> {
+        Err(sysinfo::Error::Unsupported)
+    }
+
+    #[test]
+    fn an_unreadable_process_table_is_unknown_and_unknown_is_not_gone() {
+        let me = std::process::id();
+        assert_eq!(presence_with(me, broken), Presence::Unknown);
+        assert_eq!(presence_with(me, sysinfo::System::new), Presence::Running);
+        assert_eq!(
+            presence_with(u32::MAX - 1, sysinfo::System::new),
+            Presence::Gone
+        );
+        assert!(may_be_alive(me));
+        assert!(!may_be_alive(u32::MAX - 1));
+        assert!(processes_mentioning_with("anything", broken).is_empty());
+    }
+
     use crate::testchild::{Mode, child, lines};
     use std::io::{BufRead, BufReader, Read};
     use std::process::Stdio;

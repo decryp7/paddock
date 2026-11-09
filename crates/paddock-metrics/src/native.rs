@@ -7,7 +7,12 @@ use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, RefreshKind, System};
 
 /// The mounted volumes now.
 pub(crate) fn mounts() -> Vec<Mount> {
-    let disks = match Disks::new_with_refreshed_list() {
+    mounts_with(Disks::new_with_refreshed_list)
+}
+
+/// [`mounts`] over a constructor; no volumes when it fails.
+fn mounts_with(make: impl FnOnce() -> Result<Disks, sysinfo::Error>) -> Vec<Mount> {
+    let disks = match make() {
         Ok(disks) => disks,
         Err(why) => {
             log::warn!("the volume list is unavailable (sysinfo): {why}; no volumes are reported");
@@ -39,11 +44,18 @@ impl Default for SystemProbe {
 impl SystemProbe {
     /// A probe; the first CPU reading is taken at once so the next one covers the time in between.
     pub fn new() -> Self {
-        let sys = System::new_with_specifics(
-            RefreshKind::nothing()
-                .with_cpu(CpuRefreshKind::nothing().with_usage())
-                .with_memory(MemoryRefreshKind::nothing().with_ram()),
-        )
+        Self::with(|| {
+            System::new_with_specifics(
+                RefreshKind::nothing()
+                    .with_cpu(CpuRefreshKind::nothing().with_usage())
+                    .with_memory(MemoryRefreshKind::nothing().with_ram()),
+            )
+        })
+    }
+
+    /// A probe over a constructor of the sysinfo `System` (tests give one that fails).
+    fn with(make: impl FnOnce() -> Result<System, sysinfo::Error>) -> Self {
+        let sys = make()
         .inspect_err(|why| {
             log::warn!(
                 "the machine sampler is unavailable (sysinfo): {why}; CPU and memory read as zero"
@@ -123,5 +135,29 @@ pub(crate) fn dir_volume(path: &std::path::Path, meta: &std::fs::Metadata) -> Op
     {
         let _ = meta;
         volume_id(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn no_system() -> Result<System, sysinfo::Error> {
+        Err(sysinfo::Error::Unsupported)
+    }
+
+    #[test]
+    fn a_probe_whose_system_failed_reads_zero_and_lists_no_volumes() {
+        let mut probe = SystemProbe::with(no_system);
+        assert_eq!(probe.cpu_permille(), 0);
+        assert_eq!(probe.memory(), (0, 0));
+        assert!(mounts_with(|| Err(sysinfo::Error::Unsupported)).is_empty());
+    }
+
+    #[test]
+    fn a_working_probe_reads_memory() {
+        let mut probe = SystemProbe::new();
+        assert!(probe.memory().1 > 0);
+        assert!(!probe.mounts().is_empty());
     }
 }

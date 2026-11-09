@@ -396,9 +396,10 @@ fn unique_dir(base: &Path) -> PathBuf {
 }
 
 /// Removes throwaway profiles in `base` left by processes that are gone (a crash, a kill). Call at start-up. Returns how
-/// many were removed.
+/// many were removed. A process counts as gone only when the OS said so: when the process table cannot be read nothing
+/// is known, every owner counts as alive and nothing is removed (rule 53).
 pub fn sweep_profiles(base: &Path) -> usize {
-    sweep_profiles_with(base, &paddock_proc::is_alive)
+    sweep_profiles_with(base, &paddock_proc::may_be_alive)
 }
 
 fn sweep_profiles_with(base: &Path, alive: &dyn Fn(u32) -> bool) -> usize {

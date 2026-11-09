@@ -82,9 +82,10 @@ pub fn candidate_dirs(vars: &dyn Vars, os: Os) -> Vec<PathBuf> {
     }
 }
 
-/// Whether process `pid` exists (any user); pid 0 never does.
+/// Whether process `pid` may exist (any user); pid 0 never does. When the OS process table cannot be read the answer is
+/// "yes": a discovery file is removed only on a proven "gone" (rule 53).
 pub fn pid_alive(pid: u32) -> bool {
-    pid != 0 && paddock_proc::is_alive(pid)
+    pid != 0 && paddock_proc::may_be_alive(pid)
 }
 
 /// Whether a process id is alive.
