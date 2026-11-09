@@ -257,7 +257,17 @@ pub struct Gating {
 
 /// The plan job outputs the planner models (scripts/affected-marks.mjs). An output outside this list (an app workflow's `run`) is
 /// not verified.
-const KNOWN_OUTPUTS: &[&str] = &["crates", "ui", "eslint", "conformance", "tools", "icons", "paddock_dev", "any_app"];
+const KNOWN_OUTPUTS: &[&str] = &[
+    "crates",
+    "ui",
+    "eslint",
+    "conformance",
+    "tools",
+    "icons",
+    "paddock_dev",
+    "c99",
+    "any_app",
+];
 
 /// Levels at which a pull request or a push is planned from a diff; tags and the nightly run everything.
 const PLANNED_LEVELS: &[Level] = &[Level::Branch, Level::Main];
@@ -1125,6 +1135,38 @@ mod tests {
         // good: the planner turns conformance on for the script's file
         assert_eq!(
             ask(&Marks(vec![("scripts/check-x.mjs", &["conformance"])])).gated,
+            BTreeSet::from([Level::Branch])
+        );
+    }
+
+    #[test]
+    fn the_c99_output_is_a_planner_output_like_the_others() {
+        // ci.yml's c99 job runs under needs.plan.outputs.c99; the script it runs is a check
+        let ci = "on:\n  pull_request:\njobs:\n  plan:\n    runs-on: ubuntu-latest\n    outputs:\n      c99: ${{ steps.plan.outputs.c99 }}\n    steps:\n      - id: plan\n        run: node scripts/affected.mjs --ci\n  conformance:\n    needs: [plan]\n    if: ${{ needs.plan.outputs.c99 == 'true' }}\n    runs-on: ubuntu-latest\n    steps:\n      - run: node scripts/check-x.mjs\n";
+        let w = world(&[(".gitea/workflows/ci.yml", ci)], &[], &[]);
+        let mut c = check(Kind::Script, "scripts/check-x.mjs");
+        c.file = Some("scripts/check-x.mjs".into());
+        let ask = |p: &dyn Planner| {
+            let index = index(&w.model, &w.tree);
+            gating(
+                &c,
+                &Env {
+                    model: &w.model,
+                    index: &index,
+                    tree: &w.tree,
+                    apps: &w.apps,
+                    harness_files: &[],
+                    planner: p,
+                },
+            )
+        };
+        // bad: a change to the script marks only tools, so the conformance job would not run it on that branch
+        let bad = ask(&Marks(vec![("scripts/check-x.mjs", &["tools"])]));
+        assert!(!bad.gated.contains(&Level::Branch) && !bad.gated.contains(&Level::Main));
+        assert_eq!(bad.conditional, BTreeSet::from([Level::Branch]));
+        // good: the planner turns conformance on for the script's file
+        assert_eq!(
+            ask(&Marks(vec![("scripts/check-x.mjs", &["c99"])])).gated,
             BTreeSet::from([Level::Branch])
         );
     }
