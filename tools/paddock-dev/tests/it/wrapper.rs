@@ -612,7 +612,8 @@ fn run_overlapping(rustcs: &[&str], expected: usize) -> (tempfile::TempDir, Vec<
         })
         .collect();
     assert!(
-        paddock_testkit::poll_until_within(std::time::Duration::from_secs(60), || std::fs::read_dir(&barrier).unwrap().count() >= expected),
+        paddock_testkit::poll_until_within(std::time::Duration::from_secs(60), || std::fs::read_dir(&barrier).unwrap().count()
+            >= expected),
         "the builds never overlapped"
     );
     std::fs::write(barrier.join("go"), "").unwrap();
