@@ -3189,6 +3189,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-secrets"
+version = "0.1.0"
+dependencies = [
+ "keyring",
+ "libc",
+ "log",
+ "paddock-env",
+ "paddock-proc",
+ "paddock-workspace-hack",
+ "windows-sys 0.61.2",
+ "zeroize",
+]
+
+[[package]]
 name = "paddock-workspace-hack"
 version = "0.1.0"
 dependencies = [
@@ -3396,12 +3410,12 @@ dependencies = [
 name = "pitcrew-app"
 version = "1.0.2"
 dependencies = [
- "keyring",
  "notify-channels",
  "objc2",
  "objc2-foundation",
  "objc2-service-management",
  "paddock-build",
+ "paddock-secrets",
  "pitcrew-core",
  "serde",
  "serde_json",

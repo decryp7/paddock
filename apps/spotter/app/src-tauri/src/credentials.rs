@@ -4,7 +4,11 @@
 //!
 //! Entries are `Spotter` / `<scope>/<key>`, where the scope is a watch id (or `channel:<watch id>:<n>`) and the key
 //! names the secret (`token`, `cookie`, ...).
+//!
+//! The store is `paddock-secrets`' [`Vault`] port (ADR 0077 WP-4): the app uses [`OsVault`], tests a `MemoryVault`, so a
+//! test never reaches the real credential store. The entries keep the names Spotter wrote before.
 
+use paddock_secrets::{OsVault, Secret, Vault};
 use spotter_engine::secrets::SecretStore;
 
 /// The credential store's service name.
@@ -13,9 +17,9 @@ pub const SERVICE: &str = "Spotter";
 pub const MAX_SECRET_LEN: usize = 8192;
 const MAX_NAME_LEN: usize = 128;
 
-/// The OS credential store as the engine's [`SecretStore`].
+/// A credential store as the engine's [`SecretStore`]: the OS one by default ([`OsVault`]), a `MemoryVault` in tests.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct KeyringSecrets;
+pub struct KeyringSecrets<V = OsVault>(pub V);
 
 /// The account name of a secret, or why the scope or key is not acceptable.
 pub fn account(scope: &str, key: &str) -> Result<String, String> {
@@ -33,35 +37,33 @@ fn check_value(value: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn entry(scope: &str, key: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(SERVICE, &account(scope, key)?).map_err(|e| format!("the credential store is not available: {e}"))
-}
-
-impl SecretStore for KeyringSecrets {
+impl<V: Vault> SecretStore for KeyringSecrets<V> {
     fn get(&self, scope: &str, key: &str) -> Option<String> {
-        entry(scope, key).ok()?.get_password().ok()
+        let account = account(scope, key).ok()?;
+        self.0.get(SERVICE, &account).ok().flatten().map(|s| s.expose().to_string())
     }
 
     fn set(&self, scope: &str, key: &str, value: &str) -> Result<(), String> {
         check_value(value)?;
-        entry(scope, key)?
-            .set_password(value)
+        let value = Secret::new(value).map_err(|e| e.to_string())?;
+        self.0
+            .set(SERVICE, &account(scope, key)?, &value)
             .map_err(|e| format!("it could not be stored: {e}"))
     }
 
     fn delete(&self, scope: &str, key: &str) -> Result<(), String> {
-        match entry(scope, key)?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(format!("it could not be deleted: {e}")),
-        }
+        self.0
+            .delete(SERVICE, &account(scope, key)?)
+            .map_err(|e| format!("it could not be deleted: {e}"))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use paddock_secrets::MemoryVault;
 
-    // Only the checks that run before the store is touched: tests never use the real credential store.
+    // Tests never use the real credential store: a MemoryVault stands in for it.
     #[test]
     fn names_and_values_are_checked_before_the_store_is_touched() {
         assert_eq!(account("w1", "token").unwrap(), "w1/token");
@@ -69,12 +71,35 @@ mod tests {
         assert!(account("w/1", "token").is_err());
         assert!(account("w1", "to ken").is_err());
         assert!(account(&"a".repeat(129), "k").is_err());
-        let s = KeyringSecrets;
+        let v = MemoryVault::default();
+        v.set_unavailable(true);
+        let s = KeyringSecrets(v);
         assert!(s.set("w1", "token", "").is_err());
         assert!(s.set("w1", "token", "two\nlines").is_err());
         assert!(s.set("w1", "token", &"x".repeat(MAX_SECRET_LEN + 1)).is_err());
         assert!(s.set("bad scope", "token", "v").is_err());
         assert!(s.delete("bad scope", "token").is_err());
         assert_eq!(s.get("bad scope", "token"), None);
+    }
+
+    /// ADR 0077 WP-4: the entries stay where Spotter wrote them, `Spotter` / `<scope>/<key>`, so a stored secret is read after
+    /// the update; a store that cannot be reached gives no secret and a message, never the value.
+    #[test]
+    fn secrets_keep_the_entries_spotter_wrote() {
+        let s = KeyringSecrets(MemoryVault::default());
+        s.set("channel:w1:2", "token", "s3cr").unwrap();
+        assert_eq!(
+            s.0.get("Spotter", "channel:w1:2/token").unwrap().map(|v| v.expose().to_string()),
+            Some("s3cr".to_string())
+        );
+        assert_eq!(s.get("channel:w1:2", "token").as_deref(), Some("s3cr"));
+        s.delete("channel:w1:2", "token").unwrap();
+        s.delete("channel:w1:2", "token").unwrap();
+        assert_eq!(s.get("channel:w1:2", "token"), None);
+        s.0.set_unavailable(true);
+        let e = s.set("w1", "cookie", "s3cr").unwrap_err();
+        assert!(e.starts_with("it could not be stored: ") && !e.contains("s3cr"), "{e}");
+        assert_eq!(s.get("w1", "cookie"), None);
+        assert!(s.delete("w1", "cookie").is_err());
     }
 }
