@@ -112,7 +112,7 @@ fn a_working_browser_is_waited_for_however_many_looks_its_answer_takes() {
         tick: Duration::ZERO,
         ..patience()
     };
-    let r = await_answer(&pending, &mut life, quick);
+    let r = await_answer(&pending, "Target.createTarget", &mut life, quick);
     assert_eq!(r.unwrap()["targetId"], "T1");
     assert!(life.looks >= 6000, "answered after {} looks", life.looks);
     drop(pending);
@@ -127,8 +127,13 @@ fn a_browser_that_ended_fails_at_the_next_look_while_its_connection_stays_open()
     let pending = conn.send(None, "Target.createTarget", json!({})).unwrap();
     let mut life = Scripted::new(tx);
     life.ends_at = Some(3);
-    let r = await_answer(&pending, &mut life, patience());
-    assert!(matches!(r, Err(Error::Closed)), "{r:?}");
+    let r = await_answer(&pending, "Target.createTarget", &mut life, patience());
+    // The error alone says what was asked, how long it waited, how the browser ended and what it printed (ER-27).
+    assert!(
+        matches!(&r, Err(Error::Launch(m)) if m.contains("did not answer Target.createTarget after")
+            && m.contains("pid unknown") && m.contains("exit status 1") && m.contains("crashed")),
+        "{r:?}"
+    );
     assert_eq!(life.looks, 3, "it ends at the look that saw the browser gone");
     assert!(!conn.is_closed(), "the connection was still open: the process told");
     drop(life.tell.take());
@@ -144,8 +149,11 @@ fn an_idle_browser_that_does_not_answer_is_stuck_not_timed_out() {
     let pending = conn.send(None, "Target.createTarget", json!({})).unwrap();
     let mut life = Scripted::new(tx);
     life.working = false;
-    let r = await_answer(&pending, &mut life, patience());
-    assert!(matches!(&r, Err(Error::Timeout(m)) if m.contains("stopped working")), "{r:?}");
+    let r = await_answer(&pending, "Target.createTarget", &mut life, patience());
+    assert!(
+        matches!(&r, Err(Error::Launch(m)) if m.contains("did not answer Target.createTarget after") && m.contains(" s: ")),
+        "{r:?}"
+    );
     // Idle for 20 ms of ticks of 1 ms: about twenty looks, counted, not timed.
     assert!((20..=25).contains(&life.looks), "{} looks", life.looks);
     drop(life.tell.take());
@@ -162,7 +170,7 @@ fn a_connection_that_closes_ends_the_wait_as_closed() {
     let mut life = Scripted::new(tx);
     // The peer closes the connection instead of answering.
     life.tell.as_ref().unwrap().send(None).unwrap();
-    let r = await_answer(&pending, &mut life, patience());
+    let r = await_answer(&pending, "Target.createTarget", &mut life, patience());
     assert!(matches!(r, Err(Error::Closed)), "{r:?}");
     drop(pending);
     drop(conn);

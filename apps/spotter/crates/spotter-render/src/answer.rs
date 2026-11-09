@@ -14,7 +14,7 @@ use crate::{Error, Result};
 use paddock_proc::{ExitInfo, Liveness, Pace, Patience, ProcessId, StartProbe, StartState, StartWatch, Watched};
 use serde_json::Value;
 use std::cell::RefCell;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// What says whether the browser that owes the answer is still there.
 pub(crate) trait Life {
@@ -77,11 +77,15 @@ pub(crate) fn ask<L: Life>(
     params: Value,
 ) -> Result<Value> {
     let pending = conn.send(session, method, params)?;
-    await_answer(&pending, &mut *life.borrow_mut(), patience)
+    await_answer(&pending, method, &mut *life.borrow_mut(), patience)
 }
 
-/// Waits for the reply to the command sent as `pending` while `life` says the browser is there.
-pub(crate) fn await_answer(pending: &Pending<'_>, life: &mut dyn Life, patience: Patience) -> Result<Value> {
+/// Waits for the reply to `method` (sent as `pending`) while `life` says the browser is there. A browser that ended or
+/// stopped working fails with the method, the time waited, its pid and the judge's reason (and, when it ended, its exit
+/// status and the end of its error output), so the error alone explains the failure (ER-27).
+pub(crate) fn await_answer(pending: &Pending<'_>, method: &str, life: &mut dyn Life, patience: Patience) -> Result<Value> {
+    let began = Instant::now();
+    let pid = life.pid().map_or_else(|| "pid unknown".to_string(), |p| format!("pid {}", p.pid()));
     let slot: Slot = RefCell::new(None);
     let probe = Probe { life, slot: &slot };
     let pace = ReplyPace { pending, slot: &slot };
@@ -94,10 +98,18 @@ pub(crate) fn await_answer(pending: &Pending<'_>, life: &mut dyn Life, patience:
         }
     };
     drop(watch);
+    let secs = began.elapsed().as_secs_f64();
     match seen {
         Watched::State(StartState::Ready) => slot.into_inner().unwrap_or(Err(Error::Closed)),
-        Watched::State(StartState::Exited(ExitInfo { .. })) => Err(Error::Closed),
-        Watched::State(StartState::Stalled(_)) => Err(Error::Timeout("an answer from a browser that stopped working")),
+        Watched::State(StartState::Exited(ExitInfo { status, stderr_tail })) => Err(Error::Launch(format!(
+            "the browser ({pid}) did not answer {method} after {secs:.1} s: it ended (exit status {}; browser output: {})",
+            status.map_or_else(|| "unknown".to_string(), |c| c.to_string()),
+            stderr_tail.as_deref().unwrap_or("none")
+        ))),
+        Watched::State(StartState::Stalled(r)) => Err(Error::Launch(format!(
+            "the browser ({pid}) did not answer {method} after {secs:.1} s: {}",
+            r.message
+        ))),
         // The pace never cancels, and a watch never answers `Starting`.
         Watched::State(StartState::Starting) | Watched::Cancelled => Err(Error::Closed),
     }

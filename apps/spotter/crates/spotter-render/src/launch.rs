@@ -319,8 +319,10 @@ impl Chromium {
         }
     }
 
-    /// Opens a page (tab) to drive. The browser's answers are waited for while it is alive and working, not for a fixed
-    /// time ([`crate::answer`]).
+    /// Opens a page (tab) to drive. Every command of the open (creating the tab, attaching to it, enabling its domains) is
+    /// judged by the browser's liveness, never by a fixed deadline ([`crate::answer`], ADR 0071): it is waited for while the
+    /// process runs and its tree uses CPU, and fails, naming the command, the time waited, the pid and the reason, once the
+    /// browser ended or stopped working. [`LaunchOptions::max_lifetime`]'s watchdog stays the overall bound.
     pub fn new_page(&self) -> Result<Page> {
         let id = lock(&self.process).process();
         let life = RefCell::new(BrowserLife {
