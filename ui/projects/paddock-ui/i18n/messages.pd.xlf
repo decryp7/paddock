@@ -3107,8 +3107,41 @@
       <trans-unit id="pd.wb.assistant.approve.tool" datatype="html">
         <source>Tool</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.attach" datatype="html">
+        <source>Attach files</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.attach.audio" datatype="html">
+        <source>Audio clip</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.attach.drop" datatype="html">
+        <source>Drop files to attach them</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.attach.failed" datatype="html">
+        <source>&quot;<x id="name"/>&quot; could not be attached.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.attach.image" datatype="html">
+        <source>Image</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.attach.remove" datatype="html">
+        <source>Remove from this question</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.attach.remove-named" datatype="html">
+        <source>Remove <x id="name"/></source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.attach.too-big" datatype="html">
+        <source>&quot;<x id="name"/>&quot; is larger than <x id="kib"/> KiB. Attach a smaller file, or paste the part that matters.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.attach.too-big-bytes" datatype="html">
+        <source>&quot;<x id="name"/>&quot; is larger than <x id="bytes"/> bytes. Attach a smaller file, or paste the part that matters.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.attach.too-many" datatype="html">
+        <source>A question can carry at most <x id="max"/> attachments.</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.attached" datatype="html">
         <source>Attached context</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.attaching" datatype="html">
+        <source>Attaching…</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.chip.add" datatype="html">
         <source>Send this context</source>
@@ -3124,6 +3157,48 @@
       </trans-unit>
       <trans-unit id="pd.wb.assistant.context" datatype="html">
         <source>Context for this question</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.context.about-of" datatype="html">
+        <source>About <x id="n"/> of <x id="of"/> tokens</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.context.about-tokens" datatype="html">
+        <source>About <x id="n"/> tokens</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.context.close" datatype="html">
+        <source>close to the limit</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.context.files-too-long" datatype="html">
+        <source>These files are too long for the model. Remove a file.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.context.full" datatype="html">
+        <source>Full: <x id="n"/> of <x id="of"/> tokens</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.context.full-note" datatype="html">
+        <source>This chat fills what the model can read.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.context.high" datatype="html">
+        <source>Close to what the model can read.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.context.label" datatype="html">
+        <source>Context used</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.context.of" datatype="html">
+        <source><x id="n"/> of <x id="of"/> tokens</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.context.over" datatype="html">
+        <source>Full: over by <x id="over"/> of <x id="of"/> tokens</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.context.reserve" datatype="html">
+        <source><x id="n"/> more are kept for the answer.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.context.start-new" datatype="html">
+        <source>Start a new chat</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.context.title" datatype="html">
+        <source>What the next question carries before its own text: the conversation the model reads and the tools' definitions.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.context.tokens" datatype="html">
+        <source><x id="n"/> tokens</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.conversations" datatype="html">
         <source>Conversations</source>
@@ -3164,6 +3239,21 @@
       <trans-unit id="pd.wb.assistant.feature" datatype="html">
         <source>The assistant</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.files" datatype="html">
+        <source>Attached files</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.files.fold" datatype="html">
+        <source>Show fewer attached files</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.files.many" datatype="html">
+        <source><x id="count"/> files</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.files.one" datatype="html">
+        <source>1 file</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.files.show" datatype="html">
+        <source>Show all attached files</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.hint.incompatible" datatype="html">
         <source>Update to ask questions</source>
       </trans-unit>
@@ -3191,6 +3281,15 @@
       <trans-unit id="pd.wb.assistant.loading" datatype="html">
         <source>Loading…</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.mic" datatype="html">
+        <source>Speak your question</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.mic.hint" datatype="html">
+        <source>Speak your question (press again to stop; Escape cancels)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.mic.stop" datatype="html">
+        <source>Stop recording</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.new" datatype="html">
         <source>New conversation</source>
       </trans-unit>
@@ -3212,11 +3311,17 @@
       <trans-unit id="pd.wb.assistant.question" datatype="html">
         <source>Your question</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.recording" datatype="html">
+        <source>Recording <x id="time"/></source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.retry" datatype="html">
         <source>Try again</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.send" datatype="html">
         <source>Send</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.speech.failed" datatype="html">
+        <source>Speech input did not work.</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.stop" datatype="html">
         <source>Stop</source>
@@ -3256,6 +3361,9 @@
       </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.unreadable" datatype="html">
         <source>(unreadable call)</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.transcribing" datatype="html">
+        <source>Writing down what you said…</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.turn-failed.cause" datatype="html">
         <source>Likely cause: the local model stopped answering. Check that Pitwall is running, then try again.</source>
