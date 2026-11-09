@@ -305,7 +305,8 @@ mod tests {
         // The resource is a pure function of `VersionInfo`: each field changes the bytes (so none is dropped), and building from the same
         // fields in a fresh struct gives the same bytes (no clock, no environment, no counter reaches the output).
         let base = to_res(&info());
-        let changed: [(&str, fn(&mut VersionInfo)); 8] = [
+        type Change = (&'static str, fn(&mut VersionInfo));
+        let changed: [Change; 8] = [
             ("description", |i| i.description = "Other update".into()),
             ("product", |i| i.product = "Other".into()),
             ("version", |i| i.version = "1.2.0".into()),
