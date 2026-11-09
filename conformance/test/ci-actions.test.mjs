@@ -1113,6 +1113,21 @@ test('Debrief\'s shell tests, which start plugin processes, run in a group of at
   }
 });
 
+// Debrief's store-duck waivers (the differential, analysis and large-folder suites) each import whole sample workspaces;
+// five at once beside the rest of the workspace on a shared Mac runner pushed three past their 180 s waiver (CI 7822).
+// They take turns two at a time instead of getting a longer limit (ER-12).
+test('Debrief\'s heavy DuckDB store suites run at most two at a time, in the override that holds their waiver', () => {
+  const text = read(join(PADDOCK, 'apps', 'debrief', '.config', 'nextest.toml'));
+  const group = text.match(/^duck-heavy = \{ max-threads = (\d+) \}$/m);
+  assert.ok(group, 'the duck-heavy test group exists');
+  assert.ok(Number(group[1]) >= 1 && Number(group[1]) <= 2, `at most two at a time (is ${group[1]})`);
+  const overrides = text.split(/^\[\[profile\.\w+\.overrides\]\]$/m).slice(1);
+  const mine = overrides.filter((o) => /^test-group = 'duck-heavy'$/m.test(o));
+  assert.equal(mine.length, 1, 'one override puts tests in the group');
+  assert.match(mine[0], /package\(debrief-store-duck\) & binary\(it\)/, 'the store-duck suites');
+  assert.match(mine[0], /terminate-after = 6 \}/, 'the same override as their waiver, its limit unchanged');
+});
+
 test('ci.yml runs the icon tests and `install.mjs --check` in an icons job that the plan feeds', () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   assert.match(ci, /icons: \$\{\{ steps\.plan\.outputs\.icons \}\}/, 'the plan job exports the icons output');
