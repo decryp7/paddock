@@ -289,6 +289,23 @@ test('kept-clone: a config key the script does not own (core.autocrlf) makes the
   assert.doesNotMatch(git(k, fx.root, 'config', '--local', '--list'), /autocrlf|fsmonitor/);
 });
 
+test('kept-clone: a refs/replace entry left in .git does not change the checked-out tree', () => {
+  const fx = fixture();
+  const first = job(fx, git(fx.work, fx.root, 'rev-parse', 'HEAD'));
+  const k = first.stable();
+  fx.put('crates/a/lib.rs', 'two');
+  const sha2 = fx.commit('two');
+  // A commit with an empty tree, made to stand in for the job's commit.
+  const empty = git(k, fx.root, 'hash-object', '-t', 'tree', '-w', '--stdin');
+  const bad = git(k, fx.root, 'commit-tree', empty, '-m', 'bad');
+  git(k, fx.root, 'update-ref', `refs/replace/${sha2}`, bad);
+  const second = job(fx, sha2);
+  assert.equal(second.status, 0, second.out);
+  assert.equal(git(k, fx.root, 'rev-parse', 'HEAD'), sha2);
+  assert.equal(read(join(k, 'crates/a/lib.rs')), 'two', 'the tree is the commit\'s own, not the replacement\'s');
+  assert.ok(!existsSync(join(k, '.git', 'refs', 'replace', sha2)), 'the replace ref is removed');
+});
+
 test('kept-clone: a leftover .git lock is removed and the clone recreated once; the failing git command is named in the log', () => {
   const fx = fixture();
   const sha = git(fx.work, fx.root, 'rev-parse', 'HEAD');

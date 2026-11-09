@@ -21,7 +21,7 @@
 # folder is expanded to the profile instead (one ::warning::; only the compile cache of the workspace crates is lost).
 # The clone's .git survives between jobs and the clone is shared by every job of the slot, so nothing in it is trusted: every git
 # command runs with core.hooksPath on an empty folder this script owns, .git/hooks is emptied, .git/info/attributes and info/exclude
-# are removed, and a local config key outside an allow-list (git's own defaults, the remote, the sparse settings) makes the clone be
+# and refs/replace are removed (replace objects are ignored), and a local config key outside an allow-list (git's own defaults, the remote, the sparse settings) makes the clone be
 # made again (one ::warning:: naming the key).
 # The checkout's credentials (its http extraheader) are passed to git through the environment, never in a command line, never kept.
 # Environment: RUNNER_OS, GITHUB_WORKSPACE, GITHUB_ENV, NAME (the kept folder's name), PROFILE, KEPT_CLONE_PROFILES (the profile file,
@@ -41,11 +41,11 @@ trap 'rm -rf "$scratch"' EXIT
 # shellcheck source=bounded.sh
 . "$here/bounded.sh"
 export GIT_TERMINAL_PROMPT=0
-export BOUNDED_SOFT=1
+BOUNDED_SOFT=1
 # Every git command of this script: no hook of the kept clone's .git runs (core.hooksPath is a folder this script owns, empty).
 empty_hooks="$scratch/no-hooks"
 mkdir -p "$empty_hooks"
-gq() { git -c core.hooksPath="$empty_hooks" "$@"; } # quiet: a probe whose failure is an answer
+gq() { GIT_NO_REPLACE_OBJECTS=1 git -c core.hooksPath="$empty_hooks" "$@"; } # quiet: a probe whose failure is an answer
 g() { # noisy: a failure names the command in the phase's stderr (ER-27)
   local rc=0 sub='' x skip=0
   for x in "$@"; do # the subcommand: the first word that is not -C <dir> or -c <key=value>
@@ -123,7 +123,7 @@ foreign_key() {
 }
 # sanitize: nothing a job could have planted in .git is left to act: hooks (also never run: core.hooksPath), attributes, excludes.
 sanitize() {
-  rm -rf "$stable/.git/hooks" && mkdir -p "$stable/.git/hooks" && rm -f "$stable/.git/info/attributes" "$stable/.git/info/exclude"
+  rm -rf "$stable/.git/hooks" && mkdir -p "$stable/.git/hooks" && rm -f "$stable/.git/info/attributes" "$stable/.git/info/exclude" && rm -rf "$stable/.git/refs/replace"
 }
 clone_kib() { # the clone's object size in KiB
   gq -C "$stable" count-objects -v 2>/dev/null | awk '/^(size|size-pack): / { k += $2 } END { printf "%d", k }'
