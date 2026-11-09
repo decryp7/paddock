@@ -79,6 +79,10 @@ fn left_in(dir: &Path) -> Vec<String> {
 }
 
 /// Removes `path` (a fixture's folder, when its owner is dropped); a failure is reported and marked (see the module).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the leak marker goes in the system temp folder by design, where the next run's sweep looks for it; no fixture lives there"
+)]
 pub fn remove_or_defer(path: &Path) {
     remove_or_defer_marking_in(path, &std::env::temp_dir());
 }
