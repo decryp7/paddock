@@ -433,7 +433,7 @@ pub async fn real_harness(dir: tempfile::TempDir) -> Harness {
 /// (three CI runners on one Mac, CI run 7775) that check queues behind theirs for many seconds (`syspolicyd` busy, the
 /// child still at `_dyld_start`). Later starts of the same file are not checked again.
 #[allow(clippy::disallowed_methods)] // a test starting its own helper binary and waiting for it to end
-pub fn runnable_fake_engine(_dir: &std::path::Path) -> String {
+pub fn runnable_fake_engine() -> String {
     let exe = env!("CARGO_BIN_EXE_pitwall-fake-engine");
     let len = std::fs::metadata(exe).map(|m| m.len()).unwrap_or(0);
     assert!(len > 100_000, "{exe} is {len} bytes: it was replaced by a placeholder; rebuild it");

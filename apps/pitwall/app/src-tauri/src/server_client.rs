@@ -271,6 +271,7 @@ impl FrameStream for SseFrames {
 }
 
 /// A scripted server for tests: answers per method, can hang, and serves canned stream frames.
+#[cfg(any(test, feature = "test-support"))]
 pub mod fake {
     use super::*;
     use std::collections::HashMap;

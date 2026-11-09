@@ -748,14 +748,14 @@ describe('matrix legs', () => {
     const other = '/Users/x/gitea-runner/work/fedcba9876543210/tmp';
     const ours = {
       dyno: ['/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-test-plugin echo', 'C:\\Users\\x\\.paddock-ci\\target-dyno-app-s1\\debug\\dyno-test-plugin.exe', `${t}/dyno-it-plugins-Xk3a9Q/p1/plugin`],
-      pitwall: ['/Users/x/.paddock-ci/target-pitwall-app-s1/debug/pitwall-server --die-after-ms 500 --port 4455 --fake-engine'],
+      pitwall: ['/Users/x/.paddock-ci/target-pitwall-app-s1/debug/pitwall-fake-engine --die-after-ms 500 --port 4455'],
       pitcrew: [`${t}/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon`, 'C:\\Users\\x\\gitea-runner\\work\\0123456789abcdef\\tmp\\pitcrew-it-stop-7\\runner\\bin\\gitea-runner.exe daemon', '/Users/x/.paddock-ci/target-pitcrew-app-s1/debug/examples/fake_runner --exit-after 5'],
       spotter: ['/Users/x/.paddock-ci/test-browser-spotter-s1/chrome-mac/Google Chrome for Testing --headless', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotter-s1\\chrome-win64\\chrome.exe --headless'],
     };
     // Another job on the same host: the next slot's kept folders, another runner folder's temp.
     const otherJob = {
       dyno: ['/Users/x/.paddock-ci/target-dyno-app-s2/debug/dyno-test-plugin echo', `${other}/dyno-it-plugins-Xk3a9Q/p1/plugin`],
-      pitwall: ['/Users/x/.paddock-ci/target-pitwall-app-s2/debug/pitwall-server --fake-engine'],
+      pitwall: ['/Users/x/.paddock-ci/target-pitwall-app-s2/debug/pitwall-fake-engine --die-after-ms 500 --port 4455'],
       pitcrew: [`${other}/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon`, '/Users/x/.paddock-ci/target-pitcrew-app-s2/debug/examples/fake_runner'],
       spotter: ['/Users/x/.paddock-ci/test-browser-spotter-s2/chrome-mac/Google Chrome for Testing', '/Users/x/.paddock-ci/test-browser-spotter-s12/chrome-mac/Google Chrome for Testing', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotter-s2\\chrome.exe'],
     };
@@ -898,15 +898,17 @@ describe('contracts', () => {
       for (const pat of app.processPatterns ?? []) assert.match(pat, /\{(tmp|build|slot)\}/, `${name}: ${pat} names no folder of the job ({tmp}, {build}, {slot})`);
     }
     const pitwall = graph.apps.get('pitwall');
-    const ours = ['/Users/x/.paddock-ci/target-pitwall-app-s1/debug/pitwall-server --die-after-ms 500 --port 4455 --fake-engine'];
+    const ours = ['/Users/x/.paddock-ci/target-pitwall-app-s1/debug/pitwall-fake-engine --die-after-ms 500 --port 4455'];
     const near = [
+      '/Applications/Pitwall.app/Contents/MacOS/pitwall-server',
       '/Applications/Pitwall.app/Contents/MacOS/pitwall-server --port 8080',
-      '/Applications/Pitwall.app/Contents/MacOS/pitwall-server --fake-engine',
-      '/Users/x/.paddock-ci/target-spotter-app-s1/debug/pitwall-server --fake-engine',
-      '/Users/x/.paddock-ci/target-pitwall-bundle-s1/debug/pitwall-server --fake-engine',
-      '/Users/x/.paddock-ci/target-pitwall-app-s2/debug/pitwall-server --fake-engine',
+      '/Users/x/.paddock-ci/target-pitwall-app-s1/debug/pitwall-server --port 1',
+      '/Users/x/.paddock-ci/target-spotter-app-s1/debug/pitwall-fake-engine --port 1',
+      '/Users/x/.paddock-ci/target-pitwall-bundle-s1/debug/pitwall-fake-engine --port 1',
+      '/Users/x/.paddock-ci/target-pitwall-app-s2/debug/pitwall-fake-engine',
+      '/Users/x/.paddock-ci/target-pitwall-app-s1/debug/deps/pitwall_fake_engine-0123456789abcdef',
       '/Users/x/.paddock/engines/llama-server --port 8081 -m model.gguf',
-      '/Users/x/dev/pitwall/target/debug/pitwall-server --fake-engine',
+      '/Users/x/dev/pitwall/target/debug/pitwall-fake-engine --port 1',
       '/opt/homebrew/bin/llama-server --port 8080',
     ];
     for (const re of scopedAll('pitwall', pitwall.processPatterns)) {

@@ -3134,6 +3134,7 @@ dependencies = [
  "objc2",
  "objc2-foundation",
  "objc2-service-management",
+ "pitwall-app",
  "pitwall-core",
  "pitwall-loopback",
  "serde",

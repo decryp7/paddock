@@ -116,8 +116,10 @@ impl AdminKeys for StoredAdminKey {
 }
 
 /// A fixed key, for tests.
+#[cfg(any(test, feature = "test-support"))]
 pub struct StaticKeys(String);
 
+#[cfg(any(test, feature = "test-support"))]
 impl StaticKeys {
     /// Always `key`.
     pub fn new(key: &str) -> StaticKeys {
@@ -125,6 +127,7 @@ impl StaticKeys {
     }
 }
 
+#[cfg(any(test, feature = "test-support"))]
 impl AdminKeys for StaticKeys {
     fn current(&self) -> Option<String> {
         Some(self.0.clone())

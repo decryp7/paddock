@@ -16,6 +16,11 @@ name = "pitwall_app_lib"
 # only for a mobile target.
 crate-type = ["rlib"]
 
+[features]
+# Test doubles (the scripted server `server_client::fake`, the fixed admin key `StaticKeys`); enabled only through the
+# self dev-dependency below, never by a normal dependency (ADR 0073 / rule 73).
+test-support = []
+
 [build-dependencies]
 tauri-build = { version = "2.7.3", features = [] }
 
@@ -61,6 +66,8 @@ objc2-service-management = { version = "0.3", default-features = false, features
 workspace = true
 
 [dev-dependencies]
+# The self dev-dependency that turns `test-support` on for this package's tests (ADR 0073 / rule 73).
+pitwall-app = { path = ".", features = ["test-support"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["time", "sync", "rt", "rt-multi-thread", "macros", "net", "io-util", "test-util"] }
 tauri = { version = "2.12.4", features = ["test"] }
