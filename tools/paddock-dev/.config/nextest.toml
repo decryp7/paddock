@@ -26,6 +26,17 @@ slow-timeout = { period = "60s", terminate-after = 4 }
 filter = "test(/^golden::live_/)"
 success-output = "final"
 
+# Every test that reads the repository graph runs `cargo metadata` over every workspace, and those runs queue on cargo's
+# package-cache lock; started together on a loaded host runner (run 7787, macOS) they pass the 60 s budget while they wait.
+[test-groups.repo-graph]
+max-threads = 2
+
+# waiver: not a longer budget. At most two of the tests that read the repository graph run at a time (the group above), which keeps
+# each of them far inside the 60 s budget on a loaded host runner.
+[[profile.ci.overrides]]
+filter = "test(/^(golden|tree|contracts|inputs)::/) | test(/^cli::graph_affected/)"
+test-group = "repo-graph"
+
 [profile.ci.junit]
 # Written to <target>/nextest/ci/junit.xml.
 path = "junit.xml"
