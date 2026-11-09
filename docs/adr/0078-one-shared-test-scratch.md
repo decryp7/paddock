@@ -69,7 +69,8 @@ second copy. Shipped-classified sites to read in WP-0: 46 `let _ = remove_dir_al
 `debrief-ipc/src/elevation.rs:104`, `endpoint.rs:192`; Dyno `dyno-agent/src/bench_scratch.rs:118`; `paddock-archive`
 `stage.rs:43`; `paddock-ipc` `endpoint/unix.rs:147`, the only one that checks its result).
 
-TypeScript and scripts: 97 files call `mkdtemp`; **25 of them have no removal call at all** (Debrief 4, Dyno 3,
+TypeScript and scripts: 70 files hold the 97 calls of `mkdtemp(`/`mkdtempSync(` (`git grep -E 'mkdtemp(Sync)?\('`; 170
+lines in 71 files mention `mkdtemp`, imports included); **25 of them have no removal call at all** (Debrief 4, Dyno 3,
 conformance 4, scripts 4, docs 3, one each in Pacenotes, Pitcrew, Pitwall, Sighter, Spotter, tools and ui; a file may still remove through a helper of its own, which WP-0 reads).
 
 ## Decision
@@ -81,22 +82,33 @@ pub struct ScratchDir            // one folder; the TempDir-shaped replacement (
 pub fn dir(prefix: &str) -> ScratchDir     // made under the run root, named <prefix><random>
 pub struct Scratch               // today's three-folder type (work, home, tmp), made under the run root
 pub fn remove(path: &Path) -> Removal      // the one removal: Removed | Deferred { error } (reported)
-pub fn run_root() -> &'static Path         // $TMPDIR/paddock-run-<id>, made once per process, 0700 on Unix
+pub fn run_root() -> &'static Path         // <base>/paddock-run-<id>, made once per process, 0700 on Unix,
+                                           // the process holding a shared lock on <root>/.lock until it exits
 ```
 
 - **The run root.** `<id>` is the ADR 0077 marker (`PADDOCK_TEST_RUN`, else `NEXTEST_RUN_ID`), so every test process of
   one run shares one root and a job checks one folder. Without a marker (a plain `cargo test`), `<id>` is the process's
-  `ProcessId` (pid plus start time, rule 53). The root holds a `.owner` file with that identity.
+  `ProcessId` (pid plus start time, rule 53). `<base>` is `PADDOCK_JOB_TEMP` when set (CI, `job-tmpdir.sh`), else the
+  temp folder read **once, before** any `EnvLock::hermetic` can move `TMPDIR` (the kit captures it at its first call
+  and `hermetic` keeps the run root, so a test's own `tmp` folder is never the base).
+- **The root's lock (rule 53).** Nextest runs one process per test, and other worktrees' runs share the same temp
+  folder, so a root may have many live users at once. Every process that uses a root takes a **shared** OS file lock on
+  `<root>/.lock` (`flock(LOCK_SH)`; `LockFileEx` without `LOCKFILE_EXCLUSIVE_LOCK` on Windows) and holds it until it
+  exits; the OS releases it when the process dies. A root is removed or swept only by a process that gets the
+  **exclusive** lock without waiting; anything that fails to get it leaves the root alone. The identity in `.owner` is
+  only a hint for the log, never the reason to delete.
 - **Removal.** `Drop` calls `remove`. On Windows, only the error kinds known to be transient there (a sharing violation, a
-  file pending delete) are tried again, within 500 ms on the testkit clock; any other failure, on any OS, is **deferred at
-  once**: one stderr line (`scratch: could not remove <path>: <error>; test <name>; deferred`), the path recorded in
+  file pending delete) are tried again, within 500 ms of the **real monotonic clock** (`Instant`; a test's fake clock
+  never governs a real file system), and every retry is logged on stderr with its error and elapsed time, so a retry
+  that turns green is still visible; any other failure, on any OS, is **deferred at once**: one stderr line (`scratch: could not remove <path>: <error>; test <name>; deferred`), the path recorded in
   `<run root>/.deferred`, and a removal at process exit. No yield loop: a folder that needs one is almost always a writer
   that outlived its owner (ADR 0076), and retrying hides it (ER-12).
 - **Deferrals are failures that name themselves.** The job's leak check (§3) lists `.deferred` with the test names.
   Until ADR 0076's leak guard lands (its M1), a deferral fails the job, not the test (D2); afterwards the test.
 - **Stopped processes.** A process stopped by nextest's timeout leaves its folders in the run root; the job's check
-  reports them and removes the root. Locally, the next run removes run roots whose `.owner` process has ended, after
-  checking its identity (rule 53). This replaces Debrief's SIGTERM handler and `atexit` copies.
+  reports them and removes the root once it holds the exclusive lock (every test process has ended by then). Locally,
+  the next run sweeps only the roots whose exclusive lock it gets without waiting, so a live run in another worktree is
+  never touched (rule 53). This replaces Debrief's SIGTERM handler and `atexit` copies.
 - **Keep for inspection.** `PADDOCK_TESTKIT_KEEP` keeps a failed test's folder, as today.
 
 ### 2. One TypeScript helper: `@decryp7/paddock-e2e/scratch`
@@ -167,17 +179,17 @@ checks that its run root is empty. Checked by the scratch lint and the job leak 
 | WP | Content | Days |
 | --- | --- | --- |
 | WP-0 | Read the shipped-classified sites; exact counts with a syn pass; the ratchet baseline | 1 |
-| WP-1 | `paddock_testkit::scratch`: `ScratchDir`, `dir`, run root and `.owner`, `remove`, deferral record, exit removal, the identity sweep; tests on Linux, macOS, Windows | 2 |
+| WP-1 | `paddock_testkit::scratch`: `ScratchDir`, `dir`, run root and its base, the shared and exclusive `.lock`, `remove` with logged Windows retries, deferral record, exit removal, the lock-guarded sweep; tests on Linux, macOS, Windows (two processes and a sweeper) | 2.5 |
 | WP-2 | `@decryp7/paddock-e2e/scratch` and its tests | 1 |
 | WP-3 | `./dev check temp-leaks` (port of Debrief's script), wired into job-isolation and `job-tmpdir`; positive controls; fix or ratchet the day-one leaks (kept-clone included) | 2 |
 | WP-4 | The lint, fixtures and ratchet | 1.5 |
 | WP-5 | `scope = "test"` in the register and C58; the `test-scratch-removal` entry | 0.5 |
 | WP-6 | Migration (mostly mechanical, an implementer with the counts as the brief): Debrief 3 (39 types, the four local mechanisms), Dyno 1, Pitcrew 1, Pitwall 0.5, Spotter 0.5, `crates/` 2, tools and demos 0.5, TypeScript files 1 | 9.5 |
 | WP-7 | Rule text, lessons, the temp-leaks doc moved to `docs/testing/`, ADR index | 0.5 |
-| | **Total** | **18** |
+| | **Total** | **18.5** |
 | WP-8 (D6) | `paddock_env::scratch::private_dir`, the 8 shipped sites | 1.5 |
 
-First cut (the mechanism, the check in every job, new sites refused): WP-0 to WP-5 and WP-7 = **8.5 days**; each app's
+First cut (the mechanism, the check in every job, new sites refused): WP-0 to WP-5 and WP-7 = **9 days**; each app's
 part of WP-6 lands in its next release phase.
 
 ## Release impact (ER-31)
@@ -192,10 +204,10 @@ ships. Under D7 (b) the ratchet blocks no tag.
 | --- | --- | --- | --- |
 | D1 | Where the Rust type lives | (a) `paddock_testkit::scratch` (exists, `Scratch` already there). (b) A new crate. | (a). |
 | D2 | A failed removal | (a) Defer at once and fail the job naming the test; Windows transient kinds tried for 500 ms; fail the test once ADR 0076's leak guard is in. (b) Today's 200-attempt retry, then defer. (c) Fail the test at once. | (a). |
-| D3 | The run root | (a) `$TMPDIR/paddock-run-<marker>`, shared with ADR 0077's marker. (b) Per-process roots. | (a): one folder per job to check. |
+| D3 | The run root | (a) `<PADDOCK_JOB_TEMP or the temp folder captured before hermetic>/paddock-run-<marker>`, shared with ADR 0077's marker, each user holding a shared lock and a sweep only with the exclusive one. (b) Per-process roots. | (a): one folder per job to check; the lock makes the sweep safe across processes and worktrees. |
 | D4 | The leak check | (a) The family's `./dev check temp-leaks` in every test job, through job-isolation. (b) Debrief only, as today. | (a). |
 | D5 | The lint | (a) A conformance check on test code with a ratchet. (b) clippy `disallowed-methods`. | (a). |
 | D6 | Production scratch | (a) `paddock_env::scratch::private_dir` now, copies registered. (b) Out of scope. | (a), as a separate WP in Debrief 1.2's phase (it owns 5 of the 8 sites). |
 | D7 | Release gating | (a) Ratchet entries block each app's next tag. (b) New sites fail from landing; old ones migrate in each app's phase; no tag blocked. | (b): test-only code, nothing a user runs. |
 | D8 | Register scope | Add `scope = "test"` to ADR 0034's register (amendment) so C58 sees test-support copies. | Yes. |
-| D9 | Scope now | (a) All (18 days). (b) First cut (8.5 days). | (b). |
+| D9 | Scope now | (a) All (18.5 days). (b) First cut (9 days). | (b). |
