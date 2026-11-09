@@ -4,6 +4,7 @@ import * as mocks from './app/mock-backends';
 import { installBrowserMocks } from './app/core/mock-registry';
 import { resetMockJobs } from './app/jobs/mock-jobs';
 import { resetMockNotifications } from './app/notifications/mock-notifications';
+import { testEnded, testStarted } from './testing/test-lifetime';
 
 // The app loads the mock backends before bootstrapping in a browser; specs get them at once.
 installBrowserMocks(mocks);
@@ -13,6 +14,11 @@ installBrowserMocks(mocks);
 const dropTauriStub = () => delete (window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__'];
 beforeEach(dropTauriStub);
 afterEach(dropTauriStub);
+
+// A timed-out test's body keeps running after Vitest moves on; helpers such as `settle()` stop once their test has ended
+// instead of acting on the next test's TestBed (testing/test-lifetime.ts).
+beforeEach(testStarted);
+afterEach(testEnded);
 
 // The mock jobs service and notification centre are page-wide singletons, and spec files share the page (the Angular
 // builder runs Vitest with `isolate: false`). A job one test left running held its kind's slot (one import at a time)

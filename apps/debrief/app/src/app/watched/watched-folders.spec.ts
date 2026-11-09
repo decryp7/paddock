@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
-import { settle, all, el, text } from '../../testing/helpers';
+import { settle, all, el, text, tinyDataset } from '../../testing/helpers';
+import { ManualClock } from '../../testing/manual-clock';
 import { DebriefBackend } from '../core/backend';
 import { MockBackend } from '../core/mock/mock-backend';
 import { Platform } from '../core/platform';
@@ -7,15 +8,19 @@ import { WorkspaceStore } from '../core/workspace.store';
 import { parseWatchedFolders, WatchedFoldersStore } from './watched-folders.store';
 import { WatchedFoldersView } from './watched-folders-view';
 
+// The small dataset keeps each test fast; the manual clock makes the mock's "a file settles 400 ms later" a step the
+// test takes. With the 40k-event demo data the view test only passed because loading it outlasted that real 400 ms
+// timer, and on a slow CI runner it took 20 s (CI run 7825).
 function setup(picked: string[] = ['/logs/incoming']) {
-  const backend = new MockBackend({ latency: false });
+  const clock = new ManualClock();
+  const backend = new MockBackend({ latency: false, dataset: tinyDataset, clock });
   TestBed.configureTestingModule({
     providers: [
       { provide: DebriefBackend, useValue: backend },
       { provide: Platform, useValue: { pickPaths: async () => picked, isTauri: () => false } },
     ],
   });
-  return { backend, store: TestBed.inject(WatchedFoldersStore), workspace: TestBed.inject(WorkspaceStore) };
+  return { backend, clock, store: TestBed.inject(WatchedFoldersStore), workspace: TestBed.inject(WorkspaceStore) };
 }
 
 describe('parseWatchedFolders', () => {
@@ -64,13 +69,16 @@ describe('WatchedFoldersStore', () => {
 
 describe('WatchedFoldersView', () => {
   it('lists folders, adds the picked one and removes it again', async () => {
-    setup(['/logs/incoming']);
+    const { clock } = setup(['/logs/incoming']);
     const fixture = TestBed.createComponent(WatchedFoldersView);
     fixture.detectChanges();
     expect(text(fixture)).toContain('No folders are watched.');
     el<HTMLButtonElement>(fixture, '[data-testid=watch-add]').click();
     await settle(fixture, 4);
     expect(all(fixture, '.item')).toHaveLength(1);
+    expect(text(fixture)).toContain('0 files imported · 1 waiting');
+    await clock.advance(400);
+    await settle(fixture, 4);
     expect(text(fixture)).toContain('/logs/incoming');
     expect(text(fixture)).toContain('1 file imported');
     const box = el<HTMLInputElement>(fixture, '.item input');
