@@ -35,6 +35,9 @@ test.describe('lenses and filter sets', () => {
     const all = await initialTotal(page);
     const levels = page.getByRole('toolbar', { name: 'Levels' });
     await levels.getByRole('button', { name: /^ERR/ }).click();
+    // The total changes only when the new query's first page arrives: read it once it has, never right after the click
+    // (that read the unfiltered total, and the lens check below then waited for the wrong value).
+    await expect(total).not.toHaveText(all);
     const errorsOnly = await total.innerText();
 
     await lensMenu(page, /Save current as lens/);
