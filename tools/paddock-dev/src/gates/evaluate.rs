@@ -272,8 +272,10 @@ pub fn evaluate(input: &Input) -> Outcome {
             Some("scripts/affected-marks.mjs"),
             None,
             "planner",
-            "not measured: the planner could not say which plan outputs a check's files turn on, so 'runs when planned' is unchecked"
-                .into(),
+            format!(
+                "not measured: the planner could not say which plan outputs a check's files turn on, so 'runs when planned' is unchecked{}",
+                input.planner.failure().map(|why| format!(" (cause: {why})")).unwrap_or_default()
+            ),
             "Run `echo '[\"scripts/affected.mjs\"]' | node scripts/affected-marks.mjs` and fix what it reports.",
         );
     }
@@ -716,6 +718,10 @@ mod tests {
     const REG_HEAD: &str = "version = 1\n[docs]\ninclude = [\"AGENTS.md\"]\nexclude = []\n[measurements]\nfiles = [\"notes/*.txt\"]\n";
 
     fn run(register: Option<&str>, files: &[(&str, &str)], contracts: &[(&str, &str)]) -> Outcome {
+        run_with(register, files, contracts, &AllMarks)
+    }
+
+    fn run_with(register: Option<&str>, files: &[(&str, &str)], contracts: &[(&str, &str)], planner: &dyn gating::Planner) -> Outcome {
         let tree = MemTree::new(files);
         let mut sources = Sources::default();
         sources.workflows.insert(".gitea/workflows/ci.yml".into(), CI.into());
@@ -733,7 +739,7 @@ mod tests {
             history: Vec::new(),
             today: Date::parse("2026-11-10").unwrap(),
             release_tag: None,
-            planner: &AllMarks,
+            planner,
             history_error: None,
             warn: false,
             shallow: false,
@@ -755,6 +761,31 @@ mod tests {
                     .collect(),
             )
         }
+    }
+
+    /// A planner that cannot answer and says why.
+    struct Down;
+    impl gating::Planner for Down {
+        fn marks(&self, _: &str) -> Option<BTreeSet<String>> {
+            None
+        }
+        fn failure(&self) -> Option<String> {
+            Some("scripts/affected-marks.mjs: it did not finish within 60 seconds".into())
+        }
+    }
+
+    #[test]
+    fn a_planner_that_cannot_answer_is_not_measured_and_the_finding_names_why() {
+        let o = run_with(Some(REG_HEAD), &[], &[], &Down);
+        let m = messages(&o);
+        let f = m
+            .iter()
+            .find(|x| x.contains("planner could not say"))
+            .unwrap_or_else(|| panic!("{m:?}"));
+        assert!(
+            f.contains("it did not finish within 60 seconds"),
+            "the cause is in the finding: {f}"
+        );
     }
 
     const RUST_APP: &str = r#"{"cargo": "."}"#;

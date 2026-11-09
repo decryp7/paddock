@@ -776,6 +776,10 @@ pub trait Planner {
     fn prefetch(&self, _files: &[String]) {}
     /// The plan job outputs a change of `file` alone turns on; `None` when the planner cannot answer.
     fn marks(&self, file: &str) -> Option<BTreeSet<String>>;
+    /// Why the planner could not answer (its command, how long it ran, its error), for the finding that says "not measured".
+    fn failure(&self) -> Option<String> {
+        None
+    }
 }
 
 /// The files whose planner marks decide whether a check's planned lines gate it: the check's own definition.

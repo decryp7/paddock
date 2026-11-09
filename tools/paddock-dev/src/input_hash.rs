@@ -213,7 +213,10 @@ pub trait Exec {
 /// Feeds `bytes` to the child's standard input (on its own thread, so a large input cannot stall the wait) and waits for the
 /// child for at most `limit`; a child still running then is killed and reported as an error.
 fn pipe_in(mut child: std::process::Child, bytes: &[u8], limit: Duration) -> std::io::Result<std::process::Output> {
+    use std::io::Read;
     let stdin = child.stdin.take();
+    let mut stdout = child.stdout.take();
+    let mut stderr = child.stderr.take();
     let deadline = std::time::Instant::now() + limit;
     std::thread::scope(|s| {
         s.spawn(move || {
@@ -222,9 +225,24 @@ fn pipe_in(mut child: std::process::Child, bytes: &[u8], limit: Duration) -> std
                 let _ = pipe.write_all(bytes);
             }
         });
-        loop {
-            if child.try_wait()?.is_some() {
-                return child.wait_with_output();
+        // Both outputs are read while the child runs: a reply larger than the pipe would block it until the limit otherwise.
+        let out = s.spawn(move || {
+            let mut v = Vec::new();
+            if let Some(p) = stdout.as_mut() {
+                let _ = p.read_to_end(&mut v);
+            }
+            v
+        });
+        let err = s.spawn(move || {
+            let mut v = Vec::new();
+            if let Some(p) = stderr.as_mut() {
+                let _ = p.read_to_end(&mut v);
+            }
+            v
+        });
+        let status = loop {
+            if let Some(status) = child.try_wait()? {
+                break status;
             }
             if std::time::Instant::now() >= deadline {
                 let _ = child.kill();
@@ -235,7 +253,12 @@ fn pipe_in(mut child: std::process::Child, bytes: &[u8], limit: Duration) -> std
                 ));
             }
             std::thread::sleep(Duration::from_millis(5));
-        }
+        };
+        Ok(std::process::Output {
+            status,
+            stdout: out.join().unwrap_or_default(),
+            stderr: err.join().unwrap_or_default(),
+        })
     })
 }
 
@@ -363,6 +386,17 @@ pub fn command() -> Result<Report, CliError> {
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    /// The child echoes more than a pipe holds: its output must be read while it runs, or it blocks until the limit.
+    #[cfg(unix)]
+    #[test]
+    fn pipe_in_reads_a_large_reply_while_the_child_runs() {
+        let bytes = vec![b'x'; 1 << 20];
+        let mut cmd = std::process::Command::new("cat");
+        cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        let out = pipe_in(cmd.spawn().unwrap(), &bytes, Duration::from_secs(20)).expect("finishes");
+        assert_eq!(out.stdout.len(), bytes.len());
+    }
 
     #[test]
     fn inputs_skip_comments_and_refuse_odd_paths() {
