@@ -76,6 +76,13 @@ impl JobCentre {
     /// job; a search or log read while another of its kind runs is refused (`Busy`), because the person has to
     /// choose which to keep.
     pub fn start(&self, shared: &Arc<Shared>, spec: JobSpec) -> Result<WireSnapshot, AgentError> {
+        // No job starts once the agent stops.
+        let Some(_pass) = shared.stop_gate.enter() else {
+            return Err(AgentError::new(
+                ErrorCode::AgentUnavailable,
+                "Dyno is stopping; the job was not started.",
+            ));
+        };
         let spec = validated(spec)?;
         let ctx = {
             let mut book = lock(&self.book);

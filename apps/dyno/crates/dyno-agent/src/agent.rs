@@ -463,6 +463,9 @@ pub struct Shared {
     pub helper_first: bool,
     /// Cancelled with the agent's stop: what runs for the agent alone (the process-sweep worker) ends with it.
     pub stop_token: paddock_jobs::CancelToken,
+    /// What must not start once the agent stops (a keep-awake, a job, a due wake's actions and its saved next time): the stop
+    /// closes it and waits for what is already inside.
+    pub stop_gate: StopGate,
     stop: AtomicBool,
     wake: (Mutex<bool>, Condvar),
     next_conn: AtomicU64,
@@ -506,6 +509,63 @@ impl crate::bench::BenchEnv for AgentBenchEnv {
 
     fn space(&self, mount: &str) -> Option<(u64, u64)> {
         dyno_platform::volumes::capacity(mount)
+    }
+}
+
+std::thread_local! {
+    /// How many [`StopPass`]es this thread holds (a pass taken inside another one is let in after the gate closed).
+    static PASSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The gate work passes through when it must not start after the agent stops: [`StopGate::enter`] refuses once the stop has
+/// closed it, and [`StopGate::close`] waits until the work already inside has finished. A pass taken by a thread that holds one
+/// is always given, so an action and the save that belongs to it end together.
+#[derive(Default)]
+pub struct StopGate {
+    /// Whether the gate is closed, and how many passes are out.
+    state: Mutex<(bool, usize)>,
+    idle: Condvar,
+}
+
+/// Held while work that the stop must wait for runs; released when dropped.
+pub struct StopPass<'a>(&'a StopGate);
+
+impl StopGate {
+    /// A pass, or `None` once the gate is closed (unless this thread already holds one).
+    pub fn enter(&self) -> Option<StopPass<'_>> {
+        let mut state = lock(&self.state);
+        if state.0 && !Self::held_here() {
+            return None;
+        }
+        state.1 += 1;
+        PASSES.with(|p| p.set(p.get() + 1));
+        Some(StopPass(self))
+    }
+
+    /// Closes the gate and waits until every pass is back. Work behind it is short (no helper call): a keep-awake, a job
+    /// queued, a row saved.
+    pub fn close(&self) {
+        let mut state = lock(&self.state);
+        state.0 = true;
+        while state.1 > 0 {
+            state = self.idle.wait(state).unwrap_or_else(PoisonError::into_inner);
+        }
+    }
+
+    /// Whether this thread holds a pass.
+    pub fn held_here() -> bool {
+        PASSES.with(|p| p.get() > 0)
+    }
+}
+
+impl Drop for StopPass<'_> {
+    fn drop(&mut self) {
+        PASSES.with(|p| p.set(p.get().saturating_sub(1)));
+        let mut state = lock(&self.0.state);
+        state.1 = state.1.saturating_sub(1);
+        if state.1 == 0 {
+            self.0.idle.notify_all();
+        }
     }
 }
 
@@ -785,6 +845,7 @@ impl Shared {
             cores,
             helper_first,
             stop_token: paddock_jobs::CancelToken::new(),
+            stop_gate: StopGate::default(),
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),
             next_conn: AtomicU64::new(1),
@@ -830,9 +891,12 @@ impl Shared {
     /// Runs `write` on the core under its lock unless the agent has been asked to stop (then `None`). A thread the stop does not
     /// wait for (one that may be inside a helper call) writes to the store only through this: [`crate::Running::stop`] takes the
     /// lock once after asking to stop, so no such write reaches the store after the stop returns.
+    ///
+    /// A thread inside the [`StopGate`] (it entered before the stop closed the gate, and the stop waits for it) may still write: what
+    /// it began is finished together, such as a due wake's actions and the next time it saves.
     pub fn write_unless_stopped<R>(&self, write: impl FnOnce(&mut Core) -> R) -> Option<R> {
         let mut core = lock(&self.core);
-        if self.stopped() {
+        if self.stopped() && !StopGate::held_here() {
             return None;
         }
         Some(write(&mut core))
