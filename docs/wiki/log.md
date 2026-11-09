@@ -7,4 +7,4 @@ Append-only. One line per change: `## [YYYY-MM-DD] ingest|lint|fix | page | subj
 ## [2026-10-31] fix | all | fact-check fixes: check numbers, Windows ERR_ABORTED, Dyno socket sweep, Offline mode, rule restatements, line citations
 ## [2026-10-31] fix | all | pilot concluded and official; second fact-check round (citations, hashes, check numbers)
 ## [2026-11-09] fix | eval, process-starts, logging-and-diagnostics | check numbers claimed only on branches removed, planned logging and cargo-metadata checks cited without numbers (C100 docs gate); awaiting fact-check
-## [2026-11-09] fix | eval, process-starts, logging-and-diagnostics | check-number claims rebuilt from git ls-tree of the train 3 tree and the origin branches, C52 registered as planned, verified dates set; awaiting fact-check
+## [2026-11-09] fix | eval, process-starts, logging-and-diagnostics | check-number claims rebuilt from git ls-tree of the train 3 tree and the origin branches, the Pacenotes check stated in words, not by id, verified dates set; awaiting fact-check

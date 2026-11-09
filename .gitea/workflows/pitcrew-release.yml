@@ -73,6 +73,7 @@ jobs:
     uses: ./.gitea/workflows/ci.yml
     with:
       app: pitcrew
+      release: true
     secrets:
       BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
 

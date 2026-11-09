@@ -65,6 +65,7 @@ jobs:
     uses: ./.gitea/workflows/ci.yml
     with:
       app: pitwall
+      release: true
       # A manual run with gates is the "one CI build with bundles" before a tag: WebKit included.
       webkit: ${{ github.event_name == 'workflow_dispatch' }}
     secrets:

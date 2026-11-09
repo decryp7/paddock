@@ -65,6 +65,7 @@ jobs:
     uses: ./.gitea/workflows/ci.yml
     with:
       app: spotter
+      release: true
       # A manual run with gates is the "one CI build with bundles" before a tag: WebKit included, as the old bundles run was.
       webkit: ${{ github.event_name == 'workflow_dispatch' }}
     secrets:

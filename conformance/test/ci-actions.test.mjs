@@ -2029,7 +2029,7 @@ test('a release or installer job never runs a downloaded ./dev: PADDOCK_DEV_DOWN
   assert.ok(checked >= 5, `found the release jobs (${checked})`);
   let tagJobs = 0;
   for (const job of jobsOf('ci.yml').filter((j) => j.text.includes('\n      PADDOCK_DEV_TOKEN:'))) {
-    assert.match(job.text, /PADDOCK_DEV_DOWNLOAD: \$\{\{ startsWith\(github\.ref, 'refs\/tags\/'\) && '0' \|\| '' \}\}/, `ci.yml:${job.id}: a run for a tag builds the tool from source`);
+    assert.match(job.text, /PADDOCK_DEV_DOWNLOAD: \$\{\{ \(inputs\.release == true \|\| startsWith\(github\.ref, 'refs\/tags\/'\)\) && '0' \|\| '' \}\}/, `ci.yml:${job.id}: a run for a tag builds the tool from source`);
     tagJobs += 1;
   }
   assert.equal(tagJobs, 7, 'the ci.yml jobs that read the prebuilt tool: the four that take a host slot, ipc-endpoints, conformance and tools-macos');
@@ -2041,7 +2041,7 @@ test('dev-tool.yml publishes only from main, in every job (ADR 0022: the store i
   for (const job of jobs) assert.match(job.text, /\n    if: \$\{\{ github\.ref == 'refs\/heads\/main'/, `dev-tool.yml:${job.id}: runs only on refs/heads/main`);
 });
 
-const TAG_RULE = /PADDOCK_DEV_DOWNLOAD: (?:"0"|\$\{\{ startsWith\(github\.ref, 'refs\/tags\/'\) && '0' \|\| '' \}\}|\$\{\{ \(inputs\.release == 'true' \|\| startsWith\(github\.ref, 'refs\/tags\/'\)\) && '0' \|\| '' \}\})/;
+const TAG_RULE = /PADDOCK_DEV_DOWNLOAD: (?:"0"|\$\{\{ startsWith\(github\.ref, 'refs\/tags\/'\) && '0' \|\| '' \}\}|\$\{\{ \(inputs\.release == true \|\| startsWith\(github\.ref, 'refs\/tags\/'\)\) && '0' \|\| '' \}\}|\$\{\{ \(inputs\.release == 'true' \|\| startsWith\(github\.ref, 'refs\/tags\/'\)\) && '0' \|\| '' \}\})/;
 
 /**
  * Where a tag run could still download the tool (ADR 0022: tag jobs bypass every cache). Two rules, both on parsed jobs and steps:
