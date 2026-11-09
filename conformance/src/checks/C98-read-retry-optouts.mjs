@@ -27,6 +27,8 @@ export default {
   id: 'C98',
   title: 'temporary opt-outs of the read retry end on time',
   rule: 30,
+  scope: 'root',
+  mode: 'gate',
   run(ctx) {
     const today = ctx.now.toISOString().slice(0, 10);
     const out = [];

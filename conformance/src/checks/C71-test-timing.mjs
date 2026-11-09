@@ -343,6 +343,8 @@ export default {
   id: 'C71',
   title: 'Tests do not settle on real time',
   rule: 49,
+  scope: 'both',
+  mode: 'gate',
   run(ctx) {
     if (!ctx.config.timingLint) return [];
     const sites = timingSites(ctx.files(), ctx.read);
