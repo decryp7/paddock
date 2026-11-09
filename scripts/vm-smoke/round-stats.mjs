@@ -7,6 +7,7 @@
 //
 //   node scripts/vm-smoke/round-stats.mjs [--since YYYY-MM-DD] [--list-unclassified] <report.json ...>
 import { readFileSync } from 'node:fs';
+import { isMain } from '../../conformance/src/util/is-main.mjs';
 
 /** Ordered keyword rules; the first match wins. Pure. */
 export const REASON_RULES = [
@@ -71,7 +72,7 @@ export function roundStats(reports) {
   return { per, reasons, byOs, unclassified };
 }
 
-if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+if (isMain(import.meta.url)) {
   const args = process.argv.slice(2);
   const since = args.includes('--since') ? args[args.indexOf('--since') + 1] : null;
   const files = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--since');

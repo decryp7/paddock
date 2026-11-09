@@ -4,7 +4,7 @@
 //   node scripts/vm-smoke/win-vm-target.mjs --vmx    prints the checked .vmx path, or exits 2 with an ::error:: line
 import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { isMain } from '../../conformance/src/util/is-main.mjs';
 
 export const WIN_VM_NAME = 'paddock-win11-test';
 /** The test VM's folder; the .vmx, the SSH keys and the snapshots all live below it. */
@@ -32,7 +32,7 @@ export function checkWinVmTarget({ realpath = realpathSync } = {}) {
   return { dir, vmx };
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) {
+if (isMain(import.meta.url)) {
   if (process.argv[2] !== '--vmx') {
     console.error('usage: win-vm-target.mjs --vmx');
     process.exit(2);
