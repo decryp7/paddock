@@ -169,7 +169,9 @@ pub fn sweep_in_background(
     }
     let work = move || {
         // Bulk work nobody waits on (rule 52): below the user's own work.
-        debrief_core::threads::lower_priority();
+        if !debrief_core::threads::lower_priority() {
+            log::info!("The OS did not lower the priority of the {what} sweep; it runs at the normal level");
+        }
         sweep_old(&root, prefix, max_age, what)
     };
     match std::thread::Builder::new().name(format!("sweep {what}")).spawn(work) {

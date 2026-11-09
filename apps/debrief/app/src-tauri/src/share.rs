@@ -85,20 +85,28 @@ fn touch_folder_under(root: &Path, path: &Path, now: std::time::SystemTime) -> b
     crate::app_dirs::set_folder_mtime(&root.join(first), now).is_ok()
 }
 
+/// The start-up work on the folder of extracted bundles, in this order: the folders saved sessions name are marked as in
+/// use now, and only then the sweep of old extractions starts (in the background, main instance only). Returns the sweep
+/// thread, when one was started.
+fn prepare_bundles(root: &Path, sources: &[PathBuf], main_instance: bool) -> Option<std::thread::JoinHandle<usize>> {
+    let touched = touch_session_sources(root, sources, std::time::SystemTime::now());
+    log::info!(Folders = touched as u64; "Bundle folders named by saved sessions were marked as in use");
+    start_bundle_sweep(root.to_path_buf(), main_instance)
+}
+
 /// Fixes the folder of extracted bundles under the app's local data folder (call from `setup`, in its own step) and
-/// sweeps the old extractions in the background.
+/// prepares it ([`prepare_bundles`]).
 pub(crate) fn init_bundles_root<R: Runtime>(app: &AppHandle<R>) {
     #[cfg(not(test))]
     use tauri::Manager as _;
     #[cfg(not(test))]
     if let Some(root) = resolve_bundles_root(crate::app_dirs::webview_data(app)) {
         let main_instance = app.try_state::<crate::instance::SingleInstance>().is_some_and(|s| s.0);
-        // Folders a saved session names count as used now, before the sweep starts.
-        if let Some(life) = app.try_state::<crate::lifecycle::Lifecycle>() {
-            let touched = touch_session_sources(&root, &life.session_sources(), std::time::SystemTime::now());
-            log::info!(Folders = touched as u64; "Bundle folders named by saved sessions were marked as in use");
-        }
-        start_bundle_sweep(root.clone(), main_instance);
+        let sources = app
+            .try_state::<crate::lifecycle::Lifecycle>()
+            .map(|life| life.session_sources())
+            .unwrap_or_default();
+        prepare_bundles(&root, &sources, main_instance);
         let _ = BUNDLES_ROOT.set(root);
     }
     #[cfg(test)]
@@ -501,6 +509,33 @@ mod tests {
         assert_eq!(handle.join().unwrap(), 1);
         assert!(root.path().join("named").exists(), "named by a session: kept");
         assert!(!root.path().join("unnamed").exists());
+    }
+
+    /// End to end: a saved session on disk names a source in an old extraction; the start-up work keeps that folder and
+    /// removes the old one nobody names.
+    #[test]
+    fn start_up_keeps_the_extraction_a_saved_session_names_and_sweeps_the_rest() {
+        use crate::lifecycle::{Lifecycle, SessionStore};
+        let data = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(10 * 24 * 3600);
+        for name in ["named", "unnamed"] {
+            std::fs::create_dir_all(root.path().join(name).join("logs")).unwrap();
+            crate::app_dirs::set_folder_mtime(&root.path().join(name), old).unwrap();
+        }
+        let project = debrief_core::project::ProjectFile {
+            version: 1,
+            name: "saved".into(),
+            sources: vec![root.path().join("named").join("logs").to_string_lossy().into_owned()],
+            profile: "name = 'x'".into(),
+            ..Default::default()
+        };
+        SessionStore::new(data.path().to_path_buf()).save("main", &project).unwrap();
+        let life = Lifecycle::begin(Some(data.path().to_path_buf()), false);
+        let handle = prepare_bundles(root.path(), &life.session_sources(), true).expect("main instance sweeps");
+        assert_eq!(handle.join().unwrap(), 1);
+        assert!(root.path().join("named").exists(), "named by a saved session: kept");
+        assert!(!root.path().join("unnamed").exists(), "named by nobody: removed");
     }
 
     #[test]

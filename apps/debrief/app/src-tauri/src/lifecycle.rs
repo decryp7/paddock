@@ -312,16 +312,22 @@ impl Lifecycle {
             .collect()
     }
 
-    /// The opened files and folders the autosaved sessions (this run's and the recovered ones) name.
-    #[cfg(not(test))] // used by `share::init_bundles_root`, which tests do not run
+    /// The opened files and folders the autosaved sessions (this run's and the recovered ones) name. A session file that
+    /// cannot be read is skipped. The sessions of separate instances (`instances/<pid>/`) are not listed: they are not
+    /// swept by (and not visible to) the main instance, and a project they open marks its own bundle folders as used.
     pub fn session_sources(&self) -> Vec<PathBuf> {
         let Some(s) = &self.sessions else { return Vec::new() };
-        s.all_files()
+        let mut sources: Vec<PathBuf> = s
+            .all_files()
             .into_iter()
             .filter_map(|f| ProjectFile::load(&f).ok())
             .flat_map(|p| p.sources)
             .map(PathBuf::from)
-            .collect()
+            .collect();
+        // A session file stays in `sessions/` after it is copied to `recovered/`: each source once.
+        sources.sort();
+        sources.dedup();
+        sources
     }
 
     /// A window was closed by the user: it is not restored after a crash.
@@ -1429,6 +1435,42 @@ mod tests {
             ui: Value::Null,
             ..Default::default()
         }
+    }
+
+    fn project_naming(sources: &[&str]) -> ProjectFile {
+        ProjectFile {
+            sources: sources.iter().map(|s| s.to_string()).collect(),
+            ..project("naming")
+        }
+    }
+
+    /// The sources saved sessions name: this run's, the recovered ones, and nothing from a session file that is corrupt.
+    #[test]
+    fn session_sources_come_from_saved_and_recovered_sessions_and_skip_a_corrupt_one() {
+        let d = temp("session-sources");
+        {
+            let store = SessionStore::new(d.clone());
+            store.rotate();
+            store.save("w-old", &project_naming(&["/bundles/a/old.log"])).unwrap();
+            std::fs::write(d.join(MARKER), r#"{"version":1,"pid":4000000000,"startedAt":1}"#).unwrap();
+        }
+        let life = Lifecycle::begin_in(Some(d.clone()), false, InstanceScope::Main);
+        life.sessions
+            .as_ref()
+            .unwrap()
+            .save(MAIN, &project_naming(&["/bundles/b/new.log", "/bundles/b/more.log"]))
+            .unwrap();
+        let corrupt = d.join(SESSIONS_DIR).join("w-bad");
+        std::fs::create_dir_all(&corrupt).unwrap();
+        std::fs::write(corrupt.join(SESSION_FILE), "{ not json").unwrap();
+        let mut got = life.session_sources();
+        got.sort();
+        let want: Vec<PathBuf> = ["/bundles/a/old.log", "/bundles/b/more.log", "/bundles/b/new.log"]
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        assert_eq!(got, want);
+        assert!(Lifecycle::begin_in(None, false, InstanceScope::Main).session_sources().is_empty());
     }
 
     fn name_of(path: &Path) -> String {
