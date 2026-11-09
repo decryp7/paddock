@@ -118,7 +118,10 @@ pub struct SharedStream(Arc<TcpStream>);
 impl SharedStream {
     /// Ends one or both directions of the connection.
     pub fn shutdown(&self, how: Shutdown) {
-        let _ = self.0.shutdown(how);
+        if let Err(e) = self.0.shutdown(how) {
+            // The peer would wait for more input and never end the connection (ER-27: say so).
+            log::warn!("paddock_mcp: could not end {how:?} of the connection: {e}");
+        }
     }
 }
 

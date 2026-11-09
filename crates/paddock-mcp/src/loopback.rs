@@ -156,12 +156,18 @@ impl Serving {
     }
 
     fn shutdown(&mut self) {
+        // Runs once: `stop` and then `Drop` both come here, and a second wake connection would go to a port this listener
+        // no longer holds (another process may hold it by then; on Windows a refused loopback connect retries for 2 s).
+        let Some(accept) = self.accept.take() else {
+            return;
+        };
         self.stop.store(true, Ordering::SeqCst);
-        // A blocking accept is woken by connecting to it.
-        let _ = TcpStream::connect(self.addr);
-        if let Some(a) = self.accept.take() {
-            let _ = a.join();
+        // A blocking accept is woken by connecting to it. Only a running accept thread still holds the listener: one that
+        // has already ended (a panic) closed it, and a connection would go to a closed port or to whoever took it since.
+        if !accept.is_finished() {
+            let _ = TcpStream::connect(self.addr);
         }
+        let _ = accept.join();
         let conns = std::mem::take(
             &mut *self
                 .conns
@@ -396,8 +402,15 @@ pub fn serve_loopback(
                 // key line is read: a socket closed with unread data is reset, and the reset can reach the client before
                 // the refusal (2026-11-07). The drain has its own thread, at most [`DRAIN_PLACES`] at a time, each ended
                 // by the key line, the client's end, the handshake timeout or a stop.
+                // Logged before the client can see the end of its connection, so the log line is there by the time it does.
+                let drain = Place::take(&drains, DRAIN_PLACES);
+                if drain.is_none() {
+                    log::warn!(
+                        "paddock_mcp: connection #{id} from port {peer}: all {DRAIN_PLACES} drains are busy; closed without reading its key line (the client may see a reset)"
+                    );
+                }
                 let _ = stream.shutdown(Shutdown::Write);
-                if let Some(draining) = Place::take(&drains, DRAIN_PLACES) {
+                if let Some(draining) = drain {
                     let stream = Arc::new(stream);
                     let kept = Arc::downgrade(&stream);
                     let stop = stop2.clone();
@@ -407,10 +420,6 @@ pub fn serve_loopback(
                         drop(stream);
                     });
                     list.push((kept, handle));
-                } else {
-                    log::warn!(
-                        "paddock_mcp: connection #{id} from port {peer}: all {DRAIN_PLACES} drains are busy; closed without reading its key line (the client may see a reset)"
-                    );
                 }
                 continue;
             };
@@ -755,6 +764,63 @@ mod tests {
             .map_while(Result::ok)
             .collect();
         (s, lines)
+    }
+
+    /// Stopping wakes the accept with one connection to the listener's own address, and only while the listener is still
+    /// open. `stop` used to run the shutdown a second time from `Drop`, whose wake connection went to the closed port: on
+    /// Windows a refused loopback connect is retried for about 2 s (every listener stop took 2 s there, CI run 7810), and a
+    /// process that had meanwhile taken the port got a stranger's connection.
+    #[test]
+    fn a_stopped_listener_never_connects_to_its_old_port_again() {
+        let serving = serve_loopback(
+            test_server(),
+            Arc::new(crate::keys::KeyStore::new()),
+            TcpListener::bind("127.0.0.1:0").unwrap(),
+            4,
+        )
+        .unwrap();
+        let addr = serving.addr();
+        let mut serving = serving;
+        serving.shutdown();
+        // Whoever binds the freed port next (here the test) must not be reached by this listener's stop.
+        let next_owner =
+            TcpListener::bind(addr).expect("the stopped listener's port is free again");
+        next_owner.set_nonblocking(true).unwrap();
+        drop(serving);
+        let reached = next_owner.accept();
+        assert!(
+            matches!(&reached, Err(e) if e.kind() == io::ErrorKind::WouldBlock),
+            "the stop of a stopped listener connected to its old port: {reached:?}"
+        );
+    }
+
+    /// An accept thread that has already ended (here: it saw the stop flag on a connection, as after a panic or an error it
+    /// would have ended too) holds no listener, so the stop must not make its wake connection: it would go to a closed port,
+    /// about 2 s on Windows, or to whoever took the port since.
+    #[test]
+    fn a_listener_whose_accept_already_ended_is_stopped_without_a_connection() {
+        let mut serving = serve_loopback(
+            test_server(),
+            Arc::new(crate::keys::KeyStore::new()),
+            TcpListener::bind("127.0.0.1:0").unwrap(),
+            4,
+        )
+        .unwrap();
+        let addr = serving.addr();
+        serving.stop.store(true, Ordering::SeqCst);
+        drop(TcpStream::connect(addr).unwrap());
+        paddock_testkit::wait_until("the accept thread ended by itself", || {
+            serving.accept.as_ref().is_some_and(JoinHandle::is_finished)
+        });
+        let next_owner =
+            TcpListener::bind(addr).expect("the ended accept thread's port is free again");
+        next_owner.set_nonblocking(true).unwrap();
+        serving.shutdown();
+        let reached = next_owner.accept();
+        assert!(
+            matches!(&reached, Err(e) if e.kind() == io::ErrorKind::WouldBlock),
+            "the stop connected to a port its listener no longer holds: {reached:?}"
+        );
     }
 
     #[test]

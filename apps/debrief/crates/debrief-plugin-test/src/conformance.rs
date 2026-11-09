@@ -301,68 +301,19 @@ fn cancellation(p: &PluginUnderTest, inputs: &[(String, Vec<u8>)]) -> Result<Str
     };
     let result = (|| -> Result<String, String> {
         let mut stream = p.child.peer().stream_request(&req, 1).map_err(|e| e.to_string())?;
-        // Waits for the host's signal that the whole file was read (a loaded machine reads it late, and cancelling
-        // before the importer has it all ends the read, not the importer's own work). The slice only bounds how
-        // long to wait before looking at the stream again. The guard fails a plugin whose read made no progress for
-        // the read stall limit (the bytes read so far are in the message), so the check ends with a cause long before a
-        // test runner's kill; a slow read that keeps advancing is waited for.
-        let read_before = p.host.bytes_read.load(std::sync::atomic::Ordering::Relaxed);
-        let target = read_before + content.len() as u64;
-        let stall = p.launch_options().read_stall;
-        let mut seen = read_before;
-        let mut moved = Instant::now();
-        let mut reported = Instant::now();
+        let poll = || match stream.next(Some(Duration::from_millis(1))) {
+            Ok(StreamEvent::Done(_)) => Some(Ok("the import ended before it could be cancelled".to_string())),
+            Ok(_) => None,
+            Err(e) => Some(Err(format!(
+                "importer \"{}\" ended with an error while its file was being read ({} of {} bytes): {e}",
+                importer.id,
+                p.host.read_of(id),
+                content.len()
+            ))),
+        };
         let waiting = Instant::now();
-        while !p.host.wait_bytes_read(target, Duration::from_millis(20)) {
-            match stream.next(Some(Duration::from_millis(1))) {
-                Ok(StreamEvent::Done(_)) => {
-                    phase("cancellation: the import ended before it could be cancelled");
-                    return Ok("the import ended before it could be cancelled".into());
-                }
-                // The import ended with an error (or the plugin went away) before it had its whole file: the cause is
-                // the error, not a read that stopped advancing, so the check says so at once instead of after the guard.
-                Err(e) => {
-                    let read = p.host.bytes_read.load(std::sync::atomic::Ordering::Relaxed) - read_before;
-                    phase(format_args!(
-                        "cancellation: the import ended with an error after {read} of {} bytes: {e}",
-                        content.len()
-                    ));
-                    return Err(format!(
-                        "importer \"{}\" ended with an error while its file was being read ({read} of {} bytes): {e}",
-                        importer.id,
-                        content.len()
-                    ));
-                }
-                Ok(_) => {}
-            }
-            let now = p.host.bytes_read.load(std::sync::atomic::Ordering::Relaxed);
-            if now != seen {
-                seen = now;
-                moved = Instant::now();
-            }
-            if reported.elapsed() >= Duration::from_secs(2) {
-                reported = Instant::now();
-                phase(format_args!(
-                    "cancellation: read {} of {} bytes after {} ms",
-                    seen - read_before,
-                    content.len(),
-                    waiting.elapsed().as_millis()
-                ));
-            }
-            if moved.elapsed() >= stall {
-                phase(format_args!(
-                    "cancellation: read stalled at {} of {} bytes",
-                    seen - read_before,
-                    content.len()
-                ));
-                return Err(format!(
-                    "importer \"{}\" read {} of {} bytes and then made no progress for {} s (hung)",
-                    importer.id,
-                    seen - read_before,
-                    content.len(),
-                    stall.as_millis() as f64 / 1000.0
-                ));
-            }
+        if let Some(early) = wait_read_whole(&p.host, id, content.len() as u64, &importer.id, p.launch_options().read_stall, poll)? {
+            return Ok(early);
         }
         phase(format_args!(
             "cancellation: whole file read after {} ms, sending the cancel",
@@ -413,6 +364,64 @@ fn cancellation(p: &PluginUnderTest, inputs: &[(String, Vec<u8>)]) -> Result<Str
     Ok(detail)
 }
 
+/// Waits until the plugin has read the whole of lent file `id` (`len` bytes), the host's signal that the importer has
+/// it all (a loaded machine reads it late, and cancelling before the importer has it all ends the read, not the
+/// importer's own work). `poll` looks at the import's stream: `Some(Ok(how))` when it ended, `Some(Err(why))` when it
+/// broke (the plugin died: the cause is the check's, not a stall's).
+/// `Ok(None)`: read whole; `Ok(Some(why))`: the import ended before it could be cancelled; `Err`: it broke, or its
+/// read made no progress for `stall` (the bytes read so far are in the message), so the check ends with a cause long
+/// before a test runner's kill; a slow read that keeps advancing is waited for. The 20 ms slice only bounds how long
+/// to wait before looking at the stream again.
+fn wait_read_whole(
+    host: &crate::host::FakeHost,
+    id: u64,
+    len: u64,
+    importer: &str,
+    stall: Duration,
+    mut poll: impl FnMut() -> Option<Result<String, String>>,
+) -> Result<Option<String>, String> {
+    // Counted by file, not as a difference of the host's total: the plugin may read before this wait begins (it gets
+    // the request first), and on a loaded machine it did, so a baseline taken here missed a chunk and waited for it.
+    let mut seen = host.read_of(id);
+    phase(format_args!("cancellation: {seen} of {len} bytes already read when the wait began"));
+    let mut moved = Instant::now();
+    let mut reported = Instant::now();
+    let waiting = Instant::now();
+    while !host.wait_read_of(id, len, Duration::from_millis(20)) {
+        match poll() {
+            Some(Ok(how)) => {
+                phase(format_args!("cancellation: {how}"));
+                return Ok(Some(how));
+            }
+            Some(Err(why)) => {
+                phase(format_args!("cancellation: {why}"));
+                return Err(why);
+            }
+            None => {}
+        }
+        let now = host.read_of(id);
+        if now != seen {
+            seen = now;
+            moved = Instant::now();
+        }
+        if reported.elapsed() >= Duration::from_secs(2) {
+            reported = Instant::now();
+            phase(format_args!(
+                "cancellation: read {seen} of {len} bytes after {} ms",
+                waiting.elapsed().as_millis()
+            ));
+        }
+        if moved.elapsed() >= stall {
+            phase(format_args!("cancellation: read stalled at {seen} of {len} bytes"));
+            return Err(format!(
+                "importer \"{importer}\" read {seen} of {len} bytes and then made no progress for {} s (hung)",
+                stall.as_millis() as f64 / 1000.0
+            ));
+        }
+    }
+    Ok(None)
+}
+
 /// The frame limit of the `oversized-frames` check.
 const SMALL_FRAME: usize = 64 * 1024;
 
@@ -448,4 +457,54 @@ fn oversized(p: &PluginUnderTest, inputs: &[(String, Vec<u8>)]) -> Result<String
         Ok(out) => format!("{} records fit in 64 KiB frames", out.records.len()),
         Err(e) => format!("refused with a typed error: {e:#}"),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host::FakeHost;
+    use debrief_plugin_api::protocol::READ_CHUNK;
+
+    fn host() -> FakeHost {
+        let host = FakeHost::default();
+        host.stall_reads_after(None);
+        host.fail_reads_after(None);
+        host
+    }
+
+    #[test]
+    fn reads_served_before_the_wait_began_count_toward_the_whole_file() {
+        // A loaded machine: the plugin reads the lent file (its first chunk, or all of it) before the check starts
+        // waiting. Those bytes are this file's too, so the wait ends at once; it is never judged a stall.
+        let host = host();
+        let len = 3 * u64::from(READ_CHUNK) + 4;
+        let id = host.lend_file(vec![b'x'; len as usize]);
+        let mut offset = 0;
+        while offset < len {
+            offset += host.read_file(id, offset, READ_CHUNK).unwrap().len() as u64;
+        }
+        let got = wait_read_whole(&host, id, len, "fixture", Duration::from_millis(200), || None);
+        assert_eq!(got, Ok(None));
+    }
+
+    #[test]
+    fn reads_of_another_lent_file_do_not_count() {
+        let host = host();
+        let other = host.lend_file(vec![b'y'; 8]);
+        let id = host.lend_file(vec![b'x'; 8]);
+        assert_eq!(host.read_file(other, 0, 8).unwrap().len(), 8);
+        let got = wait_read_whole(&host, id, 8, "fixture", Duration::from_millis(200), || None);
+        let e = got.unwrap_err();
+        assert!(e.contains("read 0 of 8 bytes") && e.contains("made no progress"), "{e}");
+    }
+
+    #[test]
+    fn an_import_that_broke_ends_the_wait_with_its_cause() {
+        let host = host();
+        let id = host.lend_file(vec![b'x'; 8]);
+        let got = wait_read_whole(&host, id, 8, "fixture", Duration::from_secs(3600), || {
+            Some(Err("the plugin died".into()))
+        });
+        assert_eq!(got, Err("the plugin died".into()));
+    }
 }
