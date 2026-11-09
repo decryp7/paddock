@@ -740,6 +740,12 @@ fn sandbox_status(host: Vec<debrief_ipc::sandbox::Note>, reported: Vec<debrief_i
     lines
 }
 
+/// The plugin's own program folder as its working folder, never the shared temp folder (another local user could plant
+/// files there). A bare program name has an empty parent, which would fail the spawn: then the folder is not set.
+fn program_folder(exe: &std::path::Path) -> Option<PathBuf> {
+    exe.parent().filter(|p| !p.as_os_str().is_empty()).map(std::path::Path::to_path_buf)
+}
+
 fn child_spec(manifest: &Manifest, spec: &PluginSpec, granted: &[Permission], elevated: bool) -> ChildSpec {
     let label = if elevated {
         format!("plugin \"{}\" (elevated)", manifest.id)
@@ -748,8 +754,7 @@ fn child_spec(manifest: &Manifest, spec: &PluginSpec, granted: &[Permission], el
     };
     let mut s = SpawnSpec::new(spec.exe.clone(), label);
     s.args = spec.args.clone();
-    // The plugin's own program folder, never the shared temp folder (another local user could plant files there).
-    s.current_dir = spec.exe.parent().map(std::path::Path::to_path_buf);
+    s.current_dir = program_folder(&spec.exe);
     s.endpoint_prefix = debrief_ipc::endpoint::prefix::PLUGIN.into();
     s.connect_window = spec.connect_window;
     s.log = if elevated { None } else { spec.log.clone() };
@@ -795,6 +800,16 @@ mod tests {
         assert_eq!(
             sandbox_status(host, vec![partly.clone(), seccomp.clone()]),
             [partly.message, seccomp.message]
+        );
+    }
+
+    #[test]
+    fn a_bare_program_name_sets_no_working_folder_instead_of_an_empty_one() {
+        assert_eq!(program_folder(std::path::Path::new("p.exe")), None);
+        assert_eq!(program_folder(std::path::Path::new("")), None);
+        assert_eq!(
+            program_folder(&std::path::Path::new("plugins").join("p.exe")),
+            Some(PathBuf::from("plugins"))
         );
     }
 

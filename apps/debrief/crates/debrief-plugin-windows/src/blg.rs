@@ -31,7 +31,8 @@ impl BlgImporter {
     }
 
     fn relog(&self, input: &Path) -> Result<Vec<u8>> {
-        // `relog` writes into a fresh private folder (random name, owner only) that goes when this function returns.
+        // `relog` writes into a fresh folder with a random name, made atomically, that goes when this function returns.
+        // `relog` exists on Windows only: the folder inherits the owner-only access of the per-user %TEMP%.
         let scratch = tempfile::Builder::new()
             .prefix("debrief-blg-")
             .tempdir()

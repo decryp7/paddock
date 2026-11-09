@@ -75,7 +75,8 @@ mod windows_impl {
 
     pub(super) fn import(knobs: &Knobs, file_name: &str, bytes: &[u8], limits: &Limits) -> debrief_profile::Result<Capture> {
         let io = |e: std::io::Error| ProfileError::invalid(format!("the .etl file could not be read: {e}"));
-        // Both files live in one fresh private folder (random name, owner only), removed when the import ends.
+        // Both files live in one fresh folder with a random name, made atomically and removed when the import ends.
+        // Windows only: it inherits the owner-only access of the per-user %TEMP% (not a mode 0700 folder).
         let scratch = tempfile::Builder::new().prefix("debrief-etl-").tempdir().map_err(io)?;
         let etl_path = scratch.path().join("input.etl");
         let out = scratch.path().join("output.nettrace");
