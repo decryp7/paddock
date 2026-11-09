@@ -333,6 +333,13 @@ pub fn gguf(arch: &str) -> Vec<u8> {
     b
 }
 
+/// The data folder in `dir`, private to the user like the real per-user one: the server keeps `admin.key` only in a folder
+/// nobody else may change, and a Windows CI runner's temporary folder inherits the drive root's entries (CI run 7821).
+pub fn private_data(dir: &tempfile::TempDir) -> Dirs {
+    paddock_secrets::make_folder_private(dir.path()).unwrap();
+    Dirs::at(dir.path())
+}
+
 pub async fn harness(fail: bool) -> Harness {
     harness_in(tempfile::tempdir().unwrap(), fail).await
 }
@@ -343,7 +350,7 @@ pub async fn harness_in(dir: tempfile::TempDir, fail: bool) -> Harness {
 
 /// [`harness_in`] with another engine than the in-process fake (for example [`ChildEngine`]).
 pub async fn harness_with(dir: tempfile::TempDir, fail: bool, other: Option<Arc<dyn Engine>>) -> Harness {
-    let dirs = Dirs::at(dir.path());
+    let dirs = private_data(&dir);
     let m = dirs.models().join("o/r");
     std::fs::create_dir_all(&m).unwrap();
     if !m.join("tiny-Q4_K_M.gguf").exists() {
@@ -486,7 +493,7 @@ impl Harness {
 /// A server over a temp folder with the *real* engine manager (no fake): for the opt-in end-to-end test that installs
 /// llama.cpp and a tiny model (`PITWALL_LLAMA_E2E=1`).
 pub async fn real_harness(dir: tempfile::TempDir) -> Harness {
-    let dirs = Dirs::at(dir.path());
+    let dirs = private_data(&dir);
     let st = AppState::open(dirs.clone(), None).await;
     let app = pitwall_server::http::router(st.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
