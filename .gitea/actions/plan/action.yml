@@ -19,6 +19,9 @@ inputs:
   dev-token:
     description: "Read token of the private package store for ./dev's prebuilt download (ADR 0022 R0b); empty: ./dev builds the tool. Pass BUILD_INPUTS_TOKEN."
     default: ""
+  release:
+    description: "'true' in a release workflow (a rule 54 dispatch counts as a release): ./dev never downloads its tool, whatever the ref (ADR 0022 section 3.3)."
+    default: "false"
 outputs:
   run:
     description: "'true' or 'false'; later jobs use if: needs.plan.outputs.run == 'true'."
@@ -47,7 +50,7 @@ runs:
         TAG_PATTERN: ${{ inputs.tag-pattern }}
         PLAN_TOKEN: ${{ inputs.token }}
         PADDOCK_DEV_TOKEN: ${{ inputs.dev-token }}
-        PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+        PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == 'true' || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
       run: |
         TAGS=""
         if [ "$EVENT" = push ] && [ "$REF" = "$MAIN_REF" ]; then

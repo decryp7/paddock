@@ -108,7 +108,7 @@ jobs:
           # The crate and paddock-dev legs when the plan names none of its own (every run but a rerun of their failures).
           PLAN_OS_LEGS: '[{"os":"ubuntu-latest"},{"os":"windows-latest"},{"os":"macos-latest"}]'
         run: |
-          ./dev plan --ci
+          if [ -n "$PLAN_SINCE_RUN" ]; then ./dev plan --ci; else node scripts/affected.mjs --ci; fi
           grep -q '^crate_legs=' "$GITHUB_OUTPUT" || echo "crate_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
           grep -q '^paddock_dev_legs=' "$GITHUB_OUTPUT" || echo "paddock_dev_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
 
@@ -123,6 +123,7 @@ jobs:
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     env:
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
     steps:
       - uses: actions/checkout@v4
@@ -291,6 +292,7 @@ jobs:
       run:
         working-directory: conformance
     env:
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
     steps:
       - uses: actions/checkout@v4
@@ -379,6 +381,7 @@ jobs:
     if: ${{ needs.plan.outputs.tools == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["tools-macos"]'), 'tools-macos') }}
     runs-on: macos-latest
     env:
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
     steps:
       - uses: actions/checkout@v4

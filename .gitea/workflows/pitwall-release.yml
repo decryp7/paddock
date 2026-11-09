@@ -55,6 +55,7 @@ jobs:
           tag-pattern: pitwall-v*
           nightly-marker: "false"
           dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
+          release: "true"
 
   # A tag is gated by exactly Pitwall's legs of ci.yml (all of them, both halves, on the tagged commit).
   gates:

@@ -43,7 +43,7 @@ jobs:
     outputs:
       run: ${{ steps.plan.outputs.run }}
     env:
-      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+      PADDOCK_DEV_DOWNLOAD: "0"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,6 +57,7 @@ jobs:
           tag-pattern: dyno-v*
           nightly-marker: "false"
           dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
+          release: "true"
 
       # ADR 0072 D8: a tag whose pattern a ratchet entry of docs/ipc-endpoint-ratchet.toml blocks is refused (connection endings
       # not yet made right), before the gates run. Fails this job, so `gates` and `release` do not start.
