@@ -441,6 +441,18 @@ describe('the VM lock', () => {
     assert.equal(again.status, 0, again.stderr);
   });
 
+  test('run-win.mjs --help prints usage and exits 0 without the lock, even while another run holds it', async () => {
+    const holder = await holding('chain-release');
+    try {
+      const r = spawnSync('node', [join(here, 'vm-smoke/run-win.mjs'), '--help'], { encoding: 'utf8', env: { ...process.env, ...lockEnv }, timeout: 60_000 });
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, /run-win\.mjs --app dyno/);
+      assert.doesNotMatch(r.stderr, /vm-lock|::error::/);
+    } finally {
+      await holder.stop();
+    }
+  });
+
   test('run-win.mjs and defender-rate.mjs take the lock for the whole run: a second one fails at the start (75), before any vm-win call', async () => {
     const holder = await holding('chain-release');
     try {

@@ -196,3 +196,13 @@ test('P1-4: vm-lock-run.sh holds the lock around a command, passes its exit code
     assert.equal(bash(`'${RUN}' --check`, t.env).status, 1, 'no inherited lock');
   } finally { try { process.kill(-h.pid, 'SIGKILL'); } catch { /* gone */ } }
 });
+
+test('P2: a lock that frees between our failed acquire and the status is retried, not reported as an unknown holder', () => {
+  const t = fresh();
+  const dev = join(scratch, 'racy-dev.sh'); // the first acquire answers "busy", status then shows the slot free (the holder just ended)
+  const flag = join(scratch, `racy-${n}`);
+  writeFileSync(dev, `#!/bin/bash\nif [ "$3" = acquire ] && [ ! -e '${flag}' ]; then touch '${flag}'; echo busy >&2; exit 4; fi\nif [ "$3" = status ]; then echo '{"ok":true,"slots":[{"slot":"s1","busy":false,"pid":null,"owner":null}]}'; exit 0; fi\nexec '${DEV}' "$@"\n`, { mode: 0o755 });
+  const r = bash(stub('retrier', t.log), { ...t.env, PADDOCK_DEV: dev });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /unknown \(no who file\)/);
+});

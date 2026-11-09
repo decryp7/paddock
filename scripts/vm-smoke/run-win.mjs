@@ -81,6 +81,12 @@ async function download(run, name, dest) {
   return join(dir, exe);
 }
 
+/** --help: the usage lines of this file's header; touches no VM and takes no lock. */
+function usage() {
+  console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').filter((l) => l.startsWith('//   ')).map((l) => l.slice(2)).join('\n'));
+  process.exit(0);
+}
+
 async function main(argv) {
   const o = parseArgs(argv);
   checkWinVmTarget(); // only paddock-win11-test, before anything is started, reverted or written (review P1-1)
@@ -260,4 +266,4 @@ async function main(argv) {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) holdVmLock('run-win') ?? main(process.argv.slice(2)).then((c) => process.exit(c));
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) (/^(-h|--help)$/.test(process.argv[2] ?? '') ? usage() : holdVmLock('run-win')) ?? main(process.argv.slice(2)).then((c) => process.exit(c));

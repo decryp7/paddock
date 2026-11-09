@@ -91,7 +91,7 @@ _vm_lock_install_traps() {
 }
 
 vm_lock_acquire() {
-  local label="${1:?vm_lock_acquire needs a label}" wait poll waited=0 said src owner other who pid start rest olabel now errf
+  local label="${1:?vm_lock_acquire needs a label}" unknown=0 wait poll waited=0 said src owner other who pid start rest olabel now errf
   vm_lock_inherited && return 0
   _vm_lock_root="$(_vm_lock_default_root)"
   wait="${PADDOCK_VM_LOCK_WAIT:-0}"; poll="${PADDOCK_VM_LOCK_POLL:-5}"
@@ -125,6 +125,8 @@ vm_lock_acquire() {
         rm -rf "$other" "$other.err"; sleep 1; continue
       fi
     else
+      # Free again or not yet named (the holder ended or is starting between our acquire and the status): try the acquire again a few times.
+      if [ "$unknown" -lt 3 ]; then unknown=$((unknown + 1)); sleep 0.5; continue; fi
       pid="?"; start="?"; olabel="unknown (no who file)"
     fi
     if [ "$waited" -ge "$wait" ]; then
