@@ -335,6 +335,30 @@ jobs:
       - name: Affected rules and repo contracts
         run: node --test scripts/affected.test.mjs
 
+  # The Windows test VM tooling (scripts/vm-lock.sh, vm-win.sh, vm-win/) is a macOS tool: its lock and guard-rail tests have seven cases that
+  # need sysctl, BSD stat, the keychain and Fusion's lease file, which the Linux `ui` job skips ("not measured on this OS", ER-33). They run
+  # here, on the Mac host, against fakes only (no VM, no Fusion). Gated on the `tools` output, which every scripts/ change turns on.
+  tools-macos:
+    name: VM tooling tests (macOS)
+    needs: [plan]
+    if: ${{ needs.plan.outputs.tools == 'true' }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # CARGO_BUILD_JOBS: this runner's share of the host's cores (the tests build and run ./dev).
+      - uses: ./.gitea/actions/build-jobs
+
+      - uses: ./.gitea/actions/job-isolation
+
+      - name: VM lock and Windows test VM guard rails
+        run: node --test scripts/vm-lock.test.mjs scripts/vm-win.test.mjs
+
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
+
   # The family icons (icons/): the pipeline's tests (seam scan, coverage, tray shapes, .icns frames, docs copies) and the check that every
   # installed copy in the apps and the docs equals the build. Without the second step a hand edit of an app's icons goes unnoticed.
   icons:
