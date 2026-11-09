@@ -557,7 +557,17 @@ pub struct Chromium {
     /// judged with them ([`crate::answer`]).
     patience: Patience,
     cpu_sampler: Option<CpuSampler>,
+    /// `LaunchOptions::max_lifetime`, for the message when it ended the browser during the start.
+    max_lifetime: Duration,
+    /// Set once the first page is open: the start is over, and later commands have fixed deadlines again
+    /// ([`LATER_LIST`], [`LATER_CALL`]).
+    opened: AtomicBool,
 }
+
+/// After the start, how long `Target.getTargets` may take ([`Chromium::page_count`], a later [`Chromium::start_page`]).
+pub const LATER_LIST: Duration = Duration::from_secs(5);
+/// After the start, how long each command that opens a page may take ([`Chromium::new_page`]).
+pub const LATER_CALL: Duration = Duration::from_secs(10);
 
 impl Chromium {
     /// Starts `exe` and connects to it. The sandbox follows [`Sandbox::from_environment`].
@@ -641,6 +651,8 @@ impl Chromium {
                 close_answered: None,
                 patience: opts.patience,
                 cpu_sampler: opts.cpu_sampler.clone(),
+                max_lifetime: opts.max_lifetime,
+                opened: AtomicBool::new(false),
             }),
             Err(e) => {
                 stop.cancel();
@@ -697,14 +709,16 @@ impl Chromium {
         }
     }
 
-    /// Opens another page (tab) to drive, beside the ones the browser has. The browser's answers are waited for while it
-    /// is alive and working, not for a fixed time ([`crate::answer`]).
+    /// Opens another page (tab) to drive, beside the ones the browser has. As the browser's first page, its answers are
+    /// waited for while it is alive and working ([`crate::answer`]); later, each within [`LATER_CALL`].
     pub fn new_page(&self) -> Result<Page> {
-        Page::attach(
+        let page = Page::attach(
             self.conn.clone(),
             self.clock.clone(),
             &|session, method, params| self.ask(session, method, params, "opening a page"),
-        )
+        )?;
+        self.opened.store(true, Ordering::Release);
+        Ok(page)
     }
 
     /// The page the browser opened with (its [`START_PAGE`]), to drive instead of opening a second one beside it: the
@@ -714,14 +728,16 @@ impl Chromium {
         let end = Deadline::after(self.clock.clone(), START_PAGE_WAIT);
         loop {
             if let Some(target) = self.first_page_target()? {
-                return Page::adopt(
+                let page = Page::adopt(
                     self.conn.clone(),
                     target,
                     self.clock.clone(),
                     &|session, method, params| {
                         self.ask(session, method, params, "opening the start page")
                     },
-                );
+                )?;
+                self.opened.store(true, Ordering::Release);
+                return Ok(page);
             }
             if end.passed() {
                 log::warn!(
@@ -763,9 +779,11 @@ impl Chromium {
         }
     }
 
-    /// Sends `method` and waits for its answer while the browser is alive and working (ADR 0071): judged on its process,
-    /// its DevTools connection and its CPU time with the launch's patience, never a fixed deadline; the time limit
-    /// ([`LaunchOptions::max_lifetime`]) is the overall bound. `phase` names the step in the log.
+    /// Sends `method` and waits for its answer. Until the first page is open (the start), while the browser is alive and
+    /// working (ADR 0071): judged on its process, its DevTools connection and its CPU time with the launch's patience,
+    /// never a fixed deadline; the time limit ([`LaunchOptions::max_lifetime`]) is the overall bound. After the start,
+    /// within [`LATER_LIST`] or [`LATER_CALL`], so a command later in a long-lived browser's life cannot wait for its
+    /// whole time limit. `phase` names the step in the log.
     fn ask(
         &self,
         session: Option<&str>,
@@ -773,14 +791,53 @@ impl Chromium {
         params: Value,
         phase: &str,
     ) -> Result<Value> {
+        if self.opened.load(Ordering::Acquire) {
+            let bound = if method == "Target.getTargets" {
+                LATER_LIST
+            } else {
+                LATER_CALL
+            };
+            return self.call_within(session, method, params, bound);
+        }
         let pending = self.conn.send(session, method, params)?;
         let mut life = BrowserLife {
             process: &self.process,
             dir: &self.dir,
             id: self.proc().process(),
             cpu: self.cpu_sampler.as_ref(),
+            timed_out: &self.timed_out,
+            max_lifetime: self.max_lifetime,
         };
         crate::answer::await_answer(&pending, method, phase, &mut life, self.patience)
+    }
+
+    /// Sends `method` and waits for its answer up to `bound` on the browser's clock ([`LaunchOptions::clock`], so a test
+    /// runs the bound out without waiting). A browser ended by one of its limits meanwhile is named in the log.
+    fn call_within(
+        &self,
+        session: Option<&str>,
+        method: &str,
+        params: Value,
+        bound: Duration,
+    ) -> Result<Value> {
+        let pending = self.conn.send(session, method, params)?;
+        let end = Deadline::after(self.clock.clone(), bound);
+        loop {
+            // pace: a slice of the wait for the reply, which ends at once when it comes; the browser's clock bounds it
+            if let Some(reply) = pending.wait(POLL) {
+                if matches!(reply, Err(Error::Closed)) && self.timed_out.load(Ordering::Acquire) {
+                    log::warn!(
+                        "The browser was ended by its time limit ({} s) while {method} was owed",
+                        self.max_lifetime.as_secs()
+                    );
+                }
+                return reply;
+            }
+            if end.passed() {
+                log::warn!("The browser did not answer {method} within {bound:?} after its start");
+                return Err(Error::Timeout("a command"));
+            }
+        }
     }
 
     fn pages(&self) -> Result<Vec<Value>> {
@@ -955,6 +1012,8 @@ struct BrowserLife<'a> {
     dir: &'a Path,
     id: Option<ProcessId>,
     cpu: Option<&'a CpuSampler>,
+    timed_out: &'a AtomicBool,
+    max_lifetime: Duration,
 }
 
 impl crate::answer::Life for BrowserLife<'_> {
@@ -968,6 +1027,19 @@ impl crate::answer::Life for BrowserLife<'_> {
 
     fn cpu_time(&mut self) -> Option<Duration> {
         sample_cpu(self.id, self.cpu)
+    }
+
+    fn ended_by(&self) -> Option<String> {
+        if self.timed_out.load(Ordering::Acquire) {
+            Some(format!(
+                "its time limit ({} s)",
+                self.max_lifetime.as_secs()
+            ))
+        } else if lock(self.process).stopped_over_memory().is_some() {
+            Some("its memory cap".into())
+        } else {
+            None
+        }
     }
 }
 

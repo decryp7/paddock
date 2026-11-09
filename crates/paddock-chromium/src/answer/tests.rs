@@ -57,6 +57,8 @@ struct Scripted {
     /// The CPU time grows at every reading (a working browser) or stays (an idle one).
     working: bool,
     cpu: Duration,
+    /// Which limit ended the browser, if one did.
+    limit: Option<String>,
 }
 
 impl Scripted {
@@ -68,6 +70,7 @@ impl Scripted {
             tell: Some(tell),
             working: true,
             cpu: Duration::ZERO,
+            limit: None,
         }
     }
 }
@@ -96,6 +99,9 @@ impl Life for Scripted {
             self.cpu += Duration::from_millis(1);
         }
         Some(self.cpu)
+    }
+    fn ended_by(&self) -> Option<String> {
+        self.limit.clone()
     }
 }
 
@@ -227,4 +233,29 @@ fn the_note_comes_after_five_seconds_worth_of_ticks() {
         ..patience()
     });
     assert_eq!(p.note_after, 1);
+}
+
+#[test]
+fn a_browser_ended_by_its_time_limit_says_so() {
+    let (tx, rx) = channel();
+    let (conn, h) = peer(Peer::AnswerWhenTold(rx));
+    let pending = conn.send(None, "Target.getTargets", json!({})).unwrap();
+    let mut life = Scripted::new(tx);
+    life.ends_at = Some(2);
+    life.limit = Some("its time limit (7 s)".into());
+    let r = await_answer(
+        &pending,
+        "Target.getTargets",
+        "listing the pages",
+        &mut life,
+        patience(),
+    );
+    assert!(
+        matches!(&r, Err(Error::Launch(m)) if m == "the browser was ended by its time limit (7 s) while listing the pages"),
+        "{r:?}"
+    );
+    drop(life.tell.take());
+    drop(pending);
+    drop(conn);
+    h.join().unwrap();
 }
