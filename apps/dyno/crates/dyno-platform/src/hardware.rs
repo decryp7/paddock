@@ -639,7 +639,7 @@ pub struct WindowsBattery;
 impl BatteryCapacitySource for WindowsBattery {
     #[expect(
         clippy::disallowed_methods,
-        reason = "KNOWN DEFECT, not a justification: a shared, predictable folder under the OS temp dir that another local user can create first (Dyno security fix, owner and review date in docs/gates.toml [[defect]])"
+        reason = "the report goes into a fresh private folder that `with_report` makes exclusively under the temp folder, never a fixed name"
     )]
     fn read(&mut self) -> Reading<BatteryCapacity> {
         let windir = std::env::var_os("WINDIR").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);

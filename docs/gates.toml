@@ -342,16 +342,6 @@ review_by = 2026-12-27
 approved = "coordinator"
 
 [[ignored]]
-path = "apps/debrief/app/src-tauri/src/ai/tests.rs"
-tests = ["real_worker_set_up_with_a_local_model_answers_through_the_commands"]
-gate = "not-gated"
-reason = "a real-model test: needs a local GGUF model (DEBRIEF_TEST_GGUF) and the AI worker binary; run by hand"
-owner = "Debrief 1.2"
-since = 2026-11-08
-review_by = 2027-01-07
-approved = "coordinator"
-
-[[ignored]]
 path = "apps/debrief/app/src-tauri/src/browser/live.rs"
 tests = ["live_search_every_engine_gives_results_or_a_recognised_hand_off"]
 gate = "not-gated"
@@ -376,46 +366,6 @@ path = "apps/debrief/app/src-tauri/src/lifecycle.rs"
 tests = ["quitting_finishes_with_live_tail_jobs_and_the_tray"]
 gate = "not-gated"
 reason = "ignored or env-gated: macOS creates the tray menu on the main thread only, and the test harness runs tests on worker threads; it runs on Linux and Windows CI"
-owner = "Debrief 1.2"
-since = 2026-11-08
-review_by = 2027-01-07
-approved = "coordinator"
-
-[[ignored]]
-path = "apps/debrief/crates/debrief-ai-worker/tests/it/server_backend.rs"
-tests = ["the_real_llama_server_answers", "the_real_model_reads_an_image"]
-gate = "not-gated"
-reason = "the real llama-server end-to-end test: needs DEBRIEF_LLAMA_E2E=1 (downloads the runtime) or DEBRIEF_LLAMA_SERVER with a model; run by hand"
-owner = "Debrief 1.2"
-since = 2026-11-08
-review_by = 2027-01-07
-approved = "coordinator"
-
-[[ignored]]
-path = "apps/debrief/crates/debrief-ai/tests/it/hf_live.rs"
-tests = ["downloads_and_verifies_the_smallest_catalog_model"]
-gate = "not-gated"
-reason = "needs a real runtime, network or sample set (ignored or env-gated); run by hand"
-owner = "Debrief 1.2"
-since = 2026-11-08
-review_by = 2027-01-07
-approved = "coordinator"
-
-[[ignored]]
-path = "apps/debrief/crates/debrief-ai/tests/it/real_worker.rs"
-tests = ["the_real_worker_loads_a_model_and_answers"]
-gate = "not-gated"
-reason = "needs a real runtime, network or sample set (ignored or env-gated); run by hand"
-owner = "Debrief 1.2"
-since = 2026-11-08
-review_by = 2027-01-07
-approved = "coordinator"
-
-[[ignored]]
-path = "apps/debrief/crates/debrief-ai/tests/it/segmented_download.rs"
-tests = ["benchmark_connections_against_a_throttled_server"]
-gate = "not-gated"
-reason = "a measurement (rule 48) whose results block is not written yet: benchmark_connections_against_a_throttled_server"
 owner = "Debrief 1.2"
 since = 2026-11-08
 review_by = 2027-01-07
@@ -1037,38 +987,6 @@ reason = "contact-sheet screenshot capture, skipped without its output folder va
 owner = "ADR 0060 WP-9"
 since = 2026-11-08
 review_by = 2026-12-20
-approved = "coordinator"
-
-[[defect]]
-path = "apps/dyno/crates/dyno-agent/src/paths.rs"
-reason = "the agent falls back to the fixed, shared folder /tmp/Dyno (with its agent.json discovery file) when no user home is known; another local user can create it first (rule 53)"
-owner = "Dyno security fix (fix/dyno-no-shared-tmp-fallback)"
-since = 2026-11-08
-review_by = 2026-11-22
-approved = "coordinator"
-
-[[defect]]
-path = "apps/dyno/crates/dyno-cli/src/connection.rs"
-reason = "the CLI repeats the agent rule: without a home it reads agent.json from /tmp/Dyno, which another local user can create first and point at their own port"
-owner = "Dyno security fix (fix/dyno-no-shared-tmp-fallback)"
-since = 2026-11-08
-review_by = 2026-11-22
-approved = "coordinator"
-
-[[defect]]
-path = "apps/dyno/crates/dyno-platform/src/linux/startup.rs"
-reason = "without a home the Linux autostart folder falls back to the shared /tmp/dyno-no-home"
-owner = "Dyno security fix (fix/dyno-no-shared-tmp-fallback)"
-since = 2026-11-08
-review_by = 2026-11-22
-approved = "coordinator"
-
-[[defect]]
-path = "apps/dyno/crates/dyno-platform/src/hardware.rs"
-reason = "the Windows battery report is written to %TEMP%\\Dyno\\battery-report.xml, a shared folder, and its doc comment wrongly says only Dyno writes there"
-owner = "Dyno security fix (fix/dyno-no-shared-tmp-fallback)"
-since = 2026-11-08
-review_by = 2026-11-22
 approved = "coordinator"
 
 [[not_gated]]

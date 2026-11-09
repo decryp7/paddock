@@ -65,10 +65,6 @@ impl LinuxStartup {
     }
 
     /// The real folders: `$XDG_CONFIG_HOME/autostart` (or `~/.config/autostart`) and `/etc/xdg/autostart`.
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "KNOWN DEFECT, not a justification: a shared, predictable folder under the OS temp dir that another local user can create first (Dyno security fix, owner and review date in docs/gates.toml [[defect]])"
-    )]
     pub fn for_this_user(tools: Arc<dyn Tools>) -> Self {
         match config_dir(std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from), home_dir()) {
             Some(config) => LinuxStartup::new(config.join("autostart"), vec![PathBuf::from("/etc/xdg/autostart")], tools),
