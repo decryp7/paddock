@@ -1,0 +1,32 @@
+2026-11-09T07:36:08.1418809Z Gitea Action Runner (d-gtr9)(version:v5.4.1)
+2026-11-09T07:36:08.1419319Z ::group::Runner Information
+2026-11-09T07:36:08.1419357Z Runner labels: ubuntu-latest
+2026-11-09T07:36:08.1419367Z Task: 1
+2026-11-09T07:36:08.1419375Z Job: ui
+2026-11-09T07:36:08.1419385Z Repository: ***/paddock
+2026-11-09T07:36:08.1419407Z Triggered by event: workflow_dispatch
+2026-11-09T07:36:08.1419423Z ::endgroup::
+2026-11-09T07:36:22.5747137Z ::group::Run npm ci
+2026-11-09T07:36:35.3214555Z ::group::Run npm run test:tokens
+2026-11-09T07:36:37.2250582Z [2m Test Files [22m [1m[32m7 passed[39m[22m[90m (7)[39m
+2026-11-09T07:36:37.3113215Z ::group::Run npm run lint
+2026-11-09T07:36:56.5172966Z ::group::Run npm test
+2026-11-09T07:37:46.1656455Z [2m Test Files [22m [1m[32m218 passed[39m[22m[90m (218)[39m
+2026-11-09T07:37:57.3321818Z [2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+2026-11-09T07:37:57.5582735Z ::group::Run npm run test:scripts
+2026-11-09T07:38:39.1745424Z ✖ a second acquirer fails at once with ::error naming the holder (pid, start time) and the next step (15360.755054ms)
+2026-11-09T07:38:57.3460314Z ✖ guard rails (311.288377ms)
+2026-11-09T07:38:57.3465325Z ✖ only paddock-win11-test can be the target (47194.658333ms)
+2026-11-09T07:38:57.3466692Z ✖ vmrun password (619.303139ms)
+2026-11-09T07:38:57.3466855Z ✖ ip (46.619451ms)
+2026-11-09T07:38:57.3467665Z ✖ the VM lock (3001.348678ms)
+2026-11-09T07:38:57.3586159Z ✖ failing tests:
+2026-11-09T07:38:57.3586263Z ✖ a second acquirer fails at once with ::error naming the holder (pid, start time) and the next step (15360.755054ms)
+2026-11-09T07:38:57.3586690Z ✖ prepare.sh --vm-only refuses to run without a setup disc and changes nothing else (57.252396ms)
+2026-11-09T07:38:57.3587165Z ✖ a .vmx with more than one hard link is refused (589.269297ms)
+2026-11-09T07:38:57.3587848Z ✖ an unencrypted VM gets no -vp and never reads the keychain (619.109487ms)
+2026-11-09T07:38:57.3588775Z ✖ takes the newest lease of the test VM fixed MAC and ignores other VMs (21.674016ms)
+2026-11-09T07:38:57.3589463Z ✖ fails with a message when the VM has no lease yet (24.657808ms)
+2026-11-09T07:38:57.3590190Z ✖ a second vm-win.sh start fails while chain-release.sh holds the lock, names the holder, and never reaches vmrun (461.323695ms)
+2026-11-09T07:38:57.3647993Z ✖ a command run by the holder inherits the lock (PADDOCK_VM_LOCK_HELD) and reaches vmrun; the lock is free afterwards (1763.748996ms)
+2026-11-09T07:38:57.3762519Z npm error Lifecycle script `test:scripts` failed with error:

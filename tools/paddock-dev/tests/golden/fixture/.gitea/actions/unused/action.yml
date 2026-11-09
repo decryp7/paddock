@@ -1,0 +1,6 @@
+name: unused
+runs:
+  using: composite
+  steps:
+    - run: echo unused
+      shell: bash

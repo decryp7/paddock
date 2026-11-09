@@ -1,0 +1,31 @@
+2026-11-09T07:28:05.8260000Z runner-1(version:v5.4.1)
+2026-11-09T07:28:05.8260800Z ::group::Runner Information
+2026-11-09T07:28:05.8260960Z Runner labels: macos-latest, macos-arm64
+2026-11-09T07:28:05.8260970Z Task: 1
+2026-11-09T07:28:05.8260980Z Job: crate
+2026-11-09T07:28:05.8260990Z Repository: ***/paddock
+2026-11-09T07:28:05.8261000Z Triggered by event: workflow_dispatch
+2026-11-09T07:28:05.8261010Z ::endgroup::
+2026-11-09T07:28:05.8261020Z ::group::Inputs
+2026-11-09T07:28:05.8261030Z base: b51c72509
+2026-11-09T07:28:05.8261040Z webkit: false
+2026-11-09T07:28:05.8261040Z ::endgroup::
+2026-11-09T07:30:27.2207850Z ::group::Run cargo nextest run --workspace --all-features --profile ci
+2026-11-09T07:34:19.9103130Z [32;1m    Starting[0m [1m4434[0m tests across [1m112[0m binaries ([1m1[0m test [33;1mskipped[0m)
+2026-11-09T07:34:19.9736590Z [32;1m        PASS[0m [   0.030s] (   1/4434) [35;1mcargo-paddock-plugin[0m [36margs::tests[0m[36m::[0m[34;1mevery_command_is_read_into_typed_values[0m
+2026-11-09T07:34:19.9816110Z [32;1m        PASS[0m [   0.035s] (   2/4434) [35;1mcargo-paddock-plugin[0m [36mbuild::tests[0m[36m::[0m[34;1mthe_host_build_has_no_target_flag_and_others_have[0m
+2026-11-09T07:34:19.9816350Z [32;1m        PASS[0m [   0.036s] (   3/4434) [35;1mcargo-paddock-plugin[0m [36mbuild::tests[0m[36m::[0m[34;1ma_failed_build_or_a_missing_program_says_what_to_fix[0m
+2026-11-09T07:35:19.9220920Z [31;1m        FAIL[0m [   0.061s] (2807/4434) [35;1mpaddock-service[0m [36mper_machine::tests[0m[36m::[0m[34;1mevery_adopting_app_is_in_sync[0m
+2026-11-09T07:36:19.3580590Z [31;1m     Summary[0m [ 119.437s] [1m4434[0m tests run: [1m4433[0m [32;1mpassed[0m ([1m1[0m [33;1mslow[0m), [1m1[0m [31;1mfailed[0m, [1m1[0m [33;1mskipped[0m
+2026-11-09T07:36:19.3581430Z [31;1m        FAIL[0m [   0.061s] (2807/4434) [35;1mpaddock-service[0m [36mper_machine::tests[0m[36m::[0m[34;1mevery_adopting_app_is_in_sync[0m
+2026-11-09T07:36:19.6340100Z [31;1merror[0m: test run failed
+2026-11-09T07:36:19.6358900Z ##[error]Process completed with exit code 100.
+2026-11-09T07:36:19.6563550Z ::group::Run cargo nextest run -p paddock-shell -p paddock-secrets -p paddock-siblings --profile ci
+2026-11-09T07:37:17.2129810Z [32;1m    Starting[0m [1m140[0m tests across [1m4[0m binaries
+2026-11-09T07:37:21.4825940Z [32;1m     Summary[0m [   4.270s] [1m140[0m tests run: [1m140[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-09T07:37:31.6154660Z [32;1m    Starting[0m [1m170[0m tests across [1m6[0m binaries
+2026-11-09T07:37:33.6821860Z [32;1m     Summary[0m [   2.066s] [1m170[0m tests run: [1m170[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-09T07:37:36.3354610Z [32;1m    Starting[0m [1m59[0m tests across [1m2[0m binaries
+2026-11-09T07:37:36.9027240Z [32;1m     Summary[0m [   0.567s] [1m59[0m tests run: [1m59[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-09T07:37:44.8895690Z [32;1m    Starting[0m [1m22[0m tests across [1m2[0m binaries
+2026-11-09T07:37:44.9711260Z [32;1m     Summary[0m [   0.082s] [1m22[0m tests run: [1m22[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m

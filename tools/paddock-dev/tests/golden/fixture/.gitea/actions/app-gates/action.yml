@@ -1,0 +1,6 @@
+name: app-gates
+runs:
+  using: composite
+  steps:
+    - run: echo app-gates
+      shell: bash

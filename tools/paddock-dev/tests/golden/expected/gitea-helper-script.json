@@ -1,0 +1,53 @@
+{
+ "all": false,
+ "crates": true,
+ "ui": false,
+ "eslint": false,
+ "conformance": true,
+ "c99": true,
+ "tools": false,
+ "icons": false,
+ "ciImage": false,
+ "paddockDev": false,
+ "docs": false,
+ "apps": [
+  "x",
+  "y",
+  "z"
+ ],
+ "kinds": {
+  "x": [
+   "rust",
+   "ui"
+  ],
+  "y": [
+   "rust",
+   "ui"
+  ],
+  "z": [
+   "rust",
+   "ui"
+  ]
+ },
+ "packages": {},
+ "why": {
+  "app:x": [
+   "conformance conformance/src/util/paths.sh"
+  ],
+  "app:y": [
+   "conformance conformance/src/util/paths.sh"
+  ],
+  "app:z": [
+   "conformance conformance/src/util/paths.sh"
+  ],
+  "c99": [
+   "C99 reads conformance/src/util/paths.sh"
+  ],
+  "conformance": [
+   "conformance/src/util/paths.sh"
+  ],
+  "crates": [
+   "conformance/src/util/paths.sh used by ci.yml, job crates"
+  ]
+ }
+}

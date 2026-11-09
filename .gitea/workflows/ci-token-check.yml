@@ -1,0 +1,41 @@
+# A manual check that the job token can read what `./dev plan --since-run` reads (ci.yml's since_run input): a run's job list
+# and one job's log, through the Gitea API with ${{ github.token }}. It prints only the HTTP status codes, never a body or the
+# token. Dispatch it with a finished run of ci.yml and one of its job ids; 200 and 200 mean the rerun plan can read them.
+name: ci-token-check
+
+on:
+  workflow_dispatch:
+    inputs:
+      run:
+        description: "A finished ci.yml run (its number)"
+        required: true
+      job:
+        description: "One job id of that run"
+        required: true
+
+jobs:
+  read:
+    name: the job token reads a run's jobs and a job's log
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      - name: HTTP status of the job list and of the log
+        env:
+          TOKEN: ${{ github.token }}
+          API: ${{ github.server_url }}/api/v1/repos/${{ github.repository }}/actions
+          RUN: ${{ inputs.run }}
+          JOB: ${{ inputs.job }}
+        run: |
+          set -u
+          case "$RUN$JOB" in *[!0-9]*|'') echo "::error::run and job must be numbers"; exit 1 ;; esac
+          code() { printf 'header = "Authorization: token %s"\n' "$TOKEN" | curl -sS -o /dev/null -w '%{http_code}' --max-time 60 -K - "$1"; }
+          jobs=$(code "$API/runs/$RUN/jobs?limit=1" || true)
+          log=$(code "$API/jobs/$JOB/logs" || true)
+          echo "jobs of run $RUN: HTTP $jobs; log of job $JOB: HTTP $log"
+          echo "| what | HTTP |" >> "$GITHUB_STEP_SUMMARY"; echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| jobs of run $RUN | $jobs |" >> "$GITHUB_STEP_SUMMARY"; echo "| log of job $JOB | $log |" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$jobs" != 200 ] || [ "$log" != 200 ]; then
+            echo "::error::the job token cannot read the run ($jobs) or the log ($log): since_run needs a token with read access to Actions (PLAN_TOKEN from a secret)"
+            exit 1
+          fi

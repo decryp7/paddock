@@ -737,9 +737,27 @@ fn ci_yml_wires_the_plan_job_outputs_and_the_commits_job_asks_for_its_range() {
         .captures_iter(plan_job)
         .map(|c| (c[1].to_string(), c[2].to_string()))
         .collect();
+    // A rerun of a run's failures (PLAN_SINCE_RUN) writes its own outputs besides these; a normal run leaves them empty. A
+    // project boolean matters only when a job of this ci.yml reads it.
+    let since_written: Vec<String> = since_outputs()
+        .into_iter()
+        .filter(|k| {
+            let project = k.replace('_', "-");
+            let is_project = paddock_dev::plan_gitea::CI_JOBS
+                .iter()
+                .any(|(_, ps)| ps.contains(&project.as_str()));
+            !is_project
+                || paddock_dev::plan_gitea::CI_JOBS
+                    .iter()
+                    .any(|(j, ps)| ps.contains(&project.as_str()) && wf.jobs.iter().any(|(k, _)| k == j))
+        })
+        .collect();
     for (name, step) in &declared {
         assert_eq!(name, step, "output {name} reads steps.plan.outputs.{step}");
-        assert!(written.contains(step), "dev plan --ci writes {step}");
+        assert!(
+            written.contains(step) || since_written.contains(step),
+            "dev plan --ci writes {step}"
+        );
     }
     let names: Vec<&String> = declared.iter().map(|(n, _)| n).collect();
     for c in regex::Regex::new(r"needs\.plan\.outputs\.([a-z0-9_]+)").unwrap().captures_iter(&ci) {
@@ -752,6 +770,14 @@ fn ci_yml_wires_the_plan_job_outputs_and_the_commits_job_asks_for_its_range() {
     for w in &written {
         assert!(names.contains(&w), "dev plan --ci writes {w}, which the plan job does not declare");
     }
+    if plan_job.contains("PLAN_SINCE_RUN") {
+        for w in &since_written {
+            assert!(
+                names.contains(&w),
+                "dev plan --ci --since-run writes {w}, which the plan job does not declare"
+            );
+        }
+    }
     let commits = &wf.jobs.iter().find(|(k, _)| k == "commits").expect("a commits job").1;
     assert!(
         commits.contains("needs: [plan]")
@@ -763,6 +789,73 @@ fn ci_yml_wires_the_plan_job_outputs_and_the_commits_job_asks_for_its_range() {
         assert!(commits.contains(&format!("{v}: ${{{{")), "{v}");
     }
     assert!(plan_job.contains("./dev plan --ci"), "the plan job calls dev plan");
+}
+
+/// Every output a since-run plan can write: one with a rerun of every job, the crate and paddock-dev legs known.
+fn since_outputs() -> Vec<String> {
+    use paddock_dev::plan_since::{Leg, Rerun, Scope, SincePlan};
+    let reruns = paddock_dev::plan_gitea::CI_JOBS
+        .iter()
+        .map(|(j, _)| Rerun {
+            id: 1,
+            name: j.to_string(),
+            key: Some(j.to_string()),
+            leg: Leg {
+                os: Some("ubuntu-latest".into()),
+                ..Leg::default()
+            },
+            scope: Scope::Job("x".into()),
+            vitest: vec![],
+        })
+        .collect();
+    let plan = SincePlan {
+        run: 1,
+        workflow: "ci.yml".into(),
+        head: String::new(),
+        reruns,
+        not_rerun: 0,
+        everything: None,
+    };
+    plan.ci_outputs(&[], &mut |_| {}).into_iter().map(|(k, _)| k).collect()
+}
+
+/// A rerun of a run's failures must be able to run every job that failed and none that passed: every job of ci.yml is in the
+/// planner's job table (or a rerun of it plans everything), and every job but the plan asks `rerun_jobs` for itself.
+#[test]
+fn every_ci_yml_job_is_in_the_job_table_and_asks_rerun_jobs() {
+    let ci = std::fs::read_to_string(root().join(".gitea/workflows/ci.yml"))
+        .unwrap()
+        .replace("\r\n", "\n");
+    let wf = paddock_dev::plan_gitea::workflow_jobs(&ci).unwrap();
+    for (key, text) in &wf.jobs {
+        assert!(
+            paddock_dev::plan_gitea::CI_JOBS.iter().any(|(j, _)| j == key),
+            "ci.yml job {key} is not in plan_gitea::CI_JOBS (and CI_JOBS of scripts/affected.mjs)"
+        );
+        if key == "plan" {
+            continue;
+        }
+        let gate = format!("contains(fromJSON(needs.plan.outputs.rerun_jobs || '[\"{key}\"]'), '{key}')");
+        assert!(text.contains("needs: [plan]"), "job {key} needs the plan");
+        let cond = text
+            .lines()
+            .find(|l| l.starts_with("    if: "))
+            .unwrap_or_else(|| panic!("job {key} has no if"));
+        assert!(cond.contains(&gate), "job {key}: its if asks rerun_jobs ({gate})");
+    }
+    // The WebKit job runs in a rerun of its failure even without the webkit input or a push to main.
+    let webkit = &wf.jobs.iter().find(|(k, _)| k == "e2e-webkit").unwrap().1;
+    assert!(webkit.contains("|| contains(fromJSON(needs.plan.outputs.rerun_jobs || '[]'), 'e2e-webkit')"));
+    // The matrices read their legs from the plan step, which writes every OS when it plans no rerun of them.
+    for (job, output) in [("crate", "crate_legs"), ("paddock-dev", "paddock_dev_legs")] {
+        let text = &wf.jobs.iter().find(|(k, _)| k == job).unwrap().1;
+        assert!(
+            text.contains(&format!("include: ${{{{ fromJSON(needs.plan.outputs.{output}) }}}}")),
+            "{job}"
+        );
+    }
+    let plan = &wf.jobs.iter().find(|(k, _)| k == "plan").unwrap().1;
+    assert!(plan.contains("crate_legs=$PLAN_OS_LEGS") && plan.contains("paddock_dev_legs=$PLAN_OS_LEGS"));
 }
 
 #[test]
@@ -793,4 +886,11 @@ fn ci_yml_passes_every_field_of_a_matrix_leg_to_app_gates() {
         assert!(gates.contains(&format!("\n  {input}:\n")), "{input}");
     }
     assert!(job.contains("include: ${{ fromJSON(needs.plan.outputs.apps) }}"));
+    // A since-run leg narrowed to its failed tests adds `tests_only` (plan_since.rs), which app-gates must take.
+    if gates.contains("\n  tests-only:\n") {
+        assert!(
+            job.contains("tests-only: ${{ matrix.tests_only }}"),
+            "ci.yml passes matrix.tests_only"
+        );
+    }
 }

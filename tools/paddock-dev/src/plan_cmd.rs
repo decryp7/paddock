@@ -7,8 +7,12 @@
 //! dev plan --ci                  CI: picks the base from the event, writes GITHUB_OUTPUT and GITHUB_STEP_SUMMARY
 //! dev plan --ci --app <app>      `true` or `false` on stdout: whether the change reaches that app
 //! dev plan --commit-range        the commit lint's range (or `skip`) from EVENT, REF, BEFORE, SHA, PLAN_BASE, BASE_REF, INPUT_APP
+//! dev plan --since-run <run>     what of a finished CI run reruns: its failed jobs, or only their failed tests (JSON)
 //! options: --explain
 //! ```
+//!
+//! `--ci` with `PLAN_SINCE_RUN` set (ci.yml's `since_run` input) writes the outputs of such a rerun instead: only the failed
+//! jobs run, a narrowed one only its failed tests ([`crate::plan_since`]). The run is read with `PLAN_TOKEN` or `GITEA_TOKEN`.
 //!
 //! Log lines of `--ci` go to standard error (the script printed them to standard output unless `--app` was given); the job log
 //! shows both streams.
@@ -19,6 +23,7 @@ use crate::plan_ci::{
     wants_webkit,
 };
 use crate::plan_repo::git_text;
+use crate::plan_since::{GiteaRuns, SincePlan, since_run};
 use crate::wait::{CurlHttp, Http};
 use paddock_cli::{CliError, Report};
 use paddock_repo_graph::GitHistory;
@@ -132,6 +137,11 @@ pub fn command(args: &[String], root: Option<PathBuf>) -> Result<Report, CliErro
         return Ok(Report::new(serde_json::json!({ "output": text }), text));
     }
     let a = parse_args(args).map_err(fail)?;
+    if let Some(id) = a.since_run {
+        let plan = read_since_run(&root, &env, id).map_err(fail)?;
+        let v = plan.to_json();
+        return Ok(Report::new(v.clone(), serde_json::to_string_pretty(&v).unwrap_or_default()));
+    }
     if a.ci {
         return ci(&root, &env, a.app.as_deref());
     }
@@ -154,6 +164,11 @@ pub fn command(args: &[String], root: Option<PathBuf>) -> Result<Report, CliErro
 /// CI: the plan for this event. Without `app`, the ci.yml job outputs and summary; with `app` (an app's own workflow),
 /// `true` or `false` on stdout for whether the change reaches that app.
 fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> Result<Report, CliError> {
+    if app.is_none()
+        && let Some(run) = env("PLAN_SINCE_RUN").filter(|r| !r.trim().is_empty())
+    {
+        return since_ci(root, env, run.trim());
+    }
     let log = |l: &str| eprintln!("{l}");
     let contains = |sha: &str| git_text(root, &["merge-base", "--is-ancestor", sha, "HEAD"]).is_some();
     let merge_base = |b: &str| git_text(root, &["merge-base", "HEAD", &format!("origin/{b}")]).map(|s| s.trim().to_string());
@@ -252,6 +267,84 @@ fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> R
     ))
 }
 
+/// The workflow file a run names (`ci.yml`), from this checkout; `None` for a name that is not a plain file name.
+fn workflow_text(root: &Path, file: &str) -> Option<String> {
+    let plain = !file.is_empty() && file.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    plain
+        .then(|| std::fs::read_to_string(root.join(".gitea/workflows").join(file)).ok())
+        .flatten()
+}
+
+/// Reads a finished run of this repository and decides what of it reruns; its phases go to the log (standard error).
+fn read_since_run(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u64) -> Result<SincePlan, String> {
+    let server = env("GITHUB_SERVER_URL").unwrap_or_else(|| "https://dev.decryptology.net".into());
+    let repo = env("GITHUB_REPOSITORY").unwrap_or_else(|| "decryp7/paddock".into());
+    let token = env("PLAN_TOKEN")
+        .filter(|t| !t.is_empty())
+        .or_else(|| env("GITEA_TOKEN"))
+        .unwrap_or_default();
+    let mut http = CurlHttp;
+    let mut runs = GiteaRuns::new(&mut http, &server, &repo, token);
+    since_run(&mut runs, id, &|f| workflow_text(root, f), &mut |l| eprintln!("{l}"))
+}
+
+/// Appends the outputs and the summary of a `--ci` run to the files the workflow names.
+fn write_ci(env: &dyn Fn(&str) -> Option<String>, outputs: &[(String, String)], md: &str) -> Result<(), CliError> {
+    if let Some(path) = env("GITHUB_OUTPUT") {
+        append(&path, &outputs.iter().map(|(k, v)| format!("{k}={v}\n")).collect::<String>())?;
+    }
+    if let Some(path) = env("GITHUB_STEP_SUMMARY") {
+        append(&path, md)?;
+    }
+    Ok(())
+}
+
+/// CI with `PLAN_SINCE_RUN`: the outputs that rerun only what failed in that run. A run that cannot be read or has not finished
+/// stops the plan with an error (a rerun must not quietly become a full run); a run whose failures cannot be told job by job
+/// plans everything with a warning (a rerun never runs less than failed).
+fn since_ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, run: &str) -> Result<Report, CliError> {
+    let id: u64 = run
+        .parse()
+        .ok()
+        .filter(|n| *n > 0)
+        .ok_or_else(|| fail(format!("PLAN_SINCE_RUN must be a run number, not {run:?}")))?;
+    since_ci_with(root, env, id, read_since_run(root, env, id))
+}
+
+fn since_ci_with(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u64, read: Result<SincePlan, String>) -> Result<Report, CliError> {
+    let plan = read.map_err(|e| fail(format!("the rerun of run {id} cannot be planned: {e}")))?;
+    if !matches!(plan.workflow.as_str(), "ci.yml" | "ci.yaml") {
+        return Err(fail(format!(
+            "run {id} is a run of {}; ci.yml reruns only its own runs (rerun that workflow's failed jobs by hand)",
+            plan.workflow
+        )));
+    }
+    // The WebKit legs too when a WebKit job or leg failed, or the matrix would have no leg to rerun it in.
+    let webkit = wants_webkit(env) || plan.needs_webkit();
+    let history = GitHistory::new(root, TIMEOUT);
+    let all = Request {
+        files: Vec::new(),
+        all: true,
+        explain: true,
+        root: None,
+        base: None,
+        head: "HEAD".into(),
+    };
+    let (graph, everything) = plan_with_graph(root, &history, &all).map_err(|e| fail(e.to_string()))?;
+    let legs = matrix(&everything, &graph, MatrixOpts { narrow: false, webkit }).map_err(fail)?;
+    if let Some(why) = &plan.everything {
+        println!("::warning::dev plan --since-run {id}: {why}; this run tests everything");
+        let reason = format!("everything: the rerun of run {id} cannot be narrowed ({why})");
+        eprintln!("base: {reason}");
+        write_ci(env, &ci_outputs(&everything, &legs, None), &summary(&everything, &reason, &legs))?;
+        return Ok(Report::new(serde_json::json!({ "sinceRun": id, "everything": why }), String::new()));
+    }
+    let outputs = plan.ci_outputs(&legs, &mut |w| println!("{w}"));
+    eprintln!("{}", serde_json::to_string_pretty(&plan.to_json()).unwrap_or_default());
+    write_ci(env, &outputs, &plan.summary())?;
+    Ok(Report::new(plan.to_json(), String::new()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,6 +401,15 @@ mod tests {
             urls: vec![],
         };
         assert_eq!(ci_runs(&mut http, &no_env, &mut |_| {}).unwrap().len(), 200, "at most four pages");
+    }
+
+    #[test]
+    fn an_unreadable_or_unfinished_run_stops_the_rerun_plan_with_an_error() {
+        let root = tempfile::tempdir().unwrap();
+        let e = since_ci_with(root.path(), &no_env, 7, Err("run 7 is running: wait until it finishes".into()))
+            .err()
+            .unwrap();
+        assert!(e.text().contains("run 7 is running"), "{}", e.text());
     }
 
     #[test]

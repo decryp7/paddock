@@ -1,0 +1,6 @@
+name: build-folder
+runs:
+  using: composite
+  steps:
+    - run: bash "${{ github.action_path }}/../../../conformance/ci/build-folder.sh"
+      shell: bash

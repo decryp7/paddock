@@ -1,0 +1,8 @@
+# Runs on a schedule only.
+name: nightly
+on:
+  schedule:
+    - cron: "0 2 * * *"
+jobs:
+  everything:
+    uses: ./.gitea/workflows/gates.yml

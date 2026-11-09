@@ -1,0 +1,57 @@
+2026-11-09T07:28:07.9234605Z ***ology-dev(version:v5.4.1)
+2026-11-09T07:28:07.9234605Z ::group::Runner Information
+2026-11-09T07:28:07.9234605Z Runner labels: windows-latest
+2026-11-09T07:28:07.9234605Z Task: 1
+2026-11-09T07:28:07.9234605Z Job: crate
+2026-11-09T07:28:07.9234605Z Repository: ***/paddock
+2026-11-09T07:28:07.9234605Z Triggered by event: workflow_dispatch
+2026-11-09T07:28:07.9234605Z ::endgroup::
+2026-11-09T07:28:07.9234605Z ::group::Inputs
+2026-11-09T07:28:07.9234605Z base: b51c72509
+2026-11-09T07:28:07.9234605Z webkit: false
+2026-11-09T07:28:07.9234605Z ::endgroup::
+2026-11-09T07:30:43.8395175Z ::group::Run cargo nextest run --workspace --all-features --profile ci
+2026-11-09T07:34:18.9597632Z [32;1m    Starting[0m [1m4267[0m tests across [1m112[0m binaries ([1m28[0m tests [33;1mskipped[0m)
+2026-11-09T07:34:19.0713194Z [32;1m        PASS[0m [   0.096s] (   1/4267) [35;1mcargo-paddock-plugin[0m [36mcargo::tests[0m[36m::[0m[34;1ma_missing_cargo_says_how_to_get_one[0m
+2026-11-09T07:34:19.0714234Z [32;1m        PASS[0m [   0.096s] (   2/4267) [35;1mcargo-paddock-plugin[0m [36margs::tests[0m[36m::[0m[34;1mevery_command_is_read_into_typed_values[0m
+2026-11-09T07:34:19.0714234Z [32;1m        PASS[0m [   0.096s] (   3/4267) [35;1mcargo-paddock-plugin[0m [36margs::tests[0m[36m::[0m[34;1ma_wrong_command_line_says_what_to_write[0m
+2026-11-09T07:35:05.5970724Z [31;1m        FAIL[0m [   0.100s] (2509/4267) [35;1mpaddock-secrets[0m [36mfallback::tests[0m[36m::[0m[34;1man_unavailable_store_falls_back_to_the_file_and_back[0m
+2026-11-09T07:35:05.5970724Z [31;1m        FAIL[0m [   0.094s] (2510/4267) [35;1mpaddock-secrets[0m [36mfallback::tests[0m[36m::[0m[34;1mdelete_removes_both_and_other_errors_are_not_hidden[0m
+2026-11-09T07:35:05.5970724Z [31;1m        FAIL[0m [   0.059s] (2511/4267) [35;1mpaddock-secrets[0m [36mfile::tests[0m[36m::[0m[34;1ma_secret_round_trips_and_deletes[0m
+2026-11-09T07:35:05.6161961Z [31;1m        FAIL[0m [   0.049s] (2513/4267) [35;1mpaddock-secrets[0m [36mfile::tests[0m[36m::[0m[34;1mone_secret_file_at_a_chosen_path_round_trips[0m
+2026-11-09T07:35:05.6161961Z [31;1m        FAIL[0m [   0.073s] (2514/4267) [35;1mpaddock-secrets[0m [36mfile::tests[0m[36m::[0m[34;1mdamaged_files_and_io_errors_are_reported_without_values[0m
+2026-11-09T07:35:05.6789199Z [31;1m        FAIL[0m [   0.081s] (2515/4267) [35;1mpaddock-secrets[0m [36mfile::tests[0m[36m::[0m[34;1mtwo_threads_setting_one_name_never_leave_a_half_written_file[0m
+2026-11-09T07:35:05.6928693Z [31;1m        FAIL[0m [   0.096s] (2519/4267) [35;1mpaddock-secrets[0m [36mfile::windows::tests[0m[36m::[0m[34;1ma_written_secret_is_owner_only_and_a_shared_one_is_refused[0m
+2026-11-09T07:35:11.6152882Z [31;1m        FAIL[0m [   0.121s] (2663/4267) [35;1mpaddock-service[0m [36mper_machine::tests[0m[36m::[0m[34;1man_untrusted_uninstaller_ends_before_it_deletes_anything[0m
+2026-11-09T07:35:11.7688231Z [31;1m        FAIL[0m [   0.265s] (2676/4267) [35;1mpaddock-service[0m [36mper_machine::tests[0m[36m::[0m[34;1mevery_adopting_app_is_in_sync[0m
+2026-11-09T07:36:10.0362113Z [31;1m     Summary[0m [ 111.076s] [1m4267[0m tests run: [1m4258[0m [32;1mpassed[0m, [1m9[0m [31;1mfailed[0m, [1m28[0m [33;1mskipped[0m
+2026-11-09T07:36:10.0362113Z [31;1m        FAIL[0m [   0.100s] (2509/4267) [35;1mpaddock-secrets[0m [36mfallback::tests[0m[36m::[0m[34;1man_unavailable_store_falls_back_to_the_file_and_back[0m
+2026-11-09T07:36:10.0362113Z [31;1m        FAIL[0m [   0.094s] (2510/4267) [35;1mpaddock-secrets[0m [36mfallback::tests[0m[36m::[0m[34;1mdelete_removes_both_and_other_errors_are_not_hidden[0m
+2026-11-09T07:36:10.0362113Z [31;1m        FAIL[0m [   0.059s] (2511/4267) [35;1mpaddock-secrets[0m [36mfile::tests[0m[36m::[0m[34;1ma_secret_round_trips_and_deletes[0m
+2026-11-09T07:36:10.0362113Z [31;1m        FAIL[0m [   0.049s] (2513/4267) [35;1mpaddock-secrets[0m [36mfile::tests[0m[36m::[0m[34;1mone_secret_file_at_a_chosen_path_round_trips[0m
+2026-11-09T07:36:10.0362113Z [31;1m        FAIL[0m [   0.073s] (2514/4267) [35;1mpaddock-secrets[0m [36mfile::tests[0m[36m::[0m[34;1mdamaged_files_and_io_errors_are_reported_without_values[0m
+2026-11-09T07:36:10.0362113Z [31;1m        FAIL[0m [   0.081s] (2515/4267) [35;1mpaddock-secrets[0m [36mfile::tests[0m[36m::[0m[34;1mtwo_threads_setting_one_name_never_leave_a_half_written_file[0m
+2026-11-09T07:36:10.0362113Z [31;1m        FAIL[0m [   0.096s] (2519/4267) [35;1mpaddock-secrets[0m [36mfile::windows::tests[0m[36m::[0m[34;1ma_written_secret_is_owner_only_and_a_shared_one_is_refused[0m
+2026-11-09T07:36:10.0379519Z [31;1m        FAIL[0m [   0.121s] (2663/4267) [35;1mpaddock-service[0m [36mper_machine::tests[0m[36m::[0m[34;1man_untrusted_uninstaller_ends_before_it_deletes_anything[0m
+2026-11-09T07:36:10.0379519Z [31;1m        FAIL[0m [   0.265s] (2676/4267) [35;1mpaddock-service[0m [36mper_machine::tests[0m[36m::[0m[34;1mevery_adopting_app_is_in_sync[0m
+2026-11-09T07:36:10.1632295Z [31;1merror[0m: test run failed
+2026-11-09T07:36:10.2162423Z ##[error]Process completed with exit code 100.
+2026-11-09T07:36:13.6215444Z ::group::Run cargo nextest run -p paddock-shell -p paddock-secrets -p paddock-siblings --profile ci
+2026-11-09T07:37:14.8906260Z [32;1m    Starting[0m [1m132[0m tests across [1m4[0m binaries
+2026-11-09T07:37:14.9444131Z [31;1m        FAIL[0m [   0.052s] (  4/132) [35;1mpaddock-secrets[0m [36mfallback::tests[0m[36m::[0m[34;1man_unavailable_store_falls_back_to_the_file_and_back[0m
+2026-11-09T07:37:14.9785772Z [31;1m        FAIL[0m [   0.086s] (  8/132) [35;1mpaddock-secrets[0m [36mfallback::tests[0m[36m::[0m[34;1mdelete_removes_both_and_other_errors_are_not_hidden[0m
+2026-11-09T07:37:15.0006947Z [31;1m        FAIL[0m [   0.071s] ( 10/132) [35;1mpaddock-secrets[0m [36mfile::tests[0m[36m::[0m[34;1ma_secret_round_trips_and_deletes[0m
+2026-11-09T07:37:15.0041644Z [31;1m        FAIL[0m [   0.059s] ( 11/132) [35;1mpaddock-secrets[0m [36mfile::tests[0m[36m::[0m[34;1mdamaged_files_and_io_errors_are_reported_without_values[0m
+2026-11-09T07:37:15.0206381Z [31;1m        FAIL[0m [   0.069s] ( 13/132) [35;1mpaddock-secrets[0m [36mfile::tests[0m[36m::[0m[34;1mone_secret_file_at_a_chosen_path_round_trips[0m
+2026-11-09T07:37:15.0287835Z [31;1m        FAIL[0m [   0.067s] ( 14/132) [35;1mpaddock-secrets[0m [36mfile::tests[0m[36m::[0m[34;1mtwo_threads_setting_one_name_never_leave_a_half_written_file[0m
+2026-11-09T07:37:15.0581879Z [31;1m        FAIL[0m [   0.079s] ( 16/132) [35;1mpaddock-secrets[0m [36mfile::windows::tests[0m[36m::[0m[34;1ma_written_secret_is_owner_only_and_a_shared_one_is_refused[0m
+2026-11-09T07:37:17.5380847Z [31;1m     Summary[0m [   2.647s] [1m132[0m tests run: [1m125[0m [32;1mpassed[0m, [1m7[0m [31;1mfailed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-09T07:37:17.5380847Z [31;1m        FAIL[0m [   0.052s] (  4/132) [35;1mpaddock-secrets[0m [36mfallback::tests[0m[36m::[0m[34;1man_unavailable_store_falls_back_to_the_file_and_back[0m
+2026-11-09T07:37:17.5380847Z [31;1m        FAIL[0m [   0.086s] (  8/132) [35;1mpaddock-secrets[0m [36mfallback::tests[0m[36m::[0m[34;1mdelete_removes_both_and_other_errors_are_not_hidden[0m
+2026-11-09T07:37:17.5382136Z [31;1m        FAIL[0m [   0.071s] ( 10/132) [35;1mpaddock-secrets[0m [36mfile::tests[0m[36m::[0m[34;1ma_secret_round_trips_and_deletes[0m
+2026-11-09T07:37:17.5383703Z [31;1m        FAIL[0m [   0.059s] ( 11/132) [35;1mpaddock-secrets[0m [36mfile::tests[0m[36m::[0m[34;1mdamaged_files_and_io_errors_are_reported_without_values[0m
+2026-11-09T07:37:17.5385814Z [31;1m        FAIL[0m [   0.069s] ( 13/132) [35;1mpaddock-secrets[0m [36mfile::tests[0m[36m::[0m[34;1mone_secret_file_at_a_chosen_path_round_trips[0m
+2026-11-09T07:37:17.5390601Z [31;1m        FAIL[0m [   0.067s] ( 14/132) [35;1mpaddock-secrets[0m [36mfile::tests[0m[36m::[0m[34;1mtwo_threads_setting_one_name_never_leave_a_half_written_file[0m
+2026-11-09T07:37:17.5392006Z [31;1m        FAIL[0m [   0.079s] ( 16/132) [35;1mpaddock-secrets[0m [36mfile::windows::tests[0m[36m::[0m[34;1ma_written_secret_is_owner_only_and_a_shared_one_is_refused[0m
+2026-11-09T07:37:17.5606077Z [31;1merror[0m: test run failed
+2026-11-09T07:37:17.5912818Z ##[error]Process completed with exit code 100.

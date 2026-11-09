@@ -1,0 +1,37 @@
+{
+ "all": false,
+ "crates": false,
+ "ui": true,
+ "eslint": false,
+ "conformance": true,
+ "c99": false,
+ "tools": true,
+ "icons": false,
+ "ciImage": false,
+ "paddockDev": false,
+ "docs": false,
+ "apps": [
+  "x"
+ ],
+ "kinds": {
+  "x": [
+   "rust",
+   "ui"
+  ]
+ },
+ "packages": {},
+ "why": {
+  "app:x": [
+   ".gitea/actions/node-caches/action.yml used by .gitea/workflows/x.yml"
+  ],
+  "conformance": [
+   "ci files .gitea/actions/node-caches/action.yml"
+  ],
+  "tools": [
+   ".gitea/actions/node-caches/action.yml used by .gitea/workflows/nightly.yml, which runs only on a schedule, a tag or a manual run (not a pull request)"
+  ],
+  "ui": [
+   ".gitea/actions/node-caches/action.yml used by ci.yml, job ui"
+  ]
+ }
+}

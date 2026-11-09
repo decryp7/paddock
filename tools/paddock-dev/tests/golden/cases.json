@@ -137,5 +137,35 @@
   "name": "range-from-an-unknown-base",
   "base": "no-such-revision",
   "head": "fixture-head"
+ },
+ {
+  "name": "gitea-ci-yml-one-job",
+  "base": "fixture-head",
+  "head": "step-01-ci-job"
+ },
+ {
+  "name": "gitea-shared-action",
+  "base": "step-01-ci-job",
+  "head": "step-02-action"
+ },
+ {
+  "name": "gitea-helper-script",
+  "base": "step-02-action",
+  "head": "step-03-helper-script"
+ },
+ {
+  "name": "gitea-reusable-workflow",
+  "base": "step-03-helper-script",
+  "head": "step-04-reusable-workflow"
+ },
+ {
+  "name": "gitea-action-named-only-in-a-comment",
+  "base": "step-04-reusable-workflow",
+  "head": "step-05-action-named-only-in-a-comment"
+ },
+ {
+  "name": "gitea-ci-yml-header",
+  "base": "step-05-action-named-only-in-a-comment",
+  "head": "step-06-ci-header"
  }
 ]

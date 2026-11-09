@@ -1,0 +1,30 @@
+2026-11-09T10:24:37.4427582Z Gitea Action Runner (d-gtr9)(version:v5.4.1)
+2026-11-09T10:24:37.4428108Z ::group::Runner Information
+2026-11-09T10:24:37.4428148Z Runner labels: ubuntu-latest
+2026-11-09T10:24:37.4428157Z Task: 1
+2026-11-09T10:24:37.4428164Z Job: frontend
+2026-11-09T10:24:37.4428169Z Repository: ***/paddock
+2026-11-09T10:24:37.4428180Z Triggered by event: workflow_dispatch
+2026-11-09T10:24:37.4428198Z ::endgroup::
+2026-11-09T10:25:38.5180624Z ❯ Building...
+2026-11-09T10:26:08.9482606Z ❯ Building...
+2026-11-09T10:26:37.7605926Z ❯ Building...
+2026-11-09T10:28:34.8139480Z  [31m❯[39m [30m[43m app [49m[39m src/app/watched/watched-folders.spec.ts [2m([22m[2m5 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 30182[2mms[22m[39m
+2026-11-09T10:28:34.8140330Z    [31m❯[39m WatchedFoldersView [2m(1)[22m
+2026-11-09T10:28:34.8140370Z [31m     [31m×[31m lists folders, adds the picked one and removes it again[39m[33m 20814[2mms[22m[39m
+2026-11-09T10:28:52.8781616Z  [31m❯[39m [30m[43m app [49m[39m src/app/analysis/outliers-view.spec.ts [2m([22m[2m9 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 17469[2mms[22m[39m
+2026-11-09T10:28:52.8786719Z    [31m❯[39m OutliersView [2m(4)[22m
+2026-11-09T10:28:52.8787342Z [31m     [31m×[31m lists the engine outliers with counts, lift and p-value[39m[32m 3[2mms[22m[39m
+2026-11-09T10:30:10.3720482Z [31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 2 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+2026-11-09T10:30:10.3730968Z [41m[1m FAIL [22m[49m [30m[43m app [49m[39m src/app/analysis/outliers-view.spec.ts[2m > [22mOutliersView[2m > [22mlists the engine outliers with counts, lift and p-value
+2026-11-09T10:30:10.3736896Z [90m [2m❯[22m TestBedImpl.assertNotInstantiated ../../../../k8-fastbuild-ST-fdfa778d11ba/bin/packages/core/testing/src/test_bed.ts:[2m839:13[22m[39m
+2026-11-09T10:30:10.3737876Z [90m [2m❯[22m TestBedImpl.configureTestingModule ../../../../k8-fastbuild-ST-fdfa778d11ba/bin/packages/core/testing/src/test_bed.ts:[2m596:10[22m[39m
+2026-11-09T10:30:10.3738141Z [90m [2m❯[22m TestBedImpl.configureTestingModule ../../../../k8-fastbuild-ST-fdfa778d11ba/bin/packages/core/testing/src/test_bed.ts:[2m343:33[22m[39m
+2026-11-09T10:30:10.3738306Z [36m [2m❯[22m mount src/app/analysis/outliers-view.spec.ts:[2m11:11[22m[39m
+2026-11-09T10:30:10.3832353Z [90m [2m❯[22m src/app/analysis/outliers-view.spec.ts:[2m21:31[22m[39m
+2026-11-09T10:30:10.3832486Z [41m[1m FAIL [22m[49m [30m[43m app [49m[39m src/app/watched/watched-folders.spec.ts[2m > [22mWatchedFoldersView[2m > [22mlists folders, adds the picked one and removes it again
+2026-11-09T10:30:10.3832623Z [36m [2m❯[22m src/app/watched/watched-folders.spec.ts:[2m66:3[22m[39m
+2026-11-09T10:30:10.3910856Z [2m Test Files [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m450 passed[39m[22m[90m (452)[39m
+2026-11-09T10:30:10.3978817Z [2m      Tests [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m4891 passed[39m[22m[90m (4893)[39m
+2026-11-09T10:30:10.4098248Z ::error::/workspace/repo/apps/debrief/app/src/app/analysis/outliers-view.spec.ts:11:11: [app] src/app/analysis/outliers-view.spec.ts > OutliersView > lists the engine outliers with counts, lift and p-value: Error: Cannot configure the test module when the test module has already been instantiated. Make sure you are not using `inject` before `TestBed.configureTestingModule`.%0A ❯ TestBedImpl.assertNotInstantiated ../../../../k8-fastbuild-ST-fdfa778d11ba/bin/packages/core/testing/src/test_bed.ts:839:13%0A ❯ TestBedImpl.configureTestingModule ../../../../k8-fastbuild-ST-fdfa778d11ba/bin/packages/core/testing/src/test_bed.ts:596:10%0A ❯ TestBedImpl.configureTestingModule ../../../../k8-fastbuild-ST-fdfa778d11ba/bin/packages/core/testing/src/test_bed.ts:343:33%0A ❯ mount src/app/analysis/outliers-view.spec.ts:11:11%0A ❯ src/app/analysis/outliers-view.spec.ts:21:31%0A%0A
+2026-11-09T10:30:10.4112801Z ::error::/workspace/repo/apps/debrief/app/src/app/watched/watched-folders.spec.ts:66:3: [app] src/app/watched/watched-folders.spec.ts > WatchedFoldersView > lists folders, adds the picked one and removes it again: Error: Test timed out in 20000ms.%0AIf this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".%0A ❯ src/app/watched/watched-folders.spec.ts:66:3%0A%0A
