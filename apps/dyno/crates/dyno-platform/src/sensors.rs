@@ -73,13 +73,20 @@ fn prune_space(space: &mut std::collections::HashMap<String, (u64, u64)>, listed
 
 /// The reason given when no temperature sensor is visible.
 pub const NO_TEMPERATURES: &str = "This computer reports no temperature sensors";
+/// The reason given for the memory pressure when the OS memory reading failed.
+pub const NO_MEMORY_READING: &str = "The memory reading is unavailable on this computer";
 /// The reason given for fans (sysinfo reads none).
 pub const NO_FANS: &str = "This computer reports no fan speeds";
 
 impl SysinfoSensors {
     /// Sensors with an OS probe.
     pub fn new(probe: Box<dyn SensorProbe>) -> Self {
-        let sys = System::new()
+        Self::with_system(probe, System::new)
+    }
+
+    /// Sensors over a constructor of the sysinfo `System` (tests give one that fails).
+    fn with_system(probe: Box<dyn SensorProbe>, make: impl FnOnce() -> Result<System, sysinfo::Error>) -> Self {
+        let sys = make()
             .inspect_err(|why| log::warn!("CPU and memory readings are unavailable (sysinfo): {why}; they read zero"))
             .ok()
             .map(|mut sys| {
@@ -152,6 +159,7 @@ impl SysinfoSensors {
             None => (0, 0, 0, 0, 0),
         };
         let (used, available) = split_memory(cfg!(target_os = "macos"), total, sys_available, sys_used);
+        let measured = self.sys.is_some();
         let mut m = MemorySample {
             total,
             used,
@@ -161,7 +169,12 @@ impl SysinfoSensors {
             swap_total,
             pressure: Reading::unavailable("Not measured"),
         };
-        m.pressure = Reading::Available(derive_pressure(&m));
+        // Without a memory reading the zeros are not a measurement: the pressure is "unavailable", never a derived "normal".
+        m.pressure = if measured {
+            Reading::Available(derive_pressure(&m))
+        } else {
+            Reading::unavailable(NO_MEMORY_READING)
+        };
         m
     }
 
@@ -390,6 +403,17 @@ mod tests {
         assert_eq!(split_memory(false, 64 * GIB, 53 * GIB, 35 * GIB), (11 * GIB, 53 * GIB));
         assert_eq!(split_memory(true, 8 * GIB, 0, 9 * GIB), (8 * GIB, 0));
         assert_eq!(split_memory(false, 8 * GIB, 9 * GIB, 0), (0, 8 * GIB));
+    }
+
+    #[test]
+    fn a_failed_system_reading_is_unavailable_not_a_calm_zero() {
+        let mut s = SysinfoSensors::with_system(Box::new(NoProbe), || Err(sysinfo::Error::Unsupported));
+        let sample = s.sample(Timestamp(1));
+        assert_eq!(sample.memory.total, 0);
+        assert_eq!(sample.memory.pressure, Reading::unavailable(NO_MEMORY_READING));
+        assert!(sample.cpu.per_core.is_empty());
+        let mut ok = SysinfoSensors::with_system(Box::new(NoProbe), System::new);
+        assert!(ok.sample(Timestamp(1)).memory.pressure.value().is_some());
     }
 
     #[test]
