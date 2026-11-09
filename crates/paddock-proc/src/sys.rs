@@ -470,7 +470,7 @@ pub fn signal_by_pidfd(id: crate::ProcessId, signal: i32) -> Option<crate::Endin
 #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 pub fn start_time(pid: u32) -> Option<crate::StartTime> {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
-    let mut sys = crate::usage::new_system()?;
+    let mut sys = crate::usage::new_system_with(System::new)?;
     let id = Pid::from_u32(pid);
     sys.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[id]),

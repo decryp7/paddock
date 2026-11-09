@@ -2034,7 +2034,9 @@ struct Adopted {
 /// failure is permanent and this runs every tick, so it is logged once.
 fn adopted_exit(pid: u32, make: impl FnOnce() -> Result<sysinfo::System, sysinfo::Error>) -> Option<Option<i32>> {
     static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    let Ok(mut sys) = make().inspect_err(|why| warn_once(&WARNED, pid, why)) else {
+    let Ok(mut sys) = make().inspect_err(|why| {
+        warn_once(&WARNED, pid, why);
+    }) else {
         return None;
     };
     let id = sysinfo::Pid::from_u32(pid);
@@ -2057,6 +2059,24 @@ fn warn_once(flag: &std::sync::atomic::AtomicBool, pid: u32, why: &sysinfo::Erro
     first
 }
 
+impl RunnerProcess for Adopted {
+    fn pid(&self) -> u32 {
+        self.pid
+    }
+
+    fn try_wait(&mut self) -> Option<Option<i32>> {
+        adopted_exit(self.pid, sysinfo::System::new)
+    }
+
+    fn stop_gracefully(&mut self) -> Result<(), String> {
+        graceful_stop(self.pid, None)
+    }
+
+    fn kill(&mut self) {
+        kill_tree(self.pid);
+    }
+}
+
 #[cfg(test)]
 mod adopted_tests {
     use super::*;
@@ -2076,23 +2096,5 @@ mod adopted_tests {
     fn a_readable_table_says_whether_the_runner_is_there() {
         assert_eq!(adopted_exit(std::process::id(), sysinfo::System::new), None);
         assert_eq!(adopted_exit(u32::MAX - 1, sysinfo::System::new), Some(None));
-    }
-}
-
-impl RunnerProcess for Adopted {
-    fn pid(&self) -> u32 {
-        self.pid
-    }
-
-    fn try_wait(&mut self) -> Option<Option<i32>> {
-        adopted_exit(self.pid, sysinfo::System::new)
-    }
-
-    fn stop_gracefully(&mut self) -> Result<(), String> {
-        graceful_stop(self.pid, None)
-    }
-
-    fn kill(&mut self) {
-        kill_tree(self.pid);
     }
 }

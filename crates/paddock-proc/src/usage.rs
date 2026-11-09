@@ -72,12 +72,7 @@ pub fn table_from(entries: impl IntoIterator<Item = ProcEntry>) -> Table {
 
 /// An empty sysinfo `System` to refresh process data into. Since sysinfo 0.40 the constructor can fail (a platform whose
 /// process table cannot be opened); that is logged (once per process, the failure is permanent) and the caller answers
-/// "unknown" instead of panicking.
-pub(crate) fn new_system() -> Option<System> {
-    new_system_with(System::new)
-}
-
-/// [`new_system`] over a constructor (tests give one that fails).
+/// "unknown" instead of panicking. `make` is `System::new`; tests give a constructor that fails.
 pub(crate) fn new_system_with(
     make: impl FnOnce() -> Result<System, sysinfo::Error>,
 ) -> Option<System> {
