@@ -228,6 +228,10 @@ fn the_wrapper_finds_the_root_from_a_subfolder_and_refuses_to_run_outside_a_repo
     assert!(String::from_utf8_lossy(&out.stderr).contains("inside the Paddock repository"));
 }
 
+// The flag checks are three tests, not one: each `both` runs the shell wrapper (about 35 programs, slow to start under Git bash)
+// and the Rust side, about 4 s on the Windows runner, so twelve in one test took 50 s of its 60 s and timed out in runs 7725,
+// 7812 and 7819; split, nextest runs them side by side.
+
 #[test]
 fn compiler_flags_are_part_of_the_hash_in_both_implementations() {
     let f = Fixture::new();
@@ -235,6 +239,31 @@ fn compiler_flags_are_part_of_the_hash_in_both_implementations() {
     let rustflags = f.both(&[("RUSTFLAGS", "-C target-cpu=native".to_string())]).0;
     let encoded = f.both(&[("CARGO_ENCODED_RUSTFLAGS", "-Ca\u{1f}-Cb".to_string())]).0;
     assert!(plain != rustflags && plain != encoded && rustflags != encoded);
+}
+
+#[test]
+fn build_profile_and_target_variables_count_and_the_job_count_does_not() {
+    let f = Fixture::new();
+    let plain = f.both(&[]).0;
+    for (k, v) in [
+        ("CARGO_BUILD_RUSTFLAGS", "-Ca"),
+        ("CARGO_PROFILE_RELEASE_OPT_LEVEL", "1"),
+        ("CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS", "-Cb"),
+        ("CARGO_BUILD_TARGET", "wasm32-unknown-unknown"),
+    ] {
+        assert_ne!(f.both(&[(k, v.to_string())]).0, plain, "{k}");
+    }
+    assert_eq!(
+        f.both(&[("CARGO_BUILD_JOBS", "3".to_string())]).0,
+        plain,
+        "the job count does not change the binary"
+    );
+}
+
+#[test]
+fn every_cargo_config_the_tool_reads_is_part_of_the_hash_in_both_implementations() {
+    let f = Fixture::new();
+    let plain = f.both(&[]).0;
     // A `rustflags` line in a committed config (a target table) and in $CARGO_HOME's config.
     std::fs::write(
         f.root().join(".cargo/config.toml"),
@@ -260,21 +289,8 @@ fn compiler_flags_are_part_of_the_hash_in_both_implementations() {
     let profile = f.both(&[]).0;
     assert_ne!(profile, committed);
     assert_ne!(profile, with_home);
-    // The dotted key, a profile or target variable, and the git-ignored include next to the tool all count too.
+    // The git-ignored include next to the tool counts too.
     std::fs::remove_file(f.cargo_home.path().join("config.toml")).unwrap();
-    for (k, v) in [
-        ("CARGO_BUILD_RUSTFLAGS", "-Ca"),
-        ("CARGO_PROFILE_RELEASE_OPT_LEVEL", "1"),
-        ("CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS", "-Cb"),
-        ("CARGO_BUILD_TARGET", "wasm32-unknown-unknown"),
-    ] {
-        assert_ne!(f.both(&[(k, v.to_string())]).0, committed, "{k}");
-    }
-    assert_eq!(
-        f.both(&[("CARGO_BUILD_JOBS", "3".to_string())]).0,
-        committed,
-        "the job count does not change the binary"
-    );
     std::fs::create_dir_all(f.root().join("tools/paddock-dev/.cargo")).unwrap();
     std::fs::write(
         f.root().join("tools/paddock-dev/.cargo/ci.toml"),

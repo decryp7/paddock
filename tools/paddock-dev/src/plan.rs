@@ -615,7 +615,12 @@ pub struct Request {
 
 /// The plan for a request against the repository at `root`.
 pub fn plan_for(root: &Path, history: &dyn History, req: &Request) -> Result<Value, GraphError> {
-    let graph = read_graph(root, history)?;
+    plan_with(root, history, &read_graph(root, history)?, req)
+}
+
+/// [`plan_for`] with the graphs already read by [`read_graph`] (they depend only on the tree, so several requests against one
+/// tree read them once: each read runs `cargo metadata` for every workspace).
+pub fn plan_with(root: &Path, history: &dyn History, graph: &RepoGraph, req: &Request) -> Result<Value, GraphError> {
     let mut opts = Options {
         all: req.all,
         explain: req.explain,
@@ -633,7 +638,7 @@ pub fn plan_for(root: &Path, history: &dyn History, req: &Request) -> Result<Val
             );
         }
     }
-    affected(&changed, &graph, &opts)
+    affected(&changed, graph, &opts)
 }
 
 fn cli_error(e: GraphError) -> CliError {

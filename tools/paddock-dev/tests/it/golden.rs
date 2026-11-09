@@ -7,7 +7,7 @@
 //!   samples need a clean tree: the script narrows those only for files that differ from HEAD (it answers everything for a clean one). Skipped, with the reason printed,
 //!   when node or the script is missing.
 #![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
-use paddock_dev::plan::{Request, plan_for};
+use paddock_dev::plan::{Request, plan_for, plan_with, read_graph};
 use paddock_repo_graph::GitHistory;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -18,9 +18,35 @@ fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().to_path_buf()
 }
 
-fn oracle(files: &[&str]) -> Value {
+/// What `node scripts/affected.mjs --files <files> --explain` answers for each sample, from one node process: the script's
+/// `planFor` per sample (the function its command line calls), with its `cargo metadata` runs remembered across samples (the
+/// tree does not change between them). Run per sample, the script read every workspace's metadata again each time: 36 samples
+/// times 23 workspaces, which took 195 s of the 240 s limit on the Windows runner (run 7810 job 33008) and timed out in
+/// others. Returns the plans and how many times cargo really ran.
+fn oracle(samples: &[&[&str]]) -> (Vec<Value>, usize) {
+    const DRIVER: &str = r#"
+import { createRequire, syncBuiltinESMExports } from 'node:module';
+import { pathToFileURL } from 'node:url';
+const cp = createRequire(import.meta.url)('node:child_process');
+const real = cp.execFileSync;
+const seen = new Map();
+cp.execFileSync = (file, args, opts) => {
+  if (file !== 'cargo') return real(file, args, opts);
+  const key = JSON.stringify([args, opts?.cwd ?? null]);
+  if (!seen.has(key)) seen.set(key, real(file, args, opts));
+  return seen.get(key);
+};
+syncBuiltinESMExports();
+// Through the environment: a script path in argv[1] would make the script think it is the program (isMain) and run its CLI.
+const { planFor } = await import(pathToFileURL(process.env.PADDOCK_GOLDEN_SCRIPT).href);
+const samples = JSON.parse(process.env.PADDOCK_GOLDEN_SAMPLES);
+const plans = samples.map((files) => planFor({ files, explain: true }).plan);
+process.stdout.write(JSON.stringify({ plans, cargoRuns: seen.size }));
+"#;
     let out = Command::new("node")
-        .args(["scripts/affected.mjs", "--files", &files.join(","), "--explain"])
+        .args(["--input-type=module", "-e", DRIVER])
+        .env("PADDOCK_GOLDEN_SCRIPT", repo_root().join("scripts/affected.mjs"))
+        .env("PADDOCK_GOLDEN_SAMPLES", serde_json::to_string(samples).unwrap())
         .current_dir(repo_root())
         .output()
         .expect("node is required: the golden test runs scripts/affected.mjs");
@@ -29,20 +55,37 @@ fn oracle(files: &[&str]) -> Value {
         "affected.mjs failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    serde_json::from_slice(&out.stdout).unwrap()
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let plans = v["plans"].as_array().unwrap().clone();
+    (plans, v["cargoRuns"].as_u64().unwrap() as usize)
 }
 
-fn ours(files: &[&str]) -> Value {
-    let root = repo_root();
-    let req = Request {
+fn request(files: &[&str]) -> Request {
+    Request {
         files: files.iter().map(|s| s.to_string()).collect(),
         all: false,
         explain: true,
         root: None,
         base: None,
         head: "HEAD".into(),
-    };
-    plan_for(&root, &GitHistory::new(&root, Duration::from_secs(60)), &req).unwrap()
+    }
+}
+
+/// The Cargo workspaces of the tree (a tracked `Cargo.toml` with a `[workspace]` line), as both planners find them.
+fn workspaces(root: &Path) -> usize {
+    let out = Command::new("git")
+        .args(["ls-files", "*Cargo.toml"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|f| {
+            std::fs::read_to_string(root.join(f))
+                .map(|t| t.lines().any(|l| l == "[workspace]"))
+                .unwrap_or(false)
+        })
+        .count()
 }
 
 /// `why` lists reasons in the order the script visited its sets; the closure here is sorted, so compare them as sets.
@@ -104,9 +147,27 @@ fn live_plan_matches_affected_mjs_on_sample_change_sets() {
         eprintln!("skipped: scripts/affected.mjs or node is not available (the recorded cases still run)");
         return;
     }
-    for files in SAMPLES {
-        assert_eq!(canonical(ours(files)), canonical(oracle(files)), "different plan for {files:?}");
+    let root = repo_root();
+    let history = GitHistory::new(&root, Duration::from_secs(60));
+    // The graphs depend only on the tree: read once (cargo metadata of every workspace), then one plan per sample.
+    let graph = read_graph(&root, &history).unwrap();
+    let (theirs, cargo_runs) = oracle(SAMPLES);
+    assert_eq!(theirs.len(), SAMPLES.len());
+    let workspaces = workspaces(&root);
+    assert!(
+        cargo_runs > 0 && cargo_runs <= workspaces,
+        "the oracle ran cargo metadata {cargo_runs} times for {workspaces} workspaces: once per workspace for all samples"
+    );
+    for (files, their) in SAMPLES.iter().zip(theirs) {
+        let ours = plan_with(&root, &history, &graph, &request(files)).unwrap();
+        assert_eq!(canonical(ours), canonical(their), "different plan for {files:?}");
     }
+    // plan_for (what `dev graph affected` runs) is plan_with over a fresh graph.
+    let first = request(SAMPLES[0]);
+    assert_eq!(
+        plan_for(&root, &history, &first).unwrap(),
+        plan_with(&root, &history, &graph, &first).unwrap()
+    );
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
