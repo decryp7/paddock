@@ -420,7 +420,7 @@ test('the declared port blocks never overlap each other or an end-to-end port, f
 // ---- The contract over every workflow: a host job takes a slot before any kept folder and gives it back last. ----
 
 const WORKFLOWS = join(PADDOCK, '.gitea', 'workflows');
-const KEPT = /actions\/(stable-workspace|build-folder|node-caches|setup-rust|host-tools|host-cleanup|prune-build-folder)\b|job-isolation\.sh path/;
+const KEPT = /actions\/(stable-workspace|kept-clone|build-folder|node-caches|setup-rust|host-tools|host-cleanup|prune-build-folder)\b|job-isolation\.sh path/;
 const files = spawnSync('git', ['ls-files', '.gitea/workflows/*.yml'], { cwd: PADDOCK, encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
 
 test('every job that may run on a host and uses a kept folder takes a slot first (after Git bash on Windows) and releases it as its last step, always', () => {

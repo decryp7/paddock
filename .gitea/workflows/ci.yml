@@ -463,7 +463,22 @@ jobs:
       # Root in the Linux container: Chromium needs the opt-in to start without its sandbox (ignored when not root).
       PADDOCK_BROWSER_NO_SANDBOX: "1"
     steps:
+      # Linux: the whole tree in the container. Hosts: only the bootstrap folders (the actions, their scripts, paddock-dev's inputs)
+      # as a partial clone; the kept-clone step below brings the slot's own clone to this commit (conformance/ci/checkout-profiles.txt).
       - uses: actions/checkout@v4
+        if: runner.os == 'Linux'
+
+      - uses: actions/checkout@v4
+        if: runner.os != 'Linux'
+        with:
+          sparse-checkout: |
+            .cargo
+            .gitea
+            conformance
+            scripts
+            tools
+            crates
+          filter: blob:none
 
       # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it).
       - name: Git bash on PATH (Windows)
@@ -481,7 +496,7 @@ jobs:
       # folders are the runner's per-job folder, so concurrent jobs on one host never share either.
       - uses: ./.gitea/actions/job-isolation
 
-      # The test browser outside the checkout, which stable-workspace moves: the slot's kept folder (the installer stamps the
+      # The test browser outside the checkout, the slot's kept folder (the installer stamps the
       # pinned version in it).
       - name: Test browser folder (macOS, Windows)
         if: runner.os != 'Linux'
@@ -492,14 +507,16 @@ jobs:
           echo "PADDOCK_TEST_BROWSER_DIR=$dir" >> "$GITHUB_ENV"
 
       # Host runners check out into a per-job hashed folder; sccache keys a compile on its folder, so the workspace crates miss
-      # on every run. Build from the same physical path every time: PADDOCK_WORKSPACE, the cargo steps' working-directory
-      # (macOS: the checkout moved there, the old path a link; Windows, where act keeps the work folder open: a clone there
-      # at the same commit). On Windows the step comes after the one that puts Git's bash on PATH (before it, `shell: bash`
-      # finds WSL's bash.exe).
-      - uses: ./.gitea/actions/stable-workspace
+      # on every run. Build from the same physical path every time: PADDOCK_WORKSPACE, the steps' working-directory, is the slot's
+      # kept clone at this commit (kept-clone: a fetch of what changed, a clean tree, no screenshots; macOS: the work folder is
+      # a link to it; Windows, where act keeps the work folder open: the work folder stays the bootstrap, so every read of the
+      # tree goes through PADDOCK_WORKSPACE). On Windows the step comes after the one that puts Git's bash on PATH (before it,
+      # `shell: bash` finds WSL's bash.exe).
+      - uses: ./.gitea/actions/kept-clone
         if: runner.os != 'Linux'
         with:
-          name: paddock-${{ github.job }}-${{ runner.os }}
+          name: paddock-checkout-${{ runner.os }}
+          profile: lean
 
       # A build folder that outlives the job on the hosts (the work folder does not: it is hashed per job), crates/target in
       # the container, as cargo configuration (crates/.cargo/ci.toml, included by crates/.cargo/config.toml), never
@@ -538,7 +555,7 @@ jobs:
         if: ${{ !cancelled() && runner.os != 'Linux' }}
         uses: ./.gitea/actions/install-test-browser
         with:
-          catalogue: ${{ github.workspace }}/crates/paddock-chromium/src/chromium.toml
+          catalogue: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates/paddock-chromium/src/chromium.toml
           env-prefix: PADDOCK
           dir: ${{ env.PADDOCK_TEST_BROWSER_DIR }}
 
@@ -635,7 +652,7 @@ jobs:
   # (plan S18) and the workbench demo (X50 W8) are the first legs: their UI is ui/projects/<app> (tested by the ui and e2e
   # jobs), built here because Tauri embeds it (tauri.conf.json frontendDist). A change to a shell crate or to the UI that
   # breaks an app fails here before a tag. Installers come from <app>-release.yml (an `<app>-v*` tag or a manual run).
-  # Host legs: the same physical checkout path and a kept build folder every run (stable-workspace, build-folder), the pinned
+  # Host legs: the same physical checkout path and a kept build folder every run (kept-clone, build-folder), the pinned
   # cargo-nextest (host-tools), nothing left behind (host-cleanup).
   app:
     name: app ${{ matrix.app }} (${{ matrix.os }}${{ matrix.e2e_leg != '' && format(', {0}', matrix.e2e_leg) || '' }})
@@ -650,7 +667,22 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
     steps:
+      # Linux: the whole tree in the container. Hosts: only the bootstrap folders (the actions, their scripts, paddock-dev's inputs)
+      # as a partial clone; the kept-clone step below brings the slot's own clone to this commit (conformance/ci/checkout-profiles.txt).
       - uses: actions/checkout@v4
+        if: runner.os == 'Linux'
+
+      - uses: actions/checkout@v4
+        if: runner.os != 'Linux'
+        with:
+          sparse-checkout: |
+            .cargo
+            .gitea
+            conformance
+            scripts
+            tools
+            crates
+          filter: blob:none
 
       # Host-mode Windows runner: Git's bash on PATH (`shell: bash` needs it).
       - name: Git bash on PATH (Windows)
@@ -666,10 +698,11 @@ jobs:
       # A slot of the host (job isolation; after Git bash on Windows), before every kept folder.
       - uses: ./.gitea/actions/job-isolation
 
-      - uses: ./.gitea/actions/stable-workspace
+      - uses: ./.gitea/actions/kept-clone
         if: runner.os != 'Linux'
         with:
-          name: ${{ matrix.app }}-${{ github.job }}-${{ runner.os }}
+          name: paddock-checkout-${{ runner.os }}
+          profile: lean
 
       # The workspace's .cargo/config.toml must include ci.toml (build-folder checks it): required of an app with host legs.
       - uses: ./.gitea/actions/build-folder
@@ -701,7 +734,7 @@ jobs:
         if: runner.os != 'Linux' && matrix.test_browser_prefix != ''
         uses: ./.gitea/actions/install-test-browser
         with:
-          catalogue: ${{ github.workspace }}/${{ matrix.test_browser_catalogue }}
+          catalogue: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/${{ matrix.test_browser_catalogue }}
           env-prefix: ${{ matrix.test_browser_prefix }}
           dir: ${{ env.PADDOCK_TEST_BROWSER_DIR }}
 
@@ -800,7 +833,22 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
     steps:
+      # Linux: the whole tree in the container. Hosts: only the bootstrap folders (the actions, their scripts, paddock-dev's inputs)
+      # as a partial clone; the kept-clone step below brings the slot's own clone to this commit (conformance/ci/checkout-profiles.txt).
       - uses: actions/checkout@v4
+        if: runner.os == 'Linux'
+
+      - uses: actions/checkout@v4
+        if: runner.os != 'Linux'
+        with:
+          sparse-checkout: |
+            .cargo
+            .gitea
+            conformance
+            scripts
+            tools
+            crates
+          filter: blob:none
 
       - name: Git bash on PATH (Windows)
         if: runner.os == 'Windows'
@@ -816,10 +864,11 @@ jobs:
       # A slot of the host (job isolation; after Git bash on Windows): its kept folders and ports are this job's alone.
       - uses: ./.gitea/actions/job-isolation
 
-      - uses: ./.gitea/actions/stable-workspace
+      - uses: ./.gitea/actions/kept-clone
         if: runner.os != 'Linux'
         with:
-          name: paddock-${{ github.job }}-${{ runner.os }}
+          name: paddock-checkout-${{ runner.os }}
+          profile: lean
 
       - uses: ./.gitea/actions/build-folder
         with:

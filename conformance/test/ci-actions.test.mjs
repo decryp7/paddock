@@ -118,7 +118,7 @@ test('the release workflow cannot publish from anything but its own v* tag, and 
 // A host job's work folder is not where the build ran: on Windows stable-workspace keeps a clone at the stable path and the work
 // folder stays, so a relative `dist/*` finds nothing and the bundle job fails after building (or uploads the wrong files).
 test('in a job that moves the checkout (stable-workspace), every upload-artifact path starts at PADDOCK_WORKSPACE', () => {
-  const stable = /uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/stable-workspace/;
+  const stable = /uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/(?:stable-workspace|kept-clone)/;
   let checked = 0;
   for (const file of readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x))) {
     for (const job of parseJobs(read(join(WORKFLOWS, file)))) {
@@ -386,7 +386,7 @@ test('every job that builds Rust on a host sets its build folder with the build-
       // app-release.yml reaches the kit through its .paddock checkout.
       const at = job.text.search(/uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/build-folder/);
       if (at < 0) continue;
-      const sw = job.text.search(/uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/stable-workspace/);
+      const sw = job.text.search(/uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/(?:stable-workspace|kept-clone)/);
       assert.ok(sw >= 0 && sw < at, `${file} ${job.id}: the stable checkout path before the build folder`);
       const ws = /workspace: \$\{\{ env\.PADDOCK_WORKSPACE \|\| github\.workspace \}\}\/([^\n]+)\n\s+name: (\S+)/.exec(job.text.slice(at));
       assert.ok(ws, `${file} ${job.id}: the workspace in the stable checkout, and a folder name`);
@@ -643,14 +643,14 @@ test('stable-workspace leaves Linux containers alone and never fails a job it ca
 
 test('CI moves the checkout to a stable path on the host runners only, after Git bash is on PATH on Windows', () => {
   const ci = read(join(WORKFLOWS, 'ci.yml'));
-  const jobs = parseJobs(ci).filter((j) => j.text.includes('uses: ./.gitea/actions/stable-workspace'));
+  const jobs = parseJobs(ci).filter((j) => j.text.includes('uses: ./.gitea/actions/kept-clone'));
   assert.deepEqual(jobs.map((j) => j.id), ['crate', 'app', 'paddock-dev'], 'the crate job, the apps\' host legs and the developer tool');
   for (const job of jobs) {
-    const at = job.text.indexOf('uses: ./.gitea/actions/stable-workspace');
+    const at = job.text.indexOf('uses: ./.gitea/actions/kept-clone');
     assert.match(job.text.slice(at, at + 160), /\n\s+if: runner\.os != 'Linux'/, `${job.id}: host runners only; on Windows \`shell: bash\` before Git bash is on PATH resolves to WSL`);
     const gitBash = job.text.indexOf('Git bash on PATH');
     assert.ok(gitBash > 0 && gitBash < at, `${job.id}: Git bash is on PATH before any later step needs bash`);
-    assert.equal(job.text.split('uses: ./.gitea/actions/stable-workspace').length - 1, 1);
+    assert.equal(job.text.split('uses: ./.gitea/actions/kept-clone').length - 1, 1);
   }
 });
 

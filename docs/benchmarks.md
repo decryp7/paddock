@@ -476,6 +476,93 @@ Quoted by [ADR 0076](adr/0076-owned-background-work.md) ("Parallelism and cost",
   budget; verdict: cheap enough for CI over the whole tree, and for the push check over the changed files only.
 - **Memory:** not measured.
 
+### 2026-11-09, host-runner checkout: plain checkout plus stable-workspace against the kept clone (ci/kept-clone-sparse-checkout)
+
+What: the checkout and stable-workspace steps of ci.yml's host jobs (`crate`, `app`, `paddock-dev`) on the real runners, from the
+48 h of job data of the speed research R2 (`/Volumes/d7sst7/dev-targets/scratch/speed-research/data/jobs`, successful host jobs
+with both steps) against dispatched affected runs 7808 (commit a3ad3d78f, 12 host jobs) 7816 (commit 6d0eb0824), 7818 (commit 4ebe7db09) and 7819 (commit 0fcc299fb). The tree: 12,367 files, 540 MiB; the
+lean profile checks out 10,314 files. Synthetic data only; step times from the Gitea API (`steps[].started_at/completed_at`).
+Script: `measure.py` in the scratch folder `/Volumes/d7sst7/dev-targets/scratch/ci-cheap-checkout`.
+
+| Step (seconds) | before p50 | before p90 | run 7808 (a3ad3d78f) |
+|---|---|---|---|
+| Windows checkout | 50 | 63 | 5 to 14 (bootstrap) |
+| Windows stable-workspace | 51 | 61 | kept-clone 62 to 127 (see below) |
+| Windows both | 102 | 123 | 76 to 133 |
+| macOS checkout | 24 | 40 | 1 to 8 (bootstrap) |
+| macOS stable-workspace | 14 | 70 | kept-clone 16 to 59 |
+| macOS both | 41 | 130 | 17 to 67 |
+
+Reading run 7808, per phase (kept-clone log lines): on Windows the clone is created in 1 to 7 s, the fetch takes 0 to 2 s and the
+checkout 3 to 5 s, but `clean` took 52 to 111 s: `reset --hard` ran before the sparse patterns were set and wrote the whole tree of
+the new clone's branch. On macOS the slots held clones of the old layout (plain shallow checkouts), which were reused and fetched
+without a partial filter: fetch 12 to 50 s, clean 2 to 10 s. Both were fixed in 5544158b2.
+
+**Run 7816 (commit 6d0eb0824, with that fix), Windows, every clone cold** (seconds; the CI VM runs three slots, s1 to s3; bootstrap
+checkout 6 to 7 s in each):
+
+| Job (slot) | create the clone | fetch | check out | kept-clone total | checkout + kept-clone |
+|---|---|---|---|---|---|
+| crate (s2) | 14 | 1 | 25 | 43 | 49 |
+| paddock-dev (s1) | 19 | 1 | 30 | 52 | 58 |
+| app dyno (s3) | 17 | 0 | 29 | 49 | 56 |
+| app pitcrew (s1) | 36 | 1 | 27 | 67 | 72 |
+| app pitwall (s2) | 17 | 1 | 27 | 48 | 54 |
+| app spotter (s3) | 1 | 0 | 29 | 34 | 40 |
+
+Against the 102 s p50 (123 s p90) of the plain checkout plus stable-workspace, a cold clone costs 40 to 72 s (about 55 % of p50,
+the 25 to 30 s being the blobs of the 10,314 lean files). **No clone was warm**: the kept folder was named after the job
+(`<app>-<job>-<os>-<slot>`), so each of the six jobs made its own clone in its slot; the one that was 1 s to create (spotter, s3)
+reused a folder of the same name left by run 7808. The clone is now one per slot, shared by every job (`paddock-checkout-<os>`),
+which a warm job should turn into a fetch of the delta (the fetch phase was 0 to 1 s) plus a checkout of the changed files. That is
+**not measured yet**. The 3-slot VM means three cold clones at first and warm ones after.
+
+**Run 7818 (commit 4ebe7db09, one clone per slot), Windows** (seconds; slots s1 to s3, `paddock-checkout-Windows-s<n>`):
+
+| Job (slot) | bootstrap checkout | create | clean | fetch | check out | kept-clone total | checkout + kept-clone |
+|---|---|---|---|---|---|---|---|
+| crate (s2), cold | 6 | 0 | - | 1 | 26 | 28 | 35 |
+| paddock-dev (s1), cold | 6 | 1 | - | 0 | 25 | 28 | 34 |
+| app dyno (s3), cold | 6 | 1 | - | 0 | 25 | 28 | 34 |
+| app pitcrew (s1), warm | 14 | - | 4 | 1 | 2 | 10 | 24 |
+| app pitwall (s1), warm | 9 | - | 1 | 2 | 1 | 7 | 16 |
+| app spotter (s2), warm | 6 | - | 1 | 2 | 1 | 7 | 13 |
+
+Against 102 s p50 (123 s p90): cold 34 to 35 s (a third), warm 13 to 24 s (an eighth to a quarter). Caveat on "warm": the slot's
+clone was already at the same commit (the same run), so fetch and check out had no delta to carry; a warm clone one commit
+behind adds the changed files. The six jobs repeated only slots s1 and s2, the three-slot VM's first run. The warm bootstrap
+checkout (6 to 14 s) is now the biggest single piece left; the cold check out (25 s) is the blobs of the lean files.
+
+**macOS did not run the clone in run 7816 or 7818.** All six macOS jobs failed in job-isolation, before kept-clone, in both
+runs: paddock-dev has to be built from the bootstrap (a cached `./dev` binary hid this in run 7808), and cargo loads the whole
+workspace around its path dependencies. 7816 lacked `crates/paddock-testkit` (a dev-dependency), 7818 lacked the other members
+of the `crates/` workspace (`failed to load manifest for workspace member crates/cargo-paddock-plugin`, `no matching package
+named paddock-jobs`). The bootstrap is now the whole `crates/` folder (13.7 MiB). Before the next run it was proved locally (ER-9):
+a sparse partial clone of exactly the bootstrap folders, the real `job-isolation.sh acquire` against a scratch CI home with a
+fresh build folder and no cached binary, which built paddock-dev, took slot s1 and released it.
+
+**Run 7819 (commit 0fcc299fb), macOS** (seconds; slots s1 to s3, `paddock-checkout-macOS-s<n>`; the first run per slot is cold):
+
+| Job (slot) | bootstrap checkout | create | check out | kept-clone total | checkout + kept-clone |
+|---|---|---|---|---|---|
+| crate (s1), cold | 2 | 1 | 25 | 27 | 29 |
+| app dyno (s3), cold | 3 | 1 | 20 | 22 | 25 |
+| app pitwall (s2), cold | 6 | 1 | 17 | 18 | 24 |
+| paddock-dev (s1), warm | 5 | - | 0 | 2 | 7 |
+| app pitcrew (s3), warm | 6 | - | 0 | 2 | 8 |
+| app spotter (s1), warm | 4 | - | 1 | 2 | 6 |
+
+Against 41 s p50 (130 s p90): cold 24 to 29 s, warm 6 to 8 s (same caveat as Windows: the warm clone was already at this commit).
+Windows in the same run, warm: kept-clone 5 to 10 s, checkout + kept-clone 15 to 20 s (bootstrap 8 to 12 s); the Windows
+slots that repeated were s1 and s3.
+
+Failures in runs 7818 and 7819 that are not the checkout: macOS `paddock-dev` in 7819 passed its 99 tests and failed at the end on
+sccache (`No such file or directory` in the job's temp folder, the holder of s1 ended before the job did), the same error as in
+run 7808 and the older run 7774; `crate` Windows (`paddock-mcp` bridge test timeout), `paddock-dev` Windows (two
+timeouts, `golden::live_plan_matches_affected_mjs_on_sample_change_sets` and `wrapper::compiler_flags_are_part_of_the_hash...`;
+the golden live tests also timed out or failed on Windows in runs 7812 and 7803 of other branches, and the wrapper test works in a
+temporary fixture repository, so load on the three-slot VM is the likelier cause, not shown).
+
 ### 2026-11-03, starving a test process by OS priority on macOS
 
 Quoted by [ADR 0041](adr/0041-deterministic-timing-in-tests.md) §5 (the starved run).

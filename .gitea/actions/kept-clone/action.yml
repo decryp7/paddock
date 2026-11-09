@@ -1,0 +1,18 @@
+name: kept-clone
+description: "Host runners only (a Linux container is left alone): brings the job slot's kept git clone (job-isolation: src/<name>-<slot>, one per slot, never shared by concurrent jobs) to the job's exact commit by a fetch and a checkout, cleaned, without the paths the job's profile leaves out (conformance/ci/checkout-profiles.txt), and sets PADDOCK_WORKSPACE to it. It follows a SPARSE, PARTIAL actions/checkout (the declared bootstrap folders only), so a job neither fetches nor writes the whole tree: only what changed since the slot's last job. On macOS the work folder becomes a link to the clone; on Windows (act holds the work folder open) it stays the bootstrap, and every later step reads the tree through PADDOCK_WORKSPACE. Replaces stable-workspace in a job that uses it (ADR 0025, Kept clones). Logs each phase with its duration; a clone that cannot be made is one warning and the job builds from the work folder, expanded to the profile."
+inputs:
+  name:
+    description: "Folder name under the CI home's src/ (the job's slot is appended); one per repo and job (the default is both)."
+    default: ${{ github.repository }}-${{ github.job }}
+  profile:
+    description: "The checkout profile of conformance/ci/checkout-profiles.txt: `lean` leaves out screenshots, review sheets and design sheets; `full` leaves nothing out. A job whose steps read a path a profile excludes uses a profile that keeps it (a conformance test cross-checks the file)."
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Update the slot's kept clone
+      shell: bash
+      env:
+        NAME: ${{ inputs.name }}
+        PROFILE: ${{ inputs.profile }}
+      run: bash "${{ github.action_path }}/../../../conformance/ci/kept-clone.sh"
