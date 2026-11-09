@@ -611,7 +611,7 @@ mod tests {
                 rig.stop();
                 result
             }
-            _ => Err("this scenario is not driven by the helper rig; if it does not apply, declare it in [[not_applicable]]"),
+            _ => Err("this scenario is not driven by the helper rig; declare it in [[not_applicable]] if it is out of scope"),
         }
     }
 
