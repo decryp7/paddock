@@ -23,6 +23,11 @@ const read = (p) => readFileSync(p, 'utf8');
 const FAKE_DEV = `#!/usr/bin/env bash
 set -u
 echo "$*" >> "$FAKE_DEV_LOG"
+# The real ./dev builds paddock-dev with cargo when its cached binary is missing: through RUSTC_WRAPPER when one is set.
+if [ -n "\${RUSTC_WRAPPER:-}\${RUSTC_WORKSPACE_WRAPPER:-}\${CARGO_BUILD_RUSTC_WRAPPER:-}" ] && [ -n "\${FAKE_DEV_BUILD_FAILS_WITH_WRAPPER:-}" ]; then
+  echo "error: process didn't exit successfully: sccache rustc -vV (exit status: 2)" >&2; exit 101
+fi
+[ -n "\${FAKE_DEV_FAILS:-}" ] && { echo "error: could not build paddock-dev" >&2; exit 101; }
 [ "$1 $2" = "ci slot" ] || exit 2
 cmd=$3; shift 3
 max= owner= root= slot= token= run=()
@@ -150,6 +155,32 @@ test('a job that ends without its release frees its slot (the holder ends with t
   const r = b.later(['release']);
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /the holder of s1 ended before the job did .* isolation was not guaranteed/);
+});
+
+// Runs 7773 to 7775 (macOS): setup-rust had put RUSTC_WRAPPER=sccache into the job's environment; by release the job's sccache
+// server was stopped (sccache-stats) and its temp folder removed (job-tmpdir.sh remove), so ./dev's cargo build of paddock-dev
+// failed ("No such file or directory ... gitea-runner/tmp/<job>/sccache...") and the release reported "the holder of s2
+// ended before the job did", which was not what happened.
+test('paddock-dev runs without the job\'s compiler wrapper, so a release never builds it through a stopped sccache', () => {
+  const h = host();
+  const a = h.job('a'.repeat(16), { FAKE_DEV_BUILD_FAILS_WITH_WRAPPER: '1' });
+  assert.equal(a.exec(['acquire']).status, 0);
+  const wrapped = { RUSTC_WRAPPER: 'sccache', RUSTC_WORKSPACE_WRAPPER: 'sccache', CARGO_BUILD_RUSTC_WRAPPER: 'sccache', SCCACHE_SERVER_PORT: '4228' };
+  const r = a.later(['release'], wrapped);
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /::error::/);
+  assert.match(r.stderr, /job-isolation: released s1/);
+});
+
+test('a release that cannot ask paddock-dev says so, and never blames a holder it could not see', () => {
+  const h = host();
+  const a = h.job('a'.repeat(16));
+  assert.equal(a.exec(['acquire']).status, 0);
+  const r = a.later(['release'], { FAKE_DEV_FAILS: '1' });
+  assert.notEqual(r.status, 0, 'isolation could not be checked: the job fails');
+  assert.doesNotMatch(r.stderr, /the holder of s1 ended before the job did/);
+  assert.match(r.stderr, /::error::job-isolation: could not ask paddock-dev whether the holder of s1 is still there/);
+  assert.match(r.stderr, /could not build paddock-dev/, 'paddock-dev\'s own message is in the log');
 });
 
 test('release frees only the job\'s own slot; a job without one, or in a Linux container, does nothing', () => {

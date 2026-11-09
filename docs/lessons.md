@@ -1539,3 +1539,11 @@ what the line says, with a date, and say in the check's fix text how to waive a 
 ## Dyno helper_seam: the agent closed a client's connection in the handshake, cause open (2026-11-09, run 7763)
 
 Run 7763 (train 1, Linux container): `dyno-agent::helper_seam the_cached_inventory_reads_the_memory_slots_again_when_the_helper_comes_up` failed after 5.25 s at `helper_seam.rs:138` (`connect(&self.dirs).unwrap()`) with "The agent in .../agent.json did not answer (the connection ended (the host closed the connection during the handshake))". It did not reproduce on macOS. A first change (a 100 ms poll cadence, aca067f7f) assumed the fast poll's connection rate was the trigger; the review measured 21,000 back-to-back sequential connect-and-ask calls on macOS (normal priority and starved), 0 failures, so that cause is unproven, and the change was reverted (9a08a1ca2). Candidate causes, none measured yet: the handshake watchdog thread failed to spawn (`bounded`, paddock-ipc `handshake.rs:104-114`, the stream is dropped without an answer); the server's read of the Hello failed and the host closed without a `Fail` frame; the 10 s watchdog fired (unlikely in 5.25 s); a rig artefact (the discovery file rewritten mid-test). The agent's own log line (`dyno-agent: refused a connection: ...`, `server.rs:75`) would decide it, but the rig does not show the agent log on failure. Owner: branch `fix/dyno-agent-handshake-close`. **Lesson:** a test that fails because a product closed a well-formed connection is a product question first; do not slow the client until the cause is measured, and make the rig print the product's own log on failure.
+
+## A test that kept every vCPU of the Windows test VM busy cut its SSH and left nothing to clean up with (2026-11-09)
+
+To provoke a rare close race in paddock-ipc, an agent started one busy process per core (4 of 4) in the Paddock Windows 11
+test VM over SSH, with the cleanup in the same PowerShell session. sshd stopped answering at once, the session dropped, and
+the cleanup could not run; the VM was later powered off by someone else. The same series without the extra load had
+already reproduced the race (1 in 2,000 runs). Rule of thumb: in the test VM, load at most cores minus one, run the load
+from a scheduled task with its own time limit (not from the SSH session), and stop it by the process ids it recorded.

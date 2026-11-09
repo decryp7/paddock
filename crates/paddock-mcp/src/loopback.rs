@@ -25,6 +25,12 @@ use std::time::{Duration, Instant};
 const HANDSHAKE_MAX: usize = 512;
 /// A client that does not send its key within this is dropped.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// How many refused connections are drained (their key line read before they close) at once. Not tied to the number of
+/// places: a client that reconnects at once after a refusal is refused again before the drain of its previous connection
+/// has run on a loaded machine, and with no drain place left its key line is left unread, which resets the connection (CI
+/// run 7761). A drain is a thread blocked in a read for at most [`HANDSHAKE_TIMEOUT`]; beyond this bound a refused
+/// connection is closed at once.
+const DRAIN_PLACES: usize = 16;
 /// How long one blocking read waits before the connection looks at the stop flag again. Shutting a socket down wakes a
 /// blocked read on Linux and macOS, but not on Windows, where only the system's own connection timeout (about two minutes)
 /// would end it; so reads are cut into slices and [`Serving::stop`] is noticed within one.
@@ -388,10 +394,10 @@ pub fn serve_loopback(
                 );
                 // The client sees the refusal and then the end at once, but the socket is closed only once the client's
                 // key line is read: a socket closed with unread data is reset, and the reset can reach the client before
-                // the refusal (2026-11-07). The drain has its own thread, at most `max_connections` at a time, each ended
+                // the refusal (2026-11-07). The drain has its own thread, at most [`DRAIN_PLACES`] at a time, each ended
                 // by the key line, the client's end, the handshake timeout or a stop.
                 let _ = stream.shutdown(Shutdown::Write);
-                if let Some(draining) = Place::take(&drains, max_connections) {
+                if let Some(draining) = Place::take(&drains, DRAIN_PLACES) {
                     let stream = Arc::new(stream);
                     let kept = Arc::downgrade(&stream);
                     let stop = stop2.clone();
@@ -401,6 +407,10 @@ pub fn serve_loopback(
                         drop(stream);
                     });
                     list.push((kept, handle));
+                } else {
+                    log::warn!(
+                        "paddock_mcp: connection #{id} from port {peer}: all {DRAIN_PLACES} drains are busy; closed without reading its key line (the client may see a reset)"
+                    );
                 }
                 continue;
             };
@@ -887,9 +897,10 @@ mod tests {
     }
 
     /// More refused clients than drain places: the extra one is closed at once, and with nothing unread it still reads its
-    /// refusal and the end. Two silent clients hold the one place and the one drain (it waits for their key lines).
+    /// refusal and the end. Silent clients hold the one place and every drain (each waits for its client's key line).
     #[test]
     fn a_refused_client_beyond_the_drains_still_reads_its_refusal() {
+        capture_logs();
         let keys = Arc::new(crate::keys::KeyStore::new());
         let (_, key) = keys.issue("holder", 1).unwrap();
         let serving = serve_loopback(
@@ -915,11 +926,85 @@ mod tests {
             assert_eq!(lines.len(), 1, "the refusal, then the end: {lines:?}");
             assert!(lines[0].contains("\"code\":\"busy\""), "{lines:?}");
         };
-        // The first refused client keeps the one drain busy: it sends nothing and stays connected.
-        let drained = TcpStream::connect(serving.addr()).unwrap();
-        read_refusal(&drained);
+        // The first refused clients keep every drain busy: they send nothing and stay connected.
+        let drained: Vec<TcpStream> = (0..DRAIN_PLACES)
+            .map(|_| {
+                let s = TcpStream::connect(serving.addr()).unwrap();
+                read_refusal(&s);
+                s
+            })
+            .collect();
         let extra = TcpStream::connect(serving.addr()).unwrap();
         read_refusal(&extra);
+        // The log says so (ER-27): a client closed without a drain may see a reset, which its own logs cannot explain.
+        let port = format!(" from port {}: ", extra.local_addr().unwrap().port());
+        let said = LOGGED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .any(|l| l.contains(&port) && l.contains("drains are busy"));
+        assert!(
+            said,
+            "no log line about the connection closed without a drain"
+        );
+        drop(drained);
+        drop(serving);
+    }
+
+    /// Regression (CI run 7761, macOS, under load): a client reconnecting at once after its refusal was refused again while
+    /// the drain of its previous connection had not yet run, so with the one drain place taken the new connection was closed
+    /// with its key line unread, and the client read a reset after the refusal instead of the end. A drain that has not run
+    /// yet is a silent refused client here, which holds a drain place the same way.
+    #[test]
+    fn a_refused_client_that_sends_its_key_while_an_earlier_drain_is_pending_reads_the_refusal_then_the_end()
+     {
+        let keys = Arc::new(crate::keys::KeyStore::new());
+        let (_, key) = keys.issue("holder", 1).unwrap();
+        let serving = serve_loopback(
+            test_server(),
+            keys,
+            TcpListener::bind("127.0.0.1:0").unwrap(),
+            1,
+        )
+        .unwrap();
+        let hello = format!("{}\n", json!({"key": key}));
+        let mut holder = TcpStream::connect(serving.addr()).unwrap();
+        holder.write_all(hello.as_bytes()).unwrap();
+        let mut ok = String::new();
+        std::io::BufRead::read_line(&mut BufReader::new(holder.try_clone().unwrap()), &mut ok)
+            .unwrap();
+        assert!(ok.contains("\"ok\":true"), "{ok}");
+        let pending_drain = TcpStream::connect(serving.addr()).unwrap();
+        let mut first = String::new();
+        std::io::BufRead::read_line(
+            &mut BufReader::new(pending_drain.try_clone().unwrap()),
+            &mut first,
+        )
+        .unwrap();
+        assert!(first.contains("\"code\":\"busy\""), "{first}");
+        for attempt in 0..20 {
+            let mut s = TcpStream::connect(serving.addr()).unwrap();
+            s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+            s.write_all(hello.as_bytes()).unwrap();
+            let mut reader = BufReader::new(s);
+            let mut line = String::new();
+            let read = std::io::BufRead::read_line(&mut reader, &mut line);
+            assert!(
+                read.is_ok(),
+                "attempt {attempt}: the refusal was lost: {read:?}"
+            );
+            assert!(
+                line.contains("\"code\":\"busy\""),
+                "attempt {attempt}: {line}"
+            );
+            line.clear();
+            let end = std::io::BufRead::read_line(&mut reader, &mut line);
+            assert!(
+                matches!(end, Ok(0)),
+                "attempt {attempt}: then the end, not {end:?}"
+            );
+        }
+        drop(pending_drain);
         drop(serving);
     }
 }

@@ -180,12 +180,17 @@ cmd_sweep_slot() {
 }
 
 # dev_tool <args>: paddock-dev (PADDOCK_DEV, else the repository's ./dev with its binary cached in the shared tools folder).
+# Always without the job's compiler wrapper: ./dev builds paddock-dev when its cached binary is missing, and at release the
+# job's sccache server is stopped and its temp folder removed, so a build through RUSTC_WRAPPER=sccache fails (runs 7773 to
+# 7775: "No such file or directory ... gitea-runner/tmp/<job>/sccache..."). The tool's build has its own target folder anyway.
 dev_tool() {
-  if [ -n "${PADDOCK_DEV:-}" ]; then "$PADDOCK_DEV" "$@"; return; fi
-  local tools repo
-  tools="$(cmd_path tools)"
-  repo="$(cd "$here/../.." && pwd)"
-  (cd "$repo" && PADDOCK_DEV_HOME="$tools/paddock-dev" PADDOCK_DEV_TARGET_DIR="$tools/paddock-dev-target" bash ./dev "$@")
+  (
+    unset RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER CARGO_BUILD_RUSTC_WRAPPER CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER
+    if [ -n "${PADDOCK_DEV:-}" ]; then exec "$PADDOCK_DEV" "$@"; fi
+    tools="$(cmd_path tools)"
+    repo="$(cd "$here/../.." && pwd)"
+    cd "$repo" && PADDOCK_DEV_HOME="$tools/paddock-dev" PADDOCK_DEV_TARGET_DIR="$tools/paddock-dev-target" exec bash ./dev "$@"
+  )
 }
 
 # native <path>: the path as the operating system's own programs take it (Windows form under Git bash).
@@ -392,12 +397,13 @@ cmd_acquire() {
   fi
 }
 
-# held_by_us <home> <slot> <token>: the slot's lock is held and its holder is the one this job started.
+# held_by_us <home> <slot> <token>: 0 when the slot's lock is held and its holder is the one this job started, 1 when not,
+# 2 when paddock-dev could not be asked (its own message is on stderr): that says nothing about the holder.
 held_by_us() {
-  local home="$1" slot="$2" token="$3" state
+  local home="$1" slot="$2" token="$3" status
   [ "$(sed -n 's/^token=//p' "$home/slots/$slot.owner" 2>/dev/null | head -1)" = "$token" ] || return 1
-  state="$(dev_tool ci slot status --max "${slot#s}" --root "$(native "$home")" | awk -v s="$slot" '$1 == s { print $2 }')"
-  [ "$state" = busy ]
+  status="$(dev_tool ci slot status --max "${slot#s}" --root "$(native "$home")")" || return 2
+  [ "$(printf '%s\n' "$status" | awk -v s="$slot" '$1 == s { print $2 }')" = busy ]
 }
 
 cmd_release() {
@@ -407,7 +413,12 @@ cmd_release() {
   local s="${PADDOCK_CI_SLOT:-}" token="${PADDOCK_CI_SLOT_TOKEN:-}" home ok=1
   [[ "$s" =~ ^s[1-9][0-9]*$ ]] || { echo "job-isolation: this job holds no slot" >&2; return 0; }
   home="$(ci_home)" || return 0
-  if ! held_by_us "$home" "$s" "$token"; then
+  local held=0
+  held_by_us "$home" "$s" "$token" || held=$?
+  if [ "$held" = 2 ]; then
+    ok=0
+    echo "::error::job-isolation: could not ask paddock-dev whether the holder of $s is still there (its message is above), so this job's isolation could not be checked. Next step: run './dev ci slot status' in the repository on the runner to see why paddock-dev fails." >&2
+  elif [ "$held" != 0 ]; then
     ok=0
     echo "::error::job-isolation: the holder of $s ended before the job did (killed with the job's processes?), so another job could have taken $s meanwhile: this job's isolation was not guaranteed. See ADR 0025, \"Stalled holder\"." >&2
   fi
