@@ -17,6 +17,7 @@ body:
         - Sighter
         - Pacenotes
         - Recce
+        - Scrutineer
         - Other
     validations:
       required: true
