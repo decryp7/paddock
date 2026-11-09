@@ -678,6 +678,13 @@ pub fn plan_for(root: &Path, history: &dyn History, req: &Request) -> Result<Val
 /// The graph the plan was computed from and the plan (the CI matrix reads the apps' contracts from the graph).
 pub fn plan_with_graph(root: &Path, history: &dyn History, req: &Request) -> Result<(RepoGraph, Value), GraphError> {
     let graph = read_graph(root, history)?;
+    let plan = plan_on_graph(root, history, req, &graph)?;
+    Ok((graph, plan))
+}
+
+/// The plan for a request on a graph already read from `root` (reading it runs `cargo metadata` over every workspace). The graph
+/// depends on the tracked files and manifests, not on the text of the changed files, so one reading serves many requests.
+pub fn plan_on_graph(root: &Path, history: &dyn History, req: &Request, graph: &RepoGraph) -> Result<Value, GraphError> {
     let files_mode = !req.files.is_empty();
     let gitea = if req.all {
         None
@@ -709,8 +716,7 @@ pub fn plan_with_graph(root: &Path, history: &dyn History, req: &Request) -> Res
             );
         }
     }
-    let plan = affected(&changed, &graph, &opts)?;
-    Ok((graph, plan))
+    affected(&changed, graph, &opts)
 }
 
 fn cli_error(e: GraphError) -> CliError {
