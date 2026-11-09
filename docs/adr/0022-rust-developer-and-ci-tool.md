@@ -547,9 +547,9 @@ Status of R0b against this ADR, not a design change:
   that runs `./dev`. The arm64 Linux and Windows ARM rows of the target table are as stated there (no runner).
 - **Not yet proven in CI from `main`:** a download of a binary published by `main`. The first proof run happens after the branch lands.
 
-## Amendment (2026-11-09, Proposed): where the binary lives and who reads it
+## Amendment (2026-11-09, Accepted): where the binary lives and who reads it
 
-Status: **Proposed**, for the user's approval. It changes two sentences of section 3.3 and nothing else.
+Status: **Accepted 2026-11-09 by the user.** It changes two sentences of section 3.3 and nothing else.
 
 - **Owner and credentials.** The package `paddock-dev` lives in the private organisation `paddock-build-inputs` (the store that
   holds the pinned build inputs, ADR 0062 on branch `ci/build-inputs-wp1`), not under the repository owner. Jobs read it with the

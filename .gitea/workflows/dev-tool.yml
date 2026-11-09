@@ -5,7 +5,7 @@
 #
 # Needs the Gitea secret DEV_TOOL_PUBLISH_TOKEN (a token with write:package; the only workflow that gets it). Without it the
 # upload stops with an ::error:: naming what to create. Reads use BUILD_INPUTS_TOKEN; the package owner is the private org
-# paddock-build-inputs (ADR 0022 amendment 2026-11-09, Proposed). It publishes only from main: a binary from a branch must
+# paddock-build-inputs (ADR 0022 amendment 2026-11-09, accepted). It publishes only from main: a binary from a branch must
 # not be readable by other branches' jobs under a hash they could compute (ADR 0022, "written only by main"). The consumer side is the `dev` wrapper.
 
 name: dev-tool
