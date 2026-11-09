@@ -107,9 +107,16 @@ fn live_plan_matches_affected_mjs_on_sample_change_sets() {
         skip("scripts/affected.mjs or node is not available (the recorded cases still run)");
         return;
     }
+    let mut narrowed = 0;
     for files in SAMPLES {
-        assert_eq!(canonical(ours(files)), canonical(oracle(files)), "different plan for {files:?}");
+        let got = canonical(ours(files));
+        assert_eq!(got, canonical(oracle(files)), "different plan for {files:?}");
+        narrowed += usize::from(got["all"] == false);
     }
+    assert!(
+        narrowed > 0,
+        "a positive control: some sample narrows the plan, or a comparison of 'everything' with 'everything' proves nothing"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -397,6 +404,7 @@ fn live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history(
         ));
         return;
     }
+    let mut narrowed = 0;
     for i in (0..shas.len() - 6).step_by(6) {
         let (head, base) = (&shas[i], &shas[i + 5]);
         let script = Command::new("node")
@@ -411,10 +419,149 @@ fn live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history(
             .output()
             .unwrap();
         assert!(ours.status.success(), "{}", String::from_utf8_lossy(&ours.stderr));
+        let got = canonical(serde_json::from_slice(&ours.stdout).unwrap());
         assert_eq!(
-            canonical(serde_json::from_slice(&ours.stdout).unwrap()),
+            got,
             canonical(serde_json::from_slice(&script.stdout).unwrap()),
             "different plan for {base}..{head}"
         );
+        narrowed += usize::from(got["all"] == false);
     }
+    assert!(narrowed > 0, "a positive control: some range narrows the plan");
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The per-job narrowing of `.gitea/` and `conformance/ci` changes, made deterministic (the recorded cases and the history
+// sample do not reach every job): uncommitted edits in a copy of this repository, the script as the oracle.
+
+fn node_available() -> bool {
+    repo_root().join("scripts/affected.mjs").exists() && Command::new("node").arg("--version").output().is_ok()
+}
+
+#[test]
+fn live_ci_jobs_table_equals_the_one_affected_mjs_exports() {
+    if !node_available() {
+        skip("scripts/affected.mjs or node is not available");
+        return;
+    }
+    let out = Command::new("node")
+        .current_dir(repo_root())
+        .args([
+            "-e",
+            "import('./scripts/affected.mjs').then(m => console.log(JSON.stringify(m.CI_JOBS)))",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let script: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let ours: serde_json::Map<String, Value> = paddock_dev::plan_gitea::CI_JOBS
+        .iter()
+        .map(|(job, projects)| (job.to_string(), json!(projects)))
+        .collect();
+    assert_eq!(
+        Value::Object(ours),
+        script,
+        "plan_gitea::CI_JOBS and CI_JOBS of scripts/affected.mjs must be the same table"
+    );
+}
+
+/// Adds a comment line to `rel` in `root` (inside the job `job` of a workflow, right under its key, when one is named).
+fn touch(root: &Path, rel: &str, job: Option<&str>) {
+    let path = root.join(rel);
+    let text = std::fs::read_to_string(&path).unwrap();
+    let edited = match job {
+        Some(job) => {
+            let key = regex::Regex::new(&format!(r"(?m)^  {}:[^\n]*\n", regex::escape(job))).unwrap();
+            let m = key.find(&text).unwrap_or_else(|| panic!("job {job} in {rel}"));
+            format!("{}    # touched by the narrowing test\n{}", &text[..m.end()], &text[m.end()..])
+        }
+        None if rel.ends_with(".mjs") => format!("{text}\n// touched by the narrowing test\n"),
+        None => format!("{text}\n# touched by the narrowing test\n"),
+    };
+    std::fs::write(path, edited).unwrap();
+}
+
+#[test]
+fn live_workflow_action_and_script_edits_narrow_exactly_as_affected_mjs_does() {
+    if !node_available() {
+        skip("scripts/affected.mjs or node is not available");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let copy = dir.path().join("copy");
+    let cloned = Command::new("git")
+        .args(["clone", "-q", "--shared"])
+        .arg(repo_root())
+        .arg(&copy)
+        .status()
+        .unwrap();
+    assert!(cloned.success(), "git clone of this repository");
+    // The jobs of ci.yml that CI_JOBS names, from the script's own table; one action, one reusable workflow, one script of
+    // conformance/ci and a helper it imports.
+    let jobs: Value = serde_json::from_slice(
+        &Command::new("node")
+            .current_dir(&copy)
+            .args([
+                "-e",
+                "import('./scripts/affected.mjs').then(m => console.log(JSON.stringify(Object.keys(m.CI_JOBS))))",
+            ])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap();
+    let ci = std::fs::read_to_string(copy.join(".gitea/workflows/ci.yml")).unwrap();
+    let mut edits: Vec<(String, Option<String>)> = jobs
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|j| ci.contains(&format!("\n  {j}:")))
+        .map(|j| (".gitea/workflows/ci.yml".to_string(), Some(j.to_string())))
+        .collect();
+    assert!(edits.len() >= 10, "ci.yml has the jobs CI_JOBS names: {edits:?}");
+    for rel in [
+        ".gitea/actions/node-caches/action.yml",
+        ".gitea/workflows/app-e2e.yml",
+        "conformance/ci/install-test-browser.mjs",
+        "conformance/ci/runtime-catalogue.mjs",
+        "conformance/ci/build-folder.sh",
+    ] {
+        edits.push((rel.to_string(), None));
+    }
+    let history = GitHistory::new(&copy, Duration::from_secs(60));
+    let mut narrowed = 0;
+    for (rel, job) in &edits {
+        touch(&copy, rel, job.as_deref());
+        let script = Command::new("node")
+            .current_dir(&copy)
+            .args(["scripts/affected.mjs", "--files", rel, "--explain"])
+            .output()
+            .unwrap();
+        assert!(script.status.success(), "{}", String::from_utf8_lossy(&script.stderr));
+        let req = Request {
+            files: vec![rel.clone()],
+            all: false,
+            explain: true,
+            root: None,
+            base: None,
+            head: "HEAD".into(),
+        };
+        let got = canonical(plan_for(&copy, &history, &req).unwrap());
+        let want = canonical(serde_json::from_slice(&script.stdout).unwrap());
+        assert_eq!(got, want, "different plan for an edit of {rel} (job {job:?})");
+        narrowed += usize::from(got["all"] == false);
+        let restored = Command::new("git")
+            .arg("-C")
+            .arg(&copy)
+            .args(["checkout", "-q", "--", rel])
+            .status()
+            .unwrap();
+        assert!(restored.success());
+    }
+    assert!(
+        narrowed >= 10,
+        "a positive control: most of these edits narrow the plan ({narrowed} of {})",
+        edits.len()
+    );
 }
