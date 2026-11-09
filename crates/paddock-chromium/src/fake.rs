@@ -59,6 +59,16 @@ pub enum UserAction {
     RestartNetworkService,
     /// Every `Page.navigate` from now on is cancelled (`net::ERR_ABORTED`, not a download, nothing replaces it).
     AbortLoads,
+    /// A browser that is up but slow to answer (a loaded machine): the answer to `Target.getTargets` is held until
+    /// [`UserAction::ReleaseAnswers`].
+    HoldPageList,
+    /// As [`UserAction::HoldPageList`], for `Target.attachToTarget`.
+    HoldAttach,
+    /// Held answers are sent, and nothing is held from now on.
+    ReleaseAnswers,
+    /// While an answer is held, the process ends but its DevTools connection stays open (a process it started holds the
+    /// socket), so only the process says that the browser is gone.
+    EndKeepingConnection,
 }
 
 impl UserAction {
@@ -73,6 +83,10 @@ impl UserAction {
             UserAction::NoFrameTree => "no-frame-tree",
             UserAction::RestartNetworkService => "restart-network-service",
             UserAction::AbortLoads => "abort-loads",
+            UserAction::HoldPageList => "hold-page-list",
+            UserAction::HoldAttach => "hold-attach",
+            UserAction::ReleaseAnswers => "release-answers",
+            UserAction::EndKeepingConnection => "end-keeping-connection",
         }
     }
 }
@@ -261,6 +275,10 @@ static START_PAGE_FINISHED: AtomicBool = AtomicBool::new(false);
 static NO_FRAME_TREE: AtomicBool = AtomicBool::new(false);
 static NETWORK_SERVICE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(100);
 static LOADS_ABORTED: AtomicBool = AtomicBool::new(false);
+static PAGE_LIST_HELD: AtomicBool = AtomicBool::new(false);
+static ATTACH_HELD: AtomicBool = AtomicBool::new(false);
+static ANSWERS_RELEASED: AtomicBool = AtomicBool::new(false);
+static END_KEEPING_CONNECTION: AtomicBool = AtomicBool::new(false);
 /// The number of the last page opened over DevTools (its target id is `T<n>`).
 static LAST_TARGET: AtomicUsize = AtomicUsize::new(0);
 
@@ -320,6 +338,10 @@ fn apply_control() {
             "finish-start-page" => START_PAGE_FINISHED.store(true, Ordering::SeqCst),
             "no-frame-tree" => NO_FRAME_TREE.store(true, Ordering::SeqCst),
             "abort-loads" => LOADS_ABORTED.store(true, Ordering::SeqCst),
+            "hold-page-list" => PAGE_LIST_HELD.store(true, Ordering::SeqCst),
+            "hold-attach" => ATTACH_HELD.store(true, Ordering::SeqCst),
+            "release-answers" => ANSWERS_RELEASED.store(true, Ordering::SeqCst),
+            "end-keeping-connection" => END_KEEPING_CONNECTION.store(true, Ordering::SeqCst),
             "quit" => std::process::exit(0),
             _ => {}
         }
@@ -523,6 +545,7 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
         if let Some(s) = req.get("sessionId") {
             reply["sessionId"] = s.clone();
         }
+        hold_if_asked(&ws, method);
         if ws.send(Message::text(reply.to_string())).is_err() {
             return;
         }
@@ -536,6 +559,35 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
             let _ = std::io::stdout().flush();
             std::process::exit(0);
         }
+    }
+}
+
+/// Holds the answer to `method` while the user asked for it ([`UserAction::HoldPageList`], [`UserAction::HoldAttach`])
+/// until [`UserAction::ReleaseAnswers`]; on [`UserAction::EndKeepingConnection`] the process ends meanwhile and a `sleep`
+/// it starts keeps the socket open (it stays in the browser's process group, so ending the tree ends it).
+fn hold_if_asked(ws: &tungstenite::WebSocket<std::net::TcpStream>, method: &str) {
+    let held = |m: &str| {
+        !ANSWERS_RELEASED.load(Ordering::SeqCst)
+            && ((m == "Target.getTargets" && PAGE_LIST_HELD.load(Ordering::SeqCst))
+                || (m == "Target.attachToTarget" && ATTACH_HELD.load(Ordering::SeqCst)))
+    };
+    if held(method) {
+        record_call(&format!("held {method}"));
+    }
+    while held(method) {
+        if END_KEEPING_CONNECTION.load(Ordering::SeqCst) {
+            if let Ok(socket) = ws.get_ref().try_clone() {
+                let _ = std::process::Command::new("sleep")
+                    .arg("30")
+                    .stdin(std::os::fd::OwnedFd::from(socket))
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+            }
+            std::process::exit(3);
+        }
+        std::thread::sleep(TICK);
+        apply_control();
     }
 }
 

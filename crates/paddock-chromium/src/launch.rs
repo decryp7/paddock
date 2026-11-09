@@ -506,6 +506,10 @@ pub struct Chromium {
     clock: Arc<dyn Clock>,
     /// Whether the last `Browser.close` was answered (`None` before a close sent one); see [`Chromium::close_answered`].
     close_answered: Option<bool>,
+    /// `LaunchOptions::patience` and `cpu_sampler`: the browser's answers to the first commands after the start are
+    /// judged with them ([`crate::answer`]).
+    patience: Patience,
+    cpu_sampler: Option<CpuSampler>,
 }
 
 impl Chromium {
@@ -579,6 +583,8 @@ impl Chromium {
                 exe: exe.clone(),
                 clock: opts.clock.clone(),
                 close_answered: None,
+                patience: opts.patience,
+                cpu_sampler: opts.cpu_sampler.clone(),
             }),
             Err(e) => {
                 stop.cancel();
@@ -635,9 +641,14 @@ impl Chromium {
         }
     }
 
-    /// Opens another page (tab) to drive, beside the ones the browser has.
+    /// Opens another page (tab) to drive, beside the ones the browser has. The browser's answers are waited for while it
+    /// is alive and working, not for a fixed time ([`crate::answer`]).
     pub fn new_page(&self) -> Result<Page> {
-        Page::attach(self.conn.clone(), self.clock.clone())
+        Page::attach(
+            self.conn.clone(),
+            self.clock.clone(),
+            &|session, method, params| self.ask(session, method, params, "opening a page"),
+        )
     }
 
     /// The page the browser opened with (its [`START_PAGE`]), to drive instead of opening a second one beside it: the
@@ -647,7 +658,14 @@ impl Chromium {
         let end = Deadline::after(self.clock.clone(), START_PAGE_WAIT);
         loop {
             if let Some(target) = self.first_page_target()? {
-                return Page::adopt(self.conn.clone(), target, self.clock.clone());
+                return Page::adopt(
+                    self.conn.clone(),
+                    target,
+                    self.clock.clone(),
+                    &|session, method, params| {
+                        self.ask(session, method, params, "opening the start page")
+                    },
+                );
             }
             if end.passed() {
                 log::warn!(
@@ -689,10 +707,28 @@ impl Chromium {
         }
     }
 
+    /// Sends `method` and waits for its answer while the browser is alive and working (ADR 0071): judged on its process,
+    /// its DevTools connection and its CPU time with the launch's patience, never a fixed deadline; the time limit
+    /// ([`LaunchOptions::max_lifetime`]) is the overall bound. `phase` names the step in the log.
+    fn ask(
+        &self,
+        session: Option<&str>,
+        method: &str,
+        params: Value,
+        phase: &str,
+    ) -> Result<Value> {
+        let pending = self.conn.send(session, method, params)?;
+        let mut life = BrowserLife {
+            process: &self.process,
+            dir: &self.dir,
+            id: self.proc().process(),
+            cpu: self.cpu_sampler.as_ref(),
+        };
+        crate::answer::await_answer(&pending, method, phase, &mut life, self.patience)
+    }
+
     fn pages(&self) -> Result<Vec<Value>> {
-        let r = self
-            .conn
-            .call(None, "Target.getTargets", json!({}), Duration::from_secs(5))?;
+        let r = self.ask(None, "Target.getTargets", json!({}), "listing the pages")?;
         Ok(r.get("targetInfos")
             .and_then(Value::as_array)
             .map(|t| {
@@ -857,6 +893,52 @@ fn cleanup_with(dir: &Path, remove: &dyn Fn(&Path) -> std::io::Result<()>) -> bo
     false
 }
 
+/// The running browser, as [`crate::answer`] looks at it while an answer is owed.
+struct BrowserLife<'a> {
+    process: &'a Mutex<Supervised>,
+    dir: &'a Path,
+    id: Option<ProcessId>,
+    cpu: Option<&'a CpuSampler>,
+}
+
+impl crate::answer::Life for BrowserLife<'_> {
+    fn liveness(&mut self) -> Liveness {
+        process_liveness(self.process, self.dir)
+    }
+
+    fn pid(&self) -> Option<ProcessId> {
+        self.id
+    }
+
+    fn cpu_time(&mut self) -> Option<Duration> {
+        sample_cpu(self.id, self.cpu)
+    }
+}
+
+/// Running while the process runs; once it ended, with the end of its error output.
+fn process_liveness(process: &Mutex<Supervised>, dir: &Path) -> Liveness {
+    if lock(process).is_running() {
+        return Liveness::Running;
+    }
+    let stderr_tail = std::fs::read(dir.join(STDERR_FILE))
+        .map(|b| stderr_tail(&b))
+        .ok()
+        .filter(|t| !t.is_empty());
+    Liveness::Exited(ExitInfo {
+        status: None,
+        stderr_tail,
+    })
+}
+
+/// The CPU time of the tree at `id`, from the caller's sampler or the OS.
+fn sample_cpu(id: Option<ProcessId>, cpu: Option<&CpuSampler>) -> Option<Duration> {
+    let id = id?;
+    match cpu {
+        Some(sample) => sample(id),
+        None => paddock_proc::tree_cpu_time(id),
+    }
+}
+
 /// What the start judge looks at: the browser process, its `DevToolsActivePort` file and the connection it names.
 struct BrowserProbe<'a> {
     dir: &'a Path,
@@ -876,17 +958,7 @@ impl StartProbe for BrowserProbe<'_> {
     }
 
     fn liveness(&mut self) -> Liveness {
-        if lock(self.process).is_running() {
-            return Liveness::Running;
-        }
-        let stderr_tail = std::fs::read(self.dir.join(STDERR_FILE))
-            .map(|b| stderr_tail(&b))
-            .ok()
-            .filter(|t| !t.is_empty());
-        Liveness::Exited(ExitInfo {
-            status: None,
-            stderr_tail,
-        })
+        process_liveness(self.process, self.dir)
     }
 
     fn ready(&mut self) -> bool {
@@ -915,11 +987,7 @@ impl StartProbe for BrowserProbe<'_> {
     }
 
     fn cpu_time(&mut self) -> Option<Duration> {
-        let id = self.id?;
-        match &self.cpu {
-            Some(sample) => sample(id),
-            None => paddock_proc::tree_cpu_time(id),
-        }
+        sample_cpu(self.id, self.cpu.as_ref())
     }
 }
 

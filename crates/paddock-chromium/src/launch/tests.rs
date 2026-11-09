@@ -267,6 +267,91 @@ fn the_start_page_is_driven_so_the_window_has_one_tab() {
     assert!(second.exists().unwrap());
 }
 
+/// Opens the start page on another thread while the fake holds the answer to `held` (`hold`), and checks that the open is
+/// still waiting `past` after the fake received the command; then releases the answer and checks the page opens. A fixed
+/// deadline shorter than `past` makes the open end before (train runs 7771, 7796 and 7810: `Timeout("a command")`).
+fn start_page_answered_late(hold: UserAction, held: &str, past: Duration) {
+    let f = Fixture::new(Mode::Obey, 1);
+    let b = f.launch();
+    f.fake.act(hold).unwrap();
+    std::thread::scope(|s| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let b = &b;
+        s.spawn(move || {
+            let _ = tx.send(b.start_page());
+        });
+        let marker = format!("held {held}");
+        wait_until("the fake to hold the answer", || {
+            f.fake.calls().contains(&marker)
+        });
+        // The condition is "no result yet": a wait that ends early with a result is the failure under test, and the
+        // bound is the old fixed deadline plus a margin (the browser is alive and its answer is merely late).
+        let early = rx.recv_timeout(past);
+        assert!(
+            early.is_err(),
+            "opening the start page ended while the browser was alive and its answer to {held} was late: {:?}",
+            early.map(|r| r.map(|_| ()))
+        );
+        f.fake.act(UserAction::ReleaseAnswers).unwrap();
+        let page = rx
+            .recv_timeout(CLOSE_GUARD)
+            .expect("the page opens once the browser answers")
+            .expect("the page opens");
+        assert!(!page.is_closed());
+    });
+}
+
+#[test]
+fn a_browser_slow_to_list_its_pages_is_waited_for_while_it_is_alive() {
+    start_page_answered_late(
+        UserAction::HoldPageList,
+        "Target.getTargets",
+        Duration::from_millis(5_500),
+    );
+}
+
+#[test]
+fn a_browser_slow_to_attach_its_start_page_is_waited_for_while_it_is_alive() {
+    start_page_answered_late(
+        UserAction::HoldAttach,
+        "Target.attachToTarget",
+        Duration::from_millis(10_500),
+    );
+}
+
+#[test]
+fn a_browser_that_ends_before_it_answers_fails_the_open_as_closed() {
+    let f = Fixture::new(Mode::Obey, 1);
+    let mut b = f.launch();
+    f.fake.act(UserAction::HoldPageList).unwrap();
+    let opened = std::thread::scope(|s| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let b = &b;
+        s.spawn(move || {
+            let _ = tx.send(b.start_page());
+        });
+        wait_until("the fake to hold the answer", || {
+            f.fake.calls().iter().any(|c| c == "held Target.getTargets")
+        });
+        // The process ends; a process it started keeps the DevTools socket open, so only the process tells.
+        f.fake.act(UserAction::EndKeepingConnection).unwrap();
+        rx.recv_timeout(CLOSE_GUARD)
+            .expect("the open ends once the browser has ended")
+    });
+    assert!(
+        matches!(opened, Err(Error::Closed)),
+        "{:?}",
+        opened.map(|_| ())
+    );
+    assert!(
+        !b.conn.is_closed(),
+        "the connection stayed open: the process said it"
+    );
+    assert!(!b.proc().is_running());
+    // conformance: grace-free — the process exited before this close, so it waits out no grace
+    b.close();
+}
+
 #[test]
 fn a_browser_without_a_start_page_gets_a_new_one_after_the_wait_on_its_clock() {
     let f = Fixture::new(Mode::Obey, 0);

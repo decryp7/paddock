@@ -14,6 +14,7 @@
 //! * [`runtime`]: the pinned Chrome for Testing, installed through `paddock-runtime` as a job.
 //! * `fake` (feature `test-support`, Unix): a fake DevTools browser for tests.
 
+mod answer;
 pub mod cdp;
 pub mod challenge;
 pub mod cue;

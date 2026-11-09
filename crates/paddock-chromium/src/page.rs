@@ -100,28 +100,36 @@ pub enum Outcome {
     TimedOut(Readiness),
 }
 
+/// Sends a command (to a session, or to the browser for `None`) and waits for its answer as the browser judges right:
+/// the commands that open a page go through it ([`crate::answer`]: while the browser is alive, not a fixed deadline).
+pub(crate) type Ask<'a> = &'a dyn Fn(Option<&str>, &str, Value) -> Result<Value>;
+
 impl Page {
-    /// Opens a new page (a tab beside the others) and attaches to it.
-    pub(crate) fn attach(conn: Arc<Connection>, clock: Arc<dyn Clock>) -> Result<Page> {
+    /// Opens a new page (a tab beside the others) and attaches to it; `ask` sends the commands that open it.
+    pub(crate) fn attach(
+        conn: Arc<Connection>,
+        clock: Arc<dyn Clock>,
+        ask: Ask<'_>,
+    ) -> Result<Page> {
         let born = conn.mark();
-        let t = conn.call(
+        let t = ask(
             None,
             "Target.createTarget",
             json!({"url": crate::launch::START_PAGE}),
-            CALL,
         )?;
         let target = str_of(&t, "targetId")?;
-        Page::attach_to(conn, target, clock, born)
+        Page::attach_to(conn, target, clock, born, ask)
     }
 
-    /// Attaches to the existing page `target` (the one the browser opened with).
+    /// Attaches to the existing page `target` (the one the browser opened with); `ask` sends the commands that attach it.
     pub(crate) fn adopt(
         conn: Arc<Connection>,
         target: String,
         clock: Arc<dyn Clock>,
+        ask: Ask<'_>,
     ) -> Result<Page> {
         let born = conn.mark();
-        Page::attach_to(conn, target, clock, born)
+        Page::attach_to(conn, target, clock, born, ask)
     }
 
     fn attach_to(
@@ -129,12 +137,12 @@ impl Page {
         target: String,
         clock: Arc<dyn Clock>,
         born: u64,
+        ask: Ask<'_>,
     ) -> Result<Page> {
-        let s = conn.call(
+        let s = ask(
             None,
             "Target.attachToTarget",
             json!({"targetId": target, "flatten": true}),
-            CALL,
         )?;
         let session = str_of(&s, "sessionId")?;
         conn.watch(&session);
@@ -149,14 +157,14 @@ impl Page {
             initial_settled: AtomicBool::new(false),
         };
         let enabling = p.conn.mark();
-        p.call("Page.enable", json!({}))?;
+        p.first_call(ask, "Page.enable", json!({}))?;
         // A tab's own first navigation (`about:blank` from `Target.createTarget`, or the start page) may still be
         // running: `Page.enable` then reports it as `Page.frameStartedNavigating` before its reply (Chromium's
         // PageHandler::Enable, read 2026-10-28). A `Page.navigate` sent meanwhile can come back `net::ERR_ABORTED`.
         // Only the main frame's navigation is the tab's own (its frame id from the frame tree; for a page target Chrome
         // uses the target id, the fallback).
         let main = p
-            .call("Page.getFrameTree", json!({}))
+            .first_call(ask, "Page.getFrameTree", json!({}))
             .ok()
             .and_then(|r| {
                 r.pointer("/frameTree/frame/id")
@@ -168,16 +176,27 @@ impl Page {
             .map(|i| (i, enabling));
         // For a load that fails, what the browser reported about it (see `trace`): a handful of lifecycle events per
         // document, and the document request's network events (the connection keeps only documents' network events).
-        let _ = p.call("Page.setLifecycleEventsEnabled", json!({"enabled": true}));
-        p.call("Network.enable", json!({}))?;
+        let _ = p.first_call(
+            ask,
+            "Page.setLifecycleEventsEnabled",
+            json!({"enabled": true}),
+        );
+        p.first_call(ask, "Network.enable", json!({}))?;
         // Downloads are never wanted from a page that is only read.
-        let _ = p.conn.call(
+        let _ = ask(
             None,
             "Browser.setDownloadBehavior",
             json!({"behavior": "deny"}),
-            CALL,
         );
         Ok(p)
+    }
+
+    /// [`Page::call`] through `ask`: a command of the page's attach.
+    fn first_call(&self, ask: Ask<'_>, method: &str, params: Value) -> Result<Value> {
+        if self.is_closed() {
+            return Err(Error::Closed);
+        }
+        self.closed_wins(ask(Some(&self.session), method, params))
     }
 
     /// The process id of the browser's network service (`SystemInfo.getProcessInfo`, an experimental DevTools domain):
