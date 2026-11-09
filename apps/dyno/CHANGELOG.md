@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- macOS: when the computer logs out or shuts down, the agent no longer waits for a temperature and energy reading in progress, which could take longer than the system allows, so it now always stops cleanly. A stop request that arrives while the agent is still starting now lets the start finish and then stops it cleanly.
 - Report a problem: a Windows user folder name made of several words, such as a first and last name, is now removed completely, also when it comes last in a line or is followed by more text. Up to 20 characters of the name are removed, so a word or two after it may go too. On macOS and Linux the first word of the account folder is removed.
 
 ## [1.1.0] - 2026-11-06

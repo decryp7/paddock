@@ -1470,6 +1470,10 @@ mod widget_layouts {
     fn popover_values_answer_only_the_slow_kinds_the_layout_has() {
         let h = Harness::start();
         let peer = h.client();
+        // The disk widget answers from the cached volume list only, filled by the first listing after the start: wait for it, or
+        // a fast start asks before it and the widget is left out as still loading.
+        let s = super::shared(&h);
+        paddock_testkit::wait_until("the first volume listing", || s.disk.cached_volumes().is_some());
         let ask_for = |ids: &[&str]| -> Vec<PopoverState> {
             let placements = ids.iter().map(|s| id(s)).collect();
             let Reply::PopoverValues(v) = ask(&peer, Request::PopoverValues { placements }).unwrap() else {

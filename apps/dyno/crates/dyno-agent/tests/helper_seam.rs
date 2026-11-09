@@ -367,6 +367,48 @@ fn any_other_account_gets_the_same_counters() {
     counters_reach_the_energy_report_and_the_temperature_source(Caller::Other);
 }
 
+/// A stop never waits for a counters read in progress: the real read (`powermetrics`, about 2 s per id) cannot be interrupted,
+/// and a stop after TERM has a 10 s grace before the process ends anyway (CI job 33005: exit 143 under load). The read that is
+/// left behind ends by itself once let through and keeps nothing of the agent alive.
+#[test]
+fn a_stop_does_not_wait_for_a_counters_read_in_progress() {
+    struct OpenOnDrop(std::sync::Arc<helper_rig::Gate>);
+    impl Drop for OpenOnDrop {
+        fn drop(&mut self) {
+            self.0.open();
+        }
+    }
+    let gate = std::sync::Arc::new(helper_rig::Gate::default());
+    // Opened however the test ends, so neither the read nor a stop that waits for it is left hanging.
+    let _open = OpenOnDrop(gate.clone());
+    let mut rig = Rig::start_readers(
+        Caller::Owner,
+        HelperHost::Macos,
+        true,
+        Readers {
+            counters: apple_silicon(),
+            counters_gate: Some(gate.clone()),
+            ..Readers::default()
+        },
+    );
+    paddock_testkit::wait_until("the climate worker's counters read to reach the helper", || gate.arrived());
+    let running = rig.running.take().unwrap();
+    let shared = running.shared.clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let stopper = std::thread::spawn(move || {
+        running.stop();
+        let _ = tx.send(());
+    });
+    let stopped = paddock_testkit::poll_until_within(HANG_GUARD, || rx.try_recv().is_ok());
+    gate.open();
+    stopper.join().unwrap();
+    assert!(stopped, "the stop waited for the counters read in progress");
+    assert!(!dyno_agent::instance::is_held(&rig.dirs), "the agent lock was not released");
+    paddock_testkit::wait_until("the read left behind to end and let go of the agent's state", || {
+        std::sync::Arc::strong_count(&shared) == 1
+    });
+}
+
 fn bundle_file(rig: &Rig, path: &str) -> Option<String> {
     let bundle = dyno_agent::diagnostics::collect(&rig.running.as_ref().unwrap().shared);
     bundle.files.iter().find(|f| f.name == path).map(|f| f.text.clone())

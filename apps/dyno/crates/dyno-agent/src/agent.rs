@@ -649,15 +649,19 @@ impl Shared {
         );
         let power_marker = dirs.root().join("keep-awake.active");
         let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-        let own_folder = dirs.root() == Dirs::current().root();
+        // The user's own folder, not one moved by `DYNO_DATA_DIR` (tests, development agents): only the user's agent uses this
+        // computer's helper and runs the background checks (ER-14).
+        let own_folder = dirs.is_users_own();
         let own_tools = dirs.tools();
         let helper_first = own_folder || wiring.is_some();
+        let local_memory = || Box::new(dyno_platform::inventory::read_memory_layout) as crate::helper_readers::memory::LocalMemory;
         let (helper_centre, local_memory) = match wiring {
             Some(w) => (w.centre, w.local_memory),
-            None => (
-                crate::helper_os::centre(),
-                Box::new(dyno_platform::inventory::read_memory_layout) as crate::helper_readers::memory::LocalMemory,
-            ),
+            None if own_folder => (crate::helper_os::centre(), local_memory()),
+            None => {
+                log::info!(Folder = dirs.kind(); "Helper not used: this agent runs on a data folder of its own");
+                (crate::helper_os::off_centre(), local_memory())
+            }
         };
         let host = helper_centre.host();
         let Platform {

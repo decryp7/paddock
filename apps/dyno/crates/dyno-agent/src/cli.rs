@@ -26,8 +26,9 @@ static STOPPED: AtomicBool = AtomicBool::new(false);
 // cap: the one deliberate time limit of the agent's stop.
 const SIGNAL_STOP_GRACE: Duration = Duration::from_secs(10);
 
-/// What to do about a signal that arrived: end now (the agent is still starting, so nothing is open to close and the main
-/// thread is in a start that does not look at the flag), wait for the clean stop, or end because the clean stop took too long.
+/// What to do about a signal that arrived: wait (for a start in progress to finish, after which the main loop stops the agent
+/// cleanly, or for that clean stop), or end because the start (`EndNow`) or the stop (`EndAnyway`) took longer than the grace.
+/// A start is not ended at once: it may already have opened the store and written the discovery file (CI job 33005).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OnSignal {
     EndNow,
@@ -38,7 +39,8 @@ enum OnSignal {
 fn on_signal_decision(running: bool, stopped: bool, waited_too_long: bool) -> OnSignal {
     match (running, stopped) {
         (_, true) => OnSignal::WaitForStop,
-        (false, false) => OnSignal::EndNow,
+        (false, false) if waited_too_long => OnSignal::EndNow,
+        (false, false) => OnSignal::WaitForStop,
         (true, false) if waited_too_long => OnSignal::EndAnyway,
         (true, false) => OnSignal::WaitForStop,
     }
@@ -57,9 +59,9 @@ fn end_process(code: i32) -> ! {
     std::process::exit(code)
 }
 
-/// Watches for a signal on a thread of its own, so that TERM ends a slow start too (the main thread only looks at the flag once
-/// the agent runs). Once the agent runs, the main loop stops it cleanly (store closed, lock released, discovery file removed);
-/// this thread only makes sure the process ends if that stop hangs.
+/// Watches for a signal on a thread of its own, so that TERM ends a start that hangs too (the main thread only looks at the flag
+/// once the agent runs). Once the agent runs, the main loop stops it cleanly (store closed, lock released, discovery file removed);
+/// this thread only makes sure the process ends if the start and that stop take longer than [`SIGNAL_STOP_GRACE`].
 fn spawn_signal_watch() {
     let spawned = std::thread::Builder::new().name("dyno-signal".into()).spawn(|| {
         while !SIGNALLED.load(Ordering::SeqCst) {
@@ -71,11 +73,19 @@ fn spawn_signal_watch() {
             let late = signalled_at.elapsed() >= SIGNAL_STOP_GRACE;
             match on_signal_decision(RUNNING.load(Ordering::SeqCst), STOPPED.load(Ordering::SeqCst), late) {
                 OnSignal::EndNow => {
-                    eprintln!("dyno-agent: ended by a signal while starting");
+                    eprintln!("dyno-agent: ended by a signal; the start did not finish in time");
+                    log::error!(GraceMs = SIGNAL_STOP_GRACE.as_millis() as u64; "Agent ended by a signal: the start did not finish in time");
                     end_process(143);
                 }
                 OnSignal::EndAnyway => {
-                    eprintln!("dyno-agent: ended by a signal; the stop did not finish in time");
+                    // Rule 56 (ER-27): which part of the stop was still running, so a forced end can be explained from the log.
+                    let waiting_on = crate::stop_waiting_on();
+                    eprintln!("dyno-agent: ended by a signal; the stop did not finish in time (waiting on {waiting_on})");
+                    log::error!(
+                        GraceMs = SIGNAL_STOP_GRACE.as_millis() as u64,
+                        WaitingOn = waiting_on.as_str();
+                        "Agent ended by a signal: the stop did not finish in time"
+                    );
                     end_process(143);
                 }
                 OnSignal::WaitForStop if STOPPED.load(Ordering::SeqCst) => return,
@@ -456,10 +466,13 @@ mod tests {
     }
 
     #[test]
-    fn a_signal_ends_a_start_at_once_and_a_running_agent_stops_cleanly_with_a_bound() {
+    fn a_signal_lets_a_start_finish_stops_cleanly_and_ends_only_after_the_grace() {
         use super::{on_signal_decision, OnSignal};
-        // Still starting: the main thread is in a start that does not look at the flag, so the watch ends the process.
-        assert_eq!(on_signal_decision(false, false, false), OnSignal::EndNow);
+        // Still starting: the start may already have opened the store and written the discovery file, so the watch lets it
+        // finish (the main loop then stops it cleanly, CI job 33005)...
+        assert_eq!(on_signal_decision(false, false, false), OnSignal::WaitForStop);
+        // ...and ends the process only if the start and its stop take longer than the grace.
+        assert_eq!(on_signal_decision(false, false, true), OnSignal::EndNow);
         // Running: the main loop stops it cleanly; the watch only waits...
         assert_eq!(on_signal_decision(true, false, false), OnSignal::WaitForStop);
         // ...and ends the process if that stop hangs.

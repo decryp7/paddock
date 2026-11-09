@@ -37,7 +37,8 @@ cargo run -p dyno-agent -- once    # one measurement
 ```
 
 Use a private `CARGO_TARGET_DIR` for heavy builds and `DYNO_DATA_DIR=/tmp/dyno-dev` to keep a development agent out of your
-real data folder. Do not run `cargo fmt --all` or `cargo clippy --fix` across the workspace while others are editing; format
+real data folder. An agent on such a folder never uses this computer's administrator helper (its status says "not included"),
+so it reads only what your account can. Do not run `cargo fmt --all` or `cargo clippy --fix` across the workspace while others are editing; format
 your own files with `rustfmt --edition 2021 <files>`. Never run `prettier --write`: the TypeScript is not prettier-formatted.
 
 ### Browser tests and screenshots
