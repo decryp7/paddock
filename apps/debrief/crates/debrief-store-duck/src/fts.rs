@@ -804,8 +804,11 @@ const LOWER_INDEXING_THREAD: bool = !cfg!(windows);
 fn drop_writer(s: &FtsShared) {
     let mut slot = crate::lock(&s.writer);
     if let Some(w) = slot.take() {
-        if let Err(e) = w.wait_merging_threads() {
-            log::warn!("full-text index merges failed: {e}");
+        let started = std::time::Instant::now();
+        let waited = w.wait_merging_threads();
+        log::debug!("full-text index merges ended after {:?}", started.elapsed());
+        if let Err(e) = waited {
+            log::warn!("full-text index merges failed after {:?}: {e}", started.elapsed());
         }
         debrief_alloc::release();
     }
@@ -825,7 +828,8 @@ fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epo
             Err(e) => {
                 log::warn!("full-text indexing failed: {e:#}");
                 *crate::lock(&s.failure) = Some(format!("{e:#}"));
-                *crate::lock(&s.writer) = None;
+                // Not just dropped: a dropped writer leaves its merge threads writing into the folder.
+                drop_writer(s);
                 Turn::Blocked
             }
         };
@@ -846,6 +850,8 @@ fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epo
         }
         *woken = false;
     }
+    // Stopping (the store is dropped): the merges must end before the folder can be removed or reopened.
+    drop_writer(s);
 }
 
 #[cfg(test)]
@@ -917,6 +923,40 @@ mod tests {
         );
         drop(held);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_stopped_indexing_thread_leaves_no_writer_and_so_no_merge_thread_behind() {
+        // Tantivy's merge threads outlive a dropped writer unless `wait_merging_threads` ran, and then keep writing into
+        // the store's folder after its owner removed it (CI 7813 left folders behind).
+        let dir = tempfile::Builder::new().prefix("debrief-fts-stop-").tempdir().unwrap();
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&crate::schema::ddl(&debrief_core::batch::EventSchema::plain()))
+            .unwrap();
+        let (fts, _) = Fts::open_or_create(
+            &dir.path().join(INDEX_DIR),
+            1,
+            WriterBudget {
+                heap: 16 << 20,
+                threads: 1,
+            },
+        )
+        .unwrap();
+        let s = FtsShared {
+            writer: Mutex::new(Some(fts.writer().unwrap())),
+            fts,
+            stop: AtomicBool::new(true),
+            wake: (Mutex::new(false), Condvar::new()),
+            pending: AtomicU64::new(1),
+            failure: Mutex::new(None),
+            bulk_import: Arc::new(AtomicBool::new(false)),
+            fail_writes: AtomicBool::new(false),
+        };
+        run(&s, dir.path(), &conn, &Mutex::new(()), 1);
+        assert!(
+            crate::lock(&s.writer).is_none(),
+            "the writer, and with it its merges, is gone when the thread ends"
+        );
     }
 
     #[test]

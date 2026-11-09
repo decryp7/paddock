@@ -9,6 +9,10 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 - **Names:** Searching for an abbreviation of a program name now finds it: "rptbldr" finds Report Builder and "netmon" finds Network Monitor, with the reason "abbreviation: letters of report builder", without any AI model
 
+### Fixed
+
+- **Search:** Closing a log store while its word-search index was still merging could leave the index's background merges writing into the store's folder after it was closed or deleted. Closing now waits for them to end
+
 ### Removed
 
 - **Names:** Debrief no longer asks the AI model for human names in the background. "Learning human names" after an import, and the Settings ▸ AI switch "AI aliases for names", are gone, so opening logs no longer loads or runs a model. Aliases an earlier version already learned stay, labelled AI-generated, and you can still remove any of them
