@@ -1,6 +1,6 @@
 # 75. Copy waivers are data, bound to the landing unit, not commit trailers
 
-- Status: Proposed (2026-11-09), revision 2 after independent review round 1 (P1-1 to P1-5 and the P2s). Amends
+- Status: Proposed (2026-11-09), revision 3 after independent review rounds 1 (P1-1 to P1-5, P2s) and 2 (P2-1 to P2-5, P2-7). Amends
   ADR 0034 §3 (waivers, the entry guard's trailers, the range check's unit) and the trailer parts of rule 55 (a), (c) and
   (d). Everything else in ADR 0034 (the register, members, counted lines, modes a and c, the freeze rule) stays as it is.
 - Date: 2026-11-09
@@ -68,7 +68,7 @@ are real unwaived touches nobody could see. Incident #5 stays red after the cuto
 
 The prototype also found a register defect: on `train/2026-11-08-1` the mechanism `rust-test-wait` has members made only of
 test files (`crates/paddock-ipc/tests/it/clocked.rs` and others). A test-only member can never be touched (ADR 0034 §2), so
-it would be required in every unit that touches its canonical. §3 makes such members an error of mode a.
+it would be required in every unit that touches its canonical. §3 exempts such members with a notice (D10).
 
 The same exposure exists for every other trailer record: `Batch-size-waived:` (ADR 0042), `Switch-date:`,
 `Freeze-closed:`, `Release-part:` (ADR 0049). This ADR fixes the `Copies-*` family and proposes the same mechanism for the
@@ -110,7 +110,11 @@ reason = "..."
 Field rules:
 
 - `mechanism` is a register id and each of `members` (or `member`) is exactly the first path of a member of that
-  mechanism, **in the register at the tip of the unit the record belongs to** (§2, §3). `*` in `members` follows ADR
+  mechanism, **in the register at the tip of the unit the record belongs to** (§2, §3). The check resolves that path to
+  the member's **identity**: the mechanism id plus `canonical`, or plus the copy's `key`. `key` is a new optional field
+  of `[[mechanism.copy]]` (kebab-case, unique within the mechanism; default the copy's `owner`, so it is needed only where
+  one owner has two copies of a mechanism). A copy keeps its identity when its paths are renamed, so a rename never
+  turns a required member into a satisfied one (§3). `*` in `members` follows ADR
   0034 (at most two members besides wiring). `reason` has at least 10 characters. Incidents #1 and #5 fail here.
 - **Lifetime.** A waiver has no date of its own. Its member's `delete_by` bounds it: once the member has left the register,
   the record is **stale**, which is a notice, never an error (P1-3; see §3). `copies --prune` deletes stale records; the
@@ -148,19 +152,25 @@ claimed**, and each commit belongs to the first unit that reaches it. Consequenc
 |---|---|
 | plain topic, merged into a train | one unit; its diff `merge-base(m^1, P)..P` |
 | topic that synced `origin/main` | still one unit; the synced commits are on main and skipped |
-| **stacked topic** (T2 branched from an unlanded T1) | if T1 landed first, its unit claimed T1's commits and T2's unit holds only T2's; if T2 lands first, its unit holds both, and T1's later merge is a merge-only unit |
+| **stacked topic** (T2 branched from an unlanded T1) | if T1 landed first, its unit claimed T1's commits and T2's unit holds T2's own commits (and any T1 commits made after T2 branched are T1's); if T2 lands first, its unit holds the T1 commits it contains as well, and T1's later merge holds only T1's commits T2 did not bring, or is a merge-only unit |
 | **upstream sync** (a line merged into a downstream line, `5ff58bd04` merges `pitwall/1.1-b1` into `pitwall/1.1-b1b`) | expanded: the upstream's own landing merges become their own units and its direct commits its own-work unit, each holding only commits the downstream did not have; never one lump |
 | **release line off a release line** | the upstream's landing merges stay separate units; its direct commits fall into the downstream's own-work unit unless the upstream landed first (a known limit; the steward lands upstream lines first) |
 | `84bcb9732` (P1-1's example) | one unit of **1 commit** (`5cd3ff15d`) with `84bcb9732` as carrier, not 212; the whole `pitwall/1.1-b1b-b6` line walks into 36 units over 206 commits |
 
 **A topic branch's own check** is `Units(merge-base(T, HEAD), HEAD)` with the same walk. A plain topic gives one unit; a
-stacked topic includes its unlanded base's commits in its own unit (stricter than needed, never weaker). There is no
+stacked topic includes its unlanded base's commits in its own unit. That unit is larger than the one the train will form
+if the base lands first, so the topic's own result can differ from its result at landing in either direction (a base's
+waiver can cover the topic, or the base's touches can require more of it); the steward's landing check is the one that
+counts. There is no
 "train form": the walk is the same everywhere.
 
 **The touches of a unit** (ADR 0034 §2: counted lines, test and comment code masked) come from the net diff
-`merge-base(m^1, P)..P` when the unit's commits are exactly `rev-list merge-base(m^1, P)..P` (the common case), and
-otherwise from the union of its commits' own diffs plus its carriers' `--cc` lines. In the union case a change and its
-revert inside the same unit both count; the check prints a notice saying so.
+`merge-base(m^1, P)..P` when the unit's commits are exactly `rev-list merge-base(m^1, P)..P` **after leaving out main
+syncs and commits on main** (the common case, synced topics included; when the line is older than the main a topic
+synced, the net diff would carry main's newer changes, so that case is the union one), and otherwise from the union of
+its commits' own diffs. Both add the carriers' `--cc` lines. In the union case a change and its revert inside the same
+unit both count; the check prints a notice saying so. (The prototype behind the numbers in this ADR does not read the
+carriers' `--cc` lines; WP-1 keeps the fixture for a conflict resolution that edits a member.)
 
 **A record belongs to a unit** when one of that unit's commits (or carriers) adds it or changes it. Entries are compared
 after normalising the TOML, so an edited entry belongs to the unit that edits it. An entry with
@@ -185,16 +195,19 @@ author and one review, and a branch that needs separate judgements is split.
 
 ADR 0034 §3 stays the specification of counted lines and modes a and c. Mode b and the record handling change:
 
-- **Mode a** (`copies --check-register`, at the head) validates the folder's syntax and fields. A record naming a member
-  absent from the **head** register is a **stale notice**, not an error, so a branch that deletes or renames a copy never
-  makes another branch's record invalid (P1-3). Mode a also rejects a member whose paths are all non-counted (test files,
-  manifests, docs), which can never be touched.
+- **Mode a** (`copies --check-register`, at the head) validates the folder's syntax and fields, and that copy `key`s
+  are unique within a mechanism. A record whose member identity is absent from the **head** register is a **stale
+  notice**, not an error, so a branch that deletes a copy never makes another branch's record invalid (P1-3); a renamed
+  copy keeps its identity, so its records stay valid. A member whose paths are all non-counted (test files, manifests,
+  docs) can never be touched; it is **exempt from touch alike with a notice** (D10), and mode a prints it once per run.
 - **Mode b** (`copies --range <B>..<X> [--main <T>] [--worktree]`) walks the units (§2) and judges **each unit against
   the register at that unit's tip** (`P` for a landing merge, the last own commit otherwise). For each unit:
   - an untouched, unwaived member: **error**, with the TOML entry to paste; `--suggest` writes it into the branch's file
     with `reason = "TODO"`, which mode a rejects until filled in;
-  - a required member that is absent from the **head** register (deleted or renamed by another branch since): satisfied,
-    with a notice (P1-3: no deadlock between a branch that deletes copy K and one that waives K);
+  - a required member whose identity is absent from the **head** register (deleted by another branch since): satisfied,
+    with a notice (P1-3: no deadlock between a branch that deletes copy K and one that waives K). A member renamed since
+    (same identity, other paths) **stays required**: the error names its head paths, and a waiver for it may name either
+    path;
   - a waiver naming a member the unit **changed**: **error** ("a waiver is for members left unchanged; delete it")
     (incident #1);
   - a waiver naming a mechanism the unit does not touch: **warning** ("waives nothing"), like W003, so a record in the
@@ -214,7 +227,8 @@ ADR 0034 §3 stays the specification of counted lines and modes a and c. Mode b 
 | missing waiver for a unit already merged into a train | any later commit adds an entry with `for` |
 | waiver in the wrong branch or commit | a warning; delete it whenever |
 | missing waiver for a unit already on main | a `for` entry as a record; no gate is involved |
-| another branch deleted or renamed the waived copy | nothing: stale notice, satisfied |
+| another branch deleted the waived copy | nothing: stale notice, satisfied |
+| another branch renamed the waived copy | nothing: the record follows the copy's identity |
 
 Where the check runs: the author before pushing (`copies --range $(git merge-base origin/main HEAD)..HEAD --worktree`;
 the `./dev` pre-push check of ADR 0049 calls it when the branch reaches a registered path), the plan job on every branch
@@ -225,13 +239,22 @@ same walk over `origin/main..<train>`). The landed train is not re-checked on ma
 
 - **The cutover is read from history, per commit** (no marker that names itself): a commit is **post-cutover** when its
   first parent's tree contains `docs/known-copies.d/README.md`, which WP-4 adds. One `git cat-file -e` per commit.
-- **Old units are report-only.** A unit none of whose commits is post-cutover is judged and printed, but its errors are
-  warnings: the 61 red branches above keep landing as they would today, and the steward and reviewer still see the
-  findings. In such a unit a `Copies-waived:`, `Copies-removed:` or `Copies-date:` trailer on any of its commits or
-  carriers counts as a record of the unit; an invalid old trailer waives nothing.
-- **New units are enforced.** A unit with at least one post-cutover commit is judged with errors, from data records only;
-  an old trailer inside it still counts (it came from the pre-cutover part of the branch).
-- **Trailers retired.** C23 rejects a `Copies-*:` trailer on a post-cutover commit, **merges included** ("write it in
+- **The cutover date** is the committer date of the first commit on main whose tree contains that README.
+- **Old units are report-only, for at most 14 days.** A unit none of whose commits or carriers is post-cutover (by
+  ancestry, or by a committer date on or after the cutover date) is judged and printed, but its errors are warnings: the
+  61 red branches above keep landing as they would today, and the steward and reviewer still see the findings. In such
+  a unit a `Copies-waived:`, `Copies-removed:` or `Copies-date:` trailer on any of its commits or carriers counts as a
+  record of the unit; an invalid old trailer waives nothing.
+- **New units are enforced.** A unit is enforced when any of its commits **or carriers** is post-cutover. So a
+  pre-cutover branch that a steward merges into a train after the cutover is enforced at that landing (the merge is a new
+  act, judged by today's rule; its missing waivers are added as data with `for`). Old trailers inside an enforced unit
+  still count.
+- **The window closes.** From the cutover date plus 14 days, **every unit is enforced, whatever its branch base**; the
+  check reads the date from its run's clock, and replays pass a pinned `--as-of` so they stay deterministic. A branch
+  still open by then adds its waivers as data (`copies trailers-to-data` and `--suggest` write them).
+- **Trailers retired.** C23 rejects a `Copies-*:` trailer on any commit that is post-cutover by ancestry **or** whose
+  committer date is on or after the cutover date (so a commit made today on an old branch is caught too), **merges
+  included** ("write it in
   `docs/known-copies.d/<branch>.toml`, ADR 0075"). Today `messagesInRange` lists merges only with `--first-parent` and
   `lint(message)` sees no ancestry, so this is a new range-level function in `commit-lint.mjs` over all commits of the
   range, not a change to `lint()`. The escape for a commit that must keep such a trailer (a cherry-pick of an old commit) is
@@ -249,7 +272,8 @@ A C58 run counts only if it has shown that it can see a violation.
   line off a release line**; an **upstream sync** merge; a landing merge whose conflict resolution edits a member; a
   test-only and a comment-only commit; a `for` entry for a merged unit, for a branch landed in parts and for a split
   revert; a deleted and a renamed copy with another branch's waiver (no deadlock); old trailers before and after the
-  cutover; a test-only member (mode a error).
+  cutover and after the 14-day window; a post-cutover carrier of an old branch (enforced); a renamed copy with another
+  branch's waiver (still required, record follows); a test-only member (exempt, notice).
 - **Golden replays of real history**, pinned so that they never change: each names its main-equivalent `T`, its base and
   its tip explicitly, and the commits are kept alive by tags `refs/tags/c58-golden/<name>/{main,base,tip}` that WP-5
   pushes; the plan job fetches `+refs/tags/c58-golden/*:refs/tags/c58-golden/*`. Expected results are pinned per mechanism,
@@ -298,7 +322,7 @@ A C58 run counts only if it has shown that it can see a violation.
 - Rule 55 (a), (c) and (d) change from trailers to records (proposed text below); C23 gains one range rule.
 - Reviewers read waivers in the diff, next to the code they excuse.
 - A branch's waivers cover the whole branch; split a branch that needs separate judgements.
-- The 61 currently red branches are not blocked (report-only old units); their findings become visible at once, which is
+- The 61 currently red branches are not blocked for the first 14 days (report-only old units); their findings become visible at once, which is
   itself the backlog that rule 55 was meant to prevent. The steward decides whether to waive them as data or fix them.
 - The precautionary trailers stop: `--suggest` writes only what a unit needs.
 
@@ -331,9 +355,9 @@ This replaces ADR 0034 WP-1 (2.5 d, not started). Estimates assume D7's recommen
 | WP | What | Size | Depends on |
 |---|---|---|---|
 | WP-1 | The unit walk (§2: claiming, main syncs, landing merges, recursion, carriers, net or union diff, `for`) over `paddock-repo-graph`'s `History` port, with fixtures for every shape in §6 | 1.25 d | none |
-| WP-2 | C58 modes a-c (ADR 0034 §2-§3 with this ADR's changes): register and folder parsing with the `toml` crate, counted lines and masking (`item:` walker as C39's `maskRust`), touch alike per unit against the unit-tip register, stale notices, errors and warnings, `--worktree`, `--suggest`, `--drift`, `--prune`, entry guard from records; fixtures for every rule | 1.75 d | WP-1 interface |
+| WP-2 | C58 modes a-c (ADR 0034 §2-§3 with this ADR's changes): register and folder parsing with the `toml` crate, counted lines and masking (`item:` walker as C39's `maskRust`), touch alike per unit against the unit-tip register, stale notices, member identity and the copy `key` field, test-only members exempt, errors and warnings, `--worktree`, `--suggest`, `--drift`, `--prune`, entry guard from records; fixtures for every rule | 1.75 d | WP-1 interface |
 | WP-3 | Speed: the batched diff pass and, if measured to help, parallel judging; results block per rule 48 | 0.5 d | WP-2 |
-| WP-4 | Cutover: report-only old units, old trailers as records, the C23 range rule (merges included) with its waiver escape, `trailers-to-data`, `docs/known-copies.d/README.md`, register header, rule 55 wording (after acceptance), lessons entry | 0.5 d | none |
+| WP-4 | Cutover: report-only old units with the 14-day window and `--as-of`, enforced post-cutover carriers, old trailers as records, the C23 range rule (merges included, by ancestry or date) with its waiver escape, `trailers-to-data`, `docs/known-copies.d/README.md`, register header, rule 55 wording (after acceptance), lessons entry | 0.5 d | none |
 | WP-5 | Controls and wiring: the golden replays and their `c58-golden` tags, `check broken` confined to the C58 step, the plan job, the `./dev` pre-push call, the steward's landing call, the C58 entry of `paddock-conformance` calling `./dev copies`, ADR 0034 status | 0.5 d | WP-2 |
 | | **Total** | **4.5 agent-days** | |
 | WP-6 | Follow-up (D8): `Batch-size-waived:`, `Switch-date:`, `Freeze-closed:`, `Release-part:` on the same walk | separate ADR | after a week of C58 |
@@ -350,7 +374,8 @@ in `ci.yml`) and C23's trailer rule is reverted; the records keep working as doc
 | D3 | The binding unit | (a) the recursive walk of §2 (a branch's commits not already claimed); (b) per commit, as ADR 0034 (cannot be corrected without a rewrite); (c) the whole range as one unit (leaks between branches of a train) | **(a)**, accepting that one branch's waivers cover the whole branch |
 | D4 | Lifetime of waivers | (a) kept as the copy's drift log until the copy leaves, pruned as stale by the owner's release batch; (b) pruned after the unit lands (by age, for example 30 days after landing on main; bounded, loses the drift log); (c) kept forever | **(a)** |
 | D5 | A waiver that waives nothing | (a) warning; (b) error | **(a)**, so a misplaced record never needs a rewrite |
-| D6 | Cutover | (a) old units report-only, new units enforced, C23 rejects new trailers (61 of 78 active branches would otherwise be red at once); (b) enforce everything at the cutover after a one-off waiver sweep of the 73 red units (about one agent-day, reviewed); (c) keep trailers and data side by side for good | **(a)**; run (b)'s sweep for the release lines that tag next if the findings show real drift |
+| D6 | Cutover | (a) old units report-only for at most 14 days, a post-cutover carrier enforces its unit, then every unit enforced; C23 rejects new trailers by ancestry or date (61 of 78 active branches would otherwise be red at once); (b) enforce everything at the cutover after a one-off waiver sweep of the 73 red units (about one agent-day, reviewed); (c) keep trailers and data side by side for good | **(a)**; run (b)'s sweep for the release lines that tag next if the findings show real drift |
 | D7 | Implementation | (a) Rust in `./dev copies` on `paddock-repo-graph`'s `History` port and the `toml` crate already in its lockfile, with `paddock-conformance`'s C58 calling it: 4.5 d, no port later; (b) JavaScript in `conformance/` next to C23 (needs a TOML parser: `smol-toml` is in the lockfile but not a conformance dependency, and `util/waivers.mjs` parses only a string subset): about 4 d now plus 1-1.5 d to port when the Rust move reaches conformance | **(a)** |
 | D8 | The other trailer records (ADRs 0042 and 0049) | same walk and data records in a follow-up ADR, or keep them as trailers | **Follow-up ADR** after C58 has run a week |
 | D9 | `for` entries for units already on main | record only (notice), or rejected | **Record only** |
+| D10 | Members made only of test files (today `rust-test-wait` on `train/2026-11-08-1`) | (a) exempt from touch alike with a notice; (b) a declared `kind = "test"` for such copies, counted by its own rule (test files counted for that mechanism only); (c) a mode a error until the register is changed | **(a)** now; (b) if a test-only mechanism ever needs its copies kept alike |

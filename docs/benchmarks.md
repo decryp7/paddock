@@ -259,9 +259,10 @@ Quoted by [ADR 0075](adr/0075-copy-waivers-are-data-bound-to-the-landing-unit.md
 
   The independent reviewer's raw `git diff -U0` loop over register paths per first-parent commit (no walk, no masking,
   no judging), same day at load 32: the train 0.42–0.67 s, 90 first-parent commits of `origin/main` 1.46–1.53 s.
-- **Memory measure:** not measured
+- **Memory measure:** not measured (neither the prototype's nor git's memory was sampled)
 - **Notes:** taken under load; an indication only. The time is in per-commit `git diff` and `git show` processes of the
-  two large union units of the Pitwall line (52 and 56 commits); the ADR's WP-3 batches them. Raw output in the change's
+  two large union units of the Pitwall line (52 and 56 commits); the ADR's WP-3 batches them, and the same ranges are
+  re-measured (time and memory) after WP-3, as a new block here. Raw output in the change's
   scratch folder, not kept in the repository.
 
 ### 2026-11-03, starving a test process by OS priority on macOS
