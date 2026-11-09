@@ -215,50 +215,77 @@ pub trait Exec {
 fn pipe_in(mut child: std::process::Child, bytes: &[u8], limit: Duration) -> std::io::Result<std::process::Output> {
     use std::io::Read;
     let stdin = child.stdin.take();
-    let mut stdout = child.stdout.take();
-    let mut stderr = child.stderr.take();
     let deadline = std::time::Instant::now() + limit;
-    std::thread::scope(|s| {
-        s.spawn(move || {
-            if let Some(mut pipe) = stdin {
-                // The child may end before reading everything; its exit status says what went wrong.
-                let _ = pipe.write_all(bytes);
+    let input = bytes.to_vec();
+    // Detached threads, not a scope: a grandchild may hold the pipes after the child is killed, and the limit must still end the call.
+    std::thread::spawn(move || {
+        if let Some(mut pipe) = stdin {
+            // The child may end before reading everything; its exit status says what went wrong.
+            let _ = pipe.write_all(&input);
+        }
+    });
+    // Each reader appends to a shared buffer, so what a stuck child already printed can be shown when the limit ends the call.
+    type Shared = std::sync::Arc<std::sync::Mutex<(Vec<u8>, bool)>>;
+    let reader = |pipe: Option<Box<dyn Read + Send>>| -> Shared {
+        let buf: Shared = Default::default();
+        let mine = buf.clone();
+        std::thread::spawn(move || {
+            if let Some(mut p) = pipe {
+                let mut chunk = [0u8; 8192];
+                while let Ok(n) = p.read(&mut chunk) {
+                    if n == 0 {
+                        break;
+                    }
+                    mine.lock().unwrap_or_else(|e| e.into_inner()).0.extend_from_slice(&chunk[..n]);
+                }
             }
+            mine.lock().unwrap_or_else(|e| e.into_inner()).1 = true;
         });
-        // Both outputs are read while the child runs: a reply larger than the pipe would block it until the limit otherwise.
-        let out = s.spawn(move || {
-            let mut v = Vec::new();
-            if let Some(p) = stdout.as_mut() {
-                let _ = p.read_to_end(&mut v);
-            }
-            v
-        });
-        let err = s.spawn(move || {
-            let mut v = Vec::new();
-            if let Some(p) = stderr.as_mut() {
-                let _ = p.read_to_end(&mut v);
-            }
-            v
-        });
-        let status = loop {
-            if let Some(status) = child.try_wait()? {
-                break status;
-            }
-            if std::time::Instant::now() >= deadline {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    format!("it did not finish within {} seconds", limit.as_secs()),
-                ));
-            }
-            std::thread::sleep(Duration::from_millis(5));
+        buf
+    };
+    let out = reader(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let err = reader(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let tail = |b: &Shared| {
+        let g = b.lock().unwrap_or_else(|e| e.into_inner());
+        let text = String::from_utf8_lossy(&g.0).trim().to_string();
+        let keep: Vec<&str> = text.lines().rev().take(5).collect();
+        keep.into_iter().rev().collect::<Vec<_>>().join(" | ")
+    };
+    let timed_out = |limit: Duration, err: &Shared| {
+        let said = tail(err);
+        let said = if said.is_empty() {
+            String::new()
+        } else {
+            format!("; its stderr so far: {said}")
         };
-        Ok(std::process::Output {
-            status,
-            stdout: out.join().unwrap_or_default(),
-            stderr: err.join().unwrap_or_default(),
-        })
+        std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!("it did not finish within {} seconds{said}", limit.as_secs()),
+        )
+    };
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(timed_out(limit, &err));
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    // The child has ended; a grandchild still holding a pipe gets only what is left of the limit.
+    while !(out.lock().unwrap_or_else(|e| e.into_inner()).1 && err.lock().unwrap_or_else(|e| e.into_inner()).1) {
+        if std::time::Instant::now() >= deadline {
+            return Err(timed_out(limit, &err));
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let take = |b: &Shared| std::mem::take(&mut b.lock().unwrap_or_else(|e| e.into_inner()).0);
+    Ok(std::process::Output {
+        status,
+        stdout: take(&out),
+        stderr: take(&err),
     })
 }
 
@@ -602,13 +629,17 @@ mod tests {
     #[test]
     fn a_program_that_reads_its_input_but_never_ends_is_killed_at_the_limit() {
         let mut cmd = proc_command("sh");
-        cmd.args(["-c", "cat >/dev/null; sleep 30"])
+        cmd.args(["-c", "echo stuck-here >&2; cat >/dev/null; sleep 30"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let child = cmd.spawn().unwrap();
+        let started = std::time::Instant::now();
         let err = pipe_in(child, b"x", Duration::from_millis(200)).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+        assert!(err.to_string().contains("stuck-here"), "the stderr tail is in the error: {err}");
+        // The `sleep` grandchild keeps the pipes open for 30 s: the limit must still end the call (it did, before readers were added).
+        assert!(started.elapsed() < Duration::from_secs(5), "took {:?}", started.elapsed());
     }
 
     #[test]
