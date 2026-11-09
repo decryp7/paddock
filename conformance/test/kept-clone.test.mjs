@@ -207,6 +207,15 @@ test('kept-clone leaves Linux containers alone, and a job without a slot builds 
   assert.match(none.out, /::warning::kept-clone: no kept folder of this job's slot/);
 });
 
+test('kept-clone with the full profile leaves nothing out (and a profile file with no exclusion for it is fine)', () => {
+  const fx = fixture();
+  writeFileSync(join(fx.root, 'profiles.txt'), 'exclude lean big/ large\n');
+  const r = job(fx, git(fx.work, fx.root, 'rev-parse', 'HEAD'), { profile: 'full' });
+  assert.equal(r.status, 0, r.out);
+  assert.equal(read(join(r.stable(), 'big/shot.png')), 'png');
+  assert.match(r.out, /profile full/);
+});
+
 test('kept-clone fails with one ::error:: naming the profile when it does not exist', () => {
   const fx = fixture();
   const r = job(fx, git(fx.work, fx.root, 'rev-parse', 'HEAD'), { profile: 'nope' });
@@ -236,7 +245,9 @@ test('checkout profiles: every exclusion names tracked files, every bootstrap fo
 test('checkout profiles: the bootstrap covers the inputs of paddock-dev, which job-isolation builds before the clone exists', () => {
   const boot = declared().filter((d) => d.kind === 'bootstrap').map((d) => d.parts[0]);
   const inputs = read(join(PADDOCK, 'tools', 'paddock-dev', 'inputs.txt')).split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
-  for (const i of inputs) assert.ok(boot.some((b) => i === b || i.startsWith(`${b}/`)), `inputs.txt names ${i}: the bootstrap must contain it`);
+  // Cone mode also checks out the files directly in every parent folder of a listed folder (crates/Cargo.toml beside crates/paddock-slots).
+  const covered = (i) => boot.some((b) => i === b || i.startsWith(`${b}/`) || (!i.slice(i.indexOf('/') + 1).includes('/') && i.includes('/') && b.startsWith(`${i.slice(0, i.indexOf('/'))}/`)));
+  for (const i of inputs) assert.ok(covered(i), `inputs.txt names ${i}: the bootstrap must contain it`);
   for (const need of ['.gitea', 'conformance', 'tools']) assert.ok(boot.includes(need), `${need}: the actions, their scripts and ./dev`);
 });
 
