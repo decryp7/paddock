@@ -233,6 +233,31 @@ These measure tooling, not a product. They are kept where they are.
   0.53–1.77 ms of that. Windows is not measured.
 - [Lessons](lessons.md): test-binary consolidation, 239 → 99 binaries, nextest 301 s → 196 s.
 
+### 2026-11-09, host-runner checkout: plain checkout plus stable-workspace against the kept clone (ci/kept-clone-sparse-checkout)
+
+What: the checkout and stable-workspace steps of ci.yml's host jobs (`crate`, `app`, `paddock-dev`) on the real runners, from the
+48 h of job data of the speed research R2 (`/Volumes/d7sst7/dev-targets/scratch/speed-research/data/jobs`, successful host jobs
+with both steps) against ONE dispatched affected run, 7808 (commit a3ad3d78f, 12 host jobs). The tree: 12,367 files, 540 MiB; the
+lean profile checks out 10,314 files. Synthetic data only; step times from the Gitea API (`steps[].started_at/completed_at`).
+Script: `measure.py` in the scratch folder `/Volumes/d7sst7/dev-targets/scratch/ci-cheap-checkout`.
+
+| Step (seconds) | before p50 | before p90 | run 7808 (a3ad3d78f) |
+|---|---|---|---|
+| Windows checkout | 50 | 63 | 5 to 14 (bootstrap) |
+| Windows stable-workspace | 51 | 61 | kept-clone 62 to 127 (see below) |
+| Windows both | 102 | 123 | 76 to 133 |
+| macOS checkout | 24 | 40 | 1 to 8 (bootstrap) |
+| macOS stable-workspace | 14 | 70 | kept-clone 16 to 59 |
+| macOS both | 41 | 130 | 17 to 67 |
+
+Reading the run, per phase (kept-clone log lines): on Windows the clone is created in 1 to 7 s, the fetch takes 0 to 2 s and the
+checkout 3 to 5 s, but `clean` took 52 to 111 s: `reset --hard` ran before the sparse patterns were set and wrote the whole tree of
+the new clone's branch. On macOS the slots held clones of the old layout (plain shallow checkouts), which were reused and fetched
+without a partial filter: fetch 12 to 50 s, clean 2 to 10 s. Both are fixed in 5544158b2 (patterns first; only clones this script
+made, marked, are reused). **That fix is not measured**: the brief allowed one dispatch. Expected from the phase times: Windows
+about 10 to 15 s for the two steps, macOS a few seconds when the slot's clone is warm and about 10 to 20 s when it has to
+fetch. Confirm with one more affected run before relying on it. Load was not recorded (shared CI runners).
+
 ### 2026-11-03, starving a test process by OS priority on macOS
 
 Quoted by [ADR 0041](adr/0041-deterministic-timing-in-tests.md) §5 (the starved run).
