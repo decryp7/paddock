@@ -166,6 +166,15 @@ review_by = 2026-12-06
 approved = "coordinator"
 
 [[planned]]
+id = "C52"
+adr = "Pacenotes 0002"
+reason = "the Pacenotes cargo-metadata-off backstop (Pacenotes ADR 0002 line 105; its check file is on origin/pacenotes/a2-parse); the wiki names it"
+owner = "Pacenotes"
+since = 2026-11-09
+review_by = 2026-12-07
+approved = "coordinator"
+
+[[planned]]
 id = "C58"
 adr = "0034"
 reason = "the copies register check, ADR 0034 WP-1 (named in docs/rules.md rule 55 and the AGENTS.md block)"

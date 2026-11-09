@@ -1,6 +1,6 @@
 ---
 title: Logging and diagnostics
-verified: 2026-10-31
+verified: 2026-11-09
 sources: [crates/paddock-log/src/lib.rs, crates/paddock-diag/src/lib.rs, rule 56, ADR 0036, handoff/merge-steward.md]
 ---
 What the two shared logging crates do on main, what is only on a branch (rule 56, ADR 0036), and the work packages that move the

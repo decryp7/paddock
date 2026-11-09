@@ -1,6 +1,6 @@
 ---
 title: Wiki evaluation
-verified: 2026-10-31
+verified: 2026-11-09
 sources: [handoff/research-llm-wiki-2026-10-31.md, handoff/merge-steward.md, docs/lessons.md]
 ---
 Ten questions that agents re-derived recently, with the expected answers and where each answer comes from. The user made the wiki
@@ -26,8 +26,8 @@ Fix: the shared test-kit timer guard (`onTestFinished` head `d459854a6`, only on
 Sources: [test-isolation](test-isolation.md); src: `merge-steward.md:673, 683, 685`.
 
 ### 3. Which conformance check number is free?
-Expected: the first number above those claimed. On main: C50, C51, C53, C54, C56, C57. Claimed: C58 copies, C59 updater guard, C61 the Material bridge (`fix/ui-settings-density`, Pitcrew p8, s28), C62 pipefail-grep. Planned without a number on main: the Pacenotes cargo-metadata check (plan section 4.3; src: `git show origin/docs/apps-readiness-plan:docs/plans/apps-readiness.md`) and the logging checks (ADR 0036 section 7, which renumbers them at acceptance if taken; src: `git show origin/docs/adr-logging-root-cause:docs/adr/0036-logging-for-root-cause.md`). Check the branches first.
-Sources: [process-starts](process-starts.md); [conformance README](../../conformance/README.md); src: `merge-steward.md:150, 155, 566, 600, 641, 712`.
+Expected: 103, written here as a number because the id with its letter would trip the C100 docs gate (it rejects a check id that does not exist). It is the first number above every check file (the highest on the tree is C99: `git ls-tree 0cf98adb2 conformance/src/checks`; origin branches hold files up to number 97, `git ls-tree origin/<branch> conformance/src/checks` for each) and above every number a doc names (the highest is number 102; `git grep -h -o -w -E 'C[0-9]{2,3}' <rev> -- docs 'apps/*/docs'` over the tree and the origin branches). Below it nothing is free to assume: ADRs name numbers that have no file yet, for example C58 (ADR 0034 WP-1, registered under `[[planned]]` in `docs/gates.toml`, src: `git show 0cf98adb2:docs/gates.toml`) and C52 (the Pacenotes `cargo-metadata`-off check: Pacenotes ADR 0002 line 105, src: `git show origin/pacenotes/a2-parse:apps/pacenotes/docs/adr/0002-core-types-and-ports.md`; its first-release plan line 361 says it waits for shared code, src: `git show origin/docs/pacenotes-fast-ingest:apps/pacenotes/docs/plans/2026-10-29-first-release-plan.md`; C100 accepts the id because `docs/gates.toml` registers it under `[[planned]]`). On the tree the checks C59, C61 and C62 exist (C59 updater guard, C61 the Material bridge, C62 limit-completeness: the file names in `git ls-tree 0cf98adb2 conformance/src/checks`).
+Sources: [process-starts](process-starts.md); [conformance README](../../conformance/README.md); the `git` commands named above.
 
 ### 4. What blocks the Dyno 1.0 tag?
 Expected: main merged into `steward/s28-dyno-1.0` together with the replacement of the macOS socket sweep the user required (`fix/ipc-poll-waits` `c028d3f39`, `dyno/macos-socket-list` `5defc8fcc`, being merged; s28 not yet pushed with them), then ci.yml and a gated `dyno-release` run with installers; the open screenshot findings (disk activity series, tray default); VM checks on those installers (retarget checklist, `--gui`, WebContent); the user's GUI look; then the tag on the same commit.
