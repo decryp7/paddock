@@ -1,6 +1,6 @@
 # 74. Declared hosts and machine leases: one inventory of every runner, a live check against it, a lease for shared test machines
 
-- Status: Proposed (2026-11-09; drafted at the user's request of 2026-11-09 to write the redesign ADRs 0071 to 0074 now.
+- Status: Accepted 2026-11-09 by the user: D0–D7 as recommended (revision 3, `4dcb3afbd`). History: Proposed (2026-11-09; drafted at the user's request of 2026-11-09 to write the redesign ADRs 0071 to 0074 now.
   Revision 2 answers the independent review of revision 1 (`8080eb707`): P1-1 to P1-5 and its P2s. Revision 3 applies
   the re-review of revision 2 (`e954827e0`): the D2 evidence corrected to two measured pairs, and its P2s. Needs the user's
   decisions below before any build; WP-0, the interim Windows VM lock, is being done separately by the coordinator)
