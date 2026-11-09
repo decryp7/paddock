@@ -29,6 +29,7 @@
 pub mod cleanup;
 mod command;
 pub mod console;
+pub mod guardian;
 pub mod hint;
 mod identity;
 pub mod installed;

@@ -3291,6 +3291,7 @@ dependencies = [
  "paddock-jobs",
  "paddock-proc",
  "paddock-runtime",
+ "paddock-testkit",
  "paddock-workspace-hack",
  "serde_json",
  "tempfile",

@@ -146,6 +146,22 @@ pub(crate) fn kill_tree_on(
     out
 }
 
+/// Ends the process group `group` while `keeper` (a process that joined the group only to hold its id, see
+/// [`crate::guardian`]) is still the process it was and still in it: the id cannot then have been handed to another group
+/// (rule 53). True when the group was signalled.
+#[cfg(unix)]
+pub(crate) fn end_pinned_group(group: u32, keeper: ProcessId) -> bool {
+    keeper.is_alive()
+        && crate::sys::group_of(keeper.pid()) == Some(group)
+        && crate::sys::signal_group(group, crate::sys::SIGKILL)
+}
+
+/// Whether the process group `group` still has a member (zombies included).
+#[cfg(unix)]
+pub(crate) fn group_exists(group: u32) -> bool {
+    crate::sys::signal_group(group, 0)
+}
+
 /// Ends `root` and everything below it. A child started by this crate leads its own process group (Unix), which is
 /// signalled as a whole while the root is still the process `root` names (or is gone with no new holder of its pid); every
 /// process of the tree is then ended by identity, so a pid handed on since the tree was read is left alone (ADR 0033).

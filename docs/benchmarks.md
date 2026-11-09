@@ -217,6 +217,33 @@ Results of shared crates (rule 48: shared code records here), newest first.
 - **Notes:** measured on macOS, not on the CI image. Check on the first CI run that the Linux host's
   `cargo tree --target aarch64-apple-darwin` prints the same line shape; a different shape shows as "check broken: the
   cargo tree output has a line this probe cannot read", never as a pass. No budget until the CI number exists (rule 48).
+### 2026-11-09, paddock-proc: the orphan guardian's cost per child (fix/chromium-orphan-guard)
+
+- **Commits:** A, the first shape (21abc8d71: a keeper and a guardian `sh` per child). B, the Rust guardian (69205f941:
+  one guardian per process, one `cat` keeper per child). C, B hardened after the security review (the owner check, the
+  folder marker, one write per line). Each measured with a temporary timing test in the guardian's tests (not committed).
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2.
+- **Load (1-minute):** A 8.8 to 10.3; B 72 to 93; C 10.0 to 11.5. A and C ran at a similar load; B did not, and its
+  numbers are not comparable with A's.
+- **Build:** debug, `cargo nextest run -p paddock-proc --no-capture`.
+- **Runs:** 3 runs each. A: 60 iterations of start `/bin/sleep 5` in its own group, `Guard::start`, drop. B and C: 61
+  iterations of start `/bin/sleep 5` in its own group, `guardian::register`, end the child, drop the registration; the
+  first registration of the process (which starts the guardian) reported apart. B registered a folder; C both without a
+  folder and with one (which writes the folder's marker). p50 / p95 per run.
+- **Numbers (p50 of each run; p95 in brackets):**
+
+  | Measure | A (load 9-10) | B (load 72-93) | C, no folder (load 10-12) | C, with a folder (load 10-12) |
+  |---|---|---|---|---|
+  | the child's own spawn | 0.30, 0.45, 0.39 ms | 0.13, 0.11, 0.11 ms | 0.17, 0.14, 0.13 ms | 0.14, 0.14, 0.13 ms |
+  | guarding one child | 5.8, 7.0, 6.1 ms (7.9, 13.0, 7.6) | 0.16, 0.14, 0.15 ms (1.41, 0.19, 0.21) | 0.26, 0.20, 0.20 ms (0.67, 0.44, 0.25) | 0.35, 0.31, 0.29 ms (0.75, 0.41, 0.38) |
+  | ending the guard of one child | 0.33, 0.34, 0.32 ms | 0.05, 0.04, 0.04 ms | 0.08, 0.05, 0.05 ms | 0.08, 0.06, 0.06 ms |
+  | the first child (starts the guardian) | (none shared) | 0.66, 0.44, 0.59 ms | 0.99, 0.53, 0.55 ms | (started already) |
+  | processes for N guarded children | 2N | N + 1 | N + 1 | N + 1 |
+
+- **Memory:** resident size (`ps -o rss`), once, shape B: the guardian of a 5 MB debug test binary 6.9 MB, a `cat`
+  keeper 1.3 MB. Not measured: an app-sized release binary as its guardian.
+- **Notes:** A's start was mostly the wait for the guardian's starting shell to exit; B and C start the guardian once,
+  and a registration is a keeper spawn plus one line on a pipe (C: plus the marker file when a folder is given).
 
 ### 2026-11-03, paddock-widgets: grid engine, 32 placements (feat/widgets-grid)
 

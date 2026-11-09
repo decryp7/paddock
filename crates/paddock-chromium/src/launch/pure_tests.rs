@@ -276,30 +276,54 @@ fn profiles_are_unique_and_leftovers_of_dead_processes_are_swept() {
         (0..1000).map(|_| unique_dir(base.path())).collect();
     assert_eq!(dirs.len(), 1000);
     let me = std::process::id();
+    let mine = ProcessId::new(me, StartTime::from_micros(500));
     for name in [
         "chromium-1-1-1",
         "chromium-2-1-1",
         &format!("chromium-{me}-1-1"),
+        // By identity: pid 3 runs, but the one that started at 7 µs is gone (its pid was handed on).
+        "chromium-3-s7-1-1",
+        "chromium-3-s9-1-1",
+        // This process's own (the same start time, and one read a little apart), and an earlier process that had this pid.
+        &format!("chromium-{me}-s500-1-1"),
+        &format!("chromium-{me}-s501-1-1"),
+        &format!("chromium-{me}-s10000500-1-1"),
         "chromium-x-1",
         "other",
     ] {
         std::fs::create_dir_all(base.path().join(name)).unwrap();
     }
-    assert_eq!(sweep_profiles_with(base.path(), &|pid| pid == 2), 1);
+    let alive = |pid: u32, started: Option<StartTime>| match started {
+        Some(s) => pid == 3 && s == StartTime::from_micros(9),
+        None => pid == 2,
+    };
+    assert_eq!(sweep_profiles_with(base.path(), Some(mine), &alive), 3);
     let left: std::collections::BTreeSet<String> = std::fs::read_dir(base.path())
         .unwrap()
         .flatten()
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
-    assert!(
-        !left.contains("chromium-1-1-1")
-            && left.contains("chromium-2-1-1")
-            && left.contains("other")
-    );
-    assert!(
-        left.contains(&format!("chromium-{me}-1-1")),
-        "this process's own profiles stay"
-    );
+    for gone in [
+        "chromium-1-1-1",
+        "chromium-3-s7-1-1",
+        &format!("chromium-{me}-s10000500-1-1"),
+    ] {
+        assert!(!left.contains(gone), "{gone} was left");
+    }
+    for kept in [
+        "chromium-2-1-1",
+        "chromium-3-s9-1-1",
+        "other",
+        "chromium-x-1",
+        &format!("chromium-{me}-1-1"),
+        &format!("chromium-{me}-s500-1-1"),
+        &format!("chromium-{me}-s501-1-1"),
+    ] {
+        assert!(left.contains(kept), "{kept} was removed");
+    }
+    let name = unique_dir(base.path());
+    let (pid, started) = owner_of(&name.file_name().unwrap().to_string_lossy()).unwrap();
+    assert_eq!((pid, started), (me, super::me().map(|m| m.started())));
     assert_eq!(sweep_profiles(&base.path().join("none")), 0);
     let vars = paddock_env::MapVars::new()
         .with("HOME", base.path().as_os_str())
@@ -332,4 +356,36 @@ fn the_cap_is_checked_once_more_when_the_browser_connects() {
     );
     o.memory_cap = None;
     assert!(over_cap_at_start(&o, Some(11)).is_none(), "no cap");
+}
+
+/// Review P1: on Linux two processes can read the same start time about a second apart (each reads the boot time once,
+/// in whole seconds), so a live owner whose start time this process reads a little differently must keep its profile.
+#[cfg(unix)]
+#[test]
+fn a_live_owner_whose_start_time_reads_a_little_apart_keeps_its_profile() {
+    let base = tempfile::tempdir().unwrap();
+    let mut other = std::process::Command::new("/bin/sleep")
+        .arg("30")
+        .spawn()
+        .unwrap();
+    let id = ProcessId::of(other.id()).unwrap();
+    let at = |d: i64| id.started().as_micros().saturating_add_signed(d);
+    let near = format!("chromium-{}-s{}-1-1", id.pid(), at(500));
+    let far = format!("chromium-{}-s{}-1-1", id.pid(), at(10_000_000));
+    for name in [&near, &far] {
+        std::fs::create_dir_all(base.path().join(name)).unwrap();
+    }
+    let removed = sweep_profiles_with(base.path(), super::me(), &owner_alive);
+    // Ended through the handle of this test's own child, before any assert can fail (ER-14).
+    other.kill().unwrap();
+    other.wait().unwrap();
+    assert_eq!(removed, 1);
+    assert!(
+        base.path().join(&near).exists(),
+        "the live owner's profile was removed"
+    );
+    assert!(
+        !base.path().join(&far).exists(),
+        "a profile of a process that is gone (its pid handed on) stays"
+    );
 }

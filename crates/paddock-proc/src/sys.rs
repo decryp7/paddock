@@ -53,6 +53,52 @@ mod unix {
         unsafe { libc::kill(pid, signal) == 0 }
     }
 
+    /// The process group of `pid` (`getpgid`); `None` when there is no such process.
+    pub fn group_of(pid: u32) -> Option<u32> {
+        let pid = libc::pid_t::try_from(pid).ok()?;
+        // SAFETY: getpgid takes one integer; a process that does not exist makes it fail with ESRCH.
+        let group = unsafe { libc::getpgid(pid) };
+        u32::try_from(group).ok()
+    }
+
+    /// The pid of this process's parent.
+    pub fn parent_pid() -> u32 {
+        // SAFETY: getppid has no arguments and cannot fail.
+        let p = unsafe { libc::getppid() };
+        u32::try_from(p).unwrap_or(0)
+    }
+
+    /// The executable file of `pid`, canonical; `None` when the process is gone or the OS does not say.
+    #[cfg(target_os = "macos")]
+    pub fn exe_of(pid: u32) -> Option<std::path::PathBuf> {
+        use std::os::unix::ffi::OsStringExt;
+        let pid = libc::c_int::try_from(pid).ok()?;
+        let mut buf = vec![0u8; usize::try_from(libc::PROC_PIDPATHINFO_MAXSIZE).ok()?];
+        let size = u32::try_from(buf.len()).ok()?;
+        // SAFETY: proc_pidpath writes at most `size` bytes into the buffer and returns how many it wrote (0 on failure).
+        let n = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr().cast(), size) };
+        buf.truncate(usize::try_from(n).ok().filter(|n| *n > 0)?);
+        std::fs::canonicalize(std::ffi::OsString::from_vec(buf)).ok()
+    }
+
+    /// The executable file of `pid`, canonical; `None` when the process is gone or the OS does not say.
+    #[cfg(not(target_os = "macos"))]
+    pub fn exe_of(pid: u32) -> Option<std::path::PathBuf> {
+        std::fs::canonicalize(format!("/proc/{pid}/exe")).ok()
+    }
+
+    /// Whether this process's standard input is a pipe; with its inode (Linux uses it to find who else holds the pipe).
+    pub fn stdin_pipe() -> Option<u64> {
+        let mut st = std::mem::MaybeUninit::<libc::stat>::zeroed();
+        // SAFETY: fstat fills the stat buffer for descriptor 0; it fails on a closed descriptor.
+        if unsafe { libc::fstat(0, st.as_mut_ptr()) } != 0 {
+            return None;
+        }
+        // SAFETY: fstat succeeded, so the buffer is filled.
+        let st = unsafe { st.assume_init() };
+        (st.st_mode & libc::S_IFMT == libc::S_IFIFO).then_some(st.st_ino)
+    }
+
     pub const SIGTERM: i32 = libc::SIGTERM;
     pub const SIGKILL: i32 = libc::SIGKILL;
 
