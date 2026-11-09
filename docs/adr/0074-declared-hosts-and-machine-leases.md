@@ -15,7 +15,7 @@
   redesign drafts of the same day: ADR 0071 (ready or exit, never a fixed start budget; `docs/adr-0071-ready-or-exit`, owns
   the macOS first-start check, its D5), ADR 0072 (every connection end says why, in order; `docs/adr-0072-ordered-close`,
   whose Windows VM stress loops need the lease), ADR 0073 (no test fakes, family-wide; `docs/adr-0073-no-fakes-family`,
-  not yet pushed); Pitcrew ADR 0021 (a pool of capacity-1 runners per host)
+  revision 2 at `bb9891c18`, Proposed); Pitcrew ADR 0021 (a pool of capacity-1 runners per host)
 - Code it changes: `conformance/ci/build-jobs.sh`, `.gitea/actions/{build-jobs,job-isolation,setup-rust}`, every
   `.config/nextest.toml` (7), `crates/paddock-slots`, `tools/paddock-dev` (`./dev host`, `./dev machine`),
   `scripts/vm-win.sh` and `scripts/vm-smoke/*` (on `origin/tools/vm-smoke-defender`, which contains the approved V1
