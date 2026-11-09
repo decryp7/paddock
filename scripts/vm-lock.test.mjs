@@ -16,6 +16,8 @@ const scratch = mkdtempSync(join(process.env.PADDOCK_TEST_SCRATCH ?? tmpdir(), '
 after(() => rmSync(scratch, { recursive: true, force: true }));
 before(warmDev);
 
+/** A holder's body: it waits until its process group is killed, never for a fixed time (a slow machine must not outlast it, ER-12). */
+const FOREVER = 'while :; do sleep 0.2; done';
 let n = 0;
 /** Kills the holder's whole process group (its sleep too) so nothing outlives the test. */
 const killGroup = (child) => { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* gone */ } };
@@ -39,7 +41,7 @@ const until = async (cond) => {
 
 test('a second acquirer fails at once with ::error naming the holder (pid, start time) and the next step', async () => {
   const t = fresh();
-  const holder = spawn('bash', ['-c', stub('first', t.log, `echo ready >> '${t.log}'; sleep 20`)], { env: t.env, stdio: 'ignore', detached: true });
+  const holder = spawn('bash', ['-c', stub('first', t.log, `echo ready >> '${t.log}'; ${FOREVER}`)], { env: t.env, stdio: 'ignore', detached: true });
   try {
     await until(() => lines(t.log).includes('ready'));
     assert.ok(lines(t.log).includes('ready'), 'the first holder got the lock');
@@ -76,7 +78,7 @@ test('with PADDOCK_VM_LOCK_WAIT a second acquirer waits for the first and then r
 
 test('the wait is bounded: after PADDOCK_VM_LOCK_WAIT seconds it fails with ::error', async () => {
   const t = fresh();
-  const holder = spawn('bash', ['-c', stub('first', t.log, 'sleep 20')], { env: t.env, stdio: 'ignore', detached: true });
+  const holder = spawn('bash', ['-c', stub('first', t.log, FOREVER)], { env: t.env, stdio: 'ignore', detached: true });
   try {
     await until(() => lines(t.log).includes('first start'));
     const second = bash(stub('second', t.log), { ...t.env, PADDOCK_VM_LOCK_WAIT: '2', PADDOCK_VM_LOCK_POLL: '1' });
@@ -89,7 +91,7 @@ test('the wait is bounded: after PADDOCK_VM_LOCK_WAIT seconds it fails with ::er
 
 test('a holder that was killed (no trap ran) frees the lock: its pid is gone, so the next acquirer takes it', async () => {
   const t = fresh();
-  const holder = spawn('bash', ['-c', stub('dead', t.log, 'sleep 60')], { env: t.env, stdio: 'ignore', detached: true });
+  const holder = spawn('bash', ['-c', stub('dead', t.log, FOREVER)], { env: t.env, stdio: 'ignore', detached: true });
   await until(() => lines(t.log).includes('dead start'));
   killGroup(holder);
   await new Promise((r) => holder.on('exit', r));
@@ -122,7 +124,7 @@ test('a script run under a holder that already took the lock (chain script calli
 const RUN = join(here, 'vm-lock-run.sh');
 const waitFor = async (f, line) => { assert.ok(await until(() => lines(f).includes(line)), `${line} in ${f}`); };
 /** A holder in its own process group (killed with the group, so no orphaned sleep or detached holder outlives the test). */
-const hold = async (t, label, body = 'sleep 30') => {
+const hold = async (t, label, body = FOREVER) => {
   const child = spawn('bash', ['-c', stub(label, t.log, `echo ready-${label} >> '${t.log}'; ${body}`)], { env: t.env, stdio: 'ignore', detached: true });
   await waitFor(t.log, `ready-${label}`);
   const exited = new Promise((r) => child.on('exit', r));
@@ -194,7 +196,7 @@ test('P1-4: vm-lock-run.sh holds the lock around a command, passes its exit code
   const t = fresh();
   const ran = bash(`'${RUN}' viarun -- bash -c "echo inner >> '${t.log}'; exit 9"`, t.env);
   assert.equal(ran.status, 9);
-  const h = spawn('bash', [RUN, 'long', '--', 'bash', '-c', `echo ready >> '${t.log}'; sleep 30`], { env: t.env, stdio: 'ignore', detached: true });
+  const h = spawn('bash', [RUN, 'long', '--', 'bash', '-c', `echo ready >> '${t.log}'; ${FOREVER}`], { env: t.env, stdio: 'ignore', detached: true });
   try {
     await waitFor(t.log, 'ready');
     const second = bash(`'${RUN}' second -- bash -c "echo SECOND >> '${t.log}'"`, t.env);
@@ -221,5 +223,14 @@ test('a holder is the same process when its start token matches, even if `ps lst
   assert.ok(!same('Mon Nov 9 10:47:00 2026 [t4242]', 'Mon Nov 9 10:47:00 2026 [t4243]'), 'another start tick is another process');
   assert.ok(same('Mon 9 Nov 17:27:42 2026', 'Mon 9 Nov 17:27:42 2026'), 'no token (macOS): the whole string');
   assert.ok(!same('Mon 9 Nov 17:27:42 2026', 'Mon 9 Nov 17:27:43 2026'), 'no token: a different string is a different process');
+  assert.ok(same('Mon Nov 9 10:47:00 2026 [t4242]', 'Mon Nov 9 10:47:00 2026'), 'a token on one side only: the lstart parts decide, a live lock is not stolen');
+  assert.ok(!same('Mon Nov 9 10:47:00 2026 [t4242]', 'Tue Nov 10 10:47:00 2026'), 'a token on one side only, and a different lstart: another process');
   assert.ok(!same('', ''), 'an empty start is never a match');
+});
+
+test('no holder in the lock tests lives for a fixed time: a holder waits for its kill, so a slow machine cannot outlast it (ER-12)', () => {
+  for (const file of ['vm-lock.test.mjs', 'vm-win.test.mjs']) {
+    const longSleeps = readFileSync(join(here, file), 'utf8').split('\n').filter((l) => /sleep (\d{2,}|[3-9])\b/.test(l) && !l.includes('longSleeps'));
+    assert.deepEqual(longSleeps, [], `${file}: a holder that sleeps a fixed time frees the lock when the test runs longer`);
+  }
 });

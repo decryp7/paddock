@@ -44,12 +44,13 @@ _vm_lock_start() {
   fi
   printf '%s' "$s"
 }
-# 0 when two starts name the same process: equal kernel ticks when both carry one, else equal strings. An empty start never matches.
+# 0 when two starts name the same process: equal kernel ticks when both carry one; when only one does, the lstart parts alone are compared (a
+# holder recorded by an older script must not be taken for dead); else equal strings. An empty start never matches.
 _vm_lock_same_start() {
   local a="$1" b="$2" ta tb
   [ -n "$a" ] && [ -n "$b" ] || return 1
   ta="${a##*\[t}"; tb="${b##*\[t}"
-  if [ "$ta" != "$a" ] && [ "$tb" != "$b" ]; then [ "$ta" = "$tb" ]; else [ "$a" = "$b" ]; fi
+  if [ "$ta" != "$a" ] && [ "$tb" != "$b" ]; then [ "$ta" = "$tb" ]; else [ "${a%% \[t*}" = "${b%% \[t*}" ]; fi
 }
 _vm_lock_default_root() { printf '%s' "${PADDOCK_VM_LOCK_ROOT:-/Volumes/d7sst7/ci/locks/test-machines}"; }
 

@@ -6,7 +6,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, closeSync, readdirSync, existsSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { after, before, beforeEach, describe, test } from 'node:test';
+import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { efiBootImages, patchNoPrompt } from './vm-win/noprompt-iso.mjs';
 import { macOnly, warmDev } from './vm-test-support.mjs';
@@ -24,16 +24,6 @@ before(warmDev);
 const lockTmp = join(scratch, 'lock-tmp'); // owner folders of the lock's holders live here, so a holder killed by a test ends with the scratch folder
 mkdirSync(lockTmp, { recursive: true });
 const lockEnv = { TMPDIR: lockTmp, PADDOCK_VM_LOCK_ROOT: join(scratch, 'lock-root'), PADDOCK_VM_LOCK_HELD: '', PADDOCK_DEV: join(here, '..', 'dev') };
-// Each test gets its own lock root and owner folder: a holder one test killed still has a detached slot process that ends when a later
-// acquirer removes its owner folder, and that cleanup must never meet the next test's holder on the same root (it flaked: the next test's
-// lock came up free and run-win took it instead of exiting 75).
-let lockN = 0;
-beforeEach(() => {
-  const d = join(scratch, `lock${++lockN}`);
-  mkdirSync(join(d, 'tmp'), { recursive: true });
-  lockEnv.TMPDIR = join(d, 'tmp');
-  lockEnv.PADDOCK_VM_LOCK_ROOT = join(d, 'root');
-});
 const run = (script, args, env = {}) =>
   spawnSync('bash', [join(here, script), ...args], { encoding: 'utf8', env: { ...process.env, ...lockEnv, ...env } });
 
@@ -418,8 +408,10 @@ describe('the VM lock', () => {
     writeFileSync(join(dir, 'vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx'), '.encoding = "UTF-8"\n');
     return { ...f, env: { PADDOCK_WIN_VM_DIR: dir, FUSION_APP: f.fusion, PATH: f.path, PADDOCK_VM_MAX_LOAD: '100000' } };
   };
-  const holding = async (label, body = 'sleep 30') => {
-    const marker = join(scratch, `${label}-held`);
+  // The holder lives until the test kills its process group: no fixed lifetime (ER-12), a loop on a condition that never comes.
+  const holding = async (label, body = 'while :; do sleep 0.2; done') => {
+    // One marker per call: a label used twice must not return on the first call's leftover marker.
+    const marker = join(mkdtempSync(join(scratch, 'held-')), 'held');
     const child = spawn('bash', ['-c', `. '${join(here, 'vm-lock.sh')}'; vm_lock_acquire ${label}; touch '${marker}'; ${body}`], { env: { ...process.env, ...lockEnv }, stdio: 'ignore', detached: true });
     const exited = new Promise((r) => child.on('exit', r));
     // A poll of a condition: the bound only stops a hung child, the verdict never depends on the time taken.
@@ -427,6 +419,20 @@ describe('the VM lock', () => {
     assert.ok(existsSync(marker), `${label} took the lock`);
     return { stop: async () => { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* gone */ } await exited; } };
   };
+
+  test('holding() returns only once its own holder has the lock, also when an earlier call used the same label', async () => {
+    const owner = () => readFileSync(join(lockEnv.PADDOCK_VM_LOCK_ROOT, 'slots', 's1.owner'), 'utf8').match(/owner=(.*)/)?.[1];
+    const first = await holding('same-label');
+    const firstOwner = owner();
+    assert.ok(firstOwner, 'the first holder holds the lock');
+    await first.stop();
+    const second = await holding('same-label');
+    try {
+      assert.notEqual(owner(), firstOwner, 'the slot names the second holder, not the killed first one (a marker left by the first call must not count)');
+    } finally {
+      await second.stop();
+    }
+  });
 
   test('a second vm-win.sh start fails while chain-release.sh holds the lock, names the holder, and never reaches vmrun', macOnly, async () => {
     const f = fakeUsable('Locked');
