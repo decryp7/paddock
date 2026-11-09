@@ -71,8 +71,12 @@ impl Drop for TempDir {
 /// Store options for tests that compare answers, not speed: two parse workers, two DuckDB threads and one index writer
 /// thread instead of the app's budgets (up to 8, 4 and 4 per store). Several such stores run at once beside the rest of the
 /// workspace; at the app's budgets they oversubscribed a shared Mac runner (CI 7822, 7825). Answers do not depend on the
-/// thread counts (streaming_import checks it).
+/// thread counts (streaming_import checks it). `DEBRIEF_TEST_APP_BUDGETS=1` (the nightly) gives the app's own options
+/// instead, so every such test also runs at the shipped counts.
 pub fn test_options() -> debrief_store_duck::StoreOptions {
+    if std::env::var("DEBRIEF_TEST_APP_BUDGETS").as_deref() == Ok("1") {
+        return debrief_store_duck::StoreOptions::default();
+    }
     debrief_store_duck::StoreOptions {
         parse_threads: 2,
         duck_threads: 2,
@@ -85,7 +89,16 @@ pub fn test_options() -> debrief_store_duck::StoreOptions {
 }
 
 pub fn store_with(dir: &TempDir, profile: Profile, paths: &[PathBuf]) -> StoreResult<(DuckStore, debrief_core::ports::ImportReport)> {
-    let mut opts = test_options();
+    store_with_options(dir, profile, paths, test_options())
+}
+
+/// [`store_with`] with the given options (`DEBRIEF_PARSE_THREADS` still sets the parse workers).
+pub fn store_with_options(
+    dir: &TempDir,
+    profile: Profile,
+    paths: &[PathBuf],
+    mut opts: debrief_store_duck::StoreOptions,
+) -> StoreResult<(DuckStore, debrief_core::ports::ImportReport)> {
     if let Some(n) = std::env::var("DEBRIEF_PARSE_THREADS").ok().and_then(|v| v.parse().ok()) {
         opts.parse_threads = n;
     }
@@ -117,10 +130,15 @@ pub fn pair(profile: Profile) -> Pair {
 
 /// The two stores with `paths` imported.
 pub fn pair_of(profile: Profile, paths: &[PathBuf]) -> Pair {
+    pair_of_with(profile, paths, test_options())
+}
+
+/// [`pair_of`] with the DuckDB store's options (`StoreOptions::default()`: the app's own thread counts).
+pub fn pair_of_with(profile: Profile, paths: &[PathBuf], opts: debrief_store_duck::StoreOptions) -> Pair {
     let mut ws = Workspace::new(profile.clone()).unwrap();
     ws.open(paths).unwrap();
     let dir = TempDir::new("diff");
-    let (duck, report) = store_with(&dir, profile, paths).unwrap();
+    let (duck, report) = store_with_options(&dir, profile, paths, opts).unwrap();
     assert!(report.events > 0, "{} events", report.events);
     // Smart search answers from the index once it caught up (before, it matches substrings of the words).
     assert!(duck.wait_for_index(std::time::Duration::from_secs(120)).unwrap().ready);

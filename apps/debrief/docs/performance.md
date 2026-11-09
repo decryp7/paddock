@@ -777,3 +777,18 @@ Single runs on a loaded machine. streaming_import about halves, large_folder dro
 half. The differential tests drop by about a quarter only: what is left is the import of the samples into both stores and
 the reference Workspace's smart-search answers (pages, timelines, facets of the two smart-search queries), which this change
 does not touch. Six repeated runs of the changed tests (profile ci, no extra load) passed in 15.3 to 16.3 s.
+
+After review (same day, same setup): the shipped thread counts are compared again
+(`answers_like_the_workspace_on_a_file_of_several_products` runs at `StoreOptions::default()`; the nightly sets
+`DEBRIEF_TEST_APP_BUDGETS=1`, which gives every test store the app's options; a new search test checks that the index at the
+app's counts merges 12 commits into fewer segments and keeps every document), the coarse timelines also run with the two
+time windows, all facet fields also with the text search, and large_folder left the 180 s waiver (and so the `duck-heavy`
+group). One run:
+
+| run (load before) | streaming_import | differential default / sample / several products | large_folder | index merge (new) | analysis default / sample | crate |
+|---|---|---|---|---|---|---|
+| after review (33) | 7.6 s | 27.5 / 24.3 / 5.4 s | 12.4 s | 9.3 s | 27.1 / 24.7 s | 61.6 s |
+
+The differential tests gave back most of the first change's gain with the restored combinations, at a higher load than
+the "after" runs above; large_folder now runs beside everything else instead of in the group. The whole crate also passes
+with `DEBRIEF_TEST_APP_BUDGETS=1` (47.5 s without extra load).
