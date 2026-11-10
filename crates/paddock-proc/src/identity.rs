@@ -256,7 +256,6 @@ mod tests {
 
     #[test]
     fn an_unreadable_table_or_start_time_is_unknown_never_gone() {
-        use crate::tree::Presence;
         use crate::tree::Presence::{Gone, Running, Unknown};
         let id = ProcessId::new(4242, at(1_000));
         assert_eq!(id.presence_given(Unknown, Some(at(1_000))), Unknown);
