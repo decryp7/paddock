@@ -22,7 +22,7 @@ fn marker(data: &Path) -> Value {
         MarkerFile::Missing => json!({ "state": "missing" }),
         MarkerFile::Unreadable => json!({ "state": "unreadable" }),
         MarkerFile::Found(m) => {
-            let alive = os_probe(m.pid).is_some_and(|now| m.started_at.is_none_or(|then| now.abs_diff(then) <= 1));
+            let alive = os_probe(m.pid).started().is_some_and(|now| m.started_at.is_none_or(|then| now.abs_diff(then) <= 1));
             json!({ "state": "found", "pid": m.pid, "startedAt": m.started_at, "processAlive": alive })
         }
     }

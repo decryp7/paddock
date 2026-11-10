@@ -1668,6 +1668,7 @@ dependencies = [
  "objc2-web-kit",
  "open",
  "paddock-diag",
+ "paddock-proc",
  "semver",
  "serde",
  "serde_json",
