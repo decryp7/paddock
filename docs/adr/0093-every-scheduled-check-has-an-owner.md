@@ -1,8 +1,9 @@
 # 93. Every scheduled CI check has an owner, and a red one cannot be ignored
 
-- Status: Proposed 2026-11-10, revision 2. Drafted at the coordinator's request of 2026-11-10, asked for by the user under
+- Status: Proposed 2026-11-10, revision 3. Drafted at the coordinator's request of 2026-11-10, asked for by the user under
   ER-21. Revision 1 (`34e7eeb00`) was reviewed independently ("changes", 5 P1 and a list of P2s); revision 2 answers it
-  (see "Review answers (revision 2)"). Nothing here is built yet. ER-23 does not apply (no drawings).
+  (see "Review answers (revision 2)"); its re-review of
+  `fe28d4032` ("changes", P1-6 and seven P2s) is answered by revision 3 (see "Review answers (revision 3)"). Nothing here is built yet. ER-23 does not apply (no drawings).
 - Date: 2026-11-10
 - Related: ER-12, ER-21 / rule 40, ER-31, ER-33 / rule 71, ER-36; ADR 0022 (developer tools are Rust in `./dev`); ADR
   0041 (its tag-checklist row, line 208: "the last ... starved nightly of the app's tests has no open failure, or each is
@@ -24,18 +25,20 @@
   7861 and 7870, the logs of the failed jobs of runs 7685 and 7870 and of job 34160 (run 7861), the issue list and labels
   of `decryp7/paddock`, and `/api/v1/user`. Run times from the API carry `+08:00` (local); job and log times are UTC
   (`Z`). Git facts from `git log` and `git merge-base --is-ancestor` after `git fetch`; lockfile facts from `grep` over
-  every `Cargo.lock` on the base. Paths without a branch are from this ADR's base `origin/train/2026-11-09-3`. No user
+  every `Cargo.lock` on the base. Paths without a branch are from this ADR's base `origin/train/2026-11-09-3` (`67a633ef3`; the train has since
+  moved to `c151422a4`, which changes only `tools/paddock-dev/tests/it/golden.rs`, see the nightly row). No user
   data was read. The heads, re-read right before the commit:
 
 ```evidence-heads
 read: 2026-11-10
-origin/train/2026-11-09-3 67a633ef3
+origin/train/2026-11-09-3 c151422a4
 origin/main b51c72509
 origin/docs/adr-not-measured 0df6835a9
-origin/docs/adr-evidence-heads f2bdba1df
+origin/docs/adr-evidence-heads b32655fef
 origin/feat/rt8-ci-flakes 0d40eafed
 origin/docs/redesign-adrs-7-9 4b0633e73
 origin/feat/rt5-check-host ec8530a95
+origin/docs/adr-private-files fdfb17c8f
 engineering-rules main ca4124bdc
 ```
 
@@ -50,13 +53,15 @@ midday; the night-only schedules of 2026-11-10 are on the train.
 | `debrief-bench.yml` | 14 | 13 (1 cancelled, never green) | 10-29 to 11-10, every run (6954 to 7870) | job `store benchmarks (10M events)`; on run 7870 the test `worker::imports_and_queries_within_the_budgets` logged "peak RSS importing 776 MB, indexing 527 MB" against `IMPORT_BUDGET_MB` 768 (`apps/debrief/crates/debrief-store-worker/tests/it/worker.rs:313`). Its cause is investigated separately | none named; ADR 0080 (2026-11-09) asked for one, two more red runs followed |
 | `debrief-fuzz.yml` | 14 | 11 (2 cancelled, 1 green) | 10-28 to 11-08 | shards 5/6 and 6/6 (run 7684). The fix `a5aca536d` ("cut the schema error message on a char boundary") was committed 2026-11-05 13:29 and reached `main` with the merge `af929a1e3` (2026-11-08 11:26, "Merge debrief/1.2-limits-adopt"); the first green run was 7806 on 11-09; run 7863 on 11-10 was cancelled, so the check is unmeasured today | none |
 | `service-smoke.yml` | 16 | 13 | 10-26 to 11-08 | job `update smoke in a macOS VM` (run 7685: "N+1's agent is not 0.1.1", "leftover VMs") | none |
-| `nightly.yml` | 16 | 10 (3 cancelled, 3 green) | red on 10 of the 13 runs that finished; 9 to 537 min | run 7861: `crate (macos-latest)`, `crate (windows-latest)`, `paddock-dev (macos-latest)`, `paddock-dev (windows-latest)`, `fuzz (shard 1)`, and the callers `everything` and `fuzz (paddock-ipc)` (no runner, no steps); run 7802 also `app dyno (macos-latest)`, red only that day | the coordinator, implicitly |
+| `nightly.yml` | 16 | 10 (3 cancelled, 3 green) | red on 10 of the 13 runs that finished; 9 to 537 min | run 7861: `crate (macos-latest)`, `crate (windows-latest)`, `paddock-dev (macos-latest)`, `paddock-dev (windows-latest)`, `fuzz (shard 1)`, and the callers `everything` and `fuzz (paddock-ipc)` (no runner, no steps); run 7802 also `app dyno (macos-latest)`, red only that day. The train's `c151422a4` merges `fix/golden-live-windows-timeout` (`tools/paddock-dev/tests/it/golden.rs`), which bears on the `paddock-dev (windows-latest)` red; it is not on `main`, so the next nightly cannot show it yet | the coordinator, implicitly |
 | `debrief.yml` (schedule) | 14 | 8 | 11-09 and 11-10 now; 0 to 581 min | run 7857: `rust tests`, `rust tests (macOS)`, `real-app smoke (macos-latest)` | Debrief, implicitly |
 | `debrief-mutants.yml` | 2 | 2 (never green) | 11-01 and 11-08 | job `mutants` | none; `docs/ci-schedules.md` says "not measured (never ran on schedule)", which the API contradicts |
 | `canary.yml`, `debrief-corpus.yml` | 17, 14 | 1, 0 | none | | |
 
 `dev-tool.yml` (05:33 local, Windows leg) is scheduled on the train only (it does not exist on `main`), so it has no
-scheduled runs yet; it is in the register from the start.
+scheduled runs yet; it is in the register from the start. With it there are 9 scheduled workflows (`canary`,
+`debrief-bench`, `debrief-corpus`, `debrief-fuzz`, `debrief-mutants`, `debrief`, `dev-tool`, `nightly`,
+`service-smoke`); with this ADR's digest workflow, 10.
 
 **The first `::error::` line is often not the error.** In job 34160 (`fuzz (shard 1)`, run 7861) the first lines
 containing `::error::` are script text echoed by the runner (line 220: `command -v rustup >/dev/null || { echo
@@ -135,6 +140,11 @@ skip = "after-failure"              # skipped by design when an upstream job fai
 name = "paddock-dev (*)"
 skip = "never"
 covers = "release-path"             # only for failures that are not tests (§3); see D3
+
+[[scheduled.job]]
+name = "crate (*)"
+skip = "never"
+tests = "derived"                   # C107 reads the packages from the job's commands; their dependents are covered (§3)
 ```
 
 **C107** (a `./dev check` in the RT-5 host) fails when a workflow with `on.schedule`, or a job it runs, has no entry;
@@ -179,16 +189,22 @@ A `test:` signature covers the apps whose dependency set contains the test's pac
 ER-31 (a) and ADR 0080 §3.3 use (the app's `Cargo.lock`, the npm workspace graph), at the commit being tagged. For
 example `paddock-mcp` is in the lockfiles of `crates/`, Dyno, Pitwall, `shell-demo` and `workbench-demo` and no other
 app, so a red `paddock-mcp` test blocks those and not Debrief, Pitcrew or Spotter. A `step:` or `unclassified:` signature
-(rustup missing, a leftover VM) cannot be traced to a package; it covers the job's owner app, or for `family` the job's
-`covers` (D3), and every such case is listed in the digest for triage. A `not measured` job covers like its last failure,
-or its owner when it has none.
+(rustup missing, a leftover VM) cannot be traced to a package. It covers, in this order: the job's `covers` if the register
+gives one; otherwise the dependents of the packages the job tests (§1 `tests`, derived by C107 from the job's commands,
+for example `cargo nextest -p` lists, `--workspace` in `crates/`, an app's `paddock.ci.json` leg); otherwise, for an app
+owner, that app. A `family` job for which neither `covers` nor `tests` can be derived fails C107, so no `family` job
+covers nothing by omission (D12). A `not measured` job covers the same way. Every `step:`, `unclassified:` and `not
+measured` case is listed in the digest for triage. For tool jobs (`paddock-dev (*)`, `dev-tool.yml`) the derived
+coverage is D3's.
 
 ### 4. The tag gate: stateless, from the Actions record
 
 `./dev ci scheduled gate --app <app> --commit <sha>` computes, for each register job, from the Actions API and git only:
 the latest **completed** first-attempt run on `main` (a run still in progress is reported as pending and the one before it
-is used), its outcome per §2, and for each signature the start of its red streak (the completion time of the first run in
-the unbroken sequence of runs that show it). It refuses (exit 5) when a signature that covers the app (§3) has a streak
+is used), its outcome per §2, and for each signature the start of its red streak: the completion time of the first run that showed
+it after the job's last **three consecutive** full first-attempt greens (D13), so an intermittent failure that passes in
+between does not restart its clock; a signature also listed as flaky by the flake ledger (RT-8 `ci flakes`, across
+commits, ER-12) keeps its first appearance in the ledger's window as its start. It refuses (exit 5) when a signature that covers the app (§3) has a streak
 older than 24 h at the time of the gate and no valid user waiver (§5); it returns 6 (not measured) when it cannot read the
 API or the logs, when a covering job is not measured, or when the last sweep (§6) is older than 30 h, so a broken or
 stopped pipeline never passes. Issues are not read for the verdict.
@@ -205,6 +221,14 @@ stopped pipeline never passes. Issues are not read for the verdict.
   the steward's tag checklist and in `./dev release tag` once that exists (ER-9). ADR 0041's hand-run row becomes a reading
   of this gate.
 - **Not gated:** landings on `main` and trains (a fix must be able to land), branch runs, fix rounds.
+- **The mode is a user decision, signed.** The gate's mode lives in `docs/gates.toml` (`[scheduled_gate]`: `mode =
+  "report" | "enforce"`, `report_until = YYYY-MM-DD`, `reason`), never in a repository variable or an environment
+  value, because agents can change those with the administrator token or the keychain credential. Before `report_until`
+  the gate reports only; an unsigned `report_until` counts only up to the go-live length (D9) after the commit
+  that first added the record, so an agent cannot push it out. After it, the gate enforces; any other mode counts only if every line of the `[scheduled_gate]`
+  record blames to a commit signed per §5, and otherwise the gate exits 6 (not measured). There is no `off`. Positive
+  controls: an unsigned commit that sets `mode = "report"` after `report_until` still refuses; a signed one by a key not
+  in the trust root still refuses.
 
 ### 5. Waivers need the user present (detail in ADR 0097)
 
@@ -214,13 +238,21 @@ claude-in-chrome, and CI secrets reachable from a pushed workflow; a PreToolUse 
 bypassed by a script file or the browser. A Gitea comment, label or issue state therefore proves nothing about who wrote
 it, and neither does an `approved = "user"` line.
 
-The waiver this ADR recommends (D5 (a)) is a record in `docs/gates.toml` (`[[scheduled_waiver]]`: workflow, job,
-signature, reason, `until` at most 14 days ahead) added by a commit, or named by a tag, **signed with a touch-required
-`sk-ssh-ed25519` key or a Secure Enclave key** listed in an `allowed_signers` file; the gate verifies the signature of the
-commit that added each record (`git log --format=%G?` with `gpg.ssh.allowedSignersFile`) and ignores a record whose
-commit is unsigned or signed by another key. A touch or Touch ID prompt is something an agent cannot answer. How the
+The waiver this ADR recommends (D5 (a)), and the gate mode of §4, are records in `docs/gates.toml` (`[[scheduled_waiver]]`: workflow, job,
+signature, reason, `until` at most 14 days ahead; `[scheduled_gate]`) added by a commit, or named by a tag, **signed with a touch-required
+`sk-ssh-ed25519` key or a Secure Enclave key** listed in an `allowed_signers` file; the gate verifies that **every line** of each
+record blames to a commit with a good signature (`git blame --porcelain`, then `git log --format=%G?` with
+`gpg.ssh.allowedSignersFile`) and ignores a record any line of which comes from an unsigned commit or another key, so an
+agent cannot extend a signed waiver by editing its `until` line. A touch or Touch ID prompt is something an agent cannot answer. How the
 user's approvals are recorded across the family (keys, the `allowed_signers` file, rotation, what else they cover) is ADR
-0097's subject; this ADR consumes it and does not design it. Until 0097 is accepted, the gate has no waivers at all: only
+0097's subject; this ADR consumes it and does not design it. It states what it needs from 0097:
+
+- **R1.** Agents cannot change the set of trusted keys. An `allowed_signers` file in the repository is not enough, since
+  any agent can commit a key to it; the trust root must be somewhere agents cannot write, or every change to it must
+  itself be signed by a key already in it, checked from a pinned starting point.
+- **R2.** Verification is per line: a record counts only if every line of it blames to a commit signed by a trusted key.
+- **R3.** Scope includes switches (the gate mode of §4) as well as waivers, and any later user-only setting of this kind.
+- **R4.** Each signature needs the user present (a touch or Touch ID), never a key an agent process can use unattended. Until 0097 is accepted, the gate has no waivers at all: only
 a fix clears a red, and the shadow period (§7) is the slack.
 
 As defence in depth, agents and CI move to a bot account (`paddock-agent`: issue write, Actions read, no admin), so
@@ -247,7 +279,11 @@ verdict: an agent who closes one changes nothing the gate reads, and the next sw
   `not measured` jobs; `step:` signatures awaiting coverage triage. A scheduled workflow `scheduled-digest.yml` (Linux,
   one slot, owner `family`, itself in the register) runs the sweep and the digest at **09:13 and 15:13 local**: the
   nightly starts 05:03 and has run up to 537 min, `debrief.yml` 06:03 and up to 581 min, so the morning digest lists them
-  as pending and the afternoon one judges them. It writes into one issue labelled `scheduled-digest` (body replaced);
+  as pending and the afternoon one judges them. These are daytime starts against the user's night-only scheduling
+  decision of 2026-11-10; the job builds nothing, takes one Linux slot for about a minute and reads the API, but it is
+  an exception the user must grant (D14). Without it, the sweep runs at 04:13 local only (Linux, outside the backup
+  window, before the Windows starts), and the nightly and `debrief.yml` are judged a day later in the digest; the gate,
+  which reads the Actions record itself, is not delayed. It writes into one issue labelled `scheduled-digest` (body replaced);
   pinning it is optional, as whether pinning needs administrator rights on this Gitea is not verified (WP-0 checks). The
   coordinator's session start reads the digest, and every coordinator batch report carries its first line. A digest older
   than 30 h is reported stale, and the gate treats a sweep older than 30 h as not measured (§4).
@@ -259,7 +295,8 @@ It exits per ADR 0089: 0, 5 when it found reds, 6 when it could not read a run o
 For N days after go-live (D9: 14 recommended) the gate runs everywhere in report-only mode: its verdict and the reasons
 go into the release summary and the digest, and nothing is refused. The period ends with a triage of the backlog with the
 user: every open signature is fixed, waived (§5) or has its coverage corrected, and the register's skip classes are
-checked against what the period showed. Enforcement starts after that triage, not at a date alone. Reasons: bench has
+checked against what the period showed. The triage is planned before `report_until`; if it is not done by then,
+enforcement starts anyway (fail closed) and only the user can extend the period, with a signed record (§4). Reasons: bench has
 never been green, mutants fails within minutes of starting, and the `step:` coverage needs a look before it blocks
 anything.
 
@@ -272,13 +309,13 @@ only through failing tests whose package the app ships (§3) and through untrace
 reds as an illustration, not a forecast (the triage changes them): `debrief-bench.yml` (a `debrief-store-worker` test)
 and `debrief-mutants.yml` would block a Debrief tag; the nightly's `crate (macos-latest)` and `crate (windows-latest)`
 block exactly the apps whose lockfiles contain the failing tests' crates, which this ADR has not enumerated (that is the
-gate's job); `paddock-dev (*)` blocks under D3; `app dyno (macos-latest)` was red only on 11-09 and green on 11-10, so it
+gate's job); `paddock-dev (*)` blocks under D3 (today every app but `packages`); `app dyno (macos-latest)` was red only on 11-09 and green on 11-10, so it
 blocks nothing; `debrief-fuzz.yml` is not measured today (run 7863 cancelled) and blocks Debrief only if the next run is
 not green. Landings, branch runs and fix rounds are never gated.
 
 ## Parallelism and cost (rule 51)
 
-The sweep reads one runs page per 50 runs (about one a day per workflow, 10 scheduled workflows with `dev-tool.yml`) and
+The sweep reads one runs page per 50 runs (about one a day per workflow, 9 scheduled workflows plus the digest's own) and
 the logs of failed first attempts only; on today's numbers about 10 failed jobs a day, so seconds of API time and one log
 each. Comments are rate-limited by the "new commit or once a day" rule. The gate repeats the same reads for one app's jobs
 at tag time, under a minute. Nothing to parallelise; RT-8's client retries and ADR 0089's `runlog` are reused, not
@@ -295,11 +332,13 @@ copied (rule 55).
 
 ## Rollback
 
-The gate is one step per release workflow behind one switch (`SCHEDULED_GATE=report|enforce|off`, a repository
-variable): setting it to `report` returns to the shadow mode without a commit, `off` removes the step's effect. The sweep
-and the digest are independent of the gate and can be stopped by disabling `scheduled-digest.yml`, which the gate then
-reports as not measured after 30 h unless the switch is `report` or `off`. Removing the register section and C107 is a
-normal revert.
+Rolling back is the user's decision and needs the user present. The gate's mode is the signed `[scheduled_gate]` record
+of §4: the user sets `mode = "report"` with a new `report_until` in a signed commit, and the gate returns to the shadow
+mode. An unsigned change does nothing but turn the gate's result into exit 6 after `report_until`, so a rollback cannot
+be made by an agent and a failed attempt does not pass a tag. The sweep and the digest are independent of the gate and can
+be stopped by disabling `scheduled-digest.yml`; the gate then reports not measured after 30 h. Removing the register
+section, C107 and the gate step is a normal revert, which lands like any change (reviewed, on `main`), and is itself the
+user's decision.
 
 ## Alternatives
 
@@ -324,8 +363,12 @@ normal revert.
 - **D2. Who keeps the issues** (§6): (a) one sweep from outside (recommended); (b) a final job in each scheduled workflow.
 - **D3. What a `step:` failure of a `family` tool job (`paddock-dev (*)`, `dev-tool.yml`) covers**: (a) every app,
   because `./dev` is on the release path (ER-31 (b)); (b) none, because no app ships it; (c) the apps whose release
-  workflows run `./dev`: today `dyno-release.yml`, `pitcrew-release.yml` and `debrief.yml` (recommended: exactly the apps
-  whose release path it is on). Its test failures are `test:` signatures and follow §3 like any other.
+  workflow reaches `./dev`, derived by C107 from the workflow graph, following composite actions and called workflows
+  (recommended: exactly the apps whose release path it is on). Today that is every app and not `packages`:
+  `dyno-release.yml` and `pitcrew-release.yml` run `./dev check` directly and call `ci.yml`; `pitwall-` and
+  `spotter-release.yml` use `./.gitea/actions/plan` (`./dev plan --ci --app`) and call `ci.yml`; the two demo releases use
+  `./.gitea/actions/job-isolation` (`./dev ci slot`); `debrief.yml` runs `./dev`; `publish.yml` reaches none. Its test
+  failures are `test:` signatures and follow §3 like any other.
 - **D4. The tag gate** (§4): (a) streak older than 24 h refuses unless waived, enforced in the release workflows on the
   tag and checked before tagging, stateless from the Actions record (recommended); (b) 48 h; (c) report only.
 - **D5. How a user waiver is recorded** (§5): (a) a `[[scheduled_waiver]]` record added by a commit or tag signed with a
@@ -345,23 +388,38 @@ normal revert.
 - **D11. Closure rule** (§6): (a) only a full, unfiltered, first-attempt green that ran the signature's test or step; a
   rerun green makes it `flaky:` (recommended, ER-12); (b) any green of the job.
 
+- **D12. Coverage of a `family` job's untraceable failures** (§3): (a) `covers` if given, else the dependents of the
+  packages the job tests as derived by C107, and C107 fails a `family` job for which neither exists (recommended); (b)
+  require an explicit `covers` on every `family` job.
+- **D13. When an intermittent failure's clock starts** (§4): (a) at its first red after the job's last three
+  consecutive full first-attempt greens, or its first appearance in the flake ledger (recommended); (b) N = 5; (c) only
+  the unbroken streak (revision 2; an intermittent failure then never ages).
+- **D14. The digest's daytime runs** (§6): (a) grant an exception to the night-only decision for `scheduled-digest.yml`
+  at 09:13 and 15:13 local (one Linux slot, about a minute, no build) (recommended); (b) night only, at 04:13 local, with
+  the nightly and `debrief.yml` shown a day later.
+- **D15. The gate mode** (§4): (a) a signed `[scheduled_gate]` record in `docs/gates.toml`, enforce after `report_until`
+  unless a signed record says otherwise, no `off` (recommended); (b) a repository variable (not recommended: agents can
+  change it).
+
 ## Work packages (agent-days)
 
 | WP | What | Days | Needs |
 | --- | --- | --- | --- |
 | WP-0 | Bot account `paddock-agent` (issue write, Actions read, no admin), tokens swapped in agents' environment and CI secrets; labels `scheduled-red`, `scheduled-digest`, `covers:<app>`; check whether pinning needs admin and whether a tag run's `github.token` can read the Actions API | 0.5 (plus the user's account step) | — |
-| WP-1 | `[[scheduled]]` section for the 10 scheduled workflows and the digest, C107 in the RT-5 host (reusable workflows and matrices expanded, skip classes checked against job text) with positive controls; owner column of `docs/ci-schedules.md` generated | 2.5 | D1, RT-5 |
+| WP-1 | `[[scheduled]]` section for the 9 scheduled workflows and the digest, C107 in the RT-5 host (reusable workflows, composite actions and matrices expanded; skip classes checked against job text; `tests` derived from job commands; D3's `./dev` reach derived from the workflow graph; a `family` job with no `covers` and no derivable `tests` fails) with positive controls; owner column of `docs/ci-schedules.md` generated | 3 | D1, D3, D12, RT-5 |
 | WP-2 | The pure reader of §2 (outcomes, skip classes, callers, flaky, not measured, streaks) and signatures on `runlog` with annotation-only `step:` lines; synthetic fixtures (job 34160's echo shapes, callers, charged skips, carried-forward skips, rerun greens); no real logs | 3 | RT-8 on `main`, ADR 0089 WP-2c (`runlog` for Playwright and vitest), WP-1 |
 | WP-3 | Coverage per signature (§3) through the planner graph at a commit; tests with a planted crate in two of three lockfiles | 1 | WP-2 |
 | WP-4 | Write client (idempotent create, duplicate close, comment rate rule) and `sweep`, `fix`, `digest`, `scheduled-digest.yml` (09:13 and 15:13 local) | 2.5 | WP-0, WP-2 |
-| WP-5 | `gate --app --commit`: stateless verdict, 24 h streak rule, pending runs, release-branch tags, sweep freshness, ADR 0089 exit codes, the `SCHEDULED_GATE` switch; wired into the six `*-release.yml`, `debrief.yml` (tags) and `publish.yml`, and the tag checklist; positive controls (a planted red refuses, a stale sweep is not measured, a rerun green still refuses) | 2 | WP-2, WP-3, D4 |
-| WP-6 | Waiver records and signature check against `allowed_signers` (unsigned and wrong-key controls) | 0.5 | ADR 0097 accepted, D5 (a) |
+| WP-5 | `gate --app --commit`: stateless verdict, 24 h streak rule, pending runs, release-branch tags, sweep freshness, ADR 0089 exit codes, the three-greens streak rule and the flake ledger, the `[scheduled_gate]` mode record; wired into the six `*-release.yml`, `debrief.yml` (tags) and `publish.yml`, and the tag checklist; positive controls (a planted red refuses, a stale sweep is not measured, a rerun green still refuses, an intermittent red with greens in between still ages, an unsigned mode flip after `report_until` still refuses) | 2 | WP-2, WP-3, D4 |
+| WP-6 | Waiver and mode records, per-line blame and signature check against ADR 0097's trust root (unsigned, wrong-key and edited-line controls) | 0.5 | ADR 0097 accepted, D5 (a) |
 | WP-7 | Rule text (a Paddock rule and an ER-33 amendment, below), agent and reviewer briefs | 0.5 | WP-5 |
 | WP-8 | Go-live: report-only switch on, backfill sweep, `docs/ci-schedules.md` corrected; at the end of the period the triage list for the user | 0.5 | WP-4, WP-5 |
 
-**Total about 13 agent-days. A first cut that reaches the shadow period with the gate (WP-0, WP-1, WP-2, WP-3, WP-5,
-WP-8) is about 9.5; the sweep, issues and digest (WP-4) add 2.5 (until then the gate's sweep-freshness check is off);
-WP-6 waits for ADR 0097; WP-7 is 0.5.** WP-0 needs the user's hands (creating the account).
+**Total about 13.5 agent-days. A first cut that reaches the shadow period with the gate (WP-0, WP-1, WP-2, WP-3, WP-5,
+WP-8) is about 10; the sweep, issues and digest (WP-4) add 2.5 (until then the gate's sweep-freshness check is off);
+WP-6 waits for ADR 0097; WP-7 is 0.5.** WP-0 needs the user's hands (creating the account). Before WP-6 the gate cannot
+leave enforcement once `report_until` has passed, because no signed record can be verified; the shadow period is set
+long enough (D9) for 0097 to land first.
 
 **Proposed rule** (a Paddock rule and an amendment to ER-33, wording for the user's approval): "Every scheduled CI job has
 a declared owner and skip class. A failing or unmeasured scheduled job is in the coordinator's daily digest within a day;
@@ -379,8 +437,8 @@ and not from issues, unless the user has waived that failure with a step that ne
   `step:` whose normalised text still changes is flagged in the digest.
 - **Job-token permissions.** Whether a tag run's `github.token` can read the Actions API and logs is not verified; WP-0
   checks it first and otherwise uses the bot's read token as a secret.
-- **Waivers wait for ADR 0097.** Until then only fixes clear a red after enforcement; if 0097 is late, D9's shadow
-  period is the slack, or the `SCHEDULED_GATE` switch.
+- **Waivers wait for ADR 0097.** Until then only fixes clear a red after enforcement and the mode cannot be changed; if
+  0097 is late, enforcement still starts at `report_until` (fail closed) and only fixes clear reds until it lands. This is deliberate: a switch an agent can flip is the fail-open path P1-6 found.
 
 ## Review answers (revision 2)
 
@@ -402,3 +460,23 @@ and not from issues, unless the user has waived that failure with a step that ne
   tags defined (§4); estimates raised for the write client and C107's expansion (13 days, first cut 9.5);
   pinning checked in WP-0 and not relied on; demo release workflows in WP-5; the ADR 0080 §4.4
   conflict noted at D7; Consequences and Rollback added; the README blank line before 0080 removed.
+
+## Review answers (revision 3)
+
+- P1-6 (the repository-variable switch reopens fail-open): the switch is gone; the mode is a `[scheduled_gate]` record in
+  `docs/gates.toml` under the same per-line signature check as waivers (§4, §5), a user decision; after `report_until`
+  anything but `enforce` without a signed record is exit 6; no `off`; positive control: an unsigned flip still refuses
+  (WP-5); Rollback rewritten; D15 added.
+- P2-1 (D3 (c)): derived from the workflow graph through composite actions and called workflows, in C107; today every
+  app and not `packages`, with the route per workflow stated.
+- P2-2 (coverage gaps): `covers`, else the dependents of the job's tested packages derived by C107, else the owner app; a
+  `family` job with neither fails C107 (§3, D12).
+- P2-3 (intermittent flakes never age): the streak starts at the first red after the last three consecutive greens, or
+  at the first flake-ledger appearance (§4, D13).
+- P2-4 (requirements for ADR 0097): R1 to R4 in §5: agents cannot change the trusted keys, per-line blame to signed
+  commits, switches in scope, user presence.
+- P2-5 (daytime digest): D14 asks the user for the exception, with a 04:13 night-only fallback.
+- P2-6 (counts): 9 scheduled workflows including `dev-tool.yml`, 10 with the digest.
+- P2-7 (heads): block refreshed (train `c151422a4`, `origin/docs/adr-evidence-heads` `b32655fef`) and
+  `origin/docs/adr-private-files` added; the golden fix's bearing on the `paddock-dev (windows-latest)` red noted.
+- Estimate +0.5 day (WP-1): 13.5 in all, first cut 10.
