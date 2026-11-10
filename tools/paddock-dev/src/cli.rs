@@ -1,4 +1,4 @@
-use crate::{ci_isolation, gates, input_hash, ipc_endpoints, plan, plan_cmd, release_isolation, slots, wait, worktree};
+use crate::{ci_isolation, gates, hook, input_hash, ipc_endpoints, plan, plan_cmd, release_isolation, slots, wait, worktree};
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
 use std::io::Write;
@@ -55,6 +55,28 @@ enum Command {
         #[command(subcommand)]
         command: GraphCommand,
     },
+    /// Claude Code hooks (ADR 0083). Run by the installed copy, never through `./dev`.
+    Hook {
+        #[command(subcommand)]
+        command: HookCommand,
+    },
+    /// Put the hook binary and its shim in place.
+    Hooks {
+        #[command(subcommand)]
+        command: HooksCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum HookCommand {
+    /// The PreToolUse guard: reads one tool call as JSON on standard input, prints a deny decision or nothing. Exit 0 always.
+    PreToolUse,
+}
+
+#[derive(Subcommand)]
+enum HooksCommand {
+    /// Copy this binary to <git-common-dir>/paddock/hooks/ and write the shim tools/githooks/claude-pre-tool-use.
+    Install(hook::install::InstallArgs),
 }
 
 #[derive(Subcommand)]
@@ -259,6 +281,10 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         // The script's contract: plain values on standard output, `::error::` lines on standard error, no `error:` prefix.
         return ci_isolation::run(a, out, err);
     }
+    if matches!(cli.command, Command::Hook { .. }) {
+        // The hook's answer is its own JSON on standard output, not a report, and its exit code is always 0.
+        return hook::pre_tool_use(&mut std::io::stdin(), out, err);
+    }
     let result = dispatch(cli.command);
     // A probe whose only problems are checks that could not run ends with `worktree::EXIT_NOT_MEASURED` (ER-33).
     let not_measured_only = result.as_ref().is_ok_and(|r| r.data["not_measured_only"] == true);
@@ -319,6 +345,10 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         } => worktree::check_primary(&a),
         Command::Worktree { command } => worktree::command(command),
         Command::Plan(a) => plan_cmd::command(&a.args, a.root),
+        Command::Hook { .. } => Ok(Report::new(serde_json::json!({}), String::new())),
+        Command::Hooks {
+            command: HooksCommand::Install(a),
+        } => hook::install::command(&a),
         Command::Graph {
             command: GraphCommand::Affected(a),
         } => plan::command(&plan::Request {
