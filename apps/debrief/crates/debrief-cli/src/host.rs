@@ -20,15 +20,20 @@ pub trait StoreHost {
     fn open(&self, dir: &Path, profile: &Profile) -> StoreResult<SharedStore>;
 }
 
-/// The store worker process, found next to the executable (`DEBRIEF_STORE_WORKER` overrides it; `DEBRIEF_LIB_DIR` names the
-/// folder holding libduckdb when it is not next to the worker).
+/// The store worker process, found next to the executable (`DEBRIEF_STORE_WORKER` overrides it in a debug build only, a release
+/// build ignores it; `DEBRIEF_LIB_DIR` names the folder holding libduckdb when it is not next to the worker).
 pub struct WorkerHost {
     worker: debrief_store_client::StoreWorker,
 }
 
 /// Where the worker's executable is.
 pub fn worker_binary() -> PathBuf {
-    if let Some(p) = std::env::var_os("DEBRIEF_STORE_WORKER") {
+    worker_binary_with(cfg!(debug_assertions), std::env::var_os("DEBRIEF_STORE_WORKER"))
+}
+
+/// [`worker_binary`] for a given build mode and value of `DEBRIEF_STORE_WORKER`.
+fn worker_binary_with(debug: bool, env: Option<std::ffi::OsString>) -> PathBuf {
+    if let Some(p) = debrief_ipc::dev_env::resolve(debug, "DEBRIEF_STORE_WORKER", env) {
         return PathBuf::from(p);
     }
     let name = if cfg!(windows) {
@@ -42,14 +47,21 @@ pub fn worker_binary() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(name))
 }
 
+/// What to tell the user when the worker is not at `exe`. Only a debug build honours `DEBRIEF_STORE_WORKER`, so only its
+/// message names the variable.
+fn missing_worker_message(debug: bool, exe: &Path) -> String {
+    let hint = if debug { " or set DEBRIEF_STORE_WORKER" } else { "" };
+    format!(
+        "the store worker was not found at {}; install it next to this program{hint}",
+        exe.display()
+    )
+}
+
 impl WorkerHost {
     pub fn new() -> StoreResult<WorkerHost> {
         let exe = worker_binary();
         if !exe.is_file() {
-            return Err(StoreError::Invalid(format!(
-                "the store worker was not found at {}; install it next to this program or set DEBRIEF_STORE_WORKER",
-                exe.display()
-            )));
+            return Err(StoreError::Invalid(missing_worker_message(cfg!(debug_assertions), &exe)));
         }
         let mut cfg = debrief_store_client::WorkerConfig::new(&exe);
         cfg.lib_dir = std::env::var_os("DEBRIEF_LIB_DIR")
@@ -74,5 +86,34 @@ impl StoreHost for WorkerHost {
 
     fn open(&self, dir: &Path, profile: &Profile) -> StoreResult<SharedStore> {
         Ok(Arc::new(self.worker.open_store(dir, profile.clone(), false, None)?))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_missing_worker_message_names_the_variable_only_where_it_works() {
+        let exe = Path::new("/opt/debrief/debrief-store-worker");
+        let release = missing_worker_message(false, exe);
+        assert!(
+            release.contains("/opt/debrief/debrief-store-worker") && release.contains("next to this program"),
+            "{release}"
+        );
+        assert!(
+            !release.contains("DEBRIEF_STORE_WORKER"),
+            "a release build ignores the variable: {release}"
+        );
+        assert!(missing_worker_message(true, exe).contains("DEBRIEF_STORE_WORKER"));
+    }
+
+    #[test]
+    fn a_release_build_ignores_debrief_store_worker() {
+        let evil = Some(std::ffi::OsString::from("/evil/store-worker"));
+        assert_eq!(worker_binary_with(true, evil.clone()), PathBuf::from("/evil/store-worker"));
+        let release = worker_binary_with(false, evil);
+        assert_ne!(release, PathBuf::from("/evil/store-worker"));
+        assert!(release.file_name().unwrap().to_string_lossy().starts_with("debrief-store-worker"));
     }
 }

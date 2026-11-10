@@ -20,7 +20,7 @@ The user decided (2026-10-22) to drive a real Chromium over the DevTools protoco
 ## Decision
 
 1. **A neutral renderer crate, `chromium-driver`** (`crates/chromium-driver`, no Debrief types, so other apps can copy it):
-   - `discover`: Edge, Chrome or Chromium on Windows, macOS and Linux (`CHROMIUM_PATH` wins). Candidate lists are pure.
+   - `discover`: Edge, Chrome or Chromium on Windows, macOS and Linux (`CHROMIUM_PATH` wins in a debug build only; a release build ignores it, ADR 0073 DB1 class, and uses the browser path from Settings). Candidate lists are pure.
    - `launch`: a supervised child (own process group on Unix, `taskkill /T` on Windows) killed on drop, with a time cap
      (a watchdog) and a throwaway `--user-data-dir` per launch (or a persistent per-purpose profile when cookies must
      survive a challenge). Headful but off screen (`--window-position=-32000,-32000`); `set_visible` brings the window

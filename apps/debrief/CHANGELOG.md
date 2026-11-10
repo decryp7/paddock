@@ -13,6 +13,10 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 - **Search:** Closing a log store while its word-search index was still merging could leave the index's background merges writing into the store's folder after it was closed or deleted. Closing now waits for them to end
 
+### Security
+
+- **Start-up programs:** Debrief no longer lets environment variables choose which program it starts. `DEBRIEF_STORE_WORKER` (the store worker), `DEBRIEF_PLUGINS` (the plugins program) and `CHROMIUM_PATH` (the research browser) are now read only by development builds, and `DEBRIEF_BROWSER_NO_SANDBOX` (which started the research browser without its sandbox when Debrief ran as root) is ignored too. Before, any program running as you could set one of them, and Debrief, relaunched with administrator rights, would start the program it named. An installed Debrief now starts the store worker and the plugins program from its own install folder, and the research browser from the browser path in Settings, the one Debrief installed, or one found in the usual places; its log says once, by name, when it ignored a variable
+
 ### Removed
 
 - **AI:** Pitwall is now the only AI engine. Debrief no longer downloads or runs its own models: the set-up wizard, the model manager, the inference runtimes, their update checks and manual downloads, the engine choice and the AI worker's memory cap are gone, and every AI feature runs on the model Pitwall serves. Install Pitwall and connect Debrief to it in Settings ▸ AI; Debrief's own model and runtime files stay on disk until you remove them. The AI download proxy and connection settings are gone too: the FFmpeg download now follows your system's proxy settings (HTTPS_PROXY, NO_PROXY or the operating system's)

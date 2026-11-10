@@ -56,7 +56,7 @@ pub(crate) struct WorkerHost {
 }
 
 impl WorkerHost {
-    /// The worker next to Debrief's executable (`DEBRIEF_STORE_WORKER` overrides it), with libduckdb from the installed
+    /// The worker next to Debrief's executable (`DEBRIEF_STORE_WORKER` overrides it in a debug build only), with libduckdb from the installed
     /// resource folder `lib_dir` (installers), next to the worker, or from Debrief's own library path (development
     /// builds, `fetch-libduckdb.sh`). The worker starts the built-in plugins and the installed `third_party` ones
     /// for imports itself (ADR 0027), with `launch` (its cap and tuning from Settings ▸ Performance, ADR 0031) and
@@ -91,9 +91,15 @@ impl WorkerHost {
     }
 }
 
-/// Where the store worker's executable is: `DEBRIEF_STORE_WORKER`, else next to Debrief's own executable.
+/// Where the store worker's executable is: next to Debrief's own executable (`DEBRIEF_STORE_WORKER` names another one in a
+/// debug build only; a release build ignores it, see `debrief_ipc::dev_env`).
 pub(crate) fn worker_binary() -> PathBuf {
-    if let Some(p) = std::env::var_os("DEBRIEF_STORE_WORKER") {
+    worker_binary_with(cfg!(debug_assertions), std::env::var_os("DEBRIEF_STORE_WORKER"))
+}
+
+/// [`worker_binary`] for a given build mode and value of `DEBRIEF_STORE_WORKER`.
+fn worker_binary_with(debug: bool, env: Option<std::ffi::OsString>) -> PathBuf {
+    if let Some(p) = debrief_ipc::dev_env::resolve(debug, "DEBRIEF_STORE_WORKER", env) {
         return PathBuf::from(p);
     }
     let name = if cfg!(windows) {
@@ -573,6 +579,15 @@ pub(crate) mod local;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_release_build_ignores_debrief_store_worker() {
+        let evil = Some(std::ffi::OsString::from("/evil/store-worker"));
+        assert_eq!(worker_binary_with(true, evil.clone()), PathBuf::from("/evil/store-worker"));
+        let release = worker_binary_with(false, evil);
+        assert_ne!(release, PathBuf::from("/evil/store-worker"));
+        assert!(release.file_name().unwrap().to_string_lossy().starts_with("debrief-store-worker"));
+    }
 
     #[test]
     fn store_errors_become_typed_command_errors() {

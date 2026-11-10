@@ -2,7 +2,8 @@
 # usage: perf-import.sh LABEL CORPUS_DIR STORE_DIR
 # Imports CORPUS_DIR (synthetic data only, e.g. from gen_large.py) with the release CLI and store worker, sampling the
 # CLI and its children (store worker, plugin processes) every 250 ms with procsample.py (footprint, RSS, CPU, wake-ups).
-# Environment: DEBRIEF_PERF_BIN (release target folder holding debrief and debrief-store-worker), DEBRIEF_LIB_DIR
+# Environment: DEBRIEF_PERF_BIN (release target folder holding debrief and debrief-store-worker: the release CLI starts only
+# the worker that sits in its own folder, DEBRIEF_STORE_WORKER is ignored there), DEBRIEF_LIB_DIR
 # (libduckdb folder), DEBRIEF_PERF_OUT (results folder). macOS only (procsample.py reads proc_pid_rusage).
 set -eu
 LABEL=$1; CORPUS=$2; STORE=$3
@@ -10,7 +11,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 B=${DEBRIEF_PERF_BIN:?set DEBRIEF_PERF_BIN to the release target folder}
 L=${DEBRIEF_LIB_DIR:?set DEBRIEF_LIB_DIR to the libduckdb folder}
 OUT=${DEBRIEF_PERF_OUT:?set DEBRIEF_PERF_OUT to a results folder}
-export DEBRIEF_STORE_WORKER=$B/debrief-store-worker DYLD_LIBRARY_PATH=$L
+export DYLD_LIBRARY_PATH=$L  # the release CLI finds debrief-store-worker next to itself ($B)
 mkdir -p "$OUT"
 rm -rf "$STORE"
 uptime > "$OUT/$LABEL.uptime"

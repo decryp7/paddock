@@ -195,7 +195,7 @@ export const config: WebdriverIO.Config = {
     // The built-in plugins run in their own processes of `debrief-plugins`, found next to the app (ADR 0017).
     const plugins = join(dirname(app), platform() === 'win32' ? 'debrief-plugins.exe' : 'debrief-plugins');
     if (!process.env['DEBRIEF_PLUGINS'] && !existsSync(plugins))
-      fail(`No plugins binary at ${plugins}. Build it with npm run e2e:tauri:build (or set DEBRIEF_PLUGINS).`);
+      fail(`No plugins binary at ${plugins}. Build it with npm run e2e:tauri:build (or set DEBRIEF_PLUGINS, which only a debug build honours).`);
     const td = tauriDriver();
     if (!existsSync(td))
       fail(
