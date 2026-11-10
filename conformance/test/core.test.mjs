@@ -94,6 +94,21 @@ test('runner: a check that throws is an error finding, unknown ids are refused, 
   await assert.rejects(runChecks({ root: makeApp({ a: 'x' }) }), /app name is needed/);
 });
 
+test('runner: a crash or an incomplete result is never waived, even by a path "*" waiver (ER-33, ADR 0089 D8)', async () => {
+  const waiver = '[[waiver]]\ncheck = "C00"\npath = "*"\nreason = "plant"\nexpires = "2099-01-01"\n';
+  const root = makeApp({ a: 'x', 'paddock.waivers.toml': waiver });
+  const boom = { id: 'C00', title: 't', rule: 1, run() { throw new Error('kaput'); } };
+  const half = { id: 'C00', title: 't', rule: 1, run() { return undefined; } };
+  for (const [label, check] of [['crash', boom], ['incomplete', half]]) {
+    const r = await runChecks({ root, app: 'demo', registry: [check] });
+    const hit = r.findings.find((f) => f.check === 'C00');
+    assert.ok(hit, `${label}: the finding survives the waiver`);
+    assert.equal(hit.unwaivable, true, label);
+    assert.equal(r.waived.length, 0, label);
+    assert.ok(r.errors >= 1, label);
+  }
+});
+
 test('report: markdown table with the fix, and the passed form', async () => {
   const r = await runChecks({ root: makeApp(app), app: 'demo', only: ['C16'] });
   const md = formatMarkdown(r);

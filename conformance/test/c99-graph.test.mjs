@@ -171,10 +171,10 @@ test('C99 waivers: a waived lock still reports a broken check and any finding th
   for (const path of ['Cargo.lock', 'Cargo.lock*', '*']) {
     const glob = { 'paddock.waivers.toml': waiver(path) };
     const broken = await findingsOf('C99', make(t, glob), { options: { probe: () => ({ broken: 'cargo fetch failed: exit 101' }) } });
-    assert.match(broken[0].message, /check broken/, path);
+    assert.match(broken[0].message, /not measured/, path);
     assert.equal(broken[0].severity, 'error');
     const unfetched = await findingsOf('C99', make(t, glob), probeOf({ app: { deps: ['dep'] }, dep: {} }, { readSources: () => [] }));
-    assert.match(unfetched.map((f) => f.message).join('\n'), /check broken.*not downloaded/, path);
+    assert.match(unfetched.map((f) => f.message).join('\n'), /not measured.*not downloaded/, path);
     const nolock = makeApp({ ...glob, 'paddock.ci.json': CI, 'Cargo.toml': '[package]\nname = "a"\n', 'src/lib.rs': '' });
     t.after(() => rmSync(nolock, { recursive: true, force: true }));
     assert.match((await findingsOf('C99', nolock))[0].message, /not measured/, path);
@@ -184,9 +184,9 @@ test('C99 waivers: a waived lock still reports a broken check and any finding th
 test('C99 through the runner: a failed probe, an unfetched dependency and a missing lock are errors', async (t) => {
   const failed = await findingsOf('C99', make(t, {}), { options: { probe: () => ({ broken: 'cargo fetch failed: exit 101' }) } });
   assert.deepEqual(failed.map((f) => f.severity), ['error']);
-  assert.match(failed[0].message, /check broken.*cargo fetch failed/);
+  assert.match(failed[0].message, /not measured.*cargo fetch failed/);
   const unfetched = await findingsOf('C99', make(t, {}), probeOf({ app: { deps: ['dep'] }, dep: {} }, { readSources: () => [] }));
-  assert.match(unfetched[0].message, /check broken.*not downloaded/);
+  assert.match(unfetched[0].message, /not measured.*not downloaded/);
   // ADR 0057 §3.4: no Cargo.lock to probe is an error ("not measured"), not a warning.
   const lockless = makeApp({ 'paddock.ci.json': CI, 'Cargo.toml': '[package]\nname = "a"\n', 'src/lib.rs': '' });
   t.after(() => rmSync(lockless, { recursive: true, force: true }));
@@ -239,6 +239,7 @@ test('C99 through the runner: an unreviewed binary is an error that a waiver for
   const blind = await findingsOf('C99', make(t, { 'paddock.waivers.toml': waiver('Cargo.lock*') }), opts('pub fn nothing() {}', []));
   assert.match(blind[0].message, /check broken.*did not find SecKeychainSetUserInteractionAllowed in security-framework@3\.7\.0/);
   assert.equal(blind[0].severity, 'error');
+  assert.equal(blind[0].outcome, 'check-broken', 'a failed positive control is exit 7, not 6');
 });
 
 test('C99 waivers: a path with a glob is itself an error (W004), an exact path is fine', async (t) => {
@@ -265,8 +266,9 @@ test('C99 --scope: a release of one app is judged on that app and crates/ only, 
   assert.deepEqual(seen.sort(), ['/apps/good', '/crates'], 'its workspace and crates/ are probed, no other app');
   assert.ok((await run('apps/bad')).some((f) => f.file === 'apps/bad/Cargo.toml'), 'scoped to the bad app: found');
   const typo = await run('apps/goood');
-  assert.match(typo[0].message, /check broken: --scope apps\/goood matches no file/);
+  assert.match(typo[0].message, /not measured: --scope apps\/goood matches no file/);
   assert.equal(typo.length, 1);
+  assert.equal(typo[0].outcome, 'not-measured', 'an input the check could not read is exit 6, not 7');
   // crates/ is always in scope.
   const crates = makeApp({ ...app('good', ''), 'crates/Cargo.toml': '[package]\nname = "shared"\nversion = "0.1.0"\n\n[dependencies]\nkeyring = "4"\n', 'crates/src/lib.rs': '' });
   t.after(() => rmSync(crates, { recursive: true, force: true }));
@@ -306,6 +308,7 @@ test('C99 fails closed: with no security-framework in any probed graph the contr
   const r = await findingsOf('C99', make(t, { 'paddock.waivers.toml': waiver('*') }), { options: { probe: () => raw, readSources: () => [{ file: 'src/lib.rs', text: '' }], listBinaries: () => [] } });
   assert.ok(r.length > 0 && r.every((f) => f.severity === 'error'));
   assert.match(r.map((f) => f.message).join('\n'), /check broken: no probed macOS graph contains security-framework/);
+  assert.ok(r.some((f) => f.outcome === 'check-broken'), 'a failed positive control is exit 7');
 });
 
 // The whole path with a real cargo and no network: path dependencies.
