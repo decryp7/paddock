@@ -1,6 +1,7 @@
 # 89. A measurement that did not happen can never pass: one outcome type, one test outcome, one exit code, and a check over every copy
 
-- Status: Proposed 2026-11-10, revision 6. Drafted at the coordinator's request of 2026-11-10 (ER-21: one class, seen
+- Status: Accepted 2026-11-10 (user), all decisions as recommended, D14 (a). History: Proposed 2026-11-10, revision 6
+  approved by the independent review at `d3acc649c`. Drafted at the coordinator's request of 2026-11-10 (ER-21: one class, seen
   six times in one day's Rust tooling reviews, after the Dyno 1.1.0 instances that created ER-33). Revision 1
   (`e5e4f300d`) was reviewed independently ("changes", 6 P1 and 12 P2); revision 2 (`90d28a0a6`) answered it and was
   re-reviewed ("changes": P1-7 and four P2s); revision 3 (`197d5234e`) answered that and was re-reviewed ("changes":
