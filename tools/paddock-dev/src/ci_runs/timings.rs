@@ -14,8 +14,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::LazyLock;
 
-/// The repositories the script measured by default.
-pub const DEFAULT_REPOS: &str = "debrief,paddock,pitcrew,pitwall,spotter,dyno";
+/// The repositories measured by default: the apps live in the monorepo now (the script still defaulted to the old per-app ones).
+pub const DEFAULT_REPOS: &str = "paddock";
 const BEGIN: &str = "<!-- ci-timings:begin -->";
 const END: &str = "<!-- ci-timings:end -->";
 

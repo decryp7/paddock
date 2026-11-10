@@ -57,6 +57,27 @@ impl Fake {
         self.logs.insert(job, Err(error.to_string()));
     }
 
+    /// The runs of page 1 of the run list.
+    pub fn take_runs(&self) -> Vec<Value> {
+        let page = &self.json[&self.runs_url()];
+        page["workflow_runs"].as_array().cloned().unwrap_or_default()
+    }
+
+    /// Replace the runs of page 1 of the run list.
+    pub fn set_runs(&mut self, runs: Vec<Value>) {
+        let url = self.runs_url();
+        self.json
+            .insert(url, serde_json::json!({"total_count": runs.len(), "workflow_runs": runs}));
+    }
+
+    fn runs_url(&self) -> String {
+        self.json
+            .keys()
+            .find(|u| u.ends_with("/runs?limit=50&page=1"))
+            .cloned()
+            .unwrap_or_default()
+    }
+
     /// Every URL asked for, in order.
     pub fn requested(&self) -> &[String] {
         &self.urls

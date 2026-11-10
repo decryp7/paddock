@@ -23,6 +23,7 @@ mod fds;
 pub mod gates;
 pub mod input_hash;
 pub mod ipc_endpoints;
+pub mod log_text;
 pub mod plan;
 pub mod plan_ci;
 pub mod plan_cmd;

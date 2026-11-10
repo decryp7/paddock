@@ -97,7 +97,7 @@ corpora are in each app's file.
 | C29 window weight ([`conformance/src/window-weight`](../conformance/src/window-weight)) | JS each window loads before first paint (rule 35) | `ng build --stats-json`, then `paddock-conformance window-weight [kind] [--max kB] [--record]` | The build | `windowWeight` in `paddock.conformance.json`, **not configured anywhere** (C29 warns) | `ci.yml` conformance (warns) | — |
 | `./dev gates check` (C100, [ADR 0060](adr/0060-every-check-runs-somewhere.md)) | Run time of the meta-check: 328 checks, the CI model, 3,192 Rust files scanned, the docs | `./dev gates check` (release build of `tools/paddock-dev`) | This repository | none (ADR 0060: quote it only from here; a few seconds at most) | `ci.yml` conformance job, `nightly.yml` c100 job | [results](#2026-11-08-dev-gates-check) |
 | Angular build budgets in `ui/angular.json` | Initial chunk size | `npm run build -w ui` (and each demo's build) | — | gallery 1.5 MB / 3 MB; shell-demo 500 kB / 1 MB; workbench-demo 580 kB / 1 MB (warn / error) | `ci.yml` ui jobs, through `ng build` | — |
-| [`scripts/ci-timings.mjs`](../scripts/ci-timings.mjs) | CI wall time, queueing, runners, per-step and compile/test phases, critical path (Gitea API, read-only) | `GITEA_TOKEN=… node scripts/ci-timings.mjs [--repos …] [--limit 30] [--out docs/research/2026-10-ci-timings.md] [--json F]` | Gitea run history | none | No (manual) | [research/2026-10-ci-timings.md](research/2026-10-ci-timings.md) |
+| `./dev ci timings` ([`tools/paddock-dev/src/ci_runs/timings.rs`](../tools/paddock-dev/src/ci_runs/timings.rs); the script [`scripts/ci-timings.mjs`](../scripts/ci-timings.mjs) is its oracle until it is deleted, [known-copies](known-copies.toml) `ci-timings`) | CI wall time, queueing, runners, per-step and compile/test phases, critical path (Gitea API, read-only) | `GITEA_TOKEN=… ./dev ci timings [--repos paddock] [--limit 30] [--cache DIR] [--out docs/research/2026-10-ci-timings.md] [--json-file F]` (default repo: `paddock`; the script defaulted to the old per-app repos) | Gitea run history | none | No (manual) | [research/2026-10-ci-timings.md](research/2026-10-ci-timings.md) |
 
 Not benchmarks, though the names suggest it:
 - `ui/e2e/shell-demo-startup.spec.ts` checks the start-up contract (splash, ready, pings). Its 1.5 s busy loop simulates
@@ -878,7 +878,7 @@ These are ordered by impact.
    - Re-run each with the template once a quiet window exists. The search-perf runbook
      (`/Volumes/d7sst7/dev-targets/handoff/search-perf-bench.md`) already plans one for Debrief.
 5. **Stale or doubtful numbers:**
-   - CI timings predate the monorepo, and `ci-timings.mjs` still defaults to the old per-app repos.
+   - CI timings predate the monorepo, and `./dev ci timings` defaults to `paddock`; only the script (until deleted) defaults to the old per-app repos.
    - Debrief ADR 0010's spike numbers are from DuckDB 1.5 on the Windows VM.
    - The R2a/R2b/R2c numbers use RSS and a different machine.
    - The `paddock-names`, `paddock-download` and `paddock-proc` figures give no machine or load.

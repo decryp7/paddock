@@ -11,6 +11,7 @@
 pub mod client;
 pub mod flakes;
 pub mod logfind;
+pub mod preconditions;
 #[cfg(test)]
 mod testutil;
 pub mod time;
@@ -39,6 +40,17 @@ pub struct FlakesArgs {
     /// The Gitea server.
     #[arg(long, default_value = SERVER)]
     server: String,
+    /// End the window at this date (`YYYY-MM-DD`, end of day UTC) or at the newest run of this commit (7+ hex digits), for
+    /// the tag gate of ADR 0082 D6 (default: now).
+    #[arg(long, value_name = "DATE|SHA")]
+    until: Option<String>,
+    /// Exit 5 when the measured window lists any flaky or failed test (default: exit 0, so a listing is not a failure).
+    #[arg(long)]
+    fail_on_flakes: bool,
+    /// The repository checkout whose `apps/<app>/app/playwright.config.ts` is read for the Playwright precondition (default:
+    /// the folder containing .git, found from the current folder).
+    #[arg(long)]
+    root: Option<PathBuf>,
 }
 
 /// Arguments of `ci timings`.
@@ -77,17 +89,47 @@ fn token_from(value: Option<String>) -> Result<String, CliError> {
     })
 }
 
+/// The folder containing `.git`, from `start` upwards.
+fn find_root(start: &std::path::Path) -> Option<PathBuf> {
+    start.ancestors().find(|d| d.join(".git").exists()).map(PathBuf::from)
+}
+
 /// `ci flakes`.
 pub fn flakes(a: &FlakesArgs) -> Result<Report, CliError> {
     let token = token()?;
+    let until = match a.until.as_deref() {
+        None => flakes::Until::Now,
+        Some(u) => flakes::Until::parse(u).map_err(CliError::usage)?,
+    };
+    let root = a.root.clone().or_else(|| std::env::current_dir().ok().and_then(|d| find_root(&d)));
+    let read = |p: &str| match &root {
+        Some(r) => std::fs::read_to_string(r.join(p)),
+        None => Err(std::io::Error::other("no repository checkout was found (use --root)")),
+    };
+    let preconditions: Vec<String> = preconditions::playwright(&a.app, &read).into_iter().collect();
     let mut http = CurlHttp;
     let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
-    let report = flakes::collect(&mut client, &a.app, a.days, time::now_secs(), &a.repo, &mut |l| eprintln!("{l}")).map_err(|e| {
+    let req = flakes::Request {
+        app: a.app.clone(),
+        days: a.days,
+        until,
+        repo: a.repo.clone(),
+        now_secs: time::now_secs(),
+        preconditions,
+    };
+    let report = flakes::collect(&mut client, &req, &mut |l| eprintln!("{l}")).map_err(|e| {
         CliError::failure(format!("the runs of {} could not be listed: {e}", a.repo))
-            .with_hint("Check the network and that GITEA_TOKEN can read the repository.")
+            .with_hint("Check the network, that GITEA_TOKEN can read the repository, and --until.")
     })?;
-    // An incomplete measurement ends with the findings code: a script must not read it as "no flakes".
-    let exit = if report.complete() { Exit::Ok } else { Exit::Findings };
+    let exit = if !report.complete() {
+        // A script must not read an incomplete measurement as "no flakes" (ER-33); the annotation goes to the job log.
+        eprintln!("::error::{}", report.error_line());
+        Exit::Failure
+    } else if a.fail_on_flakes && !report.rows.is_empty() {
+        Exit::Findings
+    } else {
+        Exit::Ok
+    };
     Ok(Report::new(report.json(), report.text()).with_exit(exit))
 }
 
@@ -119,7 +161,12 @@ pub fn timings(a: &TimingsArgs) -> Result<Report, CliError> {
             .map_err(|e| CliError::failure(format!("cannot write {}: {e}", file.display())))?;
     }
     if let Some(out) = &a.out {
-        let existing = std::fs::read_to_string(out).unwrap_or_default();
+        // Only a missing file starts empty; any other read error would overwrite what the file holds.
+        let existing = match std::fs::read_to_string(out) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => return Err(CliError::failure(format!("cannot read {}: {e}", out.display()))),
+        };
         std::fs::write(out, timings::splice(&existing, &md))
             .map_err(|e| CliError::failure(format!("cannot write {}: {e}", out.display())))?;
         return Ok(Report::new(serde_json::json!({"out": out.display().to_string()}), String::new()));
@@ -159,7 +206,20 @@ mod tests {
         assert_eq!(code, Exit::Usage.code(), "{err}");
         let (code, out, _) = run(&["ci", "flakes", "--help"]);
         assert_eq!(code, 0);
-        assert!(out.contains("--days") && out.contains("--repo"), "{out}");
+        for flag in ["--days", "--repo", "--until", "--fail-on-flakes", "--root"] {
+            assert!(out.contains(flag), "{flag} missing in {out}");
+        }
+        let (code, _, _) = run(&["ci", "flakes", "--app", "dyno", "--until", "tomorrow"]);
+        assert_eq!(code, Exit::Usage.code(), "a bad --until is refused before any request");
+    }
+
+    #[test]
+    fn the_repository_root_is_the_folder_with_git() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("a/b")).unwrap();
+        assert_eq!(find_root(&d.path().join("a/b")), None);
+        std::fs::create_dir(d.path().join(".git")).unwrap();
+        assert_eq!(find_root(&d.path().join("a/b")).as_deref(), Some(d.path()));
     }
 
     #[test]

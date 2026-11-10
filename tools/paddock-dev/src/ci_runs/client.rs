@@ -1,8 +1,8 @@
-//! The run listing of `ci flakes` and `ci timings`: Gitea's run list, a run's jobs with their times, and job logs. Jobs and
-//! logs for the rerun planner already exist in [`GiteaRuns`] (reused here); the run list is the part `plan_since` does not have.
+//! The run listing of `ci flakes` and `ci timings`: Gitea's run list, a run's jobs with their times (every attempt), and job
+//! logs (through the planner's [`GiteaRuns`]); the run list is the part `plan_since` does not have.
 
 use super::time::ts;
-use crate::plan_since::{GiteaRuns, RunJob};
+use crate::plan_since::GiteaRuns;
 use crate::wait::Http;
 use serde_json::Value;
 
@@ -23,6 +23,9 @@ pub struct RunInfo {
     pub head_sha: String,
     /// When it was created, as the API prints it.
     pub created_at: String,
+    /// Which attempt the run is on: a rerun in Gitea is another attempt of the same run, so the run's `conclusion` is the
+    /// last attempt's and earlier attempts are read through [`Client::attempt_jobs`].
+    pub run_attempt: u64,
 }
 
 impl RunInfo {
@@ -46,6 +49,7 @@ impl RunInfo {
             conclusion: s("conclusion"),
             head_sha: s("head_sha"),
             created_at: s("created_at"),
+            run_attempt: v["run_attempt"].as_u64().filter(|n| *n >= 1).unwrap_or(1),
         }
     }
 }
@@ -65,6 +69,8 @@ pub struct TimedJob {
     pub id: u64,
     /// Its display name.
     pub name: String,
+    /// The runner's id; 0 for a job that was never given a runner (skipped, or cancelled while queued).
+    pub runner_id: u64,
     /// The runner's name, when the job ran on one.
     pub runner: Option<String>,
     /// `success`, `failure`...
@@ -78,11 +84,23 @@ pub struct TimedJob {
 }
 
 impl TimedJob {
+    /// Whether the job did not pass (a failure, a cancel, a job that never finished).
+    pub fn failed(&self) -> bool {
+        !matches!(self.conclusion.as_str(), "success" | "skipped")
+    }
+
+    /// Whether the job never ran a step: no runner took it, or every step started and ended in the same second (or has no
+    /// time). Such a job has no log and nothing to measure.
+    pub fn never_ran(&self) -> bool {
+        self.runner_id == 0 || self.steps.iter().all(|(_, secs)| secs.is_none_or(|s| s <= 0.0))
+    }
+
     fn from_json(j: &Value) -> TimedJob {
         let t = |v: &Value, k: &str| ts(v[k].as_str().unwrap_or(""));
         TimedJob {
             id: j["id"].as_u64().unwrap_or(0),
             name: j["name"].as_str().unwrap_or("").to_string(),
+            runner_id: j["runner_id"].as_u64().unwrap_or(0),
             runner: j["runner_name"]
                 .as_str()
                 .filter(|r| !r.is_empty() && *r != "undefined")
@@ -162,16 +180,19 @@ impl<'a> Client<'a> {
         })
     }
 
-    /// The jobs of a run for the failure reader (id, name, conclusion), as the rerun planner reads them.
-    pub fn jobs(&mut self, run: u64) -> Result<Vec<RunJob>, String> {
-        GiteaRuns::new(self.http, &self.server, &self.repo, self.token.clone()).jobs(run)
+    /// The jobs of a run's last attempt with their times: up to four pages of 50, as the timings read them.
+    pub fn timed_jobs(&mut self, run: u64) -> Result<Vec<TimedJob>, String> {
+        self.attempt_jobs(run, None)
     }
 
-    /// The jobs of a run with their times: up to four pages of 50, as the timings read them.
-    pub fn timed_jobs(&mut self, run: u64) -> Result<Vec<TimedJob>, String> {
+    /// The jobs of one earlier attempt of a run (`None`: the last attempt, which `/jobs` lists).
+    pub fn attempt_jobs(&mut self, run: u64, attempt: Option<u64>) -> Result<Vec<TimedJob>, String> {
         let mut jobs = Vec::new();
         for page in 1..=4 {
-            let url = format!("{}/runs/{run}/jobs?limit=50&page={page}", self.api());
+            let url = match attempt {
+                None => format!("{}/runs/{run}/jobs?limit=50&page={page}", self.api()),
+                Some(n) => format!("{}/runs/{run}/attempts/{n}/jobs?limit=50&page={page}", self.api()),
+            };
             let body = self.retry(|c| c.http.get_json(&url, &c.token))?.unwrap_or(Value::Null);
             let batch: Vec<TimedJob> = body["jobs"]
                 .as_array()
@@ -186,9 +207,9 @@ impl<'a> Client<'a> {
         Ok(jobs)
     }
 
-    /// A job's log; `Ok(None)` when the server has none (404).
+    /// A job's log (read through the planner's reader); `Ok(None)` when the server has none (404).
     pub fn log(&mut self, job: u64) -> Result<Option<String>, String> {
-        let url = format!("{}/jobs/{job}/logs", self.api());
-        self.retry(|c| c.http.get_text(&url, &c.token))
+        let (server, repo) = (self.server.clone(), self.repo.clone());
+        self.retry(|c| GiteaRuns::new(c.http, &server, &repo, c.token.clone()).log(job))
     }
 }

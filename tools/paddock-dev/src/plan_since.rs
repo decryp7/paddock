@@ -14,6 +14,7 @@
 //!
 //! The pure core is here ([`nextest_failures`], [`classify`], [`SincePlan`]); [`GiteaRuns`] reads a run through the Gitea API.
 
+use crate::log_text::plain;
 use crate::plan_gitea::{CI_JOBS, workflow_jobs};
 use crate::wait::Http;
 use regex::Regex;
@@ -50,15 +51,6 @@ impl std::fmt::Display for FailedTest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} {}", self.binary, self.test)
     }
-}
-
-static ANSI: LazyLock<Regex> = LazyLock::new(|| re(r"\x1b\[[0-9;]*[A-Za-z]"));
-static STAMP: LazyLock<Regex> = LazyLock::new(|| re(r"^\d{4}-\d\d-\d\dT[0-9:.]+Z ?"));
-
-/// A log line without the runner's timestamp and colours.
-pub(crate) fn plain(line: &str) -> String {
-    let no_colour = ANSI.replace_all(line.trim_end_matches('\r'), "");
-    STAMP.replace(&no_colour, "").to_string()
 }
 
 static STARTING: LazyLock<Regex> = LazyLock::new(|| re(r"^\s*Starting (\d+) tests? across"));

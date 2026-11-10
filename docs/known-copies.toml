@@ -1017,3 +1017,20 @@ status = "planned"
   owner = "pitwall"
   delete_by = "pitwall-v1.2.0"
   note = "The same wiring as Dyno's (B6b). Follow-up as in Dyno's note."
+
+# =====================================================================================================================
+# CI run readers (RT-8)
+# =====================================================================================================================
+
+[[mechanism]]
+id = "ci-timings"
+title = "CI timings from the Gitea Actions API: wall time, delay, runners, step categories, critical path, log phases"
+canonical = "tools/paddock-dev"
+paths = ["tools/paddock-dev/src/ci_runs/timings.rs"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["scripts/ci-timings.mjs"]
+  owner = "paddock"
+  delete_by = "v0.4.0"
+  note = "The oracle of `./dev ci timings` (a test compares its Markdown, byte for byte, with this script's output on recorded API replies: tools/paddock-dev/tests/ci-runs/timings/golden.md). It has no CI caller; delete it, and engineering-rules' copy one release later, once the Rust command is the only reader."
