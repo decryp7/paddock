@@ -1,33 +1,38 @@
 # 97. A user approval carries proof that the user gave it
 
-- Status: Proposed 2026-11-10. Drafted at the coordinator's request of 2026-11-10 under ER-21 (a class seen three or more
-  times gets a redesign ADR), with requirements R1 to R5 from the ADR 0093 review. Nothing here is built yet. ER-23 does
-  not apply (no drawings).
+- Status: Proposed 2026-11-10, revision 2 (answers the independent security review of revision 1, `d21eddcbf`: P1-1 to
+  P1-4 and the P2s; see "Review answers (revision 2)"). Drafted at the coordinator's request of 2026-11-10 under ER-21
+  (a class seen three or more times gets a redesign ADR), with requirements R1 to R5 from the ADR 0093 review. Nothing
+  here is built yet. ER-23 does not apply (no drawings).
 - Date: 2026-11-10
-- Related: ER-5, ER-14 (tests never touch real keys or the keychain), ER-15, ER-21 / rule 40, ER-31, ER-33 / rule 71,
-  ER-36; rule 55 (`Copies-date: ... approved: <coordinator|user>`); ADR 0022 and its build-inputs amendment (main-only
-  publish bot for `./dev`); ADR 0034 and 0075 (copy waivers, `[[date_move]] approved`); ADR 0060 (`docs/gates.toml`,
-  `approved`, `Gates-date:`, C100); ADR 0073 (`approved = "user ..."` on shipped-double exceptions, `Doubles-date:`); ADR
-  0078 (shared test scratch); ADR 0089 (`Outcome`: exit 5 findings, 6 not measured, 7 check broken); draft ADR 0091
-  (`evidence-heads`); draft ADR 0093 (`origin/docs/adr-scheduled-owners`: §5 waivers and the gate mode, which defer to this
-  ADR, and its requirements R1 to R4); draft ADR 0096 (decision register: `status = "accepted"` rows).
+- Related: ER-5, ER-14 (tests never touch real keys or the keychain), ER-15, ER-21 / rule 40, ER-27, ER-31, ER-33 /
+  rule 71, ER-36; rule 55 (`Copies-date: ... approved: <coordinator|user>`); ADR 0022 and its build-inputs amendment
+  (main-only publish bot for `./dev`); ADR 0034 and 0075 (copy waivers, `[[date_move]] approved`); ADR 0060
+  (`docs/gates.toml`, `approved`, `Gates-date:`, C100); ADR 0073 (`approved = "user ..."` on shipped-double exceptions,
+  `Doubles-date:`); ADR 0078 (shared test scratch); ADR 0089 (`Outcome`: exit 5 findings, 6 not measured, 7 check
+  broken); draft ADR 0091 (`evidence-heads`); ADR 0092 (accepted at `e2f7e946b`: trust-bearing files); ADR 0093
+  (accepted at `390ec29bd`: §5 waivers and the gate mode, which use this ADR, its requirements R1 to R5, and its
+  server-recorded go-live time); ADR 0096 (accepted at `39e79d355`: decision register `docs/adr/register/<id>.toml`,
+  `./dev adr status`).
 - Number: 0097 was free on every `origin` branch on 2026-11-10 (0090 to 0096 are taken; no file 0097 or higher on any
-  branch). Check id: **C108** (C105 to C107 are claimed by drafts 0091 to 0093; no branch names C108).
-- Evidence: read in git on 2026-11-10 at the heads below; the Gitea API of this instance (version 28.3.0), read-only, with
-  the agents' `GITEA_TOKEN`; local probes with throw-away keys in the agent's scratch folder (never a real key, the
+  other branch). Check id: **C108** (C105 to C107 are claimed by ADRs 0091 to 0093).
+- Evidence: read in git on 2026-11-10 at the heads below; the Gitea API of this instance (version 28.3.0), read-only,
+  with the agents' `GITEA_TOKEN`; local probes with throw-away keys in the agent's scratch folder (never a real key, the
   keychain or ssh-agent; ER-14). Sources outside the repository are listed with what was read and when (§ Sources).
-  Statements marked *(secondary, unverified)* come from community write-ups only.
+  Statements marked *(secondary, unverified)* come from community write-ups only; *(per the review)* marks facts the
+  independent review established and this revision did not re-read.
 
 ```evidence-heads
 read: 2026-11-10
 origin/train/2026-11-09-3 c151422a4
 origin/main b51c72509
-origin/docs/adr-scheduled-owners 6270bbbbe
-origin/docs/adr-decision-register baa0f01c6
+origin/docs/adr-scheduled-owners 390ec29bd
+origin/docs/adr-decision-register 39e79d355
 origin/docs/adr-evidence-heads b32655fef
-origin/docs/adr-private-files fdfb17c8f
-origin/docs/adr-text-cuts-repo-copies 2e5017b46
+origin/docs/adr-private-files e2f7e946b
+origin/docs/adr-text-cuts-repo-copies 06c77a417
 origin/docs/adr-captured-tool-output 9c2cd4d8e
+origin/ci/build-inputs-wp1 3f5206a40
 ```
 
 ## Context: the instances
@@ -36,17 +41,21 @@ Paddock records many things as "approved by the user". Every one of them is text
 
 | # | Where | What stands for the user's consent | Who can write it today |
 |---|---|---|---|
-| 1 | `docs/gates.toml` (ADR 0060 §3.1, §3.2) | `approved = "user"`: one live entry on the train, Debrief's C13 `[[ratchet]]` (line 1023), whose comment says "approved: user 2026-11-08"; it was committed unsigned by `fa6bfcded` (`%G?` = `N`). C100 parses the value in `tools/paddock-dev/src/gates/register.rs` (`Approver::User`, lines 53 to 74, 238 to 242) and requires it for a ratchet (line 367) | any agent with commit access |
+| 1 | `docs/gates.toml` (ADR 0060 §3.1, §3.2) | `approved = "user"`: one live entry on the train, Debrief's C13 `[[ratchet]]` (line 1023), committed unsigned by `fa6bfcded` (`%G?` = `N`). Its comment "approved: user 2026-11-08" is on line 1015, above the `[[ratchet]]` header, so by the span rule of §3 it belongs to the previous record. C100 parses the value in `tools/paddock-dev/src/gates/register.rs` (`Approver::User`, lines 53 to 74, 238 to 242) and requires it for a ratchet (line 367) | any agent with commit access |
 | 2 | `Gates-date: <id> <old> -> <new>; approved: <coordinator\|user>` (ADR 0060 §3.1; `register.rs` lines 497 to 528) | a commit trailer; a second move needs `approved: user` | any agent writing a commit message |
 | 3 | `Copies-date: ... approved: <coordinator\|user>` (rule 55 (d), `docs/rules.md` lines 298 to 300) and its replacement `[[date_move]] approved = "user"` (ADR 0075 §1, line 107) | a trailer, then a data field | any agent |
 | 4 | ADR 0073's register (`approved = "user 2026-11-08"`, its lines 528 to 553; `Doubles-date:`; "a permanent kind needs `approved: user`") | a data field and a trailer | any agent |
-| 5 | Draft ADR 0093 D5 (its revision 1, `34e7eeb00`: a `waive:` Gitea comment by the user's account, after a bot move); revision 3 (`3bf12da60`) moved waivers and the gate mode into signed records and deferred the design here | a Gitea comment, then a record | any agent: the token agents hold is the user's (below) |
-| 6 | Draft ADR 0096 (decision register: `status = "accepted"`, `source = "memory ..."`) and 67 ADR files on the train whose status line says Accepted, most "by the user" | a status line | any agent |
-| 7 | The standing practice that agents never write `approved` lines for the user (0093 revision 1 §5: "the brief rule already in force") | an instruction | honoured, not enforced |
+| 5 | ADR 0093 D5 (revision 1, `34e7eeb00`: a `waive:` Gitea comment by the user's account); accepted at `390ec29bd` with signed `[[scheduled_waiver]]` and `[scheduled_gate]` records that use this ADR | a Gitea comment, then a record | any agent: the token agents hold is the user's (below) |
+| 6 | ADR 0096 (decision register rows `status = "accepted"`, copied by agents) and 67 ADR files on the train whose status line says Accepted, most "by the user" | a status line, a register row | any agent |
+| 7 | The standing practice that agents never write `approved` lines for the user | an instruction | honoured, not enforced |
 
 None of this code is in a release: `tools/paddock-dev/src/gates/register.rs` was added by `3a38c41ed`, and `git tag
 --contains 3a38c41ed` and `git tag --contains fa6bfcded` print nothing; neither is an ancestor of `origin/main`
 (`b51c72509`). All 6 860 commits on the train are unsigned (`git log --format=%G?` over the last 3 000: all `N`).
+
+**Unlanded approvals.** `a5153d114` on `origin/ci/build-inputs-wp1` carries `Copies-date: build-input-fetch
+ci-image/fetch-verified.sh: v0.5.0 -> v0.5.0: approved: coordinator: debrief entries move to debrief-v1.3.0`. Moving
+Debrief entries to a later release line needs `approved: user` under rule 55 (d); the migration (§10) lists it.
 
 **Agents act as the user** (verified on 2026-11-10 unless marked):
 
@@ -55,13 +64,17 @@ None of this code is in a release: `tools/paddock-dev/src/gates/register.rs` was
   `https://dev.decryptology.net/decryp7/paddock.git`, so `git credential fill` yields the user's Gitea credential (from
   the 0093 review; not re-run here, because it reads the keychain).
 - `GET /api/v1/user` with the agents' `GITEA_TOKEN` answers `decryp7`, `is_admin: true`. The instance's users are
-  `decryp7` (admin), `paddock-ci-reader`, `paddock-ci-writer` and `renovate-bot`: bot accounts exist, agents do not use one.
+  `decryp7` (admin), `paddock-ci-reader`, `paddock-ci-writer` and `renovate-bot`: bot accounts exist, agents do not use
+  one.
 - The repository has **no branch protection** (`GET /repos/decryp7/paddock/branch_protections` returns an empty list),
-  so the history of `main` is only as fixed as the agents' discipline (the force-push hook is untracked, ADR 0075 line 23).
+  so the history of `main` is only as fixed as the agents' discipline (the force-push hook is untracked, ADR 0075 line
+  23).
 - The claude-in-chrome tools act in the user's signed-in Chrome (from the 0093 review).
-- CI secrets are readable by any workflow an agent pushes; a PreToolUse hook is bypassed by a script file or the browser.
+- Repository secrets are readable by any workflow an agent pushes, `paddock-ci-writer`'s token included; a PreToolUse
+  hook is bypassed by a script file or the browser.
 - Gitea has no SSH or GPG key on the user's account (`/user/keys`: 0, `/user/gpg_keys`: 0) and no instance signing key
-  (`/signing-key.gpg`: "no signing key"); the train's head reports `verified: false, reason: gpg.error.not_signed_commit`.
+  (`/signing-key.gpg`: "no signing key"); the train's head reports `verified: false, reason:
+  gpg.error.not_signed_commit`.
 
 ## Pattern
 
@@ -71,296 +84,383 @@ a commit or a comment, and agents hold the user's name. Each new mechanism re-in
 `"user 2026-11-08"`, `approved: user`) and re-states "agents never write it" as an instruction. Hooks cannot close it:
 agents can reach the same effect through a script, the keychain credential or the browser.
 
-**Invariant.** A record that claims the user's consent counts only if it carries a signature that needs the user to be
-physically present (a touch or Touch ID), made with a key in a trust root that agents cannot change, and only for the
-exact lines the user signed, read from history agents cannot rewrite. Anything else is "not approved", with a clear
-message, and the stricter state applies.
+**Invariant.** A record that claims the user's consent counts only if its exact current value was written by a commit
+that carries a signature needing the user to be physically present (a touch, or Touch ID once WP-0 confirms it), made
+with a key in a trust root that agents cannot change, read from history agents cannot rewrite. Anything else is "not
+approved", with a clear message, and the stricter state applies.
 
 ## Decision
 
-### 1. What a proof is: a user-presence signature on the commit that wrote the lines
+### 1. What a proof is: a user-presence signature on the commit that wrote the record
 
-A user approval is a **commit signed by a user-presence key** (`gpg.format=ssh`), and the approval is exactly the lines
-that commit wrote. Git signs commits with SSH keys through `ssh-keygen -Y sign` in the `git` namespace and verifies
-against `gpg.ssh.allowedSignersFile` (git-config, `gpg.format` accepts `ssh`; local `git help config`, git 2.56.0).
+A user approval is a **commit signed by a user-presence key** (`gpg.format=ssh`). Git signs commits with SSH keys
+through `ssh-keygen -Y sign` in the `git` namespace and verifies against `gpg.ssh.allowedSignersFile` (git-config,
+`gpg.format` accepts `ssh`; local `git help config`, git 2.56.0).
 
 Keys (D3):
-- **FIDO2 security key**, `sk-ssh-ed25519@openssh.com`, created with the default touch requirement (and `verify-required`
-  for a PIN if the key supports it). The private key never leaves the device; each signature needs a touch (local
-  `ssh-keygen(1)`, "FIDO AUTHENTICATOR").
+- **FIDO2 security key**, `sk-ssh-ed25519@openssh.com`, created with the default touch requirement (and
+  `verify-required` for a PIN if the key supports it). The private key never leaves the device; each signature needs a
+  touch (local `ssh-keygen(1)`, "FIDO AUTHENTICATOR"). **The routine signing key.**
 - **Secure Enclave key**, through the system's `/usr/lib/ssh-keychain.dylib` (present on this Mac, macOS 27.2; local
   `ssh-keychain(8)`: "ecdsa256 for Secure Key module"), created with `sc_auth create-ctk-identity -l <label> -k p-256-ne
   -t bio` (local `sc_auth(8)`: `-ne` non-exportable, `-t bio|none` the private key protection). It appears to ssh as
-  `sk-ecdsa-sha2-nistp256@openssh.com` *(secondary, unverified: community write-ups of macOS 26, 2025-11)*.
-- Not accepted: plain software keys, and agent-held keys such as Secretive's (MIT, v4.0.0 of 2026-09-21; plain ECDSA
-  signatures, so whether a use needed Touch ID is a setting the verifier cannot see).
+  `sk-ecdsa-sha2-nistp256@openssh.com` *(secondary, unverified)*. Its flags byte is most likely composed in software by
+  `ssh-keychain.dylib`, not attested by hardware, and a reused LocalAuthentication context might allow several
+  signatures per Touch ID *(per the review; unverified)*. WP-0 checks both with the user's own key. Until then it is **a
+  recovery key, not the routine signer**.
+- Not accepted: plain software keys on the Mac, and agent-held keys such as Secretive's (MIT, v4.0.0 of 2026-09-21;
+  plain ECDSA signatures, so whether a use needed Touch ID is a setting the verifier cannot see). D3 (c) allows one
+  software key kept **offline** (made and stored off the Mac, never on it) for recovery only.
 
 **The verifier checks the user-presence flag itself.** An `sk-*` signature carries a flags byte and a counter (OpenSSH
 `PROTOCOL.u2f`). `ssh-keygen -Y verify`, which `git verify-commit` calls, does **not** reject a signature without user
-presence: `ssh-keygen.c`'s `sig_verify()` only logs `sk_flags` at debug level and `sshsig.c` never reads them (both read on
-2026-11-10 at `openssh-portable` `master`), and GitLab issue 545178 (2025) shows git reporting "Good" for commits signed
-with `-O no-touch-required` keys. An agent with the key handle file could ask the authenticator for a silent assertion
-(CTAP2 `up=false`); the signature is then valid but has the presence bit clear. So the Paddock verifier (§5) parses the
-signature and requires the presence bit (and the verification bit when the signer line says so). A `git log %G?` or `git
-verify-commit` result alone is **not** a proof under this ADR, contrary to the wording of 0093 §5 (revision 4, `6270bbbbe`,
-line 262).
+presence: `ssh-keygen.c`'s `sig_verify()` only logs `sk_flags` at debug level and `sshsig.c` never reads them (both read
+on 2026-11-10 at `openssh-portable` `master`); GitLab issue 545178 (2025) shows git reporting "Good" for commits signed
+with `-O no-touch-required` keys; and the independent review reproduced it: OpenSSH 10.5p1 `ssh-keygen -Y verify`
+accepts an `sk-ssh-ed25519` signature with flags `0x00`. An agent holding a key handle file can ask the authenticator
+for a silent assertion (CTAP2 `up=false`); the signature is then valid with the presence bit clear. So `git log %G?`,
+`git verify-commit` and `ssh-keygen -Y verify` are never a proof under this ADR (ADR 0093 as accepted says the same, its
+line 276).
+
+**Where the presence requirement lives.** The allowed-signers format has no presence option, and an unknown option makes
+`sshsig.c` reject the whole line *(per the review)*. So `allowed_signers` stays plain, and the per-key requirement
+(`presence = "touch"` or `"touch+verify"`, the key's fingerprint and its role, routine or recovery) is in
+`docs/approvals/subjects.toml` under `[[key]]`, protected like the trust root (§2).
 
 **Namespaces and scope of a key.** The approval keys are used for approvals only, so a touch request the user did not
 start is an alarm. The probe below shows `namespaces="git"` in the signer line refuses a signature made for another
 namespace.
 
-### 2. The trust root: `docs/approvals/allowed_signers`, chained from a pinned genesis (R1)
+### 2. The trust root: chained from a pinned genesis, bound to this repository (R1)
 
-The file lists the user's approval keys in `ssh-keygen(1)` ALLOWED SIGNERS form, one principal
-(`decryp7@approvals.paddock.invalid`), `namespaces="git"`, and `valid-after`/`valid-before` for rotation. It is protected
-three ways:
+`docs/approvals/allowed_signers` lists the user's approval keys in `ssh-keygen(1)` ALLOWED SIGNERS form, one principal
+(`decryp7@approvals.paddock.invalid`), `namespaces="git"`, and `valid-after`/`valid-before` for rotation. It, the
+`[[key]]` entries and the subject declarations of `subjects.toml` (§4) are the **trust files**, protected four ways:
 
-1. **Chain.** Every line of the file blames (§3) to a commit signed by a key that is valid in the version of the file at
-   that commit's first parent. A key can enter only through a signature by a key already trusted. The **genesis** commit,
-   which creates the file, is signed by a key it lists.
-2. **Pin outside the repository.** `PADDOCK_APPROVAL_ROOT` = `<genesis commit sha> <sha256 of the current file>`, a Gitea
+1. **Chain.** A trust file counts only if the newest commit that changed it (§3's rule, applied to the whole file)
+   verifies under §5 with a key valid in the trust files of that commit's first parent. A key can enter only through a
+   signature by a key already trusted. The **genesis** commit, which creates the files, is signed by a key it lists.
+2. **Bound to the repository.** Every approval commit, and every commit that changes a trust file, must descend from the
+   genesis commit. A signed commit copied from another repository, or made before the genesis, is refused.
+3. **Pin outside the repository.** `PADDOCK_APPROVAL_ROOT` = `<genesis commit sha> <sha256 of allowed_signers>`, a Gitea
    Actions repository variable that only an administrator can change. The verifier refuses (exit 5) when the file on
-   `main` does not hash to the pin, or the genesis is not that commit, and reports not measured (6) when it cannot read the
-   pin. A rotation therefore needs the user's signed commit **and** the user's own change of the variable.
-3. **Shown to the user.** Every release summary prints the trust root (key fingerprints, genesis sha), and the user keeps
-   the genesis sha and fingerprints in their own password manager at bootstrap, so a substitution is visible at the next
-   release even if both checks above were defeated.
+   `main` does not hash to the pin, or the genesis is not that commit, and reports not measured (6) when it cannot read
+   the pin. A rotation therefore needs the user's signed commit **and** the user's own change of the variable.
+4. **Shown to the user.** Every release summary prints the trust root (key fingerprints, genesis sha), and the user
+   keeps the genesis sha and fingerprints in their own password manager at bootstrap.
+
+**Time.** `valid-after` and `valid-before` are judged against a **server-recorded time**, as ADR 0093 does for its
+go-live anchor (its line 244): the `created_at` of the first Actions run on `origin/main` whose head commit contains the
+approval commit. Committer and author dates are never used; an agent can set them.
 
 Honest limit: while agents hold the user's administrator token, the browser session and the keychain credential, they
-can change the variable and force-push `main`; the chain then still holds but the pin does not. §8 (D8) closes that by
-taking those credentials out of the agents' reach. Before D8 is done, this ADR makes a forged approval a deliberate,
-visible act (a change of the trust root, the pin or the verifier, each shown in the release summary), not a typo.
+can change the variable and force-push `main` (table in §8). D8 closes that.
 
-### 3. Every line of a record blames to a trusted signed commit (R2)
+### 3. A record counts only as the signed commit left it (R2)
 
-A **record** is a TOML table (from its header line to the line before the next header or the end of file, including
-comments inside it) in a file of §4. A record counts as the user's only if **every** line of it blames to a commit whose
-signature verifies (§1, §5) against the trust root valid at that commit (§2). So an unsigned later edit of `until`,
-`reason`, `mode` or a signer line voids the record; a line moved from one record to another blames to the commit that
-moved it; a line a merge's conflict resolution changed blames to the merge. All of these fail closed.
+**Records.** Each subject kind (§4) has a strict schema: its file is parsed as TOML, every record is one table (`[x]` or
+`[[x]]`) with a **declared id key** (for example `id` for `[[scheduled_waiver]]`, `id` plus `app` for `[[ratchet]]`),
+unknown fields are denied, and subtables (`[x.sub]`), dotted keys (`a.b = 1`) and inline tables that add fields to a
+record from outside its span are errors. The record's **span** is its header line to the line before the next header or
+the end of the file; comments above a header belong to the previous record (so `docs/gates.toml` line 1015 moves inside
+the ratchet in the migration, §10).
 
-The blame runs with a fixed configuration, so the tree under check cannot steer it: `GIT_CONFIG_NOSYSTEM=1`,
-`GIT_CONFIG_GLOBAL=/dev/null`, `GIT_NO_REPLACE_OBJECTS=1`, `-c blame.ignoreRevsFile=`, no `-M`/`-C`, `--porcelain`, on
-`origin/main` (§6). Grafts and a shallow boundary make blame land on a boundary commit; a boundary inside a record is
-reported as not measured (6), never as a pass.
+**The rule.** A kind declares its **user fields** (all fields unless some are `agent_maintained`, such as a ratchet's
+`not_yet`, which C100 already keeps shrink-only). Let `projection(r)` be the record's id and user fields as parsed
+values. For each record on `main`:
 
-**Fields agents maintain.** Some kinds hold both the user's decision and a list agents shrink (ADR 0060's ratchet:
-`target` is the user's, `not_yet` shrinks with each opted-in crate). A kind declares such fields `agent_maintained` in
-the subject register (§4), with the check that keeps them only tightening (C100's shrink-only rule for `not_yet`). Their
-lines are exempt from the blame rule; every other line of the record is not.
+1. walk the record's history with `git log -L<span>:<file>` on `main` (first-parent order of landing, §6), parse the
+   record at each commit, and find the **newest commit that changed `projection`**, including a change from absent or a
+   removed field;
+2. that commit must verify (§5) with a trusted key at its parent and descend from the genesis;
+3. `projection` at that commit must equal `projection` now;
+4. in addition, every line of the record's span except `agent_maintained` lines blames (`git blame --porcelain`) to a
+   commit that verifies, as ADR 0093 accepted requires.
 
-Trailers: an `approved: user` trailer (`Gates-date:`, `Copies-date:`, `Doubles-date:`) counts only when the commit that
-carries it verifies under §1 and §5. A trailer is part of the signed commit object, so it needs no blame.
+So: an unsigned deletion of `until` or `report_until` changes `projection` and voids the record (step 1 finds the
+unsigned commit); a removed element of a restricting list, a removed closing condition, a field added by a dotted key
+elsewhere (a schema error), a line moved from one record to another, and a line a merge's conflict resolution changed
+all fail closed. Blame alone cannot see deleted lines; the projection rule is what does.
+
+The history commands run with a fixed configuration, so the tree under check cannot steer them:
+`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_NO_REPLACE_OBJECTS=1`, `-c blame.ignoreRevsFile=`, no
+`-M`/`-C`. Grafts and a shallow boundary inside a record's history are reported as not measured (6), never as a pass.
+
+**Trailers.** An `approved: user` trailer (`Gates-date:`, `Copies-date:`, `Doubles-date:`) counts only when the commit
+that carries it verifies under §5, descends from the genesis and is on `main` (§6). A trailer is part of the signed
+commit object, so it needs no projection.
 
 ### 4. What carries an approval, and what each artifact becomes (R3)
 
-`docs/approvals/subjects.toml`, itself a trust-root-protected file (every line blames to a signed commit), declares each
-**subject**: a file, the table kind whose records are the user's, and the kind's `agent_maintained` fields. The verifier
-never infers subjects from wording.
+`docs/approvals/subjects.toml`, a trust file (§2), declares each **subject**: a file, the table kind, its id key, its
+user fields and `agent_maintained` fields, its schema, and whether it is a code subject (below). The verifier never
+infers subjects from wording.
 
 | Today | Becomes |
 |---|---|
-| `approved = "user"` in `docs/gates.toml` (ADR 0060), ADR 0073's register, ADR 0075's `[[date_move]]` | unchanged text; the record counts as the user's only under §3. `approved = "coordinator"` stays as it is and claims nothing about the user |
-| `Gates-date:` / `Copies-date:` / `Doubles-date:` with `approved: user` | honoured only on a commit that verifies (§3, trailers) |
-| 0093's `[[scheduled_waiver]]` (workflow, job, signature, reason, `until` at most 14 days) | a subject of kind `waiver` in `docs/gates.toml`; expiry as 0093 says |
-| **Gate switches**: 0093's `[scheduled_gate]` (`mode`, `report_until`), ADR 0060's `report_only`, `not_gated`, `conditional` entries with `approved = "user"`, and any later user-only setting | a subject of kind `switch`. A switch that **lowers** a gate guarding a tag (enforce to report or off, a later `report_until`) needs a user record; raising never does. A switch in a repository variable, environment value or workflow input is not honoured by a gate (0093 revision 3 already says so for its mode) |
+| `approved = "user"` in `docs/gates.toml` (ADR 0060), ADR 0073's register, ADR 0075's `[[date_move]]` | the same text; the record counts as the user's only under §3. `approved = "coordinator"` stays as it is and claims nothing about the user |
+| `Gates-date:` / `Copies-date:` / `Doubles-date:` with `approved: user` | honoured only on a verified commit on `main` (§3, trailers) |
+| ADR 0093's `[[scheduled_waiver]]` and `[scheduled_gate]` | subjects of kind `waiver` and `switch` in `docs/gates.toml`, as 0093 accepted them |
+| **Gate switches**: ADR 0060's `report_only`, `not_gated`, `conditional` entries with `approved = "user"`, and any later user-only setting | kind `switch`. A switch that **lowers** a gate guarding a tag (enforce to report or off, a later `report_until`) needs a user record; raising never does. A switch in a repository variable, environment value or workflow input is not honoured by a gate |
 | A Gitea comment, label, issue state or the author of anything in Gitea | never a proof; display only |
-| ADR status lines "Accepted ... by the user", 0096's `status = "accepted"` rows | going forward, an acceptance commit is a signed user commit (D5); history before the cutover is grandfathered by ancestry (§9) |
+| ADR 0096 register rows `status = "accepted"` and ADR status lines "Accepted ... by the user" | from the cutover, a register row's `status` and `accepted` are user fields of a subject of kind `acceptance` (`docs/adr/register/<id>.toml`); `./dev adr status` (ADR 0096) calls the library and reports an unverified acceptance as `proposed`. The ADR's status line is a copy for people; ADR 0096's check compares it with the row. History before the cutover is grandfathered by ancestry (§10) |
 
-**How the user gives an approval: `./dev approve`.** Agents write proposals as ordinary, inert files under
-`docs/approvals/pending/` (a record and its subject). In the user's own terminal, `./dev approve` prints each pending
-record and the subject lines it changes, asks y/N per record, writes the accepted ones into their subject files in a
-temporary worktree on a new branch `approvals/<date>-<n>`, and makes **one** signed commit for the batch: one touch. The
-commit touches only subject files and `pending/` (the verifier refuses a signed approval commit that touches anything
-else, so a signature never blesses code by accident). An agent pushes and lands the branch (a docs-only change, rule 50
-(d)); the signature, not the pusher, is the proof. `./dev approve` never runs in an agent's session: it refuses when
-`CLAUDECODE` or a non-interactive stdin is present, which is a guard against mistakes, not a security boundary.
+**ADR 0075's records and the main-only read.** ADR 0075 binds `[[waiver]]` and `[[removal]]` records to the landing
+unit; they are agents' records and stay as they are. A `[[date_move]]` with `approved = "user"` is a user record: under
+§6 it must be on `main`, verified, before a tag that relies on it. So the user's approval lands first, as its own
+docs-only branch from `./dev approve`, and the unit's own record names it by id (`approval = "<id>"`); C58's tag mode
+reads the approval from `main`.
+
+**Code subjects (P1-3).** An approval commit may touch only declared subject files (PC-16): a signature never blesses
+code by accident. Code that decides whether approvals count is protected by a **code pin** instead: a record of kind
+`code_pin` (`id`, `paths`, `tree`) whose `tree` is the hash git computes for those paths at a named commit of `main`
+(`git rev-parse <commit>:<path>` per path, combined in a declared order). The declared pins are
+`tools/paddock-dev/src/approvals/**` (the verifier) and `docs/approvals/**` itself. The user re-signs a pin after
+reviewing a change of those paths (one touch). The post-tag audit (§7) recomputes the hashes in the tagged tree and on
+`main` and refuses a tag whose verifier differs from the signed pin. Release workflow files change too often to pin;
+they are compared by the post-tag audit with `main`'s version instead (§7), and that audit from `main` is their only
+protection (D11).
 
 ### 5. The verifier: `./dev approvals verify` and check C108
 
 Rust, a new module `tools/paddock-dev/src/approvals/` (ADR 0022: tooling is Rust), with ADR 0089's `Outcome` for exit
 codes and JSON. It:
 
-- parses SSHSIG and verifies `ssh-ed25519`, `sk-ssh-ed25519@openssh.com` and `sk-ecdsa-sha2-nistp256@openssh.com`
-  signatures **in process**, requiring the user-presence bit for `sk-*`. The RustCrypto `ssh-key` crate (0.6.7,
-  Apache-2.0 OR MIT) has `SshSig`; whether it verifies the `sk-*` algorithms and exposes the flags is not confirmed by
-  its docs page, so WP-1 starts with a spike and otherwise verifies the few formats directly over `ed25519-dalek` and
-  `p256`. In process means the Windows and Linux runners need no particular OpenSSH: they **only verify**, never sign,
-  and have no approval key;
-- parses allowed signers (principals, `namespaces`, `valid-after`, `valid-before`); `valid-*` is judged against the
-  **first-parent time on `main`** at which the commit landed (§6), not the committer date, which an agent can set;
-- drives `git blame` and `git cat-file` as in §3, walks the chain of §2 and reads the pin;
+- verifies SSHSIG signatures **in process** with the RustCrypto `ssh-key` crate 0.6.7 (Apache-2.0 OR MIT), whose
+  `Verifier` supports `SkEd25519` and `SkEcdsaSha2NistP256` and does **not** check the flags; the flags byte and the
+  counter are the last five bytes of `Signature::as_bytes()` (its `src/signature.rs` lines 181 and 419 to 455, *per the
+  review*). The verifier reads them and requires the presence bit, and the verification bit where the `[[key]]` entry
+  says `touch+verify`. In process means the Windows and Linux runners need no particular OpenSSH: they **only verify**,
+  never sign, and have no approval key;
+- parses allowed signers (principals, `namespaces`, `valid-after`, `valid-before`) and the `[[key]]` entries;
+- runs the history rules of §2, §3 and §6 with the fixed configuration;
+- **records the FIDO counter** of every approval signature in its report and compares consecutive approval commits by
+  the same key: a counter that went down is a finding (a cloned or replayed signature), a gap is a notice naming how
+  many signatures the device made in between. Whether the counter is per credential or per device depends on the
+  authenticator *(unverified; many FIDO2 keys use one counter for all credentials)*, so a gap is an alarm for the user
+  to judge, not proof of misuse;
 - caches by commit sha: one verification per distinct approval commit.
 
 **C108** runs in two places:
-- **On branches** (conformance, report only): lists records that will not count and why ("line 4 of
-  `[[scheduled_waiver]] debrief-bench` blames to unsigned `1a2b3c4d5`: ask the user to sign it with `./dev approve`").
-- **As a tag gate**, a step in each release workflow (§7) and in `./dev release tag` once it exists. ADR 0060's C100,
-  ADR 0075's `./dev copies` (C58) and ADR 0073's check call the same library: an `approved = "user"` entry whose record
-  does not verify is treated as if it said nothing, so the stricter state applies (a ratchet without a valid target
-  approval is enforced at its default; an unverified waiver waives nothing; an unverified lowering switch is ignored).
+- **On branches** (conformance, report only): lists records that will not count and why ("`[[scheduled_waiver]]
+  debrief-bench`: `until` removed by unsigned `1a2b3c4d5`; ask the user to sign it with `./dev approve`").
+- **As a tag gate**, a step in each release workflow (§7) and in `./dev release tag` once it exists. ADR 0060's C100
+  calls the same library now: an `approved = "user"` entry whose record does not verify is treated as if it said
+  nothing, so the stricter state applies (a ratchet without a valid target approval keeps its target; an unverified
+  waiver waives nothing; an unverified lowering switch is ignored). ADR 0075's `./dev copies` (pending), ADR 0073's
+  check (not built) and ADR 0096's `./dev adr status` call it when they are built; their own work packages carry that
+  wiring (WP-3 provides the library API and the C100 wiring only).
 
 ### 6. Records are read from `origin/main`'s first-parent history (R5)
 
-Every user-only record (approval, waiver, switch) is read from **`origin/main`**, fetched at gate time, never from the
-tagged tree or a branch: an agent can add or delete records on a release branch. So:
-- an approval reaches a gate only after its signed commit has landed on `main` (on a merge, the record's lines still blame
-  to the signed commit on the second-parent side);
-- the verifier walks `main`'s **first-parent** history for the subject files. Once a record id has appeared verified on
-  `main`, its later absence is a finding unless the commit that removed it verifies (a signed deletion) or the record
-  expired by its own `until`: **a missing record fails closed** and the gate says "record `<id>` removed by unsigned
-  `<sha>` on main: restore it or have the user sign the removal". Absence never loosens anything either: the default of
-  every switch is its strictest value;
-- a tag whose commit is not reachable from a release line the gate knows (ER-31 release branches) is judged with
+Every user-only record (approval, waiver, switch, code pin, acceptance) is read from **`origin/main`**, fetched at gate
+time, never from the tagged tree or a branch: an agent can add or delete records on a release branch. ADR 0093 as
+accepted reads its mode and waivers the same way (its lines 249 and 250).
+
+- An approval reaches a gate only after its signed commit has landed on `main`. On a merge, the record's lines and its
+  `git log -L` history still lead to the signed commit on the second-parent side; the projection rule (§3) is what is
+  checked, not who merged.
+- **Deletion fails closed.** The verifier walks `main`'s first-parent history of each subject file. Once a record id has
+  appeared verified on `main`, its later absence is a finding unless the commit that removed it verifies (a signed
+  deletion) or the record expired by its own `until`: the gate says "record `<id>` removed by unsigned `<sha>` on main:
+  restore it or have the user sign the removal". Absence never loosens anything: the default of every switch is its
+  strictest value.
+- A tag whose commit is not reachable from a release line the gate knows (ER-31 release branches) is judged with
   `main`'s records only.
 
-This differs from 0093 revision 4 (`6270bbbbe`, line 244), which reads a signed mode record "on the tagged tree and on
-`origin/main` alike": under this ADR the tagged tree's copy is ignored, so a record added or removed on a release
-branch has no effect (PC-12). 0093 is to follow §6 when both are accepted.
+### 7. The release workflow runs from the tagged tree: controls and what they cannot do
 
-### 7. The release workflow runs from the tagged tree: the residual risk and its controls
+A tag run executes the workflow files of the **tagged** commit (GitHub Actions' documented behaviour, which Gitea
+Actions follows; not tested on this instance). An agent could drop or weaken the C108 step on a release branch and tag
+it, and the run would publish.
 
-A tag run executes the workflow files of the **tagged** commit (GitHub Actions' documented behaviour, which Gitea Actions follows; not tested on this instance). An agent could drop
-or weaken the C108 step, or the gate it feeds, on a release branch and tag it; the run would then publish. Two controls:
+- **Post-tag audit from `main` (detects; D7).** A workflow on `main` runs on every push to `main` and in the night
+  schedule (the 2026-11-10 decision: scheduled work at night only; scheduled runs use the default branch's file, so a
+  release branch cannot remove it), with `./dev` built from `main`'s inputs, one Linux job of a few seconds that only
+  reads the API and git (rule 50). It:
+  1. fails when `main` does not descend from the last audited `main` sha (recorded in the audit's own output and in a
+     `release-audit` issue), which shows a force-push;
+  2. for every release tag since its last run, compares the tag run's job and step list from the Actions API with the
+     job and step list of `main`'s release workflow for that app, requiring every gate step of `main`'s version to have
+     run and succeeded in the tag run;
+  3. re-runs C108 and the gates that read approvals against `main`'s records at the tag's time, and compares the tagged
+     tree's code pins (§4);
+  4. lists every **published release and package** (Gitea releases, the package registry) and requires each to come from
+     an audited tag run; anything published otherwise (an admin token, a release token used from a pushed workflow, a
+     hand upload) is a finding;
+  5. verifies the release tag's signature if D7 (b) is chosen.
 
-- **Post-tag audit from `main` (detects; D7 recommended).** A workflow on `main` runs on every push to `main` and in the
-  night schedule (the 2026-11-10 decision: scheduled work at night only; scheduled runs use the default branch's file, so
-  a release branch cannot remove it), with `./dev` built from `main`'s inputs. It is a single Linux job of a few seconds
-  that only reads the API and git (rule 50). For every release tag since its last run it: (1) compares the tag run's job and step list from the
-  Actions API with the job and step list of `main`'s release workflow for that app, requiring every gate step of `main`'s
-  version to have run and succeeded in the tag run; (2) re-runs C108 and the gates that read approvals against `main`'s
-  records at the tag's time; (3) verifies the release tag's signature if D7 (b) is chosen. A mismatch opens a
-  `release-blocker` issue, marks the release "unverified" in its notes through the API, and fails the audit run with an
-  `::error::` naming the tag, the missing step and the next step (ER-27).
+  A mismatch opens a `release-blocker` issue, marks the release "unverified" in its notes, and fails the audit run with
+  an `::error::` naming the tag, the missing step and the next step (ER-27).
 - **Who may create release tags.** Gitea protected tags (docs for Gitea 28: a pattern, allowed users or teams; "If you
-  leave these fields empty no one is allowed to create or modify this tag") can restrict `*-v*` and `v*` to named accounts.
-  If the agents' bot (D8) is not on the list, agents cannot tag: the user tags, which changes the standing "tag when
-  green" practice. The middle way (D7 (b)): agents keep tagging, but a release tag counts only when it is an annotated tag
-  signed by an approval key (one touch per release) and the post-tag audit verifies it. The page does not say whether
-  admins bypass a rule or whether deletion is covered *(unverified; WP-6 tests both on a scratch repository)*.
+  leave these fields empty no one is allowed to create or modify this tag") can restrict `*-v*` and `v*` to named
+  accounts. Whether admins bypass a rule and whether deletion is covered is not stated *(unverified; WP-6 tests both on
+  a scratch repository)*. With D8 (a) done and the agents' bot not on the list, agents cannot tag (D7 (d)); otherwise
+  the middle way is D7 (b): a release tag counts only when it is an annotated tag signed by an approval key.
+- **Not a control: publishing as a draft until the audit promotes it.** The promote step would hold a release or package
+  credential; repository secrets are readable by any workflow an agent pushes, so an agent could promote or publish
+  without the audit. A draft stage adds strength only after publish credentials are unreachable from agent-pushable
+  workflows (D8 (a) plus §8's credential rule).
 
-What stays: between a tag push and the next audit the release is published (the audit runs at the next push to `main`
-or that night at the latest; the steward's tag checklist runs it by hand right after each tag). Making the publish wait for the audit (a draft release promoted by the audit) is the
-stronger form and is D7 (c).
+### 8. What this ADR makes impossible, what only visible, and what closes the rest (P1-4)
 
-### 8. Separate identities (defence in depth; D8)
+| Impossible from WP-5 on | Visible only (detected by C108, the audit or the release summary) | Closed only by |
+|---|---|---|
+| A record that verifies without a touch of a routine key (or Touch ID, once WP-0 confirms the Secure Enclave behaviour) | A swap of the pin or the trust root (needs the admin token: the release summary and password-manager copy show it) | D8 (a): the agents' bot has no admin, the user's credential and browser session are out of reach, so the pin and branch protection are the user's alone |
+| An unsigned edit, deletion or move of a signed record's value counting as the user's | A verifier or workflow bypass at a tag (the audit: job and step list, code pins) | D8 (a) plus a credential rule: publish credentials (release and package tokens) are held only by workflows agents cannot change before they run (a protected environment or a runner-held secret; WP-7 checks what Gitea 28 offers) |
+| An approval copied from another repository or made before the genesis | A force-push of `main` that drops a later signed deletion and replays a superseded record (the audit's descent check) | D8 (a): branch protection without force push or deletion |
+| A trailer or status line on an unsigned commit counting as the user's | An out-of-band publish (the audit's release and package listing) | the credential rule above |
+| | A touch that signs an agent-chosen commit (the confused deputy, §9: the printed sha and counter, the counter gaps) | D8 (b): agents in a separate macOS account, so the signer process and its inputs are out of their reach |
 
-Signatures prove consent; separate identities protect the pin (§2), `main`'s history (§6) and the tag list (§7):
-- agents and CI use a bot account (`paddock-agent`: write to code and issues, no admin) instead of `decryp7`'s token, as
-  0093 proposes; CI secrets that write move to the existing `paddock-ci-writer`;
-- the user's Gitea credential leaves the agents' reach: it is removed from the login keychain item that
-  `git-credential-osxkeychain` reads (the agents' git uses the bot token through a helper in their environment), and
-  claude-in-chrome's site permissions block `dev.decryptology.net`;
-- branch protection on `main` and `train/*`: no force push, no deletion; protected tags as D7 decides;
-- the repository variable `PADDOCK_APPROVAL_ROOT` is then writable only by the user.
+### 9. How the user gives an approval: `./dev approve`, and its limits (P1-2)
 
-The full boundary is agents in a **separate macOS account** (no shared keychain, browser profile, ssh files or global git
-config). That is a larger change to worktrees, build folders and Docker, and is left to its own ADR after the releases
-(D8 (b)).
+Agents write proposals as ordinary, inert files under `docs/approvals/pending/`. In the user's own terminal, `./dev
+approve`:
 
-### 9. Bootstrapping, key loss and rotation, migration
+1. makes a **fresh clone** of `origin/main` into a new temporary folder (never a worktree, which shares `.git/config`,
+   hooks and refs with the agents' checkouts);
+2. runs every git and ssh command in it with a **cleared environment** (only `PATH=/usr/bin:/bin`, `HOME` set to the
+   temporary folder, `SSH_AUTH_SOCK` passed only when the key needs the agent, `SSH_SK_PROVIDER` unset for a FIDO2 key
+   or set to `/usr/lib/ssh-keychain.dylib` for the Secure Enclave key, nothing else), `GIT_CONFIG_NOSYSTEM=1`,
+   `GIT_CONFIG_GLOBAL=/dev/null`, `-c gpg.format=ssh -c gpg.ssh.program=/usr/bin/ssh-keygen -c core.hooksPath=/dev/null`
+   and the key handle path given explicitly;
+3. prints each pending record and the subject lines it changes, asks y/N per record, writes the accepted ones, makes
+   **one** signed commit for the batch (one touch), and then prints the **commit sha and the FIDO counter** of the
+   signature, so the user can compare the sha with what the agent later pushes and see a counter jump;
+4. leaves the commit on a branch `approvals/<date>-<n>` that an agent pushes and lands (a docs-only change, rule 50
+   (d)); the signature, not the pusher, is the proof.
 
-**Bootstrap (WP-0, the user's hands, about 30 minutes, not measured).** The user creates two keys on two devices (D3:
-a FIDO2 key and the Mac's Secure Enclave, or two FIDO2 keys), and runs `./dev approve --genesis`, which writes
-`docs/approvals/allowed_signers` with both and makes the genesis commit signed by the first key (one touch). The user
-notes the genesis sha and fingerprints in their password manager, sets `PADDOCK_APPROVAL_ROOT` in the repository's
-Actions variables, and adds the public keys to their Gitea profile so the web view shows signed approval commits as
-verified (display only: Gitea's own trust is an admin-writable key list, and its handling of `sk-*` keys is not verified).
+It refuses when `CLAUDECODE` is set or stdin is not a terminal; that guards against mistakes, it is not a security
+boundary. **Limit, stated plainly:** `./dev approve` is a binary agents can build and change, and agents can edit the
+user's shell files and `PATH` because they share the account. Without a touch, no record verifies; **with** a touch,
+what was signed is only as trustworthy as the signer process, until D8 (b) moves agents to their own account. The
+printed sha and counter, the path rule (PC-16) and the code pins narrow it; they do not close it.
 
-**Key loss.** With the second key the user signs a commit that sets `valid-before=<today>` on the lost key (old
-approvals keep verifying, judged by their landing time on `main`, §5) and adds a replacement, then updates the pin.
-**Key compromise.** The same commit removes the key outright, and the user re-signs the live records it signed
-(`./dev approvals verify --by-key <fp>` lists them), because a stolen key can sign with any date. **All keys lost.** A new
-genesis, a new pin, and a re-sign of every live record; the verifier treats records signed under the old root as
-unverified until re-signed. A Secure Enclave key dies with its Mac, so it is never the only key.
+### 10. Bootstrapping, key loss and rotation, migration
 
-**Migration (D9).** The live approvals that a check or gate reads today are one record (Debrief's C13 ratchet in
-`docs/gates.toml`); 0073's and 0093's are not on the train yet. They are re-signed in the first `./dev approve` batch
-after genesis (one touch). History is grandfathered **by ancestry, not date** (dates are agent-writable): a cutover
-commit on `main`, pinned in `subjects.toml`, and every trailer or status line in commits that are ancestors of it counts
-as it did, with a notice "grandfathered (before cutover `<sha>`)". Nothing grandfathered can lower a gate after the
-cutover.
+**Bootstrap (WP-0, the user's hands, about 30 minutes, not measured).** The user creates the keys of D3, and runs `./dev
+approve --genesis`, which writes `docs/approvals/allowed_signers` and `subjects.toml` and makes the genesis commit
+signed by the routine key (one touch). The user notes the genesis sha and fingerprints in their password manager, sets
+`PADDOCK_APPROVAL_ROOT` in the repository's Actions variables, and adds the public keys to their Gitea profile so the
+web view shows signed approval commits as verified (display only: Gitea's own trust is an admin-writable key list, and
+its handling of `sk-*` keys is not verified). WP-0 also checks, with the user's own Secure Enclave key, whether one
+Touch ID allows more than one signature and what the flags byte says.
+
+**Key loss.** With the recovery key the user signs a commit that sets `valid-before=<today>` on the lost key (old
+approvals keep verifying, judged by server-recorded time, §2) and adds a replacement, then updates the pin. **Key
+compromise.** The same commit removes the key outright, and the user re-signs the live records it signed (`./dev
+approvals verify --by-key <fp>` lists them). **All keys lost.** A new genesis, a new pin, and a re-sign of every live
+record; records signed under the old root are unverified until re-signed. A Secure Enclave key dies with its Mac, so it
+is never the only key.
+
+**Interim while keys are bought or set up.** Nothing verifies, so the stricter state holds: ADR 0093 has no waivers and
+its mode follows its accepted go-live rules, a ratchet keeps its target, and date moves needing the user do not count.
+
+**Migration inventory (D9).**
+
+| Item | Where | Action |
+|---|---|---|
+| Debrief's C13 `[[ratchet]]`, `approved = "user"` | `docs/gates.toml` on the train (lines 1015 to 1023; the comment moves inside the span) | re-signed in the first `./dev approve` batch after genesis |
+| `Copies-date: build-input-fetch ...: approved: coordinator: debrief entries move to debrief-v1.3.0` | `a5153d114` on `origin/ci/build-inputs-wp1`, not landed | a move to a later release line: needs the user's signed approval (a `[[date_move]]` record under ADR 0075) before the branch lands; otherwise C58 refuses at the Debrief tag |
+| ADR 0073's register entries with `approved = "user ..."` | not on the train | written as pending records when ADR 0073's register lands |
+| ADR 0093's `[[scheduled_waiver]]` and `[scheduled_gate]` | not on the train | signed when ADR 0093's WP-6 lands |
+| `approved: user` trailers and accepted ADR status lines in history | the train and `main` | grandfathered by ancestry (below) |
+
+The inventory is regenerated by WP-8 across every `origin` branch (`git log --all --grep 'approved: user'`, the subject
+files on each branch head), not only the train. History is grandfathered **by ancestry, not date** (dates are
+agent-writable): a cutover commit on `main`, pinned in `subjects.toml`, and every trailer or status line in commits that
+are ancestors of it counts as it did, with a notice "grandfathered (before cutover `<sha>`)". Nothing grandfathered can
+lower a gate after the cutover.
 
 ## Positive controls (ER-33)
 
 Each is a test over a synthetic repository in the shared test scratch (ADR 0078), with keys generated by the test
-(software Ed25519, and `sk-*` signatures built by the test over the U2F message format so the presence bit can be set or
-cleared without hardware), `HOME` in scratch, `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, `SSH_AUTH_SOCK`
-unset: never a real key, the keychain or ssh-agent (ER-14). Each must turn the verdict red (or 6 where named); the green
-twin is in the same test.
+(software Ed25519, and `sk-*` signatures built by the test over the U2F message format so the presence bit and counter
+can be set freely without hardware), `HOME` in scratch, `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`,
+`SSH_AUTH_SOCK` unset: never a real key, the keychain or ssh-agent (ER-14). Each must turn the verdict red (or 6 where
+named); the green twin is in the same test.
 
 | # | Requirement | Planted | Expected |
 |---|---|---|---|
-| PC-1 | R1 | a key appended to `allowed_signers` in an unsigned commit | refused, "line n blames to unsigned" |
+| PC-1 | R1 | a key appended to `allowed_signers` in an unsigned commit | refused, "changed by unsigned" |
 | PC-2 | R1 | a key appended in a commit signed by that new key | refused, "signer not trusted at parent" |
 | PC-3 | R1 | file on `main` differs from the pin; pin unreadable | refused (5); not measured (6) |
-| PC-4 | R1 | a second root commit creating the file (new genesis) | refused, genesis mismatch |
+| PC-4 | R1 | a second root commit creating the files; a signed approval commit that does not descend from the genesis | refused, genesis mismatch; refused, "not bound to this repository" |
 | PC-5 | R2 | a signed waiver, then an unsigned edit of `until`; of `reason`; a signed line moved into another record; a line changed in a merge's conflict resolution | each record does not count |
-| PC-6 | R4 | an `sk-ssh-ed25519` signature with the presence bit clear; an `sk-ecdsa` one with it set | refused; accepted |
+| PC-5b | R2 | a signed waiver, then an unsigned commit that deletes its `until` line; a signed switch whose closing condition is deleted unsigned; a restricting list element removed unsigned | none counts (the projection rule) |
+| PC-5c | R2 | a field added to a signed record by a dotted key or a `[kind.sub]` table outside its span; an unknown field | schema error, record does not count |
+| PC-6 | R4 | an `sk-ssh-ed25519` signature with flags `0x00`; an `sk-ecdsa` one with the presence bit set; a `touch+verify` key whose signature lacks the verification bit | refused; accepted; refused |
 | PC-7 | R3 | `[scheduled_gate] mode` from `enforce` to `report` in an unsigned commit; the mode set by an environment value | `enforce` stays, a finding; ignored |
-| PC-8 | R2 | a signature in another namespace; a key past its `valid-before` at landing time | refused |
+| PC-8 | R2 | a signature in another namespace; a key past its `valid-before` at the server-recorded time while the committer date is earlier | refused; refused |
 | PC-9 | R2 | a planted `.git-blame-ignore-revs` and `blame.ignoreRevsFile` in the repo config; a `refs/replace` object | no effect on the verdict |
-| PC-10 | R2 | a shallow clone whose boundary is inside a record | not measured (6) |
+| PC-10 | R2 | a shallow clone whose boundary is inside a record's history | not measured (6) |
 | PC-11 | R3 | `Gates-date: ...; approved: user` on an unsigned commit | not honoured |
 | PC-12 | R5 | a signed record only on a release branch, not on `main` | not honoured at that branch's tag |
 | PC-13 | R5 | a verified record deleted on `main` by an unsigned commit | the gate refuses, "removed by unsigned" |
 | PC-14 | §7 | a recorded Actions API reply (synthetic JSON) for a tag run without `main`'s C108 step | the audit fails and names the step |
-| PC-15 | §7 | an unsigned release tag (D7 (b)) | the audit flags it |
+| PC-15 | §7 | an unsigned release tag (D7 (b)); a release listed by the API with no audited tag run; `main` that does not descend from the last audited sha | each flagged |
 | PC-16 | §4 | a signed approval commit that also changes a `.rs` file | refused, "approval commit touches non-subject paths" |
+| PC-17 | §4 | a tagged tree whose `tools/paddock-dev/src/approvals/` differs from the signed code pin | the audit refuses the tag |
+| PC-18 | §9 | `./dev approve` run with a planted `gpg.ssh.program`, `core.hooksPath`, `SSH_SK_PROVIDER` and a `PATH` entry in the agents' checkout and environment | none is used (the fresh clone's command lines and environment are asserted by the test, which signs with a test key) |
+| PC-19 | §5 | two approval commits by the same key with counters 7 then 5; 7 then 12 | finding; notice "5 signatures in between" |
 
 Measured here, with throw-away keys in the scratch folder (no device): a commit signed with the listed key verifies
-(`git verify-commit` exit 0, `%G?` `G`); an unsigned commit gives exit 1 (`N`); a commit signed by an unlisted key prints
-"Good ... signature" **and** "No principal matched", exit 1, `%G?` `U`; a signer line limited to `namespaces="git"`
-refuses a detached signature made in another namespace ("Could not verify signature"). A checker that tests only for
-"Good" in the output would accept the unlisted key: the verifier reads exit codes and its own result, never text.
+(`git verify-commit` exit 0, `%G?` `G`); an unsigned commit gives exit 1 (`N`); a commit signed by an unlisted key
+prints "Good ... signature" **and** "No principal matched", exit 1, `%G?` `U`; a signer line limited to
+`namespaces="git"` refuses a detached signature made in another namespace ("Could not verify signature"). A checker that
+tests only for "Good" in the output would accept the unlisted key: the verifier reads its own result, never text.
 
 ## What it gates
 
-From enforcement (D9: after WP-0 to WP-5 and the re-sign of the live record): every `<app>-v*` tag and every `v*` tag,
-through C108 in the release workflows and the post-tag audit. Concretely, a tag is refused when a gate it depends on is
-lowered by a record that does not verify: 0093's waivers and mode (0093 has no waivers until this ADR is accepted, its
-§5), Debrief's C13 ratchet target (`debrief-v1.2.0`), ADR 0073's permanent exceptions, and rule 55's date moves to a
-later release line. Until enforcement, C108 is report-only and prints its verdict in each release summary. Landings on
-`main` and trains are not gated by C108 (an unsigned record just does not count). No release currently in flight depends
-on a user record other than Debrief's ratchet, which is one touch to re-sign.
+From enforcement (D9: after WP-0 to WP-6 and the re-sign of the live record): every `<app>-v*` tag and every `v*` tag,
+through C108 in the release workflows and the post-tag audit. A tag is refused when a gate it depends on is lowered by a
+record that does not verify: ADR 0093's waivers and mode, Debrief's C13 ratchet target (`debrief-v1.2.0`), ADR 0073's
+permanent exceptions, and rule 55's date moves to a later release line (today the unlanded `a5153d114`). Until
+enforcement, C108 is report-only and prints its verdict in each release summary. Landings on `main` and trains are not
+gated by C108 (an unsigned record just does not count). No release in flight depends on a user record other than
+Debrief's ratchet (one touch to re-sign) and, if `ci/build-inputs-wp1` lands as it is, its Debrief date move.
 
 ## Parallelism and cost (rule 51)
 
-Verification is bounded by the number of distinct approval commits, not records: one blame per subject file and one
-signature check per commit, cached by sha, run in parallel up to cores minus one. Measured as separate processes on this
-Mac at load 9 to 13 (docs/benchmarks.md, "Approval signature verification (ADR 0097, 2026-11-10)"): 22 to 52 ms per `git
-verify-commit`, 8 to 12 ms per `ssh-keygen -Y verify`, both dominated by process start; the in-process verifier avoids
-that and is not measured yet. At today's counts (one live record) the cost is the `git fetch` of `main`.
+Verification is bounded by the number of approval records and distinct approval commits: one `git log -L` per record,
+one blame per subject file, one signature check per commit (cached by sha), run in parallel up to cores minus one.
+Measured as separate processes on this Mac (`docs/benchmarks.md`, "Approval signature verification (ADR 0097,
+2026-11-10)"): 22 to 52 ms per `git verify-commit` and 8 to 12 ms per `ssh-keygen -Y verify` at load 9 to 13; on
+`docs/gates.toml` (1 023 lines, 14 commits) 15 to 31 ms per whole-file blame, 44 to 52 ms per `git log -L` of one record
+and 43 to 53 ms for its first-parent log, at load 16 to 20. So 200 approval commits checked by `git verify-commit` one
+by one would take 4 to 10 s; the in-process verifier avoids the process start and is not measured yet. At today's count
+(one live record) the cost is the `git fetch` of `main`.
 
-**Cost to the user**: one touch (or Touch ID) per `./dev approve` batch plus reading what it shows; one touch and one
-variable change per rotation; at bootstrap about 30 minutes. With D7 (b), one more touch per release tag. Not measured
-(no device was used, by design).
+**Cost to the user**: one touch per `./dev approve` batch plus reading what it shows and comparing the printed sha; one
+touch and one variable change per rotation; one touch per change of a code pin; at bootstrap about 30 minutes. With D7
+(b), one more touch per release tag. Not measured (no device was used, by design).
 
 ## Consequences
 
-- An agent can no longer make the user approve anything. The coordinator's job becomes preparing pending records and
-  asking for a batch.
-- Every "approved by the user" in data becomes either verifiable or visibly unverified; the `"coordinator"` value stays
-  as an honest name for an agent's decision.
-- ADR 0093's waivers and mode, and future user-only switches, have one mechanism instead of each ADR inventing one.
-- Approvals arrive on `main` as their own small docs-only branches, outside trains.
-- The release summary prints the trust root on every tag.
+- Without a touch, no record verifies: an agent alone can no longer make anything count as the user's approval.
+- With a touch, what was signed is only as trustworthy as the signer process (§9) until D8 (b); the printed sha and
+  counter and the path rule narrow that gap.
+- Every "approved by the user" in data becomes either verifiable or visibly unverified; `"coordinator"` stays as an
+  honest name for an agent's decision.
+- ADR 0093's waivers and mode, and future user-only switches, have one mechanism.
+- Approvals arrive on `main` as their own small docs-only branches, outside trains, before the tags that rely on them.
+- The release summary prints the trust root on every tag; the post-tag audit lists every published release.
 
 ## Rollback
 
-C108 is a check, not a runtime change. If it misbehaves, its tag-gate step returns to report-only in one signed switch
-record (a lowering, so the user signs it) and the gates fall back to treating every user record as unverified, which is
-the strict state. Rolling back never loosens a gate.
+C108 is a check, not a runtime change. If it misbehaves, its tag-gate step returns to report-only through a signed
+switch record (a lowering, so the user signs it), and the gates treat every user record as unverified, which is the
+strict state. Rolling back never loosens a gate.
 
 ## Alternatives
 
 - **(b) alone, separate identities.** Proves which account wrote a comment or a commit, but while agents run as the
-  user's macOS account they can reach the user's credential, browser and keychain; the account boundary is only as good
-  as that separation, which is not complete short of a separate macOS account. Kept as defence in depth (§8).
+  user's macOS account they can reach the user's credential, browser and keychain. Kept as defence in depth (§8).
 - **(c) Honour system plus hooks.** Today's state: instance 7, bypassed by a script or the browser. Rejected.
-- **Detached signatures per record** (`ssh-keygen -Y sign -n paddock-approval@...` over each record, the signature in a
-  file beside it). Binds the record's bytes without blame and survives any history shape, but doubles the files, has no
-  Gitea display, and Paddock never rewrites history (ADR 0075), so blame is reliable. The fallback for D2.
+- **Detached signatures per record** (`ssh-keygen -Y sign -n paddock-approval@...` over each record's canonical bytes,
+  the signature beside it). Binds the value directly, so it needs neither blame nor `git log -L`, and deletions of a
+  field break the signature by construction; but it doubles the files, has no Gitea display, and still needs §6's
+  deletion rule for whole records. The fallback for D2; if the projection rule proves fragile in WP-2, switch to it.
 - **Signed tags as approvals.** A tag signs a whole tree and cannot say which lines are approved. Rejected for records;
   used only for release tags (D7 (b)).
 - **Gitea `require_signed_commits`** on `main`. Requires some trusted signature on every commit, the bot's included; it
@@ -371,57 +471,79 @@ the strict state. Rolling back never loosens a gate.
 | # | Decision | Options | Recommendation |
 |---|---|---|---|
 | D1 | Mechanism | (a) user-presence signatures; (b) separate identities; (c) honour plus hooks | **(a), with (b) as defence in depth (D8)** |
-| D2 | What carries the signature | (a) signed commits, every record line blamed to a trusted signed commit (§3); (b) detached signatures per record in their own namespace; (c) signed tags | **(a)**; fallback (b) |
-| D3 | Keys | (a) two FIDO2 keys (`sk-ssh-ed25519`, touch, PIN if supported); (b) one FIDO2 key plus the Mac's Secure Enclave key (`sc_auth ... -k p-256-ne -t bio`); (c) Secure Enclave only | **(b)** if the user has one FIDO2 key, else (a) after buying two; never (c) (one Mac is one point of loss) |
-| D4 | Trust root | (a) chained `allowed_signers` from a pinned genesis, the pin in an admin-only Actions variable and in the release summary (§2); (b) keys only in a CI variable; (c) repository file only | **(a)** |
-| D5 | Scope | (a) every record a check or gate reads as the user's, trailers with `approved: user`, gate switches that lower a tag gate, and ADR acceptances from the cutover; (b) the same without ADR acceptances | **(a)** |
+| D2 | What carries the signature | (a) signed commits, each record judged by the projection rule and per-line blame (§3); (b) detached signatures per record in their own namespace; (c) signed tags | **(a)**; fallback (b) |
+| D3 | Keys | (a) two FIDO2 keys (`sk-ssh-ed25519`, touch, PIN if supported), one routine, one recovery kept apart; (b) one FIDO2 key for routine signing and the Mac's Secure Enclave key as recovery; (c) no FIDO2 key: the Secure Enclave key for routine signing (after WP-0 confirms one Touch ID per signature) plus an offline software recovery key made and kept off the Mac | **(a)**; (b) if buying a second key is not wanted; (c) only until keys arrive. Until any key exists, nothing verifies (stricter state, §10) |
+| D4 | Trust root | (a) chained trust files from a pinned genesis, bound to the repository, pin in an admin-only Actions variable and in the release summary (§2); (b) keys only in a CI variable; (c) repository file only | **(a)** |
+| D5 | Scope | (a) every record a check or gate reads as the user's, trailers with `approved: user`, gate switches that lower a tag gate, code pins, and ADR 0096 acceptances from the cutover; (b) the same without acceptances | **(a)** |
 | D6 | Lowering switches | (a) a lowering of a tag-guarding gate always needs a user record, raising never; switches outside files are ignored; (b) the coordinator may lower for at most 72 h with an unsigned record, the user signs to extend | **(a)** |
-| D7 | The tagged-tree risk (§7) | (a) post-tag audit from `main` only; (b) (a) plus release tags signed by an approval key (one touch per tag); (c) (b) plus publishing as a draft until the audit promotes it; (d) protected tags limited to the user (the user tags) | **(b)**; (c) once the audit has run clean for two releases |
-| D8 | Identities | (a) bot account for agents and CI, the user's credential out of the keychain item agents' git reads, claude-in-chrome blocked on the Gitea host, branch protection (no force push or deletion) on `main` and trains; (b) agents in a separate macOS account | **(a) now; (b) as its own ADR after the releases** |
-| D9 | Migration and enforcement | (a) re-sign the live record(s) at genesis, grandfather history by ancestry of a pinned cutover commit, report-only until WP-0 to WP-5 are done, then enforce at tags; (b) re-sign everything, including the 67 accepted ADR status lines (one touch, but 67 lines to read) | **(a)** |
+| D7 | The tagged-tree risk (§7) | (a) post-tag audit from `main` only; (b) (a) plus release tags signed by an approval key (one touch per tag); (c) protected tags limited to the user once D8 (a) is done (the user tags) | **(b)**; (c) is stronger but ends "tag when green" |
+| D8 | Identities | (a) bot account for agents and CI, the user's credential out of the keychain item agents' git reads, claude-in-chrome blocked on the Gitea host, branch protection (no force push or deletion) on `main` and trains, publish credentials only in workflows agents cannot change before they run; (b) agents in a separate macOS account | **(a) now; (b) as its own ADR after the releases** |
+| D9 | Migration and enforcement | (a) re-sign the live record at genesis, sign or refuse the unlanded date move, grandfather history by ancestry of a pinned cutover commit, report-only until WP-0 to WP-6 are done, then enforce at tags; (b) re-sign everything, including the 67 accepted ADR status lines | **(a)** |
 | D10 | Rule | (a) a Paddock rule and a new ER (wording below); (b) ADR only | **(a)** |
+| D11 | Protecting the code that decides | (a) signed code pins for the verifier and `docs/approvals/**`, release workflows compared by the post-tag audit; (b) the post-tag audit from `main` only | **(a)** |
 
 **Proposed rule** (a Paddock rule, number on acceptance, and a new ER after ER-36; wording for the user's approval, not
 applied while Proposed): "A record that stands for the user's consent (an approval, a waiver, a date move, a switch that
-lowers a gate, an acceptance) counts only when every line of it comes from a commit signed with one of the user's
-presence keys in the trust root, read from `main`. Agents prepare such records; they never make them count. Anything
-that does not verify is treated as not approved, and the stricter state applies."
+lowers a gate, an acceptance) counts only when its current value was written by a commit on `main` signed with one of
+the user's presence keys in the trust root. Agents prepare such records; they never make them count. Anything that does
+not verify is treated as not approved, and the stricter state applies."
 
 ## Work packages (agent-days)
 
 | WP | What | Days | Needs |
 |---|---|---|---|
-| WP-0 | Bootstrap: `./dev approve --genesis`, `docs/approvals/README.md`, `subjects.toml`, the user's key creation and pin (user's hands, about 30 min) | 0.25 | D3, D4 |
-| WP-1 | Verifier core: SSHSIG parse, Ed25519 / `sk-ssh-ed25519` / `sk-ecdsa-sha2-nistp256` verification with the presence bit, allowed-signers parser; spike on `ssh-key` first; test vectors built in the test (PC-6, PC-8) | 1.5 | D2 |
-| WP-2 | History: fixed-config blame driver, chain and genesis, pin read with the bot's read token, first-parent walk of `main`, deletion rule, `Outcome`s (PC-1 to PC-5, PC-9, PC-10, PC-12, PC-13) | 1.5 | WP-1 |
-| WP-3 | Subjects and callers: kinds, `agent_maintained` fields, trailers; C100, `./dev copies` (C58) and ADR 0073's check call the library; switches (PC-7, PC-11) | 1.5 | WP-2 |
-| WP-4 | `./dev approve`: pending records, display, per-record y/N, temporary worktree, one signed commit; path rule (PC-16) | 1 | WP-2 |
+| WP-0 | Bootstrap: `./dev approve --genesis`, `docs/approvals/README.md`, `subjects.toml`, the user's key creation and pin (user's hands, about 30 min); the Secure Enclave checks with the user's own key | 0.5 | D3, D4 |
+| WP-1 | Verifier core on `ssh-key` 0.6.7: flags and counter read from the signature bytes, `[[key]]` presence rules, allowed-signers parser; test vectors built in the test (PC-6, PC-8, PC-19) | 1 | D2 |
+| WP-2 | History: strict schemas and record ids, the projection rule over `git log -L`, fixed-config blame, chain, genesis descent, pin read with the bot's read token, server-recorded time from the Actions API, first-parent walk of `main`, deletion rule, `Outcome`s (PC-1 to PC-5c, PC-9 to PC-13) | 2.5 | WP-1 |
+| WP-3 | Library API for callers and the C100 wiring; switches and trailers (PC-7, PC-11). ADR 0075's `./dev copies`, ADR 0073's check and ADR 0096's `./dev adr status` wire it in their own work packages | 1.5 | WP-2 |
+| WP-4 | `./dev approve`: fresh clone, cleared environment, fixed signer, per-record y/N, sha and counter printed; path rule (PC-16, PC-18) | 1.5 | WP-2 |
 | WP-5 | C108 in conformance (report) and as a step in every release workflow; release summary prints the trust root; runs on the Linux and Windows runners | 1 | WP-3 |
-| WP-6 | Post-tag audit workflow on `main` (job and step comparison, signed release tags if D7 (b), issue and release note), recorded-API tests (PC-14, PC-15); protected-tag behaviour tested on a scratch repository | 1.5 | WP-5, D7 |
-| WP-7 | Identities (D8 (a)): `paddock-agent`, token swap in agents' environment and CI secrets, keychain item and git helper, claude-in-chrome block, branch protection (user's hands for the admin steps) | 1 | D8 |
-| WP-8 | Migration and rules: re-sign batch, cutover commit pinned, rule text, briefs (coordinator, integrator, reviewer), lessons entry; 0093 §5 and ADR 0060/0073/0075 references | 0.5 | WP-4, D9 |
-| | **Total** | **9.75 agent-days** | |
+| WP-6 | Post-tag audit on `main`: descent check, job and step comparison, code pins, release and package listing, signed release tags if D7 (b), issue and release note; recorded-API tests (PC-14, PC-15, PC-17); protected-tag behaviour on a scratch repository | 2 | WP-5, D7, D11 |
+| WP-7 | Identities (D8 (a)): `paddock-agent`, token swap in agents' environment and CI secrets, keychain item and git helper, claude-in-chrome block, branch protection, where publish credentials can live (user's hands for the admin steps) | 1 | D8 |
+| WP-8 | Migration: inventory across every `origin` branch, re-sign batch, the unlanded date move, cutover commit pinned, rule text, briefs (coordinator, integrator, reviewer), lessons entry | 1 | WP-4, D9 |
+| | **Total** | **12 agent-days** (12 to 14 with the risks below) | |
 
-A first cut that lets 0093's waivers and mode be signed and checked at tags (WP-0 to WP-3, WP-5): 5.75 agent-days. WP-7
-can run in parallel from the start.
+A first cut that lets ADR 0093's waivers and mode be signed and checked at tags needs WP-0 to WP-5: **8 agent-days**;
+with the post-tag audit (WP-6), which closes the tagged-tree gap to "visible", **10**. WP-7 can run in parallel from the
+start.
 
 ## Risks
 
-- **Touch fatigue and confused deputy.** A touch proves presence, not understanding; an agent could start a signing
-  request while the user expects one. Mitigations: the keys sign approvals only, `./dev approve` is the only signer and
-  shows each record before the touch, and an unexpected blink or Touch ID prompt is an alarm. Residual while agents share
-  the account: an agent could alter `./dev approve` so it shows one thing and commits another. The commit is small and
-  path-limited (PC-16), lands through review, and the user can read it with `git show` before pushing; D8 (b) removes the
-  residual.
-- **The verifier is repository code.** An agent could weaken it on a branch. Release gates and the audit run `./dev` built
-  from `main`'s inputs (ADR 0022 amendment: main-only publish), and changes to `tools/paddock-dev/src/approvals/**` are a
-  subject (a signed approval is needed for them to count at a tag).
-- **Before D8, the pin and `main`'s history are agent-writable.** Stated in §2; the release summary makes changes visible.
-- **`sk-*` support in third-party crates and in Gitea is not verified.** WP-1's spike and WP-0's display check settle it.
-- **Secure Enclave details are from community sources.** The man pages confirm `sc_auth` and the library; how macOS
-  presents `p-256-ne -t bio` keys to ssh is checked during WP-0 with the user's own key, not by an agent.
-- **History must be present.** Release jobs that check out shallowly report not measured; CI's release workflows already
-  use `fetch-depth: 0` in several jobs, and WP-5 makes the C108 step fetch `main` in full.
+- **The confused deputy (§9).** A touch proves presence, not understanding, and the signer process shares the account
+  with the agents until D8 (b). Mitigations: approval-only keys, the fresh clone and cleared environment, the printed
+  sha and counter, path-limited commits, code pins.
+- **Counter semantics differ by authenticator.** A per-device counter makes every unrelated use a gap; the alarm is a
+  notice for the user, not a refusal.
+- **Before D8 (a), the pin, `main`'s history and publish credentials are agent-reachable.** §8's table; the audit and
+  the release summary make changes visible.
+- **The Secure Enclave key's flags may not prove a Touch ID.** WP-0 checks; until then it is recovery only.
+- **The projection rule depends on `git log -L` following a record's span.** A rename of a subject file or a large
+  re-ordering may lose the trail; then the record is unverified (fail closed) and the user re-signs it. If that happens
+  often, D2 falls back to detached signatures.
+- **Callers that are not built yet.** ADR 0073's check and ADR 0075's `./dev copies` must call the library when they are
+  built; until then those approvals are judged by C108's report and the post-tag audit only.
+- **History must be present.** Release jobs that check out shallowly report not measured; several release workflows
+  already use `fetch-depth: 0`, and WP-5 makes the C108 step fetch `main` in full.
+
+## Review answers (revision 2)
+
+The independent security review of revision 1 (`d21eddcbf`) returned CHANGES with four P1s and P2s.
+
+- **P1-1, blame cannot see deleted lines:** §3 now judges a record by its parsed projection at the newest commit that
+  changed it (`git log -L`), with strict schemas, declared id keys and no dotted keys or subtables; blame stays as a
+  second condition. PC-5b and PC-5c added.
+- **P1-2, signer integrity:** §9 signs in a fresh clone with a cleared environment and a fixed signer, prints the sha
+  and counter; the verifier records counters (§5, PC-18, PC-19); Consequences reworded.
+- **P1-3, code protection contradicted the path rule:** code pins (§4, D11, PC-17); release workflows are protected by
+  the post-tag audit only, said so.
+- **P1-4, residual claims too strong:** §8's table; draft-until-audit withdrawn as a control; the audit checks descent,
+  published releases and packages.
+- **P2s:** heads refreshed (ADR 0093, 0092, 0096 accepted); the "contrary to 0093" remark dropped; server-recorded time
+  for `valid-*` (§2); the `ssh-key` spike answered and its fallback dropped (§5); presence kept in `subjects.toml`, not
+  in `allowed_signers` (§1); Secure Enclave marked unverified and moved to recovery (§1, D3); D3 (c) and the interim
+  added; WPs re-estimated (12 days, first cut 8 or 10); genesis descent (§2); the line 1015 comment (Context, §3, §10);
+  ADR 0075 and ADR 0096 interplay (§4); the unlanded `a5153d114` (§10); the benchmark arithmetic corrected and blame
+  measured.
 
 ## Sources
 
@@ -442,7 +564,8 @@ Read on 2026-11-10.
   Enclave ssh keys through `sc_auth` and the library).
 - Secretive: https://github.com/maxgoedjen/Secretive (MIT; latest release v4.0.0, 2026-09-21; Touch ID per access,
   notifications).
-- `ssh-key` crate: https://docs.rs/ssh-key/latest/ssh_key/struct.SshSig.html (0.6.7, Apache-2.0 OR MIT).
+- `ssh-key` crate: https://docs.rs/ssh-key/latest/ssh_key/struct.SshSig.html (0.6.7, Apache-2.0 OR MIT); `sk-*` support
+  and the flags position per the independent review of revision 1.
 - Gitea: https://docs.gitea.com/administration/signing (version 28: verification against keys in Gitea's database and
   `TRUSTED_SSH_KEYS`); https://docs.gitea.com/usage/access-control/protected-tags (version 28); the instance's API
   (version 28.3.0) for users, keys, branch protections and commit verification; release notes
