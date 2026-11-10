@@ -47,14 +47,21 @@ fn worker_binary_with(debug: bool, env: Option<std::ffi::OsString>) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(name))
 }
 
+/// What to tell the user when the worker is not at `exe`. Only a debug build honours `DEBRIEF_STORE_WORKER`, so only its
+/// message names the variable.
+fn missing_worker_message(debug: bool, exe: &Path) -> String {
+    let hint = if debug { " or set DEBRIEF_STORE_WORKER" } else { "" };
+    format!(
+        "the store worker was not found at {}; install it next to this program{hint}",
+        exe.display()
+    )
+}
+
 impl WorkerHost {
     pub fn new() -> StoreResult<WorkerHost> {
         let exe = worker_binary();
         if !exe.is_file() {
-            return Err(StoreError::Invalid(format!(
-                "the store worker was not found at {}; install it next to this program or set DEBRIEF_STORE_WORKER",
-                exe.display()
-            )));
+            return Err(StoreError::Invalid(missing_worker_message(cfg!(debug_assertions), &exe)));
         }
         let mut cfg = debrief_store_client::WorkerConfig::new(&exe);
         cfg.lib_dir = std::env::var_os("DEBRIEF_LIB_DIR")
@@ -85,6 +92,21 @@ impl StoreHost for WorkerHost {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_missing_worker_message_names_the_variable_only_where_it_works() {
+        let exe = Path::new("/opt/debrief/debrief-store-worker");
+        let release = missing_worker_message(false, exe);
+        assert!(
+            release.contains("/opt/debrief/debrief-store-worker") && release.contains("next to this program"),
+            "{release}"
+        );
+        assert!(
+            !release.contains("DEBRIEF_STORE_WORKER"),
+            "a release build ignores the variable: {release}"
+        );
+        assert!(missing_worker_message(true, exe).contains("DEBRIEF_STORE_WORKER"));
+    }
 
     #[test]
     fn a_release_build_ignores_debrief_store_worker() {

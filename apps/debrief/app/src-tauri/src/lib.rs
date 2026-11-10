@@ -1288,7 +1288,7 @@ pub(crate) mod test_support {
 
     /// Builds the bundled plugins binary once when it is not next to the test executable (`cargo test -p debrief-app`
     /// builds only this crate; `cargo nextest run --workspace` in CI builds every binary), so the tests that need
-    /// the plugins run instead of failing on their absence. `DEBRIEF_PLUGINS` names one built elsewhere.
+    /// the plugins run instead of failing on their absence. `DEBRIEF_PLUGINS` names one built elsewhere (honoured in a debug build only).
     fn ensure_plugins_binary() {
         static BUILT: std::sync::Once = std::sync::Once::new();
         BUILT.call_once(|| {

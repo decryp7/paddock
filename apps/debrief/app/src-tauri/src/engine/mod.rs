@@ -56,7 +56,7 @@ pub(crate) struct WorkerHost {
 }
 
 impl WorkerHost {
-    /// The worker next to Debrief's executable (`DEBRIEF_STORE_WORKER` overrides it), with libduckdb from the installed
+    /// The worker next to Debrief's executable (`DEBRIEF_STORE_WORKER` overrides it in a debug build only), with libduckdb from the installed
     /// resource folder `lib_dir` (installers), next to the worker, or from Debrief's own library path (development
     /// builds, `fetch-libduckdb.sh`). The worker starts the built-in plugins and the installed `third_party` ones
     /// for imports itself (ADR 0027), with `launch` (its cap and tuning from Settings ▸ Performance, ADR 0031) and

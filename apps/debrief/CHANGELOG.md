@@ -15,7 +15,7 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 ### Security
 
-- **Start-up programs:** Debrief no longer lets environment variables choose which program it starts. `DEBRIEF_STORE_WORKER` and `DEBRIEF_PLUGINS` (the store worker and the plugins program) are now read only by development builds, and `DEBRIEF_BROWSER_NO_SANDBOX` (which started the research browser without its sandbox when Debrief ran as root) is ignored too. Before, any program running as you could set one of them and Debrief, relaunched with administrator rights, would start the program it named. An installed Debrief now starts these programs from its own install folder only, and its log says once, by name, when it ignored a variable
+- **Start-up programs:** Debrief no longer lets environment variables choose which program it starts. `DEBRIEF_STORE_WORKER` (the store worker), `DEBRIEF_PLUGINS` (the plugins program) and `CHROMIUM_PATH` (the research browser) are now read only by development builds, and `DEBRIEF_BROWSER_NO_SANDBOX` (which started the research browser without its sandbox when Debrief ran as root) is ignored too. Before, any program running as you could set one of them, and Debrief, relaunched with administrator rights, would start the program it named. An installed Debrief now starts the store worker and the plugins program from its own install folder, and the research browser from the browser path in Settings, the one Debrief installed, or one found in the usual places; its log says once, by name, when it ignored a variable
 
 ### Removed
 

@@ -89,9 +89,14 @@ pub fn candidates(os: Os, env: &dyn Fn(&str) -> Option<String>) -> Vec<Browser> 
     v
 }
 
-/// The first existing candidate. `CHROMIUM_PATH` (an explicit executable) wins.
+/// The variable that names a browser executable (development builds only).
+pub const PATH_ENV: &str = "CHROMIUM_PATH";
+
+/// The first existing candidate. `CHROMIUM_PATH` (an explicit executable) wins in a debug build only: a release build
+/// ignores it and logs its name once, because the environment must not decide which program an (elevated) Debrief starts;
+/// the user's choice is the browser path in Settings.
 pub fn find() -> Option<Browser> {
-    find_with(Os::CURRENT, &|k| std::env::var(k).ok(), &|p| p.is_file())
+    find_with(cfg!(debug_assertions), Os::CURRENT, &|k| std::env::var(k).ok(), &|p| p.is_file())
 }
 
 /// The browser tests may launch: only the explicit `CHROMIUM_TEST_PATH` (a pinned test build), never the browsers
@@ -110,12 +115,17 @@ pub fn find_for_tests_with(env: &dyn Fn(&str) -> Option<String>, exists: &dyn Fn
         })
 }
 
-pub fn find_with(os: Os, env: &dyn Fn(&str) -> Option<String>, exists: &dyn Fn(&Path) -> bool) -> Option<Browser> {
-    if let Some(p) = env("CHROMIUM_PATH").map(PathBuf::from).filter(|p| exists(p)) {
-        return Some(Browser {
-            flavor: Flavor::Chromium,
-            path: p,
-        });
+/// [`find`] for a given build mode: `debug` is `cfg!(debug_assertions)`.
+pub fn find_with(debug: bool, os: Os, env: &dyn Fn(&str) -> Option<String>, exists: &dyn Fn(&Path) -> bool) -> Option<Browser> {
+    if let Some(p) = env(PATH_ENV).filter(|v| !v.is_empty()) {
+        if !debug {
+            crate::ignored_env::warn_once(PATH_ENV);
+        } else if exists(Path::new(&p)) {
+            return Some(Browser {
+                flavor: Flavor::Chromium,
+                path: PathBuf::from(p),
+            });
+        }
     }
     candidates(os, env).into_iter().find(|b| exists(&b.path))
 }
@@ -172,13 +182,34 @@ mod tests {
     #[test]
     fn finds_first_existing_and_honours_override() {
         let only = PathBuf::from("/usr/bin/chromium");
-        let b = find_with(Os::Linux, &env, &|p| p == only).unwrap();
+        let b = find_with(true, Os::Linux, &env, &|p| p == only).unwrap();
         assert_eq!(b.flavor, Flavor::Chromium);
         let over = |k: &str| (k == "CHROMIUM_PATH").then(|| "/x/chrome".to_string());
         assert_eq!(
-            find_with(Os::Linux, &over, &|p| p == Path::new("/x/chrome")).unwrap().path,
+            find_with(true, Os::Linux, &over, &|p| p == Path::new("/x/chrome")).unwrap().path,
             PathBuf::from("/x/chrome")
         );
-        assert!(find_with(Os::Linux, &env, &|_| false).is_none());
+        assert!(find_with(true, Os::Linux, &env, &|_| false).is_none());
+    }
+
+    #[test]
+    fn a_release_build_ignores_chromium_path() {
+        let over = |k: &str| match k {
+            "CHROMIUM_PATH" => Some("/evil/chrome".to_string()),
+            other => env(other),
+        };
+        let evil_and_chromium = |p: &Path| p == Path::new("/evil/chrome") || p == Path::new("/usr/bin/chromium");
+        let b = find_with(false, Os::Linux, &over, &evil_and_chromium).unwrap();
+        assert_eq!(
+            b.path,
+            PathBuf::from("/usr/bin/chromium"),
+            "the installed browser, not the variable's"
+        );
+        assert!(find_with(false, Os::Linux, &over, &|p| p == Path::new("/evil/chrome")).is_none());
+        // A debug build still honours it.
+        assert_eq!(
+            find_with(true, Os::Linux, &over, &evil_and_chromium).unwrap().path,
+            PathBuf::from("/evil/chrome")
+        );
     }
 }

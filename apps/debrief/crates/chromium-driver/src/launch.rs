@@ -152,16 +152,10 @@ impl Sandbox {
         let value = std::env::var(NO_SANDBOX_ENV).ok();
         let debug = cfg!(debug_assertions);
         if !debug && value.as_deref().is_some_and(|v| !v.is_empty()) {
-            warn_ignored_once();
+            crate::ignored_env::warn_once(NO_SANDBOX_ENV);
         }
         Sandbox::decide(debug, value.as_deref(), running_as_root())
     }
-}
-
-/// Logs once per process that [`NO_SANDBOX_ENV`] is set but ignored (its name only, never its value).
-fn warn_ignored_once() {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| log::warn!("{NO_SANDBOX_ENV} is set but ignored: a release build always starts the browser with its sandbox"));
 }
 
 #[cfg(unix)]
