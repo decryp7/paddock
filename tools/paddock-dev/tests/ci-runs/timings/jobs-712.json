@@ -1,0 +1,169 @@
+{
+"total_count": 4,
+"jobs": [
+{
+"id": 5049,
+"name": "plan",
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-08T03:00:13+08:00",
+"completed_at": "2026-11-08T03:00:19+08:00",
+"runner_name": "Gitea Action Runner (d-gtr9)",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-08T03:00:13+08:00",
+"completed_at": "2026-11-08T03:00:16+08:00"
+},
+{
+"name": "Affected projects",
+"number": 1,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-08T03:00:16+08:00",
+"completed_at": "2026-11-08T03:00:18+08:00"
+}
+]
+},
+{
+"id": 5050,
+"name": "test (macos)",
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-08T03:00:33+08:00",
+"completed_at": "2026-11-08T03:04:49+08:00",
+"runner_name": "Gitea Action Runner (mac-mini)",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-08T03:00:33+08:00",
+"completed_at": "2026-11-08T03:00:41+08:00"
+},
+{
+"name": "Run ./.gitea/actions/rust-cache",
+"number": 1,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-08T03:00:41+08:00",
+"completed_at": "2026-11-08T03:00:55+08:00"
+},
+{
+"name": "Install nextest",
+"number": 2,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-08T03:00:55+08:00",
+"completed_at": "2026-11-08T03:01:04+08:00"
+},
+{
+"name": "Tests (workspace, every feature)",
+"number": 3,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-08T03:01:04+08:00",
+"completed_at": "2026-11-08T03:03:44+08:00"
+},
+{
+"name": "Run clippy",
+"number": 4,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-08T03:03:44+08:00",
+"completed_at": "2026-11-08T03:04:44+08:00"
+},
+{
+"name": "Post Run actions/cache@v4",
+"number": 5,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-08T03:04:44+08:00",
+"completed_at": "2026-11-08T03:04:49+08:00"
+}
+]
+},
+{
+"id": 5051,
+"name": "bundle (windows)",
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-08T03:00:35+08:00",
+"completed_at": "2026-11-08T03:07:29+08:00",
+"runner_name": "Gitea Action Runner (win-ci)",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-08T03:00:35+08:00",
+"completed_at": "2026-11-08T03:00:41+08:00"
+},
+{
+"name": "Install",
+"number": 1,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-08T03:00:41+08:00",
+"completed_at": "2026-11-08T03:01:11+08:00"
+},
+{
+"name": "Build the frontend",
+"number": 2,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-08T03:01:11+08:00",
+"completed_at": "2026-11-08T03:02:21+08:00"
+},
+{
+"name": "Tauri build",
+"number": 3,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-08T03:02:21+08:00",
+"completed_at": "2026-11-08T03:07:09+08:00"
+},
+{
+"name": "Run installer smoke",
+"number": 4,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-08T03:07:09+08:00",
+"completed_at": "2026-11-08T03:07:29+08:00"
+}
+]
+},
+{
+"id": 5052,
+"name": "release",
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-08T03:07:37+08:00",
+"completed_at": "2026-11-08T03:08:15+08:00",
+"runner_name": "Gitea Action Runner (d-gtr9)",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-08T03:07:37+08:00",
+"completed_at": "2026-11-08T03:07:40+08:00"
+},
+{
+"name": "Affected projects",
+"number": 1,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-08T03:07:40+08:00",
+"completed_at": "2026-11-08T03:07:42+08:00"
+}
+]
+}
+]
+}

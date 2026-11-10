@@ -1,0 +1,64 @@
+{
+"total_count": 1,
+"jobs": [
+{
+"id": 5053,
+"name": "everything",
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T02:00:03+08:00",
+"completed_at": "2026-11-09T02:15:11+08:00",
+"runner_name": "Gitea Action Runner (mac-mini)",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T02:00:03+08:00",
+"completed_at": "2026-11-09T02:00:11+08:00"
+},
+{
+"name": "Run ./.gitea/actions/rust-cache",
+"number": 1,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T02:00:11+08:00",
+"completed_at": "2026-11-09T02:00:25+08:00"
+},
+{
+"name": "Install nextest",
+"number": 2,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T02:00:25+08:00",
+"completed_at": "2026-11-09T02:00:34+08:00"
+},
+{
+"name": "Tests (workspace, every feature)",
+"number": 3,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T02:00:34+08:00",
+"completed_at": "2026-11-09T02:14:06+08:00"
+},
+{
+"name": "Run clippy",
+"number": 4,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T02:14:06+08:00",
+"completed_at": "2026-11-09T02:15:06+08:00"
+},
+{
+"name": "Post Run actions/cache@v4",
+"number": 5,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T02:15:06+08:00",
+"completed_at": "2026-11-09T02:15:11+08:00"
+}
+]
+}
+]
+}

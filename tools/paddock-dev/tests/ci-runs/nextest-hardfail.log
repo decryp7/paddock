@@ -1,0 +1,14 @@
+2026-11-09T10:00:00.1234567Z Gitea Action Runner (inventedrunner)(version:v5.4.1)
+2026-11-09T10:00:01.1234567Z ::group::Runner Information
+2026-11-09T10:00:02.1234567Z Runner labels: ubuntu-latest
+2026-11-09T10:00:03.1234567Z Task: 1
+2026-11-09T10:00:04.1234567Z Job: app
+2026-11-09T10:00:05.1234567Z Repository: ***/paddock
+2026-11-09T10:00:06.1234567Z ::endgroup::
+2026-11-09T10:00:07.1234567Z     Starting 40 tests across 2 binaries
+2026-11-09T10:00:08.1234567Z   [33mTRY 1 [31mFAIL[0m [   0.100s] ( 12/40) dyno-app a::b::c
+2026-11-09T10:00:09.1234567Z   [33mTRY 2 [31mFAIL[0m [   0.100s] ( 12/40) dyno-app a::b::c
+2026-11-09T10:00:10.1234567Z         [31mFAIL[0m [   0.100s] ( 12/40) dyno-app a::b::c
+2026-11-09T10:00:11.1234567Z      [1mSummary[0m [   3.000s] 40 tests run: 39 passed, 1 failed, 0 skipped
+2026-11-09T10:00:12.1234567Z         [31mFAIL[0m [   0.100s] ( 12/40) dyno-app a::b::c
+2026-11-09T10:00:13.1234567Z ##[error]Process completed with exit code 100.

@@ -17,6 +17,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod ci_runs;
 mod cli;
 mod fds;
 pub mod gates;

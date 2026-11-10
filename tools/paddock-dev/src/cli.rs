@@ -1,4 +1,4 @@
-use crate::{gates, input_hash, ipc_endpoints, plan, plan_cmd, slots, wait};
+use crate::{ci_runs, gates, input_hash, ipc_endpoints, plan, plan_cmd, slots, wait};
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
 use std::io::Write;
@@ -78,6 +78,11 @@ enum CiCommand {
         #[command(subcommand)]
         command: SlotCommand,
     },
+    /// The tests CI marked flaky (nextest, Playwright), vitest's failed specs and tests that failed and then passed on a
+    /// rerun of the same commit, over a window of runs. A run whose logs cannot be read is "not measured" (exit 5).
+    Flakes(ci_runs::FlakesArgs),
+    /// Real CI timings of the family from the Gitea API (the port of scripts/ci-timings.mjs, same Markdown).
+    Timings(ci_runs::TimingsArgs),
 }
 
 #[derive(Subcommand)]
@@ -236,6 +241,12 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             SlotCommand::IdleRun(a) => slots::idle_run(&a),
             SlotCommand::Hold(a) => slots::hold(&a),
         },
+        Command::Ci {
+            command: CiCommand::Flakes(a),
+        } => ci_runs::flakes(&a),
+        Command::Ci {
+            command: CiCommand::Timings(a),
+        } => ci_runs::timings(&a),
         Command::Wait(a) => wait::command(&a),
         Command::Gates {
             command: GatesCommand::Model(a),

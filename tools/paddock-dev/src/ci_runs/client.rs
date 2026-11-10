@@ -1,0 +1,194 @@
+//! The run listing of `ci flakes` and `ci timings`: Gitea's run list, a run's jobs with their times, and job logs. Jobs and
+//! logs for the rerun planner already exist in [`GiteaRuns`] (reused here); the run list is the part `plan_since` does not have.
+
+use super::time::ts;
+use crate::plan_since::{GiteaRuns, RunJob};
+use crate::wait::Http;
+use serde_json::Value;
+
+/// One run of the list (`GET .../actions/runs`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunInfo {
+    /// The run's id.
+    pub id: u64,
+    /// The workflow path with its ref (`dyno-release.yml@refs/heads/main`).
+    pub path: String,
+    /// `push`, `pull_request`, `workflow_dispatch`...
+    pub event: String,
+    /// `completed`, `in_progress`, `queued`...
+    pub status: String,
+    /// `success`, `failure`, `cancelled`, `skipped`, or empty while it runs.
+    pub conclusion: String,
+    /// The commit it tested.
+    pub head_sha: String,
+    /// When it was created, as the API prints it.
+    pub created_at: String,
+}
+
+impl RunInfo {
+    /// The workflow file (`dyno-release.yml`).
+    pub fn workflow(&self) -> &str {
+        self.path.split('@').next().unwrap_or("")
+    }
+
+    /// Whether the run is over (the API says `completed`; older servers put the conclusion in `status`).
+    pub fn finished(&self) -> bool {
+        self.status == "completed" || matches!(self.status.as_str(), "success" | "failure" | "cancelled" | "skipped")
+    }
+
+    fn from_json(v: &Value) -> RunInfo {
+        let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
+        RunInfo {
+            id: v["id"].as_u64().unwrap_or(0),
+            path: s("path"),
+            event: s("event"),
+            status: s("status"),
+            conclusion: s("conclusion"),
+            head_sha: s("head_sha"),
+            created_at: s("created_at"),
+        }
+    }
+}
+
+/// One page of the run list, newest first.
+pub struct RunsPage {
+    /// The runs of the page.
+    pub runs: Vec<RunInfo>,
+    /// The server's count of all runs (0 when it did not say).
+    pub total: u64,
+}
+
+/// A job of a run with its times (`GET .../runs/<id>/jobs`): what the timings need.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TimedJob {
+    /// The job's id.
+    pub id: u64,
+    /// Its display name.
+    pub name: String,
+    /// The runner's name, when the job ran on one.
+    pub runner: Option<String>,
+    /// `success`, `failure`...
+    pub conclusion: String,
+    /// Start and end, milliseconds since the epoch.
+    pub start: Option<f64>,
+    /// End, milliseconds since the epoch.
+    pub end: Option<f64>,
+    /// Its steps: name and duration in seconds.
+    pub steps: Vec<(String, Option<f64>)>,
+}
+
+impl TimedJob {
+    fn from_json(j: &Value) -> TimedJob {
+        let t = |v: &Value, k: &str| ts(v[k].as_str().unwrap_or(""));
+        TimedJob {
+            id: j["id"].as_u64().unwrap_or(0),
+            name: j["name"].as_str().unwrap_or("").to_string(),
+            runner: j["runner_name"]
+                .as_str()
+                .filter(|r| !r.is_empty() && *r != "undefined")
+                .map(str::to_string),
+            conclusion: j["conclusion"].as_str().unwrap_or("").to_string(),
+            start: t(j, "started_at"),
+            end: t(j, "completed_at"),
+            steps: j["steps"]
+                .as_array()
+                .map(|steps| {
+                    steps
+                        .iter()
+                        .map(|s| {
+                            let secs = t(s, "started_at").zip(t(s, "completed_at")).map(|(a, b)| (b - a) / 1000.0);
+                            (s["name"].as_str().unwrap_or("").to_string(), secs)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }
+    }
+}
+
+/// How the server says a path is missing (curl's `--fail-with-body` text).
+fn is_not_found(e: &str) -> bool {
+    e.contains("error: 404") || e.contains("HTTP 404")
+}
+
+/// The Gitea Actions API of one repository. The token travels in a header only (the [`Http`] contract).
+pub struct Client<'a> {
+    http: &'a mut dyn Http,
+    server: String,
+    repo: String,
+    token: String,
+    /// Waits between retries; tests set it to nothing.
+    pub backoff_ms: u64,
+}
+
+impl<'a> Client<'a> {
+    /// `server` like `https://dev.decryptology.net`, `repo` like `decryp7/paddock`.
+    pub fn new(http: &'a mut dyn Http, server: &str, repo: &str, token: &str) -> Client<'a> {
+        Client {
+            http,
+            server: server.to_string(),
+            repo: repo.to_string(),
+            token: token.to_string(),
+            backoff_ms: 500,
+        }
+    }
+
+    fn api(&self) -> String {
+        format!("{}/api/v1/repos/{}/actions", self.server.trim_end_matches('/'), self.repo)
+    }
+
+    fn retry<T>(&mut self, mut once: impl FnMut(&mut Client<'a>) -> Result<T, String>) -> Result<Option<T>, String> {
+        for attempt in 0..4u64 {
+            match once(self) {
+                Ok(v) => return Ok(Some(v)),
+                Err(e) if is_not_found(&e) => return Ok(None),
+                Err(e) if attempt >= 3 => return Err(e),
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(self.backoff_ms * (attempt + 1))),
+            }
+        }
+        Ok(None)
+    }
+
+    /// Page `page` of the run list (50 a page), an empty page for a missing one.
+    pub fn runs_page(&mut self, page: u32) -> Result<RunsPage, String> {
+        let url = format!("{}/runs?limit=50&page={page}", self.api());
+        let body = self.retry(|c| c.http.get_json(&url, &c.token))?.unwrap_or(Value::Null);
+        Ok(RunsPage {
+            runs: body["workflow_runs"]
+                .as_array()
+                .map(|a| a.iter().map(RunInfo::from_json).collect())
+                .unwrap_or_default(),
+            total: body["total_count"].as_u64().unwrap_or(0),
+        })
+    }
+
+    /// The jobs of a run for the failure reader (id, name, conclusion), as the rerun planner reads them.
+    pub fn jobs(&mut self, run: u64) -> Result<Vec<RunJob>, String> {
+        GiteaRuns::new(self.http, &self.server, &self.repo, self.token.clone()).jobs(run)
+    }
+
+    /// The jobs of a run with their times: up to four pages of 50, as the timings read them.
+    pub fn timed_jobs(&mut self, run: u64) -> Result<Vec<TimedJob>, String> {
+        let mut jobs = Vec::new();
+        for page in 1..=4 {
+            let url = format!("{}/runs/{run}/jobs?limit=50&page={page}", self.api());
+            let body = self.retry(|c| c.http.get_json(&url, &c.token))?.unwrap_or(Value::Null);
+            let batch: Vec<TimedJob> = body["jobs"]
+                .as_array()
+                .map(|a| a.iter().map(TimedJob::from_json).collect())
+                .unwrap_or_default();
+            let n = batch.len();
+            jobs.extend(batch);
+            if n < 50 {
+                break;
+            }
+        }
+        Ok(jobs)
+    }
+
+    /// A job's log; `Ok(None)` when the server has none (404).
+    pub fn log(&mut self, job: u64) -> Result<Option<String>, String> {
+        let url = format!("{}/jobs/{job}/logs", self.api());
+        self.retry(|c| c.http.get_text(&url, &c.token))
+    }
+}

@@ -56,7 +56,7 @@ static ANSI: LazyLock<Regex> = LazyLock::new(|| re(r"\x1b\[[0-9;]*[A-Za-z]"));
 static STAMP: LazyLock<Regex> = LazyLock::new(|| re(r"^\d{4}-\d\d-\d\dT[0-9:.]+Z ?"));
 
 /// A log line without the runner's timestamp and colours.
-fn plain(line: &str) -> String {
+pub(crate) fn plain(line: &str) -> String {
     let no_colour = ANSI.replace_all(line.trim_end_matches('\r'), "");
     STAMP.replace(&no_colour, "").to_string()
 }
