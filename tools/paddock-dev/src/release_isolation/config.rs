@@ -82,7 +82,8 @@ fn tracked(env: &Env, clone: &Path) -> Result<BTreeSet<String>, String> {
     Ok(out.1.split('\0').filter(|s| !s.is_empty()).map(str::to_string).collect())
 }
 
-/// Runs git in `dir` with the job's environment (and no repository override), returning the exit code and standard output.
+/// Runs git in `dir` with the job's environment (and no repository override), returning the exit code and standard output (after a
+/// failure, its standard error as well, so the finding says why).
 fn git(env: &Env, dir: &Path, args: &[&str]) -> Result<(Option<i32>, String), String> {
     let mut cmd = command("git");
     cmd.args(args).current_dir(dir).env_clear();
@@ -96,7 +97,8 @@ fn git(env: &Env, dir: &Path, args: &[&str]) -> Result<(Option<i32>, String), St
     }
     let out = run_bounded(cmd, Limits::new(GIT_TIMEOUT)).map_err(|e| format!("git cannot be run: {e}"))?;
     match out.outcome {
-        Outcome::Exited(s) => Ok((s.code(), out.stdout_text())),
+        Outcome::Exited(s) if s.success() => Ok((s.code(), out.stdout_text())),
+        Outcome::Exited(s) => Ok((s.code(), format!("{}{}", out.stdout_text(), out.stderr_text()))),
         _ => Err("git did not finish in time".to_string()),
     }
 }
@@ -350,7 +352,18 @@ pub(crate) fn npm(ctx: &mut Ctx) {
 
 /// `npm config get <key>` in the clone with the job's environment, at most 10 s. `Ok(None)` for `undefined` or nothing.
 fn npm_get(env: &Env, clone: &Path, key: &str) -> Result<Option<String>, String> {
-    let mut cmd = command(if cfg!(windows) { "npm.cmd" } else { "npm" });
+    // The npm of the job's own PATH, found here: a bare name is looked up by the system as well, and on Windows through the parent's
+    // PATH, so a runner with npm on its PATH would answer for a job whose PATH has none (the check then passed instead of saying
+    // it was broken; seen on the Windows runner, run 7904).
+    let name = if cfg!(windows) { "npm.cmd" } else { "npm" };
+    let program = env
+        .get("PATH")
+        .into_iter()
+        .flat_map(std::env::split_paths)
+        .map(|d| d.join(name))
+        .find(|p| p.is_file())
+        .ok_or_else(|| format!("cannot be run ({name} is not on the job's PATH)"))?;
+    let mut cmd = command(program);
     cmd.args(["config", "get", key]).current_dir(clone).env_clear();
     for (k, v) in &env.0 {
         cmd.env(k, v);

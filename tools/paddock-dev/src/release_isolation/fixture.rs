@@ -132,7 +132,6 @@ impl Leak {
             UserNpmrc,
             TauriFileTampered,
             NpmGlobalNpmrc,
-            NpmHomebrewLink,
             NpmMissing,
             TauriPinsMissing,
             AllowUnpinnedOnTag,
@@ -149,7 +148,14 @@ impl Leak {
             v.push(LinkJunction);
         }
         if cfg!(unix) {
-            v.extend([AngularLink, LinkRegistrySrc, LinkNodeModules, LinkTargetRelease, GitMissing]);
+            v.extend([
+                AngularLink,
+                LinkRegistrySrc,
+                LinkNodeModules,
+                LinkTargetRelease,
+                GitMissing,
+                NpmHomebrewLink,
+            ]);
         }
         v
     }
@@ -311,7 +317,10 @@ fn path_without(env: &mut Env, names: &[&str]) {
 impl Fixture {
     /// Builds a clean job under `root` (an existing, empty folder).
     pub fn build(root: &Path) -> Fixture {
-        let root = root.canonicalize().expect("root exists");
+        // Plain, not `\\?\C:\...`: the fixture hands these paths to git (HOME) and writes them into files, and git on Windows cannot open
+        // a config file through a verbatim path ("unknown error occurred while reading the configuration files").
+        assert!(root.exists(), "root exists");
+        let root = paddock_repo_graph::real_path(root);
         let home = root.join("home");
         let temp = root.join("job");
         let dev = root.join("tools-home").join("release-1234-bundle");
@@ -601,7 +610,7 @@ impl Fixture {
                 fs::create_dir_all(self.clone.join(".cargo")).expect(".cargo");
                 fs::write(
                     self.clone.join(".cargo").join("ci.toml"),
-                    format!("[build]\ntarget-dir = \"{}\"\nrustc-wrapper = \"x\"\n", self.target.display()),
+                    format!("[build]\ntarget-dir = '{}'\nrustc-wrapper = \"x\"\n", self.target.display()),
                 )
                 .expect("ci.toml");
             }
