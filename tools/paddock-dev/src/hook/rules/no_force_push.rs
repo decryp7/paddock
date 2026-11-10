@@ -3,9 +3,9 @@
 //! Ported from `.claude/hooks/no-force-push.sh`, whose regexes are the oracle (`oracle_tests`). The shell hook matched the text
 //! `git [options] push ... -f|--force|--force-with-lease[=x]|--force-if-includes` and `git push ... +src:dst` with no `;`, `&` or
 //! `|` in between; this rule reads the commands: any simple command with a `git` word, global options (an option may take the
-//! next word as its value), `push`, and a force flag or a `+src:dst` refspec among the rest of its words. A `+branch` refspec
-//! with no colon and a combined short flag such as `-fu` were not matched by the shell hook and are not matched here either
-//! (a gap kept for parity; the report names it).
+//! next word as its value), `push`, and a force flag or a `+refspec` among the rest of its words. The shell hook missed a `+branch`
+//! refspec with no colon and combined short flags (`-fu`, `-uf`, `-vf`); both are denied here (closed on purpose, recorded in
+//! `oracle_tests::DIFFERENCES`).
 
 use crate::hook::decision::Denial;
 use crate::hook::input::ToolCall;
@@ -66,18 +66,18 @@ fn find_push(words: &[Word]) -> Option<usize> {
     None
 }
 
+/// `-f`, a short cluster with an `f` (`-fu`, `-uf`, `-vf`; `f` is push's only short flag with that letter), or a long force
+/// option. Lease-based forces are force pushes.
 fn is_force_flag(t: &str) -> bool {
-    matches!(t, "-f" | "--force" | "--force-with-lease" | "--force-if-includes") || t.starts_with("--force-with-lease=")
+    matches!(t, "--force" | "--force-with-lease" | "--force-if-includes")
+        || t.starts_with("--force-with-lease=")
+        || t.strip_prefix('-')
+            .is_some_and(|c| !c.starts_with('-') && c.chars().all(|x| x.is_ascii_alphanumeric()) && c.contains('f'))
 }
 
-/// `+src:dst`: a plus, one or more name characters, a colon.
+/// `+src`, `+src:dst` or `+:dst`: a leading plus forces that ref.
 fn is_force_refspec(t: &str) -> bool {
-    let Some(rest) = t.strip_prefix('+') else { return false };
-    let run = rest
-        .chars()
-        .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '/' | '-'))
-        .count();
-    run > 0 && rest[run..].starts_with(':')
+    t.starts_with('+') && t.len() > 1
 }
 
 #[cfg(test)]
@@ -115,10 +115,10 @@ mod tests {
 
     #[test]
     fn a_plus_refspec_with_a_colon_is_refused() {
-        for spec in ["+main:main", "+HEAD:refs/heads/x", "+a.b/c_d-e:f"] {
+        for spec in ["+main:main", "+HEAD:refs/heads/x", "+a.b/c_d-e:f", "+main", "+:x", "+HEAD"] {
             assert!(denies(&format!("git push origin {spec}")), "{spec}");
         }
-        for spec in ["main:main", "+main", "+:x", "origin+main:x", ":old"] {
+        for spec in ["main:main", "+", "origin+main:x", ":old"] {
             assert!(!denies(&format!("git push origin {spec}")), "{spec}");
         }
     }
@@ -180,8 +180,27 @@ mod tests {
     }
 
     #[test]
-    fn the_old_gaps_are_kept_for_parity() {
-        for line in ["git push -fu origin x", "git push -uf origin x", "git push origin +main"] {
+    fn the_old_gaps_are_closed_and_other_short_flags_pass() {
+        for line in [
+            "git push -fu origin x",
+            "git push -uf origin x",
+            "git push -vf origin x",
+            "git push origin +main",
+            "git -c a=b push origin +main",
+            "git --git-dir=/x push -fu origin x",
+            "git -C /r push -uf origin x",
+            "git -C /r -c a=b --no-pager push --force-if-includes",
+        ] {
+            assert!(denies(line), "{line}");
+        }
+        for line in [
+            "git push -u origin x",
+            "git push -v",
+            "git push -n",
+            "git push --follow-tags",
+            "git push --no-verify",
+            "git push -d origin x",
+        ] {
             assert!(!denies(line), "{line}");
         }
     }

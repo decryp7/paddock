@@ -949,13 +949,25 @@ after 20 warm-up runs, release build with `CARGO_BUILD_JOBS=2`, Mac mini (arm64)
 | Installed hook, a denied call (a `while` loop that polls `pgrep -f`) | 4.00 ms | 4.89 ms | 5.58 ms | 14.69 ms |
 | Installed hook, a 6 KB commit command (heredoc in `$(...)`, then a push) | 4.04 ms | 4.96 ms | 9.85 ms | 15.15 ms |
 | Installed hook, malformed input (allowed, one stderr line) | 4.35 ms | 7.05 ms | 10.72 ms | 27.41 ms |
-| The shim `tools/githooks/claude-pre-tool-use` (`sh`, `git rev-parse`, then `exec` of the installed hook), an allowed call | 13.38 ms | 15.54 ms | 29.42 ms | 66.06 ms |
+| The first shim (`sh`, `git rev-parse`, then `exec` of the installed hook), an allowed call | 13.38 ms | 15.54 ms | 29.42 ms | 66.06 ms |
 | A `brush-parser` 0.4.0 probe binary that only parses one `while` loop (no rules) | 2.29 ms | 4.24 ms | 5.81 ms | 10.29 ms |
 
 The hook itself costs about 3 ms over the spawn floor, inside the plan's 4 to 6 ms range, and a longer command costs no more at the
-median (the lexer is linear, bounded at 1 MiB). Of the shim's 15.5 ms, about 10 ms is the `git rev-parse` that finds the common
-folder: that is the next cost to remove (read `.git` and its `gitdir:` line in `sh`, or have Claude Code's settings name the
-installed binary directly once install is guaranteed).
+median (the lexer is linear, bounded at 1 MiB). Of the first shim's 15.5 ms, about 10 ms was the `git rev-parse` that finds the
+common folder. The shim now finds it with shell builtins only (it walks up to `.git`; for a linked worktree it reads the
+`gitdir:` line of the `.git` file and cuts `/worktrees/<name>`; the deny-all fallback and the install-command exception are
+unchanged). Second run, same method, 300 runs, after that change (load average 18 to 20, busier than the first run, so its
+spawn floor is higher too):
+
+| Per call, second run | min | median | p90 | max |
+|---|---|---|---|---|
+| `/usr/bin/true` (the spawn floor) | 1.86 ms | 3.00 ms | 4.19 ms | 8.21 ms |
+| Installed hook, an allowed Bash call | 4.04 ms | 5.87 ms | 7.99 ms | 17.56 ms |
+| Installed hook, a 6 KB commit command | 3.65 ms | 5.20 ms | 6.56 ms | 10.99 ms |
+| The shim without `git`, an allowed call | 6.80 ms | 8.55 ms | 9.23 ms | 19.59 ms |
+
+The shim path falls from 15.5 ms to 8.6 ms at the median (about 2.7 ms over the hook alone, which is the `sh` start). The
+binary of this second run is 7,684,640 bytes (the rule changes added 688 bytes).
 
 | Binary size (`cargo build --release --locked`, `tools/paddock-dev`) | Bytes |
 |---|---|

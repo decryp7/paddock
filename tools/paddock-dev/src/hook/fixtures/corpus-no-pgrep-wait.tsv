@@ -51,7 +51,5 @@ allow	watch -n1 pgrep -f foo
 allow	while true; do sleep 1; pgrep -f foo; done
 allow	cargo test --workspace
 allow	while IFS= read -r line; do echo "$line"; done < <(pgrep -f foo)
-allow	while pgrep -u me -f foo; do sleep 1; done
-allow	while pgrep --full foo; do sleep 1; done
 allow	while pgrep -x foo && sleep 1; do :; done
 allow	./dev wait --plock build --max 10m

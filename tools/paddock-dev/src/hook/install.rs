@@ -529,12 +529,15 @@ mod tests {
     }
 
     #[test]
-    fn the_tracked_shim_is_the_text_install_writes_and_has_six_lines() {
+    fn the_tracked_shim_is_the_text_install_writes_and_starts_no_program() {
         let tracked = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../githooks/claude-pre-tool-use")).unwrap();
         assert_eq!(tracked, SHIM);
-        assert_eq!(SHIM.lines().count(), 6);
+        assert!(SHIM.lines().count() <= 8, "a shim is a few lines");
         assert!(SHIM.starts_with("#!/bin/sh\n"));
-        assert!(!SHIM.contains("bash") && !SHIM.contains("jq") && !SHIM.contains("python"));
+        // shell builtins only: no git (about 10 ms a call), no sed, no cat
+        for program in ["bash", "jq", "python", "git ", "sed ", "cat", "dirname"] {
+            assert!(!SHIM.contains(program), "{program}");
+        }
     }
 
     /// Runs the shim in `cwd` with a standard input of `input`, as Claude Code does. Returns standard output.
@@ -590,6 +593,74 @@ mod tests {
         // from a subfolder too
         let sub = f.root.join("tools");
         assert!(shim(&f, &sub, "x\n").starts_with("args: hook pre-tool-use"));
+    }
+
+    /// Runs the shim with an empty PATH, so any program it starts fails: only shell builtins and the final `exec` work.
+    #[cfg(unix)]
+    fn shim_without_path(f: &Fixture, cwd: &Path, project_dir: Option<&str>, input: &str) -> String {
+        let shim = f.root.join(SHIM_PATH);
+        let mut args = vec!["PATH=/nonexistent".to_string()];
+        if let Some(d) = project_dir {
+            args.push(format!("CLAUDE_PROJECT_DIR={d}"));
+        }
+        args.extend(["/bin/sh".to_string(), shim.to_string_lossy().into_owned()]);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        f.exec.run("env", &args, cwd, Some(input.as_bytes())).unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_shim_finds_the_common_folder_from_a_linked_worktree_without_starting_any_program() {
+        let f = fixture(true);
+        std::fs::write(f.root.join(SHIM_PATH), SHIM).unwrap();
+        // an installed "binary" that uses builtins only
+        std::fs::write(&f.exe, "#!/bin/sh\nIFS= read -r l\nprintf 'args: %s <%s>\\n' \"$*\" \"$l\"\n").unwrap();
+        install(&f.exec, &f.root, &f.exe, &Origin::Local).unwrap();
+        let wt = f.root.parent().unwrap().join("wt");
+        git(&f, &["worktree", "add", "-q", "-b", "other", wt.to_str().unwrap()]);
+        std::fs::write(wt.join(SHIM_PATH), SHIM).unwrap();
+        let want = "args: hook pre-tool-use <INPUT>\n";
+        // the primary, a subfolder of it, the linked worktree (its .git is a file), a subfolder of that
+        for cwd in [f.root.clone(), f.root.join("tools/paddock-dev"), wt.clone(), wt.join("tools")] {
+            assert_eq!(shim_without_path(&f, &cwd, None, "INPUT\n"), want, "{}", cwd.display());
+        }
+        // CLAUDE_PROJECT_DIR wins over the working folder
+        let elsewhere = f.exe.parent().unwrap().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        assert_eq!(shim_without_path(&f, &elsewhere, Some(wt.to_str().unwrap()), "INPUT\n"), want);
+        // a relative gitdir line (older git, or a moved worktree) is read relative to the worktree
+        let rel = f.root.parent().unwrap().join("rel");
+        std::fs::create_dir_all(&rel).unwrap();
+        std::fs::write(rel.join(".git"), "gitdir: ../repo/.git/worktrees/x\n").unwrap();
+        assert_eq!(shim_without_path(&f, &rel, Some(rel.to_str().unwrap()), "INPUT\n"), want);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_shim_still_denies_without_a_binary_a_repository_or_a_readable_git_file() {
+        let f = fixture(true);
+        std::fs::write(f.root.join(SHIM_PATH), SHIM).unwrap();
+        let denied = |cwd: &Path, project: Option<&str>| {
+            shim_without_path(&f, cwd, project, "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"}}\n")
+        };
+        assert!(denied(&f.root, None).contains("deny"), "no binary installed");
+        let outside = f.exe.parent().unwrap().join("not-a-repo");
+        std::fs::create_dir_all(&outside).unwrap();
+        assert!(denied(&outside, None).contains("deny"), "no repository");
+        // a relative project dir, an empty one and a .git file that names no worktree
+        assert!(denied(&outside, Some("relative/dir")).contains("deny"));
+        assert!(denied(&outside, Some("")).contains("deny"));
+        std::fs::write(outside.join(".git"), "gitdir: ../modules/x\n").unwrap();
+        assert!(denied(&outside, None).contains("deny"), "a submodule's git file");
+        std::fs::write(outside.join(".git"), "").unwrap();
+        assert!(denied(&outside, None).contains("deny"), "an empty git file");
+        let ok = shim_without_path(
+            &f,
+            &f.root,
+            None,
+            "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"./dev hooks install\"}}\n",
+        );
+        assert_eq!(ok, "", "the install command still passes");
     }
 
     #[test]

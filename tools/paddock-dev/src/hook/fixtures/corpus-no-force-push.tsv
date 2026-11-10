@@ -58,10 +58,6 @@ allow	ls -f
 allow	rm -f file
 allow	echo force
 allow	git push origin main 2>&1 | grep -f x
-allow	git push origin main -fx
-allow	git push origin +main
-allow	git push -fu origin feat
-allow	git push -uf origin feat
 allow	git commit -m "fix thing" && git push
 allow	git status --short | head
 allow	npm push -f

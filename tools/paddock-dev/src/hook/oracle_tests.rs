@@ -35,6 +35,21 @@ const DIFFERENCES: &[(&str, &str, &str)] = &[
     // A long option glued to its value and a quoted flag are still the flag.
     ("no-force-push", "allow", "git --work-tree=/w push -f"),
     ("no-force-push", "allow", "git push origin main '-f'"),
+    // Holes the old regexes had and the coordinator closed (2026-11-10): a `+refspec` with no colon, combined short flags,
+    // and `pgrep` options after a valued option or in long form.
+    ("no-force-push", "allow", "git push origin +main"),
+    ("no-force-push", "allow", "git push -fu origin feat"),
+    ("no-force-push", "allow", "git push -uf origin feat"),
+    ("no-force-push", "allow", "git push -vf origin main"),
+    ("no-force-push", "allow", "git push origin main -fx"),
+    ("no-force-push", "allow", "git push origin HEAD:refs/heads/x +y"),
+    ("no-force-push", "allow", "git -c a=b push origin +main"),
+    ("no-force-push", "allow", "git --git-dir=/x push -fu origin x"),
+    ("no-force-push", "allow", "git -C /r push -uf origin x"),
+    ("no-pgrep-wait", "allow", "while pgrep -u me -f foo; do sleep 1; done"),
+    ("no-pgrep-wait", "allow", "while pgrep --full foo; do sleep 1; done"),
+    ("no-pgrep-wait", "allow", "while pgrep foo -f; do :; done"),
+    ("no-pgrep-wait", "allow", "while pgrep -u me -fl foo; do :; done"),
     // The old regex stops at `;` and reads a loop condition of two commands as one.
     ("no-pgrep-wait", "allow", "while sleep 1; pgrep -f foo; do :; done"),
 ];

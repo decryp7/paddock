@@ -2,7 +2,7 @@
 //!
 //! `pgrep -f PATTERN` matches the waiting shell's own command line, so `while pgrep -f PATTERN; do sleep 5; done` never ends.
 //! Ported from `.claude/hooks/no-pgrep-wait.sh`, whose regexes are the oracle (`oracle_tests`). The shell hook matched the text
-//! `(while|until) ... pgrep -f` with no `;` in between; this rule reads the command: a `pgrep` with the `-f` flag inside the
+//! `(while|until) ... pgrep -f` with no `;` in between; this rule reads the command: a `pgrep` with `-f` or `--full` inside the
 //! condition of a `while` or `until` loop, that is, in the commands from the keyword up to the loop's `do`.
 
 use crate::hook::decision::Denial;
@@ -50,25 +50,21 @@ impl Rule for NoPgrepWait {
     }
 }
 
-/// The command runs `pgrep` with a flag cluster that has `f`, as the old regex read it: any number of words `-` plus letters and
-/// digits, then a word that starts `-`, letters and digits with an `f` among them. A `pgrep -u me -f x` is not read as `-f`.
+/// The command runs `pgrep` with `--full` or a short flag cluster that has `f` (`-f`, `-fl`, `-af`), anywhere among its options
+/// and arguments: `pgrep -u me -f x` and `pgrep x -f` poll the command line too. (The old regex stopped at the first option with
+/// a value; closed on purpose.)
 fn polls_full_command_line(cmd: &Simple) -> bool {
     cmd.words
         .iter()
         .enumerate()
         .filter(|(_, w)| basename(&w.text) == "pgrep")
         .any(|(k, _)| {
-            for w in &cmd.words[k + 1..] {
-                let Some(body) = w.text.strip_prefix('-') else { return false };
-                let run: String = body.chars().take_while(char::is_ascii_alphanumeric).collect();
-                if run.contains('f') {
-                    return true;
-                }
-                if run.len() != body.len() {
-                    return false;
-                }
-            }
-            false
+            cmd.words[k + 1..].iter().any(|w| {
+                let t = w.text.as_str();
+                t == "--full"
+                    || t.strip_prefix('-')
+                        .is_some_and(|b| !b.starts_with('-') && b.chars().take_while(char::is_ascii_alphanumeric).any(|c| c == 'f'))
+            })
         })
 }
 
@@ -87,19 +83,25 @@ mod tests {
 
     #[test]
     fn the_flag_cluster_is_read_as_the_old_regex_read_it() {
-        for yes in ["-f", "-fl", "-lf", "-af", "-x1f", "-n -o -f", "- -f", "-f=x"] {
+        for yes in [
+            "-f",
+            "-fl",
+            "-lf",
+            "-af",
+            "-x1f",
+            "-n -o -f",
+            "- -f",
+            "-f=x",
+            "-u me -f",
+            "-u me -fl",
+            "--full",
+            "--full -l",
+            "foo -f",
+            "-- -f",
+        ] {
             assert!(denies(&format!("while pgrep {yes} foo; do :; done")), "{yes}");
         }
-        for no in [
-            "foo",
-            "-x foo",
-            "-l",
-            "--full foo",
-            "-u me -f foo",
-            "-- -f foo",
-            "-F foo",
-            "-n 'a -f'",
-        ] {
+        for no in ["foo", "-x foo", "-l", "-F foo", "-n 'a -f'", "-u me foo", "--fullx"] {
             assert!(!denies(&format!("while pgrep {no}; do :; done")), "{no}");
         }
     }
