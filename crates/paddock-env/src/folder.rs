@@ -83,7 +83,7 @@ impl Refusal {
             }
             Refusal::OtherOwner { .. } => "it belongs to another user",
             Refusal::OpenToOthers { .. } => "other users can change it",
-            Refusal::OpenToOthersAcl { .. } => "its access list lets other users change it",
+            Refusal::OpenToOthersAcl { .. } => "its access list gives other users access",
             Refusal::OtherOwnerAccount { .. } => "it belongs to another user",
             Refusal::NotAFile => "it is not a regular file",
             Refusal::Parent(_) => "its parent folder can be changed by other users",
@@ -109,7 +109,7 @@ impl fmt::Display for Refusal {
                 write!(f, "it is owned by {who}, not by this account")
             }
             Refusal::OpenToOthersAcl { who } => {
-                write!(f, "its access list lets {who} in")
+                write!(f, "its access list grants access to {who}")
             }
             Refusal::Parent(inner) => write!(f, "its parent folder cannot be trusted: {inner}"),
             other => f.write_str(other.reason()),

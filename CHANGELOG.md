@@ -29,6 +29,10 @@ Conventional Commits; one semver tag for the whole repo.
   `directory_inherit`, with or without `only_inherit`) is refused with every right, because it would make each file written
   there readable; the refusal names the inherited entry and the advice says how to remove it. The Windows rename also falls
   back on `STATUS_INVALID_INFO_CLASS`, `STATUS_NOT_SUPPORTED` and `STATUS_INVALID_DEVICE_REQUEST`.
+- Third round: the macOS ACL of a folder's parent is judged by the parent rule only (an entry that lets others delete a child, change
+  its permissions or take it over refuses, wrapped as a parent refusal; a read entry that is inherited does not); the ACL
+  refusal wording is "grants access to ..."; `paddock-ipc`'s peer-facts test no longer expects the primary gid in the
+  supplementary group list (it fails under `setpriv --clear-groups`).
 
 ### Pitwall: no test double or test switch in the shipped build (ADR 0073, rule 73, WP-P)
 - Removes P1 to P6 of ADR 0073's Pitwall survey; the register and the shared crates follow.

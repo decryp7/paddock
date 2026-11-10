@@ -203,23 +203,22 @@ impl Dir {
     }
 
     /// Owner and mode of this folder from its descriptor, plus the macOS ACL check.
-    fn facts(&self, scope: AclScope, me: u32) -> Result<FolderFacts, Fail> {
-        acl_check(&self.0, scope, me)?;
+    fn facts(&self, me: u32) -> Result<FolderFacts, Fail> {
+        acl_check(&self.0, AclScope::Folder, me)?;
         Ok(facts_of(&fstat(&self.0)?))
     }
 
     /// The folder belongs to `who` and no one else can write to it.
     pub(super) fn check(&self, who: &Account) -> Result<(), Fail> {
-        Ok(crate::folder::decide(
-            self.facts(AclScope::Folder, *who)?,
-            *who,
-        )?)
+        Ok(crate::folder::decide(self.facts(*who)?, *who)?)
     }
 
     /// The folder's parent cannot be used to rename or replace the folder.
     pub(super) fn check_parent(&self, who: &Account) -> Result<(), Fail> {
-        let facts = self.parent()?.facts(AclScope::Folder, *who)?;
-        Ok(parent_decision(facts, *who).map_err(|r| Refusal::Parent(Box::new(r)))?)
+        let parent = self.parent()?;
+        let wrap = |r| Refusal::Parent(Box::new(r));
+        acl_check(&parent.0, AclScope::Parent, *who).map_err(wrap)?;
+        Ok(parent_decision(facts_of(&fstat(&parent.0)?), *who).map_err(wrap)?)
     }
 }
 
@@ -252,6 +251,9 @@ pub(super) fn parent_decision(facts: FolderFacts, uid: u32) -> Result<(), Refusa
 enum AclScope {
     Folder,
     File,
+    /// The folder's parent: only the rights that let others delete, rename or take over a child, on entries that apply to the
+    /// parent itself (inherit flags widen nothing here; the Windows `PARENT_WRITE` rule).
+    Parent,
 }
 
 /// macOS extended ACLs: an allow entry for another principal is refused when it carries a right that matters for `scope`
@@ -291,8 +293,24 @@ fn acl_check(fd: &OwnedFd, scope: AclScope, me: u32) -> Result<(), Refusal> {
         1 << 12,
         1 << 13,
     ];
-    // READ_DATA, EXECUTE, READ_ATTRIBUTES, READ_EXTATTRIBUTES, READ_SECURITY: with the write rights, every right.
-    const READ_RIGHTS: [libc::c_uint; 5] = [1 << 1, 1 << 3, 1 << 7, 1 << 9, 1 << 11];
+    // The write rights plus READ_DATA, EXECUTE, READ_ATTRIBUTES, READ_EXTATTRIBUTES, READ_SECURITY: every right.
+    const ALL_RIGHTS: [libc::c_uint; 13] = [
+        1 << 2,
+        1 << 4,
+        1 << 5,
+        1 << 6,
+        1 << 8,
+        1 << 10,
+        1 << 12,
+        1 << 13,
+        1 << 1,
+        1 << 3,
+        1 << 7,
+        1 << 9,
+        1 << 11,
+    ];
+    // DELETE_CHILD, WRITE_SECURITY, CHANGE_OWNER: what lets another principal remove, replace or take over a child of the parent.
+    const PARENT_RIGHTS: [libc::c_uint; 3] = [1 << 6, 1 << 12, 1 << 13];
     const ID_TYPE_UID: libc::c_int = 0;
     // SAFETY: a valid descriptor; a null result means no extended ACL.
     let acl = unsafe { acl_get_fd_np(fd.as_raw_fd(), ACL_TYPE_EXTENDED) };
@@ -320,7 +338,8 @@ fn acl_check(fd: &OwnedFd, scope: AclScope, me: u32) -> Result<(), Refusal> {
         let only_inherit = flag(ACL_ENTRY_ONLY_INHERIT);
         // What a new file or folder made here would inherit: it counts with every right, whatever the scope (a read entry
         // that new files inherit makes every file written here readable by that principal).
-        let inherited = flag(ACL_ENTRY_FILE_INHERIT) || flag(ACL_ENTRY_DIRECTORY_INHERIT);
+        let inherited = !matches!(scope, AclScope::Parent)
+            && (flag(ACL_ENTRY_FILE_INHERIT) || flag(ACL_ENTRY_DIRECTORY_INHERIT));
         // SAFETY: as above.
         if unsafe { acl_get_permset(entry, &mut perms) } != 0 {
             continue;
@@ -330,14 +349,14 @@ fn acl_check(fd: &OwnedFd, scope: AclScope, me: u32) -> Result<(), Refusal> {
             continue;
         }
         let every_right = matches!(scope, AclScope::File) || inherited;
-        let rights = WRITE_RIGHTS.iter().chain(if every_right {
-            READ_RIGHTS.iter()
-        } else {
-            [].iter()
-        });
+        let rights: &[libc::c_uint] = match scope {
+            AclScope::Parent => &PARENT_RIGHTS,
+            _ if every_right => &ALL_RIGHTS,
+            _ => &WRITE_RIGHTS,
+        };
         // SAFETY: `perms` is the entry's live permission set.
         if !rights
-            .into_iter()
+            .iter()
             .any(|&r| unsafe { acl_get_perm_np(perms, r) } == 1)
         {
             continue;

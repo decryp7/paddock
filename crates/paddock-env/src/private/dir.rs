@@ -534,6 +534,65 @@ mod common_tests {
         }
     }
 
+    /// Review (delta): the parent is judged by the parent rule: only rights that let others delete, rename or take over a child
+    /// refuse, wrapped as a parent refusal; a harmless inheritable read entry does not refuse every folder below it.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_macos_parent_acl_is_judged_by_the_parent_rule() {
+        let t = temp();
+        let chmod = |entry: &str, p: &Path| {
+            let out = std::process::Command::new("/bin/chmod")
+                .args(["+a", entry, p.to_str().unwrap()])
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{entry}");
+        };
+        let parent = t.path().join("parent");
+        let child = parent.join("d");
+        PrivateDir::create_all(&child).unwrap();
+        for entry in [
+            "everyone allow read,file_inherit",
+            "everyone allow read,file_inherit,directory_inherit,only_inherit",
+        ] {
+            chmod(entry, &parent);
+            PrivateDir::open(&child, Links::Refuse).unwrap();
+            PrivateDir::create_all(&child).unwrap();
+            assert_eq!(
+                std::process::Command::new("/bin/chmod")
+                    .args(["-N", parent.to_str().unwrap()])
+                    .status()
+                    .unwrap()
+                    .code(),
+                Some(0)
+            );
+        }
+        for entry in [
+            "everyone allow delete_child",
+            "everyone allow writesecurity",
+            "everyone allow chown",
+        ] {
+            chmod(entry, &parent);
+            for result in [
+                PrivateDir::open(&child, Links::Refuse),
+                PrivateDir::create_all(&child),
+            ] {
+                let why = refusal(result.unwrap_err());
+                assert!(
+                    matches!(&why, Refusal::Parent(inner) if matches!(**inner, Refusal::OpenToOthersAcl { .. })),
+                    "{entry}: {why:?}"
+                );
+            }
+            assert_eq!(
+                std::process::Command::new("/bin/chmod")
+                    .args(["-N", parent.to_str().unwrap()])
+                    .status()
+                    .unwrap()
+                    .code(),
+                Some(0)
+            );
+        }
+    }
+
     #[test]
     fn io_and_refusal_errors_display_with_their_path() {
         let e = PrivateError::Io {
