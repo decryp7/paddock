@@ -19,6 +19,7 @@ pub mod fixture;
 pub mod identity;
 pub mod ledger;
 pub mod links;
+pub mod pathfind;
 pub mod setup;
 pub mod verify;
 
