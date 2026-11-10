@@ -3976,6 +3976,7 @@ dependencies = [
  "paddock-commands",
  "paddock-env",
  "paddock-log",
+ "paddock-proc",
  "paddock-testkit",
  "paddock-workspace-hack",
  "serde",

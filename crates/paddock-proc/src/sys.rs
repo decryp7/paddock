@@ -99,6 +99,27 @@ mod unix {
         (st.st_mode & libc::S_IFMT == libc::S_IFIFO).then_some(st.st_ino)
     }
 
+    /// Whether the OS knows `pid`, by `kill(pid, 0)` (no signal is sent): ESRCH is no such process, EPERM a process this user
+    /// may not signal.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "signal 0 only asks whether the pid exists; nothing is sent"
+    )]
+    pub fn pid_exists(pid: u32) -> super::Exists {
+        // A pid that is not a positive pid_t cannot be held by any process (0 would signal our own group).
+        let Some(pid) = libc::pid_t::try_from(pid).ok().filter(|p| *p > 0) else {
+            return super::Exists::No;
+        };
+        // SAFETY: kill takes two integers; signal 0 checks the pid and delivers nothing.
+        if unsafe { libc::kill(pid, 0) } == 0 {
+            return super::Exists::Yes;
+        }
+        match std::io::Error::last_os_error().raw_os_error() {
+            Some(libc::ESRCH) => super::Exists::No,
+            _ => super::Exists::Refused,
+        }
+    }
+
     pub const SIGTERM: i32 = libc::SIGTERM;
     pub const SIGKILL: i32 = libc::SIGKILL;
 
@@ -267,6 +288,113 @@ mod unix {
 
 #[cfg(unix)]
 pub use unix::*;
+
+/// What a primitive that tells "no such process" from "refused" says of a pid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Exists {
+    /// A process holds the pid.
+    Yes,
+    /// The OS says no process holds it.
+    No,
+    /// The OS refused the look (access denied) or said nothing clear: nothing is known.
+    Refused,
+}
+
+/// Whether the OS knows `pid`: `OpenProcess`, where ERROR_INVALID_PARAMETER is no such process and ACCESS_DENIED a refusal.
+#[cfg(windows)]
+pub fn pid_exists(pid: u32) -> Exists {
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, ERROR_INVALID_PARAMETER, GetLastError, STILL_ACTIVE,
+    };
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    // SAFETY: OpenProcess takes plain values; the handle is closed below.
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if !h.is_null() {
+            // A process that exited keeps its pid while anything holds a handle to it: only a still-active one exists.
+            // STILL_ACTIVE (259) can also be a real exit code: such an exited process reads as still there (Yes here, so
+            // never Gone, and not known in `presence` when sysinfo does not list it). That is the deliberate, safe direction.
+            let mut code = 0u32;
+            let got = GetExitCodeProcess(h, &raw mut code) != 0;
+            CloseHandle(h);
+            return match (got, code == STILL_ACTIVE as u32) {
+                (true, true) => Exists::Yes,
+                (true, false) => Exists::No,
+                (false, _) => Exists::Refused,
+            };
+        }
+        if GetLastError() == ERROR_INVALID_PARAMETER {
+            Exists::No
+        } else {
+            Exists::Refused
+        }
+    }
+}
+
+/// Whether the process under `pid` is a zombie (or dead): it only waits to be reaped, and runs nothing. Read from the OS's own
+/// state (macOS `kp_proc.p_stat`, Linux `/proc/<pid>/stat`); false when it cannot be read or is not such a process.
+#[cfg(target_os = "macos")]
+pub fn is_zombie(pid: u32) -> bool {
+    let Ok(pid) = libc::c_int::try_from(pid) else {
+        return false;
+    };
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_PID, pid];
+    let mut buf = [0u64; 128];
+    let mut len = std::mem::size_of_val(&buf);
+    // SAFETY: the kernel writes at most `len` bytes into `buf`, which is that large, and sets `len` to what it wrote.
+    let rc = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as libc::c_uint,
+            buf.as_mut_ptr().cast(),
+            &raw mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    zombie_from_kinfo(rc, len, &buf)
+}
+
+/// Linux: the state letter of `/proc/<pid>/stat` is Z (zombie) or X (dead).
+#[cfg(target_os = "linux")]
+pub fn is_zombie(pid: u32) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|t| zombie_from_stat(&t))
+}
+
+/// No state read here: not known to be a zombie.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn is_zombie(_pid: u32) -> bool {
+    false
+}
+
+/// Whether a `kinfo_proc` the sysctl answered with `rc` and `len` bytes says the process is a zombie: `kp_proc.p_stat` is the
+/// byte at offset 36 (`offsetof(struct kinfo_proc, kp_proc.p_stat)` in the macOS SDK, 64-bit) and `SZOMB` is 5.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn zombie_from_kinfo(rc: i32, len: usize, buf: &[u64]) -> bool {
+    const P_STAT_OFFSET: usize = 36;
+    const SZOMB: u8 = 5;
+    if rc != 0 || len <= P_STAT_OFFSET || buf.len() * 8 <= P_STAT_OFFSET {
+        return false;
+    }
+    let byte = buf[P_STAT_OFFSET / 8].to_ne_bytes()[P_STAT_OFFSET % 8];
+    byte == SZOMB
+}
+
+/// Whether the text of `/proc/<pid>/stat` has state Z or X: the state is the first letter after the command's closing `)`.
+#[cfg(any(target_os = "linux", test))]
+pub(crate) fn zombie_from_stat(text: &str) -> bool {
+    text.rfind(')')
+        .and_then(|i| text[i + 1..].trim_start().chars().next())
+        .is_some_and(|c| c == 'Z' || c == 'X')
+}
+
+/// No primitive here: nothing is known.
+#[cfg(not(any(unix, windows)))]
+pub fn pid_exists(_pid: u32) -> Exists {
+    Exists::Refused
+}
 
 /// A close request to `id` alone (`taskkill` without `/T` or `/F`: never a tree, whose members `taskkill` would find by
 /// parent pids that may have been handed on). A handle with `SYNCHRONIZE` is held across the `taskkill` call, after its

@@ -71,9 +71,38 @@ impl InstanceScope {
     }
 }
 
-/// Returns the start time (seconds since the Unix epoch) of the process with
-/// this PID, or `None` when no such process exists.
-pub type Probe<'a> = &'a dyn Fn(u32) -> Option<u64>;
+/// What a look at the process table found for one PID. Three-valued because
+/// "could not look" is not "gone" (rule 53).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Look {
+    /// No process has this PID.
+    Gone,
+    /// A process has it, started at this time (seconds since the Unix epoch).
+    Started(u64),
+    /// The process table could not be read: nothing is known.
+    Unknown,
+}
+
+impl Look {
+    /// The start time when a process was seen.
+    pub fn started(self) -> Option<u64> {
+        match self {
+            Look::Started(t) => Some(t),
+            Look::Gone | Look::Unknown => None,
+        }
+    }
+}
+
+#[cfg(test)]
+impl From<Option<u64>> for Look {
+    /// A table that was read: a start time, or nobody.
+    fn from(seen: Option<u64>) -> Look {
+        seen.map_or(Look::Gone, Look::Started)
+    }
+}
+
+/// Looks up the process with this PID in the process table.
+pub type Probe<'a> = &'a dyn Fn(u32) -> Look;
 
 /// The running process recorded in `running.marker`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -146,16 +175,30 @@ pub enum PreviousRun {
     Crashed,
     /// The marker's process is still alive (another instance, or one still exiting).
     StillRunning,
+    /// The process table could not be read: whether the marker's process runs is not known (neither crashed nor running).
+    Unknown,
 }
 
 /// Whether the marker's process is alive: the PID exists and, when the marker
 /// recorded it, with the same start time (else the PID was reused).
-fn alive(m: &Marker, probe: Probe<'_>) -> bool {
+fn alive(m: &Marker, probe: Probe<'_>) -> Liveness {
     match (probe(m.pid), m.started_at) {
-        (None, _) => false,
-        (Some(_), None) => true,
-        (Some(now), Some(then)) => now.abs_diff(then) <= START_TOLERANCE_SECS,
+        (Look::Gone, _) => Liveness::Dead,
+        (Look::Unknown, _) => Liveness::Unknown,
+        // A start time of 0 is no start time (the process could not be read), not a pid that was reused.
+        (Look::Started(0), _) => Liveness::Unknown,
+        (Look::Started(_), None) => Liveness::Alive,
+        (Look::Started(now), Some(then)) if now.abs_diff(then) <= START_TOLERANCE_SECS => Liveness::Alive,
+        (Look::Started(_), Some(_)) => Liveness::Dead,
     }
+}
+
+/// Whether a marker's process runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Liveness {
+    Alive,
+    Dead,
+    Unknown,
 }
 
 /// Decides how the previous run ended. A marker with this process's own PID
@@ -164,25 +207,47 @@ pub fn previous_run(marker: MarkerFile, own_pid: u32, probe: Probe<'_>) -> Previ
     match marker {
         MarkerFile::Missing => PreviousRun::Clean,
         MarkerFile::Unreadable => PreviousRun::Crashed,
-        MarkerFile::Found(m) if m.pid != own_pid && alive(&m, probe) => PreviousRun::StillRunning,
+        MarkerFile::Found(m) if m.pid != own_pid => match alive(&m, probe) {
+            Liveness::Alive => PreviousRun::StillRunning,
+            Liveness::Dead => PreviousRun::Crashed,
+            Liveness::Unknown => PreviousRun::Unknown,
+        },
         MarkerFile::Found(_) => PreviousRun::Crashed,
     }
 }
 
-/// The OS's process table (the production [`Probe`]).
-pub fn os_probe(pid: u32) -> Option<u64> {
+/// The OS's process table (the production [`Probe`]). A process sysinfo could not read (start time 0 or status Unknown: macOS
+/// lists another user's root process so) is `Unknown`, and one it does not list is `Gone` only when `paddock_proc` confirms
+/// it with an OS answer that tells "no such process" from "refused".
+pub fn os_probe(pid: u32) -> Look {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
-    let pid = Pid::from_u32(pid);
-    let mut sys = System::new()
-        .inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; the start time of pid {pid} is unknown"))
-        .ok()?;
-    sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), false, ProcessRefreshKind::nothing());
-    sys.process(pid).map(|p| p.start_time())
+    let id = Pid::from_u32(pid);
+    let Ok(mut sys) = System::new()
+        .inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; the start time of pid {id} is unknown"))
+    else {
+        return Look::Unknown;
+    };
+    sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[id]), false, ProcessRefreshKind::nothing());
+    look_from(sys.process(id).map(|p| (p.start_time(), p.status())), || {
+        paddock_proc::presence(pid)
+    })
 }
 
-/// Removes the folders of separate instances that are no longer alive (and any
-/// left with this process's PID, which can only be stale). Folders whose name
-/// is not a PID are left alone. Returns how many were removed. Never fails.
+/// [`os_probe`] over what sysinfo listed (start time, status) and the confirmation asked when it listed nothing.
+fn look_from(seen: Option<(u64, sysinfo::ProcessStatus)>, confirm_absent: impl FnOnce() -> paddock_proc::Presence) -> Look {
+    match seen {
+        Some((0, _) | (_, sysinfo::ProcessStatus::Unknown(_))) => Look::Unknown,
+        Some((started, _)) => Look::Started(started),
+        None => match confirm_absent() {
+            paddock_proc::Presence::Gone => Look::Gone,
+            paddock_proc::Presence::Running | paddock_proc::Presence::Unknown => Look::Unknown,
+        },
+    }
+}
+
+/// Removes the folders of separate instances seen to be gone, and any left with
+/// this process's PID, which can only be stale. An unreadable process table
+/// keeps every folder. Folders whose name is not a PID are left alone. Returns how many were removed. Never fails.
 pub fn prune_instances(data: &Path, own_pid: u32, probe: Probe<'_>) -> usize {
     let Ok(entries) = std::fs::read_dir(data.join(INSTANCES_DIR)) else {
         return 0;
@@ -198,9 +263,10 @@ pub fn prune_instances(data: &Path, own_pid: u32, probe: Probe<'_>) -> usize {
         let path = entry.path();
         let live = pid != own_pid
             && match MarkerFile::read(&path.join(MARKER)) {
-                MarkerFile::Found(m) if m.pid == pid => alive(&m, probe),
+                // Only a process seen gone loses its folder: an unreadable table keeps it (rule 53).
+                MarkerFile::Found(m) if m.pid == pid => alive(&m, probe) != Liveness::Dead,
                 // Being created right now, or damaged: decide by the PID alone.
-                _ => probe(pid).is_some(),
+                _ => probe(pid) != Look::Gone,
             };
         if !live && std::fs::remove_dir_all(&path).is_ok() {
             removed += 1;
@@ -241,7 +307,7 @@ impl Lifecycle {
     pub fn begin_with(data: Option<PathBuf>, safe_mode: bool, scope: InstanceScope, own_pid: u32, probe: Probe<'_>) -> Lifecycle {
         let own = Marker {
             pid: own_pid,
-            started_at: probe(own_pid),
+            started_at: probe(own_pid).started(),
         };
         if let Some(d) = &data {
             let pruned = prune_instances(d, own_pid, probe);
@@ -258,6 +324,9 @@ impl Lifecycle {
             match previous_run(MarkerFile::read(&d.join(MARKER)), own_pid, probe) {
                 PreviousRun::Clean => {}
                 PreviousRun::Crashed => previous_crash = true,
+                PreviousRun::Unknown => {
+                    log::warn!("Whether the previous run of Debrief ended cleanly is not known: the process table could not be read")
+                }
                 PreviousRun::StillRunning => {
                     log::info!("Another Debrief process still holds the running marker; taking it over")
                 }
@@ -1158,8 +1227,8 @@ mod tests {
     }
 
     /// A fake process table: PID → start time.
-    fn table(procs: &[(u32, u64)]) -> impl Fn(u32) -> Option<u64> + '_ {
-        move |pid| procs.iter().find(|(p, _)| *p == pid).map(|(_, t)| *t)
+    fn table(procs: &[(u32, u64)]) -> impl Fn(u32) -> Look + '_ {
+        move |pid| procs.iter().find(|(p, _)| *p == pid).map(|(_, t)| *t).into()
     }
 
     fn marker(pid: u32, started_at: Option<u64>) -> MarkerFile {
@@ -1240,15 +1309,71 @@ mod tests {
     }
 
     #[test]
+    fn an_unreadable_process_table_is_not_a_crash() {
+        let unreadable = |_: u32| Look::Unknown;
+        assert_eq!(previous_run(marker(5, Some(1_000)), 9, &unreadable), PreviousRun::Unknown);
+        let zero = |_: u32| Look::Started(0);
+        assert_eq!(
+            previous_run(marker(5, Some(1_000)), 9, &zero),
+            PreviousRun::Unknown,
+            "start 0 is no start time"
+        );
+    }
+
+    #[test]
+    fn pruning_keeps_every_folder_when_the_process_table_cannot_be_read() {
+        let d = temp("prune-unknown");
+        let instances = d.join(INSTANCES_DIR);
+        for pid in [101u32, 102] {
+            std::fs::create_dir_all(instances.join(pid.to_string())).unwrap();
+        }
+        // 101 has a marker, 102 has none (decided by the pid alone).
+        write_marker(
+            &instances.join("101"),
+            &Marker {
+                pid: 101,
+                started_at: Some(1_000),
+            },
+        )
+        .unwrap();
+        let unreadable = |_: u32| Look::Unknown;
+        assert_eq!(prune_instances(&d, 300, &unreadable), 0);
+        let zero = |_: u32| Look::Started(0);
+        assert_eq!(prune_instances(&d, 300, &zero), 0);
+        assert!(instances.join("101").exists() && instances.join("102").exists());
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn only_a_confirmed_absence_is_gone_and_an_unreadable_listing_is_unknown() {
+        use paddock_proc::Presence;
+        use sysinfo::ProcessStatus::{Run, Unknown as Unk};
+        let never = || panic!("a listed process needs no confirmation");
+        assert_eq!(look_from(Some((7, Run)), never), Look::Started(7));
+        assert_eq!(look_from(Some((0, Run)), never), Look::Unknown);
+        assert_eq!(look_from(Some((7, Unk(0))), never), Look::Unknown);
+        assert_eq!(look_from(None, || Presence::Gone), Look::Gone);
+        assert_eq!(look_from(None, || Presence::Unknown), Look::Unknown);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_os_probe_never_reads_a_process_it_may_not_see_as_started_at_zero_or_gone() {
+        let seen = os_probe(1);
+        assert_ne!(seen, Look::Started(0), "start time 0 is not a start time");
+        assert_ne!(seen, Look::Gone, "pid 1 runs");
+    }
+
+    #[test]
     fn the_os_probe_sees_this_process_only_while_it_runs() {
-        let started = os_probe(std::process::id()).expect("this process exists");
+        let started = os_probe(std::process::id()).started().expect("this process exists");
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
         assert!(started <= now + START_TOLERANCE_SECS && now - started < 24 * 3600);
-        assert_eq!(os_probe(std::process::id()), Some(started), "stable between reads");
-        assert_eq!(os_probe(4_000_000_000), None);
+        assert_eq!(os_probe(std::process::id()), Look::Started(started), "stable between reads");
+        assert_eq!(os_probe(4_000_000_000), Look::Gone);
     }
 
     #[test]

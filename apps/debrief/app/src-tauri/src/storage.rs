@@ -34,7 +34,9 @@ use walk::Budget;
 
 /// When this process started (whole seconds, rounded down), so files of this run are recognised.
 fn session_start() -> Option<SystemTime> {
-    crate::lifecycle::os_probe(std::process::id()).map(|secs| UNIX_EPOCH + Duration::from_secs(secs))
+    crate::lifecycle::os_probe(std::process::id())
+        .started()
+        .map(|secs| UNIX_EPOCH + Duration::from_secs(secs))
 }
 
 /// Resolves every folder of the categories (see the module docs).

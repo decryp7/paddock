@@ -2,7 +2,7 @@
 //! behind `ui_checkpoint`, and the clean exit.
 
 use super::*;
-use crate::lifecycle::{InstanceScope, Start};
+use crate::lifecycle::{InstanceScope, Look, Start};
 use crate::safe_mode::Mode;
 use paddock_log::CrashMarker;
 use std::path::Path;
@@ -18,7 +18,7 @@ fn begin(dir: &Path, pid: u32, alive: &[u32]) -> Lifecycle {
             app_version: "1.0.0",
         },
         pid,
-        &move |p| alive.contains(&p).then_some(1000),
+        &move |p| Look::from(alive.contains(&p).then_some(1000)),
     )
 }
 
@@ -173,7 +173,7 @@ fn a_safe_mode_run_reports_it_without_a_notice() {
             app_version: "1.0.0",
         },
         300,
-        &|_| Some(1),
+        &|_| Look::Started(1),
     );
     let seen = Shared::default();
     let app = app_after(life, &seen);

@@ -62,19 +62,27 @@ impl Supervisor {
             StopReason::User => "you",
         };
         if let Some(r) = self.runners.get_mut(name) {
-            r.log.supervisor(
-                now,
-                &format!(
+            let line = if d.unconfirmed {
+                format!(
+                    "could not confirm that {} (process {}, running {}) stopped, asked by {who}: {}",
+                    d.name,
+                    d.pid,
+                    age(d.age_ms),
+                    d.rule
+                )
+            } else {
+                format!(
                     "stopped {} (process {}, running {}) by {who}: {}{}",
                     d.name,
                     d.pid,
                     age(d.age_ms),
                     d.rule,
                     if d.forced { "; it ignored the request and was ended" } else { "" }
-                ),
-            );
+                )
+            };
+            r.log.supervisor(now, &line);
         }
-        let rule = if d.by == StopReason::User && !d.rule.contains("could not be ended") {
+        let rule = if d.by == StopReason::User && !d.rule.contains("could not be ended") && !d.unconfirmed {
             "you".to_string()
         } else {
             d.rule.clone()
