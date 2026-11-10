@@ -1,0 +1,506 @@
+//! add, claim, reassign, release and drop: ADR 0083 §1 and R8's worktree cases.
+use super::Fixture;
+
+fn p(path: &std::path::Path) -> &str {
+    path.to_str().unwrap()
+}
+
+#[test]
+fn add_makes_a_locked_worktree_with_an_owner_note_on_a_new_branch() {
+    let fx = Fixture::new();
+    let path = fx.path("w1");
+    let r = fx.dev(&[
+        "worktree",
+        "add",
+        p(&path),
+        "-b",
+        "feat/w1",
+        "origin/main",
+        "--owner",
+        "implementer:RT-3",
+    ]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert_eq!(r.json["path"], p(&path));
+    assert_eq!(r.json["branch"], "feat/w1");
+    assert_eq!(r.json["locked"], true);
+    assert_eq!(fx.git(&path, &["rev-parse", "--abbrev-ref", "HEAD"]), "feat/w1");
+    assert_eq!(
+        fx.git(&path, &["rev-parse", "HEAD"]),
+        fx.git(&fx.primary, &["rev-parse", "origin/main"])
+    );
+    let reason = fx.lock_reason(&path).expect("locked");
+    for part in ["owner=implementer:RT-3", "branch=feat/w1", "created=", "by=coordinator", "base="] {
+        assert!(reason.contains(part), "{part} in {reason}");
+    }
+    // The coordinator made it: nobody has claimed it yet.
+    assert_eq!(fx.owner_of(&path), None);
+}
+
+#[test]
+fn add_by_an_agent_claims_the_new_worktree() {
+    let fx = Fixture::new();
+    let path = fx.path("w1");
+    let r = fx.dev(&[
+        "worktree",
+        "add",
+        p(&path),
+        "-b",
+        "w1",
+        "origin/main",
+        "--owner",
+        "reviewer:x",
+        "--agent",
+        "agent-A",
+        "--agent-type",
+        "reviewer",
+    ]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert_eq!(fx.owner_of(&path).as_deref(), Some("agent-A"));
+    assert_eq!(fx.owners()["owners"][p(&path)]["agent_type"], "reviewer");
+    assert!(fx.lock_reason(&path).unwrap().contains("by=agent:agent-A"));
+}
+
+#[test]
+fn add_detach_makes_a_review_copy_with_no_branch() {
+    let fx = Fixture::new();
+    let path = fx.path("copy");
+    let r = fx.dev(&[
+        "worktree",
+        "add",
+        p(&path),
+        "origin/main",
+        "--detach",
+        "--owner",
+        "reviewer:RT-3",
+        "--agent",
+        "agent-R",
+    ]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert_eq!(r.json["branch"], serde_json::Value::Null);
+    assert!(!fx.git_ok(&path, &["symbolic-ref", "-q", "HEAD"]), "HEAD must be detached");
+    assert_eq!(
+        fx.git(&path, &["rev-parse", "HEAD"]),
+        fx.git(&fx.primary, &["rev-parse", "origin/main"])
+    );
+    assert!(fx.lock_reason(&path).unwrap().contains("branch=detached"));
+}
+
+#[test]
+fn add_needs_a_branch_or_detach_and_not_both() {
+    let fx = Fixture::new();
+    let path = fx.path("w");
+    let neither = fx.dev(&["worktree", "add", p(&path), "origin/main", "--owner", "a:b"]);
+    assert_eq!(neither.code, 2, "{}", neither.err);
+    let both = fx.dev(&["worktree", "add", p(&path), "-b", "x", "origin/main", "--detach", "--owner", "a:b"]);
+    assert_eq!(both.code, 2, "{}", both.err);
+    assert!(!path.exists());
+}
+
+#[test]
+fn add_refuses_a_bad_owner_and_an_unknown_base_and_makes_nothing() {
+    let fx = Fixture::new();
+    let path = fx.path("w");
+    for owner in ["implementer", "a b:c", "a:b;c"] {
+        let r = fx.dev(&["worktree", "add", p(&path), "-b", "w", "origin/main", "--owner", owner]);
+        assert_eq!(r.code, 2, "{owner}: {}", r.err);
+    }
+    let r = fx.dev(&["worktree", "add", p(&path), "-b", "w", "origin/nope", "--owner", "a:b"]);
+    assert_eq!(r.code, 2, "{}", r.err);
+    assert!(r.err.contains("origin/nope"), "{}", r.err);
+    assert!(!path.exists());
+    assert!(!fx.git_ok(&fx.primary, &["rev-parse", "--verify", "-q", "refs/heads/w"]));
+}
+
+#[test]
+fn add_refuses_an_existing_path_and_never_rebinds_it() {
+    // R8: agent-B's `add` of a name that exists, while the owner map says agent-A, changes nothing.
+    let fx = Fixture::new();
+    let path = fx.add("w1");
+    assert_eq!(fx.claim(&path, "agent-A").code, 0);
+    let before = fx.owners();
+    let r = fx.dev(&[
+        "worktree",
+        "add",
+        p(&path),
+        "-b",
+        "other",
+        "origin/main",
+        "--owner",
+        "x:y",
+        "--agent",
+        "agent-B",
+    ]);
+    assert_eq!(r.code, 4, "{} {}", r.json, r.err);
+    assert!(r.err.contains("already"), "{}", r.err);
+    assert_eq!(fx.owners(), before);
+    assert_eq!(fx.owner_of(&path).as_deref(), Some("agent-A"));
+    assert!(!fx.git_ok(&fx.primary, &["rev-parse", "--verify", "-q", "refs/heads/other"]));
+}
+
+#[test]
+fn add_refuses_an_existing_plain_folder_and_a_dangling_link() {
+    let fx = Fixture::new();
+    let folder = fx.path("folder");
+    std::fs::create_dir_all(&folder).unwrap();
+    let r = fx.dev(&["worktree", "add", p(&folder), "-b", "f", "origin/main", "--owner", "a:b"]);
+    assert_eq!(r.code, 4, "{}", r.err);
+    #[cfg(unix)]
+    {
+        let link = fx.path("link");
+        std::os::unix::fs::symlink(fx.root.join("missing"), &link).unwrap();
+        let r = fx.dev(&["worktree", "add", p(&link), "-b", "l", "origin/main", "--owner", "a:b"]);
+        assert_eq!(r.code, 4, "{}", r.err);
+    }
+}
+
+#[test]
+fn add_refuses_a_path_the_owner_map_already_has_even_when_the_folder_is_gone() {
+    let fx = Fixture::new();
+    let path = fx.path("w1");
+    let r = fx.dev(&[
+        "worktree",
+        "add",
+        p(&path),
+        "-b",
+        "w1",
+        "origin/main",
+        "--owner",
+        "a:b",
+        "--agent",
+        "agent-A",
+    ]);
+    assert_eq!(r.code, 0, "{}", r.err);
+    // Someone removed the worktree behind the tool's back: the entry stays.
+    assert!(fx.git_ok(&fx.primary, &["worktree", "unlock", p(&path)]));
+    assert!(fx.git_ok(&fx.primary, &["worktree", "remove", p(&path)]));
+    let r = fx.dev(&[
+        "worktree",
+        "add",
+        p(&path),
+        "-b",
+        "w2",
+        "origin/main",
+        "--owner",
+        "a:b",
+        "--agent",
+        "agent-B",
+    ]);
+    assert_eq!(r.code, 4, "{}", r.err);
+    assert!(r.err.contains("owner map"), "{}", r.err);
+    assert_eq!(fx.owner_of(&path).as_deref(), Some("agent-A"));
+    // The coordinator frees the entry, then the path can be used again.
+    assert_eq!(fx.dev(&["worktree", "reassign", p(&path)]).code, 0);
+    let r = fx.dev(&[
+        "worktree",
+        "add",
+        p(&path),
+        "-b",
+        "w2",
+        "origin/main",
+        "--owner",
+        "a:b",
+        "--agent",
+        "agent-B",
+    ]);
+    assert_eq!(r.code, 0, "{}", r.err);
+    assert_eq!(fx.owner_of(&path).as_deref(), Some("agent-B"));
+}
+
+#[test]
+fn add_refuses_an_existing_branch_and_leaves_no_entry() {
+    let fx = Fixture::new();
+    fx.git(&fx.primary, &["branch", "taken", "origin/main"]);
+    let path = fx.path("w");
+    let r = fx.dev(&[
+        "worktree",
+        "add",
+        p(&path),
+        "-b",
+        "taken",
+        "origin/main",
+        "--owner",
+        "a:b",
+        "--agent",
+        "agent-A",
+    ]);
+    assert_ne!(r.code, 0);
+    assert!(r.err.contains("taken"), "{}", r.err);
+    assert!(!path.exists());
+    assert_eq!(fx.owner_of(&path), None);
+}
+
+#[test]
+fn add_with_sparse_makes_a_cone_checkout_without_changing_the_primary() {
+    let fx = Fixture::new();
+    std::fs::create_dir_all(fx.primary.join("keep")).unwrap();
+    std::fs::create_dir_all(fx.primary.join("other")).unwrap();
+    std::fs::write(fx.primary.join("keep/a.txt"), "a").unwrap();
+    std::fs::write(fx.primary.join("other/b.txt"), "b").unwrap();
+    fx.git(&fx.primary, &["add", "."]);
+    fx.git(&fx.primary, &["commit", "-q", "-m", "dirs"]);
+    fx.git(&fx.primary, &["push", "-q", "origin", "main"]);
+    fx.git(&fx.primary, &["fetch", "-q", "origin"]);
+    let path = fx.path("sp");
+    let r = fx.dev(&[
+        "worktree",
+        "add",
+        p(&path),
+        "-b",
+        "sp",
+        "origin/main",
+        "--owner",
+        "a:b",
+        "--sparse",
+        "keep",
+    ]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert!(path.join("keep/a.txt").exists());
+    assert!(!path.join("other/b.txt").exists());
+    assert!(fx.primary.join("other/b.txt").exists());
+    assert!(fx.lock_reason(&path).is_some());
+    // The primary stays a full checkout, which the probe also checks.
+    assert!(
+        !fx.git_ok(&fx.primary, &["config", "--get", "core.sparseCheckout"]),
+        "sparse is set only in the worktree"
+    );
+}
+
+#[test]
+fn claim_binds_the_agent_and_is_idempotent_for_it() {
+    let fx = Fixture::new();
+    let path = fx.add("w1");
+    let r = fx.claim(&path, "agent-A");
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert_eq!(r.json["already"], false);
+    assert_eq!(fx.owner_of(&path).as_deref(), Some("agent-A"));
+    let again = fx.claim(&path, "agent-A");
+    assert_eq!(again.code, 0);
+    assert_eq!(again.json["already"], true);
+}
+
+#[test]
+fn claim_refuses_another_agents_worktree_until_the_coordinator_reassigns() {
+    let fx = Fixture::new();
+    let path = fx.add("w1");
+    assert_eq!(fx.claim(&path, "agent-A").code, 0);
+    let r = fx.claim(&path, "agent-B");
+    assert_eq!(r.code, 4, "{}", r.err);
+    assert!(r.err.contains("claimed by agent-A") && r.err.contains("reassign"), "{}", r.err);
+    assert_eq!(fx.owner_of(&path).as_deref(), Some("agent-A"));
+    assert_eq!(fx.dev(&["worktree", "reassign", p(&path)]).code, 0);
+    assert_eq!(fx.claim(&path, "agent-B").code, 0);
+    assert_eq!(fx.owner_of(&path).as_deref(), Some("agent-B"));
+}
+
+#[test]
+fn claim_refuses_unknown_unlocked_and_primary_targets() {
+    let fx = Fixture::new();
+    let unknown = fx.path("nowhere");
+    let r = fx.claim(&unknown, "agent-A");
+    assert_eq!(r.code, 4, "{}", r.err);
+    let plain = fx.path("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    assert_eq!(fx.claim(&plain, "agent-A").code, 4);
+    let unlocked = fx.add("u");
+    assert!(fx.git_ok(&fx.primary, &["worktree", "unlock", p(&unlocked)]));
+    let r = fx.claim(&unlocked, "agent-A");
+    assert_eq!(r.code, 4, "{}", r.err);
+    assert!(r.err.contains("not locked"), "{}", r.err);
+    assert_eq!(fx.claim(&fx.primary, "agent-A").code, 4);
+    assert_eq!(fx.owners(), serde_json::Value::Null, "a refused claim writes nothing");
+}
+
+#[test]
+fn claim_takes_the_agent_from_the_environment_and_needs_one() {
+    let fx = Fixture::new();
+    let path = fx.add("w1");
+    let none = fx.dev(&["worktree", "claim", p(&path)]);
+    assert_eq!(none.code, 2, "{}", none.err);
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+        .args(["--json", "worktree", "claim", p(&path)])
+        .current_dir(&fx.primary)
+        .env("PADDOCK_AGENT_ID", "agent-E")
+        .env("PADDOCK_AGENT_TYPE", "implementer")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(fx.owner_of(&path).as_deref(), Some("agent-E"));
+    let bad = fx.dev(&["worktree", "claim", p(&path), "--agent", "a b"]);
+    assert_eq!(bad.code, 2, "{}", bad.err);
+}
+
+#[test]
+fn reassign_is_for_the_coordinator_and_keeps_the_lock() {
+    let fx = Fixture::new();
+    let path = fx.add("w1");
+    assert_eq!(fx.claim(&path, "agent-A").code, 0);
+    let by_agent = fx.dev(&["worktree", "reassign", p(&path), "--agent", "agent-B"]);
+    assert_eq!(by_agent.code, 4, "{}", by_agent.err);
+    assert!(by_agent.err.contains("coordinator"), "{}", by_agent.err);
+    assert_eq!(fx.owner_of(&path).as_deref(), Some("agent-A"));
+    let r = fx.dev(&["worktree", "reassign", p(&path)]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert_eq!(r.json["previous"], "agent-A");
+    assert_eq!(r.json["locked"], true);
+    assert_eq!(fx.owner_of(&path), None);
+    assert!(fx.lock_reason(&path).is_some(), "the lock stays");
+    let unknown = fx.dev(&["worktree", "reassign", p(&fx.path("nowhere"))]);
+    assert_eq!(unknown.code, 4, "{}", unknown.err);
+}
+
+#[test]
+fn release_unlocks_for_the_owner_or_the_coordinator_only() {
+    let fx = Fixture::new();
+    let path = fx.add("w1");
+    assert_eq!(fx.claim(&path, "agent-A").code, 0);
+    let other = fx.dev(&["worktree", "release", p(&path), "--agent", "agent-B"]);
+    assert_eq!(other.code, 4, "{}", other.err);
+    assert!(fx.lock_reason(&path).is_some());
+    let owner = fx.dev(&["worktree", "release", p(&path), "--agent", "agent-A"]);
+    assert_eq!(owner.code, 0, "{} {}", owner.json, owner.err);
+    assert_eq!(fx.lock_reason(&path), None);
+    assert_eq!(fx.owner_of(&path), None);
+    assert!(path.exists(), "release never removes the folder");
+    let again = fx.dev(&["worktree", "release", p(&path), "--agent", "agent-A"]);
+    assert_eq!(again.code, 4, "an unlocked worktree cannot be released: {}", again.err);
+    // The coordinator can release another's, and an unclaimed one is the coordinator's alone.
+    let w2 = fx.add("w2");
+    let unclaimed = fx.dev(&["worktree", "release", p(&w2), "--agent", "agent-B"]);
+    assert_eq!(unclaimed.code, 4, "{}", unclaimed.err);
+    assert_eq!(fx.dev(&["worktree", "release", p(&w2)]).code, 0);
+    assert_eq!(fx.lock_reason(&w2), None);
+}
+
+fn add_copy(fx: &Fixture, name: &str, agent: &str) -> std::path::PathBuf {
+    let path = fx.path(name);
+    let r = fx.dev(&[
+        "worktree",
+        "add",
+        p(&path),
+        "origin/main",
+        "--detach",
+        "--owner",
+        "reviewer:t",
+        "--agent",
+        agent,
+        "--agent-type",
+        "reviewer",
+    ]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    path
+}
+
+#[test]
+fn drop_removes_the_owners_clean_review_copy_with_its_lock_and_entry() {
+    let fx = Fixture::new();
+    let path = add_copy(&fx, "copy", "agent-R");
+    let r = fx.dev(&["worktree", "drop", p(&path), "--agent", "agent-R"]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert!(!path.exists());
+    assert!(!fx.porcelain().contains(p(&path)));
+    assert_eq!(fx.owner_of(&path), None);
+}
+
+#[test]
+fn drop_refuses_what_it_does_not_own() {
+    let fx = Fixture::new();
+    let mine = add_copy(&fx, "copy", "agent-R");
+    let other = fx.dev(&["worktree", "drop", p(&mine), "--agent", "agent-S"]);
+    assert_eq!(other.code, 4, "{}", other.err);
+    let coordinator = fx.dev(&["worktree", "drop", p(&mine)]);
+    assert_eq!(coordinator.code, 2, "drop needs an agent: {}", coordinator.err);
+    let unclaimed = fx.add("w1");
+    let r = fx.dev(&["worktree", "drop", p(&unclaimed), "--agent", "agent-R"]);
+    assert_eq!(r.code, 4, "{}", r.err);
+    assert!(unclaimed.exists() && mine.exists());
+    assert_eq!(fx.dev(&["worktree", "drop", p(&fx.primary), "--agent", "agent-R"]).code, 4);
+    assert!(fx.primary.join("README.md").exists());
+}
+
+#[test]
+fn drop_refuses_uncommitted_changes_and_untracked_files() {
+    let fx = Fixture::new();
+    let path = add_copy(&fx, "copy", "agent-R");
+    std::fs::write(path.join("README.md"), "changed\n").unwrap();
+    let r = fx.dev(&["worktree", "drop", p(&path), "--agent", "agent-R"]);
+    assert_eq!(r.code, 4, "{}", r.err);
+    assert!(r.err.contains("uncommitted"), "{}", r.err);
+    assert!(path.join("README.md").exists());
+    fx.git(&path, &["checkout", "--", "README.md"]);
+    std::fs::write(path.join("new.txt"), "x").unwrap();
+    assert_eq!(fx.dev(&["worktree", "drop", p(&path), "--agent", "agent-R"]).code, 4);
+    assert!(fx.lock_reason(&path).is_some(), "a refused drop keeps the lock");
+    assert_eq!(fx.owner_of(&path).as_deref(), Some("agent-R"));
+}
+
+#[test]
+fn drop_refuses_commits_that_are_on_no_remote_and_allows_them_once_pushed() {
+    let fx = Fixture::new();
+    let path = fx.path("w1");
+    let r = fx.dev(&[
+        "worktree",
+        "add",
+        p(&path),
+        "-b",
+        "w1",
+        "origin/main",
+        "--owner",
+        "a:b",
+        "--agent",
+        "agent-A",
+    ]);
+    assert_eq!(r.code, 0, "{}", r.err);
+    fx.commit_in(&path, "f.txt");
+    let refused = fx.dev(&["worktree", "drop", p(&path), "--agent", "agent-A"]);
+    assert_eq!(refused.code, 4, "{}", refused.err);
+    assert!(refused.err.contains("no remote"), "{}", refused.err);
+    assert!(path.exists());
+    fx.git(&path, &["push", "-q", "origin", "w1"]);
+    let ok = fx.dev(&["worktree", "drop", p(&path), "--agent", "agent-A"]);
+    assert_eq!(ok.code, 0, "{} {}", ok.json, ok.err);
+    assert!(!path.exists());
+    assert!(
+        fx.git_ok(&fx.primary, &["rev-parse", "--verify", "-q", "refs/heads/w1"]),
+        "drop keeps the branch"
+    );
+}
+
+#[test]
+fn a_corrupt_owner_map_stops_claims_and_is_not_overwritten() {
+    let fx = Fixture::new();
+    let path = fx.add("w1");
+    std::fs::create_dir_all(fx.primary.join(".git/paddock")).unwrap();
+    let file = fx.primary.join(".git/paddock/owners.json");
+    std::fs::write(&file, "{ not json").unwrap();
+    let r = fx.claim(&path, "agent-A");
+    assert_eq!(r.code, 1, "{}", r.err);
+    assert!(r.err.contains("owner map"), "{}", r.err);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "{ not json");
+}
+
+#[test]
+fn the_tool_finds_the_repository_from_inside_a_worktree() {
+    let fx = Fixture::new();
+    let a = fx.add("w1");
+    let b = fx.add("w2");
+    let r = fx.dev_in(&a, &["worktree", "claim", p(&b), "--agent", "agent-A"]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert_eq!(fx.owner_of(&b).as_deref(), Some("agent-A"));
+}
+
+#[test]
+fn the_owner_map_file_is_versioned_and_lives_under_the_common_dir() {
+    let fx = Fixture::new();
+    let path = fx.add("w1");
+    assert_eq!(fx.claim(&path, "agent-A").code, 0);
+    let m = fx.owners();
+    assert_eq!(m["version"], 1);
+    assert!(m["owners"][p(&path)]["claimed"].as_str().unwrap().ends_with('Z'));
+    assert!(fx.primary.join(".git/paddock/owners.lock").exists());
+    assert!(
+        std::fs::read_dir(fx.primary.join(".git/paddock"))
+            .unwrap()
+            .all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".tmp"))
+    );
+}

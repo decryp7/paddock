@@ -11,5 +11,6 @@ mod ipc_endpoints;
 mod isolation;
 mod slots;
 mod tree;
+mod worktree;
 mod wrapper;
 mod wrapper_download;
