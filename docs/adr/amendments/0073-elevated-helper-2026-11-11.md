@@ -1,6 +1,6 @@
 # Amendment to ADR 0073 (2026-11-11): Debrief's elevated work moves into one narrow helper, and the elevated relaunch goes
 
-- Status: **Proposed 2026-11-11, revision 2.**
+- Status: **Proposed 2026-11-11, revision 3.**
   - The direction was decided by the user on 2026-11-11: Debrief 1.2 replaces "Restart as administrator" (the whole app
     relaunched elevated through `runas`) with a **narrow elevated helper**. The helper does only the work that needs
     administrator rights and hands the results back. The user chose this over "installed programs only while elevated"
@@ -8,7 +8,9 @@
   - This is an amendment, not a new ADR: the user's rule since 2026-11-10 is no new redesign ADRs.
   - Revision 2 answers the independent review of revision 1 (`6f9d81618`, CHANGES: six P1s and nine P2s). The
     "Review answers (revision 2)" section at the end lists them.
-  - The details below, and D-H1 to D-H9, still need the user's answer. Nothing here is built yet. ER-23 does not apply
+  - Revision 3 answers the delta review of revision 2 (`78f3f4f2d`: P1-1 to P1-4 closed; two new P1s and four P2s).
+    See "Review answers (revision 3)". It changes the recommendations of D-H3, D-H5 and D-H6 and adds D-H10.
+  - The details below, and D-H1 to D-H10, still need the user's answer. Nothing here is built yet. ER-23 does not apply
     (no drawings).
 - Amends:
   - ADR 0073 §1.3 ("Test switches are gated or registered"): the paragraphs on a relaunch through `runas`, and on "No
@@ -130,6 +132,23 @@ Two more weaknesses on the path that already elevates per plugin (Debrief ADR 00
 | A5 | A dump of another user's process, or of an elevated one | `debrief-plugin-dumps/src/capture.rs:203-207,252-254` | the relaunch |
 | A6 | Process monitor samples of processes it cannot open | `debrief-monitor/src/tracker.rs:111-122` | the relaunch |
 | A7 | Native sampling of an elevated process | `debrief-plugin-native/src/sampling/live.rs:170-172` sends the user to A2 | – |
+| A8 | Opening a file only administrators can read (`C:\Windows\Minidump\*.dmp`, `MEMORY.DMP`, a live `.evtx` under `System32\winevt\Logs`, a protected service log) | an OS "permission denied" | the user restarts elevated by hand |
+
+**A6 is not Windows-only.** The monitor marks a process unreadable on every platform (`debrief-monitor/src/source.rs:142`:
+`access_denied` when no executable path and no memory can be read). On macOS and Linux the monitor view says "Run Debrief
+as administrator to include them" (`app/src/app/tools/monitor/monitor-view.ts:48-49`, the branch where no restart is
+offered). `debrief_ipc::elevation::decide_on` tells Unix users to start Debrief "for example with sudo"
+(`elevation.rs:46-48`). So refusing root (D-H3) removes something that works today on the user's development Mac and on
+Linux. D-H6 decides what replaces it.
+
+**A8 and the permission-denied mapping.** Tool calls carry a `Denied` reason whenever an OS "permission denied" is in the
+error chain (`debrief-plugin-api/src/tools.rs:762-772`, `failure_reason`). The UI recognises such messages
+(`app/src/app/tools/tool-errors.ts:7-12`, `isAccessDenied`) and offers "Restart as administrator" through
+`debrief-tool-error`. By code reading, that component is used only by the tool, profiling, dumps and plugin views
+(`git grep ToolError` in `app/src/app`), not by the import or sources views. So an import of an admin-only file shows
+the plain OS error and never offered the restart (read, not measured; WP-H0 measures it by importing `MEMORY.DMP` on the
+VM). Opening an admin-only `.etl` in the profiling views does reach the mapping (`profiling/native/etl-dialog.ts`).
+D-H10 decides what replaces the restart there.
 
 `debrief-agent`'s service install (`debrief-agent/src/service/mod.rs:45`) is out of scope: it is a command-line tool
 that tells the user to use an elevated prompt.
@@ -154,9 +173,16 @@ finds only event-log test fixtures.
   - Plugins keep their port, `ToolCtx::elevated()` and `ElevatedOps::invoke` (`debrief-plugin-api/src/tools.rs:592-631`).
     The host turns their calls into typed helper requests.
   - Third-party plugins still cannot declare elevated operations (`installed.rs:502-505`).
-- **On demand, for the session (D-H5).** The first admin-only operation starts it, which shows one UAC prompt right
-  after the user's click. It serves until Debrief closes the connection, and sits in a kill-on-close job object with a
-  memory cap. It is not a service.
+- **Two lifetimes (D-H5).**
+  - The **session helper** serves the routine requests: ETW of the user's own processes, `ProcessSample`, and
+    `PerfmonControl` and `PerfmonOutputs` of Debrief's own sets. The first such operation starts it with one UAC prompt,
+    right after the user's click. It serves until Debrief closes the connection, and sits in a kill-on-close job object
+    with a memory cap. It is not a service.
+  - Each **sensitive request** runs in a **single-request helper** started by its own UAC prompt: `Dump`,
+    `PerfmonInstall`, `SecurityLog` (each query or follow), and ETW of a process of another account. Its command line
+    carries the request kind and the target's pid, which UAC shows under "Show more details". After connecting, the
+    helper refuses any request that differs from its arguments (exit code 15), and it exits when the request ends.
+    §6 explains why.
 - **Windows only (D-H6).**
 - **A fixed, protected install path (D-H2, D-H8).** Debrief 1.2 installs per machine (ADR 0053's Debrief row,
   `3a6be49b5` line 550).
@@ -247,6 +273,16 @@ moving the delete date.)
 - **Fixed parameters.** `SandboxSpec` and the frame limit, today fields of the bootstrap, are compiled into the helper.
 - `paddock-ipc`'s system-endpoint identity (`identity.rs`) and the squatting check (`trust.rs`) are for a service that
   many accounts call (Dyno ADR 0027 §2). They are not used here: this is a private one-to-one child.
+- **Windows "Administrator protection"** (newer Windows 11 releases) runs an elevated process as a separate,
+  system-managed administrator account with its own profile and `HKCU`. This is read in Microsoft's documentation and
+  not re-read for this revision, so it is unverified. Under it, the helper is another account, not the user's elevated
+  token. WP-H0 measures three things on a VM with it switched on:
+  - whether the pipe DACL (owner plus Administrators) admits the helper;
+  - that the user's `HKCU\Environment` is not the helper's (the helper reads no environment either way);
+  - whether the helper can open the requester by pid to check its start time and image, across accounts.
+
+  If it cannot, WP-H1a takes the start time from `GetNamedPipeServerProcessId` plus a process handle that the host
+  duplicates into the helper. That handle cannot be reused while it is open.
 
 ## 5. How results come back, and what goes
 
@@ -259,20 +295,32 @@ moving the delete date.)
 - progress as task events;
 - the helper's standard error forwarded over the connection, so the helper writes no log file.
 
-**No elevated Debrief (D-H3).** At start, the shell reads `TokenElevationType`:
+**No elevated Debrief (D-H3).** The first thing `main` does, before it resolves the data, configuration or log
+folders and before Tauri starts, is read `TokenElevationType`.
 
-- **`TokenElevationTypeFull`** (UAC is on and Debrief was started elevated) or **root on macOS and Linux**: Debrief does
-  not start its windows. It shows one native message: "Debrief does not run as administrator. Start it normally; it asks
-  for administrator permission when a feature needs it." Then it exits with a logged reason.
-  - This is the honest answer to rule 75: there is an unelevated user whose folders an elevated Debrief would read,
-    starting with every project and import file.
-  - Option (b) relaunches unelevated instead (through the shell's own token); it costs about 1 day more.
+- **`TokenElevationTypeFull`** (UAC is on and Debrief was started elevated):
+  - Under D-H3 (b), recommended, Debrief **relaunches itself unelevated** through the desktop shell's own token, with
+    the same command line (the files the user named). This uses the documented route of asking Explorer to start the
+    program: `IShellWindows`, then `IShellDispatch2::ShellExecute`. That is read in Raymond Chen, "How can I launch an
+    unelevated process from my elevated process and vice versa?", The Old New Thing, 2013-11-18,
+    <https://devblogs.microsoft.com/oldnewthing/20131118-00/?p=2643>, and is not measured.
+  - This keeps the workflow of administrators who work in an elevated console (`debrief C:\logs\x.log` from an
+    elevated prompt). Their Debrief then runs as them, unelevated.
+  - Where there is no unelevated shell to ask (Server Core, a session with no Explorer, or an Explorer that is itself
+    elevated), it falls back to D-H3 (a): one native message, "Debrief does not run as administrator. Start it normally;
+    it asks for administrator permission when a feature needs it.", and exit.
 - **`TokenElevationTypeDefault`** (UAC is off, or the built-in Administrator account) runs as today. No helper is needed
   (`decide_on`, `elevation.rs:44`).
   - Every process of that user is already elevated, so there is no lower integrity level to protect from. Rule 75's
     premise does not hold, and gating S1 to S10 there would protect nothing.
   - The About page and the log say "UAC is off: Debrief runs with administrator rights".
 - **`TokenElevationTypeLimited`** is the normal case.
+- **Root on macOS and Linux** is refused with the same message (D-H6).
+
+**The refusal and the relaunch write nothing into the user's folders.** They run before any data, configuration or log
+folder is resolved. Their only outputs are standard error and the native message, plus the relaunch itself. Rule 75
+holds here too: the elevated instance never reads or writes the user's profile. Test 8 and the VM run (§9) check this,
+and WP-H8's scan checks that nothing in `main` before the check opens a file for writing.
 
 **What is removed:**
 
@@ -297,22 +345,52 @@ moving the delete date.)
 ## 6. Residual risk, and what limits it (D-H1, D-H4, D-H5)
 
 The host is a medium-integrity process that holds a session-long channel to a High process. Code that already runs as
-the user can inject into the host, and then until Debrief exits, without another prompt, it can:
+the user can inject into the host. Until Debrief exits, without another prompt, it can then use every request the
+channel serves. ADR 0017 §7 already says UAC is not a boundary against code running as the same user. A session-long
+channel turns one consent into many operations, so the question is which requests may ride on one consent.
 
-- dump any unprotected process;
-- read the Security log;
-- create and start collector sets.
+**What D-H5 (d), recommended, does.**
 
-ADR 0017 §7 already says UAC is not a boundary against code running as the same user. But a session-long channel turns
-one consent into many operations. The limits:
+- The session channel serves only the routine requests of §2: ETW of the user's own processes, process samples, and
+  control and outputs of Debrief's own collector sets. Injected code gains little from those that the user's own token
+  does not already give it.
+- Each sensitive request (`Dump`, `PerfmonInstall`, `SecurityLog`, ETW of another account's process) needs its own UAC
+  prompt.
+  - With the default `PromptOnSecureDesktop = 1`, the consent dialog is on the secure desktop. Same-user code cannot
+    draw over it or send it input.
+  - "Show more details" shows the request kind and target pid from the command line, and the helper refuses a request
+    that differs from them.
+  - This is the OS's own consent, not a boundary in Microsoft's sense. Same-user code can still raise UAC prompts for
+    its own programs, and a user who lowered UAC to "no secure desktop" loses the secure-desktop part.
+- Cost: one prompt per dump, per collector-set install, per Security log read and per capture of another account's
+  process. These are rare actions, and each is the user's own click.
 
-- **The request list is closed and typed.** There is no "run this program" and no path argument (§3).
-- **Protected processes and LSASS are refused** (D-H4), so credential memory is never dumped.
-- **Mitigation option for D-H5.** For each `Dump` and each `PerfmonInstall`, the helper shows **its own** confirmation
-  window ("Debrief asks to write a memory dump of <process> (pid N). Allow?"). That window runs at High integrity, and
-  User Interface Privilege Isolation (UIPI) stops a medium-integrity process from sending it input, so injected code
-  cannot click it. The alternative is one UAC prompt per `Dump`.
-- The audit lines in the log (§8) name every request, with its correlation id.
+**What D-H5 (b) would do, and why it is not recommended.** In (b) the helper shows its own confirmation window for
+sensitive requests on the session channel. That window is **defence in depth against automation, not a boundary**:
+
+- same-user code can borrow a UIAccess token and drive higher-integrity windows (James Forshaw, "Reading Your Way Around
+  UAC (Part 3)", Tyranid's Lair, 2017, <https://www.tiraniddo.dev/2017/05/reading-your-way-around-uac-part-3.html>;
+  secondary, not re-read for this revision);
+- it can cover the window with its own window;
+- it can repeat requests until the user gives in.
+
+The guards (b) would need:
+
+- buttons disabled for about 1 s after the window appears and again after it regains focus;
+- at most three refused requests per minute, after which sensitive requests are refused for five minutes and logged;
+- the target's image path and account shown as **the helper** reads them from its own handle, never as the host sends
+  them;
+- `SecurityLog` and other-account ETW included.
+
+With those, (b) is about 1 day. It is weaker than (d) against an attacker who takes the UIAccess route, and (d) costs
+about the same.
+
+**Under every option:**
+
+- the request list is closed and typed, with no "run this program" and no path argument (§3; D-H10 (a) would add the
+  first path argument);
+- protected processes and LSASS are refused (D-H4);
+- every request is an audit line in the log (§8).
 
 ## 7. Failure states, wording and long work (ER-18, ER-19)
 
@@ -323,13 +401,17 @@ Copy is in sentence case. Every state has a next step.
 | Before the prompt | Dialog: "Windows will ask for permission to start Debrief's administrator helper. It records and reads only what you ask for here." Buttons: **Continue**, **Cancel**. |
 | Waiting | Phase "Waiting for administrator permission". **Cancel** stops waiting; a helper that arrives later finds the connection closed and exits. |
 | Declined (`ERROR_CANCELLED`) | "Administrator permission was declined. Nothing was changed." **Try again** |
-| The helper's own confirmation declined | "You declined the dump in the administrator helper's window. Nothing was written." |
+| A sensitive request's own prompt declined | "Administrator permission for this dump was declined. Nothing was written." (and the same for the other sensitive kinds) |
+| A request that does not match the helper's command line (exit 15) | "The administrator helper refused a request it was not started for. Try again; if it happens again, export a diagnostic bundle." |
+| An admin-only file (A8), under D-H10 (b) | "Only administrators can read this file. Copy it to a folder of yours from an administrator command prompt (`copy "<file>" "%USERPROFILE%\\Documents"`), then open the copy." |
 | Helper missing or not protected (exit 12, or the host's chain check) | "Debrief's administrator helper is missing or is not in a protected folder. Reinstall Debrief for all users." |
 | Not verified (exit 11 or 13) | "The administrator helper could not confirm it was started by this Debrief, so it stopped. Try again; if it happens again, export a diagnostic bundle." |
 | Protected target | "Windows protects this process, so it cannot be dumped." |
 | Helper stopped during work | "The administrator helper stopped (exit code N). Your other work is not affected." **Try again**. A stream cut short is kept and marked "incomplete". |
-| Started elevated (Full) | the native message of §5 |
-| Not on Windows | "This is only available on Windows." |
+| Started elevated (Full), no shell to relaunch through | the native message of §5 |
+| Started as root on macOS or Linux | the native message of §5 |
+| Monitor on macOS or Linux, unreadable processes | "N processes belong to other users; macOS and Linux do not let Debrief read them without root." |
+| Not on Windows (A1 to A5) | "This is only available on Windows." |
 
 Long operations (an ETW capture, a large dump, a week of the Security log, collector-set logs) run as jobs with
 labelled phases: "Waiting for permission", "Recording" or "Reading", "Writing the dump", "Copying to Debrief". Each
@@ -345,6 +427,7 @@ works in every phase: it sends `stop` and keeps what was written, marked incompl
 | 12 | own image not protected |
 | 13 | requester image wrong |
 | 14 | the admin folder refused |
+| 15 | a request that does not match the command line |
 
 ## 8. Logging (ER-27)
 
@@ -385,8 +468,15 @@ The work starts from these failing tests (ER-11):
      process such as `MsMpEng.exe`).
 7. The helper crate has no `std::env` call, and no `Command::new` except the `logman` site: Clippy plus the WP-H8 scan,
    each with a planted positive control.
-8. The start-up decision: `Full` and Unix root refuse with the message; `Default` and `Limited` start. Only if the user
-   chooses D-H3 (c), **8b**: every row from S1 to S10 is refused in elevated mode, one assertion per row.
+8. The start-up decision over a fake token port and a fake shell port:
+   - `Full` relaunches through the shell, or refuses when there is no shell;
+   - Unix root refuses;
+   - `Default` and `Limited` start;
+   - in the refusing and relaunching cases, the data, configuration and log path resolvers are never called (a fake
+     that fails the test if it is).
+
+   Only if the user chooses D-H3 (c), **8b**: every row from S1 to S10 is refused in elevated mode, one assertion per row.
+10. A single-request helper refuses a request that differs from its command line (exit 15).
 9. The host's view of the helper's token is identification-level (§4).
 
 Windows CI (unelevated) runs the helper as a plain child. The switch for that is a `test-support` launch option, not an
@@ -396,13 +486,20 @@ middle of a stream.
 **The Windows test VM's admin snapshot** (local only, never CI) runs the real prompt:
 
 - accept, decline and cancel-while-waiting;
-- the helper's own confirmation, plus a medium-integrity `SendInput` attempt at that window, which must have no effect;
+- a sensitive request's own prompt, accepted and declined;
+- if D-H5 (b) is chosen, the helper's window gets a medium-integrity `SendInput` attempt. This is a **smoke test**: it
+  shows UIPI is in force, not that the window resists a UIAccess-token attack, which no automated test here covers
+  (ER-33: it is reported as what it proves);
 - `HKCU\Environment` poisoned (`ProgramFiles`, `ProgramFiles(x86)`, `SystemRoot`, `PATH`, `DEBRIEF_PLUGINS`), with a
   planted `relog.exe` and a planted `version.dll` in user folders;
 - a full run that records every process creation with its token elevation, and every image load into an elevated
   process. Only `debrief-admin.exe`, `System32\logman.exe` and system DLLs may appear elevated.
-- A1 to A6 end to end;
-- Debrief started elevated is refused.
+- A1 to A6 end to end, and A8 (an import of `MEMORY.DMP`, to see which error the user gets);
+- Debrief started elevated from an elevated console relaunches unelevated, with its arguments. Started with no shell,
+  it is refused. In both cases, a listing of `%APPDATA%`, `%LOCALAPPDATA%` and the profile taken before and after shows
+  no file created or changed;
+- the same pipe, environment and `ProcessId` checks on a VM with Administrator protection switched on, if the snapshot
+  has a Windows build that offers it.
 
 **Positive control (ER-33):** `debrief-v1.1.1`'s "Restart as administrator" with `HKCU\Environment` `DEBRIEF_PLUGINS`
 set to a marker program must show the marker running elevated. The same run measures the `ProgramFiles` question, S5's
@@ -415,8 +512,9 @@ E1, E2 and W2 stay in `debrief-v1.1.1`. The 1.2 release notes list them as fixed
 
 ## Parallelism and cost (ER-20, rule 51)
 
-- **Prompts.** One per session, plus the helper's own confirmation per `Dump` or `PerfmonInstall` (D-H5). A prompt per
-  operation would cost the user more than any CPU time here.
+- **Prompts.** One per session for routine requests, plus one per sensitive request (D-H5 (d)). Starting a
+  single-request helper costs one process start and one handshake, which is small next to a dump. The real cost is the
+  user's prompt, accepted for rare actions only.
 - **Work in the helper.** Requests run on a small worker pool: one slot per slow kind (`Dump`, `PerfmonInstall`,
   `SecurityLog` back-read) and up to four requests in all, as Dyno's helper does (Dyno ADR 0027 §2). More requests
   answer "busy" at once. The thread level is normal (rule 52): a person waits on each request.
@@ -452,31 +550,37 @@ Estimates are raw days of agent work, before review rounds.
 
 | WP | Package | Depends on | Days |
 | --- | --- | --- | --- |
-| WP-H0 | VM spikes on the admin snapshot: `ProgramFiles` in `HKCU`, S5's lowbox token, `SeDebugPrivilege` for A5 and A6, bare-name resolution, DLL loads, `GetNamedPipeServerProcessId` across integrity levels, the impersonation level, pipe throughput for a 2 GiB dump, the positive control; a research note and a `performance.md` block | admin snapshot | 1.5–2 |
-| WP-H1a | `paddock_ipc::elevated`: the `runas` launch, the verified pipe, no command-line token, the identification-level client, the shared exit codes, the re-built output stream with credits; tests 3, 4 and 9 first; CHANGELOG entry | – | 2.5–3.5 |
+| WP-H0 | VM spikes on the admin snapshot: `ProgramFiles` in `HKCU`, S5's lowbox token, `SeDebugPrivilege` for A5 and A6, bare-name resolution, DLL loads, `GetNamedPipeServerProcessId` across integrity levels, the impersonation level, pipe throughput for a 2 GiB dump, A8's import error, the shell relaunch, Administrator protection (pipe DACL, `HKCU`, `ProcessId` across accounts), the positive control; a research note and a `performance.md` block | admin snapshot | 2–2.5 |
+| WP-H1a | `paddock_ipc::elevated`: the `runas` launch, the verified pipe, no command-line token, the identification-level client, the shared exit codes, the re-built output stream with credits; tests 3, 4 and 9 first; ADR 0092's test 8 (the rewritten bootstrap) is closed here; CHANGELOG entry | – | 2.5–3.5 |
 | WP-H1 | `debrief-admin` core: the decoder (test 5), the typed perfmon renderer with a fixed `RootPath`, the image chain and `HKLM` folder (test 2), no environment, `SetDefaultDllDirectories` and the link flag, the admin folder and `PrivateDir`, `logman` added to `system_tool_in` | WP-H1a, ADR 0092 WP-1 | 3–4 |
-| WP-H2 | The requests: the ETW halves of A1 and A2 moved; A3 (`install`, `control`, `outputs`), A4, A5 (protection level, LSASS, the helper's confirmation; test 6), A6; `SeDebugPrivilege` per WP-H0 | WP-H1 | 3.5–5 |
+| WP-H2 | The requests: the ETW halves of A1 and A2 moved; A3 (`install`, `control`, `outputs`), A4, A5 (protection level and LSASS; test 6), A6; `SeDebugPrivilege` per WP-H0 | WP-H1 | 3.5–5 |
 | WP-H2b | E1: native symbolisation moved into the unelevated plugin; `elevated_data_dir` deleted | WP-H2 | 1–1.5 |
-| WP-H3 | Host routing: the launcher on `paddock-ipc`, one helper per session, `ElevatedOps` turned into typed requests, A3 to A6 in their plugins routed to the helper, the `--elevated` role removed | WP-H1 | 3–4 |
-| WP-H4 | `restart_elevated` and every item of §5's removal list (test 1 first), the start-up decision (test 8), the UI states of §7, mocks, specs and i18n | WP-H3 | 2–2.5 |
+| WP-H3 | Host routing: the launcher on `paddock-ipc`, the session helper and the single-request helpers with the request bound to the command line (test 10), `ElevatedOps` turned into typed requests, A3 to A6 in their plugins routed to the helper, the `--elevated` role removed | WP-H1 | 3.5–5 |
+| WP-H4 | `restart_elevated` and every item of §5's removal list (test 1 first); the start-up decision with the shell relaunch and fallback, before any folder (test 8); Unix root refusal and the monitor's new text; A8's copy-out message (D-H10 (b)); the UI states of §7, mocks, specs and i18n | WP-H3 | 3–4 |
 | WP-H5 | Debrief per machine (ADR 0053's row, counted there), plus the `%ProgramData%\Debrief\Admin` folder line | ADR 0053 accepted and on main | (2.5–3) |
-| WP-H6 | Windows CI legs and the VM run of §9; installer build (rule 54) | WP-H2 to WP-H5 | 2–2.5 |
-| WP-H8 | Rule-75 check of every elevated entry point: Clippy `disallowed-methods` in a `clippy.toml` for each elevated binary (environment, `Command::new`, path-taking `std::fs` calls); a source scan that finds every `runas` and elevated launch in the family and asserts each target is registered; a planted positive control. The conformance half moves onto the RT-5 host once that exists. | – | 1–1.5 |
-| WP-H7 | Text: merge into ADR 0073, links in ADR 0017 §7 and 0022 §7, the ADR 0053 Debrief-row line, lessons entry, wiki notes, release notes | – | 0.5 |
+| WP-H6 | Windows CI legs and the VM run of §9, including the profile listing and Administrator protection; installer build (rule 54) | WP-H2 to WP-H5 | 2.25–2.75 |
+| WP-H8 | Rule-75 check of every elevated entry point: Clippy `disallowed-methods` in a `clippy.toml` for each elevated binary (environment, `Command::new`, path-taking `std::fs` calls); a source scan that finds every `runas` and elevated launch in the family and asserts each target is registered; a scan that `main` opens nothing for writing before the elevation check; a planted positive control. The conformance half moves onto the RT-5 host once that exists. | – | 1–1.5 |
+| WP-H7 | Text: merge into ADR 0073, links in ADR 0017 §7 and 0022 §7, the ADR 0053 Debrief-row line, the ADR 0092 WP-7 note below, lessons entry, wiki notes, release notes (including what changes for elevated consoles, root on Unix and admin-only files) | – | 0.5 |
 | WP-HR | Independent re-review of this amendment, and review of WP-H1a's trust code | – | 0.5–1 |
 
-**Total: 20.5 to 28 days raw** (revision 1 said 13 to 18.5). The additions:
+**Total: 22.75 to 31.25 days raw.** Revision 1 said 13 to 18.5 and revision 2 said 20.5 to 28. Revision 3 adds:
 
-- the `paddock-ipc` launcher (WP-H1a);
-- routing A3 to A6 (WP-H3);
-- E1 (WP-H2b);
-- the typed perfmon renderer and the helper's confirmation;
-- the start-up decision;
-- the rule-75 check (WP-H8);
-- larger spikes.
+- the single-request helpers (WP-H3);
+- the shell relaunch, the Unix refusal and A8's message (WP-H4);
+- Administrator protection and the profile check (WP-H0, WP-H6);
+- the scan of `main` (WP-H8).
 
-The per-machine install that ADR 0053 counts (2.5 to 3 days) comes on top. ADR 0092 WP-7 drops from 3 to 1.5 days,
-because the verified pipe is built here; it keeps `private_tempdir`, the IPC socket folder, Pitcrew and its test 8.
+The per-machine install that ADR 0053 counts (2.5 to 3 days) comes on top.
+
+**ADR 0092 WP-7, applied when this amendment is accepted.** `docs/adr/register/0092.toml` is not changed while this
+amendment is Proposed: an accepted ADR's row keeps its accepted state until the change to it is accepted too. On
+acceptance, WP-H7 sets WP-7 to 1.5 days and writes down its new scope:
+
+- ADR 0092's test 8 (an elevated child accepting a rewritten `bootstrap.json`) moves to WP-H1a, which removes the file;
+- `private_tempdir` and the IPC socket folder (ADR 0092 rows 10 and 11) live in `debrief-ipc` copies that leave by
+  `debrief-v1.2.0`, so WP-7 moves them with Debrief's move onto `paddock-ipc` (PH1 to PH4). They land on
+  `paddock-ipc`'s endpoint folder and on `PrivateDir`, not as fixes to the copies;
+- the Pitcrew socket folder stays in WP-7.
 
 After WP-H1a and WP-H1, WP-H2 and WP-H3 run in parallel, and WP-H8 is independent. Everything except WP-H8's
 conformance half gates `debrief-v1.2.0` (D-H7).
@@ -485,15 +589,16 @@ conformance half gates `debrief-v1.2.0` (D-H7).
 
 | # | Decision | Recommendation |
 | --- | --- | --- |
-| D-H1 | Shape: (a) one dedicated `debrief-admin` with a closed request list, and the per-plugin elevated role retired; (b) keep ADR 0017 §7's per-plugin elevated process and add A3 to A6 to it; (c) a LocalSystem service like Dyno's | **(a)**. Residual risk under all three: same-user code injected into Debrief can use the open channel (§6). (a) limits that to seven typed requests, protected processes refused. (b) is about 3 days cheaper but keeps twelve plugins in an administrator's process (E2), with up to four prompts. (c) never asks again, so its residual risk lasts for good, not for a session. |
+| D-H1 | Shape: (a) one dedicated `debrief-admin` with a closed request list, and the per-plugin elevated role retired; (b) keep ADR 0017 §7's per-plugin elevated process and add A3 to A6 to it; (c) a LocalSystem service like Dyno's | **(a)**. Residual risk under all three: same-user code injected into Debrief can use whatever the open channel serves (§6). (a) with D-H5 (d) limits that to routine requests. (b) is about 3 days cheaper but keeps twelve plugins in an administrator's process (E2), with up to four prompts. (c) never asks again, so its residual risk lasts for good. |
 | D-H2 | Fixed path: (a) Debrief per machine in 1.2 (ADR 0053), the helper in its install folder; (b) Dyno's protected copy on first use (Dyno ADR 0027 R1); (c) the per-user folder | **(a)**. The direction the user set for every app on 2026-11-04. It closes S10 and makes bare names resolve to protected folders. ADR 0053 must be accepted and on main first. |
-| D-H3 | A Debrief started elevated: (a) **with UAC on (`Full`) or as root, refuse to start, with the message of §5; with UAC off (`Default`), run as today**; (b) as (a), but relaunch unelevated instead of refusing (+1 day); (c) elevated mode: run, and refuse S1 to S10 with a banner | **(a)**. An elevated Debrief still parses the user's files, and that is what rule 75 forbids, so (c) is not honest. Where UAC is off, there is no lower integrity level to protect from. |
-| D-H4 | Dumps: (a) refuse every protected process (by protection level) and LSASS; (b) any process, as the relaunch allows today | **(a)**. Residual risk: injected code can still dump unprotected processes of other accounts during the session. D-H5 (b) limits that. |
-| D-H5 | Consent: (a) one UAC prompt per session, nothing more; (b) (a) plus the helper's own UIPI-protected confirmation per `Dump` and `PerfmonInstall`; (c) one UAC prompt per `Dump` | **(b)**. Under (a), injected code gets dumps, the Security log and collector sets for the rest of the session, with no further prompt. (b) keeps a person in the loop for the two operations that write lasting or sensitive data, at about 0.5 day. (c) trains people to click through. |
-| D-H6 | macOS and Linux: no helper in 1.2; root is refused at start (D-H3) | **Yes.** All the admin-only operations are Windows only. |
+| D-H3 | A Debrief started with a `Full` token: (a) refuse with a message; (b) relaunch unelevated through the desktop shell, falling back to (a) where there is no shell (+1 day); (c) elevated mode: run, and refuse S1 to S10 with a banner. A `Default` token (UAC off) runs as today under (a) and (b). | **(b)** (changed from (a) in revision 2). Only (b) keeps administrators who start Debrief from an elevated console working. It is as honest as (a), because no elevated Debrief ever reads the user's files. (c) still parses the user's files elevated, which rule 75 forbids. Cost of (b) over (a): about 1 day, and a shell dependency with a tested fallback. |
+| D-H4 | Dumps: (a) refuse every protected process (by protection level) and LSASS; (b) any process, as the relaunch allows today | **(a)**. Residual risk: an unprotected process of another account can still be dumped, with that dump's own prompt under D-H5 (d). |
+| D-H5 | Consent: (a) one UAC prompt per session for everything; (b) (a) plus the helper's own confirmation window for sensitive requests, with the guards of §6; (c) one UAC prompt per `Dump` only; (d) one session prompt for routine requests, and a single-request helper with its own UAC prompt for every sensitive request (`Dump`, `PerfmonInstall`, `SecurityLog`, ETW of other accounts' processes) | **(d)** (changed from (b) in revision 2). (b)'s window is defence in depth against automation, not a boundary: UIAccess tokens, covering windows and repeated requests get around it (§6). (d) uses the OS's own consent, on the secure desktop by default, and binds it to the request. It costs about the same as (b), with one prompt per rare sensitive action. (a) gives injected code the sensitive requests for the whole session. (c) leaves the Security log and collector sets on the session channel. |
+| D-H6 | macOS and Linux, where the monitor reads other users' processes only as root and Debrief today tells users to use `sudo`: (a) refuse root and accept that those processes show as "belong to other users" in 1.2; (b) allow root on Unix as today, against rule 75; (c) (a) now, and a small Unix helper for A6 only in a later release, on `paddock-service`'s `osascript` and `pkexec` prompts (`privileged/elevate.rs:122,150`; estimate 3 to 5 days, not designed here) | **(c)**. Process monitoring is the only Unix admin use found in the code (§1). Refusing root loses it on the user's development Mac for 1.2, and (b) keeps an elevated process parsing user files. The later helper restores it narrowly. |
 | D-H7 | Gate: WP-H0 to WP-H6 and WP-H8's Clippy half block the `debrief-v1.2.0` tag | **Yes.** It is the second half of the DB9 fix the user put in 1.2. |
 | D-H8 | Install folder: (a) read from the `HKLM` uninstall key and then chain-checked; (b) pin `Program Files\Debrief` in ADR 0053's Debrief row (no folder page) | **(a)**. A machine may install to another drive; the key only administrators can write, and the chain check still decides. |
 | D-H9 | IPC base: (a) build the elevated launch in `paddock-ipc` now (WP-H1a); (b) build it on `debrief-ipc` and move `debrief-ipc`'s delete date past `debrief-v1.2.0` (`Copies-date: … approved: user`) | **(a)**. (b) saves about 1 day now but adds a second elevated mechanism that rule 55 must later fix in two places, and it moves a date the user set. |
+| D-H10 | Admin-only files (A8): (a) a typed `ReadProtectedFile` request (the path chain-checked so no reparse point is followed, the file opened read-only, its own prompt under D-H5 (d), the bytes streamed); (b) documented copy-out steps in the error and the help (§7); (c) accept the loss with no message | **(b)** for 1.2, about 0.25 day. (a) would be the helper's first path argument, a new request class in an elevated process, at about 1.5 to 2 days, and imports never offered the restart anyway (§1, to be measured). Revisit (a) if the user often opens such files. |
 
 ## Review answers (revision 2)
 
@@ -517,3 +622,18 @@ The review of revision 1 is `6f9d81618`, verdict CHANGES.
 | P2-8 | §2 DLL loading; image loads in the VM probe. |
 | P2-9 | A "Parallelism and cost" section; test 8's range is S1 to S10; the R-row comment cites ADR 0096 §4. |
 | Rule-75 check | WP-H8. |
+
+## Review answers (revision 3)
+
+The delta review of revision 2 is `78f3f4f2d`. It closed P1-1 to P1-4.
+
+| Finding | Answer |
+| --- | --- |
+| P1-A §6 and D-H5 (b) overclaim | §6 now says the helper's window is defence in depth against automation, not a boundary (UIAccess tokens, covering windows, repeated requests). It lists the guards (b) would need, including `SecurityLog` and other-account ETW. §9 presents the `SendInput` check as a smoke test. D-H5's recommendation is re-checked and changed to (d): a UAC prompt per sensitive request, bound to the request by the command line. |
+| P1-B 1 admin-only files | A8 is added to §1. The mapping's reach is stated by code reading, unmeasured, and measured in WP-H0. D-H10 has options (a), (b) and (c). |
+| P1-B 2 elevated consoles | D-H3 now recommends (b), the relaunch through the shell, with its cost and fallback. |
+| P1-B 3 Unix | D-H6 is corrected. §1 cites A6 on every platform (`source.rs:142`, `monitor-view.ts:48-49`, `elevation.rs:46-48`), and the options include a later narrow Unix helper. |
+| P2-1 | §5: the refusal and the relaunch run before any folder is resolved and write nothing. Test 8 asserts the resolvers are not called, the VM lists the profile, and WP-H8 scans `main`. |
+| P2-2 | The `0092.toml` change is reverted. The WP-7 change is "applied when this amendment is accepted" (Work packages), with test 8 moved to WP-H1a and rows 10 and 11 moved with the `paddock-ipc` migration. |
+| P2-3 | Administrator protection: §4 and WP-H0. |
+| P2-4 | The R-row's `adr_by` comment now explains a two-week review window. |

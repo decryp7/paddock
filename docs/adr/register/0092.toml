@@ -45,7 +45,7 @@ state = "not-started"
 
 [[wp]]
 id = "WP-7"
-days = 1.5 # was 3; the verified pipe moves to ADR 0073 amendment 2026-11-11 WP-H1a; keeps private_tempdir, the IPC socket folder, Pitcrew and test 8
+days = 3
 state = "not-started"
 
 [[wp]]

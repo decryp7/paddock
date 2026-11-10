@@ -1,15 +1,15 @@
 # Free-text prerequisites are matched to `provides` names in ADR 0096 WP-1's review.
 id = "R-2026-11-11-0073-elevated-helper"
 title = "Amendment to ADR 0073: Debrief's elevated work moves into one narrow helper, and the elevated relaunch goes"
-summary = "Amendment to ADR 0073 (proposed 2026-11-11, revision 2; direction decided by the user on 2026-11-11: a narrow elevated helper instead of \"Restart as administrator\"): one on-demand `debrief-admin.exe` with a closed typed request list (ETW for .NET and native, perfmon from a typed template, the Security log, dumps with protected processes refused, process samples) from the per-machine install folder; the elevated launch built in paddock-ipc over a verified pipe (rule 75); no environment; no elevated Debrief when UAC is on; restart_elevated and the per-plugin elevated role removed; D-H1 to D-H9 open; 20.5 to 28 days plus ADR 0053's Debrief row; gates debrief-v1.2.0"
+summary = "Amendment to ADR 0073 (proposed 2026-11-11, revision 3; direction decided by the user on 2026-11-11: a narrow elevated helper instead of \"Restart as administrator\"): `debrief-admin.exe` from the per-machine install folder with a closed typed request list; a session helper for routine requests and a single-request helper with its own UAC prompt for each sensitive one (dumps, collector-set installs, the Security log, other accounts' ETW); the elevated launch built in paddock-ipc over a verified pipe (rule 75); no environment; a Debrief started elevated relaunches unelevated through the shell (or is refused), root on Unix is refused; restart_elevated and the per-plugin elevated role removed; D-H1 to D-H10 open; 22.75 to 31.25 days plus ADR 0053's Debrief row; gates debrief-v1.2.0"
 status = "proposed"
 approval_file = "docs/adr/amendments/0073-elevated-helper-2026-11-11.md"
-adr_by = "2026-11-25" # ADR 0096 section 4 staleness default: 14 days, counted from the user's direction decision of 2026-11-11
+adr_by = "2026-11-25" # a two-week review window from the user's direction decision of 2026-11-11, chosen for this proposal; ADR 0096 sets no default for adr_by
 prerequisites = ["ADR 0053 accepted and on main", "ADR 0053 Debrief per-machine install", "ADR 0092 WP-1", "Windows test VM admin snapshot", "ADR 0092 WP-9 rule 75 text", "ADR 0073 WP-0", "RT-5"]
 
 [[wp]]
 id = "WP-H0"
-days = 1.75 # amendment: 1.5 to 2
+days = 2.25 # amendment: 2 to 2.5
 state = "not-started"
 
 [[wp]]
@@ -36,17 +36,17 @@ state = "not-started"
 
 [[wp]]
 id = "WP-H3"
-days = 3.5 # amendment: 3 to 4
+days = 4.25 # amendment: 3.5 to 5
 state = "not-started"
 
 [[wp]]
 id = "WP-H4"
-days = 2.25 # amendment: 2 to 2.5
+days = 3.5 # amendment: 3 to 4
 state = "not-started"
 
 [[wp]]
 id = "WP-H6"
-days = 2.25 # amendment: 2 to 2.5
+days = 2.5 # amendment: 2.25 to 2.75
 state = "not-started"
 
 [[wp]]
