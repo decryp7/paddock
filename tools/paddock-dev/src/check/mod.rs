@@ -263,6 +263,11 @@ fn control_holds(check: &dyn Check) -> bool {
 /// Runs the selected checks of `registry` over the tree. A check that panics, did not complete, failed its control, had no
 /// precondition or looked at nothing adds an error no waiver covers, whatever else it found; waivers are applied last.
 pub fn run_checks(opts: &RunOptions, registry: &[Box<dyn Check>]) -> Result<RunResult, UnknownCheck> {
+    run_checks_in(&Tree::open(&opts.root), opts, registry)
+}
+
+/// [`run_checks`] over a tree the caller opened (a test passes one that reports a listing error).
+pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]) -> Result<RunResult, UnknownCheck> {
     let only = opts.only.clone().unwrap_or_default();
     let unknown: Vec<String> = only
         .iter()
@@ -276,7 +281,6 @@ pub fn run_checks(opts: &RunOptions, registry: &[Box<dyn Check>]) -> Result<RunR
         .iter()
         .filter(|c| opts.only.is_none() || only.iter().any(|id| id == c.id()))
         .collect();
-    let tree = Tree::open(&opts.root);
     let (scoped, scope, unknown_files) = match &opts.files {
         None => (tree.files(), Scope::Root, Vec::new()),
         Some(wanted) => {
@@ -288,11 +292,23 @@ pub fn run_checks(opts: &RunOptions, registry: &[Box<dyn Check>]) -> Result<RunR
         }
     };
     let ctx = Ctx {
-        tree: &tree,
+        tree,
         scoped: scoped.clone(),
     };
 
-    let mut findings: Vec<Finding> = Vec::new();
+    let mut findings: Vec<Finding> = unknown_files
+        .iter()
+        .map(|f| {
+            Finding::warn(
+                "FILES",
+                0,
+                f,
+                1,
+                "--files names a file the tree does not have (a deleted file is fine; a typo narrows the run silently)",
+                "Fix the path, or drop it if the file was deleted.",
+            )
+        })
+        .collect();
     let mut runs = Vec::new();
     for check in &selected {
         let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check.run(&ctx)));
@@ -301,6 +317,8 @@ pub fn run_checks(opts: &RunOptions, registry: &[Box<dyn Check>]) -> Result<RunR
             check: check.id().into(),
             ran: true,
             completed: false,
+            crash: None,
+            listing_complete: tree.listing_complete(),
             precondition: Precondition {
                 met: true,
                 detail: String::new(),
@@ -311,51 +329,34 @@ pub fn run_checks(opts: &RunOptions, registry: &[Box<dyn Check>]) -> Result<RunR
             os: RunRecord::this_os(),
             matched: Vec::new(),
         };
-        // ER-33, one rule for every way a run can fail to look: the error below is added whatever else the check found, and no
-        // waiver covers it (a waived finding next to an unreadable file must not read as a pass).
-        let mut reasons: Vec<String> = Vec::new();
         let mut found = match attempt {
             Ok(out) => {
-                record.completed = out.completed && tree.listing_complete();
+                record.completed = out.completed;
                 record.precondition = out.precondition;
                 record.probes = out.probes;
-                if !out.completed {
-                    reasons.push("it did not complete (a file could not be read)".into());
-                }
-                if !tree.listing_complete() {
-                    reasons.push("the tree could not be listed completely (a folder could not be read)".into());
-                }
                 out.findings
             }
             Err(p) => {
-                reasons.push(format!("it crashed: {}", panic_text(p.as_ref())));
+                record.crash = Some(panic_text(p.as_ref()));
                 Vec::new()
             }
         };
-        if !control {
-            reasons.push("its positive control no longer sees what the check is built to see".into());
-        }
-        if !record.precondition.met {
-            reasons.push(format!("its precondition failed: {}", record.precondition.detail));
-        }
-        if record.probes == 0 && scope == Scope::Root && record.completed {
-            reasons.push("it looked at no file on a whole-tree run".into());
-        }
         record.matched = found
             .iter()
             .filter(|f| !f.file.is_empty())
             .map(|f| format!("{}:{}", f.file, f.line))
             .collect();
         let raw = found.len();
-        if !reasons.is_empty() {
-            let what = if control { "not measured" } else { "check broken" };
+        // ER-33: the record decides its status and the error together; the error is added whatever else the check found, and no
+        // waiver covers it (a waived finding next to an unreadable file must not read as a pass).
+        if let (_, Some(message)) = record.judge(false) {
             found.push(
                 Finding::error(
                     check.id(),
                     check.rule(),
                     "",
                     1,
-                    format!("{what}: {} {}", check.id(), reasons.join("; ")),
+                    message,
                     "Fix the check or its input; a run that did not look is not a pass.",
                 )
                 .unwaivable(),

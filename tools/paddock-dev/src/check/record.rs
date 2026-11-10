@@ -31,8 +31,12 @@ pub struct RunRecord {
     pub check: String,
     /// The check was started.
     pub ran: bool,
-    /// It finished (it did not panic and read everything it meant to read).
+    /// It read everything it meant to read (a file it could not read makes this false).
     pub completed: bool,
+    /// The panic message when the check crashed.
+    pub crash: Option<String>,
+    /// Every folder of the tree was listed (the tree is completely known).
+    pub listing_complete: bool,
     /// What its input had to be for the run to mean anything, and whether it was.
     pub precondition: Precondition,
     /// Its built-in positive control saw what it is built to see.
@@ -63,8 +67,10 @@ pub enum Status {
     Clean,
     /// Measured, something found.
     Findings,
-    /// Could not look: no input, no probes, or not completed.
+    /// Could not look: no input, no probes on a whole-tree run, a crash, or not completed. Always comes with an unwaivable error.
     NotMeasured,
+    /// A scoped (`--files`) run whose files the check does not read: nothing to measure, nothing wrong.
+    NotApplicable,
     /// The probe does not see what it is built to see.
     CheckBroken,
 }
@@ -76,6 +82,7 @@ impl Status {
             Status::Clean => "clean",
             Status::Findings => "findings",
             Status::NotMeasured => "not measured",
+            Status::NotApplicable => "not applicable",
             Status::CheckBroken => "check broken",
         }
     }
@@ -87,23 +94,68 @@ impl RunRecord {
         std::env::consts::OS
     }
 
-    /// Whether the run counts as a measurement (what the stale-entry engine asks): it ran, completed, had its precondition and
-    /// control, and looked at something.
+    /// Whether the run counts as a measurement (what the stale-entry engine asks): it ran, did not crash, completed, listed the
+    /// whole tree, had its precondition and control, and looked at something.
     pub fn measured(&self) -> bool {
-        self.ran && self.completed && self.precondition.met && self.control && self.probes > 0
+        self.ran
+            && self.crash.is_none()
+            && self.completed
+            && self.listing_complete
+            && self.precondition.met
+            && self.control
+            && self.probes > 0
+    }
+
+    /// The one decision about a run (ER-33): its status given whether findings are left after waivers, and the error no waiver
+    /// covers when the run did not look. The error is `Some` exactly when the status is `not measured` or `check broken`; the host
+    /// adds it to the findings, so the record and the exit code cannot disagree.
+    pub fn judge(&self, kept: bool) -> (Status, Option<String>) {
+        let mut reasons: Vec<String> = Vec::new();
+        if !self.ran {
+            reasons.push("it did not run".into());
+        }
+        if let Some(why) = &self.crash {
+            reasons.push(format!("it crashed: {why}"));
+        } else if !self.completed {
+            reasons.push("it did not complete (a file could not be read)".into());
+        }
+        if !self.listing_complete {
+            reasons.push("the tree could not be listed completely (a folder could not be read)".into());
+        }
+        if !self.control {
+            reasons.push("its positive control no longer sees what the check is built to see".into());
+        }
+        if !self.precondition.met {
+            reasons.push(format!("its precondition failed: {}", self.precondition.detail));
+        }
+        let mut applicable = true;
+        if self.probes == 0 && self.crash.is_none() && self.completed {
+            match &self.scope {
+                Scope::Root => reasons.push("it looked at no file on a whole-tree run".into()),
+                Scope::Files(known) if known.is_empty() => {
+                    reasons.push("none of the --files entries is a file of the tree, so it looked at nothing".into());
+                }
+                Scope::Files(_) => applicable = false,
+            }
+        }
+        let status = if !self.control {
+            Status::CheckBroken
+        } else if !reasons.is_empty() {
+            Status::NotMeasured
+        } else if kept {
+            Status::Findings
+        } else if !applicable {
+            Status::NotApplicable
+        } else {
+            Status::Clean
+        };
+        let error = (!reasons.is_empty()).then(|| format!("{}: {} {}", status.name(), self.check, reasons.join("; ")));
+        (status, error)
     }
 
     /// The status given whether findings are left after waivers.
     pub fn status(&self, kept: bool) -> Status {
-        if !self.control {
-            Status::CheckBroken
-        } else if !self.measured() {
-            Status::NotMeasured
-        } else if kept {
-            Status::Findings
-        } else {
-            Status::Clean
-        }
+        self.judge(kept).0
     }
 
     /// The record as JSON: the raw findings (before waivers) and the kept ones (after), and the status from the kept ones.
@@ -112,6 +164,7 @@ impl RunRecord {
             "check": self.check,
             "ran": self.ran,
             "completed": self.completed,
+            "listingComplete": self.listing_complete,
             "precondition": {"met": self.precondition.met, "detail": self.precondition.detail},
             "control": self.control,
             "probes": self.probes,
@@ -134,6 +187,8 @@ mod tests {
             check: "C39".into(),
             ran: true,
             completed: true,
+            crash: None,
+            listing_complete: true,
             precondition: Precondition {
                 met: true,
                 detail: "the tree lists files".into(),
@@ -169,6 +224,61 @@ mod tests {
             assert!(!r.measured(), "{name}");
         }
         assert_eq!(RunRecord { control: false, ..rec() }.status(false), Status::CheckBroken);
+    }
+
+    /// Every scope times every way of not looking: the status and the unwaivable error come from one decision and agree.
+    #[test]
+    fn status_and_error_agree_for_every_scope_and_way_of_not_looking() {
+        type Way = (&'static str, fn(RunRecord) -> RunRecord);
+        let ways: [Way; 7] = [
+            ("crash", |r| RunRecord {
+                crash: Some("boom".into()),
+                completed: false,
+                probes: 0,
+                ..r
+            }),
+            ("incomplete", |r| RunRecord { completed: false, ..r }),
+            ("unlistable folder", |r| RunRecord {
+                listing_complete: false,
+                ..r
+            }),
+            ("failed control", |r| RunRecord { control: false, ..r }),
+            ("unmet precondition", |r| RunRecord {
+                precondition: Precondition {
+                    met: false,
+                    detail: "no input".into(),
+                },
+                ..r
+            }),
+            ("zero probes", |r| RunRecord { probes: 0, ..r }),
+            ("fine", |r| r),
+        ];
+        let scopes = [
+            ("root", Scope::Root),
+            ("files, known", Scope::Files(vec!["notes.md".into()])),
+            ("files, all unknown", Scope::Files(vec![])),
+        ];
+        for (sname, scope) in scopes {
+            for (wname, way) in &ways {
+                let r = way(RunRecord {
+                    scope: scope.clone(),
+                    ..rec()
+                });
+                for kept in [false, true] {
+                    let (status, error) = r.judge(kept);
+                    let must_fail = matches!(status, Status::NotMeasured | Status::CheckBroken);
+                    assert_eq!(error.is_some(), must_fail, "{sname} / {wname} / kept {kept}: {status:?} {error:?}");
+                    assert_eq!(r.status(kept), status);
+                }
+                let expect = match (*wname, &scope) {
+                    ("failed control", _) => Status::CheckBroken,
+                    ("fine", _) => Status::Clean,
+                    ("zero probes", Scope::Files(f)) if !f.is_empty() => Status::NotApplicable,
+                    _ => Status::NotMeasured,
+                };
+                assert_eq!(r.status(false), expect, "{sname} / {wname}");
+            }
+        }
     }
 
     #[test]

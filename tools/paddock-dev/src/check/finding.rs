@@ -61,6 +61,14 @@ impl Finding {
         }
     }
 
+    /// A warning finding: reported and counted, never fails the run.
+    pub fn warn(check: &str, rule: u32, file: &str, line: usize, message: impl Into<String>, fix: impl Into<String>) -> Finding {
+        Finding {
+            severity: Severity::Warn,
+            ..Finding::error(check, rule, file, line, message, fix)
+        }
+    }
+
     /// The same, as the waiver engine builds it (`W001`, `W003`, `W004`): `file` and `line` come before `rule` in the JSON.
     pub fn waiver_problem(
         check: &str,

@@ -276,19 +276,41 @@ fn files_scopes_the_run_and_the_record_says_so() {
     );
 }
 
+/// A tree with no waiver problems: `a.rs` (a file C39 and C53 read, with no findings) and `notes.md` (one they do not).
+fn small_tree() -> tempfile::TempDir {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(d.path().join("a.rs"), "fn a() {}\n").unwrap();
+    std::fs::write(d.path().join("notes.md"), "x").unwrap();
+    d
+}
+
 #[test]
-fn a_scoped_run_that_reads_no_rust_file_is_not_measured_and_not_an_error() {
-    let tree = materialize();
+fn a_scoped_run_that_reads_no_rust_file_is_not_applicable_and_not_an_error() {
+    let tree = small_tree();
     let mut o = options(tree.path());
-    o.files = Some(vec!["paddock.waivers.toml".into()]);
+    o.only = Some(vec!["C39".into()]);
+    o.files = Some(vec!["notes.md".into()]);
     let r = run_checks(&o, &registry()).unwrap();
     for e in &r.runs {
-        assert_eq!(e.record.status(e.kept > 0).name(), "not measured", "{}", e.record.check);
+        assert_eq!(e.record.status(e.kept > 0).name(), "not applicable", "{}", e.record.check);
     }
-    assert!(
-        r.findings.iter().all(|f| !f.check.starts_with('C')),
-        "a push gate on a docs change must not fail"
-    );
+    assert_eq!(r.errors(), 0, "a push gate on a docs change must not fail: {:?}", r.findings);
+    assert!(r.findings.iter().all(|f| !f.check.starts_with('C')));
+}
+
+#[test]
+fn files_that_are_all_unknown_are_an_unwaivable_error_and_each_is_a_warning() {
+    let tree = small_tree();
+    let mut o = options(tree.path());
+    o.only = Some(vec!["C39".into()]);
+    o.files = Some(vec!["typo/one.rs".into(), "typo/two.rs".into()]);
+    let r = run_checks(&o, &registry()).unwrap();
+    assert_eq!(r.warnings(), 2, "one counted warning per unknown entry: {:?}", r.findings);
+    let broken: Vec<_> = r.findings.iter().filter(|f| f.unwaivable).collect();
+    assert_eq!(broken.len(), 1, "{:?}", r.findings);
+    assert!(broken[0].message.contains("--files"), "{}", broken[0].message);
+    assert_eq!(r.runs[0].record.status(true).name(), "not measured");
+    assert!(r.errors() >= 1);
 }
 
 #[test]
@@ -401,7 +423,7 @@ fn the_command_writes_the_report_to_out() {
 
 // ---- ER-33: every way a run can fail to look adds an error no waiver covers -------------------------------------------------
 
-use paddock_dev::check::finding::Finding;
+use paddock_dev::check::finding::{Finding, Severity};
 use paddock_dev::check::record::Precondition;
 use paddock_dev::check::{Check, CheckOutput, Control, Ctx};
 
@@ -448,7 +470,11 @@ impl Check for Stub {
         }
         CheckOutput {
             findings: vec![Finding::error(self.id, 1, "a.rs", 1, "a finding", "fix it")],
-            probes: if matches!(way, Way::ZeroProbes) { 0 } else { 1 },
+            probes: if matches!(way, Way::ZeroProbes) {
+                0
+            } else {
+                ctx.files().iter().filter(|f| f.ends_with(".rs")).count()
+            },
             completed: !matches!(way, Way::Incomplete),
             precondition: Precondition {
                 met: !matches!(way, Way::PreconditionUnmet),
@@ -487,6 +513,67 @@ fn stub_run(way: Way, only_fine_is_clean: bool) -> paddock_dev::check::RunResult
 }
 
 #[test]
+fn a_tree_that_could_not_be_listed_is_an_unwaivable_error_next_to_a_clean_looking_run() {
+    let tree = paddock_dev::check::tree::Tree::in_memory_with_list_errors(&[("a.rs", "x")], 1);
+    let reg: Vec<Box<dyn Check>> = vec![Box::new(Stub { id: "S1", way: Way::Fine })];
+    let mut o = options(Path::new(""));
+    o.only = None;
+    let r = paddock_dev::check::run_checks_in(&tree, &o, &reg).unwrap();
+    let broken: Vec<&Finding> = r.findings.iter().filter(|f| f.unwaivable).collect();
+    assert_eq!(broken.len(), 1, "{:?}", r.findings);
+    assert!(broken[0].message.contains("could not be listed"), "{}", broken[0].message);
+    assert!(r.errors() >= 1);
+    assert_eq!(r.runs[0].record.status(r.runs[0].kept > 0).name(), "not measured");
+}
+
+/// Every scope times every way of not looking, through the host: the record's status and the unwaivable error agree.
+#[test]
+fn status_and_error_agree_for_every_scope_and_way_through_the_host() {
+    let scopes: [(&str, Option<Vec<&str>>); 5] = [
+        ("root", None),
+        ("files a.rs", Some(vec!["a.rs"])),
+        ("files notes.md", Some(vec!["notes.md"])),
+        ("files unknown", Some(vec!["typo.rs"])),
+        ("files known and unknown", Some(vec!["a.rs", "typo.rs"])),
+    ];
+    for way in [
+        Way::Fine,
+        Way::Panics,
+        Way::Incomplete,
+        Way::ControlFails,
+        Way::PreconditionUnmet,
+        Way::ZeroProbes,
+    ] {
+        for (sname, files) in &scopes {
+            let tree = stub_tree(&["S1"]);
+            std::fs::write(tree.path().join("notes.md"), "x").unwrap();
+            let reg: Vec<Box<dyn Check>> = vec![Box::new(Stub { id: "S1", way })];
+            let mut o = options(tree.path());
+            o.only = None;
+            o.files = files.as_ref().map(|f| f.iter().map(|s| s.to_string()).collect());
+            let r = run_checks(&o, &reg).unwrap();
+            let e = &r.runs[0];
+            let status = e.record.status(e.kept > 0).name();
+            let unwaivable = r.findings.iter().filter(|f| f.unwaivable).count();
+            let all_unknown = files.as_ref().is_some_and(|f| f.iter().all(|x| *x == "typo.rs"));
+            let expect = match (way, all_unknown, *sname) {
+                (Way::ControlFails, _, _) => "check broken",
+                (Way::Panics | Way::Incomplete | Way::PreconditionUnmet, _, _) => "not measured",
+                (_, true, _) => "not measured",
+                (Way::ZeroProbes, _, s) if s != "root" => "not applicable",
+                (Way::ZeroProbes, _, _) => "not measured",
+                (Way::Fine, _, "files notes.md") => "not applicable",
+                (Way::Fine, _, _) => "clean",
+            };
+            assert_eq!(status, expect, "{way:?} / {sname}");
+            let fails = matches!(status, "not measured" | "check broken");
+            assert_eq!(unwaivable, usize::from(fails), "{way:?} / {sname}: {status}: {:?}", r.findings);
+            assert_eq!(r.errors() > 0, fails, "{way:?} / {sname}: the exit follows the status");
+        }
+    }
+}
+
+#[test]
 fn a_run_that_looks_fine_and_whose_findings_are_all_waived_passes() {
     let r = stub_run(Way::Fine, true);
     assert!(r.findings.is_empty());
@@ -515,10 +602,13 @@ fn every_way_of_not_looking_is_an_unwaivable_error_next_to_waived_findings() {
 #[test]
 fn a_panicking_check_is_not_waivable_even_by_a_star_waiver() {
     let r = stub_run(Way::Panics, false);
-    assert!(
-        r.findings
-            .iter()
-            .any(|f| f.check == "S1" && f.message.starts_with("check broken") || f.message.contains("crashed"))
+    let broken: Vec<&Finding> = r.findings.iter().filter(|f| f.unwaivable).collect();
+    assert_eq!(broken.len(), 1, "exactly one unwaivable finding: {:?}", r.findings);
+    assert_eq!(broken[0].check, "S1");
+    assert_eq!(broken[0].severity, Severity::Error);
+    assert_eq!(
+        broken[0].message, "not measured: S1 it crashed: boom",
+        "the crash is named in the one unwaivable error"
     );
     assert!(
         r.waived.iter().all(|w| w.finding.line == 1 && !w.finding.unwaivable),

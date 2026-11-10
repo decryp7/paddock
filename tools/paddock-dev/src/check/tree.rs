@@ -49,6 +49,13 @@ impl Tree {
         }
     }
 
+    /// An in-memory tree whose listing reports `errors` unreadable folders, as a locked folder would (for tests of the host).
+    pub fn in_memory_with_list_errors(files: &[(&str, &str)], errors: usize) -> Tree {
+        let t = Tree::in_memory(files);
+        t.list_errors.set(errors);
+        t
+    }
+
     /// Whether every folder and entry was listed (a read error is counted, never skipped silently).
     pub fn listing_complete(&self) -> bool {
         self.files();
