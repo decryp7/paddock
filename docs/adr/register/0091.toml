@@ -5,7 +5,7 @@ status = "accepted"
 accepted = "2026-11-10"
 copied_from = "docs/adr-evidence-heads b32655fef"
 copied = "2026-11-11"
-prerequisites = []
+prerequisites = ["RT-5", "ADR 0089 WP-1"]
 
 [[wp]]
 id = "WP-1"

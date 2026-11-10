@@ -5,7 +5,6 @@ status = "accepted"
 accepted = "2026-11-10"
 copied_from = "docs/adr-user-approvals 8e813d5fb"
 copied = "2026-11-11"
-prerequisites = []
 
 [[wp]]
 id = "WP-0"

@@ -5,7 +5,7 @@ status = "accepted"
 accepted = "2026-11-10"
 copied_from = "docs/adr-captured-tool-output 9c2cd4d8e"
 copied = "2026-11-11"
-prerequisites = []
+prerequisites = ["RT-5", "ADR 0088 WP-2", "ADR 0088 WP-3"]
 
 [[wp]]
 id = "WP-0"

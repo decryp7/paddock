@@ -1,0 +1,48 @@
+id = "R-2026-11-10-0076-exit-phase"
+title = "Amendment to ADR 0076: exit is a phase, so native work is stopped before the process exits"
+summary = "Amendment to ADR 0076 (accepted 2026-11-10 by the user, D-E1 to D-E7 as recommended; ER-21): the process ends only through one exit phase that stops every registered owner within the process stop budget; WP-X0 is the open Debrief crash fix, WP-X1 and WP-X2 the shared registry and check, WP-X3 to WP-X6 per app, WP-X7 the rule text; merged into ADR 0076 when 0076 lands on main"
+status = "approved"
+approved = "2026-11-10"
+approval_file = "docs/adr/amendments/0076-exit-phase-2026-11-10.md"
+adr_by = ""
+
+[[wp]]
+id = "WP-X0"
+days = 1
+state = "in-progress"
+branch = "fix/debrief-store-worker-exit"
+
+[[wp]]
+id = "WP-X1"
+days = 2.5
+state = "not-started"
+
+[[wp]]
+id = "WP-X2"
+days = 1.5
+state = "not-started"
+
+[[wp]]
+id = "WP-X3"
+days = 4
+state = "not-started"
+
+[[wp]]
+id = "WP-X4"
+days = 1
+state = "not-started"
+
+[[wp]]
+id = "WP-X5"
+days = 1
+state = "not-started"
+
+[[wp]]
+id = "WP-X6"
+days = 0.5
+state = "not-started"
+
+[[wp]]
+id = "WP-X7"
+days = 0.25
+state = "not-started"

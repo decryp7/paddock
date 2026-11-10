@@ -5,7 +5,7 @@ status = "accepted"
 accepted = "2026-11-10"
 copied_from = "docs/adr-private-files e2f7e946b"
 copied = "2026-11-11"
-prerequisites = []
+prerequisites = ["RT-5", "ADR 0088 engine"]
 
 [[wp]]
 id = "WP-0"

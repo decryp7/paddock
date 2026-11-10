@@ -5,17 +5,19 @@ status = "accepted"
 accepted = "2026-11-10"
 copied_from = "docs/adr-not-measured 0df6835a9"
 copied = "2026-11-11"
-prerequisites = []
+prerequisites = ["RT-5"]
 
 [[wp]]
 id = "WP-0"
 days = 0.25
-state = "not-started"
+state = "in-progress"
+branch = "feat/outcome-type"
 
 [[wp]]
 id = "WP-1"
 days = 1.5
-state = "not-started"
+state = "in-progress"
+branch = "feat/outcome-type"
 
 [[wp]]
 id = "WP-2"
