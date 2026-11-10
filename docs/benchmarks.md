@@ -305,6 +305,42 @@ These measure tooling, not a product. They are kept where they are.
   0.53–1.77 ms of that. Windows is not measured.
 - [Lessons](lessons.md): test-binary consolidation, 239 → 99 binaries, nextest 301 s → 196 s.
 
+### 2026-11-10, release bundle jobs: what the shared caches save, warm against cold (CI job records; ADR 0085)
+
+Quoted by [ADR 0085](adr/0085-release-builds-never-consume-caches-branch-runs-can-write.md) (the cost of isolating tag runs).
+
+- **Commit:** the runs' own heads: 7695 `8efce3fc3` (tag `dyno-v1.1.0`), 7728 and 7729 `a5153d114`, 7851 `a4d6644fc`,
+  7810 `f94934ec5`
+- **Machine:** the CI runners: Linux container (`paddock-ci:v2`, 16-core host), macOS host runner on the shared Mac mini
+  (three runners), Windows host runner (16 vCPU VM, three slots)
+- **Load:** not recorded by the runner. Run 7729's macOS leg ran while two other cold bundle jobs (7728, 7732) ran on the
+  same Mac, so it is an upper bound
+- **Build:** `tauri build` of the app (cargo `dist` profile: thin LTO, one codegen unit), sidecars first; sccache 0.19.0 on
+  local disk (the slot's `sccache-s<n>` on a host, the `/sccache` mount in a container), the slot's kept build folder on a host
+- **Corpus:** none; real CI jobs of the release workflows
+- **Command:** the job records of the Gitea API (`/actions/runs/<run>/jobs`, started and completed times) and each job's
+  log (`/actions/jobs/<id>/logs`): the cargo `Finished` lines and `sccache --show-stats` of the `sccache-stats` step
+- **Runs:** one job per row
+- **Numbers:**
+
+  | Run, leg | sccache requests / hits / misses | cargo `Finished` lines | Job wall | Budget | Verdict |
+  |---|---|---|---|---|---|
+  | 7695 tag `dyno-v1.1.0`, macOS (warm slot s1) | 173 / 150 / 0 | 50 s, 66 s | 3.9 min | none set | recorded |
+  | 7695 tag `dyno-v1.1.0`, Linux (warm `/sccache`) | 1,039 / 821 / 0 | 39 s, 61 s | 5.5 min | none set | recorded |
+  | 7695 tag `dyno-v1.1.0`, Windows (warm slot s1) | 307 / 210 / 19 | 16 s, 63 s, 104 s | 8.3 min | none set | recorded |
+  | 7851 Dyno dispatch, macOS (slot s2, partly cold) | 180 / 76 / 81 | 4 min 21 s, 4 min 49 s | 15.5 min | none set | recorded |
+  | 7851 Dyno dispatch, Linux (partly cold) | 1,097 / 792 / 80 | 1 min 43 s, 3 min 11 s | 8.2 min | none set | recorded |
+  | 7728 Pitwall dispatch, macOS (cold: 2 hits) | 630 / 2 / 520 | 3 min 42 s, 5 min 40 s | 20.1 min | none set | recorded |
+  | 7729 Dyno dispatch, macOS (cold slot s2, Mac shared with two cold bundles) | 856 / 289 / 414 | 9 min 45 s, 21 min 17 s | 90.8 min | none set | upper bound |
+  | 7810 `app dyno (windows)` gates, cold slot s3 (a debug test build, not a bundle) | 1,020 misses, 2 hits | not read | 21.3 min | none set | reference only |
+
+- **Memory measure:** not measured
+- **Notes:** no fully cold bundle (empty build folder, no compile cache, empty `CARGO_HOME`) exists in the records on any
+  OS, so the cold cost ADR 0085 quotes is an estimate from these rows. The Linux tag leg already downloads every crate (515
+  `Downloaded` lines in 7695: the container's `CARGO_HOME` is new each run); the host legs downloaded none (the runner user's
+  `~/.cargo` was reused). Measure a fully isolated bundle on each OS with ADR 0085's release-mode dispatch (WP-3) and add it
+  here.
+
 ### 2026-11-09, CI share on the shared Mac (three runners)
 
 Quoted by `conformance/ci/build-jobs.sh` (the macOS layout) and the fix/main-after-7761 report (CI run 7775).
