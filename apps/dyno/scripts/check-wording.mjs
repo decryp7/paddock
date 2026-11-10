@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Dyno 1.0.0 only looks: nothing it shows may promise a change to the computer (ER-21: the class is checked, not each string).
+// Dyno shows readings and runs only the power actions its owner sets up: nothing it shows may promise tuning, cleanup or another change to the computer (ER-21: the class is checked, not each string).
 // Scans the user-visible text of the Rust core and helper (string literals), the Angular app (templates and TS strings),
 // the Tauri bundle descriptions and the Cargo descriptions for change vocabulary, minus an explicit allow-list.
 //
@@ -8,7 +8,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-/** Words a read-only monitor must not use in text people read. */
+/** Words a monitor that does not tune or clean up must not use in text people read. */
 export const FORBIDDEN = [
   /\btunes?\b/i,
   /\btuning\b/i,

@@ -1,7 +1,7 @@
 # The Paddock ecosystem
 
 <picture>
-  <img src="images/paddock-ecosystem.svg?v=bbf5ff4b" alt="Paddock: eight apps. Pacenotes, Debrief and Sighter above Pitwall, the local AI hub; Recce, Dyno and Spotter below it; Pitcrew under Dyno. Dash-dot lines marked MCP show what is planned for Pitwall 1.1: it calls the MCP servers of Pacenotes, Debrief, Sighter, Dyno and Recce, the family's retrieval engine. All are built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps." width="100%">
+  <img src="images/paddock-ecosystem.svg?v=79e35414" alt="Paddock: eight apps. Pacenotes, Debrief and Sighter above Pitwall, the local AI hub; Recce, Dyno and Spotter below it; Pitcrew under Dyno. Dash-dot lines marked MCP show what is planned for Pitwall 1.1: it calls the MCP servers of Pacenotes, Debrief, Sighter, Dyno and Recce, the family's retrieval engine. All are built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps." width="100%">
 </picture>
 
 Eight desktop apps for people who keep systems running, built on one shared foundation. Each is useful alone and better with
@@ -16,7 +16,7 @@ Sighter: docked panes with the layout planner, the activity bar, the Explorer, t
 
 Images are generated ([`images/src/ecosystem.mjs`](images/src/ecosystem.mjs),
 [`images/src/integrations.mjs`](images/src/integrations.mjs)). PNG exports for places that cannot render SVG:
-hero [light](images/paddock-ecosystem-light.png?v=66869804) and [dark](images/paddock-ecosystem-dark.png?v=386413ff), integrations
+hero [light](images/paddock-ecosystem-light.png?v=2f28e185) and [dark](images/paddock-ecosystem-dark.png?v=ff10f4fa), integrations
 [light](images/paddock-integrations-light.png?v=b166f32d) and [dark](images/paddock-integrations-dark.png?v=cb959d02), hand-offs
 [light](images/paddock-handoffs-light.png?v=e754dcb5) and [dark](images/paddock-handoffs-dark.png?v=ce5abde7). PNGs are
 rendered with Playwright's pinned Chrome for Testing, never the installed Google Chrome ([`images/src/chrome.mjs`](images/src/chrome.mjs); set
