@@ -144,6 +144,36 @@ impl Fixture {
         format!("{}:{}", bin.display(), std::env::var("PATH").unwrap())
     }
 
+    /// A fake `git` whose `worktree add` tells the test it has been reached, then holds for three seconds. The tool reserves
+    /// the path before it starts git, so the signal means the reservation is in place; the test waits on it instead of
+    /// polling the owner map (ER-12). Returns the `PATH` to give the tool and the receiver of the signal.
+    // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
+    #[allow(clippy::disallowed_methods)]
+    pub fn fake_slow_add(&self, name: &str) -> (String, std::sync::mpsc::Receiver<()>) {
+        let fifo = self.root.join(format!("reached-{name}.fifo"));
+        assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
+        let body = format!(r#"case "$*" in *"worktree add"*) echo reached > '{}'; sleep 3;; esac"#, fifo.display());
+        let path_env = self.fake_git(name, &body);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            // Opening a fifo for reading blocks until the fake git opens it for writing; the caller bounds the wait.
+            let _ = std::fs::read_to_string(&fifo);
+            let _ = tx.send(());
+        });
+        (path_env, rx)
+    }
+
+    /// Waits until the `worktree add` of [`Fixture::fake_slow_add`] is inside its git call, at most ten seconds.
+    pub fn wait_inside_add(&self, reached: &std::sync::mpsc::Receiver<()>) {
+        reached
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the add never reached its git call");
+        assert!(
+            self.owners()["pending"].as_object().is_some_and(|m| !m.is_empty()),
+            "the add reached git without a reservation"
+        );
+    }
+
     /// The path of a worktree named `name`.
     pub fn path(&self, name: &str) -> PathBuf {
         self.wt.join(name)

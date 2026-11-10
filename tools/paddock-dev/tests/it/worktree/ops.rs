@@ -537,7 +537,7 @@ fn a_claim_stays_fast_while_a_slow_add_runs() {
     use std::time::{Duration, Instant};
     let fx = Fixture::new();
     let other = fx.add("other");
-    let path_env = fx.fake_git("slow", r#"case "$*" in *"worktree add"*) sleep 3;; esac"#);
+    let (path_env, reached) = fx.fake_slow_add("slow");
     let mut slow = fx
         .cmd(
             &fx.primary,
@@ -558,12 +558,8 @@ fn a_claim_stays_fast_while_a_slow_add_runs() {
         .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    // Wait for the reservation: the add is now inside its slow git call.
-    let started = Instant::now();
-    while fx.owners()["pending"].as_object().is_none_or(|m| m.is_empty()) {
-        assert!(started.elapsed() < Duration::from_secs(10), "the add never reserved its path");
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    // Wait for the add to be inside its slow git call (the reservation is in place).
+    fx.wait_inside_add(&reached);
     let t = Instant::now();
     let r = fx.claim(&other, "agent-A");
     let took = t.elapsed();
@@ -747,9 +743,8 @@ fn drop_says_so_when_the_lock_could_not_be_put_back() {
 #[test]
 fn two_adds_with_different_roots_cannot_nest_through_a_reservation() {
     // Add A is inside its slow git call (its path is only reserved, nothing on disk yet); add B names A's folder as its root.
-    use std::time::{Duration, Instant};
     let fx = Fixture::new();
-    let path_env = fx.fake_git("nest", r#"case "$*" in *"worktree add"*) sleep 3;; esac"#);
+    let (path_env, reached) = fx.fake_slow_add("nest");
     let slow = fx
         .cmd(&fx.primary, &["worktree", "add", "a", "--base", "origin/main", "--owner", "a:b"])
         .env("PATH", path_env)
@@ -757,11 +752,7 @@ fn two_adds_with_different_roots_cannot_nest_through_a_reservation() {
         .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    let started = Instant::now();
-    while fx.owners()["pending"].as_object().is_none_or(|m| m.is_empty()) {
-        assert!(started.elapsed() < Duration::from_secs(10), "the add never reserved its path");
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    fx.wait_inside_add(&reached);
     let inside = fx.dev(&[
         "worktree",
         "add",
