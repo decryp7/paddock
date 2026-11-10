@@ -6,8 +6,10 @@
 
 use super::input::ToolCall;
 use super::{decide, rules};
+#[cfg(unix)]
 use crate::input_hash::{Exec, Real};
 use serde_json::json;
+#[cfg(unix)]
 use std::path::Path;
 
 const PGREP: &str = include_str!("fixtures/corpus-no-pgrep-wait.tsv");
@@ -106,6 +108,7 @@ fn the_deliberate_differences_hold() {
     }
 }
 
+#[cfg(unix)]
 /// Runs an old shell hook on a command and says whether it refused. `None` when `bash` or `jq` is missing.
 fn old_denies(script: &str, cmd: &str) -> Option<bool> {
     let path = format!("{}/src/hook/fixtures/{script}", env!("CARGO_MANIFEST_DIR"));
@@ -114,6 +117,7 @@ fn old_denies(script: &str, cmd: &str) -> Option<bool> {
     Some(!out.trim().is_empty())
 }
 
+#[cfg(unix)]
 fn live(corpus: &str, script: &str) {
     let mut compared = 0;
     for (deny, cmd) in rows(corpus) {
