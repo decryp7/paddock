@@ -233,6 +233,69 @@ fn a_held_lock_with_no_file_is_waited_for_and_nothing_is_launched() {
     assert_eq!(*s.phase(), Phase::WaitingForHolder);
 }
 
+/// The guard the link test of a stale file beside a slow lock holder gave with 100 timed looks (CI run 7854), here without a
+/// clock: a holder that keeps the data folder and never answers, beside an old agent's file of this build, is waited for over
+/// hundreds of ticks. Every connect to the old file fails, the wait is noted once, and nothing is ever launched.
+#[test]
+fn a_slow_holder_beside_a_stale_file_is_waited_for_over_hundreds_of_looks_and_nothing_is_launched() {
+    const TICKS: u32 = 200;
+    let stale = || Some(hint(9, 0, true)); // written before the wait began: not fresh
+    let (mut s, cmds) = first(|l| Look {
+        hint: stale(),
+        lock: Some(LockSeen::Held),
+        ..l
+    });
+    let mut all = cmds.clone();
+    let mut pending = cmds;
+    let mut probed = 0;
+    for _ in 0..TICKS {
+        pending.extend(s.step(Event::Tick));
+        while !pending.is_empty() {
+            let mut next = Vec::new();
+            for c in pending.drain(..) {
+                match c {
+                    Command::Look { seq, lock, .. } => {
+                        probed += usize::from(lock);
+                        next.extend(s.step(Event::Looked(Look {
+                            hint: stale(),
+                            // A look that does not probe the lock does not know it.
+                            lock: lock.then_some(LockSeen::Held),
+                            ..look(seq)
+                        })));
+                    }
+                    Command::Connect { seq, .. } => next.extend(s.step(Event::ConnectFailed {
+                        seq,
+                        why: "nothing listens at the old file's endpoint".into(),
+                    })),
+                    _ => {}
+                }
+                all.push(c);
+            }
+            pending = next;
+        }
+    }
+    // The wait probes the lock on every LOCK_EVERY-th tick of its own; the deciding look before it is not counted.
+    assert!(
+        probed + 1 >= (TICKS / LOCK_EVERY) as usize,
+        "the wait stopped probing the lock ({probed} probes)"
+    );
+    assert_eq!(launches(&all), 0, "an agent was launched beside the holder");
+    assert_eq!(*s.phase(), Phase::WaitingForHolder);
+    let notes = all
+        .iter()
+        .filter(|c| {
+            matches!(
+                c,
+                Command::Stall {
+                    stall: Stall::OtherAgentHolds,
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(notes, 1, "the wait is noted once, not once per look");
+}
+
 #[test]
 fn a_file_of_this_build_beside_a_held_lock_is_connected_to() {
     let (s, cmds) = first(|l| Look {

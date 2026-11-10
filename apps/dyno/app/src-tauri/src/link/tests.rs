@@ -849,7 +849,17 @@ impl FakeServiceManager {
 
 #[test]
 fn with_the_service_supervising_the_app_never_starts_an_agent_of_its_own() {
-    let r = rig(false);
+    // The idle fallback (a service that starts nothing is replaced after a few rechecks) never fires here: at the 1 ms test
+    // pace its 4 rechecks of 50 ticks are about 200 ms, which the service's agent may not beat on a loaded runner. It has its own
+    // tests: machine::table::a_service_that_starts_nothing_is_replaced_by_the_apps_own_without_retry and
+    // a_lock_held_resets_the_count_of_a_service_that_starts_nothing.
+    let r = rig_with(
+        false,
+        super::machine::Tuning {
+            idle_rechecks: u32::MAX,
+            ..patient()
+        },
+    );
     let manager = FakeServiceManager::new(r.link.dirs.clone(), true, true);
     r.link.set_service_probe(manager.probe());
     let handle = r.link.spawn().unwrap();
@@ -873,7 +883,9 @@ fn with_the_service_supervising_the_app_never_starts_an_agent_of_its_own() {
 }
 
 /// Production-like counts, shrunk so that a few dozen looks outlast the old fallback (idle rechecks of the service) many times.
-/// A pending registration is never given up on here (that has its own tests in `machine::table`). Why: the give-up is counted
+/// A pending registration is never given up on here; the give-up has its own tests,
+/// machine::table::a_pending_registration_that_never_ends_is_given_up_on_after_the_longest_wait_and_the_app_starts_its_own_agent
+/// and giving_up_on_a_pending_registration_lasts_while_it_stays_pending_and_ends_with_it. Why: the give-up is counted
 /// in ticks (3000, 3 s at the 1 ms test pace) while these tests wait for 60 looks, and under I/O load 60 looks took longer
 /// than 3 s, so the link gave up and started its own agent (2 of 10 runs on the Windows test VM under I/O load).
 fn pending_tuning() -> super::machine::Tuning {
@@ -886,6 +898,10 @@ fn pending_tuning() -> super::machine::Tuning {
     }
 }
 
+/// The app waits for a registration under way and uses the service's agent once it is up. The tuning never gives up on the
+/// registration (see [`pending_tuning`]); the give-up is covered by
+/// machine::table::a_pending_registration_that_never_ends_is_given_up_on_after_the_longest_wait_and_the_app_starts_its_own_agent
+/// and giving_up_on_a_pending_registration_lasts_while_it_stays_pending_and_ends_with_it.
 #[test]
 fn a_pending_registration_is_waited_for_and_the_services_agent_finds_the_data_folder_free() {
     let r = rig_with(false, pending_tuning());
