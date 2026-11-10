@@ -298,6 +298,7 @@ fn handshake_then_lock_down(
     })?;
     // `join` returns when the thread's user code is over, but the kernel lists its task until it is torn down: landlock's
     // count of threads that predate the lockdown would take that exiting task for a thread that escapes it.
+    // A task that outlives the bound is a thread that really runs on: the lockdown then reports it, as it should.
     wait_task_gone(tid, TASK_GONE_BOUND);
     lock_down(bootstrap, elevated)?;
     // `from_std` registers with the reactor of the runtime entered: the shared one, started now.
@@ -324,15 +325,23 @@ fn current_tid() -> u32 {
     }
 }
 
-/// Waits (at most `bound`) until thread `tid` of this process has left `/proc/self/task`. Nothing to wait for where
-/// there is no such directory or for tid 0.
+/// Waits (at most `bound`) until thread `tid` of this process has left `/proc/self/task`; true when it has. Nothing to
+/// wait for (true) where there is no such directory or for tid 0. Giving up is logged on stderr, the child's log.
 #[cfg(unix)]
-fn wait_task_gone(tid: u32, bound: Duration) {
+fn wait_task_gone(tid: u32, bound: Duration) -> bool {
     if tid == 0 {
-        return;
+        return true;
     }
     let path = std::path::PathBuf::from(format!("/proc/self/task/{tid}"));
-    wait_until(|| !path.exists(), bound);
+    let started = std::time::Instant::now();
+    let gone = wait_until(|| !path.exists(), bound);
+    if !gone {
+        eprintln!(
+            "the handshake thread {tid} was still listed after {} ms: the lockdown will count it as a thread that escapes it",
+            started.elapsed().as_millis()
+        );
+    }
+    gone
 }
 
 /// Polls `done` until it is true or `bound` has passed; true when it was met. The wait is on the condition: a short
@@ -340,6 +349,7 @@ fn wait_task_gone(tid: u32, bound: Duration) {
 #[cfg(unix)]
 fn wait_until(mut done: impl FnMut() -> bool, bound: Duration) -> bool {
     let end = std::time::Instant::now() + bound;
+    let mut looks = 0u32;
     loop {
         if done() {
             return true;
@@ -347,7 +357,12 @@ fn wait_until(mut done: impl FnMut() -> bool, bound: Duration) -> bool {
         if std::time::Instant::now() >= end {
             return false;
         }
-        std::thread::yield_now();
+        looks += 1;
+        if looks <= 64 {
+            std::thread::yield_now();
+        } else {
+            std::thread::sleep(Duration::from_micros(200));
+        }
     }
 }
 
@@ -498,8 +513,24 @@ mod tests {
         assert_eq!(looks, 3);
         assert!(!wait_until(|| false, Duration::from_millis(20)));
         // A tid that never existed, or none at all, is already gone.
-        wait_task_gone(0, Duration::from_secs(30));
-        wait_task_gone(u32::MAX, Duration::from_secs(30));
+        assert!(wait_task_gone(0, Duration::from_secs(30)));
+        assert!(wait_task_gone(u32::MAX, Duration::from_secs(30)));
+    }
+
+    /// A thread that is still running stays listed: the wait gives up at the bound and says so.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_live_thread_is_not_waited_for_beyond_the_bound() {
+        let (tid_tx, tid_rx) = std::sync::mpsc::channel();
+        let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+        let t = std::thread::spawn(move || {
+            tid_tx.send(current_tid()).unwrap();
+            let _ = stop_rx.recv();
+        });
+        let tid = tid_rx.recv().unwrap();
+        assert!(!wait_task_gone(tid, Duration::from_millis(20)));
+        stop_tx.send(()).unwrap();
+        t.join().unwrap();
     }
 
     /// The race behind a lockdown that reported "1 thread(s) started before the lockdown": a joined thread still
@@ -510,7 +541,7 @@ mod tests {
         for i in 0..300 {
             let tid = std::thread::spawn(current_tid).join().unwrap();
             assert_ne!(tid, 0);
-            wait_task_gone(tid, TASK_GONE_BOUND);
+            assert!(wait_task_gone(tid, TASK_GONE_BOUND));
             assert!(
                 !std::path::Path::new(&format!("/proc/self/task/{tid}")).exists(),
                 "round {i}: thread {tid} is still listed"
