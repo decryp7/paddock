@@ -1,14 +1,15 @@
 # 96. Accepted decisions land, and their work is tracked to main
 
-- Status: Proposed 2026-11-10, revision 2. Revision 1 (`919381e26`) was reviewed independently ("changes": one P1 and
-  nine P2s), answered here (see "Review answers"). Drafted at the coordinator's request of 2026-11-10, after the user chose "a register plus a
+- Status: Proposed 2026-11-10, revision 3. Revision 1 (`919381e26`) was reviewed independently ("changes": one P1 and
+  nine P2s); revision 2 (`b2d6031e5`) answered it and was re-reviewed ("changes": one P1, two P2s, and one new class
+  from the 0094/0095 review); revision 3 answers that (see "Review answers"). Drafted at the coordinator's request of 2026-11-10, after the user chose "a register plus a
   check" that day (ER-21: one class, six instances below). Nothing here is built yet. ER-23 does not apply (no drawings).
 - Date: 2026-11-10
 - Related: ER-21 / rule 40 (looking for recurring classes is standing work), ER-30, ER-33 / rule 71, ER-36, rule 50 (d)
   (docs-only changes land after the local conformance checks, without CI); ADR 0021 (§4 `.gitattributes` policy), ADR
   0038 (`./dev check --pre-push`), ADR 0049 (§5 `merge=union` for the ADR indexes and C82), ADR 0088 (accepted: registers
-  and one ratchet engine), ADR 0089 (accepted: `Outcome`, "not measured" is never a pass), ADR 0091 (proposed:
-  `evidence-heads` and the public "is this commit in `origin/main`" query in `./dev evidence`); the plan
+  and one ratchet engine), ADR 0089 (accepted: `Outcome`, "not measured" is never a pass), ADR 0091 (accepted 2026-11-10
+  at `b32655fef`: `evidence-heads` and the in-main query in `tools/paddock-dev/src/git_refs.rs`); the plan
   `docs/plans/rust-tooling-2026-11-10.md` on `origin/docs/rust-tooling-plan` (§3: one module folder, one CLI variant).
 - Number: 0096 was free on every `origin` branch on 2026-11-10 (highest file `0091`; 0092 to 0095 are being drafted, and
   no branch's `docs/` names "ADR 0096" except ADR 0091's forward reference). Check id: the next free one when this is
@@ -31,7 +32,7 @@ origin/docs/adr-redesigns-2026-11-10 405b119a0
 origin/docs/adr-windows-gate-ratchets db7782e01
 origin/docs/adr-not-measured 0df6835a9
 origin/docs/adr-captured-tool-output 9c2cd4d8e
-origin/docs/adr-evidence-heads f2bdba1df
+origin/docs/adr-evidence-heads b32655fef
 origin/docs/rule-48-merge-check 3d45cdb57
 origin/docs/rust-tooling-plan 2791c634c
 origin/feat/rt5-check-host ec8530a95
@@ -104,14 +105,25 @@ files outside `docs/` and is 843 commits behind `origin/main`; `origin/docs/adr-
 
 **The extraction.** The integrator builds one docs-only commit on top of `origin/main` that writes each accepted ADR
 file from its branch with `git show <branch>:<path> > <path>` (blobs only; no source branch is merged, cherry-picked or
-rebased), adds the ADR's register file (§2), regenerates the index (§3), and lands under rule 50 (d). Each copied ADR gets
-one status note line: "Text copied to main on DATE from `<branch>` `<sha>`; its paths and line numbers refer to its
-stated base, not to main." The same method serves every later acceptance, on the day of acceptance, without waiting for
-the train the work rides on.
+rebased), adds the ADR's register file (§2), regenerates the index (§3), and lands under rule 50 (d). The copy is
+**byte-identical**: no note is added to the ADR text. When the source branch later lands, Git sees the same file added
+on both sides and merges it cleanly; any edit makes it an add/add conflict. Measured with `git merge-file` and an empty
+base on 0058's text from the train: the identical pair exits 0, the same pair with one note line added exits 1. The
+provenance goes into the register file instead (`copied_from = "<branch> <sha>"`, `copied = "YYYY-MM-DD"`), and the
+generated index shows it ("copied from `<branch>` `<sha>`; paths refer to that base"). The same method serves every
+later acceptance, on the day of acceptance, without waiting for the train the work rides on.
+
+**Copied texts are frozen until their source lands.** Nobody revises a copied ADR on its source branch or on main
+until the source has landed (a later change is an amendment file, ADR 0049's way); `./dev adr status` reports a copy
+whose source blob differs from main's as a failing finding, because that pair will conflict. WP-1's status-line
+normalisation (§2) of the copied files runs on main only after the identical copy has landed **and** the source branch
+has landed or been dropped.
 
 **The train's accepted ADRs.** The 12 accepted ADRs that are on the train only (0051, 0058, 0060, 0071 to 0078, 0080)
-are copied in the same first commit (WP-0), with the same note naming `origin/train/2026-11-09-3`; when the train lands,
-its versions replace them (the train is their source, so the merge takes the train's text). No exemption is needed.
+are copied byte-identical in the same first commit (WP-0), with `copied_from` naming `origin/train/2026-11-09-3`; when
+the train lands, each file is the same blob on both sides and merges without a conflict, as long as nobody revised it
+meanwhile. The README index is a different case: it is modified on both sides and conflicts whatever WP-0 does; the
+integrator regenerates it in the train's merge (§3). No exemption is needed.
 
 ### 2. A register: one small file per decision, `docs/adr/register/<id>.toml`
 
@@ -124,6 +136,9 @@ title = "Design documents pin their evidence"
 summary = "..."                # the index line
 status = "accepted"            # proposed | accepted | superseded | rejected | approved (R- rows only)
 accepted = "2026-11-10"        # from the clock
+copied_from = ""                # "<branch> <sha>" when the text was copied to main before its branch landed (§1)
+copied = ""                     # the day of that copy
+prerequisites = ["C105", "RT-5"] # mechanisms this ADR relies on that it does not build itself (§4)
 
 [[wp]]
 id = "WP-1"
@@ -132,7 +147,14 @@ state = "in-progress"          # stored states: not-started | in-progress | drop
 branch = "feat/evidence-check" # in-progress
 commit = "1a2b3c4d5"           # optional: the commit that completes the WP, once there is one
 reason = ""                    # dropped: why, and who approved it
+provides = ["C105"]             # mechanisms (check ids, commands, modules) this WP builds
 ```
+
+**Mechanisms are registered through the WPs that build them.** A check id (`C58`), a command (`./dev push-gate`), a
+plan package (`RT-5`) or a named module (ADR 0078's run root in `paddock_testkit::scratch`) is "built" exactly when the WP
+that `provides` it has landed. A mechanism that was planned outside any ADR's WPs gets an R- row with one WP (for
+example C58, ADR 0034 WP-1, `not-started`; the train's `AGENTS.md:202` says "planned, ADR 0034 WP-1; not built yet",
+and `conformance/src/checks` has no C58 file).
 
 **Landed is derived, never stored.** A WP counts as landed when its `commit` is an ancestor of `origin/main`; until then
 it is in progress, whatever anyone wrote. An accepted decision with no work says `no_work = "<reason>"` instead of `[[wp]]`
@@ -165,13 +187,23 @@ register row records the split.
 
 - **C1xx in the RT-5 host (tree only, deterministic):** every ADR file has a register file and the reverse; the status
   line's first word and date agree with the register; an accepted row has `[[wp]]` rows or `no_work`; each WP's stored
-  state has its field (`branch` for in-progress, `reason` for dropped); R- rows have `approval` or `approval_file` and
+  state has its field (`branch` for in-progress, `reason` for dropped) and no field that contradicts it (a `not-started`
+  WP with a `commit` set, or a `dropped` WP with a `commit` set, is an error: a commit means work happened); R- rows have `approval` or `approval_file` and
   `adr_by`; the index equals the generated one. It runs in the local conformance checks of rule 50 (d).
 - **`./dev adr status` (git, Rust, `tools/paddock-dev/src/adr/`):** for each accepted row, the ADR file is in
   `origin/main` (else a failing finding "accepted, not on main", naming the branches that hold it, found with `git
   ls-tree` over `origin/docs/*`: 89 branches, 1.4 s here); each WP's `commit` decides landed through the in-main query;
   each `in-progress` branch exists; anything it cannot read is `NotMeasured` (ADR 0089), never "landed". It also lists
-  accepted ADRs found only on branches, so the backlog is visible before it is copied.
+  accepted ADRs found only on branches, so the backlog is visible before it is copied, and copies whose source blob now
+  differs from main's (§1).
+- **Reliance on unbuilt mechanisms, report-only:** for every ADR, proposed or accepted, `./dev adr status` lists each
+  registered mechanism its text cites (check ids as `C` plus digits, and the other `provides` names, matched as whole
+  words) whose providing WP has not landed, unless the ADR's register file lists it under `prerequisites`. Each is an
+  ADR 0089 report-only finding ("ADR 0094 relies on C58, unbuilt: ADR 0034 WP-1 not-started"). The class, from the
+  0094/0095 review: a design treats planned or unbuilt infrastructure as if it already enforced something (0094's "C58
+  holds that tag"; 0095's reliance on ADR 0078's run root, which the train's `crates/paddock-testkit/src/scratch.rs`
+  does not have: no `run root` in it; RT-5 not landed). A citation in prose that is not a reliance ("C58 is planned") is
+  cleared by listing it under `prerequisites`, which is what the author means anyway.
 - **One home for the in-main query:** `tools/paddock-dev/src/git_refs.rs` (`is_in(commit, "origin/main") -> Result<bool,
   GitReadError>`), written by whichever of ADR 0091 WP-1 and this ADR's WP-2 lands first and used by both.
 - **Staleness, report-only:** an accepted ADR not on main 2 days after acceptance, a WP `not-started` or `in-progress`
@@ -209,7 +241,8 @@ per docs branch (89 branches, 1.4 s measured). C1xx is a scan of about 90 small 
 - The integrator copies accepted texts daily (minutes each, no CI under rule 50 (d)); WP-0 copies the backlog once.
 - Every ADR change also touches its register file; `./dev adr new` (WP-1) writes the skeleton.
 - A decision nobody builds becomes visible within two weeks, and the user decides to build, defer or drop it.
-- Copied texts on main can name paths that only exist on their base; the status note says so.
+- Copied texts on main can name paths that only exist on their base; the index row says so, from `copied_from`.
+- Copied texts are frozen on their source branch until it lands; a change is an amendment.
 
 ## Rollback
 
@@ -220,7 +253,7 @@ index part back to C82.
 
 | # | Decision | Options | Recommended |
 |---|---|---|---|
-| D1 | When and how an accepted text lands | (a) same day, a docs-only commit on `origin/main` that copies the file blobs with `git show` (never a merge), with a status note, by the integrator; (b) with its first work package; (c) with the train | **(a)**: incident 1's backlog is (b) and (c) in practice, and §1 measures why merging is impossible |
+| D1 | When and how an accepted text lands | (a) same day, a docs-only commit on `origin/main` that copies the file blobs byte-identical with `git show` (never a merge, never a note in the text; provenance in the register), by the integrator; (b) with its first work package; (c) with the train | **(a)**: incident 1's backlog is (b) and (c) in practice, and §1 measures why merging is impossible |
 | D2 | Register shape | (a) one file per decision, `docs/adr/register/<id>.toml`; (b) one `docs/adr/register.toml` with `merge=union` | **(a)**: no conflicts and no duplicate keys |
 | D3 | The index | (a) generated from the register, checked by C1xx, which takes over C82's ADR-index part; (b) hand-written with 0049's union and C82 | **(a)**: also removes status disagreements |
 | D4 | Approved decisions without an ADR | (a) R- rows with the approval inline or in a repository file and an `adr_by` date; (b) only ADRs are registered | **(a)**: three of incident 2's rows had no ADR |
@@ -232,12 +265,12 @@ index part back to C82.
 
 | WP | What | Days | Depends on |
 |---|---|---|---|
-| WP-0 | One docs-only commit on `origin/main`: the 13 accepted texts of incident 1 and the 12 train-only ones copied with `git show` (§1), each with its status note, the index rebuilt once by hand | 0.5 | the user's D1 |
-| WP-1 | Register format and files for every family ADR (states read from the texts once, reviewed), R- rows for incident 2 with their approval text; the 50 status lines normalised; `./dev adr new` and `./dev adr index --write` | 1.25 | – |
-| WP-2 | `./dev adr status`: main and branch reads, `git_refs.rs` (if ADR 0091 has not built it), `Outcome` per row, report-only staleness; tests on a throw-away repository with a planted unlanded text, a WP commit not in main, and an unreadable ref (positive controls); the nightly summary and landing-step lines | 1 | ADR 0089's `Outcome` |
+| WP-0 | One docs-only commit on `origin/main`: the 13 accepted texts of incident 1 and the 12 train-only ones copied byte-identical with `git show` (§1), the index rebuilt once by hand with each copy's source | 0.5 | the user's D1 |
+| WP-1 | Register format and files for every family ADR (states read from the texts once, reviewed), R- rows for incident 2 with their approval text, `copied_from` for WP-0's copies, `provides` and `prerequisites` for the mechanisms the ADRs name (C58 and the RT packages included); the 50 status lines normalised (copied ones only after their source has landed, §1); `./dev adr new` and `./dev adr index --write` | 1.5 | – |
+| WP-2 | `./dev adr status`: main and branch reads, `git_refs.rs` (if ADR 0091 has not built it), `Outcome` per row, report-only staleness, the unbuilt-reliance finding and the diverged-copy finding; tests on a throw-away repository with a planted unlanded text, a WP commit not in main, an ADR citing an unbuilt check, a diverged copy and an unreadable ref (positive controls); the nightly summary and landing-step lines | 1.25 | ADR 0089 WP-1 (`Outcome`) |
 | WP-3 | C1xx in the RT-5 host with good and bad register fixtures; the index's `merge=union` line; C82's scope reduced in ADR 0049's register row | 0.5 | RT-5 landed |
-| WP-4 | Rule and ER text (D7), lesson, integrator and coordinator brief lines | 0.25 | – |
-| | **Total** | **3.5** | |
+| WP-4 | Rule and ER text (D7), lesson, integrator and coordinator brief lines, and the reviewer brief line "verify that every check or mechanism an ADR relies on is built, or marked as a prerequisite" (Paddock `.claude/agents/reviewer.md`, engineering-rules `agents/reviewer.md`) | 0.25 | – |
+| | **Total** | **4** | |
 
 WP-0 and WP-4 can start on the user's yes; WP-1 and WP-2 in parallel; WP-3 after RT-5.
 
@@ -259,3 +292,12 @@ makes that visible.)
 | P2-8 `no_work` | §2 and C1xx use `no_work = "<reason>"` |
 | P2-9 size | 3.5 days (WP-0 0.5 with 25 copies, WP-1 1.25 with the status-line pass) |
 | README conflict with 0091 | §3: the second of the two to land fixes the row by hand until WP-1 |
+
+## Review answers (revision 2, `b2d6031e5`)
+
+| Finding | Answer |
+|---|---|
+| P1 the status note turns each copy into an add/add conflict | §1: copies are byte-identical (measured: identical pair `git merge-file` exit 0, one note line exit 1, on 0058); provenance in the register (`copied_from`, `copied`) and the generated index; copied texts frozen until their source lands; normalisation of copied status lines only after that; the claim "the merge takes the train's text" replaced |
+| P2 Related line | ADR 0091 accepted 2026-11-10 at `b32655fef` |
+| P2 contradictory WP states | C1xx fails a `not-started` or `dropped` WP with a `commit` set (tree-only, so it needs no git) |
+| New class: relying on unbuilt mechanisms | §2 `provides` and `prerequisites`; §4 a report-only finding in `./dev adr status` for every ADR citing an unbuilt registered mechanism; C58 gets an R- row; the reviewer brief line in WP-4; WP-1 +0.25 and WP-2 +0.25, total 4 days |
