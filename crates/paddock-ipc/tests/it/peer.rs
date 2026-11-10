@@ -830,11 +830,15 @@ fn closing_ends_calls_that_were_still_waiting_in_the_queue() {
     assert!(peer.wait_closed(Some(GUARD)));
     // Every thread that holds the handler ends once the running call is done and the queue is dropped; the handler's sender
     // goes with the last of them, so the channel disconnecting is the condition "nothing else will run". The two calls that
-    // waited never ran.
-    assert!(matches!(
-        ran.recv_timeout(GUARD),
-        Err(mpsc::RecvTimeoutError::Disconnected)
-    ));
+    // waited never ran. The reader may record the close first (it reads the end the writer made); `close` still returns
+    // only once the queue is emptied (lib test `a_close_is_not_seen_until_it_has_ended_the_calls`).
+    match ran.recv_timeout(GUARD) {
+        Err(mpsc::RecvTimeoutError::Disconnected) => {}
+        Ok(()) => panic!("a call that waited in the queue ran after close returned"),
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            panic!("a thread still held the handler {GUARD:?} after the close")
+        }
+    }
 }
 
 #[test]
