@@ -1,10 +1,12 @@
 # 95. Tests get a writable repository copy through one cheap helper, and pay whole-repository setup once per run
 
-- Status: Proposed 2026-11-10, revision 2. Drafted at the user's request of 2026-11-10 (ER-21: one class, nine red runs
-  over three causes in the golden and graph tests, plus one slow CI step, each fixed one cause at a time). Includes the
-  coordinator's input from the review of `origin/fix/golden-live-windows-timeout`. Revision 2 answers the independent
-  review of revision 1 (`55286a33f`, "changes": P1-1, P1-2 and the P2s; see "Review answers"). Amends ADR 0078
-  (`docs/adr/amendments/0078-2026-11-10.md`). Nothing here is built yet. ER-23 does not apply (no drawings).
+- Status: Accepted 2026-11-10 (user), all decisions as recommended. History: proposed 2026-11-10 at the user's request
+  (ER-21: one class, nine red runs over three causes in the golden and graph tests, plus one slow CI step, each fixed
+  one cause at a time), with the coordinator's input from the review of `origin/fix/golden-live-windows-timeout`;
+  revision 2 (`2e5017b46`) answered the independent review of revision 1 (`55286a33f`, "changes"); the review approved
+  revision 2; revision 3 folds in its P2s (see "Review answers"). Amends ADR 0078
+  (`docs/adr/amendments/0078-2026-11-10.md`, accepted with it). Nothing here is built yet. ER-23 does not apply (no
+  drawings).
 - Date: 2026-11-10
 - Related: ER-12, ER-14, ER-20 / rule 51, ER-21 / rule 40, ER-22 / rules 42 and 55, ER-27, ER-33 / rule 71; ADR 0025
   (kept clones), ADR 0071 §6 (nextest setup scripts not used), ADR 0078 (accepted: `paddock_testkit::scratch`, one run
@@ -98,8 +100,11 @@ through the helper.
      range), locked with `std::fs::File::lock`/`try_lock` (stable since 1.89.0: `#[stable(feature = "file_lock", since =
      "1.89.0")]` in the toolchain's `std/src/fs.rs:858`; `paddock-slots` is a non-blocking pool, the wrong shape). The
      first test builds into `<key>.tmp-<pid>`, renames it to `<key>` and releases; a waiter polls `try_lock` through
-     `paddock_testkit::wait` with a bound, logs its wait as a phase, and on the bound fails with a named error. A
-     waiter's budget is its own test's: D7's measured budgets include one build plus one wait.
+     `paddock_testkit::wait` with a bound, logs its wait as a phase, and on the bound fails with a named error. The
+     bound is the waiting test's own nextest budget (its profile's `period` × `terminate-after` for the filter that
+     matches it, declared next to the waiter as a constant that a test compares with `.config/nextest.toml`) minus a
+     margin of 10 % and at least 10 s, so the named error, with the holder's pid and the build's phases so far, fires
+     before nextest kills the test. D7's measured budgets include one build plus one wait.
    - Artifacts: the raw `cargo metadata --no-deps` JSON of every workspace, served through `paddock-repo-graph`'s
      existing `CargoMetadata` port (`crates/paddock-repo-graph/src/cargo.rs:6`), so the Rust reader under test still
      parses it; only the process runs once. A writable copy is never shared: each test that edits builds its own.
@@ -127,6 +132,14 @@ through the helper.
      clone created in the same script before its sparse setup. A `checkout -f` in an existing worktree writes only the
      diff and is not flagged. A marked line (`# whole-tree: <why>`) passes; `stable-workspace` is measured (WP-0) and
      either marked or moved to kept-clone.
+   - **Host legs.** There are 81 `actions/checkout` steps in `.gitea/` and about 4 are sparse (83 grep hits for
+     `actions/checkout`, 4 for `sparse-checkout`, both including comments). A job is a host leg when its `runs-on`
+     resolves to a macOS or Windows label and it has no `container:`; when `runs-on` is a matrix expression the check
+     cannot resolve, the job counts as a host leg (fail closed) unless every matrix value it can read is a Linux label.
+   - **Existing sites.** WP-0 counts the day-one findings. Each existing site is either marked with its reason, when
+     whole-tree checkout is what the job needs (a bundle build), or held in an ADR 0088 ratchet
+     `docs/ratchets/whole-tree.toml` (shrink-only, stale entries fail), so the check is an error for new sites from its
+     first day.
    - Positive controls: one planted site of each kind must be reported, and a planted fixture-repo `add -A` must not.
 6. **kept-clone keeps its own code** (D6): it fetches a commit from the remote into a slot's clone, not a copy of a
    local checkout; the CI half of §5 and its run-7808 test cover it.
@@ -182,7 +195,14 @@ and removed with the root by the exclusive-lock holder.
   without sparse, and exempts `checkout -f` in an existing worktree. nextest setup scripts evaluated. D7 measures
   several shared-host runs. Prerequisites stated. Estimate +1.5 days. `.mjs` sites counted.
 
-## Decisions for the user
+## Review answers (revision 3, after approval)
+
+- **P2-1 `actions/checkout`.** 81 steps, about 4 sparse: §5 now says how a host leg is identified (fail closed on an
+  unresolvable matrix), WP-0 counts the day-one findings, and existing sites are marked or held in an ADR 0088 ratchet.
+- **P2-2 the waiter's bound.** Named in §2: the test's own nextest budget minus 10 % (at least 10 s), so the named
+  error fires before nextest kills the test.
+
+## Decisions (accepted 2026-11-10 as recommended)
 
 | # | Decision | Options | Recommended |
 |---|---|---|---|
@@ -202,11 +222,11 @@ Prerequisites outside this ADR: ADR 0078 WP-1 (run root, `.lock`, `ScratchDir`) 
 
 | WP | Content | Days |
 |---|---|---|
-| WP-0 | Measure: phase durations of the two narrowing tests on the Windows host once the fix is on main; `stable-workspace`'s `clone_checkout` duration from Debrief job logs | 0.5 |
+| WP-0 | Measure: phase durations of the two narrowing tests on the Windows host once the fix is on main; `stable-workspace`'s `clone_checkout` duration from Debrief job logs; a dry run of the check's rules over today's tree to count its day-one findings (tests and the 81 checkout steps) | 0.75 |
 | WP-1 | `paddock-testkit-repo` (new crate per the new-crate skill), `RepoCopy` with phases through `paddock_proc`, the `count-objects` mechanism test with its planted control, tests on Linux, macOS and Windows | 1.75 |
 | WP-2 | `repo::once` (key, `.lock`, temp then rename, bounded wait), the recorded `CargoMetadata` adapter; the 0078 leak-check exemption for `.cache/` with its own positive control (a leftover outside `.cache/` is still reported) | 1.25 |
 | WP-3 | `golden.rs`, contracts, tree and inputs tests onto the helper and the cache; phases in every live test; drop `repo-graph`; read five or more shared-host Windows runs and shrink the waiver (D7) | 1 |
-| WP-4 | `./dev check whole-tree` (syn and JS call matching with one level of same-file calls, the CI half), positive and negative controls | 1.5 |
+| WP-4 | `./dev check whole-tree` (syn and JS call matching with one level of same-file calls, the CI half with host-leg resolution), positive and negative controls, the marks and the `whole-tree` ratchet for day-one sites | 1.75 |
 | WP-5 | Lesson, rule text (proposed: "a test that needs a copy of the real repository takes it from `paddock-testkit-repo`"), ADR index | 0.25 |
 
-**6.25 days**; first cut (WP-0, WP-1, WP-2 and the golden part of WP-3) 4 days, after the prerequisites. **Gates no tag.**
+**6.75 days**; first cut (WP-0, WP-1, WP-2 and the golden part of WP-3) 4.25 days, after the prerequisites. **Gates no tag.**

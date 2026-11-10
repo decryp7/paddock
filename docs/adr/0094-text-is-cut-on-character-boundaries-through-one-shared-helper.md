@@ -1,8 +1,9 @@
 # 94. Text is cut on character boundaries through one shared helper
 
-- Status: Proposed 2026-11-10, revision 2. Drafted at the user's request of 2026-11-10 (ER-21 and rule 55: one panic,
-  `a5aca536d`, and about 60 hand-written guards with no failure, among them two shared helpers nobody else calls).
-  Revision 2 answers the independent review of revision 1 (`55286a33f`, "changes": P1-1, P1-2 and the P2s; see "Review
+- Status: Accepted 2026-11-10 (user), all decisions as recommended. History: proposed 2026-11-10 at the user's request
+  (ER-21 and rule 55: one panic, `a5aca536d`, and about 60 hand-written guards with no failure, among them two shared
+  helpers that only their own crates' families call); revision 2 (`2e5017b46`) answered the independent review of
+  revision 1 (`55286a33f`, "changes"); the review approved revision 2; revision 3 folds in its P2s (see "Review
   answers"). Nothing here is built yet. ER-23 does not apply (no drawings).
 - Date: 2026-11-10
 - Related: ER-11, ER-21 / rule 40, ER-22 / rules 42 and 55 (share first; one implementation per mechanism; 55(e): C58
@@ -24,8 +25,8 @@ origin/train/2026-11-09-3 c151422a4
 origin/main b51c72509
 origin/docs/adr-windows-gate-ratchets db7782e01
 origin/docs/adr-evidence-heads b32655fef
-origin/docs/adr-private-files fdfb17c8f
-origin/docs/adr-scheduled-owners 3bf12da60
+origin/docs/adr-private-files e2f7e946b
+origin/docs/adr-scheduled-owners 390ec29bd
 ```
 
 ## Context
@@ -47,7 +48,7 @@ Each of these works; each is the same mechanism written again, the shape rule 55
 | `29e051f4d` (2026-10-22, `feat(parsers)`) | Debrief's parser verification grew its own `floor(s, i)` (`apps/debrief/crates/debrief-core/src/parser/verify/mod.rs:383`); `07f89413d` (a `test:` commit the same day) added its test, that a cut inside `€` falls back to the character's start |
 | `ec8b15b37` / `f6c87b551` (2026-10-24, the same `test:` patch on two parents) | tests for `paddock-diag`'s own boundary loop (`a_cut_never_splits_a_character`, `crates/paddock-diag/tests/report.rs`) |
 | `a7276b216` (2026-10-30, Pacenotes) | `pacenotes-parse` cuts qualified names at `MAX_QUALIFIED_BYTES` (1 KiB) "on a character boundary" with its own `cut` (`extract.rs`) |
-| shared, unused by others | `paddock_plugin_api::cut_line` (`crates/paddock-plugin-api/src/protocol.rs:294`, copied as `apps/debrief/crates/debrief-plugin-api/src/protocol.rs:439`; 12 call sites) and `paddock_service::cut` (`crates/paddock-service/src/os_log.rs:40`, characters plus `…`); and Debrief's unshared `truncate_chars` (`debrief-ai/src/assistant/tools.rs:40`) |
+| shared, used only by the plugin crates | `paddock_plugin_api::cut_line` (`crates/paddock-plugin-api/src/protocol.rs:294`, copied as `apps/debrief/crates/debrief-plugin-api/src/protocol.rs:439`), called in production at `crates/paddock-plugin-api/src/serve.rs:93`, `crates/paddock-plugin-host/src/services.rs:142`, `:145`, `:186`, `apps/debrief/crates/debrief-plugin-api/src/forward.rs:51` and `apps/debrief/crates/debrief-plugin-host/src/output.rs:140`, plus its own tests and `paddock_service::cut` (`crates/paddock-service/src/os_log.rs:40`, characters plus `…`); and Debrief's unshared `truncate_chars` (`debrief-ai/src/assistant/tools.rs:40`) |
 
 **The copies.** `git grep -l is_char_boundary` over `*.rs`, without `tests/`, `tests.rs`, fuzz and bench files: **41
 production files, 44 calls** (the same at `c151422a4`): Debrief 19 in `apps/debrief/crates` and 3 in its app, Dyno 3,
@@ -93,7 +94,7 @@ reach it.
 
 **Code cuts text at a byte count with an operation that panics inside a character** (`String::truncate`, `&s[..n]`,
 `split_off`, `drain`), or guards it with a boundary loop written again in each file. Every author writes the guard
-fresh, at least four forms exist (byte loop, `chars().take`, `char_indices().nth`, two unused shared helpers), and the
+fresh, at least four forms exist (byte loop, `chars().take`, `char_indices().nth`, two shared helpers the other crates do not use), and the
 tests that would find a miss feed only ASCII or invalid bytes. One miss shipped to a fuzz target and stayed red for days.
 
 **Invariant.** Text is cut to a byte or character budget only through one shared function that cannot split a
@@ -118,8 +119,9 @@ clippy everywhere else; and the shared hostile corpus puts multi-byte characters
    `paddock_plugin_api::cut_line` becomes a call of `cut_bytes` and then goes (a public API change: CHANGELOG entry
    and a note for plugin authors, since a plugin may call it; `debrief-plugin-api`'s copy goes with it);
    `paddock_service::cut` and `truncate_chars` become calls of `cut_marked`.
-2. **Clippy refuses the primitives elsewhere** (D2). `lint/clippy.toml` (C13 copies it into every app) and
-   `crates/clippy.toml` gain `disallowed-methods` entries for `alloc::string::String::truncate`,
+2. **Clippy refuses the primitives elsewhere** (D2). `crates/clippy.toml`, every unfrozen app's own `clippy.toml`
+   (C13 allows an app to add entries) and, once no app is frozen, `lint/clippy.toml` (C13 copies it into every app) gain
+   `disallowed-methods` entries for `alloc::string::String::truncate`,
    `alloc::string::String::split_off` and `str::is_char_boundary` (the signature of a hand-written cut), each with the
    reason "cut text with `paddock_limits::text` (ADR 0094)". `paddock_limits::text` is the one
    `#[expect(clippy::disallowed_methods, reason = "...")]`. A site that truly needs a byte position (a parser that
@@ -145,9 +147,10 @@ clippy everywhere else; and the shared hostile corpus puts multi-byte characters
    (ADR 0049 D7) is not touched before its frozen tag: C81 would refuse the change and the frozen release must not
    change. For such an app:
    - its `clippy.toml` and its sites change **after** its tag, in its first post-tag change;
-   - until then C13 carries a stated exception for that app's missing ADR 0094 paths (the shape of C13's existing
-     per-app omission, `conformance/src/checks/C13-rust-lints.mjs:5`), with the ADR as its reason and the frozen tag as
-     its end;
+   - no C13 exception is needed: while any app is frozen, the three paths go into the unfrozen apps' own
+     `clippy.toml` (C13 allows additions) and `crates/clippy.toml`, and `lint/clippy.toml` gets them only after the last
+     frozen tag, when every app takes them. (C13's per-app exemptions live in the `[[ratchet]]` `clippy_not_yet` list in
+     `docs/gates.toml`, which C100 keeps shrink-only, ADR 0060 line 226, so a new entry there would be refused);
    - its copies-register entry `text-cut` (canonical `paddock-limits`) names as `delete_by` the tag **after** the frozen
      one, never the frozen one, so the frozen release is not blocked by its own register;
    - C58 is not built, so until it is the release steward checks the `text-cut` entries by hand at each tag (the
@@ -182,7 +185,7 @@ today run a few hundred; the clippy entries cost nothing measurable in an existi
 
 ## Consequences
 
-- One function to read when a cut looks wrong; four cut forms and two unused shared helpers disappear; new code cannot
+- One function to read when a cut looks wrong; four cut forms and two narrowly used shared helpers disappear; new code cannot
   call `truncate` on a `String` or hand-write a boundary loop without a reason in the source.
 - `Vec::truncate` is unaffected (the entry names `String::truncate`; clippy resolves the type).
 - Shared never-panics tests may find new panics the day §4 lands; each is a real bug.
@@ -200,6 +203,7 @@ Drop the clippy entries; the helper and the corpus variants are harmless to keep
 - **P1-2 freeze and gating.** C58 is not built; a `delete_by` of the frozen tag would block that release; C81 and C13
   would refuse a frozen app's change. §6 now changes a frozen app only after its tag, under a stated C13 exception,
   with `delete_by` the tag after, checked by the steward by hand until C58 exists. D6 and the closing line follow.
+  (Revision 3: the C13 route corrected, see below.)
 - **P2s.** `TextCut`/`CutUnit` and the unit of `dropped` (§1); the existing shared helpers and the `cut_line` removal
   with CHANGELOG and plugin note (§1); the vendored site is Dyno's `tray-icon` patch, not sysinfo (§2); proptest is
   used by 11 shared crates, `paddock-limits` among them, so §5 uses it beside the exhaustive test; the corpus takes cut
@@ -208,7 +212,17 @@ Drop the clippy entries; the helper and the corpus variants are harmless to keep
   failing tests listed; Pacenotes' missing `clippy.toml` and the unguarded `&s[..n]` stated (§2, §3); README blank
   line fixed.
 
-## Decisions for the user
+## Review answers (revision 3, after approval)
+
+- **P2-1 the C13 route.** A comment at `C13-rust-lints.mjs:5` is not the mechanism; per-app exemptions are the
+  `clippy_not_yet` ratchet in `docs/gates.toml`, which C100 keeps shrink-only (ADR 0060 line 226), so a new entry would
+  be refused. §2 and §6 now add the paths to unfrozen apps' own `clippy.toml` and to `lint/clippy.toml` only after the
+  last frozen tag: no exception needed.
+- **P2-2 `cut_line` callers.** It is called in production in `paddock-plugin-api`, `paddock-plugin-host` and Debrief's
+  two plugin crates (sites in the table); the Status line and the row say so, and WP-3's shared part names
+  `paddock-plugin-host`.
+
+## Decisions (accepted 2026-11-10 as recommended)
 
 | # | Decision | Options | Recommended |
 |---|---|---|---|
@@ -227,8 +241,8 @@ Drop the clippy entries; the helper and the corpus variants are harmless to keep
 | WP-1 | `paddock_limits::text` (`cut_bytes`, `cut_chars`, `cut_marked`, `TextCut`, `CutUnit`), exhaustive and proptest tests, doc comments, CHANGELOG | 1 |
 | WP-2a | `corpus` multi-byte variants and `corpus_cutting` with the planted positive control, fuzz dictionaries | 0.75 |
 | WP-2b | Run the affected `never_panics` suites with the new inputs and fix what they find, each failing first; time-boxed at 1.5 days, anything left becomes its own bug with a failing test | 1.5 (box) |
-| WP-3 | Migration per app (not mechanical: about 60 to 75 sites, some change output and snapshots): shared crates with `cut_line`, `paddock_service::cut`, CHANGELOG and plugin note 1; Debrief 1.5; Dyno, Pitcrew, Pitwall and Spotter 1; frozen apps' parts after their tags | 3.5 |
-| WP-4 | Clippy entries in `lint/clippy.toml`, `crates/clippy.toml`, each unfrozen app's `clippy.toml` and `tools/*/clippy.toml`; the clippy fixture; C13 exceptions for frozen apps; the `text-cut` entry and the steward's checklist line if any app is frozen | 0.75 |
+| WP-3 | Migration per app (not mechanical: about 60 to 75 sites, some change output and snapshots): shared crates (`paddock-plugin-api` and `paddock-plugin-host` with `cut_line`, `paddock-service`), Debrief's plugin crates with its `cut_line` copy, `paddock_service::cut`, CHANGELOG and plugin note 1; Debrief 1.5; Dyno, Pitcrew, Pitwall and Spotter 1; frozen apps' parts after their tags | 3.5 |
+| WP-4 | Clippy entries in `lint/clippy.toml`, `crates/clippy.toml`, each unfrozen app's `clippy.toml` and `tools/*/clippy.toml`; the clippy fixture; `lint/clippy.toml` after the last frozen tag; the `text-cut` entry and the steward's checklist line if any app is frozen | 0.75 |
 | WP-5 | Rule text (proposed: "text is cut only through `paddock_limits::text`"), lesson, ADR index | 0.25 |
 
 **8.25 days** with WP-2b at its box. First cut (helper, corpus, shared crates and their lint): WP-0, WP-1, WP-2a,
