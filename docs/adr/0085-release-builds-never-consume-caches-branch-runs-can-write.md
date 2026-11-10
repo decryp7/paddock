@@ -1,7 +1,8 @@
 # 85. Release builds never consume caches that branch runs can write
 
-- Status: Proposed (2026-11-10), revision 2. Revision 2 answers the independent review of revision 1 (`4c2fcc109`).
-  Drafted at the user's request of 2026-11-10. Its fix gates the next app tag; the one gating list is in §8.
+- Status: Accepted 2026-11-10 (user), decisions as recommended (D1–D10). The user chose not to rotate the updater signing
+  key (T6, D7). Revision 2 answered the independent review of revision 1 (`4c2fcc109`); round 2 and round 3 notes are
+  folded in. Drafted at the user's request of 2026-11-10. Its fix gates the next app tag; the one gating list is in §8.
 - Date: 2026-11-10
 - Related: rule 9 / ER-15 (releases only from a tag in CI), rule 23 (ad-hoc seal), rule 25 (before tagging), rule 54
   (installers before landing; its dispatches are the "branch runs" here), rule 71 / ER-33 (a check counts only if its
@@ -134,7 +135,7 @@ installers. So a poisoned release has a high impact even with one user, and the 
 | T3 | A compromised dependency **in the tagged lockfile** | ships | ships | out of scope: cargo-deny advisories (rule 25), lockfile review, ADR 0073 |
 | T4 | A device on the LAN or any job writes the Redis compile cache (no password) or the act_runner cache server | the bundle path does not read them. The Debrief `licences` tag gate restores a cargo registry and the advisory database by prefix, so a planted stale database can hide an advisory | no `actions/cache` and no remote sccache in any job a tag reaches (D9, a conformance check) | ADR 0080 D4's shared cache service is named in D9, so it never reaches a tag |
 | T5 | **Accidental** reuse: a branch's leftovers (another feature set, an old `ui/dist`, a stale `node_modules`) end up in a tag's installers (the rule 54 incident was this kind) | possible on the hosts | gone: the tag builds in folders made by the run | none |
-| T6 | **The signing key is already exposed**: every rule 54 dispatch since the release callers began passing the key gave it to `npm ci` and `tauri build`, so to every install script and build script of those branches | — | D7 stops new exposure | whether to rotate the updater key is the user's decision (§7, D7). A new key needs every installed copy updated by hand once |
+| T6 | **The signing key is already exposed**: every rule 54 dispatch since the release callers began passing the key gave it to `npm ci` and `tauri build`, so to every install script and build script of those branches | — | D7 stops new exposure | **not rotated, user decision 2026-11-10**; the exposure is stopped by D7 (WP-4) |
 
 Honest weighing: T1 is the case this ADR is for. On Linux the gating list closes it; on the hosts it closes the cheap,
 targeted part (the caches) and the configuration files, and leaves the runner user's account open until D6. T2 is stronger
@@ -307,7 +308,8 @@ tag time), and D6 (a), which keeps a warm, release-only cache.
   prompt. WP-4 also researches signing in a separate step after the build (the build without the key, then `tauri signer
   sign` on the finished installers), which would keep the key away from `tauri build`'s build scripts too.
   **Key rotation (the user's decision):** the key has already been in the environment of many dispatch builds (T6).
-  Rotating it means a new updater public key in every app and one manual update of every installed copy.
+  Rotating it means a new updater public key in every app and one manual update of every installed copy. **Decided
+  2026-11-10: not rotated (user); the exposure is stopped by D7 / WP-4.**
 - **D8. Release images by digest.** (a) release jobs name `paddock-ci` and `garage` by `@sha256:` digest; only a
   `ci-image.yml` run on `main` produces the digest the callers pin (a branch dispatch may build and push for testing, and
   its registry `buildcache` is writable by any branch, so a digest from a branch is never pinned); (b) keep tags.
@@ -335,7 +337,7 @@ and workbench demos), **WP-2, WP-3, WP-4, WP-5 and WP-9.** That is about 6 agent
 | **WP-1b** | the same for `debrief.yml` bundle: `kept-clone` instead of `stable-workspace` in release mode (and the Windows clone's `clean -ffd` gap closed with `-x` and hooks off in every mode), `libduckdb` checked every time, no kept `node_modules`; the `licences` gate without `actions/cache` on tags (D9) | yes (Debrief) | 1 | WP-1a |
 | **WP-1c** | the same for `shell-demo-release.yml` and `workbench-demo-release.yml` bundles (their own job-isolation and kept build folder on Windows, `actions/setup-node`, `dtolnay/rust-toolchain` by digest) | yes (the demos) | 0.5 | WP-1a |
 | **WP-2** | `release-isolation.sh verify`: ledger, identity freshness, `.crate` hashes against `Cargo.lock`, the configuration probes, the job's own pointers on Linux, summary, `::error::` per finding; the unit tests of §5.1 with the old-mtime fixture and the mutation check; the static conformance check | yes | 2 | WP-1a |
-| **WP-3** | `release-mode` and `isolation-probe` inputs on the release callers' dispatch; rule 25's pre-tag dispatch always in release mode; the positive-control run (red on every OS, naming each planted leak) and a green release-mode run on the release candidate; their timings, Windows Defender's effect included, as a results block in `docs/benchmarks.md`; the run numbers in §10 | yes (rule 71's proof) | 0.5 + runner time | WP-2 |
+| **WP-3** | `release-mode` and `isolation-probe` inputs on the release callers' dispatch; rule 25's pre-tag dispatch always in release mode; the positive-control run (red on every OS, naming each planted leak) and a green release-mode run on the release candidate; their timings, Windows Defender's effect included, as a results block in `docs/benchmarks.md`; the run numbers in §10; note (round 3 review): the `tauri-tools` probe reads the `.tauri` path from the ledger, never from a path derived from `target/`, because `.cargo/ci.toml` moves the target dir to the run's build folder | yes (rule 71's proof) | 0.5 + runner time | WP-2 |
 | **WP-4** | D7: the key only on tags and never in `npm ci` or `prepare`; a throw-away key on dispatch; a note on signing after the build as a separate step | yes | 1 | — |
 | **WP-5** | D8: release jobs pin the images by digest; `ci-image.yml` prints the digest and only a `main` run's digest is pinned (a conformance check compares the pinned digest with `main`'s last image run) | yes | 0.5 | — |
 | **WP-9** | the AppImage tools (`linuxdeploy`, `linuxdeploy-plugin-appimage`, `AppRun`) and the Windows NSIS tools fetched from pinned URLs with pinned SHA-256 values into `<build folder>/.tauri/` (the `useLocalToolsDir` folder) before `tauri build`; the hashes the probe checks; a test that the build downloads nothing else | yes | 0.5 | — |
