@@ -144,16 +144,29 @@ pub fn set_watch_every_for_tests(every: std::time::Duration) {
 
 /// Waits `every` in slices of at most 500 ms, returning `false` as soon as the agent is asked to stop.
 pub fn wait_or_stop(shared: &crate::agent::Shared, every: std::time::Duration) -> bool {
+    wait_with(every, std::time::Instant::now, std::thread::sleep, || shared.stopped())
+}
+
+/// The slices of [`wait_or_stop`] with the clock, the sleep and the stop flag passed in. The end is a deadline on the clock, not a
+/// sum of the slices asked for: a sleep that overshoots (a loaded machine, a suspended laptop) cannot stretch the wait.
+fn wait_with(
+    every: std::time::Duration,
+    now: impl Fn() -> std::time::Instant,
+    mut sleep: impl FnMut(std::time::Duration),
+    stopped: impl Fn() -> bool,
+) -> bool {
     let slice = every.min(std::time::Duration::from_millis(500));
-    let mut waited = std::time::Duration::ZERO;
-    while waited < every {
-        if shared.stopped() {
+    let deadline = now() + every;
+    loop {
+        if stopped() {
             return false;
         }
-        std::thread::sleep(slice);
-        waited += slice;
+        let left = deadline.saturating_duration_since(now());
+        if left.is_zero() {
+            return true;
+        }
+        sleep(slice.min(left));
     }
-    !shared.stopped()
 }
 
 /// The thread body: looks at the agent's own file every [`WATCH_EVERY`] and, once it was replaced, logs why and asks the
@@ -253,5 +266,39 @@ mod tests {
         );
         assert_eq!(key_build("1.1.0#ab"), Some("ab"));
         assert_eq!(key_build("1.1.0"), None);
+    }
+
+    #[test]
+    fn the_wait_ends_at_its_deadline_even_when_every_sleep_overshoots() {
+        use std::cell::Cell;
+        use std::time::{Duration, Instant};
+        let (t0, elapsed) = (Instant::now(), Cell::new(Duration::ZERO));
+        let (mut sleeps, mut longest) = (0u32, Duration::ZERO);
+        let every = Duration::from_secs(30);
+        // Each sleep takes three times what was asked, as on a loaded machine.
+        let finished = wait_with(
+            every,
+            || t0 + elapsed.get(),
+            |asked| {
+                sleeps += 1;
+                longest = longest.max(asked);
+                elapsed.set(elapsed.get() + asked * 3);
+            },
+            || false,
+        );
+        assert!(finished);
+        assert!(
+            longest <= Duration::from_millis(500),
+            "slices stay short so a stop is seen: {longest:?}"
+        );
+        let slack = Duration::from_millis(1500);
+        assert!(
+            elapsed.get() >= every && elapsed.get() <= every + slack,
+            "{:?} for a wait of {every:?} ({sleeps} sleeps)",
+            elapsed.get()
+        );
+        // A stop ends it at once, and a zero wait never sleeps.
+        assert!(!wait_with(every, || t0, |_| panic!("slept after the stop"), || true));
+        assert!(wait_with(Duration::ZERO, || t0, |_| panic!("slept for nothing"), || false));
     }
 }

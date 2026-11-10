@@ -418,6 +418,54 @@ pub fn version_at_least(have: &str, min: &str) -> bool {
     }
 }
 
+/// Orders two versions ("1.2.3", optionally with a `-pre-release` and a `+build` suffix) by the SemVer rules: the numbers first,
+/// a pre-release before its release, pre-releases by their dot-separated identifiers (numbers by value and before words), the
+/// build suffix ignored. `None` when either is not three numbers.
+pub fn compare_versions(a: &str, b: &str) -> Option<std::cmp::Ordering> {
+    use std::cmp::Ordering;
+    fn split(v: &str) -> Option<([u64; 3], Option<&str>)> {
+        let v = v.split_once('+').map_or(v, |(core, _build)| core);
+        let (core, pre) = match v.split_once('-') {
+            Some((core, pre)) => (core, Some(pre)),
+            None => (v, None),
+        };
+        let mut it = core.split('.');
+        let mut out = [0u64; 3];
+        for slot in &mut out {
+            *slot = it.next()?.parse().ok()?;
+        }
+        it.next().is_none().then_some((out, pre.filter(|p| !p.is_empty())))
+    }
+    fn identifier(a: &str, b: &str) -> Ordering {
+        match (a.parse::<u64>(), b.parse::<u64>()) {
+            (Ok(x), Ok(y)) => x.cmp(&y),
+            (Ok(_), Err(_)) => Ordering::Less,
+            (Err(_), Ok(_)) => Ordering::Greater,
+            (Err(_), Err(_)) => a.cmp(b),
+        }
+    }
+    let ((na, pa), (nb, pb)) = (split(a)?, split(b)?);
+    Some(na.cmp(&nb).then_with(|| match (pa, pb) {
+        (None, None) => Ordering::Equal,
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (Some(x), Some(y)) => {
+            let (mut x, mut y) = (x.split('.'), y.split('.'));
+            loop {
+                match (x.next(), y.next()) {
+                    (None, None) => break Ordering::Equal,
+                    (None, Some(_)) => break Ordering::Less,
+                    (Some(_), None) => break Ordering::Greater,
+                    (Some(i), Some(j)) => match identifier(i, j) {
+                        Ordering::Equal => {}
+                        other => break other,
+                    },
+                }
+            }
+        }
+    }))
+}
+
 /// What the OS asks for on `host`, in words.
 pub fn prompt_text(host: HelperHost, verb: &str) -> String {
     match host {
@@ -498,8 +546,7 @@ pub fn readings(host: HelperHost) -> &'static [Advertised] {
 }
 
 /// The text shown when an action needs a helper that is not there.
-pub const HELPER_MISSING: &str =
-    "This reading needs Dyno's helper, which is not installed. Install it under Settings > Dyno > Administrator readings (the system asks for your \
+pub const HELPER_MISSING: &str = "This reading needs Dyno's helper, which is not installed. Install it under Settings > Dyno > Administrator readings (the system asks for your \
      permission once); nothing else in Dyno needs it.";
 
 /// The verb the system's prompt uses for what the card offers in `state`.
@@ -943,6 +990,34 @@ mod tests {
         assert!(!version_at_least("1.0.99", "1.1.0"));
         for bad in ["", "1.1", "1.1.0.1", "a.b.c", "1.1.x"] {
             assert!(!version_at_least(bad, "1.1.0"), "{bad}");
+        }
+    }
+
+    #[test]
+    fn versions_compare_by_semver() {
+        use std::cmp::Ordering::{Equal, Greater, Less};
+        let cases = [
+            ("1.1.0", "1.1.1", Less),
+            ("1.1.1", "1.1.1", Equal),
+            ("1.10.0", "1.9.9", Greater),
+            ("1.1.1-beta.1", "1.1.1", Less),
+            ("1.1.1", "1.1.1-rc.1", Greater),
+            ("1.1.1-beta.2", "1.1.1-beta.10", Less),
+            ("1.1.1-beta", "1.1.1-beta.1", Less),
+            ("1.1.1-1", "1.1.1-alpha", Less),
+            ("1.1.1-alpha", "1.1.1-beta", Less),
+            ("1.1.1+build.7", "1.1.1", Equal),
+            ("1.1.1+a", "1.1.1+b", Equal),
+            ("1.1.1-beta.1+x", "1.1.1-beta.1+y", Equal),
+            ("1.1.0+build.9", "1.1.1", Less),
+        ];
+        for (a, b, want) in cases {
+            assert_eq!(compare_versions(a, b), Some(want), "{a} vs {b}");
+            assert_eq!(compare_versions(b, a), Some(want.reverse()), "{b} vs {a}");
+        }
+        for bad in ["", "1.1", "1.1.0.1", "a.b.c", "1.1.x", "-1.1.1"] {
+            assert_eq!(compare_versions(bad, "1.1.0"), None, "{bad}");
+            assert_eq!(compare_versions("1.1.0", bad), None, "{bad}");
         }
     }
 
