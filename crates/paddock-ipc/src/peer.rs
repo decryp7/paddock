@@ -213,12 +213,17 @@ struct Inner {
     closed: Mutex<Closing>,
     /// Signalled when the close is done.
     closed_cv: Condvar,
-    /// A test's look at the peer right after `mark_closed` cancelled the served calls, on whichever thread closed it.
+    /// A test's look at the peer at the end of `mark_closed`, on whichever thread closed it: after the served calls were
+    /// cancelled and the close was reported done (so `wait_closed` can return before it runs).
     #[cfg(test)]
     after_cancel: Mutex<Option<tests::Hook>>,
-    /// A test's look at the peer while a close is under way: its reason taken, its calls not yet ended.
+    /// A test's look at the peer while a close is under way: its reason taken, its calls not yet ended. It must not close the
+    /// peer: a close from the closing thread would wait for itself.
     #[cfg(test)]
     while_closing: Mutex<Option<tests::Hook>>,
+    /// A test's look at a second closer as it starts waiting for the close under way (runs with the close state locked).
+    #[cfg(test)]
+    close_waits: Mutex<Option<tests::Hook>>,
 }
 
 /// How far the connection has closed.
@@ -237,6 +242,20 @@ impl Closing {
         match self {
             Closing::Done(why) => Some(why),
             Closing::Open | Closing::Started(_) => None,
+        }
+    }
+}
+
+/// Reports a started close done when dropped: at its end, or when ending the calls unwinds.
+struct DoneOnDrop<'a> {
+    peer: &'a Peer,
+    why: Option<IpcError>,
+}
+
+impl Drop for DoneOnDrop<'_> {
+    fn drop(&mut self) {
+        if let Some(why) = self.why.take() {
+            self.peer.report_done(why);
         }
     }
 }
@@ -338,6 +357,8 @@ impl Peer {
                 after_cancel: Mutex::new(None),
                 #[cfg(test)]
                 while_closing: Mutex::new(None),
+                #[cfg(test)]
+                close_waits: Mutex::new(None),
             }),
         };
         if let Some(f) = on_push {
@@ -384,12 +405,14 @@ impl Peer {
         lock(&self.inner.closed).done().cloned()
     }
 
-    /// Whether the connection is closed.
+    /// Whether the connection is closed: every pending call has failed and every served call is cancelled (a close still
+    /// ending the calls is not closed yet).
     pub fn is_closed(&self) -> bool {
         self.closed().is_some()
     }
 
-    /// Waits until the connection closes (at most `timeout`; `None`: as long as it takes); returns whether it did.
+    /// Waits until the connection is closed, every call ended (at most `timeout`; `None`: as long as it takes); returns whether
+    /// it is.
     pub fn wait_closed(&self, timeout: Option<Duration>) -> bool {
         let g = lock(&self.inner.closed);
         match timeout {
@@ -439,6 +462,10 @@ impl Peer {
                 Closing::Open => *c = Closing::Started(why.clone()),
                 Closing::Started(_) => {
                     // Waits for the other closer, which takes no lock a closer may hold while it waits here.
+                    #[cfg(test)]
+                    if let Some(f) = lock(&self.inner.close_waits).as_ref() {
+                        f(self);
+                    }
                     drop(
                         self.inner
                             .closed_cv
@@ -450,6 +477,11 @@ impl Peer {
                 Closing::Done(_) => return,
             }
         }
+        // Reports the close done even if ending the calls panics, so no other closer waits forever.
+        let done = DoneOnDrop {
+            peer: self,
+            why: Some(why.clone()),
+        };
         #[cfg(test)]
         if let Some(f) = lock(&self.inner.while_closing).as_ref() {
             f(self);
@@ -461,8 +493,7 @@ impl Peer {
             lock(&s.state).cancelled = true;
             s.cv.notify_all();
         }
-        *lock(&self.inner.closed) = Closing::Done(why.clone());
-        self.inner.closed_cv.notify_all();
+        drop(done);
         // After the close is reported: a caller woken by its failure finds the connection closed.
         for p in pending {
             p.post(Event::Closed(why.clone()));
@@ -471,6 +502,12 @@ impl Peer {
         if let Some(f) = lock(&self.inner.after_cancel).as_ref() {
             f(self);
         }
+    }
+
+    /// Marks the close done and wakes the closers waiting for it.
+    fn report_done(&self, why: IpcError) {
+        *lock(&self.inner.closed) = Closing::Done(why);
+        self.inner.closed_cv.notify_all();
     }
 
     /// Why the connection closed (every close records its reason first, so this is the reason while the close is under way too).
@@ -1196,14 +1233,15 @@ mod tests {
     /// A test's look at a peer from inside `mark_closed`.
     pub(super) type Hook = Box<dyn Fn(&Peer) + Send>;
 
-    /// Installs a hook that runs on the closing thread (the caller's or the reader's, whichever wins `mark_closed`) right after
-    /// `mark_closed` has cancelled the served calls (a test seam, per peer).
+    /// Installs a hook that runs on the closing thread (the caller's or the reader's, whichever wins `mark_closed`) at the end
+    /// of `mark_closed`: the served calls cancelled and the close reported done (a test seam, per peer).
     fn on_closed(peer: &Peer, f: impl Fn(&Peer) + Send + 'static) {
         *lock(&peer.inner.after_cancel) = Some(Box::new(f));
     }
 
     /// Installs a hook that runs on the closing thread while the close is under way: after it took the reason, before it
-    /// ended the pending and served calls (a test seam, per peer).
+    /// ended the pending and served calls (a test seam, per peer). The hook must not close the peer itself: that close would
+    /// wait for the close it runs in.
     fn while_closing(peer: &Peer, f: impl Fn(&Peer) + Send + 'static) {
         *lock(&peer.inner.while_closing) = Some(Box::new(f));
     }
@@ -1238,6 +1276,140 @@ mod tests {
              closer would return while a queued call could still start"
         );
         assert!(peer.is_closed() && peer.wait_closed(Some(Duration::ZERO)));
+        drop(theirs);
+    }
+
+    /// A second `close` while another is under way returns only once that close is done, and the call waiting in the queue
+    /// never runs (review of the fix for `closing_ends_calls_that_were_still_waiting_in_the_queue`: a second closer that
+    /// returned early in the `Started` arm passed every other test). Deterministic: the first closer is held in its
+    /// `while_closing` hook until the second closer has started to wait (the `close_waits` seam), or has returned without
+    /// waiting, whichever it does.
+    #[test]
+    fn a_second_close_returns_only_when_the_close_under_way_is_done_and_no_queued_call_runs() {
+        use crate::frame::{self, Frame};
+        use std::sync::mpsc;
+
+        let (ours, mut theirs) = endpoint::pair().unwrap();
+        let limit = FrameLimit::default();
+        let gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let g = gate.clone();
+        let (ran_tx, ran) = mpsc::channel::<Vec<u8>>();
+        let ran_tx = Mutex::new(ran_tx);
+        let slow: Arc<dyn Handler> = Arc::new(
+            move |_: &CallCtx, body: &[u8]| -> Result<Vec<u8>, RemoteError> {
+                let _ = lock(&ran_tx).send(body.to_vec());
+                drop(
+                    g.1.wait_while(lock(&g.0), |open| !*open)
+                        .unwrap_or_else(|p| p.into_inner()),
+                );
+                Ok(Vec::new())
+            },
+        );
+        let mut one = PeerOptions::new("the other side");
+        one.max_concurrent_calls = 1;
+        one.call_queue = 1;
+        let peer = Peer::start(Connection::raw(ours, limit), slow, one).unwrap();
+        for id in 1..=3u64 {
+            let body = id.to_string().into_bytes();
+            frame::write_frame(
+                &mut theirs,
+                &Frame::Call {
+                    id,
+                    credit: 0,
+                    body,
+                },
+                limit,
+            )
+            .unwrap();
+        }
+        // The refusal of the third proves the reader took the first two: 1 runs, 2 waits.
+        match frame::read_frame(&mut theirs, limit).unwrap() {
+            Frame::Fail { id: 3, error } => assert_eq!(error.code, codes::BUSY),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(ran.recv_timeout(Duration::from_secs(30)), Ok(b"1".to_vec()));
+
+        const SECOND: &str = "the second closer";
+        enum Second {
+            Waits,
+            Returned { closed: bool },
+        }
+        let (tx, second) = mpsc::channel::<Second>();
+        let waits = Mutex::new(tx.clone());
+        *lock(&peer.inner.close_waits) = Some(Box::new(move |_: &Peer| {
+            if std::thread::current().name() == Some(SECOND) {
+                let _ = lock(&waits).send(Second::Waits);
+            }
+        }));
+        let (seen_tx, seen) = mpsc::channel::<(bool, mpsc::Receiver<Second>)>();
+        let hook_state = Mutex::new(Some((tx, seen_tx, second)));
+        while_closing(&peer, move |p| {
+            // Runs once, on the first closer (the test thread or the reader).
+            let Some((tx, seen_tx, second)) = lock(&hook_state).take() else {
+                return;
+            };
+            let p2 = p.clone();
+            std::thread::Builder::new()
+                .name(SECOND.into())
+                .spawn(move || {
+                    p2.close();
+                    let _ = tx.send(Second::Returned {
+                        closed: p2.is_closed(),
+                    });
+                })
+                .unwrap();
+            // Released only once the second closer waits (fixed) or has returned without waiting (the bug).
+            let waited = matches!(
+                second.recv_timeout(Duration::from_secs(30)),
+                Ok(Second::Waits)
+            );
+            let _ = seen_tx.send((waited, second));
+        });
+        peer.close();
+        let (waited, second) = seen.recv_timeout(Duration::from_secs(30)).unwrap();
+        assert!(
+            waited,
+            "the second close returned without waiting while the first was still ending the calls"
+        );
+        // After the hook the first close went on to done; only then did the second closer return.
+        match second.recv_timeout(Duration::from_secs(30)) {
+            Ok(Second::Returned { closed }) => assert!(
+                closed,
+                "the second close returned before the close was done"
+            ),
+            Ok(Second::Waits) => panic!("the second closer started to wait twice"),
+            Err(e) => panic!("the second close did not return: {e:?}"),
+        }
+        assert!(peer.wait_closed(Some(Duration::ZERO)));
+        // The call that waited in the queue must never run: let the running one end, then every holder of the handler goes.
+        *lock(&gate.0) = true;
+        gate.1.notify_all();
+        assert_eq!(
+            ran.recv_timeout(Duration::from_secs(30)),
+            Err(mpsc::RecvTimeoutError::Disconnected),
+            "a call that waited in the queue ran after the close"
+        );
+        drop(theirs);
+    }
+
+    /// A close that panics while it ends the calls is still reported done, so no other closer and no `wait_closed` waits
+    /// for it forever.
+    #[test]
+    fn a_close_that_panics_while_ending_the_calls_is_still_reported_done() {
+        let (ours, theirs) = endpoint::pair().unwrap();
+        let peer = Peer::start(
+            Connection::raw(ours, FrameLimit::default()),
+            Arc::new(NoCalls),
+            PeerOptions::new("the other side"),
+        )
+        .unwrap();
+        while_closing(&peer, |_| panic!("a close that fails half way"));
+        // The test thread or the reader runs the hook and unwinds; either way the close must end.
+        let _ = catch_unwind(AssertUnwindSafe(|| peer.close()));
+        assert!(
+            peer.wait_closed(Some(Duration::from_secs(30))),
+            "the close that panicked was never reported done"
+        );
         drop(theirs);
     }
 
@@ -1287,7 +1459,7 @@ mod tests {
             let _ = lock(&tx).send((std::thread::current().id(), p.inner.out.is_shut()));
         });
         drop(theirs);
-        // Waits on the seam itself (it runs after `closed` is set, so `wait_closed` alone could return before it).
+        // Waits on the seam itself (it runs after the close is reported done, so `wait_closed` alone could return before it).
         let (thread, shut) = seen
             .recv_timeout(Duration::from_secs(30))
             .expect("the seam did not run within 30 s of the other end going away");
