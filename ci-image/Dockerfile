@@ -111,6 +111,10 @@ RUN npx -y "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chromium webki
  && echo /opt/libduckdb > /etc/ld.so.conf.d/duckdb.conf && ldconfig \
  && rm -rf /root/.npm /var/lib/apt/lists/*
 
+# jq: paddock-dev's hook tests run the old shell hooks (src/hook/fixtures/*.sh) as a live oracle, and those hooks parse their input with it.
+RUN apt-get update && apt-get install -y --no-install-recommends jq \
+ && rm -rf /var/lib/apt/lists/*
+
 # Where jobs find things. CHROMIUM_TEST_PATH is the variable @decryp7/paddock-e2e reads (rule 7: never an installed Chrome).
 ENV DUCKDB_LIB_DIR=/opt/libduckdb \
     DUCKDB_INCLUDE_DIR=/opt/libduckdb \
