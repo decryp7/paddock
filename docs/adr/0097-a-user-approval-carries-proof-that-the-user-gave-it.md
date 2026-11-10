@@ -309,12 +309,24 @@ no pin would change. So the decision lives where callers cannot reach into it:
    legitimate use, and the action and the audit check its pin before trusting a tag it made.
 5. `docs/approvals/**` itself, and the sha256 of the FIDO middleware installed by WP-0 (a `file_sha256` entry, checked
    by `./dev approve` on the user's machine, not by CI).
+6. **The execution closure of every pinned job.** A pinned workflow or action pins nothing if it `uses:` code that is
+   not pinned: a local action such as `./.gitea/actions/setup-rust` runs inside the cut run with the tag credential and
+   could forge its `(intent, tag, sha)` artifact. So the pin covers, for `approvals-check/action.yml`,
+   `approvals-audit.yml` and `release-cut.yml`, their whole execution closure: the workflow, every local action reached
+   through `uses:` (recursively), every repository file a `run:` line in that closure executes or reads as code, and the
+   built binary (item 1). **External actions are allowed only by a full 40-hex commit sha** (`actions/checkout@<sha>`),
+   never by tag or branch, so their content is fixed by the reference. C108 computes the closure mechanically from the
+   YAML (`uses:` paths, and the repository paths named in `run:` lines) and fails on any `uses:` or script in it that no
+   pin covers, on an external action referenced by anything but a full sha, and on a `run:` line that calls a tool built
+   from unpinned repository sources (for example `./dev`, `npm run` or `node scripts/...`): pinned jobs run only `cargo
+   build --locked -p paddock-approvals`, the binary it builds, and pinned files.
 
 **Invariant: everything between the pinned sources and the gate's exit code is either pinned or built inside the gated
-job.** The sources, the lock entries, the action and the two workflows (`approvals-audit.yml`, `release-cut.yml`) are
-pinned; the binary is built in the same job from them; the audit and `release-cut.yml` (§7) do the same from `main`.
-Nothing on that path is downloaded, cached between jobs or taken from a runner's disk. The toolchain (`rust-toolchain`,
-the runner image) is the one exception, shared with every build the family makes.
+job.** The sources, the lock entries, the action and the two workflows (`approvals-audit.yml`, `release-cut.yml`) and
+their whole execution closure (item 6) are pinned, external actions are fixed by full commit sha, and the binary is
+built in the same job from them; the audit and `release-cut.yml` (§7) do the same from `main`. Nothing on that path is
+downloaded, cached between jobs or taken from a runner's disk. The toolchain (`rust-toolchain`, the runner image) is the
+one exception, shared with every build the family makes.
 
 **Callers stay unpinned, on purpose.** `./dev approvals verify`, C100, `./dev copies`, ADR 0073's check and `./dev adr
 status` call the library for early reports on branches. Because the pinned action is an independent gate at every tag
@@ -381,18 +393,26 @@ it, and the run would publish.
 **Release tags come from signed release intents (D7, accepted 2026-11-10).** The user signs ahead, with one touch (and
 several intents in one `./dev approve` batch), a `release_intent` record: app, version, the gates that must be green, an
 expiry, and optionally the commit or branch it applies to. The intent lands on `main` like every user record (§6). The
-pinned workflow `release-cut.yml` (§4 item 4, built and run like the audit) runs on `main` only, on pushes to `main`,
-on the night schedule and on dispatch. For each verifying, unexpired, unconsumed intent it:
+pinned workflow `release-cut.yml` (§4 item 4, built and run like the audit) runs on `main` only, on pushes to `main`, on
+the night schedule and on dispatch, in one concurrency group (`release-cut`, never cancelled in progress), so two runs
+never cut at once. For each verifying, unexpired, unconsumed intent it:
 
 1. **resolves the commit:** the named commit; or the head of the named ER-31 release branch; or, with neither, a commit
-   on `main`'s **first-parent chain** that **landed after the intent did**, by server time (§2: the `created_at` of the
-   first `approvals-audit.yml` run that contains it), never an older green commit;
+   on `main`'s **first-parent chain** that **landed after the intent did**. "Landed after" is judged by position on that
+   chain, not by time: the commit must be the intent's landing commit or a later commit of the first-parent chain, so
+   code that arrives in the same push as the intent counts, and an older green commit never does;
 2. **checks the named gates** only through Actions runs: for each `workflow#job`, a successful run of exactly that
    workflow path whose head is the resolved commit, with that job successful; commit statuses are never read, because
    any write token can post one. The workflow file's blob at the resolved commit must equal its blob on `main` at the
-   commit where the intent landed, so the gate is the definition the user saw when signing;
+   commit where the intent landed, so the gate is the definition the user saw when signing. If that workflow file has
+   changed since, even legitimately, the intent cannot be used: `release-cut.yml` reports "gate definition changed since
+   the intent was signed: sign a new intent" and cuts nothing;
 3. **creates the annotated tag** `<app>-v<version>` (or `v<version>`) with the intent id in the message, using CI's
-   tag credential, and **records `(intent id, tag, sha)`** as an artifact of its own successful run.
+   tag credential, and **records `(intent id, tag, sha)`** as an artifact of its own successful run, only for a tag it
+   created itself in that run: if the tag already exists, it records nothing and reports a finding. The artifact gets
+   the longest retention the instance allows (the default is not verified on Gitea 28.3.0; WP-6 sets and checks it),
+   and the audit stores each tag it has verified in its ledger as settled, so an expired artifact does not turn a
+   verified tag into an unverifiable one. Before D8 (a) that ledger is editable with the admin token (§8).
 
 **A tag counts only if `release-cut.yml` made it.** The pinned C108 action in the tag run and the audit look up, through
 the Actions API, the `release-cut.yml` run that recorded this tag: its workflow path must be
@@ -401,13 +421,22 @@ the Actions API, the `release-cut.yml` run that recorded this tag: its workflow 
 measured (6); neither is ever a pass. So an agent holding the tag secret cannot choose another green commit, and a tag
 deleted and re-created elsewhere before the first audit no longer matches its record.
 
+**Where the pinned jobs run.** The instance has five online runners (admin API, read-only, 2026-11-10): three macOS
+runners named `d7-mac-mini`, `d7-mac-mini-2` and `d7-mac-mini-3`, one Windows runner `decryp7ology-dev` and one Linux
+runner `Gitea Action Runner (d-gtr9)`. The macOS runners serve this Mac mini, the user's account that agents share, so
+`release-cut.yml`, `approvals-audit.yml` and the C108 action's job in release workflows run on `ubuntu-latest`, never on
+a macOS runner. Which host the Linux runner is on was not verified here; if it is the user's Mac or one of its VMs,
+agents can reach its disk and environment, and §8's D8 (b) row covers that residual. WP-7 records where it runs.
+
 **What an intent approves.** An intent that names a commit approves that code. An intent without a commit approves an
 app, a version and a time window, not the code: whatever lands on `main` in that window and passes the named gates is
-released. The user should name the commit, or an ER-31 release branch, when the content matters, and `./dev approve`
-proposes a short default expiry (3 days). **The gates bind definitions, not their integrity:** step 2 binds the
+released. A named ER-31 release branch narrows which line ships, not what is on it, because agents can push to that
+branch. **Only a named commit approves the code**; the user should name one when the content matters, and `./dev
+approve` proposes a short default expiry (3 days). **The gates bind definitions, not their integrity:** step 2 binds the
 workflow and job definitions the user saw at signing time; whether those definitions really test what they claim is
 ADR 0093's and ADR 0060's subject, and for workflows agents write it stays an honour-system matter, visible in history
-and in review.
+and in review. The binding stops at the workflow file: the local actions, scripts and `./dev` commands a gate job calls
+are not bound by the intent and are honour-system too.
 
 Agents no longer cut release tags themselves; the standing "tag when green" practice becomes "the user signs an intent,
 CI tags when green". The user can be away.
@@ -456,7 +485,7 @@ CI tags when green". The user can be away.
 | A trailer or status line on an unsigned commit counting as the user's | An out-of-band publish (the audit's release and package listing) | the credential rule above |
 | A release tag that passes the audit without a verifying, unexpired, unused intent for that app and version, or not made by a pinned `release-cut.yml` run on `main` at the sha that run recorded | A tag pushed without an intent or at another commit, with CI's tag credential read from a pushed workflow or with the admin token (the audit compares every tag with a consumed intent and its cut run); the audit's memory of past tags (its issue and run outputs) edited or deleted with the admin token | D8 (a), the credential rule (the tag token only in `release-cut.yml`, out of reach of agent-pushable workflows), and protected tags limited to that token's account |
 | **Bound to the definitions at signing** (not impossible): the named gates are the workflow paths and jobs, with their file contents, that were on `main` when the intent landed | Changes to those gate definitions before the intent was signed are visible in history and review only; whether a gate tests what it claims is ADR 0093's and ADR 0060's subject and an honour-system matter for agent-written workflows | not closed by this ADR |
-| | A touch that signs an agent-chosen commit (the confused deputy, §9: the printed sha and counter, the counter gaps) | D8 (b): agents in a separate macOS account, so the signer process and its inputs are out of their reach |
+| | A touch that signs an agent-chosen commit (the confused deputy, §9: the printed sha and counter, the counter gaps); a pinned job (`release-cut.yml`, the audit, the C108 action) run on a runner agents can reach, whose disk, toolchain or environment they could change | D8 (b): agents in a separate macOS account, so the signer process and its inputs are out of their reach; and the pinned jobs on a runner outside the user's account and its VMs |
 
 ### 9. How the user gives an approval: `./dev approve`, and its limits (P1-2)
 
@@ -572,6 +601,7 @@ named); the green twin is in the same test.
 | PC-16 | §4 | a signed approval commit that also changes a `.rs` file | refused, "approval commit touches non-subject paths" |
 | PC-17 | §4 | a tagged tree, or the head of the `release-cut.yml` run, whose `crates/paddock-approvals/`, its lock entries, `.gitea/actions/approvals-check/action.yml`, `approvals-audit.yml` or `release-cut.yml` differs from the signed code pin | the audit refuses the tag |
 | PC-21 | §7, D7 | release tags checked by the audit: a tag with no intent; with an expired intent (expiry before the tag run's server time); with an intent already consumed by an earlier tag; with an intent for another version or app; with an intent whose named gate is red on the tagged commit; an intent whose `expires` or `gates` was changed by an unsigned commit; an agent's tag at another green commit pushed with the tag secret before `release-cut.yml` ran; a tag deleted and re-created at another commit before the first audit; a tag recorded by a `release-cut.yml` run from a branch, not `main`; a tag with no `release-cut.yml` run at all; a gate satisfied only by a posted commit status; a gate whose workflow file differs from its blob on `main` when the intent landed; a no-commit intent resolved to a green commit that landed before the intent; and a tag cut by `release-cut.yml` from a valid intent | fail; fail; fail; fail; fail; fail (the intent does not verify); fail; fail; fail; fail (5, or 6 if the API is unreadable); fail; fail; fail; passes |
+| PC-17d | §4 | `release-cut.yml` (or the action, or the audit) calling a local action whose content changed on `main` after the pin; an external action referenced by a tag or branch instead of a full commit sha; a `run:` line in a pinned job calling `./dev` or a script outside the pin | refused by C108 and by the audit (the closure is not covered by the pin) |
 | PC-17c | §4 | a gate run whose binary was fetched (a planted download step, or a binary placed in the cache or on the runner's disk) or differs from the one built in the job | refused: the pinned action builds in the job and runs only that build's path; the audit requires the build step in the tag run's step list |
 | PC-17b | §4 | a caller-side no-op: `./dev`'s `main.rs` returns success for `approvals verify` without calling the crate; the release workflow's C108 step replaced by an `echo` (or the action's `run` line by `true`) | the first leaves every pinned check red at the tag (only the early report lies); the second is refused by the audit (missing pinned action step) or by the pin (changed action) |
 | PC-18 | §9 | `./dev approve` run with a planted `gpg.ssh.program`, `core.hooksPath`, `SSH_SK_PROVIDER`, `SSH_AUTH_SOCK` and a `PATH` entry in the agents' checkout and environment | none is used (the fresh clone's command lines and environment are asserted by the test, which signs with a test key) |
@@ -676,17 +706,15 @@ not verify is treated as not approved, and the stricter state applies."
 | WP-2 | History: strict schemas and record ids, the structural walk of §3 (memoized, parents in recorded order), fixed-config blame, chain, genesis descent, pin read with the bot's read token, server time from `approvals-audit.yml` runs (6 when missing or not monotonic), the merge-base rule in `crates/paddock-merge-rule`, shared with the merge check, deletion rule, `Outcome`s (PC-1 to PC-5e, PC-9 to PC-13, PC-20) | 2.75 | WP-1 |
 | WP-3 | Library API for callers and the C100 wiring; switches and trailers (PC-7, PC-11). ADR 0075's `./dev copies`, ADR 0073's check and ADR 0096's `./dev adr status` wire it in their own work packages | 1.5 | WP-2 |
 | WP-4 | `./dev approve`: fresh clone, cleared environment, fixed signer, middleware hash and folder-owner check, per-record y/N, sha and counter printed; path rule (PC-16, PC-18, PC-18b); the `release_intent` kind (prompts for app, version, gates from the app's release workflow, expiry with a short default, optional commit or branch; shows what CI will tag) | 2.25 | WP-2 |
-| WP-5 | C108 in conformance (report); the crate's own binary and the pinned `.gitea/actions/approvals-check` action called by every release workflow; release summary prints the trust root; runs on the Linux and Windows runners (PC-17b) | 1.5 | WP-3 |
+| WP-5 | C108 in conformance (report); the crate's own binary and the pinned `.gitea/actions/approvals-check` action called by every release workflow; release summary prints the trust root; runs on the Linux and Windows runners (PC-17b); the execution-closure computation over `uses:` and `run:` and the full-sha rule for external actions (PC-17d) | 1.75 | WP-3 |
 | WP-6 | Post-tag audit on `main`: descent check, job and step comparison, code pins, release and package listing, the intent comparison (item 5), issue and release note; the pinned `approvals-audit.yml`; the pinned `release-cut.yml` (resolve the commit, wait for the named gates through the Actions API, cut the annotated tag once, idempotent on reruns) and the C108 action's intent check at tag runs; the cut run's `(intent id, tag, sha)` artifact and its lookup by the action and the audit, the first-parent and landed-after rule, gates bound to workflow path, job and blob; recorded-API tests (PC-14, PC-15, PC-17, PC-17b, PC-21); protected-tag behaviour on a scratch repository | 4 | WP-5, D7, D11 |
 | WP-7 | Identities (D8 (a)): `paddock-agent`, token swap in agents' environment and CI secrets, keychain item and git helper, claude-in-chrome block, branch protection, where publish credentials can live (user's hands for the admin steps) | 1 | D8 |
 | WP-8 | Migration: inventory across every `origin` branch (including `eba981aed`), ADRs 0089 to 0096 landed before the cutover, re-sign batch, cutover commit pinned, rule text, briefs (coordinator, integrator, reviewer), lessons entry; **D3 key steps** as the FIDO2 keys arrive (§10): middleware installed with `sudo` and a real signature through it first, genesis signed by the first key (offline key enrolled as recovery), pin set; the second key enrolled as recovery in a commit signed by the first, the offline key retired or kept recovery-only, pin updated | 1.25 | WP-4, D9, the keys |
-| | **Total** | **16.25 agent-days** (16 to 18 with the risks below) | |
+| | **Total** | **16.5 agent-days** (16.25 to 18.25 with the risks below) | |
 
-**Enforcement needs WP-0 to WP-6: 14 agent-days.** Without WP-6 nothing detects a bypass at a tag (§7) and there is
-no server time (§2), so `valid-*` checks would report 6, and no release intent can be cut. WP-0 to WP-5 (10 days) give a
-report-only C108 that already
-shows which records would count. WP-7 can run in parallel from the
-start.
+**Enforcement needs WP-0 to WP-6: 14.25 agent-days.** Without WP-6 nothing detects a bypass at a tag (§7) and there is
+no server time (§2), so `valid-*` checks would report 6, and no release intent can be cut. WP-0 to WP-5 (10.25 days)
+give a report-only C108 that already shows which records would count. WP-7 can run in parallel from the start.
 
 ## Risks
 
