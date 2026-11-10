@@ -5,9 +5,9 @@
 //! Two things can keep the service from running there:
 //! - **A stale registration.** After the app was replaced launchd keeps the launch constraint (LWCR: the cdhash of the
 //!   ad-hoc signed build that was registered) and refuses to start the new binary: `job state = spawn failed`, exit 78
-//!   (EX_CONFIG), `has LWCR`, looping. Registering again over the old job does not replace the constraint, so
-//!   [`run_repair`] removes the job (unregister and `launchctl bootout`), waits until launchd has dropped it, and only
-//!   then registers; it retries a bounded number of times and says every step to the log and to the UI
+//!   (EX_CONFIG) or "needs LWCR update" in the report, looping (`has LWCR` alone is every healthy job's mark).
+//!   Registering again over the old job does not replace the constraint, so [`run_repair`] removes the job (unregister
+//!   and `launchctl bootout`), waits until launchd has dropped it, and only then registers; it retries a bounded number of times and says every step to the log and to the UI
 //!   ([`RepairTracker`]). Because every ad-hoc build has a new cdhash, [`plan`] also re-registers once after every
 //!   version change instead of waiting for the failure.
 //! - **The user turned it off** in System Settings, Login Items ([`disabled_in_login_items`]). That is the user's
@@ -122,8 +122,9 @@ pub fn parse_job(launchctl_print: &str) -> JobReport {
             job.running = line == "state = running";
         } else if line == "job state = spawn failed" {
             job.spawn_failed = true;
-        } else if line.starts_with("last exit code = 78") {
-            job.exit_config = true;
+        } else if let Some(code) = line.strip_prefix("last exit code = ") {
+            // `78: EX_CONFIG` on newer systems, `78` on older ones, `(never exited)` before the first exit.
+            job.exit_config = code.split(':').next().and_then(|c| c.trim().parse::<i32>().ok()) == Some(78);
         } else if line.starts_with("properties = ") {
             job.needs_lwcr_update = line.contains("needs LWCR update");
             job.has_lwcr = line.contains("has LWCR");
@@ -426,6 +427,14 @@ mod tests {
         assert!(job.found && job.running && job.has_lwcr, "{job:?}");
         assert!(!job.spawn_failed && !job.exit_config && !job.needs_lwcr_update, "{job:?}");
         assert!(!job.stale());
+        // A running job is not refused whatever an earlier run left in the report.
+        let leftover = JobReport {
+            exit_config: true,
+            needs_lwcr_update: true,
+            spawn_failed: true,
+            ..job
+        };
+        assert!(leftover.running && !leftover.stale());
     }
 
     #[test]
