@@ -1,9 +1,10 @@
 # 93. Every scheduled CI check has an owner, and a red one cannot be ignored
 
-- Status: Proposed 2026-11-10, revision 3. Drafted at the coordinator's request of 2026-11-10, asked for by the user under
+- Status: Proposed 2026-11-10, revision 4. Drafted at the coordinator's request of 2026-11-10, asked for by the user under
   ER-21. Revision 1 (`34e7eeb00`) was reviewed independently ("changes", 5 P1 and a list of P2s); revision 2 answers it
   (see "Review answers (revision 2)"); its re-review of
-  `fe28d4032` ("changes", P1-6 and seven P2s) is answered by revision 3 (see "Review answers (revision 3)"). Nothing here is built yet. ER-23 does not apply (no drawings).
+  `fe28d4032` ("changes", P1-6 and seven P2s) is answered by revision 3 (see "Review answers (revision 3)"); the re-review of `3bf12da60` ("changes", P1-7
+  and one P2) is answered by revision 4 (see "Review answers (revision 4)"). Nothing here is built yet. ER-23 does not apply (no drawings).
 - Date: 2026-11-10
 - Related: ER-12, ER-21 / rule 40, ER-31, ER-33 / rule 71, ER-36; ADR 0022 (developer tools are Rust in `./dev`); ADR
   0041 (its tag-checklist row, line 208: "the last ... starved nightly of the app's tests has no open failure, or each is
@@ -99,6 +100,13 @@ green. The same class at other levels: ADR 0080's own "fix or quarantine with an
 run is shown to the coordinator within a day, and an app whose shipped code a scheduled failure covers cannot be tagged
 once that failure has been red for more than 24 h, unless the user has waived it with a step that needs the user present.
 The verdict is computed from the Actions record and git, never from state an agent can edit.
+
+**Residual risk (not closed here).** The release workflow, and with it the gate step, runs from the tagged tree. An
+agent can remove the step (or weaken the workflow) on a release branch and tag that commit; the gate then never runs.
+This holds for every release gate, ADR 0089's `measured-on` and C103 (d) included, not only this one. Possible remedies:
+Gitea protected tags so only the user can create `<app>-v*` and `v*` tags, or a post-tag check run from `main` that
+compares the tag run's job list with `main`'s release workflow and fails (and withholds publication) when a gate job is
+missing. ADR 0097 is asked to cover it as R5 (§5).
 
 ## Decision
 
@@ -223,12 +231,22 @@ stopped pipeline never passes. Issues are not read for the verdict.
 - **Not gated:** landings on `main` and trains (a fix must be able to land), branch runs, fix rounds.
 - **The mode is a user decision, signed.** The gate's mode lives in `docs/gates.toml` (`[scheduled_gate]`: `mode =
   "report" | "enforce"`, `report_until = YYYY-MM-DD`, `reason`), never in a repository variable or an environment
-  value, because agents can change those with the administrator token or the keychain credential. Before `report_until`
-  the gate reports only; an unsigned `report_until` counts only up to the go-live length (D9) after the commit
-  that first added the record, so an agent cannot push it out. After it, the gate enforces; any other mode counts only if every line of the `[scheduled_gate]`
-  record blames to a commit signed per §5, and otherwise the gate exits 6 (not measured). There is no `off`. Positive
-  controls: an unsigned commit that sets `mode = "report"` after `report_until` still refuses; a signed one by a key not
-  in the trust root still refuses.
+  value, because agents can change those with the administrator token or the keychain credential. The gate reads it in
+  two parts:
+  - **The go-live anchor.** The **go-live commit** is the earliest commit on `origin/main`'s first-parent history that
+    introduced a `[scheduled_gate]` section. It is found once from that history and never reset: deleting the record and
+    adding it again, or adding one on another branch, does not move it. The **unsigned allowance** (report-only until the
+    go-live commit's date plus the go-live length of D9) is read only from the record as it stands in that go-live commit,
+    never from the tagged tree or a later commit.
+  - **After the go-live commit**, the record must exist on both `origin/main` and the tagged tree; a missing or
+    unparsable record on either gives exit 6 (not measured). Before the unsigned allowance ends, the gate reports only.
+    After it, the gate enforces; a mode other than `enforce`, or a later `report_until`, counts only from a record every
+    line of which blames to a commit signed per §5, on the tagged tree and on `origin/main` alike, and otherwise the gate
+    exits 6. There is no `off`.
+  - **Positive controls (WP-5):** an unsigned commit that sets `mode = "report"` after the allowance still refuses; a
+    signed one by a key outside the trust root still refuses; deleting the record and adding it back on `main` leaves the
+    go-live date unchanged and refuses after the original allowance; a fresh unsigned record on a release branch (tagged
+    tree only) gives no allowance and refuses; deleting the record on `main` or on the tagged tree gives exit 6.
 
 ### 5. Waivers need the user present (detail in ADR 0097)
 
@@ -252,8 +270,12 @@ user's approvals are recorded across the family (keys, the `allowed_signers` fil
   itself be signed by a key already in it, checked from a pinned starting point.
 - **R2.** Verification is per line: a record counts only if every line of it blames to a commit signed by a trusted key.
 - **R3.** Scope includes switches (the gate mode of §4) as well as waivers, and any later user-only setting of this kind.
-- **R4.** Each signature needs the user present (a touch or Touch ID), never a key an agent process can use unattended. Until 0097 is accepted, the gate has no waivers at all: only
-a fix clears a red, and the shadow period (§7) is the slack.
+- **R4.** Each signature needs the user present (a touch or Touch ID), never a key an agent process can use unattended.
+- **R5.** A release gate cannot be removed by the tree it gates: the release workflow and its gate steps run from the
+  tagged tree, so 0097 is asked to cover tag creation itself (protected tags for the user, or a post-tag check from
+  `main` that compares the tag run's jobs with `main`'s release workflow); see the residual risk under the Invariant.
+
+Until 0097 is accepted, the gate has no waivers at all: only a fix clears a red, and the shadow period (§7) is the slack.
 
 As defence in depth, agents and CI move to a bot account (`paddock-agent`: issue write, Actions read, no admin), so
 issues and comments say who wrote them and agents stop holding an administrator token. It does not make a waiver
@@ -296,7 +318,8 @@ For N days after go-live (D9: 14 recommended) the gate runs everywhere in report
 go into the release summary and the digest, and nothing is refused. The period ends with a triage of the backlog with the
 user: every open signature is fixed, waived (§5) or has its coverage corrected, and the register's skip classes are
 checked against what the period showed. The triage is planned before `report_until`; if it is not done by then,
-enforcement starts anyway (fail closed) and only the user can extend the period, with a signed record (§4). Reasons: bench has
+enforcement starts anyway (fail closed) and only the user can extend the period, with a signed record (§4); the period's start is the go-live commit on
+`origin/main` and cannot be reset. Reasons: bench has
 never been green, mutants fails within minutes of starting, and the `step:` coverage needs a look before it blocks
 anything.
 
@@ -411,7 +434,7 @@ user's decision.
 | WP-3 | Coverage per signature (§3) through the planner graph at a commit; tests with a planted crate in two of three lockfiles | 1 | WP-2 |
 | WP-4 | Write client (idempotent create, duplicate close, comment rate rule) and `sweep`, `fix`, `digest`, `scheduled-digest.yml` (09:13 and 15:13 local) | 2.5 | WP-0, WP-2 |
 | WP-5 | `gate --app --commit`: stateless verdict, 24 h streak rule, pending runs, release-branch tags, sweep freshness, ADR 0089 exit codes, the three-greens streak rule and the flake ledger, the `[scheduled_gate]` mode record; wired into the six `*-release.yml`, `debrief.yml` (tags) and `publish.yml`, and the tag checklist; positive controls (a planted red refuses, a stale sweep is not measured, a rerun green still refuses, an intermittent red with greens in between still ages, an unsigned mode flip after `report_until` still refuses) | 2 | WP-2, WP-3, D4 |
-| WP-6 | Waiver and mode records, per-line blame and signature check against ADR 0097's trust root (unsigned, wrong-key and edited-line controls) | 0.5 | ADR 0097 accepted, D5 (a) |
+| WP-6 | Waiver and mode records, per-line blame and signature check against ADR 0097's trust root (unsigned, wrong-key and edited-line controls; the go-live anchor read from `origin/main`'s first-parent history) | 0.5 | ADR 0097 accepted, D5 (a) |
 | WP-7 | Rule text (a Paddock rule and an ER-33 amendment, below), agent and reviewer briefs | 0.5 | WP-5 |
 | WP-8 | Go-live: report-only switch on, backfill sweep, `docs/ci-schedules.md` corrected; at the end of the period the triage list for the user | 0.5 | WP-4, WP-5 |
 
@@ -480,3 +503,14 @@ and not from issues, unless the user has waived that failure with a step that ne
 - P2-7 (heads): block refreshed (train `c151422a4`, `origin/docs/adr-evidence-heads` `b32655fef`) and
   `origin/docs/adr-private-files` added; the golden fix's bearing on the `paddock-dev (windows-latest)` red noted.
 - Estimate +0.5 day (WP-1): 13.5 in all, first cut 10.
+
+## Review answers (revision 4)
+
+- P1-7 (report mode reopened without a signature by deleting the record, deleting and re-adding it, or adding a fresh
+  one on a release branch): the unsigned allowance is read only from the go-live commit, the earliest commit on
+  `origin/main`'s first-parent history that introduced `[scheduled_gate]`, never reset; after it, a missing record on the
+  tagged tree or on `origin/main` is exit 6; positive controls added for delete-and-re-add, a fresh record on a release
+  branch and a deleted record (§4, WP-5, WP-6).
+- P2 (the gate step runs from the tagged tree): stated as a residual risk under the Invariant, shared with every release
+  gate (ADR 0089 `measured-on`, C103 (d)), with protected tags or a post-tag job-list check from `main` as remedies, and
+  handed to ADR 0097 as R5 (§5). Not fixed here.
