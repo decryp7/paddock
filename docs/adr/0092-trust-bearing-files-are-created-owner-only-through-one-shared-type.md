@@ -1,6 +1,8 @@
 # 92. Trust-bearing files are created owner-only through one shared type
 
-- Status: Proposed 2026-11-10, revision 2. Drafted at the user's request of 2026-11-10 under ER-21 (rule 40): one
+- Status: Accepted 2026-11-10 (user); D9 (a), D2 tighten default only; other decisions as recommended. Independent
+  review approved revision 2 (`fdfb17c8f`); this text adds the review's last five P2s ("Review answers (acceptance)").
+  Revision 2 of the proposal. Drafted at the user's request of 2026-11-10 under ER-21 (rule 40): one
   class, about 23 fixes in six days. Revision 2 answers the independent review of revision 1 (`3ba5a4a16`, CHANGES,
   4 P1s and 8 P2s; "Review answers (revision 2)" at the end). Nothing here is built yet. ER-23 does not apply (no
   drawings).
@@ -61,7 +63,7 @@ them: it is the owner. For data the user's own processes read at the user's own 
 (anything running as the user can already read the user's memory and files). It is **not** a boundary for an elevated
 reader (S4): an elevated process that reads a file in a folder the user owns can be fed by any unelevated process of that
 user, which is the UAC-bypass shape of the Debrief environment-override finding the user made a Debrief 1.2 blocker
-(memory "debrief-env-exe-override-security", 2026-11-09). §4 (rule 75) therefore governs S4 separately: no owner-only
+(user decision, 2026-11-09). §4 (rule 75) therefore governs S4 separately: no owner-only
 file is a sufficient channel into an elevated process.
 
 ### The fixes (all verified with `git show --stat` and `git tag --contains`)
@@ -132,7 +134,7 @@ protected-chain rule of Dyno ADR 0022 §2.1, used by the Dyno helper's `protect.
 
 | # | Where | What | Rating | Closed by |
 |---|---|---|---|---|
-| W1 | `pitwall-v1.0.3` LocalSystem service log (`git show pitwall-v1.0.3:.../service/windows.rs` lines 488-505) | `%ProgramData%\Pitwall\logs\service.log` made with `create_dir_all`, then size-checked, removed and opened **by path** as SYSTEM: a user who pre-creates the folder plants a link and the service writes or deletes where the link points | **High** (local privilege escalation) where the opt-in service is installed | `073e5a150` on the train, in **Pitwall 1.1**. The user decided on 2026-11-08 to ship the fix in 1.1 only, no 1.0.4, and re-confirmed it after foundation-first pushed 1.1 to about January (memory "pitwall-1-1"). Every day 1.1 is later keeps W1 live on installs with the service |
+| W1 | `pitwall-v1.0.3` LocalSystem service log (`git show pitwall-v1.0.3:.../service/windows.rs` lines 488-505) | `%ProgramData%\Pitwall\logs\service.log` made with `create_dir_all`, then size-checked, removed and opened **by path** as SYSTEM: a user who pre-creates the folder plants a link and the service writes or deletes where the link points | **High** (local privilege escalation) where the opt-in service is installed | `073e5a150` on the train, in **Pitwall 1.1**. The user decided on 2026-11-08 to ship the fix in 1.1 only, no 1.0.4, (user decision, 2026-11-08), and kept it after foundation-first pushed 1.1 to about January. Every day 1.1 is later keeps W1 live on installs with the service |
 | W2 | Debrief elevated bootstrap, `debrief-v1.0.0` to `debrief-v1.1.1` and the train (`apps/debrief/crates/debrief-ipc/src/elevation.rs:104-124`) | the unelevated side writes the endpoint, token and sandbox spec to `%TEMP%\debrief-elevate-<random>\bootstrap.json` (at `debrief-v1.1.1` under `temp_dir()` with 8 random bytes, line 113; on the train through `private_tempdir`); the elevated child reads it by path. Any unelevated process of the same user can rewrite it between write and read (the type's limit above) | **Medium**: needs code already running as the user; it crosses the UAC boundary, the same shape as the env-override bypass already blocking Debrief 1.2 | **Debrief 1.2** (WP-7): input through a channel rule 75 allows |
 | W3 | `pitwall-v1.0.3` `admin.key` (`auth.rs:110-119` at that tag) | written to a fixed temp name, renamed, then chmod 0600: on Linux, under a 0644 default, another account watching with inotify can read the key in the window | **Low to medium** (Linux, multi-user) | the train writes it through `SecretFile`, but **keeps an existing key** (`auth.rs:24-26`), so a key read in 1.0.3 survives. Pitwall 1.1: rotate the admin key once on the first start after an upgrade from 1.0.3 or earlier (WP-0), or say it in the release notes (D11) |
 | W4 | `apps.json`, `pitwall-v1.0.3` and the train (`auth.rs:134`, `:153-156`; `paths.rs:106-116`) | fixed `apps.tmp`, `fs::write` follows a link, chmod after rename; and the `.bak` fallback: when the primary is damaged the backup is used, which can bring back a key revoked since | **Low to medium** (integrity of the access list) | **Pitwall 1.1** (WP-0) |
@@ -232,8 +234,17 @@ runs or follows a link in a place that user, or any process of that user at a lo
 runs passes the protected-chain rule (`paddock_service::privileged::trust`); where it stages or logs is a protected folder
 it created (ADR 0053 §2.5). It gets its input only through a channel the lower-integrity side cannot change after the
 fact: a handle it inherits, a pipe whose server it has verified (the server process by identity, ADR 0033), or a folder
-the elevated side created with a High mandatory label (`S:(ML;OICI;NWNRNX;;;HI)`) and owner-only DACL. An owner-only file
-in the user's folders is not such a channel."
+the elevated side created with a High mandatory label (`S:(ML;OICI;NWNRNX;;;HI)`) and owner-only DACL, which it then uses
+only relative to the handle it created, or after re-reading the label and owner from the handle it opened. An owner-only
+file in the user's folders is not such a channel."
+
+The last clause closes a rename hole: the folder's parent is the user's, so a medium-integrity process holding
+`FILE_DELETE_CHILD` there can rename the High-label folder away and put its own in its place; only a check on the handle
+the elevated side holds sees that. For input that flows from low to high, as W2's does, the label channel does not apply
+(the low side writes the input), and handles are not inherited across a `runas` elevation, so the channel is the verified
+pipe: the unelevated side creates the pipe, the pipe's address goes in the elevated child's arguments, and the child
+checks `GetNamedPipeServerProcessId` against the requester's pid and start time passed with it (rule 53,
+`paddock_proc::ProcessId`) before it reads anything.
 
 The text of Dyno ADR 0022 §2.1 moves into a family document this ADR links (when 0053 is accepted, its §2.5 is the
 per-machine half); the app ADRs then link instead of restating. The code is already shared; this makes the rule binding
@@ -280,14 +291,13 @@ naming reasons without paths (ER-27, as `note_result` does now).
 
 - **D1 Mechanism.** (a) **One `PrivateDir`/`PrivateFile` type in `paddock-env`, every writer through it** · (b)
   `fs-mistrust` for checks plus our creation · (c) keep fixing instances.
-- **D2 Tightening the default data location (a question, not a claim of compliance).** Your rule is: refuse an existing
-  others-writable folder with a fix-it message, never re-ACL a folder Paddock did not create. May Paddock still remove
-  group write from the app's **default** data location, never an override, only in the proven own-private-group case
-  (Linux umask 002)? (a) **yes, default location only, logged** · (b) no, refuse always and show `chmod g-w`. (a) keeps
-  Linux users with umask 002 working without a manual step; (b) is the stricter reading of your rule.
+- **D2 Tightening the default data location.** Decided (user, 2026-11-10): Paddock removes group write only from the
+  app's **default** data location, only in the proven own-private-group case (Linux umask 002), and logs it; an override
+  location (`<APP>_DATA_DIR`, portable mode, `<ID>_HOME`) open to others is always refused with the fix-it message.
 - **D3 The Windows descriptor.** (a) user SID only · (b) **user SID and SYSTEM, explicit SID, protected, `OICI`, and
   `FILE_ATTRIBUTE_NOT_CONTENT_INDEXED` on every `PrivateDir`** · (c) user, SYSTEM and Administrators (today's
-  `make_private`). An explicit SID rather than `OW` (row 13) because inherited `OW` entries apply to whoever owns each
+  `make_private`). The descriptor also sets the owner, `O:<user SID>`, so a folder made while the app ran elevated is
+  owned by the user and is not refused on the next normal run. An explicit SID rather than `OW` (row 13) because inherited `OW` entries apply to whoever owns each
   child. A folder created by an elevated process is owned by `BUILTIN\Administrators` (the default owner for an
   administrator's token), so the check accepts that owner only for folders the elevated side created (rule 75), never
   for the user's own `PrivateDir`.
@@ -303,11 +313,11 @@ naming reasons without paths (ER-27, as `note_result` does now).
 - **D7 `make_folder_private`.** (a) **test-support only, behind `test-support` (as you decided)** · (b) keep public.
 - **D8 Elevated and protected locations.** (a) **rule 75 as in §4, the protected-chain text lifted from Dyno ADR 0022
   §2.1, app ADRs link it** · (b) leave it in the app ADRs and 0053.
-- **D9 What it gates.** (a) the Pitwall 1.1 tag on WP-1 to WP-5, WP-8 and WP-10; the next Dyno tag on WP-6; Debrief 1.2
-  and Pitcrew 1.1 on WP-7 · (b) Pitwall 1.1 on the whole type · (c) gate nothing · (d) **an exposure cut, WP-0 (about
+- **D9 What it gates.** Decided (user, 2026-11-10): **(a)**. (a) the Pitwall 1.1 tag on WP-1 to WP-5, WP-8 and WP-10; the next Dyno tag on WP-6; Debrief 1.2
+  and Pitcrew 1.1 on WP-7 · (b) Pitwall 1.1 on the whole type · (c) gate nothing · (d) an exposure cut, WP-0 (about
   3.5 days), gates Pitwall 1.1; WP-6 gates the next Dyno tag; WP-7 (with W2) gates Debrief 1.2 and Pitcrew 1.1; the type
-  and the rest land on the train without gating Pitwall.**
-  - Why (d): Pitwall 1.1's exposure on the train is small. Its service writes no file (`073e5a150`); `admin.key` and
+  and the rest land on the train without gating Pitwall (recommended in revision 2, not chosen).
+  - The user chose (a) knowing this trade-off. Why (d) was recommended: Pitwall 1.1's exposure on the train is small. Its service writes no file (`073e5a150`); `admin.key` and
     the chat secrets already go through `paddock-secrets`, which refuses a Windows folder others can write (row 6);
     Pitwall's data folder is under `%APPDATA%`, private by default. What remains is W3, W4 and W5, and WP-0 closes them
     with code that exists today.
@@ -319,27 +329,31 @@ naming reasons without paths (ER-27, as `note_result` does now).
   rename with `RootDirectory`, behind cap-std where it covers it** · (b) held handles without `FILE_SHARE_DELETE` plus a
   `GetFinalPathNameByHandleW` re-check before each child operation · (c) path-based (today).
 - **D11 Admin keys read in 1.0.3.** (a) **rotate once on the first start after an upgrade from 1.0.3 or earlier (paired
-  apps keep working; the window gets the new key)** · (b) a release-note line telling Linux users how to rotate · (c)
+  apps keep working; the window gets the new key), recorded by a one-time upgrade marker in the data folder, with a
+  release-note line for scripts that hold the old admin key** · (b) a release-note line telling Linux users how to rotate · (c)
   nothing.
 
 ## Work packages
 
-| WP | What | Days | Gates under D9 (d) |
+| WP | What | Days | Gates (D9 (a)) |
 |---|---|---|---|
-| WP-0 | Pitwall exposure cut: `apps.json` through a unique-temp `O_EXCL \| O_NOFOLLOW` owner-only writer (`paddock_env::write_atomic(private)` plus `paddock_secrets` `file_windows::create_owner_only`); no `.bak` fallback for the access list; a Windows DACL refusal on the data root through `paddock_secrets::acl::folder_refusal`; `random32` fails closed; admin-key rotation from 1.0.3 (D11); failing tests 4 and 5 first | 3.5 | Pitwall 1.1 |
-| WP-1 | `paddock_env::private`: cap-std spike (1 day), Unix (`mkdirat`, `fchmod`, `fstat`, `renameat`), Windows NT-native creation and rename with `RootDirectory`, descriptors, reparse refusal; failing tests 6 and 7 first | 7 | none |
-| WP-2 | Existing folders: `Refusal::OpenToOthersAcl`, macOS extended ACLs, the parent rule (D4), fix-it texts, tightening per D2; `check_folder` real on Windows; failing test 1 first | 2.5 | none |
-| WP-3 | `docs/trust-files.toml`, C106 on the RT-5 host with an ADR 0088 ratchet (after both land), Clippy `disallowed-methods` now, a planted positive control | 3 | none |
-| WP-4 | Shared adopters: `paddock-env` atomic writer and `dirs`, `paddock-proc::hint`, `paddock-secrets` (`secure_folder` refuses, no chmod), `paddock-mcp` key list (gains Windows); failing tests 2 and 3 first | 3 | none |
-| WP-5 | Pitwall onto the type: `admin.key` folder, chat secrets and prefs, slots folder, `cache_db`; delete `paths::write_atomic`, `restrict`, `restrict_dir` | 1.5 | none |
+| WP-0 | Pitwall exposure cut: `apps.json` through a unique-temp `O_EXCL \| O_NOFOLLOW` owner-only writer (`paddock_env::write_atomic(private)` on Unix; on Windows a new public writer in `paddock-secrets` that composes `paddock_env::write_atomic_created` (`atomic.rs:37`) with `file_windows::create_owner_only`, today `pub(crate)` at `file_windows.rs:132`, added as a shared-integration change); no `.bak` fallback for the access list; a Windows DACL refusal on the data root through `paddock_secrets::acl::folder_refusal`; `random32` fails closed; admin-key rotation from 1.0.3 behind a one-time upgrade marker, and its release-note line (D11); failing tests 4 and 5 first | 4 | Pitwall 1.1 |
+| WP-1 | `paddock_env::private`: cap-std spike (1 day), Unix (`mkdirat`, `fchmod`, `fstat`, `renameat`), Windows NT-native creation and rename with `RootDirectory`, descriptors, reparse refusal; failing tests 6 and 7 first | 7 | Pitwall 1.1 |
+| WP-2 | Existing folders: `Refusal::OpenToOthersAcl`, macOS extended ACLs, the parent rule (D4), fix-it texts, tightening per D2; `check_folder` real on Windows; failing test 1 first | 2.5 | Pitwall 1.1 |
+| WP-3 | `docs/trust-files.toml`, C106 on the RT-5 host with an ADR 0088 ratchet (after both land), Clippy `disallowed-methods` now, a planted positive control | 3 | Pitwall 1.1 |
+| WP-4 | Shared adopters: `paddock-env` atomic writer and `dirs`, `paddock-proc::hint`, `paddock-secrets` (`secure_folder` refuses, no chmod), `paddock-mcp` key list (gains Windows); failing tests 2 and 3 first | 3 | Pitwall 1.1 |
+| WP-5 | Pitwall onto the type: `admin.key` folder, chat secrets and prefs, slots folder, `cache_db`; delete `paths::write_atomic`, `restrict`, `restrict_dir` | 1.5 | Pitwall 1.1 |
 | WP-6 | Dyno onto the type: data root (W8), `agent.json`, the MCP key list's folder (W7), WoL folder, cache db, geo and intel caches, battery folder (`hardware.rs` copy deleted) | 2 | next Dyno |
-| WP-7 | Debrief: the elevated bootstrap through a rule-75 channel (W2; failing test 8 first), `private_tempdir` and the IPC socket folder; Pitcrew socket folder | 3 | Debrief 1.2, Pitcrew 1.1 |
-| WP-8 | `make_folder_private` behind `test-support`; tests through `paddock_testkit::scratch` | 1 | none |
+| WP-7 | Debrief: the elevated bootstrap through the verified pipe of rule 75 (address in the arguments, `GetNamedPipeServerProcessId` checked against the requester's pid and start time; W2; failing test 8 first), `private_tempdir` and the IPC socket folder; Pitcrew socket folder | 3 | Debrief 1.2, Pitcrew 1.1 |
+| WP-8 | `make_folder_private` behind `test-support`; tests through `paddock_testkit::scratch` | 1 | Pitwall 1.1 |
 | WP-9 | Rule 75 text and the family protected-location document; Dyno ADR 0022, Pitwall ADR 0024 and 0053 link it | 1 | none (docs) |
-| WP-10 | Windows positive controls in CI and the test VM: a planted junction, an Everyone-writable folder, portable mode and `DYNO_DATA_DIR` on a folder others can write, a rewritten bootstrap | 1.5 | none |
+| WP-10 | Windows positive controls in CI and the test VM: a planted junction, an Everyone-writable folder, portable mode and `DYNO_DATA_DIR` on a folder others can write, a rewritten bootstrap | 1.5 | Pitwall 1.1 |
 
-Total 29 days (revision 1 said 21: WP-1 grew by 3 for NT-native anchoring, WP-0 and the Debrief bootstrap are new, WP-2
-grew for macOS ACLs). WP-0 is independent of everything else and comes first. WP-1 comes before WP-2 to WP-8; WP-3 also
+Total 29.5 days (revision 1 said 21: WP-1 grew by 3 for NT-native anchoring, WP-0 and the Debrief bootstrap are new, WP-2
+grew for macOS ACLs; the acceptance added 0.5 for the public Windows writer). Under D9 (a) **WP-0 to WP-5, WP-8 and WP-10
+gate the Pitwall 1.1 tag** (23.5 days; WP-0's items stay in that set), WP-6 gates the next Dyno tag, WP-7 gates Debrief 1.2
+and Pitcrew 1.1, and WP-9 is docs only. WP-3 still waits for ADR 0088's engine and RT-5, so their landing is on Pitwall
+1.1's critical path too. WP-0 is independent of everything else and comes first. WP-1 comes before WP-2 to WP-8; WP-3 also
 waits for ADR 0088's engine and RT-5; WP-5 to WP-7 are independent of each other once WP-1 is done.
 
 ## Consequences
@@ -374,3 +388,15 @@ The independent review of revision 1 (`3ba5a4a16`) judged the diagnosis and core
   extended and the register is triggered from the type's use; D3 adds `FILE_ATTRIBUTE_NOT_CONTENT_INDEXED` and the
   elevated owner; D4 says why the parent is enough; the evidence heads add `origin/docs/adr-windows-gate-ratchets` and
   `origin/feat/rt5-check-host`, both marked unbuilt; `random32` is W5 with test 5, in WP-0.
+
+## Review answers (acceptance)
+
+The review approved revision 2 and listed five P2s, answered here with the user's decisions.
+
+- Rule 75's High-label channel: the elevated side acts relative to the handle it created or re-verifies label and owner
+  on its opened handle (the rename hole through the parent's `FILE_DELETE_CHILD`); W2 uses the verified pipe, since its
+  input flows from low to high and `runas` does not inherit handles (§4, WP-7).
+- D3: the descriptor sets `O:<user SID>`.
+- WP-0 needs a public Windows writer; `create_owner_only` is `pub(crate)`. Added as a shared-integration change, +0.5 day.
+- Memory files are no longer cited; W1 and the env override cite the user decisions of 2026-11-08 and 2026-11-09.
+- D11: a one-time upgrade marker and a release-note line for scripts holding the old key.
