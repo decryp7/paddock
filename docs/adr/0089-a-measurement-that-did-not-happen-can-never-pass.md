@@ -1,11 +1,11 @@
 # 89. A measurement that did not happen can never pass: one outcome type, one test outcome, one exit code, and a check over every copy
 
-- Status: Proposed 2026-11-10, revision 5. Drafted at the coordinator's request of 2026-11-10 (ER-21: one class, seen
+- Status: Proposed 2026-11-10, revision 6. Drafted at the coordinator's request of 2026-11-10 (ER-21: one class, seen
   six times in one day's Rust tooling reviews, after the Dyno 1.1.0 instances that created ER-33). Revision 1
   (`e5e4f300d`) was reviewed independently ("changes", 6 P1 and 12 P2); revision 2 (`90d28a0a6`) answered it and was
   re-reviewed ("changes": P1-7 and four P2s); revision 3 (`197d5234e`) answered that and was re-reviewed ("changes":
   P1-8, two P2s); revision 4 (`264468b3c`) answered it and was re-reviewed ("changes": P1-9, three P2s); revision 5
-  answers it (see "Review answers").
+  (`7680e9d79`) answered it and was re-reviewed ("changes": P1-10, three P2s); revision 6 answers it.
   Nothing here is built yet.
 - Date: 2026-11-10
 - Related: ER-21 / rule 40, ER-22 / rules 42 and 55 (share first; one implementation per mechanism,
@@ -182,6 +182,10 @@ expires = "2027-01-31"
   release workflow from an explicit `PADDOCK_RUN_KIND=release` that each `<app>-release.yml` and the tag path of each
   `<app>.yml` set in their `env:` (`GITHUB_WORKFLOW` is the workflow's `name:`, not its file, and whether Gitea sets
   `GITHUB_WORKFLOW_REF` is **unverified**). Anything else is an ordinary run.
+- **Rule 54 dispatches** of an `<app>-release.yml` (a manual run with gates on) are release runs: the file is the
+  tag-triggered one and sets `PADDOCK_RUN_KIND=release`. **Not release runs** (ADR 0088 §3's set): `debrief.yml`'s
+  manual run with `bundles: true` (a branch ref, no `PADDOCK_RUN_KIND`), and `nightly.yml`'s calls of
+  `app-release.yml` (`:216`, `:263`, `:295`, `:325`; nightly sets none).
 - **Records and the 0088 engine:** `check:`, `gate:` and `probe:` entries are judged stale or live by 0088's engine
   from the run records of `./dev check` and the push gate. **`test:` entries are expiry-only**: their records live in
   CI job artifacts (`PADDOCK_NOT_MEASURED_LOG`, uploaded per job) that no run on main reads today, so the engine reports
@@ -223,7 +227,13 @@ fn transcodes_a_clip() -> Measured {
 `Termination::report()` decides, in this order:
 
 1. **Declared optional** for this test on this leg (`PADDOCK_LEG` and the OS against `docs/optional-measurements.toml`,
-   §3), and, in a release run, the entry names `measured_on` legs (whose results the tag workflow's final job checks, §3a and §7) → success, and one record is appended to `PADDOCK_NOT_MEASURED_LOG` when that is set.
+   §3) → success, with one record appended to `PADDOCK_NOT_MEASURED_LOG` when it is set. **In a release run this fails
+   closed** (revision 6): it succeeds only when the entry names `measured_on` legs, **and** `PADDOCK_LEG` and
+   `PADDOCK_NOT_MEASURED_LOG` are both set, **and** the record was written (the file opened and the line flushed);
+   any of the three missing is a strict failure, `not measured: release run on an unwired step (no PADDOCK_LEG or
+   PADDOCK_NOT_MEASURED_LOG), so the cross-leg check could not see this skip`. The final job (§3a, §7) then checks the
+   `measured_on` legs. This is the primary guarantee: an unwired step can never skip silently in a release, whatever
+   C103 (d) found; C103 (d) is wiring coverage, so that wired steps are the normal case and failures are rare.
 2. **Reporting mode** (`PADDOCK_NOT_MEASURED=report:<file>`, set only by `./dev test` and the push gate, which read the
    file afterwards and fold it into their `Verdict`, so they exit 6) → success after recording.
 3. **Otherwise strict** (plain `cargo test`, `cargo nextest run`, CI without an entry) → failure with
@@ -289,8 +299,9 @@ In RT-5's `./dev check` host:
   RT-3 `worktree/mod.rs:14`, RT-5 `record.rs:71, 73, 75, 99`, RT-8 `flakes.rs:148` (6 sites, 3 branches); the JS seed
   (vm-smoke's verdict and its rows) is counted by WP-3, which re-seeds every list from the heads it lands on.
 - **(c) Exits.** `std::process::exit` in `tools/` only in `main.rs` (Clippy `disallowed-methods` in `tools/*/clippy.toml`).
-- **(d) Tag workflows** follow §7's rule: the variables on every test step, uploads from every leg, and a final
-  `measured-on` job; enumerated over `.gitea/workflows/` and the local actions they call, with fixture workflows (§7).
+- **(d) Tag workflows** follow §7's rule: the variables on every test step (the wide detector of §7), uploads from
+  every leg, and a final `measured-on` job; `on.push.tags` read as YAML, actions followed recursively, with fixture
+  workflows (§7). It is wiring coverage; the release guarantee is §4 rule 1's fail-closed check.
 
 Today's (a), (b) and (d) sites seed a shrink-only ratchet (`docs/ratchets/c103.toml`, ADR 0088's engine); new sites fail.
 
@@ -302,6 +313,10 @@ Today's (a), (b) and (d) sites seed a shrink-only ratchet (`docs/ratchets/c103.t
   both listed.
 - Waivers: a planted crash and a planted half run with one finding, each under a matching `*` waiver, exit 7 and 6, in
   both hosts.
+- **Fail closed on an unwired step:** in a release run (`PADDOCK_RUN_KIND=release`), a planted test with an
+  `os`-only entry (no `measured_on`) and with `measured_on` but without `PADDOCK_NOT_MEASURED_LOG` (and again without
+  `PADDOCK_LEG`) must each fail; with both variables and `measured_on` it passes and writes exactly one record. Run
+  under nextest and `cargo test`, and the JS twin under node:test.
 - `Measured` under nextest and `cargo test` in all three modes (A.2 is the prototype): a missing tool
   (`paddock-no-such-tool-0089`) fails strict, passes and records once in reporting mode, passes on a declared leg and
   fails on an undeclared one, and in a release run passes only with `measured_on` (a planted `measured_on` leg that did
@@ -322,7 +337,8 @@ that a check enumerates:
 
 **Rule.** Every workflow under `.gitea/workflows/` that has a tag trigger (`on.push.tags`) and whose steps, or the
 steps of a workflow it calls (`uses: ./.gitea/workflows/…`), or of a local action those steps use
-(`uses: ./.gitea/actions/…`), run nextest, vitest or Playwright must:
+(`uses: ./.gitea/actions/…`, recursively: an action that uses another), run tests must. "Runs tests" is the detector
+of C103 (d) below, wider than the three runner names:
 
 1. set `PADDOCK_LEG` and `PADDOCK_NOT_MEASURED_LOG` on each of those steps (an action takes a `leg` input, default
    `${{ github.job }}-${{ runner.os }}`);
@@ -342,13 +358,28 @@ the reusable `ci.yml` call (`actions/download-artifact` across a `workflow_call`
 the Dyno control below; if it cannot, the called `ci.yml` runs `measured-on` itself for its legs (`if: always()`, its
 `app` input set) and passes its outcome to the caller as a job output, which `verdict` reads.
 
-**The check: C103 (d).** A YAML pass over `.gitea/workflows/*.yml` and the local actions, following `uses:` into called
-workflows and local actions, that reports every tag workflow breaking the rule, by job and step. Fixtures: a tag
-workflow with a nextest step and no `PADDOCK_LEG`; one with the variables but no final job; one whose final job lacks
-`if: always()` or misses a test job in `needs:`; one that calls a reusable workflow running Playwright; and a clean
-twin of each. The seed is today's tag workflows that run tests, enumerated by the check, not typed here; at
-`67a633ef3` a scan (`grep` for `tags:` and then for nextest, vitest, Playwright, `app-gates` or a called workflow)
-finds 9 (every one breaks the rule today), and `ci-image.yml` is the one tag workflow that runs no tests:
+**The check: C103 (d), wiring coverage.** The guarantee is §4 rule 1's fail-closed release rule; C103 (d) keeps the
+wiring complete so that rule rarely fires. It parses each workflow as YAML and reads `on.push.tags` (not any `tags:`
+key: `ci-image.yml:63` has a docker `tags:` input and no tag trigger, only `workflow_dispatch`), follows `uses:` into
+called workflows and local actions **recursively** (composite actions inside composite actions), and reports every tag
+workflow breaking the rule, by job and step.
+
+**Detector: a step runs tests** when its `run:` (or a followed action's) invokes `cargo test` or `cargo nextest`,
+`node --test`, `npm test`, `npm run <script>` (or `npm run <script> -w <ws>`) whose `package.json` script runs
+`vitest`, `ng test`, `playwright` or `node --test` (resolved through the workspace's `package.json`, following
+`npm run` chains), `ng test`, or `npx playwright test`/`npx vitest`. Today's steps the narrow detector missed:
+`publish.yml:42` (`cargo test --doc`) and `:49-51` (`npm run test:tokens`, `npm test`, `npm run test:scripts`), the demo
+releases' `:61-62` and `:75`, `debrief.yml:236` (`cargo test --doc`) and `:252` (`cargo test --release -p
+debrief-store-duck --test analysis_memory`), `ci.yml:99` (`node --test`). **Doc tests** (`cargo test --doc`) may be
+exempted per step with a reason in the check's register (they cannot return `Measured`), never silently.
+
+Fixtures (each with a clean twin): a tag workflow with a nextest step and no `PADDOCK_LEG`; one with the variables but
+no final job; one whose final job lacks `if: always()` or misses a test job in `needs:`; one calling a reusable
+workflow that runs Playwright; one per detector form above (`cargo test`, `node --test`, `npm test`, an `npm run`
+script that runs vitest, `ng test`, `npx playwright test`); a composite action nested inside another that runs
+`cargo nextest`; a workflow with a docker `tags:` input and no tag trigger (must not be selected). The seed is
+enumerated by the check, not typed here; at `67a633ef3` a scan finds 9 tag workflows that run tests (every one breaks
+the rule today); `ci-image.yml` has no tag trigger:
 
 | Workflow (tag) | Test steps found at `67a633ef3` | Final job |
 |---|---|---|
@@ -465,17 +496,27 @@ An `[[optional]]` line declares a measurement optional per place; C103 can be re
 |---|---|---|
 | WP-0 | The JS host's crash (§8.1) with the planted-waiver test first | 0.25 |
 | WP-1 | `paddock_cli::outcome` (`Outcome`, `Verdict`, `Optional` reader with run kinds, JSON and table), `Exit` 6 and 7, contract and property tests (D5's case included), 99% coverage; `conformance/src/outcome.mjs` | 1.5 |
-| WP-2 | `paddock_testkit::{Measured, measure, require_tool, require_tool_that, require_capability, require_env}` with the three modes and the record format; the JS `measure`/`requireTool`; `./dev test` (nextest plus records into a `Verdict`); §6's controls under nextest and `cargo test` | 2.5 |
+| WP-2 | `paddock_testkit::{Measured, measure, require_tool, require_tool_that, require_capability, require_env}` with the three modes and the record format; the JS `measure`/`requireTool`; `./dev test` (nextest plus records into a `Verdict`); §6's controls under nextest and `cargo test`; the fail-closed release rule (§4 rule 1) and its control | 2.75 |
 | WP-2b | §7's rule on every tag workflow that runs tests (9 at `67a633ef3`): the variables on each test step, uploads from every leg, `PADDOCK_RUN_KIND` in the release workflows, `./dev ci measured-on`, new final jobs in `debrief.yml`, both demo release workflows and `ci.yml` (skipped when `inputs.app` is set), a step in `publish.yml`'s `publish` job, `release-verdict` extended; settle the artifact download across the `ci.yml` call; the Debrief and Dyno controls | 2.5 |
 | WP-2c | §4b's reader: the Playwright and vitest parts (nextest by RT-8, not counted here), the truncation controls over every captured log, a vitest fixture, `plan_since` and `ci flakes` as callers, the copies entry | 1.5 |
-| WP-3 | C103 (a) syn pass, (b), (c), (d) (the tag-workflow pass of §7 with its fixture workflows), fixtures for every shape, the ratchet seed; `docs/optional-measurements.toml` with schema and its 0088 list entry; benchmark line | 3 |
+| WP-3 | C103 (a) syn pass, (b), (c), (d) (the tag-workflow pass of §7: YAML `on.push.tags`, recursive actions, the wide detector with `package.json` script resolution, doc-test exemptions, fixture workflows), fixtures for every shape, the ratchet seed; `docs/optional-measurements.toml` with schema and its 0088 list entry; benchmark line | 3.5 |
 | WP-4 | Tooling copies onto the type (§8.4) with the shadow-table entries | 2 |
 | WP-5 | Step 1: one reporting-mode run per Rust test leg, the per-leg list, the image line for ffmpeg (D9) and the entries; step 2: the 126 test-body sites and 2 JS sites by kind, per app. Re-sized after step 1 | 3 (1 + 2, provisional) |
 | WP-6 | `docs/known-copies.toml` entry, ER-33 text (D11), rule 71 line, lessons entry, RT brief template line | 0.5 |
-| | **Total** | **16.75** |
+| | **Total** | **17.5** |
 
-First cut: WP-0 now (independent of acceptance), then WP-1, WP-2, WP-2b, WP-2c and WP-3 (11 days) close the class for new
+First cut: WP-0 now (independent of acceptance), then WP-1, WP-2, WP-2b, WP-2c and WP-3 (11.75 days) close the class for new
 code; WP-4 and WP-5 retire today's copies.
+
+## Review answers (revision 5, `7680e9d79`)
+
+- P1-10: §4 rule 1 fails closed in a release run (both variables set and the record written, else a strict
+  failure), stated as the primary guarantee, with a §6 control; C103 (d) is wiring coverage with a wide detector
+  (`cargo test`/`nextest`, `node --test`, `npm test`, `npm run` scripts resolved through `package.json`, `ng test`,
+  `npx playwright`), each with a fixture, and doc-test exemptions with reasons.
+- P2: `ci-image.yml` has no tag trigger (its `tags:` is a docker input); the check reads `on.push.tags` as YAML;
+  actions are followed recursively with a nested-composite fixture; rule 54 dispatches are release runs, Debrief's
+  bundles dispatch and nightly's `app-release.yml` calls are not.
 
 ## Review answers (revision 4, `264468b3c`)
 
