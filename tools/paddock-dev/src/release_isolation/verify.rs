@@ -16,12 +16,22 @@ pub struct Env(pub BTreeMap<String, String>);
 impl Env {
     /// This process's environment.
     pub fn from_process() -> Env {
-        Env(std::env::vars().collect())
+        Env(super::pathfind::normalise(std::env::vars().collect(), cfg!(windows), &|k| {
+            std::env::var(k).ok()
+        }))
     }
 
-    /// A variable that is set and not empty.
+    /// A variable that is set and not empty. On Windows the name is matched ignoring case (`Path` is `PATH`).
     pub fn get(&self, key: &str) -> Option<&str> {
-        self.0.get(key).map(String::as_str).filter(|v| !v.is_empty())
+        super::pathfind::lookup(&self.0, key, cfg!(windows))
+    }
+
+    /// Sets a variable under the spelling it already has (on Windows, ignoring case), so one variable never has two keys.
+    pub fn set(&mut self, key: &str, value: String) {
+        let existing = cfg!(windows)
+            .then(|| self.0.keys().find(|k| k.eq_ignore_ascii_case(key)).cloned())
+            .flatten();
+        self.0.insert(existing.unwrap_or_else(|| key.to_string()), value);
     }
 
     /// The user's home folder: `HOME`, else `USERPROFILE` (Windows).

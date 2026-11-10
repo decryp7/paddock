@@ -36,7 +36,8 @@ cleanup removes a locked one. Run it from any checkout of the repository (or pas
 - **The caller's identity is self-declared** (`--agent`, or `PADDOCK_AGENT_ID` and `PADDOCK_AGENT_TYPE`; none means the
   coordinator) until the guard hook (RT-7) passes the real `agent_id`: this keeps honest agents out of each other's worktrees, it
   does not stop one that lies.
-- The owner map is `<git-common-dir>/paddock-worktree-owners.json` with the sidecar lock `paddock-worktree-owners.lock`
+- The owner map is `<git-common-dir>/paddock-worktree-owners.json` with the sidecar lock `paddock-worktree-owners.lock` and the
+  sidecar `paddock-worktree-owners.holder` (who holds the lock: a locked file cannot be read on Windows; removed when the update ends)
   (`src/worktree/owners.rs`, which RT-7's hook reuses). A file it cannot read is an error, never an empty map. A lock wait ends
   after 15 s and names the process that holds it.
 - `check primary [--live <file>] [--allow-untracked <prefix>] [--baseline <file>] [--accept-untracked]` probes the primary

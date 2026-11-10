@@ -1,6 +1,7 @@
 //! The git side of `./dev worktree`: running git, finding the repository and reading `git worktree list --porcelain`.
 
 use paddock_proc::{Limits, command, run_bounded};
+use paddock_repo_graph::strip_verbatim;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -176,7 +177,7 @@ pub fn canonical(p: &Path) -> PathBuf {
     let mut cur = p.to_path_buf();
     loop {
         if let Ok(real) = cur.canonicalize() {
-            let mut out = strip_verbatim(real);
+            let mut out = strip_verbatim(&real);
             for part in rest.iter().rev() {
                 out.push(part);
             }
@@ -189,15 +190,6 @@ pub fn canonical(p: &Path) -> PathBuf {
             }
             _ => return p.to_path_buf(),
         }
-    }
-}
-
-/// Windows `canonicalize` returns `\\?\C:\...`; git prints `C:/...`. Compare in one form.
-fn strip_verbatim(p: PathBuf) -> PathBuf {
-    let s = p.to_string_lossy();
-    match s.strip_prefix(r"\\?\") {
-        Some(rest) if !rest.starts_with("UNC") => PathBuf::from(rest),
-        _ => p,
     }
 }
 
@@ -245,7 +237,7 @@ mod tests {
     #[test]
     fn a_path_that_does_not_exist_yet_resolves_through_its_existing_parent() {
         let d = tempfile::tempdir().unwrap();
-        let real = d.path().canonicalize().unwrap();
+        let real = paddock_repo_graph::real_path(d.path());
         assert_eq!(canonical(&d.path().join("a").join("b")), real.join("a").join("b"));
     }
 }

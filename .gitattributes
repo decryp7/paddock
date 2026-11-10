@@ -38,3 +38,8 @@ crates/*/tests/golden/** text eol=lf
 
 # The tables job-isolation.sh reads line by line: a CRLF checkout (Windows) gave every last field a carriage return.
 conformance/ci/*.txt text eol=lf
+
+# paddock-dev's tests compare these text files with strings the tool prints (the shim `./dev hooks install` writes, the CI timings golden):
+# a CRLF checkout (Windows) failed both on the Windows runner (run 7904).
+/tools/githooks/* text eol=lf
+/tools/paddock-dev/tests/** text eol=lf

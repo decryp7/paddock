@@ -2,6 +2,8 @@
 //!
 //! It lives in `<git-common-dir>/paddock-worktree-owners.json` (ADR 0083 §1). Every update is a read-check-write under an exclusive lock on the
 //! sidecar `paddock-worktree-owners.lock` and the write is atomic (temp file, then rename), so two agents claiming at once cannot both win.
+//! Who holds the lock is written to a second sidecar, `paddock-worktree-owners.holder`: on Windows a lock is mandatory, so no other handle
+//! may read the locked file, and a waiter that timed out could not name the holder from the lock file itself (run 7904).
 //! The `./dev worktree` commands and the guard hook (RT-7) use this one module, so the format has one writer.
 //!
 //! A missing file is an empty map. A file that cannot be read as a map is an error, never an empty map: falling back to
@@ -224,6 +226,15 @@ impl fmt::Display for OwnerError {
 
 impl std::error::Error for OwnerError {}
 
+/// Removes the holder file when an update ends, whatever the way out.
+struct ForgetHolder(PathBuf);
+
+impl Drop for ForgetHolder {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 /// The owner map of one repository.
 #[derive(Debug, Clone)]
 pub struct OwnerStore {
@@ -255,6 +266,11 @@ impl OwnerStore {
         self.dir.join("paddock-worktree-owners.lock")
     }
 
+    /// Names the holder of the lock; a file of its own because a locked file cannot be read on Windows.
+    fn holder_file(&self) -> PathBuf {
+        self.dir.join("paddock-worktree-owners.holder")
+    }
+
     /// The map as of now (no lock: the writer replaces the file atomically).
     pub fn read(&self) -> Result<OwnerMap, OwnerError> {
         let path = self.file();
@@ -276,7 +292,7 @@ impl OwnerStore {
         self.update_as("update", f)
     }
 
-    /// Like [`OwnerStore::update`]; `what` names the caller in the lock file, so a waiter that times out can say who holds it.
+    /// Like [`OwnerStore::update`]; `what` names the caller in the lock file, so a waiter that times out can say who holds it (in the holder file beside the lock file).
     pub fn update_as<T>(&self, what: &str, f: impl FnOnce(&mut OwnerMap) -> T) -> Result<T, OwnerError> {
         let lock_path = self.lock_file();
         let lock = OpenOptions::new()
@@ -291,21 +307,23 @@ impl OwnerStore {
                 Ok(()) => break,
                 Err(TryLockError::WouldBlock) if started.elapsed() < self.wait => std::thread::sleep(LOCK_POLL),
                 Err(TryLockError::WouldBlock) => {
-                    let holder = std::fs::read_to_string(&lock_path).unwrap_or_default();
+                    // The holder writes its name just after it takes the lock, so a waiter can read an empty or partial name while the
+                    // file is being written; that only shortens the name in this message, never the lock's behaviour.
+                    let holder = std::fs::read_to_string(self.holder_file()).unwrap_or_default();
                     return Err(OwnerError::LockTimeout(lock_path, holder.trim().to_string(), self.wait));
                 }
                 Err(TryLockError::Error(e)) => return Err(OwnerError::Io(format!("Locking {}", lock_path.display()), e)),
             }
         }
-        // Say who holds it (the file is only written by the holder).
+        // Say who holds it (the file is only written by the holder, and removed again when it lets go).
         let holder = format!(
             "pid {} running `{what}` since {}",
             std::process::id(),
             super::note::format_utc(super::note::now_secs())
         );
-        let _ = lock.set_len(0);
-        let _ = (&lock).write_all(holder.as_bytes());
-        // The lock is released when `lock` is dropped, on every path out of here.
+        let _ = std::fs::write(self.holder_file(), holder.as_bytes());
+        // Dropped before `lock`, so the lock is still held while the holder file goes; the lock is released when `lock` is dropped.
+        let _forget = ForgetHolder(self.holder_file());
         let before = self.read()?;
         let mut map = before.clone();
         let out = f(&mut map);
@@ -453,7 +471,7 @@ mod tests {
             .unwrap();
         held.lock().unwrap();
         std::fs::write(
-            s.lock_file(),
+            s.holder_file(),
             "pid 4242 running `worktree add (confirm)` since 2026-11-10T00:00:00Z",
         )
         .unwrap();
@@ -469,15 +487,28 @@ mod tests {
     }
 
     #[test]
-    fn the_lock_file_names_the_holder_while_an_update_runs() {
+    fn the_holder_file_names_the_holder_while_an_update_runs() {
         let (_d, s) = store();
         let text = s
-            .update_as("worktree claim", |_| std::fs::read_to_string(s.lock_file()).unwrap())
+            .update_as("worktree claim", |_| std::fs::read_to_string(s.holder_file()).unwrap())
             .unwrap();
         assert!(
             text.contains(&format!("pid {}", std::process::id())) && text.contains("worktree claim"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn no_holder_file_is_left_after_an_update_also_when_the_closure_panics() {
+        let (_d, s) = store();
+        s.update_as("worktree claim", |_| ()).unwrap();
+        assert!(!s.holder_file().exists(), "removed when the update returned");
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = s.update_as("worktree add", |_| -> () { panic!("the closure fails") });
+        }));
+        assert!(panicked.is_err());
+        assert!(!s.holder_file().exists(), "removed on the way out of a panic too");
+        assert!(s.update(|_| ()).is_ok(), "and the lock was released");
     }
 
     #[test]

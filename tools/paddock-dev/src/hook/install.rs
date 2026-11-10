@@ -330,7 +330,8 @@ mod tests {
     /// A throwaway repository with one commit, a fake binary and a home of its own.
     fn fixture() -> Fixture {
         let dir = tempfile::tempdir().unwrap();
-        let base = dir.path().canonicalize().unwrap();
+        // Without Windows' `\\?\` prefix: git cannot clone to or add a worktree at such a path (run 7904).
+        let base = paddock_repo_graph::real_path(dir.path());
         let home = base.join("home");
         let root = base.join("repo");
         std::fs::create_dir_all(&home).unwrap();

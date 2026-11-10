@@ -201,13 +201,34 @@ mod tests {
 
     fn aged(path: &Path, days: u64) {
         let t = SystemTime::now() - Duration::from_secs(days * 86_400 + 60);
-        std::fs::File::open(path).unwrap().set_modified(t).unwrap();
+        open_folder(path).set_modified(t).unwrap();
+    }
+
+    /// A handle that may set the folder's modification time: Windows opens a folder only with `FILE_FLAG_BACKUP_SEMANTICS`, and
+    /// `File::open` without it is "Access is denied" (run 7904).
+    fn open_folder(path: &Path) -> std::fs::File {
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            std::fs::OpenOptions::new()
+                .write(true)
+                .custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS)
+                .open(path)
+                .unwrap()
+        }
+        #[cfg(not(windows))]
+        {
+            std::fs::File::open(path).unwrap()
+        }
+    }
+
+    /// `p` below `home` as text with `/` between the parts, whatever the platform joined it with.
+    fn rel(p: &Path, home: &Path) -> String {
+        p.strip_prefix(home).unwrap().to_string_lossy().replace('\\', "/")
     }
 
     fn names(v: &[(PathBuf, String)], home: &Path) -> Vec<(String, String)> {
-        v.iter()
-            .map(|(f, w)| (f.strip_prefix(home).unwrap().to_string_lossy().into_owned(), w.clone()))
-            .collect()
+        v.iter().map(|(f, w)| (rel(f, home), w.clone())).collect()
     }
 
     #[test]
@@ -225,10 +246,7 @@ mod tests {
             ],
         );
         let k = kept();
-        let got: Vec<String> = slot_folders(&k, d.path(), 1)
-            .iter()
-            .map(|p| p.strip_prefix(d.path()).unwrap().display().to_string())
-            .collect();
+        let got: Vec<String> = slot_folders(&k, d.path(), 1).iter().map(|p| rel(p, d.path())).collect();
         assert_eq!(
             got,
             ["target-a-0123456789-s1", "target-a-b-0123456789-s1", "src/x-s1", "sccache-s1"]
@@ -285,10 +303,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         make(d.path(), &["sccache", "src/x", "src/x-s3"]);
         let k = kept();
-        let l: Vec<String> = legacy_folders(&k, d.path())
-            .iter()
-            .map(|p| p.strip_prefix(d.path()).unwrap().display().to_string())
-            .collect();
+        let l: Vec<String> = legacy_folders(&k, d.path()).iter().map(|p| rel(p, d.path())).collect();
         assert!(
             l.contains(&"sccache".to_string()) && l.contains(&"src/x".to_string()) && !l.iter().any(|n| n.ends_with("s3")),
             "{l:?}"

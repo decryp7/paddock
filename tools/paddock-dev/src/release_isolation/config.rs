@@ -77,13 +77,31 @@ pub(crate) fn compile_cache(ctx: &mut Ctx) {
 fn tracked(env: &Env, clone: &Path) -> Result<BTreeSet<String>, String> {
     let out = git(env, clone, &["ls-files", "-z"])?;
     if out.0 != Some(0) {
-        return Err(format!("`git ls-files` exited with {:?}: {}", out.0, out.1.trim()));
+        return Err(format!("`git ls-files` exited with {:?}: {}", out.0, out.2));
     }
     Ok(out.1.split('\0').filter(|s| !s.is_empty()).map(str::to_string).collect())
 }
 
-/// Runs git in `dir` with the job's environment (and no repository override), returning the exit code and standard output.
-fn git(env: &Env, dir: &Path, args: &[&str]) -> Result<(Option<i32>, String), String> {
+/// How much of git's standard error a finding quotes: its end, where the cause is.
+const STDERR_TAIL: usize = 2048;
+
+/// The last `max` bytes of `text`, cut at a character boundary.
+fn tail_text(text: &str, max: usize) -> String {
+    let t = text.trim();
+    if t.len() <= max {
+        return t.to_string();
+    }
+    let mut from = t.len() - max;
+    while !t.is_char_boundary(from) {
+        from += 1;
+    }
+    t[from..].to_string()
+}
+
+/// Runs git in `dir` with the job's environment (and no repository override), returning the exit code, the standard output and the
+/// end of the standard error. Callers read the output; the standard error is only for a `check broken` message, because git may
+/// print warnings on a run whose answer is fine.
+fn git(env: &Env, dir: &Path, args: &[&str]) -> Result<(Option<i32>, String, String), String> {
     let mut cmd = command("git");
     cmd.args(args).current_dir(dir).env_clear();
     for (k, v) in &env.0 {
@@ -96,7 +114,7 @@ fn git(env: &Env, dir: &Path, args: &[&str]) -> Result<(Option<i32>, String), St
     }
     let out = run_bounded(cmd, Limits::new(GIT_TIMEOUT)).map_err(|e| format!("git cannot be run: {e}"))?;
     match out.outcome {
-        Outcome::Exited(s) => Ok((s.code(), out.stdout_text())),
+        Outcome::Exited(s) => Ok((s.code(), out.stdout_text(), tail_text(&out.stderr_text(), STDERR_TAIL))),
         _ => Err("git did not finish in time".to_string()),
     }
 }
@@ -130,7 +148,7 @@ pub(crate) fn cargo_config(ctx: &mut Ctx) {
             "Run verify inside the CI job.",
         ),
         Some(sha) => match git(ctx.env, &clone, &["rev-parse", "HEAD"]) {
-            Ok((Some(0), out)) if out.trim() == sha => {}
+            Ok((Some(0), out, _)) if out.trim() == sha => {}
             other => ctx.add(
                 Probe::CargoConfig,
                 format!("the clone's HEAD ({other:?}) is not GITHUB_SHA {sha}."),
@@ -187,7 +205,7 @@ pub(crate) fn cargo_config(ctx: &mut Ctx) {
                 .unwrap_or(&canonical)
                 .to_string_lossy()
                 .replace('\\', "/");
-            if !matches!(git(ctx.env, &clone, &["diff", "--quiet", "HEAD", "--", &rel]), Ok((Some(0), _))) {
+            if !matches!(git(ctx.env, &clone, &["diff", "--quiet", "HEAD", "--", &rel]), Ok((Some(0), _, _))) {
                 ctx.add(
                     Probe::CargoConfig,
                     format!("{} differs from the commit (`git diff HEAD` is not empty).", canonical.display()),
@@ -253,7 +271,7 @@ pub(crate) fn git_probe(ctx: &mut Ctx) {
             "core.hooksPath",
         ],
     ) {
-        Ok((Some(0), out)) if out.contains("canary") => {}
+        Ok((Some(0), out, _)) if out.contains("canary") => {}
         other => {
             ctx.add(
                 Probe::Git,
@@ -272,8 +290,8 @@ pub(crate) fn git_probe(ctx: &mut Ctx) {
     ];
     for (what, args) in probes {
         match git(ctx.env, &clone, args) {
-            Ok((Some(1 | 0), out)) if out.trim().is_empty() => {}
-            Ok((Some(0), out)) => {
+            Ok((Some(1 | 0), out, _)) if out.trim().is_empty() => {}
+            Ok((Some(0), out, _)) => {
                 for line in out.lines().filter(|l| !l.trim().is_empty()) {
                     ctx.add(
                         Probe::Git,
@@ -348,9 +366,19 @@ pub(crate) fn npm(ctx: &mut Ctx) {
     }
 }
 
+/// `name` on the job's own `PATH` (Windows: `Path`, with `.exe` or `.cmd` in `PATHEXT` order).
+fn which(env: &Env, name: &str) -> Option<PathBuf> {
+    let path = env.get("PATH")?;
+    super::pathfind::find_program(path, name, cfg!(windows), &super::pathfind::extensions(env.get("PATHEXT")))
+}
+
 /// `npm config get <key>` in the clone with the job's environment, at most 10 s. `Ok(None)` for `undefined` or nothing.
 fn npm_get(env: &Env, clone: &Path, key: &str) -> Result<Option<String>, String> {
-    let mut cmd = command(if cfg!(windows) { "npm.cmd" } else { "npm" });
+    // The npm of the job's own PATH, found here: a bare name is looked up by the system as well, and on Windows through the parent's
+    // PATH, so a runner with npm on its PATH would answer for a job whose PATH has none (the check then passed instead of saying
+    // it was broken; seen on the Windows runner, run 7904).
+    let program = which(env, "npm").ok_or_else(|| "cannot be run (npm is not on the job's PATH)".to_string())?;
+    let mut cmd = command(program);
     cmd.args(["config", "get", key]).current_dir(clone).env_clear();
     for (k, v) in &env.0 {
         cmd.env(k, v);
@@ -375,13 +403,7 @@ fn npm_prefix_candidates(env: &Env) -> Vec<PathBuf> {
     if let Some(prefix) = env.get("npm_config_prefix").or_else(|| env.get("NPM_CONFIG_PREFIX")) {
         out.push(Path::new(prefix).join("etc").join("npmrc"));
     }
-    let node = if cfg!(windows) { "node.exe" } else { "node" };
-    let raw = env
-        .get("PATH")
-        .into_iter()
-        .flat_map(std::env::split_paths)
-        .map(|d| d.join(node))
-        .find(|p| p.is_file());
+    let raw = which(env, "node");
     if let Some(raw) = raw {
         for node_path in [Some(raw.clone()), raw.canonicalize().ok()].into_iter().flatten() {
             if cfg!(windows) {
@@ -424,5 +446,44 @@ pub(crate) fn angular(ctx: &mut Ctx) {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn process_env_in(home: &Path) -> Env {
+        let mut env = Env::from_process();
+        env.set("HOME", home.display().to_string());
+        env.set("USERPROFILE", home.display().to_string());
+        env.set("GIT_CONFIG_NOSYSTEM", "1".into());
+        env
+    }
+
+    #[test]
+    fn a_git_failure_in_a_finding_carries_its_cause_from_standard_error() {
+        let d = tempfile::tempdir().unwrap();
+        let err = tracked(&process_env_in(d.path()), d.path()).unwrap_err();
+        assert!(err.contains("fatal:"), "{err}");
+    }
+
+    #[test]
+    fn git_standard_error_is_a_separate_field_so_a_warning_never_turns_not_found_into_broken() {
+        let d = tempfile::tempdir().unwrap();
+        let mut env = process_env_in(d.path());
+        env.set("GIT_TRACE", "1".into()); // git then writes trace lines to standard error
+        let (code, out, err) = git(&env, d.path(), &["config", "--get-all", "core.hooksPath"]).unwrap();
+        assert_eq!(code, Some(1), "an absent key is exit 1");
+        assert!(out.trim().is_empty(), "standard output stays empty: {out:?}");
+        assert!(!err.is_empty(), "the trace is in the standard error field");
+    }
+
+    #[test]
+    fn the_standard_error_quoted_is_its_last_two_kib_at_a_character_boundary() {
+        let long = format!("{}{}", "é".repeat(5000), "END");
+        let t = tail_text(&long, STDERR_TAIL);
+        assert!(t.len() <= STDERR_TAIL && t.ends_with("END"), "{}", t.len());
+        assert_eq!(tail_text("  short \n", STDERR_TAIL), "short");
     }
 }

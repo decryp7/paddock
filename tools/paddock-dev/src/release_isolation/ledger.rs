@@ -228,18 +228,18 @@ pub fn simplified(path: &Path) -> PathBuf {
     PathBuf::from(simplify_text(&path.to_string_lossy()))
 }
 
-/// [`simplified`] on text, so that it is testable on every OS.
+/// [`simplified`] on text, so that it is testable on every OS. The prefix comes off through the shared
+/// [`paddock_repo_graph::strip_verbatim`]; `\\?\Volume{..}\` and other forms that name no drive or share stay as they are, because
+/// without the prefix they would name nothing.
 pub fn simplify_text(text: &str) -> String {
-    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
-        return format!(r"\\{rest}");
-    }
-    if let Some(rest) = text.strip_prefix(r"\\?\") {
+    let drive_or_unc = |rest: &str| {
         let b = rest.as_bytes();
-        if b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\' {
-            return rest.to_string();
-        }
+        rest.starts_with(r"UNC\") || (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\')
+    };
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if drive_or_unc(rest) => paddock_repo_graph::strip_verbatim(Path::new(text)).to_string_lossy().into_owned(),
+        _ => text.to_string(),
     }
-    text.to_string()
 }
 
 /// Starts a ledger file (only `setup` calls this): refuses when one exists, because a second `setup` would orphan the
@@ -323,6 +323,14 @@ mod tests {
         assert_eq!(simplify_text(r"\\?\UNC\srv\share\x"), r"\\srv\share\x");
         assert_eq!(simplify_text(r"\\?\Volume{1234}\x"), r"\\?\Volume{1234}\x");
         assert_eq!(simplify_text("/tmp/x"), "/tmp/x");
+        // Through the path form too, UNC included, and the same answer as the shared function for the forms both handle.
+        assert_eq!(simplified(Path::new(r"\\?\UNC\srv\share\x")), Path::new(r"\\srv\share\x"));
+        assert_eq!(simplified(Path::new(r"\\?\C:\job")), Path::new(r"C:\job"));
+        assert_eq!(simplified(Path::new(r"\\srv\share")), Path::new(r"\\srv\share"), "already plain");
+        assert_eq!(
+            simplify_text(r"\\?\UNC\srv\share"),
+            paddock_repo_graph::strip_verbatim(Path::new(r"\\?\UNC\srv\share")).to_string_lossy()
+        );
     }
 
     #[test]

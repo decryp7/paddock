@@ -132,7 +132,6 @@ impl Leak {
             UserNpmrc,
             TauriFileTampered,
             NpmGlobalNpmrc,
-            NpmHomebrewLink,
             NpmMissing,
             TauriPinsMissing,
             AllowUnpinnedOnTag,
@@ -149,7 +148,14 @@ impl Leak {
             v.push(LinkJunction);
         }
         if cfg!(unix) {
-            v.extend([AngularLink, LinkRegistrySrc, LinkNodeModules, LinkTargetRelease, GitMissing]);
+            v.extend([
+                AngularLink,
+                LinkRegistrySrc,
+                LinkNodeModules,
+                LinkTargetRelease,
+                GitMissing,
+                NpmHomebrewLink,
+            ]);
         }
         v
     }
@@ -297,21 +303,31 @@ fn write_fake_npm(bin: &Path, prefix: &Path, home: &Path) {
     }
 }
 
+/// Marks a fake program executable (Unix; a no-op elsewhere): the probes find programs only when the job could run them.
+fn make_executable(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).expect("chmod");
+    }
+    let _ = path;
+}
+
 /// `PATH` without the folders that hold `name`.
 fn path_without(env: &mut Env, names: &[&str]) {
-    let kept: Vec<_> = std::env::split_paths(&env.0["PATH"])
+    let kept: Vec<_> = std::env::split_paths(env.get("PATH").unwrap_or_default())
         .filter(|d| !names.iter().any(|n| d.join(n).exists()))
         .collect();
-    env.0.insert(
-        "PATH".into(),
-        std::env::join_paths(kept).expect("PATH").to_string_lossy().into_owned(),
-    );
+    env.set("PATH", std::env::join_paths(kept).expect("PATH").to_string_lossy().into_owned());
 }
 
 impl Fixture {
     /// Builds a clean job under `root` (an existing, empty folder).
     pub fn build(root: &Path) -> Fixture {
-        let root = root.canonicalize().expect("root exists");
+        // Plain, not `\\?\C:\...`: the fixture hands these paths to git (HOME) and writes them into files, and git on Windows cannot open
+        // a config file through a verbatim path ("unknown error occurred while reading the configuration files").
+        assert!(root.exists(), "root exists");
+        let root = paddock_repo_graph::real_path(root);
         let home = root.join("home");
         let temp = root.join("job");
         let dev = root.join("tools-home").join("release-1234-bundle");
@@ -323,20 +339,25 @@ impl Fixture {
         let made = setup(&temp, &temp.join("release-isolation").join("ledger.tsv"), Some(&dev)).expect("setup");
         let folder = |k: Kind| made.folders.iter().find(|(kk, _)| *kk == k).map(|(_, p)| p.clone()).expect("made");
         let mut env = Env::default();
-        for key in ["PATH", "SYSTEMROOT", "TEMP", "TMP", "LANG"] {
-            if let Ok(v) = std::env::var(key) {
-                env.0.insert(key.to_string(), v);
+        // Under the names the process has them: on Windows the path variable is `Path`, and a probe that reads `PATH` exactly would
+        // pass here and fail on every real job.
+        for (name, v) in std::env::vars() {
+            if ["PATH", "PATHEXT", "SYSTEMROOT", "TEMP", "TMP", "LANG"]
+                .iter()
+                .any(|k| name.eq_ignore_ascii_case(k))
+            {
+                env.0.insert(name, v);
             }
         }
         let node_prefix = root.join("node-prefix");
         let node_bin = node_prefix.join("bin");
         fs::create_dir_all(&node_bin).expect("node bin");
         fs::write(node_bin.join(NODE_NAME), b"not a real node").expect("fake node");
+        make_executable(&node_bin.join(NODE_NAME));
         write_fake_npm(&node_bin, &node_prefix, &home);
-        let path =
-            std::env::join_paths(std::iter::once(node_bin).chain(std::env::split_paths(&env.0.get("PATH").cloned().unwrap_or_default())))
-                .expect("PATH");
-        env.0.insert("PATH".into(), path.to_string_lossy().into_owned());
+        let path = std::env::join_paths(std::iter::once(node_bin).chain(std::env::split_paths(env.get("PATH").unwrap_or_default())))
+            .expect("PATH");
+        env.set("PATH", path.to_string_lossy().into_owned());
         env.0.insert("HOME".into(), home.display().to_string());
         env.0.insert("USERPROFILE".into(), home.display().to_string());
         env.0.insert("XDG_CONFIG_HOME".into(), home.join(".config").display().to_string());
@@ -601,7 +622,7 @@ impl Fixture {
                 fs::create_dir_all(self.clone.join(".cargo")).expect(".cargo");
                 fs::write(
                     self.clone.join(".cargo").join("ci.toml"),
-                    format!("[build]\ntarget-dir = \"{}\"\nrustc-wrapper = \"x\"\n", self.target.display()),
+                    format!("[build]\ntarget-dir = '{}'\nrustc-wrapper = \"x\"\n", self.target.display()),
                 )
                 .expect("ci.toml");
             }
@@ -639,15 +660,18 @@ impl Fixture {
                     let cellar_bin = brew.join("Cellar").join("node").join("26").join("bin");
                     fs::create_dir_all(&cellar_bin).expect("cellar");
                     fs::write(cellar_bin.join("node"), "x").expect("node");
+                    make_executable(&cellar_bin.join("node"));
                     fs::create_dir_all(brew.join("bin")).expect("bin");
                     std::os::unix::fs::symlink(cellar_bin.join("node"), brew.join("bin").join("node")).expect("link");
                     fs::create_dir_all(brew.join("etc")).expect("etc");
                     fs::write(brew.join("etc").join("npmrc"), "registry=https://evil.invalid/\n").expect("npmrc");
                     // The real node is first on PATH; the fixture's fake one goes.
                     fs::remove_file(self.node_prefix.join("bin").join(NODE_NAME)).expect("remove fake node");
-                    let path = std::env::join_paths(std::iter::once(brew.join("bin")).chain(std::env::split_paths(&self.env.0["PATH"])))
-                        .expect("PATH");
-                    self.env.0.insert("PATH".into(), path.to_string_lossy().into_owned());
+                    let path = std::env::join_paths(
+                        std::iter::once(brew.join("bin")).chain(std::env::split_paths(self.env.get("PATH").unwrap_or_default())),
+                    )
+                    .expect("PATH");
+                    self.env.set("PATH", path.to_string_lossy().into_owned());
                 }
             }
             Leak::NpmMissing => {
@@ -657,7 +681,7 @@ impl Fixture {
             Leak::GitMissing => {
                 let empty = self.root.join("empty-path");
                 fs::create_dir_all(&empty).expect("empty");
-                self.env.0.insert("PATH".into(), empty.display().to_string());
+                self.env.set("PATH", empty.display().to_string());
             }
             Leak::OtherRegistryIndex => {
                 let other = self.cargo_home.join("registry").join("cache").join("evil.example-1111111111111111");
