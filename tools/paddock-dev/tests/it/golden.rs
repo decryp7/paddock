@@ -631,7 +631,19 @@ fn copy_checked_out_files(src: &Path, dst: &Path) {
     git(dst, &["config", "core.autocrlf", "input"]);
     git(dst, &["config", "core.eol", "lf"]);
     git(dst, &["add", "-A"]);
-    git(dst, &["-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-q", "-m", "copy"]);
+    git(
+        dst,
+        &[
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "copy",
+        ],
+    );
     git(dst, &["checkout-index", "-a", "-f"]);
 }
 
