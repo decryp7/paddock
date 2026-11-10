@@ -7,6 +7,11 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
+[features]
+# The `create_all_as` and `open_as` seams of `paddock_env::private`, which name the account that is trusted. Never enabled in a
+# shipped build (ADR 0073).
+test-support = []
+
 [dependencies]
 serde = "1"
 serde_json = "1"
@@ -15,6 +20,10 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# NtCreateFile relative to a folder handle with the owner-only descriptor, and the owner and DACL read back from the handle.
+windows-sys = { version = "0.61", features = ["Wdk_Foundation", "Wdk_Storage_FileSystem", "Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Threading"] }
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }

@@ -9,6 +9,36 @@ Conventional Commits; one semver tag for the whole repo.
 - `Exit` gains `NotMeasured = 6` and `CheckBroken = 7`; the existing codes are unchanged.
 - Conformance (JS host): a check that crashes, throws a non-Error, returns no list or returns a malformed finding (or an unknown severity) is an unwaivable error, so a `path = "*"` waiver can no longer hide it, and a waiver for such a check is not reported as stale. The CLI exits 7 for a broken check and 6 for one that did not look (new `conformance/src/outcome.mjs`); findings still exit 1.
 
+### `paddock-env`: `PrivateDir` and `PrivateFile`, trust-bearing files made owner-only (ADR 0092 WP-1)
+- New `paddock_env::private::{PrivateDir, PrivateFile}` (the module is now public; the existing fallback-folder items keep
+  their names and are still re-exported at the crate root). A folder or file is owner-only from the moment it exists, with no
+  chmod or ACL call afterwards: Unix `mkdirat(0700)` plus `fchmod` on the new handle, files `O_CREAT | O_EXCL | O_NOFOLLOW`
+  0600; Windows `NtCreateFile` relative to the held parent handle (`RootDirectory`) with the descriptor
+  `O:<user SID>D:P(A;OICI;FA;;;<user SID>)(A;OICI;FA;;;SY)` in the creating call, no file sharing, not content-indexed.
+  Every later step (create a child, write, replace, read, remove) is relative to the held handle, so an ancestor replaced
+  afterwards changes which path names the folder, not what the handle refers to.
+- `PrivateDir::create_all`, `open` (with `Links`), `child`, `write_atomic` (unique exclusive temp file, fsync, rename inside
+  the held folder), `open_file`, `read` (bounded), `remove_file`; typed `PrivateError` with a fix-it message per OS.
+- The folder and its parent are checked from handles: owner, group or other write (Unix, plus macOS extended ACLs through
+  `acl_get_fd_np`), the DACL with an entry for another principal and a reparse point refused (Windows); another account that
+  could rename or replace the folder (a writable parent, `FILE_DELETE_CHILD` for others) is refused too. An existing folder
+  open to others is refused and left as it was; nothing is tightened.
+- `Refusal` gains `OpenToOthersAcl { who }`, `OtherOwnerAccount { who }`, `NotAFile` and `Parent(..)`. Nothing adopts the type
+  yet (later work packages of ADR 0092 move the copies onto it).
+- Review round: two creators racing to make the same new folder both succeed; `create_all_as` and `open_as` exist only with
+  the `test-support` feature; each `Refusal` has its own fix-it sentence, `PrivateError::reason` names no path, and a Windows
+  reparse point is `Refusal::ReparsePoint`; the macOS ACL check refuses only write-type entries for others on a folder (any
+  right on a file) and names the principal; a Windows replace works while a reader holds the file (`FILE_SHARE_DELETE`) and
+  falls back to `FileRenameInformation` on a system without the Ex class.
+- Second review round: on macOS a folder ACL entry for another principal that new files or folders inherit (`file_inherit` or
+  `directory_inherit`, with or without `only_inherit`) is refused with every right, because it would make each file written
+  there readable; the refusal names the inherited entry and the advice says how to remove it. The Windows rename also falls
+  back on `STATUS_INVALID_INFO_CLASS`, `STATUS_NOT_SUPPORTED` and `STATUS_INVALID_DEVICE_REQUEST`.
+- Third round: the macOS ACL of a folder's parent is judged by the parent rule only (an entry that lets others delete a child, change
+  its permissions or take it over refuses, wrapped as a parent refusal; a read entry that is inherited does not); the ACL
+  refusal wording is "grants access to ..."; `paddock-ipc`'s peer-facts test no longer expects the primary gid in the
+  supplementary group list (it fails under `setpriv --clear-groups`).
+
 ### Pitwall: no test double or test switch in the shipped build (ADR 0073, rule 73, WP-P)
 - Removes P1 to P6 of ADR 0073's Pitwall survey; the register and the shared crates follow.
 - `pitwall-server` no longer knows `--fake-engine`, `--die-after-ms` or `--ready-when` (it answers `unknown option`, exit 2). The fake OpenAI-compatible engine is the `pitwall-fake-engine` bin of the same package, built only with the `test-support` feature, which only the package's self dev-dependency enables; the `fake_engine` module is behind `cfg(any(test, feature = "test-support"))`. The tests start it through `CARGO_BIN_EXE_pitwall-fake-engine`, and the host-cleanup process pattern follows the new name.
