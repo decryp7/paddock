@@ -1,8 +1,8 @@
 # 87. Windows code runs before it lands: `./dev test --windows` on the leased test VM, a detector, and positive controls
 
-- Status: Proposed (2026-11-10), revision 2. Drafted at the user's request of 2026-11-10 (ER-21 redesigns). Revision 2
+- Status: Accepted 2026-11-10 (user), decisions as recommended (D0–D11). History: Proposed 2026-11-10; revision 2 answered review round 1 (`fe314225c`); round 2 approved revision 2 (`e24fdf447`); revision 3 folds in its P2s. **Supersedes ADR 0021 line 38** ("no Windows test host", user 2026-10-27) for unit and integration tests of enrolled crates (D0). Drafted at the user's request of 2026-11-10 (ER-21 redesigns). Revision 2
   answers the independent review of revision 1 (`fe314225c`, "changes": P1-1 to P1-5 and the P2s; see "Review answers").
-  Draft only: nothing here is built. It needs the user's decisions below, D0 first, and a re-review.
+  Nothing here is built yet.
 - Date: 2026-11-10
 - Related: ER-9 / rules 3, 4 and 50 (h) (fix locally first; "the Windows tests where paths are compared"; the slower local
   checks run beside CI and a local failure cancels the run), ER-11 / rule 5, ER-14 / rule 7, ER-21 / rule 40, ER-24 /
@@ -79,7 +79,8 @@ the tests ran, and that a failure is seen; CI stays the final gate, not the firs
 The user decided on 2026-10-27 that there is **no Windows test host** (ADR 0021, line 38: "Before a push, Windows is
 checked on the Mac by `cargo xwin clippy`"), and on 2026-10-28 that VMs are for local install, service and update tests
 before releases. This ADR reverses the first for unit and integration tests and widens the VM's purpose to a daily
-pre-review runner. Nothing below is built before D0 is answered.
+pre-review runner. The user accepted D0 on 2026-11-10: ADR 0021:38 is superseded on this point (xwin clippy before a
+push stays; it is no longer the only Windows check before CI).
 
 ### 1. `./dev test --windows [<crate>...]`
 
@@ -170,11 +171,12 @@ ends matter move to run-time reads. Cost: §5 and WP-5.
 
 ### 2. Enrolment, the rule, and the fallback
 
-**Enrolment, a ratchet.** A crate is in `docs/wintest-crates.toml` (a list under ADR 0088's engine, growing only by
-enrolment) only after one green `./dev test --windows -p <crate>` baseline run on the train tree, with its declared
-skips. The detector marks only enrolled crates as needing the run; touched non-enrolled crates are reported. Order: the
+**Enrolment, an adoption list.** A crate is in `docs/wintest-crates.toml`, a list of ADR 0088's **adoption list** kind
+(it may only grow; each addition carries a reason and the run id of a green baseline), only after one green
+`./dev test --windows -p <crate>` baseline run on the train tree, with its declared skips; the entry records that run's
+stamp key and lease id. The detector marks only enrolled crates as needing the run; touched non-enrolled crates are reported. Order: the
 crates of the incidents first (`paddock-proc`, `tools/paddock-dev`, `paddock-ipc`), then shared crates with Windows
-code, then apps by their next release. An enrolled crate leaves only with a recorded reason.
+code, then apps by their next release. An enrolled crate leaves only with a recorded reason (a removal record of ADR 0088 §4), or as stale when the crate no longer exists.
 
 **Rule (proposed; amends ER-9 and rule 50 (h); the coordinator numbers any new Paddock rule):**
 
@@ -240,7 +242,7 @@ A run counts only when its controls pass; otherwise it reports `check broken`, n
 |---|---|---|
 | **Nonce** | The host draws a random nonce per run and passes it only through the SSH command's environment (`PADDOCK_WINTEST_NONCE`); the canary test prints it into its JUnit `system-out`; the host compares | The JUnit file comes from this run in the guest, not from a cached or host-side run |
 | **Build** | The canary calls `RtlGetVersion` (not `GetVersionEx`, which reports an older version without a manifest) and prints major, minor and build; the host compares the build with the machine's declared build in `machines.toml` (26300 today) | The tests ran on the declared Windows guest |
-| **Machine** | The canary calls `IsWow64Process2` and prints the process machine and the native machine; for `--arch aarch64` the native machine must be ARM64 and the process not emulated (process machine `IMAGE_FILE_MACHINE_UNKNOWN`), for `--arch x64` the binary is AMD64 code on an ARM64 native machine (WP-3 records what `IsWow64Process2` reports for an x64 process under Prism before the assertion is fixed) | The binary built for this run ran natively or under emulation as requested |
+| **Machine** | The canary calls `GetProcessInformation(GetCurrentProcess(), ProcessMachineTypeInfo, ...)`, which reports the process's own machine (`PROCESS_MACHINE_INFORMATION.ProcessMachine`), and `IsWow64Process2` for the native machine only. `IsWow64Process2` cannot see Prism's x64 emulation (it reports a native-looking process for x64 code on ARM64), so it is not used for the process side. For `--arch aarch64` the process machine must be `IMAGE_FILE_MACHINE_ARM64`; for `--arch x64` it must be `IMAGE_FILE_MACHINE_AMD64`; the native machine must be ARM64 in both | The binary built for this run ran natively or under emulation as requested |
 | **A failure is seen** | The canary runs as its **own nextest invocation** before the real run (`--profile wintest-canary`), with one test that fails on purpose; the host expects exactly one failure, of that test, and every other canary test passed | nextest's failures reach the host's report |
 | **Line ends** | A canary test reads a checked-in text fixture **at run time** (`std::env::var("CARGO_MANIFEST_DIR")`) and asserts it saw `\r\n` | The sources arrived with CI's line ends |
 | **Tests ran** | Every requested crate ran at least one test; the triple in the archive equals the requested one | A crate whose tests were all filtered or gated away is not "green" |
@@ -248,7 +250,10 @@ A run counts only when its controls pass; otherwise it reports `check broken`, n
 
 The canary is a package of its own, `tools/wintest-canary` (its own tiny workspace and lockfile, `windows-sys` only), and
 gets its own archive: a nextest archive covers one Cargo workspace, so the canary cannot sit inside an app workspace's
-archive, and putting it there would add a member to every app. Its build is cached by input hash.
+archive, and putting it there would add a member to every app. Its build is cached by input hash. It gets a
+`CODEOWNERS` line (owned with `tools/paddock-dev`) and a planner entry (`tools/wintest-canary/**` marks the `tools` job,
+whose Linux and macOS legs build it and run its non-Windows tests), and the `scripts/affected.test.mjs` /
+`paddock-dev` planner test that checks every tool folder has a CODEOWNERS line and a planner entry covers it (WP-4).
 
 ### 5. Parallelism and cost (rule 51)
 
@@ -294,8 +299,8 @@ inputs; D5 (b) if boot dominates.
   its xwin clippy (step 5) covers incident 3's lint. `./dev test --windows` is one of ER-9's slower local checks, a stage
   of `push-tests` (A1b, only when the stamp key changed) and of `./dev check --pre-push` (§3) when the detector marks the
   change.
-- **ADR 0088 (ratchets).** `docs/wintest-crates.toml` is a list of that engine (an enrolled crate that no longer exists
-  is stale).
+- **ADR 0088 (ratchets).** `docs/wintest-crates.toml` is an **adoption list** of that engine: it may only grow, each
+  addition with a reason and a green-baseline run id; an enrolled crate that no longer exists is stale.
 - **ADR 0086 (failing-first).** A fix of Windows-only code names a test that runs on Windows; its replay runs through
   this command's guest part.
 - **ADR 0040 (Windows GUI session).** Tests that need a desktop are `vm: session` and stay with that harness.
@@ -359,7 +364,7 @@ restore ADR 0038 §3's `ci-only` Windows row. The VM, its lock and the lease pre
 | D8 | Tag gating | (a) nothing new gates a tag; (b) a tag needs a green `--self-test` within N days | **(a)** |
 | D9 | Engineering rule | (a) amend ER-9: "Windows-only code runs on a Windows test machine before review; pure Windows logic takes the platform as a parameter"; (b) a new ER | **(a)** |
 | D10 | Host-baked fixtures (`env!("CARGO_MANIFEST_DIR")` in 189 files, `include_*!` in 93) | (a) extract sources at the host's absolute path on C:; (b) migrate each crate's fixtures to run-time `env::var` as it enrols; (c) both: (a) as a per-crate stop-gap, (b) as the rule | **(c)** |
-| D11 | Enrolment | (a) crate by crate after a green baseline, incident crates first, a ratchet list under ADR 0088; (b) every crate with Windows code at once | **(a)** |
+| D11 | Enrolment | (a) crate by crate after a green baseline, incident crates first, an adoption list under ADR 0088 (grows only, reason and baseline run id per addition); (b) every crate with Windows code at once | **(a)** |
 
 ## Work packages (raw agent-days, one agent)
 
@@ -368,8 +373,8 @@ restore ADR 0038 §3's `ci-only` Windows row. The VM, its lock and the lease pre
 | WP-0 | Measure by hand under the interim lock, at a load under 25: §5's list for `paddock-proc`, `tools/paddock-dev` (with its `env!` fixtures, trying D10 (a)) and one Debrief crate with runtime files; archive and tar sizes; Defender's share; cold and warm aarch64 builds; the `867add2de` replay. Results block in `docs/benchmarks.md` (rule 48); `--max` and N for D6 | 1.5 |
 | WP-1 | `./dev test --windows`: resolve, `cargo xwin env` + `nextest archive`, snapshot and CRLF source tar, `MachineLease` port with the interim adapter, guest part through `vm-win.sh`, nonce, `wintest` profile (`fail-fast = false`), JUnit parse, table, `::error::`, input-keyed stamp, declared skips, the CI fallback dispatch; tests with `vm-win.sh`'s fake mode and a fake lease | 3 |
 | WP-2 | `./dev plan --windows-touch`: `syn` spans, predicate evaluation, module-tree resolution with `#[path]`, inner attributes, `cfg_attr`, paths, target tables, `docs/windows-paths.toml`, x64 marks, JSON; the fixtures of §3 | 2 |
-| WP-3 | Controls: `tools/wintest-canary` (nonce, `RtlGetVersion`, `IsWow64Process2`, the deliberate failure, CRLF read), its own archive and invocation, tests-ran and triple checks, `--self-test`, the two replays | 1.5 |
-| WP-4 | Rule text (ER-9 amendment, rule 50 (h), AGENTS.md), review brief and landing checklist lines, ADR 0038 §3 row, the `push-tests` and `--pre-push` stages (declared lines) | 0.5 |
+| WP-3 | Controls: `tools/wintest-canary` (nonce, `RtlGetVersion`, `GetProcessInformation(ProcessMachineTypeInfo)`, `IsWow64Process2` for the native machine, the deliberate failure, CRLF read), its own archive and invocation, tests-ran and triple checks, `--self-test`, the two replays | 1.5 |
+| WP-4 | `CODEOWNERS` line and planner entry for `tools/wintest-canary`, with the planner test that every tool folder has both; rule text (ER-9 amendment, rule 50 (h), AGENTS.md), review brief and landing checklist lines, ADR 0038 §3 row, the `push-tests` and `--pre-push` stages (declared lines) | 0.5 |
 | WP-5 | Enrolment of the first three crates (`paddock-proc`, `tools/paddock-dev`, `paddock-ipc`): fixtures to run-time reads (D10 (b)), `vm: node` / `vm: git` declarations, runtime files, green baselines; `docs/wintest-crates.toml`. Later crates: about 0.25 to 1 day each by their fixture count, booked with the owning app's batches | 2 |
 | WP-6 | Swap to ADR 0074 Part A's lease when it lands; delete the interim adapter | 0.5 |
 | | **Total (first three crates enrolled)** | **11** |
@@ -390,3 +395,11 @@ follow, so the rule starts with the detector in place.
 | P2 `max_load`, interim queue | §1.1 items 4 and 5, §6 |
 | P2 D0 | D0 and §0 |
 | P2 the 139 s figure (rule 48) | §5 quotes it as the block's note, not as a result, and WP-0 records a results block |
+
+## Review answers (revision 2, round 2: approved with P2s)
+
+| Finding | Answer in revision 3 |
+|---|---|
+| Enrolment contradicts ADR 0088 (a ratchet only shrinks) | ADR 0088 gains the **adoption list** kind (grows only, reason and green-baseline run id per addition); `docs/wintest-crates.toml` is that kind in §2, §6 and D11 |
+| The x64 control | §4 names `GetProcessInformation(ProcessMachineTypeInfo)` for the process machine; `IsWow64Process2` only for the native machine |
+| `tools/wintest-canary` ownership | §4: a CODEOWNERS line and a planner entry, checked by the planner test (WP-4) |

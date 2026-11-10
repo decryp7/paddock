@@ -1,8 +1,8 @@
 # 88. Ratchets fail on stale entries: one ratchet engine in `./dev check`, a `--write` that only removes, and a control per list
 
-- Status: Proposed (2026-11-10), revision 2. Drafted at the user's request of 2026-11-10 (ER-21 redesigns). Revision 2
+- Status: Accepted 2026-11-10 (user), decisions as recommended (D1–D11). History: Proposed 2026-11-10; revision 2 answered review round 1 (`fe314225c`); round 2 approved revision 2 (`e24fdf447`); revision 3 folds in its P2s. Drafted at the user's request of 2026-11-10 (ER-21 redesigns). Revision 2
   answers the independent review of revision 1 (`fe314225c`, "changes": P1-1 to P1-4 and the P2s; see "Review answers").
-  Draft only: nothing here is built. It needs the user's decisions below and a re-review.
+  Nothing here is built yet.
 - Date: 2026-11-10
 - Related: ER-21 / rule 40, ER-22 / rules 42 and 55 (share first; one implementation per mechanism), ER-27, ER-31,
   ER-33 / rule 71 (a check counts only if it can see the thing), ER-36; ADR 0022 (Rust tools in `./dev`; no new shell or
@@ -97,7 +97,8 @@ depends on cargo-deny's level (14), and ADR 0075 chose a notice for its drift lo
 
 | Kind | Meaning | Stale entry | Growth |
 |---|---|---|---|
-| **Ratchet** (baselines, adoption lists: 2, 3, 4, 7, 8, coverage, `wintest-crates`) | known debt that may only shrink | stale (§3) | error against the merge base, except a seed (§5) |
+| **Ratchet** (baselines, not-yet lists: 2, 3, 4, 7, 8, coverage) | known debt that may only shrink | stale (§3) | error against the merge base, except a seed (§5) |
+| **Adoption list** (`docs/wintest-crates.toml`, ADR 0087) | what has been brought under a new check; may only grow | stale (§3) when the member no longer exists | allowed, each addition with a `reason` and the `baseline_run` id of a green run; a removal needs a `[[removed]]` record with a reason (§4) |
 | **Register** (waivers and exemptions with reasons: 1, 5, 6, 9 to 16) | a deliberate exception with a reason | stale (§3) | allowed with its reason (and date where the register has one) |
 | **Drift log** (ADR 0075 records: 17) | history kept on purpose | **notice** always, as ADR 0075 D4/D5 decided; pruned by `copies --prune` | allowed |
 
@@ -162,8 +163,11 @@ entries, `gates/register.rs` `check_ratchets`).
 
 - Without `--write`: runs every declared list's readers (or reads their run records, during RT-5's shadow period) and
   reports per list: entries, live, stale, not measured.
-- `--write` **only ever removes**, and only when, **in the same invocation**, the list's positive control (§6) passed
-  and every reader of the list covered every entry. It deletes the stale entries' byte spans (with a comment block that
+- `--write` **only ever removes**, and only after the list's positive control (§6) passed **in the same invocation**
+  (without it, it writes nothing). It removes the stale entries that every reader covered, **leaves the uncovered
+  (`not measured`) entries untouched and lists them** with the reader that did not cover each and why (did not run, did
+  not complete, out of scope, other OS), and exits non-zero only when it removed nothing and some entry was uncovered,
+  so a partial run never pretends to be complete. It deletes the stale entries' byte spans (with a comment block that
   belongs to the entry only), keeps JSON valid (the separating comma of a removed array element goes with it; the file
   is re-parsed), keeps the rest byte for byte, asserts the new entry set is a subset of the old one and every remaining
   entry is still live, and otherwise writes nothing and fails. It never touches a drift log (use `copies --prune`).
@@ -179,8 +183,9 @@ entries, `gates/register.rs` `check_ratchets`).
 
 Every list is declared once: `id`, `file`, `kind`, `readers`, `key`, `control` (its fixture folder). A meta-check in the
 same host fails when a file matching the list patterns (`*.waivers.toml`, `conformance/baselines/**`,
-`docs/*-ratchet.toml`, `docs/known-copies*.toml`, `docs/ratchets/**`, `**/e2e/*.baseline.json`, `deny.toml`
-`[bans] skip`/`skip-tree`, the keys of `paddock.conformance.json` that checks read as lists) is not declared, or a
+`docs/*-ratchet.toml`, `docs/known-copies*.toml`, `docs/ratchets/**`, `docs/wintest-crates.toml`,
+`**/e2e/*.baseline.json`, `deny.toml` `[bans] skip`/`skip-tree`, the `allow-invalid = true` entries of every
+`clippy.toml`, the keys of `paddock.conformance.json` that checks read as lists) is not declared, or a
 declared list has no control or its control did not run in the module's tests.
 
 **Seeds** (growth of a ratchet on purpose, such as ADR 0082 WP-0 adding its new rows to C71). A `[[seed]]` record names
@@ -190,8 +195,11 @@ rule accepts exactly that set when:
 - every added entry carries a `rule` field naming one of the seed's rule ids (C71's entries gain `rule`; today they have
   `file`, `line`, `hash`);
 - `count` and `entries_sha256` match the entries the branch added;
-- the seed is on the branch that adds the entries: a seed is valid only in the range of that branch; **the integrator
-  removes the seed record at landing** (in the landing merge), so it can never cover a later growth.
+- the seed **stays until its branch's commits are on `origin/main`** (chosen over honouring a seed that the judged
+  merge removes: a train carries the branch's growth through several merges and pushes before it lands, and each of
+  them is judged against `origin/main`). A seed covers only entries added by commits that are in its own branch's range
+  and not yet on `origin/main`; once that range is on main, the seed is stale (its entries are in the base, so nothing
+  is left to cover) and the next `--write` on main removes it. It can therefore never cover a later growth.
 
 ### 6. Positive controls, one per list (ER-33)
 
@@ -293,6 +301,10 @@ parallelise beyond what the readers already do.
 - Stale entries caused by time or other branches are removed on main, by the root run's failure or a bot's commit, not
   by whoever happens to run an app check.
 - A reader that goes blind shows up: its controls fail, and its run record shows a probe count of zero.
+- **C23 aging turns main red until D3's bot exists.** A C23 commit waiver becomes stale on main by itself, the day its
+  commit is on main and falls out of the 200-commit window; the root run on main then fails without any change to the
+  waiver's code. Until the bot of D3 (b) opens the `--write` commit, the integrator of the next landing removes it
+  (D3 (a)); the coordinator should expect this a few times a month at today's commit rate.
 - Lists in code move to data files with planner inputs and owners.
 
 ## Rollback
@@ -310,8 +322,8 @@ severity changes; entries removed by `--write` can be restored through their `[[
 | D4 | Where the engine lives | (a) an extension of RT-5's `./dev check` host (Rust), the JS checks as its shadow oracle until ported; (b) the JS conformance host | **(a)** |
 | D5 | Interim severity flips in the JS checks (WP-1) | (a) now, each with a failing test and an entry in RT-5's shadow difference table; (b) wait for the Rust ports | **(a)** |
 | D6 | Remove today's 14 stale entries | (a) now (WP-0), one commit per list, each after a planted-site check; the 11 C23 waivers for commits not on main stay; (b) with WP-1 | **(a)** |
-| D7 | What `--write` may do | (a) remove only, after the list's control passed in the same invocation and every entry was covered; JSON-safe; a `[[removed]]` record so a revert is not growth; (b) also re-key moved entries | **(a)** |
-| D8 | Growth on purpose (ADR 0082's new rows) | (a) a `[[seed]]` with `count`, `entries_sha256` and rule ids, valid only for an ADR accepted on main and only on its branch, removed by the integrator at landing; (b) a commit trailer; (c) never | **(a)** |
+| D7 | What `--write` may do | (a) remove only the covered stale entries, after the list's control passed in the same invocation; leave and report the uncovered ones; JSON-safe; a `[[removed]]` record so a revert is not growth; (b) also re-key moved entries | **(a)** |
+| D8 | Growth on purpose (ADR 0082's new rows) | (a) a `[[seed]]` with `count`, `entries_sha256` and rule ids, valid only for an ADR accepted on main and only for its branch's commits not yet on main, removed by `--write` once they are; (b) a commit trailer; (c) never | **(a)** |
 | D9 | Lists in code (C79's `ADOPTING`) | (a) move to `docs/ratchets/<id>.toml`, added to the planner inputs and CODEOWNERS; (b) the engine edits source | **(a)** |
 | D10 | Tag gating | (a) none beyond the normal gates, judged per app under ER-31 (§9); (b) a tag also needs zero stale entries family-wide | **(a)** |
 | D11 | Engineering rule | (a) extend ER-33: "... and a list of known exceptions counts only if each entry is shown to match something: an entry no reader matches is removed, and an entry no reader could see is not measured"; (b) a new ER-37 | **(a)**: it is ER-33's rule (a check must show it can see the thing) applied to the lists checks read |
@@ -323,7 +335,7 @@ severity changes; entries removed by `--write` can be restored through their `[[
 | WP-0 | Remove the 14 stale entries (§7.1), one commit per list, each with its planted-site check recorded in the commit | 0.5 |
 | WP-1 | JS severity flips with failing tests first (§7.2), the §2 rule for C23 commit waivers, the §3 split by run kind, and the shadow difference entries for RT-5 | 1.5 |
 | WP-2 | **Extension of RT-5:** `check/ratchet.rs` (trait, coverage from run records, judge, growth, §3 severities, report) extracted from C100's code; the run record written by the RT-5 host for every check it runs; property test that `--write` never adds. Net of RT-5's own "shrink-only baselines by text" (RT-5 already budgets that part) | 2 net |
-| WP-3 | `docs/ratchets.toml`, the meta-check, `[[seed]]` and `[[removed]]`, `./dev check ratchets [--write]` with JSON-safe removal and the control gate; control fixtures for every list in §6 (about 15 lists, two to four cases each) | 3 |
+| WP-3 | Settle cargo-deny's `unmatched-skip` / `unmatched-skip-root` default severity (run `cargo deny check bans` on a fixture with a planted unmatched skip and record what it prints) and set it explicitly in each `deny.toml`; `docs/ratchets.toml`, the meta-check, `[[seed]]` and `[[removed]]`, the adoption-list kind, `./dev check ratchets [--write]` with JSON-safe removal and the control gate; control fixtures for every list in §6 (about 15 lists, two to four cases each) | 3 |
 | WP-4 | C100 (with the `not_yet` stale half) and C102 (with `os` coverage) on the engine; C79's `ADOPTING` to data with planner inputs and CODEOWNERS | 1 |
 | WP-5 | Register `ratchet-entries` and its copies (including `paddock-timing-baseline.mjs --write`) in `docs/known-copies.toml`; the ER-33 extension and the Paddock rule line; lessons entry | 0.5 |
 | | **Total (new work, net of RT-5)** | **8.5** |
@@ -345,3 +357,12 @@ First cut: WP-0 and WP-1 (2 days) close the four lists that are stale or silent 
 | P2 JSON commas, the timing-baseline writer as a copy | §4, §7.4 |
 | P2 ER-37 as an extension of ER-33 | D11 |
 | P2 inventory | `install.rs` is gone (stated); C79 counted once as "mixed"; Pitwall's a11y and layout baselines, the cargo-deny skips and the clippy `allow-invalid` entries added (rows 8, 14, 15) |
+
+## Review answers (revision 2, round 2: approved with P2s)
+
+| Finding | Answer in revision 3 |
+|---|---|
+| ADR 0087's enrolment list grows | New **adoption list** kind (§1): grows only, each addition with a reason and a green-baseline run id |
+| `--write` refused on any uncovered entry | §4: it removes the covered stale entries, leaves the uncovered ones and reports them |
+| Seeds across a train | §5: chosen to keep the seed until its branch's commits are on `origin/main`; it then turns stale and `--write` removes it |
+| Meta-check patterns, cargo-deny severity, C23 aging | §5 adds `clippy.toml` `allow-invalid` entries and `docs/wintest-crates.toml`; WP-3 settles cargo-deny's severity; Consequences note that C23 aging can turn main red until D3's bot exists |
