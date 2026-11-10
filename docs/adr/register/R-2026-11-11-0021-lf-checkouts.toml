@@ -1,10 +1,11 @@
 # Free-text prerequisites are matched to `provides` names in ADR 0096 WP-1's review.
 id = "R-2026-11-11-0021-lf-checkouts"
 title = "Amendment to ADR 0021: text is checked out with LF everywhere, and a check covers every tracked file"
-summary = "Amendment to ADR 0021 (proposed 2026-11-11, revision 2; ER-21): five CRLF incidents each fixed by a narrow .gitattributes line (runs 7904, 7706, 7494 job 28583); 209 test-data files still resolve to text=auto with no eol; `* text=auto eol=lf` with -text inputs and declared CRLF types (.cmd, .bat), C38g built standalone over every tracked file, CRLF parser coverage kept through -text fixtures; changes ADR 0087 section 4 line-ends control (pointer: docs/adr/amendments/0087-line-ends-control-2026-11-11.md); 2 to 2.75 days, gates no tag"
-status = "proposed"
-# approval_file is set when the user accepts the decisions; a proposed row carries none (ADR 0096 section 2)
-adr_by = "2026-11-25" # ADR 0096 section 2 default: 14 days
+summary = "Amendment to ADR 0021 (accepted 2026-11-11 by the user, all decisions as recommended; ER-21): five CRLF incidents each fixed by a narrow .gitattributes line (runs 7904, 7706, 7494 job 28583); 209 test-data files still resolve to text=auto with no eol; `* text=auto eol=lf` with -text inputs and declared CRLF types (.cmd, .bat), C38g built standalone over every tracked file, CRLF parser coverage kept through -text fixtures; changes ADR 0087 section 4 line-ends control (pointer: docs/adr/amendments/0087-line-ends-control-2026-11-11.md); 2 to 2.75 days, gates no tag"
+status = "approved"
+approved = "2026-11-11"
+approval_file = "docs/adr/amendments/0021-lf-checkouts-2026-11-11.md"
+adr_by = "2026-11-25" # ADR 0096 section 2 default: 14 days after acceptance on 2026-11-11
 prerequisites = ["RT-5"] # C38g runs in the RT-5 check host (on the train, not on origin/main)
 
 [[wp]]

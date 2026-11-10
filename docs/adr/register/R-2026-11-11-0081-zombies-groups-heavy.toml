@@ -1,10 +1,11 @@
 # Free-text prerequisites are matched to `provides` names in ADR 0096 WP-1's review.
 id = "R-2026-11-11-0081-zombies-groups-heavy"
 title = "Amendment to ADR 0081: zombies, process groups and tools/heavy go through the one look"
-summary = "Amendment to ADR 0081 (proposed 2026-11-11, revision 2; ER-21): kill(pid, 0) and killpg(group, 0) count zombies (lesson 2026-10-25; guardian c8d2f6423, 620bb7adb, 1f9029dbc); the zombie-aware look is paddock_proc::presence (train only); tools/heavy breaks a slot lock on Unknown (procs.rs:68); group shapes and registered signal-0 #[expect]s in the liveness check, zombie positive controls, heavy migrated; 1.75 to 2.5 days on top of ADR 0081's 14, gates no tag"
-status = "proposed"
-# approval_file is set when the user accepts the decisions; a proposed row carries none (ADR 0096 section 2)
-adr_by = "2026-11-25" # ADR 0096 section 2 default: 14 days
+summary = "Amendment to ADR 0081 (accepted 2026-11-11 by the user, all decisions as recommended; ER-21): kill(pid, 0) and killpg(group, 0) count zombies (lesson 2026-10-25; guardian c8d2f6423, 620bb7adb, 1f9029dbc); the zombie-aware look is paddock_proc::presence (train only); tools/heavy breaks a slot lock on Unknown (procs.rs:68); group shapes and registered signal-0 #[expect]s in the liveness check, zombie positive controls, heavy migrated; 1.75 to 2.5 days on top of ADR 0081's 14, gates no tag"
+status = "approved"
+approved = "2026-11-11"
+approval_file = "docs/adr/amendments/0081-zombies-groups-and-heavy-2026-11-11.md"
+adr_by = "2026-11-25" # ADR 0096 section 2 default: 14 days after acceptance on 2026-11-11
 prerequisites = ["ADR 0081 WP-1", "ADR 0081 WP-3"] # WP-Z1 and WP-Z3 extend them; ADR 0081 is on origin/docs/adr-0081-0082 only
 
 [[wp]]

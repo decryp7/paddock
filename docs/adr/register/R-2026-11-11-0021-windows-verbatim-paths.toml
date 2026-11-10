@@ -1,10 +1,11 @@
 # Free-text prerequisites are matched to `provides` names in ADR 0096 WP-1's review.
 id = "R-2026-11-11-0021-windows-verbatim-paths"
 title = "Amendment to ADR 0021: Windows verbatim paths are made plain in one shared place"
-summary = "Amendment to ADR 0021 (proposed 2026-11-11, revision 2; ER-21): run 7904 failed three paddock-dev tests on Windows on verbatim paths from canonicalize; 23 hand-written strippers, comparers or classifiers in 16 crates disagree on UNC and volume paths; paddock_env::winpath (plain for display, for_tools returns a refusal with the path, reason and next step when a path cannot be made plain, real, real_verbatim, same by Windows ordinal ignore-case, kind), Clippy on canonicalize, C109 for any literal holding the prefix; 7.5 to 11 days, gates no tag"
-status = "proposed"
-# approval_file is set when the user accepts the decisions; a proposed row carries none (ADR 0096 section 2)
-adr_by = "2026-11-25" # ADR 0096 section 2 default: 14 days
+summary = "Amendment to ADR 0021 (accepted 2026-11-11 by the user, all decisions as recommended; ER-21): run 7904 failed three paddock-dev tests on Windows on verbatim paths from canonicalize; 23 hand-written strippers, comparers or classifiers in 16 crates disagree on UNC and volume paths; paddock_env::winpath (plain for display, for_tools returns a refusal with the path, reason and next step when a path cannot be made plain, real, real_verbatim, same by Windows ordinal ignore-case, kind), Clippy on canonicalize, C109 for any literal holding the prefix; 7.5 to 11 days, gates no tag"
+status = "approved"
+approved = "2026-11-11"
+approval_file = "docs/adr/amendments/0021-windows-verbatim-paths-2026-11-11.md"
+adr_by = "2026-11-25" # ADR 0096 section 2 default: 14 days after acceptance on 2026-11-11
 prerequisites = ["RT-5"] # C109 runs in the RT-5 check host (tools/paddock-dev/src/check/, on the train, not on origin/main)
 
 [[wp]]

@@ -1,12 +1,12 @@
 # Amendment to ADR 0081 (2026-11-11): zombies, process groups and `tools/heavy` go through the one look
 
-- Status: Proposed 2026-11-11, revision 2 (answers the independent review of revision 1, `dbd7028a1`: see "Review
-  answers"). The coordinator's brief of 2026-11-11 reports that the user approved the class and the
-  shape of the fix that day ("one zombie-aware is-alive helper plus a lint"); the user's words are not in the
-  repository, and D-Z1 and D-Z2 are open. An amendment to ADR 0081 (accepted 2026-11-10 by the user, decisions as
-  recommended), which is **not on `origin/main`**: it is on `origin/docs/adr-0081-0082` (`9dc480ef6`) only, and ADR
-  0096's copy to main has not happened yet. This file is merged into the ADR's text when 0081 lands on main. Nothing
-  here is built yet. ER-23 does not apply.
+- Status: Accepted 2026-11-11 (user), all decisions as recommended (D-Z1, D-Z2). The user accepted it on 2026-11-11 in chat, as relayed by the coordinator on 2026-11-11 (the user's words are not in
+  the repository; ADR 0097's signed approvals are not built). History: Proposed
+  2026-11-11; revision 2 (`f3d313123`) answered the independent review of revision 1 (`dbd7028a1`: see "Review answers")
+  and was approved. An amendment to ADR 0081 (accepted 2026-11-10 by the user, decisions as recommended), which is
+  **not on `origin/main`**: it is on `origin/docs/adr-0081-0082` (`9dc480ef6`) only, and ADR 0096's copy to main has
+  not happened yet. This file is merged into the ADR's text when 0081 lands on main. Nothing here is built yet. ER-23
+  does not apply.
 - Amends: ADR 0081 §1 (the look: process groups), §3 (the check: group shapes and the `#[expect]` reason), §4 (a fourth
   user with its own check: `tools/heavy`), the instance table, and "Order" (what of WP-1 the train already has).
 - Related: ER-21 / rule 40, ER-33 (a probe must be shown to see the thing), rule 53 and ADR 0033, ADR 0076 and its
@@ -133,9 +133,9 @@ WP-Z2 can land at once (it touches only `tools/heavy`); WP-Z1 and WP-Z3 ride on 
   `!is_alive`, so the equivalent real-OS path breaks it).
 - `paddock-proc`: `an_unreaped_killed_child_is_gone_though_signal_zero_finds_it` (Linux, macOS).
 
-## Decisions for the user
+## Decisions (accepted 2026-11-11 as recommended)
 
-| # | Question | Options | Recommendation |
+| # | Question | Options | Recommended and chosen |
 |---|---|---|---|
 | D-Z1 | `tools/heavy` | (a) migrate now (WP-Z2, 0.5 days, touches no app); (b) wait for ADR 0081 WP-1b's one-landing migration | **(a)**: it can break a live job's slot lock, and every agent's heavy build goes through it (ER-24) |
 | D-Z2 | A public group look | (a) keep `group_exists` crate-private until a second user; (b) publish `group_presence` now | **(a)** (YAGNI); item 1 fixes its shape for when it is needed |

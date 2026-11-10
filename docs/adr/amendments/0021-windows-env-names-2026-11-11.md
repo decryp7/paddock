@@ -1,10 +1,11 @@
 # Amendment to ADR 0021 (2026-11-11): environment variables are read through one case-aware map
 
-- Status: Proposed 2026-11-11, revision 2 (answers the independent review of revision 1, `dbd7028a1`: see "Review
-  answers"). The coordinator's brief of 2026-11-11 reports that the user approved the class and the
-  shape of the fix that day ("a Path/PATH case lint"); the user's words are not in the repository, and D-E1 and D-E2
-  are open. An amendment to ADR 0021 (accepted 2026-10-27, on `origin/main`); merged into its text by WP-E4. Nothing
-  here is built yet. ER-23 does not apply.
+- Status: Accepted 2026-11-11 (user), all decisions as recommended (D-E1, D-E2). The user accepted it on 2026-11-11 in chat, as relayed by the coordinator on 2026-11-11 (the user's words are not in
+  the repository; ADR 0097's signed approvals are not built). History: Proposed
+  2026-11-11; revision 2 (`f3d313123`) answered the independent review of revision 1 (`dbd7028a1`: see "Review answers")
+  and was approved, with its wording P2s (the standard library's source cited, `apply_to` clearing the environment)
+  folded in here. An amendment to ADR 0021 (accepted 2026-10-27, on `origin/main`); merged into its text by WP-E4.
+  Nothing here is built yet. ER-23 does not apply.
 - Amends: ADR 0021 decision 5 (the shared crates are the only path for OS-specific calls: `paddock-env` gains the
   environment map), §3 (two Clippy entries) and the pattern table (a tenth shape).
 - Related: ER-21 / rule 40, ER-22 / rule 42, rule 55 / ADR 0034, ADR 0087 (accepted, on
@@ -48,9 +49,12 @@ cause.
 **Platform facts.** The standard library: "environment variable names are case-insensitive (but case-preserving) on
 Windows and case-sensitive on all other platforms" (`std::process::Command::env` and `::envs`,
 <https://doc.rust-lang.org/std/process/struct.Command.html>, read 2026-11-11). So `Command::env("PATH", ..)` replaces
-`Path` in a child, while a `HashMap`/`BTreeMap` built from `std::env::vars()` keeps two distinct keys. That
-`std::env::var("PATH")` finds `Path` on Windows is the behaviour the fixture relied on and the commit describes; it is
-**not re-verified here** (the `std::env::vars` page says nothing about case); WP-E0 pins it on the test VM.
+`Path` in a child, while a `HashMap`/`BTreeMap` built from `std::env::vars()` keeps two distinct keys. The
+standard library's source agrees for children: `EnvKey`'s `Ord` compares names with `CompareStringOrdinal(.., TRUE)`
+(`library/std/src/sys/process/windows.rs:74-82`), and `CommandEnv::set` inserts into a `BTreeMap<EnvKey, ..>`
+(`library/std/src/sys/process/env.rs:50-53`), whose `insert` keeps the existing key and replaces the value; read in the
+local toolchain's sources, rustc 1.99.1 (`58cf8f9c3`), 2026-11-11. That `std::env::var("PATH")` finds `Path` on
+Windows is the behaviour the fixture relied on and the commit describes; WP-E0 records it on the test VM.
 
 ## Instances: every map of the process environment
 
@@ -99,8 +103,8 @@ platform's rule, and builds test environments with the same type.
      2026-11-11), not ASCII-only folding (revision 1 said ASCII, as `pathfind::normalise` does today). The pure
      function uses the same per-character simple uppercase as `paddock_env::winpath::same` (one shared fold, tested
      once); that it equals the OS table outside ASCII is **unverified** and WP-E0 compares the two on the Windows CI
-     leg. That the standard library's own Windows `Command` environment uses `CompareStringOrdinal` is the author's
-     reading of its source, **not re-verified** here. Off Windows names are exact;
+     leg. The standard library's own Windows `Command` environment uses the same comparison (`EnvKey`'s `Ord`,
+     `sys/process/windows.rs:74-82`, rustc 1.99.1). Off Windows names are exact;
    - **construction from the process, in a fixed order.** `from_process` collects `std::env::vars_os()` into a
      `BTreeMap` (byte order of the names, as `pathfind::normalise` iterates today) and then folds: for each group of
      names that are the same variable, the **first in byte order** keeps its spelling (`PATH` sorts before `Path`), and
@@ -110,7 +114,9 @@ platform's rule, and builds test environments with the same type.
      spelling is kept**, the case-preserving rule `Command::env` documents ("case-insensitive (but case-preserving) on
      Windows"); so `of([("PATH","a"),("Path","b")], Windows)` holds one entry `PATH=b`. On Unix they are two entries;
    - `get`, `set`, `remove`, `names`, `iter`, and `apply_to(&mut Command)` (`env_clear` then `envs`), so a child gets
-     exactly one spelling;
+     exactly one spelling. Because `apply_to` clears the inherited environment first, the family stays self-consistent
+     even when the inherited block itself holds two spellings of one name: the child gets the map's one entry, never the
+     OS's leftovers;
    - it implements `Vars`, and `MapVars` becomes `EnvMap` (or a thin constructor of it), so `AppDirs` tests and product
      code share the rule. The platform is a parameter (`Os`), so macOS and Linux test the Windows rule.
 2. **Every copy moves (rule 55).** `release_isolation`'s `Env` and `pathfind::{lookup, normalise}`, `ci_isolation`'s
@@ -161,9 +167,9 @@ Clippy entries ride with them. About **1 to 3 branch runs**, plus a fix round if
 - `paddock-env`: `MapVars::new().with("Path", "x")` resolved for `Os::Windows` answers `get("PATH")`.
 - Pitcrew `runner_env`: `runner_environment(Some("/a"), {"Path": "/b"})` holds one path variable, `/b`.
 
-## Decisions for the user
+## Decisions (accepted 2026-11-11 as recommended)
 
-| # | Question | Options | Recommendation |
+| # | Question | Options | Recommended and chosen |
 |---|---|---|---|
 | D-E1 | Where the map lives | (a) `paddock_env::EnvMap`, beside `Vars`; (b) keep `pathfind` in `tools/paddock-dev` and copy the rule where needed | **(a)**: product (`paddock-build`, Pitcrew) and tools both need it (ER-22) |
 | D-E2 | The lint | (a) Clippy on `std::env::vars` and `vars_os` plus the shared type; (b) also a text scan for literal Windows variable names as map keys | **(a)**: (b) has no current instance outside the fixed site and its heuristic cannot tell an environment map from an event's `Path` field (Debrief has several) |

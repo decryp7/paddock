@@ -1,11 +1,11 @@
 # Amendment to ADR 0021 (2026-11-11): Windows verbatim paths are made plain in one shared place
 
-- Status: Proposed 2026-11-11, revision 2. The coordinator's brief of 2026-11-11 reports that the user approved the
-  class and the shape of the fix that day ("one shared Windows path helper"); the user's words are not in the
-  repository, and the decisions below (D-P1 to D-P4) are open. Revision 1 (`dbd7028a1`) was reviewed independently
-  ("changes": one P1, P2s); this revision answers it (see "Review answers"). An amendment to ADR 0021 (accepted
-  2026-10-27, on `origin/main`). It stands next to that ADR until it is merged into the ADR's text (WP-P6). Nothing here
-  is built yet. ER-23 does not apply (no drawings).
+- Status: Accepted 2026-11-11 (user), all decisions as recommended (D-P1 to D-P4). The user accepted it on 2026-11-11 in chat, as relayed by the coordinator on 2026-11-11 (the user's words are not in
+  the repository; ADR 0097's signed approvals are not built). History: Proposed
+  2026-11-11; revision 1 (`dbd7028a1`) was reviewed independently ("changes": one P1, P2s); revision 2 (`f3d313123`)
+  answered it (see "Review answers") and was approved, with two wording P2s folded in here. An amendment to ADR 0021
+  (accepted 2026-10-27, on `origin/main`). It stands next to that ADR until it is merged into the ADR's text (WP-P6).
+  Nothing here is built yet. ER-23 does not apply (no drawings).
 - Amends: ADR 0021 §1 (the kit's `paths` module and decision 5, "the shared crates are the only path for OS-specific
   calls"), §2 (a check beside C38), §3 (one more Clippy entry) and the pattern table (a ninth shape).
 - Related: ER-21 / rule 40, ER-22 / rule 42 (share first), ER-27 (errors give the cause and the next step), rule 55 and
@@ -159,8 +159,8 @@ Comparison is its own operation (`same`). No other code removes or tests the pre
      - "cannot hand `\\?\C:\…` (312 characters) to git: the path is longer than Windows' 259; move the work folder to a
        shorter path (or enable long paths: git `core.longpaths`)".
 
-     Callers return the error to their user; none falls back to the verbatim text. Incident 3 (git given a verbatim
-     path) can then only end in this error, never in git's "could not open".
+     Callers return the error to their user; none falls back to the verbatim text. A verbatim path can then never reach
+     git; it is made plain or refused with this error.
    - `real(p) -> io::Result<PathBuf>` = `canonicalize` then `plain`; `real_for_tools(p) -> Result<String, RealError>`
      = `canonicalize` then `for_tools`; `real_or_given(p) -> PathBuf` (today's `paddock_repo_graph::real_path`: the given
      path when it cannot be resolved).
@@ -314,12 +314,12 @@ every OS (ADR 0080). WP-P0 and WP-P6 are docs-only (no CI, rule 50 (d)).
   is `Ok` (today `Redirected`).
 - `paddock-setup` `checkdir.rs`: `components(r"\\?\UNC\srv\share\a")` starts with the server, not `UNC`.
 
-## Decisions for the user
+## Decisions (accepted 2026-11-11 as recommended)
 
-| # | Question | Options | Recommendation |
+| # | Question | Options | Recommended and chosen |
 |---|---|---|---|
 | D-P1 | Where the helper lives | (a) a `winpath` module in `paddock-env` (ADR 0021 decision 5: no new crate); (b) a new zero-dependency crate `paddock-paths`; (c) depend on `dunce` | **(a)**. (c) does not convert UNC, never strips off Windows (so macOS cannot test the rule), accepts 260 units, and would still need our own `same`/`for_tools`. Its reserved-name rules are copied into (a)'s tests instead |
-| D-P2 | Clippy on `canonicalize` | (a) disallow both forms everywhere; every call migrated or `#[expect]`ed with its reason (2 to 3.5 days for 237 calls); (b) no Clippy entry, C109 only (finds strippers, not unmarked verbatim paths) | **(a)**: the three incidents of run 7904 had no stripper at all; they used `canonicalize` and compared. Only (a) makes that choice visible |
+| D-P2 | Clippy on `canonicalize` | (a) disallow both forms everywhere; every call migrated or `#[expect]`ed with its reason (2 to 3.5 days for 237 calls); (b) no Clippy entry, C109 only (finds strippers, not unmarked verbatim paths) | **(a)**: the failing assertions used `canonicalize` directly; the one stripper involved was replaced by a shared one that still has the volume defect. Only (a) makes the choice of door visible |
 | D-P3 | The check's number | (a) C109, the next free number on 2026-11-11 (C108 is ADR 0097's; ADR 0081's liveness check and ADR 0096's index check are still written unnumbered); (b) leave unnumbered until landing | **(a)**, confirmed by the integrator at landing |
 | D-P4 | Shipped rows (2, 8 to 14, 17, 23 compiled into `dyno-v1.1.0`) | (a) WP-P0 decides per row; a wrong decision found is a finding for the app's next tag; (b) block Dyno's next tag on WP-P2/P3 regardless | **(a)** |
 
