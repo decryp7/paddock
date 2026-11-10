@@ -152,7 +152,7 @@ import { MatMenuModule } from '@angular/material/menu';
                   }
                 </div>
               } @else {
-                <div class="skeleton chart-skeleton" aria-busy="true" aria-label="Loading the chart"></div>
+                <div class="skeleton chart-skeleton" role="status" aria-busy="true" aria-label="Loading the chart"></div>
               }
             }
           </section>

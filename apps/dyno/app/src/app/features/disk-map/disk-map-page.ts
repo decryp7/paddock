@@ -217,7 +217,7 @@ import {
         }
 
         @if (!store.restored()) {
-          <div class="loading" aria-busy="true" aria-label="Loading the last scan">
+          <div class="loading" role="status" aria-busy="true" aria-label="Loading the last scan">
             <div class="skeleton cap"></div>
             <div class="main">
               <section class="card centre"><div class="skeleton ring"></div></section>

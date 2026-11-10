@@ -33,7 +33,7 @@ import { injectTrackLoad } from '@decryp7/paddock-ui/shell/store';
         @if (store.hashJob(); as job) {
           <dy-job-progress [progress]="job" (cancel)="store.cancelHash()" />
         } @else {
-          <div class="skeleton line" aria-busy="true" aria-label="Reading the file"></div>
+          <div class="skeleton line" role="status" aria-busy="true" aria-label="Reading the file"></div>
           <p class="wait">Reading the file…</p>
         }
       }
