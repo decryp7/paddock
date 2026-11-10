@@ -33,6 +33,9 @@ pub trait PluginSource: Send + Sync {
     fn registry(&self, choice: &PluginChoice<'_>) -> PluginRegistry;
     /// The app's third-party plugins now: changed grants and removed plugins take effect.
     fn set_third_party(&self, _plugins: &[ThirdPartyPlugin]) {}
+    /// Stops every plugin process, all together, before the worker ends (the worker's exit stop calls this within its
+    /// budget). Idempotent.
+    fn shutdown(&self) {}
 }
 
 /// No plugins: only the built-in importers of the engine read files.
@@ -167,6 +170,19 @@ impl PluginSource for WorkerPlugins {
             }
         }
         install_plugins(plugins, choice.disabled)
+    }
+
+    fn shutdown(&self) {
+        let third_party: Vec<Arc<PluginProcess>> = lock(&self.third_party).values().map(|s| s.process.clone()).collect();
+        std::thread::scope(|scope| {
+            // The built-ins stop their own processes together (and none start here if none was ever used).
+            if let Some(b) = self.builtins.get() {
+                scope.spawn(move || b.shutdown());
+            }
+            for p in &third_party {
+                scope.spawn(move || p.shutdown());
+            }
+        });
     }
 
     fn set_third_party(&self, plugins: &[ThirdPartyPlugin]) {

@@ -1758,3 +1758,47 @@ Found by the review of the outcome type (`feat/outcome-type`). None is fixed one
 - `conformance/src/util/keychain-graph.mjs:202` drops files it cannot read instead of reporting the check as not measured.
 - `ctx.read(...) ?? ''` reads a missing file as an empty one in the checks that use it, so a missing input passes.
 Fixed in the same change as the type: the runner's crash path (a `path = "*"` waiver hid a crashed check), a non-Error throw (which made `runChecks` reject and exit 2), a malformed finding and an unknown severity, and the stale-waiver warning for a crashed check.
+
+## A Debrief store worker crashed at exit with two threads in `exit` and a live thread in DuckDB (2026-11-10, ADR 0076 exit-phase amendment, WP-X0)
+
+The `debrief-store-worker` crash (21 reports in six days, all in the catalogue thread inside DuckDB while another thread ran
+the exit handlers) had two candidate causes, listed under ER-28: (a) a native thread still alive during static
+destruction (as `601858de8`, `5740cb6b6`, `e3f6cdead` before it), (b) two threads in `exit` at once. A deterministic
+reproducer does not need DuckDB: a test-only `atexit` pair (a holder registered last, a witness before it) shows on macOS
+that a second thread enters `exit` while the first is in the handlers, since libc marks the entry it runs as called and the
+second thread runs the entries after it (`two_exits_never_run_the_handlers_together`, red 6 of 6 before the fix in
+`debrief-ipc`, 20 of 20 in `paddock-ipc`; a first version of the probe registered only one handler and stayed green, because
+the second thread skips the held entry: the probe has to watch the entries after it).
+
+What the measurement said (`apps/debrief/docs/performance.md`, "Store worker exit"): with a thread held inside DuckDB, one exit
+route alone still crashed (22 of 100), so (a) is a cause on its own; a join in `main` with both exit routes kept crashed
+100 of 100, because the lifeline's `exit` runs the static destructors while `main` is still joining; both fixes together 0 of
+200 where the unfixed code crashed 12 of 100. Without the hook the unfixed worker did not crash in 107 natural runs, so the
+natural per-run rate could not be measured; the arms needed a hook that holds a thread inside a statement.
+
+What changed: both lifelines (`debrief-ipc` and `paddock-ipc`, rule 55) close the peer instead of calling `exit`, so `main`
+is the only exit (with a bounded fallback to `exit(0)` if the exit phase has not begun within the child's stop budget plus
+a margin); the worker's `main` stops and joins the store threads within `STOP_BUDGET` (interrupting their statements) and
+on overrun logs what it was waiting on and ends with `_exit`; Debrief's `KILL_GRACE` is the child's stop budget plus the
+margin (1.5 s, was 150 ms, which killed a worker that needed a few hundred ms).
+
+Lessons: (1) a test double for a race must watch the code that runs after the held point, not the held one; (2) a join does
+not protect a process that has a second route to `exit`; fix the route before the join; (3) when the natural rate is
+unmeasurable, hold the suspected cause in place with a hook and measure the arms against that, saying so in the record.
+Open: the two repaired routes are checked by the barrier test only on macOS (std's `unique_thread_exit` hides a second exit on
+Linux, and Windows' `ExitProcess` is a different mechanism); the shared `paddock_jobs::exit` phase (WP-X1) replaces the
+hand-made pieces.
+Class: a background thread in native code at process exit (CI 6734, CI 7837, instance 5 above).
+
+Review round (2026-11-10): the worker's `stop_for_exit` stops the import sessions (cancel, then wait: dropping an `ImportSession`
+detaches its `debrief-import` thread), the store threads and the stores; **open owners it does not stop, for WP-X1's ratchet:**
+the threads of calls in flight (`spawn_blocking` work of the peer's handler is cancelled by the peer's close but not joined, and
+its `DuckStore` clones keep the databases open), the plugin processes' threads, the IPC runtime's threads. The lifeline's
+fallback claims the exit atomically (serving, main exiting, lifeline exiting; a late `main` waits at most `STOP_MARGIN`, then ends the process itself), and in `debrief-ipc` ends with
+`end_without_destructors`. The D-E4 gate for instance 5 is not met (see `apps/debrief/docs/performance.md`).
+For WP-X3: `BuiltinPlugins::shutdown` stops plugin processes one after the other, so two hung plugins can overrun the 3 s teardown;
+stopping them in parallel is done now (`BuiltinPlugins::shutdown` and `WorkerPlugins::shutdown` run together, after the stores close). A child's kill grace must fit the parent's split (0.5 s per plugin by the amendment's §3.1), not the 1.5 s `KILL_GRACE`: a hung plugin still outlasts the 1.25 s budget, ends the worker with `_exit`, and is left to its own kill thread (WP-X3).
+Two flakes seen, not fixed here: `debrief-ipc` `launch::a_locked_child_cannot_write_files_or_start_programs` on Linux (about 3 of 6
+runs on the base tree, 5 of 6 in one container run; the "before the lockdown" note, probably the handshake thread still being
+listed), and the store worker's client-RSS budget tests (`imports_and_queries_within_the_budgets`, `low_memory_mode_...`), which
+measure the test process's own growth while other tests of the same binary run in it.

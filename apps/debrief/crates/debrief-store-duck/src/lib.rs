@@ -1107,6 +1107,34 @@ impl Drop for Importing {
 }
 
 impl DuckStore {
+    /// Stops this store's background threads (the full-text indexer, the catalogue builder) and waits for each to end, so
+    /// that nothing of the store runs native code when the process exits. The statements they run are interrupted.
+    /// `step` is told, before each wait, which thread it is: the caller bounds the whole call (a statement that does not
+    /// stop leaves the call waiting) and names the thread it was waiting on when the bound runs out.
+    ///
+    /// Threads of *other* stores sharing the process are interrupted too (the process is ending).
+    pub fn stop_for_exit(&self, step: &dyn Fn(&'static str)) {
+        // Both stop flags first, then the interrupts: a statement already running ends, none starts after the flag.
+        if let Some(c) = &self.inner.catalogue {
+            c.request_stop();
+        }
+        if let Some(f) = &self.inner.fts {
+            f.request_stop();
+        }
+        shutdown::interrupt_all();
+        if let Some(c) = &self.inner.catalogue {
+            step("debrief-catalogue");
+            c.stop();
+            // Path-specific evidence for the worker's exit test: the join happened through here, not through a drop.
+            #[cfg(all(feature = "exit-hold", debug_assertions))]
+            catalogue::note_exit_hold("stopped by stop_for_exit");
+        }
+        if let Some(f) = &self.inner.fts {
+            step("debrief-fts");
+            f.stop();
+        }
+    }
+
     pub(crate) fn idle(&self) -> StoreResult<()> {
         if self.inner.importing.load(Ordering::SeqCst) {
             return Err(StoreError::Busy("an import is running; wait for it or cancel it".into()));

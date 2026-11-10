@@ -36,10 +36,10 @@ const QUERY_BUDGET_MB: u64 = if cfg!(target_os = "macos") { 630 } else { 320 };
 const CLIENT_GROWTH_MB: u64 = 64;
 
 /// A fresh folder under the system temp folder, removed on drop.
-struct TempDir(PathBuf);
+pub(super) struct TempDir(pub(super) PathBuf);
 
 impl TempDir {
-    fn new(tag: &str) -> TempDir {
+    pub(super) fn new(tag: &str) -> TempDir {
         let p = tempfile::Builder::new()
             .prefix(&format!("debrief-worker-{tag}-"))
             .tempdir()
@@ -56,7 +56,7 @@ impl Drop for TempDir {
 }
 
 /// The folders of `/samples` the built-in importers read (as in debrief-store-duck's tests).
-fn log_samples() -> Vec<PathBuf> {
+pub(super) fn log_samples() -> Vec<PathBuf> {
     const SKIP: &[&str] = &[
         "profiling",
         "configs",
@@ -80,7 +80,7 @@ fn log_samples() -> Vec<PathBuf> {
     v
 }
 
-fn copy_dir(from: &Path, to: &Path) {
+pub(super) fn copy_dir(from: &Path, to: &Path) {
     std::fs::create_dir_all(to).unwrap();
     for e in std::fs::read_dir(from).unwrap() {
         let e = e.unwrap();
@@ -149,7 +149,7 @@ thread_local! {
 /// plugins' sockets (`debrief-plugin-*`, made before the handshake); they go with the folder instead of staying in a
 /// shared one (see `debrief_ipc::testing`).
 #[cfg(unix)]
-fn confined(exe: &str) -> WorkerConfig {
+pub(super) fn confined(exe: &str) -> WorkerConfig {
     let mut cfg = WorkerConfig::new(exe);
     let dir = debrief_ipc::testing::confined_tmp();
     cfg.env.extend(dir.env());

@@ -6,7 +6,9 @@
 //! 3. locks itself down ([`crate::sandbox::lockdown`]) before it handles anything;
 //! 4. answers the host's calls with its handler until the connection closes, then returns (the process exits).
 //!
-//! A child also exits when its stdin closes (the host died); nothing is left behind.
+//! A child also ends when its stdin closes (the host died); nothing is left behind. It ends through **one** exit: the
+//! [`lifeline`] closes the connection, `main` returns and is the only `exit` (Rust guards two `exit`s only on Linux; on
+//! macOS two threads ran the `atexit` handlers and DuckDB's static destructors together, and the store worker crashed).
 
 use crate::elevation::{take_bootstrap, BOOTSTRAP_FLAG};
 use crate::frame::ProtocolVersion;
@@ -14,7 +16,95 @@ use crate::launch::Bootstrap;
 use crate::link::Token;
 use crate::peer::{Handler, Peer, PeerOptions};
 use std::io::{self, BufRead, Read};
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
+
+/// What a child's exit phase may take once its host is gone or stops it: the child's own stop budget. The parent waits at
+/// least this plus [`STOP_MARGIN`] before it kills the child (`process::KILL_GRACE`), so a child that stops within its
+/// budget is never killed in the middle of it.
+pub const STOP_BUDGET: Duration = Duration::from_millis(1250);
+
+/// Covers the parent's kill and reap, and a child's last log lines, on top of [`STOP_BUDGET`].
+pub const STOP_MARGIN: Duration = Duration::from_millis(250);
+
+/// Who ends the process: the child's `main` (past the connection) or, after a bound, the lifeline. One claim wins, under
+/// one lock, so the two never both run an exit.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Exit {
+    Serving,
+    MainExiting,
+    LifelineExiting,
+}
+
+struct Phase {
+    state: Mutex<Exit>,
+    wake: Condvar,
+}
+
+static PHASE: Phase = Phase {
+    state: Mutex::new(Exit::Serving),
+    wake: Condvar::new(),
+};
+
+impl Phase {
+    #[cfg(test)]
+    fn new() -> Phase {
+        Phase {
+            state: Mutex::new(Exit::Serving),
+            wake: Condvar::new(),
+        }
+    }
+
+    /// `main` claims the exit; false when the lifeline claimed it first (this `main` must then park: the lifeline ends the
+    /// process).
+    fn claim_main(&self) -> bool {
+        let mut st = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if *st == Exit::LifelineExiting {
+            return false;
+        }
+        *st = Exit::MainExiting;
+        self.wake.notify_all();
+        true
+    }
+
+    /// Waits at most `max` for `main` to claim the exit; if it has not by then, the lifeline claims it and this says true.
+    fn claim_fallback(&self, max: Duration) -> bool {
+        let g = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        let mut g = self
+            .wake
+            .wait_timeout_while(g, max, |st| *st == Exit::Serving)
+            .map(|(g, _)| g)
+            .unwrap_or_else(|p| p.into_inner().0);
+        if *g == Exit::Serving {
+            *g = Exit::LifelineExiting;
+            return true;
+        }
+        false
+    }
+}
+
+/// Says that this child's exit phase has begun: its `main` is past the connection and ends the process itself. A child
+/// whose `main` calls [`child_main`] never calls this (it does); one that serves by [`connect_speaking`] and
+/// [`lifeline_closing`] calls it when its own `wait_closed` returns. If the lifeline's fallback already took the exit
+/// (a `main` that was too late), this waits at most [`STOP_MARGIN`] for the lifeline to end the process, then ends it itself.
+pub fn exit_phase_begun() {
+    begin_exit(&PHASE, STOP_MARGIN, || end_without_destructors(0));
+}
+
+/// `main`'s claim on `phase`; when the lifeline's fallback holds it, see [`main_lost_claim`].
+fn begin_exit(phase: &Phase, wait: Duration, end: impl FnOnce()) {
+    if !phase.claim_main() {
+        main_lost_claim(wait, end);
+    }
+}
+
+/// A `main` that finds the lifeline's fallback already took the exit: waits at most `wait` for the lifeline to end the
+/// process, then calls `end` itself (never parks for good: the lifeline may have died, and this `main` holds what the child
+/// holds).
+fn main_lost_claim(wait: Duration, end: impl FnOnce()) {
+    std::thread::park_timeout(wait);
+    end();
+}
 
 /// Largest bootstrap line read from stdin.
 const MAX_BOOTSTRAP: u64 = 64 * 1024;
@@ -64,21 +154,94 @@ pub fn child_main_then(
     connected(&bootstrap, &peer);
     if elevated.is_none() {
         // Started after the lockdown, like every thread of a child (see `connect_and_lock_down`).
-        lifeline();
+        lifeline_closing(&peer);
     }
     peer.wait_closed(None);
+    exit_phase_begun();
     Ok(())
 }
 
-/// The lifeline: when the host closes stdin (or dies), exit at once.
+/// The lifeline of a child that has no connection yet (or none to close): when the host closes stdin (or dies), exit at
+/// once. Once the peer is up use [`lifeline_closing`]: two threads in `exit` crashed the store worker.
 pub fn lifeline() {
     std::thread::spawn(|| {
-        let mut sink = [0u8; 256];
-        while matches!(io::stdin().read(&mut sink), Ok(n) if n > 0) {}
+        wait_stdin_closed(io::stdin());
         // `exit` runs no destructors: remove the endpoints of children this process was still starting.
         crate::endpoint::remove_live();
         std::process::exit(0);
     });
+}
+
+/// The lifeline of a child whose connection is up: when the host closes stdin (or dies) it **closes the connection**, so
+/// the child's `main` (past `wait_closed`) is the only exit. If the exit phase has not begun within
+/// [`STOP_BUDGET`] plus [`STOP_MARGIN`] (a `main` that hangs would keep the store's database lock), it ends the
+/// process itself. Call [`exit_phase_begun`] from a `main` that does not go through [`child_main`].
+pub fn lifeline_closing(peer: &Peer) {
+    let peer = peer.clone();
+    std::thread::spawn(move || {
+        wait_stdin_closed(io::stdin());
+        let end = || end_without_destructors(0);
+        lifeline_end(&peer, &PHASE, LIFELINE_WAIT, &mut io::stderr(), end);
+    });
+}
+
+/// Ends this process at once without running `atexit` handlers or static destructors (`_exit`, `TerminateProcess` on
+/// itself): for a child whose exit phase overran, where running the C++ static destructors under a thread still inside
+/// native code is what crashed the store worker. Stdio is not flushed: the caller logs first.
+#[cfg(unix)]
+#[rustfmt::skip]
+pub fn end_without_destructors(code: i32) -> ! { /* SAFETY: `_exit` takes no pointers and never returns. */ unsafe { libc::_exit(code) } }
+
+/// [`end_without_destructors`] on Windows (`TerminateProcess` on this process).
+#[cfg(windows)]
+pub fn end_without_destructors(code: i32) -> ! {
+    use windows::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
+    // SAFETY: the pseudo-handle of this process; `TerminateProcess` notifies no DLL, so no detach code can wait on a
+    // thread that was cut short.
+    unsafe {
+        // conformance: pid-kill — this process itself (`GetCurrentProcess`), not a pid read earlier
+        let _ = TerminateProcess(GetCurrentProcess(), code as u32);
+    }
+    std::process::abort()
+}
+
+fn wait_stdin_closed(mut stdin: impl Read) {
+    let mut sink = [0u8; 256];
+    while matches!(stdin.read(&mut sink), Ok(n) if n > 0) {}
+}
+
+/// What the lifeline does once stdin is closed: close `peer`, wait for `main` to claim the exit, and if it does not within
+/// the child's stop budget plus margin, say so on `err` and `end` the process.
+fn lifeline_end(peer: &Peer, phase: &Phase, wait: Duration, err: &mut dyn io::Write, end: impl FnOnce()) {
+    close_then_end(peer, phase, wait, || end_after_fallback(err, end));
+}
+
+/// The last steps of the lifeline's fallback: say why and remove the endpoints of children this process was still starting
+/// (`exit` runs no destructors), then `end`. Nothing before `end` may stop it: a broken stderr (the host is gone) or a
+/// writer that panics must not keep the process alive, holding what the child holds (the store's database lock).
+fn end_after_fallback(err: &mut dyn std::io::Write, end: impl FnOnce()) {
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = writeln!(
+            err,
+            "the exit phase did not begin within {} ms of the host going away; ending the process (exit code 0)",
+            (STOP_BUDGET + STOP_MARGIN).as_millis()
+        );
+        crate::endpoint::remove_live();
+    }));
+    end();
+}
+
+/// How long the lifeline waits for `main` to claim the exit after the host went away.
+const LIFELINE_WAIT: Duration = STOP_BUDGET.saturating_add(STOP_MARGIN);
+
+/// Closes `peer`, then waits at most `wait` for `phase` to begin; `fallback` runs when it does not.
+fn close_then_end(peer: &Peer, phase: &Phase, wait: Duration, fallback: impl FnOnce()) {
+    // Endpoints of children this process was still starting: `main`'s exit runs no destructors for them either.
+    crate::endpoint::remove_live();
+    peer.close();
+    if phase.claim_fallback(wait) {
+        fallback();
+    }
 }
 
 /// Steps 2–4 of [`child_main`]: connect, lock down, serve. Returns the running peer.
@@ -168,6 +331,108 @@ fn lock_down(bootstrap: &Bootstrap, elevated: bool) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn a_peer() -> Peer {
+        let (x, _y) = tokio::io::duplex(1 << 16);
+        let rt = crate::runtime::shared().unwrap();
+        Peer::start(x, Arc::new(crate::peer::NoCalls), PeerOptions::new("test"), rt.handle())
+    }
+
+    #[test]
+    fn the_lifeline_closes_the_peer_and_leaves_the_exit_to_main_once_the_phase_begins() {
+        let peer = a_peer();
+        let phase = Arc::new(Phase::new());
+        let t = {
+            let (peer, phase) = (peer.clone(), phase.clone());
+            std::thread::spawn(move || {
+                let mut said = Vec::new();
+                lifeline_end(&peer, &phase, LIFELINE_WAIT, &mut said, || panic!("took"));
+                said
+            })
+        };
+        // `main` sees the connection close and begins the phase.
+        assert!(peer.wait_closed(Some(Duration::from_secs(30))));
+        assert!(phase.claim_main());
+        assert!(t.join().unwrap().is_empty(), "the lifeline left the exit to main and said nothing");
+    }
+
+    #[test]
+    fn the_lifeline_says_why_and_ends_when_main_never_claims_the_exit() {
+        let peer = a_peer();
+        let (mut said, mut ended) = (Vec::new(), false);
+        let wait = Duration::from_millis(30);
+        lifeline_end(&peer, &Phase::new(), wait, &mut said, || ended = true);
+        assert!(ended && String::from_utf8(said).unwrap().contains("did not begin"));
+    }
+
+    #[test]
+    fn a_main_that_lost_the_claim_goes_through_begin_exit() {
+        let phase = Phase::new();
+        assert!(phase.claim_fallback(Duration::ZERO));
+        let mut ended = false;
+        begin_exit(&phase, Duration::from_millis(30), || ended = true);
+        assert!(ended, "a main that lost the claim ends the process itself");
+        let mut kept = false;
+        begin_exit(&Phase::new(), Duration::from_millis(30), || kept = true);
+        assert!(!kept, "a main that wins the claim does not");
+    }
+
+    struct Broken;
+    impl io::Write for Broken {
+        fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+            Err(io::ErrorKind::BrokenPipe.into())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct Panicking;
+    impl io::Write for Panicking {
+        fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+            panic!("a writer that panics")
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn the_fallback_ends_the_process_whatever_its_message_does() {
+        let mut said = Vec::new();
+        let mut ended = 0;
+        end_after_fallback(&mut said, || ended += 1);
+        assert_eq!((ended, String::from_utf8(said).unwrap().contains("did not begin")), (1, true));
+        // The host is gone: a broken pipe, and a writer that panics, still end it.
+        end_after_fallback(&mut Broken, || ended += 1);
+        end_after_fallback(&mut Panicking, || ended += 1);
+        assert_eq!(ended, 3);
+        io::Write::flush(&mut Broken).unwrap();
+        io::Write::flush(&mut Panicking).unwrap();
+    }
+
+    #[test]
+    fn a_main_that_lost_the_claim_ends_the_process_within_the_bound() {
+        // On a thread, so a `main` that parked for good fails this test instead of hanging it.
+        let (done, ended) = std::sync::mpsc::channel();
+        std::thread::spawn(move || main_lost_claim(Duration::from_millis(30), || done.send(()).unwrap()));
+        assert!(
+            ended.recv_timeout(Duration::from_secs(30)).is_ok(),
+            "the late main did not end the process"
+        );
+    }
+
+    #[test]
+    fn the_lifeline_ends_the_process_itself_when_the_phase_never_begins() {
+        let peer = a_peer();
+        let phase = Phase::new();
+        let mut ended = false;
+        close_then_end(&peer, &phase, Duration::from_millis(50), || ended = true);
+        assert!(peer.is_closed(), "it closed the peer first");
+        assert!(ended, "after the bound it falls back to ending the process");
+        // A `main` that comes late finds the exit taken: it must park, never run a second exit.
+        assert!(!phase.claim_main(), "the lifeline owns the exit now");
+    }
 
     #[test]
     fn the_bootstrap_comes_from_stdin_or_a_named_file() {

@@ -208,9 +208,13 @@ impl Builtins {
 
     /// Stops every plugin process (on exit; they would also exit when Debrief does).
     pub fn shutdown(&self) {
-        for p in &self.processes {
-            p.shutdown();
-        }
+        // Together: each stop may wait for its process (a hung one is killed after its grace), and one after the other two
+        // hung plugins overran the worker's whole stop budget.
+        std::thread::scope(|scope| {
+            for p in &self.processes {
+                scope.spawn(move || p.shutdown());
+            }
+        });
     }
 }
 

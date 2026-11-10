@@ -41,8 +41,10 @@ pub const KEPT_ENV: &[&str] = &[
     "XDG_RUNTIME_DIR",
 ];
 
-/// How long a child whose lifeline was cut may take to exit before it is killed.
-pub const KILL_GRACE: Duration = Duration::from_millis(150);
+/// How long a child whose lifeline was cut may take to exit before it is killed: the child's own stop budget plus a
+/// margin ([`crate::child::STOP_BUDGET`], [`crate::child::STOP_MARGIN`]). A grace shorter than the budget killed the store
+/// worker in the middle of its exit; a child that stops sooner ends the wait with it.
+pub const KILL_GRACE: Duration = crate::child::STOP_BUDGET.saturating_add(crate::child::STOP_MARGIN);
 
 /// How to start a child.
 #[derive(Debug, Clone)]
