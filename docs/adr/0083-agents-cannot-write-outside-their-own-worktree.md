@@ -1,7 +1,8 @@
 # 83. Agents cannot write outside their own worktree: one worktree tool with owner locks, cleanup that skips locks, a guard hook for the primary checkout and other agents' worktrees, and a probe
 
-- Status: Proposed (2026-11-10). The user asked for this redesign on 2026-11-10 (ER-21). Revised after independent
-  review rounds 1 (4 P1, 8 P2), 2 (2 P1, 4 P2) and 3 (2 P1). Needs the decisions below and a fourth review round before any build.
+- Status: Accepted 2026-11-10 (user), decisions as recommended (D1-D11). The user asked for this redesign on 2026-11-10
+  (ER-21). Revised after independent review rounds 1 (4 P1, 8 P2), 2 (2 P1, 4 P2) and 3 (2 P1); the round-3 fixes were
+  checked before acceptance.
 - Date: 2026-11-10
 - Related: ER-2 / rule 2 (every agent works in its own worktree; the main checkout stays on `main` for the coordinator),
   ER-3 (no `git stash`), ER-14 (an agent's run must not change the machine), ER-21 / rule 40 (recurring bugs mean a
@@ -212,6 +213,20 @@ unlocks it, and no cleanup removes a locked worktree. Merges into trains and `ma
 worktree. The primary checkout stays on `main` for the coordinator's fast-forwards. A guard hook refuses unguarded
 `cd`s, an agent's git writes and edits outside its own worktree and scratch, and the coordinator's other git writes in
 the primary; the coordinator's primary-checkout probe runs at every landing."
+
+**Proposed ER-2 amendment (D6 (a); to be applied in the engineering-rules repository by its owner, not by this ADR).**
+Today's text (`RULES.md`):
+
+```text
+- **ER-2. Every agent works in its own git worktree,** with its own build directory and its own test ports; the main checkout stays on `main` for the coordinator. Why: parallel agents overwrite each other's files and builds otherwise ([scripts/worktree.sh](scripts/worktree.sh)).
+```
+
+Proposed text:
+
+```diff
+-- **ER-2. Every agent works in its own git worktree,** with its own build directory and its own test ports; the main checkout stays on `main` for the coordinator. Why: parallel agents overwrite each other's files and builds otherwise ([scripts/worktree.sh](scripts/worktree.sh)).
++- **ER-2. Every agent works in its own git worktree,** created, locked with an owner note and claimed through the project's one worktree tool, with its own build directory and its own test ports. Only its owner, or the coordinator after the owner has ended, unlocks it; no cleanup removes a locked worktree, and "pushed and clean" is not "unused". Merges into trains and main run in the integrator's locked worktree. The main checkout stays on `main` for the coordinator's fast-forwards. A guard hook refuses an unguarded `cd` (one not followed by `&&` or `|| exit`), an agent's git writes and edits outside its own worktree and scratch folder, and the coordinator's other git writes in the main checkout; a probe of the main checkout runs at every landing. Why: parallel agents overwrite each other's files and builds otherwise, and on 2026-11-10 a cleanup removed a live agent's worktree and its `cd ...; git merge` then merged into the main checkout's `main` ([scripts/worktree.sh](scripts/worktree.sh); Paddock ADR 0083).
+```
 
 ## Alternatives rejected
 

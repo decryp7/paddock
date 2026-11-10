@@ -1,7 +1,7 @@
 # 84. Accessible names need a role that allows them: a template lint, one loading-state component, a shared ARIA spec helper and axe over loading, empty and error states
 
-- Status: Proposed (2026-11-10). The user asked for this redesign on 2026-11-10 (ER-21). Revised after independent
-  review rounds 1 (1 P1, 5 P2) and 2 (approved, one P2 applied). Needs the decisions below before any build.
+- Status: Accepted 2026-11-10 (user), decisions as recommended (D1-D7). The user asked for this redesign on 2026-11-10
+  (ER-21). Revised after independent review rounds 1 (1 P1, 5 P2) and 2 (approved, one P2 applied).
 - Date: 2026-11-10
 - Related: ER-21 / rule 40 (recurring bugs mean a missing design rule), ER-22 / rules 42, 43 and 55 (share first; one
   implementation per mechanism), ER-33 / rule 71 (a check counts only with a positive control), rule 47 (Material and
