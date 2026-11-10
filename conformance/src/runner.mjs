@@ -1,12 +1,13 @@
 import { createContext, loadConfig } from './context.mjs';
-import { error } from './finding.mjs';
+import { error, unwaivable } from './finding.mjs';
 import { checks } from './checks/index.mjs';
 import { inScope } from './util/scope.mjs';
 import { pathMatches } from './util/fs.mjs';
 import { applyWaivers, parseWaivers } from './util/waivers.mjs';
 
 /**
- * Runs the selected checks over `root`. A check that throws is an error finding (it fails closed). Waivers are applied last.
+ * Runs the selected checks over `root`. A check that throws, or returns no list of findings, is an unwaivable error finding: a run that did not finish never passes and
+ * no waiver (not even `path = "*"`) covers it (ER-33, ADR 0089 D8). Waivers are applied last.
  * Returns { app, checks: [ids run], findings, waived, errors, warnings }.
  */
 export async function runChecks({ root, app, only = null, options = {}, registry = checks }) {
@@ -19,9 +20,14 @@ export async function runChecks({ root, app, only = null, options = {}, registry
   let findings = [];
   for (const check of selected) {
     try {
-      findings.push(...(await check.run(ctx)));
+      const found = await check.run(ctx);
+      if (!Array.isArray(found)) {
+        findings.push(unwaivable(error(check.id, check.rule, '', 1, `the check did not complete: it returned ${found === undefined ? 'nothing' : typeof found} instead of a list of findings`, 'Fix the check; a run that is incomplete never passes.')));
+        continue;
+      }
+      findings.push(...found);
     } catch (e) {
-      findings.push(error(check.id, check.rule, '', 1, `the check crashed: ${e.message}`, 'Fix the check or the input it could not read; a check that cannot run never passes.'));
+      findings.push(unwaivable(error(check.id, check.rule, '', 1, `the check crashed: ${e.message}`, 'Fix the check or the input it could not read; a check that cannot run never passes.')));
     }
   }
 
