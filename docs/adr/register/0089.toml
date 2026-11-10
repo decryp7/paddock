@@ -1,0 +1,53 @@
+id = "0089"
+title = "A measurement that did not happen can never pass: one outcome type, one test outcome, one exit code, and a check over every copy"
+summary = "A measurement that did not happen can never pass (accepted 2026-11-10 by the user, all decisions as recommended, D14 (a); ER-21, ER-33): one `Outcome` (`Clean`, `NotApplicable`, `Findings`, `NotMeasured`, `CheckBroken`) in `paddock_cli::outcome` computed once from the run record after waivers; a `Verdict` where an undeclared not-measured exits 6 and is never masked by report-only findings, check broken exits 7; a `Termination` test outcome `paddock_testkit::Measured` (strict by default, optional entries per CI leg from `docs/optional-measurements.toml`, a reporting mode for `./dev test`); one CI runner-log reader that never returns an empty result for partial input; C103 over every early exit in tests and local outcome definitions; six instances of 2026-11-10 plus the JS host; decisions D1–D14 (release runs honour an entry only when another leg of the same run measured it, checked by a final job in every tag workflow that runs tests, fail-closed for unwired steps, wiring checked by C103 (d)), 17.5 days"
+status = "accepted"
+accepted = "2026-11-10"
+copied_from = "docs/adr-not-measured 0df6835a9"
+copied = "2026-11-11"
+prerequisites = []
+
+[[wp]]
+id = "WP-0"
+days = 0.25
+state = "not-started"
+
+[[wp]]
+id = "WP-1"
+days = 1.5
+state = "not-started"
+
+[[wp]]
+id = "WP-2"
+days = 2.75
+state = "not-started"
+
+[[wp]]
+id = "WP-2b"
+days = 2.5
+state = "not-started"
+
+[[wp]]
+id = "WP-2c"
+days = 1.5
+state = "not-started"
+
+[[wp]]
+id = "WP-3"
+days = 3.5
+state = "not-started"
+
+[[wp]]
+id = "WP-4"
+days = 2
+state = "not-started"
+
+[[wp]]
+id = "WP-5"
+days = 3
+state = "not-started"
+
+[[wp]]
+id = "WP-6"
+days = 0.5
+state = "not-started"

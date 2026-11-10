@@ -1,0 +1,33 @@
+id = "0096"
+title = "Accepted decisions land, and their work is tracked to main"
+summary = "Accepted decisions land, and their work is tracked to main (accepted 2026-11-10 by the user, all decisions as recommended; ER-21): 13 accepted ADRs on neither `origin/main` nor the train (0036 for ten days), four approved mechanisms unbuilt while their class recurred (ADR 0021 §4 eol lines, 0038 pre-push, 0049 §5 union index, the merge check), the index conflicting on every docs branch; accepted texts copied byte-identical to main the same day as a docs-only commit (rule 50 (d), never a merge; provenance in the register), one register file per decision with work-package states (landed derived from main), a generated index, a tree check and `./dev adr status` (in-main query shared with ADR 0091, unknown is not measured, staleness and reliance on unbuilt mechanisms as report-only findings); 4 days, gates no tag"
+status = "accepted"
+accepted = "2026-11-10"
+copied_from = "docs/adr-decision-register 39e79d355"
+copied = "2026-11-11"
+prerequisites = []
+
+[[wp]]
+id = "WP-0"
+days = 0.5
+state = "not-started"
+
+[[wp]]
+id = "WP-1"
+days = 1.5
+state = "not-started"
+
+[[wp]]
+id = "WP-2"
+days = 1.25
+state = "not-started"
+
+[[wp]]
+id = "WP-3"
+days = 0.5
+state = "not-started"
+
+[[wp]]
+id = "WP-4"
+days = 0.25
+state = "not-started"

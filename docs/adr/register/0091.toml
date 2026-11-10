@@ -1,0 +1,33 @@
+id = "0091"
+title = "Design documents pin their evidence, and reviews check it is still current"
+summary = "Design documents pin their evidence, and reviews check it is still current (accepted 2026-11-10 by the user, all decisions as recommended; ER-21): four stale or unchecked facts in one day's ADRs 0089 and 0090 (fixes cited minutes after they moved, a shipped bug no tag contains); an `evidence-heads` block of branch → sha in every design document that reads another branch, `./dev evidence check` judged into ADR 0089's `Outcome` (moves touching a named file fail, others report-only) and `./dev evidence shipped` (tags, patch-id equivalents, grep hits per tag), reviewers run it first, C105 checks the block is there (never staleness); 2.75 days, gates no tag"
+status = "accepted"
+accepted = "2026-11-10"
+copied_from = "docs/adr-evidence-heads b32655fef"
+copied = "2026-11-11"
+prerequisites = []
+
+[[wp]]
+id = "WP-1"
+days = 1.25
+state = "not-started"
+
+[[wp]]
+id = "WP-2"
+days = 0.25
+state = "not-started"
+
+[[wp]]
+id = "WP-3"
+days = 0.5
+state = "not-started"
+
+[[wp]]
+id = "WP-4"
+days = 0.25
+state = "not-started"
+
+[[wp]]
+id = "WP-5"
+days = 0.5
+state = "not-started"
