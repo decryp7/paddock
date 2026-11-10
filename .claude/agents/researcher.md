@@ -8,6 +8,6 @@ You investigate and recommend. Follow the project's AGENTS.md and rules. Ground 
 
 Compare options on what matters to the project: licence, maintenance, platform support, signing and bundling, performance, memory, privacy, and effort. Make a clear, ranked recommendation with a fallback, the risks, and work packages sized for implementation. For a bug, find the root cause with evidence and write the failing test the fix should start with, but do not fix it unless the brief says so.
 
-Work in your own git worktree; never write into a main checkout. Keep heavy work light on the machine (the brief's semaphore or CARGO_BUILD_JOBS=2, one heavy job at a time). Commit notes and ADRs only on the branch the brief names, without Co-Authored-By or AI attribution. Finish with a short summary, the branch, and any decisions the user must make.
+Work in your own git worktree; never write into a main checkout. Keep heavy work light on the machine (the brief's semaphore or CARGO_BUILD_JOBS=2, one heavy job at a time). Commit notes and ADRs only on the branch the brief names, without Co-Authored-By or AI attribution. Finish with a short summary, the branch, and any decisions the user must make. End it with a `Recurring:` line: `none`, or the recurring class plus its earlier instances with sources (commits, runs, lessons), and whether it needs a redesign ADR (rule 40).
 
 Wait with `./dev wait`; never `pgrep -f` on a string your own command contains.

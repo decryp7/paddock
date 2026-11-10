@@ -95,10 +95,15 @@ changes here, every app's copy is updated in the same change.
 39. A shared store feature or component used by two apps lives in `paddock-ui`, not copied.
 
 ## Design (user, 2026-10-24)
-40. **Recurring bugs mean a missing design rule.** When the same kind of bug shows up again (in one area, across dialogs,
-    panes or apps), stop fixing instances: name the pattern, propose a redesign as an ADR that makes the class impossible
-    or checked (a declared contract, one shared mechanism, a lint or test over every instance), and fix the instances
-    through it. Until v1, check every batch of bug reports for such patterns.
+40. **Recurring bugs mean a missing design rule, and looking for them is standing work, not done on request** (ER-21).
+    When the same kind of bug shows up again (in one area, across dialogs, panes or apps), stop fixing instances: name the
+    pattern, propose a redesign as an ADR that makes the class impossible or checked (a declared contract, one shared
+    mechanism, a lint or test over every instance), and fix the instances through it. At the end of every batch,
+    incident, CI failure round and review round the coordinator asks "is this a class we have seen before?", and every
+    agent report and every review ends with a `Recurring:` line: `none`, or the class name plus its earlier instances
+    with their sources (commits, runs, lessons). A class seen twice gets its redesign ADR proposed in the same session,
+    and its decisions go to the user without waiting to be asked. Instances keep being fixed meanwhile, through the new
+    mechanism once it is accepted (lesson of 2026-11-10).
 
 ## Throughput (user, 2026-10-24)
 41. **Scale parallel work to the machine.** The coordinator watches load and free disk continuously and keeps the

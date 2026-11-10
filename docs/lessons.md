@@ -1499,3 +1499,7 @@ A redaction default in a shared crate was widened for one app's problem report. 
 ## Gitea tokens cannot mint narrower tokens, and agents must not create bot users (2026-11-08)
 
 An agent looking for a narrower CI token found that a Gitea token cannot create a token with fewer rights, and the only other route was creating a bot user. Agents must not create users. The user creates scoped CI tokens (one per purpose, least privilege) and the agent is given the one it needs; if none exists, the agent stops and asks.
+
+## Redesigns for recurring classes came only when the user asked (2026-11-10)
+
+Six redesign ADRs (0081 to 0086) and the amendments to ADRs 0025, 0038 and 0077 were written only after the user asked "any redesign?", although their classes had recurred for days. Root cause: rule 40 (ER-21) said what to do with a recurring class but not who looks for one or when, so nobody did until asked. Fix: rule 40 and ER-21 make the check standing work: the coordinator asks "is this a class we have seen before?" at the end of every batch, incident, CI failure round and review round; every agent report and review ends with a `Recurring:` line; a class seen twice gets its ADR proposed in the same session and its decisions go to the user unasked. Class: a rule that names an action but no trigger runs only on request.
