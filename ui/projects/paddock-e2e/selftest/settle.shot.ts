@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { settleTransitions } from '../src/index.ts';
+import { axeViolations, settleTransitions } from '../src/index.ts';
 
 // axeViolations waits for transitions: a colour changing over 400 ms is read at its end, an endless animation does not hold it up.
 test('settleTransitions waits for a colour transition and ignores an endless animation', async ({ page }) => {
@@ -26,4 +26,36 @@ test('settleTransitions returns at once while a transition restarts on every tic
   const t = Date.now();
   await settleTransitions(page);
   expect(Date.now() - t, 'settling waited for transitions that restart').toBeLessThan(800);
+});
+
+// A Material tooltip opens 500 ms after the pointer rests on its host and fades in; a click leaves the pointer there. axe then
+// scans a tooltip that is half faded in (run 7872: color-contrast on .mat-mdc-tooltip-surface). axeViolations must not leave a
+// hover behind: no pointer on the host and no tooltip timer pending when it returns (a timer that is armed fires 500 ms later).
+test('axeViolations leaves no hover tooltip pending after a click', async ({ page }) => {
+  const body = `<style>@keyframes fade{from{opacity:0}to{opacity:1}} #tip{position:fixed;left:200px;top:10px;color:#ccc;background:#fff;animation:fade 200ms linear}</style>
+    <button id="b" style="margin:50px;padding:20px">item</button>`;
+  await page.goto(`data:text/html,${encodeURIComponent(body)}`);
+  await page.evaluate(() => {
+    const b = document.getElementById('b') as HTMLElement;
+    let timer = 0;
+    (window as unknown as { armed: () => boolean }).armed = () => timer !== 0;
+    b.addEventListener('mouseenter', () => {
+      timer = window.setTimeout(() => {
+        timer = 0;
+        const tip = document.createElement('div');
+        tip.id = 'tip';
+        tip.textContent = 'low contrast tip';
+        document.body.append(tip);
+      }, 500);
+    });
+    b.addEventListener('mouseleave', () => {
+      clearTimeout(timer);
+      timer = 0;
+    });
+  });
+  await page.click('#b');
+  expect(await page.evaluate(() => (window as unknown as { armed: () => boolean }).armed()), 'the click arms the tooltip').toBe(true);
+  await axeViolations(page, { idsOnly: true });
+  expect(await page.evaluate(() => (window as unknown as { armed: () => boolean }).armed()), 'a tooltip timer is still pending').toBe(false);
+  expect(await page.evaluate(() => document.getElementById('b')?.matches(':hover'))).toBe(false);
 });

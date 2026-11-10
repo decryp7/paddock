@@ -31,6 +31,10 @@ export async function settleTransitions(page: Page): Promise<void> {
 
 /** The page's axe violations as `rule: target, target` lines (empty: none), against `WCAG_TAGS`. */
 export async function axeViolations(page: Page, options: AxeOptions = {}): Promise<string[]> {
+  // A click leaves the pointer on its target, and a hover tooltip (Material's opens after 500 ms and fades in) would appear
+  // while axe scans, half transparent. Moving the pointer away cancels the pending tooltip and closes an open one; this runs
+  // before settling so a tooltip that was already open finishes closing.
+  await page.mouse.move(0, 0);
   await settleTransitions(page);
   let builder = new AxeBuilder({ page }).withTags([...WCAG_TAGS]);
   for (const s of options.include ?? []) builder = builder.include(s);
