@@ -299,14 +299,14 @@ mod tests {
         let (cb, pb, _) = go(&c, &["path", "target", "x", "--source", b.to_str().unwrap()]);
         assert_eq!((ca, cb), (0, 0));
         assert_ne!(pa, pb, "two roots, two folders");
-        let real = std::fs::canonicalize(&ci).unwrap();
+        let real = mixed(&std::fs::canonicalize(&ci).unwrap());
         let ka = source_key(&a, false).unwrap();
-        assert_eq!(pa.trim(), format!("{}/target-x-{ka}-s1", real.display()));
+        assert_eq!(pa.trim(), format!("{real}/target-x-{ka}-s1"));
         assert!(Path::new(pa.trim()).is_dir());
         // A layout without {src} ignores --source.
         let (code, p, _) = go(&c, &["path", "src", "x", "--source", a.to_str().unwrap()]);
         assert_eq!(code, 0);
-        assert_eq!(p.trim(), format!("{}/src/x-s1", real.display()));
+        assert_eq!(p.trim(), format!("{real}/src/x-s1"));
     }
 
     #[test]
