@@ -602,3 +602,51 @@ fn a_run_marker_is_not_called_a_crash_when_the_process_table_cannot_be_read() {
         PreviousRun::Unknown
     );
 }
+
+/// sysinfo lists a process it could not read with start time 0 (macOS, a root process of another user): that is no start
+/// time, so it never reads as "a different start" (a reused pid) and the folder of the process is kept.
+#[test]
+fn a_start_time_of_zero_is_unknown_not_a_reused_pid() {
+    let m = Marker {
+        pid: 5,
+        started_at: Some(1000),
+    };
+    let zero = |_: u32| Look::Started(0);
+    assert_eq!(
+        previous_run(MarkerState::Found(m), 9, &zero),
+        PreviousRun::Unknown
+    );
+    let t = tempfile::tempdir().unwrap();
+    let inst = t.path().join(INSTANCES_DIR);
+    std::fs::create_dir_all(inst.join("101")).unwrap();
+    marker_file(&inst.join("101"))
+        .save(&MarkerBody {
+            pid: 101,
+            started_at: Some(1000),
+            ..MarkerBody::default()
+        })
+        .unwrap();
+    assert_eq!(prune_instances(t.path(), 300, &zero), 0);
+    assert!(inst.join("101").exists());
+}
+
+#[cfg(all(feature = "os-probe", unix))]
+#[test]
+fn the_os_probe_never_reads_a_process_it_may_not_see_as_started_at_zero_or_gone() {
+    let seen = os_probe(1);
+    assert_ne!(seen, Look::Started(0), "start time 0 is not a start time");
+    assert_ne!(seen, Look::Gone, "pid 1 runs");
+}
+
+#[cfg(feature = "os-probe")]
+#[test]
+fn only_a_confirmed_absence_is_gone_and_a_unreadable_listing_is_unknown() {
+    use paddock_proc::Presence;
+    use sysinfo::ProcessStatus::{Run, Unknown as Unk};
+    let never = || panic!("a listed process needs no confirmation");
+    assert_eq!(look_from(Some((7, Run)), never), Look::Started(7));
+    assert_eq!(look_from(Some((0, Run)), never), Look::Unknown);
+    assert_eq!(look_from(Some((7, Unk(0))), never), Look::Unknown);
+    assert_eq!(look_from(None, || Presence::Gone), Look::Gone);
+    assert_eq!(look_from(None, || Presence::Unknown), Look::Unknown);
+}

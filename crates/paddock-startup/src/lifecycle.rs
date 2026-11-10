@@ -73,22 +73,43 @@ impl From<Option<u64>> for Look {
 /// Looks up the process with this PID in the process table.
 pub type Probe<'a> = &'a dyn Fn(u32) -> Look;
 
-/// The OS's process table (the production [`Probe`]).
+/// The OS's process table (the production [`Probe`]). A process sysinfo could not read (start time 0 or status Unknown: macOS
+/// lists another user's root process so) is `Unknown`, and one it does not list is `Gone` only when `paddock_proc` confirms
+/// it with an OS answer that tells "no such process" from "refused".
 #[cfg(feature = "os-probe")]
 pub fn os_probe(pid: u32) -> Look {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
-    let pid = Pid::from_u32(pid);
+    let id = Pid::from_u32(pid);
     let Ok(mut sys) = System::new()
-        .inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; the start time of pid {pid} is unknown"))
+        .inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; the start time of pid {id} is unknown"))
     else {
         return Look::Unknown;
     };
     sys.refresh_processes_specifics(
-        ProcessesToUpdate::Some(&[pid]),
+        ProcessesToUpdate::Some(&[id]),
         false,
         ProcessRefreshKind::nothing(),
     );
-    sys.process(pid).map(|p| p.start_time()).into()
+    look_from(
+        sys.process(id).map(|p| (p.start_time(), p.status())),
+        || paddock_proc::presence(pid),
+    )
+}
+
+/// [`os_probe`] over what sysinfo listed (start time, status) and the confirmation asked when it listed nothing.
+#[cfg(feature = "os-probe")]
+fn look_from(
+    seen: Option<(u64, sysinfo::ProcessStatus)>,
+    confirm_absent: impl FnOnce() -> paddock_proc::Presence,
+) -> Look {
+    match seen {
+        Some((0, _) | (_, sysinfo::ProcessStatus::Unknown(_))) => Look::Unknown,
+        Some((started, _)) => Look::Started(started),
+        None => match confirm_absent() {
+            paddock_proc::Presence::Gone => Look::Gone,
+            paddock_proc::Presence::Running | paddock_proc::Presence::Unknown => Look::Unknown,
+        },
+    }
 }
 
 /// Which state folder a process uses (see the module docs).
@@ -173,6 +194,8 @@ fn alive(m: &Marker, probe: Probe<'_>) -> Liveness {
     match (probe(m.pid), m.started_at) {
         (Look::Gone, _) => Liveness::Dead,
         (Look::Unknown, _) => Liveness::Unknown,
+        // A start time of 0 is no start time (the process could not be read), not a pid that was reused.
+        (Look::Started(0), _) => Liveness::Unknown,
         (Look::Started(_), None) => Liveness::Alive,
         (Look::Started(now), Some(then)) if now.abs_diff(then) <= START_TOLERANCE_SECS => {
             Liveness::Alive
