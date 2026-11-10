@@ -429,13 +429,6 @@ fn owner_presence(pid: u32, started: Option<StartTime>) -> paddock_proc::Presenc
     }
 }
 
-/// Whether the owner a profile's name gives may still run: only a proven `Gone` says no (rule 53). The sweep asks
-/// [`owner_presence`] through [`sweep_profiles_by_presence`]; the tests ask this.
-#[cfg(test)]
-fn owner_alive(pid: u32, started: Option<StartTime>) -> bool {
-    owner_presence(pid, started).may_be_alive()
-}
-
 /// Removes throwaway profiles in `base` whose owner is gone (a crash, a kill; the owner by pid and start time, rule 53).
 /// Each launch with a throwaway profile calls it; an app may also call it at start-up. Returns how many were removed. A
 /// process counts as gone only when the OS said so: when the process table cannot be read nothing is known, every owner
