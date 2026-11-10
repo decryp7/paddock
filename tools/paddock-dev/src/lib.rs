@@ -6,6 +6,7 @@
 //! - `self hash`: the content address of the binary ([`input_hash`]);
 //! - `ci slot acquire|release|status`: job-isolation slots over kernel file locks ([`slots`], backed by `paddock-slots`);
 //! - `wait`: one bounded wait for a plock job, a process, a log line or a CI run ([`wait`]);
+//! - `check run`: the host of the repository checks in Rust, C39 and C53 first ([`check`], RT-5);
 //! - `check ipc-endpoints`: C102, the register of every listen site and the ratchet of connection endings
 //!   ([`ipc_endpoints`], ADR 0072);
 //! - `graph affected`: the affected closure of a change set, the first consumer of `paddock-repo-graph` ([`plan`], with the
@@ -17,6 +18,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod check;
 mod cli;
 mod fds;
 pub mod gates;

@@ -1,4 +1,4 @@
-use crate::{gates, input_hash, ipc_endpoints, plan, plan_cmd, slots, wait};
+use crate::{check, gates, input_hash, ipc_endpoints, plan, plan_cmd, slots, wait};
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
 use std::io::Write;
@@ -53,6 +53,25 @@ enum Command {
 
 #[derive(Subcommand)]
 enum CheckCommand {
+    /// The repository checks ported to Rust so far (C39, C53; RT-5): findings, expiring waivers from paddock.waivers.toml, a run
+    /// record per check (`not measured` is told from `clean`). The report JSON has the shape of paddock-conformance's, plus `runs`.
+    Run {
+        /// Only these check ids, comma separated (for example C39,C53).
+        #[arg(long, value_delimiter = ',')]
+        only: Option<Vec<String>>,
+        /// Only these repository-relative files, comma separated (the scope of a push gate).
+        #[arg(long, value_delimiter = ',')]
+        files: Option<Vec<String>>,
+        /// The repository root (default: the folder containing .git, found from the current folder).
+        #[arg(long)]
+        root: Option<PathBuf>,
+        /// The app name in the report.
+        #[arg(long, default_value = "paddock")]
+        app: String,
+        /// Also write the report JSON to this file.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
     /// C102 (ADR 0072): every listen site is in docs/ipc-endpoints.toml with an ending test or a reason, and the ratchet of
     /// connection endings is well formed. With `--tag`, also refuses a release tag that a ratchet entry blocks.
     IpcEndpoints {
@@ -257,6 +276,22 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Gates {
             command: GatesCommand::Ratchet(a),
         } => gates::command::ratchet(a.root.as_deref(), &a.base, &a.release_tag),
+        Command::Check {
+            command:
+                CheckCommand::Run {
+                    only,
+                    files,
+                    root,
+                    app,
+                    out,
+                },
+        } => check::command(check::Args {
+            only,
+            files,
+            root,
+            app,
+            out,
+        }),
         Command::Check {
             command: CheckCommand::IpcEndpoints { tag, root },
         } => ipc_endpoints::command(root, tag),
