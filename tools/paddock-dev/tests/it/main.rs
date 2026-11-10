@@ -10,6 +10,7 @@ mod hostile;
 mod inputs;
 mod ipc_endpoints;
 mod isolation;
+mod release_isolation;
 mod slots;
 mod tree;
 mod wrapper;

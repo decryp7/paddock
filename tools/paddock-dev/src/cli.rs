@@ -1,4 +1,4 @@
-use crate::{ci_isolation, gates, input_hash, ipc_endpoints, plan, plan_cmd, slots, wait};
+use crate::{ci_isolation, gates, input_hash, ipc_endpoints, plan, plan_cmd, release_isolation, slots, wait};
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
 use std::io::Write;
@@ -81,6 +81,12 @@ enum CiCommand {
     /// The CI kit's job isolation on a host runner: slots, kept folders, ports, process patterns, temp folders (the port of
     /// `conformance/ci/job-isolation.sh`). Values go to standard output, messages to standard error.
     Isolation(ci_isolation::IsolationArgs),
+    /// Release mode (ADR 0085): a tag build reads nothing kept. `setup` makes the job's folders, `record` is the only
+    /// ledger writer, `verify` proves it.
+    ReleaseIsolation {
+        #[command(subcommand)]
+        command: release_isolation::Command,
+    },
 }
 
 #[derive(Subcommand)]
@@ -266,6 +272,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::Isolation(_),
         } => Err(CliError::failure("`ci isolation` was dispatched through the report path.")),
+        Command::Ci {
+            command: CiCommand::ReleaseIsolation { command },
+        } => release_isolation::command(command),
         Command::Wait(a) => wait::command(&a),
         Command::Gates {
             command: GatesCommand::Model(a),
