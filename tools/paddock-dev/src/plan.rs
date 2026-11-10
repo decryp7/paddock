@@ -106,8 +106,7 @@ static PER_MACHINE_INPUT: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// What C100 reads (ADR 0060 section 4): scripts/affected.mjs `C100_INPUTS` and `./dev gates inputs`. A change marks conformance.
-/// The content rule (a test file that adds or removes an ignore attribute or an environment guard) needs the file's text before
-/// and after and is not in this port yet.
+/// The content rule (a test file that adds or removes an ignore attribute or an environment guard) is [`guards_changed`].
 static C100_INPUTS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     [
         r"^docs/gates\.toml$",
@@ -126,6 +125,48 @@ static C100_INPUTS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     .map(|p| re(p))
     .collect()
 });
+
+static GUARD: LazyLock<Regex> = LazyLock::new(|| re(r"#\[ignore|cfg_attr\([^)\n]*ignore|env::var|process\.env"));
+static RUST_FN: LazyLock<Regex> = LazyLock::new(|| re(r"\bfn\s+(\w+)"));
+static TS_TEST: LazyLock<Regex> = LazyLock::new(|| re(r#"\b(?:test|it)(?:\.\w+)?\(\s*['"`]([^'"`]+)"#));
+
+/// The ignore attributes and environment guards of a test file, each paired with the Rust function or TypeScript test title it
+/// belongs to (`guardSet` in scripts/affected.mjs): moving an ignore from one test to another changes the set though the count
+/// stays.
+pub fn guard_set(text: &str) -> BTreeSet<String> {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut set = BTreeSet::new();
+    for (i, line) in lines.iter().enumerate() {
+        let Some(m) = GUARD.find(line) else {
+            continue;
+        };
+        let mut name = String::new();
+        for l in lines.iter().take((i + 8).min(lines.len())).skip(i) {
+            if let Some(c) = RUST_FN.captures(l) {
+                name = c[1].to_string();
+                break;
+            }
+        }
+        if name.is_empty() {
+            for k in (0..=i).rev().take_while(|k| *k + 40 > i) {
+                if let Some(c) = TS_TEST.captures(lines[k]) {
+                    name = c[1].to_string();
+                    break;
+                }
+            }
+        }
+        set.insert(format!("{}|{name}", m.as_str()));
+    }
+    set
+}
+
+/// Whether a file's guards differ between two texts (a missing file has none).
+pub fn guards_changed(before: Option<&str>, after: Option<&str>) -> bool {
+    guard_set(before.unwrap_or_default()) != guard_set(after.unwrap_or_default())
+}
+
+/// The text of a changed file before and after the change (`None`: no such file at that end).
+pub type ContentOf<'a> = &'a dyn Fn(&str) -> (Option<String>, Option<String>);
 
 /// The conformance tool's own code.
 static CONFORMANCE_CODE: LazyLock<Regex> = LazyLock::new(|| re(r"^conformance/(src|bin)/"));
@@ -299,6 +340,8 @@ pub struct Options<'a> {
     pub gitea: Option<&'a dyn GiteaSource>,
     /// The crate folders whose Rust sources name a generated file (by its file name); without it a generated file marks every crate.
     pub crates_naming: Option<CratesNaming<'a>>,
+    /// The text of a changed file before and after, for the C100 content rule; without it that rule is not applied.
+    pub content: Option<ContentOf<'a>>,
 }
 
 /// The apps whose Windows installer adopts the shared include: hooks that include `paddock-per-machine.nsh`, or a
@@ -406,6 +449,18 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
         }
         if C100_INPUTS.iter().any(|r| r.is_match(f)) {
             st.mark(Some("conformance".to_string()), format!("C100 reads {f} (./dev gates inputs)"));
+        }
+        if let Some(content) = opts
+            .content
+            .filter(|_| (f.ends_with(".rs") || f.ends_with(".ts")) && !f.contains("node_modules/"))
+        {
+            let (before, after) = content(f);
+            if guards_changed(before.as_deref(), after.as_deref()) {
+                st.mark(
+                    Some("conformance".to_string()),
+                    format!("C100: an ignore attribute or an environment guard changed in {f}"),
+                );
+            }
         }
         // The apps whose own checks run paddock-conformance rerun those checks when conformance changes (scripts/affected.mjs).
         if CONFORMANCE_CODE.is_match(f) {
@@ -788,6 +843,21 @@ pub fn plan_on_graph(root: &Path, history: &dyn History, req: &Request, graph: &
         )?)
     };
     let naming = |f: &str| crate::plan_repo::files_naming_generated(root, f);
+    // Files mode: HEAD before, the working tree after (as the script does); base mode: the two revisions.
+    let content = |f: &str| {
+        if files_mode {
+            (
+                history.file_at("HEAD", f).ok().flatten(),
+                std::fs::read_to_string(root.join(f)).ok(),
+            )
+        } else {
+            let base = req.base.as_deref().unwrap_or("HEAD");
+            (
+                history.file_at(base, f).ok().flatten(),
+                history.file_at(&req.head, f).ok().flatten(),
+            )
+        }
+    };
     let mut opts = Options {
         all: req.all,
         explain: req.explain,
@@ -796,6 +866,7 @@ pub fn plan_on_graph(root: &Path, history: &dyn History, req: &Request, graph: &
         conformance_apps: conformance_apps(root),
         gitea: gitea.as_ref().map(|g| g as &dyn GiteaSource),
         crates_naming: Some(&naming),
+        content: Some(&content),
     };
     let mut changed = req.files.clone();
     if let (Some(base), false) = (&req.base, req.all) {
@@ -1055,6 +1126,48 @@ mod tests {
             (include["conformance"].clone(), include["crates"].clone()),
             (json!(true), json!(true))
         );
+    }
+
+    fn guard_plan(file: &str, before: Option<&str>, after: Option<&str>) -> Value {
+        let (b, a) = (before.map(String::from), after.map(String::from));
+        let read = move |_: &str| (b.clone(), a.clone());
+        let opts = Options {
+            explain: true,
+            content: Some(&read),
+            ..Options::default()
+        };
+        affected(&[file.to_string()], &sample(), &opts).unwrap()
+    }
+
+    #[test]
+    fn guard_set_pairs_each_guard_with_its_rust_function_or_ts_test_title() {
+        let rust = "#[test]\n#[ignore]\nfn slow() {}\nfn other() { let _ = std::env::var(\"X\"); }\n";
+        assert_eq!(
+            guard_set(rust),
+            BTreeSet::from(["#[ignore|slow".to_string(), "env::var|other".to_string()])
+        );
+        let ts = "it('reads it', () => {\n  const a = process.env.X;\n});\n";
+        assert_eq!(guard_set(ts), BTreeSet::from(["process.env|reads it".to_string()]));
+        assert!(guard_set("").is_empty());
+    }
+
+    #[test]
+    fn an_added_moved_or_removed_guard_in_a_test_file_marks_conformance() {
+        let before = "#[test]\n#[ignore]\nfn a() {}\n#[test]\nfn b() {}\n";
+        let moved = "#[test]\nfn a() {}\n#[test]\n#[ignore]\nfn b() {}\n";
+        for (b, a) in [(Some(before), Some(moved)), (None, Some(before)), (Some(before), None)] {
+            let p = guard_plan("crates/paddock-cli/src/lib.rs", b, a);
+            assert_eq!(
+                p["why"]["conformance"],
+                json!(["C100: an ignore attribute or an environment guard changed in crates/paddock-cli/src/lib.rs"])
+            );
+        }
+        let same = guard_plan("crates/paddock-cli/src/lib.rs", Some(before), Some(before));
+        assert_eq!(same["conformance"], json!(false));
+        let other = guard_plan("crates/paddock-cli/README.txt", Some(before), Some(moved));
+        assert_eq!(other["conformance"], json!(false));
+        let nm = guard_plan("ui/node_modules/x/a.ts", Some(before), Some(moved));
+        assert_eq!(nm["conformance"], json!(false));
     }
 
     #[test]

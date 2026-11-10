@@ -22,3 +22,11 @@ published, shared as a run artifact) and `setup-rust`'s image fast path, both de
 publishes the binary per input hash and runner kind from `main`, and the `dev` wrapper downloads it in CI (locally with
 `PADDOCK_DEV_DOWNLOAD=1`), checks its checksum and embedded hash (transport checks, not a trust boundary), and builds on any miss
 or doubt; a run with `PADDOCK_DEV_DOWNLOAD=0` (release and tag jobs) never uses a downloaded copy.
+
+## The planner in CI
+
+`ci.yml`'s plan job runs `./dev plan --ci` for every run (the app workflows already ran `./dev plan --ci --app <app>`); the golden
+tests compare it with `scripts/affected.mjs` on every sample, recorded case, the repository's history and the live narrowing edits,
+including C100's content rule (a test file that adds, moves or removes an ignore attribute or an environment guard marks conformance).
+Fallback for one release (ADR 0022 R4): set the repository variable `PLAN_PLANNER` to `node` and the plan job plans with the script
+again (it prints a `::warning::`); unset it to return. The script, its golden generator and this switch are removed together.
