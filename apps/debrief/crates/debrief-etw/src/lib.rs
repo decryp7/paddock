@@ -17,6 +17,7 @@ pub mod convert;
 pub mod heap;
 pub mod kernel;
 pub mod nettrace;
+pub mod orphan;
 pub mod scan;
 
 #[cfg(windows)]

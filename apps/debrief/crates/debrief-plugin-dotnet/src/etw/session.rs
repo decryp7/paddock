@@ -329,21 +329,6 @@ pub fn can_record() -> bool {
 mod tests {
     use super::*;
 
-    #[test]
-    fn orphans_are_sessions_of_dead_debriefs_only() {
-        let me = std::process::id();
-        assert!(etw::is_orphan(PREFIX, "Debrief-dotnet-999999-5-1", |_| false));
-        assert!(!etw::is_orphan(PREFIX, "Debrief-dotnet-999999-5-1", |_| true));
-        assert!(
-            !etw::is_orphan(PREFIX, &format!("Debrief-dotnet-{me}-5-1"), |_| false),
-            "our own sessions"
-        );
-        assert!(
-            !etw::is_orphan(PREFIX, "Debrief-native-999999-5-1", |_| false),
-            "the native profiler's sessions"
-        );
-    }
-
     /// Without administrator rights, starting a session is refused with `Denied` (the UI then offers
     /// "Restart as administrator"). Run unelevated; skipped when elevated.
     #[test]
