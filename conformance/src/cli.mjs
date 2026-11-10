@@ -6,6 +6,7 @@ import { checks } from './checks/index.mjs';
 import { runHermetic } from './hermetic.mjs';
 import { formatText, writeOutputs } from './report.mjs';
 import { runChecks } from './runner.mjs';
+import { exitStatus } from './outcome.mjs';
 import { ownPaddock } from './sync/paddock-root.mjs';
 import { syncMain } from './sync/main.mjs';
 import { windowWeightMain } from './window-weight/cli.mjs';
@@ -57,7 +58,7 @@ export function parseArgs(argv) {
   return o;
 }
 
-/** Entry point; returns the exit status. 0 clean, 1 findings, 2 usage. */
+/** Entry point; returns the exit status. 0 clean, 1 findings, 2 usage, 6 a check did not look, 7 a check is broken. */
 export async function main(argv, { log = console.log, err = console.error, env = process.env } = {}) {
   const [cmd, ...rest] = argv;
   try {
@@ -130,7 +131,8 @@ export async function main(argv, { log = console.log, err = console.error, env =
     log(o.json ? JSON.stringify(result, null, 2) : formatText(result));
     // `--strict C36`: the warnings of these checks fail the run too (a check that is a warning for apps may block in one repo).
     const strict = new Set((o.strict ?? '').split(',').map((x) => x.trim().toUpperCase()).filter(Boolean));
-    return result.errors || result.findings.some((f) => f.severity === 'warn' && strict.has(f.check)) ? 1 : 0;
+    // 7 a check is broken, 1 findings, 6 a check did not look (outcome.mjs); `--strict` makes the named checks' warnings fail too.
+    return exitStatus(result, strict);
   } catch (e) {
     err(`paddock-conformance: ${e.message}`);
     return 2;

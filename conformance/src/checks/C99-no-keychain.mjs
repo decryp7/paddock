@@ -251,7 +251,7 @@ function graphLayers(ctx, files) {
   const out = [];
   // Neither of these can be waived: a waiver would hide that the check looked at nothing (ER-33).
   const broken = (lock, dir, why) => unwaivable(error('C99', 72, lock, 1, `check broken: the macOS dependency graph of ${dir} could not be read (${why}), so a Keychain use in a dependency cannot be seen`, 'Fix the cause (network to the registry, a Cargo.lock that is out of date, cargo on PATH) and run the check again.'));
-  const notMeasured = (what, fix) => unwaivable(error('C99', 72, '.', 1, `not measured: ${what}, so the macOS dependency graph was not probed`, fix));
+  const notMeasured = (what, fix) => unwaivable(error('C99', 72, '.', 1, `not measured: ${what}, so the macOS dependency graph was not probed`, fix), 'not-measured');
   if (!spaces.length) return [notMeasured('no paddock.ci.json names a Cargo workspace', 'Name the workspace in the app\'s paddock.ci.json (`cargo`).')];
   let control = false;
   for (const { dir, allFeatures } of spaces) {
