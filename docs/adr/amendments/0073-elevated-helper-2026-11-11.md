@@ -12,7 +12,6 @@
   elevated or service process"; revision 3's DB9 note; and the Debrief part of "Migration per app" (item 2). DB9's own
   fix is unchanged: release builds ignore the program-path variables (`9905ea48c`, plus `bf40474ec` for
   `CHROMIUM_PATH`, on `origin/fix/debrief-env-exe-override`, merged into `origin/train/2026-11-11-5`, not on main yet).
-  This text is merged into ADR 0073 once it is accepted.
 - **Scope: user-chosen elevation only.** That means Debrief relaunched through "Restart as administrator", or started
   elevated by the user. Privileged services and helpers that run on their own (Dyno's helper, Pitwall's service) are
   out of scope, and rule 75 (ADR 0092 §4) still binds them. ADR 0092 WP-7 (the W2 bootstrap of the per-plugin elevated
@@ -61,7 +60,9 @@ a security boundary (Microsoft Security Servicing Criteria for Windows,
 (`app/src/app/lifecycle/lifecycle.service.ts:90-93`): the error hint, the monitor, the event log view, the command
 palette and the menu (`elevation-hint.ts:14-15`, `monitor-view.ts:45-47`, `eventlog-view.ts:109-110`,
 `lifecycle-commands.ts:11`, `menu-model.ts:347`). So the warning goes there once, before the backend call, through the
-app's existing dialog mechanism. The text, in sentence case:
+app's existing dialog mechanism. In a dialog window, `restartElevated()` first forwards the call to the main window
+(`forward('app.restartElevated')`, `lifecycle.service.ts:91`), so the warning opens in the main window, never in the
+dialog; WP-W's spec covers the forwarded case (the forwarding test at `lifecycle.spec.ts:278`). The text, in sentence case:
 
 > **Restart Debrief as administrator?**
 > While elevated, Debrief and the programs and plugins it starts run with administrator rights. Anything your account
@@ -75,13 +76,16 @@ app's existing dialog mechanism. The text, in sentence case:
 - One log line records the choice, with no user content (ER-27).
 - A Debrief that is already elevated never offers the restart (`lifecycle.service.ts:35-36`), so it never shows the
   warning either.
+- No warning is shown when the user starts Debrief elevated themselves (Run as administrator from Windows), including
+  after the in-app hint "Run Debrief as administrator and try again." (`elevation-hint.ts:16-17`, shown where the
+  restart is not offered): that choice is the user's, made outside Debrief.
 - macOS and Linux do not offer the restart (`system.rs:65`), so nothing changes there.
 
 ## Work package
 
 | WP | Package | Days |
 | --- | --- | --- |
-| WP-W | The warning dialog in `restartElevated()` with its i18n strings; a failing spec first (ER-11): Cancel never calls the backend; Continue calls `restart_elevated` with the session flag as today; every entry point goes through the warning; the mock backend records the choice. Release-notes and lessons lines. | 0.5–1 |
+| WP-W | The warning dialog in `restartElevated()` with its i18n strings; a failing spec first (ER-11): Cancel never calls the backend; Continue calls `restart_elevated` with the session flag as today; every entry point goes through the warning, and a call forwarded from a dialog window shows it in the main window; the mock backend records the choice. The specs that click "Restart as administrator" (about five: `elevation-hint.spec.ts`, `monitor.spec.ts`, `perfmon.spec.ts`, `eventlog.spec.ts`, `provide-tools.spec.ts`) are updated to answer the warning. Release-notes and lessons lines. | 0.5–1 |
 
 It is not a release-path change, so rule 54's installer build is not needed. It goes in Debrief 1.2.
 
