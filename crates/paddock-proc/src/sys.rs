@@ -516,7 +516,7 @@ pub fn signal_by_pidfd(id: crate::ProcessId, signal: i32) -> Option<crate::Endin
 #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 pub fn start_time(pid: u32) -> Option<crate::StartTime> {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
-    let mut sys = System::new();
+    let mut sys = crate::usage::new_system_with(System::new)?;
     let id = Pid::from_u32(pid);
     sys.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[id]),
@@ -639,7 +639,7 @@ mod tests {
         );
         let me = std::process::id();
         let ours = start_time(me).unwrap().as_micros();
-        let mut sys = sysinfo::System::new();
+        let mut sys = sysinfo::System::new().expect("a System");
         let pid = sysinfo::Pid::from_u32(me);
         sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
         assert_eq!(ours / 1_000_000, sys.process(pid).unwrap().start_time());

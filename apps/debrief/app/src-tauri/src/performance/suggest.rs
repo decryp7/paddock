@@ -139,12 +139,16 @@ pub fn proposal(environment: Option<Environment>, before: &PerformanceSettings, 
 /// This computer: its memory and cores (sysinfo), and the free space where projects are kept.
 pub fn probe(data_dir: &Path) -> Environment {
     use debrief_ai::models::DiskSpace;
-    let mut sys = sysinfo::System::new();
-    sys.refresh_memory();
+    let mut sys = sysinfo::System::new()
+        .inspect_err(|why| log::warn!("memory figures unavailable (sysinfo): {why}; reported as zero"))
+        .ok();
+    if let Some(sys) = sys.as_mut() {
+        sys.refresh_memory();
+    }
     let mb = |b: u64| b >> 20;
     Environment {
-        total_memory_mb: mb(sys.total_memory()),
-        free_memory_mb: mb(sys.available_memory()),
+        total_memory_mb: sys.as_ref().map_or(0, |s| mb(s.total_memory())),
+        free_memory_mb: sys.as_ref().map_or(0, |s| mb(s.available_memory())),
         cores: super::section::cores(),
         disk_free_mb: debrief_ai::models::SystemDisk.available_bytes(data_dir).map(mb),
         // sysinfo tells the kind only with its disk feature, which Debrief does not build; unknown is treated as fast.

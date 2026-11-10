@@ -270,9 +270,17 @@ pub struct SystemMemory;
 
 impl dyno_core::helper_memory::MemoryReader for SystemMemory {
     fn read(&self) -> dyno_core::inventory::MemoryLayout {
-        let mut sys = sysinfo::System::new();
-        sys.refresh_memory();
-        crate::inventory::read_memory_layout(sys.total_memory())
+        let total = match sysinfo::System::new() {
+            Ok(mut sys) => {
+                sys.refresh_memory();
+                sys.total_memory()
+            }
+            Err(why) => {
+                log::warn!("installed RAM unavailable (sysinfo): {why}; the layout is read without a total");
+                0
+            }
+        };
+        crate::inventory::read_memory_layout(total)
     }
 }
 

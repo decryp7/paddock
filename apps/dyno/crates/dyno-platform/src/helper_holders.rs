@@ -77,8 +77,18 @@ fn uid_of(dir: &Path) -> Option<u32> {
     std::fs::metadata(dir).ok().map(|m| m.uid())
 }
 
+/// The account list; the scan fails with the reason when sysinfo cannot read it (no holder is then named wrongly).
+fn user_list() -> Result<sysinfo::Users, PlatformError> {
+    sysinfo::Users::new_with_refreshed_list().map_err(|why| {
+        log::warn!("the user list is unavailable (sysinfo): {why}; the holder scan is refused");
+        PlatformError::Failed(format!("The OS user list could not be read ({why})."))
+    })
+}
+
 fn started_secs(pid: u32) -> Option<i64> {
-    let mut sys = sysinfo::System::new();
+    let mut sys = sysinfo::System::new()
+        .inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; the start time of pid {pid} is unknown"))
+        .ok()?;
     let sp = sysinfo::Pid::from_u32(pid);
     sys.refresh_processes_specifics(
         sysinfo::ProcessesToUpdate::Some(&[sp]),
@@ -91,7 +101,7 @@ fn started_secs(pid: u32) -> Option<i64> {
 impl HolderSource for ProcHolders {
     fn sockets(&self) -> Result<HolderScan, PlatformError> {
         let started = Instant::now();
-        let users = sysinfo::Users::new_with_refreshed_list();
+        let users = user_list()?;
         let first_person = crate::helper_sweep::first_person_uid(HelperHost::Linux);
         let (mut fds, mut truncated) = (0usize, false);
         let mut holders = Vec::new();
@@ -132,7 +142,7 @@ impl HolderSource for ProcHolders {
     fn file(&self, dev: u64, ino: u64) -> Result<HolderScan, PlatformError> {
         use std::os::unix::fs::MetadataExt;
         let started = Instant::now();
-        let users = sysinfo::Users::new_with_refreshed_list();
+        let users = user_list()?;
         let first_person = crate::helper_sweep::first_person_uid(HelperHost::Linux);
         let (mut fds, mut truncated) = (0usize, false);
         let mut found: BTreeMap<u32, ()> = BTreeMap::new();

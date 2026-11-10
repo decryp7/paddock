@@ -48,7 +48,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 # The one redactor (the search seed removes personal details with it); the report's zip is the app's, not the agent's.
 paddock-diag = { path = "../../../../crates/paddock-diag" }
-sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+sysinfo = { version = "0.40", default-features = false, features = ["system"] }
 # Content hashes for the duplicate file finder (MIT OR Apache-2.0; already in the tree through other dependencies).
 sha2 = "0.10"
 # The saved disk maps' chunks (D3, ADR 0029): deflate level 1, on the same Rust zlib-rs back end as the diagnostics zip.

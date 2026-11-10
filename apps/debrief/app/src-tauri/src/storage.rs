@@ -238,7 +238,12 @@ fn process_alive(pid: u32) -> bool {
         return true;
     }
     let p = sysinfo::Pid::from_u32(pid);
-    let mut sys = sysinfo::System::new();
+    // Unknown counts as alive: a store folder is never removed because the process table could not be read.
+    let Ok(mut sys) = sysinfo::System::new()
+        .inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; pid {pid} is assumed alive"))
+    else {
+        return true;
+    };
     sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[p]), true);
     sys.process(p).is_some()
 }

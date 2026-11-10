@@ -196,7 +196,7 @@ fn the_real_worker_test_uses_the_built_worker_and_builds_one_only_when_it_is_mis
 
 fn process_is_alive(pid: u32) -> bool {
     let p = sysinfo::Pid::from_u32(pid);
-    let mut sys = sysinfo::System::new();
+    let mut sys = sysinfo::System::new().expect("a System");
     sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[p]), true);
     sys.process(p).is_some()
 }
@@ -208,7 +208,7 @@ fn process_is_alive(pid: u32) -> bool {
 )]
 fn kill_process(pid: u32) {
     let p = sysinfo::Pid::from_u32(pid);
-    let mut sys = sysinfo::System::new();
+    let mut sys = sysinfo::System::new().expect("a System");
     sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[p]), true);
     if let Some(process) = sys.process(p) {
         process.kill();

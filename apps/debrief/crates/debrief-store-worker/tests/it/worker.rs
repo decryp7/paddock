@@ -357,7 +357,7 @@ fn errors_pass_through_and_a_crash_is_recovered() {
     );
     // The worker dies: the next call fails (retryable) or already runs on a new worker; then all is back.
     let pid = w.status().pid.unwrap();
-    let mut sys = sysinfo::System::new();
+    let mut sys = sysinfo::System::new().expect("a System");
     let p = sysinfo::Pid::from_u32(pid);
     sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[p]), true);
     assert!(sys.process(p).unwrap().kill());
@@ -430,7 +430,7 @@ fn a_project_exported_through_the_worker_opens_without_its_logs() {
 )]
 fn kill(w: &StoreWorker) -> u32 {
     let pid = w.status().pid.unwrap();
-    let mut sys = sysinfo::System::new();
+    let mut sys = sysinfo::System::new().expect("a System");
     let p = sysinfo::Pid::from_u32(pid);
     sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[p]), true);
     assert!(sys.process(p).unwrap().kill());

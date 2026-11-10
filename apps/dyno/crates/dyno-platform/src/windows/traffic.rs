@@ -79,7 +79,11 @@ impl ProcessTraffic for WinTraffic {
 fn program_names(pids: &[u32]) -> HashMap<u32, String> {
     use sysinfo::{Pid, ProcessesToUpdate, System};
     let list: Vec<Pid> = pids.iter().map(|p| Pid::from_u32(*p)).collect();
-    let mut sys = System::new();
+    let Ok(mut sys) =
+        System::new().inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; program names are unknown"))
+    else {
+        return HashMap::new();
+    };
     sys.refresh_processes(ProcessesToUpdate::Some(&list), true);
     pids.iter()
         .filter_map(|p| {

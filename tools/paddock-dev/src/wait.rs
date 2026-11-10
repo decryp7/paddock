@@ -20,7 +20,7 @@
 
 use clap::{ArgGroup, Args};
 use paddock_cli::{CliError, Report};
-use paddock_proc::ProcessId;
+use paddock_proc::{Presence, ProcessId};
 use regex::Regex;
 use serde_json::{Value, json};
 use std::io::Write;
@@ -372,12 +372,13 @@ pub fn plock_done_pattern(name: &str) -> Result<Regex, String> {
 /// Waits for a process to exit; the process is its pid AND its start time, so a recycled pid is "gone" (rule 53).
 pub struct PidProbe {
     id: ProcessId,
-    alive: Box<dyn Fn(ProcessId) -> bool>,
+    alive: Box<dyn Fn(ProcessId) -> Presence>,
 }
 
 impl PidProbe {
-    /// Waits for `id`; `alive` is `ProcessId::is_alive` outside the tests.
-    pub fn new(id: ProcessId, alive: Box<dyn Fn(ProcessId) -> bool>) -> PidProbe {
+    /// Waits for `id`; `alive` is `ProcessId::presence` outside the tests. `Unknown` (the process table cannot be read) is
+    /// never "done": the wait goes on until `--max`, which ends with an `::error::`.
+    pub fn new(id: ProcessId, alive: Box<dyn Fn(ProcessId) -> Presence>) -> PidProbe {
         PidProbe { id, alive }
     }
 }
@@ -387,13 +388,16 @@ impl Probe for PidProbe {
         format!("{} to exit", self.id)
     }
     fn poll(&mut self) -> Result<Poll, String> {
-        if (self.alive)(self.id) {
-            Ok(Poll::Pending(format!("{} is still running", self.id)))
-        } else {
-            Ok(Poll::Done(format!(
+        match (self.alive)(self.id) {
+            Presence::Running => Ok(Poll::Pending(format!("{} is still running", self.id))),
+            Presence::Unknown => Ok(Poll::Pending(format!(
+                "{}: the OS process table cannot be read, so it is not known whether it has exited",
+                self.id
+            ))),
+            Presence::Gone => Ok(Poll::Done(format!(
                 "{} has exited (or its pid belongs to another process now)",
                 self.id
-            )))
+            ))),
         }
     }
     fn next_step(&self) -> String {
@@ -580,9 +584,11 @@ pub struct Env<'a> {
     /// HTTP.
     pub http: &'a mut dyn Http,
     /// Whether the process `ProcessId` names is alive.
-    pub alive: Box<dyn Fn(ProcessId) -> bool>,
+    pub alive: Box<dyn Fn(ProcessId) -> Presence>,
     /// The process with this pid now, if any.
     pub process: &'a dyn Fn(u32) -> Option<ProcessId>,
+    /// A look at a pid, asked only when `process` finds no identity: only a proven `Gone` is "not running".
+    pub look: &'a dyn Fn(u32) -> Presence,
 }
 
 /// Runs the command against the real machine.
@@ -593,8 +599,9 @@ pub fn command(args: &WaitArgs) -> Result<Report, CliError> {
         var: &var,
         files: &DiskFiles,
         http: &mut http,
-        alive: Box::new(ProcessId::is_alive),
+        alive: Box::new(ProcessId::presence),
         process: &ProcessId::of,
+        look: &paddock_proc::presence,
     };
     run_with(args, env, &mut SystemClock::new(), &mut std::io::stderr())
 }
@@ -637,6 +644,14 @@ pub fn run_with(args: &WaitArgs, env: Env<'_>, clock: &mut dyn Clock, log: &mut 
     } else if let Some(pid) = args.pid {
         kind = "pid";
         let Some(id) = (env.process)(pid) else {
+            if (env.look)(pid) != Presence::Gone {
+                // Running (or not known) but without a readable start time: it cannot be told from a recycled pid later.
+                let why = format!(
+                    "pid {pid} cannot be identified because its start time cannot be read; wait on something else (a log line with --file, a plock job, a CI run)"
+                );
+                let _ = writeln!(log, "::error::wait: {why}");
+                return Err(CliError::failure(format!("{why}.")));
+            }
             let _ = writeln!(log, "wait: pid {pid} is not running; nothing to wait for");
             return Ok(Report::new(
                 json!({"kind": kind, "result": "done", "detail": "not running at the start"}),
@@ -935,7 +950,7 @@ mod tests {
             id,
             Box::new(move |_| {
                 a.set(a.get() - 1);
-                a.get() > 0
+                if a.get() > 0 { Presence::Running } else { Presence::Gone }
             }),
         );
         let (o, log, _) = go(&mut p, 60, 1);
@@ -944,6 +959,15 @@ mod tests {
             "{o:?}"
         );
         assert!(log.contains("has exited"), "{log}");
+    }
+
+    #[test]
+    fn a_pid_wait_that_cannot_read_the_process_table_never_reports_done() {
+        let id = ProcessId::of(std::process::id()).unwrap();
+        let mut p = PidProbe::new(id, Box::new(|_| Presence::Unknown));
+        let (o, log, _) = go(&mut p, 10, 1);
+        assert!(!matches!(o, Outcome::Done { .. }), "{o:?}");
+        assert!(log.contains("cannot be read"), "{log}");
     }
 
     struct FakeHttp {
@@ -1004,14 +1028,25 @@ mod tests {
         http: &mut FakeHttp,
         vars: &'static [(&'static str, &'static str)],
     ) -> (Result<Report, CliError>, String) {
+        run_looking(a, files, http, vars, &paddock_proc::presence)
+    }
+
+    fn run_looking(
+        a: &WaitArgs,
+        files: &FakeFiles,
+        http: &mut FakeHttp,
+        vars: &'static [(&'static str, &'static str)],
+        look: &dyn Fn(u32) -> Presence,
+    ) -> (Result<Report, CliError>, String) {
         let var = move |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
         let process = |pid: u32| (pid == 1).then(|| ProcessId::of(std::process::id()).unwrap());
         let env = Env {
             var: &var,
             files,
             http,
-            alive: Box::new(|_| true),
+            alive: Box::new(|_| Presence::Running),
             process: &process,
+            look,
         };
         let mut clock = FakeClock::default();
         let mut log = Vec::new();
@@ -1063,6 +1098,25 @@ mod tests {
         };
         let (r, _) = run(&args(&["--pid", "999999", "--max", "5s"]), &files, &mut http, &[]);
         assert_eq!(r.unwrap().data["detail"], "not running at the start");
+    }
+
+    #[test]
+    fn a_pid_that_cannot_be_identified_is_an_error_unless_it_is_proven_gone() {
+        let files = FakeFiles::default();
+        let mut http = FakeHttp {
+            answers: vec![],
+            urls: vec![],
+        };
+        // The identity lookup finds nothing (pid 5 is not the fake's pid 1): only a proven Gone is "done".
+        let a = args(&["--pid", "5", "--max", "5s"]);
+        let (r, _) = run_looking(&a, &files, &mut http, &[], &|_| Presence::Gone);
+        assert_eq!(r.unwrap().data["detail"], "not running at the start");
+        for look in [Presence::Running, Presence::Unknown] {
+            let (r, log) = run_looking(&a, &files, &mut http, &[], &move |_| look);
+            let e = r.unwrap_err();
+            assert!(e.to_string().contains("start time"), "{look:?}: {e}");
+            assert!(log.contains("::error::wait: pid 5 cannot be identified"), "{log}");
+        }
     }
 
     #[test]

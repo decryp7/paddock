@@ -458,8 +458,12 @@ impl AppState {
     /// Memory and GPU reading for the dashboard.
     pub fn memory_sample(&self) -> mgmt::MemorySample {
         let sys = self.serving.memory_now();
-        let mut s = sysinfo::System::new();
-        s.refresh_memory();
+        let swap_used = sysinfo::System::new()
+            .inspect_err(|why| log::warn!("swap figures unavailable (sysinfo): {why}; swap is reported as zero"))
+            .map_or(0, |mut s| {
+                s.refresh_memory();
+                s.used_swap()
+            });
         let (hot_ram, _) = self.serving.hot_ram();
         let pressure = if sys.total > 0 && sys.available * 100 / sys.total < 5 {
             mgmt::MemoryPressure::Critical
@@ -474,7 +478,7 @@ impl AppState {
             ram_available: sys.available,
             commit_used: None,
             commit_limit: None,
-            swap_used: s.used_swap(),
+            swap_used,
             pressure,
             cpu_percent: 0.0,
             gpus: self

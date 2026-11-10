@@ -9,17 +9,22 @@ use std::time::Duration;
 
 /// Detect the hardware: CPU, RAM and GPUs (NVIDIA through `nvidia-smi` when present, Apple Silicon unified memory).
 pub async fn detect_hardware() -> Hardware {
-    let mut sys = sysinfo::System::new();
-    sys.refresh_memory();
-    sys.refresh_cpu_list(sysinfo::CpuRefreshKind::nothing());
-    let total = sys.total_memory();
+    let sys = sysinfo::System::new()
+        .inspect_err(|why| log::warn!("hardware figures unavailable (sysinfo): {why}; RAM reads as zero and one core"))
+        .ok()
+        .map(|mut sys| {
+            sys.refresh_memory();
+            sys.refresh_cpu_list(sysinfo::CpuRefreshKind::nothing());
+            sys
+        });
+    let total = sys.as_ref().map_or(0, sysinfo::System::total_memory);
     let (os, arch) = (std::env::consts::OS.to_string(), std::env::consts::ARCH.to_string());
     let mut gpus: Vec<Gpu> = hardware::apple_silicon_gpu(&os, &arch, total).into_iter().collect();
     gpus.extend(nvidia_gpus().await);
     Hardware {
         os,
         arch,
-        cpu_cores: sys.cpus().len().max(1),
+        cpu_cores: sys.as_ref().map_or(0, |s| s.cpus().len()).max(1),
         total_ram: total,
         gpus,
     }
@@ -37,11 +42,16 @@ async fn nvidia_gpus() -> Vec<Gpu> {
 /// Live memory for the release policy; `vram_free` comes from the hardware's GPUs when known, the pressure and
 /// foreground flags from the OS signals the release loop keeps current (`os_signals`).
 pub fn read_system(hw: &Hardware) -> System {
-    let mut s = sysinfo::System::new();
-    s.refresh_memory();
+    let s = sysinfo::System::new()
+        .inspect_err(|why| log::warn!("memory figures unavailable (sysinfo): {why}; RAM reads as zero"))
+        .ok()
+        .map(|mut s| {
+            s.refresh_memory();
+            s
+        });
     let sys = System {
-        total: s.total_memory(),
-        available: s.available_memory(),
+        total: s.as_ref().map_or(0, sysinfo::System::total_memory),
+        available: s.as_ref().map_or(0, sysinfo::System::available_memory),
         vram_free: hw.vram_free(),
         os_pressure: false,
         os_critical: false,
@@ -72,10 +82,13 @@ pub fn room_from(sys: &System, hw: &Hardware, releasable: u64) -> Room {
 
 /// Free bytes on the volume holding `path` (0 when unknown).
 pub fn free_disk(path: &std::path::Path) -> u64 {
-    let disks = sysinfo::Disks::new_with_refreshed_list();
+    let Ok(disks) = sysinfo::Disks::new_with_refreshed_list()
+        .inspect_err(|why| log::warn!("the volume list is unavailable (sysinfo): {why}; free space is unknown"))
+    else {
+        return 0;
+    };
     let p = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     disks
-        .list()
         .iter()
         .filter(|d| p.starts_with(d.mount_point()))
         .max_by_key(|d| d.mount_point().as_os_str().len())
@@ -106,11 +119,36 @@ pub fn terminate(id: paddock_proc::ProcessId, force: bool) {
 
 /// Whether a process id is alive.
 pub fn pid_alive(pid: u32) -> bool {
-    let mut s = sysinfo::System::new();
+    pid_alive_logged(pid, sysinfo::System::new).0
+}
+
+/// [`pid_alive`] over a constructor of the sysinfo `System`, also saying whether this call logged a failure. Unknown counts
+/// as alive: a process is never declared gone because the process table could not be read. That failure is permanent and
+/// the release loop asks every 50 ms, so only the first one is logged.
+fn pid_alive_logged(pid: u32, make: impl FnOnce() -> Result<sysinfo::System, sysinfo::Error>) -> (bool, bool) {
+    static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let mut logged = false;
+    let Ok(mut s) = make().inspect_err(|why| {
+        logged = warn_table_once(&WARNED, why);
+    }) else {
+        return (true, logged);
+    };
     let p = sysinfo::Pid::from_u32(pid);
     s.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[p]), false);
     // A child that exited but was not reaped yet (a zombie on Linux) is gone for our purposes.
-    s.process(p).is_some_and(|proc| proc.status() != sysinfo::ProcessStatus::Zombie)
+    (
+        s.process(p).is_some_and(|proc| proc.status() != sysinfo::ProcessStatus::Zombie),
+        false,
+    )
+}
+
+/// Logs the unreadable process table on the first call on `flag` only; returns whether it logged.
+fn warn_table_once(flag: &std::sync::atomic::AtomicBool, why: &sysinfo::Error) -> bool {
+    let first = !flag.swap(true, std::sync::atomic::Ordering::Relaxed);
+    if first {
+        log::warn!("the OS process table is unavailable (sysinfo): {why}; processes are assumed alive (logged once)");
+    }
+    first
 }
 
 #[cfg(test)]
@@ -122,6 +160,20 @@ mod tests {
         // The reader is the shared one (footprint, PSS); a fake gives a footprint far below the resident size.
         assert_eq!(memory_with(7, |pid| (pid == 7).then_some(535 << 20)), 535 << 20);
         assert_eq!(memory_with(8, |pid| (pid == 7).then_some(535 << 20)), 0);
+    }
+
+    #[test]
+    fn an_unreadable_process_table_counts_as_alive_and_warns_once() {
+        let broken = || Err(sysinfo::Error::Unsupported);
+        let first = pid_alive_logged(u32::MAX - 1, broken);
+        let second = pid_alive_logged(u32::MAX - 1, broken);
+        assert!(first.0 && second.0, "unknown counts as alive");
+        assert!(!second.1, "the real wrapper does not log the second failure again");
+        assert_eq!(pid_alive_logged(u32::MAX - 1, sysinfo::System::new), (false, false));
+        let flag = std::sync::atomic::AtomicBool::new(false);
+        let why = sysinfo::Error::Unsupported;
+        assert!(warn_table_once(&flag, &why));
+        assert!(!warn_table_once(&flag, &why));
     }
 
     #[tokio::test]

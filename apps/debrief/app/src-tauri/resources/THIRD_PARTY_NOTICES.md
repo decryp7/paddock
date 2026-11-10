@@ -598,7 +598,7 @@ Licence expressions (packages):
 - syn 3.0.9 — MIT OR Apache-2.0 [MIT-63]
 - sync_wrapper 1.0.2 — Apache-2.0 [Apache-2.0-11]
 - synstructure 0.14.0 — MIT [MIT-80]
-- sysinfo 0.39.6 — MIT [MIT-8]
+- sysinfo 0.40.1 — MIT [MIT-8]
 - system-configuration 0.7.0 — MIT OR Apache-2.0 [MIT-286]
 - system-configuration-sys 0.6.0 — MIT OR Apache-2.0 [MIT-286]
 - tantivy 0.27.0 — MIT [MIT-299]
@@ -5566,7 +5566,7 @@ Used by (1):
 ### MIT-8
 
 Used by (1):
-  sysinfo 0.39.6
+  sysinfo 0.40.1
 
     The MIT License (MIT)
 

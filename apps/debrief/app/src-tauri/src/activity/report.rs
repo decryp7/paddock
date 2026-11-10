@@ -277,8 +277,13 @@ pub fn system_info(inputs: &ReportInputs) -> Value {
     if let Some(fixed) = &inputs.system_override {
         return fixed.clone();
     }
-    let mut sys = sysinfo::System::new();
-    sys.refresh_memory();
+    let memory = sysinfo::System::new()
+        .inspect_err(|why| log::warn!("memory figures unavailable (sysinfo): {why}; the report says null"))
+        .ok()
+        .map(|mut sys| {
+            sys.refresh_memory();
+            (sys.total_memory() / (1024 * 1024), sys.available_memory() / (1024 * 1024))
+        });
     let mut unreadable = Vec::new();
     let settings = inputs.config_dir.as_deref().map(|d| {
         let mut section = serde_json::Map::new();
@@ -303,11 +308,11 @@ pub fn system_info(inputs: &ReportInputs) -> Value {
         "commit": super::build_commit(),
         "sessionId": super::session_id(),
         "os": std::env::consts::OS,
-        "osVersion": sysinfo::System::long_os_version(),
+        "osVersion": sysinfo::System::long_os_version().ok(),
         "arch": std::env::consts::ARCH,
         "cpuCores": std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0),
-        "totalMemoryMb": sys.total_memory() / (1024 * 1024),
-        "availableMemoryMb": sys.available_memory() / (1024 * 1024),
+        "totalMemoryMb": memory.map(|m| m.0),
+        "availableMemoryMb": memory.map(|m| m.1),
         "safeMode": inputs.safe_mode,
         "activityDetail": format!("{:?}", super::config().detail).to_lowercase(),
         "plugins": inputs.plugins,

@@ -17,8 +17,10 @@ use sysinfo::{Disks, Pid, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, Sy
 
 /// The process and machine snapshot.
 pub struct Probe {
-    sys: System,
-    disks: Disks,
+    /// `None` when sysinfo could not start (logged once): the process table is then empty and the machine reads zero.
+    sys: Option<System>,
+    /// `None` when the volume list could not be read (logged): free space is then unknown.
+    disks: Option<Disks>,
     space: SpaceCache,
     cpus: usize,
 }
@@ -32,10 +34,19 @@ impl Default for Probe {
 impl Probe {
     /// A probe with a first snapshot.
     pub fn new() -> Self {
-        let sys = System::new_with_specifics(RefreshKind::nothing());
+        let sys = System::new_with_specifics(RefreshKind::nothing())
+            .inspect_err(|why| {
+                eprintln!("pitcrew-service: warning: the OS process table is unavailable (sysinfo): {why}; no process is seen")
+            })
+            .ok();
+        let disks = Disks::new_with_refreshed_list()
+            .inspect_err(|why| {
+                eprintln!("pitcrew-service: warning: the volume list is unavailable (sysinfo): {why}; free space is unknown")
+            })
+            .ok();
         let mut p = Probe {
             sys,
-            disks: Disks::new_with_refreshed_list(),
+            disks,
             space: SpaceCache::default(),
             cpus: std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
         };
@@ -45,7 +56,8 @@ impl Probe {
 
     /// Refreshes the process list (names, parents, executables, CPU).
     pub fn refresh_processes(&mut self) {
-        self.sys.refresh_processes_specifics(
+        let Some(sys) = self.sys.as_mut() else { return };
+        sys.refresh_processes_specifics(
             ProcessesToUpdate::All,
             true,
             ProcessRefreshKind::nothing()
@@ -63,8 +75,8 @@ impl Probe {
         // to reap it (in a container without an init it may never be), so it uses nothing and must never be stopped
         // or counted again.
         self.sys
-            .processes()
             .iter()
+            .flat_map(|sys| sys.processes().iter())
             .filter(|(_, p)| p.thread_kind().is_none() && p.status() != sysinfo::ProcessStatus::Zombie)
     }
 
@@ -93,7 +105,10 @@ impl Probe {
         ordered.sort_by_key(|p| (p.pid != runner_pid, p.pid));
         ordered.truncate(MAX_DESCRIBED);
         let pids: Vec<Pid> = ordered.iter().map(|p| Pid::from_u32(p.pid)).collect();
-        self.sys.refresh_processes_specifics(
+        let Some(sys) = self.sys.as_mut() else {
+            return Vec::new();
+        };
+        sys.refresh_processes_specifics(
             ProcessesToUpdate::Some(&pids),
             false,
             ProcessRefreshKind::nothing()
@@ -103,7 +118,7 @@ impl Probe {
         ordered
             .into_iter()
             .map(|info| {
-                let p = self.sys.process(Pid::from_u32(info.pid));
+                let p = sys.process(Pid::from_u32(info.pid));
                 let start = p.map(sysinfo::Process::start_time).filter(|s| *s > 0);
                 ProcessMeta {
                     pid: info.pid,
@@ -126,9 +141,12 @@ impl Probe {
     // ADR 0033 WP-6: a missing start time counts as a match; compare start times or use paddock_proc::ProcessId
     pub fn alive(&mut self, pid: u32, started_ms: Option<u64>) -> bool {
         let id = Pid::from_u32(pid);
-        self.sys
-            .refresh_processes_specifics(ProcessesToUpdate::Some(&[id]), true, ProcessRefreshKind::nothing());
-        match self.sys.process(id) {
+        // Unknown counts as alive: a runner is never restarted because the process table could not be read.
+        let Some(sys) = self.sys.as_mut() else {
+            return true;
+        };
+        sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[id]), true, ProcessRefreshKind::nothing());
+        match sys.process(id) {
             None => false,
             Some(p) => {
                 if p.status() == sysinfo::ProcessStatus::Zombie {
@@ -160,16 +178,21 @@ impl Probe {
 
     /// A machine sample (without the runners' share, which the supervisor adds); `disk_of` names a folder on the disk to report.
     pub fn machine(&mut self, now: Timestamp, disk_of: &Path) -> MachineSample {
-        self.sys.refresh_cpu_usage();
-        self.sys.refresh_memory();
-        let cpu = permille(self.sys.global_cpu_usage() / 100.0);
+        let (cpu, mem_used_bytes, mem_total_bytes) = match self.sys.as_mut() {
+            Some(sys) => {
+                sys.refresh_cpu_usage();
+                sys.refresh_memory();
+                (permille(sys.global_cpu_usage() / 100.0), sys.used_memory(), sys.total_memory())
+            }
+            None => (permille(0.0), 0, 0),
+        };
         let (free, total) = self.disk_space(disk_of, now).unwrap_or((0, 0));
         MachineSample {
             at: now,
             cpu_permille: cpu,
             cpu_peak_permille: cpu,
-            mem_used_bytes: self.sys.used_memory(),
-            mem_total_bytes: self.sys.total_memory(),
+            mem_used_bytes,
+            mem_total_bytes,
             disk_free_bytes: free,
             disk_total_bytes: total,
             runners: Usage::default(),
@@ -179,14 +202,13 @@ impl Probe {
     /// Free and total bytes of the disk holding `path`. The OS is asked at most once a minute per disk
     /// ([`SpaceCache`]); in between the last reading is returned.
     pub fn disk_space(&mut self, path: &Path, now: Timestamp) -> Option<(u64, u64)> {
-        let disks = &mut self.disks;
+        let disks = self.disks.as_mut()?;
         let key = path.to_string_lossy().to_string();
         self.space.get(&key, now, || {
             disks.refresh(true);
             let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
             let target = normalise(&target);
             disks
-                .list()
                 .iter()
                 .filter(|d| target.starts_with(&normalise(d.mount_point())))
                 .max_by_key(|d| d.mount_point().as_os_str().len())
@@ -197,9 +219,11 @@ impl Probe {
     /// The service's own CPU (per mille of the whole machine) and memory.
     pub fn own_usage(&self) -> (u32, u64) {
         let me = Pid::from_u32(std::process::id());
-        let cpus = self.sys.cpus().len().max(1) as f32;
-        self.sys
-            .process(me)
+        let Some(sys) = self.sys.as_ref() else {
+            return (0, 0);
+        };
+        let cpus = sys.cpus().len().max(1) as f32;
+        sys.process(me)
             .map(|p| (permille(p.cpu_usage() / 100.0 / cpus), p.memory()))
             .unwrap_or((0, 0))
     }

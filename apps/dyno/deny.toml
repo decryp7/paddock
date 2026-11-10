@@ -40,8 +40,7 @@ wildcards = "deny"
 allow-wildcard-paths = true
 # Exactly one tray-icon: the vendored, patched copy (vendor/PATCHES.md) replaces Tauri's through [patch.crates-io]; a second
 # version in the graph would mean the patch no longer applies and the tray GUIDs silently stop working.
-# The same for sysinfo (its null-iterator fix, vendor/PATCHES.md): a second version would be an unpatched one.
-deny = [{ crate = "tray-icon", deny-multiple-versions = true }, { crate = "sysinfo", deny-multiple-versions = true }]
+deny = [{ crate = "tray-icon", deny-multiple-versions = true }]
 
 [sources]
 unknown-registry = "deny"

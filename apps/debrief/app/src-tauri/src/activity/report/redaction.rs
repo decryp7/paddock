@@ -41,7 +41,7 @@ pub fn machine_redactor() -> Redactor {
     let mut homes = env_values(&["HOME", "USERPROFILE"]);
     homes.extend(dirs::home_dir().map(|h| h.to_string_lossy().into_owned()));
     let mut machines = env_values(&["HOSTNAME", "COMPUTERNAME", "HOST"]);
-    machines.extend(sysinfo::System::host_name());
+    machines.extend(sysinfo::System::host_name().ok());
     redactor_for(&users, &homes, &machines)
 }
 
