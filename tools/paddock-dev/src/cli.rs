@@ -1,4 +1,4 @@
-use crate::{gates, input_hash, ipc_endpoints, plan, plan_cmd, slots, wait};
+use crate::{gates, hook, input_hash, ipc_endpoints, plan, plan_cmd, slots, wait};
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
 use std::io::Write;
@@ -49,6 +49,28 @@ enum Command {
         #[command(subcommand)]
         command: GraphCommand,
     },
+    /// Claude Code hooks (ADR 0083). Run by the installed copy, never through `./dev`.
+    Hook {
+        #[command(subcommand)]
+        command: HookCommand,
+    },
+    /// Put the hook binary and its shim in place.
+    Hooks {
+        #[command(subcommand)]
+        command: HooksCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum HookCommand {
+    /// The PreToolUse guard: reads one tool call as JSON on standard input, prints a deny decision or nothing. Exit 0 always.
+    PreToolUse,
+}
+
+#[derive(Subcommand)]
+enum HooksCommand {
+    /// Copy this binary to <git-common-dir>/paddock/hooks/ and write the shim tools/githooks/claude-pre-tool-use.
+    Install(hook::install::InstallArgs),
 }
 
 #[derive(Subcommand)]
@@ -218,6 +240,10 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             .with_hint("Its output is the planner's own: JSON for a plan, true or false, a range.");
         return finish(Format::Json, Err(e), out, err).code();
     }
+    if matches!(cli.command, Command::Hook { .. }) {
+        // The hook's answer is its own JSON on standard output, not a report, and its exit code is always 0.
+        return hook::pre_tool_use(&mut std::io::stdin(), out, err);
+    }
     let result = dispatch(cli.command);
     finish(if cli.json { Format::Json } else { Format::Text }, result, out, err).code()
 }
@@ -261,6 +287,10 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CheckCommand::IpcEndpoints { tag, root },
         } => ipc_endpoints::command(root, tag),
         Command::Plan(a) => plan_cmd::command(&a.args, a.root),
+        Command::Hook { .. } => Ok(Report::new(serde_json::json!({}), String::new())),
+        Command::Hooks {
+            command: HooksCommand::Install(a),
+        } => hook::install::command(&a),
         Command::Graph {
             command: GraphCommand::Affected(a),
         } => plan::command(&plan::Request {

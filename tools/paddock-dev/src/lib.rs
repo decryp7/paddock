@@ -8,6 +8,7 @@
 //! - `wait`: one bounded wait for a plock job, a process, a log line or a CI run ([`wait`]);
 //! - `check ipc-endpoints`: C102, the register of every listen site and the ratchet of connection endings
 //!   ([`ipc_endpoints`], ADR 0072);
+//! - `hook pre-tool-use` and `hooks install`: Claude Code's PreToolUse guard and its installer ([`hook`], ADR 0083);
 //! - `graph affected`: the affected closure of a change set, the first consumer of `paddock-repo-graph` ([`plan`], with the
 //!   `.gitea` narrowing in [`plan_gitea`] and the git reader in [`plan_repo`]);
 //! - `plan`: the CI planner, the whole command line of `scripts/affected.mjs` (`<base> [<head>]`, `--files`, `--all`, `--ci
@@ -20,6 +21,7 @@
 mod cli;
 mod fds;
 pub mod gates;
+pub mod hook;
 pub mod input_hash;
 pub mod ipc_endpoints;
 pub mod plan;
