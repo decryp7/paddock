@@ -63,6 +63,7 @@ impl Look {
     }
 }
 
+#[cfg(test)]
 impl From<Option<u64>> for Look {
     /// A table that was read: a start time, or nobody.
     fn from(seen: Option<u64>) -> Look {
