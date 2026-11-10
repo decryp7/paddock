@@ -1,0 +1,54 @@
+# Free-text prerequisites are matched to `provides` names in ADR 0096 WP-1's review.
+id = "0093"
+title = "Every scheduled CI check has an owner, and a red one cannot be ignored"
+summary = "Every scheduled CI check has an owner, and a red one cannot be ignored (accepted 2026-11-10 by the user, all decisions as recommended, D14 (a); ER-21): owner, skip class and tested packages per scheduled job in a `[[scheduled]]` section of `docs/gates.toml` (check C107, following reusable workflows, actions and matrices), outcomes from the Actions record (callers, charged and carried-forward skips, rerun greens as `flaky:`, not measured) with per-test signatures on ADR 0089's `runlog` and annotation-only step lines, coverage per failing test through the planner graph (ER-31), a stateless tag gate in every release workflow (a red over 24 h counted from the last three greens refuses, a stale sweep is not measured), waivers and the gate mode only as records whose every line blames to a user-present signature, verified by ADR 0097's verifier with the user-presence bit, the report-only allowance anchored to the first go-live commit on `main` and the server time of its first Actions run (requirements R1–R5 for ADR 0097; the tag-tree residual risk named), issues and a digest as display only, a report-only shadow period before enforcement; D1–D15, about 13.5 agent-days, first cut 10"
+status = "accepted"
+accepted = "2026-11-10"
+copied_from = "docs/adr-scheduled-owners 390ec29bd"
+copied = "2026-11-11"
+prerequisites = ["RT-5", "RT-8", "ADR 0089 WP-2c"]
+
+[[wp]]
+id = "WP-0"
+days = 0.5
+state = "not-started"
+
+[[wp]]
+id = "WP-1"
+days = 3
+state = "not-started"
+
+[[wp]]
+id = "WP-2"
+days = 3
+state = "not-started"
+
+[[wp]]
+id = "WP-3"
+days = 1
+state = "not-started"
+
+[[wp]]
+id = "WP-4"
+days = 2.5
+state = "not-started"
+
+[[wp]]
+id = "WP-5"
+days = 2
+state = "not-started"
+
+[[wp]]
+id = "WP-6"
+days = 0.5
+state = "not-started"
+
+[[wp]]
+id = "WP-7"
+days = 0.5
+state = "not-started"
+
+[[wp]]
+id = "WP-8"
+days = 0.5
+state = "not-started"

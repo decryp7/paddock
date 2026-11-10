@@ -1,0 +1,39 @@
+# Free-text prerequisites are matched to `provides` names in ADR 0096 WP-1's review.
+id = "0090"
+title = "Code that reads another tool's output is tested against captured output: a register of readers and fixtures, a capture command at the pinned version, and C104"
+summary = "Code that reads another tool's output is tested against captured output (accepted 2026-11-10 by the user, D1–D11 as recommended, D11 (a); ER-21, ER-14): four instances of test input written or trimmed from belief (RT-8 nextest `TRY n FAIL` and `TRY n TMT`, the launchd simulation, `launchctl print` coalition blocks, still in Pitcrew's unshipped copy); a register `docs/captured-output.toml` (ADR 0088 Register) of readers and whole captures per mode (OS major, VM or metal, language) with tool, version, command and who captured; versions equal the pin in `ci/tool-pins.toml`; `./dev capture` at the pin, allowlist-sanitised, scratch first, user-approved on the Mac; C104 with `docs/ratchets/c104.toml`; known labels seen, sourced or unverified; survey of 54 Rust readers (2 whole versioned captures, 9 short notes, 43 none) plus JS and vm-smoke; 9.75 days, first cut 4.25; decisions D1-D11"
+status = "accepted"
+accepted = "2026-11-10"
+copied_from = "docs/adr-captured-tool-output 9c2cd4d8e"
+copied = "2026-11-11"
+prerequisites = ["RT-5", "ADR 0088 WP-2", "ADR 0088 WP-3"]
+
+[[wp]]
+id = "WP-0"
+days = 0.25
+state = "not-started"
+
+[[wp]]
+id = "WP-1"
+days = 2.5
+state = "not-started"
+
+[[wp]]
+id = "WP-2"
+days = 2
+state = "not-started"
+
+[[wp]]
+id = "WP-3"
+days = 1
+state = "not-started"
+
+[[wp]]
+id = "WP-4"
+days = 3.5
+state = "not-started"
+
+[[wp]]
+id = "WP-5"
+days = 0.5
+state = "not-started"

@@ -1,0 +1,64 @@
+# Free-text prerequisites are matched to `provides` names in ADR 0096 WP-1's review.
+id = "0092"
+title = "Trust-bearing files are created owner-only through one shared type"
+summary = "Trust-bearing files are created owner-only through one shared type (accepted 2026-11-10 (user); D9 (a), D2 tighten default only; other decisions as recommended; ER-21): `paddock_env::private` (`PrivateDir`, `PrivateFile`: owner-only at creation with `O:<user SID>`, anchored to held handles (`mkdirat`/`fchmod` on Unix, `NtCreateFile` and rename with `RootDirectory` on Windows, cap-std where it fits), checked by handle with the parent, links and junctions refused), override locations open to others refused, the register `docs/trust-files.toml` and check C106, fifteen copies deleted, `make_folder_private` test-support only, rule 75 (elevated readers take input only through an inherited handle, a verified pipe or a High-label folder used by handle); shipped weaknesses W1-W9 rated; WP-0 to WP-5, WP-8 and WP-10 (23.5 days) gate Pitwall 1.1, WP-6 the next Dyno tag, the Debrief elevated bootstrap Debrief 1.2; 29.5 days"
+status = "accepted"
+accepted = "2026-11-10"
+copied_from = "docs/adr-private-files e2f7e946b"
+copied = "2026-11-11"
+prerequisites = ["RT-5", "ADR 0088 engine"]
+
+[[wp]]
+id = "WP-0"
+days = 4
+state = "not-started"
+
+[[wp]]
+id = "WP-1"
+days = 7
+state = "not-started"
+
+[[wp]]
+id = "WP-2"
+days = 2.5
+state = "not-started"
+
+[[wp]]
+id = "WP-3"
+days = 3
+state = "not-started"
+
+[[wp]]
+id = "WP-4"
+days = 3
+state = "not-started"
+
+[[wp]]
+id = "WP-5"
+days = 1.5
+state = "not-started"
+
+[[wp]]
+id = "WP-6"
+days = 2
+state = "not-started"
+
+[[wp]]
+id = "WP-7"
+days = 3
+state = "not-started"
+
+[[wp]]
+id = "WP-8"
+days = 1
+state = "not-started"
+
+[[wp]]
+id = "WP-9"
+days = 1
+state = "not-started"
+
+[[wp]]
+id = "WP-10"
+days = 1.5
+state = "not-started"
