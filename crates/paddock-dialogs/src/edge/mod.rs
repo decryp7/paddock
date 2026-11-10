@@ -248,6 +248,12 @@ pub fn outcome(requested: (u32, u32), read_back: (u32, u32)) -> Outcome {
 mod tests {
     use super::*;
 
+    #[test]
+    fn only_windows_and_macos_signal_a_user_resize() {
+        assert!(has_resize_signal("windows") && has_resize_signal("macos"));
+        assert!(!has_resize_signal("linux") && !has_resize_signal(""));
+    }
+
     fn size(width: f64, height: f64) -> Size {
         Size { width, height }
     }

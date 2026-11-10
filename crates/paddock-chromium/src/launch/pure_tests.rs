@@ -389,3 +389,10 @@ fn a_live_owner_whose_start_time_reads_a_little_apart_keeps_its_profile() {
         "a profile of a process that is gone (its pid handed on) stays"
     );
 }
+
+/// A profile named without its owner's start time is judged by the pid alone.
+#[test]
+fn an_owner_without_a_start_time_is_judged_by_its_pid() {
+    assert!(owner_alive(std::process::id(), None));
+    assert!(!owner_alive(i32::MAX as u32 - 1, None), "no such process");
+}

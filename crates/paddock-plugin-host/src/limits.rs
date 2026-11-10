@@ -115,6 +115,39 @@ pub fn start(limit: Duration) -> LimitExceeded {
 mod tests {
     use super::*;
 
+    /// The registry builds its rows in constants, where no coverage is measured: build each unit's row once at run time.
+    #[test]
+    fn a_row_takes_its_unit_from_its_default() {
+        let bytes = row(
+            "plugin.example",
+            Quantity::Bytes(2),
+            Quantity::Bytes(1),
+            Quantity::Bytes(3),
+        );
+        assert_eq!(
+            (bytes.unit, bytes.default, bytes.min, bytes.max),
+            (
+                Unit::Bytes,
+                Quantity::Bytes(2),
+                Quantity::Bytes(1),
+                Quantity::Bytes(3)
+            )
+        );
+        let millis = row(
+            "plugin.example",
+            Quantity::Millis(2),
+            Quantity::Millis(1),
+            Quantity::Millis(3),
+        );
+        assert_eq!(millis.unit, Unit::Millis);
+        assert_eq!(millis.id, LimitId::new("plugin.example"));
+        assert_eq!(
+            (millis.value, millis.kind, millis.remedy),
+            (RowValue::ByRequest, RowKind::Stop, Remedy::None)
+        );
+        assert!(millis.selections.is_empty());
+    }
+
     #[test]
     fn a_duration_in_milliseconds_saturates_at_the_largest_count() {
         use std::time::Duration;

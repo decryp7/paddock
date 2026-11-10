@@ -454,6 +454,13 @@ impl DialogGrant for Grant {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn what_a_dialog_remembers_has_a_name_in_the_generated_typescript() {
+        assert_eq!(Remembers::Offset.as_str(), "offset");
+        assert_eq!(Remembers::WidthAndOffset.as_str(), "widthAndOffset");
+        assert_eq!(Remembers::SizeAndOffset.as_str(), "sizeAndOffset");
+    }
     use crate::table::Shape;
 
     mod app {

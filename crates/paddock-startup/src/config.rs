@@ -147,6 +147,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn every_refusal_reads_as_a_sentence_that_says_what_to_change() {
+        assert_eq!(
+            ConfigError::AskBeforeReload.to_string(),
+            "the time before the question must be at least the ready timeout"
+        );
+    }
+
+    #[test]
     fn the_defaults_are_consistent() {
         assert_eq!(Config::default().checked(), Ok(Config::default()));
     }
