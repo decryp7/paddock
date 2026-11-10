@@ -3,6 +3,8 @@
 //! and a crash that the next call recovers from by reopening the store.
 //!
 //! `DEBRIEF_BENCH_COPIES=<n>` imports n copies of the samples for a larger run (use `--release`).
+//! `DEBRIEF_BENCH_TRACE=1` also prints the worker's memory every 50 ms with the import phase and the index progress, so
+//! a peak over a budget can be placed in a phase.
 
 use debrief_core::api::{FacetRequest, TimelineRequest};
 use debrief_core::batch::SourceId;
@@ -228,6 +230,7 @@ fn imports_and_queries_within(mode: MemoryMode, import_budget_mb: u64) {
         mode,
         "the worker started in the mode asked for"
     );
+    let trace = std::env::var_os("DEBRIEF_BENCH_TRACE").is_some();
     let sampler = Sampler::start(pid);
     let started = Instant::now();
     let session = store.open(&paths).unwrap();
@@ -239,13 +242,39 @@ fn imports_and_queries_within(mode: MemoryMode, import_budget_mb: u64) {
             p.phase == debrief_core::workspace::ImportPhase::Finding || p.done <= p.total,
             "{p:?}"
         );
+        if trace {
+            let ix = store.index_status().ok();
+            eprintln!(
+                "TRACE {:>6} ms {:>5} MB {:?} {:?} files {}/{} index {:?}",
+                started.elapsed().as_millis(),
+                rss_of(pid) >> 20,
+                p.phase,
+                p.stage,
+                p.done,
+                p.total,
+                ix.map(|i| (i.indexed, i.total))
+            );
+        }
         std::thread::sleep(Duration::from_millis(50));
     }
     let report = session.wait().unwrap();
     let elapsed = started.elapsed().as_secs_f64();
     let import_peak = sampler.take_mb();
     let indexed = Instant::now();
-    while !store.index_status().unwrap().ready && indexed.elapsed() < Duration::from_secs(600) {
+    loop {
+        let ix = store.index_status().unwrap();
+        if trace {
+            eprintln!(
+                "TRACE {:>6} ms {:>5} MB indexing {}/{}",
+                started.elapsed().as_millis(),
+                rss_of(pid) >> 20,
+                ix.indexed,
+                ix.total
+            );
+        }
+        if ix.ready || indexed.elapsed() >= Duration::from_secs(600) {
+            break;
+        }
         std::thread::sleep(Duration::from_millis(50));
     }
     // The names catalogue is built in the background after the index (one source per turn: about 100 s for 20
@@ -266,9 +295,11 @@ fn imports_and_queries_within(mode: MemoryMode, import_budget_mb: u64) {
     sampler.take_mb();
     // Printed before the queries, so a failing query still reports the import.
     eprintln!(
-        "worker: import {} events in {elapsed:.2} s ({:.0}/s); peak RSS importing {import_peak} MB, indexing and cataloguing ({catalogue_s:.1} s) {index_peak} MB, idle {idle} MB",
+        "worker: import {} events in {elapsed:.2} s ({:.0}/s); peak RSS importing {import_peak} MB, indexing and cataloguing ({catalogue_s:.1} s) {index_peak} MB, idle {idle} MB ({mode:?} mode; {} cores, {} parse threads by default)",
         report.events,
-        report.events as f64 / elapsed
+        report.events as f64 / elapsed,
+        std::thread::available_parallelism().map_or(1, |n| n.get()),
+        debrief_core::ingest::default_threads()
     );
     // Queries.
     let summary = store.summary().unwrap();

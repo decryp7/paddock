@@ -83,6 +83,69 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
+### 2026-11-10, store worker import peak at 20 copies: file order, freed pages and the chunk reader (branch `fix/debrief-import-memory`)
+
+- **Commit:** `origin/train/2026-11-09-3` 67a633ef3; change on `fix/debrief-import-memory`
+- **Why:** the nightly `store-bench` job failed `imports_and_queries_within_the_budgets` every night. It failed on the
+  import budget (768 MB) in 4 of 16 scheduled runs since 10-25 and on the query or idle budget (320 MB) in the others. The
+  import assertion comes first, so an import failure hides the query failure. Worker peaks per scheduled run, from the
+  job logs (RSS until 10-27, PSS after 9d802de4c), as import / index / idle / query MB:
+
+| Run (date, commit) | Import | Index | Idle | Query | Fails on |
+|---|---|---|---|---|---|
+| debrief 5976 (10-22, f826f4f4) | 593 | 261 | 196 | 303 | query (budget 300) |
+| debrief 6161 (10-23, eba53424) | 650 | 258 | 199 | 300 | green |
+| debrief 6233 (10-24, 9e4369c2) | 670 | 297 | 214 | 322 | query |
+| debrief 6344 (10-25, e42bb85e, 1.1.1) | 732 | 527 | 321 | 430 | idle |
+| debrief 6396, 6412 (10-26, 10-27, e42bb85e) | 778, 752 | 530, 509 | 298, 281 | 444, 424 | import, query |
+| paddock 6451 to 7870 (10-27 to 11-10, 14 runs) | 586–778 | 433–527 | 240–322 | 382–441 | import in 7567, 7688, 7870; query in the rest |
+
+  Runs 7815 and 7870 tested the same commit (b51c72509) and peaked at 679 and 776 MB: one commit moves about ±50 MB
+  between nights. Every run used runner d-gtr9 (16 cores, 128 GB); the logs checked (6233, 6344, 7870) show the same
+  image `garage:ubuntu-24.04-20261023-r5` and rustc 1.99.1, and libduckdb stayed 1.5.6.
+- **Machine:** Mac mini, Linux arm64 container (`train3-linux-dev:1`, 6 CPUs, 24 GB), load 10–40 from other agents.
+  Release builds with `CARGO_BUILD_JOBS=2`. The worker sizes its parse threads from the cores (cores − 1, at most 8): 5
+  in the container, 8 on the CI runner, so the A/B runs set 8 through `StoreTuning::parse_threads`.
+- **Corpus:** `/samples` × 20 (585,800 events, 680 files), as the job.
+- **Bisect** (first parent, default 5 parse threads, 3 runs each, import / index / idle / query MB):
+
+| Commit | Import | Index | Idle | Query |
+|---|---|---|---|---|
+| d0f1be76c (good, 10-23) | 440–461 | 270–283 | 185–189 | 287–294 |
+| b18719967 (entity catalogue) | 433–446 | 270–280 | 192–209 | 329–339 |
+| a5322584c (long ops b: indexing pipeline) | 447–475 | 432–437 | 191–208 | 333–342 |
+| 10a1df67d (human names) | 451–501 | 420–464 | 183–213 | 323–354 |
+| 3fc2fd1f8 (long ops a: streaming import) | 558–611 | 484–513 | 259–260 | 397–412 |
+| 245ff96af alone (its parent is d0f1be76c) | 554–611 | 300–315 | 219–221 | 339–353 |
+| c3a37cc2f | 549–557 | 476–533 | 228–309 | 387–439 |
+| e190e2f30 (bad, 10-25) | 534–577 | 475–482 | 231–249 | 376–395 |
+
+  Three steps: the streaming import (245ff96af) raised the import peak and made the import 3–4 times slower; the
+  indexing pipeline (a5322584c) raised the indexing peak by about 160 MB; the entity catalogue (b18719967) raised the
+  query peak by about 40 MB.
+- **The import step, measured:**
+  - The peak grows with the parse threads, about 70 MB each (train, 2 runs each): 1 thread 246–276 MB, 2: 333–356,
+    4: 491, 8: 776–797. At 8 threads, d0f1be76c peaked at 616–649 MB and 245ff96af at 724–736 MB (3 runs each).
+  - File order (ER-28, removed and put back, interleaved in d0f1be76c at 8 threads, 3 runs each): the old import read the
+    largest files first, 615–661 MB; the same code reading in path order, as the streaming import must, 745–767 MB.
+  - Freed pages: mimalloc giving freed memory back at once (`debrief_alloc::purge_at_once`) took the train's peak at 8
+    threads from 744–773 MB to 547–570 MB (2 runs each). About 200 MB of the peak is memory already freed but not yet
+    returned (10 ms purge delay, 100 ms for arenas, `debrief_alloc::tune`).
+  - The chunk reader: `ReaderChunks::fill` zero-filled a whole block (8 MB) before every read, so each of the 680 small
+    files wrote 8 MB of memory (about 5.4 GB for 340 MB of logs), and freed it to the allocator's retained pages.
+  - Refuted: in-flight files (the streaming gate at 1× instead of 2× the threads: 565–593 against 535–575 MB); row groups
+    by size (`max_row_group_bytes` 8 MB: 751–769 against 751–757; 16k rows: 698–715); the real RAM probe (no product
+    code reads `WorkKind::Memory` or `ram_mb`); DuckDB, the allocator crate and the samples (unchanged in the range).
+- **Fix:** `fill` reads into the buffer as it grows (`take(block).read_to_end`), never a whole block of zeros. Regression
+  test `a_small_input_never_holds_a_whole_block` (failed before: a 64-byte input held 1,048,576 bytes).
+- **After the fix** (train at 8 parse threads, 8 interleaved pairs): import peak 658–712 MB (mean 688) against 746–776 MB
+  (mean 760; 3 of 8 over 768). Idle and query about 15 MB lower (means 315 against 331 and 415 against 428). Parse
+  phase 0.77–1.0 s against 0.68–1.07 s in 5 traced pairs (one fixed run took 2.4 s under load): no slowdown measured.
+- **Still over budget, not changed here:** the query peak (396–440 MB) and idle (292–345 MB) at 20 copies stay over
+  320 MB (indexing pipeline, catalogue, path order). The import keeps about 200 MB of freed pages at its peak. Recording
+  the file fingerprints commits once per file (`record_fingerprints`, 680 commits): about 4 s of the import's 5–7 s.
+- **Budget:** unchanged (768 MB import, 320 MB query and idle).
+
 ### 2026-10-31, store worker memory at 20 copies: the names catalogue (branch `fix/debrief-bench-query-rss`)
 
 - **Commit:** main 09293bcde; change on `fix/debrief-bench-query-rss`
