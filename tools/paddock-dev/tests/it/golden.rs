@@ -603,6 +603,38 @@ fn touch(root: &Path, rel: &str, job: Option<&str>) {
     std::fs::write(path, edited).unwrap();
 }
 
+/// A fresh one-commit repository in `dst` holding the files of `src` that are present on disk, as LF text.
+///
+/// Not `git clone`: CI checks out a depth-1, blob-less, sparse clone, in which a local clone must fetch blobs from a promisor
+/// remote that is not there ("lazy fetching disabled"). The files this test reads are on disk in every kind of checkout.
+fn copy_checked_out_files(src: &Path, dst: &Path) {
+    let git = |dir: &Path, args: &[&str]| {
+        let out = Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        out.stdout
+    };
+    let listed = git(src, &["ls-files", "-z"]);
+    std::fs::create_dir_all(dst).unwrap();
+    for rel in listed.split(|b| *b == 0).filter(|r| !r.is_empty()) {
+        let rel = Path::new(std::str::from_utf8(rel).unwrap());
+        let from = src.join(rel);
+        // Files outside a sparse checkout are listed but not on disk; a symlink is not a regular file here (conformance C57).
+        if !std::fs::symlink_metadata(&from).is_ok_and(|m| m.is_file()) {
+            continue;
+        }
+        let to = dst.join(rel);
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        std::fs::copy(&from, &to).unwrap_or_else(|e| panic!("copy {}: {e}", rel.display()));
+    }
+    git(dst, &["init", "-q"]);
+    // `input` stores LF whatever the host's checkout wrote; checking the index out again leaves LF files on disk.
+    git(dst, &["config", "core.autocrlf", "input"]);
+    git(dst, &["config", "core.eol", "lf"]);
+    git(dst, &["add", "-A"]);
+    git(dst, &["-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-q", "-m", "copy"]);
+    git(dst, &["checkout-index", "-a", "-f"]);
+}
+
 #[test]
 fn live_workflow_action_and_script_edits_narrow_exactly_as_affected_mjs_does() {
     if !node_available() {
@@ -611,13 +643,7 @@ fn live_workflow_action_and_script_edits_narrow_exactly_as_affected_mjs_does() {
     }
     let dir = tempfile::tempdir().unwrap();
     let copy = dir.path().join("copy");
-    let cloned = Command::new("git")
-        .args(["clone", "-q", "--shared", "-c", "core.autocrlf=false", "-c", "core.eol=lf"])
-        .arg(repo_root())
-        .arg(&copy)
-        .status()
-        .unwrap();
-    assert!(cloned.success(), "git clone of this repository");
+    copy_checked_out_files(&repo_root(), &copy);
     // LF checkout on every host: the workflow split reads LF text (a CRLF checkout cannot be split by either planner).
     // The jobs of ci.yml that CI_JOBS names, from the script's own table; one action, one reusable workflow, one script of
     // conformance/ci and a helper it imports.
