@@ -1,6 +1,13 @@
 # Plan: Dyno 1.1.1
 
-- Status: Plan, 2026-11-08. Nothing here is built. Five decisions for the user are in section 5.
+- Status: Plan, 2026-11-08; updated 2026-11-11. Nothing here is built. The five decisions in section 5 were answered by the
+  user on 2026-11-08. Decided on 2026-11-11 (memory: `simplify-2026-11-11`, `decisions-2026-11-11`):
+  - process ADRs were trimmed after a comparable-practice review (see `docs/adr/trims-2026-11-11.md` once landed): ADR 0072's
+    Dyno gate is now only its logging part, and ADR 0033 keeps only its WP-3 and WP-4;
+  - the copy register no longer blocks tags (rule 55(d)); WP-1's `known-copies.toml` entry stays a to-do list item;
+  - one review round: one independent review, then fix and land; a second round only for security code or a P1 finding;
+  - the Dyno 1.0.0 installers are being removed from the release page, with the tag kept (section 6).
+  No work package is dropped by these changes; estimates are unchanged.
 - App: Dyno (`apps/dyno`). Dyno 1.1.0 was tagged on 2026-11-08 (`dyno-v1.1.0`, tag object `01e3548b7`, commit `8efce3fc3`
   on `dyno/1.1.0-rc`). Rule 1 holds: Dyno 1.1.1 runs beside Pitwall 1.1 and Debrief 1.2 within load and CI capacity, and its
   shared changes follow the landing order in section 4.
@@ -147,13 +154,13 @@ design yet. Firm numbers follow once WP-1's ADR and WP-8's design note have work
 
 ## 5. Decisions for the user
 
-| # | Question | Recommendation | Why |
-|---|---|---|---|
-| 1 | Should the Processes table's **Account** column survive at a 1024 px window with the sidebar open? | **Yes: drop Disk first**, then lower the other minimums; Account goes last. | "Processes of every account" is a 1.1.0 feature, and the account is what tells a user whose process it is; Disk is also shown in the details pane. |
-| 2 | Should Dyno's buttons match the **family's 32 px** (Compact 28 px) instead of Dyno's 28/24? | **Yes**, removing the override at `styles.scss:709`, done inside WP-14 so the layout is checked and screenshots are retaken once. | The shared tray footer already shows the mismatch beside Pitwall and Spotter; one height across the family; 28 px stays available as Compact. |
-| 3 | **Row 41**: build "An update is already running." as ADR 0022 §3 describes, or amend the ADR? | **Amend the ADR** (WP-15). | The helper has no `Update` request; updates go through `paddock-setup`, which already refuses a second install with its own text. Building a helper update path adds an elevated, file-receiving surface for no user need. |
-| 4 | Should **`paddock-setup` get its own version**, so its hash stays stable across app releases? | **Yes** (WP-7). | Its bytes change with every app version today only because the app version is baked in; a stable hash keeps a Microsoft "not malware" determination and any prevalence counting. The per-app identity values stay baked in, so the hash is stable per app, not across apps. Pitwall ships it too after B6c. |
-| 5 | **Restart Manager first** in 1.1.1, or after the evidence? | **After the evidence**: run WP-4 first; do WP-16 in 1.1.1 only if the captured Detection Source shows a behaviour origin, otherwise in 1.2. | The link between the privileged kill path and this verdict rests on one detection (n = 1); WP-16 is an ADR amendment plus VM rows 12-14 again. |
+| # | Question | Recommendation | Why | State |
+|---|---|---|---|---|
+| 1 | Should the Processes table's **Account** column survive at a 1024 px window with the sidebar open? | **Yes: drop Disk first**, then lower the other minimums; Account goes last. | "Processes of every account" is a 1.1.0 feature, and the account is what tells a user whose process it is; Disk is also shown in the details pane. | decided (user, 2026-11-08): keep Account at 1024 px, drop Disk first (memory `dyno-release-asap.md`). |
+| 2 | Should Dyno's buttons match the **family's 32 px** (Compact 28 px) instead of Dyno's 28/24? | **Yes**, removing the override at `styles.scss:709`, done inside WP-14 so the layout is checked and screenshots are retaken once. | The shared tray footer already shows the mismatch beside Pitwall and Spotter; one height across the family; 28 px stays available as Compact. | decided (user, 2026-11-08): buttons match the family 32/28 px (memory `dyno-release-asap.md`). |
+| 3 | **Row 41**: build "An update is already running." as ADR 0022 §3 describes, or amend the ADR? | **Amend the ADR** (WP-15). | The helper has no `Update` request; updates go through `paddock-setup`, which already refuses a second install with its own text. Building a helper update path adds an elevated, file-receiving surface for no user need. | decided (user, 2026-11-08): amend ADR 0022 (memory `dyno-release-asap.md`); WP-15 takes the amend branch. |
+| 4 | Should **`paddock-setup` get its own version**, so its hash stays stable across app releases? | **Yes** (WP-7). | Its bytes change with every app version today only because the app version is baked in; a stable hash keeps a Microsoft "not malware" determination and any prevalence counting. The per-app identity values stay baked in, so the hash is stable per app, not across apps. Pitwall ships it too after B6c. | decided (user, 2026-11-08): `paddock-setup` gets its own version (memory `dyno-release-asap.md`). |
+| 5 | **Restart Manager first** in 1.1.1, or after the evidence? | **After the evidence**: run WP-4 first; do WP-16 in 1.1.1 only if the captured Detection Source shows a behaviour origin, otherwise in 1.2. | The link between the privileged kill path and this verdict rests on one detection (n = 1); WP-16 is an ADR amendment plus VM rows 12-14 again. | decided (user, 2026-11-08): only if the 1.1.1 Defender evidence points to behaviour (memory `dyno-release-asap.md`). |
 
 Still standing from earlier: signing stays off (2026-11-05); if detections recur after WP-4, WP-5 and WP-7, the note's R7
 (signing) comes back to the user.
