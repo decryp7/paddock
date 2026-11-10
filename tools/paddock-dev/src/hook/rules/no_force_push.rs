@@ -108,7 +108,8 @@ fn legacy_patterns() -> &'static [Regex] {
     static PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
     PATTERNS.get_or_init(|| {
         [
-            r"git([[:space:]]+-[[:alnum:]-]+([[:space:]]+[^[:space:]-][^[:space:]]*)?)*[[:space:]]+push([[:space:]]+[^;&|]*)?[[:space:]](-f|--force|--force-with-lease(=[^[:space:]]*)?|--force-if-includes)([[:space:]]|$)",
+            // The flag may end at any shell punctuation, not only a space (the shell hook needed a space: `-f;` and `-f)` passed).
+            r#"git([[:space:]]+-[[:alnum:]-]+([[:space:]]+[^[:space:]-][^[:space:]]*)?)*[[:space:]]+push([[:space:]]+[^;&|]*)?[[:space:]](-f|--force|--force-with-lease(=[^[:space:]]*)?|--force-if-includes)([[:space:];&|)'"`]|$)"#,
             r"git[[:space:]]+push[^;&|]*[[:space:]]\+[[:alnum:]_./-]+:",
         ]
         .iter()
@@ -364,6 +365,28 @@ mod tests {
             "git push origin main; git branch -f x",
             "git status -f",
         ] {
+            assert!(!legacy(no), "{no}");
+        }
+    }
+
+    #[test]
+    fn the_text_fallback_sees_a_flag_followed_by_any_shell_punctuation() {
+        let legacy = |t: &str| NoForcePush.legacy(t).is_some();
+        for yes in [
+            "git push -f;",
+            "git push -f)",
+            "git push -f'",
+            "git push -f\"",
+            "git push -f`",
+            "git push -f&",
+            "git push -f|cat",
+            "(git push --force)",
+            "x'; git push --force-with-lease;",
+        ] {
+            assert!(legacy(yes), "{yes}");
+        }
+        for no in ["git push -fx", "git push -x -fl", "git push origin; git branch -f"] {
+            // `-fx` is not a flag the old pattern knew; the lexer path denies it, the text path stays as it was
             assert!(!legacy(no), "{no}");
         }
     }

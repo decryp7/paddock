@@ -8,9 +8,11 @@
 //! one line on standard error names the cause (never the command text) and the exit code stays 0. Every refusal also writes one
 //! line to standard error naming the rule (ER-27).
 //!
-//! A command the [`lex`] cannot read (an unclosed quote) or that passes one of its limits (1 MiB, 16 nested levels, 10,000 nested
-//! pieces) is not allowed blindly: every rule runs the old shell hook's text pattern on the raw text first
-//! ([`rules::Rule::legacy`]), so what the shell hooks refused is still refused; only harmless unreadable text passes.
+//! A command the [`lex`] cannot read (an unclosed quote, over 1 MiB, or more `((` scanning than its work limit) is not allowed
+//! blindly: every rule runs the old shell hook's text pattern on the raw text first ([`rules::Rule::legacy`]), so what the shell hooks
+//! refused is still refused; only harmless unreadable text passes. A command that nests shell text more than 16 levels deep or has
+//! more than 10,000 nested pieces is refused (rule `command-too-complex`): no ordinary command does. An input over 8 MiB gets the
+//! same text check on the bytes read.
 //!
 //! # Residual risk (ADR 0083 D7: the guard reads commands, it is not a shell)
 //!
@@ -72,11 +74,50 @@ pub fn decide(call: &ToolCall) -> Outcome {
             denial: rules::all().iter().find_map(|r| r.check(call, Some(&script))),
             unread: None,
         },
+        // No ordinary command nests more than 16 levels or has 10,000 substitutions: refuse it.
+        Err(why @ (lex::LexError::TooDeep | lex::LexError::TooMany)) => Outcome {
+            denial: Some(Denial {
+                rule: "command-too-complex",
+                reason: format!(
+                    "Blocked: this command nests shell text too deeply or too often ({why}); no ordinary command does. Split it into \
+                     separate steps."
+                ),
+            }),
+            unread: Some(why),
+        },
+        // An unclosed quote or a size limit: the old shell hooks' text patterns decide.
         Err(why) => Outcome {
             denial: rules::all().iter().find_map(|r| r.legacy(command)),
             unread: Some(why),
         },
     }
+}
+
+/// The text of a JSON string's escapes (`\n`, `\t`, `\"`, `\\`) decoded, in one pass, for the text check of an input too large to
+/// parse as JSON. Other escapes stay as they are.
+fn unescape_json(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some('r') => out.push('\r'),
+            Some('"') => out.push('"'),
+            Some('\\') => out.push('\\'),
+            Some('/') => out.push('/'),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
 }
 
 /// `dev hook pre-tool-use`: reads the call from `stdin`, writes the decision to `out` and log lines to `err`. Returns the exit
@@ -89,7 +130,21 @@ pub fn pre_tool_use(stdin: &mut dyn Read, out: &mut dyn Write, err: &mut dyn Wri
         return 0;
     }
     if raw.len() as u64 > MAX_INPUT {
-        let _ = writeln!(err, "paddock-dev hook: allowed, the input is larger than {MAX_INPUT} bytes");
+        // Too large to parse as JSON: the old text patterns (linear) run on the bytes read, escapes decoded.
+        let text = unescape_json(&String::from_utf8_lossy(&raw));
+        match rules::all().iter().find_map(|r| r.legacy(&text)) {
+            Some(denial) => {
+                let _ = writeln!(
+                    err,
+                    "paddock-dev hook: denied by {}, by the text check because the input is larger than {MAX_INPUT} bytes",
+                    denial.rule
+                );
+                let _ = writeln!(out, "{}", denial.json());
+            }
+            None => {
+                let _ = writeln!(err, "paddock-dev hook: allowed, the input is larger than {MAX_INPUT} bytes");
+            }
+        }
         return 0;
     }
     text.push_str(&String::from_utf8_lossy(&raw));
@@ -108,7 +163,10 @@ pub fn pre_tool_use(stdin: &mut dyn Read, out: &mut dyn Write, err: &mut dyn Wri
         }
         (Some(denial), unread) => {
             let how = match unread {
-                Some(why) => format!(", by the text check because the command could not be read ({why})"),
+                Some(why) if denial.rule != "command-too-complex" => {
+                    format!(", by the text check because the command could not be read ({why})")
+                }
+                Some(_) => String::new(),
                 None => String::new(),
             };
             let _ = writeln!(err, "paddock-dev hook: denied by {} ({}){how}", denial.rule, call.tool_name);
@@ -218,13 +276,55 @@ mod tests {
 
     #[test]
     fn exhausting_a_limit_falls_back_to_the_text_check_too() {
-        let many = vec!["$(:)"; 10_001].join(" ");
-        let (_, out, err) = denies_in(&format!("echo {many}; git push -f"));
+        // the arithmetic scan's work limit (`TooLarge`) takes the text path, as the size limit does
+        let parens = "(".repeat(lex::MAX_SOURCE - 20);
+        let (_, out, err) = denies_in(&format!("{parens}\ngit push -f"));
         assert!(out.contains("deny") && err.contains("text check"), "{err}");
         let big = format!("{}; git push -f", "x".repeat(lex::MAX_SOURCE + 10));
         let (_, out, err) = denies_in(&big);
         assert!(out.contains("deny") && err.contains("text check"), "{err}");
         let (_, out, _) = denies_in(&format!("{}; git push origin main", "x".repeat(lex::MAX_SOURCE + 10)));
         assert_eq!(out, "");
+    }
+
+    #[test]
+    fn nesting_no_command_has_is_denied_by_the_limit_rule() {
+        let eval17 = format!("{}ls", "eval ".repeat(17));
+        let sub17 = format!("echo {}:{}", "$(".repeat(17), ")".repeat(17));
+        let many = format!("echo {}", vec!["$(:)"; 10_001].join(" "));
+        for cmd in [eval17, sub17, many] {
+            let (code, out, err) = denies_in(&cmd);
+            assert_eq!(code, 0);
+            assert!(
+                out.contains("\"permissionDecision\":\"deny\"") && out.contains("nests shell text"),
+                "{out}"
+            );
+            assert!(err.contains("denied by command-too-complex") && !err.contains("echo"), "{err}");
+        }
+        // 16 levels are fine, and an unclosed quote still only gets the text check
+        let (_, out, _) = denies_in(&format!("{}ls", "eval ".repeat(16)));
+        assert_eq!(out, "");
+        let (_, out, err) = denies_in("echo 'unclosed");
+        assert_eq!(out, "");
+        assert!(err.contains("could not be read"));
+    }
+
+    #[test]
+    fn input_over_the_read_limit_gets_the_text_check_on_the_bytes_read() {
+        // Only the first MAX_INPUT bytes are read, so what is to be seen sits inside them and the rest makes the input too large.
+        let pad = "x".repeat(MAX_INPUT as usize - 1000);
+        let after = "y".repeat(2000);
+        let line = |tail: &str| format!(r#"{{"tool_name":"Bash","tool_input":{{"command":"echo {pad}\n{tail}\n{after}"}}}}"#);
+        let (code, out, err) = run(line("git push -f\\n").as_bytes());
+        assert_eq!(code, 0);
+        assert!(out.contains("deny"), "{}", &out[..out.len().min(200)]);
+        assert!(err.contains("denied by no-force-push") && err.contains("text check"), "{err}");
+        // a force push at the start of the oversized command is seen too
+        let head = format!(r#"{{"tool_name":"Bash","tool_input":{{"command":"git push --force origin x; echo {pad}{after}"}}}}"#);
+        assert!(run(head.as_bytes()).1.contains("deny"));
+        // harmless oversized input is allowed with the log line
+        let (code, out, err) = run(line("git status").as_bytes());
+        assert_eq!((code, out.as_str()), (0, ""));
+        assert!(err.contains("larger than"), "{err}");
     }
 }

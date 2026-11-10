@@ -953,7 +953,10 @@ after 20 warm-up runs, release build with `CARGO_BUILD_JOBS=2`, Mac mini (arm64)
 | A `brush-parser` 0.4.0 probe binary that only parses one `while` loop (no rules) | 2.29 ms | 4.24 ms | 5.81 ms | 10.29 ms |
 
 The hook itself costs about 3 ms over the spawn floor, inside the plan's 4 to 6 ms range, and a longer command costs no more at the
-median (the lexer is linear, bounded at 1 MiB). Of the first shim's 15.5 ms, about 10 ms was the `git rev-parse` that finds the
+median (every loop of the lexer has a limit: 1 MiB of text, 16 levels, 10,000 nested pieces, 4 MiB of `((` scanning; before the
+last one 1 MiB of `(` took 256.7 s of CPU and 224 MB, after it 0.01 s: `hook pre-tool-use < 1 MiB of (`, release build, measured
+with `/usr/bin/time -p`; the reviewer's `dos.py` set of 15 worst cases ran 0.2 to 2.0 s wall each, at a machine load of 15 to 60, including
+Python's own spawn and a 1.05 to 8.39 MB input). Of the first shim's 15.5 ms, about 10 ms was the `git rev-parse` that finds the
 common folder. The shim now finds it with shell builtins only (it walks up to `.git`; for a linked worktree it reads the
 `gitdir:` line of the `.git` file and cuts `/worktrees/<name>`; the deny-all fallback and the install-command exception are
 unchanged). Second run, same method, 300 runs, after that change (load average 18 to 20, busier than the first run, so its

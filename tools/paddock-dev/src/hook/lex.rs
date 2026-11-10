@@ -6,7 +6,9 @@
 //! bodies fed to anything else are data, never commands, so a commit message that mentions `git push -f` does not match.
 //!
 //! It is not a shell. It never expands variables or globs and never fails on odd input beyond [`LexError`]; the rules fail open
-//! on an error (ADR 0083 D7). Bounded: input size, nesting depth and the number of nested parses have limits.
+//! on an error (ADR 0083 D7). Every loop is bounded by a limit with its own error: the input size (`MAX_SOURCE`, 1 MiB), the nesting
+//! depth (`MAX_DEPTH`), the number of nested pieces (`MAX_NESTED`) and the characters the `((`...`))` scans pass over
+//! (`MAX_ARITH_WORK`); a test feeds 1 MiB of `(` with a time bound as a hang guard.
 //!
 //! brush-parser 0.4.0 was measured first and not taken: it pulls 94 crates (`bon`, `darling`, `cached`, a second `syn` major) for a
 //! walk over an AST of which the rules need the flat command list. The numbers are in `docs/benchmarks.md`.
@@ -17,21 +19,34 @@ pub const MAX_SOURCE: usize = 1 << 20;
 const MAX_DEPTH: usize = 16;
 /// The most nested pieces parsed for one command.
 const MAX_NESTED: usize = 10_000;
+/// The most characters the scans for `))` may pass over in one piece of text, all attempts together. Each `((` starts a scan to the
+/// end of the text when it never closes, so 1 MiB of `(` was quadratic (256 s) before this limit.
+const MAX_ARITH_WORK: usize = 4 * MAX_SOURCE;
+/// The deepest the lexer's own recursion goes inside one piece of text (`$(` in `"` in `${` in `((` ...): 1 MiB of `(($(` recursed
+/// until the stack overflowed before this limit.
+const MAX_LEX_NEST: usize = 64;
 
 /// Why a command could not be read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LexError {
     /// A quote, `$(`, backtick or `${` was never closed.
     Unterminated(&'static str),
-    /// The text or its nesting is past a limit.
+    /// The text is over `MAX_SOURCE`, or the scans for `((` ... `))` did more work than `MAX_ARITH_WORK` allows. The raw text gets
+    /// the text check.
     TooLarge,
+    /// More than `MAX_DEPTH` levels of nested shell text. No ordinary command has that; the hook denies it.
+    TooDeep,
+    /// More than `MAX_NESTED` nested pieces. No ordinary command has that; the hook denies it.
+    TooMany,
 }
 
 impl std::fmt::Display for LexError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LexError::Unterminated(what) => write!(f, "unterminated {what}"),
-            LexError::TooLarge => write!(f, "command text or nesting past the limit"),
+            LexError::TooLarge => write!(f, "command text or arithmetic scanning past the limit"),
+            LexError::TooDeep => write!(f, "shell text nested more than {MAX_DEPTH} levels deep"),
+            LexError::TooMany => write!(f, "more than {MAX_NESTED} nested pieces of shell text"),
         }
     }
 }
@@ -276,8 +291,11 @@ impl Script {
 }
 
 fn parse_into(src: &str, depth: usize, budget: &mut usize, out: &mut Vec<Item>) -> Result<(), LexError> {
-    if src.len() > MAX_SOURCE || depth > MAX_DEPTH {
+    if src.len() > MAX_SOURCE {
         return Err(LexError::TooLarge);
+    }
+    if depth > MAX_DEPTH {
+        return Err(LexError::TooDeep);
     }
     let (toks, bodies, body_subs) = Lexer::new(src).run()?;
     let mut items = Vec::new();
@@ -336,7 +354,7 @@ fn parse_into(src: &str, depth: usize, budget: &mut usize, out: &mut Vec<Item>) 
         out.push(item);
         for n in nested {
             if *budget == 0 {
-                return Err(LexError::TooLarge);
+                return Err(LexError::TooMany);
             }
             *budget -= 1;
             out.push(Item::Enter);
@@ -367,6 +385,10 @@ struct Lexer {
     bodies: Vec<String>,
     /// The substitutions of each unquoted heredoc body, by slot.
     body_subs: Vec<Vec<String>>,
+    /// Characters the `((` scans have passed over (see `MAX_ARITH_WORK`).
+    arith_work: usize,
+    /// How deep the lexer's own recursion is (see `MAX_LEX_NEST`).
+    nest: usize,
 }
 
 fn is_meta(c: char) -> bool {
@@ -382,6 +404,8 @@ impl Lexer {
             pending: Vec::new(),
             bodies: Vec::new(),
             body_subs: Vec::new(),
+            arith_work: 0,
+            nest: 0,
         }
     }
 
@@ -448,6 +472,7 @@ impl Lexer {
                     let start = self.i;
                     self.i += 2;
                     match self.arith() {
+                        Err(LexError::TooLarge) => return Err(LexError::TooLarge),
                         Ok(subs) if self.i >= 2 && self.s[self.i - 2] == ')' && self.s[self.i - 1] == ')' => {
                             self.toks.push(Tok::Word(Word {
                                 text: "((".to_string(),
@@ -720,6 +745,22 @@ impl Lexer {
     }
 
     fn double_quoted(&mut self, w: &mut Word) -> Result<(), LexError> {
+        self.nested(|l| l.double_quoted_inner(w))
+    }
+
+    /// Runs `f` one level deeper in the lexer's own recursion (`$(`, `((`, `"` and `${` call each other); past `MAX_LEX_NEST`
+    /// levels it fails with `TooDeep` instead of overflowing the stack.
+    fn nested<T>(&mut self, f: impl FnOnce(&mut Self) -> Result<T, LexError>) -> Result<T, LexError> {
+        if self.nest >= MAX_LEX_NEST {
+            return Err(LexError::TooDeep);
+        }
+        self.nest += 1;
+        let result = f(self);
+        self.nest -= 1;
+        result
+    }
+
+    fn double_quoted_inner(&mut self, w: &mut Word) -> Result<(), LexError> {
         loop {
             match self.peek(0) {
                 None => return Err(LexError::Unterminated("double quote")),
@@ -774,8 +815,18 @@ impl Lexer {
     }
 
     /// After `((` or `$((`: skips to the `))` that closes it, counting parentheses. Returns the `$(...)` substitutions inside,
-    /// which run.
+    /// which run. The characters passed over count against `MAX_ARITH_WORK` whether the scan succeeds or not.
     fn arith(&mut self) -> Result<Vec<String>, LexError> {
+        if self.arith_work > MAX_ARITH_WORK {
+            return Err(LexError::TooLarge);
+        }
+        let from = self.i;
+        let result = self.nested(Self::arith_scan);
+        self.arith_work += self.i.saturating_sub(from);
+        result
+    }
+
+    fn arith_scan(&mut self) -> Result<Vec<String>, LexError> {
         let mut depth = 2;
         let mut subs = Vec::new();
         while let Some(c) = self.peek(0) {
@@ -854,6 +905,10 @@ impl Lexer {
     /// The text up to the `)` that closes a `$(` already consumed. Quotes, escapes, nested parentheses and heredoc bodies
     /// are skipped, so a `)` or an apostrophe inside them does not end it.
     fn balanced(&mut self, what: &'static str) -> Result<String, LexError> {
+        self.nested(|l| l.balanced_inner(what))
+    }
+
+    fn balanced_inner(&mut self, what: &'static str) -> Result<String, LexError> {
         let start = self.i;
         let mut depth = 1;
         let mut pending: Vec<(String, bool)> = Vec::new();
@@ -1082,9 +1137,9 @@ mod tests {
     fn limits_hold() {
         assert_eq!(Script::parse(&"a ".repeat(MAX_SOURCE)), Err(LexError::TooLarge));
         let deep = "$(".repeat(20) + "x" + &")".repeat(20);
-        assert_eq!(Script::parse(&format!("echo {deep}")), Err(LexError::TooLarge));
+        assert_eq!(Script::parse(&format!("echo {deep}")), Err(LexError::TooDeep));
         let wide = (0..10_001).map(|_| "$(a)").collect::<Vec<_>>().join(" ");
-        assert_eq!(Script::parse(&format!("echo {wide}")), Err(LexError::TooLarge));
+        assert_eq!(Script::parse(&format!("echo {wide}")), Err(LexError::TooMany));
     }
 
     #[test]
@@ -1140,7 +1195,7 @@ mod tests {
         }
         assert!(cmds(&nest).iter().any(|c| c.first().map(String::as_str) == Some("git")));
         let too_many = vec!["$(:)"; 10_001].join(" ");
-        assert_eq!(Script::parse(&format!("echo {too_many}")), Err(LexError::TooLarge));
+        assert_eq!(Script::parse(&format!("echo {too_many}")), Err(LexError::TooMany));
     }
 
     #[test]
@@ -1195,5 +1250,51 @@ mod tests {
         assert!(c("select x in a b"));
         assert!(!c("echo for"));
         assert!(!c("while true"));
+    }
+
+    /// Runs `parse` and fails when it takes long enough to be a hang (a generous bound, for a debug build, used only as a guard).
+    fn parse_bounded(src: &str) -> Result<Script, LexError> {
+        let start = std::time::Instant::now();
+        let r = Script::parse(src);
+        let took = start.elapsed();
+        assert!(
+            took < std::time::Duration::from_secs(5),
+            "parsing {} bytes took {took:?}",
+            src.len()
+        );
+        r
+    }
+
+    #[test]
+    fn a_megabyte_of_open_parentheses_ends_at_the_work_limit() {
+        // Every `((` starts a scan to the end of the text that never finds its `))`: 256 s of CPU before the work limit.
+        let src = "(".repeat(MAX_SOURCE - 10);
+        assert_eq!(parse_bounded(&src), Err(LexError::TooLarge));
+        for unit in ["((", "(( ", "$((", "(($(", "(( $( ", "((a)", "( ("] {
+            let src = unit.repeat(MAX_SOURCE / unit.len() - 1);
+            // the outcome is an error or a script; what matters is that it ends
+            let _ = parse_bounded(&src);
+        }
+    }
+
+    #[test]
+    fn ordinary_arithmetic_stays_far_below_the_work_limit() {
+        let many = "(( x = 1 )); ".repeat(5000);
+        assert!(parse_bounded(&many).is_ok());
+        let nested = format!("{}1{}", "(".repeat(40), ")".repeat(40));
+        assert!(parse_bounded(&format!("echo $(( {nested} ))")).is_ok());
+    }
+
+    #[test]
+    fn the_limits_have_their_own_errors() {
+        let deep = format!("{}:{}", "$(".repeat(17), ")".repeat(17));
+        assert_eq!(Script::parse(&deep), Err(LexError::TooDeep));
+        assert!(Script::parse(&format!("{}:{}", "$(".repeat(16), ")".repeat(16))).is_ok());
+        assert_eq!(Script::parse(&format!("{}ls", "eval ".repeat(17))), Err(LexError::TooDeep));
+        assert!(Script::parse(&format!("{}ls", "eval ".repeat(16))).is_ok());
+        assert_eq!(Script::parse(&vec!["$(:)"; 10_001].join(" ")), Err(LexError::TooMany));
+        assert!(Script::parse(&vec!["$(:)"; 10_000].join(" ")).is_ok());
+        assert_eq!(Script::parse(&"a".repeat(MAX_SOURCE + 1)), Err(LexError::TooLarge));
+        assert!(matches!(Script::parse("echo 'x"), Err(LexError::Unterminated(_))));
     }
 }

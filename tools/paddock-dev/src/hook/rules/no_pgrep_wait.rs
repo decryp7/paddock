@@ -90,18 +90,61 @@ fn legacy_pattern() -> Option<&'static Regex> {
 
 const LEAVES: &[&str] = &["break", "exit", "return"];
 
-/// The command after the poll ends the loop on its result: `|| break`, `&& exit`, or the poll is an `if` whose `then` breaks.
-/// A closing substitution between them (`[ -z "$(pgrep -f x)" ] || break`) is skipped.
+/// What follows the poll at its own level ends the loop on its result:
+/// - an `&&`/`||` chain with a `break`, `exit` or `return` in it (`pgrep -f x || break`, `pgrep -f x && sleep 1 || break`);
+/// - the poll is an `if` whose `then` breaks;
+/// - the next command tests `$?` and that chain or `then` breaks (`pgrep -f x; [ $? -ne 0 ] && break`).
+///
+/// Nested pieces after the poll (substitutions) and the closings of the pieces the poll sits in are skipped, so
+/// `[ -z "$(pgrep -f x)" ] || break` is seen.
 fn decides_the_loop(items: &[Item], idx: usize, cmd: &Simple) -> bool {
-    let leaves = |c: &Simple| c.command().first().is_some_and(|w| LEAVES.contains(&w.text.as_str()));
-    let mut rest = items[idx + 1..].iter().filter(|i| !matches!(i, Item::Leave));
-    match rest.next() {
-        Some(Item::Sep(Sep::And | Sep::Or)) => matches!(rest.next(), Some(Item::Cmd(c)) if leaves(c)),
-        Some(Item::Sep(Sep::Semi | Sep::Newline)) if opens_if(cmd) => {
-            matches!(rest.next(), Some(Item::Cmd(c)) if c.words.first().is_some_and(|w| w.text == "then") && c.words.get(1).is_some_and(|w| LEAVES.contains(&w.text.as_str())))
+    let mut following: Vec<&Item> = Vec::new();
+    let mut nested = 0usize;
+    for item in &items[idx + 1..] {
+        match item {
+            Item::Enter => nested += 1,
+            Item::Leave => nested = nested.saturating_sub(1),
+            other if nested == 0 => following.push(other),
+            _ => {}
+        }
+        if following.len() >= 12 {
+            break;
+        }
+    }
+    let separated = |at: usize, seps: &[Sep]| matches!(following.get(at), Some(Item::Sep(s)) if seps.contains(s));
+    let then_leaves =
+        |at: usize| matches!(following.get(at), Some(Item::Cmd(c)) if c.words.first().is_some_and(|w| w.text == "then") && leaves(c));
+    // `|| break`, `&& echo up && sleep 1 || break`
+    let chain_from = |start: usize| {
+        let mut at = start;
+        while separated(at, &[Sep::And, Sep::Or]) {
+            match following.get(at + 1) {
+                Some(Item::Cmd(c)) if leaves(c) => return true,
+                Some(Item::Cmd(_)) => at += 2,
+                _ => return false,
+            }
+        }
+        false
+    };
+    if chain_from(0) {
+        return true;
+    }
+    if !separated(0, &[Sep::Semi, Sep::Newline]) {
+        return false;
+    }
+    if opens_if(cmd) && then_leaves(1) {
+        return true;
+    }
+    match following.get(1) {
+        Some(Item::Cmd(next)) if next.words.iter().any(|w| w.text.contains("$?")) => {
+            chain_from(2) || (opens_if(next) && separated(2, &[Sep::Semi, Sep::Newline]) && then_leaves(3))
         }
         _ => false,
     }
+}
+
+fn leaves(c: &Simple) -> bool {
+    c.command().first().is_some_and(|w| LEAVES.contains(&w.text.as_str()))
 }
 
 fn opens_if(cmd: &Simple) -> bool {
@@ -278,6 +321,30 @@ mod tests {
         }
         for no in ["pgrep -f x", "while pgrep x; do :; done", "while a; do pgrep -f x; done"] {
             assert!(!legacy(no), "{no}");
+        }
+    }
+
+    #[test]
+    fn a_poll_whose_exit_status_decides_the_loop_is_refused() {
+        for line in [
+            "while :; do pgrep -f x; [ $? -ne 0 ] && break; sleep 1; done",
+            "while :; do pgrep -f x\n[ $? -ne 0 ] && break\nsleep 1\ndone",
+            "while :; do pgrep -f x; if [ $? -ne 0 ]; then break; fi; sleep 1; done",
+            "while :; do pgrep -f x >/dev/null; [ \"$?\" = 1 ] && exit 0; done",
+            "while :; do pgrep -f x && sleep 1 || break; done",
+            "while :; do pgrep -f x && echo up && sleep 1 || break; done",
+            "for i in 1 2 3; do pgrep -f x || break; done",
+        ] {
+            assert!(denies(line), "{line}");
+        }
+        for line in [
+            "while :; do pgrep -f x; echo $?; sleep 1; done",
+            "while :; do pgrep -f x; [ $? -ne 0 ] && echo gone; sleep 1; done",
+            "while :; do pgrep -f x && sleep 1; done",
+            "while :; do pgrep -f x; sleep 1; done; [ $? -ne 0 ] && break",
+            "while :; do pgrep x; [ $? -ne 0 ] && break; done",
+        ] {
+            assert!(!denies(line), "{line}");
         }
     }
 }
