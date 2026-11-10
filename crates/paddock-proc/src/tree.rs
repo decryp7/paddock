@@ -265,7 +265,11 @@ pub(crate) fn presence_with(
         ProcessRefreshKind::nothing(),
     );
     let seen = sys.process(id).map(|p| (p.start_time(), p.status()));
-    classify(seen, || crate::sys::pid_exists(pid))
+    classify(
+        seen,
+        || crate::sys::pid_exists(pid),
+        || crate::sys::is_zombie(pid),
+    )
 }
 
 /// What sysinfo's per-pid refresh means. A process it lists with start time 0 or status Unknown was one it could not read
@@ -275,6 +279,7 @@ pub(crate) fn presence_with(
 pub(crate) fn classify(
     seen: Option<(u64, sysinfo::ProcessStatus)>,
     exists: impl FnOnce() -> crate::sys::Exists,
+    zombie: impl FnOnce() -> bool,
 ) -> Presence {
     match seen {
         Some((_, sysinfo::ProcessStatus::Zombie | sysinfo::ProcessStatus::Dead)) => Presence::Gone,
@@ -283,10 +288,10 @@ pub(crate) fn classify(
         None => match exists() {
             crate::sys::Exists::No => Presence::Gone,
             crate::sys::Exists::Refused => Presence::Unknown,
-            // Listed nowhere yet signalable: on Unix a zombie that only waits to be reaped (macOS does not list it, and it
-            // still answers signal 0), which counts as gone. Windows drops a process it could not snapshot, which is not.
-            crate::sys::Exists::Yes if cfg!(windows) => Presence::Unknown,
-            crate::sys::Exists::Yes => Presence::Gone,
+            // Listed nowhere yet answering: sysinfo can drop a live process (macOS), so it is gone only when the OS's own
+            // state read says it is a zombie that waits to be reaped. Every other case is not known.
+            crate::sys::Exists::Yes if zombie() => Presence::Gone,
+            crate::sys::Exists::Yes => Presence::Unknown,
         },
     }
 }
@@ -312,14 +317,19 @@ pub(crate) fn terminate_by(
     }
     if ask(id) {
         let end_at = Instant::now() + grace;
+        let mut last = Presence::Running;
         while Instant::now() < end_at {
-            match look(id) {
-                Presence::Gone => return Terminated::Gracefully,
-                // A look that failed is not a stop that was seen: nothing more is done to the process.
-                Presence::Unknown => return Terminated::Unknown,
-                Presence::Running => {}
+            last = look(id);
+            // A process that is dying is for a moment listed nowhere yet still answers (macOS): not known, so look again
+            // until the grace ends rather than report either way on one look.
+            if last == Presence::Gone {
+                return Terminated::Gracefully;
             }
             std::thread::sleep(Duration::from_millis(25));
+        }
+        if last == Presence::Unknown {
+            // Still not known when the grace ran out: nothing is ended, and nothing is claimed.
+            return Terminated::Unknown;
         }
     }
     end(id);
@@ -568,6 +578,188 @@ mod port_tests {
     }
 }
 
+#[cfg(test)]
+mod presence_tests {
+    use super::*;
+    use crate::sys::{self, Exists};
+    use std::process::{Child, Command, Stdio};
+
+    #[test]
+    fn what_sysinfo_could_not_read_is_unknown_and_only_proof_of_absence_is_gone() {
+        use sysinfo::ProcessStatus::{Run, Unknown as Unk, Zombie};
+        let never = || -> Exists { panic!("a listed process needs no second look") };
+        let nor = || -> bool { panic!("a listed process needs no second look") };
+        assert_eq!(classify(Some((5, Run)), never, nor), Presence::Running);
+        assert_eq!(
+            classify(Some((0, Run)), never, nor),
+            Presence::Unknown,
+            "start 0"
+        );
+        assert_eq!(
+            classify(Some((5, Unk(0))), never, nor),
+            Presence::Unknown,
+            "status Unknown"
+        );
+        assert_eq!(classify(Some((0, Unk(0))), never, nor), Presence::Unknown);
+        assert_eq!(classify(Some((5, Zombie)), never, nor), Presence::Gone);
+        assert_eq!(
+            classify(None, || Exists::No, nor),
+            Presence::Gone,
+            "no such process"
+        );
+        assert_eq!(classify(None, || Exists::Refused, nor), Presence::Unknown);
+    }
+
+    /// sysinfo can drop a live process (macOS): a pid it does not list that still answers is Gone only when its own state is
+    /// a zombie, never because it answered.
+    #[test]
+    fn a_live_process_that_sysinfo_does_not_list_is_not_gone() {
+        assert_eq!(
+            classify(None, || Exists::Yes, || false),
+            Presence::Unknown,
+            "answers, not a zombie"
+        );
+        assert_eq!(
+            classify(None, || Exists::Yes, || true),
+            Presence::Gone,
+            "answers, a zombie"
+        );
+    }
+
+    #[test]
+    fn the_state_of_a_zombie_is_read_from_the_os_records() {
+        // Linux /proc/<pid>/stat: the command may hold spaces and parentheses; the state follows the last ')'.
+        assert!(sys::zombie_from_stat("12 (a (b) c) Z 1 2 3"));
+        assert!(sys::zombie_from_stat("12 (x) X 1"));
+        assert!(
+            !sys::zombie_from_stat("12 (a) Z) S 1"),
+            "the state is after the last )"
+        );
+        assert!(!sys::zombie_from_stat("12 (x) S 1"));
+        assert!(!sys::zombie_from_stat("garbage"));
+        // macOS kinfo_proc: p_stat is byte 36, SZOMB is 5.
+        let mut buf = [0u64; 128];
+        assert!(!sys::zombie_from_kinfo(0, 648, &buf));
+        buf[4] = u64::from_ne_bytes([0, 0, 0, 0, 5, 0, 0, 0]); // byte 36 of the buffer
+        assert!(sys::zombie_from_kinfo(0, 648, &buf), "byte 36 is SZOMB");
+        assert!(
+            !sys::zombie_from_kinfo(1, 648, &buf),
+            "a failed sysctl says nothing"
+        );
+        assert!(
+            !sys::zombie_from_kinfo(0, 36, &buf),
+            "too short to hold p_stat"
+        );
+    }
+
+    fn exiting_child() -> Child {
+        #[cfg(unix)]
+        let mut c = Command::new("true");
+        #[cfg(windows)]
+        let mut c = {
+            let mut c = Command::new("cmd");
+            c.args(["/C", "exit", "0"]);
+            c
+        };
+        c.stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        c.spawn().expect("a child that exits at once")
+    }
+
+    /// Blocks until the child has exited without reaping it (Unix: `waitid(WNOWAIT)`, so it stays a zombie; Windows: the
+    /// process object lives on while the `Child` holds its handle).
+    fn wait_exited_keeping_it(child: &mut Child) {
+        #[cfg(unix)]
+        {
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            // SAFETY: a valid siginfo_t and a pid of our own child; WNOWAIT leaves the child waitable.
+            let rc = unsafe {
+                libc::waitid(
+                    libc::P_PID,
+                    libc::id_t::from(child.id()),
+                    &raw mut info,
+                    libc::WEXITED | libc::WNOWAIT,
+                )
+            };
+            assert_eq!(rc, 0, "waitid: {}", std::io::Error::last_os_error());
+        }
+        #[cfg(windows)]
+        {
+            child.wait().expect("the child exits");
+        }
+    }
+
+    /// An exited child whose handle (Windows) or zombie entry (Unix) is still there is gone: it runs nothing.
+    #[test]
+    fn an_exited_child_that_is_not_yet_reaped_is_gone() {
+        let mut child = exiting_child();
+        let pid = child.id();
+        wait_exited_keeping_it(&mut child);
+        assert_eq!(presence(pid), Presence::Gone);
+        // The same look through the primitives alone: sysinfo hiding it must not change the answer.
+        assert_eq!(
+            classify(None, || sys::pid_exists(pid), || sys::is_zombie(pid)),
+            Presence::Gone
+        );
+        child.wait().expect("reaped");
+    }
+
+    /// After the child is reaped, the OS says no such process (ESRCH; Windows: invalid parameter).
+    #[cfg(unix)]
+    #[test]
+    fn a_reaped_child_is_gone_by_no_such_process() {
+        let mut child = exiting_child();
+        let pid = child.id();
+        child.wait().expect("reaped");
+        assert_eq!(sys::pid_exists(pid), Exists::No);
+        assert_eq!(presence(pid), Presence::Gone);
+    }
+
+    /// A live child is running, and a seam that hides it from sysinfo does not make it gone.
+    #[cfg(unix)]
+    #[test]
+    fn a_live_child_hidden_from_sysinfo_is_not_gone() {
+        let mut child = Command::new("sleep").arg("30").spawn().expect("sleep");
+        let pid = child.id();
+        assert_eq!(presence(pid), Presence::Running);
+        assert_ne!(
+            classify(None, || sys::pid_exists(pid), || sys::is_zombie(pid)),
+            Presence::Gone,
+            "listed by the OS, not a zombie"
+        );
+        child.kill().expect("kill");
+        child.wait().expect("reaped");
+    }
+
+    /// Positive control: a process this user may not signal (pid 1, root's) is never reported gone, and on macOS, where sysinfo
+    /// lists it with start time 0 and status Unknown, it is not reported running either: nothing is known of it.
+    #[cfg(unix)]
+    #[test]
+    fn a_process_of_another_user_is_not_gone() {
+        // SAFETY: geteuid has no arguments and cannot fail.
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let seen = presence(1);
+        assert_ne!(seen, Presence::Gone, "pid 1 runs");
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            seen,
+            Presence::Unknown,
+            "start time 0 and status Unknown: not known"
+        );
+    }
+
+    /// Positive control (Windows): the System process (pid 4) runs and may not be opened; it is never reported gone.
+    #[cfg(windows)]
+    #[test]
+    fn the_system_process_is_never_gone() {
+        assert_ne!(presence(4), Presence::Gone);
+        assert_ne!(sys::pid_exists(4), Exists::No);
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -599,8 +791,27 @@ mod tests {
             }
         };
         assert_eq!(
-            terminate_by(id, Duration::from_secs(5), &look, &|_| true),
+            terminate_by(id, Duration::from_millis(200), &look, &|_| true),
             Terminated::Unknown
+        );
+    }
+
+    /// A dying process is for a moment listed nowhere yet still answers: one unknown look inside the grace is not the answer.
+    #[test]
+    fn an_unknown_look_that_clears_inside_the_grace_period_is_still_a_graceful_stop() {
+        let id = ProcessId::new(4242, StartTime::from_micros(1));
+        let looks = std::cell::Cell::new(0);
+        let look = |_: ProcessId| {
+            looks.set(looks.get() + 1);
+            match looks.get() {
+                1 => Presence::Running,
+                2 => Presence::Unknown,
+                _ => Presence::Gone,
+            }
+        };
+        assert_eq!(
+            terminate_by(id, Duration::from_secs(5), &look, &|_| true),
+            Terminated::Gracefully
         );
     }
 
@@ -619,55 +830,6 @@ mod tests {
         assert_eq!(
             terminate_by(id, Duration::from_secs(5), &look, &|_| true),
             Terminated::Gracefully
-        );
-    }
-
-    /// Positive control: a process this user may not signal (pid 1, root's) is never reported gone, and on macOS, where sysinfo
-    /// lists it with start time 0 and status Unknown, it is not reported running either: nothing is known of it.
-    #[test]
-    fn a_process_of_another_user_is_not_gone() {
-        // SAFETY: geteuid has no arguments and cannot fail.
-        if unsafe { libc::geteuid() } == 0 {
-            return;
-        }
-        let seen = presence(1);
-        assert_ne!(seen, Presence::Gone, "pid 1 runs");
-        #[cfg(target_os = "macos")]
-        assert_eq!(
-            seen,
-            Presence::Unknown,
-            "start time 0 and status Unknown: not known"
-        );
-    }
-
-    #[test]
-    fn what_sysinfo_could_not_read_is_unknown_and_only_a_confirmed_absence_is_gone() {
-        use crate::sys::Exists;
-        use sysinfo::ProcessStatus::{Run, Unknown as Unk, Zombie};
-        let never = || panic!("a listed process needs no second look");
-        assert_eq!(classify(Some((5, Run)), never), Presence::Running);
-        assert_eq!(
-            classify(Some((0, Run)), never),
-            Presence::Unknown,
-            "start 0"
-        );
-        assert_eq!(
-            classify(Some((5, Unk(0))), never),
-            Presence::Unknown,
-            "status Unknown"
-        );
-        assert_eq!(classify(Some((0, Unk(0))), never), Presence::Unknown);
-        assert_eq!(classify(Some((5, Zombie)), never), Presence::Gone);
-        assert_eq!(classify(None, || Exists::No), Presence::Gone);
-        assert_eq!(classify(None, || Exists::Refused), Presence::Unknown);
-        assert_eq!(
-            classify(None, || Exists::Yes),
-            if cfg!(windows) {
-                Presence::Unknown
-            } else {
-                Presence::Gone
-            },
-            "unlisted but signalable: a zombie on Unix"
         );
     }
 
