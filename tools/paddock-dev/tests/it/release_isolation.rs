@@ -1,10 +1,12 @@
 //! `./dev ci release-isolation` through the real binary (ADR 0085 WP-2): the exit codes and `::error::` lines a workflow
 //! step sees, on a synthetic job under a scratch folder with its own HOME (ER-14). The probes themselves are unit-tested.
-#![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use paddock_dev::release_isolation::fixture::{Fixture, Leak};
 use std::process::{Command, Output};
 
+// Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
+#[allow(clippy::disallowed_methods)]
 fn dev(f: &Fixture, args: &[&str]) -> Output {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
     cmd.args(["ci", "release-isolation"]).args(args).env_clear();
@@ -77,6 +79,8 @@ fn record_is_the_one_writer_one_line_per_kind() {
 }
 
 #[test]
+// Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
+#[allow(clippy::disallowed_methods)]
 fn setup_prints_the_environment_and_refuses_to_run_twice() {
     let dir = tempfile::tempdir().unwrap();
     let temp = dir.path().join("job");

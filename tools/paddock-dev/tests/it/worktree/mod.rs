@@ -1,6 +1,6 @@
 //! `dev worktree` and `dev check primary` end to end with the real binary against throw-away repositories (ER-14): a bare
 //! `origin`, a primary clone on `main`, and worktrees under one temporary folder. No test touches a real repository.
-#![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 // Unix only: the tests start `sleep` and bash, and the in-use probe of `clean` reads other processes' folders, which is
 // not implemented on Windows (there `clean` keeps everything). The Windows build is type-checked with `cargo xwin check`.
 #![cfg(unix)]
@@ -68,6 +68,8 @@ impl Fixture {
         fx
     }
 
+    // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
+    #[allow(clippy::disallowed_methods)]
     fn git_cmd(&self, dir: &Path) -> Command {
         let mut c = Command::new("git");
         c.arg("-C")
@@ -102,6 +104,8 @@ impl Fixture {
     }
 
     /// Like [`Fixture::cmd`] without `--json` (the text a person reads).
+    // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
+    #[allow(clippy::disallowed_methods)]
     pub fn cmd_text(&self, cwd: &Path, args: &[&str]) -> Command {
         let mut c = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
         c.args(args)
@@ -127,6 +131,8 @@ impl Fixture {
     /// A `git` script first on the PATH (the seam that slows or fails one git call): `body` is shell run before the real git
     /// with `$REAL` the real binary and the arguments in `$*`; falling off the end runs the real git. Returns the PATH.
     #[cfg(unix)]
+    // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
+    #[allow(clippy::disallowed_methods)]
     pub fn fake_git(&self, name: &str, body: &str) -> String {
         use std::os::unix::fs::PermissionsExt;
         let real = String::from_utf8(Command::new("which").arg("git").output().unwrap().stdout).unwrap();

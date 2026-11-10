@@ -29,6 +29,8 @@ fn the_pinned_oracle_names_its_source_commit() {
     assert_eq!(text.lines().nth(1), Some("#!/bin/bash"), "the script follows its header line");
 }
 
+// Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
+#[allow(clippy::disallowed_methods)]
 fn sh(fx: &Fixture, args: &[&str]) -> String {
     let out = Command::new("bash")
         .arg(script())

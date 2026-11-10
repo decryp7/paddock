@@ -31,6 +31,8 @@ fn finished(fx: &Fixture, name: &str, merged: bool) -> std::path::PathBuf {
 /// A process whose current folder is `dir`, ended when dropped.
 struct Inside(Child);
 impl Inside {
+    // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
+    #[allow(clippy::disallowed_methods)]
     fn at(dir: &Path) -> Inside {
         Inside(
             Command::new("sleep")
