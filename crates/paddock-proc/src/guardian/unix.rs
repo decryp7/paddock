@@ -52,8 +52,21 @@ pub fn run_if_requested() {
     let _ = HOOK.set(Vec::new());
 }
 
+/// The test entry of a test binary's guardian: a test function that calls this and nothing else (see
+/// [`enable_in_test_binary`]). In the guardian process (started with [`GUARDIAN_ENV`] `=1`) it serves the owner and never
+/// returns; in a plain test run, where the entry is a test like any other, it returns at once and changes nothing.
+///
+/// Test binaries use this, never [`run_if_requested`], in the entry: `run_if_requested` also marks the process as one
+/// that runs the guardian with no arguments, so every supervised launch after the entry ran as a plain test started the
+/// guardian as the whole test binary, which re-ran every test and left their children running when it ended.
+pub fn serve_if_guardian() {
+    if std::env::var_os(GUARDIAN_ENV).is_some_and(|v| v == "1") {
+        std::process::exit(serve(std::io::stdin().lock()));
+    }
+}
+
 /// For a test binary (whose `main` is the test harness): `entry` is the full path of a test function of this binary that
-/// calls [`run_if_requested`] (for example `guardian_entry`, or `launch::tests::guardian_entry`); the guardian is this
+/// calls [`serve_if_guardian`] (for example `guardian_entry`, or `launch::tests::guardian_entry`); the guardian is this
 /// binary run on that test alone.
 /// A test binary's guardian has no log unless the test names one ([`LOG_ENV`] or [`set_log`]): tests never write into the
 /// user's folders (ER-14).

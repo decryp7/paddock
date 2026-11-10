@@ -920,7 +920,6 @@ adr = "0041"
     "crates/paddock-jobs/tests/it/parallel.rs",
     "crates/paddock-download/tests/it/http.rs",
     "crates/paddock-window/src/tauri/tests.rs",
-    "crates/paddock-chromium/src/launch/tests.rs",
   ]
   owner = "paddock"
   delete_by = "v0.5.0"

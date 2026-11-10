@@ -3,6 +3,7 @@ use crate::fake::{FakeBrowser, Mode, UserAction};
 use crate::page::{MAX_HTML, Outcome};
 use crate::ready::{Readiness, Rule};
 use paddock_jobs::time::FakeClock;
+use paddock_testkit::wait::wait_until;
 
 const FAKE: &str = "launch::tests::fake_browser_process";
 
@@ -18,16 +19,6 @@ fn fake_browser_process() {
 /// alone. 40 s: over three times that, and under CI's 60 s test kill (nextest `slow-timeout` 30 s × 2), so a real hang
 /// fails with its own message instead of being killed first.
 const CLOSE_GUARD: Duration = Duration::from_secs(40);
-
-/// Waits (without sleeping) until `f` holds; a hang guard only.
-fn wait_until(what: &str, mut f: impl FnMut() -> bool) {
-    let end = Instant::now() + Duration::from_secs(20);
-    while !f() {
-        // conformance: hang-guard — a broken fake must fail the test, not hang it
-        assert!(Instant::now() < end, "timed out waiting for {what}");
-        std::thread::yield_now();
-    }
-}
 
 fn opts(base: &Path) -> LaunchOptions {
     let mut o = LaunchOptions::new(Profile::Throwaway(base.to_path_buf()));
@@ -88,6 +79,8 @@ struct Fixture {
 
 impl Fixture {
     fn new(mode: Mode, tabs: usize) -> Fixture {
+        // In-process launches get the real orphan guardian too, so a killed run ends its fakes by the product's own path.
+        paddock_proc::guardian::enable_in_test_binary(GUARDIAN);
         let dir = tempfile::tempdir().unwrap();
         let fake = FakeBrowser::install(dir.path(), FAKE, mode, tabs).unwrap();
         Fixture { dir, fake }
@@ -112,13 +105,20 @@ impl Fixture {
 /// Not a test: the orphan guardian of [`browser_owner_process`] (this binary run again, `paddock_proc::guardian`).
 #[test]
 fn guardian_entry() {
-    paddock_proc::guardian::run_if_requested();
+    paddock_proc::guardian::serve_if_guardian();
 }
 
 const GUARDIAN: &str = "launch::tests::guardian_entry";
 
 /// The base folder of [`browser_owner_process`]'s launch.
 const OWNER_ENV: &str = "PADDOCK_CHROMIUM_TEST_OWNER_BASE";
+
+/// Set to `1` for an owner that runs without the orphan guardian, so only the fake browser's own end on its owner's
+/// death can end the browser.
+const OWNER_UNGUARDED_ENV: &str = "PADDOCK_CHROMIUM_TEST_OWNER_UNGUARDED";
+
+/// Set to `1` for an owner that runs [`guardian_entry`] as a plain test first, as the test harness does.
+const OWNER_ENTRY_FIRST_ENV: &str = "PADDOCK_CHROMIUM_TEST_OWNER_ENTRY_FIRST";
 
 /// Not a test: a process that launches the fake browser with a throwaway profile, names it, and blocks until it is killed
 /// (or its standard input ends, when the test has gone).
@@ -127,7 +127,12 @@ fn browser_owner_process() {
     let Ok(base) = std::env::var(OWNER_ENV) else {
         return;
     };
-    paddock_proc::guardian::enable_in_test_binary(GUARDIAN);
+    if std::env::var(OWNER_ENTRY_FIRST_ENV).as_deref() == Ok("1") {
+        guardian_entry();
+    }
+    if std::env::var(OWNER_UNGUARDED_ENV).as_deref() != Ok("1") {
+        paddock_proc::guardian::enable_in_test_binary(GUARDIAN);
+    }
     let base = PathBuf::from(base);
     let fake = FakeBrowser::install(&base, FAKE, Mode::Obey, 1).unwrap();
     let b = Chromium::launch_with(
@@ -141,17 +146,27 @@ fn browser_owner_process() {
     std::process::exit(0);
 }
 
-#[test]
-fn a_browser_whose_owner_is_killed_is_ended_and_its_throwaway_profile_removed() {
+/// Starts [`browser_owner_process`] (unguarded when `guarded` is false) and returns it with the pid and profile folder of
+/// the browser it launched.
+#[expect(
+    clippy::zombie_processes,
+    reason = "the caller kills and waits for the owner it gets back"
+)]
+fn start_owner(
+    base: &Path,
+    guarded: bool,
+    entry_first: bool,
+) -> (std::process::Child, ProcessId, PathBuf) {
     use std::io::BufRead;
-    let d = tempfile::tempdir().unwrap();
     let mut owner = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
             "launch::tests::browser_owner_process",
             "--exact",
             "--nocapture",
         ])
-        .env(OWNER_ENV, d.path())
+        .env(OWNER_ENV, base)
+        .env(OWNER_UNGUARDED_ENV, if guarded { "0" } else { "1" })
+        .env(OWNER_ENTRY_FIRST_ENV, if entry_first { "1" } else { "0" })
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -159,23 +174,123 @@ fn a_browser_whose_owner_is_killed_is_ended_and_its_throwaway_profile_removed() 
         .unwrap();
     let mut out = std::io::BufReader::new(owner.stdout.take().unwrap());
     let mut line = String::new();
-    let (browser, profile) = loop {
+    loop {
         line.clear();
-        assert!(
-            out.read_line(&mut line).unwrap() > 0,
-            "the owner ended before naming its browser"
-        );
+        if out.read_line(&mut line).unwrap() == 0 {
+            let _ = owner.kill();
+            let _ = owner.wait();
+            panic!("the owner ended before naming its browser");
+        }
         if let Some((pid, dir)) = line
             .trim()
             .strip_prefix("browser ")
             .and_then(|r| r.split_once(' '))
         {
-            break (
+            let (pid, dir) = (
                 ProcessId::of(pid.parse().unwrap()).unwrap(),
                 PathBuf::from(dir),
             );
+            return (owner, pid, dir);
         }
-    };
+    }
+}
+
+/// A browser whose owner dies without any clean-up and without a guardian ends by itself (the fake watches its parent),
+/// so a killed or timed-out test run leaves no `fake_browser_process` behind (ER-14).
+#[test]
+fn a_fake_browser_ends_when_its_owner_dies_even_without_a_guardian() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut owner, browser, _profile) = start_owner(d.path(), false, false);
+    assert!(browser.is_alive());
+    owner.kill().unwrap();
+    owner.wait().unwrap();
+    let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+        paddock_proc::run_state(browser) == paddock_proc::RunState::Exited
+    });
+    if !gone {
+        // Ended by identity before the test fails, so a failure leaves no browser behind (ER-14).
+        paddock_proc::kill_tree(browser);
+        panic!("the fake browser outlived its owner");
+    }
+}
+
+/// A fake whose launcher is already gone when the fake starts (the launch was killed or timed out at that moment) ends too:
+/// its watch knows the launcher from the start script, not from whoever its parent is when it first looks. The launcher
+/// here is a shell that starts the fake in the background and exits at once, five times over (the fake needs a few
+/// milliseconds to start, so it is orphaned before it first looks).
+#[test]
+fn a_fake_browser_whose_launcher_is_already_gone_when_it_starts_ends() {
+    let d = tempfile::tempdir().unwrap();
+    let fake = FakeBrowser::install(d.path(), FAKE, Mode::Obey, 1).unwrap();
+    let mut started = Vec::new();
+    for n in 0..5 {
+        let profile = d.path().join(format!("profile-{n}"));
+        std::fs::create_dir_all(&profile).unwrap();
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(r#""$0" --user-data-dir="$1" >/dev/null 2>&1 </dev/null & echo $!"#)
+            .arg(&fake.exe)
+            .arg(&profile)
+            .output()
+            .unwrap();
+        let pid: u32 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
+        started.push(ProcessId::of(pid).unwrap());
+    }
+    let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+        started
+            .iter()
+            .all(|p| paddock_proc::run_state(*p) == paddock_proc::RunState::Exited)
+    });
+    if !gone {
+        // Ended by identity before the test fails, so a failure leaves none behind (ER-14).
+        for p in &started {
+            paddock_proc::kill_tree(*p);
+        }
+        panic!("a fake browser whose launcher was gone when it started kept running");
+    }
+}
+
+/// `guardian_entry` is a test too, so it runs in the plain test process; that must not turn the process into one that
+/// starts the guardian as the whole test binary (which re-ran every test and orphaned their fake browsers).
+#[test]
+fn running_the_guardian_entry_as_a_plain_test_does_not_start_a_guardian_of_the_whole_binary() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut owner, browser, _profile) = start_owner(d.path(), false, true);
+    let me = std::env::current_exe().unwrap().display().to_string();
+    let table = std::process::Command::new("ps")
+        .args(["-axo", "pid=,ppid=,command="])
+        .output()
+        .unwrap();
+    let table = String::from_utf8_lossy(&table.stdout).into_owned();
+    // The processes of the owner that run this binary with no arguments (a guardian that re-runs every test).
+    let bare: Vec<u32> = table
+        .lines()
+        .filter_map(|l| {
+            let mut f = l.split_whitespace();
+            let (pid, ppid) = (f.next()?, f.next()?);
+            let command = l.trim_start().splitn(3, char::is_whitespace).nth(2)?.trim();
+            (ppid == owner.id().to_string() && command == me).then(|| pid.parse().ok())?
+        })
+        .collect();
+    // Ended by identity before the assertion, so a failure leaves nothing behind (ER-14).
+    for pid in &bare {
+        if let Some(id) = ProcessId::of(*pid) {
+            paddock_proc::kill_tree(id);
+        }
+    }
+    paddock_proc::kill_tree(browser);
+    let _ = owner.kill();
+    let _ = owner.wait();
+    assert!(
+        bare.is_empty(),
+        "the owner started this test binary with no arguments (a guardian that re-runs every test): {bare:?}"
+    );
+}
+
+#[test]
+fn a_browser_whose_owner_is_killed_is_ended_and_its_throwaway_profile_removed() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut owner, browser, profile) = start_owner(d.path(), true, false);
     assert!(profile.exists() && browser.is_alive());
     // SIGKILL through the handle of this process's own child: none of the owner's own clean-up runs.
     owner.kill().unwrap();
@@ -1139,7 +1254,6 @@ fn a_helper_that_left_the_process_group_is_ended_with_the_browser() {
     std::fs::write(&log, b"").unwrap();
     let mut cmd = paddock_proc::command("tail");
     cmd.arg("-f").arg(&log);
-    #[allow(clippy::zombie_processes)]
     let mut helper = cmd.spawn().unwrap();
     wait_until("the helper to show up", || {
         !paddock_proc::processes_mentioning(&dir.to_string_lossy()).is_empty()

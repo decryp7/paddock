@@ -40,6 +40,13 @@ Conventional Commits; one semver tag for the whole repo.
   written_ms)` (the holder must have started no later than the record). Code that deletes something on "gone" (a profile
   folder, a discovery or lock file) uses these, so an unreadable process table removes nothing; `is_alive` keeps `Unknown`
   as not running, for code that ends or waits for a process (ADR 0081).
+- New `paddock_proc::guardian::serve_if_guardian()`: the entry a test binary's guardian test function calls (and nothing
+  else). It serves only in the guardian process (`PADDOCK_PROC_GUARDIAN=1`) and never touches the guardian hook. Test
+  binaries use it instead of `run_if_requested`: that call also marks the process as one that runs the guardian with no
+  arguments, so after the entry ran as a plain test every supervised launch started the guardian as the whole test binary,
+  which re-ran every test, wrote its log in the user's log folder and left its children running when it ended. Used by the
+  `paddock-proc` and `paddock-chromium` test binaries (unit and `real_browser`). The `paddock-chromium` fake browser also
+  ends when its launcher is gone (the launcher's pid comes from its start script), so a killed run leaves none.
 - `paddock-chromium`: throwaway profiles go with an orphaned browser, are named `chromium-<pid>-s<start µs>-...`, and each
   throwaway launch sweeps profiles whose owner is gone (by pid and start time, within the slack).
 
