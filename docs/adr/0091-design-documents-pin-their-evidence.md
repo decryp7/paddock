@@ -1,7 +1,8 @@
 # 91. Design documents pin their evidence, and reviews check it is still current
 
-- Status: Proposed 2026-11-10, revision 2. Revision 1 (`5d1c252c4`) was reviewed independently ("changes": P1-1, P1-2
-  and nine P2s; the idea judged sound and proportionate); this revision answers it (see "Review answers"). Drafted at the
+- Status: Accepted 2026-11-10 (user), all decisions as recommended. History: Proposed 2026-11-10; revision 1
+  (`5d1c252c4`) was reviewed independently ("changes": P1-1, P1-2 and nine P2s); revision 2 (`f2bdba1df`) answered it
+  and was approved by the re-review, whose P2s this text folds in (see "Review answers"). Drafted at the
   coordinator's request of 2026-11-10 (ER-21: one class, seen four times in one day's ADR work and twice before).
   Nothing here is built yet. ER-23 does not apply (no drawings).
 - Date: 2026-11-10
@@ -19,18 +20,20 @@
   none).
 - Evidence: read on 2026-11-10 with `git show`, `git log`, `git grep`, `git merge-base --is-ancestor`, `git log
   --cherry-mark` and `git tag --contains` after `git fetch`. Paths without a branch are from this ADR's base
-  `origin/train/2026-11-09-3`. No user data was read. The heads, re-read right before the commit:
+  `origin/train/2026-11-09-3` `67a633ef3`; before the acceptance commit the train moved to `c151422a4` (one test file,
+  `tools/paddock-dev/tests/it/golden.rs`) and RT-8 to `0d40eafed` (`ci_runs/{client,flakes,mod}.rs`, `cli.rs`), none of
+  them a file this ADR names, so the block was accepted forward (report-only moves, §2). No user data was read. The heads, re-read right before the commit:
 
 ```evidence-heads
 read: 2026-11-10
-origin/train/2026-11-09-3 67a633ef3
+origin/train/2026-11-09-3 c151422a4
 origin/main b51c72509
 origin/docs/adr-not-measured 0df6835a9
 origin/docs/adr-captured-tool-output 9c2cd4d8e
 origin/docs/adr-windows-gate-ratchets db7782e01
 origin/docs/rust-tooling-plan 2791c634c
 origin/feat/rt5-check-host ec8530a95
-origin/feat/rt8-ci-flakes 1313b8d9e
+origin/feat/rt8-ci-flakes 0d40eafed
 origin/docs/rule-48-merge-check 3d45cdb57
 engineering-rules main ca4124bdc
 ```
@@ -48,12 +51,15 @@ Times are committer times from `git log -1 --format=%ci` (all +08:00, 2026-11-10
 | 5 | A scout lookup, 2026-11-03 | Dyno has no disk-map UI and no reveal action | it read the coordinator's main checkout, 1008 commits behind `origin/main`; both exist there (memory "lookups-read-origin-main") |
 | 6 | Commit `b48df1818` (2026-11-05 18:28), one parent `945798909` | an uninstall fix | built on a stale tree, it also reverted the macOS memory fix, MCP key redaction and e2e fixes; a steward caught it by hand (memory "merges-check-stale-reverts"). The merge check for this lives on `origin/docs/rule-48-merge-check` (`scripts/merge-regression-check.mjs`, not on main) |
 
-**It is happening now.** Accepted ADR 0089 (`0df6835a9`) pins nine heads in its Evidence line. Against the tips fetched
-for this revision, three have moved: `origin/feat/rt5-check-host` `0a94bf347` → `ec8530a95` (+1),
-`origin/feat/rt8-ci-flakes` `da05b54e8` → `1313b8d9e` (+1), and `origin/docs/adr-captured-tool-output` `9687d644b` →
-`9c2cd4d8e` (+2); six are current. Accepted ADR 0090 (`9c2cd4d8e`) pins six heads; all six are current. Measured with
-`git rev-parse` and `git merge-base --is-ancestor` per head; eleven heads took 0.19 s wall time on this Mac. A reader of
-0089 today cannot tell from its text that three of its facts may be out of date.
+**It is happening now.** Read at 2026-11-10 20:04 +08:00, after `git fetch`, against the tips in this ADR's block:
+accepted ADR 0089 (`0df6835a9`) pins nine heads in its Evidence line, and four have moved: `origin/train/2026-11-09-3`
+`67a633ef3` → `c151422a4` (+3), `origin/feat/rt5-check-host` `0a94bf347` → `ec8530a95` (+1), `origin/feat/rt8-ci-flakes`
+`da05b54e8` → `0d40eafed` (+3) and `origin/docs/adr-captured-tool-output` `9687d644b` → `9c2cd4d8e` (+2); five are
+current. Accepted ADR 0090 (`9c2cd4d8e`) pins six heads; two have moved (the train +3, RT-8 `1313b8d9e` → `0d40eafed`
++2), four are current. (At the revision 2 fetch, about 19:40, 0089 had three moved and 0090 none: the count grows by
+the hour.) Measured with `git rev-parse` and `git rev-list --count` per head; eleven heads took 0.19 s wall time on this
+Mac. A reader of 0089 today cannot tell from its text that four of its facts may be out of date.
+
 
 **The practice exists, by hand.** 26 of the 57 family ADR files on the train have a `- Evidence` line, 29 cite a
 9-character commit, and 27 name an `origin/` branch (`grep -lE` over `docs/adr/0*.md`). The lines are prose in many
@@ -120,18 +126,32 @@ engineering-rules line be compared against that checkout's `origin`.
 same run. It refuses on a document whose `- Status:` says Accepted: an accepted document's block is history, and its
 moves are a revision's or amendment's business.
 
-**Shared query.** The test "is commit X in `origin/main`" is a public function of the module, so ADR 0096's register
-check reuses it instead of writing its own.
+**Shared query.** The test "is commit X in `origin/main`" lives in one place, `tools/paddock-dev/src/git_refs.rs`
+(`is_in(commit, "origin/main") -> Result<bool, GitReadError>`), written by whichever of this ADR's WP-1 and ADR 0096's
+WP-2 lands first, and used by both.
 
 ### 3. `./dev evidence shipped <commit> [--app <app>] [--grep <pattern> [--path <path>]]`
 
-Prints, for each tag (filtered to `<app>-v*`): whether it contains the commit (`git tag --contains`); whether it holds an
-equivalent patch (`git log --cherry-mark <tag>...<commit>`, patch-id); and with `--grep`, the matching lines at that tag
-(in `--path`, or the whole tree). Containing the introducing commit is **neither necessary nor sufficient** for shipping:
-a cherry-pick onto a release branch ships the code without the commit, and a later commit may remove it. The `--grep`
-hits at the tag are the evidence; the other two columns say how it got there. Measured case: `pitcrew-v1.0.1` holds
-`service_repair.rs` without `5ff3b0a39`'s line scan (row 4). A document that says code shipped, or did not, cites this
-output.
+Prints one row per tag (filtered to `<app>-v*`) with four columns:
+
+| Column | How | What it says |
+|---|---|---|
+| contains | `git merge-base --is-ancestor <commit> <tag>` (as `git tag --contains`) | the commit itself is in the tag |
+| tag before commit | `git merge-base --is-ancestor <tag> <commit>` | the tag is an ancestor of the commit, so the commit came later and cannot be in it except as a copy |
+| equivalent patch | `git log --cherry-mark --right-only --format='%m %H' <tag>...<commit>`, the one line whose full sha is `<commit>`: `=` means the tag holds a patch with the same patch-id, `>` means it does not | a cherry-pick onto a release branch |
+| grep hits | with `--grep`, `git grep` at the tag (in `--path`, or the whole tree) | the code itself |
+
+Containing the introducing commit is **neither necessary nor sufficient** for shipping: a cherry-pick ships the code
+without the commit, and a later commit may remove it. The grep hits are the evidence; the other three columns say how
+it got there. A document that says code shipped, or did not, cites this output.
+
+Measured (2026-11-10): for `5ff3b0a39` at `pitcrew-v1.0.1`, contains no, tag before commit yes, equivalent patch `>`
+(none), and `service_repair.rs` at the tag has 0 lines matching `starts_with("state = ")` and 7 naming
+`stale_registration` (row 4). On a non-trivial range, `pitcrew-v1.0.1...4d169393d` (5,507 commits), the cherry-mark
+line for `4d169393d` is `>` and the whole `git log` took 0.04 s; `dyno-v1.1.0...4d169393d` (171 commits) 0.01 s. Positive
+control on a throw-away repository: a commit cherry-picked onto a tagged release branch reads contains no, equivalent
+patch `=`, grep hit 1. (Match the full `%H`: an abbreviated `%h` has a repository-dependent length, and a fixed-width
+match missed the `=` line in the first run of that control.)
 
 ### 4. Reviews start with it
 
@@ -171,7 +191,7 @@ never promoted to an error.
 ## Parallelism and cost (rule 51)
 
 One `git fetch` (seconds on this network) plus one `rev-parse`, one `merge-base` and one `log` per ref; eleven refs took
-0.19 s here, and `git log --cherry-mark` over one tag range 0.02 s. Nothing to parallelise. C105 is a text scan of under
+0.19 s here, and `git log --cherry-mark` over a 5,507-commit tag range 0.04 s (§3). Nothing to parallelise. C105 is a text scan of under
 250 files (57 family ADRs, 153 app ADRs, 8 family plans on the train), within the RT-5 host's tree read.
 
 ## Alternatives
@@ -213,8 +233,8 @@ in documents are inert text.
 
 | WP | What | Days | Depends on |
 |---|---|---|---|
-| WP-1 | `./dev evidence check` and `--accept`: block parser, git reads through a `Result`, the state table judged into ADR 0089's `Outcome` and `Verdict`, name matching, `--repo`, the public "in `origin/main`" query; tests on a throw-away git repository in the shared test scratch (ADR 0078) with a planted current, moved (named and unnamed file), merged, rewritten, gone and unknown head each (positive controls); goldens of the text output | 1.25 | ADR 0089 WP for `paddock_cli::outcome` (or a local shim replaced by it) |
-| WP-2 | `./dev evidence shipped` with `--app`, `--grep`, `--path` and the cherry-mark column; tests on a throw-away repository with two tags and a cherry-pick | 0.25 | WP-1 |
+| WP-1 | `./dev evidence check` and `--accept`: block parser, git reads through a `Result`, the state table judged into ADR 0089's `Outcome` and `Verdict`, name matching, `--repo`, the public "in `origin/main`" query; tests on a throw-away git repository in the shared test scratch (ADR 0078) with a planted current, moved (named and unnamed file), merged, rewritten, gone and unknown head each (positive controls); goldens of the text output | 1.25 | ADR 0089 WP-1 (`paddock_cli::outcome`, 1.5 days), strictly: no local shim, so no second copy of the outcome type to register |
+| WP-2 | `./dev evidence shipped` with `--app`, `--grep`, `--path` and the four columns of §3; tests on a throw-away repository with two tags, a cherry-pick (the `=` control) and a commit after the tag | 0.25 | WP-1 |
 | WP-3 | C105 in the RT-5 host (`check/c105.rs`, one registry line), fixtures of the 0089 and 0090 shapes, a bad file as control | 0.5 | RT-5 landed |
 | WP-4 | Paddock rule and lesson, ER-33 amendment (D7), reviewer brief lines in both repositories, two pre-review checklist lines, the block's form in `docs/adr/README.md` (no ADR template file exists under `docs/adr/` or `templates/` today) | 0.25 | – |
 | WP-5 | Blocks for open **proposed** ADRs only (accepted ones such as 0089 and 0090 keep theirs as history); RT-12's warning (§6) | 0.5 | WP-1; RT-12 for the warning |
@@ -239,3 +259,11 @@ WP-1, WP-2 and WP-4 can start now; WP-3 waits for RT-5 to land; WP-5's warning w
 | P2 WP-1 size | 1.25 days; total 2.75 |
 | P2 scope | "What this does not cover" names accepted-but-unlanded ADRs (ADR 0096) and docs-branch-only ADRs; the in-main query is public |
 | P2 README | the blank line between the 0078 and 0080 rows removed |
+
+## Review answers (revision 2, `f2bdba1df`, approved; P2s folded in at acceptance)
+
+| Finding | Answer |
+|---|---|
+| P2 `shipped` columns | §3: a "tag before commit" column (`git merge-base --is-ancestor <tag> <commit>`); the cherry-mark read uses `--right-only` and the one line of the commit's full sha; re-measured on a 5,507-commit range, with a cherry-pick control |
+| P2 Outcome shim | WP-1 depends strictly on ADR 0089 WP-1; no shim, so no known-copies entry is needed |
+| P2 "six are current" | dated: read 2026-11-10 after the revision 2 fetch, at the heads of this ADR's block |
