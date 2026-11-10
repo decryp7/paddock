@@ -86,8 +86,11 @@ pub enum Item {
     Cmd(Simple),
     /// A separator.
     Sep(Sep),
-    /// The end of a nested piece: state a rule carries from command to command (a loop condition) does not cross it.
-    Boundary,
+    /// The start of a nested piece (`$(...)`, `bash -c`...): it runs inside the command before it, so it starts with that state
+    /// (a loop condition) and the state is restored at the matching [`Item::Leave`].
+    Enter,
+    /// The end of a nested piece.
+    Leave,
 }
 
 /// A parsed command line.
@@ -281,9 +284,9 @@ fn parse_into(src: &str, depth: usize, budget: &mut usize, out: &mut Vec<Item>) 
                 return Err(LexError::TooLarge);
             }
             *budget -= 1;
-            out.push(Item::Boundary);
+            out.push(Item::Enter);
             parse_into(&n, depth + 1, budget, out)?;
-            out.push(Item::Boundary);
+            out.push(Item::Leave);
         }
     }
     Ok(())
@@ -737,7 +740,10 @@ mod tests {
 
     #[test]
     fn separators_split_commands_and_redirections_vanish() {
-        assert_eq!(cmds("a && b || c; d | e & f\ng"), vec![vec!["a"], vec!["b"], vec!["c"], vec!["d"], vec!["e"], vec!["f"], vec!["g"]]);
+        assert_eq!(
+            cmds("a && b || c; d | e & f\ng"),
+            vec![vec!["a"], vec!["b"], vec!["c"], vec!["d"], vec!["e"], vec!["f"], vec!["g"]]
+        );
         assert_eq!(cmds("ls >out 2>&1 -l &>x"), vec![vec!["ls", "-l"]]);
         assert_eq!(cmds("a 2>/dev/null; b >> f"), vec![vec!["a"], vec!["b"]]);
     }
@@ -799,7 +805,10 @@ mod tests {
 
     #[test]
     fn shells_and_eval_are_parsed_again() {
-        assert_eq!(cmds("bash -c 'a b; c'"), vec![vec!["bash", "-c", "a b; c"], vec!["a", "b"], vec!["c"]]);
+        assert_eq!(
+            cmds("bash -c 'a b; c'"),
+            vec![vec!["bash", "-c", "a b; c"], vec!["a", "b"], vec!["c"]]
+        );
         assert_eq!(cmds("sh -lc 'x y'")[1], ["x", "y"]);
         assert_eq!(cmds("eval git push -f")[1], ["git", "push", "-f"]);
         assert_eq!(cmds("/bin/bash -c 'x'")[1], ["x"]);

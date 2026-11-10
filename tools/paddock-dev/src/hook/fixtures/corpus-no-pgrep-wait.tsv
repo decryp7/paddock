@@ -1,0 +1,57 @@
+deny	while pgrep -f "foo"; do sleep 5; done
+deny	until ! pgrep -f foo; do sleep 1; done
+deny	while pgrep -fl foo; do sleep 1; done
+deny	while pgrep -af cargo; do sleep 2; done
+deny	while pgrep -x -f foo; do sleep 1; done
+deny	while pgrep -n -o -f foo; do :; done
+deny	while pgrep -lf 'x y'; do sleep 1; done
+deny	while /usr/bin/pgrep -f foo; do sleep 1; done
+deny	while ! pgrep -f foo; do sleep 1; done
+deny	until pgrep -f foo; do sleep 1; done
+deny	while sleep 1 && pgrep -f x; do :; done
+deny	while pgrep -f foo\ndo sleep 1\ndone
+deny	while (pgrep -f foo); do sleep 1; done
+deny	cd /x && while pgrep -f foo; do sleep 1; done
+deny	while pgrep -f foo | grep -q .; do sleep 1; done
+deny	timeout 60 bash -c 'while pgrep -f foo; do sleep 1; done'
+deny	sh -c "while pgrep -f foo; do sleep 1; done"
+deny	eval "while pgrep -f foo; do sleep 1; done"
+deny	echo start; while pgrep -f foo; do sleep 1; done; echo done
+deny	until pgrep -fq done; do sleep 1; done
+deny	while pgrep -qf foo; do sleep 1; done
+deny	while [ -n "$(pgrep -f foo)" ]; do sleep 1; done
+deny	while pgrep -f foo >/dev/null 2>&1; do sleep 1; done
+deny	while pgrep -f "dev-server --port 3000"; do sleep 0.5; done
+deny	while pgrep -f foo; do echo waiting; sleep 5; done; echo ok
+allow	while pgrep foo; do sleep 1; done
+allow	while pgrep -x foo; do sleep 1; done
+allow	while pgrep -l foo; do sleep 1; done
+allow	until pgrep -n foo; do sleep 1; done
+allow	pgrep -f foo
+allow	pgrep -fl foo | head
+allow	./dev wait --pid 123 --max 5m
+allow	while kill -0 $pid; do sleep 1; done
+allow	while true; do pgrep -f x; done
+allow	for i in 1 2 3; do pgrep -f foo; done
+allow	echo hello
+allow	ls -la
+allow	git status
+allow	while read l; do echo $l; done < file
+allow	until [ -f /tmp/x ]; do sleep 1; done
+allow	ps aux | grep foo
+allow	timeout 10 pgrep foo
+allow	pgrep -f foo || echo none
+allow	while pgrep foo; do pgrep -f bar; done
+allow	while ! pgrep -x foo; do sleep 1; done
+allow	echo "pgrep -f foo"
+allow	grep -f patterns file
+allow	sleep 5 && pgrep -f foo
+allow	until ssh host true; do sleep 1; done
+allow	watch -n1 pgrep -f foo
+allow	while true; do sleep 1; pgrep -f foo; done
+allow	cargo test --workspace
+allow	while IFS= read -r line; do echo "$line"; done < <(pgrep -f foo)
+allow	while pgrep -u me -f foo; do sleep 1; done
+allow	while pgrep --full foo; do sleep 1; done
+allow	while pgrep -x foo && sleep 1; do :; done
+allow	./dev wait --plock build --max 10m

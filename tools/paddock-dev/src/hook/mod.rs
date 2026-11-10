@@ -92,7 +92,14 @@ mod tests {
 
     #[test]
     fn malformed_input_is_allowed_with_one_log_line_that_does_not_echo_it() {
-        for bad in ["", "garbage SECRET-TEXT", "[1]", "{}", r#"{"tool_name":"Bash"}"#, r#"{"tool_name":"Bash","tool_input":5}"#] {
+        for bad in [
+            "",
+            "garbage SECRET-TEXT",
+            "[1]",
+            "{}",
+            r#"{"tool_name":"Bash"}"#,
+            r#"{"tool_name":"Bash","tool_input":5}"#,
+        ] {
             let (code, out, err) = run(bad.as_bytes());
             assert_eq!((code, out.as_str()), (0, ""), "{bad}");
             assert_eq!(err.lines().count(), 1, "{bad}");
