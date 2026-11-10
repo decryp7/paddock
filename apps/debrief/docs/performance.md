@@ -102,10 +102,22 @@ some fields; "n/s" means the source does not state them.
 
   Runs 7815 and 7870 tested the same commit (b51c72509) and peaked at 679 and 776 MB: one commit moves about ±50 MB
   between nights. Every run used runner d-gtr9 (16 cores, 128 GB); the logs checked (6233, 6344, 7870) show the same
-  image `garage:ubuntu-24.04-20261023-r5` and rustc 1.99.1, and libduckdb stayed 1.5.6.
+  image `garage:ubuntu-24.04-20261023-r5` and rustc 1.99.1. libduckdb was 1.5.6 up to run 7688 and 2.0.0 from run
+  7815 on (559885b08 reached main between them); the peaks did not move with it.
 - **Machine:** Mac mini, Linux arm64 container (`train3-linux-dev:1`, 6 CPUs, 24 GB), load 10–40 from other agents.
   Release builds with `CARGO_BUILD_JOBS=2`. The worker sizes its parse threads from the cores (cores − 1, at most 8): 5
   in the container, 8 on the CI runner, so the A/B runs set 8 through `StoreTuning::parse_threads`.
+- **Command** (from `apps/debrief`, libduckdb set up as in [development.md](development.md)):
+  `DEBRIEF_BENCH_COPIES=20 DEBRIEF_BENCH_PARSE_THREADS=8 cargo test --release -p debrief-store-worker --test it worker:: -- --nocapture`;
+  the switch sets the parse threads in normal mode only (low memory mode keeps its cap of 4); add `DEBRIEF_BENCH_TRACE=1`
+  for the memory per import phase. The A/B runs of the file order, freed pages and row groups
+  used temporary switches that are not committed (described with each result).
+- **Memory measure:** the worker process only, sampled every 20 ms. The bisect builds (10-23 to 10-25) measure RSS
+  (sysinfo, the test of that time); the train and the fix measure PSS (`paddock_proc::process_memory`, since 9d802de4c).
+  Compare within one block only.
+- **Build:** release; allocator mimalloc v3 (crate 0.1.52) with `debrief_alloc::tune` (10 ms purge delay). libduckdb
+  1.5.6 for the bisect builds (their `fetch-libduckdb.sh`), 2.0.0 for the train and the fix (`VERSION=2.0.0`, duckdb-rs
+  1.20000.0).
 - **Corpus:** `/samples` × 20 (585,800 events, 680 files), as the job.
 - **Bisect** (first parent, default 5 parse threads, 3 runs each, import / index / idle / query MB):
 
@@ -141,6 +153,18 @@ some fields; "n/s" means the source does not state them.
 - **After the fix** (train at 8 parse threads, 8 interleaved pairs): import peak 658–712 MB (mean 688) against 746–776 MB
   (mean 760; 3 of 8 over 768). Idle and query about 15 MB lower (means 315 against 331 and 415 against 428). Parse
   phase 0.77–1.0 s against 0.68–1.07 s in 5 traced pairs (one fixed run took 2.4 s under load): no slowdown measured.
+
+| Worker, 20 copies, 8 parse threads, PSS | Before (8 runs) | After (8 runs) | Budget | Verdict after |
+|---|---|---|---|---|
+| Import peak | 746–776 MB (mean 760) | 658–712 MB (mean 688) | 768 MB | pass |
+| Idle | 317–345 MB (mean 331) | 292–334 MB (mean 315) | 320 MB | fail (2 of 8 over) |
+| Query peak | 414–440 MB (mean 428) | 396–433 MB (mean 415) | 320 MB | fail |
+
+- **Notes:** on a large file the new `fill` makes about 11× more read calls per 8 MB block (`read_to_end` grows the
+  buffer step by step) and its first fill peaks about 2 MB higher per thread (estimates from the review, not measured
+  here); no slowdown was measured on this corpus, whose files are small.
+- **Check run with the command above** (fixed branch, load under 20, 2 runs): import 637 and 641 MB (pass), idle 290
+  and 291 MB, query 383 and 388 MB (fail, as above); low memory mode imported at 307 MB (pass, budget 400).
 - **Still over budget, not changed here:** the query peak (396–440 MB) and idle (292–345 MB) at 20 copies stay over
   320 MB (indexing pipeline, catalogue, path order). The import keeps about 200 MB of freed pages at its peak. Recording
   the file fingerprints commits once per file (`record_fingerprints`, 680 commits): about 4 s of the import's 5–7 s.

@@ -522,7 +522,8 @@ mod tests {
 
     /// Regression (nightly store-bench, import over 768 MB at 8 parse threads): every read appended a whole block of
     /// zeros (8 MB in the import) before reading into it, so each small file, read in a few KB, still wrote 8 MB of
-    /// memory, and the allocator kept those pages for its purge delay. A small input holds about its own size.
+    /// memory, and the allocator kept those pages for its purge delay. A small input holds about its own size. The
+    /// buffer's capacity stands in for the memory written: the old fill zeroed (and so touched) all of it.
     #[test]
     fn a_small_input_never_holds_a_whole_block() {
         let text = "2026-10-14 10:00:00 INFO first\n2026-10-14 10:00:01 ERROR second\n";

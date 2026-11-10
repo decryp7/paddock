@@ -5,6 +5,8 @@
 //! `DEBRIEF_BENCH_COPIES=<n>` imports n copies of the samples for a larger run (use `--release`).
 //! `DEBRIEF_BENCH_TRACE=1` also prints the worker's memory every 50 ms with the import phase and the index progress, so
 //! a peak over a budget can be placed in a phase.
+//! `DEBRIEF_BENCH_PARSE_THREADS=<n>` gives the worker n parse threads (`StoreTuning::parse_threads`) instead of its
+//! default (cores - 1, at most 8) in normal mode, so a machine with fewer cores can measure what the CI runner (8) uses.
 
 use debrief_core::api::{FacetRequest, TimelineRequest};
 use debrief_core::batch::SourceId;
@@ -168,7 +170,19 @@ fn confined(exe: &str) -> WorkerConfig {
 fn worker_in(mode: MemoryMode) -> StoreWorker {
     let mut cfg = confined(env!("CARGO_BIN_EXE_debrief-store-worker"));
     cfg.memory_mode = mode;
+    // Normal mode only: low memory mode keeps its own, smaller parse pool.
+    if mode == MemoryMode::Normal {
+        cfg.tuning.parse_threads = bench_parse_threads();
+    }
     StoreWorker::new(cfg).unwrap()
+}
+
+/// The parse threads `DEBRIEF_BENCH_PARSE_THREADS` asks for, if any.
+fn bench_parse_threads() -> Option<usize> {
+    std::env::var("DEBRIEF_BENCH_PARSE_THREADS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|n| *n > 0)
 }
 
 /// Regression (macOS CI temp-leak check): the confined folder was inside macOS' long temp folder, so the endpoints of the
@@ -295,11 +309,15 @@ fn imports_and_queries_within(mode: MemoryMode, import_budget_mb: u64) {
     sampler.take_mb();
     // Printed before the queries, so a failing query still reports the import.
     eprintln!(
-        "worker: import {} events in {elapsed:.2} s ({:.0}/s); peak RSS importing {import_peak} MB, indexing and cataloguing ({catalogue_s:.1} s) {index_peak} MB, idle {idle} MB ({mode:?} mode; {} cores, {} parse threads by default)",
+        "worker: import {} events in {elapsed:.2} s ({:.0}/s); peak RSS importing {import_peak} MB, indexing and cataloguing ({catalogue_s:.1} s) {index_peak} MB, idle {idle} MB ({mode:?} mode; {} cores, parse threads {}{})",
         report.events,
         report.events as f64 / elapsed,
         std::thread::available_parallelism().map_or(1, |n| n.get()),
-        debrief_core::ingest::default_threads()
+        match (mode, bench_parse_threads()) {
+            (MemoryMode::Normal, Some(n)) => format!("{n} (DEBRIEF_BENCH_PARSE_THREADS)"),
+            _ => format!("{} (default)", debrief_core::ingest::default_threads()),
+        },
+        if mode == MemoryMode::Low { ", low memory mode caps them at 4" } else { "" }
     );
     // Queries.
     let summary = store.summary().unwrap();
