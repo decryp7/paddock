@@ -124,8 +124,13 @@ impl From<paddock_env::Refusal> for Untrusted {
                 what: "open the socket's folder",
                 cause: "it is not a folder".into(),
             },
-            // The account-based refusals of `paddock_env::private` (ACL, file, parent): not what `decide` returns, kept readable.
-            other => Untrusted::Unreadable {
+            // The refusals of `paddock_env::private` (ACL, owner SID, file, parent, reparse point): `decide` never returns them, but
+            // each is named here so a new variant is a compile error, not a silent default.
+            other @ (Refusal::OpenToOthersAcl { .. }
+            | Refusal::OtherOwnerAccount { .. }
+            | Refusal::NotAFile
+            | Refusal::Parent(_)
+            | Refusal::ReparsePoint) => Untrusted::Unreadable {
                 what: "check the socket's folder",
                 cause: other.to_string(),
             },
@@ -148,14 +153,29 @@ mod tests {
 
     #[test]
     fn a_refusal_of_the_private_type_stays_readable() {
-        let e = Untrusted::from(paddock_env::Refusal::NotAFile);
-        assert_eq!(
-            e,
-            Untrusted::Unreadable {
-                what: "check the socket's folder",
-                cause: "it is not a regular file".into(),
-            }
-        );
+        use paddock_env::Refusal;
+        let acl = Refusal::OpenToOthersAcl {
+            who: "S-1-1-0".into(),
+        };
+        for r in [
+            Refusal::NotAFile,
+            Refusal::ReparsePoint,
+            Refusal::OtherOwnerAccount {
+                who: "S-1-5-18".into(),
+            },
+            Refusal::Parent(Box::new(acl.clone())),
+            acl,
+        ] {
+            let cause = r.to_string();
+            let e = Untrusted::from(r);
+            assert_eq!(
+                e,
+                Untrusted::Unreadable {
+                    what: "check the socket's folder",
+                    cause
+                }
+            );
+        }
     }
 
     #[test]

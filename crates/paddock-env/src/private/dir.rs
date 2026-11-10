@@ -433,6 +433,56 @@ mod common_tests {
         ));
     }
 
+    /// Review P2-6: on a folder only write-type entries for others refuse (the mode rule); read-only ones, inherit-only ones and
+    /// ones for the account itself pass, and the refusal names the principal.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_macos_folder_acl_refuses_only_write_entries_for_others() {
+        let t = temp();
+        let chmod = |entry: &str, p: &Path| {
+            let out = std::process::Command::new("/bin/chmod")
+                .args(["+a", entry, p.to_str().unwrap()])
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{entry}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        let new = |name: &str| {
+            let p = t.path().join(name);
+            std::fs::create_dir(&p).unwrap();
+            p
+        };
+        let read_only = new("read-only");
+        chmod("everyone allow list,search,readattr", &read_only);
+        PrivateDir::open(&read_only, Links::Refuse).unwrap();
+        let inherit_only = new("inherit-only");
+        chmod(
+            "everyone allow add_file,delete_child,file_inherit,directory_inherit,only_inherit",
+            &inherit_only,
+        );
+        PrivateDir::open(&inherit_only, Links::Refuse).unwrap();
+        let me = std::env::var("USER").unwrap_or_default();
+        let own = new("own");
+        chmod(&format!("user:{me} allow add_file,delete_child"), &own);
+        PrivateDir::open(&own, Links::Refuse).unwrap();
+        let write = new("write");
+        chmod("everyone allow add_file", &write);
+        let why = refusal(PrivateDir::open(&write, Links::Refuse).unwrap_err());
+        assert!(
+            matches!(&why, Refusal::OpenToOthersAcl { who } if who.contains("group 12")),
+            "{why:?}"
+        );
+        let deleter = new("deleter");
+        chmod("everyone allow delete_child", &deleter);
+        assert!(matches!(
+            refusal(PrivateDir::open(&deleter, Links::Refuse).unwrap_err()),
+            Refusal::OpenToOthersAcl { .. }
+        ));
+    }
+
     #[test]
     fn io_and_refusal_errors_display_with_their_path() {
         let e = PrivateError::Io {
@@ -1171,7 +1221,7 @@ mod windows_tests {
             PrivateDir::open(&link, Links::Refuse),
             PrivateDir::create_all(&link),
         ] {
-            assert_eq!(refusal(result.unwrap_err()), Refusal::Symlink);
+            assert_eq!(refusal(result.unwrap_err()), Refusal::ReparsePoint);
         }
         assert_eq!(std::fs::read_dir(&target).unwrap().count(), 0);
     }
@@ -1288,5 +1338,49 @@ mod windows_tests {
             matches!(e, PrivateError::Io { .. } | PrivateError::Refused { .. }),
             "{e}"
         );
+    }
+
+    /// Review P2-2, Windows half: an existing child with an Everyone ACL is refused by `child`.
+    #[test]
+    fn an_existing_child_with_an_everyone_acl_is_refused() {
+        let t = temp();
+        let d = PrivateDir::create_all(&t.path().join("d")).unwrap();
+        d.child("c").unwrap();
+        icacls(
+            &d.path().join("c"),
+            &["/grant", &format!("*{EVERYONE}:(OI)(CI)F")],
+        );
+        assert_eq!(
+            refusal(d.child("c").unwrap_err()),
+            Refusal::OpenToOthersAcl {
+                who: EVERYONE.to_owned()
+            }
+        );
+    }
+
+    /// Review P2-5: a held reader of the file must not make the replace fail, and keeps reading the old content.
+    #[test]
+    fn a_held_reader_does_not_stop_a_replace() {
+        let t = temp();
+        let d = PrivateDir::create_all(&t.path().join("d")).unwrap();
+        d.write_atomic("f", b"old").unwrap();
+        let reader = d.open_file("f").unwrap();
+        d.write_atomic("f", b"new").unwrap();
+        assert_eq!(d.read("f", 10).unwrap(), b"new");
+        assert_eq!(reader.read_to_vec(10).unwrap(), b"old");
+    }
+
+    /// The plain `FileRenameInformation` class, which the replace falls back to on a system without the Ex class.
+    #[test]
+    fn the_plain_rename_class_replaces_too() {
+        let t = temp();
+        let d = PrivateDir::create_all(&t.path().join("d")).unwrap();
+        d.write_atomic("f", b"old").unwrap();
+        let (tmp, mut file) = d.create_temp("f", d.path()).unwrap();
+        std::io::Write::write_all(&mut file, b"new").unwrap();
+        d.dir.rename_plain(&file, OsStr::new("f")).unwrap();
+        drop(file);
+        assert_eq!(d.read("f", 10).unwrap(), b"new");
+        assert!(!d.path().join(tmp).exists());
     }
 }

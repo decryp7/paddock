@@ -21,11 +21,12 @@ use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows_sys::Wdk::Storage::FileSystem::{
     FILE_CREATE, FILE_DELETE_ON_CLOSE, FILE_DIRECTORY_FILE, FILE_NON_DIRECTORY_FILE, FILE_OPEN,
     FILE_OPEN_REPARSE_POINT, FILE_RENAME_INFORMATION, FILE_SYNCHRONOUS_IO_NONALERT,
-    FileRenameInformationEx, NtCreateFile, NtSetInformationFile,
+    FileRenameInformation, FileRenameInformationEx, NtCreateFile, NtSetInformationFile,
 };
 use windows_sys::Win32::Foundation::{
     CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE, LocalFree,
-    RtlNtStatusToDosError, STATUS_FILE_IS_A_DIRECTORY, STATUS_NOT_A_DIRECTORY, UNICODE_STRING,
+    RtlNtStatusToDosError, STATUS_FILE_IS_A_DIRECTORY, STATUS_INVALID_PARAMETER,
+    STATUS_NOT_A_DIRECTORY, UNICODE_STRING,
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, GetSecurityInfo,
@@ -35,7 +36,7 @@ use windows_sys::Win32::Security::{
     ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, GetAce, GetTokenInformation, INHERIT_ONLY_ACE,
     IsWellKnownSid, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, TOKEN_QUERY,
     TOKEN_USER, TokenUser, WinBuiltinAdministratorsSid, WinCreatorOwnerRightsSid,
-    WinLocalSystemSid,
+    WinCreatorOwnerSid, WinLocalSystemSid,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CreateFileW, DELETE, FILE_ATTRIBUTE_DIRECTORY,
@@ -51,6 +52,9 @@ use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken}
 /// What a held folder handle is opened with: list, traverse (a relative open needs it), read attributes and the descriptor.
 const DIR_ACCESS: u32 =
     FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE;
+
+/// The SID of `NT SERVICE\\TrustedInstaller`, the owner of system folders.
+const TRUSTED_INSTALLER: &str = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
 
 /// `OBJ_CASE_INSENSITIVE` (`ntdef.h`).
 const OBJ_CASE_INSENSITIVE: u32 = 0x40;
@@ -236,6 +240,21 @@ impl Dir {
         Ok(unsafe { OwnedHandle::from_raw_handle(handle) })
     }
 
+    /// [`Dir::ensure_not_indexed`], where a failure is logged and not fatal: the access list is already owner-only, so a search
+    /// indexer that does read the content runs as the same account; refusing to create the object would help nobody (ER-27: the
+    /// line names no path).
+    fn not_indexed_or_warn(handle: &OwnedHandle) {
+        if let Err(e) = Self::ensure_not_indexed(handle) {
+            log::warn!(
+                "Could not mark a new private folder or file as not content-indexed ({}); it stays owner-only",
+                match e {
+                    Fail::Io(e) => e.to_string(),
+                    Fail::Refused(r) => r.reason().to_owned(),
+                }
+            );
+        }
+    }
+
     /// Marks the new object as not to be content-indexed (a created folder's flag is inherited by what is made in it). The
     /// descriptor already holds the access list; this only keeps the search indexer from reading the content.
     fn ensure_not_indexed(handle: &OwnedHandle) -> Result<(), Fail> {
@@ -307,7 +326,7 @@ impl Dir {
         let handle = unsafe { OwnedHandle::from_raw_handle(h) };
         let attrs = Self::attributes(&handle)?;
         if !follow && attrs & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-            return Err(Refusal::Symlink.into());
+            return Err(Refusal::ReparsePoint.into());
         }
         if attrs & FILE_ATTRIBUTE_DIRECTORY == 0 {
             return Err(Refusal::NotAFolder.into());
@@ -327,7 +346,7 @@ impl Dir {
             descriptor: None,
         })?;
         if Self::attributes(&handle)? & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-            return Err(Refusal::Symlink.into());
+            return Err(Refusal::ReparsePoint.into());
         }
         Ok(Dir(handle))
     }
@@ -374,7 +393,7 @@ impl Dir {
             options: FILE_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT,
             descriptor: Some(&descriptor),
         })?;
-        Self::ensure_not_indexed(&handle)?;
+        Self::not_indexed_or_warn(&handle);
         Ok(Dir(handle))
     }
 
@@ -397,7 +416,7 @@ impl Dir {
             options: FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT,
             descriptor: Some(&descriptor),
         })?;
-        Self::ensure_not_indexed(&handle)?;
+        Self::not_indexed_or_warn(&handle);
         Ok(File::from(handle))
     }
 
@@ -407,13 +426,13 @@ impl Dir {
             name,
             access: GENERIC_READ | READ_CONTROL | SYNCHRONIZE,
             attributes: 0,
-            share: FILE_SHARE_READ,
+            share: FILE_SHARE_READ | FILE_SHARE_DELETE,
             disposition: FILE_OPEN,
             options: FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT,
             descriptor: None,
         })?;
         if Self::attributes(&handle)? & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-            return Err(Refusal::Symlink.into());
+            return Err(Refusal::ReparsePoint.into());
         }
         let (owner, aces) = security(handle.as_raw_handle(), who)?;
         super::acl::file_decision(&owner, &aces)?;
@@ -423,6 +442,23 @@ impl Dir {
     /// Renames the open `file` (`from` is its name) to `to` inside this folder, replacing a file already there, relative to this
     /// folder's handle.
     pub(super) fn rename(&self, file: &File, _from: &OsStr, to: &OsStr) -> io::Result<()> {
+        // `FileRenameInformationEx` (POSIX semantics) needs Windows 10 1809 or later; an older system answers
+        // STATUS_INVALID_PARAMETER and the replace is retried with the plain class and `ReplaceIfExists`.
+        let mut rc = self.rename_class(file, to, true);
+        if rc == STATUS_INVALID_PARAMETER {
+            rc = self.rename_class(file, to, false);
+        }
+        if rc < 0 {
+            return Err(match nt(rc) {
+                Fail::Io(e) => e,
+                Fail::Refused(_) => io::Error::from(io::ErrorKind::InvalidInput),
+            });
+        }
+        Ok(())
+    }
+
+    /// One rename call, `extended` for `FileRenameInformationEx`; the NT status.
+    fn rename_class(&self, file: &File, to: &OsStr, extended: bool) -> i32 {
         let name = wide(to);
         let header = std::mem::size_of::<FILE_RENAME_INFORMATION>();
         let total = header + name.len() * 2;
@@ -430,7 +466,11 @@ impl Dir {
         let info = buf.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>();
         // SAFETY: `buf` is 8-byte aligned and at least `header + name bytes` long; the name is copied after the fixed part.
         unsafe {
-            (*info).Anonymous.Flags = RENAME_REPLACE_POSIX;
+            if extended {
+                (*info).Anonymous.Flags = RENAME_REPLACE_POSIX;
+            } else {
+                (*info).Anonymous.ReplaceIfExists = true;
+            }
             (*info).RootDirectory = self.0.as_raw_handle();
             (*info).FileNameLength = (name.len() * 2) as u32;
             std::ptr::copy_nonoverlapping(
@@ -441,23 +481,32 @@ impl Dir {
         }
         // SAFETY: a zeroed status block is filled in by the call.
         let mut status: IO_STATUS_BLOCK = unsafe { std::mem::zeroed() };
+        let class = if extended {
+            FileRenameInformationEx
+        } else {
+            FileRenameInformation
+        };
         // SAFETY: the file handle was opened with DELETE; `buf` holds a complete FILE_RENAME_INFORMATION.
-        let rc = unsafe {
+        unsafe {
             NtSetInformationFile(
                 file.as_raw_handle(),
                 &mut status,
                 buf.as_ptr().cast(),
                 total as u32,
-                FileRenameInformationEx,
+                class,
             )
-        };
-        if rc < 0 {
-            return Err(match nt(rc) {
-                Fail::Io(e) => e,
-                Fail::Refused(_) => io::Error::from(io::ErrorKind::InvalidInput),
-            });
         }
-        Ok(())
+    }
+
+    /// The plain-class rename, for the test of the fallback.
+    #[cfg(test)]
+    pub(super) fn rename_plain(&self, file: &File, to: &OsStr) -> io::Result<()> {
+        match self.rename_class(file, to, false) {
+            rc if rc < 0 => Err(io::Error::from_raw_os_error(
+                unsafe { RtlNtStatusToDosError(rc) } as i32,
+            )),
+            _ => Ok(()),
+        }
     }
 
     /// Removes the file `name` from this folder: opened with `DELETE` as itself, deleted when the handle closes.
@@ -481,7 +530,8 @@ impl Dir {
         }
     }
 
-    /// NTFS journals folder entries, and a folder handle cannot be flushed: nothing to do.
+    /// Windows has no portable flush of a folder's entries (a flush needs a handle with write access and is not supported on
+    /// every volume); NTFS journals the rename, so the replace is as durable as the file system makes a rename. Nothing to do.
     pub(super) fn sync(&self) -> io::Result<()> {
         Ok(())
     }
@@ -522,6 +572,8 @@ fn who_is(sid: PSID, me: &str) -> io::Result<Who> {
             Some(Who::Admins)
         } else if IsWellKnownSid(sid, WinCreatorOwnerRightsSid) != 0 {
             Some(Who::OwnerRights)
+        } else if IsWellKnownSid(sid, WinCreatorOwnerSid) != 0 {
+            Some(Who::CreatorOwner)
         } else {
             None
         }
@@ -532,6 +584,8 @@ fn who_is(sid: PSID, me: &str) -> io::Result<Who> {
             let text = sid_text(sid)?;
             Ok(if text == me {
                 Who::Me
+            } else if text == TRUSTED_INSTALLER {
+                Who::TrustedInstaller
             } else {
                 Who::Other(text)
             })

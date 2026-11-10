@@ -165,7 +165,7 @@ impl Dir {
             return Err(Refusal::NotAFile.into());
         }
         file_decision(facts_of(&st), *who)?;
-        acl_check(&fd)?;
+        acl_check(&fd, AclScope::File, *who)?;
         Ok(File::from(fd))
     }
 
@@ -203,19 +203,22 @@ impl Dir {
     }
 
     /// Owner and mode of this folder from its descriptor, plus the macOS ACL check.
-    fn facts(&self) -> Result<FolderFacts, Fail> {
-        acl_check(&self.0)?;
+    fn facts(&self, scope: AclScope, me: u32) -> Result<FolderFacts, Fail> {
+        acl_check(&self.0, scope, me)?;
         Ok(facts_of(&fstat(&self.0)?))
     }
 
     /// The folder belongs to `who` and no one else can write to it.
     pub(super) fn check(&self, who: &Account) -> Result<(), Fail> {
-        Ok(crate::folder::decide(self.facts()?, *who)?)
+        Ok(crate::folder::decide(
+            self.facts(AclScope::Folder, *who)?,
+            *who,
+        )?)
     }
 
     /// The folder's parent cannot be used to rename or replace the folder.
     pub(super) fn check_parent(&self, who: &Account) -> Result<(), Fail> {
-        let facts = self.parent()?.facts()?;
+        let facts = self.parent()?.facts(AclScope::Folder, *who)?;
         Ok(parent_decision(facts, *who).map_err(|r| Refusal::Parent(Box::new(r)))?)
     }
 }
@@ -243,56 +246,121 @@ pub(super) fn parent_decision(facts: FolderFacts, uid: u32) -> Result<(), Refusa
     Ok(())
 }
 
-/// macOS extended ACLs: an allow entry for another principal is refused (the mode bits do not show it). Linux POSIX ACLs show in
-/// the group bits through the mask, which the mode check already covers.
+/// Which rule an ACL is judged by: a folder like its mode bits (only write-type rights for others refuse; listing shows no
+/// value), a file like its mode (any right for another principal refuses: the content is the secret).
+#[derive(Clone, Copy)]
+enum AclScope {
+    Folder,
+    File,
+}
+
+/// macOS extended ACLs: an allow entry for another principal is refused when it carries a right that matters for `scope`
+/// (entries that only apply to children, and entries for the account itself, are ignored), naming the principal. The mode
+/// bits do not show these. Linux POSIX ACLs show in the group bits through the mask, which the mode check already covers.
 #[cfg(target_os = "macos")]
-fn acl_check(fd: &OwnedFd) -> Result<(), Refusal> {
+fn acl_check(fd: &OwnedFd, scope: AclScope, me: u32) -> Result<(), Refusal> {
     use std::ffi::c_void;
-    type Acl = *mut c_void;
+    type Ptr = *mut c_void;
     unsafe extern "C" {
-        fn acl_get_fd_np(fd: libc::c_int, kind: libc::c_uint) -> Acl;
-        fn acl_get_entry(acl: Acl, id: libc::c_int, entry: *mut *mut c_void) -> libc::c_int;
-        fn acl_get_tag_type(entry: *mut c_void, tag: *mut libc::c_uint) -> libc::c_int;
-        fn acl_free(obj: *mut c_void) -> libc::c_int;
+        fn acl_get_fd_np(fd: libc::c_int, kind: libc::c_uint) -> Ptr;
+        fn acl_get_entry(acl: Ptr, id: libc::c_int, entry: *mut Ptr) -> libc::c_int;
+        fn acl_get_tag_type(entry: Ptr, tag: *mut libc::c_uint) -> libc::c_int;
+        fn acl_get_permset(entry: Ptr, perms: *mut Ptr) -> libc::c_int;
+        fn acl_get_perm_np(perms: Ptr, perm: libc::c_uint) -> libc::c_int;
+        fn acl_get_flagset_np(entry: Ptr, flags: *mut Ptr) -> libc::c_int;
+        fn acl_get_flag_np(flags: Ptr, flag: libc::c_uint) -> libc::c_int;
+        fn acl_get_qualifier(entry: Ptr) -> Ptr;
+        fn acl_free(obj: Ptr) -> libc::c_int;
+        fn mbr_uuid_to_id(uu: *const u8, id: *mut u32, kind: *mut libc::c_int) -> libc::c_int;
     }
     const ACL_TYPE_EXTENDED: libc::c_uint = 0x100;
     const ACL_FIRST_ENTRY: libc::c_int = 0;
     const ACL_NEXT_ENTRY: libc::c_int = -1;
     const ACL_EXTENDED_ALLOW: libc::c_uint = 1;
+    const ACL_ENTRY_ONLY_INHERIT: libc::c_uint = 1 << 8;
+    // WRITE_DATA, DELETE, APPEND_DATA, DELETE_CHILD, WRITE_ATTRIBUTES, WRITE_EXTATTRIBUTES, WRITE_SECURITY, CHANGE_OWNER.
+    const WRITE_RIGHTS: [libc::c_uint; 8] = [
+        1 << 2,
+        1 << 4,
+        1 << 5,
+        1 << 6,
+        1 << 8,
+        1 << 10,
+        1 << 12,
+        1 << 13,
+    ];
+    // READ_DATA, EXECUTE, READ_ATTRIBUTES, READ_EXTATTRIBUTES, READ_SECURITY: with the write rights, every right.
+    const READ_RIGHTS: [libc::c_uint; 5] = [1 << 1, 1 << 3, 1 << 7, 1 << 9, 1 << 11];
+    const ID_TYPE_UID: libc::c_int = 0;
     // SAFETY: a valid descriptor; a null result means no extended ACL.
     let acl = unsafe { acl_get_fd_np(fd.as_raw_fd(), ACL_TYPE_EXTENDED) };
     if acl.is_null() {
         return Ok(());
     }
+    let mut found = None;
     let mut id = ACL_FIRST_ENTRY;
-    let mut allows = false;
     loop {
-        let mut entry: *mut c_void = std::ptr::null_mut();
-        // SAFETY: `acl` is a live ACL and `entry` a valid out pointer; the call returns -1 after the last entry.
+        let mut entry: Ptr = std::ptr::null_mut();
+        // SAFETY: `acl` is a live ACL and `entry` a valid out pointer; the call returns non-zero after the last entry.
         if unsafe { acl_get_entry(acl, id, &mut entry) } != 0 {
             break;
         }
         id = ACL_NEXT_ENTRY;
         let mut tag: libc::c_uint = 0;
         // SAFETY: `entry` came from the call above.
-        if unsafe { acl_get_tag_type(entry, &mut tag) } == 0 && tag == ACL_EXTENDED_ALLOW {
-            allows = true;
-            break;
+        if unsafe { acl_get_tag_type(entry, &mut tag) } != 0 || tag != ACL_EXTENDED_ALLOW {
+            continue;
         }
+        let (mut flags, mut perms): (Ptr, Ptr) = (std::ptr::null_mut(), std::ptr::null_mut());
+        // SAFETY: `entry` is live; the out pointers are valid.
+        let only_inherit = unsafe { acl_get_flagset_np(entry, &mut flags) } == 0
+            && unsafe { acl_get_flag_np(flags, ACL_ENTRY_ONLY_INHERIT) } == 1;
+        // SAFETY: as above.
+        if only_inherit || unsafe { acl_get_permset(entry, &mut perms) } != 0 {
+            continue;
+        }
+        let rights = WRITE_RIGHTS.iter().chain(match scope {
+            AclScope::Folder => [].iter(),
+            AclScope::File => READ_RIGHTS.iter(),
+        });
+        // SAFETY: `perms` is the entry's live permission set.
+        if !rights
+            .into_iter()
+            .any(|&r| unsafe { acl_get_perm_np(perms, r) } == 1)
+        {
+            continue;
+        }
+        // SAFETY: `entry` is live; a non-null qualifier is a 16-byte GUID the caller frees.
+        let guid = unsafe { acl_get_qualifier(entry) };
+        let who = if guid.is_null() {
+            "an unnamed principal".to_owned()
+        } else {
+            let (mut who_id, mut kind) = (0u32, 0 as libc::c_int);
+            // SAFETY: `guid` points at 16 bytes; the out pointers are valid.
+            let known = unsafe { mbr_uuid_to_id(guid.cast::<u8>(), &mut who_id, &mut kind) } == 0;
+            // SAFETY: `guid` came from acl_get_qualifier and is freed once.
+            unsafe { acl_free(guid) };
+            match (known, kind) {
+                (true, ID_TYPE_UID) if who_id == me => continue,
+                (true, ID_TYPE_UID) => format!("user {who_id}"),
+                (true, _) if who_id == 12 => "group 12 (everyone)".to_owned(),
+                (true, _) => format!("group {who_id}"),
+                (false, _) => "an unknown principal".to_owned(),
+            }
+        };
+        found = Some(who);
+        break;
     }
     // SAFETY: `acl` is freed once.
     unsafe { acl_free(acl) };
-    if allows {
-        Err(Refusal::OpenToOthersAcl {
-            who: "an extended ACL entry".to_owned(),
-        })
-    } else {
-        Ok(())
+    match found {
+        Some(who) => Err(Refusal::OpenToOthersAcl { who }),
+        None => Ok(()),
     }
 }
 
 #[cfg(not(target_os = "macos"))]
-fn acl_check(_fd: &OwnedFd) -> Result<(), Refusal> {
+fn acl_check(_fd: &OwnedFd, _scope: AclScope, _me: u32) -> Result<(), Refusal> {
     Ok(())
 }
 

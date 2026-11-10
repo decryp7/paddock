@@ -42,6 +42,9 @@ pub enum Refusal {
     Symlink,
     /// The path is not a folder.
     NotAFolder,
+    /// A Windows reparse point (symbolic link, junction, mount point, or another kind such as a cloud-sync placeholder) is
+    /// where a plain folder or file must be. Reparse points are never followed by the private-files type.
+    ReparsePoint,
     /// Another account owns the folder.
     OtherOwner {
         /// The owner's uid.
@@ -75,6 +78,9 @@ impl Refusal {
             Refusal::Unreadable { .. } => "it cannot be inspected",
             Refusal::Symlink => "it is a symbolic link",
             Refusal::NotAFolder => "it is not a folder",
+            Refusal::ReparsePoint => {
+                "it is a reparse point (a link, junction, mount point or cloud placeholder)"
+            }
             Refusal::OtherOwner { .. } => "it belongs to another user",
             Refusal::OpenToOthers { .. } => "other users can change it",
             Refusal::OpenToOthersAcl { .. } => "its access list lets other users change it",

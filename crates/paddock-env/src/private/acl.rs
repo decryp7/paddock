@@ -19,6 +19,11 @@ pub(super) enum Who {
     Admins,
     /// `OWNER RIGHTS`: the object's owner, who is checked separately.
     OwnerRights,
+    /// `CREATOR OWNER`: a placeholder that becomes the creator of whatever inherits the entry (the usual inherit-only entry on
+    /// system folders such as `C:\ProgramData`); it names no other account.
+    CreatorOwner,
+    /// `NT SERVICE\TrustedInstaller`, the owner of system folders.
+    TrustedInstaller,
     /// Anyone else, by SID text.
     Other(String),
 }
@@ -34,6 +39,8 @@ impl Who {
             Who::System => "SYSTEM".to_owned(),
             Who::Admins => "Administrators".to_owned(),
             Who::OwnerRights => "OWNER RIGHTS".to_owned(),
+            Who::CreatorOwner => "CREATOR OWNER".to_owned(),
+            Who::TrustedInstaller => "TrustedInstaller".to_owned(),
             Who::Other(sid) => sid.clone(),
         }
     }
@@ -124,7 +131,11 @@ pub(super) fn file_decision(owner: &Who, aces: &[Ace]) -> Result<(), Refusal> {
 /// Whether a folder's parent cannot be used to rename or replace the folder: Administrators, SYSTEM or the account own it and no
 /// one else may delete entries in it or change its owner or access list.
 pub(super) fn parent_decision(owner: &Who, aces: &[Ace]) -> Result<(), Refusal> {
-    let inner = if owner.trusted() && !matches!(owner, Who::OwnerRights) {
+    let acceptable = matches!(
+        owner,
+        Who::Me | Who::System | Who::Admins | Who::TrustedInstaller
+    );
+    let inner = if acceptable {
         intruder(aces, PARENT_WRITE, false).map(|who| Refusal::OpenToOthersAcl { who })
     } else {
         Some(Refusal::OtherOwnerAccount { who: owner.text() })
@@ -338,7 +349,7 @@ mod tests {
         for owner in [Who::Me, Who::System, Who::Admins] {
             assert_eq!(parent_decision(&owner, &mine()), Ok(()));
         }
-        for owner in [other(), Who::OwnerRights] {
+        for owner in [other(), Who::OwnerRights, Who::CreatorOwner] {
             assert!(matches!(
                 parent_decision(&owner, &mine()),
                 Err(Refusal::Parent(_))
@@ -346,9 +357,57 @@ mod tests {
         }
     }
 
+    /// Review P2-7: the inherit-only CREATOR OWNER entry that system folders carry names no other account.
+    #[test]
+    fn a_creator_owner_entry_for_children_does_not_refuse_a_folder() {
+        let children = Ace {
+            inherit_only: true,
+            ..allow(Who::CreatorOwner, FULL)
+        };
+        assert_eq!(
+            folder_decision(&Who::Me, &[allow(Who::Me, FULL), children.clone()]),
+            Ok(())
+        );
+        assert_eq!(
+            file_decision(
+                &Who::Me,
+                &[allow(Who::Me, FULL), allow(Who::CreatorOwner, FULL)]
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            parent_decision(&Who::Me, &[allow(Who::CreatorOwner, FULL)]),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn trusted_installer_may_own_a_parent_but_not_the_folder() {
+        assert_eq!(parent_decision(&Who::TrustedInstaller, &mine()), Ok(()));
+        assert!(matches!(
+            folder_decision(&Who::TrustedInstaller, &mine()),
+            Err(Refusal::OtherOwnerAccount { .. })
+        ));
+        assert_eq!(
+            folder_decision(
+                &Who::Me,
+                &[allow(Who::Me, FULL), allow(Who::TrustedInstaller, FULL)]
+            ),
+            Ok(())
+        );
+    }
+
     #[test]
     fn every_who_has_a_text() {
-        for who in [Who::Me, Who::System, Who::Admins, Who::OwnerRights, other()] {
+        for who in [
+            Who::Me,
+            Who::System,
+            Who::Admins,
+            Who::OwnerRights,
+            Who::CreatorOwner,
+            Who::TrustedInstaller,
+            other(),
+        ] {
             assert!(!who.text().is_empty());
         }
     }
