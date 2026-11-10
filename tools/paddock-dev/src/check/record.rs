@@ -35,8 +35,8 @@ pub struct RunRecord {
     pub completed: bool,
     /// The panic message when the check crashed.
     pub crash: Option<String>,
-    /// Every folder of the tree was listed (the tree is completely known).
-    pub listing_complete: bool,
+    /// The folders the listing could not read (empty: the tree is completely known).
+    pub unlisted: Vec<String>,
     /// What its input had to be for the run to mean anything, and whether it was.
     pub precondition: Precondition,
     /// Its built-in positive control saw what it is built to see.
@@ -94,16 +94,15 @@ impl RunRecord {
         std::env::consts::OS
     }
 
-    /// Whether the run counts as a measurement (what the stale-entry engine asks): it ran, did not crash, completed, listed the
-    /// whole tree, had its precondition and control, and looked at something.
+    /// Whether the run counts as a measurement (what the stale-entry engine asks): [`RunRecord::judge`] says `clean` or `findings`.
+    /// There is no second definition to drift from it.
     pub fn measured(&self) -> bool {
-        self.ran
-            && self.crash.is_none()
-            && self.completed
-            && self.listing_complete
-            && self.precondition.met
-            && self.control
-            && self.probes > 0
+        matches!(self.judge(false).0, Status::Clean | Status::Findings)
+    }
+
+    /// Every folder of the tree was listed.
+    pub fn listing_complete(&self) -> bool {
+        self.unlisted.is_empty()
     }
 
     /// The one decision about a run (ER-33): its status given whether findings are left after waivers, and the error no waiver
@@ -119,8 +118,19 @@ impl RunRecord {
         } else if !self.completed {
             reasons.push("it did not complete (a file could not be read)".into());
         }
-        if !self.listing_complete {
-            reasons.push("the tree could not be listed completely (a folder could not be read)".into());
+        if !self.listing_complete() {
+            let shown: Vec<&str> = self.unlisted.iter().take(5).map(String::as_str).collect();
+            let more = self.unlisted.len() - shown.len();
+            reasons.push(format!(
+                "the tree could not be listed completely: cannot read folder(s) {}{}{}",
+                shown.join(", "),
+                if more > 0 { format!(" and {more} more") } else { String::new() },
+                if matches!(self.scope, Scope::Files(_)) {
+                    " (outside the scoped files, but the run fails closed: an unknown folder may hold what the files name)"
+                } else {
+                    ""
+                }
+            ));
         }
         if !self.control {
             reasons.push("its positive control no longer sees what the check is built to see".into());
@@ -164,7 +174,8 @@ impl RunRecord {
             "check": self.check,
             "ran": self.ran,
             "completed": self.completed,
-            "listingComplete": self.listing_complete,
+            "listingComplete": self.listing_complete(),
+            "unlisted": self.unlisted,
             "precondition": {"met": self.precondition.met, "detail": self.precondition.detail},
             "control": self.control,
             "probes": self.probes,
@@ -188,7 +199,7 @@ mod tests {
             ran: true,
             completed: true,
             crash: None,
-            listing_complete: true,
+            unlisted: vec![],
             precondition: Precondition {
                 met: true,
                 detail: "the tree lists files".into(),
@@ -223,6 +234,27 @@ mod tests {
             assert_eq!(r.status(false), Status::NotMeasured, "{name}");
             assert!(!r.measured(), "{name}");
         }
+        for (name, r) in [
+            (
+                "crash",
+                RunRecord {
+                    crash: Some("boom".into()),
+                    ..rec()
+                },
+            ),
+            (
+                "unlisted folder",
+                RunRecord {
+                    unlisted: vec!["locked".into()],
+                    ..rec()
+                },
+            ),
+            ("control", RunRecord { control: false, ..rec() }),
+        ] {
+            assert!(!r.measured(), "{name}");
+            assert_ne!(r.status(false), Status::Clean, "{name}");
+        }
+        assert!(rec().measured());
         assert_eq!(RunRecord { control: false, ..rec() }.status(false), Status::CheckBroken);
     }
 
@@ -239,7 +271,7 @@ mod tests {
             }),
             ("incomplete", |r| RunRecord { completed: false, ..r }),
             ("unlistable folder", |r| RunRecord {
-                listing_complete: false,
+                unlisted: vec!["locked".into()],
                 ..r
             }),
             ("failed control", |r| RunRecord { control: false, ..r }),
@@ -269,6 +301,13 @@ mod tests {
                     let must_fail = matches!(status, Status::NotMeasured | Status::CheckBroken);
                     assert_eq!(error.is_some(), must_fail, "{sname} / {wname} / kept {kept}: {status:?} {error:?}");
                     assert_eq!(r.status(kept), status);
+                    if !kept {
+                        assert_eq!(
+                            r.measured(),
+                            matches!(status, Status::Clean | Status::Findings),
+                            "{sname} / {wname}: measured follows the status"
+                        );
+                    }
                 }
                 let expect = match (*wname, &scope) {
                     ("failed control", _) => Status::CheckBroken,
@@ -277,8 +316,26 @@ mod tests {
                     _ => Status::NotMeasured,
                 };
                 assert_eq!(r.status(false), expect, "{sname} / {wname}");
+                assert_eq!(r.measured(), expect == Status::Clean, "{sname} / {wname}");
             }
         }
+    }
+
+    #[test]
+    fn an_unlisted_folder_is_named_and_a_scoped_run_says_it_is_outside_the_files() {
+        let r = RunRecord {
+            unlisted: vec!["locked/dir".into(), "other".into()],
+            scope: Scope::Files(vec!["a.rs".into()]),
+            ..rec()
+        };
+        let message = r.judge(false).1.unwrap();
+        assert!(message.contains("locked/dir, other"), "{message}");
+        assert!(message.contains("outside the scoped files"), "{message}");
+        let message = RunRecord { scope: Scope::Root, ..r }.judge(false).1.unwrap();
+        assert!(
+            message.contains("locked/dir") && !message.contains("outside the scoped files"),
+            "{message}"
+        );
     }
 
     #[test]

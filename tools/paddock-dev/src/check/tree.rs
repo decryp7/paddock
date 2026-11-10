@@ -1,7 +1,7 @@
 //! The inspected tree: the files under a root listed once and read on demand, as `openTree` in `conformance/src/util/fs.mjs`
 //! does (a file-system walk that skips build output and dependencies, not `git ls-files`: the two hosts see the same files).
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -23,8 +23,9 @@ pub struct Tree {
     root: PathBuf,
     files: RefCell<Option<Rc<Vec<String>>>>,
     cache: RefCell<HashMap<String, Option<Rc<String>>>>,
-    /// Folders or entries the listing could not read: the tree is then not completely known.
-    list_errors: Cell<usize>,
+    /// Folders (relative POSIX paths, `.` for the root) whose entries the listing could not read: the tree is then not completely
+    /// known.
+    unlisted: RefCell<Vec<String>>,
     /// A tree held in memory (a check's positive control), instead of a folder.
     memory: Option<BTreeMap<String, String>>,
 }
@@ -36,7 +37,7 @@ impl Tree {
             root: root.to_path_buf(),
             files: RefCell::new(None),
             cache: RefCell::new(HashMap::new()),
-            list_errors: Cell::new(0),
+            unlisted: RefCell::new(Vec::new()),
             memory: None,
         }
     }
@@ -49,17 +50,26 @@ impl Tree {
         }
     }
 
-    /// An in-memory tree whose listing reports `errors` unreadable folders, as a locked folder would (for tests of the host).
-    pub fn in_memory_with_list_errors(files: &[(&str, &str)], errors: usize) -> Tree {
+    /// An in-memory tree whose listing reports the given folders as unreadable, as a locked folder would (for tests of the host).
+    #[cfg(test)]
+    pub fn in_memory_with_unlisted(files: &[(&str, &str)], unlisted: &[&str]) -> Tree {
         let t = Tree::in_memory(files);
-        t.list_errors.set(errors);
+        *t.unlisted.borrow_mut() = unlisted.iter().map(|d| d.to_string()).collect();
         t
     }
 
     /// Whether every folder and entry was listed (a read error is counted, never skipped silently).
     pub fn listing_complete(&self) -> bool {
+        self.unlisted().is_empty()
+    }
+
+    /// The folders the listing could not read, sorted (empty when the listing is complete).
+    pub fn unlisted(&self) -> Vec<String> {
         self.files();
-        self.list_errors.get() == 0
+        let mut v = self.unlisted.borrow().clone();
+        v.sort();
+        v.dedup();
+        v
     }
 
     /// The root folder.
@@ -75,7 +85,7 @@ impl Tree {
         let mut out = Vec::new();
         match &self.memory {
             Some(m) => out.extend(m.keys().cloned()),
-            None => walk(&self.root, "", &mut out, &self.list_errors),
+            None => walk(&self.root, "", &mut out, &self.unlisted),
         }
         out.sort();
         let rc = Rc::new(out);
@@ -99,19 +109,24 @@ impl Tree {
     }
 }
 
-fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>, errors: &Cell<usize>) {
+fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>, unlisted: &RefCell<Vec<String>>) {
+    let here = || {
+        unlisted
+            .borrow_mut()
+            .push(if prefix.is_empty() { ".".into() } else { prefix.to_string() })
+    };
     let Ok(entries) = std::fs::read_dir(dir) else {
-        errors.set(errors.get() + 1);
+        here();
         return;
     };
     for entry in entries {
         let Ok(entry) = entry else {
-            errors.set(errors.get() + 1);
+            here();
             continue;
         };
         let name = entry.file_name().to_string_lossy().into_owned();
         let Ok(kind) = entry.file_type() else {
-            errors.set(errors.get() + 1);
+            here();
             continue;
         };
         let rel = if prefix.is_empty() {
@@ -121,7 +136,7 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>, errors: &Cell<usize>) {
         };
         if kind.is_dir() {
             if !SKIP_DIRS.contains(&name.as_str()) {
-                walk(&entry.path(), &rel, out, errors);
+                walk(&entry.path(), &rel, out, unlisted);
             }
         } else if kind.is_file() {
             out.push(rel);
@@ -167,10 +182,19 @@ mod tests {
         let readable_anyway = std::fs::read_dir(&sub).is_ok(); // root ignores the mode (CI containers)
         let t = Tree::open(d.path());
         let complete = t.listing_complete();
+        let unlisted = t.unlisted();
         std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(
             complete, readable_anyway,
             "the locked folder must make the listing incomplete unless it can be read"
+        );
+        assert_eq!(
+            unlisted,
+            if readable_anyway {
+                Vec::<String>::new()
+            } else {
+                vec!["locked".to_string()]
+            }
         );
     }
 

@@ -512,20 +512,6 @@ fn stub_run(way: Way, only_fine_is_clean: bool) -> paddock_dev::check::RunResult
     r
 }
 
-#[test]
-fn a_tree_that_could_not_be_listed_is_an_unwaivable_error_next_to_a_clean_looking_run() {
-    let tree = paddock_dev::check::tree::Tree::in_memory_with_list_errors(&[("a.rs", "x")], 1);
-    let reg: Vec<Box<dyn Check>> = vec![Box::new(Stub { id: "S1", way: Way::Fine })];
-    let mut o = options(Path::new(""));
-    o.only = None;
-    let r = paddock_dev::check::run_checks_in(&tree, &o, &reg).unwrap();
-    let broken: Vec<&Finding> = r.findings.iter().filter(|f| f.unwaivable).collect();
-    assert_eq!(broken.len(), 1, "{:?}", r.findings);
-    assert!(broken[0].message.contains("could not be listed"), "{}", broken[0].message);
-    assert!(r.errors() >= 1);
-    assert_eq!(r.runs[0].record.status(r.runs[0].kept > 0).name(), "not measured");
-}
-
 /// Every scope times every way of not looking, through the host: the record's status and the unwaivable error agree.
 #[test]
 fn status_and_error_agree_for_every_scope_and_way_through_the_host() {

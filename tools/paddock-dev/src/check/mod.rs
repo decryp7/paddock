@@ -318,7 +318,7 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
             ran: true,
             completed: false,
             crash: None,
-            listing_complete: tree.listing_complete(),
+            unlisted: tree.unlisted(),
             precondition: Precondition {
                 met: true,
                 detail: String::new(),
@@ -469,4 +469,82 @@ pub fn command(args: Args) -> Result<Report, CliError> {
     }
     let exit = if result.errors() > 0 { Exit::Findings } else { Exit::Ok };
     Ok(Report::new(json, result.text()).with_exit(exit))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A check that reads every `.rs` file and finds nothing.
+    struct Reader;
+
+    impl Check for Reader {
+        fn id(&self) -> &'static str {
+            "S1"
+        }
+        fn rule(&self) -> u32 {
+            1
+        }
+        fn title(&self) -> &'static str {
+            "reader"
+        }
+        fn control(&self) -> Control {
+            Control {
+                files: vec![("c.rs", "x")],
+                expect: vec![],
+            }
+        }
+        fn run(&self, ctx: &Ctx) -> CheckOutput {
+            CheckOutput {
+                findings: vec![],
+                probes: ctx.files().iter().filter(|f| f.ends_with(".rs")).count(),
+                completed: true,
+                precondition: Precondition {
+                    met: true,
+                    detail: String::new(),
+                },
+            }
+        }
+    }
+
+    fn run_over_unlisted(files: Option<Vec<String>>, unlisted: &[&str]) -> RunResult {
+        let tree = Tree::in_memory_with_unlisted(&[("a.rs", "x")], unlisted);
+        let opts = RunOptions {
+            root: PathBuf::new(),
+            app: "t".into(),
+            only: None,
+            files,
+            today: "2026-11-10".into(),
+        };
+        run_checks_in(&tree, &opts, &[Box::new(Reader)]).unwrap()
+    }
+
+    #[test]
+    fn a_tree_that_could_not_be_listed_is_an_unwaivable_error_next_to_a_clean_looking_run() {
+        let r = run_over_unlisted(None, &["locked/dir"]);
+        let broken: Vec<&Finding> = r.findings.iter().filter(|f| f.unwaivable).collect();
+        assert_eq!(broken.len(), 1, "{:?}", r.findings);
+        assert!(broken[0].message.contains("could not be listed"), "{}", broken[0].message);
+        assert!(
+            broken[0].message.contains("locked/dir"),
+            "the folder is named: {}",
+            broken[0].message
+        );
+        assert!(r.errors() >= 1);
+        assert_eq!(r.runs[0].record.status(r.runs[0].kept > 0), record::Status::NotMeasured);
+        assert_eq!(
+            run_over_unlisted(None, &[]).errors(),
+            0,
+            "the same run over a listable tree is clean"
+        );
+    }
+
+    #[test]
+    fn a_scoped_run_fails_closed_on_an_unlistable_folder_and_names_it() {
+        let r = run_over_unlisted(Some(vec!["a.rs".into()]), &["elsewhere"]);
+        let broken: Vec<&Finding> = r.findings.iter().filter(|f| f.unwaivable).collect();
+        assert_eq!(broken.len(), 1, "{:?}", r.findings);
+        let m = &broken[0].message;
+        assert!(m.contains("elsewhere") && m.contains("outside the scoped files"), "{m}");
+    }
 }
