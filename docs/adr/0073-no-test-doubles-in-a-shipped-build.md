@@ -203,7 +203,7 @@ confirms each is a product setting.
 | Y6 | `dyno-agent/src/build_id.rs:136` | `#[doc(hidden)] pub fn set_watch_every_for_tests` | R | still R |
 | Y7 | `app/src-tauri/src/shell.rs:104-106` | `DYNO_TRAY_ITEMS` overrides the tray items ("development and measurements") in release builds | R (switch) | still R |
 | Y8 | `dyno-agent/Cargo.toml:74`, `geo_db.rs:325` | feature `testdb` gating `mod testdb` (fuzz corpus writer, one example) | G | still G |
-| Y9 | `app/src-tauri/src/login.rs:426-430` | `DYNO_AGENT_BIN`, honoured only when `cfg!(debug_assertions)` (`agent_override`) | G (`debug_assertions`) | still G |
+| Y9 | `app/src-tauri/src/login.rs:426-430` | `DYNO_AGENT_BIN`, honoured only when `cfg!(debug_assertions)` (`paddock_env::dev_override!` at `login.rs:429`) | G (`debug_assertions`) | still G |
 | Y10 | `dyno-agent/src/paths.rs:165`, `logging.rs:30,40` | `DYNO_DATA_DIR`: moves the data folder (tests, isolation) | E (CI opt-in) | still E |
 | Y11 | `dyno-plugin-host/Cargo.toml:13` | `[[bin]] dyno-test-plugin` in an in-scope package, without `required-features` | N | still N |
 

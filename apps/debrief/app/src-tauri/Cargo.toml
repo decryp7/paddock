@@ -43,8 +43,9 @@ debrief-image = { path = "../../crates/debrief-image" }
 # Debrief's Pitwall key in the OS credential store (ADR 0059): macOS Keychain, Windows Credential Manager, Secret Service.
 keyring = "4.2"
 debrief-collect = { path = "../../crates/debrief-collect" }
-# The shared report redactor (secrets, user names, home folders, e-mail and IP addresses) for problem reports.
+# `DEBRIEF_STORE_WORKER` is honoured in a debug build only, through the shared override (ADR 0073).
 paddock-env = { path = "../../../../crates/paddock-env" }
+# The shared report redactor (secrets, user names, home folders, e-mail and IP addresses) for problem reports.
 paddock-diag = { path = "../../../../crates/paddock-diag" }
 paddock-proc = { path = "../../../../crates/paddock-proc" }
 # Child-process logs (`debrief_ipc::child_log`) for problem reports.

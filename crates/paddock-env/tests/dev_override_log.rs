@@ -67,8 +67,15 @@ fn an_ignored_variable_is_logged_once_by_name_and_never_by_value() {
 }
 
 #[test]
-fn the_macro_expands_the_callers_debug_flag() {
-    // This test crate is built with the profile's debug assertions, the same flag `cfg!` sees here.
-    let name = "PADDOCK_MACRO_TEST_UNSET";
+fn the_macro_honours_the_variable_exactly_when_the_callers_build_is_a_debug_build() {
+    // Set before any other thread reads it; the name is private to this test binary.
+    let name = "PADDOCK_MACRO_TEST_SET";
+    // SAFETY: only this test touches the variable, and no other test in this binary reads the environment concurrently.
+    unsafe { std::env::set_var(name, "/dev/program") };
+    assert_eq!(
+        paddock_env::dev_override!(name),
+        cfg!(debug_assertions).then(|| "/dev/program".into())
+    );
+    unsafe { std::env::remove_var(name) };
     assert_eq!(paddock_env::dev_override!(name), None);
 }
