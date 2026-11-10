@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// The line-coverage gate over an lcov file: `node scripts/coverage-gate.mjs lcov.info [minimum percent]` (default 99).
+// The line-coverage gate over an lcov file: `node scripts/coverage-gate.mjs lcov.info [minimum percent]` (default 90).
+// The floor is 90% over everything; the security code listed in SECURITY keeps 99% (user, 2026-11-11).
 //
 // One kind of line is not counted: the `#[tauri::command]` attribute itself. Tauri's macro turns the attribute into a
 // wrapper (argument extraction with an error arm per argument, the response glue) and llvm-cov attributes every region of
@@ -8,6 +9,14 @@
 // built). The command's body, signature and arguments are separate lines and stay counted. Nothing else is skipped.
 import { readFileSync } from 'node:fs';
 import { isMain } from '../conformance/src/util/is-main.mjs';
+
+/** Security code that keeps the strict minimum: paddock-env's private module, paddock-service's privileged side, paddock-ipc's trust. */
+export const SECURITY = [
+  /(?:^|\/)paddock-env\/src\/private\.rs$/,
+  /(?:^|\/)paddock-service\/src\/privileged\//,
+  /(?:^|\/)paddock-ipc\/src\/(?:trust|identity)\.rs$/,
+];
+export const SECURITY_MINIMUM = 99;
 
 const GENERATED = /^\s*#\[(::)?tauri::command(\(.*\))?\]\s*$/;
 
@@ -19,9 +28,10 @@ export function crateOf(path) {
 
 /**
  * Reads lcov text and returns { hit, total, skipped }. `read` gives a source file's text (or null when unreadable).
- * When `crates` is a Map it also gets one { total, hit } entry per crate, counted the same way.
+ * When `crates` is a Map it also gets one { total, hit } entry per crate, counted the same way; when `security` is
+ * { patterns, total, hit } it gets the lines of the files that match one of its patterns.
  */
-export function measure(lcov, read = (p) => { try { return readFileSync(p, 'utf8'); } catch { return null; } }, crates = null) {
+export function measure(lcov, read = (p) => { try { return readFileSync(p, 'utf8'); } catch { return null; } }, crates = null, security = null) {
   let file = null;
   let source = null;
   let hit = 0;
@@ -40,6 +50,10 @@ export function measure(lcov, read = (p) => { try { return readFileSync(p, 'utf8
       }
       total += 1;
       if (count > 0) hit += 1;
+      if (security && security.patterns.some((p) => p.test(file))) {
+        security.total += 1;
+        if (count > 0) security.hit += 1;
+      }
       if (crates) {
         const c = crates.get(crateOf(file)) ?? { total: 0, hit: 0 };
         c.total += 1;
@@ -65,11 +79,20 @@ export function table(crates) {
 }
 
 /** Runs the gate over lcov text; returns { code, lines } (the output lines, the exit code). The rule: aggregate >= minimum. */
-export function gate(lcov, minimum = 99, read) {
+export function gate(lcov, minimum = 90, read, patterns = SECURITY) {
   const crates = new Map();
-  const { hit, total, skipped } = measure(lcov, read, crates);
+  const security = { patterns, total: 0, hit: 0 };
+  const { hit, total, skipped } = measure(lcov, read, crates, security);
   const percent = total === 0 ? 0 : (100 * hit) / total;
   const lines = [`lines ${hit}/${total} = ${percent.toFixed(2)}% (${skipped} generated #[tauri::command] lines not counted)`, table(crates)];
+  const securityPercent = security.total === 0 ? 100 : (100 * security.hit) / security.total;
+  lines.push(`security lines ${security.hit}/${security.total} = ${securityPercent.toFixed(2)}% (minimum ${SECURITY_MINIMUM}%)`);
+  const securityPass = securityPercent >= SECURITY_MINIMUM;
+  if (!securityPass) {
+    lines.push(
+      `::error::security code line coverage ${securityPercent.toFixed(2)}% is below ${SECURITY_MINIMUM}%: ${security.total - security.hit} lines uncovered. Next step: add tests for paddock-env private, paddock-service privileged or paddock-ipc trust.`,
+    );
+  }
   const pass = total > 0 && percent >= Number(minimum);
   if (!pass) {
     const needed = Math.max(0, Math.ceil((Number(minimum) / 100) * total) - hit);
@@ -77,11 +100,11 @@ export function gate(lcov, minimum = 99, read) {
       `::error::line coverage ${percent.toFixed(2)}% is below the minimum ${Number(minimum)}%: ${total - hit} lines uncovered, ${needed} more must be covered. Next step: add tests for the crates at the top of the table above.`,
     );
   }
-  return { code: pass ? 0 : 1, lines };
+  return { code: pass && securityPass ? 0 : 1, lines };
 }
 
 if (isMain(import.meta.url)) {
-  const [path, minimum = '99'] = process.argv.slice(2);
+  const [path, minimum = '90'] = process.argv.slice(2);
   if (!path) {
     console.error('usage: coverage-gate.mjs <lcov.info> [minimum percent]');
     process.exit(2);

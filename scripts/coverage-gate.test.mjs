@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { crateOf, gate, measure } from './coverage-gate.mjs';
+import { SECURITY, crateOf, gate, measure } from './coverage-gate.mjs';
 
 const sources = {
   'a.rs': ['fn a() {}', '#[::tauri::command]', 'pub async fn cmd() {', '    body();', '}'].join('\n'),
@@ -30,7 +30,7 @@ const lcov = [
 ].join('\n');
 
 test('a failing gate prints one ::error:: line and the table, worst crate first', () => {
-  const { code, lines } = gate(lcov, 99, () => null);
+  const { code, lines } = gate(lcov, 99, () => null, []);
   assert.equal(code, 1);
   const errors = lines.filter((l) => l.startsWith('::error::'));
   assert.equal(errors.length, 1);
@@ -42,7 +42,7 @@ test('a failing gate prints one ::error:: line and the table, worst crate first'
 });
 
 test('a passing gate prints the table too, without an error line', () => {
-  const { code, lines } = gate(lcov, 50, () => null);
+  const { code, lines } = gate(lcov, 50, () => null, []);
   assert.equal(code, 0);
   assert.equal(lines.some((l) => l.includes('::error::')), false);
   assert.match(lines[1], /paddock-a/);
@@ -52,4 +52,29 @@ test('an empty lcov fails instead of dividing by zero', () => {
   const { code, lines } = gate('', 99, () => null);
   assert.equal(code, 1);
   assert.ok(lines.some((l) => l.startsWith('::error::')));
+});
+
+test('the default floor is 90% over everything', () => {
+  const ok = ['SF:x/crates/paddock-a/src/a.rs', ...Array.from({ length: 10 }, (_, i) => `DA:${i + 1},${i === 0 ? 0 : 1}`), 'end_of_record'].join('\n');
+  assert.equal(gate(ok, undefined, () => null).code, 0);
+  const bad = ['SF:x/crates/paddock-a/src/a.rs', ...Array.from({ length: 10 }, (_, i) => `DA:${i + 1},${i < 2 ? 0 : 1}`), 'end_of_record'].join('\n');
+  assert.equal(gate(bad, undefined, () => null).code, 1);
+});
+
+test('security code keeps 99% even when the aggregate passes', () => {
+  const secure = (misses) =>
+    ['SF:x/crates/paddock-env/src/private.rs', ...Array.from({ length: 10 }, (_, i) => `DA:${i + 1},${i < misses ? 0 : 1}`), 'end_of_record',
+      'SF:x/crates/paddock-a/src/a.rs', ...Array.from({ length: 990 }, (_, i) => `DA:${i + 1},1`), 'end_of_record'].join('\n');
+  assert.equal(gate(secure(0), undefined, () => null).code, 0);
+  const { code, lines } = gate(secure(1), undefined, () => null);
+  assert.equal(code, 1);
+  assert.equal(lines.filter((l) => l.startsWith('::error::security code line coverage 90.00%')).length, 1);
+});
+
+test('the security list names the three security areas', () => {
+  const hit = (p) => SECURITY.some((r) => r.test(p));
+  assert.equal(hit('/w/crates/paddock-env/src/private.rs'), true);
+  assert.equal(hit('crates/paddock-service/src/privileged/install.rs'), true);
+  assert.equal(hit('crates/paddock-ipc/src/trust.rs'), true);
+  assert.equal(hit('crates/paddock-env/src/dirs.rs'), false);
 });

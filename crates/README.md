@@ -9,7 +9,7 @@ Rules for a crate here:
 
 - Pure logic and thin adapters, no dependency on any app crate. Edition and licence come from `[workspace.package]`.
 - Library errors are typed, no `unwrap`/`expect` on user data or I/O, `cargo clippy -- -D warnings` clean,
-  >= 99% line coverage.
+  >= 90% line coverage (99% for the security code listed in `scripts/coverage-gate.mjs`).
 - Native glue (code only a real desktop runs, that tests cannot reach by rule 7 or because Tauri does not let them build
   the value: a real tray icon, window effects, `RunEvent::ExitRequested`) lives in one small file per crate named
   `native.rs` under the adapter and is left out of the coverage job (`--ignore-filename-regex` in the `crates` job of
