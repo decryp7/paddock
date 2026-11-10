@@ -1,0 +1,61 @@
+# fixture waivers: every outcome of the waiver engine
+[[waiver]]
+check = "C39"
+path = "crates/a/tests/c39_unicode.rs"
+reason = "covered by a waiver in the file" # a trailing comment
+expires = "2099-01-01"
+
+[[waiver]]
+check = "C53"
+path = "crates/a/src/expired.rs"
+reason = "old"
+expires = "2000-01-01"
+
+[[waiver]]
+check = "C39"
+path = "crates/zzz/*"
+reason = "nothing here"
+expires = "2099-01-01"
+
+[[waiver]]
+check = "C53"
+path = "crates/a/src/noreason.rs"
+expires = "2099-01-01"
+
+[[waiver]]
+check = "C23"
+path = "commit abc"
+reason = "r"
+expires = "2099-01-01"
+
+[[waiver]]
+check = "C23"
+path = "commit ABCDEF0123456789abcdef0123456789abcdef01"
+reason = "long form is cut to ten"
+expires = "2099-01-01"
+
+[[waiver]]
+check = "C99"
+path = "Cargo.lock#*"
+reason = "x"
+expires = "2099-01-01"
+
+[[waiver]]
+check = "C53"
+path = "crates/a/src/c53_waivers.rs"
+reason = "has # a hash inside"
+expires = "2099-01-01"
+
+[[waiver]]
+check = "C53"
+path = "apps/*"
+reason = "a glob over the vendor folder, which is skipped, so it waives nothing"
+expires = "2099-01-01"
+
+[[waiver]]
+check = "C39"
+path = "crates/a/tests/c39_crlf.rs"
+reason = "bad date"
+expires = "01/01/2099"
+
+garbage line

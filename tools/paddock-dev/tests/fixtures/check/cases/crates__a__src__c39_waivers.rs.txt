@@ -1,0 +1,16 @@
+fn a() {
+    // conformance: freed-port — the child process binds it and the start retries on a taken port
+    let p = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+}
+
+fn b() {
+    let p = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port(); // conformance: freed-port
+}
+
+fn c() {
+    let p = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port(); // conformance: freed-port — x
+}
+
+fn d() {
+    let p = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port(); // conformance: freed-port - handed to a child
+}

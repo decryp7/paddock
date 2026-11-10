@@ -1,0 +1,33 @@
+fn served() {
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    std::thread::spawn(move || { let _ = l.accept(); });
+    get(port);
+}
+
+fn serve() -> (TcpListener, u16) {
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let p = l.local_addr().unwrap().port();
+    (l, p)
+}
+
+fn after_last_use() {
+    let silent = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut m = mail(silent.local_addr().unwrap().port());
+    send(&m);
+    drop(silent);
+    let mut m = mail(1);
+    send(&m);
+}
+
+fn held() {
+    let held = HeldPort::reset();
+    get(held.port());
+}
+
+fn masked() {
+    // let p = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let s = r#"TcpListener::bind("x").unwrap().local_addr()"#;
+    let q = '"';
+    /* TcpListener::bind("a").unwrap().local_addr() */
+}

@@ -1,0 +1,7 @@
+fn a() {
+    // conformance: freed-port — reason with CRLF
+    let p = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+}
+fn b() {
+    let p = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+}
