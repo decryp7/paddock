@@ -347,7 +347,8 @@ pub fn acquire(ctx: &Ctx, io: &mut Sinks<'_>) -> R<()> {
         if let Some(free) = again.filter(|f| *f < floor) {
             io.say(format!("::error::job-isolation: still only {free} GB free on {home}'s disk after removing every idle slot's kept folders (floor {floor} GB). Free disk on the host, then re-run the job."));
             // Give the slot back: this job will not run.
-            let again = Ctx::new(ctx_env_with(ctx, &slot, &token), ctx.tables.clone(), ctx.exe.clone());
+            let mut again = Ctx::new(ctx_env_with(ctx, &slot, &token), ctx.tables.clone(), ctx.exe.clone());
+            again.windows = ctx.windows;
             let _ = release(
                 &again,
                 &mut Sinks {

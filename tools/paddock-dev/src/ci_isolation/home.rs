@@ -26,7 +26,9 @@ fn is_drive_path(p: &str) -> bool {
 pub fn from_git_bash(p: &str, windows: bool) -> String {
     let b = p.as_bytes();
     if windows && (b.len() == 2 || b.len() >= 3 && b[2] == b'/') && b[0] == b'/' && b[1].is_ascii_alphabetic() {
-        return format!("{}:{}", (b[1] as char).to_ascii_uppercase(), &p[2..]);
+        // `/c` is the drive's root `C:/`, never the drive-relative `C:`.
+        let rest = if b.len() == 2 { "/" } else { &p[2..] };
+        return format!("{}:{rest}", (b[1] as char).to_ascii_uppercase());
     }
     p.to_string()
 }
@@ -47,7 +49,7 @@ pub fn native(p: &str) -> String {
 /// The job's temp folder: the runner's `RUNNER_TEMP` without a trailing separator.
 pub fn job_temp(ctx: &Ctx) -> R<String> {
     let t = ctx.need("RUNNER_TEMP", "RUNNER_TEMP is not set (the per-job temp folder of the runner)")?;
-    let t = from_git_bash(t, cfg!(windows));
+    let t = from_git_bash(t, ctx.windows);
     Ok(t.trim_end_matches(['/', '\\']).to_string())
 }
 
@@ -73,7 +75,7 @@ pub fn slot(ctx: &Ctx) -> R<String> {
 /// The CI home (`ci-home.sh`): `PADDOCK_CI_HOME` (absolute, must exist) or `~/.paddock-ci` (created); canonical, no trailing slash.
 pub fn ci_home(ctx: &Ctx) -> R<String> {
     let dir: PathBuf = if let Some(h) = ctx.get("PADDOCK_CI_HOME") {
-        let h = from_git_bash(h, cfg!(windows));
+        let h = from_git_bash(h, ctx.windows);
         if !(h.starts_with('/') || is_drive_path(&h)) {
             return Err(Stop::line(1, format!("::error::PADDOCK_CI_HOME ({h}) is not an absolute path.")));
         }
@@ -99,7 +101,7 @@ pub fn ci_home(ctx: &Ctx) -> R<String> {
 /// The first ten hex digits of the SHA-256 of the canonical source root: the `{src}` of a layout (amendment §1). The root is
 /// `pwd -P` (links resolved, `/` separators), on Windows `cygpath -m` with the drive letter lower-cased; the text is hashed as is,
 /// without a trailing newline.
-pub fn source_key(dir: &Path) -> R<String> {
+pub fn source_key(dir: &Path, windows: bool) -> R<String> {
     // `/c/x`, `C:\x` and `c:/x` are one folder: Git bash callers may pass either.
     let real = std::fs::canonicalize(dir).map_err(|e| {
         Stop::die(format!(
@@ -107,7 +109,7 @@ pub fn source_key(dir: &Path) -> R<String> {
             dir.display()
         ))
     })?;
-    Ok(source_key_of(&mixed(&real), cfg!(windows)))
+    Ok(source_key_of(&mixed(&real), windows))
 }
 
 /// A path text as the key is made from it: Git-bash spelling made a drive path (`windows`), `\` as `/`, a `\\?\` prefix dropped, no
@@ -198,7 +200,7 @@ pub fn cmd_path(ctx: &Ctx, args: &[String], io: &mut Sinks<'_>) -> R<()> {
                 "the kept folder '{kind}' is keyed by its source: pass --source <the workspace folder> (ADR 0025 amendment)"
             ))
         })?;
-        source_key(Path::new(&from_git_bash(&dir, cfg!(windows))))?
+        source_key(Path::new(&from_git_bash(&dir, ctx.windows)), ctx.windows)?
     } else {
         String::new()
     };
@@ -263,6 +265,9 @@ mod tests {
         assert_eq!(from_git_bash("/c/x", true), "C:/x");
         assert_eq!(from_git_bash("/cc/x", true), "/cc/x", "only a one-letter first part is a drive");
         assert_eq!(from_git_bash("/usr", true), "/usr");
+        assert_eq!(from_git_bash("/c", true), "C:/", "a drive's root, not the drive-relative C:");
+        assert_eq!(from_git_bash("/c/", true), "C:/");
+        assert_eq!(from_git_bash("/c", false), "/c");
         assert_eq!(normalize_root("/c/x", true), "c:/x");
     }
 
@@ -295,7 +300,7 @@ mod tests {
         assert_eq!((ca, cb), (0, 0));
         assert_ne!(pa, pb, "two roots, two folders");
         let real = std::fs::canonicalize(&ci).unwrap();
-        let ka = source_key(&a).unwrap();
+        let ka = source_key(&a, false).unwrap();
         assert_eq!(pa.trim(), format!("{}/target-x-{ka}-s1", real.display()));
         assert!(Path::new(pa.trim()).is_dir());
         // A layout without {src} ignores --source.

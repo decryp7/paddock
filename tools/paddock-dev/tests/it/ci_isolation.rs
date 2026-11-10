@@ -289,3 +289,56 @@ fn old_layout_folders_with_and_without_a_hyphen_are_retired_and_current_ones_sta
     assert!(!h.ci.join("target-x-s2").exists() && !h.ci.join("target-pitwall-app-s2").exists());
     assert!(h.ci.join("target-pitwall-app-0123456789-s2").exists());
 }
+
+/// Git-bash paths (`/c/...`) on any OS: `PADDOCK_CI_ASSUME_WINDOWS=1` reads `/c/x` as `C:/x`, which here is a folder named `C:` in the
+/// current folder, so the whole chain (home, `--source`, `owns`, `source-key`) runs for real.
+#[test]
+fn git_bash_paths_drive_path_and_owns_and_source_key_end_to_end() {
+    let d = tempfile::tempdir().unwrap();
+    let h = Host::new(d.path(), AMENDED);
+    let cwd = d.path().join("cwd");
+    std::fs::create_dir_all(cwd.join("C:/ci")).unwrap();
+    std::fs::create_dir_all(cwd.join("C:/w")).unwrap();
+    let run = |args: &[&str], later: bool| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+        cmd.args(["ci", "isolation"])
+            .args(args)
+            .current_dir(&cwd)
+            .env_clear()
+            .env("PATH", std::env::var("PATH").unwrap_or_default())
+            .env("HOME", &h.home)
+            .env("RUNNER_OS", "Windows")
+            .env("RUNNER_TEMP", &h.temp)
+            .env("GITHUB_ENV", &h.env_file)
+            .env("PADDOCK_CI_TABLES", &h.tables)
+            .env("PADDOCK_CI_HOME", "/c/ci")
+            .env("PADDOCK_CI_ASSUME_WINDOWS", "1")
+            .env("PADDOCK_CI_SLOT", "s1")
+            .env("PADDOCK_CI_SLOTS", "3");
+        let _ = later;
+        cmd.output().unwrap()
+    };
+    let key_bash = text(&run(&["source-key", "/c/w"], false).stdout);
+    let key_drive = text(&run(&["source-key", "C:/w"], false).stdout);
+    assert_eq!(key_bash.trim().len(), 10, "{key_bash}");
+    assert_eq!(key_bash, key_drive, "/c/w and C:/w are one folder");
+    let p = run(&["path", "target", "x", "--source", "/c/w"], false);
+    assert!(p.status.success(), "{}", text(&p.stderr));
+    let path = text(&p.stdout);
+    assert!(path.trim().ends_with(&format!("target-x-{}-s1", key_bash.trim())), "{path}");
+    assert!(Path::new(path.trim()).is_dir());
+    assert!(
+        run(&["owns", "/c/ci/target-x-0123456789-s1"], false).status.code() == Some(1),
+        "no such folder"
+    );
+    let mine = cwd.join("C:/ci").join(Path::new(path.trim()).file_name().unwrap());
+    assert!(mine.is_dir());
+    let spelled = format!("/c/ci/{}", mine.file_name().unwrap().to_str().unwrap());
+    assert!(run(&["owns", &spelled, "target"], false).status.success(), "owns {spelled}");
+    std::fs::create_dir_all(cwd.join("C:/ci/target-x-0123456789-s2")).unwrap();
+    assert_eq!(
+        run(&["owns", "/c/ci/target-x-0123456789-s2", "target"], false).status.code(),
+        Some(1),
+        "another slot"
+    );
+}

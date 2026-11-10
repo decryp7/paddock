@@ -90,12 +90,19 @@ pub struct Ctx {
     pub tables: PathBuf,
     /// This program (what `PADDOCK_DEV` falls back to, and what a sweep runs under `idle-run`).
     pub exe: PathBuf,
+    /// Read Git-bash paths (`/c/x`) as drive paths. `cfg!(windows)` by default; a test sets it to exercise them on any OS.
+    pub windows: bool,
 }
 
 impl Ctx {
     /// A context over explicit values.
     pub fn new(env: HashMap<String, String>, tables: PathBuf, exe: PathBuf) -> Ctx {
-        Ctx { env, tables, exe }
+        Ctx {
+            env,
+            tables,
+            exe,
+            windows: cfg!(windows),
+        }
     }
 
     /// A copy of the environment (for a command that runs as a later step of the job).
@@ -212,7 +219,10 @@ fn run_command(ctx: &Ctx, args: &[String], io: &mut Sinks<'_>) -> R<()> {
         Some("path") => home::cmd_path(ctx, rest, io),
         Some("source-key") => {
             let dir = rest.first().ok_or_else(|| Stop::die("usage: dev ci isolation source-key <dir>"))?;
-            io.value(home::source_key(std::path::Path::new(&home::from_git_bash(dir, cfg!(windows))))?);
+            io.value(home::source_key(
+                std::path::Path::new(&home::from_git_bash(dir, ctx.windows)),
+                ctx.windows,
+            )?);
             Ok(())
         }
         Some("temp") => {
@@ -233,7 +243,10 @@ pub fn run(a: &IsolationArgs, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     let cwd = std::env::current_dir().unwrap_or_default();
     let tables = find_tables(a.tables.clone(), &env, &cwd);
     let exe = std::env::current_exe().unwrap_or_default();
-    dispatch(&Ctx::new(env, tables, exe), &a.args, &mut Sinks { out, err })
+    let mut ctx = Ctx::new(env, tables, exe);
+    // A test hook for the integration tests: Git-bash path handling on any OS.
+    ctx.windows |= ctx.get("PADDOCK_CI_ASSUME_WINDOWS") == Some("1");
+    dispatch(&ctx, &a.args, &mut Sinks { out, err })
 }
 
 #[cfg(test)]

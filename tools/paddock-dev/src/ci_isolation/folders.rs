@@ -138,7 +138,7 @@ pub fn owns_rel(kept: &Kept, rel: &str, slot: &str, only: &str) -> bool {
 /// `owns <folder> [<kind>]`: exit 0 when the folder is a kept folder (of that kind) of this job's slot; 1 otherwise, with no output.
 pub fn cmd_owns(ctx: &Ctx, args: &[String]) -> R<()> {
     let refuse = || Stop::silent(1);
-    let dir = super::home::from_git_bash(args.first().map(String::as_str).unwrap_or(""), cfg!(windows));
+    let dir = super::home::from_git_bash(args.first().map(String::as_str).unwrap_or(""), ctx.windows);
     let only = args.get(1).map(String::as_str).unwrap_or("");
     let meta = std::fs::symlink_metadata(&dir).map_err(|_| refuse())?;
     if dir.is_empty() || !meta.is_dir() {
@@ -151,7 +151,7 @@ pub fn cmd_owns(ctx: &Ctx, args: &[String]) -> R<()> {
     let real_parent = std::fs::canonicalize(parent).map_err(|_| refuse())?;
     let name = path.file_name().ok_or_else(refuse)?;
     let real = super::home::mixed(&real_parent.join(name));
-    let rel = rel_under_home(&home, &real, cfg!(windows)).ok_or_else(refuse)?;
+    let rel = rel_under_home(&home, &real, ctx.windows).ok_or_else(refuse)?;
     if owns_rel(&ctx.kept()?, &rel, &s, only) {
         Ok(())
     } else {

@@ -622,3 +622,23 @@ test('acquire says so, naming the fallback, when the tool cannot be pinned (a bu
   assert.match(r.stderr, /::warning::job-isolation: the tool could not be pinned.*PADDOCK_DEV/, r.stderr);
   assert.equal(a.exported().PADDOCK_DEV, undefined, 'nothing pinned');
 });
+
+// Wiring of the Rust path (RT-1; docs/adr/amendments/0025-2026-11-10-rt1-source-key.md): once the job-isolation action runs
+// `ci isolation`, its release step must run the tool `acquire` pinned ("$PADDOCK_DEV"), and a build of the tool must land under the CI
+// home (PADDOCK_DEV_HOME and PADDOCK_DEV_TARGET_DIR, taken from the shared `tools` folder), never inside a job folder.
+const wiringProblems = (text) => {
+  if (!/ci isolation/.test(text)) return []; // not switched yet: nothing to check
+  const found = [];
+  if (!/"\$PADDOCK_DEV" ci isolation release/.test(text) && !/"\$PADDOCK_DEV" ci isolation "\$MODE"/.test(text)) found.push('the release step does not run "$PADDOCK_DEV" ci isolation release');
+  for (const v of ['PADDOCK_DEV_HOME', 'PADDOCK_DEV_TARGET_DIR']) if (!new RegExp(`${v}=.*isolation path tools|${v}=.*\\$tools`).test(text)) found.push(`${v} is not under the CI home (the tools folder)`);
+  return found;
+};
+
+test('the job-isolation action, once it runs the Rust path, releases with the pinned tool and builds it under the CI home (with a positive control)', () => {
+  const action = read(join(PADDOCK, '.gitea', 'actions', 'job-isolation', 'action.yml'));
+  assert.deepEqual(wiringProblems(action), [], 'the action is wired as the amendment addendum says');
+  // Positive controls: a switched action without the pieces is caught, a complete one passes.
+  assert.equal(wiringProblems('run: ./dev ci isolation "$MODE"').length, 3);
+  assert.equal(wiringProblems('run: |\n  tools="$(./dev ci isolation path tools)"\n  PADDOCK_DEV_HOME="$tools/paddock-dev" PADDOCK_DEV_TARGET_DIR="$tools/target" "$PADDOCK_DEV" ci isolation release').length, 0);
+  assert.deepEqual(wiringProblems('run: bash conformance/ci/job-isolation.sh "$MODE"'), [], 'the shell path is not checked');
+});
