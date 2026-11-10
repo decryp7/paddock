@@ -744,6 +744,10 @@ struct FakeServiceManager {
     state: Mutex<ServiceState>,
     agent: Mutex<Option<Running>>,
     refused: AtomicUsize,
+    /// Why each start was refused, so a failed test says it.
+    refusals: Mutex<Vec<String>>,
+    /// Told each time the job's agent has started (see [`FakeServiceManager::on_start`]).
+    started: Mutex<Option<std::sync::mpsc::Sender<()>>>,
     done: std::sync::atomic::AtomicBool,
     thread: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
@@ -759,6 +763,8 @@ impl FakeServiceManager {
             }),
             agent: Mutex::new(None),
             refused: AtomicUsize::new(0),
+            refusals: Mutex::new(Vec::new()),
+            started: Mutex::new(None),
             done: std::sync::atomic::AtomicBool::new(false),
             thread: Mutex::new(None),
         })
@@ -777,6 +783,13 @@ impl FakeServiceManager {
         };
     }
 
+    /// A receiver told each time the job's agent has started (holds the data folder), for a test to wait on.
+    fn on_start(&self) -> Receiver<()> {
+        let (tx, rx) = channel();
+        *lock(&self.started) = Some(tx);
+        rx
+    }
+
     /// A registration is under way (or over): the job is absent and the service's agent will come.
     fn set_pending(&self, pending: bool) {
         lock(&self.state).pending = pending;
@@ -792,6 +805,11 @@ impl FakeServiceManager {
                 match Running::start(me.dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))) {
                     Ok(r) => {
                         *lock(&me.agent) = Some(r);
+                        if let Some(tx) = lock(&me.started).as_ref() {
+                            // silent: a test that stopped listening no longer waits for it
+                            #[allow(clippy::let_underscore_must_use)]
+                            let _ = tx.send(());
+                        }
                         while !me.done.load(Ordering::SeqCst) && me.agent_running() {
                             // pace: how often the fake looks at its agent.
                             std::thread::sleep(Duration::from_millis(20));
@@ -803,7 +821,8 @@ impl FakeServiceManager {
                             return;
                         }
                     }
-                    Err(_) => {
+                    Err(e) => {
+                        lock(&me.refusals).push(e.to_string());
                         me.refused.fetch_add(1, Ordering::SeqCst);
                         // pace: the service manager's restart interval, shortened for the test.
                         std::thread::sleep(Duration::from_millis(20));
@@ -854,11 +873,15 @@ fn with_the_service_supervising_the_app_never_starts_an_agent_of_its_own() {
 }
 
 /// Production-like counts, shrunk so that a few dozen looks outlast the old fallback (idle rechecks of the service) many times.
+/// A pending registration is never given up on here (that has its own tests in `machine::table`). Why: the give-up is counted
+/// in ticks (3000, 3 s at the 1 ms test pace) while these tests wait for 60 looks, and under I/O load 60 looks took longer
+/// than 3 s, so the link gave up and started its own agent (2 of 10 runs on the Windows test VM under I/O load).
 fn pending_tuning() -> super::machine::Tuning {
     super::machine::Tuning {
         service_recheck: 5,
         idle_rechecks: 2,
         pending_recheck: 2,
+        pending_max: u32::MAX,
         ..patient()
     }
 }
@@ -881,15 +904,24 @@ fn a_pending_registration_is_waited_for_and_the_services_agent_finds_the_data_fo
         "the app started an agent while the service was registering"
     );
     // The registration ends with the service: its agent starts, and finds the folder free (an exit with code 3 is refused()).
-    manager.set(true, true);
+    // The agent is up before the service reports itself registered. Why: once the service supervises, a link with these
+    // counts falls back to its own agent after two idle rechecks, about 10 ms at the test pace, so a slow start of the
+    // service's agent (a loaded Windows runner, CI run 7855) raced the fallback. The wait for the registration is what this
+    // test is about; the fallback has its own tests.
+    let started = manager.on_start();
     manager.start_job();
+    started
+        .recv_timeout(HANG_GUARD)
+        .unwrap_or_else(|_| panic!("the service's agent never started: {:?}", lock(&manager.refusals)));
+    manager.set(true, true);
     running(&r.link, &r.statuses);
     assert_eq!(r.launcher.launches.load(Ordering::SeqCst), 0);
     assert!(!r.link.started_by_this_app());
     assert_eq!(
         manager.refused.load(Ordering::SeqCst),
         0,
-        "the service's agent found the data folder locked"
+        "the service's agent was refused: {:?}",
+        lock(&manager.refusals)
     );
     assert!(!r.link.quit(), "the service's agent stays");
     handle.join().unwrap();
@@ -1027,12 +1059,24 @@ struct StubRig {
 }
 
 fn stub_rig(after_launch: Child) -> StubRig {
+    stub_rig_tuned(after_launch, super::machine::Tuning::default())
+}
+
+/// [`stub_rig`] with other counts (see `machine::Tuning`).
+fn stub_rig_tuned(after_launch: Child, tuning: super::machine::Tuning) -> StubRig {
     let tmp = tempfile::tempdir().unwrap();
     let dirs = Dirs::at(tmp.path().join("data"));
     let (tx, rx) = channel();
     let sink = Recorder::new(tx);
     let launcher = StubLauncher::new(after_launch);
-    let link = AgentLink::paced(dirs, env!("CARGO_PKG_VERSION"), sink, Box::new(StubShared(launcher.clone())), FAST);
+    let link = AgentLink::tuned(
+        dirs,
+        env!("CARGO_PKG_VERSION"),
+        sink,
+        Box::new(StubShared(launcher.clone())),
+        FAST,
+        tuning,
+    );
     StubRig {
         link,
         launcher,
@@ -1120,15 +1164,27 @@ fn the_stub_launchers_pid_is_a_process_this_test_holds() {
 
 #[test]
 fn a_stale_discovery_file_beside_a_slow_lock_holder_is_not_ready_and_launches_nothing_more() {
-    let r = stub_rig(Child::Exited {
-        code: Some(dyno_agent::cli::EXIT_ALREADY_RUNNING),
-    });
+    // The wait's note comes after a few ticks: the wait is counted past it in looks, never timed. Why: every look that probes
+    // the held lock costs the settled re-check (about 0.4 s), so the 100 looks this test counted took 27 s on an idle Mac and
+    // ran past the hang guard on a loaded Windows runner (CI run 7854, 77 looks in 40 s).
+    let r = stub_rig_tuned(
+        Child::Exited {
+            code: Some(dyno_agent::cli::EXIT_ALREADY_RUNNING),
+        },
+        super::machine::Tuning {
+            note_after: 5,
+            ..super::machine::Tuning::default()
+        },
+    );
     // Another agent holds the data folder but is slow to write its file; the file there is an old agent's.
     let holder = SlowHolder::take(&r.link.dirs);
     stale_file().write(&r.link.dirs.discovery()).unwrap();
     let handle = r.link.spawn().unwrap();
     wait_state(&r.link, "waiting for the holder", |s| s.phase == Phase::WaitingForHolder);
-    let_it_look(&r.link, 100);
+    wait_state(&r.link, "the wait for the holder is noted", |s| {
+        s.stall.is_some_and(|(_, k)| k == Stall::OtherAgentHolds)
+    });
+    let_it_look(&r.link, LOOKS_WHILE_HELD);
     assert_eq!(r.launcher.launches(), 0, "the link launched agents that the holder's lock refuses");
     assert!(!r.link.connected(), "a stale file was taken for the agent");
     let seen: Vec<AgentStatus> = r.statuses.try_iter().collect();
