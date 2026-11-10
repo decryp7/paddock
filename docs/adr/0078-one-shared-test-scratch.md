@@ -1,6 +1,7 @@
 # 78. One shared test scratch: one folder type per language, a per-run root, every failed removal reported, a leak check in every test job
 
 - Status: Accepted (2026-11-09). The user accepted it as recommended on 2026-11-09 (ER-21 redesigns).
+- Trimmed 2026-11-11 (user, comparable-practice review): TRIM: keep a thin wrapper over `tempfile` plus the exit-removal sweep, the port of Debrief's temp-leak check, Debrief's own migration; dropped lock-guarded run roots, the TypeScript twin, the lint and ratchet, the register scope, the other apps' migrations and `private_dir` (WP-8, overlaps 0092).
 - Date: 2026-11-09
 - Related: ER-14 / rule 7 (tests leave nothing behind), ER-12 / rule 5 (no retry that turns a red run green), ER-21 /
   rule 40, ER-22 / rules 42, 43 and 55 (share first; one implementation per mechanism, `docs/known-copies.toml`, ADR

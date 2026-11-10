@@ -8,6 +8,8 @@ You carry out a precise brief from the lead agent. Follow the project's AGENTS.m
 
 Wait with `./dev wait`; never `pgrep -f` on a string your own command contains.
 
+One independent review, then fix and land; a second review round only for security code or a P1 finding (user, 2026-11-11).
+
 Before you hand back work for review:
 - Every code fix made in answer to a review comment comes with a test that fails without it: revert the fix and show the test red before you push.
 - Before handing a merged tree back, run the full conformance CI line on the merged tree, not only on the touched files.

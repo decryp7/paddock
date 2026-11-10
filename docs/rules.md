@@ -295,7 +295,8 @@ changes here, every app's copy is updated in the same change.
     (c) A new copy is allowed only with its register entry, a delete-by tag and the reason, in the same change. An entry
     leaves the register only together with its copy's files, or with the trailer `Copies-removed: <mechanism-id> <path>:
     <reason>`.
-    (d) A tag is refused while its app still holds a copy whose delete-by tag it has reached. A delete-by date moves only
+    (d) A copy whose delete-by tag is reached is reported as a warning; it no longer blocks a tag (user, 2026-11-11: the
+    register is a to-do list). A delete-by date moves only
     with the trailer `Copies-date: <mechanism-id> <path>: <old> -> <new>: approved: <coordinator|user>: <reason>`; a
     move to a later release line (a higher major or minor version) needs `approved: user`.
     (e) Enforced by conformance check C58 (planned, ADR 0034 WP-1; not built yet). A register-only change is docs-only and

@@ -4,6 +4,7 @@
   after WP-1 as the ADR states). Revision 2 answered the first independent review (P1-1 flush policy, P1-2 typestates,
   P1-3 register check and Pitcrew); revision 3 the re-review's four P2s (listen calls, Pitcrew's busy handling,
   client-side drains, the enforced D8 gate).
+- Trimmed 2026-11-11 (user, comparable-practice review): DEFERRED, keeping the logging part: keep WP-7 (ER-27 end lines and summaries) and Pitcrew's busy refusal (WP-11) only if the bug recurs; deferred WP-1 to WP-6, WP-8 to WP-10 and the rest of WP-11. Dyno's tag gate is now only the kept logging part (WP-7); M2 to M4 no longer gate any tag.
 - Date: 2026-11-09
 - Related: ER-21 / rule 40 (recurring bugs mean a missing design rule), ER-27 (logs explain every failure), ER-28 (a cause
   is confirmed only by measurement), ER-33 / rule 71 (a check counts only if its probe can see the thing), rule 5 / ER-11

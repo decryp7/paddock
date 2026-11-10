@@ -1,6 +1,6 @@
 # 91. Design documents pin their evidence, and reviews check it is still current
 
-- Status: Accepted 2026-11-10 (user), all decisions as recommended. History: Proposed 2026-11-10; revision 1
+- Status: Deferred 2026-11-11 (user): nothing here is built until the user asks. Was: Accepted 2026-11-10 (user), all decisions as recommended. History: Proposed 2026-11-10; revision 1
   (`5d1c252c4`) was reviewed independently ("changes": P1-1, P1-2 and nine P2s); revision 2 (`f2bdba1df`) answered it
   and was approved by the re-review, whose P2s this text folds in (see "Review answers"). Drafted at the
   coordinator's request of 2026-11-10 (ER-21: one class, seen four times in one day's ADR work and twice before).

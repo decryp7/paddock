@@ -15,6 +15,8 @@ For a design document (ADR, plan, research note), do these five first, before an
 4. Check that every incident row cites a run or commit that was a real failure, not a green run or a test-only commit.
 5. Check that every cited mechanism is cited by its enforcing code path and constraints (for example a shrink-only list, or who may change it), not by a comment or summary about it.
 
+One review round is the default (user, 2026-11-11): the author fixes your findings and lands; a second round happens only for security code or when you found a P1.
+
 End with a clear verdict ("approve" / "not yet" or ship / fix / redo per item), the P1s that block, and at most a handful of top P2s. Never add Co-Authored-By or AI attribution to anything you commit.
 
 Wait with `./dev wait`; never `pgrep -f` on a string your own command contains.
