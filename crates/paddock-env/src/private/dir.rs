@@ -703,20 +703,54 @@ mod tests {
         why
     }
 
+    /// Runs `body` in a child process: the umask is process-wide, so a test that changes it must not share a process with the
+    /// others (under `cargo test` they are threads of one; a 002 umask made their parents 0775 and refused, ER-12). The test
+    /// binary is run again for this one test with a marker variable; the child runs the body, the parent asserts it passed.
+    fn in_child_process(test: &str, body: impl FnOnce()) {
+        const MARKER: &str = "PADDOCK_ENV_UMASK_CHILD";
+        if std::env::var_os(MARKER).is_some() {
+            return body();
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", test, "--test-threads=1", "--nocapture"])
+            .env(MARKER, "1")
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&out.stdout).to_string()
+            + &String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success(), "the child process failed:\n{text}");
+        assert!(
+            text.contains("1 passed"),
+            "the child did not run the test:\n{text}"
+        );
+    }
+
     /// Failing test 6 (ADR 0092): a folder made under umask 002 is owner-only from its first fstat, with no narrowing call after.
     #[test]
     fn a_folder_made_under_a_loose_umask_is_owner_only_from_creation() {
-        let t = temp();
-        // SAFETY: the umask is process-wide; the value is restored below and the test only reads modes it just set.
-        let old = unsafe { libc::umask(0o002) };
-        let made = PrivateDir::create_all(&t.path().join("a").join("b"))
-            .and_then(|d| d.write_atomic("f", b"x").map(|()| d));
-        // SAFETY: restores the value read above.
-        unsafe { libc::umask(old) };
-        let made = made.unwrap();
-        assert_eq!(mode_of(made.path()), 0o700);
-        assert_eq!(mode_of(&t.path().join("a")), 0o700);
-        assert_eq!(mode_of(&t.path().join("a/b/f")), 0o600);
+        in_child_process(
+            "private::dir::tests::a_folder_made_under_a_loose_umask_is_owner_only_from_creation",
+            || {
+                let t = temp();
+                // The umask is set before the temporary folder is made so that its own parent is loose too; the child process
+                // owns it, so nothing leaks to another test.
+                // SAFETY: the umask is process-wide, and this process runs this one test.
+                unsafe { libc::umask(0o002) };
+                let base = t.path().join("base");
+                std::fs::create_dir(&base).unwrap();
+                std::fs::set_permissions(
+                    &base,
+                    std::os::unix::fs::PermissionsExt::from_mode(0o700),
+                )
+                .unwrap();
+                let made = PrivateDir::create_all(&base.join("a").join("b"))
+                    .and_then(|d| d.write_atomic("f", b"x").map(|()| d))
+                    .unwrap();
+                assert_eq!(mode_of(made.path()), 0o700);
+                assert_eq!(mode_of(&base.join("a")), 0o700);
+                assert_eq!(mode_of(&base.join("a/b/f")), 0o600);
+            },
+        );
     }
 
     #[test]
