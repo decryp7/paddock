@@ -23,7 +23,6 @@ pub const MAIN_BRANCH: &str = "main";
 pub const REMOTE_MAIN: &str = "origin/main";
 /// Untracked entries that live in the primary on purpose (tool folders), by path prefix.
 pub const DEFAULT_ALLOWED_UNTRACKED: [&str; 3] = [".claude/densepack-vault/", ".serena/", "node_modules"];
-const LISTED: usize = 20;
 
 /// How serious a finding is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,6 +75,10 @@ impl Finding {
 
 /// `check primary`'s options.
 pub struct Options<'a> {
+    /// The known-untracked file (default in the git directory).
+    pub baseline: Option<&'a Path>,
+    /// Record the current untracked entries as the baseline.
+    pub accept_untracked: bool,
     /// A file with one live `agent_id` per line.
     pub live: Option<&'a Path>,
     /// Allowed untracked prefixes beyond [`DEFAULT_ALLOWED_UNTRACKED`].
@@ -109,8 +112,17 @@ pub fn unexpected_untracked(status: &str, allowed: &[String], expand: &dyn Fn(&s
 /// The two-way comparison of locked worktrees and owner-map entries, and the lock ages.
 pub fn ownership_findings(list: &[WorktreeInfo], owners: &OwnerMap, now: u64) -> Vec<Finding> {
     let mut out = Vec::new();
+    let primary = list.first().map(|w| w.path.replace('\\', "/")).unwrap_or_default();
     for w in list.iter().skip(1) {
         let k = w.path.replace('\\', "/");
+        if super::git::is_under(&k, &primary) {
+            out.push(Finding::new(
+                "nested-worktree",
+                Severity::Error,
+                format!("{k} is inside the primary checkout's folder."),
+                "Move it out (`git worktree move`) after its agent ended; every worktree belongs under the worktree root.",
+            ));
+        }
         let Some(reason) = &w.locked else { continue };
         // `git worktree add --lock` without --reason stores git's own placeholder text.
         if reason.trim().is_empty() || reason.trim() == "added with --lock" {
@@ -129,8 +141,8 @@ pub fn ownership_findings(list: &[WorktreeInfo], owners: &OwnerMap, now: u64) ->
                 format!("The agent runs `./dev worktree claim {k}`, or the coordinator runs `./dev worktree release {k}`."),
             ));
         }
-        if let Some(n) = Note::parse(reason) {
-            let age = now.saturating_sub(n.created);
+        if let Some(created) = Note::parse(reason).and_then(|n| n.created) {
+            let age = now.saturating_sub(created);
             if age > STALE_LOCK_SECS {
                 out.push(Finding::new(
                     "lock-old",
@@ -176,7 +188,7 @@ pub fn not_live(owners: &OwnerMap, live: &BTreeSet<String>) -> Vec<Finding> {
         .collect()
 }
 
-fn primary_findings(repo: &Repo, allow: &[String]) -> Vec<Finding> {
+fn primary_findings(repo: &Repo) -> Vec<Finding> {
     let mut out = Vec::new();
     let git = repo.git();
     let head_ref = git
@@ -298,37 +310,90 @@ fn primary_findings(repo: &Repo, allow: &[String]) -> Vec<Finding> {
             "Run `git sparse-checkout disable` in the primary; sparse cones belong in agent worktrees.",
         ));
     }
-    match git.text(&["status", "--porcelain=v1", "--untracked-files=normal"]) {
-        Ok(s) => {
-            let expand = |dir: &str| -> Vec<String> {
-                git.text(&["ls-files", "--others", "--exclude-standard", "--", dir])
-                    .map(|t| t.lines().map(str::to_string).collect())
-                    .unwrap_or_default()
-            };
-            let unexpected = unexpected_untracked(&s, allow, &expand);
-            if !unexpected.is_empty() {
-                let shown: Vec<&str> = unexpected.iter().take(LISTED).map(String::as_str).collect();
-                out.push(Finding::new(
-                    "untracked",
-                    Severity::Warning,
-                    format!(
-                        "{} untracked entr(ies) outside the allow-list: {}{}.",
-                        unexpected.len(),
-                        shown.join(", "),
-                        if unexpected.len() > LISTED { ", ..." } else { "" }
-                    ),
-                    "Find which agent wrote them (a write into the primary leaves untracked files); delete or move them.",
-                ));
-            }
-        }
-        Err(e) => out.push(Finding::new(
-            "untracked",
-            Severity::NotMeasured,
-            e.to_string(),
-            "Run `git status` in the primary.",
-        )),
-    }
     out
+}
+
+/// The untracked entries of the primary that the allow-list does not cover.
+fn untracked_outside_allow(repo: &Repo, allow: &[String]) -> Result<Vec<String>, String> {
+    let git = repo.git();
+    let status = git
+        .text(&["status", "--porcelain=v1", "--untracked-files=normal"])
+        .map_err(|e| e.to_string())?;
+    let expand = |dir: &str| -> Vec<String> {
+        git.text(&["ls-files", "--others", "--exclude-standard", "--", dir])
+            .map(|t| t.lines().map(str::to_string).collect())
+            .unwrap_or_default()
+    };
+    Ok(unexpected_untracked(&status, allow, &expand))
+}
+
+/// The baseline file: one known untracked entry per line (`#` starts a comment).
+fn read_baseline(path: &Path) -> Vec<String> {
+    std::fs::read_to_string(path)
+        .map(|t| {
+            t.lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Entries that neither the baseline nor one of its folders names.
+pub fn not_in_baseline<'a>(entries: &'a [String], baseline: &[String]) -> Vec<&'a String> {
+    entries
+        .iter()
+        .filter(|e| !baseline.iter().any(|b| super::git::is_under(e, b)))
+        .collect()
+}
+
+fn untracked_findings(repo: &Repo, allow: &[String], baseline_file: &Path, accept: bool) -> Vec<Finding> {
+    let entries = match untracked_outside_allow(repo, allow) {
+        Ok(e) => e,
+        Err(e) => {
+            return vec![Finding::new(
+                "untracked",
+                Severity::NotMeasured,
+                e,
+                "Run `git status` in the primary.",
+            )];
+        }
+    };
+    if accept {
+        let mut text = String::from("# Known untracked entries of the primary checkout (`./dev check primary --accept-untracked`).\n");
+        for e in &entries {
+            text.push_str(e);
+            text.push('\n');
+        }
+        if let Err(e) = std::fs::write(baseline_file, text) {
+            return vec![Finding::new(
+                "untracked",
+                Severity::NotMeasured,
+                format!("Cannot write {}: {e}.", baseline_file.display()),
+                "Check the folder's permissions.",
+            )];
+        }
+        return Vec::new();
+    }
+    let baseline = read_baseline(baseline_file);
+    let new = not_in_baseline(&entries, &baseline);
+    if new.is_empty() {
+        return Vec::new();
+    }
+    vec![Finding::new(
+        "untracked-new",
+        Severity::Error,
+        format!(
+            "{} new untracked entr(ies) in the primary: {}.",
+            new.len(),
+            new.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+        ),
+        format!(
+            "Find which agent wrote them (a write into the primary leaves untracked files) and move or delete them; if they belong there, record them with `./dev check primary --accept-untracked` (baseline {}).",
+            baseline_file.display()
+        ),
+    )]
 }
 
 fn short(sha: &str) -> &str {
@@ -355,7 +420,14 @@ pub fn check(repo: &Repo, opts: &Options<'_>) -> Result<Report, CliError> {
     };
     let mut allow: Vec<String> = DEFAULT_ALLOWED_UNTRACKED.iter().map(|s| s.to_string()).collect();
     allow.extend(opts.allow_untracked.iter().cloned());
-    let mut findings = primary_findings(repo, &allow);
+    let mut findings = primary_findings(repo);
+    let default_baseline = repo.common_dir.join("paddock-primary-untracked.txt");
+    findings.extend(untracked_findings(
+        repo,
+        &allow,
+        opts.baseline.unwrap_or(&default_baseline),
+        opts.accept_untracked,
+    ));
     match (worktrees(repo), OwnerStore::open(&repo.common_dir).read()) {
         (Ok(list), Ok(owners)) => {
             findings.extend(ownership_findings(&list, &owners, now_secs()));
@@ -395,7 +467,9 @@ pub fn check(repo: &Repo, opts: &Options<'_>) -> Result<Report, CliError> {
             format!("{failing} problem(s)")
         }
     ));
+    let only_unmeasured = findings.iter().all(|f| f.severity != Severity::Error) && failing > 0;
     let data = json!({
+        "not_measured_only": only_unmeasured,
         "primary": repo.primary.to_string_lossy(),
         "healthy": failing == 0,
         "problems": failing,

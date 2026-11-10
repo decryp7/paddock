@@ -1,15 +1,24 @@
 //! The engineering-rules `scripts/worktree.sh` is the oracle for add, list and clean: the same fixture repository goes
-//! through both tools and their decisions are compared. The script lives in another repository, so the test is ignored
-//! unless `WORKTREE_SH` names it:
+//! through both tools and their decisions are compared. The script lives in another repository, so the tests run when
+//! `WORKTREE_SH` names it (CI sets it where engineering-rules is checked out) and otherwise print `not measured`:
 //!
-//! `WORKTREE_SH=<engineering-rules>/scripts/worktree.sh cargo test --test it worktree::oracle -- --ignored`
+//! `WORKTREE_SH=<engineering-rules>/scripts/worktree.sh cargo test --test it worktree::oracle`
 use super::Fixture;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Command;
 
+/// The oracle script, or `None` (and a visible `not measured` line, ER-33) when `WORKTREE_SH` is not set.
+fn oracle() -> Option<PathBuf> {
+    let found = std::env::var("WORKTREE_SH").ok().map(PathBuf::from);
+    if found.is_none() {
+        eprintln!("oracle not measured: WORKTREE_SH is not set");
+    }
+    found
+}
+
 fn script() -> PathBuf {
-    PathBuf::from(std::env::var("WORKTREE_SH").expect("WORKTREE_SH must name engineering-rules/scripts/worktree.sh"))
+    oracle().expect("checked by the caller")
 }
 
 fn sh(fx: &Fixture, args: &[&str]) -> String {
@@ -64,8 +73,10 @@ fn sh_list(fx: &Fixture) -> BTreeMap<String, (String, String, String)> {
 }
 
 #[test]
-#[ignore = "needs WORKTREE_SH (engineering-rules/scripts/worktree.sh)"]
 fn list_agrees_with_worktree_sh_on_merged_and_dirty() {
+    if oracle().is_none() {
+        return;
+    }
     let fx = Fixture::new();
     let made = build(&fx);
     let theirs = sh_list(&fx);
@@ -82,8 +93,10 @@ fn list_agrees_with_worktree_sh_on_merged_and_dirty() {
 }
 
 #[test]
-#[ignore = "needs WORKTREE_SH (engineering-rules/scripts/worktree.sh)"]
 fn clean_removes_the_same_worktrees_as_worktree_sh() {
+    if oracle().is_none() {
+        return;
+    }
     let fx = Fixture::new();
     let made = build(&fx);
     let theirs: Vec<String> = sh(&fx, &["clean", "--base", "main", "--dry-run"])
@@ -120,31 +133,20 @@ fn clean_removes_the_same_worktrees_as_worktree_sh() {
 }
 
 #[test]
-#[ignore = "needs WORKTREE_SH (engineering-rules/scripts/worktree.sh)"]
 fn add_starts_from_the_same_commit_on_a_new_branch_but_locks_it() {
+    if oracle().is_none() {
+        return;
+    }
     let fx = Fixture::new();
     sh(&fx, &["add", "theirs", "--base", "main"]);
     let theirs = fx.root.join("sh-wt/theirs").canonicalize().unwrap();
     let path = fx.path("ours");
-    let r = fx.dev(&[
-        "worktree",
-        "add",
-        path.to_str().unwrap(),
-        "-b",
-        "ours",
-        "main",
-        "--owner",
-        "implementer:x",
-    ]);
+    let r = fx.dev(&["worktree", "add", "ours", "--base", "main", "--owner", "implementer:x"]);
     assert_eq!(r.code, 0, "{}", r.err);
     assert_eq!(fx.git(&theirs, &["rev-parse", "HEAD"]), fx.git(&path, &["rev-parse", "HEAD"]));
     assert_eq!(fx.git(&path, &["rev-parse", "--abbrev-ref", "HEAD"]), "ours");
     assert!(fx.lock_reason(&path).is_some(), "ours is locked");
     assert!(fx.lock_reason(&theirs).is_none(), "worktree.sh's is not (WP-4 adds --owner there)");
-    let again = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
-        .args(["worktree", "add", path.to_str().unwrap(), "-b", "x", "main", "--owner", "a:b"])
-        .current_dir(&fx.primary)
-        .output()
-        .unwrap();
-    assert!(!again.status.success(), "both refuse an existing path");
+    let again = fx.dev(&["worktree", "add", "ours", "--base", "main", "-b", "x", "--owner", "a:b"]);
+    assert_eq!(again.code, 4, "both refuse an existing path: {}", again.err);
 }

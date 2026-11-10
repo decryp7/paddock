@@ -40,7 +40,8 @@ enum Command {
         #[command(subcommand)]
         command: CheckCommand,
     },
-    /// Agent worktrees (ADR 0083): add, claim, reassign, release, drop, list and clean.
+    /// Agent worktrees (ADR 0083): add, claim, reassign, release, drop, list and clean. The caller's agent id is self-declared
+    /// until the guard hook (RT-7) passes the real one.
     Worktree {
         #[command(subcommand)]
         command: worktree::WorktreeCommand,
@@ -58,7 +59,7 @@ enum Command {
 
 #[derive(Subcommand)]
 enum CheckCommand {
-    /// The probe of the primary checkout (ADR 0083): on main, no local-only commit, no tracked change, owners match locks.
+    /// The probe of the primary checkout (ADR 0083): on main, no local-only commit, no tracked change, owners match locks. Exit 5: a problem; exit 6: only checks that could not run (not measured). Liveness is measured only with --live.
     Primary(worktree::PrimaryArgs),
     /// C102 (ADR 0072): every listen site is in docs/ipc-endpoints.toml with an ending test or a reason, and the ratchet of
     /// connection endings is well formed. With `--tag`, also refuses a release tag that a ratchet entry blocks.
@@ -226,7 +227,14 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         return finish(Format::Json, Err(e), out, err).code();
     }
     let result = dispatch(cli.command);
-    finish(if cli.json { Format::Json } else { Format::Text }, result, out, err).code()
+    // A probe whose only problems are checks that could not run ends with `worktree::EXIT_NOT_MEASURED` (ER-33).
+    let not_measured_only = result.as_ref().is_ok_and(|r| r.data["not_measured_only"] == true);
+    let code = finish(if cli.json { Format::Json } else { Format::Text }, result, out, err);
+    if not_measured_only && code == Exit::Findings {
+        worktree::EXIT_NOT_MEASURED
+    } else {
+        code.code()
+    }
 }
 
 fn dispatch(command: Command) -> Result<Report, CliError> {

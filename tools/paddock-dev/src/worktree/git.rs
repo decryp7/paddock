@@ -199,6 +199,19 @@ fn strip_verbatim(p: PathBuf) -> PathBuf {
     }
 }
 
+/// `child` is `parent` or below it (both in [`key`] form), ignoring case where the file system does.
+pub fn is_under(child: &str, parent: &str) -> bool {
+    let fold = |s: &str| {
+        if cfg!(any(target_os = "macos", windows)) {
+            s.to_ascii_lowercase()
+        } else {
+            s.to_string()
+        }
+    };
+    let (c, p) = (fold(child.trim_end_matches('/')), fold(parent.trim_end_matches('/')));
+    c == p || c.starts_with(&format!("{p}/"))
+}
+
 /// The path as the owner map and `git worktree list` spell it: absolute, real, with `/` separators.
 pub fn key(p: &Path) -> String {
     canonical(p).to_string_lossy().replace('\\', "/")
@@ -219,6 +232,12 @@ mod tests {
         assert_eq!(w[1].locked.as_deref(), Some("owner=x:y"));
         assert!(w[2].detached && w[2].locked.as_deref() == Some("") && w[2].branch.is_none());
         assert!(w[3].prunable && w[3].locked.is_none());
+    }
+
+    #[test]
+    fn under_means_the_same_folder_or_a_component_boundary() {
+        assert!(is_under("/a/b", "/a/b") && is_under("/a/b/c", "/a/b") && is_under("/a/b/c/", "/a/b/"));
+        assert!(!is_under("/a/bc", "/a/b") && !is_under("/a", "/a/b"));
     }
 
     #[test]

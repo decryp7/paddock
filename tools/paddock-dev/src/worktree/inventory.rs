@@ -121,7 +121,7 @@ pub fn rows(repo: &Repo, base: &str, with_in_use: bool) -> Result<Vec<Row>, CliE
         };
         out.push(Row {
             primary: i == 0,
-            lock_age: note.as_ref().map(|n| now.saturating_sub(n.created)),
+            lock_age: note.as_ref().and_then(|n| n.created).map(|c| now.saturating_sub(c)),
             merged: merged_state(repo, &w, base),
             owner: owners.get(&k).cloned(),
             note,
@@ -143,7 +143,7 @@ fn row_json(r: &Row) -> Value {
         "locked": r.info.locked.is_some(),
         "lock_note": r.info.locked,
         "owner_note": r.note.as_ref().map(|n| format!("{}:{}", n.role, n.task)),
-        "created": r.note.as_ref().map(|n| format_utc(n.created)),
+        "created": r.note.as_ref().and_then(|n| n.created).map(format_utc),
         "agent_id": r.owner.as_ref().map(|e| e.agent_id.clone()),
         "agent_type": r.owner.as_ref().map(|e| e.agent_type.clone()),
         "lock_age_secs": r.lock_age,
@@ -262,8 +262,9 @@ pub fn clean(repo: &Repo, base: &str, dry_run: bool) -> Result<Report, CliError>
         let _ = store.update(|m| m.remove(&k));
         let mut branch_note = String::new();
         if let Some(b) = &r.info.branch {
-            // Safe: the tip is an ancestor of the base, so no commit is lost; `-d` would compare with the primary's HEAD.
-            match repo.git().text(&["branch", "-D", b]) {
+            // The tip is an ancestor of the base, so no commit is lost; naming the snapshot head makes git refuse if the
+            // branch moved since (`branch -d` would compare with the primary's HEAD instead).
+            match repo.git().text(&["update-ref", "-d", &format!("refs/heads/{b}"), &r.info.head]) {
                 Ok(_) => branch_note = format!(", branch {b}"),
                 Err(e) => branch_note = format!(", branch {b} kept ({})", e.stderr.trim()),
             }
@@ -275,4 +276,113 @@ pub fn clean(repo: &Repo, base: &str, dry_run: bool) -> Result<Report, CliError>
         json!({"base": base, "dry_run": dry_run, "removed": removed, "kept": kept}),
         text,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row() -> Row {
+        Row {
+            info: WorktreeInfo {
+                path: "/w/a".into(),
+                head: "abc".into(),
+                branch: Some("a".into()),
+                detached: false,
+                locked: None,
+                prunable: false,
+            },
+            primary: false,
+            note: None,
+            owner: None,
+            lock_age: None,
+            merged: Merged::Yes,
+            dirty: Some(false),
+            in_use: Some(false),
+        }
+    }
+
+    #[test]
+    fn an_idle_clean_merged_unlocked_worktree_is_the_only_one_removed() {
+        assert_eq!(keep_reason(&row(), "origin/main"), None);
+    }
+
+    #[test]
+    fn where_other_processes_cannot_be_read_everything_is_kept() {
+        // The Windows branch: `process_folders` is an error there, so `in_use` is `None` for every row.
+        let r = Row { in_use: None, ..row() };
+        assert!(keep_reason(&r, "origin/main").unwrap().contains("not known here"));
+        assert!(
+            keep_reason(
+                &Row {
+                    in_use: Some(true),
+                    ..row()
+                },
+                "origin/main"
+            )
+            .unwrap()
+            .contains("current folder")
+        );
+    }
+
+    #[test]
+    fn every_other_state_keeps_with_its_reason() {
+        let b = "origin/main";
+        let cases: Vec<(Row, &str)> = vec![
+            (Row { primary: true, ..row() }, "primary"),
+            (
+                Row {
+                    info: WorktreeInfo {
+                        locked: Some(String::new()),
+                        ..row().info
+                    },
+                    ..row()
+                },
+                "locked",
+            ),
+            (
+                Row {
+                    info: WorktreeInfo {
+                        prunable: true,
+                        ..row().info
+                    },
+                    ..row()
+                },
+                "prune",
+            ),
+            (
+                Row {
+                    merged: Merged::No,
+                    ..row()
+                },
+                "not merged",
+            ),
+            (
+                Row {
+                    merged: Merged::Empty,
+                    ..row()
+                },
+                "no commits",
+            ),
+            (
+                Row {
+                    merged: Merged::Unknown,
+                    ..row()
+                },
+                "cannot tell",
+            ),
+            (
+                Row {
+                    dirty: Some(true),
+                    ..row()
+                },
+                "uncommitted",
+            ),
+            (Row { dirty: None, ..row() }, "uncommitted"),
+        ];
+        for (r, want) in cases {
+            let why = keep_reason(&r, b).unwrap_or_default();
+            assert!(why.contains(want), "{want}: {why}");
+        }
+    }
 }

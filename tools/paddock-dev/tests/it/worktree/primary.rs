@@ -30,11 +30,7 @@ fn a_healthy_primary_passes_and_says_liveness_is_not_measured() {
     assert_eq!(r.json["healthy"], true);
     assert_eq!(r.json["liveness"], "not measured");
     assert!(r.json["findings"].as_array().unwrap().is_empty());
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
-        .args(["check", "primary"])
-        .current_dir(&fx.primary)
-        .output()
-        .unwrap();
+    let out = fx.cmd_text(&fx.primary, &["check", "primary"]).output().unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("liveness: not measured"), "{text}");
     assert!(text.contains("ok"), "{text}");
@@ -56,9 +52,10 @@ fn the_positive_control_sees_a_stray_commit_a_tracked_change_an_unclaimed_lock_a
     let a = fx.dev(&[
         "worktree",
         "add",
-        p(&orphan),
+        "orphan",
         "-b",
         "orphan",
+        "--base",
         "origin/main",
         "--owner",
         "a:b",
@@ -75,11 +72,7 @@ fn the_positive_control_sees_a_stray_commit_a_tracked_change_an_unclaimed_lock_a
     for want in ["local-commits", "tracked", "owner-missing", "owner-orphan"] {
         assert!(errors.iter().any(|e| e == want), "{want} missing from {errors:?}: {}", r.json);
     }
-    let text = std::process::Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
-        .args(["check", "primary"])
-        .current_dir(&fx.primary)
-        .output()
-        .unwrap();
+    let text = fx.cmd_text(&fx.primary, &["check", "primary"]).output().unwrap();
     let text = String::from_utf8_lossy(&text.stdout);
     assert!(text.contains("::error::local-commits") && text.contains("Next:"), "{text}");
     assert!(text.contains(p(&unclaimed)) && text.contains(p(&orphan)), "{text}");
@@ -119,7 +112,11 @@ fn a_missing_origin_is_not_measured_and_does_not_pass() {
     let fx = Fixture::new();
     fx.git(&fx.primary, &["remote", "remove", "origin"]);
     let r = probe(&fx, &[]);
-    assert_eq!(r.code, 5, "{}", r.json);
+    assert_eq!(
+        r.code, 6,
+        "only checks that could not run: its own exit code, not 5 or 0: {}",
+        r.json
+    );
     assert_eq!(ids(&r, "not measured"), vec!["local-commits".to_string()], "{}", r.json);
     assert_eq!(r.json["healthy"], false);
 }
@@ -148,13 +145,13 @@ fn a_half_done_merge_and_a_sparse_primary_are_reported() {
 #[test]
 fn a_sparse_agent_worktree_does_not_make_the_primary_sparse() {
     let fx = Fixture::new();
-    let path = fx.path("sp");
     let r = fx.dev(&[
         "worktree",
         "add",
-        p(&path),
+        "sp",
         "-b",
         "sp",
+        "--base",
         "origin/main",
         "--owner",
         "a:b",
@@ -169,26 +166,76 @@ fn a_sparse_agent_worktree_does_not_make_the_primary_sparse() {
 }
 
 #[test]
-fn untracked_entries_are_listed_unless_allowed_and_never_fail_the_probe() {
+fn new_untracked_entries_are_errors_unless_allowed_or_in_the_baseline() {
     let fx = Fixture::new();
     for d in [".serena", "node_modules", ".claude/densepack-vault"] {
         std::fs::create_dir_all(fx.primary.join(d)).unwrap();
         std::fs::write(fx.primary.join(d).join("x"), "x").unwrap();
     }
+    assert_eq!(probe(&fx, &[]).code, 0, "the declared tool folders need no baseline");
     std::fs::write(fx.primary.join("stray.whl"), "x").unwrap();
     std::fs::create_dir_all(fx.primary.join("extra")).unwrap();
     std::fs::write(fx.primary.join("extra/y"), "y").unwrap();
     let r = probe(&fx, &[]);
-    assert_eq!(r.code, 0, "{}", r.json);
-    assert_eq!(ids(&r, "warning"), vec!["untracked".to_string()]);
+    assert_eq!(r.code, 5, "{}", r.json);
+    assert_eq!(ids(&r, "error"), vec!["untracked-new".to_string()]);
     let msg = r.json["findings"][0]["message"].as_str().unwrap().to_string();
     assert!(msg.contains("stray.whl") && msg.contains("extra/"), "{msg}");
     assert!(
         !msg.contains(".serena") && !msg.contains("node_modules") && !msg.contains("densepack"),
         "{msg}"
     );
-    let r = probe(&fx, &["--allow-untracked", "stray.whl", "--allow-untracked", "extra/"]);
-    assert!(r.json["findings"].as_array().unwrap().is_empty(), "{}", r.json);
+    // The coordinator looks, then records them: the probe is green; a newer entry is an error again.
+    let accepted = probe(&fx, &["--accept-untracked"]);
+    assert_eq!(accepted.code, 0, "{}", accepted.json);
+    assert_eq!(probe(&fx, &[]).code, 0);
+    let baseline = std::fs::read_to_string(fx.primary.join(".git/paddock-primary-untracked.txt")).unwrap();
+    assert!(baseline.contains("stray.whl") && baseline.contains("extra/"), "{baseline}");
+    std::fs::write(fx.primary.join("newer.txt"), "x").unwrap();
+    let r = probe(&fx, &[]);
+    assert_eq!(r.code, 5);
+    let msg = r.json["findings"][0]["message"].as_str().unwrap().to_string();
+    assert!(msg.contains("newer.txt") && !msg.contains("stray.whl"), "{msg}");
+    let r = probe(&fx, &["--allow-untracked", "newer.txt"]);
+    assert_eq!(r.code, 0, "{}", r.json);
+}
+
+#[test]
+fn the_untracked_list_is_never_cut() {
+    let fx = Fixture::new();
+    for i in 0..40 {
+        std::fs::write(fx.primary.join(format!("stray{i:02}.whl")), "x").unwrap();
+    }
+    let r = probe(&fx, &[]);
+    let msg = r.json["findings"][0]["message"].as_str().unwrap().to_string();
+    assert!(
+        msg.contains("40 new") && msg.contains("stray00.whl") && msg.contains("stray39.whl"),
+        "{msg}"
+    );
+}
+
+#[test]
+fn a_worktree_inside_the_primarys_folder_is_an_error() {
+    let fx = Fixture::new();
+    let nested = fx.primary.join("nested-wt");
+    fx.git(
+        &fx.primary,
+        &[
+            "worktree",
+            "add",
+            "--lock",
+            "--reason",
+            "owner=a:b; branch=n; base=x; created=2999-01-01T00:00:00Z; by=coordinator",
+            "-b",
+            "n",
+            p(&nested),
+            "origin/main",
+        ],
+    );
+    assert_eq!(fx.claim(&nested, "agent-A").code, 0);
+    let r = probe(&fx, &["--accept-untracked"]);
+    assert_eq!(r.code, 5, "{}", r.json);
+    assert!(ids(&r, "error").contains(&"nested-worktree".to_string()), "{}", r.json);
 }
 
 #[test]
@@ -266,9 +313,11 @@ fn the_probe_checks_the_primary_even_when_run_from_a_worktree() {
 #[test]
 fn a_corrupt_owner_map_is_not_measured_not_a_pass() {
     let fx = Fixture::new();
-    std::fs::create_dir_all(fx.primary.join(".git/paddock")).unwrap();
-    std::fs::write(fx.primary.join(".git/paddock/owners.json"), "garbage").unwrap();
+    std::fs::write(fx.primary.join(".git/paddock-worktree-owners.json"), "garbage").unwrap();
     let r = probe(&fx, &[]);
-    assert_eq!(r.code, 5, "{}", r.json);
+    assert_eq!(r.code, 6, "{}", r.json);
     assert_eq!(ids(&r, "not measured"), vec!["ownership".to_string()]);
+    // A found problem outranks a check that could not run.
+    std::fs::write(fx.primary.join("README.md"), "edited\n").unwrap();
+    assert_eq!(probe(&fx, &[]).code, 5);
 }

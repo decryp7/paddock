@@ -24,6 +24,15 @@ pub struct Fixture {
     gitconfig: PathBuf,
 }
 
+fn run_of(out: std::process::Output) -> Run {
+    let text = String::from_utf8_lossy(&out.stdout);
+    Run {
+        code: out.status.code().unwrap(),
+        json: serde_json::from_str(text.trim()).unwrap_or(Value::Null),
+        err: String::from_utf8_lossy(&out.stderr).into_owned(),
+    }
+}
+
 /// One result of the tool: exit code, the JSON object on stdout, standard error.
 pub struct Run {
     pub code: i32,
@@ -84,29 +93,49 @@ impl Fixture {
         self.git_cmd(dir).args(args).output().unwrap().status.success()
     }
 
-    /// The tool, run in `cwd` with the test's git config and no agent identity in the environment.
-    pub fn dev_in(&self, cwd: &Path, args: &[&str]) -> Run {
-        let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
-            .arg("--json")
-            .args(args)
+    /// The tool as a command: run in `cwd`, with the test's git config (ER-14: never the user's), the worktree root set to
+    /// this fixture's folder and no agent identity in the environment.
+    pub fn cmd(&self, cwd: &Path, args: &[&str]) -> Command {
+        let mut c = self.cmd_text(cwd, args);
+        c.arg("--json");
+        c
+    }
+
+    /// Like [`Fixture::cmd`] without `--json` (the text a person reads).
+    pub fn cmd_text(&self, cwd: &Path, args: &[&str]) -> Command {
+        let mut c = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+        c.args(args)
             .current_dir(cwd)
             .env("GIT_CONFIG_GLOBAL", &self.gitconfig)
             .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("PADDOCK_WORKTREE_ROOT", &self.wt)
             .env_remove("PADDOCK_AGENT_ID")
-            .env_remove("PADDOCK_AGENT_TYPE")
-            .output()
-            .unwrap();
-        let text = String::from_utf8_lossy(&out.stdout);
-        Run {
-            code: out.status.code().unwrap(),
-            json: serde_json::from_str(text.trim()).unwrap_or(Value::Null),
-            err: String::from_utf8_lossy(&out.stderr).into_owned(),
-        }
+            .env_remove("PADDOCK_AGENT_TYPE");
+        c
+    }
+
+    /// The tool, run in `cwd`.
+    pub fn dev_in(&self, cwd: &Path, args: &[&str]) -> Run {
+        run_of(self.cmd(cwd, args).output().unwrap())
     }
 
     /// The tool, run in the primary.
     pub fn dev(&self, args: &[&str]) -> Run {
         self.dev_in(&self.primary, args)
+    }
+
+    /// A `git` script first on the PATH (the seam that slows or fails one git call): `body` is shell run before the real git
+    /// with `$REAL` the real binary and the arguments in `$*`; falling off the end runs the real git. Returns the PATH.
+    #[cfg(unix)]
+    pub fn fake_git(&self, name: &str, body: &str) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        let real = String::from_utf8(Command::new("which").arg("git").output().unwrap().stdout).unwrap();
+        let bin = self.root.join(format!("fakebin-{name}"));
+        std::fs::create_dir_all(&bin).unwrap();
+        let script = format!("#!/bin/sh\nREAL={}\n{body}\nexec \"$REAL\" \"$@\"\n", real.trim());
+        std::fs::write(bin.join("git"), script).unwrap();
+        std::fs::set_permissions(bin.join("git"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        format!("{}:{}", bin.display(), std::env::var("PATH").unwrap())
     }
 
     /// The path of a worktree named `name`.
@@ -120,9 +149,8 @@ impl Fixture {
         let r = self.dev(&[
             "worktree",
             "add",
-            p.to_str().unwrap(),
-            "-b",
             name,
+            "--base",
             "origin/main",
             "--owner",
             &format!("implementer:{name}"),
@@ -138,7 +166,7 @@ impl Fixture {
 
     /// The owner map as JSON (null when there is none).
     pub fn owners(&self) -> Value {
-        let f = self.primary.join(".git/paddock/owners.json");
+        let f = self.primary.join(".git/paddock-worktree-owners.json");
         std::fs::read_to_string(f)
             .ok()
             .and_then(|t| serde_json::from_str(&t).ok())

@@ -10,6 +10,9 @@
 //! The engine reads no Paddock path: the base ref and the main branch are the constants of [`primary`] and the default of
 //! `--base`, so it can move to a generic tool (RT plan, "Generic code stays generic").
 
+/// The exit code of `check primary` when its only problems are checks that could not run (5 is a found problem).
+pub const EXIT_NOT_MEASURED: i32 = 6;
+
 pub mod git;
 pub mod inventory;
 pub mod note;
@@ -25,7 +28,8 @@ use std::path::PathBuf;
 /// `dev worktree ...`
 #[derive(Subcommand)]
 pub enum WorktreeCommand {
-    /// Make a worktree: always locked, with an owner note; refuses an existing path or one in the owner map.
+    /// Make a worktree under the worktree root: always locked, with an owner note; refuses an existing path, one in the owner
+    /// map, or one inside another checkout. Not yet printed: CARGO_TARGET_DIR and the e2e port (they come with RT-6).
     Add(AddArgs),
     /// Bind a locked worktree to the calling agent (refuses an unknown, unlocked or other-owned one).
     Claim(PathArgs),
@@ -37,17 +41,21 @@ pub enum WorktreeCommand {
     Drop(PathArgs),
     /// Every worktree: branch, lock note, owner, lock age, merged, dirty and in use.
     List(ListArgs),
-    /// Remove worktrees that are unlocked, merged, clean and not in use (never rm, never force).
+    /// Remove worktrees that are unlocked, merged, clean and not in use (never rm, never force). Does not remove build
+    /// folders yet (RT-6).
     Clean(CleanArgs),
 }
 
 /// Who is calling and where the repository is.
+///
+/// The agent id is **self-declared** (an argument or PADDOCK_AGENT_ID) until the guard hook (RT-7) passes the real
+/// `agent_id`: these commands keep honest agents from each other's worktrees, they do not stop a caller that lies.
 #[derive(Args)]
 pub struct Common {
     /// The repository (default: the current folder's).
     #[arg(long, global = true)]
     repo: Option<PathBuf>,
-    /// The calling agent's id (default: PADDOCK_AGENT_ID; none means the coordinator).
+    /// The calling agent's id, self-declared until RT-7's hook passes it (default: PADDOCK_AGENT_ID; none means the coordinator).
     #[arg(long, global = true)]
     agent: Option<String>,
     /// The calling agent's type (default: PADDOCK_AGENT_TYPE).
@@ -58,13 +66,14 @@ pub struct Common {
 /// `add`'s arguments.
 #[derive(Args)]
 pub struct AddArgs {
-    /// Where to make it.
-    path: PathBuf,
-    /// The new branch.
-    #[arg(short = 'b', long = "branch", conflicts_with = "detach", required_unless_present = "detach")]
-    branch: Option<String>,
+    /// The folder name (one component); the worktree is made at <root>/<name>.
+    name: String,
     /// The commit-ish to start from (for example origin/main).
+    #[arg(long)]
     base: String,
+    /// The new branch (default: the name). Not with --detach.
+    #[arg(short = 'b', long = "branch", conflicts_with = "detach")]
+    branch: Option<String>,
     /// What it is for: <role>:<task>, for example implementer:RT-3.
     #[arg(long)]
     owner: String,
@@ -74,6 +83,10 @@ pub struct AddArgs {
     /// Sparse cone folders (comma separated).
     #[arg(long, value_delimiter = ',')]
     sparse: Vec<String>,
+    /// The folder all agent worktrees go under (default: git config paddock.worktreeRoot, then PADDOCK_WORKTREE_ROOT).
+    /// The tool refuses a path inside the primary checkout or another worktree.
+    #[arg(long)]
+    root: Option<PathBuf>,
     #[command(flatten)]
     common: Common,
 }
@@ -119,6 +132,13 @@ pub struct PrimaryArgs {
     /// An untracked path prefix that may live in the primary (repeatable).
     #[arg(long)]
     allow_untracked: Vec<String>,
+    /// The file of known untracked entries (default: paddock-primary-untracked.txt in the git directory). An untracked
+    /// entry in neither it nor the allow-list is an error.
+    #[arg(long)]
+    baseline: Option<PathBuf>,
+    /// Write the current untracked entries to the baseline (the coordinator does this after looking at them).
+    #[arg(long)]
+    accept_untracked: bool,
     /// The repository (default: the current folder's).
     #[arg(long)]
     repo: Option<PathBuf>,
@@ -150,17 +170,25 @@ pub fn command(c: WorktreeCommand) -> Result<Report, CliError> {
     let repo = repo_of(common.repo.as_ref())?;
     let caller = ops::Caller::resolve(common.agent.as_deref(), common.agent_type.as_deref(), &env)?;
     match c {
-        WorktreeCommand::Add(a) => ops::add(
-            &repo,
-            &caller,
-            &ops::AddRequest {
-                path: &a.path,
-                branch: a.branch.as_deref(),
-                base: &a.base,
-                owner: &a.owner,
-                sparse: &a.sparse,
-            },
-        ),
+        WorktreeCommand::Add(a) => {
+            let root = ops::resolve_root(&repo, a.root.as_deref(), &env)?;
+            ops::add(
+                &repo,
+                &caller,
+                &ops::AddRequest {
+                    name: &a.name,
+                    root: &root,
+                    branch: if a.detach {
+                        None
+                    } else {
+                        Some(a.branch.as_deref().unwrap_or(&a.name))
+                    },
+                    base: &a.base,
+                    owner: &a.owner,
+                    sparse: &a.sparse,
+                },
+            )
+        }
         WorktreeCommand::Claim(a) => ops::claim(&repo, &caller, &a.path),
         WorktreeCommand::Reassign(a) => ops::reassign(&repo, &caller, &a.path),
         WorktreeCommand::Release(a) => ops::release(&repo, &caller, &a.path),
@@ -178,6 +206,8 @@ pub fn check_primary(a: &PrimaryArgs) -> Result<Report, CliError> {
         &primary::Options {
             live: a.live.as_deref(),
             allow_untracked: &a.allow_untracked,
+            baseline: a.baseline.as_deref(),
+            accept_untracked: a.accept_untracked,
         },
     )
 }

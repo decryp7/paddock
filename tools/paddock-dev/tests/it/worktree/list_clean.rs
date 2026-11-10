@@ -95,7 +95,8 @@ fn list_shows_a_detached_review_copy_and_a_missing_folder() {
     let r = fx.dev(&[
         "worktree",
         "add",
-        p(&copy),
+        "copy",
+        "--base",
         "origin/main",
         "--detach",
         "--owner",
@@ -229,8 +230,17 @@ fn clean_removes_a_released_detached_copy_at_the_base() {
     let fx = Fixture::new();
     let copy = fx.path("copy");
     assert_eq!(
-        fx.dev(&["worktree", "add", p(&copy), "origin/main", "--detach", "--owner", "reviewer:t"])
-            .code,
+        fx.dev(&[
+            "worktree",
+            "add",
+            "copy",
+            "--base",
+            "origin/main",
+            "--detach",
+            "--owner",
+            "reviewer:t"
+        ])
+        .code,
         0
     );
     assert_eq!(fx.dev(&["worktree", "release", p(&copy)]).code, 0);
@@ -247,4 +257,39 @@ fn clean_with_an_unknown_base_keeps_everything() {
     assert_eq!(r.code, 0, "{}", r.err);
     assert!(gone.exists());
     assert!(r.json["removed"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn clean_deletes_a_branch_only_at_the_head_it_looked_at() {
+    // The branch moves between the snapshot and the delete (the seam runs `update-ref` first): git refuses, the commit is safe.
+    let fx = Fixture::new();
+    let gone = finished(&fx, "gone", true);
+    let moved_to = fx.git(
+        &fx.primary,
+        &["commit-tree", "-p", "origin/main", "-m", "later", "origin/main^{tree}"],
+    );
+    let path_env = fx.fake_git(
+        "move",
+        &format!(r#"case "$*" in *"update-ref -d"*) "$REAL" update-ref refs/heads/gone {moved_to};; esac"#),
+    );
+    let r = run_with_path(&fx, &["worktree", "clean"], &path_env);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert!(!gone.exists(), "the worktree itself was removed");
+    assert_eq!(
+        fx.git(&fx.primary, &["rev-parse", "refs/heads/gone"]),
+        moved_to,
+        "the moved branch survives"
+    );
+    let kept = r.json["removed"][0]["branch"].as_str();
+    assert_eq!(kept, Some("gone"));
+}
+
+fn run_with_path(fx: &Fixture, args: &[&str], path: &str) -> super::Run {
+    let out = fx.cmd(&fx.primary, args).env("PATH", path).output().unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    super::Run {
+        code: out.status.code().unwrap(),
+        json: serde_json::from_str(text.trim()).unwrap_or(Value::Null),
+        err: String::from_utf8_lossy(&out.stderr).into_owned(),
+    }
 }

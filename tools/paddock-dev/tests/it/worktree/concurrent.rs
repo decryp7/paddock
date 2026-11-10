@@ -1,14 +1,9 @@
 //! Two commands started together: exactly one claim passes (ADR 0083 R8, "the flock test"), and one path is made once.
 use super::Fixture;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 fn spawn(fx: &Fixture, args: &[&str]) -> std::process::Child {
-    Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
-        .arg("--json")
-        .args(args)
-        .current_dir(&fx.primary)
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env_remove("PADDOCK_AGENT_ID")
+    fx.cmd(&fx.primary, args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -68,16 +63,17 @@ fn claims_of_different_worktrees_started_together_all_land() {
 fn two_adds_of_one_path_make_it_once() {
     let fx = Fixture::new();
     for round in 0..4 {
-        let path = fx.path(&format!("same{round}"));
-        let p = path.to_str().unwrap();
+        let name = format!("same{round}");
+        let path = fx.path(&name);
         let a = spawn(
             &fx,
             &[
                 "worktree",
                 "add",
-                p,
+                &name,
                 "-b",
                 &format!("a{round}"),
+                "--base",
                 "origin/main",
                 "--owner",
                 "x:y",
@@ -90,9 +86,10 @@ fn two_adds_of_one_path_make_it_once() {
             &[
                 "worktree",
                 "add",
-                p,
+                &name,
                 "-b",
                 &format!("b{round}"),
+                "--base",
                 "origin/main",
                 "--owner",
                 "x:y",
