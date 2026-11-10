@@ -13,6 +13,10 @@
 //! earlier commit lost) and b48df1818 is a commit built on a stale tree: this check looks at a merge's parents against its
 //! result, so a per-commit run covers the first three; the last is caught when its branch is merged (detector 1).
 //!
+//! Rule for filters: a filter may only remove findings for paths git reports as cleanly merged (not in the conflicted list of
+//! `git merge-tree --write-tree`, and equal to its tree), and git's own merge is the arbiter for every detector that has a
+//! filter: a conflicted path is never skipped, whatever its blob (a binary conflict taken as ours has parent 1's blob).
+//!
 //! Principle: every judgement is a three-way content judgement (base, mine, other, result), never a name or a count alone, and
 //! each mechanism is tested with the others switched off (a test per detector that the others cannot satisfy). Git's own merge
 //! of the two parents is the arbiter where one is needed: a file whose result equals it was merged, not taken.
@@ -20,10 +24,8 @@
 //! The gate must also run per commit, not only per merge: 85f326139, 439861fcf and 359be91b4 are commit-level drops that a
 //! merge-level check cannot see.
 //!
-//! Octopus merges: parent 1 is compared with every later parent; detector 1 runs for each later parent against the first, and
-//! detectors 2 and 3 for every parent, each with the merge base of the first parent and the other one (the second for the
-//! first parent). A file or test the other parents all lack counts as deleted by them. Git has no automatic merge of more than two parents here,
-//! so the whole-file detector is two-way only for an octopus merge.
+//! Octopus merges are not supported: they are reported as not measured (git has no automatic merge of more than two parents to
+//! ask, and the history has none).
 //!
 //! Outcomes follow ADR 0089: clean, findings (exit 5, an error object in JSON mode) and not measured (a missing parent, a
 //! shallow clone, an unparsable file, a git failure). Never a silent pass: whatever the check could not read is reported as
@@ -40,7 +42,7 @@ mod testnames;
 mod trailers;
 mod whole_file;
 
-use git::{Git, short};
+use git::{AutoMerge, Git, short};
 use paddock_cli::{CliError, Exit, Report};
 use serde_json::json;
 use std::path::PathBuf;
@@ -113,6 +115,17 @@ pub struct Ctx<'a> {
     generated: &'a generated::Generated,
     /// The diff from each parent to the result, in parent order.
     diffs: &'a [Vec<diff::FileDiff>],
+    /// Git's own merge of the two parents, and the result's files.
+    auto: &'a AutoMerge,
+    result_blobs: &'a std::collections::HashMap<String, String>,
+}
+
+impl Ctx<'_> {
+    /// Whether git merged `path` cleanly and the result is exactly that: nothing a parent added can be missing from it. A path
+    /// git lists as conflicted is never clean, whatever its blob is (a binary conflict's blob is parent 1's).
+    fn merged_cleanly(&self, path: &str) -> bool {
+        !self.auto.conflicted.contains(path) && self.auto.blobs.get(path) == self.result_blobs.get(path)
+    }
 }
 
 /// Runs the detectors over `merge`.
@@ -125,6 +138,9 @@ pub fn analyze(git: &Git, merge: &Merge) -> Outcome {
 }
 
 fn run(git: &Git, merge: &Merge) -> Result<Vec<Finding>, String> {
+    if merge.parents.len() > 2 {
+        return Err("octopus merges are not supported (git has no automatic merge of more than two parents to ask)".into());
+    }
     // A shallow clone's history is cut: a parent, a merge base or an earlier blob may be missing, and what is missing cannot
     // be told from what is not there.
     if git.is_shallow()? {
@@ -145,6 +161,11 @@ fn run(git: &Git, merge: &Merge) -> Result<Vec<Finding>, String> {
         .filter(|p| !generated::by_name(p))
         .collect();
     let generated = generated::Generated::load(git, tree, &paths.into_iter().collect::<Vec<_>>())?;
+    let mut out = Vec::new();
+    let blobs = merge.parents.iter().map(|p| git.blob_ids(p)).collect::<Result<Vec<_>, _>>()?;
+    let result_blobs = git.blob_ids(tree)?;
+    // Git's own merge of two parents: what a file is when nothing but the three-way merge decides it.
+    let auto = git.auto_merge(&merge.parents[0], &merge.parents[1])?;
     let cx = Ctx {
         git,
         parents: &merge.parents,
@@ -152,15 +173,8 @@ fn run(git: &Git, merge: &Merge) -> Result<Vec<Finding>, String> {
         message: &merge.message,
         generated: &generated,
         diffs: &diffs,
-    };
-    let mut out = Vec::new();
-    let blobs = merge.parents.iter().map(|p| git.blob_ids(p)).collect::<Result<Vec<_>, _>>()?;
-    let result_blobs = git.blob_ids(tree)?;
-    // Git's own merge of two parents: what a file is when nothing but the three-way merge decides it.
-    let auto = if merge.parents.len() == 2 {
-        Some(git.blob_ids(&git.auto_merge_tree(&merge.parents[0], &merge.parents[1])?)?)
-    } else {
-        None
+        auto: &auto,
+        result_blobs: &result_blobs,
     };
     for (i, parent) in merge.parents.iter().enumerate() {
         // The merge base of the first parent with the second; of a later parent with the first (an octopus has one per parent).
@@ -174,7 +188,7 @@ fn run(git: &Git, merge: &Merge) -> Result<Vec<Finding>, String> {
             parents: &blobs,
             base: &base_blobs,
             result: &result_blobs,
-            auto: auto.as_ref(),
+            auto: &auto,
         };
         out.extend(whole_file::check(&merge.parents, i, &listings, &merge.message, &generated));
         if i > 0 {

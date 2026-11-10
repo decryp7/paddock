@@ -7,7 +7,7 @@
 //! among the lines the result removes from the parent's file and does not add back elsewhere in it, each line counted once.
 //! A file that every other parent lacks under its name in the base (deleted on the other side; for a file this parent
 //! renamed, the name it had before) is skipped: that is a modify/delete conflict, resolved on
-//! purpose. Generated files ([`super::generated`]) are skipped: they are regenerated, not merged.
+//! purpose. A file git merged cleanly, and the result is exactly its merge, is skipped. Generated files ([`super::generated`]) are skipped: they are regenerated, not merged.
 
 use super::diff::{DIFF_FLAGS, FileDiff, parse, trivial};
 use super::git::short;
@@ -44,6 +44,10 @@ pub fn check(cx: &Ctx, index: usize, base: &str, to_result: &[FileDiff]) -> Resu
     let mut out = Vec::new();
     for file in added_by_parent.iter().filter(|f| !f.deleted && !generated.is(&f.path)) {
         let Some(change) = by_path.get(file.path.as_str()) else { continue };
+        // Git merged it cleanly and the result is that merge: nothing this parent added can be missing from it.
+        if cx.merged_cleanly(&file.path) {
+            continue;
+        }
         let hunks: Vec<Vec<&String>> = file
             .hunks
             .iter()

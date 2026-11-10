@@ -10,6 +10,15 @@ use std::time::Duration;
 const TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_OUTPUT: usize = 1 << 28;
 
+/// What git's own merge of two parents gives.
+#[derive(Debug, Default)]
+pub struct AutoMerge {
+    /// Every file of the tree it wrote, with its blob id.
+    pub blobs: HashMap<String, String>,
+    /// The paths it lists as conflicted: never evidence of a clean merge, whatever their blob is.
+    pub conflicted: std::collections::HashSet<String>,
+}
+
 /// A repository folder to run git in.
 pub struct Git<'a> {
     root: &'a Path,
@@ -44,16 +53,28 @@ impl<'a> Git<'a> {
         self.run(args, true)
     }
 
-    /// The tree git's own merge of two commits gives (`git merge-tree --write-tree`): clean, or with conflict markers in the
-    /// conflicted files (exit status 1 is an answer here). Conflicted files are in the tree as the marker text.
-    pub fn auto_merge_tree(&self, a: &str, b: &str) -> Result<String, String> {
-        let out = self.run(&["merge-tree", "--write-tree", "--no-messages", a, b], true)?;
+    /// Git's own merge of two commits (`git merge-tree --write-tree`): the files of the tree it writes, and the paths it lists
+    /// as conflicted (exit status 1 is an answer here). A conflicted path's blob in the tree is not a merge result: for a text
+    /// file it holds conflict markers, for a binary file it is parent 1's version.
+    pub fn auto_merge(&self, a: &str, b: &str) -> Result<AutoMerge, String> {
+        let out = self.run(&["merge-tree", "--write-tree", "-z", "--no-messages", a, b], true)?;
         let text = String::from_utf8_lossy(&out).into_owned();
-        text.lines()
+        let mut tokens = text.split('\0');
+        let tree = tokens
             .next()
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty())
-            .ok_or_else(|| "git merge-tree printed no tree".to_string())
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .ok_or("git merge-tree printed no tree")?
+            .to_string();
+        // "<mode> <oid> <stage>\t<path>" for every stage of every conflicted path, up to the first empty token.
+        let conflicted = tokens
+            .take_while(|t| !t.is_empty())
+            .filter_map(|t| t.split_once('\t').map(|(_, path)| path.to_string()))
+            .collect();
+        Ok(AutoMerge {
+            blobs: self.blob_ids(&tree)?,
+            conflicted,
+        })
     }
 
     fn run(&self, args: &[&str], status_1_is_empty: bool) -> Result<Vec<u8>, String> {

@@ -464,7 +464,11 @@ fn a_rust_file_that_does_not_parse_is_not_measured() {
     // Main touches the file too, so that both sides' versions of it matter and it is read.
     r.write("crates/x/src/lib.rs", "// a main note\n#[test]\nfn ok() {}\n");
     r.commit("fix: main note");
-    r.git(&["merge", "-q", "--no-ff", "-m", "Merge feature", "feature"]);
+    // The result is not git's own merge (it drops main's note), so the file is read.
+    r.git(&["merge", "-q", "-s", "ours", "--no-commit", "feature"]);
+    r.write("crates/x/src/lib.rs", "#[test]\nfn renamed( {\n");
+    r.git(&["add", "--all"]);
+    r.git(&["commit", "-q", "-m", "Merge feature"]);
     let (code, out) = r.check(&["HEAD"]);
     assert_eq!(code, 1, "{out}");
     assert!(
@@ -912,4 +916,169 @@ fn a_test_the_merge_moved_to_another_file_is_not_lost() {
     r.git(&["commit", "-q", "-m", "Merge feature"]);
     let (_, out) = r.check(&["HEAD"]);
     assert!(!out.contains("[lost-test]"), "{out}");
+}
+
+impl Repo {
+    /// Runs git and returns whether it succeeded (a conflicting merge fails on purpose).
+    fn git_may_fail(&self, args: &[&str]) -> bool {
+        self.cmd("git")
+            .arg("-c")
+            .arg("commit.gpgsign=false")
+            .args(args)
+            .output()
+            .unwrap()
+            .status
+            .success()
+    }
+}
+
+#[test]
+fn a_binary_conflict_resolved_with_ours_is_not_skipped_as_cleanly_merged() {
+    // Git cannot merge a binary file changed on both sides; its automatic result is parent 1's blob, which is also what
+    // `--ours` gives. That equality is no evidence of a clean merge.
+    let r = Repo::new();
+    let bin = |tag: &str| -> Vec<u8> { [b"head\0".as_slice(), tag.as_bytes(), b"\0tail\n"].concat() };
+    fs::write(r.path().join("bin.dat"), bin("base")).unwrap();
+    r.write("other.txt", &lines(10, "o"));
+    r.commit("initial");
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    fs::write(r.path().join("bin.dat"), bin("branch")).unwrap();
+    r.commit("feat: branch changes it");
+    r.git(&["checkout", "-q", "main"]);
+    fs::write(r.path().join("bin.dat"), bin("main")).unwrap();
+    r.commit("fix: main changes it");
+    assert!(
+        !r.git_may_fail(&["merge", "--no-commit", "--no-ff", "feature"]),
+        "the merge must conflict"
+    );
+    r.git(&["checkout", "--ours", "bin.dat"]);
+    r.git(&["add", "--all"]);
+    r.git(&["commit", "-q", "-m", "Merge feature"]);
+    let (code, out) = r.check(&["HEAD"]);
+    assert_eq!(code, 5, "{out}");
+    assert!(out.contains("[whole-file] bin.dat"), "{out}");
+}
+
+#[test]
+fn a_hunk_whose_lines_exist_elsewhere_in_a_cleanly_merged_file_is_not_dropped() {
+    // Main adds two boilerplate lines at the top; the branch deletes the same two lines at the bottom (they were there in the
+    // base). Git merges cleanly: the lines are at the top. The old file's removed lines look like the hunk's lines.
+    let r = Repo::new();
+    let boiler = "beta boilerplate line one\ngamma boilerplate line two\n";
+    let base = format!("{}{boiler}", lines(30, "a"));
+    r.write("f.txt", &base);
+    r.write("other.txt", &lines(10, "o"));
+    r.commit("initial");
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write("f.txt", &lines(30, "a"));
+    r.commit("refactor: drop the boilerplate at the bottom");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("f.txt", &format!("{boiler}{base}"));
+    r.commit("feat: boilerplate at the top");
+    r.git(&["merge", "-q", "--no-ff", "-m", "Merge feature", "feature"]);
+    let (code, out) = r.check(&["HEAD"]);
+    assert!(!out.contains("[dropped-hunk]"), "{out}");
+    assert_eq!(code, 0, "{out}");
+}
+
+#[test]
+fn an_octopus_merge_is_not_measured() {
+    let r = Repo::new();
+    r.write("a.txt", &lines(10, "a"));
+    r.write("b.txt", &lines(10, "b"));
+    r.write("c.txt", &lines(10, "c"));
+    r.commit("initial");
+    r.git(&["checkout", "-q", "-b", "one"]);
+    r.write("a.txt", &format!("{}one\n", lines(10, "a")));
+    r.commit("feat: one");
+    r.git(&["checkout", "-q", "main"]);
+    r.git(&["checkout", "-q", "-b", "two"]);
+    r.write("b.txt", &format!("{}two\n", lines(10, "b")));
+    r.commit("feat: two");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("c.txt", &format!("{}main\n", lines(10, "c")));
+    r.commit("fix: main");
+    r.git(&["merge", "-q", "-m", "Merge one and two", "one", "two"]);
+    assert_eq!(r.git(&["rev-list", "--parents", "-n", "1", "HEAD"]).split(' ').count(), 4);
+    let (code, out) = r.check(&["HEAD"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("NOT MEASURED") && out.contains("octopus merges are not supported"),
+        "{out}"
+    );
+}
+
+#[test]
+fn one_side_adding_a_test_and_the_other_deleting_another_is_judged_per_test() {
+    // The result takes the branch's file whole: main's new test is lost, the test the branch deleted is not.
+    let r = Repo::new();
+    r.write("crates/x/src/lib.rs", &format!("{}{KEPT}{REMOVED}", padding()));
+    r.write("other.txt", &lines(10, "o"));
+    r.commit("initial");
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write("crates/x/src/lib.rs", &format!("{}{KEPT}", padding()));
+    r.commit("test: drop old_case");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("crates/x/src/lib.rs", &format!("{}{KEPT}{REMOVED}{ADDED}", padding()));
+    r.commit("test: add new_case");
+    r.git(&["merge", "-q", "-s", "ours", "--no-commit", "feature"]);
+    r.write("crates/x/src/lib.rs", &format!("{}{KEPT}", padding()));
+    r.git(&["add", "--all"]);
+    r.git(&["commit", "-q", "-m", "Merge feature"]);
+    let (code, out) = r.check(&["HEAD"]);
+    assert_eq!(code, 5, "{out}");
+    assert!(out.contains("[lost-test] new_case"), "{out}");
+    assert!(!out.contains("[lost-test] old_case"), "{out}");
+}
+
+/// Both sides change `file`, which `.gitattributes` makes unmergeable (`merge=binary`), and the resolution is `--ours`: git's
+/// automatic blob for it is parent 1's, equal to the result, yet the file is listed as conflicted.
+fn conflicted_taken_as_ours(file: &str, base: &str, main: &str, branch: &str) -> Repo {
+    let r = Repo::new();
+    r.write(".gitattributes", "*.rs merge=binary\n*.txt merge=binary\n");
+    r.write(file, base);
+    r.write("other.txt", &lines(10, "o"));
+    r.commit("initial");
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write(file, branch);
+    r.commit("feat: branch");
+    r.git(&["checkout", "-q", "main"]);
+    r.write(file, main);
+    r.commit("fix: main");
+    assert!(
+        !r.git_may_fail(&["merge", "--no-commit", "--no-ff", "feature"]),
+        "the merge must conflict"
+    );
+    r.git(&["checkout", "--ours", file]);
+    r.git(&["add", "--all"]);
+    r.git(&["commit", "-q", "-m", "Merge feature"]);
+    r
+}
+
+#[test]
+fn a_conflicted_file_taken_as_ours_still_loses_the_other_sides_hunks() {
+    let base = lines(30, "a");
+    let r = conflicted_taken_as_ours(
+        "notes.txt",
+        &base,
+        &format!("main head one\nmain head two\n{base}"),
+        &format!("{base}branch tail one\nbranch tail two\nbranch tail three\n"),
+    );
+    let (code, out) = r.check(&["HEAD"]);
+    assert_eq!(code, 5, "{out}");
+    assert!(out.contains("[dropped-hunk] notes.txt"), "{out}");
+}
+
+#[test]
+fn a_conflicted_file_taken_as_ours_still_loses_the_other_sides_tests() {
+    let base = format!("{}{KEPT}", padding());
+    let r = conflicted_taken_as_ours(
+        "crates/x/src/lib.rs",
+        &base,
+        &format!("// main note\n{base}"),
+        &format!("{base}{ADDED}"),
+    );
+    let (code, out) = r.check(&["HEAD"]);
+    assert_eq!(code, 5, "{out}");
+    assert!(out.contains("[lost-test] new_case"), "{out}");
 }

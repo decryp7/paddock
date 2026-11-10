@@ -132,7 +132,10 @@ pub fn check(cx: &Ctx, index: usize, base: &str, to_result: &[FileDiff]) -> Resu
         .collect();
     let mut files = BTreeSet::new();
     for f in to_result.iter().filter(|f| {
-        testnames::is_source(f.old()) && !generated.is(f.old()) && changed_by_a_side(f.old(), &base_to_parent, &others_to_result)
+        testnames::is_source(f.old())
+            && !generated.is(f.old())
+            && !cx.merged_cleanly(&f.path)
+            && changed_by_a_side(f.old(), &base_to_parent, &others_to_result)
     }) {
         if f.hunks
             .iter()

@@ -2,11 +2,12 @@
 //! the result equals parent P's, and every other parent changed it since the merge base (its blob differs from the base's and
 //! from the result's): the other side's changes cannot be in the result. This is the cheap, precise signal for an "ours" or
 //! "theirs" resolution of a file both sides edited (087570da4, the Dyno docs of 9e18230c5). The answer is
-//! `Hunks-dropped: <path>: <reason>`. A file is not flagged when git's own three-way merge of the parents gives the same
-//! blob as the result: the other side's change is already in this side's file (a cherry-pick), or merges cleanly. Generated files are skipped, and so are rendered images (`.png`, `.svg`, ...): they
+//! `Hunks-dropped: <path>: <reason>`. A file is not flagged when git's own three-way merge of the parents merged it cleanly (it
+//! is not in the conflicted list: a binary conflict's blob is parent 1's, no evidence) and gives the same blob as the result: the other side's change is already in this side's file (a cherry-pick), or merges cleanly. Generated files are skipped, and so are rendered images (`.png`, `.svg`, ...): they
 //! follow their generator, which is flagged itself.
 
 use super::generated::Generated;
+use super::git::AutoMerge;
 use super::git::short;
 use super::{Finding, Kind, trailers};
 use std::collections::HashMap;
@@ -41,12 +42,11 @@ pub struct Listings<'a> {
     /// The result's.
     pub result: &'a Blobs,
     /// Git's own merge of the two parents.
-    pub auto: Option<&'a Blobs>,
+    pub auto: &'a AutoMerge,
 }
 
 /// Files `result` took whole from `parents[index]` against the other parents. `blobs[j]` is parent `j`'s listing, `base` the
-/// merge base's, `result` the result's, `auto` the listing of git's own merge of two parents (none for an octopus merge: the
-/// judgement is then two-way only).
+/// merge base's, `result` the result's, `auto` the listing of git's own merge of two parents .
 pub fn check(parents: &[String], index: usize, l: &Listings, message: &str, generated: &Generated) -> Vec<Finding> {
     let (blobs, base, result, auto) = (l.parents, l.base, l.result, l.auto);
     let mine = &blobs[index];
@@ -69,7 +69,7 @@ pub fn check(parents: &[String], index: usize, l: &Listings, message: &str, gene
         ) || generated.is(path)
             || image(path)
             // Git's own merge of the two parents gives this very file: the other side's change is in it already (a cherry-pick).
-            || auto.is_some_and(|a| a.get(path) == Some(oid))
+            || (!auto.conflicted.contains(path) && auto.blobs.get(path) == Some(oid))
             || trailers::path_reason(message, "Hunks-dropped", path).is_some()
         {
             continue;
