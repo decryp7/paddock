@@ -30,7 +30,7 @@
 ```evidence-heads
 read: 2026-11-10
 origin/train/2026-11-09-3 c151422a4
-origin/main b51c72509
+origin/main c151422a4
 origin/docs/adr-scheduled-owners 390ec29bd
 origin/docs/adr-decision-register 39e79d355
 origin/docs/adr-evidence-heads b32655fef
@@ -39,7 +39,7 @@ origin/docs/adr-text-cuts-repo-copies 06c77a417
 origin/docs/adr-captured-tool-output 9c2cd4d8e
 origin/ci/build-inputs-wp1 3f5206a40
 origin/fix/build-inputs-copies-date eba981aed
-origin/feat/dev-merge-check b18bd1ad8
+origin/feat/dev-merge-check 2c364af74
 ```
 
 ## Context: the instances
@@ -57,8 +57,9 @@ Paddock records many things as "approved by the user". Every one of them is text
 | 7 | The standing practice that agents never write `approved` lines for the user | an instruction | honoured, not enforced |
 
 None of this code is in a release: `tools/paddock-dev/src/gates/register.rs` was added by `3a38c41ed`, and `git tag
---contains 3a38c41ed` and `git tag --contains fa6bfcded` print nothing; neither is an ancestor of `origin/main`
-(`b51c72509`). All 6 860 commits on the train are unsigned (`git log --format=%G?` over the last 3 000: all `N`).
+--contains 3a38c41ed` and `git tag --contains fa6bfcded` print nothing. Both became ancestors of `origin/main` when the
+train landed (`c151422a4`, re-read 2026-11-10); they are still in no tag. All 6 860 commits on the train are unsigned
+(`git log --format=%G?` over the last 3 000: all `N`).
 
 **Unlanded approvals.** `a5153d114` on `origin/ci/build-inputs-wp1` carries `Copies-date: ... approved: coordinator:
 debrief entries move to debrief-v1.3.0`, a move to a later release line that rule 55 (d) gives to the user. The user
@@ -139,11 +140,11 @@ Keys (D3):
   option for that case only.
 - **Recovery keys sign only trust-file changes.** A `[[key]]` entry has `role = "routine"` or `role = "recovery"`; the
   verifier refuses a record, trailer or code pin whose deciding commit is signed by a recovery key, and accepts recovery
-  signatures only on commits that change trust files (key replacement, §10). The offline software recovery key (WP-0) signs
-  on another machine, never on this Mac.
+  signatures only on commits that change trust files (key replacement, §10). The offline software recovery key (WP-0)
+  signs on another machine, never on this Mac.
 - Not accepted: plain software keys on the Mac, and agent-held keys such as Secretive's (MIT, v4.0.0 of 2026-09-21;
-  plain ECDSA signatures, so whether a use needed Touch ID is a setting the verifier cannot see). The accepted D3 keeps one
-  software key **offline** (made and stored off the Mac, never on it) for recovery only.
+  plain ECDSA signatures, so whether a use needed Touch ID is a setting the verifier cannot see). The accepted D3 keeps
+  one software key **offline** (made and stored off the Mac, never on it) for recovery only.
 
 **The verifier checks the user-presence flag itself.** An `sk-*` signature carries a flags byte and a counter (OpenSSH
 `PROTOCOL.u2f`). `ssh-keygen -Y verify`, which `git verify-commit` calls, does **not** reject a signature without user
@@ -240,10 +241,14 @@ the approval, is where the walk ends, so it fails; a merge that restores a super
 see deleted lines, and blame also passes the replay; the walk is what catches both.
 
 **One rule for merges.** "A merge may carry only a change that one side made since the merge base" is the same rule the
-merge check (`./dev merge check` on `origin/feat/dev-merge-check`, `b18bd1ad8`: "finds hunks and tests a merge silently
-dropped", being fixed now) applies to hunks. The two share one implementation (ER-22) in a small crate of its own,
-`crates/paddock-merge-rule`, which both `paddock-approvals` and the merge check depend on. It is pinned (§4) and small
-and stable, so fixes to the merge check itself, and to `paddock-repo-graph`, need no touch. WP-2 builds it.
+merge check (`./dev merge check` on `origin/feat/dev-merge-check`: `b18bd1ad8` "finds hunks and tests a merge silently
+dropped", then `2c364af74` "judges three-way, follows renames and skips generated files") applies to hunks and files.
+Its whole-file detector now exposes `merge_changed_it(base, mine, others, result)` in
+`tools/paddock-dev/src/merge_check/whole_file.rs` (line 26 at `2c364af74`); WP-2 moves that function into
+`crates/paddock-merge-rule` and the merge check calls it from there. The two share one implementation (ER-22) in a small
+crate of its own, `crates/paddock-merge-rule`, which both `paddock-approvals` and the merge check depend on. It is
+pinned (§4) and small and stable, so fixes to the merge check itself, and to `paddock-repo-graph`, need no touch. WP-2
+builds it.
 
 The history commands run with a fixed configuration, so the tree under check cannot steer them:
 `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_NO_REPLACE_OBJECTS=1`, `-c blame.ignoreRevsFile=`, no
