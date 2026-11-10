@@ -28,9 +28,9 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// How many refused connections are drained (what the client sent read and dropped before the socket closes) at once, busy
 /// and key refusals together. Not tied to the number of places: a client that reconnects at once after a refusal is refused
 /// again before the drain of its previous connection has run on a loaded machine, and with no drain place left its key line
-/// is left unread, which resets the connection (CI run 7761). A drain is a thread in a read: a busy refusal's waits at most
-/// [`HANDSHAKE_TIMEOUT`] for the key line, and every drain then at most [`REFUSAL_DRAIN_TIME`] for the client's end. Beyond
-/// this bound a refused connection is closed at once and its drain line says `poolFull`.
+/// is left unread, which resets the connection (CI run 7761). A drain is a thread in a read for at most
+/// [`REFUSAL_DRAIN_TIME`] (ADR 0072 §7). Beyond this bound a refused connection is closed at once and its drain line says
+/// `poolFull`.
 const DRAIN_PLACES: usize = 16;
 /// How long one blocking read waits before the connection looks at the stop flag again. Shutting a socket down wakes a
 /// blocked read on Linux and macOS, but not on Windows, where only the system's own connection timeout (about two minutes)
@@ -41,6 +41,12 @@ const STOP_SLICE: Duration = Duration::from_millis(100);
 const REFUSAL_DRAIN_BYTES: usize = 64 << 10;
 /// How long a refusal's drain waits for the client's end once its key line was read (ADR 0072 §7).
 const REFUSAL_DRAIN_TIME: Duration = Duration::from_secs(2);
+/// How long [`Serving::stop`] waits for the accept thread and every connection's thread together (ADR 0076 D4: a group's
+/// stop bound, 2 s); a thread still running then is reported as overrun and left to end on its own.
+const STOP_BOUND: Duration = Duration::from_secs(2);
+/// The longest the accept thread's poll waits without an event: the backstop that lets it see the stop flag even if the
+/// stop's wake-up never reaches it (ADR 0076: every owned thread ends within a bound).
+const ACCEPT_BACKSTOP: Duration = Duration::from_secs(1);
 
 /// The read half of a connection: reads in [`STOP_SLICE`]s, ends (as end of input) once the server stops, and fails with
 /// `TimedOut` when its deadline (the handshake's) has passed. A read that a signal interrupted is read again. On Linux a
@@ -56,8 +62,9 @@ struct Watched {
     /// How many reads a signal interrupted (and were read again), for the connection's log line. Shared so a test can wait
     /// until a signal has landed inside a read.
     interrupted: Arc<AtomicU64>,
-    /// How many bytes were read from the socket, for a drain's log line.
-    received: usize,
+    /// How many read slices ended without data, for the connection's log line: a silent client costs one per
+    /// [`STOP_SLICE`], so a count far above that says the socket does not block (a busy loop).
+    empty_slices: u64,
 }
 
 impl Watched {
@@ -69,7 +76,7 @@ impl Watched {
             deadline: None,
             slice: STOP_SLICE,
             interrupted: Arc::default(),
-            received: 0,
+            empty_slices: 0,
         })
     }
 }
@@ -109,11 +116,9 @@ impl Read for Watched {
                 let kind = e.kind();
                 kind == io::ErrorKind::WouldBlock || kind == io::ErrorKind::TimedOut
             });
-            if !slice_ended {
-                if let Ok(n) = read {
-                    // Saturating: a paired connection may run long enough to pass `usize` on a 32-bit target.
-                    self.received = self.received.saturating_add(n);
-                }
+            if slice_ended {
+                self.empty_slices += 1;
+            } else {
                 return read;
             }
         }
@@ -123,7 +128,116 @@ impl Read for Watched {
 /// The live connections, for [`Serving::stop`]. Each connection's thread owns the only strong handle to its socket, so
 /// ending the thread closes the connection: it never depends on `shutdown`, which fails (ENOTCONN on macOS) once the
 /// client has half-closed. Finished threads are pruned on the next accept.
-type Conns = Arc<Mutex<Vec<(Weak<TcpStream>, JoinHandle<()>)>>>;
+type Conns = Arc<Mutex<Vec<Member>>>;
+
+/// A thread of the listener (the accept, a connection or a drain), the socket it serves, and the latch it sets when its
+/// work has ended, so a stop waits for it with a bound (ADR 0076).
+struct Member {
+    role: String,
+    stream: Weak<TcpStream>,
+    handle: JoinHandle<()>,
+    ended: Arc<Latch>,
+}
+
+/// How a member ended within a stop's bound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Outcome {
+    Ended,
+    Panicked,
+    Overran,
+}
+
+impl Member {
+    /// Starts `work` on its own thread as the member `role`, serving `stream`.
+    fn spawn(
+        role: String,
+        stream: Weak<TcpStream>,
+        work: impl FnOnce() + Send + 'static,
+    ) -> Member {
+        let ended = Arc::new(Latch::default());
+        let set = SetOnDrop(ended.clone());
+        let handle = std::thread::spawn(move || {
+            // Set when the work returns or unwinds.
+            let _set = set;
+            work();
+        });
+        Member {
+            role,
+            stream,
+            handle,
+            ended,
+        }
+    }
+
+    /// Waits until the member's work has ended, at most until `until`; a member still running then is left to end on its
+    /// own (its handle dropped) and reported as overrun.
+    fn end_within(self, until: Instant) -> Outcome {
+        if !self.ended.wait_until(until) {
+            return Outcome::Overran;
+        }
+        // The work has returned: the join waits only for the thread's own exit.
+        match self.handle.join() {
+            Ok(()) => Outcome::Ended,
+            Err(_) => Outcome::Panicked,
+        }
+    }
+}
+
+/// Starts `work` as a member of `list` (see [`Member::spawn`]).
+fn spawn_member(
+    list: &mut Vec<Member>,
+    role: String,
+    stream: Weak<TcpStream>,
+    work: impl FnOnce() + Send + 'static,
+) {
+    list.push(Member::spawn(role, stream, work));
+}
+
+/// Set once, when a member's work has ended; waited for with a deadline.
+#[derive(Default)]
+struct Latch {
+    set: Mutex<bool>,
+    changed: std::sync::Condvar,
+}
+
+impl Latch {
+    fn set(&self) {
+        *self
+            .set
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
+        self.changed.notify_all();
+    }
+
+    /// Whether the latch was set by `until`.
+    fn wait_until(&self, until: Instant) -> bool {
+        let mut set = self
+            .set
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while !*set {
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return false;
+            }
+            set = self
+                .changed
+                .wait_timeout(set, left)
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .0;
+        }
+        true
+    }
+}
+
+/// Sets its latch when dropped, also during an unwind.
+struct SetOnDrop(Arc<Latch>);
+
+impl Drop for SetOnDrop {
+    fn drop(&mut self) {
+        self.0.set();
+    }
+}
 
 /// One of the `max_connections` places, held by a connection's thread and given back when it is dropped, which the thread
 /// does before it ends the connection: a client that has seen its connection end can connect again at once. (Counting
@@ -149,22 +263,26 @@ impl Drop for Place {
     }
 }
 
-/// The refusal drains of one listener: the pool of [`DRAIN_PLACES`] and the bounds each drain runs under (ADR 0072 §7).
-struct Drains {
+/// The bounds of one listener (ADR 0072 §7, ADR 0076 D4) and its pool of [`DRAIN_PLACES`] refusal drains. Tests shorten
+/// or lengthen the times.
+struct Bounds {
     /// How many drains run now.
-    places: Arc<AtomicUsize>,
-    /// How long a client refused before its key line was read has to send it ([`HANDSHAKE_TIMEOUT`] when serving).
-    key_line: Duration,
-    /// How long a drain waits for the client's end once the key line was read ([`REFUSAL_DRAIN_TIME`] when serving).
-    time: Duration,
+    drain_places: Arc<AtomicUsize>,
+    /// How long a client has to send its key line ([`HANDSHAKE_TIMEOUT`] when serving).
+    handshake: Duration,
+    /// How long a refusal's drain waits for the client's end ([`REFUSAL_DRAIN_TIME`] when serving).
+    drain_time: Duration,
+    /// How long a stop waits for the listener's threads ([`STOP_BOUND`] when serving).
+    stop: Duration,
 }
 
-impl Drains {
-    fn serving() -> Drains {
-        Drains {
-            places: Arc::default(),
-            key_line: HANDSHAKE_TIMEOUT,
-            time: REFUSAL_DRAIN_TIME,
+impl Bounds {
+    fn serving() -> Bounds {
+        Bounds {
+            drain_places: Arc::default(),
+            handshake: HANDSHAKE_TIMEOUT,
+            drain_time: REFUSAL_DRAIN_TIME,
+            stop: STOP_BOUND,
         }
     }
 }
@@ -175,7 +293,9 @@ pub struct Serving {
     stop: Arc<AtomicBool>,
     /// Wakes the accept thread's poll for the stop.
     waker: Arc<mio::Waker>,
-    accept: Option<JoinHandle<()>>,
+    /// How long the stop waits for the threads.
+    stop_bound: Duration,
+    accept: Option<Member>,
     conns: Conns,
 }
 
@@ -195,31 +315,62 @@ impl Serving {
         let Some(accept) = self.accept.take() else {
             return;
         };
+        let began = Instant::now();
+        let until = began + self.stop_bound;
         self.stop.store(true, Ordering::SeqCst);
         // The accept waits on a poll, woken here by its own event, never by a connection to the listener (CI stress on
-        // 2026-11-10: with no port left that connection failed and `stop` waited for ever).
-        if !accept.is_finished()
+        // 2026-11-10: with no port left that connection failed and `stop` waited for ever); its backstop timeout ends the
+        // wait even without the wake-up.
+        if !accept.handle.is_finished()
             && let Err(e) = self.waker.wake()
         {
-            log::error!(
-                "paddock_mcp: the loopback listener could not be woken to stop: {e} ({:?}); it stops at its next client",
-                e.kind()
+            log::warn!(
+                "paddock_mcp: the loopback listener could not be woken to stop: {e} ({:?}); it sees the stop within {} ms",
+                e.kind(),
+                ACCEPT_BACKSTOP.as_millis()
             );
         }
-        let _ = accept.join();
-        let conns = std::mem::take(
+        let mut members = vec![accept];
+        members.extend(std::mem::take(
             &mut *self
                 .conns
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner),
-        );
-        for (stream, handle) in conns {
+        ));
+        let (mut ended, mut panicked, mut overran) = (0, Vec::new(), Vec::new());
+        for member in members {
             // Wakes a blocked read on Linux and macOS; elsewhere the read notices `stop` within a slice. A connection whose
             // thread has already ended has no socket left to shut down.
-            if let Some(stream) = stream.upgrade() {
+            if let Some(stream) = member.stream.upgrade() {
                 let _ = stream.shutdown(Shutdown::Both);
             }
-            let _ = handle.join();
+            let role = member.role.clone();
+            match member.end_within(until) {
+                Outcome::Ended => ended += 1,
+                Outcome::Panicked => panicked.push(role),
+                Outcome::Overran => overran.push(role),
+            }
+        }
+        let line = format!(
+            "paddock_mcp: the loopback listener on port {} stopped in {} ms (bound {} ms): {ended} thread(s) ended, {} panicked, {} overran",
+            self.addr.port(),
+            began.elapsed().as_millis(),
+            self.stop_bound.as_millis(),
+            panicked.len(),
+            overran.len()
+        );
+        if panicked.is_empty() && overran.is_empty() {
+            log::info!("{line}");
+        } else {
+            log::warn!(
+                "{line} ({}); a thread that overran ends on its own once its read or call returns",
+                panicked
+                    .iter()
+                    .map(|r| format!("{r} panicked"))
+                    .chain(overran.iter().map(|r| format!("{r} overran")))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
         }
     }
 }
@@ -404,7 +555,7 @@ fn serve_connection(
     keys: &dyn KeyVerifier,
     stop: Arc<AtomicBool>,
     place: Place,
-    drains: &Drains,
+    bounds: &Bounds,
 ) {
     let began = Instant::now();
     let read_half = match stream
@@ -422,21 +573,26 @@ fn serve_connection(
     };
     let mut reader = BufReader::new(read_half);
     let mut writer: &TcpStream = stream;
-    let client = match handshake(&mut writer, &mut reader, keys, HANDSHAKE_TIMEOUT) {
+    let client = match handshake(&mut writer, &mut reader, keys, bounds.handshake) {
         Ok(client) => client,
         Err(cause) => {
             log::warn!(
-                "paddock_mcp: connection #{id} refused after {} ms: {cause}; {} read(s) interrupted by a signal and read again",
+                "paddock_mcp: connection #{id} refused after {} ms: {cause}; {} read(s) interrupted by a signal and read again; {} empty read slice(s)",
                 began.elapsed().as_millis(),
-                reader.get_ref().interrupted.load(Ordering::SeqCst)
+                reader.get_ref().interrupted.load(Ordering::SeqCst),
+                reader.get_ref().empty_slices
             );
             // The place goes back before the client can see the end; the drain holds a drain place instead.
-            let draining = Place::take(&drains.places, DRAIN_PLACES);
+            let draining = Place::take(&bounds.drain_places, DRAIN_PLACES);
             drop(place);
             let _ = stream.shutdown(Shutdown::Write);
             match draining {
                 Some(draining) => {
-                    log_drain(id, began, drain(&mut reader, Instant::now() + drains.time));
+                    log_drain(
+                        id,
+                        began,
+                        drain(&mut reader, Instant::now() + bounds.drain_time),
+                    );
                     drop(draining);
                 }
                 None => log_drain(id, began, (0, DrainEnd::PoolFull)),
@@ -466,41 +622,29 @@ fn serve_connection(
     }
 }
 
-/// Drains a connection refused before its key line was read (busy): the key line has the handshake's time
-/// ([`HANDSHAKE_TIMEOUT`]) to arrive, as in a handshake, and what follows it the refusal drain's ([`REFUSAL_DRAIN_TIME`]), as
-/// after a key refusal; both under the [`drain`] byte cap.
+/// Drains a connection refused before its key line was read (busy): its key line and anything after it are read and
+/// dropped under the refusal drain's bounds ([`REFUSAL_DRAIN_TIME`] in all, ADR 0072 §7; the [`drain`] byte cap).
 fn drain_unread(
     id: u64,
     accepted: Instant,
     stream: &TcpStream,
     stop: Arc<AtomicBool>,
-    drains: &Drains,
+    bounds: &Bounds,
 ) {
-    let read_half = match stream.try_clone().and_then(|s| Watched::new(s, stop)) {
-        Ok(read_half) => read_half,
-        Err(e) => {
-            log::warn!(
-                "paddock_mcp: connection #{id} could not be drained after its refusal: {e} ({:?}); the client may see a reset",
-                e.kind()
-            );
-            return;
-        }
-    };
-    let mut reader = BufReader::new(read_half);
-    reader.get_mut().deadline = Some(Instant::now() + drains.key_line);
-    let end = match read_line(&mut reader, HANDSHAKE_MAX) {
-        Ok(Line::Text(_) | Line::TooLong) => drain(&mut reader, Instant::now() + drains.time).1,
-        Ok(Line::Eof) if reader.get_ref().stop.load(Ordering::SeqCst) => DrainEnd::Stopped,
-        Ok(Line::Eof) => DrainEnd::Eof,
-        Err(e) if e.kind() == io::ErrorKind::TimedOut => DrainEnd::TimeCap,
-        Err(e) => DrainEnd::Failed(e.kind()),
-    };
-    // Every byte taken from the socket and not left in the buffer: the key line and what the drain read after it.
-    let read = reader
-        .get_ref()
-        .received
-        .saturating_sub(reader.buffer().len());
-    log_drain(id, accepted, (read, end));
+    match stream.try_clone().and_then(|s| Watched::new(s, stop)) {
+        Ok(read_half) => log_drain(
+            id,
+            accepted,
+            drain(
+                &mut BufReader::new(read_half),
+                Instant::now() + bounds.drain_time,
+            ),
+        ),
+        Err(e) => log::warn!(
+            "paddock_mcp: connection #{id} could not be drained after its refusal: {e} ({:?}); the client may see a reset",
+            e.kind()
+        ),
+    }
 }
 
 /// Refuses any address that is not loopback: there is no remote MCP listener.
@@ -522,16 +666,16 @@ pub fn serve_loopback(
     listener: TcpListener,
     max_connections: usize,
 ) -> io::Result<Serving> {
-    serve_with(server, keys, listener, max_connections, Drains::serving())
+    serve_with(server, keys, listener, max_connections, Bounds::serving())
 }
 
-/// [`serve_loopback`] with the drains' bounds given (tests shorten or lengthen them).
+/// [`serve_loopback`] with the bounds given (tests shorten or lengthen them).
 fn serve_with(
     server: Arc<Server>,
     keys: Arc<dyn KeyVerifier>,
     listener: TcpListener,
     max_connections: usize,
-    drains: Drains,
+    bounds: Bounds,
 ) -> io::Result<Serving> {
     let addr = listener.local_addr()?;
     check_loopback(&addr)?;
@@ -554,16 +698,47 @@ fn serve_with(
         conns: conns.clone(),
         taken: Arc::new(AtomicUsize::new(0)),
         ids: AtomicU64::new(0),
-        drains: Arc::new(drains),
+        stop_bound: bounds.stop,
+        bounds: Arc::new(bounds),
     };
-    let accept = std::thread::spawn(move || accepting.run(&mut poll, &listener));
+    let stop_bound = accepting.stop_bound;
+    let accept = Member::spawn("the accept thread".into(), Weak::new(), move || {
+        accepting.run(&mut poll, &listener)
+    });
     Ok(Serving {
         addr,
         stop,
         waker,
+        stop_bound,
         accept: Some(accept),
         conns,
     })
+}
+
+/// What the accept loop does after an accept failed (not `WouldBlock`, which ends a round).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AcceptFailure {
+    /// Accept the next client at once.
+    Again,
+    /// Wait a slice and try again: the failure is the listener's or the system's (out of descriptors or memory).
+    Pause,
+}
+
+/// EPROTO on Linux: accept(2) reports a protocol error of the pending connection, the client's (Rust names it no kind).
+#[cfg(target_os = "linux")]
+const EPROTO: i32 = 71;
+
+/// Classifies a failed accept: a signal, or a client that gave up while it waited in the backlog (`ConnectionAborted`, and
+/// EPROTO on Linux, accept(2)), is not the listener's, so the next client is accepted at once.
+fn accept_failure(e: &io::Error) -> AcceptFailure {
+    #[cfg(target_os = "linux")]
+    if e.raw_os_error() == Some(EPROTO) {
+        return AcceptFailure::Again;
+    }
+    match e.kind() {
+        io::ErrorKind::Interrupted | io::ErrorKind::ConnectionAborted => AcceptFailure::Again,
+        _ => AcceptFailure::Pause,
+    }
 }
 
 /// The poll token of the listener.
@@ -580,17 +755,18 @@ struct Accepting {
     conns: Conns,
     taken: Arc<AtomicUsize>,
     ids: AtomicU64,
-    drains: Arc<Drains>,
+    stop_bound: Duration,
+    bounds: Arc<Bounds>,
 }
 
 impl Accepting {
-    /// Accepts until the stop. The listener is non-blocking: each wake-up of the poll (a client in the backlog, the stop, or
-    /// the retry after a failed accept) accepts until the backlog is empty.
+    /// Accepts until the stop. The listener is non-blocking: each wake-up of the poll (a client in the backlog, the stop, the
+    /// retry after a failed accept, or the backstop timeout) accepts until the backlog is empty.
     fn run(&self, poll: &mut mio::Poll, listener: &mio::net::TcpListener) {
         let mut events = mio::Events::with_capacity(8);
         let mut retry = None;
         loop {
-            if let Err(e) = poll.poll(&mut events, retry) {
+            if let Err(e) = poll.poll(&mut events, Some(retry.unwrap_or(ACCEPT_BACKSTOP))) {
                 if e.kind() == io::ErrorKind::Interrupted {
                     continue;
                 }
@@ -618,7 +794,14 @@ impl Accepting {
                         }
                     }
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                    Err(e) if accept_failure(&e) == AcceptFailure::Again => {
+                        if e.kind() != io::ErrorKind::Interrupted {
+                            log::debug!(
+                                "paddock_mcp: a client gave up before its connection was accepted: {e} ({:?})",
+                                e.kind()
+                            );
+                        }
+                    }
                     Err(e) => {
                         // Out of descriptors or memory: the client stays in the backlog, and the accept is tried again after a
                         // slice instead of spinning (no new readiness event would come for it).
@@ -648,10 +831,10 @@ impl Accepting {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let (done, live): (Vec<_>, Vec<_>) = std::mem::take(&mut *list)
             .into_iter()
-            .partition(|(_, h)| h.is_finished());
+            .partition(|m| m.handle.is_finished());
         *list = live;
-        for (_, h) in done {
-            let _ = h.join();
+        for m in done {
+            let _ = m.handle.join();
         }
         let id = self.ids.fetch_add(1, Ordering::SeqCst) + 1;
         let peer = stream.peer_addr().map_or(0, |p| p.port());
@@ -668,19 +851,23 @@ impl Accepting {
             // The client sees the refusal and then the end at once, but the socket is closed only once the client's input is
             // drained: a socket closed with unread data is reset, and the reset can reach the client before the refusal
             // (2026-11-07). The drain has its own thread, at most [`DRAIN_PLACES`] at a time.
-            let drain = Place::take(&self.drains.places, DRAIN_PLACES);
+            let drain = Place::take(&self.bounds.drain_places, DRAIN_PLACES);
             let _ = stream.shutdown(Shutdown::Write);
             match drain {
                 Some(draining) => {
                     let stream = Arc::new(stream);
                     let kept = Arc::downgrade(&stream);
-                    let (stop, drains) = (self.stop.clone(), self.drains.clone());
-                    let handle = std::thread::spawn(move || {
-                        drain_unread(id, accepted, &stream, stop, &drains);
-                        drop(draining);
-                        drop(stream);
-                    });
-                    list.push((kept, handle));
+                    let (stop, bounds) = (self.stop.clone(), self.bounds.clone());
+                    spawn_member(
+                        &mut list,
+                        format!("the drain of connection #{id}"),
+                        kept,
+                        move || {
+                            drain_unread(id, accepted, &stream, stop, &bounds);
+                            drop(draining);
+                            drop(stream);
+                        },
+                    );
                 }
                 None => log_drain(id, accepted, (0, DrainEnd::PoolFull)),
             }
@@ -689,19 +876,18 @@ impl Accepting {
         log::info!("paddock_mcp: connection #{id} from port {peer} accepted");
         let stream = Arc::new(stream);
         let kept = Arc::downgrade(&stream);
-        let (server, keys, stop, drains) = (
+        let (server, keys, stop, bounds) = (
             self.server.clone(),
             self.keys.clone(),
             self.stop.clone(),
-            self.drains.clone(),
+            self.bounds.clone(),
         );
-        let handle = std::thread::spawn(move || {
+        spawn_member(&mut list, format!("connection #{id}"), kept, move || {
             // Gives the place back before the client can see the end of its connection; then the last handle (the read half
             // is already closed) is closed here, which ends it.
-            serve_connection(id, &server, &stream, keys.as_ref(), stop, place, &drains);
+            serve_connection(id, &server, &stream, keys.as_ref(), stop, place, &bounds);
             drop(stream);
         });
-        list.push((kept, handle));
     }
 }
 
@@ -991,17 +1177,17 @@ mod tests {
         );
     }
 
-    /// Drains with these bounds, and the usual pool.
-    fn drains(key_line: Duration, time: Duration) -> Drains {
-        Drains {
-            places: Arc::default(),
-            key_line,
-            time,
+    /// The serving bounds with this handshake and drain time.
+    fn bounds(handshake: Duration, drain_time: Duration) -> Bounds {
+        Bounds {
+            handshake,
+            drain_time,
+            ..Bounds::serving()
         }
     }
 
     /// A listener whose one place is held by a paired client, so the next client is refused `busy`.
-    fn busy_listener(drains: Drains) -> (Serving, TcpStream) {
+    fn busy_listener(bounds: Bounds) -> (Serving, TcpStream) {
         let keys = Arc::new(crate::keys::KeyStore::new());
         let (_, key) = keys.issue("holder", 1).unwrap();
         let serving = serve_with(
@@ -1009,7 +1195,7 @@ mod tests {
             keys,
             TcpListener::bind("127.0.0.1:0").unwrap(),
             1,
-            drains,
+            bounds,
         )
         .unwrap();
         let mut holder = TcpStream::connect(serving.addr()).unwrap();
@@ -1121,7 +1307,10 @@ mod tests {
         serving.stop.store(true, Ordering::SeqCst);
         serving.waker.wake().unwrap();
         paddock_testkit::wait_until("the accept thread ended by itself", || {
-            serving.accept.as_ref().is_some_and(JoinHandle::is_finished)
+            serving
+                .accept
+                .as_ref()
+                .is_some_and(|m| m.handle.is_finished())
         });
         let next_owner =
             TcpListener::bind(addr).expect("the ended accept thread's port is free again");
@@ -1273,11 +1462,13 @@ mod tests {
         capture_logs();
         let keys = Arc::new(crate::keys::KeyStore::new());
         let (_, key) = keys.issue("holder", 1).unwrap();
-        let serving = serve_loopback(
+        // Drains far longer than the test, so the silent clients below hold every drain place however slow the machine is.
+        let serving = serve_with(
             test_server(),
             keys,
             TcpListener::bind("127.0.0.1:0").unwrap(),
             1,
+            bounds(HANDSHAKE_TIMEOUT, Duration::from_secs(600)),
         )
         .unwrap();
         let mut holder = TcpStream::connect(serving.addr()).unwrap();
@@ -1386,7 +1577,7 @@ mod tests {
             Arc::new(crate::keys::KeyStore::new()),
             TcpListener::bind("127.0.0.1:0").unwrap(),
             4,
-            drains(HANDSHAKE_TIMEOUT, Duration::from_secs(600)),
+            bounds(HANDSHAKE_TIMEOUT, Duration::from_secs(600)),
         )
         .unwrap();
         let mut s = TcpStream::connect(serving.addr()).unwrap();
@@ -1417,7 +1608,7 @@ mod tests {
             Arc::new(crate::keys::KeyStore::new()),
             TcpListener::bind("127.0.0.1:0").unwrap(),
             4,
-            drains(HANDSHAKE_TIMEOUT, Duration::ZERO),
+            bounds(HANDSHAKE_TIMEOUT, Duration::ZERO),
         )
         .unwrap();
         let mut s = TcpStream::connect(serving.addr()).unwrap();
@@ -1430,21 +1621,148 @@ mod tests {
         drop(serving);
     }
 
-    /// Review P2 of 05a6a1bdf: a busy-refused client was drained to its end under the handshake's 10 s, so one that sent its
-    /// key line and stayed connected held a drain place for 10 s. The key line has the handshake's time; after it the drain has
-    /// the refusal drain's time (zero here, the handshake's ten minutes: a drain still bound to the handshake never ends in
-    /// the test's guard).
+    /// Review P2s of 05a6a1bdf and 593b750c7: a busy-refused client was drained under the handshake's 10 s, and then still
+    /// waited 10 s for its key line, while ADR 0072 §7 bounds a refusal's whole drain by 2 s. A busy client that sends
+    /// nothing and stays connected is drained for the drain time (zero here) and no longer (the handshake's ten minutes here:
+    /// a drain still bound to the handshake never ends in the test's guard).
     #[test]
-    fn a_busy_client_is_drained_for_the_refusal_time_after_its_key_line() {
+    fn a_busy_client_is_drained_for_the_refusal_drain_time_only() {
         capture_logs();
-        let (serving, _holder) = busy_listener(drains(Duration::from_secs(600), Duration::ZERO));
+        let (serving, _holder) = busy_listener(bounds(Duration::from_secs(600), Duration::ZERO));
         let mut s = TcpStream::connect(serving.addr()).unwrap();
-        s.write_all(b"{\"key\":\"pmk_any\"}\n").unwrap();
         read_refusal_then_end(&mut s, "busy");
         let line = wait_logged(id_by_port(&s), "drained");
         assert!(line.contains("drain timeCap after "), "{line}");
         drop(s);
         drop(serving);
+    }
+
+    /// Review P2 of 593b750c7: mio accepts in non-blocking mode, and a connection left so would read with no wait at all, a
+    /// busy loop for every silent client that no other test sees. A silent client is read in slices of [`STOP_SLICE`]: over a
+    /// 300 ms handshake that is 3 or 4 slices, not thousands.
+    #[test]
+    fn a_silent_client_is_read_in_slices_not_in_a_busy_loop() {
+        capture_logs();
+        let serving = serve_with(
+            test_server(),
+            Arc::new(crate::keys::KeyStore::new()),
+            TcpListener::bind("127.0.0.1:0").unwrap(),
+            4,
+            bounds(Duration::from_millis(300), Duration::ZERO),
+        )
+        .unwrap();
+        let mut s = TcpStream::connect(serving.addr()).unwrap();
+        read_refusal_then_end(&mut s, "handshake");
+        let line = wait_logged(id_of(&s), "refused after");
+        let slices: u64 = line
+            .split("; ")
+            .find_map(|part| part.strip_suffix(" empty read slice(s)"))
+            .and_then(|n| n.parse().ok())
+            .unwrap_or_else(|| panic!("no slice count: {line}"));
+        assert!(
+            slices <= 6,
+            "a silent client cost {slices} empty reads in 300 ms (a busy loop): {line}"
+        );
+        drop(s);
+        drop(serving);
+    }
+
+    /// Review P2 of 593b750c7 (ADR 0076): the accept thread must see the stop even when no wake-up reaches it; its poll has
+    /// a backstop timeout. Here the stop flag is set and nothing wakes the poll.
+    #[test]
+    fn the_accept_thread_sees_the_stop_without_a_wake_up() {
+        let mut serving = serve_loopback(
+            test_server(),
+            Arc::new(crate::keys::KeyStore::new()),
+            TcpListener::bind("127.0.0.1:0").unwrap(),
+            4,
+        )
+        .unwrap();
+        serving.stop.store(true, Ordering::SeqCst);
+        paddock_testkit::wait_until_within("the accept thread to end by itself", GUARD, || {
+            serving
+                .accept
+                .as_ref()
+                .is_some_and(|m| m.handle.is_finished())
+        });
+        serving.shutdown();
+    }
+
+    /// Review P2 of 593b750c7 (ADR 0076 D4): a stop waits for the listener's threads within its bound, then returns and
+    /// logs what overran, instead of waiting for ever on a thread that does not end.
+    #[test]
+    fn a_stop_returns_within_its_bound_and_names_a_thread_that_overran() {
+        capture_logs();
+        let serving = serve_with(
+            test_server(),
+            Arc::new(crate::keys::KeyStore::new()),
+            TcpListener::bind("127.0.0.1:0").unwrap(),
+            4,
+            Bounds {
+                stop: Duration::from_millis(100),
+                ..Bounds::serving()
+            },
+        )
+        .unwrap();
+        // A member that ends only when the test lets it (a stand-in for a thread stuck in a handler).
+        let (release, stuck) = std::sync::mpsc::channel::<()>();
+        spawn_member(
+            &mut serving.conns.lock().unwrap(),
+            "a stuck test thread".into(),
+            Weak::new(),
+            move || {
+                let _ = stuck.recv();
+            },
+        );
+        let port = serving.addr().port();
+        let (done, stopped) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            serving.stop();
+            let _ = done.send(());
+        });
+        let returned = stopped.recv_timeout(GUARD);
+        drop(release);
+        assert!(
+            returned.is_ok(),
+            "stop waited past its bound for a thread that did not end"
+        );
+        let line = wait_for_line(
+            |l| l.contains(&format!("listener on port {port} stopped")),
+            GUARD,
+        )
+        .expect("a line for the stop");
+        assert!(
+            line.contains("1 overran (a stuck test thread overran)"),
+            "{line}"
+        );
+    }
+
+    /// Review P2 of 593b750c7: a client that gave up while it waited in the backlog makes `accept` fail with
+    /// `ConnectionAborted` (ECONNABORTED; EPROTO on Linux): that is the client's, so the next client is accepted at once.
+    /// Only a failure of the listener or the system (out of descriptors) waits a slice.
+    #[test]
+    fn an_aborted_client_does_not_pause_the_accept() {
+        let aborted = io::Error::from(io::ErrorKind::ConnectionAborted);
+        assert_eq!(accept_failure(&aborted), AcceptFailure::Again);
+        assert_eq!(
+            accept_failure(&io::Error::from(io::ErrorKind::Interrupted)),
+            AcceptFailure::Again
+        );
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            accept_failure(&io::Error::from_raw_os_error(EPROTO)),
+            AcceptFailure::Again
+        );
+        // EMFILE: the process is out of descriptors.
+        #[cfg(unix)]
+        assert_eq!(
+            accept_failure(&io::Error::from_raw_os_error(24)),
+            AcceptFailure::Pause
+        );
+        assert_eq!(
+            accept_failure(&io::Error::from(io::ErrorKind::OutOfMemory)),
+            AcceptFailure::Pause
+        );
     }
 
     /// Review P2 of 05a6a1bdf: `stop` woke the blocking accept by connecting to the listener, so when that connection could
