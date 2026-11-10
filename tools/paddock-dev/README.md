@@ -14,6 +14,41 @@ The developer and CI tool of ADR 0022. Run it with `./dev <command>` (`dev.cmd` 
   `paddock-cli`'s (2 usage, 4 refused, ...).
 - When a path dependency in `crates/` changes its dependencies, regenerate this lockfile in the same change.
 
+## `worktree` and `check primary` (ADR 0083, RT-3)
+
+One tool makes, claims and removes agent worktrees, so every one is locked with an owner note and bound to its agent, and no
+cleanup removes a locked one. Run it from any checkout of the repository (or pass `--repo <folder>`); `--json` as everywhere.
+
+- `worktree add <name> --base <ref> [-b <branch>] [--detach] [--sparse a,b] --owner <role>:<task> [--root <folder>]` makes
+  `<root>/<name>` (branch `<name>` unless `-b`; `--detach` for a review copy), always locked with the note
+  `owner=<role>:<task>; branch=; base=; created=; by=`. The root is `--root`, else `git config paddock.worktreeRoot`, else
+  `PADDOCK_WORKTREE_ROOT`; with none set it fails and says how to set one. It refuses an existing path, a path in the owner map or
+  being made by another `add`, an existing branch, and **any path inside the primary checkout or another worktree** (compared
+  by real path). The owner map's lock is held only to reserve and to confirm the path, never while git checks out, so claims
+  never wait for a slow `add`. It does not print `CARGO_TARGET_DIR` or an e2e port yet (RT-6).
+- `worktree claim <path>` binds a locked worktree to the caller; refuses an unknown, unlocked or other-owned one.
+  `reassign` (coordinator only) clears the entry and keeps the lock; `release` unlocks (the owner, or the coordinator);
+  `drop` removes the caller's own worktree and refuses unpushed commits or uncommitted changes.
+- `worktree list` (JSON: branch, lock note, claimed agent, lock age, merged, dirty, in use) and `worktree clean [--dry-run]`,
+  which removes only worktrees that are unlocked, merged into `--base` (default `origin/main`), clean and with no process inside,
+  with `git worktree remove` (never `rm`, never forced) and a branch delete that names the head it looked at. It does not remove
+  build folders yet (RT-6). Where other processes' folders cannot be read (Windows) it keeps everything.
+- **The caller's identity is self-declared** (`--agent`, or `PADDOCK_AGENT_ID` and `PADDOCK_AGENT_TYPE`; none means the
+  coordinator) until the guard hook (RT-7) passes the real `agent_id`: this keeps honest agents out of each other's worktrees, it
+  does not stop one that lies.
+- The owner map is `<git-common-dir>/paddock-worktree-owners.json` with the sidecar lock `paddock-worktree-owners.lock`
+  (`src/worktree/owners.rs`, which RT-7's hook reuses). A file it cannot read is an error, never an empty map. A lock wait ends
+  after 15 s and names the process that holds it.
+- `check primary [--live <file>] [--allow-untracked <prefix>] [--baseline <file>] [--accept-untracked]` probes the primary
+  checkout: on `main` at its tip, no commit `origin/main` lacks, no tracked change, sparse checkout or half-done merge, no worktree
+  inside it, and the locked worktrees and the owner map match in both directions. Untracked entries outside the allow-list
+  (`.claude/densepack-vault/`, `.serena/`, `node_modules`) and the baseline `paddock-primary-untracked.txt` in the git directory
+  are errors; the coordinator records the current ones with `--accept-untracked`. Without `--live` it prints `liveness: not
+  measured` and calls no lock stale. Exit codes: 0 ok, **5** a problem was found, **6** only checks that could not run (not
+  measured; never a pass), as `paddock-cli` plus this one.
+- Tests: `cargo test --test it worktree` builds throw-away repositories (Unix). `WORKTREE_SH=<engineering-rules>/scripts/worktree.sh`
+  adds the oracle comparison with `worktree.sh` (otherwise those tests print `not measured`).
+
 ## Not ported yet (R0b gaps, listed on purpose)
 
 `dev plan` is the port of `scripts/affected.mjs` (`--ci`, `--app`, the matrix legs and the commit range; its recorded cases are in

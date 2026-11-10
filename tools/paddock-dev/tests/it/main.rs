@@ -13,5 +13,6 @@ mod isolation;
 mod release_isolation;
 mod slots;
 mod tree;
+mod worktree;
 mod wrapper;
 mod wrapper_download;
