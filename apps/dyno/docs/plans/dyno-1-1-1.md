@@ -3,11 +3,12 @@
 - Status: Plan, 2026-11-08; updated 2026-11-11. Nothing here is built. The five decisions in section 5 were answered by the
   user on 2026-11-08. Decided on 2026-11-11 (memory: `simplify-2026-11-11`, `decisions-2026-11-11`):
   - process ADRs were trimmed after a comparable-practice review (see `docs/adr/trims-2026-11-11.md` once landed): ADR 0072's
-    Dyno gate is now only its logging part, and ADR 0033 keeps only its WP-3 and WP-4;
+    Dyno gate is now only its logging part (ADR 0072 WP-7), and ADR 0033 keeps WP-3, WP-4 and WP-8 (rows A33-3, A33-4, A33-8
+    and A72-7 below); ADR 0058 (failed reads retry, WP-1) is trimmed: no six-copy unification;
   - the copy register no longer blocks tags (rule 55(d)); WP-1's `known-copies.toml` entry stays a to-do list item;
   - one review round: one independent review, then fix and land; a second round only for security code or a P1 finding;
-  - the Dyno 1.0.0 installers are being removed from the release page, with the tag kept (section 6).
-  No work package is dropped by these changes; estimates are unchanged.
+  - the Dyno 1.0.0 installers were removed from the release page, with the tag kept (section 6).
+  No work package of this plan is dropped; the ADR 0033 and 0072 rows add 5.5-7 days to the totals.
 - App: Dyno (`apps/dyno`). Dyno 1.1.0 was tagged on 2026-11-08 (`dyno-v1.1.0`, tag object `01e3548b7`, commit `8efce3fc3`
   on `dyno/1.1.0-rc`). Rule 1 holds: Dyno 1.1.1 runs beside Pitwall 1.1 and Debrief 1.2 within load and CI capacity, and its
   shared changes follow the landing order in section 4.
@@ -84,7 +85,7 @@ by an agent that did not write it.
 
 | # | Package | Owned files | Role | Depends on | Acceptance | Raw days |
 |---|---|---|---|---|---|---|
-| WP-1 | **Shared failed-read retry** (ER-21 / rule 40, user OK `log:1339`). A family ADR names the pattern (a store's event path never clears `requestStatus` after a failed first read) and the mechanism: `withRequestStatus` owns "error, then a later success" (a snapshot clears the error, a delta triggers a re-read, a backoff retry runs while in error). Move the Jobs store's retry there; adopt it in the ~8 affected stores; one spec that runs over **every** store using `withRequestStatus` (16 today). Includes the Jobs spec gaps: stop on success after an event re-read (mutant M3 survives today), no re-set of an identical error, the two-microtask wait, the rate-limit doc line (`log:1320`, `log:1338`). Same pass: look at the Rust backoffs in `paddock-ipc` `link/client.rs` and `paddock-jobs` `schedule` and either share them or register a `known-copies.toml` entry (rule 55). | `docs/adr/<next>-failed-reads-retry.md`, `ui/projects/paddock-ui/shell/store/src/request-status.ts`, the stores' `*.store.ts` and specs under `ui/projects/paddock-ui/shell/*/src/`, `docs/known-copies.toml` (one entry if needed) | designer (ADR, mechanism) + implementer (adoption) | wave 0 | ADR accepted after independent review; the every-store spec fails on today's code for each named store and passes after; a store added later without the feature fails the spec; demos and Dyno affected e2e green | 3-5 |
+| WP-1 | **Shared failed-read retry** (ER-21 / rule 40, user OK `log:1339`), built to the existing [ADR 0058](../../../../docs/adr/0058-failed-reads-retry.md) as trimmed on 2026-11-11 (no new ADR, no six-copy `BackoffPolicy` unification). The pattern (a store's event path never clears `requestStatus` after a failed first read) and the mechanism: `withRequestStatus` owns "error, then a later success" (a snapshot clears the error, a delta triggers a re-read, a backoff retry runs while in error). Move the Jobs store's retry there; adopt it in the ~8 affected stores; one spec that runs over **every** store using `withRequestStatus` (16 today). Includes the Jobs spec gaps: stop on success after an event re-read (mutant M3 survives today), no re-set of an identical error, the two-microtask wait, the rate-limit doc line (`log:1320`, `log:1338`). The Rust backoffs in `paddock-ipc` `link/client.rs` and `paddock-jobs` `schedule` are not unified (ADR 0058 trim); at most a `known-copies.toml` entry (rule 55). | `ui/projects/paddock-ui/shell/store/src/request-status.ts`, the stores' `*.store.ts` and specs under `ui/projects/paddock-ui/shell/*/src/`, `docs/known-copies.toml` (one entry if needed) | implementer | wave 0 | the every-store spec fails on today's code for each named store and passes after; a store added later without the feature fails the spec; demos and Dyno affected e2e green | 3-5 |
 | WP-2 | **Release-path robustness.** Pin linuxdeploy and AppRun by version and sha256 and cache them (actions/cache on the user's cache server, or the CI image), so a GitHub outage cannot fail a bundle; every failing download or bundle step prints one `::error::` with the URL, status and next step (ER-27). | `.gitea/actions/tauri-bundle/action.yml` (integrating agent), the script it calls | implementer | wave 0 | a run with the cache warm and GitHub blocked (deny the host in a local act run) bundles the AppImage; a forced 504 prints the annotation; hash mismatch fails loudly; dyno-release dispatched with bundles (rule 54) | 1-2 |
 | WP-3 | **dyno-agent exit-143 flakes**: `the_agents_start_and_stop_are_in_its_own_dated_log_with_millisecond_counts` and `term_stops_a_running_agent_cleanly_and_removes_its_discovery_file`. Hypothesis (`log:1259`): the test waits on the discovery file, which `run()` writes before RUNNING, so a TERM in that gap takes the EndNow path. Bug-fix skill: list causes, reproduce under load, fix by waiting on RUNNING. | `apps/dyno/crates/dyno-agent/tests/` (the two tests and their helper) | researcher (cause) + implementer | wave 0 | ER-28: the reproduction fails with the gap and stays green without it, at the measured failure rate; no sleeps, no raised timeouts | 1-2 |
 | WP-4 | **Defender evidence and submission** (note R1, R2; WP1, WP2 there). The Windows install row keeps the full 1116/1117 event text, `Get-MpThreatDetection` (InitialDetectionTime, ProcessName, DetectionSourceTypeID), `Get-MpComputerStatus` versions, and the `MPLog-*.log` lines around the detection; prints one "Defender: origin / type / source / process" line; can repeat the install row N times per snapshot for a rate. Release checklist step: submit `paddock-setup.exe` and the installer as a software developer after each tag and record the submission id and determination. Also check VirusTotal's "obfuscated" and "detect-debug-environment" tags (note addendum). | `scripts/vm-smoke/` Windows rows, `apps/dyno/docs/releasing.md`, the release skill's checklist text (one line) | implementer | wave 0 | a control run that drops the EICAR test file in the guest shows every field in full (rule 71) before a "no detection" counts; 10 runs per snapshot on the 1.1.0 installer recorded as a baseline rate | 1.5-2.5 |
@@ -106,6 +107,17 @@ by an agent that did not write it.
 | WP-11 | **`dyno mcp` waits ~11 s after the app was killed** before "The app isn't open" (`log:1342`): the connect waits on a dead listener. Fail fast when the discovery file's owner is gone (rule 53: verify the pid with its start time before waiting). | `apps/dyno/crates/dyno-agent/src/cli.rs` or the MCP bridge's connect, `crates/paddock-mcp` only if the wait is there | implementer | wave 0 | test: a killed owner with a stale discovery file answers in under 1 s; a live but slow owner is still waited for | 1-2 |
 | WP-12 | **Wiring checks run in CI** (Dyno's part of the ER-21 candidate "every check runs somewhere", `log:1296`). Remove the `#[ignore]` from the helper wiring checks, add them to a CI job, and fix their findings: send or stop advertising `SocketOwners` and `FileHolders`; declare `LogTail`; add the user-guide and CHANGELOG helper-readings markers; drop the stale `WolState` `[[unwired]]` entry. The family meta-check (every check id is gated or registered as not gated) is a separate ADR, not in 1.1.1. | `apps/dyno/crates/*/tests/helper_wiring*`, `apps/dyno/docs/user-guide.md` markers, `apps/dyno/CHANGELOG.md` markers, `apps/dyno/paddock.ci.json` (checks list) | implementer | wave 0 | the checks fail on today's tree in CI, then pass; the wired readings have their contract tests (wiring plan §3) or are removed from the advertised list with a CHANGELOG line | 2-5 |
 | WP-13 | **Link-probe decision (`a6b906bbf`).** Decide whether Dyno's link takes the one-check lock probe from Pitwall's branch (removes the ~400 ms held-lock probe) or keeps it; either way correct `docs/lessons.md`. Default: take it with the Pitwall landing, since it is the CI 7257 fix and the code is shared. | `apps/dyno/app/src-tauri/src/link/`, `docs/lessons.md` (one entry) | implementer | Pitwall landing if taken | the link tests (including `a_stale_discovery_file_beside_a_slow_lock_holder...`) pass on Windows, macOS and Linux CI; lessons text matches the code | 0.5-2 |
+
+### Wave 2, ADR packages kept by the 2026-11-11 trims
+
+Days are taken from each ADR's own work-package table.
+
+| # | Package | Owned files | Role | Depends on | Acceptance | Raw days |
+|---|---|---|---|---|---|---|
+| A33-3 | **Dyno ADR 0033 WP-3: Windows facts** (`win_os_name` first, then the registry, power, WMI and folder reads, with per-fact logging), as in [ADR 0033](../adr/0033-no-test-fake-in-a-release-build.md) | as ADR 0033 WP-3 names | implementer | ADR 0033 WP-0, WP-1 | ADR 0033 WP-3's acceptance | 1.5-2 |
+| A33-4 | **Dyno ADR 0033 WP-4: startup from the registry and folders** (Run keys, Startup folders, StartupApproved; the deferred sources say "not read here") | as ADR 0033 WP-4 names | implementer | ADR 0033 WP-0, WP-1 | ADR 0033 WP-4's acceptance | 2.5-3 |
+| A33-8 | **Dyno ADR 0033 WP-8: docs** (architecture, features, user guide, CHANGELOG 1.1.1, lessons entry) for what A33-3 and A33-4 build | as ADR 0033 WP-8 names | implementer | A33-3, A33-4 | ADR 0033 WP-8's acceptance | 0.5-1 |
+| A72-7 | **ADR 0072 WP-7: connection-end logging** (ER-27 end lines, summaries, rigs print the product log on failure); Dyno's tag gate since the 2026-11-11 trim of [ADR 0072](../../../../docs/adr/0072-every-connection-end-says-why-in-order.md) | as ADR 0072 WP-7 names | implementer | wave 0 | ADR 0072 WP-7's acceptance; gates the Dyno 1.1.1 tag | 1 |
 
 ### Wave 3
 
@@ -131,15 +143,16 @@ by an agent that did not write it.
 | macOS, Linux, CLI | WP-9, WP-10, WP-11 | 4-7 |
 | Tests and CI | WP-2, WP-3, WP-12, WP-13 | 4.5-11 |
 | UI and row 41 (amend) | WP-14, WP-15 | 4.5-8 |
+| ADR packages kept by the trims | A33-3, A33-4, A33-8, A72-7 | 5.5-7 |
 | Release | WP-R | 3-5 |
-| **Total, recommended options** (decision 3 amend, decision 4 yes, decision 5 after the evidence) | | **33.5-61.5** |
+| **Total, recommended options** (decision 3 amend, decision 4 yes, decision 5 after the evidence) | | **39-68.5** |
 | If row 41 is built instead | WP-15 | +2.5-5 |
 | If Restart Manager first is in 1.1.1 | WP-16 | +3-5 |
 
 With three builder lanes (the current allocation beside Pitwall and Debrief), the critical path is wave 0, then WP-1, then the
 Pitwall landing, then WP-6, WP-5, WP-7 in sequence on `paddock-setup`, then WP-R: about 16-27 agent-days on that path (WP-7 with its own version), so
 roughly 3-6 weeks elapsed plus any wait for the Pitwall landing. **This is a guess**: it depends on that landing date, and WP-8 and any "build" choices have no
-design yet. Firm numbers follow once WP-1's ADR and WP-8's design note have work packages.
+design yet. Firm numbers follow once WP-8's design note has work packages.
 
 ## 4. Dependencies and landing order
 
@@ -176,4 +189,5 @@ Kept here so they are not lost; each needs the user or the coordinator to place 
 - 64 dyno-agent tests that leak on Windows (ER-14 look, `log:1181`).
 - The family ER-21 candidates found during 1.1.0 (dialog commands vs contract, undeclared cross-inputs, EINTR on timed socket
   reads, red intermediate commits, the conformance meta-check): family ADRs, not Dyno 1.1.1 packages.
-- Removing the 1.0.0 installers after 1.1.0 publishes (memory: confirm with the user first).
+- Done: the 1.0.0 installers were removed from the release page (user OK, 2026-11-11), and its `latest.json` was deleted
+  too; the `dyno-v1.0.0` tag is kept.
