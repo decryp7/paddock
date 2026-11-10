@@ -7,8 +7,10 @@
 //! A binary is installed only when it was built from `origin/main` (its embedded input hash, `dev self hash`, equals the hash
 //! of the inputs at that revision), so a branch's half-built rules never guard everyone; `--local` installs any binary and the
 //! stamp says so. The shim `tools/githooks/claude-pre-tool-use` is POSIX `sh` (bootstrap exception: it must run before any
-//! binary exists); this module holds its text, the tracked file is the same bytes (a test compares them) and `install` rewrites
-//! it when it differs. `core.hooksPath` is set to `tools/githooks` only when that folder existed before this run.
+//! binary exists). It is a tracked file and `install` never writes it: this module holds the same text (a test compares them)
+//! and install warns when the checkout's copy is missing or differs. Install does not touch git's configuration either:
+//! `core.hooksPath` would silently switch off `.git/hooks/commit-msg` (the ER-5 trailer and subject-length guard), so setting it
+//! is left to the tracked-hooks change of ADR 0038.
 
 use crate::input_hash::{self, EMBEDDED, Exec, Real};
 use clap::Args;
@@ -18,10 +20,10 @@ use std::path::{Path, PathBuf};
 
 /// The text of the shim `tools/githooks/claude-pre-tool-use`.
 pub const SHIM: &str = include_str!("claude-pre-tool-use.sh");
-/// The shim's place in the repository.
+/// The shim's place in the repository (a tracked file).
 pub const SHIM_PATH: &str = "tools/githooks/claude-pre-tool-use";
-/// The folder `core.hooksPath` names.
-pub const HOOKS_PATH: &str = "tools/githooks";
+/// The folder of tracked hook scripts.
+pub const HOOKS_DIR: &str = "tools/githooks";
 /// The installed binary's file name.
 pub const BIN_NAME: &str = if cfg!(windows) { "paddock-dev.exe" } else { "paddock-dev" };
 /// The stamp's file name.
@@ -62,11 +64,18 @@ pub fn command(a: &InstallArgs) -> Result<Report, CliError> {
     let cwd = std::env::current_dir().unwrap_or_default();
     let root = match &a.root {
         Some(r) => r.clone(),
-        None => PathBuf::from(
-            Real.run("git", &["rev-parse", "--show-toplevel"], &cwd, None)
-                .map_err(|e| e.with_hint("Run ./dev hooks install inside the Paddock repository."))?
-                .trim(),
-        ),
+        // A bare repository has no top level: its own folder is the root then (the shim and the binary live in it).
+        None => match Real.run("git", &["rev-parse", "--show-toplevel"], &cwd, None) {
+            Ok(top) => PathBuf::from(top.trim()),
+            Err(_)
+                if Real
+                    .run("git", &["rev-parse", "--is-bare-repository"], &cwd, None)
+                    .is_ok_and(|b| b.trim() == "true") =>
+            {
+                cwd.clone()
+            }
+            Err(e) => return Err(e.with_hint("Run ./dev hooks install inside the Paddock repository.")),
+        },
     };
     let exe = std::env::current_exe()
         .map_err(|e| CliError::failure(format!("the path of this binary is unknown: {e}.")).with_hint("Run it as ./dev hooks install."))?;
@@ -141,7 +150,18 @@ pub fn expected_hash(exec: &dyn Exec, root: &Path, rev: &str) -> Result<String, 
     Ok(input_hash::compute(&AtRev { exec, rev }, &env, &vars, root)?.hash)
 }
 
-/// Copies `exe` to the common git folder, writes the stamp and the shim, and sets `core.hooksPath` when `tools/githooks` existed.
+/// What the tracked shim looks like in the checkout `install` ran in.
+fn shim_state(root: &Path) -> &'static str {
+    match std::fs::read_to_string(root.join(SHIM_PATH)) {
+        Err(_) => "missing",
+        Ok(t) if t == SHIM => "current",
+        Ok(_) => "differs",
+    }
+}
+
+/// Copies `exe` to the common git folder and writes the stamp beside it. Nothing else is written: not a file of the checkout
+/// (the shim is tracked; a missing or different one is a warning) and not git's configuration (`core.hooksPath` would switch
+/// off `.git/hooks/commit-msg`, the ER-5 guard; setting it belongs to the tracked-hooks change of ADR 0038).
 pub fn install(exec: &dyn Exec, root: &Path, exe: &Path, origin: &Origin) -> Result<Report, CliError> {
     let fail = |what: &str, e: std::io::Error| {
         CliError::failure(format!("{what}: {e}.")).with_hint("Check that the folder is writable, then run ./dev hooks install again.")
@@ -182,54 +202,28 @@ pub fn install(exec: &dyn Exec, root: &Path, exe: &Path, origin: &Origin) -> Res
     text.push('\n');
     place_bytes(text.as_bytes(), &stamp_path, false).map_err(|e| fail(&format!("{} could not be written", stamp_path.display()), e))?;
 
-    let hooks_dir = root.join(HOOKS_PATH);
-    let hooks_existed = hooks_dir.is_dir();
-    std::fs::create_dir_all(&hooks_dir).map_err(|e| fail(&format!("{} could not be made", hooks_dir.display()), e))?;
-    let shim = root.join(SHIM_PATH);
-    let shim_changed = std::fs::read_to_string(&shim).map_or(true, |t| t != SHIM);
-    if shim_changed {
-        place_bytes(SHIM.as_bytes(), &shim, true).map_err(|e| fail(&format!("{} could not be written", shim.display()), e))?;
-    } else {
-        set_executable(&shim).map_err(|e| fail(&format!("{} could not be made executable", shim.display()), e))?;
-    }
-
-    let (hooks_path, previous) = if hooks_existed {
-        let previous = exec
-            .run("git", &["config", "--local", "--get", "core.hooksPath"], root, None)
-            .ok()
-            .map(|s| s.trim().to_string());
-        if previous.as_deref() != Some(HOOKS_PATH) {
-            exec.run("git", &["config", "--local", "core.hooksPath", HOOKS_PATH], root, None)?;
-        }
-        ("set", previous)
-    } else {
-        ("not set (tools/githooks did not exist)", None)
+    let state = shim_state(root);
+    let shim_line = match state {
+        "current" => format!("shim      {SHIM_PATH} is current"),
+        "differs" => format!(
+            "shim      warning: {SHIM_PATH} differs from this binary's shim. The tracked file wins: update it through a change (the text is in src/hook/claude-pre-tool-use.sh)."
+        ),
+        _ => format!(
+            "shim      warning: {SHIM_PATH} is missing in this checkout (a sparse checkout without tools? git sparse-checkout add tools). Claude Code's hook needs it."
+        ),
     };
-
     let kind = match origin {
         Origin::Local => "local build".to_string(),
         Origin::Base { base, commit, .. } => format!("built from {base} ({})", commit.get(..9).unwrap_or(commit)),
     };
-    let text = format!(
-        "binary    {} ({size} bytes, {kind})\nshim      {}{}\nhooksPath {hooks_path}{}",
-        dest.display(),
-        shim.display(),
-        if shim_changed { " (written)" } else { " (unchanged)" },
-        match &previous {
-            Some(p) if p != HOOKS_PATH => format!(" (was {p})"),
-            _ => String::new(),
-        }
-    );
+    let text = format!("binary    {} ({size} bytes, {kind})\n{shim_line}", dest.display());
     Ok(Report::new(
         json!({
             "binary": dest.display().to_string(),
             "bytes": size,
             "stamp": stamp_path.display().to_string(),
             "local": matches!(origin, Origin::Local),
-            "shim": shim.display().to_string(),
-            "shim_written": shim_changed,
-            "hooks_path_set": hooks_existed,
-            "hooks_path_was": previous,
+            "shim_state": state,
         }),
         text,
     ))
@@ -334,7 +328,7 @@ mod tests {
     }
 
     /// A throwaway repository with one commit, a fake binary and a home of its own.
-    fn fixture(with_hooks_dir: bool) -> Fixture {
+    fn fixture() -> Fixture {
         let dir = tempfile::tempdir().unwrap();
         let base = dir.path().canonicalize().unwrap();
         let home = base.join("home");
@@ -342,10 +336,8 @@ mod tests {
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(root.join("tools/paddock-dev")).unwrap();
         std::fs::write(root.join("tools/paddock-dev/inputs.txt"), "tools/paddock-dev\n").unwrap();
-        if with_hooks_dir {
-            std::fs::create_dir_all(root.join(HOOKS_PATH)).unwrap();
-            std::fs::write(root.join(HOOKS_PATH).join("README"), "x\n").unwrap();
-        }
+        std::fs::create_dir_all(root.join(HOOKS_DIR)).unwrap();
+        std::fs::write(root.join(HOOKS_DIR).join("README"), "x\n").unwrap();
         let exe = base.join("fake-paddock-dev");
         std::fs::write(&exe, "#!/bin/sh\necho fake\n").unwrap();
         let exec = Isolated { home };
@@ -362,6 +354,11 @@ mod tests {
 
     fn git(f: &Fixture, args: &[&str]) -> String {
         f.exec.run("git", args, &f.root, None).unwrap()
+    }
+
+    fn common_hooks(f: &Fixture) -> PathBuf {
+        let common = git(f, &["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+        PathBuf::from(common.trim()).join("paddock").join("hooks")
     }
 
     #[test]
@@ -381,7 +378,7 @@ mod tests {
 
     #[test]
     fn the_expected_hash_is_the_hash_at_the_base_not_at_head() {
-        let f = fixture(true);
+        let f = fixture();
         git(&f, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
         let at_base = expected_hash(&f.exec, &f.root, "origin/main").unwrap();
         assert_eq!(at_base, expected_hash(&f.exec, &f.root, "HEAD").unwrap());
@@ -398,7 +395,7 @@ mod tests {
 
     #[test]
     fn a_missing_base_is_refused_with_the_fetch_hint() {
-        let f = fixture(true);
+        let f = fixture();
         let e = check_origin(&f.exec, &f.root, "origin/main").unwrap_err();
         assert!(e.to_string().contains("not a revision") && e.hint.contains("git fetch"), "{e}");
     }
@@ -407,50 +404,68 @@ mod tests {
     fn a_binary_without_an_embedded_hash_is_refused_unless_local() {
         // the test binary is not built through ./dev, so nothing is embedded
         if EMBEDDED.is_none() {
-            let f = fixture(true);
+            let f = fixture();
             git(&f, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
             assert!(check_origin(&f.exec, &f.root, "origin/main").is_err());
         }
     }
 
     #[test]
-    fn install_copies_the_binary_stamps_it_writes_the_shim_and_sets_hooks_path() {
-        let f = fixture(true);
-        let before = std::fs::read_dir(&f.exec.home).unwrap().count();
+    fn install_copies_the_binary_and_a_stamp_and_changes_nothing_else() {
+        let f = fixture();
+        let home_before = std::fs::read_dir(&f.exec.home).unwrap().count();
+        let tracked_before = git(&f, &["status", "--porcelain", "--untracked-files=all"]);
         let report = install(&f.exec, &f.root, &f.exe, &Origin::Local).unwrap();
-        let common = PathBuf::from(git(&f, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).trim());
-        let bin = common.join("paddock/hooks").join(BIN_NAME);
+        let dir = common_hooks(&f);
+        let bin = dir.join(BIN_NAME);
         assert_eq!(std::fs::read(&bin).unwrap(), std::fs::read(&f.exe).unwrap());
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(&bin).unwrap().permissions().mode() & 0o777, 0o755);
-            let shim_mode = std::fs::metadata(f.root.join(SHIM_PATH)).unwrap().permissions().mode();
-            assert_eq!(shim_mode & 0o777, 0o755);
         }
-        let stamp_text = std::fs::read_to_string(common.join("paddock/hooks").join(STAMP_NAME)).unwrap();
-        let stamp: serde_json::Value = serde_json::from_str(&stamp_text).unwrap();
+        let stamp: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join(STAMP_NAME)).unwrap()).unwrap();
         assert_eq!(stamp["local"], true);
         assert_eq!(stamp["base"], serde_json::Value::Null);
-        assert_eq!(std::fs::read_to_string(f.root.join(SHIM_PATH)).unwrap(), SHIM);
-        assert_eq!(git(&f, &["config", "--local", "--get", "core.hooksPath"]).trim(), HOOKS_PATH);
+        // P1: no core.hooksPath (it would switch off .git/hooks), and no file of the checkout is written
         assert!(
-            report.text.contains("local build") && report.text.contains("hooksPath set"),
-            "{}",
-            report.text
+            f.exec
+                .run("git", &["config", "--local", "--get", "core.hooksPath"], &f.root, None)
+                .is_err()
         );
-        assert_eq!(report.data["hooks_path_set"], true);
-        assert_eq!(std::fs::read_dir(&f.exec.home).unwrap().count(), before, "the home was not touched");
-        let leftovers: Vec<_> = std::fs::read_dir(bin.parent().unwrap())
-            .unwrap()
-            .map(|e| e.unwrap().file_name())
-            .collect();
+        assert_eq!(git(&f, &["status", "--porcelain", "--untracked-files=all"]), tracked_before);
+        assert!(!report.text.contains("hooksPath") && report.data.get("hooks_path_set").is_none());
+        assert_eq!(
+            std::fs::read_dir(&f.exec.home).unwrap().count(),
+            home_before,
+            "the home was not touched"
+        );
+        let leftovers: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
         assert_eq!(leftovers.len(), 2, "binary and stamp only: {leftovers:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_existing_commit_msg_hook_still_runs_after_install() {
+        use std::os::unix::fs::PermissionsExt;
+        let f = fixture();
+        let hook = f.root.join(".git/hooks/commit-msg");
+        std::fs::write(&hook, "#!/bin/sh\necho ran > \"$(dirname \"$0\")/marker\"\nexit 0\n").unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        install(&f.exec, &f.root, &f.exe, &Origin::Local).unwrap();
+        std::fs::write(f.root.join("x.txt"), "x\n").unwrap();
+        git(&f, &["add", "-A"]);
+        git(&f, &["commit", "-q", "-m", "after install"]);
+        assert_eq!(
+            std::fs::read_to_string(f.root.join(".git/hooks/marker")).unwrap(),
+            "ran\n",
+            "commit-msg did not run"
+        );
     }
 
     #[test]
     fn a_base_origin_is_stamped_with_its_commit_and_hash() {
-        let f = fixture(true);
+        let f = fixture();
         let origin = Origin::Base {
             base: "origin/main".into(),
             commit: "0123456789abcdef".into(),
@@ -467,58 +482,75 @@ mod tests {
 
     #[test]
     fn a_linked_worktree_installs_into_the_shared_common_folder() {
-        let f = fixture(true);
+        let f = fixture();
         let wt = f.root.parent().unwrap().join("wt");
         git(&f, &["worktree", "add", "-q", "-b", "other", wt.to_str().unwrap()]);
         install(&f.exec, &wt, &f.exe, &Origin::Local).unwrap();
         assert!(f.root.join(".git/paddock/hooks").join(BIN_NAME).is_file());
         assert!(!wt.join(".git").is_dir(), "a linked worktree's .git is a file");
-        // hooksPath is repository-wide (the common config), so the primary sees it too
-        assert_eq!(git(&f, &["config", "--local", "--get", "core.hooksPath"]).trim(), HOOKS_PATH);
     }
 
     #[test]
-    fn without_tools_githooks_the_shim_is_written_but_hooks_path_is_left_alone() {
-        let f = fixture(false);
-        let report = install(&f.exec, &f.root, &f.exe, &Origin::Local).unwrap();
-        assert!(f.root.join(SHIM_PATH).is_file());
+    fn a_bare_repository_and_its_worktree_share_one_install() {
+        let f = fixture();
+        let bare = f.root.parent().unwrap().join("bare.git");
+        f.exec
+            .run(
+                "git",
+                &["clone", "-q", "--bare", f.root.to_str().unwrap(), bare.to_str().unwrap()],
+                &f.root,
+                None,
+            )
+            .unwrap();
+        let wt = f.root.parent().unwrap().join("bare-wt");
+        f.exec
+            .run("git", &["worktree", "add", "-q", wt.to_str().unwrap(), "main"], &bare, None)
+            .unwrap();
+        install(&f.exec, &wt, &f.exe, &Origin::Local).unwrap();
         assert!(
-            f.exec
-                .run("git", &["config", "--local", "--get", "core.hooksPath"], &f.root, None)
-                .is_err()
+            bare.join("paddock/hooks").join(BIN_NAME).is_file(),
+            "the binary is in the bare repository's folder"
         );
-        assert_eq!(report.data["hooks_path_set"], false);
-        assert!(report.text.contains("not set"));
+        // installing from inside the bare repository itself works too (no worktree to find)
+        let again = install(&f.exec, &bare, &f.exe, &Origin::Local).unwrap();
+        assert!(again.data["binary"].as_str().unwrap().contains("bare.git"));
     }
 
     #[test]
-    fn a_second_run_updates_the_binary_leaves_a_current_shim_and_reports_a_replaced_hooks_path() {
-        let f = fixture(true);
-        git(&f, &["config", "--local", "core.hooksPath", ".githooks-old"]);
-        let first = install(&f.exec, &f.root, &f.exe, &Origin::Local).unwrap();
-        assert_eq!(first.data["hooks_path_was"], ".githooks-old");
-        assert!(first.text.contains("(was .githooks-old)"));
+    fn the_tracked_shim_is_checked_never_written() {
+        let f = fixture();
+        let shim = f.root.join(SHIM_PATH);
+        // missing: a warning, no file
+        let missing = install(&f.exec, &f.root, &f.exe, &Origin::Local).unwrap();
+        assert_eq!(missing.data["shim_state"], "missing");
+        assert!(missing.text.contains("warning") && !shim.exists(), "{}", missing.text);
+        // different: a warning, the file is untouched
+        std::fs::write(&shim, "#!/bin/sh\nexit 0\n").unwrap();
+        let differs = install(&f.exec, &f.root, &f.exe, &Origin::Local).unwrap();
+        assert_eq!(differs.data["shim_state"], "differs");
+        assert!(differs.text.contains("warning"), "{}", differs.text);
+        assert_eq!(std::fs::read_to_string(&shim).unwrap(), "#!/bin/sh\nexit 0\n");
+        // same: quiet
+        std::fs::write(&shim, SHIM).unwrap();
+        let same = install(&f.exec, &f.root, &f.exe, &Origin::Local).unwrap();
+        assert_eq!(same.data["shim_state"], "current");
+        assert!(!same.text.contains("warning"));
+    }
+
+    #[test]
+    fn a_second_run_replaces_the_binary_atomically_and_leaves_no_temporary_file() {
+        let f = fixture();
+        install(&f.exec, &f.root, &f.exe, &Origin::Local).unwrap();
         std::fs::write(&f.exe, "#!/bin/sh\necho second\n").unwrap();
         let second = install(&f.exec, &f.root, &f.exe, &Origin::Local).unwrap();
-        assert_eq!(second.data["shim_written"], false);
-        assert!(second.text.contains("(unchanged)"));
         let installed = std::fs::read_to_string(second.data["binary"].as_str().unwrap()).unwrap();
         assert_eq!(installed, "#!/bin/sh\necho second\n");
-        assert_eq!(second.data["hooks_path_was"], HOOKS_PATH);
-    }
-
-    #[test]
-    fn a_stale_shim_is_rewritten() {
-        let f = fixture(true);
-        std::fs::write(f.root.join(SHIM_PATH), "#!/bin/sh\nexit 0\n").unwrap();
-        let report = install(&f.exec, &f.root, &f.exe, &Origin::Local).unwrap();
-        assert_eq!(report.data["shim_written"], true);
-        assert_eq!(std::fs::read_to_string(f.root.join(SHIM_PATH)).unwrap(), SHIM);
+        assert_eq!(std::fs::read_dir(common_hooks(&f)).unwrap().count(), 2);
     }
 
     #[test]
     fn a_missing_binary_or_a_folder_that_is_no_repository_is_refused_with_a_next_step() {
-        let f = fixture(true);
+        let f = fixture();
         let e = install(&f.exec, &f.root, &f.root.join("nope"), &Origin::Local).unwrap_err();
         assert!(e.to_string().contains("not a file"));
         let outside = f.exe.parent().unwrap().join("not-a-repo");
@@ -529,76 +561,21 @@ mod tests {
     }
 
     #[test]
-    fn the_tracked_shim_is_the_text_install_writes_and_starts_no_program() {
+    fn the_tracked_shim_is_the_text_install_compares_with_and_starts_no_program() {
         let tracked = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../githooks/claude-pre-tool-use")).unwrap();
         assert_eq!(tracked, SHIM);
-        assert!(SHIM.lines().count() <= 8, "a shim is a few lines");
+        assert!(SHIM.lines().count() <= 10, "a shim is a few lines");
         assert!(SHIM.starts_with("#!/bin/sh\n"));
         // shell builtins only: no git (about 10 ms a call), no sed, no cat
         for program in ["bash", "jq", "python", "git ", "sed ", "cat", "dirname"] {
             assert!(!SHIM.contains(program), "{program}");
         }
-    }
-
-    /// Runs the shim in `cwd` with a standard input of `input`, as Claude Code does. Returns standard output.
-    #[cfg(unix)]
-    fn shim(f: &Fixture, cwd: &Path, input: &str) -> String {
-        f.exec
-            .run("sh", &[f.root.join(SHIM_PATH).to_str().unwrap()], cwd, Some(input.as_bytes()))
-            .unwrap()
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn the_shim_denies_everything_but_the_install_command_while_no_binary_is_installed() {
-        let f = fixture(true);
-        std::fs::write(f.root.join(SHIM_PATH), SHIM).unwrap();
-        let call = |cmd: &str| format!(r#"{{"tool_name":"Bash","tool_input":{{"command":"{cmd}"}}}}"#);
-        for denied in [
-            "ls",
-            "./dev hooks install && rm x",
-            "echo ./dev hooks install",
-            "./dev hooks install --other",
-        ] {
-            let out = shim(&f, &f.root, &call(denied));
-            let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap_or_else(|e| panic!("{denied}: {e}: {out}"));
-            assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "deny", "{denied}");
-            assert!(
-                v["hookSpecificOutput"]["permissionDecisionReason"]
-                    .as_str()
-                    .unwrap()
-                    .contains("./dev hooks install")
-            );
-        }
-        for allowed in ["./dev hooks install", "./dev hooks install --local"] {
-            assert_eq!(shim(&f, &f.root, &call(allowed)), "", "{allowed}");
-        }
-        let edit = shim(&f, &f.root, r#"{"tool_name":"Edit","tool_input":{"file_path":"/x"}}"#);
-        assert!(edit.contains("deny"), "an edit is denied too");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn the_shim_outside_a_repository_denies_and_inside_one_runs_the_installed_binary_with_the_input() {
-        let f = fixture(true);
-        std::fs::write(f.root.join(SHIM_PATH), SHIM).unwrap();
-        let outside = f.exe.parent().unwrap().join("elsewhere");
-        std::fs::create_dir_all(&outside).unwrap();
-        assert!(shim(&f, &outside, "{}").contains("deny"));
-        // an installed "binary" that echoes its arguments and its standard input
-        std::fs::write(&f.exe, "#!/bin/sh\necho \"args: $*\"\ncat\n").unwrap();
-        install(&f.exec, &f.root, &f.exe, &Origin::Local).unwrap();
-        let out = shim(&f, &f.root, "INPUT-LINE\n");
-        assert_eq!(out, "args: hook pre-tool-use\nINPUT-LINE\n");
-        // from a subfolder too
-        let sub = f.root.join("tools");
-        assert!(shim(&f, &sub, "x\n").starts_with("args: hook pre-tool-use"));
+        assert!(SHIM.contains("--local"), "the bare-repository way out is in the deny text");
     }
 
     /// Runs the shim with an empty PATH, so any program it starts fails: only shell builtins and the final `exec` work.
     #[cfg(unix)]
-    fn shim_without_path(f: &Fixture, cwd: &Path, project_dir: Option<&str>, input: &str) -> String {
-        let shim = f.root.join(SHIM_PATH);
+    fn shim_without_path(f: &Fixture, shim: &Path, cwd: &Path, project_dir: Option<&str>, input: &str) -> String {
         let mut args = vec!["PATH=/nonexistent".to_string()];
         if let Some(d) = project_dir {
             args.push(format!("CLAUDE_PROJECT_DIR={d}"));
@@ -609,45 +586,147 @@ mod tests {
     }
 
     #[cfg(unix)]
+    const BUILTIN_BINARY: &str = "#!/bin/sh\nIFS= read -r l\nprintf 'args: %s <%s>\\n' \"$*\" \"$l\"\n";
+
+    #[cfg(unix)]
+    const BASH_LS: &str = "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"}}\n";
+
+    #[cfg(unix)]
     #[test]
-    fn the_shim_finds_the_common_folder_from_a_linked_worktree_without_starting_any_program() {
-        let f = fixture(true);
-        std::fs::write(f.root.join(SHIM_PATH), SHIM).unwrap();
-        // an installed "binary" that uses builtins only
-        std::fs::write(&f.exe, "#!/bin/sh\nIFS= read -r l\nprintf 'args: %s <%s>\\n' \"$*\" \"$l\"\n").unwrap();
+    fn the_shim_denies_everything_but_the_install_command_while_no_binary_is_installed() {
+        let f = fixture();
+        let shim = f.root.join(SHIM_PATH);
+        std::fs::write(&shim, SHIM).unwrap();
+        let call = |cmd: &str| format!("{{\"tool_name\":\"Bash\",\"tool_input\":{{\"command\":\"{cmd}\"}}}}\n");
+        for denied in [
+            "ls",
+            "./dev hooks install && rm x",
+            "echo ./dev hooks install",
+            "./dev hooks install --other",
+        ] {
+            let out = shim_without_path(&f, &shim, &f.root, None, &call(denied));
+            let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap_or_else(|e| panic!("{denied}: {e}: {out}"));
+            assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "deny", "{denied}");
+            assert!(
+                v["hookSpecificOutput"]["permissionDecisionReason"]
+                    .as_str()
+                    .unwrap()
+                    .contains("./dev hooks install")
+            );
+        }
+        for allowed in ["./dev hooks install", "./dev hooks install --local"] {
+            assert_eq!(shim_without_path(&f, &shim, &f.root, None, &call(allowed)), "", "{allowed}");
+        }
+        let edit = shim_without_path(
+            &f,
+            &shim,
+            &f.root,
+            None,
+            "{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"/x\"}}\n",
+        );
+        assert!(edit.contains("deny"), "an edit is denied too");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_shim_finds_the_installed_binary_from_every_checkout_layout_without_starting_any_program() {
+        let f = fixture();
+        let shim = f.root.join(SHIM_PATH);
+        std::fs::write(&shim, SHIM).unwrap();
+        std::fs::write(&f.exe, BUILTIN_BINARY).unwrap();
         install(&f.exec, &f.root, &f.exe, &Origin::Local).unwrap();
         let wt = f.root.parent().unwrap().join("wt");
         git(&f, &["worktree", "add", "-q", "-b", "other", wt.to_str().unwrap()]);
-        std::fs::write(wt.join(SHIM_PATH), SHIM).unwrap();
         let want = "args: hook pre-tool-use <INPUT>\n";
         // the primary, a subfolder of it, the linked worktree (its .git is a file), a subfolder of that
         for cwd in [f.root.clone(), f.root.join("tools/paddock-dev"), wt.clone(), wt.join("tools")] {
-            assert_eq!(shim_without_path(&f, &cwd, None, "INPUT\n"), want, "{}", cwd.display());
+            assert_eq!(shim_without_path(&f, &shim, &cwd, None, "INPUT\n"), want, "{}", cwd.display());
         }
         // CLAUDE_PROJECT_DIR wins over the working folder
         let elsewhere = f.exe.parent().unwrap().join("elsewhere");
         std::fs::create_dir_all(&elsewhere).unwrap();
-        assert_eq!(shim_without_path(&f, &elsewhere, Some(wt.to_str().unwrap()), "INPUT\n"), want);
-        // a relative gitdir line (older git, or a moved worktree) is read relative to the worktree
+        assert_eq!(
+            shim_without_path(&f, &shim, &elsewhere, Some(wt.to_str().unwrap()), "INPUT\n"),
+            want
+        );
+        // a relative gitdir line is read relative to the worktree; the common folder comes from its `commondir` file
         let rel = f.root.parent().unwrap().join("rel");
         std::fs::create_dir_all(&rel).unwrap();
-        std::fs::write(rel.join(".git"), "gitdir: ../repo/.git/worktrees/x\n").unwrap();
-        assert_eq!(shim_without_path(&f, &rel, Some(rel.to_str().unwrap()), "INPUT\n"), want);
+        std::fs::write(rel.join(".git"), "gitdir: ../repo/.git/worktrees/wt\n").unwrap();
+        assert_eq!(shim_without_path(&f, &shim, &rel, Some(rel.to_str().unwrap()), "INPUT\n"), want);
+        // a worktree folder that is not named like its gitdir still resolves (no name parsing)
+        let renamed = f.root.parent().unwrap().join("renamed");
+        std::fs::create_dir_all(&renamed).unwrap();
+        std::fs::write(
+            renamed.join(".git"),
+            format!("gitdir: {}\n", f.root.join(".git/worktrees/wt").display()),
+        )
+        .unwrap();
+        assert_eq!(shim_without_path(&f, &shim, &renamed, None, "INPUT\n"), want);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_shim_works_in_a_bare_repository_and_its_worktrees() {
+        let f = fixture();
+        let shim = f.root.join(SHIM_PATH);
+        std::fs::write(&shim, SHIM).unwrap();
+        let bare = f.root.parent().unwrap().join("bare.git");
+        f.exec
+            .run(
+                "git",
+                &["clone", "-q", "--bare", f.root.to_str().unwrap(), bare.to_str().unwrap()],
+                &f.root,
+                None,
+            )
+            .unwrap();
+        let wt = f.root.parent().unwrap().join("bare-wt");
+        f.exec
+            .run("git", &["worktree", "add", "-q", wt.to_str().unwrap(), "main"], &bare, None)
+            .unwrap();
+        // before the install: denied, with the way out in the text
+        let out = shim_without_path(&f, &shim, &bare, None, BASH_LS);
+        assert!(out.contains("deny") && out.contains("--local"), "{out}");
+        std::fs::write(&f.exe, BUILTIN_BINARY).unwrap();
+        install(&f.exec, &wt, &f.exe, &Origin::Local).unwrap();
+        for cwd in [&bare, &wt] {
+            let out = shim_without_path(&f, &shim, cwd, None, "INPUT\n");
+            assert_eq!(out, "args: hook pre-tool-use <INPUT>\n", "{}", cwd.display());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_shim_also_finds_a_binary_with_the_windows_name() {
+        let f = fixture();
+        let shim = f.root.join(SHIM_PATH);
+        std::fs::write(&shim, SHIM).unwrap();
+        let dir = f.root.join(".git/paddock/hooks");
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("paddock-dev.exe");
+        std::fs::write(&exe, BUILTIN_BINARY).unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        assert_eq!(
+            shim_without_path(&f, &shim, &f.root, None, "INPUT\n"),
+            "args: hook pre-tool-use <INPUT>\n"
+        );
     }
 
     #[cfg(unix)]
     #[test]
     fn the_shim_still_denies_without_a_binary_a_repository_or_a_readable_git_file() {
-        let f = fixture(true);
-        std::fs::write(f.root.join(SHIM_PATH), SHIM).unwrap();
-        let denied = |cwd: &Path, project: Option<&str>| {
-            shim_without_path(&f, cwd, project, "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"}}\n")
-        };
+        let f = fixture();
+        let shim = f.root.join(SHIM_PATH);
+        std::fs::write(&shim, SHIM).unwrap();
+        let denied = |cwd: &Path, project: Option<&str>| shim_without_path(&f, &shim, cwd, project, BASH_LS);
         assert!(denied(&f.root, None).contains("deny"), "no binary installed");
         let outside = f.exe.parent().unwrap().join("not-a-repo");
         std::fs::create_dir_all(&outside).unwrap();
         assert!(denied(&outside, None).contains("deny"), "no repository");
-        // a relative project dir, an empty one and a .git file that names no worktree
+        // a relative project dir, an empty one and .git files that name nothing usable
         assert!(denied(&outside, Some("relative/dir")).contains("deny"));
         assert!(denied(&outside, Some("")).contains("deny"));
         std::fs::write(outside.join(".git"), "gitdir: ../modules/x\n").unwrap();
@@ -656,6 +735,7 @@ mod tests {
         assert!(denied(&outside, None).contains("deny"), "an empty git file");
         let ok = shim_without_path(
             &f,
+            &shim,
             &f.root,
             None,
             "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"./dev hooks install\"}}\n",
@@ -688,5 +768,20 @@ mod tests {
         assert!(hook["command"].as_str().unwrap().ends_with(SHIM_PATH));
         assert!(hook["command"].as_str().unwrap().contains("$CLAUDE_PROJECT_DIR"));
         assert_eq!(v["hooks"].as_object().unwrap().len(), 1, "only PreToolUse");
+    }
+
+    #[test]
+    fn the_readme_says_which_settings_file_lands_and_when() {
+        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../githooks/README.md")).unwrap();
+        for needle in [
+            "claude-settings.json",
+            ".claude/settings.json",
+            "untracked",
+            "--local",
+            "bare",
+            "core.hooksPath",
+        ] {
+            assert!(text.contains(needle), "the README does not mention {needle}");
+        }
     }
 }
