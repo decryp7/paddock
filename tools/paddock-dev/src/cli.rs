@@ -80,7 +80,8 @@ enum CiCommand {
     },
     /// The tests CI marked flaky (nextest, Playwright), vitest's failed specs and tests that failed and then passed on a
     /// rerun of the same commit, over a window of runs. An incomplete measurement ("not measured") exits 1 for now;
-    /// flaky tests found exit 5 only with --fail-on-flakes.
+    /// flaky tests found exit 5 only with --fail-on-flakes;
+    /// cancelled runs are counted and listed but never change the exit code.
     Flakes(ci_runs::FlakesArgs),
     /// Real CI timings of the family from the Gitea API (the port of scripts/ci-timings.mjs, same Markdown).
     Timings(ci_runs::TimingsArgs),

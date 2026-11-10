@@ -95,8 +95,8 @@ impl TimedJob {
         self.runner_id == 0 && self.steps.is_empty() && self.start.zip(self.end).is_some_and(|(s, e)| s < e)
     }
 
-    /// Whether the job never ran a step: no runner took it and it is not a caller (no real times, or start equal to end), or
-    /// every step started and ended in the same second (or has no time). Such a job has no log and nothing to measure.
+    /// Whether the job has no step timings: no runner took it and it is not a caller (no real times, or start equal to end),
+    /// or every step started and ended in the same second (or has no time). Such a job has no log and nothing to measure.
     pub fn never_ran(&self) -> bool {
         if self.is_caller() {
             return false;

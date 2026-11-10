@@ -8,8 +8,8 @@
 //! - **failed-then-passed**: it failed in a job that passed on a later attempt of the same run (Gitea reruns are attempts), or
 //!   in a run whose workflow later passed on the same commit with the same job passing.
 //!
-//! Only the logs of jobs that did not pass are read; a job that never ran a step is excluded and counted. A failed job whose log
-//! cannot be read, or whose log the reader cannot account for, is **not measured**, never "no flakes" (ER-33), and so is a
+//! Only the logs of jobs that did not pass are read; a job with no step timings (no runner, or every step starts and ends
+//! together) is a gap. A failed job whose log cannot be read, or whose log the reader cannot account for, is **not measured**, never "no flakes" (ER-33), and so is a
 //! precondition that makes flakes invisible in passing jobs (Playwright retries without `failOnFlakyTests`).
 
 use super::client::{Client, RunInfo, TimedJob};
@@ -137,7 +137,7 @@ pub struct Report {
     pub rows: Vec<Row>,
     /// Failed jobs that failed outside any test runner (a build, a lint).
     pub non_test_failures: usize,
-    /// Failed jobs that never ran a step (no runner took them): excluded, nothing to read.
+    /// Failed jobs with no step timings (no runner took them, or every step starts and ends together): nothing to read.
     pub never_ran: usize,
     /// Cancelled runs of the app's own workflows, whose jobs are not read.
     pub cancelled_not_read: usize,
@@ -188,7 +188,10 @@ impl Report {
             ));
         }
         if self.cancelled_not_read > 0 {
-            l.push(format!("{} cancelled run(s) not read", self.cancelled_not_read));
+            l.push(format!(
+                "{} cancelled run(s) not read (counted and listed here; they do not change the exit code)",
+                self.cancelled_not_read
+            ));
         }
         if !self.config_source.is_empty() {
             l.push(format!("settings read from {}", self.config_source));
@@ -392,7 +395,7 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
             }),
         }
     }
-    let mut never_ran_runs: BTreeSet<u64> = BTreeSet::new();
+    let mut never_ran_jobs: BTreeSet<(u64, u64)> = BTreeSet::new();
     for run in finished {
         let own = own_workflow(app, run.workflow());
         let last = run.run_attempt;
@@ -436,7 +439,7 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
                 }
                 if job.never_ran() {
                     report.never_ran += 1;
-                    never_ran_runs.insert(run.id);
+                    never_ran_jobs.insert((run.id, job.id));
                     continue;
                 }
                 let label = format!("{} \"{}\"", job.id, job.name);
@@ -517,9 +520,13 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
     }
     if report.never_ran > 0 {
         report.gaps.push(format!(
-            "{} failed job(s) never ran a step ({}), so what they would have shown is not measured",
+            "{} failed job(s) have no step timings ({}), so what they would have shown is not measured",
             report.never_ran,
-            never_ran_runs.iter().map(|r| format!("run {r}")).collect::<Vec<_>>().join(", ")
+            never_ran_jobs
+                .iter()
+                .map(|(r, j)| format!("job {j} of run {r}"))
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
     let runs = report.runs;
@@ -830,12 +837,18 @@ mod tests {
         assert_eq!(r.never_ran, 1);
         assert!(f.requested().iter().all(|u| !u.contains("/jobs/1112/")), "its log was asked for");
         assert!(
-            r.gaps.iter().any(|g| g.contains("never ran a step") && g.contains("run 111")),
+            r.gaps
+                .iter()
+                .any(|g| g.contains("have no step timings") && g.contains("job 1112 of run 111")),
             "{:?}",
             r.gaps
         );
         assert!(!r.complete());
-        assert!(r.text().contains("NOT MEASURED: 1 failed job(s) never ran a step"), "{}", r.text());
+        assert!(
+            r.text().contains("NOT MEASURED: 1 failed job(s) have no step timings"),
+            "{}",
+            r.text()
+        );
     }
 
     #[test]

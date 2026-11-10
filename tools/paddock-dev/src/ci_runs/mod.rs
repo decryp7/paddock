@@ -28,7 +28,8 @@ type Reader = Box<dyn Fn(&str) -> std::io::Result<String>>;
 
 const SERVER: &str = "https://dev.decryptology.net";
 
-/// Arguments of `ci flakes`.
+/// Arguments of `ci flakes`. Cancelled runs are counted and listed in the report ("N cancelled run(s) not read") but never change
+/// the exit code.
 #[derive(Args)]
 pub struct FlakesArgs {
     /// The app (`dyno`, `debrief`, ...): its own workflows' jobs and the `app <app>` jobs of the shared ones.
