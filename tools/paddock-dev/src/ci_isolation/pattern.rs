@@ -155,7 +155,8 @@ mod tests {
 
     #[test]
     fn the_slot_must_end_the_pattern_right_after_a_kept_folders_name() {
-        let k = parse_kept("target target-{name}-{src}-{slot} slot\nbrowser test-browser-{name}-{slot} slot\nsrc src/{name}-{slot} slot\n");
+        let k = parse_kept("target target-{name}-{src}-{slot} slot\nbrowser test-browser-{name}-{slot} slot\nsrc src/{name}-{slot} slot\n")
+            .unwrap();
         for good in [
             "[/\\\\]test-browser-spotter-{slot}",
             "test-browser-x-{slot}",

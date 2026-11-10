@@ -53,10 +53,36 @@ fn lines_of(text: &str) -> impl Iterator<Item = String> + '_ {
     text.replace('\r', "").lines().map(str::to_string).collect::<Vec<_>>().into_iter()
 }
 
-/// Parses `kept-folders.txt` (CRLF-safe). A line of fewer than three fields is not a layout.
-pub fn parse_kept(text: &str) -> Kept {
+/// The placeholders a layout may hold.
+const PLACEHOLDERS: [&str; 3] = ["{name}", "{src}", "{slot}"];
+
+/// The first `{...}` in `layout` that is not a known placeholder, if any.
+fn unknown_placeholder(layout: &str) -> Option<String> {
+    let mut rest = layout;
+    while let Some(i) = rest.find('{') {
+        let tail = &rest[i..];
+        let end = tail.find('}').map_or(tail.len(), |e| e + 1);
+        let word = &tail[..end];
+        if !PLACEHOLDERS.contains(&word) {
+            return Some(word.to_string());
+        }
+        rest = &tail[end..];
+    }
+    None
+}
+
+/// Parses `kept-folders.txt` (CRLF-safe). A line of fewer than three fields is not a layout. A layout with a placeholder other than
+/// `{name}`, `{src}` and `{slot}` is refused with the line named: it would be read as a literal by every glob and never match.
+pub fn parse_kept(text: &str) -> Result<Kept, String> {
     let mut kept = Kept::default();
-    for line in lines_of(text) {
+    for (index, line) in lines_of(text).enumerate() {
+        let number = index + 1;
+        let check = |layout: &str| match unknown_placeholder(layout) {
+            Some(p) => Err(format!(
+                "kept-folders.txt line {number}: the layout '{layout}' has the unknown placeholder {p}; only {{name}}, {{src}} and {{slot}} exist. Fix the line."
+            )),
+            None => Ok(()),
+        };
         let fields: Vec<&str> = line.split_whitespace().collect();
         let Some(first) = fields.first() else { continue };
         if first.starts_with('#') {
@@ -65,11 +91,13 @@ pub fn parse_kept(text: &str) -> Kept {
                 && let Some(rest) = rest.trim_start().strip_prefix("retired:")
                 && let Some(layout) = rest.split_whitespace().next()
             {
+                check(layout)?;
                 kept.retired.push(layout.to_string());
             }
             continue;
         }
         if fields.len() >= 3 {
+            check(fields[1])?;
             kept.layouts.push(Layout {
                 kind: fields[0].to_string(),
                 layout: fields[1].to_string(),
@@ -77,7 +105,7 @@ pub fn parse_kept(text: &str) -> Kept {
             });
         }
     }
-    kept
+    Ok(kept)
 }
 
 /// Parses `ports.txt` (CRLF-safe). Lines whose numbers do not parse are not blocks.
@@ -222,12 +250,21 @@ mod tests {
 
     #[test]
     fn the_table_reads_with_crlf_and_keeps_retired_layouts() {
-        let k = parse_kept(TABLE);
+        let k = parse_kept(TABLE).unwrap();
         assert_eq!(k.layouts.len(), 3);
         assert_eq!(k.layouts[0].kind, "target");
         assert_eq!(k.layouts[0].layout, "target-{name}-{src}-{slot}");
         assert!(k.layouts[2].scope == "shared" && !k.layouts[2].is_slot());
         assert_eq!(k.retired, ["target-{name}-{slot}"]);
+    }
+
+    #[test]
+    fn a_placeholder_that_does_not_exist_is_refused_with_its_line() {
+        let e = parse_kept("src src/{name}-{slot} slot\ntarget target-{name}-{arch}-{slot} slot\n").unwrap_err();
+        assert!(e.contains("line 2") && e.contains("{arch}"), "{e}");
+        let e = parse_kept("# retired: target-{name}-{os}-{slot} 2026-11-10\n").unwrap_err();
+        assert!(e.contains("line 1") && e.contains("{os}"), "{e}");
+        assert!(parse_kept("a {name} slot\n").is_ok());
     }
 
     #[test]
@@ -253,7 +290,7 @@ mod tests {
 
     #[test]
     fn an_old_layout_folder_is_retired() {
-        let k = parse_kept(TABLE);
+        let k = parse_kept(TABLE).unwrap();
         assert!(k.is_retired("target-pitwall-app-s1", 1), "a hyphenated name, old layout");
         assert!(k.is_retired("target-x-s2", 2));
     }
@@ -261,7 +298,7 @@ mod tests {
     #[test]
     fn a_current_folder_is_never_retired_also_with_hyphens_in_the_name() {
         // The negative controls of the amendment: the retired glob `target-*-s<n>` matches these, the current layout owns them.
-        let k = parse_kept(TABLE);
+        let k = parse_kept(TABLE).unwrap();
         for (name, src) in [("x", "0123456789"), ("pitwall-app", "abcdef0123"), ("a-b-c-d", "ffffffffff")] {
             let r = rel(name, src, 1);
             assert!(glob_match("target-*-s1", &r), "{r}: the retired glob alone would take it");
@@ -271,7 +308,7 @@ mod tests {
 
     #[test]
     fn src_is_exactly_ten_lower_case_hex_digits_before_the_slot() {
-        let k = parse_kept(TABLE);
+        let k = parse_kept(TABLE).unwrap();
         for bad in ["012345678", "01234567890", "0123456789A", "0123456789g"] {
             let r = rel("x", bad, 1);
             assert!(!k.matches_current(&r, 1), "{r} is not a current folder");
@@ -283,7 +320,7 @@ mod tests {
 
     #[test]
     fn a_folder_matching_no_layout_at_all_is_not_retired() {
-        let k = parse_kept(TABLE);
+        let k = parse_kept(TABLE).unwrap();
         assert!(!k.is_retired("something-else", 1));
         assert!(!k.is_retired("src/x-s1", 1), "a current layout");
         assert!(!k.is_retired("target-x-s1", 2), "another slot");

@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! dev ci isolation acquire | release | status | slots | temp
-//! dev ci isolation path <kind> [<name>] [--source <dir>]
+//! dev ci isolation path <kind> [<name>] [--source <dir>] | source-key <dir>
 //! dev ci isolation owns <folder> [<kind>] | port <name> | pattern <regex> | sweep-slot [all]
 //! dev ci isolation tmpdir setup | remove | sweep
 //! ```
@@ -116,12 +116,20 @@ impl Ctx {
     /// `kept-folders.txt`, parsed.
     pub fn kept(&self) -> R<table::Kept> {
         let p = self.tables.join("kept-folders.txt");
-        std::fs::read_to_string(&p).map(|t| table::parse_kept(&t)).map_err(|e| {
+        let text = std::fs::read_to_string(&p).map_err(|e| {
             Stop::die(format!(
                 "cannot read {}: {e}. Pass --tables <folder with kept-folders.txt and ports.txt>.",
                 p.display()
             ))
-        })
+        })?;
+        table::parse_kept(&text).map_err(Stop::die)
+    }
+
+    /// A whole number from a variable (digits only: `+5` and `5 ` are not numbers here), or `None` when unset, empty or not one.
+    pub fn digits(&self, key: &str) -> Option<u64> {
+        self.get(key)
+            .filter(|v| v.bytes().all(|b| b.is_ascii_digit()))
+            .and_then(|v| v.parse().ok())
     }
 
     /// `ports.txt`, parsed.
@@ -156,7 +164,7 @@ impl Sinks<'_> {
     }
 }
 
-const USAGE: &str = "usage: dev ci isolation acquire|release|status|slots|path <kind> [<name>] [--source <dir>]|temp|owns <folder> [<kind>]|port <name>|pattern <regex>|sweep-slot [all]|tmpdir setup|remove|sweep";
+const USAGE: &str = "usage: dev ci isolation acquire|release|status|slots|path <kind> [<name>] [--source <dir>]|temp|owns <folder> [<kind>]|source-key <dir>|port <name>|pattern <regex>|sweep-slot [all]|tmpdir setup|remove|sweep";
 
 /// The tables folder: the flag, `PADDOCK_CI_TABLES`, else `conformance/ci` of the repository above the current folder.
 pub fn find_tables(flag: Option<PathBuf>, env: &HashMap<String, String>, cwd: &std::path::Path) -> PathBuf {
@@ -202,6 +210,11 @@ fn run_command(ctx: &Ctx, args: &[String], io: &mut Sinks<'_>) -> R<()> {
         }
         Some("sweep-slot") => slotflow::sweep_slot(ctx, rest.first().map(String::as_str), io),
         Some("path") => home::cmd_path(ctx, rest, io),
+        Some("source-key") => {
+            let dir = rest.first().ok_or_else(|| Stop::die("usage: dev ci isolation source-key <dir>"))?;
+            io.value(home::source_key(std::path::Path::new(&home::from_git_bash(dir, cfg!(windows))))?);
+            Ok(())
+        }
         Some("temp") => {
             io.value(home::job_temp(ctx)?);
             Ok(())
@@ -221,6 +234,20 @@ pub fn run(a: &IsolationArgs, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     let tables = find_tables(a.tables.clone(), &env, &cwd);
     let exe = std::env::current_exe().unwrap_or_default();
     dispatch(&Ctx::new(env, tables, exe), &a.args, &mut Sinks { out, err })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::testkit::ctx;
+
+    #[test]
+    fn numbers_from_the_environment_are_digits_only() {
+        assert_eq!(ctx(&[("N", "5")]).digits("N"), Some(5));
+        for bad in ["+5", "-5", "5 ", " 5", "5x", "", "0x5"] {
+            assert_eq!(ctx(&[("N", bad)]).digits("N"), None, "{bad:?}");
+        }
+        assert_eq!(ctx(&[]).digits("N"), None);
+    }
 }
 
 #[cfg(test)]

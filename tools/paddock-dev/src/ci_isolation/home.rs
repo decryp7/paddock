@@ -21,10 +21,11 @@ fn is_drive_path(p: &str) -> bool {
     b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'/' || b[2] == b'\\')
 }
 
-/// A Git-bash style `/c/dir` as a drive path `C:/dir`; anything else as it is. Only meaningful on Windows.
-fn from_git_bash(p: &str) -> String {
+/// A Git-bash style `/c/dir` (or `/c`) as a drive path `C:/dir`; anything else as it is. Only on Windows (`windows`), where Git bash
+/// hands native programs such paths; `windows` is a parameter so every OS tests it.
+pub fn from_git_bash(p: &str, windows: bool) -> String {
     let b = p.as_bytes();
-    if cfg!(windows) && b.len() >= 3 && b[0] == b'/' && b[1].is_ascii_alphabetic() && b[2] == b'/' {
+    if windows && (b.len() == 2 || b.len() >= 3 && b[2] == b'/') && b[0] == b'/' && b[1].is_ascii_alphabetic() {
         return format!("{}:{}", (b[1] as char).to_ascii_uppercase(), &p[2..]);
     }
     p.to_string()
@@ -46,7 +47,7 @@ pub fn native(p: &str) -> String {
 /// The job's temp folder: the runner's `RUNNER_TEMP` without a trailing separator.
 pub fn job_temp(ctx: &Ctx) -> R<String> {
     let t = ctx.need("RUNNER_TEMP", "RUNNER_TEMP is not set (the per-job temp folder of the runner)")?;
-    let t = from_git_bash(t);
+    let t = from_git_bash(t, cfg!(windows));
     Ok(t.trim_end_matches(['/', '\\']).to_string())
 }
 
@@ -72,7 +73,7 @@ pub fn slot(ctx: &Ctx) -> R<String> {
 /// The CI home (`ci-home.sh`): `PADDOCK_CI_HOME` (absolute, must exist) or `~/.paddock-ci` (created); canonical, no trailing slash.
 pub fn ci_home(ctx: &Ctx) -> R<String> {
     let dir: PathBuf = if let Some(h) = ctx.get("PADDOCK_CI_HOME") {
-        let h = from_git_bash(h);
+        let h = from_git_bash(h, cfg!(windows));
         if !(h.starts_with('/') || is_drive_path(&h)) {
             return Err(Stop::line(1, format!("::error::PADDOCK_CI_HOME ({h}) is not an absolute path.")));
         }
@@ -99,21 +100,34 @@ pub fn ci_home(ctx: &Ctx) -> R<String> {
 /// `pwd -P` (links resolved, `/` separators), on Windows `cygpath -m` with the drive letter lower-cased; the text is hashed as is,
 /// without a trailing newline.
 pub fn source_key(dir: &Path) -> R<String> {
+    // `/c/x`, `C:\x` and `c:/x` are one folder: Git bash callers may pass either.
     let real = std::fs::canonicalize(dir).map_err(|e| {
         Stop::die(format!(
             "--source {} cannot be resolved: {e}. Pass the workspace folder.",
             dir.display()
         ))
     })?;
-    Ok(source_key_of(&mixed(&real)))
+    Ok(source_key_of(&mixed(&real), cfg!(windows)))
 }
 
-/// [`source_key`] of an already canonical text.
-pub fn source_key_of(root: &str) -> String {
-    let mut text = root.trim_end_matches('/').to_string();
-    if is_drive_path(&text) {
+/// A path text as the key is made from it: Git-bash spelling made a drive path (`windows`), `\` as `/`, a `\\?\` prefix dropped, no
+/// trailing `/`, the drive letter lower-cased. Pure, so every OS tests it.
+pub fn normalize_root(root: &str, windows: bool) -> String {
+    let mut text = from_git_bash(root, windows);
+    if windows {
+        text = text.replace('\\', "/");
+    }
+    let text = text.strip_prefix("//?/").unwrap_or(&text);
+    let mut text = text.trim_end_matches('/').to_string();
+    if is_drive_path(&format!("{text}/")) {
         text.replace_range(0..1, &text[0..1].to_ascii_lowercase());
     }
+    text
+}
+
+/// [`source_key`] of a path text (see [`normalize_root`]).
+pub fn source_key_of(root: &str, windows: bool) -> String {
+    let text = normalize_root(root, windows);
     let digest = Sha256::digest(text.as_bytes());
     let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
     hex[..10].to_string()
@@ -184,7 +198,7 @@ pub fn cmd_path(ctx: &Ctx, args: &[String], io: &mut Sinks<'_>) -> R<()> {
                 "the kept folder '{kind}' is keyed by its source: pass --source <the workspace folder> (ADR 0025 amendment)"
             ))
         })?;
-        source_key(Path::new(&dir))?
+        source_key(Path::new(&from_git_bash(&dir, cfg!(windows))))?
     } else {
         String::new()
     };
@@ -227,14 +241,29 @@ mod tests {
     #[test]
     fn the_source_key_is_ten_hex_digits_of_the_sha256_of_the_root_text() {
         // sha256("abc") = ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
-        assert_eq!(source_key_of("abc"), "ba7816bf8f");
-        assert_eq!(source_key_of("abc/"), "ba7816bf8f", "no trailing slash");
+        assert_eq!(source_key_of("abc", false), "ba7816bf8f");
+        assert_eq!(source_key_of("abc/", false), "ba7816bf8f", "no trailing slash");
         assert_eq!(
-            source_key_of("C:/Users/x"),
-            source_key_of("c:/Users/x"),
+            source_key_of("C:/Users/x", false),
+            source_key_of("c:/Users/x", false),
             "the drive letter is lower-cased"
         );
-        assert_ne!(source_key_of("/a/b"), source_key_of("/a/c"));
+        assert_ne!(source_key_of("/a/b", false), source_key_of("/a/c", false));
+    }
+
+    #[test]
+    fn git_bash_and_native_spellings_of_one_windows_folder_give_one_key() {
+        let k = source_key_of("c:/x", true);
+        for spelling in ["/c/x", "C:\\x", "c:/x", "C:/x", "C:\\x\\", "\\\\?\\C:\\x", "/C/x/"] {
+            assert_eq!(source_key_of(spelling, true), k, "{spelling}");
+        }
+        assert_ne!(source_key_of("/c/y", true), k);
+        // Off Windows `/c/x` is just a folder of that name.
+        assert_eq!(from_git_bash("/c/x", false), "/c/x");
+        assert_eq!(from_git_bash("/c/x", true), "C:/x");
+        assert_eq!(from_git_bash("/cc/x", true), "/cc/x", "only a one-letter first part is a drive");
+        assert_eq!(from_git_bash("/usr", true), "/usr");
+        assert_eq!(normalize_root("/c/x", true), "c:/x");
     }
 
     #[test]

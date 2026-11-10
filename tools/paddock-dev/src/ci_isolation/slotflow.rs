@@ -68,8 +68,13 @@ fn pin_tool(ctx: &Ctx) -> Option<String> {
     Some(super::home::mixed(&ctx.exe)).filter(|s| !s.is_empty())
 }
 
-/// Whole gigabytes free on the folder's disk (`PADDOCK_DF` replaces `df` in tests); `None` when `df` cannot tell.
-pub fn free_gb(ctx: &Ctx, folder: &str) -> Option<u64> {
+/// Whole gigabytes free for this user on the folder's disk. `PADDOCK_DF` replaces the measurement with a `df -Pk`-shaped program (tests);
+/// else Windows asks `GetDiskFreeSpaceExW` and the others run `df -Pk`. `Err` says why it could not be measured.
+pub fn free_gb(ctx: &Ctx, folder: &str) -> Result<u64, String> {
+    #[cfg(windows)]
+    if ctx.get("PADDOCK_DF").is_none() {
+        return windows_free_gb(folder);
+    }
     let df = ctx.get("PADDOCK_DF").unwrap_or("df");
     let out = paddock_proc::command(df)
         .arg("-Pk")
@@ -77,10 +82,37 @@ pub fn free_gb(ctx: &Ctx, folder: &str) -> Option<u64> {
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .output()
-        .ok()?;
-    let text = String::from_utf8_lossy(&out.stdout).into_owned();
-    let kb: u64 = text.lines().nth(1)?.split_whitespace().nth(3)?.parse().ok()?;
-    Some(kb / 1_048_576)
+        .map_err(|e| format!("{df} could not be run: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("{df} -Pk failed ({})", out.status));
+    }
+    parse_df(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// The free gigabytes of `df -Pk`'s second line (its fourth column is the available kilobytes).
+pub fn parse_df(text: &str) -> Result<u64, String> {
+    let kb = text
+        .lines()
+        .nth(1)
+        .and_then(|l| l.split_whitespace().nth(3))
+        .ok_or_else(|| "df printed no data line".to_string())?;
+    kb.parse::<u64>()
+        .map(|kb| kb / 1_048_576)
+        .map_err(|_| format!("df's available column is '{kb}', not a number"))
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)] // one Win32 call on a wide string this function owns
+fn windows_free_gb(folder: &str) -> Result<u64, String> {
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    let wide: Vec<u16> = folder.replace('/', "\\").encode_utf16().chain(std::iter::once(0)).collect();
+    let mut available = 0u64;
+    // SAFETY: `wide` is NUL terminated and outlives the call; the two optional out-pointers are null, `available` is a valid u64.
+    let ok = unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut available, std::ptr::null_mut(), std::ptr::null_mut()) };
+    if ok == 0 {
+        return Err(format!("GetDiskFreeSpaceExW failed: {}", std::io::Error::last_os_error()));
+    }
+    Ok(available / (1024 * 1024 * 1024))
 }
 
 fn owner_field(home: &str, slot: &str, key: &str) -> Option<String> {
@@ -183,7 +215,7 @@ fn sweep(ctx: &Ctx, kept: &Kept, home: &str, all: bool, floor: Option<u64>, io: 
             io.say(format!("::warning::job-isolation: the sweep of slot s{n} failed"));
         }
         if let Some(floor) = floor
-            && free_gb(ctx, home).is_some_and(|f| f >= floor)
+            && free_gb(ctx, home).is_ok_and(|f| f >= floor)
         {
             return Ok(());
         }
@@ -230,7 +262,10 @@ pub fn acquire(ctx: &Ctx, io: &mut Sinks<'_>) -> R<()> {
     }
     let home = ci_home(ctx)?;
     let kept = ctx.kept()?;
-    let wait: u32 = ctx.get("PADDOCK_SLOT_WAIT_TRIES").and_then(|v| v.parse().ok()).unwrap_or(20);
+    let wait: u32 = ctx
+        .digits("PADDOCK_SLOT_WAIT_TRIES")
+        .and_then(|v| u32::try_from(v).ok())
+        .unwrap_or(20);
     let pause = ctx
         .get("PADDOCK_SLOT_WAIT_SECONDS")
         .and_then(|v| v.parse::<f64>().ok())
@@ -272,9 +307,10 @@ pub fn acquire(ctx: &Ctx, io: &mut Sinks<'_>) -> R<()> {
         ));
         return Err(Stop::silent(1));
     }
-    let mut words = said.split_whitespace();
-    let slot = words.next().unwrap_or("").to_string();
-    let token = said.trim_start().strip_prefix(slot.as_str()).unwrap_or("").trim().to_string();
+    // `read -r slot token <<< "$said"` reads the first line only: the slot is its first word, the token the rest of that line.
+    let first = said.lines().next().unwrap_or("").trim();
+    let (slot, token) = first.split_once(char::is_whitespace).map_or((first, ""), |(s, t)| (s, t.trim()));
+    let (slot, token) = (slot.to_string(), token.to_string());
     if !valid_slot(&slot) || token.is_empty() {
         return Err(Stop::die(format!("paddock-dev answered '{said}', not a slot and a token")));
     }
@@ -297,12 +333,18 @@ pub fn acquire(ctx: &Ctx, io: &mut Sinks<'_>) -> R<()> {
         "job-isolation: slot {slot} (kept folders end in -{slot}); temp folders in {temp}"
     ));
     sweep(ctx, &kept, &home, false, None, io)?;
-    let floor: u64 = ctx.get("PADDOCK_CI_MIN_FREE_GB").and_then(|v| v.parse().ok()).unwrap_or(30);
-    let free = free_gb(ctx, &home);
+    let floor: u64 = ctx.digits("PADDOCK_CI_MIN_FREE_GB").unwrap_or(30);
+    let not_measured = |io: &mut Sinks<'_>, why: &str| {
+        io.say(format!(
+            "::warning::job-isolation: free disk on {home} not measured ({why}); the floor was not checked"
+        ));
+    };
+    let free = free_gb(ctx, &home).map_err(|why| not_measured(io, &why)).ok();
     if let Some(free) = free.filter(|f| *f < floor) {
         io.say(format!("::warning::job-isolation: {free} GB free on the CI home's disk, below the floor of {floor} GB (PADDOCK_CI_MIN_FREE_GB); removing idle slots' kept folders, highest slot first"));
         sweep(ctx, &kept, &home, true, Some(floor), io)?;
-        if let Some(free) = free_gb(ctx, &home).filter(|f| *f < floor) {
+        let again = free_gb(ctx, &home).map_err(|why| not_measured(io, &why)).ok();
+        if let Some(free) = again.filter(|f| *f < floor) {
             io.say(format!("::error::job-isolation: still only {free} GB free on {home}'s disk after removing every idle slot's kept folders (floor {floor} GB). Free disk on the host, then re-run the job."));
             // Give the slot back: this job will not run.
             let again = Ctx::new(ctx_env_with(ctx, &slot, &token), ctx.tables.clone(), ctx.exe.clone());
@@ -393,7 +435,6 @@ pub fn release(ctx: &Ctx, io: &mut Sinks<'_>) -> R<()> {
     let Ok(home) = ci_home(ctx).inspect_err(|e| io.say(&e.text)) else {
         return Ok(());
     };
-    let kept = ctx.kept()?;
     let mut ok = true;
     match held_by_us(ctx, &home, &s, &token) {
         Err(()) => {
@@ -431,12 +472,15 @@ pub fn release(ctx: &Ctx, io: &mut Sinks<'_>) -> R<()> {
         ));
     }
     io.say(format!("job-isolation: released {s}"));
+    // The slot is free before the tables are read: a table that cannot be read must not keep a slot held.
+    let kept = ctx.kept()?;
     sweep(ctx, &kept, &home, false, None, io)?;
     if ok { Ok(()) } else { Err(Stop::silent(1)) }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::{free_gb, parse_df};
     use crate::ci_isolation::testkit::{ctx, go};
 
     #[test]
@@ -449,6 +493,22 @@ mod tests {
             err.contains("::error::job-isolation: PADDOCK_CI_SLOTS must be a whole number above 0 (got 'many')"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn df_is_read_from_its_second_line_and_a_bad_answer_says_what_it_was() {
+        assert_eq!(
+            parse_df("Filesystem 1024-blocks Used Available Capacity Mounted\ndisk 1 1 31457280 1% /\n"),
+            Ok(30)
+        );
+        assert!(parse_df("Filesystem\n").unwrap_err().contains("no data line"));
+        assert!(parse_df("h\ndisk 1 1 lots 1% /\n").unwrap_err().contains("'lots'"));
+    }
+
+    #[test]
+    fn a_program_that_is_not_df_is_an_unmeasured_disk_not_a_free_one() {
+        let c = ctx(&[("PADDOCK_DF", "/nonexistent/df")]);
+        assert!(free_gb(&c, "/").unwrap_err().contains("could not be run"));
     }
 
     #[test]

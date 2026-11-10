@@ -197,6 +197,23 @@ struct AffectedArgs {
 
 /// Runs the tool: `args` are the command line without the program name. Returns the exit code.
 pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
+    // What `./dev --print-binary` answers (the wrapper prints its cached binary): this binary's own path, so the CI kit can pin
+    // whichever of the two `PADDOCK_DEV` names.
+    if args == ["--print-binary"] {
+        return match std::env::current_exe() {
+            Ok(p) => {
+                let _ = writeln!(out, "{}", p.display());
+                Exit::Ok.code()
+            }
+            Err(e) => finish(
+                Format::Text,
+                Err(CliError::failure(format!("the program's own path is unknown: {e}."))),
+                out,
+                err,
+            )
+            .code(),
+        };
+    }
     let format = if args.iter().any(|a| a == "--json") {
         Format::Json
     } else {

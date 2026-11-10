@@ -85,7 +85,7 @@ pub fn old(folder: &Path, days: u64, now: SystemTime) -> bool {
 /// layout are due at once, whatever their age (amendment §1). The old unslotted layout's folders belong to slot 1.
 pub fn due(ctx: &Ctx, kept: &Kept, home: &Path, n: u32, all: bool, now: SystemTime) -> R<Vec<(PathBuf, String)>> {
     let keep = keep_slots(ctx)?;
-    let days = ctx.get("PADDOCK_CI_ORPHAN_DAYS").and_then(|d| d.parse::<u64>().ok()).unwrap_or(14);
+    let days = ctx.digits("PADDOCK_CI_ORPHAN_DAYS").unwrap_or(14);
     let mut folders = slot_folders(kept, home, n);
     if n == 1 {
         folders.extend(legacy_folders(kept, home));
@@ -114,36 +114,49 @@ pub fn due(ctx: &Ctx, kept: &Kept, home: &Path, n: u32, all: bool, now: SystemTi
     Ok(out)
 }
 
+/// `real` (a canonical folder, `/` separators) relative to `home`, or `None` when it is not under it. On Windows the drive letter's
+/// case is not compared (`C:/ci` and `c:/ci` are one folder).
+pub fn rel_under_home(home: &str, real: &str, windows: bool) -> Option<String> {
+    let (home, real) = if windows {
+        (super::home::normalize_root(home, true), super::home::normalize_root(real, true))
+    } else {
+        (home.to_string(), real.to_string())
+    };
+    real.strip_prefix(&format!("{home}/")).map(str::to_string)
+}
+
+/// Is `rel` a folder of a slot layout (of kind `only`, when given) of slot `slot`? Only a path with as many `/` as the layout: `*` in a
+/// layout's glob would otherwise match across a `/`, and a folder inside a checkout would be taken for a kept folder.
+pub fn owns_rel(kept: &Kept, rel: &str, slot: &str, only: &str) -> bool {
+    kept.slot_layouts().any(|l| {
+        (only.is_empty() || l.kind == only)
+            && rel.matches('/').count() == l.layout.matches('/').count()
+            && glob_match(&glob_of(&l.layout, slot, true), rel)
+    })
+}
+
 /// `owns <folder> [<kind>]`: exit 0 when the folder is a kept folder (of that kind) of this job's slot; 1 otherwise, with no output.
 pub fn cmd_owns(ctx: &Ctx, args: &[String]) -> R<()> {
     let refuse = || Stop::silent(1);
-    let dir = args.first().map(String::as_str).unwrap_or("");
+    let dir = super::home::from_git_bash(args.first().map(String::as_str).unwrap_or(""), cfg!(windows));
     let only = args.get(1).map(String::as_str).unwrap_or("");
-    let meta = std::fs::symlink_metadata(dir).map_err(|_| refuse())?;
+    let meta = std::fs::symlink_metadata(&dir).map_err(|_| refuse())?;
     if dir.is_empty() || !meta.is_dir() {
         return Err(refuse());
     }
     let s = slot(ctx).map_err(|_| refuse())?;
     let home = ci_home(ctx)?;
-    let path = Path::new(dir);
+    let path = Path::new(&dir);
     let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
     let real_parent = std::fs::canonicalize(parent).map_err(|_| refuse())?;
     let name = path.file_name().ok_or_else(refuse)?;
     let real = super::home::mixed(&real_parent.join(name));
-    let rel = real.strip_prefix(&format!("{home}/")).ok_or_else(refuse)?;
-    let kept = ctx.kept()?;
-    for l in kept.slot_layouts() {
-        if !only.is_empty() && l.kind != only {
-            continue;
-        }
-        if rel.matches('/').count() != l.layout.matches('/').count() {
-            continue;
-        }
-        if glob_match(&glob_of(&l.layout, &s, true), rel) {
-            return Ok(());
-        }
+    let rel = rel_under_home(&home, &real, cfg!(windows)).ok_or_else(refuse)?;
+    if owns_rel(&ctx.kept()?, &rel, &s, only) {
+        Ok(())
+    } else {
+        Err(refuse())
     }
-    Err(refuse())
 }
 
 #[cfg(test)]
@@ -157,6 +170,27 @@ mod tests {
             "target target-{name}-{src}-{slot} slot\nsrc src/{name}-{slot} slot\nsccache sccache-{slot} slot\ntools tools shared\n\
              # retired: target-{name}-{slot} 2026-11-10\n",
         )
+        .unwrap()
+    }
+
+    #[test]
+    fn owns_is_by_layout_slot_and_depth_in_every_spelling_of_the_home() {
+        let k = kept();
+        assert!(owns_rel(&k, "target-x-0123456789-s1", "s1", "target"));
+        assert!(!owns_rel(&k, "target-x-0123456789-s2", "s1", "target"), "another slot");
+        assert!(!owns_rel(&k, "target-x-0123456789-s1", "s1", "src"), "another kind");
+        // Nested inside a kept folder or a checkout: `?*` would match across the `/`, the depth guard does not.
+        assert!(!owns_rel(&k, "target-x-0123456789-s1/sub-0123456789-s1", "s1", ""));
+        assert!(!owns_rel(&k, "src/x-s1/target-y-0123456789-s1", "s1", ""));
+        assert!(owns_rel(&k, "src/x-s1", "s1", "src"));
+        // One answer for `/c/ci`, `C:\ci` and `c:/ci` as the home and as the folder.
+        let real = "C:/ci/src/x-s1";
+        for home in ["/c/ci", "C:\\ci", "c:/ci", "C:/ci"] {
+            let rel = rel_under_home(home, real, true).unwrap_or_else(|| panic!("{home}"));
+            assert!(owns_rel(&k, &rel, "s1", "src"), "{home}");
+        }
+        assert_eq!(rel_under_home("c:/ci", "/c/ci/src/x-s1", true).as_deref(), Some("src/x-s1"));
+        assert_eq!(rel_under_home("/ci", "/other/src/x-s1", false), None);
     }
 
     fn make(home: &Path, names: &[&str]) {
@@ -208,6 +242,7 @@ mod tests {
             d.path(),
             &[
                 "target-pitwall-app-s1",
+                "target-x-s1",
                 "target-pitwall-app-0123456789-s1",
                 "target-a-b-c-ffffffffff-s1",
             ],
@@ -215,9 +250,14 @@ mod tests {
         let c = ctx(&[]);
         let due = due(&c, &kept(), d.path(), 1, false, SystemTime::now()).unwrap();
         let n = names(&due, d.path());
-        assert_eq!(n.len(), 1, "{n:?}");
-        assert_eq!(n[0].0, "target-pitwall-app-s1");
-        assert!(n[0].1.starts_with("retired"), "{n:?}");
+        let mut got: Vec<&str> = n.iter().map(|(f, _)| f.as_str()).collect();
+        got.sort_unstable();
+        assert_eq!(
+            got,
+            ["target-pitwall-app-s1", "target-x-s1"],
+            "old names, with and without a hyphen: {n:?}"
+        );
+        assert!(n.iter().all(|(_, why)| why.starts_with("retired")), "{n:?}");
     }
 
     #[test]

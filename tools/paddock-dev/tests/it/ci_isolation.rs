@@ -189,3 +189,103 @@ fn the_engine_reads_every_name_from_the_data_files() {
     let rel = h.run(&["release"], &[], true);
     assert!(rel.status.success(), "{}", text(&rel.stderr));
 }
+
+#[test]
+fn the_source_key_is_one_command_and_matches_the_folder_path_makes() {
+    let d = tempfile::tempdir().unwrap();
+    let h = Host::new(d.path(), AMENDED);
+    let root = d.path().join("root-a");
+    std::fs::create_dir_all(&root).unwrap();
+    assert!(h.run(&["acquire"], &[], false).status.success());
+    let key = text(&h.run(&["source-key", root.to_str().unwrap()], &[], true).stdout);
+    let key = key.trim();
+    assert_eq!(key.len(), 10);
+    assert!(key.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()), "{key}");
+    let p = text(
+        &h.run(&["path", "target", "x", "--source", root.to_str().unwrap()], &[], true)
+            .stdout,
+    );
+    assert!(p.trim().ends_with(&format!("target-x-{key}-s1")), "{p}");
+    assert_eq!(h.run(&["source-key", "/no/such/folder"], &[], true).status.code(), Some(1));
+}
+
+#[test]
+fn a_table_with_an_unknown_placeholder_stops_acquire_before_a_slot_is_taken_and_names_the_line() {
+    let d = tempfile::tempdir().unwrap();
+    let h = Host::new(d.path(), "src src/{name}-{slot} slot\ntarget target-{name}-{arch}-{slot} slot\n");
+    let acq = h.run(&["acquire"], &[], false);
+    assert_eq!(acq.status.code(), Some(1));
+    let e = text(&acq.stderr);
+    assert!(
+        e.contains("::error::job-isolation: kept-folders.txt line 2") && e.contains("{arch}"),
+        "{e}"
+    );
+    assert!(
+        text(&h.run(&["status"], &[], false).stdout).contains("s1 free"),
+        "no slot was taken"
+    );
+}
+
+#[test]
+fn release_gives_the_slot_back_even_when_the_tables_have_become_unreadable() {
+    let d = tempfile::tempdir().unwrap();
+    let h = Host::new(d.path(), "target target-{name}-{slot} slot\n");
+    assert!(h.run(&["acquire"], &[], false).status.success());
+    std::fs::write(h.tables.join("kept-folders.txt"), "target target-{name}-{arch}-{slot} slot\n").unwrap();
+    let rel = h.run(&["release"], &[], true);
+    assert_eq!(rel.status.code(), Some(1), "the table error is reported");
+    assert!(
+        text(&h.run(&["status"], &[], false).stdout).contains("s1 free"),
+        "but the slot is free"
+    );
+}
+
+#[test]
+fn a_disk_that_cannot_be_measured_is_said_so_and_the_floor_is_not_pretended_checked() {
+    let d = tempfile::tempdir().unwrap();
+    let h = Host::new(d.path(), "target target-{name}-{slot} slot\n");
+    let acq = h.run(
+        &["acquire"],
+        &[("PADDOCK_DF", "/usr/bin/false"), ("PADDOCK_CI_MIN_FREE_GB", "30")],
+        false,
+    );
+    assert!(acq.status.success(), "{}", text(&acq.stderr));
+    let e = text(&acq.stderr);
+    assert!(
+        e.contains("::warning::job-isolation: free disk on ") && e.contains("not measured (") && e.contains("the floor was not checked"),
+        "{e}"
+    );
+}
+
+#[test]
+fn the_binary_answers_print_binary_with_its_own_path() {
+    let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+        .arg("--print-binary")
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert_eq!(
+        text(&out.stdout).trim(),
+        std::env::current_exe()
+            .ok()
+            .map(|_| env!("CARGO_BIN_EXE_paddock-dev").to_string())
+            .unwrap()
+    );
+}
+
+#[test]
+fn old_layout_folders_with_and_without_a_hyphen_are_retired_and_current_ones_stay() {
+    let d = tempfile::tempdir().unwrap();
+    let h = Host::new(d.path(), AMENDED);
+    for n in ["target-x-s2", "target-pitwall-app-s2", "target-pitwall-app-0123456789-s2"] {
+        std::fs::create_dir_all(h.ci.join(n)).unwrap();
+    }
+    let swept = h.run(
+        &["sweep-slot"],
+        &[("PADDOCK_CI_IDLE_SLOT", "s2"), ("PADDOCK_CI_KEEP_SLOTS", "2")],
+        false,
+    );
+    assert!(swept.status.success(), "{}", text(&swept.stderr));
+    assert!(!h.ci.join("target-x-s2").exists() && !h.ci.join("target-pitwall-app-s2").exists());
+    assert!(h.ci.join("target-pitwall-app-0123456789-s2").exists());
+}
