@@ -1,12 +1,13 @@
 # 97. A user approval carries proof that the user gave it
 
-- Status: Proposed 2026-11-10, ready for the user's decisions (D1 to D11). Revision 6 makes the last fix the review
-  asked for (P1-E); revision 5 answered the re-review of revision 4, `db150467b`: P1-D and the P2s; revision
-  4 answered the re-review of revision 3, `849a4ab13`: P1-C; revision 3 answered the re-review of revision 2,
-  `c591c5668`: P1-A, P1-B and the P2s; revision 2 answered the security review of revision 1, `d21eddcbf`; see the
-  "Review answers" sections. Drafted at the coordinator's request of 2026-11-10 under ER-21 (a class seen three or more
-  times gets a redesign ADR), with requirements R1 to R5 from the ADR 0093 review. Nothing here is built yet. ER-23 does
-  not apply (no drawings).
+- Status: Accepted 2026-11-10 (user); D3 interim (c) then (a) when two FIDO2 keys arrive; other decisions as recommended
+  (D8: (a) now, (b) later). The independent review approved revision 5 subject to P1-E, which revision 6 (`5ae86c263`)
+  made. History: Proposed 2026-11-10; revision 6 made the last fix the review asked for (P1-E); revision 5 answered the
+  re-review of revision 4, `db150467b`: P1-D and the P2s; revision 4 answered the re-review of revision 3, `849a4ab13`:
+  P1-C; revision 3 answered the re-review of revision 2, `c591c5668`: P1-A, P1-B and the P2s; revision 2 answered the
+  security review of revision 1, `d21eddcbf`; see the "Review answers" sections. Drafted at the coordinator's request of
+  2026-11-10 under ER-21 (a class seen three or more times gets a redesign ADR), with requirements R1 to R5 from the ADR
+  0093 review. Nothing here is built yet. ER-23 does not apply (no drawings).
 - Date: 2026-11-10
 - Related: ER-5, ER-14 (tests never touch real keys or the keychain), ER-15, ER-21 / rule 40, ER-27, ER-31, ER-33 /
   rule 71, ER-36; rule 55 (`Copies-date: ... approved: <coordinator|user>`); ADR 0022 and its build-inputs amendment
@@ -130,8 +131,9 @@ Keys (D3):
   `sk-ecdsa-sha2-nistp256@openssh.com` *(secondary, unverified)*. Its flags byte is most likely composed in software by
   `ssh-keychain.dylib`, not attested by hardware, and a reused LocalAuthentication context might allow several
   signatures per Touch ID *(per the review; unverified)*. WP-0 checks both with the user's own key, including an
-  agent-written process that holds its own LocalAuthentication context with a reuse window and signs twice. It is **a
-  recovery key, not the routine signer**.
+  agent-written process that holds its own LocalAuthentication context with a reuse window and signs twice. Under the
+  accepted D3 it is the **interim routine key** until two FIDO2 keys arrive, but only if WP-0 shows one Touch ID per
+  signature; then it is demoted to recovery or retired (D3, WP-8).
 - **Recovery keys sign only trust-file changes.** A `[[key]]` entry has `role = "routine"` or `role = "recovery"`; the
   verifier refuses a record, trailer or code pin whose deciding commit is signed by a recovery key, and accepts recovery
   signatures only on commits that change trust files (key replacement, §10). The D3 (c) offline software key signs on
@@ -449,8 +451,18 @@ approvals verify --by-key <fp>` lists them). **All keys lost.** A new genesis, a
 record; records signed under the old root are unverified until re-signed. A Secure Enclave key dies with its Mac, so it
 is never the only key.
 
-**Interim while keys are bought or set up.** Nothing verifies, so the stricter state holds: ADR 0093 has no waivers and
-its mode follows its accepted go-live rules, a ratchet keeps its target, and date moves needing the user do not count.
+**Interim while keys are bought or set up (accepted D3).** Until WP-0 has set up a key, nothing verifies, so the
+stricter state holds: ADR 0093 has no waivers and its mode follows its accepted go-live rules, a ratchet keeps its
+target, and date moves needing the user do not count. From WP-0 until the FIDO2 keys arrive, D3 (c) applies: the Secure
+Enclave key (`role = "routine"`) signs records **only if** WP-0's first test shows that one Touch ID allows one
+signature and no more (including against an agent-held LocalAuthentication context with a reuse window); the offline
+software key (`role = "recovery"`, made, kept and used off the Mac) signs trust-file changes only. If WP-0 shows reuse,
+the Secure Enclave key is enrolled as recovery only, no record verifies, and waivers stay impossible until the FIDO2
+keys arrive (the stricter state). **Switch-over** (WP-8, when the two keys arrive): the user installs the FIDO
+middleware (§1, `sudo`), enrolls both FIDO2 keys in one trust-file commit signed by the current routine key (one
+routine, one recovery kept apart), sets `valid-before=<today>` on the Secure Enclave key (or demotes it to `role =
+"recovery"`) and retires the offline software key the same way, updates the pin, and re-signs live records with the new
+routine key if the Secure Enclave key was retired.
 
 **Migration inventory (D9).**
 
@@ -576,7 +588,7 @@ strict state. Rolling back never loosens a gate.
 |---|---|---|---|
 | D1 | Mechanism | (a) user-presence signatures; (b) separate identities; (c) honour plus hooks | **(a), with (b) as defence in depth (D8)** |
 | D2 | What carries the signature | (a) signed commits, each record judged by the projection rule and per-line blame (§3); (b) detached signatures per record in their own namespace; (c) signed tags | **(a)**; fallback (b) |
-| D3 | Keys | (a) two FIDO2 keys (`sk-ssh-ed25519`, touch, PIN if supported), one routine, one recovery kept apart; (b) one FIDO2 key for routine signing and the Mac's Secure Enclave key as recovery; (c) no FIDO2 key: the Secure Enclave key for routine signing (after WP-0 confirms one Touch ID per signature, including against an agent-held LocalAuthentication context) plus an offline software recovery key made, kept and used off the Mac. Recovery keys sign trust-file changes only. Every FIDO2 option needs the root-owned middleware of §1 (WP-0, `sudo`) | **(a)**; (b) if buying a second key is not wanted; (c) only until keys arrive. Until any key exists, nothing verifies (stricter state, §10) |
+| D3 | Keys | (a) two FIDO2 keys (`sk-ssh-ed25519`, touch, PIN if supported), one routine, one recovery kept apart; (b) one FIDO2 key for routine signing and the Mac's Secure Enclave key as recovery; (c) no FIDO2 key: the Secure Enclave key for routine signing (after WP-0 confirms one Touch ID per signature, including against an agent-held LocalAuthentication context) plus an offline software recovery key made, kept and used off the Mac. Recovery keys sign trust-file changes only. Every FIDO2 option needs the root-owned middleware of §1 (WP-0, `sudo`) | **Accepted 2026-11-10: (c) in the interim, then (a) when two FIDO2 keys arrive** (the user has none yet). Under (c) the Secure Enclave key signs records only if WP-0 shows one Touch ID per signature; otherwise no record verifies until the switch-over (§10). The switch-over is a WP-8 item |
 | D4 | Trust root | (a) chained trust files from a pinned genesis, bound to the repository, pin in an admin-only Actions variable and in the release summary (§2); (b) keys only in a CI variable; (c) repository file only | **(a)** |
 | D5 | Scope | (a) every record a check or gate reads as the user's, trailers with `approved: user`, gate switches that lower a tag gate, code pins, and ADR 0096 acceptances from the cutover; (b) the same without acceptances | **(a)** |
 | D6 | Lowering switches | (a) a lowering of a tag-guarding gate always needs a user record, raising never; switches outside files are ignored; (b) the coordinator may lower for at most 72 h with an unsigned record, the user signs to extend | **(a)** |
@@ -596,7 +608,7 @@ not verify is treated as not approved, and the stricter state applies."
 
 | WP | What | Days | Needs |
 |---|---|---|---|
-| WP-0 | Bootstrap: the FIDO middleware built from a pinned OpenSSH release, its sha256 printed, installed by the user with `sudo` into `/usr/local/libexec/paddock/`, first step a real signature through it (fallback: the pinned `ssh-keygen` installed beside it); `./dev approve --genesis`, `docs/approvals/README.md`, `subjects.toml`, the user's key creation and pin (user's hands, about 30 min); the Secure Enclave checks with the user's own key, including an agent-held LocalAuthentication context | 1 | D3, D4 |
+| WP-0 | Bootstrap for the accepted D3 interim: **first** the Secure Enclave test with the user's own key (one Touch ID per signature, including an agent-held LocalAuthentication context with a reuse window; the flags byte); the offline software recovery key made off the Mac; `./dev approve --genesis` with the Secure Enclave key as routine (or recovery only, if the test shows reuse), `docs/approvals/README.md`, `subjects.toml`, the pin (user's hands, about 30 min). The FIDO middleware (built from a pinned OpenSSH release, sha256 printed, installed with `sudo` into `/usr/local/libexec/paddock/`, a real signature through it first; fallback: the pinned `ssh-keygen` beside it) is prepared here and installed at the switch-over | 1 | D3, D4 |
 | WP-1 | Verifier core on `ssh-key` 0.6.7: flags and counter read from the signature bytes, `[[key]]` presence rules, allowed-signers parser; test vectors built in the test (PC-6, PC-8, PC-19) | 1 | D2 |
 | WP-2 | History: strict schemas and record ids, the structural walk of §3 (memoized, parents in recorded order), fixed-config blame, chain, genesis descent, pin read with the bot's read token, server time from `approvals-audit.yml` runs (6 when missing or not monotonic), the merge-base rule in `crates/paddock-merge-rule`, shared with the merge check, deletion rule, `Outcome`s (PC-1 to PC-5e, PC-9 to PC-13, PC-20) | 2.75 | WP-1 |
 | WP-3 | Library API for callers and the C100 wiring; switches and trailers (PC-7, PC-11). ADR 0075's `./dev copies`, ADR 0073's check and ADR 0096's `./dev adr status` wire it in their own work packages | 1.5 | WP-2 |
@@ -604,8 +616,8 @@ not verify is treated as not approved, and the stricter state applies."
 | WP-5 | C108 in conformance (report); the crate's own binary and the pinned `.gitea/actions/approvals-check` action called by every release workflow; release summary prints the trust root; runs on the Linux and Windows runners (PC-17b) | 1.5 | WP-3 |
 | WP-6 | Post-tag audit on `main`: descent check, job and step comparison, code pins, release and package listing, signed release tags if D7 (b), issue and release note; the pinned `approvals-audit.yml`; recorded-API tests (PC-14, PC-15, PC-17, PC-17b); protected-tag behaviour on a scratch repository | 2 | WP-5, D7, D11 |
 | WP-7 | Identities (D8 (a)): `paddock-agent`, token swap in agents' environment and CI secrets, keychain item and git helper, claude-in-chrome block, branch protection, where publish credentials can live (user's hands for the admin steps) | 1 | D8 |
-| WP-8 | Migration: inventory across every `origin` branch (including `eba981aed`), ADRs 0089 to 0096 landed before the cutover, re-sign batch, cutover commit pinned, rule text, briefs (coordinator, integrator, reviewer), lessons entry | 1 | WP-4, D9 |
-| | **Total** | **13.75 agent-days** (13.5 to 15.5 with the risks below) | |
+| WP-8 | Migration: inventory across every `origin` branch (including `eba981aed`), ADRs 0089 to 0096 landed before the cutover, re-sign batch, cutover commit pinned, rule text, briefs (coordinator, integrator, reviewer), lessons entry; **D3 switch-over** when the two FIDO2 keys arrive (§10: middleware installed with `sudo`, both keys enrolled in one signed trust-file commit, the Secure Enclave and offline keys retired or demoted to recovery, pin updated, live records re-signed if needed) | 1.25 | WP-4, D9, the keys |
+| | **Total** | **14 agent-days** (13.75 to 15.75 with the risks below) | |
 
 **Enforcement needs WP-0 to WP-6: 11.75 agent-days.** Without WP-6 nothing detects a bypass at a tag (§7) and there is
 no server time (§2), so `valid-*` checks would report 6. WP-0 to WP-5 (9.75 days) give a report-only C108 that already
