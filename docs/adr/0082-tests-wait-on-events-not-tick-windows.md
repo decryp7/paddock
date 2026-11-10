@@ -1,7 +1,7 @@
 # 82. Tests wait on events, not tick windows: a stepped ticker for state machines, one until-stable settle, and C71 over counts
 
-- Status: Proposed (2026-11-10), revision 3 (2026-11-10): the second independent review APPROVED it; its three P2s are
-  applied (copy dates, where `Wait` lives, the order of `./dev ci flakes`). Draft for the user's decision (ER-21); not implemented.
+- Status: Accepted 2026-11-10 (user), decisions as recommended. Revision 3 (2026-11-10): the second independent review independent review approved it; its three P2s are
+  applied (copy dates, where `Wait` lives, the order of `./dev ci flakes`). Not implemented yet.
 - Date: 2026-11-10
 - Related: ER-12 / rule 5 (no sleeps or raised timeouts; make it deterministic), rule 49 (specs never wait a fixed number
   of event-loop turns), ER-21 / rule 40, ER-29 (shuffled nightly suites), ER-33 / rule 71 (a check needs a positive

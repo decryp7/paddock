@@ -1,7 +1,7 @@
 # 81. Process liveness is three-valued: "could not look" is never "gone", proof tokens before destructive acts, one check over every look
 
-- Status: Proposed (2026-11-10), revision 3 (2026-11-10): the second independent review APPROVED it; its three P2s are
-  applied (Gone only on ESRCH, the S21 exception, stale text). Draft for the user's decision (ER-21); not implemented.
+- Status: Accepted 2026-11-10 (user), decisions as recommended. Revision 3 (2026-11-10): the second independent review independent review approved it; its three P2s are
+  applied (Gone only on ESRCH, the S21 exception, stale text). Not implemented yet.
 - Date: 2026-11-10
 - Related: ER-21 / rule 40 (recurring bugs mean a missing design rule), rule 53 and ADR
   [0033](0033-processes-by-identity-never-by-a-bare-pid.md) (identity before acting: *which* process), ER-27 (logs explain
@@ -295,7 +295,7 @@ constructor is removed with them; no migration of old folders (user, 2026-11-06:
   reaped, or a process the owner does not hold, goes through a look. Their "ended" reports come from the handle's wait
   status, which is proof (`Departed::reaped`). 0076's leak guard uses `paddock_testkit::proc::assert_gone` (fails on
   `Unknown`). The held-handle `try_wait` folds of this survey are 0076 territory and are registered, not rewritten, here.
-  **Amendment note for ADR 0076** (added to 0076 on acceptance of this ADR): "§2 and §2a: ending an owned child goes
+  **Amendment note for ADR 0076** (filed as [amendments/0076-liveness-2026-11-10.md](amendments/0076-liveness-2026-11-10.md); merged into 0076's text when that branch lands): "§2 and §2a: ending an owned child goes
   through its handle and never waits on a process-table look; a liveness token for a held child is minted from the handle
   (ADR 0081 §5)." 
 
