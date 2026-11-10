@@ -1780,7 +1780,7 @@ Review round (2026-11-10): the worker's `stop_for_exit` stops the import session
 detaches its `debrief-import` thread), the store threads and the stores; **open owners it does not stop, for WP-X1's ratchet:**
 the threads of calls in flight (`spawn_blocking` work of the peer's handler is cancelled by the peer's close but not joined, and
 its `DuckStore` clones keep the databases open), the plugin processes' threads, the IPC runtime's threads. The lifeline's
-fallback claims the exit atomically (serving, main exiting, lifeline exiting; a late `main` parks), and in `debrief-ipc` ends with
+fallback claims the exit atomically (serving, main exiting, lifeline exiting; a late `main` waits at most `STOP_MARGIN`, then ends the process itself), and in `debrief-ipc` ends with
 `end_without_destructors`. The D-E4 gate for instance 5 is not met (see `apps/debrief/docs/performance.md`).
 For WP-X3: `BuiltinPlugins::shutdown` stops plugin processes one after the other, so two hung plugins can overrun the 3 s teardown;
 stopping them in parallel is done now (`BuiltinPlugins::shutdown` and `WorkerPlugins::shutdown` run together, after the stores close). A child's kill grace must fit the parent's split (0.5 s per plugin by the amendment's §3.1), not the 1.5 s `KILL_GRACE`: a hung plugin still outlasts the 1.25 s budget, ends the worker with `_exit`, and is left to its own kill thread (WP-X3).
