@@ -117,18 +117,11 @@ fn workspaces(root: &Path) -> usize {
         .count()
 }
 
-/// `why` lists reasons in the order the script visited its sets; the closure here is sorted, so compare them as sets. The script's
-/// C100 content rule (a test file that adds or removes an ignore attribute or an environment guard marks conformance) needs the
-/// file's text before and after and is not in this port yet (plan.rs, C100_INPUTS), so its reasons are not compared; the
-/// `conformance` flag still is.
+/// `why` lists reasons in the order the script visited its sets; the closure here is sorted, so compare them as sets.
 fn canonical(mut v: Value) -> Value {
     if let Some(why) = v.get_mut("why").and_then(Value::as_object_mut) {
         for reasons in why.values_mut() {
             if let Some(list) = reasons.as_array_mut() {
-                list.retain(|r| {
-                    !r.as_str()
-                        .is_some_and(|r| r.starts_with("C100: an ignore attribute or an environment guard changed in "))
-                });
                 list.sort_by_key(|r| r.as_str().unwrap_or_default().to_string());
             }
         }
@@ -689,4 +682,55 @@ fn live_workflow_action_and_script_edits_narrow_exactly_as_affected_mjs_does() {
         "a positive control: most of these edits narrow the plan ({narrowed} of {})",
         edits.len()
     );
+}
+
+#[test]
+fn live_guard_edits_mark_conformance_exactly_as_affected_mjs_does() {
+    if !node_available() {
+        skip("scripts/affected.mjs or node is not available");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let copy = dir.path().join("copy");
+    let cloned = Command::new("git")
+        .args(["clone", "-q", "--shared", "-c", "core.autocrlf=false", "-c", "core.eol=lf"])
+        .arg(repo_root())
+        .arg(&copy)
+        .status()
+        .unwrap();
+    assert!(cloned.success(), "git clone of this repository");
+    let history = GitHistory::new(&copy, Duration::from_secs(60));
+    let graph = read_graph(&copy, &history).unwrap();
+    // A new Rust test with an ignore and a TypeScript spec with an environment guard, and a comment-only edit of each (no mark).
+    let edits: [(&str, &str, bool); 4] = [
+        ("crates/paddock-cli/src/lib.rs", "\n#[test]\n#[ignore]\nfn skipped_by_the_guard_test() {}\n", true),
+        ("crates/paddock-cli/src/lib.rs", "\n// a comment\n", false),
+        ("ui/projects/paddock-ui/src/public-api.ts", "\nit('guarded', () => { void process.env.X; });\n", true),
+        ("ui/projects/paddock-ui/src/public-api.ts", "\n// a comment\n", false),
+    ];
+    for (rel, add, marks) in edits {
+        let path = copy.join(rel);
+        let original = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, format!("{original}{add}")).unwrap();
+        let script = Command::new("node")
+            .current_dir(&copy)
+            .args(["scripts/affected.mjs", "--files", rel, "--explain"])
+            .output()
+            .unwrap();
+        assert!(script.status.success(), "{}", String::from_utf8_lossy(&script.stderr));
+        let req = Request {
+            files: vec![rel.to_string()],
+            all: false,
+            explain: true,
+            root: None,
+            base: None,
+            head: "HEAD".into(),
+        };
+        let got = canonical(plan_on_graph(&copy, &history, &req, &graph).unwrap());
+        assert_eq!(got, canonical(serde_json::from_slice(&script.stdout).unwrap()), "different plan for a guard edit of {rel}");
+        let reasons = got["why"]["conformance"].as_array().cloned().unwrap_or_default();
+        let marked = reasons.iter().any(|r| r.as_str().is_some_and(|r| r.starts_with("C100: an ignore attribute")));
+        assert_eq!(marked, marks, "the content rule on {rel} with {add:?}");
+        std::fs::write(&path, original).unwrap();
+    }
 }
