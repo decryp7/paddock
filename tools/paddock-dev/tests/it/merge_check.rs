@@ -1082,3 +1082,32 @@ fn a_conflicted_file_taken_as_ours_still_loses_the_other_sides_tests() {
     assert_eq!(code, 5, "{out}");
     assert!(out.contains("[lost-test] new_case"), "{out}");
 }
+
+#[test]
+fn a_dropped_hunk_finding_shows_where_it_was_and_what_it_said() {
+    // Main adds five lines at the top of f.txt; the result keeps only the first (4 of 5 missing).
+    let (code, out) = hunk_merge(1, "Merge").check(&["HEAD"]);
+    assert_eq!(code, 5, "{out}");
+    let finding = out.lines().position(|l| l.starts_with("  [dropped-hunk] f.txt")).expect(&out);
+    let shown: Vec<&str> = out.lines().skip(finding + 1).take(3).collect();
+    // The parent-side line range of the hunk and the first missing lines, under the finding.
+    assert!(
+        shown[0].contains("parent 1 lines 1-5") && shown[0].contains("added two here"),
+        "{out}"
+    );
+    let (code, out) = hunk_merge(1, "Merge").check(&["HEAD", "--json"]);
+    assert_eq!(code, 5, "{out}");
+    let json = out.lines().find(|l| l.starts_with('{')).unwrap();
+    let v: serde_json::Value = serde_json::from_str(json).unwrap();
+    let f = v["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["kind"] == "dropped-hunk")
+        .unwrap();
+    let ex = f["excerpts"].as_array().unwrap();
+    assert!(
+        ex.len() == 1 && ex[0].as_str().unwrap().contains("lines 1-5") && ex[0].as_str().unwrap().contains("added two here"),
+        "{out}"
+    );
+}

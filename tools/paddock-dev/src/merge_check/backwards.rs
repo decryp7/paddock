@@ -81,6 +81,7 @@ pub fn check(cx: &Ctx, second: &str, base: &str, to_result: &[FileDiff]) -> Resu
                 kind: Kind::Backwards,
                 subject: file,
                 detail: "the branch never touched it, but the merge changed it against the first parent".into(),
+                excerpts: Vec::new(),
             });
             continue;
         }
@@ -143,6 +144,7 @@ pub fn check(cx: &Ctx, second: &str, base: &str, to_result: &[FileDiff]) -> Resu
                         mine.len(),
                         short(sha)
                     ),
+                    excerpts: Vec::new(),
                 });
                 break;
             }

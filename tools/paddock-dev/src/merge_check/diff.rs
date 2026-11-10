@@ -7,6 +7,10 @@ pub struct Hunk {
     pub added: Vec<String>,
     /// Removed lines, without the `-`.
     pub removed: Vec<String>,
+    /// The first line of the hunk on the new side (the line numbers of the revision the diff leads to), and how many it has.
+    pub new_start: usize,
+    /// The number of lines the hunk has on the new side.
+    pub new_len: usize,
 }
 
 /// The hunks of one file (the path after the change).
@@ -113,8 +117,12 @@ pub fn parse(text: &str) -> Result<Vec<FileDiff>, String> {
                 }
             }
         } else if line.starts_with("@@ ") {
-            let (mut old_n, mut new_n) = counts(line).ok_or_else(|| format!("an unreadable hunk header: {line}"))?;
-            let mut hunk = Hunk::default();
+            let (mut old_n, mut new_n, new_start) = counts(line).ok_or_else(|| format!("an unreadable hunk header: {line}"))?;
+            let mut hunk = Hunk {
+                new_start,
+                new_len: new_n,
+                ..Hunk::default()
+            };
             while old_n > 0 || new_n > 0 {
                 let Some(l) = lines.next() else { break };
                 if let Some(a) = l.strip_prefix('+') {
@@ -133,18 +141,20 @@ pub fn parse(text: &str) -> Result<Vec<FileDiff>, String> {
     Ok(files)
 }
 
-/// `@@ -a[,b] +c[,d] @@`: the old and new line counts.
-fn counts(header: &str) -> Option<(usize, usize)> {
+/// `@@ -a[,b] +c[,d] @@`: the old and new line counts, and the first new line `c`.
+fn counts(header: &str) -> Option<(usize, usize, usize)> {
     let mut parts = header.split(' ');
     parts.next()?;
-    let one = |s: &str, sign: char| -> Option<usize> {
-        let s = s.strip_prefix(sign)?;
+    let old = parts.next()?.strip_prefix('-')?;
+    let new = parts.next()?.strip_prefix('+')?;
+    let len = |s: &str| -> Option<usize> {
         match s.split_once(',') {
             Some((_, n)) => n.parse().ok(),
             None => Some(1),
         }
     };
-    Some((one(parts.next()?, '-')?, one(parts.next()?, '+')?))
+    let start = new.split(',').next()?.parse().ok()?;
+    Some((len(old)?, len(new)?, start))
 }
 
 #[cfg(test)]
@@ -159,6 +169,8 @@ mod tests {
         assert_eq!(f[0].hunks.len(), 2);
         assert_eq!(f[0].hunks[0].added, vec!["+++ nor this", " c"]);
         assert_eq!(f[0].hunks[1].removed, vec!["gone"]);
+        assert_eq!((f[0].hunks[0].new_start, f[0].hunks[0].new_len), (3, 2));
+        assert_eq!((f[0].hunks[1].new_start, f[0].hunks[1].new_len), (9, 0));
     }
 
     #[test]

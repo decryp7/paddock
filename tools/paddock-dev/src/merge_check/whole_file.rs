@@ -85,6 +85,7 @@ pub fn check(parents: &[String], index: usize, l: &Listings, message: &str, gene
                 index + 1,
                 short(&parents[index])
             ),
+                excerpts: Vec::new(),
         });
     }
     out

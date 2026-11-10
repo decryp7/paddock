@@ -199,6 +199,7 @@ pub fn check(cx: &Ctx, index: usize, base: &str, to_result: &[FileDiff]) -> Resu
                 before.of(&name),
                 after.of(&name),
             ),
+                excerpts: Vec::new(),
         });
     }
     Ok(out)

@@ -80,6 +80,8 @@ pub struct Finding {
     pub subject: String,
     /// What is wrong and how to give a reason.
     pub detail: String,
+    /// Lines that show it (where a dropped hunk was, and what it said); empty when the detail says it all.
+    pub excerpts: Vec<String>,
 }
 
 /// The result of a check (ADR 0089).
@@ -281,7 +283,10 @@ fn not_measured(why: &str) -> String {
 /// The findings as text: a header, one line per finding in one format, and the `::error::` line with the next step.
 fn findings_text(label: &str, found: &[Finding]) -> String {
     let mut lines = vec![format!("merge check: {label}: {} finding(s)", found.len())];
-    lines.extend(found.iter().map(|f| format!("  [{}] {}: {}", f.kind.name(), f.subject, f.detail)));
+    for f in found {
+        lines.push(format!("  [{}] {}: {}", f.kind.name(), f.subject, f.detail));
+        lines.extend(f.excerpts.iter().map(|e| format!("      {e}")));
+    }
     lines.push(format!(
         "::error::{label}: {} finding(s). Next step: restore what was dropped, or if it was meant, say so in the merge message with `Hunks-dropped: <path>: <reason>`, `Reverted: <path>: <reason>` or `Tests-removed: <name>: <reason>`, then run it again.",
         found.len()
@@ -332,7 +337,7 @@ pub fn command_json(req: &Request, out: &mut dyn std::io::Write, err: &mut dyn s
                 "exit": Exit::Findings.code(),
                 "merge": label,
                 "error": text,
-                "findings": found.iter().map(|f| json!({"kind": f.kind.name(), "subject": f.subject, "detail": f.detail})).collect::<Vec<_>>(),
+                "findings": found.iter().map(|f| json!({"kind": f.kind.name(), "subject": f.subject, "detail": f.detail, "excerpts": f.excerpts})).collect::<Vec<_>>(),
             });
             let _ = writeln!(out, "{object}");
             let _ = writeln!(err, "error: {text}");
