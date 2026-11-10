@@ -191,6 +191,11 @@ describe('the graph of this tree', () => {
     assert.ok(r.kinds.dyno.includes('rust'), JSON.stringify(r.kinds));
   });
 
+  test("the canonical launchctl capture is read by Pitcrew's Rust test, so a change marks Pitcrew", () => {
+    const r = run('crates/paddock-service/tests/fixtures/launchctl-print-running.txt');
+    assert.ok(r.apps.includes('pitcrew'), JSON.stringify(r.apps));
+  });
+
   test('a wiki change runs the tools job, where the wiki lint runs (ER-30); so does its settings file', () => {
     const w = run('docs/wiki/index.md', 'docs/wiki/ci-and-runners.md');
     assert.deepEqual([w.tools, w.docs, w.crates, w.ui, w.all, w.apps], [true, false, false, false, false, []]);

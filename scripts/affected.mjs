@@ -272,6 +272,7 @@ export const DOC_INPUTS = [
   { re: /^apps\/(shell-demo|workbench-demo)\/README\.md$/, projects: ['tools'], why: 'new-app.mjs copies its "Start a new app" section' },
   { re: /(^|\/)REVIEWED\.md$/, projects: (f) => (f.startsWith('apps/') ? owners(f) : ['conformance']), why: 'the image reviews conformance C24 checks' },
   { re: /^ui\/projects\/paddock-ui\/format\/src\/storage-cases\.json$/, projects: ['ui', 'app:dyno'], why: "dyno-core units::storage_writes_what_the_ui_writes reads the UI's storage cases" },
+  { re: /^crates\/paddock-service\/tests\/fixtures\/launchctl-print-running\.txt$/, projects: ['crates', 'app:pitcrew'], why: "Pitcrew's service_repair.rs tests parse the canonical real launchctl capture (include_str!)" },
   { re: /^apps\/debrief\/docs\/ai\/sql-views\.md$/, why: 'debrief-ai tests/sql_tool.rs (from the import)' },
   { re: /^apps\/debrief\/docs\/testing\/quarantine\.md$/, why: 'scripts/ci/check-quarantine (from the import)' },
   { re: /^apps\/[^/]+\/vendor\/.*\.md$/, why: "a vendored crate's own markdown (its lib.rs include_str!s it; vendor/PATCHES.md)" },

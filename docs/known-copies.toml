@@ -45,7 +45,7 @@ status = "built"
   paths = ["apps/pitcrew/app/src-tauri/src/service_repair.rs"]
   owner = "pitcrew"
   delete_by = "pitcrew-v1.1.0"
-  note = "Both B4 defects (nested state lines, has_lwcr && !running). Pitcrew 1.1 adopts paddock-service; its parse_extras is in paddock-service (JobReport pid, runs and last exit code); its start_wait.rs moves in as StartWatch/StartWait only after Pitwall 1.1 B1 (the merge with ADR 0056 left it out). Both are deleted by the adoption."
+  note = "The copy of parse_job and stale() mirrors the canonical logic since fix/pitcrew-launchctl-copy (nested blocks skipped, has LWCR alone is not stale; test over the canonical real capture); it still lacks the JobReport pid, runs and last exit code. Pitcrew 1.1 adopts paddock-service; its parse_extras is in paddock-service (JobReport pid, runs and last exit code); its start_wait.rs moves in as StartWatch/StartWait only after Pitwall 1.1 B1 (the merge with ADR 0056 left it out). Both are deleted by the adoption."
 
 [[mechanism]]
 id = "service-registration"
