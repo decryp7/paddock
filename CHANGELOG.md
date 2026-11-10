@@ -4,6 +4,23 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-env`: `PrivateDir` and `PrivateFile`, trust-bearing files made owner-only (ADR 0092 WP-1)
+- New `paddock_env::private::{PrivateDir, PrivateFile}` (the module is now public; the existing fallback-folder items keep
+  their names and are still re-exported at the crate root). A folder or file is owner-only from the moment it exists, with no
+  chmod or ACL call afterwards: Unix `mkdirat(0700)` plus `fchmod` on the new handle, files `O_CREAT | O_EXCL | O_NOFOLLOW`
+  0600; Windows `NtCreateFile` relative to the held parent handle (`RootDirectory`) with the descriptor
+  `O:<user SID>D:P(A;OICI;FA;;;<user SID>)(A;OICI;FA;;;SY)` in the creating call, no file sharing, not content-indexed.
+  Every later step (create a child, write, replace, read, remove) is relative to the held handle, so an ancestor replaced
+  afterwards changes which path names the folder, not what the handle refers to.
+- `PrivateDir::create_all`, `open` (with `Links`), `child`, `write_atomic` (unique exclusive temp file, fsync, rename inside
+  the held folder), `open_file`, `read` (bounded), `remove_file`; typed `PrivateError` with a fix-it message per OS.
+- The folder and its parent are checked from handles: owner, group or other write (Unix, plus macOS extended ACLs through
+  `acl_get_fd_np`), the DACL with an entry for another principal and a reparse point refused (Windows); another account that
+  could rename or replace the folder (a writable parent, `FILE_DELETE_CHILD` for others) is refused too. An existing folder
+  open to others is refused and left as it was; nothing is tightened.
+- `Refusal` gains `OpenToOthersAcl { who }`, `OtherOwnerAccount { who }`, `NotAFile` and `Parent(..)`. Nothing adopts the type
+  yet (later work packages of ADR 0092 move the copies onto it).
+
 ### Pitwall: no test double or test switch in the shipped build (ADR 0073, rule 73, WP-P)
 - Removes P1 to P6 of ADR 0073's Pitwall survey; the register and the shared crates follow.
 - `pitwall-server` no longer knows `--fake-engine`, `--die-after-ms` or `--ready-when` (it answers `unknown option`, exit 2). The fake OpenAI-compatible engine is the `pitwall-fake-engine` bin of the same package, built only with the `test-support` feature, which only the package's self dev-dependency enables; the `fake_engine` module is behind `cfg(any(test, feature = "test-support"))`. The tests start it through `CARGO_BIN_EXE_pitwall-fake-engine`, and the host-cleanup process pattern follows the new name.

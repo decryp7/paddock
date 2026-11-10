@@ -124,6 +124,11 @@ impl From<paddock_env::Refusal> for Untrusted {
                 what: "open the socket's folder",
                 cause: "it is not a folder".into(),
             },
+            // The account-based refusals of `paddock_env::private` (ACL, file, parent): not what `decide` returns, kept readable.
+            other => Untrusted::Unreadable {
+                what: "check the socket's folder",
+                cause: other.to_string(),
+            },
         }
     }
 }
@@ -140,6 +145,18 @@ pub fn check_server_account(uid: u32, expected_uid: u32) -> Result<(), Untrusted
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refusal_of_the_private_type_stays_readable() {
+        let e = Untrusted::from(paddock_env::Refusal::NotAFile);
+        assert_eq!(
+            e,
+            Untrusted::Unreadable {
+                what: "check the socket's folder",
+                cause: "it is not a regular file".into(),
+            }
+        );
+    }
 
     #[test]
     fn only_system_may_own_the_pipe() {

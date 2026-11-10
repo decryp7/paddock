@@ -1,0 +1,305 @@
+//! Unix: every step after the first is relative to a held folder descriptor (`mkdirat`, `openat`, `renameat`), and owner and mode
+//! are read from the descriptor (`fstat`), so what was checked is what is used (rule 53, ADR 0033).
+#![allow(unsafe_code)]
+
+use super::error::Fail;
+use crate::folder::{FolderFacts, Refusal};
+use std::ffi::CString;
+use std::fs::File;
+use std::io;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::unix::ffi::OsStrExt;
+use std::path::Path;
+
+/// A held folder.
+#[derive(Debug)]
+pub(super) struct Dir(OwnedFd);
+
+fn cstring(name: &std::ffi::OsStr) -> io::Result<CString> {
+    CString::new(name.as_bytes()).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))
+}
+
+/// `-1` is an error, anything else the value.
+fn check(r: libc::c_int) -> io::Result<libc::c_int> {
+    if r < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(r)
+    }
+}
+
+fn own(fd: libc::c_int) -> io::Result<OwnedFd> {
+    // SAFETY: `fd` was just returned by a successful open and nothing else owns it.
+    Ok(unsafe { OwnedFd::from_raw_fd(check(fd)?) })
+}
+
+/// The file type bits of `mode`.
+fn kind(mode: u32) -> u32 {
+    mode & u32::from(libc::S_IFMT)
+}
+
+fn fstat(fd: &OwnedFd) -> io::Result<libc::stat> {
+    // SAFETY: `stat` is plain data the call fills in; `fd` is open.
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    check(unsafe { libc::fstat(fd.as_raw_fd(), &mut st) })?;
+    Ok(st)
+}
+
+fn facts_of(st: &libc::stat) -> FolderFacts {
+    FolderFacts {
+        uid: st.st_uid,
+        mode: u32::from(st.st_mode),
+    }
+}
+
+/// `open` failed with ELOOP (Linux) or ENOTDIR (macOS, or a link to a file): say whether a link was in the way.
+fn classify(e: io::Error, is_link: impl FnOnce() -> bool) -> Fail {
+    match e.raw_os_error() {
+        Some(libc::ELOOP | libc::ENOTDIR) => Fail::Refused(if is_link() {
+            Refusal::Symlink
+        } else {
+            Refusal::NotAFolder
+        }),
+        _ => Fail::Io(e),
+    }
+}
+
+impl Dir {
+    /// Opens a folder by path. With `follow` a link as the last part is followed; otherwise it is refused. Ancestors are always
+    /// resolved by name (the root of the chain cannot be anchored to anything).
+    pub(super) fn open_path(path: &Path, follow: bool) -> Result<Dir, Fail> {
+        let c = cstring(path.as_os_str())?;
+        let flags = libc::O_RDONLY
+            | libc::O_DIRECTORY
+            | libc::O_CLOEXEC
+            | if follow { 0 } else { libc::O_NOFOLLOW };
+        // SAFETY: `c` is a NUL-terminated path.
+        let fd = unsafe { libc::open(c.as_ptr(), flags) };
+        match own(fd) {
+            Ok(fd) => Ok(Dir(fd)),
+            Err(e) => Err(classify(e, || {
+                !follow && std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink())
+            })),
+        }
+    }
+
+    /// The folder `name` inside this one, a link refused.
+    pub(super) fn open_at(&self, name: &std::ffi::OsStr) -> Result<Dir, Fail> {
+        let c = cstring(name)?;
+        let flags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW;
+        // SAFETY: `c` is NUL-terminated; the descriptor is open.
+        let fd = unsafe { libc::openat(self.0.as_raw_fd(), c.as_ptr(), flags) };
+        match own(fd) {
+            Ok(fd) => Ok(Dir(fd)),
+            Err(e) => Err(classify(e, || self.is_link(&c))),
+        }
+    }
+
+    fn is_link(&self, c: &CString) -> bool {
+        // SAFETY: plain data filled in by the call; `c` is NUL-terminated.
+        let mut st: libc::stat = unsafe { std::mem::zeroed() };
+        let r = unsafe {
+            libc::fstatat(
+                self.0.as_raw_fd(),
+                c.as_ptr(),
+                &mut st,
+                libc::AT_SYMLINK_NOFOLLOW,
+            )
+        };
+        r == 0 && kind(u32::from(st.st_mode)) == u32::from(libc::S_IFLNK)
+    }
+
+    /// This folder's real parent, found through the held descriptor and not through a name.
+    pub(super) fn parent(&self) -> Result<Dir, Fail> {
+        // SAFETY: a constant NUL-terminated name; the descriptor is open.
+        let fd = unsafe {
+            libc::openat(
+                self.0.as_raw_fd(),
+                c"..".as_ptr(),
+                libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC,
+            )
+        };
+        Ok(Dir(own(fd)?))
+    }
+
+    /// Makes the folder `name` with mode 0700 and opens it. The mode is set again on the new handle, so it is exact whatever the
+    /// umask was, and the folder is never open to others at any moment.
+    pub(super) fn mkdir_at(&self, name: &std::ffi::OsStr) -> Result<Dir, Fail> {
+        let c = cstring(name)?;
+        // SAFETY: `c` is NUL-terminated; the descriptor is open. The 0700 mode is masked by the umask only downwards.
+        check(unsafe { libc::mkdirat(self.0.as_raw_fd(), c.as_ptr(), 0o700) })?;
+        let dir = self.open_at(name)?;
+        // SAFETY: the descriptor is open.
+        check(unsafe { libc::fchmod(dir.0.as_raw_fd(), 0o700) })?;
+        Ok(dir)
+    }
+
+    /// Creates the file `name` exclusively with mode 0600, no link followed.
+    pub(super) fn create_file_at(&self, name: &std::ffi::OsStr) -> Result<File, Fail> {
+        let c = cstring(name)?;
+        let flags =
+            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+        // SAFETY: `c` is NUL-terminated; the descriptor is open.
+        let fd = own(unsafe {
+            libc::openat(self.0.as_raw_fd(), c.as_ptr(), flags, 0o600 as libc::c_uint)
+        })?;
+        // SAFETY: the descriptor is open.
+        check(unsafe { libc::fchmod(fd.as_raw_fd(), 0o600) })?;
+        Ok(File::from(fd))
+    }
+
+    /// Opens the file `name` for reading and refuses it unless it is a regular file of `uid` closed to others.
+    pub(super) fn open_file_at(&self, name: &std::ffi::OsStr, who: &Account) -> Result<File, Fail> {
+        let c = cstring(name)?;
+        // O_NONBLOCK: a planted pipe must not make the open wait; the type check below refuses it.
+        let flags = libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC;
+        // SAFETY: `c` is NUL-terminated; the descriptor is open.
+        let fd = own(unsafe { libc::openat(self.0.as_raw_fd(), c.as_ptr(), flags) }).map_err(
+            |e| match e.raw_os_error() {
+                Some(libc::ELOOP) => Fail::Refused(Refusal::Symlink),
+                _ => Fail::Io(e),
+            },
+        )?;
+        let st = fstat(&fd)?;
+        if kind(u32::from(st.st_mode)) != u32::from(libc::S_IFREG) {
+            return Err(Refusal::NotAFile.into());
+        }
+        file_decision(facts_of(&st), *who)?;
+        acl_check(&fd)?;
+        Ok(File::from(fd))
+    }
+
+    /// Renames inside this folder.
+    pub(super) fn rename(
+        &self,
+        _file: &File,
+        from: &std::ffi::OsStr,
+        to: &std::ffi::OsStr,
+    ) -> io::Result<()> {
+        let (f, t) = (cstring(from)?, cstring(to)?);
+        // SAFETY: both names are NUL-terminated; the descriptor is open.
+        check(unsafe {
+            libc::renameat(
+                self.0.as_raw_fd(),
+                f.as_ptr(),
+                self.0.as_raw_fd(),
+                t.as_ptr(),
+            )
+        })
+        .map(drop)
+    }
+
+    /// Removes the file `name` from this folder.
+    pub(super) fn unlink(&self, name: &std::ffi::OsStr) -> io::Result<()> {
+        let c = cstring(name)?;
+        // SAFETY: `c` is NUL-terminated; the descriptor is open.
+        check(unsafe { libc::unlinkat(self.0.as_raw_fd(), c.as_ptr(), 0) }).map(drop)
+    }
+
+    /// Flushes the folder's entries to disk.
+    pub(super) fn sync(&self) -> io::Result<()> {
+        // SAFETY: the descriptor is open.
+        check(unsafe { libc::fsync(self.0.as_raw_fd()) }).map(drop)
+    }
+
+    /// Owner and mode of this folder from its descriptor, plus the macOS ACL check.
+    fn facts(&self) -> Result<FolderFacts, Fail> {
+        acl_check(&self.0)?;
+        Ok(facts_of(&fstat(&self.0)?))
+    }
+
+    /// The folder belongs to `who` and no one else can write to it.
+    pub(super) fn check(&self, who: &Account) -> Result<(), Fail> {
+        Ok(crate::folder::decide(self.facts()?, *who)?)
+    }
+
+    /// The folder's parent cannot be used to rename or replace the folder.
+    pub(super) fn check_parent(&self, who: &Account) -> Result<(), Fail> {
+        let facts = self.parent()?.facts()?;
+        Ok(parent_decision(facts, *who).map_err(|r| Refusal::Parent(Box::new(r)))?)
+    }
+}
+
+/// A file passes when it is the account's own and has no group or other bit.
+pub(super) fn file_decision(facts: FolderFacts, uid: u32) -> Result<(), Refusal> {
+    if facts.uid != uid {
+        return Err(Refusal::OtherOwner { uid: facts.uid });
+    }
+    if facts.mode & 0o077 != 0 {
+        return Err(Refusal::OpenToOthers { mode: facts.mode });
+    }
+    Ok(())
+}
+
+/// A parent passes when it belongs to the account or to root and others cannot rename or replace entries in it: no group or
+/// world write bit, or the sticky bit (then only an entry's owner may rename it, and the folder is the account's own).
+pub(super) fn parent_decision(facts: FolderFacts, uid: u32) -> Result<(), Refusal> {
+    if facts.uid != uid && facts.uid != 0 {
+        return Err(Refusal::OtherOwner { uid: facts.uid });
+    }
+    if facts.mode & 0o022 != 0 && facts.mode & 0o1000 == 0 {
+        return Err(Refusal::OpenToOthers { mode: facts.mode });
+    }
+    Ok(())
+}
+
+/// macOS extended ACLs: an allow entry for another principal is refused (the mode bits do not show it). Linux POSIX ACLs show in
+/// the group bits through the mask, which the mode check already covers.
+#[cfg(target_os = "macos")]
+fn acl_check(fd: &OwnedFd) -> Result<(), Refusal> {
+    use std::ffi::c_void;
+    type Acl = *mut c_void;
+    unsafe extern "C" {
+        fn acl_get_fd_np(fd: libc::c_int, kind: libc::c_uint) -> Acl;
+        fn acl_get_entry(acl: Acl, id: libc::c_int, entry: *mut *mut c_void) -> libc::c_int;
+        fn acl_get_tag_type(entry: *mut c_void, tag: *mut libc::c_uint) -> libc::c_int;
+        fn acl_free(obj: *mut c_void) -> libc::c_int;
+    }
+    const ACL_TYPE_EXTENDED: libc::c_uint = 0x100;
+    const ACL_FIRST_ENTRY: libc::c_int = 0;
+    const ACL_NEXT_ENTRY: libc::c_int = -1;
+    const ACL_EXTENDED_ALLOW: libc::c_uint = 1;
+    // SAFETY: a valid descriptor; a null result means no extended ACL.
+    let acl = unsafe { acl_get_fd_np(fd.as_raw_fd(), ACL_TYPE_EXTENDED) };
+    if acl.is_null() {
+        return Ok(());
+    }
+    let mut id = ACL_FIRST_ENTRY;
+    let mut allows = false;
+    loop {
+        let mut entry: *mut c_void = std::ptr::null_mut();
+        // SAFETY: `acl` is a live ACL and `entry` a valid out pointer; the call returns -1 after the last entry.
+        if unsafe { acl_get_entry(acl, id, &mut entry) } != 0 {
+            break;
+        }
+        id = ACL_NEXT_ENTRY;
+        let mut tag: libc::c_uint = 0;
+        // SAFETY: `entry` came from the call above.
+        if unsafe { acl_get_tag_type(entry, &mut tag) } == 0 && tag == ACL_EXTENDED_ALLOW {
+            allows = true;
+            break;
+        }
+    }
+    // SAFETY: `acl` is freed once.
+    unsafe { acl_free(acl) };
+    if allows {
+        Err(Refusal::OpenToOthersAcl {
+            who: "an extended ACL entry".to_owned(),
+        })
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn acl_check(_fd: &OwnedFd) -> Result<(), Refusal> {
+    Ok(())
+}
+
+/// Who owns what is trusted: the user id.
+pub(super) type Account = u32;
+
+/// The account running this process.
+pub(super) fn current_account() -> io::Result<Account> {
+    Ok(crate::folder::current_uid())
+}
