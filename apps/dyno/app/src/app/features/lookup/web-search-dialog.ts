@@ -33,7 +33,7 @@ export const MAX_QUERY = 200;
           <span>{{ removedText() }}</span>
         </p>
       } @else if (!store.error()) {
-        <div class="skeleton line" aria-busy="true" aria-label="Preparing the search text"></div>
+        <div class="skeleton line" role="status" aria-busy="true" aria-label="Preparing the search text"></div>
       }
       @if (store.error(); as e) {
         <div class="err" role="alert"><dy-icon name="alert" /><span>{{ e.message }} @if (hint(); as h) {<small>{{ h }}</small>}</span></div>

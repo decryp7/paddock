@@ -1,5 +1,6 @@
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { expectNameAllowed } from '../../../testing/aria-name';
 import { provideIcons } from '../../shared/icons';
 import { Tile } from './tile';
 
@@ -36,6 +37,8 @@ describe('Tile', () => {
     host.ready.set(false);
     f.detectChanges();
     expect(el.querySelector('.loading')?.getAttribute('aria-busy')).toBe('true');
+    expectNameAllowed(el.querySelector('.loading'));
+    expect(el.querySelector('.loading')?.getAttribute('aria-label')).toBe('Loading Battery');
     expect(el.querySelectorAll('.skeleton').length).toBeGreaterThan(0);
     expect(el.querySelector('.content')).toBeNull();
   });
