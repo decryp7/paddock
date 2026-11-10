@@ -20,7 +20,7 @@
   without a ref), `origin/feat/rt2-release-isolation` `ad9d85a5b`, `origin/feat/rt3-dev-worktree` `2be92ec01`,
   `origin/feat/rt4-hook` `48b938bcb`, `origin/feat/rt5-check-host` `0a94bf347`, `origin/feat/rt8-ci-flakes` `da05b54e8` (incident #6 reviewed at `5da33f8cf`),
   `origin/fix/playwright-flaky-as-failure` `06adcb058`, `origin/docs/adr-windows-gate-ratchets` `db7782e01`,
-  `origin/docs/adr-captured-tool-output` `0cca8dd30` (ADR 0090). Each count
+  `origin/docs/adr-captured-tool-output` `9687d644b` (ADR 0090). Each count
   names its command (Appendix B). Measurements on synthetic input only (Appendix A): a throw-away crate under `cargo
   test` and `cargo nextest run` (cargo 1.99.1, nextest 0.9.151); the JS host's `applyWaivers` on a planted crash; the
   local `paddock-ci:v2` image (`sha256:fdc6b409ce5c…`, created 2026-10-24) probed with `docker run`.
@@ -184,7 +184,11 @@ expires = "2027-01-31"
 - **How a run knows its kind:** a tag or `release/**` run from `GITHUB_REF` (`refs/tags/…`, `refs/heads/release/…`); a
   release workflow from an explicit `PADDOCK_RUN_KIND=release` that each `<app>-release.yml` and the tag path of each
   `<app>.yml` set in their `env:` (`GITHUB_WORKFLOW` is the workflow's `name:`, not its file, and whether Gitea sets
-  `GITHUB_WORKFLOW_REF` is **unverified**). Anything else is an ordinary run.
+  `GITHUB_WORKFLOW_REF` is **unverified**). A caller's workflow `env:` does not pass into a reusable workflow, so
+  `ci.yml` sets it itself, at workflow level, from its `release` input or a tag ref, the same expression as
+  `PADDOCK_DEV_DOWNLOAD` at `ci.yml:83`:
+  `PADDOCK_RUN_KIND: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && 'release' || '' }}`.
+  Anything else is an ordinary run.
 - **Rule 54 dispatches** of an `<app>-release.yml` (a manual run with gates on) are release runs: the file is the
   tag-triggered one and sets `PADDOCK_RUN_KIND=release`. **Not release runs** (ADR 0088 §3's set): `debrief.yml`'s
   manual run with `bundles: true` (a branch ref, no `PADDOCK_RUN_KIND`), and `nightly.yml`'s calls of
@@ -278,7 +282,7 @@ pub enum Read {
   beside it), `plan_since::nextest_failures` becomes a caller, and the
   mechanism `runner-log` is registered in `docs/known-copies.toml` with Debrief's `retried-reporter.mjs` as a copy
   to retire.
-- **ADR 0090** (proposed, `origin/docs/adr-captured-tool-output` `0cca8dd30`: code that reads another tool's output is
+- **ADR 0090** (proposed, `origin/docs/adr-captured-tool-output` `9687d644b`: code that reads another tool's output is
   tested against captured output, with a register of readers and fixtures and its check C104) covers the fixtures:
   `runlog` is one of its readers and its captured logs are 0090 fixtures. This ADR adds only the rule that partial input
   is `NotMeasured`; the two are not merged.
@@ -397,7 +401,9 @@ the rule today); `ci-image.yml` has no tag trigger:
 `NotMeasured` on `rust-test` (Linux) with `measured_on = ["rust-test-macos"]`: green when macOS passes it, red when it is
 skipped there too; (2) `dyno-release.yml` with gates on, a planted test in a Dyno crate `NotMeasured` on the Linux
 `app` leg with `measured_on = ["<Dyno's macOS app leg>"]`, the same two outcomes, which also proves (or disproves) the
-artifact download across the `ci.yml` call; (3) C103 (d)'s fixtures.
+artifact download across the `ci.yml` call; (3) a rule 54 dispatch of `dyno-release.yml` (`workflow_dispatch`, gates
+on, a branch ref, so only `inputs.release` marks it): the planted test inside the called `ci.yml` must see
+`PADDOCK_RUN_KIND=release` (an `os`-only entry fails there, as in a tag run); (4) C103 (d)'s fixtures.
 
 This touches shared actions and every app's release path (ER-31 (b), ADR 0022 G.7), so WP-2b lands outside a release
 freeze, **before** WP-4 and WP-5: otherwise migrated tests turn legs red where a declared exception was intended.
@@ -500,7 +506,7 @@ An `[[optional]]` line declares a measurement optional per place; C103 can be re
 | WP-0 | The JS host's crash (§8.1) with the planted-waiver test first | 0.25 |
 | WP-1 | `paddock_cli::outcome` (`Outcome`, `Verdict`, `Optional` reader with run kinds, JSON and table), `Exit` 6 and 7, contract and property tests (D5's case included), 99% coverage; `conformance/src/outcome.mjs` | 1.5 |
 | WP-2 | `paddock_testkit::{Measured, measure, require_tool, require_tool_that, require_capability, require_env}` with the three modes and the record format; the JS `measure`/`requireTool`; `./dev test` (nextest plus records into a `Verdict`); §6's controls under nextest and `cargo test`; the fail-closed release rule (§4 rule 1) and its control | 2.75 |
-| WP-2b | §7's rule on every tag workflow that runs tests (9 at `67a633ef3`): the variables on each test step, uploads from every leg, `PADDOCK_RUN_KIND` in the release workflows, `./dev ci measured-on`, new final jobs in `debrief.yml`, both demo release workflows and `ci.yml` (skipped when `inputs.app` is set), a step in `publish.yml`'s `publish` job, `release-verdict` extended; settle the artifact download across the `ci.yml` call; the Debrief and Dyno controls | 2.5 |
+| WP-2b | §7's rule on every tag workflow that runs tests (9 at `67a633ef3`): the variables on each test step, uploads from every leg, `PADDOCK_RUN_KIND` in the release workflows and in `ci.yml` from its `release` input, `./dev ci measured-on`, new final jobs in `debrief.yml`, both demo release workflows and `ci.yml` (skipped when `inputs.app` is set), a step in `publish.yml`'s `publish` job, `release-verdict` extended; settle the artifact download across the `ci.yml` call; the Debrief and Dyno controls | 2.5 |
 | WP-2c | §4b's reader: the Playwright and vitest parts (nextest by RT-8, not counted here), the truncation controls over every captured log, a vitest fixture, `plan_since` and `ci flakes` as callers, the copies entry | 1.5 |
 | WP-3 | C103 (a) syn pass, (b), (c), (d) (the tag-workflow pass of §7: YAML `on.push.tags`, recursive actions, the wide detector with `package.json` script resolution, doc-test exemptions, fixture workflows), fixtures for every shape, the ratchet seed; `docs/optional-measurements.toml` with schema and its 0088 list entry; benchmark line | 3.5 |
 | WP-4 | Tooling copies onto the type (§8.4) with the shadow-table entries | 2 |
