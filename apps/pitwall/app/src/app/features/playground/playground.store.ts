@@ -164,7 +164,7 @@ export const PlaygroundStore = signalStore(
           setPane(i, (p) => ({ ...p, turns: [...p.turns, user, answer] }));
           streams[i] = backend.chat({ modelId: pane.modelId, messages, temperature: store.temperature(), maxTokens: store.maxTokens() }, (e) => {
             setPane(i, (p) => applyEvent(p, e));
-            if (e.kind !== 'delta') streams[i] = null;
+            if (e.kind === 'done' || e.kind === 'error') streams[i] = null;
           });
         }
         return true;
