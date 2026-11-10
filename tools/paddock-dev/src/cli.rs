@@ -1,4 +1,6 @@
-use crate::{check, ci_isolation, gates, hook, input_hash, ipc_endpoints, plan, plan_cmd, release_isolation, slots, wait, worktree};
+use crate::{
+    check, ci_isolation, ci_runs, gates, hook, input_hash, ipc_endpoints, plan, plan_cmd, release_isolation, slots, wait, worktree,
+};
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
 use std::io::Write;
@@ -136,6 +138,13 @@ enum CiCommand {
         #[command(subcommand)]
         command: release_isolation::Command,
     },
+    /// The tests CI marked flaky (nextest, Playwright), vitest's failed specs and tests that failed and then passed on a
+    /// rerun of the same commit, over a window of runs. An incomplete measurement ("not measured") exits 1 for now;
+    /// flaky tests found exit 5 only with --fail-on-flakes;
+    /// cancelled runs are counted and listed but never change the exit code.
+    Flakes(ci_runs::FlakesArgs),
+    /// Real CI timings of the family from the Gitea API (the port of scripts/ci-timings.mjs, same Markdown).
+    Timings(ci_runs::TimingsArgs),
 }
 
 #[derive(Subcommand)]
@@ -335,6 +344,12 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::ReleaseIsolation { command },
         } => release_isolation::command(command),
+        Command::Ci {
+            command: CiCommand::Flakes(a),
+        } => ci_runs::flakes(&a),
+        Command::Ci {
+            command: CiCommand::Timings(a),
+        } => ci_runs::timings(&a),
         Command::Wait(a) => wait::command(&a),
         Command::Gates {
             command: GatesCommand::Model(a),

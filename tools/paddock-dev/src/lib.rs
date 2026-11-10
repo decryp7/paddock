@@ -26,12 +26,15 @@
 
 pub mod check;
 pub mod ci_isolation;
+pub mod ci_runs;
 mod cli;
 mod fds;
 pub mod gates;
 pub mod hook;
 pub mod input_hash;
 pub mod ipc_endpoints;
+pub mod log_text;
+pub mod nextest_log;
 pub mod plan;
 pub mod plan_ci;
 pub mod plan_cmd;

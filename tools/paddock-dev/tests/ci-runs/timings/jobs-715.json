@@ -1,0 +1,32 @@
+{
+"total_count": 1,
+"jobs": [
+{
+"id": 5055,
+"name": "plan (affected projects)",
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T10:00:18+08:00",
+"completed_at": "2026-11-09T10:00:26+08:00",
+"runner_name": "Gitea Action Runner (d-gtr9)",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T10:00:18+08:00",
+"completed_at": "2026-11-09T10:00:21+08:00"
+},
+{
+"name": "Affected projects",
+"number": 1,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T10:00:21+08:00",
+"completed_at": "2026-11-09T10:00:23+08:00"
+}
+]
+}
+]
+}

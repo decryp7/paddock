@@ -1035,3 +1035,20 @@ adr = "docs/adr/0025-ci-job-isolation.md"
   owner = "paddock"
   delete_by = "v0.5.0"
   note = "The shell kit runs one release in parallel with `dev ci isolation` (plan decision D5, `PADDOCK_CI_KIT=shell` as the fallback); `conformance/test/job-isolation.test.mjs` runs the same cases against both (ISOLATION_CMD). The retirement PR after the next app tag whose release run went through the Rust path green deletes the scripts, that switch and this entry; the date follows that point (a paddock tag, as no app tag fits `owner = paddock`)."
+
+# =====================================================================================================================
+# CI run readers (RT-8)
+# =====================================================================================================================
+
+[[mechanism]]
+id = "ci-timings"
+title = "CI timings from the Gitea Actions API: wall time, delay, runners, step categories, critical path, log phases"
+canonical = "tools/paddock-dev"
+paths = ["tools/paddock-dev/src/ci_runs/timings.rs"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["scripts/ci-timings.mjs"]
+  owner = "paddock"
+  delete_by = "v0.4.0"
+  note = "The oracle of `./dev ci timings` (a test compares its Markdown, byte for byte, with this script's output on recorded API replies: tools/paddock-dev/tests/ci-runs/timings/golden.md). It has no CI caller; delete it, and engineering-rules' copy one release later, once the Rust command is the only reader."

@@ -1,0 +1,69 @@
+2026-11-10T10:00:00.1234567Z captured with cargo-nextest 0.9.149 (the CI pin, in the paddock-ci:v2 image; identical status lines with 0.9.151): retries = 1, flaky-result = "pass" (scratch crate nxflaky: passes, always_fails, flaky_once)
+2026-11-10T10:00:01.1234567Z [1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+2026-11-10T10:00:02.1234567Z ────────────
+2026-11-10T10:00:03.1234567Z [32;1m Nextest run[0m ID [1m799b5b13-2e9c-4281-8a71-932e6c26800a[0m with nextest profile: [1mdefault[0m
+2026-11-10T10:00:04.1234567Z [32;1m    Starting[0m [1m3[0m tests across [1m1[0m binary ([1m1[0m test [33;1mskipped[0m)
+2026-11-10T10:00:05.1234567Z [35;1m  TRY 1 FAIL[0m [   0.057s] (───) [35;1mnxflaky[0m [36mt[0m[36m::[0m[34;1malways_fails[0m
+2026-11-10T10:00:06.1234567Z [35;1m [0m [35;1mstdout[0m [35;1m───[0m
+2026-11-10T10:00:07.1234567Z 
+2026-11-10T10:00:08.1234567Z     running 1 test
+2026-11-10T10:00:09.1234567Z     test t::always_fails ... FAILED
+2026-11-10T10:00:10.1234567Z 
+2026-11-10T10:00:11.1234567Z     failures:
+2026-11-10T10:00:12.1234567Z 
+2026-11-10T10:00:13.1234567Z     failures:
+2026-11-10T10:00:14.1234567Z         t::always_fails
+2026-11-10T10:00:15.1234567Z 
+2026-11-10T10:00:16.1234567Z     test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.01s
+2026-11-10T10:00:17.1234567Z     [0m
+2026-11-10T10:00:18.1234567Z [35;1m [0m [35;1mstderr[0m [35;1m───[0m
+2026-11-10T10:00:19.1234567Z 
+2026-11-10T10:00:20.1234567Z     [0m[31;1mthread 't::always_fails' (219) panicked at src/lib.rs:7:9:[0m
+2026-11-10T10:00:21.1234567Z     [31;1mno[0m
+2026-11-10T10:00:22.1234567Z     note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace[0m
+2026-11-10T10:00:23.1234567Z 
+2026-11-10T10:00:24.1234567Z [32;1m        PASS[0m [   0.079s] (1/3) [35;1mnxflaky[0m [36mt[0m[36m::[0m[34;1mpasses[0m
+2026-11-10T10:00:25.1234567Z [35;1m  TRY 1 FAIL[0m [   0.082s] (───) [35;1mnxflaky[0m [36mt[0m[36m::[0m[34;1mflaky_once[0m
+2026-11-10T10:00:26.1234567Z [35;1m [0m [35;1mstdout[0m [35;1m───[0m
+2026-11-10T10:00:27.1234567Z 
+2026-11-10T10:00:28.1234567Z     running 1 test
+2026-11-10T10:00:29.1234567Z     test t::flaky_once ... FAILED
+2026-11-10T10:00:30.1234567Z 
+2026-11-10T10:00:31.1234567Z     failures:
+2026-11-10T10:00:32.1234567Z 
+2026-11-10T10:00:33.1234567Z     failures:
+2026-11-10T10:00:34.1234567Z         t::flaky_once
+2026-11-10T10:00:35.1234567Z 
+2026-11-10T10:00:36.1234567Z     test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.01s
+2026-11-10T10:00:37.1234567Z     [0m
+2026-11-10T10:00:38.1234567Z [35;1m [0m [35;1mstderr[0m [35;1m───[0m
+2026-11-10T10:00:39.1234567Z 
+2026-11-10T10:00:40.1234567Z     [0m[31;1mthread 't::flaky_once' (218) panicked at src/lib.rs:14:13:[0m
+2026-11-10T10:00:41.1234567Z     [31;1mfirst attempt fails[0m
+2026-11-10T10:00:42.1234567Z     note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace[0m
+2026-11-10T10:00:43.1234567Z 
+2026-11-10T10:00:44.1234567Z [31;1m  TRY 2 FAIL[0m [   0.058s] (2/3) [35;1mnxflaky[0m [36mt[0m[36m::[0m[34;1malways_fails[0m
+2026-11-10T10:00:45.1234567Z [31;1m [0m [31;1mstdout[0m [31;1m───[0m
+2026-11-10T10:00:46.1234567Z 
+2026-11-10T10:00:47.1234567Z     running 1 test
+2026-11-10T10:00:48.1234567Z     test t::always_fails ... FAILED
+2026-11-10T10:00:49.1234567Z 
+2026-11-10T10:00:50.1234567Z     failures:
+2026-11-10T10:00:51.1234567Z 
+2026-11-10T10:00:52.1234567Z     failures:
+2026-11-10T10:00:53.1234567Z         t::always_fails
+2026-11-10T10:00:54.1234567Z 
+2026-11-10T10:00:55.1234567Z     test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.01s
+2026-11-10T10:00:56.1234567Z     [0m
+2026-11-10T10:00:57.1234567Z [31;1m [0m [31;1mstderr[0m [31;1m───[0m
+2026-11-10T10:00:58.1234567Z 
+2026-11-10T10:00:59.1234567Z     [0m[31;1mthread 't::always_fails' (223) panicked at src/lib.rs:7:9:[0m
+2026-11-10T10:00:59.1234567Z     [31;1mno[0m
+2026-11-10T10:00:59.1234567Z     note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace[0m
+2026-11-10T10:00:59.1234567Z 
+2026-11-10T10:00:59.1234567Z [33;1m  TRY 2 PASS[0m [   0.056s] (3/3) [35;1mnxflaky[0m [36mt[0m[36m::[0m[34;1mflaky_once[0m
+2026-11-10T10:00:59.1234567Z ────────────
+2026-11-10T10:00:59.1234567Z [31;1m     Summary[0m [   0.159s] [1m3[0m tests run: [1m2[0m [32;1mpassed[0m ([1m1[0m [33;1mflaky[0m), [1m1[0m [31;1mfailed[0m, [1m1[0m [33;1mskipped[0m
+2026-11-10T10:00:59.1234567Z [33;1m   FLAKY 2/2[0m [   0.056s] (3/3) [35;1mnxflaky[0m [36mt[0m[36m::[0m[34;1mflaky_once[0m
+2026-11-10T10:00:59.1234567Z [31;1m  TRY 2 FAIL[0m [   0.058s] (2/3) [35;1mnxflaky[0m [36mt[0m[36m::[0m[34;1malways_fails[0m
+2026-11-10T10:00:59.1234567Z [31;1merror[0m: test run failed
