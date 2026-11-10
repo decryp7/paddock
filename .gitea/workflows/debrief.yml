@@ -26,10 +26,10 @@ on:
     branches: [main]
     tags: ["debrief-v*"]
   pull_request:
-  # Nightly on the default branch (main), with the installers. Scheduled runs start at night local time (UTC+8), outside
-  # the Proxmox backup window (assumed 01:00-04:00 local) and staggered so they do not overlap on the three Linux slots.
+  # Nightly on the default branch (main), with the installers. Scheduled runs start at night local time (UTC+8). The
+  # Windows legs start after the Proxmox backup window (00:00 to 04:00 local) and are staggered; see docs/ci-schedules.md.
   schedule:
-    - cron: "33 20 * * *" # 04:33 UTC+8
+    - cron: "3 21 * * *" # 05:03 UTC+8, Windows leg
   workflow_dispatch:
     inputs:
       bundles:

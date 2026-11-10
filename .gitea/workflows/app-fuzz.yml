@@ -2,7 +2,7 @@
 # compiles the fuzz workspace once and fuzzes its targets one after another; a crash fails the shard and the reproducers are
 # uploaded. Triage: the app's docs/fuzzing.md. Every parser crate has a target or a never-panics test (conformance check C34).
 #
-#   on: { schedule: [{ cron: "47 21 * * *" }], workflow_dispatch: {} }
+#   on: { schedule: [{ cron: "13 15 * * *" }], workflow_dispatch: {} }
 #   jobs:
 #     plan: ...                                                   # .gitea/actions/plan
 #     fuzz:
