@@ -1,0 +1,2 @@
+#![cfg_attr(windows, allow(clippy::disallowed_methods))]
+fn a(){}

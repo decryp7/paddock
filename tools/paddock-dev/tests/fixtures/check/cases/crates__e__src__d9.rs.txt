@@ -1,0 +1,1 @@
+fn a(){ let x =  TcpListener::bind("x")?.local_addr(); }

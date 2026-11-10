@@ -1,0 +1,9 @@
+fn a() {
+    let s = "😀 taskkill"; // 😀 "taskkill"
+    Command::new("taskkill");
+    let r = r#"😀 "taskkill""#;
+}
+/* 😀 */ fn b(h: HANDLE) {
+    let c = '😀'; unsafe { TerminateProcess(h, 1) };
+    ps.arg("😀 Stop-Process -Id 1");
+}

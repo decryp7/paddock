@@ -1,0 +1,1 @@
+fn a(){ Command::new("kill"); Command::new( "pkill" ); let s = "a Stop-Process b"; let t = "/usr/bin/kill"; }

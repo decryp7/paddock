@@ -1,0 +1,23 @@
+fn a(c: &mut Child) {
+    let _ = c.kill();
+}
+
+fn b() {
+    let alive = sys.process(Pid::from_u32(pid)).is_some();
+}
+
+// libc::kill(p, 9) and Command::new("taskkill")
+fn c() {
+    let s = "TerminateProcess(h, 1) taskkill";
+    paddock_proc::kill_tree(id);
+    paddock_proc::end(id);
+}
+
+fn d(p: i32) {
+    unsafe { libc::kill(p, 9) };
+    if let Some(p) = sys.process(Pid::from_u32(pid)) { p.kill(); }
+}
+
+#[allow(clippy::disallowed_methods)]
+fn e() {}
+// #![allow(clippy::disallowed_methods)]

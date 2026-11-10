@@ -8,6 +8,7 @@
 //! - `ci isolation`: the CI kit's job isolation (the port of `conformance/ci/job-isolation.sh`, `job-tmpdir.sh` and `ci-home.sh`,
 //!   [`ci_isolation`], ADR 0025);
 //! - `wait`: one bounded wait for a plock job, a process, a log line or a CI run ([`wait`]);
+//! - `check run`: the host of the repository checks in Rust, C39 and C53 first ([`check`], RT-5);
 //! - `check ipc-endpoints`: C102, the register of every listen site and the ratchet of connection endings
 //!   ([`ipc_endpoints`], ADR 0072);
 //! - `hook pre-tool-use` and `hooks install`: Claude Code's PreToolUse guard and its installer ([`hook`], ADR 0083);
@@ -23,6 +24,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod check;
 pub mod ci_isolation;
 mod cli;
 mod fds;
