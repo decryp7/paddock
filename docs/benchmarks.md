@@ -896,6 +896,21 @@ These are ordered by impact.
    - Pitcrew ADR 0021's contention measurement (WP-0) is pending.
    - The Pacenotes measurement plan on real repositories is pending.
 
+## `./dev check run` against the JS conformance host (RT-5, 2026-11-10)
+
+Question: is the Rust host of C39 and C53 faster than `paddock-conformance.mjs` on this tree? Same two checks, same tree
+(3466 tracked `.rs` files), release build of `tools/paddock-dev`.
+
+| Host | Command | Wall time |
+|---|---|---|
+| Rust | `./dev check run --only C39,C53` (OS file cache warm) | 0.16 s |
+| Rust | the same, cold file cache | 0.51 s |
+| JS | `node conformance/bin/paddock-conformance.mjs --app paddock --only C39,C53 --root .` | 0.6 s |
+
+- **Machine:** Mac mini M4 Pro, macOS 27.2. **Source:** the independent review of `feat/rt5-check-host` (40b7faf8f), single runs
+  each, not interleaved; the load was not recorded. Treat the ratio (about 3.6 warm) as the figure, not the seconds.
+- The debug build the tests use is slower; no budget is asserted. The shadow release (RT-5 wiring) can record CI timings.
+
 ## `./dev` cold build (planner port, 2026-11-08)
 
 Question: what does a cache miss of the `./dev` wrapper cost a plan job? `cargo build --release --locked` of
