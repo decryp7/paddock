@@ -210,3 +210,30 @@ fn exit_status_waits_on_the_injected_clock_not_on_the_wall() {
     assert_eq!(asked.join().unwrap(), None);
     child.kill();
 }
+
+/// A child ends through one exit only. Its lifeline thread (stdin closed) called `std::process::exit` while the child's `main`
+/// returned (the connection closed) and ran `exit` too; Rust guards two `exit`s only on Linux, so on macOS two threads ran
+/// the `atexit` handlers and the C++ static destructors together (the store worker's crash, ADR 0076's exit-phase
+/// amendment). The probe child records whether a second thread entered `exit` while the first was in the handlers.
+#[cfg(unix)]
+#[test]
+fn two_exits_never_run_the_handlers_together() {
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().to_str().unwrap();
+    let child = launch(&spec(&["exit-probe", marker]), Arc::new(NoCalls)).unwrap();
+    assert_eq!(child.peer().call(b"up".to_vec(), T).unwrap(), b"up");
+    // The way an owner ends a child: the connection and the lifeline close together, then the grace.
+    child.stop(GUARD);
+    assert!(child.exited());
+    let size = |name: &str| std::fs::metadata(dir.path().join(name)).map_or(0, |m| m.len());
+    // The probe ran (a probe that did not run proves nothing): the child ended through `exit`, not killed.
+    assert!(
+        size("entered-1") > 0,
+        "the probe handler never ran: the child did not end through `exit`"
+    );
+    assert_eq!(
+        size("entered-2"),
+        0,
+        "a second thread entered `exit` while the first was still in the handlers"
+    );
+}

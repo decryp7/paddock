@@ -18,6 +18,10 @@
 //! - `out-of-files-idle` (Unix): with no descriptor left and nobody connecting, the host's accept (Linux fails it with EMFILE
 //!   before it looks for a client) must keep its reserve: prints `free after the idle accept: <bool>`, then the `client:` of
 //!   a client that connects once one descriptor is free.
+//! - `exit-probe <folder>` (Unix): `echo` through the real child loop (`child::serve`) with a test-only `atexit` handler that records
+//!   in the folder's `entered-1` and `entered-2` files whether a second thread entered `exit` while a first was still in
+//!   the handlers (the files are opened first: a lockdown may forbid opening them later). The same probe as
+//!   `debrief-ipc-fake-child --exit-probe` (the two child loops are copies, `docs/known-copies.toml` `ipc-child-launch`).
 //! - `link-out-of-files <discovery file>` (Unix): a `LinkServer` with no descriptor left; prints `ready <endpoint>`, waits for a
 //!   line on standard input (the test's client got its answer) and prints `refused: <what the server recorded>`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -49,6 +53,100 @@ fn echo(_: &CallCtx, body: &[u8]) -> Result<Vec<u8>, RemoteError> {
     }
 }
 
+/// The test-only `atexit` handlers of `exit-probe`. `holder` is registered last, so it runs first: the first thread to enter it
+/// waits on a bounded condition until another thread has been seen in `exit` (or `PROBE_WAIT` passes). `witness` is
+/// registered before it, so a thread that reaches it from another thread than the holder's is a second exit: libc marks an
+/// entry it is running as called, so a second thread skips `holder` and runs the entries after it (that is how both threads
+/// ended up in the static destructors at once on macOS).
+#[cfg(unix)]
+mod exit_probe {
+    use std::fs::File;
+    use std::io::Write;
+    use std::sync::{Condvar, Mutex, OnceLock};
+    use std::time::Duration;
+
+    /// Longest the first thread holds the handlers for a second one (it ends as soon as one arrives).
+    const PROBE_WAIT: Duration = Duration::from_millis(500);
+
+    struct State {
+        holder: Option<usize>,
+        second: bool,
+    }
+
+    static FILES: OnceLock<(Mutex<File>, Mutex<File>)> = OnceLock::new();
+    static STATE: (Mutex<State>, Condvar) = (
+        Mutex::new(State {
+            holder: None,
+            second: false,
+        }),
+        Condvar::new(),
+    );
+
+    /// The calling thread, without `std::thread::current` (not usable once a thread's locals are destroyed, as in `exit`).
+    fn thread_id() -> usize {
+        // SAFETY: `pthread_self` has no preconditions.
+        unsafe { libc::pthread_self() as usize }
+    }
+
+    fn mark(file: &Mutex<File>) {
+        if let Ok(mut f) = file.lock() {
+            let _ = f.write_all(b"x");
+            let _ = f.flush();
+        }
+    }
+
+    fn second_seen(state: &mut State) {
+        if !state.second {
+            state.second = true;
+            if let Some((_, second)) = FILES.get() {
+                mark(second);
+            }
+            STATE.1.notify_all();
+        }
+    }
+
+    extern "C" fn holder() {
+        let Some((first, _)) = FILES.get() else {
+            return;
+        };
+        let Ok(mut st) = STATE.0.lock() else { return };
+        let me = thread_id();
+        match st.holder {
+            Some(h) if h != me => second_seen(&mut st),
+            Some(_) => {}
+            None => {
+                st.holder = Some(me);
+                mark(first);
+                let _ = STATE.1.wait_timeout_while(st, PROBE_WAIT, |s| !s.second);
+            }
+        }
+    }
+
+    extern "C" fn witness() {
+        let Ok(mut st) = STATE.0.lock() else { return };
+        if st.holder.is_some_and(|h| h != thread_id()) {
+            second_seen(&mut st);
+        }
+    }
+
+    /// Opens the marker files (before the lockdown).
+    pub fn open(dir: &str) {
+        let make = |name: &str| {
+            Mutex::new(File::create(std::path::Path::new(dir).join(name)).expect("probe file"))
+        };
+        let _ = FILES.set((make("entered-1"), make("entered-2")));
+    }
+
+    /// Registers the handlers (once the connection is up).
+    pub fn register() {
+        // SAFETY: both are plain `extern "C" fn()`.
+        unsafe {
+            libc::atexit(witness);
+            libc::atexit(holder);
+        }
+    }
+}
+
 fn park_forever() -> ! {
     loop {
         std::thread::park();
@@ -60,6 +158,20 @@ fn main() {
     let arg = |i: usize| args.get(i).cloned().unwrap_or_default();
     match arg(1).as_str() {
         "exit" => std::process::exit(3),
+        #[cfg(unix)]
+        "exit-probe" => {
+            exit_probe::open(&arg(2));
+            // `main` returns after `serve`: its return is the child's one exit once the lifeline closes the connection.
+            let r = child::serve(
+                "host",
+                ProtocolVersion::UNVERSIONED,
+                |_| Arc::new(echo) as Arc<dyn Handler>,
+                |_, _| exit_probe::register(),
+            );
+            if r.is_err() {
+                std::process::exit(2);
+            }
+        }
         "silent" => park_forever(),
         "wrong-token" => {
             let b = child::read_bootstrap(std::io::stdin().lock()).unwrap();
