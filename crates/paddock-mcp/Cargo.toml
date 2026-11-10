@@ -24,6 +24,8 @@ paddock-proc = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4"
+# The loopback accept waits on a poll that `Serving::stop` wakes (no wake connection to the listener).
+mio = { version = "1", features = ["os-poll", "net"] }
 sha2 = "0.10"
 getrandom = "0.3"
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
