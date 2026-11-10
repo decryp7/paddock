@@ -1743,3 +1743,12 @@ Serial local-then-CI added a full local cycle to every landing, while CI found n
 ## Fix rounds after a red CI run rerun only the fix (2026-11-09)
 
 Each full re-run of a combined train cost about 35 minutes of every runner, while the fixes touched a few jobs. The user asked: keep running only the failed tests and builds, then the full CI once everything passed. Rule 50(i): fix rounds dispatch with `base` = the last tested commit; the full affected plan runs once on the final tree before landing.
+
+## Known instances for C103 and ADR 0089 WP-4: a failure read as "nothing to report" (2026-11-10)
+
+Found by the review of the outcome type (`feat/outcome-type`). None is fixed one by one; each goes through the ADR's mechanism (the `Outcome` type and C103) in WP-4.
+- `conformance/src/checks/C57-tracked-symlinks.mjs:33-34` treats any `git` failure as a clean tree.
+- C34 (sidecar self-test) treats invalid JSON as "no sidecars".
+- `conformance/src/util/keychain-graph.mjs:202` drops files it cannot read instead of reporting the check as not measured.
+- `ctx.read(...) ?? ''` reads a missing file as an empty one in the checks that use it, so a missing input passes.
+Fixed in the same change as the type: the runner's crash path (a `path = "*"` waiver hid a crashed check), a non-Error throw (which made `runChecks` reject and exit 2), a malformed finding and an unknown severity, and the stale-waiver warning for a crashed check.

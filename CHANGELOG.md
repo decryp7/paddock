@@ -4,6 +4,11 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-cli`: `Outcome` and `Verdict`, exit codes 6 and 7 (ADR 0089, WP-0 and WP-1)
+- New `paddock_cli::outcome`: `Outcome` (`Clean`, `NotApplicable`, `Findings`, `NotMeasured`, `CheckBroken`; no `bool`, `Result` or default conversion), `Verdict::of(outcomes, &Optional, &Run)` with the precedence `CheckBroken` 7, failing findings 5, `NotMeasured` 6, clean 0 (report-only findings never mask a missing measurement; an empty run and `NotApplicable` in a whole-tree run are not measured), `Optional::parse` for `docs/optional-measurements.toml` (leg, OS, expiry, `measured_on` in release runs) and `RunKind::detect`. `Verdict` writes JSON and a `Table`.
+- `Exit` gains `NotMeasured = 6` and `CheckBroken = 7`; the existing codes are unchanged.
+- Conformance (JS host): a check that crashes, throws a non-Error, returns no list or returns a malformed finding (or an unknown severity) is an unwaivable error, so a `path = "*"` waiver can no longer hide it, and a waiver for such a check is not reported as stale. The CLI exits 7 for a broken check and 6 for one that did not look (new `conformance/src/outcome.mjs`); findings still exit 1.
+
 ### Pitwall: no test double or test switch in the shipped build (ADR 0073, rule 73, WP-P)
 - Removes P1 to P6 of ADR 0073's Pitwall survey; the register and the shared crates follow.
 - `pitwall-server` no longer knows `--fake-engine`, `--die-after-ms` or `--ready-when` (it answers `unknown option`, exit 2). The fake OpenAI-compatible engine is the `pitwall-fake-engine` bin of the same package, built only with the `test-support` feature, which only the package's self dev-dependency enables; the `fake_engine` module is behind `cfg(any(test, feature = "test-support"))`. The tests start it through `CARGO_BIN_EXE_pitwall-fake-engine`, and the host-cleanup process pattern follows the new name.

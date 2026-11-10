@@ -20,7 +20,7 @@ mod error;
 mod exit;
 mod flags;
 mod help;
-mod outcome;
+pub mod outcome;
 mod progress;
 mod report;
 mod table;
@@ -32,7 +32,9 @@ pub use error::CliError;
 pub use exit::Exit;
 pub use flags::{CommonFlags, Format};
 pub use help::{Help, version_line};
-pub use outcome::{Finding, Findings, Outcome, Reason, Severity, Verdict};
+pub use outcome::{
+    Entry, Finding, Findings, Optional, Outcome, Reason, Run, RunKind, Scope, Severity, Verdict,
+};
 pub use progress::{LINE_EVERY, Progress, StopFlag};
 pub use report::{Report, finish};
 pub use table::{MAX_CELL_CHARS, Table, TableFormat, cell_text, write_table};

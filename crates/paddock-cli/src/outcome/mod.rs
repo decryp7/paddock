@@ -1,19 +1,27 @@
 //! One answer for "did this check pass?" (ADR 0089, ER-33): a measurement that did not happen can never pass.
 //!
 //! A check, probe or test ends in exactly one [`Outcome`]. There is no conversion to `bool`, `Result` or a default: the only
-//! ways out are [`Verdict::exit`] and [`Verdict::json`], so a missing tool, a crash or an empty run cannot be read as "clean".
-//! [`Verdict::of`] folds a run's outcomes into one exit code:
+//! ways out are [`Verdict::exit`], [`Verdict::json`] and [`Verdict::table`], so a missing tool, a crash or an empty run
+//! cannot be read as "clean". [`Verdict::of`] folds a run's outcomes into one exit code:
 //!
-//! 1. any [`Outcome::CheckBroken`] gives [`Exit::CheckBroken`] (7);
-//! 2. else any *failing* finding gives [`Exit::Findings`] (5); the JSON still lists every not-measured item;
-//! 3. else any [`Outcome::NotMeasured`], or no outcome at all, gives [`Exit::NotMeasured`] (6), whatever report-only findings
-//!    the run has: a report-only finding never masks a missing measurement;
-//! 4. else 0: clean, not applicable, or report-only findings.
+//! 1. any [`Outcome::CheckBroken`] gives [`crate::Exit::CheckBroken`] (7); it is never optional;
+//! 2. else any *failing* finding, or an expired optional entry, gives [`crate::Exit::Findings`] (5); the JSON still lists every
+//!    not-measured item;
+//! 3. else any [`Outcome::NotMeasured`] that no live [`Optional`] entry covers, an [`Outcome::NotApplicable`] in a whole-tree
+//!    run (only a scoped run can have nothing to do), or no outcome at all, gives [`crate::Exit::NotMeasured`] (6), whatever
+//!    report-only findings the run has: a report-only finding never masks a missing measurement;
+//! 4. else 0: clean, not applicable in a scoped run, report-only findings, and not-measured items all declared optional.
 //!
 //! Waivers and baselines work on [`Finding`]s before an `Outcome` is built, so they never see (and cannot cancel) a
-//! `NotMeasured` or `CheckBroken`. Pure: nothing here reads the environment or the clock.
+//! `NotMeasured` or `CheckBroken`. Pure: nothing here reads the environment or the clock; the run's kind, leg, OS and date are
+//! passed in as a [`Run`].
 
-use crate::Exit;
+mod optional;
+mod verdict;
+
+pub use optional::{Entry, Optional, Run, RunKind, Scope};
+pub use verdict::Verdict;
+
 use serde_json::{Value, json};
 
 /// Why a check did not measure, or is broken, or has nothing to do. Never empty: a missing reason is itself named.
@@ -101,11 +109,11 @@ impl Findings {
 
 /// How one measurement ended. Deliberately not convertible to `bool` or `Result`, and without a `Default`.
 #[must_use = "an outcome must reach a Verdict; dropping it turns a missing measurement into a pass"]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum Outcome {
     /// Measured, nothing found.
     Clean,
-    /// A scoped run (`--files`, an app scope) reached nothing this check reads. Never produced by a whole-tree run.
+    /// A scoped run (`--files`, an app scope) reached nothing this check reads. In a whole-tree run it counts as not measured.
     NotApplicable(Reason),
     /// Measured; each finding failing or report-only.
     Findings(Findings),
@@ -124,8 +132,8 @@ impl Outcome {
         }
     }
 
-    /// The name in the JSON.
-    pub fn name(&self) -> &'static str {
+    /// The name in the JSON and the table.
+    pub(crate) fn name(&self) -> &'static str {
         match self {
             Outcome::Clean => "clean",
             Outcome::NotApplicable(_) => "not-applicable",
@@ -135,7 +143,37 @@ impl Outcome {
         }
     }
 
-    fn json(&self) -> Value {
+    pub(crate) fn failing(&self) -> bool {
+        matches!(self, Outcome::Findings(f) if f.failing())
+    }
+
+    /// The reason or the findings, as one line for the table.
+    pub(crate) fn detail(&self) -> String {
+        match self {
+            Outcome::Clean => String::new(),
+            Outcome::NotApplicable(r) | Outcome::NotMeasured(r) | Outcome::CheckBroken(r) => {
+                r.as_str().to_string()
+            }
+            Outcome::Findings(f) => f
+                .as_slice()
+                .iter()
+                .map(|x| {
+                    format!(
+                        "{}{}",
+                        if x.severity == Severity::Failing {
+                            ""
+                        } else {
+                            "(report only) "
+                        },
+                        x.message
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("; "),
+        }
+    }
+
+    pub(crate) fn json(&self) -> Value {
         match self {
             Outcome::Clean => json!({"status": self.name()}),
             Outcome::NotApplicable(r) | Outcome::NotMeasured(r) | Outcome::CheckBroken(r) => {
@@ -153,221 +191,34 @@ impl Outcome {
     }
 }
 
-/// A run's outcomes folded into one exit code. Built only by [`Verdict::of`].
-#[must_use = "a verdict is turned into the process exit with Verdict::exit"]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Verdict {
-    outcomes: Vec<Outcome>,
-}
-
-impl Verdict {
-    /// Folds `outcomes`. No outcome at all is a run that measured nothing: [`Exit::NotMeasured`].
-    pub fn of(outcomes: impl IntoIterator<Item = Outcome>) -> Verdict {
-        Verdict {
-            outcomes: outcomes.into_iter().collect(),
-        }
-    }
-
-    /// The outcomes, in the order given.
-    pub fn outcomes(&self) -> &[Outcome] {
-        &self.outcomes
-    }
-
-    /// The exit code, by the precedence in the module doc.
-    pub fn exit(&self) -> Exit {
-        if self
-            .outcomes
-            .iter()
-            .any(|o| matches!(o, Outcome::CheckBroken(_)))
-        {
-            Exit::CheckBroken
-        } else if self
-            .outcomes
-            .iter()
-            .any(|o| matches!(o, Outcome::Findings(f) if f.failing()))
-        {
-            Exit::Findings
-        } else if self.outcomes.is_empty()
-            || self
-                .outcomes
-                .iter()
-                .any(|o| matches!(o, Outcome::NotMeasured(_)))
-        {
-            Exit::NotMeasured
-        } else {
-            Exit::Ok
-        }
-    }
-
-    /// The report: the exit, its name, and every outcome with its reason or findings (nothing is dropped, whatever the exit).
-    pub fn json(&self) -> Value {
-        let exit = self.exit();
-        let mut v = json!({
-            "exit": exit.code(),
-            "status": exit.name(),
-            "outcomes": self.outcomes.iter().map(Outcome::json).collect::<Vec<_>>(),
-        });
-        if self.outcomes.is_empty() {
-            v["note"] = json!("no outcome was recorded: nothing was measured");
-        }
-        v
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn reason() -> Reason {
-        Reason::new("why")
-    }
-
-    /// Every kind an outcome can take, with both severities and a mixed list.
-    fn kinds() -> Vec<Outcome> {
-        vec![
-            Outcome::Clean,
-            Outcome::NotApplicable(reason()),
-            Outcome::from_findings(vec![Finding::failing("f")]),
-            Outcome::from_findings(vec![Finding::report_only("r")]),
-            Outcome::from_findings(vec![Finding::report_only("r"), Finding::failing("f")]),
-            Outcome::NotMeasured(reason()),
-            Outcome::CheckBroken(reason()),
-        ]
-    }
-
-    /// The rules of the module doc, written a second time from the ADR (D3, D5), as the oracle for the property test.
-    fn oracle(run: &[Outcome]) -> i32 {
-        let broken = run.iter().any(|o| o.name() == "check-broken");
-        let failing = run.iter().any(|o| match o {
-            Outcome::Findings(f) => f.as_slice().iter().any(|x| x.severity == Severity::Failing),
-            _ => false,
-        });
-        let not_measured = run.iter().any(|o| o.name() == "not-measured") || run.is_empty();
-        if broken {
-            7
-        } else if failing {
-            5
-        } else if not_measured {
-            6
-        } else {
-            0
-        }
-    }
-
-    /// Calls `visit` with every sequence of up to `max` outcomes drawn from `kinds()`.
-    fn every_run(max: usize, visit: &mut dyn FnMut(&[Outcome])) {
-        fn go(prefix: &mut Vec<Outcome>, left: usize, visit: &mut dyn FnMut(&[Outcome])) {
-            visit(prefix);
-            if left == 0 {
-                return;
-            }
-            for k in kinds() {
-                prefix.push(k);
-                go(prefix, left - 1, visit);
-                prefix.pop();
-            }
-        }
-        go(&mut Vec::new(), max, visit);
-    }
-
-    #[test]
-    fn property_every_combination_folds_by_the_precedence() {
-        let mut runs = 0;
-        every_run(4, &mut |run| {
-            runs += 1;
-            let v = Verdict::of(run.to_vec());
-            assert_eq!(v.exit().code(), oracle(run), "{run:?}");
-            // The JSON never disagrees with the exit and never drops an outcome.
-            let j = v.json();
-            assert_eq!(j["exit"], v.exit().code());
-            assert_eq!(j["outcomes"].as_array().unwrap().len(), run.len());
-            // The two guarantees of ADR 0089 section 6, stated directly on every combination:
-            let has = |name: &str| run.iter().any(|o| o.name() == name);
-            if has("check-broken") {
-                assert_eq!(v.exit(), Exit::CheckBroken);
-            }
-            if has("not-measured") {
-                assert_ne!(
-                    v.exit(),
-                    Exit::Ok,
-                    "a missing measurement must not pass: {run:?}"
-                );
-            }
-            // Order never matters.
-            let mut rev = run.to_vec();
-            rev.reverse();
-            assert_eq!(Verdict::of(rev).exit(), v.exit());
-        });
-        assert_eq!(runs, 1 + 7 + 49 + 343 + 2401);
-    }
-
-    #[test]
-    fn positive_controls() {
-        let report_only = Outcome::from_findings(vec![Finding::report_only("r")]);
-        // D5: report-only findings plus not measured is 6, never 0.
-        let v = Verdict::of([report_only.clone(), Outcome::NotMeasured(reason())]);
-        assert_eq!(v.exit(), Exit::NotMeasured);
-        // ... and plus check broken is 7.
-        assert_eq!(
-            Verdict::of([report_only.clone(), Outcome::CheckBroken(reason())]).exit(),
-            Exit::CheckBroken
-        );
-        // Failing plus not measured is 5, with both listed.
-        let v = Verdict::of([
-            Outcome::from_findings(vec![Finding::failing("f")]),
-            Outcome::NotMeasured(Reason::new("no ffmpeg")),
-        ]);
-        assert_eq!(v.exit(), Exit::Findings);
-        let text = v.json().to_string();
-        assert!(
-            text.contains("no ffmpeg") && text.contains("\"failing\":true"),
-            "{text}"
-        );
-        // Broken beats failing.
-        let both = Verdict::of([
-            Outcome::from_findings(vec![Finding::failing("f")]),
-            Outcome::CheckBroken(reason()),
-        ]);
-        assert_eq!(both.exit(), Exit::CheckBroken);
-        // The probe sees the clean cases: only these exit 0.
-        assert_eq!(Verdict::of([Outcome::Clean]).exit(), Exit::Ok);
-        assert_eq!(
-            Verdict::of([Outcome::NotApplicable(reason())]).exit(),
-            Exit::Ok
-        );
-        assert_eq!(Verdict::of([report_only]).exit(), Exit::Ok);
-        // Nothing recorded is nothing measured.
-        let none = Verdict::of(Vec::new());
-        assert_eq!(none.exit(), Exit::NotMeasured);
-        assert!(none.json()["note"].is_string());
-        assert!(none.outcomes().is_empty());
-    }
-
     #[test]
     fn findings_and_reasons_are_never_empty() {
-        assert_eq!(Outcome::from_findings(Vec::new()), Outcome::Clean);
+        assert!(matches!(Outcome::from_findings(Vec::new()), Outcome::Clean));
         assert!(Findings::new(Vec::new()).is_none());
         let blank = Reason::new("  ");
         assert!(blank.as_str().contains("no reason was given"));
         assert_eq!(Reason::new("tool missing").as_str(), "tool missing");
-        let v = Verdict::of([Outcome::NotMeasured(Reason::new(""))]);
-        assert!(v.json().to_string().contains("no reason was given"));
     }
 
     #[test]
-    fn json_names_every_status() {
-        let names: Vec<&str> = kinds().iter().map(|o| o.name()).collect();
-        for n in [
-            "clean",
-            "not-applicable",
-            "findings",
-            "not-measured",
-            "check-broken",
-        ] {
-            assert!(names.contains(&n), "{n}");
-        }
-        let j = Verdict::of(kinds()).json();
-        assert_eq!(j["status"], "check-broken");
-        assert_eq!(j["exit"], 7);
+    fn detail_and_json_say_what_each_outcome_holds() {
+        let mixed = Outcome::from_findings(vec![Finding::report_only("r"), Finding::failing("f")]);
+        assert_eq!(mixed.detail(), "(report only) r; f");
+        let j = mixed.json();
+        assert_eq!(j["findings"][0]["message"], "r");
+        assert_eq!(j["findings"][0]["failing"], false);
+        assert_eq!(j["findings"][1]["message"], "f");
+        assert_eq!(j["findings"][1]["failing"], true);
+        assert_eq!(Outcome::Clean.detail(), "");
+        let nm = Outcome::NotMeasured(Reason::new("no ffmpeg"));
+        assert_eq!(nm.detail(), "no ffmpeg");
+        assert_eq!(nm.json()["reason"], "no ffmpeg");
+        assert_eq!(Outcome::Clean.json()["status"], "clean");
+        assert!(!Outcome::Clean.failing() && mixed.failing());
+        assert!(!Outcome::from_findings(vec![Finding::report_only("r")]).failing());
     }
 }
