@@ -16,7 +16,9 @@ pub struct Env(pub BTreeMap<String, String>);
 impl Env {
     /// This process's environment.
     pub fn from_process() -> Env {
-        Env(std::env::vars().collect())
+        Env(super::pathfind::normalise(std::env::vars().collect(), cfg!(windows), &|k| {
+            std::env::var(k).ok()
+        }))
     }
 
     /// A variable that is set and not empty. On Windows the name is matched ignoring case (`Path` is `PATH`).

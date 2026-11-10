@@ -15,6 +15,26 @@ pub fn lookup<'a>(vars: &'a BTreeMap<String, String>, key: &str, windows: bool) 
     found.map(String::as_str).filter(|v| !v.is_empty())
 }
 
+/// `vars` with one key per variable. On Windows `PATH` and `Path` are one variable, and a map that holds both would give `get`, `set` and
+/// a child's environment three answers; the key kept is the first in order and its value is the one the process itself reports for
+/// it (`os_value`), falling back to the value it had. Elsewhere `vars` is returned as it is.
+pub fn normalise(vars: BTreeMap<String, String>, windows: bool, os_value: &dyn Fn(&str) -> Option<String>) -> BTreeMap<String, String> {
+    if !windows {
+        return vars;
+    }
+    let mut out: BTreeMap<String, String> = BTreeMap::new();
+    let mut seen: Vec<String> = Vec::new();
+    for (k, v) in &vars {
+        let lower = k.to_ascii_lowercase();
+        if seen.contains(&lower) {
+            continue;
+        }
+        seen.push(lower);
+        out.insert(k.clone(), os_value(k).unwrap_or_else(|| v.clone()));
+    }
+    out
+}
+
 /// The extensions a bare program name may take on Windows, in `PATHEXT` order, limited to the ones a job's npm and node come as
 /// (`.exe`, `.cmd`); without a `PATHEXT` the order is `.exe`, `.cmd`.
 pub fn extensions(pathext: Option<&str>) -> Vec<String> {
@@ -144,26 +164,48 @@ mod tests {
 
     #[test]
     fn empty_and_relative_entries_are_ignored() {
-        // A folder under the current folder holds the program: a relative entry naming it would find it if it were read.
-        let rel = tempfile::tempdir_in(".").unwrap();
-        touch(rel.path(), "npm.cmd", 0o755);
-        touch(rel.path(), "npm", 0o755);
-        let relative = rel.path().file_name().unwrap().to_string_lossy().into_owned();
+        // The tests run in the crate folder, which holds `Cargo.toml`: with `.toml` as the extension, a relative entry that was read
+        // against the current folder would find it. Nothing is written anywhere.
+        let toml = [".toml".to_string()];
+        assert!(
+            Path::new("Cargo.toml").is_file(),
+            "the control: the current folder holds Cargo.toml"
+        );
         let sep = if cfg!(windows) { ";" } else { ":" };
-        for entry in ["", ".", relative.as_str()] {
+        for entry in ["", ".", "src/.."] {
             let p = format!("{entry}{sep}{entry}");
-            assert_eq!(find_program(&p, "npm", cfg!(windows), &extensions(None)), None, "{entry:?}");
+            assert_eq!(find_program(&p, "Cargo", true, &toml), None, "{entry:?}");
         }
         // An absolute entry after them is still found.
         let d = tempfile::tempdir().unwrap();
         touch(d.path(), "npm.cmd", 0o755);
         touch(d.path(), "npm", 0o755);
-        let p = format!("{sep}.{sep}{relative}{sep}{}", d.path().display());
+        let p = format!("{sep}.{sep}{}", d.path().display());
         let name = if cfg!(windows) {
             d.path().join("npm.cmd")
         } else {
             d.path().join("npm")
         };
         assert_eq!(find_program(&p, "npm", cfg!(windows), &extensions(None)), Some(name));
+    }
+
+    #[test]
+    fn a_map_with_path_and_path_is_one_variable_with_the_value_the_process_reports() {
+        let both = vars(&[("PATH", "/x"), ("Path", "/y"), ("HOME", "/h")]);
+        let os = |k: &str| {
+            if k.eq_ignore_ascii_case("path") {
+                Some("/y".to_string())
+            } else {
+                None
+            }
+        };
+        let n = normalise(both.clone(), true, &os);
+        assert_eq!(n.len(), 2, "one key for the path variable, one for HOME: {n:?}");
+        assert_eq!(lookup(&n, "PATH", true), Some("/y"));
+        assert_eq!(lookup(&n, "Path", true), Some("/y"));
+        assert_eq!(lookup(&n, "HOME", true), Some("/h"));
+        assert_eq!(normalise(both.clone(), false, &os), both, "Unix keeps every key");
+        // No answer from the process: the kept key's own value stays.
+        assert_eq!(normalise(both, true, &|_| None).get("PATH").map(String::as_str), Some("/x"));
     }
 }
