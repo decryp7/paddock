@@ -9,7 +9,7 @@ name: bench
 
 on:
   schedule:
-    - cron: "47 3 * * *"
+    - cron: "3 14 * * *" # 22:03 UTC+8, a night slot (see docs/ci-schedules.md in the Paddock repo)
   workflow_dispatch:
 
 env:

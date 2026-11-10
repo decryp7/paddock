@@ -350,7 +350,7 @@ snapshots* (manual test 24 in [testing-manual.md](testing-manual.md)).
 
 Gitea Actions workflows live in [`.gitea/workflows/`](../.gitea/workflows/):
 
-- **`build.yml`** runs on pushes to `main`, pull requests, `v*` tags, nightly (00:30 UTC, on `main`) and on
+- **`debrief.yml`** (formerly `build.yml`) runs on pushes to `main`, pull requests, `debrief-v*` tags, nightly (06:03 local, UTC+8, on `main`; schedule table in [docs/ci-schedules.md](../../../docs/ci-schedules.md)) and on
   demand (`workflow_dispatch`):
   1. *check* (Linux): `cargo nextest run --profile ci` (and the doc tests), `fmt`, `clippy -D warnings`, `cargo-deny`, the commit-message
      check (pull requests), the Angular build with `npm audit`, the i18n extraction check, `ng lint`,

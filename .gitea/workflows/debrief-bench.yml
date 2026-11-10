@@ -15,7 +15,7 @@ on:
       - "apps/debrief/crates/debrief-store-duck/**"
       - "apps/debrief/crates/debrief-store-worker/**"
   schedule:
-    - cron: "47 3 * * *"
+    - cron: "3 14 * * *" # 22:03 UTC+8
   workflow_dispatch:
 
 env:

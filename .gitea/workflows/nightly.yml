@@ -11,7 +11,7 @@ name: nightly
 
 on:
   schedule:
-    - cron: "43 1 * * *"
+    - cron: "3 21 * * *" # 05:03 UTC+8, Windows leg (backup end only assumed; docs/ci-schedules.md)
   workflow_dispatch:
 
 concurrency:
@@ -408,6 +408,9 @@ jobs:
   # IP1 item 6 (plan 1.2): every shared crate's fuzz targets run for a bounded time each, through the reusable app-fuzz workflow
   # (rule 55: one implementation of the fuzz run). A crash fails its job, uploads the reproducer and keeps the night from being
   # marked green. Each crate's fuzz folder is its own workspace (`crates/<crate>/fuzz`).
+  # Gitea counts runner slots per caller, so the five calls are chained in two chains (ipc, view, testplan and plugin-package,
+  # archive): at most two run at once and one of the three Linux slots stays free. A later link runs even after a crash
+  # in the earlier one (`!cancelled()`), so one crash does not hide the others.
   fuzz-ipc:
     name: fuzz (paddock-ipc)
     needs: [gate]
@@ -434,8 +437,8 @@ jobs:
 
   fuzz-view:
     name: fuzz (paddock-view)
-    needs: [gate]
-    if: ${{ needs.gate.outputs.run == 'true' }}
+    needs: [gate, fuzz-ipc]
+    if: ${{ !cancelled() && needs.gate.outputs.run == 'true' }}
     uses: ./.gitea/workflows/app-fuzz.yml
     with:
       paddock-ref: ${{ github.sha }}
@@ -446,8 +449,8 @@ jobs:
 
   fuzz-archive:
     name: fuzz (paddock-archive)
-    needs: [gate]
-    if: ${{ needs.gate.outputs.run == 'true' }}
+    needs: [gate, fuzz-plugin-package]
+    if: ${{ !cancelled() && needs.gate.outputs.run == 'true' }}
     uses: ./.gitea/workflows/app-fuzz.yml
     with:
       paddock-ref: ${{ github.sha }}
@@ -458,8 +461,8 @@ jobs:
 
   fuzz-testplan:
     name: fuzz (paddock-testplan)
-    needs: [gate]
-    if: ${{ needs.gate.outputs.run == 'true' }}
+    needs: [gate, fuzz-view]
+    if: ${{ !cancelled() && needs.gate.outputs.run == 'true' }}
     uses: ./.gitea/workflows/app-fuzz.yml
     with:
       paddock-ref: ${{ github.sha }}

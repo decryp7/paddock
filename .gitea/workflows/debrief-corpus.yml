@@ -7,7 +7,7 @@ name: debrief-corpus
 
 on:
   schedule:
-    - cron: "43 3 * * *"
+    - cron: "43 14 * * *" # 22:43 UTC+8
   workflow_dispatch:
 
 env:
