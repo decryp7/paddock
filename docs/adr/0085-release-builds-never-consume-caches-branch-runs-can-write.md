@@ -65,7 +65,7 @@ in any case as the same OS user (host runners) or through the same bind mount (L
 | Angular build cache | `/sccache/angular/<name>` | `angular/<name>-s<n>` | same (not for Debrief Windows) | yes, linked into the app as `.angular/cache` | `node-caches`; run 7695 |
 | Debrief `node_modules` | npm ci | npm ci | **kept per lockfile hash** in `node-modules/debrief-s<n>`, junctioned in; `npm ci` skipped when it exists | yes (Windows) | `windows-node-modules.sh` |
 | Debrief `libduckdb` (shipped in the installer) | the image's `/opt/libduckdb` or the job's temp | `libduckdb/<job>-s<n>`; the SHA-256 is checked only when the folder has no `.verified` marker | same | yes; anyone can write the marker | `fetch-libduckdb.sh:34` |
-| **Tauri's tool cache** (NSIS and its plugins, shipped inside the installer) | n/a | n/a | the runner user's `%LOCALAPPDATA%\tauri` | yes, reused once present | tauri-bundler (read, not verified on the runner) |
+| **Tauri's tool cache** (NSIS and its plugins, shipped inside the installer) | n/a | n/a | the runner user's `%LOCALAPPDATA%\tauri`, which Tauri finds through `dirs-sys` 0.5.0: `SHGetKnownFolderPath(FOLDERID_LocalAppData)` (`lib.rs:153`, `:181`), **not** the `LOCALAPPDATA` variable | yes, reused once present | tauri-bundler and `dirs-sys` source (read, not verified on the runner) |
 | **AppImage tools** (`linuxdeploy`, `linuxdeploy-plugin-appimage` from the moving `continuous` release, `AppRun` from `apprun-old`), part of the shipped AppImage | **downloaded in every run without a checksum** | n/a | n/a | yes | job 31478: three `Downloading https://github.com/…` lines |
 | `paddock-dev` (`./dev`, run by `job-isolation` as the slot holder for the whole job) | `/sccache/paddock-dev/bin-source/<hash>` | `<ci-home>/tools/paddock-dev/bin-source/<hash>` (scope `shared`) | same | yes: a cached binary that answers `--version` runs. `self hash` is checked only for a new build or a download | `dev:280-312`; `job-isolation.sh:186-193`; no `dev: built` line in run 7695's host logs |
 | sccache binary | the image's | the first `sccache` 0.19.0 on `PATH` (the shared Mac: `/opt/homebrew/bin`, user-writable); the checksum is checked only on a download | same | yes | `setup-rust/action.yml:72-109` |
@@ -150,8 +150,11 @@ A tag run (`github.ref` starts with `refs/tags/`) and the pre-tag dispatch of ru
    checked against the pinned SHA-256; the `.verified` marker is ignored). `CARGO_HOME` starts empty: a fresh registry
    download against the tagged lockfiles (a cold `cargo fetch` of all eight workspaces took 34.3 s on this Mac,
    `docs/benchmarks.md` 2026-11-08 C99 block; the Linux leg already downloads its 515 crates every run). The kept Angular
-   cache is not linked; the build writes its cache inside the job's own checkout. On Windows `LOCALAPPDATA` points into
-   the job folder for the build steps, so Tauri downloads its NSIS tools again; WP-9 pins their hash.
+   cache is not linked; the build writes its cache inside the job's own checkout. Tauri's bundler tools (NSIS on Windows,
+   the AppImage tools on Linux) go into the run's own build folder: release mode passes `--config
+   '{"bundle":{"useLocalToolsDir":true}}'` to `tauri build`, so they live in `<build folder>/.tauri/`, where WP-9 puts
+   the pinned files. Pointing `LOCALAPPDATA` at the job folder would not do this: Tauri resolves that folder through
+   `SHGetKnownFolderPath`, not the variable (§2.2), so release mode does not rely on it.
 2. **No compile cache.** `setup-rust` leaves `RUSTC_WRAPPER` unset and starts no sccache server. No Redis, no WebDAV, no
    `actions/cache`.
 3. **`paddock-dev` is built from source for the run**, with no compiler wrapper, into an empty folder made for this run,
@@ -184,7 +187,7 @@ summary line to the job summary.
 
 1. **The ledger.** Every action that chooses a folder or a cache appends one line `kind<TAB>path<TAB>mode` to
    `$RUNNER_TEMP/release-isolation/ledger.tsv` (`setup-rust`: `sccache off`; `build-folder`: `target`; `kept-clone`:
-   `workspace`; `node-caches`: `npm`, `angular`; `./dev`: `dev-tool`; Windows: `tauri-tools`; Debrief: `libduckdb`,
+   `workspace`; `node-caches`: `npm`, `angular`; `./dev`: `dev-tool`; `tauri build`: `tauri-tools` (the `.tauri` folder inside the build folder); Debrief: `libduckdb`,
    `node-modules`). Verify fails when a mode is not `job`, `run` or `off`, or when a path does not match what `setup`
    recorded for its kind. A kind that the job's declared list expects and the ledger lacks is **check broken**, never a pass
    (rule 71).
@@ -194,7 +197,11 @@ summary line to the job summary.
    with `mktemp -d` and records each one's device and inode (and, on Unix, its ctime), in a record under `$RUNNER_TEMP`.
    Verify checks that each path still resolves (canonical; `cygpath -u` on Windows) to the same device and inode, and that
    each is still under the folder `setup` made it in. It also checks every `.crate` archive in `CARGO_HOME/registry/cache`
-   against the SHA-256 that the tagged `Cargo.lock` names: an archive with no lock entry or another hash fails.
+   against the SHA-256 values in the **union of the tagged lockfiles this job builds**: the app's Cargo workspace,
+   `tools/paddock-dev` and, on Windows for a per-machine app, the `paddock-setup.exe` workspace. An archive with no entry in
+   that union, or with another hash, fails. The publishing `release` job compiles nothing in release mode: its
+   `cargo install git-cliff --locked` fallback (`app-release.yml:448`, when the image lacks git-cliff) is refused there, and
+   the pinned image must carry git-cliff.
 3. **No compile cache.** `RUSTC_WRAPPER`, `CARGO_BUILD_RUSTC_WRAPPER` and `RUSTC_WORKSPACE_WRAPPER` are empty, and no
    sccache server answers on the job's port (or `--show-stats` shows 0 compile requests).
 4. **The job's own pointers on Linux** (the gate's choice, D2): `SCCACHE_DIR` is unset or inside the job, `npm_config_cache`
@@ -205,8 +212,11 @@ summary line to the job summary.
 5. **Configuration from the tagged tree only.** Every `.cargo/config` and `.cargo/config.toml` that cargo would read for
    the build (each parent folder of the Cargo workspace up to the root, and `CARGO_HOME`) is either a file of the tagged
    tree (`git ls-files` in the clone) or absent; `.cargo/ci.toml` holds only the `target-dir` that `build-folder` wrote. No
-   `.npmrc` outside the tagged tree is read (`npm config list --json` shows no user or global file), and `git config
-   --global --get core.hooksPath` is empty. On Windows the NSIS files Tauri used are the pinned ones (WP-9's hashes).
+   `.npmrc` outside the tagged tree is read (`npm config list --json` shows no user or global file). Git: run in the clone,
+   with no scope option, `git config --show-origin --get-all core.hooksPath` and `git config --show-origin
+   --get-regexp '^url\..*\.insteadof$'` must print nothing, so the system file (Homebrew's `etc/gitconfig` on the Mac), the
+   global file, `include` and `includeIf` all count, and any value fails (with the file it came from). The bundler tools:
+   every file in `<build folder>/.tauri/` has the SHA-256 WP-9 pins, and the ledger's `tauri-tools` path is that folder.
 6. **Output.** `release isolation: 10 kinds made by this run, 0 shared; 512 crate archives match Cargo.lock; no compile
    cache; no cargo or npm configuration outside the tag` (numbers per job), or the `::error::` list. The `release` job needs
    the bundle jobs, so a red check stops the publish.
@@ -227,8 +237,9 @@ summary line to the job summary.
   test fail.
 - **A positive control in CI, once, before the first isolated tag.** The release-mode dispatch (WP-3) with
   `isolation-probe: leak` shares on purpose, on every OS: the Angular link and sccache; on the hosts also the kept build
-  folder and the runner user's `CARGO_HOME`; on Windows also the kept Tauri tool cache. Verify must go red and name each
-  one. The run number goes into §10; without it the check does not count.
+  folder and the runner user's `CARGO_HOME`. On Windows it also plants a marked file in the runner user's
+  `%LOCALAPPDATA%\tauri` NSIS folder and checks that the build did not read it (the installer and `.tauri/` carry no copy of
+  the marker, and the run's own `.tauri/` holds the pinned files). Verify must go red on each planted leak and name it. The run number goes into §10; without it the check does not count.
 - **The real proof.** A green release-mode dispatch on the release candidate (WP-3), then the tag run itself, each showing
   the summary line with non-zero counts.
 
@@ -278,7 +289,9 @@ tag time), and D6 (a), which keeps a warm, release-only cache.
   - (a) **a separate OS user per host with its own runner** (registered with a label such as `macos-release`,
     `windows-release`; the release callers pick it with a tag-dependent `runs-on`), its own toolchain, Node, `CARGO_HOME`,
     git and npm configuration, **and a warm release-only cache** (sccache, build folder, cargo home) that only that user
-    writes. Branch jobs never run as that user, so T1 is closed on the hosts too, and tag builds stay warm (about
+    writes, and only **tag runs** write: the rule 25 pre-tag dispatch also runs in release mode (§4) but is a branch run,
+    so it must not land on the release user (the tag-dependent `runs-on` keys on `refs/tags/`, not on release mode). Branch
+    jobs never run as that user, so T1 is closed on the hosts too, and tag builds stay warm (about
     today's 4 to 8 min instead of 25 to 40). Needs: a runner-side guard that refuses non-tag jobs on that runner (a branch
     could name the label; whether act_runner can refuse by ref is unverified), and per-user installs on each host.
   - (b) a throw-away VM per tag build (Tart on the Mac, already used by the VM smoke; a Windows VM snapshot): the strongest,
@@ -318,16 +331,16 @@ and workbench demos), **WP-2, WP-3, WP-4, WP-5 and WP-9.** That is about 6 agent
 
 | WP | What | Gates the next tag | Days | Depends on |
 |---|---|---|---|---|
-| **WP-1a** | `release-isolation.sh setup` and its action; release mode in `setup-rust` (no wrapper), `build-folder` (folder made by the run), `kept-clone` (fresh clone in the job folder), `node-caches` (the run's npm cache, no Angular link), `./dev` (§4 item 3; on Linux inside the container); `CARGO_HOME` and, on Windows, `LOCALAPPDATA` made by the run; wired into `app-release.yml` bundle, keychain and release in the §4 step order; ADR 0022 comments corrected on those jobs | yes (Dyno, Pitcrew, Pitwall, Spotter) | 1.5 | — |
+| **WP-1a** | `release-isolation.sh setup` and its action; release mode in `setup-rust` (no wrapper), `build-folder` (folder made by the run), `kept-clone` (fresh clone in the job folder), `node-caches` (the run's npm cache, no Angular link), `./dev` (§4 item 3; on Linux inside the container); `CARGO_HOME` made by the run; `useLocalToolsDir` passed to `tauri build`; wired into `app-release.yml` bundle, keychain and release in the §4 step order; ADR 0022 comments corrected on those jobs | yes (Dyno, Pitcrew, Pitwall, Spotter) | 1.5 | — |
 | **WP-1b** | the same for `debrief.yml` bundle: `kept-clone` instead of `stable-workspace` in release mode (and the Windows clone's `clean -ffd` gap closed with `-x` and hooks off in every mode), `libduckdb` checked every time, no kept `node_modules`; the `licences` gate without `actions/cache` on tags (D9) | yes (Debrief) | 1 | WP-1a |
 | **WP-1c** | the same for `shell-demo-release.yml` and `workbench-demo-release.yml` bundles (their own job-isolation and kept build folder on Windows, `actions/setup-node`, `dtolnay/rust-toolchain` by digest) | yes (the demos) | 0.5 | WP-1a |
 | **WP-2** | `release-isolation.sh verify`: ledger, identity freshness, `.crate` hashes against `Cargo.lock`, the configuration probes, the job's own pointers on Linux, summary, `::error::` per finding; the unit tests of §5.1 with the old-mtime fixture and the mutation check; the static conformance check | yes | 2 | WP-1a |
 | **WP-3** | `release-mode` and `isolation-probe` inputs on the release callers' dispatch; rule 25's pre-tag dispatch always in release mode; the positive-control run (red on every OS, naming each planted leak) and a green release-mode run on the release candidate; their timings, Windows Defender's effect included, as a results block in `docs/benchmarks.md`; the run numbers in §10 | yes (rule 71's proof) | 0.5 + runner time | WP-2 |
 | **WP-4** | D7: the key only on tags and never in `npm ci` or `prepare`; a throw-away key on dispatch; a note on signing after the build as a separate step | yes | 1 | — |
 | **WP-5** | D8: release jobs pin the images by digest; `ci-image.yml` prints the digest and only a `main` run's digest is pinned (a conformance check compares the pinned digest with `main`'s last image run) | yes | 0.5 | — |
-| **WP-9** | the AppImage tools (`linuxdeploy`, `linuxdeploy-plugin-appimage`, `AppRun`) and the Windows NSIS tools fetched from pinned URLs with pinned SHA-256 values into the places Tauri looks, before `tauri build`; a test that the build downloads nothing else | yes | 0.5 | — |
+| **WP-9** | the AppImage tools (`linuxdeploy`, `linuxdeploy-plugin-appimage`, `AppRun`) and the Windows NSIS tools fetched from pinned URLs with pinned SHA-256 values into `<build folder>/.tauri/` (the `useLocalToolsDir` folder) before `tauri build`; the hashes the probe checks; a test that the build downloads nothing else | yes | 0.5 | — |
 | WP-6 | D2 (b): the `ubuntu-release` runner without the mount (a host action by the user, then the label change and the mount-absent probe) | no | 0.25 + host action | WP-1a |
-| WP-7 | D6: research note on a release identity for the hosts (a separate user with a release-only cache; a Tart VM per tag; Windows options; act_runner job guards by ref; Gitea secret scoping by ref), then an ADR | no; after the next tag | 1 | — |
+| WP-7 | D6: research note on a release identity for the hosts (a separate user with a release-only cache written only by tag runs, never by the rule 25 pre-tag dispatch; a Tart VM per tag; Windows options; act_runner job guards by ref; Gitea secret scoping by ref), then an ADR | no; after the next tag | 1 | — |
 | WP-8 | D10: the rule, the lesson, the ADR 0022 amendment (`PADDOCK_DEV_FRESH`'s claim made true for tags) | no | 0.25 | WP-2 |
 
 ## 9. Consequences
