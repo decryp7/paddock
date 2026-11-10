@@ -1,10 +1,11 @@
 # 89. A measurement that did not happen can never pass: one outcome type, one test outcome, one exit code, and a check over every copy
 
-- Status: Proposed 2026-11-10, revision 4. Drafted at the coordinator's request of 2026-11-10 (ER-21: one class, seen
+- Status: Proposed 2026-11-10, revision 5. Drafted at the coordinator's request of 2026-11-10 (ER-21: one class, seen
   six times in one day's Rust tooling reviews, after the Dyno 1.1.0 instances that created ER-33). Revision 1
   (`e5e4f300d`) was reviewed independently ("changes", 6 P1 and 12 P2); revision 2 (`90d28a0a6`) answered it and was
   re-reviewed ("changes": P1-7 and four P2s); revision 3 (`197d5234e`) answered that and was re-reviewed ("changes":
-  P1-8, two P2s); revision 4 answers it (see "Review answers").
+  P1-8, two P2s); revision 4 (`264468b3c`) answered it and was re-reviewed ("changes": P1-9, three P2s); revision 5
+  answers it (see "Review answers").
   Nothing here is built yet.
 - Date: 2026-11-10
 - Related: ER-21 / rule 40, ER-22 / rules 42 and 55 (share first; one implementation per mechanism,
@@ -288,8 +289,10 @@ In RT-5's `./dev check` host:
   RT-3 `worktree/mod.rs:14`, RT-5 `record.rs:71, 73, 75, 99`, RT-8 `flakes.rs:148` (6 sites, 3 branches); the JS seed
   (vm-smoke's verdict and its rows) is counted by WP-3, which re-seeds every list from the heads it lands on.
 - **(c) Exits.** `std::process::exit` in `tools/` only in `main.rs` (Clippy `disallowed-methods` in `tools/*/clippy.toml`).
+- **(d) Tag workflows** follow §7's rule: the variables on every test step, uploads from every leg, and a final
+  `measured-on` job; enumerated over `.gitea/workflows/` and the local actions they call, with fixture workflows (§7).
 
-Today's (a) and (b) sites seed a shrink-only ratchet (`docs/ratchets/c103.toml`, ADR 0088's engine); new sites fail.
+Today's (a), (b) and (d) sites seed a shrink-only ratchet (`docs/ratchets/c103.toml`, ADR 0088's engine); new sites fail.
 
 ### 6. Positive controls (ER-33), each a test
 
@@ -305,33 +308,65 @@ Today's (a) and (b) sites seed a shrink-only ratchet (`docs/ratchets/c103.toml`,
   not run the test makes the final job fail; run on Debrief's tag path, §7); `require_tool("cargo")` returns a path (the probe sees a present tool).
 - C103: every shape of §5 (a) and (b) in fixtures with a clean twin each; it must report every planted one.
 
-### 7. CI and the strict default (rewritten in revision 4)
+### 7. CI and the strict default (rewritten in revision 5: a rule and a check, not a list)
 
-CI does not use `./dev test`: it calls nextest directly. Under D4 (b) the strict outcome reads the register itself, so
-each nextest step needs `PADDOCK_LEG=<id>` and `PADDOCK_NOT_MEASURED_LOG=<file>` in its environment, each leg uploads
-its JUnit report and its not-measured log, and one final job per tag workflow reads them. Today nothing of that exists:
-`release-verdict` runs only in `dyno-`, `pitcrew-`, `pitwall-` and `spotter-release.yml` (`:199`, `:157`, `:168`,
-`:155`) and in `nightly.yml`, and it reads no test results (it reports installers and failed gates,
-`conformance/ci/release-verdict.mjs`); the only JUnit upload is Debrief's Linux `rust-test` (`debrief.yml:225-230`).
-WP-2b, per workflow that runs a tag's tests:
+CI does not use `./dev test`: it calls the runners directly. Under D4 (b) the strict outcome reads the register itself,
+so each test step needs `PADDOCK_LEG=<id>` and `PADDOCK_NOT_MEASURED_LOG=<file>`, each leg uploads its reports, and one
+final job reads them. Today nothing of that exists: `release-verdict` runs only in `dyno-`, `pitcrew-`, `pitwall-` and
+`spotter-release.yml` (`:199`, `:157`, `:168`, `:155`) and in `nightly.yml` and reads no test results
+(`conformance/ci/release-verdict.mjs` reports installers and failed gates); the only JUnit upload is Debrief's Linux
+`rust-test` (`debrief.yml:225-230`).
 
-| Workflow (tag) | Test legs (nextest steps) | Final job |
+Revisions 3 and 4 listed the tag workflows by hand and missed three (P1-8, P1-9), so the list is replaced by a rule
+that a check enumerates:
+
+**Rule.** Every workflow under `.gitea/workflows/` that has a tag trigger (`on.push.tags`) and whose steps, or the
+steps of a workflow it calls (`uses: ./.gitea/workflows/…`), or of a local action those steps use
+(`uses: ./.gitea/actions/…`), run nextest, vitest or Playwright must:
+
+1. set `PADDOCK_LEG` and `PADDOCK_NOT_MEASURED_LOG` on each of those steps (an action takes a `leg` input, default
+   `${{ github.job }}-${{ runner.os }}`);
+2. upload, `if: always()`, each leg's JUnit report and not-measured log under a name that carries the leg;
+3. have a final job, `if: always()`, that needs every job running such a step, directly or through a called workflow,
+   and runs `./dev ci measured-on` (Rust, ADR 0022; it applies §3a and is `NotMeasured`, never "nothing to check", when
+   a leg's artifacts are missing). In the four app release workflows that job is the existing `verdict`, whose
+   `release-verdict` step is extended to call it.
+
+**Who is authoritative when a workflow is called.** `ci.yml` runs `measured-on` in its own final job only when it is
+not an app's tag gate: `if: always() && inputs.app == ''` (its `workflow_call` input `app` is set by the
+`<app>-release.yml` callers, `dyno-release.yml:73-77`). For a release caller, the caller's `verdict` job is the one
+check; there is no second.
+
+**Unverified:** whether Gitea's act_runner lets the caller's `verdict` job download artifacts uploaded by legs inside
+the reusable `ci.yml` call (`actions/download-artifact` across a `workflow_call` boundary). WP-2b settles it first with
+the Dyno control below; if it cannot, the called `ci.yml` runs `measured-on` itself for its legs (`if: always()`, its
+`app` input set) and passes its outcome to the caller as a job output, which `verdict` reads.
+
+**The check: C103 (d).** A YAML pass over `.gitea/workflows/*.yml` and the local actions, following `uses:` into called
+workflows and local actions, that reports every tag workflow breaking the rule, by job and step. Fixtures: a tag
+workflow with a nextest step and no `PADDOCK_LEG`; one with the variables but no final job; one whose final job lacks
+`if: always()` or misses a test job in `needs:`; one that calls a reusable workflow running Playwright; and a clean
+twin of each. The seed is today's tag workflows that run tests, enumerated by the check, not typed here; at
+`67a633ef3` a scan (`grep` for `tags:` and then for nextest, vitest, Playwright, `app-gates` or a called workflow)
+finds 9 (every one breaks the rule today), and `ci-image.yml` is the one tag workflow that runs no tests:
+
+| Workflow (tag) | Test steps found at `67a633ef3` | Final job |
 |---|---|---|
-| `debrief.yml` (`debrief-v*`; full gates on tags, `:27`, `:75`) | `rust-test` (Linux, `:223`), `rust-test-macos` (`:330`), and any other nextest step WP-2b's `grep -n nextest .gitea/workflows/debrief.yml` finds at its head (the review counted three; two `cargo nextest run` lines were found at `67a633ef3`) | **new** `measured-on` job: `needs:` every test leg, `if: always()`, runs the new step |
-| `dyno-`, `pitcrew-`, `pitwall-`, `spotter-release.yml` (`<app>-v*`) | their `gates` job calls `ci.yml`, whose `app` job runs the tests through `.gitea/actions/app-gates` (`ci.yml:1034`; nextest at `action.yml:153-154`); the release workflows run no nextest themselves | the existing `verdict` job (`needs: [plan, gates, installers, release]`, `if: always()`), whose `release-verdict` step is **extended to read the legs' test reports** |
-| `ci.yml` (`v*`, the shared packages) | the four jobs that call nextest directly: `wiki` (`:478`), `heavy` (`:575`), `crate` (`:835-857`), `paddock-dev` (`:1186`), plus `app` through `app-gates` | a new final `measured-on` job, as in `debrief.yml` |
+| `debrief.yml` (`debrief-v*`) | `rust-test` `:223`, `rust-test-macos` `:330` (nextest), its e2e and frontend jobs (Playwright, vitest) | **new** `measured-on` job |
+| `dyno-`, `pitcrew-`, `pitwall-`, `spotter-release.yml` | through `gates` → `ci.yml` (`app` job → `app-gates`, `action.yml:153-154`) | existing `verdict`, extended |
+| `shell-demo-release.yml` (`shell-demo-v*`) | `gates`: Playwright `:67`, nextest `:74` | **new** final job |
+| `workbench-demo-release.yml` (`workbench-demo-v*`) | `gates`: Playwright `:67`, nextest `:74` | **new** final job |
+| `publish.yml` (`v*`, the shared packages every app ships) | `gates`: nextest `:41` | a `measured-on` step at the start of the `publish` job (it already `needs: [gates]`), before anything is published |
+| `ci.yml` (`v*`) | `wiki` `:478`, `heavy` `:575`, `crate` `:835-857`, `paddock-dev` `:1186`, `app` (through `app-gates`) | **new** final job, skipped when `inputs.app` is set |
 
-- **Every leg:** the two variables on each nextest step (in `app-gates` through a `leg` input defaulting to
-  `${{ github.job }}-${{ runner.os }}`), and an upload of `target/nextest/ci/junit.xml` and the not-measured log under
-  a name that carries the leg, `if: always()`.
-- **The check** is one step, `./dev ci measured-on` (Rust, ADR 0022), called by the new jobs and by the extended
-  `release-verdict`; it reads every leg's artifacts of the run and applies §3a. A leg whose artifacts are missing makes
-  the step `NotMeasured`, never "nothing to check".
-- **Positive control on Debrief's tag path** (§6): a `workflow_dispatch` of `debrief.yml` with the tag path's inputs on
-  a throw-away branch, with a planted test that is `NotMeasured` on the Linux leg and declared `measured_on =
-  ["rust-test-macos"]`: green when the macOS leg passes it, red when the planted test is also skipped on macOS.
-- This touches shared actions and every app's release path (ER-31 (b), ADR 0022 G.7), so WP-2b lands outside a release
-  freeze, **before** WP-4 and WP-5: otherwise migrated tests turn legs red where a declared exception was intended.
+**Positive controls** (§6), on throw-away branches with the tag path's inputs: (1) `debrief.yml`, a planted test
+`NotMeasured` on `rust-test` (Linux) with `measured_on = ["rust-test-macos"]`: green when macOS passes it, red when it is
+skipped there too; (2) `dyno-release.yml` with gates on, a planted test in a Dyno crate `NotMeasured` on the Linux
+`app` leg with `measured_on = ["<Dyno's macOS app leg>"]`, the same two outcomes, which also proves (or disproves) the
+artifact download across the `ci.yml` call; (3) C103 (d)'s fixtures.
+
+This touches shared actions and every app's release path (ER-31 (b), ADR 0022 G.7), so WP-2b lands outside a release
+freeze, **before** WP-4 and WP-5: otherwise migrated tests turn legs red where a declared exception was intended.
 
 ### 8. Migration (after acceptance; one small commit per group, C103 green as the proof)
 
@@ -415,13 +450,13 @@ An `[[optional]]` line declares a measurement optional per place; C103 can be re
 | D4 | How CI applies optional entries | (a) every CI test step through `./dev test --leg <id>`; (b) the strict `Measured` reads the register and `PADDOCK_LEG`, plus a summary step (WP-2b) | **(b)** now; (a) can follow with RT-12 |
 | D5 | Report-only findings and not measured | (a) never masked: exit 6 (or 7), the property test covers it; (b) report-only runs exit 0 regardless | **(a)** |
 | D6 | Where optional is declared | (a) `docs/optional-measurements.toml`, an ADR 0088 register (readers, coverage, uncovered = not measured); never for `CheckBroken`; in a release run only under D14; `ci-only` counts for the push gate; (b) at the call site | **(a)** |
-| D7 | The check | (a) C103: every early exit in a test body, print or not; outcome definitions outside the canonical module; `process::exit` outside `main.rs`; shrink-only ratchet; (b) Clippy only | **(a)** |
+| D7 | The check | (a) C103: every early exit in a test body, print or not; outcome definitions outside the canonical module; `process::exit` outside `main.rs`; tag workflows that run tests without §7's variables, uploads and final job; shrink-only ratchet; (b) Clippy only | **(a)** |
 | D8 | The JS host's waivable crash | (a) fix now, failing test first, shadow-table entry; (b) with WP-4 | **(a)** |
 | D9 | ffmpeg in CI (measured absent in `paddock-ci:v2`) | (a) add it to the image; (b) an `[[optional]]` entry for the Linux container leg; (c) both, (b) expiring at the image date | **(c)** |
 | D10 | The 91 `#[ignore]` tests | (a) out of scope; a later check that each names the job that runs it; (b) now | **(a)** |
 | D11 | Engineering rule | (a) extend ER-33: "… and a check, probe or test that could not look reports it as its own outcome and exit code, which no waiver, baseline, report-only finding, aggregation or test harness turns into a pass; a measurement may be skipped only where reviewed data declares it optional for that place, with a reason and an expiry, and in a release run only where another leg of the same run measured it"; (b) a new ER-37 | **(a)**, as ADR 0088 D11 |
 | D12 | Tag gating | (a) no new gate on tags beyond D14's rule; WP-1 and WP-2b land outside a release freeze, and WP-5 migrates an app's tests only with its `measured_on` entries in the same change; (b) block tags until WP-5 | **(a)** |
-| D14 | Optional entries in release runs (P1-7) | (a) honoured only with `measured_on = [legs]` and one of those legs ran the test green in the same run, checked across legs by a final job of each tag workflow (`release-verdict` extended, or a new `measured-on` job in `debrief.yml` and `ci.yml`, §7); (b) release strictness only for ER-33 release checks (vm-smoke, release isolation, installer, gates), `where` entries for unit tests honoured as on any run; (c) stay strict, and first make the image measure everything (a non-root test user, a landlock-capable runner) in a WP before WP-5 | **(a)**: a test may be measured on another leg but never vanishes from a release; (c)'s image work stays worth doing and removes entries as it lands; (b) is the fallback if `release-verdict` cannot read the legs' reports |
+| D14 | Optional entries in release runs (P1-7) | (a) honoured only with `measured_on = [legs]` and one of those legs ran the test green in the same run, checked across legs by a final job of each tag workflow (§7's rule, enforced by C103 (d)); (b) release strictness only for ER-33 release checks (vm-smoke, release isolation, installer, gates), `where` entries for unit tests honoured as on any run; (c) stay strict, and first make the image measure everything (a non-root test user, a landlock-capable runner) in a WP before WP-5 | **(a)**: a test may be measured on another leg but never vanishes from a release; (c)'s image work stays worth doing and removes entries as it lands; (b) is the fallback if `release-verdict` cannot read the legs' reports |
 | D13 | Reading CI logs for test results | (a) one reader (`runlog`, §4b) for nextest, Playwright and vitest, `Measured` only with the runner's summary, truncation controls from real logs; (b) each tool keeps its own | **(a)**: two nextest readers already drifted (#6) |
 
 ## Work packages (raw agent-days, one agent), in order
@@ -431,16 +466,26 @@ An `[[optional]]` line declares a measurement optional per place; C103 can be re
 | WP-0 | The JS host's crash (§8.1) with the planted-waiver test first | 0.25 |
 | WP-1 | `paddock_cli::outcome` (`Outcome`, `Verdict`, `Optional` reader with run kinds, JSON and table), `Exit` 6 and 7, contract and property tests (D5's case included), 99% coverage; `conformance/src/outcome.mjs` | 1.5 |
 | WP-2 | `paddock_testkit::{Measured, measure, require_tool, require_tool_that, require_capability, require_env}` with the three modes and the record format; the JS `measure`/`requireTool`; `./dev test` (nextest plus records into a `Verdict`); §6's controls under nextest and `cargo test` | 2.5 |
-| WP-2b | CI legs per workflow (§7's table): the two variables on every nextest step (`debrief.yml`, `app-gates`, the four `ci.yml` jobs), JUnit and log uploads from every leg, `PADDOCK_RUN_KIND` in the release workflows, `./dev ci measured-on`, a new final job in `debrief.yml` and `ci.yml`, `release-verdict` extended to read the legs' test reports; the §6 control on Debrief's tag path and a dispatch of one other app's release workflow with gates on (rule 54) | 2 |
+| WP-2b | §7's rule on every tag workflow that runs tests (9 at `67a633ef3`): the variables on each test step, uploads from every leg, `PADDOCK_RUN_KIND` in the release workflows, `./dev ci measured-on`, new final jobs in `debrief.yml`, both demo release workflows and `ci.yml` (skipped when `inputs.app` is set), a step in `publish.yml`'s `publish` job, `release-verdict` extended; settle the artifact download across the `ci.yml` call; the Debrief and Dyno controls | 2.5 |
 | WP-2c | §4b's reader: the Playwright and vitest parts (nextest by RT-8, not counted here), the truncation controls over every captured log, a vitest fixture, `plan_since` and `ci flakes` as callers, the copies entry | 1.5 |
-| WP-3 | C103 (a) syn pass, (b), (c), fixtures for every shape, the ratchet seed; `docs/optional-measurements.toml` with schema and its 0088 list entry; benchmark line | 2.5 |
+| WP-3 | C103 (a) syn pass, (b), (c), (d) (the tag-workflow pass of §7 with its fixture workflows), fixtures for every shape, the ratchet seed; `docs/optional-measurements.toml` with schema and its 0088 list entry; benchmark line | 3 |
 | WP-4 | Tooling copies onto the type (§8.4) with the shadow-table entries | 2 |
 | WP-5 | Step 1: one reporting-mode run per Rust test leg, the per-leg list, the image line for ffmpeg (D9) and the entries; step 2: the 126 test-body sites and 2 JS sites by kind, per app. Re-sized after step 1 | 3 (1 + 2, provisional) |
 | WP-6 | `docs/known-copies.toml` entry, ER-33 text (D11), rule 71 line, lessons entry, RT brief template line | 0.5 |
-| | **Total** | **15.75** |
+| | **Total** | **16.75** |
 
-First cut: WP-0 now (independent of acceptance), then WP-1, WP-2, WP-2b, WP-2c and WP-3 (10 days) close the class for new
+First cut: WP-0 now (independent of acceptance), then WP-1, WP-2, WP-2b, WP-2c and WP-3 (11 days) close the class for new
 code; WP-4 and WP-5 retire today's copies.
+
+## Review answers (revision 4, `264468b3c`)
+
+- P1-9: the hand-made workflow table (which missed `shell-demo-release.yml:74`, `workbench-demo-release.yml:74` and
+  `publish.yml:41`, after revision 3 had missed Debrief's tag path) is replaced by §7's rule and the check C103 (d) with
+  fixture workflows; the three are added (a final job per demo, a step at the start of `publish.yml`'s `publish` job);
+  WP-2b 2.5 days, WP-3 3 days.
+- P2: Debrief's count is the two lines `:223`, `:330`; the artifact download across the `ci.yml` call is marked
+  unverified, with a fallback, and the Dyno control settles it; `ci.yml`'s own final job skips when `inputs.app` is set,
+  so the release caller's `verdict` is the one check.
 
 ## Review answers (revision 3, `197d5234e`)
 
@@ -456,7 +501,7 @@ code; WP-4 and WP-5 retire today's copies.
 - RT-5 drifts: `judge` named as RT-5 names it; crash stays `CheckBroken`, changed in RT-5 by WP-4 with a shadow-table
   line; the "being fixed" text replaced by `0a94bf347`'s state; the C103 (b) seed updated and re-seeded by WP-3.
 - A: `test:` entries are expiry-only; their records are CI artifacts read by the tag workflow's final job (§7). B: run kind from
-  `GITHUB_REF` and an explicit `PADDOCK_RUN_KIND`; `PADDOCK_LEG` set on every nextest step (revision 4: §7's table).
+  `GITHUB_REF` and an explicit `PADDOCK_RUN_KIND`; `PADDOCK_LEG` set on every nextest step (revision 5: §7's rule).
   C: start lines must equal summaries; a two-invocation fixture. D: JS shapes in C103 (b). ADR 0090 cross-referenced.
 
 ## Review answers (revision 1, `e5e4f300d`)
