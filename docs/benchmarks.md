@@ -932,3 +932,21 @@ figure. The CI download figure needs a measurement once the package is populated
 The first publish attempts failed for two reasons found on the way: `curl --data-binary` makes Gitea answer 500 (fixed with `-T`),
 and a binary published for one hash is a miss after any commit that touches `tools/paddock-dev` (a test file changed between
 publish and consume): the hash is per commit of the tool's inputs, so each such commit needs its own publish.
+
+## Push gate: lockfile check (2026-11-10)
+
+Question: what does the push gate's lockfile step (ADR 0038 amendment 2026-11-10, step 4) cost per Cargo workspace?
+Command: `cargo metadata --locked --offline --format-version 1` in each workspace of `origin/train/2026-11-09-3`
+(`66b600669`), warm registry cache, one run each, cargo 1.99.1, Mac mini (arm64), 1-minute load 7.7 (`uptime`), nothing
+else of this agent running. An indication, not an A/B result.
+
+| Workspace | Wall |
+|---|---|
+| `tools/paddock-dev` | 0.26 s |
+| `apps/pitwall` | 0.44 s |
+| `crates` | 0.45 s |
+| `apps/dyno` | 0.48 s |
+| `apps/debrief` | 0.84 s |
+
+Positive controls (synthetic crate depending on `itoa = "=1.0.14"`): a `Cargo.lock` hand-edited to `1.0.15` with the old
+checksum, and the same with `Cargo.toml` changed to `=1.0.15`, both exit 101 under `--locked --offline`.
