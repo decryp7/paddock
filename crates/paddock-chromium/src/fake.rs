@@ -221,6 +221,12 @@ impl FakeBrowser {
     }
 }
 
+/// The pid of this process's parent (it changes to the reaper's when the parent dies).
+fn parent_pid() -> libc::pid_t {
+    // SAFETY: getppid has no arguments and cannot fail.
+    unsafe { libc::getppid() }
+}
+
 /// Becomes the fake browser when this process was started by [`FakeBrowser::install`]'s script; returns at once otherwise
 /// (so the caller's marker test is harmless in a normal run). Never returns when it serves.
 pub fn serve_if_requested() {
@@ -234,10 +240,15 @@ pub fn serve_if_requested() {
         .unwrap_or(1);
     let url_file = std::env::var(URL_ENV).unwrap_or_default();
     apply_control();
-    // An idle fake still quits when told to.
-    std::thread::spawn(|| {
+    // The process that started this fake; when it is gone (a killed or timed-out test run, no guardian) the fake ends.
+    let owner = parent_pid();
+    // An idle fake still quits when told to, and when its owner is gone (it would otherwise listen for ever, ER-14).
+    std::thread::spawn(move || {
         loop {
             apply_control();
+            if parent_pid() != owner {
+                std::process::exit(0);
+            }
             std::thread::sleep(TICK);
         }
     });
