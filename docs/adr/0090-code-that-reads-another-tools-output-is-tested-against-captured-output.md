@@ -1,10 +1,10 @@
 # 90. Code that reads another tool's output is tested against captured output: a register of readers and fixtures, a capture command at the pinned version, and C104
 
-- Status: Proposed 2026-11-10, revision 3. Revision 1 (`0cca8dd30`) was reviewed independently ("changes": P1-1 to
-  P1-6 and ten P2s), revision 2 (`9687d644b`) answered them, and its re-review ("changes": P1-A, P1-B and six P2s) is
-  answered here (see "Review answers"). Drafted at the coordinator's request of 2026-11-10
-  (ER-21: one class, seen twice that day in RT-8 and twice before). Nothing here is built yet. ER-23 does not apply (no
-  drawings).
+- Status: Accepted 2026-11-10 (user), all decisions as recommended. History: Proposed 2026-11-10. Revision 1
+  (`0cca8dd30`) was reviewed independently ("changes": P1-1 to P1-6 and ten P2s), revision 2 (`9687d644b`) answered
+  them, its re-review ("changes": P1-A, P1-B and six P2s) is answered in revision 3 (see "Review answers"), and the
+  independent review approved revision 3 (`22b6a4b16`). Drafted at the coordinator's request of 2026-11-10 (ER-21: one
+  class, seen twice that day in RT-8 and twice before). Nothing here is built yet. ER-23 does not apply (no drawings).
 - Date: 2026-11-10
 - Related: ER-11, ER-12, ER-14 (no real user data in fixtures; "invent same-shape data"), ER-21 / rule 40, ER-22 / rule
   55 (`docs/known-copies.toml`), ER-33 / rule 71; ADR 0022 (developer tooling is Rust in `./dev`), ADR 0074 (leased test
@@ -14,16 +14,17 @@
 - Number: 0090 was free on every `origin` branch on 2026-11-10 (0089 is the highest, on `origin/docs/adr-not-measured`;
   no ADR worktree holds an uncommitted 009x file). Check id C104: C103 (ADR 0089 §5) is the highest named on any `origin`
   branch.
-- Evidence: read on 2026-11-10 with `git show`, `git grep` and `git log -S` at these branch heads, re-read for revision 2:
+- Evidence: read on 2026-11-10 with `git show`, `git grep` and `git log -S` at these branch heads, re-read for revision 3:
   `origin/train/2026-11-09-3` `67a633ef3` (this ADR's base; paths and lines without a branch are from it),
-  `origin/main` `b51c72509`, `origin/feat/rt8-ci-flakes` `da05b54e8`, `origin/feat/rt5-check-host` `ec8530a95`,
-  `origin/docs/adr-windows-gate-ratchets` `db7782e01` (ADR 0088), `origin/docs/adr-not-measured` `0df6835a9` (ADR 0089, its status commit after `bd9f9eea4`; accepted
-  2026-11-10 by the user). Claims about shipped code were checked with `git tag --contains` on the commit that
-  introduced the code.
+  `origin/main` `b51c72509`, `origin/feat/rt8-ci-flakes` `1313b8d9e`, `origin/feat/rt5-check-host` `ec8530a95`,
+  `origin/docs/adr-windows-gate-ratchets` `db7782e01` (ADR 0088), `origin/docs/adr-not-measured` `0df6835a9`
+  (ADR 0089, its status commit after `bd9f9eea4`; accepted 2026-11-10 by the user). Claims about shipped code were
+  checked with `git tag --contains` on the commit that introduced the code.
   One measurement: Pitcrew's `parse_job` state loop (`apps/pitcrew/app/src-tauri/src/service_repair.rs:104-107`),
   copied into a 5-line program in the researcher's scratch folder and run on paddock-service's real capture
   (`crates/paddock-service/tests/fixtures/launchctl-print-running.txt`), returns `found = true, running = false` for a
-  running job (that loop is on the train and `origin/main`, but in no Pitcrew or Pitwall tag; see below). One web page: the nextest retries docs. No user data was read.
+  running job (that loop is on the train and `origin/main`, but in no Pitcrew or Pitwall tag; see below). One web
+  page: the nextest retries docs. No user data was read.
 
 ## Context: the incidents
 
@@ -43,16 +44,16 @@ nextest and Playwright print, not taken from the tools.
 
 RT-8 then re-captured every log at CI's pin, cargo-nextest **0.9.149** (`.gitea/actions/host-tools/action.yml:12`), in
 the `paddock-ci:v2` image, and replaced the invented clippy log with a capture from clippy 0.1.99 / rustc 1.99.1 in the
-same image (first line of each fixture in `tools/paddock-dev/tests/ci-runs/` at `da05b54e8`). Its one nextest reader,
+same image (first line of each fixture in `tools/paddock-dev/tests/ci-runs/` at `1313b8d9e`). Its one nextest reader,
 `tools/paddock-dev/src/nextest_log.rs`, says which labels have no capture: `SIG*`, `ABORT` and `LEAK-FAIL` (`:9`,
-`:67`). That is the shape this ADR asks of every reader. The nextest documentation would not have caught either bug: its
+`:69` at `1313b8d9e`). That is the shape this ADR asks of every reader. The nextest documentation would not have caught either bug: its
 retries page names `TRY 1 FAIL`, `TRY 2 PASS`, `FLAKY 2/3` and `(1 flaky)`, but not `TMT` or `FLKY-FL`
 (https://nexte.st/docs/features/retries/, read 2026-11-10). Only the tool's output, or its source, is the reference.
 
 On the train (`67a633ef3`) the class still lives next door: `./dev plan --since-run` has its own matcher,
 `FAIL|TIMEOUT|SIG*|ABORT|LEAK-FAIL|FLAKY`, without `TMT` or `FLKY-FL` (`tools/paddock-dev/src/plan_since.rs:67-71`), so
 with `retries = 1` (allowed by ER-12) a timed-out test is not rerun. At RT-8's head `plan_since` calls the shared reader
-instead (`plan_since.rs:60` at `da05b54e8`; `nextest_log.rs:70` matches `TMT` and `FLKY`), so the gap closes when RT-8
+instead (`plan_since.rs:60` at `1313b8d9e`; `nextest_log.rs:72` matches `TMT` and `FLKY`), so the gap closes when RT-8
 lands.
 
 ## The class, seen before
@@ -68,7 +69,7 @@ lands.
     same on `origin/main`). Run on the real capture it returns `running = false` for a running job (Evidence).
   - **It never shipped.** The line scan came in with `5ff3b0a39` (Pitcrew) and `638a61a6b` (Pitwall), both 2026-10-23;
     `git tag --contains` lists only Dyno tags for either, no Pitcrew or Pitwall tag. `pitcrew-v1.0.1` and `pitwall-v1.0.3`
-    use `stale_registration` (`service_repair.rs:80-83` at those tags), which reads three phrases and is not tripped by
+    use `stale_registration` (`service_repair.rs:80-84` at both tags), which reads three phrases and is not tripped by
     the coalition blocks. Pitwall's copy is removed on the train in `b7151a57f`.
   - Its tests pass because their input is a real capture with the nested blocks cut out ("The real `launchctl print` ...
     (trimmed)", `:429-431`). A trimmed capture showed the shape the author expected, not the one macOS prints.
@@ -98,7 +99,7 @@ This is a sweep, not an audit. WP-3 repeats the structural pass and seeds the re
 
 | Provenance | Count | Units |
 |---|---|---|
-| Whole capture, tool or OS version named | 2 | RT-8's readers at `da05b54e8`: `nextest_log.rs` with its callers `ci_runs/logfind.rs` and `plan_since.rs`, and logfind's Playwright and clippy parts (nextest 0.9.149 at the pin and clippy 0.1.99, both in `paddock-ci:v2`; Playwright 1.64.1; first line of each fixture); `crates/paddock-service/src/parse.rs` for `launchctl print` (`:719`). Its `sc query`/`sc qc` mode is invented text (`:493`), so the Windows mode has no capture |
+| Whole capture, tool or OS version named | 2 | RT-8's readers at `1313b8d9e`: `nextest_log.rs` with its callers `ci_runs/logfind.rs` and `plan_since.rs`, and logfind's Playwright and clippy parts (nextest 0.9.149 at the pin and clippy 0.1.99, both in `paddock-ci:v2`; Playwright 1.64.1; first line of each fixture); `crates/paddock-service/src/parse.rs` for `launchctl print` (`:719`). Its `sc query`/`sc qc` mode is invented text (`:493`), so the Windows mode has no capture |
 | A note that falls short (trimmed, no version or command, or inconsistent) | 9 | Pitcrew `service_repair.rs:429` (real, trimmed, the cut not declared); `tools/paddock-dev/src/plan_since.rs` on the train (its own matcher, real CI logs in `tests/since-run/`, no note; at RT-8's head it becomes a caller of `nextest_log`, but its vitest part and its logs stay); Dyno `parse/mac_pcblist.rs` with `tests/fixtures/mac_pcblist/make.py` (a capture script, but its note says "macOS 27.2, build 26B123", `make.py:1`, and a 26B build is macOS 26); `apps/debrief/crates/debrief-plugin-windows/tests/fixtures/NOTICE.txt` ("recorded on a test machine", no OS build); Dyno `parse/smart.rs:153,233,246,287`, `parse/ioreg_disk.rs:85`, `parse/btm.rs:166` ("invented" or "shape of a real reading"); `dyno-platform/src/counters/mac.rs:1-2` ("tested with real output", none named); `dyno-platform/src/issues/macos.rs` (`log show`, one "invented" note) |
 | No note | 43 | **paddock-dev and shared:** RT-8 `ci_runs/client.rs` and `timings.rs`, one unit (Gitea JSON `tests/ci-runs/timings/*.json`); `tools/paddock-dev/src/input_hash.rs` (`git`); `crates/paddock-repo-graph/src/cargo.rs` (`cargo metadata`), `history.rs` (`git log`); `crates/paddock-download/src/proxy_os.rs` (`scutil`, `reg query`, `netsh`); `crates/paddock-service/src/privileged/windows_acl.rs` (`icacls`, whose words change with the display language); `apps/debrief/crates/cargo-debrief-plugin/src/lib.rs` (cargo JSON). **Debrief:** `debrief-video/src/parse.rs` (ffprobe, ffmpeg; its stand-in `src/bin/fake_ffmpeg.rs` answers "like FFmpeg does" from a script). **Pitcrew:** `pitcrew-core/src/gitea_api.rs`, `distribution.rs` (Gitea), `hygiene.rs` (`docker`, `podman`). **Spotter:** `spotter-core/src/source/forge.rs`, `json_api.rs`. **Pitwall:** `pitwall-core/src/pressure.rs` (`sysctl`, `pmset`), `hardware.rs` (`nvidia-smi`). **Dyno agent and app:** `dyno-agent/src/service/mod.rs:235` (`launchctl print` by substring), `helper_readers/counters.rs` (`powermetrics`), `app/src-tauri/src/link/launchd.rs`. **Dyno core:** `extras/boot.rs` (`wevtutil`, `systemd-analyze`), `extras/sleep.rs` (`pmset`, `powercfg`), `extras/gpu.rs` (`nvidia-smi pmon`, `typeperf`), `extras/usage.rs` (`nettop`, `top`), `extras/software.rs` (`system_profiler`, `reg query`), `network_traffic.rs` (`nettop`), `wol/readiness.rs` (`pmset`, `powercfg`, `reg query`; adapter `dyno-platform/src/wol/readiness.rs`), `wol/neighbours.rs` (`arp`, `ip neigh`, `ndp`), `region.rs` (locale, `reg query` Geo). **Dyno platform:** `issues/windows.rs` (`wevtutil`), `issues/linux.rs` (`journalctl`, `coredumpctl`), `inventory/windows.rs` (CIM JSON), `inventory/macos.rs` (`system_profiler` JSON), `inventory/linux.rs`, `wakes.rs` (`pmset`, `systemctl`), `helper_counters.rs`, and in `parse/` `firewall.rs`, `hardware.rs`, `ioreg.rs`, `linux_hw.rs`, `linux_tools.rs`, `lsof.rs`, `mac_tools.rs`, `powercfg.rs`, `wifi.rs` |
 
@@ -276,7 +277,7 @@ Each case below is a test of C104:
 
 ADR 0089 §4b (`0df6835a9`, accepted) makes one runner-log reader, `runlog`, for nextest, Playwright and vitest. RT-8 has
 already built its nextest part: `tools/paddock-dev/src/nextest_log.rs` is the one nextest reader, and `ci_runs/logfind.rs`
-and `plan_since.rs` are its callers (`da05b54e8`). In the register it is one reader, `runlog`, with modes per runner
+and `plan_since.rs` are its callers (`1313b8d9e`). In the register it is one reader, `runlog`, with modes per runner
 (nextest retries 0 and 1, Playwright with and without projects, vitest), and its captured logs are this register's
 fixtures. ADR 0089 WP-2c adds the Playwright and vitest parts and a vitest capture; it comes before this ADR's WP-3, and
 the vitest capture is made once. The train's `plan_since` label gap closes when RT-8 lands.
