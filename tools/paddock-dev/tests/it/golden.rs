@@ -703,9 +703,17 @@ fn live_guard_edits_mark_conformance_exactly_as_affected_mjs_does() {
     let graph = read_graph(&copy, &history).unwrap();
     // A new Rust test with an ignore and a TypeScript spec with an environment guard, and a comment-only edit of each (no mark).
     let edits: [(&str, &str, bool); 4] = [
-        ("crates/paddock-cli/src/lib.rs", "\n#[test]\n#[ignore]\nfn skipped_by_the_guard_test() {}\n", true),
+        (
+            "crates/paddock-cli/src/lib.rs",
+            "\n#[test]\n#[ignore]\nfn skipped_by_the_guard_test() {}\n",
+            true,
+        ),
         ("crates/paddock-cli/src/lib.rs", "\n// a comment\n", false),
-        ("ui/projects/paddock-ui/src/public-api.ts", "\nit('guarded', () => { void process.env.X; });\n", true),
+        (
+            "ui/projects/paddock-ui/src/public-api.ts",
+            "\nit('guarded', () => { void process.env.X; });\n",
+            true,
+        ),
         ("ui/projects/paddock-ui/src/public-api.ts", "\n// a comment\n", false),
     ];
     for (rel, add, marks) in edits {
@@ -727,9 +735,15 @@ fn live_guard_edits_mark_conformance_exactly_as_affected_mjs_does() {
             head: "HEAD".into(),
         };
         let got = canonical(plan_on_graph(&copy, &history, &req, &graph).unwrap());
-        assert_eq!(got, canonical(serde_json::from_slice(&script.stdout).unwrap()), "different plan for a guard edit of {rel}");
+        assert_eq!(
+            got,
+            canonical(serde_json::from_slice(&script.stdout).unwrap()),
+            "different plan for a guard edit of {rel}"
+        );
         let reasons = got["why"]["conformance"].as_array().cloned().unwrap_or_default();
-        let marked = reasons.iter().any(|r| r.as_str().is_some_and(|r| r.starts_with("C100: an ignore attribute")));
+        let marked = reasons
+            .iter()
+            .any(|r| r.as_str().is_some_and(|r| r.starts_with("C100: an ignore attribute")));
         assert_eq!(marked, marks, "the content rule on {rel} with {add:?}");
         std::fs::write(&path, original).unwrap();
     }

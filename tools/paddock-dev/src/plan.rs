@@ -450,7 +450,10 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
         if C100_INPUTS.iter().any(|r| r.is_match(f)) {
             st.mark(Some("conformance".to_string()), format!("C100 reads {f} (./dev gates inputs)"));
         }
-        if let Some(content) = opts.content.filter(|_| (f.ends_with(".rs") || f.ends_with(".ts")) && !f.contains("node_modules/")) {
+        if let Some(content) = opts
+            .content
+            .filter(|_| (f.ends_with(".rs") || f.ends_with(".ts")) && !f.contains("node_modules/"))
+        {
             let (before, after) = content(f);
             if guards_changed(before.as_deref(), after.as_deref()) {
                 st.mark(
@@ -849,7 +852,10 @@ pub fn plan_on_graph(root: &Path, history: &dyn History, req: &Request, graph: &
             )
         } else {
             let base = req.base.as_deref().unwrap_or("HEAD");
-            (history.file_at(base, f).ok().flatten(), history.file_at(&req.head, f).ok().flatten())
+            (
+                history.file_at(base, f).ok().flatten(),
+                history.file_at(&req.head, f).ok().flatten(),
+            )
         }
     };
     let mut opts = Options {
