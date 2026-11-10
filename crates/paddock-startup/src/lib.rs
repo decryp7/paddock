@@ -45,7 +45,7 @@ pub use boot_error::{BootErrorKind, clean_error};
 pub use checkpoint::{Checkpoints, ReadyReply, ready_reply};
 pub use config::{Config, ConfigError};
 pub use lifecycle::{
-    CrashInfo, Decision, InstanceScope, Lifecycle, Offers, PreviousRun, RestorePlan, Start,
+    CrashInfo, Decision, InstanceScope, Lifecycle, Look, Offers, PreviousRun, RestorePlan, Start,
     StartReport, UncleanShutdown,
 };
 pub use safe_mode::{Feature, Mode, SAFE_MODE_FLAG};

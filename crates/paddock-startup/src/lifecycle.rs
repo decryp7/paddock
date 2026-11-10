@@ -42,24 +42,53 @@ pub const MAX_INSTANCE_DIRS: usize = 256;
 /// Start times are whole seconds; allow for rounding between reads.
 const START_TOLERANCE_SECS: u64 = 1;
 
-/// Returns the start time (seconds since the Unix epoch) of the process with this PID, or `None` when no such process
-/// exists.
-pub type Probe<'a> = &'a dyn Fn(u32) -> Option<u64>;
+/// What a look at the process table found for one PID. Three-valued because "could not look" is not "gone" (rule 53).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Look {
+    /// No process has this PID.
+    Gone,
+    /// A process has it, started at this time (seconds since the Unix epoch).
+    Started(u64),
+    /// The process table could not be read: nothing is known.
+    Unknown,
+}
+
+impl Look {
+    /// The start time when a process was seen.
+    pub fn started(self) -> Option<u64> {
+        match self {
+            Look::Started(t) => Some(t),
+            Look::Gone | Look::Unknown => None,
+        }
+    }
+}
+
+impl From<Option<u64>> for Look {
+    /// A table that was read: a start time, or nobody.
+    fn from(seen: Option<u64>) -> Look {
+        seen.map_or(Look::Gone, Look::Started)
+    }
+}
+
+/// Looks up the process with this PID in the process table.
+pub type Probe<'a> = &'a dyn Fn(u32) -> Look;
 
 /// The OS's process table (the production [`Probe`]).
 #[cfg(feature = "os-probe")]
-pub fn os_probe(pid: u32) -> Option<u64> {
+pub fn os_probe(pid: u32) -> Look {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
     let pid = Pid::from_u32(pid);
-    let mut sys = System::new()
+    let Ok(mut sys) = System::new()
         .inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; the start time of pid {pid} is unknown"))
-        .ok()?;
+    else {
+        return Look::Unknown;
+    };
     sys.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[pid]),
         false,
         ProcessRefreshKind::nothing(),
     );
-    sys.process(pid).map(|p| p.start_time())
+    sys.process(pid).map(|p| p.start_time()).into()
 }
 
 /// Which state folder a process uses (see the module docs).
@@ -134,16 +163,30 @@ pub enum PreviousRun {
     Crashed,
     /// The marker's process is still alive (another instance, or one still exiting).
     StillRunning,
+    /// The process table could not be read, so whether the marker's process runs is not known: neither crashed nor running.
+    Unknown,
 }
 
 /// Whether the marker's process is alive: the PID exists and, when the marker recorded it, with the same start time
 /// (else the PID was reused).
-fn alive(m: &Marker, probe: Probe<'_>) -> bool {
+fn alive(m: &Marker, probe: Probe<'_>) -> Liveness {
     match (probe(m.pid), m.started_at) {
-        (None, _) => false,
-        (Some(_), None) => true,
-        (Some(now), Some(then)) => now.abs_diff(then) <= START_TOLERANCE_SECS,
+        (Look::Gone, _) => Liveness::Dead,
+        (Look::Unknown, _) => Liveness::Unknown,
+        (Look::Started(_), None) => Liveness::Alive,
+        (Look::Started(now), Some(then)) if now.abs_diff(then) <= START_TOLERANCE_SECS => {
+            Liveness::Alive
+        }
+        (Look::Started(_), Some(_)) => Liveness::Dead,
     }
+}
+
+/// Whether a marker's process runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Liveness {
+    Alive,
+    Dead,
+    Unknown,
 }
 
 /// Decides how the previous run ended. A marker with this process's own PID is necessarily from a dead process. Pure: the
@@ -152,7 +195,11 @@ pub fn previous_run(marker: MarkerState, own_pid: u32, probe: Probe<'_>) -> Prev
     match marker {
         MarkerState::Missing => PreviousRun::Clean,
         MarkerState::Unreadable => PreviousRun::Crashed,
-        MarkerState::Found(m) if m.pid != own_pid && alive(&m, probe) => PreviousRun::StillRunning,
+        MarkerState::Found(m) if m.pid != own_pid => match alive(&m, probe) {
+            Liveness::Alive => PreviousRun::StillRunning,
+            Liveness::Dead => PreviousRun::Crashed,
+            Liveness::Unknown => PreviousRun::Unknown,
+        },
         MarkerState::Found(_) => PreviousRun::Crashed,
     }
 }
@@ -176,8 +223,8 @@ fn read_marker(file: &VersionedFile<MarkerBody>) -> (MarkerState, bool) {
     )
 }
 
-/// Removes the folders of separate instances that are no longer alive (and any left with this process's PID, which can
-/// only be stale). Folders whose name is not a PID are left alone. Returns how many were removed. Never fails.
+/// Removes the folders of separate instances seen to be gone, and any left with this process's PID, which can only be
+/// stale. An unreadable process table keeps every folder. Folders whose name is not a PID are left alone. Returns how many were removed. Never fails.
 pub fn prune_instances(data: &Path, own_pid: u32, probe: Probe<'_>) -> usize {
     let Ok(entries) = std::fs::read_dir(data.join(INSTANCES_DIR)) else {
         return 0;
@@ -197,9 +244,10 @@ pub fn prune_instances(data: &Path, own_pid: u32, probe: Probe<'_>) -> usize {
         let path = entry.path();
         let live = pid != own_pid
             && match read_marker(&marker_file(&path)).0 {
-                MarkerState::Found(m) if m.pid == pid => alive(&m, probe),
+                // Only a process seen gone loses its folder: an unreadable table keeps it (rule 53).
+                MarkerState::Found(m) if m.pid == pid => alive(&m, probe) != Liveness::Dead,
                 // Being created right now, or damaged: decide by the PID alone.
-                _ => probe(pid).is_some(),
+                _ => probe(pid) != Look::Gone,
             };
         if !live && std::fs::remove_dir_all(&path).is_ok() {
             removed += 1;
@@ -345,7 +393,7 @@ impl Lifecycle {
     pub fn begin_with(start: Start<'_>, own_pid: u32, probe: Probe<'_>) -> Lifecycle {
         let own = Marker {
             pid: own_pid,
-            started_at: probe(own_pid),
+            started_at: probe(own_pid).started(),
         };
         let scope = if start.mode.is_safe() {
             InstanceScope::Separate
@@ -384,6 +432,9 @@ impl Lifecycle {
         match previous {
             PreviousRun::Clean => {}
             PreviousRun::Crashed => log::warn!("The previous run of the app did not end cleanly"),
+            PreviousRun::Unknown => log::warn!(
+                "Whether the previous run of the app ended cleanly is not known: the process table could not be read"
+            ),
             PreviousRun::StillRunning => {
                 log::info!("Another process still holds the running marker; taking it over");
             }

@@ -16,8 +16,8 @@ impl Procs {
     fn gone(&self, pid: u32) {
         self.0.borrow_mut().remove(&pid);
     }
-    fn probe(&self) -> impl Fn(u32) -> Option<u64> + '_ {
-        move |pid| self.0.borrow().get(&pid).copied()
+    fn probe(&self) -> impl Fn(u32) -> Look + '_ {
+        move |pid| self.0.borrow().get(&pid).copied().into()
     }
 }
 
@@ -222,8 +222,8 @@ fn a_marker_without_a_start_time_counts_as_running_while_its_pid_is_alive() {
         pid: 5,
         started_at: None,
     };
-    let alive_probe = |_: u32| Some(1u64);
-    let dead_probe = |_: u32| None;
+    let alive_probe = |_: u32| Look::Started(1);
+    let dead_probe = |_: u32| Look::Gone;
     assert_eq!(
         previous_run(MarkerState::Found(m), 9, &alive_probe),
         PreviousRun::StillRunning
@@ -534,10 +534,12 @@ fn the_scope_follows_the_single_instance_lock() {
 #[cfg(feature = "os-probe")]
 #[test]
 fn the_os_probe_knows_this_process_and_not_a_pid_nobody_has() {
-    let started = os_probe(std::process::id()).expect("this process is in the process table");
+    let started = os_probe(std::process::id())
+        .started()
+        .expect("this process is in the process table");
     assert!(started > 0);
     // Linux caps pids at 2^22 and macOS at 99999: this one is never in use.
-    assert_eq!(os_probe(u32::MAX - 1), None);
+    assert_eq!(os_probe(u32::MAX - 1), Look::Gone);
 }
 
 #[cfg(feature = "os-probe")]
@@ -551,4 +553,52 @@ fn begin_uses_the_real_pid_and_process_table_and_ends_clean() {
     run.forget_window("main");
     run.flush();
     assert!(run.report(true).unclean.is_none());
+}
+
+#[test]
+fn an_unreadable_process_table_is_not_a_crash() {
+    let m = Marker {
+        pid: 5,
+        started_at: Some(1000),
+    };
+    let unreadable = |_: u32| Look::Unknown;
+    assert_eq!(
+        previous_run(MarkerState::Found(m), 9, &unreadable),
+        PreviousRun::Unknown
+    );
+}
+
+#[test]
+fn pruning_keeps_every_folder_when_the_process_table_cannot_be_read() {
+    let t = tempfile::tempdir().unwrap();
+    let inst = t.path().join(INSTANCES_DIR);
+    for name in ["101", "102"] {
+        std::fs::create_dir_all(inst.join(name)).unwrap();
+    }
+    // 101 has a marker, 102 has none (decided by the pid alone).
+    marker_file(&inst.join("101"))
+        .save(&MarkerBody {
+            pid: 101,
+            started_at: Some(1000),
+            ..MarkerBody::default()
+        })
+        .unwrap();
+    let unreadable = |_: u32| Look::Unknown;
+    assert_eq!(prune_instances(t.path(), 300, &unreadable), 0);
+    assert!(inst.join("101").exists() && inst.join("102").exists());
+}
+
+#[test]
+fn a_run_marker_is_not_called_a_crash_when_the_process_table_cannot_be_read() {
+    let t = tempfile::tempdir().unwrap();
+    std::fs::write(
+        crate::run_marker::marker_path(t.path(), "tool"),
+        "4242 100\n",
+    )
+    .unwrap();
+    let unreadable = |_: u32| Look::Unknown;
+    assert_eq!(
+        crate::run_marker::begin(t.path(), "tool", 1, &unreadable).1,
+        PreviousRun::Unknown
+    );
 }
