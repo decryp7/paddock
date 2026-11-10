@@ -1017,3 +1017,21 @@ status = "planned"
   owner = "pitwall"
   delete_by = "pitwall-v1.2.0"
   note = "The same wiring as Dyno's (B6b). Follow-up as in Dyno's note."
+
+# =====================================================================================================================
+# CI kit: job isolation (ADR 0025, ADR 0022 R1; Rust tooling plan RT-1)
+# =====================================================================================================================
+
+[[mechanism]]
+id = "ci-job-isolation"
+title = "Job isolation on a host runner: slots, kept folders, ports, process patterns, the job's temp and socket folders"
+canonical = "tools/paddock-dev"
+paths = ["tools/paddock-dev/src/ci_isolation/**"]
+status = "built"
+adr = "docs/adr/0025-ci-job-isolation.md"
+
+  [[mechanism.copy]]
+  paths = ["conformance/ci/job-isolation.sh", "conformance/ci/job-tmpdir.sh", "conformance/ci/ci-home.sh"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "The shell kit runs one release in parallel with `dev ci isolation` (plan decision D5, `PADDOCK_CI_KIT=shell` as the fallback); `conformance/test/job-isolation.test.mjs` runs the same cases against both (ISOLATION_CMD). The retirement PR after the next app tag whose release run went through the Rust path green deletes the scripts, that switch and this entry; the date follows that point (a paddock tag, as no app tag fits `owner = paddock`)."

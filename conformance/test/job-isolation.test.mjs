@@ -16,7 +16,7 @@ const read = (p) => readFileSync(p, 'utf8');
 
 /**
  * The implementation under test. By default the shell script. With ISOLATION_CMD=<path of the paddock-dev binary> every case runs
- * against `paddock-dev ci isolation` instead (the Rust port, RT-1 of docs/plans/rust-tooling-2026-11-10.md): the same cases, the
+ * against `paddock-dev ci isolation` instead (the Rust port, RT-1 of docs/plans/rust-tooling-2026-11-10.md, on origin/docs/rust-tooling-plan until it lands): the same cases, the
  * same fakes, the same assertions on exit codes, standard output and standard error. The cases that read the script's text
  * (bash-5 pitfalls, "no shell lock") are about the shell and run only when it is the implementation.
  */
@@ -267,6 +267,11 @@ test('owns, port and pattern scope to the job\'s own slot and folders', () => {
   assert.equal(a.later(['owns', mine, 'target']).status, 0);
   assert.notEqual(a.later(['owns', join(h.ci, 'target-x-app-s2'), 'target']).status, 0, 'another slot\'s folder');
   assert.notEqual(a.later(['owns', mine, 'src']).status, 0, 'not a folder of that kind');
+  // A folder inside a kept folder or a checkout is not a kept folder: the layout's `*` would match across the `/` without the depth guard.
+  mkdirSync(join(mine, 'nested-s1'), { recursive: true });
+  mkdirSync(join(h.ci, 'src', 'x-app-macOS-s1', 'target-y-s1'), { recursive: true });
+  assert.notEqual(a.later(['owns', join(mine, 'nested-s1')]).status, 0, 'a folder inside a kept folder');
+  assert.notEqual(a.later(['owns', join(h.ci, 'src', 'x-app-macOS-s1', 'target-y-s1')]).status, 0, 'a folder inside a checkout');
   assert.notEqual(a.later(['owns', h.ci]).status, 0);
   assert.notEqual(a.later(['owns', join(h.root, 'home')]).status, 0);
   assert.equal(a.later(['port', 'sccache']).stdout.trim(), '4227');
