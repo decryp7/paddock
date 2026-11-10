@@ -125,6 +125,8 @@ pub struct VerifyOptions {
     pub sccache_stats: Option<PathBuf>,
     /// The pinned SHA-256 values of the Tauri tool folder (`<sha256>  <relative path>` per line).
     pub tauri_pins: Option<PathBuf>,
+    /// Accept a missing pin file (a local trial only; refused when `GITHUB_REF` is a tag).
+    pub allow_unpinned_tauri: bool,
     /// How far behind the run's start a folder's change time may be before it counts as older (file systems stamp with a
     /// coarse clock that can lag).
     pub slack_ns: i128,
@@ -142,6 +144,7 @@ impl VerifyOptions {
             app_dirs: Vec::new(),
             sccache_stats: None,
             tauri_pins: None,
+            allow_unpinned_tauri: false,
             slack_ns: 2_000_000_000,
             skip: Vec::new(),
         }
@@ -317,6 +320,15 @@ fn ledger_probe(ctx: &mut Ctx) {
     }
 }
 
+/// Identity of every `job` and `run` folder (ADR 0085 §5 item 2).
+///
+/// **Device and inode are the equality check:** a folder that was replaced after it was recorded has another inode (or
+/// device), whatever its times say. **The change time is a floor, not an equality:** a directory's ctime moves whenever an
+/// entry is added, so equality would turn every honest run red. Two floors are checked: the current ctime must not be
+/// older than the recorded one (nothing restored an older copy), and the recorded ctime must not be older than the run's
+/// start less the slack (the folder was made by this run; file systems stamp with a coarse clock that can lag). ctime
+/// cannot be set from user space, unlike mtime, which proves nothing (cargo unpacks sources with the package's times).
+/// On Windows the creation time stands in for ctime (`identity.rs`).
 fn identity_probe(ctx: &mut Ctx) {
     let root = ctx.ledger.job_root.canonicalize().unwrap_or_else(|_| ctx.ledger.job_root.clone());
     let started = ctx.ledger.started_ns;

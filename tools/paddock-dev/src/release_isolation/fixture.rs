@@ -65,6 +65,14 @@ pub enum Leak {
     UserNpmrc,
     /// The Angular cache is a link (Unix).
     AngularLink,
+    /// A global npmrc under the node prefix.
+    NpmGlobalNpmrc,
+    /// `node` cannot be found, so the global npmrc cannot be located (check broken).
+    NpmGlobalUnknown,
+    /// No Tauri pin file was given.
+    TauriPinsMissing,
+    /// `--allow-unpinned-tauri` on a tag run.
+    AllowUnpinnedOnTag,
     /// A file of the Tauri tool folder with other bytes than its pin.
     TauriFileTampered,
 }
@@ -95,6 +103,10 @@ impl Leak {
             GitInsteadOf,
             UserNpmrc,
             TauriFileTampered,
+            NpmGlobalNpmrc,
+            NpmGlobalUnknown,
+            TauriPinsMissing,
+            AllowUnpinnedOnTag,
         ];
         if cfg!(unix) {
             v.push(AngularLink);
@@ -113,9 +125,9 @@ impl Leak {
             CrateHashMismatch | CrateNotInLock | NoCrates => Probe::Crates,
             ConfigInParent | ConfigInCargoHome | ConfigUntrackedInClone | CiTomlExtra => Probe::CargoConfig,
             GitHooksPath | GitInsteadOf => Probe::Git,
-            UserNpmrc => Probe::Npm,
+            UserNpmrc | NpmGlobalNpmrc | NpmGlobalUnknown => Probe::Npm,
             AngularLink => Probe::Angular,
-            TauriFileTampered => Probe::TauriTools,
+            TauriFileTampered | TauriPinsMissing | AllowUnpinnedOnTag => Probe::TauriTools,
         }
     }
 
@@ -145,6 +157,10 @@ impl Leak {
             UserNpmrc => ".npmrc",
             AngularLink => "is a link",
             TauriFileTampered => "makensis",
+            NpmGlobalNpmrc => "global npmrc",
+            NpmGlobalUnknown => "npm-global: not measured",
+            TauriPinsMissing => "not measured (check broken)",
+            AllowUnpinnedOnTag => "refused on a tag run",
         }
     }
 }
@@ -169,11 +185,15 @@ pub struct Fixture {
     pub npm: PathBuf,
     /// The Tauri tool folder.
     pub tauri_tools: PathBuf,
+    /// The fake node install (`<prefix>/bin/node`) that is first on PATH.
+    pub node_prefix: PathBuf,
     /// The job's environment.
     pub env: Env,
     /// What `verify` is asked.
     pub opts: VerifyOptions,
 }
+
+const NODE_NAME: &str = if cfg!(windows) { "node.exe" } else { "node" };
 
 /// The bytes of a fake archive.
 fn crate_bytes(name: &str) -> Vec<u8> {
@@ -213,6 +233,14 @@ impl Fixture {
                 env.0.insert(key.to_string(), v);
             }
         }
+        let node_prefix = root.join("node-prefix");
+        let node_bin = node_prefix.join("bin");
+        fs::create_dir_all(&node_bin).expect("node bin");
+        fs::write(node_bin.join(NODE_NAME), b"not a real node").expect("fake node");
+        let path =
+            std::env::join_paths(std::iter::once(node_bin).chain(std::env::split_paths(&env.0.get("PATH").cloned().unwrap_or_default())))
+                .expect("PATH");
+        env.0.insert("PATH".into(), path.to_string_lossy().into_owned());
         env.0.insert("HOME".into(), home.display().to_string());
         env.0.insert("USERPROFILE".into(), home.display().to_string());
         env.0.insert("XDG_CONFIG_HOME".into(), home.join(".config").display().to_string());
@@ -299,6 +327,7 @@ impl Fixture {
             clone,
             cargo_home,
             tauri_tools,
+            node_prefix,
             env,
             opts,
         }
@@ -453,6 +482,31 @@ impl Fixture {
                     fs::remove_dir(&cache).expect("remove the real cache");
                     std::os::unix::fs::symlink(&kept, &cache).expect("link");
                 }
+            }
+            Leak::NpmGlobalNpmrc => {
+                // On Windows the node folder's own `etc\npmrc` is the one read.
+                let etc = if cfg!(windows) {
+                    self.node_prefix.join("bin").join("etc")
+                } else {
+                    self.node_prefix.join("etc")
+                };
+                fs::create_dir_all(&etc).expect("etc");
+                fs::write(etc.join("npmrc"), "ignore-scripts=false\n").expect("npmrc");
+            }
+            Leak::NpmGlobalUnknown => {
+                fs::remove_file(self.node_prefix.join("bin").join(NODE_NAME)).expect("remove node");
+                let kept: Vec<_> = std::env::split_paths(&self.env.0["PATH"])
+                    .filter(|d| !d.join(NODE_NAME).is_file())
+                    .collect();
+                self.env.0.insert(
+                    "PATH".into(),
+                    std::env::join_paths(kept).expect("PATH").to_string_lossy().into_owned(),
+                );
+            }
+            Leak::TauriPinsMissing => self.opts.tauri_pins = None,
+            Leak::AllowUnpinnedOnTag => {
+                self.opts.allow_unpinned_tauri = true;
+                self.env.0.insert("GITHUB_REF".into(), "refs/tags/dyno-v9.9.9".into());
             }
             Leak::TauriFileTampered => {
                 fs::write(self.tauri_tools.join("NSIS").join("makensis.exe"), b"planted installer tool").expect("tamper")

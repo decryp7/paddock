@@ -276,6 +276,18 @@ pub(crate) fn npm(ctx: &mut Ctx) {
             candidates.push((format!("the file {var} names"), PathBuf::from(v)));
         }
     }
+    let global_named = ["NPM_CONFIG_GLOBALCONFIG", "npm_config_globalconfig"]
+        .iter()
+        .any(|v| ctx.env.get(v).is_some());
+    match npm_global_candidates(ctx.env) {
+        Some(found) => candidates.extend(found.into_iter().map(|p| ("the global npmrc".to_string(), p))),
+        None if global_named => {}
+        None => ctx.add(
+            Probe::Npm,
+            "check broken: npm-global: not measured, `node` is not on PATH and npm_config_prefix and NPM_CONFIG_GLOBALCONFIG are not set, so the global npmrc cannot be located.",
+            "Put the job's node on PATH before `verify`, or set NPM_CONFIG_GLOBALCONFIG.",
+        ),
+    }
     for (what, path) in candidates {
         if path.is_file() {
             let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
@@ -291,6 +303,41 @@ pub(crate) fn npm(ctx: &mut Ctx) {
             }
         }
     }
+}
+
+/// Where the global npmrc can be, without running npm: `<prefix>/etc/npmrc`, with the prefix from `npm_config_prefix` or from
+/// the node binary on PATH (Unix: two folders above it; Windows: also `%APPDATA%\npm`). `None` when node cannot be found.
+fn npm_global_candidates(env: &Env) -> Option<Vec<PathBuf>> {
+    let mut out = Vec::new();
+    let mut located = false;
+    if let Some(prefix) = env.get("npm_config_prefix").or_else(|| env.get("NPM_CONFIG_PREFIX")) {
+        out.push(Path::new(prefix).join("etc").join("npmrc"));
+        located = true;
+    }
+    let node = if cfg!(windows) { "node.exe" } else { "node" };
+    let found = env
+        .get("PATH")
+        .into_iter()
+        .flat_map(std::env::split_paths)
+        .map(|d| d.join(node))
+        .find(|p| p.is_file())
+        .and_then(|p| p.canonicalize().ok());
+    if let Some(node_path) = found {
+        located = true;
+        if cfg!(windows) {
+            if let Some(dir) = node_path.parent() {
+                out.push(dir.join("etc").join("npmrc"));
+            }
+        } else if let Some(prefix) = node_path.parent().and_then(Path::parent) {
+            out.push(prefix.join("etc").join("npmrc"));
+        }
+    }
+    if cfg!(windows)
+        && let Some(appdata) = env.get("APPDATA")
+    {
+        out.push(Path::new(appdata).join("npm").join("etc").join("npmrc"));
+    }
+    located.then_some(out)
 }
 
 /// The Angular cache of each app is absent or a real folder inside the checkout.

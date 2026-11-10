@@ -8,7 +8,8 @@
 //! - [`verify`]: the ledger is complete, every folder is the one recorded, every `.crate` matches the tagged lock files,
 //!   no cargo, git or npm configuration comes from outside the tag, and no compile cache ran. One `::error::` per finding.
 //!
-//! Freshness is by identity (device, inode, change time), never by modification time ([`identity`]). Windows, Linux and
+//! Freshness is by identity, never by modification time ([`identity`]): device and inode are the equality check, and the
+//! change time is only a floor (a directory's ctime moves when entries are added; see `verify::identity_probe`, ADR 0085 §5 item 2). Windows, Linux and
 //! macOS share one implementation; the only OS-specific code is [`identity::identity_of`]. [`fixture`] builds a synthetic
 //! job with one plantable leak per probe; ADR 0025's build-folder check can reuse it.
 
@@ -93,6 +94,9 @@ pub struct VerifyArgs {
     /// The pinned SHA-256 values of the Tauri tool files (`<sha256>  <relative path>`).
     #[arg(long)]
     tauri_pins: Option<PathBuf>,
+    /// Accept a missing --tauri-pins (a local trial only; refused when GITHUB_REF starts with refs/tags/).
+    #[arg(long)]
+    allow_unpinned_tauri: bool,
     /// Append the result to this file too (the job's $GITHUB_STEP_SUMMARY).
     #[arg(long)]
     summary_file: Option<PathBuf>,
@@ -178,6 +182,7 @@ pub fn command(cmd: Command) -> Result<Report, CliError> {
             opts.app_dirs = a.app_dirs;
             opts.sccache_stats = a.sccache_stats;
             opts.tauri_pins = a.tauri_pins;
+            opts.allow_unpinned_tauri = a.allow_unpinned_tauri;
             let verdict = verify::verify(&opts, &env);
             let summary = if verdict.passed() {
                 let mut s = verdict.summary();

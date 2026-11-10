@@ -173,12 +173,31 @@ fn files_under(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
 
 pub(crate) fn tauri_probe(ctx: &mut Ctx) {
     let Some(tools) = ctx.folder(Kind::TauriTools) else { return };
+    let on_tag = ctx.env.get("GITHUB_REF").is_some_and(|r| r.starts_with("refs/tags/"));
+    if ctx.opts.allow_unpinned_tauri && on_tag {
+        ctx.add(
+            Probe::TauriTools,
+            "check broken: --allow-unpinned-tauri is refused on a tag run (GITHUB_REF starts with refs/tags/).",
+            "Pass `--tauri-pins <WP-9 pin file>` and drop the flag.",
+        );
+        return;
+    }
     let Some(pins) = ctx.opts.tauri_pins.clone() else {
-        ctx.verdict
-            .notices
-            .push("tauri-tools: not measured (no --tauri-pins file; ADR 0085 WP-9 pins the files). The folder's identity was checked, its content was not.".to_string());
+        if !ctx.opts.allow_unpinned_tauri {
+            ctx.add(
+                Probe::TauriTools,
+                "check broken: tauri-tools: not measured (check broken): no pin file was given, so the tool files were not compared with anything.",
+                "Pass `--tauri-pins <WP-9 pin file>`; `--allow-unpinned-tauri` is for a local trial only.",
+            );
+        } else {
+            ctx.verdict.notices.push(
+                "tauri-tools: not measured (--allow-unpinned-tauri, local trial): the folder's identity was checked, its content was not."
+                    .to_string(),
+            );
+        }
         return;
     };
+
     let text = match std::fs::read_to_string(&pins) {
         Ok(t) => t,
         Err(e) => {

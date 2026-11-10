@@ -36,12 +36,29 @@ fn registry_files_with_old_modification_times_pass() {
 }
 
 #[test]
-fn without_pins_the_tauri_content_is_reported_as_not_measured_not_as_a_pass() {
+fn without_pins_verify_fails_unless_a_local_trial_allows_it_and_never_on_a_tag() {
     let (_d, mut f) = job();
-    f.opts.tauri_pins = None;
+    f.plant(Leak::TauriPinsMissing);
+    let v = f.verify();
+    assert!(
+        v.findings
+            .iter()
+            .any(|x| x.is_broken() && x.what.contains("tauri-tools: not measured")),
+        "{}",
+        lines(&v)
+    );
+    // A local trial may allow it, and the notice says so.
+    f.opts.allow_unpinned_tauri = true;
     let v = f.verify();
     assert!(v.passed(), "{}", lines(&v));
     assert!(v.notices.iter().any(|n| n.contains("not measured")), "{:?}", v.notices);
+    // On a tag the flag itself is refused, with or without pins.
+    f.env.0.insert("GITHUB_REF".into(), "refs/tags/dyno-v1.2.3".into());
+    let v = f.verify();
+    assert!(v.findings.iter().any(|x| x.what.contains("refused on a tag run")), "{}", lines(&v));
+    f.opts.tauri_pins = Some(f.root.join("tauri-pins.txt"));
+    let v = f.verify();
+    assert!(v.findings.iter().any(|x| x.what.contains("refused on a tag run")), "{}", lines(&v));
 }
 
 #[test]
@@ -83,7 +100,13 @@ fn every_planted_leak_fails_and_names_its_probe_and_the_probe_is_what_catches_it
 
 #[test]
 fn a_missing_kind_or_no_crates_is_check_broken_never_a_pass() {
-    for leak in [Leak::LedgerMissingKind, Leak::NoCrates, Leak::SccacheStatsMissing] {
+    for leak in [
+        Leak::LedgerMissingKind,
+        Leak::NoCrates,
+        Leak::SccacheStatsMissing,
+        Leak::NpmGlobalUnknown,
+        Leak::TauriPinsMissing,
+    ] {
         let (_d, mut f) = job();
         f.plant(leak);
         let v = f.verify();
