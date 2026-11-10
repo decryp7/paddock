@@ -19,8 +19,8 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
-mod cli;
 pub mod ci_isolation;
+mod cli;
 mod fds;
 pub mod gates;
 pub mod input_hash;

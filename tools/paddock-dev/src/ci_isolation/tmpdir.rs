@@ -137,6 +137,7 @@ fn random_suffix() -> String {
 fn make_private_dir(root: &str) -> R<String> {
     for _ in 0..64 {
         let path = format!("{root}/pd-{}", random_suffix());
+        #[cfg_attr(not(unix), allow(unused_mut))]
         let mut b = std::fs::DirBuilder::new();
         #[cfg(unix)]
         {
