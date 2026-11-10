@@ -34,7 +34,7 @@ tantivy = { workspace = true, features = ["mmap", "lz4-compression"] }
 # Test-only helpers (`test_scratch`) for this crate's integration tests; enabled by its own dev-dependency below.
 test-support = []
 # Test hook of the catalogue thread (`DEBRIEF_EXIT_HOLD`): holds it inside DuckDB until it is stopped; enabled by the store
-# worker's dev-dependency, never in a shipped build.
+# worker's dev-dependency, only in a debug build (a release build compiles the hook out even with the feature on).
 exit-hold = []
 
 [dev-dependencies]

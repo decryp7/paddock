@@ -132,6 +132,8 @@ fn the_worker_ends_cleanly_when_debrief_stops_it() {
 /// `run()` joins the store threads before `main` returns: the catalogue thread is held inside DuckDB by the test hook
 /// (`DEBRIEF_EXIT_HOLD`, feature `exit-hold`) until it is stopped, and writes `stopped` when it is. A worker that returns
 /// without stopping it never writes it (and can crash in DuckDB's static destructors with the thread live).
+#[cfg(debug_assertions)] // the hold is not compiled into a release build
+#[cfg(debug_assertions)] // the hold is not compiled into a release build
 #[test]
 fn the_worker_stops_its_store_threads_before_it_exits() {
     let marker = TempDir::new("exit-hold");
@@ -153,8 +155,8 @@ fn the_worker_stops_its_store_threads_before_it_exits() {
     );
     let text = std::fs::read_to_string(&note).unwrap_or_default();
     assert!(
-        text.lines().any(|l| l == "stopped"),
-        "the thread was not stopped before the worker exited: {text:?}"
+        text.lines().any(|l| l == "stopped by stop_for_exit"),
+        "the worker did not stop the thread through stop_for_exit before it exited: {text:?}"
     );
 }
 

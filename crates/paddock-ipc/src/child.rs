@@ -22,7 +22,7 @@ use crate::handshake::{Client, Connection};
 use crate::launch::Bootstrap;
 use crate::peer::{Handler, Peer, PeerOptions};
 use crate::token::Token;
-use std::io::{self, BufRead, BufReader, Read};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
@@ -91,14 +91,33 @@ impl Phase {
 }
 
 /// Says that this child's exit phase has begun: its `main` is past the connection and ends the process itself. A child
-/// whose `main` calls [`child_main`] never calls this (it does); one that serves by [`connect_speaking`] and
-/// [`lifeline_closing`] calls it when its own `wait_closed` returns. If the lifeline's fallback already took the exit
-/// (a `main` that was too late), this parks the calling thread for good: the lifeline ends the process.
+/// whose `main` calls [`serve`] never calls this (it does); one that runs its own loop with [`lifeline_closing`] calls it
+/// when its own `wait_closed` returns. If the lifeline's fallback already took the exit (a `main` that was too late), this
+/// waits at most [`STOP_MARGIN`] for the lifeline to end the process, then ends it itself.
 pub fn exit_phase_begun() {
     if !PHASE.claim_main() {
-        loop {
-            std::thread::park();
+        std::thread::park_timeout(STOP_MARGIN);
+        end_without_destructors(0);
+    }
+}
+
+/// Ends this process at once without running `atexit` handlers or static destructors (`_exit`, `TerminateProcess` on
+/// itself): for a child whose exit phase overran or was taken by the lifeline's fallback. Stdio is not flushed.
+pub fn end_without_destructors(code: i32) -> ! {
+    #[cfg(unix)]
+    // SAFETY: `_exit` takes no pointers and never returns.
+    unsafe {
+        libc::_exit(code)
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
+        // SAFETY: the pseudo-handle of this process; `TerminateProcess` notifies no DLL.
+        unsafe {
+            // conformance: pid-kill — this process itself (`GetCurrentProcess`), not a pid read earlier
+            TerminateProcess(GetCurrentProcess(), code as u32);
         }
+        std::process::abort()
     }
 }
 
@@ -154,11 +173,17 @@ pub fn lifeline_closing(peer: &Peer) {
                 let mut sink = [0u8; 256];
                 while matches!(io::stdin().read(&mut sink), Ok(n) if n > 0) {}
                 close_then_end(&peer, &PHASE, STOP_BUDGET + STOP_MARGIN, || {
-                    eprintln!(
-                        "the exit phase did not begin within {} ms of the host going away; ending the process (exit code 0)",
-                        (STOP_BUDGET + STOP_MARGIN).as_millis()
-                    );
-                    std::process::exit(0);
+                    // Nothing before the end step may stop it: a broken stderr (the host is gone) must not panic here.
+                    std::panic::catch_unwind(|| {
+                        writeln!(
+                            io::stderr(),
+                            "the exit phase did not begin within {} ms of the host going away; ending the process (exit code 0)",
+                            (STOP_BUDGET + STOP_MARGIN).as_millis()
+                        )
+                        .ok();
+                    })
+                    .ok();
+                    end_without_destructors(0);
                 });
             }),
     );

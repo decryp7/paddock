@@ -1125,6 +1125,9 @@ impl DuckStore {
         if let Some(c) = &self.inner.catalogue {
             step("debrief-catalogue");
             c.stop();
+            // Path-specific evidence for the worker's exit test: the join happened through here, not through a drop.
+            #[cfg(all(feature = "exit-hold", debug_assertions))]
+            catalogue::note_exit_hold("stopped by stop_for_exit");
         }
         if let Some(f) = &self.inner.fts {
             step("debrief-fts");

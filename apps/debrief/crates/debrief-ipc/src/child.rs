@@ -86,12 +86,11 @@ impl Phase {
 /// Says that this child's exit phase has begun: its `main` is past the connection and ends the process itself. A child
 /// whose `main` calls [`child_main`] never calls this (it does); one that serves by [`connect_speaking`] and
 /// [`lifeline_closing`] calls it when its own `wait_closed` returns. If the lifeline's fallback already took the exit
-/// (a `main` that was too late), this parks the calling thread for good: the lifeline ends the process.
+/// (a `main` that was too late), this waits at most [`STOP_MARGIN`] for the lifeline to end the process, then ends it itself.
 pub fn exit_phase_begun() {
     if !PHASE.claim_main() {
-        loop {
-            std::thread::park();
-        }
+        std::thread::park_timeout(STOP_MARGIN);
+        end_without_destructors(0);
     }
 }
 
@@ -170,12 +169,17 @@ pub fn lifeline_closing(peer: &Peer) {
     std::thread::spawn(move || {
         wait_stdin_closed(io::stdin());
         close_then_end(&peer, &PHASE, STOP_BUDGET + STOP_MARGIN, || {
-            eprintln!(
-                "the exit phase did not begin within {} ms of the host going away; ending the process (exit code 0)",
-                (STOP_BUDGET + STOP_MARGIN).as_millis()
-            );
-            // `exit` runs no destructors: remove the endpoints of children this process was still starting.
-            crate::endpoint::remove_live();
+            // Nothing before the end step may stop it: a broken stderr (the host is gone) must not panic here.
+            let _ = std::panic::catch_unwind(|| {
+                use std::io::Write;
+                let _ = writeln!(
+                    io::stderr(),
+                    "the exit phase did not begin within {} ms of the host going away; ending the process (exit code 0)",
+                    (STOP_BUDGET + STOP_MARGIN).as_millis()
+                );
+                // `exit` runs no destructors: remove the endpoints of children this process was still starting.
+                crate::endpoint::remove_live();
+            });
             end_without_destructors(0);
         });
     });

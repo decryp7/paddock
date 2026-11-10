@@ -98,10 +98,10 @@ impl Worker {
         }
     }
 
-    /// Stops what the worker owns that runs native code, within `budget`, before the process ends: each import session is
-    /// cancelled and waited for, each store's background threads (indexer, catalogue builder) are stopped and joined, then
-    /// the stores are dropped (closing their databases when nothing else holds them). Blocking joins run on a helper
-    /// thread, so the bound holds.
+    /// Stops what the worker owns that runs native code, within `budget`, before the process ends: every import session is
+    /// cancelled, each store's background threads (indexer, catalogue builder) are stopped and joined, the sessions are
+    /// waited for, the plugin processes are stopped together, and the stores are dropped (closing their databases when
+    /// nothing else holds them). Blocking joins run on a helper thread, so the bound holds.
     ///
     /// **Not stopped (open owners, for the exit phase's ratchet, ADR 0076 amendment WP-X1/X3):** the threads of calls in
     /// flight (`spawn_blocking` work of the peer's handler is not waited for; the peer's close cancels it, but nothing joins
@@ -113,16 +113,23 @@ impl Worker {
     pub fn stop_for_exit(&self, budget: Duration) -> Result<(), String> {
         let stores = std::mem::take(&mut *lock(&self.stores));
         let sessions = std::mem::take(&mut *lock(&self.sessions));
+        let plugins = self.plugins.clone();
         run_bounded("debrief-worker-stop", budget, move |doing| {
+            // Every session is asked to stop first, so an import that holds a store's write lock ends while the threads
+            // that wait for that lock are joined; then the sessions are waited for.
+            for session in sessions.values() {
+                session.cancel();
+            }
             for (path, store) in stores.values() {
                 let path = path.display().to_string();
                 store.stop_for_exit(&|thread| *lock(doing) = format!("joining thread {thread} of the store {path}"));
             }
             for (id, session) in sessions {
-                *lock(doing) = format!("cancelling and waiting for the import session {id}");
-                session.cancel();
+                *lock(doing) = format!("waiting for the import session {id}");
                 let _ = session.wait();
             }
+            *lock(doing) = "stopping the plugin processes".into();
+            plugins.shutdown();
             *lock(doing) = "closing the stores".into();
             drop(stores);
         })
@@ -484,10 +491,6 @@ pub fn run(plugins: Arc<dyn PluginSource>, mode: MemoryMode, tuning: StoreTuning
             debrief_ipc::child::end_without_destructors(0);
         }
     }
-    // The process ends next: dropping the worker now would only run the stores' drops (their joins and database closes) a
-    // second time, under the exit, and let a missing stop above hide behind them. What `stop_for_exit` did not stop stays
-    // running, as it must be seen to (the exit test's hold).
-    std::mem::forget(worker);
     result
 }
 
@@ -536,6 +539,24 @@ mod tests {
         worker.session(session);
         worker.stop_for_exit(Duration::from_secs(10)).unwrap();
         assert!(ended.load(Ordering::SeqCst), "the import thread was still running after the stop");
+    }
+
+    /// The plugin processes are an explicit step of the stop (inside its budget), not left to a drop: a dropped worker
+    /// that was leaked, or ended with `_exit`, would leave their process groups behind.
+    #[test]
+    fn stopping_for_exit_stops_the_plugin_processes() {
+        struct Counting(AtomicBool);
+        impl PluginSource for Counting {
+            fn registry(&self, _: &PluginChoice<'_>) -> PluginRegistry {
+                PluginRegistry::new()
+            }
+            fn shutdown(&self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let source = Arc::new(Counting(AtomicBool::new(false)));
+        Worker::new(source.clone()).stop_for_exit(Duration::from_secs(10)).unwrap();
+        assert!(source.0.load(Ordering::SeqCst), "the plugin processes were not stopped");
     }
 
     fn none(_: Vec<u8>) -> bool {
