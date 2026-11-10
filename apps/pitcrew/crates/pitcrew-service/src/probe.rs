@@ -6,6 +6,7 @@
 use pitcrew_core::jobs::is_job_process;
 use pitcrew_core::metrics::{permille, MachineSample};
 use pitcrew_core::process_track::ProcessMeta;
+use crate::process_watch::Seen;
 use pitcrew_core::time::Timestamp;
 use pitcrew_core::usage::{ProcessInfo, Usage, UsageTracker};
 use std::path::Path;
@@ -136,27 +137,16 @@ impl Probe {
             .collect()
     }
 
-    /// Whether the process `pid` (started at `started_ms` when known) still runs. A zombie that nobody has reaped
-    /// yet does not count: it is dead, only its entry is left.
-    // ADR 0033 WP-6: a missing start time counts as a match; compare start times or use paddock_proc::ProcessId
-    pub fn alive(&mut self, pid: u32, started_ms: Option<u64>) -> bool {
+    /// What the process `pid` (started at `started_ms` when known) is now. A zombie that nobody has reaped yet does not
+    /// count: it is dead, only its entry is left.
+    pub fn alive(&mut self, pid: u32, started_ms: Option<u64>) -> Seen {
         let id = Pid::from_u32(pid);
         // Unknown counts as alive: a runner is never restarted because the process table could not be read.
         let Some(sys) = self.sys.as_mut() else {
-            return true;
+            return Seen::Unverified;
         };
         sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[id]), true, ProcessRefreshKind::nothing());
-        match sys.process(id) {
-            None => false,
-            Some(p) => {
-                if p.status() == sysinfo::ProcessStatus::Zombie {
-                    return false;
-                }
-                let start = p.start_time().saturating_mul(1000);
-                // The same process: start times are whole seconds, so allow rounding.
-                started_ms.is_none_or(|s| start == 0 || s.abs_diff(start) <= 1500)
-            }
-        }
+        seen(sys.process(id).map(|p| (p.start_time(), p.status())), started_ms)
     }
 
     /// Whether `pid` has child processes that belong to a job (its console host does not).
@@ -329,5 +319,43 @@ mod tests {
         for t in threads {
             let _ = t.join();
         }
+    }
+}
+
+
+/// What sysinfo's listing of a pid (start time in seconds and status; `None` when it is not listed) says about the process
+/// recorded at `started_ms`.
+fn seen(listed: Option<(u64, sysinfo::ProcessStatus)>, started_ms: Option<u64>) -> Seen {
+    match listed {
+        None | Some((_, sysinfo::ProcessStatus::Zombie)) => Seen::Gone,
+        // An unreadable start time (0), or none recorded: this cannot be told from a process that took the pid over.
+        Some((0, _)) => Seen::Unverified,
+        Some((start, _)) => match started_ms {
+            None => Seen::Unverified,
+            // The same process: start times are whole seconds, so allow rounding. Another start is a recycled pid.
+            Some(s) if s.abs_diff(start.saturating_mul(1000)) <= 1500 => Seen::Same,
+            Some(_) => Seen::Gone,
+        },
+    }
+}
+
+#[cfg(test)]
+mod seen_tests {
+    use super::*;
+    use sysinfo::ProcessStatus::{Run, Zombie};
+
+    #[test]
+    fn a_pid_that_reports_start_zero_or_has_no_recorded_start_is_unverified_not_the_same_process() {
+        assert_eq!(seen(Some((0, Run)), Some(5_000)), Seen::Unverified, "start time unreadable");
+        assert_eq!(seen(Some((5, Run)), None), Seen::Unverified, "no recorded start");
+    }
+
+    #[test]
+    fn the_same_start_is_the_same_process_and_a_recycled_pid_or_a_zombie_is_gone() {
+        assert_eq!(seen(Some((5, Run)), Some(5_000)), Seen::Same);
+        assert_eq!(seen(Some((5, Run)), Some(5_900)), Seen::Same, "rounding");
+        assert_eq!(seen(Some((9, Run)), Some(5_000)), Seen::Gone, "recycled pid");
+        assert_eq!(seen(Some((5, Zombie)), Some(5_000)), Seen::Gone);
+        assert_eq!(seen(None, Some(5_000)), Seen::Gone);
     }
 }
