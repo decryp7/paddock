@@ -1,6 +1,6 @@
 //! `dev worktree` and `dev check primary` end to end with the real binary against throw-away repositories (ER-14): a bare
 //! `origin`, a primary clone on `main`, and worktrees under one temporary folder. No test touches a real repository.
-#![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 // Unix only: the tests start `sleep` and bash, and the in-use probe of `clean` reads other processes' folders, which is
 // not implemented on Windows (there `clean` keeps everything). The Windows build is type-checked with `cargo xwin check`.
 #![cfg(unix)]
@@ -68,6 +68,8 @@ impl Fixture {
         fx
     }
 
+    // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
+    #[allow(clippy::disallowed_methods)]
     fn git_cmd(&self, dir: &Path) -> Command {
         let mut c = Command::new("git");
         c.arg("-C")
@@ -102,6 +104,8 @@ impl Fixture {
     }
 
     /// Like [`Fixture::cmd`] without `--json` (the text a person reads).
+    // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
+    #[allow(clippy::disallowed_methods)]
     pub fn cmd_text(&self, cwd: &Path, args: &[&str]) -> Command {
         let mut c = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
         c.args(args)
@@ -127,6 +131,8 @@ impl Fixture {
     /// A `git` script first on the PATH (the seam that slows or fails one git call): `body` is shell run before the real git
     /// with `$REAL` the real binary and the arguments in `$*`; falling off the end runs the real git. Returns the PATH.
     #[cfg(unix)]
+    // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
+    #[allow(clippy::disallowed_methods)]
     pub fn fake_git(&self, name: &str, body: &str) -> String {
         use std::os::unix::fs::PermissionsExt;
         let real = String::from_utf8(Command::new("which").arg("git").output().unwrap().stdout).unwrap();
@@ -136,6 +142,39 @@ impl Fixture {
         std::fs::write(bin.join("git"), script).unwrap();
         std::fs::set_permissions(bin.join("git"), std::fs::Permissions::from_mode(0o755)).unwrap();
         format!("{}:{}", bin.display(), std::env::var("PATH").unwrap())
+    }
+
+    /// A fake `git` whose `worktree add` tells the test it has been reached, then holds for three seconds. The tool reserves
+    /// the path before it starts git, so the signal means the reservation is in place; the test waits on it instead of
+    /// polling the owner map (ER-12). Returns the `PATH` to give the tool and the receiver of the signal.
+    // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
+    #[allow(clippy::disallowed_methods)]
+    pub fn fake_slow_add(&self, name: &str) -> (String, std::sync::mpsc::Receiver<()>) {
+        let fifo = self.root.join(format!("reached-{name}.fifo"));
+        assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
+        let body = format!(
+            r#"case "$*" in *"worktree add"*) echo reached > '{}'; sleep 3;; esac"#,
+            fifo.display()
+        );
+        let path_env = self.fake_git(name, &body);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            // Opening a fifo for reading blocks until the fake git opens it for writing; the caller bounds the wait.
+            let _ = std::fs::read_to_string(&fifo);
+            let _ = tx.send(());
+        });
+        (path_env, rx)
+    }
+
+    /// Waits until the `worktree add` of [`Fixture::fake_slow_add`] is inside its git call, at most ten seconds.
+    pub fn wait_inside_add(&self, reached: &std::sync::mpsc::Receiver<()>) {
+        reached
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the add never reached its git call");
+        assert!(
+            self.owners()["pending"].as_object().is_some_and(|m| !m.is_empty()),
+            "the add reached git without a reservation"
+        );
     }
 
     /// The path of a worktree named `name`.

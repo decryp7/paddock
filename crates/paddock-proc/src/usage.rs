@@ -76,18 +76,20 @@ pub fn table_from(entries: impl IntoIterator<Item = ProcEntry>) -> Table {
 pub(crate) fn new_system_with(
     make: impl FnOnce() -> Result<System, sysinfo::Error>,
 ) -> Option<System> {
-    new_system_with_logged(make).0
+    static WARNED: AtomicBool = AtomicBool::new(false);
+    new_system_with_flag(make, &WARNED).0
 }
 
-/// [`new_system_with`], also saying whether this call logged the failure (only the first failure of the process does).
-pub(crate) fn new_system_with_logged(
+/// [`new_system_with`] over an explicit once-flag, also saying whether this call logged the failure (only the first failure
+/// on `warned` does). The process uses one static flag; a test gives its own so the order of tests cannot matter.
+pub(crate) fn new_system_with_flag(
     make: impl FnOnce() -> Result<System, sysinfo::Error>,
+    warned: &AtomicBool,
 ) -> (Option<System>, bool) {
-    static WARNED: AtomicBool = AtomicBool::new(false);
     let mut logged = false;
     let sys = make()
         .inspect_err(|why| {
-            if first_time(&WARNED) {
+            if first_time(warned) {
                 logged = true;
                 log::warn!("the OS process table is unavailable (sysinfo): {why}; the answer is unknown (logged once)")
             }
@@ -1281,15 +1283,13 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
 
     #[test]
     fn the_real_wrapper_logs_a_permanent_failure_once() {
-        // The wrapper reports whether this call logged: only the first failure does, a working constructor never.
-        assert!(!new_system_with_logged(System::new).1);
-        let first = new_system_with_logged(broken);
-        let second = new_system_with_logged(broken);
+        // A private flag: the shared one may already be set by another test of this process.
+        let warned = AtomicBool::new(false);
+        assert!(!new_system_with_flag(System::new, &warned).1);
+        let first = new_system_with_flag(broken, &warned);
+        let second = new_system_with_flag(broken, &warned);
         assert!(first.0.is_none() && second.0.is_none());
-        assert!(
-            first.1 || second.1,
-            "some call logs (another test may have logged first)"
-        );
+        assert!(first.1, "the first failure is logged");
         assert!(!second.1, "the second failure is not logged again");
     }
 

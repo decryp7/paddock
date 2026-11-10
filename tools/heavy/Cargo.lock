@@ -746,7 +746,7 @@ dependencies = [
  "proptest",
  "serde_json",
  "signal-hook",
- "sysinfo 0.39.6",
+ "sysinfo",
  "tempfile",
  "windows-sys 0.61.2",
 ]
@@ -758,7 +758,7 @@ dependencies = [
  "libc",
  "log",
  "paddock-workspace-hack",
- "sysinfo 0.40.1",
+ "sysinfo",
  "thiserror",
  "windows-sys 0.61.2",
 ]
@@ -815,7 +815,7 @@ dependencies = [
  "subtle",
  "syn 2.0.119",
  "syn 3.0.9",
- "sysinfo 0.40.1",
+ "sysinfo",
  "tar",
  "thiserror",
  "time",
@@ -1142,20 +1142,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
-]
-
-[[package]]
-name = "sysinfo"
-version = "0.39.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2071df9448915b71c4fe6d25deaf1c22f12bd234f01540b77312bb8e41361e6"
-dependencies = [
- "libc",
- "memchr",
- "ntapi",
- "objc2-core-foundation",
- "objc2-io-kit",
- "windows",
 ]
 
 [[package]]

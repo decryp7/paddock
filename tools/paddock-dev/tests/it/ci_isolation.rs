@@ -3,7 +3,7 @@
 //! which the shell script does not know. The parity cases against the script live in conformance/test/job-isolation.test.mjs
 //! (`ISOLATION_CMD=<this binary>`). Unix only, like isolation.rs: the Windows host jobs run the real thing on every run.
 #![cfg(unix)]
-#![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -50,6 +50,8 @@ impl Host {
             .collect()
     }
 
+    // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
+    #[allow(clippy::disallowed_methods)]
     fn run(&self, args: &[&str], envs: &[(&str, &str)], later: bool) -> Output {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
         cmd.args(["ci", "isolation"])
@@ -258,6 +260,8 @@ fn a_disk_that_cannot_be_measured_is_said_so_and_the_floor_is_not_pretended_chec
 }
 
 #[test]
+// Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
+#[allow(clippy::disallowed_methods)]
 fn the_binary_answers_print_binary_with_its_own_path() {
     let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
         .arg("--print-binary")
@@ -293,6 +297,8 @@ fn old_layout_folders_with_and_without_a_hyphen_are_retired_and_current_ones_sta
 /// Git-bash paths (`/c/...`) on any OS: `PADDOCK_CI_ASSUME_WINDOWS=1` reads `/c/x` as `C:/x`, which here is a folder named `C:` in the
 /// current folder, so the whole chain (home, `--source`, `owns`, `source-key`) runs for real.
 #[test]
+// Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
+#[allow(clippy::disallowed_methods)]
 fn git_bash_paths_drive_path_and_owns_and_source_key_end_to_end() {
     let d = tempfile::tempdir().unwrap();
     let h = Host::new(d.path(), AMENDED);
