@@ -653,8 +653,6 @@ mod tests {
         );
     }
 
-    /// Regression (macOS CI, nextest): the test binary finds its native libraries through `DYLD_FALLBACK_LIBRARY_PATH`,
-    /// which the shell running the fake dropped, so every fake browser exited at once.
     #[test]
     fn the_fake_ends_when_its_parent_is_not_its_launcher() {
         assert!(!should_exit(4242, 4242), "the launcher is alive");
@@ -667,6 +665,8 @@ mod tests {
         assert!(should_exit(0, 0));
     }
 
+    /// Regression (macOS CI, nextest): the test binary finds its native libraries through `DYLD_FALLBACK_LIBRARY_PATH`,
+    /// which the shell running the fake dropped, so every fake browser exited at once.
     #[test]
     fn the_script_restores_every_loader_variable_and_marks_the_child() {
         let dyld = vec![
