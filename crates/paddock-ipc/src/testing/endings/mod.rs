@@ -201,7 +201,9 @@ pub struct Expect {
     /// The client sent bytes the endpoint never reads before it closes (a refusal before the hello is read, a client that
     /// keeps writing). Closing with unread input makes the OS send a reset, which may or may not reach the client before the
     /// reason does (a race: macOS delivers either), so a missing reason is then attributed to the reset and reported as
-    /// [`Fault::Reset`], the one outcome that does not depend on the race.
+    /// [`Fault::Reset`]. That is not the only outcome on TCP: the reset is one unacknowledged segment, and when it does not
+    /// reach the client (macOS, CI run 7868: a cut-off refusal, then nothing) the read waits out its guard and is reported as
+    /// [`Fault::Unanswered`]. Only an endpoint that half-closes and drains (ADR 0072 §2) ends the same way every time.
     pub unread_input: bool,
 }
 

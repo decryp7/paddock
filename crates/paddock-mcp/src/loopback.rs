@@ -35,6 +35,11 @@ const DRAIN_PLACES: usize = 16;
 /// blocked read on Linux and macOS, but not on Windows, where only the system's own connection timeout (about two minutes)
 /// would end it; so reads are cut into slices and [`Serving::stop`] is noticed within one.
 const STOP_SLICE: Duration = Duration::from_millis(100);
+/// The most a refused client's input is read and dropped before its socket closes (ADR 0072 §7, "drain after a refusal").
+/// A key line is under 1 KiB; a client that keeps writing beyond this is cut off (and may then see a reset).
+const REFUSAL_DRAIN_BYTES: usize = 64 << 10;
+/// How long a refusal's drain waits for the client's end once its key line was read (ADR 0072 §7).
+const REFUSAL_DRAIN_TIME: Duration = Duration::from_secs(2);
 
 /// The read half of a connection: reads in [`STOP_SLICE`]s, ends (as end of input) once the server stops, and fails with
 /// `TimedOut` when its deadline (the handshake's) has passed. A read that a signal interrupted is read again. On Linux a
@@ -212,12 +217,80 @@ impl Refusal {
     }
 }
 
+/// Writes the refusal line in one write: written piece by piece (as `writeln!` of a JSON value does), a close in between left
+/// the client a cut-off line.
 fn refuse(stream: &mut impl Write, refusal: Refusal, why: &str) {
-    let _ = writeln!(
-        stream,
-        "{}",
+    let line = format!(
+        "{}\n",
         json!({"ok": false, "code": refusal.code(), "error": why})
     );
+    let _ = stream.write_all(line.as_bytes());
+}
+
+/// How a refused connection's drain ended (ADR 0072 §2 step 5), in the ADR's words for the log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DrainEnd {
+    /// The client ended its side: everything it sent was read, so the close cannot reset.
+    Eof,
+    /// [`REFUSAL_DRAIN_BYTES`] were read and the client was still writing.
+    BytesCap,
+    /// The drain's time ran out with the client still connected.
+    TimeCap,
+    /// The listener stopped.
+    Stopped,
+    /// The read failed (the client reset the connection).
+    Failed(io::ErrorKind),
+}
+
+impl DrainEnd {
+    fn word(self) -> String {
+        match self {
+            DrainEnd::Eof => "eof".into(),
+            DrainEnd::BytesCap => "bytesCap".into(),
+            DrainEnd::TimeCap => "timeCap".into(),
+            DrainEnd::Stopped => "stopped".into(),
+            DrainEnd::Failed(kind) => format!("failed ({kind:?})"),
+        }
+    }
+}
+
+/// Reads and drops a refused client's input, its buffered part included, until the client's end, [`REFUSAL_DRAIN_BYTES`],
+/// `until` or a stop. Closing a socket with received bytes unread resets the connection, and the reset can overtake or
+/// discard the refusal (or, being one unacknowledged segment, never reach the client, which then waits for an end that never
+/// comes); so a refused connection is half-closed, drained, and only then closed. Returns the bytes read and how it ended.
+fn drain(reader: &mut BufReader<Watched>, until: Instant) -> (usize, DrainEnd) {
+    reader.get_mut().deadline = Some(until);
+    let mut buf = [0u8; 8192];
+    let mut read = 0;
+    loop {
+        let room = REFUSAL_DRAIN_BYTES - read;
+        if room == 0 {
+            return (read, DrainEnd::BytesCap);
+        }
+        let take = room.min(buf.len());
+        match reader.read(&mut buf[..take]) {
+            Ok(0) if reader.get_ref().stop.load(Ordering::SeqCst) => {
+                return (read, DrainEnd::Stopped);
+            }
+            Ok(0) => return (read, DrainEnd::Eof),
+            Ok(n) => read += n,
+            Err(e) if e.kind() == io::ErrorKind::TimedOut => return (read, DrainEnd::TimeCap),
+            Err(e) => return (read, DrainEnd::Failed(e.kind())),
+        }
+    }
+}
+
+/// Logs how a refused connection's drain ended (ER-27: a client that saw a reset is explained by the app's log).
+fn log_drain(id: u64, (read, end): (usize, DrainEnd)) {
+    let line = format!(
+        "paddock_mcp: connection #{id} drained {read} byte(s) after its refusal: drain {}",
+        end.word()
+    );
+    if end == DrainEnd::Eof {
+        log::info!("{line}");
+    } else {
+        log::warn!("{line}; the client may see a reset");
+    }
 }
 
 /// Reads the key line, waiting at most `timeout` ([`HANDSHAKE_TIMEOUT`] when serving), and answers it. `Err` holds the cause
@@ -278,12 +351,17 @@ fn handshake(
 
 /// Serves one accepted connection: the handshake, then the lines, and one log line for how it ended (ER-27: a client that saw
 /// nothing must be explainable from the app's log alone). The log names the client by its key's label, never the key.
+///
+/// A refused connection gives its place back, half-closes and is drained on this thread under a place of the drain pool
+/// (`drains`); with none left it closes at once. A paired one gives its place back when it ends; the caller then closes it.
 fn serve_connection(
     id: u64,
     server: &Server,
     stream: &TcpStream,
     keys: &dyn KeyVerifier,
     stop: Arc<AtomicBool>,
+    place: Place,
+    drains: &Arc<AtomicUsize>,
 ) {
     let began = Instant::now();
     let read_half = match stream
@@ -309,11 +387,26 @@ fn serve_connection(
                 began.elapsed().as_millis(),
                 reader.get_ref().interrupted.load(Ordering::SeqCst)
             );
+            // The place goes back before the client can see the end; the drain holds a drain place instead.
+            let draining = Place::take(drains, DRAIN_PLACES);
+            drop(place);
+            if draining.is_none() {
+                log::warn!(
+                    "paddock_mcp: connection #{id}: all {DRAIN_PLACES} drains are busy; closed without reading what the client sent after its key line (the client may see a reset)"
+                );
+            }
+            let _ = stream.shutdown(Shutdown::Write);
+            if let Some(draining) = draining {
+                log_drain(id, drain(&mut reader, Instant::now() + REFUSAL_DRAIN_TIME));
+                drop(draining);
+            }
             return;
         }
     };
     log::info!("paddock_mcp: connection #{id} paired with client {client}");
     let ended = serve_lines(server, &Session::new(&client), &mut reader, &mut writer);
+    // Given back before the caller closes the connection: a client that has seen its end can connect again at once.
+    drop(place);
     let interrupted = reader.get_ref().interrupted.load(Ordering::SeqCst);
     let ms = began.elapsed().as_millis();
     match ended {
@@ -332,12 +425,21 @@ fn serve_connection(
     }
 }
 
-/// Reads (and drops) a refused client's key line, bounded by [`HANDSHAKE_MAX`], [`HANDSHAKE_TIMEOUT`] and `stop`.
-fn drain_key_line(stream: &TcpStream, stop: Arc<AtomicBool>) {
-    if let Ok(read_half) = stream.try_clone().and_then(|s| Watched::new(s, stop)) {
-        let mut reader = BufReader::new(read_half);
-        reader.get_mut().deadline = Some(Instant::now() + HANDSHAKE_TIMEOUT);
-        let _ = read_line(&mut reader, HANDSHAKE_MAX);
+/// Drains a connection refused before its key line was read (busy): the key line has [`HANDSHAKE_TIMEOUT`] to arrive, as in
+/// a handshake, and everything up to the client's end is read under the [`drain`] bounds.
+fn drain_unread(id: u64, stream: &TcpStream, stop: Arc<AtomicBool>) {
+    match stream.try_clone().and_then(|s| Watched::new(s, stop)) {
+        Ok(read_half) => log_drain(
+            id,
+            drain(
+                &mut BufReader::new(read_half),
+                Instant::now() + HANDSHAKE_TIMEOUT,
+            ),
+        ),
+        Err(e) => log::warn!(
+            "paddock_mcp: connection #{id} could not be drained after its refusal: {e} ({:?}); the client may see a reset",
+            e.kind()
+        ),
     }
 }
 
@@ -415,7 +517,7 @@ pub fn serve_loopback(
                     let kept = Arc::downgrade(&stream);
                     let stop = stop2.clone();
                     let handle = std::thread::spawn(move || {
-                        drain_key_line(&stream, stop);
+                        drain_unread(id, &stream, stop);
                         drop(draining);
                         drop(stream);
                     });
@@ -426,12 +528,12 @@ pub fn serve_loopback(
             log::info!("paddock_mcp: connection #{id} from port {peer} accepted");
             let stream = Arc::new(stream);
             let kept = Arc::downgrade(&stream);
-            let (server, keys, stop) = (server.clone(), keys.clone(), stop2.clone());
+            let (server, keys, stop, drains) =
+                (server.clone(), keys.clone(), stop2.clone(), drains.clone());
             let handle = std::thread::spawn(move || {
-                serve_connection(id, &server, &stream, keys.as_ref(), stop);
-                // Give the place back before the client can see the end of its connection, then close the last handle
-                // (the read half is already closed), which ends it.
-                drop(place);
+                // Gives the place back before the client can see the end of its connection; then the last handle (the read
+                // half is already closed) is closed here, which ends it.
+                serve_connection(id, &server, &stream, keys.as_ref(), stop, place, &drains);
                 drop(stream);
             });
             list.push((kept, handle));
@@ -1046,6 +1148,65 @@ mod tests {
             );
         }
         drop(pending_drain);
+        drop(serving);
+    }
+
+    /// Regression (CI run 7868, macOS, `client-keeps-writing` of the ending harness): a client refused for its key that kept
+    /// writing had its bytes left unread when the listener closed the connection, so the close was a reset. A reset is one
+    /// unacknowledged segment: the client usually read a cut-off refusal and `ConnectionReset`, and when the reset did not
+    /// reach it, nothing more until its own guard ran out ("unanswered", 2 in 2400 local runs under load). Refusing now
+    /// half-closes and drains (ADR 0072 §2, I18): the client reads the whole refusal and then the end, and the log says how
+    /// the drain ended (the line did not exist before, so this test fails without the drain whatever the race does).
+    #[test]
+    fn a_refused_client_that_keeps_writing_reads_the_whole_refusal_then_the_end() {
+        capture_logs();
+        let serving = serve_loopback(
+            test_server(),
+            Arc::new(crate::keys::KeyStore::new()),
+            TcpListener::bind("127.0.0.1:0").unwrap(),
+            4,
+        )
+        .unwrap();
+        let mut s = TcpStream::connect(serving.addr()).unwrap();
+        // A hang guard only: every read below waits for something that must already have happened.
+        s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+        // The key line and, without waiting for the answer, more bytes (a pipelined request), under the drain's byte cap.
+        s.write_all(b"{\"key\":\"pmk_wrong\"}\n").unwrap();
+        let junk = [0x5au8; 4096];
+        for _ in 0..12 {
+            if s.write_all(&junk).is_err() {
+                break; // The old close resets under a writing client; the read below reports it.
+            }
+        }
+        let mut received = Vec::new();
+        let end = s.read_to_end(&mut received);
+        // The accepted line is logged before the connection is served, so it is there once anything was read.
+        let id = id_of(&s);
+        let text = String::from_utf8_lossy(&received);
+        assert!(
+            end.is_ok(),
+            "the end after the refusal, not {end:?} after {text:?} (a reset: the client's bytes were left unread)"
+        );
+        assert!(
+            text.ends_with('\n') && text.lines().count() == 1,
+            "one whole line: {text:?}"
+        );
+        assert!(text.contains("\"code\":\"key\""), "{text}");
+        // The client has read the end; it ends its side, which ends the listener's drain.
+        s.shutdown(Shutdown::Write).unwrap();
+        // Waits for the condition (the drain's line), not a time; the deadline is only a hang guard.
+        let guard = Instant::now() + Duration::from_secs(20);
+        let line = loop {
+            if let Some(line) = logged(id, "drained") {
+                break line;
+            }
+            assert!(
+                Instant::now() < guard,
+                "no log line for the refused connection's drain"
+            );
+            std::thread::yield_now();
+        };
+        assert!(line.contains("drain eof"), "{line}");
         drop(serving);
     }
 }
