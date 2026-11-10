@@ -10,7 +10,7 @@ use std::time::Duration;
 /// Not a test: the orphan guardian of this binary (`paddock_proc::guardian`): a killed test run ends its browsers.
 #[test]
 fn guardian_entry() {
-    paddock_proc::guardian::run_if_requested();
+    paddock_proc::guardian::serve_if_guardian();
 }
 
 fn options(base: &std::path::Path) -> LaunchOptions {

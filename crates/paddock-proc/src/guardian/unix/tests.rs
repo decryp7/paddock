@@ -10,7 +10,81 @@ use std::io::BufReader;
 /// Not a test: the guardian of the owner processes below (this binary run with [`GUARDIAN_ENV`]).
 #[test]
 fn guardian_entry() {
+    serve_if_guardian();
+}
+
+/// Set for [`hook_probe_process`].
+const PROBE_ENV: &str = "PADDOCK_PROC_TEST_HOOK_PROBE";
+
+/// Not a test: a process that runs the test entry as a plain test and says whether it marked itself as one that runs the
+/// guardian with no arguments (it must not: see [`serve_if_guardian`]).
+#[test]
+fn hook_probe_process() {
+    if std::env::var_os(PROBE_ENV).is_none() {
+        return;
+    }
+    guardian_entry();
+    println!("hook-unset={}", HOOK.get().is_none());
+}
+
+/// Not a test: a process that calls `run_if_requested` as a `main` does and says what it did to the guardian hook.
+#[test]
+fn run_if_requested_probe_process() {
+    if std::env::var_os(PROBE_ENV).is_none() {
+        return;
+    }
     run_if_requested();
+    println!("hook-empty={}", HOOK.get().is_some_and(Vec::is_empty));
+}
+
+#[test]
+fn run_if_requested_marks_a_plain_process_and_serves_in_the_guardian_process() {
+    let probe = |guardian: bool| {
+        let mut cmd = Command::new(std::env::current_exe().unwrap());
+        cmd.args([
+            "guardian::unix::tests::run_if_requested_probe_process",
+            "--exact",
+            "--nocapture",
+        ])
+        .env(PROBE_ENV, "1")
+        .env_remove(OWNER_ENV);
+        if guardian {
+            cmd.env(GUARDIAN_ENV, "1");
+        } else {
+            cmd.env_remove(GUARDIAN_ENV);
+        }
+        cmd.output().unwrap()
+    };
+    let plain = probe(false);
+    assert!(
+        String::from_utf8_lossy(&plain.stdout).contains("hook-empty=true"),
+        "{plain:?}"
+    );
+    // As the guardian, with no owner named, it refuses to serve and exits (2, or 3 for root) before printing.
+    let guardian = probe(true);
+    assert!(
+        matches!(guardian.status.code(), Some(2 | 3)),
+        "{guardian:?}"
+    );
+    assert!(!String::from_utf8_lossy(&guardian.stdout).contains("hook-empty"));
+}
+
+#[test]
+fn the_test_entry_run_as_a_plain_test_does_not_mark_the_process_as_a_guardian_host() {
+    let out = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "guardian::unix::tests::hook_probe_process",
+            "--exact",
+            "--nocapture",
+        ])
+        .env(PROBE_ENV, "1")
+        .env_remove(GUARDIAN_ENV)
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("hook-unset=true"),
+        "the entry set the guardian hook in a plain run: {out:?}"
+    );
 }
 
 thread_local! {
