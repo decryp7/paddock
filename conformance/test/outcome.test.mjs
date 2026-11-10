@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { runChecks } from '../src/runner.mjs';
 import { error, warn, unwaivable } from '../src/finding.mjs';
 import { exitStatus, EXIT } from '../src/outcome.mjs';
+import { main } from '../src/cli.mjs';
 import { makeApp } from './helpers.mjs';
 
 const waiver = (id) => `[[waiver]]\ncheck = "${id}"\npath = "*"\nreason = "plant"\nexpires = "2099-01-01"\n`;
@@ -77,4 +78,15 @@ test('exit status over every combination of findings (property)', () => {
   assert.equal(exitStatus(warnOnly, new Set(['C1'])), 1, '--strict makes them fail');
   assert.equal(exitStatus({ findings: [...warnOnly.findings, ...kinds[3][1]] }), 6, 'a warning never masks a missing measurement');
   assert.equal(combos, 1 + 5 + 25 + 125 + 625);
+});
+
+test('main(): a crashing check exits 7 and an incomplete one 6, whatever the waivers say (CLI level)', async () => {
+  const root = makeApp({ a: 'x', 'paddock.waivers.toml': waiver('C00') });
+  const go = (check) => main(['--root', root, '--app', 'demo'], { log: () => {}, err: () => {}, registry: [{ id: 'C00', title: 't', rule: 1, run: check }] });
+  assert.equal(await go(() => { throw new Error('x'); }), 7);
+  assert.equal(await go(() => undefined), 6);
+  assert.equal(await go(() => []), 0);
+  assert.equal(await go(() => [error('C00', 1, 'a', 1, 'm', 'f')]), 0, 'waived');
+  const open = makeApp({ a: 'x' });
+  assert.equal(await main(['--root', open, '--app', 'demo'], { log: () => {}, err: () => {}, registry: [{ id: 'C00', title: 't', rule: 1, run: () => [error('C00', 1, 'a', 1, 'm', 'f')] }] }), 1);
 });

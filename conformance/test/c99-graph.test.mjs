@@ -267,6 +267,7 @@ test('C99 --scope: a release of one app is judged on that app and crates/ only, 
   const typo = await run('apps/goood');
   assert.match(typo[0].message, /check broken: --scope apps\/goood matches no file/);
   assert.equal(typo.length, 1);
+  assert.equal(typo[0].outcome, 'not-measured', 'an input the check could not read is exit 6, not 7');
   // crates/ is always in scope.
   const crates = makeApp({ ...app('good', ''), 'crates/Cargo.toml': '[package]\nname = "shared"\nversion = "0.1.0"\n\n[dependencies]\nkeyring = "4"\n', 'crates/src/lib.rs': '' });
   t.after(() => rmSync(crates, { recursive: true, force: true }));
@@ -306,6 +307,7 @@ test('C99 fails closed: with no security-framework in any probed graph the contr
   const r = await findingsOf('C99', make(t, { 'paddock.waivers.toml': waiver('*') }), { options: { probe: () => raw, readSources: () => [{ file: 'src/lib.rs', text: '' }], listBinaries: () => [] } });
   assert.ok(r.length > 0 && r.every((f) => f.severity === 'error'));
   assert.match(r.map((f) => f.message).join('\n'), /check broken: no probed macOS graph contains security-framework/);
+  assert.ok(r.some((f) => f.outcome === 'check-broken'), 'a failed positive control is exit 7');
 });
 
 // The whole path with a real cargo and no network: path dependencies.

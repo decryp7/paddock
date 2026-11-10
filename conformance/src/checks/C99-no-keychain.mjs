@@ -35,6 +35,9 @@
 //    probed graph has security-framework the control never ran, which is an unwaivable broken check.
 import { join, posix } from 'node:path';
 import { error, unwaivable, warn } from '../finding.mjs';
+
+// An input the check could not read (a file, cargo, the network, a scope with no file) is "not measured" (exit 6); a failed positive control is "check broken" (exit 7).
+const cannotRead = (f) => unwaivable(f, 'not-measured');
 import { tomlTables } from '../sync/baseline.mjs';
 import { inScope, normalizeScope } from '../util/scope.mjs';
 import { graphFindings, MACOS_ONLY_BANNED, ONE_DOOR, probeWorkspace, readGraph, SYMBOLS, sourceScan } from '../util/keychain-graph.mjs';
@@ -157,13 +160,13 @@ export default {
       return injected === undefined ? ctx.read(f) : injected;
     };
     const unreadable = (file) =>
-      unwaivable(error('C99', 72, file, 1, `check broken: ${file} could not be read, so a Keychain use in it cannot be seen`, 'Make the file readable (permissions, encoding) and run the check again.'));
+      cannotRead(error('C99', 72, file, 1, `check broken: ${file} could not be read, so a Keychain use in it cannot be seen`, 'Make the file readable (permissions, encoding) and run the check again.'));
     // `--scope apps/<app>`: a release of one app is judged on that app's workspaces and the shared crates/ only (ER-31): another
     // app's findings must not block it. A scope that matches no file is a broken check, never an empty pass (ER-33).
     const scope = normalizeScope(ctx.options.scope);
     const all = ctx.files().filter(shipped);
     if (scope && !all.some((f) => f.startsWith(`${scope}/`))) {
-      return [unwaivable(error('C99', 72, '.', 1, `check broken: --scope ${scope} matches no file, so nothing was checked`, 'Name the app folder as it is in the repository (apps/<app>).'))];
+      return [cannotRead(error('C99', 72, '.', 1, `check broken: --scope ${scope} matches no file, so nothing was checked`, 'Name the app folder as it is in the repository (apps/<app>).'))];
     }
     const files = all.filter((f) => inScope(scope, f));
     const manifests = files.filter((f) => f === 'Cargo.toml' || f.endsWith('/Cargo.toml'));
@@ -178,7 +181,7 @@ export default {
       }
       return noRust
         ? []
-        : [unwaivable(error('C99', 72, '.', 1, 'check broken: no Cargo.toml was found, so the manifest scan read nothing', 'Run the check from the app or repository root, or state "no Rust" by leaving `cargo` out of paddock.ci.json.'))];
+        : [cannotRead(error('C99', 72, '.', 1, 'check broken: no Cargo.toml was found, so the manifest scan read nothing', 'Run the check from the app or repository root, or state "no Rust" by leaving `cargo` out of paddock.ci.json.'))];
     }
     const out = [];
     for (const file of manifests) {
@@ -250,7 +253,7 @@ function graphLayers(ctx, files) {
   const spaces = workspaces(ctx, files);
   const out = [];
   // Neither of these can be waived: a waiver would hide that the check looked at nothing (ER-33).
-  const broken = (lock, dir, why) => unwaivable(error('C99', 72, lock, 1, `check broken: the macOS dependency graph of ${dir} could not be read (${why}), so a Keychain use in a dependency cannot be seen`, 'Fix the cause (network to the registry, a Cargo.lock that is out of date, cargo on PATH) and run the check again.'));
+  const broken = (lock, dir, why) => cannotRead(error('C99', 72, lock, 1, `check broken: the macOS dependency graph of ${dir} could not be read (${why}), so a Keychain use in a dependency cannot be seen`, 'Fix the cause (network to the registry, a Cargo.lock that is out of date, cargo on PATH) and run the check again.'));
   const notMeasured = (what, fix) => unwaivable(error('C99', 72, '.', 1, `not measured: ${what}, so the macOS dependency graph was not probed`, fix), 'not-measured');
   if (!spaces.length) return [notMeasured('no paddock.ci.json names a Cargo workspace', 'Name the workspace in the app\'s paddock.ci.json (`cargo`).')];
   let control = false;

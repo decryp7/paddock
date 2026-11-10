@@ -76,6 +76,7 @@ test('C99 through the runner: findings per file, the shared crate passes, and an
   const none = await findingsOf('C99', makeApp({ 'README.md': 'no Rust\n' }), OFF);
   assert.deepEqual(none.map((x) => x.severity), ['error']);
   assert.match(none[0].message, /check broken.*no Cargo\.toml/);
+  assert.equal(none[0].outcome, 'not-measured');
   assert.deepEqual(await findingsOf('C99', makeApp({ 'paddock.ci.json': '{"checks": []}\n' }), OFF), [], 'no `cargo` in the CI contract: no Rust');
   assert.equal((await findingsOf('C99', makeApp({ 'paddock.ci.json': '{"cargo": "."}\n' }), OFF)).length, 1, 'a contract with Rust and no manifest is broken');
 });

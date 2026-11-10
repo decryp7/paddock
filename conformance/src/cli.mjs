@@ -59,7 +59,7 @@ export function parseArgs(argv) {
 }
 
 /** Entry point; returns the exit status. 0 clean, 1 findings, 2 usage, 6 a check did not look, 7 a check is broken. */
-export async function main(argv, { log = console.log, err = console.error, env = process.env } = {}) {
+export async function main(argv, { log = console.log, err = console.error, env = process.env, registry = checks } = {}) {
   const [cmd, ...rest] = argv;
   try {
     if (!cmd || cmd === '--help' || cmd === '-h') {
@@ -109,6 +109,7 @@ export async function main(argv, { log = console.log, err = console.error, env =
     }
     const o = parseArgs(argv);
     const result = await runChecks({
+      registry,
       root: resolve(o.root ?? '.'),
       app: o.app,
       only: o.only ? o.only.split(',').map((s) => s.trim().toUpperCase()) : null,
