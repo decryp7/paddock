@@ -15,10 +15,10 @@
 //! The port of `conformance/src/checks/C39-freed-port.mjs`, finding for finding (the oracle test compares them).
 
 use super::finding::Finding;
-use super::jsre::{DOT, line_at, rx};
+use super::jsre::{has_reason, line_at, rx};
 use super::mask::mask_rust;
 use super::record::Precondition;
-use super::{Check, CheckOutput, Ctx};
+use super::{Check, CheckOutput, Control, Ctx};
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -55,7 +55,8 @@ pub struct FreedPort {
     pub waived: Waived,
 }
 
-static WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(&format!(r"conformance:\s*freed-port\s*[—–-]+\s*(\S{DOT}{{2,}})")));
+/// The marker up to its dashes; a reason must follow ([`has_reason`]).
+static WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(r"conformance:\s*freed-port\s*([—–-]+)"));
 static BARE_WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(r"conformance:\s*freed-port"));
 static ALIAS: LazyLock<Regex> = LazyLock::new(|| rx(r"\b(?:TcpListener|TcpSocket)\s+as\s+(\w+)"));
 static TAIL: LazyLock<Regex> =
@@ -141,7 +142,7 @@ pub fn freed_ports(text: &str) -> Vec<FreedPort> {
             raw.get(line - 1).copied().unwrap_or(""),
             if line >= 2 { raw.get(line - 2).copied().unwrap_or("") } else { "" }
         );
-        let waived = if WAIVER.is_match(&here) {
+        let waived = if has_reason(&here, &WAIVER) {
             Waived::Reason
         } else if BARE_WAIVER.is_match(&here) {
             Waived::NoReason
@@ -209,13 +210,6 @@ pub fn freed_ports(text: &str) -> Vec<FreedPort> {
     out
 }
 
-/// A snippet with a freed port and one without: the check's positive control (ER-33).
-fn control() -> bool {
-    let bad = "fn a() {\n    let p = TcpListener::bind(\"127.0.0.1:0\").unwrap().local_addr().unwrap().port();\n}\n";
-    let good = "fn a() {\n    let held = HeldPort::reset();\n    get(held.port());\n}\n";
-    freed_ports(bad).iter().map(|p| p.kind).collect::<Vec<_>>() == [Kind::Chain] && freed_ports(good).is_empty()
-}
-
 /// The check.
 pub struct C39;
 
@@ -230,6 +224,26 @@ impl Check for C39 {
 
     fn title(&self) -> &'static str {
         "Tests never free a port they probe"
+    }
+
+    fn control(&self) -> Control {
+        Control {
+            files: vec![
+                (
+                    "crates/c/tests/bad.rs",
+                    "fn a() {\n    let p = TcpListener::bind(\"127.0.0.1:0\").unwrap().local_addr().unwrap().port();\n}\n",
+                ),
+                (
+                    "crates/c/tests/good.rs",
+                    "fn a() {\n    let held = HeldPort::reset();\n    get(held.port());\n}\n",
+                ),
+                (
+                    "crates/c/tests/waived.rs",
+                    "fn a() {\n    // conformance: freed-port — a child retries on a taken port\n    let p = TcpListener::bind(\"127.0.0.1:0\").unwrap().local_addr().unwrap().port();\n}\n",
+                ),
+            ],
+            expect: vec![("crates/c/tests/bad.rs", 2)],
+        }
     }
 
     fn run(&self, ctx: &Ctx) -> CheckOutput {
@@ -280,10 +294,9 @@ impl Check for C39 {
             findings,
             probes,
             completed,
-            control: control(),
             precondition: Precondition {
-                met: !ctx.tree_files().is_empty(),
-                detail: "the tree lists at least one file".into(),
+                met: ctx.tree_files().iter().any(|f| f.ends_with(".rs")),
+                detail: "the tree has a .rs file".into(),
             },
         }
     }

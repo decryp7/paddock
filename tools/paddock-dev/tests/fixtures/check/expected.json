@@ -168,6 +168,78 @@
       "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
     },
     {
+      "check": "C39",
+      "severity": "error",
+      "rule": 40,
+      "file": "crates/e/src/d10.rs",
+      "line": 1,
+      "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+      "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+    },
+    {
+      "check": "C39",
+      "severity": "error",
+      "rule": 40,
+      "file": "crates/e/src/d11.rs",
+      "line": 3,
+      "message": "the freed-port waiver gives no reason",
+      "fix": "Write `// conformance: freed-port — <why the port may be freed>`."
+    },
+    {
+      "check": "C39",
+      "severity": "error",
+      "rule": 40,
+      "file": "crates/e/src/d6.rs",
+      "line": 4,
+      "message": "drops a listener whose port it read: another process may be given the port before the test uses it",
+      "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+    },
+    {
+      "check": "C39",
+      "severity": "error",
+      "rule": 40,
+      "file": "crates/e/src/d9.rs",
+      "line": 1,
+      "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+      "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+    },
+    {
+      "check": "C39",
+      "severity": "error",
+      "rule": 40,
+      "file": "crates/e/tests/c39_mutants.rs",
+      "line": 1,
+      "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+      "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+    },
+    {
+      "check": "C39",
+      "severity": "error",
+      "rule": 40,
+      "file": "crates/e/tests/c39_mutants.rs",
+      "line": 3,
+      "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+      "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+    },
+    {
+      "check": "C39",
+      "severity": "error",
+      "rule": 40,
+      "file": "crates/e/tests/c39_mutants.rs",
+      "line": 10,
+      "message": "returns the port of a listener the block drops: another process may be given the port before the test uses it",
+      "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+    },
+    {
+      "check": "C39",
+      "severity": "error",
+      "rule": 40,
+      "file": "crates/e/tests/c39_mutants.rs",
+      "line": 14,
+      "message": "returns the port of a listener the block drops: another process may be given the port before the test uses it",
+      "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`."
+    },
+    {
       "check": "C53",
       "severity": "error",
       "rule": 53,
@@ -355,6 +427,51 @@
       "line": 2,
       "message": "runs `taskkill`, which ends processes by pid: the pid may belong to another process by now",
       "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+    },
+    {
+      "check": "C53",
+      "severity": "error",
+      "rule": 53,
+      "file": "crates/e/src/d7.rs",
+      "line": 1,
+      "message": "runs `kill`, which ends processes by pid: the pid may belong to another process by now",
+      "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+    },
+    {
+      "check": "C53",
+      "severity": "error",
+      "rule": 53,
+      "file": "crates/e/src/d7.rs",
+      "line": 1,
+      "message": "runs `pkill`, which ends processes by pid: the pid may belong to another process by now",
+      "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+    },
+    {
+      "check": "C53",
+      "severity": "error",
+      "rule": 53,
+      "file": "crates/e/src/d7.rs",
+      "line": 1,
+      "message": "runs `Stop-Process`, which ends processes by pid: the pid may belong to another process by now",
+      "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+    },
+    {
+      "check": "C53",
+      "severity": "error",
+      "rule": 53,
+      "file": "crates/e/src/d7.rs",
+      "line": 1,
+      "message": "runs `/usr/bin/kill`, which ends processes by pid: the pid may belong to another process by now",
+      "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`."
+    },
+    {
+      "check": "C53",
+      "severity": "error",
+      "rule": 53,
+      "file": "crates/e/src/d8.rs",
+      "line": 1,
+      "message": "allows `clippy::disallowed_methods` for a whole crate or module, which hides bare-pid kills from Clippy",
+      "fix": "Fix the site through paddock_proc (ADR 0033), or give it a dated waiver in paddock.waivers.toml."
     },
     {
       "check": "C53",
@@ -614,6 +731,6 @@
       }
     }
   ],
-  "errors": 61,
+  "errors": 74,
   "warnings": 2
 }

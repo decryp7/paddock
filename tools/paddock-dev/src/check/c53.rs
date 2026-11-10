@@ -16,17 +16,18 @@
 //! UTF-16 offsets, as in the JavaScript, so a hit orders the same way next to non-ASCII text.
 
 use super::finding::Finding;
-use super::jsre::{DOT, line_at, rx, units};
+use super::jsre::{has_reason, line_at, rx, units};
 use super::mask::mask_units;
 use super::record::Precondition;
-use super::{Check, CheckOutput, Ctx};
+use super::{Check, CheckOutput, Control, Ctx};
 use regex::Regex;
 use std::sync::LazyLock;
 
 /// The one place that may signal a pid: it does so right after the identity check.
 const IMPLEMENTATION: [&str; 1] = ["crates/paddock-proc/src/sys.rs"];
 
-static WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(&format!(r"conformance:\s*pid-kill\s*[—–-]+\s*(\S{DOT}{{2,}})")));
+/// The marker up to its dashes; a reason must follow ([`has_reason`]).
+static WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(r"conformance:\s*pid-kill\s*([—–-]+)"));
 static BARE_WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(r"conformance:\s*pid-kill"));
 static VENDORED: LazyLock<Regex> = LazyLock::new(|| rx(r"^apps/[^/]+/vendor/"));
 static PREFILTER: LazyLock<Regex> =
@@ -136,7 +137,7 @@ pub fn pid_kills(text: &str) -> Vec<PidKill> {
             // A follow-up marker is waived only in paddock.waivers.toml (dated), never inline.
             let waived = if h.follow_up {
                 None
-            } else if WAIVER.is_match(&near) {
+            } else if has_reason(&near, &WAIVER) {
                 Some(true)
             } else if BARE_WAIVER.is_match(&near) {
                 Some(false)
@@ -150,13 +151,6 @@ pub fn pid_kills(text: &str) -> Vec<PidKill> {
             }
         })
         .collect()
-}
-
-/// A snippet with a bare-pid kill and one without: the check's positive control (ER-33).
-fn control() -> bool {
-    let bad = pid_kills("fn a(h: HANDLE) {\n    unsafe { TerminateProcess(h, 1) };\n}\n");
-    let good = pid_kills("fn a(c: &mut Child) {\n    let _ = c.kill();\n}\n// \"taskkill\"\n");
-    bad.len() == 1 && bad[0].line == 2 && good.is_empty()
 }
 
 /// The check.
@@ -173,6 +167,30 @@ impl Check for C53 {
 
     fn title(&self) -> &'static str {
         "Nothing is ended by a bare pid"
+    }
+
+    fn control(&self) -> Control {
+        Control {
+            files: vec![
+                (
+                    "crates/c/src/bad.rs",
+                    "fn a(h: HANDLE) {\n    unsafe { TerminateProcess(h, 1) };\n}\n",
+                ),
+                (
+                    "crates/c/src/good.rs",
+                    "fn a(c: &mut Child) {\n    let _ = c.kill();\n}\n// \"taskkill\"\n",
+                ),
+                (
+                    "crates/paddock-proc/src/sys.rs",
+                    "fn a(h: HANDLE) {\n    unsafe { TerminateProcess(h, 1) };\n}\n",
+                ),
+                (
+                    "apps/x/vendor/d/src/w.rs",
+                    "fn a(h: HANDLE) {\n    unsafe { TerminateProcess(h, 1) };\n}\n",
+                ),
+            ],
+            expect: vec![("crates/c/src/bad.rs", 2)],
+        }
     }
 
     fn run(&self, ctx: &Ctx) -> CheckOutput {
@@ -229,10 +247,9 @@ impl Check for C53 {
             findings,
             probes,
             completed,
-            control: control(),
             precondition: Precondition {
-                met: !ctx.tree_files().is_empty(),
-                detail: "the tree lists at least one file".into(),
+                met: ctx.tree_files().iter().any(|f| f.ends_with(".rs")),
+                detail: "the tree has a .rs file".into(),
             },
         }
     }

@@ -7,6 +7,12 @@
 
 use std::collections::BTreeSet;
 
+/// Whether `key` can be an entry: one line, no surrounding white space, not empty, not starting with `#` (that is a comment). A key
+/// that cannot is never in a baseline, so a site with such a key always counts as new (it cannot be baselined by mistake).
+pub fn is_storable(key: &str) -> bool {
+    !key.is_empty() && key == key.trim() && !key.starts_with('#') && !key.contains('\n') && !key.contains('\r')
+}
+
 /// A parsed baseline file.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Baseline {
@@ -31,7 +37,7 @@ fn entry_of(line: &str) -> Option<&str> {
 impl Baseline {
     /// Reads the file's text.
     pub fn parse(text: &str) -> Baseline {
-        let lines: Vec<String> = text.lines().map(str::to_string).collect();
+        let lines: Vec<String> = text.split_inclusive('\n').map(str::to_string).collect();
         let entries = lines.iter().filter_map(|l| entry_of(l)).map(str::to_string).collect();
         Baseline { lines, entries }
     }
@@ -50,7 +56,7 @@ impl Baseline {
         }
     }
 
-    /// The file's text without its stale entries, everything else byte for byte. It never adds a line.
+    /// The file's text without its stale entries, everything else byte for byte (line endings included). It never adds a line.
     pub fn shrunk(&self, current: &[String]) -> String {
         let now: BTreeSet<&str> = current.iter().map(String::as_str).collect();
         let mut out = String::new();
@@ -59,7 +65,6 @@ impl Baseline {
                 continue;
             }
             out.push_str(l);
-            out.push('\n');
         }
         out
     }
@@ -115,6 +120,34 @@ mod tests {
             assert!(again.judge(&current).stale.is_empty(), "mask {mask}: nothing stale is left");
             assert!(again.entries().is_subset(b.entries()));
         }
+    }
+
+    #[test]
+    fn line_endings_and_a_missing_final_newline_are_kept() {
+        let b = Baseline::parse("# h\r\nabc\r\ndef\r\nghi");
+        assert_eq!(b.shrunk(&keys(&["abc", "ghi"])), "# h\r\nabc\r\nghi");
+        assert_eq!(b.shrunk(&keys(&["abc", "def", "ghi"])), "# h\r\nabc\r\ndef\r\nghi");
+        assert!(
+            b.judge(&keys(&["abc", "def", "ghi"])).stale.is_empty(),
+            "a CR is not part of the entry"
+        );
+    }
+
+    #[test]
+    fn keys_that_cannot_be_stored_are_always_new() {
+        assert!(
+            is_storable("a b")
+                && !is_storable("#x")
+                && !is_storable(" x")
+                && !is_storable("x ")
+                && !is_storable("")
+                && !is_storable("a\nb")
+        );
+        let b = Baseline::parse("abc\n");
+        let j = b.judge(&keys(&["#abc", " abc", "abc "]));
+        assert_eq!(j.new.len(), 3);
+        assert_eq!(j.stale, ["abc"], "none of those keys is the entry `abc`");
+        assert_eq!(b.shrunk(&keys(&["#abc"])), "");
     }
 
     #[test]

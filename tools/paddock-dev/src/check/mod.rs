@@ -62,10 +62,17 @@ pub struct CheckOutput {
     pub probes: usize,
     /// It read everything it meant to.
     pub completed: bool,
-    /// Its positive control saw what it is built to see.
-    pub control: bool,
     /// What its input had to be.
     pub precondition: Precondition,
+}
+
+/// A check's positive control (ER-33): a small tree and the findings the check must report on it, as `(file, line)`. The host runs
+/// the check itself over it, so the prefilters and the file loop are exercised, not only the scanner.
+pub struct Control {
+    /// `(path, text)` of the control tree: at least one site that must be found, one that must not, and a path the check skips.
+    pub files: Vec<(&'static str, &'static str)>,
+    /// The findings the check must report, sorted.
+    pub expect: Vec<(&'static str, usize)>,
 }
 
 /// A repository check.
@@ -78,6 +85,8 @@ pub trait Check {
     fn title(&self) -> &'static str;
     /// Runs over the context.
     fn run(&self, ctx: &Ctx) -> CheckOutput;
+    /// Its positive control.
+    fn control(&self) -> Control;
 }
 
 /// The checks the host has, in the order of `conformance/src/checks/index.mjs`.
@@ -109,8 +118,20 @@ pub struct RunResult {
     pub findings: Vec<Finding>,
     /// Findings a waiver covered.
     pub waived: Vec<Waived>,
-    /// The run records, one per check that ran, with whether the check produced a finding.
-    pub runs: Vec<(RunRecord, bool)>,
+    /// The run records, one per check that ran.
+    pub runs: Vec<RunEntry>,
+    /// `--files` entries the tree does not have (a deleted file is fine; a typo is not), as given.
+    pub unknown_files: Vec<String>,
+}
+
+/// A run record with the number of findings the check produced before and after waivers.
+pub struct RunEntry {
+    /// The record.
+    pub record: RunRecord,
+    /// Findings before waivers.
+    pub raw: usize,
+    /// Findings left after waivers (the unwaivable ones included).
+    pub kept: usize,
 }
 
 impl RunResult {
@@ -133,7 +154,8 @@ impl RunResult {
             "waived": self.waived.iter().map(Waived::json).collect::<Vec<_>>(),
             "errors": self.errors(),
             "warnings": self.warnings(),
-            "runs": self.runs.iter().map(|(r, found)| r.json(*found)).collect::<Vec<_>>(),
+            "runs": self.runs.iter().map(|e| e.record.json(e.raw, e.kept)).collect::<Vec<_>>(),
+            "unknownFiles": self.unknown_files,
         })
     }
 
@@ -173,18 +195,28 @@ impl RunResult {
                 w.reason
             ));
         }
-        for (r, found) in &self.runs {
+        if !self.unknown_files.is_empty() {
             out.push(format!(
-                "run {}: {} (ran {}, completed {}, precondition {}, control {}, probes {}, scope {}, os {})",
+                "::warning::--files names {} file(s) the tree does not have: {}. A deleted file is fine; a typo narrows the run silently.",
+                self.unknown_files.len(),
+                self.unknown_files.join(", ")
+            ));
+        }
+        for e in &self.runs {
+            let (r, kept) = (&e.record, e.kept);
+            out.push(format!(
+                "run {}: {} (ran {}, completed {}, precondition {}, control {}, probes {}, scope {}, os {}, raw findings {}, kept {})",
                 r.check,
-                r.status(*found).name(),
+                r.status(kept > 0).name(),
                 r.ran,
                 r.completed,
                 if r.precondition.met { "met" } else { "NOT met" },
                 r.control,
                 r.probes,
                 r.scope.name(),
-                r.os
+                r.os,
+                e.raw,
+                kept
             ));
         }
         out.push(format!(
@@ -210,8 +242,26 @@ fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
         .unwrap_or_else(|| "panic".into())
 }
 
-/// Runs the selected checks of `registry` over the tree. A check that panics is an error finding (it fails closed), a check that
-/// could not look is an error no waiver covers, and waivers are applied last.
+/// Runs the check over its own control tree: it must report exactly the expected findings, read at least one file and complete.
+fn control_holds(check: &dyn Check) -> bool {
+    let c = check.control();
+    let tree = Tree::in_memory(&c.files);
+    let ctx = Ctx {
+        tree: &tree,
+        scoped: tree.files(),
+    };
+    let Ok(out) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check.run(&ctx))) else {
+        return false;
+    };
+    let mut got: Vec<(String, usize)> = out.findings.iter().map(|f| (f.file.clone(), f.line)).collect();
+    got.sort();
+    let mut want: Vec<(String, usize)> = c.expect.iter().map(|(f, l)| (f.to_string(), *l)).collect();
+    want.sort();
+    out.completed && out.precondition.met && out.probes > 0 && got == want
+}
+
+/// Runs the selected checks of `registry` over the tree. A check that panics, did not complete, failed its control, had no
+/// precondition or looked at nothing adds an error no waiver covers, whatever else it found; waivers are applied last.
 pub fn run_checks(opts: &RunOptions, registry: &[Box<dyn Check>]) -> Result<RunResult, UnknownCheck> {
     let only = opts.only.clone().unwrap_or_default();
     let unknown: Vec<String> = only
@@ -227,13 +277,14 @@ pub fn run_checks(opts: &RunOptions, registry: &[Box<dyn Check>]) -> Result<RunR
         .filter(|c| opts.only.is_none() || only.iter().any(|id| id == c.id()))
         .collect();
     let tree = Tree::open(&opts.root);
-    let (scoped, scope) = match &opts.files {
-        None => (tree.files(), Scope::Root),
+    let (scoped, scope, unknown_files) = match &opts.files {
+        None => (tree.files(), Scope::Root, Vec::new()),
         Some(wanted) => {
-            let set: BTreeSet<&str> = wanted.iter().map(|f| f.trim_start_matches("./")).collect();
+            let norm = |f: &str| f.replace('\\', "/").trim_start_matches("./").to_string();
+            let set: BTreeSet<String> = wanted.iter().map(|f| norm(f)).collect();
             let known: Vec<String> = tree.files().iter().filter(|f| set.contains(f.as_str())).cloned().collect();
-            let n = known.len();
-            (Rc::new(known), Scope::Files(n))
+            let unknown: Vec<String> = wanted.iter().filter(|f| !known.contains(&norm(f))).cloned().collect();
+            (Rc::new(known.clone()), Scope::Files(known), unknown)
         }
     };
     let ctx = Ctx {
@@ -245,76 +296,73 @@ pub fn run_checks(opts: &RunOptions, registry: &[Box<dyn Check>]) -> Result<RunR
     let mut runs = Vec::new();
     for check in &selected {
         let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check.run(&ctx)));
-        let (mut found, record) = match attempt {
+        let control = control_holds(check.as_ref());
+        let mut record = RunRecord {
+            check: check.id().into(),
+            ran: true,
+            completed: false,
+            precondition: Precondition {
+                met: true,
+                detail: String::new(),
+            },
+            control,
+            probes: 0,
+            scope: scope.clone(),
+            os: RunRecord::this_os(),
+            matched: Vec::new(),
+        };
+        // ER-33, one rule for every way a run can fail to look: the error below is added whatever else the check found, and no
+        // waiver covers it (a waived finding next to an unreadable file must not read as a pass).
+        let mut reasons: Vec<String> = Vec::new();
+        let mut found = match attempt {
             Ok(out) => {
-                let record = RunRecord {
-                    check: check.id().into(),
-                    ran: true,
-                    completed: out.completed,
-                    precondition: out.precondition,
-                    control: out.control,
-                    probes: out.probes,
-                    scope: scope.clone(),
-                    os: RunRecord::this_os(),
-                };
-                (out.findings, record)
+                record.completed = out.completed && tree.listing_complete();
+                record.precondition = out.precondition;
+                record.probes = out.probes;
+                if !out.completed {
+                    reasons.push("it did not complete (a file could not be read)".into());
+                }
+                if !tree.listing_complete() {
+                    reasons.push("the tree could not be listed completely (a folder could not be read)".into());
+                }
+                out.findings
             }
             Err(p) => {
-                let record = RunRecord {
-                    check: check.id().into(),
-                    ran: true,
-                    completed: false,
-                    precondition: Precondition {
-                        met: true,
-                        detail: "the check panicked".into(),
-                    },
-                    control: true,
-                    probes: 0,
-                    scope: scope.clone(),
-                    os: RunRecord::this_os(),
-                };
-                let f = Finding::error(
-                    check.id(),
-                    check.rule(),
-                    "",
-                    1,
-                    format!("the check crashed: {}", panic_text(p.as_ref())),
-                    "Fix the check or the input it could not read; a check that cannot run never passes.",
-                );
-                (vec![f], record)
+                reasons.push(format!("it crashed: {}", panic_text(p.as_ref())));
+                Vec::new()
             }
         };
-        // ER-33: a check that could not look never reads as clean, and no waiver covers that.
-        let why = if !record.control {
-            Some((
-                "check broken",
-                "its positive control no longer sees what the check is built to see".to_string(),
-            ))
-        } else if !record.precondition.met {
-            Some(("not measured", format!("its precondition failed: {}", record.precondition.detail)))
-        } else if !record.completed && found.is_empty() {
-            Some(("not measured", "it did not complete (a file could not be read)".to_string()))
-        } else if record.probes == 0 && scope == Scope::Root {
-            Some(("not measured", "it looked at no file on a whole-tree run".to_string()))
-        } else {
-            None
-        };
-        if let Some((what, detail)) = why {
+        if !control {
+            reasons.push("its positive control no longer sees what the check is built to see".into());
+        }
+        if !record.precondition.met {
+            reasons.push(format!("its precondition failed: {}", record.precondition.detail));
+        }
+        if record.probes == 0 && scope == Scope::Root && record.completed {
+            reasons.push("it looked at no file on a whole-tree run".into());
+        }
+        record.matched = found
+            .iter()
+            .filter(|f| !f.file.is_empty())
+            .map(|f| format!("{}:{}", f.file, f.line))
+            .collect();
+        let raw = found.len();
+        if !reasons.is_empty() {
+            let what = if control { "not measured" } else { "check broken" };
             found.push(
                 Finding::error(
                     check.id(),
                     check.rule(),
                     "",
                     1,
-                    format!("{what}: {} {detail}", check.id()),
+                    format!("{what}: {} {}", check.id(), reasons.join("; ")),
                     "Fix the check or its input; a run that did not look is not a pass.",
                 )
                 .unwaivable(),
             );
         }
-        let any = !found.is_empty();
         findings.extend(found);
-        runs.push((record, any));
+        runs.push(RunEntry { record, raw, kept: 0 });
     }
 
     let waiver_text = tree.read(waivers::FILE);
@@ -337,12 +385,16 @@ pub fn run_checks(opts: &RunOptions, registry: &[Box<dyn Check>]) -> Result<RunR
         checks_run: &checks_run,
         skip_unused: &skip_unused,
     });
+    for e in &mut runs {
+        e.kept = kept.iter().filter(|f| f.check == e.record.check).count();
+    }
     Ok(RunResult {
         app: opts.app.clone(),
         checks: checks_run,
         findings: kept,
         waived,
         runs,
+        unknown_files,
     })
 }
 

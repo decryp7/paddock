@@ -10,8 +10,8 @@ use serde_json::{Value, json};
 pub enum Scope {
     /// The whole tree under the root.
     Root,
-    /// Only the listed files (`--files`): the count of those the tree knows.
-    Files(usize),
+    /// Only the listed files (`--files`): those of them the tree knows, sorted. ADR 0088 decides coverage of an entry by them.
+    Files(Vec<String>),
 }
 
 impl Scope {
@@ -43,6 +43,8 @@ pub struct RunRecord {
     pub scope: Scope,
     /// The OS the run was on.
     pub os: &'static str,
+    /// The keys it matched (`file:line` of each raw finding, before waivers), for ADR 0088's stale-entry engine.
+    pub matched: Vec<String>,
 }
 
 /// A precondition and whether it held.
@@ -91,21 +93,21 @@ impl RunRecord {
         self.ran && self.completed && self.precondition.met && self.control && self.probes > 0
     }
 
-    /// The status given whether the check produced findings.
-    pub fn status(&self, found: bool) -> Status {
+    /// The status given whether findings are left after waivers.
+    pub fn status(&self, kept: bool) -> Status {
         if !self.control {
             Status::CheckBroken
         } else if !self.measured() {
             Status::NotMeasured
-        } else if found {
+        } else if kept {
             Status::Findings
         } else {
             Status::Clean
         }
     }
 
-    /// The record as JSON.
-    pub fn json(&self, found: bool) -> Value {
+    /// The record as JSON: the raw findings (before waivers) and the kept ones (after), and the status from the kept ones.
+    pub fn json(&self, raw: usize, kept: usize) -> Value {
         json!({
             "check": self.check,
             "ran": self.ran,
@@ -114,9 +116,11 @@ impl RunRecord {
             "control": self.control,
             "probes": self.probes,
             "scope": self.scope.name(),
-            "files": match self.scope { Scope::Files(n) => json!(n), Scope::Root => Value::Null },
+            "files": match &self.scope { Scope::Files(f) => json!(f), Scope::Root => Value::Null },
             "os": self.os,
-            "status": self.status(found).name(),
+            "found": {"raw": raw, "kept": kept},
+            "matched": self.matched,
+            "status": self.status(kept > 0).name(),
         })
     }
 }
@@ -138,6 +142,7 @@ mod tests {
             probes: 3,
             scope: Scope::Root,
             os: "linux",
+            matched: vec![],
         }
     }
 
@@ -169,10 +174,11 @@ mod tests {
     #[test]
     fn json_names_every_field_the_stale_entry_engine_reads() {
         let v = RunRecord {
-            scope: Scope::Files(2),
+            scope: Scope::Files(vec!["a.rs".into(), "b.rs".into()]),
+            matched: vec!["a.rs:3".into()],
             ..rec()
         }
-        .json(false);
+        .json(2, 0);
         for k in [
             "check",
             "ran",
@@ -184,10 +190,17 @@ mod tests {
             "status",
             "control",
             "files",
+            "found",
+            "matched",
         ] {
             assert!(v.get(k).is_some(), "{k}");
         }
         assert_eq!(v["scope"], "files");
-        assert_eq!(v["files"], 2);
+        assert_eq!(v["files"], json!(["a.rs", "b.rs"]));
+        assert_eq!(
+            v["status"], "clean",
+            "every raw finding was waived: the status follows the kept ones"
+        );
+        assert_eq!(v["found"], json!({"raw": 2, "kept": 0}));
     }
 }

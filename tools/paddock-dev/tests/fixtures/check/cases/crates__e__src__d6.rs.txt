@@ -1,0 +1,6 @@
+fn a(){
+ let l = TcpListener::bind("x").unwrap();
+ let p = l.local_addr();
+ drop(l);
+ use_(p);
+}

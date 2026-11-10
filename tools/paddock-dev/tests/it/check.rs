@@ -265,8 +265,8 @@ fn files_scopes_the_run_and_the_record_says_so() {
         .map(|f| f.file.as_str())
         .collect();
     assert_eq!(files, ["crates/a/src/c53_bad.rs"].into_iter().collect());
-    let (c39, found39) = &r.runs[0];
-    assert_eq!((c39.scope.name(), c39.probes, *found39), ("files", 2, false));
+    let (c39, kept39) = (&r.runs[0].record, r.runs[0].kept);
+    assert_eq!((c39.scope.name(), c39.probes, kept39), ("files", 2, 0));
     assert!(c39.measured(), "the two .rs files in scope were read");
     // No waiver warning for waivers of files outside the scope.
     assert!(
@@ -282,8 +282,8 @@ fn a_scoped_run_that_reads_no_rust_file_is_not_measured_and_not_an_error() {
     let mut o = options(tree.path());
     o.files = Some(vec!["paddock.waivers.toml".into()]);
     let r = run_checks(&o, &registry()).unwrap();
-    for (rec, found) in &r.runs {
-        assert_eq!(rec.status(*found).name(), "not measured", "{}", rec.check);
+    for e in &r.runs {
+        assert_eq!(e.record.status(e.kept > 0).name(), "not measured", "{}", e.record.check);
     }
     assert!(
         r.findings.iter().all(|f| !f.check.starts_with('C')),
@@ -305,14 +305,14 @@ fn a_whole_tree_run_that_looks_at_nothing_is_an_error_no_waiver_covers() {
     assert_eq!(broken.len(), 2, "{:?}", r.findings);
     assert!(broken[0].message.starts_with("not measured"));
     assert!(r.waived.is_empty());
-    assert_eq!(r.runs[0].0.status(true).name(), "not measured");
+    assert_eq!(r.runs[0].record.status(true).name(), "not measured");
 }
 
 #[test]
 fn an_empty_tree_fails_the_precondition() {
     let d = tempfile::tempdir().unwrap();
     let r = run_checks(&options(d.path()), &registry()).unwrap();
-    assert!(r.runs.iter().all(|(rec, _)| !rec.precondition.met));
+    assert!(r.runs.iter().all(|e| !e.record.precondition.met));
     assert!(r.errors() >= 2);
 }
 
@@ -397,4 +397,348 @@ fn the_command_writes_the_report_to_out() {
     ]);
     let v = read_json(&out);
     assert!(v["findings"].as_array().unwrap().len() > 40);
+}
+
+// ---- ER-33: every way a run can fail to look adds an error no waiver covers -------------------------------------------------
+
+use paddock_dev::check::finding::Finding;
+use paddock_dev::check::record::Precondition;
+use paddock_dev::check::{Check, CheckOutput, Control, Ctx};
+
+#[derive(Clone, Copy, Debug)]
+enum Way {
+    Fine,
+    Panics,
+    Incomplete,
+    ControlFails,
+    PreconditionUnmet,
+    ZeroProbes,
+}
+
+/// A check that always has one waivable finding at `a.rs:1`, and misbehaves in one way on the real tree (never on its control tree).
+struct Stub {
+    id: &'static str,
+    way: Way,
+}
+
+impl Check for Stub {
+    fn id(&self) -> &'static str {
+        self.id
+    }
+    fn rule(&self) -> u32 {
+        1
+    }
+    fn title(&self) -> &'static str {
+        "stub"
+    }
+    fn control(&self) -> Control {
+        Control {
+            files: vec![("control/x.rs", "x")],
+            expect: match self.way {
+                Way::ControlFails => vec![],
+                _ => vec![("a.rs", 1)],
+            },
+        }
+    }
+    fn run(&self, ctx: &Ctx) -> CheckOutput {
+        let in_control = ctx.files().iter().any(|f| f == "control/x.rs");
+        let way = if in_control { Way::Fine } else { self.way };
+        if matches!(way, Way::Panics) {
+            panic!("boom");
+        }
+        CheckOutput {
+            findings: vec![Finding::error(self.id, 1, "a.rs", 1, "a finding", "fix it")],
+            probes: if matches!(way, Way::ZeroProbes) { 0 } else { 1 },
+            completed: !matches!(way, Way::Incomplete),
+            precondition: Precondition {
+                met: !matches!(way, Way::PreconditionUnmet),
+                detail: "the stub's input".into(),
+            },
+        }
+    }
+}
+
+fn stub_tree(ids: &[&str]) -> tempfile::TempDir {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(d.path().join("a.rs"), "x").unwrap();
+    let waivers: String = ids
+        .iter()
+        .map(|id| format!("[[waiver]]\ncheck = \"{id}\"\npath = \"*\"\nreason = \"waive all\"\nexpires = \"2099-01-01\"\n"))
+        .collect();
+    std::fs::write(d.path().join("paddock.waivers.toml"), waivers).unwrap();
+    d
+}
+
+fn stub_run(way: Way, only_fine_is_clean: bool) -> paddock_dev::check::RunResult {
+    let tree = stub_tree(&["S1"]);
+    let reg: Vec<Box<dyn Check>> = vec![Box::new(Stub { id: "S1", way })];
+    let mut o = options(tree.path());
+    o.only = None;
+    let r = run_checks(&o, &reg).unwrap();
+    assert_eq!(
+        r.waived.len(),
+        usize::from(!matches!(way, Way::Panics)),
+        "{way:?}: the stub's own finding is waived by the `*` waiver; a crash has none and its error is not waived"
+    );
+    if only_fine_is_clean {
+        assert_eq!(r.errors(), 0, "{:?}", r.findings);
+    }
+    r
+}
+
+#[test]
+fn a_run_that_looks_fine_and_whose_findings_are_all_waived_passes() {
+    let r = stub_run(Way::Fine, true);
+    assert!(r.findings.is_empty());
+    assert_eq!((r.runs[0].raw, r.runs[0].kept), (1, 0));
+    assert_eq!(r.runs[0].record.status(r.runs[0].kept > 0).name(), "clean");
+}
+
+#[test]
+fn every_way_of_not_looking_is_an_unwaivable_error_next_to_waived_findings() {
+    for (way, word) in [
+        (Way::Incomplete, "did not complete"),
+        (Way::Panics, "crashed: boom"),
+        (Way::ControlFails, "positive control"),
+        (Way::PreconditionUnmet, "precondition failed"),
+        (Way::ZeroProbes, "no file"),
+    ] {
+        let r = stub_run(way, false);
+        let broken: Vec<&Finding> = r.findings.iter().filter(|f| f.unwaivable).collect();
+        assert_eq!(broken.len(), 1, "{way:?}: {:?}", r.findings);
+        assert!(broken[0].message.contains(word), "{way:?}: {}", broken[0].message);
+        assert!(r.errors() >= 1, "{way:?}: the run fails");
+        assert_ne!(r.runs[0].record.status(r.runs[0].kept > 0).name(), "clean", "{way:?}");
+    }
+}
+
+#[test]
+fn a_panicking_check_is_not_waivable_even_by_a_star_waiver() {
+    let r = stub_run(Way::Panics, false);
+    assert!(
+        r.findings
+            .iter()
+            .any(|f| f.check == "S1" && f.message.starts_with("check broken") || f.message.contains("crashed"))
+    );
+    assert!(
+        r.waived.iter().all(|w| w.finding.line == 1 && !w.finding.unwaivable),
+        "the crash finding is never in `waived`"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unreadable_file_next_to_a_waived_finding_fails_the_run() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(d.path().join("a.rs"), "fn a() { Command::new(\"taskkill\"); }\n").unwrap();
+    std::fs::write(d.path().join("b.rs"), "fn b() {}\n").unwrap();
+    std::fs::write(
+        d.path().join("paddock.waivers.toml"),
+        "[[waiver]]\ncheck = \"C53\"\npath = \"a.rs\"\nreason = \"x\"\nexpires = \"2099-01-01\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(d.path().join("b.rs"), std::fs::Permissions::from_mode(0o000)).unwrap();
+    let readable_anyway = std::fs::read(d.path().join("b.rs")).is_ok(); // root ignores the mode (CI containers)
+    let mut o = options(d.path());
+    o.only = Some(vec!["C53".into()]);
+    let r = run_checks(&o, &registry()).unwrap();
+    std::fs::set_permissions(d.path().join("b.rs"), std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(r.waived.len(), 1);
+    if readable_anyway {
+        eprintln!("skipped the failing half: this user can read a mode 000 file");
+        assert_eq!(r.errors(), 0);
+    } else {
+        assert!(
+            r.findings.iter().any(|f| f.unwaivable && f.message.contains("did not complete")),
+            "{:?}",
+            r.findings
+        );
+        assert!(r.errors() >= 1);
+    }
+}
+
+#[test]
+fn zero_probes_with_a_rust_file_present_and_no_rust_file_at_all_are_both_not_measured() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(d.path().join("empty.rs"), "").unwrap();
+    let r = run_checks(&options(d.path()), &registry()).unwrap();
+    assert!(r.runs.iter().all(|e| e.record.precondition.met && e.record.probes == 0));
+    assert!(
+        r.findings.iter().filter(|f| f.unwaivable).all(|f| f.message.contains("no file")),
+        "{:?}",
+        r.findings
+    );
+    assert_eq!(r.errors(), 2);
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(d.path().join("readme.md"), "x").unwrap();
+    let r = run_checks(&options(d.path()), &registry()).unwrap();
+    assert!(r.runs.iter().all(|e| !e.record.precondition.met), "no .rs file in the tree");
+}
+
+#[test]
+fn the_real_checks_pass_their_controls_through_the_host() {
+    let tree = materialize();
+    let r = run_checks(&options(tree.path()), &registry()).unwrap();
+    assert!(
+        r.runs.iter().all(|e| e.record.control),
+        "C39 and C53 must see their control sites through the prefilter and the file loop"
+    );
+}
+
+// ---- --files and the record ------------------------------------------------------------------------------------------------
+
+#[test]
+fn files_accepts_backslashes_and_reports_entries_the_tree_does_not_have() {
+    let tree = materialize();
+    let mut o = options(tree.path());
+    o.files = Some(vec![
+        r"crates\a\src\c53_bad.rs".into(),
+        "crates/a/src/typo.rs".into(),
+        "./crates/a/src/c53_good.rs".into(),
+    ]);
+    let r = run_checks(&o, &registry()).unwrap();
+    assert_eq!(r.unknown_files, ["crates/a/src/typo.rs"]);
+    assert!(r.findings.iter().any(|f| f.file == "crates/a/src/c53_bad.rs"));
+    assert!(r.text().contains("::warning::--files names 1 file(s)"));
+    assert_eq!(r.json()["unknownFiles"], json!(["crates/a/src/typo.rs"]));
+    match &r.runs[0].record.scope {
+        paddock_dev::check::record::Scope::Files(f) => assert_eq!(f, &["crates/a/src/c53_bad.rs", "crates/a/src/c53_good.rs"]),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn the_record_carries_raw_and_kept_counts_and_the_matched_keys() {
+    let tree = materialize();
+    let v = run_checks(&options(tree.path()), &registry()).unwrap().json();
+    let c39 = &v["runs"][0];
+    assert!(c39["found"]["raw"].as_u64().unwrap() > c39["found"]["kept"].as_u64().unwrap() - 1);
+    assert!(
+        c39["matched"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|k| k == "crates/a/tests/c39_bad.rs:7"),
+        "{}",
+        c39["matched"]
+    );
+}
+
+// ---- a seeded token-soup differential against the JS host ------------------------------------------------------------------
+
+const TOKENS: &[&str] = &[
+    "TcpListener::bind(",
+    "TcpSocket::bind(",
+    "Socket::new(",
+    ")",
+    "(",
+    "{",
+    "}",
+    ";",
+    ".unwrap()",
+    "?",
+    ".await",
+    ".expect(\"e\")",
+    ".local_addr()",
+    ".port()",
+    "let l = ",
+    "let mut s = ",
+    "let p = ",
+    "l",
+    "s",
+    "p",
+    "drop(l);",
+    "drop(s);",
+    "s.bind(&a);",
+    "s.set_reuse(true);",
+    "\n",
+    "\n",
+    " ",
+    "\"",
+    "'",
+    "'a'",
+    "'\\n'",
+    "'\\u{1F600}'",
+    "r#\"",
+    "\"#",
+    "r\"",
+    "br\"",
+    "xr\"",
+    "cr\"",
+    "//",
+    "/*",
+    "*/",
+    "\\",
+    "é",
+    "\u{1F600}",
+    "\r\n",
+    " ",
+    " ",
+    "TerminateProcess(",
+    "TerminateJobObject (",
+    "\"taskkill\"",
+    "\"taskkill.exe\"",
+    "\"Stop-Process -Id\"",
+    "\"/bin/kill\"",
+    "Command::new(\"kill\")",
+    "command(\"pkill\")",
+    "#![allow(clippy::disallowed_methods)]",
+    "// ADR 0033 W\u{50}-3",
+    "// ADR 0033 WP-\u{661}",
+    "// conformance: pid-kill — ok reason",
+    "// conformance: pid-kill",
+    "// conformance: freed-port — fine here",
+    "// conformance: freed-port — \u{1F600}a",
+    "// conformance: freed-port -- a",
+    "// conformance: freed-port",
+    "use std::net::TcpListener as L;",
+    "L::bind(",
+    "fn f() ",
+    "x",
+    "=",
+    ":",
+    "kill",
+    "#",
+];
+
+fn soup(seed: u64, files: usize, root: &Path) {
+    let mut s = seed;
+    let mut rnd = |n: usize| {
+        s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        ((s >> 33) as usize) % n
+    };
+    for i in 0..files {
+        let mut t = String::new();
+        for _ in 0..(5 + rnd(80)) {
+            t.push_str(TOKENS[rnd(TOKENS.len())]);
+        }
+        let p = root.join(format!("crates/f/src/f{i}.rs"));
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, t).unwrap();
+    }
+}
+
+#[test]
+fn live_token_soup_findings_equal_the_js_host() {
+    if !has_node() {
+        return skip("node is not installed");
+    }
+    for seed in [1u64, 2, 3] {
+        let d = tempfile::tempdir().unwrap();
+        soup(seed, 250, d.path());
+        let js: Value = serde_json::from_str(&node(
+            JS_RUN,
+            &[("RT5_ROOT", d.path().display().to_string()), ("RT5_APP", "soup".into())],
+        ))
+        .unwrap();
+        let mut o = options(d.path());
+        o.app = "soup".into();
+        let r = run_checks(&o, &registry()).unwrap();
+        assert_eq!(shared_part(&r.json())["findings"], js["findings"], "seed {seed}");
+        assert!(
+            js["findings"].as_array().unwrap().len() > 20,
+            "seed {seed}: the soup must hit the checks"
+        );
+    }
 }

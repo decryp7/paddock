@@ -1,0 +1,16 @@
+fn a() { let s = xr"a"; let t = cr"b"; let p = TcpListener::bind("x").unwrap().local_addr().unwrap().port(); }
+fn b() { let c = '
+'; let p = TcpListener::bind("x").unwrap().local_addr().unwrap().port(); }
+fn c() {
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let q = l.accept();
+    l.local_addr().unwrap().port()
+}
+fn d() {
+    if x { y(); } let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    l.local_addr().unwrap().port()
+}
+fn e() {
+    { let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    l.local_addr().unwrap().port() }
+}
