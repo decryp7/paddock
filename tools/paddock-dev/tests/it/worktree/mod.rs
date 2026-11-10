@@ -152,7 +152,10 @@ impl Fixture {
     pub fn fake_slow_add(&self, name: &str) -> (String, std::sync::mpsc::Receiver<()>) {
         let fifo = self.root.join(format!("reached-{name}.fifo"));
         assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
-        let body = format!(r#"case "$*" in *"worktree add"*) echo reached > '{}'; sleep 3;; esac"#, fifo.display());
+        let body = format!(
+            r#"case "$*" in *"worktree add"*) echo reached > '{}'; sleep 3;; esac"#,
+            fifo.display()
+        );
         let path_env = self.fake_git(name, &body);
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
