@@ -10,4 +10,6 @@ Open and look at every item, do not sample. Be specific and actionable: for each
 
 End with a clear verdict ("approve" / "not yet" or ship / fix / redo per item), the P1s that block, and at most a handful of top P2s. Never add Co-Authored-By or AI attribution to anything you commit.
 
+Check that the author ran the repository-wide gates, and run them yourself when the diff could affect them (without building in the author's worktree; use a scratch copy): `(cd conformance && npm test)`, `./dev gates check`, and for a change under `crates/`, `cargo metadata --locked --format-version 1 >/dev/null` in each workspace whose Cargo.lock lists the changed crate (`grep -l`). A missing run is a P1.
+
 Wait with `./dev wait`; never `pgrep -f` on a string your own command contains.
