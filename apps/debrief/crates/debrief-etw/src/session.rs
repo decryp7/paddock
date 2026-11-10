@@ -408,13 +408,14 @@ mod tests {
     const PREFIX: &str = "Debrief-test-";
 
     #[test]
-    fn orphans_are_sessions_of_dead_debriefs_only() {
+    fn orphans_are_sessions_of_debriefs_seen_gone_only() {
         let me = std::process::id();
-        assert!(is_orphan(PREFIX, "Debrief-test-999999-5-1", |_| false));
-        assert!(!is_orphan(PREFIX, "Debrief-test-999999-5-1", |_| true));
-        assert!(!is_orphan(PREFIX, &format!("Debrief-test-{me}-5-1"), |_| false), "our own sessions");
-        assert!(!is_orphan(PREFIX, "NT Kernel Logger", |_| false));
-        assert!(!is_orphan(PREFIX, "Debrief-test-x-5-1", |_| false));
+        assert!(is_orphan(PREFIX, "Debrief-test-999999-5-1", |_| Owner::Gone));
+        assert!(!is_orphan(PREFIX, "Debrief-test-999999-5-1", |_| Owner::Running));
+        assert!(!is_orphan(PREFIX, "Debrief-test-999999-5-1", |_| Owner::Unknown), "a refused look keeps the session");
+        assert!(!is_orphan(PREFIX, &format!("Debrief-test-{me}-5-1"), |_| Owner::Gone), "our own sessions");
+        assert!(!is_orphan(PREFIX, "NT Kernel Logger", |_| Owner::Gone));
+        assert!(!is_orphan(PREFIX, "Debrief-test-x-5-1", |_| Owner::Gone));
         let a = session_name(PREFIX, 7);
         assert!(a.starts_with(&format!("{PREFIX}{me}-7-")) && a != session_name(PREFIX, 7));
     }
