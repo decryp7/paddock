@@ -1,0 +1,126 @@
+# Pinned copy of engineering-rules scripts/worktree.sh at commit 9cf4f030b3dfaedcb390f82306aadc15cc4a4f72 (test oracle for ./dev worktree; not run as a script, tests start it with bash).
+#!/bin/bash
+# worktree.sh - one git worktree per agent, each with its own build directory and test port (ER-2, ER-24).
+#
+# Usage (run inside the repository, or set WT_REPO):
+#   worktree.sh add NAME [--base BRANCH]   create worktree <root>/NAME on new branch NAME from BASE (default: default branch), with its own
+#                                          build dir and a free port from the range; prints the settings and writes them to
+#                                          <worktree>/.worktree.env (kept out of git through .git/info/exclude)
+#   worktree.sh list [--base BRANCH]       every worktree: branch, port, build-dir size, merged into the base (yes, no, or empty = no
+#                                          commits yet), dirty or clean; the base defaults to the repo's default branch
+#   worktree.sh clean [--base BRANCH] [--dry-run]
+#                                          remove worktrees whose branch has commits, is merged into BASE and whose tree is clean,
+#                                          together with their branch and build dir; unmerged, empty (no commits yet) or dirty ones
+#                                          are never touched
+#   worktree.sh disk [MIN_GB]              print free disk (GB) of the build root and the repo; exit 1 when below MIN_GB (default 20)
+# Environment:
+#   WT_ROOT        where worktrees go (default: <repo parent>/<repo name>-worktrees)
+#   WT_BUILD_ROOT  where build dirs go (default: ~/.cache/worktree-targets/<repo name>)
+#   WT_PORTS       port range "low-high" for end-to-end test servers (default 4200-4299)
+# Build with the dir from .worktree.env through the tool's config (cargo: --config build.target-dir=...), not CARGO_TARGET_DIR,
+# so a compile cache keyed on CARGO_* variables keeps hitting (LESSONS.md).
+set -u
+die() { echo "worktree.sh: $*" >&2; exit 2; }
+REPO=$(git -C "${WT_REPO:-.}" rev-parse --show-toplevel 2>/dev/null) || die "not inside a git repository"
+# The main checkout, even when run from a linked worktree.
+MAIN=$(git -C "$REPO" worktree list --porcelain | awk '/^worktree /{sub(/^worktree /,""); print; exit}')
+NAME_OF_REPO=$(basename "$MAIN")
+ROOT=${WT_ROOT:-$(dirname "$MAIN")/$NAME_OF_REPO-worktrees}
+BUILD_ROOT=${WT_BUILD_ROOT:-$HOME/.cache/worktree-targets/$NAME_OF_REPO}
+RANGE=${WT_PORTS:-4200-4299}
+LOW=${RANGE%-*}; HIGH=${RANGE#*-}
+
+# Prints "path<TAB>branch" for each linked worktree (not the main checkout).
+linked() {
+  git -C "$MAIN" worktree list --porcelain | awk -v main="$MAIN" '
+    /^worktree /{p=substr($0,10)} /^branch /{b=substr($0,8); sub(/^refs\/heads\//,"",b); if (p!=main) print p "\t" b}'
+}
+# The repo's default branch: origin/HEAD, else main or master, else the branch checked out in the main checkout.
+default_branch() {
+  local b
+  b=$(git -C "$MAIN" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null) && { echo "${b#origin/}"; return; }
+  for b in main master; do git -C "$MAIN" rev-parse --verify -q "refs/heads/$b" >/dev/null && { echo "$b"; return; }; done
+  git -C "$MAIN" symbolic-ref -q --short HEAD
+}
+env_of() { sed -n "s/^$2=//p" "$1/.worktree.env" 2>/dev/null | head -1; }
+# yes | no | empty (tip is still the commit the worktree was created from) | unknown (no BASE_SHA recorded)
+merge_state() {
+  local p=$1 b=$2 base=$3 tip bs
+  tip=$(git -C "$MAIN" rev-parse "refs/heads/$b" 2>/dev/null) || { echo unknown; return; }
+  bs=$(env_of "$p" BASE_SHA)
+  [ -n "$bs" ] || { echo unknown; return; }
+  [ "$tip" = "$bs" ] && { echo empty; return; }
+  if git -C "$MAIN" merge-base --is-ancestor "$tip" "$base" 2>/dev/null; then echo yes; else echo no; fi
+}
+port_of() { sed -n 's/^E2E_PORT=//p' "$1/.worktree.env" 2>/dev/null | head -1; }
+port_in_use() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+size_of() { [ -d "$1" ] && du -sh "$1" 2>/dev/null | cut -f1 || echo -; }
+free_gb() { df -Pk "$1" | awk 'NR==2{printf "%d", $4/1048576}'; }
+
+cmd=${1:-}; [ $# -gt 0 ] && shift
+case $cmd in
+  add)
+    name=${1:-}; [ -n "$name" ] || die "usage: add NAME [--base BRANCH]"; shift
+    base=$(default_branch)
+    [ "${1:-}" = --base ] && { base=${2:-}; [ -n "$base" ] || die "--base needs a branch"; }
+    case $name in *[!A-Za-z0-9._/-]*|-*) die "bad name: $name" ;; esac
+    wt="$ROOT/${name//\//-}"
+    [ ! -e "$wt" ] || die "$wt already exists"
+    used=$(linked | while IFS=$'\t' read -r p _; do port_of "$p"; done)
+    port=
+    for ((c = LOW; c <= HIGH; c++)); do
+      case " $(echo "$used" | tr '\n' ' ') " in *" $c "*) continue ;; esac
+      port_in_use "$c" && continue
+      port=$c; break
+    done
+    [ -n "$port" ] || die "no free port in $RANGE"
+    mkdir -p "$ROOT" "$BUILD_ROOT" || die "cannot create $ROOT or $BUILD_ROOT"
+    git -C "$MAIN" worktree add -q -b "$name" "$wt" "$base" >/dev/null || die "git worktree add failed"
+    target="$BUILD_ROOT/${name//\//-}"
+    mkdir -p "$target"
+    printf 'WORKTREE=%s\nBRANCH=%s\nBASE=%s\nBASE_SHA=%s\nBUILD_DIR=%s\nE2E_PORT=%s\n' "$wt" "$name" "$base" "$(git -C "$wt" rev-parse HEAD)" "$target" "$port" > "$wt/.worktree.env"
+    excl=$(git -C "$wt" rev-parse --git-path info/exclude)
+    grep -qx '.worktree.env' "$excl" 2>/dev/null || echo '.worktree.env' >> "$excl"
+    cat "$wt/.worktree.env" ;;
+  list)
+    base=$(default_branch)
+    while [ $# -gt 0 ]; do
+      case $1 in --base) base=${2:-}; shift ;; *) die "unknown option $1" ;; esac
+      shift
+    done
+    printf '%-40s %-24s %-6s %-8s %-7s %s\n' WORKTREE BRANCH PORT BUILD MERGED STATE
+    linked | while IFS=$'\t' read -r p b; do
+      m=$(merge_state "$p" "$b" "$base")
+      st=clean; [ -n "$(git -C "$p" status --porcelain 2>/dev/null)" ] && st=dirty
+      printf '%-40s %-24s %-6s %-8s %-7s %s\n' "$p" "$b" "$(port_of "$p")" "$(size_of "$(env_of "$p" BUILD_DIR)")" "$m" "$st"
+    done ;;
+  clean)
+    base=$(default_branch); dry=0
+    while [ $# -gt 0 ]; do
+      case $1 in --base) base=${2:-}; shift ;; --dry-run) dry=1 ;; *) die "unknown option $1" ;; esac
+      shift
+    done
+    linked | while IFS=$'\t' read -r p b; do
+      case $(merge_state "$p" "$b" "$base") in
+        yes) ;;
+        empty) echo "keep $p (no commits yet)"; continue ;;
+        unknown) echo "keep $p (no BASE_SHA recorded; remove it by hand)"; continue ;;
+        *) echo "keep $p (branch $b not merged into $base)"; continue ;;
+      esac
+      [ -z "$(git -C "$p" status --porcelain 2>/dev/null)" ] || { echo "keep $p (uncommitted changes)"; continue; }
+      bd=$(sed -n 's/^BUILD_DIR=//p' "$p/.worktree.env" 2>/dev/null | head -1)
+      if [ "$dry" = 1 ]; then echo "would remove $p, branch $b, build dir ${bd:--}"; continue; fi
+      # .worktree.env is untracked-and-excluded; git needs --force only for that, which is safe here (tree is clean).
+      git -C "$MAIN" worktree remove --force "$p" && git -C "$MAIN" branch -d "$b" >/dev/null
+      case $bd in "$BUILD_ROOT"/?*) rm -rf "$bd" ;; esac
+      echo "removed $p, branch $b, build dir ${bd:--}"
+    done ;;
+  disk)
+    min=${1:-20}
+    mkdir -p "$BUILD_ROOT" 2>/dev/null
+    b=$(free_gb "$BUILD_ROOT"); r=$(free_gb "$MAIN")
+    echo "free: build root ${b} GB, repo ${r} GB (minimum ${min} GB)"
+    [ "$b" -ge "$min" ] && [ "$r" -ge "$min" ] || { echo "low disk: clean worktrees (worktree.sh clean) and caches first" >&2; exit 1; } ;;
+  ""|-h|--help) sed -n '2,/^[^#]/{/^#/s/^# \{0,1\}//p;}' "$0"; [ -n "$cmd" ] || exit 2 ;;
+  *) die "unknown command: $cmd (add, list, clean, disk)" ;;
+esac

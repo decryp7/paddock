@@ -3,7 +3,7 @@
 
 use super::git::{Git, GitError, Repo, WorktreeInfo, is_under, key, worktrees};
 use super::note::{Note, check_owner, format_utc, now_secs};
-use super::owners::{Claim, OwnerError, OwnerMap, OwnerStore, same_path};
+use super::owners::{Claim, OwnerError, OwnerMap, OwnerStore, PENDING_TTL, same_path};
 use paddock_cli::{CliError, Report};
 use serde_json::json;
 use std::path::Path;
@@ -138,11 +138,18 @@ fn require_locked(w: &WorktreeInfo, k: &str) -> Result<(), CliError> {
     }
 }
 
+/// Git calls one `add` makes after its reservation: `worktree add`, `sparse-checkout set` and `checkout`.
+const ADD_GIT_STEPS: u64 = 3;
+// A live `add` must never outlast its reservation, or a second `add` could take the path while the first still runs.
+const _: () = assert!(PENDING_TTL > super::git::GIT_TIMEOUT_SECS * ADD_GIT_STEPS + 60);
+
 /// `add`: `git worktree add --lock --reason <owner note>` under the worktree root.
 ///
 /// The owner map's lock is held only to check and reserve the path, and again to confirm it: the slow git work (a checkout of
-/// a large tree) runs between the two with the lock free, so other claims never wait for it. Git refuses an existing path
-/// atomically, so two `add`s of one path cannot both succeed even without the reservation.
+/// a large tree) runs between the two with the lock free, so other claims never wait for it. **The reservation is the only
+/// guard against two `add`s of one path**: git does not refuse an existing path atomically (the reviewer measured two raw
+/// `git worktree add` of one path both succeeding in 5 of 30 runs). A reservation older than `PENDING_TTL` is a crashed
+/// `add`; the compile-time assert below keeps that longer than any live `add` can run.
 pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report, CliError> {
     let (role, task) =
         check_owner(req.owner).map_err(|m| CliError::usage(m).with_hint("Write --owner implementer:RT-3 (role, a colon, task)."))?;
@@ -157,25 +164,6 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
         .trim()
         .to_string();
     let k = key(&req.root.join(req.name));
-    // Never inside the primary or another worktree (an agent would write into somebody else's tree).
-    let list = worktrees(repo).map_err(git_failure)?;
-    for w in &list {
-        let other = w.path.replace('\\', "/");
-        let (inside, around) = (is_under(&k, &other), is_under(&other, &k));
-        // The very same path is judged below (existing folder, owner map), with a plainer message.
-        if (inside || around) && !(inside && around) {
-            return Err(CliError::refused(format!(
-                "{k} is {} {other}{}.",
-                if inside { "inside" } else { "around" },
-                if w.path == list[0].path {
-                    ", the primary checkout"
-                } else {
-                    ", another worktree"
-                }
-            ))
-            .with_hint("Choose a worktree root outside every checkout (`--root`, `paddock.worktreeRoot`)."));
-        }
-    }
     let branch_name = req.branch.unwrap_or("detached");
     let note = Note {
         role,
@@ -190,6 +178,7 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
     // 1. Under the lock: check, then reserve.
     store
         .update_as("worktree add (reserve)", |map| -> Result<(), CliError> {
+            check_nesting(repo, &k, map)?;
             if let Some(e) = map.get(&k) {
                 return Err(
                     CliError::refused(format!("{k} is already in the owner map (agent {}).", e.agent_id))
@@ -239,6 +228,39 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
             req.branch.map_or("detached".to_string(), |b| format!("branch {b}"))
         ),
     ))
+}
+
+/// Never inside, or around, the primary, another worktree, an owner-map path or a path another `add` has reserved. Run under
+/// the lock against the worktrees as they are now, so two `add`s with different roots cannot nest.
+fn check_nesting(repo: &Repo, k: &str, map: &OwnerMap) -> Result<(), CliError> {
+    let list = worktrees(repo).map_err(git_failure)?;
+    let mut others: Vec<(String, String)> = list
+        .iter()
+        .enumerate()
+        .map(|(i, w)| {
+            (
+                w.path.replace('\\', "/"),
+                if i == 0 { "the primary checkout" } else { "another worktree" }.to_string(),
+            )
+        })
+        .collect();
+    others.extend(map.iter().map(|(p, _)| (p.to_string(), "another worktree".to_string())));
+    others.extend(
+        map.pending_paths(now_secs())
+            .into_iter()
+            .map(|p| (p, "a worktree another `add` is making".to_string())),
+    );
+    for (other, what) in others {
+        let (inside, around) = (is_under(k, &other), is_under(&other, k));
+        // The very same path is judged by the checks after this one (existing folder, owner map, reservation).
+        if (inside || around) && !(inside && around) {
+            return Err(
+                CliError::refused(format!("{k} is {} {other}, {what}.", if inside { "inside" } else { "around" }))
+                    .with_hint("Choose a worktree root outside every checkout (`--root`, `paddock.worktreeRoot`)."),
+            );
+        }
+    }
+    Ok(())
 }
 
 /// `git worktree add --lock`, then the sparse cone (made without a checkout first, so the full tree is never written).

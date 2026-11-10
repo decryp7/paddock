@@ -1,24 +1,32 @@
 //! The engineering-rules `scripts/worktree.sh` is the oracle for add, list and clean: the same fixture repository goes
-//! through both tools and their decisions are compared. The script lives in another repository, so the tests run when
-//! `WORKTREE_SH` names it (CI sets it where engineering-rules is checked out) and otherwise print `not measured`:
-//!
-//! `WORKTREE_SH=<engineering-rules>/scripts/worktree.sh cargo test --test it worktree::oracle`
+//! through both tools and their decisions are compared. The tests run against a pinned copy of the script
+//! (`tests/fixtures/worktree-oracle/worktree-sh.txt`, its source commit in the first line); `WORKTREE_SH` names another
+//! script instead (for example the current one in engineering-rules). A test that did not run must not pass (ER-33), so
+//! there is no skip.
 use super::Fixture;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Command;
 
-/// The oracle script, or `None` (and a visible `not measured` line, ER-33) when `WORKTREE_SH` is not set.
-fn oracle() -> Option<PathBuf> {
-    let found = std::env::var("WORKTREE_SH").ok().map(PathBuf::from);
-    if found.is_none() {
-        eprintln!("oracle not measured: WORKTREE_SH is not set");
-    }
-    found
+/// The oracle script: `WORKTREE_SH`, else the pinned copy.
+fn script() -> PathBuf {
+    std::env::var("WORKTREE_SH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/worktree-oracle/worktree-sh.txt"))
 }
 
-fn script() -> PathBuf {
-    oracle().expect("checked by the caller")
+#[test]
+fn the_pinned_oracle_names_its_source_commit() {
+    let text =
+        std::fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/worktree-oracle/worktree-sh.txt")).unwrap();
+    let first = text.lines().next().unwrap();
+    let sha = first
+        .split("at commit ")
+        .nth(1)
+        .and_then(|r| r.split_whitespace().next())
+        .unwrap_or("");
+    assert!(sha.len() == 40 && sha.bytes().all(|b| b.is_ascii_hexdigit()), "{first}");
+    assert_eq!(text.lines().nth(1), Some("#!/bin/bash"), "the script follows its header line");
 }
 
 fn sh(fx: &Fixture, args: &[&str]) -> String {
@@ -74,9 +82,6 @@ fn sh_list(fx: &Fixture) -> BTreeMap<String, (String, String, String)> {
 
 #[test]
 fn list_agrees_with_worktree_sh_on_merged_and_dirty() {
-    if oracle().is_none() {
-        return;
-    }
     let fx = Fixture::new();
     let made = build(&fx);
     let theirs = sh_list(&fx);
@@ -94,9 +99,6 @@ fn list_agrees_with_worktree_sh_on_merged_and_dirty() {
 
 #[test]
 fn clean_removes_the_same_worktrees_as_worktree_sh() {
-    if oracle().is_none() {
-        return;
-    }
     let fx = Fixture::new();
     let made = build(&fx);
     let theirs: Vec<String> = sh(&fx, &["clean", "--base", "main", "--dry-run"])
@@ -134,9 +136,6 @@ fn clean_removes_the_same_worktrees_as_worktree_sh() {
 
 #[test]
 fn add_starts_from_the_same_commit_on_a_new_branch_but_locks_it() {
-    if oracle().is_none() {
-        return;
-    }
     let fx = Fixture::new();
     sh(&fx, &["add", "theirs", "--base", "main"]);
     let theirs = fx.root.join("sh-wt/theirs").canonicalize().unwrap();

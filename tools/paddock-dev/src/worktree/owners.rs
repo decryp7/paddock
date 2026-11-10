@@ -100,6 +100,15 @@ impl OwnerMap {
             .any(|(k, t)| same_path(k, path) && now.saturating_sub(*t) < PENDING_TTL)
     }
 
+    /// Every live reservation.
+    pub fn pending_paths(&self, now: u64) -> Vec<String> {
+        self.pending
+            .iter()
+            .filter(|(_, t)| now.saturating_sub(**t) < PENDING_TTL)
+            .map(|(k, _)| k.clone())
+            .collect()
+    }
+
     /// Reserves `path` for an `add` in progress; `false` when another reservation is alive.
     pub fn reserve(&mut self, path: &str, now: u64) -> bool {
         if self.is_pending(path, now) {

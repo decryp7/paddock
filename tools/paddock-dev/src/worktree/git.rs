@@ -4,7 +4,9 @@ use paddock_proc::{Limits, command, run_bounded};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-const TIMEOUT: Duration = Duration::from_secs(120);
+/// The longest one git call may run.
+pub const GIT_TIMEOUT_SECS: u64 = 120;
+const TIMEOUT: Duration = Duration::from_secs(GIT_TIMEOUT_SECS);
 
 /// A git command that failed, with the words that explain it.
 #[derive(Debug)]

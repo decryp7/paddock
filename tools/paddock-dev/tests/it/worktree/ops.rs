@@ -743,3 +743,69 @@ fn drop_says_so_when_the_lock_could_not_be_put_back() {
         "nothing was removed, the entry stays"
     );
 }
+
+#[test]
+fn two_adds_with_different_roots_cannot_nest_through_a_reservation() {
+    // Add A is inside its slow git call (its path is only reserved, nothing on disk yet); add B names A's folder as its root.
+    use std::time::{Duration, Instant};
+    let fx = Fixture::new();
+    let path_env = fx.fake_git("nest", r#"case "$*" in *"worktree add"*) sleep 3;; esac"#);
+    let slow = fx
+        .cmd(&fx.primary, &["worktree", "add", "a", "--base", "origin/main", "--owner", "a:b"])
+        .env("PATH", path_env)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let started = Instant::now();
+    while fx.owners()["pending"].as_object().is_none_or(|m| m.is_empty()) {
+        assert!(started.elapsed() < Duration::from_secs(10), "the add never reserved its path");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let inside = fx.dev(&[
+        "worktree",
+        "add",
+        "b",
+        "--base",
+        "origin/main",
+        "--owner",
+        "a:b",
+        "--root",
+        p(&fx.path("a")),
+    ]);
+    assert_eq!(inside.code, 4, "{}", inside.err);
+    assert!(
+        inside.err.contains("inside") && inside.err.contains("another `add`"),
+        "{}",
+        inside.err
+    );
+    // And the other way round: a root that would put a new worktree around the reserved one.
+    let around = fx.dev(&[
+        "worktree",
+        "add",
+        "wt",
+        "--base",
+        "origin/main",
+        "--owner",
+        "a:b",
+        "--root",
+        p(&fx.root),
+    ]);
+    assert_eq!(around.code, 4, "{}", around.err);
+    assert!(around.err.contains("around"), "{}", around.err);
+    assert!(slow.wait_with_output().unwrap().status.success());
+    assert!(fx.path("a").exists() && !fx.path("a").join("b").exists());
+    // Once made, the same nesting is refused against the real worktree.
+    let after = fx.dev(&[
+        "worktree",
+        "add",
+        "b",
+        "--base",
+        "origin/main",
+        "--owner",
+        "a:b",
+        "--root",
+        p(&fx.path("a")),
+    ]);
+    assert_eq!(after.code, 4, "{}", after.err);
+}
