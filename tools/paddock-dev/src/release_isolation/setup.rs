@@ -64,6 +64,40 @@ pub fn now_ns() -> i128 {
         .unwrap_or(0)
 }
 
+/// A path on overlayfs (Linux, statfs magic `0x794c7630`): the folder of a container job lives in the writable layer.
+#[cfg(target_os = "linux")]
+#[allow(unsafe_code, clippy::unnecessary_cast)] // f_type is i64 or u32 by target; one statfs(2) call on a path this process passes in
+pub fn on_overlayfs(path: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    const OVERLAYFS_SUPER_MAGIC: i64 = 0x794c_7630;
+    let Ok(c) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    // SAFETY: plain data written by the call; `c` is a valid C string.
+    let mut st: libc::statfs = unsafe { std::mem::zeroed() };
+    // SAFETY: `c` is NUL-terminated and `st` is a valid out pointer.
+    unsafe { libc::statfs(c.as_ptr(), &mut st) == 0 && st.f_type as i64 == OVERLAYFS_SUPER_MAGIC }
+}
+
+/// Not Linux: no overlayfs.
+#[cfg(not(target_os = "linux"))]
+pub fn on_overlayfs(_path: &Path) -> bool {
+    false
+}
+
+/// The job's start: the birth time of the job folder. In a container that folder may be a layer created before the job began
+/// or have been born in the image, so on overlayfs the older of it and the birth time of `/` is taken. A birth time that is
+/// missing is check broken (never a fall-back to ctime).
+pub fn job_start(root: &Path, overlay: bool, birth: &dyn Fn(&Path) -> Result<i128, String>) -> Result<i128, String> {
+    let broken = |p: &Path, e: String| format!("check broken: the job's start cannot be read from {}: {e}", p.display());
+    let mut start = birth(root).map_err(|e| broken(root, e))?;
+    if overlay {
+        let top = Path::new("/");
+        start = start.min(birth(top).map_err(|e| broken(top, e))?);
+    }
+    Ok(start)
+}
+
 /// Makes the job's folders under `temp` and starts the ledger at `ledger_path`.
 ///
 /// The job's start is the birth time of `temp`, which the runner made when the job began (a file system without birth times
@@ -79,9 +113,9 @@ pub fn setup(temp: &Path, ledger_path: &Path, dev_tool: Option<&Path>) -> Result
     if let Some(dir) = ledger_path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("the ledger folder {} cannot be made: {e}", dir.display()))?;
     }
-    let started = identity_of(&job_root)
-        .map_err(|e| format!("check broken: the job's start cannot be read from {}: {e}", job_root.display()))?
-        .birth_ns;
+    let started = job_start(&job_root, on_overlayfs(&job_root), &|p| {
+        identity_of(p).map(|i| i.birth_ns).map_err(|e| e.to_string())
+    })?;
     ledger::create(ledger_path, &simplified(&job_root), started)?;
     let mut folders: Vec<(Kind, PathBuf)> = Vec::new();
     for kind in MADE {
@@ -154,6 +188,21 @@ mod tests {
         assert!(tauri.starts_with(&made.folders[1].1), "inside the build folder");
         assert!(made.env.iter().any(|(k, v)| k == "RUSTC_WRAPPER" && v.is_empty()));
         assert!(setup(temp.path(), &ledger, None).is_err(), "a second setup is refused");
+    }
+
+    #[test]
+    fn the_job_start_is_the_older_birth_on_overlayfs_and_a_missing_birth_is_broken() {
+        let birth = |p: &Path| -> Result<i128, String> { Ok(if p == Path::new("/") { 10 } else { 50 }) };
+        assert_eq!(job_start(Path::new("/job"), false, &birth), Ok(50));
+        assert_eq!(job_start(Path::new("/job"), true, &birth), Ok(10));
+        let none = |_: &Path| -> Result<i128, String> { Err("no birth time".into()) };
+        assert!(job_start(Path::new("/job"), false, &none).unwrap_err().starts_with("check broken"));
+        let root_missing = |p: &Path| -> Result<i128, String> { if p == Path::new("/") { Err("none".into()) } else { Ok(5) } };
+        assert!(
+            job_start(Path::new("/job"), true, &root_missing)
+                .unwrap_err()
+                .starts_with("check broken")
+        );
     }
 
     #[test]

@@ -145,7 +145,11 @@ fn a_missing_git_is_check_broken() {
     let (_d, mut f) = job();
     f.plant(Leak::GitMissing);
     let v = f.verify();
-    assert!(v.findings.iter().any(|x| x.probe == super::verify::Probe::Git && x.is_broken()), "{}", lines(&v));
+    assert!(
+        v.findings.iter().any(|x| x.probe == super::verify::Probe::Git && x.is_broken()),
+        "{}",
+        lines(&v)
+    );
 }
 
 #[cfg(unix)]

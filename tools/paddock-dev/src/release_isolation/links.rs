@@ -13,23 +13,11 @@ use std::path::{Path, PathBuf};
 
 const LIST_LIMIT: usize = 20;
 
+/// A symlink or a junction. `FileType::is_symlink` already covers junctions on Windows: std's Windows implementation reports it
+/// for every reparse point whose tag has the name-surrogate bit (`0x20000000`), which `IO_REPARSE_TAG_MOUNT_POINT`
+/// (`0xA0000003`) has (`library/std/src/sys/fs/windows.rs`, `FileType::new`).
 fn is_link(e: &DirEntry) -> bool {
-    let Ok(t) = e.file_type() else { return false };
-    if t.is_symlink() {
-        return true;
-    }
-    #[cfg(windows)]
-    {
-        // A junction is a directory with a reparse point.
-        use std::os::windows::fs::MetadataExt;
-        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-        return e
-            .metadata()
-            .map(|m| m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
-            .unwrap_or(false);
-    }
-    #[cfg(not(windows))]
-    false
+    e.file_type().is_ok_and(|t| t.is_symlink())
 }
 
 /// What a walk found.

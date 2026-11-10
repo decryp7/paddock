@@ -6,7 +6,9 @@
 //!
 //! - **device and inode** for equality (ADR 0085 §5 item 2 and its Rust-tool amendment): a replaced folder is another object;
 //! - **birth time** (`Metadata::created()`: `statx` btime on Linux, the creation date on APFS, `ftCreationTime` on Windows) as
-//!   a floor against the *job's* start. A birth time never changes for an object and cannot be set from user space on Unix.
+//!   a floor against the *job's* start. A birth time does not change by itself for an object, and it is not changed by writing into it. It *can* be set on purpose
+//!   (macOS `setattrlist` with `ATTR_CMN_CRTIME`, APFS mtime back-dating, Windows `SetFileTime`), so it guards against
+//!   mistakes (a kept folder adopted by accident), not against an attacker who controls the runner user.
 //!   A file system that cannot report it makes the check *broken*, never a pass.
 //!
 //! Windows: the volume serial number (64-bit) and the 128-bit file id of `GetFileInformationByHandleEx(FileIdInfo)`

@@ -89,6 +89,8 @@ pub enum Leak {
     LinkNodeModules,
     /// `<target>/release` is a link to a kept folder (Unix).
     LinkTargetRelease,
+    /// `<target>/release` is a junction to a kept folder (Windows, made with `mklink /J`).
+    LinkJunction,
     /// A tracked `.cargo/config.toml` edited after checkout.
     ConfigTrackedModified,
     /// The clone is not at `GITHUB_SHA`.
@@ -143,6 +145,9 @@ impl Leak {
             CloneNotAtTag,
             AllowUnpinnedInCiReleaseMode,
         ];
+        if cfg!(windows) {
+            v.push(LinkJunction);
+        }
         if cfg!(unix) {
             v.extend([AngularLink, LinkRegistrySrc, LinkNodeModules, LinkTargetRelease, GitMissing]);
         }
@@ -156,7 +161,7 @@ impl Leak {
             LedgerMissingKind | LedgerSharedMode => Probe::Ledger,
             FolderReplaced | KeptFolder | OutsideJobRoot => Probe::Identity,
             DevToolWrongName | DevToolOff | FolderKindRun => Probe::Ledger,
-            LinkRegistrySrc | LinkNodeModules | LinkTargetRelease => Probe::Links,
+            LinkRegistrySrc | LinkNodeModules | LinkTargetRelease | LinkJunction => Probe::Links,
             OtherRegistryIndex | GitCheckoutsInCargoHome => Probe::Crates,
             GitMissing => Probe::Git,
             CargoHomeElsewhere | SccacheDirShared => Probe::Pointers,
@@ -207,7 +212,7 @@ impl Leak {
             DevToolWrongName => "is not named",
             DevToolOff => "only run is allowed",
             FolderKindRun => "only job is allowed",
-            LinkRegistrySrc | LinkNodeModules | LinkTargetRelease => "lead outside the job",
+            LinkRegistrySrc | LinkNodeModules | LinkTargetRelease | LinkJunction => "lead outside the job",
             ConfigTrackedModified => "differs from the commit",
             CloneNotAtTag => "is not GITHUB_SHA",
             AllowUnpinnedInCiReleaseMode => "refused on a tag run",
@@ -707,6 +712,18 @@ impl Fixture {
                         _ => self.target.join("release"),
                     };
                     std::os::unix::fs::symlink(&kept, link).expect("link");
+                }
+            }
+            Leak::LinkJunction => {
+                #[cfg(windows)]
+                {
+                    let kept = self.root.join("kept");
+                    fs::create_dir_all(&kept).expect("kept folder");
+                    let link = self.target.join("release");
+                    let mut cmd = command("cmd");
+                    cmd.args(["/c", "mklink", "/J"]).arg(&link).arg(&kept);
+                    let out = run_bounded(cmd, Limits::new(Duration::from_secs(30))).expect("cmd starts");
+                    assert!(out.success(), "mklink /J: {}{}", out.stdout_text(), out.stderr_text());
                 }
             }
             Leak::ConfigTrackedModified => {
