@@ -25,8 +25,7 @@ use windows_sys::Wdk::Storage::FileSystem::{
 };
 use windows_sys::Win32::Foundation::{
     CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE, LocalFree,
-    RtlNtStatusToDosError, STATUS_FILE_IS_A_DIRECTORY, STATUS_INVALID_PARAMETER,
-    STATUS_NOT_A_DIRECTORY, UNICODE_STRING,
+    RtlNtStatusToDosError, STATUS_FILE_IS_A_DIRECTORY, STATUS_NOT_A_DIRECTORY, UNICODE_STRING,
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, GetSecurityInfo,
@@ -442,10 +441,10 @@ impl Dir {
     /// Renames the open `file` (`from` is its name) to `to` inside this folder, replacing a file already there, relative to this
     /// folder's handle.
     pub(super) fn rename(&self, file: &File, _from: &OsStr, to: &OsStr) -> io::Result<()> {
-        // `FileRenameInformationEx` (POSIX semantics) needs Windows 10 1809 or later; an older system answers
-        // STATUS_INVALID_PARAMETER and the replace is retried with the plain class and `ReplaceIfExists`.
+        // `FileRenameInformationEx` (POSIX semantics) needs Windows 10 version 1709 or later; an older system (or a
+        // file system without the class) answers an "unknown class" status (`rename_falls_back`) and the replace is retried with the plain class and `ReplaceIfExists`.
         let mut rc = self.rename_class(file, to, true);
-        if rc == STATUS_INVALID_PARAMETER {
+        if super::acl::rename_falls_back(rc) {
             rc = self.rename_class(file, to, false);
         }
         if rc < 0 {

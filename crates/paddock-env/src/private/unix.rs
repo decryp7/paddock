@@ -277,6 +277,8 @@ fn acl_check(fd: &OwnedFd, scope: AclScope, me: u32) -> Result<(), Refusal> {
     const ACL_FIRST_ENTRY: libc::c_int = 0;
     const ACL_NEXT_ENTRY: libc::c_int = -1;
     const ACL_EXTENDED_ALLOW: libc::c_uint = 1;
+    const ACL_ENTRY_FILE_INHERIT: libc::c_uint = 1 << 5;
+    const ACL_ENTRY_DIRECTORY_INHERIT: libc::c_uint = 1 << 6;
     const ACL_ENTRY_ONLY_INHERIT: libc::c_uint = 1 << 8;
     // WRITE_DATA, DELETE, APPEND_DATA, DELETE_CHILD, WRITE_ATTRIBUTES, WRITE_EXTATTRIBUTES, WRITE_SECURITY, CHANGE_OWNER.
     const WRITE_RIGHTS: [libc::c_uint; 8] = [
@@ -313,15 +315,25 @@ fn acl_check(fd: &OwnedFd, scope: AclScope, me: u32) -> Result<(), Refusal> {
         }
         let (mut flags, mut perms): (Ptr, Ptr) = (std::ptr::null_mut(), std::ptr::null_mut());
         // SAFETY: `entry` is live; the out pointers are valid.
-        let only_inherit = unsafe { acl_get_flagset_np(entry, &mut flags) } == 0
-            && unsafe { acl_get_flag_np(flags, ACL_ENTRY_ONLY_INHERIT) } == 1;
+        let has_flags = unsafe { acl_get_flagset_np(entry, &mut flags) } == 0;
+        let flag = |f: libc::c_uint| has_flags && unsafe { acl_get_flag_np(flags, f) } == 1;
+        let only_inherit = flag(ACL_ENTRY_ONLY_INHERIT);
+        // What a new file or folder made here would inherit: it counts with every right, whatever the scope (a read entry
+        // that new files inherit makes every file written here readable by that principal).
+        let inherited = flag(ACL_ENTRY_FILE_INHERIT) || flag(ACL_ENTRY_DIRECTORY_INHERIT);
         // SAFETY: as above.
-        if only_inherit || unsafe { acl_get_permset(entry, &mut perms) } != 0 {
+        if unsafe { acl_get_permset(entry, &mut perms) } != 0 {
             continue;
         }
-        let rights = WRITE_RIGHTS.iter().chain(match scope {
-            AclScope::Folder => [].iter(),
-            AclScope::File => READ_RIGHTS.iter(),
+        // An entry for children with no inherit flag applies to nothing made here, and to the folder itself not at all.
+        if only_inherit && !inherited {
+            continue;
+        }
+        let every_right = matches!(scope, AclScope::File) || inherited;
+        let rights = WRITE_RIGHTS.iter().chain(if every_right {
+            READ_RIGHTS.iter()
+        } else {
+            [].iter()
         });
         // SAFETY: `perms` is the entry's live permission set.
         if !rights
@@ -348,7 +360,11 @@ fn acl_check(fd: &OwnedFd, scope: AclScope, me: u32) -> Result<(), Refusal> {
                 (false, _) => "an unknown principal".to_owned(),
             }
         };
-        found = Some(who);
+        found = Some(if inherited && matches!(scope, AclScope::Folder) {
+            format!("{who} through an entry that new files and folders inherit")
+        } else {
+            who
+        });
         break;
     }
     // SAFETY: `acl` is freed once.

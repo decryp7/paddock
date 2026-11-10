@@ -458,12 +458,26 @@ mod common_tests {
         let read_only = new("read-only");
         chmod("everyone allow list,search,readattr", &read_only);
         PrivateDir::open(&read_only, Links::Refuse).unwrap();
+        // Review P1-2: an entry that only applies to children is what every new file and folder inherits, so it counts.
         let inherit_only = new("inherit-only");
         chmod(
             "everyone allow add_file,delete_child,file_inherit,directory_inherit,only_inherit",
             &inherit_only,
         );
-        PrivateDir::open(&inherit_only, Links::Refuse).unwrap();
+        let why = refusal(PrivateDir::open(&inherit_only, Links::Refuse).unwrap_err());
+        assert!(matches!(&why, Refusal::OpenToOthersAcl { .. }), "{why:?}");
+        // An entry for children with no inherit flag at all applies to nothing that is made here.
+        let no_flag = new("only-inherit-no-flag");
+        chmod("everyone allow add_file,only_inherit", &no_flag);
+        PrivateDir::open(&no_flag, Links::Refuse).unwrap();
+        // Another real account, never one made for the test.
+        let other = new("other-user");
+        chmod("user:nobody allow add_file", &other);
+        let why = refusal(PrivateDir::open(&other, Links::Refuse).unwrap_err());
+        assert!(
+            matches!(&why, Refusal::OpenToOthersAcl { who } if who.starts_with("user ")),
+            "{why:?}"
+        );
         let me = std::env::var("USER").unwrap_or_default();
         let own = new("own");
         chmod(&format!("user:{me} allow add_file,delete_child"), &own);
@@ -481,6 +495,43 @@ mod common_tests {
             refusal(PrivateDir::open(&deleter, Links::Refuse).unwrap_err()),
             Refusal::OpenToOthersAcl { .. }
         ));
+    }
+
+    /// Review P1-2, the reviewer's probe: a folder whose ACL gives `everyone` a read entry that new files inherit would make every
+    /// file written there world-readable. It is refused before anything is written, and the advice names the entry.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_macos_folder_whose_new_files_would_inherit_a_read_entry_is_refused_before_a_write() {
+        let t = temp();
+        for entry in [
+            "everyone allow read,file_inherit,only_inherit",
+            "everyone allow read,file_inherit",
+            "everyone allow list,directory_inherit",
+        ] {
+            let p = t.path().join(entry.replace([' ', ','], "-"));
+            std::fs::create_dir(&p).unwrap();
+            let out = std::process::Command::new("/bin/chmod")
+                .args(["+a", entry, p.to_str().unwrap()])
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{entry}");
+            for result in [
+                PrivateDir::open(&p, Links::Refuse),
+                PrivateDir::create_all(&p),
+            ] {
+                let e = result.unwrap_err();
+                let text = e.to_string();
+                assert!(
+                    matches!(refusal(e), Refusal::OpenToOthersAcl { .. }),
+                    "{entry}"
+                );
+                assert!(
+                    text.contains("inherit") && text.contains("chmod -a"),
+                    "{entry}: {text}"
+                );
+            }
+            assert_eq!(std::fs::read_dir(&p).unwrap().count(), 0, "nothing written");
+        }
     }
 
     #[test]

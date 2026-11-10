@@ -88,6 +88,17 @@ const FOLDER_WRITE: u32 = ADD_FILE
 /// The rights on a parent that let someone rename or replace entries in it.
 const PARENT_WRITE: u32 = DELETE_CHILD | WRITE_DAC | WRITE_OWNER | GENERIC_ALL | GENERIC_WRITE;
 
+/// Whether an NT status from `FileRenameInformationEx` means "this system does not know that class", so the replace is
+/// retried with the plain `FileRenameInformation` class: `STATUS_INVALID_PARAMETER` (0xC000000D), `STATUS_INVALID_INFO_CLASS`
+/// (0xC0000003), `STATUS_NOT_SUPPORTED` (0xC00000BB) and `STATUS_INVALID_DEVICE_REQUEST` (0xC0000010, a file system that does
+/// not implement it). Any other failure (a sharing violation, access denied) is the real answer and is not retried.
+pub(super) fn rename_falls_back(status: i32) -> bool {
+    matches!(
+        status as u32,
+        0xC000_000D | 0xC000_0003 | 0xC000_00BB | 0xC000_0010
+    )
+}
+
 fn owner_check(owner: &Who) -> Result<(), Refusal> {
     match owner {
         Who::Me => Ok(()),
@@ -395,6 +406,17 @@ mod tests {
             ),
             Ok(())
         );
+    }
+
+    #[test]
+    fn the_rename_falls_back_only_on_an_unknown_class() {
+        for status in [0xC000_000D_u32, 0xC000_0003, 0xC000_00BB, 0xC000_0010] {
+            assert!(rename_falls_back(status as i32), "{status:#x}");
+        }
+        // STATUS_SHARING_VIOLATION, STATUS_ACCESS_DENIED, STATUS_OBJECT_NAME_NOT_FOUND, success.
+        for status in [0xC000_0043_u32, 0xC000_0022, 0xC000_0034, 0] {
+            assert!(!rename_falls_back(status as i32), "{status:#x}");
+        }
     }
 
     #[test]

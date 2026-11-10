@@ -25,6 +25,10 @@ Conventional Commits; one semver tag for the whole repo.
   reparse point is `Refusal::ReparsePoint`; the macOS ACL check refuses only write-type entries for others on a folder (any
   right on a file) and names the principal; a Windows replace works while a reader holds the file (`FILE_SHARE_DELETE`) and
   falls back to `FileRenameInformation` on a system without the Ex class.
+- Second review round: on macOS a folder ACL entry for another principal that new files or folders inherit (`file_inherit` or
+  `directory_inherit`, with or without `only_inherit`) is refused with every right, because it would make each file written
+  there readable; the refusal names the inherited entry and the advice says how to remove it. The Windows rename also falls
+  back on `STATUS_INVALID_INFO_CLASS`, `STATUS_NOT_SUPPORTED` and `STATUS_INVALID_DEVICE_REQUEST`.
 
 ### Pitwall: no test double or test switch in the shipped build (ADR 0073, rule 73, WP-P)
 - Removes P1 to P6 of ADR 0073's Pitwall survey; the register and the shared crates follow.

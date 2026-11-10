@@ -109,7 +109,7 @@ impl fmt::Display for Refusal {
                 write!(f, "it is owned by {who}, not by this account")
             }
             Refusal::OpenToOthersAcl { who } => {
-                write!(f, "its access list lets {who} change it")
+                write!(f, "its access list lets {who} in")
             }
             Refusal::Parent(inner) => write!(f, "its parent folder cannot be trusted: {inner}"),
             other => f.write_str(other.reason()),

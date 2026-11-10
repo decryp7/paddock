@@ -48,7 +48,8 @@ pub(super) fn fix_it(why: &Refusal) -> &'static str {
         Refusal::OtherOwner { .. } | Refusal::OtherOwnerAccount { .. } => OWNER,
         Refusal::Parent(_) => PARENT,
         Refusal::Unreadable { .. } => UNREADABLE,
-        Refusal::OpenToOthers { .. } | Refusal::OpenToOthersAcl { .. } => OPEN,
+        Refusal::OpenToOthers { .. } => OPEN,
+        Refusal::OpenToOthersAcl { .. } => ACL,
     }
 }
 
@@ -63,6 +64,10 @@ const OWNER: &str = "use a folder your account owns (`chown` it to your account,
 const PARENT: &str = "remove the rights of other users to delete items in the parent folder or to change its permissions (Security tab), or point the app's data-folder variable at a folder under your own profile";
 #[cfg(not(windows))]
 const PARENT: &str = "run `chmod go-w` on the parent folder (or make it sticky and yours), or point the app's data-folder variable at a folder under your own home";
+#[cfg(windows)]
+const ACL: &str = "remove the entries for other users in the folder's Security tab (including entries that new files and folders inherit), or point the app's data-folder variable at a folder of your own";
+#[cfg(not(windows))]
+const ACL: &str = "remove the extra access-list entry (list it with `ls -lde`, remove it with `chmod -a# <index>`; an entry that new files inherit counts), or point the app's data-folder variable at a folder of your own";
 #[cfg(windows)]
 const OPEN: &str = "remove the entries for other users in the folder's Security tab, or point the app's data-folder variable at a folder of your own";
 #[cfg(not(windows))]
@@ -179,7 +184,7 @@ mod tests {
                 "exists",
             ),
             (Refusal::OpenToOthers { mode: 0o777 }, "folder"),
-            (acl, "folder"),
+            (acl, "entr"),
         ];
         for (why, word) in cases {
             let step = fix_it(&why);
