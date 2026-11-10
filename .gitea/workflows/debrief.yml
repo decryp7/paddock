@@ -26,10 +26,10 @@ on:
     branches: [main]
     tags: ["debrief-v*"]
   pull_request:
-  # Nightly on the default branch (main), with the installers; after midnight UTC so it does not compete
-  # with the fuzz (02:17) and bench (03:47) runs for the Linux runners.
+  # Nightly on the default branch (main), with the installers. Scheduled runs start at night local time (UTC+8), outside
+  # the Proxmox backup window (assumed 01:00-04:00 local) and staggered so they do not overlap on the three Linux slots.
   schedule:
-    - cron: "30 0 * * *"
+    - cron: "33 20 * * *" # 04:33 UTC+8
   workflow_dispatch:
     inputs:
       bundles:

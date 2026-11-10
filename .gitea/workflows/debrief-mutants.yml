@@ -6,7 +6,7 @@ name: debrief-mutants
 
 on:
   schedule:
-    - cron: "41 3 * * 0"
+    - cron: "37 16 * * 6" # Sunday 00:37 UTC+8
   pull_request:
     paths: ["apps/debrief/crates/debrief-core/**"]
   workflow_dispatch:

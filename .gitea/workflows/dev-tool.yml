@@ -26,7 +26,7 @@ on:
       - conformance/ci/dev-tool-publish.sh
       - .gitea/workflows/dev-tool.yml
   schedule:
-    - cron: '35 2 * * *'
+    - cron: '43 20 * * *' # 04:43 UTC+8
   workflow_dispatch:
     inputs:
       macos:

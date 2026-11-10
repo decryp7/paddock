@@ -13,7 +13,7 @@ name: service-smoke
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 3 * * *"
+    - cron: "17 15 * * *" # 23:17 UTC+8, macOS VM only
 
 concurrency:
   group: service-smoke

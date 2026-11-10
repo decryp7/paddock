@@ -11,7 +11,7 @@ name: nightly
 
 on:
   schedule:
-    - cron: "43 1 * * *"
+    - cron: "3 14 * * *" # 22:03 UTC+8
   workflow_dispatch:
 
 concurrency:
