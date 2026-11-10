@@ -27,6 +27,48 @@ behaviour, not measured budgets. Rule 16's budgets (start-up, request latency, q
 
 ## Results (newest first)
 
+### 2026-11-11, speech to text: llama.cpp + Qwen3-ASR against whisper.cpp (docs/pitwall-speech-spike, WP-6)
+
+Quoted by the [speech spike note](research/speech-spike-2026-11-11.md) (ADR 0023 Decision 5, plan WP-6).
+
+- **Commit:** none of Pitwall's code runs; repository at `896171397`. Engines: llama.cpp `b11669` (`620d2225c`), the
+  official `llama-b11669-bin-macos-arm64.tar.gz` that `llama-runtimes.json` pins (SHA-256 checked); whisper.cpp
+  `v1.9.5` (`d1be6fde1`) built from source (the release has no macOS CLI asset).
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2 (the shared host; other agents were building).
+- **Load:** 1-minute load 7–42 at the start of the runs (printed per run in the note's table). An indication only: no run
+  had the machine to itself.
+- **Build:** llama.cpp release binary (Metal); whisper.cpp `cmake -DCMAKE_BUILD_TYPE=Release -DGGML_METAL=ON
+  -DWHISPER_SDL2=OFF`, `cmake --build -j 2 --target whisper-cli whisper-server`. Models: `ggml-org/Qwen3-ASR-0.6B-GGUF`
+  Q8_0 + its Q8_0 mmproj; `ggerganov/whisper.cpp` `ggml-{tiny,base,small,small-q8_0,large-v3-turbo-q5_0}.bin`, all
+  SHA-256 checked against Hugging Face's LFS ids.
+- **Corpus:** synthetic: 9 clips made with macOS `say -r 150` (voices Daniel, Samantha, Anna, Thomas), converted with
+  `afconvert -f WAVE -d LEI16@16000 -c 1`; 4.7–38.2 s, English, German, French, two with pink noise mixed in by ffmpeg
+  (`anoisesrc=color=pink:amplitude=0.06`), one 300 s concatenation. Texts invented; listed in the note.
+- **Command:** the note's harness, `python3 -I bench.py <run> llama|whisper <port> <engine args>`; llama-server
+  `--temp 0 -c 8192 -np 1 --no-webui -m <model> --mmproj <mmproj>` (`-c 4096`/`6144` and `--device none -t 4 -tb 4` in
+  the variants), request `input_audio` with `cache_prompt: false`; whisper-server `-m <model> -l auto -t 4` (`-ng` for
+  CPU), `/inference` with `temperature=0`.
+- **Runs:** 3 requests per clip on a loaded server, median reported; the 300 s clip once. Cold start = process start to
+  `/health` 200, 3 starts back to back with a warm file cache.
+- **Numbers** (Metal unless marked CPU; WER on synthetic speech, small sample):
+
+  | Measure | Qwen3-ASR 0.6B Q8 | whisper base | whisper small | Budget | Verdict |
+  |---|---|---|---|---|---|
+  | Latency, 24.7 s clip | 0.78 s (CPU 4 threads 2.51 s) | 0.39 s (CPU 0.73 s) | 0.48 s (CPU 1.83 s) | none | all well under 1 s on Metal |
+  | Real-time factor, 4.7–38 s clips | 0.028–0.047 (CPU 0.080–0.102) | 0.016–0.033 (CPU 0.030–0.089) | 0.019–0.052 (CPU 0.068–0.424) | none | - |
+  | 300 s clip | 9.1 s, RTF 0.030 (CPU 74.7 s, RTF 0.25) | - | 4.45 s, RTF 0.015 | none | - |
+  | WER, 7 English clips (mean) | 0.3% | 1.2% | 0.3% | none | Qwen = small > base |
+  | WER, German / French clip | 0% / 0% | 10.5% / 12.5% | 0% / 0% | none | base too weak outside English |
+  | WER, 300 s mixed English + German | 0.7% (`max_tokens` 2048) | - | 11.8% (`-l auto` dropped every German passage) | none | - |
+  | Physical footprint | 1,105 MB (`-c 4096`), 1,247 MB (`-c 6144`), 1,548 MB (`-c 8192`); CPU 1,931–2,232 MB | 405 MB | 802 MB (q8_0: 551 MB) | none | - |
+  | Start to ready (warm cache) | 0.53–0.56 s | 0.12–0.17 s | 0.22–0.23 s | none | - |
+
+- **Memory measure:** physical footprint (`footprint -p <pid>`) of the server after the run.
+- **Notes:** first starts on this loaded host varied 1.4–11.6 s (Qwen) and 20–33 s (whisper.cpp's first Metal library
+  compile); not repeatable, not a cold-boot figure. Tiny and large-v3-turbo results and the per-clip rows are in the
+  note. Not measured: Windows (any backend), Linux, Intel or AMD CPUs, a real voice or real microphone. Raw output in
+  `/Volumes/d7sst7/dev-targets/scratch/pitwall-speech-spike/out/` (scratch, not kept).
+
 ### 2026-11-09, first starts of a freshly copied `pitwall-server` and the child-engine tests (fix/pitwall-e2e-engine-health)
 
 Quoted by [ADR 0071](../../../docs/adr/0071-ready-or-exit-never-a-fixed-start-budget.md). Recorded from the raw output
