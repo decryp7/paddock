@@ -280,14 +280,16 @@ pub(crate) fn presence_with(
 /// Asks `id` to stop, waits up to `grace` for it, then ends it. For processes that are not our children (the caller
 /// checked that the process belongs to it); a child of ours should go through `Supervised::terminate`, which also reaps.
 pub fn terminate(id: ProcessId, grace: Duration) -> Terminated {
-    terminate_by(id, grace, &ProcessId::presence)
+    terminate_by(id, grace, &ProcessId::presence, &ask)
 }
 
-/// [`terminate`] over the first look at the process (tests give one that cannot read the process table).
+/// [`terminate`] over the look at the process, first and during the grace period, and the polite request (tests give a look
+/// that cannot read the process table).
 pub(crate) fn terminate_by(
     id: ProcessId,
     grace: Duration,
     look: &dyn Fn(ProcessId) -> Presence,
+    ask: &dyn Fn(ProcessId) -> bool,
 ) -> Terminated {
     match look(id) {
         Presence::Gone => return Terminated::Gone,
@@ -297,8 +299,11 @@ pub(crate) fn terminate_by(
     if ask(id) {
         let end_at = Instant::now() + grace;
         while Instant::now() < end_at {
-            if !id.is_alive() {
-                return Terminated::Gracefully;
+            match look(id) {
+                Presence::Gone => return Terminated::Gracefully,
+                // A look that failed is not a stop that was seen: nothing more is done to the process.
+                Presence::Unknown => return Terminated::Unknown,
+                Presence::Running => {}
             }
             std::thread::sleep(Duration::from_millis(25));
         }
@@ -558,12 +563,48 @@ mod tests {
     fn an_unreadable_process_table_is_not_a_process_that_was_gone() {
         let id = ProcessId::new(4242, StartTime::from_micros(1));
         assert_eq!(
-            terminate_by(id, Duration::ZERO, &|_| Presence::Unknown),
+            terminate_by(id, Duration::ZERO, &|_| Presence::Unknown, &|_| false),
             Terminated::Unknown
         );
         assert_eq!(
-            terminate_by(id, Duration::ZERO, &|_| Presence::Gone),
+            terminate_by(id, Duration::ZERO, &|_| Presence::Gone, &|_| false),
             Terminated::Gone
+        );
+    }
+
+    #[test]
+    fn a_table_that_becomes_unreadable_during_the_grace_period_is_not_a_graceful_stop() {
+        let id = ProcessId::new(4242, StartTime::from_micros(1));
+        let looks = std::cell::Cell::new(0);
+        let look = |_: ProcessId| {
+            looks.set(looks.get() + 1);
+            if looks.get() == 1 {
+                Presence::Running
+            } else {
+                Presence::Unknown
+            }
+        };
+        assert_eq!(
+            terminate_by(id, Duration::from_secs(5), &look, &|_| true),
+            Terminated::Unknown
+        );
+    }
+
+    #[test]
+    fn a_process_seen_gone_during_the_grace_period_stopped_gracefully() {
+        let id = ProcessId::new(4242, StartTime::from_micros(1));
+        let looks = std::cell::Cell::new(0);
+        let look = |_: ProcessId| {
+            looks.set(looks.get() + 1);
+            if looks.get() == 1 {
+                Presence::Running
+            } else {
+                Presence::Gone
+            }
+        };
+        assert_eq!(
+            terminate_by(id, Duration::from_secs(5), &look, &|_| true),
+            Terminated::Gracefully
         );
     }
 
