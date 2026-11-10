@@ -30,7 +30,7 @@ static WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(&format!(r"conformance:\s*p
 static BARE_WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(r"conformance:\s*pid-kill"));
 static VENDORED: LazyLock<Regex> = LazyLock::new(|| rx(r"^apps/[^/]+/vendor/"));
 static PREFILTER: LazyLock<Regex> =
-    LazyLock::new(|| rx(r"kill|Stop-Process|Terminate(?:Process|JobObject)|ADR 0033 WP-|disallowed_methods"));
+    LazyLock::new(|| rx(r"kill|Stop-Process|Terminate(?:Process|JobObject)|ADR 0033 WP-|disallowed_methods")); // conformance: pid-kill — a pattern that finds these words in source text; nothing here ends a process
 static BLANKET: LazyLock<Regex> = LazyLock::new(|| rx(r"#!\[(?:cfg_attr\([^\]]*?)?allow\([^\]]*\bclippy::disallowed_methods\b"));
 static FOLLOW_UP: LazyLock<Regex> = LazyLock::new(|| rx(r"ADR 0033 (WP-\d+)"));
 static WIN32: LazyLock<[(Regex, &str); 2]> = LazyLock::new(|| {
@@ -44,6 +44,7 @@ static WIN32: LazyLock<[(Regex, &str); 2]> = LazyLock::new(|| {
 static PROGRAMS: LazyLock<[(Regex, bool); 4]> = LazyLock::new(|| {
     [
         (rx(r#""(taskkill)(?:\.exe)?""#), false),
+        // conformance: pid-kill — a pattern that finds `Stop-Process` in source text; this file ends no process
         (rx(r#""[^"\n]*\b(Stop-Process)\b[^"\n]*""#), false),
         (rx(r#""(/(?:usr/)?bin/kill)""#), false),
         (rx(r#"\b(?:command|Command::new)\s*\(\s*"(kill|pkill)""#), true),

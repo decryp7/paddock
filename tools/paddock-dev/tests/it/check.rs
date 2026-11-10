@@ -6,7 +6,7 @@
 //!   findings of C39 and C53). When node is missing: a note on a workstation, a failure in CI on Linux (so a missing oracle cannot
 //!   let the comparison pass unseen), a `::notice::` on the other CI legs (the Linux leg runs it).
 //! - the host: `--only`, `--files`, run records, `not measured`, `check broken`, the report shape and the CLI.
-#![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::check::mask::mask_rust;
 use paddock_dev::check::{RunOptions, registry, run_checks};
 use serde_json::{Value, json};
@@ -37,6 +37,10 @@ fn skip(reason: &str) {
     }
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test spawns node, git or the built binary; it ends them itself"
+)]
 fn has_node() -> bool {
     Command::new("node").arg("--version").output().is_ok_and(|o| o.status.success())
 }
@@ -104,6 +108,10 @@ fn fixture_masks_equal_the_recorded_js_masks() {
     assert!(n >= 14, "{n} cases masked");
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test spawns node, git or the built binary; it ends them itself"
+)]
 /// Runs a node program (an ES module given on the command line) in the repository and returns its standard output.
 fn node(driver: &str, env: &[(&str, String)]) -> String {
     let mut c = Command::new("node");
@@ -172,6 +180,10 @@ fn live_tree_findings_equal_the_js_host() {
 }
 
 #[test]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test spawns node, git or the built binary; it ends them itself"
+)]
 fn live_mask_equals_the_js_mask_on_every_tracked_rust_file() {
     if !has_node() {
         return skip("node is not installed");
@@ -330,6 +342,10 @@ fn the_report_has_the_js_shape_and_the_run_records() {
     assert!(run["probes"].as_u64().unwrap() >= 10);
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test spawns node, git or the built binary; it ends them itself"
+)]
 fn dev(args: &[&str]) -> (i32, String, String) {
     let o = Command::new(env!("CARGO_BIN_EXE_paddock-dev")).args(args).output().unwrap();
     (
