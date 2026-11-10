@@ -229,15 +229,29 @@ describe('PlaygroundStore', () => {
   });
 
   it('stops a running answer: keeps the partial text, marks it stopped and sends no more', async () => {
-    const { store } = setup(new MockBackend({ streamDelayMs: 2 }));
+    const inner = new MockBackend({ streamDelayMs: 2 });
+    const emitters: ((event: PlaygroundEvent) => void)[] = [];
+    let unsubscribed = 0;
+    const backend = Object.create(inner) as PitwallBackend;
+    backend.chat = (request, onEvent) => {
+      emitters.push(onEvent);
+      const off = inner.chat(request, onEvent);
+      return () => {
+        unsubscribed++;
+        off();
+      };
+    };
+    const { store } = setup(backend);
     await store.load();
     store.send('go');
-    await wait(25);
+    // Wait for the first chunk to arrive (the condition), not for a time.
+    await vi.waitFor(() => expect(store.panes()[0].turns[1]!.content.length).toBeGreaterThan(0), { timeout: 10_000 });
     store.stop();
     const text = store.panes()[0].turns[1]!.content;
-    expect(text.length).toBeGreaterThan(0);
     expect(store.panes()[0].turns[1]).toMatchObject({ streaming: false, stopped: true, stats: null });
-    await wait(30);
+    expect(unsubscribed).toBe(store.activePanes().length);
+    // A chunk that is still in flight after Stop is dropped.
+    emitters.forEach((emit) => emit({ kind: 'delta', text: ' late' }));
     expect(store.panes()[0].turns[1]!.content).toBe(text);
     store.stop();
     expect(store.streaming()).toBe(false);
