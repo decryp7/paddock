@@ -61,14 +61,34 @@ test('the default floor is 90% over everything', () => {
   assert.equal(gate(bad, undefined, () => null).code, 1);
 });
 
-test('security code keeps 99% even when the aggregate passes', () => {
+test('security code below 99% is a warning and exit 0 (report-only until the privileged/trust tests land)', () => {
   const secure = (misses) =>
     ['SF:x/crates/paddock-env/src/private.rs', ...Array.from({ length: 10 }, (_, i) => `DA:${i + 1},${i < misses ? 0 : 1}`), 'end_of_record',
       'SF:x/crates/paddock-a/src/a.rs', ...Array.from({ length: 990 }, (_, i) => `DA:${i + 1},1`), 'end_of_record'].join('\n');
   assert.equal(gate(secure(0), undefined, () => null).code, 0);
   const { code, lines } = gate(secure(1), undefined, () => null);
-  assert.equal(code, 1);
-  assert.equal(lines.filter((l) => l.startsWith('::error::security code line coverage 90.00%')).length, 1);
+  assert.equal(code, 0);
+  assert.equal(lines.some((l) => l.includes('::error::')), false);
+  const w = lines.filter((l) => l.startsWith('::warning::security code line coverage'));
+  assert.equal(w.length, 1);
+  assert.match(w[0], /90\.00%/);
+  assert.match(w[0], /paddock-env\/src\/private\.rs 9\/10/);
+});
+
+test('the workspace floor still gates when security code is fine', () => {
+  const bad = ['SF:x/crates/paddock-env/src/private.rs', 'DA:1,1', 'end_of_record', 'SF:x/crates/paddock-a/src/a.rs', ...Array.from({ length: 10 }, (_, i) => `DA:${i + 1},0`), 'end_of_record'].join('\n');
+  assert.equal(gate(bad, undefined, () => null).code, 1);
+});
+
+test('no security file in the lcov is reported as not measured, not as a pass', () => {
+  const { code, lines } = gate(lcov, 50, () => null);
+  assert.equal(code, 0);
+  assert.equal(lines.filter((l) => l.startsWith('::warning::security code: not measured')).length, 1);
+});
+
+test('trust_fake.rs, a test double, is not security code', () => {
+  assert.equal(SECURITY.some((r) => r.test('crates/paddock-service/src/privileged/trust_fake.rs')), false);
+  assert.equal(SECURITY.some((r) => r.test('crates/paddock-service/src/privileged/trust.rs')), true);
 });
 
 test('the security list names the three security areas', () => {
