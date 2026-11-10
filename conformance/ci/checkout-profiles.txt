@@ -61,3 +61,5 @@ mention conformance/test/c24-reviewed-images.test.mjs fixture strings of the C24
 mention docs/images/src/ the diagram generators, run by hand
 mention docs/gates.toml a glob in the register's docs.exclude list; the register is read as text, the review folder itself is not needed
 mention conformance/test/kept-clone.test.mjs fixture strings of this test
+mention tools/paddock-dev/src/merge_check/ doc comment and test strings: docs/images/ is an example trailer path, nothing reads the folder
+mention tools/paddock-dev/tests/it/merge_check.rs test strings: a fixture repository of its own with a docs/images file, not the real folder
