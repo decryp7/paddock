@@ -20,6 +20,11 @@ Conventional Commits; one semver tag for the whole repo.
   open to others is refused and left as it was; nothing is tightened.
 - `Refusal` gains `OpenToOthersAcl { who }`, `OtherOwnerAccount { who }`, `NotAFile` and `Parent(..)`. Nothing adopts the type
   yet (later work packages of ADR 0092 move the copies onto it).
+- Review round: two creators racing to make the same new folder both succeed; `create_all_as` and `open_as` exist only with
+  the `test-support` feature; each `Refusal` has its own fix-it sentence, `PrivateError::reason` names no path, and a Windows
+  reparse point is `Refusal::ReparsePoint`; the macOS ACL check refuses only write-type entries for others on a folder (any
+  right on a file) and names the principal; a Windows replace works while a reader holds the file (`FILE_SHARE_DELETE`) and
+  falls back to `FileRenameInformation` on a system without the Ex class.
 
 ### Pitwall: no test double or test switch in the shipped build (ADR 0073, rule 73, WP-P)
 - Removes P1 to P6 of ADR 0073's Pitwall survey; the register and the shared crates follow.
