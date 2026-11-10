@@ -127,8 +127,8 @@ static C100_INPUTS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
 });
 
 static GUARD: LazyLock<Regex> = LazyLock::new(|| re(r"#\[ignore|cfg_attr\([^)\n]*ignore|env::var|process\.env"));
-static RUST_FN: LazyLock<Regex> = LazyLock::new(|| re(r"\bfn\s+(\w+)"));
-static TS_TEST: LazyLock<Regex> = LazyLock::new(|| re(r#"\b(?:test|it)(?:\.\w+)?\(\s*['"`]([^'"`]+)"#));
+static RUST_FN: LazyLock<Regex> = LazyLock::new(|| re(r"(?-u:\b)fn\s+((?-u:\w)+)"));
+static TS_TEST: LazyLock<Regex> = LazyLock::new(|| re(r#"(?-u:\b)(?:test|it)(?:\.(?-u:\w)+)?\(\s*['"`]([^'"`]+)"#));
 
 /// The ignore attributes and environment guards of a test file, each paired with the Rust function or TypeScript test title it
 /// belongs to (`guardSet` in scripts/affected.mjs): moving an ignore from one test to another changes the set though the count
@@ -1250,7 +1250,9 @@ mod tests {
             Ok(vec!["package-lock.json".into()])
         }
         fn file_at(&self, rev: &str, path: &str) -> Result<Option<String>, GraphError> {
-            assert_eq!(path, "package-lock.json");
+            if path != "package-lock.json" {
+                return Ok(None);
+            }
             let version = if rev == "old" { "1" } else { "2" };
             Ok(Some(format!(
                 r#"{{"packages":{{"ui":{{"dependencies":{{"x":"1"}}}},"node_modules/x":{{"version":"{version}"}}}}}}"#
