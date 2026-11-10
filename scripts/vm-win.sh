@@ -35,6 +35,7 @@ max_load=${PADDOCK_VM_MAX_LOAD:-25}
 ssh_deadline=${PADDOCK_VM_SSH_DEADLINE:-300}
 install_deadline=${PADDOCK_VM_INSTALL_DEADLINE:-7200}
 off_deadline=${PADDOCK_VM_OFF_DEADLINE:-180} # the guest's clean power-off after gui-setup and admin-setup
+cleanup_deadline=${PADDOCK_VM_CLEANUP_DEADLINE:-120} # each vmrun call of admin-setup's cleanup
 step_deadline=${PADDOCK_VM_STEP_DEADLINE:-300} # one PowerShell step in the guest (gui-setup, admin-setup)
 baseline=clean-baseline
 
@@ -59,9 +60,9 @@ vmrun() {
     local pw
     pw=$(security find-generic-password -s paddock-win11-test-vm -a vmrun -w 2>/dev/null) ||
       die "the VM is encrypted but the keychain has no item paddock-win11-test-vm/vmrun (docs/testing/windows-test-vm.md, TPM)"
-    "$lib/vmrun" -T fusion -vp "$pw" "$cmd" "$vmx" "$@"
+    ${vmrun_prefix:-} "$lib/vmrun" -T fusion -vp "$pw" "$cmd" "$vmx" "$@"
   else
-    "$lib/vmrun" -T fusion "$cmd" "$vmx" "$@"
+    ${vmrun_prefix:-} "$lib/vmrun" -T fusion "$cmd" "$vmx" "$@"
   fi
 }
 
@@ -156,6 +157,7 @@ bounded() {
   done
   wait "$p"
 }
+vmrun_exec() { vmrun_prefix="exec" vmrun "$@"; } # for bounded: the subshell becomes vmrun, so a kill reaches it
 ssh_admin_exec() { ssh_prefix="exec" ssh_to paddock-admin "$@"; }
 
 # The refused state before a snapshot: a run-win.mjs VNC password must never end up in a baseline (vmx-edit.mjs strips it after a run).
@@ -179,17 +181,18 @@ install_gui_runner() {
 SETUP_SHUTDOWN='Remove-Item C:\paddock-test\gui-setup.ps1, C:\paddock-test\admin-setup.ps1 -Force -ErrorAction SilentlyContinue; shutdown /s /t 0'
 
 # admin-setup's cleanup: whatever ends it early (a failed step, TERM, INT, HUP, a hang that was killed), the VM ends stopped and reverted to
-# clean-baseline. It is the EXIT trap, set before the lock (scripts/vm-lock.sh: the lock's trap runs it after the release). Not covered:
-# SIGKILL of this script and a lost host; then run `vm-win.sh stop && vm-win.sh revert`.
+# clean-baseline. It is the EXIT trap, set before the lock (scripts/vm-lock.sh runs it FIRST, with the lock still held, then releases the
+# lock). Each vmrun call is bounded (PADDOCK_VM_CLEANUP_DEADLINE). Not covered: SIGKILL of this script and a lost host; then run
+# `vm-win.sh stop && vm-win.sh revert`.
 admin_active=0; admin_ok=0
 admin_cleanup() {
   [ "$admin_active" = 1 ] && [ "$admin_ok" != 1 ] || return 0
   jobs -p | xargs kill 2>/dev/null || true # a background step (bounded, a shutdown request) must not outlive this script
   echo "::error::admin-setup did not finish: stopping the VM and reverting to $baseline ($baseline itself was never changed)" >&2
   if running; then
-    vmrun stop hard >&2 || echo "::error::could not power the VM off. Next step: stop it in Fusion (never leave it running), then scripts/vm-win.sh revert" >&2
+    bounded "$cleanup_deadline" vmrun_exec stop hard >&2 || echo "::error::could not power the VM off. Next step: stop it in Fusion (never leave it running), then scripts/vm-win.sh revert" >&2
   fi
-  vmrun revertToSnapshot "$baseline" >&2 || echo "::error::could not revert to $baseline. Next step: scripts/vm-win.sh revert" >&2
+  bounded "$cleanup_deadline" vmrun_exec revertToSnapshot "$baseline" >&2 || echo "::error::could not revert to $baseline. Next step: scripts/vm-win.sh revert" >&2
 }
 trap admin_cleanup EXIT
 admin_fail() { echo "::error::admin-setup failed at: $1 (read the output above); the cleanup follows" >&2; exit 1; }

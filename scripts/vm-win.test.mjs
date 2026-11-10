@@ -363,6 +363,7 @@ describe('admin-setup and stop: cleanup, hangs, lock', macOnly, () => {
     mkdirSync(join(fusion, 'Contents/Library'), { recursive: true });
     const sh = (file, body) => { writeFileSync(file, `#!/bin/sh\n${body}\n`); chmodSync(file, 0o755); };
     sh(join(fusion, 'Contents/Library/vmrun'), `echo "vmrun $*" >> '${log}'
+if [ -n "$FAKE_VMRUN_HANG" ] && [ "$3" = "$FAKE_VMRUN_HANG" ]; then echo $$ >> '${pids}.vmrun'; exec tail -f /dev/null; fi
 case "$3" in
   list) echo "Total running VMs: 0"; [ -f '${st}/running' ] && echo '${vmx}'; exit 0 ;;
   start) touch '${st}/running' ;;
@@ -378,14 +379,15 @@ exit 0`);
 echo "ssh $last" >> '${log}'
 case "$last" in *shutdown*) [ -n "$FAKE_SSH_NOSHUT" ] || rm -f '${st}/running' ;; esac
 if [ -n "$FAKE_SSH_FAIL" ] && printf %s "$last" | grep -Fq -- "$FAKE_SSH_FAIL"; then echo "fake ssh: boom" >&2; exit 3; fi
-if [ -n "$FAKE_SSH_HANG" ] && printf %s "$last" | grep -Fq -- "$FAKE_SSH_HANG"; then echo $$ >> '${pids}'; exec sleep 600; fi
+if [ -n "$FAKE_SSH_HANG" ] && printf %s "$last" | grep -Fq -- "$FAKE_SSH_HANG"; then echo $$ >> '${pids}'; exec tail -f /dev/null; fi
 exit 0`);
     sh(join(bin, 'scp'), `echo "scp $*" >> '${log}'; exit 0`);
     sh(join(bin, 'security'), 'exit 1');
-    const env = { PADDOCK_WIN_VM_DIR: dir, FUSION_APP: fusion, PATH: `${bin}:${process.env.PATH}`, PADDOCK_VM_MAX_LOAD: '100000', PADDOCK_VM_LEASES: leases, FAKE_SSH_FAIL: '', FAKE_SSH_HANG: '', FAKE_SSH_NOSHUT: '' };
+    const env = { PADDOCK_WIN_VM_DIR: dir, FUSION_APP: fusion, PATH: `${bin}:${process.env.PATH}`, PADDOCK_VM_MAX_LOAD: '100000', PADDOCK_VM_LEASES: leases, FAKE_SSH_FAIL: '', FAKE_SSH_HANG: '', FAKE_SSH_NOSHUT: '', FAKE_VMRUN_HANG: '' };
+    const hungVmrun = () => (existsSync(`${pids}.vmrun`) ? readFileSync(`${pids}.vmrun`, 'utf8').split('\n').filter(Boolean).map(Number) : []);
     const hung = () => (existsSync(pids) ? readFileSync(pids, 'utf8').split('\n').filter(Boolean).map(Number) : []);
     const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
-    return { env, log, st, vmx, hung, alive, running: () => existsSync(join(st, 'running')), snaps: () => readFileSync(join(st, 'snaps'), 'utf8').split('\n').filter(Boolean), calls: () => calls(log), vmrunCalls: () => calls(log).split('\n').filter((l) => l.startsWith('vmrun ')) };
+    return { env, log, st, vmx, hung, hungVmrun, alive, running: () => existsSync(join(st, 'running')), snaps: () => readFileSync(join(st, 'snaps'), 'utf8').split('\n').filter(Boolean), calls: () => calls(log), vmrunCalls: () => calls(log).split('\n').filter((l) => l.startsWith('vmrun ')) };
   };
   const killHung = (t) => t.hung().forEach((p) => { try { process.kill(p, 'SIGKILL'); } catch { /* gone */ } });
   const stopsAndReverts = (t) => {
@@ -447,6 +449,20 @@ exit 0`);
     assert.equal(t.running(), false);
     assert.match(err, /::error::admin-setup did not finish/);
     for (const p of t.hung()) assert.equal(t.alive(p), false, `fake ssh ${p} did not outlive the script`);
+  });
+
+  test('P2: a vmrun stop that hangs in the cleanup is ended at its deadline, with ::error:: and the next step, and the revert still runs', () => {
+    const t = rig('as-cleanup-hang');
+    const r = spawnSync('bash', [join(here, 'vm-win.sh'), 'admin-setup'], { encoding: 'utf8', timeout: 60_000, env: { ...process.env, ...lockEnv, ...t.env, FAKE_SSH_FAIL: '-File C:\\paddock-test\\admin-setup.ps1', FAKE_VMRUN_HANG: 'stop', PADDOCK_VM_CLEANUP_DEADLINE: '2' } }); // conformance: hang-guard — 60 s only stops a regression that never ends
+    const hv = t.hungVmrun();
+    const survivors = hv.filter(t.alive);
+    hv.forEach((p) => { try { process.kill(p, 'SIGKILL'); } catch { /* gone */ } });
+    assert.equal(r.status, 1, `${r.status} ${r.signal} ${r.stderr}`);
+    assert.ok(hv.length > 0, 'the vmrun stop hung');
+    assert.deepEqual(survivors, []);
+    assert.match(r.stderr, /::error::no answer within 2s: vmrun_exec stop hard/);
+    assert.match(r.stderr, /::error::could not power the VM off\. Next step/);
+    assert.match(t.vmrunCalls().at(-1), /revertToSnapshot \S+ clean-baseline$/);
   });
 
   test('P1-3c: admin-setup is refused while another holder has the lock, and never reaches vmrun', async () => {

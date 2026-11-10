@@ -192,6 +192,21 @@ test('P2: an EXIT trap set before the acquire still runs (quotes intact) and the
   assert.equal(bash(stub('after', t.log), t.env).status, 0, 'released');
 });
 
+test('an EXIT trap set before the acquire runs while the lock is still held (cleanup of a VM must not happen unlocked); the lock is released after it', () => {
+  const t = fresh();
+  const seen = join(scratch, `trap-status-${n}`);
+  const script = `trap '"${DEV}" ci slot status --max 1 --root "${t.root}" --json > "${seen}"; echo "$_vm_lock_owner" >> "${seen}.owner"' EXIT; . '${LIB}'; vm_lock_acquire ordered; exit 0`;
+  const r = bash(script, t.env);
+  assert.equal(r.status, 0, r.stderr);
+  const status = JSON.parse(readFileSync(seen, 'utf8'));
+  const owner = readFileSync(`${seen}.owner`, 'utf8').trim();
+  assert.ok(owner, 'the lock had an owner folder when the earlier trap ran');
+  const slot = status.slots.find((x) => x.busy);
+  assert.ok(slot, `a slot was busy inside the earlier trap: ${JSON.stringify(status)}`);
+  assert.ok(JSON.stringify(slot).includes(owner), `busy with this holder's owner folder: ${JSON.stringify(slot)}`);
+  assert.equal(bash(stub('after', t.log), t.env).status, 0, 'released afterwards');
+});
+
 test('P1-4: vm-lock-run.sh holds the lock around a command, passes its exit code, and a second run fails before its command starts', async () => {
   const t = fresh();
   const ran = bash(`'${RUN}' viarun -- bash -c "echo inner >> '${t.log}'; exit 9"`, t.env);
