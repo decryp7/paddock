@@ -100,8 +100,8 @@ impl Worker {
 
     /// Stops what the worker owns that runs native code, within `budget`, before the process ends: every import session is
     /// cancelled, each store's background threads (indexer, catalogue builder) are stopped and joined, the sessions are
-    /// waited for, the plugin processes are stopped together, and the stores are dropped (closing their databases when
-    /// nothing else holds them). Blocking joins run on a helper thread, so the bound holds.
+    /// waited for, the stores are dropped (closing their databases when nothing else holds them), and the plugin processes
+    /// are stopped together. Blocking joins run on a helper thread, so the bound holds.
     ///
     /// **Not stopped (open owners, for the exit phase's ratchet, ADR 0076 amendment WP-X1/X3):** the threads of calls in
     /// flight (`spawn_blocking` work of the peer's handler is not waited for; the peer's close cancels it, but nothing joins
@@ -128,10 +128,12 @@ impl Worker {
                 *lock(doing) = format!("waiting for the import session {id}");
                 let _ = session.wait();
             }
-            *lock(doing) = "stopping the plugin processes".into();
-            plugins.shutdown();
+            // The stores close before the plugins stop: a plugin that hangs is killed after its grace (longer than this
+            // budget), and that wait must not cost the databases their close.
             *lock(doing) = "closing the stores".into();
             drop(stores);
+            *lock(doing) = "stopping the plugin processes".into();
+            plugins.shutdown();
         })
     }
 

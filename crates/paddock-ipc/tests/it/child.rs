@@ -237,3 +237,14 @@ fn two_exits_never_run_the_handlers_together() {
         "a second thread entered `exit` while the first was still in the handlers"
     );
 }
+
+/// The plain lifeline (a child with no peer to close) ends the process itself when stdin closes.
+#[test]
+fn the_plain_lifeline_ends_a_child_without_a_peer_loop() {
+    let child = launch(&spec(&["plain-lifeline"]), Arc::new(NoCalls)).unwrap();
+    child.close_stdin();
+    let status = child
+        .exit_status(GUARD)
+        .expect("the child exited on its own");
+    assert!(status.success(), "{status:?}");
+}

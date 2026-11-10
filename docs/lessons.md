@@ -1783,7 +1783,7 @@ its `DuckStore` clones keep the databases open), the plugin processes' threads, 
 fallback claims the exit atomically (serving, main exiting, lifeline exiting; a late `main` parks), and in `debrief-ipc` ends with
 `end_without_destructors`. The D-E4 gate for instance 5 is not met (see `apps/debrief/docs/performance.md`).
 For WP-X3: `BuiltinPlugins::shutdown` stops plugin processes one after the other, so two hung plugins can overrun the 3 s teardown;
-stopping them in parallel fixes it (not done here).
+stopping them in parallel is done now (`BuiltinPlugins::shutdown` and `WorkerPlugins::shutdown` run together, after the stores close). A child's kill grace must fit the parent's split (0.5 s per plugin by the amendment's §3.1), not the 1.5 s `KILL_GRACE`: a hung plugin still outlasts the 1.25 s budget, ends the worker with `_exit`, and is left to its own kill thread (WP-X3).
 Two flakes seen, not fixed here: `debrief-ipc` `launch::a_locked_child_cannot_write_files_or_start_programs` on Linux (about 3 of 6
 runs on the base tree, 5 of 6 in one container run; the "before the lockdown" note, probably the handshake thread still being
 listed), and the store worker's client-RSS budget tests (`imports_and_queries_within_the_budgets`, `low_memory_mode_...`), which

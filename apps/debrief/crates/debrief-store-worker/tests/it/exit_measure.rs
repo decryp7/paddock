@@ -133,7 +133,6 @@ fn the_worker_ends_cleanly_when_debrief_stops_it() {
 /// (`DEBRIEF_EXIT_HOLD`, feature `exit-hold`) until it is stopped, and writes `stopped` when it is. A worker that returns
 /// without stopping it never writes it (and can crash in DuckDB's static destructors with the thread live).
 #[cfg(debug_assertions)] // the hold is not compiled into a release build
-#[cfg(debug_assertions)] // the hold is not compiled into a release build
 #[test]
 fn the_worker_stops_its_store_threads_before_it_exits() {
     let marker = TempDir::new("exit-hold");

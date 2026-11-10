@@ -4,6 +4,7 @@
 //!   answer of n bytes, `pid` → its pid)
 //! - `protocol <major.minor>`: `echo`, speaking that protocol
 //! - `exit`: exits at once with code 3, without connecting
+//! - `plain-lifeline`: connects, starts the plain `child::lifeline()` (no peer to close) and waits: it exits when stdin closes
 //! - `silent`: never connects
 //! - `wrong-token`: connects with a token of its own; exits 0 when refused
 //! - `stubborn`: `echo` without a lifeline, and keeps running after the connection closes
@@ -173,6 +174,12 @@ fn main() {
             }
         }
         "silent" => park_forever(),
+        "plain-lifeline" => {
+            let b = child::read_bootstrap(std::io::stdin().lock()).unwrap();
+            let _conn = child::connect(&b, ProtocolVersion::UNVERSIONED).unwrap();
+            child::lifeline();
+            park_forever();
+        }
         "wrong-token" => {
             let b = child::read_bootstrap(std::io::stdin().lock()).unwrap();
             let r = Client::connect(
