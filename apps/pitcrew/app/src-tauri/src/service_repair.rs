@@ -7,9 +7,9 @@
 //!   ad-hoc signed build that was registered) and refuses to start the new binary: `job state = spawn failed`, exit 78
 //!   (EX_CONFIG) or "needs LWCR update" in the report, looping (`has LWCR` alone is every healthy job's mark).
 //!   Registering again over the old job does not replace the constraint, so [`run_repair`] removes the job (unregister
-//!   and `launchctl bootout`), waits until launchd has dropped it, and only then registers; it retries a bounded number of times and says every step to the log and to the UI
-//!   ([`RepairTracker`]). Because every ad-hoc build has a new cdhash, [`plan`] also re-registers once after every
-//!   version change instead of waiting for the failure.
+//!   and `launchctl bootout`), waits until launchd has dropped it, and only then registers; it retries a bounded number
+//!   of times and says every step to the log and to the UI ([`RepairTracker`]). Because every ad-hoc build has a new
+//!   cdhash, [`plan`] also re-registers once after every version change instead of waiting for the failure.
 //! - **The user turned it off** in System Settings, Login Items ([`disabled_in_login_items`]). That is the user's
 //!   choice: it is reported, never repaired, and Pitcrew never switches it back on by itself.
 
@@ -485,6 +485,9 @@ mod tests {
         // `has LWCR` alone is every healthy job's mark, not a refusal.
         assert!(!parse_job("\tstate = spawn scheduled\n\tproperties = keepalive | has LWCR\n").stale());
         assert!(parse_job("\tstate = waiting\n\tproperties = keepalive | needs LWCR update\n").stale());
+        // The exit code is read as a number: 780 is not 78, a bare 78 is.
+        assert!(!parse_job("\tstate = waiting\n\tlast exit code = 780\n").stale());
+        assert!(parse_job("\tstate = waiting\n\tlast exit code = 78\n").stale());
         let healthy = parse_job(HEALTHY);
         assert!(healthy.found && healthy.running && healthy.has_lwcr && !healthy.stale());
         // Gone from launchd.
