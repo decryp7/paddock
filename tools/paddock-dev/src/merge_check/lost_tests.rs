@@ -1,7 +1,9 @@
 //! Tests a parent has that the result lacks, judged three-way. For every source file that differs between a parent and the
 //! result and whose removed lines could hold a test (an attribute naming `test`, a `fn`, an `it(` / `test(` call), the test
 //! names of both versions are counted (a renamed file is read at its old path in the parent and at its new one in the result,
-//! and a test that moved to another file is found by name). A name the result has less often than a three-way merge expects is lost unless
+//! and a test that moved to another file is found by name). Only files a side changed are looked at: those changed between the
+//! base and this parent, and those changed between another parent and the result. A name the result has less often than a
+//! three-way merge expects is lost unless
 //!
 //! - the other side deleted it on purpose: the count a three-way merge expects is the parent's plus what the other parents
 //!   changed since the base (`before + other - base`, for each other parent), and the result has at least that many; or
@@ -13,7 +15,7 @@ use super::diff::FileDiff;
 use super::git::{Git, short};
 use super::{Ctx, Finding, Kind, testnames, trailers};
 use regex::Regex;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 /// Test names with their counts, and the first file each was seen in.
 #[derive(Default)]
@@ -28,17 +30,48 @@ impl Tally {
     }
 }
 
-fn tally(git: &Git, rev: &str, files: &BTreeSet<String>) -> Result<Tally, String> {
+/// Counts the tests of `strict` files (an unreadable one is an error: the check cannot see its tests) and of `lenient` files,
+/// which were only found by a text search (one that does not parse or is not UTF-8 is skipped: it is a fixture, not a test file).
+fn tally(git: &Git, rev: &str, strict: &BTreeSet<String>, lenient: &BTreeSet<String>) -> Result<Tally, String> {
     let mut t = Tally::default();
-    for f in files {
+    let mut add = |f: &String, names: Vec<String>| {
+        for n in names {
+            *t.counts.entry(n.clone()).or_insert(0) += 1;
+            t.file.entry(n).or_insert_with(|| f.clone());
+        }
+    };
+    for f in strict {
         if let Some(text) = git.text_at(rev, f)? {
-            for n in testnames::names(f, &text)? {
-                *t.counts.entry(n.clone()).or_insert(0) += 1;
-                t.file.entry(n).or_insert_with(|| f.clone());
-            }
+            add(f, testnames::names(f, &text)?);
+        }
+    }
+    for f in lenient.iter().filter(|f| !strict.contains(*f)) {
+        if let Ok(Some(text)) = git.text_at(rev, f)
+            && let Ok(names) = testnames::names(f, &text)
+        {
+            add(f, names);
         }
     }
     Ok(t)
+}
+
+/// The text patterns that find test `name` in source: a Rust test is `fn <name>`, a script test is its quoted name (in its
+/// escaped form too, so `cargo's` is found as `cargo\'s`).
+fn search_patterns(name: &str) -> Vec<String> {
+    if name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return vec![
+            format!("fn {name}"),
+            format!("'{name}'"),
+            format!("\"{name}\""),
+            format!("`{name}`"),
+        ];
+    }
+    let escaped = name.replace('\\', "\\\\").replace('\'', "\\'").replace('"', "\\\"");
+    let mut v = vec![name.to_string()];
+    if escaped != name {
+        v.push(escaped);
+    }
+    v
 }
 
 /// Whether a line the result removes could be part of a test: reading every changed file would be a process per file.
@@ -54,15 +87,9 @@ fn files_naming(git: &Git, rev: &str, names: &[&String]) -> Result<BTreeSet<Stri
     for chunk in names.chunks(100) {
         let mut args: Vec<String> = vec!["grep".into(), "-l".into(), "-z".into(), "-F".into()];
         for n in chunk {
-            args.push("-e".into());
-            args.push(if n.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                format!("fn {n}")
-            } else {
-                (*n).clone()
-            });
-            if n.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            for pattern in search_patterns(n) {
                 args.push("-e".into());
-                args.push((*n).clone());
+                args.push(pattern);
             }
         }
         args.push(rev.into());
@@ -78,6 +105,15 @@ fn files_naming(git: &Git, rev: &str, names: &[&String]) -> Result<BTreeSet<Stri
     Ok(found)
 }
 
+/// Whether a file can hold a lost test: a side changed it (base to this parent, or another parent to the result). A file
+/// neither side changed is the same everywhere, and a test in it cannot be lost by a merge.
+fn changed_by_a_side(old_path: &str, base_to_parent: &HashSet<String>, others_to_result: &[&[FileDiff]]) -> bool {
+    base_to_parent.contains(old_path)
+        || others_to_result
+            .iter()
+            .any(|d| d.iter().any(|f| f.old() == old_path || f.path == old_path))
+}
+
 /// The tests of `parents[index]` that `result` lacks and neither the other side's deletion nor the message explains.
 /// `to_result` is the diff from that parent to the result; `base` is the merge base of the parent with the first parent.
 pub fn check(cx: &Ctx, index: usize, base: &str, to_result: &[FileDiff]) -> Result<Vec<Finding>, String> {
@@ -86,8 +122,18 @@ pub fn check(cx: &Ctx, index: usize, base: &str, to_result: &[FileDiff]) -> Resu
     let js_call = Regex::new(r"(?:^|[^.\w$])(?:it|test)(?:\.\w+)?\s*\(").map_err(|e| e.to_string())?;
     let rust_fn = Regex::new(r"^(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s").map_err(|e| e.to_string())?;
     // The parent's files whose removed lines could hold a test, plus where a renamed one went.
+    let base_to_parent: HashSet<String> = git.changed_paths(base, parent)?.into_iter().collect();
+    let others_to_result: Vec<&[FileDiff]> = cx
+        .diffs
+        .iter()
+        .enumerate()
+        .filter(|(j, _)| *j != index)
+        .map(|(_, d)| d.as_slice())
+        .collect();
     let mut files = BTreeSet::new();
-    for f in to_result.iter().filter(|f| testnames::is_source(f.old()) && !generated.is(f.old())) {
+    for f in to_result.iter().filter(|f| {
+        testnames::is_source(f.old()) && !generated.is(f.old()) && changed_by_a_side(f.old(), &base_to_parent, &others_to_result)
+    }) {
         if f.hunks
             .iter()
             .flat_map(|h| h.removed.iter())
@@ -108,23 +154,23 @@ pub fn check(cx: &Ctx, index: usize, base: &str, to_result: &[FileDiff]) -> Resu
             .map(|(n, _)| n.clone())
             .collect()
     };
-    let (mut before, mut after) = (tally(git, parent, &files)?, tally(git, result, &files)?);
+    let mut found = BTreeSet::new();
+    let (mut before, mut after) = (tally(git, parent, &files, &found)?, tally(git, result, &files, &found)?);
     let candidates = lost(&before, &after);
     if candidates.is_empty() {
         return Ok(Vec::new());
     }
     // A moved test is found where it went; both sides are counted over the same files.
     let named: Vec<&String> = candidates.iter().collect();
-    let extra = files_naming(git, result, &named)?;
-    if extra.iter().any(|f| !files.contains(f)) {
-        files.extend(extra);
-        (before, after) = (tally(git, parent, &files)?, tally(git, result, &files)?);
+    found = files_naming(git, result, &named)?;
+    if found.iter().any(|f| !files.contains(f)) {
+        (before, after) = (tally(git, parent, &files, &found)?, tally(git, result, &files, &found)?);
     }
-    let base_tally = tally(git, base, &files)?;
+    let base_tally = tally(git, base, &files, &found)?;
     let mut others = Vec::new();
     for (j, p) in parents.iter().enumerate() {
         if j != index {
-            others.push(tally(git, p, &files)?);
+            others.push(tally(git, p, &files, &found)?);
         }
     }
     let mut out = Vec::new();
@@ -153,4 +199,35 @@ pub fn check(cx: &Ctx, index: usize, base: &str, to_result: &[FileDiff]) -> Resu
         });
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_name_is_searched_as_it_is_written_in_source() {
+        assert_eq!(search_patterns("new_case")[0], "fn new_case");
+        assert!(search_patterns("new_case").contains(&"'new_case'".to_string()));
+        assert_eq!(
+            search_patterns("keeps cargo's default"),
+            vec!["keeps cargo's default", "keeps cargo\\'s default"]
+        );
+        assert_eq!(search_patterns("plain words"), vec!["plain words"]);
+    }
+
+    #[test]
+    fn only_files_a_side_changed_can_lose_a_test() {
+        let changed: HashSet<String> = ["a.rs".to_string()].into();
+        let d = |p: &str| FileDiff {
+            path: p.into(),
+            old_path: None,
+            deleted: false,
+            hunks: Vec::new(),
+        };
+        let other = [d("b.rs")];
+        assert!(changed_by_a_side("a.rs", &changed, &[&other]));
+        assert!(changed_by_a_side("b.rs", &changed, &[&other]));
+        assert!(!changed_by_a_side("c.rs", &changed, &[&other]));
+    }
 }

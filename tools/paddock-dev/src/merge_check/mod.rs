@@ -13,9 +13,17 @@
 //! earlier commit lost) and b48df1818 is a commit built on a stale tree: this check looks at a merge's parents against its
 //! result, so a per-commit run covers the first three; the last is caught when its branch is merged (detector 1).
 //!
+//! Principle: every judgement is a three-way content judgement (base, mine, other, result), never a name or a count alone, and
+//! each mechanism is tested with the others switched off (a test per detector that the others cannot satisfy). Git's own merge
+//! of the two parents is the arbiter where one is needed: a file whose result equals it was merged, not taken.
+//!
+//! The gate must also run per commit, not only per merge: 85f326139, 439861fcf and 359be91b4 are commit-level drops that a
+//! merge-level check cannot see.
+//!
 //! Octopus merges: parent 1 is compared with every later parent; detector 1 runs for each later parent against the first, and
 //! detectors 2 and 3 for every parent, each with the merge base of the first parent and the other one (the second for the
-//! first parent). A file or test the other parents all lack counts as deleted by them.
+//! first parent). A file or test the other parents all lack counts as deleted by them. Git has no automatic merge of more than two parents here,
+//! so the whole-file detector is two-way only for an octopus merge.
 //!
 //! Outcomes follow ADR 0089: clean, findings (exit 5, an error object in JSON mode) and not measured (a missing parent, a
 //! shallow clone, an unparsable file, a git failure). Never a silent pass: whatever the check could not read is reported as
@@ -103,6 +111,8 @@ pub struct Ctx<'a> {
     tree: &'a str,
     message: &'a str,
     generated: &'a generated::Generated,
+    /// The diff from each parent to the result, in parent order.
+    diffs: &'a [Vec<diff::FileDiff>],
 }
 
 /// Runs the detectors over `merge`.
@@ -141,10 +151,17 @@ fn run(git: &Git, merge: &Merge) -> Result<Vec<Finding>, String> {
         tree,
         message: &merge.message,
         generated: &generated,
+        diffs: &diffs,
     };
     let mut out = Vec::new();
     let blobs = merge.parents.iter().map(|p| git.blob_ids(p)).collect::<Result<Vec<_>, _>>()?;
     let result_blobs = git.blob_ids(tree)?;
+    // Git's own merge of two parents: what a file is when nothing but the three-way merge decides it.
+    let auto = if merge.parents.len() == 2 {
+        Some(git.blob_ids(&git.auto_merge_tree(&merge.parents[0], &merge.parents[1])?)?)
+    } else {
+        None
+    };
     for (i, parent) in merge.parents.iter().enumerate() {
         // The merge base of the first parent with the second; of a later parent with the first (an octopus has one per parent).
         let other = merge.parents.get(if i == 0 { 1 } else { i }).ok_or("the merge has one parent")?;
@@ -152,15 +169,14 @@ fn run(git: &Git, merge: &Merge) -> Result<Vec<Finding>, String> {
             .text(&["merge-base", first, other])
             .map_err(|e| format!("no merge base for parent {}: {e}", i + 1))?;
         let base = base.trim();
-        out.extend(whole_file::check(
-            &merge.parents,
-            i,
-            &blobs,
-            &git.blob_ids(base)?,
-            &result_blobs,
-            &merge.message,
-            &generated,
-        ));
+        let base_blobs = git.blob_ids(base)?;
+        let listings = whole_file::Listings {
+            parents: &blobs,
+            base: &base_blobs,
+            result: &result_blobs,
+            auto: auto.as_ref(),
+        };
+        out.extend(whole_file::check(&merge.parents, i, &listings, &merge.message, &generated));
         if i > 0 {
             out.extend(backwards::check(&cx, parent, base, &diffs[0])?);
         }
@@ -248,31 +264,65 @@ fn not_measured(why: &str) -> String {
     )
 }
 
-/// `./dev merge check`.
-pub fn command(req: &Request) -> Result<Report, CliError> {
+/// The findings as text: a header, one line per finding in one format, and the `::error::` line with the next step.
+fn findings_text(label: &str, found: &[Finding]) -> String {
+    let mut lines = vec![format!("merge check: {label}: {} finding(s)", found.len())];
+    lines.extend(found.iter().map(|f| format!("  [{}] {}: {}", f.kind.name(), f.subject, f.detail)));
+    lines.push(format!(
+        "::error::{label}: {} finding(s). Next step: restore what was dropped, or if it was meant, say so in the merge message with `Hunks-dropped: <path>: <reason>`, `Reverted: <path>: <reason>` or `Tests-removed: <name>: <reason>`, then run it again.",
+        found.len()
+    ));
+    lines.join("\n")
+}
+
+fn clean_report(label: &str) -> Report {
+    Report::new(
+        json!({"outcome": "clean", "merge": label}),
+        format!("merge check: {label}: nothing a parent added is missing from the result."),
+    )
+}
+
+/// Runs the check: the merge's label and its findings, or why it could not look.
+fn check(req: &Request) -> Result<(String, Vec<Finding>), CliError> {
     let root = crate::gates::command::repo_root(req.root.as_deref())?;
     let git = Git::new(&root);
     let merge = resolve(&git, req)?;
     match analyze(&git, &merge) {
         // TODO(ADR 0089 WP-1): exit 6 (not measured) once `paddock_cli::Exit` has it; until then it is Failure (1).
         Outcome::NotMeasured(why) => Err(CliError::failure(not_measured(&why))),
-        Outcome::Clean => Ok(Report::new(
-            json!({"outcome": "clean", "merge": merge.label}),
-            format!("merge check: {}: nothing a parent added is missing from the result.", merge.label),
-        )),
-        Outcome::Findings(found) => {
-            let mut lines: Vec<String> = found
-                .iter()
-                .map(|f| format!("  [{}] {}: {}", f.kind.name(), f.subject, f.detail))
-                .collect();
-            lines.push(format!(
-                "::error::{}: {} finding(s) (see above). Next step: restore what was dropped, or if it was meant, say so in the merge message with `Hunks-dropped: <path>: <reason>` or `Tests-removed: <name>: <reason>`, then run it again.",
-                merge.label,
-                found.len()
-            ));
-            // An error object, so JSON mode says `"ok": false, "kind": "findings"`, never `ok: true` with findings in it.
-            Err(CliError::new(Exit::Findings, lines.join("\n"))
-                .with_hint("Each line names its finding; the last one says how to answer it."))
+        Outcome::Clean => Ok((merge.label, Vec::new())),
+        Outcome::Findings(found) => Ok((merge.label, found)),
+    }
+}
+
+/// `./dev merge check`. Findings are an error (exit 5), so the text goes to standard error like every other failure.
+pub fn command(req: &Request) -> Result<Report, CliError> {
+    let (label, found) = check(req)?;
+    if found.is_empty() {
+        return Ok(clean_report(&label));
+    }
+    Err(CliError::new(Exit::Findings, findings_text(&label, &found)))
+}
+
+/// `./dev merge check --json`: one object on standard output. Findings are `"ok": false, "kind": "findings"` with the
+/// structured list (`kind`, `subject`, `detail`), and the text goes to standard error as without `--json`.
+pub fn command_json(req: &Request, out: &mut dyn std::io::Write, err: &mut dyn std::io::Write) -> i32 {
+    match check(req) {
+        Err(e) => paddock_cli::finish(paddock_cli::Format::Json, Err(e), out, err).code(),
+        Ok((label, found)) if found.is_empty() => paddock_cli::finish(paddock_cli::Format::Json, Ok(clean_report(&label)), out, err).code(),
+        Ok((label, found)) => {
+            let text = findings_text(&label, &found);
+            let object = json!({
+                "ok": false,
+                "kind": "findings",
+                "exit": Exit::Findings.code(),
+                "merge": label,
+                "error": text,
+                "findings": found.iter().map(|f| json!({"kind": f.kind.name(), "subject": f.subject, "detail": f.detail})).collect::<Vec<_>>(),
+            });
+            let _ = writeln!(out, "{object}");
+            let _ = writeln!(err, "error: {text}");
+            Exit::Findings.code()
         }
     }
 }

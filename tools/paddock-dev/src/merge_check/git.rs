@@ -39,9 +39,21 @@ impl<'a> Git<'a> {
         self.run(args, false)
     }
 
-    /// Like [`Git::bytes`], but exit status 1 is an answer too (`git grep` with no match): the output is empty then.
+    /// Like [`Git::bytes`], but exit status 1 is an answer too (`git grep` with no match prints nothing and exits 1).
     pub fn bytes_or_none(&self, args: &[&str]) -> Result<Vec<u8>, String> {
         self.run(args, true)
+    }
+
+    /// The tree git's own merge of two commits gives (`git merge-tree --write-tree`): clean, or with conflict markers in the
+    /// conflicted files (exit status 1 is an answer here). Conflicted files are in the tree as the marker text.
+    pub fn auto_merge_tree(&self, a: &str, b: &str) -> Result<String, String> {
+        let out = self.run(&["merge-tree", "--write-tree", "--no-messages", a, b], true)?;
+        let text = String::from_utf8_lossy(&out).into_owned();
+        text.lines()
+            .next()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .ok_or_else(|| "git merge-tree printed no tree".to_string())
     }
 
     fn run(&self, args: &[&str], status_1_is_empty: bool) -> Result<Vec<u8>, String> {
@@ -64,8 +76,8 @@ impl<'a> Git<'a> {
         if out.truncated {
             return Err(format!("git {shown} wrote more than {} bytes", self.max_output));
         }
-        if status_1_is_empty && matches!(out.outcome, paddock_proc::Outcome::Exited(st) if st.code() == Some(1)) && out.stdout.is_empty() {
-            return Ok(Vec::new());
+        if status_1_is_empty && matches!(out.outcome, paddock_proc::Outcome::Exited(st) if st.code() == Some(1)) {
+            return Ok(out.stdout);
         }
         if !out.success() {
             let err = out.stderr_text();

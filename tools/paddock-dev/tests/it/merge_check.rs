@@ -461,8 +461,9 @@ fn a_rust_file_that_does_not_parse_is_not_measured() {
     r.write("crates/x/src/lib.rs", "#[test]\nfn renamed( {\n");
     r.commit("feat: broken");
     r.git(&["checkout", "-q", "main"]);
-    r.write("other.txt", &format!("{}more\nmore\n", lines(10, "o")));
-    r.commit("fix: other");
+    // Main touches the file too, so that both sides' versions of it matter and it is read.
+    r.write("crates/x/src/lib.rs", "// a main note\n#[test]\nfn ok() {}\n");
+    r.commit("fix: main note");
     r.git(&["merge", "-q", "--no-ff", "-m", "Merge feature", "feature"]);
     let (code, out) = r.check(&["HEAD"]);
     assert_eq!(code, 1, "{out}");
@@ -720,4 +721,195 @@ fn a_shallow_clone_is_not_measured_even_when_every_object_is_there() {
     let (code, out) = r.check(&["HEAD"]);
     assert_eq!(code, 1, "{out}");
     assert!(out.contains("NOT MEASURED") && out.contains("shallow"), "{out}");
+}
+
+#[test]
+fn a_change_the_result_already_has_is_no_whole_file_take() {
+    // The branch fixes line 5; main cherry-picks that fix and edits line 15; git merges cleanly to main's file.
+    let r = Repo::new();
+    let base = lines(30, "a");
+    let fixed = base.replace("a line 5 of the original file", "a line 5 fixed by the branch");
+    let main_edit = fixed.replace("a line 15 of the original file", "a line 15 edited on main");
+    r.write("f.txt", &base);
+    r.write("other.txt", &lines(10, "o"));
+    r.commit("initial");
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write("f.txt", &fixed);
+    r.commit("fix: line 5");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("f.txt", &fixed);
+    r.commit("fix: line 5 (cherry-pick)");
+    r.write("f.txt", &main_edit);
+    r.commit("fix: line 15");
+    r.git(&["merge", "-q", "--no-ff", "-m", "Merge feature", "feature"]);
+    let (code, out) = r.check(&["HEAD"]);
+    assert!(!out.contains("[whole-file]"), "{out}");
+    assert_eq!(code, 0, "{out}");
+}
+
+#[test]
+fn edits_a_branch_made_while_renaming_a_file_cannot_be_dropped_quietly() {
+    let r = Repo::new();
+    let base = lines(30, "x");
+    r.write("x.txt", &base);
+    r.write("other.txt", &lines(10, "o"));
+    r.commit("initial");
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.git(&["mv", "x.txt", "y.txt"]);
+    r.write(
+        "y.txt",
+        &format!("{base}renamed and edited one\nrenamed and edited two\nrenamed and edited three\n"),
+    );
+    r.commit("refactor: rename x and edit it");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("other.txt", &format!("{}more\nmore\nmore\n", lines(10, "o")));
+    r.commit("fix: other");
+    r.git(&["merge", "-q", "-s", "ours", "--no-commit", "feature"]);
+    r.git(&["rm", "-q", "x.txt"]);
+    r.write("y.txt", &base);
+    r.git(&["add", "--all"]);
+    r.git(&["commit", "-q", "-m", "Merge feature"]);
+    let (code, out) = r.check(&["HEAD"]);
+    assert_eq!(code, 5, "{out}");
+    assert!(out.contains("[dropped-hunk] y.txt"), "{out}");
+}
+
+#[test]
+fn a_revert_of_few_lines_of_a_big_commit_is_no_stale_tree() {
+    // c2 adds ten lines, c3 removes eight of them; a stale-tree branch brings back the file as it was before c2, so the result
+    // removes the two that are left: 2 of the 10 lines c2 added, below half.
+    let r = Repo::new();
+    let base = lines(30, "a");
+    let ten: Vec<String> = (1..=10).map(|i| format!("added line number {i} of the big commit\n")).collect();
+    r.write("a.txt", &base);
+    r.write("other.txt", &lines(10, "o"));
+    r.commit("initial");
+    r.write("a.txt", &format!("{base}{}", ten.concat()));
+    r.commit("feat: ten lines");
+    r.write("a.txt", &format!("{base}{}", ten[8..].concat()));
+    let c3 = r.commit("refactor: remove eight");
+    r.git(&["checkout", "-q", "-b", "feature", &c3]);
+    r.write("a.txt", &base);
+    r.commit("feat: stale tree");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("other.txt", &format!("{}more\nmore\nmore\n", lines(10, "o")));
+    r.commit("fix: other");
+    r.git(&["merge", "-q", "--no-ff", "-m", "Merge feature", "feature"]);
+    let (_, out) = r.check(&["HEAD"]);
+    assert!(!out.contains("[backwards] a.txt"), "{out}");
+}
+
+#[test]
+fn a_test_moved_into_a_new_file_while_the_old_one_stays_is_not_lost() {
+    let r = Repo::new();
+    r.write("crates/x/src/tests.rs", &format!("{}{KEPT}{REMOVED}", padding()));
+    r.write("other.txt", &lines(10, "o"));
+    r.commit("initial");
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write("crates/x/src/tests.rs", &format!("{}{KEPT}", padding()));
+    r.write(
+        "crates/x/src/moved.rs",
+        &format!("{}{}", padding().replace("LIMIT", "MOVED"), REMOVED),
+    );
+    r.commit("refactor: move old_case to its own file");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("crates/x/src/tests.rs", &format!("// a main note\n{}{KEPT}{REMOVED}", padding()));
+    r.commit("fix: main note");
+    r.git(&["merge", "-q", "--no-ff", "-m", "Merge feature", "feature"]);
+    let (_, out) = r.check(&["HEAD"]);
+    assert!(!out.contains("[lost-test]"), "{out}");
+}
+
+#[test]
+fn a_moved_script_test_is_found_by_its_escaped_name() {
+    let r = Repo::new();
+    r.write(
+        "ui/a.spec.ts",
+        "it('keeps cargo\\'s default', () => {});\ntest('stays', () => {});\n",
+    );
+    r.write("other.txt", &lines(10, "o"));
+    r.commit("initial");
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write("ui/a.spec.ts", "test('stays', () => {});\n");
+    r.write("ui/b.spec.ts", "it('keeps cargo\\'s default', () => {});\n");
+    r.commit("test: move");
+    r.git(&["checkout", "-q", "main"]);
+    r.write(
+        "ui/a.spec.ts",
+        "it('keeps cargo\\'s default', () => {});\ntest('stays', () => {});\n// main note\n",
+    );
+    r.commit("test: main note");
+    r.git(&["merge", "-q", "--no-ff", "-m", "Merge feature", "feature"]);
+    let (_, out) = r.check(&["HEAD"]);
+    assert!(!out.contains("[lost-test]") && !out.contains("NOT MEASURED"), "{out}");
+}
+
+#[test]
+fn a_file_found_only_by_the_moved_test_search_that_does_not_parse_is_skipped_not_fatal() {
+    // A fixture that mentions `fn new_case` but is not valid Rust must not make the whole merge not measured.
+    let r = Repo::new();
+    r.write("crates/x/src/lib.rs", &format!("{}{KEPT}", padding()));
+    r.write("crates/x/tests/fixtures/bad.rs", "fn new_case( {\n");
+    r.write("other.txt", &lines(10, "o"));
+    r.commit("initial");
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write("crates/x/src/lib.rs", &format!("pub const BRANCH: u32 = 1;\n{}{KEPT}", padding()));
+    r.commit("feat: branch change");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("crates/x/src/lib.rs", &format!("{}{KEPT}{ADDED}", padding()));
+    r.commit("test: new_case");
+    r.git(&["merge", "-q", "-s", "ours", "--no-commit", "feature"]);
+    r.write("crates/x/src/lib.rs", &format!("pub const BRANCH: u32 = 1;\n{}{KEPT}", padding()));
+    r.git(&["add", "--all"]);
+    r.git(&["commit", "-q", "-m", "Merge feature"]);
+    let (code, out) = r.check(&["HEAD"]);
+    assert_eq!(code, 5, "{out}");
+    assert!(out.contains("[lost-test] new_case") && !out.contains("NOT MEASURED"), "{out}");
+}
+
+#[test]
+fn findings_print_one_line_each_and_json_keeps_them_structured() {
+    let r = stale_tree_merge("Merge feature");
+    let (code, out) = r.check(&["HEAD"]);
+    assert_eq!(code, 5, "{out}");
+    let lines: Vec<&str> = out.lines().collect();
+    assert!(lines[0].starts_with("error: merge check: "), "{out}");
+    assert!(
+        lines
+            .iter()
+            .filter(|l| l.contains("[backwards]"))
+            .all(|l| l.starts_with("  [backwards] ")),
+        "{out}"
+    );
+    let (code, out) = r.check(&["HEAD", "--json"]);
+    assert_eq!(code, 5, "{out}");
+    let json = out.lines().find(|l| l.starts_with('{')).unwrap();
+    let v: serde_json::Value = serde_json::from_str(json).unwrap();
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["kind"], "findings");
+    assert_eq!(v["findings"][0]["kind"], "backwards");
+    assert_eq!(v["findings"][0]["subject"], "src/a.txt");
+    assert!(v["findings"][0]["detail"].as_str().is_some());
+}
+
+#[test]
+fn a_test_the_merge_moved_to_another_file_is_not_lost() {
+    // Main adds `new_case`; the result keeps it, in a file of its own: found by name, not lost.
+    let r = Repo::new();
+    r.write("crates/x/src/lib.rs", &format!("{}{KEPT}", padding()));
+    r.write("other.txt", &lines(10, "o"));
+    r.commit("initial");
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write("crates/x/src/lib.rs", &format!("pub const BRANCH: u32 = 1;\n{}{KEPT}", padding()));
+    r.commit("feat: branch change");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("crates/x/src/lib.rs", &format!("{}{KEPT}{ADDED}", padding()));
+    r.commit("test: new_case");
+    r.git(&["merge", "-q", "-s", "ours", "--no-commit", "feature"]);
+    r.write("crates/x/src/lib.rs", &format!("pub const BRANCH: u32 = 1;\n{}{KEPT}", padding()));
+    r.write("crates/x/src/more.rs", ADDED);
+    r.git(&["add", "--all"]);
+    r.git(&["commit", "-q", "-m", "Merge feature"]);
+    let (_, out) = r.check(&["HEAD"]);
+    assert!(!out.contains("[lost-test]"), "{out}");
 }

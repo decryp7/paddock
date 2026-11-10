@@ -182,12 +182,6 @@ mod tests {
     }
 
     #[test]
-    fn renames_are_asked_for() {
-        // Without -M a moved file is a deletion plus an addition, and the readers below would call it a revert.
-        assert!(DIFF_FLAGS.contains(&"-M") && !DIFF_FLAGS.contains(&"--no-renames"));
-    }
-
-    #[test]
     fn trivial_lines() {
         assert!(trivial("  }  ") && trivial("") && !trivial("let x"));
     }

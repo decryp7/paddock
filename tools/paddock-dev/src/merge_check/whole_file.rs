@@ -2,7 +2,8 @@
 //! the result equals parent P's, and every other parent changed it since the merge base (its blob differs from the base's and
 //! from the result's): the other side's changes cannot be in the result. This is the cheap, precise signal for an "ours" or
 //! "theirs" resolution of a file both sides edited (087570da4, the Dyno docs of 9e18230c5). The answer is
-//! `Hunks-dropped: <path>: <reason>`. Generated files are skipped, and so are rendered images (`.png`, `.svg`, ...): they
+//! `Hunks-dropped: <path>: <reason>`. A file is not flagged when git's own three-way merge of the parents gives the same
+//! blob as the result: the other side's change is already in this side's file (a cherry-pick), or merges cleanly. Generated files are skipped, and so are rendered images (`.png`, `.svg`, ...): they
 //! follow their generator, which is flagged itself.
 
 use super::generated::Generated;
@@ -30,17 +31,24 @@ pub fn merge_changed_it(base: Option<&str>, mine: &str, others: &[Option<&str>],
 /// The blob ids of one revision: path to blob.
 pub type Blobs = HashMap<String, String>;
 
+/// The blob listings the check compares: each parent's, the merge base's, the result's, and git's own merge of two parents
+/// (none for an octopus merge: the judgement is then two-way only).
+pub struct Listings<'a> {
+    /// Parent `j`'s listing.
+    pub parents: &'a [Blobs],
+    /// The merge base's.
+    pub base: &'a Blobs,
+    /// The result's.
+    pub result: &'a Blobs,
+    /// Git's own merge of the two parents.
+    pub auto: Option<&'a Blobs>,
+}
+
 /// Files `result` took whole from `parents[index]` against the other parents. `blobs[j]` is parent `j`'s listing, `base` the
-/// merge base's, `result` the result's.
-pub fn check(
-    parents: &[String],
-    index: usize,
-    blobs: &[Blobs],
-    base: &Blobs,
-    result: &Blobs,
-    message: &str,
-    generated: &Generated,
-) -> Vec<Finding> {
+/// merge base's, `result` the result's, `auto` the listing of git's own merge of two parents (none for an octopus merge: the
+/// judgement is then two-way only).
+pub fn check(parents: &[String], index: usize, l: &Listings, message: &str, generated: &Generated) -> Vec<Finding> {
+    let (blobs, base, result, auto) = (l.parents, l.base, l.result, l.auto);
     let mine = &blobs[index];
     let mut out = Vec::new();
     let mut paths: Vec<&String> = mine.keys().collect();
@@ -60,6 +68,8 @@ pub fn check(
             result.get(path).map(String::as_str),
         ) || generated.is(path)
             || image(path)
+            // Git's own merge of the two parents gives this very file: the other side's change is in it already (a cherry-pick).
+            || auto.is_some_and(|a| a.get(path) == Some(oid))
             || trailers::path_reason(message, "Hunks-dropped", path).is_some()
         {
             continue;

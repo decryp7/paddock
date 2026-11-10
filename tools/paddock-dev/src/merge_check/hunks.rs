@@ -5,7 +5,8 @@
 //!
 //! A hunk counts when it adds at least two non-trivial lines; it is missing when at least half of them (and at least two) are
 //! among the lines the result removes from the parent's file and does not add back elsewhere in it, each line counted once.
-//! A file that every other parent lacks (deleted on the other side) is skipped: that is a modify/delete conflict, resolved on
+//! A file that every other parent lacks under its name in the base (deleted on the other side; for a file this parent
+//! renamed, the name it had before) is skipped: that is a modify/delete conflict, resolved on
 //! purpose. Generated files ([`super::generated`]) are skipped: they are regenerated, not merged.
 
 use super::diff::{DIFF_FLAGS, FileDiff, parse, trivial};
@@ -86,7 +87,7 @@ pub fn check(cx: &Ctx, index: usize, base: &str, to_result: &[FileDiff]) -> Resu
         }
         if others
             .as_ref()
-            .is_some_and(|sets| !sets.is_empty() && sets.iter().all(|s| !s.contains(&file.path)))
+            .is_some_and(|sets| !sets.is_empty() && sets.iter().all(|s| !s.contains(file.old())))
         {
             continue;
         }
