@@ -1,6 +1,9 @@
 # 92. Trust-bearing files are created owner-only through one shared type
 
-- Status: Accepted 2026-11-10 (user); D9 (a), D2 tighten default only; other decisions as recommended. Independent
+- Status: Accepted 2026-11-10 (user); D9 (a), D2 tighten default only; other decisions as recommended. **D9 changed
+  2026-11-11 (user): from (a) to the minimum cut, (d): only WP-0 (about 3.5 days; it closes W3, W4 and W5, and W1 is fixed
+  by `073e5a150`) gates Pitwall 1.1. WP-1 (`paddock_env::private`) is built (`feat/private-files-type`, on train 5) and
+  stays; the rest of this ADR is later.** Independent
   review approved revision 2 (`fdfb17c8f`); this text adds the review's last five P2s ("Review answers (acceptance)").
   Revision 2 of the proposal. Drafted at the user's request of 2026-11-10 under ER-21 (rule 40): one
   class, about 23 fixes in six days. Revision 2 answers the independent review of revision 1 (`3ba5a4a16`, CHANGES,
@@ -313,7 +316,8 @@ naming reasons without paths (ER-27, as `note_result` does now).
 - **D7 `make_folder_private`.** (a) **test-support only, behind `test-support` (as you decided)** · (b) keep public.
 - **D8 Elevated and protected locations.** (a) **rule 75 as in §4, the protected-chain text lifted from Dyno ADR 0022
   §2.1, app ADRs link it** · (b) leave it in the app ADRs and 0053.
-- **D9 What it gates.** Decided (user, 2026-11-10): **(a)**. (a) the Pitwall 1.1 tag on WP-1 to WP-5, WP-8 and WP-10; the next Dyno tag on WP-6; Debrief 1.2
+- **D9 What it gates.** Decided (user, 2026-11-10): **(a)**. **Changed (user, 2026-11-11): (d), the minimum cut: WP-0
+  only gates Pitwall 1.1; WP-1 is built and stays; the rest is later.** (a) the Pitwall 1.1 tag on WP-1 to WP-5, WP-8 and WP-10; the next Dyno tag on WP-6; Debrief 1.2
   and Pitcrew 1.1 on WP-7 · (b) Pitwall 1.1 on the whole type · (c) gate nothing · (d) an exposure cut, WP-0 (about
   3.5 days), gates Pitwall 1.1; WP-6 gates the next Dyno tag; WP-7 (with W2) gates Debrief 1.2 and Pitcrew 1.1; the type
   and the rest land on the train without gating Pitwall (recommended in revision 2, not chosen).
