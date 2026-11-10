@@ -3,6 +3,8 @@
 //! Every app's CLI (Pitwall, Dyno, Debrief, the agent and service programs) looks and behaves alike:
 //!
 //! - [`Exit`] and [`CliError`]: stable exit codes, and an error is a message that says what to do next.
+//! - [`Outcome`] and [`Verdict`]: how a check ended (clean, findings, not measured, check broken, not applicable) and the one
+//!   exit code a run folds to; a measurement that did not happen never passes (ADR 0089).
 //! - [`Format`] and [`Report`]: `--json` makes standard output exactly one JSON object, failures included
 //!   (`{"ok":false,"error":..,"hint":..,"exit":..}`); text is for people. Data goes to stdout, notes and progress to stderr.
 //! - [`Table`]: results as aligned text, CSV or JSON, bounded cells, a truncation note on stderr.
@@ -18,6 +20,7 @@ mod error;
 mod exit;
 mod flags;
 mod help;
+mod outcome;
 mod progress;
 mod report;
 mod table;
@@ -29,6 +32,7 @@ pub use error::CliError;
 pub use exit::Exit;
 pub use flags::{CommonFlags, Format};
 pub use help::{Help, version_line};
+pub use outcome::{Finding, Findings, Outcome, Reason, Severity, Verdict};
 pub use progress::{LINE_EVERY, Progress, StopFlag};
 pub use report::{Report, finish};
 pub use table::{MAX_CELL_CHARS, Table, TableFormat, cell_text, write_table};
