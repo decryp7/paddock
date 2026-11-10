@@ -6,7 +6,7 @@ status = "accepted"
 accepted = "2026-11-10"
 copied_from = "docs/adr-text-cuts-repo-copies 06c77a417"
 copied = "2026-11-11"
-prerequisites = ["C58", "ADR 0088 ratchet"]
+prerequisites = ["C58"]
 
 [[wp]]
 id = "WP-0"
