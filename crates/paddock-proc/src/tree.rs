@@ -182,8 +182,10 @@ pub(crate) fn group_exists(group: u32) -> bool {
 /// has running threads (field 20, `num_threads`, above 1: the leader's zombie state hides them) and so counts as running.
 /// Fields are read after the last `)`, since the name (field 2) may hold spaces and parentheses.
 #[cfg(any(target_os = "linux", all(test, unix)))]
-pub(crate) fn parse_group_and_running(stat: &str) -> Option<(u32, bool)> {
-    let rest = stat.get(stat.rfind(')')? + 1..)?;
+pub(crate) fn parse_group_and_running(stat: &[u8]) -> Option<(u32, bool)> {
+    // Bytes, not text: the name (field 2) can be any bytes, and only the tail after its closing `)` is ASCII.
+    let rest = stat.get(stat.iter().rposition(|&b| b == b')')? + 1..)?;
+    let rest = std::str::from_utf8(rest).ok()?;
     let f: Vec<&str> = rest.split_whitespace().collect();
     // After the name: state (3), ppid (4), pgrp (5), ... num_threads (20) are f[0], f[1], f[2], ... f[17].
     let state = *f.first()?;
@@ -193,20 +195,35 @@ pub(crate) fn parse_group_and_running(stat: &str) -> Option<(u32, bool)> {
     Some((group, !zombie || threads > 1))
 }
 
-/// Whether a process under `proc_root` is in `group` and runs; `None` when `proc_root` cannot be listed (nothing is known).
-/// A process that ended while the listing was read (its stat cannot be read) is not in the group any more.
+/// Whether a process under `proc_root` is in `group` and runs. `None` when nothing is known: `proc_root` cannot be listed
+/// or lists no pid at all. A process whose stat is gone (`NotFound`, or `ESRCH` as `/proc` says for a process that ended
+/// while it was read) ended and is not in the group; a stat that exists but cannot be read or parsed is a process of unknown
+/// state and counts as running (unknown is never read as gone, ADR 0081).
 #[cfg(any(target_os = "linux", all(test, unix)))]
 pub(crate) fn group_runs_in_proc(proc_root: &std::path::Path, group: u32) -> Option<bool> {
-    let dir = std::fs::read_dir(proc_root).ok()?;
-    Some(dir.flatten().any(|e| {
-        e.file_name()
+    let mut seen = false;
+    let mut runs = false;
+    for e in std::fs::read_dir(proc_root).ok()?.flatten() {
+        let numeric = e
+            .file_name()
             .to_str()
-            .is_some_and(|n| n.bytes().all(|b| b.is_ascii_digit()))
-            && std::fs::read_to_string(e.path().join("stat"))
-                .ok()
-                .and_then(|t| parse_group_and_running(&t))
-                .is_some_and(|(g, runs)| g == group && runs)
-    }))
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+        if !numeric {
+            continue;
+        }
+        seen = true;
+        match std::fs::read(e.path().join("stat")) {
+            Ok(bytes) => match parse_group_and_running(&bytes) {
+                Some((g, r)) => runs |= g == group && r,
+                None => runs = true,
+            },
+            Err(err)
+                if err.kind() == std::io::ErrorKind::NotFound
+                    || err.raw_os_error() == Some(libc::ESRCH) => {}
+            Err(_) => runs = true,
+        }
+    }
+    seen.then_some(runs)
 }
 
 /// Ends `root` and everything below it. A child started by this crate leads its own process group (Unix), which is
@@ -1176,29 +1193,29 @@ mod tests {
     #[test]
     fn a_stat_line_gives_its_group_and_whether_it_runs() {
         assert_eq!(
-            parse_group_and_running(&stat("sh", "S", 7, 1)),
+            parse_group_and_running(stat("sh", "S", 7, 1).as_bytes()),
             Some((7, true))
         );
         assert_eq!(
-            parse_group_and_running(&stat("sh", "Z", 7, 1)),
+            parse_group_and_running(stat("sh", "Z", 7, 1).as_bytes()),
             Some((7, false))
         );
         assert_eq!(
-            parse_group_and_running(&stat("sh", "X", 7, 1)),
+            parse_group_and_running(stat("sh", "X", 7, 1).as_bytes()),
             Some((7, false))
         );
         // A zombie leader whose other threads still run is running.
         assert_eq!(
-            parse_group_and_running(&stat("sh", "Z", 7, 3)),
+            parse_group_and_running(stat("sh", "Z", 7, 3).as_bytes()),
             Some((7, true))
         );
         // A name with spaces and parentheses does not shift the fields.
         assert_eq!(
-            parse_group_and_running(&stat("a) S (b c", "S", 9, 1)),
+            parse_group_and_running(stat("a) S (b c", "S", 9, 1).as_bytes()),
             Some((9, true))
         );
-        assert_eq!(parse_group_and_running("42 (sh) S 1"), None);
-        assert_eq!(parse_group_and_running("garbage"), None);
+        assert_eq!(parse_group_and_running(b"42 (sh) S 1"), None);
+        assert_eq!(parse_group_and_running(b"garbage"), None);
     }
 
     #[test]
@@ -1223,5 +1240,26 @@ mod tests {
         );
         assert_eq!(group_runs_in_proc(root.path(), 5), Some(false));
         assert_eq!(group_runs_in_proc(&root.path().join("missing"), 7), None);
+    }
+
+    /// A name that is not UTF-8 is still a process that runs (unknown is never read as gone, ADR 0081); an empty /proc, or a
+    /// stat that cannot be parsed, is not a reason to call a group empty either.
+    #[test]
+    fn a_stat_that_is_not_text_or_a_proc_without_pids_is_not_read_as_gone() {
+        let root = tempfile::tempdir().unwrap();
+        let d = root.path().join("11");
+        std::fs::create_dir_all(&d).unwrap();
+        let mut bytes = b"11 (a\xff) b) S 1 7 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 5 0 0".to_vec();
+        bytes.extend_from_slice(b"\n");
+        std::fs::write(d.join("stat"), &bytes).unwrap();
+        assert_eq!(group_runs_in_proc(root.path(), 7), Some(true));
+        assert_eq!(group_runs_in_proc(root.path(), 5), Some(false));
+        // A stat that exists but cannot be parsed: running, as far as is known.
+        std::fs::write(d.join("stat"), b"\xff\xfe").unwrap();
+        assert_eq!(group_runs_in_proc(root.path(), 7), Some(true));
+        // No pid entry at all: nothing is known.
+        let empty = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(empty.path().join("self")).unwrap();
+        assert_eq!(group_runs_in_proc(empty.path(), 7), None);
     }
 }
