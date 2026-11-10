@@ -212,6 +212,9 @@ struct Inner {
     dropped_pushes: AtomicU64,
     closed: Mutex<Option<IpcError>>,
     closed_cv: Condvar,
+    /// A test's look at the peer right after `mark_closed` cancelled the served calls, on whichever thread closed it.
+    #[cfg(test)]
+    after_cancel: Mutex<Option<tests::Hook>>,
 }
 
 /// The calls running now and those waiting for a slot.
@@ -307,6 +310,8 @@ impl Peer {
                 dropped_pushes: AtomicU64::new(0),
                 closed: Mutex::new(None),
                 closed_cv: Condvar::new(),
+                #[cfg(test)]
+                after_cancel: Mutex::new(None),
             }),
         };
         if let Some(f) = on_push {
@@ -413,11 +418,9 @@ impl Peer {
             s.cv.notify_all();
         }
         #[cfg(test)]
-        tests::AFTER_CANCEL.with(|hook| {
-            if let Some(f) = hook.borrow().as_ref() {
-                f(self);
-            }
-        });
+        if let Some(f) = lock(&self.inner.after_cancel).as_ref() {
+            f(self);
+        }
     }
 
     /// Why the connection closed (every close records its reason).
@@ -1139,11 +1142,12 @@ mod tests {
     use crate::endpoint;
 
     /// A test's look at a peer from inside `mark_closed`.
-    type Hook = Box<dyn Fn(&Peer)>;
+    pub(super) type Hook = Box<dyn Fn(&Peer) + Send>;
 
-    std::thread_local! {
-        /// Runs on the closing thread right after `mark_closed` has cancelled the served calls (a test seam).
-        pub(super) static AFTER_CANCEL: std::cell::RefCell<Option<Hook>> = const { std::cell::RefCell::new(None) };
+    /// Installs a hook that runs on the closing thread (the caller's or the reader's, whichever wins `mark_closed`) right after
+    /// `mark_closed` has cancelled the served calls (a test seam, per peer).
+    fn on_closed(peer: &Peer, f: impl Fn(&Peer) + Send + 'static) {
+        *lock(&peer.inner.after_cancel) = Some(Box::new(f));
     }
 
     /// Regression (CI run 7761, Windows, 1 in 2,000 runs of `closing_fails_pending_calls_on_both_sides` on the test VM):
@@ -1159,21 +1163,46 @@ mod tests {
             PeerOptions::new("the other side"),
         )
         .unwrap();
-        let seen = Arc::new(Mutex::new(None));
-        let seen2 = seen.clone();
-        AFTER_CANCEL.with(|hook| {
-            *hook.borrow_mut() = Some(Box::new(move |p: &Peer| {
-                *lock(&seen2) = Some(p.inner.out.is_shut());
-            }))
+        let (tx, seen) = std::sync::mpsc::channel();
+        let tx = Mutex::new(tx);
+        on_closed(&peer, move |p| {
+            let _ = lock(&tx).send(p.inner.out.is_shut());
         });
         peer.close();
-        AFTER_CANCEL.with(|hook| *hook.borrow_mut() = None);
+        // Whichever thread wins `mark_closed` runs the seam; wait for it rather than assume it was this one.
+        let shut = seen.recv_timeout(Duration::from_secs(30));
         assert_eq!(
-            *lock(&seen),
-            Some(true),
+            shut,
+            Ok(true),
             "the served calls were cancelled while the outgoing queue was still open"
         );
         drop(theirs);
+    }
+
+    /// Regression (CI run 7872): the seam must run on whichever thread closes the peer. Here the reader thread closes it (the
+    /// other end is dropped, so it reads the end of the stream) while this thread only waits.
+    #[test]
+    fn the_close_seam_runs_when_the_reader_side_closes_the_peer() {
+        let (ours, theirs) = endpoint::pair().unwrap();
+        let peer = Peer::start(
+            Connection::raw(ours, FrameLimit::default()),
+            Arc::new(NoCalls),
+            PeerOptions::new("the other side"),
+        )
+        .unwrap();
+        let (tx, seen) = std::sync::mpsc::channel();
+        let tx = Mutex::new(tx);
+        on_closed(&peer, move |p| {
+            let _ = lock(&tx).send(p.inner.out.is_shut());
+        });
+        drop(theirs);
+        // Waits on the seam itself (it runs after `closed` is set, so `wait_closed` alone could return before it).
+        let shut = seen.recv_timeout(Duration::from_secs(30));
+        assert_eq!(
+            shut,
+            Ok(true),
+            "the seam ran on the reader thread that closed the peer"
+        );
     }
 
     /// A writer whose every write fails, while the reader is still reading its stream.
