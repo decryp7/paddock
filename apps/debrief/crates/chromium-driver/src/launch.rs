@@ -121,7 +121,9 @@ pub fn command_line(flavor: Flavor, data_dir: &Path, opts: &LaunchOptions, sandb
     a
 }
 
-/// Set to `1` (by a CI job that runs as root in a container) to start the browser without its sandbox.
+/// Set to `1` (by a CI job that runs as root in a container) to start the browser without its sandbox. Honoured in a debug
+/// build only (the CI job runs the debug tests); a release build ignores it and logs its name once, so the environment
+/// cannot switch off the sandbox of a shipped Debrief (ADR 0073 DB1).
 pub const NO_SANDBOX_ENV: &str = "DEBRIEF_BROWSER_NO_SANDBOX";
 
 /// Whether the browser runs inside its own sandbox.
@@ -135,8 +137,10 @@ impl Sandbox {
     /// Chromium refuses to start as root ("Running as root without --no-sandbox is not supported"), which is how
     /// every CI container runs. The sandbox is dropped only when the process is root AND the environment asks for it
     /// explicitly: a user's browser keeps its sandbox, and root without the opt-in still gets Chromium's own refusal.
-    pub fn decide(env_value: Option<&str>, root: bool) -> Sandbox {
-        if root && env_value.is_some_and(|v| !v.is_empty() && v != "0") {
+    ///
+    /// `debug` is `cfg!(debug_assertions)`: in a release build the variable never counts.
+    pub fn decide(debug: bool, env_value: Option<&str>, root: bool) -> Sandbox {
+        if debug && root && env_value.is_some_and(|v| !v.is_empty() && v != "0") {
             Sandbox::Off
         } else {
             Sandbox::On
@@ -145,8 +149,19 @@ impl Sandbox {
 
     /// The decision for this process, from [`NO_SANDBOX_ENV`] and the effective user.
     fn from_environment() -> Sandbox {
-        Sandbox::decide(std::env::var(NO_SANDBOX_ENV).ok().as_deref(), running_as_root())
+        let value = std::env::var(NO_SANDBOX_ENV).ok();
+        let debug = cfg!(debug_assertions);
+        if !debug && value.as_deref().is_some_and(|v| !v.is_empty()) {
+            warn_ignored_once();
+        }
+        Sandbox::decide(debug, value.as_deref(), running_as_root())
     }
+}
+
+/// Logs once per process that [`NO_SANDBOX_ENV`] is set but ignored (its name only, never its value).
+fn warn_ignored_once() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| log::warn!("{NO_SANDBOX_ENV} is set but ignored: a release build always starts the browser with its sandbox"));
 }
 
 #[cfg(unix)]
@@ -642,11 +657,26 @@ mod tests {
 
     #[test]
     fn the_sandbox_is_dropped_only_for_root_that_asked_for_it() {
-        assert_eq!(Sandbox::decide(Some("1"), true), Sandbox::Off);
-        assert_eq!(Sandbox::decide(Some("1"), false), Sandbox::On, "a user's browser keeps its sandbox");
-        assert_eq!(Sandbox::decide(None, true), Sandbox::On, "root without the opt-in is not changed");
-        assert_eq!(Sandbox::decide(Some(""), true), Sandbox::On);
-        assert_eq!(Sandbox::decide(Some("0"), true), Sandbox::On);
+        assert_eq!(Sandbox::decide(true, Some("1"), true), Sandbox::Off);
+        assert_eq!(
+            Sandbox::decide(true, Some("1"), false),
+            Sandbox::On,
+            "a user's browser keeps its sandbox"
+        );
+        assert_eq!(
+            Sandbox::decide(true, None, true),
+            Sandbox::On,
+            "root without the opt-in is not changed"
+        );
+        assert_eq!(Sandbox::decide(true, Some(""), true), Sandbox::On);
+        assert_eq!(Sandbox::decide(true, Some("0"), true), Sandbox::On);
+    }
+
+    #[test]
+    fn a_release_build_keeps_the_sandbox_whatever_the_environment_says() {
+        for value in [Some("1"), Some("true"), None] {
+            assert_eq!(Sandbox::decide(false, value, true), Sandbox::On, "{value:?}");
+        }
     }
 
     #[test]

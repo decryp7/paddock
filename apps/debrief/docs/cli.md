@@ -3,7 +3,7 @@
 The command line runs the same engine and store worker as the app, without a window: import files and folders,
 run query-language queries, run the analyses and build the incident report as HTML or PDF. It is meant for scripts,
 CI and headless machines. The executable is called `debrief`; the store worker (`debrief-store-worker`) and libduckdb must sit next to it, or be named by
-`DEBRIEF_STORE_WORKER` and `DEBRIEF_LIB_DIR`.
+`DEBRIEF_STORE_WORKER` and `DEBRIEF_LIB_DIR` (a release build ignores `DEBRIEF_STORE_WORKER`: the worker must be next to the executable).
 
 ```text
 debrief import PATH... [SOURCE OPTIONS] [--json]

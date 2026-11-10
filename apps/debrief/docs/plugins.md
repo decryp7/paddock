@@ -194,7 +194,7 @@ The complete, real examples are `crates/debrief-plugin-syslog` (text) and `crate
 
    Build the binary for the app with `scripts/build-plugins.sh` (release builds do it through
    `app/scripts/build-sidecars.mjs`); Debrief finds it next to its executable, `DEBRIEF_PLUGINS` overrides the path
-   for development.
+   in a debug build only (a release build ignores it).
 
 5. **Test it**: unit tests per format feature (call the importer directly), sniff positives and negatives
    (your sniffer must not claim the files under `/samples`), a garbage-input loop that must not panic, and a

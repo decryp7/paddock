@@ -30,10 +30,19 @@ pub fn binary_name() -> &'static str {
 }
 
 /// Where the bundled plugins binary lives: next to the application executable (Tauri puts `externalBin`
-/// sidecars there). `DEBRIEF_PLUGINS` overrides it, for development. A test binary (in cargo's `deps` folder) finds
-/// the one cargo built next to that folder.
+/// sidecars there). `DEBRIEF_PLUGINS` overrides it in a debug build only: a release build ignores it (and logs its name
+/// once), because the environment must not decide which program runs, possibly elevated. A test binary (in cargo's
+/// `deps` folder) finds the one cargo built next to that folder.
 pub fn default_binary() -> PathBuf {
-    if let Some(p) = std::env::var_os("DEBRIEF_PLUGINS") {
+    default_binary_with(cfg!(debug_assertions), std::env::var_os(PLUGINS_VAR))
+}
+
+/// The variable that names another plugins binary (development builds only).
+pub const PLUGINS_VAR: &str = "DEBRIEF_PLUGINS";
+
+/// [`default_binary`] for a given build mode and value of [`PLUGINS_VAR`].
+fn default_binary_with(debug: bool, env: Option<std::ffi::OsString>) -> PathBuf {
+    if let Some(p) = debrief_ipc::dev_env::resolve(debug, PLUGINS_VAR, env) {
         return PathBuf::from(p);
     }
     let dir = std::env::current_exe()
@@ -230,12 +239,17 @@ mod tests {
     }
 
     #[test]
-    fn the_binary_is_next_to_the_executable_unless_overridden() {
-        std::env::remove_var("DEBRIEF_PLUGINS");
-        assert_eq!(default_binary().file_name().unwrap().to_str().unwrap(), binary_name());
-        std::env::set_var("DEBRIEF_PLUGINS", "/custom/plugins");
-        assert_eq!(default_binary(), PathBuf::from("/custom/plugins"));
-        std::env::remove_var("DEBRIEF_PLUGINS");
+    fn the_binary_is_next_to_the_executable_unless_overridden_in_a_debug_build() {
+        let custom = Some(std::ffi::OsString::from("/custom/plugins"));
+        assert_eq!(
+            default_binary_with(true, None).file_name().unwrap().to_str().unwrap(),
+            binary_name()
+        );
+        assert_eq!(default_binary_with(true, custom.clone()), PathBuf::from("/custom/plugins"));
+        // A release build ignores the variable: the plugins come from the install location only.
+        let release = default_binary_with(false, custom);
+        assert_ne!(release, PathBuf::from("/custom/plugins"));
+        assert_eq!(release.file_name().unwrap().to_str().unwrap(), binary_name());
     }
 
     #[test]

@@ -20,15 +20,20 @@ pub trait StoreHost {
     fn open(&self, dir: &Path, profile: &Profile) -> StoreResult<SharedStore>;
 }
 
-/// The store worker process, found next to the executable (`DEBRIEF_STORE_WORKER` overrides it; `DEBRIEF_LIB_DIR` names the
-/// folder holding libduckdb when it is not next to the worker).
+/// The store worker process, found next to the executable (`DEBRIEF_STORE_WORKER` overrides it in a debug build only, a release
+/// build ignores it; `DEBRIEF_LIB_DIR` names the folder holding libduckdb when it is not next to the worker).
 pub struct WorkerHost {
     worker: debrief_store_client::StoreWorker,
 }
 
 /// Where the worker's executable is.
 pub fn worker_binary() -> PathBuf {
-    if let Some(p) = std::env::var_os("DEBRIEF_STORE_WORKER") {
+    worker_binary_with(cfg!(debug_assertions), std::env::var_os("DEBRIEF_STORE_WORKER"))
+}
+
+/// [`worker_binary`] for a given build mode and value of `DEBRIEF_STORE_WORKER`.
+fn worker_binary_with(debug: bool, env: Option<std::ffi::OsString>) -> PathBuf {
+    if let Some(p) = debrief_ipc::dev_env::resolve(debug, "DEBRIEF_STORE_WORKER", env) {
         return PathBuf::from(p);
     }
     let name = if cfg!(windows) {
@@ -74,5 +79,19 @@ impl StoreHost for WorkerHost {
 
     fn open(&self, dir: &Path, profile: &Profile) -> StoreResult<SharedStore> {
         Ok(Arc::new(self.worker.open_store(dir, profile.clone(), false, None)?))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_release_build_ignores_debrief_store_worker() {
+        let evil = Some(std::ffi::OsString::from("/evil/store-worker"));
+        assert_eq!(worker_binary_with(true, evil.clone()), PathBuf::from("/evil/store-worker"));
+        let release = worker_binary_with(false, evil);
+        assert_ne!(release, PathBuf::from("/evil/store-worker"));
+        assert!(release.file_name().unwrap().to_string_lossy().starts_with("debrief-store-worker"));
     }
 }

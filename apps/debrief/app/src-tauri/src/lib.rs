@@ -1292,7 +1292,7 @@ pub(crate) mod test_support {
     fn ensure_plugins_binary() {
         static BUILT: std::sync::Once = std::sync::Once::new();
         BUILT.call_once(|| {
-            if std::env::var_os("DEBRIEF_PLUGINS").is_some() || debrief_plugin_host::builtins::default_binary().exists() {
+            if debrief_ipc::dev_env::dev_override("DEBRIEF_PLUGINS").is_some() || debrief_plugin_host::builtins::default_binary().exists() {
                 return;
             }
             let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
