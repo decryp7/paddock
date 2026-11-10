@@ -542,6 +542,16 @@ review_by = 2027-01-07
 approved = "coordinator"
 
 [[ignored]]
+path = "apps/debrief/crates/debrief-store-worker/tests/it/exit_measure.rs"
+tests = ["measure_the_workers_exit_under_load"]
+gate = "not-gated"
+reason = "a measurement (rule 48), run by hand; results in apps/debrief/docs/performance.md, Store worker exit"
+owner = "Debrief 1.2"
+since = 2026-11-10
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
 path = "apps/dyno/app/e2e/screenshots-dialogs.spec.ts"
 tests = ["Dyno dialog screenshots"]
 gate = "not-gated"
