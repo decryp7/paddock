@@ -1,6 +1,6 @@
 # 86. A bug fix names its failing test, and a replay shows it failed without the fix
 
-- Status: Proposed (2026-11-10). Drafted at the user's request of 2026-11-10 (ER-21 redesigns) as Part B of the ADR 0038
+- Status: Proposed (2026-11-10), revision 2 (after review round 2 of `cd02c1217`). Drafted at the user's request of 2026-11-10 (ER-21 redesigns) as Part B of the ADR 0038
   amendment of the same date; the independent review of that draft (`f0979961a`) asked for it to stand alone and for the
   changes listed in "Review answers". Needs the decisions below.
 - Date: 2026-11-10
@@ -42,17 +42,22 @@ be amended; it never needs correcting afterwards.
 
 ### 2. The replay: `./dev check failing-first <commit>`
 
-1. **Where.** In one fixed replay worktree per agent worktree (`<worktree>-replay`, made once by `./dev worktree`,
-   ADR 0083), detached, reused for every replay of that worktree, so its build folder's source key (ADR 0025 amendment)
-   stays the same and the builds stay warm. Never in the author's worktree.
+1. **Where.** In one fixed, detached replay worktree **per integrator and app** (`replay-<owner>-<app>`, made once by
+   `./dev worktree`, ADR 0083), reused for every replay of that app by that owner, so its build folder's source key (ADR
+   0025 amendment) stays the same and the builds stay warm, and an agent count does not multiply build folders. Never in
+   the author's worktree.
 2. **The test side** of the commit is a **declared** list, `docs/test-paths.toml` (globs: `**/tests/**`, `*_tests.rs`,
    `**/testing.rs`, `*.spec.ts`, `*.test.{ts,mjs,js,cjs}`, `**/fixtures/**`, ...), plus the hunks inside `#[cfg(test)]`
-   modules of other Rust files, found by a syn pass. A changed file that **looks like a test** (a name containing `test`,
-   `spec` or `fixture`) but matches no glob is **refused** ("declare it in docs/test-paths.toml or rename it"), so the
-   split cannot silently treat test code as fix code.
+   modules of other Rust files, found by a syn pass. A changed file that **looks like a test** but matches no glob is
+   **refused** ("declare it in docs/test-paths.toml or rename it"), so the split cannot silently treat test code as fix
+   code. "Looks like a test" is matched by **path segment** (a folder named `test`, `tests`, `spec` or `fixture(s)`) or by
+   a name part `.test.`, `.spec.`, `_test`, `-test`; never by a substring, so `scripts/release/latest-json.mjs` or
+   `attestation.rs` is not refused.
 3. **Red.** At `<commit>^` with only the test side applied, each named test runs **twice** through the hermetic child
-   helper (ADR 0077 amendment); it must fail both times on an assertion or a panic (`red 2/2`). One pass in two is
-   `flaky-red`, reported as a failure of the claim (ER-12).
+   helper (ADR 0077 amendment); it must fail both times on an assertion or a panic (`red 2/2`) **raised at a site inside
+   the named test's own file** (the panic location or the assertion's stack frame). A failure raised elsewhere (a fixture
+   helper, a setup hook, another test) is counted and printed as `red elsewhere: <site>` and does not count as red. One
+   pass in two is `flaky-red`, reported as a failure of the claim (ER-12).
 4. **Not measured.** The test cannot run without the fix: a Rust compile error, or in TypeScript an import that does
    not resolve, `X is not a function`, `X is not defined` or `Cannot read properties of undefined` raised from the test's
    own call of the code under test (the new API is missing, not wrong). These count as `not measured`.
@@ -60,19 +65,26 @@ be amended; it never needs correcting afterwards.
 6. **Output.** The failing output's tail per test, kept with the push gate's stamp and printed in the landing summary:
    `Failing-first: <n> red 2/2 then green, <k> waived, <m> not measured (<m> reviewer revert checks recorded)`.
 
-### 3. "Not measured" needs a reviewer's record, within a limit
+### 3. "Not measured" and "waived" need a reviewer's record, within a limit
 
-A `not measured` or `waived` fix lands only with a recorded rule-5 reviewer check: the reviewer's report line
-`Revert-check: <commit> <test id> red` (the reviewer reverted the non-test change by hand, or ran `cargo mutants
---in-diff`), which the integrator copies into the landing summary. The landing summary turns red when more than a
-threshold of a landing's `fix:` commits are `not measured` (D4: 25 % to start, set after WP-5's replay of real ranges), so
-the escape hatch cannot become the norm.
+- A **`not measured`** fix lands only with the reviewer's `Revert-check: <commit> <test id> red`: the rule-5 check (the
+  non-test change reverted by hand, or `cargo mutants --in-diff`), run in a **detached worktree the reviewer owns**
+  (ADR 0083 R7: a reviewer writes only in its own detached review copy, never in the author's worktree).
+- A **`waived`** fix (no test seam) has no test to revert; it lands only with the reviewer's
+  `Waiver-accepted: <commit> <reason>`, which says the reviewer checked that no test seam exists.
+- The integrator copies both kinds of line into the landing summary, which counts them separately:
+  `Failing-first: <n> red 2/2 then green, <m> not measured (<m> revert checks), <k> waived (<k> accepted)`.
+- **Threshold.** The summary turns red when `not measured` exceeds 25 % of the landing's `fix:` commits (D4; set after
+  WP-5's replay of real ranges). Waivers are **not** in that 25 %: they are counted and listed on their own, and every
+  one needs its `Waiver-accepted:` line, so the escape hatches cannot become the norm unseen.
 
 ### 4. Where it runs
 
-In the integrator's landing step beside `./dev check --commits` (ADR 0038 A3), for every `fix:` commit of the range,
-through `heavy`. The push gate runs only the trailer form (cheap); the replay needs builds and runs at landing, or by the
-author on demand before review.
+- **After a push, in the background:** `./dev push-tests` (ADR 0038 amendment, A1b) also replays the pushed `fix:`
+  commits, so the author learns early; its result is printed, not trusted at landing.
+- **At landing (the check that counts):** the integrator's landing step beside `./dev check --commits` (ADR 0038 A3),
+  for every `fix:` commit of the range, through `heavy`.
+- The push gate itself checks only the trailer's form (cheap).
 
 ## Check (positive controls, ER-33)
 
@@ -80,7 +92,10 @@ A fixture repository (`FixtureRepo`, ADR 0077 amendment) with: (i) a fix whose t
 (ii) a proper fix: red 2/2 then green; (iii) a test inside `#[cfg(test)]` in the fixed file: split and replayed; (iv) a
 trailer naming a test that does not exist: `check broken`; (v) a `fix:` commit without a trailer: commit-lint refuses;
 (vi) a test that fails 1 of 2 at the parent: `flaky-red`; (vii) a TS test whose import of a new function fails: `not
-measured`; (viii) a changed `foo.test-helper.ts` outside the declared globs: refused. The replay prints the number of
+measured`; (viii) a changed `foo.test-helper.ts` outside the declared globs: refused; (ix) a changed
+`scripts/release/latest-json.mjs`: **not** refused (negative control of the test-looking match); (x) a test whose
+failure is raised in a shared fixture helper: `red elsewhere`, not red; (xi) a waived fix without `Waiver-accepted:`
+and a not-measured fix without `Revert-check:`: the landing summary is red. The replay prints the number of
 tests it ran; 0 for a non-waived fix is `check broken`. Registered in `docs/gates.toml` (ADR 0060).
 
 ## Alternatives
@@ -95,8 +110,8 @@ tests it ran; 0 for a non-waived fix is `check broken`. Registered in `docs/gate
 ## Consequences
 
 - Rule 5 becomes checkable; a test written with the fix that never fails is found at landing, not by a reviewer's luck.
-- Every agent worktree gains one replay worktree (one more warm build folder per active worktree; disk bounded by ADR
-  0083's worktree tool and the orphan sweep).
+- Each integrator gains one replay worktree per app it lands (one warm build folder each; disk bounded by ADR 0083's
+  worktree tool and the orphan sweep).
 - Landings with `fix:` commits take the replay's build and two runs per named test.
 
 ## Rollback
@@ -111,8 +126,8 @@ the trailer requirement.
 | D1 | The record | (a) trailer plus replay; (b) trailer plus pasted output read by the reviewer; (c) a red `test:` commit first | (a) |
 | D2 | The test side | (a) a declared glob list plus syn for `#[cfg(test)]` hunks, refusing unknown test-looking files; (b) path heuristics only | (a) |
 | D3 | Red means | (a) fails 2 of 2 on an assertion or panic; compile, import and missing-function failures are `not measured`; (b) any failure counts | (a) |
-| D4 | `not measured` and waived fixes | (a) land only with a recorded reviewer revert check, and the landing summary is red above 25 % of the landing's `fix:` commits; (b) no limit | (a) |
-| D5 | Where the replay runs | (a) one fixed replay worktree per agent worktree, at landing (and on demand); (b) in CI on every push | (a) |
+| D4 | `not measured` and waived fixes | (a) `not measured` needs `Revert-check:`, `waived` needs `Waiver-accepted:`, both from the reviewer; counted separately; the summary is red above 25 % `not measured` (waivers outside the 25 %, each accepted); (b) no records, no limit | (a) |
+| D5 | Where the replay runs | (a) one fixed replay worktree per integrator and app, at landing (the check that counts), plus a background replay from `push-tests` after a push; (b) in CI on every push | (a) |
 | D6 | Release gating | (a) none for app tags; required at landing for `fix:` commits once WP-3 lands; (b) the next tag waits | (a) |
 
 ## Work packages (agent-days, one agent)
@@ -121,11 +136,11 @@ the trailer requirement.
 |---|---|---|
 | WP-1 | Trailer form in commit-lint (push gate step 1) and the waiver form | 0.5 |
 | WP-2 | `docs/test-paths.toml`, the split (globs, syn for `#[cfg(test)]` hunks, refusal of unknown test-looking files) | 1.25 |
-| WP-3 | `./dev check failing-first`: replay worktree, red 2/2, not-measured classification for Rust and TS, green, output | 2 |
-| WP-4 | Landing summary line, `Revert-check:` records, the threshold; the `integrate` skill and the reviewer brief | 0.5 |
+| WP-3 | `./dev check failing-first`: replay worktree per integrator and app, red 2/2 at the test's own site, not-measured classification for Rust and TS, green, output; the background call from `push-tests` | 2.25 |
+| WP-4 | Landing summary line, `Revert-check:` and `Waiver-accepted:` records counted apart, the threshold; the `integrate` skill and the reviewer brief (detached own worktree) | 0.5 |
 | WP-5 | Replay the `fix:` commits of three recent landings; record timings in `docs/benchmarks.md`; set the threshold | 0.5 |
 | WP-6 | Rule 5 text (the record and the replay), lessons entry, index | 0.25 |
-| | **Total** | **5** |
+| | **Total** | **5.25** |
 
 ## Release impact (ER-31)
 
@@ -137,4 +152,7 @@ Tooling only; no shipped code. No app tag waits for it (D6 (a)).
 - TypeScript import and `is not a function` failures count as not measured: §2 item 4.
 - The test side is a declared list plus syn, refusing unknown test-looking files: §2 item 2.
 - Red on 2 of 2 runs: §2 item 3.
-- One fixed replay worktree per agent worktree, so its build folder key stays stable: §2 item 1.
+- One fixed replay worktree (revision 2 of this ADR: per integrator and app), so its build folder key stays stable: §2 item 1.
+- Round 2: a waived fix needs `Waiver-accepted:`, not `Revert-check:` (§3); test-looking files matched by path segment
+  (§2 item 2); red at the test's own site (§2 item 3); the reviewer's check in its own detached worktree (§3); a
+  background replay from `push-tests` (§4).
