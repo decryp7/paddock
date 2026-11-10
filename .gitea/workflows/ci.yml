@@ -109,10 +109,18 @@ jobs:
           PLAN_WEBKIT: ${{ (inputs.webkit == true || inputs.webkit == 'true') && '1' || '' }}
           # The rerun reads the earlier run's jobs and logs through the API (tools/paddock-dev/src/plan_since.rs).
           PLAN_SINCE_RUN: ${{ github.event.inputs.since_run }}
+          # Fallback for one release (ADR 0022 R4): the repository variable PLAN_PLANNER=node plans with scripts/affected.mjs again
+          # (a rerun of failures, PLAN_SINCE_RUN, always uses ./dev plan). Unset: ./dev plan. Remove with the script.
+          PLAN_PLANNER: ${{ vars.PLAN_PLANNER }}
           # The crate and paddock-dev legs when the plan names none of its own (every run but a rerun of their failures).
           PLAN_OS_LEGS: '[{"os":"ubuntu-latest"},{"os":"windows-latest"},{"os":"macos-latest"}]'
         run: |
-          if [ -n "$PLAN_SINCE_RUN" ]; then ./dev plan --ci; else node scripts/affected.mjs --ci; fi
+          if [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_PLANNER" = node ]; then
+            echo "::warning::PLAN_PLANNER=node: planning with scripts/affected.mjs, the fallback that goes with the script (ADR 0022 R4). Unset the repository variable to plan with ./dev plan."
+            node scripts/affected.mjs --ci
+          else
+            ./dev plan --ci
+          fi
           grep -q '^crate_legs=' "$GITHUB_OUTPUT" || echo "crate_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
           grep -q '^paddock_dev_legs=' "$GITHUB_OUTPUT" || echo "paddock_dev_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
 
