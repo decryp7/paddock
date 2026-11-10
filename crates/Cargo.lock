@@ -3545,6 +3545,7 @@ dependencies = [
  "getrandom 0.3.4",
  "libc",
  "log",
+ "mio",
  "paddock-commands",
  "paddock-dialogs",
  "paddock-env",

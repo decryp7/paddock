@@ -2,11 +2,14 @@
 //! process under `cargo test` (nextest runs each in its own), so two modules that each installed "their" logger made the capture
 //! of whichever lost the race see nothing: three loopback log tests failed on Linux, 3 of 3 full runs.
 
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 /// Every log line of the process since [`install`], for a test that checks what a connection's lines say (ER-27). Each test looks
 /// for the lines of its own connection (its port or id), so tests running side by side do not disturb each other.
 pub(crate) static LOGGED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// Notified after every line pushed to [`LOGGED`], so a test waits for a line instead of spinning.
+static PUSHED: Condvar = Condvar::new();
 
 struct Capture;
 
@@ -19,6 +22,7 @@ impl log::Log for Capture {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(record.args().to_string());
+        PUSHED.notify_all();
     }
     fn flush(&self) {}
 }
@@ -39,6 +43,28 @@ pub(crate) fn install() {
             .any(|l| l == "paddock_mcp test_log: installed check"),
         "another logger is installed: only crate::test_log may install one in this crate's tests"
     );
+}
+
+/// Waits until a captured line matches `found` and returns it, or `None` once `guard` has passed (a hang guard: the line is
+/// one that must come, and the wait ends as soon as it does).
+pub(crate) fn wait_for_line(found: impl Fn(&str) -> bool, guard: Duration) -> Option<String> {
+    let until = Instant::now() + guard;
+    let mut lines = LOGGED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    loop {
+        if let Some(line) = lines.iter().find(|l| found(l)) {
+            return Some(line.clone());
+        }
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return None;
+        }
+        lines = PUSHED
+            .wait_timeout(lines, left)
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .0;
+    }
 }
 
 #[cfg(test)]
