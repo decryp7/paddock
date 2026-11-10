@@ -1,7 +1,7 @@
 # 84. Accessible names need a role that allows them: a template lint, one loading-state component, a shared ARIA spec helper and axe over loading, empty and error states
 
 - Status: Proposed (2026-11-10). The user asked for this redesign on 2026-11-10 (ER-21). Revised after independent
-  review round 1 (CHANGES: 1 P1, 5 P2). Needs the decisions below and a second review round before any build.
+  review rounds 1 (1 P1, 5 P2) and 2 (approved, one P2 applied). Needs the decisions below before any build.
 - Date: 2026-11-10
 - Related: ER-21 / rule 40 (recurring bugs mean a missing design rule), ER-22 / rules 42, 43 and 55 (share first; one
   implementation per mechanism), ER-33 / rule 71 (a check counts only with a positive control), rule 47 (Material and
@@ -165,8 +165,12 @@ Beside `pd-empty-state` and `pd-error-state` (`src/lib/states.ts`): `<pd-loading
 renders an indeterminate progress indicator: `role="progressbar"` with the name ("Loading widgets"), **no**
 `aria-valuenow`, and **no** `aria-busy` on itself, with `pd-skeleton` children (already `aria-hidden`). `aria-busy="true"`
 goes on the host or panel whose content is loading (the `dy-async` host, the jobs list, the page section), as ARIA 1.2's
-progressbar text asks: "set the aria-busy attribute to true on the region until it is finished loading". The component
-also sets `data-pd-loading` on itself, so tests can find it without depending on the role (§4).
+progressbar text asks: "set the aria-busy attribute to true on the region until it is finished loading", and the busy
+host points to the indicator with `aria-describedby="<the progressbar's id>"` (the same text: "use aria-describedby to
+point to the status"). The component generates a unique id and exposes it (`loadingId`), so a host binds
+`[attr.aria-describedby]="busy() ? loading.loadingId : null"`; the shared wrappers (`dy-async`'s replacement, the jobs
+list, the activity page) do this themselves. The component also sets `data-pd-loading` on itself, so tests can find it
+without depending on the role (§4).
 
 - **Why not a labelled status region.** A `role="status"` element inserted already busy and empty is a live region
   that has never changed while it was present and announces content changes, not its name; screen readers are likely to
@@ -176,7 +180,9 @@ also sets `data-pd-loading` on itself, so tests can find it without depending on
   shell (present from start-up, `aria-live="polite"`), into which the shell writes "Loading <what>" and "<what> loaded";
   never from a region created at the same moment as the text.
 - **WP-2 checks both** with VoiceOver on macOS and Narrator in the local Windows VM (recorded in the PR): the progressbar
-  is reached and read with its name while browsing, and the shell region speaks its two lines once each.
+  is reached and read with its name while browsing inside the busy host, the host's description names it, and the
+  shell region speaks its two lines once each. If the progressbar is not read inside a busy host in either browse mode,
+  D2 (c) is the fallback.
 
 Dyno's `dy-async`, Pitcrew's `load-state`, paddock-ui's jobs list and activity page, and the other loading rows use it;
 their copies of the markup go (rule 55: registered in `docs/known-copies.toml` until removed, if any app cannot move in
@@ -247,7 +253,7 @@ and C33."
 | --- | --- | --- |
 | WP-0 | Rerun the inventory with axe-core's role data (adds `a` without `href`, `label`, `abbr`, `mark`, `time`), confirm each row by reading it, turn them into the lint rule's fixture list; confirm C33's status for Pitcrew, Pitwall and Spotter | 0.75 |
 | WP-1 | `paddock/template-name-needs-role` with fixtures and positive controls, `hostRoleDirectives` option, preset wiring | 1.5 |
-| WP-2 | `pd-loading-state` (role per D2, `aria-busy` on the host, `data-pd-loading`), the shell's persistent live region, a screen-reader check of both with VoiceOver on macOS and Narrator in the local Windows VM (recorded), gallery entry, CHANGELOG | 1.5 |
+| WP-2 | `pd-loading-state` (role per D2, `aria-busy` and `aria-describedby` on the host, `loadingId`, `data-pd-loading`), the shell's persistent live region, a screen-reader check of both with VoiceOver on macOS and Narrator in the local Windows VM (recorded), gallery entry, CHANGELOG | 1.5 |
 | WP-3 | `expectAriaValid` in `@decryp7/paddock-ui/testing` with its own tests; replace Dyno's `aria-name.ts` | 1 |
 | WP-4 | `failIncomplete`, `states` and per-state `ready` in `axe.ts`; the `state=` switch in the mock backends of Dyno, Debrief and the shell demo (data reads only, a final error kind the shared retry skips); C33 extension; measure the added time | 2.5 |
 | WP-5 | Fix the 61 rows through the mechanism: paddock-ui and shell-demo 0.5, Dyno 0.5 (after the branch lands), Pitwall 0.5, Pitcrew 0.5, Debrief 0.5, Spotter 0.25 | 2.75 |
@@ -270,7 +276,7 @@ Nothing here blocks a tag in flight.
 | # | Question | Options | Recommendation |
 | --- | --- | --- | --- |
 | D1 | Where the static check lives | (a) An ESLint template rule in the shared preset. (b) A conformance check over template text. | (a): it has the template AST and runs in the editor. |
-| D2 | The role of a loading placeholder | (a) `pd-loading-state` is `role="progressbar"` with the name, no value and no `aria-busy` on itself; `aria-busy` on the host or panel being loaded; a start-of-loading announcement, where wanted, from one persistent shell live region. (b) `role="status"` with the name (Dyno's interim fix). (c) `role="status"` with visually hidden "Loading ..." text. | (a), checked with VoiceOver and Narrator in WP-2. (b) is likely silent (a busy, labelled live region inserted with its content); it stays only until Dyno moves. Not yet verified with a screen reader. |
+| D2 | The role of a loading placeholder | (a) `pd-loading-state` is `role="progressbar"` with the name, no value and no `aria-busy` on itself; `aria-busy` on the host or panel being loaded, which points to it with `aria-describedby`; a start-of-loading announcement, where wanted, from one persistent shell live region. (b) `role="status"` with the name (Dyno's interim fix). (c) `role="status"` with visually hidden "Loading ..." text. | (a), checked with VoiceOver and Narrator in WP-2. (b) is likely silent (a busy, labelled live region inserted with its content); it stays only until Dyno moves. Not yet verified with a screen reader. |
 | D3 | The spec helper | (a) axe-core in jsdom (`expectAriaValid`). (b) A role table (Dyno's helper extended with implicit roles). | (a): one engine for unit and browser checks. |
 | D4 | States in the axe scans | (a) Loading, empty and error in both themes. (b) In one theme (the loaded state stays in both). (c) Only loading. | (b), switching to (a) if WP-4 measures under 20 % added time. |
 | D5 | Rollout | (a) The rule lands as `error` with every app's fixes in one change. (b) Per app with a shrink-only baseline until each app's next tag. | (a): 61 small edits, about 2.75 days; a baseline would live longer than the work. |

@@ -1,7 +1,7 @@
 # 83. Agents cannot write outside their own worktree: one worktree tool with owner locks, cleanup that skips locks, a guard hook for the primary checkout and other agents' worktrees, and a probe
 
 - Status: Proposed (2026-11-10). The user asked for this redesign on 2026-11-10 (ER-21). Revised after independent
-  review round 1 (CHANGES: 4 P1, 8 P2). Needs the decisions below and a second review round before any build.
+  review rounds 1 (4 P1, 8 P2) and 2 (2 P1, 4 P2). Needs the decisions below and a third review round before any build.
 - Date: 2026-11-10
 - Related: ER-2 / rule 2 (every agent works in its own worktree; the main checkout stays on `main` for the coordinator),
   ER-3 (no `git stash`), ER-14 (an agent's run must not change the machine), ER-21 / rule 40 (recurring bugs mean a
@@ -92,22 +92,26 @@ repository from it with `git rev-parse --git-common-dir`.
 
 | Command | Does |
 | --- | --- |
-| `./dev worktree add <name> --base origin/main [--sparse <paths>] --owner <role>:<task>` | `git worktree add --lock --reason "owner=<role>:<task>; branch=<name>; created=<UTC>; by=<coordinator\|agent>"` under the configured root (`/Volumes/d7sst7/dev-targets/wt`), sparse cone if asked; prints path, branch, `CARGO_TARGET_DIR` and e2e port (`e2ePort` already derives from the path) as JSON. Refuses an existing path or branch. The integrator's train worktree is `--owner integrator:<train>` (for example `integrator:train/2026-11-10-1`). |
-| `./dev worktree claim <path>` | The agent that will work in the worktree runs it first (one brief line). The guard hook (§2) records the caller's `agent_id` for that worktree in the owner map before the command runs; the command checks the lock exists and prints the owner note. A worktree an agent made itself with `add` is claimed by that same call. |
+| `./dev worktree add <name> --base origin/main [--sparse <paths>] [--detach] --owner <role>:<task>` | `git worktree add --lock --reason "owner=<role>:<task>; branch=<name>; created=<UTC>; by=<coordinator\|agent>"` under the configured root (`/Volumes/d7sst7/dev-targets/wt`), sparse cone if asked; prints path, branch, `CARGO_TARGET_DIR` and e2e port (`e2ePort` already derives from the path) as JSON. `--detach` makes a review copy at `--base` with no branch (for R7). Refuses an existing path or branch. The integrator's train worktree is `--owner integrator:<train>` (for example `integrator:train/2026-11-10-1`). |
+| `./dev worktree claim <path>` | The agent that will work in the worktree runs it first (one brief line), with a literal path. The guard hook (§2, R8) checks and records the caller's `agent_id` for that worktree in the owner map before the command runs: it refuses a target it cannot resolve, a worktree that is not locked, and a worktree the map already binds to a **different** `agent_id` ("claimed by <id>; the coordinator reassigns it"). The same agent claiming again passes. A worktree an agent made itself with `add` is claimed by that same call. |
+| `./dev worktree reassign <path>` | Coordinator only (the hook refuses it to agents): clears the owner-map entry and keeps the lock, so the next agent can claim it. Used when an agent ended without releasing, or the coordinator hands a worktree on. |
+| `./dev worktree drop <path>` | The owner removes a worktree it claimed itself (a reviewer's or scout's detached review copy, a scratch-only worktree): refuses a worktree with commits not on `origin` or with uncommitted changes, then unlocks, removes it and its map entry. |
 | `./dev worktree release <path>` | Unlocks and removes the owner-map entry: the owner at hand-off, or the coordinator after the agent's completion notification. |
 | `./dev worktree list` | Every worktree: branch, lock note, claimed `agent_id`, lock age, merged into `origin/main` (yes, no, empty), dirty, and whether a process has its current directory inside it (`lsof -a -d cwd`, a hint only). |
 | `./dev worktree clean [--dry-run]` | Removes only worktrees that are **unlocked**, merged into `origin/main` (pushed is not enough), clean, and with no process inside; then their branch and build folder. Locked ones are listed with their owner note and kept. Never `-f -f`, never `rm`. |
 
 **The owner map** is `<git-common-dir>/paddock-worktree-owners.json` (`{ "<worktree path>": { "agent_id", "agent_type",
-"claimed": "<UTC>" } }`), written atomically (temp file and rename) by the hook only, on an agent's `./dev worktree
-add|claim` call; it is the hook's one side effect. An entry whose command then failed is harmless: an entry counts only
+"claimed": "<UTC>" } }`), written by the hook on an agent's `./dev worktree add|claim` call and by the tool on
+`reassign`, `release` and `drop`; the hook's one side effect. Every update is a read-check-write under an exclusive
+`flock` on the sidecar `paddock-worktree-owners.lock` (the hook and `./dev` take the same lock), and the write itself is
+atomic (temp file and rename), so two agents claiming at once cannot both win. An entry whose command then failed is harmless: an entry counts only
 while its worktree is locked. The lock note says what the worktree is for; the map says who may write in it. A lock
 older than the threshold of D3 is reported, never removed automatically (rule 53: a note is a hint, the coordinator's
 completion signal is the proof).
 
 ### 2. A PreToolUse guard hook: `.claude/hooks/own-worktree.sh`
 
-One hook, matched on `Bash`, `Edit`, `Write`, `NotebookEdit` and the Serena write tools (D11), built like
+One hook, matched on `Bash`, `Edit`, `Write`, `NotebookEdit` and `mcp__serena__.*` (D11), built like
 `no-pgrep-wait`: a shell wrapper and a Python matcher run with `python3 -I`; quoted text and heredoc bodies removed
 first; `bash -c`, `eval`, heredocs and here-strings fed to a shell scanned again. The parsing helpers move to one shared
 `.claude/hooks/shellparse.py` that both hooks import.
@@ -120,8 +124,9 @@ first; `bash -c`, `eval`, heredocs and here-strings fed to a shell scanned again
   primary's folder is its own checkout, because `--show-toplevel` answers the innermost one.
 - *Effective directory* of a command: start at the input `cwd`; follow each `cd`/`pushd` that is guarded (R1) and has
   a literal target; apply `git -C X` (several compose), `--git-dir`, `--work-tree`, `GIT_DIR=` and `GIT_WORK_TREE=`.
-  A target is **unknown** when it is empty, contains a variable, a command substitution or a glob, or is a `cd` with no
-  argument or `cd -`.
+  A variable assigned a literal earlier in the same command (`VAR=/abs; ...`, `export VAR=/abs; ...`, also as a prefix
+  `VAR=/abs cmd`) is substituted first; a target is **unknown** when, after that, it is empty, still contains a variable,
+  a command substitution or a glob, or is a `cd` with no argument or `cd -`.
 - *Git write*: a subcommand that changes a working tree, index, HEAD or a local ref: `add`, `am`, `apply` (not
   `--check`), `branch` with `-d -D -m -M -c -C -f` or a new name, `checkout`, `cherry-pick`, `clean`, `commit`, `config`
   (not `--get*`/`--list`), `merge`, `mv`, `notes`, `pull`, `rebase`, `reset`, `restore`, `revert`, `rm`,
@@ -138,10 +143,12 @@ first; `bash -c`, `eval`, heredocs and here-strings fed to a shell scanned again
 | R4 | A recursive delete or move whose target is, or contains, a **locked** worktree: `rm -r`, `rm -rf`, `trash`, `mv`, `find <path> -delete` or `-exec rm`, `rsync --delete` into it, `git clean -d/-x` in a parent, `git worktree remove -f -f`, `git worktree unlock` of a worktree the caller does not own. A literal target is resolved and tested for a locked worktree beneath it; an unknown target (`rm -rf "$VAR"`, `rm -rf */`) is refused when the input `cwd` or the target's literal prefix contains a locked worktree. | everyone | "<path> is locked by <owner note>. Release it with `./dev worktree release` once its owner has ended, then `./dev worktree clean`." |
 | R5 | A file edit (`Edit`/`Write` `file_path`, `NotebookEdit` `notebook_path`) whose checkout is the primary | agents | "Edit the file in your own worktree." |
 | R6 | **Owner binding.** A git write (effective directory known or, when unknown, the `cwd`) or a file edit whose checkout is a **locked** worktree that the owner map binds to a different `agent_id`, or that no entry binds yet | agents | "<path> belongs to <owner note> (agent <id>). Work in your own worktree; read others with `git show <rev>:<path>` or `git archive`." Unclaimed: "Run `./dev worktree claim <path>` first." |
-| R7 | **Roles.** For `agent_type` `reviewer` or `scout`: any git write or file edit whose checkout is any worktree of the repository (scratch folders and scratch clones are not worktrees of it and pass) | reviewer, scout | "Reviewers and scouts are read-only on the repository (ER-25): copy what you need into your scratch folder with `git archive`." |
+| R7 | **Roles.** For `agent_type` `reviewer` or `scout`: any git write or file edit whose checkout is any worktree of the repository, except a worktree the owner map binds to the same agent that is **detached** (a review copy at a fixed commit, no branch). Scratch folders and scratch clones are not worktrees of the repository and pass. Such an agent removes its own review copy with `./dev worktree drop`. | reviewer, scout | "Reviewers and scouts are read-only on the repository (ER-25): read with `git show` or `git archive` into your scratch folder, or make a detached review copy of your own (`./dev worktree add <name> --base <rev> --detach --owner reviewer:<task>`)." |
+| R8 | **Worktree tool calls.** An agent's raw `git worktree add` (anywhere); `./dev worktree claim` of an unknown target, of an unlocked worktree, or of one the owner map binds to a different `agent_id`; an agent's `./dev worktree reassign` | agents | Raw add: "Make worktrees with `./dev worktree add <name> --owner <role>:<task>` (locks and claims it)." Claim: "<path> is claimed by <id>; the coordinator reassigns it with `./dev worktree reassign`." Reassign: "Only the coordinator reassigns a worktree." |
 
-- **Fail-open stays the default** (D7): a command the matcher cannot parse passes, except R2's and R4's unknown-target
-  cases, which refuse because they are exactly incidents 2 and 1.
+- **Fail-open stays the default** (D7): a command the matcher cannot parse passes, except R2's, R4's and R8's
+  unknown-target cases, which refuse because they are exactly incidents 2 and 1 and a claim that could take over a
+  worktree.
 - **Malformed input** (not JSON, no `tool_input`) passes and writes one line to stderr naming the hook and the parse
   error, never the command text.
 - **Logs.** Each refusal prints the rule id, the resolved directory, the checkout and the git subcommand to stderr (no
@@ -157,7 +164,7 @@ with `agent_type` `implementer`. The minimum cases:
 | deny (R1) | `cd /missing; git merge x` (incident 2); `cd $WT` newline `git commit -m x`; `cd $WT & git status`; `cd $WT \|\| echo no; git merge x`; `cd $WT && a; b`; `bash -c 'cd /x; git merge y'`; `for d in a b; do (cd $d; git pull); done`; `f() { cd /x; git merge y; }; f`; `set -e; set +e; cd /x; git merge y` |
 | pass (R1) | `cd $WT && git merge x`; `cd $WT \|\| exit 1; git merge x`; `set -e; cd $WT; git merge x`; `for d in a b; do (cd $d && git pull); done`; `f() { cd /x \|\| return; git merge y; }; f` |
 | deny (R2) | agent `git commit -m x`; agent `git -C <primary> reset --hard`; agent `git --git-dir=<primary>/.git --work-tree=<primary> checkout x`; agent `GIT_DIR=<primary>/.git git commit`; agent `git -C "$WT" commit -m x` (unknown target, `cwd` primary); agent `cd "$WT" && git merge x`; agent `cd $UNSET && git merge x`; agent `git -C "" commit -m x`; coordinator `git merge x` in the primary (message names the integrator); coordinator `git reset --hard origin/main` in the primary |
-| pass (R2) | agent `git status`, `git log`, `git show origin/main:x` in the primary; agent `git -C /abs/own-wt commit -m x`; agent `git -C "$WT" commit` with `cwd` its own worktree; coordinator `git fetch`, `git pull --ff-only`, `git merge --ff-only origin/main`, `git branch -d merged-branch`, `git worktree prune`, `./dev worktree add t --owner integrator:train/2026-11-10-1` in the primary |
+| pass (R2) | agent `git status`, `git log`, `git show origin/main:x` in the primary; agent `git -C /abs/own-wt commit -m x`; agent `WT=/abs/own-wt; git -C "$WT" commit -m x`; agent `export WT=/abs/own-wt; cd "$WT" && git commit -m x`; agent `git -C "$WT" commit` with `cwd` its own worktree; coordinator `git fetch`, `git pull --ff-only`, `git merge --ff-only origin/main`, `git branch -d merged-branch`, `git worktree prune`, `./dev worktree add t --owner integrator:train/2026-11-10-1` in the primary |
 | deny (R3) | agent `git -C /abs/own-wt branch -f main HEAD`; agent `git -C /abs/own-wt fetch origin x:main`; agent `git push . HEAD:main` |
 | deny (R4) | `rm -rf <locked wt>`; `rm -rf <parent of locked wt>/*`; `rm -rf "$VAR"` with `cwd` the parent of a locked worktree; `find <parent> -name x -delete`; `rsync -a --delete src/ <locked wt>/`; `git -C <parent repo> clean -xdf` above a locked worktree; agent `git worktree unlock <locked wt of another agent>` |
 | pass (R4) | `rm -rf <unlocked wt>`; `rm -rf <own scratch>/tmp`; `find <own scratch> -delete` |
@@ -165,9 +172,12 @@ with `agent_type` `implementer`. The minimum cases:
 | pass (R5) | agent `Write` of a file in its own worktree, in the nested worktree it owns, in its scratch folder |
 | deny (R6) | `agent-B` `git -C $WT checkout --detach` (incident 5); `agent-B` `Edit` of `$WT/x.ts`; `agent-B` `git commit` in the unclaimed locked worktree |
 | pass (R6) | `agent-A` `git -C $WT commit -m x`; `agent-B` `git -C $WT log`; `agent-B` `./dev worktree claim <its own new wt>` |
-| deny (R7) | `reviewer` `git -C <any wt> checkout x`; `scout` `Edit` of a file in any worktree |
-| pass (R7) | `reviewer` `git -C <wt> show rev:path`; `reviewer` `git archive rev \| tar -x -C <own scratch>`; `scout` `git -C <own scratch clone> commit` |
-| deny (D11) | agent Serena `replace_symbol_body`, `create_text_file` |
+| deny (R7) | `reviewer` `git -C <any wt> checkout x`; `scout` `Edit` of a file in any worktree; `reviewer` `git -C <own claimed wt on a branch> commit` |
+| pass (R7) | `reviewer` `git -C <wt> show rev:path`; `reviewer` `git archive rev \| tar -x -C <own scratch>`; `scout` `git -C <own scratch clone> commit`; `reviewer` `git -C <own detached review copy> checkout <rev>`; `reviewer` `./dev worktree drop <own detached review copy>` |
+| deny (R8) | agent `git worktree add ../x -b x`; `agent-B` `./dev worktree claim $WT` (claimed by `agent-A`); agent `./dev worktree claim "$WT"` (unknown target); agent `./dev worktree claim <unlocked wt>`; agent `./dev worktree reassign $WT` |
+| pass (R8) | coordinator `./dev worktree reassign $WT`, then `agent-B` `./dev worktree claim $WT`; `agent-A` `./dev worktree claim $WT` again; two claims of one worktree started together: exactly one passes (the `flock` test) |
+| deny (D11) | agent `mcp__serena__serena_repl` (any input); agent `mcp__serena__replace_symbol_body`, `mcp__serena__create_text_file` |
+| pass (D11) | agent `mcp__serena__initial_instructions`; the coordinator's Serena calls |
 | pass, logged | malformed JSON; JSON without `tool_input`; a command mentioning `cd x; git merge` only in quotes or in a heredoc fed to `cat` |
 
 The test prints the number of cases and fails when none ran (rule 71). The hook and its test land in git with the two
@@ -229,7 +239,7 @@ the primary; the coordinator's primary-checkout probe runs at every landing."
 - **Residual risk (writes the hook does not see):** non-git writes through Bash (`sed -i`, `npm install`, `pip
   download`, a redirect `> file`) in the primary or another worktree; hidden git writes behind a git alias, `gh`
   (`gh pr checkout`, `gh repo sync`), npm and husky scripts, `./dev` subcommands and other tools that run git
-  themselves; MCP tools other than the Serena ones. The probe lists their results afterwards in the primary (incident 8
+  themselves; MCP tools other than Serena. The probe lists their results afterwards in the primary (incident 8
   shows up as untracked entries); in other worktrees only the owner notices.
 
 ## Work packages (raw agent-days, one agent)
@@ -237,15 +247,15 @@ the primary; the coordinator's primary-checkout probe runs at every landing."
 | WP | Content | Days |
 | --- | --- | --- |
 | WP-0 | Land the existing hooks (`no-pgrep-wait` from `docs/rules-2026-11-04`, `no-force-push`) and a tracked `.claude/settings.json`; extract `shellparse.py` from `no-pgrep-wait.py` with its test unchanged; a note for the coordinator on moving the untracked copies aside | 0.5 |
-| WP-1 | `./dev worktree add/claim/release/list/clean` with tests on throw-away repositories (lock at create, owner map read, clean skips locked and unmerged, no `rm`, sparse cones, JSON output) | 2.5 |
-| WP-2 | `own-worktree` hook R1-R7, the owner-map write, the Serena rule, and its test (the table above, about 75 cases); confirm `agent_id` and `agent_type` in a real subagent call; record the hook's cost | 3 |
+| WP-1 | `./dev worktree add/claim/reassign/release/drop/list/clean` with tests on throw-away repositories (lock at create, `--detach` review copies, owner map under the `flock`, clean skips locked and unmerged, no `rm`, sparse cones, JSON output) | 3 |
+| WP-2 | `own-worktree` hook R1-R8, the owner-map check and write under the `flock`, literal variable resolution, the Serena allow-list, and its test (the table above, about 90 cases); confirm `agent_id` and `agent_type` in a real subagent call; record the hook's cost | 3.5 |
 | WP-3 | `./dev check primary` with `--live` and its positive control; the coordinator's landing checklist and session start call it | 1 |
-| WP-4 | engineering-rules: `worktree.sh add --owner` (locks), `claim`, `release`, `clean` names the locked ones it keeps and never deletes a locked path; the `worktree-lifecycle`, `delegate` and `integrate` skills (briefs: "claim your worktree first; absolute paths or `git -C`; guarded `cd` only"; the integrator's train worktree is made with `./dev worktree add <train> --owner integrator:<train>` and every merge runs there); the `reviewer` and `scout` role files (read-only on worktrees); a generic copy of the hook in `templates/` with `templates/claude-settings.json`; the ER-2 amendment | 1 |
+| WP-4 | engineering-rules: `worktree.sh add --owner` (locks), `claim`, `release`, `clean` names the locked ones it keeps and never deletes a locked path; the `worktree-lifecycle`, `delegate` and `integrate` skills (briefs: "claim your worktree first; absolute paths or `git -C`; guarded `cd` only"; the integrator's train worktree is made with `./dev worktree add <train> --owner integrator:<train>` and every merge runs there); the `reviewer` and `scout` role files (`agents/reviewer.md`, `agents/scout.md`: read-only on worktrees except a detached review copy they made and claimed, removed with `./dev worktree drop`, as D10 says); a generic copy of the hook in `templates/` with `templates/claude-settings.json`; the ER-2 amendment | 1 |
 | WP-5 | Paddock: rule 2 amendment, the 2026-11-10 lessons entry (memory says it is not in `docs/lessons.md` yet), ADR index | 0.5 |
 | WP-6 | Migration: lock and claim every live agent worktree through the tool, report the 4 locks without a reason and the 9 detached worktrees to the coordinator; ask the user about the 96 archives in the primary | 0.5 |
-| | **Total** | **9** |
+| | **Total** | **10** |
 
-First cut (closes incidents 1 to 5): WP-0, WP-2, and WP-1 `add`, `claim` and `clean` = **5 days**. The rest follows in
+First cut (closes incidents 1 to 5): WP-0, WP-2, and WP-1 `add`, `claim`, `reassign` and `clean` = **6 days**. The rest follows in
 the next process batch.
 
 ## Release impact (ER-1, ER-31)
@@ -264,7 +274,7 @@ No shipped code changes. `.claude/` is outside every app's dependency set; `tool
 | D5 | Agent file edits in the primary (R5) | (a) Denied. (b) `ask`. | (a): no brief asks an agent to edit the primary; memory and scratch folders are outside it. |
 | D6 | Engineering rule | (a) Amend ER-2 with the text of §4. (b) A new ER-37. | (a): it is ER-2's own mechanism; a new number would split one rule. |
 | D7 | Hook failure mode | (a) Refuse on a positive match, plus R2's and R4's unknown targets; anything else it cannot parse passes and is logged, and the probe catches the damage. (b) Refuse whatever it cannot parse. | (a): a false refusal of an odd but harmless command stalls agents; the two exceptions are the measured incidents. |
-| D8 | Scope now | (a) All WPs (9 days). (b) The first cut (5 days) now, the rest in the next process batch. | (b). |
-| D9 | Writes in another agent's worktree (incident 5) | (a) Owner binding: the hook records the claiming `agent_id` in the owner map and refuses other agents' writes in a locked worktree (R6). (b) Leave incident 5 open (briefs only). | (a): it is the only check that sees which agent writes; the cost is one `claim` line per brief. |
-| D10 | Read-only roles (R7) | (a) `reviewer` and `scout` get no git writes or edits in any worktree of the repository; their scratch folders and scratch clones are free. (b) Owner binding only. | (a): matches ER-25's roles and incident 5's actor; owner binding alone would still let a reviewer claim and switch a new worktree by mistake. |
-| D11 | Serena write tools (`mcp__serena__*` that edit: `replace_symbol_body`, `insert_after_symbol`, `insert_before_symbol`, `rename_symbol`, `replace_content`, `create_text_file` and the line editors) | (a) Matched by the hook, with R5 to R7 applied to their `relative_path` against Serena's project root. (b) Denied to agents outright. | (b) for now: Serena's project root is the primary (memory `serena-usage.md`: worktree agents cannot use it), so every agent write through it lands in the primary; (a) once Serena can open a worktree. |
+| D8 | Scope now | (a) All WPs (10 days). (b) The first cut (6 days) now, the rest in the next process batch. | (b). |
+| D9 | Writes in another agent's worktree (incident 5) | (a) Owner binding: the hook records the claiming `agent_id` in the owner map under a `flock`, refuses a claim of a worktree another agent holds (only the coordinator's `reassign` frees it) and refuses other agents' writes in a locked worktree (R6, R8). (b) Leave incident 5 open (briefs only). | (a): it is the only check that sees which agent writes; the cost is one `claim` line per brief. |
+| D10 | Read-only roles (R7) | (a) `reviewer` and `scout` get no git writes or edits in any worktree of the repository, except a detached review copy they made and claimed themselves (removed with `./dev worktree drop`); their scratch folders and scratch clones are free. (b) Owner binding only. | (a): matches ER-25's roles and incident 5's actor, and still lets a reviewer check out the commit under review in a copy of its own. |
+| D11 | Serena tools for agents | (a) The hook matches `mcp__serena__.*` and denies every Serena tool to agents except a declared read-only allow-list, today only `mcp__serena__initial_instructions`; this session's Serena exposes just `initial_instructions` and `serena_repl`, and the REPL can edit, so it is denied. (b) Match only named edit tools. | (a): tool names differ between Serena setups (the REPL hides edits behind one name), and Serena's project root is the primary (memory `serena-usage.md`), so an allow-list is the only safe shape. A read-only tool joins the list after it is shown not to write. |
