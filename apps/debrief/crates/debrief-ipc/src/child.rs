@@ -284,21 +284,71 @@ fn handshake_then_lock_down(
     label: &str,
     protocol: ProtocolVersion,
 ) -> io::Result<Box<dyn crate::peer::Duplex>> {
-    let stream = std::thread::scope(|s| {
-        s.spawn(|| -> io::Result<std::os::unix::net::UnixStream> {
+    let (stream, tid) = std::thread::scope(|s| {
+        s.spawn(|| -> io::Result<(std::os::unix::net::UnixStream, u32)> {
+            let tid = current_tid();
             let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
             let stream = rt
                 .block_on(crate::link::platform_handshake(&bootstrap.address, token, label, protocol))
                 .map_err(|e| io::Error::other(e.to_string()))?;
-            stream.into_std()
+            Ok((stream.into_std()?, tid))
         })
         .join()
         .map_err(|_| io::Error::other("the handshake thread panicked"))?
     })?;
+    // `join` returns when the thread's user code is over, but the kernel lists its task until it is torn down: landlock's
+    // count of threads that predate the lockdown would take that exiting task for a thread that escapes it.
+    wait_task_gone(tid, TASK_GONE_BOUND);
     lock_down(bootstrap, elevated)?;
     // `from_std` registers with the reactor of the runtime entered: the shared one, started now.
     let _g = crate::runtime::shared().map_err(io::Error::other)?.enter();
     Ok(Box::new(tokio::net::UnixStream::from_std(stream)?))
+}
+
+/// How long to wait for a joined thread's task to leave the kernel's list; it is gone within microseconds, the bound
+/// only keeps a broken `/proc` from stalling the child.
+#[cfg(unix)]
+const TASK_GONE_BOUND: Duration = Duration::from_secs(2);
+
+/// The kernel's id of the calling thread (the name its task has in `/proc/self/task`); 0 where there is none.
+#[cfg(unix)]
+fn current_tid() -> u32 {
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: `gettid` takes no arguments and cannot fail.
+        u32::try_from(unsafe { libc::syscall(libc::SYS_gettid) }).unwrap_or(0)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        0
+    }
+}
+
+/// Waits (at most `bound`) until thread `tid` of this process has left `/proc/self/task`. Nothing to wait for where
+/// there is no such directory or for tid 0.
+#[cfg(unix)]
+fn wait_task_gone(tid: u32, bound: Duration) {
+    if tid == 0 {
+        return;
+    }
+    let path = std::path::PathBuf::from(format!("/proc/self/task/{tid}"));
+    wait_until(|| !path.exists(), bound);
+}
+
+/// Polls `done` until it is true or `bound` has passed; true when it was met. The wait is on the condition: a short
+/// pause between looks only spares the CPU, it never decides the outcome.
+#[cfg(unix)]
+fn wait_until(mut done: impl FnMut() -> bool, bound: Duration) -> bool {
+    let end = std::time::Instant::now() + bound;
+    loop {
+        if done() {
+            return true;
+        }
+        if std::time::Instant::now() >= end {
+            return false;
+        }
+        std::thread::yield_now();
+    }
 }
 
 /// Windows: the lowered integrity level and the job hold for every thread of the process.
@@ -432,6 +482,40 @@ mod tests {
         assert!(ended, "after the bound it falls back to ending the process");
         // A `main` that comes late finds the exit taken: it must park, never run a second exit.
         assert!(!phase.claim_main(), "the lifeline owns the exit now");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wait_until_meets_its_condition_or_gives_up_at_the_bound() {
+        let mut looks = 0;
+        assert!(wait_until(
+            || {
+                looks += 1;
+                looks == 3
+            },
+            Duration::from_secs(30)
+        ));
+        assert_eq!(looks, 3);
+        assert!(!wait_until(|| false, Duration::from_millis(20)));
+        // A tid that never existed, or none at all, is already gone.
+        wait_task_gone(0, Duration::from_secs(30));
+        wait_task_gone(u32::MAX, Duration::from_secs(30));
+    }
+
+    /// The race behind a lockdown that reported "1 thread(s) started before the lockdown": a joined thread still
+    /// listed in `/proc/self/task` (about one run in five on a loaded Linux machine).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_joined_thread_leaves_the_task_list_once_waited_for() {
+        for i in 0..300 {
+            let tid = std::thread::spawn(current_tid).join().unwrap();
+            assert_ne!(tid, 0);
+            wait_task_gone(tid, TASK_GONE_BOUND);
+            assert!(
+                !std::path::Path::new(&format!("/proc/self/task/{tid}")).exists(),
+                "round {i}: thread {tid} is still listed"
+            );
+        }
     }
 
     #[test]
