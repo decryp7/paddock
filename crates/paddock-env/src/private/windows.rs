@@ -25,7 +25,7 @@ use windows_sys::Wdk::Storage::FileSystem::{
 };
 use windows_sys::Win32::Foundation::{
     CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE, LocalFree,
-    RtlNtStatusToDosError, STATUS_NOT_A_DIRECTORY, UNICODE_STRING,
+    RtlNtStatusToDosError, STATUS_FILE_IS_A_DIRECTORY, STATUS_NOT_A_DIRECTORY, UNICODE_STRING,
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, GetSecurityInfo,
@@ -40,12 +40,17 @@ use windows_sys::Win32::Security::{
 use windows_sys::Win32::Storage::FileSystem::{
     BY_HANDLE_FILE_INFORMATION, CreateFileW, DELETE, FILE_ATTRIBUTE_DIRECTORY,
     FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_NOT_CONTENT_INDEXED, FILE_ATTRIBUTE_REPARSE_POINT,
-    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, GetFileInformationByHandle, GetFinalPathNameByHandleW, OPEN_EXISTING,
-    READ_CONTROL, SYNCHRONIZE,
+    FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY,
+    FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE,
+    FILE_WRITE_ATTRIBUTES, FileBasicInfo, GetFileInformationByHandle, GetFinalPathNameByHandleW,
+    OPEN_EXISTING, READ_CONTROL, SYNCHRONIZE, SetFileInformationByHandle,
 };
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+/// What a held folder handle is opened with: list, traverse (a relative open needs it), read attributes and the descriptor.
+const DIR_ACCESS: u32 =
+    FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE;
 
 /// `OBJ_CASE_INSENSITIVE` (`ntdef.h`).
 const OBJ_CASE_INSENSITIVE: u32 = 0x40;
@@ -91,6 +96,9 @@ fn wide(s: &OsStr) -> Vec<u16> {
 fn nt(status: i32) -> Fail {
     if status == STATUS_NOT_A_DIRECTORY {
         return Fail::Refused(Refusal::NotAFolder);
+    }
+    if status == STATUS_FILE_IS_A_DIRECTORY {
+        return Fail::Refused(Refusal::NotAFile);
     }
     // SAFETY: a pure status-to-error mapping.
     let code = unsafe { RtlNtStatusToDosError(status) };
@@ -228,6 +236,36 @@ impl Dir {
         Ok(unsafe { OwnedHandle::from_raw_handle(handle) })
     }
 
+    /// Marks the new object as not to be content-indexed (a created folder's flag is inherited by what is made in it). The
+    /// descriptor already holds the access list; this only keeps the search indexer from reading the content.
+    fn ensure_not_indexed(handle: &OwnedHandle) -> Result<(), Fail> {
+        let attrs = Self::attributes(handle)?;
+        if attrs & FILE_ATTRIBUTE_NOT_CONTENT_INDEXED != 0 {
+            return Ok(());
+        }
+        // A zero time means "leave unchanged".
+        let info = FILE_BASIC_INFO {
+            CreationTime: 0,
+            LastAccessTime: 0,
+            LastWriteTime: 0,
+            ChangeTime: 0,
+            FileAttributes: attrs | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED,
+        };
+        // SAFETY: a valid handle opened with FILE_WRITE_ATTRIBUTES and a complete FILE_BASIC_INFO.
+        let ok = unsafe {
+            SetFileInformationByHandle(
+                handle.as_raw_handle(),
+                FileBasicInfo,
+                std::ptr::addr_of!(info).cast(),
+                std::mem::size_of::<FILE_BASIC_INFO>() as u32,
+            )
+        };
+        if ok == 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+        Ok(())
+    }
+
     /// The handle's attributes: refuses a reparse point (link, junction, mount point) when `follow` is not set.
     fn attributes(handle: &OwnedHandle) -> Result<u32, Fail> {
         // SAFETY: plain data filled in by the call.
@@ -254,7 +292,7 @@ impl Dir {
         let h = unsafe {
             CreateFileW(
                 name.as_ptr(),
-                FILE_LIST_DIRECTORY | READ_CONTROL | SYNCHRONIZE,
+                DIR_ACCESS,
                 FILE_SHARE_READ | FILE_SHARE_WRITE,
                 null(),
                 OPEN_EXISTING,
@@ -281,7 +319,7 @@ impl Dir {
     pub(super) fn open_at(&self, name: &OsStr) -> Result<Dir, Fail> {
         let handle = self.nt_create(&Request {
             name,
-            access: FILE_LIST_DIRECTORY | READ_CONTROL | SYNCHRONIZE,
+            access: DIR_ACCESS,
             attributes: 0,
             share: FILE_SHARE_READ | FILE_SHARE_WRITE,
             disposition: FILE_OPEN,
@@ -329,13 +367,14 @@ impl Dir {
         let descriptor = Descriptor::owner_only(&me, true)?;
         let handle = self.nt_create(&Request {
             name,
-            access: FILE_LIST_DIRECTORY | READ_CONTROL | SYNCHRONIZE,
+            access: DIR_ACCESS | FILE_WRITE_ATTRIBUTES,
             attributes: FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED,
             share: FILE_SHARE_READ | FILE_SHARE_WRITE,
             disposition: FILE_CREATE,
             options: FILE_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT,
             descriptor: Some(&descriptor),
         })?;
+        Self::ensure_not_indexed(&handle)?;
         Ok(Dir(handle))
     }
 
@@ -346,13 +385,19 @@ impl Dir {
         let descriptor = Descriptor::owner_only(&me, false)?;
         let handle = self.nt_create(&Request {
             name,
-            access: GENERIC_WRITE | DELETE | READ_CONTROL | SYNCHRONIZE,
+            access: GENERIC_WRITE
+                | DELETE
+                | READ_CONTROL
+                | SYNCHRONIZE
+                | FILE_READ_ATTRIBUTES
+                | FILE_WRITE_ATTRIBUTES,
             attributes: FILE_ATTRIBUTE_NORMAL | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED,
             share: 0,
             disposition: FILE_CREATE,
             options: FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT,
             descriptor: Some(&descriptor),
         })?;
+        Self::ensure_not_indexed(&handle)?;
         Ok(File::from(handle))
     }
 
@@ -421,7 +466,7 @@ impl Dir {
             name,
             access: DELETE | SYNCHRONIZE,
             attributes: 0,
-            share: FILE_SHARE_READ | FILE_SHARE_WRITE | DELETE,
+            share: FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             disposition: FILE_OPEN,
             options: FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT | FILE_DELETE_ON_CLOSE,
             descriptor: None,

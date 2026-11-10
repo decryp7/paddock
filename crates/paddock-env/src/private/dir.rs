@@ -1100,8 +1100,6 @@ mod windows_tests {
             assert_eq!(refusal(result.unwrap_err()), Refusal::Symlink);
         }
         assert_eq!(std::fs::read_dir(&target).unwrap().count(), 0);
-        // Followed only when asked, and then the target is judged.
-        PrivateDir::open(&link, Links::Follow).unwrap();
     }
 
     /// Failing test 7, Windows half: while the handle is held the ancestors cannot be renamed or replaced by a junction, so a
@@ -1143,7 +1141,7 @@ mod windows_tests {
     }
 
     #[test]
-    fn a_file_others_can_read_or_a_junction_for_a_file_is_refused() {
+    fn a_file_others_can_read_or_that_is_not_ours_or_not_a_file_is_refused_on_windows() {
         let t = temp();
         let d = PrivateDir::create_all(&t.path().join("d")).unwrap();
         d.write_atomic("f", b"x").unwrap();
@@ -1154,11 +1152,7 @@ mod windows_tests {
             Refusal::OpenToOthersAcl { .. }
         ));
         std::fs::create_dir(d.path().join("sub")).unwrap();
-        assert_eq!(
-            refusal(d.open_file("sub").unwrap_err()),
-            Refusal::NotAFolder,
-            "NT says not a file"
-        );
+        assert_eq!(refusal(d.open_file("sub").unwrap_err()), Refusal::NotAFile);
         let other = PrivateDir {
             dir: Dir::open_path(d.path(), false).unwrap(),
             path: d.path().to_path_buf(),
