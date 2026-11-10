@@ -317,19 +317,24 @@ pub(crate) fn terminate_by(
     }
     if ask(id) {
         let end_at = Instant::now() + grace;
-        let mut last = Presence::Running;
+        let mut last = None;
         while Instant::now() < end_at {
-            last = look(id);
+            let seen = look(id);
             // A process that is dying is for a moment listed nowhere yet still answers (macOS): not known, so look again
             // until the grace ends rather than report either way on one look.
-            if last == Presence::Gone {
+            if seen == Presence::Gone {
                 return Terminated::Gracefully;
             }
+            last = Some(seen);
             std::thread::sleep(Duration::from_millis(25));
         }
-        if last == Presence::Unknown {
+        // The request may have outlasted the grace, so the loop never looked: take one look now. Nothing is ended without a
+        // real Running look.
+        match last.unwrap_or_else(|| look(id)) {
+            Presence::Gone => return Terminated::Gracefully,
             // Still not known when the grace ran out: nothing is ended, and nothing is claimed.
-            return Terminated::Unknown;
+            Presence::Unknown => return Terminated::Unknown,
+            Presence::Running => {}
         }
     }
     end(id);
@@ -812,6 +817,35 @@ mod tests {
         assert_eq!(
             terminate_by(id, Duration::from_secs(5), &look, &|_| true),
             Terminated::Gracefully
+        );
+    }
+
+    /// A polite request that outlasts the grace period (the closure stands in for a slow `ask`, so the loop never looks): the
+    /// process is judged by a look taken after it, and is never ended on an assumed Running.
+    #[test]
+    fn a_request_that_outlasts_the_grace_period_is_followed_by_a_real_look_before_any_kill() {
+        let id = ProcessId::new(4242, StartTime::from_micros(1));
+        let after = |second: Presence| {
+            let looks = std::cell::Cell::new(0);
+            let look = move |_: ProcessId| {
+                looks.set(looks.get() + 1);
+                if looks.get() == 1 {
+                    Presence::Running
+                } else {
+                    second
+                }
+            };
+            terminate_by(id, Duration::ZERO, &look, &|_| true)
+        };
+        assert_eq!(
+            after(Presence::Unknown),
+            Terminated::Unknown,
+            "not known: nothing is ended"
+        );
+        assert_eq!(
+            after(Presence::Gone),
+            Terminated::Gracefully,
+            "it stopped while the request was made"
         );
     }
 

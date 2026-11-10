@@ -268,6 +268,8 @@ pub fn pid_exists(pid: u32) -> Exists {
         let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if !h.is_null() {
             // A process that exited keeps its pid while anything holds a handle to it: only a still-active one exists.
+            // STILL_ACTIVE (259) can also be a real exit code: such an exited process reads as still there (Yes here, so
+            // never Gone, and not known in `presence` when sysinfo does not list it). That is the deliberate, safe direction.
             let mut code = 0u32;
             let got = GetExitCodeProcess(h, &raw mut code) != 0;
             CloseHandle(h);
