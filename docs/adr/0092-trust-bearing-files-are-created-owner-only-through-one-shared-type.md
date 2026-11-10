@@ -243,6 +243,10 @@ the elevated side created with a High mandatory label (`S:(ML;OICI;NWNRNX;;;HI)`
 only relative to the handle it created, or after re-reading the label and owner from the handle it opened. An owner-only
 file in the user's folders is not such a channel."
 
+Note (2026-11-11, user): user-chosen elevation (Run or Restart as administrator) is governed by rule 77, not rule 75:
+it needs only a clear risk warning (ADR 0073 amendment `amendments/0073-elevated-helper-2026-11-11.md`). Rule 75 binds
+privileged services and helpers that run on their own.
+
 The last clause closes a rename hole: the folder's parent is the user's, so a medium-integrity process holding
 `FILE_DELETE_CHILD` there can rename the High-label folder away and put its own in its place; only a check on the handle
 the elevated side holds sees that. For input that flows from low to high, as W2's does, the label channel does not apply

@@ -335,7 +335,8 @@ changes here, every app's copy is updated in the same change.
     credentials), not by the pipe or socket ACL alone. A request that changes what runs elevated (a program path, a
     folder, a setting the elevated side acts on) needs an administrator caller. Read-only requests may take any local
     user the ACL lets in. Elevation the user chooses with a click (Run or Restart as administrator) needs only a clear
-    risk warning, as Visual Studio and VS Code do.
+    risk warning, as tools such as Visual Studio and VS Code allow elevation with no further controls (they mark the
+    window as Administrator). User-chosen elevation is governed by this rule, not rule 75.
     *Why:* on 2026-11-11 a survey found that Pitcrew's LocalSystem service (shipped in pitcrew-v1.0.1) starts any program
     a same-user process names over its pipe, with no prompt, because ADR 0004 authorised by the pipe ACL alone. Dyno's
     helper already checks the caller per connection. The user chose "warn and accept" for click-to-elevate and a caller
