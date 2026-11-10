@@ -16,9 +16,11 @@
 //! `NotMeasured` or `CheckBroken`. Pure: nothing here reads the environment or the clock; the run's kind, leg, OS and date are
 //! passed in as a [`Run`].
 
+mod date;
 mod optional;
 mod verdict;
 
+pub use date::Date;
 pub use optional::{Entry, Optional, Run, RunKind, Scope};
 pub use verdict::Verdict;
 

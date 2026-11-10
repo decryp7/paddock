@@ -1,6 +1,9 @@
 //! `docs/optional-measurements.toml` (ADR 0089 section 3): the reviewed list of measurements a place may skip, and the facts of
 //! a run that decide whether an entry covers it. Pure: the text and the facts are passed in.
 
+use super::Date;
+use std::collections::HashSet;
+
 /// What kind of run this is. A release run honours an entry only under ADR 0089 D14.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunKind {
@@ -11,14 +14,22 @@ pub enum RunKind {
 }
 
 impl RunKind {
-    /// The kind from the two facts the environment gives: `GITHUB_REF` and `PADDOCK_RUN_KIND`.
-    pub fn detect(github_ref: Option<&str>, run_kind_var: Option<&str>) -> RunKind {
+    /// The kind from the two facts the environment gives: `GITHUB_REF` and `PADDOCK_RUN_KIND`. The variable is empty (or
+    /// unset) or exactly `release`; anything else (`relase`, `Release`, ` release`) is an error, because a misspelt variable
+    /// would otherwise make a release run look ordinary and let an optional entry excuse a missing measurement.
+    pub fn detect(github_ref: Option<&str>, run_kind_var: Option<&str>) -> Result<RunKind, String> {
         let by_ref = github_ref
             .is_some_and(|r| r.starts_with("refs/tags/") || r.starts_with("refs/heads/release/"));
-        if by_ref || run_kind_var == Some("release") {
-            RunKind::Release
-        } else {
-            RunKind::Ordinary
+        match run_kind_var {
+            None | Some("") => Ok(if by_ref {
+                RunKind::Release
+            } else {
+                RunKind::Ordinary
+            }),
+            Some("release") => Ok(RunKind::Release),
+            Some(other) => Err(format!(
+                "PADDOCK_RUN_KIND=\"{other}\" is not a run kind: leave it empty or write exactly release"
+            )),
         }
     }
 }
@@ -43,25 +54,20 @@ pub struct Run {
     pub leg: Option<String>,
     /// The operating system (`std::env::consts::OS`).
     pub os: String,
-    /// Today as `YYYY-MM-DD`, for expiry.
-    pub today: String,
+    /// Today, for expiry.
+    pub today: Date,
     green: Vec<(String, String)>,
 }
 
 impl Run {
     /// A run on `os` today; add the leg and green legs with the builders.
-    pub fn new(
-        kind: RunKind,
-        scope: Scope,
-        os: impl Into<String>,
-        today: impl Into<String>,
-    ) -> Run {
+    pub fn new(kind: RunKind, scope: Scope, os: impl Into<String>, today: Date) -> Run {
         Run {
             kind,
             scope,
             leg: None,
             os: os.into(),
-            today: today.into(),
+            today,
             green: Vec::new(),
         }
     }
@@ -95,7 +101,7 @@ pub struct Entry {
     /// Why, with a measurement date.
     pub reason: String,
     /// Last day it counts, `YYYY-MM-DD`.
-    pub expires: String,
+    pub expires: Date,
     /// Legs that must have run the same measurement green for a release run to honour the entry (D14).
     pub measured_on: Vec<String>,
 }
@@ -140,11 +146,8 @@ impl Optional {
     }
 
     /// Entries past their date today: each is an error (as the conformance waiver's W001).
-    pub fn expired(&self, today: &str) -> Vec<&Entry> {
-        self.entries
-            .iter()
-            .filter(|e| e.expires.as_str() < today)
-            .collect()
+    pub fn expired(&self, today: Date) -> Vec<&Entry> {
+        self.entries.iter().filter(|e| e.expires < today).collect()
     }
 
     /// The first live entry that covers `id` in `run`.
@@ -152,12 +155,13 @@ impl Optional {
         self.entries.iter().find(|e| e.covers(id, run))
     }
 
-    /// Reads the file: `[[optional]]` tables with `id`, `reason`, `expires` (`YYYY-MM-DD`), `where = { leg = [..], os = [..] }`
-    /// and `measured_on = [..]`. This is the whole subset; anything else is an error naming the line, so a typo never
-    /// silently drops an entry.
+    /// Reads the file: `[[optional]]` tables with `id` (a kind prefix `test:`, `check:`, `gate:` or `probe:` and something
+    /// narrower than `*`), `reason`, `expires` (a real `YYYY-MM-DD`), `where = { leg = [..], os = [..] }` (required, at least
+    /// one non-empty list) and `measured_on = [..]`. This is the whole subset; anything else, a duplicate key and an entry
+    /// that would excuse every place are errors naming the line, so a typo never silently drops or widens an entry.
     pub fn parse(text: &str) -> Result<Optional, String> {
         let mut entries: Vec<Entry> = Vec::new();
-        let mut cur: Option<(usize, Entry)> = None;
+        let mut cur: Option<(usize, Entry, HashSet<String>)> = None;
         for (i, raw) in text.lines().enumerate() {
             let n = i + 1;
             let line = strip_comment(raw).trim().to_string();
@@ -165,23 +169,21 @@ impl Optional {
                 continue;
             }
             if line == "[[optional]]" {
-                if let Some((start, e)) = cur.take() {
-                    entries.push(finish(start, e)?);
+                if let Some((start, e, seen)) = cur.take() {
+                    entries.push(finish(start, e, &seen)?);
                 }
-                cur = Some((
-                    n,
-                    Entry {
-                        id: String::new(),
-                        legs: vec![],
-                        os: vec![],
-                        reason: String::new(),
-                        expires: String::new(),
-                        measured_on: vec![],
-                    },
-                ));
+                let blank = Entry {
+                    id: String::new(),
+                    legs: vec![],
+                    os: vec![],
+                    reason: String::new(),
+                    expires: Date::parse("1970-01-01")?,
+                    measured_on: vec![],
+                };
+                cur = Some((n, blank, HashSet::new()));
                 continue;
             }
-            let Some((_, e)) = cur.as_mut() else {
+            let Some((_, e, seen)) = cur.as_mut() else {
                 return Err(format!(
                     "line {n}: \"{line}\" is outside an [[optional]] table"
                 ));
@@ -192,12 +194,35 @@ impl Optional {
                 .ok_or_else(|| {
                     format!("line {n}: cannot read \"{line}\" (expected key = value)")
                 })?;
+            let mut once = |name: &str| -> Result<(), String> {
+                if seen.insert(name.to_string()) {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "line {n}: the key \"{name}\" appears twice in one entry"
+                    ))
+                }
+            };
             match key {
-                "id" => e.id = string(value, n)?,
-                "reason" => e.reason = string(value, n)?,
-                "expires" => e.expires = string(value, n)?,
-                "measured_on" => e.measured_on = array(value, n)?,
+                "id" => {
+                    once("id")?;
+                    e.id = string(value, n)?;
+                }
+                "reason" => {
+                    once("reason")?;
+                    e.reason = string(value, n)?;
+                }
+                "expires" => {
+                    once("expires")?;
+                    e.expires =
+                        Date::parse(&string(value, n)?).map_err(|m| format!("line {n}: {m}"))?;
+                }
+                "measured_on" => {
+                    once("measured_on")?;
+                    e.measured_on = array(value, n)?;
+                }
                 "where" => {
+                    once("where")?;
                     let inner = value
                         .strip_prefix('{')
                         .and_then(|v| v.strip_suffix('}'))
@@ -207,9 +232,15 @@ impl Optional {
                             .split_once('=')
                             .map(|(k, v)| (k.trim(), v.trim()))
                             .ok_or_else(|| format!("line {n}: cannot read \"{part}\" in where"))?;
+                        let list = array(v, n)?;
+                        if list.is_empty() {
+                            return Err(format!(
+                                "line {n}: where.{k} is an empty list, which would mean every {k}; name them or leave the key out"
+                            ));
+                        }
                         match k {
-                            "leg" => e.legs = array(v, n)?,
-                            "os" => e.os = array(v, n)?,
+                            "leg" => once("where.leg").map(|_| e.legs = list)?,
+                            "os" => once("where.os").map(|_| e.os = list)?,
                             other => {
                                 return Err(format!(
                                     "line {n}: unknown key \"{other}\" in where (leg and os only)"
@@ -221,32 +252,42 @@ impl Optional {
                 other => return Err(format!("line {n}: unknown key \"{other}\"")),
             }
         }
-        if let Some((start, e)) = cur.take() {
-            entries.push(finish(start, e)?);
+        if let Some((start, e, seen)) = cur.take() {
+            entries.push(finish(start, e, &seen)?);
         }
         Ok(Optional { entries })
     }
 }
 
-fn finish(start: usize, e: Entry) -> Result<Entry, String> {
+/// The kinds of measurement an entry can name.
+const KINDS: [&str; 4] = ["test:", "check:", "gate:", "probe:"];
+
+fn finish(start: usize, e: Entry, seen: &HashSet<String>) -> Result<Entry, String> {
     let need = |what: &str| format!("the [[optional]] at line {start} needs {what}");
-    if e.id.trim().is_empty() {
-        return Err(need("an id"));
+    let rest = KINDS.iter().find_map(|k| e.id.strip_prefix(k));
+    match rest {
+        None => {
+            return Err(need(
+                "an id that starts with test:, check:, gate: or probe: (a bare * would excuse everything)",
+            ));
+        }
+        Some(r) if r.trim_matches('*').is_empty() => {
+            return Err(need(
+                "an id narrower than the whole kind (test:* would excuse every test)",
+            ));
+        }
+        Some(_) => {}
     }
     if e.reason.trim().is_empty() {
         return Err(need("a reason"));
     }
-    let b = e.expires.as_bytes();
-    let shaped = b.len() == 10
-        && b.iter().enumerate().all(|(i, c)| {
-            if i == 4 || i == 7 {
-                *c == b'-'
-            } else {
-                c.is_ascii_digit()
-            }
-        });
-    if !shaped {
+    if !seen.contains("expires") {
         return Err(need("expires = \"YYYY-MM-DD\""));
+    }
+    if e.legs.is_empty() && e.os.is_empty() {
+        return Err(need(
+            "where = { leg = [..] and/or os = [..] }: an entry with no place would excuse every leg and OS",
+        ));
     }
     Ok(e)
 }
@@ -337,12 +378,17 @@ measured_on = ["linux-host", "macos"]
 
 [[optional]]
 id = "check:C99/graph"
+where = { os = ["linux"] }
 reason = "offline"
 expires = "2027-02-01"
 "#;
 
+    fn d(text: &str) -> Date {
+        Date::parse(text).unwrap()
+    }
+
     fn run(kind: RunKind) -> Run {
-        Run::new(kind, Scope::Root, "linux", "2026-11-10").on_leg("linux-container")
+        Run::new(kind, Scope::Root, "linux", d("2026-11-10")).on_leg("linux-container")
     }
 
     #[test]
@@ -379,6 +425,18 @@ expires = "2027-02-01"
             "[[optional]]\nwhere = { arch = [\"x\"] }\n",
             "[[optional]]\nmeasured_on = \"a\"\n",
             "[[optional]]\nmeasured_on = [a]\n",
+            // The register must not excuse too much.
+            "[[optional]]\nid = \"*\"\nwhere = { os = [\"linux\"] }\nreason = \"r\"\nexpires = \"2027-01-01\"\n",
+            "[[optional]]\nid = \"test:*\"\nwhere = { os = [\"linux\"] }\nreason = \"r\"\nexpires = \"2027-01-01\"\n",
+            "[[optional]]\nid = \"thing\"\nwhere = { os = [\"linux\"] }\nreason = \"r\"\nexpires = \"2027-01-01\"\n",
+            "[[optional]]\nid = \"test:a\"\nreason = \"r\"\nexpires = \"2027-01-01\"\n",
+            "[[optional]]\nid = \"test:a\"\nwhere = {}\nreason = \"r\"\nexpires = \"2027-01-01\"\n",
+            "[[optional]]\nid = \"test:a\"\nwhere = { leg = [], os = [\"linux\"] }\nreason = \"r\"\nexpires = \"2027-01-01\"\n",
+            "[[optional]]\nid = \"test:a\"\nwhere = { leg = [] }\nreason = \"r\"\nexpires = \"2027-01-01\"\n",
+            "[[optional]]\nid = \"test:a\"\nwhere = { os = [\"linux\"], os = [\"macos\"] }\nreason = \"r\"\nexpires = \"2027-01-01\"\n",
+            "[[optional]]\nid = \"test:a\"\nid = \"test:b\"\nwhere = { os = [\"linux\"] }\nreason = \"r\"\nexpires = \"2027-01-01\"\n",
+            "[[optional]]\nid = \"test:a\"\nwhere = { os = [\"linux\"] }\nreason = \"r\"\nexpires = \"2027-13-99\"\n",
+            "[[optional]]\nid = \"test:a\"\nwhere = { os = [\"linux\"] }\nreason = \"r\"\nexpires = \"\"\n",
         ];
         for b in bad {
             let e = Optional::parse(b).unwrap_err();
@@ -397,19 +455,19 @@ expires = "2027-02-01"
         assert!(o.covering("test:other", &run(RunKind::Ordinary)).is_none());
         // Another leg or another OS is not covered: the entry names where it applies.
         let other_leg =
-            Run::new(RunKind::Ordinary, Scope::Root, "linux", "2026-11-10").on_leg("macos");
+            Run::new(RunKind::Ordinary, Scope::Root, "linux", d("2026-11-10")).on_leg("macos");
         assert!(o.covering(id, &other_leg).is_none());
-        let no_leg = Run::new(RunKind::Ordinary, Scope::Root, "linux", "2026-11-10");
+        let no_leg = Run::new(RunKind::Ordinary, Scope::Root, "linux", d("2026-11-10"));
         assert!(o.covering(id, &no_leg).is_none());
-        let other_os = Run::new(RunKind::Ordinary, Scope::Root, "windows", "2026-11-10")
+        let other_os = Run::new(RunKind::Ordinary, Scope::Root, "windows", d("2026-11-10"))
             .on_leg("linux-container");
         assert!(o.covering(id, &other_os).is_none());
         // Expired.
-        let late = Run::new(RunKind::Ordinary, Scope::Root, "linux", "2027-02-01")
+        let late = Run::new(RunKind::Ordinary, Scope::Root, "linux", d("2027-02-01"))
             .on_leg("linux-container");
         assert!(o.covering(id, &late).is_none());
-        assert_eq!(o.expired("2027-02-01").len(), 1);
-        assert!(o.expired("2026-11-10").is_empty());
+        assert_eq!(o.expired(d("2027-02-01")).len(), 1);
+        assert!(o.expired(d("2026-11-10")).is_empty());
         // A release run needs measured_on and a green leg for the same id.
         assert!(o.covering(id, &run(RunKind::Release)).is_none());
         assert!(
@@ -425,30 +483,54 @@ expires = "2027-02-01"
                 .is_some()
         );
         // An entry without measured_on is never honoured in a release run.
-        let rel = Run::new(RunKind::Release, Scope::Root, "linux", "2026-11-10")
+        let rel = Run::new(RunKind::Release, Scope::Root, "linux", d("2026-11-10"))
             .with_green("check:C99/graph", "macos");
         assert!(o.covering("check:C99/graph", &rel).is_none());
     }
 
     #[test]
-    fn run_kind_comes_from_the_ref_or_the_variable() {
+    fn run_kind_comes_from_the_ref_or_the_variable_and_a_misspelling_is_an_error() {
+        let k = RunKind::detect;
+        assert_eq!(k(Some("refs/tags/dyno-v1.1.0"), None), Ok(RunKind::Release));
         assert_eq!(
-            RunKind::detect(Some("refs/tags/dyno-v1.1.0"), None),
-            RunKind::Release
+            k(Some("refs/heads/release/x"), Some("")),
+            Ok(RunKind::Release)
         );
         assert_eq!(
-            RunKind::detect(Some("refs/heads/release/x"), None),
-            RunKind::Release
+            k(Some("refs/heads/main"), Some("release")),
+            Ok(RunKind::Release)
         );
-        assert_eq!(
-            RunKind::detect(Some("refs/heads/main"), Some("release")),
-            RunKind::Release
-        );
-        assert_eq!(
-            RunKind::detect(Some("refs/heads/main"), Some("")),
-            RunKind::Ordinary
-        );
-        assert_eq!(RunKind::detect(None, None), RunKind::Ordinary);
+        assert_eq!(k(Some("refs/heads/main"), Some("")), Ok(RunKind::Ordinary));
+        assert_eq!(k(None, None), Ok(RunKind::Ordinary));
+        for bad in [
+            "relase", "Release", " release", "release ", "RELEASE", "1", "ordinary",
+        ] {
+            let e = k(Some("refs/heads/main"), Some(bad)).unwrap_err();
+            assert!(
+                e.contains("PADDOCK_RUN_KIND") && e.contains(bad),
+                "{bad:?}: {e}"
+            );
+            // A bad variable is an error even on a tag: nobody guesses what it was meant to say.
+            assert!(k(Some("refs/tags/x"), Some(bad)).is_err());
+        }
+    }
+
+    #[test]
+    fn a_hash_inside_a_quoted_reason_is_kept_and_a_trailing_comment_is_cut() {
+        let o = Optional::parse("[[optional]]\nid = \"test:a\"\nwhere = { os = [\"linux\"] }\nreason = \"issue #12 # still\" # comment\nexpires = \"2027-01-01\"\n").unwrap();
+        assert_eq!(o.entries()[0].reason, "issue #12 # still");
+    }
+
+    #[test]
+    fn an_entry_is_live_on_its_expiry_day() {
+        let o = Optional::parse(FILE).unwrap();
+        let id = "test:debrief-video::real_ffmpeg::probe";
+        let on = |day: &str| {
+            Run::new(RunKind::Ordinary, Scope::Root, "linux", d(day)).on_leg("linux-container")
+        };
+        assert!(o.covering(id, &on("2027-01-31")).is_some());
+        assert!(o.covering(id, &on("2027-02-01")).is_none());
+        assert!(o.expired(d("2027-01-31")).is_empty());
     }
 
     #[test]

@@ -59,7 +59,7 @@ impl Verdict {
             })
             .collect();
         let problems = optional
-            .expired(&run.today)
+            .expired(run.today)
             .iter()
             .map(|e| {
                 format!(
@@ -163,12 +163,16 @@ impl Verdict {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::outcome::{Finding, Reason, RunKind};
+    use crate::outcome::{Date, Finding, Reason, RunKind};
     use crate::{TableFormat, write_table};
 
-    const FILE: &str = "[[optional]]\nid = \"cov\"\nwhere = { leg = [\"l\"] }\nreason = \"r\"\nexpires = \"2027-01-31\"\nmeasured_on = [\"m\"]\n";
+    const FILE: &str = "[[optional]]\nid = \"test:cov\"\nwhere = { leg = [\"l\"] }\nreason = \"r\"\nexpires = \"2027-01-31\"\nmeasured_on = [\"m\"]\n";
 
     type Labelled = (&'static str, Outcome);
+
+    fn d(text: &str) -> Date {
+        Date::parse(text).unwrap()
+    }
 
     fn reason() -> Reason {
         Reason::new("why")
@@ -176,7 +180,7 @@ mod tests {
 
     /// An ordinary whole-tree run on leg `l`, before the entry expires.
     fn root() -> Run {
-        Run::new(RunKind::Ordinary, Scope::Root, "linux", "2026-11-10").on_leg("l")
+        Run::new(RunKind::Ordinary, Scope::Root, "linux", d("2026-11-10")).on_leg("l")
     }
 
     fn of(items: Vec<(&str, Outcome)>, run: &Run) -> Verdict {
@@ -198,7 +202,7 @@ mod tests {
                 Outcome::from_findings(vec![Finding::report_only("r"), Finding::failing("f")]),
             ),
             ("unc", Outcome::NotMeasured(reason())),
-            ("cov", Outcome::NotMeasured(reason())),
+            ("test:cov", Outcome::NotMeasured(reason())),
             ("broken", Outcome::CheckBroken(reason())),
         ]
     }
@@ -214,9 +218,9 @@ mod tests {
                     } else {
                         RunKind::Release
                     };
-                    let mut r = Run::new(kind, scope, "linux", today).on_leg("l");
+                    let mut r = Run::new(kind, scope, "linux", d(today)).on_leg("l");
                     if variant == 1 {
-                        r = r.with_green("cov", "m");
+                        r = r.with_green("test:cov", "m");
                     }
                     let covers = today == "2026-11-10" && variant != 2;
                     out.push((r, covers));
@@ -255,17 +259,13 @@ mod tests {
                 {
                     3
                 }
-                Outcome::NotMeasured(_) if *id == "cov" && entry_covers => 0,
+                Outcome::NotMeasured(_) if *id == "test:cov" && entry_covers => 0,
                 Outcome::NotMeasured(_) => 2,
                 Outcome::NotApplicable(_) if r.scope == Scope::Root => 2,
                 _ => 0,
             }
         };
-        let expired = if r.today.as_str() > "2027-01-31" {
-            3
-        } else {
-            0
-        };
+        let expired = if r.today > d("2027-01-31") { 3 } else { 0 };
         let top = if run.is_empty() {
             2
         } else {
@@ -306,7 +306,7 @@ mod tests {
                         "an undeclared not-measured item never passes"
                     );
                 }
-                if has("cov") && !covers {
+                if has("test:cov") && !covers {
                     assert_ne!(
                         v.exit(),
                         Exit::Ok,
@@ -380,7 +380,7 @@ mod tests {
         // The probe sees the clean cases: only these exit 0.
         assert_eq!(of(vec![("a", Outcome::Clean)], &root()).exit(), Exit::Ok);
         assert_eq!(of(vec![("a", report_only())], &root()).exit(), Exit::Ok);
-        let scoped = Run::new(RunKind::Ordinary, Scope::Scoped, "linux", "2026-11-10");
+        let scoped = Run::new(RunKind::Ordinary, Scope::Scoped, "linux", d("2026-11-10"));
         assert_eq!(
             of(vec![("a", Outcome::NotApplicable(reason()))], &scoped).exit(),
             Exit::Ok
@@ -399,37 +399,37 @@ mod tests {
     fn an_optional_entry_excuses_one_not_measured_item_and_the_report_says_so() {
         let v = of(
             vec![
-                ("cov", Outcome::NotMeasured(Reason::new("no ffmpeg"))),
+                ("test:cov", Outcome::NotMeasured(Reason::new("no ffmpeg"))),
                 ("x", Outcome::Clean),
             ],
             &root(),
         );
         assert_eq!(v.exit(), Exit::Ok);
         let j = v.json();
-        assert_eq!(j["optional_used"][0], "cov");
-        assert_eq!(j["outcomes"][0]["optional"], "cov");
-        assert_eq!(j["outcomes"][0]["id"], "cov");
+        assert_eq!(j["optional_used"][0], "test:cov");
+        assert_eq!(j["outcomes"][0]["optional"], "test:cov");
+        assert_eq!(j["outcomes"][0]["id"], "test:cov");
         // The same item on another leg is not excused.
         let other =
-            Run::new(RunKind::Ordinary, Scope::Root, "linux", "2026-11-10").on_leg("elsewhere");
+            Run::new(RunKind::Ordinary, Scope::Root, "linux", d("2026-11-10")).on_leg("elsewhere");
         assert_eq!(
-            of(vec![("cov", Outcome::NotMeasured(reason()))], &other).exit(),
+            of(vec![("test:cov", Outcome::NotMeasured(reason()))], &other).exit(),
             Exit::NotMeasured
         );
         // A release run honours it only with a green leg of measured_on.
-        let release = Run::new(RunKind::Release, Scope::Root, "linux", "2026-11-10").on_leg("l");
+        let release = Run::new(RunKind::Release, Scope::Root, "linux", d("2026-11-10")).on_leg("l");
         assert_eq!(
-            of(vec![("cov", Outcome::NotMeasured(reason()))], &release).exit(),
+            of(vec![("test:cov", Outcome::NotMeasured(reason()))], &release).exit(),
             Exit::NotMeasured
         );
-        let green = release.with_green("cov", "m");
+        let green = release.with_green("test:cov", "m");
         assert_eq!(
-            of(vec![("cov", Outcome::NotMeasured(reason()))], &green).exit(),
+            of(vec![("test:cov", Outcome::NotMeasured(reason()))], &green).exit(),
             Exit::Ok
         );
         // An expired entry is an error and excuses nothing.
-        let late = Run::new(RunKind::Ordinary, Scope::Root, "linux", "2027-06-01").on_leg("l");
-        let v = of(vec![("cov", Outcome::NotMeasured(reason()))], &late);
+        let late = Run::new(RunKind::Ordinary, Scope::Root, "linux", d("2027-06-01")).on_leg("l");
+        let v = of(vec![("test:cov", Outcome::NotMeasured(reason()))], &late);
         assert_eq!(v.exit(), Exit::Findings);
         assert!(
             v.json()["problems"][0]
@@ -462,7 +462,7 @@ mod tests {
     fn the_table_lists_every_item_and_writes_in_each_format() {
         let v = of(
             vec![
-                ("cov", Outcome::NotMeasured(Reason::new("no ffmpeg"))),
+                ("test:cov", Outcome::NotMeasured(Reason::new("no ffmpeg"))),
                 ("t", Outcome::from_findings(vec![Finding::failing("f")])),
             ],
             &root(),
@@ -470,7 +470,7 @@ mod tests {
         let t = v.table();
         assert_eq!(t.columns, ["id", "status", "detail", "optional"]);
         assert_eq!(t.rows[0][1], "not-measured");
-        assert_eq!(t.rows[0][3], "cov");
+        assert_eq!(t.rows[0][3], "test:cov");
         assert_eq!(t.rows[1][2], "f");
         let (mut out, mut note) = (Vec::new(), Vec::new());
         for f in [TableFormat::Table, TableFormat::Csv, TableFormat::Json] {
@@ -479,5 +479,58 @@ mod tests {
         let text = String::from_utf8(out).unwrap();
         assert!(text.contains("no ffmpeg") && text.contains("not-measured"));
         assert!(note.is_empty());
+    }
+
+    #[test]
+    fn every_status_name_reaches_the_json_and_the_table() {
+        let all = [
+            ("a", Outcome::Clean, "clean"),
+            ("b", Outcome::NotApplicable(reason()), "not-applicable"),
+            (
+                "c",
+                Outcome::from_findings(vec![Finding::failing("f")]),
+                "findings",
+            ),
+            ("d", Outcome::NotMeasured(reason()), "not-measured"),
+            ("e", Outcome::CheckBroken(reason()), "check-broken"),
+        ];
+        let v = of(
+            all.iter().map(|(i, o, _)| (*i, o.clone())).collect(),
+            &root(),
+        );
+        let (j, t) = (v.json(), v.table());
+        for (n, (_, _, name)) in all.iter().enumerate() {
+            assert_eq!(j["outcomes"][n]["status"], *name);
+            assert_eq!(t.rows[n][1], *name);
+        }
+        for e in [
+            Exit::Ok,
+            Exit::Findings,
+            Exit::NotMeasured,
+            Exit::CheckBroken,
+        ] {
+            assert!(!e.name().is_empty());
+        }
+        assert_eq!(j["status"], "check-broken");
+    }
+
+    #[test]
+    fn an_entry_is_still_live_on_its_last_day_and_dead_the_day_after() {
+        let item = || vec![("test:cov", Outcome::NotMeasured(reason()))];
+        let on = |day: &str| {
+            of(
+                item(),
+                &Run::new(RunKind::Ordinary, Scope::Root, "linux", d(day)).on_leg("l"),
+            )
+        };
+        assert_eq!(on("2027-01-31").exit(), Exit::Ok);
+        assert_eq!(
+            on("2027-01-31").json()["problems"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
+        assert_eq!(on("2027-02-01").exit(), Exit::Findings);
     }
 }
