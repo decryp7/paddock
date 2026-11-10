@@ -53,6 +53,27 @@ mod unix {
         unsafe { libc::kill(pid, signal) == 0 }
     }
 
+    /// Whether the OS knows `pid`, by `kill(pid, 0)` (no signal is sent): ESRCH is no such process, EPERM a process this user
+    /// may not signal.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "signal 0 only asks whether the pid exists; nothing is sent"
+    )]
+    pub fn pid_exists(pid: u32) -> super::Exists {
+        // A pid that is not a positive pid_t cannot be held by any process (0 would signal our own group).
+        let Some(pid) = libc::pid_t::try_from(pid).ok().filter(|p| *p > 0) else {
+            return super::Exists::No;
+        };
+        // SAFETY: kill takes two integers; signal 0 checks the pid and delivers nothing.
+        if unsafe { libc::kill(pid, 0) } == 0 {
+            return super::Exists::Yes;
+        }
+        match std::io::Error::last_os_error().raw_os_error() {
+            Some(libc::ESRCH) => super::Exists::No,
+            _ => super::Exists::Refused,
+        }
+    }
+
     pub const SIGTERM: i32 = libc::SIGTERM;
     pub const SIGKILL: i32 = libc::SIGKILL;
 
@@ -221,6 +242,43 @@ mod unix {
 
 #[cfg(unix)]
 pub use unix::*;
+
+/// What a primitive that tells "no such process" from "refused" says of a pid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Exists {
+    /// A process holds the pid.
+    Yes,
+    /// The OS says no process holds it.
+    No,
+    /// The OS refused the look (access denied) or said nothing clear: nothing is known.
+    Refused,
+}
+
+/// Whether the OS knows `pid`: `OpenProcess`, where ERROR_INVALID_PARAMETER is no such process and ACCESS_DENIED a refusal.
+#[cfg(windows)]
+pub fn pid_exists(pid: u32) -> Exists {
+    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, GetLastError};
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    // SAFETY: OpenProcess takes plain values; the handle is closed below.
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if !h.is_null() {
+            CloseHandle(h);
+            return Exists::Yes;
+        }
+        if GetLastError() == ERROR_INVALID_PARAMETER {
+            Exists::No
+        } else {
+            Exists::Refused
+        }
+    }
+}
+
+/// No primitive here: nothing is known.
+#[cfg(not(any(unix, windows)))]
+pub fn pid_exists(_pid: u32) -> Exists {
+    Exists::Refused
+}
 
 /// A close request to `id` alone (`taskkill` without `/T` or `/F`: never a tree, whose members `taskkill` would find by
 /// parent pids that may have been handed on). A handle with `SYNCHRONIZE` is held across the `taskkill` call, after its

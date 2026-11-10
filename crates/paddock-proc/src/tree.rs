@@ -264,16 +264,30 @@ pub(crate) fn presence_with(
         true,
         ProcessRefreshKind::nothing(),
     );
-    let running = sys.process(id).is_some_and(|p| {
-        !matches!(
-            p.status(),
-            sysinfo::ProcessStatus::Zombie | sysinfo::ProcessStatus::Dead
-        )
-    });
-    if running {
-        Presence::Running
-    } else {
-        Presence::Gone
+    let seen = sys.process(id).map(|p| (p.start_time(), p.status()));
+    classify(seen, || crate::sys::pid_exists(pid))
+}
+
+/// What sysinfo's per-pid refresh means. A process it lists with start time 0 or status Unknown was one it could not read
+/// (macOS lists a root process to another user that way): nothing is known of it. One it does not list is gone only when an
+/// OS primitive that tells "no such process" from "refused" (`exists`, asked only then) says so: a refused look (Windows
+/// drops a process it cannot snapshot) is not an absent process.
+pub(crate) fn classify(
+    seen: Option<(u64, sysinfo::ProcessStatus)>,
+    exists: impl FnOnce() -> crate::sys::Exists,
+) -> Presence {
+    match seen {
+        Some((_, sysinfo::ProcessStatus::Zombie | sysinfo::ProcessStatus::Dead)) => Presence::Gone,
+        Some((0, _) | (_, sysinfo::ProcessStatus::Unknown(_))) => Presence::Unknown,
+        Some(_) => Presence::Running,
+        None => match exists() {
+            crate::sys::Exists::No => Presence::Gone,
+            crate::sys::Exists::Refused => Presence::Unknown,
+            // Listed nowhere yet signalable: on Unix a zombie that only waits to be reaped (macOS does not list it, and it
+            // still answers signal 0), which counts as gone. Windows drops a process it could not snapshot, which is not.
+            crate::sys::Exists::Yes if cfg!(windows) => Presence::Unknown,
+            crate::sys::Exists::Yes => Presence::Gone,
+        },
     }
 }
 
@@ -605,6 +619,55 @@ mod tests {
         assert_eq!(
             terminate_by(id, Duration::from_secs(5), &look, &|_| true),
             Terminated::Gracefully
+        );
+    }
+
+    /// Positive control: a process this user may not signal (pid 1, root's) is never reported gone, and on macOS, where sysinfo
+    /// lists it with start time 0 and status Unknown, it is not reported running either: nothing is known of it.
+    #[test]
+    fn a_process_of_another_user_is_not_gone() {
+        // SAFETY: geteuid has no arguments and cannot fail.
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let seen = presence(1);
+        assert_ne!(seen, Presence::Gone, "pid 1 runs");
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            seen,
+            Presence::Unknown,
+            "start time 0 and status Unknown: not known"
+        );
+    }
+
+    #[test]
+    fn what_sysinfo_could_not_read_is_unknown_and_only_a_confirmed_absence_is_gone() {
+        use crate::sys::Exists;
+        use sysinfo::ProcessStatus::{Run, Unknown as Unk, Zombie};
+        let never = || panic!("a listed process needs no second look");
+        assert_eq!(classify(Some((5, Run)), never), Presence::Running);
+        assert_eq!(
+            classify(Some((0, Run)), never),
+            Presence::Unknown,
+            "start 0"
+        );
+        assert_eq!(
+            classify(Some((5, Unk(0))), never),
+            Presence::Unknown,
+            "status Unknown"
+        );
+        assert_eq!(classify(Some((0, Unk(0))), never), Presence::Unknown);
+        assert_eq!(classify(Some((5, Zombie)), never), Presence::Gone);
+        assert_eq!(classify(None, || Exists::No), Presence::Gone);
+        assert_eq!(classify(None, || Exists::Refused), Presence::Unknown);
+        assert_eq!(
+            classify(None, || Exists::Yes),
+            if cfg!(windows) {
+                Presence::Unknown
+            } else {
+                Presence::Gone
+            },
+            "unlisted but signalable: a zombie on Unix"
         );
     }
 
