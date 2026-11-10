@@ -607,6 +607,7 @@ fn touch(root: &Path, rel: &str, job: Option<&str>) {
 ///
 /// Not `git clone`: CI checks out a depth-1, blob-less, sparse clone, in which a local clone must fetch blobs from a promisor
 /// remote that is not there ("lazy fetching disabled"). The files this test reads are on disk in every kind of checkout.
+/// Ignore rules do not apply (`add -f`): tracked files that a rule matches stay in the graph, as in the real repository.
 fn copy_checked_out_files(src: &Path, dst: &Path) {
     let git = |dir: &Path, args: &[&str]| {
         let out = Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
@@ -627,10 +628,11 @@ fn copy_checked_out_files(src: &Path, dst: &Path) {
         std::fs::copy(&from, &to).unwrap_or_else(|e| panic!("copy {}: {e}", rel.display()));
     }
     git(dst, &["init", "-q"]);
-    // `input` stores LF whatever the host's checkout wrote; checking the index out again leaves LF files on disk.
+    // `input` stores LF whatever the host's checkout wrote; a hard reset from a fresh index rewrites every file as LF.
+    // (`checkout-index -f` would skip files whose stat still matches the index entry and keep a CRLF checkout's bytes.)
     git(dst, &["config", "core.autocrlf", "input"]);
     git(dst, &["config", "core.eol", "lf"]);
-    git(dst, &["add", "-A"]);
+    git(dst, &["-c", "core.safecrlf=false", "add", "-f", "-A"]);
     git(
         dst,
         &[
@@ -644,9 +646,11 @@ fn copy_checked_out_files(src: &Path, dst: &Path) {
             "copy",
         ],
     );
-    git(dst, &["checkout-index", "-a", "-f"]);
+    std::fs::remove_file(dst.join(".git/index")).unwrap();
+    git(dst, &["reset", "-q", "--hard"]);
 }
 
+// Takes about a minute: it copies the checked-out files and runs the script and the planner for every edit.
 #[test]
 fn live_workflow_action_and_script_edits_narrow_exactly_as_affected_mjs_does() {
     if !node_available() {
@@ -656,6 +660,12 @@ fn live_workflow_action_and_script_edits_narrow_exactly_as_affected_mjs_does() {
     let dir = tempfile::tempdir().unwrap();
     let copy = dir.path().join("copy");
     copy_checked_out_files(&repo_root(), &copy);
+    assert!(
+        !std::fs::read_to_string(copy.join(".gitea/workflows/ci.yml"))
+            .unwrap()
+            .contains('\r'),
+        "the copy's ci.yml has CRLF line endings: the workflow split reads LF text, so every edit would mark everything"
+    );
     // LF checkout on every host: the workflow split reads LF text (a CRLF checkout cannot be split by either planner).
     // The jobs of ci.yml that CI_JOBS names, from the script's own table; one action, one reusable workflow, one script of
     // conformance/ci and a helper it imports.

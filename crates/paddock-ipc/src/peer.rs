@@ -1193,15 +1193,21 @@ mod tests {
         let (tx, seen) = std::sync::mpsc::channel();
         let tx = Mutex::new(tx);
         on_closed(&peer, move |p| {
-            let _ = lock(&tx).send(p.inner.out.is_shut());
+            let _ = lock(&tx).send((std::thread::current().id(), p.inner.out.is_shut()));
         });
         drop(theirs);
         // Waits on the seam itself (it runs after `closed` is set, so `wait_closed` alone could return before it).
-        let shut = seen.recv_timeout(Duration::from_secs(30));
-        assert_eq!(
+        let (thread, shut) = seen
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the seam did not run within 30 s of the other end going away");
+        assert_ne!(
+            thread,
+            std::thread::current().id(),
+            "the seam ran on the test thread, not on the reader that closed the peer"
+        );
+        assert!(
             shut,
-            Ok(true),
-            "the seam ran on the reader thread that closed the peer"
+            "the served calls were cancelled while the outgoing queue was still open"
         );
     }
 
