@@ -10,14 +10,12 @@
 //!   that need administrator rights.
 //! - [`supervisor`]: lazy start, restart with backoff and a restore hook, quarantine after repeated failures.
 //! - [`child_log`]: each child's captured standard error and start/exit lines, for problem reports.
-//! - [`dev_env`]: development-only variables that pick a program (debug builds only).
 //! - [`stderr_pipe`]: an elevated child's standard error into a pipe it reads and forwards itself.
 
 pub mod child;
 pub mod child_log;
 #[cfg(windows)]
 pub mod contain;
-pub mod dev_env;
 pub mod elevation;
 pub mod endpoint;
 pub mod error;

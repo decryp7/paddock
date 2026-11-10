@@ -152,7 +152,7 @@ impl Sandbox {
         let value = std::env::var(NO_SANDBOX_ENV).ok();
         let debug = cfg!(debug_assertions);
         if !debug && value.as_deref().is_some_and(|v| !v.is_empty()) {
-            crate::ignored_env::warn_once(NO_SANDBOX_ENV);
+            paddock_env::dev_override::warn_ignored(NO_SANDBOX_ENV);
         }
         Sandbox::decide(debug, value.as_deref(), running_as_root())
     }

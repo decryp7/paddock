@@ -4,6 +4,10 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-env`: `dev_override`, the development-only environment override (ADR 0073 WP-S)
+- New `paddock_env::dev_override`: `decide(debug, value)` (pure; empty is unset), `resolve(debug, name, value)` (a set variable is ignored in a release build and logged once per name, never its value; a poisoned lock still answers), `from_environment(debug, name)`, `warn_ignored(name)` and the `dev_override!(NAME)` macro. The build mode is `cfg!(debug_assertions)` of the calling crate (the macro expands it there), not of `paddock-env`, so a per-package profile override or a prebuilt copy cannot make a release app honour the variable.
+- Adopted in the same change: Debrief (`debrief_ipc::dev_env` removed; the store worker in the app and CLI and the plugins lookup use it), Dyno (`agent_override` removed; `DYNO_AGENT_BIN` now logs the ignored name too) and Debrief's chromium-driver (its own log-once removed). Register: `dev-env-override` is built, its three copies are gone.
+
 ### `paddock-cli`: `Outcome` and `Verdict`, exit codes 6 and 7 (ADR 0089, WP-0 and WP-1)
 - New `paddock_cli::outcome`: `Outcome` (`Clean`, `NotApplicable`, `Findings`, `NotMeasured`, `CheckBroken`; no `bool`, `Result` or default conversion), `Verdict::of(outcomes, &Optional, &Run)` with the precedence `CheckBroken` 7, failing findings 5, `NotMeasured` 6, clean 0 (report-only findings never mask a missing measurement; an empty run and `NotApplicable` in a whole-tree run are not measured), `Optional::parse` for `docs/optional-measurements.toml` (leg, OS, expiry, `measured_on` in release runs) and `RunKind::detect`. `Verdict` writes JSON and a `Table`.
 - `Exit` gains `NotMeasured = 6` and `CheckBroken = 7`; the existing codes are unchanged.

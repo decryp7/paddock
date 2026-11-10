@@ -18,6 +18,8 @@ sha2 = { workspace = true }
 zip = { workspace = true }
 # A small synchronous WebSocket client for the DevTools endpoint on 127.0.0.1 (MIT OR Apache-2.0).
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
+# `CHROMIUM_PATH` and `DEBRIEF_BROWSER_NO_SANDBOX` are reported once when a release build ignores them (ADR 0073).
+paddock-env = { path = "../../../../crates/paddock-env" }
 # The shared start judge (ADR 0031): the browser's start is judged on its run state, not on a fixed wait.
 paddock-proc = { path = "../../../../crates/paddock-proc" }
 
