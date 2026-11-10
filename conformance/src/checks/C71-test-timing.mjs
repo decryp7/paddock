@@ -15,6 +15,8 @@
 // Existing sites sit in `conformance/baselines/C71.json` as {file, hash of the normalised line}: a site in the baseline passes, any
 // other is an error. The baseline may only shrink: a listed site that is gone is a warning to remove it, and an entry that the
 // baseline at the merge base (`origin/main`, or PADDOCK_BASE_REF) does not have is an error. There is no expiry: ADR 0041 WP-6 is open-ended.
+// Also (ER-12): a Playwright config (`playwright*.config.*`) whose `retries` can be above 0 sets `failOnFlakyTests` (not `false`), so a
+// retry never turns a red run green; a config with `retries: 0` or no `retries` is fine.
 // Not yet (ADR 0041 §4 amendment, "first slice"): Instant/SystemTime/Date.now, recv_timeout/wait_timeout/Deadline::after,
 // performance.now, page.clock.install without pauseAt, vi.waitFor under fake timers, the live-status spread, C30's elapsed asserts,
 // vm-smoke `observe()`, the ESLint rule.
@@ -339,6 +341,17 @@ export function baselineGrowth(ctx, current) {
   return { base, added };
 }
 
+const PW_CONFIG = /(?:^|\/)playwright[^/]*\.config\.(?:ts|mts|cts|js|mjs|cjs)$/;
+
+/** The 1-based line of a `retries` setting that can exceed 0 without `failOnFlakyTests` (ER-12), or 0 when the config is fine. */
+export function retriesWithoutFlakyFailure(text) {
+  const code = maskTs(text);
+  const m = /\bretries\s*:(?!\s*0\s*(?:[,}\n]|$))/.exec(code);
+  if (!m) return 0;
+  if (/\bfailOnFlakyTests\s*:\s*(?!false\b)\S/.test(code)) return 0;
+  return code.slice(0, m.index).split('\n').length;
+}
+
 export default {
   id: 'C71',
   title: 'Tests do not settle on real time',
@@ -347,14 +360,18 @@ export default {
   mode: 'gate',
   run(ctx) {
     if (!ctx.config.timingLint) return [];
+    const flaky = ctx.files().filter((f) => PW_CONFIG.test(f) && !SKIP_PATH.test(f)).flatMap((f) => {
+      const line = retriesWithoutFlakyFailure(ctx.read(f) ?? '');
+      return line ? [error('C71', 49, f, line, '`retries` can be above 0 without `failOnFlakyTests` (ER-12): a flaky test would pass its job unseen', 'Add `failOnFlakyTests: true` next to `retries` (Playwright 1.50+), so a test that needed its retry fails the run.')] : [];
+    });
     const sites = timingSites(ctx.files(), ctx.read);
     let baseline = { sites: [] };
     const raw = ctx.read(BASELINE_PATH);
     if (raw) baseline = JSON.parse(raw);
     const { fresh, stale } = againstBaseline(sites, baseline.sites);
-    const out = fresh.map((s) =>
+    const out = flaky.concat(fresh.map((s) =>
       error('C71', 49, s.file, s.line, `${s.what} (ER-12, rule 49): ${s.text.trim().slice(0, 100)}`, 'Wait on the condition (an event, `expect.poll`, a locator assertion, `useTestClock`/`frozenClock`, the FakeClock), or for a real bound add `// conformance: hang-guard — <why>, <bound of at least 10 s>` on the line.'),
-    );
+    ));
     for (const e of stale) {
       out.push(warn('C71', 49, e.file, e.line ?? 1, `${BASELINE_PATH} lists a site that is gone (hash ${e.hash}); the baseline may only shrink`, 'Remove the entry (`node conformance/bin/paddock-timing-baseline.mjs --write` rewrites the file without it).'));
     }
