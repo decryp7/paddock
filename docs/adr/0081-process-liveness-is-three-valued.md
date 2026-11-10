@@ -1,6 +1,6 @@
 # 81. Process liveness is three-valued: "could not look" is never "gone", proof tokens before destructive acts, one check over every look
 
-- Status: Accepted 2026-11-10 (user), decisions as recommended. Revision 3 (2026-11-10): the second independent review independent review approved it; its three P2s are
+- Status: Accepted 2026-11-10 (user), decisions as recommended. Revision 3 (2026-11-10): the second independent review approved it; its three P2s are
   applied (Gone only on ESRCH, the S21 exception, stale text). Not implemented yet.
 - Date: 2026-11-10
 - Related: ER-21 / rule 40 (recurring bugs mean a missing design rule), rule 53 and ADR
