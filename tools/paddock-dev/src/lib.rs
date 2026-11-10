@@ -5,6 +5,8 @@
 //!
 //! - `self hash`: the content address of the binary ([`input_hash`]);
 //! - `ci slot acquire|release|status`: job-isolation slots over kernel file locks ([`slots`], backed by `paddock-slots`);
+//! - `ci isolation`: the CI kit's job isolation (the port of `conformance/ci/job-isolation.sh`, `job-tmpdir.sh` and `ci-home.sh`,
+//!   [`ci_isolation`], ADR 0025);
 //! - `wait`: one bounded wait for a plock job, a process, a log line or a CI run ([`wait`]);
 //! - `check ipc-endpoints`: C102, the register of every listen site and the ratchet of connection endings
 //!   ([`ipc_endpoints`], ADR 0072);
@@ -17,6 +19,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod ci_isolation;
 mod cli;
 mod fds;
 pub mod gates;
