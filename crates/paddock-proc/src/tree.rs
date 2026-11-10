@@ -1136,7 +1136,7 @@ mod tests {
         dead.wait().unwrap();
 
         let mut live = Command::new("/bin/sh");
-        live.args(["-c", "sleep 60"]).process_group(0);
+        live.args(["-c", "exec sleep 60"]).process_group(0);
         let mut live = live.spawn().unwrap();
         assert!(group_exists(live.id()));
         live.kill().unwrap();
