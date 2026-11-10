@@ -313,6 +313,17 @@ changes here, every app's copy is updated in the same change.
     *Why:* on Dyno 1.1.0 a VM with no menu bar produced a false "confirmed" cause in 12 of 12 runs, a tray count matched
     the app's own window buttons, and a reading row passed on a dead helper.
 
+## Design decisions (user, 2026-11-11; ER-37)
+76. **Measure a design against common practice before paying for it.** Before an ADR or design is accepted, it states how
+    comparable, well-known software handles the same problem (for example Visual Studio, VS Code, Chrome, Docker, Homebrew,
+    git, the OS vendor's own tools) and what the platform vendor documents as the standard (Microsoft, Apple, Linux
+    distributions), with sources. It then states the cost in agent-days, set against that baseline. A design that goes
+    beyond common practice says why this project needs more, and the cheaper common-practice option is always offered as a
+    decision. Personal, single-user tools default to common practice.
+    *Why:* on 2026-11-11 a 23-31-day elevated-helper design for Debrief went through four review rounds before the user
+    compared it with Visual Studio and VS Code and chose a half-day risk warning instead; several accepted process ADRs
+    (signed approvals, decision registers, extra gates) were then cut as more than a personal tool needs.
+
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (sparse to its app where possible:
