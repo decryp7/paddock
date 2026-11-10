@@ -98,10 +98,25 @@ pub struct JobReport {
     pub has_lwcr: bool,
 }
 
-/// Reads the report of `launchctl print` for the launch agent.
+/// Reads the report of `launchctl print` for the launch agent. Only the job's own keys count: nested blocks (`arguments`,
+/// `environment`, and on macOS 26 the resource and jetsam coalitions with their own `state = active`) are skipped.
 pub fn parse_job(launchctl_print: &str) -> JobReport {
     let mut job = JobReport::default();
+    // 0 before the `<target> = {` header (fakes print bare lines), 1 inside it, more inside a nested block.
+    let mut depth = 0usize;
     for line in launchctl_print.lines().map(str::trim) {
+        if line == "}" {
+            depth = depth.saturating_sub(1);
+            continue;
+        }
+        let own = depth <= 1;
+        if line.ends_with('{') {
+            depth += 1;
+            continue;
+        }
+        if !own {
+            continue;
+        }
         if line.starts_with("state = ") {
             job.found = true;
             job.running = line == "state = running";
@@ -120,10 +135,11 @@ pub fn parse_job(launchctl_print: &str) -> JobReport {
 impl JobReport {
     /// Whether launchd holds a registration it can no longer start. macOS keeps the launch constraint of the build that
     /// was registered; every ad-hoc signed build has another cdhash, so after an update launchd refuses the new binary
-    /// (spawn failed, exit 78 EX_CONFIG, has LWCR, "needs LWCR update" when it says so) until the job is replaced.
-    /// A job that holds a constraint and is not running counts too: the caller only asks when the server is unreachable.
+    /// (spawn failed, exit 78 EX_CONFIG, "needs LWCR update") until the job is replaced. `has LWCR` alone is not a sign:
+    /// every healthy `SMAppService` job has it, and a pending or restarting job is not refused. A running job is not
+    /// refused whatever an earlier run left in the report.
     pub fn stale(&self) -> bool {
-        self.found && (self.spawn_failed || self.exit_config || self.needs_lwcr_update || (self.has_lwcr && !self.running))
+        self.found && !self.running && (self.spawn_failed || self.exit_config || self.needs_lwcr_update)
     }
 }
 
@@ -400,6 +416,25 @@ mod tests {
 
     const LABEL: &str = "net.decryptology.pitcrew.service";
 
+    /// The whole of a real `launchctl print` of a healthy job (macOS 26.6.2, label and ids invented): the canonical
+    /// capture of `paddock-service`, with its nested coalition blocks that print their own `state = active`.
+    const REAL_RUNNING: &str = include_str!("../../../../../crates/paddock-service/tests/fixtures/launchctl-print-running.txt");
+
+    #[test]
+    fn a_real_running_print_reads_as_running_and_not_stale() {
+        let job = parse_job(REAL_RUNNING);
+        assert!(job.found && job.running && job.has_lwcr, "{job:?}");
+        assert!(!job.spawn_failed && !job.exit_config && !job.needs_lwcr_update, "{job:?}");
+        assert!(!job.stale());
+    }
+
+    #[test]
+    fn a_pending_job_with_a_constraint_is_not_stale() {
+        let pending = REAL_RUNNING.replacen("\tstate = running", "\tstate = spawn scheduled", 1);
+        let job = parse_job(&pending);
+        assert!(job.found && !job.running && job.has_lwcr && !job.stale(), "{job:?}");
+    }
+
     #[test]
     fn the_disabled_mapping() {
         use RegistrationStatus::*;
@@ -438,7 +473,8 @@ mod tests {
         // Each sign alone is enough.
         assert!(parse_job("\tstate = spawn scheduled\n\tlast exit code = 78: EX_CONFIG\n").stale());
         assert!(parse_job("\tstate = spawn scheduled\n\tjob state = spawn failed\n").stale());
-        assert!(parse_job("\tstate = spawn scheduled\n\tproperties = keepalive | has LWCR\n").stale());
+        // `has LWCR` alone is every healthy job's mark, not a refusal.
+        assert!(!parse_job("\tstate = spawn scheduled\n\tproperties = keepalive | has LWCR\n").stale());
         assert!(parse_job("\tstate = waiting\n\tproperties = keepalive | needs LWCR update\n").stale());
         let healthy = parse_job(HEALTHY);
         assert!(healthy.found && healthy.running && healthy.has_lwcr && !healthy.stale());
