@@ -524,6 +524,10 @@ fn the_owner_map_file_is_versioned_and_lives_in_the_common_dir_under_the_adrs_na
     assert!(m["pending"].as_object().unwrap().is_empty(), "no reservation is left behind");
     assert!(fx.primary.join(".git/paddock-worktree-owners.lock").exists());
     assert!(
+        !fx.primary.join(".git/paddock-worktree-owners.holder").exists(),
+        "the holder file is removed when the command ends"
+    );
+    assert!(
         std::fs::read_dir(fx.primary.join(".git"))
             .unwrap()
             .all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".tmp"))

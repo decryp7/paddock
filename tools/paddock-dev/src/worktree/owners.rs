@@ -307,6 +307,8 @@ impl OwnerStore {
                 Ok(()) => break,
                 Err(TryLockError::WouldBlock) if started.elapsed() < self.wait => std::thread::sleep(LOCK_POLL),
                 Err(TryLockError::WouldBlock) => {
+                    // The holder writes its name just after it takes the lock, so a waiter can read an empty or partial name while the
+                    // file is being written; that only shortens the name in this message, never the lock's behaviour.
                     let holder = std::fs::read_to_string(self.holder_file()).unwrap_or_default();
                     return Err(OwnerError::LockTimeout(lock_path, holder.trim().to_string(), self.wait));
                 }
@@ -494,6 +496,19 @@ mod tests {
             text.contains(&format!("pid {}", std::process::id())) && text.contains("worktree claim"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn no_holder_file_is_left_after_an_update_also_when_the_closure_panics() {
+        let (_d, s) = store();
+        s.update_as("worktree claim", |_| ()).unwrap();
+        assert!(!s.holder_file().exists(), "removed when the update returned");
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = s.update_as("worktree add", |_| -> () { panic!("the closure fails") });
+        }));
+        assert!(panicked.is_err());
+        assert!(!s.holder_file().exists(), "removed on the way out of a panic too");
+        assert!(s.update(|_| ()).is_ok(), "and the lock was released");
     }
 
     #[test]
