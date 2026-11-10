@@ -1,8 +1,8 @@
 # 86. A bug fix names its failing test, and a replay shows it failed without the fix
 
-- Status: Proposed (2026-11-10), revision 2 (after review round 2 of `cd02c1217`). Drafted at the user's request of 2026-11-10 (ER-21 redesigns) as Part B of the ADR 0038
+- Status: Accepted 2026-11-10 (user), decisions as recommended (D1–D6). Revision 2, after review rounds 1–3. Drafted at the user's request of 2026-11-10 (ER-21 redesigns) as Part B of the ADR 0038
   amendment of the same date; the independent review of that draft (`f0979961a`) asked for it to stand alone and for the
-  changes listed in "Review answers". Needs the decisions below.
+  changes listed in "Review answers".
 - Date: 2026-11-10
 - Related: ER-11 / rule 5 (every bug fix starts with a failing regression test; the reviewer's mutation or revert check,
   2026-10-30), ER-12 (no retries that turn red green), ER-21 / rule 40, ER-27, ER-33 / rule 71, ER-36; ADR 0038 and its

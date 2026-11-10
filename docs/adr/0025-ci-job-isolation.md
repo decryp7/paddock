@@ -1,6 +1,8 @@
 # 25. CI job isolation: any number of jobs per host, job-scoped state in the runner's job folder, kept folders per slot
 
-- Status: Proposed (2026-10-28; independent review 2026-10-28: "not yet", two P1s and the P2s below; all addressed on
+- Status: Accepted 2026-11-10 (user), with its amendment [2026-11-10](amendments/0025-2026-11-10.md) (a kept build folder is
+  keyed by the source it builds; corrects §2's claim that cargo fingerprints hold absolute paths). Proposed 2026-10-28
+  (independent review 2026-10-28: "not yet", two P1s and the P2s below; all addressed on
   `ci/job-isolation`, see "Verified" and "Still open" at the end)
 - Date: 2026-10-28
 - Related: rule 2 (own worktrees, build folders and ports), rule 7 (tests never touch the machine), rule 40 (recurring bugs
