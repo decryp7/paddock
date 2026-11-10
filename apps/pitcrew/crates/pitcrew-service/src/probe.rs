@@ -3,10 +3,10 @@
 //!
 //! One `sysinfo` snapshot is refreshed per supervision tick (every few seconds), not per question.
 
+use crate::process_watch::Seen;
 use pitcrew_core::jobs::is_job_process;
 use pitcrew_core::metrics::{permille, MachineSample};
 use pitcrew_core::process_track::ProcessMeta;
-use crate::process_watch::Seen;
 use pitcrew_core::time::Timestamp;
 use pitcrew_core::usage::{ProcessInfo, Usage, UsageTracker};
 use std::path::Path;
@@ -146,7 +146,9 @@ impl Probe {
             return Seen::Unverified;
         };
         sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[id]), true, ProcessRefreshKind::nothing());
-        seen(sys.process(id).map(|p| (p.start_time(), p.status())), started_ms)
+        seen(sys.process(id).map(|p| (p.start_time(), p.status())), started_ms, || {
+            paddock_proc::presence(pid)
+        })
     }
 
     /// Whether `pid` has child processes that belong to a job (its console host does not).
@@ -322,12 +324,18 @@ mod tests {
     }
 }
 
-
 /// What sysinfo's listing of a pid (start time in seconds and status; `None` when it is not listed) says about the process
 /// recorded at `started_ms`.
-fn seen(listed: Option<(u64, sysinfo::ProcessStatus)>, started_ms: Option<u64>) -> Seen {
+///
+/// A pid sysinfo does not list is gone only when `paddock_proc::presence` (`absent`, asked only then) says so: sysinfo drops
+/// processes it could not read.
+fn seen(listed: Option<(u64, sysinfo::ProcessStatus)>, started_ms: Option<u64>, absent: impl FnOnce() -> paddock_proc::Presence) -> Seen {
     match listed {
-        None | Some((_, sysinfo::ProcessStatus::Zombie)) => Seen::Gone,
+        None => match absent() {
+            paddock_proc::Presence::Gone => Seen::Gone,
+            paddock_proc::Presence::Running | paddock_proc::Presence::Unknown => Seen::Unverified,
+        },
+        Some((_, sysinfo::ProcessStatus::Zombie)) => Seen::Gone,
         // An unreadable start time (0), or none recorded: this cannot be told from a process that took the pid over.
         Some((0, _)) => Seen::Unverified,
         Some((start, _)) => match started_ms {
@@ -342,20 +350,32 @@ fn seen(listed: Option<(u64, sysinfo::ProcessStatus)>, started_ms: Option<u64>) 
 #[cfg(test)]
 mod seen_tests {
     use super::*;
+    use paddock_proc::Presence;
     use sysinfo::ProcessStatus::{Run, Zombie};
+
+    fn never() -> Presence {
+        panic!("a listed process needs no second look")
+    }
+
+    /// sysinfo drops processes it could not read: an unlisted pid is not gone until the OS says so.
+    #[test]
+    fn an_unlisted_pid_is_gone_only_when_the_os_confirms_it() {
+        assert_eq!(seen(None, Some(5_000), || Presence::Unknown), Seen::Unverified);
+        assert_eq!(seen(None, Some(5_000), || Presence::Running), Seen::Unverified);
+    }
 
     #[test]
     fn a_pid_that_reports_start_zero_or_has_no_recorded_start_is_unverified_not_the_same_process() {
-        assert_eq!(seen(Some((0, Run)), Some(5_000)), Seen::Unverified, "start time unreadable");
-        assert_eq!(seen(Some((5, Run)), None), Seen::Unverified, "no recorded start");
+        assert_eq!(seen(Some((0, Run)), Some(5_000), never), Seen::Unverified, "start time unreadable");
+        assert_eq!(seen(Some((5, Run)), None, never), Seen::Unverified, "no recorded start");
     }
 
     #[test]
     fn the_same_start_is_the_same_process_and_a_recycled_pid_or_a_zombie_is_gone() {
-        assert_eq!(seen(Some((5, Run)), Some(5_000)), Seen::Same);
-        assert_eq!(seen(Some((5, Run)), Some(5_900)), Seen::Same, "rounding");
-        assert_eq!(seen(Some((9, Run)), Some(5_000)), Seen::Gone, "recycled pid");
-        assert_eq!(seen(Some((5, Zombie)), Some(5_000)), Seen::Gone);
-        assert_eq!(seen(None, Some(5_000)), Seen::Gone);
+        assert_eq!(seen(Some((5, Run)), Some(5_000), never), Seen::Same);
+        assert_eq!(seen(Some((5, Run)), Some(5_900), never), Seen::Same, "rounding");
+        assert_eq!(seen(Some((9, Run)), Some(5_000), never), Seen::Gone, "recycled pid");
+        assert_eq!(seen(Some((5, Zombie)), Some(5_000), never), Seen::Gone);
+        assert_eq!(seen(None, Some(5_000), || Presence::Gone), Seen::Gone);
     }
 }

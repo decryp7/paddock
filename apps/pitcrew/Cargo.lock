@@ -3457,6 +3457,7 @@ dependencies = [
  "libc",
  "nix",
  "paddock-ipc",
+ "paddock-proc",
  "pitcrew-core",
  "serde",
  "serde_json",

@@ -59,6 +59,8 @@ pub struct Stopped {
     pub by: StopReason,
     /// It ignored the request and was ended.
     pub forced: bool,
+    /// Whether the process is gone is not known: its identity could not be verified, so it was neither seen to stop nor ended.
+    pub unconfirmed: bool,
 }
 
 /// One runner's processes.
@@ -217,6 +219,7 @@ impl ProcessWatch {
                         rule: s.rule.clone(),
                         by: s.by,
                         forced: s.ended,
+                        unconfirmed: false,
                     });
                     false
                 }
@@ -227,9 +230,13 @@ impl ProcessWatch {
                         name: s.name.clone(),
                         pid: s.pid,
                         age_ms: s.started_ms.map_or(0, |st| now.0.saturating_sub(st)),
-                        rule: format!("{} (not ended: the process could not be verified to be the same one)", s.rule),
+                        rule: format!(
+                            "{} (could not confirm that it stopped: the process could not be verified to be the same one)",
+                            s.rule
+                        ),
                         by: s.by,
-                        forced: false,
+                        forced: s.ended,
+                        unconfirmed: true,
                     });
                     false
                 }
@@ -249,6 +256,7 @@ impl ProcessWatch {
                             rule: format!("{} (could not be ended)", s.rule),
                             by: s.by,
                             forced: true,
+                            unconfirmed: false,
                         });
                         return false;
                     }
@@ -408,8 +416,15 @@ mod tests {
         // The timeout has passed: a pid that reports start time 0 may be a recycled one.
         let done = w.advance(t(815), &mut |_, _| Seen::Unverified, &term);
         assert!(term.ended.lock().unwrap().is_empty(), "never ended by a bare pid");
-        let reported: Vec<_> = done.iter().filter(|d| d.rule.contains("not ended")).collect();
+        let reported: Vec<_> = done
+            .iter()
+            .filter(|d| d.rule.contains("could not confirm that it stopped"))
+            .collect();
         assert_eq!(reported.len(), 1, "reported, not silently dropped: {done:?}");
+        assert!(
+            reported[0].unconfirmed && !reported[0].forced,
+            "not claimed as a stop or a kill: {done:?}"
+        );
         assert!(!w.is_stopping(11));
     }
 
