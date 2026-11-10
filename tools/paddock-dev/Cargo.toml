@@ -24,6 +24,8 @@ clap = { version = "4", default-features = false, features = ["std", "derive", "
 # Keep the key order of the JSON the planner prints, as scripts/affected.mjs does.
 serde_json = { version = "1", features = ["preserve_order"] }
 regex = "1"
+# ci_isolation: the {src} key of a kept build folder (ADR 0025 amendment).
+sha2 = "0.10"
 # C102 (ipc_endpoints): the syn pass over non-test code and the register/ratchet files.
 syn = { version = "2", default-features = false, features = ["full", "parsing", "visit", "printing"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }

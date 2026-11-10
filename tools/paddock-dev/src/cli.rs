@@ -1,4 +1,4 @@
-use crate::{gates, input_hash, ipc_endpoints, plan, plan_cmd, slots, wait};
+use crate::{ci_isolation, gates, input_hash, ipc_endpoints, plan, plan_cmd, slots, wait};
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
 use std::io::Write;
@@ -78,6 +78,9 @@ enum CiCommand {
         #[command(subcommand)]
         command: SlotCommand,
     },
+    /// The CI kit's job isolation on a host runner: slots, kept folders, ports, process patterns, temp folders (the port of
+    /// `conformance/ci/job-isolation.sh`). Values go to standard output, messages to standard error.
+    Isolation(ci_isolation::IsolationArgs),
 }
 
 #[derive(Subcommand)]
@@ -218,6 +221,13 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             .with_hint("Its output is the planner's own: JSON for a plan, true or false, a range.");
         return finish(Format::Json, Err(e), out, err).code();
     }
+    if let Command::Ci {
+        command: CiCommand::Isolation(a),
+    } = &cli.command
+    {
+        // The script's contract: plain values on standard output, `::error::` lines on standard error, no `error:` prefix.
+        return ci_isolation::run(a, out, err);
+    }
     let result = dispatch(cli.command);
     finish(if cli.json { Format::Json } else { Format::Text }, result, out, err).code()
 }
@@ -236,6 +246,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             SlotCommand::IdleRun(a) => slots::idle_run(&a),
             SlotCommand::Hold(a) => slots::hold(&a),
         },
+        Command::Ci {
+            command: CiCommand::Isolation(_),
+        } => Err(CliError::failure("`ci isolation` was dispatched through the report path.")),
         Command::Wait(a) => wait::command(&a),
         Command::Gates {
             command: GatesCommand::Model(a),
