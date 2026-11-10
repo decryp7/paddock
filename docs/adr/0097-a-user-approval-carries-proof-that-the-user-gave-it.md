@@ -1,9 +1,10 @@
 # 97. A user approval carries proof that the user gave it
 
-- Status: Proposed 2026-11-10, revision 3 (answers the re-review of revision 2, `c591c5668`: P1-A, P1-B and the P2s;
-  revision 2 answered the security review of revision 1, `d21eddcbf`; see the two "Review answers" sections). Drafted at
-  the coordinator's request of 2026-11-10 under ER-21 (a class seen three or more times gets a redesign ADR), with
-  requirements R1 to R5 from the ADR 0093 review. Nothing here is built yet. ER-23 does not apply (no drawings).
+- Status: Proposed 2026-11-10, revision 4 (answers the re-review of revision 3, `849a4ab13`: P1-C and the P2s; revision
+  3 answered the re-review of revision 2, `c591c5668`: P1-A, P1-B and the P2s; revision 2 answered the security review
+  of revision 1, `d21eddcbf`; see the "Review answers" sections). Drafted at the coordinator's request of 2026-11-10
+  under ER-21 (a class seen three or more times gets a redesign ADR), with requirements R1 to R5 from the ADR 0093
+  review. Nothing here is built yet. ER-23 does not apply (no drawings).
 - Date: 2026-11-10
 - Related: ER-5, ER-14 (tests never touch real keys or the keychain), ER-15, ER-21 / rule 40, ER-27, ER-31, ER-33 /
   rule 71, ER-36; rule 55 (`Copies-date: ... approved: <coordinator|user>`); ADR 0022 and its build-inputs amendment
@@ -114,7 +115,12 @@ Keys (D3):
   provider library built from a pinned OpenSSH release) to a **root-owned** folder, `/usr/local/libexec/paddock/`
   (`/usr/local` is `root:wheel`, `drwxr-xr-x`; the subfolder does not exist yet), which needs the user's `sudo`; its
   sha256 is part of a code pin (§4), and `./dev approve` checks the hash before it passes the path as `SSH_SK_PROVIDER`
-  (PC-18b).
+  (PC-18b). That check compares two values agents wrote (the pinned hash was computed by an agent, and `./dev approve`
+  is agent-built), so it catches mistakes and a later swap, not a determined agent. That is acceptable: each signature
+  still needs a hardware touch, and a bad middleware only widens the confused-deputy risk already in §8. Whether a
+  self-built `sk-libfido2` dylib loads in Apple's `ssh-sk-helper` at all (library validation, `dlopen` of an unsigned
+  library) is **unverified**; WP-0's first step is a real signature through it. Fallback: install the pinned OpenSSH
+  release's own `ssh-keygen` root-owned beside the provider and point `gpg.ssh.program` at it.
 - **Secure Enclave key**, through the system's `/usr/lib/ssh-keychain.dylib` (present on this Mac, macOS 27.2; local
   `ssh-keychain(8)`: "ecdsa256 for Secure Key module"), created with `sc_auth create-ctk-identity -l <label> -k p-256-ne
   -t bio` (local `sc_auth(8)`: `-ne` non-exportable, `-t bio|none` the private key protection). It appears to ssh as
@@ -172,7 +178,10 @@ namespace.
 go-live anchor (its line 244): the `created_at` of the first run of **`approvals-audit.yml`** (§7) on `origin/main`
 whose head commit contains the approval commit. That workflow runs on every push to `main` with no path filter, so a
 docs-only landing, which rule 50 keeps out of `ci.yml`'s heavy jobs, still gets a run. When no such run exists (the
-workflow was down, or the commit landed before WP-6), the time is not measured and the verdict is 6, never a guess.
+workflow was down, or the commit landed before WP-6), the time is not measured and the verdict is 6, never a guess. An
+administrator can delete runs; the next run then supplies a later time, which is stricter for `valid-before` but laxer
+for `valid-after`. So the verifier also requires run ids to increase with landing order along `main`'s first-parent
+chain, and reports 6 where they do not.
 Committer and author dates are never used; an agent can set them.
 
 Honest limit: while agents hold the user's administrator token, the browser session and the keychain credential, they
@@ -200,9 +209,15 @@ graph from `main`'s tip with `v = projection(record at tip)`:
 1. at a commit `c` whose value is `v`: if `c` has no parent, or its first parent's value differs and `c` is not a merge,
    `c` introduced `v`: it must verify (§5) with a routine key trusted at its first parent and descend from the genesis;
 2. a non-merge commit whose parent's value is `v`: continue at the parent;
-3. a merge: if some parent's value is `v`, continue at the first such parent (a landing merge that only carried the
-   value); if no parent has `v`, **the merge itself changed the value** (a conflict resolution or an evil merge): it
-   must verify like step 1, and an unsigned merge makes the record fail;
+3. a merge with parents `p` and `q` and merge base `b` (one `git merge-base`; more than one base, or more than two
+   parents, while the parents' values differ, is treated as a change): the merge may **carry** `v` from `p` only if
+   `value(p) = v` and `value(q) = value(b)`, that is, only `p`'s side changed the value since the base; the walk then
+   continues at `p`. The rule is symmetric in `p` and `q`. If both parents have `v`, the walk continues at the first
+   parent. Otherwise **the merge itself changed the value** (a conflict resolution, an evil merge, or a merge that
+   brings back an old value): it must verify like step 1, and an unsigned merge makes the record fail. This stops a
+   replay without a force-push: a merge of `main`'s tip with an older ancestor that still had a superseded signed value
+   (made with `git commit-tree` or `-s ours`) has that ancestor as its base, the tip's side changed the value since,
+   so the merge must be signed, whichever parent is first;
 4. results are memoized per (commit, record id), so the walk visits each commit at most once per record; parents are
    taken in their recorded order, never by date.
 
@@ -213,7 +228,13 @@ So: an unsigned deletion of `until` or `report_until` changes `v` and voids the 
 restricting list, a removed closing condition, a field added by a dotted key elsewhere (a schema error), a line moved
 from one record to another, and a merge's conflict resolution that changes the value all fail closed; a signed approval
 that lands through an unsigned merge passes (step 3); an unsigned side-branch change with a backdated date, merged after
-the approval, is where the walk ends, so it fails. Blame alone cannot see deleted lines; the walk is what does.
+the approval, is where the walk ends, so it fails; a merge that restores a superseded value fails. Blame alone cannot
+see deleted lines, and blame also passes the replay; the walk is what catches both.
+
+**One rule for merges.** "A merge may carry only a change that one side made since the merge base" is the same rule the
+merge check (`./dev merge check`, the stale-revert check of memory "merges-check-stale-reverts", being fixed now)
+applies to whole files. The two should share one implementation in `paddock-repo-graph` (ER-22); WP-2 builds it there
+if the merge check has not.
 
 The history commands run with a fixed configuration, so the tree under check cannot steer them:
 `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_NO_REPLACE_OBJECTS=1`, `-c blame.ignoreRevsFile=`, no
@@ -247,11 +268,13 @@ reads the approval from `main`.
 **Code subjects (P1-3).** An approval commit may touch only declared subject files (PC-16): a signature never blesses
 code by accident. Code that decides whether approvals count is protected by a **code pin** instead: a record of kind
 `code_pin` (`id`, `paths`, `tree`) whose `tree` is the hash git computes for those paths at a named commit of `main`
-(`git rev-parse <commit>:<path>` per path, combined in a declared order). The declared pins are
-the verifier and everything it is built from: `tools/paddock-dev/src/approvals/**`, the shared modules it uses (the git
-driver and ADR 0089's `Outcome`), `tools/paddock-dev/Cargo.toml` and its `Cargo.lock`; `docs/approvals/**` itself; and
-the sha256 of the FIDO middleware installed by WP-0 (a `file_sha256` entry, checked by `./dev approve` on the user's
-machine, not by CI). The user re-signs a pin after
+(`git rev-parse <commit>:<path>` per path, combined in a declared order). The scope is mechanical, not a list someone
+keeps: the **module closure** of `tools/paddock-dev/src/approvals/` (every source file reachable through `mod` and
+`use crate::` edges, computed by code inside the pinned set, and every crate path it depends on inside the repository),
+plus `tools/paddock-dev/Cargo.toml` and its `Cargo.lock`, `docs/approvals/**` itself, and the sha256 of the FIDO
+middleware installed by WP-0 (a `file_sha256` entry, checked by `./dev approve` on the user's machine, not by CI). C108
+fails when a file in the closure is not covered by a pin. The simpler alternative, all of `tools/paddock-dev/src` minus
+declared exclusions, needs a touch for every `./dev` change and is not recommended (D11). The user re-signs a pin after
 reviewing a change of those paths (one touch). The post-tag audit (§7) recomputes the hashes in the tagged tree and on
 `main` and refuses a tag whose verifier differs from the signed pin. Release workflow files change too often to pin;
 they are compared by the post-tag audit with `main`'s version instead (§7), and that audit from `main` is their only
@@ -314,8 +337,9 @@ it, and the run would publish.
   schedule (the 2026-11-10 decision: scheduled work at night only; scheduled runs use the default branch's file, so a
   release branch cannot remove it), with `./dev` built from `main`'s inputs, one Linux job of a few seconds that only
   reads the API and git (rule 50). It:
-  1. fails when `main` does not descend from the last audited `main` sha (recorded in the audit's own output and in a
-     `release-audit` issue), which shows a force-push;
+  1. fails when the last audited `main` sha (recorded in the audit's own output and in a `release-audit` issue) is not
+     on the new tip's **first-parent chain**; being an ancestor is not enough, because a merge with swapped parents
+     rewrites the first-parent chain without a force-push;
   2. for every release tag since its last run, compares the tag run's job and step list from the Actions API with the
      job and step list of `main`'s release workflow for that app, requiring every gate step of `main`'s version to have
      run and succeeded in the tag run;
@@ -344,7 +368,7 @@ it, and the run would publish.
 |---|---|---|
 | A record that verifies without a touch of a routine key (or Touch ID, once WP-0 confirms the Secure Enclave behaviour) | A swap of the pin or the trust root (needs the admin token: the release summary and password-manager copy show it) | D8 (a): the agents' bot has no admin, the user's credential and browser session are out of reach, so the pin and branch protection are the user's alone |
 | An unsigned edit, deletion or move of a signed record's value counting as the user's | A verifier or workflow bypass at a tag (the audit: job and step list, code pins) | D8 (a) plus a credential rule: publish credentials (release and package tokens) are held only by workflows agents cannot change before they run (a protected environment or a runner-held secret; WP-7 checks what Gitea 28 offers) |
-| An approval copied from another repository or made before the genesis | A force-push of `main` that drops a later signed deletion and replays a superseded record (the audit's descent check) | D8 (a): branch protection without force push or deletion |
+| An approval copied from another repository or made before the genesis; a superseded signed value restored by an unsigned merge (§3 step 3) | A force-push of `main` that drops a later signed deletion and leaves an older signed value as the newest (the audit's first-parent check) | D8 (a): branch protection without force push or deletion |
 | A trailer or status line on an unsigned commit counting as the user's | An out-of-band publish (the audit's release and package listing) | the credential rule above |
 | | A touch that signs an agent-chosen commit (the confused deputy, §9: the printed sha and counter, the counter gaps) | D8 (b): agents in a separate macOS account, so the signer process and its inputs are out of their reach |
 
@@ -433,6 +457,7 @@ named); the green twin is in the same test.
 | PC-4 | R1 | a second root commit creating the files; a signed approval commit that does not descend from the genesis | refused, genesis mismatch; refused, "not bound to this repository" |
 | PC-5 | R2 | a signed waiver, then an unsigned edit of `until`; of `reason`; a signed line moved into another record; a line changed in a merge's conflict resolution | each record does not count |
 | PC-5b | R2 | a signed waiver, then an unsigned commit that deletes its `until` line; a signed switch whose closing condition is deleted unsigned; a restricting list element removed unsigned | none counts (the projection rule) |
+| PC-5e | R2 | a merge of `main`'s tip with an older ancestor that restores a superseded signed `mode = "report"` (made with `git commit-tree`); the same with the parents swapped | fails; fails |
 | PC-5d | R2 | a signed approval landed through an unsigned merge; an unsigned side-branch change with a backdated date, merged after the approval; an unsigned conflict resolution in a merge that changes the value | passes; fails; fails |
 | PC-5c | R2 | a field added to a signed record by a dotted key or a `[kind.sub]` table outside its span; an unknown field | schema error, record does not count |
 | PC-6 | R4 | an `sk-ssh-ed25519` signature with flags `0x00`; an `sk-ecdsa` one with the presence bit set; a `touch+verify` key whose signature lacks the verification bit | refused; accepted; refused |
@@ -444,7 +469,7 @@ named); the green twin is in the same test.
 | PC-12 | R5 | a signed record only on a release branch, not on `main` | not honoured at that branch's tag |
 | PC-13 | R5 | a verified record deleted on `main` by an unsigned commit | the gate refuses, "removed by unsigned" |
 | PC-14 | §7 | a recorded Actions API reply (synthetic JSON) for a tag run without `main`'s C108 step | the audit fails and names the step |
-| PC-15 | §7 | an unsigned release tag (D7 (b)); a release listed by the API with no audited tag run; `main` that does not descend from the last audited sha | each flagged |
+| PC-15 | §7 | an unsigned release tag (D7 (b)); a release listed by the API with no audited tag run; a new tip whose first-parent chain does not contain the last audited sha although it descends from it (swapped parents) | each flagged |
 | PC-16 | §4 | a signed approval commit that also changes a `.rs` file | refused, "approval commit touches non-subject paths" |
 | PC-17 | §4 | a tagged tree whose `tools/paddock-dev/src/approvals/` differs from the signed code pin | the audit refuses the tag |
 | PC-18 | §9 | `./dev approve` run with a planted `gpg.ssh.program`, `core.hooksPath`, `SSH_SK_PROVIDER`, `SSH_AUTH_SOCK` and a `PATH` entry in the agents' checkout and environment | none is used (the fresh clone's command lines and environment are asserted by the test, which signs with a test key) |
@@ -528,7 +553,7 @@ strict state. Rolling back never loosens a gate.
 | D8 | Identities | (a) bot account for agents and CI, the user's credential out of the keychain item agents' git reads, claude-in-chrome blocked on the Gitea host, branch protection (no force push or deletion) on `main` and trains, publish credentials only in workflows agents cannot change before they run; (b) agents in a separate macOS account | **(a) now; (b) as its own ADR after the releases** |
 | D9 | Migration and enforcement | (a) re-sign the live record at genesis, land ADRs 0089 to 0096 before the cutover, grandfather history by ancestry of a pinned cutover commit, report-only until WP-0 to WP-6 are done, then enforce at tags; (b) re-sign everything, including the 67 accepted ADR status lines | **(a)** |
 | D10 | Rule | (a) a Paddock rule and a new ER (wording below); (b) ADR only | **(a)** |
-| D11 | Protecting the code that decides | (a) signed code pins for the verifier and `docs/approvals/**`, release workflows compared by the post-tag audit; (b) the post-tag audit from `main` only | **(a)** |
+| D11 | Protecting the code that decides | (a) signed code pins over the module closure of the verifier, its `Cargo.toml` and `Cargo.lock`, `docs/approvals/**` and the middleware hash, release workflows compared by the post-tag audit; (b) pins over all of `tools/paddock-dev/src` minus declared exclusions (a touch per `./dev` change); (c) the post-tag audit from `main` only | **(a)** |
 
 **Proposed rule** (a Paddock rule, number on acceptance, and a new ER after ER-36; wording for the user's approval, not
 applied while Proposed): "A record that stands for the user's consent (an approval, a waiver, a date move, a switch that
@@ -540,21 +565,20 @@ not verify is treated as not approved, and the stricter state applies."
 
 | WP | What | Days | Needs |
 |---|---|---|---|
-| WP-0 | Bootstrap: the FIDO middleware built from a pinned OpenSSH release, its sha256 printed, installed by the user with `sudo` into `/usr/local/libexec/paddock/`; `./dev approve --genesis`, `docs/approvals/README.md`, `subjects.toml`, the user's key creation and pin (user's hands, about 30 min); the Secure Enclave checks with the user's own key, including an agent-held LocalAuthentication context | 1 | D3, D4 |
+| WP-0 | Bootstrap: the FIDO middleware built from a pinned OpenSSH release, its sha256 printed, installed by the user with `sudo` into `/usr/local/libexec/paddock/`, first step a real signature through it (fallback: the pinned `ssh-keygen` installed beside it); `./dev approve --genesis`, `docs/approvals/README.md`, `subjects.toml`, the user's key creation and pin (user's hands, about 30 min); the Secure Enclave checks with the user's own key, including an agent-held LocalAuthentication context | 1 | D3, D4 |
 | WP-1 | Verifier core on `ssh-key` 0.6.7: flags and counter read from the signature bytes, `[[key]]` presence rules, allowed-signers parser; test vectors built in the test (PC-6, PC-8, PC-19) | 1 | D2 |
-| WP-2 | History: strict schemas and record ids, the structural walk of §3 (memoized, parents in recorded order), fixed-config blame, chain, genesis descent, pin read with the bot's read token, server-recorded time from the Actions API, server time from `approvals-audit.yml` runs (6 when missing), deletion rule, `Outcome`s (PC-1 to PC-5d, PC-9 to PC-13, PC-20) | 2.5 | WP-1 |
+| WP-2 | History: strict schemas and record ids, the structural walk of §3 (memoized, parents in recorded order), fixed-config blame, chain, genesis descent, pin read with the bot's read token, server time from `approvals-audit.yml` runs (6 when missing or not monotonic), the merge-base rule shared with the merge check, deletion rule, `Outcome`s (PC-1 to PC-5e, PC-9 to PC-13, PC-20) | 2.75 | WP-1 |
 | WP-3 | Library API for callers and the C100 wiring; switches and trailers (PC-7, PC-11). ADR 0075's `./dev copies`, ADR 0073's check and ADR 0096's `./dev adr status` wire it in their own work packages | 1.5 | WP-2 |
 | WP-4 | `./dev approve`: fresh clone, cleared environment, fixed signer, middleware hash and folder-owner check, per-record y/N, sha and counter printed; path rule (PC-16, PC-18, PC-18b) | 2 | WP-2 |
 | WP-5 | C108 in conformance (report) and as a step in every release workflow; release summary prints the trust root; runs on the Linux and Windows runners | 1 | WP-3 |
 | WP-6 | Post-tag audit on `main`: descent check, job and step comparison, code pins, release and package listing, signed release tags if D7 (b), issue and release note; recorded-API tests (PC-14, PC-15, PC-17); protected-tag behaviour on a scratch repository | 2 | WP-5, D7, D11 |
 | WP-7 | Identities (D8 (a)): `paddock-agent`, token swap in agents' environment and CI secrets, keychain item and git helper, claude-in-chrome block, branch protection, where publish credentials can live (user's hands for the admin steps) | 1 | D8 |
 | WP-8 | Migration: inventory across every `origin` branch (including `eba981aed`), ADRs 0089 to 0096 landed before the cutover, re-sign batch, cutover commit pinned, rule text, briefs (coordinator, integrator, reviewer), lessons entry | 1 | WP-4, D9 |
-| | **Total** | **13 agent-days** (13 to 15 with the risks below) | |
+| | **Total** | **13.25 agent-days** (13 to 15 with the risks below) | |
 
-A first cut that lets ADR 0093's waivers and mode be signed and checked at tags needs WP-0 to WP-5: **9 agent-days**;
-with the post-tag audit (WP-6), which closes the tagged-tree gap to "visible" and supplies the server time of §2,
-**11**. Without WP-6, `valid-*` checks report 6 (not measured), so a key rotation before WP-6 blocks tags that rely on
-the rotated key's records. WP-7 can run in parallel from the
+**Enforcement needs WP-0 to WP-6: 11.25 agent-days.** Without WP-6 nothing detects a bypass at a tag (§7) and there is
+no server time (§2), so `valid-*` checks would report 6. WP-0 to WP-5 (9.25 days) give a report-only C108 that already
+shows which records would count. WP-7 can run in parallel from the
 start.
 
 ## Risks
@@ -616,6 +640,18 @@ The re-review of revision 2 (`c591c5668`) returned CHANGES with two new P1s.
   names the clone's source and credential, never passes `SSH_AUTH_SOCK`, and notes agent-pushed refs; `eba981aed` and
   ADRs 0089 to 0096 in the migration; server time from `approvals-audit.yml`, 6 when missing; record ids unique per
   kind; long lines wrapped.
+
+## Review answers (revision 4)
+
+The re-review of revision 3 (`849a4ab13`) returned CHANGES with one P1.
+
+- **P1-C, replay by merge:** step 3 of the walk now carries a value from a parent only if the other parent still has the
+  merge base's value, symmetrically; otherwise the merge changed the value and must be signed (PC-5e). The audit's
+  descent check requires the last audited sha on the new tip's first-parent chain. §8 no longer says a replay needs a
+  force-push. The same rule is named for the merge check. WP-2 grows by 0.25 d.
+- **P2s:** the middleware hash check is said to compare agent-written values; loading a self-built provider in
+  `ssh-sk-helper` is marked unverified with a fallback, and WP-0 starts with a real signature; the code-pin scope is the
+  module closure, checked by C108; deleted audit runs and non-monotonic run ids give 6; enforcement needs WP-0 to WP-6.
 
 ## Sources
 
