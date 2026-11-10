@@ -29,7 +29,7 @@ on:
   # Nightly on the default branch (main), with the installers. Scheduled runs start at night local time (UTC+8). The
   # Windows legs start after the Proxmox backup window (00:00 to 04:00 local) and are staggered; see docs/ci-schedules.md.
   schedule:
-    - cron: "3 21 * * *" # 05:03 UTC+8, Windows leg
+    - cron: "3 22 * * *" # 06:03 UTC+8, Windows leg
   workflow_dispatch:
     inputs:
       bundles:

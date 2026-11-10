@@ -8,9 +8,13 @@ runner slots. Matrix jobs are capped with `strategy.max-parallel` so one Linux s
 known; 04:00 local (20:00 UTC) is assumed until evidence says otherwise. The Windows CI VM crawled from 00:52 local on
 2026-11-09/10 (memory note `windows-ci-proxmox-backup`). Rules:
 
-- A workflow with a Windows leg neither starts in 00:00-04:00 local nor is likely to run into it. It starts after 04:00.
-- Linux-only and macOS-only workflows run 22:00-23:59 local or after 04:00, and finish before about 08:00 local.
-- Re-check the table when the real end of the window is known.
+- A workflow with a Windows leg neither starts in 00:00-04:00 local nor is likely to run into it. Because the end is
+  only assumed, the Windows starts keep an hour of margin: nothing starts before 05:00. These times will be reset once the
+  real end is read from the Proxmox task log.
+- Linux-only and macOS-only workflows START between 22:00 and 23:59 local or after 04:00. debrief-fuzz runs until about
+  02:30 local (estimate).
+- Open point: whether the Linux runners are affected by the backup at all is unknown; the Linux-only runs that cross
+  midnight (fuzz, perhaps mutants) assume they are not.
 
 Typical durations are from the last five scheduled runs (Gitea API, 2026-11-06 to 11-10; the failed runs count, they
 ran the same jobs).
@@ -23,10 +27,11 @@ ran the same jobs).
 | debrief-corpus | `43 14 * * *` | 22:43 | Linux | 0-21 min | 1 |
 | service-smoke | `17 15 * * *` | 23:17 | macOS VM | about 22 min | 0 |
 | debrief-fuzz | `13 15 * * *` | 23:13 | Linux | 77-90 min with 6 shards at once; about 3 h at 2 at a time | 2 (`max-parallel: 2`), alone in its window |
-| nightly | `3 20 * * *` | 04:03 | Linux, Windows, macOS | 25-123 min | uncapped (reusable ci.yml; its fuzz shards use `max-parallel: 2`) |
-| debrief | `3 21 * * *` | 05:03 | Linux, Windows, macOS | 37-147 min | uncapped (parallel jobs, 4 e2e shards) |
-| dev-tool | `13 21 * * *` | 05:13 | Linux, Windows, macOS | not measured | 1 (Linux leg) |
+| nightly | `3 21 * * *` | 05:03 | Linux, Windows, macOS | 25-123 min | uncapped for the rest (reusable ci.yml and many jobs); its five fuzz calls are chained in two chains, so at most 2 at once |
+| debrief | `3 22 * * *` | 06:03 | Linux, Windows, macOS | 37-147 min | uncapped (parallel jobs, 4 e2e shards) |
+| dev-tool | `33 21 * * *` | 05:33 | Linux, Windows, macOS | not measured | 1 (Linux leg) |
 
 The Linux-only block (22:03-23:13) is serial so that fuzz, which takes two slots, runs after the small jobs have ended.
 nightly and debrief cannot be capped by `max-parallel` (many unrelated jobs); only the stagger and the runner's capacity
-limit them.
+limit them. Gitea counts runner slots per caller, so `max-parallel` inside the reusable `app-fuzz.yml` does not cap
+five separate callers: nightly chains them with `needs:` instead.

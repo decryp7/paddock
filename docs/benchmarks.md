@@ -123,7 +123,7 @@ Not benchmarks, though the names suggest it:
 
 | Workflow | Job and step | When | Output |
 |---|---|---|---|
-| [`debrief-bench.yml`](../.gitea/workflows/debrief-bench.yml) | `bench`: `cargo bench -p debrief-core --bench engine -- --quick` | Push to main touching `debrief-core`, `debrief-store-duck` or `debrief-store-worker`; nightly 03:47; dispatch | Artifact `criterion-report` |
+| [`debrief-bench.yml`](../.gitea/workflows/debrief-bench.yml) | `bench`: `cargo bench -p debrief-core --bench engine -- --quick` | Push to main touching `debrief-core`, `debrief-store-duck` or `debrief-store-worker`; nightly at 22:03 local (UTC+8; [ci-schedules.md](ci-schedules.md)); dispatch | Artifact `criterion-report` |
 | `debrief-bench.yml` | `store-bench`: `bench` and `bench_reads` at 10M events (report only), and the worker memory tests with 20 copies | Nightly and dispatch (skipped while main has not changed since the last green night) | Job log only |
 | [`debrief.yml`](../.gitea/workflows/debrief.yml) | `rust-test`, step "Memory budget": `analysis_memory` (release, Linux, `continue-on-error`) | Every run | Job log |
 | `debrief.yml` | `frontend`, step "First-paint JS budget": `window-weight.mjs main --max 1355`, `about --max 480` | Every run | Job log |
