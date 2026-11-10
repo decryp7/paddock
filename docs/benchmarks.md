@@ -932,3 +932,23 @@ figure. The CI download figure needs a measurement once the package is populated
 The first publish attempts failed for two reasons found on the way: `curl --data-binary` makes Gitea answer 500 (fixed with `-T`),
 and a binary published for one hash is a miss after any commit that touches `tools/paddock-dev` (a test file changed between
 publish and consume): the hash is per commit of the tool's inputs, so each such commit needs its own publish.
+
+## Hook process start cost (2026-11-10)
+
+Question: can ADR 0083's PreToolUse guard hook be a compiled Rust command (`./dev hook`) instead of shell plus a Python
+matcher, within the same per-call budget? Quoted by `docs/plans/rust-tooling-2026-11-10.md` §2.1. Mac mini (arm64), macOS
+27.2, load average 9.6 to 11.8 at the time; Python 3.12.5, jq 1.7.1. Each row: a `sh` loop of 200 calls (20 for the
+wrapper) with one synthetic hook input (`{"tool_name":"Bash","cwd":"/tmp","tool_input":{"command":"git -C /x/y commit -m
+\"a b\" && echo ok"}}`) on stdin, timed with `/usr/bin/time -p`, three runs; per call = wall time divided by calls.
+
+| Command per call | Per call (three runs) |
+|---|---|
+| `paddock-dev --version`, the cached compiled binary started directly (`~/.paddock-dev/bin/<hash>/paddock-dev-aarch64-apple-darwin`) | 4.1, 6.4, 5.0 ms |
+| `bash .claude/hooks/no-pgrep-wait.sh` (the current hook: bash plus `jq`) | 16.6, 9.8, 11.2 ms |
+| `python3 -I -c 'import json,sys,re,shlex; json.load(sys.stdin)'` (interpreter start and imports only, no matching) | 23.2, 23.9, 21.6 ms |
+| `./dev --version` through the wrapper (git, `rustc -vV`, input hash), warm cache | 203 ms (one run of 20; an earlier run of 10 gave 156 ms) |
+
+Reading: a directly started Rust binary costs about a quarter of Python's start alone, so a Rust hook fits ADR 0083's
+budget (about 50 ms for shell plus Python at a load of 53, measured there). The `./dev` wrapper must not be on the hook's
+path. Not measured: the matcher's own work in either language, and the start cost once a shell parser crate is linked
+(RT-4 records both).
