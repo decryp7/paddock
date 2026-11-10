@@ -4,6 +4,7 @@
   every AI feature stays, which keeps the AI browser over Pitwall (the note's Q3); Q2 keep Model2Vec; Q5 a one-time notice
   and no migration; Q4, Q6, Q7, Q8 and Q9 as recommended. Revision 2 answered the independent review of `b1872a1c5`
   (4 P1s, P2s); revision 3 the re-review of `52f03d649` (1 P1, P2s), which approves it once fixed.
+- Trimmed 2026-11-11 (user, comparable-practice review): TRIM: keep AI-3 as one "needs Pitwall" card from `Link::state_for` (the request-time error is the truth) and AI-4 as the CHANGELOG and user-guide sentence "delete the old model folder"; dropped the `AiFeature` enum with its registry lint, the old-files category and AI-5.
 - Date: 2026-11-08
 - Supersedes: ADR 0009 (prebuilt llama-server runtimes), ADR 0015 (AI update checks), and in ADR 0059 the engine choice,
   the built-in fallback and "Built-in downloads while Pitwall is used".

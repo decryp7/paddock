@@ -2,6 +2,7 @@
 
 - Status: Accepted (2026-10-29), by the user, after independent review (rounds 1–2). The owner decided the four open
   points on 2026-10-29 ("Decided by the user" at the end); the reviews are answered in "Reviews: what changed".
+- Trimmed 2026-11-11 (user, comparable-practice review): TRIM: keep WP-1 (core model, reduced), WP-2 (protocol), WP-7 (Actions cache projection), WP-9 (UI reduced to variables and the cache setting), WP-10 (docs); deferred WP-3 (presets), WP-5 (measure and clean jobs), WP-6 (shared crates), WP-8 (Windows impersonation, Credential Manager) and the `[defaults.storage_io]` Settings UI.
 - Date: 2026-10-29
 - Amends: ADR 0004 (the environment, secret, clean and reachability requests are authorised from the caller's identity,
   not by the pipe's ACL alone), ADR 0005 (environment secrets are created, stored and read by the **service**), ADR 0009
