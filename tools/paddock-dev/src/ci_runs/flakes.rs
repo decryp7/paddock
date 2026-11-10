@@ -377,11 +377,21 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
     let mut seen: Seen = BTreeMap::new();
     let mut later_jobs: HashMap<u64, Result<Option<Vec<TimedJob>>, String>> = HashMap::new();
     log(&format!("{} runs listed, {} finished", w.runs.len(), finished.len()));
-    report.cancelled_not_read = w
-        .runs
-        .iter()
-        .filter(|r| r.finished() && r.conclusion == "cancelled" && own_workflow(app, r.workflow()))
-        .count();
+    // Cancelled runs are counted, not read: of the app's own workflows at once, of shared ones when a job of the app is in them.
+    for r in w.runs.iter().filter(|r| r.finished() && r.conclusion == "cancelled") {
+        if own_workflow(app, r.workflow()) {
+            report.cancelled_not_read += 1;
+            continue;
+        }
+        match client.attempt_jobs(r.id, None) {
+            Ok(Some(jobs)) => report.cancelled_not_read += usize::from(jobs.iter().any(|j| app_job(app, &j.name))),
+            Ok(None) | Err(_) => report.not_measured.push(NotMeasured {
+                run: r.id,
+                job: "(a cancelled run's job list)".into(),
+                why: "whether the cancelled run has jobs of the app could not be read".into(),
+            }),
+        }
+    }
     let mut never_ran_runs: BTreeSet<u64> = BTreeSet::new();
     for run in finished {
         let own = own_workflow(app, run.workflow());
@@ -421,6 +431,9 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
         report.runs += 1;
         for (k, mine) in attempts.iter().enumerate() {
             for job in mine.iter().filter(|j| j.failed()) {
+                if job.is_caller() {
+                    continue; // a reusable workflow's caller: its children are listed beside it
+                }
                 if job.never_ran() {
                     report.never_ran += 1;
                     never_ran_runs.insert(run.id);
@@ -826,6 +839,28 @@ mod tests {
     }
 
     #[test]
+    fn a_reusable_workflow_caller_job_is_skipped_not_reported_as_never_ran() {
+        // Run 7880's real job list: the failed `installers` caller (34496) has no runner and no steps but real times.
+        let mut f = Fake::default();
+        let runs = vec![run(7880, "dyno-release.yml", "failure", "abc", "2026-11-09T10:00:00+08:00")];
+        f.json(
+            &format!("{API}/runs?limit=50&page=1"),
+            json!({"total_count": 1, "workflow_runs": runs}),
+        );
+        f.json(
+            &jobs_url(7880),
+            serde_json::from_str(include_str!("../../tests/ci-runs/run-7880-jobs.json")).unwrap(),
+        );
+        let r = measure(&mut f);
+        assert_eq!(r.never_ran, 0, "{:?}", r.gaps);
+        assert!(r.gaps.is_empty(), "{:?}", r.gaps);
+        assert!(
+            f.requested().iter().all(|u| !u.contains("/jobs/34496/")),
+            "the caller's log was asked for"
+        );
+    }
+
+    #[test]
     fn a_missing_job_list_is_not_measured_for_an_own_run_and_for_an_earlier_attempt() {
         // 404 on the job list of own run 101.
         let mut f = scenario();
@@ -868,10 +903,17 @@ mod tests {
     #[test]
     fn cancelled_runs_are_counted_and_said_to_be_unread() {
         let mut f = scenario();
+        // Run 115: a cancelled shared run with a job of the app; run 116: one without.
+        let mut runs = f.take_runs();
+        runs.push(run(115, "ci.yml", "cancelled", "lll", "2026-11-03T09:00:00+08:00"));
+        runs.push(run(116, "ci.yml", "cancelled", "mmm", "2026-11-03T08:00:00+08:00"));
+        f.set_runs(runs);
+        f.json(&jobs_url(115), jobs(&[(1151, "app dyno (ubuntu-latest)", "cancelled")]));
+        f.json(&jobs_url(116), jobs(&[(1161, "crate (macos-latest)", "cancelled")]));
         let r = measure(&mut f);
-        assert_eq!(r.cancelled_not_read, 1, "run 108");
-        assert!(r.text().contains("1 cancelled run(s) not read"), "{}", r.text());
-        assert_eq!(r.json()["cancelledNotRead"], 1);
+        assert_eq!(r.cancelled_not_read, 2, "runs 108 (own) and 115 (shared, with an app job)");
+        assert!(r.text().contains("2 cancelled run(s) not read"), "{}", r.text());
+        assert_eq!(r.json()["cancelledNotRead"], 2);
     }
 
     #[test]

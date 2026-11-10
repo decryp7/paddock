@@ -97,6 +97,32 @@ fn find_root(start: &std::path::Path) -> Option<PathBuf> {
     start.ancestors().find(|d| d.join(".git").exists()).map(PathBuf::from)
 }
 
+/// A reader of the repository's files at a commit, through `git` (`args` to its output when it succeeded). `Err(gap)` when the
+/// commit is not in this clone: its settings are then unknown, which is a gap and never "no config". Only a path that the
+/// existing commit does not contain is `NotFound` (no such config); any other failure of `git show` is unknown.
+fn commit_reader<G>(git: G, commit: &str) -> Result<Reader, String>
+where
+    G: Fn(&[&str]) -> Option<String> + 'static,
+{
+    if git(&["cat-file", "-e", &format!("{commit}^{{commit}}")]).is_none() {
+        return Err(format!(
+            "commit {commit} is not in this clone (fetch it with `git fetch origin`), so the Playwright and nextest settings \
+             at it are unknown"
+        ));
+    }
+    let commit = commit.to_string();
+    Ok(Box::new(move |path: &str| {
+        let spec = format!("{commit}:{path}");
+        if git(&["cat-file", "-e", &spec]).is_none() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("{path} is not in commit {commit}"),
+            ));
+        }
+        git(&["show", &spec]).ok_or_else(|| std::io::Error::other(format!("git show {spec} failed")))
+    }))
+}
+
 /// The exit code of a report: an incomplete measurement is a failure (1, until ADR 0089 gives it its own code), flakes found
 /// are findings (5) only when asked for with `--fail-on-flakes`, anything else is 0.
 pub fn exit_of(report: &flakes::Report, fail_on_flakes: bool) -> Exit {
@@ -119,21 +145,21 @@ pub fn flakes(a: &FlakesArgs) -> Result<Report, CliError> {
     let root = a.root.clone().or_else(|| std::env::current_dir().ok().and_then(|d| find_root(&d)));
     // The settings that decide whether flakes are visible are read at the end of the window: from the checkout, or, with
     // `--until <sha>`, from that commit.
+    let mut unknown_commit: Option<String> = None;
     let (read, config_source): (Reader, String) = match (&root, &until) {
         (Some(r), flakes::Until::Commit(c)) => {
-            let (r2, c2) = (r.clone(), c.clone());
-            (
-                Box::new(
-                    move |p: &str| match crate::plan_repo::git_text(&r2, &["show", &format!("{c2}:{p}")]) {
-                        Some(t) => Ok(t),
-                        None => Err(std::io::Error::new(
-                            std::io::ErrorKind::NotFound,
-                            format!("{p} is not in commit {c2} (or the commit is not in this clone)"),
-                        )),
-                    },
-                ),
-                format!("commit {c}"),
-            )
+            let r2 = r.clone();
+            match commit_reader(move |args: &[&str]| crate::plan_repo::git_text(&r2, args), c) {
+                Ok(reader) => (reader, format!("commit {c}")),
+                // The commit is not here: nothing about its settings is known, and the report says so once.
+                Err(gap) => {
+                    unknown_commit = Some(gap);
+                    (
+                        Box::new(|_: &str| Err(std::io::Error::other("unused"))),
+                        format!("commit {c} (not in this clone)"),
+                    )
+                }
+            }
         }
         (Some(r), _) => {
             let r2 = r.clone();
@@ -147,10 +173,13 @@ pub fn flakes(a: &FlakesArgs) -> Result<Report, CliError> {
             "no checkout".into(),
         ),
     };
-    let preconditions: Vec<String> = preconditions::playwright(&a.app, read.as_ref())
-        .into_iter()
-        .chain(preconditions::nextest(&a.app, read.as_ref()))
-        .collect();
+    let preconditions: Vec<String> = match unknown_commit {
+        Some(gap) => vec![gap],
+        None => preconditions::playwright(&a.app, read.as_ref())
+            .into_iter()
+            .chain(preconditions::nextest(&a.app, read.as_ref()))
+            .collect(),
+    };
     let mut http = CurlHttp;
     let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
     let req = flakes::Request {
@@ -261,6 +290,48 @@ mod tests {
         assert_eq!(find_root(&d.path().join("a/b")), None);
         std::fs::create_dir(d.path().join(".git")).unwrap();
         assert_eq!(find_root(&d.path().join("a/b")).as_deref(), Some(d.path()));
+    }
+
+    /// A fake git: `commits` exist, `files` are `commit:path` to text, `broken` are `commit:path` whose `show` fails.
+    fn fake_git(
+        commits: &'static [&'static str],
+        files: &'static [(&'static str, &'static str)],
+        broken: &'static [&'static str],
+    ) -> impl Fn(&[&str]) -> Option<String> {
+        move |args: &[&str]| match args {
+            ["cat-file", "-e", spec] => {
+                let ok = match spec.strip_suffix("^{commit}") {
+                    Some(c) => commits.contains(&c),
+                    None => files.iter().any(|(k, _)| k == spec) || broken.contains(spec),
+                };
+                ok.then(String::new)
+            }
+            ["show", spec] if !broken.contains(spec) => files.iter().find(|(k, _)| k == spec).map(|(_, v)| v.to_string()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_commit_missing_from_the_clone_is_a_gap_not_no_config() {
+        let e = commit_reader(fake_git(&[], &[], &[]), "abc1234").err().unwrap();
+        assert!(e.contains("abc1234 is not in this clone") && e.contains("git fetch"), "{e}");
+    }
+
+    #[test]
+    fn only_a_path_missing_from_an_existing_commit_is_no_config() {
+        let files = &[("abc1234:apps/dyno/app/playwright.config.ts", "retries: 0,")];
+        let broken = &["abc1234:apps/dyno/.config/nextest.toml"];
+        let read = commit_reader(fake_git(&["abc1234"], files, broken), "abc1234").ok().unwrap();
+        assert_eq!(read("apps/dyno/app/playwright.config.ts").unwrap(), "retries: 0,");
+        // The commit exists and does not have the file: not found, so no precondition.
+        let e = read("apps/dyno/.config/other.toml").unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::NotFound);
+        // The file is there but `git show` fails: unknown, never "no config".
+        let e = read("apps/dyno/.config/nextest.toml").unwrap_err();
+        assert_ne!(e.kind(), std::io::ErrorKind::NotFound);
+        // Through the preconditions, unknown becomes a gap and not-found does not.
+        assert!(preconditions::nextest("dyno", read.as_ref()).unwrap().contains("could not be read"));
+        assert!(preconditions::playwright("dyno", read.as_ref()).is_none());
     }
 
     #[test]

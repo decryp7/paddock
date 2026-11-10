@@ -43,6 +43,12 @@ pub fn playwright(app: &str, read: &dyn Fn(&str) -> std::io::Result<String>) -> 
 pub const NEXTEST_HIDES_FLAKES: &str =
     "nextest flakes in passing jobs are not visible (profile.ci has retries but no flaky-result = \"fail\")";
 
+/// The message for an app whose per-test nextest override adds retries.
+pub const NEXTEST_OVERRIDE_HIDES_FLAKES: &str = concat!(
+    "nextest flakes in passing jobs are not visible ",
+    "(an override in profile.ci or profile.default has retries but no flaky-result = \"fail\")"
+);
+
 /// The nextest precondition of an app, from `apps/<app>/.config/nextest.toml`: CI runs `--profile ci`; retries above 0 in it
 /// (or inherited from the default profile) without `flaky-result = "fail"` pass a job whose test failed once.
 pub fn nextest(app: &str, read: &dyn Fn(&str) -> std::io::Result<String>) -> Option<String> {
@@ -74,7 +80,27 @@ pub fn nextest(app: &str, read: &dyn Fn(&str) -> std::io::Result<String>) -> Opt
         _ => 0,
     };
     let fails = setting("flaky-result").and_then(toml::Value::as_str) == Some("fail");
-    (retries > 0 && !fails).then(|| NEXTEST_HIDES_FLAKES.to_string())
+    if retries > 0 && !fails {
+        return Some(NEXTEST_HIDES_FLAKES.to_string());
+    }
+    // A per-test override can add retries of its own (the default profile's overrides apply to `ci` too).
+    let retry_count = |v: Option<&toml::Value>| match v {
+        Some(toml::Value::Integer(n)) => *n,
+        Some(toml::Value::Table(t)) => t.get("count").and_then(toml::Value::as_integer).unwrap_or(0),
+        _ => 0,
+    };
+    let inherited = setting("flaky-result").and_then(toml::Value::as_str);
+    let hides = ["ci", "default"]
+        .iter()
+        .filter_map(|n| profile(n))
+        .filter_map(|p| p.get("overrides")?.as_array())
+        .flatten()
+        .any(|o| {
+            let o = o.as_table();
+            let own = o.and_then(|t| t.get("flaky-result")).and_then(toml::Value::as_str).or(inherited);
+            retry_count(o.and_then(|t| t.get("retries"))) > 0 && own != Some("fail")
+        });
+    hides.then(|| NEXTEST_OVERRIDE_HIDES_FLAKES.to_string())
 }
 
 #[cfg(test)]
@@ -146,6 +172,29 @@ mod tests {
             nextest(
                 "dyno",
                 &toml("[profile.ci]\nretries = { backoff = \"fixed\", count = 2, delay = \"1s\" }\n")
+            )
+            .is_some()
+        );
+        // Overrides: retries added for some tests only.
+        let o = |extra: &'static str| {
+            toml(Box::leak(
+                format!("[profile.ci]\nretries = 0\n[[profile.ci.overrides]]\nfilter = \"test(slow)\"\n{extra}").into_boxed_str(),
+            ))
+        };
+        assert_eq!(nextest("dyno", &o("retries = 2\n")).as_deref(), Some(NEXTEST_OVERRIDE_HIDES_FLAKES));
+        assert!(nextest("dyno", &o("retries = 2\nflaky-result = \"fail\"\n")).is_none());
+        assert!(nextest("dyno", &o("slow-timeout = \"60s\"\n")).is_none());
+        assert!(
+            nextest(
+                "dyno",
+                &toml("[profile.ci]\nretries = 0\nflaky-result = \"fail\"\n[[profile.ci.overrides]]\nfilter = \"x\"\nretries = 2\n")
+            )
+            .is_none()
+        );
+        assert!(
+            nextest(
+                "dyno",
+                &toml("[profile.default]\n[[profile.default.overrides]]\nfilter = \"x\"\nretries = 2\n[profile.ci]\nretries = 0\n")
             )
             .is_some()
         );

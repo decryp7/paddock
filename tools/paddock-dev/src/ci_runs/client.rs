@@ -89,9 +89,18 @@ impl TimedJob {
         !matches!(self.conclusion.as_str(), "success" | "skipped")
     }
 
-    /// Whether the job never ran a step: no runner took it, or every step started and ended in the same second (or has no
-    /// time). Such a job has no log and nothing to measure.
+    /// Whether the job is the caller of a reusable workflow: no runner and no steps of its own, but a real start before its
+    /// end (it spans its children, which are listed beside it). It has no log and nothing to measure of its own.
+    pub fn is_caller(&self) -> bool {
+        self.runner_id == 0 && self.steps.is_empty() && self.start.zip(self.end).is_some_and(|(s, e)| s < e)
+    }
+
+    /// Whether the job never ran a step: no runner took it and it is not a caller (no real times, or start equal to end), or
+    /// every step started and ended in the same second (or has no time). Such a job has no log and nothing to measure.
     pub fn never_ran(&self) -> bool {
+        if self.is_caller() {
+            return false;
+        }
         self.runner_id == 0 || self.steps.iter().all(|(_, secs)| secs.is_none_or(|s| s <= 0.0))
     }
 
@@ -217,5 +226,52 @@ impl<'a> Client<'a> {
     pub fn log(&mut self, job: u64) -> Result<Option<String>, String> {
         let (server, repo) = (self.server.clone(), self.repo.clone());
         self.retry(|c| GiteaRuns::new(c.http, &server, &repo, c.token.clone()).log(job))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ci_runs::testutil::Fake;
+
+    /// The job list of run 7880 of the real server (a dyno release run), saved through the API.
+    const RUN_7880: &str = include_str!("../../tests/ci-runs/run-7880-jobs.json");
+
+    fn jobs_7880() -> Vec<TimedJob> {
+        let mut f = Fake::default();
+        f.json(
+            "https://gitea.invalid/api/v1/repos/decryp7/paddock/actions/runs/7880/jobs?limit=50&page=1",
+            serde_json::from_str(RUN_7880).unwrap(),
+        );
+        let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");
+        c.attempt_jobs(7880, None).unwrap().unwrap()
+    }
+
+    fn named(jobs: &[TimedJob], id: u64) -> &TimedJob {
+        jobs.iter().find(|j| j.id == id).unwrap()
+    }
+
+    #[test]
+    fn a_reusable_workflow_caller_is_not_a_job_that_never_ran() {
+        let jobs = jobs_7880();
+        // `installers` (34496): no runner, no steps, but a real start and end; its children are listed beside it.
+        let caller = named(&jobs, 34496);
+        assert!(caller.failed() && caller.is_caller() && !caller.never_ran(), "{caller:?}");
+        // A job the workflow skipped has no runner and epoch times: it is not failed at all.
+        assert!(!named(&jobs, 34497).failed());
+        // A failed job that ran steps is neither.
+        let ran = named(&jobs, 34520);
+        assert!(ran.failed() && !ran.is_caller() && !ran.never_ran());
+    }
+
+    #[test]
+    fn no_runner_and_no_real_times_is_a_job_that_never_ran() {
+        let mut j = named(&jobs_7880(), 34496).clone();
+        j.start = None;
+        j.end = None;
+        assert!(!j.is_caller() && j.never_ran());
+        let mut j = named(&jobs_7880(), 34496).clone();
+        j.end = j.start;
+        assert!(!j.is_caller() && j.never_ran());
     }
 }

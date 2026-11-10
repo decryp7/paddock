@@ -4,10 +4,10 @@
 //! A log is a series of runs (`Starting N tests` ... `Summary [..] N tests run: ...`). A run is read only when it is provably
 //! whole: it printed its summary, ran every test it started, was not cut short (fail-fast), and its summary's counts of failed
 //! and flaky tests are met by the names the log gives. Anything else is [`NextestError::Partial`] with the reason, never a
-//! quiet empty answer (ER-33). Within a run the **last status line of a test decides** (captured cargo-nextest 0.9.151, see
-//! `tests/ci-runs/nextest-*.log`): with `retries >= 1` a hard failure prints only `TRY n FAIL` lines and never a bare `FAIL`
-//! (a timeout: `TRY n TMT`; `SIG*`, `ABORT` and `LEAK-FAIL` endings have no captured log), a test that passed on a retry ends `FLAKY a/b` (`flaky-result =
-//! "pass"`) or `FLKY-FL a/b` (`"fail"`). The fixtures were captured with cargo-nextest 0.9.149 (the CI pin,
+//! quiet empty answer (ER-33). Within a run the **last status line of a test decides**: with `retries >= 1` a hard failure
+//! prints only `TRY n FAIL` lines and never a bare `FAIL` (a timeout: `TRY n TMT`; `SIG*`, `ABORT` and `LEAK-FAIL` endings
+//! have no captured log), and a test that passed on a retry ends `FLAKY a/b` (`flaky-result = "pass"`) or `FLKY-FL a/b`
+//! (`"fail"`). The fixtures in `tests/ci-runs/nextest-*.log` were captured with cargo-nextest 0.9.149 (the CI pin,
 //! `.gitea/actions/host-tools/action.yml`); 0.9.151 prints the same status lines.
 
 use crate::log_text::plain;
@@ -63,7 +63,9 @@ static STARTING: LazyLock<Regex> = LazyLock::new(|| re(r"^\s*Starting (\d+) test
 static SUMMARY: LazyLock<Regex> = LazyLock::new(|| re(r"^\s*Summary \[[^\]]*\]\s+(\d+) tests? run:(.*)$"));
 static FAILED_COUNT: LazyLock<Regex> = LazyLock::new(|| re(r"(\d+) (?:[a-z]+ )?(?:failed|timed out)"));
 static FLAKY_COUNT: LazyLock<Regex> = LazyLock::new(|| re(r"\((\d+) flaky\)"));
-static NOT_RUN: LazyLock<Regex> = LazyLock::new(|| re(r"tests? (?:were |was )?not run|Cancelling due to"));
+// nextest prints `Cancelling due to` before the summary and `N/M tests were not run due to test failure` after it.
+static NOT_RUN: LazyLock<Regex> = LazyLock::new(|| re(r"tests? (?:were |was )?not run"));
+static CANCELLING: LazyLock<Regex> = LazyLock::new(|| re(r"Cancelling due to"));
 // `ABORT` and `LEAK-FAIL` have no capture (nor `SIG*`): they are taken as failure labels without a real log to check them.
 static LINE: LazyLock<Regex> = LazyLock::new(|| {
     re(concat!(
@@ -120,12 +122,12 @@ pub fn read(log: &str) -> Result<Nextest, NextestError> {
             });
             continue;
         }
-        if NOT_RUN.is_match(&l) {
-            return Err(partial(format!("a nextest run stopped before every test ran ({})", l.trim())));
-        }
         let Some(b) = block.as_mut() else {
             continue;
         };
+        if NOT_RUN.is_match(&l) || (!b.summarised && CANCELLING.is_match(&l)) {
+            return Err(partial(format!("a nextest run stopped before every test ran ({})", l.trim())));
+        }
         if let Some(m) = SUMMARY.captures(&l) {
             let ran: u64 = m[1].parse().unwrap_or(0);
             b.summarised = true;
@@ -239,6 +241,16 @@ mod tests {
     }
 
     #[test]
+    fn a_cut_short_phrase_outside_a_nextest_run_is_not_a_partial_run() {
+        // The text of another tool before the first `Starting` line says nothing about this run.
+        let log = format!("some tool: 2 tests were not run\nCancelling due to something else\n{R1_FAIL}");
+        assert!(read(&log).is_ok(), "{:?}", read(&log));
+        // Nor is the same text in the output of a later step, after the run's summary.
+        let log = format!("{R1_FAIL}Cancelling due to a later step\n");
+        assert!(read(&log).is_ok(), "{:?}", read(&log));
+    }
+
+    #[test]
     fn a_run_cut_short_or_with_a_different_count_is_partial() {
         let started: String = R0_PASS
             .lines()
@@ -252,7 +264,20 @@ mod tests {
             .map(|l| format!("{l}\n"))
             .collect();
         assert!(matches!(read(&started), Err(NextestError::Partial(w)) if w.contains("started 4 tests but ran 3")));
-        let failfast = format!("{R0_PASS}Cancelling due to test failure: 2 tests still running\n");
-        assert!(matches!(read(&failfast), Err(NextestError::Partial(w)) if w.contains("before every test ran")));
+        // Fail-fast: `Cancelling due to` before the summary, `tests were not run` after it.
+        let before: String = R0_PASS
+            .lines()
+            .flat_map(|l| {
+                let cancel = plain(l)
+                    .trim_start()
+                    .starts_with("Summary")
+                    .then(|| "Cancelling due to test failure: 2 tests still running".to_string());
+                cancel.into_iter().chain([l.to_string()])
+            })
+            .map(|l| format!("{l}\n"))
+            .collect();
+        assert!(matches!(read(&before), Err(NextestError::Partial(w)) if w.contains("before every test ran")));
+        let after = format!("{R0_PASS}warning: 2/3 tests were not run due to test failure\n");
+        assert!(matches!(read(&after), Err(NextestError::Partial(w)) if w.contains("before every test ran")));
     }
 }
