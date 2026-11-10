@@ -12,7 +12,7 @@
   ADR 0034 (one implementation per mechanism; the copies register `docs/known-copies.toml`), ER-9 (Linux and Windows
   before a push), ADR 0087 (accepted 2026-11-10, on `origin/docs/adr-windows-gate-ratchets` only: Windows-only code runs
   on the test VM before review), ADR 0094 (the rollout route for a new Clippy entry while apps are frozen, §6), ADR 0096
-  (the register row `docs/adr/register/R-2026-11-11-0021-windows-verbatim-paths.toml`).
+  (the register row `docs/adr/register/R-2026-11-11-0021-windows-verbatim-paths.toml` (not made; see [2026-11-11-windows-liveness-cut.md](2026-11-11-windows-liveness-cut.md))).
 - Overlap checked: ADR 0087's planned `docs/windows-paths.toml` (§3.4) declares modules that compare paths so the
   detector routes them to the VM; it holds no helper and no check of prefix handling, so this amendment adds the
   mechanism and 0087 stays the run-time net (item 6). ADR 0094 is reused for the Clippy rollout, not changed.

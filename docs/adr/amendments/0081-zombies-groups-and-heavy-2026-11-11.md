@@ -11,7 +11,7 @@
   user with its own check: `tools/heavy`), the instance table, and "Order" (what of WP-1 the train already has).
 - Related: ER-21 / rule 40, ER-33 (a probe must be shown to see the thing), rule 53 and ADR 0033, ADR 0076 and its
   orphan-guardian amendment (`0076-orphan-guardian-2026-11-09.md`: the guardian that waits for groups), ADR 0096
-  (register row `docs/adr/register/R-2026-11-11-0081-zombies-groups-heavy.toml`).
+  (register row `docs/adr/register/R-2026-11-11-0081-zombies-groups-heavy.toml` (not made; see [2026-11-11-windows-liveness-cut.md](2026-11-11-windows-liveness-cut.md))).
 - Overlap checked: ADR 0081 itself already defines the zombie rule for single pids (§1's table) and the `kill(<pid>, 0)`
   shape of its check (§3.2); this amendment adds only groups, `tools/heavy` and the `#[expect]` rule. ADR 0033 and C53
   cover kills, not looks. The orphan-guardian amendment of ADR 0076 owns the guardian's waits; its group look is the one

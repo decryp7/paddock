@@ -10,7 +10,7 @@
   environment map), §3 (two Clippy entries) and the pattern table (a tenth shape).
 - Related: ER-21 / rule 40, ER-22 / rule 42, rule 55 / ADR 0034, ADR 0087 (accepted, on
   `origin/docs/adr-windows-gate-ratchets` only), ADR 0094 §6 (Clippy rollout while apps are frozen), ADR 0096 (register
-  row `docs/adr/register/R-2026-11-11-0021-windows-env-names.toml`).
+  row `docs/adr/register/R-2026-11-11-0021-windows-env-names.toml` (not made; see [2026-11-11-windows-liveness-cut.md](2026-11-11-windows-liveness-cut.md))).
 - Overlap checked: `paddock-env`'s `Vars`/`ProcessVars`/`MapVars` (`dirs.rs:34-70`) is the existing port, extended, not
   duplicated; `tools/paddock-dev`'s `release_isolation::pathfind` is the copy that goes. No ADR or amendment on
   `origin/main`, the train or the pinned ADR branches defines an environment map (`git grep -i "env::vars\|EnvMap"
