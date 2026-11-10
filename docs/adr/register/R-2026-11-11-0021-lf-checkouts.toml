@@ -1,0 +1,34 @@
+# Free-text prerequisites are matched to `provides` names in ADR 0096 WP-1's review.
+id = "R-2026-11-11-0021-lf-checkouts"
+title = "Amendment to ADR 0021: text is checked out with LF everywhere, and a check covers every tracked file"
+summary = "Amendment to ADR 0021 (proposed 2026-11-11; ER-21): five CRLF incidents each fixed by a narrow .gitattributes line (runs 7904, 7706, 7494); 209 test-data files still resolve to text=auto with no eol; `* text=auto eol=lf` with -text inputs and declared CRLF types, C38g built standalone over every tracked file, ADR 0087's line-ends control reads one CRLF and one LF file; 2 days, gates no tag"
+status = "proposed"
+approval_file = "docs/adr/amendments/0021-lf-checkouts-2026-11-11.md"
+adr_by = "2026-11-25" # ADR 0096 section 2 default: 14 days
+prerequisites = ["RT-5"] # C38g runs in the RT-5 check host (on the train, not on origin/main)
+
+[[wp]]
+id = "WP-L0"
+days = 0.25
+state = "not-started"
+
+[[wp]]
+id = "WP-L1"
+days = 0.5
+state = "not-started"
+
+[[wp]]
+id = "WP-L2"
+days = 0.75
+state = "not-started"
+provides = ["C38g"]
+
+[[wp]]
+id = "WP-L3"
+days = 0.25
+state = "not-started"
+
+[[wp]]
+id = "WP-L4"
+days = 0.25
+state = "not-started"

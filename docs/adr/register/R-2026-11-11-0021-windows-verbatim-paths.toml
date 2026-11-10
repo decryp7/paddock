@@ -1,0 +1,45 @@
+# Free-text prerequisites are matched to `provides` names in ADR 0096 WP-1's review.
+id = "R-2026-11-11-0021-windows-verbatim-paths"
+title = "Amendment to ADR 0021: Windows verbatim paths are made plain in one shared place"
+summary = "Amendment to ADR 0021 (proposed 2026-11-11; ER-21): run 7904 failed three paddock-dev tests on Windows on `\\\\?\\` paths from canonicalize; 21 hand-written strippers in 12 crates disagree on UNC and volume paths; paddock_env::winpath (plain, real, real_verbatim, for_tools, same), Clippy on canonicalize, C109 for hand-written prefix handling; 7.5 days, gates no tag"
+status = "proposed"
+approval_file = "docs/adr/amendments/0021-windows-verbatim-paths-2026-11-11.md"
+adr_by = "2026-11-25" # ADR 0096 section 2 default: 14 days
+prerequisites = ["RT-5"] # C109 runs in the RT-5 check host (tools/paddock-dev/src/check/, on the train, not on origin/main)
+
+[[wp]]
+id = "WP-P0"
+days = 0.5
+state = "not-started"
+
+[[wp]]
+id = "WP-P1"
+days = 1
+state = "not-started"
+provides = ["paddock_env::winpath"]
+
+[[wp]]
+id = "WP-P2"
+days = 1.5
+state = "not-started"
+
+[[wp]]
+id = "WP-P3"
+days = 1.5
+state = "not-started"
+
+[[wp]]
+id = "WP-P4"
+days = 0.75
+state = "not-started"
+provides = ["C109"]
+
+[[wp]]
+id = "WP-P5"
+days = 2
+state = "not-started"
+
+[[wp]]
+id = "WP-P6"
+days = 0.25
+state = "not-started"
