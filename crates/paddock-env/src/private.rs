@@ -17,7 +17,9 @@ mod windows;
 #[cfg(windows)]
 use windows as sys;
 
-pub use dir::{AccountId, PrivateDir, PrivateFile};
+#[cfg(any(test, feature = "test-support"))]
+pub use dir::AccountId;
+pub use dir::{PrivateDir, PrivateFile};
 pub use error::{PrivateError, PrivateResult};
 
 use crate::error::{EnvError, Result};

@@ -7,6 +7,11 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
+[features]
+# The `create_all_as` and `open_as` seams of `paddock_env::private`, which name the account that is trusted. Never enabled in a
+# shipped build (ADR 0073).
+test-support = []
+
 [dependencies]
 serde = "1"
 serde_json = "1"

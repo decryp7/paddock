@@ -5,8 +5,17 @@
 //! owner-only from the moment they exist (no narrowing call afterwards), the folder and its parent are checked from handles, and
 //! an existing folder open to others is refused with a message that says what to fix: it is never tightened, because tightening
 //! cannot evict what was planted while it was open.
+//!
+//! **Why not cap-std (ADR 0092 section 1 asked for a one-day spike first).** The spike was skipped on reading: `cap-std`'s
+//! `DirBuilder` has no Windows option for a security descriptor, so it cannot create a Windows folder owner-only in the
+//! creating call, which is the point of the type; and its Unix side is the same handful of `openat` calls used here. The
+//! type therefore calls `libc` (`mkdirat`, `openat`, `renameat`, `fchmod`) and `NtCreateFile` itself; `windows-sys` is
+//! already in the workspace hack.
+//!
+//! **Logging.** [`PrivateError`]'s text carries the path (and the fix-it sentence). Adopters log
+//! [`PrivateError::reason`], which names no path, and show the full text to the user (ER-27).
 
-use super::error::{PrivateError, PrivateResult, at};
+use super::error::{Fail, PrivateError, PrivateResult, at};
 use super::sys::{self, Dir};
 use crate::folder::Links;
 use std::ffi::OsStr;
@@ -15,7 +24,9 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Who owns what is trusted: a user id on Unix, a SID in text form on Windows.
+/// Who owns what is trusted: a user id on Unix, a SID in text form on Windows. Only the test seams
+/// (`create_all_as`, `open_as`) take one.
+#[cfg(any(test, feature = "test-support"))]
 pub type AccountId = sys::Account;
 
 /// A held, checked, owner-only folder.
@@ -23,7 +34,7 @@ pub type AccountId = sys::Account;
 pub struct PrivateDir {
     dir: Dir,
     path: PathBuf,
-    who: AccountId,
+    who: sys::Account,
 }
 
 /// A held, checked, owner-only file, opened through its [`PrivateDir`].
@@ -56,25 +67,47 @@ fn is_missing(e: &super::error::Fail) -> bool {
     matches!(e, super::error::Fail::Io(e) if e.kind() == std::io::ErrorKind::NotFound)
 }
 
+/// The folder `name` in `parent`: opened if it exists, made owner-only if it does not. When another creator makes it between
+/// the two steps, the make reports "already exists" and the folder is opened once more, to be checked like any existing one.
+fn open_or_make(parent: &Dir, name: &OsStr, path: &Path) -> PrivateResult<Dir> {
+    match parent.open_at(name) {
+        Ok(existing) => Ok(existing),
+        Err(e) if is_missing(&e) => match parent.mkdir_at(name) {
+            Ok(made) => Ok(made),
+            Err(Fail::Io(e)) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                parent.open_at(name).map_err(at("open the folder", path))
+            }
+            Err(e) => Err(at("create folder", path)(e)),
+        },
+        Err(e) => Err(at("open the folder", path)(e)),
+    }
+}
+
 impl PrivateDir {
     /// Makes `path` and any missing parents owner-only and returns the held folder. The deepest existing ancestor is opened by path
     /// (links in it are followed: `/var` may be a link); every missing folder is made relative to the one before, owner-only at
-    /// creation. An existing final folder, a link in its place, another owner, a write right for others and an untrusted parent
-    /// are refused and nothing is changed.
+    /// creation. An existing final folder that passes the check is reused as it is; a link in its place, another owner, a write
+    /// right for others and an untrusted parent are refused and nothing is changed. Two callers making the same new folder at
+    /// once both succeed: the loser of the race opens what the winner made and checks it like any existing folder.
     ///
     /// # Errors
     /// [`PrivateError::Refused`] for an untrusted folder or parent, [`PrivateError::Io`] when a step fails,
     /// [`PrivateError::NotAbsolute`] for a relative path.
     pub fn create_all(path: &Path) -> PrivateResult<PrivateDir> {
         let who = sys::current_account().map_err(io_err("find the account", path))?;
-        Self::create_all_as(path, who)
+        Self::create_all_for(path, who)
     }
 
     /// [`PrivateDir::create_all`] for the account `who` (tests name another account to meet a folder it does not own).
     ///
     /// # Errors
     /// As [`PrivateDir::create_all`].
+    #[cfg(any(test, feature = "test-support"))]
     pub fn create_all_as(path: &Path, who: AccountId) -> PrivateResult<PrivateDir> {
+        Self::create_all_for(path, who)
+    }
+
+    fn create_all_for(path: &Path, who: sys::Account) -> PrivateResult<PrivateDir> {
         if !path.is_absolute() {
             return Err(PrivateError::NotAbsolute(path.to_path_buf()));
         }
@@ -100,13 +133,7 @@ impl PrivateDir {
         let mut here = cur.to_path_buf();
         for name in missing.into_iter().rev() {
             here.push(name);
-            dir = match dir.open_at(name) {
-                Ok(existing) => existing,
-                Err(e) if is_missing(&e) => {
-                    dir.mkdir_at(name).map_err(at("create folder", &here))?
-                }
-                Err(e) => return Err(at("open the folder", &here)(e)),
-            };
+            dir = open_or_make(&dir, name, &here)?;
         }
         let made = PrivateDir {
             dir,
@@ -124,14 +151,19 @@ impl PrivateDir {
     /// [`PrivateError::Refused`] when the folder or its parent cannot be trusted, [`PrivateError::Io`] when it cannot be opened.
     pub fn open(path: &Path, links: Links) -> PrivateResult<PrivateDir> {
         let who = sys::current_account().map_err(io_err("find the account", path))?;
-        Self::open_as(path, links, who)
+        Self::open_for(path, links, who)
     }
 
     /// [`PrivateDir::open`] for the account `who`.
     ///
     /// # Errors
     /// As [`PrivateDir::open`].
+    #[cfg(any(test, feature = "test-support"))]
     pub fn open_as(path: &Path, links: Links, who: AccountId) -> PrivateResult<PrivateDir> {
+        Self::open_for(path, links, who)
+    }
+
+    fn open_for(path: &Path, links: Links, who: sys::Account) -> PrivateResult<PrivateDir> {
         let dir =
             Dir::open_path(path, links == Links::Follow).map_err(at("open the folder", path))?;
         let opened = PrivateDir {
@@ -164,13 +196,7 @@ impl PrivateDir {
     pub fn child(&self, name: &str) -> PrivateResult<PrivateDir> {
         let os = plain(name)?;
         let path = self.path.join(name);
-        let dir = match self.dir.open_at(os) {
-            Ok(existing) => existing,
-            Err(e) if is_missing(&e) => {
-                self.dir.mkdir_at(os).map_err(at("create folder", &path))?
-            }
-            Err(e) => return Err(at("open the folder", &path)(e)),
-        };
+        let dir = open_or_make(&self.dir, os, &path)?;
         dir.check(&self.who)
             .map_err(at("check the folder", &path))?;
         // The account is a Copy user id on Unix and a SID string on Windows.
@@ -329,6 +355,51 @@ mod common_tests {
         why
     }
 
+    /// Two creators racing to make the same new folder must both end up holding it (review P1-1).
+    #[test]
+    fn concurrent_create_all_of_the_same_new_folder_all_succeed() {
+        use std::sync::{Arc, Barrier};
+        let t = temp();
+        for round in 0..100 {
+            let path = Arc::new(t.path().join(format!("r{round}")).join("a").join("b"));
+            let barrier = Arc::new(Barrier::new(4));
+            let threads: Vec<_> = (0..4)
+                .map(|_| {
+                    let (path, barrier) = (path.clone(), barrier.clone());
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        PrivateDir::create_all(&path).map(|_| ())
+                    })
+                })
+                .collect();
+            for th in threads {
+                th.join().unwrap().unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn concurrent_child_of_the_same_new_folder_all_succeed() {
+        use std::sync::{Arc, Barrier};
+        let t = temp();
+        let parent = Arc::new(PrivateDir::create_all(&t.path().join("p")).unwrap());
+        for round in 0..100 {
+            let barrier = Arc::new(Barrier::new(4));
+            let threads: Vec<_> = (0..4)
+                .map(|_| {
+                    let (parent, barrier) = (parent.clone(), barrier.clone());
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        parent.child(&format!("c{round}")).map(|_| ())
+                    })
+                })
+                .collect();
+            for th in threads {
+                th.join().unwrap().unwrap();
+            }
+        }
+    }
+
     #[test]
     fn names_must_be_plain() {
         let t = temp();
@@ -470,10 +541,6 @@ mod tests {
             panic!("{e}")
         };
         why
-    }
-
-    fn not_root() -> bool {
-        sys::current_account().unwrap() != 0
     }
 
     /// Failing test 6 (ADR 0092): a folder made under umask 002 is owner-only from its first fstat, with no narrowing call after.
@@ -793,45 +860,37 @@ mod tests {
         );
     }
 
+    /// Works as root too (CI runs as root, ER-12): the folder is removed under the held handle, so every create in it fails.
     #[test]
     fn a_folder_that_cannot_be_written_is_an_error() {
-        let Some(()) = not_root().then_some(()) else {
-            return;
-        };
         let t = temp();
         let d = PrivateDir::create_all(&t.path().join("d")).unwrap();
-        set_mode(d.path(), 0o500);
+        std::fs::remove_dir(d.path()).unwrap();
         let e = d.write_atomic("f", b"x").unwrap_err();
+        let op = "create the temporary file for";
+        assert!(
+            matches!(&e, PrivateError::Io { op: o, .. } if *o == op),
+            "{e}"
+        );
+        let e = d.child("c").unwrap_err();
         assert!(
             matches!(
                 &e,
                 PrivateError::Io {
-                    op: "create the temporary file for",
+                    op: "create folder",
                     ..
                 }
             ),
             "{e}"
         );
-        assert!(matches!(
-            d.child("c").unwrap_err(),
-            PrivateError::Io {
-                op: "create folder",
-                ..
-            }
-        ));
-        set_mode(d.path(), 0o700);
     }
 
+    /// Works as root too: a name longer than the OS allows fails the open with an I/O error, not a refusal.
     #[test]
-    fn an_unreadable_ancestor_is_an_error_not_a_refusal() {
-        let Some(()) = not_root().then_some(()) else {
-            return;
-        };
+    fn an_ancestor_that_cannot_be_opened_is_an_error_not_a_refusal() {
         let t = temp();
-        let locked = t.path().join("locked");
-        std::fs::create_dir(&locked).unwrap();
-        set_mode(&locked, 0o000);
-        let e = PrivateDir::create_all(&locked.join("a").join("b")).unwrap_err();
+        let long = "x".repeat(300);
+        let e = PrivateDir::create_all(&t.path().join(&long).join("a").join("b")).unwrap_err();
         assert!(
             matches!(
                 &e,
@@ -842,10 +901,25 @@ mod tests {
             ),
             "{e}"
         );
-        let e = PrivateDir::open(&locked.join("a"), Links::Refuse).unwrap_err();
+        let e = PrivateDir::open(&t.path().join(&long), Links::Refuse).unwrap_err();
         assert!(matches!(&e, PrivateError::Io { .. }), "{e}");
-        // The creation inside an existing ancestor that exists but cannot be searched.
-        set_mode(&locked, 0o700);
+        let d = PrivateDir::create_all(&t.path().join("d")).unwrap();
+        let e = d.child(&long).unwrap_err();
+        assert!(matches!(&e, PrivateError::Io { .. }), "{e}");
+    }
+
+    /// Review P2-2: the check of an existing child (the mutation that removed it survived).
+    #[test]
+    fn an_existing_child_open_to_others_is_refused_and_left_alone() {
+        let t = temp();
+        let d = PrivateDir::create_all(&t.path().join("d")).unwrap();
+        d.child("c").unwrap();
+        for mode in [0o777, 0o770, 0o707] {
+            set_mode(&d.path().join("c"), mode);
+            let why = refusal(d.child("c").unwrap_err());
+            assert!(matches!(why, Refusal::OpenToOthers { .. }), "{mode:o}");
+            assert_eq!(mode_of(&d.path().join("c")), mode, "never tightened");
+        }
     }
 
     #[test]
