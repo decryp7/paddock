@@ -177,7 +177,7 @@ impl Optional {
                     legs: vec![],
                     os: vec![],
                     reason: String::new(),
-                    expires: Date::parse("1970-01-01")?,
+                    expires: Date::EPOCH,
                     measured_on: vec![],
                 };
                 cur = Some((n, blank, HashSet::new()));
@@ -271,9 +271,9 @@ fn finish(start: usize, e: Entry, seen: &HashSet<String>) -> Result<Entry, Strin
                 "an id that starts with test:, check:, gate: or probe: (a bare * would excuse everything)",
             ));
         }
-        Some(r) if r.trim_matches('*').is_empty() => {
+        Some(r) if !r.chars().any(char::is_alphanumeric) => {
             return Err(need(
-                "an id narrower than the whole kind (test:* would excuse every test)",
+                "an id with some name in it, not only * and punctuation (test:* would excuse every test)",
             ));
         }
         Some(_) => {}
@@ -425,6 +425,11 @@ expires = "2027-02-01"
             "[[optional]]\nwhere = { arch = [\"x\"] }\n",
             "[[optional]]\nmeasured_on = \"a\"\n",
             "[[optional]]\nmeasured_on = [a]\n",
+            // Each required key, missing alone.
+            "[[optional]]\nid = \"test:a\"\nwhere = { os = [\"linux\"] }\nexpires = \"2027-01-01\"\n",
+            "[[optional]]\nid = \"test:a\"\nwhere = { os = [\"linux\"] }\nreason = \"r\"\n",
+            "[[optional]]\nid = \"test:*::*\"\nwhere = { os = [\"linux\"] }\nreason = \"r\"\nexpires = \"2027-01-01\"\n",
+            "[[optional]]\nid = \"check:/-*\"\nwhere = { os = [\"linux\"] }\nreason = \"r\"\nexpires = \"2027-01-01\"\n",
             // The register must not excuse too much.
             "[[optional]]\nid = \"*\"\nwhere = { os = [\"linux\"] }\nreason = \"r\"\nexpires = \"2027-01-01\"\n",
             "[[optional]]\nid = \"test:*\"\nwhere = { os = [\"linux\"] }\nreason = \"r\"\nexpires = \"2027-01-01\"\n",
@@ -513,6 +518,35 @@ expires = "2027-02-01"
             // A bad variable is an error even on a tag: nobody guesses what it was meant to say.
             assert!(k(Some("refs/tags/x"), Some(bad)).is_err());
         }
+    }
+
+    #[test]
+    fn each_refusal_says_which_rule_it_is() {
+        let e = |extra: &str| Optional::parse(&format!("[[optional]]\n{extra}")).unwrap_err();
+        let (id, wh, re, ex) = (
+            "id = \"test:a\"\n",
+            "where = { os = [\"linux\"] }\n",
+            "reason = \"r\"\n",
+            "expires = \"2027-01-01\"\n",
+        );
+        assert!(e(&format!("{wh}{re}{ex}")).contains("needs an id that starts with"));
+        assert!(e(&format!("{id}{wh}{ex}")).contains("needs a reason"));
+        assert!(e(&format!("{id}{wh}{re}")).contains("needs expires"));
+        assert!(e(&format!("{id}{re}{ex}")).contains("needs where"));
+        for bare in ["*", "test:*", "test:*::*", "check:/-*", "gate:  *"] {
+            let m = e(&format!("id = \"{bare}\"\n{wh}{re}{ex}"));
+            assert!(m.contains("needs an id"), "{bare}: {m}");
+        }
+        assert!(
+            e(&format!("{id}{wh}{re}{ex}where = {{ os = [\"x\"] }}\n")).contains("appears twice")
+        );
+        assert!(
+            e(&format!(
+                "{id}where = {{ leg = [] , os = [\"l\"] }}\n{re}{ex}"
+            ))
+            .contains("empty list")
+        );
+        assert!(Optional::parse(&format!("[[optional]]\nid = \"test:a*\"\n{wh}{re}{ex}")).is_ok());
     }
 
     #[test]

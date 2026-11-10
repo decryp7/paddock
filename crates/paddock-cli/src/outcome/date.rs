@@ -9,9 +9,15 @@ pub struct Date {
 }
 
 impl Date {
+    /// The earliest date: a placeholder for an entry whose `expires` has not been read yet.
+    pub(super) const EPOCH: Date = Date {
+        year: 1970,
+        month: 1,
+        day: 1,
+    };
+
     /// Reads `YYYY-MM-DD`; the error says what was wrong (shape, month 1 to 12, day of that month, leap years).
     pub fn parse(text: &str) -> Result<Date, String> {
-        let shape = format!("\"{text}\" is not a date: write YYYY-MM-DD");
         let b = text.as_bytes();
         let digits = |r: std::ops::Range<usize>| b[r].iter().all(u8::is_ascii_digit);
         if b.len() != 10
@@ -21,11 +27,11 @@ impl Date {
             || !digits(5..7)
             || !digits(8..10)
         {
-            return Err(shape);
+            return Err(format!("\"{text}\" is not a date: write YYYY-MM-DD"));
         }
-        let year: u16 = text[0..4].parse().map_err(|_| shape.clone())?;
-        let month: u8 = text[5..7].parse().map_err(|_| shape.clone())?;
-        let day: u8 = text[8..10].parse().map_err(|_| shape.clone())?;
+        let num =
+            |r: std::ops::Range<usize>| b[r].iter().fold(0u16, |n, c| n * 10 + u16::from(c - b'0'));
+        let (year, month, day) = (num(0..4), num(5..7) as u8, num(8..10) as u8);
         if !(1..=12).contains(&month) {
             return Err(format!(
                 "\"{text}\" is not a date: month {month} does not exist"
