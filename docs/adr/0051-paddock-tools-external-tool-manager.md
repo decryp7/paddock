@@ -5,6 +5,7 @@
   the last P1 (the spawn path, D4.5) and P2 (inherit-only entries, D4.3). `NextStep` and `Why` are imported from
   `paddock-jobs` as ADR 0052 revision 2 requires (`28cc578ee` on `origin/docs/adr-wiring-outcomes-ui`). Docs only: no
   crate exists yet; this ADR lands on `main` with the `paddock-tools` crate's first change.
+- Trimmed 2026-11-11 (user, comparable-practice review): DEFERRED: keep only WP-14 (`paddock_proc::login_env`) and the docs-only WP-0a; deferred WP-1 to WP-13, WP-15, WP-16.
 - Date: 2026-11-04
 - Related: ER-17 to ER-20 (long operations, progress, no UI timeouts, parallelism and cost), ER-21 / rule 40 (recurring bugs
   mean a missing design rule), ER-22 / rules 39, 42, 43 (share first, shared behaviour tested once), ER-27 (logs explain

@@ -4,6 +4,7 @@
   Revision 2 answers the independent review of revision 1 (`8080eb707`): P1-1 to P1-5 and its P2s. Revision 3 applies
   the re-review of revision 2 (`e954827e0`): the D2 evidence corrected to two measured pairs, and its P2s. Needs the user's
   decisions below before any build; WP-0, the interim Windows VM lock, is being done separately by the coordinator)
+- Trimmed 2026-11-11 (user, comparable-practice review): DROPPED, keeping the interim lock (WP-0, done) and WP-C0 (runner container limits spike); dropped Part A (lease), Part B (host inventory), WP-C1 and WP-C2.
 - Date: 2026-11-09
 - Related: ER-21 / rule 40 (recurring bugs mean a missing design rule), ER-20 / rule 51 (parallelism and cost), ER-24 /
   rule 41 (scale parallel work to the machine), ER-14 / rule 7 (tests never touch the user's machine), ER-27 (logs

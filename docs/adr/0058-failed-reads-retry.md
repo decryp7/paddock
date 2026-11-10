@@ -3,6 +3,7 @@
 - Status: Accepted (2026-11-08, by the user, with decision D1 = (a), after the independent review and its re-review of
   revision 2). The user approved the work on 2026-11-08 as the first shared item after the Dyno 1.1.0 tag (Dyno 1.1.1
   plan WP-1).
+- Trimmed 2026-11-11 (user, comparable-practice review): TRIM: keep what is built, the live-feed adoption and Debrief's `service-health` store; dropped the six-copy `BackoffPolicy::delay_after` unification.
 - Date: 2026-11-08
 - Related: ER-21 / rule 40 (recurring bugs mean a missing design rule), rule 30 (one shared `withRequestStatus`), rule 29
   (signal reads before the first `await`), rule 34 (the engine is the single source of truth), rule 49 (no fixed turn

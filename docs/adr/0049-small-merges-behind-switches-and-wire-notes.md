@@ -4,6 +4,7 @@
   accepted D1 to D6 as recommended (revision 1) and D7 (revision 3); revision 2 answered the review's "needs rework",
   revision 3 its "needs another round" (the wire schema, the helper and plugin wires, the freeze's enforcement), and the
   final edit its last P1 (old goldens are decoded only when the version is not bumped) with its P2 and P3 text.
+- Trimmed 2026-11-11 (user, comparable-practice review): TRIM: keep WP-1 (push check), WP-3 cut to the `.gitattributes` union lines, WP-6 (rule text) and a one-line wire-version equality check in Dyno's link; dropped WP-2, WP-4's schema pipeline, WP-5, WP-7.
 - Date: 2026-11-04
 - Related: ER-1 / rule 1 (one release at a time), ER-4 (Conventional Commits), ER-8 / rule 3 (the full suite once on the
   combined result), ER-14 / rule 7 and rule 49 (tests never read the user's environment; no leaked state), ER-21 / rule
