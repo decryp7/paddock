@@ -397,7 +397,9 @@ fn run_wrapper(f: &Fixture, home: &Path, extra_env: &[(&str, String)]) -> (i32, 
         .env("PADDOCK_DEV_TARGET_DIR", f.cargo_home.path().join("target"))
         .env("CARGO_HOME", f.cargo_home.path())
         .env_remove("RUSTC")
-        .env_remove("CARGO_BUILD_RUSTC");
+        .env_remove("CARGO_BUILD_RUSTC")
+        // `dev` changes its messages and defaults on a CI runner; a test opts in through `extra_env`.
+        .env_remove("GITHUB_ACTIONS");
     cmd.envs(extra_env.iter().map(|(k, v)| (*k, v.as_str())));
     let out = cmd.output().unwrap();
     (
@@ -450,6 +452,25 @@ fn without_a_compiler_the_wrapper_runs_a_cached_binary_or_points_at_rustup() {
     // A cached file that does not run is not used either.
     write_script(&home.join("bin/some-hash/paddock-dev-test-host"), "exit 1");
     assert_eq!(run_wrapper(&f, &home, &missing).0, 2);
+}
+
+#[cfg(unix)]
+#[test]
+fn without_a_compiler_a_ci_runner_gets_a_warning_annotation_for_the_cached_binary() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let home = scratch.path().join("home");
+    let env = [
+        ("RUSTC", scratch.path().join("no-such-rustc").display().to_string()),
+        ("GITHUB_ACTIONS", "true".to_string()),
+    ];
+    write_script(
+        &home.join("bin/some-hash/paddock-dev-test-host"),
+        r#"if [ "$1" = "--version" ]; then echo 0; else echo "cached ran $*"; fi"#,
+    );
+    let (code, out, err) = run_wrapper(&f, &home, &env);
+    assert_eq!((code, out.trim()), (0, "cached ran hello"), "{err}");
+    assert!(err.contains("::warning::./dev: rustc is not available on this runner"), "{err}");
 }
 
 #[cfg(unix)]
