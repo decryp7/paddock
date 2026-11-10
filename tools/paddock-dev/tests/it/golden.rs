@@ -15,7 +15,7 @@ use paddock_repo_graph::GitHistory;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// A live comparison that cannot run. On a workstation a note. In CI on Linux (the paddock-ci image has node and a full clone) a
 /// failure, so a missing oracle or a shallow clone cannot let the comparison pass unseen. In CI on a Windows or macOS host leg, which
@@ -596,7 +596,7 @@ fn touch(root: &Path, rel: &str, job: Option<&str>) {
     std::fs::write(path, edited).unwrap();
 }
 
-/// A fresh one-commit repository in `dst` holding the files of `src` that are present on disk, as LF text.
+/// A fresh one-commit repository in `dst` holding the files of `src` that are present on disk, as stored (LF for text).
 ///
 /// Not `git clone`: CI checks out a depth-1, blob-less, sparse clone, in which a local clone must fetch blobs from a promisor
 /// remote that is not there ("lazy fetching disabled"). The files this test reads are on disk in every kind of checkout.
@@ -605,7 +605,7 @@ fn touch(root: &Path, rel: &str, job: Option<&str>) {
 ///
 /// Cheap by design (both live narrowing tests run it at once, on a loaded Windows host too): the copy borrows `src`'s object store
 /// (`objects/info/alternates`) and takes its index entries, so no file is hashed or compressed again, and git writes each file
-/// once, as LF. The blob of every file on disk is in that store, a blob-less clone's included: checking a file out fetched it.
+/// once, as stored (LF for text). The blob of every file on disk is in that store, a blob-less clone's included: checking a file out fetched it.
 /// Only files edited in `src` (`ls-files -m`, none in CI) are hashed, from their content on disk.
 fn copy_checked_out_files(src: &Path, dst: &Path) {
     use std::io::Write;
@@ -615,7 +615,7 @@ fn copy_checked_out_files(src: &Path, dst: &Path) {
         assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
         out.stdout
     };
-    let git_with_input = |dir: &Path, args: &[&str], input: &[u8]| {
+    let git_with_input = |dir: &Path, args: &[&str], input: Vec<u8>| {
         let mut child = Command::new("git")
             .arg("-C")
             .arg(dir)
@@ -625,9 +625,11 @@ fn copy_checked_out_files(src: &Path, dst: &Path) {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        // These commands print nothing until their input ends, so writing it all first cannot fill a pipe and stall.
-        child.stdin.take().unwrap().write_all(input).unwrap();
+        // The input is written from its own thread while this one drains stdout and stderr, so neither side can stall on a full pipe.
+        let mut stdin = child.stdin.take().unwrap();
+        let writer = std::thread::spawn(move || stdin.write_all(&input));
         let out = child.wait_with_output().unwrap();
+        writer.join().unwrap().unwrap();
         assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
     };
     let on_disk = |rel: &str| std::fs::symlink_metadata(src.join(rel)).is_ok_and(|m| m.is_file());
@@ -650,9 +652,18 @@ fn copy_checked_out_files(src: &Path, dst: &Path) {
     // `input` stores LF whatever the host's checkout wrote, and checkouts in the copy write what is stored: LF.
     git(dst, &["config", "core.autocrlf", "input"]);
     git(dst, &["config", "core.eol", "lf"]);
-    let objects = objects.to_str().unwrap().trim_start_matches(r"\\?\").replace('\\', "/");
+    // No automatic packing: the copy's own objects stay as written (and the mechanism test counts loose and packed alike).
+    git(dst, &["config", "gc.auto", "0"]);
+    // `canonicalize` on Windows returns a verbatim path: `\\?\C:\...` for a drive, `\\?\UNC\server\share\...` for a share. Git
+    // reads `C:/...` and `//server/share/...`.
+    let objects = objects.to_str().unwrap();
+    let objects = match objects.strip_prefix(r"\\?\UNC\") {
+        Some(share) => format!(r"\\{share}"),
+        None => objects.strip_prefix(r"\\?\").unwrap_or(objects).to_string(),
+    }
+    .replace('\\', "/");
     std::fs::write(dst.join(".git/objects/info/alternates"), format!("{objects}\n")).unwrap();
-    git_with_input(dst, &["update-index", "-z", "--index-info"], &entries);
+    git_with_input(dst, &["update-index", "-z", "--index-info"], entries);
     // A fresh index has no file on disk to keep: every entry is written, and `-u` records what was written.
     git(dst, &["checkout-index", "--all", "--force", "--quiet", "-u"]);
     let edited: Vec<String> = modified_files(src).into_iter().filter(|rel| on_disk(rel)).collect();
@@ -671,13 +682,13 @@ fn copy_checked_out_files(src: &Path, dst: &Path) {
                 "--pathspec-from-file=-",
                 "--pathspec-file-nul",
             ],
-            &list,
+            list.clone(),
         );
         // The edited files as stored (LF), as the rest.
         for rel in &edited {
             std::fs::remove_file(dst.join(rel)).unwrap();
         }
-        git_with_input(dst, &["checkout-index", "--force", "--quiet", "-u", "-z", "--stdin"], &list);
+        git_with_input(dst, &["checkout-index", "--force", "--quiet", "-u", "-z", "--stdin"], list);
     }
     git(
         dst,
@@ -711,18 +722,26 @@ fn modified_files(src: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Loose objects in `repo`'s own object store (not its alternates).
-fn own_loose_objects(repo: &Path) -> usize {
-    std::fs::read_dir(repo.join(".git/objects"))
+/// Objects in `repo`'s own store, loose and packed (`count` plus `in-pack` of `git count-objects -v`; its alternates are not
+/// counted). Both, because `gc --auto` may pack loose objects at any time.
+fn own_objects(repo: &Path) -> usize {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["count-objects", "-v"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git count-objects: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8(out.stdout)
         .unwrap()
-        .filter_map(Result::ok)
-        .filter(|d| d.file_name().len() == 2)
-        .map(|d| std::fs::read_dir(d.path()).unwrap().count())
+        .lines()
+        .filter_map(|l| l.strip_prefix("count: ").or_else(|| l.strip_prefix("in-pack: ")))
+        .map(|n| n.trim().parse::<usize>().unwrap())
         .sum()
 }
 
 /// The live narrowing tests each copy this repository, at the same time. Hashing and compressing every checked-out file into a new
-/// object store (`git add -A` of about 11,000 files and 550 MB, then a full rewrite) took most of their 240 s budget on the Windows
+/// object store (`git add -A` of the about 11,000 files of CI's lean checkout, then a full rewrite) took most of their 240 s budget on the Windows
 /// host runner with the host to itself (run 7881: 183 s and 236 s) and passed it when another job shared the host (runs 7879,
 /// 7893). The copy borrows the source's objects instead and hashes only files that differ from them: its own store holds the
 /// trees a sparse checkout changes, the commit and those few files.
@@ -749,7 +768,7 @@ fn the_repository_copy_reuses_the_source_objects_instead_of_hashing_every_file()
         "a positive control: the copy holds the checked-out files ({})",
         files.len()
     );
-    let own = own_loose_objects(&copy);
+    let own = own_objects(&copy);
     let budget = folders.len() + 1 + modified_files(&repo_root()).len();
     assert!(
         own <= budget,
@@ -769,7 +788,9 @@ fn live_workflow_action_and_script_edits_narrow_exactly_as_affected_mjs_does() {
     }
     let dir = tempfile::tempdir().unwrap();
     let copy = dir.path().join("copy");
+    let started = Instant::now();
     copy_checked_out_files(&repo_root(), &copy);
+    eprintln!("copy of the checked-out files: {:.1} s", started.elapsed().as_secs_f64());
     assert!(
         !std::fs::read_to_string(copy.join(".gitea/workflows/ci.yml"))
             .unwrap()
@@ -812,15 +833,19 @@ fn live_workflow_action_and_script_edits_narrow_exactly_as_affected_mjs_does() {
     }
     let history = GitHistory::new(&copy, Duration::from_secs(60));
     // The edits change the text of tracked files, never which files or manifests exist: one reading of the graph serves all.
+    let started = Instant::now();
     let graph = read_graph(&copy, &history).unwrap();
+    eprintln!("read_graph: {:.1} s", started.elapsed().as_secs_f64());
     let mut narrowed = 0;
     for (rel, job) in &edits {
         touch(&copy, rel, job.as_deref());
+        let started = Instant::now();
         let script = Command::new("node")
             .current_dir(&copy)
             .args(["scripts/affected.mjs", "--files", rel, "--explain"])
             .output()
             .unwrap();
+        let script_took = started.elapsed().as_secs_f64();
         assert!(script.status.success(), "{}", String::from_utf8_lossy(&script.stderr));
         let req = Request {
             files: vec![rel.clone()],
@@ -830,7 +855,12 @@ fn live_workflow_action_and_script_edits_narrow_exactly_as_affected_mjs_does() {
             base: None,
             head: "HEAD".into(),
         };
+        let started = Instant::now();
         let got = canonical(plan_on_graph(&copy, &history, &req, &graph).unwrap());
+        eprintln!(
+            "edit of {rel} (job {job:?}): affected.mjs {script_took:.1} s, plan {:.1} s",
+            started.elapsed().as_secs_f64()
+        );
         let want = canonical(serde_json::from_slice(&script.stdout).unwrap());
         assert_eq!(got, want, "different plan for an edit of {rel} (job {job:?})");
         narrowed += usize::from(got["all"] == false);
@@ -857,9 +887,13 @@ fn live_guard_edits_mark_conformance_exactly_as_affected_mjs_does() {
     }
     let dir = tempfile::tempdir().unwrap();
     let copy = dir.path().join("copy");
+    let started = Instant::now();
     copy_checked_out_files(&repo_root(), &copy);
+    eprintln!("copy of the checked-out files: {:.1} s", started.elapsed().as_secs_f64());
     let history = GitHistory::new(&copy, Duration::from_secs(60));
+    let started = Instant::now();
     let graph = read_graph(&copy, &history).unwrap();
+    eprintln!("read_graph: {:.1} s", started.elapsed().as_secs_f64());
     // A new Rust test with an ignore and a TypeScript spec with an environment guard, and a comment-only edit of each (no mark).
     let edits: [(&str, &str, bool); 4] = [
         (
@@ -879,11 +913,13 @@ fn live_guard_edits_mark_conformance_exactly_as_affected_mjs_does() {
         let path = copy.join(rel);
         let original = std::fs::read_to_string(&path).unwrap();
         std::fs::write(&path, format!("{original}{add}")).unwrap();
+        let started = Instant::now();
         let script = Command::new("node")
             .current_dir(&copy)
             .args(["scripts/affected.mjs", "--files", rel, "--explain"])
             .output()
             .unwrap();
+        let script_took = started.elapsed().as_secs_f64();
         assert!(script.status.success(), "{}", String::from_utf8_lossy(&script.stderr));
         let req = Request {
             files: vec![rel.to_string()],
@@ -893,7 +929,12 @@ fn live_guard_edits_mark_conformance_exactly_as_affected_mjs_does() {
             base: None,
             head: "HEAD".into(),
         };
+        let started = Instant::now();
         let got = canonical(plan_on_graph(&copy, &history, &req, &graph).unwrap());
+        eprintln!(
+            "guard edit of {rel} ({add:?}): affected.mjs {script_took:.1} s, plan {:.1} s",
+            started.elapsed().as_secs_f64()
+        );
         assert_eq!(
             got,
             canonical(serde_json::from_slice(&script.stdout).unwrap()),
