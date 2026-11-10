@@ -600,32 +600,85 @@ fn touch(root: &Path, rel: &str, job: Option<&str>) {
 ///
 /// Not `git clone`: CI checks out a depth-1, blob-less, sparse clone, in which a local clone must fetch blobs from a promisor
 /// remote that is not there ("lazy fetching disabled"). The files this test reads are on disk in every kind of checkout.
-/// Ignore rules do not apply (`add -f`): tracked files that a rule matches stay in the graph, as in the real repository.
+/// Ignore rules do not apply: the index is built from `src`'s, so tracked files that a rule matches stay in the graph, as in the
+/// real repository.
+///
+/// Cheap by design (both live narrowing tests run it at once, on a loaded Windows host too): the copy borrows `src`'s object store
+/// (`objects/info/alternates`) and takes its index entries, so no file is hashed or compressed again, and git writes each file
+/// once, as LF. The blob of every file on disk is in that store, a blob-less clone's included: checking a file out fetched it.
+/// Only files edited in `src` (`ls-files -m`, none in CI) are hashed, from their content on disk.
 fn copy_checked_out_files(src: &Path, dst: &Path) {
+    use std::io::Write;
+    use std::process::Stdio;
     let git = |dir: &Path, args: &[&str]| {
         let out = Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
         assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
         out.stdout
     };
-    let listed = git(src, &["ls-files", "-z"]);
-    std::fs::create_dir_all(dst).unwrap();
-    for rel in listed.split(|b| *b == 0).filter(|r| !r.is_empty()) {
-        let rel = Path::new(std::str::from_utf8(rel).unwrap());
-        let from = src.join(rel);
-        // Files outside a sparse checkout are listed but not on disk; a symlink is not a regular file here (conformance C57).
-        if !std::fs::symlink_metadata(&from).is_ok_and(|m| m.is_file()) {
-            continue;
+    let git_with_input = |dir: &Path, args: &[&str], input: &[u8]| {
+        let mut child = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        // These commands print nothing until their input ends, so writing it all first cannot fill a pipe and stall.
+        child.stdin.take().unwrap().write_all(input).unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    };
+    let on_disk = |rel: &str| std::fs::symlink_metadata(src.join(rel)).is_ok_and(|m| m.is_file());
+    // `<mode> <blob> <stage>\t<path>` per entry. Files outside a sparse checkout are listed but not on disk (and their blobs are
+    // not in a blob-less clone's store); a symlink is not a regular file here (conformance C57).
+    let staged = git(src, &["ls-files", "--stage", "-z"]);
+    let mut entries = Vec::new();
+    for entry in staged.split(|b| *b == 0).filter(|r| !r.is_empty()) {
+        let text = std::str::from_utf8(entry).unwrap();
+        let (_, rel) = text.split_once('\t').unwrap_or_else(|| panic!("ls-files --stage entry {text:?}"));
+        if on_disk(rel) {
+            entries.extend_from_slice(entry);
+            entries.push(0);
         }
-        let to = dst.join(rel);
-        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
-        std::fs::copy(&from, &to).unwrap_or_else(|e| panic!("copy {}: {e}", rel.display()));
     }
+    let common = String::from_utf8(git(src, &["rev-parse", "--git-common-dir"])).unwrap();
+    let objects = src.join(common.trim()).join("objects").canonicalize().unwrap();
+    std::fs::create_dir_all(dst).unwrap();
     git(dst, &["init", "-q"]);
-    // `input` stores LF whatever the host's checkout wrote; a hard reset from a fresh index rewrites every file as LF.
-    // (`checkout-index -f` would skip files whose stat still matches the index entry and keep a CRLF checkout's bytes.)
+    // `input` stores LF whatever the host's checkout wrote, and checkouts in the copy write what is stored: LF.
     git(dst, &["config", "core.autocrlf", "input"]);
     git(dst, &["config", "core.eol", "lf"]);
-    git(dst, &["-c", "core.safecrlf=false", "add", "-f", "-A"]);
+    let objects = objects.to_str().unwrap().trim_start_matches(r"\\?\").replace('\\', "/");
+    std::fs::write(dst.join(".git/objects/info/alternates"), format!("{objects}\n")).unwrap();
+    git_with_input(dst, &["update-index", "-z", "--index-info"], &entries);
+    // A fresh index has no file on disk to keep: every entry is written, and `-u` records what was written.
+    git(dst, &["checkout-index", "--all", "--force", "--quiet", "-u"]);
+    let edited: Vec<String> = modified_files(src).into_iter().filter(|rel| on_disk(rel)).collect();
+    if !edited.is_empty() {
+        for rel in &edited {
+            std::fs::copy(src.join(rel), dst.join(rel)).unwrap_or_else(|e| panic!("copy {rel}: {e}"));
+        }
+        let list: Vec<u8> = edited.iter().flat_map(|rel| rel.bytes().chain([0])).collect();
+        git_with_input(
+            dst,
+            &[
+                "-c",
+                "core.safecrlf=false",
+                "add",
+                "-f",
+                "--pathspec-from-file=-",
+                "--pathspec-file-nul",
+            ],
+            &list,
+        );
+        // The edited files as stored (LF), as the rest.
+        for rel in &edited {
+            std::fs::remove_file(dst.join(rel)).unwrap();
+        }
+        git_with_input(dst, &["checkout-index", "--force", "--quiet", "-u", "-z", "--stdin"], &list);
+    }
     git(
         dst,
         &[
@@ -635,12 +688,76 @@ fn copy_checked_out_files(src: &Path, dst: &Path) {
             "user.email=test@example.invalid",
             "commit",
             "-q",
+            "--no-verify",
             "-m",
             "copy",
         ],
     );
-    std::fs::remove_file(dst.join(".git/index")).unwrap();
-    git(dst, &["reset", "-q", "--hard"]);
+}
+
+/// Tracked files of `src` whose content on disk differs from the index (`git ls-files -m`).
+fn modified_files(src: &Path) -> Vec<String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(src)
+        .args(["ls-files", "-m", "-z"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git ls-files -m: {}", String::from_utf8_lossy(&out.stderr));
+    out.stdout
+        .split(|b| *b == 0)
+        .filter(|r| !r.is_empty())
+        .map(|r| String::from_utf8(r.to_vec()).unwrap())
+        .collect()
+}
+
+/// Loose objects in `repo`'s own object store (not its alternates).
+fn own_loose_objects(repo: &Path) -> usize {
+    std::fs::read_dir(repo.join(".git/objects"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|d| d.file_name().len() == 2)
+        .map(|d| std::fs::read_dir(d.path()).unwrap().count())
+        .sum()
+}
+
+/// The live narrowing tests each copy this repository, at the same time. Hashing and compressing every checked-out file into a new
+/// object store (`git add -A` of about 11,000 files and 550 MB, then a full rewrite) took most of their 240 s budget on the Windows
+/// host runner with the host to itself (run 7881: 183 s and 236 s) and passed it when another job shared the host (runs 7879,
+/// 7893). The copy borrows the source's objects instead and hashes only files that differ from them: its own store holds the
+/// trees a sparse checkout changes, the commit and those few files.
+#[test]
+fn the_repository_copy_reuses_the_source_objects_instead_of_hashing_every_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let copy = dir.path().join("copy");
+    copy_checked_out_files(&repo_root(), &copy);
+    let listed = Command::new("git")
+        .arg("-C")
+        .arg(&copy)
+        .args(["ls-files", "-z"])
+        .output()
+        .unwrap()
+        .stdout;
+    let files: Vec<&Path> = listed
+        .split(|b| *b == 0)
+        .filter(|r| !r.is_empty())
+        .map(|r| Path::new(std::str::from_utf8(r).unwrap()))
+        .collect();
+    let folders: std::collections::BTreeSet<&Path> = files.iter().flat_map(|f| f.ancestors().skip(1)).collect();
+    assert!(
+        files.len() > 1000,
+        "a positive control: the copy holds the checked-out files ({})",
+        files.len()
+    );
+    let own = own_loose_objects(&copy);
+    let budget = folders.len() + 1 + modified_files(&repo_root()).len();
+    assert!(
+        own <= budget,
+        "the copy wrote {own} objects of its own for {} files in {} folders (at most {budget} expected): it hashed the files \
+         instead of borrowing the source's objects",
+        files.len(),
+        folders.len()
+    );
 }
 
 // Takes about a minute: it copies the checked-out files and runs the script and the planner for every edit.
