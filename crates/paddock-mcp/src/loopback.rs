@@ -330,14 +330,22 @@ impl Serving {
                 ACCEPT_BACKSTOP.as_millis()
             );
         }
-        let mut members = vec![accept];
-        members.extend(std::mem::take(
+        let (mut ended, mut panicked, mut overran) = (0, Vec::new(), Vec::new());
+        let mut tally = |role: String, outcome| match outcome {
+            Outcome::Ended => ended += 1,
+            Outcome::Panicked => panicked.push(role),
+            Outcome::Overran => overran.push(role),
+        };
+        // The accept thread ends first, so the list taken below holds every connection it started; one it accepts while
+        // the stop runs is closed instead of served (`Accepting::serve`).
+        let role = accept.role.clone();
+        tally(role, accept.end_within(until));
+        let members = std::mem::take(
             &mut *self
                 .conns
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner),
-        ));
-        let (mut ended, mut panicked, mut overran) = (0, Vec::new(), Vec::new());
+        );
         for member in members {
             // Wakes a blocked read on Linux and macOS; elsewhere the read notices `stop` within a slice. A connection whose
             // thread has already ended has no socket left to shut down.
@@ -345,11 +353,7 @@ impl Serving {
                 let _ = stream.shutdown(Shutdown::Both);
             }
             let role = member.role.clone();
-            match member.end_within(until) {
-                Outcome::Ended => ended += 1,
-                Outcome::Panicked => panicked.push(role),
-                Outcome::Overran => overran.push(role),
-            }
+            tally(role, member.end_within(until));
         }
         let line = format!(
             "paddock_mcp: the loopback listener on port {} stopped in {} ms (bound {} ms): {ended} thread(s) ended, {} panicked, {} overran",
@@ -729,16 +733,37 @@ enum AcceptFailure {
 const EPROTO: i32 = 71;
 
 /// Classifies a failed accept: a signal, or a client that gave up while it waited in the backlog (`ConnectionAborted`, and
-/// EPROTO on Linux, accept(2)), is not the listener's, so the next client is accepted at once.
+/// EPROTO on Linux, accept(2); `ConnectionReset` on Windows, WSAECONNRESET), is not the listener's, so the next client is
+/// accepted at once.
 fn accept_failure(e: &io::Error) -> AcceptFailure {
     #[cfg(target_os = "linux")]
     if e.raw_os_error() == Some(EPROTO) {
         return AcceptFailure::Again;
     }
     match e.kind() {
-        io::ErrorKind::Interrupted | io::ErrorKind::ConnectionAborted => AcceptFailure::Again,
+        io::ErrorKind::Interrupted
+        | io::ErrorKind::ConnectionAborted
+        | io::ErrorKind::ConnectionReset => AcceptFailure::Again,
         _ => AcceptFailure::Pause,
     }
+}
+
+/// Logs a failed accept (not `WouldBlock`) and says what the accept loop does next.
+fn on_accept_error(e: &io::Error) -> AcceptFailure {
+    let next = accept_failure(e);
+    match next {
+        AcceptFailure::Again if e.kind() == io::ErrorKind::Interrupted => {}
+        AcceptFailure::Again => log::debug!(
+            "paddock_mcp: a client gave up before its connection was accepted: {e} ({:?})",
+            e.kind()
+        ),
+        AcceptFailure::Pause => log::warn!(
+            "paddock_mcp: accepting a connection failed: {e} ({:?}); trying again in {} ms",
+            e.kind(),
+            STOP_SLICE.as_millis()
+        ),
+    }
+    next
 }
 
 /// The poll token of the listener.
@@ -794,24 +819,13 @@ impl Accepting {
                         }
                     }
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
-                    Err(e) if accept_failure(&e) == AcceptFailure::Again => {
-                        if e.kind() != io::ErrorKind::Interrupted {
-                            log::debug!(
-                                "paddock_mcp: a client gave up before its connection was accepted: {e} ({:?})",
-                                e.kind()
-                            );
-                        }
-                    }
                     Err(e) => {
-                        // Out of descriptors or memory: the client stays in the backlog, and the accept is tried again after a
-                        // slice instead of spinning (no new readiness event would come for it).
-                        log::warn!(
-                            "paddock_mcp: accepting a connection failed: {e} ({:?}); trying again in {} ms",
-                            e.kind(),
-                            STOP_SLICE.as_millis()
-                        );
-                        retry = Some(STOP_SLICE);
-                        break;
+                        if on_accept_error(&e) == AcceptFailure::Pause {
+                            // No new readiness event would come for the client still in the backlog: try again after a
+                            // slice instead of spinning.
+                            retry = Some(STOP_SLICE);
+                            break;
+                        }
                     }
                 }
             }
@@ -829,6 +843,15 @@ impl Accepting {
             .conns
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Checked under the lock the stop takes the list with: a connection accepted while the listener stops gets no thread
+        // the stop would not wait for; it is closed here.
+        if self.stop.load(Ordering::SeqCst) {
+            let peer = stream.peer_addr().map_or(0, |p| p.port());
+            log::info!(
+                "paddock_mcp: a connection from port {peer} closed: the listener is stopping"
+            );
+            return;
+        }
         let (done, live): (Vec<_>, Vec<_>) = std::mem::take(&mut *list)
             .into_iter()
             .partition(|m| m.handle.is_finished());
@@ -1737,32 +1760,181 @@ mod tests {
         );
     }
 
-    /// Review P2 of 593b750c7: a client that gave up while it waited in the backlog makes `accept` fail with
-    /// `ConnectionAborted` (ECONNABORTED; EPROTO on Linux): that is the client's, so the next client is accepted at once.
-    /// Only a failure of the listener or the system (out of descriptors) waits a slice.
+    /// Review P2s of 593b750c7 and 7e76cc53c: a client that gave up while it waited in the backlog makes `accept` fail with
+    /// `ConnectionAborted` (ECONNABORTED; EPROTO on Linux) or, on Windows, `ConnectionReset` (WSAECONNRESET): that is the
+    /// client's, so the next client is accepted at once. Only a failure of the listener or the system (out of descriptors)
+    /// waits a slice. Called through the accept loop's own handler, so the wiring is what is tested.
     #[test]
-    fn an_aborted_client_does_not_pause_the_accept() {
-        let aborted = io::Error::from(io::ErrorKind::ConnectionAborted);
-        assert_eq!(accept_failure(&aborted), AcceptFailure::Again);
-        assert_eq!(
-            accept_failure(&io::Error::from(io::ErrorKind::Interrupted)),
-            AcceptFailure::Again
-        );
+    fn a_client_that_gave_up_does_not_pause_the_accept() {
+        for kind in [
+            io::ErrorKind::ConnectionAborted,
+            io::ErrorKind::ConnectionReset,
+            io::ErrorKind::Interrupted,
+        ] {
+            assert_eq!(
+                on_accept_error(&io::Error::from(kind)),
+                AcceptFailure::Again,
+                "{kind:?}"
+            );
+        }
         #[cfg(target_os = "linux")]
         assert_eq!(
-            accept_failure(&io::Error::from_raw_os_error(EPROTO)),
+            on_accept_error(&io::Error::from_raw_os_error(EPROTO)),
             AcceptFailure::Again
         );
         // EMFILE: the process is out of descriptors.
         #[cfg(unix)]
         assert_eq!(
-            accept_failure(&io::Error::from_raw_os_error(24)),
+            on_accept_error(&io::Error::from_raw_os_error(24)),
             AcceptFailure::Pause
         );
         assert_eq!(
-            accept_failure(&io::Error::from(io::ErrorKind::OutOfMemory)),
+            on_accept_error(&io::Error::from(io::ErrorKind::OutOfMemory)),
             AcceptFailure::Pause
         );
+    }
+
+    /// The accept thread's state of a listener on `serving`'s connection list and stop flag, for calling `serve` directly.
+    fn accepting_of(serving: &Serving) -> Accepting {
+        Accepting {
+            server: test_server(),
+            keys: Arc::new(crate::keys::KeyStore::new()),
+            max_connections: 4,
+            stop: serving.stop.clone(),
+            conns: serving.conns.clone(),
+            taken: Arc::default(),
+            ids: AtomicU64::new(1000),
+            stop_bound: serving.stop_bound,
+            bounds: Arc::new(Bounds::serving()),
+        }
+    }
+
+    /// Review P2 of 7e76cc53c: a connection the accept thread takes while the listener stops is not served (no thread that
+    /// the stop could miss); it is closed and logged.
+    #[test]
+    fn a_connection_accepted_during_the_stop_is_closed_not_served() {
+        capture_logs();
+        let serving = serve_loopback(
+            test_server(),
+            Arc::new(crate::keys::KeyStore::new()),
+            TcpListener::bind("127.0.0.1:0").unwrap(),
+            4,
+        )
+        .unwrap();
+        let accepting = accepting_of(&serving);
+        let (server_end, mut client) = pair();
+        serving.stop.store(true, Ordering::SeqCst);
+        accepting.serve(server_end);
+        assert!(
+            serving.conns.lock().unwrap().is_empty(),
+            "a thread was started for a connection accepted during the stop"
+        );
+        client.set_read_timeout(Some(GUARD)).unwrap();
+        let mut rest = Vec::new();
+        let end = client.read_to_end(&mut rest);
+        assert!(
+            matches!(end, Ok(0)) || end.is_err(),
+            "the connection is closed: {end:?}"
+        );
+        let port = client.local_addr().unwrap().port();
+        wait_for_line(
+            |l| {
+                l.contains(&format!(
+                    "from port {port} closed: the listener is stopping"
+                ))
+            },
+            GUARD,
+        )
+        .expect("a line for the connection closed during the stop");
+        drop(serving);
+    }
+
+    /// Review P2 of 7e76cc53c: the stop took the connection list before the accept thread had ended, so a connection the
+    /// accept thread added meanwhile was neither waited for nor counted. A stand-in accept thread adds one (stuck) as soon
+    /// as it sees the stop; the stop must count it.
+    #[test]
+    fn a_member_added_while_the_accept_thread_ends_is_waited_for() {
+        capture_logs();
+        let mut serving = serve_with(
+            test_server(),
+            Arc::new(crate::keys::KeyStore::new()),
+            TcpListener::bind("127.0.0.1:0").unwrap(),
+            4,
+            Bounds {
+                stop: Duration::from_millis(300),
+                ..Bounds::serving()
+            },
+        )
+        .unwrap();
+        let (stop, conns) = (serving.stop.clone(), serving.conns.clone());
+        let (release, stuck) = std::sync::mpsc::channel::<()>();
+        let stand_in = Member::spawn("the accept thread".into(), Weak::new(), move || {
+            paddock_testkit::wait_until_within("the stop", GUARD, || stop.load(Ordering::SeqCst));
+            spawn_member(
+                &mut conns.lock().unwrap(),
+                "a connection accepted during the stop".into(),
+                Weak::new(),
+                move || {
+                    let _ = stuck.recv();
+                },
+            );
+        });
+        let real = serving.accept.replace(stand_in).unwrap();
+        let port = serving.addr().port();
+        serving.stop();
+        drop(release);
+        // The real accept thread sees the stop at its backstop.
+        let _ = real.end_within(Instant::now() + GUARD);
+        let line = wait_for_line(
+            |l| l.contains(&format!("listener on port {port} stopped")),
+            GUARD,
+        )
+        .expect("a line for the stop");
+        assert!(
+            line.contains("1 overran (a connection accepted during the stop overran)"),
+            "{line}"
+        );
+    }
+
+    /// Review P2 of 7e76cc53c: a member whose work panics still sets its latch (on the unwind), so the stop reports it as
+    /// panicked at once instead of waiting for the bound and calling it overrun.
+    #[test]
+    fn a_member_that_panicked_is_reported_without_waiting_for_the_bound() {
+        capture_logs();
+        let serving = serve_with(
+            test_server(),
+            Arc::new(crate::keys::KeyStore::new()),
+            TcpListener::bind("127.0.0.1:0").unwrap(),
+            4,
+            Bounds {
+                stop: Duration::from_secs(600),
+                ..Bounds::serving()
+            },
+        )
+        .unwrap();
+        spawn_member(
+            &mut serving.conns.lock().unwrap(),
+            "a panicking test thread".into(),
+            Weak::new(),
+            || panic!("a test member panics on purpose"),
+        );
+        let port = serving.addr().port();
+        let (done, stopped) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            serving.stop();
+            let _ = done.send(());
+        });
+        assert!(
+            stopped.recv_timeout(GUARD).is_ok(),
+            "the stop waited for a member that had panicked (its bound is 600 s)"
+        );
+        let line = wait_for_line(
+            |l| l.contains(&format!("listener on port {port} stopped")),
+            GUARD,
+        )
+        .expect("a line for the stop");
+        assert!(line.contains("1 panicked"), "{line}");
+        assert!(line.contains("a panicking test thread panicked"), "{line}");
     }
 
     /// Review P2 of 05a6a1bdf: `stop` woke the blocking accept by connecting to the listener, so when that connection could
