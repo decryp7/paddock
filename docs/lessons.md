@@ -1743,3 +1743,35 @@ Serial local-then-CI added a full local cycle to every landing, while CI found n
 ## Fix rounds after a red CI run rerun only the fix (2026-11-09)
 
 Each full re-run of a combined train cost about 35 minutes of every runner, while the fixes touched a few jobs. The user asked: keep running only the failed tests and builds, then the full CI once everything passed. Rule 50(i): fix rounds dispatch with `base` = the last tested commit; the full affected plan runs once on the final tree before landing.
+
+
+## A Debrief store worker crashed at exit with two threads in `exit` and a live thread in DuckDB (2026-11-10, ADR 0076 exit-phase amendment, WP-X0)
+
+The `debrief-store-worker` crash (21 reports in six days, all in the catalogue thread inside DuckDB while another thread ran
+the exit handlers) had two candidate causes, listed under ER-28: (a) a native thread still alive during static
+destruction (as `601858de8`, `5740cb6b6`, `e3f6cdead` before it), (b) two threads in `exit` at once. A deterministic
+reproducer does not need DuckDB: a test-only `atexit` pair (a holder registered last, a witness before it) shows on macOS
+that a second thread enters `exit` while the first is in the handlers, since libc marks the entry it runs as called and the
+second thread runs the entries after it (`two_exits_never_run_the_handlers_together`, red 6 of 6 before the fix in
+`debrief-ipc`, 20 of 20 in `paddock-ipc`; a first version of the probe registered only one handler and stayed green, because
+the second thread skips the held entry: the probe has to watch the entries after it).
+
+What the measurement said (`apps/debrief/docs/performance.md`, "Store worker exit"): with a thread held inside DuckDB, one exit
+route alone still crashed (22 of 100), so (a) is a cause on its own; a join in `main` with both exit routes kept crashed
+100 of 100, because the lifeline's `exit` runs the static destructors while `main` is still joining; both fixes together 0 of
+200 where the unfixed code crashed 12 of 100. Without the hook the unfixed worker did not crash in 107 natural runs, so the
+natural per-run rate could not be measured; the arms needed a hook that holds a thread inside a statement.
+
+What changed: both lifelines (`debrief-ipc` and `paddock-ipc`, rule 55) close the peer instead of calling `exit`, so `main`
+is the only exit (with a bounded fallback to `exit(0)` if the exit phase has not begun within the child's stop budget plus
+a margin); the worker's `main` stops and joins the store threads within `STOP_BUDGET` (interrupting their statements) and
+on overrun logs what it was waiting on and ends with `_exit`; Debrief's `KILL_GRACE` is the child's stop budget plus the
+margin (1.5 s, was 150 ms, which killed a worker that needed a few hundred ms).
+
+Lessons: (1) a test double for a race must watch the code that runs after the held point, not the held one; (2) a join does
+not protect a process that has a second route to `exit`; fix the route before the join; (3) when the natural rate is
+unmeasurable, hold the suspected cause in place with a hook and measure the arms against that, saying so in the record.
+Open: the two repaired routes are checked by the barrier test only on macOS (std's `unique_thread_exit` hides a second exit on
+Linux, and Windows' `ExitProcess` is a different mechanism); the shared `paddock_jobs::exit` phase (WP-X1) replaces the
+hand-made pieces.
+Class: a background thread in native code at process exit (CI 6734, CI 7837, instance 5 above).

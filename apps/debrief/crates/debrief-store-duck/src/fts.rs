@@ -553,7 +553,7 @@ pub struct FtsShared {
 pub struct FtsService {
     pub shared: Arc<FtsShared>,
     epoch: u64,
-    handle: Option<std::thread::JoinHandle<()>>,
+    handle: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 impl FtsService {
@@ -596,7 +596,7 @@ impl FtsService {
         Ok(FtsService {
             shared,
             epoch,
-            handle: Some(handle),
+            handle: Mutex::new(Some(handle)),
         })
     }
 
@@ -682,13 +682,33 @@ impl FtsService {
     }
 }
 
-impl Drop for FtsService {
-    fn drop(&mut self) {
+impl FtsService {
+    /// Whether the thread was joined (tests).
+    #[cfg(test)]
+    pub(crate) fn joined(&self) -> bool {
+        crate::lock(&self.handle).is_none()
+    }
+
+    /// Asks the thread to end, without waiting.
+    pub(crate) fn request_stop(&self) {
         self.shared.stop.store(true, Ordering::SeqCst);
         self.wake();
-        if let Some(h) = self.handle.take() {
+    }
+
+    /// Stops the thread and waits for it to end (idempotent; the caller bounds the wait, see [`crate::DuckStore::stop_for_exit`]).
+    pub(crate) fn stop(&self) {
+        self.shared.stop.store(true, Ordering::SeqCst);
+        self.wake();
+        let handle = crate::lock(&self.handle).take();
+        if let Some(h) = handle {
             let _ = h.join();
         }
+    }
+}
+
+impl Drop for FtsService {
+    fn drop(&mut self) {
+        self.stop();
     }
 }
 
@@ -1123,9 +1143,8 @@ mod tests {
             let f = store.inner.fts.as_ref().unwrap();
             f.shared.stop.store(true, Ordering::SeqCst);
             f.wake();
-            let handle = f.handle.as_ref().unwrap();
             let deadline = std::time::Instant::now() + Duration::from_secs(60);
-            while !handle.is_finished() {
+            while !crate::lock(&f.handle).as_ref().unwrap().is_finished() {
                 assert!(std::time::Instant::now() < deadline, "the indexing thread did not stop");
                 std::thread::yield_now();
             }

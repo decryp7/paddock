@@ -174,7 +174,7 @@ struct Shared {
 /// The catalogue thread of a store; stopped and joined on drop.
 pub(crate) struct CatalogueService {
     shared: Arc<Shared>,
-    handle: Option<std::thread::JoinHandle<()>>,
+    handle: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 impl CatalogueService {
@@ -211,7 +211,7 @@ impl CatalogueService {
         })?;
         Ok(CatalogueService {
             shared,
-            handle: Some(handle),
+            handle: Mutex::new(Some(handle)),
         })
     }
 
@@ -226,13 +226,33 @@ impl CatalogueService {
     }
 }
 
-impl Drop for CatalogueService {
-    fn drop(&mut self) {
+impl CatalogueService {
+    /// Whether the thread was joined (tests).
+    #[cfg(test)]
+    pub(crate) fn joined(&self) -> bool {
+        lock(&self.handle).is_none()
+    }
+
+    /// Asks the thread to end, without waiting.
+    pub(crate) fn request_stop(&self) {
         self.shared.stop.store(true, Ordering::SeqCst);
         self.wake();
-        if let Some(h) = self.handle.take() {
+    }
+
+    /// Stops the thread and waits for it to end (idempotent; the caller bounds the wait, see [`crate::DuckStore::stop_for_exit`]).
+    pub(crate) fn stop(&self) {
+        self.shared.stop.store(true, Ordering::SeqCst);
+        self.wake();
+        let handle = lock(&self.handle).take();
+        if let Some(h) = handle {
             let _ = h.join();
         }
+    }
+}
+
+impl Drop for CatalogueService {
+    fn drop(&mut self) {
+        self.stop();
     }
 }
 
@@ -437,6 +457,26 @@ mod tests {
     use debrief_core::ports::Ingest;
     use debrief_core::{PluginRegistry, Profile};
 
+    /// The store's own stop for the process's end (`DuckStore::stop_for_exit`, called by the store worker's `main`): both
+    /// background threads are stopped and joined before it returns, so none of them runs DuckDB code when the process
+    /// exits, and it says which thread it is waiting for (the caller names it if the bound runs out).
+    #[test]
+    fn stop_for_exit_joins_the_background_threads() {
+        let dir = debrief_ipc::testing::scratch_dir("stop-for-exit");
+        let store = crate::DuckStore::create(&dir, Profile::default_profile(), PluginRegistry::new()).unwrap();
+        let samples = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../samples/serilog-text");
+        store.open(&[samples]).unwrap().wait().unwrap();
+        let catalogue = store.inner.catalogue.as_ref().expect("a catalogue thread");
+        let fts = store.inner.fts.as_ref().expect("an indexing thread");
+        assert!(!catalogue.joined() && !fts.joined(), "both threads run");
+        let said = Mutex::new(Vec::new());
+        store.stop_for_exit(&|thread| lock(&said).push(thread));
+        assert_eq!(*lock(&said), ["debrief-catalogue", "debrief-fts"]);
+        assert!(catalogue.joined() && fts.joined(), "a background thread was not joined");
+        // Again is harmless (a store whose threads are gone).
+        store.stop_for_exit(&|_| {});
+    }
+
     /// Regression (CI 7837, `debrief-app` on macOS: SIGSEGV after the test's own "ok", on the `debrief-catalogue`
     /// thread in `settle` -> `CHECKPOINT`, the main thread in the exit handlers): the catalogue's checkpoint ran
     /// outside the statements the exit handler counts, so the handler did not wait for it, and it ran on while C++
@@ -479,7 +519,7 @@ mod tests {
         service.wake();
         assert!(
             paddock_testkit::poll_until_within(Duration::from_secs(60), || {
-                service.handle.as_ref().is_some_and(std::thread::JoinHandle::is_finished)
+                lock(&service.handle).as_ref().is_some_and(std::thread::JoinHandle::is_finished)
             }),
             "the catalogue thread did not end once exit began"
         );

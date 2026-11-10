@@ -792,3 +792,48 @@ group). One run:
 The differential tests gave back most of the first change's gain with the restored combinations, at a higher load than
 the "after" runs above; large_folder now runs beside everything else instead of in the group. The whole crate also passes
 with `DEBRIEF_TEST_APP_BUDGETS=1` (47.5 s without extra load).
+
+
+## Store worker exit: crashes over runs of its stop (2026-11-10, ADR 0076 exit-phase amendment, WP-X0)
+
+Rule 48 block. The store worker crashed in DuckDB at exit (21 crash reports on the development Mac, 2026-11-05 to 2026-11-10).
+Two causes were candidates (ER-28): (a) a native thread of the worker still inside DuckDB while C++ destroys its statics,
+(b) two threads in `exit` at once (the lifeline thread's `std::process::exit` and `main` returning). Each run starts a real
+worker (`debrief-store-worker`), imports the samples (the repository's invented samples), and stops it the way Debrief does
+(`StoreWorker::shutdown`, which closes the connection and then stdin) the moment the import is over, while the indexer and
+the names catalogue work. How the worker ended is read with `waitid` (`WNOWAIT`). The harness is
+`crates/debrief-store-worker/tests/it/exit_measure.rs` (`DEBRIEF_EXIT_RUNS`, `_PAR`, `_BUSY`, `_COPIES`, `_ARM`;
+`cargo test -p debrief-store-worker --test it measure_the_workers_exit -- --ignored --nocapture`).
+
+Setup: Mac mini (14 cores, macOS, Darwin 27.2), debug build, libduckdb 2.0.0, two runs at once (`DEBRIEF_EXIT_PAR=2`), on a
+machine also busy with other agents (5-minute load 16 to 25 during the runs; `DEBRIEF_EXIT_BUSY` busy threads where noted).
+"Crashed" is any signal but SIGKILL or a non-zero exit status; `parent_killed` (SIGKILL by the parent after its grace) was 0
+in every run. Every run's line is `EXIT-MEASURE arm=... ended=...`; SIGSEGV (11) was the only crash seen.
+
+The natural runs never crashed, so the per-run rate `p` is not measurable that way, and the arms need a hook that holds a
+thread inside DuckDB when `main` returns: **the hook** (a temporary edit of the catalogue thread, never committed) keeps it
+running `SELECT i FROM range(1)` (a statement that fails in the binder, which formats an error with identifiers: the
+keyword-table path of 17 of the 21 reports) in a loop, outside the exit handler's count, until its stop flag is set. Every
+arm below `H2` has it.
+
+| arm | what runs | runs | crashed (SIGSEGV) |
+|---|---|---|---|
+| 0 natural (no fix, no hook) | the code before this change | 12 + 20 (8 copies) | 0 of 32 |
+| 0 long statement (no fix; a 30-billion-row aggregate, interrupted at exit) | the code before this change | 75 | 0 of 75 |
+| **0 H2** (no fix, hook) | the code before this change | 100 | **12 of 100** (p about 0.12; a first 20 gave 2) |
+| **1 H2**: one exit route only | the lifeline closes the peer; `main` is the only exit; the catalogue is **not** joined | 100 | **22 of 100** |
+| **2 H2**: the join only | the join runs in `main`, **both** exits kept (the lifeline still calls `exit`) | 100 | **100 of 100** |
+| **fix H2** | both fixes (one exit route, the bounded join), hook | 200 (`BUSY=2`) | **0 of 200** |
+| fix natural | both fixes, no hook | 100 (2 copies, `BUSY=2`) | 0 of 100 |
+
+Reading: arm 1 crashes without any second exit route, so (a), a live native thread during static destruction, is a
+cause on its own. Arm 2 crashes every time: with both exits kept, the lifeline's `exit` starts the static destructors while
+`main` is still joining, so a join in `main` alone protects nothing; this arm does not show that (b) alone crashes, since
+(a) is present in it until the join ends. Both fixes together: 0 of 200, where `p` was about 0.12 (the chance of 0 of 200 at
+that rate is about 1e-11); the recommended count of about 3/p is 25. The post-fix run was 8 times that. With the hook,
+arm 0 and arm 1 differ (12 and 22 of 100) by more than their separate noise suggests but were run at different loads; no
+claim is made about the relative size.
+
+Not measured: the natural per-run rate (the 21 reports came from long-lived workers with big stores; the harness stops a worker
+seconds after an import of a few MB), the hook's catalogue loop is a model of the thread the crash reports show, not the
+catalogue's own statements; Linux and Windows (a native arm64 Linux run of the new tests: see the commit's report).

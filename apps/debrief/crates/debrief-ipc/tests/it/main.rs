@@ -3,5 +3,6 @@
 
 mod child_log;
 mod endpoint_exit;
+mod exit_once;
 mod launch;
 mod properties;

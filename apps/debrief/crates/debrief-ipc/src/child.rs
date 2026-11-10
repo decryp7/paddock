@@ -6,7 +6,9 @@
 //! 3. locks itself down ([`crate::sandbox::lockdown`]) before it handles anything;
 //! 4. answers the host's calls with its handler until the connection closes, then returns (the process exits).
 //!
-//! A child also exits when its stdin closes (the host died); nothing is left behind.
+//! A child also ends when its stdin closes (the host died); nothing is left behind. It ends through **one** exit: the
+//! [`lifeline`] closes the connection, `main` returns and is the only `exit` (Rust guards two `exit`s only on Linux; on
+//! macOS two threads ran the `atexit` handlers and DuckDB's static destructors together, and the store worker crashed).
 
 use crate::elevation::{take_bootstrap, BOOTSTRAP_FLAG};
 use crate::frame::ProtocolVersion;
@@ -14,7 +16,50 @@ use crate::launch::Bootstrap;
 use crate::link::Token;
 use crate::peer::{Handler, Peer, PeerOptions};
 use std::io::{self, BufRead, Read};
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
+
+/// What a child's exit phase may take once its host is gone or stops it: the child's own stop budget. The parent waits at
+/// least this plus [`STOP_MARGIN`] before it kills the child (`process::KILL_GRACE`), so a child that stops within its
+/// budget is never killed in the middle of it.
+pub const STOP_BUDGET: Duration = Duration::from_millis(1250);
+
+/// Covers the parent's kill and reap, and a child's last log lines, on top of [`STOP_BUDGET`].
+pub const STOP_MARGIN: Duration = Duration::from_millis(250);
+
+/// Whether the child's exit phase has begun (its `main` is past the connection), and the wait for it.
+struct Phase {
+    begun: Mutex<bool>,
+    wake: Condvar,
+}
+
+static PHASE: Phase = Phase {
+    begun: Mutex::new(false),
+    wake: Condvar::new(),
+};
+
+impl Phase {
+    fn begin(&self) {
+        *self.begun.lock().unwrap_or_else(|p| p.into_inner()) = true;
+        self.wake.notify_all();
+    }
+
+    /// Waits at most `max` for the phase to begin; whether it has.
+    fn wait_begun(&self, max: Duration) -> bool {
+        let g = self.begun.lock().unwrap_or_else(|p| p.into_inner());
+        self.wake
+            .wait_timeout_while(g, max, |begun| !*begun)
+            .map(|(g, _)| *g)
+            .unwrap_or_else(|p| *p.into_inner().0)
+    }
+}
+
+/// Says that this child's exit phase has begun: its `main` is past the connection and ends the process itself. A child
+/// whose `main` calls [`child_main`] never calls this (it does); one that serves by [`connect_speaking`] and
+/// [`lifeline_closing`] calls it when its own `wait_closed` returns.
+pub fn exit_phase_begun() {
+    PHASE.begin();
+}
 
 /// Largest bootstrap line read from stdin.
 const MAX_BOOTSTRAP: u64 = 64 * 1024;
@@ -64,21 +109,79 @@ pub fn child_main_then(
     connected(&bootstrap, &peer);
     if elevated.is_none() {
         // Started after the lockdown, like every thread of a child (see `connect_and_lock_down`).
-        lifeline();
+        lifeline_closing(&peer);
     }
     peer.wait_closed(None);
+    exit_phase_begun();
     Ok(())
 }
 
-/// The lifeline: when the host closes stdin (or dies), exit at once.
+/// The lifeline of a child that has no connection yet (or none to close): when the host closes stdin (or dies), exit at
+/// once. Once the peer is up use [`lifeline_closing`]: two threads in `exit` crashed the store worker.
 pub fn lifeline() {
     std::thread::spawn(|| {
-        let mut sink = [0u8; 256];
-        while matches!(io::stdin().read(&mut sink), Ok(n) if n > 0) {}
+        wait_stdin_closed(io::stdin());
         // `exit` runs no destructors: remove the endpoints of children this process was still starting.
         crate::endpoint::remove_live();
         std::process::exit(0);
     });
+}
+
+/// The lifeline of a child whose connection is up: when the host closes stdin (or dies) it **closes the connection**, so
+/// the child's `main` (past `wait_closed`) is the only exit. If the exit phase has not begun within
+/// [`STOP_BUDGET`] plus [`STOP_MARGIN`] (a `main` that hangs would keep the store's database lock), it ends the
+/// process itself. Call [`exit_phase_begun`] from a `main` that does not go through [`child_main`].
+pub fn lifeline_closing(peer: &Peer) {
+    let peer = peer.clone();
+    std::thread::spawn(move || {
+        wait_stdin_closed(io::stdin());
+        close_then_end(&peer, &PHASE, STOP_BUDGET + STOP_MARGIN, || {
+            eprintln!(
+                "the exit phase did not begin within {} ms of the host going away; ending the process (exit code 0)",
+                (STOP_BUDGET + STOP_MARGIN).as_millis()
+            );
+            // `exit` runs no destructors: remove the endpoints of children this process was still starting.
+            crate::endpoint::remove_live();
+            std::process::exit(0);
+        });
+    });
+}
+
+/// Ends this process at once without running `atexit` handlers or static destructors (`_exit`, `TerminateProcess` on
+/// itself): for a child whose exit phase overran, where running the C++ static destructors under a thread still inside
+/// native code is what crashed the store worker. Stdio is not flushed: the caller logs first.
+pub fn end_without_destructors(code: i32) -> ! {
+    #[cfg(unix)]
+    // SAFETY: `_exit` takes no pointers and never returns.
+    unsafe {
+        libc::_exit(code)
+    }
+    #[cfg(windows)]
+    {
+        use windows::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
+        // SAFETY: the pseudo-handle of this process; `TerminateProcess` notifies no DLL, so no detach code can wait on a
+        // thread that was cut short.
+        unsafe {
+            // conformance: pid-kill — this process itself (`GetCurrentProcess`), not a pid read earlier
+            let _ = TerminateProcess(GetCurrentProcess(), code as u32);
+        }
+        std::process::abort()
+    }
+}
+
+fn wait_stdin_closed(mut stdin: impl Read) {
+    let mut sink = [0u8; 256];
+    while matches!(stdin.read(&mut sink), Ok(n) if n > 0) {}
+}
+
+/// Closes `peer`, then waits at most `wait` for `phase` to begin; `fallback` runs when it does not.
+fn close_then_end(peer: &Peer, phase: &Phase, wait: Duration, fallback: impl FnOnce()) {
+    // Endpoints of children this process was still starting: `main`'s exit runs no destructors for them either.
+    crate::endpoint::remove_live();
+    peer.close();
+    if !phase.wait_begun(wait) {
+        fallback();
+    }
 }
 
 /// Steps 2–4 of [`child_main`]: connect, lock down, serve. Returns the running peer.
@@ -168,6 +271,51 @@ fn lock_down(bootstrap: &Bootstrap, elevated: bool) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn a_peer() -> Peer {
+        let (x, _y) = tokio::io::duplex(1 << 16);
+        let rt = crate::runtime::shared().unwrap();
+        Peer::start(x, Arc::new(crate::peer::NoCalls), PeerOptions::new("test"), rt.handle())
+    }
+
+    #[test]
+    fn the_lifeline_closes_the_peer_and_leaves_the_exit_to_main_once_the_phase_begins() {
+        let peer = a_peer();
+        let phase = Arc::new(Phase {
+            begun: Mutex::new(false),
+            wake: Condvar::new(),
+        });
+        let ended = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let t = {
+            let (peer, phase, ended) = (peer.clone(), phase.clone(), ended.clone());
+            std::thread::spawn(move || {
+                close_then_end(&peer, &phase, Duration::from_secs(30), || {
+                    ended.store(true, std::sync::atomic::Ordering::SeqCst)
+                })
+            })
+        };
+        // `main` sees the connection close and begins the phase.
+        assert!(peer.wait_closed(Some(Duration::from_secs(10))));
+        phase.begin();
+        t.join().unwrap();
+        assert!(
+            !ended.load(std::sync::atomic::Ordering::SeqCst),
+            "the lifeline left the exit to main"
+        );
+    }
+
+    #[test]
+    fn the_lifeline_ends_the_process_itself_when_the_phase_never_begins() {
+        let peer = a_peer();
+        let phase = Phase {
+            begun: Mutex::new(false),
+            wake: Condvar::new(),
+        };
+        let mut ended = false;
+        close_then_end(&peer, &phase, Duration::from_millis(50), || ended = true);
+        assert!(peer.is_closed(), "it closed the peer first");
+        assert!(ended, "after the bound it falls back to ending the process");
+    }
 
     #[test]
     fn the_bootstrap_comes_from_stdin_or_a_named_file() {
