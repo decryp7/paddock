@@ -426,6 +426,15 @@ mod tests {
         assert!(a.starts_with(&format!("{PREFIX}{me}-7-")) && a != session_name(PREFIX, 7));
     }
 
+    /// Windows controls for the look at a session's owner: this process runs, a pid nobody holds is gone, and the System
+    /// process (pid 4, which refuses the open) is never gone.
+    #[test]
+    fn the_owner_look_tells_running_gone_and_refused_apart() {
+        assert_eq!(owner_of(std::process::id()), Owner::Running);
+        assert_eq!(owner_of(u32::MAX - 1), Owner::Gone);
+        assert_ne!(owner_of(4), Owner::Gone, "a refused look is not a gone process");
+    }
+
     #[test]
     fn properties_hold_the_logger_name_and_kernel_flags() {
         let mut p = Properties::new();
