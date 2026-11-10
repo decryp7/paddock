@@ -2,6 +2,7 @@ import { Component, input } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import type { CommandError } from '../core/api.types';
 import { AsyncState } from './async-state';
+import { expectNameAllowed } from '../../testing/aria-name';
 import { provideIcons } from './icons';
 
 @Component({
@@ -40,6 +41,7 @@ describe('AsyncState', () => {
     const { el } = mount({ rows: 4 });
     const wrap = el.querySelector('.skeleton-wrap')!;
     expect(wrap.getAttribute('aria-busy')).toBe('true');
+    expectNameAllowed(wrap);
     expect(wrap.getAttribute('aria-label')).toBe('Loading widgets');
     expect(el.querySelectorAll('.skeleton')).toHaveLength(4);
     expect(el.querySelector('.content')).toBeNull();

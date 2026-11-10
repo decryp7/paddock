@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { afterEach, vi } from 'vitest';
-import { all, buttonByText, el, settle, text, typeInto } from '../../../testing/helpers';
+import { all, buttonByText, el, settle, text, typeInto, settleUntil } from '../../../testing/helpers';
 import { HeapObjectsPage, HeapPaths, HeapTypesPage } from '../../core/api.types';
 import { MockProfilingBackend, MockProfilingOptions } from '../../core/mock/mock-profiling';
 import { CapturesStore } from '../captures.store';
@@ -607,16 +607,16 @@ describe('HeapView', () => {
 
     it('shows the loading line of children while they load', async () => {
       const { fixture, spies, orig } = await mount();
-      let release: () => void = () => undefined;
+      let release: (() => void) | undefined;
       spies.dominators.mockImplementation(async (r) => {
         if (r.parent !== null && r.parent !== undefined) await new Promise<void>((res) => (release = res));
         return orig.dominators(r);
       });
       const index = await openFirstParent(fixture);
       at(rowsOf(fixture), index).querySelector<HTMLElement>('.tw')!.click();
-      await settle(fixture, 3);
+      await settleUntil(fixture, () => expect(release).toBeTypeOf('function'));
       expect(el(fixture, '.pad').textContent).toMatch(/^Loading children of @\d+…$/);
-      release();
+      release!();
       await settle(fixture, 4);
       expect(fixture.nativeElement.querySelector('.pad')).toBeNull();
     });

@@ -96,14 +96,29 @@ test('the download shows a determinate Material progress bar, and an indetermina
   await expect(dialog.getByTestId('updates-phase')).toContainText('downloaded and its signature verified');
 });
 
-test('a build without an update key says updates are not available, with only Open releases page and Close', async ({ app, page }) => {
-  await app.dialogs.openWindow('pd.updates', {}, { query: '?updates=unavailable' });
-  await expect(page.getByTestId('updates-phase')).toHaveText('Updates are not available in this build.');
-  await expect(page.getByText('without an update signing key')).toBeVisible();
-  // The actions are the window frame's footer, outside the dialog's own element: Close, then the primary.
-  await expect(page.getByRole('main', { name: 'pd.updates' }).getByRole('button')).toHaveText(['Close', 'Open releases page']);
-  expect(await axeViolations(page, { idsOnly: true })).toEqual([]);
-});
+// The footer order is the platform's (layoutActions in shell/dialogs/src/actions.ts): macOS and Linux put the primary last, Windows first.
+// The page reads its platform from `data-platform` on <html>, else from navigator.platform plus the user agent, and Playwright's Desktop Chrome
+// user agent says "Windows" even on a Linux runner, so the platform is declared here instead of left to the host the test runs on.
+for (const [platform, order] of [
+  ['macos', ['Close', 'Open releases page']],
+  ['linux', ['Close', 'Open releases page']],
+  ['windows', ['Open releases page', 'Close']],
+] as const) {
+  test(`a build without an update key says updates are not available, with only Open releases page and Close (${platform} order)`, async ({ app, page }) => {
+    // An init script runs before <html> exists: set the attribute the moment the element is added, before the app's scripts run.
+    await page.addInitScript((p) => {
+      const set = () => document.documentElement?.setAttribute('data-platform', p);
+      set();
+      new MutationObserver(set).observe(document, { childList: true });
+    }, platform);
+    await app.dialogs.openWindow('pd.updates', {}, { query: '?updates=unavailable' });
+    await expect(page.getByTestId('updates-phase')).toHaveText('Updates are not available in this build.');
+    await expect(page.getByText('without an update signing key')).toBeVisible();
+    // The actions are the window frame's footer, outside the dialog's own element.
+    await expect(page.getByRole('main', { name: 'pd.updates' }).getByRole('button')).toHaveText(order);
+    expect(await axeViolations(page, { idsOnly: true })).toEqual([]);
+  });
+}
 
 /** The engine's updater status (`updates_status`) with `phase`, as `paddock-updater` reports it. */
 const PER_USER = { scope: 'perUser', installOnQuitAvailable: true, administratorNotice: null };

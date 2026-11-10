@@ -16,13 +16,18 @@ fn line(file: usize, n: usize) -> String {
     format!("2026-10-14 10:00:00 INFO file{file} line{n}\n")
 }
 
+/// Lines of the one big file in `tree`.
+const BIG_LINES: usize = 5_000;
+
 fn tree(root: &Path, files: usize) {
     for i in 0..files {
         let dir = root.join(format!("d{}/e{}", i % 7, (i / 7) % 5));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(format!("f{i:03}.log")), (0..4).map(|n| line(i, n)).collect::<String>()).unwrap();
     }
-    std::fs::write(root.join("zz-big.log"), (0..30_000).map(|n| line(9999, n)).collect::<String>()).unwrap();
+    // Past two of the parser's chunks (debrief_core::stages::DEFAULT_CHUNK, 2048 records), so a file split across chunks is
+    // ordered too; every event is compared (observed).
+    std::fs::write(root.join("zz-big.log"), (0..BIG_LINES).map(|n| line(9999, n)).collect::<String>()).unwrap();
     for i in 0..2 {
         let f = std::fs::File::create(root.join(format!("arch{i}.zip"))).unwrap();
         let mut z = zip::ZipWriter::new(f);
@@ -38,7 +43,7 @@ fn tree(root: &Path, files: usize) {
 fn store(dir: &TempDir, threads: usize) -> DuckStore {
     let opts = StoreOptions {
         parse_threads: threads,
-        ..StoreOptions::default()
+        ..common::test_options()
     };
     DuckStore::create_with(&dir.0, Profile::default_profile(), PluginRegistry::new(), opts).unwrap()
 }
@@ -71,9 +76,10 @@ fn observed(s: &DuckStore, root: &Path) -> Observed {
         })
         .unwrap();
     let total = page.total;
+    assert!(total < 20_000, "{total} events: observed reads every one");
     let mut events = Vec::new();
     let mut offset = 0;
-    while offset < total.min(2_000) {
+    while offset < total {
         let page = s
             .page(&debrief_core::ports::PageQuery {
                 query: QueryDef::default(),
@@ -91,10 +97,14 @@ fn observed(s: &DuckStore, root: &Path) -> Observed {
 
 #[test]
 fn ids_positions_and_results_do_not_depend_on_workers_or_arrival_order() {
+    // Each run imports the folder into a new store, at about 30 ms per file with one worker (measured locally). 24 small
+    // files (in 7 x 4 folders), two zips and a big file keep the order property with 40% of the files that took the test
+    // past 90 s on a loaded Mac runner (CI 7825). One worker is the reference; then 2 and 16 workers in file order, and
+    // three arrival orders (jitter seeds) at 2, 3 and 16 workers.
     let data = TempDir::new("stream-data");
-    tree(&data.0, 60);
+    tree(&data.0, 24);
     let mut runs = Vec::new();
-    for (threads, jitter) in [(1, 0), (2, 0), (8, 0), (16, 0), (8, 1), (8, 7), (3, 99), (16, 12345)] {
+    for (threads, jitter) in [(1, 0), (2, 0), (16, 0), (2, 7), (3, 99), (16, 12345)] {
         let dir = TempDir::new("stream-store");
         let s = store(&dir, threads);
         s.set_import_jitter(jitter);
@@ -102,7 +112,8 @@ fn ids_positions_and_results_do_not_depend_on_workers_or_arrival_order() {
         runs.push(((threads, jitter), observed(&s, &data.0)));
     }
     let (first_label, first) = &runs[0];
-    assert!(first.0.len() > 60 + 6, "{} sources", first.0.len());
+    assert!(first.0.len() > 24 + 6, "{} sources", first.0.len());
+    assert_eq!(first.1.len(), 24 * 4 + 2 * 3 * 3 + BIG_LINES, "every event is compared");
     // Ids follow the sorted order of the paths, without gaps.
     let by_path: Vec<_> = first.0.iter().map(|x| x.1.clone()).collect();
     assert_eq!(

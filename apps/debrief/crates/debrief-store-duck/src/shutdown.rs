@@ -42,6 +42,18 @@ pub(crate) fn interrupt_on_exit(conn: &duckdb::Connection) {
 /// One borrowed connection that may run a statement; dropping it lets the exit handler go on.
 pub(crate) struct Active(());
 
+#[cfg(test)]
+thread_local! {
+    /// How many [`Active`] guards the current thread holds (tests check that a statement runs under one).
+    static HELD: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Whether the current thread holds an [`Active`] guard, so the exit handler would wait for its statement.
+#[cfg(test)]
+pub(crate) fn held_here() -> bool {
+    HELD.with(|h| h.get() > 0)
+}
+
 impl Active {
     /// `None` once the process is shutting down: no new statement may start.
     pub(crate) fn enter() -> Option<Active> {
@@ -54,14 +66,24 @@ impl Active {
             ACTIVE.fetch_sub(1, Ordering::SeqCst);
             return None;
         }
+        #[cfg(test)]
+        HELD.with(|h| h.set(h.get() + 1));
         Some(Active(()))
     }
 }
 
 impl Drop for Active {
     fn drop(&mut self) {
+        #[cfg(test)]
+        HELD.with(|h| h.set(h.get() - 1));
         ACTIVE.fetch_sub(1, Ordering::SeqCst);
     }
+}
+
+/// Runs the exit handler now, as `exit()` would (tests, in a child process of their own: it cannot be undone).
+#[cfg(test)]
+pub(crate) fn begin_exit() {
+    at_exit();
 }
 
 extern "C" fn at_exit() {

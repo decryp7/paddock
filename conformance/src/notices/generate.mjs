@@ -3,7 +3,7 @@
 // deterministic (sorted, no paths, no dates), so the output can be compared in CI (`--check`).
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { dirname, join, relative, sep } from 'node:path';
+import { dirname, join, posix, relative, sep } from 'node:path';
 import { allowedFor, EXCEPTIONS } from './licences.mjs';
 
 const LICENCE_FILE = /^(licen[cs]e|licen[cs]ing|copying|notice|unlicense)([-_.].*)?$/i;
@@ -119,14 +119,28 @@ export function npmPackages(appDir) {
   return { packages, warnings };
 }
 
-/** Rust crates from cargo-about JSON documents (workspace crates are the app itself and are skipped): { packages, warnings }. */
-export function rustCrates(documents) {
+/**
+ * True for a path crate that is a patched copy of someone else's crate in the app's own `vendor/` folder (`[patch.crates-io]`):
+ * it ships under its own licence like any registry crate. Other path crates (the app's and the shared Paddock crates) are ours.
+ * The test is on the path relative to the app folder, so a checkout that itself lies under a folder named vendor changes nothing.
+ */
+export function isVendored(manifestPath, appDir) {
+  if (!manifestPath || !appDir) return false;
+  const slash = (p) => p.replaceAll('\\', '/');
+  return posix.relative(slash(appDir), slash(manifestPath)).startsWith('vendor/');
+}
+
+/**
+ * Rust crates from cargo-about JSON documents: { packages, warnings }. Path crates are the app itself and are skipped, except
+ * the vendored copies under `appDir` (the folder of the app's paddock.ci.json).
+ */
+export function rustCrates(documents, appDir) {
   const crates = new Map();
   const warnings = [];
   for (const j of documents) {
     for (const c of j.crates ?? []) {
       const p = c.package;
-      if (!p.source) continue;
+      if (!p.source && !isVendored(p.manifest_path, appDir)) continue;
       const key = `${p.name} ${p.version}`;
       if (!crates.has(key)) crates.set(key, { kind: 'rust', name: p.name, version: p.version, license: c.license || 'UNKNOWN', texts: [], spdx: spdxIds(c.license || '') });
     }

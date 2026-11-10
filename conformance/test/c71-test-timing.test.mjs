@@ -167,3 +167,11 @@ test('C71 shrinkBaseline keeps the matching entries with their current lines and
   const kept = shrinkBaseline(sites, entries);
   assert.deepEqual(kept, [{ file: 'a.ts', line: 30, hash: lineHash('await sleep(5);') }], 'a copy and a new file are not added; stale ones go');
 });
+
+test('C71 leaves vendored third-party code to its own upstream (a vendor/ folder)', async () => {
+  const sleepy = '#[cfg(test)]\nmod t {\n    #[test]\n    fn a() {\n        std::thread::sleep(std::time::Duration::from_secs(1));\n    }\n}\n';
+  const files = { 'paddock.conformance.json': JSON.stringify({ app: 'demo', timingLint: true }), 'apps/x/vendor/dep/src/system.rs': sleepy };
+  assert.deepEqual(await findingsOf('C71', makeApp(files), { options: firstIntroduction }), []);
+  const own = await findingsOf('C71', makeApp({ ...files, 'crates/x/src/vendor/a.rs': sleepy }), { options: firstIntroduction });
+  assert.deepEqual(own.map((x) => x.file), ['crates/x/src/vendor/a.rs'], 'a first-party folder named vendor is still checked');
+});

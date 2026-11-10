@@ -4,6 +4,7 @@ import { renderFramed } from '@decryp7/paddock-ui/shell/testing';
 import { BACKEND } from '../../core/backend';
 import type { MockBackend } from '../../core/mock-backend';
 import { jobsProviders, mockWithJobs } from '../../../testing/job-test-support';
+import { expectNameAllowed } from '../../../testing/aria-name';
 import { provideIcons } from '../../shared/icons';
 import { HashSearchDialog } from './hash-search-dialog';
 import { Lookups } from './lookups';
@@ -72,6 +73,31 @@ describe('WebSearchDialog', () => {
     expect(field(d)).toBeNull();
     expect(d.el.querySelector('[role=alert]')).not.toBeNull();
     expect(d.action('search')!.disabled).toBe(true);
+  });
+});
+
+describe('loading skeletons name themselves through a role that allows a name', () => {
+  // axe aria-prohibited-attr: a plain div must not carry aria-label; a status region may.
+  // The backend call never answers, so the dialog stays in its loading state; `open` would wait for it, so watch the page.
+  const loading = async (component: Parameters<typeof renderFramed>[0], inputs: Record<string, unknown>, kind: 'form' | 'viewer', stall: 'searchSeed' | 'startJob') => {
+    const backend = mock();
+    (vi.spyOn(backend, stall) as unknown as { mockReturnValue(v: Promise<never>): void }).mockReturnValue(new Promise<never>(() => {}));
+    void open(component, inputs, backend, kind);
+    await vi.waitFor(() => expect(document.body.querySelector('.skeleton')).not.toBeNull());
+    const sk = document.body.querySelector<HTMLElement>('.skeleton');
+    expectNameAllowed(sk);
+    if (!sk!.closest('[aria-hidden="true"]')) expect(sk!.getAttribute('aria-busy')).toBe('true');
+  };
+  it('the web search dialog while it prepares the text', async () => {
+    await loading(WebSearchDialog, { text: 'x', subject: 'x' }, 'form', 'searchSeed');
+  });
+  it('the hash dialog while it reads the file', async () => {
+    await loading(HashSearchDialog, { source: { path: '/a/b' }, name: 'b' }, 'viewer', 'startJob');
+    // The visible line is the one announcement; the bar is decoration.
+    expect(document.body.querySelector('.skeleton')!.closest('[aria-hidden="true"]')).not.toBeNull();
+    const wait = document.body.querySelector('p.wait')!;
+    expect(wait.getAttribute('role')).toBe('status');
+    expect(wait.textContent).toContain('Reading the file');
   });
 });
 

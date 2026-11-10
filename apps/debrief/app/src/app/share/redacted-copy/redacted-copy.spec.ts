@@ -8,7 +8,7 @@ import { Platform } from '../../core/platform';
 import { ProjectService } from '../../projects/project.service';
 import { DialogService, DIALOG_REF } from '../../ui/dialog.service';
 import { OverwriteGuard } from '../../ui/overwrite-guard';
-import { all, el, provideTinyBackend, settle, tinyBackend, tinyDataset } from '../../../testing/helpers';
+import { all, el, provideTinyBackend, settle, tinyBackend, tinyDataset, settleUntil } from '../../../testing/helpers';
 import { provideToolsTesting } from '../../tools/mock/test-support';
 import { MockShareBackend } from '../mock/mock-share-backend';
 import { ShareBackend, TauriShareBackend } from '../share-backend';
@@ -266,7 +266,7 @@ describe('RedactedCopyDialog', () => {
     let done!: (r: RedactedExport) => void;
     const { fixture } = await setup({ export: vi.fn(() => new Promise<RedactedExport>((r) => (done = r))) });
     createBtn(fixture).click();
-    await settle(fixture);
+    await settleUntil(fixture, () => expect(done).toBeTypeOf('function'));
     expect(createBtn(fixture).disabled).toBe(true);
     expect(createBtn(fixture).textContent).toContain('Creating the copy');
     done(RESULT);

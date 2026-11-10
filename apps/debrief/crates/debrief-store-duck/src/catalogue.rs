@@ -163,6 +163,12 @@ struct Shared {
     unsaved: AtomicBool,
     /// The store's lock of heavy DuckDB work (`Inner::heavy`).
     heavy: Arc<Mutex<()>>,
+    /// Checkpoints run under / outside an [`crate::shutdown::Active`] guard (tests: the exit handler must count each).
+    #[cfg(test)]
+    checkpoints: (AtomicU64, AtomicU64),
+    /// Whether the thread dropped its connection after the process began to exit (tests).
+    #[cfg(test)]
+    dropped_while_exiting: AtomicBool,
 }
 
 /// The catalogue thread of a store; stopped and joined on drop.
@@ -180,12 +186,29 @@ impl CatalogueService {
             failed: Mutex::new(HashSet::new()),
             unsaved: AtomicBool::new(false),
             heavy,
+            #[cfg(test)]
+            checkpoints: (AtomicU64::new(0), AtomicU64::new(0)),
+            #[cfg(test)]
+            dropped_while_exiting: AtomicBool::new(false),
         });
         crate::shutdown::interrupt_on_exit(&conn);
         let s = shared.clone();
-        let handle = std::thread::Builder::new()
-            .name("debrief-catalogue".into())
-            .spawn(move || run(&s, &conn, &write_lock))?;
+        let handle = std::thread::Builder::new().name("debrief-catalogue".into()).spawn(move || {
+            run(&s, &conn, &write_lock);
+            if crate::shutdown::down() {
+                // `run` returns at exit too. Dropping the connection then would call duckdb_disconnect (and
+                // duckdb_close for the last handle of the database) while C++ destroys DuckDB's statics: the crash
+                // the exit handler exists to prevent. The process is exiting, so the OS reclaims what is leaked here.
+                std::mem::forget(conn);
+                return;
+            }
+            // A drop that still meets an exit begun since the check above (tests record it).
+            #[cfg(test)]
+            if crate::shutdown::down() {
+                s.dropped_while_exiting.store(true, Ordering::SeqCst);
+            }
+            drop(conn);
+        })?;
         Ok(CatalogueService {
             shared,
             handle: Some(handle),
@@ -213,12 +236,8 @@ impl Drop for CatalogueService {
     }
 }
 
-/// One turn: tidy, then build the next source.
-fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<Turn> {
-    // Counted by the exit handler like a borrowed connection (see `fts::step`).
-    let Some(_running) = crate::shutdown::Active::enter() else {
-        return Ok(Turn::Idle);
-    };
+/// One turn: tidy, then build the next source. `_running` proves the exit handler counts its statements.
+fn step(_running: &crate::shutdown::Active, s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<Turn> {
     let todo = {
         let Ok(_writing) = write_lock.try_lock() else {
             return Ok(Turn::Blocked);
@@ -258,7 +277,13 @@ fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<Turn> {
 
 fn run(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) {
     while !s.stop.load(Ordering::SeqCst) {
-        let turn = match step(s, conn, write_lock) {
+        // Every statement of a turn (the step and the checkpoint after it) runs under one guard the exit handler counts
+        // (see `fts::step`): a checkpoint outside it ran on while C++ destroyed DuckDB's statics at exit and crashed
+        // the process with SIGSEGV (CI 7837). None once the process is exiting: the thread ends, no statement may start.
+        let Some(running) = crate::shutdown::Active::enter() else {
+            return;
+        };
+        let turn = match step(&running, s, conn, write_lock) {
             Ok(t) => t,
             Err(e) => {
                 log::warn!("catalogue: {e:#}");
@@ -266,9 +291,11 @@ fn run(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) {
             }
         };
         let Some(wait) = wait_after(turn) else { continue };
-        if s.unsaved.load(Ordering::SeqCst) && settle(conn, write_lock) {
+        if s.unsaved.load(Ordering::SeqCst) && settle(&running, s, conn, write_lock) {
             s.unsaved.store(false, Ordering::SeqCst);
         }
+        // Not held while waiting: the exit handler waits for statements, never for an idle thread.
+        drop(running);
         let mut woken = lock(&s.wake.0);
         if !*woken {
             woken = s.wake.1.wait_timeout(woken, wait).map(|r| r.0).unwrap_or_else(|p| p.into_inner().0);
@@ -281,9 +308,21 @@ fn run(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) {
 /// the database file, then the run's freed pages go back to the OS. Without it a worker that had catalogued 20 copies
 /// of the samples idled at about 440 MB (130 MB once reopened), DuckDB holding 145 MB of the uncheckpointed rows
 /// (docs/performance.md, 2026-10-31).
-/// False when an import holds the write lock (it checkpoints when it ends; the next idle turn tries again).
-fn settle(conn: &Connection, write_lock: &Mutex<()>) -> bool {
+/// False when an import holds the write lock (it checkpoints when it ends; the next idle turn tries again), or when the
+/// process is exiting (no new statement; `_running` keeps the exit handler waiting for one already running).
+#[cfg_attr(not(test), allow(unused_variables))] // `s` only records the checkpoints for the tests
+fn settle(_running: &crate::shutdown::Active, s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> bool {
     let Ok(_writing) = write_lock.try_lock() else { return false };
+    if crate::shutdown::down() {
+        return false;
+    }
+    #[cfg(test)]
+    if crate::shutdown::held_here() {
+        &s.checkpoints.0
+    } else {
+        &s.checkpoints.1
+    }
+    .fetch_add(1, Ordering::SeqCst);
     if let Err(e) = conn.execute_batch("CHECKPOINT") {
         log::warn!("catalogue: checkpoint failed: {e}");
     }
@@ -389,5 +428,94 @@ impl crate::DuckStore {
             }
             std::thread::sleep(Duration::from_millis(20));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use debrief_core::ports::Ingest;
+    use debrief_core::{PluginRegistry, Profile};
+
+    /// Regression (CI 7837, `debrief-app` on macOS: SIGSEGV after the test's own "ok", on the `debrief-catalogue`
+    /// thread in `settle` -> `CHECKPOINT`, the main thread in the exit handlers): the catalogue's checkpoint ran
+    /// outside the statements the exit handler counts, so the handler did not wait for it, and it ran on while C++
+    /// destroyed DuckDB's statics (and the test helpers removed the store's folder).
+    #[test]
+    fn the_exit_handler_waits_for_the_catalogue_checkpoint() {
+        let dir = debrief_ipc::testing::scratch_dir("catalogue-checkpoint-exit");
+        let store = crate::DuckStore::create(&dir, Profile::default_profile(), PluginRegistry::new()).unwrap();
+        let samples = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../samples/serilog-text");
+        store.open(&[samples]).unwrap().wait().unwrap();
+        assert!(store.wait_for_catalogue(Duration::from_secs(120)).unwrap(), "catalogue built");
+        let c = &store.inner.catalogue.as_ref().expect("a catalogue thread").shared;
+        let (counted, uncounted) = (c.checkpoints.0.load(Ordering::SeqCst), c.checkpoints.1.load(Ordering::SeqCst));
+        assert!(counted + uncounted > 0, "the probe saw no checkpoint");
+        assert_eq!(
+            uncounted, 0,
+            "{uncounted} catalogue checkpoint(s) ran outside the statements the exit handler waits for ({counted} inside)"
+        );
+        drop(store);
+        crate::test_scratch::remove_or_defer(&dir);
+    }
+
+    const EXIT_CHILD: &str = "DEBRIEF_CATALOGUE_EXIT_CHILD";
+
+    /// Runs in the child process only (setting the process's exit state cannot be undone): a store with catalogued
+    /// rows, then the exit handler, then one more turn of the catalogue thread.
+    #[test]
+    fn a_turn_after_exit_began_child() {
+        let Some(dir) = std::env::var_os(EXIT_CHILD) else { return };
+        let store = crate::DuckStore::create(std::path::Path::new(&dir), Profile::default_profile(), PluginRegistry::new()).unwrap();
+        let samples = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../samples/serilog-text");
+        store.open(&[samples]).unwrap().wait().unwrap();
+        assert!(store.wait_for_catalogue(Duration::from_secs(120)).unwrap(), "catalogue built");
+        let service = store.inner.catalogue.as_ref().expect("a catalogue thread");
+        let c = service.shared.clone();
+        let before = c.checkpoints.0.load(Ordering::SeqCst) + c.checkpoints.1.load(Ordering::SeqCst);
+        // Rows to checkpoint, as when the process exits right after a build.
+        c.unsaved.store(true, Ordering::SeqCst);
+        crate::shutdown::begin_exit();
+        service.wake();
+        assert!(
+            paddock_testkit::poll_until_within(Duration::from_secs(60), || {
+                service.handle.as_ref().is_some_and(std::thread::JoinHandle::is_finished)
+            }),
+            "the catalogue thread did not end once exit began"
+        );
+        let after = c.checkpoints.0.load(Ordering::SeqCst) + c.checkpoints.1.load(Ordering::SeqCst);
+        assert_eq!(after, before, "a checkpoint ran after exit began");
+        assert!(
+            !c.dropped_while_exiting.load(Ordering::SeqCst),
+            "the catalogue thread dropped its connection after exit began (duckdb_disconnect/duckdb_close during exit)"
+        );
+        // The store is not dropped either: the process is exiting.
+        std::mem::forget(store);
+    }
+
+    /// Regression (review of the CI 7837 fix): once exit has begun, the catalogue thread runs no checkpoint and ends
+    /// without tearing DuckDB down (dropping its connection would disconnect, and close the database if it held the last
+    /// handle, while C++ destroys DuckDB's statics).
+    #[test]
+    fn a_turn_after_exit_began_runs_no_statement_and_keeps_the_connection() {
+        let dir = debrief_ipc::testing::scratch_dir("catalogue-exit-turn");
+        let out = debrief_core::process::quiet_command(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "catalogue::tests::a_turn_after_exit_began_child",
+                "--test-threads=1",
+                "--nocapture",
+            ])
+            .env(EXIT_CHILD, &dir)
+            .output()
+            .unwrap();
+        crate::test_scratch::remove_or_defer(&dir);
+        assert!(
+            out.status.success(),
+            "{:?}\n{}{}",
+            out.status,
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 }

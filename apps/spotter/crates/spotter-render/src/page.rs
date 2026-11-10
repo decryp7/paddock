@@ -70,12 +70,17 @@ pub enum Outcome {
     TimedOut(Readiness),
 }
 
+/// Sends a command (to a session, or to the browser for `None`) and waits for its answer as the browser judges right: the
+/// commands that open a page go through it ([`crate::answer`]: while the browser is alive, not a fixed deadline).
+pub(crate) type Ask<'a> = &'a dyn Fn(Option<&str>, &str, Value) -> Result<Value>;
+
 impl Page {
-    pub(crate) fn attach(conn: Arc<Connection>) -> Result<Page> {
+    /// Opens a new tab and attaches to it; `ask` sends the commands that open it.
+    pub(crate) fn attach(conn: Arc<Connection>, ask: Ask<'_>) -> Result<Page> {
         let born = conn.mark();
-        let t = conn.call(None, "Target.createTarget", json!({"url": "about:blank"}), CALL)?;
+        let t = ask(None, "Target.createTarget", json!({"url": "about:blank"}))?;
         let target = str_of(&t, "targetId")?;
-        let s = conn.call(None, "Target.attachToTarget", json!({"targetId": target, "flatten": true}), CALL)?;
+        let s = ask(None, "Target.attachToTarget", json!({"targetId": target, "flatten": true}))?;
         let session = str_of(&s, "sessionId")?;
         let mut p = Page {
             conn,
@@ -85,14 +90,14 @@ impl Page {
             initial_settled: AtomicBool::new(false),
         };
         let enabling = p.conn.mark();
-        p.call("Page.enable", json!({}))?;
+        p.first_call(ask, "Page.enable", json!({}))?;
         // The tab's own first navigation (`about:blank` from `Target.createTarget`) may still be running: `Page.enable`
         // then reports it as `Page.frameStartedNavigating` before its reply (Chromium's PageHandler::Enable, read
         // 2026-10-28). A `Page.navigate` sent meanwhile can come back `net::ERR_ABORTED`.
         // Only the main frame's navigation is the tab's own (its frame id from the frame tree; for a page target Chrome
         // uses the target id, the fallback).
         let main = p
-            .call("Page.getFrameTree", json!({}))
+            .first_call(ask, "Page.getFrameTree", json!({}))
             .ok()
             .and_then(|r| r.pointer("/frameTree/frame/id").and_then(Value::as_str).map(str::to_string))
             .unwrap_or(target);
@@ -102,15 +107,21 @@ impl Page {
         // `blockedReason` and `corsErrorStatus`; the connection keeps only documents' network events). Enabled here,
         // before any load: sent while a `Page.navigate` is still unanswered, `Network.enable` got no answer within the
         // call timeout (measured 2026-10-28, Chrome for Testing 156). Nothing reads response bodies, so the buffers are small.
-        let _ = p.call("Page.setLifecycleEventsEnabled", json!({"enabled": true}));
-        let _ = p.call(
+        let _ = p.first_call(ask, "Page.setLifecycleEventsEnabled", json!({"enabled": true}));
+        let _ = p.first_call(
+            ask,
             "Network.enable",
             json!({"maxTotalBufferSize": 1 << 20, "maxResourceBufferSize": 256 << 10}),
         );
-        p.call("Page.addScriptToEvaluateOnNewDocument", json!({"source": TRACKER}))?;
+        p.first_call(ask, "Page.addScriptToEvaluateOnNewDocument", json!({"source": TRACKER}))?;
         // Downloads are never wanted from a page that is only read.
-        let _ = p.conn.call(None, "Browser.setDownloadBehavior", json!({"behavior": "deny"}), CALL);
+        let _ = ask(None, "Browser.setDownloadBehavior", json!({"behavior": "deny"}));
         Ok(p)
+    }
+
+    /// A command of the page's attach, sent to its session through `ask`.
+    fn first_call(&self, ask: Ask<'_>, method: &str, params: Value) -> Result<Value> {
+        ask(Some(&self.session), method, params)
     }
 
     fn call(&self, method: &str, params: Value) -> Result<Value> {
@@ -648,7 +659,14 @@ mod tests {
         ws.send(tungstenite::Message::text(v.to_string())).is_ok()
     }
 
-    fn fake_session(mut ws: Ws, script: Script, fin: &AtomicBool, log: &std::sync::Mutex<Vec<String>>) {
+    /// `hold`: the answer to `Target.createTarget` waits until the test sends on (or drops) its sender.
+    fn fake_session(
+        mut ws: Ws,
+        script: Script,
+        fin: &AtomicBool,
+        log: &std::sync::Mutex<Vec<String>>,
+        hold: Option<std::sync::mpsc::Receiver<()>>,
+    ) {
         let Script {
             slow_start,
             flood,
@@ -680,6 +698,12 @@ mod tests {
             let req: Value = serde_json::from_str(t.as_str()).unwrap_or(Value::Null);
             let method = req["method"].as_str().unwrap_or("").to_string();
             log.lock().unwrap_or_else(|e| e.into_inner()).push(method.clone());
+            if method == "Target.createTarget" {
+                // A browser that is up but slow to open the tab (a loaded machine): the answer waits for the test.
+                if let Some(release) = &hold {
+                    let _ = release.recv();
+                }
+            }
             let starting = slow_start && !fin.load(Ordering::SeqCst);
             if method == "Page.enable" && starting {
                 for (frame, loader) in [("C", "LC"), (main, "L0")] {
@@ -788,6 +812,16 @@ mod tests {
 
     impl FakeCdp {
         fn start(script: Script) -> FakeCdp {
+            FakeCdp::start_with(script, None)
+        }
+
+        /// A fake whose answer to `Target.createTarget` waits until the returned sender sends (or is dropped).
+        fn holding_create(script: Script) -> (FakeCdp, std::sync::mpsc::Sender<()>) {
+            let (tx, rx) = std::sync::mpsc::channel();
+            (FakeCdp::start_with(script, Some(rx)), tx)
+        }
+
+        fn start_with(script: Script, hold: Option<std::sync::mpsc::Receiver<()>>) -> FakeCdp {
             let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             let port = l.local_addr().unwrap().port();
             let finish = Arc::new(AtomicBool::new(false));
@@ -796,14 +830,15 @@ mod tests {
             std::thread::spawn(move || {
                 let Ok((stream, _)) = l.accept() else { return };
                 if let Some(ws) = handshake(stream) {
-                    fake_session(ws, script, &fin, &log);
+                    fake_session(ws, script, &fin, &log, hold);
                 }
             });
             FakeCdp { port, finish, calls }
         }
 
         fn page(&self) -> Page {
-            Page::attach(Arc::new(Connection::connect(self.port, "/devtools/browser/fake").unwrap())).unwrap()
+            let conn = Arc::new(Connection::connect(self.port, "/devtools/browser/fake").unwrap());
+            Page::attach(conn.clone(), &|session, method, params| conn.call(session, method, params, CALL)).unwrap()
         }
 
         fn navigated(&self) -> bool {
@@ -813,6 +848,65 @@ mod tests {
                 .iter()
                 .any(|c| c == "Page.navigate")
         }
+    }
+
+    /// A browser that is up and working, as [`crate::answer`] looks at it: it answers (releases the fake's held answer) at
+    /// look `answer_at`, so the wait is counted in looks, never timed.
+    struct AnswersAt {
+        looks: u32,
+        answer_at: u32,
+        release: Option<std::sync::mpsc::Sender<()>>,
+        cpu: Duration,
+    }
+
+    impl crate::answer::Life for AnswersAt {
+        fn liveness(&mut self) -> paddock_proc::Liveness {
+            self.looks += 1;
+            if self.looks == self.answer_at {
+                if let Some(r) = self.release.take() {
+                    let _ = r.send(());
+                }
+            }
+            paddock_proc::Liveness::Running
+        }
+        fn pid(&self) -> Option<paddock_proc::ProcessId> {
+            None
+        }
+        fn cpu_time(&mut self) -> Option<Duration> {
+            self.cpu += Duration::from_millis(1);
+            Some(self.cpu)
+        }
+    }
+
+    /// Regression (spotter-release run 7853, `off_screen_headful_mode_and_redirects` on the loaded CI Mac): opening the tab
+    /// ended with `Timeout("a command")` after a fixed 10 s while the browser was up. The answers that open a page are now
+    /// waited for while the browser is alive and working (ADR 0071), as in paddock-chromium. The fake answers only after
+    /// thousands of looks at a working browser; with a fixed deadline nobody looks, the answer never comes and the open
+    /// ends with the CI's `Timeout("a command")`.
+    #[test]
+    fn a_browser_slow_to_open_the_tab_is_waited_for_while_it_is_alive() {
+        let (f, release) = FakeCdp::holding_create(Script { slow_start: false, ..SLOW });
+        let conn = Arc::new(Connection::connect(f.port, "/devtools/browser/fake").unwrap());
+        // Ticks of zero: the looks come as fast as the judge makes them; idle and spin are far away for a working browser.
+        let patience = paddock_proc::Patience {
+            spin: Duration::from_secs(3600),
+            idle: Duration::from_secs(3600),
+            hang_guard: Duration::from_secs(3600),
+            note_after: 0,
+            tick: Duration::ZERO,
+            cpu_every: 1,
+        };
+        let life = std::cell::RefCell::new(AnswersAt {
+            looks: 0,
+            answer_at: 5000,
+            release: Some(release),
+            cpu: Duration::ZERO,
+        });
+        let ask = |session: Option<&str>, method: &str, params: Value| crate::answer::ask(&conn, &life, patience, session, method, params);
+        let page = Page::attach(conn.clone(), &ask).expect("the tab opens once the browser answers");
+        assert_eq!(page.session, "S1");
+        let looks = life.borrow().looks;
+        assert!(looks >= 5000, "opened after {looks} looks, before the browser answered");
     }
 
     /// Regression (Windows CI runs 6473 and 6563): a load sent right after the tab was created, while its own first

@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { provideTinyBackend, settle, testLogger, tinyBackend, tinyDataset } from '../../testing/helpers';
+import { provideTinyBackend, settle, testLogger, tinyBackend, tinyDataset, settleUntil } from '../../testing/helpers';
 import { LiveState } from '../core/api.types';
 import { DebriefBackend } from '../core/backend';
 import { MockBackend } from '../core/mock/mock-backend';
@@ -121,6 +121,7 @@ describe('LiveTail', () => {
     notify();
     notify();
     notify();
+    await settleUntil(undefined, () => expect(release).toBeTypeOf('function'));
     await settle();
     expect(summary).toHaveBeenCalledTimes(1);
     release();

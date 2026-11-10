@@ -2,7 +2,7 @@ import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { FakeECharts } from '../../testing/fake-echarts';
 import type { EChartsCoreOption } from 'echarts/core';
-import { all, buttonByText, el, FakeDock, provideFakeDock, provideTinyBackend, settle, text, tinyBackend, typeInto, manualFrames } from '../../testing/helpers';
+import { all, buttonByText, el, FakeDock, provideFakeDock, provideTinyBackend, settle, text, tinyBackend, typeInto, manualFrames, settleUntil } from '../../testing/helpers';
 import { ChartData, ChartDef } from '../core/api.types';
 import { WorkspaceStore } from '../core/workspace.store';
 import { ChartCard } from './chart-card';
@@ -476,8 +476,7 @@ describe('live charts', () => {
     const live = TestBed.inject(LiveTail);
     const fixture = TestBed.createComponent(ChartCard);
     fixture.componentRef.setInput('def', def({ id: 'cpu', y: 'avg(cpu)' }));
-    await settle(fixture);
-    expect(observed).not.toBeNull();
+    await settleUntil(fixture, () => expect(observed).not.toBeNull());
     const query = vi.spyOn(TestBed.inject(DebriefBackend), 'queryChart');
     await live.set(true);
     await settle(fixture);

@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { all, buttonByText, el, provideFakeDock, provideTinyBackend, settle, text } from '../../../testing/helpers';
+import { all, buttonByText, el, provideFakeDock, provideTinyBackend, settle, text, settleUntil } from '../../../testing/helpers';
 import { AiError } from '../../ai/ai-backend';
 import { AiStatusStore } from '../../ai/ai-status.store';
 import { AiStatus } from '../../ai/ai.types';
@@ -148,7 +148,7 @@ describe('KnownIssues component', () => {
     const f = TestBed.createComponent(KnownIssues);
     await settle(f);
     buttonByText(f, 'Suggest with AI').click();
-    await settle(f);
+    await settleUntil(f, () => expect(finish).toBeTypeOf('function'));
     expect(el(f, '[data-testid=known-issues-progress]')).toBeTruthy();
     expect(buttonByText(f, 'Suggesting…').disabled).toBe(true);
     finish([aiMatch()]);

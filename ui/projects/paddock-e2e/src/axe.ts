@@ -17,14 +17,15 @@ export interface AxeOptions {
 }
 
 /**
- * Waits until the page's finite animations and CSS transitions have ended: axe reads the colours at the moment it looks, and a
- * theme switch is a colour transition (axe saw the old scheme's text colour on the new background, slowly under emulation).
- * Endless animations (a spinner) are left running.
+ * Brings the page's finite animations and CSS transitions to their end state at once: axe reads the colours at the moment it
+ * looks, and a theme switch is a colour transition (axe saw the old scheme's text colour on the new background). They are
+ * finished, not waited for: a transition that restarts on every tick (a countdown bar's width) never ends by itself, and
+ * waiting for it cost axe 1-23 s per theme. Endless animations (a spinner) are left running.
  */
 export async function settleTransitions(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const finite = () => document.getAnimations().filter((a) => a.effect?.getComputedTiming().endTime !== Infinity);
-    for (let round = 0; round < 5 && finite().length; round++) await Promise.all(finite().map((a) => a.finished.catch(() => undefined)));
+  await page.evaluate(() => {
+    const finite = () => document.getAnimations().filter((a) => a.effect?.getComputedTiming().endTime !== Infinity && a.playState !== 'finished');
+    for (let round = 0; round < 5 && finite().length; round++) for (const a of finite()) a.finish();
   });
 }
 
@@ -71,8 +72,6 @@ export async function axeTargets(page: Page, targets: readonly AxeTarget[], opti
       await page.goto('about:blank');
       await page.goto(target.url);
       await target.ready?.(page);
-      // Colours are measured at rest, not in the middle of a fade.
-      await page.evaluate(() => Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))));
       const found = await axeViolations(page, options);
       if (found.length) failures[`${target.name} (${theme})`] = found;
     }

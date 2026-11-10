@@ -1653,6 +1653,34 @@ Class: a test that asks a cached answer before its cache is filled.
 
 Under a full nextest run two store-duck tests failed once each with "Directory not empty": `segments::reopening_recovers_from_a_crash_and_refuses_damage` (`tests/it/segments.rs:240`, `remove_dir_all` of the moved store) and `search::indexing_many_segments_in_batches_is_complete_and_repeatable` (`tests/it/search.rs:220`, `remove_dir_all` of the `index` folder right after `drop(store)`). Both passed 30 of 30 times alone under `--stress-count 30 -j 6`, on this branch and on the base, so the cause is not the temp-folder change. Probable cause (not measured): the store's index threads finish writing after `drop`, so the removal races them. Not fixed in the LINT-1 branch: a separate branch should make the store's drop wait for its index threads (or the test wait on the condition), not retry or sleep (ER-12).
 
+## A Debrief test process crashed at exit: the catalogue's checkpoint ran outside the exit handler's count (2026-11-09, CI 7837)
+
+- **Symptom:** `debrief-app ai::tests::use_cases_route_through_ipc_to_the_model_and_the_engine` printed "ok", then the process
+  died with SIGSEGV (macOS, run 7837); the temp-leak check then failed on `debrief-test-stores-*` and `debrief-bundles-*`.
+- **Evidence:** the runner's crash report (`~/Library/Logs/DiagnosticReports/Retired/debrief_app_lib-*-2026-11-09-213925.ips`): the
+  main thread in `exit` -> `test_support::remove_process_scratch_at_exit` -> `remove_dir_all`, the faulting thread
+  `debrief-catalogue` in `catalogue::settle` -> `CHECKPOINT` -> `QueryResult(ErrorData)`. Ten `debrief_app_lib` reports of
+  2026-11-08/09 on the Mac have the same thread and `settle` or `commit` frames. The leaked folders are the ones only that
+  `atexit` handler removes: it was the handler running when the process died (confirmed, not assumed).
+- **Causes listed:** the catalogue thread's checkpoint at exit (confirmed); the fts thread (ruled out: every statement is in its
+  guarded `step`); tokio or the AI fakes (ruled out: their threads idle in the report); a child or socket left (ruled out: the
+  faulting thread is ours, in DuckDB); ADR 0072 endings and the orphan guardian (ruled out: not on the stacks, not on the train).
+- **Root cause:** the exit handler (`shutdown.rs`) waits only for statements under an `Active` guard. `catalogue::step` took one,
+  but `run` called `settle` (the `CHECKPOINT`) after the guard was gone, and `settle` did not check `down()`. So at exit the
+  handler found nothing running, the checkpoint went on (or started after the interrupt), and C++ destroyed DuckDB's statics
+  under it while the test helpers removed the store's folder.
+- **Fix:** one `Active` per turn covers the step and the checkpoint; `step` and `settle` take `&Active`, so a statement outside
+  the count no longer compiles; the thread ends when no guard is given (exiting). Regression test
+  `catalogue::tests::the_exit_handler_waits_for_the_catalogue_checkpoint` (records, in test builds, whether each checkpoint ran
+  under a guard): failed with "1 catalogue checkpoint(s) ran outside ...", then 30 of 30 green.
+- **Reproduction:** the crash itself did not reproduce locally (the app test 40 of 40 green, a child process exiting mid-build
+  20 of 20 green although a probe saw the unguarded checkpoint run after `down()` in every round); the invariant test is
+  deterministic.
+- **Open, same class:** `debrief-store-worker` crash reports of 2026-11-05 to 09 show the catalogue thread crashing inside a
+  guarded `step` while the main thread still drains in `shutdown::at_exit`: DuckDB statics registered after the handler's
+  last registration are destroyed before it runs. This is the second fix of "a background thread in DuckDB at exit" (CI 6734,
+  CI 7837): a candidate for a redesign ADR (ER-21), for example stopping and joining the store threads before `exit`.
+
 ## ADR 0072 M0: an ending test is only as good as the OSes it ran on, and a reset is a race (2026-11-09)
 
 The ending harness (`paddock_ipc::testing::endings`, register `docs/ipc-endpoints.toml`, ratchet `docs/ipc-endpoint-ratchet.toml`)

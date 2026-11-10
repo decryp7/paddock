@@ -11,6 +11,7 @@ import { BUILTIN_VIEWS } from '../app/builtin/builtin-views';
 import { DockService } from '../app/dock/dock.service';
 import { provideWorkspace } from '../app/core/workspace/provide-workspace';
 import { ConsumerGate } from '../app/core/panel-visibility';
+import { assertSameTest, currentTest } from './test-lifetime';
 
 export const T0 = DEMO_START;
 export const SEC = 1000;
@@ -174,14 +175,35 @@ export function markerKind(patch: Partial<MarkerKind> & Pick<MarkerKind, 'kind'>
   };
 }
 
-/** Lets promises, effects and change detection settle. */
+/**
+ * Lets promises, effects and change detection settle. Stops with an error if its test ends meanwhile (a timeout), so a
+ * leftover body never ticks the next test's TestBed (`test-lifetime.ts`).
+ */
 export async function settle<T>(fixture?: ComponentFixture<T>, rounds = 4): Promise<void> {
+  const test = currentTest();
   for (let i = 0; i < rounds; i++) {
     await Promise.resolve();
     await new Promise((r) => setTimeout(r, 0));
+    assertSameTest(test, 'settle()');
     TestBed.tick();
     if (fixture) await fixture.whenStable();
   }
+  assertSameTest(test, 'settle()');
+}
+
+/**
+ * Settles until `condition` holds (it throws until then, like an `expect`), at most `timeout` ms. Use it instead of a
+ * fixed `settle()` when the test needs something that happens after a lazy import, a timer or an engine call: a
+ * stub's resolver being captured, a dialog opening (rule 49). Returns as soon as the condition holds.
+ */
+export async function settleUntil<T>(fixture: ComponentFixture<T> | undefined, condition: () => void, timeout = 10_000): Promise<void> {
+  await vi.waitFor(
+    async () => {
+      await settle(fixture, 1);
+      condition();
+    },
+    { timeout, interval: 10 },
+  );
 }
 
 export function el<T extends Element = HTMLElement>(fixture: ComponentFixture<unknown>, selector: string): T {

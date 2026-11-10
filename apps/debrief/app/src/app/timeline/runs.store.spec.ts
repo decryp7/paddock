@@ -3,7 +3,7 @@ import { ViewRequests } from '../core/view-requests';
 import { RunsReply } from '../core/api.types';
 import { WorkspaceStore } from '../core/workspace.store';
 import { DockService } from '../dock/dock.service';
-import { FakeDock, provideFakeDock, provideTinyBackend, settle, tinyBackend, useGate } from '../../testing/helpers';
+import { FakeDock, provideFakeDock, provideTinyBackend, settle, tinyBackend, useGate, settleUntil } from '../../testing/helpers';
 import { at, must } from '../../testing/must';
 import { TimelineAnnotations } from './annotations.store';
 import { RunsBackend } from './runs-backend';
@@ -56,7 +56,7 @@ describe('RunsStore', () => {
       .mockImplementationOnce(() => new Promise<RunsReply>((res) => (release = res)))
       .mockImplementationOnce(() => Promise.reject('engine down'));
     runs.kind.set('run');
-    await settle(undefined, 2);
+    await settleUntil(undefined, () => expect(release).toBeTypeOf('function'));
     runs.kind.set(null);
     await settle(undefined, 6);
     expect(runs.error()).toContain('engine down');

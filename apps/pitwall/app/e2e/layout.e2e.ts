@@ -144,6 +144,16 @@ function measure(rootSelector: string | null): { spill: string[]; scroll: string
   return out;
 }
 
+/**
+ * Opens a state with the page's clock held still (its timers still run). `mock-static` stops the mock's data, but the screens'
+ * own clock (`injectNow`) ticks every second, and the dashboard's idle countdown bar re-arms a 1 s width transition on each
+ * tick, so a frame with no running animation (`waitForStableFrame`) would never come (Linux CI, run 7824).
+ */
+async function openStill(page: Page, state: State): Promise<void> {
+  await page.clock.setFixedTime(Date.now());
+  await openApp(page, state.hash, `mock-fast&mock-static${state.query ? `&${state.query}` : ''}`);
+}
+
 async function problems(page: Page, rootSelector: string | null): Promise<Report> {
   await page.evaluate(() => document.fonts.ready);
   await waitForStableFrame(page);
@@ -172,7 +182,7 @@ test.describe('layout at the supported window widths', () => {
       const key = `${state.id}@${state.width ?? width}`;
       test(`${key}: nothing new spills, scrolls sideways or is clipped`, async ({ page }, info) => {
         await page.setViewportSize({ width: state.width ?? width, height: state.height ?? 780 });
-        await openApp(page, state.hash, `mock-fast&mock-static${state.query ? `&${state.query}` : ''}`);
+        await openStill(page, state);
         await page.waitForLoadState('networkidle');
         // A step that breaks fails the test: nothing here is caught.
         await state.act?.(page);
@@ -319,7 +329,7 @@ test.describe('tables fill their container and never cut a header, a number or a
     for (const width of TABLE_WIDTHS) {
       test(`${state.id}@${width}`, async ({ page }) => {
         await page.setViewportSize({ width, height: 900 });
-        await openApp(page, state.hash, `mock-fast&mock-static${state.query ? `&${state.query}` : ''}`);
+        await openStill(page, state);
         await page.waitForLoadState('networkidle');
         await state.act?.(page);
         await page.waitForLoadState('networkidle');

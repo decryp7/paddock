@@ -1,7 +1,7 @@
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { describe, expect, it } from 'vitest';
-import { el, settle } from '../../testing/helpers';
+import { el, settle, settleUntil } from '../../testing/helpers';
 import { VideoView } from '../core/generated/video';
 import { FrameImage } from './frame-image';
 import { MOCK_VIDEO_PATHS, MockVideoBackend } from './mock/mock-video-backend';
@@ -127,8 +127,7 @@ describe('FrameImage', () => {
       const fixture = TestBed.createComponent(ImageHost);
       fixture.componentInstance.key = v.record.key;
       fixture.detectChanges();
-      await settle(fixture);
-      expect(seen).toHaveLength(1);
+      await settleUntil(fixture, () => expect(seen).toHaveLength(1));
       expect(fixture.nativeElement.querySelector('img')).toBeNull();
       notify([{ isIntersecting: false }]);
       await settle(fixture);
