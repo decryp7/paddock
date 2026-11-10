@@ -27,7 +27,7 @@ import { MatButton } from '@angular/material/button';
         <button type="button" matButton="outlined" (click)="retry.emit()"><dy-icon name="refresh" /> Retry</button>
       </div>
     } @else if (!loaded()) {
-      <div class="skeleton-wrap" aria-busy="true" [attr.aria-label]="'Loading ' + what()">
+      <div class="skeleton-wrap" role="status" aria-busy="true" [attr.aria-label]="'Loading ' + what()">
         <ng-content select="[skeleton]" />
         @if (rows() > 0) {
           @for (r of rowList(); track $index) {

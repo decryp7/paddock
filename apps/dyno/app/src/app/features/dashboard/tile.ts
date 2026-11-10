@@ -25,7 +25,7 @@ import type { IconName } from '../../shared/icons';
         <span>{{ why }}</span>
       </div>
     } @else if (!ready()) {
-      <div class="loading" role="status" aria-busy="true" aria-label="Loading">
+      <div class="loading" role="status" aria-busy="true" [attr.aria-label]="'Loading ' + title()">
         <div class="skeleton big"></div>
         <div class="skeleton"></div>
         <div class="skeleton short"></div>

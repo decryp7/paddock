@@ -4,6 +4,7 @@ import { renderFramed } from '@decryp7/paddock-ui/shell/testing';
 import { BACKEND } from '../../core/backend';
 import type { MockBackend } from '../../core/mock-backend';
 import { jobsProviders, mockWithJobs } from '../../../testing/job-test-support';
+import { expectNameAllowed } from '../../../testing/aria-name';
 import { provideIcons } from '../../shared/icons';
 import { HashSearchDialog } from './hash-search-dialog';
 import { Lookups } from './lookups';
@@ -83,17 +84,20 @@ describe('loading skeletons name themselves through a role that allows a name', 
     (vi.spyOn(backend, stall) as unknown as { mockReturnValue(v: Promise<never>): void }).mockReturnValue(new Promise<never>(() => {}));
     void open(component, inputs, backend, kind);
     for (let i = 0; i < 50 && !document.body.querySelector('.skeleton'); i++) await new Promise((r) => setTimeout(r, 20));
-    const sk = document.body.querySelector<HTMLElement>('.skeleton')!;
-    expect(sk).not.toBeNull();
-    expect(sk.getAttribute('role')).toBe('status');
-    expect(sk.getAttribute('aria-busy')).toBe('true');
-    expect(sk.getAttribute('aria-label')).toBeTruthy();
+    const sk = document.body.querySelector<HTMLElement>('.skeleton');
+    expectNameAllowed(sk);
+    if (!sk!.closest('[aria-hidden="true"]')) expect(sk!.getAttribute('aria-busy')).toBe('true');
   };
   it('the web search dialog while it prepares the text', async () => {
     await loading(WebSearchDialog, { text: 'x', subject: 'x' }, 'form', 'searchSeed');
   });
   it('the hash dialog while it reads the file', async () => {
     await loading(HashSearchDialog, { source: { path: '/a/b' }, name: 'b' }, 'viewer', 'startJob');
+    // The visible line is the one announcement; the bar is decoration.
+    expect(document.body.querySelector('.skeleton')!.closest('[aria-hidden="true"]')).not.toBeNull();
+    const wait = document.body.querySelector('p.wait')!;
+    expect(wait.getAttribute('role')).toBe('status');
+    expect(wait.textContent).toContain('Reading the file');
   });
 });
 

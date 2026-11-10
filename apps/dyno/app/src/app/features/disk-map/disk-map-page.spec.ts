@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { expectNameAllowed } from '../../../testing/aria-name';
 import { BACKEND } from '../../core/backend';
 import { formatStorage } from '../../shared/format';
 import { MockBackend } from '../../core/mock-backend';
@@ -76,6 +77,7 @@ describe('dy-disk-map-page', () => {
     const el = f.nativeElement as HTMLElement;
     await settle(f);
     expect(el.querySelector('[aria-label="Loading the last scan"]')!.getAttribute('aria-busy')).toBe('true');
+    expectNameAllowed(el.querySelector('[aria-label="Loading the last scan"]'));
     expect(el.querySelector('[aria-label="Loading the last scan"]')!.textContent!.trim()).toBe('');
     expect(el.querySelector('[aria-label="Not scanned"]')).toBeNull();
     expect(el.querySelector('.capacity')).toBeNull();
