@@ -1,10 +1,13 @@
 # 93. Every scheduled CI check has an owner, and a red one cannot be ignored
 
-- Status: Proposed 2026-11-10, revision 4. Drafted at the coordinator's request of 2026-11-10, asked for by the user under
+- Status: Accepted 2026-11-10 (user), all decisions as recommended (D14 (a)). History: Proposed 2026-11-10, revision 4
+  approved by the independent review at `6270bbbbe`. Drafted at the coordinator's request of 2026-11-10, asked for by the user under
   ER-21. Revision 1 (`34e7eeb00`) was reviewed independently ("changes", 5 P1 and a list of P2s); revision 2 answers it
   (see "Review answers (revision 2)"); its re-review of
   `fe28d4032` ("changes", P1-6 and seven P2s) is answered by revision 3 (see "Review answers (revision 3)"); the re-review of `3bf12da60` ("changes", P1-7
-  and one P2) is answered by revision 4 (see "Review answers (revision 4)"). Nothing here is built yet. ER-23 does not apply (no drawings).
+  and one P2) is answered by revision 4 (see "Review answers (revision 4)"). The acceptance commit adds the review's three P2s on
+  revision 4 and aligns §4 and §5 with ADR 0097 (proposed, `origin/docs/adr-user-approvals` `d21eddcbf`; see "At
+  acceptance"). Nothing here is built yet. ER-23 does not apply (no drawings).
 - Date: 2026-11-10
 - Related: ER-12, ER-21 / rule 40, ER-31, ER-33 / rule 71, ER-36; ADR 0022 (developer tools are Rust in `./dev`); ADR
   0041 (its tag-checklist row, line 208: "the last ... starved nightly of the app's tests has no open failure, or each is
@@ -39,7 +42,8 @@ origin/docs/adr-evidence-heads b32655fef
 origin/feat/rt8-ci-flakes 0d40eafed
 origin/docs/redesign-adrs-7-9 4b0633e73
 origin/feat/rt5-check-host ec8530a95
-origin/docs/adr-private-files fdfb17c8f
+origin/docs/adr-private-files e2f7e946b
+origin/docs/adr-user-approvals d21eddcbf
 engineering-rules main ca4124bdc
 ```
 
@@ -235,18 +239,25 @@ stopped pipeline never passes. Issues are not read for the verdict.
   two parts:
   - **The go-live anchor.** The **go-live commit** is the earliest commit on `origin/main`'s first-parent history that
     introduced a `[scheduled_gate]` section. It is found once from that history and never reset: deleting the record and
-    adding it again, or adding one on another branch, does not move it. The **unsigned allowance** (report-only until the
-    go-live commit's date plus the go-live length of D9) is read only from the record as it stands in that go-live commit,
-    never from the tagged tree or a later commit.
-  - **After the go-live commit**, the record must exist on both `origin/main` and the tagged tree; a missing or
-    unparsable record on either gives exit 6 (not measured). Before the unsigned allowance ends, the gate reports only.
-    After it, the gate enforces; a mode other than `enforce`, or a later `report_until`, counts only from a record every
-    line of which blames to a commit signed per §5, on the tagged tree and on `origin/main` alike, and otherwise the gate
-    exits 6. There is no `off`.
+    adding it again, or adding one on another branch, does not move it. The **unsigned allowance** (report-only for the go-live length
+    of D9) is read only from the record as it stands in that go-live commit, never from the tagged tree or a later commit.
+    It starts at a **server-recorded time**: the `created_at` of the first Actions run on `origin/main` whose head commit
+    contains the go-live commit, never the committer date, which an agent can set. A `report_until` in the record counts
+    at most up to that time plus the go-live length. `origin/main` must be protected against force-push, so the anchor's
+    first-parent history cannot be rewritten; ADR 0097's R5 and its D8 cover that protection.
+  - **After the go-live commit**, the record must exist on `origin/main`; a missing or unparsable record there gives
+    exit 6 (not measured). The tagged tree's copy is not read for the mode: like every user record (ADR 0097 §6), the mode
+    is read only from `origin/main`'s first-parent history, so a record added, changed or deleted on a release branch has
+    no effect. Before the unsigned allowance ends, the gate reports only. After it, the gate enforces; a mode other than
+    `enforce`, or a later `report_until`, counts only from a record that ADR 0097's verifier accepts on `origin/main`
+    (every line blamed to a commit with a valid user-presence signature from the trust root), and otherwise the gate exits
+    6. There is no `off`.
   - **Positive controls (WP-5):** an unsigned commit that sets `mode = "report"` after the allowance still refuses; a
     signed one by a key outside the trust root still refuses; deleting the record and adding it back on `main` leaves the
     go-live date unchanged and refuses after the original allowance; a fresh unsigned record on a release branch (tagged
-    tree only) gives no allowance and refuses; deleting the record on `main` or on the tagged tree gives exit 6.
+    tree only) gives no allowance and refuses; deleting the record on `main` gives exit 6; a go-live commit whose committer
+    date is set earlier than its first Actions run on `main` gets its allowance from the run's `created_at`; a signature
+    with the user-presence bit clear is refused.
 
 ### 5. Waivers need the user present (detail in ADR 0097)
 
@@ -258,10 +269,12 @@ it, and neither does an `approved = "user"` line.
 
 The waiver this ADR recommends (D5 (a)), and the gate mode of §4, are records in `docs/gates.toml` (`[[scheduled_waiver]]`: workflow, job,
 signature, reason, `until` at most 14 days ahead; `[scheduled_gate]`) added by a commit, or named by a tag, **signed with a touch-required
-`sk-ssh-ed25519` key or a Secure Enclave key** listed in an `allowed_signers` file; the gate verifies that **every line** of each
-record blames to a commit with a good signature (`git blame --porcelain`, then `git log --format=%G?` with
-`gpg.ssh.allowedSignersFile`) and ignores a record any line of which comes from an unsigned commit or another key, so an
-agent cannot extend a signed waiver by editing its `until` line. A touch or Touch ID prompt is something an agent cannot answer. How the
+`sk-ssh-ed25519` key or a Secure Enclave key** listed in an `allowed_signers` file; the gate verifies through **ADR 0097's verifier**
+(`./dev approvals verify`) that **every line** of each record, as read from `origin/main`'s first-parent history, blames
+to a commit whose signature is valid for a key in the trust root **and has the user-presence bit set**, and ignores a
+record any line of which fails that, so an agent cannot extend a signed waiver by editing its `until` line. `git log
+--format=%G?`, `git verify-commit` and `ssh-keygen -Y verify` are not enough: they accept an `sk-*` signature whose
+presence flag is clear (0097 §1), so the verifier parses the signature itself. A touch or Touch ID prompt is something an agent cannot answer. How the
 user's approvals are recorded across the family (keys, the `allowed_signers` file, rotation, what else they cover) is ADR
 0097's subject; this ADR consumes it and does not design it. It states what it needs from 0097:
 
@@ -433,8 +446,8 @@ user's decision.
 | WP-2 | The pure reader of §2 (outcomes, skip classes, callers, flaky, not measured, streaks) and signatures on `runlog` with annotation-only `step:` lines; synthetic fixtures (job 34160's echo shapes, callers, charged skips, carried-forward skips, rerun greens); no real logs | 3 | RT-8 on `main`, ADR 0089 WP-2c (`runlog` for Playwright and vitest), WP-1 |
 | WP-3 | Coverage per signature (§3) through the planner graph at a commit; tests with a planted crate in two of three lockfiles | 1 | WP-2 |
 | WP-4 | Write client (idempotent create, duplicate close, comment rate rule) and `sweep`, `fix`, `digest`, `scheduled-digest.yml` (09:13 and 15:13 local) | 2.5 | WP-0, WP-2 |
-| WP-5 | `gate --app --commit`: stateless verdict, 24 h streak rule, pending runs, release-branch tags, sweep freshness, ADR 0089 exit codes, the three-greens streak rule and the flake ledger, the `[scheduled_gate]` mode record; wired into the six `*-release.yml`, `debrief.yml` (tags) and `publish.yml`, and the tag checklist; positive controls (a planted red refuses, a stale sweep is not measured, a rerun green still refuses, an intermittent red with greens in between still ages, an unsigned mode flip after `report_until` still refuses) | 2 | WP-2, WP-3, D4 |
-| WP-6 | Waiver and mode records, per-line blame and signature check against ADR 0097's trust root (unsigned, wrong-key and edited-line controls; the go-live anchor read from `origin/main`'s first-parent history) | 0.5 | ADR 0097 accepted, D5 (a) |
+| WP-5 | `gate --app --commit`: stateless verdict, 24 h streak rule, pending runs, release-branch tags, sweep freshness, ADR 0089 exit codes, the three-greens streak rule and the flake ledger, the `[scheduled_gate]` mode record; wired into the six `*-release.yml`, `debrief.yml` (tags) and `publish.yml`, and the tag checklist; positive controls (a planted red refuses, a stale sweep is not measured, a rerun green still refuses, an intermittent red with greens in between still ages, an unsigned mode flip after the allowance still refuses, a key outside the trust root refuses, delete-and-re-add on `main` keeps the go-live time, a fresh record on a release branch gives no allowance, a deleted record on `main` is exit 6, a back-dated go-live commit gets the run's `created_at`, a signature with the presence bit clear refuses) | 2 | WP-2, WP-3, D4 |
+| WP-6 | Waiver and mode records, per-line blame and signature check against ADR 0097's trust root through ADR 0097's verifier (unsigned, wrong-key, presence-bit-clear and edited-line controls; the go-live anchor read from `origin/main`'s first-parent history, its time from the first Actions run's `created_at`) | 0.5 | ADR 0097 accepted, D5 (a) |
 | WP-7 | Rule text (a Paddock rule and an ER-33 amendment, below), agent and reviewer briefs | 0.5 | WP-5 |
 | WP-8 | Go-live: report-only switch on, backfill sweep, `docs/ci-schedules.md` corrected; at the end of the period the triage list for the user | 0.5 | WP-4, WP-5 |
 
@@ -514,3 +527,15 @@ and not from issues, unless the user has waived that failure with a step that ne
 - P2 (the gate step runs from the tagged tree): stated as a residual risk under the Invariant, shared with every release
   gate (ADR 0089 `measured-on`, C103 (d)), with protected tags or a post-tag job-list check from `main` as remedies, and
   handed to ADR 0097 as R5 (§5). Not fixed here.
+
+## At acceptance
+
+- Accepted by the user on 2026-11-10: D1 to D13 and D15 as recommended, D14 (a) (the daytime digest at 09:13 and 15:13
+  local as an exception to the night-only scheduling decision). The independent review approved revision 4 at
+  `6270bbbbe`.
+- The review's P2s on revision 4: the unsigned allowance starts from the server-recorded `created_at` of the first Actions
+  run on `origin/main` containing the go-live commit, not the committer date (§4); the WP-5 row lists every positive
+  control of §4; `origin/main` must be protected against force-push, covered by ADR 0097's R5 and D8 (§4).
+- Aligned with ADR 0097 (`d21eddcbf`, proposed): the mode record is read only from `origin/main`'s first-parent history
+  (0097 §6), so the tagged tree's copy is not required and has no effect, while a record missing on `main` stays exit 6
+  (§4); verification goes through 0097's verifier, which requires the user-presence bit, not `%G?` (§5).
