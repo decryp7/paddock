@@ -1037,8 +1037,8 @@ adr = "0073"
   note = "decide, resolve and dev_override: used by the store worker (app and CLI) and the plugins binary lookups."
 
   [[mechanism.copy]]
-  paths = ["apps/debrief/crates/chromium-driver/src/ignored_env.rs", "apps/debrief/crates/chromium-driver/src/discover.rs"]
-  symbols = ["item:warn_once", "item:first_time", "item:find_with"]
+  paths = ["apps/debrief/crates/chromium-driver/src/ignored_env.rs", "apps/debrief/crates/chromium-driver/src/discover.rs", "apps/debrief/crates/chromium-driver/src/launch.rs"]
+  symbols = ["item:warn_once", "item:first_time", "item:find_with", "item:decide", "item:from_environment"]
   owner = "debrief"
   delete_by = "debrief-v1.2.0"
   note = "chromium-driver is a neutral crate that moves to paddock-chromium (docs/plans/shared-next.md), so it cannot depend on debrief-ipc; it keeps its own log-once for CHROMIUM_PATH and DEBRIEF_BROWSER_NO_SANDBOX (launch.rs Sandbox::decide takes the same debug flag)."
