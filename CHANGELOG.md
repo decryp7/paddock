@@ -26,8 +26,15 @@ Conventional Commits; one semver tag for the whole repo.
   mains that reach `paddock-proc` and do not call it first in `main` yet (`ADOPTING`, which only shrinks; `[[bin]] path`
   included, `#![no_main]` fuzz targets skipped; an `async` or `#[tokio::main]` main is refused: call it from a plain
   `fn main`). The guardian never removes the home folder, its ancestors or a path of two components or fewer.
-- New `Supervised::spawn_owning_folder(cmd, cap, folder)`; `ProcessId::may_be_alive` and `StartTime::is_near` (start times
-  within the clock's slack, for decisions that err towards "still there"; kills still compare exactly).
+- New `Supervised::spawn_owning_folder(cmd, cap, folder)`; `ProcessId::may_be_alive` (false only when the OS proved the
+  process gone: **`Unknown` counts as alive**) and `StartTime::is_near` (start times within the clock's slack, for decisions
+  that err towards "still there"; kills still compare exactly).
+- `paddock-proc`: the three-valued look at a process. New `Presence` (`Running`, `Gone`, `Unknown` when the process table or
+  the holder's start time cannot be read; `Presence::may_be_alive` counts `Unknown` as alive), `ProcessId::presence`,
+  `ProcessId::presence_near` (start time compared within the clock's slack) and `ProcessId::recorded_presence(pid,
+  written_ms)` (the holder must have started no later than the record). Code that deletes something on "gone" (a profile
+  folder, a discovery or lock file) uses these, so an unreadable process table removes nothing; `is_alive` keeps `Unknown`
+  as not running, for code that ends or waits for a process (ADR 0081).
 - `paddock-chromium`: throwaway profiles go with an orphaned browser, are named `chromium-<pid>-s<start µs>-...`, and each
   throwaway launch sweeps profiles whose owner is gone (by pid and start time, within the slack).
 
