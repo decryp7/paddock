@@ -10,8 +10,6 @@ use debrief_ipc::process::SpawnSpec;
 use debrief_ipc::{launch::ChildSpec, RemoteError};
 use std::sync::Arc;
 use std::time::Duration;
-#[cfg(unix)]
-use std::time::Instant;
 
 #[cfg(unix)]
 fn probe_spec(dir: &std::path::Path) -> ChildSpec {
@@ -45,10 +43,6 @@ fn stop_a_probe_child() -> Ended {
         b"up"
     );
     child.stop();
-    let started = Instant::now();
-    while !child.exited() && started.elapsed() < Duration::from_secs(10) {
-        std::thread::yield_now();
-    }
     assert!(child.exited(), "the child is gone");
     Ended {
         first_entered: size(&dir.path().join("entered-1")) > 0,

@@ -295,7 +295,32 @@ fn step(_running: &crate::shutdown::Active, s: &Shared, conn: &Connection, write
     Ok(Turn::Worked)
 }
 
+/// Test hook (feature `exit-hold`, never in a shipped build): when the environment names a file in `DEBRIEF_EXIT_HOLD`, the
+/// thread stays inside DuckDB (a statement that fails in the binder, outside the exit handler's count) until it is
+/// stopped, and records `held` when it starts and `stopped` when it ends. A worker whose `main` does not stop and join
+/// this thread before it exits never writes `stopped`; one that exits with the thread live can crash in DuckDB's static
+/// destructors (the store worker's exit crash, ADR 0076 amendment WP-X0).
+#[cfg(feature = "exit-hold")]
+fn hold_for_exit_tests(s: &Shared, conn: &Connection) {
+    use std::io::Write;
+    let Some(path) = std::env::var_os("DEBRIEF_EXIT_HOLD") else {
+        return;
+    };
+    let note = |text: &str| {
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+            let _ = writeln!(f, "{text}");
+        }
+    };
+    note("held");
+    while !s.stop.load(Ordering::SeqCst) {
+        let _ = conn.execute_batch("SELECT i FROM range(1)");
+    }
+    note("stopped");
+}
+
 fn run(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) {
+    #[cfg(feature = "exit-hold")]
+    hold_for_exit_tests(s, conn);
     while !s.stop.load(Ordering::SeqCst) {
         // Every statement of a turn (the step and the checkpoint after it) runs under one guard the exit handler counts
         // (see `fts::step`): a checkpoint outside it ran on while C++ destroyed DuckDB's statics at exit and crashed

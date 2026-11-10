@@ -27,38 +27,72 @@ pub const STOP_BUDGET: Duration = Duration::from_millis(1250);
 /// Covers the parent's kill and reap, and a child's last log lines, on top of [`STOP_BUDGET`].
 pub const STOP_MARGIN: Duration = Duration::from_millis(250);
 
-/// Whether the child's exit phase has begun (its `main` is past the connection), and the wait for it.
+/// Who ends the process: the child's `main` (past the connection) or, after a bound, the lifeline. One claim wins, under
+/// one lock, so the two never both run an exit.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Exit {
+    Serving,
+    MainExiting,
+    LifelineExiting,
+}
+
 struct Phase {
-    begun: Mutex<bool>,
+    state: Mutex<Exit>,
     wake: Condvar,
 }
 
 static PHASE: Phase = Phase {
-    begun: Mutex::new(false),
+    state: Mutex::new(Exit::Serving),
     wake: Condvar::new(),
 };
 
 impl Phase {
-    fn begin(&self) {
-        *self.begun.lock().unwrap_or_else(|p| p.into_inner()) = true;
-        self.wake.notify_all();
+    #[cfg(test)]
+    fn new() -> Phase {
+        Phase {
+            state: Mutex::new(Exit::Serving),
+            wake: Condvar::new(),
+        }
     }
 
-    /// Waits at most `max` for the phase to begin; whether it has.
-    fn wait_begun(&self, max: Duration) -> bool {
-        let g = self.begun.lock().unwrap_or_else(|p| p.into_inner());
-        self.wake
-            .wait_timeout_while(g, max, |begun| !*begun)
-            .map(|(g, _)| *g)
-            .unwrap_or_else(|p| *p.into_inner().0)
+    /// `main` claims the exit; false when the lifeline claimed it first (this `main` must then park: the lifeline ends the
+    /// process).
+    fn claim_main(&self) -> bool {
+        let mut st = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        if *st == Exit::LifelineExiting {
+            return false;
+        }
+        *st = Exit::MainExiting;
+        self.wake.notify_all();
+        true
+    }
+
+    /// Waits at most `max` for `main` to claim the exit; if it has not by then, the lifeline claims it and this says true.
+    fn claim_fallback(&self, max: Duration) -> bool {
+        let g = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        let mut g = self
+            .wake
+            .wait_timeout_while(g, max, |st| *st == Exit::Serving)
+            .map(|(g, _)| g)
+            .unwrap_or_else(|p| p.into_inner().0);
+        if *g == Exit::Serving {
+            *g = Exit::LifelineExiting;
+            return true;
+        }
+        false
     }
 }
 
 /// Says that this child's exit phase has begun: its `main` is past the connection and ends the process itself. A child
 /// whose `main` calls [`child_main`] never calls this (it does); one that serves by [`connect_speaking`] and
-/// [`lifeline_closing`] calls it when its own `wait_closed` returns.
+/// [`lifeline_closing`] calls it when its own `wait_closed` returns. If the lifeline's fallback already took the exit
+/// (a `main` that was too late), this parks the calling thread for good: the lifeline ends the process.
 pub fn exit_phase_begun() {
-    PHASE.begin();
+    if !PHASE.claim_main() {
+        loop {
+            std::thread::park();
+        }
+    }
 }
 
 /// Largest bootstrap line read from stdin.
@@ -142,7 +176,7 @@ pub fn lifeline_closing(peer: &Peer) {
             );
             // `exit` runs no destructors: remove the endpoints of children this process was still starting.
             crate::endpoint::remove_live();
-            std::process::exit(0);
+            end_without_destructors(0);
         });
     });
 }
@@ -179,7 +213,7 @@ fn close_then_end(peer: &Peer, phase: &Phase, wait: Duration, fallback: impl FnO
     // Endpoints of children this process was still starting: `main`'s exit runs no destructors for them either.
     crate::endpoint::remove_live();
     peer.close();
-    if !phase.wait_begun(wait) {
+    if phase.claim_fallback(wait) {
         fallback();
     }
 }
@@ -281,10 +315,7 @@ mod tests {
     #[test]
     fn the_lifeline_closes_the_peer_and_leaves_the_exit_to_main_once_the_phase_begins() {
         let peer = a_peer();
-        let phase = Arc::new(Phase {
-            begun: Mutex::new(false),
-            wake: Condvar::new(),
-        });
+        let phase = Arc::new(Phase::new());
         let ended = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let t = {
             let (peer, phase, ended) = (peer.clone(), phase.clone(), ended.clone());
@@ -296,7 +327,7 @@ mod tests {
         };
         // `main` sees the connection close and begins the phase.
         assert!(peer.wait_closed(Some(Duration::from_secs(10))));
-        phase.begin();
+        assert!(phase.claim_main());
         t.join().unwrap();
         assert!(
             !ended.load(std::sync::atomic::Ordering::SeqCst),
@@ -307,14 +338,13 @@ mod tests {
     #[test]
     fn the_lifeline_ends_the_process_itself_when_the_phase_never_begins() {
         let peer = a_peer();
-        let phase = Phase {
-            begun: Mutex::new(false),
-            wake: Condvar::new(),
-        };
+        let phase = Phase::new();
         let mut ended = false;
         close_then_end(&peer, &phase, Duration::from_millis(50), || ended = true);
         assert!(peer.is_closed(), "it closed the peer first");
         assert!(ended, "after the bound it falls back to ending the process");
+        // A `main` that comes late finds the exit taken: it must park, never run a second exit.
+        assert!(!phase.claim_main(), "the lifeline owns the exit now");
     }
 
     #[test]

@@ -129,6 +129,35 @@ fn the_worker_ends_cleanly_when_debrief_stops_it() {
     );
 }
 
+/// `run()` joins the store threads before `main` returns: the catalogue thread is held inside DuckDB by the test hook
+/// (`DEBRIEF_EXIT_HOLD`, feature `exit-hold`) until it is stopped, and writes `stopped` when it is. A worker that returns
+/// without stopping it never writes it (and can crash in DuckDB's static destructors with the thread live).
+#[test]
+fn the_worker_stops_its_store_threads_before_it_exits() {
+    let marker = TempDir::new("exit-hold");
+    let note = marker.0.join("hold.log");
+    let dir = TempDir::new("exit-hold-store");
+    let mut cfg = confined(env!("CARGO_BIN_EXE_debrief-store-worker"));
+    cfg.env.push(("DEBRIEF_EXIT_HOLD".into(), note.display().to_string()));
+    let w = StoreWorker::new(cfg).unwrap();
+    let _store = w.open_store(&dir.0, Profile::default_profile(), true, None).unwrap();
+    let pid = w.status().pid.expect("the worker runs");
+    let held = || std::fs::read_to_string(&note).is_ok_and(|t| t.lines().any(|l| l == "held"));
+    paddock_testkit::wait_until("the catalogue thread to be held inside DuckDB", held);
+    let waiter = std::thread::spawn(move || wait_how(pid));
+    w.shutdown();
+    let ended = waiter.join().unwrap();
+    assert!(
+        matches!(ended, Ended::Exited(0) | Ended::Unknown),
+        "the worker did not exit with status 0: {ended:?}"
+    );
+    let text = std::fs::read_to_string(&note).unwrap_or_default();
+    assert!(
+        text.lines().any(|l| l == "stopped"),
+        "the thread was not stopped before the worker exited: {text:?}"
+    );
+}
+
 #[test]
 #[ignore = "a measurement: see the module docs (DEBRIEF_EXIT_RUNS, DEBRIEF_EXIT_PAR, DEBRIEF_EXIT_BUSY)"]
 fn measure_the_workers_exit_under_load() {

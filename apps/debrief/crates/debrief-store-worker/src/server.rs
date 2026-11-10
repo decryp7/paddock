@@ -98,9 +98,15 @@ impl Worker {
         }
     }
 
-    /// Stops everything of the worker that runs native code, within `budget`, before the process ends: the stores'
-    /// background threads (each store's indexer and catalogue builder) are stopped and joined, then the stores and import
-    /// sessions are dropped (closing their databases). Blocking joins run on a helper thread, so the bound holds.
+    /// Stops what the worker owns that runs native code, within `budget`, before the process ends: each import session is
+    /// cancelled and waited for, each store's background threads (indexer, catalogue builder) are stopped and joined, then
+    /// the stores are dropped (closing their databases when nothing else holds them). Blocking joins run on a helper
+    /// thread, so the bound holds.
+    ///
+    /// **Not stopped (open owners, for the exit phase's ratchet, ADR 0076 amendment WP-X1/X3):** the threads of calls in
+    /// flight (`spawn_blocking` work of the peer's handler is not waited for; the peer's close cancels it, but nothing joins
+    /// it, and the `DuckStore` clones it holds keep the databases open), the plugin processes' own threads, and the IPC
+    /// runtime's threads.
     ///
     /// `Err` names what was still running when the budget ran out (the thread being joined and its store): the caller
     /// must then end the process without running static destructors, never return into `exit` under a live statement.
@@ -112,8 +118,11 @@ impl Worker {
                 let path = path.display().to_string();
                 store.stop_for_exit(&|thread| *lock(doing) = format!("joining thread {thread} of the store {path}"));
             }
-            *lock(doing) = "dropping the import sessions".into();
-            drop(sessions);
+            for (id, session) in sessions {
+                *lock(doing) = format!("cancelling and waiting for the import session {id}");
+                session.cancel();
+                let _ = session.wait();
+            }
             *lock(doing) = "closing the stores".into();
             drop(stores);
         })
@@ -475,6 +484,10 @@ pub fn run(plugins: Arc<dyn PluginSource>, mode: MemoryMode, tuning: StoreTuning
             debrief_ipc::child::end_without_destructors(0);
         }
     }
+    // The process ends next: dropping the worker now would only run the stores' drops (their joins and database closes) a
+    // second time, under the exit, and let a missing stop above hide behind them. What `stop_for_exit` did not stop stays
+    // running, as it must be seen to (the exit test's hold).
+    std::mem::forget(worker);
     result
 }
 
@@ -500,6 +513,29 @@ mod tests {
             "{err}"
         );
         drop(release);
+    }
+
+    /// An import session is cancelled and waited for: dropping it detaches its `debrief-import` thread, which would run on
+    /// (and keep its store's connections open) while the process exits.
+    #[test]
+    fn stopping_for_exit_cancels_and_waits_for_the_import_sessions() {
+        let worker = Worker::default();
+        let ended = Arc::new(AtomicBool::new(false));
+        let progress = Arc::new(debrief_core::workspace::ImportProgress::default());
+        let seen = ended.clone();
+        let session = ImportSession::spawn(progress, move |p| {
+            // Runs until cancelled (bounded, so a failing run does not leave a spinning thread behind).
+            let give_up = std::time::Instant::now() + Duration::from_secs(30);
+            while !p.is_cancelled_flag() && std::time::Instant::now() < give_up {
+                std::thread::park_timeout(Duration::from_millis(5));
+            }
+            seen.store(true, Ordering::SeqCst);
+            Ok(Default::default())
+        })
+        .unwrap();
+        worker.session(session);
+        worker.stop_for_exit(Duration::from_secs(10)).unwrap();
+        assert!(ended.load(Ordering::SeqCst), "the import thread was still running after the stop");
     }
 
     fn none(_: Vec<u8>) -> bool {

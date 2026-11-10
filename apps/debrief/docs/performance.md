@@ -826,13 +826,29 @@ arm below `H2` has it.
 | **fix H2** | both fixes (one exit route, the bounded join), hook | 200 (`BUSY=2`) | **0 of 200** |
 | fix natural | both fixes, no hook | 100 (2 copies, `BUSY=2`) | 0 of 100 |
 
-Reading: arm 1 crashes without any second exit route, so (a), a live native thread during static destruction, is a
-cause on its own. Arm 2 crashes every time: with both exits kept, the lifeline's `exit` starts the static destructors while
-`main` is still joining, so a join in `main` alone protects nothing; this arm does not show that (b) alone crashes, since
-(a) is present in it until the join ends. Both fixes together: 0 of 200, where `p` was about 0.12 (the chance of 0 of 200 at
-that rate is about 1e-11); the recommended count of about 3/p is 25. The post-fix run was 8 times that. With the hook,
-arm 0 and arm 1 differ (12 and 22 of 100) by more than their separate noise suggests but were run at different loads; no
-claim is made about the relative size.
+Review corrections (same day). The hook is now the `exit-hold` feature of `debrief-store-duck` (`DEBRIEF_EXIT_HOLD`), enabled
+by the worker's dev-dependency, with a test (`the_worker_stops_its_store_threads_before_it_exits`) that fails when `run()`
+does not stop the store threads. Arm 2 as first run (the row above, 100 of 100) **deviates from WP-X0's spec**: the lifeline
+still exited at once, before the join. As specified (the join in `main`, the lifeline's `exit` only after the join, so both
+`exit`s still run with nothing native alive) it was run again:
+
+| arm | what runs | runs | crashed |
+|---|---|---|---|
+| **2 H2 as specified** | the join, both exits kept, the lifeline exits only after the join | 100 | **0 of 100** |
+| fix H2 (the committed code, hook as the feature) | both fixes | 100 | 0 of 100 (2 `unknown`) |
+
+Reading: arm 1 crashes without any second exit route, so (a), a live native thread during static destruction, is a cause on
+its own. Arm 2 as specified does not crash, so a second `exit` alone, with nothing native alive, was not seen to crash:
+(b) amplifies (a) (arm 2 as first run, where the second `exit` ran before the join: 100 of 100) but is not shown to be a cause
+without it; the 0 of 100 bounds it only loosely (95% upper bound about 3%).
+
+**The D-E4 gate for instance 5 is NOT met yet.** The gate is the rate of crash reports against today's rate (21 reports in six
+days, about 3.5 a day). What was measured: the natural arm 0 was 0 of 107 runs, so the natural per-run rate `p` is
+unmeasured and below about 0.028 (95%); and 0 of 100 after the fix says nothing when 0 of 107 was also the result before
+it. The hooked rate (`p` about 0.12 with a thread held in DuckDB) proves the mechanism and the fix against that mechanism, not
+the field rate. To close it: a field soak on the development Mac, about 1 to 2 days of normal use with 0 crash reports of
+`debrief-store-worker` (against about 3.5 a day, 0 in 2 days is a 95% bound under one third of the old rate), or a natural
+harness that reproduces the old rate (longer-lived workers with big stores) and then runs 3/p after the fix.
 
 Not measured: the natural per-run rate (the 21 reports came from long-lived workers with big stores; the harness stops a worker
 seconds after an import of a few MB), the hook's catalogue loop is a model of the thread the crash reports show, not the

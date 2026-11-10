@@ -1775,3 +1775,16 @@ Open: the two repaired routes are checked by the barrier test only on macOS (std
 Linux, and Windows' `ExitProcess` is a different mechanism); the shared `paddock_jobs::exit` phase (WP-X1) replaces the
 hand-made pieces.
 Class: a background thread in native code at process exit (CI 6734, CI 7837, instance 5 above).
+
+Review round (2026-11-10): the worker's `stop_for_exit` stops the import sessions (cancel, then wait: dropping an `ImportSession`
+detaches its `debrief-import` thread), the store threads and the stores; **open owners it does not stop, for WP-X1's ratchet:**
+the threads of calls in flight (`spawn_blocking` work of the peer's handler is cancelled by the peer's close but not joined, and
+its `DuckStore` clones keep the databases open), the plugin processes' threads, the IPC runtime's threads. The lifeline's
+fallback claims the exit atomically (serving, main exiting, lifeline exiting; a late `main` parks), and in `debrief-ipc` ends with
+`end_without_destructors`. The D-E4 gate for instance 5 is not met (see `apps/debrief/docs/performance.md`).
+For WP-X3: `BuiltinPlugins::shutdown` stops plugin processes one after the other, so two hung plugins can overrun the 3 s teardown;
+stopping them in parallel fixes it (not done here).
+Two flakes seen, not fixed here: `debrief-ipc` `launch::a_locked_child_cannot_write_files_or_start_programs` on Linux (about 3 of 6
+runs on the base tree, 5 of 6 in one container run; the "before the lockdown" note, probably the handshake thread still being
+listed), and the store worker's client-RSS budget tests (`imports_and_queries_within_the_budgets`, `low_memory_mode_...`), which
+measure the test process's own growth while other tests of the same binary run in it.
