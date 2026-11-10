@@ -740,13 +740,7 @@ fn live_guard_edits_mark_conformance_exactly_as_affected_mjs_does() {
     }
     let dir = tempfile::tempdir().unwrap();
     let copy = dir.path().join("copy");
-    let cloned = Command::new("git")
-        .args(["clone", "-q", "--shared", "-c", "core.autocrlf=false", "-c", "core.eol=lf"])
-        .arg(repo_root())
-        .arg(&copy)
-        .status()
-        .unwrap();
-    assert!(cloned.success(), "git clone of this repository");
+    copy_checked_out_files(&repo_root(), &copy);
     let history = GitHistory::new(&copy, Duration::from_secs(60));
     let graph = read_graph(&copy, &history).unwrap();
     // A new Rust test with an ignore and a TypeScript spec with an environment guard, and a comment-only edit of each (no mark).
