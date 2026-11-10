@@ -237,7 +237,7 @@ const gb = (d, id) => d.rect[id][1] + d.rect[id][3];
     ['run', 'accent', { name: 'runtime', tech: 'Chrome for Testing', desc: 'Optional pinned download with SHA-256, self-test and rollback by never switching.' }],
   ]);
   grp(d, 'g3', GX(2), Y0, 'chromium-driver', [
-    C('dis', 'discover, install', 'Edge · Chrome · Chromium', 'Finds a browser (`CHROMIUM_PATH` wins); verified, zip-slip-safe install.'),
+    C('dis', 'discover, install', 'Edge · Chrome · Chromium', 'Settings, installed, usual places; `CHROMIUM_PATH` in debug only. Verified, zip-slip-safe install.'),
     C('lau', 'launch, process', 'Supervised child', 'Own process group, killed on drop, time cap, throwaway profile, off screen.'),
     C('cdp', 'cdp, page', 'DevTools client', 'Minimal synchronous client (loopback only); navigate, evaluate, history.'),
     C('rdy', 'ready, challenge, cue', 'Pure rules', 'Readiness, CAPTCHA and consent-wall detection, window title cues.'),
