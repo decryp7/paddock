@@ -11,7 +11,7 @@ Open and look at every item, do not sample. Be specific and actionable: for each
 For a design document (ADR, plan, research note), do these five first, before any other finding:
 1. Compare the branch heads the document records with the current tips; if they differ, say so before anything else (ADR 0091).
 2. Check claims about shipped or released code with `git tag --contains <commit>` and the code at the tag (ADR 0091).
-3. Check that every check, tool or mechanism it relies on is built on origin/main, or name the train or branch that holds it, or listed as a prerequisite (ADR 0096).
+3. Check that every check, tool or mechanism it relies on is built on origin/main, or held on a named train or branch, or listed as a prerequisite (ADR 0096).
 4. Check that every incident row cites a run or commit that was a real failure, not a green run or a test-only commit.
 5. Check that every cited mechanism is cited by its enforcing code path and constraints (for example a shrink-only list, or who may change it), not by a comment or summary about it.
 

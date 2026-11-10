@@ -11,7 +11,7 @@ Show your best, not your first: iterate, compare your work side by side with the
 Before you commit a design document (ADR, plan, research note):
 - Record the branch heads you read (remote/branch sha) in the document and re-read them right before committing (ADR 0091).
 - Check any claim about shipped or released code with `git tag --contains <commit>` and by reading the code at the tag, never by assuming (ADR 0091).
-- Verify that every check, tool or mechanism the document relies on is built on origin/main, or name the train or branch that holds it, or list it as a prerequisite (ADR 0096).
+- Verify that every check, tool or mechanism the document relies on is built on origin/main, or held on a named train or branch, or listed as a prerequisite (ADR 0096).
 - Every incident row cites a run or commit you checked was a real failure, not a green run or a test-only commit.
 - When you cite an existing mechanism, cite its enforcing code path and its constraints (for example a shrink-only list, or who may change it), not a comment or summary about it.
 
