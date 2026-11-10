@@ -2,12 +2,22 @@
 //! left (pid and start time only) and which windows' sessions a crash restore offers (labels only, never
 //! the sessions' paths or queries).
 
-use crate::lifecycle::{os_probe, MarkerFile, SessionStore};
+use crate::lifecycle::{os_probe, Look, MarkerFile, SessionStore};
 use serde_json::{json, Value};
 use std::path::Path;
 
 /// Largest marker file read.
 const MAX_MARKER: u64 = 4096;
+
+/// Whether the marker's process runs, as the report says it: `false` only when the OS said it is gone or another process has
+/// the pid; `null` when the look could not tell (an unreadable process table or start time).
+fn process_alive(look: Look, started_at: Option<u64>) -> Value {
+    match look {
+        Look::Gone => json!(false),
+        Look::Unknown | Look::Started(0) => Value::Null,
+        Look::Started(now) => json!(started_at.is_none_or(|then| now.abs_diff(then) <= 1)),
+    }
+}
 
 fn marker(data: &Path) -> Value {
     let path = data.join("running.marker");
@@ -22,7 +32,7 @@ fn marker(data: &Path) -> Value {
         MarkerFile::Missing => json!({ "state": "missing" }),
         MarkerFile::Unreadable => json!({ "state": "unreadable" }),
         MarkerFile::Found(m) => {
-            let alive = os_probe(m.pid).started().is_some_and(|now| m.started_at.is_none_or(|then| now.abs_diff(then) <= 1));
+            let alive = process_alive(os_probe(m.pid), m.started_at);
             json!({ "state": "found", "pid": m.pid, "startedAt": m.started_at, "processAlive": alive })
         }
     }
@@ -65,6 +75,20 @@ pub fn summary(v: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_look_that_could_not_tell_is_reported_as_unknown_not_as_not_running() {
+        assert_eq!(process_alive(Look::Gone, Some(5)), json!(false));
+        assert_eq!(process_alive(Look::Unknown, Some(5)), Value::Null);
+        assert_eq!(process_alive(Look::Started(0), Some(5)), Value::Null, "start 0 is no start time");
+        assert_eq!(process_alive(Look::Started(5), Some(5)), json!(true));
+        assert_eq!(
+            process_alive(Look::Started(9), Some(5)),
+            json!(false),
+            "another process has the pid"
+        );
+        assert_eq!(process_alive(Look::Started(9), None), json!(true));
+    }
 
     #[test]
     fn markers_and_sessions_are_reported_without_paths() {

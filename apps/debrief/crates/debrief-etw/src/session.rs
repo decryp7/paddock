@@ -412,8 +412,14 @@ mod tests {
         let me = std::process::id();
         assert!(is_orphan(PREFIX, "Debrief-test-999999-5-1", |_| Owner::Gone));
         assert!(!is_orphan(PREFIX, "Debrief-test-999999-5-1", |_| Owner::Running));
-        assert!(!is_orphan(PREFIX, "Debrief-test-999999-5-1", |_| Owner::Unknown), "a refused look keeps the session");
-        assert!(!is_orphan(PREFIX, &format!("Debrief-test-{me}-5-1"), |_| Owner::Gone), "our own sessions");
+        assert!(
+            !is_orphan(PREFIX, "Debrief-test-999999-5-1", |_| Owner::Unknown),
+            "a refused look keeps the session"
+        );
+        assert!(
+            !is_orphan(PREFIX, &format!("Debrief-test-{me}-5-1"), |_| Owner::Gone),
+            "our own sessions"
+        );
         assert!(!is_orphan(PREFIX, "NT Kernel Logger", |_| Owner::Gone));
         assert!(!is_orphan(PREFIX, "Debrief-test-x-5-1", |_| Owner::Gone));
         let a = session_name(PREFIX, 7);

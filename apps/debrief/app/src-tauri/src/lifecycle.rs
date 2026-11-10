@@ -93,6 +93,7 @@ impl Look {
     }
 }
 
+#[cfg(test)]
 impl From<Option<u64>> for Look {
     /// A table that was read: a start time, or nobody.
     fn from(seen: Option<u64>) -> Look {
@@ -227,7 +228,9 @@ pub fn os_probe(pid: u32) -> Look {
         return Look::Unknown;
     };
     sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[id]), false, ProcessRefreshKind::nothing());
-    look_from(sys.process(id).map(|p| (p.start_time(), p.status())), || paddock_proc::presence(pid))
+    look_from(sys.process(id).map(|p| (p.start_time(), p.status())), || {
+        paddock_proc::presence(pid)
+    })
 }
 
 /// [`os_probe`] over what sysinfo listed (start time, status) and the confirmation asked when it listed nothing.
@@ -1310,7 +1313,11 @@ mod tests {
         let unreadable = |_: u32| Look::Unknown;
         assert_eq!(previous_run(marker(5, Some(1_000)), 9, &unreadable), PreviousRun::Unknown);
         let zero = |_: u32| Look::Started(0);
-        assert_eq!(previous_run(marker(5, Some(1_000)), 9, &zero), PreviousRun::Unknown, "start 0 is no start time");
+        assert_eq!(
+            previous_run(marker(5, Some(1_000)), 9, &zero),
+            PreviousRun::Unknown,
+            "start 0 is no start time"
+        );
     }
 
     #[test]
