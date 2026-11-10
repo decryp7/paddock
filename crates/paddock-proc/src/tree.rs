@@ -159,10 +159,34 @@ pub(crate) fn end_pinned_group(group: u32, keeper: ProcessId) -> bool {
         && crate::sys::signal_group(group, crate::sys::SIGKILL)
 }
 
-/// Whether the process group `group` still has a member (zombies included).
+/// Whether the process group `group` still has a member that runs. A zombie, which only waits to be reaped, is not one:
+/// Linux's `kill(-group, 0)` counts it, and where nothing reaps the orphans (a container whose init does not) it would
+/// make the answer "yes" forever. macOS does not count zombies, so the table is read only when the signal says yes.
 #[cfg(unix)]
 pub(crate) fn group_exists(group: u32) -> bool {
     crate::sys::signal_group(group, 0)
+        && group_runs_in(
+            &usage::snapshot(),
+            group,
+            crate::sys::group_of,
+            crate::sys::is_zombie,
+        )
+}
+
+/// Whether a process of `table` that is in `group` and not a zombie exists. A process whose group cannot be read is gone
+/// (it ended since the table was read); one whose state cannot be read is not known to be a zombie, so it counts as running.
+/// An empty table is an unreadable one (this process is in it), so nothing is known and the signal's "yes" stands.
+#[cfg(unix)]
+pub(crate) fn group_runs_in(
+    table: &Table,
+    group: u32,
+    group_of: impl Fn(u32) -> Option<u32>,
+    is_zombie: impl Fn(u32) -> bool,
+) -> bool {
+    table.is_empty()
+        || table
+            .keys()
+            .any(|&pid| group_of(pid) == Some(group) && !is_zombie(pid))
 }
 
 /// Ends `root` and everything below it. A child started by this crate leads its own process group (Unix), which is
@@ -785,6 +809,7 @@ mod presence_tests {
 mod tests {
     use super::*;
     use crate::Supervised;
+    use std::process::Command;
 
     #[test]
     fn an_unreadable_process_table_is_not_a_process_that_was_gone() {
@@ -1085,5 +1110,61 @@ mod tests {
             Terminated::Killed
         );
         s.kill();
+    }
+
+    /// `kill(-group, 0)` counts a zombie as a member; the guardian waits for a group to empty, so a group whose members
+    /// only wait to be reaped (a container whose init does not reap) must read as empty, and one with a running member not.
+    #[cfg(unix)]
+    #[test]
+    fn a_group_of_zombies_has_no_member_that_runs() {
+        use std::os::unix::process::CommandExt;
+        let mut dead = Command::new("/bin/sh");
+        dead.args(["-c", "exit 0"]).process_group(0);
+        let mut dead = dead.spawn().unwrap();
+        let zombie = dead.id();
+        // Not waited for: it stays a zombie until this test reaps it.
+        paddock_testkit::wait::wait_until("the child to exit and wait to be reaped", || {
+            crate::sys::is_zombie(zombie)
+        });
+        // Linux counts the zombie; macOS does not (killpg fails there), so the check below holds either way.
+        #[cfg(target_os = "linux")]
+        assert!(
+            crate::sys::signal_group(zombie, 0),
+            "the OS still counts the zombie as a member of its group"
+        );
+        assert!(!group_exists(zombie), "a zombie is not a member that runs");
+        dead.wait().unwrap();
+
+        let mut live = Command::new("/bin/sh");
+        live.args(["-c", "sleep 60"]).process_group(0);
+        let mut live = live.spawn().unwrap();
+        assert!(group_exists(live.id()));
+        live.kill().unwrap();
+        // Between the kill and the reap the child is a zombie: not a running member either.
+        paddock_testkit::wait::wait_until("the killed group to have no running member", || {
+            !group_exists(live.id())
+        });
+        live.wait().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_group_runs_while_a_member_that_is_not_a_zombie_is_in_it() {
+        let row = || usage::Row {
+            parent: None,
+            rss: 0,
+            started: None,
+        };
+        let table: Table = [(10, row()), (11, row()), (12, row())].into();
+        let group_of = |pid: u32| Some(if pid == 12 { 99 } else { 7 });
+        // Members 10 and 11 of group 7: one zombie, one not.
+        assert!(group_runs_in(&table, 7, group_of, |pid| pid == 10));
+        // Both zombies: the group is empty; 12 is another group's.
+        assert!(!group_runs_in(&table, 7, group_of, |pid| pid != 12));
+        // A process that cannot be read is not in the group; no state read counts as running.
+        assert!(!group_runs_in(&table, 7, |_| None, |_| false));
+        assert!(group_runs_in(&table, 7, group_of, |_| false));
+        // An unreadable (empty) table knows nothing: the signal's answer stands.
+        assert!(group_runs_in(&Table::default(), 7, group_of, |_| true));
     }
 }
