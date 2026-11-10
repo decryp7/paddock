@@ -2111,3 +2111,25 @@ test('the tag-rule check sees a mutated workflow: a token without the rule, and 
   const plan = ci.replace(/^ {10}PADDOCK_DEV_DOWNLOAD:.*\n/gm, '');
   assert.ok(tagRuleProblems('ci.yml', plan).some((p) => p.includes('runs ./dev')), 'a ./dev step without the rule is reported');
 });
+
+import { bashBeforeGitBash } from '../src/util/windows-bash.mjs';
+
+test('no Windows host job runs a bash step before Git bash is on PATH (there bash is WSL: run 7880)', () => {
+  const bad = [];
+  for (const f of readdirSync(WORKFLOWS).filter((n) => n.endsWith('.yml'))) {
+    for (const v of bashBeforeGitBash(read(join(WORKFLOWS, f)))) bad.push(`${f}: job ${v.job}, step "${v.step}" (${v.why})`);
+  }
+  assert.deepEqual(bad, []);
+});
+
+test('the bash-before-Git-bash check flags the 7880 shape and passes the fixed order, Linux-only steps and non-Windows jobs', () => {
+  const wf = (steps, runsOn = '${{ matrix.os }}') => `jobs:\n  bundle:\n    runs-on: ${runsOn}\n    defaults:\n      run:\n        shell: bash\n    steps:\n${steps}`;
+  const check = `      - name: The kit is this commit\n        run: |\n          echo hi\n`;
+  const gitBash = `      - name: Git bash on PATH (Windows)\n        if: runner.os == 'Windows'\n        shell: cmd\n        run: |\n          echo x\n`;
+  assert.equal(bashBeforeGitBash(wf(check + gitBash)).length, 1, 'positive control: bash step first');
+  assert.equal(bashBeforeGitBash(wf(check)).length, 1, 'positive control: no Git bash step at all');
+  assert.equal(bashBeforeGitBash(wf(`      - uses: ./.gitea/actions/build-jobs\n` + gitBash)).length, 1, 'positive control: composite action first');
+  assert.deepEqual(bashBeforeGitBash(wf(gitBash + check)), []);
+  assert.deepEqual(bashBeforeGitBash(wf(check.replace('        run', "        if: runner.os == 'Linux'\n        run") + gitBash)), []);
+  assert.deepEqual(bashBeforeGitBash(wf(check, 'ubuntu-latest')), []);
+});
