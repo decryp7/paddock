@@ -145,7 +145,7 @@ fn an_error_names_a_service_outage_only_while_that_service_is_down() {
 /// and it is used as it is. It used to be rebuilt here on every run: `cargo build -p debrief-store-worker` resolves
 /// features for that one package, unlike the workspace build, so it recompiled part of the dependency graph inside the
 /// test and swapped the binary under the other tests, and on a busy CI runner the test ran past nextest's five-minute
-/// limit. Like the plugins binary (`test_support::ensure_plugins_binary`), it is built only when it is missing (a
+/// limit. It is built only when it is missing (a
 /// `cargo test -p debrief-app` without a workspace build).
 fn built_store_worker() -> std::path::PathBuf {
     let test_exe = std::env::current_exe().unwrap();
