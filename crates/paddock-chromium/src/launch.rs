@@ -399,7 +399,13 @@ fn unique_dir(base: &Path) -> PathBuf {
 /// many were removed. A process counts as gone only when the OS said so: when the process table cannot be read nothing
 /// is known, every owner counts as alive and nothing is removed (rule 53).
 pub fn sweep_profiles(base: &Path) -> usize {
-    sweep_profiles_with(base, &paddock_proc::may_be_alive)
+    sweep_profiles_by_presence(base, &paddock_proc::presence)
+}
+
+/// [`sweep_profiles`] over a look at each owner (tests give one that cannot read the process table): only a proven
+/// `Gone` makes a profile removable.
+fn sweep_profiles_by_presence(base: &Path, look: &dyn Fn(u32) -> paddock_proc::Presence) -> usize {
+    sweep_profiles_with(base, &|pid| look(pid).may_be_alive())
 }
 
 fn sweep_profiles_with(base: &Path, alive: &dyn Fn(u32) -> bool) -> usize {

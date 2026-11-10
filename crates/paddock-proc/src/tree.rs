@@ -231,7 +231,15 @@ pub fn is_alive(pid: u32) -> bool {
 /// Whether `pid` might be a running process: false only when the OS said it is gone. **Unknown counts as alive**, so a
 /// sweep that removes the files of dead processes removes nothing when the process table cannot be read.
 pub fn may_be_alive(pid: u32) -> bool {
-    presence(pid) != Presence::Gone
+    presence(pid).may_be_alive()
+}
+
+impl Presence {
+    /// Whether the process might run: false only for [`Presence::Gone`]; `Unknown` counts as running. The decision of every
+    /// caller that deletes or starts something on "gone".
+    pub fn may_be_alive(self) -> bool {
+        self != Presence::Gone
+    }
 }
 
 /// The three-valued look at `pid` (see [`Presence`]).
@@ -545,6 +553,12 @@ mod tests {
             presence_with(u32::MAX - 1, sysinfo::System::new),
             Presence::Gone
         );
+        assert!(
+            Presence::Unknown.may_be_alive(),
+            "unknown counts as alive for a sweep"
+        );
+        assert!(Presence::Running.may_be_alive());
+        assert!(!Presence::Gone.may_be_alive());
         assert!(may_be_alive(me));
         assert!(!may_be_alive(u32::MAX - 1));
         assert!(processes_mentioning_with("anything", broken).is_empty());

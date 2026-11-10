@@ -20,7 +20,7 @@
 
 use clap::{ArgGroup, Args};
 use paddock_cli::{CliError, Report};
-use paddock_proc::ProcessId;
+use paddock_proc::{Presence, ProcessId};
 use regex::Regex;
 use serde_json::{Value, json};
 use std::io::Write;
@@ -372,12 +372,13 @@ pub fn plock_done_pattern(name: &str) -> Result<Regex, String> {
 /// Waits for a process to exit; the process is its pid AND its start time, so a recycled pid is "gone" (rule 53).
 pub struct PidProbe {
     id: ProcessId,
-    alive: Box<dyn Fn(ProcessId) -> bool>,
+    alive: Box<dyn Fn(ProcessId) -> Presence>,
 }
 
 impl PidProbe {
-    /// Waits for `id`; `alive` is `ProcessId::is_alive` outside the tests.
-    pub fn new(id: ProcessId, alive: Box<dyn Fn(ProcessId) -> bool>) -> PidProbe {
+    /// Waits for `id`; `alive` is `ProcessId::presence` outside the tests. `Unknown` (the process table cannot be read) is
+    /// never "done": the wait goes on until `--max`, which ends with an `::error::`.
+    pub fn new(id: ProcessId, alive: Box<dyn Fn(ProcessId) -> Presence>) -> PidProbe {
         PidProbe { id, alive }
     }
 }
@@ -387,13 +388,16 @@ impl Probe for PidProbe {
         format!("{} to exit", self.id)
     }
     fn poll(&mut self) -> Result<Poll, String> {
-        if (self.alive)(self.id) {
-            Ok(Poll::Pending(format!("{} is still running", self.id)))
-        } else {
-            Ok(Poll::Done(format!(
+        match (self.alive)(self.id) {
+            Presence::Running => Ok(Poll::Pending(format!("{} is still running", self.id))),
+            Presence::Unknown => Ok(Poll::Pending(format!(
+                "{}: the OS process table cannot be read, so it is not known whether it has exited",
+                self.id
+            ))),
+            Presence::Gone => Ok(Poll::Done(format!(
                 "{} has exited (or its pid belongs to another process now)",
                 self.id
-            )))
+            ))),
         }
     }
     fn next_step(&self) -> String {
@@ -544,7 +548,7 @@ pub struct Env<'a> {
     /// HTTP.
     pub http: &'a mut dyn Http,
     /// Whether the process `ProcessId` names is alive.
-    pub alive: Box<dyn Fn(ProcessId) -> bool>,
+    pub alive: Box<dyn Fn(ProcessId) -> Presence>,
     /// The process with this pid now, if any.
     pub process: &'a dyn Fn(u32) -> Option<ProcessId>,
 }
@@ -557,7 +561,7 @@ pub fn command(args: &WaitArgs) -> Result<Report, CliError> {
         var: &var,
         files: &DiskFiles,
         http: &mut http,
-        alive: Box::new(ProcessId::is_alive),
+        alive: Box::new(ProcessId::presence),
         process: &ProcessId::of,
     };
     run_with(args, env, &mut SystemClock::new(), &mut std::io::stderr())
@@ -899,7 +903,7 @@ mod tests {
             id,
             Box::new(move |_| {
                 a.set(a.get() - 1);
-                a.get() > 0
+                if a.get() > 0 { Presence::Running } else { Presence::Gone }
             }),
         );
         let (o, log, _) = go(&mut p, 60, 1);
@@ -908,6 +912,15 @@ mod tests {
             "{o:?}"
         );
         assert!(log.contains("has exited"), "{log}");
+    }
+
+    #[test]
+    fn a_pid_wait_that_cannot_read_the_process_table_never_reports_done() {
+        let id = ProcessId::of(std::process::id()).unwrap();
+        let mut p = PidProbe::new(id, Box::new(|_| Presence::Unknown));
+        let (o, log, _) = go(&mut p, 10, 1);
+        assert!(!matches!(o, Outcome::Done { .. }), "{o:?}");
+        assert!(log.contains("cannot be read"), "{log}");
     }
 
     struct FakeHttp {
@@ -974,7 +987,7 @@ mod tests {
             var: &var,
             files,
             http,
-            alive: Box::new(|_| true),
+            alive: Box::new(|_| Presence::Running),
             process: &process,
         };
         let mut clock = FakeClock::default();

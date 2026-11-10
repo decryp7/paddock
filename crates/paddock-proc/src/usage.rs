@@ -76,16 +76,24 @@ pub fn table_from(entries: impl IntoIterator<Item = ProcEntry>) -> Table {
 pub(crate) fn new_system_with(
     make: impl FnOnce() -> Result<System, sysinfo::Error>,
 ) -> Option<System> {
+    new_system_with_logged(make).0
+}
+
+/// [`new_system_with`], also saying whether this call logged the failure (only the first failure of the process does).
+pub(crate) fn new_system_with_logged(
+    make: impl FnOnce() -> Result<System, sysinfo::Error>,
+) -> (Option<System>, bool) {
     static WARNED: AtomicBool = AtomicBool::new(false);
-    make()
+    let mut logged = false;
+    let sys = make()
         .inspect_err(|why| {
             if first_time(&WARNED) {
-                log::warn!(
-                    "the OS process table is unavailable (sysinfo): {why}; the answer is unknown (logged once)"
-                )
+                logged = true;
+                log::warn!("the OS process table is unavailable (sysinfo): {why}; the answer is unknown (logged once)")
             }
         })
-        .ok()
+        .ok();
+    (sys, logged)
 }
 
 /// True for the first call on `flag` only: a permanent failure is logged once, not on every call of a tick loop.
@@ -1269,6 +1277,20 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
         assert_eq!(resident_with(std::process::id(), broken), None);
         assert!(new_system_with(broken).is_none());
         assert!(new_system_with(System::new).is_some());
+    }
+
+    #[test]
+    fn the_real_wrapper_logs_a_permanent_failure_once() {
+        // The wrapper reports whether this call logged: only the first failure does, a working constructor never.
+        assert!(!new_system_with_logged(System::new).1);
+        let first = new_system_with_logged(broken);
+        let second = new_system_with_logged(broken);
+        assert!(first.0.is_none() && second.0.is_none());
+        assert!(
+            first.1 || second.1,
+            "some call logs (another test may have logged first)"
+        );
+        assert!(!second.1, "the second failure is not logged again");
     }
 
     #[test]

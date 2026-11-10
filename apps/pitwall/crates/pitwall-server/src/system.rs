@@ -119,23 +119,27 @@ pub fn terminate(id: paddock_proc::ProcessId, force: bool) {
 
 /// Whether a process id is alive.
 pub fn pid_alive(pid: u32) -> bool {
-    pid_alive_with(pid, sysinfo::System::new)
+    pid_alive_logged(pid, sysinfo::System::new).0
 }
 
-/// [`pid_alive`] over a constructor of the sysinfo `System`. Unknown counts as alive: a process is never declared gone
-/// because the process table could not be read. That failure is permanent and the release loop asks every 50 ms, so it is
-/// logged once.
-fn pid_alive_with(pid: u32, make: impl FnOnce() -> Result<sysinfo::System, sysinfo::Error>) -> bool {
+/// [`pid_alive`] over a constructor of the sysinfo `System`, also saying whether this call logged a failure. Unknown counts
+/// as alive: a process is never declared gone because the process table could not be read. That failure is permanent and
+/// the release loop asks every 50 ms, so only the first one is logged.
+fn pid_alive_logged(pid: u32, make: impl FnOnce() -> Result<sysinfo::System, sysinfo::Error>) -> (bool, bool) {
     static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let mut logged = false;
     let Ok(mut s) = make().inspect_err(|why| {
-        warn_table_once(&WARNED, why);
+        logged = warn_table_once(&WARNED, why);
     }) else {
-        return true;
+        return (true, logged);
     };
     let p = sysinfo::Pid::from_u32(pid);
     s.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[p]), false);
     // A child that exited but was not reaped yet (a zombie on Linux) is gone for our purposes.
-    s.process(p).is_some_and(|proc| proc.status() != sysinfo::ProcessStatus::Zombie)
+    (
+        s.process(p).is_some_and(|proc| proc.status() != sysinfo::ProcessStatus::Zombie),
+        false,
+    )
 }
 
 /// Logs the unreadable process table on the first call on `flag` only; returns whether it logged.
@@ -160,8 +164,12 @@ mod tests {
 
     #[test]
     fn an_unreadable_process_table_counts_as_alive_and_warns_once() {
-        assert!(pid_alive_with(u32::MAX - 1, || Err(sysinfo::Error::Unsupported)));
-        assert!(!pid_alive_with(u32::MAX - 1, sysinfo::System::new));
+        let broken = || Err(sysinfo::Error::Unsupported);
+        let first = pid_alive_logged(u32::MAX - 1, broken);
+        let second = pid_alive_logged(u32::MAX - 1, broken);
+        assert!(first.0 && second.0, "unknown counts as alive");
+        assert!(!second.1, "the real wrapper does not log the second failure again");
+        assert_eq!(pid_alive_logged(u32::MAX - 1, sysinfo::System::new), (false, false));
         let flag = std::sync::atomic::AtomicBool::new(false);
         let why = sysinfo::Error::Unsupported;
         assert!(warn_table_once(&flag, &why));

@@ -1139,3 +1139,27 @@ fn going_back_ends_at_once_when_the_window_is_closed_meanwhile() {
 fn the_page_size_cap_is_sixteen_mebibytes() {
     assert_eq!(MAX_HTML, 16 << 20);
 }
+
+#[test]
+fn a_sweep_removes_nothing_when_the_process_table_cannot_be_read() {
+    use paddock_proc::Presence::{Gone, Running, Unknown};
+    let base = tempfile::tempdir().unwrap();
+    let made = |pid: u32| {
+        let d = base.path().join(format!("{PROFILE_PREFIX}{pid}-1-0"));
+        std::fs::create_dir(&d).unwrap();
+        d
+    };
+    let (a, b, c) = (made(4_000_001), made(4_000_002), made(4_000_003));
+    assert_eq!(sweep_profiles_by_presence(base.path(), &|_| Unknown), 0);
+    assert_eq!(sweep_profiles_by_presence(base.path(), &|_| Running), 0);
+    assert!(a.exists() && b.exists() && c.exists());
+    assert_eq!(
+        sweep_profiles_by_presence(base.path(), &|pid| if pid == 4_000_002 {
+            Running
+        } else {
+            Gone
+        }),
+        2
+    );
+    assert!(!a.exists() && b.exists() && !c.exists());
+}

@@ -189,21 +189,32 @@ fn read_bounded(path: &Path) -> Result<Option<String>, String> {
     Ok(Some(text))
 }
 
-/// Whether process `pid` exists (any user).
+/// Whether process `pid` exists (any user). When the process table cannot be read the answer is "yes" (a discovery file is
+/// never judged stale on a failed read); that failure is permanent, so it is logged once.
 pub fn pid_alive(pid: u32) -> bool {
-    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    pid_alive_logged(pid, sysinfo::System::new).0
+}
+
+/// [`pid_alive`] over a constructor of the sysinfo `System`, also saying whether this call logged a failure.
+fn pid_alive_logged(pid: u32, make: impl FnOnce() -> Result<sysinfo::System, sysinfo::Error>) -> (bool, bool) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate};
+    static WARNED: AtomicBool = AtomicBool::new(false);
     if pid == 0 {
-        return false;
+        return (false, false);
     }
-    // Unknown counts as alive: a discovery file is never judged stale because the process table could not be read.
-    let Ok(mut sys) =
-        System::new().inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; pid {pid} is assumed alive"))
-    else {
-        return true;
+    let mut logged = false;
+    let Ok(mut sys) = make().inspect_err(|why| {
+        if !WARNED.swap(true, Ordering::Relaxed) {
+            logged = true;
+            log::warn!("the OS process table is unavailable (sysinfo): {why}; processes are assumed alive (logged once)");
+        }
+    }) else {
+        return (true, logged);
     };
     let p = Pid::from_u32(pid);
     sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[p]), true, ProcessRefreshKind::nothing());
-    sys.process(p).is_some()
+    (sys.process(p).is_some(), false)
 }
 
 #[cfg(test)]
@@ -304,5 +315,16 @@ mod tests {
         assert!(pid_alive(std::process::id()));
         assert!(!pid_alive(0));
         let _ = Locator::system().data_dir;
+    }
+
+    #[test]
+    fn an_unreadable_process_table_counts_as_alive_and_is_logged_once() {
+        let broken = || Err(sysinfo::Error::Unsupported);
+        let first = pid_alive_logged(7, broken);
+        let second = pid_alive_logged(7, broken);
+        assert!(first.0 && second.0, "unknown counts as alive");
+        assert!(!second.1, "the second failure is not logged again");
+        let fine = pid_alive_logged(u32::MAX - 1, sysinfo::System::new);
+        assert_eq!(fine, (false, false));
     }
 }

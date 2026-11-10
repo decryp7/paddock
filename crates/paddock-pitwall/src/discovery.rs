@@ -85,7 +85,12 @@ pub fn candidate_dirs(vars: &dyn Vars, os: Os) -> Vec<PathBuf> {
 /// Whether process `pid` may exist (any user); pid 0 never does. When the OS process table cannot be read the answer is
 /// "yes": a discovery file is removed only on a proven "gone" (rule 53).
 pub fn pid_alive(pid: u32) -> bool {
-    pid != 0 && paddock_proc::may_be_alive(pid)
+    pid_alive_by(pid, &paddock_proc::presence)
+}
+
+/// [`pid_alive`] over a look at the process (tests give one that cannot read the table).
+fn pid_alive_by(pid: u32, look: &dyn Fn(u32) -> paddock_proc::Presence) -> bool {
+    pid != 0 && look(pid).may_be_alive()
 }
 
 /// Whether a process id is alive.
@@ -410,5 +415,17 @@ mod tests {
     fn this_process_is_alive_and_pid_zero_is_not() {
         assert!(pid_alive(std::process::id()));
         assert!(!pid_alive(0));
+    }
+
+    #[test]
+    fn a_discovery_file_is_stale_only_when_the_process_is_proven_gone() {
+        use paddock_proc::Presence::{Gone, Running, Unknown};
+        assert!(pid_alive_by(7, &|_| Running));
+        assert!(
+            pid_alive_by(7, &|_| Unknown),
+            "an unreadable process table never makes the file stale (rule 53)"
+        );
+        assert!(!pid_alive_by(7, &|_| Gone));
+        assert!(!pid_alive_by(0, &|_| Running), "pid 0 never exists");
     }
 }

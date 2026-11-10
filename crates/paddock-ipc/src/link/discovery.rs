@@ -76,10 +76,19 @@ impl Discovery {
 }
 
 /// Whether the process `d` names still runs: its pid is held by a process that started before the file was written
-/// (`paddock_proc::ProcessId::of_recorded`). A pid handed on to a newer process makes the file stale (ADR 0033).
+/// (`paddock_proc::ProcessId::recorded_presence`). A pid handed on to a newer process makes the file stale (ADR 0033).
+/// When the process table or the holder's start time cannot be read the answer is "running": a file is removed, and a
+/// second companion started, only on a proven "gone" (rule 53).
 pub fn is_running(d: &Discovery) -> bool {
-    paddock_proc::ProcessId::of_recorded(d.pid, d.started_ms)
-        .is_some_and(paddock_proc::ProcessId::is_alive)
+    running_from(paddock_proc::ProcessId::recorded_presence(
+        d.pid,
+        d.started_ms,
+    ))
+}
+
+/// The decision of [`is_running`] over a look at the process: only `Gone` is stale.
+fn running_from(p: paddock_proc::Presence) -> bool {
+    p.may_be_alive()
 }
 
 /// Reads the discovery file at `path`, with `is_alive` deciding whether its process runs ([`is_running`] in apps; tests
@@ -202,4 +211,20 @@ fn private(path: &Path, _meta: &std::fs::Metadata) -> Result<(), String> {
 #[cfg(not(any(unix, windows)))]
 fn private(_path: &Path, _meta: &std::fs::Metadata) -> Result<(), String> {
     Ok(())
+}
+
+#[cfg(test)]
+mod running_tests {
+    use super::*;
+    use paddock_proc::Presence::{Gone, Running, Unknown};
+
+    #[test]
+    fn a_file_is_stale_only_when_the_process_is_proven_gone() {
+        assert!(running_from(Running));
+        assert!(
+            running_from(Unknown),
+            "an unreadable process table never makes a file stale (rule 53)"
+        );
+        assert!(!running_from(Gone));
+    }
 }

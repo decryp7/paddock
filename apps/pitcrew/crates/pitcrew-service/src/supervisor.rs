@@ -2032,20 +2032,18 @@ struct Adopted {
 /// Whether the adopted runner `pid` has ended (`Some(None)`: gone, its code unknown) or still runs (`None`). Unknown counts
 /// as still running: an adopted runner is never reported as exited because the process table could not be read. That
 /// failure is permanent and this runs every tick, so it is logged once.
-fn adopted_exit(pid: u32, make: impl FnOnce() -> Result<sysinfo::System, sysinfo::Error>) -> Option<Option<i32>> {
+/// The second value says whether this call logged the failure.
+fn adopted_exit(pid: u32, make: impl FnOnce() -> Result<sysinfo::System, sysinfo::Error>) -> (Option<Option<i32>>, bool) {
     static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let mut logged = false;
     let Ok(mut sys) = make().inspect_err(|why| {
-        warn_once(&WARNED, pid, why);
+        logged = warn_once(&WARNED, pid, why);
     }) else {
-        return None;
+        return (None, logged);
     };
     let id = sysinfo::Pid::from_u32(pid);
     sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[id]), true);
-    if sys.process(id).is_some() {
-        None
-    } else {
-        Some(None)
-    }
+    (if sys.process(id).is_some() { None } else { Some(None) }, false)
 }
 
 /// Logs the unreadable process table on the first call on `flag` only; returns whether it logged.
@@ -2065,7 +2063,7 @@ impl RunnerProcess for Adopted {
     }
 
     fn try_wait(&mut self) -> Option<Option<i32>> {
-        adopted_exit(self.pid, sysinfo::System::new)
+        adopted_exit(self.pid, sysinfo::System::new).0
     }
 
     fn stop_gracefully(&mut self) -> Result<(), String> {
@@ -2084,7 +2082,11 @@ mod adopted_tests {
 
     #[test]
     fn an_unreadable_process_table_leaves_an_adopted_runner_running_and_warns_once() {
-        assert_eq!(adopted_exit(std::process::id(), || Err(sysinfo::Error::Unsupported)), None);
+        let broken = || Err(sysinfo::Error::Unsupported);
+        let first = adopted_exit(std::process::id(), broken);
+        let second = adopted_exit(std::process::id(), broken);
+        assert_eq!((first.0, second.0), (None, None), "unknown counts as running");
+        assert!(!second.1, "the real wrapper does not log the second failure again");
         let flag = AtomicBool::new(false);
         let why = sysinfo::Error::Unsupported;
         assert!(warn_once(&flag, 1, &why));
@@ -2094,7 +2096,7 @@ mod adopted_tests {
 
     #[test]
     fn a_readable_table_says_whether_the_runner_is_there() {
-        assert_eq!(adopted_exit(std::process::id(), sysinfo::System::new), None);
-        assert_eq!(adopted_exit(u32::MAX - 1, sysinfo::System::new), Some(None));
+        assert_eq!(adopted_exit(std::process::id(), sysinfo::System::new), (None, false));
+        assert_eq!(adopted_exit(u32::MAX - 1, sysinfo::System::new), (Some(None), false));
     }
 }
