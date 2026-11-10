@@ -18,6 +18,7 @@ pub mod crates;
 pub mod fixture;
 pub mod identity;
 pub mod ledger;
+pub mod links;
 pub mod setup;
 pub mod verify;
 
@@ -56,6 +57,9 @@ pub struct SetupArgs {
     /// Append the `KEY=value` lines to this file too (the job's $GITHUB_ENV).
     #[arg(long)]
     env_file: Option<PathBuf>,
+    /// The folder `./dev` was built into for this run (`release-<run id>-<job>`), recorded as `dev-tool`.
+    #[arg(long)]
+    dev_tool: Option<PathBuf>,
 }
 
 /// `record`.
@@ -133,7 +137,7 @@ pub fn command(cmd: Command) -> Result<Report, CliError> {
                     CliError::usage("No job folder: pass --temp or set RUNNER_TEMP.").with_hint("Run it as a step of a CI job.")
                 })?;
             let ledger = ledger_path(a.ledger, &env, Some(&temp))?;
-            let made = setup::setup(&temp, &ledger).map_err(bad)?;
+            let made = setup::setup(&temp, &ledger, a.dev_tool.as_deref()).map_err(bad)?;
             let lines: Vec<String> = made.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
             if let Some(f) = a.env_file {
                 let mut file = std::fs::OpenOptions::new()

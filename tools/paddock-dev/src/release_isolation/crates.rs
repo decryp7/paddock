@@ -9,7 +9,7 @@ use super::verify::{Ctx, Probe};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// How many findings of one probe are listed before the rest are counted.
 const LIST_LIMIT: usize = 20;
@@ -21,9 +21,38 @@ pub fn sha256_file(path: &Path) -> std::io::Result<String> {
     Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// `name-version` to every checksum a lock file of the union gives it.
-pub fn lock_union(lock_files: &[std::path::PathBuf]) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
-    let mut union: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+/// The registry packages of the tagged lock files: `(source, name, version)` to every checksum a lock file gives it.
+#[derive(Debug, Default)]
+pub struct Union {
+    /// The checksums by package.
+    pub sums: BTreeMap<(String, String, String), BTreeSet<String>>,
+    /// Some lock file has a `git+` source (its checkouts under `CARGO_HOME/git` cannot be matched to a checksum).
+    pub has_git: bool,
+}
+
+impl Union {
+    /// The registry sources of the union.
+    fn sources(&self) -> BTreeSet<&str> {
+        self.sums.keys().map(|(s, _, _)| s.as_str()).collect()
+    }
+}
+
+/// The folder-name prefixes cargo gives the cache folder of a registry source: `<host>-<hash>`. crates.io is
+/// `index.crates.io-` (sparse) or `github.com-` (the old git index). Matching is by host: the hash is cargo's own and is not
+/// recomputed here.
+pub fn index_prefixes(source: &str) -> Vec<String> {
+    let url = source.trim_start_matches("registry+").trim_start_matches("sparse+");
+    let rest = url.split_once("://").map_or(url, |(_, r)| r);
+    let host = rest.split('/').next().unwrap_or_default();
+    if host == "index.crates.io" || (host == "github.com" && rest.contains("crates.io-index")) {
+        return vec!["index.crates.io-".into(), "github.com-".into()];
+    }
+    vec![format!("{host}-")]
+}
+
+/// Reads the lock files of the union.
+pub fn lock_union(lock_files: &[std::path::PathBuf]) -> Result<Union, String> {
+    let mut union = Union::default();
     for path in lock_files {
         let text = std::fs::read_to_string(path).map_err(|e| format!("{} cannot be read: {e}", path.display()))?;
         let doc: toml::Table = text.parse().map_err(|e| format!("{} is not valid TOML: {e}", path.display()))?;
@@ -32,6 +61,10 @@ pub fn lock_union(lock_files: &[std::path::PathBuf]) -> Result<BTreeMap<String, 
             .and_then(toml::Value::as_array)
             .ok_or_else(|| format!("{} has no [[package]] entries", path.display()))?;
         for p in packages {
+            let source = p.get("source").and_then(toml::Value::as_str).unwrap_or_default();
+            if source.starts_with("git+") {
+                union.has_git = true;
+            }
             let (Some(name), Some(version), Some(sum)) = (
                 p.get("name").and_then(toml::Value::as_str),
                 p.get("version").and_then(toml::Value::as_str),
@@ -39,7 +72,11 @@ pub fn lock_union(lock_files: &[std::path::PathBuf]) -> Result<BTreeMap<String, 
             ) else {
                 continue;
             };
-            union.entry(format!("{name}-{version}")).or_default().insert(sum.to_string());
+            union
+                .sums
+                .entry((source.to_string(), name.to_string(), version.to_string()))
+                .or_default()
+                .insert(sum.to_string());
         }
     }
     Ok(union)
@@ -89,45 +126,126 @@ pub(crate) fn crates_probe(ctx: &mut Ctx) {
             return;
         }
     };
-    let mut archives = Vec::new();
-    if let Ok(indexes) = std::fs::read_dir(home.join("registry").join("cache")) {
+    // Archives are listed without following links: a link is a finding, never hashed.
+    let sources = union.sources();
+    let mut archives: Vec<(PathBuf, String)> = Vec::new(); // (file, index folder name)
+    let (mut links, mut strays, mut orphan_indexes) = (Vec::new(), Vec::new(), Vec::new());
+    let cache = home.join("registry").join("cache");
+    if std::fs::symlink_metadata(&cache).is_ok_and(|m| m.file_type().is_symlink()) {
+        links.push(cache.display().to_string());
+    } else if let Ok(indexes) = std::fs::read_dir(&cache) {
         for index in indexes.flatten() {
+            let name = index.file_name().to_string_lossy().into_owned();
+            let Ok(t) = index.file_type() else { continue };
+            if t.is_symlink() {
+                links.push(index.path().display().to_string());
+                continue;
+            }
+            if !t.is_dir() {
+                continue;
+            }
+            if !sources
+                .iter()
+                .any(|s| index_prefixes(s).iter().any(|p| name.starts_with(p.as_str())))
+            {
+                orphan_indexes.push(name.clone());
+            }
             if let Ok(files) = std::fs::read_dir(index.path()) {
-                archives.extend(
-                    files
-                        .flatten()
-                        .map(|f| f.path())
-                        .filter(|p| p.extension().is_some_and(|e| e == "crate")),
-                );
+                for f in files.flatten() {
+                    let p = f.path();
+                    let Ok(ft) = f.file_type() else { continue };
+                    if ft.is_symlink() {
+                        links.push(p.display().to_string());
+                    } else if p.extension().is_some_and(|e| e == "crate") && ft.is_file() {
+                        archives.push((p, name.clone()));
+                    } else {
+                        strays.push(p.display().to_string());
+                    }
+                }
             }
         }
     }
     archives.sort();
-    if archives.is_empty() {
+    if archives.is_empty() && links.is_empty() {
         ctx.add(
             Probe::Crates,
-            format!("check broken: 0 .crate archives under {}/registry/cache, so nothing was compared.", home.display()),
+            format!(
+                "check broken: 0 .crate archives under {}/registry/cache, so nothing was compared.",
+                home.display()
+            ),
             "If the job compiles nothing, leave `cargo-home` out of --expect; otherwise `cargo fetch --locked` did not use this CARGO_HOME.",
         );
         return;
     }
+    if !links.is_empty() {
+        ctx.add(
+            Probe::Crates,
+            format!("{} link(s) in the registry cache: {}.", links.len(), listed(&links)),
+            "The cache must hold archives this run downloaded, never links to a kept registry.",
+        );
+    }
+    if !orphan_indexes.is_empty() {
+        ctx.add(
+            Probe::Crates,
+            format!(
+                "registry index folder(s) {} match no registry source of the tagged Cargo.lock files.",
+                listed(&orphan_indexes)
+            ),
+            "Something wrote another registry's cache here: a shared CARGO_HOME, or a lock file missing from --cargo-workspace.",
+        );
+    }
+    if !strays.is_empty() {
+        ctx.add(
+            Probe::Crates,
+            format!(
+                "{} file(s) in the registry cache are not .crate archives: {}.",
+                strays.len(),
+                listed(&strays)
+            ),
+            "The cache must hold only the archives this run downloaded.",
+        );
+    }
+    let git = home.join("git");
+    if git.exists() || std::fs::symlink_metadata(&git).is_ok() {
+        if union.has_git {
+            ctx.verdict
+                .notices
+                .push("crates: git dependencies of the lock files are fetched under CARGO_HOME/git and are not matched to a checksum (not measured).".to_string());
+        } else {
+            ctx.add(
+                Probe::Crates,
+                format!("{} exists, but no tagged Cargo.lock has a git source.", git.display()),
+                "Nothing in the tagged tree needs a git checkout: this is another build's leftover or a planted source.",
+            );
+        }
+    }
     let (mut unknown, mut wrong, mut unreadable) = (Vec::new(), Vec::new(), Vec::new());
-    for a in &archives {
+    for (a, index) in &archives {
         let stem = a.file_stem().and_then(|s| s.to_str()).unwrap_or_default().to_string();
-        match union.get(&stem) {
-            None => unknown.push(stem),
-            Some(sums) => match sha256_file(a) {
-                Ok(h) if sums.contains(&h) => ctx.verdict.crates_matched += 1,
-                Ok(h) => wrong.push(format!("{stem} (sha256 {h})")),
-                Err(e) => unreadable.push(format!("{stem} ({e})")),
-            },
+        // Every lock entry of this name-version whose source lives in this index folder.
+        let mut candidates: BTreeSet<&String> = BTreeSet::new();
+        let mut known = false;
+        for ((source, name, version), sums) in &union.sums {
+            if format!("{name}-{version}") == stem && index_prefixes(source).iter().any(|p| index.starts_with(p.as_str())) {
+                known = true;
+                candidates.extend(sums);
+            }
+        }
+        if !known {
+            unknown.push(format!("{index}/{stem}"));
+            continue;
+        }
+        match sha256_file(a) {
+            Ok(h) if candidates.contains(&h) => ctx.verdict.crates_matched += 1,
+            Ok(h) => wrong.push(format!("{stem} (sha256 {h})")),
+            Err(e) => unreadable.push(format!("{stem} ({e})")),
         }
     }
     if !unknown.is_empty() {
         ctx.add(
             Probe::Crates,
             format!(
-                "{} archive(s) have no entry in the tagged Cargo.lock files: {}.",
+                "{} archive(s) have no entry for their registry in the tagged Cargo.lock files: {}.",
                 unknown.len(),
                 listed(&unknown)
             ),
@@ -158,12 +276,14 @@ pub(crate) fn crates_probe(ctx: &mut Ctx) {
     }
 }
 
-fn files_under(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+/// Files under `dir`, links not followed; a link is reported in `links` and never read.
+fn files_under(dir: &Path, out: &mut Vec<PathBuf>, links: &mut Vec<String>) {
     if let Ok(rd) = std::fs::read_dir(dir) {
         for e in rd.flatten() {
             let p = e.path();
             match e.file_type() {
-                Ok(t) if t.is_dir() => files_under(&p, out),
+                Ok(t) if t.is_symlink() => links.push(p.display().to_string()),
+                Ok(t) if t.is_dir() => files_under(&p, out, links),
                 Ok(_) => out.push(p),
                 Err(_) => {}
             }
@@ -173,11 +293,12 @@ fn files_under(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
 
 pub(crate) fn tauri_probe(ctx: &mut Ctx) {
     let Some(tools) = ctx.folder(Kind::TauriTools) else { return };
-    let on_tag = ctx.env.get("GITHUB_REF").is_some_and(|r| r.starts_with("refs/tags/"));
+    let on_tag = ctx.env.get("GITHUB_REF").is_some_and(|r| r.starts_with("refs/tags/"))
+        || (ctx.env.get("GITHUB_ACTIONS") == Some("true") && ctx.env.get("PADDOCK_RELEASE_MODE") == Some("1"));
     if ctx.opts.allow_unpinned_tauri && on_tag {
         ctx.add(
             Probe::TauriTools,
-            "check broken: --allow-unpinned-tauri is refused on a tag run (GITHUB_REF starts with refs/tags/).",
+            "check broken: --allow-unpinned-tauri is refused on a tag run and in release mode in CI (GITHUB_REF starts with refs/tags/, or GITHUB_ACTIONS=true with PADDOCK_RELEASE_MODE=1).",
             "Pass `--tauri-pins <WP-9 pin file>` and drop the flag.",
         );
         return;
@@ -219,7 +340,15 @@ pub(crate) fn tauri_probe(ctx: &mut Ctx) {
         }
     }
     let mut files = Vec::new();
-    files_under(&tools, &mut files);
+    let mut links = Vec::new();
+    files_under(&tools, &mut files, &mut links);
+    if !links.is_empty() {
+        ctx.add(
+            Probe::TauriTools,
+            format!("{} link(s) in the Tauri tool folder: {}.", links.len(), listed(&links)),
+            "The tools must be files fetched into <build folder>/.tauri, never links to a kept cache.",
+        );
+    }
     if files.is_empty() {
         ctx.add(
             Probe::TauriTools,

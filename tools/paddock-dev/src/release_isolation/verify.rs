@@ -51,13 +51,15 @@ pub enum Probe {
     Npm,
     /// The Angular cache is a real folder inside the checkout.
     Angular,
+    /// No link inside a job folder leads outside the job.
+    Links,
     /// Every file of the Tauri tool folder has its pinned SHA-256.
     TauriTools,
 }
 
 impl Probe {
     /// Every probe.
-    pub const ALL: [Probe; 10] = [
+    pub const ALL: [Probe; 11] = [
         Probe::Ledger,
         Probe::Identity,
         Probe::Pointers,
@@ -67,6 +69,7 @@ impl Probe {
         Probe::Git,
         Probe::Npm,
         Probe::Angular,
+        Probe::Links,
         Probe::TauriTools,
     ];
 
@@ -82,6 +85,7 @@ impl Probe {
             Probe::Git => "git",
             Probe::Npm => "npm",
             Probe::Angular => "angular",
+            Probe::Links => "links",
             Probe::TauriTools => "tauri-tools",
         }
     }
@@ -127,9 +131,12 @@ pub struct VerifyOptions {
     pub tauri_pins: Option<PathBuf>,
     /// Accept a missing pin file (a local trial only; refused when `GITHUB_REF` is a tag).
     pub allow_unpinned_tauri: bool,
-    /// How far behind the run's start a folder's change time may be before it counts as older (file systems stamp with a
-    /// coarse clock that can lag).
+    /// How far before the job's start a folder's birth may be before it counts as older (file systems stamp with a coarse
+    /// clock that can lag).
     pub slack_ns: i128,
+    /// Tests only: where the walk up from a Cargo workspace for `.cargo/config*` stops (inclusive), so that a test does not
+    /// depend on the machine's folders above its scratch root. `None` walks to the filesystem root.
+    pub walk_stop: Option<PathBuf>,
     /// Probes turned off (tests only).
     pub skip: Vec<Probe>,
 }
@@ -145,7 +152,8 @@ impl VerifyOptions {
             sccache_stats: None,
             tauri_pins: None,
             allow_unpinned_tauri: false,
-            slack_ns: 2_000_000_000,
+            walk_stop: None,
+            slack_ns: 1_000_000_000,
             skip: Vec::new(),
         }
     }
@@ -259,6 +267,9 @@ pub fn verify(opts: &VerifyOptions, env: &Env) -> Verdict {
     if ctx.on(Probe::Angular) {
         config::angular(&mut ctx);
     }
+    if ctx.on(Probe::Links) {
+        super::links::links_probe(&mut ctx);
+    }
     if ctx.on(Probe::TauriTools) {
         crates::tauri_probe(&mut ctx);
     }
@@ -310,25 +321,57 @@ fn ledger_probe(ctx: &mut Ctx) {
             Some(_) if e.id.is_none() => ctx.add(Probe::Ledger, format!("line {}: `{}` has no identity.", e.line, e.kind), setup_next),
             Some(_) => {}
         }
-        if e.kind == Kind::Sccache.name() && e.mode != Mode::Off.name() {
-            ctx.add(
-                Probe::Ledger,
-                format!("the compile cache is `{}`, not off.", e.mode),
-                "Release mode leaves RUSTC_WRAPPER unset and starts no sccache server (ADR 0085 §4 item 2).",
-            );
+        if let (Some(kind), Some(mode)) = (Kind::parse(&e.kind), Mode::parse(&e.mode)) {
+            if !kind.allowed_modes().contains(&mode) {
+                let names: Vec<&str> = kind.allowed_modes().iter().map(|m| m.name()).collect();
+                ctx.add(
+                    Probe::Ledger,
+                    format!("line {}: `{kind}` is recorded as `{}`; only {} is allowed for it.", e.line, e.mode, names.join(" or ")),
+                    "Only `dev-tool` may be `run`, only `sccache` (and an unexpected `libduckdb`) may be `off`; every other kind is a folder this run made inside the job folder.",
+                );
+            } else if kind == Kind::Libduckdb && mode == Mode::Off && ctx.opts.expect.contains(&kind) {
+                ctx.add(
+                    Probe::Ledger,
+                    format!("line {}: `libduckdb` is `off` but this job expects it.", e.line),
+                    "Debrief's libduckdb must be downloaded and checked in every run.",
+                );
+            }
+            if kind == Kind::DevTool && mode == Mode::Run {
+                dev_tool_name(ctx, e);
+            }
         }
     }
 }
 
-/// Identity of every `job` and `run` folder (ADR 0085 §5 item 2).
+/// The dev-tool folder is named `release-<GITHUB_RUN_ID>-<job>` (ADR 0085 §4 item 3).
+fn dev_tool_name(ctx: &mut Ctx, e: &super::ledger::Entry) {
+    let Some(run_id) = ctx.env.get("GITHUB_RUN_ID") else {
+        ctx.add(
+            Probe::Ledger,
+            "check broken: GITHUB_RUN_ID is not set, so the name of the dev-tool folder cannot be checked.",
+            "Run verify inside the CI job.",
+        );
+        return;
+    };
+    let name = Path::new(&e.path).file_name().and_then(|n| n.to_str()).unwrap_or_default();
+    let prefix = format!("release-{run_id}-");
+    if !name.starts_with(&prefix) || name.len() == prefix.len() {
+        ctx.add(
+            Probe::Ledger,
+            format!("line {}: the dev-tool folder `{name}` is not named `{prefix}<job>`.", e.line),
+            "Release mode builds `./dev` into a new `release-<run id>-<job>` folder (PADDOCK_DEV_HOME), never a cached one.",
+        );
+    }
+}
+
+/// Identity of every `job` and `run` folder (ADR 0085 §5 item 2 and its Rust-tool amendment).
 ///
-/// **Device and inode are the equality check:** a folder that was replaced after it was recorded has another inode (or
-/// device), whatever its times say. **The change time is a floor, not an equality:** a directory's ctime moves whenever an
-/// entry is added, so equality would turn every honest run red. Two floors are checked: the current ctime must not be
-/// older than the recorded one (nothing restored an older copy), and the recorded ctime must not be older than the run's
-/// start less the slack (the folder was made by this run; file systems stamp with a coarse clock that can lag). ctime
-/// cannot be set from user space, unlike mtime, which proves nothing (cargo unpacks sources with the package's times).
-/// On Windows the creation time stands in for ctime (`identity.rs`).
+/// **Device and inode are the equality check:** a folder that was replaced after it was recorded is another object, whatever
+/// its times say (128-bit ids on Windows). **The birth time is a floor against the job's start**: a folder born before the job
+/// began is a kept one, whatever was written into it since (its change and modification times are not looked at: they move
+/// with every write and can be set). The job's start is the birth time of `$RUNNER_TEMP`, not of `setup`, because `./dev` is
+/// built into the dev-tool folder before `setup` runs. A birth time never changes for an object, so it is also compared for
+/// equality with the recorded one. A file system that reports no birth time makes the check broken.
 fn identity_probe(ctx: &mut Ctx) {
     let root = ctx.ledger.job_root.canonicalize().unwrap_or_else(|_| ctx.ledger.job_root.clone());
     let started = ctx.ledger.started_ns;
@@ -364,40 +407,42 @@ fn identity_probe(ctx: &mut Ctx) {
             continue;
         }
         match identity_of(&canonical) {
+            Err(err) if err.kind() == std::io::ErrorKind::Unsupported => ctx.add(
+                Probe::Identity,
+                format!("check broken: {err}."),
+                "Use a file system with birth times (ext4, xfs, btrfs, tmpfs on a recent kernel, APFS, NTFS) for the job folder.",
+            ),
             Err(err) => ctx.add(
                 Probe::Identity,
                 format!("`{}` {}: its identity cannot be read ({err}).", e.kind, canonical.display()),
                 "Check the folder's permissions.",
             ),
             Ok(now) => {
-                if (now.dev, now.ino) != (recorded.dev, recorded.ino) {
+                if (now.dev, now.ino, now.birth_ns) != (recorded.dev, recorded.ino, recorded.birth_ns) {
                     ctx.add(
                         Probe::Identity,
                         format!(
-                            "`{}` {} is not the folder the ledger recorded: device {} inode {} instead of device {} inode {}.",
-                            e.kind, canonical.display(), now.dev, now.ino, recorded.dev, recorded.ino
+                            "`{}` {} is not the folder the ledger recorded: device {} inode {} born {} instead of device {} inode {} born {}.",
+                            e.kind,
+                            canonical.display(),
+                            now.dev,
+                            now.ino,
+                            now.birth_ns,
+                            recorded.dev,
+                            recorded.ino,
+                            recorded.birth_ns
                         ),
                         "A step replaced the folder after it was recorded (a move, a link, a restored cache): remove that step in release mode.",
                     );
-                } else if now.change_ns < recorded.change_ns {
+                } else if recorded.birth_ns < started - ctx.opts.slack_ns {
                     ctx.add(
                         Probe::Identity,
                         format!(
-                            "`{}` {}: its change time went backwards since it was recorded.",
+                            "`{}` {} was born before this job started: it is a kept folder.",
                             e.kind,
                             canonical.display()
                         ),
-                        "Something restored an older copy of this folder.",
-                    );
-                } else if recorded.change_ns < started - ctx.opts.slack_ns {
-                    ctx.add(
-                        Probe::Identity,
-                        format!(
-                            "`{}` {} is older than this run: it existed before `setup` started.",
-                            e.kind,
-                            canonical.display()
-                        ),
-                        "Create the folder during the run (mktemp-style), never adopt a kept one.",
+                        "Create the folder during the job (mktemp-style, or `./dev` into a new release-<run id>-<job> folder), never adopt a kept one.",
                     );
                 } else {
                     ctx.verdict.folders_confirmed += 1;

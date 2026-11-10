@@ -122,6 +122,23 @@ pub(crate) fn cargo_config(ctx: &mut Ctx) {
             return;
         }
     };
+    // The clone must be the tagged commit: a tracked file means "of the tag" only then.
+    match ctx.env.get("GITHUB_SHA") {
+        None => ctx.add(
+            Probe::CargoConfig,
+            "check broken: GITHUB_SHA is not set, so the clone cannot be compared with the tagged commit.",
+            "Run verify inside the CI job.",
+        ),
+        Some(sha) => match git(ctx.env, &clone, &["rev-parse", "HEAD"]) {
+            Ok((Some(0), out)) if out.trim() == sha => {}
+            other => ctx.add(
+                Probe::CargoConfig,
+                format!("the clone's HEAD ({other:?}) is not GITHUB_SHA {sha}."),
+                "The clone must be a checkout of the tagged commit.",
+            ),
+        },
+    }
+    let stop = ctx.opts.walk_stop.as_ref().and_then(|p| p.canonicalize().ok());
     let mut starts: Vec<PathBuf> = Vec::new();
     for w in &ctx.opts.cargo_workspaces {
         match clone.join(w).canonicalize() {
@@ -143,6 +160,9 @@ pub(crate) fn cargo_config(ctx: &mut Ctx) {
             for name in ["config.toml", "config"] {
                 candidates.push(dir.join(".cargo").join(name));
             }
+            if stop.as_deref() == Some(dir) {
+                break;
+            }
         }
     }
     if let Some(home) = ctx.folder(Kind::CargoHome) {
@@ -161,6 +181,19 @@ pub(crate) fn cargo_config(ctx: &mut Ctx) {
                 format!("{} is a cargo configuration that is not a file of the tagged tree.", canonical.display()),
                 "Cargo reads it for every build (rustc-wrapper, [source], linker, rustflags, [env]): move it away from the runner or remove it.",
             );
+        } else {
+            let rel = canonical
+                .strip_prefix(&clone)
+                .unwrap_or(&canonical)
+                .to_string_lossy()
+                .replace('\\', "/");
+            if !matches!(git(ctx.env, &clone, &["diff", "--quiet", "HEAD", "--", &rel]), Ok((Some(0), _))) {
+                ctx.add(
+                    Probe::CargoConfig,
+                    format!("{} differs from the commit (`git diff HEAD` is not empty).", canonical.display()),
+                    "A tracked cargo configuration was edited after checkout: the tag's own file is the only one allowed.",
+                );
+            }
         }
     }
     // `.cargo/ci.toml` is written by build-folder: it may hold only `[build] target-dir`.
@@ -276,21 +309,31 @@ pub(crate) fn npm(ctx: &mut Ctx) {
             candidates.push((format!("the file {var} names"), PathBuf::from(v)));
         }
     }
-    let global_named = ["NPM_CONFIG_GLOBALCONFIG", "npm_config_globalconfig"]
-        .iter()
-        .any(|v| ctx.env.get(v).is_some());
-    match npm_global_candidates(ctx.env) {
-        Some(found) => candidates.extend(found.into_iter().map(|p| ("the global npmrc".to_string(), p))),
-        None if global_named => {}
-        None => ctx.add(
-            Probe::Npm,
-            "check broken: npm-global: not measured, `node` is not on PATH and npm_config_prefix and NPM_CONFIG_GLOBALCONFIG are not set, so the global npmrc cannot be located.",
-            "Put the job's node on PATH before `verify`, or set NPM_CONFIG_GLOBALCONFIG.",
-        ),
+    // npm itself says where its user and global files are (it knows its own prefix; Homebrew's node is a link into the
+    // Cellar and the prefix is that of the link). Missing or failing npm: the probe cannot look.
+    for key in ["userconfig", "globalconfig"] {
+        match npm_get(ctx.env, &clone, key) {
+            Ok(Some(p)) => candidates.push((format!("the file `npm config get {key}` names"), PathBuf::from(p))),
+            Ok(None) => {}
+            Err(e) => ctx.add(
+                Probe::Npm,
+                format!("check broken: `npm config get {key}` {e}, so the npm configuration was not measured."),
+                "Put the job's npm on PATH before `verify`.",
+            ),
+        }
     }
+    candidates.extend(
+        npm_prefix_candidates(ctx.env)
+            .into_iter()
+            .map(|p| ("the global npmrc under node's prefix".to_string(), p)),
+    );
+    let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
     for (what, path) in candidates {
         if path.is_file() {
             let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+            if !seen.insert(canonical.clone()) {
+                continue;
+            }
             if !inside_tagged_tree(&canonical, &clone, &files) {
                 ctx.add(
                     Probe::Npm,
@@ -305,31 +348,49 @@ pub(crate) fn npm(ctx: &mut Ctx) {
     }
 }
 
-/// Where the global npmrc can be, without running npm: `<prefix>/etc/npmrc`, with the prefix from `npm_config_prefix` or from
-/// the node binary on PATH (Unix: two folders above it; Windows: also `%APPDATA%\npm`). `None` when node cannot be found.
-fn npm_global_candidates(env: &Env) -> Option<Vec<PathBuf>> {
+/// `npm config get <key>` in the clone with the job's environment, at most 10 s. `Ok(None)` for `undefined` or nothing.
+fn npm_get(env: &Env, clone: &Path, key: &str) -> Result<Option<String>, String> {
+    let mut cmd = command(if cfg!(windows) { "npm.cmd" } else { "npm" });
+    cmd.args(["config", "get", key]).current_dir(clone).env_clear();
+    for (k, v) in &env.0 {
+        cmd.env(k, v);
+    }
+    let out = run_bounded(cmd, Limits::new(Duration::from_secs(10))).map_err(|e| format!("cannot be run ({e})"))?;
+    match out.outcome {
+        Outcome::Exited(s) if s.success() => {
+            let text = out.stdout_text();
+            let t = text.trim();
+            Ok((!t.is_empty() && t != "undefined" && t != "null").then(|| t.to_string()))
+        }
+        Outcome::Exited(s) => Err(format!("exited with {:?}: {}", s.code(), out.stderr_text().trim())),
+        _ => Err("did not finish within 10 s".to_string()),
+    }
+}
+
+/// Where the global npmrc may be without asking npm, as a second reading: `<prefix>/etc/npmrc` for `npm_config_prefix` and for
+/// the node on PATH, by **both** its PATH spelling and its canonical one (Homebrew: `/opt/homebrew/bin/node` is a link into the
+/// Cellar, and npm's prefix is `/opt/homebrew`); on Windows the node folder's `etc\npmrc` and `%APPDATA%\npm\etc\npmrc`.
+fn npm_prefix_candidates(env: &Env) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    let mut located = false;
     if let Some(prefix) = env.get("npm_config_prefix").or_else(|| env.get("NPM_CONFIG_PREFIX")) {
         out.push(Path::new(prefix).join("etc").join("npmrc"));
-        located = true;
     }
     let node = if cfg!(windows) { "node.exe" } else { "node" };
-    let found = env
+    let raw = env
         .get("PATH")
         .into_iter()
         .flat_map(std::env::split_paths)
         .map(|d| d.join(node))
-        .find(|p| p.is_file())
-        .and_then(|p| p.canonicalize().ok());
-    if let Some(node_path) = found {
-        located = true;
-        if cfg!(windows) {
-            if let Some(dir) = node_path.parent() {
-                out.push(dir.join("etc").join("npmrc"));
+        .find(|p| p.is_file());
+    if let Some(raw) = raw {
+        for node_path in [Some(raw.clone()), raw.canonicalize().ok()].into_iter().flatten() {
+            if cfg!(windows) {
+                if let Some(dir) = node_path.parent() {
+                    out.push(dir.join("etc").join("npmrc"));
+                }
+            } else if let Some(prefix) = node_path.parent().and_then(Path::parent) {
+                out.push(prefix.join("etc").join("npmrc"));
             }
-        } else if let Some(prefix) = node_path.parent().and_then(Path::parent) {
-            out.push(prefix.join("etc").join("npmrc"));
         }
     }
     if cfg!(windows)
@@ -337,7 +398,7 @@ fn npm_global_candidates(env: &Env) -> Option<Vec<PathBuf>> {
     {
         out.push(Path::new(appdata).join("npm").join("etc").join("npmrc"));
     }
-    located.then_some(out)
+    out
 }
 
 /// The Angular cache of each app is absent or a real folder inside the checkout.

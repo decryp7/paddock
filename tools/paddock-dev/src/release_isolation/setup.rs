@@ -4,7 +4,8 @@
 //! can never be adopted), owner-only on Unix, directly under the job's folder (`$RUNNER_TEMP`). Nothing is read from a
 //! kept location. The caller appends the printed `KEY=value` lines to `$GITHUB_ENV`.
 
-use super::ledger::{self, Kind, Mode};
+use super::identity::identity_of;
+use super::ledger::{self, Kind, Mode, simplified};
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 use std::io;
@@ -64,7 +65,11 @@ pub fn now_ns() -> i128 {
 }
 
 /// Makes the job's folders under `temp` and starts the ledger at `ledger_path`.
-pub fn setup(temp: &Path, ledger_path: &Path) -> Result<Made, String> {
+///
+/// The job's start is the birth time of `temp`, which the runner made when the job began (a file system without birth times
+/// is an error: the freshness check could not work). `dev_tool` is the folder `./dev` was built into for this run (it exists
+/// before `setup`, because `setup` itself runs through `./dev`); it is recorded as `dev-tool` with mode `run`.
+pub fn setup(temp: &Path, ledger_path: &Path, dev_tool: Option<&Path>) -> Result<Made, String> {
     let job_root = temp.canonicalize().map_err(|e| {
         format!(
             "the job folder {} is not usable: {e}. Pass --temp or set RUNNER_TEMP.",
@@ -74,7 +79,10 @@ pub fn setup(temp: &Path, ledger_path: &Path) -> Result<Made, String> {
     if let Some(dir) = ledger_path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("the ledger folder {} cannot be made: {e}", dir.display()))?;
     }
-    ledger::create(ledger_path, &job_root, now_ns())?;
+    let started = identity_of(&job_root)
+        .map_err(|e| format!("check broken: the job's start cannot be read from {}: {e}", job_root.display()))?
+        .birth_ns;
+    ledger::create(ledger_path, &simplified(&job_root), started)?;
     let mut folders: Vec<(Kind, PathBuf)> = Vec::new();
     for kind in MADE {
         let made = match kind {
@@ -93,16 +101,20 @@ pub fn setup(temp: &Path, ledger_path: &Path) -> Result<Made, String> {
         ledger::append(ledger_path, kind, Mode::Job, Some(&made))?;
         folders.push((kind, made));
     }
+    if let Some(dev) = dev_tool {
+        let entry = ledger::append(ledger_path, Kind::DevTool, Mode::Run, Some(dev))?;
+        folders.push((Kind::DevTool, PathBuf::from(entry.path)));
+    }
     let path_of = |k: Kind| {
         folders
             .iter()
             .find(|(kk, _)| *kk == k)
-            .map(|(_, p)| p.display().to_string())
+            .map(|(_, p)| simplified(p).display().to_string())
             .unwrap_or_default()
     };
     let env = vec![
         ("PADDOCK_RELEASE_MODE".to_string(), "1".to_string()),
-        ("PADDOCK_RELEASE_LEDGER".to_string(), ledger_path.display().to_string()),
+        ("PADDOCK_RELEASE_LEDGER".to_string(), simplified(ledger_path).display().to_string()),
         ("PADDOCK_RELEASE_CLONE".to_string(), path_of(Kind::Workspace)),
         ("PADDOCK_RELEASE_TARGET".to_string(), path_of(Kind::Target)),
         ("CARGO_TARGET_DIR".to_string(), path_of(Kind::Target)),
@@ -129,7 +141,7 @@ mod tests {
     fn setup_makes_six_fresh_folders_and_records_each() {
         let temp = tempfile::tempdir().unwrap();
         let ledger = temp.path().join("release-isolation/ledger.tsv");
-        let made = setup(temp.path(), &ledger).unwrap();
+        let made = setup(temp.path(), &ledger, None).unwrap();
         assert_eq!(made.folders.len(), 6);
         let read = ledger::Ledger::read(&ledger).unwrap();
         assert_eq!(read.entries.len(), 6);
@@ -141,14 +153,14 @@ mod tests {
         assert_eq!(tauri.file_name().unwrap(), ".tauri");
         assert!(tauri.starts_with(&made.folders[1].1), "inside the build folder");
         assert!(made.env.iter().any(|(k, v)| k == "RUSTC_WRAPPER" && v.is_empty()));
-        assert!(setup(temp.path(), &ledger).is_err(), "a second setup is refused");
+        assert!(setup(temp.path(), &ledger, None).is_err(), "a second setup is refused");
     }
 
     #[test]
     fn two_setups_in_two_jobs_never_share_a_folder() {
         let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-        let ma = setup(a.path(), &a.path().join("l.tsv")).unwrap();
-        let mb = setup(b.path(), &b.path().join("l.tsv")).unwrap();
+        let ma = setup(a.path(), &a.path().join("l.tsv"), None).unwrap();
+        let mb = setup(b.path(), &b.path().join("l.tsv"), None).unwrap();
         assert!(ma.folders.iter().all(|(_, p)| !mb.folders.iter().any(|(_, q)| p == q)));
     }
 

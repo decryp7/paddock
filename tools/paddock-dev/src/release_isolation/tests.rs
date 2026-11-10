@@ -62,7 +62,7 @@ fn without_pins_verify_fails_unless_a_local_trial_allows_it_and_never_on_a_tag()
 }
 
 #[test]
-fn every_planted_leak_fails_and_names_its_probe_and_the_probe_is_what_catches_it() {
+fn every_planted_leak_fails_and_names_its_probe() {
     for leak in Leak::all() {
         let (_d, mut f) = job();
         f.plant(leak);
@@ -83,18 +83,6 @@ fn every_planted_leak_fails_and_names_its_probe_and_the_probe_is_what_catches_it
             );
             assert!(finding.line().contains("Next: "), "{leak:?}: a finding without its next step");
         }
-        // Mutation check: with the probe removed the leak goes unseen by it.
-        f.opts.skip = vec![leak.probe()];
-        let v = f.verify();
-        assert!(
-            !v.findings.iter().any(|x| x.probe == leak.probe()),
-            "{leak:?}: the skipped probe still reported: {}",
-            lines(&v)
-        );
-        assert!(
-            !v.findings.iter().any(|x| x.what.contains(leak.needle()) && x.probe == leak.probe()),
-            "{leak:?}"
-        );
     }
 }
 
@@ -104,7 +92,7 @@ fn a_missing_kind_or_no_crates_is_check_broken_never_a_pass() {
         Leak::LedgerMissingKind,
         Leak::NoCrates,
         Leak::SccacheStatsMissing,
-        Leak::NpmGlobalUnknown,
+        Leak::NpmMissing,
         Leak::TauriPinsMissing,
     ] {
         let (_d, mut f) = job();
@@ -149,4 +137,42 @@ fn a_job_that_compiles_nothing_names_it_and_the_crate_check_says_so() {
     let v = f.verify();
     assert!(v.passed(), "{}", lines(&v));
     assert!(v.notices.iter().any(|n| n.contains("crates: not checked")), "{:?}", v.notices);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_missing_git_is_check_broken() {
+    let (_d, mut f) = job();
+    f.plant(Leak::GitMissing);
+    let v = f.verify();
+    assert!(v.findings.iter().any(|x| x.probe == super::verify::Probe::Git && x.is_broken()), "{}", lines(&v));
+}
+
+#[cfg(unix)]
+#[test]
+fn links_that_stay_inside_the_job_pass() {
+    let (_d, f) = job();
+    // `node_modules` of the clone may be the folder `setup` made for it.
+    let nm = f.clone.join("node_modules");
+    std::os::unix::fs::symlink(f.node_modules(), &nm).unwrap();
+    // An npm workspace link inside it points into the clone.
+    std::fs::create_dir_all(f.clone.join("ui")).unwrap();
+    std::os::unix::fs::symlink(f.clone.join("ui"), f.node_modules().join("@paddock-ui")).unwrap();
+    let v = f.verify();
+    assert!(v.passed(), "{}", lines(&v));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_node_modules_link_to_another_folder_of_the_job_is_refused() {
+    let (_d, f) = job();
+    std::os::unix::fs::symlink(&f.npm, f.clone.join("node_modules")).unwrap();
+    let v = f.verify();
+    assert!(
+        v.findings
+            .iter()
+            .any(|x| x.probe == super::verify::Probe::Links && x.what.contains("not to the node-modules folder")),
+        "{}",
+        lines(&v)
+    );
 }

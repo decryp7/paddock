@@ -1,8 +1,8 @@
 //! The ledger: one line per action kind, written only by [`append`] (the `record` command and `setup` both call it).
 //!
 //! ```text
-//! #job<TAB><job folder><TAB><started, ns since the epoch>
-//! <kind><TAB><path or -><TAB><job|run|off><TAB><dev><TAB><ino><TAB><change ns>     (last three empty for `off`)
+//! #job<TAB><job folder><TAB><job start: birth of the job folder, ns since the epoch>
+//! <kind><TAB><path or -><TAB><job|run|off><TAB><dev><TAB><ino><TAB><birth ns>     (last three empty for `off`)
 //! ```
 //!
 //! Modes (ADR 0085 §5 item 1): `job` is a folder made by this run inside the job folder, `run` a folder made by this run
@@ -82,6 +82,17 @@ impl Kind {
         }
     }
 
+    /// The modes a kind may be recorded with (ADR 0085 Rust-tool amendment): `run` only for `dev-tool`, `off` only for
+    /// `sccache` and, where the job does not expect it, `libduckdb`.
+    pub fn allowed_modes(self) -> &'static [Mode] {
+        match self {
+            Kind::Sccache => &[Mode::Off],
+            Kind::DevTool => &[Mode::Run],
+            Kind::Libduckdb => &[Mode::Job, Mode::Off],
+            _ => &[Mode::Job],
+        }
+    }
+
     /// Parses a name from [`Kind::name`].
     pub fn parse(text: &str) -> Option<Kind> {
         Kind::ALL.into_iter().find(|k| k.name() == text)
@@ -141,7 +152,7 @@ pub struct Entry {
 pub struct Ledger {
     /// The job's folder (`$RUNNER_TEMP`), canonical.
     pub job_root: PathBuf,
-    /// When `setup` started, ns since the epoch.
+    /// When the job started: the birth time of the job's folder, ns since the epoch.
     pub started_ns: i128,
     /// The lines, in order.
     pub entries: Vec<Entry>,
@@ -183,11 +194,14 @@ impl Ledger {
             let id = if cols[3].is_empty() && cols[4].is_empty() && cols[5].is_empty() {
                 None
             } else {
-                let num = |s: &str| s.parse::<u64>().map_err(|_| format!("line {}: {s:?} is not a number", i + 1));
                 Some(Identity {
-                    dev: num(cols[3])?,
-                    ino: num(cols[4])?,
-                    change_ns: cols[5]
+                    dev: cols[3]
+                        .parse::<u64>()
+                        .map_err(|_| format!("line {}: {:?} is not a number", i + 1, cols[3]))?,
+                    ino: cols[4]
+                        .parse::<u128>()
+                        .map_err(|_| format!("line {}: {:?} is not a number", i + 1, cols[4]))?,
+                    birth_ns: cols[5]
                         .parse::<i128>()
                         .map_err(|_| format!("line {}: {:?} is not a number", i + 1, cols[5]))?,
                 })
@@ -206,6 +220,26 @@ impl Ledger {
             entries,
         })
     }
+}
+
+/// A path without Windows' verbatim prefix (`\\?\C:\x` becomes `C:\x`, `\\?\UNC\s\x` becomes `\\s\x`), as `canonicalize`
+/// returns it there: tools that do not know the prefix (git bash, npm, cmd) cannot use it. Other paths are returned as given.
+pub fn simplified(path: &Path) -> PathBuf {
+    PathBuf::from(simplify_text(&path.to_string_lossy()))
+}
+
+/// [`simplified`] on text, so that it is testable on every OS.
+pub fn simplify_text(text: &str) -> String {
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    if let Some(rest) = text.strip_prefix(r"\\?\") {
+        let b = rest.as_bytes();
+        if b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\' {
+            return rest.to_string();
+        }
+    }
+    text.to_string()
 }
 
 /// Starts a ledger file (only `setup` calls this): refuses when one exists, because a second `setup` would orphan the
@@ -230,6 +264,14 @@ pub fn append(ledger_path: &Path, kind: Kind, mode: Mode, path: Option<&Path>) -
         )
     })?;
     let ledger = Ledger::parse(&text).map_err(|e| format!("the ledger {} is damaged: {e}", ledger_path.display()))?;
+    if !kind.allowed_modes().contains(&mode) {
+        let names: Vec<&str> = kind.allowed_modes().iter().map(|m| m.name()).collect();
+        return Err(format!(
+            "`{kind}` may only be recorded as {}, not `{}`.",
+            names.join(" or "),
+            mode.name()
+        ));
+    }
     if ledger.get(kind).is_some() {
         return Err(format!("the ledger already has a line for `{kind}`: one line per kind."));
     }
@@ -245,14 +287,14 @@ pub fn append(ledger_path: &Path, kind: Kind, mode: Mode, path: Option<&Path>) -
             }
             let id =
                 identity_of(&canonical).map_err(|e| format!("`{kind}`: the identity of {} cannot be read: {e}", canonical.display()))?;
-            (canonical.display().to_string(), Some(id))
+            (simplified(&canonical).display().to_string(), Some(id))
         }
     };
     if path_text.contains(['\t', '\n']) {
         return Err(format!("`{kind}`: the path contains a tab or a newline."));
     }
     let (dev, ino, ns) = match id {
-        Some(i) => (i.dev.to_string(), i.ino.to_string(), i.change_ns.to_string()),
+        Some(i) => (i.dev.to_string(), i.ino.to_string(), i.birth_ns.to_string()),
         None => (String::new(), String::new(), String::new()),
     };
     let mut file = std::fs::OpenOptions::new()
@@ -274,6 +316,29 @@ pub fn append(ledger_path: &Path, kind: Kind, mode: Mode, path: Option<&Path>) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verbatim_windows_prefixes_are_removed_only_where_that_is_safe() {
+        assert_eq!(simplify_text(r"\\?\C:\job\x"), r"C:\job\x");
+        assert_eq!(simplify_text(r"\\?\UNC\srv\share\x"), r"\\srv\share\x");
+        assert_eq!(simplify_text(r"\\?\Volume{1234}\x"), r"\\?\Volume{1234}\x");
+        assert_eq!(simplify_text("/tmp/x"), "/tmp/x");
+    }
+
+    #[test]
+    fn append_refuses_a_mode_the_kind_may_not_have() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = dir.path().join("ledger.tsv");
+        create(&ledger, dir.path(), 1).unwrap();
+        assert!(
+            append(&ledger, Kind::Npm, Mode::Off, None)
+                .unwrap_err()
+                .contains("only be recorded as job")
+        );
+        assert!(append(&ledger, Kind::Npm, Mode::Run, Some(dir.path())).is_err());
+        assert!(append(&ledger, Kind::Sccache, Mode::Job, Some(dir.path())).is_err());
+        assert!(append(&ledger, Kind::Libduckdb, Mode::Off, None).is_ok());
+    }
 
     #[test]
     fn append_writes_one_line_per_kind_and_refuses_a_second() {

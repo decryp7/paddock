@@ -65,10 +65,36 @@ pub enum Leak {
     UserNpmrc,
     /// The Angular cache is a link (Unix).
     AngularLink,
-    /// A global npmrc under the node prefix.
+    /// A global npmrc where `npm config get globalconfig` says.
     NpmGlobalNpmrc,
-    /// `node` cannot be found, so the global npmrc cannot be located (check broken).
-    NpmGlobalUnknown,
+    /// Homebrew: `node` on PATH is a link into the Cellar and the global npmrc is under the link's prefix.
+    NpmHomebrewLink,
+    /// `npm` cannot be run (check broken).
+    NpmMissing,
+    /// `git` cannot be run (check broken).
+    GitMissing,
+    /// An archive in another registry's index folder, with a name and version the lock file has.
+    OtherRegistryIndex,
+    /// `CARGO_HOME/git` exists, but no lock file has a git source.
+    GitCheckoutsInCargoHome,
+    /// The `dev-tool` folder is not named `release-<run id>-<job>`.
+    DevToolWrongName,
+    /// `dev-tool` recorded as `off`.
+    DevToolOff,
+    /// `npm` recorded as `run`.
+    FolderKindRun,
+    /// `registry/src` is a link to a kept folder (Unix).
+    LinkRegistrySrc,
+    /// `<clone>/node_modules` is a link to a kept folder (Unix).
+    LinkNodeModules,
+    /// `<target>/release` is a link to a kept folder (Unix).
+    LinkTargetRelease,
+    /// A tracked `.cargo/config.toml` edited after checkout.
+    ConfigTrackedModified,
+    /// The clone is not at `GITHUB_SHA`.
+    CloneNotAtTag,
+    /// `--allow-unpinned-tauri` in release mode in CI.
+    AllowUnpinnedInCiReleaseMode,
     /// No Tauri pin file was given.
     TauriPinsMissing,
     /// `--allow-unpinned-tauri` on a tag run.
@@ -104,12 +130,21 @@ impl Leak {
             UserNpmrc,
             TauriFileTampered,
             NpmGlobalNpmrc,
-            NpmGlobalUnknown,
+            NpmHomebrewLink,
+            NpmMissing,
             TauriPinsMissing,
             AllowUnpinnedOnTag,
+            OtherRegistryIndex,
+            GitCheckoutsInCargoHome,
+            DevToolWrongName,
+            DevToolOff,
+            FolderKindRun,
+            ConfigTrackedModified,
+            CloneNotAtTag,
+            AllowUnpinnedInCiReleaseMode,
         ];
         if cfg!(unix) {
-            v.push(AngularLink);
+            v.extend([AngularLink, LinkRegistrySrc, LinkNodeModules, LinkTargetRelease, GitMissing]);
         }
         v
     }
@@ -120,14 +155,20 @@ impl Leak {
         match self {
             LedgerMissingKind | LedgerSharedMode => Probe::Ledger,
             FolderReplaced | KeptFolder | OutsideJobRoot => Probe::Identity,
+            DevToolWrongName | DevToolOff | FolderKindRun => Probe::Ledger,
+            LinkRegistrySrc | LinkNodeModules | LinkTargetRelease => Probe::Links,
+            OtherRegistryIndex | GitCheckoutsInCargoHome => Probe::Crates,
+            GitMissing => Probe::Git,
             CargoHomeElsewhere | SccacheDirShared => Probe::Pointers,
             RustcWrapper | SccacheRequests | SccacheStatsMissing => Probe::CompileCache,
             CrateHashMismatch | CrateNotInLock | NoCrates => Probe::Crates,
-            ConfigInParent | ConfigInCargoHome | ConfigUntrackedInClone | CiTomlExtra => Probe::CargoConfig,
+            ConfigInParent | ConfigInCargoHome | ConfigUntrackedInClone | CiTomlExtra | ConfigTrackedModified | CloneNotAtTag => {
+                Probe::CargoConfig
+            }
             GitHooksPath | GitInsteadOf => Probe::Git,
-            UserNpmrc | NpmGlobalNpmrc | NpmGlobalUnknown => Probe::Npm,
+            UserNpmrc | NpmGlobalNpmrc | NpmHomebrewLink | NpmMissing => Probe::Npm,
             AngularLink => Probe::Angular,
-            TauriFileTampered | TauriPinsMissing | AllowUnpinnedOnTag => Probe::TauriTools,
+            TauriFileTampered | TauriPinsMissing | AllowUnpinnedOnTag | AllowUnpinnedInCiReleaseMode => Probe::TauriTools,
         }
     }
 
@@ -138,7 +179,7 @@ impl Leak {
             LedgerMissingKind => "sccache",
             LedgerSharedMode => "shared",
             FolderReplaced => "`npm`",
-            KeptFolder => "older than this run",
+            KeptFolder => "born before this job started",
             OutsideJobRoot => "outside the job folder",
             CargoHomeElsewhere => "CARGO_HOME is",
             SccacheDirShared => "SCCACHE_DIR",
@@ -155,10 +196,21 @@ impl Leak {
             GitHooksPath => "core.hooksPath",
             GitInsteadOf => "insteadOf",
             UserNpmrc => ".npmrc",
-            AngularLink => "is a link",
+            AngularLink => "build would read a kept Angular cache",
             TauriFileTampered => "makensis",
-            NpmGlobalNpmrc => "global npmrc",
-            NpmGlobalUnknown => "npm-global: not measured",
+            NpmGlobalNpmrc => "globalconfig",
+            NpmHomebrewLink => "node's prefix",
+            NpmMissing => "`npm config get",
+            GitMissing => "the probe did not show",
+            OtherRegistryIndex => "match no registry source",
+            GitCheckoutsInCargoHome => "no tagged Cargo.lock has a git source",
+            DevToolWrongName => "is not named",
+            DevToolOff => "only run is allowed",
+            FolderKindRun => "only job is allowed",
+            LinkRegistrySrc | LinkNodeModules | LinkTargetRelease => "lead outside the job",
+            ConfigTrackedModified => "differs from the commit",
+            CloneNotAtTag => "is not GITHUB_SHA",
+            AllowUnpinnedInCiReleaseMode => "refused on a tag run",
             TauriPinsMissing => "not measured (check broken)",
             AllowUnpinnedOnTag => "refused on a tag run",
         }
@@ -215,17 +267,55 @@ fn run(env: &Env, dir: &Path, program: &str, args: &[&str]) {
     assert!(out.success(), "{program} {args:?}: {}", out.stderr_text());
 }
 
+/// A stand-in for `npm` that answers `npm config get userconfig|globalconfig` the way npm would for this fake install.
+fn write_fake_npm(bin: &Path, prefix: &Path, home: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let script = format!(
+            "#!/bin/sh\ncase \"$3\" in\n  globalconfig) echo '{}/etc/npmrc';;\n  userconfig) echo '{}/.npmrc';;\nesac\n",
+            prefix.display(),
+            home.display()
+        );
+        let path = bin.join("npm");
+        fs::write(&path, script).expect("fake npm");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("chmod");
+    }
+    #[cfg(windows)]
+    {
+        let script = format!(
+            "@echo off\r\nif \"%3\"==\"globalconfig\" echo {}\\bin\\etc\\npmrc\r\nif \"%3\"==\"userconfig\" echo {}\\.npmrc\r\n",
+            prefix.display(),
+            home.display()
+        );
+        fs::write(bin.join("npm.cmd"), script).expect("fake npm");
+    }
+}
+
+/// `PATH` without the folders that hold `name`.
+fn path_without(env: &mut Env, names: &[&str]) {
+    let kept: Vec<_> = std::env::split_paths(&env.0["PATH"])
+        .filter(|d| !names.iter().any(|n| d.join(n).exists()))
+        .collect();
+    env.0.insert(
+        "PATH".into(),
+        std::env::join_paths(kept).expect("PATH").to_string_lossy().into_owned(),
+    );
+}
+
 impl Fixture {
     /// Builds a clean job under `root` (an existing, empty folder).
     pub fn build(root: &Path) -> Fixture {
         let root = root.canonicalize().expect("root exists");
         let home = root.join("home");
         let temp = root.join("job");
-        let dev = root.join("tools-home");
+        let dev = root.join("tools-home").join("release-1234-bundle");
         for d in [&home, &temp, &dev] {
             fs::create_dir_all(d).expect("fixture folder");
         }
-        let made = setup(&temp, &temp.join("release-isolation").join("ledger.tsv")).expect("setup");
+        // `./dev` is built into `dev` before `setup`, which runs through it: born after the job started, before `setup`.
+        fs::write(dev.join(".rustc_info.json"), "{}").expect("a built tool");
+        let made = setup(&temp, &temp.join("release-isolation").join("ledger.tsv"), Some(&dev)).expect("setup");
         let folder = |k: Kind| made.folders.iter().find(|(kk, _)| *kk == k).map(|(_, p)| p.clone()).expect("made");
         let mut env = Env::default();
         for key in ["PATH", "SYSTEMROOT", "TEMP", "TMP", "LANG"] {
@@ -237,6 +327,7 @@ impl Fixture {
         let node_bin = node_prefix.join("bin");
         fs::create_dir_all(&node_bin).expect("node bin");
         fs::write(node_bin.join(NODE_NAME), b"not a real node").expect("fake node");
+        write_fake_npm(&node_bin, &node_prefix, &home);
         let path =
             std::env::join_paths(std::iter::once(node_bin).chain(std::env::split_paths(&env.0.get("PATH").cloned().unwrap_or_default())))
                 .expect("PATH");
@@ -247,6 +338,7 @@ impl Fixture {
         env.0.insert("GIT_CONFIG_NOSYSTEM".into(), "1".into());
         env.0.insert("GIT_TERMINAL_PROMPT".into(), "0".into());
         env.0.insert("RUNNER_TEMP".into(), temp.display().to_string());
+        env.0.insert("GITHUB_RUN_ID".into(), "1234".into());
         for (k, v) in &made.env {
             env.0.insert(k.clone(), v.clone());
         }
@@ -285,6 +377,19 @@ impl Fixture {
                 "tag",
             ],
         );
+        let head = {
+            let mut cmd = command("git");
+            cmd.args(["rev-parse", "HEAD"]).current_dir(&clone).env_clear();
+            for (k, v) in &env.0 {
+                cmd.env(k, v);
+            }
+            run_bounded(cmd, Limits::new(Duration::from_secs(60)))
+                .expect("git rev-parse")
+                .stdout_text()
+                .trim()
+                .to_string()
+        };
+        env.0.insert("GITHUB_SHA".into(), head);
         // The archives and an extracted source.
         let cache = cargo_home.join("registry").join("cache").join("index.crates.io-0000000000000000");
         let src = cargo_home
@@ -307,7 +412,6 @@ impl Fixture {
         let angular = clone.join("app").join(".angular").join("cache");
         fs::create_dir_all(&angular).expect("angular");
         let ledger = temp.join("release-isolation").join("ledger.tsv");
-        append(&ledger, Kind::DevTool, Mode::Run, Some(&dev)).expect("record dev-tool");
         append(&ledger, Kind::Sccache, Mode::Off, None).expect("record sccache");
         append(&ledger, Kind::Angular, Mode::Job, Some(&angular)).expect("record angular");
         let stats = root.join("sccache-stats.json");
@@ -317,6 +421,7 @@ impl Fixture {
         opts.app_dirs = vec!["app".into()];
         opts.sccache_stats = Some(stats);
         opts.tauri_pins = Some(pins);
+        opts.walk_stop = Some(root.clone());
         Fixture {
             target: folder(Kind::Target),
             npm: folder(Kind::Npm),
@@ -331,6 +436,18 @@ impl Fixture {
             env,
             opts,
         }
+    }
+
+    /// The folder `setup` made for `node_modules`.
+    pub fn node_modules(&self) -> PathBuf {
+        PathBuf::from(
+            super::ledger::Ledger::read(&self.ledger)
+                .expect("ledger")
+                .get(Kind::NodeModules)
+                .expect("node-modules")
+                .path
+                .clone(),
+        )
     }
 
     /// Runs `verify` on this job.
@@ -363,6 +480,23 @@ impl Fixture {
     fn rewrite_ledger(&self, f: impl FnOnce(String) -> String) {
         let text = fs::read_to_string(&self.ledger).expect("ledger");
         fs::write(&self.ledger, f(text)).expect("rewrite ledger");
+    }
+
+    fn git(&self, args: &[&str]) {
+        run(&self.env, &self.clone, "git", args);
+    }
+
+    fn git_head(&self) -> String {
+        let mut cmd = command("git");
+        cmd.args(["rev-parse", "HEAD"]).current_dir(&self.clone).env_clear();
+        for (k, v) in &self.env.0 {
+            cmd.env(k, v);
+        }
+        run_bounded(cmd, Limits::new(Duration::from_secs(60)))
+            .expect("git rev-parse")
+            .stdout_text()
+            .trim()
+            .to_string()
     }
 
     fn archive_dir(&self) -> PathBuf {
@@ -414,7 +548,7 @@ impl Fixture {
                     t.lines()
                         .map(|l| {
                             if l.starts_with("node-modules\t") {
-                                format!("node-modules\t{path}\tjob\t{}\t{}\t{}", id.dev, id.ino, id.change_ns)
+                                format!("node-modules\t{path}\tjob\t{}\t{}\t{}", id.dev, id.ino, id.birth_ns)
                             } else {
                                 l.to_string()
                             }
@@ -484,7 +618,7 @@ impl Fixture {
                 }
             }
             Leak::NpmGlobalNpmrc => {
-                // On Windows the node folder's own `etc\npmrc` is the one read.
+                // On Windows the fake npm names the node folder's own `etc\npmrc`.
                 let etc = if cfg!(windows) {
                     self.node_prefix.join("bin").join("etc")
                 } else {
@@ -493,15 +627,115 @@ impl Fixture {
                 fs::create_dir_all(&etc).expect("etc");
                 fs::write(etc.join("npmrc"), "ignore-scripts=false\n").expect("npmrc");
             }
-            Leak::NpmGlobalUnknown => {
-                fs::remove_file(self.node_prefix.join("bin").join(NODE_NAME)).expect("remove node");
-                let kept: Vec<_> = std::env::split_paths(&self.env.0["PATH"])
-                    .filter(|d| !d.join(NODE_NAME).is_file())
-                    .collect();
-                self.env.0.insert(
-                    "PATH".into(),
-                    std::env::join_paths(kept).expect("PATH").to_string_lossy().into_owned(),
-                );
+            Leak::NpmHomebrewLink => {
+                #[cfg(unix)]
+                {
+                    let brew = self.root.join("brew");
+                    let cellar_bin = brew.join("Cellar").join("node").join("26").join("bin");
+                    fs::create_dir_all(&cellar_bin).expect("cellar");
+                    fs::write(cellar_bin.join("node"), "x").expect("node");
+                    fs::create_dir_all(brew.join("bin")).expect("bin");
+                    std::os::unix::fs::symlink(cellar_bin.join("node"), brew.join("bin").join("node")).expect("link");
+                    fs::create_dir_all(brew.join("etc")).expect("etc");
+                    fs::write(brew.join("etc").join("npmrc"), "registry=https://evil.invalid/\n").expect("npmrc");
+                    // The real node is first on PATH; the fixture's fake one goes.
+                    fs::remove_file(self.node_prefix.join("bin").join(NODE_NAME)).expect("remove fake node");
+                    let path = std::env::join_paths(std::iter::once(brew.join("bin")).chain(std::env::split_paths(&self.env.0["PATH"])))
+                        .expect("PATH");
+                    self.env.0.insert("PATH".into(), path.to_string_lossy().into_owned());
+                }
+            }
+            Leak::NpmMissing => {
+                fs::remove_file(self.node_prefix.join("bin").join(if cfg!(windows) { "npm.cmd" } else { "npm" })).expect("remove npm");
+                path_without(&mut self.env, &["npm", "npm.cmd"]);
+            }
+            Leak::GitMissing => {
+                let empty = self.root.join("empty-path");
+                fs::create_dir_all(&empty).expect("empty");
+                self.env.0.insert("PATH".into(), empty.display().to_string());
+            }
+            Leak::OtherRegistryIndex => {
+                let other = self.cargo_home.join("registry").join("cache").join("evil.example-1111111111111111");
+                fs::create_dir_all(&other).expect("other index");
+                fs::copy(self.archive_dir().join("serde-1.0.0.crate"), other.join("serde-1.0.0.crate")).expect("copy");
+            }
+            Leak::GitCheckoutsInCargoHome => fs::create_dir_all(self.cargo_home.join("git").join("checkouts")).expect("git"),
+            Leak::DevToolWrongName => {
+                let from = self.root.join("tools-home").join("release-1234-bundle");
+                let to = self.root.join("tools-home").join("cached-bundle");
+                fs::rename(&from, &to).expect("rename");
+                let (from, to) = (from.display().to_string(), to.display().to_string());
+                self.rewrite_ledger(|t| t.replace(&from, &to));
+            }
+            Leak::DevToolOff => self.rewrite_ledger(|t| {
+                t.lines()
+                    .map(|l| {
+                        if l.starts_with("dev-tool\t") {
+                            "dev-tool\t-\toff\t\t\t".to_string()
+                        } else {
+                            l.to_string()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    + "\n"
+            }),
+            Leak::FolderKindRun => self.rewrite_ledger(|t| {
+                t.lines()
+                    .map(|l| {
+                        if l.starts_with("npm\t") {
+                            l.replacen("\tjob\t", "\trun\t", 1)
+                        } else {
+                            l.to_string()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    + "\n"
+            }),
+            Leak::LinkRegistrySrc | Leak::LinkNodeModules | Leak::LinkTargetRelease => {
+                #[cfg(unix)]
+                {
+                    let kept = self.root.join("kept");
+                    fs::create_dir_all(&kept).expect("kept folder");
+                    let link = match leak {
+                        Leak::LinkRegistrySrc => {
+                            fs::remove_dir_all(self.cargo_home.join("registry").join("src")).expect("remove src");
+                            self.cargo_home.join("registry").join("src")
+                        }
+                        Leak::LinkNodeModules => self.clone.join("node_modules"),
+                        _ => self.target.join("release"),
+                    };
+                    std::os::unix::fs::symlink(&kept, link).expect("link");
+                }
+            }
+            Leak::ConfigTrackedModified => {
+                let cfg_dir = self.clone.join(".cargo");
+                fs::create_dir_all(&cfg_dir).expect(".cargo");
+                fs::write(cfg_dir.join("config.toml"), "[net]\nretry = 2\n").expect("config");
+                self.git(&["add", "-A"]);
+                self.git(&[
+                    "-c",
+                    "user.name=x",
+                    "-c",
+                    "user.email=x@x.invalid",
+                    "-c",
+                    "commit.gpgsign=false",
+                    "commit",
+                    "-qm",
+                    "c",
+                ]);
+                self.env.0.insert("GITHUB_SHA".into(), self.git_head());
+                fs::write(cfg_dir.join("config.toml"), "[build]\nrustc-wrapper = \"/kept/sccache\"\n").expect("edit");
+            }
+            Leak::CloneNotAtTag => {
+                self.env.0.insert("GITHUB_SHA".into(), "0".repeat(40));
+            }
+            Leak::AllowUnpinnedInCiReleaseMode => {
+                self.opts.allow_unpinned_tauri = true;
+                self.opts.tauri_pins = None;
+                self.env.0.insert("GITHUB_ACTIONS".into(), "true".into());
+                self.env.0.insert("PADDOCK_RELEASE_MODE".into(), "1".into());
             }
             Leak::TauriPinsMissing => self.opts.tauri_pins = None,
             Leak::AllowUnpinnedOnTag => {
