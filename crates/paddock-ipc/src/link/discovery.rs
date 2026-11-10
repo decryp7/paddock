@@ -80,10 +80,31 @@ impl Discovery {
 /// When the process table or the holder's start time cannot be read the answer is "running": a file is removed, and a
 /// second companion started, only on a proven "gone" (rule 53).
 pub fn is_running(d: &Discovery) -> bool {
-    running_from(paddock_proc::ProcessId::recorded_presence(
-        d.pid,
-        d.started_ms,
-    ))
+    is_running_by(d, &look_now)
+}
+
+/// [`is_running`] over a look at the recorded pid, given the pid and the record's time (tests give one that cannot read
+/// the process table).
+fn is_running_by(d: &Discovery, look: &dyn Fn(u32, i64) -> paddock_proc::Presence) -> bool {
+    running_from(look(d.pid, d.started_ms))
+}
+
+/// The real look at a recorded pid; under test a thread-local look stands in, so the real [`is_running`] can be driven
+/// through an unreadable process table.
+fn look_now(pid: u32, written_ms: i64) -> paddock_proc::Presence {
+    #[cfg(test)]
+    if let Some(p) = tests_look::OVERRIDE.with(std::cell::Cell::get) {
+        return p;
+    }
+    paddock_proc::ProcessId::recorded_presence(pid, written_ms)
+}
+
+#[cfg(test)]
+mod tests_look {
+    use std::cell::Cell;
+    thread_local! {
+        pub(super) static OVERRIDE: Cell<Option<paddock_proc::Presence>> = const { Cell::new(None) };
+    }
 }
 
 /// The decision of [`is_running`] over a look at the process: only `Gone` is stale.
@@ -217,6 +238,38 @@ fn private(_path: &Path, _meta: &std::fs::Metadata) -> Result<(), String> {
 mod running_tests {
     use super::*;
     use paddock_proc::Presence::{Gone, Running, Unknown};
+
+    fn sample(pid: u32, started_ms: i64) -> Discovery {
+        Discovery {
+            endpoint: "e".into(),
+            token: "t".into(),
+            pid,
+            build: "b".into(),
+            protocol: crate::frame::ProtocolVersion::UNVERSIONED,
+            started_ms,
+        }
+    }
+
+    #[test]
+    fn the_real_is_running_counts_an_unreadable_process_table_as_running() {
+        let d = sample(4242, 9);
+        for (look, expected) in [(Unknown, true), (Running, true), (Gone, false)] {
+            tests_look::OVERRIDE.with(|o| o.set(Some(look)));
+            assert_eq!(is_running(&d), expected, "{look:?}");
+        }
+        tests_look::OVERRIDE.with(|o| o.set(None));
+    }
+
+    #[test]
+    fn is_running_by_asks_the_three_valued_look_with_the_recorded_pid_and_time() {
+        let d = sample(4242, 9);
+        assert!(is_running_by(&d, &|pid, ms| {
+            assert_eq!((pid, ms), (4242, 9));
+            Unknown
+        }));
+        assert!(is_running_by(&d, &|_, _| Running));
+        assert!(!is_running_by(&d, &|_, _| Gone));
+    }
 
     #[test]
     fn a_file_is_stale_only_when_the_process_is_proven_gone() {

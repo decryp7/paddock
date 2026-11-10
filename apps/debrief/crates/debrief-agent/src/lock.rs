@@ -44,14 +44,30 @@ impl ProcessProbe for SystemProbe {
     }
 
     fn look(&self, pid: u32) -> Look {
-        let Ok(mut sys) = System::new()
-            .inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; the start time of pid {pid} is unknown"))
-        else {
-            return Look::Unknown;
+        Self::look_logged(pid, System::new).0
+    }
+}
+
+impl SystemProbe {
+    /// [`ProcessProbe::look`] over a constructor of the sysinfo `System`, also saying whether this call logged a failure
+    /// (only the first failure of the process is logged: it is permanent).
+    fn look_logged(pid: u32, make: impl FnOnce() -> Result<System, sysinfo::Error>) -> (Look, bool) {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static WARNED: AtomicBool = AtomicBool::new(false);
+        let mut logged = false;
+        let Ok(mut sys) = make().inspect_err(|why| {
+            if !WARNED.swap(true, Ordering::Relaxed) {
+                logged = true;
+                log::warn!(
+                    "the OS process table is unavailable (sysinfo): {why}; a lock is never taken over on a failed read (logged once)"
+                );
+            }
+        }) else {
+            return (Look::Unknown, logged);
         };
         let p = Pid::from_u32(pid);
         sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[p]), true, ProcessRefreshKind::nothing());
-        sys.process(p).map_or(Look::Gone, |proc| Look::Started(proc.start_time()))
+        (sys.process(p).map_or(Look::Gone, |proc| Look::Started(proc.start_time())), false)
     }
 }
 
@@ -252,6 +268,15 @@ mod tests {
         // A probe that can read the table and finds nobody still takes it over.
         let gone = FakeProbe([(std::process::id(), 100)].into());
         drop(RunLock::acquire(dir.path(), "nightly", 1, &gone).unwrap());
+    }
+
+    #[test]
+    fn the_real_probe_says_unknown_when_the_table_cannot_be_opened_and_logs_once() {
+        let first = SystemProbe::look_logged(1, || Err(sysinfo::Error::Unsupported));
+        let second = SystemProbe::look_logged(1, || Err(sysinfo::Error::Unsupported));
+        assert_eq!((first.0, second.0), (Look::Unknown, Look::Unknown));
+        assert!(!second.1, "the second failure is not logged again");
+        assert_eq!(SystemProbe::look_logged(u32::MAX - 7, System::new), (Look::Gone, false));
     }
 
     #[test]

@@ -23,6 +23,9 @@ pub enum Terminated {
     Gracefully,
     /// It ignored the request and was killed.
     Killed,
+    /// The OS process table (or the process's start time) could not be read: nothing was asked and nothing was ended, and
+    /// whether the process runs is not known. Not the same as [`Terminated::Gone`].
+    Unknown,
 }
 
 /// What ending a tree needs from the OS: the real one ([`RealOs`]), or a process table the tests drive.
@@ -277,8 +280,19 @@ pub(crate) fn presence_with(
 /// Asks `id` to stop, waits up to `grace` for it, then ends it. For processes that are not our children (the caller
 /// checked that the process belongs to it); a child of ours should go through `Supervised::terminate`, which also reaps.
 pub fn terminate(id: ProcessId, grace: Duration) -> Terminated {
-    if !id.is_alive() {
-        return Terminated::Gone;
+    terminate_by(id, grace, &ProcessId::presence)
+}
+
+/// [`terminate`] over the first look at the process (tests give one that cannot read the process table).
+pub(crate) fn terminate_by(
+    id: ProcessId,
+    grace: Duration,
+    look: &dyn Fn(ProcessId) -> Presence,
+) -> Terminated {
+    match look(id) {
+        Presence::Gone => return Terminated::Gone,
+        Presence::Unknown => return Terminated::Unknown,
+        Presence::Running => {}
     }
     if ask(id) {
         let end_at = Instant::now() + grace;
@@ -539,6 +553,19 @@ mod port_tests {
 mod tests {
     use super::*;
     use crate::Supervised;
+
+    #[test]
+    fn an_unreadable_process_table_is_not_a_process_that_was_gone() {
+        let id = ProcessId::new(4242, StartTime::from_micros(1));
+        assert_eq!(
+            terminate_by(id, Duration::ZERO, &|_| Presence::Unknown),
+            Terminated::Unknown
+        );
+        assert_eq!(
+            terminate_by(id, Duration::ZERO, &|_| Presence::Gone),
+            Terminated::Gone
+        );
+    }
 
     fn broken() -> Result<sysinfo::System, sysinfo::Error> {
         Err(sysinfo::Error::Unsupported)
