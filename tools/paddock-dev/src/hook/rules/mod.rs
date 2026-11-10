@@ -13,6 +13,11 @@ pub trait Rule {
     fn id(&self) -> &'static str;
     /// Decides the call. `script` is the parsed command of a Bash call, `None` for any other tool.
     fn check(&self, call: &ToolCall, script: Option<&Script>) -> Option<Denial>;
+    /// The old shell hook's text patterns, run on the raw command when it could not be read (an unclosed quote, a limit): the
+    /// hook then keeps the decisions the shell hooks gave instead of failing open on text they would have refused.
+    fn legacy(&self, _text: &str) -> Option<Denial> {
+        None
+    }
 }
 
 /// Every rule, in the order they are asked. A new rule is a new file and one line here.

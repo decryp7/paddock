@@ -13,10 +13,10 @@
 
 /// The longest command text parsed (the whole input and every nested piece count against it).
 pub const MAX_SOURCE: usize = 1 << 20;
-/// The deepest nesting of `$(...)`, `bash -c` and `eval`.
-const MAX_DEPTH: usize = 6;
+/// The deepest nesting of `$(...)`, `bash -c` and `eval`; past a limit the rules check the raw text instead (`hook::decide`).
+const MAX_DEPTH: usize = 16;
 /// The most nested pieces parsed for one command.
-const MAX_NESTED: usize = 64;
+const MAX_NESTED: usize = 10_000;
 
 /// Why a command could not be read.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,6 +45,8 @@ pub struct Word {
     pub subs: Vec<String>,
     /// The word is `NAME=value` with the name unquoted.
     pub assignment: bool,
+    /// Any part of it was quoted or escaped (`'a'`, `"a"`, `\a`, `$'a'`).
+    pub quoted: bool,
 }
 
 /// What separates two commands.
@@ -168,42 +170,91 @@ impl Simple {
         self.words.first().is_some_and(|w| w.text == "do")
     }
 
-    /// Shell text this command runs: the argument of `bash -c`, the words of `eval`, and the input of a shell that reads a
-    /// heredoc or here-string.
+    /// The command line starts a `for` or `select` loop (after `do`, `then`, `{`...).
+    pub fn opens_for(&self) -> bool {
+        for word in &self.words {
+            match word.text.as_str() {
+                "for" | "select" => return true,
+                "while" | "until" => return false,
+                t if word.assignment || PREFIX.contains(&t) => {}
+                _ => return false,
+            }
+        }
+        false
+    }
+
+    /// Shell text this command runs: the argument of `eval`, of a shell's `-c` (a shell may stand after any word: `xargs sh -c`,
+    /// `find -exec bash -c`, `nohup sh -c`, `ssh host bash -c`), of `env -S`, and the input of a shell that reads a heredoc or
+    /// here-string.
     fn nested_sources(&self) -> Vec<String> {
-        let cmd = self.command();
-        let Some(first) = cmd.first() else { return Vec::new() };
-        let name = basename(&first.text);
         let mut out = Vec::new();
-        if name == "eval" {
+        let w = &self.words;
+        let cmd = self.command();
+        if let Some(first) = cmd.first()
+            && basename(&first.text) == "eval"
+        {
             let joined: Vec<&str> = cmd[1..].iter().map(|w| w.text.as_str()).collect();
             out.push(joined.join(" "));
-        } else if SHELLS.contains(&name) {
-            let mut args = cmd[1..].iter();
-            let mut reads_stdin = true;
-            while let Some(a) = args.next() {
-                let t = a.text.as_str();
-                if t == "--" {
-                    break;
+        }
+        let mut shell_reads_stdin = false;
+        for (k, word) in w.iter().enumerate() {
+            let name = basename(&word.text);
+            if SHELLS.contains(&name) {
+                match shell_script(&w[k + 1..]) {
+                    ShellInput::Script(text) => out.push(text),
+                    ShellInput::Stdin => shell_reads_stdin = true,
+                    ShellInput::File => {}
                 }
-                // `-c`, or a cluster ending in c (`-lc`, `-ec`).
-                if t.starts_with('-') && !t.starts_with("--") && t.ends_with('c') {
-                    if let Some(script) = args.next() {
-                        out.push(script.text.clone());
+            } else if name == "env" {
+                let mut args = w[k + 1..].iter();
+                while let Some(a) = args.next() {
+                    let t = a.text.as_str();
+                    if t == "-S" || t == "--split-string" {
+                        if let Some(script) = args.next() {
+                            out.push(script.text.clone());
+                        }
+                    } else if let Some(rest) = t.strip_prefix("--split-string=") {
+                        out.push(rest.to_string());
+                    } else if let Some(rest) = t.strip_prefix("-S").filter(|r| !r.is_empty()) {
+                        out.push(rest.to_string());
                     }
-                    break;
-                }
-                if !t.starts_with('-') {
-                    reads_stdin = false; // a script file: its text is not here, and stdin is the script's
-                    break;
                 }
             }
-            if out.is_empty() && reads_stdin {
-                out.extend(self.docs.iter().cloned());
-            }
+        }
+        if out.is_empty() && shell_reads_stdin {
+            out.extend(self.docs.iter().cloned());
         }
         out
     }
+}
+
+/// What a shell is given.
+enum ShellInput {
+    /// `-c SCRIPT`.
+    Script(String),
+    /// No script and no file: it reads standard input (a heredoc or here-string).
+    Stdin,
+    /// A script file: its text is not in the command line, and standard input is the script's.
+    File,
+}
+
+/// The input of a shell whose arguments (after its name) are `args`.
+fn shell_script(args: &[Word]) -> ShellInput {
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        let t = a.text.as_str();
+        if t == "--" {
+            return ShellInput::Stdin;
+        }
+        // `-c`, or a cluster ending in c (`-lc`, `-ec`).
+        if t.starts_with('-') && !t.starts_with("--") && t.ends_with('c') {
+            return it.next().map_or(ShellInput::Stdin, |s| ShellInput::Script(s.text.clone()));
+        }
+        if !t.starts_with('-') {
+            return ShellInput::File;
+        }
+    }
+    ShellInput::Stdin
 }
 
 impl Script {
@@ -228,7 +279,7 @@ fn parse_into(src: &str, depth: usize, budget: &mut usize, out: &mut Vec<Item>) 
     if src.len() > MAX_SOURCE || depth > MAX_DEPTH {
         return Err(LexError::TooLarge);
     }
-    let (toks, bodies) = Lexer::new(src).run()?;
+    let (toks, bodies, body_subs) = Lexer::new(src).run()?;
     let mut items = Vec::new();
     let mut cur = Simple::default();
     let mut slots: Vec<usize> = Vec::new();
@@ -237,6 +288,9 @@ fn parse_into(src: &str, depth: usize, budget: &mut usize, out: &mut Vec<Item>) 
         for s in slots.drain(..) {
             if let Some(b) = bodies.get(s) {
                 cur.docs.push(b.clone());
+            }
+            if let Some(subs) = body_subs.get(s) {
+                cur.subs.extend(subs.iter().cloned());
             }
         }
         if !cur.words.is_empty() || !cur.docs.is_empty() || !cur.subs.is_empty() {
@@ -253,6 +307,7 @@ fn parse_into(src: &str, depth: usize, budget: &mut usize, out: &mut Vec<Item>) 
             Tok::Word(w) if here_string => {
                 here_string = false;
                 cur.docs.push(w.text);
+                cur.subs.extend(w.subs);
             }
             Tok::Word(w) => cur.words.push(w),
             Tok::Redir => skip_target = true,
@@ -292,6 +347,9 @@ fn parse_into(src: &str, depth: usize, budget: &mut usize, out: &mut Vec<Item>) 
     Ok(())
 }
 
+/// The tokens, the heredoc bodies and each body's substitutions.
+type Lexed = (Vec<Tok>, Vec<String>, Vec<Vec<String>>);
+
 enum Tok {
     Word(Word),
     Sep(Sep),
@@ -304,9 +362,11 @@ struct Lexer {
     s: Vec<char>,
     i: usize,
     toks: Vec<Tok>,
-    /// Heredocs whose bodies start after the next line end: (delimiter, strip leading tabs, slot).
-    pending: Vec<(String, bool, usize)>,
+    /// Heredocs whose bodies start after the next line end: (delimiter, strip leading tabs, slot, expansions run).
+    pending: Vec<(String, bool, usize, bool)>,
     bodies: Vec<String>,
+    /// The substitutions of each unquoted heredoc body, by slot.
+    body_subs: Vec<Vec<String>>,
 }
 
 fn is_meta(c: char) -> bool {
@@ -321,6 +381,7 @@ impl Lexer {
             toks: Vec::new(),
             pending: Vec::new(),
             bodies: Vec::new(),
+            body_subs: Vec::new(),
         }
     }
 
@@ -328,7 +389,7 @@ impl Lexer {
         self.s.get(self.i + n).copied()
     }
 
-    fn run(mut self) -> Result<(Vec<Tok>, Vec<String>), LexError> {
+    fn run(mut self) -> Result<Lexed, LexError> {
         while let Some(c) = self.peek(0) {
             match c {
                 ' ' | '\t' => self.i += 1,
@@ -381,6 +442,25 @@ impl Lexer {
                         self.toks.push(Tok::Sep(Sep::Pipe));
                     }
                 }
+                '(' if self.peek(1) == Some('(') => {
+                    // `(( ... ))`: arithmetic, where `<<` is a shift and not a heredoc. It must close with `))`; `((a); b)` is two
+                    // nested subshells (as bash reads it) and is lexed as parentheses.
+                    let start = self.i;
+                    self.i += 2;
+                    match self.arith() {
+                        Ok(subs) if self.i >= 2 && self.s[self.i - 2] == ')' && self.s[self.i - 1] == ')' => {
+                            self.toks.push(Tok::Word(Word {
+                                text: "((".to_string(),
+                                subs,
+                                ..Word::default()
+                            }));
+                        }
+                        _ => {
+                            self.i = start + 1;
+                            self.toks.push(Tok::Sep(Sep::Open));
+                        }
+                    }
+                }
                 '(' => {
                     self.i += 1;
                     self.toks.push(Tok::Sep(Sep::Open));
@@ -400,7 +480,7 @@ impl Lexer {
                 }
             }
         }
-        Ok((self.toks, self.bodies))
+        Ok((self.toks, self.bodies, self.body_subs))
     }
 
     fn redirection(&mut self) -> Result<(), LexError> {
@@ -410,9 +490,8 @@ impl Lexer {
             self.i += 2;
             let sub = self.balanced("process substitution")?;
             self.toks.push(Tok::Word(Word {
-                text: String::new(),
                 subs: vec![sub],
-                assignment: false,
+                ..Word::default()
             }));
             return Ok(());
         }
@@ -430,10 +509,11 @@ impl Lexer {
             while matches!(self.peek(0), Some(' ' | '\t')) {
                 self.i += 1;
             }
-            let delim = self.word()?.text;
+            let delim_word = self.word()?;
             let slot = self.bodies.len();
             self.bodies.push(String::new());
-            self.pending.push((delim, strip, slot));
+            self.body_subs.push(Vec::new());
+            self.pending.push((delim_word.text, strip, slot, !delim_word.quoted));
             self.toks.push(Tok::HereDoc(slot));
             return Ok(());
         }
@@ -447,7 +527,7 @@ impl Lexer {
 
     /// Reads the bodies of the pending heredocs, which start at `self.i` (just after a line end).
     fn read_bodies(&mut self) {
-        for (delim, strip, slot) in std::mem::take(&mut self.pending) {
+        for (delim, strip, slot, expand) in std::mem::take(&mut self.pending) {
             let mut body = String::new();
             while self.i < self.s.len() {
                 let start = self.i;
@@ -465,6 +545,9 @@ impl Lexer {
                 body.push_str(&line);
                 body.push('\n');
             }
+            if expand && let Some(subs) = self.body_subs.get_mut(slot) {
+                *subs = Lexer::new(&body).substitutions_in_text();
+            }
             if let Some(b) = self.bodies.get_mut(slot) {
                 *b = body;
             }
@@ -481,17 +564,20 @@ impl Lexer {
             match c {
                 '\'' => {
                     plain_prefix = false;
+                    w.quoted = true;
                     self.i += 1;
                     let text = self.until('\'', "single quote")?;
                     w.text.push_str(&text);
                 }
                 '"' => {
                     plain_prefix = false;
+                    w.quoted = true;
                     self.i += 1;
                     self.double_quoted(&mut w)?;
                 }
                 '\\' => {
                     plain_prefix = false;
+                    w.quoted = true;
                     self.i += 1;
                     if let Some(n) = self.peek(0) {
                         self.i += 1;
@@ -502,6 +588,7 @@ impl Lexer {
                 }
                 '$' if self.peek(1) == Some('\'') => {
                     plain_prefix = false;
+                    w.quoted = true;
                     self.i += 2;
                     let mut text = String::new();
                     loop {
@@ -528,7 +615,7 @@ impl Lexer {
                 }
                 '$' | '`' => {
                     plain_prefix = false;
-                    self.expansion(&mut w)?;
+                    self.expansion(&mut w, false)?;
                 }
                 '=' if plain_prefix && !w.text.is_empty() => {
                     w.assignment = true;
@@ -552,7 +639,7 @@ impl Lexer {
     }
 
     /// At `$` or a backtick: `$(...)` and backticks give a substitution, `${...}` and `$name` stay text.
-    fn expansion(&mut self, w: &mut Word) -> Result<(), LexError> {
+    fn expansion(&mut self, w: &mut Word, in_dq: bool) -> Result<(), LexError> {
         match (self.peek(0), self.peek(1)) {
             (Some('`'), _) => {
                 self.i += 1;
@@ -576,6 +663,12 @@ impl Lexer {
                 }
                 w.subs.push(text);
             }
+            (Some('$'), Some('(')) if self.peek(2) == Some('(') => {
+                // `$(( ... ))`: arithmetic.
+                self.i += 3;
+                let subs = self.arith()?;
+                w.subs.extend(subs);
+            }
             (Some('$'), Some('(')) => {
                 self.i += 2;
                 let sub = self.balanced("$(")?;
@@ -587,6 +680,25 @@ impl Lexer {
                 while let Some(ch) = self.peek(0) {
                     self.i += 1;
                     match ch {
+                        '\\' => self.i += 1,
+                        // Outside double quotes the default word of `${x:-...}` has quotes of its own; inside, a quote is text.
+                        '\'' if !in_dq => {
+                            self.until('\'', "single quote")?;
+                        }
+                        '"' if !in_dq => {
+                            let mut scratch = Word::default();
+                            self.double_quoted(&mut scratch)?;
+                            w.subs.extend(scratch.subs);
+                        }
+                        '$' if self.peek(0) == Some('\'') && !in_dq => {
+                            self.i += 1;
+                            self.ansi_c_skip()?;
+                        }
+                        '$' if self.peek(0) == Some('(') => {
+                            self.i += 1;
+                            let sub = self.balanced("$(")?;
+                            w.subs.push(sub);
+                        }
                         '{' => depth += 1,
                         '}' => {
                             depth -= 1;
@@ -626,7 +738,7 @@ impl Lexer {
                         _ => w.text.push('\\'),
                     }
                 }
-                Some('$' | '`') => self.expansion(w)?,
+                Some('$' | '`') => self.expansion(w, true)?,
                 Some(ch) => {
                     w.text.push(ch);
                     self.i += 1;
@@ -648,6 +760,97 @@ impl Lexer {
         Err(LexError::Unterminated(what))
     }
 
+    /// After `$'`: skips to the closing quote; a backslash escapes the next character (`\'`).
+    fn ansi_c_skip(&mut self) -> Result<(), LexError> {
+        while let Some(c) = self.peek(0) {
+            self.i += 1;
+            match c {
+                '\\' => self.i += 1,
+                '\'' => return Ok(()),
+                _ => {}
+            }
+        }
+        Err(LexError::Unterminated("$' quote"))
+    }
+
+    /// After `((` or `$((`: skips to the `))` that closes it, counting parentheses. Returns the `$(...)` substitutions inside,
+    /// which run.
+    fn arith(&mut self) -> Result<Vec<String>, LexError> {
+        let mut depth = 2;
+        let mut subs = Vec::new();
+        while let Some(c) = self.peek(0) {
+            match c {
+                '\\' => self.i += 2,
+                '(' => {
+                    depth += 1;
+                    self.i += 1;
+                }
+                ')' => {
+                    depth -= 1;
+                    self.i += 1;
+                    if depth == 0 {
+                        return Ok(subs);
+                    }
+                }
+                '$' if self.peek(1) == Some('(') && self.peek(2) != Some('(') => {
+                    self.i += 2;
+                    subs.push(self.balanced("$(")?);
+                }
+                _ => self.i += 1,
+            }
+        }
+        Err(LexError::Unterminated("arithmetic"))
+    }
+
+    /// The `$(...)` and backtick substitutions in the text of an unquoted heredoc body (an escaped `$` or backtick is text). An
+    /// unclosed one ends the scan: the body is data to every other reader.
+    fn substitutions_in_text(mut self) -> Vec<String> {
+        let mut subs = Vec::new();
+        while let Some(c) = self.peek(0) {
+            match c {
+                '\\' => self.i += 2,
+                '$' if self.peek(1) == Some('(') && self.peek(2) == Some('(') => {
+                    self.i += 3;
+                    match self.arith() {
+                        Ok(inner) => subs.extend(inner),
+                        Err(_) => break,
+                    }
+                }
+                '$' if self.peek(1) == Some('(') => {
+                    self.i += 2;
+                    match self.balanced("$(") {
+                        Ok(sub) => subs.push(sub),
+                        Err(_) => break,
+                    }
+                }
+                '`' => {
+                    self.i += 1;
+                    let mut text = String::new();
+                    loop {
+                        match self.peek(0) {
+                            None => return subs,
+                            Some('\\') if matches!(self.peek(1), Some('`' | '\\' | '$')) => {
+                                text.push(self.s[self.i + 1]);
+                                self.i += 2;
+                            }
+                            Some('`') => {
+                                self.i += 1;
+                                break;
+                            }
+                            Some(ch) => {
+                                text.push(ch);
+                                self.i += 1;
+                            }
+                        }
+                    }
+                    subs.push(text);
+                }
+                _ => self.i += 1,
+            }
+        }
+        subs
+    }
+
     /// The text up to the `)` that closes a `$(` already consumed. Quotes, escapes, nested parentheses and heredoc bodies
     /// are skipped, so a `)` or an apostrophe inside them does not end it.
     fn balanced(&mut self, what: &'static str) -> Result<String, LexError> {
@@ -666,6 +869,15 @@ impl Lexer {
                     self.double_quoted(&mut scratch)?;
                 }
                 '\\' => self.i += 2,
+                '$' if self.peek(1) == Some('\'') => {
+                    self.i += 2;
+                    self.ansi_c_skip()?;
+                }
+                '(' if self.peek(1) == Some('(') => {
+                    // arithmetic: `<<` inside is a shift
+                    self.i += 2;
+                    self.arith()?;
+                }
                 '<' if self.peek(1) == Some('<') && self.peek(2) != Some('<') => {
                     self.i += 2;
                     let strip = self.peek(0) == Some('-');
@@ -871,12 +1083,117 @@ mod tests {
         assert_eq!(Script::parse(&"a ".repeat(MAX_SOURCE)), Err(LexError::TooLarge));
         let deep = "$(".repeat(20) + "x" + &")".repeat(20);
         assert_eq!(Script::parse(&format!("echo {deep}")), Err(LexError::TooLarge));
-        let wide = (0..100).map(|_| "$(a)").collect::<Vec<_>>().join(" ");
+        let wide = (0..10_001).map(|_| "$(a)").collect::<Vec<_>>().join(" ");
         assert_eq!(Script::parse(&format!("echo {wide}")), Err(LexError::TooLarge));
     }
 
     #[test]
     fn utf8_text_is_kept() {
         assert_eq!(cmds("echo héllo \"日本\""), vec![vec!["echo", "héllo", "日本"]]);
+    }
+
+    #[test]
+    fn arithmetic_is_not_a_heredoc() {
+        assert_eq!(cmds("(( y = 1<<2 ))\ngit push -f"), vec![vec!["(("], vec!["git", "push", "-f"]]);
+        assert_eq!(cmds("echo $(( 1<<2 )); ls"), vec![vec!["echo", ""], vec!["ls"]]);
+        assert_eq!(cmds("x=$((1<<3)); ls"), vec![vec!["x="], vec!["ls"]]);
+        assert_eq!(
+            cmds("while (( 1<<2 )); do :; done"),
+            vec![vec!["while", "(("], vec!["do", ":"], vec!["done"]]
+        );
+        // a substitution inside arithmetic still runs
+        assert!(cmds("(( x = $(a b) ))").contains(&vec!["a".to_string(), "b".to_string()]));
+        // inside a substitution too
+        assert_eq!(cmds("echo $(echo $(( 1<<2 )) ); ls").last().unwrap(), &["ls"]);
+        // `((a); b)` is two nested subshells, not arithmetic: what is inside runs
+        assert!(cmds("((git push -f) | cat)").contains(&vec!["git".to_string(), "push".to_string(), "-f".to_string()]));
+        assert!(cmds("((a b); c d)").contains(&vec!["c".to_string(), "d".to_string()]));
+        assert!(Script::parse("(( 1 + 2").is_ok());
+    }
+
+    #[test]
+    fn quotes_inside_a_parameter_expansion_are_honoured() {
+        assert_eq!(cmds("echo ${x:-\"}\"}; ls"), vec![vec!["echo", ""], vec!["ls"]]);
+        assert_eq!(cmds("echo ${y:-'}'}; ls"), vec![vec!["echo", ""], vec!["ls"]]);
+        assert_eq!(cmds("echo ${z:-\\}}; ls"), vec![vec!["echo", ""], vec!["ls"]]);
+        assert_eq!(cmds("echo ${a:-${b:-x}}; ls"), vec![vec!["echo", ""], vec!["ls"]]);
+        // in double quotes a single quote is text
+        assert_eq!(cmds("echo \"${x:-'}\"; ls"), vec![vec!["echo", ""], vec!["ls"]]);
+        // a substitution in the default runs
+        assert!(cmds("echo ${x:-$(a b)}").contains(&vec!["a".to_string(), "b".to_string()]));
+        assert!(matches!(Script::parse("echo ${x:-\"}"), Err(LexError::Unterminated(_))));
+    }
+
+    #[test]
+    fn ansi_c_quotes_inside_a_substitution_do_not_end_it_early() {
+        assert_eq!(cmds("echo $(echo $'\\''); ls").last().unwrap(), &["ls"]);
+        assert_eq!(cmds("echo $(echo $'a)b'); ls").last().unwrap(), &["ls"]);
+    }
+
+    #[test]
+    fn the_limits_are_wide_enough_for_ordinary_nesting() {
+        let many = vec!["$(:)"; 65].join(" ");
+        assert_eq!(cmds(&format!("echo {many}; ls")).last().unwrap(), &["ls"]);
+        let mut nest = "git push -f".to_string();
+        for _ in 0..8 {
+            nest = format!("bash -c '{}'", nest.replace('\'', "'\\''"));
+        }
+        assert!(cmds(&nest).iter().any(|c| c.first().map(String::as_str) == Some("git")));
+        let too_many = vec!["$(:)"; 10_001].join(" ");
+        assert_eq!(Script::parse(&format!("echo {too_many}")), Err(LexError::TooLarge));
+    }
+
+    #[test]
+    fn a_shell_is_found_after_any_command_word() {
+        let has = |src: &str, want: &[&str]| cmds(src).iter().any(|c| c == want);
+        assert!(has("echo x | xargs -I{} sh -c 'a b {}'", &["a", "b", "{}"]));
+        assert!(has("find . -maxdepth 0 -exec bash -c 'c d' \\;", &["c", "d"]));
+        assert!(has("nohup sh -c 'e f' &", &["e", "f"]));
+        assert!(has("env -S 'g h'", &["g", "h"]));
+        assert!(has("env -S'i j'", &["i", "j"]));
+        assert!(has("env --split-string='k l'", &["k", "l"]));
+        assert!(has("ssh host bash -lc 'm n'", &["m", "n"]));
+        // a word that is not a shell, or a shell given a script file, runs nothing nested
+        assert_eq!(cmds("echo sh"), vec![vec!["echo", "sh"]]);
+        assert_eq!(cmds("grep sh file"), vec![vec!["grep", "sh", "file"]]);
+        assert_eq!(cmds("xargs bash script.sh"), vec![vec!["xargs", "bash", "script.sh"]]);
+    }
+
+    #[test]
+    fn here_strings_and_unquoted_heredocs_run_their_substitutions() {
+        let has = |src: &str, want: &[&str]| cmds(src).iter().any(|c| c == want);
+        assert!(has("cat <<< \"$(a b)\"", &["a", "b"]));
+        assert!(has("cat <<< $(a b)", &["a", "b"]));
+        assert!(has("cat <<EOF\nx $(c d) y\nEOF", &["c", "d"]));
+        assert!(has("cat <<EOF\nx `e f` y\nEOF", &["e", "f"]));
+        assert!(has("cat <<-EOF\n\tx $(g h)\n\tEOF", &["g", "h"]));
+        // a quoted delimiter means no expansion; an escaped dollar is text
+        for src in [
+            "cat <<'EOF'\n$(c d)\nEOF",
+            "cat <<\"EOF\"\n$(c d)\nEOF",
+            "cat <<\\EOF\n$(c d)\nEOF",
+            "cat <<EOF\n\\$(c d)\nEOF",
+        ] {
+            assert!(!has(src, &["c", "d"]), "{src}");
+        }
+        // a heredoc fed to a shell is still run as a script
+        assert!(has("bash <<EOF\nx y\nEOF", &["x", "y"]));
+    }
+
+    #[test]
+    fn words_know_whether_they_were_quoted() {
+        let s = Script::parse("a 'b' \"c\" d\\e $'f' g").unwrap();
+        let q: Vec<bool> = s.commands().next().unwrap().words.iter().map(|w| w.quoted).collect();
+        assert_eq!(q, [false, true, true, true, true, false]);
+    }
+
+    #[test]
+    fn for_loops_are_recognised_as_loops() {
+        let c = |s: &str| Script::parse(s).unwrap().commands().next().unwrap().opens_for();
+        assert!(c("for i in 1 2; do :; done"));
+        assert!(c("do for i in 1; do :; done"));
+        assert!(c("select x in a b"));
+        assert!(!c("echo for"));
+        assert!(!c("while true"));
     }
 }

@@ -8,6 +8,19 @@
 //! one line on standard error names the cause (never the command text) and the exit code stays 0. Every refusal also writes one
 //! line to standard error naming the rule (ER-27).
 //!
+//! A command the [`lex`] cannot read (an unclosed quote) or that passes one of its limits (1 MiB, 16 nested levels, 10,000 nested
+//! pieces) is not allowed blindly: every rule runs the old shell hook's text pattern on the raw text first
+//! ([`rules::Rule::legacy`]), so what the shell hooks refused is still refused; only harmless unreadable text passes.
+//!
+//! # Residual risk (ADR 0083 D7: the guard reads commands, it is not a shell)
+//!
+//! Still allowed, because what runs is built at run time: variables and `$IFS` that make up a command (`X=-f; git push $X`,
+//! `git${IFS}push`), aliases and functions defined in the same line and called there, `git -c alias.x=...` that expands to a push,
+//! an interpreter (`python3 -c 'os.system(...)'`), and look-alike characters (`gіt`). `oracle_tests::RESIDUAL` lists them so that a
+//! change that starts denying one is a decision. Quoting, line continuations, `$(...)`, backticks, `bash -c` and `eval` (after any
+//! command word: `xargs sh -c`, `find -exec`, `env -S`), heredocs and here-strings fed to a shell, and expansions inside unquoted
+//! heredoc bodies are read.
+//!
 //! The binary that runs here is an installed copy ([`install`]); the shim `tools/githooks/claude-pre-tool-use` never goes through
 //! the `./dev` wrapper, which costs 150 ms or more per call.
 //!
@@ -33,17 +46,37 @@ use std::io::{Read, Write};
 /// The most standard input read: a tool call larger than this is not read further and passes with a log line.
 pub const MAX_INPUT: u64 = 8 << 20;
 
-/// Decides one tool call: the first rule that refuses wins.
-pub fn decide(call: &ToolCall) -> Result<Option<Denial>, lex::LexError> {
-    let script = if call.tool_name == "Bash" {
-        match call.command.as_deref() {
-            Some(cmd) => Some(lex::Script::parse(cmd)?),
-            None => None,
+/// What deciding one tool call gave.
+#[derive(Debug)]
+pub struct Outcome {
+    /// The refusal, if a rule refused.
+    pub denial: Option<Denial>,
+    /// Why the command could not be read, when it could not: the rules then ran the old shell hooks' text patterns on it.
+    pub unread: Option<lex::LexError>,
+}
+
+/// Decides one tool call: the first rule that refuses wins. A command the lexer cannot read (an unclosed quote, a limit) gets the
+/// shell hooks' own text patterns before it is allowed, so what they refused is still refused.
+pub fn decide(call: &ToolCall) -> Outcome {
+    let command = match (call.tool_name.as_str(), call.command.as_deref()) {
+        ("Bash", Some(cmd)) => cmd,
+        _ => {
+            return Outcome {
+                denial: rules::all().iter().find_map(|r| r.check(call, None)),
+                unread: None,
+            };
         }
-    } else {
-        None
     };
-    Ok(rules::all().iter().find_map(|r| r.check(call, script.as_ref())))
+    match lex::Script::parse(command) {
+        Ok(script) => Outcome {
+            denial: rules::all().iter().find_map(|r| r.check(call, Some(&script))),
+            unread: None,
+        },
+        Err(why) => Outcome {
+            denial: rules::all().iter().find_map(|r| r.legacy(command)),
+            unread: Some(why),
+        },
+    }
 }
 
 /// `dev hook pre-tool-use`: reads the call from `stdin`, writes the decision to `out` and log lines to `err`. Returns the exit
@@ -67,14 +100,19 @@ pub fn pre_tool_use(stdin: &mut dyn Read, out: &mut dyn Write, err: &mut dyn Wri
             return 0;
         }
     };
-    match decide(&call) {
-        Ok(None) => {}
-        Ok(Some(denial)) => {
-            let _ = writeln!(err, "paddock-dev hook: denied by {} ({})", denial.rule, call.tool_name);
-            let _ = writeln!(out, "{}", denial.json());
-        }
-        Err(why) => {
+    let outcome = decide(&call);
+    match (outcome.denial, outcome.unread) {
+        (None, None) => {}
+        (None, Some(why)) => {
             let _ = writeln!(err, "paddock-dev hook: allowed, the command could not be read ({why})");
+        }
+        (Some(denial), unread) => {
+            let how = match unread {
+                Some(why) => format!(", by the text check because the command could not be read ({why})"),
+                None => String::new(),
+            };
+            let _ = writeln!(err, "paddock-dev hook: denied by {} ({}){how}", denial.rule, call.tool_name);
+            let _ = writeln!(out, "{}", denial.json());
         }
     }
     0
@@ -153,5 +191,40 @@ mod tests {
         ] {
             assert_eq!(run(call.as_bytes()), (0, String::new(), String::new()), "{call}");
         }
+    }
+
+    fn denies_in(cmd: &str) -> (i32, String, String) {
+        let input = serde_json::json!({"tool_name": "Bash", "tool_input": {"command": cmd}}).to_string();
+        run(input.as_bytes())
+    }
+
+    #[test]
+    fn a_command_the_lexer_cannot_read_is_checked_as_text_before_it_is_allowed() {
+        let (code, out, err) = denies_in("echo 'unclosed; git push -f");
+        assert_eq!(code, 0);
+        assert!(out.contains("\"permissionDecision\":\"deny\""), "{out}");
+        assert!(
+            err.contains("denied by no-force-push") && err.contains("text check") && !err.contains("echo"),
+            "{err}"
+        );
+        let (_, out, err) = denies_in("echo 'unclosed; while pgrep -f x; do sleep 1; done");
+        assert!(out.contains("no-pgrep-wait") || out.contains("pgrep -f"), "{out}");
+        assert!(err.contains("denied by no-pgrep-wait"));
+        // harmless unreadable text is still allowed, with the log line
+        let (code, out, err) = denies_in("echo 'unclosed; git push origin main");
+        assert_eq!((code, out.as_str()), (0, ""));
+        assert!(err.contains("could not be read"), "{err}");
+    }
+
+    #[test]
+    fn exhausting_a_limit_falls_back_to_the_text_check_too() {
+        let many = vec!["$(:)"; 10_001].join(" ");
+        let (_, out, err) = denies_in(&format!("echo {many}; git push -f"));
+        assert!(out.contains("deny") && err.contains("text check"), "{err}");
+        let big = format!("{}; git push -f", "x".repeat(lex::MAX_SOURCE + 10));
+        let (_, out, err) = denies_in(&big);
+        assert!(out.contains("deny") && err.contains("text check"), "{err}");
+        let (_, out, _) = denies_in(&format!("{}; git push origin main", "x".repeat(lex::MAX_SOURCE + 10)));
+        assert_eq!(out, "");
     }
 }

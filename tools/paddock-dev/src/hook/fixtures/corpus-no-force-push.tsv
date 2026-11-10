@@ -69,3 +69,25 @@ allow	git stash list
 allow	git push origin main --no-verify
 allow	git push --set-upstream origin x
 allow	git remote -v
+deny	env git push -f
+deny	env -i PATH=/usr/bin git push -f
+deny	command git push -f
+deny	\git push -f
+deny	/usr/bin/git push -f
+deny	echo x | xargs -I{} sh -c 'git push -f {}'
+deny	find . -maxdepth 0 -exec git push -f \;
+deny	sh <<'EOF'\ngit push -f\nEOF
+deny	(( y = 1<<2 ))\ngit push -f\n2
+deny	(( y = 1<<2 ))\ngit push -f
+deny	echo ${x:-"}"}; git push -f
+deny	echo $(echo $'\'') ; git push -f
+deny	$(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:); git push -f
+deny	git push origin -- -f
+deny	git push \\n -f origin x
+deny	git push origin main --force-with-lease=main:abc
+deny	echo $(( 1<<2 )); git push -f
+deny	x=$(( 1 << 3 )) && git push --force
+deny	echo ${y:-'}'}; git push -f
+deny	git commit -m ok; (( z = 1<<1 )); git push --force-with-lease
+deny	xargs -n1 bash -c 'git push --force origin main ' _
+deny	echo "$(echo $'\'')"; git push -f

@@ -7,8 +7,10 @@
 
 use crate::hook::decision::Denial;
 use crate::hook::input::ToolCall;
-use crate::hook::lex::{Item, Script, Simple, basename};
+use crate::hook::lex::{Item, Script, Sep, Simple, basename};
 use crate::hook::rules::Rule;
+use regex::Regex;
+use std::sync::OnceLock;
 
 /// Refuses a wait loop that polls `pgrep -f` (it matches the loop's own command line and never ends).
 pub struct NoPgrepWait;
@@ -16,54 +18,119 @@ pub struct NoPgrepWait;
 const REASON: &str = "Blocked: don't wait with pgrep -f (it matches its own command line). Wait on the job's own completion \
 notification, plock's '<name> done' line in that job's output, or `./dev wait --pid/--plock/--file/--ci-run ... --max <duration>`.";
 
+impl NoPgrepWait {
+    fn denial(&self) -> Denial {
+        Denial {
+            rule: self.id(),
+            reason: REASON.to_string(),
+        }
+    }
+}
+
+/// Where the walk over the commands stands: inside a loop condition, and how many loops deep.
+#[derive(Clone, Copy, Default)]
+struct State {
+    in_condition: bool,
+    loops: usize,
+}
+
 impl Rule for NoPgrepWait {
     fn id(&self) -> &'static str {
         "no-pgrep-wait"
     }
 
     fn check(&self, _call: &ToolCall, script: Option<&Script>) -> Option<Denial> {
-        let script = script?;
-        let mut in_condition = false;
-        let mut saved: Vec<bool> = Vec::new();
-        for item in &script.items {
+        let items = &script?.items;
+        let mut state = State::default();
+        let mut saved: Vec<State> = Vec::new();
+        for (idx, item) in items.iter().enumerate() {
             match item {
-                Item::Enter => saved.push(in_condition),
-                Item::Leave => in_condition = saved.pop().unwrap_or(false),
+                Item::Enter => saved.push(state),
+                Item::Leave => state = saved.pop().unwrap_or_default(),
                 Item::Sep(_) => {}
                 Item::Cmd(cmd) => {
                     if cmd.is_do() {
-                        in_condition = false;
+                        state.in_condition = false;
                     }
                     if cmd.opens_condition() {
-                        in_condition = true;
+                        state.in_condition = true;
+                        state.loops += 1;
+                    } else if cmd.opens_for() {
+                        state.loops += 1;
                     }
-                    if in_condition && polls_full_command_line(cmd) {
-                        return Some(Denial {
-                            rule: self.id(),
-                            reason: REASON.to_string(),
-                        });
+                    if cmd.words.first().is_some_and(|w| w.text == "done") {
+                        state.loops = state.loops.saturating_sub(1);
+                    }
+                    if !polls_full_command_line(cmd) {
+                        continue;
+                    }
+                    // In a condition it is the loop's test. In a body it is the test when `|| break`, `&& break` or `if ...; then
+                    // break` follows it.
+                    if state.in_condition || (state.loops > 0 && decides_the_loop(items, idx, cmd)) {
+                        return Some(self.denial());
                     }
                 }
             }
         }
         None
     }
+
+    fn legacy(&self, text: &str) -> Option<Denial> {
+        legacy_pattern().is_some_and(|p| p.is_match(text)).then(|| self.denial())
+    }
 }
 
-/// The command runs `pgrep` with `--full` or a short flag cluster that has `f` (`-f`, `-fl`, `-af`), anywhere among its options
-/// and arguments: `pgrep -u me -f x` and `pgrep x -f` poll the command line too. (The old regex stopped at the first option with
-/// a value; closed on purpose.)
+/// The shell hook's pattern, on text.
+fn legacy_pattern() -> Option<&'static Regex> {
+    static PATTERN: OnceLock<Option<Regex>> = OnceLock::new();
+    PATTERN
+        .get_or_init(|| Regex::new(r"(while|until)[^;]*pgrep[[:space:]]+(-[[:alnum:]]*[[:space:]]+)*-[[:alnum:]]*f").ok())
+        .as_ref()
+}
+
+const LEAVES: &[&str] = &["break", "exit", "return"];
+
+/// The command after the poll ends the loop on its result: `|| break`, `&& exit`, or the poll is an `if` whose `then` breaks.
+/// A closing substitution between them (`[ -z "$(pgrep -f x)" ] || break`) is skipped.
+fn decides_the_loop(items: &[Item], idx: usize, cmd: &Simple) -> bool {
+    let leaves = |c: &Simple| c.command().first().is_some_and(|w| LEAVES.contains(&w.text.as_str()));
+    let mut rest = items[idx + 1..].iter().filter(|i| !matches!(i, Item::Leave));
+    match rest.next() {
+        Some(Item::Sep(Sep::And | Sep::Or)) => matches!(rest.next(), Some(Item::Cmd(c)) if leaves(c)),
+        Some(Item::Sep(Sep::Semi | Sep::Newline)) if opens_if(cmd) => {
+            matches!(rest.next(), Some(Item::Cmd(c)) if c.words.first().is_some_and(|w| w.text == "then") && c.words.get(1).is_some_and(|w| LEAVES.contains(&w.text.as_str())))
+        }
+        _ => false,
+    }
+}
+
+fn opens_if(cmd: &Simple) -> bool {
+    cmd.words
+        .iter()
+        .take_while(|w| w.assignment || matches!(w.text.as_str(), "do" | "then" | "else" | "elif" | "if" | "!" | "{"))
+        .any(|w| w.text == "if" || w.text == "elif")
+}
+
+/// The command runs `pgrep` or `pkill` with `--full` (or an abbreviation of at least `--fu`) or a short flag cluster that has `f`
+/// (`-f`, `-fl`, `-af`), anywhere among its options and arguments: `pgrep -u me -f x` and `pgrep x -f` poll the command line too.
+/// (The old regex stopped at the first option with a value; closed on purpose.)
 fn polls_full_command_line(cmd: &Simple) -> bool {
     cmd.words
         .iter()
         .enumerate()
-        .filter(|(_, w)| basename(&w.text) == "pgrep")
+        .filter(|(_, w)| matches!(basename(&w.text), "pgrep" | "pkill"))
         .any(|(k, _)| {
             cmd.words[k + 1..].iter().any(|w| {
                 let t = w.text.as_str();
-                t == "--full"
-                    || t.strip_prefix('-')
-                        .is_some_and(|b| !b.starts_with('-') && b.chars().take_while(char::is_ascii_alphanumeric).any(|c| c == 'f'))
+                match t.strip_prefix("--") {
+                    Some(long) => {
+                        let name = long.split('=').next().unwrap_or(long);
+                        name.len() >= 2 && "full".starts_with(name)
+                    }
+                    None => t
+                        .strip_prefix('-')
+                        .is_some_and(|b| b.chars().take_while(char::is_ascii_alphanumeric).any(|c| c == 'f')),
+                }
             })
         })
 }
@@ -150,5 +217,67 @@ mod tests {
         let d = NoPgrepWait.check(&call(), Some(&script)).unwrap();
         assert_eq!(d.rule, "no-pgrep-wait");
         assert!(d.reason.contains("matches its own command line") && d.reason.contains("./dev wait"));
+    }
+
+    #[test]
+    fn a_pgrep_poll_in_a_loop_body_that_decides_the_loop_is_refused() {
+        for line in [
+            "while true; do pgrep -f x || break; sleep 5; done",
+            "for i in 1 2 3; do pgrep -f x >/dev/null || break; sleep 1; done",
+            "for i in $(seq 100); do pgrep -f x && break; sleep 1; done",
+            "until false; do if ! pgrep -f x; then break; fi; sleep 1; done",
+            "while :; do pgrep -f x || exit 0; sleep 1; done",
+            "while :; do pgrep -f x || return; sleep 1; done",
+            "while true; do [ -z \"$(pgrep -f x)\" ] || break; sleep 1; done",
+            "while true; do sleep 1; if pgrep -fl x; then break; fi; done",
+        ] {
+            assert!(denies(line), "{line}");
+        }
+        for line in [
+            "pgrep -f x || break",
+            "for i in 1 2; do pgrep -f x || echo none; done",
+            "while a; do :; done; pgrep -f x || break",
+            "while true; do pgrep x || break; done",
+            "while true; do pgrep -f x; sleep 1; done",
+            "for i in 1; do pgrep -f x; done; echo break",
+            "for i in 1; do :; done\npgrep -f x || break",
+        ] {
+            assert!(!denies(line), "{line}");
+        }
+    }
+
+    #[test]
+    fn pkill_and_abbreviated_full_are_polls_too() {
+        for line in [
+            "while pkill -0 -f x; do sleep 1; done",
+            "while pgrep --fu x; do :; done",
+            "while pgrep --ful x; do :; done",
+            "until ! pkill -0 --full x; do :; done",
+        ] {
+            assert!(denies(line), "{line}");
+        }
+        for line in [
+            "while pkill x; do sleep 1; done",
+            "while pgrep --fullx x; do :; done",
+            "while pgrep --f x; do :; done",
+        ] {
+            assert!(!denies(line), "{line}");
+        }
+    }
+
+    #[test]
+    fn the_text_fallback_decides_what_the_lexer_cannot_read() {
+        let legacy = |t: &str| NoPgrepWait.legacy(t).is_some();
+        for yes in [
+            "while pgrep -f x; do sleep 1; done",
+            "until ! pgrep -af x; do :; done",
+            "x'; while pgrep -f y",
+            "while\npgrep -f x\ndo :",
+        ] {
+            assert!(legacy(yes), "{yes}");
+        }
+        for no in ["pgrep -f x", "while pgrep x; do :; done", "while a; do pgrep -f x; done"] {
+            assert!(!legacy(no), "{no}");
+        }
     }
 }

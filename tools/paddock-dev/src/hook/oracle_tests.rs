@@ -1,8 +1,9 @@
 //! The oracle of the two ported rules: a corpus of commands per rule whose decisions the old shell hooks
 //! (`fixtures/no-pgrep-wait.sh`, `fixtures/no-force-push.sh`, verbatim from `.claude/hooks/`) gave. The new rules must decide
 //! every command identically. The corpus files hold `allow` or `deny`, a tab and the command (`\n` and `\t` stand for a line end
-//! and a tab). The decisions in them are checked against the live shell hooks whenever `bash` and `jq` exist (the `live_*` tests
-//! count what they compared and fail when it is zero, rule 71), and against the new rules always.
+//! and a tab). The decisions in them are checked against the live shell hooks on every Unix run (the `live_*` tests count what they
+//! compared, and fail, never pass silently, when `bash` or `jq` is missing: rule 71 and ER-33, "not measured" is not a pass; the CI
+//! image installs `jq`), and against the new rules always. `DIFFERENCES` and `RESIDUAL` are checked against the old hooks the same way.
 
 use super::input::ToolCall;
 use super::{decide, rules};
@@ -50,8 +51,81 @@ const DIFFERENCES: &[(&str, &str, &str)] = &[
     ("no-pgrep-wait", "allow", "while pgrep --full foo; do sleep 1; done"),
     ("no-pgrep-wait", "allow", "while pgrep foo -f; do :; done"),
     ("no-pgrep-wait", "allow", "while pgrep -u me -fl foo; do :; done"),
+    // Closed with the review of 2026-11-10 (the old hooks allowed all of these).
+    ("no-force-push", "allow", "f() { git push -f; }; f"),
+    ("no-force-push", "allow", "git pu\\\nsh -f"),
+    ("no-force-push", "allow", "'git' \"push\" '-f'"),
+    ("no-force-push", "allow", "g''it pu''sh -''f"),
+    (
+        "no-force-push",
+        "allow",
+        "git -c remote.origin.push=+refs/heads/*:refs/heads/* push origin",
+    ),
+    ("no-force-push", "allow", "git -c remote.origin.mirror=true push origin"),
+    ("no-force-push", "allow", "xargs sh -c 'git push -f'"),
+    ("no-force-push", "allow", "nice -n 5 bash -c 'git push -f'"),
+    ("no-force-push", "allow", "timeout 5 sh -c 'git push -f'"),
+    ("no-force-push", "allow", "env -S 'git push -f'"),
+    ("no-force-push", "allow", "sudo -u me bash -lc 'git push -f'"),
+    ("no-force-push", "allow", "cat <<EOF\n$(git push -f)\nEOF"),
+    ("no-force-push", "allow", "cat <<< \"$(git push -f)\""),
+    ("no-force-push", "allow", "bash <<<'git push -f'"),
+    ("no-force-push", "allow", "git push --force-w origin x"),
+    ("no-force-push", "allow", "git push --force-wi origin x"),
+    ("no-force-push", "allow", "git push --mirror origin"),
+    ("no-force-push", "allow", "git push --mir origin"),
+    ("no-force-push", "allow", "git send-pack --force origin main"),
+    ("no-force-push", "allow", "git send-pack --mirror origin"),
+    ("no-pgrep-wait", "allow", "while true; do pgrep -f x || break; sleep 5; done"),
+    (
+        "no-pgrep-wait",
+        "allow",
+        "for i in $(seq 100); do pgrep -f x >/dev/null || break; sleep 1; done",
+    ),
+    (
+        "no-pgrep-wait",
+        "allow",
+        "until false; do if ! pgrep -f x; then break; fi; sleep 1; done",
+    ),
+    (
+        "no-pgrep-wait",
+        "allow",
+        "while true; do [ -z \"$(pgrep -f x)\" ] || break; sleep 1; done",
+    ),
+    ("no-pgrep-wait", "allow", "while pgrep -$'f' x; do sleep 1; done"),
+    ("no-pgrep-wait", "allow", "while pgrep -\\f x; do :; done"),
+    ("no-pgrep-wait", "allow", "while pkill -0 -f x; do sleep 1; done"),
+    ("no-pgrep-wait", "allow", "while pgr\\\nep -f x; do :; done"),
+    ("no-pgrep-wait", "allow", "while pgrep --fu x; do :; done"),
+    ("no-pgrep-wait", "allow", "while (( 1<<2 )); pgrep -f x; do :; done"),
+    ("no-pgrep-wait", "allow", "while echo ${x:-\"}\"}; pgrep -f x; do :; done"),
+    (
+        "no-pgrep-wait",
+        "allow",
+        "while $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:) $(:); pgrep -f x; do :; done",
+    ),
     // The old regex stops at `;` and reads a loop condition of two commands as one.
     ("no-pgrep-wait", "allow", "while sleep 1; pgrep -f foo; do :; done"),
+];
+
+/// Documented residual risk (the module doc of `hook` and `tools/githooks/README.md`): commands the hook reads as harmless because
+/// what they run is built from variables, `$IFS`, aliases, functions, an interpreter or look-alike characters. The old hooks
+/// allowed them too. Each is checked so a change that starts denying one is a decision, not an accident.
+const RESIDUAL: &[(&str, &str)] = &[
+    ("no-force-push", "X=-f; git push $X"),
+    ("no-force-push", "X=-f && git push \"$X\""),
+    ("no-force-push", "G=git; $G push -f"),
+    ("no-force-push", "git push ${X:--f}"),
+    ("no-force-push", "git -c alias.p='push -f' p"),
+    ("no-force-push", "git -c alias.p='!git push -f' p"),
+    ("no-force-push", "git${IFS}push${IFS}-f"),
+    ("no-force-push", "IFS=,; c=git,push,-f; $c"),
+    ("no-force-push", "gіt push -f"),
+    ("no-force-push", "git push －f"),
+    ("no-force-push", "python3 -c 'import os; os.system(\"git push -f\")'"),
+    ("no-force-push", "alias gp='git push -f'; gp"),
+    ("no-pgrep-wait", "P='pgrep -f'; while $P x; do sleep 1; done"),
+    ("no-pgrep-wait", "w() { pgrep -f x; }; while w; do sleep 1; done"),
 ];
 
 fn rows(corpus: &str) -> Vec<(bool, String)> {
@@ -73,7 +147,7 @@ fn input(cmd: &str) -> String {
 /// The new rules' decision for a command: the id of the rule that refuses, if any.
 fn new_rule(cmd: &str) -> Option<&'static str> {
     let call = ToolCall::parse(&input(cmd)).unwrap();
-    decide(&call).unwrap().map(|d| d.rule)
+    decide(&call).denial.map(|d| d.rule)
 }
 
 fn check_new(corpus: &str, rule: &str) -> usize {
@@ -124,25 +198,29 @@ fn the_deliberate_differences_hold() {
 }
 
 #[cfg(unix)]
-/// Runs an old shell hook on a command and says whether it refused. `None` when `bash` or `jq` is missing.
-fn old_denies(script: &str, cmd: &str) -> Option<bool> {
+/// Runs an old shell hook on a command and says whether it refused. A missing `bash` or `jq` fails the test (rule 71, ER-33: a
+/// check that could not run is "not measured", never a pass; the CI image installs `jq`).
+fn old_denies(script: &str, cmd: &str) -> bool {
     let path = format!("{}/src/hook/fixtures/{script}", env!("CARGO_MANIFEST_DIR"));
-    Real.run("jq", &["--version"], Path::new("."), None).ok()?;
-    let out = Real.run("bash", &[&path], Path::new("."), Some(input(cmd).as_bytes())).ok()?;
-    Some(!out.trim().is_empty())
+    if let Err(e) = Real.run("jq", &["--version"], Path::new("."), None) {
+        panic!("the live oracle is not measured: jq is missing ({e}); install jq (apt-get install jq, brew install jq)");
+    }
+    match Real.run("bash", &[&path], Path::new("."), Some(input(cmd).as_bytes())) {
+        Ok(out) => !out.trim().is_empty(),
+        Err(e) => panic!("the live oracle is not measured: {script} did not run ({e})"),
+    }
 }
 
 #[cfg(unix)]
 fn live(corpus: &str, script: &str) {
     let mut compared = 0;
     for (deny, cmd) in rows(corpus) {
-        match old_denies(script, &cmd) {
-            Some(old) => {
-                assert_eq!(old, deny, "{script} decided {cmd:?} differently from the corpus");
-                compared += 1;
-            }
-            None => return eprintln!("{script}: bash or jq is missing, the live oracle did not run"),
-        }
+        assert_eq!(
+            old_denies(script, &cmd),
+            deny,
+            "{script} decided {cmd:?} differently from the corpus"
+        );
+        compared += 1;
     }
     assert!(compared >= 40, "{script}: only {compared} commands compared");
     eprintln!("{script}: {compared} commands compared with the live shell hook");
@@ -169,7 +247,30 @@ fn live_the_old_hooks_decide_the_differences_as_recorded() {
         } else {
             "no-force-push.sh"
         };
-        let Some(denies) = old_denies(script, cmd) else { return };
-        assert_eq!(denies, *old == "deny", "{cmd:?}");
+        assert_eq!(old_denies(script, cmd), *old == "deny", "{cmd:?}");
+    }
+}
+
+#[test]
+fn the_documented_residual_risks_still_pass() {
+    for (rule, cmd) in RESIDUAL {
+        assert_eq!(
+            new_rule(cmd),
+            None,
+            "{rule}: {cmd:?} is documented as a residual risk; if it is denied now, move it to the corpus"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn live_the_old_hooks_allowed_the_residual_risks_too() {
+    for (rule, cmd) in RESIDUAL {
+        let script = if *rule == "no-pgrep-wait" {
+            "no-pgrep-wait.sh"
+        } else {
+            "no-force-push.sh"
+        };
+        assert!(!old_denies(script, cmd), "{cmd:?}");
     }
 }

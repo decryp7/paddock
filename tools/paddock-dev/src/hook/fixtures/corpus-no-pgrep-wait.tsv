@@ -53,3 +53,13 @@ allow	cargo test --workspace
 allow	while IFS= read -r line; do echo "$line"; done < <(pgrep -f foo)
 allow	while pgrep -x foo && sleep 1; do :; done
 allow	./dev wait --plock build --max 10m
+deny	while [ $(pgrep -fc x) -gt 0 ]; do sleep 1; done
+deny	while\npgrep -f x\ndo :; done
+deny	while { pgrep -f x; }; do :; done
+deny	while pgrep -f x &>/dev/null; do :; done
+deny	while timeout 5 pgrep -f x; do :; done
+deny	while true; do sleep 1; done; while pgrep -f x; do :; done
+deny	while (( 1<<2 )) && pgrep -f x; do :; done
+deny	echo ${x:-"}"} && while pgrep -f x; do :; done
+deny	while echo $(( 1<<2 )) && pgrep -fl x; do :; done
+deny	xargs -I{} sh -c 'while pgrep -f {}; do sleep 1; done' < list
