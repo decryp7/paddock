@@ -18,7 +18,7 @@
 - Number: 0089 was free on every `origin` branch on 2026-11-10 (highest file `0088`; no branch's `docs/` names "ADR 0089").
 - Evidence: read on 2026-11-10 after `git fetch`, at these heads: `origin/train/2026-11-09-3` `67a633ef3` (every count
   without a ref), `origin/feat/rt2-release-isolation` `ad9d85a5b`, `origin/feat/rt3-dev-worktree` `2be92ec01`,
-  `origin/feat/rt4-hook` `48b938bcb`, `origin/feat/rt5-check-host` `0a94bf347`, `origin/feat/rt8-ci-flakes` `5da33f8cf`,
+  `origin/feat/rt4-hook` `48b938bcb`, `origin/feat/rt5-check-host` `0a94bf347`, `origin/feat/rt8-ci-flakes` `da05b54e8` (incident #6 reviewed at `5da33f8cf`),
   `origin/fix/playwright-flaky-as-failure` `06adcb058`, `origin/docs/adr-windows-gate-ratchets` `db7782e01`,
   `origin/docs/adr-captured-tool-output` `0cca8dd30` (ADR 0090). Each count
   names its command (Appendix B). Measurements on synthetic input only (Appendix A): a throw-away crate under `cargo
@@ -34,14 +34,17 @@
 | 3 | RT-4 hook; before `fb4c579fa` | the live shell-hook oracle, `bash` or `jq` missing | `None => return eprintln!(..)`, and in another test `let Some(denies) = old_denies(script, cmd) else { return };` with no print at all |
 | 4 | RT-8 `./dev ci flakes`; `dff738952` | (a) a job log that could not be read; (b) Playwright's "flaky" marker where `failOnFlakyTests` is not set | (a) an incomplete report exited 5, the code of "measured, found something"; (b) Dyno, Pitcrew and Spotter set `retries: CI ? 1 : 0` and Pitwall and ui `retries: 0` on the train (`origin/main` still has Pitwall at `CI ? 2 : 0`), and only Debrief set `failOnFlakyTests`, so a test that passed on retry was invisible and the report said `complete` |
 | 5 | RT-5 check host; `40b7faf8f` | a check that did not complete, or crashed | `mod.rs:295` added the unwaivable "not measured" error only `if !record.completed && found.is_empty()`, so a waiver for the one finding of a half run cleared it; the crash finding was waivable |
-| 6 | RT-8 again, review of `5da33f8cf` (open) | partial CI input: a job log cut before its runner's summary; a 404 on an attempt's job list; failed jobs that never ran a step | the cut log counts as a clean "non-test failure" and exits 0; the 404 reads as "no jobs"; the step-less failed jobs do not make the report incomplete. Cause: a second nextest reader, `ci_runs/logfind.rs` (`read(log) -> Findings`, no "could not read" state), a weaker copy of `plan_since::nextest_failures` (`-> Result<Vec<FailedTest>, String>`) |
+| 6 | RT-8 again, review of `5da33f8cf` (fixed in `da05b54e8`) | partial CI input: a job log cut before its runner's summary; a 404 on an attempt's job list; failed jobs that never ran a step | the cut log counts as a clean "non-test failure" and exits 0; the 404 reads as "no jobs"; the step-less failed jobs do not make the report incomplete. Cause: a second nextest reader, `ci_runs/logfind.rs` (`read(log) -> Findings`, no "could not read" state), a weaker copy of `plan_since::nextest_failures` (`-> Result<Vec<FailedTest>, String>`) |
 
 And the Dyno 1.1.0 instances that created ER-33 (`docs/lessons.md:1438`): a VM with no menu bar "confirmed" a tray cause
 in 12 of 12 runs, a tray count matched the app's own window buttons, a reading row passed on a dead helper, and
 `renderResult` printed PASS on zero steps.
 
-**Where they stand now.** #1 to #3 are fixed in their branches; #6 is being fixed in RT-8 by building the nextest part
-of §4b's shared reader. #5 is fixed: `8550764e7` makes incomplete, crashed, broken and precondition-failed runs add
+**Where they stand now.** #1 to #3 are fixed in their branches. #6 is fixed in `da05b54e8`: it adds a shared nextest
+reader, `tools/paddock-dev/src/nextest_log.rs`, used by both `plan_since` and `ci_runs/logfind.rs`; a partial log is
+refused, a 404 on a job list is not measured, and a failed job that never ran a step is a gap in the report. That is
+the nextest part of §4b's reader; `logfind.rs` still exists (as a caller), and RT-8's exit 1 for an incomplete report
+stays until WP-4 moves it to 6. #5 is fixed: `8550764e7` makes incomplete, crashed, broken and precondition-failed runs add
 an unwaivable error, and at `0a94bf347` one function, `RunRecord::judge(&self, kept: bool) -> (Status, Option<String>)`
 (`check/record.rs:112`), decides status and error together; a scoped run that reads nothing is `NotApplicable`, and a
 `--files` list none of whose entries is a file is `NotMeasured`. One difference from this ADR remains: `judge` makes a
@@ -86,14 +89,14 @@ data declares that measurement optional in that place, with a reason and an expi
 | 2 | `release_isolation/` (RT-2 `ad9d85a5b`, 40 lines) | `Leak`/`Probe` enums, `is_broken()`, `notices` | fixed; the local-trial flag still gives a notice, refused on a tag |
 | 3 | `worktree/` (RT-3) | `"not_measured_only"` JSON flag, `pub const EXIT_NOT_MEASURED: i32 = 6` (`worktree/mod.rs:14`) | fine, private exit code |
 | 4 | `check/record.rs` (RT-5 `0a94bf347`) | `Status { Clean, Findings, NotMeasured, NotApplicable, CheckBroken }` (`:71-75`), `measured() -> bool` (`:99`), `judge(kept)` (`:112`) | fine; the shape of §1, moved into it by WP-4 |
-| 5 | `ci_runs/` (RT-8 `5da33f8cf`) | `complete() -> bool` (`flakes.rs:148`), exit 1 | fine for now (1 is "failure"); moves to 6 in WP-4 |
+| 5 | `ci_runs/` (RT-8 `da05b54e8`) | `complete() -> bool` (`flakes.rs:154`), exit 1 | fine for now (1 is "failure"); moves to 6 in WP-4 |
 | 6 | `hook/oracle_tests.rs` (RT-4) | `panic!("the live oracle is not measured: …")` | fine |
 | 7 | `tests/it/golden.rs` (train) | `skip(reason)`: panic in CI on Linux, `::notice::` on CI host legs (shown through `success-output = "final"`), `eprintln!` locally (hidden) | at risk: the host-leg notice is a green run; an `[[optional]]` entry is its right form |
 | 8 | `conformance/src/finding.mjs`, `util/waivers.mjs`, `runner.mjs` | `unwaivable` flag by convention; crash not unwaivable; CLI exits 0, 1, 2 and passes a sub-command's status through (`cli.mjs:95, 107, 136`) | **at risk** (measured) |
 | 9 | `C99-no-keychain.mjs` | unwaivable errors; two "not measured" **warnings** (`--no-graph`, line 247; no clippy.toml, line 305) | fine by declaration (`--no-graph` never in CI; the demos' deviation in ADR 0057 §3.5); both become `[[optional]]` entries |
 | 10 | `scripts/vm-smoke/verdict.mjs` | `not-measured`, `check-broken`; exit 3 = INCOMPLETE | fine, but 3 is `paddock-cli`'s `NotRunning` |
 | 11 | `conformance/release/check-per-machine-installer.mjs` | text in problems | fine (fails) |
-| 12 | runner-log readers: `plan_since::nextest_failures` (train) and `ci_runs/logfind.rs` (RT-8), Debrief's `e2e/retried-reporter.mjs` (Playwright) | two nextest readers that drifted; neither has a "partial input" result except by error text | **broken** (#6) |
+| 12 | runner-log readers: `plan_since::nextest_failures` (train) and `ci_runs/logfind.rs` (RT-8), Debrief's `e2e/retried-reporter.mjs` (Playwright) | two nextest readers that drifted; neither had a "partial input" result except by error text | fixed for nextest in `da05b54e8` (one `nextest_log.rs` under both); Playwright and vitest still per tool (WP-2c) |
 | 13 | per-app strict switches: `PADDOCK_REQUIRE_TEST_BROWSER`, `DEBRIEF_`, `SPOTTER_`, `DEMO_REQUIRE_TEST_BROWSER` (e.g. `spotter-render/tests/real_browser.rs:27-35`) | lenient by default, strict when CI sets the variable | fine where CI sets it; four copies of one switch |
 
 **Early exits in tests.** An approximation over every `#[test]`/`#[tokio::test]` body (Appendix B, a token scan that
@@ -271,7 +274,7 @@ pub enum Read {
   `nextest-r0-fail.log`, `nextest-r1-pass.log`, `nextest-timeout-r0.log`, `playwright-project.log` and the others; a
   vitest log still to capture), the test cuts it at every line boundary before the summary and asserts `NotMeasured`;
   the whole log gives `Measured` with the known rows.
-- RT-8 is building the nextest part now; when §4b lands, RT-8's `ci_runs/logfind.rs` becomes `runlog` (it is not kept
+- RT-8 built the nextest part in `da05b54e8` (`nextest_log.rs`, used by `plan_since` and `logfind.rs`); when §4b lands, RT-8's `ci_runs/logfind.rs` becomes `runlog` (it is not kept
   beside it), `plan_since::nextest_failures` becomes a caller, and the
   mechanism `runner-log` is registered in `docs/known-copies.toml` with Debrief's `retried-reporter.mjs` as a copy
   to retire.
@@ -296,7 +299,7 @@ In RT-5's `./dev check` host:
   `NOT_MEASURED`, or a `fn complete|measured|is_measured(&self) -> bool`. JS shapes: an exported constant or an object
   key named `INCOMPLETE`, `NOT_MEASURED` or `CHECK_BROKEN` (vm-smoke's `EXIT = { …, INCOMPLETE: 3 }`), and the status
   literals `'not-measured'`, `'check-broken'`, `'not applicable'`. Seed at the heads above: 0 on the train's Rust;
-  RT-3 `worktree/mod.rs:14`, RT-5 `record.rs:71, 73, 75, 99`, RT-8 `flakes.rs:148` (6 sites, 3 branches); the JS seed
+  RT-3 `worktree/mod.rs:14`, RT-5 `record.rs:71, 73, 75, 99`, RT-8 `flakes.rs:154` (6 sites, 3 branches); the JS seed
   (vm-smoke's verdict and its rows) is counted by WP-3, which re-seeds every list from the heads it lands on.
 - **(c) Exits.** `std::process::exit` in `tools/` only in `main.rs` (Clippy `disallowed-methods` in `tools/*/clippy.toml`).
 - **(d) Tag workflows** follow §7's rule: the variables on every test step (the wide detector of §7), uploads from
