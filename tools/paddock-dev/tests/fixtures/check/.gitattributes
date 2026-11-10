@@ -1,0 +1,2 @@
+# Byte-exact inputs: the CRLF case must stay CRLF on every checkout.
+* -text
