@@ -3,6 +3,7 @@ use crate::fake::{FakeBrowser, Mode, UserAction};
 use crate::page::{MAX_HTML, Outcome};
 use crate::ready::{Readiness, Rule};
 use paddock_jobs::time::FakeClock;
+use paddock_testkit::wait::wait_until;
 
 const FAKE: &str = "launch::tests::fake_browser_process";
 
@@ -18,16 +19,6 @@ fn fake_browser_process() {
 /// alone. 40 s: over three times that, and under CI's 60 s test kill (nextest `slow-timeout` 30 s × 2), so a real hang
 /// fails with its own message instead of being killed first.
 const CLOSE_GUARD: Duration = Duration::from_secs(40);
-
-/// Waits (without sleeping) until `f` holds; a hang guard only.
-fn wait_until(what: &str, mut f: impl FnMut() -> bool) {
-    let end = Instant::now() + Duration::from_secs(20);
-    while !f() {
-        // conformance: hang-guard — a broken fake must fail the test, not hang it
-        assert!(Instant::now() < end, "timed out waiting for {what}");
-        std::thread::yield_now();
-    }
-}
 
 fn opts(base: &Path) -> LaunchOptions {
     let mut o = LaunchOptions::new(Profile::Throwaway(base.to_path_buf()));

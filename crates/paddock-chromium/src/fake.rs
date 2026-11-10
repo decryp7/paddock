@@ -228,6 +228,13 @@ impl FakeBrowser {
     }
 }
 
+/// Whether the fake ends: its parent is not the launcher the start script named, or is init (the launcher is gone, and
+/// the fake is a child of init, or of a subreaper such as Linux's `PR_SET_CHILD_SUBREAPER` holders, which is not the
+/// launcher either).
+fn should_exit(parent: libc::pid_t, owner: libc::pid_t) -> bool {
+    parent != owner || parent <= 1
+}
+
 /// The pid of this process's parent (it changes to the reaper's when the parent dies).
 fn parent_pid() -> libc::pid_t {
     // SAFETY: getppid has no arguments and cannot fail.
@@ -257,8 +264,7 @@ pub fn serve_if_requested() {
     std::thread::spawn(move || {
         loop {
             apply_control();
-            let parent = parent_pid();
-            if parent != owner || parent <= 1 {
+            if should_exit(parent_pid(), owner) {
                 std::process::exit(0);
             }
             std::thread::sleep(TICK);
@@ -649,6 +655,18 @@ mod tests {
 
     /// Regression (macOS CI, nextest): the test binary finds its native libraries through `DYLD_FALLBACK_LIBRARY_PATH`,
     /// which the shell running the fake dropped, so every fake browser exited at once.
+    #[test]
+    fn the_fake_ends_when_its_parent_is_not_its_launcher() {
+        assert!(!should_exit(4242, 4242), "the launcher is alive");
+        assert!(should_exit(1, 4242), "reparented to init");
+        assert!(
+            should_exit(777, 4242),
+            "reparented to a subreaper (Linux), not the launcher"
+        );
+        assert!(should_exit(1, 1), "a launcher that is init is no launcher");
+        assert!(should_exit(0, 0));
+    }
+
     #[test]
     fn the_script_restores_every_loader_variable_and_marks_the_child() {
         let dyld = vec![
