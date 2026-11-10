@@ -22,11 +22,11 @@
 read: 2026-11-10
 origin/train/2026-11-09-3 c151422a4
 origin/main b51c72509
-origin/docs/adr-scheduled-owners 3bf12da60
+origin/docs/adr-scheduled-owners 6270bbbbe
 origin/docs/adr-decision-register baa0f01c6
 origin/docs/adr-evidence-heads b32655fef
 origin/docs/adr-private-files fdfb17c8f
-origin/docs/adr-text-cuts-repo-copies 55286a33f
+origin/docs/adr-text-cuts-repo-copies 2e5017b46
 origin/docs/adr-captured-tool-output 9c2cd4d8e
 ```
 
@@ -102,7 +102,8 @@ presence: `ssh-keygen.c`'s `sig_verify()` only logs `sk_flags` at debug level an
 with `-O no-touch-required` keys. An agent with the key handle file could ask the authenticator for a silent assertion
 (CTAP2 `up=false`); the signature is then valid but has the presence bit clear. So the Paddock verifier (§5) parses the
 signature and requires the presence bit (and the verification bit when the signer line says so). A `git log %G?` or `git
-verify-commit` result alone is **not** a proof under this ADR, contrary to the wording of 0093 revision 3 §5.
+verify-commit` result alone is **not** a proof under this ADR, contrary to the wording of 0093 §5 (revision 4, `6270bbbbe`,
+line 262).
 
 **Namespaces and scope of a key.** The approval keys are used for approvals only, so a touch request the user did not
 start is an alarm. The probe below shows `namespaces="git"` in the signer line refuses a signature made for another
@@ -212,6 +213,10 @@ tagged tree or a branch: an agent can add or delete records on a release branch.
   every switch is its strictest value;
 - a tag whose commit is not reachable from a release line the gate knows (ER-31 release branches) is judged with
   `main`'s records only.
+
+This differs from 0093 revision 4 (`6270bbbbe`, line 244), which reads a signed mode record "on the tagged tree and on
+`origin/main` alike": under this ADR the tagged tree's copy is ignored, so a record added or removed on a release
+branch has no effect (PC-12). 0093 is to follow §6 when both are accepted.
 
 ### 7. The release workflow runs from the tagged tree: the residual risk and its controls
 
