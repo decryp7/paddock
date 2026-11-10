@@ -573,8 +573,17 @@ fn owner_killed(act_as_user: bool) {
             "the orphaned children's groups did not end, or their folders stayed",
         );
     }
+    // The guardian logs a group after it removed its folder: wait for the lines, not for the folders alone.
+    let logged = |l: &str| l.matches(") and removed ").count() >= 3;
+    let _ = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+        logged(&std::fs::read_to_string(&log).unwrap_or_default())
+    });
     let text = std::fs::read_to_string(&log).unwrap_or_default();
     assert_eq!(text.matches(") and removed ").count(), 3, "{text}");
+    // Ending a group does not wait out its bound: on Linux the SIGKILLed members stay zombies where init does not reap, and
+    // the guardian must read that as emptied (the old code looked 10 s per group and logged "still had members").
+    assert_eq!(text.matches(" (emptied) and removed ").count(), 3, "{text}");
+    assert!(!text.contains("still had members"), "{text}");
 }
 
 /// A root process registers nothing (ADR 0076 amendment 2026-11-09); any other user's does.

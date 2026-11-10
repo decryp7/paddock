@@ -421,7 +421,7 @@ pub(crate) fn parse(line: &str) -> Option<Line> {
 pub(crate) trait Ends {
     /// Ends the group if its keeper still holds it; false when it does not (then nothing is signalled).
     fn end_group(&mut self, g: &Guarded) -> bool;
-    /// Whether the group still has a member.
+    /// Whether the group still has a member that runs (a zombie waiting to be reaped is not one).
     fn group_exists(&mut self, group: u32) -> bool;
     /// Removes the folder if it is one the owner marked ([`removable`]); the reason when it is not removed.
     fn remove(&mut self, folder: &Path) -> Result<(), String>;
