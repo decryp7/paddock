@@ -80,6 +80,23 @@ impl RunMarker {
 mod tests {
     use super::*;
 
+    /// A marker that cannot be read (here, a folder where the file belongs) is an unreadable one, not a crash of the
+    /// start; and one that cannot be removed is reported, not raised.
+    #[test]
+    fn a_marker_that_cannot_be_read_or_removed_costs_only_its_report() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = marker_path(dir.path(), "agent");
+        std::fs::create_dir_all(path.join("inside")).unwrap();
+        let (m, previous) = begin(dir.path(), "agent", 10, &probe_none);
+        assert_eq!(
+            previous,
+            PreviousRun::Crashed,
+            "an unreadable marker is an unknown end"
+        );
+        m.end();
+        assert!(path.is_dir(), "the folder in the marker's place stays");
+    }
+
     fn probe_none(_: u32) -> Option<u64> {
         None
     }

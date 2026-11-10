@@ -13,6 +13,32 @@ fn guardian_entry() {
     run_if_requested();
 }
 
+thread_local! {
+    static ACT_HERE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the calling thread acts as the unprivileged user although it runs as root (see [`ACT_AS_USER_ENV`]).
+pub(super) fn acting_as_user_here() -> bool {
+    ACT_HERE.with(std::cell::Cell::get)
+}
+
+/// Makes the calling thread act as the unprivileged user (and the guardians it starts) until dropped; only this thread, so
+/// the tests that assert the root behaviour are not affected.
+struct ActAsUser;
+
+impl ActAsUser {
+    fn here() -> Self {
+        ACT_HERE.with(|c| c.set(true));
+        ActAsUser
+    }
+}
+
+impl Drop for ActAsUser {
+    fn drop(&mut self) {
+        ACT_HERE.with(|c| c.set(false));
+    }
+}
+
 const ENTRY: &str = "guardian::unix::tests::guardian_entry";
 const OWNER_FOLDERS_ENV: &str = "PADDOCK_GUARD_TEST_OWNER_FOLDERS";
 const OWNER_TEST: &str = "guardian::unix::tests::guard_owner_process";
@@ -28,6 +54,8 @@ struct Script {
     looks: u32,
     ended: Vec<u32>,
     removed: Vec<PathBuf>,
+    /// Every removal fails with this text.
+    remove_error: Option<&'static str>,
     lines: Vec<String>,
 }
 
@@ -44,6 +72,9 @@ impl Ends for Script {
         self.looks < self.empties_after
     }
     fn remove(&mut self, folder: &Path) -> Result<(), String> {
+        if let Some(e) = self.remove_error {
+            return Err(e.into());
+        }
         self.removed.push(folder.to_path_buf());
         Ok(())
     }
@@ -234,6 +265,16 @@ fn the_log_is_never_opened_through_a_link_or_in_a_shared_folder() {
 /// nothing and says so in its log.
 #[test]
 fn a_guardian_with_a_forged_owner_refuses_and_ends_nothing() {
+    forged_owner(true);
+}
+
+/// As root and left to itself the guardian serves nobody (exit 3, before it reads its owner).
+#[test]
+fn a_guardian_running_as_root_serves_nobody() {
+    forged_owner(false);
+}
+
+fn forged_owner(act_as_user: bool) {
     let d = tempfile::tempdir().unwrap();
     std::fs::set_permissions(
         d.path(),
@@ -258,7 +299,11 @@ fn a_guardian_with_a_forged_owner_refuses_and_ends_nothing() {
     let log = std::fs::canonicalize(d.path())
         .unwrap()
         .join("guardian.log");
-    let mut g = Command::new(std::env::current_exe().unwrap())
+    let mut guardian = Command::new(std::env::current_exe().unwrap());
+    if act_as_user {
+        guardian.env(ACT_AS_USER_ENV, "1");
+    }
+    let mut g = guardian
         .args([ENTRY, "--exact"])
         .env(GUARDIAN_ENV, "1")
         .env(OWNER_ENV, identity_text(victim_id))
@@ -282,7 +327,7 @@ fn a_guardian_with_a_forged_owner_refuses_and_ends_nothing() {
     let _ = victim.wait();
     assert!(!status.success(), "{status}");
     assert!(alive && kept, "a forged owner made the guardian act");
-    if crate::sys::effective_uid() == 0 {
+    if !act_as_user && crate::sys::effective_uid() == 0 {
         // Root: the guardian exits before anything, and the log variable is ignored for root.
         assert_eq!(
             status.code(),
@@ -426,6 +471,16 @@ fn fail(ids: &[ProcessId], why: &str) -> ! {
 
 #[test]
 fn an_owner_killed_with_three_guarded_children_leaves_none_and_no_folder() {
+    owner_killed(true);
+}
+
+/// A root owner has no guardian: its killed owner's children stay (and are ended here).
+#[test]
+fn a_root_owner_killed_has_no_guardian() {
+    owner_killed(false);
+}
+
+fn owner_killed(act_as_user: bool) {
     let dir = tempfile::tempdir().unwrap();
     let folders: Vec<PathBuf> = (0..3)
         .map(|i| dir.path().join(format!("profile-{i}")))
@@ -439,7 +494,11 @@ fn an_owner_killed_with_three_guarded_children_leaves_none_and_no_folder() {
         .map(|f| f.display().to_string())
         .collect::<Vec<_>>()
         .join(":");
-    let mut owner = Command::new(std::env::current_exe().unwrap())
+    let mut owner_cmd = Command::new(std::env::current_exe().unwrap());
+    if act_as_user {
+        owner_cmd.env(ACT_AS_USER_ENV, "1");
+    }
+    let mut owner = owner_cmd
         .args([OWNER_TEST, "--exact", "--nocapture"])
         .env(OWNER_FOLDERS_ENV, &joined)
         .env(LOG_ENV, &log)
@@ -472,7 +531,7 @@ fn an_owner_killed_with_three_guarded_children_leaves_none_and_no_folder() {
     let helpers = crate::descendants_of(owner_id)
         .len()
         .saturating_sub(ids.len());
-    if crate::sys::effective_uid() == 0 {
+    if !act_as_user && crate::sys::effective_uid() == 0 {
         // Root (the Linux CI containers): the guardian is off for root binaries (ADR 0076 amendment 2026-11-09), so a
         // killed owner's children stay. Asserted, then ended by identity; the guarded path runs as a user (macOS, and the
         // Linux run as uid 1000).
@@ -518,9 +577,22 @@ fn an_owner_killed_with_three_guarded_children_leaves_none_and_no_folder() {
     assert_eq!(text.matches(") and removed ").count(), 3, "{text}");
 }
 
+/// A root process registers nothing (ADR 0076 amendment 2026-11-09); any other user's does.
+#[test]
+fn a_root_process_registers_no_child_with_a_guardian() {
+    enable_in_test_binary(ENTRY);
+    let mut cmd = Command::new("/bin/sh");
+    cmd.args(["-c", "sleep 60"]);
+    let mut s = Supervised::spawn(cmd).unwrap();
+    let registered = s.guard.is_some();
+    s.kill();
+    assert_eq!(registered, crate::sys::effective_uid() != 0);
+}
+
 #[test]
 fn an_owner_that_ends_its_child_itself_keeps_the_folder_and_ends_the_keeper() {
     enable_in_test_binary(ENTRY);
+    let _acting = ActAsUser::here();
     let dir = tempfile::tempdir().unwrap();
     let folder = dir.path().join("kept");
     std::fs::create_dir_all(&folder).unwrap();
@@ -528,16 +600,6 @@ fn an_owner_that_ends_its_child_itself_keeps_the_folder_and_ends_the_keeper() {
     cmd.args(["-c", "sleep 60"]);
     let mut s = Supervised::spawn_owning_folder(cmd, None, &folder).unwrap();
     let child = s.process().unwrap();
-    if crate::sys::effective_uid() == 0 {
-        // Root: the guardian is off for root binaries (ADR 0076 amendment 2026-11-09): nothing is registered.
-        let registered = s.guard.is_some();
-        s.kill();
-        assert!(
-            !registered,
-            "a root process registered a child with a guardian"
-        );
-        return;
-    }
     let keeper = s.guard.as_ref().and_then(|r| ProcessId::of(r.keeper.id()));
     let Some(keeper) = keeper else {
         fail(&[child], "the child was not registered");
@@ -630,4 +692,139 @@ fn home_its_ancestors_and_shallow_paths_are_never_removed() {
     assert_eq!(removable(&folder, owner, None), Ok(()));
     assert!(removable(&folder, owner, Some(&folder.join("sub"))).is_err());
     assert!(removable(&folder, owner, Some(&folder)).is_err());
+}
+
+#[test]
+fn a_folder_that_cannot_be_removed_is_left_and_the_reason_logged() {
+    let mut s = Script {
+        remove_error: Some("busy"),
+        ..Script::default()
+    };
+    guard(add(10, Some("/p/a")).as_bytes(), &mut s, 5);
+    assert_eq!(s.ended, [10]);
+    assert!(s.removed.is_empty());
+    assert!(
+        s.lines
+            .iter()
+            .any(|l| l == "ended group 10 (emptied); left /p/a: busy"),
+        "{:?}",
+        s.lines
+    );
+}
+
+#[test]
+fn a_file_is_not_a_folder_to_remove() {
+    let d = tempfile::tempdir().unwrap();
+    let file = std::fs::canonicalize(d.path()).unwrap().join("file");
+    std::fs::write(&file, "").unwrap();
+    assert_eq!(
+        removable(&file, me(), None),
+        Err("refused: not a folder".into())
+    );
+}
+
+#[test]
+fn the_default_log_is_in_the_users_own_folder() {
+    let home = || Some(PathBuf::from("/home/u"));
+    let xdg = || Some(PathBuf::from("/state"));
+    assert_eq!(
+        default_log_path(home(), xdg(), true),
+        Some("/home/u/Library/Logs/paddock-proc-guardian.log".into())
+    );
+    assert_eq!(
+        default_log_path(home(), xdg(), false),
+        Some("/state/paddock-proc-guardian.log".into())
+    );
+    assert_eq!(
+        default_log_path(home(), None, false),
+        Some("/home/u/.local/state/paddock-proc-guardian.log".into())
+    );
+    assert_eq!(default_log_path(None, None, false), None);
+    assert_eq!(default_log_path(None, xdg(), true), None);
+}
+
+#[test]
+fn the_log_reads_as_its_path_or_off() {
+    assert_eq!(log_text(None), "off");
+    assert_eq!(log_text(Some(Path::new("/l/g.log"))), "/l/g.log");
+}
+
+#[test]
+fn a_folder_whose_marker_cannot_be_written_is_not_guarded() {
+    let d = tempfile::tempdir().unwrap();
+    let folder = std::fs::canonicalize(d.path()).unwrap();
+    // The marker's place is taken by a link: it is never written through (O_NOFOLLOW).
+    std::os::unix::fs::symlink(folder.join("elsewhere"), folder.join(MARKER)).unwrap();
+    assert_eq!(mark(&folder, me()), None);
+    assert_eq!(mark(&folder.join("missing"), me()), None);
+}
+
+/// A guardian that is refused starts (this binary on [`ENTRY`], acting as the user) and ends with code 2 and a log line.
+fn refused_guardian(owner_env: Option<String>, stdin: Stdio) -> (Option<i32>, String) {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(
+        d.path(),
+        std::os::unix::fs::PermissionsExt::from_mode(0o700),
+    )
+    .unwrap();
+    let log = std::fs::canonicalize(d.path())
+        .unwrap()
+        .join("guardian.log");
+    let mut cmd = Command::new(std::env::current_exe().unwrap());
+    cmd.args([ENTRY, "--exact"])
+        .env(ACT_AS_USER_ENV, "1")
+        .env(GUARDIAN_ENV, "1")
+        .env_remove(OWNER_ENV)
+        .env(LOG_ENV, &log)
+        .stdin(stdin)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(o) = owner_env {
+        cmd.env(OWNER_ENV, o);
+    }
+    let status = cmd.status().unwrap();
+    (
+        status.code(),
+        std::fs::read_to_string(&log).unwrap_or_default(),
+    )
+}
+
+#[test]
+fn a_guardian_without_an_owner_refuses_and_says_so() {
+    let (code, text) = refused_guardian(None, Stdio::null());
+    assert_eq!(code, Some(2));
+    assert!(text.contains("names no owner"), "{text}");
+}
+
+#[test]
+fn a_guardian_whose_input_is_not_a_pipe_refuses_and_says_so() {
+    // The owner is right (this process, which started it), but its standard input is a null device, not the owner's pipe.
+    let (code, text) = refused_guardian(Some(identity_text(me())), Stdio::null());
+    assert_eq!(code, Some(2));
+    assert!(text.contains("standard input is not a pipe"), "{text}");
+}
+
+#[test]
+fn a_guardian_that_ended_is_started_again_for_the_next_child() {
+    enable_in_test_binary(ENTRY);
+    let _acting = ActAsUser::here();
+    let mut first = Command::new("/bin/sh");
+    first.args(["-c", "sleep 60"]);
+    let mut first = Supervised::spawn(first).unwrap();
+    let guardian = {
+        let mut running = lock();
+        let r = running.as_mut().expect("a guardian is running");
+        let id = r.child.id();
+        r.child.kill().unwrap();
+        r.child.wait().unwrap();
+        id
+    };
+    let mut second = Command::new("/bin/sh");
+    second.args(["-c", "sleep 60"]);
+    let mut second = Supervised::spawn(second).unwrap();
+    let again = lock().as_ref().map(|r| r.child.id());
+    assert!(second.guard.is_some(), "the second child is guarded");
+    assert_ne!(again, Some(guardian), "a new guardian serves it");
+    second.kill();
+    first.kill();
 }

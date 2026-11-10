@@ -114,6 +114,28 @@ pub(crate) fn path_length(limit: u64) -> ArchiveError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The registry builds its rows in constants, where no coverage is measured: build each unit's row once at run time.
+    #[test]
+    fn a_row_starts_at_one_of_its_unit() {
+        for (unit, default, min) in [
+            (Unit::Bytes, Quantity::Bytes(8), Quantity::Bytes(1)),
+            (Unit::Ratio, Quantity::Ratio(8), Quantity::Ratio(1)),
+            (Unit::Count, Quantity::Count(8), Quantity::Count(1)),
+        ] {
+            let r = row("archive.example", unit, default, default);
+            assert_eq!(
+                (r.unit, r.default, r.min, r.max),
+                (unit, default, min, default)
+            );
+            assert_eq!(r.id, LimitId::new("archive.example"));
+            assert_eq!(
+                (r.value, r.kind, r.remedy),
+                (RowValue::ByRequest, RowKind::Stop, Remedy::Narrow)
+            );
+            assert!(r.selections.is_empty());
+        }
+    }
     use paddock_testkit::limit_cases;
 
     fn limit(e: ArchiveError) -> LimitExceeded {

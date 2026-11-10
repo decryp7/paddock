@@ -531,6 +531,33 @@ mod tests {
         assert!(!ask(id));
     }
 
+    /// The checked ask (macOS, and Linux without pidfds) delivers SIGTERM to the process it names, and the plain kill ends it.
+    #[cfg(unix)]
+    #[test]
+    fn the_checked_ask_and_the_plain_kill_reach_the_process_they_name() {
+        let mut c = child(Mode::Polite);
+        c.stdout(Stdio::piped());
+        let mut s = Supervised::spawn(c).unwrap();
+        ready(&mut s);
+        let id = s.process().unwrap();
+        assert_eq!(ask_checked(id), (Holder::Same, true));
+        let gone =
+            paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
+                crate::run_state(id) != crate::RunState::Running
+            });
+        assert!(gone, "a polite process stops when asked");
+        // A pid that was handed on is not signalled, and a process that is gone cannot be killed.
+        let other = ProcessId::new(id.pid(), crate::StartTime::from_micros(1));
+        assert!(!ask_checked(other).1);
+        let mut c = child(Mode::Polite);
+        c.stdout(Stdio::piped());
+        let mut s = Supervised::spawn(c).unwrap();
+        ready(&mut s);
+        let victim = s.process().unwrap();
+        assert!(RealOs.kill_pid(victim.pid()));
+        assert!(!RealOs.kill_pid(0));
+    }
+
     #[test]
     fn a_polite_process_stops_within_the_grace_period() {
         let mut c = child(Mode::Polite);

@@ -51,6 +51,17 @@ impl ViewError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The rows are built in constants, where no coverage is measured: build one at run time.
+    #[test]
+    fn a_hard_row_has_one_value_for_default_min_and_max() {
+        let r = hard("view.example", Quantity::Count(7));
+        assert_eq!(
+            (r.default, r.min, r.max),
+            (Quantity::Count(7), Quantity::Count(7), Quantity::Count(7))
+        );
+        assert_eq!((r.value, r.remedy), (RowValue::Hard, Remedy::None));
+    }
     use paddock_testkit::limit_cases;
 
     fn at(path: &str) -> String {

@@ -1060,3 +1060,18 @@ fn a_leaf_table_marks_exactly_the_commands_open_to_dialogs() {
     assert!(std::panic::catch_unwind(|| prefix(&["ab"], "abc")).is_err());
     assert!(std::panic::catch_unwind(|| prefix(&["xab"], "ab")).is_err());
 }
+
+/// The table macro evaluates these at compile time, where no coverage is measured: run them once as ordinary functions.
+#[test]
+fn the_dialog_names_of_a_table_are_counted_and_listed_in_order() {
+    let specs = [
+        Spec::new("a :: one", Kind::Query, Windows::MAIN, DEFAULT_LIMIT),
+        Spec::new("b :: two", Kind::Quiet, Windows::DIALOG, MIB),
+        Spec::new("c :: three", Kind::Query, Windows::MAIN, DEFAULT_LIMIT),
+        Spec::new("d :: four", Kind::Query, Windows::DIALOG, DEFAULT_LIMIT),
+    ];
+    assert_eq!(crate::table::dialog_count(&specs), 2);
+    assert_eq!(crate::table::dialog_names::<2>(&specs), ["two", "four"]);
+    assert_eq!(crate::table::dialog_count(&[]), 0);
+    assert_eq!(crate::DialogCallable::__prefix("app_").wire(), "app_*");
+}

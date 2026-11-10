@@ -11,6 +11,21 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
+/// In a test binary: when set, a process that runs as root acts as the unprivileged user the guardian is meant for, so the
+/// Linux CI containers (which run as root) exercise the guardian's acting code under coverage instead of only the root
+/// refusal. Tests set it on the child processes they start (never on their own process); it does not exist outside tests.
+#[cfg(test)]
+pub(crate) const ACT_AS_USER_ENV: &str = "PADDOCK_PROC_TEST_ACT_AS_USER";
+
+/// Whether the root policy applies to this process: root binaries do not use the guardian (ADR 0076 amendment 2026-11-09).
+fn runs_as_root() -> bool {
+    #[cfg(test)]
+    if std::env::var_os(ACT_AS_USER_ENV).is_some() || tests::acting_as_user_here() {
+        return false;
+    }
+    crate::sys::effective_uid() == 0
+}
+
 /// The owner's identity (`<pid> <start µs>`), which the guardian checks against its parent before it takes any line.
 const OWNER_ENV: &str = "PADDOCK_PROC_GUARDIAN_OWNER";
 /// The file in a guarded folder that names its owner (`<pid> <start µs>`): the guardian removes only a folder that has it,
@@ -61,23 +76,33 @@ pub fn set_log(path: &Path) {
 /// `$XDG_STATE_HOME` or `~/.local/state` elsewhere). Never a shared folder such as `/tmp` (the guardian checks the folder
 /// when it opens the file); never from the environment for root.
 fn log_path() -> Option<PathBuf> {
-    let env = (crate::sys::effective_uid() != 0)
+    let env = (!runs_as_root())
         .then(|| std::env::var_os(LOG_ENV).map(PathBuf::from))
         .flatten();
     env.or_else(|| LOG.get().cloned()).or_else(|| {
         if in_test_binary() {
             return None;
         }
-        let home = std::env::var_os("HOME").map(PathBuf::from);
-        let dir = if cfg!(target_os = "macos") {
-            home.map(|h| h.join("Library/Logs"))
-        } else {
-            std::env::var_os("XDG_STATE_HOME")
-                .map(PathBuf::from)
-                .or_else(|| home.map(|h| h.join(".local/state")))
-        };
-        dir.map(|d| d.join("paddock-proc-guardian.log"))
+        default_log_path(
+            std::env::var_os("HOME").map(PathBuf::from),
+            std::env::var_os("XDG_STATE_HOME").map(PathBuf::from),
+            cfg!(target_os = "macos"),
+        )
     })
+}
+
+/// The user's own log folder: `~/Library/Logs` on macOS, `$XDG_STATE_HOME` or `~/.local/state` elsewhere.
+fn default_log_path(
+    home: Option<PathBuf>,
+    xdg_state: Option<PathBuf>,
+    macos: bool,
+) -> Option<PathBuf> {
+    let dir = if macos {
+        home.map(|h| h.join("Library/Logs"))
+    } else {
+        xdg_state.or_else(|| home.map(|h| h.join(".local/state")))
+    };
+    dir.map(|d| d.join("paddock-proc-guardian.log"))
 }
 
 /// Opens the log for appending: only in a folder this user owns that nobody else can write to, never through a link
@@ -156,18 +181,27 @@ fn start(args: &[OsString], me: ProcessId) -> std::io::Result<Running> {
     if let Some(l) = &log {
         cmd.env(LOG_ENV, l);
     }
+    #[cfg(test)]
+    if tests::acting_as_user_here() {
+        // The guardian is a process of its own: it acts as the user too.
+        cmd.env(ACT_AS_USER_ENV, "1");
+    }
     let child = cmd.spawn()?;
     log::info!(
         "Started the orphan guardian (pid {}) for this process's supervised children; its log is {}",
         child.id(),
-        log.as_deref()
-            .map_or_else(|| "off".into(), |l| l.display().to_string())
+        log_text(log.as_deref())
     );
     Ok(Running {
         child,
         to,
         keeper_input,
     })
+}
+
+/// How the log reads in a message.
+fn log_text(log: Option<&Path>) -> String {
+    log.map_or_else(|| "off".into(), |l| l.display().to_string())
 }
 
 /// Sends one line as a single write, so a line the guardian takes is whole (a line cut short by the owner's death has no
@@ -244,7 +278,7 @@ pub(crate) fn register(group: u32, folder: Option<&Path>) -> Option<Registration
             "this executable does not call paddock_proc::guardian::run_if_requested() in main",
         );
     };
-    if crate::sys::effective_uid() == 0 {
+    if runs_as_root() {
         return off(
             "this process runs as root, and root binaries do not use the guardian (ADR 0076 amendment 2026-11-09)",
         );
@@ -626,7 +660,7 @@ impl Ends for OsEnds {
 
 /// The guardian process: checks who started it, serves the owner on `input` and returns the exit code.
 fn serve(input: impl BufRead) -> i32 {
-    if crate::sys::effective_uid() == 0 {
+    if runs_as_root() {
         return 3;
     }
     let log = LogFile::Closed(std::env::var_os(LOG_ENV).map(PathBuf::from));

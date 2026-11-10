@@ -132,7 +132,7 @@ mod unix {
 
     /// Lowers every thread of `pid` but the main one (Linux).
     #[cfg(target_os = "linux")]
-    fn lower_other_threads(pid: u32) {
+    pub fn lower_other_threads(pid: u32) {
         let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) else {
             return;
         };
@@ -594,6 +594,28 @@ pub fn lower_child(_child: &std::process::Child) -> bool {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    /// Linux nice values are per thread: a process's other threads are lowered with its main one.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_other_threads_of_a_process_are_lowered() {
+        let (tid_tx, tid_rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+        let worker = std::thread::spawn(move || {
+            // SAFETY: gettid takes no arguments and cannot fail.
+            let tid = unsafe { libc::syscall(libc::SYS_gettid) };
+            tid_tx.send(tid).unwrap();
+            // Held until the check is done: the thread must exist while its niceness is read.
+            let _ = done_rx.recv();
+        });
+        let tid = tid_rx.recv().unwrap();
+        lower_other_threads(std::process::id());
+        // SAFETY: getpriority takes two integers and has no memory effects.
+        let nice = unsafe { libc::getpriority(libc::PRIO_PROCESS, tid as libc::id_t) };
+        done_tx.send(()).unwrap();
+        worker.join().unwrap();
+        assert!(nice >= LOWERED_NICE, "the thread runs at nice {nice}");
+    }
 
     /// macOS: the start time comes from `kinfo_proc` (offset 0: seconds, then microseconds) and agrees with what sysinfo
     /// reads through `proc_pidinfo` for a process of our own.
