@@ -2,7 +2,7 @@
 //! (the `N flaky` and `N failed` lists of its summary) and vitest (the failed spec files, read by `plan_since`).
 //!
 //! The nextest rules come from captured output (cargo-nextest 0.9.151, `tests/ci-runs/nextest-r*-*.log`): with `retries >= 1` a
-//! hard failure prints only `TRY n FAIL` lines and never a bare `FAIL`; a test that passed on a retry ends with `FLAKY a/b`
+//! hard failure prints only `TRY n FAIL` lines (a timeout: `TRY n TMT`; SIG* endings have no captured log) and never a bare `FAIL`; a test that passed on a retry ends with `FLAKY a/b`
 //! (`flaky-result = "pass"`) or `FLKY-FL a/b` (`"fail"`).
 
 use crate::log_text::plain;
@@ -55,7 +55,7 @@ static NEXTEST_FAILED_COUNT: LazyLock<Regex> = LazyLock::new(|| re(r"(\d+) (?:[a
 static NEXTEST_FLAKY_COUNT: LazyLock<Regex> = LazyLock::new(|| re(r"\((\d+) flaky\)"));
 static NEXTEST_LINE: LazyLock<Regex> = LazyLock::new(|| {
     re(
-        r"^\s*(TRY \d+ )?(PASS|FAIL|TIMEOUT|SIG[A-Z]+|ABORT|LEAK-FAIL|(?:FLAKY|FLKY)[-A-Z]*)(?: \d+/\d+)?\s+\[[^\]]*\]\s+(?:\([^)]*\)\s+)?(\S+)\s+(\S+)\s*$",
+        r"^\s*(TRY \d+ )?(PASS|FAIL|TIMEOUT|TMT|SIG[A-Z]+|ABORT|LEAK-FAIL|(?:FLAKY|FLKY)[-A-Z]*)(?: \d+/\d+)?\s+\[[^\]]*\]\s+(?:\([^)]*\)\s+)?(\S+)\s+(\S+)\s*$",
     )
 });
 static PW_SECTION: LazyLock<Regex> = LazyLock::new(|| re(r"^\s{1,4}(\d+) (flaky|failed)\s*$"));
@@ -194,6 +194,8 @@ mod tests {
     const R0_FAIL: &str = include_str!("../../tests/ci-runs/nextest-r0-fail.log");
     const R1_PASS: &str = include_str!("../../tests/ci-runs/nextest-r1-pass.log");
     const R1_FAIL: &str = include_str!("../../tests/ci-runs/nextest-r1-fail.log");
+    const TIMEOUT_R0: &str = include_str!("../../tests/ci-runs/nextest-timeout-r0.log");
+    const TIMEOUT_R1: &str = include_str!("../../tests/ci-runs/nextest-timeout-r1.log");
     const PW_PROJECT: &str = include_str!("../../tests/ci-runs/playwright-project.log");
     const PW_PLAIN: &str = include_str!("../../tests/ci-runs/playwright-noproject.log");
     const VITEST: &str = include_str!("../../tests/since-run/vitest-frontend.log");
@@ -225,6 +227,18 @@ mod tests {
             assert_eq!(f.flaky, set(&[ONCE]), "{f:?}");
             assert_eq!(f.failed, set(&[ALWAYS]), "{f:?}");
             assert!(f.broken.is_none(), "{:?}", f.broken);
+        }
+    }
+
+    #[test]
+    fn a_timed_out_test_is_failed_with_and_without_retries() {
+        // Captured: without retries the final line is `TIMEOUT`; with retries each attempt ends `TRY n TMT` (nextest's short
+        // label for a timeout; `TRMNTG` is the progress line while it is killed). SIG* endings are not captured: they are
+        // matched by the same rule as TIMEOUT but have no real log here.
+        for log in [TIMEOUT_R0, TIMEOUT_R1] {
+            let f = read(log);
+            assert_eq!(f.failed, set(&["nxflaky slow::hangs"]), "{f:?}");
+            assert!(f.flaky.is_empty() && f.broken.is_none(), "{f:?}");
         }
     }
 
