@@ -1,7 +1,7 @@
 # 81. Process liveness is three-valued: "could not look" is never "gone", proof tokens before destructive acts, one check over every look
 
-- Status: Proposed (2026-11-10), revision 2 (2026-11-10) after the first independent review (CHANGES: P1-1 to P1-4 and
-  the P2s answered below). Draft for the user's decision (ER-21); not implemented.
+- Status: Proposed (2026-11-10), revision 3 (2026-11-10): the second independent review APPROVED it; its three P2s are
+  applied (Gone only on ESRCH, the S21 exception, stale text). Draft for the user's decision (ER-21); not implemented.
 - Date: 2026-11-10
 - Related: ER-21 / rule 40 (recurring bugs mean a missing design rule), rule 53 and ADR
   [0033](0033-processes-by-identity-never-by-a-bare-pid.md) (identity before acting: *which* process), ER-27 (logs explain
@@ -181,9 +181,9 @@ pub fn presence(pid: u32) -> Presence                  // bare-pid look; Departe
 
   | OS | Primitive | `Gone` only on | `Unknown` on |
   | --- | --- | --- | --- |
-  | Unix (all) | `kill(pid, 0)` (inside `paddock-proc` only; it stays disallowed elsewhere) | `ESRCH` | `EPERM` means it exists: then the start time decides `Running` or `Unknown` |
-  | Linux | `/proc/<pid>/stat` (state and start tick) | `ENOENT` (and state `Z` or `X`) | `EACCES`, a read error, a parse failure |
-  | macOS | `sysctl(KERN_PROC_PID)` (ADR 0033 §1: answers for every process, setuid and zombies included) | a zero-length answer, or `SZOMB` | any error; a start time of 0 |
+  | Unix (all), the existence test | `kill(pid, 0)` (inside `paddock-proc` only; it stays disallowed elsewhere) | **`ESRCH` only**: on every Unix this is the one answer that proves no process holds the pid | `EPERM` means it exists; any other errno is `Unknown` |
+  | Linux, start time and state only | `/proc/<pid>/stat` (start tick, state) | state `Z` or `X` after `kill(0)` said the pid exists (a zombie is gone) | `EACCES`, a read error, a parse failure, and **`ENOENT` after `EPERM`** (`hidepid=2` hides other users' entries: `ENOENT` there is not absence) |
+  | macOS, start time and state only | `sysctl(KERN_PROC_PID)` (ADR 0033 §1: answers for every process, setuid and zombies included) | `SZOMB` after `kill(0)` said the pid exists | any error, a zero-length answer after `EPERM`, a start time of 0 |
   | Windows | `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)`, then `GetExitCodeProcess` / `WaitForSingleObject(0)` and `GetProcessTimes` | `ERROR_INVALID_PARAMETER` from `OpenProcess`, or a signalled handle | `ERROR_ACCESS_DENIED` and every other error; a creation time of 0 |
 
   A failed snapshot, a start time of 0 and a status sysinfo cannot name are `Unknown`, never `Gone` and never a match.
@@ -192,14 +192,18 @@ pub fn presence(pid: u32) -> Presence                  // bare-pid look; Departe
 - **Positive controls against real processes (ER-33).** On every CI OS: `presence(1)` (launchd, init) is never `Gone`
   (it is `Running` or `Unknown`, never absent), on Windows a SYSTEM-owned pid (`System`, pid 4) is never `Gone`, this
   process is `Running` with its true start time, and a child spawned and reaped by the test is `Gone`. A look
-  implementation that fails any of these fails the crate's tests.
+  implementation that fails any of these fails the crate's tests. **A `hidepid=2` control** runs in the Linux CI leg (a
+  container with `/proc` mounted `hidepid=2` and a process of another uid): its look must be `Unknown` or `Running`,
+  never `Gone`. If the CI container cannot remount `/proc` (it needs `CAP_SYS_ADMIN`), the case is named in WP-1's
+  report as untested on CI and run once by hand on a local Linux VM, with the result recorded.
 - **Removed (D1):** `paddock_proc::is_alive`, `paddock_proc::may_be_alive`, `ProcessId::is_alive`,
   `Presence::may_be_alive`, and `ProcessId::of` returning `Option`. Paddock is before v1: no shims.
 - **Proof tokens (D2).** `Departed` and `Alive` have private fields and no public constructor; only a look builds them.
   "Gone" is monotonic for an identity (a pid plus start time never runs again), so a `Departed` stays true; "running" is
   not, so `Alive` is only an admission ticket: `ask`, `end`, `terminate` and `kill_tree` take it and still re-check
   identity at the act (ADR 0033 §2). A `Departed` built from `Ident::Pid` (no start time) is accepted only by acts that
-  are harmless when the pid was recycled (a cache entry), never by a delete; the type says which (`Departed::exact()`
+  are harmless when the pid was recycled (a cache entry), never by a delete, with one named exception (§4, S21's
+  old-format folders: `Departed::pid_only_aged(..)`); the type says which (`Departed::exact()`
   returns `Option<ExactDeparted>`).
 - **`terminate`** (S10): the grace loop matches the look; `Unknown` mid-grace returns `Terminated::Unknown`, never
   `Gracefully`.
@@ -219,7 +223,7 @@ direction does not compile:
 | `paddock-chromium` profile sweep | `ExactDeparted` |
 | `paddock-service` uninstall wait and stop read-back | `ExactDeparted` to report stopped or remove files |
 | `paddock_proc::{ask, end, terminate, kill_tree}` | `Alive` |
-| `paddock_testkit::proc::{assert_gone, wait_gone}` (new) | fails on `Unknown` with the reason (T1-T8) |
+| `paddock_testkit::proc::{assert_gone, wait_gone}` (new) | fails on `Unknown` with the reason (T1-T11) |
 
 An app's own destructive decision (Debrief's run lock, ETW orphan stop, store and scratch sweeps; Pitcrew's stop watch)
 matches the three arms; `next_step` in `pitcrew-core` takes `Presence` and gains `StopStep::Unconfirmed` (no kill, the
@@ -264,11 +268,12 @@ scratch sweeps (S21, below), and the run lock's `Look` (S8) becomes
 **S21's folder names carry no start time (review P2).** Scratch stores are named `<window>-<pid>-<n>`
 (`engine/mod.rs` `scratch_pid`) and store folders by pid, so no `ExactDeparted` can be built for them. Plan: new folders
 are named `<window>-<pid>-<start_us>-<n>` (the start from `ProcessId::look` of this process at creation), and the sweeps
-delete only on `ExactDeparted`. Folders in the old format get a bounded fallback for one release: removed only when the
-bare-pid look is `Gone` **and** the folder's newest file is older than 7 days (a live instance writes its store; a pid
-recycled to an unrelated process then keeps the folder at most until it is gone too). The fallback is registered in
-`docs/liveness.toml` with `delete_by = "debrief-v1.3.0"`; no migration of old folders (user, 2026-11-06: no backward
-compatibility before v1).
+delete only on `ExactDeparted`. Folders in the old format get a bounded fallback for one release, **the one named
+exception to D2** (a delete without an exact identity): its own constructor `Departed::pid_only_aged(pid, newest_write,
+min_age)` returns a token only when the bare-pid look is `Gone` and the folder's newest file is older than `min_age`
+(7 days; a live instance writes its store). Only the two Debrief sweeps accept that token type. The constructor and both
+call sites are registered in `docs/liveness.toml` as `kind = "exception"` with `delete_by = "debrief-v1.3.0"`, so the
+constructor is removed with them; no migration of old folders (user, 2026-11-06: no backward compatibility before v1).
 
 ### 5. Relation to ADR 0033, ADR 0072 and ADR 0076
 
@@ -296,14 +301,15 @@ compatibility before v1).
 
 ### 6. Parallelism and cost (rule 51)
 
-No new OS work: every look is the same per-pid refresh it is today (one `System` and one `ProcessesToUpdate::Some`), and
-the token types are zero-sized wrappers around data already read. The OS primitives of §1 are cheaper than a sysinfo
-refresh (one syscall or one `/proc` read per pid instead of a `System` and a table refresh); WP-1 records both with
-`crates/paddock-proc/examples/snapshot_cost.rs` before any number is quoted (rule 48). What changes is behaviour under failure: loops that
+Each look changes from a sysinfo refresh (one `System` and one `ProcessesToUpdate::Some`) to the OS primitives of §1:
+`kill(pid, 0)` plus one `/proc` read or one `sysctl` on Unix, `OpenProcess` plus two queries on Windows. That should be
+cheaper per pid, but it is not measured yet: WP-1 measures both with `crates/paddock-proc/examples/snapshot_cost.rs`
+and records the results in `docs/benchmarks.md` before any number is quoted (rule 48). The token types are zero-sized
+wrappers around data already read. What changes is behaviour under failure: loops that
 used to end on a failed look now keep waiting until their own bound or report "not confirmed", so a broken process table
 can make a wait last to its bound instead of ending early; each such wait already has a bound (ADR 0031 patience, the
 `./dev wait --max`). The migration is file-disjoint per app and can run as one implementer per app after the shared
-change lands; it is not on any hot path, so no benchmark is quoted (rule 48).
+change lands; no look sits on a per-event hot path (the most frequent is Pitwall's 50 ms release loop).
 
 ### 7. Rule text (rule 53 amendment, on acceptance)
 

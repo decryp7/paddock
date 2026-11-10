@@ -1,7 +1,7 @@
 # 82. Tests wait on events, not tick windows: a stepped ticker for state machines, one until-stable settle, and C71 over counts
 
-- Status: Proposed (2026-11-10), revision 2 (2026-11-10) after the first independent review (CHANGES: P1-1 to P1-3 and
-  the P2s answered below). Draft for the user's decision (ER-21); not implemented.
+- Status: Proposed (2026-11-10), revision 3 (2026-11-10): the second independent review APPROVED it; its three P2s are
+  applied (copy dates, where `Wait` lives, the order of `./dev ci flakes`). Draft for the user's decision (ER-21); not implemented.
 - Date: 2026-11-10
 - Related: ER-12 / rule 5 (no sleeps or raised timeouts; make it deterministic), rule 49 (specs never wait a fixed number
   of event-loop turns), ER-21 / rule 40, ER-29 (shuffled nightly suites), ER-33 / rule 71 (a check needs a positive
@@ -137,11 +137,22 @@ give-up."*
 All four traits are one mechanism, *an injected, cancellable wait over a clock*, which a `FakeClock` can drive; none is
 a tick source that a machine counts. So: (1) the new seam gets a distinct name, **`Ticker`** (`RealTicker`,
 `SteppedTicker`), and ADR 0041's `Pace` name is retired; (2) the four wait seams are registered in
-`docs/known-copies.toml` as mechanism `injected-wait`, canonical a new `paddock_jobs::time::Wait` (`wait(&self, d,
-cancel) -> bool` over the injected `Clock`), with `delete_by` each owner's next tag (rule 55); `Pacer`'s progress method
-stays in Dyno as its own port. The unification is WP-1b (D8).
+`docs/known-copies.toml` as mechanism `injected-wait`, canonical a new `Wait` (`wait(&self, d, cancel) -> bool` over the
+injected `Clock`); `Pacer`'s progress method stays in Dyno as its own port. The unification is WP-1b (D8).
 
-**The new seam,** in `paddock_jobs::time`:
+- **Copy dates do not gate the next tags.** A registered copy whose `delete_by` passes blocks its owner's tag (ADR 0034,
+  C58). To keep this ADR off the near release path, each entry gets the owner's **second** tag after WP-1b lands, not the
+  next one: Dyno's tag after its next, and the shared packages' second `v*`. The D6 rows therefore do not list them.
+- **Where `Wait` and `Clock` live (D10).** `paddock-proc` is a leaf today (its only dependency is
+  `paddock-workspace-hack`), while `paddock-jobs` depends on `paddock-env` and `paddock-limits`. Moving
+  `paddock-proc`'s wait seam onto `paddock_jobs::time` would give `paddock-proc` its first family dependencies (those
+  three crates). Recommended instead: a new leaf crate **`paddock-time`** (`Clock`, `SystemClock`, `FakeClock`, `Wait`,
+  `Ticker`, `RealTicker`, `SteppedTicker`; no family dependencies), which `paddock-jobs::time` re-exports unchanged, so
+  every existing `paddock_jobs::time` user compiles as before and `paddock-proc` stays free of env and limits. The crate
+  follows the new-crate checklist (coverage gate, README entry). The other option, `paddock-proc` on `paddock-jobs`, is
+  allowed but has to be said in the change.
+
+**The new seam,** in `paddock-time` (D10; re-exported as `paddock_jobs::time`):
 
 ```text
 pub trait Ticker: Send + Sync { fn next(&self, cancel: &CancelToken) -> Tick; }  // blocks until the next tick
@@ -232,7 +243,7 @@ C71 (on `origin/train/2026-11-09-3`) gains, with the same baseline-by-text ratch
 - Each app's migration is mechanical first (a codemod: imports to `@decryp7/paddock-ui/testing`, numeric arguments
   dropped), then a triage of the specs that turn red because they relied on a window: each becomes `settleUntil` on the
   condition it meant, or exposes a real bug that gets its own failing test (rule 5).
-- **Order relative to releases (rule 1, ADR 0049 freezes).** The shared pieces (`paddock-jobs` `Ticker` and `Wait`, `paddock-ui/testing`)
+- **Order relative to releases (rule 1, ADR 0049 freezes).** The shared pieces (`paddock-time` with `Ticker` and `Wait`, `paddock-ui/testing`)
   land in the first shared window outside a release freeze; the C71 extension (conformance only, no release path) may land
   first, with every current site in the baseline. Then, inside each app's own batches:
   1. **Dyno** (its link and supervisor are the only ticked machines run at a real pace; the 7855 fixes are already
@@ -262,8 +273,8 @@ C71 (on `origin/train/2026-11-09-3`) gains, with the same baseline-by-text ratch
 | WP | Content | Days |
 | --- | --- | --- |
 | WP-0 | Re-run the survey as C71 fixtures, regenerate the baseline with the new rows, list the lazy openers; **the gate (review P2):** codemod one Debrief area of about 20 specs, count the specs that turn red and the suite time before and after (recorded, rule 48), and recompute WP-6 from that red rate; if WP-6 then exceeds 6 days, the plan goes back to the user before WP-6 starts | 1 |
-| WP-1 | `Ticker`, `RealTicker`, `SteppedTicker` (`step`, `step_until`, waiting for the taker) in `paddock_jobs::time`; 99 % coverage | 1.5 |
-| WP-1b | `paddock_jobs::time::Wait`; the four wait seams (`paddock-proc`, `paddock-service`, `dyno-bench`, `dyno-core` WoL) registered as copies and moved onto it in their owners' batches | 1 |
+| WP-1 | `Ticker`, `RealTicker`, `SteppedTicker` (`step`, `step_until`, waiting for the taker) in `paddock-time` (D10); 99 % coverage | 1.5 |
+| WP-1b | The leaf crate `paddock-time` (D10: `Clock`, `FakeClock`, `Wait`, `Ticker` moved there, re-exported by `paddock-jobs::time`); the four wait seams (`paddock-proc`, `paddock-service`, `dyno-bench`, `dyno-core` WoL) registered as copies with the later `delete_by` and moved onto `Wait` in their owners' batches | 1.5 |
 | WP-2 | Dyno link and supervisor take `impl Ticker`; integration tests on `SteppedTicker` with `Tuning::patient()` where a real process races; Debrief readiness reviewed | 1.5 |
 | WP-3 | `@decryp7/paddock-ui/testing`: `settle` on `PendingTasks`, `settleUntil`, `untilState`, the test-lifetime guard, `PendingTasks` in the shared mocks, the two control specs through the real `openLazy`; `ui/` adopts it (44 helpers) | 2 |
 | WP-3b | Product change: `openLazy` and every lazy dialog opener register a `PendingTasks` task (Debrief, the shell), with unit tests | 1 |
@@ -273,9 +284,9 @@ C71 (on `origin/train/2026-11-09-3`) gains, with the same baseline-by-text ratch
 | WP-7 | Rust: 32 counted polls and 11 absence windows in 26 and 9 files | 2 |
 | WP-7b | Success deadlines under 10 s: Rust `recv_timeout(..).unwrap()` and TypeScript `vi.waitFor`/`expect.poll` on the default (count from WP-0); mostly mechanical swaps to `settleUntil`/`untilState`/`wait_until` | 1.5 |
 | WP-8 | Rule 60 text, lesson, ADR 0041 amendment notes, README row | 0.25 |
-| | **Mechanism (WP-0 to WP-4 with WP-1b and WP-3b, WP-8)** | **10.75** |
+| | **Mechanism (WP-0 to WP-4 with WP-1b and WP-3b, WP-8)** | **11.25** |
 | | **Migration (WP-5 to WP-7b)** | **11.25** |
-| | **Total** | **22** |
+| | **Total** | **22.5** |
 
 The migration figures are planning estimates from the counts above, not measurements.
 
@@ -291,8 +302,9 @@ The migration figures are planning estimates from the counts above, not measurem
 | D6 | Release gating | (a) per-tag rows below: a tag is blocked by new sites and by the baseline entries of specs that failed or were marked FLAKY in the app's CI in the 30 days before the tag; (b) every app at zero before its next tag | **(a)** with the rows below. Data source: the ER-12 FLAKY markers (nextest `flaky-result = "fail"`, Playwright `failOnFlakyTests`) and the failed-test names in the CI reports of the app's workflow, read by `./dev ci flakes` (WP-4). Vitest has no FLAKY marker yet, so for Vitest specs only failed runs count. Until `./dev ci flakes` exists, (a) falls back to (b) |
 | D7 | Absence windows (`recv_timeout(short).is_err()`) | (a) replace with an event (a sequence number, a closed channel) where one exists, else the declared observation window; (b) leave in the baseline | **(a)** |
 
-| D8 | Naming and the existing wait seams | (a) new seam `Ticker`; the four `Pace`/`Pacer` wait seams become one `paddock_jobs::time::Wait`, registered as copies; (b) reuse the name `Pace` and leave the wait seams | **(a)**: one name per mechanism; `Pace` already means "wait" in two shared crates |
+| D8 | Naming and the existing wait seams | (a) new seam `Ticker`; the four `Pace`/`Pacer` wait seams become one `Wait` (in `paddock-time` under D10 (a)), registered as copies; (b) reuse the name `Pace` and leave the wait seams | **(a)**: one name per mechanism; `Pace` already means "wait" in two shared crates |
 | D9 | Lazy openers register a pending task (product change) | (a) yes, `openLazy` and every lazy dialog opener; (b) tests use `settleUntil` around every lazy open | **(a)**: it is the only stopping rule that sees a dynamic `import()`; it costs production nothing visible |
+| D10 | Where `Clock`, `Wait` and `Ticker` live | (a) a new leaf crate `paddock-time`, re-exported by `paddock-jobs::time`; (b) in `paddock-jobs`, so `paddock-proc` gains `paddock-jobs`, `paddock-env` and `paddock-limits` as its first family dependencies | **(a)**: `paddock-proc` stays a leaf; no user of `paddock_jobs::time` changes |
 
 ### D6 (a): what blocks which tag
 
@@ -302,7 +314,7 @@ The migration figures are planning estimates from the counts above, not measurem
 | Pitwall 1.1 | zero baseline entries of the new rows (24 importers, 3 counted calls, 12 helpers: about a day) | |
 | Spotter 1.0 | zero baseline entries of the new rows (21 importers, 23 counted calls) | |
 | Pitcrew 1.1 | new sites; tests with a failure or FLAKY in 30 days; the 2 short `recv_timeout(..).unwrap()` sites in `notify-channels` | the 112 counted calls, if WP-0's gate shows they need more than 1.5 days |
-| Debrief 1.2 | new sites; specs with a failure or FLAKY in 30 days; the `openLazy` task (WP-3b) | the rest of the 503 counted calls (burn down in the 1.2 foundation, re-estimated at WP-0's gate) |
+| Debrief 1.2 | new sites; specs with a failure or FLAKY in 30 days; the `openLazy` task (WP-3b). `./dev ci flakes` (WP-4) is ordered **before** WP-0's Debrief gate and the 1.2 freeze, because without it D6 (a) falls back to (b), and then **all 503 counted calls must reach zero** before the tag | the rest of the 503 counted calls (burn down in the 1.2 foundation, re-estimated at WP-0's gate), only while `./dev ci flakes` exists |
 
 ## Consequences
 
@@ -327,7 +339,7 @@ The migration figures are planning estimates from the counts above, not measurem
 
 - `paddock-ui/testing`: `settle_waits_for_a_dialog_opened_through_openLazy_whose_chunk_takes_25_turns` (fails with any
   fixed-round settle) and its control `..._fails_when_openLazy_registers_no_task`.
-- `paddock_jobs::time`: `a_stepped_ticker_gives_one_look_per_step_under_a_starved_machine` (the machine's look count equals
+- `paddock-time`: `a_stepped_ticker_gives_one_look_per_step_under_a_starved_machine` (the machine's look count equals
   the steps taken, with the taker slowed by a seam).
 - Dyno link: `a_pending_registration_is_not_given_up_while_the_test_steps_slower_than_the_pace` (driver on `SteppedTicker`,
   the service agent's start delayed by a gate; fails today with a 1 ms real pace and `pending_max` 60).
