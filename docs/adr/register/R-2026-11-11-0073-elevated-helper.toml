@@ -1,42 +1,59 @@
 # Free-text prerequisites are matched to `provides` names in ADR 0096 WP-1's review.
 id = "R-2026-11-11-0073-elevated-helper"
 title = "Amendment to ADR 0073: Debrief's elevated work moves into one narrow helper, and the elevated relaunch goes"
-summary = "Amendment to ADR 0073 (proposed 2026-11-11; direction decided by the user on 2026-11-11: a narrow elevated helper instead of \"Restart as administrator\"): one on-demand `debrief-admin.exe` with a closed request list (ETW for .NET and native, logman, the Security log, dumps, process samples) from the per-machine install folder, verified pipe per rule 75, no environment, the per-plugin elevated role and `restart_elevated` removed, elevated mode for a hand-started elevated Debrief; D-H1 to D-H7 open; 13 to 18.5 days plus ADR 0053's Debrief row; gates debrief-v1.2.0"
+summary = "Amendment to ADR 0073 (proposed 2026-11-11, revision 2; direction decided by the user on 2026-11-11: a narrow elevated helper instead of \"Restart as administrator\"): one on-demand `debrief-admin.exe` with a closed typed request list (ETW for .NET and native, perfmon from a typed template, the Security log, dumps with protected processes refused, process samples) from the per-machine install folder; the elevated launch built in paddock-ipc over a verified pipe (rule 75); no environment; no elevated Debrief when UAC is on; restart_elevated and the per-plugin elevated role removed; D-H1 to D-H9 open; 20.5 to 28 days plus ADR 0053's Debrief row; gates debrief-v1.2.0"
 status = "proposed"
 approval_file = "docs/adr/amendments/0073-elevated-helper-2026-11-11.md"
-adr_by = "2026-11-25" # 14 days after the user's direction decision of 2026-11-11 (ADR 0096 section 2 default)
-prerequisites = ["ADR 0053 Debrief per-machine install", "Windows test VM admin snapshot", "ADR 0092 WP-9 rule 75 text", "ADR 0073 WP-0"]
+adr_by = "2026-11-25" # ADR 0096 section 4 staleness default: 14 days, counted from the user's direction decision of 2026-11-11
+prerequisites = ["ADR 0053 accepted and on main", "ADR 0053 Debrief per-machine install", "ADR 0092 WP-1", "Windows test VM admin snapshot", "ADR 0092 WP-9 rule 75 text", "ADR 0073 WP-0", "RT-5"]
 
 [[wp]]
 id = "WP-H0"
-days = 1.25 # amendment: 1 to 1.5
+days = 1.75 # amendment: 1.5 to 2
 state = "not-started"
+
+[[wp]]
+id = "WP-H1a"
+days = 3 # amendment: 2.5 to 3.5
+state = "not-started"
+provides = ["paddock_ipc::elevated", "verified elevated pipe"]
 
 [[wp]]
 id = "WP-H1"
 days = 3.5 # amendment: 3 to 4
 state = "not-started"
-provides = ["debrief-admin", "verified elevated pipe"]
+provides = ["debrief-admin"]
 
 [[wp]]
 id = "WP-H2"
-days = 3.75 # amendment: 3 to 4.5
+days = 4.25 # amendment: 3.5 to 5
+state = "not-started"
+
+[[wp]]
+id = "WP-H2b"
+days = 1.25 # amendment: 1 to 1.5
 state = "not-started"
 
 [[wp]]
 id = "WP-H3"
-days = 2.5 # amendment: 2 to 3
+days = 3.5 # amendment: 3 to 4
 state = "not-started"
 
 [[wp]]
 id = "WP-H4"
-days = 1.75 # amendment: 1.5 to 2
+days = 2.25 # amendment: 2 to 2.5
 state = "not-started"
 
 [[wp]]
 id = "WP-H6"
-days = 1.75 # amendment: 1.5 to 2
+days = 2.25 # amendment: 2 to 2.5
 state = "not-started"
+
+[[wp]]
+id = "WP-H8"
+days = 1.25 # amendment: 1 to 1.5
+state = "not-started"
+provides = ["rule-75 elevated entry-point scan"]
 
 [[wp]]
 id = "WP-H7"
