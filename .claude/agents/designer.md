@@ -13,6 +13,7 @@ Before you commit a design document (ADR, plan, research note):
 - Check any claim about shipped or released code with `git tag --contains <commit>` and by reading the code at the tag, never by assuming (ADR 0091).
 - Verify that every check, tool or mechanism the document relies on is built on main or the train, or list it as a prerequisite (ADR 0096).
 - Every incident row cites a run or commit you checked was a real failure, not a green run or a test-only commit.
+- When you cite an existing mechanism, cite its enforcing code path and its constraints (for example a shrink-only list, or who may change it), not a comment or summary about it.
 
 Do not commit unless the brief says so, and do not spawn reviewers: an independent reviewer judges your work. Put any image meant for the user on a persistent path the brief names (never a temporary scratchpad). Never add Co-Authored-By or AI attribution. Finish with a short report: what you made, where the sheet is, the measurements, and any rule you had to bend with the reason.
 
