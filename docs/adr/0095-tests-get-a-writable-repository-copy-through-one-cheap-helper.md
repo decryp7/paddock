@@ -7,6 +7,7 @@
   revision 2; revision 3 folds in its P2s (see "Review answers"). Amends ADR 0078
   (`docs/adr/amendments/0078-2026-11-10.md`, accepted with it). Nothing here is built yet. ER-23 does not apply (no
   drawings).
+- Trimmed 2026-11-11 (user, comparable-practice review): TRIM: keep a `RepoCopy` helper inside the existing testkit (no new crate), the once-cache, migrating `golden.rs` and the tree tests, WP-0 cut to 0.25 day; dropped the new crate, `./dev check whole-tree` (WP-4) and the 0078 `.cache` exemption work.
 - Date: 2026-11-10
 - Related: ER-12, ER-14, ER-20 / rule 51, ER-21 / rule 40, ER-22 / rules 42 and 55, ER-27, ER-33 / rule 71; ADR 0025
   (kept clones), ADR 0071 §6 (nextest setup scripts not used), ADR 0078 (accepted: `paddock_testkit::scratch`, one run

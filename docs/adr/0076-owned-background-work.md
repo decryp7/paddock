@@ -8,6 +8,7 @@
   revision 3 applies its P2s (per-binding handle tracking with shadowing, two more discards, `run_bounded`'s drain and
   waiter threads kept in the ratchet with their ending test, children ended inline when the reaper cannot start, the
   self-join example, `Subscriptions` and the Debrief waiver's `ctx.peer()` uses, the latch wording).
+- Trimmed 2026-11-11 (user, comparable-practice review): TRIM: keep WP-X0 (crash fix), WP-0's `leak-timeout` part only (set to fail), a small `TaskGroup` from WP-1, Debrief incident 2 and start-up sweeps from WP-7, Pitwall's `shutdown_timeout` and tokio groups (WP-6, X5), WP-4's `Peer` split only if a kept item needs it; dropped C42 and its register (WP-2, X2), the testkit leak `Guard` (WP-3), `./dev burn` and `./dev leftovers` (WP-9), the generic exit framework (X1), the Dyno, Pitcrew and Spotter site sweeps.
 - Rule: **rule 74**, assigned on acceptance (2026-11-09). `docs/rules.md` on `origin/main` ends at rule 71; the open
   rule branches use 56–59, 65 and 66; family ADR 0057's branch claims 72 and ADR 0073 took 73 (`a467cdd2e`); ADRs 0071,
   0072, 0074 and 0075, accepted the same day, assign none. WP-10 adds the text (D9) to `docs/rules.md`.

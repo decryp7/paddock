@@ -9,6 +9,7 @@
   class, about 23 fixes in six days. Revision 2 answers the independent review of revision 1 (`3ba5a4a16`, CHANGES,
   4 P1s and 8 P2s; "Review answers (revision 2)" at the end). Nothing here is built yet. ER-23 does not apply (no
   drawings).
+- Trimmed 2026-11-11 (user, comparable-practice review): TRIM beyond WP-1 and the Pitwall minimum: keep WP-0, WP-1 (built), WP-4 (shared adopters), WP-6 Dyno data root, WP-7 (Debrief elevated bootstrap and Pitcrew socket folder; the W-rows that block Pitcrew 1.1 stay, the user decided Pitcrew's SYSTEM-service fix is in Pitcrew 1.1), WP-8, WP-9 and the Clippy `disallowed-methods` entries of WP-3; dropped C106 and its register (rest of WP-3), WP-2 (extended ACLs), WP-10, Dyno's other adopters.
 - Date: 2026-11-10
 - Related: ER-21 / rule 40; rule 53 (reusable OS names) and ADR 0033 (identity by handle); rule 55 and ADR 0034/0075
   (copies register); ADR 0073 (no test doubles in a shipped build: the `test-support` feature); ADR 0077 (tests never
