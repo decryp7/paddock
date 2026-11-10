@@ -150,7 +150,7 @@ describe('guard rails', () => {
 // P1 of the 2026-11-08 review: only the test VM can ever be the target. A fake VM is allowed only with a fake Fusion AND a
 // folder under $TMPDIR; every other folder is refused before vmrun, ssh, scp or any file write.
 describe('only paddock-win11-test can be the target', () => {
-  const commands = [['status'], ['start', '--no-wait'], ['stop'], ['ssh', 'exit 0'], ['put', 'paddock-test', '/etc/hosts', 'C:\\x'], ['gui-setup'],
+  const commands = [['status'], ['start', '--no-wait'], ['stop'], ['ssh', 'exit 0'], ['put', 'paddock-test', '/etc/hosts', 'C:\\x'], ['gui-setup'], ['admin-setup'],
     ['snapshot', 'x'], ['revert', 'x'], ['ip'], ['install'], ['baseline']];
 
   test('another VM folder outside $TMPDIR is refused by every command, even with a fake Fusion, before any call', () => {
@@ -300,6 +300,47 @@ describe('vmrun password', () => {
     const calls = readFileSync(log, 'utf8');
     assert.match(calls, /^-T fusion snapshot \S+paddock-win11-test\.vmx probe$/m);
     assert.doesNotMatch(calls, /-vp|security/);
+  });
+});
+
+describe('revert chooses the snapshot', () => {
+  const setup = (label) => {
+    const dir = fakeVm(join(scratch, label));
+    const fusion = join(scratch, `${label}Fusion.app`);
+    const log = join(scratch, `${label}-vmrun.log`);
+    mkdirSync(join(dir, 'vm/paddock-win11-test.vmwarevm'), { recursive: true });
+    writeFileSync(join(dir, 'vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx'), '.encoding = "UTF-8"\nguestOS = "arm-windows11-64"\n');
+    mkdirSync(join(fusion, 'Contents/Library'), { recursive: true });
+    writeFileSync(join(fusion, 'Contents/Library/vmrun'), `#!/bin/sh\necho "$*" >> '${log}'\nfor a in "$@"; do [ "$a" = listSnapshots ] && printf 'Total snapshots: 2\\nclean-baseline\\nadmin-baseline\\n'; done\nexit 0\n`);
+    chmodSync(join(fusion, 'Contents/Library/vmrun'), 0o755);
+    const revert = (args, env = {}) => run('vm-win.sh', ['revert', ...args], { PADDOCK_WIN_VM_DIR: dir, FUSION_APP: fusion, PADDOCK_VM_SNAPSHOT: '', ...env });
+    return { revert, reverted: () => [...calls(log).matchAll(/revertToSnapshot \S+ (\S+)$/gm)].map((m) => m[1]) };
+  };
+
+  test('the default stays clean-baseline', macOnly, () => {
+    const t = setup('rv-default');
+    assert.equal(t.revert([]).status, 0);
+    assert.deepEqual(t.reverted(), ['clean-baseline']);
+  });
+
+  test('--snapshot <name> and the PADDOCK_VM_SNAPSHOT variable choose another one; the flag wins over the variable', macOnly, () => {
+    const t = setup('rv-choose');
+    assert.equal(t.revert(['--snapshot', 'admin-baseline']).status, 0);
+    assert.equal(t.revert([], { PADDOCK_VM_SNAPSHOT: 'admin-baseline' }).status, 0);
+    assert.equal(t.revert(['--snapshot', 'clean-baseline'], { PADDOCK_VM_SNAPSHOT: 'admin-baseline' }).status, 0);
+    assert.equal(t.revert(['admin-baseline']).status, 0);
+    assert.deepEqual(t.reverted(), ['admin-baseline', 'admin-baseline', 'clean-baseline', 'admin-baseline']);
+  });
+
+  test('--snapshot without a name, or an unknown snapshot, fails before any revert', macOnly, () => {
+    const t = setup('rv-bad');
+    const a = t.revert(['--snapshot']);
+    assert.notEqual(a.status, 0);
+    assert.match(a.stderr, /usage: vm-win\.sh revert --snapshot <name>/);
+    const b = t.revert(['--snapshot', 'no-such']);
+    assert.notEqual(b.status, 0);
+    assert.match(b.stderr, /no snapshot named no-such/);
+    assert.deepEqual(t.reverted(), []);
   });
 });
 

@@ -9,7 +9,10 @@
 #   scripts/vm-win.sh gui-setup               one-time: auto-logon of paddock-test + the in-session job runner, snapshot gui-baseline
 #   scripts/vm-win.sh job <file.ps1> [secs]   run a script ON the desktop of paddock-test (UI Automation works), print its output; exit = its code
 #   scripts/vm-win.sh snapshot <name>         take a snapshot
-#   scripts/vm-win.sh revert [name]           revert to a snapshot (default clean-baseline); the VM is then off
+#   scripts/vm-win.sh revert [name]           revert to a snapshot (default clean-baseline, or $PADDOCK_VM_SNAPSHOT); the VM is then off
+#   scripts/vm-win.sh revert --snapshot <name>   the same, named with a flag (--snapshot wins over the variable)
+#   scripts/vm-win.sh admin-setup             one-time: from clean-baseline, paddock-test joins Administrators, UAC consent on the normal
+#                                             desktop (+ auto-logon and job runner as gui-setup), snapshot admin-baseline; reverts at the end
 #   scripts/vm-win.sh status | ip             running or stopped / the guest's address
 #   scripts/vm-win.sh install                 one-time: install Windows headless, wait for setup to power off
 #   scripts/vm-win.sh baseline                one-time: check setup finished, detach the discs, take clean-baseline
@@ -34,7 +37,7 @@ install_deadline=${PADDOCK_VM_INSTALL_DEADLINE:-7200}
 baseline=clean-baseline
 
 die() { echo "vm-win: $*" >&2; exit 1; }
-usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; }
 
 guard() {
   case "$dir/" in "$HOME"/*) die "PADDOCK_WIN_VM_DIR must not be under \$HOME (ER-14): $dir" ;; esac
@@ -116,7 +119,7 @@ cmd=${1:-}
 [ $# -gt 0 ] && shift
 # One user of the test VM at a time (interim lock, scripts/vm-lock.sh): only the commands that change or load the guest.
 case $cmd in
-  start | stop | ssh | put | get | gui-setup | job | snapshot | revert | install | baseline)
+  start | stop | ssh | put | get | gui-setup | admin-setup | job | snapshot | revert | install | baseline)
     . "$(cd "$(dirname "$0")" && pwd)/vm-lock.sh"; vm_lock_acquire "vm-win-$cmd" ;;
 esac
 case $cmd in
@@ -128,7 +131,7 @@ case $cmd in
   stop)
     guard
     running || { echo "already stopped"; exit 0; }
-    (ssh_to paddock-admin 'shutdown /s /t 0') >/dev/null 2>&1 || true
+    (ssh_to paddock-admin 'shutdown /s /t 0') >/dev/null 2>&1 & # in the background: the session can hang while Windows shuts down (seen 2026-11-11, 13 min)
     wait_off 120 "shutting down" || { echo "  no clean shutdown in 120 s; powering off"; vmrun stop hard; }
     echo "stopped"
     ;;
@@ -164,6 +167,37 @@ case $cmd in
     vmrun snapshot gui-baseline
     echo "snapshot gui-baseline taken (clean-baseline + auto-logon + job runner); use: vm-win.sh revert gui-baseline"
     ;;
+  admin-setup)
+    guard
+    here=$(cd "$(dirname "$0")" && pwd)
+    admin_snap=admin-baseline
+    running && die "the VM is running; stop it first (admin-setup starts from $baseline)"
+    has_snapshot "$baseline" || die "no snapshot named $baseline"
+    pw=$(sed -n 's/^paddock-test=//p' "$dir/keys/setup-passwords")
+    [ -n "$pw" ] || die "no paddock-test password in $dir/keys/setup-passwords"
+    load_ok
+    # Whatever fails, the VM ends stopped and reverted to clean-baseline (no EXIT trap: the lock owns it).
+    admin_fail() {
+      echo "::error::admin-setup failed at: $1; stopping the VM and reverting to $baseline (nothing was changed in $baseline; read the output above)" >&2
+      vmrun stop hard >/dev/null 2>&1 || true
+      vmrun revertToSnapshot "$baseline" >/dev/null 2>&1 || true
+      exit 1
+    }
+    vmrun revertToSnapshot "$baseline" || admin_fail "revert to $baseline"
+    vmrun start nogui || admin_fail "start"
+    (wait_ssh) || admin_fail "wait for SSH"
+    (scp_via paddock-admin "$here/vm-win/logon-runner.ps1" "@HOST@:C:/paddock-test/logon-runner.ps1") || admin_fail "copy logon-runner.ps1"
+    (scp_via paddock-admin "$here/vm-win/gui-setup.ps1" "@HOST@:C:/paddock-test/gui-setup.ps1") || admin_fail "copy gui-setup.ps1"
+    (scp_via paddock-admin "$here/vm-win/admin-setup.ps1" "@HOST@:C:/paddock-test/admin-setup.ps1") || admin_fail "copy admin-setup.ps1"
+    (ssh_to paddock-admin "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\paddock-test\\gui-setup.ps1 -TestPassword '$pw' -RunnerSource C:\\paddock-test\\logon-runner.ps1") || admin_fail "gui-setup.ps1"
+    (ssh_to paddock-admin "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\paddock-test\\admin-setup.ps1") || admin_fail "admin-setup.ps1"
+    (ssh_to paddock-admin 'Remove-Item C:\paddock-test\gui-setup.ps1, C:\paddock-test\admin-setup.ps1 -Force; shutdown /s /t 0') >/dev/null 2>&1 &
+    wait_off 180 "shutting down" || vmrun stop hard || admin_fail "power off"
+    has_snapshot "$admin_snap" && { vmrun deleteSnapshot "$admin_snap" || admin_fail "delete the old $admin_snap"; }
+    vmrun snapshot "$admin_snap" || admin_fail "snapshot $admin_snap"
+    vmrun revertToSnapshot "$baseline" || admin_fail "final revert to $baseline"
+    echo "snapshot $admin_snap taken (clean-baseline + paddock-test in Administrators + UAC consent on the normal desktop + auto-logon and job runner); reverted to $baseline; use: vm-win.sh revert --snapshot $admin_snap"
+    ;;
   job)
     guard
     [ -f "${1:-}" ] || die "usage: vm-win.sh job <file.ps1> [timeout secs]"
@@ -194,7 +228,8 @@ case $cmd in
     ;;
   revert)
     guard
-    snap=${1:-$baseline}
+    snap=${PADDOCK_VM_SNAPSHOT:-$baseline}
+    if [ "${1:-}" = "--snapshot" ]; then snap=${2:-}; [ -n "$snap" ] || die "usage: vm-win.sh revert --snapshot <name>"; elif [ -n "${1:-}" ]; then snap=$1; fi
     has_snapshot "$snap" || die "no snapshot named $snap"
     vmrun revertToSnapshot "$snap"
     echo "reverted to $snap"
