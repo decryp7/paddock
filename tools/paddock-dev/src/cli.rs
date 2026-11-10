@@ -1,4 +1,4 @@
-use crate::{gates, input_hash, ipc_endpoints, plan, plan_cmd, slots, wait};
+use crate::{gates, input_hash, ipc_endpoints, merge_check, plan, plan_cmd, slots, wait};
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
 use std::io::Write;
@@ -44,6 +44,11 @@ enum Command {
     /// scripts/affected.mjs; the arguments are its: <base> [<head>], --files a,b, --all, --ci [--app x], --commit-range, --commit-flags, --explain).
     /// It prints no JSON object: `--json` is refused.
     Plan(PlanArgs),
+    /// Merge checks.
+    Merge {
+        #[command(subcommand)]
+        command: MergeCommand,
+    },
     /// The project graph.
     Graph {
         #[command(subcommand)]
@@ -63,6 +68,29 @@ enum CheckCommand {
         #[arg(long)]
         root: Option<PathBuf>,
     },
+}
+
+#[derive(Subcommand)]
+enum MergeCommand {
+    /// Did a merge silently drop one side's work? Flags files that go backwards against the first parent, hunks a parent added
+    /// that the result lacks (reason: `Hunks-dropped: <path>: <reason>` in the merge message) and tests a parent has that the
+    /// result lacks (`Tests-removed: <name>: <reason>`). Exit 5 on findings; a check that could not look is an error, never a pass.
+    Check(MergeCheckArgs),
+}
+
+#[derive(Args)]
+struct MergeCheckArgs {
+    /// The repository root (default: the folder containing .git, found from the current folder).
+    #[arg(long)]
+    root: Option<PathBuf>,
+    /// A branch about to be merged (before the merge exists); needs --target.
+    #[arg(long, requires = "target", conflicts_with = "commit")]
+    branch: Option<String>,
+    /// The branch it would be merged into.
+    #[arg(long, requires = "branch")]
+    target: Option<String>,
+    /// The merge commit to check.
+    commit: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -260,6 +288,14 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Check {
             command: CheckCommand::IpcEndpoints { tag, root },
         } => ipc_endpoints::command(root, tag),
+        Command::Merge {
+            command: MergeCommand::Check(a),
+        } => merge_check::command(&merge_check::Request {
+            root: a.root,
+            commit: a.commit,
+            branch: a.branch,
+            target: a.target,
+        }),
         Command::Plan(a) => plan_cmd::command(&a.args, a.root),
         Command::Graph {
             command: GraphCommand::Affected(a),
