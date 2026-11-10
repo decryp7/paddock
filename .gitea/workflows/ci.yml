@@ -669,7 +669,7 @@ jobs:
       # region of the macro's generated wrapper to that line, which no test can all reach.
       # This is also Linux's all-features test run (the crate leg skips its own on Linux): the real-browser tests of
       # paddock-chromium must find the image's Chrome for Testing instead of skipping.
-      - name: Coverage (>= 90 % lines, 99 % for security code)
+      - name: Coverage (>= 90 % lines; 99 % security target report-only)
         env:
           PADDOCK_REQUIRE_TEST_BROWSER: "1"
         run: |

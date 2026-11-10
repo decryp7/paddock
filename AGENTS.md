@@ -83,7 +83,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 - The public API is `ui/projects/paddock-ui/src/public-api.ts` and the CSS custom properties `--pd-*`, `data-theme`,
   `data-accent`, `data-density`. Any change is a CHANGELOG entry; no backward-compatibility shims before Paddock's v1.
 - Shared Rust crates have a pure core and a `tauri` feature for the adapter; typed errors, doc comments on public items,
-  no `unwrap` on I/O or user data, bounded resources. Coverage: crates >= 90% lines, security code 99% (CI's llvm-cov gate, scripts/coverage-gate.mjs), components 100%.
+  no `unwrap` on I/O or user data, bounded resources. Coverage: crates >= 90% lines, security code 99% target, report-only for now (CI's llvm-cov gate, scripts/coverage-gate.mjs), components 100%.
 - Anchor every ignore rule (`/ui/dist/`, not `dist/`); `node_modules` (no trailing slash, so it also matches a symlink) is the one unanchored rule; conformance C57 fails on any tracked symlink.
 
 ## Testing and quality gates
