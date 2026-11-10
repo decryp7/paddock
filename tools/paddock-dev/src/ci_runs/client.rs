@@ -180,20 +180,26 @@ impl<'a> Client<'a> {
         })
     }
 
-    /// The jobs of a run's last attempt with their times: up to four pages of 50, as the timings read them.
-    pub fn timed_jobs(&mut self, run: u64) -> Result<Vec<TimedJob>, String> {
+    /// The jobs of a run's last attempt with their times (up to four pages of 50); `None` when the server has no job list (404).
+    pub fn timed_jobs(&mut self, run: u64) -> Result<Option<Vec<TimedJob>>, String> {
         self.attempt_jobs(run, None)
     }
 
-    /// The jobs of one earlier attempt of a run (`None`: the last attempt, which `/jobs` lists).
-    pub fn attempt_jobs(&mut self, run: u64, attempt: Option<u64>) -> Result<Vec<TimedJob>, String> {
+    /// The jobs of one earlier attempt of a run (`None`: the last attempt, which `/jobs` lists). `Ok(None)` is a 404 on the
+    /// first page: the server has no such list, which is not the same as a run with no jobs.
+    pub fn attempt_jobs(&mut self, run: u64, attempt: Option<u64>) -> Result<Option<Vec<TimedJob>>, String> {
         let mut jobs = Vec::new();
         for page in 1..=4 {
             let url = match attempt {
                 None => format!("{}/runs/{run}/jobs?limit=50&page={page}", self.api()),
                 Some(n) => format!("{}/runs/{run}/attempts/{n}/jobs?limit=50&page={page}", self.api()),
             };
-            let body = self.retry(|c| c.http.get_json(&url, &c.token))?.unwrap_or(Value::Null);
+            let Some(body) = self.retry(|c| c.http.get_json(&url, &c.token))? else {
+                if page == 1 {
+                    return Ok(None);
+                }
+                break;
+            };
             let batch: Vec<TimedJob> = body["jobs"]
                 .as_array()
                 .map(|a| a.iter().map(TimedJob::from_json).collect())
@@ -204,7 +210,7 @@ impl<'a> Client<'a> {
                 break;
             }
         }
-        Ok(jobs)
+        Ok(Some(jobs))
     }
 
     /// A job's log (read through the planner's reader); `Ok(None)` when the server has none (404).

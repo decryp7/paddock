@@ -47,6 +47,11 @@ impl Fake {
         self.json.insert(url.to_string(), body);
     }
 
+    /// Forget the reply for `url` (it becomes a 404).
+    pub fn remove_json(&mut self, url: &str) {
+        self.json.remove(url);
+    }
+
     /// Answer the log of `job` with `text`.
     pub fn log(&mut self, job: u64, text: &str) {
         self.logs.insert(job, Ok(text.to_string()));

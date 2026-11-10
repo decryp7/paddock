@@ -23,6 +23,9 @@ use client::Client;
 use paddock_cli::{CliError, Exit, Report};
 use std::path::PathBuf;
 
+/// Reads a file of the repository for the settings preconditions.
+type Reader = Box<dyn Fn(&str) -> std::io::Result<String>>;
+
 const SERVER: &str = "https://dev.decryptology.net";
 
 /// Arguments of `ci flakes`.
@@ -94,6 +97,18 @@ fn find_root(start: &std::path::Path) -> Option<PathBuf> {
     start.ancestors().find(|d| d.join(".git").exists()).map(PathBuf::from)
 }
 
+/// The exit code of a report: an incomplete measurement is a failure (1, until ADR 0089 gives it its own code), flakes found
+/// are findings (5) only when asked for with `--fail-on-flakes`, anything else is 0.
+pub fn exit_of(report: &flakes::Report, fail_on_flakes: bool) -> Exit {
+    if !report.complete() {
+        Exit::Failure
+    } else if fail_on_flakes && !report.rows.is_empty() {
+        Exit::Findings
+    } else {
+        Exit::Ok
+    }
+}
+
 /// `ci flakes`.
 pub fn flakes(a: &FlakesArgs) -> Result<Report, CliError> {
     let token = token()?;
@@ -102,11 +117,40 @@ pub fn flakes(a: &FlakesArgs) -> Result<Report, CliError> {
         Some(u) => flakes::Until::parse(u).map_err(CliError::usage)?,
     };
     let root = a.root.clone().or_else(|| std::env::current_dir().ok().and_then(|d| find_root(&d)));
-    let read = |p: &str| match &root {
-        Some(r) => std::fs::read_to_string(r.join(p)),
-        None => Err(std::io::Error::other("no repository checkout was found (use --root)")),
+    // The settings that decide whether flakes are visible are read at the end of the window: from the checkout, or, with
+    // `--until <sha>`, from that commit.
+    let (read, config_source): (Reader, String) = match (&root, &until) {
+        (Some(r), flakes::Until::Commit(c)) => {
+            let (r2, c2) = (r.clone(), c.clone());
+            (
+                Box::new(
+                    move |p: &str| match crate::plan_repo::git_text(&r2, &["show", &format!("{c2}:{p}")]) {
+                        Some(t) => Ok(t),
+                        None => Err(std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            format!("{p} is not in commit {c2} (or the commit is not in this clone)"),
+                        )),
+                    },
+                ),
+                format!("commit {c}"),
+            )
+        }
+        (Some(r), _) => {
+            let r2 = r.clone();
+            (
+                Box::new(move |p: &str| std::fs::read_to_string(r2.join(p))),
+                format!("the working tree at {}", r.display()),
+            )
+        }
+        (None, _) => (
+            Box::new(|_: &str| Err(std::io::Error::other("no repository checkout was found (use --root)"))),
+            "no checkout".into(),
+        ),
     };
-    let preconditions: Vec<String> = preconditions::playwright(&a.app, &read).into_iter().collect();
+    let preconditions: Vec<String> = preconditions::playwright(&a.app, read.as_ref())
+        .into_iter()
+        .chain(preconditions::nextest(&a.app, read.as_ref()))
+        .collect();
     let mut http = CurlHttp;
     let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
     let req = flakes::Request {
@@ -116,20 +160,17 @@ pub fn flakes(a: &FlakesArgs) -> Result<Report, CliError> {
         repo: a.repo.clone(),
         now_secs: time::now_secs(),
         preconditions,
+        config_source,
     };
     let report = flakes::collect(&mut client, &req, &mut |l| eprintln!("{l}")).map_err(|e| {
         CliError::failure(format!("the runs of {} could not be listed: {e}", a.repo))
             .with_hint("Check the network, that GITEA_TOKEN can read the repository, and --until.")
     })?;
-    let exit = if !report.complete() {
+    let exit = exit_of(&report, a.fail_on_flakes);
+    if !report.complete() {
         // A script must not read an incomplete measurement as "no flakes" (ER-33); the annotation goes to the job log.
         eprintln!("::error::{}", report.error_line());
-        Exit::Failure
-    } else if a.fail_on_flakes && !report.rows.is_empty() {
-        Exit::Findings
-    } else {
-        Exit::Ok
-    };
+    }
     Ok(Report::new(report.json(), report.text()).with_exit(exit))
 }
 

@@ -112,6 +112,8 @@ pub struct Request {
     pub now_secs: i64,
     /// Gaps in what the runs can show at all, found before the runs are read (for example a Playwright setting).
     pub preconditions: Vec<String>,
+    /// Where the app's settings (Playwright, nextest) were read from, for the report (`the working tree`, `commit abc1234`).
+    pub config_source: String,
 }
 
 /// The report of a window.
@@ -137,6 +139,10 @@ pub struct Report {
     pub non_test_failures: usize,
     /// Failed jobs that never ran a step (no runner took them): excluded, nothing to read.
     pub never_ran: usize,
+    /// Cancelled runs of the app's own workflows, whose jobs are not read.
+    pub cancelled_not_read: usize,
+    /// Where the app's settings were read from.
+    pub config_source: String,
     /// What could not be measured, job by job.
     pub not_measured: Vec<NotMeasured>,
     /// What could not be measured about the window as a whole (a setting, the run list).
@@ -181,11 +187,11 @@ impl Report {
                 self.non_test_failures
             ));
         }
-        if self.never_ran > 0 {
-            l.push(format!(
-                "{} failed job(s) never ran a step (no runner took them) and are excluded",
-                self.never_ran
-            ));
+        if self.cancelled_not_read > 0 {
+            l.push(format!("{} cancelled run(s) not read", self.cancelled_not_read));
+        }
+        if !self.config_source.is_empty() {
+            l.push(format!("settings read from {}", self.config_source));
         }
         if self.runs == 0 {
             l.push("NOT MEASURED: no finished run of this app in the window, so this says nothing about flakes".into());
@@ -219,7 +225,8 @@ impl Report {
             ));
         }
         format!(
-            "ci flakes {}: not measured: {}. Next step: fix the cause or widen --days, then run it again; an incomplete list is not evidence of no flakes.",
+            "ci flakes {}: not measured: {}. Next step: fix the cause or widen --days, then run it again; \
+             an incomplete list is not evidence of no flakes.",
             self.app,
             causes.join("; ")
         )
@@ -245,6 +252,8 @@ impl Report {
             })).collect::<Vec<_>>(),
             "nonTestFailures": self.non_test_failures,
             "neverRan": self.never_ran,
+            "cancelledNotRead": self.cancelled_not_read,
+            "configSource": self.config_source,
             "notMeasured": self.not_measured.iter().map(|n| json!({"run": n.run, "job": n.job, "why": n.why})).collect::<Vec<_>>(),
             "gaps": self.gaps,
         })
@@ -359,13 +368,21 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
         rows: Vec::new(),
         non_test_failures: 0,
         never_ran: 0,
+        cancelled_not_read: 0,
+        config_source: req.config_source.clone(),
         not_measured: Vec::new(),
         gaps: req.preconditions.clone(),
     };
     report.gaps.extend(w.gap);
     let mut seen: Seen = BTreeMap::new();
-    let mut later_jobs: HashMap<u64, Result<Vec<TimedJob>, String>> = HashMap::new();
+    let mut later_jobs: HashMap<u64, Result<Option<Vec<TimedJob>>, String>> = HashMap::new();
     log(&format!("{} runs listed, {} finished", w.runs.len(), finished.len()));
+    report.cancelled_not_read = w
+        .runs
+        .iter()
+        .filter(|r| r.finished() && r.conclusion == "cancelled" && own_workflow(app, r.workflow()))
+        .count();
+    let mut never_ran_runs: BTreeSet<u64> = BTreeSet::new();
     for run in finished {
         let own = own_workflow(app, run.workflow());
         let last = run.run_attempt;
@@ -377,7 +394,16 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
         let mut unread = false;
         for n in 1..=last {
             match client.attempt_jobs(run.id, (n < last).then_some(n)) {
-                Ok(jobs) => attempts.push(jobs.into_iter().filter(|j| own || app_job(app, &j.name)).collect()),
+                Ok(Some(jobs)) => attempts.push(jobs.into_iter().filter(|j| own || app_job(app, &j.name)).collect()),
+                Ok(None) => {
+                    unread = true;
+                    attempts.push(Vec::new());
+                    report.not_measured.push(NotMeasured {
+                        run: run.id,
+                        job: format!("(the job list of attempt {n})"),
+                        why: "the server has no job list for it (404)".into(),
+                    });
+                }
                 Err(e) => {
                     unread = true;
                     attempts.push(Vec::new());
@@ -397,6 +423,7 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
             for job in mine.iter().filter(|j| j.failed()) {
                 if job.never_ran() {
                     report.never_ran += 1;
+                    never_ran_runs.insert(run.id);
                     continue;
                 }
                 let label = format!("{} \"{}\"", job.id, job.name);
@@ -475,6 +502,13 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
             }
         }
     }
+    if report.never_ran > 0 {
+        report.gaps.push(format!(
+            "{} failed job(s) never ran a step ({}), so what they would have shown is not measured",
+            report.never_ran,
+            never_ran_runs.iter().map(|r| format!("run {r}")).collect::<Vec<_>>().join(", ")
+        ));
+    }
     let runs = report.runs;
     let newest = |m: &BTreeMap<u64, String>| {
         m.values()
@@ -505,7 +539,7 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
 fn rerun_passed(
     client: &mut Client,
     passed: &BTreeMap<(&str, &str), Vec<u64>>,
-    cache: &mut HashMap<u64, Result<Vec<TimedJob>, String>>,
+    cache: &mut HashMap<u64, Result<Option<Vec<TimedJob>>, String>>,
     run: &RunInfo,
     job: &str,
     not_measured: &mut Vec<NotMeasured>,
@@ -516,8 +550,13 @@ fn rerun_passed(
     for id in ids.iter().filter(|id| **id > run.id) {
         let jobs = cache.entry(*id).or_insert_with(|| client.attempt_jobs(*id, None));
         match jobs {
-            Ok(jobs) if jobs.iter().any(|j| j.name == job && j.conclusion == "success") => return true,
-            Ok(_) => {}
+            Ok(Some(jobs)) if jobs.iter().any(|j| j.name == job && j.conclusion == "success") => return true,
+            Ok(Some(_)) => {}
+            Ok(None) => not_measured.push(NotMeasured {
+                run: run.id,
+                job: format!("\"{job}\""),
+                why: format!("whether run {id} passed it could not be read: the server has no job list for it (404)"),
+            }),
             Err(e) => not_measured.push(NotMeasured {
                 run: run.id,
                 job: format!("\"{job}\""),
@@ -531,7 +570,9 @@ fn rerun_passed(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ci_runs::exit_of;
     use crate::ci_runs::testutil::Fake;
+    use paddock_cli::Exit;
 
     // Real captured output of cargo-nextest 0.9.151 and @playwright/test 1.64.1 (see each file's first line).
     const R1_FAIL: &str = include_str!("../../tests/ci-runs/nextest-r1-fail.log");
@@ -655,6 +696,7 @@ mod tests {
             repo: "decryp7/paddock".into(),
             now_secs: NOW,
             preconditions,
+            config_source: "the working tree".into(),
         }
     }
 
@@ -769,12 +811,88 @@ mod tests {
     }
 
     #[test]
-    fn a_job_that_never_ran_a_step_is_excluded_and_counted_not_unmeasured() {
+    fn a_failed_job_that_never_ran_a_step_is_a_gap_that_makes_the_report_incomplete() {
         let mut f = scenario();
         let r = measure(&mut f);
         assert_eq!(r.never_ran, 1);
         assert!(f.requested().iter().all(|u| !u.contains("/jobs/1112/")), "its log was asked for");
-        assert!(r.text().contains("never ran a step"));
+        assert!(
+            r.gaps.iter().any(|g| g.contains("never ran a step") && g.contains("run 111")),
+            "{:?}",
+            r.gaps
+        );
+        assert!(!r.complete());
+        assert!(r.text().contains("NOT MEASURED: 1 failed job(s) never ran a step"), "{}", r.text());
+    }
+
+    #[test]
+    fn a_missing_job_list_is_not_measured_for_an_own_run_and_for_an_earlier_attempt() {
+        // 404 on the job list of own run 101.
+        let mut f = scenario();
+        f.remove_json(&jobs_url(101));
+        let r = measure(&mut f);
+        let n = r.not_measured.iter().find(|n| n.run == 101).expect("run 101 is not measured");
+        assert!(n.why.contains("no job list"), "{}", n.why);
+        // 404 on attempt 1 of run 112 (the attempt that failed).
+        let mut f = scenario();
+        f.remove_json(&format!("{API}/runs/112/attempts/1/jobs?limit=50&page=1"));
+        let r = measure(&mut f);
+        let n = r.not_measured.iter().find(|n| n.run == 112).expect("run 112 is not measured");
+        assert!(n.why.contains("no job list") && n.job.contains("attempt 1"), "{n:?}");
+        assert!(!r.complete());
+    }
+
+    #[test]
+    fn a_later_attempt_that_did_not_pass_does_not_make_a_failure_failed_then_passed() {
+        let mut f = scenario();
+        f.json(&jobs_url(104), jobs(&[(1041, "test (macos)", "skipped")])); // take run 103's rerun away
+        f.json(&jobs_url(112), jobs(&[(1122, "test (windows)", "failure")])); // attempt 2 failed too
+        f.log(1122, R0_FAIL);
+        let r = measure(&mut f);
+        assert!(
+            !row(&r, ALWAYS).kinds.contains(&Kind::FailedThenPassed),
+            "{:?}",
+            row(&r, ALWAYS).kinds
+        );
+    }
+
+    #[test]
+    fn a_blank_log_is_not_measured() {
+        let mut f = scenario();
+        f.log(1031, "  \n\n");
+        let r = measure(&mut f);
+        let n = r.not_measured.iter().find(|n| n.run == 103).expect("run 103 is not measured");
+        assert!(n.why.contains("no log"), "{}", n.why);
+    }
+
+    #[test]
+    fn cancelled_runs_are_counted_and_said_to_be_unread() {
+        let mut f = scenario();
+        let r = measure(&mut f);
+        assert_eq!(r.cancelled_not_read, 1, "run 108");
+        assert!(r.text().contains("1 cancelled run(s) not read"), "{}", r.text());
+        assert_eq!(r.json()["cancelledNotRead"], 1);
+    }
+
+    #[test]
+    fn the_exit_code_follows_completeness_first_and_findings_only_on_request() {
+        let mut f = scenario();
+        let incomplete = measure(&mut f);
+        assert!(!incomplete.rows.is_empty() && !incomplete.complete());
+        assert_eq!(exit_of(&incomplete, true), Exit::Failure);
+        assert_eq!(exit_of(&incomplete, false), Exit::Failure);
+        let mut complete = incomplete.clone();
+        complete.not_measured.clear();
+        complete.gaps.clear();
+        assert_eq!(exit_of(&complete, true), Exit::Findings);
+        assert_eq!(exit_of(&complete, false), Exit::Ok);
+        complete.rows.clear();
+        assert_eq!(exit_of(&complete, true), Exit::Ok);
+        let line = incomplete.error_line();
+        assert!(
+            line.starts_with("ci flakes dyno: not measured: ") && line.contains("Next step: "),
+            "{line}"
+        );
     }
 
     #[test]
@@ -853,7 +971,12 @@ mod tests {
     #[test]
     fn paging_stops_at_the_first_page_that_reaches_the_window_start() {
         let mut f = Fake::default();
-        let page = |from: u64, created: &str| json!({"total_count": 500, "workflow_runs": (0..50).map(|i| run(from + i, "dyno-release.yml", "success", "s", created)).collect::<Vec<_>>()});
+        let page = |from: u64, created: &str| {
+            let runs: Vec<Value> = (0..50)
+                .map(|i| run(from + i, "dyno-release.yml", "success", "s", created))
+                .collect();
+            json!({"total_count": 500, "workflow_runs": runs})
+        };
         f.json(&format!("{API}/runs?limit=50&page=1"), page(1000, "2026-11-09T10:00:00+08:00"));
         let mut p2 = page(2000, "2026-11-08T10:00:00+08:00");
         p2["workflow_runs"][49]["created_at"] = json!("2026-09-01T10:00:00+08:00");

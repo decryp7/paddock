@@ -53,81 +53,17 @@ impl std::fmt::Display for FailedTest {
     }
 }
 
-static STARTING: LazyLock<Regex> = LazyLock::new(|| re(r"^\s*Starting (\d+) tests? across"));
-static SUMMARY: LazyLock<Regex> = LazyLock::new(|| re(r"^\s*Summary \[[^\]]*\]\s+(\d+) tests? run:(.*)$"));
-static COUNTED_FAILURES: LazyLock<Regex> = LazyLock::new(|| re(r"(\d+) (?:[a-z]+ )?(?:failed|timed out)"));
-static FAILURE: LazyLock<Regex> = LazyLock::new(|| {
-    re(
-        r"^\s*(?:TRY \d+ )?(?:FAIL|TIMEOUT|SIG[A-Z]+|ABORT|LEAK-FAIL|FLAKY(?: \d+/\d+)?)\s+\[[^\]]*\]\s+(?:\(\s*\d+/\d+\)\s+)?(\S+)\s+(\S+)\s*$",
-    )
-});
-static NOT_RUN: LazyLock<Regex> = LazyLock::new(|| re(r"tests? (?:were |was )?not run|Cancelling due to"));
-
-#[derive(Default)]
-struct Block {
-    started: u64,
-    ran: Option<u64>,
-    counted: u64,
-    failures: BTreeSet<FailedTest>,
-}
-
-/// The failing tests of the nextest runs in a job log, or the reason the log cannot prove that they are all of them: a run
-/// that never printed its summary (a crash, a build failure, a cancelled job), a run that did not run every test it started
-/// (fail-fast), fewer failure lines than a summary counts, or no failure at all.
+/// The failing tests of the nextest runs in a job log, or the reason the log cannot prove that they are all of them (the shared
+/// reader, [`crate::nextest_log`]): a run that never printed its summary, one that did not run every test it started, fewer
+/// names than a summary counts, or no failure at all. Flaky tests count: with `flaky-result = "fail"` they fail the step.
 pub fn nextest_failures(log: &str) -> Result<Vec<FailedTest>, String> {
-    let mut blocks: Vec<Block> = Vec::new();
-    for raw in log.lines() {
-        let l = plain(raw);
-        if let Some(m) = STARTING.captures(&l) {
-            if blocks.last().is_some_and(|b| b.ran.is_none()) {
-                return Err("a nextest run ended without its summary (it crashed or was stopped)".into());
-            }
-            blocks.push(Block {
-                started: m[1].parse().unwrap_or(u64::MAX),
-                ..Block::default()
-            });
-            continue;
-        }
-        if NOT_RUN.is_match(&l) {
-            return Err(format!("a nextest run stopped before every test ran ({})", l.trim()));
-        }
-        let Some(block) = blocks.last_mut() else {
-            continue;
-        };
-        if let Some(m) = SUMMARY.captures(&l) {
-            let ran: u64 = m[1].parse().unwrap_or(0);
-            block.ran = Some(ran);
-            block.counted = COUNTED_FAILURES.captures_iter(&m[2]).filter_map(|c| c[1].parse::<u64>().ok()).sum();
-            if ran != block.started {
-                return Err(format!("a nextest run started {} tests but ran {ran}", block.started));
-            }
-            continue;
-        }
-        if let Some(m) = FAILURE.captures(&l) {
-            // The live line and the summary's list name the same test: a set.
-            block.failures.insert(FailedTest {
-                binary: m[1].to_string(),
-                test: m[2].to_string(),
-            });
-        }
-    }
-    if blocks.is_empty() {
-        return Err("no nextest run was found in the log".into());
-    }
-    let mut all: BTreeSet<FailedTest> = BTreeSet::new();
-    for b in &blocks {
-        if b.ran.is_none() {
-            return Err("a nextest run ended without its summary (it crashed or was stopped)".into());
-        }
-        if (b.failures.len() as u64) < b.counted {
-            return Err(format!(
-                "a nextest summary counts {} failures but the log names {}",
-                b.counted,
-                b.failures.len()
-            ));
-        }
-        all.extend(b.failures.iter().cloned());
-    }
+    let n = crate::nextest_log::read(log).map_err(|e| e.to_string())?;
+    let all: BTreeSet<FailedTest> = n
+        .failed
+        .into_iter()
+        .chain(n.flaky)
+        .map(|(binary, test)| FailedTest { binary, test })
+        .collect();
     if all.is_empty() {
         return Err("the step failed but no failing test was found in the log".into());
     }

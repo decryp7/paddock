@@ -1,14 +1,15 @@
-//! What a failed job's log says about flaky and failing tests: nextest (the last status line of each test decides), Playwright
-//! (the `N flaky` and `N failed` lists of its summary) and vitest (the failed spec files, read by `plan_since`).
+//! What a failed job's log says about flaky and failing tests: nextest (the shared reader [`crate::nextest_log`]), Playwright
+//! (the `N flaky`, `N failed` and `N interrupted` lists of its summary) and vitest (the failed spec files, read by `plan_since`).
 //!
-//! The nextest rules come from captured output (cargo-nextest 0.9.151, `tests/ci-runs/nextest-r*-*.log`): with `retries >= 1` a
-//! hard failure prints only `TRY n FAIL` lines (a timeout: `TRY n TMT`; SIG* endings have no captured log) and never a bare `FAIL`; a test that passed on a retry ends with `FLAKY a/b`
-//! (`flaky-result = "pass"`) or `FLKY-FL a/b` (`"fail"`).
+//! A runner that started and did not finish in the log (no nextest summary, no Playwright final count, no vitest `Test Files`
+//! line), or whose own counts the named tests do not meet, makes the log `broken`: the job is not measured, never a clean
+//! non-test failure (ER-33).
 
 use crate::log_text::plain;
+use crate::nextest_log::{self, NextestError};
 use crate::plan_since::vitest_failed_files;
 use regex::Regex;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
 fn re(pattern: &str) -> Regex {
@@ -22,14 +23,12 @@ fn re(pattern: &str) -> Regex {
 pub struct Findings {
     /// Tests the runner marked flaky (nextest `FLAKY`/`FLKY-*`, or a retry that passed; Playwright's flaky list).
     pub flaky: BTreeSet<String>,
-    /// Tests that ended failed (nextest `FAIL`, `TIMEOUT`, `SIG*`, or a last `TRY n FAIL`; Playwright's failed list).
+    /// Tests that ended failed (nextest `FAIL`, `TIMEOUT`, `TMT`, `SIG*`, or a last `TRY n FAIL`; Playwright's failed list).
     pub failed: BTreeSet<String>,
     /// The vitest spec files that failed.
     pub vitest_failed: BTreeSet<String>,
-    /// Whether any test runner's output was seen at all (a log that shows none cannot say "no flakes").
-    pub saw_runner: bool,
-    /// Set when a runner's own summary counts failures or flaky tests that the log does not name: the reader is broken for
-    /// this log, and the job is not measured (ER-33).
+    /// Set when a runner started and did not finish in the log, or counts failures or flaky tests that the log does not name:
+    /// the job is not measured (ER-33).
     pub broken: Option<String>,
 }
 
@@ -40,28 +39,14 @@ impl Findings {
     }
 }
 
-/// The last thing nextest said about a test.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Last {
-    Passed,
-    PassedOnRetry,
-    Flaky,
-    Failed,
-}
-
-static NEXTEST_STARTING: LazyLock<Regex> = LazyLock::new(|| re(r"^\s*Starting \d+ tests? across"));
-static NEXTEST_SUMMARY: LazyLock<Regex> = LazyLock::new(|| re(r"^\s*Summary \[[^\]]*\]\s+\d+ tests? run:(.*)$"));
-static NEXTEST_FAILED_COUNT: LazyLock<Regex> = LazyLock::new(|| re(r"(\d+) (?:[a-z]+ )?(?:failed|timed out)"));
-static NEXTEST_FLAKY_COUNT: LazyLock<Regex> = LazyLock::new(|| re(r"\((\d+) flaky\)"));
-static NEXTEST_LINE: LazyLock<Regex> = LazyLock::new(|| {
-    re(
-        r"^\s*(TRY \d+ )?(PASS|FAIL|TIMEOUT|TMT|SIG[A-Z]+|ABORT|LEAK-FAIL|(?:FLAKY|FLKY)[-A-Z]*)(?: \d+/\d+)?\s+\[[^\]]*\]\s+(?:\([^)]*\)\s+)?(\S+)\s+(\S+)\s*$",
-    )
-});
-static PW_SECTION: LazyLock<Regex> = LazyLock::new(|| re(r"^\s{1,4}(\d+) (flaky|failed)\s*$"));
+static PW_RUNNING: LazyLock<Regex> = LazyLock::new(|| re(r"^\s*Running \d+ tests? using"));
+static PW_SECTION: LazyLock<Regex> = LazyLock::new(|| re(r"^\s{1,4}(\d+) (flaky|failed|interrupted)\s*$"));
 static PW_ITEM: LazyLock<Regex> = LazyLock::new(|| re(r"^\s{2,}(?:\[[^\]]+\] › )?\S+:\d+:\d+ › \S.*$"));
 static PW_PADDING: LazyLock<Regex> = LazyLock::new(|| re(r"\s+─+$"));
-static PW_SUMMARY: LazyLock<Regex> = LazyLock::new(|| re(r"^\s{1,4}\d+ (?:passed|skipped|did not run|interrupted)\b"));
+static PW_FINAL: LazyLock<Regex> = LazyLock::new(|| re(r"^\s{1,4}\d+ (?:passed|skipped|did not run)\b"));
+static VITEST_STARTED: LazyLock<Regex> =
+    LazyLock::new(|| re(r"^\s*RUN\s+v\d|^\s+[✓❯↓×]\s+(?:\S+\s+)?\S+\.(?:spec|test)\.[cm]?[jt]sx?\s+\(\d+ tests?"));
+static VITEST_FILES: LazyLock<Regex> = LazyLock::new(|| re(r"^\s*Test Files\s+(?:(\d+) failed)?"));
 
 /// A Playwright list being read: which list, how many names its header promised, how many were read.
 struct PwList {
@@ -73,69 +58,43 @@ struct PwList {
 /// Reads a job log.
 pub fn read(log: &str) -> Findings {
     let mut f = Findings::default();
-    let mut last: BTreeMap<String, Last> = BTreeMap::new();
-    let mut block: BTreeSet<String> = BTreeSet::new();
+    match nextest_log::read(log) {
+        Ok(n) => {
+            f.failed.extend(n.failed.into_iter().map(|(b, t)| format!("{b} {t}")));
+            f.flaky.extend(n.flaky.into_iter().map(|(b, t)| format!("{b} {t}")));
+        }
+        Err(NextestError::NoRun) => {}
+        Err(NextestError::Partial(why)) => {
+            f.broken.get_or_insert(why);
+        }
+    }
+    read_playwright(log, &mut f);
+    read_vitest(log, &mut f);
+    f
+}
+
+fn read_playwright(log: &str, f: &mut Findings) {
+    let (mut running, mut finished) = (false, false);
     let mut pw: Option<PwList> = None;
-    let broken = |f: &mut Findings, why: String| {
-        f.broken.get_or_insert(why);
+    let close = |f: &mut Findings, pw: &mut Option<PwList>| {
+        if let Some(list) = pw.take().filter(|l| l.seen < l.expected) {
+            let kind = if list.flaky { "flaky" } else { "failed" };
+            f.broken
+                .get_or_insert(format!("Playwright lists {} {kind} but the log names {}", list.expected, list.seen));
+        }
     };
     for raw in log.lines() {
         let l = plain(raw);
-        if NEXTEST_STARTING.is_match(&l) {
-            f.saw_runner = true;
-            block.clear();
+        if PW_RUNNING.is_match(&l) {
+            running = true;
         }
-        if let Some(m) = NEXTEST_LINE.captures(&l) {
-            f.saw_runner = true;
-            let name = format!("{} {}", &m[3], &m[4]);
-            let label = &m[2];
-            let state = if label.starts_with("FLAKY") || label.starts_with("FLKY") {
-                Last::Flaky
-            } else if label == "PASS" {
-                if m.get(1).is_some() { Last::PassedOnRetry } else { Last::Passed }
-            } else {
-                Last::Failed
-            };
-            block.insert(name.clone());
-            last.insert(name, state);
-            continue;
-        }
-        if let Some(m) = NEXTEST_SUMMARY.captures(&l) {
-            f.saw_runner = true;
-            let count = |r: &Regex| r.captures_iter(&m[1]).filter_map(|c| c[1].parse::<usize>().ok()).sum::<usize>();
-            let (failed, flaky) = (count(&NEXTEST_FAILED_COUNT), count(&NEXTEST_FLAKY_COUNT));
-            let named = |want: &[Last]| block.iter().filter(|n| last.get(*n).is_some_and(|s| want.contains(s))).count();
-            // With `flaky-result = "fail"` nextest counts a flaky test among the failed ones.
-            if named(&[Last::Failed, Last::Flaky, Last::PassedOnRetry]) < failed {
-                broken(
-                    &mut f,
-                    format!(
-                        "a nextest summary counts {failed} failed but the log names {}",
-                        named(&[Last::Failed])
-                    ),
-                );
-            }
-            if named(&[Last::Flaky, Last::PassedOnRetry]) < flaky {
-                broken(
-                    &mut f,
-                    format!(
-                        "a nextest summary counts {flaky} flaky but the log names {}",
-                        named(&[Last::Flaky, Last::PassedOnRetry])
-                    ),
-                );
-            }
-            continue;
-        }
-        let close = |f: &mut Findings, pw: &mut Option<PwList>| {
-            if let Some(list) = pw.take().filter(|l| l.seen < l.expected) {
-                let kind = if list.flaky { "flaky" } else { "failed" };
-                f.broken
-                    .get_or_insert(format!("Playwright lists {} {kind} but the log names {}", list.expected, list.seen));
-            }
-        };
         if let Some(m) = PW_SECTION.captures(&l) {
-            f.saw_runner = true;
-            close(&mut f, &mut pw);
+            finished = true;
+            close(f, &mut pw);
+            if &m[2] == "interrupted" {
+                f.broken.get_or_insert(format!("Playwright was interrupted ({} tests)", &m[1]));
+                continue;
+            }
             pw = Some(PwList {
                 flaky: &m[2] == "flaky",
                 expected: m[1].parse().unwrap_or(0),
@@ -143,8 +102,8 @@ pub fn read(log: &str) -> Findings {
             });
             continue;
         }
-        if PW_SUMMARY.is_match(&l) {
-            f.saw_runner = true;
+        if PW_FINAL.is_match(&l) {
+            finished = true;
         }
         if let Some(list) = pw.as_mut() {
             if PW_ITEM.is_match(&l) {
@@ -156,33 +115,41 @@ pub fn read(log: &str) -> Findings {
                     f.failed.insert(name);
                 }
             } else if !l.trim().is_empty() {
-                close(&mut f, &mut pw);
+                close(f, &mut pw);
             }
         }
     }
-    if let Some(list) = pw.take().filter(|l| l.seen < l.expected) {
-        let kind = if list.flaky { "flaky" } else { "failed" };
-        broken(
-            &mut f,
-            format!("Playwright lists {} {kind} but the log names {}", list.expected, list.seen),
-        );
+    close(f, &mut pw);
+    if running && !finished {
+        f.broken
+            .get_or_insert("Playwright started its tests and the log has no final count (it was cut short)".into());
     }
-    for (name, state) in last {
-        match state {
-            Last::Failed => {
-                f.failed.insert(name);
-            }
-            Last::Flaky | Last::PassedOnRetry => {
-                f.flaky.insert(name);
-            }
-            Last::Passed => {}
+}
+
+fn read_vitest(log: &str, f: &mut Findings) {
+    let (mut started, mut files_line) = (false, None::<usize>);
+    for raw in log.lines() {
+        let l = plain(raw);
+        if let Some(m) = VITEST_FILES.captures(&l) {
+            files_line = Some(m.get(1).and_then(|n| n.as_str().parse().ok()).unwrap_or(0));
+        } else if VITEST_STARTED.is_match(&l) {
+            started = true;
         }
     }
     f.vitest_failed = vitest_failed_files(log).into_iter().collect();
-    if !f.vitest_failed.is_empty() || log.lines().any(|l| plain(l).trim_start().starts_with("Test Files ")) {
-        f.saw_runner = true;
+    match files_line {
+        None if started => {
+            f.broken
+                .get_or_insert("vitest started and the log has no `Test Files` line (it was cut short)".into());
+        }
+        Some(n) if n > f.vitest_failed.len() => {
+            f.broken.get_or_insert(format!(
+                "vitest counts {n} failed files but the log names {}",
+                f.vitest_failed.len()
+            ));
+        }
+        _ => {}
     }
-    f
 }
 
 #[cfg(test)]
@@ -259,7 +226,7 @@ mod tests {
             .collect();
         let f = read(&nameless);
         assert!(f.failed.is_empty());
-        assert!(f.broken.as_deref().unwrap_or("").contains("2 failed"), "{:?}", f.broken);
+        assert!(f.broken.as_deref().unwrap_or("").contains("counts 2 failures"), "{:?}", f.broken);
     }
 
     #[test]
@@ -273,7 +240,7 @@ mod tests {
             ])
         );
         assert_eq!(f.failed, set(&["[chromium] › e2e/tray.spec.js:5:3 › tray › always fails"]));
-        assert!(f.saw_runner && f.broken.is_none());
+        assert!(f.broken.is_none());
         let f = read(PW_PLAIN);
         assert_eq!(
             f.flaky,
@@ -302,13 +269,72 @@ mod tests {
             f.vitest_failed,
             set(&["src/app/analysis/outliers-view.spec.ts", "src/app/watched/watched-folders.spec.ts"])
         );
-        assert!(f.saw_runner);
+        assert!(f.broken.is_none(), "{:?}", f.broken);
     }
 
     #[test]
     fn a_log_without_any_test_runner_output_shows_no_runner() {
         let f = read(CLIPPY);
         assert!(!f.any());
-        assert!(!f.saw_runner, "a clippy log is not evidence about tests");
+        assert!(
+            f.broken.is_none(),
+            "a clippy log shows no runner, so there is nothing to be broken: {:?}",
+            f.broken
+        );
+    }
+
+    /// The log up to (not including) the first line that starts with `needle`.
+    fn cut_before(log: &str, needle: &str) -> String {
+        log.lines()
+            .take_while(|l| !plain(l).trim_start().starts_with(needle))
+            .map(|l| format!("{l}\n"))
+            .collect()
+    }
+
+    #[test]
+    fn a_truncated_nextest_log_is_broken_not_a_clean_failure() {
+        for (log, cut) in [
+            (R1_FAIL, "Summary"),
+            (R0_FAIL, "Summary"),
+            (TIMEOUT_R1, "Summary"),
+            (R0_PASS, "FAIL "),
+        ] {
+            let f = read(&cut_before(log, cut));
+            assert!(f.broken.as_deref().is_some_and(|w| w.contains("nextest")), "{f:?}");
+        }
+    }
+
+    #[test]
+    fn a_truncated_playwright_log_is_broken() {
+        for log in [PW_PROJECT, PW_PLAIN] {
+            let f = read(&cut_before(log, "1 failed"));
+            assert!(
+                f.broken
+                    .as_deref()
+                    .is_some_and(|w| w.contains("Playwright") && w.contains("cut short")),
+                "{f:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_playwright_run_that_was_interrupted_is_broken() {
+        // Not captured from a real interrupted run: the `1 failed` header of the real capture is turned into `1 interrupted`.
+        let f = read(&PW_PROJECT.replace("  1 failed", "  1 interrupted"));
+        assert!(f.broken.as_deref().is_some_and(|w| w.contains("interrupted")), "{f:?}");
+    }
+
+    #[test]
+    fn a_truncated_vitest_log_is_broken_and_so_is_a_count_above_the_named_files() {
+        let f = read(&cut_before(VITEST, "Test Files"));
+        assert!(f.broken.as_deref().is_some_and(|w| w.contains("Test Files")), "{f:?}");
+        // The summary says two failed files; cut the section that names them.
+        let unnamed: String = VITEST
+            .lines()
+            .filter(|l| !plain(l).trim_start().starts_with("FAIL "))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        let f = read(&unnamed);
+        assert!(f.broken.as_deref().is_some_and(|w| w.contains("counts 2 failed files")), "{f:?}");
     }
 }

@@ -1,12 +1,49 @@
-2026-11-09T10:00:00.1234567Z Gitea Action Runner (inventedrunner)(version:v5.4.1)
-2026-11-09T10:00:01.1234567Z ::group::Runner Information
-2026-11-09T10:00:02.1234567Z Runner labels: ubuntu-latest
-2026-11-09T10:00:03.1234567Z Task: 1
-2026-11-09T10:00:04.1234567Z Job: app
-2026-11-09T10:00:05.1234567Z Repository: ***/paddock
-2026-11-09T10:00:06.1234567Z ::endgroup::
-2026-11-09T10:00:07.1234567Z     Checking dyno-app v0.1.0 (/workspace/apps/dyno)
-2026-11-09T10:00:08.1234567Z error: this expression creates a reference which is immediately dereferenced
-2026-11-09T10:00:09.1234567Z  --> apps/dyno/src/lib.rs:10:5
-2026-11-09T10:00:10.1234567Z error: could not compile `dyno-app` (lib) due to 1 previous error
-2026-11-09T10:00:11.1234567Z ##[error]Process completed with exit code 101.
+2026-11-10T10:00:00.1234567Z captured with clippy 0.1.99 / rustc 1.99.1 (paddock-ci:v2 image): cargo clippy --all-targets -- -D warnings on a scratch crate with three lints
+2026-11-10T10:00:02.1234567Z clippy 0.1.99 (58cf8f9c35 2026-10-13)
+2026-11-10T10:00:03.1234567Z [1m[92m    Checking[0m clipfail v0.1.0 (/workspace)
+2026-11-10T10:00:04.1234567Z [1m[91merror[0m[1m: writing `&Vec` instead of `&[_]` involves a new object where a slice will do[0m
+2026-11-10T10:00:05.1234567Z  [1m[94m--> [0msrc/lib.rs:1:13
+2026-11-10T10:00:06.1234567Z   [1m[94m|[0m
+2026-11-10T10:00:07.1234567Z [1m[94m1[0m [1m[94m|[0m pub fn f(v: &Vec<u8>) -> usize {
+2026-11-10T10:00:08.1234567Z   [1m[94m|[0m             [1m[91m^^^^^^^^[0m
+2026-11-10T10:00:09.1234567Z   [1m[94m|[0m
+2026-11-10T10:00:10.1234567Z   [1m[94m= [0m[1mhelp[0m: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#ptr_arg
+2026-11-10T10:00:11.1234567Z   [1m[94m= [0m[1mnote[0m: `-D clippy::ptr-arg` implied by `-D warnings`
+2026-11-10T10:00:12.1234567Z   [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[allow(clippy::ptr_arg)]`
+2026-11-10T10:00:13.1234567Z [1m[96mhelp[0m: change this to
+2026-11-10T10:00:14.1234567Z   [1m[94m|[0m
+2026-11-10T10:00:15.1234567Z [1m[94m1[0m [91m- [0mpub fn f(v: [91m&Vec<u8>[0m) -> usize {
+2026-11-10T10:00:16.1234567Z [1m[94m1[0m [92m+ [0mpub fn f(v: [92m&[u8][0m) -> usize {
+2026-11-10T10:00:17.1234567Z   [1m[94m|[0m
+2026-11-10T10:00:18.1234567Z 
+2026-11-10T10:00:19.1234567Z [1m[91merror[0m[1m: returning the result of a `let` binding from a block[0m
+2026-11-10T10:00:20.1234567Z  [1m[94m--> [0msrc/lib.rs:3:5
+2026-11-10T10:00:21.1234567Z   [1m[94m|[0m
+2026-11-10T10:00:22.1234567Z [1m[94m2[0m [1m[94m|[0m     let x = v.len() as usize;
+2026-11-10T10:00:23.1234567Z   [1m[94m|[0m     [1m[94m-------------------------[0m [1m[94munnecessary `let` binding[0m
+2026-11-10T10:00:24.1234567Z [1m[94m3[0m [1m[94m|[0m     x
+2026-11-10T10:00:25.1234567Z   [1m[94m|[0m     [1m[91m^[0m
+2026-11-10T10:00:26.1234567Z   [1m[94m|[0m
+2026-11-10T10:00:27.1234567Z   [1m[94m= [0m[1mhelp[0m: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#let_and_return
+2026-11-10T10:00:28.1234567Z   [1m[94m= [0m[1mnote[0m: `-D clippy::let-and-return` implied by `-D warnings`
+2026-11-10T10:00:29.1234567Z   [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[allow(clippy::let_and_return)]`
+2026-11-10T10:00:30.1234567Z [1m[96mhelp[0m: return the expression directly
+2026-11-10T10:00:31.1234567Z   [1m[94m|[0m
+2026-11-10T10:00:32.1234567Z [1m[94m2[0m [92m~ [0m    
+2026-11-10T10:00:33.1234567Z [1m[94m3[0m [92m~ [0m    [92mv.len() as usize[0m
+2026-11-10T10:00:34.1234567Z   [1m[94m|[0m
+2026-11-10T10:00:35.1234567Z 
+2026-11-10T10:00:36.1234567Z [1m[91merror[0m[1m: casting to the same type is unnecessary (`usize` -> `usize`)[0m
+2026-11-10T10:00:37.1234567Z  [1m[94m--> [0msrc/lib.rs:2:13
+2026-11-10T10:00:38.1234567Z   [1m[94m|[0m
+2026-11-10T10:00:39.1234567Z [1m[94m2[0m [1m[94m|[0m     let x = v.len() as usize;
+2026-11-10T10:00:40.1234567Z   [1m[94m|[0m             [1m[91m^^^^^^^^^^^^^^^^[0m [1m[91mhelp: try: `v.len()`[0m
+2026-11-10T10:00:41.1234567Z   [1m[94m|[0m
+2026-11-10T10:00:42.1234567Z   [1m[94m= [0m[1mhelp[0m: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#unnecessary_cast
+2026-11-10T10:00:43.1234567Z   [1m[94m= [0m[1mnote[0m: `-D clippy::unnecessary-cast` implied by `-D warnings`
+2026-11-10T10:00:44.1234567Z   [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[allow(clippy::unnecessary_cast)]`
+2026-11-10T10:00:45.1234567Z 
+2026-11-10T10:00:46.1234567Z [1m[91merror[0m: could not compile `clipfail` (lib) due to 3 previous errors
+2026-11-10T10:00:47.1234567Z [1m[33mwarning[0m: build failed, waiting for other jobs to finish...
+2026-11-10T10:00:48.1234567Z [1m[91merror[0m: could not compile `clipfail` (lib test) due to 3 previous errors
+2026-11-10T10:00:49.1234567Z exit 101
