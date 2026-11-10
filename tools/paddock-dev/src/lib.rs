@@ -14,6 +14,8 @@
 //!   [--app]`, `--commit-range`, `--explain`): the matrix, the base of a run and the commit lint's range in [`plan_ci`], the
 //!   command in [`plan_cmd`]. Oracle-tested against the script until it is retired (ADR 0022 R4). `plan --since-run <run>`
 //!   reruns only what failed in a finished run ([`plan_since`]).
+//! - `worktree add|claim|reassign|release|drop|list|clean` and `check primary`: agent worktrees locked with an owner note and
+//!   bound to their agent, and the probe of the primary checkout ([`worktree`], ADR 0083).
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
@@ -30,5 +32,6 @@ pub mod plan_repo;
 pub mod plan_since;
 pub mod slots;
 pub mod wait;
+pub mod worktree;
 
 pub use cli::run;

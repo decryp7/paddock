@@ -1,4 +1,4 @@
-use crate::{gates, input_hash, ipc_endpoints, plan, plan_cmd, slots, wait};
+use crate::{gates, input_hash, ipc_endpoints, plan, plan_cmd, slots, wait, worktree};
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
 use std::io::Write;
@@ -40,6 +40,11 @@ enum Command {
         #[command(subcommand)]
         command: CheckCommand,
     },
+    /// Agent worktrees (ADR 0083): add, claim, reassign, release, drop, list and clean.
+    Worktree {
+        #[command(subcommand)]
+        command: worktree::WorktreeCommand,
+    },
     /// The CI planner: which projects a change reaches, the CI matrix and the commit lint's range (the port of
     /// scripts/affected.mjs; the arguments are its: <base> [<head>], --files a,b, --all, --ci [--app x], --commit-range, --commit-flags, --explain).
     /// It prints no JSON object: `--json` is refused.
@@ -53,6 +58,8 @@ enum Command {
 
 #[derive(Subcommand)]
 enum CheckCommand {
+    /// The probe of the primary checkout (ADR 0083): on main, no local-only commit, no tracked change, owners match locks.
+    Primary(worktree::PrimaryArgs),
     /// C102 (ADR 0072): every listen site is in docs/ipc-endpoints.toml with an ending test or a reason, and the ratchet of
     /// connection endings is well formed. With `--tag`, also refuses a release tag that a ratchet entry blocks.
     IpcEndpoints {
@@ -260,6 +267,10 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Check {
             command: CheckCommand::IpcEndpoints { tag, root },
         } => ipc_endpoints::command(root, tag),
+        Command::Check {
+            command: CheckCommand::Primary(a),
+        } => worktree::check_primary(&a),
+        Command::Worktree { command } => worktree::command(command),
         Command::Plan(a) => plan_cmd::command(&a.args, a.root),
         Command::Graph {
             command: GraphCommand::Affected(a),
