@@ -1,0 +1,4 @@
+Merge fix/debrief-train1-ci into train/2026-11-08-1
+
+The branch's wait_read_whole supersedes b41d33baf's mid-read error handling in the cancellation check (it handles an import that ends or fails before the file is read whole); its versions of the four plugin-test files are taken, so b41d33baf's fault hook and test are dropped from the tree.
+

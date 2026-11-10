@@ -12,6 +12,7 @@
 //! - `check ipc-endpoints`: C102, the register of every listen site and the ratchet of connection endings
 //!   ([`ipc_endpoints`], ADR 0072);
 //! - `hook pre-tool-use` and `hooks install`: Claude Code's PreToolUse guard and its installer ([`hook`], ADR 0083);
+//! - `merge check`: did a merge silently drop one side's hunks or tests? ([`merge_check`], ADR 0089 outcomes);
 //! - `graph affected`: the affected closure of a change set, the first consumer of `paddock-repo-graph` ([`plan`], with the
 //!   `.gitea` narrowing in [`plan_gitea`] and the git reader in [`plan_repo`]);
 //! - `plan`: the CI planner, the whole command line of `scripts/affected.mjs` (`<base> [<head>]`, `--files`, `--all`, `--ci
@@ -34,6 +35,7 @@ pub mod hook;
 pub mod input_hash;
 pub mod ipc_endpoints;
 pub mod log_text;
+pub mod merge_check;
 pub mod nextest_log;
 pub mod plan;
 pub mod plan_ci;

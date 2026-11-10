@@ -1,5 +1,5 @@
 use crate::{
-    check, ci_isolation, ci_runs, gates, hook, input_hash, ipc_endpoints, plan, plan_cmd, release_isolation, slots, wait, worktree,
+    check, ci_isolation, ci_runs, gates, hook, input_hash, ipc_endpoints, merge_check, plan, plan_cmd, release_isolation, slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -52,6 +52,11 @@ enum Command {
     /// scripts/affected.mjs; the arguments are its: <base> [<head>], --files a,b, --all, --ci [--app x], --commit-range, --commit-flags, --explain).
     /// It prints no JSON object: `--json` is refused.
     Plan(PlanArgs),
+    /// Merge checks.
+    Merge {
+        #[command(subcommand)]
+        command: MergeCommand,
+    },
     /// The project graph.
     Graph {
         #[command(subcommand)]
@@ -114,6 +119,29 @@ enum CheckCommand {
         #[arg(long)]
         root: Option<PathBuf>,
     },
+}
+
+#[derive(Subcommand)]
+enum MergeCommand {
+    /// Did a merge silently drop one side's work? Flags files that go backwards against the first parent, hunks a parent added
+    /// that the result lacks (reason: `Hunks-dropped: <path>: <reason>` in the merge message) and tests a parent has that the
+    /// result lacks (`Tests-removed: <name>: <reason>`). Exit 5 on findings; a check that could not look is an error, never a pass.
+    Check(MergeCheckArgs),
+}
+
+#[derive(Args)]
+struct MergeCheckArgs {
+    /// The repository root (default: the folder containing .git, found from the current folder).
+    #[arg(long)]
+    root: Option<PathBuf>,
+    /// A branch about to be merged (before the merge exists); needs --target.
+    #[arg(long, requires = "target", conflicts_with = "commit")]
+    branch: Option<String>,
+    /// The branch it would be merged into.
+    #[arg(long, requires = "branch")]
+    target: Option<String>,
+    /// The merge commit to check.
+    commit: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -313,7 +341,24 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         // The hook's answer is its own JSON on standard output, not a report, and its exit code is always 0.
         return hook::pre_tool_use(&mut std::io::stdin(), out, err);
     }
-    let result = dispatch(cli.command);
+    let command = match cli.command {
+        Command::Merge {
+            command: MergeCommand::Check(a),
+        } if cli.json => {
+            return merge_check::command_json(
+                &merge_check::Request {
+                    root: a.root,
+                    commit: a.commit,
+                    branch: a.branch,
+                    target: a.target,
+                },
+                out,
+                err,
+            );
+        }
+        other => other,
+    };
+    let result = dispatch(command);
     // A probe whose only problems are checks that could not run ends with `worktree::EXIT_NOT_MEASURED` (ER-33).
     let not_measured_only = result.as_ref().is_ok_and(|r| r.data["not_measured_only"] == true);
     let code = finish(if cli.json { Format::Json } else { Format::Text }, result, out, err);
@@ -394,6 +439,14 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CheckCommand::Primary(a),
         } => worktree::check_primary(&a),
         Command::Worktree { command } => worktree::command(command),
+        Command::Merge {
+            command: MergeCommand::Check(a),
+        } => merge_check::command(&merge_check::Request {
+            root: a.root,
+            commit: a.commit,
+            branch: a.branch,
+            target: a.target,
+        }),
         Command::Plan(a) => plan_cmd::command(&a.args, a.root),
         Command::Hook { .. } => Ok(Report::new(serde_json::json!({}), String::new())),
         Command::Hooks {
