@@ -1,10 +1,11 @@
 # 97. A user approval carries proof that the user gave it
 
-- Status: Proposed 2026-11-10, revision 4 (answers the re-review of revision 3, `849a4ab13`: P1-C and the P2s; revision
-  3 answered the re-review of revision 2, `c591c5668`: P1-A, P1-B and the P2s; revision 2 answered the security review
-  of revision 1, `d21eddcbf`; see the "Review answers" sections). Drafted at the coordinator's request of 2026-11-10
-  under ER-21 (a class seen three or more times gets a redesign ADR), with requirements R1 to R5 from the ADR 0093
-  review. Nothing here is built yet. ER-23 does not apply (no drawings).
+- Status: Proposed 2026-11-10, revision 5 (answers the re-review of revision 4, `db150467b`: P1-D and the P2s; revision
+  4 answered the re-review of revision 3, `849a4ab13`: P1-C; revision 3 answered the re-review of revision 2,
+  `c591c5668`: P1-A, P1-B and the P2s; revision 2 answered the security review of revision 1, `d21eddcbf`; see the
+  "Review answers" sections). Drafted at the coordinator's request of 2026-11-10 under ER-21 (a class seen three or more
+  times gets a redesign ADR), with requirements R1 to R5 from the ADR 0093 review. Nothing here is built yet. ER-23 does
+  not apply (no drawings).
 - Date: 2026-11-10
 - Related: ER-5, ER-14 (tests never touch real keys or the keychain), ER-15, ER-21 / rule 40, ER-27, ER-31, ER-33 /
   rule 71, ER-36; rule 55 (`Copies-date: ... approved: <coordinator|user>`); ADR 0022 and its build-inputs amendment
@@ -35,6 +36,7 @@ origin/docs/adr-text-cuts-repo-copies 06c77a417
 origin/docs/adr-captured-tool-output 9c2cd4d8e
 origin/ci/build-inputs-wp1 3f5206a40
 origin/fix/build-inputs-copies-date eba981aed
+origin/feat/dev-merge-check b18bd1ad8
 ```
 
 ## Context: the instances
@@ -232,9 +234,9 @@ the approval, is where the walk ends, so it fails; a merge that restores a super
 see deleted lines, and blame also passes the replay; the walk is what catches both.
 
 **One rule for merges.** "A merge may carry only a change that one side made since the merge base" is the same rule the
-merge check (`./dev merge check`, the stale-revert check of memory "merges-check-stale-reverts", being fixed now)
-applies to whole files. The two should share one implementation in `paddock-repo-graph` (ER-22); WP-2 builds it there
-if the merge check has not.
+merge check (`./dev merge check` on `origin/feat/dev-merge-check`, `b18bd1ad8`: "finds hunks and tests a merge silently
+dropped", being fixed now) applies to hunks. The two should share one implementation in `paddock-repo-graph` (ER-22);
+WP-2 builds it there if the merge check has not.
 
 The history commands run with a fixed configuration, so the tree under check cannot steer them:
 `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_NO_REPLACE_OBJECTS=1`, `-c blame.ignoreRevsFile=`, no
@@ -268,22 +270,39 @@ reads the approval from `main`.
 **Code subjects (P1-3).** An approval commit may touch only declared subject files (PC-16): a signature never blesses
 code by accident. Code that decides whether approvals count is protected by a **code pin** instead: a record of kind
 `code_pin` (`id`, `paths`, `tree`) whose `tree` is the hash git computes for those paths at a named commit of `main`
-(`git rev-parse <commit>:<path>` per path, combined in a declared order). The scope is mechanical, not a list someone
-keeps: the **module closure** of `tools/paddock-dev/src/approvals/` (every source file reachable through `mod` and
-`use crate::` edges, computed by code inside the pinned set, and every crate path it depends on inside the repository),
-plus `tools/paddock-dev/Cargo.toml` and its `Cargo.lock`, `docs/approvals/**` itself, and the sha256 of the FIDO
-middleware installed by WP-0 (a `file_sha256` entry, checked by `./dev approve` on the user's machine, not by CI). C108
-fails when a file in the closure is not covered by a pin. The simpler alternative, all of `tools/paddock-dev/src` minus
-declared exclusions, needs a touch for every `./dev` change and is not recommended (D11). The user re-signs a pin after
-reviewing a change of those paths (one touch). The post-tag audit (§7) recomputes the hashes in the tagged tree and on
-`main` and refuses a tag whose verifier differs from the signed pin. Release workflow files change too often to pin;
-they are compared by the post-tag audit with `main`'s version instead (§7), and that audit from `main` is their only
-protection (D11).
+(`git rev-parse <commit>:<path>` per path, combined in a declared order).
+
+**What is pinned is the decision point and the gate, not the callers.** Pinning only the code reachable *from* a
+verifier module leaves its callers free: an agent could change `main.rs` so that `./dev approvals verify` succeeds
+without calling the module, make `gates/register.rs` treat `approved = "user"` as verified, or edit the gate step, and
+no pin would change. So the decision lives where callers cannot reach into it:
+
+1. **Its own crate and binary**, `crates/paddock-approvals` (a library and a `paddock-approvals` binary with its own
+   `main`, §5). The pin covers the whole crate folder (so `build.rs`, `#[path]` and `include!` inside it are covered
+   without a closure walk), its `Cargo.toml`, the in-repository crates it depends on by path (whole folders; today
+   `paddock-repo-graph` for the merge rule), and the `Cargo.lock` `[[package]]` entries of its dependency closure (name,
+   version, checksum, as canonical text extracted by the pinned crate). A path dependency outside the pin is a C108
+   error.
+2. **One gate file**, `.gitea/actions/approvals-check/action.yml`, pinned: it builds or fetches the binary, runs
+   `paddock-approvals gate --tag <tag>`, and fails the job on any exit code but 0. Every release workflow calls this
+   action and nothing else for C108; the post-tag audit's step comparison (§7) requires a step that uses exactly this
+   action and succeeded.
+3. **The audit workflow**, `.gitea/workflows/approvals-audit.yml`, pinned: it is small and changes rarely.
+4. `docs/approvals/**` itself, and the sha256 of the FIDO middleware installed by WP-0 (a `file_sha256` entry, checked
+   by `./dev approve` on the user's machine, not by CI).
+
+**Callers stay unpinned, on purpose.** `./dev approvals verify`, C100, `./dev copies`, ADR 0073's check and `./dev adr
+status` call the library for early reports on branches. Because the pinned action is an independent gate at every tag
+and the pinned audit re-runs the binary from `main`, a caller that lies only loses its own early report; it cannot make
+a tag pass. The user re-signs a pin after reviewing a change of the pinned paths (one touch). The post-tag audit
+recomputes the pins in the tagged tree and on `main` and refuses a tag that differs. The release workflow files
+themselves change too often to pin; the audit compares them with `main`'s and requires the pinned action's step (D11).
 
 ### 5. The verifier: `./dev approvals verify` and check C108
 
-Rust, a new module `tools/paddock-dev/src/approvals/` (ADR 0022: tooling is Rust), with ADR 0089's `Outcome` for exit
-codes and JSON. It:
+Rust (ADR 0022: tooling is Rust), the crate `crates/paddock-approvals` with its own binary (§4: it is the pinned
+decision point), using ADR 0089's `Outcome` for exit codes and JSON; `./dev approvals verify` and the other callers use
+its library. It:
 
 - verifies SSHSIG signatures **in process** with the RustCrypto `ssh-key` crate 0.6.7 (Apache-2.0 OR MIT), whose
   `Verifier` supports `SkEd25519` and `SkEcdsaSha2NistP256` and does **not** check the flags; the flags byte and the
@@ -303,12 +322,13 @@ codes and JSON. It:
 **C108** runs in two places:
 - **On branches** (conformance, report only): lists records that will not count and why ("`[[scheduled_waiver]]
   debrief-bench`: `until` removed by unsigned `1a2b3c4d5`; ask the user to sign it with `./dev approve`").
-- **As a tag gate**, a step in each release workflow (§7) and in `./dev release tag` once it exists. ADR 0060's C100
-  calls the same library now: an `approved = "user"` entry whose record does not verify is treated as if it said
-  nothing, so the stricter state applies (a ratchet without a valid target approval keeps its target; an unverified
-  waiver waives nothing; an unverified lowering switch is ignored). ADR 0075's `./dev copies` (pending), ADR 0073's
-  check (not built) and ADR 0096's `./dev adr status` call it when they are built; their own work packages carry that
-  wiring (WP-3 provides the library API and the C100 wiring only).
+- **As a tag gate**, the pinned action `.gitea/actions/approvals-check` in each release workflow (§4, §7) and in `./dev
+  release tag` once it exists. ADR 0060's C100 calls the same library now for its early report: an `approved = "user"`
+  entry whose record does not verify is treated as if it said nothing, so the stricter state applies (a ratchet without
+  a valid target approval keeps its target; an unverified waiver waives nothing; an unverified lowering switch is
+  ignored). ADR 0075's `./dev copies` (pending), ADR 0073's check (not built) and ADR 0096's `./dev adr status` call it
+  when they are built; their own work packages carry that wiring (WP-3 provides the library API and the C100 wiring
+  only).
 
 ### 6. Records are read from `origin/main`'s first-parent history (R5)
 
@@ -367,7 +387,7 @@ it, and the run would publish.
 | Impossible from WP-5 on, unless the trust root is swapped (visible, column 2) | Visible only (detected by C108, the audit or the release summary) | Closed only by |
 |---|---|---|
 | A record that verifies without a touch of a routine key (or Touch ID, once WP-0 confirms the Secure Enclave behaviour) | A swap of the pin or the trust root (needs the admin token: the release summary and password-manager copy show it) | D8 (a): the agents' bot has no admin, the user's credential and browser session are out of reach, so the pin and branch protection are the user's alone |
-| An unsigned edit, deletion or move of a signed record's value counting as the user's | A verifier or workflow bypass at a tag (the audit: job and step list, code pins) | D8 (a) plus a credential rule: publish credentials (release and package tokens) are held only by workflows agents cannot change before they run (a protected environment or a runner-held secret; WP-7 checks what Gitea 28 offers) |
+| An unsigned edit, deletion or move of a signed record's value counting as the user's | A bypass at a tag: the release workflow on a release branch not calling the pinned action, or a changed `paddock-approvals` crate, action or audit workflow in the tagged tree (the audit, run from `main`: step comparison and code pins); a lying caller (C100, `./dev`) only loses its own early report | D8 (a) plus a credential rule: publish credentials (release and package tokens) are held only by workflows agents cannot change before they run (a protected environment or a runner-held secret; WP-7 checks what Gitea 28 offers) |
 | An approval copied from another repository or made before the genesis; a superseded signed value restored by an unsigned merge (§3 step 3) | A force-push of `main` that drops a later signed deletion and leaves an older signed value as the newest (the audit's first-parent check) | D8 (a): branch protection without force push or deletion |
 | A trailer or status line on an unsigned commit counting as the user's | An out-of-band publish (the audit's release and package listing) | the credential rule above |
 | | A touch that signs an agent-chosen commit (the confused deputy, §9: the printed sha and counter, the counter gaps) | D8 (b): agents in a separate macOS account, so the signer process and its inputs are out of their reach |
@@ -471,7 +491,8 @@ named); the green twin is in the same test.
 | PC-14 | §7 | a recorded Actions API reply (synthetic JSON) for a tag run without `main`'s C108 step | the audit fails and names the step |
 | PC-15 | §7 | an unsigned release tag (D7 (b)); a release listed by the API with no audited tag run; a new tip whose first-parent chain does not contain the last audited sha although it descends from it (swapped parents) | each flagged |
 | PC-16 | §4 | a signed approval commit that also changes a `.rs` file | refused, "approval commit touches non-subject paths" |
-| PC-17 | §4 | a tagged tree whose `tools/paddock-dev/src/approvals/` differs from the signed code pin | the audit refuses the tag |
+| PC-17 | §4 | a tagged tree whose `crates/paddock-approvals/`, its lock entries, `.gitea/actions/approvals-check/action.yml` or `approvals-audit.yml` differs from the signed code pin | the audit refuses the tag |
+| PC-17b | §4 | a caller-side no-op: `./dev`'s `main.rs` returns success for `approvals verify` without calling the crate; the release workflow's C108 step replaced by an `echo` (or the action's `run` line by `true`) | the first leaves every pinned check red at the tag (only the early report lies); the second is refused by the audit (missing pinned action step) or by the pin (changed action) |
 | PC-18 | §9 | `./dev approve` run with a planted `gpg.ssh.program`, `core.hooksPath`, `SSH_SK_PROVIDER`, `SSH_AUTH_SOCK` and a `PATH` entry in the agents' checkout and environment | none is used (the fresh clone's command lines and environment are asserted by the test, which signs with a test key) |
 | PC-18b | §1, §9 | the middleware file in the test's stand-in for `/usr/local/libexec/paddock/` replaced by another file; the folder made writable by the test user | `./dev approve` refuses before signing ("middleware hash differs from code pin"; "provider folder is writable by you") |
 | PC-20 | §1 | a record whose deciding commit is signed by a `role = "recovery"` key; a trust-file change signed by the same key | refused; accepted |
@@ -553,7 +574,7 @@ strict state. Rolling back never loosens a gate.
 | D8 | Identities | (a) bot account for agents and CI, the user's credential out of the keychain item agents' git reads, claude-in-chrome blocked on the Gitea host, branch protection (no force push or deletion) on `main` and trains, publish credentials only in workflows agents cannot change before they run; (b) agents in a separate macOS account | **(a) now; (b) as its own ADR after the releases** |
 | D9 | Migration and enforcement | (a) re-sign the live record at genesis, land ADRs 0089 to 0096 before the cutover, grandfather history by ancestry of a pinned cutover commit, report-only until WP-0 to WP-6 are done, then enforce at tags; (b) re-sign everything, including the 67 accepted ADR status lines | **(a)** |
 | D10 | Rule | (a) a Paddock rule and a new ER (wording below); (b) ADR only | **(a)** |
-| D11 | Protecting the code that decides | (a) signed code pins over the module closure of the verifier, its `Cargo.toml` and `Cargo.lock`, `docs/approvals/**` and the middleware hash, release workflows compared by the post-tag audit; (b) pins over all of `tools/paddock-dev/src` minus declared exclusions (a touch per `./dev` change); (c) the post-tag audit from `main` only | **(a)** |
+| D11 | Protecting the code that decides | (a) the decision in its own pinned crate and binary (`paddock-approvals`, with its manifest, path dependencies and lock entries), one pinned gate action, the pinned audit workflow, `docs/approvals/**` and the middleware hash; release workflows compared by the audit; callers unpinned; (b) pins over all of `tools/paddock-dev` (a touch per `./dev` change); (c) the post-tag audit from `main` only | **(a)** |
 
 **Proposed rule** (a Paddock rule, number on acceptance, and a new ER after ER-36; wording for the user's approval, not
 applied while Proposed): "A record that stands for the user's consent (an approval, a waiver, a date move, a switch that
@@ -570,14 +591,14 @@ not verify is treated as not approved, and the stricter state applies."
 | WP-2 | History: strict schemas and record ids, the structural walk of §3 (memoized, parents in recorded order), fixed-config blame, chain, genesis descent, pin read with the bot's read token, server time from `approvals-audit.yml` runs (6 when missing or not monotonic), the merge-base rule shared with the merge check, deletion rule, `Outcome`s (PC-1 to PC-5e, PC-9 to PC-13, PC-20) | 2.75 | WP-1 |
 | WP-3 | Library API for callers and the C100 wiring; switches and trailers (PC-7, PC-11). ADR 0075's `./dev copies`, ADR 0073's check and ADR 0096's `./dev adr status` wire it in their own work packages | 1.5 | WP-2 |
 | WP-4 | `./dev approve`: fresh clone, cleared environment, fixed signer, middleware hash and folder-owner check, per-record y/N, sha and counter printed; path rule (PC-16, PC-18, PC-18b) | 2 | WP-2 |
-| WP-5 | C108 in conformance (report) and as a step in every release workflow; release summary prints the trust root; runs on the Linux and Windows runners | 1 | WP-3 |
-| WP-6 | Post-tag audit on `main`: descent check, job and step comparison, code pins, release and package listing, signed release tags if D7 (b), issue and release note; recorded-API tests (PC-14, PC-15, PC-17); protected-tag behaviour on a scratch repository | 2 | WP-5, D7, D11 |
+| WP-5 | C108 in conformance (report); the crate's own binary and the pinned `.gitea/actions/approvals-check` action called by every release workflow; release summary prints the trust root; runs on the Linux and Windows runners (PC-17b) | 1.5 | WP-3 |
+| WP-6 | Post-tag audit on `main`: descent check, job and step comparison, code pins, release and package listing, signed release tags if D7 (b), issue and release note; the pinned `approvals-audit.yml`; recorded-API tests (PC-14, PC-15, PC-17, PC-17b); protected-tag behaviour on a scratch repository | 2 | WP-5, D7, D11 |
 | WP-7 | Identities (D8 (a)): `paddock-agent`, token swap in agents' environment and CI secrets, keychain item and git helper, claude-in-chrome block, branch protection, where publish credentials can live (user's hands for the admin steps) | 1 | D8 |
 | WP-8 | Migration: inventory across every `origin` branch (including `eba981aed`), ADRs 0089 to 0096 landed before the cutover, re-sign batch, cutover commit pinned, rule text, briefs (coordinator, integrator, reviewer), lessons entry | 1 | WP-4, D9 |
-| | **Total** | **13.25 agent-days** (13 to 15 with the risks below) | |
+| | **Total** | **13.75 agent-days** (13.5 to 15.5 with the risks below) | |
 
-**Enforcement needs WP-0 to WP-6: 11.25 agent-days.** Without WP-6 nothing detects a bypass at a tag (§7) and there is
-no server time (§2), so `valid-*` checks would report 6. WP-0 to WP-5 (9.25 days) give a report-only C108 that already
+**Enforcement needs WP-0 to WP-6: 11.75 agent-days.** Without WP-6 nothing detects a bypass at a tag (§7) and there is
+no server time (§2), so `valid-*` checks would report 6. WP-0 to WP-5 (9.75 days) give a report-only C108 that already
 shows which records would count. WP-7 can run in parallel from the
 start.
 
@@ -652,6 +673,19 @@ The re-review of revision 3 (`849a4ab13`) returned CHANGES with one P1.
 - **P2s:** the middleware hash check is said to compare agent-written values; loading a self-built provider in
   `ssh-sk-helper` is marked unverified with a fallback, and WP-0 starts with a real signature; the code-pin scope is the
   module closure, checked by C108; deleted audit runs and non-monotonic run ids give 6; enforcement needs WP-0 to WP-6.
+
+## Review answers (revision 5)
+
+The re-review of revision 4 (`db150467b`) returned CHANGES for one P1; P1-C was verified case by case.
+
+- **P1-D, callers were not pinned:** the decision moves into its own crate and binary, `crates/paddock-approvals`,
+  pinned whole with its manifest, in-repository path dependencies and lock entries; the tag gate is one pinned action,
+  `.gitea/actions/approvals-check/action.yml`, which every release workflow calls and the audit requires;
+  `approvals-audit.yml` is pinned; C100 and the other callers stay unpinned and only lose their early report if they
+  lie. §8 corrected; PC-17 widened, PC-17b added; WP-5 grows by 0.5 d (total 13.75, enforcement 11.75).
+- **P2s:** the crate pin covers `build.rs`, `#[path]` and `include!` by covering the whole folder; the merge-rule note
+  cites `origin/feat/dev-merge-check` (`b18bd1ad8`) instead of an agent memory note (a search of `docs/lessons.md` on
+  `origin/main` and the train found no merge-check lesson).
 
 ## Sources
 
