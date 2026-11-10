@@ -1,8 +1,9 @@
 # 89. A measurement that did not happen can never pass: one outcome type, one test outcome, one exit code, and a check over every copy
 
-- Status: Proposed 2026-11-10, revision 2. Drafted at the coordinator's request of 2026-11-10 (ER-21: one class, seen
+- Status: Proposed 2026-11-10, revision 3. Drafted at the coordinator's request of 2026-11-10 (ER-21: one class, seen
   six times in one day's Rust tooling reviews, after the Dyno 1.1.0 instances that created ER-33). Revision 1
-  (`e5e4f300d`) was reviewed independently ("changes", 6 P1 and 12 P2); revision 2 answers it (see "Review answers").
+  (`e5e4f300d`) was reviewed independently ("changes", 6 P1 and 12 P2); revision 2 (`90d28a0a6`) answered it and was
+  re-reviewed ("changes": P1-7 and four P2s); revision 3 answers that (see "Review answers").
   Nothing here is built yet.
 - Date: 2026-11-10
 - Related: ER-21 / rule 40, ER-22 / rules 42 and 55 (share first; one implementation per mechanism,
@@ -15,8 +16,9 @@
 - Number: 0089 was free on every `origin` branch on 2026-11-10 (highest file `0088`; no branch's `docs/` names "ADR 0089").
 - Evidence: read on 2026-11-10 after `git fetch`, at these heads: `origin/train/2026-11-09-3` `67a633ef3` (every count
   without a ref), `origin/feat/rt2-release-isolation` `ad9d85a5b`, `origin/feat/rt3-dev-worktree` `2be92ec01`,
-  `origin/feat/rt4-hook` `48b938bcb`, `origin/feat/rt5-check-host` `8550764e7`, `origin/feat/rt8-ci-flakes` `5da33f8cf`,
-  `origin/fix/playwright-flaky-as-failure` `06adcb058`, `origin/docs/adr-windows-gate-ratchets` `db7782e01`. Each count
+  `origin/feat/rt4-hook` `48b938bcb`, `origin/feat/rt5-check-host` `0a94bf347`, `origin/feat/rt8-ci-flakes` `5da33f8cf`,
+  `origin/fix/playwright-flaky-as-failure` `06adcb058`, `origin/docs/adr-windows-gate-ratchets` `db7782e01`,
+  `origin/docs/adr-captured-tool-output` `0cca8dd30` (ADR 0090). Each count
   names its command (Appendix B). Measurements on synthetic input only (Appendix A): a throw-away crate under `cargo
   test` and `cargo nextest run` (cargo 1.99.1, nextest 0.9.151); the JS host's `applyWaivers` on a planted crash; the
   local `paddock-ci:v2` image (`sha256:fdc6b409ce5c…`, created 2026-10-24) probed with `docker run`.
@@ -37,12 +39,11 @@ in 12 of 12 runs, a tray count matched the app's own window buttons, a reading r
 `renderResult` printed PASS on zero steps.
 
 **Where they stand now.** #1 to #3 are fixed in their branches; #6 is being fixed in RT-8 by building the nextest part
-of §4b's shared reader. #5: `8550764e7` makes incomplete, crashed, broken and
-precondition-failed runs add an unwaivable error; what is left is RT-5's status being derived in two places that disagree
-(`mod.rs:341` raises "looked at no file" only for `probes == 0 && scope == Scope::Root`, while `RunRecord::status` says
-`NotMeasured` for zero probes in any scope), which is being fixed on `feat/rt5-check-host` now: one function decides
-status and error, a scoped run that reads nothing is `not applicable`, unknown `--files` entries are counted warnings,
-or an error when all are unknown. #4: `5da33f8cf` (with `d95a47ceb`) exits **1 with an `::error::`** for an incomplete
+of §4b's shared reader. #5 is fixed: `8550764e7` makes incomplete, crashed, broken and precondition-failed runs add
+an unwaivable error, and at `0a94bf347` one function, `RunRecord::judge(&self, kept: bool) -> (Status, Option<String>)`
+(`check/record.rs:112`), decides status and error together; a scoped run that reads nothing is `NotApplicable`, and a
+`--files` list none of whose entries is a file is `NotMeasured`. One difference from this ADR remains: `judge` makes a
+crash `NotMeasured`; this ADR makes it `CheckBroken` (§1), which WP-4 changes in RT-5 with a shadow-table line. #4: `5da33f8cf` (with `d95a47ceb`) exits **1 with an `::error::`** for an incomplete
 report and records the Playwright precondition as a gap; the source fix for (b) is `06adcb058` on
 `origin/fix/playwright-flaky-as-failure` (`failOnFlakyTests` for Dyno, Pitcrew and Spotter, and C71 fails a config with
 retries and no `failOnFlakyTests`). **Still open:** the JS conformance host's crash (`conformance/src/runner.mjs:24`
@@ -71,7 +72,7 @@ another meaning. Each tool decides on its own how to say "not measured", and the
 **Invariant.** "Did not measure" and "the probe is broken" are values of their own, distinct from "clean", "not
 applicable" and "findings", from the probe to the process exit code; no step (waivers, baselines, report-only findings,
 aggregation, JSON, exit codes, the test harness) can turn either into a pass. A run with one passes only where reviewed
-data declares that measurement optional in that place, with a reason and an expiry, and never in a release run.
+data declares that measurement optional in that place, with a reason and an expiry; in a release run, only where another leg of the same run measured it (D14).
 
 ## Instances
 
@@ -82,7 +83,7 @@ data declares that measurement optional in that place, with a reason and an expi
 | 1 | `tools/paddock-dev/src/gates/` (train): `evaluate.rs` 12, `register.rs` 3, `gating.rs` 2, `edge.rs` 1 | text in error findings | fine (errors), stringly |
 | 2 | `release_isolation/` (RT-2 `ad9d85a5b`, 40 lines) | `Leak`/`Probe` enums, `is_broken()`, `notices` | fixed; the local-trial flag still gives a notice, refused on a tag |
 | 3 | `worktree/` (RT-3) | `"not_measured_only"` JSON flag, `pub const EXIT_NOT_MEASURED: i32 = 6` (`worktree/mod.rs:14`) | fine, private exit code |
-| 4 | `check/record.rs` (RT-5 `8550764e7`) | `Status { Clean, Findings, NotMeasured, CheckBroken }`, `measured() -> bool`, a second derivation in `mod.rs` | being fixed (one function; `not applicable`) |
+| 4 | `check/record.rs` (RT-5 `0a94bf347`) | `Status { Clean, Findings, NotMeasured, NotApplicable, CheckBroken }` (`:71-75`), `measured() -> bool` (`:99`), `judge(kept)` (`:112`) | fine; the shape of §1, moved into it by WP-4 |
 | 5 | `ci_runs/` (RT-8 `5da33f8cf`) | `complete() -> bool` (`flakes.rs:148`), exit 1 | fine for now (1 is "failure"); moves to 6 in WP-4 |
 | 6 | `hook/oracle_tests.rs` (RT-4) | `panic!("the live oracle is not measured: …")` | fine |
 | 7 | `tests/it/golden.rs` (train) | `skip(reason)`: panic in CI on Linux, `::notice::` on CI host legs (shown through `success-output = "final"`), `eprintln!` locally (hidden) | at risk: the host-leg notice is a green run; an `[[optional]]` entry is its right form |
@@ -133,9 +134,11 @@ pub enum Outcome {
 
 - **No conversion to a pass**: no `bool` accessor, no `From<Outcome>` for `bool` or `Result`, no `Default`. The only
   exits are `Verdict::exit()` and `Verdict::json()`.
-- **Computed once**, by `RunRecord::outcome(&self, findings_after_waivers)`, the one function RT-5's fix now builds;
+- **Computed once**, by `RunRecord::judge(&self, findings_after_waivers)`, RT-5's function under its own name (WP-4
+  moves it into the shared module and changes its argument from `kept: bool` to the findings left after waivers);
   waivers and baselines take `Vec<Finding>` and never see an `Outcome`, so they cannot cancel `NotMeasured` or
-  `CheckBroken`, and a crash is `CheckBroken`, not a finding.
+  `CheckBroken`. A **crash is `CheckBroken`** (a panic is a bug in the check; an input it could not read is
+  `NotMeasured`); RT-5's `judge` says `NotMeasured` today, and WP-4 changes it, listed in RT-5's shadow table.
 - **`NotApplicable`** is RT-5's "not applicable": only a scoped run can produce it; a root run, a tag run or a run that
   names no scope reaching nothing is `NotMeasured`. Unknown `--files` entries are RT-5's counted warnings, and an error
   when all are unknown (§2 treats that as `NotMeasured`).
@@ -171,11 +174,30 @@ expires = "2027-01-31"
 - **As an ADR 0088 register:** an entry is **covered** by a run whose leg and OS match its `where`; covered and used is
   live; covered by every reader's runs and never used is stale (0088 §3's severities); an entry whose `where` no run
   covered (a leg that did not run) is **not measured, not stale**. Expired is an error (as `W001`).
-- **Never optional:** `CheckBroken`; and anything in a **release run**, which is ADR 0088 §3's set (tag refs,
-  `release/**` branches, `<app>-release.yml` workflows), known the same way 0088 knows it: from `GITHUB_REF` and
-  `GITHUB_WORKFLOW` in CI, which the shared actions export to every step.
+- **Never optional:** `CheckBroken`, anywhere. **In a release run** (ADR 0088 §3's set: tag refs, `release/**`
+  branches, `<app>-release.yml` workflows) an entry counts only under D14's rule (§3a).
+- **How a run knows its kind:** a tag or `release/**` run from `GITHUB_REF` (`refs/tags/…`, `refs/heads/release/…`); a
+  release workflow from an explicit `PADDOCK_RUN_KIND=release` that each `<app>-release.yml` and the tag path of each
+  `<app>.yml` set in their `env:` (`GITHUB_WORKFLOW` is the workflow's `name:`, not its file, and whether Gitea sets
+  `GITHUB_WORKFLOW_REF` is **unverified**). Anything else is an ordinary run.
+- **Records and the 0088 engine:** `check:`, `gate:` and `probe:` entries are judged stale or live by 0088's engine
+  from the run records of `./dev check` and the push gate. **`test:` entries are expiry-only**: their records live in
+  CI job artifacts (`PADDOCK_NOT_MEASURED_LOG`, uploaded per job) that no run on main reads today, so the engine reports
+  them `not measured`, never stale, and their expiry (at most 90 days) is what removes them. A later step may let the
+  nightly read the artifacts.
 - `paddock.ci.json`'s `ci-only` declarations stay the push gate's source for whole steps (ADR 0038); they count as
   optional entries for the push gate only.
+
+### 3a. Optional entries in release runs (D14)
+
+"Never optional in a release run" cannot hold for unit tests: `debrief-v*` tags run the full gates
+(`debrief.yml:27`, the `full` output at `:75`), and the uid-0 Linux container can never measure `walk.rs:308`, nor can a
+Docker container without landlock measure `debrief-ipc`'s sandbox tests. The rule (D14 (a), recommended): in a release
+run an `[[optional]]` entry is honoured only if it names `measured_on = ["<leg>", …]` and at least one of those legs
+**ran the same test green in the same run**. `release-verdict` (the existing `.gitea/actions/release-verdict` step)
+merges the legs' `PADDOCK_NOT_MEASURED_LOG` artifacts with their JUnit reports and fails the release when an entry's
+`measured_on` legs did not pass it. So a measurement may move to another leg, but never vanish from a release.
+ER-33's release checks (vm-smoke, release isolation, the installer gate, the gates register) never take entries.
 
 ### 4. One test outcome: `paddock_testkit::Measured`
 
@@ -198,7 +220,7 @@ fn transcodes_a_clip() -> Measured {
 `Termination::report()` decides, in this order:
 
 1. **Declared optional** for this test on this leg (`PADDOCK_LEG` and the OS against `docs/optional-measurements.toml`,
-   §3), and not a release run → success, and one record is appended to `PADDOCK_NOT_MEASURED_LOG` when that is set.
+   §3), and, in a release run, the entry names `measured_on` legs (whose results `release-verdict` checks, §3a) → success, and one record is appended to `PADDOCK_NOT_MEASURED_LOG` when that is set.
 2. **Reporting mode** (`PADDOCK_NOT_MEASURED=report:<file>`, set only by `./dev test` and the push gate, which read the
    file afterwards and fold it into their `Verdict`, so they exit 6) → success after recording.
 3. **Otherwise strict** (plain `cargo test`, `cargo nextest run`, CI without an entry) → failure with
@@ -229,6 +251,9 @@ pub enum Read {
 - **The callers' other partial inputs are the same type:** a non-2xx reply for a run's or attempt's job list is
   `NotMeasured("job list of attempt N: HTTP 404")`, never "no jobs"; a failed job with no step that ran is
   `NotMeasured("job failed before its first step")`, so the report is incomplete.
+- **One log, several invocations:** a job log can hold two nextest runs (`app-gates/action.yml:153-154`), so a log is
+  `Measured` only when the count of runner start lines equals the count of final summaries and each summary's counts
+  match its rows; a fixture with two invocations, cut inside the second, must be `NotMeasured`.
 - **Truncation controls, per runner:** for each real captured log (RT-8's `tools/paddock-dev/tests/ci-runs/*.log`:
   `nextest-r0-fail.log`, `nextest-r1-pass.log`, `nextest-timeout-r0.log`, `playwright-project.log` and the others; a
   vitest log still to capture), the test cuts it at every line boundary before the summary and asserts `NotMeasured`;
@@ -236,8 +261,12 @@ pub enum Read {
 - RT-8 is building the nextest part now; `logfind.rs` and `plan_since::nextest_failures` become callers, and the
   mechanism `runner-log` is registered in `docs/known-copies.toml` with Debrief's `retried-reporter.mjs` as a copy
   to retire.
+- **ADR 0090** (proposed, `origin/docs/adr-captured-tool-output` `0cca8dd30`: code that reads another tool's output is
+  tested against captured output, with a register of readers and fixtures and its check C104) covers the fixtures:
+  `runlog` is one of its readers and its captured logs are 0090 fixtures. This ADR adds only the rule that partial input
+  is `NotMeasured`; the two are not merged.
 
-### 5. A check over every instance: C103 (next free id; C102 was the highest on every branch read)
+### 5. A check over every instance: C103 (next free id: C102 was the highest in use, and ADR 0090 reserves C104)
 
 In RT-5's `./dev check` host:
 
@@ -250,8 +279,11 @@ In RT-5's `./dev check` host:
 - **(b) Local copies of the outcome, definitions only** (literals are too common: "not measured" is in 132 lines of 68
   files): in non-test tooling code outside `paddock_cli::outcome` and its JS mirror `conformance/src/outcome.mjs`, an
   enum variant named `NotMeasured`, `CheckBroken`, `Incomplete` or `NotApplicable`, a `const` whose name contains
-  `NOT_MEASURED`, or a `fn complete|measured|is_measured(&self) -> bool`. Seed at the heads above: 0 on the train;
-  RT-3 `worktree/mod.rs:14`, RT-5 `record.rs:67, 69, 92`, RT-8 `flakes.rs:148` (5 sites, 3 branches).
+  `NOT_MEASURED`, or a `fn complete|measured|is_measured(&self) -> bool`. JS shapes: an exported constant or an object
+  key named `INCOMPLETE`, `NOT_MEASURED` or `CHECK_BROKEN` (vm-smoke's `EXIT = { …, INCOMPLETE: 3 }`), and the status
+  literals `'not-measured'`, `'check-broken'`, `'not applicable'`. Seed at the heads above: 0 on the train's Rust;
+  RT-3 `worktree/mod.rs:14`, RT-5 `record.rs:71, 73, 75, 99`, RT-8 `flakes.rs:148` (7 sites, 3 branches); the JS seed
+  (vm-smoke's verdict and its rows) is counted by WP-3, which re-seeds every list from the heads it lands on.
 - **(c) Exits.** `std::process::exit` in `tools/` only in `main.rs` (Clippy `disallowed-methods` in `tools/*/clippy.toml`).
 
 Today's (a) and (b) sites seed a shrink-only ratchet (`docs/ratchets/c103.toml`, ADR 0088's engine); new sites fail.
@@ -259,22 +291,25 @@ Today's (a) and (b) sites seed a shrink-only ratchet (`docs/ratchets/c103.toml`,
 ### 6. Positive controls (ER-33), each a test
 
 - `Verdict`: a property test over every combination of outcomes, failing and report-only findings, optional entries
-  and run kinds: no combination with an undeclared `NotMeasured`, any `CheckBroken`, or any optional entry in a release
+  and run kinds: no combination with an undeclared `NotMeasured`, any `CheckBroken`, or an optional entry without green `measured_on` legs in a release
   run yields 0; **report-only findings plus `NotMeasured` yields 6**; failing findings plus `NotMeasured` yields 5 with
   both listed.
 - Waivers: a planted crash and a planted half run with one finding, each under a matching `*` waiver, exit 7 and 6, in
   both hosts.
 - `Measured` under nextest and `cargo test` in all three modes (A.2 is the prototype): a missing tool
   (`paddock-no-such-tool-0089`) fails strict, passes and records once in reporting mode, passes on a declared leg and
-  fails on an undeclared one and in a release run; `require_tool("cargo")` returns a path (the probe sees a present tool).
+  fails on an undeclared one, and in a release run passes only with `measured_on` (a planted `measured_on` leg that did
+  not run the test makes `release-verdict` fail); `require_tool("cargo")` returns a path (the probe sees a present tool).
 - C103: every shape of §5 (a) and (b) in fixtures with a clean twin each; it must report every planted one.
 
 ### 7. CI and the strict default (new in revision 2)
 
 CI runs `cargo nextest run --profile ci` directly (`ci.yml:478, 575, 1186`; `.gitea/actions/app-gates/action.yml:153`),
-not `./dev test`. Under D4 (b) the strict outcome reads the register itself, so CI needs only `PADDOCK_LEG=<job id>` in
-each test job's environment, set once by the shared setup action, and an end-of-job step that prints
-`PADDOCK_NOT_MEASURED_LOG` into the job summary. That touches shared actions (on every app's release path: ER-31 (b),
+not `./dev test`. Under D4 (b) the strict outcome reads the register itself, so CI needs only `PADDOCK_LEG=<id>` and
+`PADDOCK_NOT_MEASURED_LOG` in each test step's environment. There is no single shared setup action, so they are set
+where the tests run: the `app-gates` action (a `leg` input, default `${{ github.job }}-${{ runner.os }}`) for every
+app workflow, and the three `ci.yml` jobs that call nextest directly; each of those then uploads the log as an artifact
+and prints it into the job summary. That touches shared actions (on every app's release path: ER-31 (b),
 ADR 0022 G.7), so it is its own work package (WP-2b) and lands outside a release freeze, **before** WP-4 and WP-5:
 otherwise migrated tests turn legs red where a declared exception was intended.
 
@@ -359,13 +394,14 @@ An `[[optional]]` line declares a measurement optional per place; C103 can be re
 | D3 | Exit codes | (a) `NotMeasured` 6, `CheckBroken` 7; precedence 7, then failing findings 5, then 6, then 0; (b) one code for both | **(a)** |
 | D4 | How CI applies optional entries | (a) every CI test step through `./dev test --leg <id>`; (b) the strict `Measured` reads the register and `PADDOCK_LEG`, plus a summary step (WP-2b) | **(b)** now; (a) can follow with RT-12 |
 | D5 | Report-only findings and not measured | (a) never masked: exit 6 (or 7), the property test covers it; (b) report-only runs exit 0 regardless | **(a)** |
-| D6 | Where optional is declared | (a) `docs/optional-measurements.toml`, an ADR 0088 register (readers, coverage, uncovered = not measured); never for `CheckBroken` or in a release run (0088 §3's set); `ci-only` counts for the push gate; (b) at the call site | **(a)** |
+| D6 | Where optional is declared | (a) `docs/optional-measurements.toml`, an ADR 0088 register (readers, coverage, uncovered = not measured); never for `CheckBroken`; in a release run only under D14; `ci-only` counts for the push gate; (b) at the call site | **(a)** |
 | D7 | The check | (a) C103: every early exit in a test body, print or not; outcome definitions outside the canonical module; `process::exit` outside `main.rs`; shrink-only ratchet; (b) Clippy only | **(a)** |
 | D8 | The JS host's waivable crash | (a) fix now, failing test first, shadow-table entry; (b) with WP-4 | **(a)** |
 | D9 | ffmpeg in CI (measured absent in `paddock-ci:v2`) | (a) add it to the image; (b) an `[[optional]]` entry for the Linux container leg; (c) both, (b) expiring at the image date | **(c)** |
 | D10 | The 91 `#[ignore]` tests | (a) out of scope; a later check that each names the job that runs it; (b) now | **(a)** |
-| D11 | Engineering rule | (a) extend ER-33: "… and a check, probe or test that could not look reports it as its own outcome and exit code, which no waiver, baseline, report-only finding, aggregation or test harness turns into a pass; a measurement may be skipped only where reviewed data declares it optional for that place, with a reason and an expiry, and never in a release run"; (b) a new ER-37 | **(a)**, as ADR 0088 D11 |
-| D12 | Tag gating | (a) none beyond the normal gates; WP-1 and WP-2b land outside a release freeze; (b) block tags until WP-5 | **(a)** |
+| D11 | Engineering rule | (a) extend ER-33: "… and a check, probe or test that could not look reports it as its own outcome and exit code, which no waiver, baseline, report-only finding, aggregation or test harness turns into a pass; a measurement may be skipped only where reviewed data declares it optional for that place, with a reason and an expiry, and in a release run only where another leg of the same run measured it"; (b) a new ER-37 | **(a)**, as ADR 0088 D11 |
+| D12 | Tag gating | (a) no new gate on tags beyond D14's rule; WP-1 and WP-2b land outside a release freeze, and WP-5 migrates an app's tests only with its `measured_on` entries in the same change; (b) block tags until WP-5 | **(a)** |
+| D14 | Optional entries in release runs (P1-7) | (a) honoured only with `measured_on = [legs]` and one of those legs ran the test green in the same run, checked across legs by `release-verdict` (+0.5 day in WP-2b); (b) release strictness only for ER-33 release checks (vm-smoke, release isolation, installer, gates), `where` entries for unit tests honoured as on any run; (c) stay strict, and first make the image measure everything (a non-root test user, a landlock-capable runner) in a WP before WP-5 | **(a)**: a test may be measured on another leg but never vanishes from a release; (c)'s image work stays worth doing and removes entries as it lands; (b) is the fallback if `release-verdict` cannot read the legs' reports |
 | D13 | Reading CI logs for test results | (a) one reader (`runlog`, §4b) for nextest, Playwright and vitest, `Measured` only with the runner's summary, truncation controls from real logs; (b) each tool keeps its own | **(a)**: two nextest readers already drifted (#6) |
 
 ## Work packages (raw agent-days, one agent), in order
@@ -375,16 +411,25 @@ An `[[optional]]` line declares a measurement optional per place; C103 can be re
 | WP-0 | The JS host's crash (§8.1) with the planted-waiver test first | 0.25 |
 | WP-1 | `paddock_cli::outcome` (`Outcome`, `Verdict`, `Optional` reader with run kinds, JSON and table), `Exit` 6 and 7, contract and property tests (D5's case included), 99% coverage; `conformance/src/outcome.mjs` | 1.5 |
 | WP-2 | `paddock_testkit::{Measured, measure, require_tool, require_tool_that, require_capability, require_env}` with the three modes and the record format; the JS `measure`/`requireTool`; `./dev test` (nextest plus records into a `Verdict`); §6's controls under nextest and `cargo test` | 2.5 |
-| WP-2b | CI legs (D4 (b)): `PADDOCK_LEG` and `PADDOCK_NOT_MEASURED_LOG` in the shared setup action, a summary step, the release-run variables; a dispatch of one app's release workflow with gates on (rule 54) | 1 |
+| WP-2b | CI legs (D4 (b)): `PADDOCK_LEG` and `PADDOCK_NOT_MEASURED_LOG` in `app-gates` and the three `ci.yml` nextest jobs, artifact upload and summary, `PADDOCK_RUN_KIND` in the release workflows, D14 (a)'s `measured_on` check in `release-verdict`; a dispatch of one app's release workflow with gates on (rule 54) | 1.5 |
 | WP-2c | §4b's reader: the Playwright and vitest parts (nextest by RT-8, not counted here), the truncation controls over every captured log, a vitest fixture, `plan_since` and `ci flakes` as callers, the copies entry | 1.5 |
 | WP-3 | C103 (a) syn pass, (b), (c), fixtures for every shape, the ratchet seed; `docs/optional-measurements.toml` with schema and its 0088 list entry; benchmark line | 2.5 |
 | WP-4 | Tooling copies onto the type (§8.4) with the shadow-table entries | 2 |
 | WP-5 | Step 1: one reporting-mode run per Rust test leg, the per-leg list, the image line for ffmpeg (D9) and the entries; step 2: the 126 test-body sites and 2 JS sites by kind, per app. Re-sized after step 1 | 3 (1 + 2, provisional) |
 | WP-6 | `docs/known-copies.toml` entry, ER-33 text (D11), rule 71 line, lessons entry, RT brief template line | 0.5 |
-| | **Total** | **14.75** |
+| | **Total** | **15.25** |
 
-First cut: WP-0 now (independent of acceptance), then WP-1, WP-2, WP-2b, WP-2c and WP-3 (9 days) close the class for new
+First cut: WP-0 now (independent of acceptance), then WP-1, WP-2, WP-2b, WP-2c and WP-3 (9.5 days) close the class for new
 code; WP-4 and WP-5 retire today's copies.
+
+## Review answers (revision 2, `90d28a0a6`)
+
+- P1-7 release runs: §3a and D14 (recommended (a)), D12 restated, WP-2b +0.5 day.
+- RT-5 drifts: `judge` named as RT-5 names it; crash stays `CheckBroken`, changed in RT-5 by WP-4 with a shadow-table
+  line; the "being fixed" text replaced by `0a94bf347`'s state; the C103 (b) seed updated and re-seeded by WP-3.
+- A: `test:` entries are expiry-only; their records are CI artifacts read by `release-verdict`. B: run kind from
+  `GITHUB_REF` and an explicit `PADDOCK_RUN_KIND`; `PADDOCK_LEG` set in `app-gates` and the three `ci.yml` jobs.
+  C: start lines must equal summaries; a two-invocation fixture. D: JS shapes in C103 (b). ADR 0090 cross-referenced.
 
 ## Review answers (revision 1, `e5e4f300d`)
 
