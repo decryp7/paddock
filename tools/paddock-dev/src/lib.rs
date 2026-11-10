@@ -14,6 +14,7 @@
 //!   [--app]`, `--commit-range`, `--explain`): the matrix, the base of a run and the commit lint's range in [`plan_ci`], the
 //!   command in [`plan_cmd`]. Oracle-tested against the script until it is retired (ADR 0022 R4). `plan --since-run <run>`
 //!   reruns only what failed in a finished run ([`plan_since`]).
+//! - `ci release-isolation setup|record|verify`: a tag build reads nothing kept ([`release_isolation`], ADR 0085).
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
@@ -28,6 +29,7 @@ pub mod plan_cmd;
 pub mod plan_gitea;
 pub mod plan_repo;
 pub mod plan_since;
+pub mod release_isolation;
 pub mod slots;
 pub mod wait;
 

@@ -1,4 +1,4 @@
-use crate::{gates, input_hash, ipc_endpoints, plan, plan_cmd, slots, wait};
+use crate::{gates, input_hash, ipc_endpoints, plan, plan_cmd, release_isolation, slots, wait};
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
 use std::io::Write;
@@ -77,6 +77,12 @@ enum CiCommand {
     Slot {
         #[command(subcommand)]
         command: SlotCommand,
+    },
+    /// Release mode (ADR 0085): a tag build reads nothing kept. `setup` makes the job's folders, `record` is the only
+    /// ledger writer, `verify` proves it.
+    ReleaseIsolation {
+        #[command(subcommand)]
+        command: release_isolation::Command,
     },
 }
 
@@ -236,6 +242,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             SlotCommand::IdleRun(a) => slots::idle_run(&a),
             SlotCommand::Hold(a) => slots::hold(&a),
         },
+        Command::Ci {
+            command: CiCommand::ReleaseIsolation { command },
+        } => release_isolation::command(command),
         Command::Wait(a) => wait::command(&a),
         Command::Gates {
             command: GatesCommand::Model(a),

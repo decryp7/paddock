@@ -33,14 +33,16 @@ paddock-repo-graph = { path = "../../crates/paddock-repo-graph", features = ["gi
 paddock-slots = { path = "../../crates/paddock-slots" }
 yaml-rust2 = "0.13"
 toml = { version = "1", default-features = false, features = ["parse", "serde"] }
+# release_isolation: SHA-256 of the .crate archives (already in this lockfile through the shared crates).
+sha2 = "0.10"
 
 [target.'cfg(unix)'.dependencies]
 # fds.rs: the holder closes the descriptors it inherited.
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-# fds.rs: the standard handles are made non-inheritable before the holder starts.
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
+# fds.rs: the standard handles are made non-inheritable before the holder starts; release_isolation: the file index.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 tempfile = "3"
