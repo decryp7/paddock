@@ -1,6 +1,6 @@
 # Amendment to ADR 0073 (2026-11-11): Elevated Debrief: a risk warning, the user decides
 
-- Status: **Proposed 2026-11-11, revision 6.**
+- Status: **Accepted 2026-11-11 (user)**, revision 6; D-W1 as recommended. History: Proposed 2026-11-11.
   - **The user's decision (2026-11-11, final):** "if the user wants to run as admin, just prompt the risk and if the
     user accepts, it should be ok, like Visual Studio and VS Code."
   - "Restart as administrator" stays as it is. Before it runs, Debrief shows one warning with **Continue** and
@@ -89,7 +89,7 @@ It is not a release-path change, so rule 54's installer build is not needed. It 
 
 | # | Decision | Recommendation |
 | --- | --- | --- |
-| D-W1 | Offer "Don't ask again"? | **No.** The restart is rare, and the warning is the whole control: a remembered "yes" would leave nothing. If wanted later, a setting in Settings ▸ Advanced could turn the warning off, visible and reversible, for about 0.25 day. |
+| D-W1 | Offer "Don't ask again"? | **No**, chosen (recommendation; the user did not object). The restart is rare, and the warning is the whole control: a remembered "yes" would leave nothing. If wanted later, a setting in Settings ▸ Advanced could turn the warning off, visible and reversible, for about 0.25 day. |
 
 ## Considered and set aside (2026-11-11)
 
