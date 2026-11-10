@@ -83,7 +83,7 @@ describe('loading skeletons name themselves through a role that allows a name', 
     const backend = mock();
     (vi.spyOn(backend, stall) as unknown as { mockReturnValue(v: Promise<never>): void }).mockReturnValue(new Promise<never>(() => {}));
     void open(component, inputs, backend, kind);
-    for (let i = 0; i < 50 && !document.body.querySelector('.skeleton'); i++) await new Promise((r) => setTimeout(r, 20));
+    await vi.waitFor(() => expect(document.body.querySelector('.skeleton')).not.toBeNull());
     const sk = document.body.querySelector<HTMLElement>('.skeleton');
     expectNameAllowed(sk);
     if (!sk!.closest('[aria-hidden="true"]')) expect(sk!.getAttribute('aria-busy')).toBe('true');
