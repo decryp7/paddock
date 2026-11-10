@@ -3,14 +3,16 @@
 //!
 //! (a) the branch did not touch it (its blob equals the merge base's), so the merge itself changed it, or
 //! (b) the result removes lines (and does not re-add them elsewhere in the file) that make up at least half of what one earlier
-//!     commit added to the file (at least two lines): a revert of that commit, as when a branch commit is built on a stale tree.
+//!     commit added to the file (at least two lines), AND the branch's or the result's blob of the file equals a blob the file
+//!     had earlier in the first parent's history: a stale tree brought an old version back. A file the branch deleted, renamed
+//!     or rewrote into something new is no revert, so rule (b) skips it.
 //!
 //! Why: on 2026-11-05 a branch commit built on a stale tree reverted a memory fix, a redaction and test fixes with no conflict
-//! (b48df1818).
+//! (b48df1818). A finding is answered with `Reverted: <path>: <reason>` (or `Hunks-dropped:`) in the merge message.
 
 use super::diff::{DIFF_FLAGS, FileDiff, Hunk, parse, trivial};
 use super::git::{Git, short};
-use super::{Finding, Kind};
+use super::{Ctx, Finding, Kind, trailers};
 use std::collections::{HashMap, HashSet};
 
 /// Commits touching a file that are searched for the commit being reverted.
@@ -26,13 +28,54 @@ fn counts<'a>(lines: impl Iterator<Item = &'a String>) -> HashMap<&'a str, usize
     m
 }
 
-/// Files where `result` (a tree) goes backwards against `first`; `second` is the merged branch tip, `base` their merge base.
-/// `to_result` is the diff from `first` to `result`.
-pub fn check(git: &Git, first: &str, second: &str, result: &str, base: &str, to_result: &[FileDiff]) -> Result<Vec<Finding>, String> {
+/// Every `(path, blob id)` the history of `first` gave `paths`: one `git log --raw` per hundred paths, not one per file.
+fn history_blobs(git: &Git, first: &str, paths: &[&str]) -> Result<HashSet<(String, String)>, String> {
+    let mut seen = HashSet::new();
+    for chunk in paths.chunks(100) {
+        let mut args = vec![
+            "log",
+            "--raw",
+            "-z",
+            "--no-abbrev",
+            "--no-renames",
+            "--no-merges",
+            "--format=",
+            first,
+            "--",
+        ];
+        args.extend(chunk.iter().copied());
+        let out = git.text(&args)?;
+        // ":<mode> <mode> <old> <new> <status>" NUL path NUL
+        let mut tokens = out.split('\0').map(str::trim).filter(|t| !t.is_empty());
+        while let Some(meta) = tokens.next() {
+            let Some(path) = tokens.next() else { break };
+            let ids: Vec<&str> = meta.split(' ').collect();
+            if ids.len() >= 5 {
+                seen.insert((path.to_string(), ids[2].to_string()));
+                seen.insert((path.to_string(), ids[3].to_string()));
+            }
+        }
+    }
+    Ok(seen)
+}
+
+/// Files where the result goes backwards against the first parent; `second` is the merged branch tip, `base` their merge base.
+/// `to_result` is the diff from the first parent to the result.
+pub fn check(cx: &Ctx, second: &str, base: &str, to_result: &[FileDiff]) -> Result<Vec<Finding>, String> {
+    let (git, first, result, message, generated) = (cx.git, cx.parents[0].as_str(), cx.tree, cx.message, cx.generated);
     let touched: HashSet<String> = git.changed_paths(base, second)?.into_iter().collect();
-    let diffs: HashMap<&str, &[Hunk]> = to_result.iter().map(|f| (f.path.as_str(), f.hunks.as_slice())).collect();
+    let diffs: HashMap<&str, &[Hunk]> = to_result.iter().map(|f| (f.old(), f.hunks.as_slice())).collect();
+    let mut blobs: Option<(HashMap<String, String>, HashMap<String, String>)> = None;
     let mut flagged = Vec::new();
+    // Files that look like reverts by their lines, with the blobs the stale-tree test needs: judged together afterwards.
+    let mut pending: Vec<(String, HashMap<&str, usize>, Vec<String>)> = Vec::new();
     for file in git.changed_paths(first, result)? {
+        if generated.is(&file)
+            || trailers::path_reason(message, "Reverted", &file).is_some()
+            || trailers::path_reason(message, "Hunks-dropped", &file).is_some()
+        {
+            continue;
+        }
         if !touched.contains(&file) {
             flagged.push(Finding {
                 kind: Kind::Backwards,
@@ -42,17 +85,38 @@ pub fn check(git: &Git, first: &str, second: &str, result: &str, base: &str, to_
             continue;
         }
         let hunks = diffs.get(file.as_str()).copied().unwrap_or(&[]);
-        let added: Vec<String> = hunks.iter().flat_map(|h| h.added.iter().cloned()).collect();
-        let removed: Vec<String> = hunks.iter().flat_map(|h| h.removed.iter().cloned()).collect();
-        let readded = counts(added.iter());
-        let mut gone = counts(removed.iter().filter(|l| !trivial(l)));
+        let readded = counts(hunks.iter().flat_map(|h| h.added.iter()));
+        let mut gone = counts(hunks.iter().flat_map(|h| h.removed.iter()).filter(|l| !trivial(l)));
         for (l, n) in &readded {
             if let Some(g) = gone.get_mut(l) {
                 *g = g.saturating_sub(*n);
             }
         }
-        // A revert needs at least MIN_LINES removed lines; most files stop here without a `git log`.
+        // A revert needs at least MIN_LINES removed lines; most files stop here without another git call.
         if gone.values().sum::<usize>() < MIN_LINES {
+            continue;
+        }
+        // The stale-tree test: the branch's or the result's version of the file is one the first parent's history had before.
+        let (second_ids, result_ids) = match &blobs {
+            Some(b) => b,
+            None => blobs.insert((git.blob_ids(second)?, git.blob_ids(result)?)),
+        };
+        // A file the branch deleted has no branch blob; if the result lacks it too there is nothing to have come back.
+        let mut oids: Vec<String> = second_ids.get(&file).cloned().into_iter().collect();
+        oids.extend(result_ids.get(&file).cloned());
+        if oids.is_empty() {
+            continue;
+        }
+        pending.push((file, gone, oids));
+    }
+    let paths: Vec<&str> = pending.iter().map(|(f, _, _)| f.as_str()).collect();
+    let seen = if paths.is_empty() {
+        HashSet::new()
+    } else {
+        history_blobs(git, first, &paths)?
+    };
+    for (file, gone, oids) in pending {
+        if !oids.iter().any(|o| seen.contains(&(file.clone(), o.clone()))) {
             continue;
         }
         let depth = DEPTH.to_string();
@@ -75,7 +139,7 @@ pub fn check(git: &Git, first: &str, second: &str, result: &str, base: &str, to_
                     kind: Kind::Backwards,
                     subject: file.clone(),
                     detail: format!(
-                        "removes {back} of the {} lines commit {} added (a revert of it?)",
+                        "removes {back} of the {} lines commit {} added, and its blob is one the file had before (a revert of it?)",
                         mine.len(),
                         short(sha)
                     ),

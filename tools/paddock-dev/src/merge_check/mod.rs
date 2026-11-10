@@ -1,21 +1,36 @@
 //! `./dev merge check`: did a merge silently drop one side's work? (Rule 48 / the 2026-11-05 merge check, ported from
-//! `scripts/merge-regression-check.mjs` and extended on 2026-11-10; the incidents: 087570da4 after merge f94934ec5, 85f326139,
-//! 359be91b4, 439861fcf and b48df1818.) Three detectors read the merge's parents and its result tree:
+//! `scripts/merge-regression-check.mjs` and extended on 2026-11-10.) Four detectors read the merge's parents and its result
+//! tree:
 //!
-//! 1. files that go backwards against the first parent ([`backwards`], the port);
-//! 2. hunks a parent added since the merge base that the result lacks ([`hunks`]), unless `Hunks-dropped: <path>: <reason>`;
-//! 3. tests a parent has that the result lacks ([`lost_tests`]), unless `Tests-removed: <name>: <reason>`.
+//! 1. files that go backwards against the first parent ([`backwards`], the port): a stale tree brought an old blob back
+//!    (b48df1818), or the merge changed a file the branch never touched; answered by `Reverted: <path>: <reason>`;
+//! 2. hunks a parent added since the merge base that the result lacks ([`hunks`]); answered by `Hunks-dropped: <path>: <reason>`;
+//! 3. tests a parent has that the result lacks, three-way ([`lost_tests`]); answered by `Tests-removed: <name>: <reason>`;
+//! 4. files taken whole from one parent although the other changed them too ([`whole_file`]); answered by `Hunks-dropped`.
 //!
-//! Outcomes follow ADR 0089: clean, findings (exit 5) and not measured (a missing parent, an unparsable file, a git failure).
-//! Never a silent pass: whatever the check could not read is reported as not measured.
+//! What it covers. 087570da4 restored what merge f94934ec5 dropped: a merge-level drop, found by detectors 2 and 3 (and 1 for
+//! two of its files). 85f326139, 439861fcf and 359be91b4 are commit-level drops (single-parent commits that restored work an
+//! earlier commit lost) and b48df1818 is a commit built on a stale tree: this check looks at a merge's parents against its
+//! result, so a per-commit run covers the first three; the last is caught when its branch is merged (detector 1).
+//!
+//! Octopus merges: parent 1 is compared with every later parent; detector 1 runs for each later parent against the first, and
+//! detectors 2 and 3 for every parent, each with the merge base of the first parent and the other one (the second for the
+//! first parent). A file or test the other parents all lack counts as deleted by them.
+//!
+//! Outcomes follow ADR 0089: clean, findings (exit 5, an error object in JSON mode) and not measured (a missing parent, a
+//! shallow clone, an unparsable file, a git failure). Never a silent pass: whatever the check could not read is reported as
+//! not measured. Generated files ([`generated`]) are skipped by all three detectors. Not done: `git cat-file --batch` (the
+//! shared process runner closes standard input).
 
 mod backwards;
 mod diff;
+mod generated;
 mod git;
 mod hunks;
 mod lost_tests;
 mod testnames;
 mod trailers;
+mod whole_file;
 
 use git::{Git, short};
 use paddock_cli::{CliError, Exit, Report};
@@ -31,6 +46,8 @@ pub enum Kind {
     DroppedHunk,
     /// A parent's test is missing from the result.
     LostTest,
+    /// The result is one parent's version of a file the other parent changed too.
+    WholeFile,
 }
 
 impl Kind {
@@ -39,6 +56,7 @@ impl Kind {
             Kind::Backwards => "backwards",
             Kind::DroppedHunk => "dropped-hunk",
             Kind::LostTest => "lost-test",
+            Kind::WholeFile => "whole-file",
         }
     }
 }
@@ -78,7 +96,16 @@ pub struct Merge {
     pub label: String,
 }
 
-/// Runs the three detectors over `merge`.
+/// What every detector reads: the repository, the merge's parents, its result tree and message, and the generated files.
+pub struct Ctx<'a> {
+    git: &'a Git<'a>,
+    parents: &'a [String],
+    tree: &'a str,
+    message: &'a str,
+    generated: &'a generated::Generated,
+}
+
+/// Runs the detectors over `merge`.
 pub fn analyze(git: &Git, merge: &Merge) -> Outcome {
     match run(git, merge) {
         Ok(f) if f.is_empty() => Outcome::Clean,
@@ -88,31 +115,57 @@ pub fn analyze(git: &Git, merge: &Merge) -> Outcome {
 }
 
 fn run(git: &Git, merge: &Merge) -> Result<Vec<Finding>, String> {
+    // A shallow clone's history is cut: a parent, a merge base or an earlier blob may be missing, and what is missing cannot
+    // be told from what is not there.
+    if git.is_shallow()? {
+        return Err("this clone is shallow, so parents, merge bases and earlier blobs may be missing (run `git fetch --unshallow`)".into());
+    }
     for p in &merge.parents {
         git.text(&["cat-file", "-e", &format!("{p}^{{commit}}")])
             .map_err(|e| format!("a parent is not in this clone (a shallow clone? run `git fetch --unshallow`): {e}"))?;
     }
     let first = merge.parents.first().ok_or("the merge has no parents")?;
     let tree = merge.tree.as_str();
+    // One diff per parent, shared by the three detectors; the first parent's also serves the port.
+    let diffs = merge.parents.iter().map(|p| diff_of(git, p, tree)).collect::<Result<Vec<_>, _>>()?;
+    let paths: std::collections::BTreeSet<String> = diffs
+        .iter()
+        .flatten()
+        .flat_map(|f| [f.path.clone(), f.old().to_string()])
+        .filter(|p| !generated::by_name(p))
+        .collect();
+    let generated = generated::Generated::load(git, tree, &paths.into_iter().collect::<Vec<_>>())?;
+    let cx = Ctx {
+        git,
+        parents: &merge.parents,
+        tree,
+        message: &merge.message,
+        generated: &generated,
+    };
     let mut out = Vec::new();
-    let mut first_diff: Option<Vec<diff::FileDiff>> = None;
+    let blobs = merge.parents.iter().map(|p| git.blob_ids(p)).collect::<Result<Vec<_>, _>>()?;
+    let result_blobs = git.blob_ids(tree)?;
     for (i, parent) in merge.parents.iter().enumerate() {
+        // The merge base of the first parent with the second; of a later parent with the first (an octopus has one per parent).
         let other = merge.parents.get(if i == 0 { 1 } else { i }).ok_or("the merge has one parent")?;
         let base = git
             .text(&["merge-base", first, other])
             .map_err(|e| format!("no merge base for parent {}: {e}", i + 1))?;
         let base = base.trim();
-        // One diff per parent, shared by the three detectors; the first parent's also serves the port.
-        let to_result = diff_of(git, parent, tree)?;
+        out.extend(whole_file::check(
+            &merge.parents,
+            i,
+            &blobs,
+            &git.blob_ids(base)?,
+            &result_blobs,
+            &merge.message,
+            &generated,
+        ));
         if i > 0 {
-            let fd = first_diff.as_deref().ok_or("the first parent's diff is missing")?;
-            out.extend(backwards::check(git, first, parent, tree, base, fd)?);
+            out.extend(backwards::check(&cx, parent, base, &diffs[0])?);
         }
-        out.extend(hunks::check(git, &merge.parents, i, base, &to_result, &merge.message)?);
-        out.extend(lost_tests::check(git, parent, i, tree, &to_result, &merge.message)?);
-        if i == 0 {
-            first_diff = Some(to_result);
-        }
+        out.extend(hunks::check(&cx, i, base, &diffs[i])?);
+        out.extend(lost_tests::check(&cx, i, base, &diffs[i])?);
     }
     Ok(out)
 }
@@ -217,12 +270,9 @@ pub fn command(req: &Request) -> Result<Report, CliError> {
                 merge.label,
                 found.len()
             ));
-            let data = json!({
-                "outcome": "findings",
-                "merge": merge.label,
-                "findings": found.iter().map(|f| json!({"kind": f.kind.name(), "subject": f.subject, "detail": f.detail})).collect::<Vec<_>>(),
-            });
-            Ok(Report::new(data, lines.join("\n")).with_exit(Exit::Findings))
+            // An error object, so JSON mode says `"ok": false, "kind": "findings"`, never `ok: true` with findings in it.
+            Err(CliError::new(Exit::Findings, lines.join("\n"))
+                .with_hint("Each line names its finding; the last one says how to answer it."))
         }
     }
 }

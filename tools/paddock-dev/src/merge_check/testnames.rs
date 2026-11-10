@@ -77,8 +77,21 @@ fn script(text: &str) -> Vec<String> {
         }
         for c in call.captures_iter(line) {
             if let Some(m) = c.get(1).or_else(|| c.get(2)).or_else(|| c.get(3)) {
-                out.push(m.as_str().to_string());
+                out.push(unescape(m.as_str()));
             }
+        }
+    }
+    out
+}
+
+/// The text of a string literal: a backslash makes the next character itself (`\'` is `'`, `\\` is `\`).
+fn unescape(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars();
+    while let Some(c) = chars.next() {
+        match (c, c == '\\') {
+            (_, true) => out.extend(chars.next()),
+            _ => out.push(c),
         }
     }
     out
@@ -100,5 +113,9 @@ mod tests {
         let src = "it('one', () => {});\n  test.only(\"two\", async () => {});\n// it('commented', 1)\nre.test('method');\ntest.describe('group', () => {\n  test(`three`, () => {});\n});\nsubmit('x');\n";
         assert_eq!(names("x.spec.ts", src).unwrap(), vec!["one", "two", "three"]);
         assert!(names("README.md", "it('x')").unwrap().is_empty());
+        assert_eq!(
+            names("x.spec.ts", "it('it\\'s \\\\ fine', () => {});").unwrap(),
+            vec!["it's \\ fine"]
+        );
     }
 }

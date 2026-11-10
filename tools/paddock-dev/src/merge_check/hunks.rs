@@ -6,19 +6,14 @@
 //! A hunk counts when it adds at least two non-trivial lines; it is missing when at least half of them (and at least two) are
 //! among the lines the result removes from the parent's file and does not add back elsewhere in it, each line counted once.
 //! A file that every other parent lacks (deleted on the other side) is skipped: that is a modify/delete conflict, resolved on
-//! purpose. Generated lock files are skipped: they are regenerated, not merged.
+//! purpose. Generated files ([`super::generated`]) are skipped: they are regenerated, not merged.
 
 use super::diff::{DIFF_FLAGS, FileDiff, parse, trivial};
-use super::git::{Git, short};
-use super::{Finding, Kind, trailers};
+use super::git::short;
+use super::{Ctx, Finding, Kind, trailers};
 use std::collections::{HashMap, HashSet};
 
 const MIN_LINES: usize = 2;
-
-fn generated(path: &str) -> bool {
-    let name = path.rsplit('/').next().unwrap_or(path);
-    name == "package-lock.json" || name.ends_with(".lock")
-}
 
 /// The lines `diff` (parent to result) removes from a file and does not add back in it, with their counts.
 fn gone(file: &FileDiff) -> HashMap<&str, usize> {
@@ -36,23 +31,17 @@ fn gone(file: &FileDiff) -> HashMap<&str, usize> {
 
 /// The hunks of `parents[index]` (relative to `base`) that `result` lacks. `to_result` is the diff from that parent to the
 /// result.
-pub fn check(
-    git: &Git,
-    parents: &[String],
-    index: usize,
-    base: &str,
-    to_result: &[FileDiff],
-    message: &str,
-) -> Result<Vec<Finding>, String> {
+pub fn check(cx: &Ctx, index: usize, base: &str, to_result: &[FileDiff]) -> Result<Vec<Finding>, String> {
+    let (git, parents, message, generated) = (cx.git, cx.parents, cx.message, cx.generated);
     let parent = parents[index].as_str();
     let mut args = vec!["diff"];
     args.extend(DIFF_FLAGS);
     args.extend([base, parent]);
     let added_by_parent = parse(&git.text(&args)?)?;
     let mut others: Option<Vec<HashSet<String>>> = None;
-    let by_path: HashMap<&str, &FileDiff> = to_result.iter().map(|f| (f.path.as_str(), f)).collect();
+    let by_path: HashMap<&str, &FileDiff> = to_result.iter().map(|f| (f.old(), f)).collect();
     let mut out = Vec::new();
-    for file in added_by_parent.iter().filter(|f| !f.deleted && !generated(&f.path)) {
+    for file in added_by_parent.iter().filter(|f| !f.deleted && !generated.is(&f.path)) {
         let Some(change) = by_path.get(file.path.as_str()) else { continue };
         let hunks: Vec<Vec<&String>> = file
             .hunks

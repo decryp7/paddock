@@ -79,7 +79,8 @@ fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/merge-check/087570da4")
 }
 
-const REAL_FILES: [(&str, &str); 3] = [
+const REAL_FILES: [(&str, &str); 4] = [
+    ("crates/debrief-plugin-test/src/conformance.rs", "src_conformance.rs.txt"),
     ("crates/debrief-plugin-test/src/host.rs", "src_host.rs.txt"),
     ("crates/debrief-plugin-test/src/lib.rs", "src_lib.rs.txt"),
     ("crates/debrief-plugin-test/tests/it/harness.rs", "tests_it_harness.rs.txt"),
@@ -116,6 +117,7 @@ fn real_message() -> String {
 
 const HOST: &str = "crates/debrief-plugin-test/src/host.rs";
 const LIB: &str = "crates/debrief-plugin-test/src/lib.rs";
+const CONFORMANCE: &str = "crates/debrief-plugin-test/src/conformance.rs";
 const LOST: &str = "a_plugin_whose_import_breaks_while_it_reads_fails_the_cancellation_check_with_why";
 
 #[test]
@@ -125,6 +127,7 @@ fn the_real_merge_f94934ec5_loses_hunks_and_the_message_prose_is_no_reason() {
     assert_eq!(code, 5, "{out}");
     assert!(out.contains(&format!("[dropped-hunk] {HOST}")), "{out}");
     assert!(out.contains(&format!("[dropped-hunk] {LIB}")), "{out}");
+    assert!(out.contains(&format!("[dropped-hunk] {CONFORMANCE}")), "{out}");
     assert!(out.contains("::error::"), "{out}");
 }
 
@@ -141,25 +144,28 @@ fn the_real_merge_f94934ec5_goes_backwards_against_the_first_parent() {
     let r = real_merge(&real_message());
     let (code, out) = r.check(&["HEAD"]);
     assert_eq!(code, 5, "{out}");
-    // host.rs: the result removes what the first parent's b41d33baf-shaped commit added (rule b); lib.rs: the second parent
-    // never changed it, yet the merge did (rule a).
-    assert!(out.contains(&format!("[backwards] {HOST}: removes")), "{out}");
+    // lib.rs: the second parent never changed it, yet the merge did (rule a). host.rs is no revert in the sense of rule b: the
+    // result's blob is the second parent's own, not a blob the first parent's history had before.
     assert!(out.contains(&format!("[backwards] {LIB}: the branch never touched it")), "{out}");
 }
 
 #[test]
-fn reasons_in_the_message_answer_the_hunk_and_test_findings_only() {
+fn reasons_in_the_message_answer_each_finding_they_name() {
     let mut message = real_message();
     for (file, _) in REAL_FILES {
         message.push_str(&format!("Hunks-dropped: {file}: the second side supersedes it\n"));
     }
-    message.push_str(&format!("Tests-removed: {LOST}: superseded by the wait_read_whole check\n"));
-    let r = real_merge(&message);
-    let (code, out) = r.check(&["HEAD"]);
-    assert!(!out.contains("[dropped-hunk]") && !out.contains("[lost-test]"), "{out}");
-    // The backwards detector has no waiver: the merge still goes backwards.
+    // The hunk reason answers the hunk, whole-file and backwards findings of those files; the test needs its own.
+    let (code, out) = real_merge(&message).check(&["HEAD"]);
     assert_eq!(code, 5, "{out}");
-    assert!(out.contains("[backwards]"), "{out}");
+    assert!(
+        !out.contains("[dropped-hunk]") && !out.contains("[backwards]") && !out.contains("[whole-file]"),
+        "{out}"
+    );
+    assert!(out.contains(&format!("[lost-test] {LOST}")), "{out}");
+    message.push_str(&format!("Tests-removed: {LOST}: superseded by the wait_read_whole check\n"));
+    let (code, out) = real_merge(&message).check(&["HEAD"]);
+    assert_eq!(code, 0, "{out}");
 }
 
 #[test]
@@ -210,8 +216,8 @@ fn padding() -> String {
 const KEPT: &str = "#[test]\nfn keeps_working() {\n    assert_eq!(1, 1);\n}\n";
 const REMOVED: &str = "\n#[test]\nfn old_case() {\n    assert_eq!(2, 2);\n}\n";
 
-/// The branch deletes `old_case`; main has it.
-fn merge_that_removes_a_test(message: &str) -> Repo {
+/// The branch deletes `old_case`; main still has it (the first parent has the test, the base has it, the other side deleted it).
+fn merge_where_the_branch_deletes_a_test(message: &str) -> Repo {
     let r = Repo::new();
     r.write("crates/x/src/lib.rs", &format!("{}{KEPT}{REMOVED}", padding()));
     r.write("other.txt", &lines(10, "o"));
@@ -226,43 +232,106 @@ fn merge_that_removes_a_test(message: &str) -> Repo {
     r
 }
 
+const ADDED: &str = "\n#[test]\nfn new_case() {\n    assert_eq!(3, 3);\n}\n";
+
+/// Main adds `new_case`; the branch changes the same file elsewhere; the merge result keeps the branch's change and drops
+/// `new_case` (nothing in the base or the branch had it).
+fn merge_that_drops_a_test(message: &str) -> Repo {
+    let r = Repo::new();
+    r.write("crates/x/src/lib.rs", &format!("{}{KEPT}", padding()));
+    r.write("other.txt", &lines(10, "o"));
+    r.commit("initial");
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write("crates/x/src/lib.rs", &format!("pub const BRANCH: u32 = 1;\n{}{KEPT}", padding()));
+    r.commit("feat: branch change");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("crates/x/src/lib.rs", &format!("{}{KEPT}{ADDED}", padding()));
+    r.commit("test: new_case");
+    r.git(&["merge", "-q", "-s", "ours", "--no-commit", "feature"]);
+    r.write("crates/x/src/lib.rs", &format!("pub const BRANCH: u32 = 1;\n{}{KEPT}", padding()));
+    r.git(&["add", "--all"]);
+    r.git(&["commit", "-q", "-m", message]);
+    r
+}
+
 #[test]
-fn a_merge_that_removes_a_test_needs_tests_removed() {
-    let (code, out) = merge_that_removes_a_test("Merge feature").check(&["HEAD"]);
+fn a_test_the_other_side_deleted_is_not_lost() {
+    // Present in the base and in this parent, deleted on the other side on purpose: a three-way merge keeps it deleted.
+    let (code, out) = merge_where_the_branch_deletes_a_test("Merge feature").check(&["HEAD"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("[lost-test]"), "{out}");
+}
+
+#[test]
+fn a_test_nothing_but_this_parent_had_needs_tests_removed() {
+    let (code, out) = merge_that_drops_a_test("Merge feature").check(&["HEAD"]);
     assert_eq!(code, 5, "{out}");
-    assert!(out.contains("[lost-test] old_case"), "{out}");
+    assert!(out.contains("[lost-test] new_case"), "{out}");
     assert!(!out.contains("keeps_working"), "{out}");
 }
 
 #[test]
 fn tests_removed_with_a_reason_clears_the_lost_test() {
-    let (code, out) = merge_that_removes_a_test("Merge feature\n\nTests-removed: old_case: covered by keeps_working\n").check(&["HEAD"]);
-    assert_eq!(code, 0, "{out}");
+    for subject in ["new_case", "crates/x/src/lib.rs::new_case"] {
+        let message =
+            format!("Merge feature\n\nTests-removed: {subject}: covered by keeps_working\nHunks-dropped: crates/x/src/lib.rs: same\n");
+        let (code, out) = merge_that_drops_a_test(&message).check(&["HEAD"]);
+        assert_eq!(code, 0, "{subject}: {out}");
+    }
 }
 
 #[test]
 fn script_tests_are_collected_too() {
     let r = Repo::new();
+    r.write("ui/a.spec.ts", "test('opens the dialog', async () => {});\n");
+    r.write("other.txt", &lines(10, "o"));
+    r.commit("initial");
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write("ui/a.spec.ts", "// a note\ntest('opens the dialog', async () => {});\n");
+    r.commit("test: note");
+    r.git(&["checkout", "-q", "main"]);
     r.write(
         "ui/a.spec.ts",
         "test('opens the dialog', async () => {});\nit('closes it', () => {});\n",
     );
-    r.write("other.txt", &lines(10, "o"));
-    r.commit("initial");
-    r.git(&["checkout", "-q", "-b", "feature"]);
-    r.write("ui/a.spec.ts", "test('opens the dialog', async () => {});\n");
-    r.commit("test: drop one");
-    r.git(&["checkout", "-q", "main"]);
-    r.write("other.txt", &format!("{}more\nmore\n", lines(10, "o")));
-    r.commit("fix: other");
-    r.git(&["merge", "-q", "--no-ff", "-m", "Merge feature", "feature"]);
+    r.commit("test: close");
+    r.git(&["merge", "-q", "-s", "ours", "--no-commit", "feature"]);
+    r.write("ui/a.spec.ts", "// a note\ntest('opens the dialog', async () => {});\n");
+    r.git(&["add", "--all"]);
+    r.git(&["commit", "-q", "-m", "Merge feature"]);
     let (code, out) = r.check(&["HEAD"]);
     assert_eq!(code, 5, "{out}");
     assert!(out.contains("[lost-test] closes it"), "{out}");
 }
 
 #[test]
-fn a_branch_commit_built_on_a_stale_tree_is_flagged_before_and_after_merging() {
+fn a_test_that_moved_with_its_renamed_file_is_not_lost() {
+    // The branch renames the file and edits a line in it; the first parent's file is read at its old path and the result's at
+    // the new one.
+    let r = Repo::new();
+    r.write("crates/x/src/a.rs", &format!("{}{KEPT}{REMOVED}", padding()));
+    r.write("other.txt", &lines(10, "o"));
+    r.commit("initial");
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.git(&["mv", "crates/x/src/a.rs", "crates/x/src/b.rs"]);
+    r.write(
+        "crates/x/src/b.rs",
+        &format!(
+            "{}{}{REMOVED}",
+            padding(),
+            KEPT.replace("fn keeps_working() {", "fn keeps_working()  {")
+        ),
+    );
+    r.commit("refactor: rename and touch");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("other.txt", &format!("{}more\nmore\nmore\n", lines(10, "o")));
+    r.commit("fix: other");
+    r.git(&["merge", "-q", "--no-ff", "-m", "Merge feature", "feature"]);
+    let (code, out) = r.check(&["HEAD"]);
+    assert_eq!(code, 0, "{out}");
+}
+
+fn stale_tree_merge(message: &str) -> Repo {
     // The script's own case (b48df1818): the branch commit has the fixed commit as its parent but a tree made from the stale one.
     let r = Repo::new();
     r.write("src/a.txt", &lines(40, "a"));
@@ -283,7 +352,13 @@ fn a_branch_commit_built_on_a_stale_tree_is_flagged_before_and_after_merging() {
     r.git(&["checkout", "-q", "main"]);
     r.write("src/b.txt", &format!("{}unrelated main work\n", lines(10, "b")));
     r.commit("chore: main moves on");
-    r.git(&["merge", "-q", "--no-ff", "-m", "Merge feature", "feature"]);
+    r.git(&["merge", "-q", "--no-ff", "-m", message, "feature"]);
+    r
+}
+
+#[test]
+fn a_branch_commit_built_on_a_stale_tree_is_flagged_before_and_after_merging() {
+    let r = stale_tree_merge("Merge feature");
     let (code, out) = r.check(&["HEAD"]);
     assert_eq!(code, 5, "{out}");
     assert!(out.contains("[backwards] src/a.txt"), "{out}");
@@ -294,6 +369,39 @@ fn a_branch_commit_built_on_a_stale_tree_is_flagged_before_and_after_merging() {
     let (code, out) = r.check(&["--branch", "feature", "--target", "HEAD^1"]);
     assert_eq!(code, 5, "{out}");
     assert!(out.contains("[backwards] src/a.txt"), "{out}");
+}
+
+#[test]
+fn a_backwards_finding_can_be_waived_with_a_reason() {
+    for key in ["Reverted", "Hunks-dropped"] {
+        let r = stale_tree_merge(&format!("Merge feature\n\n{key}: src/a.txt: the fix moved to another module\n"));
+        let (code, out) = r.check(&["HEAD"]);
+        assert_eq!(code, 0, "{key}: {out}");
+    }
+    let r = stale_tree_merge("Merge feature\n\nReverted: src/a.txt: \n");
+    assert_eq!(r.check(&["HEAD"]).0, 5, "an empty reason is no reason");
+}
+
+#[test]
+fn a_branch_that_renames_deletes_or_rewrites_files_is_not_backwards() {
+    let r = Repo::new();
+    r.write("keep.txt", &lines(30, "k"));
+    r.write("moved.txt", &lines(30, "m"));
+    r.write("gone.txt", &lines(30, "g"));
+    r.write("rewritten.txt", &lines(30, "w"));
+    r.write("other.txt", &lines(10, "o"));
+    r.commit("initial");
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.git(&["mv", "moved.txt", "renamed.txt"]);
+    r.git(&["rm", "-q", "gone.txt"]);
+    r.write("rewritten.txt", &lines(25, "new"));
+    r.commit("refactor: move, delete, rewrite");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("other.txt", &format!("{}more\nmore\nmore\n", lines(10, "o")));
+    r.commit("fix: other");
+    r.git(&["merge", "-q", "--no-ff", "-m", "Merge feature", "feature"]);
+    let (code, out) = r.check(&["HEAD"]);
+    assert_eq!(code, 0, "{out}");
 }
 
 #[test]
@@ -370,4 +478,246 @@ fn an_unknown_revision_is_not_measured() {
     let (code, out) = r.check(&["no-such-revision"]);
     assert_eq!(code, 1, "{out}");
     assert!(out.contains("NOT MEASURED"), "{out}");
+}
+
+/// A repository where main adds `added` to `file` after the base, the branch edits another line of it, and the merge result is
+/// `result` (a text that keeps the branch's edit). `others` are files written in the base, so both parents have them.
+fn evil_file_merge(file: &str, base: &str, added_by_main: &str, branch: &str, result: &str, message: &str) -> Repo {
+    let r = Repo::new();
+    r.write(file, base);
+    r.write("other.txt", &lines(10, "o"));
+    r.commit("initial");
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.write(file, branch);
+    r.commit("feat: branch edit");
+    r.git(&["checkout", "-q", "main"]);
+    r.write(file, added_by_main);
+    r.write("other.txt", &format!("{}main other\n", lines(10, "o")));
+    r.commit("fix: main adds");
+    r.git(&["merge", "-q", "-s", "ours", "--no-commit", "feature"]);
+    r.write(file, result);
+    r.git(&["add", "--all"]);
+    r.git(&["commit", "-q", "-m", message]);
+    r
+}
+
+fn five() -> &'static str {
+    "added one here\nadded two here\nadded three here\nadded four here\nadded five here\n"
+}
+
+fn hunk_merge(kept_of_five: usize, message: &str) -> Repo {
+    let base = lines(30, "a");
+    let main = format!("{}{}", five(), base);
+    let branch = format!("{base}branch tail one\n");
+    let kept: String = five().lines().take(kept_of_five).map(|l| format!("{l}\n")).collect();
+    evil_file_merge("f.txt", &base, &main, &branch, &format!("{kept}{base}branch tail one\n"), message)
+}
+
+#[test]
+fn a_hunk_with_most_of_its_lines_kept_is_not_dropped_but_half_is() {
+    // 5 lines, 2 missing: 40 percent, below half.
+    let (_, out) = hunk_merge(3, "Merge").check(&["HEAD"]);
+    assert!(!out.contains("[dropped-hunk]"), "{out}");
+    // 5 lines, 3 missing: more than half; and 6 lines of which 3 are missing is exactly half.
+    let (_, out) = hunk_merge(2, "Merge").check(&["HEAD"]);
+    assert!(out.contains("[dropped-hunk] f.txt"), "{out}");
+    // A hunk of two lines of which one is missing is half, but one line is not enough to call a drop.
+    let base = lines(30, "a");
+    let main = format!("added one here\nadded two here\n{base}");
+    let branch = format!("{base}branch tail one\n");
+    let r = evil_file_merge(
+        "f.txt",
+        &base,
+        &main,
+        &branch,
+        &format!("added one here\n{base}branch tail one\n"),
+        "Merge",
+    );
+    let (_, out) = r.check(&["HEAD"]);
+    assert!(!out.contains("[dropped-hunk]"), "one missing line of two: {out}");
+    let base = lines(30, "a");
+    let six = format!("{}six six six six\n", five());
+    let main = format!("{six}{base}");
+    let branch = format!("{base}branch tail one\n");
+    let kept: String = six.lines().take(3).map(|l| format!("{l}\n")).collect();
+    let r = evil_file_merge("f.txt", &base, &main, &branch, &format!("{kept}{base}branch tail one\n"), "Merge");
+    let (_, out) = r.check(&["HEAD"]);
+    assert!(out.contains("[dropped-hunk] f.txt"), "half of six: {out}");
+}
+
+#[test]
+fn a_hunk_moved_inside_the_file_is_not_dropped() {
+    let base = lines(30, "a");
+    let main = format!("{}{}", five(), base);
+    let branch = format!("{base}branch tail one\n");
+    // The result has the five lines at the end instead of the top: removed in one place, added in another.
+    let r = evil_file_merge(
+        "f.txt",
+        &base,
+        &main,
+        &branch,
+        &format!("{base}{}branch tail one\n", five()),
+        "Merge",
+    );
+    let (_, out) = r.check(&["HEAD"]);
+    assert!(!out.contains("[dropped-hunk]"), "{out}");
+}
+
+#[test]
+fn a_folder_reason_needs_its_trailing_slash() {
+    let base = lines(30, "a");
+    let main = format!("{}{}", five(), base);
+    let branch = format!("{base}branch tail one\n");
+    let result = format!("{base}branch tail one\n");
+    let make = |trailer: &str| evil_file_merge("docs/img/f.txt", &base, &main, &branch, &result, &format!("Merge\n\n{trailer}\n"));
+    let (_, out) = make("Hunks-dropped: docs/img/: the images are redrawn").check(&["HEAD"]);
+    assert!(!out.contains("[dropped-hunk]"), "{out}");
+    let (_, out) = make("Hunks-dropped: docs/img: the images are redrawn").check(&["HEAD"]);
+    assert!(out.contains("[dropped-hunk] docs/img/f.txt"), "{out}");
+}
+
+#[test]
+fn a_file_the_other_side_deleted_is_a_conflict_not_a_drop() {
+    let r = Repo::new();
+    r.write("f.txt", &lines(30, "a"));
+    r.write("other.txt", &lines(10, "o"));
+    r.commit("initial");
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.git(&["rm", "-q", "f.txt"]);
+    r.commit("refactor: delete f");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("f.txt", &format!("{}{}", five(), lines(30, "a")));
+    r.commit("fix: main adds");
+    r.git(&["merge", "-q", "-s", "ours", "--no-commit", "feature"]);
+    r.git(&["rm", "-q", "f.txt"]);
+    r.git(&["commit", "-q", "-m", "Merge feature"]);
+    let (_, out) = r.check(&["HEAD"]);
+    assert!(!out.contains("[dropped-hunk]"), "{out}");
+}
+
+#[test]
+fn generated_files_are_skipped_by_every_detector() {
+    // Hunks main added to regenerated files are not "dropped" when the merge regenerates them.
+    for file in [
+        "Cargo.lock",
+        "THIRD_PARTY_NOTICES.md",
+        "docs/x.drawio",
+        "crates/x/widgets/generated.rs",
+        "gen/out.gen.txt",
+    ] {
+        let base = lines(30, "a");
+        let main = format!("{}{}", five(), base);
+        let branch = format!("{base}branch tail one\n");
+        let r = Repo::new();
+        r.write(".gitattributes", "*.gen.txt linguist-generated\n");
+        r.write(file, &base);
+        r.write("other.txt", &lines(10, "o"));
+        r.commit("initial");
+        r.git(&["checkout", "-q", "-b", "feature"]);
+        r.write(file, &branch);
+        r.commit("feat: branch edit");
+        r.git(&["checkout", "-q", "main"]);
+        r.write(file, &main);
+        r.commit("fix: main adds");
+        r.git(&["merge", "-q", "-s", "ours", "--no-commit", "feature"]);
+        r.write(file, &branch);
+        r.git(&["add", "--all"]);
+        r.git(&["commit", "-q", "-m", "Merge feature"]);
+        let (code, out) = r.check(&["HEAD"]);
+        assert_eq!(code, 0, "{file}: {out}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_deleted_file_whose_path_git_quotes_is_not_measured() {
+    let r = Repo::new();
+    r.write("we\"ird.txt", &lines(30, "q"));
+    r.write("other.txt", &lines(10, "o"));
+    r.commit("initial");
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.git(&["rm", "-q", "we\"ird.txt"]);
+    r.commit("refactor: delete");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("other.txt", &format!("{}more\nmore\nmore\n", lines(10, "o")));
+    r.commit("fix: other");
+    r.git(&["merge", "-q", "--no-ff", "-m", "Merge feature", "feature"]);
+    let (code, out) = r.check(&["HEAD"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("NOT MEASURED"), "{out}");
+}
+
+#[test]
+fn json_mode_does_not_call_findings_ok() {
+    let r = stale_tree_merge("Merge feature");
+    let (code, out) = r.check(&["HEAD", "--json"]);
+    assert_eq!(code, 5, "{out}");
+    let line = out.lines().find(|l| l.starts_with('{')).unwrap_or("");
+    assert!(line.contains("\"ok\":false") && line.contains("\"kind\":\"findings\""), "{out}");
+}
+
+/// Both sides edit `file`; the merge result is the branch's version whole.
+fn take_branch_whole(file: &str, message: &str, main_edits: bool) -> Repo {
+    let base = lines(30, "a");
+    let branch = format!("{base}branch tail one\nbranch tail two\n");
+    let main = if main_edits {
+        format!("main head one\nmain head two\n{base}")
+    } else {
+        base.clone()
+    };
+    evil_file_merge(file, &base, &main, &branch, &branch, message)
+}
+
+#[test]
+fn a_file_both_sides_changed_and_the_merge_took_whole_is_flagged() {
+    let (code, out) = take_branch_whole("notes/ecosystem.md", "Merge", true).check(&["HEAD"]);
+    assert_eq!(code, 5, "{out}");
+    assert!(out.contains("[whole-file] notes/ecosystem.md"), "{out}");
+}
+
+#[test]
+fn a_file_only_one_side_changed_is_no_whole_file_take() {
+    let (code, out) = take_branch_whole("notes/ecosystem.md", "Merge", false).check(&["HEAD"]);
+    assert!(!out.contains("[whole-file]"), "{out}");
+    assert_eq!(code, 0, "{out}");
+}
+
+#[test]
+fn a_whole_file_take_is_answered_by_a_reason_and_images_follow_their_generator() {
+    let m = "Merge\n\nHunks-dropped: notes/ecosystem.md: the page is redrawn\n";
+    let (code, out) = take_branch_whole("notes/ecosystem.md", m, true).check(&["HEAD"]);
+    assert_eq!(code, 0, "{out}");
+    let (_, out) = take_branch_whole("docs/images/ecosystem.png", "Merge", true).check(&["HEAD"]);
+    assert!(!out.contains("[whole-file]"), "{out}");
+}
+
+#[test]
+fn a_file_the_branch_renamed_and_main_edited_merges_cleanly() {
+    // Renames are followed: main's hunk is in the renamed file, not "removed with the old name".
+    let r = Repo::new();
+    let base = lines(30, "a");
+    r.write("f.txt", &base);
+    r.write("other.txt", &lines(10, "o"));
+    r.commit("initial");
+    r.git(&["checkout", "-q", "-b", "feature"]);
+    r.git(&["mv", "f.txt", "g.txt"]);
+    r.write("g.txt", &format!("{base}branch tail one\n"));
+    r.commit("refactor: rename f");
+    r.git(&["checkout", "-q", "main"]);
+    r.write("f.txt", &format!("{}{base}", five()));
+    r.commit("fix: main edits f");
+    r.git(&["merge", "-q", "--no-ff", "-m", "Merge feature", "feature"]);
+    assert!(r.path().join("g.txt").exists());
+    let (code, out) = r.check(&["HEAD"]);
+    assert_eq!(code, 0, "{out}");
+}
+
+#[test]
+fn a_shallow_clone_is_not_measured_even_when_every_object_is_there() {
+    let r = clean_merge();
+    let root = r.git(&["rev-list", "--max-parents=0", "HEAD"]);
+    fs::write(r.path().join(".git").join("shallow"), format!("{root}\n")).unwrap();
+    let (code, out) = r.check(&["HEAD"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("NOT MEASURED") && out.contains("shallow"), "{out}");
 }

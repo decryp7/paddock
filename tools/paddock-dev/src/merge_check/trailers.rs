@@ -1,7 +1,8 @@
 //! The reasons a merge message can give for a deliberate drop (ADR 0089: a reason is data, never prose the check guesses at).
 //!
 //! - `Tests-removed: <test name>: <reason>`
-//! - `Hunks-dropped: <path>: <reason>`
+//! - `Hunks-dropped: <path>: <reason>` (a folder with a trailing slash covers the files under it)
+//! - `Reverted: <path>: <reason>` (answers a backwards finding; `Hunks-dropped` does too)
 
 /// The reason given for `subject` under `key` (`Tests-removed` or `Hunks-dropped`): the text after `<key>: <subject>: `, which
 /// must not be empty. Looks at every line of the message, so a trailer block anywhere counts. For a path, `subject` may also
