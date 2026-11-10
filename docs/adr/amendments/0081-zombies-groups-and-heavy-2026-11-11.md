@@ -1,6 +1,7 @@
 # Amendment to ADR 0081 (2026-11-11): zombies, process groups and `tools/heavy` go through the one look
 
-- Status: Proposed 2026-11-11. The coordinator's brief of 2026-11-11 reports that the user approved the class and the
+- Status: Proposed 2026-11-11, revision 2 (answers the independent review of revision 1, `dbd7028a1`: see "Review
+  answers"). The coordinator's brief of 2026-11-11 reports that the user approved the class and the
   shape of the fix that day ("one zombie-aware is-alive helper plus a lint"); the user's words are not in the
   repository, and D-Z1 and D-Z2 are open. An amendment to ADR 0081 (accepted 2026-11-10 by the user, decisions as
   recommended), which is **not on `origin/main`**: it is on `origin/docs/adr-0081-0082` (`9dc480ef6`) only, and ADR
@@ -11,6 +12,11 @@
 - Related: ER-21 / rule 40, ER-33 (a probe must be shown to see the thing), rule 53 and ADR 0033, ADR 0076 and its
   orphan-guardian amendment (`0076-orphan-guardian-2026-11-09.md`: the guardian that waits for groups), ADR 0096
   (register row `docs/adr/register/R-2026-11-11-0081-zombies-groups-heavy.toml`).
+- Overlap checked: ADR 0081 itself already defines the zombie rule for single pids (§1's table) and the `kill(<pid>, 0)`
+  shape of its check (§3.2); this amendment adds only groups, `tools/heavy` and the `#[expect]` rule. ADR 0033 and C53
+  cover kills, not looks. The orphan-guardian amendment of ADR 0076 owns the guardian's waits; its group look is the one
+  item 1 keeps. No other ADR or amendment on `origin/main`, the train or the pinned ADR branches names `killpg(.., 0)`
+  or `tools/heavy`'s liveness.
 - Evidence: read on 2026-11-11 with `git show`, `git grep`, `git log`, `git merge-base --is-ancestor` and `git tag
   --contains` after `git fetch`. Paths are from `origin/train/2026-11-11-5` unless named. No user data was read. Heads,
   re-read right before the commit:
@@ -22,6 +28,7 @@ origin/train/2026-11-11-5 55c056089
 origin/docs/adr-0081-0082 9dc480ef6
 origin/fix/guardian-zombie-wait 1f9029dbc
 origin/fix/liveness-broken-sites 7ea9fa08b
+origin/feat/sysinfo-0-40 2ea59896b
 ```
 
 ## Trigger: the instances
@@ -107,11 +114,15 @@ builds, and is in no tag yet; it lands with the train. Nothing here gates a tag 
 | WP | Content | Days |
 |---|---|---|
 | WP-Z0 | Add H1, H2, G1 to ADR 0081 WP-0's survey and `docs/liveness.toml`; re-read the four `#[expect]`ed signal-0 sites | 0.25 |
-| WP-Z1 | The zombie controls of item 4 in `paddock-proc` (Linux and macOS), part of WP-1's controls | 0.5 |
-| WP-Z2 | `tools/heavy` onto `paddock_proc::presence`, three-valued `Presence`, `Unknown` never breaks a lock, once-per-reason log; failing test first | 0.5 |
-| WP-Z3 | The group shapes and the `#[expect]`-must-be-registered rule in WP-3's check, with fixtures (`killpg(g, 0)`, `kill(-g, 0)`, an unregistered `#[expect]` over `kill(pid, 0)`) | 0.25 |
+| WP-Z1 | The zombie controls of item 4 in `paddock-proc` (Linux and macOS), part of WP-1's controls | 0.5 to 0.75 |
+| WP-Z2 | `tools/heavy` onto `paddock_proc::presence`, three-valued `Presence`, `Unknown` never breaks a lock, once-per-reason log; failing test first | 0.5 to 0.75 |
+| WP-Z3 | The group shapes and the `#[expect]`-must-be-registered rule in WP-3's check, with fixtures (`killpg(g, 0)`, `kill(-g, 0)`, an unregistered `#[expect]` over `kill(pid, 0)`) | 0.25 to 0.5 |
 | WP-Z4 | Fold this text into ADR 0081 when it lands on main; lesson line beside the 2026-10-25 zombie lesson | 0.25 |
-| | **Total** | **1.75** |
+| | **Total** | **1.75 to 2.5** |
+
+**CI runs (rule 50).** WP-Z2 is one branch run (the `tools` job for `tools/heavy`). WP-Z1 and WP-Z3 ride in ADR 0081
+WP-1's and WP-3's landings and add no run. WP-Z0 and WP-Z4 are docs-only. So **1 extra branch run**, plus a fix round
+if red.
 
 WP-Z2 can land at once (it touches only `tools/heavy`); WP-Z1 and WP-Z3 ride on ADR 0081 WP-1 and WP-3.
 
@@ -128,6 +139,14 @@ WP-Z2 can land at once (it touches only `tools/heavy`); WP-Z1 and WP-Z3 ride on 
 |---|---|---|---|
 | D-Z1 | `tools/heavy` | (a) migrate now (WP-Z2, 0.5 days, touches no app); (b) wait for ADR 0081 WP-1b's one-landing migration | **(a)**: it can break a live job's slot lock, and every agent's heavy build goes through it (ER-24) |
 | D-Z2 | A public group look | (a) keep `group_exists` crate-private until a second user; (b) publish `group_presence` now | **(a)** (YAGNI); item 1 fixes its shape for when it is needed |
+
+## Review answers (revision 1, `dbd7028a1`)
+
+| Finding | Answer in revision 2 |
+|---|---|
+| P2 pin `origin/feat/sysinfo-0-40` (ADR 0091) | pinned in the evidence heads (`2ea59896b`) |
+| P2 estimate ranges and CI runs | ranges (1.75 to 2.5); one extra branch run |
+| P2 overlap | "Overlap checked" line |
 
 ## Rollback
 

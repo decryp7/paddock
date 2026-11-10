@@ -1,26 +1,26 @@
 # Free-text prerequisites are matched to `provides` names in ADR 0096 WP-1's review.
 id = "R-2026-11-11-0021-windows-env-names"
 title = "Amendment to ADR 0021: environment variables are read through one case-aware map"
-summary = "Amendment to ADR 0021 (proposed 2026-11-11; ER-21): release-isolation's Env missed Windows' `Path` while its fixture used case-insensitive std::env::var (fixed 9a0187724, 1cb9a4a5b); ten env::vars maps, three hand folds; paddock_env::EnvMap (Vars, one key per name on Windows, apply_to), Clippy on std::env::vars and vars_os; 2.5 days, gates no tag"
+summary = "Amendment to ADR 0021 (proposed 2026-11-11, revision 2; ER-21): release-isolation's Env missed Windows' `Path` while its fixture used case-insensitive std::env::var (fixed 9a0187724, 1cb9a4a5b); 13 std::env::vars/vars_os call sites, three hand folds; paddock_env::EnvMap (Vars; Windows ordinal ignore-case, byte-order construction, later value wins with the spelling kept, apply_to), Clippy on std::env::vars and vars_os; 2.5 to 3.5 days, gates no tag"
 status = "proposed"
-approval_file = "docs/adr/amendments/0021-windows-env-names-2026-11-11.md"
+# approval_file is set when the user accepts the decisions; a proposed row carries none (ADR 0096 section 2)
 adr_by = "2026-11-25" # ADR 0096 section 2 default: 14 days
 prerequisites = [] # Clippy and paddock-env exist on origin/main; ADR 0087's VM run is used only once it is built
 
 [[wp]]
 id = "WP-E0"
-days = 0.25
+days = 0.5 # range 0.25 to 0.5
 state = "not-started"
 
 [[wp]]
 id = "WP-E1"
-days = 1
+days = 1.25 # range 1 to 1.25
 state = "not-started"
 provides = ["paddock_env::EnvMap"]
 
 [[wp]]
 id = "WP-E2"
-days = 0.75
+days = 1.25 # range 0.75 to 1.25
 state = "not-started"
 
 [[wp]]
