@@ -9,8 +9,9 @@
 //!   in a run whose workflow later passed on the same commit with the same job passing.
 //!
 //! Only the logs of jobs that did not pass are read; a job with no step timings (no runner, or every step starts and ends
-//! together) is a gap. A failed job whose log cannot be read, or whose log the reader cannot account for, is **not measured**, never "no flakes" (ER-33), and so is a
-//! precondition that makes flakes invisible in passing jobs (Playwright retries without `failOnFlakyTests`).
+//! together) is a gap. A failed job whose log cannot be read, or whose log the reader cannot account for, is **not measured**,
+//! never "no flakes" (ER-33), and so is a precondition that makes flakes invisible in passing jobs (Playwright retries without
+//! `failOnFlakyTests`).
 
 use super::client::{Client, RunInfo, TimedJob};
 use super::logfind;
