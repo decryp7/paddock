@@ -159,34 +159,54 @@ pub(crate) fn end_pinned_group(group: u32, keeper: ProcessId) -> bool {
         && crate::sys::signal_group(group, crate::sys::SIGKILL)
 }
 
-/// Whether the process group `group` still has a member that runs. A zombie, which only waits to be reaped, is not one:
-/// Linux's `kill(-group, 0)` counts it, and where nothing reaps the orphans (a container whose init does not) it would
-/// make the answer "yes" forever. macOS does not count zombies, so the table is read only when the signal says yes.
+/// Whether the process group `group` still has a member that runs. Only valid once the group cannot gain members, that is
+/// after it was SIGKILLed (the guardian's use): a zombie leader whose other threads still run counts as running, but a
+/// live group may fork between the look and the answer.
+///
+/// A zombie, which only waits to be reaped, is not a member that runs: Linux's `kill(-group, 0)` counts it, and where
+/// nothing reaps the orphans (a container whose init does not) the answer would stay "yes" for ever. macOS does not count
+/// zombies, so there the signal alone answers. On Linux, when the signal says yes, `/proc/*/stat` is read once per pid
+/// (group and state together, no sysinfo); an unreadable `/proc` leaves the signal's answer.
 #[cfg(unix)]
 pub(crate) fn group_exists(group: u32) -> bool {
-    crate::sys::signal_group(group, 0)
-        && group_runs_in(
-            &usage::snapshot(),
-            group,
-            crate::sys::group_of,
-            crate::sys::is_zombie,
-        )
+    if !crate::sys::signal_group(group, 0) {
+        return false;
+    }
+    #[cfg(target_os = "linux")]
+    return group_runs_in_proc(std::path::Path::new("/proc"), group).unwrap_or(true);
+    #[cfg(not(target_os = "linux"))]
+    true
 }
 
-/// Whether a process of `table` that is in `group` and not a zombie exists. A process whose group cannot be read is gone
-/// (it ended since the table was read); one whose state cannot be read is not known to be a zombie, so it counts as running.
-/// An empty table is an unreadable one (this process is in it), so nothing is known and the signal's "yes" stands.
-#[cfg(unix)]
-pub(crate) fn group_runs_in(
-    table: &Table,
-    group: u32,
-    group_of: impl Fn(u32) -> Option<u32>,
-    is_zombie: impl Fn(u32) -> bool,
-) -> bool {
-    table.is_empty()
-        || table
-            .keys()
-            .any(|&pid| group_of(pid) == Some(group) && !is_zombie(pid))
+/// What `/proc/<pid>/stat` says of a process: its group (field 5), whether it runs, and whether it is a zombie that still
+/// has running threads (field 20, `num_threads`, above 1: the leader's zombie state hides them) and so counts as running.
+/// Fields are read after the last `)`, since the name (field 2) may hold spaces and parentheses.
+#[cfg(any(target_os = "linux", all(test, unix)))]
+pub(crate) fn parse_group_and_running(stat: &str) -> Option<(u32, bool)> {
+    let rest = stat.get(stat.rfind(')')? + 1..)?;
+    let f: Vec<&str> = rest.split_whitespace().collect();
+    // After the name: state (3), ppid (4), pgrp (5), ... num_threads (20) are f[0], f[1], f[2], ... f[17].
+    let state = *f.first()?;
+    let group: u32 = f.get(2)?.parse().ok()?;
+    let threads: u32 = f.get(17)?.parse().ok()?;
+    let zombie = matches!(state, "Z" | "X" | "x");
+    Some((group, !zombie || threads > 1))
+}
+
+/// Whether a process under `proc_root` is in `group` and runs; `None` when `proc_root` cannot be listed (nothing is known).
+/// A process that ended while the listing was read (its stat cannot be read) is not in the group any more.
+#[cfg(any(target_os = "linux", all(test, unix)))]
+pub(crate) fn group_runs_in_proc(proc_root: &std::path::Path, group: u32) -> Option<bool> {
+    let dir = std::fs::read_dir(proc_root).ok()?;
+    Some(dir.flatten().any(|e| {
+        e.file_name()
+            .to_str()
+            .is_some_and(|n| n.bytes().all(|b| b.is_ascii_digit()))
+            && std::fs::read_to_string(e.path().join("stat"))
+                .ok()
+                .and_then(|t| parse_group_and_running(&t))
+                .is_some_and(|(g, runs)| g == group && runs)
+    }))
 }
 
 /// Ends `root` and everything below it. A child started by this crate leads its own process group (Unix), which is
@@ -1147,24 +1167,61 @@ mod tests {
         live.wait().unwrap();
     }
 
-    #[cfg(unix)]
+    /// stat lines as Linux writes them: pid (name) state ppid pgrp session tty tpgid flags minflt cminflt majflt cmajflt utime
+    /// stime cutime cstime priority nice num_threads ...
+    fn stat(name: &str, state: &str, pgrp: u32, threads: u32) -> String {
+        format!("42 ({name}) {state} 1 {pgrp} 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 {threads} 0 5 0 0")
+    }
+
+    #[test]
+    fn a_stat_line_gives_its_group_and_whether_it_runs() {
+        assert_eq!(
+            parse_group_and_running(&stat("sh", "S", 7, 1)),
+            Some((7, true))
+        );
+        assert_eq!(
+            parse_group_and_running(&stat("sh", "Z", 7, 1)),
+            Some((7, false))
+        );
+        assert_eq!(
+            parse_group_and_running(&stat("sh", "X", 7, 1)),
+            Some((7, false))
+        );
+        // A zombie leader whose other threads still run is running.
+        assert_eq!(
+            parse_group_and_running(&stat("sh", "Z", 7, 3)),
+            Some((7, true))
+        );
+        // A name with spaces and parentheses does not shift the fields.
+        assert_eq!(
+            parse_group_and_running(&stat("a) S (b c", "S", 9, 1)),
+            Some((9, true))
+        );
+        assert_eq!(parse_group_and_running("42 (sh) S 1"), None);
+        assert_eq!(parse_group_and_running("garbage"), None);
+    }
+
     #[test]
     fn a_group_runs_while_a_member_that_is_not_a_zombie_is_in_it() {
-        let row = || usage::Row {
-            parent: None,
-            rss: 0,
-            started: None,
+        let root = tempfile::tempdir().unwrap();
+        let put = |pid: &str, text: String| {
+            let d = root.path().join(pid);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("stat"), text).unwrap();
         };
-        let table: Table = [(10, row()), (11, row()), (12, row())].into();
-        let group_of = |pid: u32| Some(if pid == 12 { 99 } else { 7 });
-        // Members 10 and 11 of group 7: one zombie, one not.
-        assert!(group_runs_in(&table, 7, group_of, |pid| pid == 10));
-        // Both zombies: the group is empty; 12 is another group's.
-        assert!(!group_runs_in(&table, 7, group_of, |pid| pid != 12));
-        // A process that cannot be read is not in the group; no state read counts as running.
-        assert!(!group_runs_in(&table, 7, |_| None, |_| false));
-        assert!(group_runs_in(&table, 7, group_of, |_| false));
-        // An unreadable (empty) table knows nothing: the signal's answer stands.
-        assert!(group_runs_in(&Table::default(), 7, group_of, |_| true));
+        put("10", stat("a", "Z", 7, 1));
+        put("11", stat("b", "S", 7, 1));
+        put("12", stat("c", "S", 99, 1));
+        std::fs::create_dir_all(root.path().join("self")).unwrap(); // not a pid
+        std::fs::create_dir_all(root.path().join("13")).unwrap(); // ended: no stat
+        assert_eq!(group_runs_in_proc(root.path(), 7), Some(true));
+        put("11", stat("b", "Z", 7, 1));
+        assert_eq!(
+            group_runs_in_proc(root.path(), 7),
+            Some(false),
+            "only zombies, and another group's process"
+        );
+        assert_eq!(group_runs_in_proc(root.path(), 5), Some(false));
+        assert_eq!(group_runs_in_proc(&root.path().join("missing"), 7), None);
     }
 }

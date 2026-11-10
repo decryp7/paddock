@@ -498,6 +498,12 @@ stays a zombie for ever, and `kill(pid, 0)` still reports it. A test that checks
 when the shell happened to reap it first. **Rule:** "process gone" checks treat a zombie as gone (read the state from
 `/proc/<pid>/stat` on Linux, `proc_pidinfo` on macOS); `paddock_proc::is_alive` already does.
 
+The same holds for a group: Linux's `killpg(group, 0)` counts zombies too (macOS's does not), so a guardian that waited for a
+SIGKILLed group to "empty" looked its whole bound (10 s) per group in such a container, and its test passed at 32 s
+(2026-11-10, run 7904). **Rule:** "group gone" checks read the members' state too (`paddock_proc::tree::group_exists`
+reads `/proc/*/stat` on Linux), and a test of a bounded wait asserts the outcome the wait logs ("emptied", not "still had
+members"), because a hang guard longer than the bound cannot tell.
+
 ## Build a command line in one function (2026-10-25, Debrief 1.1.1)
 
 Chromium's arguments were assembled in three places; after two branches merged, `--no-sandbox` landed after the start
