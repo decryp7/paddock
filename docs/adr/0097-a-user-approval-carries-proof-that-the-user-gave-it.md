@@ -133,8 +133,9 @@ Keys (D3):
   -t bio` (local `sc_auth(8)`: `-ne` non-exportable, `-t bio|none` the private key protection). It appears to ssh as
   `sk-ecdsa-sha2-nistp256@openssh.com` *(secondary, unverified)*. Its flags byte is most likely composed in software by
   `ssh-keychain.dylib`, not attested by hardware, and a reused LocalAuthentication context might allow several
-  signatures per Touch ID *(per the review; unverified)*. WP-0 checks both with the user's own key, including an
-  agent-written process that holds its own LocalAuthentication context with a reuse window and signs twice. **Not used
+  signatures per Touch ID *(per the review; unverified)*. Only if a Touch ID keyboard is added would a test check both
+  with the user's own key, including an agent-written process that holds its own LocalAuthentication context with a
+  reuse window and signs twice. **Not used
   on this Mac:** the user's Mac mini has no Touch ID (no Touch ID keyboard, per the user on 2026-11-10), so `-t bio`
   cannot require biometric presence and a Secure Enclave key there proves nothing about the user being present. A Magic
   Keyboard with Touch ID would make this path possible; the ADR does not recommend it, and the reuse test above stays an
@@ -269,7 +270,7 @@ infers subjects from wording.
 |---|---|
 | `approved = "user"` in `docs/gates.toml` (ADR 0060), ADR 0073's register, ADR 0075's `[[date_move]]` | the same text; the record counts as the user's only under §3. `approved = "coordinator"` stays as it is and claims nothing about the user |
 | `Gates-date:` / `Copies-date:` / `Doubles-date:` with `approved: user` | honoured only on a verified commit on `main` (§3, trailers) |
-| A release (D7, §7) | a subject of kind `release_intent` in `docs/approvals/release-intents.toml`: `id`, `app`, `version`, `gates` (the checks that must be green), `expires`, and optionally `commit` or `branch`. All fields are user fields, so lowering it (a gate removed, a later `expires`, another version or commit) needs a new signature |
+| A release (D7, §7) | a subject of kind `release_intent` in `docs/approvals/release-intents.toml`: `id`, `app`, `version`, `gates` (each a workflow path and job id, for example `.gitea/workflows/dyno.yml#app-macos`; never a commit status), `expires`, and optionally `commit` or `branch`. All fields are user fields, so lowering it (a gate removed, a later `expires`, another version or commit) needs a new signature |
 | ADR 0093's `[[scheduled_waiver]]` and `[scheduled_gate]` | subjects of kind `waiver` and `switch` in `docs/gates.toml`, as 0093 accepted them |
 | **Gate switches**: ADR 0060's `report_only`, `not_gated`, `conditional` entries with `approved = "user"`, and any later user-only setting | kind `switch`. A switch that **lowers** a gate guarding a tag (enforce to report or off, a later `report_until`) needs a user record; raising never does. A switch in a repository variable, environment value or workflow input is not honoured by a gate |
 | A Gitea comment, label, issue state or the author of anything in Gitea | never a proof; display only |
@@ -304,13 +305,16 @@ no pin would change. So the decision lives where callers cannot reach into it:
    release workflow calls this action and nothing else for C108; the post-tag audit's step comparison (§7) requires a
    step that uses exactly this action and succeeded.
 3. **The audit workflow**, `.gitea/workflows/approvals-audit.yml`, pinned: it is small and changes rarely.
-4. `docs/approvals/**` itself, and the sha256 of the FIDO middleware installed by WP-0 (a `file_sha256` entry, checked
+4. **The tag-cutting workflow**, `.gitea/workflows/release-cut.yml` (§7), pinned: it holds the tag credential's only
+   legitimate use, and the action and the audit check its pin before trusting a tag it made.
+5. `docs/approvals/**` itself, and the sha256 of the FIDO middleware installed by WP-0 (a `file_sha256` entry, checked
    by `./dev approve` on the user's machine, not by CI).
 
 **Invariant: everything between the pinned sources and the gate's exit code is either pinned or built inside the gated
-job.** The sources, the lock entries and the action are pinned; the binary is built in the same job from them; the
-audit (§7) does the same from `main`. Nothing on that path is downloaded, cached between jobs or taken from a runner's
-disk. The toolchain (`rust-toolchain`, the runner image) is the one exception, shared with every build the family makes.
+job.** The sources, the lock entries, the action and the two workflows (`approvals-audit.yml`, `release-cut.yml`) are
+pinned; the binary is built in the same job from them; the audit and `release-cut.yml` (§7) do the same from `main`.
+Nothing on that path is downloaded, cached between jobs or taken from a runner's disk. The toolchain (`rust-toolchain`,
+the runner image) is the one exception, shared with every build the family makes.
 
 **Callers stay unpinned, on purpose.** `./dev approvals verify`, C100, `./dev copies`, ADR 0073's check and `./dev adr
 status` call the library for early reports on branches. Because the pinned action is an independent gate at every tag
@@ -376,14 +380,37 @@ it, and the run would publish.
 
 **Release tags come from signed release intents (D7, accepted 2026-11-10).** The user signs ahead, with one touch (and
 several intents in one `./dev approve` batch), a `release_intent` record: app, version, the gates that must be green, an
-expiry, and optionally the commit or branch it applies to. The intent lands on `main` like every user record (§6). A
-pinned workflow on `main`, `release-cut.yml` (in the code pins of §4, built and run like the audit), runs on pushes to
-`main`, on the night schedule and on dispatch; for each verifying, unexpired, unconsumed intent it resolves the commit
-(the named commit, the head of the named branch, or `main`), checks through the Actions API that every named gate is
-green on that commit, and only then creates the annotated tag `<app>-v<version>` (or `v<version>`) with the intent id
-in the tag message, using CI's tag credential. The user can be away. Agents no longer cut release tags themselves; the
-standing "tag when green" practice becomes "the user signs an intent, CI tags when green". The pinned C108 action in the
-tag run also refuses to publish when no verifying intent on `main` names that app and version.
+expiry, and optionally the commit or branch it applies to. The intent lands on `main` like every user record (§6). The
+pinned workflow `release-cut.yml` (§4 item 4, built and run like the audit) runs on `main` only, on pushes to `main`,
+on the night schedule and on dispatch. For each verifying, unexpired, unconsumed intent it:
+
+1. **resolves the commit:** the named commit; or the head of the named ER-31 release branch; or, with neither, a commit
+   on `main`'s **first-parent chain** that **landed after the intent did**, by server time (§2: the `created_at` of the
+   first `approvals-audit.yml` run that contains it), never an older green commit;
+2. **checks the named gates** only through Actions runs: for each `workflow#job`, a successful run of exactly that
+   workflow path whose head is the resolved commit, with that job successful; commit statuses are never read, because
+   any write token can post one. The workflow file's blob at the resolved commit must equal its blob on `main` at the
+   commit where the intent landed, so the gate is the definition the user saw when signing;
+3. **creates the annotated tag** `<app>-v<version>` (or `v<version>`) with the intent id in the message, using CI's
+   tag credential, and **records `(intent id, tag, sha)`** as an artifact of its own successful run.
+
+**A tag counts only if `release-cut.yml` made it.** The pinned C108 action in the tag run and the audit look up, through
+the Actions API, the `release-cut.yml` run that recorded this tag: its workflow path must be
+`.gitea/workflows/release-cut.yml`, it must have run on `main` and succeeded, the file at its head must equal the pin
+(§4), and the tag's sha must equal the recorded sha. No such run is a finding (exit 5); an unreadable API is not
+measured (6); neither is ever a pass. So an agent holding the tag secret cannot choose another green commit, and a tag
+deleted and re-created elsewhere before the first audit no longer matches its record.
+
+**What an intent approves.** An intent that names a commit approves that code. An intent without a commit approves an
+app, a version and a time window, not the code: whatever lands on `main` in that window and passes the named gates is
+released. The user should name the commit, or an ER-31 release branch, when the content matters, and `./dev approve`
+proposes a short default expiry (3 days). **The gates bind definitions, not their integrity:** step 2 binds the
+workflow and job definitions the user saw at signing time; whether those definitions really test what they claim is
+ADR 0093's and ADR 0060's subject, and for workflows agents write it stays an honour-system matter, visible in history
+and in review.
+
+Agents no longer cut release tags themselves; the standing "tag when green" practice becomes "the user signs an intent,
+CI tags when green". The user can be away.
 
 - **Post-tag audit from `main` (detects; D7).** A workflow on `main` runs on every push to `main` and in the night
   schedule (the 2026-11-10 decision: scheduled work at night only; scheduled runs use the default branch's file, so a
@@ -400,11 +427,11 @@ tag run also refuses to publish when no verifying intent on `main` names that ap
   4. lists every **published release and package** (Gitea releases, the package registry) and requires each to come from
      an audited tag run; anything published otherwise (an admin token, a release token used from a pushed workflow, a
      hand upload) is a finding;
-  5. compares **every release tag with a consumed intent**: an intent that verifies under §3 on `main`, with the same
-     app and version; not expired at the tag's server time (the `created_at` of the tag's first Actions run, never the
-     tagger date); each named gate green on the tagged commit (Actions API); the named commit or branch, if any,
-     matching; and the intent used once (no other tag, past or present, names the same intent id, and the tag still
-     points where it pointed at its first audit). A tag that fails any of these is a finding.
+  5. compares **every release tag with a consumed intent**: a `release-cut.yml` run as above whose recorded sha equals
+     the tag's; an intent that verifies under §3 on `main`, with the same app and version; not expired at the cut run's
+     server time (its `created_at`, never the tagger date); the commit rule of step 1 and the gate rule of step 2 above,
+     re-checked from `main`; and the intent used once (no other tag, past or present, names the same intent id). A tag
+     that fails any of these is a finding; a tag whose checks cannot be read is 6.
 
   A mismatch opens a `release-blocker` issue, marks the release "unverified" in its notes, and fails the audit run with
   an `::error::` naming the tag, the missing step and the next step (ER-27).
@@ -427,7 +454,8 @@ tag run also refuses to publish when no verifying intent on `main` names that ap
 | An unsigned edit, deletion or move of a signed record's value counting as the user's | A bypass at a tag: the release workflow on a release branch not calling the pinned action, or a changed `paddock-approvals` crate, action or audit workflow in the tagged tree (the audit, run from `main`: step comparison and code pins); a lying caller (C100, `./dev`) only loses its own early report | D8 (a) plus a credential rule: publish credentials (release and package tokens) are held only by workflows agents cannot change before they run (a protected environment or a runner-held secret; WP-7 checks what Gitea 28 offers) |
 | An approval copied from another repository or made before the genesis; a superseded signed value restored by an unsigned merge (§3 step 3) | A force-push of `main` that drops a later signed deletion and leaves an older signed value as the newest (the audit's first-parent check) | D8 (a): branch protection without force push or deletion |
 | A trailer or status line on an unsigned commit counting as the user's | An out-of-band publish (the audit's release and package listing) | the credential rule above |
-| A release tag that passes the audit without a verifying, unexpired, unused intent for that app and version, or with a named gate red on the tagged commit | A tag pushed without an intent, with CI's tag credential read from a pushed workflow or with the admin token (the audit compares every tag with a consumed intent); an intent's tag deleted and re-created elsewhere (the audit's "points where it pointed" check) | D8 (a), the credential rule (the tag token only in `release-cut.yml`, out of reach of agent-pushable workflows), and protected tags limited to that token's account |
+| A release tag that passes the audit without a verifying, unexpired, unused intent for that app and version, or not made by a pinned `release-cut.yml` run on `main` at the sha that run recorded | A tag pushed without an intent or at another commit, with CI's tag credential read from a pushed workflow or with the admin token (the audit compares every tag with a consumed intent and its cut run); the audit's memory of past tags (its issue and run outputs) edited or deleted with the admin token | D8 (a), the credential rule (the tag token only in `release-cut.yml`, out of reach of agent-pushable workflows), and protected tags limited to that token's account |
+| **Bound to the definitions at signing** (not impossible): the named gates are the workflow paths and jobs, with their file contents, that were on `main` when the intent landed | Changes to those gate definitions before the intent was signed are visible in history and review only; whether a gate tests what it claims is ADR 0093's and ADR 0060's subject and an honour-system matter for agent-written workflows | not closed by this ADR |
 | | A touch that signs an agent-chosen commit (the confused deputy, §9: the printed sha and counter, the counter gaps) | D8 (b): agents in a separate macOS account, so the signer process and its inputs are out of their reach |
 
 ### 9. How the user gives an approval: `./dev approve`, and its limits (P1-2)
@@ -440,10 +468,10 @@ approve`:
    temporary folder (never a worktree, which shares `.git/config`, hooks and refs with the agents' checkouts);
 2. runs every git and ssh command in it with a **cleared environment** (only `PATH=/usr/bin:/bin`, `HOME` set to the
    temporary folder, `SSH_AUTH_SOCK` never passed (the key handle file is named explicitly, so no ssh-agent is
-   involved), `SSH_SK_PROVIDER` set to the pinned middleware of §1 after its hash check for a FIDO2 key or set to
-   `/usr/lib/ssh-keychain.dylib` for the Secure Enclave key, nothing else), `GIT_CONFIG_NOSYSTEM=1`,
-   `GIT_CONFIG_GLOBAL=/dev/null`, `-c gpg.format=ssh -c gpg.ssh.program=/usr/bin/ssh-keygen -c core.hooksPath=/dev/null`
-   and the key handle path given explicitly;
+   involved), `SSH_SK_PROVIDER` set to the pinned middleware of §1 after its hash check (the FIDO2 key;
+   `/usr/lib/ssh-keychain.dylib` only if a Touch ID keyboard is ever added and the Secure Enclave path chosen), nothing
+   else), `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`, `-c gpg.format=ssh -c
+   gpg.ssh.program=/usr/bin/ssh-keygen -c core.hooksPath=/dev/null` and the key handle path given explicitly;
 3. prints each pending record and the subject lines it changes, asks y/N per record, writes the accepted ones, makes
    **one** signed commit for the batch (one touch), and then prints the **commit sha and the FIDO counter** of the
    signature, so the user can compare the sha with what the agent later pushes and see a counter jump;
@@ -542,8 +570,8 @@ named); the green twin is in the same test.
 | PC-14 | §7 | a recorded Actions API reply (synthetic JSON) for a tag run without `main`'s C108 step | the audit fails and names the step |
 | PC-15 | §7 | a release listed by the API with no audited tag run; a new tip whose first-parent chain does not contain the last audited sha although it descends from it (swapped parents) | each flagged |
 | PC-16 | §4 | a signed approval commit that also changes a `.rs` file | refused, "approval commit touches non-subject paths" |
-| PC-17 | §4 | a tagged tree whose `crates/paddock-approvals/`, its lock entries, `.gitea/actions/approvals-check/action.yml` or `approvals-audit.yml` differs from the signed code pin | the audit refuses the tag |
-| PC-21 | §7, D7 | release tags checked by the audit: a tag with no intent; with an expired intent (expiry before the tag run's server time); with an intent already consumed by an earlier tag; with an intent for another version or app; with an intent whose named gate is red on the tagged commit; an intent whose `expires` or `gates` was changed by an unsigned commit; and a tag cut by `release-cut.yml` from a valid intent | fail; fail; fail; fail; fail; fail (the intent does not verify); passes |
+| PC-17 | §4 | a tagged tree, or the head of the `release-cut.yml` run, whose `crates/paddock-approvals/`, its lock entries, `.gitea/actions/approvals-check/action.yml`, `approvals-audit.yml` or `release-cut.yml` differs from the signed code pin | the audit refuses the tag |
+| PC-21 | §7, D7 | release tags checked by the audit: a tag with no intent; with an expired intent (expiry before the tag run's server time); with an intent already consumed by an earlier tag; with an intent for another version or app; with an intent whose named gate is red on the tagged commit; an intent whose `expires` or `gates` was changed by an unsigned commit; an agent's tag at another green commit pushed with the tag secret before `release-cut.yml` ran; a tag deleted and re-created at another commit before the first audit; a tag recorded by a `release-cut.yml` run from a branch, not `main`; a tag with no `release-cut.yml` run at all; a gate satisfied only by a posted commit status; a gate whose workflow file differs from its blob on `main` when the intent landed; a no-commit intent resolved to a green commit that landed before the intent; and a tag cut by `release-cut.yml` from a valid intent | fail; fail; fail; fail; fail; fail (the intent does not verify); fail; fail; fail; fail (5, or 6 if the API is unreadable); fail; fail; fail; passes |
 | PC-17c | §4 | a gate run whose binary was fetched (a planted download step, or a binary placed in the cache or on the runner's disk) or differs from the one built in the job | refused: the pinned action builds in the job and runs only that build's path; the audit requires the build step in the tag run's step list |
 | PC-17b | §4 | a caller-side no-op: `./dev`'s `main.rs` returns success for `approvals verify` without calling the crate; the release workflow's C108 step replaced by an `echo` (or the action's `run` line by `true`) | the first leaves every pinned check red at the tag (only the early report lies); the second is refused by the audit (missing pinned action step) or by the pin (changed action) |
 | PC-18 | §9 | `./dev approve` run with a planted `gpg.ssh.program`, `core.hooksPath`, `SSH_SK_PROVIDER`, `SSH_AUTH_SOCK` and a `PATH` entry in the agents' checkout and environment | none is used (the fresh clone's command lines and environment are asserted by the test, which signs with a test key) |
@@ -649,12 +677,12 @@ not verify is treated as not approved, and the stricter state applies."
 | WP-3 | Library API for callers and the C100 wiring; switches and trailers (PC-7, PC-11). ADR 0075's `./dev copies`, ADR 0073's check and ADR 0096's `./dev adr status` wire it in their own work packages | 1.5 | WP-2 |
 | WP-4 | `./dev approve`: fresh clone, cleared environment, fixed signer, middleware hash and folder-owner check, per-record y/N, sha and counter printed; path rule (PC-16, PC-18, PC-18b); the `release_intent` kind (prompts for app, version, gates from the app's release workflow, expiry with a short default, optional commit or branch; shows what CI will tag) | 2.25 | WP-2 |
 | WP-5 | C108 in conformance (report); the crate's own binary and the pinned `.gitea/actions/approvals-check` action called by every release workflow; release summary prints the trust root; runs on the Linux and Windows runners (PC-17b) | 1.5 | WP-3 |
-| WP-6 | Post-tag audit on `main`: descent check, job and step comparison, code pins, release and package listing, the intent comparison (item 5), issue and release note; the pinned `approvals-audit.yml`; the pinned `release-cut.yml` (resolve the commit, wait for the named gates through the Actions API, cut the annotated tag once, idempotent on reruns) and the C108 action's intent check at tag runs; recorded-API tests (PC-14, PC-15, PC-17, PC-17b, PC-21); protected-tag behaviour on a scratch repository | 3.5 | WP-5, D7, D11 |
+| WP-6 | Post-tag audit on `main`: descent check, job and step comparison, code pins, release and package listing, the intent comparison (item 5), issue and release note; the pinned `approvals-audit.yml`; the pinned `release-cut.yml` (resolve the commit, wait for the named gates through the Actions API, cut the annotated tag once, idempotent on reruns) and the C108 action's intent check at tag runs; the cut run's `(intent id, tag, sha)` artifact and its lookup by the action and the audit, the first-parent and landed-after rule, gates bound to workflow path, job and blob; recorded-API tests (PC-14, PC-15, PC-17, PC-17b, PC-21); protected-tag behaviour on a scratch repository | 4 | WP-5, D7, D11 |
 | WP-7 | Identities (D8 (a)): `paddock-agent`, token swap in agents' environment and CI secrets, keychain item and git helper, claude-in-chrome block, branch protection, where publish credentials can live (user's hands for the admin steps) | 1 | D8 |
 | WP-8 | Migration: inventory across every `origin` branch (including `eba981aed`), ADRs 0089 to 0096 landed before the cutover, re-sign batch, cutover commit pinned, rule text, briefs (coordinator, integrator, reviewer), lessons entry; **D3 key steps** as the FIDO2 keys arrive (§10): middleware installed with `sudo` and a real signature through it first, genesis signed by the first key (offline key enrolled as recovery), pin set; the second key enrolled as recovery in a commit signed by the first, the offline key retired or kept recovery-only, pin updated | 1.25 | WP-4, D9, the keys |
-| | **Total** | **15.75 agent-days** (15.5 to 17.5 with the risks below) | |
+| | **Total** | **16.25 agent-days** (16 to 18 with the risks below) | |
 
-**Enforcement needs WP-0 to WP-6: 13.5 agent-days.** Without WP-6 nothing detects a bypass at a tag (§7) and there is
+**Enforcement needs WP-0 to WP-6: 14 agent-days.** Without WP-6 nothing detects a bypass at a tag (§7) and there is
 no server time (§2), so `valid-*` checks would report 6, and no release intent can be cut. WP-0 to WP-5 (10 days) give a
 report-only C108 that already
 shows which records would count. WP-7 can run in parallel from the
