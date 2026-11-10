@@ -332,6 +332,7 @@ Quoted by [ADR 0085](adr/0085-release-builds-never-consume-caches-branch-runs-ca
   | 7851 Dyno dispatch, Linux (partly cold) | 1,097 / 792 / 80 | 1 min 43 s, 3 min 11 s | 8.2 min | none set | recorded |
   | 7728 Pitwall dispatch, macOS (cold: 2 hits) | 630 / 2 / 520 | 3 min 42 s, 5 min 40 s | 20.1 min | none set | recorded |
   | 7729 Dyno dispatch, macOS (cold slot s2, Mac shared with two cold bundles) | 856 / 289 / 414 | 9 min 45 s, 21 min 17 s | 90.8 min | none set | upper bound |
+  | 7729 Dyno dispatch, Windows (slot s1, load not recorded) | 310 / 210 / 22 | 16.9 s, 2 min 19 s, 5 min 12 s | 28.4 min | none set | recorded |
   | 7810 `app dyno (windows)` gates, cold slot s3 (a debug test build, not a bundle) | 1,020 misses, 2 hits | not read | 21.3 min | none set | reference only |
 
 - **Memory measure:** not measured
