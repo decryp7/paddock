@@ -238,6 +238,25 @@ test('a failed toolchain install fails the step with a message that names the ca
   assert.doesNotMatch(failed.out, /NTSTATUS/);
 });
 
+// docs/plans/ci-in-rust.md, step 1: setup-rust runs ./dev ci setup-rust, except on the release path until its own lane. A tag run
+// or a run that never downloads the tool (release, rule 54 dispatch) keeps the shell steps; a job without the read credential
+// builds ./dev from source. The Rust command's parity with these shell steps is tools/paddock-dev/tests/it/setup_rust.rs.
+test('setup-rust uses ./dev only off the release path, and never a stored tool binary without the read credential', () => {
+  const text = read(join(ACTIONS, 'setup-rust', 'action.yml'));
+  const kit = text.slice(text.indexOf('- name: Implementation\n'), text.indexOf('- name: Compile cache and Tauri libraries'));
+  assert.match(kit, /id: kit\n/);
+  assert.match(kit, /refs\/tags\/\*\) kit=shell/, 'a tag run keeps the shell steps');
+  assert.match(kit, /PADDOCK_DEV_DOWNLOAD:-\}" = 0 \]; then kit=shell/, 'a run that never downloads ./dev keeps the shell steps');
+  const dev = text.slice(text.indexOf('- name: Compile cache and Tauri libraries'), text.indexOf('- name: Install sccache'));
+  assert.match(dev, /if: steps\.kit\.outputs\.kit == 'dev'\n/);
+  assert.match(dev, /then export PADDOCK_DEV_DOWNLOAD=0; fi\n\s+bash "\$\{\{ github\.action_path \}\}\/\.\.\/\.\.\/\.\.\/dev" ci setup-rust /);
+  for (const step of ['Install sccache', 'sccache', 'Linux dependencies for Tauri']) {
+    assert.match(text, new RegExp(`- name: ${step}\\n\\s+if: steps\\.kit\\.outputs\\.kit == 'shell'`), `${step}: only on the shell path`);
+  }
+  // The toolchain comes before the first ./dev of the action (./dev hashes and builds itself with it).
+  assert.ok(text.indexOf('- name: Rust toolchain') < text.indexOf('- name: Compile cache and Tauri libraries'));
+});
+
 test('setup-rust installs a pinned, checksum-verified sccache when the runner has none, for every supported OS and architecture', () => {
   const text = read(join(ACTIONS, 'setup-rust', 'action.yml'));
   const install = text.slice(text.indexOf('- name: Install sccache'), text.indexOf('- name: sccache\n'));

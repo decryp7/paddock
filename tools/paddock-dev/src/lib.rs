@@ -19,6 +19,8 @@
 //!   [--app]`, `--commit-range`, `--explain`): the matrix, the base of a run and the commit lint's range in [`plan_ci`], the
 //!   command in [`plan_cmd`]. Oracle-tested against the script until it is retired (ADR 0022 R4). `plan --since-run <run>`
 //!   reruns only what failed in a finished run ([`plan_since`]).
+//! - `ci setup-rust`: the compile cache and the Tauri Linux libraries of a CI job, the port of the setup-rust action's shell steps
+//!   ([`ci_setup_rust`]), over [`ci_tool`], the wrapper contract for third-party programs a CI step runs (docs/plans/ci-in-rust.md);
 //! - `ci release-isolation setup|record|verify`: a tag build reads nothing kept ([`release_isolation`], ADR 0085).
 //! - `worktree add|claim|reassign|release|drop|list|clean` and `check primary`: agent worktrees locked with an owner note and
 //!   bound to their agent, and the probe of the primary checkout ([`worktree`], ADR 0083).
@@ -28,6 +30,8 @@
 pub mod check;
 pub mod ci_isolation;
 pub mod ci_runs;
+pub mod ci_setup_rust;
+pub mod ci_tool;
 mod cli;
 mod fds;
 pub mod gates;

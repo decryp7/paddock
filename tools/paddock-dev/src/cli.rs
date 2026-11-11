@@ -1,6 +1,6 @@
 use crate::{
-    check, ci_isolation, ci_runs, gates, hook, input_hash, ipc_endpoints, merge_check, plan, plan_cmd, release_isolation, slots, wait,
-    worktree,
+    check, ci_isolation, ci_runs, ci_setup_rust, gates, hook, input_hash, ipc_endpoints, merge_check, plan, plan_cmd, release_isolation,
+    slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -161,6 +161,10 @@ enum CiCommand {
     /// The CI kit's job isolation on a host runner: slots, kept folders, ports, process patterns, temp folders (the port of
     /// `conformance/ci/job-isolation.sh`). Values go to standard output, messages to standard error.
     Isolation(ci_isolation::IsolationArgs),
+    /// The compile cache (sccache: installed, configured, a fresh server) and the Tauri Linux libraries of a CI job: the port of
+    /// the setup-rust action's shell steps. The action keeps CARGO_BUILD_JOBS and the toolchain install in YAML (./dev needs
+    /// rustc first). Messages and `::warning::` lines on standard output, one `::error::` line on failure.
+    SetupRust(ci_setup_rust::SetupRustArgs),
     /// Release mode (ADR 0085): a tag build reads nothing kept. `setup` makes the job's folders, `record` is the only
     /// ledger writer, `verify` proves it.
     ReleaseIsolation {
@@ -338,6 +342,13 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         // The script's contract: plain values on standard output, `::error::` lines on standard error, no `error:` prefix.
         return ci_isolation::run(a, out, err);
     }
+    if let Command::Ci {
+        command: CiCommand::SetupRust(a),
+    } = &cli.command
+    {
+        // A CI step's contract: plain lines (the shell's), one `::error::` line on failure, no report.
+        return ci_setup_rust::run(a, out, err);
+    }
     if matches!(cli.command, Command::Hook { .. }) {
         // The hook's answer is its own JSON on standard output, not a report, and its exit code is always 0.
         return hook::pre_tool_use(&mut std::io::stdin(), out, err);
@@ -387,6 +398,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::Isolation(_),
         } => Err(CliError::failure("`ci isolation` was dispatched through the report path.")),
+        Command::Ci {
+            command: CiCommand::SetupRust(_),
+        } => Err(CliError::failure("`ci setup-rust` was dispatched through the report path.")),
         Command::Ci {
             command: CiCommand::ReleaseIsolation { command },
         } => release_isolation::command(command),
