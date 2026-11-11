@@ -124,7 +124,12 @@ impl<S: WinSystem> FactsSource for WinFacts<S> {
             )
         });
         f.power_plan = read_fact("power_plan", || match self.system.power() {
-            Ok(p) => win_facts::effective_power_plan(p.scheme.as_deref(), p.friendly_name.as_deref(), &p.overlay),
+            Ok(p) => {
+                if let Some(unknown) = win_facts::unknown_overlay(&p.overlay) {
+                    log::warn!(target: "dyno::facts", "power_plan: an overlay this Dyno does not know ({unknown}); the scheme alone is reported");
+                }
+                win_facts::effective_power_plan(p.scheme.as_deref(), p.friendly_name.as_deref(), &p.overlay)
+            }
             Err(why) => Reading::unavailable(format!("Windows did not answer the power plan question ({why}).")),
         });
         f.visual_effects_full = read_fact("visual_effects_full", || win_facts::visual_effects(self.system.visual_fx_setting()));
