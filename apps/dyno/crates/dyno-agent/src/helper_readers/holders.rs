@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 /// often, however often the page asks (rule 51: cheaper). A socket opened since shows its owner at the next refresh.
 pub const OWNERS_TTL: Duration = Duration::from_secs(10);
 
-/// The sentence for sockets whose program the kernel hides, before the shared "turn on Administrator readings" sentence.
+/// The sentence for sockets whose program the kernel hides, before the shared "turn on administrator readings" sentence.
 const HIDDEN: &str = "Some sockets belong to other accounts, and Linux hides which program holds them.";
 
 /// The socket-owner reading: the helper's map, else nothing (the rows keep their hidden owner).

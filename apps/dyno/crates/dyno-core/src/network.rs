@@ -201,7 +201,7 @@ impl<'de> Deserialize<'de> for Owner {
     }
 }
 
-const UNKNOWN_REASON: &str = "The OS did not say which program owns this. It may belong to another account or the system. On Linux, turn on Administrator readings in Settings and Dyno's helper names it.";
+const UNKNOWN_REASON: &str = "The OS did not say which program owns this. It may belong to another account or the system. On Linux, turn on administrator readings in Settings and Dyno's helper names it.";
 
 fn owner_of(pid: Option<u32>, names: &HashMap<u32, (&str, Option<&str>)>) -> Owner {
     match pid {
@@ -638,7 +638,7 @@ mod tests {
             panic!("an owner nobody named is unknown")
         };
         assert!(
-            reason.contains("Administrator readings in Settings") && reason.contains("helper"),
+            reason.contains("administrator readings in Settings") && reason.contains("helper"),
             "{reason}"
         );
         assert!(!reason.contains("does not run with administrator rights"), "{reason}");

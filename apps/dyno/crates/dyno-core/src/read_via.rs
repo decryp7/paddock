@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 /// The one sentence that tells a person how to get a reading only the helper can give, for text shown where there is no button
 /// (a log line, a plain `Reading::Unavailable`). Where the page shows the button "Turn on administrator readings", the reason
 /// does not carry it as well.
-pub const NEEDS_ADMIN: &str = "Turn on Administrator readings in Settings so the helper can read this.";
+pub const NEEDS_ADMIN: &str = "Turn on administrator readings in Settings so the helper can read this.";
 
 /// `text` as a sentence: trimmed, the first letter upper case (not in a name such as macOS), a full stop at the end unless it ends a sentence already. Empty
 /// stays empty.

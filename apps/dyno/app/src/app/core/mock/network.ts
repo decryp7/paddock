@@ -1,7 +1,7 @@
 import type { ConnectionRow, ListenerRow, NetOwner, NetworkQuery, NetworkSnapshot, SocketState, TrafficRow } from '../api.types';
 
 const proc = (pid: number, name: string, path: string): NetOwner => ({ kind: 'process', pid, name, path });
-const UNKNOWN: NetOwner = { kind: 'unknown', reason: 'The OS did not say which program owns this. It may belong to another account or the system. On Linux, turn on Administrator readings in Settings and Dyno\'s helper names it.' };
+const UNKNOWN: NetOwner = { kind: 'unknown', reason: 'The OS did not say which program owns this. It may belong to another account or the system. On Linux, turn on administrator readings in Settings and Dyno\'s helper names it.' };
 
 const MIN = 60_000;
 

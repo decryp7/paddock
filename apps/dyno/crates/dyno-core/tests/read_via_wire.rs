@@ -214,3 +214,13 @@ fn the_processes_hint_travels_in_both_wire_forms() {
     let bytes = postcard::to_stdvec(&v).unwrap();
     assert_eq!(postcard::from_bytes::<LiveVia>(&bytes).unwrap(), v);
 }
+
+/// The sentence a reading shows when only the helper can read it names the same switch as its button ("Turn on administrator
+/// readings"), in the same case (WP-14 screenshot review, Firewall page).
+#[test]
+fn the_needs_admin_sentence_uses_the_buttons_words() {
+    assert_eq!(
+        NEEDS_ADMIN,
+        "Turn on administrator readings in Settings so the helper can read this."
+    );
+}

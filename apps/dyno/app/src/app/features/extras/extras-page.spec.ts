@@ -174,7 +174,7 @@ describe('dy-extras-page', () => {
     expect(el.querySelector('[data-testid="reading-source-helper"]')?.textContent).toContain('administrator helper');
     const reason = 'Windows only lets an administrator list what keeps it awake.';
     const via: ReadVia = { needsHelper: { reason, next: { openSettings: 'helper' } } };
-    returns(mock, { sleep: { ...report, blockersUnavailable: `${reason} Turn on Administrator readings in Settings so the helper can read this.`, blockersVia: via } });
+    returns(mock, { sleep: { ...report, blockersUnavailable: `${reason} Turn on administrator readings in Settings so the helper can read this.`, blockersVia: via } });
     await TestBed.inject(ExtrasStore).reload('sleep');
     await settle(f);
     expect(el.querySelector('[data-testid="reading-source-needs"]')?.textContent).toContain(reason);

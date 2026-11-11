@@ -199,7 +199,7 @@ mod tests {
     fn the_local_fallback_can_be_switched_off_and_then_the_answer_says_what_to_turn_on() {
         let (r, calls) = wear(false, vec![]);
         let mut r = r.with_fallback(false);
-        assert!(matches!(DiskWearSource::read(&mut r), Reading::Unavailable(m) if m.contains("Administrator readings")));
+        assert!(matches!(DiskWearSource::read(&mut r), Reading::Unavailable(m) if m.contains("administrator readings")));
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         let c = centre(&Net::new(false, vec![]), &FakeClock::new());
         let mut ok = helper_first_wear_on(HelperHost::Linux, port(&c), Box::new(FakeWear(Reading::Available(vec![]))));
@@ -245,7 +245,7 @@ mod tests {
             };
             assert!(text.contains("no drives"), "{text}");
             assert!(
-                !text.contains("Administrator readings") && !text.contains("helper"),
+                !text.contains("administrator readings") && !text.contains("helper"),
                 "helper up={up}: {text}"
             );
             assert!(

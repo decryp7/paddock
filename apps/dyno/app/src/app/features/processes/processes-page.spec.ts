@@ -82,7 +82,7 @@ describe('ProcessesPage', () => {
     expect([...r.el.querySelectorAll('[role="columnheader"]')].some((h) => h.textContent?.includes('Account'))).toBe(true);
     r.f.destroy();
     TestBed.resetTestingModule();
-    r = await withVia({ needsHelper: { reason: 'Other accounts’ processes are not shown. Turn on Administrator readings in Settings so the helper can read this.', next: { openSettings: 'helper' } } });
+    r = await withVia({ needsHelper: { reason: 'Other accounts’ processes are not shown. Turn on administrator readings in Settings so the helper can read this.', next: { openSettings: 'helper' } } });
     expect(r.el.querySelector('[data-testid="reading-source-needs"]')?.textContent).toContain('Other accounts’ processes are not shown');
     expect(r.el.querySelector('[data-testid="reading-source-turn-on"]')).not.toBeNull();
     r.f.destroy();
