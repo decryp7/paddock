@@ -10,7 +10,7 @@ const CATEGORY = $localize`:Command category@@windowing.commands.category:Window
 export const WINDOWING_COMMAND_STUBS: readonly CommandStub[] = [
   { id: 'window.new', title: $localize`:@@windowing.commands.new:New window`, category: CATEGORY, keybinding: NEW_WINDOW_KEYBINDING },
   { id: 'window.close', title: $localize`:@@windowing.commands.close:Close window`, category: CATEGORY },
-  { id: 'window.next', title: $localize`:@@windowing.commands.next:Switch to next window`, category: CATEGORY },
+  { id: 'window.next', gated: true, title: $localize`:@@windowing.commands.next:Switch to next window`, category: CATEGORY },
   {
     id: QUIT_COMMAND,
     title: isMac() ? $localize`:@@windowing.commands.quitMac:Quit Debrief` : $localize`:@@windowing.commands.exit:Exit`,

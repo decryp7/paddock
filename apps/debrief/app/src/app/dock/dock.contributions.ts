@@ -7,18 +7,18 @@ import { PERSPECTIVE_KEYS } from './dock.ids';
 const CATEGORY = $localize`:Command category@@dock.commands.category:Window`;
 
 export const DOCK_COMMAND_STUBS: readonly CommandStub[] = [
-  { id: 'window.popOut', title: $localize`:@@dock.commands.popOut:Pop out to window`, category: CATEGORY, keybinding: 'Ctrl+Alt+O' },
-  { id: 'window.float', title: $localize`:@@dock.commands.float:Float panel`, category: CATEGORY },
+  { id: 'window.popOut', gated: true, title: $localize`:@@dock.commands.popOut:Pop out to window`, category: CATEGORY, keybinding: 'Ctrl+Alt+O' },
+  { id: 'window.float', gated: true, title: $localize`:@@dock.commands.float:Float panel`, category: CATEGORY },
   { id: 'window.panelMenu', title: $localize`:@@dock.commands.panelMenu:Panel menu (window position)`, category: CATEGORY, keybinding: 'Alt+-' },
   { id: 'window.autoHide', title: $localize`:@@dock.commands.autoHide:Auto hide / pin tool window`, category: CATEGORY, keybinding: 'Ctrl+Alt+H' },
   { id: 'window.autoHideAll', title: $localize`:@@dock.commands.autoHideAll:Auto hide all tool windows`, category: CATEGORY },
-  { id: 'window.pinAll', title: $localize`:@@dock.commands.pinAll:Pin all tool windows`, category: CATEGORY },
+  { id: 'window.pinAll', gated: true, title: $localize`:@@dock.commands.pinAll:Pin all tool windows`, category: CATEGORY },
   { id: 'window.closeAllDocuments', title: $localize`:@@dock.commands.closeAllDocuments:Close all documents`, category: CATEGORY },
   { id: 'window.switcher', title: $localize`:@@dock.commands.switcher:Switch panel (Ctrl+Tab)`, category: CATEGORY },
   { id: 'window.fullScreen', title: $localize`:@@dock.commands.fullScreen:Full screen`, category: CATEGORY, keybinding: 'Shift+Alt+Enter' },
-  { id: 'window.fullScreenMode.both', title: $localize`:@@dock.commands.fullScreenMode.both:Full screen does: hide tool windows and chrome, and OS full screen`, category: CATEGORY },
-  { id: 'window.fullScreenMode.chrome', title: $localize`:@@dock.commands.fullScreenMode.chrome:Full screen does: hide tool windows and chrome only`, category: CATEGORY },
-  { id: 'window.fullScreenMode.os', title: $localize`:@@dock.commands.fullScreenMode.os:Full screen does: OS full screen only`, category: CATEGORY },
+  { id: 'window.fullScreenMode.both', gated: true, title: $localize`:@@dock.commands.fullScreenMode.both:Full screen does: hide tool windows and chrome, and OS full screen`, category: CATEGORY },
+  { id: 'window.fullScreenMode.chrome', gated: true, title: $localize`:@@dock.commands.fullScreenMode.chrome:Full screen does: hide tool windows and chrome only`, category: CATEGORY },
+  { id: 'window.fullScreenMode.os', gated: true, title: $localize`:@@dock.commands.fullScreenMode.os:Full screen does: OS full screen only`, category: CATEGORY },
   { id: 'window.layout.save', title: $localize`:@@dock.commands.perspective.save:Save current as perspective…`, category: CATEGORY },
   { id: 'window.layout.manage', title: $localize`:@@dock.commands.perspective.manage:Manage perspectives…`, category: CATEGORY },
   // Ctrl+n for each of the first nine perspectives. The title is the default state's (the four built-in names, then the
@@ -33,6 +33,7 @@ export const DOCK_COMMAND_STUBS: readonly CommandStub[] = [
     .map(
       (name, i): CommandStub => ({
         id: `window.perspective.${i + 1}`,
+        gated: true,
         title: $localize`:Command title|@@dock.commands.perspective:Perspective: ${name}:name:`,
         category: CATEGORY,
         keybinding: `Mod+${i + 1}`,

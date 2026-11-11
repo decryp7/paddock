@@ -19,35 +19,35 @@ export const REDACTION_COMMAND_STUBS: readonly CommandStub[] = [
 export const REPORT_COMMAND_STUBS: readonly CommandStub[] = [
   { id: 'report.show', title: $localize`:@@share.reportCommands.show:Show report builder`, category: ANALYZE, view: 'report' },
   { id: 'report.new', title: $localize`:@@share.reportCommands.new:New incident report`, category: ANALYZE },
-  { id: 'report.addSelected', title: $localize`:@@share.reportCommands.addSelected:Add selected event to report`, category: ANALYZE },
-  { id: 'report.addNotes', title: $localize`:@@share.reportCommands.addNotes:Add notes to report`, category: ANALYZE },
-  { id: 'report.addTimeline', title: $localize`:@@share.reportCommands.addTimeline:Add timeline to report`, category: ANALYZE },
-  { id: 'report.addFindings', title: $localize`:@@share.reportCommands.addFindings:Add health-check findings to report`, category: ANALYZE },
-  { id: 'report.addAnomalies', title: $localize`:@@share.reportCommands.addAnomalies:Add anomalies to report as findings`, category: ANALYZE },
-  { id: 'report.addQueryTable', title: $localize`:@@share.reportCommands.addQueryTable:Add query result to report`, category: ANALYZE },
-  { id: 'report.addAnnotations', title: $localize`:@@share.reportCommands.addAnnotations:Add annotations to report`, category: ANALYZE },
-  { id: 'report.export', title: $localize`:@@share.reportCommands.export:Export report…`, category: FILE },
+  { id: 'report.addSelected', gated: true, title: $localize`:@@share.reportCommands.addSelected:Add selected event to report`, category: ANALYZE },
+  { id: 'report.addNotes', gated: true, title: $localize`:@@share.reportCommands.addNotes:Add notes to report`, category: ANALYZE },
+  { id: 'report.addTimeline', gated: true, title: $localize`:@@share.reportCommands.addTimeline:Add timeline to report`, category: ANALYZE },
+  { id: 'report.addFindings', gated: true, title: $localize`:@@share.reportCommands.addFindings:Add health-check findings to report`, category: ANALYZE },
+  { id: 'report.addAnomalies', gated: true, title: $localize`:@@share.reportCommands.addAnomalies:Add anomalies to report as findings`, category: ANALYZE },
+  { id: 'report.addQueryTable', gated: true, title: $localize`:@@share.reportCommands.addQueryTable:Add query result to report`, category: ANALYZE },
+  { id: 'report.addAnnotations', gated: true, title: $localize`:@@share.reportCommands.addAnnotations:Add annotations to report`, category: ANALYZE },
+  { id: 'report.export', gated: true, title: $localize`:@@share.reportCommands.export:Export report…`, category: FILE },
 ];
 
 export const DASHBOARD_COMMAND_STUBS: readonly CommandStub[] = [
   { id: 'dashboards.show', title: $localize`:@@share.dashboardCommands.show:Show dashboards`, category: VIEW, view: 'dashboards' },
-  { id: 'dashboards.edit', title: $localize`:@@share.dashboardCommands.edit:Dashboard: toggle edit mode`, category: VIEW },
-  { id: 'dashboards.addTile', title: $localize`:@@share.dashboardCommands.addTile:Dashboard: add tile…`, category: VIEW },
-  { id: 'dashboards.wall', title: $localize`:@@share.dashboardCommands.wall:Dashboard: wall mode`, category: VIEW },
+  { id: 'dashboards.edit', gated: true, title: $localize`:@@share.dashboardCommands.edit:Dashboard: toggle edit mode`, category: VIEW },
+  { id: 'dashboards.addTile', gated: true, title: $localize`:@@share.dashboardCommands.addTile:Dashboard: add tile…`, category: VIEW },
+  { id: 'dashboards.wall', gated: true, title: $localize`:@@share.dashboardCommands.wall:Dashboard: wall mode`, category: VIEW },
 ];
 
 export const BUNDLE_COMMAND_STUBS: readonly CommandStub[] = [
-  { id: 'share.bundle.create', title: $localize`:@@share.bundleCommands.shareProject:Share as project file…`, category: FILE },
+  { id: 'share.bundle.create', gated: true, title: $localize`:@@share.bundleCommands.shareProject:Share as project file…`, category: FILE },
   { id: 'share.bundle.open', title: $localize`:@@share.bundleCommands.open:Open bundle…`, category: FILE },
 ];
 
 export const VISUAL_COMMAND_STUBS: readonly CommandStub[] = [
-  { id: 'visuals.timelinePng', title: $localize`:@@share.visualCommands.timelinePng:Export timeline as PNG…`, category: FILE },
-  { id: 'visuals.timelineSvg', title: $localize`:@@share.visualCommands.timelineSvg:Export timeline as SVG…`, category: FILE },
+  { id: 'visuals.timelinePng', gated: true, title: $localize`:@@share.visualCommands.timelinePng:Export timeline as PNG…`, category: FILE },
+  { id: 'visuals.timelineSvg', gated: true, title: $localize`:@@share.visualCommands.timelineSvg:Export timeline as SVG…`, category: FILE },
 ];
 
 export const REDACTED_COPY_COMMAND_STUBS: readonly CommandStub[] = [
-  { id: 'share.redactedCopy', title: $localize`:@@share.redactedCopy.command:Share redacted copy…`, category: FILE },
+  { id: 'share.redactedCopy', gated: true, title: $localize`:@@share.redactedCopy.command:Share redacted copy…`, category: FILE },
 ];
 
 /** The share features' views and commands, in the order `provideShare` registered them before M1. */

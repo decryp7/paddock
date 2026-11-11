@@ -1,14 +1,21 @@
 import { DestroyRef, inject, InjectionToken, Injector, Provider, runInInjectionContext, signal, Type } from '@angular/core';
 import { SHELL_IDLE } from '@decryp7/paddock-ui/shell/contributions';
 import { contributeFrom } from './contributions';
-import type { CommandContext, DebriefCommand } from './tokens';
+import { COMMAND_NOT_AVAILABLE, type CommandContext, type DebriefCommand } from './tokens';
 
 /**
  * What the palette, menus and keys need of a command before its code is loaded: everything but `when` and `run`. A
  * registration file (`*.contributions.ts`) lists these, so the command classes and the stores they inject stay out of
  * the main window's first paint (workbench.md §9, debrief-1-2-api.md §14.3 "lazy by construction").
  */
-export type CommandStub = Omit<DebriefCommand, 'when' | 'run'>;
+export type CommandStub = Omit<DebriefCommand, 'when' | 'run' | 'keysReady'> & {
+  /**
+   * The command's code declares `when` (it is not always available). Before the code loads, a gated stub's key falls
+   * through (and starts the load) instead of being swallowed by a command that may turn out unavailable.
+   * `stubMismatches` checks it against the code.
+   */
+  readonly gated?: true;
+};
 
 /** A class whose `commands` hold the `when` and `run` of the stubs (an injectable, created in the root injector). */
 export type CommandsClass = Type<{ readonly commands: readonly DebriefCommand[] }>;
@@ -87,7 +94,7 @@ function lazyCommandSet(load: () => Promise<CommandsFactory>, stubs: readonly Co
       idle(() => {
         if (alive) void ensure().catch(() => undefined);
       });
-      return stubs.map((stub): DebriefCommand => {
+      return stubs.map(({ gated, ...stub }): DebriefCommand => {
         const code = (): DebriefCommand | undefined => loaded()?.get(stub.id);
         return {
           ...stub,
@@ -103,12 +110,17 @@ function lazyCommandSet(load: () => Promise<CommandsFactory>, stubs: readonly Co
             const command = map?.get(stub.id);
             return map === null || (command !== undefined && (command.when?.(ctx) ?? true));
           },
+          keysReady: () => {
+            if (!gated || loaded() !== null) return true;
+            void ensure().catch(() => undefined);
+            return false;
+          },
           run: async (ctx: CommandContext, args?: unknown) => {
             const command = (await ensure()).get(stub.id);
             if (!command) throw new Error(`the command ${stub.id} is registered but its code does not define it`);
-            // Asked again with the code loaded: a command that is not available now does nothing (as the registry does).
-            if (command.when && !command.when(ctx)) return;
-            await command.run(ctx, args);
+            // Asked again with the code loaded: a command that is not available now does nothing, and says so.
+            if (command.when && !command.when(ctx)) return COMMAND_NOT_AVAILABLE;
+            return command.run(ctx, args);
           },
         };
       });

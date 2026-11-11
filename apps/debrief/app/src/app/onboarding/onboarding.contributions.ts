@@ -7,7 +7,7 @@ const CATEGORY = $localize`:@@onboarding.command.category:Help`;
 
 export const ONBOARDING_COMMAND_STUBS: readonly CommandStub[] = [
   { id: 'help.demo', title: $localize`:@@onboarding.command.demo:Try the demo`, category: CATEGORY },
-  { id: 'help.tour', title: $localize`:@@onboarding.command.tour:Take the tour`, category: CATEGORY },
+  { id: 'help.tour', gated: true, title: $localize`:@@onboarding.command.tour:Take the tour`, category: CATEGORY },
 ];
 
 export const ONBOARDING_COMMANDS_CONTRIBUTIONS = lazyCommandFactory(() => import('./onboarding.commands').then((m) => m.onboardingCommands), ONBOARDING_COMMAND_STUBS);

@@ -9,9 +9,9 @@ const ANALYZE = $localize`:@@live.commands.categoryAnalyze:Analyze`;
 const VIEW = $localize`:@@live.commands.categoryView:View`;
 
 export const LIVE_COMMAND_STUBS: readonly CommandStub[] = [
-  { id: 'live.toggle', title: $localize`:@@live.commands.toggle:Toggle live tail`, category: FILE },
+  { id: 'live.toggle', gated: true, title: $localize`:@@live.commands.toggle:Toggle live tail`, category: FILE },
   { id: 'live.open', title: $localize`:@@live.commands.open:Open for live tail…`, category: FILE },
-  { id: 'live.resume', title: $localize`:@@live.commands.resume:Resume following`, category: ANALYZE },
+  { id: 'live.resume', gated: true, title: $localize`:@@live.commands.resume:Resume following`, category: ANALYZE },
   { id: 'live.alerts', title: $localize`:@@live.commands.showAlerts:Show live alerts`, category: VIEW, view: ALERTS_VIEW },
   { id: 'live.status', title: $localize`:@@live.commands.showStatus:Show tail status`, category: VIEW, view: TAIL_STATUS_VIEW },
   { id: 'live.rules', title: $localize`:@@live.commands.rules:Edit live alert rules…`, category: ANALYZE },

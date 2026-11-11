@@ -45,7 +45,7 @@ export class FakeCommandContext implements CommandContext {
   notifyError: CommandContext['notifyError'] = () => undefined;
 }
 
-/** What a command stub promises (palette, menus, keys): compared with the loaded class by `stubMismatches`. */
+/** What a command stub promises (palette, menus, keys), with `gated`: compared with the loaded class by `stubMismatches`. */
 const STUB_FIELDS = ['id', 'title', 'category', 'keybinding', 'view'] as const;
 
 /**
@@ -53,12 +53,15 @@ const STUB_FIELDS = ['id', 'title', 'category', 'keybinding', 'view'] as const;
  * the class's `commands` (inject it in the test).
  */
 export function stubMismatches(stubs: readonly object[], commands: readonly object[]): string[] {
-  const pick = (c: object) => Object.fromEntries(STUB_FIELDS.map((f) => [f, (c as Record<string, unknown>)[f]]));
+  const fields = (c: object) => Object.fromEntries(STUB_FIELDS.map((f) => [f, (c as Record<string, unknown>)[f]]));
+  // A stub says `gated: true` exactly when its command declares `when` (its key must not be swallowed before the load).
+  const stub = (c: object) => ({ ...fields(c), gated: (c as { gated?: unknown }).gated === true });
+  const code = (c: object) => ({ ...fields(c), gated: typeof (c as { when?: unknown }).when === 'function' });
   const out: string[] = [];
   const n = Math.max(stubs.length, commands.length);
   for (let i = 0; i < n; i++) {
-    const a = stubs[i] ? JSON.stringify(pick(stubs[i] as object)) : 'nothing';
-    const b = commands[i] ? JSON.stringify(pick(commands[i] as object)) : 'nothing';
+    const a = stubs[i] ? JSON.stringify(stub(stubs[i] as object)) : 'nothing';
+    const b = commands[i] ? JSON.stringify(code(commands[i] as object)) : 'nothing';
     if (a !== b) out.push(`#${i + 1}: stub ${a} but the class has ${b}`);
   }
   return out;

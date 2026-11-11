@@ -31,6 +31,8 @@ export interface DebriefCommandDef extends CommandDef<DebriefContext> {
   readonly keybinding?: string;
   /** The view this command only shows (the palette lists one command per view). */
   readonly view?: string;
+  /** See `DebriefCommand.keysReady`. */
+  readonly keysReady?: () => boolean;
 }
 
 /** The batch keys of Debrief's own kinds in the shell's registry. */
@@ -146,7 +148,8 @@ export function toShellCommand(c: DebriefCommand): DebriefCommandDef {
     ...(c.when ? { when: (ctx) => c.when?.(ctx) ?? true } : {}),
     ...(c.keybinding ? { keybinding: c.keybinding } : {}),
     ...(c.view ? { view: c.view } : {}),
-    run: (ctx, args) => c.run(ctx, args),
+    ...(c.keysReady ? { keysReady: c.keysReady } : {}),
+    run: (ctx, args) => c.run(ctx, args) as void | Promise<void>,
   };
   return Object.freeze(def);
 }
@@ -157,7 +160,7 @@ export function keybindingsOf(commands: readonly DebriefCommandDef[]): Keybindin
 }
 
 /** The registry's command as Debrief's readers (palette, menus, overrides) see it: titles as live strings. Pure. */
-export function asDebriefCommand(def: CommandDef<DebriefContext> & { keybinding?: string; view?: string }): DebriefCommand {
+export function asDebriefCommand(def: CommandDef<DebriefContext> & { keybinding?: string; view?: string; keysReady?: () => boolean }): DebriefCommand {
   return {
     id: def.id,
     get title() {
@@ -169,6 +172,7 @@ export function asDebriefCommand(def: CommandDef<DebriefContext> & { keybinding?
     ...(def.keybinding ? { keybinding: def.keybinding } : {}),
     ...(def.view ? { view: def.view } : {}),
     ...(def.when ? { when: def.when } : {}),
+    ...(def.keysReady ? { keysReady: def.keysReady } : {}),
     run: (ctx, args) => def.run(ctx, args),
   };
 }

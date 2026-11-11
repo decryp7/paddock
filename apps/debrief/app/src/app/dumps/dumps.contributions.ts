@@ -9,7 +9,7 @@ const V = DUMP_VIEW_IDS;
 export const DUMPS_COMMAND_STUBS: readonly CommandStub[] = [
   { id: 'dumps.open', title: $localize`:@@dumps.cmd.open:Open dump…`, category: 'File' },
   { id: 'dumps.openUmdh', title: $localize`:@@dumps.cmd.openUmdh:Open UMDH snapshots…`, category: 'File' },
-  { id: 'dumps.capture', title: $localize`:@@dumps.cmd.capture:Create dump of process…`, category: $localize`:@@tools.category.tools:Tools`, view: V.capture },
+  { id: 'dumps.capture', gated: true, title: $localize`:@@dumps.cmd.capture:Create dump of process…`, category: $localize`:@@tools.category.tools:Tools`, view: V.capture },
   { id: 'dumps.show', title: $localize`:@@dumps.cmd.show:Dumps: show the dump`, category: $localize`:@@dumps.category:Dumps`, view: V.dump },
   { id: 'dumps.showUmdh', title: $localize`:@@dumps.cmd.showUmdh:Dumps: UMDH heap growth`, category: $localize`:@@dumps.category:Dumps`, view: V.umdh },
 ];

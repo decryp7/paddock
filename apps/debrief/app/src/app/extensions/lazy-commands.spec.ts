@@ -4,6 +4,8 @@ import { stubMismatches } from '../../testing/contributions';
 import { MemoryLogger } from '../../testing/helpers';
 import { appConfig } from '../app.config';
 import { Logger } from '../core/logger';
+import { SHELL_IDLE } from '@decryp7/paddock-ui/shell/contributions';
+import { CommandRegistry } from './command-registry';
 import { LAZY_COMMAND_SETS } from './lazy-registration';
 
 /**
@@ -26,6 +28,17 @@ describe('lazy command registrations of the real app', () => {
       }
     }
     expect(problems).toEqual([]);
+  });
+
+  it('lets Alt+Left through before idle: Go back’s code declares when, so its key is not swallowed by the stub', () => {
+    TestBed.configureTestingModule({
+      providers: [...appConfig.providers, { provide: Logger, useFactory: () => new MemoryLogger() }, { provide: SHELL_IDLE, useValue: () => undefined }],
+    });
+    const registry = TestBed.inject(CommandRegistry);
+    expect(registry.find('nav.back')?.keybinding).toBe('Alt+Left');
+    const key = new KeyboardEvent('keydown', { key: 'ArrowLeft', code: 'ArrowLeft', altKey: true, cancelable: true });
+    expect(registry.runForKey(key)).toBe(false);
+    expect(key.defaultPrevented).toBe(false);
   });
 });
 

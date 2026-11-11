@@ -5,7 +5,7 @@ import { lazyCommandFactory, type CommandStub } from '../extensions/lazy-registr
 
 export const BROWSER_COMMAND_STUBS: readonly CommandStub[] = [
   {
-    id: 'browser.searchSelected',
+    id: 'browser.searchSelected', gated: true,
     title: $localize`:@@browser.cmd.searchSelected:Web: Search the web for the selected event…`,
     category: $localize`:Command palette category@@browser.category:Web`,
   },

@@ -8,7 +8,7 @@ const CATEGORY = $localize`:Command palette category@@notifications.category:Vie
 
 export const NOTIFICATIONS_COMMAND_STUBS: readonly CommandStub[] = [
   { id: 'notifications.show', title: $localize`:@@notifications.cmd.show:View: Notifications`, category: CATEGORY, view: NOTIFICATIONS_VIEW },
-  { id: 'notifications.markAllRead', title: $localize`:@@notifications.cmd.markAll:Notifications: Mark all read`, category: CATEGORY },
+  { id: 'notifications.markAllRead', gated: true, title: $localize`:@@notifications.cmd.markAll:Notifications: Mark all read`, category: CATEGORY },
 ];
 
 export const NOTIFICATIONS_COMMANDS_CONTRIBUTIONS = lazyCommandFactory(() => import('./notifications.commands').then((m) => m.notificationsCommandsFactory), NOTIFICATIONS_COMMAND_STUBS);

@@ -7,6 +7,7 @@ import { FOLDER_SETUP_COMMAND } from './folder-setup.ids';
 export const FOLDER_SETUP_COMMAND_STUBS: readonly CommandStub[] = [
   {
     id: FOLDER_SETUP_COMMAND,
+    gated: true,
     title: $localize`:Command and File menu item@@ai.folderSetup.cmd:Set up analysis for this folder…`,
     category: $localize`:Command palette category@@ai.folderSetup.category:File`,
   },

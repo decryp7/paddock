@@ -8,7 +8,7 @@ const CATEGORY = $localize`:Command palette category@@jobs.category:View`;
 
 export const JOBS_COMMAND_STUBS: readonly CommandStub[] = [
   { id: 'jobs.show', title: $localize`:@@jobs.cmd.show:View: Jobs`, category: CATEGORY, view: JOBS_VIEW },
-  { id: 'jobs.clearFinished', title: $localize`:@@jobs.cmd.clear:Jobs: Clear finished`, category: CATEGORY },
+  { id: 'jobs.clearFinished', gated: true, title: $localize`:@@jobs.cmd.clear:Jobs: Clear finished`, category: CATEGORY },
 ];
 
 export const JOBS_COMMANDS_CONTRIBUTIONS = lazyCommandFactory(() => import('./jobs.commands').then((m) => m.jobsCommandsFactory), JOBS_COMMAND_STUBS);

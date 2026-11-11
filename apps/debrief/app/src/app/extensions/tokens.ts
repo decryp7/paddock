@@ -91,8 +91,17 @@ export interface DebriefCommand {
    * "Open <view>" (`view.open.<id>`) as well.
    */
   view?: string;
-  run: (ctx: CommandContext, args?: unknown) => void | Promise<void>;
+  /**
+   * Whether a key may run the command now. A lazy stub whose code declares `when` answers false until the code is
+   * loaded (and starts loading it), so its key falls through instead of being swallowed. Defaults to true.
+   */
+  keysReady?: () => boolean;
+  /** Returns `COMMAND_NOT_AVAILABLE` when, once asked again (a lazy stub's loaded `when`), it did not run. */
+  run: (ctx: CommandContext, args?: unknown) => void | typeof COMMAND_NOT_AVAILABLE | Promise<void | typeof COMMAND_NOT_AVAILABLE>;
 }
+
+/** What a command's `run` returns when it found itself not available and did nothing (the registry answers false). */
+export const COMMAND_NOT_AVAILABLE: unique symbol = Symbol('command not available');
 
 /** Id prefix of the generated "Open <view>" commands, one per registered view. */
 export const VIEW_OPEN_PREFIX = 'view.open.';

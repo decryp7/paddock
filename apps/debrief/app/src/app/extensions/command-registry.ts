@@ -11,7 +11,7 @@ import { matchesKeybinding } from './keybinding';
 import { applyOverrides } from './keybinding-overrides';
 import { KeybindingOverridesStore } from './keybinding-overrides.store';
 import { asDebriefCommand, contributedItems, provideDebriefKinds, type DebriefCommandDef } from './contributions';
-import { CommandContext, DebriefCommand } from './tokens';
+import { COMMAND_NOT_AVAILABLE, CommandContext, DebriefCommand } from './tokens';
 import { debriefCommandContext, debriefShellPorts } from './command-context';
 
 /** The context handed to commands: `ShellContext<DebriefContext>`. Replaceable in tests. */
@@ -84,8 +84,8 @@ export class CommandRegistry {
     // A modal dialog window is open over this window: it answers first.
     if (this.gate.blocked() || !command || !this.isAvailable(command)) return false;
     try {
-      await this.activity.track(id, trigger, { Title: command.title, Category: command.category }, () => command.run(this.context, args));
-      return true;
+      const result = await this.activity.track(id, trigger, { Title: command.title, Category: command.category }, () => command.run(this.context, args));
+      return result !== COMMAND_NOT_AVAILABLE;
     } catch (e) {
       this.logger.warn('ui.command', 'Command failed', { Command: id });
       this.store.setError($localize`:@@extensions.commandRegistry.failed:${command.title}:title: failed: ${e instanceof Error ? e.message : String(e)}:detail:`);
@@ -97,7 +97,8 @@ export class CommandRegistry {
   runForKey(e: KeyboardEvent): boolean {
     if (this.keysSuspended() || this.gate.blocked()) return false;
     const command = this.available().find((c) => c.keybinding && matchesKeybinding(c.keybinding, e));
-    if (!command) return false;
+    // A lazy command whose availability is not known yet lets the key through (and starts loading its code).
+    if (!command || (command.keysReady && !command.keysReady())) return false;
     e.preventDefault();
     void this.run(command.id, 'shortcut');
     return true;

@@ -5,7 +5,7 @@ import { lazyCommandFactory, type CommandStub } from '../../extensions/lazy-regi
 
 export const INCIDENT_COMMAND_STUBS: readonly CommandStub[] = [
   {
-    id: 'incident.build',
+    id: 'incident.build', gated: true,
     title: $localize`:@@incident.cmd.build:Report: Incident summary…`,
     category: $localize`:@@share.commands.categoryAnalyze:Analyze`,
   },
