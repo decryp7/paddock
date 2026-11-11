@@ -266,6 +266,34 @@ endpoint = "ep"
 scenario = "*"
 fault = "no-end-line"
 blocks_tag = "none"
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "ep"
+scenario = "wrong-token"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+
+[[ratchet]]
+instance = "WP-7"
+endpoint = "ep"
+scenario = "busy"
+fault = "drain-not-eof:timeCap"
+blocks_tag = "none"
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "ep"
+scenario = "stall"
+fault = "drain-not-eof"
+blocks_tag = "none"
+
+[[ratchet]]
+instance = "I3"
+endpoint = "ep"
+scenario = "stall"
+fault = "no-end-line"
+blocks_tag = "dyno-v*"
 "#;
     let found = run(
         &[("src/server.rs", SERVER), ("tests/endings.rs", TEST_FILE)],
@@ -275,9 +303,15 @@ blocks_tag = "none"
     let text = found.join("\n");
     assert!(text.contains("the endpoint is not in"), "{text}");
     assert!(text.contains("unknown scenario"), "{text}");
-    assert!(text.contains("only a logging gap may say `none`"), "{text}");
+    assert!(
+        text.contains("only a logging gap or the deferred drain (WP-7, WP-2) may say `none`"),
+        "{text}"
+    );
     assert!(text.contains("unknown os `beos`"), "{text}");
-    assert_eq!(found.len(), 4, "the good entries produce nothing: {text}");
+    assert!(text.contains("fault `drain-not-eof:timeCap` needs `instance = \"WP-2\"`"), "{text}");
+    assert!(text.contains("`drain-not-eof` names the drain outcome it accepts"), "{text}");
+    assert!(text.contains("fault `no-end-line` needs `instance = \"WP-7\"`"), "{text}");
+    assert_eq!(found.len(), 7, "the good entries produce nothing: {text}");
 }
 
 #[test]
@@ -382,7 +416,7 @@ fn the_check_and_the_harness_agree_on_names() {
     }
     for e in &ratchet_src {
         assert!(
-            source.contains(&format!("\"{}\"", e.fault)),
+            source.contains(&format!("\"{}\"", e.fault.split(':').next().unwrap_or(""))),
             "the harness has no fault kind {}",
             e.fault
         );

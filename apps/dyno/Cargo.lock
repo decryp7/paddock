@@ -4045,6 +4045,7 @@ version = "0.1.0"
 dependencies = [
  "getrandom 0.3.4",
  "libc",
+ "log",
  "paddock-env",
  "paddock-jobs",
  "paddock-limits",
@@ -4108,6 +4109,7 @@ dependencies = [
  "paddock-commands",
  "paddock-dialogs",
  "paddock-env",
+ "paddock-ipc",
  "paddock-jobs",
  "paddock-log",
  "paddock-proc",

@@ -172,7 +172,7 @@ impl Ratchet {
         let mut observed: BTreeSet<(String, String)> = BTreeSet::new();
         for r in reports.iter().filter(|r| r.endpoint == endpoint) {
             for f in r.faults() {
-                observed.insert((r.scenario.name().to_string(), f.kind().to_string()));
+                observed.insert((r.scenario.name().to_string(), f.key()));
             }
         }
         let mine: Vec<&Entry> = self
