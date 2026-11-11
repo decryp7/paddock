@@ -70,10 +70,10 @@ test('bundled components are appended verbatim under their own heading; Pitwall\
   const comp = '### A vendor package  \r\n\r\nSome words.\r\n';
   const withComp = render(rust.packages, [], 'Pitwall', [comp]).markdown;
   assert.equal(withComp, `${none.trimEnd()}\n\n## Bundled components\n\n### A vendor package\n\nSome words.\n`);
-  const text = readText(join(PADDOCK, 'apps/pitwall/docs/third-party/microsoft-vc-redist.md'));
+  const text = readText(join(PADDOCK, 'apps/pitwall/app/src-tauri/resources/microsoft-vc-redist.md'));
   const tail = `\n## Bundled components\n\n${normalise(text)}\n`;
   assert.ok(readText(join(PADDOCK, 'apps/pitwall/app/src-tauri/resources/THIRD_PARTY_NOTICES.md')).endsWith(tail), 'regenerate Pitwall\'s notices: scripts/notices.sh pitwall');
-  assert.deepEqual(JSON.parse(readText(join(PADDOCK, 'apps/pitwall/paddock.ci.json'))).notices.components, ['docs/third-party/microsoft-vc-redist.md']);
+  assert.deepEqual(JSON.parse(readText(join(PADDOCK, 'apps/pitwall/paddock.ci.json'))).notices.components, ['app/src-tauri/resources/microsoft-vc-redist.md']);
 });
 
 test('a vendored copy of a third-party crate is listed although it is a path dependency; first-party path crates are not', () => {

@@ -8,7 +8,7 @@
     "manifests": ["app/src-tauri/Cargo.toml", "crates/pitwall-server/Cargo.toml"],
     "npm": "app",
     "out": ["app/src-tauri/resources"],
-    "components": ["docs/third-party/microsoft-vc-redist.md"]
+    "components": ["app/src-tauri/resources/microsoft-vc-redist.md"]
   },
   "lastPackages": ["pitwall-app"],
   "windowsClippy": true,
