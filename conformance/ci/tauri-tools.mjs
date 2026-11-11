@@ -2,7 +2,7 @@
 // The bundler tools `tauri build` would download at bundle time, pinned by URL and SHA-256 and put where Tauri looks for them,
 // so a bundle downloads nothing it has not pinned (ADR 0085 WP-9; Dyno 1.1.1 WP-2: a GitHub 504 failed dyno-release 7693 and
 // 7694 without an annotation). Two kinds, chosen by the bundle list and the host:
-//   appimage (Linux x64): AppRun and linuxdeploy (tauri-bundler 2.10.3 src/bundle/linux/appimage/linuxdeploy.rs:208-278)
+//   appimage (Linux x64): AppRun, linuxdeploy, linuxdeploy-plugin-appimage (tauri-bundler 2.10.3 linuxdeploy.rs:208-278)
 //   nsis (Windows x64):  the NSIS 3.13 zip and nsis_tauri_utils.dll (src/bundle/windows/nsis/mod.rs:36-79, :137-162)
 //
 // The tools folder is `<build folder>/.tauri`: tauri-bundle.sh passes `{"bundle":{"useLocalToolsDir":true}}` to `tauri build`,
@@ -21,7 +21,7 @@
 // that is not in it (Tauri downloaded or wrote something unpinned) or has another hash is a warning, and an error on a tag.
 //
 // What Tauri then skips (so it downloads nothing pinned here):
-// - appimage: AppRun and linuxdeploy are downloaded only when the file is missing (:212, :223). Tauri zeroes linuxdeploy's
+// - appimage: AppRun, linuxdeploy and the plugin are downloaded only when missing (:212, :223, :249). Tauri zeroes linuxdeploy's
 //   AppImage magic (3 bytes at offset 8) with `dd` on every build (:267-276), so the manifest pins the patched bytes.
 //   linuxdeploy-plugin-gtk.sh and -gstreamer.sh are embedded in the bundler and written when they differ (:229-246): pinned by
 //   their hash in tauri-bundler 2.10.3.
@@ -29,10 +29,11 @@
 //   SHA-1 NSIS_EXE_SHA1 (:98-101) and nsis_tauri_utils.dll has NSIS_TAURI_UTILS_SHA1 (:72-77, :114-121). install checks both
 //   SHA-1 values after it writes the folder, so a pin that Tauri would throw away fails here, not as a silent download.
 //
-// Integrity gap (Dyno plan WP-17): linuxdeploy-plugin-appimage is NOT pinned. Tauri downloads it from linuxdeploy's moving
-// `continuous` release whenever the tools folder lacks it (:248-263) and runs it unchecked; a failed download falls back to
-// the plugin built into linuxdeploy. The project publishes only `continuous` and dated `1-alpha-*` builds, no stable release
-// (checked 2026-11-12), so it stays a named gap: check reports it as a warning, never as a pass.
+// linuxdeploy-plugin-appimage: Tauri downloads it from linuxdeploy's moving `continuous` release whenever the tools folder
+// lacks `linuxdeploy-plugin-appimage.AppImage` (:248-263). The project publishes no stable release, only `continuous` and dated
+// `1-alpha-*` builds; the user chose on 2026-11-12 to pin the dated build 1-alpha-20250213-1 (its assets predate GitHub's
+// release digests, so the SHA-256 was measured on two downloads that matched, and the size equals the release API's). With it
+// in place Tauri downloads nothing, and `check` fails a tag on any file not in the manifest: there is no unpinned exception.
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -54,8 +55,8 @@ export const KINDS = {
 };
 
 /**
- * The pinned downloads per kind: the release URL, its SHA-256 (measured on download 2026-11-12 and equal to the digest
- * GitHub's release API lists for the asset), the cache file name, and where it goes in the tools folder: `dest` for a file,
+ * The pinned downloads per kind: the release URL, its SHA-256 (measured on download 2026-11-12; equal to the digest GitHub's
+ * release API lists, except for the plugin, whose release lists none), the cache file name, and where it goes in the tools folder: `dest` for a file,
  * `unzip` (the archive's top folder) plus `dest` (the folder it becomes) for an archive. `patch: 'appimage-magic'` means Tauri
  * changes the file in place on every build, so the manifest holds the patched hash.
  */
@@ -77,6 +78,15 @@ export const PINS = {
       file: `linuxdeploy-${LINUXDEPLOY}-x86_64.AppImage`,
       dest: `linuxdeploy-${LINUXDEPLOY}-x86_64.AppImage`,
       patch: 'appimage-magic',
+    },
+    {
+      name: 'linuxdeploy-plugin-appimage',
+      version: '1-alpha-20250213-1',
+      // linuxdeploy.rs:249-255 downloads the `continuous` build under this name; the pin is the dated build (user, 2026-11-12).
+      url: 'https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-appimage-x86_64.AppImage',
+      sha256: '992d502a248e14ab185448ddf6f6e7d25558cb84d4623c354c3af350c25fccb3',
+      file: 'linuxdeploy-plugin-appimage-1-alpha-20250213-1-x86_64.AppImage',
+      dest: 'linuxdeploy-plugin-appimage.AppImage',
     },
   ],
   nsis: [
@@ -119,9 +129,6 @@ export const TAURI_SHA1 = {
     'NSIS/Plugins/x86-unicode/additional/nsis_tauri_utils.dll': '75197fee3c6a814fe035788d1c34ead39349b860',
   },
 };
-
-/** Files Tauri downloads that are not pinned (named gaps, reported as warnings): see the header. */
-export const GAPS = { appimage: ['linuxdeploy-plugin-appimage.AppImage'], nsis: [] };
 
 /** The kinds a bundle list needs on this host (none on a host whose tools are not pinned, e.g. macOS). */
 export function kindsFor(bundles, platform = process.platform, arch = process.arch) {
@@ -373,30 +380,27 @@ function walk(dir, base = dir, files = [], links = []) {
 }
 
 /**
- * Compares the tools folder after the build with its manifest: { matched, findings, gaps }. A file not in the manifest, a
- * changed hash or a link is a finding; a file named in `gaps` is a known, reported gap.
+ * Compares the tools folder after the build with its manifest: { matched, findings }. A file not in the manifest, a changed
+ * hash or a link is a finding.
  */
-export function check({ tools, gaps = [] }) {
+export function check({ tools }) {
   const file = manifestPath(tools);
-  if (!existsSync(file)) return { matched: 0, findings: [`check broken: no manifest ${file} (install did not run for this folder)`], gaps: [] };
+  if (!existsSync(file)) return { matched: 0, findings: [`check broken: no manifest ${file} (install did not run for this folder)`] };
   const want = new Map(readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => {
     const [h, ...rest] = l.split('  ');
     return [rest.join('  '), h];
   }));
-  if (!existsSync(tools)) return { matched: 0, findings: [`check broken: the tools folder ${tools} is gone`], gaps: [] };
+  if (!existsSync(tools)) return { matched: 0, findings: [`check broken: the tools folder ${tools} is gone`] };
   const { files, links } = walk(tools);
   const findings = links.map((l) => `${l} is a link (the tools must be files in the build folder)`);
-  const seenGaps = [];
   let matched = 0;
   for (const rel of files.sort()) {
     const h = want.get(rel);
-    if (h === undefined) {
-      if (gaps.includes(rel)) seenGaps.push(rel);
-      else findings.push(`${rel} is not pinned (Tauri downloaded or wrote it itself)`);
-    } else if (sha256(readFileSync(join(tools, ...rel.split('/')))) !== h) findings.push(`${rel} does not have its pinned SHA-256`);
+    if (h === undefined) findings.push(`${rel} is not pinned (Tauri downloaded or wrote it itself)`);
+    else if (sha256(readFileSync(join(tools, ...rel.split('/')))) !== h) findings.push(`${rel} does not have its pinned SHA-256`);
     else matched++;
   }
-  return { matched, findings, gaps: seenGaps };
+  return { matched, findings };
 }
 
 const OPTIONS = ['--bundles', '--src-tauri', '--tools', '--cache'];
@@ -409,7 +413,7 @@ function option(argv, name) {
 }
 
 /**
- * The command line; returns the exit code. `PADDOCK_TAURI_PINS` names a JSON file { pins, embedded?, sha1s?, gaps?,
+ * The command line; returns the exit code. `PADDOCK_TAURI_PINS` names a JSON file { pins, embedded?, sha1s?, host?,
  * retryDelayMs? } that replaces the pins (the tests only: refused under GITHUB_ACTIONS=true, exit 2). `deps.host` =
  * { platform, arch } replaces the host (tests). On a tag run the kept cache is not read: a fresh folder is used (ADR 0085 D9).
  */
@@ -468,15 +472,11 @@ export async function main(argv, env = process.env, deps = {}) {
       log(`tauri-tools: manifest ${manifestPath(tools)}`);
       return 0;
     }
-    const gaps = kinds.flatMap((k) => (o.gaps ?? GAPS)[k] ?? []);
-    const r = check({ tools, gaps });
-    for (const g of r.gaps) {
-      log(`::warning::${g} in ${tools} is not pinned: Tauri downloads it unverified (the named gap Dyno plan WP-17 closes).`);
-    }
+    const r = check({ tools });
     for (const f of r.findings) {
       log(`::${tag ? 'error' : 'warning'}::Tauri tools: ${f}. Next step: pin it in conformance/ci/tauri-tools.mjs (URL and SHA-256 from tauri-bundler, see the header), or find what wrote it.`);
     }
-    log(`tauri-tools: ${r.matched} files in ${tools} match their pins; ${r.findings.length} finding(s), ${r.gaps.length} named gap(s).`);
+    log(`tauri-tools: ${r.matched} files in ${tools} match their pins; ${r.findings.length} finding(s).`);
     return tag && r.findings.length ? 1 : 0;
   } catch (e) {
     log(e.annotation ?? `::error::Preparing the Tauri bundler tools failed: ${e.message}. Next step: see conformance/ci/tauri-tools.mjs.`);

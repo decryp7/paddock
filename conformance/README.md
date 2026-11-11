@@ -126,20 +126,23 @@ Windows installer ships, named by the Tauri configuration, imports the VC++ runt
 kin, or is missing; `<file-or-folder>...` checks given paths; pure Node, no dumpbin; `tauri-bundle.sh` runs it after
 every NSIS build).
 
-`ci/tauri-tools.mjs` pins the bundler tools `tauri build` would download from GitHub (ADR 0085 WP-9): linuxdeploy and AppRun
-for an AppImage on Linux, the NSIS 3.13 zip and nsis_tauri_utils.dll for an NSIS installer on Windows (URL and SHA-256, read from
-tauri-bundler 2.10.3's `linuxdeploy.rs` and `nsis/mod.rs`). `install` empties `<build folder>/.tauri` (cargo metadata's
-`target_directory`, the folder `useLocalToolsDir` makes Tauri use), puts each verified file there (from the cache folder, else a
-download; a tag run reads no cache) and writes the manifest `<build folder>/.tauri.sha256` (the `--tauri-pins` format of
-`./dev ci release-isolation verify`); `key` prints the actions/cache key; `check` compares the folder with the manifest after
-the build (anything unpinned or changed warns, and fails a tag run). A test ties the pins to the lockfile's `@tauri-apps/cli`.
-`tauri-bundle.sh` and Debrief's bundle step run `install` and `check` around every NSIS and AppImage build.
-linuxdeploy-plugin-appimage is not pinned (no stable release): Tauri downloads it unverified, and `check` names it as a gap
-(Dyno 1.1.1 plan, WP-17).
+`ci/tauri-tools.mjs` pins the bundler tools `tauri build` would download from GitHub (ADR 0085 WP-9): linuxdeploy, AppRun and
+linuxdeploy-plugin-appimage (the dated build `1-alpha-20250213-1`) for an AppImage on Linux, the NSIS 3.13 zip and
+nsis_tauri_utils.dll for an NSIS installer on Windows (URL and SHA-256, read from tauri-bundler 2.10.3's `linuxdeploy.rs` and
+`nsis/mod.rs`). `install` empties `<build folder>/.tauri` (cargo metadata's `target_directory`, the folder `useLocalToolsDir`
+makes Tauri use), puts each verified file there (from the cache folder, else a download; a tag run reads no cache) and writes
+the manifest `<build folder>/.tauri.sha256` (the `--tauri-pins` format of `./dev ci release-isolation verify`); `key` prints
+the actions/cache key; `check` compares the folder with the manifest after the build (anything unpinned or changed warns, and
+fails a tag run). A test ties the pins to the lockfile's `@tauri-apps/cli`. `tauri-bundle.sh` and Debrief's bundle step run
+`install` and `check` around every NSIS and AppImage build.
 
-`ci/updater-key.sh` is sourced by `tauri-bundle.sh` and Debrief's bundle step (ADR 0085 D7, rule 78): it moves the updater key
-out of the environment before `npm ci` and any prepare command, refuses a private key on a CI run that is not a tag, makes a
-throw-away key pair on such a run (`tauri signer generate`), and hands a key to `tauri build` only.
+The updater key (ADR 0085 D7, rule 78): `ci/updater-key.sh` is sourced by `tauri-bundle.sh` and Debrief's bundle step; it moves
+the key out of the environment before `npm ci` and any prepare command, refuses a private key on a CI run that is not a tag
+and a tag without one, makes a throw-away key pair on other CI runs, and hands a key to `tauri build` only, by `export` and
+`exec` (`updater_key_exec`), never on a command line. `ci/before-build.mjs` runs the app's `beforeBuildCommand` before `tauri
+build`, without the key, and `tauri build` gets it emptied. `release/updater-key-check.mjs --pubkey <key> --dir <folder>`
+verifies every `.sig` against the one public key the build carries. `ci/tag-node-caches.sh [<angular dir>]` gives a tag run a
+new npm cache and removes a kept Angular cache link, in place of the node-caches action.
 
 ## Sidecars (`paddock-sidecar`, plan X34)
 

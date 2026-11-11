@@ -24,8 +24,8 @@
 #       secrets: the Tauri keys, RELEASE_TOKEN (the family names its keys PADDOCK_TAURI_*: map them, see pitcrew-release.yml)
 #
 # Secrets: TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD, TAURI_UPDATER_PUBKEY (the updater; without them the
-# build is unsigned and cannot update itself; the private key and its password reach the build on a tag only, and any other
-# run signs with a throw-away key made in the job: ADR 0085 D7), APPLE_SIGNING_IDENTITY (empty while the apps are ad-hoc sealed, rule 23),
+# build is unsigned and cannot update itself; the private key and its password reach the build on the app's release tag only,
+# and any other run signs with a throw-away key made in the job: ADR 0085 D7), APPLE_SIGNING_IDENTITY (empty while the apps are ad-hoc sealed, rule 23),
 # RELEASE_TOKEN (a Gitea token with write:repository). Run it by hand (workflow_dispatch in the caller) to build and verify
 # the bundles without releasing: the "one CI build with bundles" of rule 25. The bundle job takes the actions and scripts from the
 # commit it builds (paddock-ref must be github.sha), so only a caller in this repository works; there is no other-repository caller.
@@ -246,10 +246,19 @@ jobs:
             exit 1
           fi
 
+      # Not on a tag (rule 78): the kept npm and Angular caches are written by branch runs. A tag gets a cache of its own.
       - uses: ./.gitea/actions/node-caches
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         with:
           angular-dir: ${{ inputs.app-dir }}
           name: ${{ inputs.app-id }}-bundle
+
+      - name: Fresh npm cache and no kept Angular cache on a tag
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
+        env:
+          ANGULAR_DIR: ${{ inputs.app-dir }}
+        run: bash conformance/ci/tag-node-caches.sh "$ANGULAR_DIR"
 
       # A tag names the version the installers carry: fail before three OS build the wrong one.
       - name: The tag names the app's version
@@ -292,9 +301,10 @@ jobs:
           set -euo pipefail
           eval "$STAGE" || { echo "::error::staging paddock-setup.exe failed (command: $STAGE); see the lines above"; exit 1; }
 
-      # The updater key reaches this step only on a tag (ADR 0085 D7, rule 78): a dispatch, nightly or branch run builds branch
-      # code, whose install and build scripts must never read it, and signs with a throw-away key the script makes in the job.
-      # Inside the step the key reaches `tauri build` only, never `npm ci` or `prepare` (conformance/ci/updater-key.sh).
+      # The updater key reaches this step only on the app's release tag (<prefix>vX.Y.Z; ADR 0085 D7, rule 78): a dispatch,
+      # nightly or branch run builds branch code, whose install and build scripts must never read it, and signs with a throw-away
+      # key the script makes in the job. Inside the step the key reaches `tauri build` only, in its environment, never `npm ci`,
+      # `prepare` or the app's beforeBuildCommand (conformance/ci/updater-key.sh, before-build.mjs).
       - uses: ./.gitea/actions/tauri-bundle
         with:
           bundles: ${{ matrix.bundles }}
@@ -302,8 +312,8 @@ jobs:
           root: ${{ inputs.root }}
           prepare: ${{ inputs.prepare }}
           apple-signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          signing-private-key: ${{ startsWith(github.ref, 'refs/tags/') && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
-          signing-key-password: ${{ startsWith(github.ref, 'refs/tags/') && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+          signing-private-key: ${{ startsWith(github.ref, format('refs/tags/{0}v', inputs.tag-prefix)) && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          signing-key-password: ${{ startsWith(github.ref, format('refs/tags/{0}v', inputs.tag-prefix)) && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
           updater-pubkey: ${{ secrets.TAURI_UPDATER_PUBKEY }}
 
       # The app's own look at what was built (run paths and the executables a package must carry), before the seal check.
@@ -334,6 +344,9 @@ jobs:
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
         env:
           CHECK: ${{ inputs.windows-installer-check }}
+          # On a release tag paddock-setup.exe's key_fingerprint must be the app's updater key (ADR 0085 D7). A dispatch build
+          # is signed with a throw-away key while paddock-setup keeps the real public key, so it is not compared there.
+          PADDOCK_EXPECT_UPDATE_KEY: ${{ startsWith(github.ref, format('refs/tags/{0}v', inputs.tag-prefix)) && secrets.TAURI_UPDATER_PUBKEY || '' }}
         run: |
           set -euo pipefail
           echo "::group::per-machine installer check"

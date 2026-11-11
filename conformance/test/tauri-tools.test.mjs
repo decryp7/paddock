@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { crc32, deflateRawSync } from 'node:zlib';
 import {
-  cacheKey, check, defaultCache, EMBEDDED, GAPS, install, kindsFor, LINUXDEPLOY, main, manifestPath, patchAppImageMagic, PINNED_FOR_CLI, PINS, retryable, TAURI_SHA1, toolsDir, unzip,
+  cacheKey, check, defaultCache, EMBEDDED, install, kindsFor, LINUXDEPLOY, main, manifestPath, patchAppImageMagic, PINNED_FOR_CLI, PINS, retryable, TAURI_SHA1, toolsDir, unzip,
 } from '../ci/tauri-tools.mjs';
 import { makeApp } from './helpers.mjs';
 
@@ -110,11 +110,21 @@ function pinsFile(dir, o) {
 
 test('tauri-tools: the real pins are exact release URLs with a SHA-256, under the names tauri-bundler 2.10.3 looks for', () => {
   for (const p of [...PINS.appimage, ...PINS.nsis]) {
-    assert.match(p.url, /^https:\/\/github\.com\/tauri-apps\/[\w-]+\/releases\/download\/[^/]+\/[^/]+$/);
+    assert.match(p.url, /^https:\/\/github\.com\/(tauri-apps|linuxdeploy)\/[\w-]+\/releases\/download\/[^/]+\/[^/]+$/);
     assert.match(p.sha256, /^[0-9a-f]{64}$/);
     assert.ok(p.url.includes(`/${p.version}/`), `${p.name}: the version is the release tag in the URL`);
   }
-  assert.deepEqual(PINS.appimage.map((p) => p.dest), ['AppRun-x86_64', `linuxdeploy-${LINUXDEPLOY}-x86_64.AppImage`]);
+  assert.deepEqual(PINS.appimage.map((p) => p.dest), ['AppRun-x86_64', `linuxdeploy-${LINUXDEPLOY}-x86_64.AppImage`, 'linuxdeploy-plugin-appimage.AppImage']);
+  // The plugin: the dated build the user chose (2026-11-12), under the name linuxdeploy.rs:249-255 looks for, so Tauri skips its
+  // download of the moving `continuous` build.
+  assert.deepEqual(PINS.appimage[2], {
+    name: 'linuxdeploy-plugin-appimage',
+    version: '1-alpha-20250213-1',
+    url: 'https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-appimage-x86_64.AppImage',
+    sha256: '992d502a248e14ab185448ddf6f6e7d25558cb84d4623c354c3af350c25fccb3',
+    file: 'linuxdeploy-plugin-appimage-1-alpha-20250213-1-x86_64.AppImage',
+    dest: 'linuxdeploy-plugin-appimage.AppImage',
+  });
   // nsis/mod.rs:38-43: the URLs Tauri itself downloads, so a seeded folder is the folder Tauri would have made.
   assert.deepEqual(PINS.nsis.map((p) => p.url), [
     'https://github.com/tauri-apps/binary-releases/releases/download/nsis-3.13/nsis-3.13.zip',
@@ -123,8 +133,7 @@ test('tauri-tools: the real pins are exact release URLs with a SHA-256, under th
   assert.deepEqual(PINS.nsis.map((p) => p.dest), ['NSIS', 'NSIS/Plugins/x86-unicode/additional/nsis_tauri_utils.dll']);
   assert.deepEqual(Object.keys(TAURI_SHA1.nsis), ['NSIS/NSIS.exe', 'NSIS/Plugins/x86-unicode/additional/nsis_tauri_utils.dll']);
   assert.deepEqual(EMBEDDED.appimage.map((e) => e.dest), ['linuxdeploy-plugin-gtk.sh', 'linuxdeploy-plugin-gstreamer.sh']);
-  assert.deepEqual(GAPS, { appimage: ['linuxdeploy-plugin-appimage.AppImage'], nsis: [] });
-  assert.equal(cacheKey(['appimage']), 'tauri-tools-appimage-apprun-old-f30140a43a0a-linuxdeploy-07333c6-36a2d7e274d1');
+  assert.equal(cacheKey(['appimage']), 'tauri-tools-appimage-apprun-old-f30140a43a0a-linuxdeploy-07333c6-36a2d7e274d1-1-alpha-20250213-1-992d502a248e');
   assert.equal(cacheKey(['nsis']), 'tauri-tools-nsis-nsis-3.13-ba63dffc4410-nsis_tauri_utils-v0.5.3-5ba143b5db4a');
   const moved = { ...PINS, appimage: PINS.appimage.map((p, i) => (i === 1 ? { ...p, sha256: 'f'.repeat(64) } : p)) };
   assert.notEqual(cacheKey(['appimage'], moved), cacheKey(['appimage']), 'a changed hash is a new cache key');
@@ -209,7 +218,7 @@ test('tauri-tools: NSIS: the zip becomes NSIS/, the plugin goes where Tauri puts
     'NSIS/makensis.exe': sha(Buffer.from('MZ makensis')),
   });
   assert.match(log.lines.join('\n'), /NSIS nsis-3\.13 .* from the download: 3 files ->/);
-  assert.deepEqual(check({ tools }), { matched: 4, findings: [], gaps: [] });
+  assert.deepEqual(check({ tools }), { matched: 4, findings: [] });
 });
 
 test('tauri-tools: NSIS: a pin Tauri would throw away (its SHA-1 differs) fails install instead of a silent download', async () => {
@@ -344,14 +353,14 @@ test('tauri-tools: a tag run reads no kept cache (ADR 0085 D9): every tool is do
   assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith('paddock-tauri-tools-')), [], 'the run\'s own cache folder is removed');
 });
 
-test('tauri-tools: check passes the pinned folder, names a gap, and flags anything else (an error on a tag)', async () => {
+test('tauri-tools: check passes the pinned folder and flags anything else, with no exception (an error on a tag)', async () => {
   const s = await serve(appimageRoutes());
   const dir = scratch();
   const tools = join(dir, '.tauri');
   const env = { HOME: dir, PADDOCK_TAURI_PINS: pinsFile(dir, { pins: appimagePins(s.base) }) };
   assert.equal(await main(['install', '--bundles', 'appimage', '--cache', join(dir, 'c'), '--tools', tools], env, { ...LINUX, log: quiet() }), 0);
   await s.close();
-  // What a Tauri build leaves: linuxdeploy patched in place, the embedded scripts, the unpinned plugin (the named gap).
+  // What a Tauri build leaves: linuxdeploy patched in place by its dd.
   const deploy = join(tools, `linuxdeploy-${LINUXDEPLOY}-x86_64.AppImage`);
   writeFileSync(deploy, patchAppImageMagic(readFileSync(deploy)));
   const run = async (e = env) => {
@@ -361,24 +370,20 @@ test('tauri-tools: check passes the pinned folder, names a gap, and flags anythi
   };
   let r = await run();
   assert.equal(r.code, 0);
-  assert.match(r.out, /2 files in .* match their pins; 0 finding\(s\), 0 named gap\(s\)/);
+  assert.match(r.out, /2 files in .* match their pins; 0 finding\(s\)\./);
+  // A plugin Tauri fetched itself (no pin for it here) is a finding like any other unpinned file: no named exception is left.
   writeFileSync(join(tools, 'linuxdeploy-plugin-appimage.AppImage'), 'from continuous');
   r = await run();
-  assert.equal(r.code, 0, 'the named gap is a warning, not a finding');
-  assert.match(r.out, /^::warning::linuxdeploy-plugin-appimage\.AppImage in .* is not pinned: Tauri downloads it unverified \(the named gap Dyno plan WP-17 closes\)/m);
-  // A Tauri whose bundler moved to another linuxdeploy downloads it itself: unpinned.
-  writeFileSync(join(tools, 'linuxdeploy-abc1234-x86_64.AppImage'), '');
-  r = await run();
   assert.equal(r.code, 0);
-  assert.match(r.out, /^::warning::Tauri tools: linuxdeploy-abc1234-x86_64\.AppImage is not pinned \(Tauri downloaded or wrote it itself\)/m);
+  assert.match(r.out, /^::warning::Tauri tools: linuxdeploy-plugin-appimage\.AppImage is not pinned \(Tauri downloaded or wrote it itself\)/m);
   r = await run({ ...env, GITHUB_REF: 'refs/tags/dyno-v1.1.1' });
-  assert.equal(r.code, 1, 'a tag run fails');
-  assert.match(r.out, /^::error::Tauri tools: linuxdeploy-abc1234-x86_64\.AppImage is not pinned/m);
+  assert.equal(r.code, 1, 'a tag run fails on any unpinned tool');
+  assert.match(r.out, /^::error::Tauri tools: linuxdeploy-plugin-appimage\.AppImage is not pinned/m);
   // A changed pinned file and a link are findings too.
   writeFileSync(join(tools, 'AppRun-x86_64'), 'changed');
   symlinkSync(join(dir, 'c'), join(tools, 'linked'));
-  const c = check({ tools, gaps: GAPS.appimage });
-  assert.deepEqual(c.findings.sort(), ['AppRun-x86_64 does not have its pinned SHA-256', 'linked is a link (the tools must be files in the build folder)', 'linuxdeploy-abc1234-x86_64.AppImage is not pinned (Tauri downloaded or wrote it itself)']);
+  const c = check({ tools });
+  assert.deepEqual(c.findings.sort(), ['AppRun-x86_64 does not have its pinned SHA-256', 'linked is a link (the tools must be files in the build folder)', 'linuxdeploy-plugin-appimage.AppImage is not pinned (Tauri downloaded or wrote it itself)']);
   const none = join(dir, 'none', '.tauri');
   assert.deepEqual(check({ tools: none }).findings, [`check broken: no manifest ${none}.sha256 (install did not run for this folder)`]);
 });
