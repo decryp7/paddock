@@ -464,6 +464,7 @@ The user accepted D2 to D8 as recommended on 2026-11-05. The sections above foll
 | D6 | Models without tool support: hide tools, or try a prompted fallback? | Disable tools with an explanation |
 | D7 | Third-party MCP servers in 1.1? | Family apps first. User-added stdio last and cuttable. Nothing remote |
 | D8 | Who may use MCP through Pitwall: only the Playground chat, or other apps' API requests too? | Only the chat in 1.1 |
+| 2026-11-12 | Is the chat on in the 1.1 release build? | Yes (user decision, 2026-11-12: Pitwall 1.1 ships the chat on). `chat` is a default feature |
 
 D1 (Dyno has no MCP listener) was not part of that acceptance and is overtaken: the listener was built for Dyno 1.1.0 (Dyno
 ADR 0032 amendments, 2026-11-05; at `origin/dyno/1.1.0-rc` `96c2a16ae`, Decision 7).
@@ -501,7 +502,7 @@ From building WP-2a and WP-4a (`pitwall/1.1-wp2a` `9dc147e24`, `pitwall/1.1-wp4a
 - The model picker (Decision 9, D6) is WP-3a's: the Chat tab lists the loaded and catalog models, those without the `tools`
   capability disabled with the reason, and preselects the starter tool-capable model.
 - The build switch is temporary (plan, Phase A): a Cargo feature `chat` read by the command `chat_enabled`, until ADR 0049's
-  switches exist. Since 2026-11-12 (user, D-3) `chat` is a default feature, so the release build ships the chat.
+  switches exist. Since 2026-11-12 (user decision, 2026-11-12: Pitwall 1.1 ships the chat on) `chat` is a default feature, so the release build ships the chat.
 - Decided 2026-11-08 (user): the chat is sent whole up to the model's window less the answer's reserve; nothing is trimmed
   silently, the meter shows the level and a turn that cannot fit is refused in words (WP-4b, `pitwall/1.1-wp4b` `0ef631f7f`).
 - The window is one slot's context, never more than the model was trained for: `min(context_max, context per slot)`, the

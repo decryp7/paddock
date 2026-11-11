@@ -332,8 +332,7 @@ on demand; they are never written to disk and are gone when Pitwall stops. Works
 Two tabs. **Compare** sends one text question to two models and shows both answers, streamed through the same pipeline apps
 use, so it queues, loads and releases like theirs. Works.
 
-**Chat** is a conversation with one model, in the same window and through the same pipeline. Built, and on in the release builds
-(the `chat` Cargo feature is a default feature). What it does:
+**Chat** is a conversation with one model, in the same window and through the same pipeline. Built and shipped. What it does:
 
 - **Text and code attachments**: up to 16 per question, UTF-8, 256 KiB each, checked again in Rust. Works.
 - **Pictures**: PNG, JPEG, WebP or GIF, read by content, turned upright, shrunk to what the model's vision file takes and
