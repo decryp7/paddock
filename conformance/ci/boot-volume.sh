@@ -14,12 +14,30 @@
 # Sourced (`. boot-volume.sh`) it only defines the functions: job-tmpdir.sh uses volume_is_external. Rust tests reach the same
 # rule through paddock_testkit::boot_volume, which runs this script. Runs under macOS' bash 3.2.
 
-# volume_is_external <folder>: true on macOS when diskutil says the volume holding the folder (links resolved) is not internal.
+# nearest_existing <path>: the path itself when it is a folder, else its nearest existing parent folder ("." for a bare
+# relative name, "/" at the top). A folder that is about to be made sits on the volume of that parent.
+nearest_existing() {
+  local d="$1"
+  while [ ! -d "$d" ]; do
+    case "$d" in
+      */*) d="${d%/*}"; [ -n "$d" ] || d=/ ;;
+      *) d=. ;;
+    esac
+  done
+  printf '%s\n' "$d"
+}
+
+# volume_is_external <folder>: true on macOS when diskutil says the volume holding the folder (links resolved; for a folder
+# that does not exist yet, its nearest existing parent) is not internal. When nothing can be judged it says why on stderr.
 volume_is_external() {
-  local dir mount plist
-  dir="$(cd "$1" 2>/dev/null && pwd -P)" || return 1
+  local base dir mount plist
+  base="$(nearest_existing "$1")"
+  dir="$(CDPATH='' cd -- "$base" 2>/dev/null && pwd -P)" || {
+    echo "boot-volume: cannot judge $1: its folder $base cannot be entered; treated as internal" >&2
+    return 1
+  }
   mount="$(df -P "$dir" 2>/dev/null | awk 'NR==2 { $1=$2=$3=$4=$5=""; sub(/^ +/, ""); print }')"
-  [ -n "$mount" ] || return 1
+  [ -n "$mount" ] || { echo "boot-volume: cannot judge $dir: df names no mount; treated as internal" >&2; return 1; }
   plist="$(diskutil info -plist "$mount" 2>/dev/null)" || return 1
   printf '%s\n' "$plist" | awk '/<key>Internal<\/key>/ { getline; if ($0 ~ /<false\/>/) found = 1 } END { exit found ? 0 : 1 }'
 }

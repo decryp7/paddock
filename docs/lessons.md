@@ -1769,7 +1769,7 @@ request that changes what runs elevated needs an administrator caller; user-chos
 
 The Mac mini showed "gitea-runner would like to access files on a removable volume" again and again. The prompts looked
 like the CI runners', but the tccd log (`AUTHREQ_PROMPTING`, matched to `AUTHREQ_ATTRIBUTION` by msgID) named one
-subject for all 18 prompts from 06:06 on: `/Volumes/d7sst7/dev-targets/pitcrew-tmp/pitcrew-it-<case>-<pid>/runner/bin/gitea-runner`.
+subject for all 18 prompts from 06:06 on: `<TMPDIR on the external volume>/pitcrew-it-<case>-<pid>/runner/bin/gitea-runner`.
 That is Pitcrew's ad-hoc signed `examples/fake_runner.rs`, which `tests/supervision.rs` copies as `gitea-runner` and the
 supervisor starts disclaimed (ADR 0020), so it is its own responsible process. An agent had run the tests locally with
 `TMPDIR` on the external volume, and each test's new path was a new TCC identity, so each test prompted once. CI was not
@@ -1782,6 +1782,9 @@ volumes itself, and does not rely on the caller's `TMPDIR`. The mechanism is one
 DARWIN_USER_TEMP_DIR`), used by `job-tmpdir.sh` and Dyno's `check-bundle.sh` and, for Rust tests, through
 `paddock_testkit::boot_volume::boot_volume_temp()` (Pitcrew's supervision harness and its `launch.rs` and `disclaim.rs`
 tests). Measure prompts with `AUTHREQ_PROMPTING` before you guess the binary from the prompt's title: the title shows the
-file name, and a test fake can share the real program's name. The tccd extracts and the join script are kept in
-`/Volumes/d7sst7/dev-targets/tcc-scratch/` (`tccd-2h.log`, `authreq-since-0600.log`, `after.log`, `after2.log`) and
-`/Volumes/d7sst7/dev-targets/tcc-tools/join.py`, outside the repository (machine logs).
+file name, and a test fake can share the real program's name. Measured on the Mac mini (`log show` of `tccd`, which kept
+entries from 06:06 that day): 18 prompts from 06:06 to 17:44 and 17 more at 17:46-17:47, all for this fake runner, one per
+test path; 0 from the CI runners, the test browser or the build tools (Chrome for Testing's requests were attributed to
+the runner or the terminal; 80 chrome-headless-shell requests were allowed from a stored consent; node's 8 went to the
+runner or the terminal). After the change, two runs of the Pitcrew service tests with `TMPDIR` on the external volume
+made 0 prompts and 0 requests for the test folder, while an unchanged run in the same window prompted.
