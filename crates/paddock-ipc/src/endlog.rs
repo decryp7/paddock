@@ -190,9 +190,15 @@ impl std::fmt::Display for ConnId {
 
 static NEXT_ACCEPT: AtomicU64 = AtomicU64::new(1);
 
-/// A fresh accept sequence number, for an end before any peer exists (unique in the process).
+/// A fresh accept sequence number, for an end before any peer exists (unique in the process, shared by every endpoint, so
+/// two endpoints never print the same `a<n>`).
+pub fn next_accept_number() -> u64 {
+    NEXT_ACCEPT.fetch_add(1, Ordering::Relaxed)
+}
+
+/// [`next_accept_number`] as a [`ConnId`].
 pub fn next_accept_id() -> ConnId {
-    ConnId::Accept(NEXT_ACCEPT.fetch_add(1, Ordering::Relaxed))
+    ConnId::Accept(next_accept_number())
 }
 
 static COUNTS: [AtomicU64; EndCode::ALL.len()] = [const { AtomicU64::new(0) }; EndCode::ALL.len()];

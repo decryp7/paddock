@@ -92,7 +92,7 @@ pub const SCENARIOS: [&str; 13] = [
     "mixed-version-peer-ignores-fail0",
 ];
 /// The fault kinds of the ratchet file (see [`SCENARIOS`]).
-pub const FAULTS: [&str; 12] = [
+pub const FAULTS: [&str; 13] = [
     "no-reason",
     "wrong-reason",
     "reason-not-last",
@@ -105,9 +105,18 @@ pub const FAULTS: [&str; 12] = [
     "dropped-without-verdict",
     "drain-not-eof",
     "end-line-count",
+    "duplicate-end-id",
 ];
+/// The drain outcomes a ratchet entry may accept (`drain-not-eof:<outcome>`; `missing` is a line without a `drain=` field).
+const DRAIN_OUTCOMES: [&str; 8] = ["none", "missing", "byteCap", "timeCap", "stopped", "failed", "poolFull", "skipped"];
 /// Faults that are a logging gap (WP-7) or the drain that WP-2 defers, not an instance of the ADR's table: they block no tag.
-const LOGGING_FAULTS: [&str; 4] = ["no-end-line", "dropped-without-verdict", "drain-not-eof", "end-line-count"];
+const LOGGING_FAULTS: [&str; 5] = [
+    "no-end-line",
+    "dropped-without-verdict",
+    "drain-not-eof",
+    "end-line-count",
+    "duplicate-end-id",
+];
 
 /// Where the register and the ratchet live, relative to the repository root.
 pub const REGISTER: &str = "docs/ipc-endpoints.toml";
@@ -924,10 +933,33 @@ pub fn findings(root: &Path, sites: &[Site], register: &Register, ratchet: &[Rat
     }
     for r in ratchet {
         let at = format!("{RATCHET}: entry {} / {} / {}", r.instance, r.endpoint, r.scenario);
-        if !(r.instance.starts_with('I') && r.instance[1..].parse::<u32>().is_ok()) && r.instance != "WP-7" && r.instance != "WP-2" {
+        // The fault's kind decides the instance: the drain that WP-2 defers is WP-2, a logging gap is WP-7, the rest is a row of
+        // the ADR's table (I1 to I27).
+        let (kind, drain) = r.fault.split_once(':').map_or((r.fault.as_str(), None), |(k, v)| (k, Some(v)));
+        let wanted = match kind {
+            "drain-not-eof" => "WP-2",
+            "no-end-line" | "dropped-without-verdict" | "end-line-count" | "duplicate-end-id" => "WP-7",
+            _ => "I1 to I27",
+        };
+        let ok = match wanted {
+            "I1 to I27" => r.instance.starts_with('I') && r.instance[1..].parse::<u32>().is_ok_and(|n| (1..=27).contains(&n)),
+            w => r.instance == w,
+        };
+        if !ok {
             out.push(format!(
-                "{at}: `instance` must be one of the ADR's I1 to I27 (WP-7 for a logging gap, WP-2 for the deferred drain)."
+                "{at}: fault `{}` needs `instance = \"{}\"` (WP-2 for the deferred drain, WP-7 for a logging gap, I1 to I27 for the ADR's table).",
+                r.fault,
+                if wanted == "I1 to I27" { "I<n>" } else { wanted }
             ));
+        }
+        match (kind, drain) {
+            ("drain-not-eof", Some(v)) if DRAIN_OUTCOMES.contains(&v) => {}
+            ("drain-not-eof", _) => out.push(format!(
+                "{at}: `drain-not-eof` names the drain outcome it accepts, as `drain-not-eof:none` (one of {}), so a later timeCap or failed is a new failure.",
+                DRAIN_OUTCOMES.join(", ")
+            )),
+            (_, Some(_)) => out.push(format!("{at}: only `drain-not-eof` takes a `:value`.")),
+            _ => {}
         }
         if !ids.contains(&r.endpoint) {
             out.push(format!("{at}: the endpoint is not in {REGISTER}."));
@@ -935,10 +967,10 @@ pub fn findings(root: &Path, sites: &[Site], register: &Register, ratchet: &[Rat
         if r.scenario != "*" && !SCENARIOS.contains(&r.scenario.as_str()) {
             out.push(format!("{at}: unknown scenario."));
         }
-        if !FAULTS.contains(&r.fault.as_str()) {
+        if !FAULTS.contains(&kind) {
             out.push(format!("{at}: unknown fault `{}`.", r.fault));
         }
-        let logging = LOGGING_FAULTS.contains(&r.fault.as_str());
+        let logging = LOGGING_FAULTS.contains(&kind);
         if r.blocks_tag.is_empty() || (r.blocks_tag == "none" && !logging) {
             out.push(format!(
                 "{at}: `blocks_tag` names the tag pattern this entry blocks (`dyno-v*`, `pitcrew-v*`); only a logging gap or the deferred drain (WP-7, WP-2) may say `none`."

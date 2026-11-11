@@ -459,19 +459,28 @@ fn observed_with_log(lines: &[&str]) -> endings::Observed {
 #[test]
 fn a_connection_must_end_exactly_once_and_with_a_drain_outcome_of_eof() {
     let one = "INFO connection ended id=p1 phase=open code=closed drain=eof";
+    let two = "INFO connection ended id=p2 phase=open code=closed drain=eof";
     let optional = endings::Expect::optional_reason();
     assert!(judge(&observed_with_log(&[one]), &optional).is_empty());
     assert_eq!(
-        kinds(&judge(&observed_with_log(&[one, one]), &optional)),
+        kinds(&judge(&observed_with_log(&[one, two]), &optional)),
         vec!["end-line-count"],
         "two end lines for one connection"
     );
     assert!(
         judge(
-            &observed_with_log(&[one, one]),
+            &observed_with_log(&[one, two]),
             &optional.clone().with_ends(2)
         )
         .is_empty()
+    );
+    assert_eq!(
+        kinds(&judge(
+            &observed_with_log(&[one, one]),
+            &optional.clone().with_ends(2)
+        )),
+        vec!["duplicate-end-id"],
+        "one connection that ended twice, or two endpoints sharing a counter"
     );
     assert_eq!(
         kinds(&judge(&observed_with_log(&[]), &optional)),

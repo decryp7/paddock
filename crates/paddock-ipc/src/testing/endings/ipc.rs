@@ -17,6 +17,9 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+/// How long no further end line may arrive before a scenario's window is over (see [`LogCapture::wait_settled`]).
+const SETTLE: Duration = Duration::from_millis(100);
+
 /// The wait for something that must already have happened.
 const GUARD: Duration = Duration::from_secs(30);
 
@@ -244,7 +247,7 @@ pub fn logged<E: std::fmt::Display>(
     let from = capture.len();
     let (mut observed, expect) = run().map_err(|e| e.to_string())?;
     if expect.end_line {
-        capture.wait_for_end_lines_since(from, expect.ends, GUARD);
+        capture.wait_settled(from, expect.ends, GUARD, SETTLE);
     }
     observed.log = capture.since(from);
     Ok((observed, expect))

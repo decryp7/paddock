@@ -129,6 +129,8 @@ pub enum Fault {
         /// The end lines found.
         got: usize,
     },
+    /// Two end lines of the scenario carry the same `id=`: one connection ended twice (or two endpoints share a counter).
+    DuplicateEndId(String),
     /// The end line says a stream was dropped without a verdict.
     DroppedWithoutVerdict,
     /// The end line's drain outcome is not `eof`.
@@ -149,8 +151,21 @@ impl Fault {
             Fault::Hang => "hang",
             Fault::NoEndLine => "no-end-line",
             Fault::EndLineCount { .. } => "end-line-count",
+            Fault::DuplicateEndId(_) => "duplicate-end-id",
             Fault::DroppedWithoutVerdict => "dropped-without-verdict",
             Fault::DrainNotEof(_) => "drain-not-eof",
+        }
+    }
+}
+
+impl Fault {
+    /// The ratchet's key for this fault: the kind, and for a drain that is not `eof` the outcome too (`drain-not-eof:none`),
+    /// so a drain that later ends in `timeCap` or `failed` is a new failure, not a silent match of the listed `none`.
+    pub fn key(&self) -> String {
+        match self {
+            Fault::DrainNotEof(v) if v.is_empty() => "drain-not-eof:missing".to_string(),
+            Fault::DrainNotEof(v) => format!("drain-not-eof:{v}"),
+            other => other.kind().to_string(),
         }
     }
 }
@@ -315,6 +330,14 @@ pub fn judge(observed: &Observed, expect: &Expect) -> Vec<Fault> {
                 expected: expect.ends,
                 got: lines.len(),
             });
+        }
+        let mut ids: Vec<&str> = Vec::new();
+        for line in &lines {
+            let id = log::field(line, "id").unwrap_or("");
+            if ids.contains(&id) {
+                faults.push(Fault::DuplicateEndId(id.to_string()));
+            }
+            ids.push(id);
         }
         for line in lines {
             if line.contains("DroppedWithoutVerdict") {

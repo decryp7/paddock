@@ -87,6 +87,34 @@ impl LogCapture {
         seen(&g)
     }
 
+    /// Waits for `n` end lines at index `from` or later, then until no further end line arrives for `quiet` (the window of the
+    /// scenario is then over: a connection that ended twice, or one the rig did not count, shows up as an extra line). Returns
+    /// false when the `n` lines did not come within `guard`. The quiet part can only miss a very late extra, never invent one.
+    pub fn wait_settled(&self, from: usize, n: usize, guard: Duration, quiet: Duration) -> bool {
+        if !self.wait_for_end_lines_since(from, n, guard) {
+            return false;
+        }
+        let count = |l: &Vec<String>| {
+            l.iter()
+                .skip(from)
+                .filter(|x| x.contains(END_MARKER))
+                .count()
+        };
+        let mut g = self.0.0.lock().unwrap_or_else(|p| p.into_inner());
+        loop {
+            let seen = count(&g);
+            let (next, timeout) = self
+                .0
+                .1
+                .wait_timeout_while(g, quiet, |l| count(l) == seen)
+                .unwrap_or_else(|p| p.into_inner());
+            g = next;
+            if timeout.timed_out() {
+                return true;
+            }
+        }
+    }
+
     /// Whether nothing was logged.
     pub fn is_empty(&self) -> bool {
         self.len() == 0

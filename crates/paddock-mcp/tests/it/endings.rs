@@ -94,9 +94,13 @@ fn start(max_connections: usize) -> Rig {
     }
 }
 
+/// Reads the client to its end, then ends the scenario's window deterministically: the other clients and the client leave,
+/// the end lines of all of them are waited for, and the listener is stopped, which joins every connection thread, so no
+/// line can come after the log is read.
 fn observe(
-    rig: &Rig,
+    rig: &mut Rig,
     mut client: TcpStream,
+    others: Vec<TcpStream>,
     expect: Expect,
 ) -> Result<(Observed, Expect), &'static str> {
     let raw = read_to_end(&mut client, READ_GUARD);
@@ -104,9 +108,13 @@ fn observe(
     // The client has read to the end: it ends its side now, as a real client does, which ends the listener's drain with `eof`
     // (held open, the drain waits for its time cap). Then the end line, written after the drain and the close, is waited for.
     drop(client);
+    drop(others);
     if expect.end_line {
         rig.log
             .wait_for_end_lines_since(rig.from, expect.ends, READ_GUARD);
+    }
+    if let Some(serving) = rig.serving.take() {
+        serving.stop();
     }
     Ok((
         Observed {
@@ -136,7 +144,7 @@ fn pair(rig: &Rig) -> Result<TcpStream, &'static str> {
 fn scenario(s: Scenario) -> Result<(Observed, Expect), &'static str> {
     match s {
         Scenario::WrongToken | Scenario::MalformedFirstFrame | Scenario::ClientKeepsWriting => {
-            let rig = start(4);
+            let mut rig = start(4);
             let mut c = TcpStream::connect(rig.addr).map_err(|_| "connect")?;
             let (first, code): (&[u8], &str) = if s == Scenario::MalformedFirstFrame {
                 (b"this is not json\n", "key")
@@ -149,8 +157,9 @@ fn scenario(s: Scenario) -> Result<(Observed, Expect), &'static str> {
             }
             let expect = Expect::reason(&[code, "handshake"]);
             observe(
-                &rig,
+                &mut rig,
                 c,
+                Vec::new(),
                 if s == Scenario::ClientKeepsWriting {
                     expect.with_unread_input()
                 } else {
@@ -159,20 +168,24 @@ fn scenario(s: Scenario) -> Result<(Observed, Expect), &'static str> {
             )
         }
         Scenario::Busy => {
-            let rig = start(1);
+            let mut rig = start(1);
             let held = pair(&rig)?;
             let mut c = TcpStream::connect(rig.addr).map_err(|_| "connect")?;
             c.write_all(format!("{{\"key\":\"{}\"}}\n", rig.key).as_bytes())
                 .map_err(|_| "write")?;
-            let result = observe(&rig, c, Expect::reason(&["busy"]));
-            drop(held);
-            result
+            // Two connections end: the refused one, and the held one that leaves after it.
+            observe(
+                &mut rig,
+                c,
+                vec![held],
+                Expect::reason(&["busy"]).with_ends(2),
+            )
         }
         Scenario::StopWithOpenConnection => {
             let mut rig = start(4);
             let c = pair(&rig)?;
             rig.serving.take().ok_or("no serving")?.stop();
-            observe(&rig, c, Expect::reason(&["stopping"]))
+            observe(&mut rig, c, Vec::new(), Expect::reason(&["stopping"]))
         }
         _ => Err(
             "this scenario is not driven by the MCP rig; if it does not apply, declare it in [[not_applicable]]",
@@ -191,22 +204,25 @@ fn mcp_loopback_ends_every_connection_right_or_is_in_the_ratchet() {
         panic!("{e}\n\n{}", failure_text(&reports));
     }
     // The refusal line is written before the drain, so the end line says `sent` (WP-7 review); the stop writes nothing.
-    for (scenario, want) in [
-        (Scenario::WrongToken, "sent"),
-        (Scenario::Busy, "sent"),
-        (Scenario::StopWithOpenConnection, "unsent"),
+    for (scenario, code, want) in [
+        (Scenario::WrongToken, "auth", "sent"),
+        (Scenario::Busy, "busy", "sent"),
+        (Scenario::StopWithOpenConnection, "stopping", "unsent"),
     ] {
         let report = reports
             .iter()
             .find(|r| r.scenario == scenario)
             .expect("a report");
-        let lines = paddock_ipc::testing::endings::log::end_lines(&report.log);
-        assert_eq!(lines.len(), 1, "{}", failure_text(&reports));
-        assert_eq!(
-            paddock_ipc::testing::endings::log::field(lines[0], "reason"),
-            Some(want),
-            "{scenario}: {}",
-            lines[0]
-        );
+        use paddock_ipc::testing::endings::log::{end_lines, field};
+        let line = end_lines(&report.log)
+            .into_iter()
+            .find(|l| field(l, "code") == Some(code))
+            .unwrap_or_else(|| {
+                panic!(
+                    "{scenario}: no end line with code {code}\n{}",
+                    failure_text(&reports)
+                )
+            });
+        assert_eq!(field(line, "reason"), Some(want), "{scenario}: {line}");
     }
 }

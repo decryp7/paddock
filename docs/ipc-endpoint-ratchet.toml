@@ -8,7 +8,7 @@
 #             says `drain=none` (the ordered shutdown with a drain is deferred by the 2026-11-11 trim; blocks no tag)
 # endpoint    the id in docs/ipc-endpoints.toml
 # scenario    a scenario of the harness, or `*` for every scenario that ran
-# fault       the kind the harness reports
+# fault       the kind the harness reports; for a drain that is not eof the kind and the outcome, `drain-not-eof:none`
 # blocks_tag  the tag pattern a release of which is refused while the entry exists (`none` only for a logging gap or the drain of WP-2)
 # os          only where the fault is not on every OS (linux, macos, windows)
 
@@ -226,7 +226,7 @@ note = "The protocol-mismatch error is written, then the stream drops with the c
 instance = "WP-2"
 endpoint = "dyno-agent"
 scenario = "client-keeps-writing"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -234,7 +234,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "dyno-agent"
 scenario = "malformed-first-frame"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -242,7 +242,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "dyno-agent"
 scenario = "stop-with-open-connection"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -250,7 +250,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "dyno-agent"
 scenario = "wrong-token"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -258,7 +258,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "dyno-agent"
 scenario = "wrong-version"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -266,7 +266,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "dyno-helper"
 scenario = "busy"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -274,7 +274,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "dyno-helper"
 scenario = "malformed-first-frame"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -282,7 +282,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "ipc-host"
 scenario = "busy"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -290,7 +290,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "ipc-host"
 scenario = "client-keeps-writing"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -298,7 +298,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "ipc-host"
 scenario = "malformed-first-frame"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -306,7 +306,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "ipc-host"
 scenario = "owner-close-while-peer-not-reading"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -314,7 +314,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "ipc-host"
 scenario = "owner-close-with-calls-in-flight"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -322,7 +322,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "ipc-host"
 scenario = "silent-client"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -330,7 +330,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "ipc-host"
 scenario = "stall"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -338,7 +338,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "ipc-host"
 scenario = "stop-with-open-connection"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -346,7 +346,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "ipc-host"
 scenario = "wrong-account"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 os = "linux,macos"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
@@ -355,7 +355,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "ipc-host"
 scenario = "wrong-token"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -363,7 +363,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "ipc-host"
 scenario = "wrong-version"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -371,7 +371,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "ipc-launcher"
 scenario = "stop-with-open-connection"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -379,7 +379,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "ipc-link-server"
 scenario = "busy"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -387,7 +387,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "ipc-link-server"
 scenario = "client-keeps-writing"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -395,7 +395,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "ipc-link-server"
 scenario = "malformed-first-frame"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -403,7 +403,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "ipc-link-server"
 scenario = "silent-client"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -411,7 +411,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "ipc-link-server"
 scenario = "stop-with-open-connection"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -419,7 +419,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "ipc-link-server"
 scenario = "wrong-token"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -427,7 +427,7 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "ipc-link-server"
 scenario = "wrong-version"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
 
@@ -435,6 +435,14 @@ note = "The end line says drain=none: this endpoint does not drain before it clo
 instance = "WP-2"
 endpoint = "mcp-loopback"
 scenario = "stop-with-open-connection"
-fault = "drain-not-eof"
+fault = "drain-not-eof:none"
 blocks_tag = "none"
 note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "mcp-loopback"
+scenario = "busy"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The held client's paired connection ends with drain=none (a paired close does not drain, deferred WP-2); the refused client's own end line says drain=eof, and a later timeCap or failed there is a new failure."
