@@ -1108,3 +1108,24 @@ group). One run:
 The differential tests gave back most of the first change's gain with the restored combinations, at a higher load than
 the "after" runs above; large_folder now runs beside everything else instead of in the group. The whole crate also passes
 with `DEBRIEF_TEST_APP_BUDGETS=1` (47.5 s without extra load).
+
+## The catalogue's tail commit, per-name statements against one set-based merge (2026-11-11)
+
+Live follow adds the names of appended lines to a catalogued source (`catalogue::commit_tail`, branch
+`fix/debrief-live-follow-catalogue`). It runs under the store's write lock, so what it costs per name is what an import
+waits for. Measured by the store's own test `a_tail_commit_of_many_names_is_timed` (an in-memory store, one source, names
+that are executables with about 25 trigrams each; Mac mini, debug build, load about 5, single runs; the same test, the
+same machine, before and after the change).
+
+| names | per-name UPDATE, then INSERT of the name and each trigram | staging table, one UPDATE, appenders |
+|---|---|---|
+| 1,000 new | 3,530 ms | 32 ms |
+| 1,000 seen again (counts added) | 669 ms | 10 ms |
+| 10,000 new | 32,992 ms | 213 ms |
+| 10,000 seen again | 7,689 ms | 25 ms |
+
+The first version (a statement per name and per trigram) took over half a minute for 10,000 names, so the merge is now one
+UPDATE ... FROM over a staging table, a read of the names the source did not have, and appenders for the new rows and their
+trigrams. What is left of the 213 ms is the 250,000 trigram rows of 10,000 new names (a tail of text lines brings a few
+dozen names, not thousands). Cost per tail read: the events appended since the last read (read once, with their ids), plus
+a pass over the source's catalogue rows for the update join; never the source's other events.

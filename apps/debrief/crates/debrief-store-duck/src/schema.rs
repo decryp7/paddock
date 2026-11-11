@@ -22,7 +22,9 @@ pub const CACHE_DDL: &str = "CREATE TABLE IF NOT EXISTS analysis_cache (
 
 /// Tables added after the format was first written (created with a new store and, if missing, when a store opens):
 /// `catalogue_tail` (the sources live tail appended to since they were catalogued, with the first id of what it
-/// appended: the catalogue reads only those rows again),
+/// appended: the catalogue reads only those rows again), `catalogue_skipped` (the fields a build left out for their
+/// many distinct values, which a tail read does not add) and `catalogue_stage` (where a tail read puts its names for
+/// the set-based merge; empty between commits),
 /// `source_encodings` (how each source file was decoded, by path; a `manual` row is the user's choice and is read
 /// with again on every re-import), `clock_offsets` (a source file's clock-skew correction in ms, already applied to its events) and `tail_offsets`
 /// (where live tail reads each followed file next: the byte and the line it continues at, the size it saw, whether
@@ -33,6 +35,10 @@ pub const CACHE_DDL: &str = "CREATE TABLE IF NOT EXISTS analysis_cache (
 /// tables): until then the blocks of files a reload dropped stay until [`BLOCKS_BACKFILL`] removes them on the next
 /// open, and nothing reads a block without joining `segments`).
 pub const ADDED_DDL: &str = "CREATE TABLE IF NOT EXISTS catalogue_tail (source UINTEGER PRIMARY KEY, from_id UBIGINT NOT NULL);
+CREATE TABLE IF NOT EXISTS catalogue_skipped (source UINTEGER NOT NULL, field VARCHAR NOT NULL);
+CREATE TABLE IF NOT EXISTS catalogue_stage (
+  source UINTEGER NOT NULL, scope VARCHAR NOT NULL, name VARCHAR NOT NULL, n UBIGINT NOT NULL, first_ts BIGINT, last_ts BIGINT,
+  first_id UBIGINT NOT NULL, last_id UBIGINT NOT NULL);
 CREATE TABLE IF NOT EXISTS source_encodings (path VARCHAR PRIMARY KEY, label VARCHAR NOT NULL, confidence UTINYINT NOT NULL, origin VARCHAR NOT NULL);
 CREATE TABLE IF NOT EXISTS clock_offsets (path VARCHAR PRIMARY KEY, offset_ms BIGINT NOT NULL);
 CREATE TABLE IF NOT EXISTS tail_offsets (
