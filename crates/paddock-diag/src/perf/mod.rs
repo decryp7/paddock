@@ -1,20 +1,26 @@
 //! The "Performance" section of the diagnostics bundle (`performance.json` and `performance-summary.txt`): how long the start
 //! took by phase, the slowest recent operations and what machine this ran on. It holds names, durations and hardware facts,
-//! never user content: names are identifiers ([`ring::valid_name`]), anything else becomes `invalid-name`.
+//! never user content: operation and phase names are `&'static str` (a file name or a query text cannot be passed at all), and
+//! a name that is not an identifier ([`ring::valid_name`]) still becomes `invalid-name`, also when read back from a ring file.
 //!
-//! An app does three things:
+//! An app does four things:
 //!
-//! 1. at start, [`init`] with its data folder (reads the ring the last run left, so a crash does not lose it) and
-//!    [`startup_phase`] after each step of the start (`logging`, `settings`, `window-ready`);
-//! 2. around work a person waits for (an import, a query, a page load, a job), [`record`] or [`record_phase`] with the
-//!    duration, or [`time`] for a guard that records on drop;
-//! 3. add [`PerformanceSection`] to the report's sections, and call [`flush`] now and then (the section flushes before it reads).
+//! 1. at start, [`init`] with its data folder (once; reads the ring the last run left) and [`startup_phase`] after each step
+//!    of the start (`logging`, `settings`, `window-ready`);
+//! 2. around work a person waits for (an import, a query, a page load), [`record`] or [`record_phase`] with the duration, or
+//!    [`time`] for a guard that records on drop; a finished job goes through [`record_job`];
+//! 3. keep the ring on disk: [`flush_in_background`] after a record that changed it (it returns `true`) and [`flush`] once at
+//!    exit, so a crash or a quit does not lose the history (the section flushes before it reads, too);
+//! 4. add [`PerformanceSection`] to the report's sections.
 //!
-//! Cost: [`record`] takes no lock for an operation too short for the full ring (one atomic read), and the ring holds at most
-//! [`RING_CAPACITY`] entries of 24 hours, so it stays a few KB in memory and in its file (`performance-ring.json` in the data
-//! folder, atomically replaced; a damaged file is replaced at the next flush and never stops the app). The format follows the
+//! Cost: a record takes no lock for an operation too short for the full ring (one atomic read, one clock read), and the ring
+//! holds at most [`RING_CAPACITY`] entries of 24 hours, a few KB in memory and in its file (`performance-ring.json` in the data
+//! folder, replaced atomically; a damaged file is replaced at the next flush and never stops the app). The format follows the
 //! startup and summary views of VS Code ("Startup Performance"), Chrome's trace summary and Windows Performance Recorder: a
 //! list of phases and a list of the slowest things, no tracing.
+//!
+//! The JSON writes no number of 13 or more digits (times as RFC 3339 or an age in seconds, sizes in MiB): the text redactor
+//! every file passes masks such a run that passes the Luhn check, and would break the file.
 //!
 //! - [`ring`]: names, the ring of the slowest operations, the startup phases (pure).
 //! - [`machine`]: the machine facts and the data folder's volume (`sysinfo` at the edge).
@@ -28,10 +34,11 @@ use crate::section::{Content, Context, Section, SectionFile, SectionOutput};
 use document::Document;
 use machine::{MachineSource, SystemMachine};
 pub use ring::{DEFAULT_PHASE, INVALID_NAME, MAX_NAME, RING_CAPACITY, WINDOW_MS};
-use ring::{Phase, Ring, RingError, Slow, Startup};
+use ring::{Floor, Phase, Ring, RingError, Slow, Startup};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// The ring file in the data folder.
@@ -48,21 +55,31 @@ struct State {
 }
 
 static STATE: OnceLock<Mutex<State>> = OnceLock::new();
-/// [`Ring::floor_ms`], readable without the lock.
-static FLOOR: AtomicU64 = AtomicU64::new(0);
+static INIT: OnceLock<Loaded> = OnceLock::new();
+/// [`Ring::floor`], readable without the lock.
+static FLOOR_MS: AtomicU64 = AtomicU64::new(0);
+static FLOOR_UNTIL_MS: AtomicU64 = AtomicU64::new(0);
+/// One flush at a time: the write and the rename of the ring file.
+static FLUSH: Mutex<()> = Mutex::new(());
+/// A background flush is queued and has not started yet.
+static FLUSH_QUEUED: AtomicBool = AtomicBool::new(false);
 
-fn state() -> &'static Mutex<State> {
-    STATE.get_or_init(|| {
+impl State {
+    fn new() -> State {
         let now = Instant::now();
-        Mutex::new(State {
+        State {
             ring: Ring::new(),
             startup: Startup::new(),
             path: None,
             dirty: false,
             began: now,
             mark: now,
-        })
-    })
+        }
+    }
+}
+
+fn state() -> &'static Mutex<State> {
+    STATE.get_or_init(|| Mutex::new(State::new()))
 }
 
 fn lock() -> std::sync::MutexGuard<'static, State> {
@@ -78,6 +95,12 @@ fn now_ms() -> u64 {
 
 fn millis(d: Duration) -> u64 {
     u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
+}
+
+fn publish_floor(st: &State, now: u64) {
+    let f = st.ring.floor(now);
+    FLOOR_MS.store(f.ms, Ordering::Relaxed);
+    FLOOR_UNTIL_MS.store(f.until_ms, Ordering::Relaxed);
 }
 
 /// What [`init`] found.
@@ -97,14 +120,27 @@ pub fn startup_begin() {
     drop(lock());
 }
 
-/// Names the data folder, reads the ring the last run left there and merges it in. Call once, early.
+/// Names the data folder, reads the ring the last run left there and merges it in. Runs once per process: a second call
+/// (from another place that also starts the app) returns the first call's outcome and changes nothing, so nothing is merged
+/// twice.
 pub fn init(data_dir: &Path) -> Loaded {
-    let path = data_dir.join(RING_FILE);
+    INIT.get_or_init(|| init_once(data_dir)).clone()
+}
+
+fn init_once(data_dir: &Path) -> Loaded {
     let now = now_ms();
-    let outcome = read_ring(&path, now);
     let mut st = lock();
+    let loaded = load_into(&mut st, data_dir, now);
+    publish_floor(&st, now);
+    loaded
+}
+
+/// Names the ring file in `data_dir` and merges what it holds into `st`.
+fn load_into(st: &mut State, data_dir: &Path, now: u64) -> Loaded {
+    let path = data_dir.join(RING_FILE);
+    let outcome = read_ring(&path, now);
     st.path = Some(path);
-    let loaded = match outcome {
+    match outcome {
         Ok(None) => Loaded::Fresh,
         Ok(Some(ring)) => {
             let n = ring.len();
@@ -118,9 +154,7 @@ pub fn init(data_dir: &Path) -> Loaded {
             st.dirty = true;
             Loaded::Unusable(e)
         }
-    };
-    FLOOR.store(st.ring.floor_ms(), Ordering::Relaxed);
-    loaded
+    }
 }
 
 fn read_ring(path: &Path, now: u64) -> Result<Option<Ring>, RingError> {
@@ -142,27 +176,43 @@ fn read_ring(path: &Path, now: u64) -> Result<Option<Ring>, RingError> {
     Ring::parse(&bytes, now).map(Some)
 }
 
-/// Records that `op` took `duration` (as one piece, phase [`DEFAULT_PHASE`]).
-pub fn record(op: &str, duration: Duration) {
-    record_phase(op, DEFAULT_PHASE, duration);
+/// Records that `op` took `duration` (as one piece, phase [`DEFAULT_PHASE`]). Returns whether the ring kept it (and so
+/// changed: see [`flush_in_background`]).
+pub fn record(op: &'static str, duration: Duration) -> bool {
+    record_phase(op, DEFAULT_PHASE, duration)
 }
 
-/// Records that the `phase` of `op` took `duration`. Cheap: a duration too short for the full ring returns after one atomic read.
-pub fn record_phase(op: &str, phase: &str, duration: Duration) {
+/// Records that the `phase` of `op` took `duration`; see [`record`]. Cheap: a duration too short for the full ring returns
+/// after one atomic read and one clock read.
+pub fn record_phase(op: &'static str, phase: &'static str, duration: Duration) -> bool {
+    record_with(duration, || (op.to_string(), phase.to_string()))
+}
+
+/// Records that a job of `kind` ended as `outcome` (`done`, `failed`, `cancelled`) after `duration`, as `job:<kind>`.
+pub fn record_job(kind: &'static str, outcome: &'static str, duration: Duration) -> bool {
+    record_with(duration, || (format!("job:{kind}"), outcome.to_string()))
+}
+
+fn record_with(duration: Duration, names: impl FnOnce() -> (String, String)) -> bool {
     let ms = millis(duration);
-    if ms <= FLOOR.load(Ordering::Relaxed) {
-        return;
-    }
     let now = now_ms();
-    let mut st = lock();
-    if st.ring.insert(Slow::new(op, phase, ms, now), now) {
-        st.dirty = true;
+    let floor = Floor {
+        ms: FLOOR_MS.load(Ordering::Relaxed),
+        until_ms: FLOOR_UNTIL_MS.load(Ordering::Relaxed),
+    };
+    if floor.turns_away(ms, now) {
+        return false;
     }
-    FLOOR.store(st.ring.floor_ms(), Ordering::Relaxed);
+    let (op, phase) = names();
+    let mut st = lock();
+    let kept = st.ring.insert(Slow::new(&op, &phase, ms, now), now);
+    st.dirty |= kept;
+    publish_floor(&st, now);
+    kept
 }
 
 /// Ends the startup phase `name`: its duration runs from the previous phase's end (or from the start).
-pub fn startup_phase(name: &str) {
+pub fn startup_phase(name: &'static str) {
     let mut st = lock();
     let now = Instant::now();
     let (at, took) = (
@@ -176,41 +226,48 @@ pub fn startup_phase(name: &str) {
 /// A guard that records `op` with the time between [`time`] and its drop.
 #[must_use = "the duration is recorded when the guard is dropped"]
 pub struct Timer {
-    op: String,
-    phase: String,
+    op: &'static str,
+    phase: &'static str,
     since: Instant,
 }
 
 /// Times `op` until the returned guard is dropped.
-pub fn time(op: &str) -> Timer {
+pub fn time(op: &'static str) -> Timer {
     time_since(op, Instant::now())
 }
 
 /// Times `op` from `since` (work that began before the guard could be made) until the returned guard is dropped.
-pub fn time_since(op: &str, since: Instant) -> Timer {
+pub fn time_since(op: &'static str, since: Instant) -> Timer {
     Timer {
-        op: op.into(),
-        phase: DEFAULT_PHASE.into(),
+        op,
+        phase: DEFAULT_PHASE,
         since,
     }
 }
 
 impl Timer {
     /// Names the phase this guard times.
-    pub fn phase(mut self, phase: &str) -> Self {
-        self.phase = phase.into();
+    pub fn phase(mut self, phase: &'static str) -> Self {
+        self.phase = phase;
         self
     }
 }
 
 impl Drop for Timer {
     fn drop(&mut self) {
-        record_phase(&self.op, &self.phase, self.since.elapsed());
+        record_phase(self.op, self.phase, self.since.elapsed());
     }
 }
 
-/// Writes the ring to its file when it changed (atomically: a temporary file, then a rename). Does nothing before [`init`].
+/// The temporary file a flush writes before the rename: one per process.
+fn tmp_path(path: &Path, pid: u32) -> PathBuf {
+    path.with_extension(format!("json.{pid}.tmp"))
+}
+
+/// Writes the ring to its file when it changed (a temporary file, then a rename; one flush at a time, so two callers never
+/// share the temporary file). Does nothing before [`init`].
 pub fn flush() -> std::io::Result<()> {
+    let _one_at_a_time = FLUSH.lock().unwrap_or_else(PoisonError::into_inner);
     let (path, bytes) = {
         let mut st = lock();
         let Some(path) = st.path.clone() else {
@@ -222,13 +279,41 @@ pub fn flush() -> std::io::Result<()> {
         st.dirty = false;
         (path, st.ring.to_bytes(now_ms()))
     };
-    let tmp = path.with_extension("json.tmp");
+    let tmp = tmp_path(&path, std::process::id());
     let written = std::fs::write(&tmp, &bytes).and_then(|()| std::fs::rename(&tmp, &path));
     if written.is_err() {
         lock().dirty = true;
         let _ = std::fs::remove_file(&tmp);
     }
     written
+}
+
+/// Flushes on a thread of its own (never on the UI thread) and logs a failure. Calls made while one is queued join it: a
+/// second call returns `None`. The handle is for tests and for an exit that wants to wait.
+pub fn flush_in_background() -> Option<JoinHandle<()>> {
+    if FLUSH_QUEUED.swap(true, Ordering::AcqRel) {
+        return None;
+    }
+    let spawned = std::thread::Builder::new()
+        .name("perf-flush".into())
+        .spawn(|| {
+            // Cleared first: a record that lands during the write queues the next flush.
+            FLUSH_QUEUED.store(false, Ordering::Release);
+            if let Err(e) = flush() {
+                log::warn!("the performance ring could not be saved: {:?}", e.kind());
+            }
+        });
+    match spawned {
+        Ok(handle) => Some(handle),
+        Err(e) => {
+            FLUSH_QUEUED.store(false, Ordering::Release);
+            log::warn!(
+                "the performance ring could not be saved: no thread ({:?})",
+                e.kind()
+            );
+            None
+        }
+    }
 }
 
 /// Where a section reads what was recorded; a test names its own.
@@ -328,8 +413,8 @@ mod tests {
                 cpu_model: "Test CPU".into(),
                 cpu_logical_cores: 4,
                 cpu_physical_cores: None,
-                memory_total_bytes: 1 << 30,
-                memory_free_bytes: 1 << 29,
+                memory_total_mib: 1024,
+                memory_free_mib: 512,
                 data_disk: None,
                 os: "TestOS".into(),
                 load_average: None,
@@ -403,6 +488,18 @@ mod tests {
         let Content::Text(json) = &out.files[1].content else {
             panic!("text")
         };
+        // Every `.json` this section writes still parses after the redactor every file passes (P1-1).
+        for f in out.files.iter().filter(|f| f.name.ends_with(".json")) {
+            let Content::Text(text) = &f.content else {
+                panic!("text")
+            };
+            let (masked, counts) = crate::Redactor::new().text(text);
+            assert_eq!(counts, Default::default(), "{masked}");
+            assert!(
+                serde_json::from_str::<serde_json::Value>(&masked).is_ok(),
+                "{masked}"
+            );
+        }
         let v: serde_json::Value = serde_json::from_str(json).unwrap();
         assert_eq!(v["schema"], 1);
         assert_eq!(v["slowest"][0]["op"], "query");
@@ -424,6 +521,39 @@ mod tests {
         let out = collect(&s);
         assert_eq!(out.files.len(), 2);
         assert!(out.notes[0].contains("PermissionDenied"), "{:?}", out.notes);
+    }
+
+    #[test]
+    fn loading_merges_a_ring_once_and_marks_a_damaged_file_for_replacement() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = now_ms();
+        let mut st = State::new();
+        assert_eq!(load_into(&mut st, dir.path(), now), Loaded::Fresh);
+        assert_eq!(
+            st.path.as_deref(),
+            Some(dir.path().join(RING_FILE).as_path())
+        );
+        assert!(!st.dirty);
+        let mut ring = Ring::new();
+        ring.insert(Slow::new("a", "b", 10, now), now);
+        ring.insert(Slow::new("c", "d", 20, now), now);
+        std::fs::write(dir.path().join(RING_FILE), ring.to_bytes(now)).unwrap();
+        assert_eq!(load_into(&mut st, dir.path(), now), Loaded::Entries(2));
+        assert_eq!(st.ring.len(), 2);
+        std::fs::write(dir.path().join(RING_FILE), b"{ damaged").unwrap();
+        assert!(matches!(
+            load_into(&mut st, dir.path(), now),
+            Loaded::Unusable(RingError::Damaged(_))
+        ));
+        assert!(st.dirty, "the damaged file is replaced at the next flush");
+        assert_eq!(st.ring.len(), 2, "what was loaded stays");
+    }
+
+    #[test]
+    fn the_temporary_file_is_one_per_process_beside_the_ring_file() {
+        let p = Path::new("/d/performance-ring.json");
+        assert_eq!(tmp_path(p, 7), Path::new("/d/performance-ring.json.7.tmp"));
+        assert_ne!(tmp_path(p, 7), tmp_path(p, 8));
     }
 
     #[test]

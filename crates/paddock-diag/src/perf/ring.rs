@@ -17,6 +17,9 @@ pub const MAX_STARTUP_PHASES: usize = 64;
 pub const MAX_NAME: usize = 48;
 /// Largest ring file read, bytes (50 entries are about 8 KB).
 pub const MAX_RING_FILE: u64 = 64 * 1024;
+/// The longest duration kept, milliseconds (12 digits, about 31 years): a number of 13 digits would be masked as a card number
+/// by the text redactor and break `performance.json`.
+pub const MAX_DURATION_MS: u64 = 999_999_999_999;
 /// What an unusable name becomes.
 pub const INVALID_NAME: &str = "invalid-name";
 /// The phase of a duration recorded without one.
@@ -42,6 +45,25 @@ pub fn clean_name(name: &str) -> String {
     }
 }
 
+/// What [`Ring::floor`] says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Floor {
+    /// Durations up to this are turned away (0: none is).
+    pub ms: u64,
+    /// The floor holds until this time (the oldest live entry expires); after it the ring has room again.
+    pub until_ms: u64,
+}
+
+impl Floor {
+    /// Nothing is turned away.
+    pub const OPEN: Floor = Floor { ms: 0, until_ms: 0 };
+
+    /// Whether an operation of `duration_ms` at `now_ms` is turned away under this floor.
+    pub fn turns_away(self, duration_ms: u64, now_ms: u64) -> bool {
+        duration_ms == 0 || (duration_ms <= self.ms && now_ms <= self.until_ms)
+    }
+}
+
 /// One slow operation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -62,7 +84,7 @@ impl Slow {
         Slow {
             op: clean_name(op),
             phase: clean_name(phase),
-            duration_ms,
+            duration_ms: duration_ms.min(MAX_DURATION_MS),
             at_ms,
         }
     }
@@ -132,17 +154,25 @@ impl Ring {
         self.entries.is_empty()
     }
 
-    /// A duration that cannot enter the ring any more: the shortest held when it is full, else 0. A caller may skip a
-    /// shorter duration without taking a lock (a hint: a stale value only costs one extra insert call).
-    pub fn floor_ms(&self) -> u64 {
-        if self.entries.len() < RING_CAPACITY {
-            0
-        } else {
+    /// The shortest duration that can still enter the ring at `now_ms`, and until when that holds. Only entries of the last
+    /// 24 hours count: a ring whose entries have expired has room, so a day after a slow session nothing shorter is turned
+    /// away. A caller may skip an operation of at most `floor.ms` while `now_ms <= floor.until_ms` without taking a lock.
+    pub fn floor(&self, now_ms: u64) -> Floor {
+        let live = || {
             self.entries
                 .iter()
-                .map(|e| e.duration_ms)
+                .filter(|e| now_ms.saturating_sub(e.at_ms) <= WINDOW_MS)
+        };
+        if live().count() < RING_CAPACITY {
+            return Floor::OPEN;
+        }
+        Floor {
+            ms: live().map(|e| e.duration_ms).min().unwrap_or(0),
+            until_ms: live()
+                .map(|e| e.at_ms)
                 .min()
                 .unwrap_or(0)
+                .saturating_add(WINDOW_MS),
         }
     }
 
@@ -238,8 +268,8 @@ impl Startup {
         }
         self.phases.push(Phase {
             name: clean_name(name),
-            at_ms,
-            duration_ms,
+            at_ms: at_ms.min(MAX_DURATION_MS),
+            duration_ms: duration_ms.min(MAX_DURATION_MS),
         });
         true
     }
@@ -283,6 +313,21 @@ mod tests {
     }
 
     #[test]
+    fn durations_never_reach_13_digits() {
+        assert_eq!(
+            Slow::new("a", "b", u64::MAX, 1).duration_ms,
+            MAX_DURATION_MS
+        );
+        let mut s = Startup::new();
+        s.push("p", u64::MAX, u64::MAX);
+        assert_eq!(
+            (s.phases()[0].at_ms, s.phases()[0].duration_ms),
+            (MAX_DURATION_MS, MAX_DURATION_MS)
+        );
+        assert_eq!(MAX_DURATION_MS.to_string().len(), 12);
+    }
+
+    #[test]
     fn a_new_entry_has_cleaned_names() {
         let e = Slow::new("open /home/bob/a.log", "ok", 5, 6);
         assert_eq!(
@@ -295,12 +340,12 @@ mod tests {
     fn the_ring_keeps_the_slowest_up_to_its_capacity() {
         let mut ring = Ring::new();
         assert!(ring.is_empty());
-        assert_eq!(ring.floor_ms(), 0);
+        assert_eq!(ring.floor(NOW), Floor::OPEN);
         for i in 1..=RING_CAPACITY as u64 {
             assert!(ring.insert(slow("op", i * 10, 0), NOW));
         }
         assert_eq!(ring.len(), RING_CAPACITY);
-        assert_eq!(ring.floor_ms(), 10);
+        assert_eq!(ring.floor(NOW).ms, 10);
         assert!(
             !ring.insert(slow("fast", 10, 0), NOW),
             "not longer than the shortest"
@@ -308,7 +353,7 @@ mod tests {
         assert!(!ring.insert(slow("fast", 5, 0), NOW));
         assert!(ring.insert(slow("slower", 15, 0), NOW));
         assert_eq!(ring.len(), RING_CAPACITY, "bounded");
-        assert_eq!(ring.floor_ms(), 15);
+        assert_eq!(ring.floor(NOW).ms, 15);
         let snap = ring.snapshot(NOW);
         assert_eq!(
             snap.first().map(|e| e.duration_ms),
@@ -337,6 +382,46 @@ mod tests {
         );
         assert_eq!(ring.len(), 1);
         assert_eq!(ring.snapshot(NOW)[0].op, "new");
+    }
+
+    /// P1-2: the floor counted expired entries, so after a slow day every shorter operation was turned away and the section
+    /// showed "none recorded". Time is injected: a full ring of slow entries gates only until the oldest expires.
+    #[test]
+    fn the_floor_lapses_when_the_entries_that_set_it_expire() {
+        let start = 5 * WINDOW_MS;
+        let mut ring = Ring::new();
+        for i in 0..RING_CAPACITY as u64 {
+            ring.insert(Slow::new("slow", "p", 60_000 + i, start + i), start + i);
+        }
+        let now = start + 10;
+        let floor = ring.floor(now);
+        assert_eq!((floor.ms, floor.until_ms), (60_000, start + WINDOW_MS));
+        assert!(
+            floor.turns_away(59_000, now),
+            "a fast one is turned away while the ring is full of slow ones"
+        );
+        assert!(!floor.turns_away(60_001, now));
+        assert!(
+            floor.turns_away(59_000, start + WINDOW_MS),
+            "the oldest entry is still live at the edge"
+        );
+        // A day and a bit later the oldest entry has expired: the ring has room, the same call is let in.
+        let later = start + WINDOW_MS + 1;
+        assert!(
+            !floor.turns_away(59_000, later),
+            "a stale floor must not turn it away"
+        );
+        assert_eq!(
+            ring.floor(later),
+            Floor::OPEN,
+            "one entry expired: there is room"
+        );
+        assert!(ring.insert(Slow::new("fast", "p", 5, later), later));
+        let shown = ring.snapshot(later);
+        assert!(shown.iter().any(|e| e.op == "fast"), "{shown:?}");
+        // Everything expired: nothing gates, and zero never enters.
+        assert_eq!(ring.floor(start + 3 * WINDOW_MS), Floor::OPEN);
+        assert!(Floor::OPEN.turns_away(0, 1) && !Floor::OPEN.turns_away(1, 1));
     }
 
     #[test]

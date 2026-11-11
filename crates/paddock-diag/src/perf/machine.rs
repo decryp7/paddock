@@ -34,10 +34,16 @@ impl DiskKind {
 pub struct DataDisk {
     /// SSD, HDD or unknown.
     pub kind: DiskKind,
-    /// Size, bytes.
-    pub total_bytes: u64,
-    /// Free, bytes.
-    pub free_bytes: u64,
+    /// Size, MiB (sizes are in MiB so that no number of 13 digits is written: the text redactor masks such a run as a card
+    /// number and breaks the JSON).
+    pub total_mib: u64,
+    /// Free, MiB.
+    pub free_mib: u64,
+}
+
+/// Bytes in MiB, rounded down.
+pub fn mib(bytes: u64) -> u64 {
+    bytes >> 20
 }
 
 /// The machine at capture time.
@@ -50,15 +56,15 @@ pub struct MachineFacts {
     pub cpu_logical_cores: usize,
     /// Physical cores, when known.
     pub cpu_physical_cores: Option<usize>,
-    /// Memory installed, bytes.
-    pub memory_total_bytes: u64,
-    /// Memory available to start work with, bytes.
-    pub memory_free_bytes: u64,
+    /// Memory installed, MiB.
+    pub memory_total_mib: u64,
+    /// Memory available to start work with, MiB.
+    pub memory_free_mib: u64,
     /// The data folder's volume, when it can be found.
     pub data_disk: Option<DataDisk>,
     /// The OS and its version (`macOS 15.1`).
     pub os: String,
-    /// Load average over 1, 5 and 15 minutes; none where the OS has no such number (Windows).
+    /// Load average over 1, 5 and 15 minutes; two decimals; none where the OS has no such number (Windows).
     pub load_average: Option<[f64; 3]>,
 }
 
@@ -93,8 +99,8 @@ pub fn volume_of<'a>(path: &Path, volumes: &'a [Volume]) -> Option<&'a Volume> {
 pub fn data_disk(path: &Path, volumes: &[Volume]) -> Option<DataDisk> {
     volume_of(path, volumes).map(|v| DataDisk {
         kind: v.kind,
-        total_bytes: v.total_bytes,
-        free_bytes: v.free_bytes,
+        total_mib: mib(v.total_bytes),
+        free_mib: mib(v.free_bytes),
     })
 }
 
@@ -124,6 +130,11 @@ fn strip_verbatim(path: &Path) -> PathBuf {
     }
 }
 
+/// `x` with two decimals (a load average has no more worth reading, and fewer digits keep the text redactor away).
+fn round2(x: f64) -> f64 {
+    (x * 100.0).round() / 100.0
+}
+
 /// The real machine, through `sysinfo`.
 pub struct SystemMachine;
 
@@ -134,10 +145,14 @@ impl MachineSource for SystemMachine {
             RefreshKind::nothing()
                 .with_cpu(CpuRefreshKind::nothing())
                 .with_memory(MemoryRefreshKind::nothing().with_ram()),
-        );
-        let volumes: Vec<Volume> = Disks::new_with_refreshed_list()
-            .list()
+        )
+        .ok();
+        let cpus = sys.as_ref().map(|s| s.cpus()).unwrap_or_default();
+        // An error from the OS leaves a fact out (an empty list, no load), never the report.
+        let disks = Disks::new_with_refreshed_list().ok();
+        let volumes: Vec<Volume> = disks
             .iter()
+            .flat_map(|d| d.iter())
             .map(|d| Volume {
                 mount: d.mount_point().to_path_buf(),
                 kind: match d.kind() {
@@ -149,22 +164,21 @@ impl MachineSource for SystemMachine {
                 free_bytes: d.available_space(),
             })
             .collect();
-        let load = System::load_average();
+        let load = System::load_average().ok();
         MachineFacts {
-            cpu_model: sys
-                .cpus()
+            cpu_model: cpus
                 .first()
                 .map(|c| c.brand().trim().to_string())
                 .unwrap_or_default(),
-            cpu_logical_cores: sys.cpus().len(),
-            cpu_physical_cores: System::physical_core_count(),
-            memory_total_bytes: sys.total_memory(),
-            memory_free_bytes: sys.available_memory(),
+            cpu_logical_cores: cpus.len(),
+            cpu_physical_cores: System::physical_core_count().ok(),
+            memory_total_mib: mib(sys.as_ref().map_or(0, |s| s.total_memory())),
+            memory_free_mib: mib(sys.as_ref().map_or(0, |s| s.available_memory())),
             data_disk: data_disk(&resolved(data_dir), &volumes),
             os: System::long_os_version()
-                .or_else(System::name)
+                .or_else(|_| System::name())
                 .unwrap_or_default(),
-            load_average: (!cfg!(windows)).then_some([load.one, load.five, load.fifteen]),
+            load_average: load.map(|l| [round2(l.one), round2(l.five), round2(l.fifteen)]),
         }
     }
 }
@@ -177,8 +191,8 @@ mod tests {
         Volume {
             mount: PathBuf::from(mount),
             kind,
-            total_bytes: 1000,
-            free_bytes: free,
+            total_bytes: 1 << 20,
+            free_bytes: free << 20,
         }
     }
 
@@ -190,28 +204,25 @@ mod tests {
             vol("/data2", DiskKind::Unknown, 3),
         ];
         assert_eq!(
-            volume_of(Path::new("/data/app/x"), &vols).map(|v| v.free_bytes),
+            volume_of(Path::new("/data/app/x"), &vols).map(|v| v.free_bytes >> 20),
             Some(2)
         );
         assert_eq!(
-            volume_of(Path::new("/data2"), &vols).map(|v| v.free_bytes),
+            volume_of(Path::new("/data2"), &vols).map(|v| v.free_bytes >> 20),
             Some(3)
         );
         assert_eq!(
-            volume_of(Path::new("/home/x"), &vols).map(|v| v.free_bytes),
+            volume_of(Path::new("/home/x"), &vols).map(|v| v.free_bytes >> 20),
             Some(1),
             "`/data` is not above `/database`"
         );
         assert_eq!(
-            volume_of(Path::new("/database"), &vols).map(|v| v.free_bytes),
+            volume_of(Path::new("/database"), &vols).map(|v| v.free_bytes >> 20),
             Some(1)
         );
         assert_eq!(volume_of(Path::new("/x"), &[]), None);
         let d = data_disk(Path::new("/data/a"), &vols).unwrap();
-        assert_eq!(
-            (d.kind, d.total_bytes, d.free_bytes),
-            (DiskKind::Hdd, 1000, 2)
-        );
+        assert_eq!((d.kind, d.total_mib, d.free_mib), (DiskKind::Hdd, 1, 2));
         assert_eq!(data_disk(Path::new("/x"), &[]), None);
     }
 
@@ -229,6 +240,16 @@ mod tests {
         let want = dir.path().canonicalize().unwrap();
         assert_eq!(resolved(&dir.path().join("not/yet/there")), want);
         assert_eq!(resolved(Path::new("")), PathBuf::new());
+    }
+
+    #[test]
+    fn sizes_are_mib_and_loads_have_two_decimals() {
+        assert_eq!(
+            (mib(0), mib((1 << 20) - 1), mib(5 << 20), mib(3 << 40)),
+            (0, 0, 5, 3 << 20)
+        );
+        assert_eq!(round2(3.133_300_781_25), 3.13);
+        assert_eq!(round2(0.005), 0.01);
     }
 
     #[test]
@@ -252,7 +273,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let f = SystemMachine.facts(dir.path());
         assert!(f.cpu_logical_cores >= 1);
-        assert!(f.memory_total_bytes > 0 && f.memory_free_bytes <= f.memory_total_bytes);
+        assert!(f.memory_total_mib > 0 && f.memory_free_mib <= f.memory_total_mib);
         assert!(!f.os.is_empty());
         assert_eq!(f.load_average.is_some(), !cfg!(windows));
         if let Some(l) = f.load_average {

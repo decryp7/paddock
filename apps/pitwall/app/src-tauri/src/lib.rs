@@ -510,7 +510,8 @@ pub fn run() {
         let _ = LOG.set(handle.clone());
     }
     paddock_diag::perf::startup_phase("logging");
-    // The slowest operations of the last run (the report's Performance section) survive a crash in the data folder.
+    // The slowest operations of the last run (the report's Performance section) are read from the data folder; a finished job
+    // saves the ring off this thread, and quitting saves it once more ([`flush_on_exit`]).
     if let Some(data) = app_state::data_dir() {
         log::info!("performance history: {:?}", paddock_diag::perf::init(&data));
         paddock_diag::perf::startup_phase("performance-history");
@@ -542,9 +543,22 @@ pub fn run() {
     // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     let builder = builder.on_web_content_process_terminate(paddock_startup::tauri::web_content_terminated);
-    if let Err(e) = builder.run(tauri::generate_context!()) {
-        eprintln!("Pitwall could not start: {e}");
-        std::process::exit(1);
+    let app = match builder.build(tauri::generate_context!()) {
+        Ok(app) => app,
+        Err(e) => {
+            eprintln!("Pitwall could not start: {e}");
+            std::process::exit(1);
+        }
+    };
+    app.run(|_, event| flush_on_exit(&event));
+}
+
+/// Quitting saves the Performance section's ring once more (a record since the last save would be lost otherwise).
+pub(crate) fn flush_on_exit(event: &tauri::RunEvent) {
+    if matches!(event, tauri::RunEvent::Exit) {
+        if let Err(e) = paddock_diag::perf::flush() {
+            log::warn!("the performance ring could not be saved at exit: {:?}", e.kind());
+        }
     }
 }
 

@@ -122,6 +122,8 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 struct Route {
+    /// The job's static kind slug, for the Performance section (never its title or subject).
+    kind: &'static str,
     sink: JobSink,
     started: bool,
     outcome: Option<Result<Value, CommandError>>,
@@ -134,10 +136,11 @@ struct Router {
 }
 
 impl Router {
-    fn route(&self, id: u64, sink: JobSink) {
+    fn route(&self, id: u64, kind: &'static str, sink: JobSink) {
         lock(&self.routes).insert(
             id,
             Route {
+                kind,
                 sink,
                 started: false,
                 outcome: None,
@@ -169,10 +172,20 @@ fn terminal_word(state: &JobState) -> &'static str {
     }
 }
 
+/// A finished job goes to the report's Performance section by its static kind and how it ended; a record that changed the ring is
+/// saved off this thread (the handle is for tests).
+fn record_finished(kind: &'static str, outcome: &'static str, elapsed_ms: u64) -> Option<std::thread::JoinHandle<()>> {
+    if paddock_diag::perf::record_job(kind, outcome, std::time::Duration::from_millis(elapsed_ms)) {
+        paddock_diag::perf::flush_in_background()
+    } else {
+        None
+    }
+}
+
 impl EventSink for Router {
     fn emit(&self, s: &JobSnapshot) {
         let job_id = s.id.0;
-        let (sink, event) = {
+        let (sink, event, finished) = {
             let mut routes = lock(&self.routes);
             let Some(route) = routes.get_mut(&job_id) else {
                 // The first (queued) snapshot of a job that has no route yet: nothing to tell the UI.
@@ -222,17 +235,16 @@ impl EventSink for Router {
                 },
             };
             let sink = route.sink.clone();
+            let kind = route.kind;
             if s.state.is_terminal() {
                 routes.remove(&job_id);
-                // The slowest jobs go to the report's Performance section: the static kind and how it ended, never the title or subject.
-                paddock_diag::perf::record_phase(
-                    &format!("job:{}", s.kind.0),
-                    terminal_word(&s.state),
-                    std::time::Duration::from_millis(s.elapsed_ms),
-                );
             }
-            (sink, event)
+            (sink, event, s.state.is_terminal().then_some((kind, terminal_word(&s.state))))
         };
+        // Outside the routes lock: the recorder has a lock of its own.
+        if let Some((kind, outcome)) = finished {
+            record_finished(kind, outcome, s.elapsed_ms);
+        }
         sink(event);
     }
 }
@@ -285,7 +297,7 @@ impl Jobs {
     fn register(&self, spec: &JobSpec, sink: &JobSink) -> JobContext {
         // The queued snapshot registering emits has no route yet and tells the UI nothing; the first running one does.
         let ctx = self.registry.register(spec.kind, &spec.title, None);
-        self.router.route(ctx.id().0, sink.clone());
+        self.router.route(ctx.id().0, spec.kind, sink.clone());
         let (cancel, cancel_rx) = tokio::sync::watch::channel(0);
         let (stop, stop_rx) = tokio::sync::watch::channel(0);
         lock(&self.signals).insert(
@@ -494,7 +506,7 @@ mod tests {
             ),
         ] {
             let (sink, _events) = collector();
-            router.route(id, sink);
+            router.route(id, "zz-perf-test", sink);
             router.emit(&JobSnapshot {
                 id: paddock_jobs::JobId(id),
                 kind: paddock_jobs::JobKind::new("zz-perf-test"),
@@ -519,6 +531,36 @@ mod tests {
         assert!(!format!("{slowest:?}").contains("MARKER"));
         let running = JobState::Running { phase: None };
         assert_eq!(terminal_word(&running), "total");
+    }
+
+    /// P1-3: a finished job that changed the ring is saved off the calling thread, and quitting saves what is left.
+    #[test]
+    fn a_finished_job_is_saved_off_thread_and_quitting_flushes() {
+        use paddock_diag::perf::{self, ring::Ring};
+        let dir = tempfile::tempdir().unwrap();
+        perf::init(dir.path());
+        let file = dir.path().join(perf::RING_FILE);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let read = |op: &str| {
+            std::fs::read(&file)
+                .ok()
+                .and_then(|b| Ring::parse(&b, now).ok())
+                .is_some_and(|r| r.snapshot(now).iter().any(|e| e.op == op))
+        };
+        // Another test of this process may have queued the flush already; then it saves this record too.
+        if let Some(flush) = record_finished("zz-save-test", "done", 9_000_001) {
+            flush.join().unwrap();
+            assert!(read("job:zz-save-test"), "the background flush wrote the record");
+        }
+        assert!(perf::record("zz-exit-test", std::time::Duration::from_millis(9_000_002)));
+        assert!(!read("zz-exit-test"), "not saved yet");
+        crate::flush_on_exit(&tauri::RunEvent::Ready);
+        assert!(!read("zz-exit-test"), "only the exit saves");
+        crate::flush_on_exit(&tauri::RunEvent::Exit);
+        assert!(read("zz-exit-test"), "quitting saved what was left");
     }
 
     #[tokio::test(start_paused = true)]
