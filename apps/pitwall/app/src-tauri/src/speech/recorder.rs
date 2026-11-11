@@ -5,7 +5,7 @@
 //! none). At the cap the worker closes the device itself; a device failure closes it too and is kept as the recording's
 //! outcome.
 
-use super::capture::{Capture, CaptureError, Chunk, Frames, FramesRx, OpenCapture, CHANNEL_CHUNKS};
+use super::capture::{Capture, CaptureError, Chunk, Frames, OpenCapture, CHANNEL_CHUNKS};
 use pitwall_core::speech::pcm::{Clip, ClipBuilder, Push};
 use pitwall_core::speech::MAX_CLIP_SAMPLES;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -109,8 +109,9 @@ impl Recorder {
         if slot.is_some() {
             return Err(RecordError::AlreadyRecording);
         }
-        let (frames, FramesRx { rx, overruns, failure }) = Frames::channel(CHANNEL_CHUNKS);
-        let open = self.capture.open(frames)?;
+        let (sink, hand_over) = Frames::channel(CHANNEL_CHUNKS);
+        let (overruns, failure) = (hand_over.overruns.clone(), hand_over.failure.clone());
+        let open = self.capture.open(sink)?;
         let format = open.format();
         let device: Device = Arc::new(Mutex::new(Some(open)));
         let progress = Arc::new(Progress::default());
@@ -118,17 +119,18 @@ impl Recorder {
         let worker = std::thread::Builder::new().name("pitwall-speech-capture".into()).spawn(move || {
             let mut clip = ClipBuilder::new(format, cap);
             // Ends when the device is closed (its Frames dropped) and every waiting chunk is read.
-            while let Ok(chunk) = rx.recv() {
+            while let Ok(chunk) = hand_over.rx.recv() {
                 if let Chunk::Samples(v) = chunk {
-                    if prog.full.load(Ordering::SeqCst) {
-                        continue;
+                    if !prog.full.load(Ordering::SeqCst) {
+                        let push = clip.push(&v);
+                        prog.recorded_ms.store(clip.duration_ms(), Ordering::SeqCst);
+                        if push == Push::Full {
+                            prog.full.store(true, Ordering::SeqCst);
+                            close(&dev);
+                        }
                     }
-                    let push = clip.push(&v);
-                    prog.recorded_ms.store(clip.duration_ms(), Ordering::SeqCst);
-                    if push == Push::Full {
-                        prog.full.store(true, Ordering::SeqCst);
-                        close(&dev);
-                    }
+                    // The buffer goes back to the audio thread, which then never allocates.
+                    hand_over.give_back(v);
                 }
                 if fail.lock().unwrap_or_else(PoisonError::into_inner).is_some() {
                     close(&dev);

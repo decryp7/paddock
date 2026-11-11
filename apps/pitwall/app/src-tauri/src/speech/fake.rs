@@ -1,7 +1,7 @@
 //! The test double of [`Capture`] (compiled only for tests and `test-support`, rule 73): a scripted device that delivers its
 //! chunks when opened, can fail to open or fail while open, and tells the test whether it is open. No microphone is touched.
 
-use super::capture::{Capture, CaptureError, Frames, OpenCapture, CHANNEL_CHUNKS};
+use super::capture::{Capture, CaptureError, FrameSink, OpenCapture, CHANNEL_CHUNKS};
 use pitwall_core::speech::pcm::InputFormat;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
@@ -29,7 +29,7 @@ pub struct FakeCapture {
 }
 
 impl FakeCapture {
-    /// A device of `rate` Hz and `channels` that delivers `chunks` (at most the hand-over's 64) as soon as it is opened, then
+    /// A device of `rate` Hz and `channels` that delivers `chunks` (at most the hand-over's 32) as soon as it is opened, then
     /// stays open, silent, until stopped.
     pub fn new(rate: u32, channels: u16, chunks: Vec<Vec<f32>>) -> FakeCapture {
         assert!(
@@ -88,16 +88,17 @@ impl FakeCapture {
 }
 
 impl Capture for FakeCapture {
-    fn open(&self, frames: Frames) -> Result<OpenCapture, CaptureError> {
+    fn open(&self, sink: FrameSink) -> Result<OpenCapture, CaptureError> {
         if let Some(e) = &self.inner.open_error {
             return Err(e.clone());
         }
         let format = InputFormat::new(self.inner.rate, self.inner.channels).map_err(|e| CaptureError::Format(e.to_string()))?;
+        let frames = sink.frames(format);
         if let Ok(mut s) = self.inner.state.lock() {
             s.open = true;
         }
         for c in &self.inner.chunks {
-            frames.push(c);
+            frames.push(c.as_slice());
         }
         if let Some(e) = &self.inner.then_fail {
             frames.fail(e.clone());

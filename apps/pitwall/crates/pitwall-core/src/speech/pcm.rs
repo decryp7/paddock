@@ -122,7 +122,6 @@ pub enum Push {
 }
 
 /// Builds a [`Clip`] from a device's interleaved `f32` frames (see the module documentation).
-#[derive(Debug)]
 pub struct ClipBuilder {
     channels: usize,
     /// Input samples per output sample.
@@ -211,6 +210,17 @@ impl ClipBuilder {
     /// The clip. A partly filled last output window is dropped (under one sample of 16 kHz).
     pub fn finish(self) -> Clip {
         Clip { samples: self.out }
+    }
+}
+
+impl std::fmt::Debug for ClipBuilder {
+    // Never the samples or the running sums: they are the user's voice.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClipBuilder")
+            .field("channels", &self.channels)
+            .field("len", &self.out.len())
+            .field("cap", &self.cap)
+            .finish()
     }
 }
 
@@ -333,6 +343,14 @@ mod tests {
         let c = Clip::from_samples(vec![1234; 16_000]).unwrap();
         let d = format!("{c:?}");
         assert_eq!(d, "Clip { duration_ms: 1000 }");
+    }
+
+    #[test]
+    fn a_builder_never_shows_its_samples_in_debug_output() {
+        let mut b = ClipBuilder::new(fmt(16_000, 2), 100);
+        b.push(&[0.123_456, 0.654_321]);
+        let d = format!("{b:?}");
+        assert_eq!(d, "ClipBuilder { channels: 2, len: 1, cap: 100 }");
     }
 
     #[test]

@@ -7,8 +7,8 @@ use pitwall_app_lib::speech::{CaptureError, RecordError, Recorder, Status};
 use std::sync::Arc;
 
 fn second_of_48k_stereo() -> Vec<Vec<f32>> {
-    // 50 chunks of 20 ms, as a device delivers them (a script fits the 64-chunk hand-over).
-    (0..50).map(|_| vec![0.25_f32; 960 * 2]).collect()
+    // 25 chunks of 40 ms, as a device delivers them (a script fits the 32-chunk hand-over).
+    (0..25).map(|_| vec![0.25_f32; 1920 * 2]).collect()
 }
 
 #[test]

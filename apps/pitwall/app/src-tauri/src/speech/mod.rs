@@ -17,5 +17,5 @@ pub mod device;
 pub mod fake;
 pub mod recorder;
 
-pub use capture::{Capture, CaptureError, Frames, OpenCapture};
+pub use capture::{Capture, CaptureError, FrameSink, Frames, OpenCapture};
 pub use recorder::{RecordError, Recorder, Status};
