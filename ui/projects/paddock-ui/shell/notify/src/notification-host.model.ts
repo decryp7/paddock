@@ -48,18 +48,22 @@ export interface NotificationSource {
 export const NOTIFICATION_SOURCES = new InjectionToken<readonly NotificationSource[]>('PADDOCK_NOTIFICATION_SOURCES');
 
 /**
- * The one display rule as a pure function: one toast per cause (a later entry with the same cause replaces an earlier
- * one and takes the later position), a cause the status chip states (`health:`) is never toasted, and at most `max` (the
- * newest) are shown.
+ * One toast per cause, in the order the causes first appeared (a later entry with the same cause replaces an earlier one
+ * and keeps its place: posting a cause again updates it where it is, so nothing moves under the pointer), without the
+ * causes the status chip states (`health:`).
  */
-export function visibleNotifications(items: readonly HostNotification[], max = MAX_VISIBLE): HostNotification[] {
+export function mergeNotifications(items: readonly HostNotification[]): HostNotification[] {
   const byCause = new Map<string, HostNotification>();
   for (const n of items) {
     if (isHealthCause(n.cause)) continue;
-    byCause.delete(n.cause);
     byCause.set(n.cause, n);
   }
-  return [...byCause.values()].slice(-max);
+  return [...byCause.values()];
+}
+
+/** The one display rule as a pure function: {@link mergeNotifications}, and at most `max` (the newest) are shown. */
+export function visibleNotifications(items: readonly HostNotification[], max = MAX_VISIBLE): HostNotification[] {
+  return mergeNotifications(items).slice(-max);
 }
 
 /** Errors, critical failures and sticky toasts stay until resolved or dismissed; the rest time out. */

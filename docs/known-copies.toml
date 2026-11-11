@@ -446,6 +446,20 @@ adr = "0010"
   note = "notify/os/time.rs was taken from these two types."
 
 [[mechanism]]
+id = "notification-host"
+title = "The toast host: the stack of notifications on screen, its order, freeze and timing"
+canonical = "@decryp7/paddock-ui"
+paths = ["ui/projects/paddock-ui/shell/notify/src/notification-host.ts", "ui/projects/paddock-ui/shell/notify/src/notification-host.model.ts"]
+status = "built"
+adr = "0010"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src/app/health/notification-host.ts", "apps/debrief/app/src/app/health/notification-host.model.ts"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "Debrief ADR 0055's host; Debrief moves onto the shell host (adopting the shell is the agreed direction). Both hosts got the same stacking fix together (newest enters at the top, frozen while the pointer is in the stack, a repost updates in place)."
+
+[[mechanism]]
 id = "settings-schema"
 title = "Settings schema, sections and values"
 canonical = "paddock-settings"

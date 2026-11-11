@@ -4,6 +4,18 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui` shell notify: the toast stack no longer moves under the pointer
+- `pd-notification-host`: the newest toast is now first in the DOM and enters at the top of the bottom-anchored stack, so the
+  toasts already shown keep their place (a press was lost when an alert arrived between the button going down and up,
+  Debrief CI run 7941); a cause posted again is updated where it is instead of moving to the newest position.
+- While the pointer or focus is anywhere in the stack, every toast's time is held and the set is frozen: new toasts wait,
+  nothing is dropped past `MAX_VISIBLE`, the order stays; dismissed or resolved toasts still go at once. The hold moved from
+  each toast to the stack (`data-testid="notification-stack"`).
+- `visibleNotifications` keeps first-seen order (was: a repeated cause moved to the end); new `mergeNotifications`. In the
+  one-line small-window form the two newest toasts (the first two in the DOM) show.
+- Debrief's own host (`apps/debrief/app/src/app/health/notification-host*.ts`) got the same fix; it is a registered copy
+  (`notification-host` in `docs/known-copies.toml`) until Debrief adopts the shell host.
+
 ### `paddock-proc`: `Supervised::exit_status`; Spotter's browser start ends on ready or exit (ADR 0071)
 - New `Supervised::exit_status`: the status of a child that has ended, without taking the child, so the tree is still ended
   by `kill` or `terminate` afterwards (`wait` forgets the tree).

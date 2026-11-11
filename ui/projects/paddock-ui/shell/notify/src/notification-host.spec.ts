@@ -9,11 +9,11 @@ import { all, FakeClock, one } from './spec-helpers';
 const n = (cause: string, extra: Partial<HostNotification> = {}): HostNotification => ({ cause, severity: 'info', title: cause, dismiss: () => undefined, ...extra });
 
 describe('visibleNotifications (the one display rule)', () => {
-  it('one toast per cause: the same cause three times is one, in the newest position', () => {
+  it('one toast per cause: the same cause three times is one, with the latest content, where it first appeared', () => {
     const out = visibleNotifications([n('a', { title: 'first' }), n('b'), n('a', { title: 'third', count: 3 })]);
     expect(out.map((x) => [x.cause, x.title])).toEqual([
-      ['b', 'b'],
       ['a', 'third'],
+      ['b', 'b'],
     ]);
   });
 
@@ -102,9 +102,10 @@ describe('pd-notification-host', () => {
   it('errors are alerts, others status; severity is on the element', async () => {
     const { f, el } = setup([n('e', { severity: 'error' }), n('i')]);
     await f.whenStable();
+    // The newest comes first (see 'the stack does not move under the pointer').
     expect(all(el, '[data-testid=notification]').map((t) => [t.getAttribute('role'), t.getAttribute('data-severity')])).toEqual([
-      ['alert', 'error'],
       ['status', 'info'],
+      ['alert', 'error'],
     ]);
   });
 
@@ -159,12 +160,12 @@ describe('pd-notification-host', () => {
     expect(dismiss).toHaveBeenCalled();
   });
 
-  it('holds the time while the pointer or focus is on a toast', async () => {
+  it('holds the time while the pointer or focus is in the stack', async () => {
     const dismiss = vi.fn();
     const { f, list, clock, el } = setup([n('i', { dismiss, ttl: 1000 })]);
     await f.whenStable();
-    const toast = one(el, '[data-testid=notification]');
-    toast.dispatchEvent(new MouseEvent('mouseenter'));
+    const stack = one(el, '[data-testid=notification-stack]');
+    stack.dispatchEvent(new MouseEvent('mouseenter'));
     clock.advance(5000);
     expect(dismiss).not.toHaveBeenCalled();
     // A repeat while held stays held.
@@ -174,14 +175,86 @@ describe('pd-notification-host', () => {
     expect(dismiss).not.toHaveBeenCalled();
     // Focus moving inside the toast keeps it held.
     const button = one(el, '[data-testid=notification-dismiss]');
-    toast.dispatchEvent(new FocusEvent('focusout', { relatedTarget: button }));
+    stack.dispatchEvent(new FocusEvent('focusout', { relatedTarget: button }));
     clock.advance(5000);
     expect(dismiss).not.toHaveBeenCalled();
-    toast.dispatchEvent(new MouseEvent('mouseleave'));
+    stack.dispatchEvent(new MouseEvent('mouseleave'));
     clock.advance(999);
     expect(dismiss).not.toHaveBeenCalled();
     clock.advance(1);
     expect(dismiss).toHaveBeenCalledTimes(1);
+  });
+
+  describe('the stack does not move under the pointer', () => {
+    const order = (el: HTMLElement) => all(el, '[data-testid=notification]').map((t) => t.getAttribute('data-cause'));
+    const enter = (el: HTMLElement) => one(el, '[data-testid=notification-stack]').dispatchEvent(new MouseEvent('mouseenter'));
+    const leave = (el: HTMLElement) => one(el, '[data-testid=notification-stack]').dispatchEvent(new MouseEvent('mouseleave'));
+
+    it('the newest toast enters at the top: the ones already there keep their elements', async () => {
+      const { f, list, el } = setup([n('a')]);
+      await f.whenStable();
+      const before = one(el, '[data-cause=a]');
+      list.set([n('a'), n('b')]);
+      await f.whenStable();
+      expect(order(el)).toEqual(['b', 'a']);
+      expect(one(el, '[data-cause=a]')).toBe(before);
+    });
+
+    it('posting a cause again updates it where it is', async () => {
+      const { f, list, el } = setup([n('a'), n('b')]);
+      await f.whenStable();
+      list.set([n('a', { count: 2 }), n('b')]);
+      await f.whenStable();
+      expect(order(el)).toEqual(['b', 'a']);
+      expect(one(el, '[data-cause=a] [data-testid=notification-count]').textContent).toContain('×2');
+    });
+
+    it('while the pointer is in the stack, new toasts wait, nothing is dropped past the limit, and the order stays', async () => {
+      const { f, list, el } = setup([n('a'), n('b'), n('c')]);
+      await f.whenStable();
+      enter(el);
+      list.set([n('a'), n('b'), n('c'), n('d'), n('a', { count: 5 })]);
+      await f.whenStable();
+      expect(order(el)).toEqual(['c', 'b', 'a']);
+      expect(one(el, '[data-cause=a] [data-testid=notification-count]').textContent).toContain('×5');
+      leave(el);
+      await f.whenStable();
+      expect(order(el)).toEqual(['d', 'c', 'b']);
+    });
+
+    it('while the pointer is in the stack, a toast that goes away still goes away at once', async () => {
+      const { f, list, el } = setup([n('a'), n('b')]);
+      await f.whenStable();
+      enter(el);
+      list.set([n('a'), n('b'), n('c')]);
+      await f.whenStable();
+      list.set([n('a'), n('c')]);
+      await f.whenStable();
+      expect(order(el)).toEqual(['a']);
+    });
+
+    it('a stack that has emptied under the pointer does not hold back what arrives next', async () => {
+      const { f, list, el } = setup([n('a')]);
+      await f.whenStable();
+      enter(el);
+      list.set([]);
+      await f.whenStable();
+      list.set([n('z')]);
+      await f.whenStable();
+      expect(order(el)).toEqual(['z']);
+    });
+
+    it('the pointer on the stack holds the time of every toast in it', async () => {
+      const gone: string[] = [];
+      const { f, clock, el } = setup([n('a', { dismiss: () => gone.push('a') }), n('b', { dismiss: () => gone.push('b') })]);
+      await f.whenStable();
+      enter(el);
+      clock.advance(TOAST_MS * 5);
+      expect(gone).toEqual([]);
+      leave(el);
+      clock.advance(TOAST_MS);
+      expect(gone.sort()).toEqual(['a', 'b']);
+    });
   });
 
   it('forgets the timer of a toast that went', async () => {
@@ -230,7 +303,7 @@ describe('pd-notification-host in a small window (review 2, P3-14)', () => {
     expect(compact).toMatch(/\.pd-actions \.pd-btn:not\(:first-child\) \{ display: none;/);
     expect(compact).toMatch(/\.pd-body:not\(\.pd-err\)/);
     // The older toasts wait in the centre: two show at most.
-    expect(compact).toMatch(/\.pd-toast:nth-last-child\(n ?\+ ?3\) \{ display: none;/);
+    expect(compact).toMatch(/\.pd-toast:nth-child\(n ?\+ ?3\) \{ display: none;/);
     // The close stays reachable and in the flow.
     expect(compact).toMatch(/\.pd-x \{[^}]*position: static/);
   });

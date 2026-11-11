@@ -1,8 +1,8 @@
 import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, signal } from '@angular/core';
 import { ToastArea } from '@decryp7/paddock-ui/shell';
 import { errorMessage } from '@decryp7/paddock-ui/shell/store';
-import { NOTIFY_CLOCK, TOAST_MS } from './notify-config';
-import { NOTIFICATION_SOURCES, persists, visibleNotifications, type HostAction, type HostNotification } from './notification-host.model';
+import { MAX_VISIBLE, NOTIFY_CLOCK, TOAST_MS } from './notify-config';
+import { NOTIFICATION_SOURCES, mergeNotifications, persists, type HostAction, type HostNotification } from './notification-host.model';
 
 /** How often the host checks its toasts' time. */
 const TICK_MS = 250;
@@ -19,14 +19,20 @@ interface Timer {
  * The one place toasts appear in a window (ADR 0010, Debrief ADR 0055). One toast per cause with its count, technical
  * details folded behind "Details", updated in place; errors and critical failures stay until resolved or dismissed; a
  * cause the status chip states (`health:...`) is never toasted. The host owns the time of every toast (sources only
- * post, update and resolve): a toast that times out stays `ttl`, is held while the pointer or focus is on it, and starts
- * over when its cause is posted again. Mounted once per window by `provideShellNotify` (or placed in the frame).
+ * post, update and resolve): a toast that times out stays `ttl`, and starts over when its cause is posted again. Mounted
+ * once per window by `provideShellNotify` (or placed in the frame).
+ *
+ * Nothing moves under the pointer. The stack is anchored at the bottom of the window, so the newest toast enters at the top
+ * (the DOM lists the newest first, as they appear) and the ones already there keep their place; a cause posted again is
+ * updated in place. While the pointer or focus is anywhere in the stack, its time is held and its set of toasts is frozen: a
+ * new toast waits, nothing is dropped past `MAX_VISIBLE`, and the order stays; only what goes away (dismissed, resolved)
+ * leaves at once. A press is two events, and a layout change between them would send the click to another element.
  */
 @Component({
   selector: 'pd-notification-host',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="pd-stack" role="region" [attr.aria-label]="t.toasts" aria-live="polite">
+    <div class="pd-stack" data-testid="notification-stack" role="region" [attr.aria-label]="t.toasts" aria-live="polite" (mouseenter)="enter()" (focusin)="enter()" (mouseleave)="leave($event)" (focusout)="leave($event)">
       @for (n of items(); track n.cause) {
         <div
           class="pd-toast"
@@ -34,10 +40,6 @@ interface Timer {
           [attr.data-severity]="n.severity"
           [attr.data-cause]="n.cause"
           [attr.role]="persistent(n) ? 'alert' : 'status'"
-          (mouseenter)="hold(n)"
-          (focusin)="hold(n)"
-          (mouseleave)="leave(n, $event)"
-          (focusout)="leave(n, $event)"
         >
           <div class="pd-head">
             <span class="pd-mark" aria-hidden="true"></span>
@@ -72,7 +74,7 @@ interface Timer {
   host: { '[style.--pd-toast-lift]': "area.lift() ? 'calc(' + area.lift() + 'px + var(--pd-space-2))' : '0px'" },
   styles: `
     :host { position: fixed; right: var(--pd-space-4); bottom: calc(var(--pd-statusbar-height, 24px) + var(--pd-page-footer-safe, 56px) + var(--pd-space-2)); z-index: var(--pd-z-toast); pointer-events: none; margin-bottom: var(--pd-toast-lift, 0px); }
-    .pd-stack { display: flex; flex-direction: column; gap: var(--pd-space-2); align-items: flex-end; }
+    .pd-stack { pointer-events: auto; display: flex; flex-direction: column; gap: var(--pd-space-2); align-items: flex-end; }
     .pd-toast { pointer-events: auto; position: relative; width: 360px; max-width: calc(100vw - 2 * var(--pd-space-4)); box-sizing: border-box; padding: var(--pd-space-2) var(--pd-space-8) var(--pd-space-2) var(--pd-space-3); border: 1px solid var(--pd-hairline); border-inline-start: 3px solid var(--pd-info); border-radius: var(--pd-radius-popover); background: var(--pd-surface-3); color: var(--pd-text); box-shadow: var(--pd-shadow-2); display: flex; flex-direction: column; gap: var(--pd-space-1); font-size: var(--pd-text-body); }
     .pd-toast[data-severity='success'] { border-inline-start-color: var(--pd-success); }
     .pd-toast[data-severity='warning'] { border-inline-start-color: var(--pd-warning); }
@@ -104,7 +106,7 @@ interface Timer {
       :host { left: var(--pd-space-2); right: var(--pd-space-2); }
       .pd-stack { align-items: stretch; }
       .pd-toast { width: auto; max-width: 360px; align-self: flex-end; flex-direction: row; flex-wrap: wrap; align-items: center; gap: var(--pd-space-2); padding: var(--pd-space-1) var(--pd-space-1) var(--pd-space-1) var(--pd-space-2); }
-      .pd-toast:nth-last-child(n + 3) { display: none; }
+      .pd-toast:nth-child(n + 3) { display: none; }
       .pd-head { flex: 1 1 0; }
       .pd-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
       .pd-body:not(.pd-err), .pd-details, .pd-actions .pd-btn:not(:first-child) { display: none; }
@@ -125,13 +127,26 @@ export class PdNotificationHost {
   protected readonly area = inject(ToastArea);
   private readonly sources = inject(NOTIFICATION_SOURCES, { optional: true }) ?? [];
   private readonly clock = inject(NOTIFY_CLOCK);
-  protected readonly items = computed(() => visibleNotifications(this.sources.flatMap((s) => s.items())));
+  /** Every toast, oldest first (not yet cut to `MAX_VISIBLE`). */
+  private readonly merged = computed(() => mergeNotifications(this.sources.flatMap((s) => s.items())));
+  /** The causes on screen when the pointer or focus came into the stack, oldest first; null while it is outside. */
+  private readonly frozen = signal<readonly string[] | null>(null);
+  /** What is shown, newest first: the live set, or while frozen the frozen causes that are still posted (updated in place). */
+  protected readonly items = computed(() => {
+    const merged = this.merged();
+    const frozen = this.frozen();
+    const kept = frozen === null ? [] : frozen.map((c) => merged.find((n) => n.cause === c)).filter((n): n is HostNotification => !!n);
+    // A stack that emptied under the pointer has nothing left to protect: what arrives next shows.
+    return (kept.length ? kept : merged.slice(-MAX_VISIBLE)).slice().reverse();
+  });
   private readonly timed = computed(() => this.items().some((n) => !persists(n)));
   private readonly opened = signal<ReadonlySet<string>>(new Set());
   /** An action that failed: why, until the next try. */
   protected readonly failed = signal<Readonly<Record<string, string>>>({});
   /** Per cause: the occurrence its timer belongs to and when it goes. */
   private readonly timers = new Map<string, Timer>();
+  /** The pointer or focus is in the stack: no toast's time runs. */
+  private held = false;
 
   constructor() {
     // The toasts' time is outside the signal graph: a timer per toast that times out, started when it appears or is
@@ -161,7 +176,7 @@ export class PdNotificationHost {
       const current = this.timers.get(n.cause);
       if (current?.key === key) continue;
       const ttl = n.ttl ?? TOAST_MS;
-      this.timers.set(n.cause, { key, ttl, deadline: current && current.deadline === null ? null : now + ttl });
+      this.timers.set(n.cause, { key, ttl, deadline: this.held || (current && current.deadline === null) ? null : now + ttl });
     }
   }
 
@@ -176,20 +191,25 @@ export class PdNotificationHost {
     }
   }
 
-  /** The pointer or focus is on a toast: its time stops. */
-  protected hold(n: HostNotification): void {
-    const t = this.timers.get(n.cause);
-    if (t) t.deadline = null;
+  /** The pointer or focus came into the stack: the time of every toast stops and the set of toasts is frozen. */
+  protected enter(): void {
+    if (this.held) return;
+    this.held = true;
+    this.frozen.set(this.items().map((n) => n.cause).reverse());
+    for (const t of this.timers.values()) t.deadline = null;
   }
 
-  /** The pointer or focus left a toast: once neither is on it, its time starts over. */
-  protected leave(n: HostNotification, e: MouseEvent | FocusEvent): void {
-    const toast = e.currentTarget as HTMLElement;
-    const focusStays = e instanceof FocusEvent ? toast.contains(e.relatedTarget as Node | null) : toast.contains(document.activeElement);
-    const pointerStays = e instanceof FocusEvent && toast.matches(':hover');
-    if (focusStays || pointerStays) return;
-    const t = this.timers.get(n.cause);
-    if (t) t.deadline = this.clock.now() + t.ttl;
+  /** The pointer or focus left the stack: once neither is in it, the time of every toast starts over and the waiting ones appear. */
+  protected leave(e: MouseEvent | FocusEvent): void {
+    const stack = e.currentTarget as HTMLElement;
+    const focusStays = e instanceof FocusEvent ? stack.contains(e.relatedTarget as Node | null) : stack.contains(document.activeElement);
+    const pointerStays = e instanceof FocusEvent && stack.matches(':hover');
+    if (focusStays || pointerStays || !this.held) return;
+    this.held = false;
+    this.frozen.set(null);
+    const now = this.clock.now();
+    this.sync(this.items());
+    for (const t of this.timers.values()) t.deadline = now + t.ttl;
   }
 
   private key(n: HostNotification): string {
