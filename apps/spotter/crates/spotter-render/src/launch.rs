@@ -373,6 +373,7 @@ impl Chromium {
 
     /// Arms a wall-clock cap that runs from now, in addition to [`LaunchOptions::max_lifetime`] (which runs from the spawn):
     /// for a caller that wants a limit on the browser's life after its start, however long the start took.
+    #[doc(hidden)] // no product caller: the tests arm a cap after a started browser; hidden until one needs it
     pub fn limit_lifetime(&self, max: Duration) {
         watchdog(lock(&self.process).process(), self.alive.clone(), self.ended_by.clone(), max);
     }
@@ -683,14 +684,18 @@ mod tests {
             path: exe_path,
         };
         let mut o = headless(base.path());
-        o.start_limit = Duration::from_millis(600);
+        o.start_limit = Duration::from_secs(3);
         let e = Chromium::launch(&exe, &o).err().unwrap().to_string();
         assert!(
             e.contains("still running but not ready") && e.contains("pid ") && e.contains("still warming up"),
             "{e}"
         );
         // `exec sleep` drops the profile folder from the command line, so the process is found by the pid the script wrote.
-        let pid: u32 = std::fs::read_to_string(base.path().join("pid")).unwrap().trim().parse().unwrap();
+        let pid: u32 = std::fs::read_to_string(base.path().join("pid"))
+            .expect("the stand-in wrote no pid before the start guard fired")
+            .trim()
+            .parse()
+            .unwrap();
         assert!(
             paddock_proc::ProcessId::of(pid).is_none_or(|id| !id.is_alive()),
             "the silent browser (pid {pid}) was left running"
