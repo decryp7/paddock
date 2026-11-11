@@ -422,6 +422,13 @@ impl Supervised {
         }
     }
 
+    /// The exit status of a child that has ended, without reaping its tree or forgetting it: the tree is still ended by
+    /// [`Supervised::kill`] or [`Supervised::terminate`] afterwards. `None` while it runs, after [`Supervised::wait`] or
+    /// [`Supervised::kill`] took the child, or when the OS cannot say. Repeated calls give the same status.
+    pub fn exit_status(&mut self) -> Option<ExitStatus> {
+        self.child.as_mut()?.try_wait().ok().flatten()
+    }
+
     /// Waits for the child to end (a memory stop or [`Supervised::kill`] from elsewhere ends it too), reaps it and
     /// forgets the tree. `None` if it was already reaped.
     pub fn wait(&mut self) -> Option<ExitStatus> {
@@ -542,6 +549,26 @@ mod tests {
                 return p.trim().parse().unwrap();
             }
         }
+    }
+
+    #[test]
+    fn exit_status_is_stable_after_the_exit_none_while_running_and_leaves_the_tree_to_kill() {
+        let mut s = Supervised::spawn(child(Mode::Exit3)).unwrap();
+        let end = Instant::now() + Duration::from_secs(30);
+        while s.is_running() && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(10)); // conformance: hang-guard — polling for the child to exit, bound 30 s
+        }
+        assert_eq!(s.exit_status().and_then(|e| e.code()), Some(3));
+        assert_eq!(
+            s.exit_status().and_then(|e| e.code()),
+            Some(3),
+            "the status stays"
+        );
+        s.kill();
+        assert!(s.exit_status().is_none(), "kill took the child");
+        let mut r = Supervised::spawn(child(Mode::Sleep)).unwrap();
+        assert!(r.exit_status().is_none(), "a running child has no status");
+        r.kill();
     }
 
     #[test]

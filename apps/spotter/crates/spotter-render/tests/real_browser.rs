@@ -164,6 +164,8 @@ async fn a_missing_element_times_out_as_failed() {
     assert_no_leftovers(&marker);
 }
 
+/// The page's own budget ends a hang. The browser is started first (a starved start is not what is tested), then the clock
+/// runs only over the load: it must end at the 6 s budget, far below the watchdog.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_server_that_never_answers_is_stopped_at_the_timeout() {
     let _turn = serial();
@@ -171,20 +173,27 @@ async fn a_server_that_never_answers_is_stopped_at_the_timeout() {
     let port = site().await;
     let base = tempfile::tempdir().unwrap();
     let marker = base.path().to_string_lossy().to_string();
-    let (r, log) = renderer(b, base.path());
-    let t = Instant::now();
-    let e = r
-        .render(&format!("http://127.0.0.1:{port}/hang"), None, Duration::from_secs(6))
-        .await
-        .unwrap_err();
-    assert!(matches!(e, RenderError::Failed(_)), "{e:?}\n{}", log.tail());
-    // Start-up has its own limit; the hang itself must end at the 6 s page budget, not at the watchdog.
-    assert!(
-        t.elapsed() < spotter_render::launch::lifetime_with(START_GUARD, Duration::from_secs(6)),
-        "took {:?}",
-        t.elapsed()
-    );
-    assert_eq!(std::fs::read_dir(base.path()).unwrap().count(), 0);
+    let dir = base.path().to_path_buf();
+    let (elapsed, error, profile) = tokio::task::spawn_blocking(move || {
+        let mut opts = LaunchOptions::new(&dir);
+        opts.extra_args = test_browser_flags();
+        opts.mode = Mode::Headless;
+        opts.start_limit = START_GUARD;
+        let c = Chromium::launch(&b, &opts).unwrap();
+        let page = c.new_page().unwrap();
+        let t = Instant::now();
+        let e = page
+            .navigate(&format!("http://127.0.0.1:{port}/hang"), Duration::from_secs(6))
+            .unwrap_err();
+        let elapsed = t.elapsed();
+        let profile = c.profile_dir().to_path_buf();
+        drop(c);
+        (elapsed, e.to_string(), profile)
+    })
+    .await
+    .unwrap();
+    assert!(elapsed < Duration::from_secs(20), "the load took {elapsed:?}: {error}");
+    assert!(!profile.exists(), "profile not removed");
     assert_no_leftovers(&marker);
 }
 
@@ -295,14 +304,16 @@ fn the_watchdog_kills_the_whole_tree_at_the_wall_clock_limit() {
     opts.extra_args = test_browser_flags();
     opts.mode = Mode::Headless;
     opts.start_limit = START_GUARD;
-    // The limit runs from the spawn, so it has to leave room for a slow start on a loaded runner (which is not what is tested).
-    opts.max_lifetime = spotter_render::launch::START_LIMIT + Duration::from_secs(4);
+    // The launch's own cap runs from the spawn and stays out of the way; the cap under test is armed once the browser is up,
+    // so a slow start on a loaded host is not what is measured.
+    opts.max_lifetime = Duration::from_secs(600);
     let mut c = Chromium::launch(&b, &opts).unwrap();
     let dir = c.profile_dir().to_path_buf();
     assert!(c.is_running());
     let marker = dir.to_string_lossy().to_string();
     assert!(!processes_mentioning(&marker).is_empty());
-    let end = Instant::now() + spotter_render::launch::START_LIMIT + Duration::from_secs(30);
+    c.limit_lifetime(Duration::from_secs(2));
+    let end = Instant::now() + Duration::from_secs(60);
     while c.is_running() && Instant::now() < end {
         std::thread::sleep(Duration::from_millis(100));
     }

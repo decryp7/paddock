@@ -94,8 +94,19 @@ pub fn stderr_tail(bytes: &[u8]) -> String {
     lines.join(" | ")
 }
 
+/// The last [`STDERR_TAIL`] bytes of the browser's stderr file: it seeks there and reads no more, however large the file grew.
+fn read_stderr_tail(dir: &Path) -> Option<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(dir.join(STDERR_FILE)).ok()?;
+    let len = f.metadata().ok()?.len();
+    f.seek(SeekFrom::Start(len.saturating_sub(STDERR_TAIL as u64))).ok()?;
+    let mut bytes = Vec::with_capacity(STDERR_TAIL);
+    f.take(STDERR_TAIL as u64).read_to_end(&mut bytes).ok()?;
+    Some(bytes)
+}
+
 fn with_stderr(message: &str, dir: &Path) -> String {
-    let tail = std::fs::read(dir.join(STDERR_FILE)).map(|b| stderr_tail(&b)).unwrap_or_default();
+    let tail = read_stderr_tail(dir).map(|b| stderr_tail(&b)).unwrap_or_default();
     if tail.is_empty() {
         message.to_string()
     } else {
@@ -360,6 +371,12 @@ impl Chromium {
         lock(&self.process).terminate(Duration::from_millis(500));
     }
 
+    /// Arms a wall-clock cap that runs from now, in addition to [`LaunchOptions::max_lifetime`] (which runs from the spawn):
+    /// for a caller that wants a limit on the browser's life after its start, however long the start took.
+    pub fn limit_lifetime(&self, max: Duration) {
+        watchdog(lock(&self.process).process(), self.alive.clone(), self.ended_by.clone(), max);
+    }
+
     /// Ends the browser at once.
     pub fn kill(&mut self) {
         self.alive.store(false, Ordering::Release);
@@ -391,10 +408,7 @@ impl Life for BrowserLife<'_> {
         if lock(self.process).is_running() {
             return Liveness::Running;
         }
-        let stderr_tail = std::fs::read(self.dir.join(STDERR_FILE))
-            .map(|b| stderr_tail(&b))
-            .ok()
-            .filter(|t| !t.is_empty());
+        let stderr_tail = read_stderr_tail(self.dir).map(|b| stderr_tail(&b)).filter(|t| !t.is_empty());
         Liveness::Exited(ExitInfo { status: None, stderr_tail })
     }
 
@@ -451,7 +465,10 @@ fn connect(dir: &Path, process: &mut Supervised, limit: Duration) -> Result<Conn
             }
         }
         if !process.is_running() {
-            let status = process.wait().map_or_else(|| "exit status unknown".to_string(), |s| s.to_string());
+            // Not `wait`: that forgets the tree, and helpers an exited browser left behind are ended by the caller's kill.
+            let status = process
+                .exit_status()
+                .map_or_else(|| "exit status unknown".to_string(), |s| s.to_string());
             return Err(Error::Launch(with_stderr(
                 &format!("the browser exited right after it started ({status})"),
                 dir,
@@ -655,7 +672,11 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let base = tempfile::tempdir().unwrap();
         let exe_path = base.path().join("silent-chrome.sh");
-        std::fs::write(&exe_path, "#!/bin/sh\necho 'still warming up' >&2\nexec sleep 300\n").unwrap();
+        std::fs::write(
+            &exe_path,
+            "#!/bin/sh\necho 'still warming up' >&2\necho $$ > \"$(dirname \"$0\")/pid\"\nexec sleep 300\n",
+        )
+        .unwrap();
         std::fs::set_permissions(&exe_path, std::fs::Permissions::from_mode(0o755)).unwrap();
         let exe = Browser {
             flavor: crate::discover::Flavor::Chromium,
@@ -663,15 +684,16 @@ mod tests {
         };
         let mut o = headless(base.path());
         o.start_limit = Duration::from_millis(600);
-        let marker = base.path().to_string_lossy().to_string();
         let e = Chromium::launch(&exe, &o).err().unwrap().to_string();
         assert!(
             e.contains("still running but not ready") && e.contains("pid ") && e.contains("still warming up"),
             "{e}"
         );
+        // `exec sleep` drops the profile folder from the command line, so the process is found by the pid the script wrote.
+        let pid: u32 = std::fs::read_to_string(base.path().join("pid")).unwrap().trim().parse().unwrap();
         assert!(
-            crate::process::processes_mentioning(&marker).is_empty(),
-            "the silent browser was left running"
+            paddock_proc::ProcessId::of(pid).is_none_or(|id| !id.is_alive()),
+            "the silent browser (pid {pid}) was left running"
         );
         assert_eq!(
             std::fs::read_dir(base.path())
@@ -702,6 +724,51 @@ mod tests {
         assert!(t.elapsed() < Duration::from_secs(30), "waited {:?}", t.elapsed());
         assert!(e.contains("exited right after it started (exit status: 3)"), "{e}");
         assert!(e.contains("out of memory"), "{e}");
+    }
+
+    /// The browser exited with a helper still running (Chrome's crashpad, GPU or renderer processes outlive a browser that
+    /// died): the failed start ends the whole tree, not only the leader.
+    #[cfg(unix)]
+    #[test]
+    fn a_browser_that_exits_leaves_no_helper_behind() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = tempfile::tempdir().unwrap();
+        let exe_path = base.path().join("leaving-chrome.sh");
+        std::fs::write(
+            &exe_path,
+            "#!/bin/sh\nsleep 300 >/dev/null 2>&1 &\necho $! > \"$(dirname \"$0\")/helper\"\nexit 3\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&exe_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let exe = Browser {
+            flavor: crate::discover::Flavor::Chromium,
+            path: exe_path,
+        };
+        let e = Chromium::launch(&exe, &headless(base.path())).err().unwrap().to_string();
+        assert!(e.contains("exit status: 3"), "{e}");
+        let pid: u32 = std::fs::read_to_string(base.path().join("helper")).unwrap().trim().parse().unwrap();
+        let end = Instant::now() + Duration::from_secs(10);
+        while paddock_proc::ProcessId::of(pid).is_some_and(|id| id.is_alive()) && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(50)); // conformance: hang-guard — polling for the helper to be gone, bound 10 s
+        }
+        let helper = paddock_proc::ProcessId::of(pid);
+        if let Some(id) = helper.filter(|id| id.is_alive()) {
+            paddock_proc::kill_tree(id);
+            panic!("the helper (pid {pid}) of an exited browser was left running");
+        }
+    }
+
+    /// Only the end of a large stderr file is read.
+    #[test]
+    fn only_the_end_of_a_large_stderr_file_is_read() {
+        let d = tempfile::tempdir().unwrap();
+        let mut big = vec![b'x'; 3 << 20];
+        big.extend_from_slice(b"\nthe real cause\n");
+        std::fs::write(d.path().join(STDERR_FILE), &big).unwrap();
+        let tail = read_stderr_tail(d.path()).unwrap();
+        assert!(tail.len() <= STDERR_TAIL);
+        assert!(with_stderr("failed", d.path()).ends_with("the real cause)"));
+        assert!(read_stderr_tail(&d.path().join("none")).is_none());
     }
 
     #[test]
