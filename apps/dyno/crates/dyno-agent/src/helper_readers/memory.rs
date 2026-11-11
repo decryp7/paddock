@@ -34,6 +34,11 @@ impl HelperReading for MemoryModules {
     type Value = MemoryLayout;
     const KINDS: &'static [RequestKind] = &[RequestKind::MemoryModules];
 
+    fn helper_applies(&self) -> bool {
+        // Only Linux's slot table is root-only; elsewhere the agent's own total is all there is and the helper has nothing to add.
+        self.host == HelperHost::Linux
+    }
+
     fn name(&self) -> &'static str {
         "memory modules"
     }

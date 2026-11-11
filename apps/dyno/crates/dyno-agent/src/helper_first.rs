@@ -432,7 +432,8 @@ pub trait HelperReading: Send {
     type Value;
     /// The helper request kinds `via_helper` sends, one per typed call it makes. Required, so a reading that does not say what it
     /// asks cannot be written; [`HelperFirst::new`] registers them where the composition wires the reading, and
-    /// [`wired_kinds_while`] hands them to the test that compares them with what the helper advertises.
+    /// [`wired_kinds_while`] hands them to the test that compares them with what the helper advertises (only while
+    /// [`HelperReading::helper_applies`] is true: a reading built on every host that this host does not use registers nothing).
     const KINDS: &'static [RequestKind];
     /// A short name for the log (no user content).
     fn name(&self) -> &'static str;
@@ -481,14 +482,29 @@ fn note_wired(kinds: &[RequestKind]) {
     });
 }
 
+/// Puts the outer record back when a [`wired_kinds_while`] ends, also when its `build` panics.
+struct WiredScope {
+    outer: Option<std::collections::HashSet<RequestKind>>,
+}
+
+impl Drop for WiredScope {
+    fn drop(&mut self) {
+        WIRED.with(|w| *w.borrow_mut() = self.outer.take());
+    }
+}
+
 /// Runs `build` and returns what it wired: the [`HelperReading::KINDS`] of every reading handed to [`HelperFirst::new`] on this
-/// thread meanwhile. The registry is the seam itself, so a reading composed without it cannot be missed by a text scan; the
-/// composition test (`tests/helper_wiring.rs`) compares the result with the readings the helper advertises. A call inside
-/// `build` keeps its own thread's record apart (a nested call restores the outer one).
+/// thread meanwhile whose [`HelperReading::helper_applies`] is true (a reading built on every host that the helper does not read
+/// on this one is not a wired reading). The registry is the seam itself, so a reading composed without it cannot be missed by a
+/// text scan; the composition test (`tests/helper_wiring.rs`) compares the result with the readings the helper advertises. A
+/// nested call keeps its own record and restores the outer one, also on a panic.
+#[doc(hidden)]
 pub fn wired_kinds_while<T>(build: impl FnOnce() -> T) -> (T, std::collections::HashSet<RequestKind>) {
-    let outer = WIRED.with(|w| w.replace(Some(std::collections::HashSet::new())));
+    let _scope = WiredScope {
+        outer: WIRED.with(|w| w.replace(Some(std::collections::HashSet::new()))),
+    };
     let built = build();
-    let wired = WIRED.with(|w| w.replace(outer)).unwrap_or_default();
+    let wired = WIRED.with(|w| w.borrow().clone()).unwrap_or_default();
     (built, wired)
 }
 
@@ -508,7 +524,9 @@ pub struct HelperFirst<R: HelperReading> {
 impl<R: HelperReading> HelperFirst<R> {
     /// The reading over `port`, with the local fallback on (the product choice, plan decision D1).
     pub fn new(reading: R, port: Box<dyn HelperPort>) -> Self {
-        note_wired(R::KINDS);
+        if reading.helper_applies() {
+            note_wired(R::KINDS);
+        }
         HelperFirst {
             reading,
             port,
@@ -1357,6 +1375,51 @@ mod tests {
         drop((before, inner));
         let (_, none) = wired_kinds_while(|| ());
         assert!(none.is_empty());
+    }
+
+    #[test]
+    fn a_panic_inside_a_scope_gives_the_outer_record_back() {
+        let (net, clock) = (Net::new(true, vec![]), FakeClock::new());
+        let c = centre(&net, &clock);
+        let (_, outer) = wired_kinds_while(|| {
+            let gone = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                wired_kinds_while(|| panic!("a build that fails"));
+            }));
+            assert!(gone.is_err());
+            // Still recording into the outer scope after the inner one died.
+            HelperFirst::new(mem(Reading::Available(total_only(4, "local")), false).0, port(&c))
+        });
+        assert_eq!(outer, [RequestKind::MemoryModules].into_iter().collect());
+        let (_, none) = wired_kinds_while(|| ());
+        assert!(none.is_empty(), "no scope is left behind");
+    }
+
+    #[test]
+    fn a_reading_the_helper_does_not_apply_to_registers_nothing() {
+        struct Off(Mem);
+        impl HelperReading for Off {
+            type Value = MemoryLayout;
+            const KINDS: &'static [RequestKind] = &[RequestKind::MemoryModules];
+            fn name(&self) -> &'static str {
+                "off"
+            }
+            fn class(&self) -> ReadClass {
+                ReadClass::Live
+            }
+            fn helper_applies(&self) -> bool {
+                false
+            }
+            fn via_helper(&self, calls: &dyn HelperCalls) -> Result<MemoryLayout, CallError> {
+                self.0.via_helper(calls)
+            }
+            fn local(&mut self) -> Reading<MemoryLayout> {
+                self.0.local()
+            }
+        }
+        let (net, clock) = (Net::new(true, vec![]), FakeClock::new());
+        let c = centre(&net, &clock);
+        let (_, wired) = wired_kinds_while(|| HelperFirst::new(Off(mem(Reading::Available(total_only(4, "x")), false).0), port(&c)));
+        assert!(wired.is_empty());
     }
 
     #[test]

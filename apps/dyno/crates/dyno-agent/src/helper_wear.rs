@@ -44,12 +44,8 @@ impl SmartWear {
 /// SSD wear through the seam.
 pub type HelperFirstWear = HelperFirst<SmartWear>;
 
-/// A wear reader over `port` with `local` as the fallback, switched as [`READ_LOCALLY_WHEN_HELPER_OFF`] says.
-pub fn helper_first_wear(port: Box<dyn crate::helper_first::HelperPort>, local: Box<dyn DiskWearSource>) -> HelperFirstWear {
-    helper_first_wear_on(dyno_platform::hardware::this_host(), port, local)
-}
-
-/// [`helper_first_wear`] as if on `host` (tests, so they read the same on every OS).
+/// A wear reader for `host` over `port` with `local` as the fallback, switched as [`READ_LOCALLY_WHEN_HELPER_OFF`] says. The
+/// composition passes the host it is composing for (the wiring test composes all three on one machine).
 pub fn helper_first_wear_on(
     host: HelperHost,
     port: Box<dyn crate::helper_first::HelperPort>,

@@ -212,13 +212,26 @@ pub fn locker_of(h: &Holder) -> Locker {
 }
 
 /// The reading behind [`HelperLocks`]: one file, by path for the agent and by device and inode for the helper.
-struct FileHolderReading {
+pub(crate) struct FileHolderReading {
     local: Box<dyn FileLocks>,
     path: PathBuf,
     dev: u64,
     ino: u64,
     /// What the agent's own reader refused with, to report it unchanged when nothing else answers (its code and next step).
     refused: Option<PlatformError>,
+}
+
+impl FileHolderReading {
+    /// A reading over the agent's own reader `local`; the file is set before each read.
+    pub(crate) fn new(local: Box<dyn FileLocks>) -> FileHolderReading {
+        FileHolderReading {
+            local,
+            path: PathBuf::new(),
+            dev: 0,
+            ino: 0,
+            refused: None,
+        }
+    }
 }
 
 impl HelperReading for FileHolderReading {
@@ -268,15 +281,8 @@ pub struct HelperLocks {
 impl HelperLocks {
     /// `local` is the platform's reader; `seam_port` says where the helper is.
     pub fn new(local: Box<dyn FileLocks>, port: Box<dyn crate::helper_first::HelperPort>) -> HelperLocks {
-        let reading = FileHolderReading {
-            local,
-            path: PathBuf::new(),
-            dev: 0,
-            ino: 0,
-            refused: None,
-        };
         HelperLocks {
-            seam: HelperFirst::new(reading, port),
+            seam: HelperFirst::new(FileHolderReading::new(local), port),
         }
     }
 }

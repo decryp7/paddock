@@ -17,6 +17,14 @@ pub struct WolModes {
     card: Option<IfName>,
 }
 
+#[cfg(test)]
+impl WolModes {
+    /// A reading of `card`'s modes (the kinds test asks it once).
+    pub(crate) fn for_card(card: IfName) -> WolModes {
+        WolModes { card: Some(card) }
+    }
+}
+
 impl HelperReading for WolModes {
     type Value = WolReply;
     const KINDS: &'static [RequestKind] = &[RequestKind::WolState];

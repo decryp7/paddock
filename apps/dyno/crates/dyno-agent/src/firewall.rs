@@ -91,6 +91,33 @@ fn helper_sources_over(sources: &[RuleSource], port: &Arc<dyn HelperPort>) -> He
         .collect()
 }
 
+/// The readers that run on this computer, for the `host` it is (none for a host that is not this computer: no real machine is read).
+#[allow(unused_variables)]
+fn local_readers(host: HelperHost, clock: Arc<dyn paddock_jobs::time::Clock>) -> Readers {
+    #[cfg(windows)]
+    if host == HelperHost::Windows {
+        return vec![(
+            RuleSource::WindowsFirewall,
+            Box::new(dyno_platform::windows_firewall::WindowsFirewallReader::new(
+                dyno_platform::windows::firewall_com::ComFirewall,
+                Box::new(dyno_platform::windows::indirect::ShellIndirect),
+                clock,
+            )),
+        )];
+    }
+    #[cfg(target_os = "macos")]
+    if host == HelperHost::Macos {
+        return vec![(
+            RuleSource::ApplicationFirewall,
+            Box::new(dyno_platform::firewall_readers::AlfReader::new(
+                Box::new(dyno_platform::runner::SystemRunner),
+                clock,
+            )),
+        )];
+    }
+    Vec::new()
+}
+
 /// A source as the agent presents it: **who read it is set here**, whatever the reader put in the field.
 fn presented(mut source: FirewallSource, via: ReadVia) -> FirewallSource {
     source.via = via;
@@ -175,43 +202,28 @@ impl Inner {
 }
 
 impl FirewallCentre {
-    /// The readers of this OS. The sources only the helper reads say it is off until [`bind_helper`](Self::bind_helper) gives
-    /// them the helper (the platform is built before the agent's `Shared` exists).
+    /// The readers of this OS (the host the program was built for).
     pub fn for_this_os(clock: Arc<dyn paddock_jobs::time::Clock>) -> FirewallCentre {
         #[cfg(windows)]
-        {
-            FirewallCentre::new(
-                HelperHost::Windows,
-                vec![(
-                    RuleSource::WindowsFirewall,
-                    Box::new(dyno_platform::windows_firewall::WindowsFirewallReader::new(
-                        dyno_platform::windows::firewall_com::ComFirewall,
-                        Box::new(dyno_platform::windows::indirect::ShellIndirect),
-                        clock,
-                    )),
-                )],
-                vec![],
-            )
-        }
+        let host = HelperHost::Windows;
         #[cfg(target_os = "macos")]
-        {
-            FirewallCentre::new(
-                HelperHost::Macos,
-                vec![(
-                    RuleSource::ApplicationFirewall,
-                    Box::new(dyno_platform::firewall_readers::AlfReader::new(
-                        Box::new(dyno_platform::runner::SystemRunner),
-                        clock,
-                    )),
-                )],
-                vec![RuleSource::Pf],
-            )
-        }
+        let host = HelperHost::Macos;
         #[cfg(not(any(windows, target_os = "macos")))]
-        {
-            let _: std::sync::Arc<dyn paddock_jobs::time::Clock> = clock;
-            FirewallCentre::new(HelperHost::Linux, vec![], vec![RuleSource::Nftables])
-        }
+        let host = HelperHost::Linux;
+        FirewallCentre::for_host(host, clock)
+    }
+
+    /// The readers for `host`. The helper's sources (`pf`, `nft`) are chosen by `host`, not by what this program was built for, so
+    /// a test agent for another system wires what that system's agent would; the readers that run on this computer exist only
+    /// for the host that is this computer's. The sources only the helper reads say it is off until
+    /// [`bind_helper`](Self::bind_helper) gives them the helper (the platform is built before the agent's `Shared` exists).
+    pub fn for_host(host: HelperHost, clock: Arc<dyn paddock_jobs::time::Clock>) -> FirewallCentre {
+        let helper_sources = match host {
+            HelperHost::Windows => vec![],
+            HelperHost::Macos => vec![RuleSource::Pf],
+            HelperHost::Linux => vec![RuleSource::Nftables],
+        };
+        FirewallCentre::new(host, local_readers(host, clock), helper_sources)
     }
 
     /// Readers given (tests); the helper is off until bound.

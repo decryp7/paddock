@@ -22,14 +22,17 @@ use dyno_core::helper_policy::RequestKind;
 use dyno_core::helper_wire::{readings, Advertised};
 use dyno_platform::fake::Fake;
 use std::collections::{BTreeSet, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[path = "common/helper_rig.rs"]
 mod helper_rig;
 use helper_rig::{dispatcher, wiring, Caller, DispatcherTransport, Readers};
 
+/// `apps/dyno`: two folders above this crate. The run-time `CARGO_MANIFEST_DIR` wins over the one built in, so a test program
+/// built here can run on another machine (the Windows test VM) over a copy of `wiring.toml` and the user guide.
 fn dyno_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
+    let manifest = std::env::var_os("CARGO_MANIFEST_DIR").map_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")), PathBuf::from);
+    manifest.join("../..").canonicalize().unwrap()
 }
 
 // ---------------------------------------------------------------- the registry
@@ -55,21 +58,13 @@ fn wired_on(host: HelperHost) -> HashSet<RequestKind> {
     wired
 }
 
-/// The reason shared by the readings the agent composes on every host but the helper reads only where `readings()` lists them:
-/// elsewhere the reading falls to the agent's own reader or says it is not on this system, and the card does not claim it.
-const EVERYWHERE: &str =
-    "composed on every host; the helper reads it only where readings() lists it, elsewhere the agent's own reader answers or says \
-                          it is not on this system";
-
 /// Kinds that are wired on some host without a line on the card for that host, and why. Anything else wired and not advertised
 /// fails the check, and an entry that is wired nowhere unadvertised is stale.
 const UNLISTED: &[(RequestKind, &str)] = &[
-    (RequestKind::Counters, EVERYWHERE),
-    (RequestKind::MemoryModules, EVERYWHERE),
-    (RequestKind::LoginItems, EVERYWHERE),
-    (RequestKind::Firewall, EVERYWHERE),
-    (RequestKind::Smart, EVERYWHERE),
-    (RequestKind::Extras, EVERYWHERE),
+    (
+        RequestKind::Smart,
+        "Linux: the agent's wear forecast asks the helper for SMART (the helper applies on every system but macOS), while the card lists disk health for Windows only",
+    ),
     (
         RequestKind::LogTail,
         "the problem report's copy of the helper's own log, not a reading on the card (diagnostics::HelperLog)",
@@ -77,6 +72,34 @@ const UNLISTED: &[(RequestKind, &str)] = &[
     (
         RequestKind::WolState,
         "Linux Wake-on-LAN readiness (plan 2026-11-04, D4), not a reading on the card",
+    ),
+];
+
+/// Request kinds that are not readings, so no `HelperReading` registers them: the helper's own state and actions, each sent by the
+/// code that owns the action. Every other kind is advertised or wired, or declared in `apps/dyno/wiring.toml` with an end.
+const NOT_A_READING: &[(RequestKind, &str)] = &[
+    (RequestKind::Info, "the handshake: the helper's version, API and host (helper_link)"),
+    (
+        RequestKind::Audit,
+        "the card's audit log of the helper's changes, read on request (helper_centre)",
+    ),
+    (
+        RequestKind::InstallTool,
+        "installs the pinned disk-health tool when the person asks (a change, not a reading)",
+    ),
+    (
+        RequestKind::Uninstall,
+        "the helper removes itself when the person turns it off (a change, not a reading)",
+    ),
+    (RequestKind::ScheduleWake, "sets a scheduled wake (an action of the wake centre)"),
+    (RequestKind::CancelWake, "cancels a scheduled wake (an action of the wake centre)"),
+    (
+        RequestKind::ListWakes,
+        "lists the wakes the helper set (the wake centre's read of its own schedule)",
+    ),
+    (
+        RequestKind::Build,
+        "the helper's build id, to tell a stale helper from this build (helper_centre)",
     ),
 ];
 
@@ -123,6 +146,107 @@ fn what_the_agent_wires_is_what_readings_advertises_on_every_host() {
         }
     }
     assert!(all.is_empty(), "{} wiring problem(s):\n- {}", all.len(), all.join("\n- "));
+}
+
+/// How many places claim `kind`: wired or advertised on some host, [`NOT_A_READING`], and a `wiring.toml` entry. Exactly one is right.
+fn kind_problems(wired_any: &HashSet<RequestKind>, entries: &[Unwired], today: i64) -> Vec<String> {
+    let advertised_any: HashSet<RequestKind> = [HelperHost::Windows, HelperHost::Macos, HelperHost::Linux]
+        .iter()
+        .flat_map(|h| advertised_on(*h))
+        .collect();
+    let mut out = Vec::new();
+    for kind in RequestKind::ALL {
+        let name = format!("{kind:?}");
+        let reading = wired_any.contains(&kind) || advertised_any.contains(&kind);
+        let not_a_reading = NOT_A_READING.iter().any(|(k, _)| *k == kind);
+        let declared = entries.iter().any(|e| e.kind == name);
+        match (reading, not_a_reading, declared) {
+            (true, false, false) | (false, true, false) | (false, false, true) => {}
+            (false, false, false) => out.push(format!(
+                "{name}: no reading wires it and it is not advertised, it is not in NOT_A_READING, and wiring.toml does not declare it; wire it, \
+                 or add an [[unwired]] entry (wire = \"agent-helper\", kind, why, until) to apps/dyno/wiring.toml"
+            )),
+            (true, false, true) => out.push(format!(
+                "{name}: wired or advertised, but apps/dyno/wiring.toml still declares it unwired; delete the [[unwired]] entry"
+            )),
+            _ => out.push(format!(
+                "{name}: claimed in more than one place (wired or advertised, NOT_A_READING, wiring.toml); keep exactly one"
+            )),
+        }
+    }
+    for e in entries {
+        if let Some(p) = until_problem(&e.until, today) {
+            out.push(format!(
+                "wiring.toml: {}: {p}; wire it or move the date with a Wiring-date trailer",
+                e.kind
+            ));
+        }
+    }
+    out
+}
+
+fn today() -> i64 {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    (secs / 86_400) as i64
+}
+
+#[test]
+fn every_request_kind_is_wired_or_not_a_reading_or_declared_in_wiring_toml() {
+    let mut wired = HashSet::new();
+    for host in [HelperHost::Windows, HelperHost::Macos, HelperHost::Linux] {
+        wired.extend(wired_on(host));
+    }
+    let text = std::fs::read_to_string(dyno_root().join("wiring.toml")).expect("apps/dyno/wiring.toml");
+    let problems = kind_problems(&wired, &parse_wiring(&text).unwrap(), today());
+    assert!(
+        problems.is_empty(),
+        "{} request kind(s) are claimed wrongly:\n- {}",
+        problems.len(),
+        problems.join("\n- ")
+    );
+}
+
+#[test]
+fn the_kind_rules_name_each_way_a_kind_can_be_wrong() {
+    let today = days_from_civil(2026, 11, 4);
+    let unwired = |kind: &str, until: &str| Unwired {
+        wire: "agent-helper".into(),
+        kind: kind.into(),
+        why: "later".into(),
+        until: until.into(),
+    };
+    let all_but = |skip: RequestKind| -> HashSet<RequestKind> {
+        RequestKind::ALL
+            .iter()
+            .copied()
+            .filter(|k| *k != skip && !NOT_A_READING.iter().any(|(n, _)| n == k))
+            .collect()
+    };
+    // Everything wired or not a reading: fine.
+    assert!(kind_problems(
+        &all_but(RequestKind::LogTail).into_iter().chain([RequestKind::LogTail]).collect(),
+        &[],
+        today
+    )
+    .is_empty());
+    // A kind nobody claims needs wiring.toml.
+    let p = kind_problems(&all_but(RequestKind::LogTail), &[], today);
+    assert_eq!(p.len(), 1, "{p:?}");
+    assert!(p[0].starts_with("LogTail:") && p[0].contains("[[unwired]]"), "{p:?}");
+    // Declared with an end: fine. Expired: a problem.
+    assert!(kind_problems(&all_but(RequestKind::LogTail), &[unwired("LogTail", "2026-12-01")], today).is_empty());
+    let p = kind_problems(&all_but(RequestKind::LogTail), &[unwired("LogTail", "2026-11-03")], today);
+    assert!(p.iter().any(|m| m.contains("ended")), "{p:?}");
+    // A kind that is wired may not stay declared.
+    let wired_all: HashSet<RequestKind> = all_but(RequestKind::Info);
+    let p = kind_problems(&wired_all, &[unwired("LogTail", "2026-12-01")], today);
+    assert!(p.iter().any(|m| m.starts_with("LogTail: wired or advertised, but")), "{p:?}");
+    // A NOT_A_READING kind that is also declared is claimed twice.
+    let p = kind_problems(&wired_all, &[unwired("Info", "2026-12-01")], today);
+    assert!(p.iter().any(|m| m.starts_with("Info: claimed in more than one place")), "{p:?}");
 }
 
 #[test]
@@ -213,7 +337,16 @@ fn until_problem(until: &str, today: i64) -> Option<String> {
     let nums: Option<Vec<i64>> = parts.iter().map(|p| p.parse().ok()).collect();
     match (parts.len(), nums) {
         (3, Some(n)) if (1..=12).contains(&n[1]) && (1..=31).contains(&n[2]) => {
-            (days_from_civil(n[0], n[1], n[2]) < today).then(|| format!("the waiver ended on {until}"))
+            let day = days_from_civil(n[0], n[1], n[2]);
+            if day < today {
+                Some(format!("the waiver ended on {until}"))
+            } else if day > today + 60 {
+                Some(format!(
+                    "the waiver runs more than 60 days ahead ({until}); a waiver is at most 60 days or a release tag"
+                ))
+            } else {
+                None
+            }
         }
         _ => Some(format!("`until` \"{until}\" is not a release tag like dyno-v1.2.0 or a date")),
     }
@@ -290,6 +423,8 @@ fn waivers_are_bounded() {
     assert_eq!(until_problem("dyno-v1.2.0", today), None);
     assert_eq!(until_problem("2026-12-01", today), None);
     assert!(until_problem("2026-11-03", today).unwrap().contains("ended"));
+    assert!(until_problem("2027-01-04", today).unwrap().contains("60 days"));
+    assert_eq!(until_problem("2027-01-03", today), None);
     assert!(until_problem("someday", today).is_some());
     assert!(until_problem("dyno-v1.2", today).is_some());
     assert!(parse_wiring("[[unwired]]\nwire = \"agent-helper\"\nkind = \"LogTail\"\n")
