@@ -5,12 +5,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 /// The text an end line starts with (after any logger prefix).
-pub const END_MARKER: &str = "connection ended";
-
-/// The drain outcomes an end line may name (ADR 0072 §6; `none` and `skipped`: the endpoint did not drain).
-pub const DRAIN_OUTCOMES: [&str; 9] = [
-    "eof", "byteCap", "bytesCap", "timeCap", "poolFull", "none", "skipped", "stopped", "failed",
-];
+pub const END_MARKER: &str = crate::endlog::MARKER;
 
 /// The lines a product logged, shared between the product's logger and the test.
 #[derive(Clone, Default)]
@@ -71,7 +66,18 @@ impl LogCapture {
 
     /// Blocks until an end line was logged at index `from` or later; false after `guard` (a hang guard).
     pub fn wait_for_end_line_since(&self, from: usize, guard: Duration) -> bool {
-        let seen = |l: &Vec<String>| l.iter().skip(from).any(|x| x.contains(END_MARKER));
+        self.wait_for_end_lines_since(from, 1, guard)
+    }
+
+    /// Blocks until `n` end lines were logged at index `from` or later; false after `guard` (a hang guard).
+    pub fn wait_for_end_lines_since(&self, from: usize, n: usize, guard: Duration) -> bool {
+        let seen = |l: &Vec<String>| {
+            l.iter()
+                .skip(from)
+                .filter(|x| x.contains(END_MARKER))
+                .count()
+                >= n
+        };
         let g = self.0.0.lock().unwrap_or_else(|p| p.into_inner());
         let (g, _) = self
             .0
@@ -85,6 +91,11 @@ impl LogCapture {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+}
+
+/// Every end line in `lines`, in order.
+pub fn end_lines(lines: &[String]) -> Vec<&String> {
+    lines.iter().filter(|l| l.contains(END_MARKER)).collect()
 }
 
 /// The first end line in `lines`.

@@ -20,6 +20,7 @@
     )
 )]
 
+use crate::endlog::{ConnId, EndCode, Phase};
 use crate::error::{IpcError, ProtocolError, RemoteError, codes, panic_message};
 use crate::frame::{self, Frame, FrameError, FrameHead, FrameKind, FrameLimit};
 use crate::handshake::Connection;
@@ -299,7 +300,19 @@ impl fmt::Debug for Peer {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// A test's seam: the next `spawn` on this thread fails as if the OS had no thread left.
+    static FAIL_SPAWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 fn spawn(name: &str, f: impl FnOnce() + Send + 'static) -> Result<(), IpcError> {
+    #[cfg(test)]
+    if FAIL_SPAWN.with(|f| f.replace(false)) {
+        return Err(IpcError::Spawn(
+            "cannot start an IPC thread: test seam".into(),
+        ));
+    }
     std::thread::Builder::new()
         .name(name.into())
         .spawn(f)
@@ -314,13 +327,52 @@ impl Peer {
         handler: Arc<dyn Handler>,
         opts: PeerOptions,
     ) -> Result<Peer, IpcError> {
-        let writer = conn.stream.try_clone()?;
+        let writer = match conn.stream.try_clone() {
+            Ok(w) => w,
+            Err(e) => {
+                let e = IpcError::from(e);
+                crate::endlog::log_end(&crate::endlog::End {
+                    detail: &e.to_string(),
+                    ..crate::endlog::End::new(
+                        crate::endlog::next_accept_id(),
+                        &opts.label,
+                        Phase::Hello,
+                        EndCode::Internal,
+                    )
+                });
+                return Err(e);
+            }
+        };
         Self::start_with_writer(conn, handler, opts, writer)
     }
 
     /// [`Peer::start`] with the stream the writer thread writes to given (a test stands in a writer that fails while the
     /// reader is still reading).
     pub(crate) fn start_with_writer(
+        conn: Connection,
+        handler: Arc<dyn Handler>,
+        opts: PeerOptions,
+        writer: impl Write + Send + 'static,
+    ) -> Result<Peer, IpcError> {
+        let (label, started) = (opts.label.clone(), std::time::Instant::now());
+        let started_peer = Self::start_inner(conn, handler, opts, writer);
+        // A peer that could not start never runs its reader, so nothing else logs its end: one line here (WP-7).
+        if let Err(e) = &started_peer {
+            crate::endlog::log_end(&crate::endlog::End {
+                open_ms: started.elapsed().as_millis(),
+                detail: &e.to_string(),
+                ..crate::endlog::End::new(
+                    crate::endlog::next_accept_id(),
+                    &label,
+                    Phase::Hello,
+                    EndCode::Internal,
+                )
+            });
+        }
+        started_peer
+    }
+
+    fn start_inner(
         conn: Connection,
         handler: Arc<dyn Handler>,
         opts: PeerOptions,
@@ -442,10 +494,13 @@ impl Peer {
     pub fn close(&self) {
         // The outgoing queue shuts first, as in a failure: a served call that answers its cancel at once must find it shut,
         // or its "cancelled" answer reaches the caller before the end of the stream (CI run 7761, Windows).
-        self.fail(IpcError::Closed(format!(
-            "the connection to {} was closed by this side",
-            self.label()
-        )));
+        self.fail(
+            EndCode::Stopping,
+            IpcError::Closed(format!(
+                "the connection to {} was closed by this side",
+                self.label()
+            )),
+        );
     }
 
     /// Pushes this side dropped because its push callback fell behind.
@@ -458,7 +513,7 @@ impl Peer {
     /// The reader can start a close while the caller's `close` runs (the writer, stopped by the shut queue, shuts the socket and
     /// the reader reads the end). Had the caller's `close` returned once it saw the reason recorded, a call waiting in the
     /// queue could still start: the reader had not yet removed it. So the close is reported only when it is done.
-    fn mark_closed(&self, why: IpcError) {
+    fn mark_closed(&self, code: EndCode, why: IpcError) {
         {
             let mut c = lock(&self.inner.closed);
             match &*c {
@@ -497,14 +552,13 @@ impl Peer {
             s.cv.notify_all();
         }
         // The one end line of this connection (WP-7), written by the closer that took the reason.
+        // No closing frame is written today, so the reason never reaches the peer (`reason=unsent`; WP-2 changes that).
         crate::endlog::log_end(&crate::endlog::End {
-            conn: self.label(),
-            phase: crate::endlog::Phase::Open,
-            code: crate::endlog::code_of(&why),
             detail: &why.to_string(),
             open_ms: self.inner.started.elapsed().as_millis(),
             pending: pending.len(),
             served: served.len(),
+            ..crate::endlog::End::new(ConnId::Peer(self.inner.id), self.label(), Phase::Open, code)
         });
         drop(done);
         // After the close is reported: a caller woken by its failure finds the connection closed.
@@ -561,10 +615,13 @@ impl Peer {
             _ => {
                 // Not time (nothing waited): even the reserve for control frames is used up.
                 let (frames, _) = self.inner.out.queued();
-                self.fail(IpcError::Closed(format!(
-                    "{} had {frames} frames unread when a reply was due",
-                    self.label()
-                )));
+                self.fail(
+                    EndCode::Stalled,
+                    IpcError::Closed(format!(
+                        "{} had {frames} frames unread when a reply was due",
+                        self.label()
+                    )),
+                );
                 Err(IpcError::Timeout)
             }
         }
@@ -572,19 +629,22 @@ impl Peer {
 
     /// The other side is not reading: closes the connection with that reason and returns the error of the send.
     fn stalled(&self) -> IpcError {
-        self.fail(IpcError::Closed(format!(
-            "{} stopped reading for {} s",
-            self.label(),
-            self.inner.opts.write_stall.as_secs()
-        )));
+        self.fail(
+            EndCode::Stalled,
+            IpcError::Closed(format!(
+                "{} stopped reading for {} s",
+                self.label(),
+                self.inner.opts.write_stall.as_secs()
+            )),
+        );
         IpcError::Timeout
     }
 
     /// Closes the connection for `why`: the queue shuts first (so whoever sees the close can no longer queue a frame), pending
     /// calls fail with it, and the socket closes.
-    fn fail(&self, why: IpcError) {
+    fn fail(&self, code: EndCode, why: IpcError) {
         self.inner.out.shutdown();
-        self.mark_closed(why);
+        self.mark_closed(code, why);
         self.inner.closer.close();
     }
 
@@ -620,11 +680,14 @@ impl Peer {
         if self.send_within(&Frame::Cancel { id }, Some(grace)) == Err(IpcError::Timeout)
             && !self.is_closed()
         {
-            self.fail(IpcError::Closed(format!(
-                "{} could not take the cancel of call {id} within {} s",
-                self.label(),
-                grace.as_secs()
-            )));
+            self.fail(
+                EndCode::Stalled,
+                IpcError::Closed(format!(
+                    "{} could not take the cancel of call {id} within {} s",
+                    self.label(),
+                    grace.as_secs()
+                )),
+            );
         }
     }
 
@@ -1015,10 +1078,10 @@ impl Peer {
         // `Out::Shutdown` ends the loop after everything queued before it.
         while let Out::Frame(bytes) = self.inner.out.pop() {
             if let Err(e) = w.write_all(&bytes) {
-                self.fail(IpcError::Closed(format!(
-                    "the connection to {} broke ({e})",
-                    self.label()
-                )));
+                self.fail(
+                    EndCode::Closed,
+                    IpcError::Closed(format!("the connection to {} broke ({e})", self.label())),
+                );
                 return;
             }
         }
@@ -1031,26 +1094,39 @@ impl Peer {
         handler: &Arc<dyn Handler>,
         pushes: Option<&mpsc::SyncSender<Vec<u8>>>,
     ) {
-        let why = loop {
+        let (code, why) = loop {
             let step = match frame::read_frame(r, self.inner.limit) {
                 Ok(f) => self.on_frame(handler, pushes, f),
                 Err(FrameError::Skipped { len, max, head }) => self.on_skipped(len, max, head),
                 Err(FrameError::Closed) => {
-                    break IpcError::Closed(format!("{} closed the connection", self.label()));
+                    break (
+                        EndCode::Closed,
+                        IpcError::Closed(format!("{} closed the connection", self.label())),
+                    );
                 }
                 Err(FrameError::Io(e)) => {
-                    break IpcError::Closed(format!(
-                        "the connection to {} broke ({e})",
-                        self.label()
-                    ));
+                    break (
+                        EndCode::Closed,
+                        IpcError::Closed(format!("the connection to {} broke ({e})", self.label())),
+                    );
                 }
-                Err(e) => break IpcError::Protocol(format!("{}: {e}", self.label())),
+                Err(e) => {
+                    break (
+                        EndCode::Protocol,
+                        IpcError::Protocol(format!("{}: {e}", self.label())),
+                    );
+                }
             };
             if let Err(e) = step {
-                break e;
+                let code = match &e {
+                    IpcError::Protocol(_) => EndCode::Protocol,
+                    IpcError::Closed(_) => EndCode::Closed,
+                    _ => EndCode::Internal,
+                };
+                break (code, e);
             }
         };
-        self.fail(why);
+        self.fail(code, why);
     }
 }
 
@@ -1289,6 +1365,56 @@ mod tests {
              closer would return while a queued call could still start"
         );
         assert!(peer.is_closed() && peer.wait_closed(Some(Duration::ZERO)));
+        drop(theirs);
+    }
+
+    fn last_end_line() -> String {
+        crate::endlog::TEST_LINES.with(|l| l.borrow().last().cloned().unwrap_or_default())
+    }
+
+    /// WP-7: a peer that cannot start logs its end line (no reader exists to do it later), in the shared crate, so the link
+    /// server, the launcher and the Dyno agent all have it. The seam makes the OS refuse the writer thread.
+    #[test]
+    fn a_peer_that_cannot_start_logs_one_end_line() {
+        let (ours, _theirs) = endpoint::pair().unwrap();
+        FAIL_SPAWN.with(|f| f.set(true));
+        let result = Peer::start(
+            Connection::raw(ours, FrameLimit::default()),
+            Arc::new(crate::NoCalls),
+            PeerOptions::new("the failing one"),
+        );
+        assert!(matches!(result, Err(IpcError::Spawn(_))));
+        let line = last_end_line();
+        for want in [
+            "connection ended",
+            "phase=hello",
+            "code=internal",
+            "reason=unsent",
+            "conn=\"the failing one\"",
+        ] {
+            assert!(line.contains(want), "{want} in {line}");
+        }
+    }
+
+    /// The open-phase code names what ended it, not a mapping of the error: the owner's close is `stopping`, a client that
+    /// closed is `closed` (P2 of the WP-7 review).
+    #[test]
+    fn the_open_phase_code_comes_from_the_call_site() {
+        let (ours, theirs) = endpoint::pair().unwrap();
+        let peer = Peer::start(
+            Connection::raw(ours, FrameLimit::default()),
+            Arc::new(crate::NoCalls),
+            PeerOptions::new("owner side"),
+        )
+        .unwrap();
+        peer.close();
+        assert!(peer.wait_closed(Some(Duration::from_secs(30))));
+        let line = last_end_line();
+        assert!(
+            line.contains("code=stopping") && line.contains("phase=open"),
+            "{line}"
+        );
+        assert!(line.contains(&format!("id=p{} ", peer.id())), "{line}");
         drop(theirs);
     }
 

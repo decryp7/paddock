@@ -14,12 +14,14 @@
     )
 )]
 
+use crate::endlog::ReasonOutcome;
 use crate::endpoint::{Access, Listener, Stream};
 use crate::error::{IpcError, RemoteError, codes};
 use crate::frame::{self, Frame, FrameError, FrameLimit, ProtocolVersion};
 use crate::token::Token;
 use paddock_jobs::CancelToken;
 use paddock_jobs::time::{Clock, Deadline, SystemClock};
+use std::cell::Cell;
 use std::io;
 use std::path::Path;
 use std::sync::Arc;
@@ -187,11 +189,13 @@ impl std::fmt::Debug for Authenticator {
 impl Authenticator {
     /// Answers a client that cannot be served now (too many connections) with a `busy` refusal and closes it.
     pub fn refuse_busy(&self, mut stream: Stream, message: &str) {
-        self.refuse(&mut stream, codes::BUSY, message);
+        let sent = Cell::new(ReasonOutcome::Unsent);
+        self.refuse(&mut stream, codes::BUSY, message, &sent);
         crate::endlog::log_handshake_end(
             &self.name,
             std::time::Instant::now(),
             &IpcError::Spawn(message.to_string()),
+            sent.get(),
         );
     }
 
@@ -228,10 +232,11 @@ impl Authenticator {
         peer_uid: Option<u32>,
     ) -> Result<Connection, IpcError> {
         let started = std::time::Instant::now();
-        let result = self.authenticate_inner(stream, os_pid, pid, peer_uid);
+        let sent = Cell::new(ReasonOutcome::Unsent);
+        let result = self.authenticate_inner(stream, os_pid, pid, peer_uid, &sent);
         // A refused or lost handshake is the end of a connection: its one line (WP-7). An accepted one ends later, in the peer.
         if let Err(e) = &result {
-            crate::endlog::log_handshake_end(&self.name, started, e);
+            crate::endlog::log_handshake_end(&self.name, started, e, sent.get());
         }
         result
     }
@@ -242,6 +247,7 @@ impl Authenticator {
         os_pid: Option<u32>,
         pid: Option<u32>,
         peer_uid: Option<u32>,
+        sent: &Cell<ReasonOutcome>,
     ) -> Result<Connection, IpcError> {
         // Before anything is read: a client of another account never gets to present a token.
         if let Err(e) = self.check_account(peer_uid) {
@@ -249,11 +255,12 @@ impl Authenticator {
                 &mut stream,
                 codes::AUTH,
                 "this host serves its own account only",
+                sent,
             );
             return Err(e);
         }
         let checked = bounded(&mut stream, &self.clock, self.timeout, |s| {
-            self.check_hello(s, os_pid, pid)
+            self.check_hello(s, os_pid, pid, sent)
         });
         let (protocol, claimed) = match checked {
             Ok(checked) => checked,
@@ -261,7 +268,7 @@ impl Authenticator {
                 // Every refusal says why (CI run 7763): `check_hello` answers version and auth itself; the rest is
                 // answered here, else the client only sees the stream end and cannot tell a busy host from a crashed one.
                 if let Some((code, why)) = refusal(&e) {
-                    self.refuse(&mut stream, code, &why);
+                    self.refuse(&mut stream, code, &why, sent);
                 }
                 return Err(e);
             }
@@ -290,15 +297,17 @@ impl Authenticator {
         }
     }
 
-    fn refuse(&self, stream: &mut Stream, code: &str, message: &str) {
+    /// Tells the peer why the handshake is refused; records in `sent` whether the write went through (the end line's `reason`).
+    fn refuse(&self, stream: &mut Stream, code: &str, message: &str, sent: &Cell<ReasonOutcome>) {
         let fail = Frame::Fail {
             id: 0,
             error: RemoteError::new(code, message),
         };
-        paddock_proc::cleanup::logged(
+        let failed = paddock_proc::cleanup::logged(
             "telling the peer why the handshake was refused",
             frame::write_frame(stream, &fail, self.limit),
         );
+        sent.set(ReasonOutcome::of_write(!failed));
     }
 
     fn check_hello(
@@ -306,6 +315,7 @@ impl Authenticator {
         stream: &mut Stream,
         os_pid: Option<u32>,
         pid: Option<u32>,
+        sent: &Cell<ReasonOutcome>,
     ) -> Result<(ProtocolVersion, u32), IpcError> {
         let body = match frame::read_body(stream, self.limit) {
             Ok(b) => b,
@@ -322,7 +332,7 @@ impl Authenticator {
                 "the other side uses frame version {version}, this side {}; update the older one",
                 frame::VERSION
             );
-            self.refuse(stream, codes::VERSION, &m);
+            self.refuse(stream, codes::VERSION, &m, sent);
             return Err(IpcError::Version(m));
         }
         let protocol = protocol.unwrap_or_default();
@@ -330,7 +340,7 @@ impl Authenticator {
             .protocol
             .mismatch(protocol, "the other side", &self.name)
         {
-            self.refuse(stream, codes::VERSION, &m);
+            self.refuse(stream, codes::VERSION, &m, sent);
             return Err(IpcError::Version(m));
         }
         let Ok(Frame::Hello {
@@ -342,13 +352,13 @@ impl Authenticator {
             return Err(IpcError::Protocol("the hello is not valid".into()));
         };
         if !self.token.matches(&token) {
-            self.refuse(stream, codes::AUTH, "wrong token");
+            self.refuse(stream, codes::AUTH, "wrong token", sent);
             return Err(IpcError::Auth("the client presented a wrong token".into()));
         }
         if let Some(os) = os_pid
             && os != claimed
         {
-            self.refuse(stream, codes::AUTH, "wrong process");
+            self.refuse(stream, codes::AUTH, "wrong process", sent);
             return Err(IpcError::Auth(format!(
                 "the client claims pid {claimed} but the OS reports {os}"
             )));
@@ -356,7 +366,7 @@ impl Authenticator {
         if let Some(expected) = pid
             && os_pid.unwrap_or(claimed) != expected
         {
-            self.refuse(stream, codes::AUTH, "wrong process");
+            self.refuse(stream, codes::AUTH, "wrong process", sent);
             return Err(IpcError::Auth(format!(
                 "expected process {expected}, got {claimed}"
             )));

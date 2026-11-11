@@ -17,6 +17,8 @@ paddock-commands = { workspace = true }
 # The dialog contracts of this crate (`dialogs!`, ADR 0026 §3).
 paddock-dialogs = { workspace = true }
 paddock-env = { workspace = true }
+# The one end line of a connection (ADR 0072 WP-7, rules 42 and 55): `paddock_ipc::endlog`, shared with the other endpoints.
+paddock-ipc = { workspace = true }
 tauri = { workspace = true, optional = true }
 paddock-jobs = { workspace = true }
 paddock-log = { workspace = true }

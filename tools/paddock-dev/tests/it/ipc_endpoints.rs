@@ -266,6 +266,13 @@ endpoint = "ep"
 scenario = "*"
 fault = "no-end-line"
 blocks_tag = "none"
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "ep"
+scenario = "wrong-token"
+fault = "drain-not-eof"
+blocks_tag = "none"
 "#;
     let found = run(
         &[("src/server.rs", SERVER), ("tests/endings.rs", TEST_FILE)],
@@ -275,7 +282,10 @@ blocks_tag = "none"
     let text = found.join("\n");
     assert!(text.contains("the endpoint is not in"), "{text}");
     assert!(text.contains("unknown scenario"), "{text}");
-    assert!(text.contains("only a logging gap may say `none`"), "{text}");
+    assert!(
+        text.contains("only a logging gap or the deferred drain (WP-7, WP-2) may say `none`"),
+        "{text}"
+    );
     assert!(text.contains("unknown os `beos`"), "{text}");
     assert_eq!(found.len(), 4, "the good entries produce nothing: {text}");
 }

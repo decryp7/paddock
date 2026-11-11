@@ -101,9 +101,12 @@ fn observe(
 ) -> Result<(Observed, Expect), &'static str> {
     let raw = read_to_end(&mut client, READ_GUARD);
     let decoded = decode_lines(&raw.bytes);
-    // The end line is written after the client saw the end (the drain, then the close), so wait for it.
+    // The client has read to the end: it ends its side now, as a real client does, which ends the listener's drain with `eof`
+    // (held open, the drain waits for its time cap). Then the end line, written after the drain and the close, is waited for.
+    drop(client);
     if expect.end_line {
-        rig.log.wait_for_end_line_since(rig.from, READ_GUARD);
+        rig.log
+            .wait_for_end_lines_since(rig.from, expect.ends, READ_GUARD);
     }
     Ok((
         Observed {
@@ -186,5 +189,24 @@ fn mcp_loopback_ends_every_connection_right_or_is_in_the_ratchet() {
     let ratchet = Ratchet::load_from(env!("CARGO_MANIFEST_DIR")).expect("the ratchet file");
     if let Err(e) = ratchet.check("mcp-loopback", &reports) {
         panic!("{e}\n\n{}", failure_text(&reports));
+    }
+    // The refusal line is written before the drain, so the end line says `sent` (WP-7 review); the stop writes nothing.
+    for (scenario, want) in [
+        (Scenario::WrongToken, "sent"),
+        (Scenario::Busy, "sent"),
+        (Scenario::StopWithOpenConnection, "unsent"),
+    ] {
+        let report = reports
+            .iter()
+            .find(|r| r.scenario == scenario)
+            .expect("a report");
+        let lines = paddock_ipc::testing::endings::log::end_lines(&report.log);
+        assert_eq!(lines.len(), 1, "{}", failure_text(&reports));
+        assert_eq!(
+            paddock_ipc::testing::endings::log::field(lines[0], "reason"),
+            Some(want),
+            "{scenario}: {}",
+            lines[0]
+        );
     }
 }

@@ -92,7 +92,7 @@ pub const SCENARIOS: [&str; 13] = [
     "mixed-version-peer-ignores-fail0",
 ];
 /// The fault kinds of the ratchet file (see [`SCENARIOS`]).
-pub const FAULTS: [&str; 11] = [
+pub const FAULTS: [&str; 12] = [
     "no-reason",
     "wrong-reason",
     "reason-not-last",
@@ -104,9 +104,10 @@ pub const FAULTS: [&str; 11] = [
     "no-end-line",
     "dropped-without-verdict",
     "drain-not-eof",
+    "end-line-count",
 ];
-/// Faults that are a logging gap (WP-7), not an instance of the ADR's table: they block no tag.
-const LOGGING_FAULTS: [&str; 3] = ["no-end-line", "dropped-without-verdict", "drain-not-eof"];
+/// Faults that are a logging gap (WP-7) or the drain that WP-2 defers, not an instance of the ADR's table: they block no tag.
+const LOGGING_FAULTS: [&str; 4] = ["no-end-line", "dropped-without-verdict", "drain-not-eof", "end-line-count"];
 
 /// Where the register and the ratchet live, relative to the repository root.
 pub const REGISTER: &str = "docs/ipc-endpoints.toml";
@@ -923,9 +924,9 @@ pub fn findings(root: &Path, sites: &[Site], register: &Register, ratchet: &[Rat
     }
     for r in ratchet {
         let at = format!("{RATCHET}: entry {} / {} / {}", r.instance, r.endpoint, r.scenario);
-        if !(r.instance.starts_with('I') && r.instance[1..].parse::<u32>().is_ok()) && r.instance != "WP-7" {
+        if !(r.instance.starts_with('I') && r.instance[1..].parse::<u32>().is_ok()) && r.instance != "WP-7" && r.instance != "WP-2" {
             out.push(format!(
-                "{at}: `instance` must be one of the ADR's I1 to I27 (or WP-7 for a logging gap)."
+                "{at}: `instance` must be one of the ADR's I1 to I27 (WP-7 for a logging gap, WP-2 for the deferred drain)."
             ));
         }
         if !ids.contains(&r.endpoint) {
@@ -940,7 +941,7 @@ pub fn findings(root: &Path, sites: &[Site], register: &Register, ratchet: &[Rat
         let logging = LOGGING_FAULTS.contains(&r.fault.as_str());
         if r.blocks_tag.is_empty() || (r.blocks_tag == "none" && !logging) {
             out.push(format!(
-                "{at}: `blocks_tag` names the tag pattern this entry blocks (`dyno-v*`, `pitcrew-v*`); only a logging gap may say `none`."
+                "{at}: `blocks_tag` names the tag pattern this entry blocks (`dyno-v*`, `pitcrew-v*`); only a logging gap or the deferred drain (WP-7, WP-2) may say `none`."
             ));
         }
         for o in r.os.split(',').map(str::trim).filter(|o| !o.is_empty()) {

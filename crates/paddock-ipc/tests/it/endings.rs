@@ -146,6 +146,28 @@ fn ipc_host_ends_every_connection_right_or_is_in_the_ratchet() {
     if let Err(e) = ratchet.check("ipc-host", &reports) {
         panic!("{e}\n\n{}", failure_text(&reports));
     }
+    // The end line tells the truth about the reason (WP-7 review): a refusal that was written says `sent`; a silent client
+    // is timed out with nothing written (`unsent`).
+    assert_reason(&reports, Scenario::WrongToken, "sent");
+    assert_reason(&reports, Scenario::WrongVersion, "sent");
+    assert_reason(&reports, Scenario::Busy, "sent");
+    assert_reason(&reports, Scenario::SilentClient, "unsent");
+}
+
+/// The `reason=` of the one end line of `scenario`.
+fn assert_reason(reports: &[endings::Report], scenario: Scenario, want: &str) {
+    let report = reports
+        .iter()
+        .find(|r| r.scenario == scenario)
+        .expect("a report");
+    let lines = endings::log::end_lines(&report.log);
+    assert_eq!(lines.len(), 1, "{}", failure_text(reports));
+    assert_eq!(
+        endings::log::field(lines[0], "reason"),
+        Some(want),
+        "{scenario}: {}",
+        lines[0]
+    );
 }
 
 mod link {
@@ -242,7 +264,10 @@ mod link {
                         decoded,
                         ..Default::default()
                     },
-                    endings::Expect::reason(&["busy"]).with_unread_input(),
+                    // The refused client's end, and the end of the held client's connection (dropped before the read).
+                    endings::Expect::reason(&["busy"])
+                        .with_unread_input()
+                        .with_ends(2),
                 ))
             }
             Scenario::SilentClient => {
@@ -379,7 +404,7 @@ fn a_rig_that_cannot_drive_a_scenario_turns_the_run_red_and_a_declared_not_appli
                 endings::Expect {
                     reason: endings::ReasonRule::Optional,
                     end_line: false,
-                    drain_eof: false,
+                    ends: 1,
                     unread_input: false,
                 },
             ))
@@ -416,7 +441,7 @@ fn a_rig_that_cannot_drive_a_scenario_turns_the_run_red_and_a_declared_not_appli
             endings::Expect {
                 reason: endings::ReasonRule::Optional,
                 end_line: false,
-                drain_eof: false,
+                ends: 1,
                 unread_input: false,
             },
         ))
@@ -424,32 +449,45 @@ fn a_rig_that_cannot_drive_a_scenario_turns_the_run_red_and_a_declared_not_appli
     Ratchet::default().check("rigged", &fine).expect("green");
 }
 
-fn observed_with_log(line: &str) -> endings::Observed {
+fn observed_with_log(lines: &[&str]) -> endings::Observed {
     endings::Observed {
-        log: vec![line.to_string()],
+        log: lines.iter().map(|l| (*l).to_string()).collect(),
         ..Default::default()
     }
 }
 
 #[test]
-fn an_end_line_needs_a_known_drain_outcome_and_only_a_draining_endpoint_must_say_eof() {
-    let none = observed_with_log("INFO connection ended phase=open code=closed drain=none");
+fn a_connection_must_end_exactly_once_and_with_a_drain_outcome_of_eof() {
+    let one = "INFO connection ended id=p1 phase=open code=closed drain=eof";
     let optional = endings::Expect::optional_reason();
+    assert!(judge(&observed_with_log(&[one]), &optional).is_empty());
+    assert_eq!(
+        kinds(&judge(&observed_with_log(&[one, one]), &optional)),
+        vec!["end-line-count"],
+        "two end lines for one connection"
+    );
     assert!(
-        judge(&none, &optional).is_empty(),
-        "WP-7: `drain=none` is an honest end line until WP-2 adds the drain"
+        judge(
+            &observed_with_log(&[one, one]),
+            &optional.clone().with_ends(2)
+        )
+        .is_empty()
     );
     assert_eq!(
-        kinds(&judge(&none, &optional.clone().with_drain_eof())),
-        vec!["drain-not-eof"],
-        "an endpoint that must drain (the reference, the controls) fails on `none`"
-    );
-    let missing = observed_with_log("INFO connection ended phase=open code=closed");
-    assert_eq!(kinds(&judge(&missing, &optional)), vec!["drain-not-eof"]);
-    let unknown = observed_with_log("INFO connection ended code=closed drain=maybe");
-    assert_eq!(kinds(&judge(&unknown, &optional)), vec!["drain-not-eof"]);
-    assert_eq!(
-        kinds(&judge(&endings::Observed::default(), &optional)),
+        kinds(&judge(&observed_with_log(&[]), &optional)),
         vec!["no-end-line"]
+    );
+    let none = "INFO connection ended id=p1 phase=open code=closed drain=none";
+    assert_eq!(
+        kinds(&judge(&observed_with_log(&[none]), &optional)),
+        vec!["drain-not-eof"],
+        "an endpoint that does not drain is a ratchet entry (WP-2), not a pass"
+    );
+    assert_eq!(
+        kinds(&judge(
+            &observed_with_log(&["INFO connection ended id=p1 code=closed"]),
+            &optional
+        )),
+        vec!["drain-not-eof"]
     );
 }

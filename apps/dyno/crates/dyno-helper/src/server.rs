@@ -9,6 +9,7 @@ use crate::dispatch::{Ctx, Dispatcher};
 use crate::policy::HelperPolicy;
 use dyno_core::helper_policy::RequestKind;
 use dyno_core::helper_wire::{codes, CallerView, HelperMessage, HelperUser, MAX_FRAME};
+use paddock_ipc::endlog::{self, End, EndCode, Phase};
 use paddock_ipc::endpoint::Listener;
 use paddock_ipc::{
     caller_of, AccountId, AccountLimits, AdminRule, BodyHandler, BodyOptions, BodyPeer, Caller, Connection, FrameLimit, RemoteError,
@@ -176,6 +177,15 @@ impl BodyHandler<HelperMessage> for Session {
     }
 }
 
+/// The end line of a connection the helper turned away before any peer existed: nothing was written to the caller, and the
+/// helper does not drain (`reason=unsent`, `drain=none`).
+fn end_unserved(detail: &str, code: EndCode) {
+    endlog::log_end(&End {
+        detail,
+        ..End::new(endlog::next_accept_id(), "a caller", Phase::Hello, code)
+    });
+}
+
 impl Daemon {
     /// Serves until `stop` is set. Returns an error only when the endpoint itself keeps failing.
     ///
@@ -202,7 +212,7 @@ impl Daemon {
         let result = self.serve(&served, clock.as_ref());
         log::info!(outcome = if result.is_ok() { "stopped" } else { "failed" }; "Helper: served: {}", served.summary());
         // The summary of the connections' ends by code (ADR 0072 §6): next to the served counts, once when the loop ends.
-        paddock_ipc::endlog::log_summary();
+        endlog::log_summary();
         result
     }
 
@@ -223,7 +233,7 @@ impl Daemon {
                         Err(e) => {
                             log::warn!(error = e.to_string().as_str(); "Helper: a caller could not be identified and was refused");
                             self.dispatcher.record_refused_caller(None, &e.to_string());
-                            paddock_ipc::endlog::log_refused("a caller", "auth", "the caller could not be identified");
+                            end_unserved("the caller could not be identified", EndCode::Auth);
                             continue;
                         }
                     };
@@ -236,7 +246,7 @@ impl Daemon {
                     if active.fetch_add(1, Ordering::SeqCst) >= MAX_SESSIONS {
                         active.fetch_sub(1, Ordering::SeqCst);
                         log::warn!("Helper: too many connections, one was dropped");
-                        paddock_ipc::endlog::log_refused("a caller", "busy", "too many connections");
+                        end_unserved("too many connections", EndCode::Busy);
                         continue;
                     }
                     let session = Session {
@@ -256,8 +266,10 @@ impl Daemon {
                         }
                         count.fetch_sub(1, Ordering::SeqCst);
                     });
-                    if spawned.is_err() {
+                    if let Err(e) = spawned {
                         active.fetch_sub(1, Ordering::SeqCst);
+                        // The session thread never ran, so its peer (which logs its own end) never existed; the stream closes.
+                        end_unserved(&format!("the session thread did not start: {e}"), EndCode::Internal);
                     }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::TimedOut || e.kind() == std::io::ErrorKind::WouldBlock => failures = 0,

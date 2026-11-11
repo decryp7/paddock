@@ -122,6 +122,13 @@ pub enum Fault {
     Hang,
     /// The endpoint wrote no end line.
     NoEndLine,
+    /// The scenario's connections wrote more or fewer end lines than they ended (each must end exactly once).
+    EndLineCount {
+        /// The end lines expected: [`Expect::ends`].
+        expected: usize,
+        /// The end lines found.
+        got: usize,
+    },
     /// The end line says a stream was dropped without a verdict.
     DroppedWithoutVerdict,
     /// The end line's drain outcome is not `eof`.
@@ -141,6 +148,7 @@ impl Fault {
             Fault::Unanswered => "unanswered",
             Fault::Hang => "hang",
             Fault::NoEndLine => "no-end-line",
+            Fault::EndLineCount { .. } => "end-line-count",
             Fault::DroppedWithoutVerdict => "dropped-without-verdict",
             Fault::DrainNotEof(_) => "drain-not-eof",
         }
@@ -198,11 +206,9 @@ pub struct Expect {
     pub reason: ReasonRule,
     /// The endpoint is expected to log an end line (ADR 0072 §6).
     pub end_line: bool,
-    /// The end line's drain outcome must be `eof`. False for every product endpoint until the ordered shutdown with a drain
-    /// (ADR 0072 WP-2, deferred by the 2026-11-11 trim): the line then needs a `drain=` field with a known outcome (`none`
-    /// where the endpoint does not drain), which is what WP-7 judges. The reference endpoint and the `Broken` controls keep
-    /// `true`, so the harness still sees a release without a drain.
-    pub drain_eof: bool,
+    /// How many end lines the scenario's connections make: one per connection the rig opened and that ended in the window
+    /// (default 1). More or fewer is [`Fault::EndLineCount`]: a connection must end exactly once.
+    pub ends: usize,
     /// The client sent bytes the endpoint never reads before it closes (a refusal before the hello is read, a client that
     /// keeps writing). Closing with unread input makes the OS send a reset, which may or may not reach the client before the
     /// reason does (a race: macOS delivers either), so a missing reason is then attributed to the reset and reported as
@@ -218,7 +224,7 @@ impl Expect {
         Expect {
             reason: ReasonRule::OneOf(codes.iter().map(|c| (*c).to_string()).collect()),
             end_line: true,
-            drain_eof: false,
+            ends: 1,
             unread_input: false,
         }
     }
@@ -228,14 +234,14 @@ impl Expect {
         Expect {
             reason: ReasonRule::Optional,
             end_line: true,
-            drain_eof: false,
+            ends: 1,
             unread_input: false,
         }
     }
 
-    /// The same expectation, with the drain outcome required to be `eof` (see [`Expect::drain_eof`]).
-    pub fn with_drain_eof(mut self) -> Expect {
-        self.drain_eof = true;
+    /// The scenario opens more connections that end in its window (a held client, a second client): `n` end lines.
+    pub fn with_ends(mut self, n: usize) -> Expect {
+        self.ends = n;
         self
     }
 
@@ -301,18 +307,23 @@ pub fn judge(observed: &Observed, expect: &Expect) -> Vec<Fault> {
         }
     }
     if expect.end_line {
-        match log::find_end_line(&observed.log) {
-            None => faults.push(Fault::NoEndLine),
-            Some(line) => {
-                if line.contains("DroppedWithoutVerdict") {
-                    faults.push(Fault::DroppedWithoutVerdict);
-                }
-                match log::field(&line, "drain") {
-                    Some("eof") => {}
-                    Some(other) if !expect.drain_eof && log::DRAIN_OUTCOMES.contains(&other) => {}
-                    Some(other) => faults.push(Fault::DrainNotEof(other.to_string())),
-                    None => faults.push(Fault::DrainNotEof(String::new())),
-                }
+        let lines = log::end_lines(&observed.log);
+        if lines.is_empty() {
+            faults.push(Fault::NoEndLine);
+        } else if lines.len() != expect.ends {
+            faults.push(Fault::EndLineCount {
+                expected: expect.ends,
+                got: lines.len(),
+            });
+        }
+        for line in lines {
+            if line.contains("DroppedWithoutVerdict") {
+                faults.push(Fault::DroppedWithoutVerdict);
+            }
+            match log::field(line, "drain") {
+                Some("eof") => {}
+                Some(other) => faults.push(Fault::DrainNotEof(other.to_string())),
+                None => faults.push(Fault::DrainNotEof(String::new())),
             }
         }
     }

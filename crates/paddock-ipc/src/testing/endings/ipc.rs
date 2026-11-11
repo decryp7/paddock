@@ -244,7 +244,7 @@ pub fn logged<E: std::fmt::Display>(
     let from = capture.len();
     let (mut observed, expect) = run().map_err(|e| e.to_string())?;
     if expect.end_line {
-        capture.wait_for_end_line_since(from, GUARD);
+        capture.wait_for_end_lines_since(from, expect.ends, GUARD);
     }
     observed.log = capture.since(from);
     Ok((observed, expect))
@@ -308,8 +308,19 @@ fn in_process_inner(scenario: Scenario) -> Result<(Observed, Expect), &'static s
                 // The write itself failed because the listener was already gone: still no reason.
                 o.decoded = Decoded::default();
             }
-            // No connection was ever accepted, so none ends: the listener's stop is not a connection end (no end line).
-            Ok((o, Expect::reason(&["stopping"]).without_end_line()))
+            // Today the stop accepts nothing, so no connection exists to end and no end line is due: the ratchet's I11 entry
+            // (`no-reason`) says the client reads a bare end. The moment the stop accepts and refuses the backlog, the client
+            // gets a reason and a connection ended, so the end line becomes required (the expectation follows the reason).
+            let told = !o.decoded.reasons.is_empty();
+            let expect = Expect::reason(&["stopping"]);
+            Ok((
+                o,
+                if told {
+                    expect
+                } else {
+                    expect.without_end_line()
+                },
+            ))
         }
         Scenario::OwnerCloseWithCallsInFlight
         | Scenario::OwnerCloseWhilePeerNotReading
@@ -360,7 +371,7 @@ fn in_process_inner(scenario: Scenario) -> Result<(Observed, Expect), &'static s
                 Expect {
                     reason: super::ReasonRule::Optional,
                     end_line: false,
-                    drain_eof: false,
+                    ends: 1,
                     unread_input: false,
                 },
             ))
@@ -456,7 +467,9 @@ fn peer_scenario(scenario: Scenario) -> Result<(Observed, Expect), &'static str>
             }
             owner.close();
             o.typed = call.join().ok().map(|r| typed_of(&r));
-            Ok((o, Expect::reason(&["stopping", "closed"])))
+            // Three connections ended in this scenario: the raw one above, and the typed pair's two sides (each side logs its own
+            // end, ADR 0072 §6).
+            Ok((o, Expect::reason(&["stopping", "closed"]).with_ends(3)))
         }
         Scenario::OwnerCloseWhilePeerNotReading => {
             let (x, mut y) = endpoint::pair().map_err(|_| "no pair")?;
