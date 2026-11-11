@@ -54,7 +54,7 @@ import { provideRecovery } from './lifecycle/recovery';
 import { provideDebriefStatusItems } from './shell/status/status-items.contributions';
 import { provideDebriefMenus } from './shell/menu/menu.contributions';
 import { provideDebriefThemes } from './theme/themes.contributions';
-import { provideDebriefSharedState } from './popout/shared-state';
+import { provideDebriefSharedState } from './popout/shared-state.contributions';
 
 export const appConfig: ApplicationConfig = {
   providers: [

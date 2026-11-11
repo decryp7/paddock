@@ -7,7 +7,9 @@ import { appConfig } from '../app.config';
 import { Logger } from '../core/logger';
 import { dialogBaseProviders } from '../dialog-windows/dialog-bootstrap';
 import { DEBRIEF_KIND } from '../extensions/contributions';
-import { DEBRIEF_SHARED_STATE, provideSharedState, sharedUiState, type SharedStateDef } from './shared-state';
+import { sharedUiState, type SharedStateDef } from './shared-state';
+import { DEBRIEF_SHARED_STATE } from './shared-state.contributions';
+import { DIALOG_SHARED_STATE, provideSharedState } from './display-state.contributions';
 
 describe('shared state as contributions (M1)', () => {
   it('registers the built-in groups in Debrief’s sharedState kind in the main window, and the lint accepts them', () => {
@@ -16,10 +18,15 @@ describe('shared state as contributions (M1)', () => {
     expect(contributionProblems(TestBed.inject(Injector)).filter((p) => p.startsWith('shared state'))).toEqual([]);
   });
 
-  it('gives a dialog window the built-in groups without registering them (its bootstrap must not import the stores they bind)', () => {
+  it('registers the display and data groups in a dialog window (not the workspace group, whose stores a dialog must not import)', () => {
     TestBed.configureTestingModule({ providers: [...dialogBaseProviders(), provideTinyBackend(), provideFakeDock(), { provide: Logger, useFactory: () => new MemoryLogger() }] });
-    expect(TestBed.inject(ContributionRegistry).items(DEBRIEF_KIND.sharedState)).toEqual([]);
+    expect(TestBed.inject(ContributionRegistry).items(DEBRIEF_KIND.sharedState)).toEqual(DIALOG_SHARED_STATE);
     expect(sharedUiState(TestBed.inject(Injector), 'display').map((v) => v.key)).toContain('theme');
+  });
+
+  it('shares nothing in a window that registers no groups (no hidden fallback)', () => {
+    TestBed.configureTestingModule({ providers: [provideTinyBackend(), provideFakeDock()] });
+    expect(sharedUiState(TestBed.inject(Injector), 'full')).toEqual([]);
   });
 
   it('syncs a contributed group (a plugin’s) in the scopes that include it, after the built-ins', () => {
