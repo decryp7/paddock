@@ -58,6 +58,8 @@ fn a_reserved_name_keeps_the_prefix_in_plain() {
         r"\\?\C:\x\con.txt",
         r"\\?\C:\x\NUL",
         r"\\?\C:\x\com1",
+        r"\\?\C:\x\com0",
+        r"\\?\C:\x\LPT0.txt",
         r"\\?\C:\x\Lpt9.log",
         r"\\?\C:\x\aux.tar.gz",
         r"\\?\C:\x\prn ",
@@ -218,6 +220,27 @@ fn for_tools_refuses_a_path_over_259_units() {
 }
 
 #[test]
+fn for_tools_refuses_a_plain_path_over_259_units_too() {
+    assert!(for_tools(p(&drive_path_of(259)), W).is_ok());
+    let e = for_tools(p(&drive_path_of(260)), W).unwrap_err();
+    assert!(e.to_string().contains("260 characters"), "{e}");
+    let unc = format!(r"\\srv\share\{}", "a".repeat(260));
+    assert!(for_tools(p(&unc), W).is_err());
+}
+
+#[test]
+fn for_tools_native_keeps_the_backslashes() {
+    assert_eq!(for_tools_native(p(r"\\?\C:\a\b"), W).unwrap(), r"C:\a\b");
+    assert_eq!(
+        for_tools_native(p(r"\\?\UNC\srv\share\x"), W).unwrap(),
+        r"\\srv\share\x"
+    );
+    assert_eq!(for_tools(p(r"\\?\C:\a\b"), W).unwrap(), "C:/a/b");
+    assert!(for_tools_native(p(&format!(r"\\?\{}", drive_path_of(300))), W).is_err());
+    assert_eq!(for_tools_native(p("/a/b"), Os::Linux).unwrap(), "/a/b");
+}
+
+#[test]
 fn for_tools_refuses_a_device_path() {
     assert!(for_tools(p(r"\\.\C:\x"), W).is_err());
     assert!(for_tools(p(r"\\?\GLOBALROOT\x"), W).is_err());
@@ -255,6 +278,41 @@ fn same_does_not_equate_different_kinds() {
 fn same_is_exact_off_windows() {
     assert!(same(p("/a/b"), p("/a/b"), Os::Linux));
     assert!(!same(p("/a/B"), p("/a/b"), Os::Linux));
+}
+
+#[test]
+fn starts_with_compares_by_component_ignoring_prefix_case_and_length() {
+    let long = format!(r"\\?\{}", drive_path_of(300));
+    assert!(starts_with(
+        p(&long),
+        p(&format!("C:\\{}", "a".repeat(50))),
+        W
+    ));
+    assert!(starts_with(p(r"\\?\C:\a\b"), p(r"C:\A"), W));
+    assert!(starts_with(p(r"C:\a"), p(r"\\?\C:\a"), W), "equal paths");
+    assert!(
+        !starts_with(p(r"C:\ab"), p(r"C:\a"), W),
+        "a name is not a prefix of a longer name"
+    );
+    assert!(!starts_with(p(r"D:\a"), p(r"C:\a"), W));
+    assert!(!starts_with(p(r"\\srv\share\a"), p(r"C:\srv"), W));
+    assert!(starts_with(p(r"\\?\UNC\srv\share\a"), p(r"\\srv\share"), W));
+    assert!(starts_with(p("/a/b"), p("/a"), Os::Linux));
+    assert!(!starts_with(p("/ab"), p("/a"), Os::Linux));
+}
+
+#[test]
+fn lexical_text_drops_the_prefix_without_any_limit_or_refusal() {
+    let long = format!(r"\\?\{}", drive_path_of(300));
+    let t = lexical_text(p(&long), W);
+    assert!(
+        t.starts_with("C:/aaaa") && !t.contains('\\') && !t.contains('?'),
+        "{t}"
+    );
+    assert_eq!(lexical_text(p(r"\\?\C:\a\con\b"), W), "C:/a/con/b");
+    assert_eq!(lexical_text(p(r"\\?\UNC\srv\share\x"), W), "//srv/share/x");
+    assert_eq!(lexical_text(p("C:/a/b/"), W), "C:/a/b");
+    assert_eq!(lexical_text(p("/a/b"), Os::Linux), "/a/b");
 }
 
 #[test]
@@ -365,6 +423,82 @@ mod on_windows {
         assert!(!t.contains('\\') && !t.starts_with("//?/"), "{t}");
     }
 
+    /// `CompareStringOrdinal(a, b, ignoreCase = TRUE) == CSTR_EQUAL`.
+    fn os_equal_ignoring_case(a: &str, b: &str) -> bool {
+        use windows_sys::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
+        let (a, b): (Vec<u16>, Vec<u16>) = (a.encode_utf16().collect(), b.encode_utf16().collect());
+        // SAFETY: both buffers are live for the call and their lengths are passed.
+        let r = unsafe {
+            CompareStringOrdinal(a.as_ptr(), a.len() as i32, b.as_ptr(), b.len() as i32, 1)
+        };
+        r == CSTR_EQUAL
+    }
+
+    #[test]
+    fn the_fold_agrees_with_compare_string_ordinal_on_the_hard_cases() {
+        let pairs = [
+            ("\u{df}", "SS"),
+            ("\u{df}", "\u{1e9e}"),
+            ("\u{17f}", "S"),
+            ("\u{17f}", "s"),
+            ("\u{131}", "I"),
+            ("\u{131}", "i"),
+            ("\u{130}", "i"),
+            ("\u{130}", "I"),
+            ("i", "I"),
+            ("\u{10428}", "\u{10400}"),
+            ("\u{3c2}", "\u{3a3}"),
+            ("\u{3c3}", "\u{3a3}"),
+            ("\u{212a}", "k"),
+            ("\u{e9}", "\u{c9}"),
+        ];
+        for (a, b) in pairs {
+            let (pa, pb) = (format!("C:\\{a}"), format!("C:\\{b}"));
+            assert_eq!(
+                same(Path::new(&pa), Path::new(&pb), Os::Windows),
+                os_equal_ignoring_case(a, b),
+                "{a:?} against {b:?}"
+            );
+        }
+    }
+
+    /// `subst X: <folder>` makes a drive that is another name for a folder: `real` resolves it to the folder, and the result is
+    /// plain and compares equal with the folder's own path.
+    #[test]
+    fn a_subst_drive_resolves_to_its_folder() {
+        struct Subst(String);
+        impl Drop for Subst {
+            fn drop(&mut self) {
+                let _ = std::process::Command::new("subst")
+                    .args([&self.0, "/d"])
+                    .status();
+            }
+        }
+        let d = tempfile::tempdir().unwrap();
+        let free = ('G'..='Z')
+            .rev()
+            .map(|l| format!("{l}:"))
+            .find(|dr| !Path::new(&format!("{dr}\\")).exists())
+            .unwrap();
+        let status = std::process::Command::new("subst")
+            .arg(&free)
+            .arg(d.path())
+            .status()
+            .unwrap();
+        assert!(status.success(), "subst {free} failed");
+        let _guard = Subst(free.clone());
+        let via_drive = real(Path::new(&format!("{free}\\"))).unwrap();
+        let direct = real(d.path()).unwrap();
+        assert!(
+            !via_drive.to_string_lossy().starts_with(r"\\?\"),
+            "{via_drive:?}"
+        );
+        assert!(
+            same(&via_drive, &direct, Os::Windows),
+            "{via_drive:?} against {direct:?}"
+        );
+    }
+
     #[test]
     fn real_or_given_is_plain_for_an_existing_path() {
         let d = tempfile::tempdir().unwrap();
@@ -440,6 +574,13 @@ fn for_tools_explains_a_bad_name_and_a_dot_part() {
         dots.contains("`.` or `..`") && dots.contains("resolved path"),
         "{dots}"
     );
+}
+
+#[test]
+fn the_fold_leaves_characters_above_the_basic_plane_alone() {
+    // Deseret small and capital letter long i: two UTF-16 units each; CompareStringOrdinal does not fold surrogate pairs.
+    assert!(!same(p("C:\\\u{10428}"), p("C:\\\u{10400}"), W));
+    assert!(same(p("C:\\\u{10428}"), p("c:\\\u{10428}"), W));
 }
 
 #[test]

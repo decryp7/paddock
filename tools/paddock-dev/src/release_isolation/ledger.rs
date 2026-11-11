@@ -222,19 +222,20 @@ impl Ledger {
     }
 }
 
-/// A path without Windows' verbatim prefix (`\\?\C:\x` becomes `C:\x`, `\\?\UNC\s\x` becomes `\\s\x`), as `canonicalize`
-/// returns it there: tools that do not know the prefix (git bash, npm, cmd) cannot use it. Other paths are returned as given.
-pub fn simplified(path: &Path) -> PathBuf {
-    PathBuf::from(simplify_text(&path.to_string_lossy()))
+/// A path as a tool that does not know Windows' verbatim prefix (git bash, npm, cmd) can use it: `\\?\C:\x` becomes `C:\x`,
+/// `\\?\UNC\s\x` becomes `\\s\x`, as `canonicalize` returns them there. Other plain paths are returned as given. A path that has
+/// no plain spelling within 259 units (a volume without a drive letter, a path over the limit, an unsafe name) is an error that
+/// names the cause and the next step: the ledger and the job's environment never carry a verbatim path.
+pub fn simplified(path: &Path) -> Result<PathBuf, String> {
+    simplify_on(path, paddock_env::Os::current())
 }
 
-/// [`simplified`] on text, so that it is testable on every OS. The prefix comes off through the shared
-/// [`paddock_env::winpath::plain`]; `\\?\Volume{..}\` and other forms that name no drive or share (and names that are unsafe
-/// without the prefix) stay as they are, because without the prefix they would name nothing.
-pub fn simplify_text(text: &str) -> String {
-    paddock_env::winpath::plain(Path::new(text), paddock_env::Os::Windows)
-        .to_string_lossy()
-        .into_owned()
+/// [`simplified`] with the platform's rules given, so that it is testable on every OS. The prefix comes off through the shared
+/// [`paddock_env::winpath::for_tools_native`].
+pub fn simplify_on(path: &Path, os: paddock_env::Os) -> Result<PathBuf, String> {
+    paddock_env::winpath::for_tools_native(path, os)
+        .map(PathBuf::from)
+        .map_err(|e| format!("the job path {e}"))
 }
 
 /// Starts a ledger file (only `setup` calls this): refuses when one exists, because a second `setup` would orphan the
@@ -274,15 +275,14 @@ pub fn append(ledger_path: &Path, kind: Kind, mode: Mode, path: Option<&Path>) -
         Mode::Off => ("-".to_string(), None),
         Mode::Job | Mode::Run => {
             let given = path.ok_or_else(|| format!("`{kind}` with mode `{}` needs a path.", mode.name()))?;
-            let canonical = given
-                .canonicalize()
+            let canonical = paddock_env::winpath::real_verbatim(given)
                 .map_err(|e| format!("`{kind}`: {} is not an existing folder: {e}", given.display()))?;
             if !canonical.is_dir() {
                 return Err(format!("`{kind}`: {} is not a folder.", canonical.display()));
             }
             let id =
                 identity_of(&canonical).map_err(|e| format!("`{kind}`: the identity of {} cannot be read: {e}", canonical.display()))?;
-            (simplified(&canonical).display().to_string(), Some(id))
+            (simplified(&canonical)?.display().to_string(), Some(id))
         }
     };
     if path_text.contains(['\t', '\n']) {
@@ -314,15 +314,27 @@ mod tests {
 
     #[test]
     fn verbatim_windows_prefixes_are_removed_only_where_that_is_safe() {
-        assert_eq!(simplify_text(r"\\?\C:\job\x"), r"C:\job\x");
-        assert_eq!(simplify_text(r"\\?\UNC\srv\share\x"), r"\\srv\share\x");
-        assert_eq!(simplify_text(r"\\?\Volume{1234}\x"), r"\\?\Volume{1234}\x");
-        assert_eq!(simplify_text("/tmp/x"), "/tmp/x");
-        // Through the path form too, UNC included, and the same answer as the shared function for the forms both handle.
-        assert_eq!(simplified(Path::new(r"\\?\UNC\srv\share\x")), Path::new(r"\\srv\share\x"));
-        assert_eq!(simplified(Path::new(r"\\?\C:\job")), Path::new(r"C:\job"));
-        assert_eq!(simplified(Path::new(r"\\srv\share")), Path::new(r"\\srv\share"), "already plain");
-        assert_eq!(simplify_text(r"\\?\UNC\srv\share"), r"\\srv\share");
+        let on = |t: &str| simplify_on(Path::new(t), paddock_env::Os::Windows);
+        assert_eq!(on(r"\\?\C:\job\x").unwrap(), Path::new(r"C:\job\x"));
+        assert_eq!(on(r"\\?\UNC\srv\share\x").unwrap(), Path::new(r"\\srv\share\x"));
+        assert_eq!(on(r"\\?\UNC\srv\share").unwrap(), Path::new(r"\\srv\share"));
+        assert_eq!(on(r"\\srv\share").unwrap(), Path::new(r"\\srv\share"), "already plain");
+        assert!(
+            on(r"\\?\Volume{1234}\x").is_err(),
+            "no plain spelling: an error, not a verbatim path"
+        );
+        assert_eq!(
+            simplify_on(Path::new("/tmp/x"), paddock_env::Os::Linux).unwrap(),
+            Path::new("/tmp/x")
+        );
+    }
+
+    #[test]
+    fn a_300_unit_verbatim_job_path_is_refused_with_the_next_step() {
+        let long = format!(r"\\?\C:\{}", vec!["a".repeat(50); 6].join(r"\"));
+        assert!(long.encode_utf16().count() >= 300);
+        let e = simplify_on(Path::new(&long), paddock_env::Os::Windows).unwrap_err();
+        assert!(e.contains("longer than Windows") && e.contains("shorter path"), "{e}");
     }
 
     #[test]

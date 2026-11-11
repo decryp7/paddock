@@ -240,7 +240,7 @@ fn mark(folder: &Path, me: ProcessId) -> Option<PathBuf> {
     use std::os::unix::fs::OpenOptionsExt;
     #[expect(
         clippy::disallowed_methods,
-        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency to use winpath (ADR 0021 amendment 2026-11-11)"
+        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency yet: until WP-P2 (row 12) of the ADR 0021 amendment 2026-11-11"
     )]
     let canonical = std::fs::canonicalize(folder).ok()?;
     let written = std::fs::OpenOptions::new()
@@ -535,7 +535,7 @@ pub(crate) fn removable(
     }
     #[expect(
         clippy::disallowed_methods,
-        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency to use winpath (ADR 0021 amendment 2026-11-11)"
+        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency yet: until WP-P2 (row 12) of the ADR 0021 amendment 2026-11-11"
     )]
     let canonical = std::fs::canonicalize(folder).ok();
     if canonical.as_deref() != Some(folder) {
@@ -644,7 +644,7 @@ impl Ends for OsEnds {
         let home = std::env::var_os("HOME").map(PathBuf::from);
         #[expect(
             clippy::disallowed_methods,
-            reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency to use winpath (ADR 0021 amendment 2026-11-11)"
+            reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency yet: until WP-P2 (row 12) of the ADR 0021 amendment 2026-11-11"
         )]
         let home = home
             .as_deref()
@@ -691,7 +691,7 @@ fn serve(input: impl BufRead) -> i32 {
     };
     #[expect(
         clippy::disallowed_methods,
-        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency to use winpath (ADR 0021 amendment 2026-11-11)"
+        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency yet: until WP-P2 (row 12) of the ADR 0021 amendment 2026-11-11"
     )]
     let mut ends = OsEnds {
         log,
@@ -700,7 +700,7 @@ fn serve(input: impl BufRead) -> i32 {
     };
     #[expect(
         clippy::disallowed_methods,
-        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency to use winpath (ADR 0021 amendment 2026-11-11)"
+        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency yet: until WP-P2 (row 12) of the ADR 0021 amendment 2026-11-11"
     )]
     let me = std::env::current_exe()
         .ok()

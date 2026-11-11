@@ -9,6 +9,7 @@ use crate::pick::{PickRequest, Picker};
 use crate::recent::{ListSpec, Recents};
 use paddock_commands::CommandError;
 use paddock_env::AppDirs;
+use paddock_env::winpath::NotPlain;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -169,10 +170,20 @@ impl Files {
             .grant(window, parse(raw)?, Access::Read, GrantSource::Recent)
     }
 
+    /// A path that has no plain spelling for the program that would open it, as the error the user sees.
+    fn refuse(e: NotPlain) -> CommandError {
+        CommandError::invalid(format!(
+            "{} cannot be opened from here: {}",
+            e.path.display(),
+            e.reason
+        ))
+        .hint(e.next_step)
+    }
+
     /// Shows a path the user chose in the file manager. Never runs anything.
     pub fn reveal(&self, window: &str, raw: &str) -> Result<()> {
         let granted = self.grants.check(window, raw, Access::Read, &[])?;
-        self.start(&open::reveal(self.os, granted.path()))
+        self.start(&open::reveal(self.os, granted.path()).map_err(Self::refuse)?)
     }
 
     /// Opens a path the user chose with the program the OS associates with it; a folder opens in the file manager. A file
@@ -186,7 +197,7 @@ impl Files {
             ))
             .hint("Show it in the file manager instead"));
         }
-        self.start(&open::open_default(self.os, granted.path()))
+        self.start(&open::open_default(self.os, granted.path()).map_err(Self::refuse)?)
     }
 
     /// Shows one of the app's own folders in the file manager.
@@ -198,7 +209,7 @@ impl Files {
             .map(|(_, p)| p)
             .ok_or_else(|| CommandError::not_found("This folder is not known to the app"))?;
         let path = canonical(path)?;
-        self.start(&open::open_default(self.os, &path))
+        self.start(&open::open_default(self.os, &path).map_err(Self::refuse)?)
     }
 
     /// Opens a file the user chose in the editor at `line` (1 to [`open::MAX_LINE`]). The file is only ever an argument of the editor,
@@ -224,13 +235,15 @@ impl Files {
             )
             .hint("Install Visual Studio Code, or open the file from the file manager")
         })?;
-        self.start(&open::open_at_line(&editor, granted.path(), line))
+        self.start(
+            &open::open_at_line(self.os, &editor, granted.path(), line).map_err(Self::refuse)?,
+        )
     }
 
     /// Shows a folder the app itself chose (never one named by the webview) in the file manager.
     pub fn show_folder(&self, folder: &Path) -> Result<()> {
         let path = canonical(folder)?;
-        self.start(&open::open_default(self.os, &path))
+        self.start(&open::open_default(self.os, &path).map_err(Self::refuse)?)
     }
 
     /// Opens a web address in the user's browser (http, https and mailto only).

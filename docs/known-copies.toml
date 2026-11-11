@@ -1086,3 +1086,113 @@ adr = "docs/adr/amendments/0021-windows-verbatim-paths-2026-11-11.md"
   owner = "paddock"
   delete_by = "v0.4.0"
   note = "A public str-level strip used by the trust rule's path splitting (two call sites in install.rs). Move those to winpath::plain and delete the function."
+
+  [[mechanism.copy]]
+  paths = ["crates/paddock-setup/src/samefolder.rs"]
+  symbols = ["item:normalise"]
+  owner = "paddock"
+  delete_by = "v0.4.0"
+  note = "Compares two folder spellings after dropping the prefix by text; moves to winpath::same (WP-P2)."
+
+  [[mechanism.copy]]
+  paths = ["crates/paddock-setup/src/checkdir.rs"]
+  symbols = ["item:components"]
+  owner = "paddock"
+  delete_by = "v0.4.0"
+  note = "Splits a Windows path into components by hand; moves to winpath::components (WP-P2)."
+
+  [[mechanism.copy]]
+  paths = ["crates/paddock-setup/src/native/facts.rs"]
+  symbols = ["item:strip_prefix"]
+  owner = "paddock"
+  delete_by = "v0.4.0"
+  note = "Drops the prefix from a path read from the OS; moves to winpath::lexical_text or plain (WP-P2)."
+
+  [[mechanism.copy]]
+  paths = ["crates/paddock-setup/src/apply.rs"]
+  symbols = ["item:volume_root"]
+  owner = "paddock"
+  delete_by = "v0.4.0"
+  note = "Finds the volume root of a final path by text; moves to winpath::components and kind (WP-P2)."
+
+  [[mechanism.copy]]
+  paths = ["crates/paddock-proc/src/installed.rs"]
+  symbols = ["item:parts"]
+  owner = "paddock"
+  delete_by = "v0.4.0"
+  note = "Splits a path into components for the folder comparison of running programs (drops the prefix); moves to winpath::components (WP-P2, row 12)."
+
+  [[mechanism.copy]]
+  paths = ["crates/paddock-proc/src/installed.rs"]
+  symbols = ["item:join_win"]
+  owner = "paddock"
+  delete_by = "v0.4.0"
+  note = "Joins a folder and an image name in the Windows spelling; moves with parts to winpath (WP-P2, row 12)."
+
+  [[mechanism.copy]]
+  paths = ["crates/paddock-service/src/privileged/trust.rs"]
+  symbols = ["item:require_same_path"]
+  owner = "paddock"
+  delete_by = "v0.4.0"
+  note = "Compares the requested and the final path after dropping the prefix by text; moves to winpath::same (WP-P2)."
+
+  [[mechanism.copy]]
+  paths = ["crates/paddock-download/src/error.rs"]
+  symbols = ["item:drive_of"]
+  owner = "paddock"
+  delete_by = "v0.4.0"
+  note = "Reads the drive of a path from its text (with and without the prefix); moves to winpath::kind (WP-P2)."
+
+  [[mechanism.copy]]
+  paths = ["tools/paddock-dev/src/ci_isolation/home.rs"]
+  symbols = ["item:mixed"]
+  owner = "paddock"
+  delete_by = "v0.4.0"
+  note = "Spells a canonical path with forward slashes and no prefix; moves to winpath::lexical_text or for_tools (WP-P5)."
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src-tauri/src/paths.rs"]
+  symbols = ["item:plain"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "Drops the prefix from a canonical path for display and tools; adopts winpath::plain or for_tools."
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src-tauri/src/opener.rs"]
+  symbols = ["item:plain_path"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "The opener's own prefix strip (the shared one is paddock_files::open, which refuses what it cannot make plain); adopts it."
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/crates/cargo-debrief-plugin/src/main.rs"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "Strips the prefix from the SDK path before handing it to cargo; adopts winpath::real_for_tools."
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/crates/debrief-plugin-native/src/paths.rs"]
+  symbols = ["item:is_within"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "Folder containment by hand over canonical paths; adopts winpath::starts_with."
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/crates/debrief-core/src/workspace/tail/identity.rs"]
+  symbols = ["item:is_network_path"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "Recognises a share by its UNC spellings, with and without the verbatim prefix, by hand; adopts winpath::kind."
+
+  [[mechanism.copy]]
+  paths = ["apps/dyno/crates/dyno-helper/src/protect.rs"]
+  owner = "dyno"
+  delete_by = "dyno-v1.2.0"
+  note = "Drops the prefix from a held final path before the trust check (strip_prefix on the text); adopts winpath::same or components."
+
+  [[mechanism.copy]]
+  paths = ["apps/pitcrew/crates/pitcrew-service/src/probe.rs"]
+  symbols = ["item:normalise"]
+  owner = "pitcrew"
+  delete_by = "pitcrew-v1.1.0"
+  note = "Drops the prefix, unifies separators and ignores case for a comparison; adopts winpath::same."

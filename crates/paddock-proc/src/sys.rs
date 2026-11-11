@@ -72,7 +72,7 @@ mod unix {
     #[cfg(target_os = "macos")]
     #[expect(
         clippy::disallowed_methods,
-        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency to use winpath (ADR 0021 amendment 2026-11-11)"
+        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency yet: until WP-P2 (row 12) of the ADR 0021 amendment 2026-11-11"
     )]
     pub fn exe_of(pid: u32) -> Option<std::path::PathBuf> {
         use std::os::unix::ffi::OsStringExt;
@@ -89,7 +89,7 @@ mod unix {
     #[cfg(not(target_os = "macos"))]
     #[expect(
         clippy::disallowed_methods,
-        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency to use winpath (ADR 0021 amendment 2026-11-11)"
+        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency yet: until WP-P2 (row 12) of the ADR 0021 amendment 2026-11-11"
     )]
     pub fn exe_of(pid: u32) -> Option<std::path::PathBuf> {
         std::fs::canonicalize(format!("/proc/{pid}/exe")).ok()

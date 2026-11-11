@@ -82,11 +82,7 @@ impl Scratch {
             .prefix("paddock-testkit-")
             .tempdir()?;
         // Canonical, so paths compare equal to what the code under test resolves (macOS /var vs /private/var).
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency to use winpath (ADR 0021 amendment 2026-11-11)"
-        )]
-        let root = dir.path().canonicalize()?;
+        let root = paddock_env::winpath::real(dir.path())?;
         for sub in ["work", "home", "tmp"] {
             fs::create_dir(root.join(sub))?;
         }

@@ -3398,6 +3398,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4012,6 +4013,7 @@ dependencies = [
 name = "paddock-testkit"
 version = "0.1.0"
 dependencies = [
+ "paddock-env",
  "paddock-jobs",
  "paddock-limits",
  "paddock-workspace-hack",

@@ -130,9 +130,20 @@ pub fn plain(path: &Path, os: Os) -> Cow<'_, Path> {
 }
 
 /// The path for another program (git, cargo, npm, Git bash, Explorer): the plain spelling with `/` separators, or why that is
-/// impossible: a volume path, a device path, an unsafe name, or a path over the limit. Callers return the error to their
-/// user; none falls back to the verbatim text.
+/// impossible: a volume path, a device path, an unsafe name, or a path over the limit (259 UTF-16 units, verbatim or not).
+/// Callers return the error to their user; none falls back to the verbatim text.
 pub fn for_tools(path: &Path, os: Os) -> Result<String, NotPlain> {
+    let text = for_tools_native(path, os)?;
+    Ok(if os == Os::Windows {
+        text.replace('\\', "/")
+    } else {
+        text
+    })
+}
+
+/// [`for_tools`] with the separators as given (`C:\x`), for a program that wants the native spelling (an environment variable
+/// that a Windows tool reads, a ledger line).
+pub fn for_tools_native(path: &Path, os: Os) -> Result<String, NotPlain> {
     let refuse = |why: Unsafe| {
         let (reason, next_step) = why.explain();
         NotPlain {
@@ -152,10 +163,20 @@ pub fn for_tools(path: &Path, os: Os) -> Result<String, NotPlain> {
         return Ok(text.to_owned());
     }
     match plan(path, os, Purpose::Plain) {
-        Plan::Strip(plain_text) => Ok(plain_text.replace('\\', "/")),
+        Plan::Strip(plain_text) => Ok(plain_text),
         Plan::Refuse(why) => Err(refuse(why)),
         Plan::NotVerbatim if parse(text).0 == Class::Device => Err(refuse(Unsafe::Device)),
-        Plan::NotVerbatim => Ok(text.replace('\\', "/")),
+        Plan::NotVerbatim => {
+            let units = text.encode_utf16().count();
+            if units > MAX_PLAIN_UNITS {
+                Err(refuse(Unsafe::TooLong {
+                    units,
+                    limit: MAX_PLAIN_UNITS,
+                }))
+            } else {
+                Ok(text.to_owned())
+            }
+        }
     }
 }
 
@@ -191,7 +212,9 @@ pub fn real_verbatim(path: &Path) -> std::io::Result<PathBuf> {
 
 /// Whether two paths name the same place by spelling: the prefix is stripped lexically from drive and UNC paths, `/` and `\`
 /// are one separator, a trailing separator is ignored and names compare ignoring case (Windows ordinal rule). Volume and
-/// device paths compare only with the same form. Never opens anything. Off Windows the comparison is exact.
+/// device paths compare only with the same form. Purely lexical: it never opens anything and does not resolve `.` or `..`
+/// parts or links (resolve both sides first, with [`real_verbatim`], when they may contain them). No length limit applies.
+/// Off Windows the comparison is exact.
 pub fn same(a: &Path, b: &Path, os: Os) -> bool {
     if os != Os::Windows {
         return a == b;
@@ -207,6 +230,42 @@ pub fn same(a: &Path, b: &Path, os: Os) -> bool {
             .iter()
             .zip(&parts_b)
             .all(|(x, y)| fold(x) == fold(y))
+}
+
+/// Whether `path` is `prefix` or below it, component by component with [`same`]'s rules (lexical, no length limit).
+pub fn starts_with(path: &Path, prefix: &Path, os: Os) -> bool {
+    if os != Os::Windows {
+        return path.starts_with(prefix);
+    }
+    let (Some(p), Some(q)) = (path.to_str(), prefix.to_str()) else {
+        return path.starts_with(prefix);
+    };
+    let (class_p, parts_p) = parse(p);
+    let (class_q, parts_q) = parse(q);
+    class_p.lexical() == class_q.lexical()
+        && parts_q.len() <= parts_p.len()
+        && parts_q
+            .iter()
+            .zip(&parts_p)
+            .all(|(x, y)| fold(x) == fold(y))
+}
+
+/// The path as text for comparing and as a map key: on Windows the prefix dropped lexically and `/` separators (`C:/a/b`,
+/// `//server/share/a`), off Windows the text as it is. Never refuses and never opens anything; not for a program
+/// ([`for_tools`]).
+pub fn lexical_text(path: &Path, os: Os) -> String {
+    let text = path.to_string_lossy();
+    if os != Os::Windows {
+        return text.into_owned();
+    }
+    let (class, parts) = parse(&text);
+    let joined = parts.join("/");
+    match class {
+        Class::Unc { .. } => format!("//{joined}"),
+        Class::Volume | Class::Device => format!(r"//?/{joined}"),
+        Class::Rooted => format!("/{joined}"),
+        Class::Drive { .. } | Class::Relative => joined,
+    }
 }
 
 /// The components of a path as [`same`] sees them: drive paths start with `C:`, UNC paths with the server (never `UNC`),
@@ -349,7 +408,9 @@ fn bad_component(names: &str) -> Option<Unsafe> {
 }
 
 /// A device name Windows resolves in every folder: `CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9` (also with the
-/// superscript digits), `CONIN$` and `CONOUT$`, whatever follows the first dot, and with trailing spaces before it.
+/// superscript digits), `CONIN$` and `CONOUT$`, whatever follows the first dot, and with trailing spaces before it. `COM0`
+/// and `LPT0` count as reserved too: the documented list leaves them out, but current Windows treats them as devices in
+/// some APIs, and refusing a strip is the safe side.
 fn is_reserved(name: &str) -> bool {
     let stem = name
         .split('.')
@@ -367,7 +428,7 @@ fn is_reserved(name: &str) -> bool {
                 let mut chars = d.chars();
                 matches!(
                     (chars.next(), chars.next()),
-                    (Some('1'..='9' | '\u{b9}' | '\u{b2}' | '\u{b3}'), None)
+                    (Some('0'..='9' | '\u{b9}' | '\u{b2}' | '\u{b3}'), None)
                 )
             })
         }
@@ -470,11 +531,15 @@ fn parse(text: &str) -> (Class, Vec<String>) {
     (class, parts)
 }
 
-/// Ordinal ignore-case folding: each `char` through its single-character simple uppercase (`char::to_uppercase` when it
-/// yields one character, else the character itself), the rule of `CompareStringOrdinal(.., TRUE)` for the letters paths use.
+/// Ordinal ignore-case folding: each UTF-16 unit of the Basic Multilingual Plane through its single-character simple
+/// uppercase (`char::to_uppercase` when it yields one character, else the character itself); characters above U+FFFF are
+/// two units and never fold, as in `CompareStringOrdinal(.., TRUE)`.
 fn fold(name: &str) -> String {
     name.chars()
         .map(|c| {
+            if u32::from(c) > 0xFFFF {
+                return c;
+            }
             let mut upper = c.to_uppercase();
             match (upper.next(), upper.next()) {
                 (Some(u), None) => u,

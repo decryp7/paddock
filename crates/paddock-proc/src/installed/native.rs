@@ -479,7 +479,7 @@ pub fn stop_all_here(dir: &Path, images: &[String], bounds: &Bounds) -> StopRepo
     // program is read from its handle in that form, and the two are compared by components.
     #[expect(
         clippy::disallowed_methods,
-        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency to use winpath (ADR 0021 amendment 2026-11-11)"
+        reason = "Windows only: the folder is compared by components through installed.rs `parts` (which handles the verbatim prefix), not text-stripped; it moves to winpath in WP-P2 (row 12) of the ADR 0021 amendment 2026-11-11"
     )]
     let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
     let own = ProcessId::of(std::process::id())

@@ -5,6 +5,7 @@
 
 use crate::path::Result;
 use paddock_commands::CommandError;
+use paddock_env::winpath::NotPlain;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -65,17 +66,23 @@ impl Invocation {
     }
 }
 
-/// `path` as the OS tools expect it: Windows verbatim paths lose their prefix, which Explorer and editors do not understand.
-/// A verbatim spelling only exists in Windows paths, so the rule is the Windows one on every host (a table of any OS tests it).
-pub fn plain_path(path: &Path) -> PathBuf {
-    paddock_env::winpath::plain(path, paddock_env::Os::Windows).into_owned()
+/// `path` as the OS tools expect it, in the native spelling: Windows verbatim paths lose their prefix, which Explorer and editors
+/// do not understand, and a path that has no plain spelling (a volume without a drive letter, over 259 units, an unsafe name)
+/// is refused with the cause and the next step, never passed on with the prefix.
+fn tool_path(os: Os, path: &Path) -> std::result::Result<PathBuf, NotPlain> {
+    let rules = match os {
+        Os::Windows => paddock_env::Os::Windows,
+        Os::Mac => paddock_env::Os::MacOs,
+        Os::Linux => paddock_env::Os::Linux,
+    };
+    paddock_env::winpath::for_tools_native(path, rules).map(PathBuf::from)
 }
 
 /// The file manager showing `file` selected (Explorer, Finder; on Linux its folder, as file managers have no common
 /// "select" argument).
-pub fn reveal(os: Os, file: &Path) -> Invocation {
-    let file = plain_path(file);
-    match os {
+pub fn reveal(os: Os, file: &Path) -> std::result::Result<Invocation, NotPlain> {
+    let file = tool_path(os, file)?;
+    Ok(match os {
         Os::Windows => {
             let mut arg = OsString::from("/select,");
             arg.push(&file);
@@ -86,12 +93,15 @@ pub fn reveal(os: Os, file: &Path) -> Invocation {
             "xdg-open",
             [file.parent().unwrap_or(&file).as_os_str().to_os_string()],
         ),
-    }
+    })
 }
 
 /// `file` (or a folder: the file manager on it) opened with the program the OS associates with it.
-pub fn open_default(os: Os, file: &Path) -> Invocation {
-    Invocation::new(opener_program(os), [plain_path(file).into_os_string()])
+pub fn open_default(os: Os, file: &Path) -> std::result::Result<Invocation, NotPlain> {
+    Ok(Invocation::new(
+        opener_program(os),
+        [tool_path(os, file)?.into_os_string()],
+    ))
 }
 
 fn opener_program(os: Os) -> &'static str {
@@ -108,10 +118,15 @@ pub fn open_url_with(os: Os, url: &str) -> Invocation {
 }
 
 /// `editor` (VS Code's `code` launcher) opening `file` at `line`: `code -g <file>:<line>`.
-pub fn open_at_line(editor: &Path, file: &Path, line: u32) -> Invocation {
-    let mut target = plain_path(file).into_os_string();
+pub fn open_at_line(
+    os: Os,
+    editor: &Path,
+    file: &Path,
+    line: u32,
+) -> std::result::Result<Invocation, NotPlain> {
+    let mut target = tool_path(os, file)?.into_os_string();
     target.push(format!(":{line}"));
-    Invocation::new(editor, [OsString::from("-g"), target])
+    Ok(Invocation::new(editor, [OsString::from("-g"), target]))
 }
 
 /// Extensions whose "default program" runs them (or changes the system): never opened with the OS association, on any
@@ -361,7 +376,7 @@ mod tests {
 
     #[test]
     fn reveal_selects_the_file_per_platform() {
-        let w = reveal(Os::Windows, Path::new(r"\\?\C:\logs\a b.log"));
+        let w = reveal(Os::Windows, Path::new(r"\\?\C:\logs\a b.log")).unwrap();
         assert_eq!(
             (w.program.to_str(), args(&w)),
             (
@@ -369,7 +384,7 @@ mod tests {
                 vec![r"/select,C:\logs\a b.log".to_string()]
             )
         );
-        let m = reveal(Os::Mac, Path::new("/logs/a.log"));
+        let m = reveal(Os::Mac, Path::new("/logs/a.log")).unwrap();
         assert_eq!(
             (m.program.to_str(), args(&m)),
             (
@@ -377,15 +392,32 @@ mod tests {
                 vec!["-R".to_string(), "/logs/a.log".to_string()]
             )
         );
-        let l = reveal(Os::Linux, Path::new("/logs/a.log"));
+        let l = reveal(Os::Linux, Path::new("/logs/a.log")).unwrap();
         assert_eq!(
             (l.program.to_str(), args(&l)),
             (Some("xdg-open"), vec!["/logs".to_string()])
         );
         assert_eq!(
-            args(&reveal(Os::Linux, Path::new("/"))),
+            args(&reveal(Os::Linux, Path::new("/")).unwrap()),
             vec!["/".to_string()]
         );
+    }
+
+    #[test]
+    fn a_verbatim_path_of_300_units_is_refused_not_handed_to_the_program() {
+        let long = format!(r"\\?\C:\{}", vec!["a".repeat(50); 6].join(r"\"));
+        assert!(long.encode_utf16().count() >= 300);
+        for e in [
+            reveal(Os::Windows, Path::new(&long)).unwrap_err(),
+            open_default(Os::Windows, Path::new(&long)).unwrap_err(),
+            open_at_line(Os::Windows, Path::new("code"), Path::new(&long), 1).unwrap_err(),
+        ] {
+            assert!(
+                e.reason.contains("longer than Windows") && e.next_step.contains("shorter path"),
+                "{e}"
+            );
+        }
+        assert!(reveal(Os::Windows, Path::new(r"\\?\Volume{1}\x")).is_err());
     }
 
     #[test]
@@ -396,7 +428,7 @@ mod tests {
             (Os::Mac, "open"),
             (Os::Linux, "xdg-open"),
         ] {
-            let i = open_default(os, Path::new(name));
+            let i = open_default(os, Path::new(name)).unwrap();
             assert_eq!(
                 (i.program.to_str(), args(&i)),
                 (Some(program), vec![name.to_string()])
@@ -406,7 +438,9 @@ mod tests {
                 Some(program)
             );
         }
-        let cmd = open_default(Os::Linux, Path::new("/a.log")).command();
+        let cmd = open_default(Os::Linux, Path::new("/a.log"))
+            .unwrap()
+            .command();
         assert_eq!(cmd.get_program(), "xdg-open");
         assert_eq!(
             cmd.get_args().collect::<Vec<_>>(),
@@ -417,10 +451,12 @@ mod tests {
     #[test]
     fn an_editor_opens_at_a_line() {
         let i = open_at_line(
+            Os::Windows,
             Path::new("/usr/bin/code"),
             Path::new(r"\\?\C:\src\a.rs"),
             42,
-        );
+        )
+        .unwrap();
         assert_eq!(
             args(&i),
             vec!["-g".to_string(), r"C:\src\a.rs:42".to_string()]
