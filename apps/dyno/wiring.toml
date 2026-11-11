@@ -40,6 +40,7 @@ modules = [
   "crates/dyno-platform/src/wakes.rs",
   "crates/dyno-platform/src/windows/activity.rs",
   "crates/dyno-platform/src/windows/counters.rs",
+  "crates/dyno-platform/src/windows/facts.rs",
   "crates/dyno-platform/src/windows/firewall_com.rs",
   "crates/dyno-platform/src/windows/pdh.rs",
   "crates/dyno-platform/src/windows/power.rs",
