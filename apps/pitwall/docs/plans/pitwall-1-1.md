@@ -141,8 +141,8 @@ goes straight onto it.
 
 **Temporary: the chat's build switch** (user, 2026-11-07). ADR 0049's switches are not built, so Rust decides from a Cargo
 feature: `chat` in `apps/pitwall/app/src-tauri/Cargo.toml`, reported by the command `chat_enabled`; the Playground shows its
-Chat tab only when it says so, and is the 1.0 Playground otherwise. On for the internal PoC build (`--features chat`), off by
-default, so the release workflow builds without it. **Remove** when ADR 0049 WP-5 lands: the feature becomes a `switches.toml`
+Chat tab only when it says so, and is the 1.0 Playground otherwise. Since 2026-11-12 (user decision, 2026-11-12: Pitwall 1.1 ships the chat on) it is a default
+feature, so the release workflow builds with it. **Remove** when ADR 0049 WP-5 lands: the feature becomes a `switches.toml`
 entry and the command reads the generated table.
 
 **Note for WP-3a (agent 2), from the user's answer of 2026-11-07:** the Chat tab gets a model picker of the loaded and catalog
@@ -153,7 +153,7 @@ picker sits in the Chat tab (`apps/pitwall/app/src/app/features/playground/playg
 **PoC path:** agent 3's chain WP-2a (2–3) → WP-4a (2–3) → WP-9a (2.5–3.5), then merging the branches into the PoC branch
 and the PoC build P (1–2): **7.5–11.5 working days**. B0 (3–5) reaches WP-9a in time, and WP-8, WP-1 and WP-3a have float.
 **The internal build the user can try: about 2026-11-19 to 2026-11-25**, a local build per ER-15 (never published), with the
-chat switched on at build time (ADR 0049), against Dyno 1.1.0 or, before Dyno is tagged, an rc build of Dyno. It shows:
+chat switched on at build time (ADR 0049; history, until 2026-11-12: the chat is now on in every build), against Dyno 1.1.0 or, before Dyno is tagged, an rc build of Dyno. It shows:
 connect to Dyno with a pasted key, pick tools, ask, approve the first call of each tool, see every call in the chat, Stop in
 every phase. It does not yet save chats, attach images, take speech, or show "Still working" in a quiet spell (that waits
 for `paddock-jobs::patience`, section 3). It needs a starter model with the `tools` capability; WP-6 checks the
@@ -167,7 +167,7 @@ T+5.
 ### Phase B: from T, the base lands
 
 1. B0b (0.5–1), then **L1: land the 1.1 base on `main`** after the rule 54 dispatches (section 4, step 4). The chat code
-   rides along behind its build switch, off.
+   rides along (history, until 2026-11-12: behind its build switch, off; the chat is on in the release build since).
 2. Then the shared chat crates (WP-8, WP-2a) land. One shared landing at a time, through the integrator.
 3. App-only base work in parallel: B1, B2, B4, B5, B6, B6b (after B1), B7 (by **2026-12-31** at the latest), B8.
 

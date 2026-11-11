@@ -146,7 +146,7 @@ panel('c4-3-ui-features', {
     ['engines', 2, 0, 'engines', 'features/engines', 'Builds, install with progress, self-test, version pin, roll back, features per build (supported, needs bNNNN).', { role: 'ui' }],
     ['apps', 0, 1, 'apps', 'features/apps · features/usage', 'Apps and keys, pairing approval, permissions and limits, per-app usage over time (the usage views), key shown once.', { role: 'ui' }],
     ['req', 1, 1, 'requests', 'features/requests', 'Recent requests with timing, the chosen model and alias; prompts only on demand.', { role: 'ui' }],
-    ['play', 2, 1, 'playground', 'features/playground', 'Compare tab, and the Chat tab (behind the chat build switch): attachments, pictures, saved chats, tools from connected apps.', { role: 'ui' }],
+    ['play', 2, 1, 'playground', 'features/playground', 'Compare tab, and the Chat tab (a default Cargo feature, on in the release build): attachments, pictures, saved chats, tools from connected apps.', { role: 'ui' }],
     ['bench', 0, 2, 'benchmarks', 'features/benchmarks', 'Tokens per second and time to first token per model.', { role: 'ui' }],
     ['set', 1, 2, 'settings', 'features/connected-apps · features/settings', 'Pitwall’s pages in the shell’s Settings window: Pitwall, Connected apps, Chats, Tray popup; the shell adds Logging.', { role: 'ui' }],
     ['tray', 2, 2, 'tray', 'features/tray · core/generated/widgets.ts', 'The popover (#/tray, its own small bootstrap) from the native tray: the widgets the user chose, in their order; Pause serving and Release memory.', { role: 'ui' }],
