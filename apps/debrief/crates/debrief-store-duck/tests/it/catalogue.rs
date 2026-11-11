@@ -301,3 +301,49 @@ fn a_file_that_live_follow_adds_is_catalogued_without_a_manual_wake() {
         lookup(&store, "Quokkasoft")
     );
 }
+
+/// A followed file that has been catalogued keeps growing: the names its new lines bring (an entity in the message, a
+/// value of a field that first appears in them) reach the catalogue too, not only those of a new file. The append
+/// marks its source, and only the appended rows are read again (the counts of the names it already had are kept).
+#[test]
+fn names_in_lines_appended_to_a_catalogued_file_reach_the_catalogue() {
+    let (logs, _dir, store) = setup("append");
+    let first = logs.0.join("a.log");
+    lines(&first, &["Started Alpha.Service.exe", "heartbeat", "Started Alpha.Service.exe"]);
+    let clef = logs.0.join("b.clef");
+    let event = |sec: u32, tenant: &str| format!("{{\"@t\":\"2026-10-14T10:00:{sec:02}Z\",\"@m\":\"served\",\"Tenant\":\"{tenant}\"}}\n");
+    std::fs::write(&clef, event(0, "Firstco")).unwrap();
+    store.open(std::slice::from_ref(&logs.0)).unwrap().wait().unwrap();
+    built(&store);
+    assert!(lookup(&store, "Quokkasoft").is_empty() && lookup(&store, "Lemurco").is_empty());
+    assert_eq!(lookup(&store, "Alpha.Service")[0].2, 2);
+
+    let mut text = std::fs::read_to_string(&first).unwrap();
+    text.push_str("2026-10-14 10:01:00 INFO Started Quokkasoft.Agent.exe and Alpha.Service.exe\n");
+    // The last line of a file is held back until the file stops growing: a plain line after the one that matters.
+    text.push_str("2026-10-14 10:01:01 INFO heartbeat\n");
+    std::fs::write(&first, text).unwrap();
+    let mut text = std::fs::read_to_string(&clef).unwrap();
+    text.push_str(&event(5, "Lemurco"));
+    std::fs::write(&clef, text).unwrap();
+    let appended = store.append_tail(&[first, clef]).unwrap();
+    assert!(appended.appended >= 2, "the step read the new lines: {appended:?}");
+    assert!(appended.added.is_empty(), "no new file: {appended:?}");
+
+    let catalogued = paddock_testkit::poll_until_within(Duration::from_secs(30), || {
+        !lookup(&store, "Quokkasoft").is_empty() && !lookup(&store, "Lemurco").is_empty()
+    });
+    assert!(
+        catalogued,
+        "the names in the appended lines were not catalogued: {:?} {:?}",
+        lookup(&store, "Quokkasoft"),
+        lookup(&store, "Lemurco")
+    );
+    assert!(
+        lookup(&store, "Firstco").iter().any(|(_, _, c)| *c == 1),
+        "a name of the first read keeps its count"
+    );
+    // Counted once more, not again from the start (that would be 2 + 3).
+    assert_eq!(lookup(&store, "Alpha.Service")[0].2, 3, "{:?}", lookup(&store, "Alpha.Service"));
+    built(&store);
+}

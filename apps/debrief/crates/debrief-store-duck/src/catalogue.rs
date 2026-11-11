@@ -29,7 +29,8 @@ use std::time::Duration;
 pub const VERSION: u32 = 1;
 
 /// Rows of the catalogue tables of `source` are removed with this.
-pub(crate) const DELETE_SQL: [&str; 3] = [
+pub(crate) const DELETE_SQL: [&str; 4] = [
+    "DELETE FROM catalogue_tail WHERE source = ?",
     "DELETE FROM catalogue WHERE source = ?",
     "DELETE FROM catalogue_trigrams WHERE source = ?",
     "DELETE FROM catalogue_sources WHERE source = ?",
@@ -37,7 +38,7 @@ pub(crate) const DELETE_SQL: [&str; 3] = [
 
 /// Removes the rows of the sources in `list` (comma-separated ids) or all rows with `None`.
 pub(crate) fn forget(conn: &Connection, list: Option<&str>) -> duckdb::Result<()> {
-    for t in ["catalogue", "catalogue_trigrams", "catalogue_sources"] {
+    for t in ["catalogue", "catalogue_trigrams", "catalogue_sources", "catalogue_tail"] {
         match list {
             Some(l) => conn.execute_batch(&format!("DELETE FROM {t} WHERE source IN ({l})"))?,
             None => conn.execute_batch(&format!("DELETE FROM {t}"))?,
@@ -58,11 +59,21 @@ fn pending(conn: &Connection) -> Result<Vec<u32>> {
 
 /// Reads one source into a tally: entities of the text of its events, then the values of its low-cardinality fields.
 fn build(conn: &Connection, source: u32, heavy: &Mutex<()>) -> Result<(Vec<Entry>, u64, u64)> {
+    let (entries, dropped, guids, _) = build_from(conn, source, None, heavy)?;
+    Ok((entries, dropped, guids))
+}
+
+/// [`build`] over the events of `source` with an id from `from_id` on (the rows live tail appended), or over all of
+/// them; the last number is how many events were read.
+fn build_from(conn: &Connection, source: u32, from_id: Option<u64>, heavy: &Mutex<()>) -> Result<(Vec<Entry>, u64, u64, u64)> {
     let mut tally = Tally::default();
+    let from = from_id.unwrap_or(0);
+    let mut read = 0u64;
     {
-        let mut stmt = conn.prepare("SELECT id, ts, message, exception FROM events WHERE source = ? LIMIT ?")?;
-        let mut rows = stmt.query(params![source, MAX_EVENTS_SCANNED as u64])?;
+        let mut stmt = conn.prepare("SELECT id, ts, message, exception FROM events WHERE source = ? AND id >= ? LIMIT ?")?;
+        let mut rows = stmt.query(params![source, from, MAX_EVENTS_SCANNED as u64])?;
         while let Some(r) = rows.next()? {
+            read += 1;
             // The process is exiting: stop reading (the source is catalogued again next time).
             if crate::shutdown::down() {
                 anyhow::bail!("the process is exiting");
@@ -79,7 +90,7 @@ fn build(conn: &Connection, source: u32, heavy: &Mutex<()>) -> Result<(Vec<Entry
         }
     }
     let sql = format!(
-        "WITH kv AS (SELECT unnest(map_keys(extra)) AS k, unnest(map_values(extra)) AS v FROM events WHERE source = ?),
+        "WITH kv AS (SELECT unnest(map_keys(extra)) AS k, unnest(map_values(extra)) AS v FROM events WHERE source = ? AND id >= ?),
 g AS (SELECT k, v, count(*) AS n FROM kv WHERE v IS NOT NULL AND length(v) BETWEEN 1 AND {} AND TRY_CAST(v AS DOUBLE) IS NULL GROUP BY k, v),
 d AS (SELECT k FROM g GROUP BY k HAVING count(*) <= {MAX_FIELD_DISTINCT}),
 r AS (SELECT g.k, g.v, g.n, row_number() OVER (PARTITION BY g.k ORDER BY g.n DESC, g.v) AS rk FROM g JOIN d USING (k))
@@ -90,13 +101,13 @@ SELECT k, v, n FROM r WHERE rk <= {MAX_VALUES_PER_FIELD} ORDER BY k, rk",
     // lock), so the catalogue cannot starve it of the memory limit.
     let _heavy = lock(heavy);
     let mut stmt = conn.prepare(&sql)?;
-    let mut rows = stmt.query(params![source])?;
+    let mut rows = stmt.query(params![source, from])?;
     while let Some(r) = rows.next()? {
         let (k, v, n): (String, String, u64) = (r.get(0)?, r.get(1)?, r.get(2)?);
         tally.add(Scope::Field(k), &v, 0, None, n);
     }
     let (dropped, guids) = (tally.dropped, tally.guids);
-    Ok((tally.finish(), dropped, guids))
+    Ok((tally.finish(), dropped, guids, read))
 }
 
 /// Rows (names and trigrams) committed since the last checkpoint that end a run of builds early: the store's own
@@ -105,7 +116,7 @@ SELECT k, v, n FROM r WHERE rk <= {MAX_VALUES_PER_FIELD} ORDER BY k, rk",
 const CHECKPOINT_AFTER_ROWS: u64 = 100_000;
 
 /// Writes the rows of a source (replacing older ones) if it is still ready; the rows written, or `None` when it is not.
-fn commit(conn: &Connection, source: u32, entries: &[Entry], dropped: u64, guids: u64) -> Result<Option<u64>> {
+fn commit(conn: &Connection, source: u32, entries: &[Entry], dropped: u64, guids: u64, seen_to: Option<u64>) -> Result<Option<u64>> {
     let ready: bool = conn.query_row("SELECT count(*) > 0 FROM sources WHERE id = ? AND ready", params![source], |r| {
         r.get(0)
     })?;
@@ -145,6 +156,124 @@ fn commit(conn: &Connection, source: u32, entries: &[Entry], dropped: u64, guids
             "INSERT INTO catalogue_sources VALUES (?, ?, ?, ?, ?)",
             params![source, entries.len() as u64, dropped, guids, VERSION],
         )?;
+        // Rows appended while the source was built are marked and read by the tail step; those the build read are not.
+        settle_mark(conn, source, seen_to)?;
+        Ok(rows)
+    })();
+    match written {
+        Ok(rows) => {
+            conn.execute_batch("COMMIT")?;
+            Ok(Some(rows))
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
+
+/// The newest event id of `source`, read before a build so the rows appended while it runs stay marked.
+fn newest_id(conn: &Connection, source: u32) -> Result<Option<u64>> {
+    Ok(conn.query_row("SELECT max(id) FROM events WHERE source = ?", params![source], |r| r.get(0))?)
+}
+
+/// After a read of the rows up to `seen_to`: the source's mark moves past them, and goes when no newer row exists.
+fn settle_mark(conn: &Connection, source: u32, seen_to: Option<u64>) -> Result<()> {
+    if let Some(hw) = seen_to {
+        conn.execute(
+            "UPDATE catalogue_tail SET from_id = ? WHERE source = ? AND from_id <= ?",
+            params![hw + 1, source, hw],
+        )?;
+    }
+    conn.execute(
+        "DELETE FROM catalogue_tail WHERE source = ? AND from_id > (SELECT coalesce(max(id), 0) FROM events WHERE source = ?)",
+        params![source, source],
+    )?;
+    Ok(())
+}
+
+/// Adds the names of the rows appended from `from_id` on to the rows of `source`: a name it already has counts more
+/// events and widens its first and last seen, a new name is added (with its trigrams) within the bounds of a build.
+/// The mark moves past what was read (`seen_to`, the newest id before the read) and goes if nothing newer exists;
+/// `None` when the source is not ready.
+fn commit_tail(conn: &Connection, source: u32, seen_to: Option<u64>, entries: &[Entry], dropped: u64, guids: u64) -> Result<Option<u64>> {
+    let ready: bool = conn.query_row("SELECT count(*) > 0 FROM sources WHERE id = ? AND ready", params![source], |r| {
+        r.get(0)
+    })?;
+    if !ready {
+        return Ok(None);
+    }
+    conn.execute_batch("BEGIN TRANSACTION")?;
+    let written = (|| -> Result<u64> {
+        let mut rows = 0u64;
+        let mut added = 0u64;
+        let mut names: u64 = conn.query_row("SELECT count(*) FROM catalogue WHERE source = ?", params![source], |r| r.get(0))?;
+        let mut per_field: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+        for e in entries {
+            let scope = e.scope.encode();
+            let updated = conn.execute(
+                "UPDATE catalogue SET n = n + ?,
+                   first_ts = CASE WHEN ? IS NULL THEN first_ts WHEN first_ts IS NULL THEN ? ELSE least(first_ts, ?) END,
+                   last_ts = CASE WHEN ? IS NULL THEN last_ts WHEN last_ts IS NULL THEN ? ELSE greatest(last_ts, ?) END,
+                   first_id = least(first_id, ?), last_id = greatest(last_id, ?)
+                 WHERE source = ? AND scope = ? AND lower(name) = lower(?)",
+                params![
+                    e.count, e.first_ts, e.first_ts, e.first_ts, e.last_ts, e.last_ts, e.last_ts, e.first_id, e.last_id, source, scope,
+                    e.name
+                ],
+            )?;
+            rows += updated as u64;
+            if updated > 0 {
+                continue;
+            }
+            // A new name, within the bounds a build keeps (names of the source, values of one field).
+            if names >= MAX_NAMES as u64 {
+                continue;
+            }
+            if matches!(e.scope, Scope::Field(_)) {
+                let have = match per_field.get(&scope) {
+                    Some(n) => *n,
+                    None => conn.query_row(
+                        "SELECT count(*) FROM catalogue WHERE source = ? AND scope = ?",
+                        params![source, scope],
+                        |r| r.get(0),
+                    )?,
+                };
+                if have >= MAX_VALUES_PER_FIELD as u64 {
+                    continue;
+                }
+                per_field.insert(scope.clone(), have + 1);
+            }
+            conn.execute(
+                "INSERT INTO catalogue VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    source,
+                    scope,
+                    e.name,
+                    squash(&e.name),
+                    e.count,
+                    e.first_ts,
+                    e.last_ts,
+                    e.first_id,
+                    e.last_id
+                ],
+            )?;
+            for t in trigram_keys(&squash(&e.name)) {
+                conn.execute(
+                    "INSERT INTO catalogue_trigrams VALUES (?, ?, ?, ?)",
+                    params![source, t, scope, e.name],
+                )?;
+                rows += 1;
+            }
+            names += 1;
+            added += 1;
+            rows += 1;
+        }
+        conn.execute(
+            "UPDATE catalogue_sources SET names = names + ?, dropped = dropped + ?, guids = guids + ? WHERE source = ?",
+            params![added, dropped, guids, source],
+        )?;
+        settle_mark(conn, source, seen_to)?;
         Ok(rows)
     })();
     match written {
@@ -357,14 +486,19 @@ fn step(running: &crate::shutdown::Active, s: &Shared, conn: &Connection, write_
         conn.execute_batch(
             "DELETE FROM catalogue WHERE source NOT IN (SELECT id FROM sources);
              DELETE FROM catalogue_trigrams WHERE source NOT IN (SELECT id FROM sources);
-             DELETE FROM catalogue_sources WHERE source NOT IN (SELECT id FROM sources);",
+             DELETE FROM catalogue_sources WHERE source NOT IN (SELECT id FROM sources);
+             DELETE FROM catalogue_tail WHERE source NOT IN (SELECT id FROM sources);",
         )?;
         pending(conn)?
     };
     let failed = lock(&s.failed).clone();
     let todo: Vec<u32> = todo.into_iter().filter(|id| !failed.contains(id)).collect();
     s.pending.store(todo.len() as u64, Ordering::SeqCst);
-    let Some(&source) = todo.first() else { return Ok(Turn::Idle) };
+    let Some(&source) = todo.first() else {
+        return step_tail(running, s, conn, write_lock);
+    };
+    // What the build is going to read: appended rows with an id above this are still marked for the tail step.
+    let seen_to = newest_id(conn, source)?;
     let built = match build(conn, source, &s.heavy) {
         Ok(b) => b,
         Err(e) => {
@@ -383,10 +517,15 @@ fn step(running: &crate::shutdown::Active, s: &Shared, conn: &Connection, write_
     if crate::shutdown::down() {
         return Ok(Turn::Idle);
     }
-    let written = commit(conn, source, &entries, dropped, guids)?;
+    let written = commit(conn, source, &entries, dropped, guids, seen_to)?;
     drop(writing);
     s.pending.store(todo.len() as u64 - 1, Ordering::SeqCst);
     s.changes.bump();
+    Ok(finish_turn(running, s, conn, write_lock, written))
+}
+
+/// The turn that follows a commit: its rows count toward the checkpoint.
+fn finish_turn(running: &crate::shutdown::Active, s: &Shared, conn: &Connection, write_lock: &Mutex<()>, written: Option<u64>) -> Turn {
     // A long run of builds does not keep its rows in memory until it ends.
     let unsaved = s.unsaved_rows.fetch_add(written.unwrap_or(0), Ordering::SeqCst) + written.unwrap_or(0);
     s.rows_high.fetch_max(unsaved, Ordering::SeqCst);
@@ -397,7 +536,48 @@ fn step(running: &crate::shutdown::Active, s: &Shared, conn: &Connection, write_
         s.unsaved.store(false, Ordering::SeqCst);
         s.changes.bump();
     }
-    Ok(Turn::Worked)
+    Turn::Worked
+}
+
+/// Reads again the rows live tail appended to one catalogued source (the first marked in `catalogue_tail`) and adds
+/// their names to its rows; nothing else of the source is read. Idle when no source is marked.
+fn step_tail(running: &crate::shutdown::Active, s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<Turn> {
+    let marked: Option<(u32, u64)> = {
+        let mut stmt = conn.prepare(
+            "SELECT t.source, t.from_id FROM catalogue_tail t
+             WHERE t.source IN (SELECT source FROM catalogue_sources WHERE version = ?) ORDER BY t.source LIMIT 1",
+        )?;
+        let mut rows = stmt.query(params![VERSION])?;
+        rows.next()?.map(|r| Ok::<_, duckdb::Error>((r.get(0)?, r.get(1)?))).transpose()?
+    };
+    let Some((source, from_id)) = marked else { return Ok(Turn::Idle) };
+    let started = std::time::Instant::now();
+    let seen_to = newest_id(conn, source)?;
+    let (entries, dropped, guids, rows_read) = match build_from(conn, source, Some(from_id), &s.heavy) {
+        Ok(b) => b,
+        Err(e) => {
+            // The mark stays: the next change of the store tries again.
+            return Err(e.context(format!("cataloguing the rows appended to source {source}")));
+        }
+    };
+    let Ok(writing) = write_lock.try_lock() else {
+        s.gate.news();
+        return Ok(Turn::Blocked);
+    };
+    s.unsaved.store(true, Ordering::SeqCst);
+    if crate::shutdown::down() {
+        return Ok(Turn::Idle);
+    }
+    let written = commit_tail(conn, source, seen_to, &entries, dropped, guids)?;
+    drop(writing);
+    s.changes.bump();
+    log::info!(
+        "catalogue: source {source} re-catalogued from its appended rows: {rows_read} rows read, {} names, {} rows written, {} ms",
+        entries.len(),
+        written.unwrap_or(0),
+        started.elapsed().as_millis()
+    );
+    Ok(finish_turn(running, s, conn, write_lock, written))
 }
 
 fn run(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) {
