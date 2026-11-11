@@ -26,6 +26,17 @@ test('the committed pin is valid and carries its hash in the url', () => {
   assert.equal(pin.name, 'vc_redist.x64.exe');
 });
 
+test('the installer hooks compare the registry with the pinned version, and its messages name the stable download link', () => {
+  const hooks = readFileSync(join(here, '../../app/src-tauri/windows/installer-hooks.nsh'), 'utf8');
+  const [major, minor, bld] = ['MAJOR', 'MINOR', 'BLD'].map((k) => hooks.match(new RegExp(`!define PITWALL_VC_${k} (\\d+)`))?.[1]);
+  assert.equal(`${major}.${minor}.${bld}`, realLock.x64.version.split('.').slice(0, 3).join('.'), 'the NSIS defines and vc-redist.lock.json name one version');
+  assert.match(hooks, /ClearErrors\n\s+StrCpy \$0 "not run"\n\s+ExecWait/, 'the exit code starts as "not run" and errors are cleared');
+  assert.match(hooks, /\$\{If\} \$\{Errors\}/, 'a package that could not start is a failure');
+  assert.match(hooks, /SetRebootFlag true/);
+  assert.match(hooks, /1618/);
+  assert.doesNotMatch(hooks, /aka\.ms\/vs\/17/);
+});
+
 test('a pin on another host, with a hash the url lacks or a bad size is refused', () => {
   assert.throws(() => readPin(pinOf({ url: 'https://example.com/x/' + hash + '/a.exe' })), /must start with/);
   assert.throws(() => readPin(pinOf({ url: 'https://download.visualstudio.microsoft.com/download/pr/g/' + 'a'.repeat(64) + '/a.exe' })), /does not carry/);
@@ -59,11 +70,13 @@ test('stage downloads, verifies and writes the file; a good staged file is not d
 
 test('stage fails closed on a wrong download and leaves no file', async () => {
   const { app, dest } = appWith(pinOf());
+  const noLock = appWith(null);
   try {
     await assert.rejects(stage({ app, fetchBytes: async () => new TextEncoder().encode('a different file!!!!!!') }), /pin says/);
     assert.equal(existsSync(dest), false);
-    await assert.rejects(stage({ app: appWith(null).app }), /is missing/);
+    await assert.rejects(stage({ app: noLock.app }), /is missing/);
   } finally {
     rmSync(app, { recursive: true, force: true });
+    rmSync(noLock.app, { recursive: true, force: true });
   }
 });

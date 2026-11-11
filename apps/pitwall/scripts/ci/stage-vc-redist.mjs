@@ -37,7 +37,7 @@ export function verify(bytes, pin) {
 }
 
 const download = async (url) => {
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(120_000) });
   if (!res.ok) throw new Error(`GET ${url} answered ${res.status}`);
   return new Uint8Array(await res.arrayBuffer());
 };

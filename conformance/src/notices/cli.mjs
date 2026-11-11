@@ -4,7 +4,7 @@
 //                   [--rust-json cargo-about.json ...] [--about about.toml] [--check]
 //   paddock-notices --config apps/<app>/paddock.ci.json [--root <repo>] [--check]
 //
-// --config reads the app's `notices` block ({ name, manifests, npm, out, about, rustJson }; paths relative to the app's
+// --config reads the app's `notices` block ({ name, manifests, npm, out, about, rustJson, components }; `components` are markdown files for bundled software that is neither a crate nor an npm package, appended verbatim; paths relative to the app's
 // folder, the folder of that file) so an app states its facts once and CI and developers run the same command. The npm
 // folder may be a workspace of the root lock above it (the monorepo). Without an `about.toml` of its own, the app uses the
 // shared one (templates/repo/about.toml), so the accepted licences are one list.
@@ -76,6 +76,7 @@ export function main(argv, { log = console.log, err = console.error, exec } = {}
     let manifestRel = o.manifest;
     let jsonRel = o['rust-json'];
     let aboutRel = o.about;
+    let componentRel = [];
     if (o.config) {
       const file = resolve(root, o.config);
       const n = JSON.parse(readFileSync(file, 'utf8')).notices;
@@ -88,6 +89,7 @@ export function main(argv, { log = console.log, err = console.error, exec } = {}
       manifestRel = o.manifest.length ? o.manifest : n.manifests ?? ['app/src-tauri/Cargo.toml'];
       jsonRel = o['rust-json'].length ? o['rust-json'] : n.rustJson ?? [];
       aboutRel = o.about ?? n.about;
+      componentRel = n.components ?? [];
     }
     const npmDir = resolve(base, npmRel);
     const outs = (outRel.length ? outRel : ['app/src-tauri/resources']).map((d) => resolve(base, d));
@@ -99,7 +101,7 @@ export function main(argv, { log = console.log, err = console.error, exec } = {}
     else throw new Error('no Rust manifest: pass --manifest <Cargo.toml> or --rust-json <file>');
     const rust = rustCrates(docs, base);
     const npm = npmPackages(npmDir);
-    const { markdown, counts } = render(rust.packages, npm.packages, name);
+    const { markdown, counts } = render(rust.packages, npm.packages, name, componentRel.map((f) => readFileSync(resolve(base, f), 'utf8')));
     for (const w of [...rust.warnings, ...npm.warnings]) err(`warning: ${w}`);
     const bad = nonPermissive([...rust.packages, ...npm.packages]);
     for (const b of bad) err(`NON-PERMISSIVE: ${b}`);

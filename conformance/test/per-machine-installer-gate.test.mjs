@@ -57,6 +57,17 @@ test('the gate names every way an installer fails it, with the next step', () =>
   assert.match(none.join('\n'), /could not be listed/);
 });
 
+test('--must-contain: an app file the installer has to carry is found by base name, and its absence is named with the next step', () => {
+  const files = ['$PLUGINSDIR/vc_redist.x64.exe', 'paddock-setup.exe'];
+  const args = { bytes: installer(), expectVersion: '1', name: 'a-setup.exe' };
+  assert.deepEqual(checkInstaller({ ...args, files, mustContain: ['vc_redist.x64.exe'] }), []);
+  const missing = checkInstaller({ ...args, files: ['paddock-setup.exe'], mustContain: ['vc_redist.x64.exe'] });
+  assert.equal(missing.length, 1);
+  assert.match(missing[0], /does not contain vc_redist\.x64\.exe: the app's bundle step stages it/);
+  assert.match(checkInstaller({ ...args, files: null, mustContain: ['vc_redist.x64.exe'] }).join('\n'), /whether vc_redist\.x64\.exe is inside/);
+  assert.deepEqual(checkInstaller({ ...args, files: ['paddock-setup.exe'] }), [], 'no list: nothing more is required');
+});
+
 const sig = (comment) => Buffer.from(`untrusted comment: signature from tauri secret key\nRUQxxxx\ntrusted comment: ${comment}\nRUQyyyy\n`).toString('base64');
 
 test('the signature names the installer as paddock-setup expects (product_version_arch-setup.exe)', () => {

@@ -1772,11 +1772,11 @@ On a clean Windows PC the llama.cpp `llama-server.exe` Pitwall downloads (pin b1
 self-test failed and the install was discarded with "it could not start" or an empty `--version failed:`. Measured on the Paddock
 test VM `clean-baseline` (speech spike 2026-11-11, section 6); shipped since pitwall-v1.0.3 (same pin, same self-test). The first
 hypothesis, that the self-test or the pinned asset was wrong, was refuted by the same binary starting after Microsoft's
-`vc_redist` was installed. Root cause: ADR 0032's import check ran only in Debrief's workflow and looks at what an installer ships,
-not at a binary fetched at run time; CI runners have Visual Studio's runtime, so every run was green (the 2026-10-30 lesson
+`vc_redist` was installed. Root cause: ADR 0032's import check (`conformance/ci/tauri-bundle.sh` runs it for every NSIS bundle) sees only
+the binaries an installer ships, never one fetched at run time; CI runners have Visual Studio's runtime, so every run was green (the 2026-10-30 lesson
 above, reached through a download). **Fix:** the Windows installer runs the pinned `vc_redist.x64.exe` (Microsoft recommends central
 deployment because it services the libraries: redistributing-visual-cpp-files), the engine's exit status `0xC0000135` is
-explained by `engines::exit_problem` with the next step, and `pitwall-release.yml` runs `windows-crt-imports.mjs`. **Class:** a
+explained by `engines::exit_problem` with the next step, and the installer build is proven on a clean VM. **Class:** a
 dependency the build machine has and a user's PC lacks, introduced through a binary no build step sees (second instance after the
 Dyno sidecar lesson); proposed for a redesign ADR: every downloaded or staged executable has a declared runtime-dependency check
 at install time.

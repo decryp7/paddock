@@ -7,6 +7,7 @@
 //   node conformance/release/check-per-machine-installer.mjs --dir <cargo profile folder holding bundle/nsis> --conf <tauri.conf.json>
 //        [--include crates/paddock-setup/nsis/paddock-per-machine.nsh] [--setup-manifest crates/paddock-setup/Cargo.toml]
 //        [--hashes crates/paddock-setup/released-hashes.json] [--root <build folder to look for in the program>]... [--tag-prefix <app>-v]
+//        [--must-contain <file name>]...   (files of the app's own the installer must carry, by base name)
 //        (the roots also come from PADDOCK_BUILD_FOLDER, PADDOCK_WORKSPACE, GITHUB_WORKSPACE and the home folder)
 //
 // Needs 7-Zip (it opens NSIS installers): on PATH or in C:\\Program Files\\7-Zip; without it the gate fails, it never passes unchecked.
@@ -246,11 +247,16 @@ export function crateVersion(toml) {
 }
 
 /** What is wrong with one installer, one sentence each with the next step. */
-export function checkInstaller({ bytes, files, expectVersion, name }) {
+export function checkInstaller({ bytes, files, expectVersion, name, mustContain = [] }) {
   const f = [];
   if (!hasAdministratorManifest(bytes)) f.push(`${name} does not request administrator level (installMode must be perMachine)`);
   if (files === null) f.push(`${name} could not be listed (7z): the gate cannot see whether paddock-setup.exe is inside`);
   else if (!files.some((p) => /(^|[\\/])paddock-setup\.exe$/i.test(p))) f.push(`${name} does not contain paddock-setup.exe: stage it before the bundle (scripts/stage-paddock-setup.mjs)`);
+  // An app's own files the installer must carry (`--must-contain vc_redist.x64.exe`: Pitwall's Visual C++ runtime package).
+  for (const want of mustContain) {
+    if (files === null) f.push(`${name} could not be listed (7z): the gate cannot see whether ${want} is inside`);
+    else if (!files.some((p) => p.split(/[\\/]/).pop().toLowerCase() === want.toLowerCase())) f.push(`${name} does not contain ${want}: the app's bundle step stages it before the installer is built`);
+  }
   const v = includeVersionOf(bytes);
   if (v !== expectVersion) f.push(`${name} carries include version ${v ?? 'none'}, expected ${expectVersion}: its hooks do not include the current paddock-per-machine.nsh`);
   return f;
@@ -265,10 +271,11 @@ function main(argv) {
     const k = argv[i].replace(/^--/, '');
     if (k === 'no-sig') o[k] = true;
     else if (k === 'root') (o.roots ??= []).push(argv[++i]);
+    else if (k === 'must-contain') (o.mustContain ??= []).push(argv[++i]);
     else o[k] = argv[++i];
   }
   if (!o.dir || !o.conf) {
-    console.error('usage: check-per-machine-installer.mjs --dir <folder> --conf <tauri.conf.json> [--include <nsh>] [--setup-manifest <Cargo.toml>] [--hashes <json>] [--root <build folder>]... [--tag-prefix <app>-v]');
+    console.error('usage: check-per-machine-installer.mjs --dir <folder> --conf <tauri.conf.json> [--include <nsh>] [--setup-manifest <Cargo.toml>] [--hashes <json>] [--root <build folder>]... [--tag-prefix <app>-v] [--must-contain <file>]...');
     return 2;
   }
   const includePath = o.include ?? 'crates/paddock-setup/nsis/paddock-per-machine.nsh';
@@ -307,7 +314,7 @@ function main(argv) {
       if (!o['no-sig']) problems.push(`${name}.sig is missing: the release is signed by the bundle step`);
     }
     problems.push(...checkNsisVersion({ bytes: readFileSync(path), name }));
-    problems.push(...checkInstaller({ bytes: readFileSync(path), files, expectVersion, name }));
+    problems.push(...checkInstaller({ bytes: readFileSync(path), files, expectVersion, name, mustContain: o.mustContain ?? [] }));
     if (files) {
       const tmp = mkdtempSync(join(tmpdir(), 'pm-gate-'));
       try {

@@ -46,34 +46,62 @@ pub enum EngineError {
     /// The build pinned for the model cannot be used (ADR 0018).
     #[error(transparent)]
     Pin(#[from] PinError),
-    /// The engine could not load because the Microsoft Visual C++ runtime is missing (Windows `STATUS_DLL_NOT_FOUND`).
-    #[error("{}", missing_runtime_message())]
-    MissingRuntime,
+    /// The engine could not load because the Microsoft Visual C++ runtime is missing (Windows `STATUS_DLL_NOT_FOUND`); the
+    /// names are the runtime files absent from System32.
+    #[error("{}", missing_runtime_message(.0))]
+    MissingRuntime(Vec<String>),
+    /// The engine could not load because a DLL it imports is missing although the Visual C++ runtime is installed.
+    #[error(
+        "The engine could not start because a DLL it needs is missing (Windows status 0xC0000135, STATUS_DLL_NOT_FOUND), although the \
+         Visual C++ runtime is installed. Next step: a file of the engine's folder may have been removed (for example by antivirus \
+         software); reinstall the engine from Settings > Engines, and check the antivirus quarantine."
+    )]
+    EngineDllMissing,
 }
 
 /// The Windows status a process ends with when the loader cannot find a DLL it imports (`STATUS_DLL_NOT_FOUND`).
 pub const STATUS_DLL_NOT_FOUND: u32 = 0xC000_0135;
 
+/// The runtime files a llama.cpp engine for Windows imports from the Visual C++ Redistributable (the installer brings them).
+pub const VC_RUNTIME_FILES: [&str; 3] = ["vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll"];
+
+/// Whether `name` is in the Windows System32 folder (always `true` off Windows: nothing to check there).
+pub fn in_system32(name: &str) -> bool {
+    if !cfg!(windows) {
+        return true;
+    }
+    let root = std::env::var_os("SystemRoot")
+        .or_else(|| std::env::var_os("windir"))
+        .unwrap_or_else(|| "C:\\Windows".into());
+    Path::new(&root).join("System32").join(name).is_file()
+}
+
 /// What an engine's exit status says about why it never ran: `Some` for a status Pitwall can explain. `code` is the raw
-/// exit code (`ExitStatus::code`; on Windows the 32-bit status, which Rust reports as an `i32`).
-pub fn exit_problem(code: Option<i32>) -> Option<EngineError> {
+/// exit code (`ExitStatus::code`; on Windows the 32-bit status, which Rust reports as an `i32`); `present` says whether a
+/// runtime file exists in System32, so the words blame the runtime only when it is really missing.
+pub fn exit_problem(code: Option<i32>, present: &dyn Fn(&str) -> bool) -> Option<EngineError> {
     // `as u32` reinterprets the i32 Windows status; a Unix exit code is never 0xC0000135 (they are 0 to 255).
-    code.filter(|c| *c as u32 == STATUS_DLL_NOT_FOUND)
-        .map(|_| EngineError::MissingRuntime)
+    code.filter(|c| *c as u32 == STATUS_DLL_NOT_FOUND)?;
+    let missing: Vec<String> = VC_RUNTIME_FILES.iter().filter(|f| !present(f)).map(|f| (*f).to_string()).collect();
+    Some(if missing.is_empty() {
+        EngineError::EngineDllMissing
+    } else {
+        EngineError::MissingRuntime(missing)
+    })
 }
 
 /// The words for a PC without the Visual C++ runtime: the cause, the raw status and the next step.
-fn missing_runtime_message() -> String {
+fn missing_runtime_message(missing: &[String]) -> String {
     let installer = if cfg!(target_arch = "aarch64") {
         "vc_redist.arm64.exe"
     } else {
         "vc_redist.x64.exe"
     };
     format!(
-        "The engine could not start because this PC has no Microsoft Visual C++ runtime (vcruntime140.dll and msvcp140.dll \
-         are missing; Windows status 0xC0000135, STATUS_DLL_NOT_FOUND). Next step: install \"Microsoft Visual C++ \
-         Redistributable\" ({installer} from https://aka.ms/vs/17/release/{installer}), or reinstall Pitwall, whose installer \
-         brings it, then try again."
+        "The engine could not start because this PC has no Microsoft Visual C++ runtime ({} missing from System32; Windows status \
+         0xC0000135, STATUS_DLL_NOT_FOUND). Next step: install \"Microsoft Visual C++ Redistributable\" ({installer} from \
+         https://aka.ms/vc14/{installer}), or reinstall Pitwall, whose installer brings it, then try again.",
+        missing.join(", ")
     )
 }
 
@@ -517,7 +545,7 @@ pub async fn self_test(bin: &Path) -> Result<Vec<String>, String> {
         .map_err(|_| "it did not answer within 30 seconds".to_string())?
         .map_err(|e| format!("it could not start: {e}"))?;
     if !v.status.success() {
-        if let Some(problem) = exit_problem(v.status.code()) {
+        if let Some(problem) = exit_problem(v.status.code(), &in_system32) {
             return Err(problem.to_string());
         }
         let tail: String = String::from_utf8_lossy(&v.stderr)
@@ -706,7 +734,7 @@ impl Engine for LlamaCpp {
             let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
             loop {
                 if let Ok(Some(status)) = child.try_wait() {
-                    if let Some(problem) = exit_problem(status.code()) {
+                    if let Some(problem) = exit_problem(status.code(), &in_system32) {
                         return Err(problem);
                     }
                     let t = tail.lock().map(|g| g.clone()).unwrap_or_default();
@@ -898,13 +926,14 @@ mod tests {
 
     #[test]
     fn an_engine_that_exits_with_status_dll_not_found_is_explained_as_a_missing_vc_runtime() {
-        // Windows reports the 32-bit status; Rust shows it as an i32.
-        let e = exit_problem(Some(STATUS_DLL_NOT_FOUND as i32)).expect("0xC0000135 is explained");
-        assert!(matches!(e, EngineError::MissingRuntime));
+        // Windows reports the 32-bit status; Rust shows it as an i32. Nothing of the runtime is in System32.
+        let e = exit_problem(Some(STATUS_DLL_NOT_FOUND as i32), &|_| false).expect("0xC0000135 is explained");
+        assert!(matches!(e, EngineError::MissingRuntime(_)));
         let m = e.to_string();
         for needed in [
             "Visual C++",
             "vcruntime140.dll",
+            "vcruntime140_1.dll",
             "msvcp140.dll",
             "0xC0000135",
             "vc_redist",
@@ -913,11 +942,32 @@ mod tests {
             assert!(m.contains(needed), "the message must contain {needed:?}: {m}");
         }
         // Other exits stay with their own words.
-        assert!(exit_problem(Some(1)).is_none());
-        assert!(exit_problem(Some(0)).is_none());
-        assert!(exit_problem(None).is_none());
-        // The same status as an unsigned value cast the other way.
-        assert!(exit_problem(Some(-1_073_741_515)).is_some());
+        assert!(exit_problem(Some(1), &|_| false).is_none());
+        assert!(exit_problem(Some(0), &|_| false).is_none());
+        assert!(exit_problem(None, &|_| false).is_none());
+        // The same status as the unsigned value cast the other way.
+        assert!(exit_problem(Some(-1_073_741_515), &|_| false).is_some());
+    }
+
+    #[test]
+    fn the_runtime_is_blamed_only_for_the_files_that_are_missing_and_an_installed_runtime_points_at_the_engine() {
+        // Only vcruntime140_1.dll is absent: the words name it, and not the two that are there.
+        let e = exit_problem(Some(STATUS_DLL_NOT_FOUND as i32), &|f| f != "vcruntime140_1.dll").unwrap();
+        let m = e.to_string();
+        assert!(
+            matches!(e, EngineError::MissingRuntime(ref v) if v == &["vcruntime140_1.dll"]),
+            "{m}"
+        );
+        assert!(m.contains("vcruntime140_1.dll missing") && !m.contains("msvcp140.dll"), "{m}");
+        // The whole runtime is there: a DLL of the engine itself is missing (quarantined, for example).
+        let e = exit_problem(Some(STATUS_DLL_NOT_FOUND as i32), &|_| true).unwrap();
+        assert!(matches!(e, EngineError::EngineDllMissing));
+        let m = e.to_string();
+        assert!(
+            m.contains("a DLL it needs is missing") && m.contains("quarantine") && m.contains("reinstall the engine"),
+            "{m}"
+        );
+        assert!(!m.contains("no Microsoft Visual C++ runtime"), "must not blame the runtime: {m}");
     }
 
     #[tokio::test]

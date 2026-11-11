@@ -349,8 +349,7 @@ jobs:
       sidecars: pitwall-server:--version
       # A per-machine app (ADR 0053), as pitwall-release.yml: the installer embeds paddock-setup.exe and is read as an artifact.
       windows-pre-bundle: node scripts/stage-paddock-setup.mjs --app pitwall && node apps/pitwall/scripts/ci/stage-vc-redist.mjs
-      windows-bundle-check: f() { node conformance/release/windows-crt-imports.mjs --src-tauri apps/pitwall/app/src-tauri --bin-dir "$(cygpath -m "$1")"; }; f
-      windows-installer-check: node conformance/release/check-per-machine-installer.mjs --conf apps/pitwall/app/src-tauri/tauri.conf.json --dir
+      windows-installer-check: node conformance/release/check-per-machine-installer.mjs --conf apps/pitwall/app/src-tauri/tauri.conf.json --must-contain vc_redist.x64.exe --dir
       setup-node: false
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     secrets:

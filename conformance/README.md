@@ -84,7 +84,7 @@ a package none of whose licence options is permissive fails both modes. The allo
 In the monorepo an app states its facts once, in the `notices` block of `apps/<app>/paddock.ci.json`
 (`{ "name", "manifests": [...], "npm": "app", "out": ["app/src-tauri/resources"] }`, paths relative to the app), and runs
 `scripts/notices.sh <app> [--check]` (`paddock-notices --config ...`). `npm` may be a workspace of the root lock: only its
-production closure is listed. Without an `about.toml` of its own an app uses `templates/repo/about.toml`. CI (`app-gates`) runs
+production closure is listed. An optional `components` list names markdown files (software that is neither a crate nor an npm package, such as a vendor installer the app carries) that are appended verbatim under "Bundled components". Without an `about.toml` of its own an app uses `templates/repo/about.toml`. CI (`app-gates`) runs
 the `--check` on the Linux leg of every app with the block.
 
 ## Configuration
