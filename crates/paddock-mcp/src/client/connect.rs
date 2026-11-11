@@ -10,7 +10,6 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// The longest answer to the key line that is read.
@@ -225,10 +224,12 @@ fn connect_watching(hint: &Discovery, limit: Duration, alive: &Alive) -> Result<
     }
 }
 
-/// Reads the answer line into `into` (at most [`MAX_ANSWER`] bytes) with one blocking read bounded by `limit`, while a watcher
-/// thread looks at the app's process every [`OWNER_LOOK`] and, when it is gone, ends the connection so the read returns at once.
-/// One read, not slices of a read timeout: Windows documents the socket as indeterminate after a receive timeout. A read that
-/// ends in EOF or an error because the owner died (the OS closes its sockets) is the app being gone, not a closed connection.
+/// Reads the answer line into `into` (at most [`MAX_ANSWER`] bytes) within `limit`, looking at the app's process every
+/// [`OWNER_LOOK`] while nothing arrives: a gone owner ends the wait at once. The socket is waited on with a readiness poll
+/// (mio) and read without blocking, never with a receive timeout (Windows documents the socket as indeterminate after one) and
+/// never by ending the connection from another thread (Windows does not complete a pending blocking `recv` on `shutdown`: the
+/// client then waited the whole limit, CI 7943). Bytes after the line stay in `reader` for the protocol. A read that ends in EOF
+/// or an error because the owner died (the OS closes its sockets) is the app being gone, not a closed connection.
 fn read_answer(
     stream: &SharedStream,
     reader: &mut BufReader<SharedStream>,
@@ -237,33 +238,82 @@ fn read_answer(
     limit: Duration,
     alive: &Arc<Alive>,
 ) -> Result<(), Waited> {
-    stream.0.set_read_timeout(Some(limit))?;
-    let gone = Arc::new(AtomicBool::new(false));
-    let (stop, tick) = std::sync::mpsc::channel::<()>();
-    let watcher = {
-        let (stream, hint, gone, alive) =
-            (stream.clone(), hint.clone(), gone.clone(), alive.clone());
-        std::thread::spawn(move || {
-            // The sender is dropped when the read is over: that wakes the tick and ends the watcher.
-            while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) =
-                tick.recv_timeout(OWNER_LOOK)
-            {
-                if !alive(&hint) {
-                    gone.store(true, Ordering::SeqCst);
-                    stream.shutdown(Shutdown::Both);
-                    break;
-                }
-            }
-        })
+    // A second handle on the same socket for the poll's registration; dropping it leaves the connection open.
+    let mut source = mio::net::TcpStream::from_std(stream.0.try_clone()?);
+    stream.0.set_nonblocking(true)?;
+    let read = wait_for_line(&mut source, reader, into, hint, limit, alive);
+    // Back to the blocking socket the protocol reads, whatever the wait ended with.
+    let restored = stream.0.set_nonblocking(false);
+    drop(source);
+    let read = match read {
+        Err(Waited::OwnerGone) => return Err(Waited::OwnerGone),
+        Err(Waited::Failed(e)) => Err(e),
+        Ok(n) => Ok(n),
     };
-    let read = reader.by_ref().take(MAX_ANSWER).read_until(b'\n', into);
-    drop(stop);
-    let _ = watcher.join();
     let ended = !matches!(read, Ok(n) if n > 0);
-    if gone.load(Ordering::SeqCst) || (ended && !alive(hint)) {
+    if ended && !alive(hint) {
         return Err(Waited::OwnerGone);
     }
+    restored?;
     read.map(|_| ()).map_err(Waited::Failed)
+}
+
+/// The poll loop of [`read_answer`]: the bytes appended to `into` (0 at EOF), [`Waited::OwnerGone`] when a look finds the owner
+/// gone, a `TimedOut` error at `limit`.
+fn wait_for_line(
+    source: &mut mio::net::TcpStream,
+    reader: &mut BufReader<SharedStream>,
+    into: &mut Vec<u8>,
+    hint: &Discovery,
+    limit: Duration,
+    alive: &Arc<Alive>,
+) -> Result<usize, Waited> {
+    let started = Instant::now();
+    let mut poll = mio::Poll::new()?;
+    poll.registry()
+        .register(source, mio::Token(0), mio::Interest::READABLE)?;
+    let mut events = mio::Events::with_capacity(4);
+    let max = usize::try_from(MAX_ANSWER).unwrap_or(usize::MAX);
+    let first = into.len();
+    loop {
+        // Readiness is edge-triggered: read until the socket has nothing more before waiting again.
+        loop {
+            let buf = match reader.fill_buf() {
+                Ok(buf) => buf,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(Waited::Failed(e)),
+            };
+            if buf.is_empty() {
+                return Ok(into.len() - first);
+            }
+            let room = max - (into.len() - first);
+            let (take, done) = match buf.iter().take(room).position(|&b| b == b'\n') {
+                Some(i) => (i + 1, true),
+                None => (buf.len().min(room), buf.len() >= room),
+            };
+            into.extend_from_slice(&buf[..take]);
+            reader.consume(take);
+            if done {
+                return Ok(into.len() - first);
+            }
+        }
+        let left = limit.saturating_sub(started.elapsed());
+        if left.is_zero() {
+            return Err(Waited::Failed(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("no answer within {} ms", limit.as_millis()),
+            )));
+        }
+        match poll.poll(&mut events, Some(left.min(OWNER_LOOK))) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(Waited::Failed(e)),
+        }
+        if events.is_empty() && !alive(hint) {
+            return Err(Waited::OwnerGone);
+        }
+    }
 }
 
 /// Connects with the default limits; see [`connect_loopback_with`].
@@ -348,7 +398,6 @@ fn connect_checked(
             limits.answer,
             &alive,
         )?;
-        stream.0.set_read_timeout(None)?;
         Ok::<usize, Waited>(first.len())
     })()
     .map_err(|e| match e {
@@ -401,7 +450,7 @@ fn connect_checked(
 mod tests {
     use super::*;
     use std::sync::Mutex;
-    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// A live owner that is busy: its answer comes only after the client has looked at its process several times, so the
     /// handshake keeps waiting while the owner is alive (no sleep: the peer waits for the third look, counted by the check).
