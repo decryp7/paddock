@@ -346,6 +346,19 @@ changes here, every app's copy is updated in the same change.
     helper already checks the caller per connection. The user chose "warn and accept" for click-to-elevate and a caller
     check for no-click paths.
 
+## Release builds (user, 2026-11-10 and 2026-11-12; ADR 0085)
+78. **A tag run reads no state that a non-tag run can write.** It builds from folders it creates, without a compile cache,
+    with signing keys only after the install step, and with bundler tools fetched from pinned URLs and SHA-256 values; a
+    check fails it otherwise. The real updater key reaches a step only on a tag (`startsWith(github.ref, 'refs/tags/')`),
+    and inside it `tauri build` only, never `npm ci` or a prepare command; a dispatch, nightly or branch run signs with a
+    throw-away key made in the job. Enforced today: `conformance/ci/updater-key.sh` (fails a key on a CI run that is not a
+    tag), `conformance/test/updater-key-tags.test.mjs` (every workflow step gates the key), and `conformance/ci/tauri-tools.mjs`
+    (`check` fails a tag on an unpinned or changed tool, and a tag reads no kept tool cache). The folders and the compile
+    cache follow with release mode (ADR 0085 WP-1 to WP-3).
+    *Why:* on 2026-11-10 synthetic experiments showed that a branch run can poison what a later tag run reads (an sccache
+    entry, a kept build folder, the cargo registry), and every rule 54 dispatch had given the updater key to `npm ci`
+    (`tauri-bundle.sh:55`), so every install script of every branch could read the key that signs updates.
+
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
 - **Rule 2:** every agent works in its own git worktree of `paddock` (sparse to its app where possible:
