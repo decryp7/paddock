@@ -115,9 +115,11 @@
   },
   "startup": {
     "btmVia": "helper",
+    "coverage": null,
     "entries": [],
     "osCount": 0,
     "signedCount": 0,
+    "signerRead": true,
     "total": 0,
     "unavailable": []
   },
