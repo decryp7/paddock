@@ -1898,3 +1898,9 @@ and the real key only on a tag (other runs sign with a throw-away key made in th
 the bundler tools come from pinned URLs and SHA-256 values into `<build folder>/.tauri` (`conformance/ci/tauri-tools.mjs`,
 `useLocalToolsDir`). A secret given to a whole step reaches every program the step starts; hand it to the one command that
 needs it.
+
+A review of that fix (2026-11-12) found the key moved into `env`'s command line (`env K=V npx tauri build`), where the process
+list shows it to every user of the machine, while the app's `beforeBuildCommand` still ran inside `tauri build` with it, and a
+Debrief Windows tag still reused a branch-written `node_modules`. Hand a secret over by `export` and `exec`, never as an
+argument; check what a tool starts on its own (a build hook) before calling a step "the one command"; and list every kept
+input a tag reads, not only the one that was found.

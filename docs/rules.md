@@ -349,12 +349,23 @@ changes here, every app's copy is updated in the same change.
 ## Release builds (user, 2026-11-10 and 2026-11-12; ADR 0085)
 78. **A tag run reads no state that a non-tag run can write.** It builds from folders it creates, without a compile cache,
     with signing keys only after the install step, and with bundler tools fetched from pinned URLs and SHA-256 values; a
-    check fails it otherwise. The real updater key reaches a step only on a tag (`startsWith(github.ref, 'refs/tags/')`),
-    and inside it `tauri build` only, never `npm ci` or a prepare command; a dispatch, nightly or branch run signs with a
-    throw-away key made in the job. Enforced today: `conformance/ci/updater-key.sh` (fails a key on a CI run that is not a
-    tag), `conformance/test/updater-key-tags.test.mjs` (every workflow step gates the key), and `conformance/ci/tauri-tools.mjs`
-    (`check` fails a tag on an unpinned or changed tool, and a tag reads no kept tool cache). The folders and the compile
-    cache follow with release mode (ADR 0085 WP-1 to WP-3).
+    check fails it otherwise. The real updater key reaches a step only on the app's release tag (`refs/tags/<app>-v`), and
+    inside it `tauri build` only, in its environment, never in a command line, `npm ci`, a prepare command or the app's
+    `beforeBuildCommand`; a dispatch, nightly or branch run signs with a throw-away key made in the job, and a tag never
+    does. Enforced today, and nothing more:
+    (a) `conformance/ci/updater-key.sh`: in CI it fails a private key on a run that is not a tag, and a tag that has the
+    public key but no private key; it hands the key to `tauri build` by `export` and `exec` only.
+    (b) `conformance/test/updater-key-tags.test.mjs`: every workflow step gates the key with the release tag prefix, Debrief's
+    bundle step takes the key before any `npm ci`, and the bundle jobs of `app-release.yml` and `debrief.yml` skip the kept
+    npm and Angular caches and Debrief's kept Windows `node_modules` on a tag (`conformance/ci/tag-node-caches.sh`).
+    (c) `conformance/ci/before-build.mjs`: the `beforeBuildCommand` runs before `tauri build` without the key, and `tauri build`
+    gets it emptied; a `beforeBundleCommand` is refused.
+    (d) `conformance/ci/tauri-tools.mjs`: every tool Tauri would download for an NSIS or AppImage bundle is pinned, a tag
+    reads no kept tool cache, and `check` fails a tag on any unpinned or changed file in `<build folder>/.tauri`.
+    (e) `conformance/release/updater-key-check.mjs` (every `.sig` verifies against the build's one public key) and, on a tag,
+    `check-per-machine-installer.mjs` (`paddock-setup.exe`'s `key_fingerprint` is that key).
+    Not yet enforced: the build folder, `CARGO_HOME`, the compile cache, the kept clone of a host runner and cargo build
+    scripts that still run with the key inside `tauri build`; they follow with release mode (ADR 0085 WP-1 to WP-3).
     *Why:* on 2026-11-10 synthetic experiments showed that a branch run can poison what a later tag run reads (an sccache
     entry, a kept build folder, the cargo registry), and every rule 54 dispatch had given the updater key to `npm ci`
     (`tauri-bundle.sh:55`), so every install script of every branch could read the key that signs updates.
