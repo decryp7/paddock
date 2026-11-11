@@ -31,15 +31,19 @@ fn take_instance_lock(data_dir: &std::path::Path) -> Result<std::fs::File, Error
         source,
     })?;
     let path = data_dir.join(ENGINE_LOCK_FILE);
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(&path)
-        .map_err(|source| Error::Io {
-            path: path.display().to_string(),
-            source,
-        })?;
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).truncate(false).write(true);
+    // Shared for read and write only, never for delete or rename: nothing can remove or replace the lock file under the engine that
+    // holds it (round 6 P2-9). Windows' default share mode would allow both.
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.share_mode(3);
+    }
+    let file = options.open(&path).map_err(|source| Error::Io {
+        path: path.display().to_string(),
+        source,
+    })?;
     match file.try_lock() {
         Ok(()) => Ok(file),
         Err(std::fs::TryLockError::WouldBlock) => Err(Error::Os {
@@ -254,11 +258,13 @@ pub fn run_foreground(data_dir: PathBuf) -> Result<(), Error> {
     // On Windows, `run` as an ordinary user is the **per-user engine** (ADR 0004, second amendment): its data folder is the
     // user's own and its pipe admits only that user. `run` as SYSTEM (the service's own entry is `service`) keeps the machine's.
     let (data_dir, mode) = engine_location(data_dir)?;
-    let socket_dir = crate::paths::socket_dir().unwrap_or_else(|| data_dir.clone());
+    let socket_dir = socket_dir_for(mode, &data_dir, crate::paths::socket_dir());
     let (fatal_tx, fatal_rx) = std::sync::mpsc::channel::<String>();
+    let own_dir = data_dir.clone();
     let host = Host::start_with(data_dir, socket_dir, mode, move |e| {
         let _ = fatal_tx.send(e);
-    })?;
+    })
+    .inspect_err(|e| log_engine_failure(&own_dir, mode, &e.to_string()))?;
     let signals = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -292,12 +298,37 @@ pub fn run_foreground(data_dir: PathBuf) -> Result<(), Error> {
     let fatal = fatal_rx.try_recv().ok();
     host.stop();
     match fatal {
-        Some(reason) => Err(Error::Os {
-            what: "Serving the Pitcrew app",
-            reason,
-        }),
+        Some(reason) => {
+            log_engine_failure(&own_dir, mode, &reason);
+            Err(Error::Os {
+                what: "Serving the Pitcrew app",
+                reason,
+            })
+        }
         None => Ok(()),
     }
+}
+
+/// The folder of the engine's socket (Unix) or of its recorded pipe name (Windows): the per-user engine keeps both in **its own**
+/// folder (the app reads `pipe.name` there), never in the machine's; the SYSTEM service uses the OS's socket folder when it has one.
+/// Pure.
+pub fn socket_dir_for(mode: ipc::ServeMode, data_dir: &std::path::Path, os_socket: Option<PathBuf>) -> PathBuf {
+    match mode {
+        ipc::ServeMode::User => data_dir.to_path_buf(),
+        ipc::ServeMode::System => os_socket.unwrap_or_else(|| data_dir.to_path_buf()),
+    }
+}
+
+/// Writes why the engine could not start or stopped to its own `logs/service.log` (ER-27): a user's engine has no console, so this is
+/// where the cause can be found from a diagnostic bundle. A log that cannot be written is the only thing left unsaid.
+pub fn log_engine_failure(data_dir: &std::path::Path, mode: ipc::ServeMode, cause: &str) {
+    let who = if mode == ipc::ServeMode::User {
+        "the engine for your own runners"
+    } else {
+        "the service"
+    };
+    let mut log = crate::logfile::LogWriter::open(&data_dir.join("logs"), "service.log", pitcrew_core::logs::RotationPolicy::default());
+    log.supervisor(crate::cleanup::now(), &format!("{who} stopped: {cause}"));
 }
 
 #[cfg(test)]
@@ -355,5 +386,62 @@ mod single_instance_tests {
         assert_eq!(before, after, "the refused engine must not overwrite pipe.name");
         first.stop();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod location_tests {
+    use super::*;
+
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
+    fn scratch(name: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("pitcrew-it-loc-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        p
+    }
+
+    /// Round 6 P1-A: on Windows the user's engine took `paths::socket_dir()`, which is `%ProgramData%\Pitcrew`, and wrote `pipe.name`
+    /// there; the app reads it from the engine's own folder.
+    #[test]
+    fn the_user_engine_keeps_its_socket_and_pipe_name_in_its_own_folder_and_the_service_uses_the_os_one() {
+        let own = PathBuf::from("/users/me/engine");
+        let machine = PathBuf::from("/programdata/pitcrew");
+        assert_eq!(socket_dir_for(ipc::ServeMode::User, &own, Some(machine.clone())), own);
+        assert_eq!(socket_dir_for(ipc::ServeMode::User, &own, None), own);
+        assert_eq!(
+            socket_dir_for(ipc::ServeMode::System, &machine, Some(PathBuf::from("/run/pitcrew"))),
+            PathBuf::from("/run/pitcrew")
+        );
+        assert_eq!(socket_dir_for(ipc::ServeMode::System, &machine, None), machine);
+    }
+
+    /// Every other test started the engine with one folder for both; with two, the engine's files stay in its data folder.
+    #[test]
+    fn an_engine_started_with_different_data_and_socket_folders_keeps_its_lock_and_log_in_the_data_folder() {
+        let (data, sock) = (scratch("data"), scratch("sock"));
+        let host = Host::start_with(data.clone(), sock.clone(), ipc::ServeMode::User, |_| {}).expect("starts");
+        assert!(data.join(ENGINE_LOCK_FILE).exists(), "the lock is in the engine's folder");
+        assert!(
+            !sock.join(ENGINE_LOCK_FILE).exists(),
+            "nothing of the engine's folder goes to the socket folder"
+        );
+        host.stop();
+        let _ = (std::fs::remove_dir_all(&data), std::fs::remove_dir_all(&sock));
+    }
+
+    /// Round 6 P1-A (ER-27): a failure that ends the engine is in its own service log.
+    #[test]
+    fn the_cause_of_an_engine_stopping_is_written_to_its_own_service_log() {
+        let data = scratch("fail");
+        log_engine_failure(&data, ipc::ServeMode::User, "the pipe could not be created (access denied)");
+        let text = std::fs::read_to_string(data.join("logs").join("service.log")).unwrap();
+        assert!(
+            text.contains("engine for your own runners stopped") && text.contains("access denied"),
+            "{text}"
+        );
+        let _ = std::fs::remove_dir_all(&data);
     }
 }

@@ -1757,28 +1757,11 @@ impl Supervisor {
             Request::RemoveRunner { runner } => {
                 let mut cfg = self.config.clone();
                 let before = cfg.runners.len();
-                let dir = cfg.runners.iter().find(|r| r.name == runner).map(|r| r.dir.clone());
                 cfg.runners.retain(|r| r.name != runner);
                 if cfg.runners.len() == before {
                     unknown(&runner)
                 } else {
-                    let answer = self.save_settings(cfg, now);
-                    if let (Response::Ok, Some(dir)) = (&answer, dir) {
-                        // Only once the runner is gone: its folder leaves the list of folders the service made. A failure is logged,
-                        // not an error: the runner is removed either way, and an entry left behind is bound to the old folder.
-                        match (self.env.forget_runner_dir)(&dir) {
-                            Ok(Some(line)) => self.log_service(now, &format!("runner {runner}: {line}")),
-                            Ok(None) => {}
-                            Err(why) => self.log_service(
-                                now,
-                                &format!(
-                                    "runner {runner}: its folder {} could not be removed from the folders the service made ({why})",
-                                    dir.display()
-                                ),
-                            ),
-                        }
-                    }
-                    answer
+                    self.save_settings(cfg, now)
                 }
             }
             Request::Register {
@@ -1918,7 +1901,30 @@ impl Supervisor {
         if let Err(e) = store::write_atomic(&self.env.data_dir.join(crate::paths::CONFIG_FILE), &text) {
             return err(ErrorCode::Internal, format!("the settings could not be saved: {e}"));
         }
+        // Runners the new configuration no longer has: their folders leave the list of folders the service made (whichever request
+        // removed them: a RemoveRunner or a SaveSettings that dropped them). Only once the file is written.
+        let gone: Vec<(RunnerName, PathBuf)> = self
+            .config
+            .runners
+            .iter()
+            .filter(|old| !checked.config.runners.iter().any(|n| n.name == old.name))
+            .map(|old| (old.name.clone(), old.dir.clone()))
+            .collect();
         self.apply_config(checked.config, now);
+        for (name, dir) in gone {
+            // A failure is logged, not an error: the runner is gone either way, and an entry left behind is bound to the old folder.
+            match (self.env.forget_runner_dir)(&dir) {
+                Ok(Some(line)) => self.log_service(now, &format!("runner {name}: {line}")),
+                Ok(None) => {}
+                Err(why) => self.log_service(
+                    now,
+                    &format!(
+                        "runner {name}: its folder {} could not be removed from the folders the service made ({why})",
+                        dir.display()
+                    ),
+                ),
+            }
+        }
         Response::Ok
     }
 

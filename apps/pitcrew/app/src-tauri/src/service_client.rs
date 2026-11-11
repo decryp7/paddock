@@ -420,4 +420,40 @@ mod tests {
         });
         assert!(matches!(r, Err(ClientError::Unavailable(_))));
     }
+
+    /// Round 6 P1-A on the VM: with the service installed (its folder is `%ProgramData%\Pitcrew`), `pitcrew-service.exe run` as the
+    /// standard user is the per-user engine; it records its pipe name in `%LOCALAPPDATA%\Pitcrew\engine`, where `pipe_of` reads it,
+    /// and answers there.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "VM: PITCREW_TEST_EXPECT=standard, the service installed, PITCREW_TEST_SERVICE_EXE names pitcrew-service.exe"]
+    #[allow(clippy::disallowed_methods, reason = "the test ends the engine it started, by its child handle")]
+    fn the_user_engine_started_beside_the_installed_service_is_found_through_pipe_of() {
+        use std::os::windows::process::CommandExt;
+        let exe = std::env::var_os("PITCREW_TEST_SERVICE_EXE").expect("PITCREW_TEST_SERVICE_EXE names pitcrew-service.exe");
+        let mut child = std::process::Command::new(exe)
+            .arg("run")
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .spawn()
+            .expect("the engine starts");
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        let found = loop {
+            if let Ok(name) = pipe_of(Engine::User) {
+                break Some(name);
+            }
+            if child.try_wait().ok().flatten().is_some() || std::time::Instant::now() > deadline {
+                break None;
+            }
+            std::thread::sleep(Duration::from_millis(250)); // conformance: hang-guard — polls for the engine's pipe.name, bounded by the 60 s deadline above
+        };
+        let answer = found.as_ref().map(|_| request_to(Engine::User, Request::Status));
+        println!("MEASURED pipe name: {found:?}; status: {answer:?}");
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(
+            found.is_some(),
+            "pipe_of never found the engine: it wrote pipe.name somewhere else, or did not start"
+        );
+        assert!(matches!(answer, Some(Ok(Response::Status { .. }))), "{answer:?}");
+    }
 }

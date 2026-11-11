@@ -158,7 +158,22 @@ impl RoutingClient {
                 }
             }
             (Ok(answer), _) => answer,
-            (Err(_), Ok(answer @ Response::Settings { .. })) => answer,
+            (
+                Err(_),
+                Ok(Response::Settings {
+                    mut config,
+                    problems,
+                    read_only,
+                }),
+            ) => {
+                // The same rule as when both answer: the user's engine is asked only for its own kind of runner.
+                config.runners.retain(|r| r.session == SessionMode::Interactive);
+                Response::Settings {
+                    config,
+                    problems,
+                    read_only,
+                }
+            }
             (Err(e), _) => return Err(e),
         })
     }
@@ -807,6 +822,24 @@ mod tests {
         user.config.lock().unwrap().runners.push(runner("same", "interactive"));
         let answer = router(&system, &user).request(Request::GetSettings).unwrap();
         assert!(matches!(&answer, Response::Error(e) if e.message.contains("same")), "{answer:?}");
+    }
+
+    /// Round 6 P2-4: the filter holds when only the user's engine answered.
+    #[test]
+    fn only_interactive_runners_are_taken_from_the_users_engine_when_the_service_does_not_answer() {
+        let (system, user) = (Fake::new(&[], true), Fake::new(&[], false));
+        user.config.lock().unwrap().runners.push(runner("impostor", "service"));
+        user.config.lock().unwrap().runners.push(runner("mine", "interactive"));
+        let Ok(Response::Settings { config, .. }) = router(&system, &user).request(Request::GetSettings) else {
+            panic!()
+        };
+        assert_eq!(
+            config.runners.len(),
+            1,
+            "{:?}",
+            config.runners.iter().map(|r| r.name.to_string()).collect::<Vec<_>>()
+        );
+        assert_eq!(config.runners[0].name.to_string(), "mine");
     }
 
     /// An engine that refuses every change.

@@ -48,7 +48,14 @@ pub fn write_atomic(path: &Path, text: &str) -> Result<(), Error> {
     }
     let tmp = sibling(path, ".tmp");
     {
-        let mut f = std::fs::File::create(&tmp).map_err(io)?;
+        // A temp name that is already there (left by a crash, or planted: a link, a second name for someone's file) is removed, never
+        // opened: the new file is made, so nothing written reaches what the old name pointed at.
+        match std::fs::remove_file(&tmp) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(io(e)),
+        }
+        let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp).map_err(io)?;
         f.write_all(text.as_bytes()).map_err(io)?;
         f.sync_all().map_err(io)?;
     }
@@ -88,6 +95,31 @@ mod tests {
         assert!(moved.ends_with("pitcrew.toml.damaged-7"));
         assert!(set_aside(&f, 8).is_err());
         assert!(read_bounded(&d, 10).is_err(), "a folder is not a file");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Round 6 P2-8: a temp name that is already there (a second name for someone's file) is removed, not written through.
+    #[cfg(unix)]
+    #[test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
+    fn a_planted_temp_name_is_replaced_not_written_through() {
+        let d = std::env::temp_dir().join(format!("pitcrew-it-store-tmp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("state.json");
+        let theirs = d.join("theirs.txt");
+        std::fs::write(&theirs, "theirs").unwrap();
+        std::fs::hard_link(&theirs, sibling(&f, ".tmp")).unwrap();
+        write_atomic(&f, "mine").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&theirs).unwrap(),
+            "theirs",
+            "the other name was written through"
+        );
+        assert_eq!(read_bounded(&f, 10).unwrap().as_deref(), Some("mine"));
         let _ = std::fs::remove_dir_all(&d);
     }
 }

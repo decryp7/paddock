@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -u
-W=/Volumes/d8sst7/dev-targets/wt/pitcrew-r5/scripts/vm-win.sh
-V=/Volumes/d7sst7/dev-targets/pitcrew-vm/vm4
+# Paths come from the repo this script is in and from PITCREW_VM_DIR (the folder holding the built exes and these .ps1 files), never
+# from a fixed worktree or drive (round 6).
+ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
+W=$ROOT/scripts/vm-win.sh
+V=${PITCREW_VM_DIR:?set PITCREW_VM_DIR to the folder that holds windows_caller.exe, app_lib.exe, pitcrew-service.exe and the .ps1 files}
 VMRUN="/Applications/VMware Fusion.app/Contents/Library/vmrun"
 cleanup() { timeout 300 $W stop; timeout 300 $W revert clean-baseline; echo "VM running after cleanup:"; "$VMRUN" -T fusion list | head -2; echo CLEANED; }
 trap cleanup EXIT

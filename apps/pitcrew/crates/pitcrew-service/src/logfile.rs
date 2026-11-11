@@ -5,9 +5,48 @@
 
 use pitcrew_core::logs::{RotationPolicy, RotationStep};
 use pitcrew_core::time::{format_rfc3339, Timestamp};
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+
+/// Whether the log's owner must be SYSTEM or Administrators: only the Windows service running as LocalSystem, the one writer that a
+/// user's hard link or planted file could turn against the machine. An engine in a user's session writes the user's own files.
+fn require_trusted_owner() -> bool {
+    #[cfg(windows)]
+    {
+        crate::platform::win_session::is_local_system()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+/// Opens a log for appending without ever following a link, and only if the file that was opened is acceptable (one name, a trusted
+/// owner where that is asked: [`paddock_service::privileged::trust_real::open_append_no_follow`], checked on the handle). A file that
+/// is not acceptable (a hard link a user holds, a planted file) is moved aside to a fresh `<name>.untrusted-<secs>-<n>` name and a new
+/// file is made, so what the service writes never reaches the other name; if it cannot be moved, nothing is written (round 6 P1-B).
+fn open_log(path: &Path) -> std::io::Result<File> {
+    let owner = require_trusted_owner();
+    match paddock_service::privileged::trust_real::open_append_no_follow(path, owner) {
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+            let secs = crate::cleanup::now().0;
+            for n in 0..100 {
+                let mut aside = path.as_os_str().to_os_string();
+                aside.push(format!(".untrusted-{secs}-{n}"));
+                let aside = PathBuf::from(aside);
+                if std::fs::symlink_metadata(&aside).is_ok() {
+                    continue;
+                }
+                std::fs::rename(path, &aside)
+                    .map_err(|e2| std::io::Error::new(e2.kind(), format!("{e}; it could not be moved aside ({e2})")))?;
+                return paddock_service::privileged::trust_real::open_append_no_follow(path, owner);
+            }
+            Err(e)
+        }
+        other => other,
+    }
+}
 
 /// Appends lines to `<dir>/<name>` and rotates it to `<name>.1` … `<name>.<keep>`.
 #[derive(Debug)]
@@ -73,7 +112,7 @@ impl LogWriter {
         if let Some(parent) = self.path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        match OpenOptions::new().create(true).append(true).open(&self.path) {
+        match open_log(&self.path) {
             Ok(f) => {
                 self.size = f.metadata().map(|m| m.len()).unwrap_or(0);
                 self.file = Some(f);
@@ -203,5 +242,50 @@ mod tests {
         assert!(!w.failed());
         assert_eq!(w.path(), Path::new(""));
         assert!(!Path::new("kept nowhere").exists());
+    }
+
+    /// Round 6 P1-B: a hard link a user holds to the log made the privileged writer append to the user's file's name too (and to the file
+    /// it pointed at). Now the file is moved aside and a new one is started; the other name keeps only what it had.
+    #[cfg(unix)]
+    #[test]
+    fn a_log_with_a_second_name_is_moved_aside_and_the_other_name_is_never_written() {
+        let d = temp("hardlink");
+        std::fs::create_dir_all(&d).unwrap();
+        let log = d.join("service.log");
+        std::fs::write(&log, "old line\n").unwrap();
+        let held = d.join("held.txt");
+        std::fs::hard_link(&log, &held).unwrap();
+        let mut w = LogWriter::open(&d, "service.log", RotationPolicy::default());
+        w.write_line("new line");
+        assert!(!w.failed());
+        assert_eq!(
+            std::fs::read_to_string(&held).unwrap(),
+            "old line\n",
+            "the other name was written to"
+        );
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "new line\n");
+        let asides = std::fs::read_dir(&d)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().starts_with("service.log.untrusted-"))
+            .count();
+        assert_eq!(asides, 1);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A link where the log should be is never followed: nothing is written to its target.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_where_the_log_should_be_is_not_written_through() {
+        let d = temp("symlink");
+        std::fs::create_dir_all(&d).unwrap();
+        let target = d.join("target.txt");
+        std::fs::write(&target, "mine").unwrap();
+        std::os::unix::fs::symlink(&target, d.join("service.log")).unwrap();
+        let mut w = LogWriter::open(&d, "service.log", RotationPolicy::default());
+        w.write_line("a line");
+        assert!(w.failed(), "a link is not a log");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "mine");
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

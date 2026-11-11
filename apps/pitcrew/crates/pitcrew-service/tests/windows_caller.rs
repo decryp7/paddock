@@ -327,11 +327,15 @@ fn the_folder_the_service_made_is_accepted_and_a_replacement_under_its_name_is_n
     println!("MEASURED data folder: {out:?}");
     let file = root.join(ADOPTED_FILE);
     let dir = root.join("runners").join("made");
-    let mut record = |made: &Path, id: Option<paddock_service::privileged::trust::FileIdentity>| -> Result<(), String> {
+    let mut record = |made: &Path, entry: pitcrew_service::protected::Entry| -> Result<(), String> {
+        use pitcrew_service::protected::Entry;
         let mut list = read_adopted(&file)?;
-        match id {
-            Some(id) => list.bind(made, id),
-            None => list.insert(made),
+        match entry {
+            Entry::Bound(id) => list.bind(made, id),
+            Entry::Pending => list.insert(made),
+            Entry::Forget => {
+                list.remove(made);
+            }
         }
         pitcrew_service::store::write_atomic(&file, &list.to_json()).map_err(|e| e.to_string())
     };

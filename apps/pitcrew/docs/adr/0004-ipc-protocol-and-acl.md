@@ -130,7 +130,7 @@ the SYSTEM service keeps the `session = service` runners in administrator-only f
 - **One engine per user.** The engine holds an exclusive lock on `engine.lock` in its folder for as long as it runs, taken before the
   supervisor, the pipe or `pipe.name`; a second engine on the same folder exits with a message that says so (round 5, P1-1).
 - **Its pipe's name** is 128 random bits from the OS's random source, new at each start. The pipe is created first and `pipe.name` is
-  written afterwards, atomically, in the engine's folder (a hint, checked for shape; the pipe's owner is still checked by the client).
+  written afterwards, atomically (retried briefly on a sharing violation), in the engine's **own** folder (`%LOCALAPPDATA%\\Pitcrew\\engine`, never `%ProgramData%\\Pitcrew`: `socket_dir_for`), a hint checked for shape; the pipe's owner is still checked by the client. The lock file is opened shared for read and write only, so nothing can delete or replace it under the engine; a failure that ends the engine is written to its own `logs\\service.log`.
   Another account can neither connect nor create an instance (VM rows written, not run yet).
 - **Routing never guesses.** A new runner is refused when the other engine already has its name; a request about one runner goes to
   the engine whose status listed it; a runner nobody lists gets an `UnknownRunner` answer, and if an engine did not answer the
@@ -153,7 +153,7 @@ from pitcrew-v1.0.1 it could pass a service runner whose deeper folders (`work\<
 gave users to add to them. So **a service runner's folder is accepted only if the service made it itself** (`prepare_runner_dir`: made
 empty, protected at creation) **or adopted it** (the shared adopt-a-tree step in `paddock-service`, `docs/adr-adopt-tree`, in review);
 the folders made or adopted are listed in `adopted-folders.json` in the data folder (administrator-only, checked at start, never in
-a runner's folder; text that cannot be read is the empty list). An upgraded tree, and a folder an administrator made by hand
+a runner's folder; a missing file is the empty list, a file that cannot be read or is not the list is an error with its cause, and each entry is bound to the file the folder is (volume and 128-bit file id, recorded first as pending and bound once the folder is made): a folder put under the recorded name later is refused, and an entry never bound is not accepted). An upgraded tree, and a folder an administrator made by hand
 (including under `C:\Program Files`), stays blocked until it is adopted. The guard asks for this before it looks at the folder
 (`check_adopted_runner_folder`); the fake-port test for the upgraded grandchild now runs and asserts the runner is blocked, and the VM
 row that shows a user cannot write in an adopted tree stays ignored until the shared step exists. (4) `EnginePrune` and

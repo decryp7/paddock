@@ -266,7 +266,34 @@ pub fn new_user_pipe_name() -> std::io::Result<String> {
 /// # Errors
 /// The folder or the file could not be written.
 pub fn record_user_pipe_name(data_dir: &std::path::Path, name: &str) -> Result<(), crate::error::Error> {
-    crate::store::write_atomic(&data_dir.join(pitcrew_core::service_paths::USER_ENGINE_PIPE_FILE), name)
+    retry_on_sharing_violation(
+        5,
+        &mut |attempt| std::thread::sleep(std::time::Duration::from_millis(20 * u64::from(attempt))),
+        || crate::store::write_atomic(&data_dir.join(pitcrew_core::service_paths::USER_ENGINE_PIPE_FILE), name),
+    )
+}
+
+/// Windows' sharing and lock violations (a reader or a scanner holds the file for a moment) are transient: `op` is tried again, at most
+/// `tries` times in all, with `pause(attempt)` between; any other error, and the last one, is returned as it is (round 6 P2-10).
+pub fn retry_on_sharing_violation<T>(
+    tries: u32,
+    pause: &mut dyn FnMut(u32),
+    mut op: impl FnMut() -> Result<T, crate::error::Error>,
+) -> Result<T, crate::error::Error> {
+    const ERROR_SHARING_VIOLATION: i32 = 32;
+    const ERROR_LOCK_VIOLATION: i32 = 33;
+    let mut attempt = 1;
+    loop {
+        match op() {
+            Err(crate::error::Error::Io { source, .. })
+                if attempt < tries && matches!(source.raw_os_error(), Some(ERROR_SHARING_VIOLATION | ERROR_LOCK_VIOLATION)) =>
+            {
+                pause(attempt);
+                attempt += 1;
+            }
+            other => return other,
+        }
+    }
 }
 
 /// The per-user engine's pipe name recorded in `dir`, if the file holds a name this module could have made.
@@ -522,6 +549,44 @@ mod user_pipe_name_tests {
         let p = std::env::temp_dir().join(format!("pitcrew-it-pipename-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         p
+    }
+
+    /// Round 6 P2-10: a sharing violation on the atomic rename is retried a few times, any other error is not.
+    #[test]
+    fn a_sharing_violation_is_retried_briefly_and_any_other_error_is_not() {
+        use crate::error::Error;
+        let io = |code: i32| Error::Io {
+            path: "pipe.name".into(),
+            source: std::io::Error::from_raw_os_error(code),
+        };
+        let mut calls = 0;
+        let mut pauses = vec![];
+        let out = retry_on_sharing_violation(5, &mut |a| pauses.push(a), || {
+            calls += 1;
+            if calls < 3 {
+                Err(io(32))
+            } else {
+                Ok(calls)
+            }
+        });
+        assert_eq!(out.unwrap(), 3);
+        assert_eq!(pauses, [1, 2]);
+        // Never more than `tries`, and the last error is the one reported.
+        let mut calls = 0;
+        let e = retry_on_sharing_violation::<()>(3, &mut |_| {}, || {
+            calls += 1;
+            Err(io(33))
+        })
+        .unwrap_err();
+        assert_eq!((calls, e.to_string().contains("pipe.name")), (3, true));
+        // Another error: once.
+        let mut calls = 0;
+        assert!(retry_on_sharing_violation::<()>(5, &mut |_| panic!("no pause"), || {
+            calls += 1;
+            Err(io(5))
+        })
+        .is_err());
+        assert_eq!(calls, 1);
     }
 
     #[test]

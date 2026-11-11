@@ -739,6 +739,27 @@ fn a_new_runner_whose_folder_does_not_exist_yet_is_made_and_then_accepted_by_the
     h.finish();
 }
 
+/// Round 6 P2-5: a SaveSettings that drops a runner forgets its folder too, not only a RemoveRunner.
+#[test]
+fn a_save_that_drops_a_runner_forgets_its_folder_in_the_list_the_service_keeps() {
+    let seen: Arc<std::sync::Mutex<Vec<PathBuf>>> = Arc::default();
+    let s = seen.clone();
+    FORGET.with(|f| {
+        *f.borrow_mut() = Some(Arc::new(move |dir: &std::path::Path| {
+            s.lock().unwrap().push(dir.to_path_buf());
+            Ok(None)
+        }));
+    });
+    let mut h = Harness::new("forgetsave", "mode=idle\n", true);
+    let Response::Settings { mut config, .. } = h.ask(Request::GetSettings) else {
+        panic!()
+    };
+    config.runners.clear();
+    assert_eq!(h.ask(Request::SaveSettings { config }), Response::Ok);
+    assert_eq!(*seen.lock().unwrap(), [h.runner_dir.clone()]);
+    h.finish();
+}
+
 /// Round 5 P2-3: removing a runner forgets its folder in the list of folders the service made, once the runner is gone; a hook that
 /// fails does not undo the removal.
 #[test]

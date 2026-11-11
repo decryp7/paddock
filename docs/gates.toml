@@ -722,6 +722,16 @@ review_by = 2026-12-20
 approved = "coordinator"
 
 [[ignored]]
+path = "apps/pitcrew/app/src-tauri/src/service_client.rs"
+tests = ["the_user_engine_started_beside_the_installed_service_is_found_through_pipe_of"]
+gate = "not-gated"
+reason = "VM-only row: it needs a Windows machine, the installed service and PITCREW_TEST_SERVICE_EXE; run with --include-ignored through scripts/vm-lock-run.sh; no harness line runs it yet"
+owner = "Pitcrew 1.1"
+since = 2026-11-11
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
 path = "apps/dyno/crates/dyno-agent/tests/helper_vm.rs"
 tests = ["the_helper_state_and_one_action_on_this_machine", "the_helper_readers_on_this_machine"]
 gate = "not-gated"
