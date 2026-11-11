@@ -161,10 +161,10 @@ You can do the same by hand to try it:
 ```sh
 curl -s -X POST http://127.0.0.1:11435/x/v1/pair \
   -H 'Content-Type: application/json' -d '{"name":"My test tool"}'
-# {"pairingId":"pr1-3f9a1c","code":"482913","expiresInSecs":300}
+# {"pairingId":"pr-3f9a1c...","pollToken":"9be0...","code":"482913","expiresInSecs":300}
 
 # approve it in Pitwall (Apps & keys), then:
-curl -s http://127.0.0.1:11435/x/v1/pair/pr1-3f9a1c
+curl -s -H 'X-Pitwall-Pair-Token: <pollToken from the answer above>' http://127.0.0.1:11435/x/v1/pair/<pairingId>
 # {"status":"pending"}   ... then {"status":"approved","key":"pw_..."}   (or "denied")
 ```
 

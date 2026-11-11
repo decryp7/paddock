@@ -31,8 +31,10 @@ app for Ollama-style tools that cannot send a key.
 
 **Pairing** (ADR 0009). `POST /x/v1/pair {name}` (loopback, no key) creates a request with a six-digit code, valid 5 minutes,
 at most 8 waiting at once (name 1 to 60 characters, no control characters). The app shows the code; the user approves in
-Pitwall with the permissions to grant (or denies). The app polls `GET /x/v1/pair/{id}` and receives its key exactly once;
-later polls say it was delivered. Expired or unknown requests read as denied. Pairing needs a person at the Pitwall window.
+Pitwall with the permissions to grant (or denies). The answer to the POST carries the id (128 random bits, shown in Pitwall's window) and a separate
+256-bit `pollToken` that only the requester gets (ADR 0092). The app polls `GET /x/v1/pair/{id}` with the token in the
+`X-Pitwall-Pair-Token` header and receives its key exactly once; later polls say it was delivered. Expired or unknown
+requests, a missing or wrong token and a request closed after 5 polls with a wrong token all read as denied. Pairing needs a person at the Pitwall window.
 
 **Permissions and limits** (`AppPermissions`, checked before queueing): allowed models (all by default), most urgent
 priority, tools, extended APIs (default on), requests per minute (sliding window), tokens per UTC day, and concurrent

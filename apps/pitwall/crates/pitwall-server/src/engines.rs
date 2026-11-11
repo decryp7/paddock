@@ -701,7 +701,7 @@ impl Engine for LlamaCpp {
         Box::pin(async move {
             let (bin, build) = self.binary_for(Some(&launch.alias))?;
             let port = LoopbackPort::new(launch.port).ok_or_else(|| EngineError::Start("bad port".into()))?;
-            let key = hex(&crate::paths::random32()[..16]);
+            let key = paddock_secrets::random_token(16).map_err(|e| EngineError::Start(e.to_string()))?;
             let mut c = process::command(&bin, bin.parent());
             c.args(llama::args(launch))
                 .env(llama::API_KEY_ENV, &key)
@@ -815,10 +815,6 @@ impl LlamaCpp {
             None => f.id.clone(),
         }
     }
-}
-
-pub(crate) fn hex(b: &[u8]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
 /// The self-test state as the UI shows it.

@@ -427,9 +427,17 @@ fn id(prefix: &str) -> String {
     format!("{prefix}-{:x}{:x}", now_ms(), rand_suffix())
 }
 
+/// A suffix that keeps ids made in the same millisecond apart. Not a secret, so a failed OS source falls back to the
+/// clock's sub-millisecond part instead of failing the request.
 fn rand_suffix() -> u32 {
-    let b = crate::paths::random32();
-    u32::from_le_bytes([b[0], b[1], b[2], b[3]])
+    crate::paths::random32().map_or_else(
+        |_| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.subsec_nanos())
+        },
+        |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]),
+    )
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -907,13 +915,14 @@ async fn x_pair(State(st): S, h: HeaderMap, body: Bytes) -> Response {
             Some(Value::Bool(b)) => *b,
             Some(_) => return Err(ApiError::invalid("rePair must be true or false")),
         };
-        let b = crate::paths::random32();
-        let r = st
+        let b = crate::paths::random32().map_err(|e| ApiError::new(ErrorKind::NotAvailable, e.to_string()))?;
+        let (r, poll_token) = st
             .auth
             .request_pairing(name, u32::from_le_bytes([b[0], b[1], b[2], b[3]]), re_pair, now_ms())
             .map_err(|e| match e {
                 AuthError::Invalid(m) => ApiError::invalid(m),
                 AuthError::Unauthorized => ApiError::new(ErrorKind::Authentication, e.to_string()),
+                AuthError::Random(_) => ApiError::new(ErrorKind::NotAvailable, e.to_string()),
             })?;
         st.event(
             EventKind::Pairing,
@@ -937,18 +946,22 @@ async fn x_pair(State(st): S, h: HeaderMap, body: Bytes) -> Response {
         });
         Ok((
             StatusCode::ACCEPTED,
-            axum::Json(json!({"pairingId": r.id, "code": r.code, "expiresInSecs": 300})),
+            axum::Json(json!({"pairingId": r.id, "pollToken": poll_token, "code": r.code, "expiresInSecs": 300})),
         )
             .into_response())
     };
     go().unwrap_or_else(|e| fail(&e, fam))
 }
 
+/// The header that carries a pairing request's poll token on `GET /x/v1/pair/{id}`.
+const PAIR_TOKEN_HEADER: &str = "x-pitwall-pair-token";
+
 async fn x_pair_poll(State(st): S, h: HeaderMap, Path(pid): Path<String>) -> Response {
     if !privacy::host_allowed(header_str(&h, "host"), &[]) {
         return fail(&ApiError::new(ErrorKind::Permission, "not a local address"), ApiFamily::Extended);
     }
-    let v = match st.auth.poll_pairing(&pid, now_ms()) {
+    // The poll token (from the POST answer) is the proof that this caller made the request; the id alone is not.
+    let v = match st.auth.poll_pairing(&pid, header_str(&h, PAIR_TOKEN_HEADER), now_ms()) {
         PairStatus::Pending => json!({"status": "pending"}),
         PairStatus::Approved(Some(k)) => json!({"status": "approved", "key": k}),
         PairStatus::Approved(None) => json!({"status": "approved", "key": null, "note": "the key was already delivered"}),

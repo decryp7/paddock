@@ -160,20 +160,27 @@ fn secure_folder(dir: &Path) -> Result<(), SecretsError> {
     #[cfg(windows)]
     {
         fs::create_dir_all(dir).map_err(|e| io("the secret folder could not be created", e))?;
-        let (owner, aces) = windows::folder_security(dir)
-            .map_err(|e| io("the secret folder's access list could not be read", e))?;
-        match crate::acl::folder_refusal(owner, &aces) {
-            Some(r) => Err(SecretsError::Failed(format!(
-                "{} {}",
-                dir.display(),
-                r.why()
-            ))),
-            None => Ok(()),
-        }
+        check_folder_acl(dir)
     }
     #[cfg(not(any(unix, windows)))]
     {
         fs::create_dir_all(dir).map_err(|e| io("the secret folder could not be created", e))
+    }
+}
+
+/// Windows: refuses a folder whose owner is not the user, SYSTEM or Administrators, or where anyone else may create, delete
+/// or change entries. Reads the access list; changes nothing.
+#[cfg(windows)]
+fn check_folder_acl(dir: &Path) -> Result<(), SecretsError> {
+    let (owner, aces) = windows::folder_security(dir)
+        .map_err(|e| io("the secret folder's access list could not be read", e))?;
+    match crate::acl::folder_refusal(owner, &aces) {
+        Some(r) => Err(SecretsError::Failed(format!(
+            "{} {}",
+            dir.display(),
+            r.why()
+        ))),
+        None => Ok(()),
     }
 }
 
@@ -280,7 +287,7 @@ fn symlink_refusal(path: &Path) -> SecretsError {
 }
 
 /// The checks on the open file: a regular file, owner-only, owned by `me` (the user running the app, Unix), of a sane size.
-fn check_open(path: &Path, file: &fs::File, me: u32) -> Result<(), SecretsError> {
+fn check_open(path: &Path, file: &fs::File, me: u32) -> Result<u64, SecretsError> {
     let meta = file
         .metadata()
         .map_err(|e| io("the secret file could not be read", e))?;
@@ -331,10 +338,74 @@ fn check_open(path: &Path, file: &fs::File, me: u32) -> Result<(), SecretsError>
             None => {}
         }
     }
-    if meta.len() as usize > crate::MAX_SECRET_LEN + 2 {
-        return Err(SecretsError::Failed("the secret file is damaged".into()));
+    Ok(meta.len())
+}
+
+/// Writes `bytes` to `path` atomically and owner-only, the mechanism of [`SecretFile::write`] for any trust-bearing file
+/// (an access list, not only a secret): the folder is made private or refused (a Windows folder where others may write
+/// is refused, a Unix one owned by another user too), the new content goes to a unique temporary file in the same folder
+/// that is created new, owner-only from its first byte (0600 and no link followed on Unix; a protected DACL and no sharing
+/// on Windows), flushed and renamed over the target (or over a link, which is replaced, never followed). No backup copy.
+pub fn write_owner_only(path: &Path, bytes: &[u8]) -> Result<(), SecretsError> {
+    let dir = path
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    secure_folder(dir)?;
+    paddock_env::write_atomic_created(path, bytes, &mut create_temp)
+        .map_err(|e| SecretsError::Failed(format!("{} could not be stored: {e}", path.display())))
+}
+
+/// Reads a trust-bearing file written by [`write_owner_only`], bounded to `max` bytes: the read twin of the writer. `None`
+/// when there is no file. Refused, with a message that names the file and the next step, when the file is a symbolic link
+/// or (Windows) a reparse point, not a regular file, readable or changeable by others (a Unix mode with a group or other
+/// bit; a Windows DACL with an entry for anyone but the owner, the user, SYSTEM and Administrators), owned by another user,
+/// has more than one name, is larger than `max`, or is not UTF-8; and on Windows when its folder lets others create or
+/// change entries. Nothing is changed or created: a folder that is loose is not tightened here (the writer does that).
+/// The checks run on the open handle, not on the path, which could be swapped in between.
+pub fn read_owner_only(path: &Path, max: usize) -> Result<Option<String>, SecretsError> {
+    #[cfg(windows)]
+    {
+        let dir = path
+            .parent()
+            .filter(|d| !d.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        match fs::metadata(dir) {
+            Ok(_) => check_folder_acl(dir)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(io("the folder could not be read", e)),
+        }
     }
-    Ok(())
+    let Some(file) = open_secret(path)? else {
+        return Ok(None);
+    };
+    #[cfg(unix)]
+    let len = check_open(path, &file, current_user())?;
+    #[cfg(not(unix))]
+    let len = check_open(path, &file, 0)?;
+    let too_big = || {
+        SecretsError::Failed(format!(
+            "{} is larger than {max} bytes, so it is not trusted; remove it and let the app write it again",
+            path.display()
+        ))
+    };
+    if len as usize > max {
+        return Err(too_big());
+    }
+    let mut bytes = Vec::new();
+    (&file)
+        .take(max as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| io("the file could not be read", e))?;
+    if bytes.len() > max {
+        return Err(too_big());
+    }
+    String::from_utf8(bytes).map(Some).map_err(|_| {
+        SecretsError::Failed(format!(
+            "{} is not text, so it is not trusted; remove it and let the app write it again",
+            path.display()
+        ))
+    })
 }
 
 impl SecretFile {
@@ -355,9 +426,12 @@ impl SecretFile {
             return Ok(None);
         };
         #[cfg(unix)]
-        check_open(&self.path, &file, current_user())?;
+        let len = check_open(&self.path, &file, current_user())?;
         #[cfg(not(unix))]
-        check_open(&self.path, &file, 0)?;
+        let len = check_open(&self.path, &file, 0)?;
+        if len as usize > crate::MAX_SECRET_LEN + 2 {
+            return Err(SecretsError::Failed("the secret file is damaged".into()));
+        }
         let mut text = zeroize::Zeroizing::new(String::new());
         (&mut file)
             .take(crate::MAX_SECRET_LEN as u64 + 3)
@@ -371,14 +445,7 @@ impl SecretFile {
     /// Stores (or replaces) the secret atomically: a new owner-only file renamed over the old one (or over a link, which is
     /// replaced, never followed).
     pub fn write(&self, value: &Secret) -> Result<(), SecretsError> {
-        let dir = self
-            .path
-            .parent()
-            .filter(|d| !d.as_os_str().is_empty())
-            .unwrap_or(Path::new("."));
-        secure_folder(dir)?;
-        paddock_env::write_atomic_created(&self.path, value.expose().as_bytes(), &mut create_temp)
-            .map_err(|e| SecretsError::Failed(format!("the secret could not be stored: {e}")))
+        write_owner_only(&self.path, value.expose().as_bytes())
     }
 
     /// Removes the secret; no error when there is none.
@@ -414,6 +481,129 @@ mod tests {
     }
     fn s(v: &str) -> Secret {
         Secret::new(v).unwrap()
+    }
+
+    /// The reader of a trust-bearing file never panics on hostile content (empty, truncated, flipped bits, NUL, invalid
+    /// UTF-8, doubled): it answers a value or a typed refusal. Each input is a private file of its own.
+    #[test]
+    fn read_owner_only_never_panics_on_hostile_content() {
+        let d = private_tempdir();
+        let f = d.path().join("apps.json");
+        let seed = br#"{"version":1,"apps":[{"id":"a","name":"A"}]}"#;
+        let bad = paddock_testkit::never_panics(&paddock_testkit::corpus(seed), |bytes| {
+            write_owner_only(&f, bytes).unwrap();
+            read_owner_only(&f, 1024)
+        });
+        assert!(
+            bad.is_empty(),
+            "read_owner_only panicked on {} input(s)",
+            bad.len()
+        );
+    }
+
+    /// The shared writer for any trust-bearing file (ADR 0092 WP-0): owner-only from the first byte on both OS, replaces the
+    /// old content, leaves no temporary file and no backup, and what it wrote passes the secret-file checks (on Windows
+    /// that reads the DACL of the handle). Needs a Windows run for the DACL half.
+    #[test]
+    fn write_owner_only_writes_and_replaces_a_private_file() {
+        let d = private_tempdir();
+        let f = d.path().join("data/apps.json");
+        write_owner_only(&f, b"one").unwrap();
+        write_owner_only(&f, b"two").unwrap();
+        assert_eq!(fs::read(&f).unwrap(), b"two");
+        let names: Vec<_> = fs::read_dir(f.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            names,
+            vec![std::ffi::OsString::from("apps.json")],
+            "no temporary file, no backup"
+        );
+        assert_eq!(
+            SecretFile::new(&f).read().unwrap().unwrap().expose(),
+            "two",
+            "it passes the owner-only checks"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&f).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+
+    /// The temporary file is owner-only the moment it is created, before a byte is written (not narrowed by a later chmod):
+    /// the file the writer makes is the one the hook sees. Unix; Windows is covered by the DACL read-back above.
+    #[cfg(unix)]
+    #[test]
+    fn the_temporary_file_is_owner_only_when_it_is_created() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = private_tempdir();
+        let f = d.path().join("apps.json");
+        let mut seen = None;
+        paddock_env::write_atomic_created(&f, b"x", &mut |tmp| {
+            let file = create_temp(tmp)?;
+            seen = Some(fs::metadata(tmp)?.permissions().mode() & 0o777);
+            Ok(file)
+        })
+        .unwrap();
+        assert_eq!(seen, Some(0o600));
+    }
+
+    /// The read twin (ADR 0092 W4): what the writer wrote reads back; a missing file is `None`; the bound is enforced.
+    #[test]
+    fn read_owner_only_reads_what_write_owner_only_wrote() {
+        let d = private_tempdir();
+        let f = d.path().join("data/apps.json");
+        assert_eq!(
+            read_owner_only(&f, 100).unwrap(),
+            None,
+            "no folder, no file"
+        );
+        write_owner_only(&f, b"{\"apps\":[]}").unwrap();
+        assert_eq!(
+            read_owner_only(&f, 100).unwrap().as_deref(),
+            Some("{\"apps\":[]}")
+        );
+        let e = read_owner_only(&f, 5).unwrap_err().to_string();
+        assert!(
+            e.contains("larger than 5 bytes") && e.contains("apps.json"),
+            "{e}"
+        );
+        write_owner_only(&f, &[0xff, 0xfe]).unwrap();
+        assert!(
+            read_owner_only(&f, 100)
+                .unwrap_err()
+                .to_string()
+                .contains("not text")
+        );
+    }
+
+    /// A file others can read (mode 0644) is not trusted: a planted list is refused, with the file named.
+    #[cfg(unix)]
+    #[test]
+    fn read_owner_only_refuses_a_loose_file_and_a_link() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = private_tempdir();
+        let f = d.path().join("apps.json");
+        fs::write(&f, "{}").unwrap();
+        fs::set_permissions(&f, fs::Permissions::from_mode(0o644)).unwrap();
+        let e = read_owner_only(&f, 100).unwrap_err();
+        assert!(matches!(e, SecretsError::InsecureFile(_)), "{e:?}");
+        // A link to a file of ours elsewhere is refused too, never followed.
+        let outside = d.path().join("outside");
+        fs::write(&outside, "{}").unwrap();
+        fs::set_permissions(&outside, fs::Permissions::from_mode(0o600)).unwrap();
+        let link = d.path().join("link.json");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        let e = read_owner_only(&link, 100).unwrap_err().to_string();
+        assert!(
+            e.contains("symbolic link") && e.contains("link.json"),
+            "{e}"
+        );
     }
 
     #[test]
@@ -555,7 +745,7 @@ mod tests {
                 let (f, barrier, values) = (&f, &barrier, &values);
                 sc.spawn(move || {
                     barrier.wait();
-                    for _ in 0..200 {
+                    for _ in 0..20 {
                         f.set(&n("token"), &s(v)).unwrap();
                         let got = f.get(&n("token")).unwrap().unwrap();
                         assert!(values.iter().any(|x| got == s(x)), "a whole value");

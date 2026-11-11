@@ -240,23 +240,31 @@ async fn pairing_flow_gives_the_key_once() {
     let h = harness(false).await;
     let r = h.call("POST", "/x/v1/pair", None, Some(json!({"name": "Debrief"})), &[]).await;
     assert_eq!(r.status, 202, "{}", r.body);
-    let (pid, code) = (
+    let (pid, code, token) = (
         r.json()["pairingId"].as_str().unwrap().to_string(),
         r.json()["code"].as_str().unwrap().to_string(),
+        r.json()["pollToken"].as_str().unwrap().to_string(),
     );
+    let with = [("x-pitwall-pair-token", token.as_str())];
+
     assert_eq!(code.len(), 6);
+    // Without the token (or with a wrong one) a poll is denied like an unknown id, and it never carries the key.
+    for extra in [&[][..], &[("x-pitwall-pair-token", "wrong")][..]] {
+        let r = h.call("GET", &format!("/x/v1/pair/{pid}"), None, None, extra).await.json();
+        assert_eq!(r, json!({"status": "denied"}));
+    }
     assert_eq!(
-        h.call("GET", &format!("/x/v1/pair/{pid}"), None, None, &[]).await.json()["status"],
+        h.call("GET", &format!("/x/v1/pair/{pid}"), None, None, &with).await.json()["status"],
         "pending"
     );
     let shown = h.rpc("pairings", json!({})).await.json();
     assert_eq!(shown[0]["code"], code);
     h.rpc("approve_pairing", json!({"id": pid, "permissions": {"models": null, "maxPriority": "interactive", "tools": true, "extendedApis": true, "limits": {}}})).await;
-    let got = h.call("GET", &format!("/x/v1/pair/{pid}"), None, None, &[]).await.json();
+    let got = h.call("GET", &format!("/x/v1/pair/{pid}"), None, None, &with).await.json();
     assert_eq!(got["status"], "approved");
     let key = got["key"].as_str().unwrap().to_string();
     assert_eq!(h.call("GET", "/v1/models", Some(&key), None, &[]).await.status, 200);
-    assert!(h.call("GET", &format!("/x/v1/pair/{pid}"), None, None, &[]).await.json()["key"].is_null());
+    assert!(h.call("GET", &format!("/x/v1/pair/{pid}"), None, None, &with).await.json()["key"].is_null());
     // Web pages cannot start a pairing.
     let r = h
         .call(
@@ -280,6 +288,7 @@ async fn a_re_pair_over_the_wire_replaces_the_apps_older_key() {
         let r = h.call("POST", "/x/v1/pair", None, Some(body.clone()), &[]).await;
         assert_eq!(r.status, 202, "{}", r.body);
         let pid = r.json()["pairingId"].as_str().unwrap().to_string();
+        let token = r.json()["pollToken"].as_str().unwrap().to_string();
         let shown = h.rpc("pairings", json!({})).await.json();
         assert_eq!(
             shown[0]["rePair"],
@@ -287,7 +296,16 @@ async fn a_re_pair_over_the_wire_replaces_the_apps_older_key() {
             "the request shows the flag"
         );
         h.rpc("approve_pairing", json!({"id": pid, "permissions": perms})).await;
-        let got = h.call("GET", &format!("/x/v1/pair/{pid}"), None, None, &[]).await.json();
+        let got = h
+            .call(
+                "GET",
+                &format!("/x/v1/pair/{pid}"),
+                None,
+                None,
+                &[("x-pitwall-pair-token", token.as_str())],
+            )
+            .await
+            .json();
         keys.push(got["key"].as_str().unwrap().to_string());
     }
     assert_eq!(

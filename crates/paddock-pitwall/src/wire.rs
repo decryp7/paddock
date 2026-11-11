@@ -36,8 +36,11 @@ impl Health {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Pairing {
-    /// The id to poll with.
+    /// The id to poll with. It is shown in Pitwall's window, so it proves nothing by itself.
     pub pairing_id: String,
+    /// Sent with every poll (the `X-Pitwall-Pair-Token` header): 256 random bits only this caller got, without which
+    /// Pitwall never hands the key over. Never logged or shown.
+    pub poll_token: String,
     /// The six-digit code both sides show.
     pub code: String,
     /// Seconds until the request expires.
@@ -251,7 +254,8 @@ mod tests {
             serde_json::from_str::<Health>(r#"{"version":"1"}"#).is_err(),
             "apiVersion is required"
         );
-        let p: Pairing = serde_json::from_str(r#"{"pairingId":"a","code":"123456"}"#).unwrap();
+        let p: Pairing =
+            serde_json::from_str(r#"{"pairingId":"a","pollToken":"t","code":"123456"}"#).unwrap();
         assert_eq!(p.expires_in_secs, 300);
         let m: ModelInfo = serde_json::from_str(
             r#"{"id":"m","capabilities":["chat"],"unavailable":[{"capability":"vision","reason":"needs mtmd"}],"contextMax":32768}"#,

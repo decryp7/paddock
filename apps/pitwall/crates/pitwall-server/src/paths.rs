@@ -133,6 +133,14 @@ pub fn read_with_backup(path: &Path, max: usize) -> (Option<String>, Option<Stri
     (read(path), read(&backup_of(path)))
 }
 
+/// Write `data` to `path` atomically and owner-only, through the shared writer of `paddock-secrets` (ADR 0092 WP-0): a
+/// new temporary file, created exclusively (`O_EXCL`, no link followed) with mode 0600 on Unix and an
+/// owner-only DACL without sharing on Windows, flushed and renamed over the target. The folder is made private or refused
+/// (on Windows when others may write in it). No backup copy is kept: use it for files that must not outlive a revocation.
+pub fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    paddock_secrets::write_owner_only(path, data).map_err(std::io::Error::other)
+}
+
 /// Make a file owner-only on Unix (a no-op on Windows, where the per-user folder is already private).
 pub fn restrict(path: &Path) {
     #[cfg(unix)]
@@ -155,18 +163,27 @@ pub fn restrict_dir(path: &Path) {
     let _ = path;
 }
 
-/// Random bytes from the OS (a failure is impossible in practice; the fallback is time-seeded and still unique).
-pub fn random32() -> [u8; 32] {
+/// The OS random source failed, so no key can be made (W5: a time-seeded stand-in would be guessable).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "the operating system's random source failed ({0}), so no key can be made; restart Pitwall, and if it keeps failing check the system's entropy source"
+)]
+pub struct RandomError(pub String);
+
+/// 32 random bytes from the OS. Fails closed: when the OS source fails there is no stand-in, because every secret here
+/// (admin key, app keys, pairing codes, engine keys) is made from these bytes.
+pub fn random32() -> Result<[u8; 32], RandomError> {
+    random32_with(|b| getrandom::fill(b).map_err(|e| e.to_string()))
+}
+
+/// [`random32`] over a given source (tests inject a failing one).
+pub fn random32_with(fill: impl FnOnce(&mut [u8]) -> Result<(), String>) -> Result<[u8; 32], RandomError> {
     let mut b = [0u8; 32];
-    if getrandom::fill(&mut b).is_err() {
-        let n = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos());
-        for (i, x) in b.iter_mut().enumerate() {
-            *x = (n >> (i % 16)) as u8 ^ (i as u8).wrapping_mul(31);
-        }
+    match fill(&mut b) {
+        Ok(()) => Ok(b),
+        // Whatever the source wrote before failing is discarded with the buffer.
+        Err(e) => Err(RandomError(e)),
     }
-    b
 }
 
 /// Milliseconds since the Unix epoch.
@@ -191,11 +208,27 @@ mod tests {
         assert_eq!(read_with_backup(&p, 2).0, None);
     }
 
+    /// ADR 0092 test 5 (W5): with a failing OS source there is an error and no bytes, never a time-seeded stand-in.
+    #[test]
+    fn a_failing_random_source_gives_an_error_and_no_key() {
+        let e = random32_with(|_| Err("no entropy".into())).unwrap_err();
+        assert!(
+            e.to_string().contains("no entropy") && e.to_string().contains("no key can be made"),
+            "{e}"
+        );
+        // A source that half-filled the buffer before failing gives nothing either.
+        assert!(random32_with(|b| {
+            b[0] = 1;
+            Err("partial".into())
+        })
+        .is_err());
+    }
+
     #[test]
     fn layout_and_random() {
         let d = Dirs::at("/x");
         assert_eq!(d.models(), PathBuf::from("/x/models"));
-        assert_ne!(random32(), random32());
+        assert_ne!(random32().unwrap(), random32().unwrap());
         assert!(now_ms() > 1_700_000_000_000);
     }
 }
