@@ -83,6 +83,9 @@ fn a_panicking_annotator_is_contained_and_the_others_still_run_over_the_store() 
         .install(&Host("chaos", |r| r.add_annotator(Arc::new(Panicky)).map(|_| ())))
         .unwrap();
     assert!(registry.has_annotators());
+    // This test is about containing a panic, not about time budgets: with the default 10 s Annotate budget a stalled
+    // unwind on a loaded machine is also counted as a hang, a third failure (ER-12: no clock instead of a longer one).
+    registry.set_budgets(debrief_core::guard::Budgets::unlimited());
 
     // Quiet the expected panic message.
     let prev = std::panic::take_hook();
