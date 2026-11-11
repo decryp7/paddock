@@ -289,10 +289,10 @@ mod tests {
         let t = Transcript::from_engine_text(&raw);
         assert!(t.was_cut());
         assert!(t.text().len() <= MAX_TRANSCRIPT_BYTES);
-        assert_eq!(t.text().len() % 2, 0);
+        assert!(t.text().len().is_multiple_of(2));
         // A three-byte character straddles the limit, so the cut steps back to its start.
         let t = Transcript::from_engine_text(&"€".repeat(MAX_TRANSCRIPT_BYTES));
-        assert!(t.was_cut() && t.text().len() <= MAX_TRANSCRIPT_BYTES && t.text().len() % 3 == 0);
+        assert!(t.was_cut() && t.text().len() <= MAX_TRANSCRIPT_BYTES && t.text().len().is_multiple_of(3));
     }
 
     #[test]
