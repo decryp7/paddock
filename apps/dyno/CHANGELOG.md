@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- The dyno mcp command and other AI clients now say "Dyno isn't open" within a second when the Dyno app was killed, instead of waiting about ten seconds for an answer that cannot come. An app that is merely slow to answer is still waited for.
 - When Dyno cannot find your home folder, it no longer falls back to a shared folder in the temporary folder, where another user on the same computer could have put a file for Dyno to trust. It now uses a private folder made for your account only and refuses a folder that belongs to someone else or is a link. If no safe folder exists, the command stops and says what to set. The file that tells the app where the agent is runs is also ignored when its folder is a link or belongs to another user.
 
 ### Changed

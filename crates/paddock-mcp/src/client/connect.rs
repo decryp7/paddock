@@ -179,6 +179,86 @@ impl LoopbackLink {
     }
 }
 
+/// How often a wait on the app looks at whether its process still runs. A process that was killed leaves a socket that may
+/// still complete a connection but never answers it; the wait ends within this, not at the end of its limit.
+const OWNER_LOOK: Duration = Duration::from_millis(100);
+
+/// Why a wait on the app ended without an answer.
+enum Waited {
+    /// The process the discovery file names is no longer the one that started when it says (rule 53).
+    OwnerGone,
+    /// The socket failed or the limit passed.
+    Failed(std::io::Error),
+}
+
+impl From<std::io::Error> for Waited {
+    fn from(e: std::io::Error) -> Self {
+        Waited::Failed(e)
+    }
+}
+
+/// Connects to the app's port in short tries, looking at its process between them, for at most `limit` (a live but slow app is
+/// still waited for).
+fn connect_watching(hint: &Discovery, limit: Duration) -> Result<TcpStream, Waited> {
+    let addr = ([127, 0, 0, 1], hint.port).into();
+    let end = Instant::now() + limit;
+    loop {
+        let left = end.saturating_duration_since(Instant::now());
+        match TcpStream::connect_timeout(&addr, left.min(OWNER_LOOK).max(Duration::from_millis(1)))
+        {
+            Ok(s) => return Ok(s),
+            Err(e)
+                if e.kind() == std::io::ErrorKind::TimedOut
+                    || e.kind() == std::io::ErrorKind::WouldBlock =>
+            {
+                if !hint.writer_alive() {
+                    return Err(Waited::OwnerGone);
+                }
+                if left.is_zero() {
+                    return Err(Waited::Failed(e));
+                }
+            }
+            Err(e) => return Err(Waited::Failed(e)),
+        }
+    }
+}
+
+/// Reads the answer line into `into` (at most [`MAX_ANSWER`] bytes) in short reads, looking at the app's process between them,
+/// for at most `limit`.
+fn read_answer(
+    stream: &SharedStream,
+    reader: &mut BufReader<SharedStream>,
+    into: &mut Vec<u8>,
+    hint: &Discovery,
+    limit: Duration,
+) -> Result<(), Waited> {
+    let end = Instant::now() + limit;
+    stream.0.set_read_timeout(Some(OWNER_LOOK))?;
+    loop {
+        let room = MAX_ANSWER.saturating_sub(into.len() as u64);
+        if room == 0 {
+            return Ok(());
+        }
+        // `read_until` keeps what it read when a read times out, so no byte of a slow line is lost.
+        match reader.by_ref().take(room).read_until(b'\n', into) {
+            Ok(_) => return Ok(()),
+            Err(e)
+                if e.kind() == std::io::ErrorKind::TimedOut
+                    || e.kind() == std::io::ErrorKind::WouldBlock =>
+            {
+                if !hint.writer_alive() {
+                    return Err(Waited::OwnerGone);
+                }
+                if Instant::now() >= end {
+                    return Err(Waited::Failed(e));
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(Waited::Failed(e)),
+        }
+    }
+}
+
 /// Connects with the default limits; see [`connect_loopback_with`].
 ///
 /// # Errors
@@ -210,33 +290,45 @@ pub fn connect_loopback_with(
             }
         })?;
     let app = hint.app.clone();
-    let tcp = TcpStream::connect_timeout(&([127, 0, 0, 1], hint.port).into(), limits.connect)
-        .map_err(|e| {
+    let not_open = |why: &str| {
+        log::info!(
+            "paddock_mcp client: {app} is gone ({why}), after {} ms",
+            started.elapsed().as_millis()
+        );
+        ConnectError::NotOpen { app: app.clone() }
+    };
+    let tcp = connect_watching(&hint, limits.connect).map_err(|e| match e {
+        Waited::OwnerGone => not_open("its process ended while connecting"),
+        Waited::Failed(e) => {
             log::warn!(
                 "paddock_mcp client: connect to {app} on port {} failed: {e}",
                 hint.port
             );
             ConnectError::NotOpen { app: app.clone() }
-        })?;
+        }
+    })?;
     let _ = tcp.set_nodelay(true);
     let stream = SharedStream(Arc::new(tcp));
     let mut reader = BufReader::new(stream.clone());
     // The key line and its answer are bounded in time and size; the protocol that follows has its own limits.
-    let mut first = String::new();
+    let mut first = Vec::new();
     let read = (|| {
-        stream.0.set_read_timeout(Some(limits.answer))?;
         writeln!(stream.clone(), "{}", serde_json::json!({"key": key}))?;
-        let n = reader.by_ref().take(MAX_ANSWER).read_line(&mut first)?;
+        read_answer(&stream, &mut reader, &mut first, &hint, limits.answer)?;
         stream.0.set_read_timeout(None)?;
-        Ok::<usize, std::io::Error>(n)
+        Ok::<usize, Waited>(first.len())
     })()
-    .map_err(|e| {
-        log::warn!("paddock_mcp client: {app} gave no answer to the key: {e}");
-        ConnectError::NoAnswer {
-            app: app.clone(),
-            cause: e.to_string(),
+    .map_err(|e| match e {
+        Waited::OwnerGone => not_open("its process ended before it answered the key"),
+        Waited::Failed(e) => {
+            log::warn!("paddock_mcp client: {app} gave no answer to the key: {e}");
+            ConnectError::NoAnswer {
+                app: app.clone(),
+                cause: e.to_string(),
+            }
         }
     })?;
+    let first = String::from_utf8_lossy(&first).into_owned();
     if read == 0 {
         log::warn!("paddock_mcp client: {app} closed the connection before answering the key");
         return Err(ConnectError::ClosedEarly { app });
