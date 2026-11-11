@@ -1,12 +1,18 @@
+import { pathToFileURL } from 'node:url';
 import { P, save, link } from './common.mjs';
 const Y = 144, W = 264, GAP = 96, NH = 120, VG = 40;
 
 /**
  * A component diagram on a grid. nodes: [id, col, row, name, tech, desc, { planned, role, span }]; links: [a, sa, b, sb, label, opts].
  * nw and gap: node width and column gap (a gap carries edge labels, so 96 unless the panel has no links); date: this panel's
- * footer date when it was redrawn on its own.
+ * footer date when it was redrawn on its own. Every panel's nodes are recorded in PANELS (for c43.test.mjs); the files are
+ * written only when this script is run, not when it is imported.
  */
-function panel(file, { title, kind, desc, group, cols, rows, nodes, links, legend, nw = W, gap = GAP, date }) {
+function panel(file, spec) {
+  PANELS[file] = spec.nodes.map(([id, , , name, tech, desc]) => ({ id, name, tech, desc }));
+  if (RUN) render(file, spec);
+}
+function render(file, { title, kind, desc, group, cols, rows, nodes, links, legend, nw = W, gap = GAP, date }) {
   const w = 96 + cols * nw + (cols - 1) * gap + 48;
   const d = P({ title, kind, desc, date, w: Math.max(w, 1000) });
   const gx = 48, gw = 24 + cols * nw + (cols - 1) * gap + 24, gh = 40 + rows * NH + (rows - 1) * VG + 24;
@@ -22,6 +28,9 @@ function panel(file, { title, kind, desc, group, cols, rows, nodes, links, legen
   d.legend(legend ?? [{ kind: 'core', label: 'Component (pure Rust)' }, { kind: 'line', label: 'Feeds' }]);
   save(file, d, Y + gh);
 }
+/** Each panel's nodes by file name: id, name, tech (the bracketed line, paths separated by " · ") and desc. */
+export const PANELS = {};
+const RUN = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
 const LEGP = [{ kind: 'core', label: 'Component (pure Rust)' }, { kind: 'line', label: 'Feeds' }];
 const SUB = 'C4 · Level 3 — Components of pitwall-core';
 
@@ -139,7 +148,7 @@ panel('c4-3-ui-features', {
     ['req', 1, 1, 'requests', 'features/requests', 'Recent requests with timing, the chosen model and alias; prompts only on demand.', { role: 'ui' }],
     ['play', 2, 1, 'playground', 'features/playground', 'Compare tab, and the Chat tab (behind the chat build switch): attachments, pictures, saved chats, tools from connected apps.', { role: 'ui' }],
     ['bench', 0, 2, 'benchmarks', 'features/benchmarks', 'Tokens per second and time to first token per model.', { role: 'ui' }],
-    ['set', 1, 2, 'settings', 'features/settings', 'Pitwall’s pages in the shell’s Settings window: Pitwall, Connected apps (features/connected-apps), Chats, Tray popup; the shell adds Logging.', { role: 'ui' }],
+    ['set', 1, 2, 'settings', 'features/connected-apps · features/settings', 'Pitwall’s pages in the shell’s Settings window: Pitwall, Connected apps, Chats, Tray popup; the shell adds Logging.', { role: 'ui' }],
     ['tray', 2, 2, 'tray', 'features/tray · core/generated/widgets.ts', 'The popover (#/tray, its own small bootstrap) from the native tray: the widgets the user chose, in their order; Pause serving and Release memory.', { role: 'ui' }],
     ['svc', 0, 3, 'service · jobs', 'features/service · features/jobs', 'Background service panel (install, Repair, Remove) and the jobs behind long work, with phases, Cancel and Stop waiting.', { role: 'ui' }],
     ['quit', 1, 3, 'quit', 'features/quit', 'The “Quit Pitwall” question (“Keep serving after you quit?”) from menus, Mod+Q and the tray; the “When you quit Pitwall” setting decides when it asks.', { role: 'ui' }],
@@ -159,11 +168,11 @@ panel('c4-3-ui-state', {
     ['shared', 0, 2, 'Shell and shared UI', 'paddock-ui · tokens · charts', 'The Paddock shell (pages frame, menus, dialogs), design tokens (dark, light), ECharts wrapper, own SVG icons, toasts.', { role: 'ui' }],
     ['be', 1, 0, 'PitwallBackend', 'core/backend · BACKEND token', 'One method per management call and a live feed; api.types.ts is the wire contract that pitwall_core::mgmt mirrors.', { role: 'ui', span: 2 }],
     ['tmo', 1, 2, 'withTimeout', 'core/timeout-backend', 'Set up in backend-factory: a call that takes too long fails with Retry; jobs and streams pass through.', { role: 'ui' }],
-    ['mock', 1, 3, 'MockBackend', 'core/mock-backend · browser only', 'Development and tests; plausible data, never the reference for behaviour.', { role: 'ui' }],
+    ['mock', 1, 3, 'MockBackend', 'core/mock-backend · implements PitwallBackend', 'The browser build only, for development and tests; plausible data, never the reference for behaviour.', { role: 'ui' }],
     ['shellb', 2, 0, 'Shell backends', 'shell/ipc · shell/engines', 'About, updates, settings, health, notifications, diagnostics and the dialog bridge over the paddock-shell plugin; in memory in the browser.', { role: 'ui' }],
     ['chat', 2, 1, 'Chat backend', 'features/playground/chat-backend', 'paddock-ui’s TauriAssistantBackend over tauriIpc, served by the shell’s chat_host module (src-tauri/src/chat_host); in memory in the browser.', { role: 'ui' }],
-    ['tauri', 2, 2, 'TauriBackend', 'core/tauri-backend', 'Invokes Pitwall’s commands and subscribes to the live event: the only code that calls Pitwall’s management commands.', { role: 'ui' }],
-    ['wc', 2, 3, 'WindowControl', 'core/window-control', 'Raises the main window on a route, fits and closes the tray popover, quits; used by the tray popover and the main window.', { role: 'ui' }],
+    ['tauri', 2, 2, 'TauriBackend', 'core/tauri-backend · implements PitwallBackend', 'The only code that calls Pitwall’s management commands; it also subscribes to the live event.', { role: 'ui' }],
+    ['wc', 2, 3, 'WindowControl', 'features/tray/tray-popover · core/window-control', 'Raises the main window on a route, fits and closes the tray popover, quits; used by the popover and the main window.', { role: 'ui' }],
     ['shell', 3, 0, 'Rust shell', 'app/src-tauri · Tauri IPC', 'Pitwall’s commands (management API, chat host, jobs, quit) and the paddock-shell plugin. Management calls go on to the server’s management API.', { role: 'accent', span: 4 }],
   ],
   links: [
