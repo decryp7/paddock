@@ -403,8 +403,8 @@ export function adoptsPerMachine(root, f) {
 /** The notices script and the shared cargo-about configuration (and the tool, conformance/src/notices/): inputs of every app with a `notices` block. */
 export const NOTICES_INPUTS = /^(scripts\/notices\.sh|templates\/repo\/about\.toml|conformance\/src\/notices\/.*)$/;
 
-/** Generated TypeScript and JSON of the shared crates, written by their tests (a `generated` folder under ui, `.ts` or `.json`). */
-export const GENERATED = /^ui\/.*\/generated\/[^/]+\.(ts|json)$/;
+/** Generated TypeScript and JSON of the shared crates, written by their tests (a `generated` folder under ui, `.ts` or `.json`), except the hand-written `public-api.ts` and `ng-package.json` that make `shell/generated` an entry. */
+export const GENERATED = /^ui\/.*\/generated\/(?!public-api\.ts$|ng-package\.json$)[^/]+\.(ts|json)$/;
 
 /** The crate folders whose Rust sources name the generated file `f` (`generated/<name>`), for the crates' own tests. */
 export function crateDirsNaming(f, cargo) {

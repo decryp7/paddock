@@ -108,6 +108,9 @@ describe('the graph of this tree', () => {
     const unknown = run('ui/projects/paddock-ui/shell/generated/no-such-file.json');
     assert.ok(unknown.crates);
     assert.ok(unknown.packages.crates.length > 5);
+    // The hand-written entry files of shell/generated are not generated output.
+    assert.ok(!run('ui/projects/paddock-ui/shell/generated/public-api.ts').crates);
+    assert.ok(!run('ui/projects/paddock-ui/shell/generated/ng-package.json').crates);
     // Other files in ui/ (not generated) do not mark crates.
     assert.ok(!run('ui/projects/paddock-ui/shell/src/public-api.ts').crates);
   });

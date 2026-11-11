@@ -134,6 +134,8 @@ const SAMPLES: &[&[&str]] = &[
     &["crates/paddock-proc/src/run.rs", "crates/paddock-slots/src/lib.rs"],
     &["crates/Cargo.toml"],
     &["ui/projects/paddock-ui/src/public-api.ts"],
+    &["ui/projects/paddock-ui/shell/generated/public-api.ts"],
+    &["ui/projects/paddock-ui/shell/generated/dialogs.ts"],
     &["ui/package.json"],
     &["eslint/src/index.cjs"],
     &["apps/dyno/app/src-tauri/src/main.rs"],

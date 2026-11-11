@@ -141,6 +141,8 @@ fn a_generated_ui_file_marks_the_crate_that_checks_it_or_every_crate_when_none_d
     let unknown = run(&["ui/projects/paddock-ui/shell/generated/no-such-file.json"]);
     assert_eq!(unknown["crates"], true);
     assert!(unknown["packages"]["crates"].as_array().unwrap().len() > 5);
+    assert_eq!(run(&["ui/projects/paddock-ui/shell/generated/public-api.ts"])["crates"], false);
+    assert_eq!(run(&["ui/projects/paddock-ui/shell/generated/ng-package.json"])["crates"], false);
     assert_eq!(run(&["ui/projects/paddock-ui/shell/src/public-api.ts"])["crates"], false);
 }
 

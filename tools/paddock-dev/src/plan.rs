@@ -81,6 +81,10 @@ static NOTICES_INPUTS: LazyLock<Regex> =
 
 /// Generated TypeScript and JSON of the shared crates, written by their tests (a `generated` folder under ui).
 static GENERATED: LazyLock<Regex> = LazyLock::new(|| re(r"^ui/.*/generated/[^/]+\.(ts|json)$"));
+/// The hand-written files in a `generated` folder (they make `shell/generated` an entry); the regex crate has no look-ahead.
+fn is_generated(f: &str) -> bool {
+    GENERATED.is_match(f) && !f.ends_with("/public-api.ts") && !f.ends_with("/ng-package.json")
+}
 
 /// JavaScript truthiness of a `paddock.ci.json` field.
 fn truthy(v: &Value) -> bool {
@@ -610,7 +614,7 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
         }
         // A generated TypeScript or JSON file under ui/ is compared with its Rust source by a crate's test: a stale one must
         // fail on the branch, so the crates that name the file are tested (all crates when none does).
-        if GENERATED.is_match(f) {
+        if is_generated(f) {
             st.mark(Some("crates".to_string()), format!("generated file {f}"));
             let named = opts.crates_naming.map(|g| g(f)).unwrap_or_default();
             let named: Vec<String> = named
