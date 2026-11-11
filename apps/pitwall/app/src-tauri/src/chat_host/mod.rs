@@ -8,6 +8,7 @@ pub mod chats;
 pub mod commands;
 pub mod log_line;
 pub mod models;
+pub mod pictures;
 pub mod policy;
 pub mod saved;
 pub mod tool;

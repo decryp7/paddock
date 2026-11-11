@@ -10,7 +10,7 @@ import { ASSISTANT_SHORT_PANE_PX, AssistantAttachments, AssistantBackend, Assist
 import type { ChatModel, ChatModels, CommandError, ConnectedApp } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
-import { PitwallAttachments } from './chat-attachments';
+import { ChatImagesState, PitwallAttachments } from './chat-attachments';
 import { ChatSaving, createChatBackend, createChatSpeech } from './chat-backend';
 
 /**
@@ -25,8 +25,9 @@ import { ChatSaving, createChatBackend, createChatSpeech } from './chat-backend'
   imports: [PdAssistant, MatFormField, MatLabel, MatSelect, MatOption, MatOptgroup, MatButton, MatSlideToggle],
   providers: [
     ChatSaving,
+    ChatImagesState,
     { provide: AssistantBackend, useFactory: createChatBackend },
-    // Text and code files (ADR 0023 Decision 4, WP-4b); Rust checks and keeps them.
+    // Text and code files and pictures (ADR 0023 Decision 4, WP-4b, WP-5); Rust checks and keeps them.
     { provide: AssistantAttachments, useClass: PitwallAttachments },
     // Speech input: none in the app until WP-7 (null: the pane shows no microphone); the browser build can play it.
     { provide: AssistantSpeech, useFactory: () => createChatSpeech() },
@@ -40,7 +41,7 @@ import { ChatSaving, createChatBackend, createChatSpeech } from './chat-backend'
         <mat-label>Model</mat-label>
         <mat-select data-testid="chat-model" panelClass="pw-chat-model-panel" [value]="picker()?.selected ?? null" [disabled]="!picker()" (selectionChange)="choose($event.value)">
           @for (m of usable(); track m.id) {
-            <mat-option [value]="m.id">{{ m.name }}</mat-option>
+            <mat-option [value]="m.id">{{ m.name }}@if (m.vision) {<span class="why"> · reads images</span>}</mat-option>
           }
           <!-- Why these can't be chosen is said once per reason, inside the open list (not under the field, where it moved the bar). -->
           @for (g of groups(); track g.reason) {
@@ -53,6 +54,21 @@ import { ChatSaving, createChatBackend, createChatSpeech } from './chat-backend'
         </mat-select>
       </mat-form-field>
       <p class="tools" data-testid="chat-apps" role="status">{{ appsLine() }}</p>
+      <!-- WP-5: whether the chosen model reads pictures, in Rust's words; with a downloaded vision model to switch to. -->
+      @if (picker()?.images; as images) {
+        <p class="vision" data-testid="chat-vision" role="status">
+          @if (images.allowed) {
+            Reads images.
+          } @else if (picker()?.selected) {
+            No image input.
+            @if (images.suggest; as s) {
+              <button type="button" matButton data-testid="chat-use-vision" (click)="choose(s.id)">Use {{ s.name }}</button>
+            } @else {
+              <span data-testid="chat-vision-why">{{ images.reason }}</span>
+            }
+          }
+        </p>
+      }
       <!-- ADR 0023 Decision 3: per chat; a new chat starts with Settings > Chats' default. -->
       <mat-slide-toggle data-testid="chat-dont-save" [checked]="!saved()" [disabled]="moving()" (toggleChange)="dontSave()">Don't save this chat</mat-slide-toggle>
       <button type="button" matButton data-testid="chat-open-apps" (click)="openApps()">Connected apps…</button>
@@ -95,6 +111,7 @@ import { ChatSaving, createChatBackend, createChatSpeech } from './chat-backend'
     ::ng-deep .pw-chat-model-panel .mat-mdc-option.mdc-list-item--disabled .mdc-list-item__primary-text { opacity: 1; color: var(--pd-text-muted); }
     ::ng-deep .pw-chat-model-panel .why { color: var(--pd-text-muted); opacity: 1; }
     ::ng-deep .pw-chat-model-panel .mat-mdc-optgroup-label { opacity: 1; color: var(--pd-text-muted); font-size: var(--pd-text-label); white-space: normal; line-height: 1.4; padding-block: var(--pd-space-2); }
+    .vision { margin: 0; display: inline-flex; align-items: center; gap: var(--pd-space-2); flex-wrap: wrap; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
     .tools { margin: 0; flex: 1; min-width: 12ch; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
     .problem { margin: 0; color: var(--pd-text); }
     .assistant { flex: 1; min-height: 0; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); box-shadow: var(--pd-shadow-1); overflow: hidden; }
@@ -105,6 +122,7 @@ export class PlaygroundChat {
   private readonly openSettings = inject(OPEN_SETTINGS, { optional: true });
   private readonly dialogs = inject(DialogService);
   private readonly saving = inject(ChatSaving);
+  private readonly imagesState = inject(ChatImagesState);
   /** The chat open in the pane (null: a new one). */
   private readonly active = signal<string | null>(null);
   /** Settings > Chats' default for new chats. */
@@ -178,7 +196,7 @@ export class PlaygroundChat {
     this.problem.set(null);
     try {
       const [picker, apps, storage] = await Promise.all([this.backend.chatModels(), this.backend.connectedApps(), this.backend.chatStorage()]);
-      this.picker.set(picker);
+      this.setPicker(picker);
       this.apps.set(apps);
       this.saveNew.set(storage.saveNew);
       if (this.active() === null) this.setNext(storage.saveNew);
@@ -189,10 +207,16 @@ export class PlaygroundChat {
 
   protected async choose(id: string): Promise<void> {
     try {
-      this.picker.set(await this.backend.setChatModel(id));
+      this.setPicker(await this.backend.setChatModel(id));
     } catch (e) {
       this.problem.set(toCommandError(e));
     }
+  }
+
+  /** Rust's picker, and what it says of pictures for the attachments' gate. */
+  private setPicker(picker: ChatModels): void {
+    this.picker.set(picker);
+    this.imagesState.images.set(picker.images);
   }
 
   private setNext(save: boolean): void {

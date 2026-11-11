@@ -109,7 +109,11 @@ const SCROLL_STICK_PX = 24;
                 @for (a of turn.attachments; track a.sha256) {
                   @let chip = chipOf(a);
                   <li class="chip static file" data-testid="assistant-turn-file" [attr.title]="chipTitle(chip)">
-                    <pd-glyph [name]="glyphOf(a)" [size]="14" />
+                    @if (thumbOf(a.sha256, chip); as src) {
+                      <img class="thumb turn-thumb" [src]="src" alt="" data-testid="assistant-turn-thumb" />
+                    } @else {
+                      <pd-glyph [name]="glyphOf(a)" [size]="14" />
+                    }
                     <span class="chip-label">{{ chip.label }}</span>
                   </li>
                 }
@@ -267,8 +271,12 @@ const SCROLL_STICK_PX = 24;
             </li>
           }
           @for (chip of store.attached(); track chip.attachment.sha256) {
-            <li class="chip file" data-testid="assistant-file" [attr.title]="chipTitle(chip)">
-              <pd-glyph [name]="glyphOf(chip.attachment)" [size]="14" />
+            <li class="chip file" [class.has-thumb]="!!thumbOf(chip.attachment.sha256, chip)" data-testid="assistant-file" [attr.title]="chipTitle(chip)">
+              @if (thumbOf(chip.attachment.sha256, chip); as src) {
+                <img class="thumb" [src]="src" alt="" data-testid="assistant-file-thumb" />
+              } @else {
+                <pd-glyph [name]="glyphOf(chip.attachment)" [size]="14" />
+              }
               <span class="chip-label">{{ chip.label }}</span>
               @if (chip.detail) {
                 <span class="chip-detail">{{ chip.detail }}</span>
@@ -282,6 +290,12 @@ const SCROLL_STICK_PX = 24;
             <li class="chip static busy" role="status" data-testid="assistant-attaching"><span class="pulse" aria-hidden="true"><i></i><i></i><i></i></span> {{ t.attaching }}</li>
           }
         </ul>
+      }
+      @if (store.imageBlock(); as why) {
+        <p class="image-block" role="status" data-testid="assistant-image-block">
+          <pd-status-glyph status="warning" [size]="14" />
+          <span>{{ why }}</span>
+        </p>
       }
       @if (store.chips().length) {
         <ul class="chips" [attr.aria-label]="t.context" data-testid="assistant-chips">
@@ -489,6 +503,15 @@ const SCROLL_STICK_PX = 24;
     .chip-x:hover { background: var(--pd-hover); color: var(--pd-text); }
     .chip-x:focus-visible { outline: 2px solid var(--pd-focus-ring); }
     .chip.busy { color: var(--pd-text-muted); gap: var(--pd-space-2); }
+    /* A picture's thumbnail replaces the file glyph: 28 px in the tray (the chip grows to 32), 20 px in a short pane's folded tray
+       (the chip stays 24), 40 px in the sent question. object-fit keeps the picture's shape inside the square. */
+    .thumb { width: 28px; height: 28px; flex: none; object-fit: cover; border-radius: var(--pd-radius-tag); background: var(--pd-surface-1); }
+    .chip.has-thumb { padding: 3px var(--pd-space-1) 3px 3px; min-height: 32px; border-radius: var(--pd-radius-control); }
+    .turn-thumb { width: 40px; height: 40px; }
+    .chip.static.file:has(.turn-thumb) { padding: 3px var(--pd-space-2) 3px 3px; border-radius: var(--pd-radius-control); gap: var(--pd-space-2); }
+    :host(.short) .chip.has-thumb { min-height: 24px; padding-block: 1px; border-radius: var(--pd-radius-pill); }
+    :host(.short) .chip.has-thumb .thumb { width: 20px; height: 20px; }
+    .image-block { display: flex; align-items: flex-start; gap: var(--pd-space-2); margin: 0; font-size: var(--pd-text-label); color: var(--pd-text); overflow-wrap: anywhere; }
     .composer { position: relative; }
     .composer.dropping { background: var(--pd-accent-tint); box-shadow: inset 0 0 0 2px var(--pd-accent); border-radius: inherit; }
     .drop-hint { position: absolute; inset: 0; margin: 0; display: grid; place-items: center; color: var(--pd-accent); font-weight: var(--pd-weight-semibold); pointer-events: none; z-index: 1; }
@@ -669,6 +692,26 @@ export class PdAssistant {
       watch.observe(el);
       onCleanup(() => watch.disconnect());
     });
+    // effect-state: the host's small copies of pictures are a cache filled by asking it (an I/O answer, not derivable); a question's
+    // pictures are asked for once each, and what the chips just attached carry is remembered for the sent question.
+    effect(() => {
+      const chips = this.store.attached();
+      const turns = this.store.turns();
+      untracked(() => {
+        for (const c of chips) if (c.thumbnail) this.rememberThumbnail(c.attachment.sha256, c.thumbnail);
+        const port = this.attachments;
+        for (const t of turns) {
+          for (const a of t.attachments) {
+            if (a.kind !== 'image' || !port || this.thumbnails().has(a.sha256) || this.thumbnailsAsked.has(a.sha256)) continue;
+            this.thumbnailsAsked.add(a.sha256);
+            void port
+              .thumbnail(a)
+              .then((url) => url && this.rememberThumbnail(a.sha256, url))
+              .catch(() => undefined);
+          }
+        }
+      });
+    });
     // The host's gate reaches the store, which sends it with each question (an input, not derived state of the store).
     effect(() => this.store.setActionsGate(this.actionsGate()));
     // Tells the host which conversation is open (an output: outside the signal graph).
@@ -843,6 +886,19 @@ export class PdAssistant {
       e.preventDefault();
       if (!this.blocked()) this.submit();
     }
+  }
+
+  /** Small copies of pictures by digest: those of the chips just attached, and those the host gives for a reopened question. */
+  private readonly thumbnails = signal<ReadonlyMap<string, string>>(new Map());
+  private readonly thumbnailsAsked = new Set<string>();
+
+  /** A picture's thumbnail (the chip's own, else the host's copy); `null` for text and for a picture with none. */
+  protected thumbOf(sha256: string, chip: AttachmentChip): string | null {
+    return chip.thumbnail ?? this.thumbnails().get(sha256) ?? null;
+  }
+
+  private rememberThumbnail(sha256: string, url: string): void {
+    if (this.thumbnails().get(sha256) !== url) this.thumbnails.update((m) => new Map(m).set(sha256, url));
   }
 
   /** An attachment's chip as the host names it (a reopened conversation's too). */

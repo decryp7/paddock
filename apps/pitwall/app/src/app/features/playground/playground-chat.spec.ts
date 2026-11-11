@@ -62,6 +62,24 @@ describe('PlaygroundChat', () => {
     expect(el.querySelector('[data-testid=assistant-empty-action]')?.textContent?.trim()).toBe('Connected apps…');
   });
 
+  it("says whether the chosen model reads images, in Rust's words, and offers a downloaded vision model to switch to (WP-5)", async () => {
+    const backend = new MockBackend();
+    const { fixture, el } = await render(PlaygroundChat, backend);
+    const vision = () => el.querySelector('[data-testid=chat-vision]')?.textContent?.replace(/\s+/g, ' ').trim();
+    await until(fixture, () => !!vision());
+    // Qwen3.5 4B has no vision file: the line says so and offers the downloaded model that can use tools and read pictures.
+    expect(vision()).toBe('No image input. Use Gemma 4 E4B');
+    (el.querySelector('[data-testid=chat-use-vision]') as HTMLElement).click();
+    await until(fixture, () => vision() === 'Reads images.');
+    expect((await backend.chatModels()).selected).toBe('gemma-4-e4b-it-q4_k_m');
+    expect(el.querySelector('[data-testid=chat-use-vision]')).toBeNull();
+    (el.querySelector('[data-testid=chat-model] .mat-mdc-select-trigger') as HTMLElement).click();
+    await settle(fixture);
+    const options = Array.from(document.querySelectorAll<HTMLElement>('mat-option'));
+    expect(options.find((o) => o.textContent?.includes('Gemma 4 E4B'))?.textContent).toContain(' · reads images');
+    expect(options.find((o) => o.textContent?.includes('Qwen3.5 9B'))?.textContent).not.toContain('reads images');
+  });
+
   it('says when no model can use tools, and shows a failure with Try again', async () => {
     const none = new MockBackend({ empty: true });
     const r = await render(PlaygroundChat, none);

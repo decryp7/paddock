@@ -1041,6 +1041,7 @@
     "pd.wb.assistant.attach.drop": "⟦Ðŕööþ ƒîîļééš ţö ááţţááçĥ ţĥééɱ⟧",
     "pd.wb.assistant.attach.failed": "⟦\"{$name}\" çööûûļð ñööţ ƀé ááţţááçĥééð.⟧",
     "pd.wb.assistant.attach.image": "⟦ÎÎɱááĝéé⟧",
+    "pd.wb.assistant.attach.image-too-big": "⟦\"{$name}\" îîš ļááŕĝééŕ ţĥáñ {$mib} ṀîîƁ. ÅÅţţááçĥ á šɱááļļééŕ þîîçţûŕéé, ööŕ ééẋþöŕţ áá šɱááļļééŕ çöþý.⟧",
     "pd.wb.assistant.attach.remove": "⟦Ŕééɱööṽéé ƒŕöɱ ţĥîîš ǫûûééšţîööñ⟧",
     "pd.wb.assistant.attach.remove-named": "⟦Ŕééɱööṽéé {$name}⟧",
     "pd.wb.assistant.attach.too-big": "⟦\"{$name}\" îîš ļááŕĝééŕ ţĥáñ {$kib} ĶîîƁ. ÅÅţţááçĥ á šɱááļļééŕ ƒîîļé, ööŕ þáášţéé ţĥé þááŕţ ţĥááţ ɱááţţéŕš.⟧",

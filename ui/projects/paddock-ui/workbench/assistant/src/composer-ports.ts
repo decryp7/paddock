@@ -1,3 +1,4 @@
+import { signal, type Signal } from '@angular/core';
 import type { Attachment } from '../generated/assistant';
 import type { Unlisten } from './backend';
 
@@ -17,6 +18,8 @@ export interface AttachSource {
 export interface AttachRules {
   /** Largest file in bytes (the engine checks again). */
   readonly maxFileBytes: number;
+  /** Largest picture in bytes, when pictures have their own limit (ADR 0023 Decision 4, WP-5); `maxFileBytes` otherwise. */
+  readonly maxImageBytes?: number;
   /** Most attachments one question carries. */
   readonly maxCount: number;
   /** The file picker's filter (`accept`). */
@@ -33,6 +36,8 @@ export interface AttachmentChip {
   readonly label: string;
   /** A second, quieter part ("12 KB · 340 lines"); `null` for none. */
   readonly detail: string | null;
+  /** A picture's small copy as a `data:` URL, for a thumbnail beside its name (WP-5); absent or `null` for none. */
+  readonly thumbnail?: string | null;
 }
 
 /**
@@ -49,6 +54,16 @@ export abstract class AssistantAttachments {
   remove(attachment: Attachment): Promise<void> {
     void attachment;
     return Promise.resolve();
+  }
+  /**
+   * Why pictures cannot be sent now (the chosen model cannot read them), in words that say what to do; `null` when they can, or
+   * when the host does not gate them. A picture waiting in the composer then disables Send and the words are shown (WP-5).
+   */
+  readonly imageBlock: Signal<string | null> = signal<string | null>(null);
+  /** A picture's small copy as a `data:` URL, for a question already sent (a reopened conversation); default: none. */
+  thumbnail(attachment: Attachment): Promise<string | null> {
+    void attachment;
+    return Promise.resolve(null);
   }
   /** The chip of an attachment a stored question carries (for a reopened conversation); a host may say more. */
   chipOf(attachment: Attachment): AttachmentChip {

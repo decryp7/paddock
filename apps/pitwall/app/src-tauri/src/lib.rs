@@ -142,7 +142,9 @@ paddock_commands::command_table! {
     Mutation [WINDOW] => chat_host::commands::set_chat_saved,
     Mutation [WINDOW] => chat_host::commands::delete_all_chats,
     Query [MAIN | POPOUT] => chat_host::commands::chat_attach_rules,
-    Mutation [MAIN | POPOUT] limit 2 * paddock_commands::MIB => chat_host::commands::chat_attach,
+    // A picture up to 25 MiB as base64 (33.4 MiB) and its name.
+    Mutation [MAIN | POPOUT] limit 36 * paddock_commands::MIB => chat_host::commands::chat_attach,
+    Query [MAIN | POPOUT] => chat_host::commands::chat_thumbnail,
     Mutation [MAIN | POPOUT] => chat_host::commands::chat_detach,
     Query [WINDOW] => commands::benchmarks,
     Query [WINDOW] => commands::settings,

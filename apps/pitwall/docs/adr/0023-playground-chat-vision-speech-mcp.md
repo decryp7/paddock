@@ -137,6 +137,27 @@ two models racing through tool approvals is confusing and few would want it).
 - Text and code files: attach as text, UTF-8 only, 256 KiB each (judgement; cheap and expected of a full chat). PDFs and
   other documents wait for Recce, which already has readers: no second extractor here.
 
+**Built in WP-5** (`app/src-tauri/src/chat_host/pictures.rs`, `attach.rs`; `feat/pitwall-chat-images`). Where the build differs from
+the text above:
+
+- The file's bytes reach `chat_attach` as base64, not Tauri's JSON list of numbers (a 25 MiB picture would be about 90 MB of
+  digits); the command's limit is 36 MiB.
+- The size is read from the header before any pixel is decoded, so a pixel bomb is refused from its header: at most 40
+  megapixels and a side of 16,384 pixels, and the decoder runs with a 320 MiB allocation limit. EXIF orientation is applied
+  before the metadata is dropped. A JPEG is written as a JPEG (quality 90), everything else as a PNG, so flat colour and text stay
+  exact.
+- The budget is the projector's: the server reads each projector's header once, when it scans the models, and reports
+  `imageMaxPixels` on every local model (its `ProjectorInfo::max_image_pixels`, until now used only by its tests); the app
+  shrinks to the chosen model's budget, and to 1024 tokens at 28 px a side when a model has none.
+- The chosen model's picture state is Rust's (`chat_host::models::ChatImages`, in the picker's reply): whether it reads
+  pictures, why not in words, and the downloaded model that can use tools and read pictures (a loaded one first) that the bar
+  offers. A picture is refused for a model without vision with those words; Send stays off while a picture waits for one; the
+  provider sends no picture to such a model and says so in the message's text. A request carries at most 16 pictures and 24 MiB of
+  them, newest first, and says which older ones were left out.
+- A chip's thumbnail (160 px, a `data:` URL) is made in Rust, at attach and again by `chat_thumbnail` for a reopened chat.
+- Not done here: a picture's viewer (rule 45) and the real-model test with a tiny vision model (`PITWALL_LLAMA_E2E=1`), which
+  need WP-12's harness; the engine's own token count of a picture replaces the meter's estimate (one token per 28 x 28 pixels).
+
 ### 5. Speech input
 
 **Scope.** In: speech to text in the composer, and sending a recorded or attached audio clip to a model that hears. Out: TTS

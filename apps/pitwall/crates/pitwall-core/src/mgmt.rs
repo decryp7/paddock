@@ -891,6 +891,10 @@ pub struct LocalModel {
     pub capabilities: Vec<Capability>,
     /// Vision projector file.
     pub projector: Option<String>,
+    /// Most pixels of one image this model's projector takes (its token budget, `gguf::ProjectorInfo::max_image_pixels`);
+    /// `None` without a readable projector. Callers downscale to it before sending.
+    #[serde(default)]
+    pub image_max_pixels: Option<u64>,
     /// Added.
     pub added_at: Millis,
     /// Last used.
@@ -1064,7 +1068,7 @@ pub struct PlaygroundToolCall {
     pub arguments: String,
 }
 
-/// A playground message (`PlaygroundMessage`). Text only; images and audio come with their own work packages.
+/// A playground message (`PlaygroundMessage`). Text and images (WP-5); audio comes with its own work package.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaygroundMessage {
@@ -1078,6 +1082,10 @@ pub struct PlaygroundMessage {
     /// The call a `tool` message answers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+    /// Images of a `user` message: inline base64, already prepared by the app (the server checks them again and never fetches a
+    /// URL). A model without a vision projector refuses a request that has any.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<crate::chat::Image>,
 }
 
 impl PlaygroundMessage {
@@ -1088,6 +1096,7 @@ impl PlaygroundMessage {
             content: content.into(),
             tool_calls: vec![],
             tool_call_id: None,
+            images: vec![],
         }
     }
 }
@@ -1771,5 +1780,29 @@ mod tests {
         assert_eq!(m.slots, 1);
         assert!(!m.slots_custom);
         assert_eq!(m.loaded_slots, None);
+    }
+
+    /// WP-5: images are additive. An old message has none and serializes without the field; a new one keeps its images in the
+    /// order given; a model from an older reply has no image budget.
+    #[test]
+    fn playground_images_are_additive() {
+        let old: PlaygroundMessage = serde_json::from_value(json!({"role": "user", "content": "x"})).unwrap();
+        assert!(old.images.is_empty());
+        assert!(serde_json::to_value(&old).unwrap().get("images").is_none());
+        let with: PlaygroundMessage = serde_json::from_value(json!({
+            "role": "user", "content": "what is this?",
+            "images": [{"mime": "Png", "data": "iVBORw0KGgo="}, {"mime": "Jpeg", "data": "/9j/4A=="}]
+        }))
+        .unwrap();
+        assert_eq!(with.images.len(), 2);
+        assert_eq!(with.images[1].mime, crate::chat::ImageMime::Jpeg);
+        assert_eq!(serde_json::to_value(&with).unwrap()["images"][0]["data"], "iVBORw0KGgo=");
+        let model = serde_json::json!({
+            "id": "m", "repo": "r", "file": "f.gguf", "name": "m", "quant": null, "sizeBytes": 1, "paramsB": null,
+            "contextMax": null, "architecture": null, "capabilities": [], "projector": null, "addedAt": 0,
+            "lastUsedAt": null, "loaded": false, "pinned": false, "idleSecs": null,
+            "fit": {"verdict": "fits", "needRam": 0, "needVram": 0, "haveRam": 0, "haveVram": 0, "offload": "all", "message": ""}
+        });
+        assert_eq!(serde_json::from_value::<LocalModel>(model).unwrap().image_max_pixels, None);
     }
 }

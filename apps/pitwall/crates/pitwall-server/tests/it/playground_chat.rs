@@ -115,6 +115,32 @@ async fn a_tool_result_message_goes_back_to_the_engine_with_its_call() {
     );
 }
 
+/// WP-5: an image reaches the model check. The test model has no vision projector, so the stream ends in an error that says so and
+/// what to do; before, the server dropped the images and answered the text alone, as if they had been read. A bad image is a
+/// `badRequest` in words, never a silent text answer.
+#[tokio::test]
+async fn images_go_to_the_vision_check_and_a_bad_one_is_refused() {
+    let h = harness(false).await;
+    let image = json!({"mime": "Png", "data": "iVBORw0KGgo="});
+    let messages = json!([{"role": "user", "content": "what is this?", "images": [image]}]);
+    let events = all(open(&h, request(json!({"messages": messages}))).await).await;
+    let last = events.last().unwrap();
+    assert_eq!(last["kind"], "error", "{events:?}");
+    let words = last["error"]["message"].as_str().unwrap();
+    assert!(words.contains("cannot read images") && words.contains("vision model"), "{words}");
+    assert!(h.bodies.lock().unwrap().is_empty(), "no request reached the engine");
+
+    let bad = json!([{"role": "user", "content": "x", "images": [{"mime": "Png", "data": "***"}]}]);
+    let events = all(open(&h, request(json!({"messages": bad}))).await).await;
+    let last = events.last().unwrap();
+    assert_eq!(
+        (last["kind"].as_str(), last["error"]["code"].as_str()),
+        (Some("error"), Some("badRequest")),
+        "{events:?}"
+    );
+    assert!(last["error"]["message"].as_str().unwrap().contains("not valid base64"), "{last}");
+}
+
 #[tokio::test]
 async fn time_to_first_token_is_the_first_tokens_not_the_whole_answers() {
     let h = harness(false).await;

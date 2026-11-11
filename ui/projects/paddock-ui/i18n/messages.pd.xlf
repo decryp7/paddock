@@ -3122,6 +3122,9 @@
       <trans-unit id="pd.wb.assistant.attach.image" datatype="html">
         <source>Image</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.attach.image-too-big" datatype="html">
+        <source>&quot;<x id="name"/>&quot; is larger than <x id="mib"/> MiB. Attach a smaller picture, or export a smaller copy.</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.attach.remove" datatype="html">
         <source>Remove from this question</source>
       </trans-unit>
