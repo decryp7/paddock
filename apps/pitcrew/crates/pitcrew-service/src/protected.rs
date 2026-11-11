@@ -374,13 +374,43 @@ pub fn os_settle(data_dir: std::path::PathBuf) -> SettleHook {
     }
 }
 
+/// What the sweep of a trusted folder's children did: every entry moved aside (and why), and every move that failed.
+/// A failed move never stops the service: the entry stays where it is and is reported, and the service does not use it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Swept {
+    /// `(entry, where it went, why)`.
+    pub moved: Vec<(String, String, String)>,
+    /// `(entry, the OS's error)`.
+    pub failed: Vec<(String, String)>,
+}
+
+impl Swept {
+    /// One line per entry for the service log.
+    pub fn lines(&self) -> Vec<String> {
+        let moved = self
+            .moved
+            .iter()
+            .map(|(entry, aside, why)| format!("{entry} was {why}: moved to {aside}. Nothing was deleted: copy back only what you trust"));
+        let failed = self.failed.iter().map(|(entry, e)| {
+            format!("{entry} could not be moved aside ({e}); the service leaves it alone and does not use it. Close what holds it open and restart the service")
+        });
+        moved.chain(failed).collect()
+    }
+}
+
+/// Whether `name` is an entry this sweep already moved aside (`<name>.untrusted-<secs>-<n>`): moving it again would only grow its name.
+fn is_moved_aside(name: &str) -> bool {
+    name.contains(".untrusted-")
+}
+
 /// What [`ensure_protected_root`] did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RootOutcome {
     /// The folder was not there and was created protected.
     Created,
-    /// The folder was there and is now locked; what it holds that the service trusts is protected.
-    Locked,
+    /// The folder was there and is now locked; what it holds that the service trusts is protected. Carries what the children
+    /// sweep moved or could not move (ER-27: each is logged with its reason).
+    Locked(Swept),
     /// What was there could not be trusted (the reason); it was moved to the path and a protected folder made.
     MovedAside(String, String),
 }
@@ -414,6 +444,7 @@ pub fn ensure_protected_root(
         return Ok(RootOutcome::Created);
     };
     let is_folder = node.kind == FileKind::Dir;
+    let mut swept = Swept::default();
     let mut verdict: Result<(), String> = if is_folder { Ok(()) } else { Err("it is not a folder".into()) };
     if is_folder {
         port.lock_dir(&path).map_err(|e| io("Locking", e))?;
@@ -446,7 +477,8 @@ pub fn ensure_protected_root(
                 // A folder an older Pitcrew made inside the data folder (`logs`) inherited what `C:\ProgramData` gives users, who
                 // could then make links inside it: it is locked like the data folder, by handle, never propagated.
                 port.lock_dir(&child).map_err(|e| io("Locking", e))?;
-                for name in list(&child).unwrap_or_default() {
+                let names = list(&child).map_err(|e| io("Listing", e))?;
+                for name in names.into_iter().filter(|n| !is_moved_aside(n)) {
                     let entry = format!("{}\\{name}", child.trim_end_matches('\\'));
                     let Some(n) = port.node(&entry).map_err(|e| io("Examining", e))? else {
                         continue;
@@ -456,14 +488,22 @@ pub fn ensure_protected_root(
                         Security::Unix { .. } => true,
                     };
                     if n.kind == FileKind::Symlink || !ours {
-                        port.rename_aside(&entry).map_err(|e| io("Moving aside", e))?;
+                        let why = if n.kind == FileKind::Symlink {
+                            "a link"
+                        } else {
+                            "not owned by SYSTEM or Administrators"
+                        };
+                        match port.rename_aside(&entry) {
+                            Ok(aside) => swept.moved.push((entry, aside, why.to_string())),
+                            Err(e) => swept.failed.push((entry, e.to_string())),
+                        }
                     }
                 }
             }
         }
     }
     match verdict {
-        Ok(()) => Ok(RootOutcome::Locked),
+        Ok(()) => Ok(RootOutcome::Locked(swept)),
         Err(reason) => {
             let aside = port.rename_aside(&path).map_err(|e| io("Moving aside", e))?;
             port.create_dir(&path).map_err(|e| io("Creating the protected folder", e))?;
@@ -563,7 +603,7 @@ mod tests {
         p.put("C:\\ProgramData\\Pitcrew", inherited_from_program_data())
             .put("C:\\ProgramData\\Pitcrew\\pitcrew.toml", file(locked()));
         let out = ensure(&mut p, &["pitcrew.toml"], &["logs"]).unwrap();
-        assert_eq!(out, RootOutcome::Locked);
+        assert!(matches!(out, RootOutcome::Locked(_)), "{out:?}");
         assert!(p.calls.iter().any(|c| c.starts_with("lock_dir")), "{:?}", p.calls);
     }
 
@@ -698,7 +738,7 @@ mod tests {
             .put("C:\\ProgramData\\Pitcrew\\logs", inherited_from_program_data())
             .put("C:\\ProgramData\\Pitcrew\\logs\\blocked", user_owned());
         let out = ensure(&mut p, &["pitcrew.toml"], &["logs"]).unwrap();
-        assert_eq!(out, RootOutcome::Locked);
+        assert!(matches!(out, RootOutcome::Locked(_)), "{out:?}");
         assert!(
             p.calls.contains(&"lock_dir C:\\ProgramData\\Pitcrew\\logs".to_string()),
             "{:?}",
@@ -740,7 +780,7 @@ mod tests {
             .put("C:\\ProgramData\\Pitcrew\\logs\\service.log", file(locked()))
             .put("C:\\ProgramData\\Pitcrew\\logs\\junction", link);
         let out = ensure(&mut p, &["pitcrew.toml"], &["logs", "runners"]).unwrap();
-        assert_eq!(out, RootOutcome::Locked);
+        assert!(matches!(out, RootOutcome::Locked(_)), "{out:?}");
         for locked_dir in ["runners", "logs"] {
             assert!(
                 p.calls.contains(&format!("lock_dir C:\\ProgramData\\Pitcrew\\{locked_dir}")),
@@ -772,6 +812,109 @@ mod tests {
             matches!(&out, RootOutcome::MovedAside(_, why) if why.contains("runners")),
             "{out:?}"
         );
+    }
+
+    fn data_folder_with_a_stranger() -> FakePort {
+        let mut p = machine();
+        p.put("C:\\ProgramData\\Pitcrew", locked())
+            .put("C:\\ProgramData\\Pitcrew\\runners", inherited_from_program_data())
+            .put("C:\\ProgramData\\Pitcrew\\runners\\evil", user_owned());
+        p
+    }
+
+    /// Round 5 P1-2: every start moved the already moved entry again, so its name grew past 255 characters and the service stopped.
+    #[test]
+    fn starting_twice_moves_an_entry_aside_once_and_names_it_in_the_outcome() {
+        let mut p = data_folder_with_a_stranger();
+        let first = ensure(&mut p, &["pitcrew.toml"], &["runners"]).unwrap();
+        let RootOutcome::Locked(swept) = first else { panic!("{first:?}") };
+        assert_eq!(swept.moved.len(), 1, "{swept:?}");
+        assert!(
+            swept.moved[0].0.ends_with("runners\\evil") && swept.moved[0].2.contains("not owned"),
+            "{swept:?}"
+        );
+        let before = p.calls.iter().filter(|c| c.starts_with("rename_aside")).count();
+        let second = ensure(&mut p, &["pitcrew.toml"], &["runners"]).unwrap();
+        let after = p.calls.iter().filter(|c| c.starts_with("rename_aside")).count();
+        assert_eq!(before, after, "the second start must not move the aside again: {:?}", p.calls);
+        assert!(matches!(second, RootOutcome::Locked(s) if s.moved.is_empty() && s.failed.is_empty()));
+    }
+
+    /// A port whose `rename_aside` fails for one path (a file held open), everything else the fake's.
+    struct FailingRename<'a>(&'a mut FakePort, &'a str);
+    impl paddock_service::privileged::trust::TrustPort for FailingRename<'_> {
+        fn style(&self) -> Style {
+            self.0.style()
+        }
+        fn node(&mut self, p: &str) -> std::io::Result<Option<paddock_service::privileged::trust::Node>> {
+            self.0.node(p)
+        }
+        fn canonical(&mut self, p: &str) -> std::io::Result<String> {
+            self.0.canonical(p)
+        }
+        fn walk(&mut self, p: &str, l: usize) -> std::io::Result<Vec<(String, paddock_service::privileged::trust::Node)>> {
+            self.0.walk(p, l)
+        }
+        fn create_dir(&mut self, p: &str) -> std::io::Result<()> {
+            self.0.create_dir(p)
+        }
+        fn lock_dir(&mut self, p: &str) -> std::io::Result<()> {
+            self.0.lock_dir(p)
+        }
+        fn rename_aside(&mut self, p: &str) -> std::io::Result<String> {
+            if p.ends_with(self.1) {
+                return Err(std::io::Error::other("the file is in use"));
+            }
+            self.0.rename_aside(p)
+        }
+        fn sweep_aside(&mut self, a: &str, b: &str, k: usize) -> std::io::Result<Vec<String>> {
+            self.0.sweep_aside(a, b, k)
+        }
+        fn remove_tree(&mut self, p: &str) -> std::io::Result<()> {
+            self.0.remove_tree(p)
+        }
+    }
+
+    /// Round 5 P1-2: a failed move stopped the service for good.
+    #[test]
+    fn a_failed_move_is_reported_and_never_stops_the_start() {
+        let mut p = data_folder_with_a_stranger();
+        p.put("C:\\ProgramData\\Pitcrew\\runners\\evil2", user_owned());
+        let list = list_of(&p);
+        let mut failing = FailingRename(&mut p, "runners\\evil");
+        let out = ensure_protected_root(
+            &mut failing,
+            &list,
+            Path::new("C:\\ProgramData\\Pitcrew"),
+            &["pitcrew.toml"],
+            &["runners"],
+        )
+        .expect("a failed move must not be an error");
+        let RootOutcome::Locked(swept) = out else { panic!("{out:?}") };
+        assert_eq!(swept.failed.len(), 1, "{swept:?}");
+        assert!(swept.failed[0].1.contains("in use"), "{swept:?}");
+        assert_eq!(swept.moved.len(), 1, "the other entry is still moved: {swept:?}");
+        let lines = swept.lines().join("\n");
+        assert!(
+            lines.contains("could not be moved aside") && lines.contains("in use") && lines.contains("moved to"),
+            "{lines}"
+        );
+    }
+
+    /// Round 5 P1-2: a listing error was treated as an empty folder.
+    #[test]
+    fn a_listing_error_of_a_trusted_folder_is_an_error() {
+        let mut p = data_folder_with_a_stranger();
+        let list = |_: &str| -> std::io::Result<Vec<String>> { Err(std::io::Error::other("access denied")) };
+        let e = ensure_protected_root(
+            &mut p,
+            &list,
+            Path::new("C:\\ProgramData\\Pitcrew"),
+            &["pitcrew.toml"],
+            &["runners"],
+        )
+        .unwrap_err();
+        assert!(e.contains("Listing") && e.contains("access denied"), "{e}");
     }
 
     /// P1-3: a new runner's folder does not exist yet. It is made protected at creation when the nearest existing folder is

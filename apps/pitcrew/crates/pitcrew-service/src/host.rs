@@ -182,7 +182,14 @@ fn protect_installed_folder(data_dir: &std::path::Path) -> Result<Option<String>
     })?;
     Ok(Some(match outcome {
         RootOutcome::Created => format!("the data folder {} was created protected (administrators and SYSTEM only)", data_dir.display()),
-        RootOutcome::Locked => format!("the data folder {} is protected (administrators and SYSTEM only)", data_dir.display()),
+        RootOutcome::Locked(swept) => {
+            let mut note = format!("the data folder {} is protected (administrators and SYSTEM only)", data_dir.display());
+            for line in swept.lines() {
+                note.push_str("\n");
+                note.push_str(&line);
+            }
+            note
+        }
         RootOutcome::MovedAside(aside, why) => format!(
             "the data folder {} could not be trusted ({why}); it was moved to {aside} and a protected one made. Nothing was deleted: copy back only what you trust",
             data_dir.display()
