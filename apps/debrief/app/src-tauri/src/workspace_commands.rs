@@ -1855,6 +1855,10 @@ mod tests {
     fn the_same_import_started_twice_while_it_runs_is_one_job_and_other_sources_run_beside_it() {
         let dir = TempDir::new("import-twice");
         let app = opened(Some(dir.0.clone()), &[samples().join("log4net")]);
+        app.manage(crate::notification_centre::NotificationCentre::new(
+            None,
+            std::sync::Arc::new(crate::jobs::SystemClock),
+        ));
         let start = |path: &str, at_end: bool| {
             let (tx, rx) = std::sync::mpsc::channel::<()>();
             // `then` runs inside the job after the import: holding it holds the job.
@@ -1875,6 +1879,12 @@ mod tests {
         assert_eq!(again, first, "the same source imported twice started a second job");
         let imports = || app.state::<crate::jobs::Jobs>().find_active(|j| j.kind == JobKind::Import);
         assert_eq!(imports().len(), 1);
+        // The user is told the second ask joined the running job (through the notification centre).
+        let told = app.state::<crate::notification_centre::NotificationCentre>().snapshot("main");
+        assert!(told
+            .notices
+            .iter()
+            .any(|n| n.body == "Already importing these files; showing that job."));
         // Another source, or the same one read from its end, is another job.
         let (other, release_other) = start("log4net", false);
         let (tail, release_tail) = start("csv", true);

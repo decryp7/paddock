@@ -589,9 +589,35 @@ where
     if spec.key.is_some() {
         // A keyed request may join a job that already exists, so there is no value to hand back: submit the work itself.
         let end = move |ctx: &JobCtx| service::settle(f(ctx), ctx).0;
-        return jobs.submit_work(spec, controls, end).map_err(|r| r.to_string());
+        let (kind, window) = (spec.kind, spec.source.window.clone());
+        let sub = jobs.submit_keyed_work(spec, controls, end).map_err(|r| r.to_string())?;
+        if !sub.created {
+            tell_joined(app, kind, window.as_deref());
+        }
+        return Ok(sub.id);
     }
     jobs.submit(spec, controls, f).map(|h| h.id).map_err(|r| r.to_string())
+}
+
+/// A second ask for an import or export that is already under way was served by that job: say so, so the user is not left
+/// wondering why nothing new started. Other kinds join silently (they are background work nobody asked for by hand).
+fn tell_joined<R: Runtime>(app: &AppHandle<R>, kind: JobKind, window: Option<&str>) {
+    use crate::notification_centre::centre::{NewNotice, NoticeScope, NoticeSeverity, NoticeSource};
+    let (source, body) = match kind {
+        JobKind::Import => (NoticeSource::Import, "Already importing these files; showing that job."),
+        JobKind::Export => (NoticeSource::Job, "Already exporting this; showing that job."),
+        _ => return,
+    };
+    let notice = NewNotice::new(
+        format!("job:joined:{}", kind.as_str()),
+        source,
+        NoticeSeverity::Info,
+        "Already in progress",
+        NoticeScope::Project,
+    )
+    .body(body)
+    .quiet();
+    crate::notification_centre::post(app, window, notice, None);
 }
 
 fn service<R: Runtime>(app: &AppHandle<R>) -> CmdResult<Jobs> {

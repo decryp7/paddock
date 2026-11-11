@@ -12,7 +12,7 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 ### Fixed
 
-- **Jobs:** Starting the same import (the same files, project or bundle) or the same export (the same file with the same settings) while it is still running no longer starts a second job: the request is served by the running one, which you can follow in the Jobs pane. A different file or different settings still run side by side.
+- **Jobs:** Starting the same import (the same files, project or bundle) or the same export (the same file with the same settings) while it is still running no longer starts a second job: the request is served by the running one, which you can follow in the Jobs pane. A different file or different settings still run side by side. A message tells you when a request was joined to a running import or export.
 - **Sandbox:** On Linux a child's log sometimes said that a thread had started before the lockdown and kept its file access. The thread was the start-up handshake thread, finished but not yet removed by the kernel; the child now waits for it to go before it locks itself down (and logs it if it does not go within two seconds).
 - **Search:** Closing a log store while its word-search index was still merging could leave the index's background merges writing into the store's folder after it was closed or deleted. Closing now waits for them to end
 - **Memory:** Opening a large profile or heap snapshot no longer reads the whole file into Debrief itself first: the reader process is lent the file by ranges. A 128 MB capture took 395 MB of Debrief's memory to open and now 140 MB. While a capture opens, the captures you already have open stay usable instead of waiting for it
