@@ -129,7 +129,7 @@ pub fn basename(word: &str) -> &str {
 
 impl Simple {
     /// The words from the command itself on: assignments, `!`, reserved words (`do`, `then`, `while`...) and wrappers (`sudo`,
-    /// `env`, `command`, `exec`, `nohup`, `nice`, `timeout`) with their options are skipped.
+    /// `env`, `command`, `exec`, `nohup`, `nice`, `timeout`, `gtimeout`) with their options are skipped.
     pub fn command(&self) -> &[Word] {
         let w = &self.words;
         let mut i = 0;
@@ -144,7 +144,7 @@ impl Simple {
                 "sudo" => (true, &["-u", "-g", "-h", "-p", "-C", "-r", "-t", "-U", "-D", "-R", "-T"]),
                 "env" => (true, &["-u", "-C", "-S"]),
                 "nice" => (true, &["-n"]),
-                "timeout" => (true, &["-s", "-k"]),
+                "timeout" | "gtimeout" => (true, &["-s", "-k"]),
                 "command" | "exec" | "nohup" | "builtin" => (true, &[]),
                 _ => (false, &[]),
             };
@@ -161,7 +161,7 @@ impl Simple {
                     break;
                 }
             }
-            if name == "timeout" {
+            if matches!(name, "timeout" | "gtimeout") {
                 i += 1; // the duration
             }
         }
@@ -178,6 +178,13 @@ impl Simple {
             }
         }
         false
+    }
+
+    /// How many of the nested pieces that follow this command in [`Script::items`] are substitutions (`$(...)`, backticks, `<(...)`
+    /// in a word or a redirection target): they come first, and they run before the command does. The pieces after them are
+    /// the shell text the command itself runs (`bash -c`, `eval`, a heredoc to a shell).
+    pub fn substitution_count(&self) -> usize {
+        self.words.iter().map(|w| w.subs.len()).sum::<usize>() + self.subs.len()
     }
 
     /// The command line starts with the `do` of a loop.
