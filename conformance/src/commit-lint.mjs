@@ -10,6 +10,8 @@ import { applyWaivers, parseWaivers } from './util/waivers.mjs';
 export const TYPES = ['feat', 'fix', 'perf', 'refactor', 'test', 'docs', 'ci', 'chore', 'build', 'style', 'revert'];
 const HEADER = new RegExp(`^(${TYPES.join('|')})(\\([a-z0-9][a-z0-9._/-]*(?:,[a-z0-9][a-z0-9._/-]*)*\\))?!?: \\S.*$`);
 const MAX_HEADER = 100;
+/** What an agent does when the subject is too long: a rejected commit changes nothing, and amending an earlier one is the wrong fix. */
+export const LONG_SUBJECT_ADVICE = `Shorten the subject to ${MAX_HEADER} characters or fewer; put the detail in the body. Nothing was committed; your staged files are unchanged. Do not amend an earlier commit.`;
 
 /** Lines that credit a co-author or an AI tool. Each entry: [pattern, what it is]. */
 export const ATTRIBUTION = [
@@ -32,7 +34,7 @@ export function lint(message) {
   if (/^(Merge|Revert|fixup!|squash!|amend!) /.test(header)) return problems;
   if (!header) problems.push('the message is empty');
   else if (!HEADER.test(header)) problems.push(`"${header}" does not start with "<type>(<scope>)?: <subject>"; types: ${TYPES.join(', ')}`);
-  if (header.length > MAX_HEADER) problems.push(`the first line is ${header.length} characters (at most ${MAX_HEADER})`);
+  if (header.length > MAX_HEADER) problems.push(`the first line is ${header.length} characters (at most ${MAX_HEADER}). ${LONG_SUBJECT_ADVICE}`);
   if (lines.length > 1 && lines[1].trim() !== '') problems.push('the second line must be empty');
   return problems;
 }
@@ -74,10 +76,12 @@ export function commitLintMain(argv, cwd = process.cwd(), log = console.error, n
   const [flag, value] = flags.length ? argv.slice(1) : argv;
   let items;
   try {
-    if (flag === '--file' && value) items = [{ id: value, message: readFileSync(value, 'utf8') }];
+    // `--subject "<text>"`: the same rules on a subject typed before committing (a commit-msg hook rejection has cost agents an amend).
+    if (flag === '--subject' && value !== undefined) items = [{ id: 'subject', message: value }];
+    else if (flag === '--file' && value) items = [{ id: value, message: readFileSync(value, 'utf8') }];
     else if (flag === '--range' && value) items = messagesInRange(value, cwd, undefined, flags);
     else {
-      log('usage: paddock-conformance commit-lint --file <path> | [--first-parent] --range <rev-range>');
+      log('usage: paddock-conformance commit-lint --subject <text> | --file <path> | [--first-parent] --range <rev-range>');
       return 2;
     }
   } catch (e) {
