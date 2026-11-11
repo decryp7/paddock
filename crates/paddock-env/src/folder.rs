@@ -515,6 +515,14 @@ mod tests {
             std::fs::metadata(p).unwrap().permissions().mode() & 0o7777
         }
 
+        /// A new folder takes its parent's group on macOS and under a setgid parent (a TMPDIR on /Volumes gives `admin`), which is
+        /// not the account's own group; the rule under test is about the account's own group, so set it first.
+        fn in_own_group(p: &Path) {
+            // SAFETY: getegid has no arguments and cannot fail.
+            let gid = unsafe { libc::getegid() };
+            std::os::unix::fs::chown(p, None, Some(gid)).unwrap();
+        }
+
         #[test]
         fn a_new_data_folder_is_private_whatever_the_umask() {
             let t = tempfile::tempdir().unwrap();
@@ -528,6 +536,7 @@ mod tests {
         #[test]
         fn an_own_group_writable_folder_loses_group_write_once() {
             let t = tempfile::tempdir().unwrap();
+            in_own_group(t.path());
             std::fs::set_permissions(t.path(), std::fs::Permissions::from_mode(0o775)).unwrap();
             assert_eq!(
                 tighten_group_write(t.path(), |_| false),
@@ -644,6 +653,7 @@ mod tests {
         #[test]
         fn a_failed_mode_change_is_refused_and_changes_nothing_else() {
             let t = tempfile::tempdir().unwrap();
+            in_own_group(t.path());
             std::fs::set_permissions(t.path(), std::fs::Permissions::from_mode(0o775)).unwrap();
             let failing = |_: &std::fs::File, _| Err(std::io::Error::other("EPERM"));
             let r = tighten_group_write_with(t.path(), |_| false, failing);
