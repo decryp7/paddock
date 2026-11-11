@@ -1,6 +1,7 @@
 # 21. Portable tests: one test kit for paths, text, fixtures, waits and tools, and a check over every test
 
 - Status: Accepted (2026-10-27, by the user; decisions below)
+- Trimmed 2026-11-11 (user, comparable-practice review): TRIM: keep WP-3, WP-4, WP-5, WP-8; dropped WP-2 (C38), WP-6 and WP-7 as a migration (migrate an app's test helpers when the file is touched).
 - Date: 2026-10-27
 - Related: rules 3–5 (affected tests, fix locally, failing test first), rule 7 (tests never touch the machine), rule 8
   (lessons and rules live once), rule 40 (recurring bugs mean a missing design rule), rules 42/43 (share first, shared

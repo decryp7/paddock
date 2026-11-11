@@ -4,6 +4,7 @@
   "the non-test host check runs on every Dyno branch run; its cost is measured and reported, and the user is asked again
   only if it is large". The independent review approved revision 2 with no P1 (re-review of `2f911c8d3`); revision 3
   folds in its P2s.
+- Trimmed 2026-11-11 (user, comparable-practice review): TRIM: keep WP-3 (facts), WP-4 (registry Run keys, Startup folders, StartupApproved), WP-8 (docs); deferred WP-5 (logon tasks), WP-5b (packaged apps), WP-6 (file locks), the signer reader; Health says "not read here" for them.
 - Date: 2026-11-08
 - Revision 2 (2026-11-08): answers the independent review of `350e351d9` (6 P1, 15 P2).
   - P1 fixes:
