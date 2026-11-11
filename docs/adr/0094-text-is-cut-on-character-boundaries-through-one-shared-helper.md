@@ -5,6 +5,7 @@
   helpers that only their own crates' families call); revision 2 (`2e5017b46`) answered the independent review of
   revision 1 (`55286a33f`, "changes"); the review approved revision 2; revision 3 folds in its P2s (see "Review
   answers"). Nothing here is built yet. ER-23 does not apply (no drawings).
+- Trimmed 2026-11-11 (user, comparable-practice review): TRIM: keep the helper (WP-1), the corpus, the `never_panics` run, migration of untrusted-input sites, the Clippy entries and the rule text; dropped WP-0's classification and the cosmetic migrations.
 - Date: 2026-11-10
 - Related: ER-11, ER-21 / rule 40, ER-22 / rules 42 and 55 (share first; one implementation per mechanism; 55(e): C58
   is planned, not built), ER-33 / rule 71; ADR 0019 (`paddock-limits`), ADR 0034 (copies register, C58), ADR 0049 §3

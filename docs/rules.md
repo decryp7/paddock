@@ -27,7 +27,11 @@ changes here, every app's copy is updated in the same change.
 7. **Tests never touch the user's machine:** no real launchd/Login Items/services, no installed apps, never the
    installed Google Chrome (pinned Chrome for Testing or an explicit env var only), no `~/Documents`, `~/Desktop`,
    `~/Downloads`, no real user data, no windows on the desktop, no processes left behind. Docker: only containers you
-   created.
+   created, each with `--rm` and CPU and memory limits (for example `--cpus 4 --memory 12g`). Agents never restart, stop
+   or reconfigure shared infrastructure (Docker or OrbStack, CI runners, the test VM outside its lock); if it is down or
+   out of resources, the agent stops and reports instead of fixing it (2026-11-11; ER-14). *Why (added 2026-11-11):* an
+   uncapped test container ran OrbStack's VM out of memory; the agent then restarted OrbStack, which also restarts every
+   container of the user's, and Docker was down for about 15 minutes.
 8. **Every lesson goes into [lessons.md](lessons.md)**, every rule here; no `Co-Authored-By` or AI attribution anywhere.
 9. **Releases only from a tag in CI**, never from a local machine; a local build for the user to try is fine but is never
    published. Never tag a `[skip ci]` commit.
@@ -295,7 +299,8 @@ changes here, every app's copy is updated in the same change.
     (c) A new copy is allowed only with its register entry, a delete-by tag and the reason, in the same change. An entry
     leaves the register only together with its copy's files, or with the trailer `Copies-removed: <mechanism-id> <path>:
     <reason>`.
-    (d) A tag is refused while its app still holds a copy whose delete-by tag it has reached. A delete-by date moves only
+    (d) A copy whose delete-by tag is reached is reported as a warning; it no longer blocks a tag (user, 2026-11-11: the
+    register is a to-do list). A delete-by date moves only
     with the trailer `Copies-date: <mechanism-id> <path>: <old> -> <new>: approved: <coordinator|user>: <reason>`; a
     move to a later release line (a higher major or minor version) needs `approved: user`.
     (e) Enforced by conformance check C58 (planned, ADR 0034 WP-1; not built yet). A register-only change is docs-only and
@@ -312,6 +317,30 @@ changes here, every app's copy is updated in the same change.
     only after the same probe passed a positive control and a known-good peer (another app, machine or VM) was compared.
     *Why:* on Dyno 1.1.0 a VM with no menu bar produced a false "confirmed" cause in 12 of 12 runs, a tray count matched
     the app's own window buttons, and a reading row passed on a dead helper.
+
+## Design decisions (user, 2026-11-11; ER-37)
+76. **Measure a design against common practice before paying for it.** Before an ADR or design is accepted, it states how
+    comparable, well-known software handles the same problem (for example Visual Studio, VS Code, Chrome, Docker, Homebrew,
+    git, the OS vendor's own tools) and what the platform vendor documents as the standard (Microsoft, Apple, Linux
+    distributions), with sources. It then states the cost in agent-days, set against that baseline. A design that goes
+    beyond common practice says why this project needs more, and the cheaper common-practice option is always offered as a
+    decision. Personal, single-user tools default to common practice.
+    *Why:* on 2026-11-11 a 23-31-day elevated-helper design for Debrief went through four review rounds before the user
+    compared it with Visual Studio and VS Code and chose a half-day risk warning instead; several accepted process ADRs
+    (signed approvals, decision registers, extra gates) were then cut as more than a personal tool needs.
+
+## Privileged services (user, 2026-11-11; ER-38)
+77. **Privileged services check the caller.** A service or helper that runs as administrator, root or SYSTEM authorises
+    every request that changes something by the caller's identity, read from the OS (pipe client token, peer
+    credentials), not by the pipe or socket ACL alone. A request that changes what runs elevated (a program path, a
+    folder, a setting the elevated side acts on) needs an administrator caller. Read-only requests may take any local
+    user the ACL lets in. Elevation the user chooses with a click (Run or Restart as administrator) needs only a clear
+    risk warning, as tools such as Visual Studio and VS Code allow elevation with no further controls (they mark the
+    window as Administrator). User-chosen elevation is governed by this rule, not rule 75.
+    *Why:* on 2026-11-11 a survey found that Pitcrew's LocalSystem service (shipped in pitcrew-v1.0.1) starts any program
+    a same-user process names over its pipe, with no prompt, because ADR 0004 authorised by the pipe ACL alone. Dyno's
+    helper already checks the caller per connection. The user chose "warn and accept" for click-to-elevate and a caller
+    check for no-click paths.
 
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:

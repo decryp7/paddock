@@ -8,6 +8,7 @@
   P1-8, two P2s); revision 4 (`264468b3c`) answered it and was re-reviewed ("changes": P1-9, three P2s); revision 5
   (`7680e9d79`) answered it and was re-reviewed ("changes": P1-10, three P2s); revision 6 answers it.
   Nothing here is built yet.
+- Trimmed 2026-11-11 (user, comparable-practice review): TRIM: keep WP-0, WP-1 (`Outcome`, `Verdict`, exit codes 6 and 7), WP-2 (`Measured`, `require_tool`) with fail-closed on release runs, the WP-3 ban on silent skips as a grep check, WP-5 step 1 and its test-body sites, WP-6; dropped the per-tag-workflow wiring, the runner-log reader, the C103 syn pass and the tooling copies.
 - Date: 2026-11-10
 - Related: ER-21 / rule 40, ER-22 / rules 42 and 55 (share first; one implementation per mechanism,
   `docs/known-copies.toml`), ER-12 (no silent skips), ER-27, ER-31, ER-33 / rule 71; ADR 0022 and its 2026-10-31

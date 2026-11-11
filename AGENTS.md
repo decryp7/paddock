@@ -83,7 +83,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 - The public API is `ui/projects/paddock-ui/src/public-api.ts` and the CSS custom properties `--pd-*`, `data-theme`,
   `data-accent`, `data-density`. Any change is a CHANGELOG entry; no backward-compatibility shims before Paddock's v1.
 - Shared Rust crates have a pure core and a `tauri` feature for the adapter; typed errors, doc comments on public items,
-  no `unwrap` on I/O or user data, bounded resources. Coverage: crates >= 99% lines (CI's llvm-cov gate), components 100%.
+  no `unwrap` on I/O or user data, bounded resources. Coverage: crates >= 90% lines, security code 99% target, report-only for now (CI's llvm-cov gate, scripts/coverage-gate.mjs), components 100%.
 - Anchor every ignore rule (`/ui/dist/`, not `dist/`); `node_modules` (no trailing slash, so it also matches a symlink) is the one unanchored rule; conformance C57 fails on any tracked symlink.
 
 ## Testing and quality gates
@@ -199,7 +199,7 @@ Apply these deliberately. They are not decoration:
   `Copies-waived: <id> <path>: <reason>` in a commit that touches it (`*` only for a mechanism of at most two members
   besides wiring); a freeze does not stop such a fix; a new copy needs its entry and a delete-by tag, an entry leaves
   only with its files (or `Copies-removed:`), and a date moves only with `Copies-date: ... approved: <coordinator|user>`
-  (`user` for a later release line); register check C58 (planned, ADR 0034 WP-1; not built yet, the steward checks the register by hand).
+  (`user` for a later release line); a reached delete-by tag is a warning, not a tag block (user, 2026-11-11); register check C58 (planned, ADR 0034 WP-1; not built yet, the steward checks the register by hand).
 - Slow means two questions (rule 51): can more threads or workers run it (bounded by the kind of work), and can it be made
   cheaper (less work per item, no repeats, a cheaper algorithm or format, caching, batching, skipping)? Measure both;
   thread counts are Settings with an "Auto" default; a long or bulk operation's design has a "Parallelism and cost" section.

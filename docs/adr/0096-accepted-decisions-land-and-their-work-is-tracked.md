@@ -1,6 +1,9 @@
 # 96. Accepted decisions land, and their work is tracked to main
 
-- Status: Accepted 2026-11-10 (user), all decisions as recommended. History: Proposed 2026-11-10; revision 1
+- Status: Accepted 2026-11-10 (user), all decisions as recommended. **Simplified 2026-11-11 (user): ADRs stay plain
+  files plus the index (`docs/adr/README.md`); the TOML decision register (`docs/adr/register/`), the generated index,
+  C1xx and `./dev adr status` are dropped, and `docs/adr/register/` is deleted. What stays: accepted ADR texts are
+  copied to main.** §2 to §5 and WP-1 to WP-4 below are history, not work to do. History: Proposed 2026-11-10; revision 1
   (`919381e26`) was reviewed independently ("changes": one P1 and nine P2s); revision 2 (`b2d6031e5`) answered it and was
   re-reviewed ("changes": one P1, two P2s, and one new class from the 0094/0095 review); revision 3 (`baa0f01c6`)
   answered that and was approved by the review, whose three P2s this text folds in (see "Review answers"). Drafted at the coordinator's request of 2026-11-10, after the user chose "a register plus a
