@@ -13,7 +13,7 @@ use super::{
     HeldImage, remove_tree_no_follow, rename_aside_free, sweep_aside_free, walk_no_follow,
 };
 use crate::privileged::files::FileKind;
-use crate::privileged::trust::{FileIdentity, Node, Security, Style, TrustPort};
+use crate::privileged::trust::{FileIdentity, Identity, Node, Security, Style, TrustPort};
 use std::io;
 
 impl TrustPort for RealTrust {
@@ -50,15 +50,15 @@ impl TrustPort for RealTrust {
         }))
     }
 
-    fn identity(&mut self, path: &str) -> io::Result<Option<FileIdentity>> {
+    fn identity(&mut self, path: &str) -> io::Result<Identity> {
         use std::os::unix::fs::MetadataExt;
         match std::fs::symlink_metadata(path) {
-            Ok(m) => Ok(Some(FileIdentity {
+            Ok(m) => Ok(Identity::Known(FileIdentity {
                 volume: m.dev(),
-                index: m.ino(),
+                index: u128::from(m.ino()),
                 links: u32::try_from(m.nlink()).unwrap_or(u32::MAX),
             })),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Identity::Missing),
             Err(e) => Err(e),
         }
     }
@@ -422,4 +422,36 @@ mod unix_tests {
             open_with(&text(&script), false, "/proc/self/fd").unwrap();
         }
     }
+}
+
+/// See [`super::open_append_no_follow`].
+pub(super) fn open_append_no_follow(
+    path: &std::path::Path,
+    require_trusted_owner: bool,
+) -> io::Result<std::fs::File> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)?;
+    let meta = file.metadata()?; // fstat of the open file
+    let bad = |why: &str| {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{} {why}", path.display()),
+        ))
+    };
+    if !meta.is_file() {
+        return bad("is not a regular file");
+    }
+    if meta.nlink() > 1 {
+        return bad("has more than one name (a hard link)");
+    }
+    // SAFETY: geteuid has no arguments and cannot fail.
+    let me = unsafe { libc::geteuid() };
+    if require_trusted_owner && meta.uid() != 0 && meta.uid() != me {
+        return bad("is owned by another account");
+    }
+    Ok(file)
 }

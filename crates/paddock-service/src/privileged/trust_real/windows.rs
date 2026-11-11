@@ -14,7 +14,7 @@ use super::{
     walk_no_follow,
 };
 use crate::privileged::files::FileKind;
-use crate::privileged::trust::{FileIdentity, Node, Security, Style, TrustPort};
+use crate::privileged::trust::{FileIdentity, Identity, Node, Security, Style, TrustPort};
 use std::io;
 
 impl TrustPort for RealTrust {
@@ -60,12 +60,13 @@ impl TrustPort for RealTrust {
         }))
     }
 
-    fn identity(&mut self, path: &str) -> io::Result<Option<FileIdentity>> {
+    fn identity(&mut self, path: &str) -> io::Result<Identity> {
         use std::os::windows::fs::OpenOptionsExt;
         use std::os::windows::io::AsRawHandle;
         use windows::Win32::Foundation::HANDLE;
         use windows::Win32::Storage::FileSystem::{
-            BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+            BY_HANDLE_FILE_INFORMATION, FILE_ID_INFO, FileIdInfo, GetFileInformationByHandle,
+            GetFileInformationByHandleEx,
         };
         const FILE_READ_ATTRIBUTES: u32 = 0x0000_0080;
         const SHARE_ALL: u32 = 7;
@@ -79,16 +80,30 @@ impl TrustPort for RealTrust {
             .open(path)
         {
             Ok(f) => f,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Identity::Missing),
             Err(e) => return Err(e),
         };
+        let handle = HANDLE(file.as_raw_handle());
+        // The link count comes from the classic call; the 128-bit file id and the 64-bit volume serial (what ReFS and a Dev Drive
+        // need: their 64-bit file index is not unique) from `FileIdInfo`.
         let mut info = BY_HANDLE_FILE_INFORMATION::default();
         // SAFETY: the handle is valid for the call (owned by `file`) and `info` is a valid out structure.
-        unsafe { GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &mut info) }
+        unsafe { GetFileInformationByHandle(handle, &mut info) }
             .map_err(|e| io::Error::other(e.to_string()))?;
-        Ok(Some(FileIdentity {
-            volume: u64::from(info.dwVolumeSerialNumber),
-            index: (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+        let mut id = FILE_ID_INFO::default();
+        // SAFETY: the handle is valid; the buffer is a FILE_ID_INFO of exactly the size passed.
+        unsafe {
+            GetFileInformationByHandleEx(
+                handle,
+                FileIdInfo,
+                (&mut id as *mut FILE_ID_INFO).cast(),
+                std::mem::size_of::<FILE_ID_INFO>() as u32,
+            )
+        }
+        .map_err(|e| io::Error::other(format!("the file id could not be read: {e}")))?;
+        Ok(Identity::Known(FileIdentity {
+            volume: id.VolumeSerialNumber,
+            index: u128::from_le_bytes(id.FileId.Identifier),
             links: info.nNumberOfLinks,
         }))
     }
@@ -412,6 +427,55 @@ fn final_path_of(file: &std::fs::File) -> io::Result<String> {
         io::ErrorKind::InvalidData,
         "the final path is longer than Windows allows",
     ))
+}
+
+/// See [`super::open_append_no_follow`].
+pub(super) fn open_append_no_follow(
+    path: &std::path::Path,
+    require_trusted_owner: bool,
+) -> io::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+    };
+    const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const REPARSE: u32 = 0x400;
+    const DIRECTORY: u32 = 0x10;
+    // Opens the entry itself, never what a reparse point names; shared for read and write only (no delete), as the engine lock is.
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .share_mode(3)
+        .custom_flags(OPEN_REPARSE_POINT)
+        .open(path)?;
+    let bad = |why: &str| {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{} {why}", path.display()),
+        ))
+    };
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    // SAFETY: the handle is valid for the call (owned by `file`) and `info` is a valid out structure.
+    unsafe { GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &mut info) }
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    if info.dwFileAttributes & REPARSE != 0 {
+        return bad("is a link or reparse point");
+    }
+    if info.dwFileAttributes & DIRECTORY != 0 {
+        return bad("is a folder");
+    }
+    if info.nNumberOfLinks > 1 {
+        return bad("has more than one name (a hard link)");
+    }
+    if require_trusted_owner {
+        let owner = win::descriptor(&file)?.owner;
+        if !crate::privileged::trust::is_trusted_sid(&owner) {
+            return bad("is not owned by SYSTEM or Administrators");
+        }
+    }
+    Ok(file)
 }
 
 #[cfg(test)]

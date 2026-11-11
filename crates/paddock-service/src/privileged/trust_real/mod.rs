@@ -28,6 +28,24 @@ mod windows;
 #[derive(Debug, Default)]
 pub struct RealTrust;
 
+/// Opens `path` for appending (made when missing) the way a privileged writer must: **never through a link or reparse point**, and
+/// only when the open file itself is acceptable, read from the handle (not from the path, so nothing can change between the check and
+/// the write): one name only (link count 1, so no hard link a user holds can receive what is written) and, when
+/// `require_trusted_owner` is set (Windows, as SYSTEM), an owner that is SYSTEM or Administrators.
+///
+/// # Errors
+/// The open failed, or the file is not acceptable: an [`io::ErrorKind::InvalidData`] error that says why (a link, a second name, an
+/// owner that is not trusted). The caller moves such a file away and starts a new one.
+pub fn open_append_no_follow(
+    path: &std::path::Path,
+    require_trusted_owner: bool,
+) -> io::Result<std::fs::File> {
+    #[cfg(unix)]
+    return unix::open_append_no_follow(path, require_trusted_owner);
+    #[cfg(windows)]
+    return windows::open_append_no_follow(path, require_trusted_owner);
+}
+
 /// Every entry below `root` (a link is listed and not entered), at most `limit`.
 fn walk_no_follow(
     port: &mut dyn TrustPort,
@@ -258,41 +276,65 @@ pub(super) mod tests {
     }
 
     /// Round 5 (Pitcrew P2-3, P2-9): the real port tells which file a path is and how many names it has, never following a link.
+    /// Round 6 P1-B: the append open refuses a link, a second name and (given a trusted-owner rule) a stranger's file, from the handle.
+    #[cfg(unix)]
+    #[test]
+    fn the_append_open_refuses_a_link_and_a_second_name_and_leaves_their_target_alone() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("service.log");
+        let mut f = open_append_no_follow(&log, false).unwrap();
+        f.write_all(b"one\n").unwrap();
+        drop(f);
+        // A hard link: the second name makes the file unacceptable.
+        let held = dir.path().join("held.log");
+        std::fs::hard_link(&log, &held).unwrap();
+        let e = open_append_no_follow(&log, false).unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::InvalidData, "{e}");
+        assert!(e.to_string().contains("more than one name"), "{e}");
+        std::fs::remove_file(&held).unwrap();
+        // A link: never followed, the target is not written.
+        let target = dir.path().join("target.txt");
+        std::fs::write(&target, "secret").unwrap();
+        let link = dir.path().join("link.log");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert!(open_append_no_follow(&link, false).is_err());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "secret");
+        // A good file opens again.
+        drop(open_append_no_follow(&log, false).unwrap());
+    }
+
     #[cfg(unix)]
     #[test]
     fn identity_tells_the_file_and_its_link_count_and_does_not_follow_a_link() {
+        use crate::privileged::trust::Identity;
+        let known =
+            |port: &mut RealTrust, p: &std::path::Path| match port.identity(&text(p)).unwrap() {
+                Identity::Known(id) => id,
+                other => panic!("{other:?}"),
+            };
         let dir = tempfile::tempdir().unwrap();
         let a = dir.path().join("a");
         let b = dir.path().join("b");
         std::fs::write(&a, "x").unwrap();
         let mut port = RealTrust;
-        let first = port.identity(&text(&a)).unwrap().expect("exists");
+        let first = known(&mut port, &a);
         assert_eq!(first.links, 1);
         std::fs::hard_link(&a, &b).unwrap();
-        let again = port.identity(&text(&a)).unwrap().unwrap();
+        let again = known(&mut port, &a);
         assert_eq!(again.links, 2, "a second name for the file");
         assert_eq!((again.volume, again.index), (first.volume, first.index));
-        assert_eq!(
-            port.identity(&text(&b)).unwrap().unwrap(),
-            again,
-            "the same file by either name"
-        );
+        assert_eq!(known(&mut port, &b), again, "the same file by either name");
         let other = dir.path().join("c");
         std::fs::write(&other, "y").unwrap();
-        assert_ne!(
-            port.identity(&text(&other)).unwrap().unwrap().index,
-            first.index
-        );
+        assert_ne!(known(&mut port, &other).index, first.index);
         // A link is itself, not its target.
         let link = dir.path().join("l");
         std::os::unix::fs::symlink(&a, &link).unwrap();
-        assert_ne!(
-            port.identity(&text(&link)).unwrap().unwrap().index,
-            first.index
-        );
+        assert_ne!(known(&mut port, &link).index, first.index);
         assert_eq!(
             port.identity(&text(&dir.path().join("missing"))).unwrap(),
-            None
+            Identity::Missing
         );
     }
 

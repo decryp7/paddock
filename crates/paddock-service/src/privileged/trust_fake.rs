@@ -43,6 +43,9 @@ impl TrustPort for FakePort {
     fn node(&mut self, path: &str) -> io::Result<Option<Node>> {
         Ok(self.nodes.get(&self.key(path)).cloned())
     }
+    fn models_identity(&self) -> bool {
+        false
+    }
     fn canonical(&mut self, path: &str) -> io::Result<String> {
         Ok(self
             .links
