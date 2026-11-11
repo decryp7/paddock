@@ -364,7 +364,12 @@ macOS needs our own build anyway; and **the Windows binaries need the VC++ runti
 fetch and place `vcruntime140*.dll`, `msvcp140.dll` and on x64 `vcomp140.dll` beside the engine, a second download that
 no installer check covers.
 
-**(b) Recommended: build whisper-server from the pinned commit in Pitwall's release workflow and ship it in the
+**Decided 2026-11-12 (W1): (a), download the pinned release; where a platform has no official release binary, the user is
+asked then.** (b) below was this note's recommendation and is withdrawn. The x64 Windows runtime point of (a) is answered by
+the installer, which installs Microsoft's VC++ runtime since `ff40d2a9f` (on `train/2026-11-11-5`); Windows on Arm still needs
+`vc_redist.arm64` or the user's answer.
+
+**(b) Withdrawn (was recommended): build whisper-server from the pinned commit in Pitwall's release workflow and ship it in the
 installer as a second sidecar** (`tauri.conf.json` already bundles `binaries/pitwall-server` through `externalBin`,
 `app/src-tauri/tauri.conf.json:37`). The pin is the commit `d1be6fde1` plus the SHA-256 of its source archive, checked
 before the build; the build is `cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DWHISPER_SDL2=OFF` with
@@ -460,7 +465,8 @@ cmake).
 
 ## 8. Decisions for the user (second revision)
 
-- **W1. How whisper.cpp is delivered.** (b) Build it from the pinned commit in the release workflow and ship it in the
+- **W1. How whisper.cpp is delivered.** **Answered 2026-11-12: (a), download the pinned release like llama.cpp; the user is
+  asked where a platform has no official release binary (macOS).** The question as asked: (b) Build it from the pinned commit in the release workflow and ship it in the
   installer (9.5–13.5 days; one mechanism, static CRT, no executable downloaded at run time). (a) Download the official
   release at first use like llama.cpp (10.5–15 days; plus our own macOS build and the VC++ runtime files). Recommended:
   **(b)**.
@@ -732,3 +738,20 @@ Stop-Process -Id $p.Id -Force
 - [cpal on crates.io](https://crates.io/crates/cpal) (0.18.2, Apache-2.0, dependencies per target).
 - Rule 76 rows: the Apple, Microsoft, Open WebUI and LM Studio pages linked in section 3; ChatGPT only from a
   third-party page, marked unverified.
+
+## 9. Next WP-7 slices, from the review of `feat/pitwall-speech` (2026-11-12)
+
+Built on `feat/pitwall-speech`: the capture port and recorder (slice 1), CoreAudio through `cpal` (slice 2), the pure
+transcribe path, `Part::Audio` and the server's `Transcriber` port (slice 5). The review's P2s 1–3 were fixed there (no samples
+in `Debug`, no allocation on the audio thread, chunks cut at whole frames). These items go to the next slices:
+
+| # | Item | Slice |
+|---|---|---|
+| 4 | **Anti-alias filter.** The box resampler (`pitwall_core::speech::pcm`) is a weak low-pass for 44.1/48 kHz input. Measure word error rate and time with it and with a proper FIR or polyphase filter on the spike's clips, record both in `performance.md` (rule 48), keep the better | 5 follow-up |
+| 5 | **Downmix by the loudest channel** (or the first speech channel) instead of the mean, so a mono microphone on one channel of a stereo interface is not halved | 1 follow-up |
+| 6 | **AVCaptureDevice authorisation check** before opening on macOS: a denied CoreAudio stream may deliver silence instead of an error, so read `AVCaptureDevice.authorizationStatus(for: .audio)` (request when undetermined) and report `Denied` with Repair | 4 |
+| 7 | **`Recorder::start` outside the session lock**, with a log line for the open's outcome and duration (opening a device can take hundreds of milliseconds; `status` must not wait for it) | 1 follow-up |
+| 8 | **`Part::Audio` limits and checks:** a byte cap per clip and per request, magic-byte check of WAV and MP3, `Capability::Audio` in `capabilities.json` with its llama.cpp floor (ADR 0018), and the refusal naming only models that are downloaded and can load | models that hear |
+| 9 | **The shared `SpeechState` mapping for Full:** `workbench/assistant`'s `SpeechState` has no state for "stopped at 5 minutes"; map `Status::Full` (finish automatically, with a notice) in the shared pane, not in Pitwall alone | 7 |
+| 10 | **A macOS CI leg that compiles `pitwall-app`:** the cpal adapter is macOS-only and Pitwall's app is tested on Linux only, so CI never compiles it | 3 (with Windows and Linux) |
+| 11 | **Wording:** the small text points of the review (messages and doc comments) | 7 |

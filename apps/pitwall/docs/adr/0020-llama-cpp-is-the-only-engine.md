@@ -41,3 +41,29 @@ on every platform with CPU, Vulkan, CUDA and Metal builds. Several engines were 
   the `Engine` trait, decided in a new ADR.
 - The wire contract loses `setModelEngine`, `PackEngine` and the engine fields of presets and models, and gains
   `engineSetup` (overview and live update), `retryEngineSetup`, `removeLeftover` and `Engine.leftovers`.
+
+## Amendment 2026-11-12: whisper.cpp for speech to text
+
+Decided by the user: the Playground's speech input uses Whisper small Q8_0 run by whisper.cpp (2026-11-11, after the speech
+spike, [research note](../research/speech-spike-2026-11-11.md)), and whisper.cpp is delivered by downloading a pinned
+release (W1, 2026-11-12). This amends "llama.cpp is the only engine" for that one purpose; it is the new decision the
+Consequences above ask for.
+
+- **whisper.cpp is a second engine, for speech to text only.** It serves no chat, embedding or rerank request, is not
+  listed among chat engines, cannot be chosen per model or preset, and its model (`ggml-small-q8_0.bin`, not GGUF) lives
+  apart from the model library. llama.cpp stays the only engine for everything else.
+- **Its own pin.** A catalog in the shape of `llama-runtimes.json` (release, tag, commit, per platform the asset's URL, size
+  and SHA-256), checked as llama.cpp's builds are: SHA-256 before unpacking, the unpack keep-list, a self-test, roll back.
+  It is downloaded on first use as a job with progress and Cancel (ER-17, ER-18), from hosts already in
+  `privacy::DOWNLOAD_HOSTS`. Where a platform has no official release binary (whisper.cpp publishes none for macOS: only
+  an xcframework), the user is asked at that point; nothing is built or fetched for it without that answer.
+- **Its own port.** whisper-server runs as a child of `pitwall-server`, like llama-server: through
+  `pitwall_server::process`, bound to 127.0.0.1 on a port Pitwall picks, never with `--convert` (it runs ffmpeg), reached
+  only through `pitwall_loopback`. The server talks to it behind the `Transcriber` port (`pitwall_server::speech`); no C++
+  runs inside a Pitwall process.
+- **Windows runtime.** The official Windows builds import the VC++ runtime (`vcruntime140`, `msvcp140`, and `vcomp140` on
+  x64), as llama.cpp's do. The x64 installer already installs it (`ff40d2a9f`, on `train/2026-11-11-5`, not in a released
+  tag yet); Windows on Arm needs `vc_redist.arm64`, which the installer does not bring (a WP-7 engine-slice item).
+
+Evidence read for this amendment (ADR 0091): `origin/train/2026-11-11-5` `607bb7928`, `origin/feat/pitwall-speech`
+`cbf37f568`; the note's release facts are at whisper.cpp `v1.9.5` / `b5454`, commit `d1be6fde1`.
