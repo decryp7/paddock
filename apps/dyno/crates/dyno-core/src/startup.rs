@@ -182,7 +182,7 @@ pub fn is_os_owned(entry: &StartupEntry, os: crate::os::Os) -> bool {
             let after_drive = exe.get(2..).unwrap_or("");
             let in_windows = exe.as_bytes().get(1) == Some(&b':') && after_drive.starts_with("/windows/");
             in_windows
-                || name.starts_with("/microsoft/windows/")
+                || (entry.id.starts_with("task:") && name.starts_with("/microsoft/windows/"))
                 || (entry.id.starts_with("task:") && norm_path(&entry.id).contains(":/microsoft/windows/"))
                 || entry
                     .publisher
@@ -425,6 +425,7 @@ mod filter_tests {
         ));
         let mut task = entry("\\Microsoft\\Windows\\Defrag\\ScheduledDefrag", "", ImpactRating::Low);
         task.exe = None;
+        task.id = "task:\\Microsoft\\Windows\\Defrag\\ScheduledDefrag".into();
         assert!(is_os_owned(&task, Os::Windows));
         assert!(is_os_owned(&signed("x", "D:\\a.exe", "Microsoft Windows"), Os::Windows));
         assert!(is_os_owned(
@@ -463,6 +464,15 @@ mod filter_tests {
             &with_id(
                 "reg:HKCU:run:64:x:\\Microsoft\\Windows\\y",
                 "x:\\Microsoft\\Windows\\y",
+                "C:\\Users\\me\\a.exe"
+            ),
+            Os::Windows
+        ));
+        // A Run value whose name starts like a task's path is still a Run value: the task-name check is for `task:` ids only.
+        assert!(!is_os_owned(
+            &with_id(
+                "reg:HKCU:run:64:\\Microsoft\\Windows\\x",
+                "\\Microsoft\\Windows\\x",
                 "C:\\Users\\me\\a.exe"
             ),
             Os::Windows

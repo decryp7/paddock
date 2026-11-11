@@ -246,7 +246,7 @@ pub struct FolderFile {
 pub struct FolderRead {
     /// The files that were read.
     pub files: Vec<FolderFile>,
-    /// Files past [`MAX_FOLDER_FILES`] that were not read.
+    /// Files past [`MAX_FOLDER_FILES`] that were not read, and entries that are not regular files (subfolders), counted as skipped.
     pub past_cap: u32,
 }
 
@@ -310,32 +310,40 @@ fn is_variable_name(name: &str) -> bool {
 /// would pass [`MAX_EXPANDED_CHARS`].
 pub fn expand_env(text: &str, env: &dyn Fn(&str) -> Option<String>) -> Option<String> {
     let mut out = String::new();
+    // A running count: `chars().count()` of `out` at every `%` would be quadratic in the number of `%`.
+    let mut chars = 0usize;
+    let mut push = |out: &mut String, piece: &str| {
+        out.push_str(piece);
+        chars = chars.saturating_add(piece.chars().count());
+        chars <= MAX_EXPANDED_CHARS
+    };
     let mut rest = text;
     while let Some(start) = rest.find('%') {
-        out.push_str(&rest[..start]);
+        if !push(&mut out, &rest[..start]) {
+            return None;
+        }
         let after = &rest[start + 1..];
-        match after.find('%') {
+        let fits = match after.find('%') {
             Some(end) if is_variable_name(&after[..end]) => match env(&after[..end]) {
                 Some(value) => {
-                    out.push_str(&value);
                     rest = &after[end + 1..];
+                    push(&mut out, &value)
                 }
                 None => {
-                    out.push('%');
                     rest = after;
+                    push(&mut out, "%")
                 }
             },
             _ => {
-                out.push('%');
                 rest = after;
+                push(&mut out, "%")
             }
-        }
-        if out.chars().count() > MAX_EXPANDED_CHARS {
+        };
+        if !fits {
             return None;
         }
     }
-    out.push_str(rest);
-    (out.chars().count() <= MAX_EXPANDED_CHARS).then_some(out)
+    push(&mut out, rest).then_some(out)
 }
 
 fn not_measured() -> StartupImpact {
@@ -719,6 +727,19 @@ mod tests {
         for text in ["%a=b%", "%a\0b%", "%%", long.as_str(), "100%=%x"] {
             assert_eq!(expand_env(text, &strict).as_deref(), Some(text), "{text:?}");
         }
+    }
+
+    /// A text made of many `%` expands correctly and stays bounded (the running count replaced a per-`%` recount of the output). Not a
+    /// timing test: the result and the bound are what it pins.
+    #[test]
+    fn many_percent_signs_expand_in_one_pass() {
+        let text = "%".repeat(MAX_VALUE_BYTES / 2);
+        assert_eq!(expand_env(&text, &env).as_deref(), Some(text.as_str()));
+        let pairs = "%A%".repeat(10_000);
+        let env_a = |n: &str| (n == "A").then(|| "v".to_string());
+        assert_eq!(expand_env(&pairs, &env_a), Some("v".repeat(10_000)));
+        let over = "%".repeat(MAX_EXPANDED_CHARS + 1);
+        assert_eq!(expand_env(&over, &env), None);
     }
 
     #[test]

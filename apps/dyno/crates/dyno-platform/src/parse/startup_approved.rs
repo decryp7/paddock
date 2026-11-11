@@ -35,6 +35,11 @@ mod tests {
     fn reads_task_manager_values() {
         assert_eq!(approved_state(&[0x02, 0, 0, 0]), Some(StartupState::Enabled));
         assert_eq!(approved_state(&[0x06]), Some(StartupState::Enabled));
+        // Any even first byte is enabled, not only the two Task Manager writes.
+        assert_eq!(
+            approved_state(&[0x04, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            Some(StartupState::Enabled)
+        );
         assert_eq!(
             approved_state(&[0x03, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8]),
             Some(StartupState::Disabled)
