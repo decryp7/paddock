@@ -38,7 +38,8 @@ pub enum WorktreeCommand {
     Reassign(PathArgs),
     /// Unlock a worktree and forget its owner (its owner, or the coordinator).
     Release(PathArgs),
-    /// Remove your own worktree (a review copy); refuses unpushed commits and uncommitted changes.
+    /// Remove your own worktree, or any unlocked unowned one (after `release`), whoever calls; refuses unpushed commits and
+    /// uncommitted changes.
     Drop(PathArgs),
     /// Every worktree: branch, lock note, owner, lock age, merged, dirty and in use.
     List(ListArgs),

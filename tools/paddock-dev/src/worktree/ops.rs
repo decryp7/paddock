@@ -533,24 +533,27 @@ fn authorize_owner(map: &OwnerMap, caller: &Caller, k: &str, what: &str) -> Resu
     }
 }
 
-/// `drop`: removes a worktree its owner claimed (a review copy). Refuses unpushed commits and uncommitted changes.
+/// `drop`: removes a worktree that is the caller's own (claimed by it) or free (unlocked and unowned, as `release` leaves
+/// it), for any caller, the coordinator included. Refuses another agent's worktree, a locked unowned one, unpushed commits
+/// and uncommitted changes; always forgets the owner entry of what it removes.
 pub fn drop_own(repo: &Repo, caller: &Caller, path: &Path) -> Result<Report, CliError> {
-    let agent = need_agent(caller, "worktree drop")?;
     let store = OwnerStore::open(&repo.common_dir);
     let k = store
         .update(|map| -> Result<String, CliError> {
             let (w, k) = find_secondary(repo, path)?;
-            match map.get(&k) {
-                Some(e) if e.agent_id == agent.id => {}
-                Some(e) => {
-                    return Err(CliError::refused(format!(
-                        "{k} belongs to agent {}; you can only drop your own worktree.",
-                        e.agent_id
-                    )));
+            match (map.get(&k), &caller.agent) {
+                (Some(e), Some(a)) if e.agent_id == a.id => {}
+                (Some(e), _) => {
+                    return Err(
+                        CliError::refused(format!("{k} belongs to agent {}; only that agent can drop it.", e.agent_id)).with_hint(
+                            "The coordinator frees it with `./dev worktree reassign` or `release` once its agent ended, then drops it.",
+                        ),
+                    );
                 }
-                None => {
-                    return Err(CliError::refused(format!("{k} is not claimed by you."))
-                        .with_hint("`drop` removes only a worktree you claimed yourself."));
+                (None, _) if w.locked.is_none() => {}
+                (None, _) => {
+                    return Err(CliError::refused(format!("{k} is locked and not claimed by you."))
+                        .with_hint("Claim it with `./dev worktree claim`, or `release` it (unlock) and then drop it."));
                 }
             }
             // Never removes work no remote has, and never with --force: staged, modified and untracked files and commits on
