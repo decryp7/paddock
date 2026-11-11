@@ -66,8 +66,9 @@ impl Invocation {
 }
 
 /// `path` as the OS tools expect it: Windows verbatim paths lose their prefix, which Explorer and editors do not understand.
+/// A verbatim spelling only exists in Windows paths, so the rule is the Windows one on every host (a table of any OS tests it).
 pub fn plain_path(path: &Path) -> PathBuf {
-    crate::path::plain(path.to_path_buf())
+    paddock_env::winpath::plain(path, paddock_env::Os::Windows).into_owned()
 }
 
 /// The file manager showing `file` selected (Explorer, Finder; on Linux its folder, as file managers have no common

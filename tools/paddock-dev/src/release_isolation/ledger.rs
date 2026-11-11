@@ -229,17 +229,12 @@ pub fn simplified(path: &Path) -> PathBuf {
 }
 
 /// [`simplified`] on text, so that it is testable on every OS. The prefix comes off through the shared
-/// [`paddock_repo_graph::strip_verbatim`]; `\\?\Volume{..}\` and other forms that name no drive or share stay as they are, because
-/// without the prefix they would name nothing.
+/// [`paddock_env::winpath::plain`]; `\\?\Volume{..}\` and other forms that name no drive or share (and names that are unsafe
+/// without the prefix) stay as they are, because without the prefix they would name nothing.
 pub fn simplify_text(text: &str) -> String {
-    let drive_or_unc = |rest: &str| {
-        let b = rest.as_bytes();
-        rest.starts_with(r"UNC\") || (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\')
-    };
-    match text.strip_prefix(r"\\?\") {
-        Some(rest) if drive_or_unc(rest) => paddock_repo_graph::strip_verbatim(Path::new(text)).to_string_lossy().into_owned(),
-        _ => text.to_string(),
-    }
+    paddock_env::winpath::plain(Path::new(text), paddock_env::Os::Windows)
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Starts a ledger file (only `setup` calls this): refuses when one exists, because a second `setup` would orphan the
@@ -327,10 +322,7 @@ mod tests {
         assert_eq!(simplified(Path::new(r"\\?\UNC\srv\share\x")), Path::new(r"\\srv\share\x"));
         assert_eq!(simplified(Path::new(r"\\?\C:\job")), Path::new(r"C:\job"));
         assert_eq!(simplified(Path::new(r"\\srv\share")), Path::new(r"\\srv\share"), "already plain");
-        assert_eq!(
-            simplify_text(r"\\?\UNC\srv\share"),
-            paddock_repo_graph::strip_verbatim(Path::new(r"\\?\UNC\srv\share")).to_string_lossy()
-        );
+        assert_eq!(simplify_text(r"\\?\UNC\srv\share"), r"\\srv\share");
     }
 
     #[test]

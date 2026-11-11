@@ -1,7 +1,6 @@
 //! The git side of `./dev worktree`: running git, finding the repository and reading `git worktree list --porcelain`.
 
 use paddock_proc::{Limits, command, run_bounded};
-use paddock_repo_graph::strip_verbatim;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -176,8 +175,7 @@ pub fn canonical(p: &Path) -> PathBuf {
     let mut rest: Vec<std::ffi::OsString> = Vec::new();
     let mut cur = p.to_path_buf();
     loop {
-        if let Ok(real) = cur.canonicalize() {
-            let mut out = strip_verbatim(&real);
+        if let Ok(mut out) = paddock_env::winpath::real(&cur) {
             for part in rest.iter().rev() {
                 out.push(part);
             }
@@ -237,7 +235,7 @@ mod tests {
     #[test]
     fn a_path_that_does_not_exist_yet_resolves_through_its_existing_parent() {
         let d = tempfile::tempdir().unwrap();
-        let real = paddock_repo_graph::real_path(d.path());
+        let real = paddock_env::winpath::real_or_given(d.path());
         assert_eq!(canonical(&d.path().join("a").join("b")), real.join("a").join("b"));
     }
 }

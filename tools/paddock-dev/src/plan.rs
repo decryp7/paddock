@@ -7,7 +7,7 @@
 
 use crate::plan_gitea::{GiteaSource, TRACED_SCRIPT, gitea_targets};
 use paddock_cli::{CliError, Report};
-use paddock_repo_graph::{CargoCli, FileSource, GitHistory, Graph, GraphError, History, cargo_graph, lock_diff, npm_graph, real_path};
+use paddock_repo_graph::{CargoCli, FileSource, GitHistory, Graph, GraphError, History, cargo_graph, lock_diff, npm_graph};
 use regex::Regex;
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -776,7 +776,7 @@ pub fn apps_of(files: &[String]) -> BTreeSet<String> {
 pub fn read_graph(root: &Path, history: &dyn History) -> Result<RepoGraph, GraphError> {
     let files = history.tracked_files()?;
     // The root in the spelling cargo prints its paths in (a temp folder's short name or a symlinked workspace is not).
-    let root = real_path(root);
+    let root = paddock_env::winpath::real_or_given(root);
     let root = root.as_path();
     let disk = DiskFiles(root.to_path_buf());
     let root_text = root.to_string_lossy().replace('\\', "/");

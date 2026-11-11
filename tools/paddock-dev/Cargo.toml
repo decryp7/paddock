@@ -30,6 +30,7 @@ sha2 = "0.10"
 syn = { version = "2", default-features = false, features = ["full", "parsing", "visit", "printing"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 paddock-cli = { path = "../../crates/paddock-cli" }
+paddock-env = { path = "../../crates/paddock-env" }
 paddock-proc = { path = "../../crates/paddock-proc" }
 paddock-repo-graph = { path = "../../crates/paddock-repo-graph", features = ["git-history", "cargo-metadata"] }
 paddock-slots = { path = "../../crates/paddock-slots" }

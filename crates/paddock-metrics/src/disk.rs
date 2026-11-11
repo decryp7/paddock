@@ -25,35 +25,14 @@ pub struct Space {
 
 /// The nearest existing ancestor of `path`, canonicalised (an output folder may not exist yet).
 pub fn existing_ancestor(path: &Path) -> Option<PathBuf> {
-    path.ancestors().find_map(|p| std::fs::canonicalize(p).ok())
+    path.ancestors()
+        .find_map(|p| paddock_env::winpath::real(p).ok())
 }
 
 /// `\\?\C:\x` as `C:\x` and `\\?\UNC\server\share\x` as `\\server\share\x` (what `canonicalize` returns on Windows
 /// against what the disk list reports); other paths unchanged.
-#[cfg(windows)]
-fn plain(path: &Path) -> PathBuf {
-    use std::path::{Component, Prefix};
-    let mut parts = path.components();
-    let Some(Component::Prefix(prefix)) = parts.next() else {
-        return path.to_path_buf();
-    };
-    let head = match prefix.kind() {
-        Prefix::VerbatimDisk(drive) => format!("{}:", drive as char),
-        Prefix::VerbatimUNC(server, share) => format!(
-            r"\\{}\{}",
-            server.to_string_lossy(),
-            share.to_string_lossy()
-        ),
-        _ => return path.to_path_buf(),
-    };
-    let mut out = PathBuf::from(head);
-    out.extend(parts);
-    out
-}
-
-#[cfg(not(windows))]
-fn plain(path: &Path) -> PathBuf {
-    path.to_path_buf()
+fn plain(path: &Path) -> std::borrow::Cow<'_, Path> {
+    paddock_env::winpath::plain(path, paddock_env::Os::current())
 }
 
 /// The mount with the longest mount point that is a prefix of `path`.

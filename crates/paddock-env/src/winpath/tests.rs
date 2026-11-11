@@ -1,5 +1,5 @@
 use super::*;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const W: Os = Os::Windows;
 
@@ -391,4 +391,59 @@ mod on_windows {
             assert_eq!(same(&lower, &upper, Os::Windows), opens, "{w}");
         }
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_name_that_is_not_text_is_left_alone_and_refused_for_programs() {
+    use std::os::unix::ffi::OsStringExt;
+    let odd = PathBuf::from(std::ffi::OsString::from_vec(vec![b'/', 0xff, b'a']));
+    assert_eq!(plain(&odd, W), odd.as_path());
+    assert!(!safe_to_strip(&odd, W, Purpose::Plain));
+    assert!(same(&odd, &odd, W));
+    assert_eq!(kind(&odd, W), Kind::Relative);
+    let e = for_tools(&odd, Os::Linux).unwrap_err();
+    assert!(e.reason.contains("Unicode") && !e.next_step.is_empty());
+    assert_eq!(components(&odd, W).len(), 2);
+}
+
+#[test]
+fn a_real_error_names_the_path_and_keeps_its_cause() {
+    use std::error::Error;
+    let e = real_for_tools(Path::new("/definitely/not/here")).unwrap_err();
+    assert!(e.to_string().contains("/definitely/not/here"));
+    assert!(e.source().is_some());
+    let np = RealError::NotPlain(for_tools(p(r"\\?\Volume{1}\x"), W).unwrap_err());
+    assert!(np.to_string().contains("drive letter") && np.source().is_some());
+}
+
+#[test]
+fn an_incomplete_share_and_a_device_without_root_keep_the_prefix() {
+    for t in [r"\\?\UNC\srv", r"\\?\UNC\\srv\share", r"\\?\UNC\"] {
+        assert!(!safe_to_strip(p(t), W, Purpose::Plain), "{t}");
+        assert!(for_tools(p(t), W).is_err(), "{t}");
+    }
+}
+
+#[test]
+fn for_tools_explains_a_bad_name_and_a_dot_part() {
+    let bad = for_tools(p(r"\\?\C:\work\a?b"), W).unwrap_err().to_string();
+    assert!(
+        bad.contains("`a?b` is not a valid Windows name") && bad.contains("rename"),
+        "{bad}"
+    );
+    let dots = for_tools(p(r"\\?\C:\work\..\x"), W)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        dots.contains("`.` or `..`") && dots.contains("resolved path"),
+        "{dots}"
+    );
+}
+
+#[test]
+fn the_fold_keeps_a_letter_whose_uppercase_is_two_letters() {
+    // `char::to_uppercase` gives "SS" for the sharp s: the fold leaves it alone, as a one-to-one table would.
+    assert!(!same(p("C:\\Stra\u{df}e"), p(r"C:\STRASSE"), W));
+    assert!(same(p("C:\\Stra\u{df}e"), p("c:\\STRA\u{df}E"), W));
 }
