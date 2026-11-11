@@ -1,5 +1,5 @@
 import { computed, effect, EffectRef, inject, Injectable, Injector, Signal, untracked } from '@angular/core';
-import { DISMISSED, ShellContextHost, type ShellCore, type ShellNotice, type ShellPorts } from '@decryp7/paddock-ui/shell';
+import { DISMISSED, ShellContextHost, type ShellCore, type ShellNotice, type ShellPorts } from '@decryp7/paddock-ui/shell/contributions';
 import { FieldFilter, Query, RecordView, WorkspaceSummary } from '../core/api.types';
 import { WorkspaceStore } from '../core/workspace.store';
 import { DockService } from '../dock/dock.service';

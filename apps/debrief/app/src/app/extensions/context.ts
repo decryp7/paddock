@@ -1,5 +1,5 @@
 import type { Signal } from '@angular/core';
-import type { ShellContext } from '@decryp7/paddock-ui/shell';
+import type { ShellContext } from '@decryp7/paddock-ui/shell/contributions';
 import type { FieldFilter, Query, RecordView, WorkspaceSummary } from '../core/api.types';
 
 /** An event's id in the store (`RecordView.id`). Ids stay below 2^53 (debrief-1-2-api.md §2.2). */

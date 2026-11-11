@@ -1,5 +1,5 @@
 import { computed, EnvironmentProviders, inject, Injectable, InjectionToken, makeEnvironmentProviders, signal } from '@angular/core';
-import { SHELL_COMMAND_RUNNER, SHELL_PORTS } from '@decryp7/paddock-ui/shell';
+import { SHELL_COMMAND_RUNNER, SHELL_PORTS } from '@decryp7/paddock-ui/shell/contributions';
 import { WorkspaceStore } from '../core/workspace.store';
 import { Logger } from '../core/logger';
 import { ActivityLog } from '../core/activity/activity-log';

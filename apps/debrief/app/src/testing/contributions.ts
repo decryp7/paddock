@@ -1,6 +1,6 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { DISMISSED, type ShellNotice } from '@decryp7/paddock-ui/shell';
+import { DISMISSED, type ShellNotice } from '@decryp7/paddock-ui/shell/contributions';
 import { asDebriefCommand, contributedItems, DEBRIEF_KIND, type DebriefBatchItems, type DebriefBatchKey, type DebriefCommandDef } from '../app/extensions/contributions';
 import type { CommandContext, EventId, TimeDisplay, TimeRange } from '../app/extensions/context';
 
