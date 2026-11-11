@@ -71,13 +71,15 @@ optional: nothing reads it.
 
 ### Added
 
+- Playground chat is on in the release build. The Playground shows the Chat tab next to Compare; before, only a proof-of-concept
+  build had it.
 - Playground chat: images. Paste, drop or pick PNG, JPEG, WebP or GIF files (up to 25 MiB each) in the chat's question box,
   see a thumbnail of each before sending, and remove one with its x. Pitwall checks the file by its content, turns a phone
   photo upright, shrinks it to what the chosen model's vision file takes, and writes it again without its location, camera and
   other metadata; nothing is fetched and nothing leaves this computer. Only models with a vision file read images: for any
   other the chat says so in words, offers a downloaded vision model to switch to, and keeps Send off while an image waits for
   a model that cannot read it. Images stay in a saved chat, but their file names are not saved: after Pitwall restarts a sent image shows as "Image 640 × 480"; a model without vision is not sent the older ones, and the turn
-  says so. The chat is still switched off in release builds until speech and the security review are done.
+  says so. The chat is on in the release build.
 - Report a problem (Help menu, command palette): a diagnostics zip you review file by file and save where you choose;
   nothing is sent. It holds the system facts, your settings, the recent logs of the app, the server and the command line,
   the server's settings, which engines and model files are installed (names and sizes), and what the server and the

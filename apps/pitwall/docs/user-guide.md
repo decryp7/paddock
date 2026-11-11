@@ -434,8 +434,7 @@ The Playground has a Chat tab and a Compare tab. Compare sends one text question
 is a full conversation with one model. The chat runs in Pitwall's own window and goes through the same queue as your apps, so
 it loads and releases models the same way.
 
-**The chat is behind a build switch.** It is off in the release builds until the speech work and the security review are
-done. A build without it shows Compare only. Everything below is for a build that has it.
+**The chat ships in Pitwall 1.1.** The release builds have it on, so the Playground shows both tabs.
 
 **Pick a model.** The list shows chat models. A model that cannot use tools is marked, because tools need a chat template that
 supports them. Stop works at every step: while a model loads, while it writes and while Pitwall waits for you to allow a tool.

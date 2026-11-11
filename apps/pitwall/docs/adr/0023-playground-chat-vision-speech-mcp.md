@@ -501,7 +501,7 @@ From building WP-2a and WP-4a (`pitwall/1.1-wp2a` `9dc147e24`, `pitwall/1.1-wp4a
 - The model picker (Decision 9, D6) is WP-3a's: the Chat tab lists the loaded and catalog models, those without the `tools`
   capability disabled with the reason, and preselects the starter tool-capable model.
 - The build switch is temporary (plan, Phase A): a Cargo feature `chat` read by the command `chat_enabled`, until ADR 0049's
-  switches exist.
+  switches exist. Since 2026-11-12 (user, D-3) `chat` is a default feature, so the release build ships the chat.
 - Decided 2026-11-08 (user): the chat is sent whole up to the model's window less the answer's reserve; nothing is trimmed
   silently, the meter shows the level and a turn that cannot fit is refused in words (WP-4b, `pitwall/1.1-wp4b` `0ef631f7f`).
 - The window is one slot's context, never more than the model was trained for: `min(context_max, context per slot)`, the

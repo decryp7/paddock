@@ -141,8 +141,8 @@ goes straight onto it.
 
 **Temporary: the chat's build switch** (user, 2026-11-07). ADR 0049's switches are not built, so Rust decides from a Cargo
 feature: `chat` in `apps/pitwall/app/src-tauri/Cargo.toml`, reported by the command `chat_enabled`; the Playground shows its
-Chat tab only when it says so, and is the 1.0 Playground otherwise. On for the internal PoC build (`--features chat`), off by
-default, so the release workflow builds without it. **Remove** when ADR 0049 WP-5 lands: the feature becomes a `switches.toml`
+Chat tab only when it says so, and is the 1.0 Playground otherwise. Since 2026-11-12 (user, D-3) it is a default
+feature, so the release workflow builds with it. **Remove** when ADR 0049 WP-5 lands: the feature becomes a `switches.toml`
 entry and the command reads the generated table.
 
 **Note for WP-3a (agent 2), from the user's answer of 2026-11-07:** the Chat tab gets a model picker of the loaded and catalog
