@@ -7,6 +7,11 @@ use std::time::Duration;
 /// The text an end line starts with (after any logger prefix).
 pub const END_MARKER: &str = "connection ended";
 
+/// The drain outcomes an end line may name (ADR 0072 §6; `none` and `skipped`: the endpoint did not drain).
+pub const DRAIN_OUTCOMES: [&str; 9] = [
+    "eof", "byteCap", "bytesCap", "timeCap", "poolFull", "none", "skipped", "stopped", "failed",
+];
+
 /// The lines a product logged, shared between the product's logger and the test.
 #[derive(Clone, Default)]
 pub struct LogCapture(Arc<(Mutex<Vec<String>>, Condvar)>);
@@ -64,6 +69,18 @@ impl LogCapture {
         g.iter().any(|x| x.contains(END_MARKER))
     }
 
+    /// Blocks until an end line was logged at index `from` or later; false after `guard` (a hang guard).
+    pub fn wait_for_end_line_since(&self, from: usize, guard: Duration) -> bool {
+        let seen = |l: &Vec<String>| l.iter().skip(from).any(|x| x.contains(END_MARKER));
+        let g = self.0.0.lock().unwrap_or_else(|p| p.into_inner());
+        let (g, _) = self
+            .0
+            .1
+            .wait_timeout_while(g, guard, |l| !seen(l))
+            .unwrap_or_else(|p| p.into_inner());
+        seen(&g)
+    }
+
     /// Whether nothing was logged.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -81,4 +98,37 @@ pub fn field<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     after
         .split_whitespace()
         .find_map(|kv| kv.strip_prefix(key).and_then(|rest| rest.strip_prefix('=')))
+}
+
+struct Forward(LogCapture);
+
+impl log::Log for Forward {
+    fn enabled(&self, m: &log::Metadata) -> bool {
+        m.level() <= log::Level::Info
+    }
+
+    fn log(&self, r: &log::Record) {
+        if self.enabled(r.metadata()) {
+            self.0.push(format!("{} {}", r.level(), r.args()));
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+/// The capture of this process's `log` records (Info and up), installing the logger on first use. An error when another
+/// logger already owns the process: a rig then cannot see the endpoint's lines and says so instead of passing quietly.
+/// Under `cargo test` the tests of one binary share the process, so a neighbour's lines can appear in a window; nextest runs
+/// each test in its own process.
+pub fn process_capture() -> Result<LogCapture, String> {
+    static CAPTURE: std::sync::OnceLock<Result<LogCapture, String>> = std::sync::OnceLock::new();
+    CAPTURE
+        .get_or_init(|| {
+            let capture = LogCapture::new();
+            log::set_logger(Box::leak(Box::new(Forward(capture.clone()))))
+                .map_err(|_| "another logger is installed in this process; the rig cannot capture the end lines".to_string())?;
+            log::set_max_level(log::LevelFilter::Info);
+            Ok(capture)
+        })
+        .clone()
 }

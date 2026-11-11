@@ -52,14 +52,6 @@ blocks_tag = "dyno-v*"
 note = "A listener dropped with a connected client in its backlog: the client reads a bare end and never learns why."
 
 [[ratchet]]
-instance = "WP-7"
-endpoint = "ipc-host"
-scenario = "*"
-fault = "no-end-line"
-blocks_tag = "none"
-note = "No end line yet (ADR 0072 §6, WP-7)."
-
-[[ratchet]]
 instance = "I4"
 endpoint = "ipc-link-server"
 scenario = "silent-client"
@@ -76,14 +68,6 @@ blocks_tag = "dyno-v*"
 note = "LinkServer::stop closes every peer with no reason."
 
 [[ratchet]]
-instance = "WP-7"
-endpoint = "ipc-link-server"
-scenario = "*"
-fault = "no-end-line"
-blocks_tag = "none"
-note = "No end line yet (ADR 0072 §6, WP-7)."
-
-[[ratchet]]
 instance = "I14"
 endpoint = "ipc-launcher"
 scenario = "stop-with-open-connection"
@@ -92,28 +76,12 @@ blocks_tag = "dyno-v*"
 note = "launch.rs closes the child's peer with no reason."
 
 [[ratchet]]
-instance = "WP-7"
-endpoint = "ipc-launcher"
-scenario = "*"
-fault = "no-end-line"
-blocks_tag = "none"
-note = "No end line yet (ADR 0072 §6, WP-7)."
-
-[[ratchet]]
 instance = "I15"
 endpoint = "dyno-agent"
 scenario = "stop-with-open-connection"
 fault = "no-reason"
 blocks_tag = "dyno-v*"
 note = "The agent's stop closes every peer with no reason (server.rs, after the accept loop)."
-
-[[ratchet]]
-instance = "WP-7"
-endpoint = "dyno-agent"
-scenario = "*"
-fault = "no-end-line"
-blocks_tag = "none"
-note = "No end line in the ADR's form yet (ADR 0072 §6, WP-7); the agent logs Client connected / disconnected."
 
 [[ratchet]]
 instance = "I16"
@@ -132,28 +100,12 @@ blocks_tag = "dyno-v*"
 note = "A frame the peer cannot decode fails the Peer (Peer::fail) with no reason frame."
 
 [[ratchet]]
-instance = "WP-7"
-endpoint = "dyno-helper"
-scenario = "*"
-fault = "no-end-line"
-blocks_tag = "none"
-note = "No end line yet (ADR 0072 §6, WP-7)."
-
-[[ratchet]]
 instance = "I22"
 endpoint = "mcp-loopback"
 scenario = "stop-with-open-connection"
 fault = "no-reason"
 blocks_tag = "dyno-v*"
 note = "Serving::shutdown(Both) after pairing: the bridge reads a bare end."
-
-[[ratchet]]
-instance = "WP-7"
-endpoint = "mcp-loopback"
-scenario = "*"
-fault = "no-end-line"
-blocks_tag = "none"
-note = "The listener logs 'ended after' lines but not the ADR's end line (code, flush, drain); WP-7."
 
 [[ratchet]]
 instance = "I24"

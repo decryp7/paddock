@@ -406,6 +406,27 @@ impl Refusal {
     }
 }
 
+/// A handshake that failed: the refusal the client was sent and the cause for the log (never the key). It reads as the cause.
+#[derive(Debug)]
+struct Refused {
+    refusal: Refusal,
+    cause: String,
+}
+
+impl std::ops::Deref for Refused {
+    type Target = String;
+
+    fn deref(&self) -> &String {
+        &self.cause
+    }
+}
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.cause)
+    }
+}
+
 /// Writes the refusal line in one write: written piece by piece (as `writeln!` of a JSON value does), a close in between left
 /// the client a cut-off line.
 fn refuse(stream: &mut impl Write, refusal: Refusal, why: &str) {
@@ -472,9 +493,43 @@ fn drain(reader: &mut BufReader<Watched>, until: Instant) -> (usize, DrainEnd) {
     }
 }
 
+/// The end line of a connection (ADR 0072 §6, WP-7; ER-27): one `connection ended` line per connection, `key=value` pairs, no
+/// content. `drain` is the drain outcome in the ADR's words (`none` for a paired connection: only a refusal is drained).
+fn log_end(
+    id: u64,
+    accepted: Instant,
+    code: &str,
+    phase: &str,
+    drain: &str,
+    bytes: usize,
+    detail: &str,
+) {
+    log::info!(
+        "paddock_mcp: connection ended conn=#{id} phase={phase} code={code} flush=none reason=none drain={drain} bytes={bytes} open_ms={} detail=\"{}\"",
+        accepted.elapsed().as_millis(),
+        detail
+            .chars()
+            .map(|c| if c.is_control() || c == '"' { ' ' } else { c })
+            .take(120)
+            .collect::<String>()
+    );
+}
+
+/// The `drain=` word of an end line: the outcome only (a failed read's kind is in the drain line).
+fn end_word(end: DrainEnd) -> &'static str {
+    match end {
+        DrainEnd::Eof => "eof",
+        DrainEnd::BytesCap => "bytesCap",
+        DrainEnd::TimeCap => "timeCap",
+        DrainEnd::Stopped => "stopped",
+        DrainEnd::Failed(_) => "failed",
+        DrainEnd::PoolFull => "poolFull",
+    }
+}
+
 /// Logs how a refused connection's drain ended and how long after the accept (ADR 0072 §6; ER-27: a client that saw a reset
-/// is explained by the app's log).
-fn log_drain(id: u64, accepted: Instant, (read, end): (usize, DrainEnd)) {
+/// is explained by the app's log), then the connection's end line with the refusal's `code`.
+fn log_drain(id: u64, accepted: Instant, code: Refusal, (read, end): (usize, DrainEnd)) {
     let line = format!(
         "paddock_mcp: connection #{id} drained {read} byte(s) after its refusal: drain {} after {} ms",
         end.word(),
@@ -487,6 +542,15 @@ fn log_drain(id: u64, accepted: Instant, (read, end): (usize, DrainEnd)) {
         ),
         _ => log::warn!("{line}; the client may see a reset"),
     }
+    log_end(
+        id,
+        accepted,
+        code.code(),
+        "hello",
+        end_word(end),
+        read,
+        "refused",
+    );
 }
 
 /// Reads the key line, waiting at most `timeout` ([`HANDSHAKE_TIMEOUT`] when serving), and answers it. `Err` holds the cause
@@ -496,7 +560,7 @@ fn handshake(
     reader: &mut BufReader<Watched>,
     keys: &dyn KeyVerifier,
     timeout: Duration,
-) -> Result<String, String> {
+) -> Result<String, Refused> {
     const SEND: &str = "send {\"key\": \"...\"} as the first line";
     reader.get_mut().deadline = Some(Instant::now() + timeout);
     let (why, cause) = match read_line(reader, HANDSHAKE_MAX) {
@@ -510,10 +574,13 @@ fn handshake(
                     Refusal::Key,
                     "the key is missing, wrong or revoked; issue a new one in the app's MCP settings",
                 );
-                return Err(if key.is_some() {
-                    "the key is wrong or revoked".into()
-                } else {
-                    "the first line holds no key".into()
+                return Err(Refused {
+                    refusal: Refusal::Key,
+                    cause: if key.is_some() {
+                        "the key is wrong or revoked".into()
+                    } else {
+                        "the first line holds no key".into()
+                    },
                 });
             };
             reader.get_mut().deadline = None;
@@ -544,7 +611,10 @@ fn handshake(
         ),
     };
     refuse(stream, Refusal::Handshake, &why);
-    Err(cause)
+    Err(Refused {
+        refusal: Refusal::Handshake,
+        cause,
+    })
 }
 
 /// Serves one accepted connection: the handshake, then the lines, and one log line for how it ended (ER-27: a client that saw
@@ -572,6 +642,15 @@ fn serve_connection(
                 "paddock_mcp: connection #{id} could not be served: {e} ({:?})",
                 e.kind()
             );
+            log_end(
+                id,
+                began,
+                "internal",
+                "hello",
+                "none",
+                0,
+                "could not be served",
+            );
             return;
         }
     };
@@ -579,7 +658,7 @@ fn serve_connection(
     let mut writer: &TcpStream = stream;
     let client = match handshake(&mut writer, &mut reader, keys, bounds.handshake) {
         Ok(client) => client,
-        Err(cause) => {
+        Err(Refused { refusal, cause }) => {
             log::warn!(
                 "paddock_mcp: connection #{id} refused after {} ms: {cause}; {} read(s) interrupted by a signal and read again; {} empty read slice(s)",
                 began.elapsed().as_millis(),
@@ -595,11 +674,12 @@ fn serve_connection(
                     log_drain(
                         id,
                         began,
+                        refusal,
                         drain(&mut reader, Instant::now() + bounds.drain_time),
                     );
                     drop(draining);
                 }
-                None => log_drain(id, began, (0, DrainEnd::PoolFull)),
+                None => log_drain(id, began, refusal, (0, DrainEnd::PoolFull)),
             }
             return;
         }
@@ -610,6 +690,12 @@ fn serve_connection(
     drop(place);
     let interrupted = reader.get_ref().interrupted.load(Ordering::SeqCst);
     let ms = began.elapsed().as_millis();
+    let (code, detail) = match &ended {
+        Ok(()) if stop.load(Ordering::SeqCst) => ("stopping", "the listener stopped".to_string()),
+        Ok(()) => ("closed", "the client closed its side".to_string()),
+        Err(e) => ("internal", format!("{:?}", e.kind())),
+    };
+    log_end(id, began, code, "open", "none", 0, &detail);
     match ended {
         Ok(()) => log::info!(
             "paddock_mcp: connection #{id} ({client}) ended after {ms} ms: {}; {interrupted} read(s) interrupted by a signal and read again",
@@ -639,6 +725,7 @@ fn drain_unread(
         Ok(read_half) => log_drain(
             id,
             accepted,
+            Refusal::Busy,
             drain(
                 &mut BufReader::new(read_half),
                 Instant::now() + bounds.drain_time,
@@ -892,7 +979,7 @@ impl Accepting {
                         },
                     );
                 }
-                None => log_drain(id, accepted, (0, DrainEnd::PoolFull)),
+                None => log_drain(id, accepted, Refusal::Busy, (0, DrainEnd::PoolFull)),
             }
             return;
         };

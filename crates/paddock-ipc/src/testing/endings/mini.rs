@@ -670,7 +670,7 @@ pub fn run(
                             log: log.lines(),
                             ..Observed::default()
                         };
-                        return Ok((o, Expect::optional_reason()));
+                        return Ok((o, Expect::optional_reason().with_drain_eof()));
                     }
                     // Now the peer reads again.
                     ep.limit_peer(0, usize::MAX);
@@ -698,7 +698,7 @@ pub fn run(
     let mut observed = observe(raw, &log, typed);
     observed.hung = hung;
     ep.finish();
-    Ok((observed, expect))
+    Ok((observed, expect.with_drain_eof()))
 }
 
 #[allow(dead_code)]

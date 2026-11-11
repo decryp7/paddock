@@ -196,8 +196,13 @@ pub enum ReasonRule {
 pub struct Expect {
     /// The reason rule.
     pub reason: ReasonRule,
-    /// The endpoint is expected to log an end line with drain outcome `eof` (ADR 0072 §6).
+    /// The endpoint is expected to log an end line (ADR 0072 §6).
     pub end_line: bool,
+    /// The end line's drain outcome must be `eof`. False for every product endpoint until the ordered shutdown with a drain
+    /// (ADR 0072 WP-2, deferred by the 2026-11-11 trim): the line then needs a `drain=` field with a known outcome (`none`
+    /// where the endpoint does not drain), which is what WP-7 judges. The reference endpoint and the `Broken` controls keep
+    /// `true`, so the harness still sees a release without a drain.
+    pub drain_eof: bool,
     /// The client sent bytes the endpoint never reads before it closes (a refusal before the hello is read, a client that
     /// keeps writing). Closing with unread input makes the OS send a reset, which may or may not reach the client before the
     /// reason does (a race: macOS delivers either), so a missing reason is then attributed to the reset and reported as
@@ -213,6 +218,7 @@ impl Expect {
         Expect {
             reason: ReasonRule::OneOf(codes.iter().map(|c| (*c).to_string()).collect()),
             end_line: true,
+            drain_eof: false,
             unread_input: false,
         }
     }
@@ -222,8 +228,21 @@ impl Expect {
         Expect {
             reason: ReasonRule::Optional,
             end_line: true,
+            drain_eof: false,
             unread_input: false,
         }
+    }
+
+    /// The same expectation, with the drain outcome required to be `eof` (see [`Expect::drain_eof`]).
+    pub fn with_drain_eof(mut self) -> Expect {
+        self.drain_eof = true;
+        self
+    }
+
+    /// No end line is expected: a scenario with no connection to end (a client that was never accepted).
+    pub fn without_end_line(mut self) -> Expect {
+        self.end_line = false;
+        self
     }
 
     /// The same expectation for a client whose input the endpoint leaves unread (see [`Expect::unread_input`]).
@@ -290,6 +309,7 @@ pub fn judge(observed: &Observed, expect: &Expect) -> Vec<Fault> {
                 }
                 match log::field(&line, "drain") {
                     Some("eof") => {}
+                    Some(other) if !expect.drain_eof && log::DRAIN_OUTCOMES.contains(&other) => {}
                     Some(other) => faults.push(Fault::DrainNotEof(other.to_string())),
                     None => faults.push(Fault::DrainNotEof(String::new())),
                 }

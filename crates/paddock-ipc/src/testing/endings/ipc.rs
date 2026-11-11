@@ -231,7 +231,26 @@ fn typed_of(result: &Result<Vec<u8>, IpcError>) -> Typed {
 
 /// The in-process suite for `paddock-ipc`'s own host (accept, authenticate) and peer (the ordered close): the endpoint
 /// register's `ipc-host` and `ipc-peer` entries.
-pub fn in_process(scenario: Scenario) -> Result<(Observed, Expect), &'static str> {
+pub fn in_process(scenario: Scenario) -> Result<(Observed, Expect), String> {
+    logged(|| in_process_inner(scenario))
+}
+
+/// Runs `run` and puts the process's log lines of the run into [`Observed::log`], after the end line (if one is expected)
+/// arrived. The rig fails, not passes, when the log cannot be captured.
+pub fn logged<E: std::fmt::Display>(
+    run: impl FnOnce() -> Result<(Observed, Expect), E>,
+) -> Result<(Observed, Expect), String> {
+    let capture = super::log::process_capture()?;
+    let from = capture.len();
+    let (mut observed, expect) = run().map_err(|e| e.to_string())?;
+    if expect.end_line {
+        capture.wait_for_end_line_since(from, GUARD);
+    }
+    observed.log = capture.since(from);
+    Ok((observed, expect))
+}
+
+fn in_process_inner(scenario: Scenario) -> Result<(Observed, Expect), &'static str> {
     let limit = FrameLimit::default();
     match scenario {
         Scenario::WrongToken
@@ -289,7 +308,8 @@ pub fn in_process(scenario: Scenario) -> Result<(Observed, Expect), &'static str
                 // The write itself failed because the listener was already gone: still no reason.
                 o.decoded = Decoded::default();
             }
-            Ok((o, Expect::reason(&["stopping"])))
+            // No connection was ever accepted, so none ends: the listener's stop is not a connection end (no end line).
+            Ok((o, Expect::reason(&["stopping"]).without_end_line()))
         }
         Scenario::OwnerCloseWithCallsInFlight
         | Scenario::OwnerCloseWhilePeerNotReading
@@ -340,6 +360,7 @@ pub fn in_process(scenario: Scenario) -> Result<(Observed, Expect), &'static str
                 Expect {
                     reason: super::ReasonRule::Optional,
                     end_line: false,
+                    drain_eof: false,
                     unread_input: false,
                 },
             ))

@@ -201,6 +201,8 @@ impl Daemon {
     pub fn run_counted_on(mut self, served: Arc<ServedCounts>, clock: Arc<dyn Clock>) -> Result<(), String> {
         let result = self.serve(&served, clock.as_ref());
         log::info!(outcome = if result.is_ok() { "stopped" } else { "failed" }; "Helper: served: {}", served.summary());
+        // The summary of the connections' ends by code (ADR 0072 §6): next to the served counts, once when the loop ends.
+        paddock_ipc::endlog::log_summary();
         result
     }
 
@@ -221,6 +223,7 @@ impl Daemon {
                         Err(e) => {
                             log::warn!(error = e.to_string().as_str(); "Helper: a caller could not be identified and was refused");
                             self.dispatcher.record_refused_caller(None, &e.to_string());
+                            paddock_ipc::endlog::log_refused("a caller", "auth", "the caller could not be identified");
                             continue;
                         }
                     };
@@ -233,6 +236,7 @@ impl Daemon {
                     if active.fetch_add(1, Ordering::SeqCst) >= MAX_SESSIONS {
                         active.fetch_sub(1, Ordering::SeqCst);
                         log::warn!("Helper: too many connections, one was dropped");
+                        paddock_ipc::endlog::log_refused("a caller", "busy", "too many connections");
                         continue;
                     }
                     let session = Session {
@@ -576,6 +580,8 @@ mod tests {
         let observe = |mut c: Stream, expect: Expect| {
             let raw = read_to_end(&mut c, READ_GUARD);
             let decoded = decode_frames(&raw.bytes, limit);
+            // The end line is written by the session thread, after the client saw the end.
+            log.wait_for_end_line_since(from, READ_GUARD);
             Ok((
                 Observed {
                     raw: Some(raw),

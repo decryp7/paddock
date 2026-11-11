@@ -21,6 +21,7 @@
 
 pub mod body;
 pub mod child;
+pub mod endlog;
 pub mod endpoint;
 pub mod error;
 pub mod frame;

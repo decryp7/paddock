@@ -285,7 +285,9 @@ mod link {
 fn ipc_link_server_ends_every_connection_right_or_is_in_the_ratchet() {
     let applicability =
         Applicability::load_from(env!("CARGO_MANIFEST_DIR")).expect("the register file");
-    let reports = run_all("ipc-link-server", &applicability, link::scenario);
+    let reports = run_all("ipc-link-server", &applicability, |s| {
+        ipc::logged(|| link::scenario(s))
+    });
     let ratchet = Ratchet::load_from(env!("CARGO_MANIFEST_DIR")).expect("the ratchet file");
     if let Err(e) = ratchet.check("ipc-link-server", &reports) {
         panic!("{e}\n\n{}", failure_text(&reports));
@@ -356,7 +358,9 @@ mod launcher {
 fn ipc_launcher_ends_every_connection_right_or_is_in_the_ratchet() {
     let applicability =
         Applicability::load_from(env!("CARGO_MANIFEST_DIR")).expect("the register file");
-    let reports = run_all("ipc-launcher", &applicability, launcher::scenario);
+    let reports = run_all("ipc-launcher", &applicability, |s| {
+        ipc::logged(|| launcher::scenario(s))
+    });
     let ratchet = Ratchet::load_from(env!("CARGO_MANIFEST_DIR")).expect("the ratchet file");
     if let Err(e) = ratchet.check("ipc-launcher", &reports) {
         panic!("{e}\n\n{}", failure_text(&reports));
@@ -375,6 +379,7 @@ fn a_rig_that_cannot_drive_a_scenario_turns_the_run_red_and_a_declared_not_appli
                 endings::Expect {
                     reason: endings::ReasonRule::Optional,
                     end_line: false,
+                    drain_eof: false,
                     unread_input: false,
                 },
             ))
@@ -411,9 +416,40 @@ fn a_rig_that_cannot_drive_a_scenario_turns_the_run_red_and_a_declared_not_appli
             endings::Expect {
                 reason: endings::ReasonRule::Optional,
                 end_line: false,
+                drain_eof: false,
                 unread_input: false,
             },
         ))
     });
     Ratchet::default().check("rigged", &fine).expect("green");
+}
+
+fn observed_with_log(line: &str) -> endings::Observed {
+    endings::Observed {
+        log: vec![line.to_string()],
+        ..Default::default()
+    }
+}
+
+#[test]
+fn an_end_line_needs_a_known_drain_outcome_and_only_a_draining_endpoint_must_say_eof() {
+    let none = observed_with_log("INFO connection ended phase=open code=closed drain=none");
+    let optional = endings::Expect::optional_reason();
+    assert!(
+        judge(&none, &optional).is_empty(),
+        "WP-7: `drain=none` is an honest end line until WP-2 adds the drain"
+    );
+    assert_eq!(
+        kinds(&judge(&none, &optional.clone().with_drain_eof())),
+        vec!["drain-not-eof"],
+        "an endpoint that must drain (the reference, the controls) fails on `none`"
+    );
+    let missing = observed_with_log("INFO connection ended phase=open code=closed");
+    assert_eq!(kinds(&judge(&missing, &optional)), vec!["drain-not-eof"]);
+    let unknown = observed_with_log("INFO connection ended code=closed drain=maybe");
+    assert_eq!(kinds(&judge(&unknown, &optional)), vec!["drain-not-eof"]);
+    assert_eq!(
+        kinds(&judge(&endings::Observed::default(), &optional)),
+        vec!["no-end-line"]
+    );
 }

@@ -188,6 +188,11 @@ impl Authenticator {
     /// Answers a client that cannot be served now (too many connections) with a `busy` refusal and closes it.
     pub fn refuse_busy(&self, mut stream: Stream, message: &str) {
         self.refuse(&mut stream, codes::BUSY, message);
+        crate::endlog::log_handshake_end(
+            &self.name,
+            std::time::Instant::now(),
+            &IpcError::Spawn(message.to_string()),
+        );
     }
 
     /// Authenticates a client accepted on the listener (its pid as the OS reported it) within this authenticator's
@@ -216,6 +221,22 @@ impl Authenticator {
     }
 
     fn authenticate_with_uid(
+        &self,
+        stream: Stream,
+        os_pid: Option<u32>,
+        pid: Option<u32>,
+        peer_uid: Option<u32>,
+    ) -> Result<Connection, IpcError> {
+        let started = std::time::Instant::now();
+        let result = self.authenticate_inner(stream, os_pid, pid, peer_uid);
+        // A refused or lost handshake is the end of a connection: its one line (WP-7). An accepted one ends later, in the peer.
+        if let Err(e) = &result {
+            crate::endlog::log_handshake_end(&self.name, started, e);
+        }
+        result
+    }
+
+    fn authenticate_inner(
         &self,
         mut stream: Stream,
         os_pid: Option<u32>,

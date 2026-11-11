@@ -101,6 +101,10 @@ fn observe(
 ) -> Result<(Observed, Expect), &'static str> {
     let raw = read_to_end(&mut client, READ_GUARD);
     let decoded = decode_lines(&raw.bytes);
+    // The end line is written after the client saw the end (the drain, then the close), so wait for it.
+    if expect.end_line {
+        rig.log.wait_for_end_line_since(rig.from, READ_GUARD);
+    }
     Ok((
         Observed {
             raw: Some(raw),

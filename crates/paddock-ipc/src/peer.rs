@@ -199,6 +199,8 @@ struct ServedState {
 
 struct Inner {
     id: u64,
+    /// When the peer started, for the end line's `open_ms`.
+    started: std::time::Instant,
     opts: PeerOptions,
     limit: FrameLimit,
     peer_pid: Option<u32>,
@@ -341,6 +343,7 @@ impl Peer {
         let peer = Peer {
             inner: Arc::new(Inner {
                 id: NEXT_PEER.fetch_add(1, Ordering::Relaxed),
+                started: std::time::Instant::now(),
                 opts,
                 limit: conn.limit,
                 peer_pid,
@@ -493,6 +496,16 @@ impl Peer {
             lock(&s.state).cancelled = true;
             s.cv.notify_all();
         }
+        // The one end line of this connection (WP-7), written by the closer that took the reason.
+        crate::endlog::log_end(&crate::endlog::End {
+            conn: self.label(),
+            phase: crate::endlog::Phase::Open,
+            code: crate::endlog::code_of(&why),
+            detail: &why.to_string(),
+            open_ms: self.inner.started.elapsed().as_millis(),
+            pending: pending.len(),
+            served: served.len(),
+        });
         drop(done);
         // After the close is reported: a caller woken by its failure finds the connection closed.
         for p in pending {
