@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Interim exclusive lock for the Windows test VM (/Volumes/d7sst7/vms/paddock-win11-test). SOURCE it, then call
+# Interim exclusive lock for the Windows test VM (/Volumes/d8sst7/vm-data/paddock-win11-test). SOURCE it, then call
 # `vm_lock_acquire <label>` before anything that starts, stops, reverts, snapshots or loads the guest (vmrun, SSH jobs).
 #
 #   . "$(dirname "$0")/vm-lock.sh"; vm_lock_acquire vm-win-start

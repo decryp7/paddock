@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-const VENV = '/Volumes/d7sst7/dev-targets/tart-home/.paddock-vm-gui';
+const VENV = '/Volumes/d8sst7/vm-data/tart-from-home/.paddock-vm-gui';
 export const vncdo = () => {
   const dir = readdirSync(VENV).find((d) => d.startsWith('vnc-venv-'));
   const bin = dir && join(VENV, dir, 'bin', 'vncdo');

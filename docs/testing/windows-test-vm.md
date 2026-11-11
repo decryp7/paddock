@@ -3,7 +3,7 @@
 A dedicated, throw-away Windows 11 on Arm VM in VMware Fusion on the Mac mini, for the tests CI cannot do: install,
 update, services, login items. **Local only, never CI** (decision 2026-10-28). It is not the user's own Fusion VM: that
 one is personal and encrypted and no script here ever starts, stops or changes it: `scripts/vm-win.sh`, `prepare.sh` and the
-`vm-smoke` harness act only on `/Volumes/d7sst7/vms/paddock-win11-test` (links resolved) and refuse any other folder before
+`vm-smoke` harness act only on `/Volumes/d8sst7/vm-data/paddock-win11-test` (links resolved) and refuse any other folder before
 `vmrun`, `ssh` or any file write (`scripts/vm-win/target.sh`, `scripts/vm-smoke/win-vm-target.mjs`). `PADDOCK_WIN_VM_DIR` may name another folder only in the scripts' own tests (fake mode): the folder resolves under the
 per-user temp root (`getconf DARWIN_USER_TEMP_DIR`, never `$TMPDIR`), carries a `.paddock-fake-vm` marker, is not under
 `$HOME`, and `FUSION_APP`'s `vmrun` is a script outside the installed Fusion; `PADDOCK_VM_LEASES` counts only then.
@@ -26,7 +26,7 @@ Background and the hypervisor choice: the research note
 
 ## Files
 
-Everything lives on d7, never under `~` (ER-14), in `/Volumes/d7sst7/vms/paddock-win11-test`:
+Everything lives on d8, never under `~` (ER-14), in `/Volumes/d8sst7/vm-data/paddock-win11-test`:
 
 ```
 keys/       paddock-test, paddock-admin (SSH key pairs), setup-passwords, known_hosts   (all private, mode 600/700)
@@ -50,7 +50,7 @@ In the repository: `scripts/vm-win.sh` (daily use), `scripts/vm-win/prepare.sh` 
 | Windows ISO | 8.5 GB (the en-GB build 26300 image, measured 2026-10-29), plus the no-prompt clone (shares the original's blocks on APFS); both may be deleted after `baseline` |
 | Setup disc + payload | about 170 MB + 70 MB |
 
-Budget about 40 GB on d7 for a working VM with a baseline and a few test runs.
+Budget about 40 GB on d8 for a working VM with a baseline and a few test runs.
 
 ## TPM: the decision
 
@@ -83,7 +83,7 @@ unencrypted VM (B) never touches the keychain, so a leftover keychain item does 
    routes, no mirrors:
    - Microsoft's page <https://www.microsoft.com/software-download/windows11arm64>: choose *Windows 11 (multi-edition ISO
      for Arm64)*, the language *English International* (the en-GB image this VM uses), and download through the browser. Save or move the file to
-     `/Volumes/d7sst7/vms/paddock-win11-test/iso/windows11-arm64.iso`.
+     `/Volumes/d8sst7/vm-data/paddock-win11-test/iso/windows11-arm64.iso`.
    - or Fusion's *File > New > Get Windows from Microsoft*, which downloads Microsoft's ESD and converts it to an ISO.
      Cancel the wizard after the ISO is saved and move the ISO to the path above. (Older Fusion releases built broken
      24H2 images with it; 26.0.1 is current, but prefer Microsoft's page.)
@@ -96,7 +96,7 @@ unencrypted VM (B) never touches the keychain, so a leftover keychain item does 
       `security add-generic-password -s paddock-win11-test-vm -a vmrun -w "$(openssl rand -base64 24)"`,
       then copy it to the clipboard without showing it and without a trailing newline:
       `security find-generic-password -s paddock-win11-test-vm -a vmrun -w | tr -d '\n' | pbcopy`.
-   2. In Fusion: *File > Open* `/Volumes/d7sst7/vms/paddock-win11-test/vm/paddock-win11-test.vmwarevm`, then
+   2. In Fusion: *File > Open* `/Volumes/d8sst7/vm-data/paddock-win11-test/vm/paddock-win11-test.vmwarevm`, then
       *Settings > Encryption & Restrictions*: turn on encryption, choose **Only the files needed to support a TPM are
       encrypted**, paste the password, and leave *Remember password in Mac Keychain* off (the script reads its own item).
    3. *Settings > Add Device > Trusted Platform Module > Add*. Close the settings and quit the VM window (do not start it).

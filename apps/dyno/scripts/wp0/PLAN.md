@@ -3,7 +3,7 @@
 Run once on 2026-11-09 (results: ADR 0033, "WP-0 results"); these scripts repeat it. `held.ps1` and `launch-held.ps1` hold a file open for the
 Restart Manager step (run `held.ps1` in a background SSH session of its own: a holder started inside a session dies with it).
 
-Runs by hand or by an agent briefed for it, on `/Volumes/d7sst7/vms/paddock-win11-test` only (VMware Fusion, Windows 11 Arm64).
+Runs by hand or by an agent briefed for it, on `/Volumes/d8sst7/vm-data/paddock-win11-test` only (VMware Fusion, Windows 11 Arm64).
 Never any other VM, never `/Volumes/d8sst7/vm-data`, never the CI PC (ER-14). The guest is reverted to its `gui-session-tools`
 snapshot first and last; no snapshot is taken. Callers as in ADR 0027 WP-0: `paddock-test` (standard user, SSH = network logon, and
 console session 1 through the `PaddockRunner` scheduled task when a measurement needs an interactive token) and `paddock-admin`.
