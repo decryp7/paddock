@@ -15,8 +15,9 @@ use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
-/// The smallest and largest limit Auto chooses, in bytes.
+/// The smallest limit Auto chooses, in bytes.
 pub const AUTO_MIN: u64 = 512 << 20;
+/// The largest limit Auto chooses, in bytes.
 pub const AUTO_MAX: u64 = 8 << 30;
 
 /// The limit Auto gives a machine with `ram_bytes` of memory: a quarter of it, between [`AUTO_MIN`] and [`AUTO_MAX`].
@@ -27,6 +28,7 @@ pub fn auto_limit(ram_bytes: u64) -> u64 {
 /// What the owner of a structure does when the budget needs its memory: drop the body (it is read again from its file
 /// on the next use).
 pub trait Release: Send + Sync {
+    /// Drops the body; the next use reads it again from its file.
     fn release(&self);
 }
 
@@ -48,9 +50,11 @@ pub struct Held {
 /// An admission that did not fit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OverBudget {
+    /// The structure that was being admitted.
     pub wanted: Held,
     /// The needed bytes of the structure being admitted (what it would add).
     pub needs: u64,
+    /// The limit in force, in bytes.
     pub limit: u64,
     /// Resident structures that cannot be released, largest first.
     pub pinned: Vec<Held>,
@@ -160,6 +164,7 @@ pub struct MemoryBudget {
 }
 
 impl MemoryBudget {
+    /// A budget of `limit_bytes`, shared through the returned `Arc`.
     pub fn new(limit_bytes: u64) -> Arc<MemoryBudget> {
         Arc::new(MemoryBudget {
             limit: AtomicU64::new(limit_bytes),
@@ -171,6 +176,7 @@ impl MemoryBudget {
         self.inner.lock().unwrap_or_else(|p| p.into_inner())
     }
 
+    /// The limit in force, in bytes.
     pub fn limit(&self) -> u64 {
         self.limit.load(Ordering::Relaxed)
     }
@@ -342,6 +348,7 @@ impl Drop for Ticket {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "test code: a failed unwrap is the failed test")]
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicBool;

@@ -10,3 +10,6 @@ description = "One byte budget for what the app keeps in memory for the user's o
 
 [dependencies]
 log.workspace = true
+
+[lints]
+workspace = true
