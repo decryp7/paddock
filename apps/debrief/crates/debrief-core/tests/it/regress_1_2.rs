@@ -34,7 +34,7 @@ impl Drop for TempDir {
 /// Resident memory of this process in bytes (0 when the OS cannot tell).
 fn rss() -> u64 {
     let pid = sysinfo::Pid::from_u32(std::process::id());
-    let mut sys = sysinfo::System::new();
+    let mut sys = sysinfo::System::new().expect("a System");
     sys.refresh_processes_specifics(
         sysinfo::ProcessesToUpdate::Some(&[pid]),
         true,

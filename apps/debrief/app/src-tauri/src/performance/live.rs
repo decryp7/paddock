@@ -16,11 +16,16 @@ use std::sync::{Arc, Mutex, RwLock};
 /// The bytes the open captures and documents may use: the setting, or (0) a quarter of this computer's memory.
 fn documents_limit(s: &PerformanceSettings) -> u64 {
     match s.documents_memory_mb {
-        0 => {
-            let mut sys = sysinfo::System::new();
-            sys.refresh_memory();
-            debrief_budget::auto_limit(sys.total_memory())
-        }
+        0 => match sysinfo::System::new() {
+            Ok(mut sys) => {
+                sys.refresh_memory();
+                debrief_budget::auto_limit(sys.total_memory())
+            }
+            Err(why) => {
+                log::warn!("memory size unavailable (sysinfo): {why}; the documents limit is the smallest Auto limit");
+                debrief_budget::auto_limit(0)
+            }
+        },
         mb => u64::from(mb) << 20,
     }
 }
