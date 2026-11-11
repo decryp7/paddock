@@ -129,7 +129,7 @@ pub fn basename(word: &str) -> &str {
 
 impl Simple {
     /// The words from the command itself on: assignments, `!`, reserved words (`do`, `then`, `while`...) and wrappers (`sudo`,
-    /// `env`, `command`, `exec`, `nohup`, `nice`, `timeout`) with their options are skipped.
+    /// `env`, `command`, `exec`, `nohup`, `nice`, `timeout`, `gtimeout`) with their options are skipped.
     pub fn command(&self) -> &[Word] {
         let w = &self.words;
         let mut i = 0;
@@ -144,7 +144,7 @@ impl Simple {
                 "sudo" => (true, &["-u", "-g", "-h", "-p", "-C", "-r", "-t", "-U", "-D", "-R", "-T"]),
                 "env" => (true, &["-u", "-C", "-S"]),
                 "nice" => (true, &["-n"]),
-                "timeout" => (true, &["-s", "-k"]),
+                "timeout" | "gtimeout" => (true, &["-s", "-k"]),
                 "command" | "exec" | "nohup" | "builtin" => (true, &[]),
                 _ => (false, &[]),
             };
@@ -161,7 +161,7 @@ impl Simple {
                     break;
                 }
             }
-            if name == "timeout" {
+            if matches!(name, "timeout" | "gtimeout") {
                 i += 1; // the duration
             }
         }

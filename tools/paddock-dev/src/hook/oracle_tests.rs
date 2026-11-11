@@ -6,7 +6,8 @@
 //! image installs `jq`), and against the new rules always. `DIFFERENCES` and `RESIDUAL` are checked against the old hooks the same way.
 
 use super::input::ToolCall;
-use super::{decide, rules};
+use super::lex::Script;
+use super::rules;
 #[cfg(unix)]
 use crate::input_hash::{Exec, Real};
 use serde_json::json;
@@ -144,17 +145,23 @@ fn input(cmd: &str) -> String {
     json!({"tool_name": "Bash", "tool_input": {"command": cmd}}).to_string()
 }
 
-/// The new rules' decision for a command: the id of the rule that refuses, if any. `no-unbounded-wait` is not a port (it has no shell
-/// hook as oracle, its tests are in its own file), and the corpora hold sleeping loops it refuses: it is not counted here.
-fn new_rule(cmd: &str) -> Option<&'static str> {
+/// What one ported rule decides for a command: the id of the rule if it refuses. The rule is looked up by id and asked on its own
+/// (`check` on the parsed command, `legacy` on text the lexer cannot read, as `decide` does), so another rule's decision, or the order
+/// the rules are registered in, never changes a corpus row.
+fn new_rule(id: &str, cmd: &str) -> Option<&'static str> {
     let call = ToolCall::parse(&input(cmd)).unwrap();
-    decide(&call).denial.map(|d| d.rule).filter(|rule| *rule != "no-unbounded-wait")
+    let rule = rules::all().into_iter().find(|r| r.id() == id).expect("a registered rule");
+    let denial = match Script::parse(cmd) {
+        Ok(script) => rule.check(&call, Some(&script)),
+        Err(_) => rule.legacy(cmd),
+    };
+    denial.map(|d| d.rule)
 }
 
 fn check_new(corpus: &str, rule: &str) -> usize {
     let rows = rows(corpus);
     for (deny, cmd) in &rows {
-        let got = new_rule(cmd);
+        let got = new_rule(rule, cmd);
         let want = deny.then_some(rule);
         assert_eq!(got, want, "{rule}: {cmd:?}");
     }
@@ -190,7 +197,7 @@ fn the_rules_are_registered_in_this_order() {
 #[test]
 fn the_deliberate_differences_hold() {
     for (rule, old, cmd) in DIFFERENCES {
-        let got = new_rule(cmd);
+        let got = new_rule(rule, cmd);
         match *old {
             "deny" => assert_eq!(got, None, "{cmd:?} must now pass"),
             _ => assert_eq!(got, Some(*rule), "{cmd:?} must now be refused"),
@@ -256,7 +263,7 @@ fn live_the_old_hooks_decide_the_differences_as_recorded() {
 fn the_documented_residual_risks_still_pass() {
     for (rule, cmd) in RESIDUAL {
         assert_eq!(
-            new_rule(cmd),
+            new_rule(rule, cmd),
             None,
             "{rule}: {cmd:?} is documented as a residual risk; if it is denied now, move it to the corpus"
         );

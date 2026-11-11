@@ -36,6 +36,7 @@ pub mod decision;
 pub mod input;
 pub mod install;
 pub mod lex;
+pub mod loops;
 pub mod rules;
 
 #[cfg(test)]
