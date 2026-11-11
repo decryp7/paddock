@@ -7,7 +7,7 @@ use common::TempDir;
 use debrief_core::catalogue::{CatalogueRequest, Scope};
 use debrief_core::entities::EntityKind;
 use debrief_core::find::{find, resolve_terms, Via, ENTITY_FIELD};
-use debrief_core::ports::{Ingest, Query, Tail};
+use debrief_core::ports::{Ingest, Query};
 use debrief_core::{PluginRegistry, Profile};
 use debrief_store_duck::DuckStore;
 use std::path::Path;
