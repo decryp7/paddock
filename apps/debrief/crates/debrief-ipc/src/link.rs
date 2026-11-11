@@ -377,6 +377,7 @@ mod platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::sync::atomic::{AtomicU32, Ordering};
 
     /// What ends the wait for a child that is alive and has not connected (ADR 0071; CI 7919 and 7925, "the store worker did not
