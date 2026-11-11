@@ -1024,7 +1024,10 @@ mod tests {
     struct Dir(std::path::PathBuf, #[allow(dead_code)] tempfile::TempDir);
     impl Dir {
         fn new(tag: &str) -> Dir {
-            let t = tempfile::Builder::new().prefix(&format!("debrief-profile-budget-{tag}-")).tempdir().unwrap();
+            let t = tempfile::Builder::new()
+                .prefix(&format!("debrief-profile-budget-{tag}-"))
+                .tempdir()
+                .unwrap();
             Dir(t.path().to_path_buf(), t)
         }
         fn file(&self, name: &str, stacks: usize) -> String {

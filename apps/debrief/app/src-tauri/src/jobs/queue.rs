@@ -667,15 +667,23 @@ mod tests {
     #[test]
     fn a_names_job_waiting_for_the_catalogue_blocks_neither_maintenance_nor_other_windows() {
         let mut q = JobQueue::new(4);
-        let n1 = q.submit(JobSpec::new(JobKind::Names, "Updating names").window("main").quiet(), 0).unwrap();
-        let n2 = q.submit(JobSpec::new(JobKind::Names, "Updating names").window("w-2").quiet(), 0).unwrap();
-        let m = q.submit(JobSpec::new(JobKind::Maintenance, "Clear storage").window("main"), 0).unwrap();
+        let n1 = q
+            .submit(JobSpec::new(JobKind::Names, "Updating names").window("main").quiet(), 0)
+            .unwrap();
+        let n2 = q
+            .submit(JobSpec::new(JobKind::Names, "Updating names").window("w-2").quiet(), 0)
+            .unwrap();
+        let m = q
+            .submit(JobSpec::new(JobKind::Maintenance, "Clear storage").window("main"), 0)
+            .unwrap();
         assert_eq!(q.startable(), vec![n1, n2, m], "all three run at once");
         for id in [n1, n2, m] {
             q.start(id, 1).unwrap();
         }
         // The same window's second names job waits for the first (single flight is also kept by the window).
-        let again = q.submit(JobSpec::new(JobKind::Names, "Updating names").window("main").quiet(), 2).unwrap();
+        let again = q
+            .submit(JobSpec::new(JobKind::Names, "Updating names").window("main").quiet(), 2)
+            .unwrap();
         assert!(q.startable().is_empty(), "{again:?} waits behind the running one of its window");
         q.finish(n1, JobEnd::Done(None), 5).unwrap();
         assert_eq!(q.startable(), vec![again]);
