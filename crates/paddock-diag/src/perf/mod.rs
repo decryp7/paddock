@@ -268,6 +268,11 @@ fn tmp_path(path: &Path, pid: u32) -> PathBuf {
 /// share the temporary file). Does nothing before [`init`].
 pub fn flush() -> std::io::Result<()> {
     let _one_at_a_time = FLUSH.lock().unwrap_or_else(PoisonError::into_inner);
+    flush_locked()
+}
+
+/// [`flush`] with the flush lock held by the caller.
+fn flush_locked() -> std::io::Result<()> {
     let (path, bytes) = {
         let mut st = lock();
         let Some(path) = st.path.clone() else {
@@ -297,9 +302,11 @@ pub fn flush_in_background() -> Option<JoinHandle<()>> {
     let spawned = std::thread::Builder::new()
         .name("perf-flush".into())
         .spawn(|| {
-            // Cleared first: a record that lands during the write queues the next flush.
+            // Cleared once this thread holds the flush lock: a record that lands during the write queues the next flush, so
+            // at most one thread writes and one waits, however many records change the ring.
+            let _one_at_a_time = FLUSH.lock().unwrap_or_else(PoisonError::into_inner);
             FLUSH_QUEUED.store(false, Ordering::Release);
-            if let Err(e) = flush() {
+            if let Err(e) = flush_locked() {
                 log::warn!("the performance ring could not be saved: {:?}", e.kind());
             }
         });

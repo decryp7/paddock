@@ -534,6 +534,9 @@ mod tests {
     }
 
     /// P1-3: a finished job that changed the ring is saved off the calling thread, and quitting saves what is left.
+    ///
+    /// Global perf state (the recorder and its `init`, once per process): this test relies on nextest running each test in its
+    /// own process; the repo has no `serial` mechanism, and `cargo test` threads would share the recorder.
     #[test]
     fn a_finished_job_is_saved_off_thread_and_quitting_flushes() {
         use paddock_diag::perf::{self, ring::Ring};
