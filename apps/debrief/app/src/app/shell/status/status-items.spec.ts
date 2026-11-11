@@ -41,7 +41,7 @@ describe('status items as contributions (M1)', () => {
     expect(texts()).toEqual(['start A', 'start B', 'spacer', 'end plugin', 'end A']);
   });
 
-  it('leaves out an item whose code fails to load or whose when is false, and shows the others', async () => {
+  it('hides an item whose when is false, keeps a failed one as a Retry, and shows the others', async () => {
     const { fixture, texts } = bar([
       item('db.test.start-a', 'start', 100, async () => StartA),
       item('db.test.broken', 'start', 150, () => Promise.reject(new Error('chunk missing'))),
@@ -51,6 +51,26 @@ describe('status items as contributions (M1)', () => {
     await settleUntil(fixture, () => expect(texts()).toHaveLength(3));
     expect(texts()).toEqual(['start A', 'start B', 'spacer']);
     expect((TestBed.inject(Logger) as MemoryLogger).entries.some((e) => e.message.includes('Status item'))).toBe(true);
+  });
+
+  it('keeps a failed item’s place with a Retry that loads it again', async () => {
+    let fail = true;
+    const { fixture, texts } = bar([
+      item('db.test.start-a', 'start', 100, async () => {
+        if (fail) {
+          fail = false;
+          throw new Error('chunk missing');
+        }
+        return StartA;
+      }),
+    ]);
+    const host = fixture.nativeElement as HTMLElement;
+    await settleUntil(fixture, () => expect(host.querySelector('[data-testid=status-item-retry]')).not.toBeNull());
+    const retry = host.querySelector<HTMLButtonElement>('[data-testid=status-item-retry]')!;
+    expect(retry.getAttribute('aria-label')).toBe('Retry loading db.test.start-a');
+    retry.click();
+    await settleUntil(fixture, () => expect(texts()).toEqual(['start A', 'spacer']));
+    expect(host.querySelector('[data-testid=status-item-retry]')).toBeNull();
   });
 
   it('registers Debrief’s built-in items in the shell’s statusItems kind, lazily, and the shell lint accepts them', () => {

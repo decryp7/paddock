@@ -253,6 +253,20 @@ describe('StatusBar', () => {
   /** The bar's items load after the first paint (they are contributions): waits until the last one is there. */
   const itemsShown = (fixture: ComponentFixture<unknown>) => settleUntil(fixture, () => el(fixture, '[data-testid=status-details]'));
 
+  it('says the workspace is loading before it has loaded (items load on import, not when the window is idle)', async () => {
+    const backend = tinyBackend();
+    let release: () => void = () => undefined;
+    const real = backend.workspaceSummary.bind(backend);
+    vi.spyOn(backend, 'workspaceSummary').mockImplementation(() => new Promise((resolve) => (release = () => resolve(real()))));
+    const { fixture } = setup(StatusBar, backend);
+    await itemsShown(fixture);
+    expect(text(fixture)).toContain('No workspace');
+    expect(el(fixture, '[data-testid=status-busy]').textContent).toContain('Loading workspace');
+    release();
+    await settleUntil(fixture, () => expect(text(fixture)).toMatch(/\d+ events/));
+    expect(fixture.nativeElement.querySelector('[data-testid=status-busy]')).toBeNull();
+  });
+
   it('shows busy work other than imports with a spinner (E1)', async () => {
     const { fixture } = setup(StatusBar);
     await itemsShown(fixture);
