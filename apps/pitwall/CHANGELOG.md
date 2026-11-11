@@ -26,6 +26,18 @@ arrive in the app as usual.
   (Install, Repair, Remove) works only from Pitwall installed in Program Files.
 - If you still have Pitwall 1.0.x installed in a folder other than Program Files, uninstall it first: its own uninstaller runs
   before any of this.
+- The admin key is replaced once on the first start of 1.1.0 (ADR 0092 W3). On a Linux machine with several accounts, 1.0.x
+  wrote `admin.key` through a temporary file another account could have read for a moment, so a key made by 1.0.x is not
+  kept. Apps you paired keep working (their keys are in `apps.json`) and Pitwall's window reads the new key itself. **A script
+  or tool of your own that holds the old admin key must read `admin.key` in the data folder again.** A marker file,
+  `admin-key-rotated-1.1`, in the data folder records that this was done; delete it to make the next start replace the key again.
+- The list of apps and keys (`apps.json`) is written through a new file of an unpredictable name, owner-only from its first
+  byte, so a link planted at the old fixed name (`apps.tmp`) is no longer written through (ADR 0092 W4). The backup copy
+  (`apps.json.bak`) is gone: when `apps.json` is damaged Pitwall loads no apps and no keys, says so in the log with the file's
+  path, and you pair your apps again; a backup could bring back a key you had revoked. A leftover `apps.json.bak` is
+  removed on the first start. On Windows a data folder where other accounts may write is refused.
+- Pitwall makes no key, pairing code or engine key when the operating system's random source fails, instead of using a
+  time-seeded stand-in that could be guessed (ADR 0092 W5). The request fails with the reason in the log.
 
 ### Changed
 

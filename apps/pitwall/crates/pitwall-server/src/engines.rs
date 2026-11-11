@@ -701,7 +701,7 @@ impl Engine for LlamaCpp {
         Box::pin(async move {
             let (bin, build) = self.binary_for(Some(&launch.alias))?;
             let port = LoopbackPort::new(launch.port).ok_or_else(|| EngineError::Start("bad port".into()))?;
-            let key = hex(&crate::paths::random32()[..16]);
+            let key = hex(&crate::paths::random32().map_err(|e| EngineError::Start(e.to_string()))?[..16]);
             let mut c = process::command(&bin, bin.parent());
             c.args(llama::args(launch))
                 .env(llama::API_KEY_ENV, &key)

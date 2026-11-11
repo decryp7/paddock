@@ -10,6 +10,7 @@ use pitwall_core::limits::{AppPermissions, RateWindow};
 use pitwall_core::mgmt::{ApiKeyInfo, AppInfo, CreatedKey, PairingRequest, ReplacedApp, UsageCounters};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 const MAX_APPS: usize = 64;
@@ -18,20 +19,47 @@ const PAIRING_TTL_MS: u64 = 5 * 60 * 1000;
 const FILE_VERSION: u32 = 1;
 const MAX_FILE: usize = 1024 * 1024;
 
+/// What the first start of 1.1 leaves in the data folder once the admin key was replaced (ADR 0092 D11).
+const ADMIN_KEY_MARKER: &str = "admin-key-rotated-1.1";
+
 /// The admin key from its owner-only file (ADR 0057 WP-4: `admin.key` is its only store, on every OS), or a new one written
 /// there when there is none or the file is not trusted (others could read it, a link, another user's file, damaged): such a
-/// key may have been read, so it is replaced, never repaired. The key itself is never logged.
-fn admin_key(file: &SecretFile) -> String {
+/// key may have been read, so it is replaced, never repaired. One more case (ADR 0092 W3, D11): until `marker` exists a key
+/// found in the file is replaced once, because 1.0.3 wrote it through a temporary file others could read for a moment on a
+/// multi-user Linux machine; the marker is written once the new key is stored. Paired apps are not affected (their keys are
+/// in `apps.json`); scripts that hold the old admin key must read `admin.key` again. The key itself is never logged.
+/// `None` when the OS random source failed: no key is made and nobody can authenticate as the admin.
+fn admin_key(file: &SecretFile, marker: &Path) -> Option<String> {
+    let marked = std::fs::symlink_metadata(marker).is_ok();
     let why = match file.read() {
-        Ok(Some(k)) if k.expose().starts_with(keys::KEY_PREFIX) => return k.expose().to_string(),
+        Ok(Some(k)) if k.expose().starts_with(keys::KEY_PREFIX) && marked => return Some(k.expose().to_string()),
+        Ok(Some(k)) if k.expose().starts_with(keys::KEY_PREFIX) => {
+            "it was made before 1.1, and a key from 1.0.3 may have been read; it is replaced once".to_string()
+        }
         Ok(Some(_)) => "it does not hold a Pitwall key".to_string(),
         Ok(None) => "there is none yet".to_string(),
         Err(e) => e.to_string(),
     };
-    let k = keys::generate(paths::random32(), paths::now_ms()).secret;
+    let k = match paths::random32() {
+        Ok(b) => keys::generate(b, paths::now_ms()).secret,
+        Err(e) => {
+            log::error!(target: "pitwall_server", "admin key: none made ({why}): {e}. Pitwall's window cannot connect until it can");
+            return None;
+        }
+    };
     let written = Secret::new(&k).and_then(|s| file.write(&s));
     match written {
-        Ok(()) => log::info!(target: "pitwall_server", "admin key: a new one in {} ({why})", file.path().display()),
+        Ok(()) => {
+            log::info!(target: "pitwall_server", "admin key: a new one in {} ({why})", file.path().display());
+            match paths::write_private(marker, b"the admin key was replaced once by 1.1\n") {
+                Ok(()) => log::info!(target: "pitwall_server", "admin key: upgrade marker written at {}", marker.display()),
+                Err(e) => log::warn!(
+                    target: "pitwall_server",
+                    "admin key: the upgrade marker {} could not be written ({e}); the key is replaced again at the next start",
+                    marker.display()
+                ),
+            }
+        }
         Err(e) => log::warn!(
             target: "pitwall_server",
             "admin key: a new one for this run only ({why}); it could not be stored: {e}. Pitwall's window cannot connect until \
@@ -39,7 +67,7 @@ fn admin_key(file: &SecretFile) -> String {
             file.path().display()
         ),
     }
-    k
+    Some(k)
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -111,6 +139,16 @@ pub enum AuthError {
     /// Something in the request is not allowed.
     #[error("{0}")]
     Invalid(String),
+    /// The OS random source failed, so no key or code can be made (fails closed; ADR 0092 W5).
+    #[error("{0}")]
+    Random(String),
+}
+
+impl From<paths::RandomError> for AuthError {
+    fn from(e: paths::RandomError) -> Self {
+        log::error!(target: "pitwall_server", "no key made: {e}");
+        AuthError::Random(e.to_string())
+    }
 }
 
 /// The apps store.
@@ -118,7 +156,8 @@ pub struct Auth {
     dirs: Dirs,
     apps: Mutex<Vec<AppRecord>>,
     pending: Mutex<Vec<Pending>>,
-    admin: String,
+    /// `None` when the OS random source failed at start: nobody is the admin then.
+    admin: Option<String>,
     rates: Mutex<HashMap<AppId, RateWindow>>,
     next_pair: Mutex<u64>,
 }
@@ -126,13 +165,34 @@ pub struct Auth {
 impl Auth {
     /// Load (tolerating damage) and make sure the admin key exists.
     pub fn open(dirs: Dirs) -> Auth {
-        let (primary, backup) = paths::read_with_backup(&dirs.apps(), MAX_FILE);
-        let parse = |t: Option<String>| {
-            t.and_then(|t| serde_json::from_str::<File>(&t).ok())
-                .filter(|f| f.version == FILE_VERSION)
+        // The access list has no backup fallback (ADR 0092 W4): a damaged file loads nothing and says so, because a backup
+        // can bring back a key revoked since. The leftovers of 1.0.3 (`apps.json.bak`, `apps.tmp`) are removed.
+        for stale in [paths::backup_of(&dirs.apps()), dirs.apps().with_extension("tmp")] {
+            match std::fs::remove_file(&stale) {
+                Ok(()) => log::info!(target: "pitwall_server", "removed {}: the access list has no backup copy any more", stale.display()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => log::warn!(target: "pitwall_server", "could not remove {}: {e}; delete it by hand", stale.display()),
+            }
+        }
+        let apps = match paths::read_bounded(&dirs.apps(), MAX_FILE) {
+            Ok(None) => Vec::new(),
+            Ok(Some(t)) => match serde_json::from_str::<File>(&t) {
+                Ok(f) if f.version == FILE_VERSION => f.apps,
+                Ok(f) => {
+                    log::error!(target: "pitwall_server", "{} has version {} (expected {FILE_VERSION}): no apps or keys were loaded; every app must pair again, or restore a file of this version", dirs.apps().display(), f.version);
+                    Vec::new()
+                }
+                Err(e) => {
+                    log::error!(target: "pitwall_server", "{} is damaged ({e}): no apps or keys were loaded; every app must pair again. Delete the file to clear this message", dirs.apps().display());
+                    Vec::new()
+                }
+            },
+            Err(e) => {
+                log::error!(target: "pitwall_server", "{} could not be read ({e}): no apps or keys were loaded; check the file's size and permissions", dirs.apps().display());
+                Vec::new()
+            }
         };
-        let apps = parse(primary).or_else(|| parse(backup)).map(|f| f.apps).unwrap_or_default();
-        let admin = admin_key(&SecretFile::new(dirs.admin_key()));
+        let admin = admin_key(&SecretFile::new(dirs.admin_key()), &dirs.root.join(ADMIN_KEY_MARKER));
         Auth {
             dirs,
             apps: Mutex::new(apps),
@@ -153,12 +213,9 @@ impl Auth {
         let path = self.dirs.apps();
         let written = serde_json::to_vec_pretty(&f)
             .map_err(|e| e.to_string())
-            .and_then(|b| paths::write_atomic(&path, &b).map_err(|e| e.to_string()));
+            .and_then(|b| paths::write_private(&path, &b).map_err(|e| e.to_string()));
         match written {
-            Ok(()) => {
-                paths::restrict(&path);
-                Ok(())
-            }
+            Ok(()) => Ok(()),
             Err(e) => {
                 log::error!(
                     target: "pitwall_server",
@@ -179,7 +236,7 @@ impl Auth {
                 Err(AuthError::Unauthorized)
             };
         };
-        if keys::constant_time_eq(c, &self.admin) {
+        if self.is_admin(c) {
             return Ok(Principal::Admin);
         }
         let mut apps = lock(&self.apps);
@@ -204,7 +261,7 @@ impl Auth {
         let Some(c) = credential else {
             return "no key".into();
         };
-        if keys::constant_time_eq(c, &self.admin) {
+        if self.is_admin(c) {
             return "pitwall".into();
         }
         lock(&self.apps)
@@ -223,9 +280,13 @@ impl Auth {
         lock(&self.rates).get(id).map_or(0, |w| w.count_since(now) as u64)
     }
 
+    fn is_admin(&self, c: &str) -> bool {
+        self.admin.as_deref().is_some_and(|a| keys::constant_time_eq(c, a))
+    }
+
     /// The admin key, for the local window (read from the owner-only file by the app).
     pub fn admin_matches(&self, c: &str) -> bool {
-        keys::constant_time_eq(c, &self.admin)
+        self.is_admin(c)
     }
 
     /// Create an app with a first key (from the UI).
@@ -239,7 +300,8 @@ impl Auth {
         if apps.len() >= MAX_APPS {
             return Err(AuthError::Invalid(format!("at most {MAX_APPS} apps; remove one first")));
         }
-        let (id, key) = (unique_id(&apps, id), keys::generate(paths::random32(), now));
+        let key = keys::generate(paths::random32()?, now);
+        let id = unique_id(&apps, id);
         let info = key_info(&key.stored);
         apps.push(AppRecord {
             id: id.clone(),
@@ -267,7 +329,7 @@ impl Auth {
         if a.keys.len() >= 8 {
             return Err(AuthError::Invalid("an app can have at most 8 keys; revoke one first".into()));
         }
-        let key = keys::generate(paths::random32(), now);
+        let key = keys::generate(paths::random32()?, now);
         let info = key_info(&key.stored);
         a.keys.push(key.stored);
         let id = a.id.to_string();
@@ -407,7 +469,7 @@ impl Auth {
             None => x.outcome = Outcome::Denied,
             Some(perms) => {
                 let mut apps = lock(&self.apps);
-                let key = keys::generate(paths::random32(), now);
+                let key = keys::generate(paths::random32()?, now);
                 let secret = key.secret.clone();
                 match apps.iter_mut().find(|a| a.id.as_str() == x.req.app_id) {
                     Some(a) => {
@@ -535,7 +597,7 @@ mod tests {
         assert_eq!(mode(&root), 0o700, "the data folder is private too");
         assert_eq!(
             std::fs::read_to_string(&key_file).unwrap(),
-            a.admin,
+            a.admin.clone().unwrap(),
             "the file holds the key and nothing else"
         );
         // A restart reads the same key.
@@ -545,7 +607,7 @@ mod tests {
         let b = Auth::open(Dirs::at(&root));
         assert_ne!(b.admin, a.admin, "a key others could read is not kept");
         assert_eq!(mode(&key_file), 0o600);
-        assert_eq!(std::fs::read_to_string(&key_file).unwrap(), b.admin);
+        assert_eq!(std::fs::read_to_string(&key_file).unwrap(), b.admin.clone().unwrap());
         // A link to a file elsewhere: never followed, never written through.
         let outside = d.path().join("outside");
         std::fs::write(&outside, "pw_planted").unwrap();
@@ -553,7 +615,7 @@ mod tests {
         std::fs::remove_file(&key_file).unwrap();
         std::os::unix::fs::symlink(&outside, &key_file).unwrap();
         let c = Auth::open(Dirs::at(&root));
-        assert_ne!(c.admin, "pw_planted");
+        assert_ne!(c.admin.as_deref(), Some("pw_planted"));
         assert_eq!(
             std::fs::read_to_string(&outside).unwrap(),
             "pw_planted",
@@ -572,7 +634,7 @@ mod tests {
         assert_eq!(a.caller_label(Some(&k.secret)), "continue-vs-code");
         assert_eq!(a.caller_label(None), "no key");
         assert_eq!(a.caller_label(Some("pw_nope")), "unknown key");
-        let admin = a.admin.clone();
+        let admin = a.admin.clone().unwrap();
         assert_eq!(a.caller_label(Some(&admin)), "pitwall");
         assert!(
             lock(&a.apps).iter().all(|app| app.last_seen_at.is_none()),
@@ -580,20 +642,95 @@ mod tests {
         );
     }
 
+    /// ADR 0092 test 4 (W4), second half: a damaged `apps.json` loads nothing, even when a `.bak` still holds a key that
+    /// was revoked since. 1.0.3's `.bak` is removed on open, so it cannot come back later either.
     #[test]
-    fn damaged_file_falls_back_to_the_backup_then_defaults() {
+    fn a_damaged_access_list_loads_nothing_and_a_backup_never_brings_back_a_revoked_key() {
         let (d, a) = auth();
-        a.create_app("one", AppPermissions::default(), 1).unwrap();
-        a.create_app("two", AppPermissions::default(), 2).unwrap();
+        let k = a.create_app("one", AppPermissions::default(), 1).unwrap();
+        let old = std::fs::read(d.path().join("apps.json")).unwrap();
+        assert!(a.revoke_key("one", &k.key.id));
+        // What 1.0.3 left behind: the list from before the revocation as `.bak`, and a damaged primary.
+        std::fs::write(d.path().join("apps.json.bak"), &old).unwrap();
         std::fs::write(d.path().join("apps.json"), b"{broken").unwrap();
         let b = Auth::open(Dirs::at(d.path()));
-        assert_eq!(
-            b.list(|_| UsageCounters::default(), 0).len(),
-            1,
-            "the backup holds the previous save"
+        assert!(
+            b.list(|_| UsageCounters::default(), 0).is_empty(),
+            "nothing is loaded from a damaged list"
         );
-        std::fs::write(d.path().join("apps.json.bak"), b"also broken").unwrap();
-        assert!(Auth::open(Dirs::at(d.path())).list(|_| UsageCounters::default(), 0).is_empty());
+        assert_eq!(
+            b.authenticate(Some(&k.secret), false, 1),
+            Err(AuthError::Unauthorized),
+            "the revoked key is not back"
+        );
+        assert!(!d.path().join("apps.json.bak").exists(), "no backup copy is kept or used");
+        b.create_app("two", AppPermissions::default(), 2).unwrap();
+        assert!(!d.path().join("apps.json.bak").exists(), "a save keeps no backup either");
+    }
+
+    /// ADR 0092 test 4 (W4), first half: a link planted at `apps.tmp` (1.0.3's fixed temporary name) is never written
+    /// through; the save lands in a new file of an unpredictable name and the link's target is untouched.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_planted_at_the_old_temporary_name_is_not_written_through() {
+        let (d, a) = auth();
+        let outside = d.path().join("outside.txt");
+        std::fs::write(&outside, "precious").unwrap();
+        std::os::unix::fs::symlink(&outside, d.path().join("apps.tmp")).unwrap();
+        let k = a.create_app("one", AppPermissions::default(), 1).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&outside).unwrap(),
+            "precious",
+            "the link's target is untouched"
+        );
+        assert!(
+            Auth::open(Dirs::at(d.path())).authenticate(Some(&k.secret), false, 1).is_ok(),
+            "the list was saved"
+        );
+    }
+
+    /// `apps.json` is owner-only from its first byte (no chmod afterwards): created through the shared writer.
+    #[cfg(unix)]
+    #[test]
+    fn the_access_list_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let (d, a) = auth();
+        a.create_app("one", AppPermissions::default(), 1).unwrap();
+        let mode = std::fs::metadata(d.path().join("apps.json")).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    /// ADR 0092 W3, D11: an admin key found without the upgrade marker (1.0.3 wrote it where others could watch) is replaced
+    /// once; paired apps keep working; the next start keeps the new key.
+    #[test]
+    fn an_admin_key_from_before_1_1_is_replaced_once_and_paired_apps_keep_working() {
+        let (d, a) = auth();
+        let app = a.create_app("Debrief", AppPermissions::default(), 1).unwrap();
+        let old = a.admin.clone().unwrap();
+        // Back to the state 1.0.3 left: a key in the file, no marker.
+        std::fs::remove_file(d.path().join(ADMIN_KEY_MARKER)).unwrap();
+        let b = Auth::open(Dirs::at(d.path()));
+        assert_ne!(b.admin.as_deref(), Some(old.as_str()), "the old admin key is replaced");
+        assert!(!b.admin_matches(&old));
+        assert!(
+            b.admin_matches(&std::fs::read_to_string(d.path().join("admin.key")).unwrap()),
+            "the file holds the new key"
+        );
+        assert!(d.path().join(ADMIN_KEY_MARKER).exists(), "the marker says it was done");
+        assert!(
+            b.authenticate(Some(&app.secret), false, 1).is_ok(),
+            "a paired app's key still works"
+        );
+        let c = Auth::open(Dirs::at(d.path()));
+        assert_eq!(c.admin, b.admin, "a second start keeps the key");
+    }
+
+    /// A first install has no key to replace and still gets the marker, so the next start keeps its key.
+    #[test]
+    fn a_fresh_install_gets_the_marker_and_keeps_its_key() {
+        let (d, a) = auth();
+        assert!(d.path().join(ADMIN_KEY_MARKER).exists());
+        assert_eq!(Auth::open(Dirs::at(d.path())).admin, a.admin);
     }
 
     #[test]
