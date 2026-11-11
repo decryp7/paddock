@@ -46,6 +46,7 @@ pub mod runtimes;
 pub mod scheduler;
 pub mod select;
 pub mod slots;
+pub mod speech;
 pub mod sse;
 pub mod supervise;
 pub mod tasks;
