@@ -46,7 +46,7 @@ fn spec(dir: &PluginsDir, r: &InstallRecord) -> ThirdPartyPlugin {
 
 /// Imports the example's log into a new store of a worker that knows `third_party`.
 fn import(root: &Path, name: &str, third_party: Vec<ThirdPartyPlugin>) -> (StoreWorker, RemoteStore) {
-    let mut cfg = WorkerConfig::new(WORKER);
+    let mut cfg = WorkerConfig::for_tests(WORKER);
     cfg.third_party = third_party;
     let w = StoreWorker::new(cfg).unwrap();
     let store = w.open_store(&root.join(name), Profile::default_profile(), true, None).unwrap();

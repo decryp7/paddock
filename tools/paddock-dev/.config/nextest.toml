@@ -16,13 +16,19 @@ test-threads = "num-cpus"
 # slowing it down. A test that needs longer is a waiver below (an override with a `# waiver:` line saying why).
 slow-timeout = { period = "30s", terminate-after = 2 }
 
-# waiver: whole-repository "live" tests, which read every tracked file (git ls-files, git grep, a syn parse of every .rs file, node over
-# every file); measured 2026-11-11 on the shared Mac (14 cores, `nextest --test-threads 4`, load 4-7, tree 2e988c03a): 0.3-9 s warm, 37 s
-# and 114 s on a first pass over the tree, and on the contended CI Mac run 7924/7918/7929 they passed the 60 s budget (waiting on
-# disk, git and node, not computing: the C102 scan itself is 3.2 s of CPU). The work is real and bounded (one pass over about 13 000
-# files), so it gets four periods of 60 s; it is not a hidden flake (ER-12).
+# waiver: the whole-repository "live" tests read every tracked file (git ls-files, a syn parse of every .rs file, node over every file);
+# measured 2026-11-11: 42-49 s quiet against over 240 s under I/O load, with files finishing all along. Each one also judges itself on
+# progress (ADR 0071, `paddock_testkit::guarded`): it fails with its own message when it finishes no file for 120 s, so a hang is named
+# and a slow disk is not called one. Four periods of 60 s are nextest's bound on the whole run, kept at the old size (not raised): a
+# run over 240 s in total is still stopped here and is a finding about the host (ER-12).
 [[profile.ci.overrides]]
-filter = "test(/^ipc_endpoints::the_repository_register_is_complete/) | test(/^check::live_/) | test(/^contracts::every_markdown_file_that_code_reads/)"
+filter = "test(/^ipc_endpoints::the_repository_register_is_complete/) | test(/^check::live_/)"
+slow-timeout = { period = "60s", terminate-after = 4 }
+
+# waiver: the whole-repository reads of the documentation contract; measured 2026-11-11 like the live tests above (waiting on disk, git
+# and node, not computing), and without a unit of work to count. Four periods of 60 s.
+[[profile.ci.overrides]]
+filter = "test(/^contracts::every_markdown_file_that_code_reads/)"
 slow-timeout = { period = "60s", terminate-after = 4 }
 
 # waiver: the two golden live tests that run scripts/affected.mjs over every edit class of the real tree (one node process per case);

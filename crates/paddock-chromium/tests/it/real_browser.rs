@@ -101,8 +101,27 @@ fn answer(
     None
 }
 
-fn require_browser() -> Option<paddock_chromium::discover::Browser> {
+/// The first run of a browser bundle on macOS is held by the OS for 20 to 40 s on an idle host and far longer on a busy one, with no
+/// CPU and no child to judge it by (`launch::warm_up`, ADR 0071; Spotter's CI runs 7918, 7929 and 7932, this crate's 7912 and
+/// 7918). The first start of a process pays it here, outside any start guard, by waiting for the browser's own `--version` to end;
+/// nextest's slow-timeout waiver is its only bound. Every later start is then about half a second.
+fn found() -> Option<paddock_chromium::discover::Browser> {
+    static WARM: std::sync::OnceLock<Result<std::time::Duration, String>> =
+        std::sync::OnceLock::new();
     let exe = find_for_tests();
+    if let Some(b) = &exe {
+        // A failed first run fails every test of the process, not only the first one to call it.
+        let warm =
+            WARM.get_or_init(|| paddock_chromium::launch::warm_up(b).map_err(|e| e.to_string()));
+        if let Err(e) = warm {
+            panic!("{e}");
+        }
+    }
+    exe
+}
+
+fn require_browser() -> Option<paddock_chromium::discover::Browser> {
+    let exe = found();
     if exe.is_none() {
         let required = std::env::var("PADDOCK_REQUIRE_TEST_BROWSER").is_ok_and(|v| !v.is_empty());
         assert!(
@@ -301,7 +320,7 @@ fn every_helper_process_starts_on_the_first_try() {
 
 #[test]
 fn a_real_browser_reads_a_page_and_closes_cleanly() {
-    let Some(exe) = find_for_tests() else {
+    let Some(exe) = found() else {
         let required = std::env::var("PADDOCK_REQUIRE_TEST_BROWSER").is_ok_and(|v| !v.is_empty());
         assert!(
             !required,
@@ -507,7 +526,7 @@ fn assert_nothing_left(pid: u32, dir: &std::path::Path) {
 /// Together the two cover both outcomes of a close with no timing in either.
 #[test]
 fn a_browser_ended_by_force_leaves_nothing_behind() {
-    let Some(exe) = find_for_tests() else {
+    let Some(exe) = found() else {
         let required = std::env::var("PADDOCK_REQUIRE_TEST_BROWSER").is_ok_and(|v| !v.is_empty());
         assert!(
             !required,

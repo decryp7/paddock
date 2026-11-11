@@ -15,6 +15,8 @@ keyring = ["dep:keyring"]
 [dependencies]
 zeroize = "1"
 log = "0.4"
+# The OS random source for `random_token` (fails closed; the same version as paddock-mcp and paddock-ipc).
+getrandom = "0.3"
 keyring = { version = "4.2", optional = true }
 paddock-env = { workspace = true }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
@@ -30,3 +32,4 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 
 [dev-dependencies]
 tempfile = "3"
+paddock-testkit = { workspace = true }

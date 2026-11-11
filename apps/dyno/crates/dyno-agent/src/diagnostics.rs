@@ -6,6 +6,7 @@ use crate::agent::{lock, now, Shared};
 use crate::helper_first::{HelperCalls, HelperReading, ReadClass, Sourced};
 use crate::helper_link::CallError;
 use dyno_core::diagnostics::{DiagnosticsFile, DiagnosticsFiles};
+use dyno_core::helper_policy::RequestKind;
 use dyno_core::metrics::Reading;
 use dyno_core::recorder::CaptureReason;
 use serde::Serialize;
@@ -21,6 +22,7 @@ pub struct HelperLog;
 
 impl HelperReading for HelperLog {
     type Value = Vec<String>;
+    const KINDS: &'static [RequestKind] = &[RequestKind::LogTail];
 
     fn name(&self) -> &'static str {
         "helper log"

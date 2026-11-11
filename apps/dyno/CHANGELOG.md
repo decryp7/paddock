@@ -11,6 +11,8 @@
 
 ### Changed
 
+- Memory modules on Windows and macOS are now read by the agent itself, so their source shows Local instead of the helper.
+- On Linux the helper's card now lists disk health (SMART), which it already read for the wear forecast.
 - Health no longer says "Nothing needs your attention" when it could not read a fact the score looks at (disk health, a pending restart, pending updates). It says "Nothing found in what Dyno could check" and lists what was not checked; facts Dyno never reads on this OS are listed once as coverage. The score is unchanged. This is another protocol version (8), so an older app or agent is replaced at the next start.
 - A job that a limit stopped now says which limit it was. The app and the agent of this version talk a new protocol, so an older Dyno app or agent is replaced at the next start instead of being read wrongly.
 - Report a problem: the report now keeps private network addresses and this computer's own address, because they show how the network is set up and say nothing about who you are. Public addresses are still replaced.

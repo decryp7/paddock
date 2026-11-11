@@ -504,7 +504,10 @@ fn start(exe: &Path, manifest: &Manifest, granted: &[Permission], launch: &Launc
     let mut s = SpawnSpec::new(exe, format!("plugin \"{}\"", manifest.id));
     s.current_dir = Some(home.join("bin"));
     s.endpoint_prefix = debrief_ipc::endpoint::prefix::PLUGIN_TEST.into();
-    s.connect_window = Duration::from_secs(15);
+    // Until the plugin connects or exits (ADR 0071 row 4): the first run of a freshly built plugin is held by the OS on macOS for
+    // longer than any fixed window, and an exit still ends the wait at once. No warm-up here: the program is a plugin author's,
+    // not necessarily one that answers `--version`.
+    s.connect_window = debrief_ipc::process::UNTIL_CONNECTED;
     s.sandbox = sandbox;
     let mut c = ChildSpec::new(s);
     c.peer.protocol = PROTOCOL;

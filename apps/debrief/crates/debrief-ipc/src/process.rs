@@ -84,6 +84,11 @@ pub struct SpawnSpec {
 /// started late again (CI 7096). The test runner's hang detector, not a clock, ends a child that never connects.
 pub const UNTIL_CONNECTED: Duration = Duration::MAX;
 
+/// The product's connect window: how long a child may take to connect before the launch gives up (an exit ends the wait at once,
+/// whatever this is). Tests that start a fresh binary use [`UNTIL_CONNECTED`] (ADR 0071); the product keeps this bound so a
+/// child that is alive and never connects ends the launch instead of holding the supervisor's lock.
+pub const DEFAULT_CONNECT_WINDOW: Duration = Duration::from_secs(15);
+
 impl SpawnSpec {
     pub fn new(exe: impl Into<PathBuf>, label: impl Into<String>) -> SpawnSpec {
         SpawnSpec {
@@ -94,7 +99,7 @@ impl SpawnSpec {
             current_dir: None,
             label: label.into(),
             endpoint_prefix: crate::endpoint::prefix::DEFAULT.into(),
-            connect_window: Duration::from_secs(15),
+            connect_window: DEFAULT_CONNECT_WINDOW,
             below_normal_priority: true,
             log: None,
             sandbox: crate::sandbox::SandboxSpec::unrestricted(),

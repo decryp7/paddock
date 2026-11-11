@@ -4,6 +4,7 @@
 use crate::helper_first::{HelperCalls, HelperReading, ReadClass};
 use crate::helper_link::CallError;
 use dyno_core::helper::HelperHost;
+use dyno_core::helper_policy::RequestKind;
 use dyno_core::inventory::{MemoryLayout, Unavailable};
 use dyno_core::metrics::Reading;
 
@@ -31,6 +32,12 @@ impl MemoryModules {
 
 impl HelperReading for MemoryModules {
     type Value = MemoryLayout;
+    const KINDS: &'static [RequestKind] = &[RequestKind::MemoryModules];
+
+    fn helper_applies(&self) -> bool {
+        // Only Linux's slot table is root-only; elsewhere the agent's own total is all there is and the helper has nothing to add.
+        self.host == HelperHost::Linux
+    }
 
     fn name(&self) -> &'static str {
         "memory modules"

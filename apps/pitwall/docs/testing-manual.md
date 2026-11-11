@@ -103,8 +103,8 @@ Needs a build with caching (ADR 0019) and a small real model. Use `temperature: 
 
 | # | Steps | Expected |
 |---|-------|----------|
-| 29 | `curl -s -X POST $PW/x/v1/pair -d '{"name":"Pair test"}'` | 202 with `pairingId`, a six-digit `code`, `expiresInSecs: 300`. The Dashboard and Apps & keys show the same code and name. |
-| 30 | Poll `GET $PW/x/v1/pair/<id>` before approving, approve with a limited permission set (one model, 5 requests per minute), poll again, poll a third time. | `pending`; then `approved` with a `pw_...` key; then `approved` with `key: null` and "the key was already delivered". |
+| 29 | `curl -s -X POST $PW/x/v1/pair -d '{"name":"Pair test"}'` | 202 with `pairingId`, a `pollToken`, a six-digit `code`, `expiresInSecs: 300`. The Dashboard and Apps & keys show the same code and name. |
+| 30 | Poll `GET $PW/x/v1/pair/<id>` (header `X-Pitwall-Pair-Token: <pollToken>`; without it the answer is `denied`) before approving, approve with a limited permission set (one model, 5 requests per minute), poll again, poll a third time. | `pending`; then `approved` with a `pw_...` key; then `approved` with `key: null` and "the key was already delivered". |
 | 31 | Use the key with a model it is not allowed, and 6 requests in a minute. | 403 "this app may not use the model ..."; 429 "rate limit: at most 5 requests per minute ..." with `Retry-After`. |
 | 32 | Deny a second request; let a third expire for 5 minutes. | `denied`. |
 | 33 | `curl -s $PW/v1/models -H 'Host: example.com' -H "Authorization: Bearer $PITWALL_KEY"` and with `-H 'Origin: https://example.com'`. | 403 "this request's Host header is not a local address..." and 403 "requests from web pages on other sites are refused". |

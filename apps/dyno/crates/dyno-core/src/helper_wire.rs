@@ -539,6 +539,10 @@ pub fn readings(host: HelperHost) -> &'static [Advertised] {
                 kinds: &[RequestKind::Firewall],
             },
             Advertised {
+                text: "Disk health",
+                kinds: &[RequestKind::Smart],
+            },
+            Advertised {
                 text: "Memory modules",
                 kinds: &[RequestKind::MemoryModules],
             },

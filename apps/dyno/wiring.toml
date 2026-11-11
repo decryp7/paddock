@@ -3,13 +3,9 @@
 # Rules: a kind that is advertised by `readings()` may not be listed; a listed kind that becomes wired must be deleted;
 # `until` is a release tag (dyno-vX.Y.Z) or a date at most 60 days ahead.
 
-# Plan 2026-11-04, D4 (accepted): WolState is wired in 1.1.0 into Linux Wake-on-LAN readiness (WP-INT deletes its entry when the
-# sender lands). LogTail is wired: the agent sends it for the problem report (`diagnostics::HelperLog`), so its entry is gone.
-[[unwired]]
-wire = "agent-helper"
-kind = "WolState"
-why = "D4: wired into Linux Wake-on-LAN readiness by its own package before the 1.1.0 tag"
-until = "dyno-v1.1.0"
+# No request kind is waived at present. WolState (plan 2026-11-04, D4) is wired into Linux Wake-on-LAN readiness, and LogTail is wired:
+# the agent sends it for the problem report (`diagnostics::HelperLog`). A kind that is neither advertised nor sent gets an [[unwired]]
+# entry here (wire = "agent-helper", kind, why, until).
 
 # OS-edge modules (family ADR 0054 sections 2.1 and 2.2): modules that hold an adapter, call an OS API through FFI or run an OS
 # tool. C93 fails on a discarded result in their non-test code. Paths are relative to this app folder.

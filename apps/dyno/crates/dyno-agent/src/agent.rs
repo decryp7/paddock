@@ -746,7 +746,7 @@ impl Shared {
             }
         };
         let shared = Arc::new_cyclic(|me| Shared {
-            firewall: crate::firewall::FirewallCentre::for_this_os(Arc::new(paddock_jobs::time::SystemClock)),
+            firewall: crate::firewall::FirewallCentre::for_host(host, Arc::new(paddock_jobs::time::SystemClock)),
             intel: crate::intel_centre::IntelCentre::new(dirs.clone(), Arc::new(paddock_jobs::time::SystemClock)),
             plugins: dyno_plugin_host::PluginHost::new(dyno_plugin_host::HostConfig::new(dirs.plugins())),
             dirs,
@@ -795,7 +795,8 @@ impl Shared {
                 hardware.signals,
                 if helper_first {
                     // The real machine: the helper first, then the local reader (which also finds a person's own install).
-                    Box::new(crate::helper_wear::helper_first_wear(
+                    Box::new(crate::helper_wear::helper_first_wear_on(
+                        host,
                         port(me),
                         dyno_platform::hardware::disk_wear_with_own_tools(&own_tools),
                     ))
@@ -850,19 +851,24 @@ impl Shared {
             wake: (Mutex::new(false), Condvar::new()),
             next_conn: AtomicU64::new(1),
         });
-        // What keeps Windows awake is read helper first.
+        // What the helper reads for the agent (wake requests on Windows, the firewall, login items on macOS) is bound here.
         if helper_first {
-            shared
-                .extras
-                .use_helper(Arc::new(crate::helper_first::SharedPort(Arc::downgrade(&shared))));
+            // Only Windows asks the helper what keeps it awake (`powercfg /requests`); the other systems read it themselves.
+            if host == dyno_core::helper::HelperHost::Windows {
+                shared
+                    .extras
+                    .use_helper(Arc::new(crate::helper_first::SharedPort(Arc::downgrade(&shared))));
+            }
             // The firewall's sources only the helper reads (`pf`, `nft`) are asked through the same port.
             shared
                 .firewall
                 .bind_helper(Arc::new(crate::helper_first::SharedPort(Arc::downgrade(&shared))));
             // macOS reads login items and background tasks only through the helper; other systems' startup lists ignore the link.
-            lock(&shared.ports.startup).use_login_items(Box::new(crate::helper_readers::login_items::HelperLoginItems::new(Box::new(
-                crate::helper_first::SharedPort(Arc::downgrade(&shared)),
-            ))));
+            if host == dyno_core::helper::HelperHost::Macos {
+                lock(&shared.ports.startup).use_login_items(Box::new(crate::helper_readers::login_items::HelperLoginItems::new(Box::new(
+                    crate::helper_first::SharedPort(Arc::downgrade(&shared)),
+                ))));
+            }
         }
         shared.disk.set_read_threads(read_threads);
         shared.disk.set_space_refresh(space_refresh);

@@ -154,7 +154,7 @@ thread_local! {
 /// shared one (see `debrief_ipc::testing`).
 #[cfg(unix)]
 pub(super) fn confined(exe: &str) -> WorkerConfig {
-    let mut cfg = WorkerConfig::new(exe);
+    let mut cfg = WorkerConfig::for_tests(exe);
     let dir = debrief_ipc::testing::confined_tmp();
     cfg.env.extend(dir.env());
     WORKER_TMP.with(|t| t.borrow_mut().push(dir));
@@ -164,7 +164,7 @@ pub(super) fn confined(exe: &str) -> WorkerConfig {
 /// Elsewhere (Windows) the worker's endpoint is a named pipe, not a folder, so nothing is left to confine.
 #[cfg(not(unix))]
 fn confined(exe: &str) -> WorkerConfig {
-    WorkerConfig::new(exe)
+    WorkerConfig::for_tests(exe)
 }
 
 fn worker_in(mode: MemoryMode) -> StoreWorker {

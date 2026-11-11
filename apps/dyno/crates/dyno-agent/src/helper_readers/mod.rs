@@ -9,3 +9,6 @@ pub mod memory;
 pub mod processes;
 pub mod traffic;
 pub mod wol;
+
+#[cfg(test)]
+mod kinds_tests;

@@ -516,13 +516,20 @@ fn serve(mut conn: TcpStream, shared: &Shared) {
                 &mut conn,
                 202,
                 &[],
-                &json!({"pairingId": format!("pr{}-abc", started), "code": s.pair_code, "expiresInSecs": 300}),
+                &json!({"pairingId": format!("pr{}-abc", started), "pollToken": format!("tok-pr{}-abc", started), "code": s.pair_code, "expiresInSecs": 300}),
             );
         }
         Some("/x/v1/pair/{id}") => {
+            // Like Pitwall: a poll without the token of its request is "denied", the same as an unknown id.
+            let id = path.rsplit('/').next().unwrap_or_default();
+            let held = headers
+                .iter()
+                .any(|(n, v)| n == "x-pitwall-pair-token" && *v == format!("tok-{id}"));
             let answer = {
                 let mut st = lock();
-                if st.pending_polls > 0 {
+                if !held {
+                    json!({"status": "denied"})
+                } else if st.pending_polls > 0 {
                     st.pending_polls -= 1;
                     json!({"status": "pending"})
                 } else {

@@ -772,16 +772,6 @@ review_by = 2026-12-20
 approved = "coordinator"
 
 [[ignored]]
-path = "apps/dyno/crates/dyno-agent/tests/helper_wiring.rs"
-tests = ["every_advertised_reading_has_a_production_sender", "the_user_guide_and_the_changelog_claim_what_readings_advertises"]
-gate = "not-gated"
-reason = "red until WP-INT wires every reading (Dyno 1.1.1 list); WP-INT adds the CI line and removes the entry"
-owner = "Dyno WP-INT"
-since = 2026-11-08
-review_by = 2026-11-29
-approved = "coordinator"
-
-[[ignored]]
 path = "apps/dyno/crates/dyno-core/src/intel/tests.rs"
 tests = ["bench_index"]
 gate = "not-gated"

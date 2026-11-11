@@ -73,7 +73,7 @@ fn the_fake_serves_every_route_the_contract_names() {
     let c = client(&fake);
     c.health().unwrap();
     assert_eq!(c.begin_pairing().unwrap().code, "482913");
-    c.poll_pairing("pr1-abc").unwrap();
+    c.poll_pairing("pr1-abc", "tok-pr1-abc").unwrap();
     c.select(&ModelSel::Auto(Caps::chat(4096))).unwrap();
     c.models().unwrap();
     c.model_ids().unwrap();
@@ -617,10 +617,13 @@ fn tokens_tasks_and_jobs() {
         );
     }
     assert!(matches!(
-        c.poll_pairing("a/b"),
+        c.poll_pairing("a/b", "tok"),
         Err(PitwallError::Protocol(_))
     ));
-    assert!(matches!(c.poll_pairing(""), Err(PitwallError::Protocol(_))));
+    assert!(matches!(
+        c.poll_pairing("", "tok"),
+        Err(PitwallError::Protocol(_))
+    ));
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -1632,10 +1635,47 @@ fn a_polled_pairing_answers_pending_again_once_its_key_was_delivered() {
     });
     let c = client(&fake);
     assert_eq!(
-        c.poll_pairing("pr1-abc").unwrap(),
+        c.poll_pairing("pr1-abc", "tok-pr1-abc").unwrap(),
         PairPoll::Approved(Some("pw_fakekey".into()))
     );
-    assert_eq!(c.poll_pairing("pr1-abc").unwrap(), PairPoll::Pending);
+    assert_eq!(
+        c.poll_pairing("pr1-abc", "tok-pr1-abc").unwrap(),
+        PairPoll::Pending
+    );
+}
+
+/// The poll carries the token of its request: without it, or with another one, the answer is "denied" (as Pitwall's is for
+/// an unknown id) and the key stays unspent for the real holder.
+#[test]
+fn a_poll_without_its_token_is_denied_and_does_not_spend_the_key() {
+    let fake = FakePitwall::start(FakeState {
+        pending_polls: 0,
+        ..keyed()
+    });
+    let c = client(&fake);
+    let start = c.begin_pairing().unwrap();
+    assert!(!start.poll_token.is_empty() && start.poll_token != start.pairing_id);
+    assert_eq!(
+        c.poll_pairing(&start.pairing_id, "someone-elses-token")
+            .unwrap(),
+        PairPoll::Denied
+    );
+    assert!(matches!(
+        c.poll_pairing(&start.pairing_id, "bad token"),
+        Err(PitwallError::Protocol(_))
+    ));
+    assert_eq!(
+        c.poll_pairing(&start.pairing_id, &start.poll_token)
+            .unwrap(),
+        PairPoll::Approved(Some("pw_fakekey".into()))
+    );
+    let seen = fake.requests_to(&format!("/x/v1/pair/{}", start.pairing_id));
+    assert!(
+        seen.iter().any(|(_, h, _)| h
+            .iter()
+            .any(|(n, v)| n == "x-pitwall-pair-token" && *v == start.poll_token)),
+        "the token goes in the X-Pitwall-Pair-Token header"
+    );
 }
 
 #[test]

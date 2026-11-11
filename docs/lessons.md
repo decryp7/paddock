@@ -1872,3 +1872,19 @@ test path; 0 from the CI runners, the test browser or the build tools (Chrome fo
 the runner or the terminal; 80 chrome-headless-shell requests were allowed from a stored consent; node's 8 went to the
 runner or the terminal). After the change, two runs of the Pitcrew service tests with `TMPDIR` on the external volume
 made 0 prompts and 0 requests for the test folder, while an unchanged run in the same window prompted.
+
+## Start waits kept coming back as fixed budgets: wait for ready or exit, warm a fresh binary once (2026-11-11)
+
+Tests on busy macOS runners failed because they gave a real process, browser or scan a fixed time: dyno-agent's start (CI
+7918), Spotter's and paddock-chromium's real browser (7912, 7918, 7929, 7932), Debrief's store-worker test (the product's 15 s
+connect window, "the store worker did not connect within 15 s", main 7919 and 7925) and paddock-dev's whole-repository live
+scans (budgets only raised). The first run of a freshly installed binary is held by the OS for 42 s on an idle Mac and over
+240 s under I/O load, with no CPU and no output, so neither a clock nor a CPU judge can tell it from a hang. What landed under
+ADR 0071 (no new ADR): `paddock_proc::warm_up` (a first run paid before the start that matters, memoised by file identity, its
+duration printed; macOS only for a browser, since `chrome --version` starts the browser on Windows), `WorkerConfig::for_tests`
+and the plugin-test harness waiting until the child connects or exits (`UNTIL_CONNECTED`, ADR 0071 rows 2 and 4; the product
+keeps its 15 s window, because the supervisor holds its lock while a launch waits and an exit already ends the wait at once),
+and `paddock_testkit::guarded` for a slow job judged on units finished (the live scans). The shared wait `wait_ready_or_exit`
+of ADR 0071 section 1 is NOT built yet: `paddock_proc::StartWatch` is the judge it is to drive, and a second wait beside it
+would be a copy (rule 55). Still open: ADR 0071 row 13 (the 20-40 s receives and deadlines in the real-browser tests of
+paddock-chromium, Spotter and Debrief's chromium-driver; only the first-run warm-up is done) and rows 1, 5-12 and 14-15.

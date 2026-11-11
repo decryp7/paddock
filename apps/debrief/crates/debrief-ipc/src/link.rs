@@ -10,7 +10,8 @@ use crate::frame::{self, Frame, FrameError, ProtocolVersion, TOKEN_BYTES, VERSIO
 use crate::peer::{Duplex, Handler, Peer, PeerOptions};
 use crate::IpcError;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tokio::time::Instant;
 
 /// How long either side waits for the other's handshake frame once connected.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -376,6 +377,53 @@ mod platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    /// What ends the wait for a child that is alive and has not connected (ADR 0071; CI 7919 and 7925, "the store worker did not
+    /// connect within 15 s": the first run of a fresh binary on a busy macOS host is held for far longer than that). Time is
+    /// tokio's paused clock, which the 25 ms poll advances on its own, so 40 s pass with no sleep and the poll count says how
+    /// long the wait ran. With `UNTIL_CONNECTED` only the child's exit (or its connection) ends it, and the exit is reported at
+    /// once with its own message; with the product's window a child that stays silent ends the launch when the window runs out.
+    #[cfg(unix)]
+    #[tokio::test(start_paused = true)]
+    async fn a_child_that_starts_late_is_waited_for_until_it_exits_when_the_window_is_until_connected() {
+        const EXIT_AT_LOOK: u32 = 1600; // 25 ms a look: 40 s
+        let wait = |window: Duration| async move {
+            let listener = Listener::create("debrief-test-late", Access::Owner).unwrap();
+            let looked = std::sync::Arc::new(AtomicU32::new(0));
+            let seen = looked.clone();
+            let ends = move || {
+                (seen.fetch_add(1, Ordering::Relaxed) >= EXIT_AT_LOOK)
+                    .then(|| "the late child exited while starting (status 7)".to_string())
+            };
+            let r = listener
+                .accept(
+                    Some(1),
+                    window,
+                    ends,
+                    Arc::new(crate::peer::NoCalls),
+                    PeerOptions::new("the late child"),
+                )
+                .await;
+            let Err(IpcError::Died(why)) = r else {
+                panic!("expected the wait to end")
+            };
+            (why, looked.load(Ordering::Relaxed))
+        };
+        let (why, looks) = wait(crate::process::UNTIL_CONNECTED).await;
+        assert!(
+            why.contains("exited while starting"),
+            "ended by something other than the child's exit: {why}"
+        );
+        assert!(looks > EXIT_AT_LOOK, "the exit was waited for: {looks} looks");
+        let (why, looks) = wait(crate::process::DEFAULT_CONNECT_WINDOW).await;
+        assert!(why.contains("did not connect within 15 s"), "{why}");
+        assert!(
+            looks < EXIT_AT_LOOK,
+            "a child silent past the product's window ends the launch: {looks} looks"
+        );
+    }
 
     #[test]
     fn tokens_roundtrip_through_hex_and_compare() {
