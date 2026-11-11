@@ -79,6 +79,11 @@ impl Tree for GitTree {
 
 /// `paddock-conformance` output (`list --json`, `commands --json`) through node.
 pub fn conformance_json(root: &Path, sub: &str) -> Result<String, String> {
+    if !root.join("conformance/bin/paddock-conformance.mjs").is_file() {
+        return Err("::error::conformance/ is not in this checkout (a sparse checkout without it), and the gates run it. Fix: run `git sparse-checkout disable` for a full checkout; \
+                    new worktrees from `./dev worktree add` are full checkouts."
+            .to_string());
+    }
     Real.run("node", &["conformance/bin/paddock-conformance.mjs", sub, "--json"], root, None)
         .map_err(|e| format!("{} (node must be on PATH)", e.message))
 }
@@ -250,6 +255,17 @@ mod tests {
         format!(
             "version = 1\n[[not_gated]]\nid = \"X\"\nreason = \"r\"\nowner = \"o\"\nsince = 2026-11-08\nreview_by = {review}\napproved = \"coordinator\"\n"
         )
+    }
+
+    #[test]
+    fn a_checkout_without_conformance_is_told_to_disable_the_sparse_checkout_not_given_a_node_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = conformance_json(dir.path(), "list").unwrap_err();
+        assert!(
+            e.contains("::error::") && e.contains("conformance/") && e.contains("git sparse-checkout disable"),
+            "{e}"
+        );
+        assert!(!e.contains("node must be on PATH"), "{e}");
     }
 
     #[test]

@@ -472,11 +472,13 @@ fn live_command_line_matches_affected_mjs_on_a_copy_of_the_fixture_repository() 
     std::fs::create_dir_all(root.join("scripts")).unwrap();
     std::fs::create_dir_all(root.join("conformance/src/util")).unwrap();
     std::fs::copy(repo_root().join("scripts/affected.mjs"), root.join("scripts/affected.mjs")).unwrap();
-    std::fs::copy(
-        repo_root().join("conformance/src/util/is-main.mjs"),
-        root.join("conformance/src/util/is-main.mjs"),
-    )
-    .unwrap();
+    for f in ["is-main.mjs", "full-checkout.mjs"] {
+        std::fs::copy(
+            repo_root().join("conformance/src/util").join(f),
+            root.join("conformance/src/util").join(f),
+        )
+        .unwrap();
+    }
     let mut failures = Vec::new();
     for case in &cli_cases() {
         let mut node = Command::new("node");

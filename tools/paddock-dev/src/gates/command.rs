@@ -80,6 +80,13 @@ fn dev_command_paths() -> std::collections::BTreeSet<String> {
 pub fn check(a: &CheckArgs) -> Result<Report, CliError> {
     let root = repo_root(a.root.as_deref())?;
     let started = std::time::Instant::now();
+    // First, so that a sparse checkout is named (conformance says which folders are missing) before anything reads the tree.
+    let conformance_list = edge::conformance_json(&root, "list");
+    if let Err(e) = &conformance_list
+        && e.contains("::error::")
+    {
+        return Err(CliError::failure(e.clone()));
+    }
     let tree = edge::GitTree::open(&root).map_err(CliError::failure)?;
     let sources = edge::load_sources(&root).map_err(CliError::failure)?;
     let planner = edge::NodePlanner::new(&root);
@@ -87,7 +94,7 @@ pub fn check(a: &CheckArgs) -> Result<Report, CliError> {
     let input = evaluate::Input {
         tree: &tree,
         sources: &sources,
-        conformance_list: edge::conformance_json(&root, "list"),
+        conformance_list,
         conformance_commands: edge::conformance_json(&root, "commands").ok(),
         dev_commands: dev_command_paths(),
         register_text: std::fs::read_to_string(root.join("docs/gates.toml")).ok(),

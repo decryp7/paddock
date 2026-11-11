@@ -225,32 +225,112 @@ fn add_refuses_a_path_the_owner_map_already_has_even_when_the_folder_is_gone() {
     assert_eq!(fx.owner_of(&path).as_deref(), Some("agent-B"));
 }
 
-#[test]
-fn add_refuses_an_existing_branch_and_leaves_no_entry() {
-    let fx = Fixture::new();
-    fx.git(&fx.primary, &["branch", "taken", "origin/main"]);
-    let path = fx.path("w");
-    let r = fx.dev(&[
+fn add_branch(fx: &Fixture, name: &str, branch: &str, extra: &[&str]) -> super::Run {
+    let mut a = vec![
         "worktree",
         "add",
-        "w",
+        name,
         "-b",
-        "taken",
+        branch,
         "--base",
         "origin/main",
         "--owner",
         "a:b",
         "--agent",
         "agent-A",
-    ]);
+    ];
+    a.extend_from_slice(extra);
+    fx.dev(&a)
+}
+
+#[test]
+fn add_attaches_to_an_existing_local_branch() {
+    // Agents ask for a branch that already exists (a review fix round, a pushed branch): attach, never refuse.
+    let fx = Fixture::new();
+    fx.git(&fx.primary, &["branch", "taken", "origin/main"]);
+    fx.git(&fx.primary, &["commit", "-q", "--allow-empty", "-m", "ahead"]);
+    fx.git(&fx.primary, &["branch", "-f", "taken", "HEAD"]);
+    fx.git(&fx.primary, &["reset", "-q", "--hard", "origin/main"]);
+    let path = fx.path("w");
+    let r = add_branch(&fx, "w", "taken", &[]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert_eq!(r.json["attached"], "local branch");
+    assert_eq!(fx.git(&path, &["rev-parse", "--abbrev-ref", "HEAD"]), "taken");
+    assert_eq!(
+        fx.git(&path, &["rev-parse", "HEAD"]),
+        fx.git(&fx.primary, &["rev-parse", "taken"]),
+        "the branch keeps its own commits; the base is not applied"
+    );
+    assert!(fx.lock_reason(&path).unwrap().contains("branch=taken"));
+}
+
+#[test]
+fn add_attaches_to_a_branch_that_exists_only_on_the_remote() {
+    let fx = Fixture::new();
+    fx.git(&fx.primary, &["push", "-q", "origin", "origin/main:refs/heads/pushed"]);
+    fx.git(&fx.primary, &["fetch", "-q", "origin"]);
+    assert!(!fx.git_ok(&fx.primary, &["rev-parse", "--verify", "--quiet", "refs/heads/pushed"]));
+    let path = fx.path("w");
+    let r = add_branch(&fx, "w", "pushed", &[]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert_eq!(r.json["attached"], "remote branch origin/pushed");
+    assert_eq!(fx.git(&path, &["rev-parse", "--abbrev-ref", "HEAD"]), "pushed");
+    assert_eq!(fx.git(&path, &["rev-parse", "--abbrev-ref", "pushed@{upstream}"]), "origin/pushed");
+}
+
+#[test]
+fn add_for_a_new_branch_says_it_is_new() {
+    let fx = Fixture::new();
+    let r = add_branch(&fx, "w", "fresh", &[]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert!(r.json["attached"].is_null());
+}
+
+#[test]
+fn add_refuses_a_branch_another_worktree_has_checked_out_and_leaves_no_entry() {
+    let fx = Fixture::new();
+    assert_eq!(add_branch(&fx, "one", "shared", &[]).code, 0);
+    let path = fx.path("two");
+    let r = add_branch(&fx, "two", "shared", &[]);
     assert_ne!(r.code, 0);
-    assert!(r.err.contains("taken"), "{}", r.err);
+    assert!(r.err.contains("shared"), "{}", r.err);
     assert!(!path.exists());
     assert_eq!(fx.owner_of(&path), None);
 }
 
 #[test]
-fn add_with_sparse_makes_a_cone_checkout_without_changing_the_primary() {
+fn add_without_a_profile_is_a_full_checkout_and_the_gates_profile_is_the_same() {
+    // Agents made sparse worktrees and then hand-added folders for conformance, affected.mjs and `gates check`: a branch
+    // worktree is the gates profile, a full checkout (measured: about 1 s and 350 MB more than a cone), unless it is a review copy.
+    let fx = Fixture::new();
+    std::fs::create_dir_all(fx.primary.join("other")).unwrap();
+    std::fs::write(fx.primary.join("other/b.txt"), "b").unwrap();
+    fx.git(&fx.primary, &["add", "."]);
+    fx.git(&fx.primary, &["commit", "-q", "-m", "dirs"]);
+    fx.git(&fx.primary, &["push", "-q", "origin", "main"]);
+    fx.git(&fx.primary, &["fetch", "-q", "origin"]);
+    for (name, extra) in [("plain", &[][..]), ("gates", &["--profile", "gates"][..])] {
+        let r = add_branch(&fx, name, name, extra);
+        assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+        assert!(fx.path(name).join("other/b.txt").exists());
+        assert!(!fx.git_ok(&fx.path(name), &["config", "--get", "core.sparseCheckout"]));
+    }
+}
+
+#[test]
+fn add_refuses_sparse_for_a_branch_worktree_and_says_what_to_use() {
+    let fx = Fixture::new();
+    let path = fx.path("sp");
+    let r = add_branch(&fx, "sp", "sp", &["--sparse", "keep"]);
+    assert_eq!(r.code, 2, "{}", r.err);
+    assert!(r.err.contains("--detach") && r.err.contains("full checkout"), "{}", r.err);
+    assert!(!path.exists());
+    assert_eq!(fx.owner_of(&path), None);
+    assert_eq!(add_branch(&fx, "sp2", "sp2", &["--profile", "gates", "--sparse", "keep"]).code, 2);
+}
+
+#[test]
+fn add_with_sparse_makes_a_cone_review_copy_without_changing_the_primary() {
     let fx = Fixture::new();
     std::fs::create_dir_all(fx.primary.join("keep")).unwrap();
     std::fs::create_dir_all(fx.primary.join("other")).unwrap();
@@ -265,8 +345,7 @@ fn add_with_sparse_makes_a_cone_checkout_without_changing_the_primary() {
         "worktree",
         "add",
         "sp",
-        "-b",
-        "sp",
+        "--detach",
         "--base",
         "origin/main",
         "--owner",
@@ -284,6 +363,30 @@ fn add_with_sparse_makes_a_cone_checkout_without_changing_the_primary() {
         !fx.git_ok(&fx.primary, &["config", "--get", "core.sparseCheckout"]),
         "sparse is set only in the worktree"
     );
+}
+
+#[test]
+fn claim_and_drop_name_the_next_step_when_git_lost_the_worktree_but_its_folder_is_there() {
+    // An `add` whose checkout timed out, or a prune, leaves a folder with a `.git` file that git no longer lists.
+    let fx = Fixture::new();
+    let path = fx.add("w1");
+    std::fs::remove_dir_all(fx.primary.join(".git/worktrees/w1")).unwrap();
+    assert!(path.join(".git").is_file());
+    for r in [
+        fx.claim(&path, "agent-A"),
+        fx.dev(&["worktree", "drop", p(&path), "--agent", "agent-A"]),
+    ] {
+        assert_eq!(r.code, 4, "{}", r.err);
+        assert!(
+            r.err.contains("git no longer lists it") && r.err.contains("./dev worktree add"),
+            "{}",
+            r.err
+        );
+    }
+    // A plain folder keeps the short message.
+    let plain = fx.path("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    assert!(!fx.claim(&plain, "agent-A").err.contains("no longer lists"));
 }
 
 #[test]
@@ -596,7 +699,7 @@ fn a_claim_stays_fast_while_a_slow_add_runs() {
 #[test]
 fn a_failed_add_removes_its_reservation() {
     let fx = Fixture::new();
-    fx.git(&fx.primary, &["branch", "taken", "origin/main"]);
+    assert_eq!(add_branch(&fx, "other", "taken", &[]).code, 0);
     let r = fx.dev(&["worktree", "add", "w", "-b", "taken", "--base", "origin/main", "--owner", "a:b"]);
     assert_ne!(r.code, 0);
     assert!(fx.owners()["pending"].as_object().unwrap().is_empty(), "{}", fx.owners());

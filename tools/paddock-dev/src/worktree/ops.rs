@@ -80,6 +80,52 @@ pub struct AddRequest<'a> {
     pub sparse: &'a [String],
 }
 
+/// What a requested branch name refers to: nothing yet, a local branch, or a branch only a remote has.
+enum Attach {
+    New,
+    /// A local branch, with its tip.
+    Local(String),
+    /// A remote-tracking ref such as `origin/fix/x`, with its tip; a local branch tracking it is made.
+    Remote(String, String),
+}
+
+impl Attach {
+    fn find(git: &Git, branch: &str) -> Result<Attach, CliError> {
+        if let Ok(sha) = git.text(&["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}^{{commit}}")]) {
+            return Ok(Attach::Local(sha.trim().to_string()));
+        }
+        let refs = git
+            .text(&["for-each-ref", "--format=%(refname:strip=2) %(objectname)", "refs/remotes"])
+            .map_err(git_failure)?;
+        let mut found: Vec<(String, String)> = refs
+            .lines()
+            .filter_map(|l| l.split_once(' '))
+            .filter(|(name, _)| name.split_once('/').is_some_and(|(_, b)| b == branch))
+            .map(|(n, s)| (n.to_string(), s.to_string()))
+            .collect();
+        if found.len() > 1 {
+            found.retain(|(n, _)| n.starts_with("origin/"));
+        }
+        match found.len() {
+            0 => Ok(Attach::New),
+            1 => {
+                let (n, s) = found.remove(0);
+                Ok(Attach::Remote(n, s))
+            }
+            _ => Err(CliError::usage(format!("The branch `{branch}` exists on several remotes."))
+                .with_hint("Make a local branch of the one you mean first (`git branch <name> <remote>/<name>`), then run add again.")),
+        }
+    }
+
+    fn describe(&self) -> Option<String> {
+        match self {
+            Attach::New => None,
+            Attach::Local(_) => Some("local branch".to_string()),
+            Attach::Remote(r, _) => Some(format!("remote branch {r}")),
+        }
+    }
+}
+
 /// The folder name is one plain path component.
 pub fn check_name(name: &str) -> Result<(), CliError> {
     let ok = !name.is_empty()
@@ -124,6 +170,12 @@ fn find_secondary(repo: &Repo, path: &Path) -> Result<(WorktreeInfo, String), Cl
         Some(w) if w.path != list[0].path => Ok((w.clone(), k)),
         Some(_) => Err(CliError::refused(format!("{k} is the primary checkout, not an agent worktree."))
             .with_hint("Work in a worktree made with `./dev worktree add`.")),
+        None if Path::new(&k).join(".git").is_file() => Err(CliError::refused(format!(
+            "{k} has a `.git` file but git no longer lists it as a worktree of this repository."
+        ))
+        .with_hint(
+            "An `add` whose checkout timed out or a prune does this. Move or delete the folder (check it holds nothing unpushed), then run `./dev worktree add` again with the same branch: it attaches to the existing branch. `git worktree list` shows what git knows.",
+        )),
         None => Err(CliError::refused(format!("{k} is not a worktree of this repository."))
             .with_hint("`./dev worktree list` shows the worktrees; make one with `./dev worktree add`.")),
     }
@@ -154,6 +206,12 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
     let (role, task) =
         check_owner(req.owner).map_err(|m| CliError::usage(m).with_hint("Write --owner implementer:RT-3 (role, a colon, task)."))?;
     check_name(req.name)?;
+    if req.branch.is_some() && !req.sparse.is_empty() {
+        return Err(CliError::usage("--sparse is for review copies (--detach); a branch worktree is a full checkout.")
+            .with_hint(
+                "The gates (conformance, affected.mjs, `gates check`) read most of the repository, and a full checkout costs about 1 s and 350 MB more than a cone. Drop --sparse, or add --detach for a review copy.",
+            ));
+    }
     let git = repo.git();
     let base_sha = git
         .text(&["rev-parse", "--verify", "--quiet", &format!("{}^{{commit}}", req.base)])
@@ -163,6 +221,15 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
         })?
         .trim()
         .to_string();
+    let attach = match req.branch {
+        Some(b) => Attach::find(&git, b)?,
+        None => Attach::New,
+    };
+    // An existing branch keeps its own commits: the base it was made from is the branch's tip, not `--base`.
+    let base_sha = match &attach {
+        Attach::New => base_sha,
+        Attach::Local(sha) | Attach::Remote(_, sha) => sha.clone(),
+    };
     let k = key(&req.root.join(req.name));
     let branch_name = req.branch.unwrap_or("detached");
     let note = Note {
@@ -199,7 +266,7 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
         })
         .map_err(owner_failure)??;
     // 2. Without the lock: make it. A failure ends the reservation.
-    let made = make_worktree(&git, req, &k, &base_sha, &note);
+    let made = make_worktree(&git, req, &attach, &k, &base_sha, &note);
     // 3. Under the lock again: confirm (claim for an agent caller) or remove the reservation.
     let confirmed = store.update_as("worktree add (confirm)", |map| {
         map.unreserve(&k);
@@ -222,10 +289,13 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
         .unwrap_or(base_sha);
     Ok(Report::new(
         json!({"path": k, "branch": req.branch, "head": head, "owner": req.owner, "locked": true, "note": note,
-               "claimed_by": caller.agent.as_ref().map(|a| a.id.clone())}),
+               "claimed_by": caller.agent.as_ref().map(|a| a.id.clone()), "attached": attach.describe()}),
         format!(
-            "Made {k} ({}), locked: {note}",
-            req.branch.map_or("detached".to_string(), |b| format!("branch {b}"))
+            "Made {k} ({}{}), locked: {note}",
+            req.branch.map_or("detached".to_string(), |b| format!("branch {b}")),
+            attach
+                .describe()
+                .map_or(String::new(), |d| format!(", attached to the existing {d}"))
         ),
     ))
 }
@@ -264,14 +334,20 @@ fn check_nesting(repo: &Repo, k: &str, map: &OwnerMap) -> Result<(), CliError> {
 }
 
 /// `git worktree add --lock`, then the sparse cone (made without a checkout first, so the full tree is never written).
-fn make_worktree(git: &Git, req: &AddRequest<'_>, k: &str, base_sha: &str, note: &str) -> Result<(), CliError> {
+fn make_worktree(git: &Git, req: &AddRequest<'_>, attach: &Attach, k: &str, base_sha: &str, note: &str) -> Result<(), CliError> {
     let mut args = vec!["worktree", "add", "--lock", "--reason", note];
     if !req.sparse.is_empty() {
         args.push("--no-checkout");
     }
-    match req.branch {
-        Some(b) => args.extend(["-b", b, k, base_sha]),
-        None => args.extend(["--detach", k, base_sha]),
+    let remote_ref;
+    match (req.branch, attach) {
+        (Some(b), Attach::New) => args.extend(["-b", b, k, base_sha]),
+        (Some(b), Attach::Local(_)) => args.extend([k, b]),
+        (Some(b), Attach::Remote(r, _)) => {
+            remote_ref = r.clone();
+            args.extend(["--track", "-b", b, k, &remote_ref]);
+        }
+        (None, _) => args.extend(["--detach", k, base_sha]),
     }
     git.text(&args).map_err(git_failure)?;
     if req.sparse.is_empty() {
