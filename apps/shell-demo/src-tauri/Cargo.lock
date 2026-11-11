@@ -2954,6 +2954,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "sysinfo",
  "tauri",
  "tauri-plugin-dialog",
  "zip",

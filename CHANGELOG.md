@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-diag`: a Performance section in the diagnostics bundle (user decision 2026-11-11)
+- New `paddock_diag::perf`: the `PerformanceSection` adds `performance.json` (versioned, `schema` 1) and `performance-summary.txt` to a report: startup phases with durations, the 50 slowest operations of the last 24 hours (name, phase, duration, when) and machine facts (processor model and cores, memory total and available, SSD/HDD type and free space of the data folder's volume, OS version, load average; no machine name, user name or serial number). No tracing; the format follows the startup and summary views of VS Code, Chrome and Windows Performance Recorder.
+- The recorder apps call: `perf::init(data_dir)` (reads the ring the last run left), `perf::startup_phase(name)`, `perf::record(op, duration)`, `perf::record_phase(op, phase, duration)` and the `perf::time(op)` guard, then `PerformanceSection::new()` in the report's sections. Bounded and cheap: a ring of 50 entries, at most 64 startup phases, and a call shorter than the ring's shortest costs one atomic read. The ring is saved atomically as `performance-ring.json` in the data folder; a damaged, oversized or foreign file is replaced and never stops the app.
+- No user content: names are identifiers (letters, digits and `. _ : -`, at most 48 characters); anything else, in a call or in a ring file read back, becomes `invalid-name`.
+- Pitwall is the first app wired (startup phases, finished jobs by kind and outcome, the section); `paddock-diag` now depends on `sysinfo` (0.39, already in every app's lockfile).
+
 ### Pitwall: no test double or test switch in the shipped build (ADR 0073, rule 73, WP-P)
 - Removes P1 to P6 of ADR 0073's Pitwall survey; the register and the shared crates follow.
 - `pitwall-server` no longer knows `--fake-engine`, `--die-after-ms` or `--ready-when` (it answers `unknown option`, exit 2). The fake OpenAI-compatible engine is the `pitwall-fake-engine` bin of the same package, built only with the `test-support` feature, which only the package's self dev-dependency enables; the `fake_engine` module is behind `cfg(any(test, feature = "test-support"))`. The tests start it through `CARGO_BIN_EXE_pitwall-fake-engine`, and the host-cleanup process pattern follows the new name.

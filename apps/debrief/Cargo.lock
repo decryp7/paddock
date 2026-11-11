@@ -5252,6 +5252,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "sysinfo",
  "zip",
 ]
 

@@ -159,6 +159,16 @@ impl Router {
     }
 }
 
+/// How a finished job ended, as a word for the Performance section.
+fn terminal_word(state: &JobState) -> &'static str {
+    match state {
+        JobState::Done => "done",
+        JobState::Failed { .. } => "failed",
+        JobState::Cancelled { .. } => "cancelled",
+        _ => "total",
+    }
+}
+
 impl EventSink for Router {
     fn emit(&self, s: &JobSnapshot) {
         let job_id = s.id.0;
@@ -214,6 +224,12 @@ impl EventSink for Router {
             let sink = route.sink.clone();
             if s.state.is_terminal() {
                 routes.remove(&job_id);
+                // The slowest jobs go to the report's Performance section: the static kind and how it ended, never the title or subject.
+                paddock_diag::perf::record_phase(
+                    &format!("job:{}", s.kind.0),
+                    terminal_word(&s.state),
+                    std::time::Duration::from_millis(s.elapsed_ms),
+                );
             }
             (sink, event)
         };
@@ -446,6 +462,63 @@ mod tests {
         for _ in 0..16 {
             tokio::task::yield_now().await;
         }
+    }
+
+    /// A finished job reaches the report's Performance section by its kind and outcome, never by its title or subject.
+    #[test]
+    fn a_finished_job_is_recorded_for_the_performance_section_without_its_title() {
+        use paddock_diag::perf::{Global, PerfSource};
+        let router = Router { routes: Mutex::default() };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        for (id, state, word, ms) in [
+            (901, JobState::Done, "done", 7_000_001u64),
+            (
+                902,
+                JobState::Failed {
+                    message: "boom".into(),
+                    limit: None,
+                },
+                "failed",
+                7_000_002,
+            ),
+            (
+                903,
+                JobState::Cancelled {
+                    reason: CancelReason::User,
+                },
+                "cancelled",
+                7_000_003,
+            ),
+        ] {
+            let (sink, _events) = collector();
+            router.route(id, sink);
+            router.emit(&JobSnapshot {
+                id: paddock_jobs::JobId(id),
+                kind: paddock_jobs::JobKind::new("zz-perf-test"),
+                title: "Opening PLANTED-TITLE-MARKER".into(),
+                subject: Some("PLANTED-SUBJECT-MARKER.log".into()),
+                state,
+                seq: 1,
+                elapsed_ms: ms,
+                eta_ms: None,
+                cancellable: false,
+                not_cancellable_reason: None,
+            });
+            let (_, slowest) = Global.snapshot(now);
+            assert!(
+                slowest
+                    .iter()
+                    .any(|e| e.op == "job:zz-perf-test" && e.phase == word && e.duration_ms == ms),
+                "{word}: {slowest:?}"
+            );
+        }
+        let (_, slowest) = Global.snapshot(now);
+        assert!(!format!("{slowest:?}").contains("MARKER"));
+        let running = JobState::Running { phase: None };
+        assert_eq!(terminal_word(&running), "total");
     }
 
     #[tokio::test(start_paused = true)]

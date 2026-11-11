@@ -234,6 +234,7 @@ pub fn shell<R: Runtime>(place: Place) -> Builder<R> {
             app.manage(quit::PendingAsk::default());
             app.manage(quit::MenuQuit::default());
             pitwall_setup(app, installed);
+            paddock_diag::perf::startup_phase("app-setup");
             // The chat (the `chat` feature), only in the installed app: a test composes nothing that reaches the user's
             // folders or other apps (ER-14).
             if chat_switch::CHAT_ENABLED && installed {
@@ -493,6 +494,7 @@ fn diagnostics_setup<R: Runtime>(app: &AppHandle<R>) -> Result<paddock_diag::tau
     for section in report::sections(app, data, &app_logs) {
         setup = setup.section(section);
     }
+    setup = setup.section(std::sync::Arc::new(paddock_diag::perf::PerformanceSection::new()));
     if let Some(handle) = LOG.get() {
         setup = setup.log(handle.clone());
     }
@@ -502,9 +504,16 @@ fn diagnostics_setup<R: Runtime>(app: &AppHandle<R>) -> Result<paddock_diag::tau
 /// Starts the app.
 pub fn run() {
     // First: the shared crates' log lines (the start's error among them) reach Pitwall's daily log file (paddock-log).
+    paddock_diag::perf::startup_begin();
     let _log = paddock_shell::logging::install(&AppIdentity::new(APP_ID, APP_NAME, VERSION));
     if let Some(handle) = &_log {
         let _ = LOG.set(handle.clone());
+    }
+    paddock_diag::perf::startup_phase("logging");
+    // The slowest operations of the last run (the report's Performance section) survive a crash in the data folder.
+    if let Some(data) = app_state::data_dir() {
+        log::info!("performance history: {:?}", paddock_diag::perf::init(&data));
+        paddock_diag::perf::startup_phase("performance-history");
     }
     let cwd = std::env::current_dir().ok();
     let launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &[]);

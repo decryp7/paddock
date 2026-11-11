@@ -3222,6 +3222,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "sysinfo 0.39.6",
  "tauri",
  "zip",
 ]
