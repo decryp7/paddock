@@ -2,6 +2,8 @@
 // the judges that turn those snapshots into pass/fail with evidence. No I/O, no clock: the orchestrator (run.mjs) collects the
 // snapshots and the tests here feed it text. Process identity is pid plus start time (rule 53), never a bare pid.
 
+import { deriveVerdict } from './verdict.mjs';
+
 /**
  * Parses `ps -axww -o pid=,ppid=,etime=,lstart=,command=` (macOS). etime is [[dd-]hh:]mm:ss; `lstart` is the process's start time as
  * ps prints it ("Fri Oct 30 14:25:12 2026", absent in older captures), which with the pid identifies a process (rule 53).
@@ -42,7 +44,15 @@ function executableOf(command, bundleDir) {
 export function instancesOf(procs, spec, bundleDir) {
   const exe = `${bundleDir}/Contents/MacOS/${spec.name}`;
   const re = spec.argsPattern ? new RegExp(spec.argsPattern) : null;
-  return procs.filter((p) => executableOf(p.command, bundleDir) === exe && (!re || re.test(p.command.slice(exe.length))));
+  // The SMAppService agent (Start at login on) shows in ps as a bare `dyno-agent run`, with no bundle path. It counts only when launchd
+  // itself reports the spec's `loginJob` with this very pid (identity from launchctl, never the name alone).
+  const loginPid = spec.loginJob ? procs.jobs?.[spec.loginJob]?.pid ?? null : null;
+  return procs.filter((p) => {
+    const first = p.command.split(/\s/)[0];
+    const isBare = loginPid !== null && p.pid === loginPid && first === spec.name;
+    const rest = isBare ? p.command.slice(first.length) : p.command.slice(exe.length);
+    return (executableOf(p.command, bundleDir) === exe || isBare) && (!re || re.test(rest));
+  });
 }
 
 /** Names of the config's processes that run from the bundle in this snapshot, with their pids: the compact evidence line. */
@@ -83,10 +93,16 @@ export function judgeSnapshot(procs, config, bundleDir, want) {
     for (const p of found) {
       const viaApp = (spec.parents ?? ['app']).includes('app') && appPids.has(p.ppid);
       const viaLaunchd = (spec.parents ?? []).includes('launchd') && want.loginService === true && p.ppid === 1;
+      // The app's own launchd job (Dyno ADR 0026: `net.decryptology.dyno.agent.ondemand`, bootstrapped even with Start at login off):
+      // launchd is a legal parent only when launchd itself reports that job with this very pid (identity, never "ppid is 1").
+      const jobPid = spec.parentJob ? procs.jobs?.[spec.parentJob]?.pid ?? null : null;
+      const loginJobPid = spec.loginJob ? procs.jobs?.[spec.loginJob]?.pid ?? null : null;
+      const viaLoginJob = want.loginService === true && p.ppid === 1 && loginJobPid === p.pid;
+      const viaJob = (Boolean(spec.parentJob) && p.ppid === 1 && jobPid === p.pid) || viaLoginJob;
       checks.push({
         id: `parent:${spec.name}:${p.pid}`,
-        ok: viaApp || viaLaunchd,
-        detail: `${spec.name} pid ${p.pid} has parent pid ${p.ppid}: ${viaApp ? 'the app' : viaLaunchd ? 'launchd (Launch at login is on)' : 'not allowed (expected the app' + (want.loginService ? ' or launchd' : '') + ')'}`,
+        ok: viaApp || viaLaunchd || viaJob,
+        detail: `${spec.name} pid ${p.pid} has parent pid ${p.ppid}: ${viaApp ? 'the app' : viaLaunchd ? 'launchd (Launch at login is on)' : viaJob ? `launchd, as the job ${viaLoginJob ? spec.loginJob : spec.parentJob} (launchd reports pid ${viaLoginJob ? loginJobPid : jobPid})` : 'not allowed (expected the app' + (want.loginService ? ' or launchd' : '') + (spec.parentJob && p.ppid === 1 ? `; launchd does not report job ${spec.parentJob} with pid ${p.pid}` : '') + ')'}`,
       });
     }
   }
@@ -142,8 +158,17 @@ export function judgeWindow(snapshots, config, bundleDir, want) {
  * Orphans after Quit: any process of the app that is still alive, with its parent. After a Quit nothing may remain, whoever the
  * parent is (an orphan has ppid 1).
  */
-export function orphansAfterQuit(procs, config, bundleDir) {
-  return config.processes.flatMap((spec) => instancesOf(procs, spec, bundleDir).map((p) => ({ name: spec.name, pid: p.pid, ppid: p.ppid, etime: p.etime, orphan: p.ppid === 1 })));
+export function orphansAfterQuit(procs, config, bundleDir, want = {}) {
+  return config.processes.flatMap((spec) =>
+    instancesOf(procs, spec, bundleDir)
+      // Start at login on: the agent that launchd supervises (the login job, with this pid) is expected to survive Quit.
+      .filter((p) => !(want.loginService === true && spec.loginJob && procs.jobs?.[spec.loginJob]?.pid === p.pid))
+      .map((p) => ({ name: spec.name, pid: p.pid, ppid: p.ppid, etime: p.etime, orphan: p.ppid === 1 })));
+}
+
+/** The supervised agents that survive Quit with the login service on, as `name pid (job label)`: evidence that the survivor is the supervised one. */
+export function supervisedSurvivors(procs, config, bundleDir) {
+  return config.processes.flatMap((spec) => (spec.loginJob ? instancesOf(procs, spec, bundleDir).filter((p) => procs.jobs?.[spec.loginJob]?.pid === p.pid).map((p) => `${spec.name} pid ${p.pid} (launchd job ${spec.loginJob})`) : []));
 }
 
 /** `launchctl print gui/<uid>/<label>` to { state, pid, program } (any field null when the job is not loaded or the text lacks it). */
@@ -157,9 +182,11 @@ export function parseLaunchctlPrint(text) {
 /**
  * The discovery file (agent.json and the like) against the live helper instances: the pid it names must be one of them, and a
  * file that names a dead pid is stale. `content` null: the file is absent.
+ * `helperSpec` is the helper's full process spec from the config (with its `loginJob`/`parentJob`): the helper started by launchd or SMAppService shows in
+ * ps as a bare `dyno-agent run`, and counts only through that spec and `procs.jobs`; without it the state file of a launchd-run helper read as stale.
  * @returns {{present:boolean, pid:number|null, live:boolean, stale:boolean}}
  */
-export function judgeStateFile(content, procs, spec, bundleDir) {
+export function judgeStateFile(content, procs, spec, bundleDir, helperSpec = { name: spec.helper }) {
   if (content == null || content === '') return { present: false, pid: null, live: false, stale: false };
   let pid = null;
   try {
@@ -168,19 +195,28 @@ export function judgeStateFile(content, procs, spec, bundleDir) {
   } catch {
     pid = null;
   }
-  const helper = { name: spec.helper };
-  const live = pid !== null && instancesOf(procs, helper, bundleDir).some((p) => p.pid === pid);
+  const live = pid !== null && instancesOf(procs, helperSpec, bundleDir).some((p) => p.pid === pid);
   return { present: true, pid, live, stale: !live };
 }
 
-/** The step list of a run to Markdown: a table of pass/fail per step, then each step's evidence. */
+/**
+ * The step list of a run to Markdown: the derived verdict (verdict.mjs: PASS only when every required step passed), the build binding in the
+ * header, a table per step, then each step's evidence. `run.required` is the manifest's list (manifest.mjs); without it the run is INCOMPLETE.
+ */
 export function renderResult(run) {
-  const mark = (s) => ({ pass: 'PASS', fail: 'FAIL', skip: 'SKIP', manual: 'MANUAL', info: 'INFO' })[s] ?? s.toUpperCase();
+  const mark = (s) => ({ pass: 'PASS', fail: 'FAIL', skip: 'SKIP', manual: 'MANUAL', info: 'INFO', 'not-measured': 'NOT MEASURED', 'check-broken': 'CHECK BROKEN' })[s] ?? s.toUpperCase();
+  const v = deriveVerdict({ steps: run.steps, required: run.required ?? [] });
+  const partial = run.partial ? ' (partial run: not a release verdict)' : '';
   const lines = [
     `# VM start check: ${run.app} ${run.version ?? ''}`.trimEnd(),
     '',
-    `- Result: **${run.steps.some((s) => s.status === 'fail') ? 'FAIL' : 'PASS'}**${run.steps.some((s) => s.status === 'manual') ? ' (manual steps are listed below and are not part of this verdict)' : ''}`,
+    `- Result: **${v.verdict}**${partial}${run.steps.some((s) => s.status === 'manual') ? ' (manual steps are listed below and are not part of this verdict)' : ''}`,
+    ...(v.missing.length ? [`- Missing: ${v.missing.map((m) => `${m.id} (${m.why})`).join('; ')}`] : []),
+    ...(v.broken.length ? [`- Checks that broke (not a product failure): ${v.broken.map((s) => s.title).join('; ')}`] : []),
     `- Installer: ${run.installer}`,
+    ...(run.installerSha256 ? [`- Installer sha256: \`${run.installerSha256}\``] : []),
+    ...(run.source ? [`- Source: ${run.source}`] : []),
+    ...(run.expectedCommit ? [`- Expected build commit: \`${run.expectedCommit}\``] : []),
     `- Guest: ${run.guest}`,
     `- Started: ${run.started}`,
     `- Tool: scripts/vm-smoke (commit ${run.commit ?? 'unknown'})`,
@@ -192,7 +228,7 @@ export function renderResult(run) {
   lines.push('');
   run.steps.forEach((s, i) => {
     lines.push(`## ${i + 1}. ${s.title}: ${mark(s.status)}`, '');
-    for (const c of s.checks ?? []) lines.push(`- ${c.ok ? 'ok' : 'FAIL'}: ${c.detail}`);
+    for (const c of s.checks ?? []) lines.push(`- ${c.info ? 'info' : c.ok ? 'ok' : c.kind === 'check' ? 'CHECK BROKEN' : 'FAIL'}: ${c.detail}`);
     if (s.evidence?.length) lines.push('', '```', ...s.evidence, '```');
     lines.push('');
   });

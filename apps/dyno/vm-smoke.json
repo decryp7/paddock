@@ -1,5 +1,5 @@
 {
-  "$comment": "The processes Dyno may start, for scripts/vm-smoke (docs: scripts/vm-smoke/README.md). Each process is Contents/MacOS/<name> of the installed bundle. parents: who may be its parent (app = the app process; launchd = parent pid 1, allowed only while Launch at login is on). argsPattern keeps the CLI calls of the check itself (dyno-agent status) out of the count. stateFiles name the discovery file the app finds its helper by: the pid in it must be the one live helper, and it is gone after Quit. ready: a command that exits 0 once the helper answers.",
+  "$comment": "The processes Dyno may start, for scripts/vm-smoke (docs: scripts/vm-smoke/README.md). Each process is Contents/MacOS/<name> of the installed bundle. parents: who may be its parent (app = the app process; launchd = parent pid 1, allowed only while Launch at login is on). argsPattern keeps the CLI calls of the check itself (dyno-agent status) out of the count. stateFiles name the discovery file the app finds its helper by: the pid in it must be the one live helper, and it is gone after Quit unless Start at login is on (launchd then keeps the agent, and its file, alive). loginJob: the SMAppService job whose agent shows in ps as a bare `dyno-agent run`; it is identified by `launchctl print` (the pid), and it is expected to survive Quit while the login service is on. ready: a command that exits 0 once the helper answers.",
   "id": "dyno",
   "app": "Dyno",
   "bundle": "Dyno.app",
@@ -25,6 +25,8 @@
       "role": "helper",
       "max": 1,
       "argsPattern": "^ run( |$)",
+      "parentJob": "net.decryptology.dyno.agent.ondemand",
+      "loginJob": "net.decryptology.dyno.agent",
       "parents": [
         "app",
         "launchd"
@@ -47,6 +49,7 @@
   },
   "loginService": {
     "label": "net.decryptology.dyno.agent",
+    "defaultOn": true,
     "on": null,
     "off": null,
     "status": null,
