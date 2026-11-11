@@ -2,7 +2,6 @@
 //! inflated while the header is read, so a file of a few hundred kilobytes can ask for gigabytes before any size check. This test
 //! binary counts every allocation of the process and holds the whole preparation of such files to a few tens of megabytes.
 //! It is its own binary so that its counting allocator sees nothing else.
-#![cfg(feature = "chat")]
 // A counting allocator is `unsafe impl GlobalAlloc` by definition: this test binary is the one place that needs it.
 #![allow(unsafe_code, clippy::unwrap_used, clippy::expect_used)]
 
@@ -66,7 +65,7 @@ fn chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
     out
 }
 
-/// A small, valid 8 x 8 PNG with a chunk of `kind` holding `data` after its header; the profile is `mib` MiB of one byte.
+/// A small, valid 8 x 8 PNG with an iCCP colour profile after its header; the profile inflates to `mib` MiB of the byte 0x41.
 fn png_with_profile(mib: usize) -> Vec<u8> {
     let zeros = vec![0x41u8; mib << 20];
     let z = miniz_oxide::deflate::compress_to_vec_zlib(&zeros, 9);

@@ -82,7 +82,7 @@ const SCROLL_STICK_PX = 24;
           <button type="button" class="pd-btn pd-btn--sm" data-testid="assistant-retry" (click)="store.load()">{{ t.retry }}</button>
         </div>
       } @else if (!store.turns().length && store.isLoaded()) {
-        <div class="empty-state" data-testid="assistant-empty">
+        <div class="empty-state" [class.tight]="short() && (!!store.failure() || store.attached().length > 0)" data-testid="assistant-empty">
           @if (emptyTitle(); as title) {
             <pd-glyph class="empty-icon" name="chat" [size]="22" />
             <p class="empty-title" data-testid="assistant-empty-title">{{ title }}</p>
@@ -110,7 +110,7 @@ const SCROLL_STICK_PX = 24;
                   @let chip = chipOf(a);
                   <li class="chip static file" data-testid="assistant-turn-file" [attr.title]="chipTitle(chip)">
                     @if (thumbOf(a.sha256, chip); as src) {
-                      <img class="thumb turn-thumb" [src]="src" [alt]="chip.label" data-testid="assistant-turn-thumb" />
+                      <img class="thumb turn-thumb" [src]="src" alt="" data-testid="assistant-turn-thumb" />
                     } @else {
                       <pd-glyph [name]="glyphOf(a)" [size]="14" />
                     }
@@ -259,6 +259,10 @@ const SCROLL_STICK_PX = 24;
           [attr.aria-label]="t.files"
           data-testid="assistant-files"
         >
+          @if (!short() && trayOverflows()) {
+            <!-- A tray that scrolls says how many it holds (the count is not a control here: only a short pane folds). -->
+            <li class="summary-item"><span class="chip static summary-count" data-testid="assistant-files-count">{{ filesCount() }}</span></li>
+          }
           @if (short() && (trayOverflows() || filesOpen())) {
             <li class="summary-item">
               <button
@@ -279,7 +283,7 @@ const SCROLL_STICK_PX = 24;
           @for (chip of store.attached(); track chip.attachment.sha256) {
             <li class="chip file" [class.has-thumb]="!!thumbOf(chip.attachment.sha256, chip)" data-testid="assistant-file" [attr.title]="chipTitle(chip)">
               @if (thumbOf(chip.attachment.sha256, chip); as src) {
-                <img class="thumb" [src]="src" [alt]="chip.label" data-testid="assistant-file-thumb" />
+                <img class="thumb" [src]="src" alt="" data-testid="assistant-file-thumb" />
               } @else {
                 <pd-glyph [name]="glyphOf(chip.attachment)" [size]="14" />
               }
@@ -523,8 +527,8 @@ const SCROLL_STICK_PX = 24;
     .files-tray.thumbs { max-height: 72px; }
     .files-tray.thumbs.open { max-height: 72px; }
     :host(.short) .files-tray.thumbs.folded { max-height: 54px; }
-    /* In a short pane the empty state keeps its title and gives up its hint, so no half line shows above a banner. */
-    :host(.short) .empty-state .hint { display: none; }
+    /* In a short pane with a banner or files waiting the empty state keeps its title and gives up its hint, so no half line shows above them. */
+    .empty-state.tight .hint { display: none; }
     .image-block .pd-btn { margin-left: var(--pd-space-1); }
     :host(.short) .chip.has-thumb .thumb { width: 20px; height: 20px; }
     .image-block { display: flex; align-items: flex-start; gap: var(--pd-space-2); margin: 0; font-size: var(--pd-text-label); color: var(--pd-text); overflow-wrap: anywhere; }

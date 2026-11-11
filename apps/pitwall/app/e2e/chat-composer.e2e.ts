@@ -109,6 +109,8 @@ test.describe('chat composer', () => {
     // Tall enough, it opens to two whole rows of 32 px thumbnails (72 px with its padding), the rest scrolls with the fade.
     await page.setViewportSize({ width: 1440, height: 900 });
     await expect(chat.getByTestId('assistant-files')).toHaveClass(/scrolls/);
+    // A tray that scrolls says how many it holds.
+    await expect(chat.getByTestId('assistant-files-count')).toHaveText('16 images');
     const tray = (await chat.getByTestId('assistant-files').boundingBox())!;
     expect(Math.round(tray.height)).toBe(72);
     const edge = tray.y + tray.height;

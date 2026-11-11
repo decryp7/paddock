@@ -53,7 +53,7 @@ optional: nothing reads it.
   photo upright, shrinks it to what the chosen model's vision file takes, and writes it again without its location, camera and
   other metadata; nothing is fetched and nothing leaves this computer. Only models with a vision file read images: for any
   other the chat says so in words, offers a downloaded vision model to switch to, and keeps Send off while an image waits for
-  a model that cannot read it. Images stay in a saved chat; a model without vision is not sent the older ones, and the turn
+  a model that cannot read it. Images stay in a saved chat, but their file names are not saved: after Pitwall restarts a sent image shows as "Image 640 × 480"; a model without vision is not sent the older ones, and the turn
   says so. The chat is still switched off in release builds until speech and the security review are done.
 - Report a problem (Help menu, command palette): a diagnostics zip you review file by file and save where you choose;
   nothing is sent. It holds the system facts, your settings, the recent logs of the app, the server and the command line,

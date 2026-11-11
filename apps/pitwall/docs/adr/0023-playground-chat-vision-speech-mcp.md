@@ -157,6 +157,7 @@ the text above:
   offers. A picture is refused for a model without vision with those words; Send stays off while a picture waits for one; the
   provider sends no picture to such a model and says so in the message's text. A request carries at most 16 pictures and 24 MiB of
   them, newest first, and says which older ones were left out.
+- An image's file name is kept only in the app's memory (the stored attachment has none), so a sent image shows its name until Pitwall restarts and then reads "Image 640 × 480".
 - A chip's thumbnail (160 px, a `data:` URL) is made in Rust, at attach and again by `chat_thumbnail` for a reopened chat.
 - Not done here: a picture's viewer (rule 45) and the real-model test with a tiny vision model (`PITWALL_LLAMA_E2E=1`), which
   need WP-12's harness; the engine's own token count of a picture replaces the meter's estimate (one token per 28 x 28 pixels).

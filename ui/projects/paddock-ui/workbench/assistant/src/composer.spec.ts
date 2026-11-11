@@ -264,10 +264,10 @@ describe('PdAssistant composer (ADR 0023 WP-4b)', () => {
       expect(r.all('[data-testid=assistant-failure-image-action]')).toHaveLength(0);
     });
 
-    it('gives a sent image its name for the alt text, and the tray scrolls on whole rows', async () => {
+    it("shows an image's name beside its thumbnail (so the thumbnail's alt is empty), and the tray scrolls on whole rows", async () => {
       const { r } = await open();
       await pick(r, [picture('rack-photo.png')]);
-      expect(r.one('[data-testid=assistant-file-thumb]').getAttribute('alt')).toBe('rack-photo.png');
+      expect(r.one('[data-testid=assistant-file-thumb]').getAttribute('alt')).toBe('');
       expect(r.one('[data-testid=assistant-files]').classList.contains('thumbs')).toBe(true);
     });
 
