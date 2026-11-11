@@ -256,6 +256,20 @@ describe('NotificationHost', () => {
       expect(el(f, '[data-cause=boom]').getAttribute('role')).toBe('alert');
     });
 
+    it('while held, at most the newest few newcomers show above the frozen set, and a line counts the rest', async () => {
+      const { f, list } = await boot([n('a'), n('b')]);
+      const mouse = pointer(f);
+      mouse.enter();
+      list.set([n('a'), n('b'), n('c1'), n('c2'), n('c3'), n('c4'), n('c5')]);
+      await flush(f);
+      expect(order(f)).toEqual(['c5', 'c4', 'c3', 'b', 'a']);
+      expect(el(f, '[data-testid=notification-more]').textContent).toContain('+2 more in Notifications');
+      await mouse.leave();
+      await flush(f);
+      expect(order(f)).toEqual(['c5', 'c4', 'c3']);
+      expect(f.nativeElement.querySelector('[data-testid=notification-more]')).toBeNull();
+    });
+
     it('while the pointer is in the stack, a toast that goes away still goes away at once', async () => {
       const { f, list } = await boot([n('a'), n('b')]);
       pointer(f).enter();

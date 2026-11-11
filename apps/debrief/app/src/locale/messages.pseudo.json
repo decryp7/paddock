@@ -1581,6 +1581,7 @@
     "health.chip.technical": "⟦Ţééçĥñîîçááļ ðéţááîîļš⟧",
     "health.host.details": "⟦Ðééţááîîļš⟧",
     "health.host.dismiss": "⟦Ðîîšɱîîšš ñööţîƒîîçááţîîöñ⟧",
+    "health.host.more": "⟦+{$INTERPOLATION} ɱööŕéé îîñ Ñöţîîƒîîçááţîööñš⟧",
     "health.host.region": "⟦Ñööţîîƒîîçáţîîööñš⟧",
     "health.repair.install": "⟦ÎÎñšţááļļ⟧",
     "health.repair.liftQuarantine": "⟦ÅÅļļööŵ ááĝáîîñ⟧",

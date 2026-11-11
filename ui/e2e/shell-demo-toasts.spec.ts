@@ -69,8 +69,10 @@ test('in a small window a click beside or between the toasts reaches the page', 
   await page.setViewportSize({ width: 400, height: 700 });
   await app.frame.open();
   await page.getByRole('region', { name: 'Notifications' }).waitFor({ state: 'attached' });
-  await page.getByRole('button', { name: 'Notify three times' }).click();
-  await expect(page.getByTestId('notification').first()).toBeVisible();
+  // Two different causes (a greeting and the reset's own message), so there are two toasts and a gap between them.
+  await page.getByRole('button', { name: 'Say hello' }).click();
+  await page.getByRole('button', { name: 'Reset greetings', exact: true }).click();
+  await expect(page.getByTestId('notification')).toHaveCount(2);
   const hit = await page.evaluate(() => {
     const stack = document.querySelector('[data-testid=notification-stack]') as HTMLElement;
     const toasts = Array.from(document.querySelectorAll('[data-testid=notification]')) as HTMLElement[];
@@ -82,10 +84,13 @@ test('in a small window a click beside or between the toasts reaches the page', 
       toastWidth: t.width,
       // The same row as a toast, in the stack's own width but left of the toast.
       beside: owner(s.left + 2, t.top + t.height / 2),
-      // Between two toasts, when there are two on screen.
-      between: toasts.length > 1 ? owner(t.left + t.width / 2, t.bottom + 4) : false,
+      // Between the two toasts: in the gap just below the first.
+      between: owner(t.left + t.width / 2, t.bottom + 4),
+      toasts: toasts.length,
     };
   });
+  // The measurement counts only with two toasts on screen (a gap needs two).
+  expect(hit.toasts, JSON.stringify(hit)).toBeGreaterThanOrEqual(2);
   expect(hit.stackWidth, JSON.stringify(hit)).toBeGreaterThan(hit.toastWidth);
   expect(hit.beside, JSON.stringify(hit)).toBe(false);
   expect(hit.between, JSON.stringify(hit)).toBe(false);

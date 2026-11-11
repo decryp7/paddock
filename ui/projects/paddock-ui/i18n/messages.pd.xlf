@@ -1385,6 +1385,9 @@
       <trans-unit id="pd.notifications.mark-read" datatype="html">
         <source>Mark read: <x id="title"/></source>
       </trans-unit>
+      <trans-unit id="pd.notifications.more" datatype="html">
+        <source>+<x id="count"/> more in Notifications</source>
+      </trans-unit>
       <trans-unit id="pd.notifications.no-answer" datatype="html">
         <source>The notification centre did not answer.</source>
       </trans-unit>

@@ -29,13 +29,19 @@ interface Timer {
  * what goes away (dismissed, resolved) leaves at once. A press is two events, and a layout change between them would send the
  * click to another element. The hold follows the DOM's own answer (focus inside, `:hover`), read after each change and a
  * short grace after the pointer or focus leaves, so a missed event can never keep the stack held. The stack itself takes no
- * clicks (only the toasts do), so the page beside and between them stays reachable.
+ * clicks (only the toasts do), so the page beside and between them stays reachable. While held, at most `MAX_VISIBLE` newcomers
+ * show above the frozen set and a line says how many more wait ("+N more in Notifications"). When the hovered toast is removed
+ * the deferred drops may apply on the next render if the browser's `:hover` is still stale (it updates on the next pointer
+ * move): the hold only ever errs towards letting go.
  */
 @Component({
   selector: 'pd-notification-host',
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="pd-stack" data-testid="notification-stack" role="region" [attr.aria-label]="t.toasts" aria-live="polite" (pointerover)="enter()" (focusin)="enter()" (pointerout)="leaving()" (focusout)="leaving()">
+      @if (more() > 0) {
+        <div class="pd-more" data-testid="notification-more" role="status">{{ t.more(more()) }}</div>
+      }
       @for (n of items(); track n.cause) {
         <div
           class="pd-toast"
@@ -87,6 +93,7 @@ interface Timer {
     [data-severity='success'] .pd-mark { background: var(--pd-success); }
     [data-severity='warning'] .pd-mark { background: var(--pd-warning); border-radius: 1px; transform: rotate(45deg); }
     [data-severity='error'] .pd-mark, [data-severity='critical'] .pd-mark { background: var(--pd-danger); border-radius: 1px; }
+    .pd-more { pointer-events: auto; align-self: flex-end; padding: var(--pd-space-1) var(--pd-space-2); border-radius: var(--pd-radius-control); background: var(--pd-surface-3); color: var(--pd-text-muted); font-size: var(--pd-text-caption); box-shadow: var(--pd-shadow-2); }
     .pd-title { overflow-wrap: anywhere; font-weight: var(--pd-weight-semibold); }
     .pd-count { color: var(--pd-text-muted); font-weight: var(--pd-weight-regular); font-size: var(--pd-text-caption); }
     .pd-body { color: var(--pd-text-muted); line-height: var(--pd-lh-body); overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
@@ -125,6 +132,7 @@ export class PdNotificationHost {
     toasts: $localize`:@@pd.notifications.toasts:Notifications`,
     dismissToast: $localize`:@@pd.notifications.dismiss-toast:Dismiss notification`,
     details: $localize`:@@pd.notifications.details:Details`,
+    more: (count: number) => $localize`:@@pd.notifications.more:+${count}:count: more in Notifications`,
   };
   /** The undo snack bar's height, when one is open: this host stacks above it. */
   protected readonly area = inject(ToastArea);
@@ -138,14 +146,19 @@ export class PdNotificationHost {
    * What is shown, newest first. Free: the newest `MAX_VISIBLE`. Held: what was on screen (still posted, updated in
    * place, in its order) with every newcomer on top; only the drop past the limit and the re-order wait for the release.
    */
-  protected readonly items = computed(() => {
+  private readonly view = computed(() => {
     const merged = this.merged();
     const frozen = this.frozen();
-    if (frozen === null) return merged.slice(-MAX_VISIBLE).reverse();
+    if (frozen === null) return { shown: merged.slice(-MAX_VISIBLE).reverse(), more: 0 };
     const kept = frozen.map((c) => merged.find((n) => n.cause === c)).filter((n): n is HostNotification => !!n);
     const newcomers = merged.filter((n) => !frozen.includes(n.cause));
-    return [...kept, ...newcomers].reverse();
+    // The newcomers above the frozen set are limited too: the newest `MAX_VISIBLE`, and a line counts the rest.
+    const shown = newcomers.slice(-MAX_VISIBLE);
+    return { shown: [...kept, ...shown].reverse(), more: newcomers.length - shown.length };
   });
+  protected readonly items = computed(() => this.view().shown);
+  /** While held: how many newer toasts are waiting beyond the limit (they are in the notification centre). */
+  protected readonly more = computed(() => this.view().more);
   private readonly timed = computed(() => this.items().some((n) => !persists(n)));
   private readonly opened = signal<ReadonlySet<string>>(new Set());
   /** An action that failed: why, until the next try. */

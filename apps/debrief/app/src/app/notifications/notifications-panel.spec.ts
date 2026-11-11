@@ -369,14 +369,15 @@ describe('notification toasts in the host', () => {
     fake.push(event([b, a], b));
     f.detectChanges();
     actions.run.mockResolvedValueOnce('did not work');
-    // The newest toast is first: `a` (the older one) is the second.
-    at(all<HTMLButtonElement>(f, '[data-testid=notification-action-primary]'), 1).click();
+    // The newest toast is first, so pick the button inside the toast of `a` by its cause.
+    const primaryOf = (id: number) => el<HTMLButtonElement>(f, `[data-testid=notification][data-cause="fixture:${id}"] [data-testid=notification-action-primary]`);
+    primaryOf(1).click();
     await settle(f);
     f.detectChanges();
     expect(actions.run).toHaveBeenLastCalledWith(expect.objectContaining({ id: 1 }), { type: 'resetPlugin', pluginId: 'p' });
     expect(all(f, '[data-testid=notification]')).toHaveLength(2);
     expect(f.nativeElement.textContent).toContain('did not work');
-    at(all<HTMLButtonElement>(f, '[data-testid=notification-action-primary]'), 1).click();
+    primaryOf(1).click();
     await settle(f);
     f.detectChanges();
     expect(all(f, '[data-testid=notification]')).toHaveLength(1);

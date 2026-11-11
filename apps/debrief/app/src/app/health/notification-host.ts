@@ -15,7 +15,10 @@ import { HOLD_RELEASE_MS, HostAction, HostNotification, MAX_VISIBLE, mergeNotifi
  * resolved, muted) leaves at once. A press is two events, and a layout change between them would send the click to another
  * element. The hold follows the DOM's own answer (focus inside, `:hover`), read after each change and a short grace after the
  * pointer or focus leaves, so a missed event can never keep the stack held. The stack itself takes no clicks (only the toasts
- * do), so the page beside and between them stays reachable.
+ * do), so the page beside and between them stays reachable. While held, at most `MAX_VISIBLE` newcomers show above the frozen set
+ * and a line says how many more wait ("+N more in Notifications"). When the hovered toast is removed the deferred drops may apply
+ * on the next render if the browser's `:hover` is still stale (it updates on the next pointer move): the hold only ever errs
+ * towards letting go.
  */
 @Component({
   selector: 'debrief-notification-host',
@@ -25,6 +28,9 @@ import { HOLD_RELEASE_MS, HostAction, HostNotification, MAX_VISIBLE, mergeNotifi
   template: `
     <div class="stack" data-testid="notification-stack" role="region" aria-label="Notifications" i18n-aria-label="@@health.host.region" aria-live="polite"
          (pointerover)="enter()" (focusin)="enter()" (pointerout)="leaving()" (focusout)="leaving()">
+      @if (more() > 0) {
+        <div class="more" data-testid="notification-more" role="status" i18n="@@health.host.more">+{{ more() }} more in Notifications</div>
+      }
       @for (n of items(); track n.cause) {
         <div
           class="toast"
@@ -71,6 +77,7 @@ import { HOLD_RELEASE_MS, HostAction, HostNotification, MAX_VISIBLE, mergeNotifi
     .toast[data-severity='warning'] { border-left-color: var(--lvl-warn); }
     .toast[data-severity='error'] { border-left-color: var(--lvl-error); }
     .toast[data-severity='critical'] { border-left-color: var(--lvl-fatal); }
+    .more { pointer-events: auto; align-self: flex-end; padding: 4px 10px; border-radius: 6px; background: var(--bg-3); color: var(--muted); font-size: var(--fs-xs); box-shadow: var(--shadow); }
     .head { display: flex; align-items: center; gap: 8px; min-width: 0; }
     .title { overflow-wrap: anywhere; }
     .count { color: var(--muted); font-weight: 400; font-size: var(--fs-xs); }
@@ -92,14 +99,19 @@ export class NotificationHost {
    * What is shown, newest first. Free: the newest `MAX_VISIBLE`. Held: what was on screen (still posted, updated in place, in
    * its order) with every newcomer on top; only the drop past the limit and the re-order wait for the release.
    */
-  protected readonly items = computed(() => {
+  private readonly view = computed(() => {
     const merged = this.merged();
     const frozen = this.frozen();
-    if (frozen === null) return merged.slice(-MAX_VISIBLE).reverse();
+    if (frozen === null) return { shown: merged.slice(-MAX_VISIBLE).reverse(), more: 0 };
     const kept = frozen.map((c) => merged.find((n) => n.cause === c)).filter((n): n is HostNotification => !!n);
     const newcomers = merged.filter((n) => !frozen.includes(n.cause));
-    return [...kept, ...newcomers].reverse();
+    // The newcomers above the frozen set are limited too: the newest `MAX_VISIBLE`, and a line counts the rest.
+    const shown = newcomers.slice(-MAX_VISIBLE);
+    return { shown: [...kept, ...shown].reverse(), more: newcomers.length - shown.length };
   });
+  protected readonly items = computed(() => this.view().shown);
+  /** While held: how many newer toasts are waiting beyond the limit (they are in Notifications). */
+  protected readonly more = computed(() => this.view().more);
   private readonly opened = signal<ReadonlySet<string>>(new Set());
   /** An action that rejected: why, until the next try. */
   protected readonly failed = signal<Record<string, string>>({});

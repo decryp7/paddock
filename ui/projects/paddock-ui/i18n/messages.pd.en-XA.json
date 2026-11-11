@@ -462,6 +462,7 @@
     "pd.notifications.filter.unread": "⟦ÛÛñŕééááð⟧",
     "pd.notifications.mark-all-read": "⟦Ṁááŕķ ááļļ ŕééáð⟧",
     "pd.notifications.mark-read": "⟦Ṁááŕķ ŕééááð: {$title}⟧",
+    "pd.notifications.more": "⟦+{$count} ɱööŕéé îîñ Ñöţîîƒîîçááţîööñš⟧",
     "pd.notifications.no-answer": "⟦Ţĥéé ñööţîîƒîçááţîîööñ çéñţŕéé ðîîð ñööţ áñšŵééŕ.⟧",
     "pd.notifications.retry": "⟦Ŕééţŕý⟧",
     "pd.notifications.select": "⟦Šééļééçţ {$title}⟧",
