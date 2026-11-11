@@ -11,6 +11,7 @@
 //!   folder, which is per user and verified, never a shared fixed path.
 //! - [`write_atomic`]: the atomic replace under it, for files that are not JSON state; [`write_atomic_created`] where
 //!   the caller creates the temporary file (an owner-only, unshared file for a secret on Windows).
+//! - [`winpath`]: Windows paths without the verbatim `\\?\` prefix, in one place (`plain`, `for_tools`, `real*`, `same`).
 //!
 //! Tests use temporary folders only and never read or write the user's real folders.
 
@@ -21,6 +22,7 @@ mod error;
 mod folder;
 mod private;
 mod versioned;
+pub mod winpath;
 
 pub use app::AppId;
 pub use atomic::{write_atomic, write_atomic_created};
