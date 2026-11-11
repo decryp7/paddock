@@ -156,6 +156,7 @@ fn a_1_6_million_row_catalogue_is_read_within_the_query_budget() {
 }
 
 /// CPU time (user plus system, seconds) of this process so far.
+#[cfg(unix)]
 fn cpu_seconds() -> f64 {
     let mut u = std::mem::MaybeUninit::<libc::rusage>::zeroed();
     // SAFETY: getrusage fills the struct it is given; RUSAGE_SELF is always valid.
@@ -170,6 +171,7 @@ fn cpu_seconds() -> f64 {
 /// Measurement (docs/performance.md): the statements and CPU time of an idle store, a store of the samples that has
 /// built its catalogue and its index and is then left alone for `DEBRIEF_IDLE_S` seconds (default 130, two turns of the
 /// background loops' 60 s backstop). Run with `--ignored --nocapture`.
+#[cfg(unix)]
 #[test]
 #[ignore = "measurement: waits DEBRIEF_IDLE_S seconds (default 130); run with --ignored --nocapture"]
 fn an_idle_store_statements_and_cpu() {

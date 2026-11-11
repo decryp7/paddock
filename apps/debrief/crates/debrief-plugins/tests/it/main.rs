@@ -5,10 +5,13 @@ mod common;
 #[path = "../../../debrief-plugin-windows/tests/it/support/synth_minidump.rs"]
 mod synth_minidump;
 
+// Measurements by hand that read the process's CPU time with getrusage (Unix only).
+#[cfg(unix)]
 mod capture_open;
 mod dumps;
 mod engine;
 mod evtx_corpus;
+#[cfg(unix)]
 mod evtx_idle;
 mod evtx_memory;
 mod formats_samples;
