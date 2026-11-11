@@ -26,6 +26,16 @@ impl Host {
 
     /// [`Host::start`] with the Unix socket in `socket_dir` (Linux: the user's runtime folder).
     pub fn start_at(data_dir: PathBuf, socket_dir: PathBuf, on_fatal: impl FnOnce(String) + Send + 'static) -> Result<Host, Error> {
+        Host::start_with(data_dir, socket_dir, ipc::ServeMode::System, on_fatal)
+    }
+
+    /// [`Host::start_at`] for a given [`ipc::ServeMode`]: the SYSTEM service, or the per-user engine.
+    pub fn start_with(
+        data_dir: PathBuf,
+        socket_dir: PathBuf,
+        mode: ipc::ServeMode,
+        on_fatal: impl FnOnce(String) + Send + 'static,
+    ) -> Result<Host, Error> {
         let protected = protect_installed_folder(&data_dir)?;
         std::fs::create_dir_all(&data_dir).map_err(|source| Error::Io {
             path: data_dir.display().to_string(),
@@ -55,7 +65,7 @@ impl Host {
         let ipc_tx = tx.clone();
         let stop_tx = tx.clone();
         runtime.spawn(async move {
-            if let Err(e) = ipc::serve(ipc_tx, socket_dir).await {
+            if let Err(e) = ipc::serve(ipc_tx, socket_dir, mode).await {
                 on_fatal(e);
                 let _ = stop_tx.send(Msg::Shutdown);
             }
@@ -127,11 +137,34 @@ fn protect_installed_folder(_: &std::path::Path) -> Result<Option<String>, Error
     Ok(None)
 }
 
+/// Where `run` keeps its data and whose engine it is (see [`run_foreground`]).
+#[cfg(windows)]
+fn engine_location(machine_dir: PathBuf) -> Result<(PathBuf, ipc::ServeMode), Error> {
+    if crate::platform::win_session::is_local_system() {
+        return Ok((machine_dir, ipc::ServeMode::System));
+    }
+    let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
+    let dir = pitcrew_core::service_paths::user_engine_dir(&env).ok_or(Error::Os {
+        what: "Finding the per-user engine's folder",
+        reason: "LOCALAPPDATA is not set".into(),
+    })?;
+    Ok((dir, ipc::ServeMode::User))
+}
+
+#[cfg(not(windows))]
+#[expect(clippy::unnecessary_wraps, reason = "the Windows version can fail")]
+fn engine_location(machine_dir: PathBuf) -> Result<(PathBuf, ipc::ServeMode), Error> {
+    Ok((machine_dir, ipc::ServeMode::System))
+}
+
 /// `run`: supervise in the foreground until Ctrl+C / SIGTERM (launchd stops agents with SIGTERM).
 pub fn run_foreground(data_dir: PathBuf) -> Result<(), Error> {
+    // On Windows, `run` as an ordinary user is the **per-user engine** (ADR 0004, second amendment): its data folder is the
+    // user's own and its pipe admits only that user. `run` as SYSTEM (the service's own entry is `service`) keeps the machine's.
+    let (data_dir, mode) = engine_location(data_dir)?;
     let socket_dir = crate::paths::socket_dir().unwrap_or_else(|| data_dir.clone());
     let (fatal_tx, fatal_rx) = std::sync::mpsc::channel::<String>();
-    let host = Host::start_at(data_dir, socket_dir, move |e| {
+    let host = Host::start_with(data_dir, socket_dir, mode, move |e| {
         let _ = fatal_tx.send(e);
     })?;
     let signals = tokio::runtime::Builder::new_current_thread()

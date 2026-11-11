@@ -17,6 +17,8 @@ pub struct LogWriter {
     file: Option<File>,
     size: u64,
     failed: bool,
+    /// Writes nothing anywhere (see [`LogWriter::discarding`]).
+    discard: bool,
 }
 
 impl LogWriter {
@@ -30,9 +32,23 @@ impl LogWriter {
             file: None,
             size: 0,
             failed: false,
+            discard: false,
         };
         w.reopen();
         w
+    }
+
+    /// A writer that keeps nothing and touches no file or folder: the log of a runner whose folder the service may not touch
+    /// (ADR 0004, second amendment). Its lines go to the service's own log instead.
+    pub fn discarding() -> Self {
+        LogWriter {
+            path: PathBuf::new(),
+            policy: RotationPolicy::default(),
+            file: None,
+            size: 0,
+            failed: false,
+            discard: true,
+        }
     }
 
     /// The file's path.
@@ -51,6 +67,9 @@ impl LogWriter {
     }
 
     fn reopen(&mut self) {
+        if self.discard {
+            return;
+        }
         if let Some(parent) = self.path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -69,6 +88,9 @@ impl LogWriter {
 
     /// Appends one line (a newline is added).
     pub fn write_line(&mut self, line: &str) {
+        if self.discard {
+            return;
+        }
         // Rotate first, so the newest line is always in the live file.
         if !self.policy.plan(self.size).is_empty() {
             self.rotate();
@@ -94,6 +116,9 @@ impl LogWriter {
 
     /// Rotates now, following the core's plan.
     pub fn rotate(&mut self) {
+        if self.discard {
+            return;
+        }
         let steps = self.policy.plan(self.size.max(self.policy.max_bytes + 1));
         self.file = None;
         let name = |n: u32| -> PathBuf {
@@ -166,5 +191,17 @@ mod tests {
         w.rotate();
         assert!(w.failed());
         let _ = std::fs::remove_file(&d);
+    }
+
+    #[test]
+    fn a_discarding_writer_touches_no_file_and_is_not_a_failure() {
+        let mut w = LogWriter::discarding();
+        w.write_line("kept nowhere");
+        w.supervisor(Timestamp(0), "kept nowhere either");
+        w.set_policy(RotationPolicy { max_bytes: 1, keep: 0 });
+        w.rotate();
+        assert!(!w.failed());
+        assert_eq!(w.path(), Path::new(""));
+        assert!(!Path::new("kept nowhere").exists());
     }
 }

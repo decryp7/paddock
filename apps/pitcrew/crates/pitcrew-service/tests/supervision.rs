@@ -30,6 +30,10 @@ fn open_guard() -> pitcrew_service::protected::FolderGuard {
     Arc::new(|_| Ok(()))
 }
 
+fn no_prepare() -> pitcrew_service::protected::PrepareHook {
+    Arc::new(|_| Ok(None))
+}
+
 fn fake_runner() -> PathBuf {
     static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     BUILT
@@ -75,13 +79,26 @@ impl Harness {
 
     /// `runner_toml` is appended to the runner's table (e.g. an `[runners.env]` table).
     fn with_runner_toml(test: &str, fake: &str, registered: bool, runner_toml: &str) -> Harness {
-        Harness::build(test, fake, registered, runner_toml, None, Box::new(OsLauncher), open_guard())
+        Harness::build(
+            test,
+            fake,
+            registered,
+            runner_toml,
+            None,
+            Box::new(OsLauncher),
+            open_guard(),
+            no_prepare(),
+        )
     }
 
     /// `state_json` is written as the service's `state.json` before it starts.
     #[allow(
         clippy::disallowed_methods,
         reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "a test harness: every part the supervisor is given is replaceable"
     )]
     fn build(
         test: &str,
@@ -91,6 +108,7 @@ impl Harness {
         state_json: Option<&str>,
         launcher: Box<dyn pitcrew_service::launcher::Launcher>,
         guard: pitcrew_service::protected::FolderGuard,
+        prepare: pitcrew_service::protected::PrepareHook,
     ) -> Harness {
         pitcrew_service::launch::set_stop_helper(PathBuf::from(env!("CARGO_BIN_EXE_pitcrew-service")));
         let root = std::env::temp_dir().join(format!("pitcrew-it-{test}-{}", std::process::id()));
@@ -122,6 +140,7 @@ impl Harness {
             program_gate: pitcrew_service::launcher::open_gate(),
             settle_runner_dir: Arc::new(|_| None),
             runner_folder_guard: guard,
+            prepare_runner_dir: prepare,
             data_dir: data,
             launcher,
             sources: Sources::public(),
@@ -433,7 +452,16 @@ fn a_service_account_runner_in_an_unprotected_folder_is_not_started() {
         OsLauncher,
         Box::new(|spec| Err(format!("{} can be changed by users", spec.dir.display()))),
     );
-    let mut h = Harness::build("guarded", "mode=idle\n", true, "", None, Box::new(guard), open_guard());
+    let mut h = Harness::build(
+        "guarded",
+        "mode=idle\n",
+        true,
+        "",
+        None,
+        Box::new(guard),
+        open_guard(),
+        no_prepare(),
+    );
     // The first start attempt can meet the runner's own version probe ("already runs outside Pitcrew"); the refusal shows on a retry.
     h.until("the refusal is shown", Duration::from_secs(5), |h| {
         h.status().problem.is_some_and(|p| p.contains("can be changed by users"))
@@ -457,7 +485,7 @@ fn a_runner_in_a_folder_a_user_can_change_is_refused_every_folder_request_with_n
     use pitcrew_core::hygiene::CacheLimits;
     let why = "is not a folder only administrators can change";
     let guard: pitcrew_service::protected::FolderGuard = Arc::new(move |dir| Err(format!("{} {why}", dir.display())));
-    let mut h = Harness::build("blocked", "mode=idle\n", true, "", None, Box::new(OsLauncher), guard);
+    let mut h = Harness::build("blocked", "mode=idle\n", true, "", None, Box::new(OsLauncher), guard, no_prepare());
     let markers = [
         h.runner_dir.join("work").join("job").join("keep.txt"),
         h.runner_dir.join("cache").join("entry").join("keep.bin"),
@@ -468,9 +496,21 @@ fn a_runner_in_a_folder_a_user_can_change_is_refused_every_folder_request_with_n
         std::fs::write(m, b"keep").unwrap();
     }
     let name = h.name.clone();
+    let evil = pitcrew_core::runner_config::ConfigEdit::Raw {
+        text: "log:\n  level: debug\n".into(),
+    };
+    // Every request that makes the service touch a runner's folder, and the ones that look like they might: each is sent for the
+    // blocked runner and must be refused or touch nothing.
     let requests = vec![
         Request::CleanDisk { runner: name.clone() },
         Request::CacheClean {
+            runner: name.clone(),
+            limits: CacheLimits {
+                max_mb: 0,
+                max_age_days: 1,
+            },
+        },
+        Request::CachePreview {
             runner: name.clone(),
             limits: CacheLimits {
                 max_mb: 0,
@@ -485,11 +525,53 @@ fn a_runner_in_a_folder_a_user_can_change_is_refused_every_folder_request_with_n
             after: None,
             limit: 10,
         },
+        Request::SearchLogs {
+            runner: name.clone(),
+            query: "x".into(),
+            limit: 10,
+        },
         Request::Disk { runner: name.clone() },
         Request::GetRunnerConfig { runner: name.clone() },
+        Request::PreviewRunnerConfig {
+            runner: name.clone(),
+            edit: evil.clone(),
+        },
+        Request::SaveRunnerConfig {
+            runner: name.clone(),
+            edit: evil,
+            base: String::new(),
+        },
+        Request::Register {
+            runner: name.clone(),
+            server_url: "https://git.example.com".into(),
+            token: pitcrew_core::protocol::Secret::new("t").unwrap(),
+            display_name: None,
+        },
+        Request::Metrics {
+            runner: Some(name.clone()),
+            range_hours: 1,
+        },
         Request::Start { runner: name.clone() },
+        Request::Restart { runner: name.clone() },
     ];
+    let snapshot = |dir: &std::path::Path| -> Vec<(String, u64)> {
+        let mut out = vec![];
+        let mut todo = vec![dir.to_path_buf()];
+        while let Some(d) = todo.pop() {
+            for e in std::fs::read_dir(&d).unwrap().flatten() {
+                let m = e.metadata().unwrap();
+                out.push((e.path().display().to_string(), if m.is_dir() { 0 } else { m.len() }));
+                if m.is_dir() {
+                    todo.push(e.path());
+                }
+            }
+        }
+        out.sort();
+        out
+    };
+    let before = snapshot(&h.runner_dir);
     for r in requests {
+        assert!(r.folder_runner().is_some(), "{r:?} does not name a folder runner");
         let kind = r.kind();
         match h.ask(r) {
             Response::Error(e) => {
@@ -498,6 +580,31 @@ fn a_runner_in_a_folder_a_user_can_change_is_refused_every_folder_request_with_n
             }
             other => panic!("{kind} was answered: {other:?}"),
         }
+        assert_eq!(
+            snapshot(&h.runner_dir),
+            before,
+            "{kind} changed something in the blocked runner's folder"
+        );
+    }
+    // The requests that name the runner but do not touch its folder leave it alone too.
+    for r in [
+        Request::Stop { runner: name.clone() },
+        Request::Drain { runner: name.clone() },
+        Request::Resume { runner: name.clone() },
+        Request::History {
+            runner: name.clone(),
+            days: 1,
+            utc_offset_minutes: 0,
+        },
+        Request::Processes { runner: name.clone() },
+    ] {
+        let kind = r.kind();
+        let _ = h.ask(r);
+        assert_eq!(
+            snapshot(&h.runner_dir),
+            before,
+            "{kind} changed something in the blocked runner's folder"
+        );
     }
     // Let the supervisor run: it must not start, probe, scan, clean or update the runner either.
     h.pump(Duration::from_secs(120));
@@ -512,9 +619,15 @@ fn a_runner_in_a_folder_a_user_can_change_is_refused_every_folder_request_with_n
         !h.runner_dir.join("logs").exists(),
         "the service made a log folder inside the runner's folder"
     );
+    // Nothing is kept per runner anywhere: the reason is in the service's own log (an administrator-only folder), once.
+    let service_log = std::fs::read_to_string(h.root.join("data").join("logs").join("service.log")).unwrap_or_default();
     assert!(
-        h.root.join("data").join("logs").join("blocked").join("blocked").exists(),
-        "its log is kept in the service's own folder"
+        service_log.contains("runner blocked: ") && service_log.contains(why),
+        "{service_log}"
+    );
+    assert!(
+        !h.root.join("data").join("logs").join("blocked").exists(),
+        "a folder per blocked runner was made"
     );
     h.finish();
 
@@ -524,6 +637,100 @@ fn a_runner_in_a_folder_a_user_can_change_is_refused_every_folder_request_with_n
         assert_ne!(e.code, pitcrew_core::protocol::ErrorCode::PermissionDenied, "{e:?}");
     }
     ok.finish();
+}
+
+/// A runner that was allowed and starts, and whose folder then turns out to be one a user can change (the administrator's fix is
+/// undone, or a user changed it), is stopped at once, its log stops being a file in the folder, and nothing is written there.
+#[test]
+fn a_runner_that_turns_blocked_is_stopped_and_stops_writing_its_log_in_the_folder() {
+    let blocked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = blocked.clone();
+    let guard: pitcrew_service::protected::FolderGuard = Arc::new(move |dir| {
+        if flag.load(Ordering::SeqCst) {
+            Err(format!("{} is not a folder only administrators can change", dir.display()))
+        } else {
+            Ok(())
+        }
+    });
+    let mut h = Harness::build("turns", "mode=idle\n", true, "", None, Box::new(OsLauncher), guard, no_prepare());
+    h.until("the runner started", Duration::from_millis(100), |h| {
+        count(&h.history(), |k| *k == HistoryKind::Started) >= 1
+    });
+    let log_before = h.log();
+    assert!(!log_before.is_empty());
+    blocked.store(true, Ordering::SeqCst);
+    h.pump(Duration::from_secs(120));
+    h.until("the runner was stopped", Duration::from_secs(5), |h| {
+        h.status().running_since.is_none()
+    });
+    h.pump(Duration::from_secs(120));
+    let after = h.log();
+    assert!(
+        !after.contains("is not a folder only administrators"),
+        "the service wrote its refusal into the runner's folder: {after}"
+    );
+    assert!(
+        after.len() <= log_before.len() + 400,
+        "the runner's log kept growing after the block"
+    );
+    assert!(h
+        .status()
+        .problem
+        .as_deref()
+        .is_some_and(|p| p.contains("only administrators can change")));
+    h.finish();
+}
+
+/// P1-3: a new runner's default folder does not exist yet. The guard says "missing" until the service has made the folder (protected,
+/// at creation, through the trust port), so without the prepare step the runner would be blocked for good and `Register` refused.
+#[test]
+fn a_new_runner_whose_folder_does_not_exist_yet_is_made_and_then_accepted_by_the_guard() {
+    let guard: pitcrew_service::protected::FolderGuard = Arc::new(|dir| {
+        if dir.is_dir() {
+            Ok(())
+        } else {
+            Err(format!("{} is missing", dir.display()))
+        }
+    });
+    let made = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = made.clone();
+    let prepare: pitcrew_service::protected::PrepareHook = Arc::new(move |dir| {
+        std::fs::create_dir_all(dir).unwrap();
+        counter.fetch_add(1, Ordering::SeqCst);
+        Ok(Some("made".into()))
+    });
+    let mut h = Harness::build("host", "mode=idle\n", true, "", None, Box::new(OsLauncher), guard.clone(), prepare);
+    let add = |h: &mut Harness, name: &str| {
+        let dir = h.root.join(name);
+        let runner: pitcrew_core::config::RunnerConfig = toml::from_str(&format!(
+            "name = \"{name}\"\nkind = \"gitea-runner\"\ndir = '{}'\nsession = \"service\"\n",
+            dir.display()
+        ))
+        .unwrap();
+        (h.ask(Request::AddRunner { runner }), dir)
+    };
+    let (answer, dir) = add(&mut h, "fresh");
+    assert_eq!(answer, Response::Ok);
+    assert!(dir.is_dir() && made.load(Ordering::SeqCst) == 1, "the folder was not made");
+    let disk = h.ask(Request::Disk {
+        runner: RunnerName::parse("fresh").unwrap(),
+    });
+    assert!(
+        !matches!(&disk, Response::Error(e) if e.code == pitcrew_core::protocol::ErrorCode::PermissionDenied),
+        "{disk:?}"
+    );
+    h.finish();
+
+    // The control: without the prepare step the same runner is blocked for good ("missing") and its requests are refused.
+    let mut h = Harness::build("host2", "mode=idle\n", true, "", None, Box::new(OsLauncher), guard, no_prepare());
+    let (answer, dir) = add(&mut h, "fresh");
+    assert_eq!(answer, Response::Ok);
+    assert!(!dir.exists());
+    let disk = h.ask(Request::Disk {
+        runner: RunnerName::parse("fresh").unwrap(),
+    });
+    assert!(matches!(&disk, Response::Error(e) if e.message.contains("is missing")), "{disk:?}");
+    h.finish();
 }
 
 #[test]
@@ -1383,7 +1590,16 @@ fn an_update_that_keeps_failing_is_reported_as_a_loop_with_its_cause() {
         failed(2),
         failed(1)
     );
-    let mut h = Harness::build("loopy", "mode=idle\n", true, "", Some(&state), Box::new(OsLauncher), open_guard());
+    let mut h = Harness::build(
+        "loopy",
+        "mode=idle\n",
+        true,
+        "",
+        Some(&state),
+        Box::new(OsLauncher),
+        open_guard(),
+        no_prepare(),
+    );
     h.pump(Duration::from_secs(6));
     let s = h.status();
     let l = s.update_loop.expect("a loop is reported");

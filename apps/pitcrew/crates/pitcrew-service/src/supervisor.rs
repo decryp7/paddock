@@ -152,6 +152,10 @@ pub struct Env {
     /// LocalSystem; ADR 0004, second amendment). A runner whose folder fails is **blocked**: no start, probe, update, cleanup,
     /// log or request touches its folder, and the status says why.
     pub runner_folder_guard: crate::protected::FolderGuard,
+    /// Makes a runner's folder that does not exist yet (a new runner's default folder) through the trust port, with the protected
+    /// rules at creation, when the nearest existing folder above it is admin-only; `Ok(None)` when nothing was needed. Without it
+    /// a new runner's folder would be "missing" to the guard for good (`protected::prepare_runner_dir`).
+    pub prepare_runner_dir: crate::protected::PrepareHook,
     /// Starts runner processes.
     pub launcher: Box<dyn Launcher>,
     /// Release information and downloads.
@@ -235,6 +239,7 @@ pub fn os_env(data_dir: PathBuf) -> Env {
         program_gate: crate::launcher::os_program_gate(),
         settle_runner_dir: crate::protected::os_settle(data_for_settle),
         runner_folder_guard: crate::protected::os_folder_guard(),
+        prepare_runner_dir: crate::protected::os_prepare(),
         base_path,
         exe_stamp,
         data_dir,
@@ -430,7 +435,9 @@ impl Supervisor {
     }
 
     fn binary(&self, r: &RunnerConfig) -> layout::RunnerBinary {
-        layout::binary(r, self.env.platform.os, |p| p.exists())
+        // A blocked runner's folder is never looked at: nothing exists as far as the service is concerned.
+        let blocked = self.runners.get(&r.name).is_some_and(|x| x.blocked.is_some());
+        layout::binary(r, self.env.platform.os, |p| !blocked && p.exists())
     }
 
     /// Asks the guard about a runner's folder again (the administrator may have fixed it, or a user may have changed it) and logs a
@@ -439,16 +446,30 @@ impl Supervisor {
         let Some(r) = self.runners.get(name) else { return };
         let verdict = (self.env.runner_folder_guard)(&r.cfg.dir).err();
         let Some(r) = self.runners.get_mut(name) else { return };
-        if r.blocked != verdict {
-            let line = match &verdict {
-                Some(why) => format!("this runner is blocked: {why}"),
-                None => "this runner's folder is admin-only now: the service manages it again".to_string(),
-            };
-            r.log.supervisor(now, &line);
+        if r.blocked == verdict {
+            return;
+        }
+        let (was_open, now_open) = (r.blocked.is_none(), verdict.is_none());
+        let line = match &verdict {
+            Some(why) => format!("this runner is blocked: {why}"),
+            None => "this runner's folder is admin-only now: the service manages it again".to_string(),
+        };
+        r.blocked = verdict;
+        if was_open && !now_open {
+            // Allowed -> blocked: its process is stopped now (it was started while the folder was still admin-only), its log
+            // stops being a file in the runner's folder, and nothing the service remembers about the folder is used.
+            r.log = LogWriter::discarding();
+            r.registered = false;
+            let actions = r.ctl.handle(Input::StopNow, now);
             self.log_service(now, &format!("runner {name}: {line}"));
-            if let Some(r) = self.runners.get_mut(name) {
-                r.blocked = verdict;
+            self.act(name, actions, now);
+        } else {
+            if !was_open && now_open {
+                // Blocked -> allowed: the runner's own log is opened again.
+                r.log = LogWriter::open(&layout::log_dir(&r.cfg), LOG_FILE, self.config.defaults.logs);
+                r.log.supervisor(now, &line);
             }
+            self.log_service(now, &format!("runner {name}: {line}"));
         }
     }
 
@@ -463,13 +484,13 @@ impl Supervisor {
         let st = self.state.runners.entry(cfg.name.to_string()).or_default().clone();
         let settings = self.settings_for(&cfg);
         let wanted = cfg.enabled && st.wanted;
-        // A blocked runner's log is kept in the service's own (administrator-only) folder, never in the runner's.
-        let log_dir = if blocked.is_some() {
-            self.env.data_dir.join("logs").join("blocked").join(cfg.name.as_str())
+        // A blocked runner has no log file at all: its lines go to the service's own log, and nothing is created in (or next to)
+        // a folder the service may not touch.
+        let mut log = if blocked.is_some() {
+            LogWriter::discarding()
         } else {
-            layout::log_dir(&cfg)
+            LogWriter::open(&layout::log_dir(&cfg), LOG_FILE, self.config.defaults.logs)
         };
-        let mut log = LogWriter::open(&log_dir, LOG_FILE, self.config.defaults.logs);
         log.supervisor(now, "Pitcrew is supervising this runner");
         if let Some(why) = &blocked {
             log.supervisor(now, &format!("this runner is blocked: {why}"));
@@ -478,7 +499,7 @@ impl Supervisor {
         if let Some(line) = settled {
             log.supervisor(now, &line);
         }
-        let registered = layout::registration(&cfg).exists();
+        let registered = blocked.is_none() && layout::registration(&cfg).exists();
         let name = cfg.name.clone();
         let mut runner = Runner {
             blocked,
@@ -1115,7 +1136,7 @@ impl Supervisor {
             self.spawn_check(name);
         } else if let Some(UpdateDecision::Apply { target }) = self.auto_decision(r, now) {
             // The window opened (or a pin was set) since the check.
-            if layout::binary(&r.cfg, self.env.platform.os, |p| p.exists()).managed && r.current_version.is_some() {
+            if layout::binary(&r.cfg, self.env.platform.os, |p| r.blocked.is_none() && p.exists()).managed && r.current_version.is_some() {
                 self.begin_update(name, target, now);
             }
         }
@@ -1484,7 +1505,11 @@ impl Supervisor {
     }
 
     fn spawn_scan(&mut self, name: &RunnerName, reply: Option<Reply>) {
-        if self.blocked(name).is_some() {
+        if let Some(why) = self.blocked(name) {
+            // Whoever waits for the answer gets one (a dropped reply would read as "the request was dropped").
+            if let Some(reply) = reply {
+                let _ = reply.send(err(ErrorCode::PermissionDenied, why));
+            }
             return;
         }
         let Some(r) = self.runners.get_mut(name) else { return };
@@ -1496,7 +1521,10 @@ impl Supervisor {
     }
 
     fn spawn_clean(&mut self, name: &RunnerName, plan: CleanupPlan, reply: Option<Reply>) {
-        if self.blocked(name).is_some() {
+        if let Some(why) = self.blocked(name) {
+            if let Some(reply) = reply {
+                let _ = reply.send(err(ErrorCode::PermissionDenied, why));
+            }
             return;
         }
         let Some(r) = self.runners.get_mut(name) else { return };
@@ -1516,6 +1544,17 @@ impl Supervisor {
     fn request(&mut self, req: Request, reply: Reply, now: Timestamp) -> Option<(Reply, Response)> {
         // A request that would make the service read, write or delete in a runner's folder is refused, with no effect, when that
         // folder is one a user can change (ADR 0004, second amendment). The guard is asked again now: the answer may have changed.
+        if let Request::Register { runner, .. } = &req {
+            // A new runner's folder is made (protected) before the guard looks at it.
+            if let Some(r) = self.runners.get(runner) {
+                let dir = r.cfg.dir.clone();
+                match (self.env.prepare_runner_dir)(&dir) {
+                    Ok(Some(line)) => self.log_service(now, &format!("runner {runner}: {line}")),
+                    Ok(None) => {}
+                    Err(why) => return Some((reply, err(ErrorCode::PermissionDenied, why))),
+                }
+            }
+        }
         if let Some(runner) = req.folder_runner().cloned() {
             if self.runners.contains_key(&runner) {
                 self.refresh_block(&runner, now);
@@ -1657,6 +1696,11 @@ impl Supervisor {
                 let Some(r) = self.runners.get_mut(&runner) else {
                     return Some((reply, unknown(&runner)));
                 };
+                // Asked again here, next to the work (the answer at the top of `request` is the same, but this is what the worker
+                // below would run on): a blocked runner's folder is never scanned or cleaned.
+                if let Some(why) = r.blocked.clone() {
+                    return Some((reply, err(ErrorCode::PermissionDenied, why)));
+                }
                 if r.cleaning {
                     return Some((reply, err(ErrorCode::Busy, "a cleanup is running")));
                 }
@@ -1695,6 +1739,13 @@ impl Supervisor {
                 if cfg.runners.iter().any(|r| r.name == runner.name) {
                     err(ErrorCode::BadRequest, format!("a runner is already named {}", runner.name))
                 } else {
+                    // A folder that does not exist yet is made protected before the runner is added (its guard would say
+                    // "missing" for good otherwise); a folder under one a user can change is refused here, with the reason.
+                    match (self.env.prepare_runner_dir)(&runner.dir) {
+                        Ok(Some(line)) => self.log_service(now, &format!("runner {}: {line}", runner.name)),
+                        Ok(None) => {}
+                        Err(why) => return Some((reply, err(ErrorCode::PermissionDenied, why))),
+                    }
                     cfg.runners.push(runner);
                     self.save_settings(cfg, now)
                 }
@@ -1988,7 +2039,7 @@ impl Supervisor {
             last_update: st.last_update.clone(),
             update_phase: r.update.phase().clone(),
             update_policy: policy,
-            managed_binary: layout::binary(&r.cfg, self.env.platform.os, |p| p.exists()).managed,
+            managed_binary: layout::binary(&r.cfg, self.env.platform.os, |p| r.blocked.is_none() && p.exists()).managed,
             dir: r.cfg.dir.display().to_string(),
             labels: r.cfg.labels.clone(),
             server_url: r.cfg.server_url.clone(),

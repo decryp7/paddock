@@ -16,6 +16,7 @@ impl Supervisor {
     /// The engine and cache requests (`None`: the worker answers).
     pub(super) fn ops_request(&mut self, req: Request, reply: Reply, now: Timestamp) -> Option<(Reply, Response)> {
         let path = (self.env.base_path)();
+        let gate = self.env.program_gate.clone();
         let home = hygiene::home_dir();
         let busy_text =
             "a job is running; Pitcrew will not remove anything while a runner works. Try again when it is idle, or drain the runner first";
@@ -23,14 +24,14 @@ impl Supervisor {
             Request::EngineReport => {
                 std::thread::spawn(move || {
                     let _ = reply.send(Response::EngineReport {
-                        report: hygiene::report(path.as_deref(), home.as_deref(), now),
+                        report: hygiene::report(path.as_deref(), home.as_deref(), now, &gate),
                     });
                 });
                 None
             }
             Request::EnginePrunePreview { selection } => {
                 std::thread::spawn(move || {
-                    let _ = reply.send(match hygiene::preview(path.as_deref(), &selection) {
+                    let _ = reply.send(match hygiene::preview(path.as_deref(), &selection, &gate) {
                         Ok(preview) => Response::EnginePreview { preview },
                         Err(e) => err(ErrorCode::BadRequest, e),
                     });
@@ -46,7 +47,7 @@ impl Supervisor {
                 }
                 self.log_service(now, &format!("pruning the container engine on request: {:?}", selection.kinds));
                 std::thread::spawn(move || {
-                    let _ = reply.send(match hygiene::prune(path.as_deref(), &selection, now) {
+                    let _ = reply.send(match hygiene::prune(path.as_deref(), &selection, now, &gate) {
                         Ok(result) => Response::EnginePruned { result },
                         Err(e) => err(ErrorCode::BadRequest, e),
                     });

@@ -75,6 +75,73 @@ pub fn is_local_system() -> bool {
     unsafe { IsWellKnownSid((*buf.as_ptr().cast::<TOKEN_USER>()).User.Sid, WinLocalSystemSid) }.as_bool()
 }
 
+/// A SID as the string `S-1-5-...`, from a pointer valid for the call.
+fn sid_string(sid: windows::Win32::Security::PSID) -> Result<String, String> {
+    use windows::Win32::Foundation::{LocalFree, HLOCAL};
+    use windows::Win32::Security::Authorization::ConvertSidToStringSidW;
+    let mut text = PWSTR::null();
+    // SAFETY: `sid` is valid for the call; the string it allocates is freed below.
+    unsafe { ConvertSidToStringSidW(sid, &mut text) }.map_err(|e| os_err("Naming an account", e))?;
+    // SAFETY: a NUL-terminated string the call allocated.
+    let result = unsafe { text.to_string() }.map_err(|e| e.to_string());
+    // SAFETY: allocated with LocalAlloc by the call above and freed once.
+    unsafe {
+        let _ = LocalFree(Some(HLOCAL(text.0.cast())));
+    }
+    result
+}
+
+/// The SID of the account this process runs as.
+pub fn current_user_sid() -> Result<String, String> {
+    let mut token = HANDLE::default();
+    // SAFETY: the pseudo handle of this process and a valid out pointer; the token is owned below.
+    unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) }.map_err(|e| os_err("Opening this process's token", e))?;
+    let token = Owned(token);
+    let mut needed = 0u32;
+    // SAFETY: a size query with no buffer (it fails by design with the size needed).
+    let _ = unsafe { GetTokenInformation(token.0, TokenUser, None, 0, &mut needed) };
+    let mut buf = vec![0u64; (needed as usize).div_ceil(8).max(1)];
+    // SAFETY: `buf` holds at least `needed` bytes and is 8-byte aligned.
+    unsafe { GetTokenInformation(token.0, TokenUser, Some(buf.as_mut_ptr().cast()), needed, &mut needed) }
+        .map_err(|e| os_err("Reading this process's account", e))?;
+    // SAFETY: the buffer holds a TOKEN_USER written by the call above and is alive for the call.
+    sid_string(unsafe { (*buf.as_ptr().cast::<TOKEN_USER>()).User.Sid })
+}
+
+/// The owner of the pipe object an open client handle is connected to, as a SID string (read through the handle, so no process id
+/// is involved).
+pub fn pipe_owner_sid(pipe: &File) -> Result<String, String> {
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Foundation::{LocalFree, HLOCAL};
+    use windows::Win32::Security::Authorization::{GetSecurityInfo, SE_KERNEL_OBJECT};
+    use windows::Win32::Security::{OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID};
+    let mut owner = PSID::default();
+    let mut descriptor = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: the handle is open for READ_CONTROL for the whole call; the out pointers are valid; `owner` points into
+    // `descriptor`, which is freed only after the SID is copied out.
+    let status = unsafe {
+        GetSecurityInfo(
+            HANDLE(pipe.as_raw_handle()),
+            SE_KERNEL_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            Some(&mut owner),
+            None,
+            None,
+            None,
+            Some(&mut descriptor),
+        )
+    };
+    if status.0 != 0 {
+        return Err(format!("GetSecurityInfo: error {}", status.0));
+    }
+    let result = sid_string(owner);
+    // SAFETY: allocated with LocalAlloc by GetSecurityInfo and freed once.
+    unsafe {
+        let _ = LocalFree(Some(HLOCAL(descriptor.0)));
+    }
+    result
+}
+
 /// An owned Win32 handle, closed on drop.
 struct Owned(HANDLE);
 

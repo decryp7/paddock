@@ -36,16 +36,7 @@ pub fn pipe_name(data_dir: &std::path::Path) -> String {
 /// [`pipe_name`] with the installed service's folder given (pure). Folders compare without case and trailing
 /// separators, as Windows paths do.
 pub fn pipe_name_for(data_dir: &std::path::Path, installed: Option<&std::path::Path>) -> String {
-    let norm = |p: &std::path::Path| p.to_string_lossy().trim_end_matches(['\\', '/']).to_lowercase();
-    let dir = norm(data_dir);
-    if installed.is_some_and(|i| norm(i) == dir) {
-        return PIPE_NAME.to_string();
-    }
-    // FNV-1a: stable across builds and platforms, no dependency.
-    let hash = dir.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
-        (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
-    });
-    format!("{PIPE_NAME}-{hash:016x}")
+    pitcrew_core::service_paths::pipe_name_for(data_dir, installed)
 }
 /// The socket's file name in the data folder elsewhere.
 pub const SOCKET_FILE: &str = pitcrew_core::service_paths::SOCKET_FILE;
@@ -242,10 +233,25 @@ async fn subscribed<S: AsyncRead + AsyncWrite + Unpin + Send>(stream: S, tx: Sen
     }
 }
 
+/// Whose engine this is (Windows; elsewhere the engine is always the user's own).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServeMode {
+    /// The SYSTEM service: the pipe admits interactive users to read and operate, and a request that changes what runs needs an
+    /// elevated administrator ([`PIPE_SDDL`], [`crate::caller`]).
+    System,
+    /// The **per-user engine**: the same engine as the service, started in a user's own session. Its pipe admits only that user
+    /// (and SYSTEM): [`PIPE_SDDL_USER`]; whoever can connect is its owner, who may do anything with their own runners, so no
+    /// caller check is asked ([`crate::caller::Caller::Local`]).
+    User,
+}
+
+/// The per-user engine's pipe: its owner and SYSTEM, nobody else (no interactive-user entry, no Administrators).
+pub const PIPE_SDDL_USER: &str = "D:P(A;;GA;;;OW)(A;;GA;;;SY)";
+
 /// Accepts connections until the runtime shuts down.
-pub async fn serve(tx: Sender<Msg>, socket_dir: std::path::PathBuf) -> Result<(), String> {
+pub async fn serve(tx: Sender<Msg>, socket_dir: std::path::PathBuf, mode: ServeMode) -> Result<(), String> {
     let permits = Arc::new(Semaphore::new(MAX_CONNECTIONS));
-    platform::serve(tx, socket_dir, permits).await
+    platform::serve(tx, socket_dir, permits, mode).await
 }
 
 #[cfg(windows)]
@@ -254,7 +260,7 @@ mod platform {
     //! the pipe's creation.
     #![allow(unsafe_code)]
 
-    use super::{connection, Msg, PIPE_SDDL};
+    use super::{connection, Caller, Msg, ServeMode, PIPE_SDDL, PIPE_SDDL_USER};
     use std::os::windows::io::AsRawHandle;
     use std::sync::mpsc::Sender;
     use std::sync::Arc;
@@ -265,8 +271,9 @@ mod platform {
     use windows::Win32::Security::Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
     use windows::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
 
-    fn create(name: &str, first: bool) -> std::io::Result<NamedPipeServer> {
-        let wide: Vec<u16> = PIPE_SDDL.encode_utf16().chain(std::iter::once(0)).collect();
+    fn create(name: &str, first: bool, mode: ServeMode) -> std::io::Result<NamedPipeServer> {
+        let sddl = if mode == ServeMode::System { PIPE_SDDL } else { PIPE_SDDL_USER };
+        let wide: Vec<u16> = sddl.encode_utf16().chain(std::iter::once(0)).collect();
         let mut descriptor = PSECURITY_DESCRIPTOR::default();
         // SAFETY: `wide` is NUL-terminated and outlives the call; the descriptor is freed below after the pipe
         // instance (which copies it) has been created.
@@ -291,14 +298,14 @@ mod platform {
         result
     }
 
-    pub async fn serve(tx: Sender<Msg>, data_dir: std::path::PathBuf, permits: Arc<Semaphore>) -> Result<(), String> {
+    pub async fn serve(tx: Sender<Msg>, data_dir: std::path::PathBuf, permits: Arc<Semaphore>, mode: ServeMode) -> Result<(), String> {
         let name = super::pipe_name(&data_dir);
-        let mut server =
-            create(&name, true).map_err(|e| format!("the pipe {name} could not be created ({e}); is another Pitcrew service running?"))?;
+        let mut server = create(&name, true, mode)
+            .map_err(|e| format!("the pipe {name} could not be created ({e}); is another Pitcrew service running?"))?;
         loop {
             server.connect().await.map_err(|e| e.to_string())?;
             let connected = server;
-            server = create(&name, false).map_err(|e| e.to_string())?;
+            server = create(&name, false, mode).map_err(|e| e.to_string())?;
             let Ok(permit) = permits.clone().acquire_owned().await else {
                 return Ok(());
             };
@@ -306,8 +313,10 @@ mod platform {
             let raw = connected.as_raw_handle() as usize;
             tokio::spawn(async move {
                 // The handle lives as long as `connected`, which `connection` owns until it returns.
-                connection(connected, tx, move || {
-                    crate::caller::level_of_pipe(raw as std::os::windows::io::RawHandle)
+                connection(connected, tx, move || match mode {
+                    ServeMode::System => crate::caller::level_of_pipe(raw as std::os::windows::io::RawHandle),
+                    // The pipe's ACL admits only its owner: nothing more to ask.
+                    ServeMode::User => Caller::Local,
                 })
                 .await;
                 drop(permit);
@@ -325,7 +334,12 @@ mod platform {
     use tokio::net::UnixListener;
     use tokio::sync::Semaphore;
 
-    pub async fn serve(tx: Sender<Msg>, socket_dir: std::path::PathBuf, permits: Arc<Semaphore>) -> Result<(), String> {
+    pub async fn serve(
+        tx: Sender<Msg>,
+        socket_dir: std::path::PathBuf,
+        permits: Arc<Semaphore>,
+        _mode: super::ServeMode,
+    ) -> Result<(), String> {
         std::fs::create_dir_all(&socket_dir).map_err(|e| format!("{}: {e}", socket_dir.display()))?;
         let _ = std::fs::set_permissions(&socket_dir, std::fs::Permissions::from_mode(0o700));
         let path = socket_dir.join(SOCKET_FILE);
@@ -353,6 +367,7 @@ mod platform {
         _: std::sync::mpsc::Sender<super::Msg>,
         _: std::path::PathBuf,
         _: std::sync::Arc<tokio::sync::Semaphore>,
+        _: super::ServeMode,
     ) -> Result<(), String> {
         Err("no local transport on this platform".into())
     }

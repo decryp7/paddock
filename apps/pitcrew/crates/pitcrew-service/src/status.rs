@@ -16,9 +16,27 @@ fn connect(_socket_dir: &Path) -> Result<Box<dyn Stream>, Error> {
     };
     #[cfg(windows)]
     {
-        let f = pitcrew_core::service_paths::open_pipe_options()
-            .open(crate::ipc::pipe_name(_socket_dir))
-            .map_err(unavailable)?;
+        let name = crate::ipc::pipe_name(_socket_dir);
+        let f = pitcrew_core::service_paths::open_pipe_options().open(&name).map_err(unavailable)?;
+        // Nothing is written before the pipe is shown to belong to the service (SYSTEM or Administrators), or, for the per-user
+        // engine's own pipe, to this user.
+        let own = (name != crate::ipc::PIPE_NAME)
+            .then(crate::platform::win_session::current_user_sid)
+            .transpose();
+        let owner = crate::platform::win_session::pipe_owner_sid(&f).map_err(|e| Error::Os {
+            what: "Checking the Pitcrew pipe",
+            reason: format!("{e}; nothing was sent"),
+        })?;
+        let own = own.map_err(|e| Error::Os {
+            what: "Checking the Pitcrew pipe",
+            reason: format!("{e}; nothing was sent"),
+        })?;
+        if !pitcrew_core::service_paths::pipe_owner_ok(&owner, own.as_deref()) {
+            return Err(Error::Os {
+                what: "Checking the Pitcrew pipe",
+                reason: format!("the pipe is owned by {owner}, not by the Pitcrew service; nothing was sent"),
+            });
+        }
         Ok(Box::new(f))
     }
     #[cfg(unix)]

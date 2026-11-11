@@ -377,6 +377,51 @@ impl Request {
         }
     }
 
+    /// The runner a request is about, whatever it does to it (state, logs, updates, history, files), or `None` for a request that is
+    /// about no one runner. With two engines (the SYSTEM service and the per-user engine) the app sends such a request to the engine
+    /// that has the runner. A `match` naming every request, so a new one must decide.
+    pub fn target_runner(&self) -> Option<&RunnerName> {
+        match self {
+            Request::Metrics { runner, .. } => runner.as_ref(),
+            Request::Start { runner, .. }
+            | Request::Stop { runner, .. }
+            | Request::Restart { runner, .. }
+            | Request::Drain { runner, .. }
+            | Request::Resume { runner, .. }
+            | Request::Logs { runner, .. }
+            | Request::SearchLogs { runner, .. }
+            | Request::CheckUpdate { runner, .. }
+            | Request::ApplyUpdate { runner, .. }
+            | Request::CancelUpdate { runner, .. }
+            | Request::SkipVersion { runner, .. }
+            | Request::PinVersion { runner, .. }
+            | Request::History { runner, .. }
+            | Request::Disk { runner, .. }
+            | Request::CleanDisk { runner, .. }
+            | Request::RemoveRunner { runner, .. }
+            | Request::Register { runner, .. }
+            | Request::GetRunnerConfig { runner, .. }
+            | Request::PreviewRunnerConfig { runner, .. }
+            | Request::SaveRunnerConfig { runner, .. }
+            | Request::Processes { runner, .. }
+            | Request::StopProcess { runner, .. }
+            | Request::KeepProcess { runner, .. }
+            | Request::CacheReport { runner, .. }
+            | Request::CachePreview { runner, .. }
+            | Request::CacheClean { runner, .. } => Some(runner),
+            Request::Hello { .. }
+            | Request::Status
+            | Request::Subscribe
+            | Request::GetSettings
+            | Request::SaveSettings { .. }
+            | Request::AddRunner { .. }
+            | Request::Diagnostics
+            | Request::EngineReport
+            | Request::EnginePrunePreview { .. }
+            | Request::EnginePrune { .. } => None,
+        }
+    }
+
     /// The runner whose **folder** the request makes the service read, write or delete in (its logs, disk, cache, configuration
     /// file, update files, registration), or `None` for a request that touches no runner folder. The service refuses these for a
     /// runner whose folder is not one only administrators can change (ADR 0004). A `match` naming every request, so a new one
@@ -1231,6 +1276,56 @@ mod tests {
         assert!(!register.kind().contains("token"));
         assert_eq!(Request::CleanDisk { runner: a }.kind(), "CleanDisk");
         assert_eq!(Request::Status.kind(), "Status");
+    }
+
+    #[test]
+    fn every_request_about_one_runner_names_it() {
+        let a = name("a");
+        for r in [
+            Request::Stop { runner: a.clone() },
+            Request::Drain { runner: a.clone() },
+            Request::History {
+                runner: a.clone(),
+                days: 1,
+                utc_offset_minutes: 0,
+            },
+            Request::RemoveRunner { runner: a.clone() },
+            Request::PinVersion {
+                runner: a.clone(),
+                version: None,
+            },
+            Request::Processes { runner: a.clone() },
+            Request::Metrics {
+                runner: Some(a.clone()),
+                range_hours: 1,
+            },
+            Request::CleanDisk { runner: a.clone() },
+        ] {
+            assert_eq!(r.target_runner(), Some(&a), "{r:?}");
+        }
+        for r in [
+            Request::Status,
+            Request::GetSettings,
+            Request::Diagnostics,
+            Request::EngineReport,
+            Request::Metrics {
+                runner: None,
+                range_hours: 1,
+            },
+        ] {
+            assert_eq!(r.target_runner(), None, "{r:?}");
+        }
+        // The folder runner is always one of the target runners.
+        for r in [
+            Request::CleanDisk { runner: a.clone() },
+            Request::Logs {
+                runner: a.clone(),
+                after: None,
+                limit: 1,
+            },
+        ] {
+            assert_eq!(r.folder_runner(), r.target_runner());
+        }
     }
 
     #[test]

@@ -34,11 +34,20 @@ pub fn find_program(name: &str, path: Option<&str>) -> Option<PathBuf> {
     std::env::split_paths(&list).map(|d| d.join(&file)).find(|p| p.is_file())
 }
 
-/// The engine found on `path`: Docker first, then Podman.
-pub fn find_engine(path: Option<&str>) -> Option<(EngineKind, PathBuf)> {
-    [EngineKind::Docker, EngineKind::Podman]
+/// The engine found on `path`: Docker first, then Podman. The service runs it with its own rights, so a program the program gate
+/// refuses (on Windows as LocalSystem: one in a folder a user can change, named by a `PATH` entry a user can write) is never run:
+/// the reason is the error, and the next candidate is not tried (an engine found first is the engine that would run).
+///
+/// # Errors
+/// No engine was found, or the one found is in a place the gate refuses.
+pub fn find_engine(path: Option<&str>, gate: &crate::launcher::ProgramGate) -> Result<(EngineKind, PathBuf), String> {
+    let (kind, program) = [EngineKind::Docker, EngineKind::Podman]
         .into_iter()
         .find_map(|k| find_program(k.program(), path).map(|p| (k, p)))
+        .ok_or_else(|| "No container engine (docker or podman) was found.".to_string())?;
+    let folder = program.parent().unwrap_or(&program).to_path_buf();
+    gate(&program, &folder).map_err(|why| format!("{} was found at {} but is not run: {why}", kind.program(), program.display()))?;
+    Ok((kind, program))
 }
 
 fn run(program: &Path, args: &[&str], timeout: Duration) -> Result<String, String> {
@@ -77,7 +86,7 @@ pub fn home_dir() -> Option<PathBuf> {
 }
 
 /// The report: the engine's disk use and the act folders' sizes.
-pub fn report(path: Option<&str>, home: Option<&Path>, now: Timestamp) -> EngineReport {
+pub fn report(path: Option<&str>, home: Option<&Path>, now: Timestamp, gate: &crate::launcher::ProgramGate) -> EngineReport {
     let folders = act_folders(home)
         .into_iter()
         .map(|(label, p)| {
@@ -92,17 +101,19 @@ pub fn report(path: Option<&str>, home: Option<&Path>, now: Timestamp) -> Engine
             }
         })
         .collect();
-    let Some((kind, program)) = find_engine(path) else {
-        return EngineReport {
-            engine: None,
-            problem: Some(
-                "No container engine (docker or podman) was found. Runners that use container jobs need one; Pitcrew only reports on it."
-                    .into(),
-            ),
-            usage: vec![],
-            folders,
-            at: now,
-        };
+    let (kind, program) = match find_engine(path, gate) {
+        Ok(found) => found,
+        Err(why) => {
+            return EngineReport {
+                engine: None,
+                problem: Some(format!(
+                    "{why} Runners that use container jobs need one; Pitcrew only reports on it."
+                )),
+                usage: vec![],
+                folders,
+                at: now,
+            };
+        }
     };
     let df = run(
         &program,
@@ -132,9 +143,13 @@ fn lines(program: &Path, args: &[&str]) -> Result<String, String> {
 }
 
 /// What pruning `selection` would remove, from the engine's listings.
-pub fn preview(path: Option<&str>, selection: &PruneSelection) -> Result<hygiene::PrunePreview, String> {
+pub fn preview(
+    path: Option<&str>,
+    selection: &PruneSelection,
+    gate: &crate::launcher::ProgramGate,
+) -> Result<hygiene::PrunePreview, String> {
     selection.validate()?;
-    let (kind, program) = find_engine(path).ok_or("No container engine (docker or podman) was found.")?;
+    let (kind, program) = find_engine(path, gate)?;
     let until = selection.until();
     let fail = |e: String| engine_problem(kind, &e);
     let mut items = vec![];
@@ -223,9 +238,14 @@ pub fn preview(path: Option<&str>, selection: &PruneSelection) -> Result<hygiene
 }
 
 /// Prunes `selection`. The caller has checked that no job runs.
-pub fn prune(path: Option<&str>, selection: &PruneSelection, now: Timestamp) -> Result<PruneResult, String> {
+pub fn prune(
+    path: Option<&str>,
+    selection: &PruneSelection,
+    now: Timestamp,
+    gate: &crate::launcher::ProgramGate,
+) -> Result<PruneResult, String> {
     selection.validate()?;
-    let (_, program) = find_engine(path).ok_or("No container engine (docker or podman) was found.")?;
+    let (_, program) = find_engine(path, gate)?;
     let mut freed = vec![];
     let mut failures = vec![];
     for k in &selection.kinds {
@@ -453,9 +473,14 @@ mod tests {
         let file = d.join(format!("docker{}", std::env::consts::EXE_SUFFIX));
         std::fs::write(&file, "x").unwrap();
         let path = std::env::join_paths([d.clone()]).unwrap().to_string_lossy().into_owned();
-        assert_eq!(find_engine(Some(&path)), Some((EngineKind::Docker, file)));
+        let open = crate::launcher::open_gate();
+        assert_eq!(find_engine(Some(&path), &open), Ok((EngineKind::Docker, file.clone())));
+        // The service runs it with its own rights: a gate that refuses its folder stops it, with the reason.
+        let refuse: crate::launcher::ProgramGate = std::sync::Arc::new(|_, _| Err("not in a protected folder".into()));
+        let e = find_engine(Some(&path), &refuse).unwrap_err();
+        assert!(e.contains("is not run") && e.contains("not in a protected folder"), "{e}");
         let empty = temp("find-none");
-        assert!(find_engine(Some(&empty.display().to_string())).is_none());
+        assert!(find_engine(Some(&empty.display().to_string()), &open).is_err());
         let _ = std::fs::remove_dir_all(d);
         let _ = std::fs::remove_dir_all(empty);
     }
@@ -466,7 +491,12 @@ mod tests {
         std::fs::create_dir_all(home.join(".cache/act/checkout")).unwrap();
         std::fs::write(home.join(".cache/act/checkout/a.txt"), vec![0u8; 2048]).unwrap();
         let empty = temp("nopath");
-        let r = report(Some(&empty.display().to_string()), Some(&home), Timestamp(5));
+        let r = report(
+            Some(&empty.display().to_string()),
+            Some(&home),
+            Timestamp(5),
+            &crate::launcher::open_gate(),
+        );
         assert!(r.engine.is_none() && r.problem.as_deref().unwrap().contains("No container engine"));
         let act = &r.folders[0];
         assert!(act.exists && act.bytes == 2048 && act.entries == 1, "{act:?}");
@@ -476,7 +506,8 @@ mod tests {
             &PruneSelection {
                 kinds: vec![PruneKind::Volumes],
                 older_than_days: 0
-            }
+            },
+            &crate::launcher::open_gate()
         )
         .is_err());
         assert!(prune(
@@ -485,7 +516,8 @@ mod tests {
                 kinds: vec![],
                 older_than_days: 0
             },
-            Timestamp(1)
+            Timestamp(1),
+            &crate::launcher::open_gate()
         )
         .is_err());
         let _ = std::fs::remove_dir_all(home);
@@ -512,14 +544,14 @@ mod tests {
         .unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         let path = d.display().to_string();
-        let r = report(Some(&path), None, Timestamp(1));
+        let r = report(Some(&path), None, Timestamp(1), &crate::launcher::open_gate());
         assert_eq!(r.engine, Some(EngineKind::Docker));
         assert_eq!(r.usage.len(), 2);
         let sel = PruneSelection {
             kinds: vec![PruneKind::DanglingImages, PruneKind::UnusedImages, PruneKind::BuildCache],
             older_than_days: 0,
         };
-        let p = preview(Some(&path), &sel).unwrap();
+        let p = preview(Some(&path), &sel, &crate::launcher::open_gate()).unwrap();
         assert_eq!(p.items[0].count, 1);
         assert_eq!(
             p.items[1].examples,
@@ -534,6 +566,7 @@ mod tests {
                 older_than_days: 0,
             },
             Timestamp(2),
+            &crate::launcher::open_gate(),
         )
         .unwrap();
         assert_eq!(res.freed, vec![(PruneKind::DanglingImages, 100_000_000)]);

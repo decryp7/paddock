@@ -24,6 +24,16 @@ pub enum NameError {
     /// The name contains a character outside `a-z`, `0-9` and `-`, or starts with `-`.
     #[error("the runner name {0:?} may only contain a-z, 0-9 and '-' and must not start with '-'")]
     BadCharacter(String),
+    /// The name is one Windows reserves for a device (`con`, `nul`, `com1`, ...): as a folder or file name it would not name a folder.
+    #[error("the runner name {0:?} is reserved by Windows for a device (con, prn, aux, nul, com1-9, lpt1-9); choose another")]
+    Reserved(String),
+}
+
+/// Whether `name` is a device name Windows reserves (`CON`, `PRN`, `AUX`, `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9`), whatever the case.
+fn is_windows_device(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    matches!(n.as_str(), "con" | "prn" | "aux" | "nul")
+        || ((n.starts_with("com") || n.starts_with("lpt")) && n.len() == 4 && matches!(n.as_bytes()[3], b'1'..=b'9'))
 }
 
 impl RunnerName {
@@ -38,6 +48,9 @@ impl RunnerName {
         let ok = s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') && !s.starts_with('-');
         if !ok {
             return Err(NameError::BadCharacter(s.to_string()));
+        }
+        if is_windows_device(s) {
+            return Err(NameError::Reserved(s.to_string()));
         }
         Ok(RunnerName(s.to_string()))
     }
@@ -79,6 +92,19 @@ mod tests {
         for bad in ["-x", "A", "a b", "../x", r"a\b", "ü"] {
             assert!(matches!(RunnerName::parse(bad), Err(NameError::BadCharacter(_))), "{bad}");
         }
+    }
+
+    /// `data\runners\con` is not a folder on Windows (it opens the console); a name that is a device is refused everywhere, so a
+    /// configuration written on one OS is valid on every other.
+    #[test]
+    fn windows_device_names_are_refused() {
+        for bad in ["con", "prn", "aux", "nul", "com1", "com9", "lpt1", "lpt9"] {
+            assert_eq!(RunnerName::parse(bad), Err(NameError::Reserved(bad.to_string())), "{bad}");
+        }
+        for ok in ["com0", "com10", "lpt", "console", "nul2", "my-con", "com", "aux1"] {
+            assert!(RunnerName::parse(ok).is_ok(), "{ok}");
+        }
+        assert!(serde_json::from_str::<RunnerName>("\"nul\"").is_err());
     }
 
     #[test]

@@ -111,6 +111,12 @@ fn the_pipe_refuses_changes_from_a_caller_that_is_not_an_elevated_administrator(
 #[ignore = "VM: PITCREW_TEST_EXPECT=standard|elevated, and the service installed (PITCREW_TEST_INSTALLED=1)"]
 fn an_interactive_user_can_use_the_installed_pipe_but_not_host_one() {
     let who = expectation();
+    // The squat attempt is what an interactive standard user could do; an administrator may create an instance (the ACL gives
+    // Administrators full control), so the row proves nothing when run as one.
+    assert_eq!(
+        who, "standard",
+        "this row must run as the standard user (PITCREW_TEST_EXPECT=standard)"
+    );
     assert_eq!(
         std::env::var("PITCREW_TEST_INSTALLED").as_deref(),
         Ok("1"),
@@ -137,11 +143,9 @@ fn an_interactive_user_can_use_the_installed_pipe_but_not_host_one() {
             .first_pipe_instance(false)
             .create(pitcrew_service::ipc::PIPE_NAME)
     });
-    match (who.as_str(), squat) {
-        ("standard", Err(e)) => assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{e}"),
-        ("standard", Ok(_)) => panic!("a standard user created an instance of the service's pipe: it would receive an elevated caller"),
-        // An administrator may (the ACL gives Administrators full control): the point is the interactive user.
-        (_, _) => {}
+    match squat {
+        Err(e) => assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{e}"),
+        Ok(_) => panic!("a standard user created an instance of the service's pipe: it would receive an elevated caller"),
     }
 }
 
@@ -279,4 +283,75 @@ fn settled_service_runner_folders_pass_the_guard_and_a_user_folder_never_does() 
         );
         println!("MEASURED standard user: refused in the service runner's folder and in runners\\");
     }
+}
+
+/// P1-1, written first and ignored until the shared adopt-a-tree mechanism lands (ADR `adopt-tree`). The elevated run lays a service
+/// runner out as an older Pitcrew did, with a folder two levels down (`svc\work\job`) that inherited the right `C:\ProgramData`
+/// gives users to add to it; after the service has settled the runner's folder and adopted its tree, the standard user must not be
+/// able to create anything in it.
+#[test]
+#[ignore = "VM: waits for the shared adopt-a-tree mechanism in paddock-service (docs/adr-adopt-tree); the runner stays blocked until then"]
+fn a_grandchild_of_a_settled_service_runner_folder_is_not_writable_by_a_user() {
+    let who = expectation();
+    let root = PathBuf::from(std::env::var_os("PITCREW_TEST_GRANDCHILD_ROOT").expect("PITCREW_TEST_GRANDCHILD_ROOT names the data folder"));
+    let svc = root.join("runners").join("svc");
+    if who == "elevated" {
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(svc.join("work").join("job")).unwrap();
+        ensure_protected_root(&mut RealTrust, &root, &["pitcrew.toml"], &["logs"]).unwrap();
+        settle_runner_dir(&mut RealTrust, &list_real, &root, &runner(&svc, "service"));
+        // The shared mechanism's call goes here when it lands: it adopts the runner's whole tree, then the guard may accept it.
+    } else {
+        assert!(
+            std::fs::create_dir(svc.join("work").join("job").join("evil")).is_err(),
+            "a standard user made a folder two levels inside a settled service runner's folder"
+        );
+    }
+}
+
+/// The per-user engine (ADR 0004, second amendment) as the standard user runs it: its pipe is owned by that user and the app's
+/// owner check accepts it only when told it is the user's own engine; it serves its own user every request (no administrator
+/// needed for their own runners), and the SYSTEM service's rule for the same request is the opposite.
+#[test]
+#[ignore = "VM: PITCREW_TEST_EXPECT=standard"]
+fn a_per_user_engine_is_owned_by_its_user_and_serves_them_every_request() {
+    use pitcrew_core::service_paths::pipe_owner_ok;
+    use pitcrew_service::ipc::ServeMode;
+    use pitcrew_service::platform::win_session::{current_user_sid, pipe_owner_sid};
+    let who = expectation();
+    assert_eq!(who, "standard", "this row is the standard user's engine");
+    let data = scratch("user-engine");
+    let host = Host::start_with(data.clone(), data.clone(), ServeMode::User, |e| panic!("the engine stopped: {e}")).unwrap();
+    let name = pitcrew_service::ipc::pipe_name(&data);
+    let mut s = connect(&name);
+    assert!(matches!(
+        ask(
+            &mut s,
+            &Request::Hello {
+                protocol: PROTOCOL_VERSION
+            }
+        ),
+        Response::Hello { .. }
+    ));
+    let change = Request::SaveSettings {
+        config: pitcrew_core::config::Config::default(),
+    };
+    assert_eq!(
+        ask(&mut s, &change),
+        Response::Ok,
+        "a user changes their own runners without an administrator"
+    );
+    drop(s);
+    let file = pitcrew_core::service_paths::open_pipe_options().open(&name).unwrap();
+    let owner = pipe_owner_sid(&file).unwrap();
+    let me = current_user_sid().unwrap();
+    println!("MEASURED per-user engine pipe owner = {owner}; this account = {me}");
+    assert!(pipe_owner_ok(&owner, Some(&me)), "the client accepts its own engine's pipe");
+    assert!(
+        !pipe_owner_ok(&owner, None),
+        "and does not accept a user-owned pipe as the service's"
+    );
+    drop(file);
+    host.stop();
+    let _ = std::fs::remove_dir_all(&data);
 }
