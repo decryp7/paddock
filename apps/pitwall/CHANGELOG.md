@@ -74,6 +74,11 @@ optional: nothing reads it.
 
 ### Fixed
 
+- Windows: the llama.cpp engine Pitwall downloads starts on a PC that has no Visual C++ runtime. It imports `vcruntime140.dll`
+  and `msvcp140.dll`, which a clean Windows install lacks, so the engine exited with `0xC0000135` and its self-test failed
+  (1.0.x has the same pin; the fix is in 1.1 only). The installer now installs Microsoft's Visual C++ Redistributable
+  (`vc_redist.x64.exe`, pinned by hash) silently when needed, and an engine that still cannot load for that reason says so, with
+  the next step, instead of "it could not start". The release workflow also checks the installer's own programs for runtime imports.
 - Repair on macOS 26 works again: it reads the service state through the shared Paddock service crate instead of Pitwall's own
   `launchctl print` parser.
 - A cancelled Repair whose registration cannot be restored is reported as a failure, not as a clean cancel; one Cancel stops

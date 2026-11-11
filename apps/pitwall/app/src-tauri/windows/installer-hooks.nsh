@@ -10,6 +10,18 @@
 !include "${__FILEDIR__}\paddock-per-machine.generated.nsh"
 !include "${__FILEDIR__}\paddock-per-machine.nsh"
 
+; The Microsoft Visual C++ runtime (vc_redist.x64.exe, pinned in vc-redist.lock.json, staged next to this file by
+; apps/pitwall/scripts/ci/stage-vc-redist.mjs before the installer is built). The llama.cpp engine Pitwall downloads imports
+; vcruntime140.dll and msvcp140.dll, which a clean Windows PC does not have: the engine then exits with 0xC0000135 and its
+; self-test fails. Microsoft's own advice is central deployment through the redistributable package (it is serviced by Windows
+; Update); the installer is elevated (per machine), so it can run the package. makensis resolves a relative path from its working
+; folder, so the folder is named here, where __FILEDIR__ is this file's.
+!define /redef PITWALL_WINDOWS_DIR "${__FILEDIR__}"
+!if /FileExists "${PITWALL_WINDOWS_DIR}\vc_redist.x64.exe"
+!else
+  !error "vc_redist.x64.exe is not next to installer-hooks.nsh (${PITWALL_WINDOWS_DIR}): the bundle step stages it (node apps/pitwall/scripts/ci/stage-vc-redist.mjs) before the installer is built"
+!endif
+
 ; Takes the service out before its program is replaced. The installer's PREINSTALL has passed PADDOCK_CHECK_DIR (Program Files,
 ; owned and protected by administrators), so the program is run from a checked folder and a failed removal aborts the install
 ; (level PADDOCK_LEVEL_TOOL_FAILED) only while the service is still registered (`sc query`; 1060 means gone): a service that is still registered must not be left to restart the server between this step
@@ -93,7 +105,36 @@
   Pop $1
 !macroend
 
+; Installs the VC++ runtime when the PC lacks it (the package itself skips the install when the same or a newer one is there).
+; Exit codes of the package: 0 installed, 1638 a newer version is installed, 3010 and 1641 installed, a restart is advised (the engine
+; starts without one; /norestart keeps the PC from restarting). Any other code is shown in the details, and the user is told in a
+; normal run: Pitwall installs, and the engine's self-test then names the missing runtime and the next step (engines.rs).
+!macro _PITWALL_INSTALL_VC_RUNTIME
+  Push $0
+  Push $1
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR"
+  File "${PITWALL_WINDOWS_DIR}\vc_redist.x64.exe"
+  DetailPrint "Installing the Microsoft Visual C++ runtime (vc_redist.x64.exe)"
+  ExecWait '"$PLUGINSDIR\vc_redist.x64.exe" /install /quiet /norestart' $0
+  DetailPrint "vc_redist.x64.exe: exit code $0"
+  Delete "$PLUGINSDIR\vc_redist.x64.exe"
+  ${If} $0 != 0
+  ${AndIf} $0 != 1638
+  ${AndIf} $0 != 3010
+  ${AndIf} $0 != 1641
+    DetailPrint "WARNING the Visual C++ runtime was not installed (exit code $0). The llama.cpp engine needs it: install vc_redist.x64.exe from https://aka.ms/vs/17/release/vc_redist.x64.exe"
+    IfSilent vc_runtime_done
+      MessageBox MB_ICONEXCLAMATION|MB_OK "Pitwall is installed, but the Microsoft Visual C++ runtime could not be installed (code $0). The llama.cpp engine cannot start without it. Install it from https://aka.ms/vs/17/release/vc_redist.x64.exe, then restart Pitwall."
+  ${EndIf}
+  vc_runtime_done:
+  SetOutPath "$INSTDIR"
+  Pop $1
+  Pop $0
+!macroend
+
 !macro NSIS_HOOK_POSTINSTALL
+  !insertmacro _PITWALL_INSTALL_VC_RUNTIME
   !insertmacro PADDOCK_INSTALL_SETUP
   !insertmacro PADDOCK_CLEAN_RUN_VALUES
   !insertmacro _PITWALL_REGISTER_SERVICE

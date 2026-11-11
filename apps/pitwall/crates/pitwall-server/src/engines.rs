@@ -46,6 +46,35 @@ pub enum EngineError {
     /// The build pinned for the model cannot be used (ADR 0018).
     #[error(transparent)]
     Pin(#[from] PinError),
+    /// The engine could not load because the Microsoft Visual C++ runtime is missing (Windows `STATUS_DLL_NOT_FOUND`).
+    #[error("{}", missing_runtime_message())]
+    MissingRuntime,
+}
+
+/// The Windows status a process ends with when the loader cannot find a DLL it imports (`STATUS_DLL_NOT_FOUND`).
+pub const STATUS_DLL_NOT_FOUND: u32 = 0xC000_0135;
+
+/// What an engine's exit status says about why it never ran: `Some` for a status Pitwall can explain. `code` is the raw
+/// exit code (`ExitStatus::code`; on Windows the 32-bit status, which Rust reports as an `i32`).
+pub fn exit_problem(code: Option<i32>) -> Option<EngineError> {
+    // `as u32` reinterprets the i32 Windows status; a Unix exit code is never 0xC0000135 (they are 0 to 255).
+    code.filter(|c| *c as u32 == STATUS_DLL_NOT_FOUND)
+        .map(|_| EngineError::MissingRuntime)
+}
+
+/// The words for a PC without the Visual C++ runtime: the cause, the raw status and the next step.
+fn missing_runtime_message() -> String {
+    let installer = if cfg!(target_arch = "aarch64") {
+        "vc_redist.arm64.exe"
+    } else {
+        "vc_redist.x64.exe"
+    };
+    format!(
+        "The engine could not start because this PC has no Microsoft Visual C++ runtime (vcruntime140.dll and msvcp140.dll \
+         are missing; Windows status 0xC0000135, STATUS_DLL_NOT_FOUND). Next step: install \"Microsoft Visual C++ \
+         Redistributable\" ({installer} from https://aka.ms/vs/17/release/{installer}), or reinstall Pitwall, whose installer \
+         brings it, then try again."
+    )
 }
 
 /// A boxed future (the trait stays object-safe without extra crates).
@@ -488,6 +517,9 @@ pub async fn self_test(bin: &Path) -> Result<Vec<String>, String> {
         .map_err(|_| "it did not answer within 30 seconds".to_string())?
         .map_err(|e| format!("it could not start: {e}"))?;
     if !v.status.success() {
+        if let Some(problem) = exit_problem(v.status.code()) {
+            return Err(problem.to_string());
+        }
         let tail: String = String::from_utf8_lossy(&v.stderr)
             .chars()
             .rev()
@@ -674,6 +706,9 @@ impl Engine for LlamaCpp {
             let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
             loop {
                 if let Ok(Some(status)) = child.try_wait() {
+                    if let Some(problem) = exit_problem(status.code()) {
+                        return Err(problem);
+                    }
                     let t = tail.lock().map(|g| g.clone()).unwrap_or_default();
                     let last: Vec<&str> = t.lines().rev().take(4).collect();
                     return Err(EngineError::Start(format!(
@@ -859,6 +894,30 @@ mod tests {
         std::fs::write(&p, b"nope").unwrap();
         assert!(unpack(&p, d.path(), "bad.zip").is_err());
         assert!(unpack(&p, d.path(), "bad.tar.gz").is_err());
+    }
+
+    #[test]
+    fn an_engine_that_exits_with_status_dll_not_found_is_explained_as_a_missing_vc_runtime() {
+        // Windows reports the 32-bit status; Rust shows it as an i32.
+        let e = exit_problem(Some(STATUS_DLL_NOT_FOUND as i32)).expect("0xC0000135 is explained");
+        assert!(matches!(e, EngineError::MissingRuntime));
+        let m = e.to_string();
+        for needed in [
+            "Visual C++",
+            "vcruntime140.dll",
+            "msvcp140.dll",
+            "0xC0000135",
+            "vc_redist",
+            "reinstall Pitwall",
+        ] {
+            assert!(m.contains(needed), "the message must contain {needed:?}: {m}");
+        }
+        // Other exits stay with their own words.
+        assert!(exit_problem(Some(1)).is_none());
+        assert!(exit_problem(Some(0)).is_none());
+        assert!(exit_problem(None).is_none());
+        // The same status as an unsigned value cast the other way.
+        assert!(exit_problem(Some(-1_073_741_515)).is_some());
     }
 
     #[tokio::test]

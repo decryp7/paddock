@@ -106,7 +106,11 @@ jobs:
       sidecars: pitwall-server:--version
       # A per-machine app (ADR 0053): the installer embeds paddock-setup.exe, built with this app's identity and update key before the
       # bundle, and the installer built is read as an artifact (administrator level, paddock-setup.exe inside, the include's version).
-      windows-pre-bundle: node scripts/stage-paddock-setup.mjs --app pitwall
+      windows-pre-bundle: node scripts/stage-paddock-setup.mjs --app pitwall && node apps/pitwall/scripts/ci/stage-vc-redist.mjs
+      # ADR 0032: no binary the installer carries (pitwall-app.exe, pitwall-server.exe, named by the Tauri configuration) imports the VC++ runtime
+      # (a clean PC exits with 0xC0000135). The llama.cpp engine Pitwall downloads does, so the installer runs vc_redist.x64.exe (installer-hooks.nsh)
+      # and the engine's self-test names the runtime when it is missing (engines.rs). The dir is appended: Node on Windows reads C:/..., not Git Bash's /c/....
+      windows-bundle-check: f() { node conformance/release/windows-crt-imports.mjs --src-tauri apps/pitwall/app/src-tauri --bin-dir "$(cygpath -m "$1")"; }; f
       windows-installer-check: node conformance/release/check-per-machine-installer.mjs --conf apps/pitwall/app/src-tauri/tauri.conf.json --dir
       setup-node: false
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -143,7 +147,11 @@ jobs:
       sidecars: pitwall-server:--version
       # A per-machine app (ADR 0053): the installer embeds paddock-setup.exe, built with this app's identity and update key before the
       # bundle, and the installer built is read as an artifact (administrator level, paddock-setup.exe inside, the include's version).
-      windows-pre-bundle: node scripts/stage-paddock-setup.mjs --app pitwall
+      windows-pre-bundle: node scripts/stage-paddock-setup.mjs --app pitwall && node apps/pitwall/scripts/ci/stage-vc-redist.mjs
+      # ADR 0032: no binary the installer carries (pitwall-app.exe, pitwall-server.exe, named by the Tauri configuration) imports the VC++ runtime
+      # (a clean PC exits with 0xC0000135). The llama.cpp engine Pitwall downloads does, so the installer runs vc_redist.x64.exe (installer-hooks.nsh)
+      # and the engine's self-test names the runtime when it is missing (engines.rs). The dir is appended: Node on Windows reads C:/..., not Git Bash's /c/....
+      windows-bundle-check: f() { node conformance/release/windows-crt-imports.mjs --src-tauri apps/pitwall/app/src-tauri --bin-dir "$(cygpath -m "$1")"; }; f
       windows-installer-check: node conformance/release/check-per-machine-installer.mjs --conf apps/pitwall/app/src-tauri/tauri.conf.json --dir
       setup-node: false
       image: dev.decryptology.net/decryp7/paddock-ci:v2

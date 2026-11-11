@@ -1,0 +1,9 @@
+{
+  "$comment": "The Microsoft Visual C++ Redistributable the Windows installer runs (installer-hooks.nsh), pinned by SHA-256 and staged by scripts/ci/stage-vc-redist.mjs. The url is the versioned download behind https://aka.ms/vs/17/release/vc_redist.x64.exe (its path carries the SHA-256); read on 2026-11-11. To move the pin, take the new url from that redirect, download it, check that the SHA-256 in the path matches the bytes and that Windows shows a valid Microsoft Authenticode signature, then edit this file. Why the package and not app-local DLLs: https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files (central deployment is recommended because Microsoft services the libraries; app-local is not recommended).",
+  "x64": {
+    "name": "vc_redist.x64.exe",
+    "url": "https://download.visualstudio.microsoft.com/download/pr/e9604e21-4b79-4096-a4b3-1b63d4b55b4d/CC0FF0EB1DC3F5188AE6300FAEF32BF5BEEBA4BDD6E8E445A9184072096B713B/VC_redist.x64.exe",
+    "sha256": "cc0ff0eb1dc3f5188ae6300faef32bf5beeba4bdd6e8e445a9184072096b713b",
+    "size": 25635768
+  }
+}
