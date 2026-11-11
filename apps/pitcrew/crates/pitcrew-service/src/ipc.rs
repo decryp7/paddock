@@ -248,27 +248,25 @@ pub enum ServeMode {
 /// The per-user engine's pipe: its owner and SYSTEM, nobody else (no interactive-user entry, no Administrators).
 pub const PIPE_SDDL_USER: &str = "D:P(A;;GA;;;OW)(A;;GA;;;SY)";
 
-/// Makes this start's pipe name for the per-user engine (128 random bits) and records it in the engine's folder, where only that
-/// user's programs (and the app) read it. A hint on top of the pipe's ACL and the client's owner check, not a secret to rely on.
+/// A fresh pipe name for the per-user engine: 128 bits from the OS's random source. A hint on top of the pipe's ACL and the client's
+/// owner check, not a secret to rely on.
+///
+/// # Errors
+/// The OS's random source failed.
+pub fn new_user_pipe_name() -> std::io::Result<String> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).map_err(|e| std::io::Error::other(format!("the OS random source failed: {e}")))?;
+    let half = |b: &[u8]| u64::from_le_bytes(b.try_into().unwrap_or([0; 8]));
+    Ok(pitcrew_core::service_paths::user_pipe_name((half(&bytes[..8]), half(&bytes[8..]))))
+}
+
+/// Records `name` in the engine's folder (atomically), where only that user's programs (and the app) read it. Called only after the
+/// pipe itself exists, so a reader never finds a name that no pipe answers to.
 ///
 /// # Errors
 /// The folder or the file could not be written.
-pub fn make_user_pipe_name(data_dir: &std::path::Path) -> std::io::Result<String> {
-    use std::hash::{BuildHasher, Hasher};
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_nanos() as u64);
-    // `RandomState` is seeded by the OS's random source once per process: a fresh state per half keeps the halves apart.
-    let half = |salt: u64| {
-        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-        h.write_u64(nanos);
-        h.write_u64(salt);
-        h.finish()
-    };
-    let name = pitcrew_core::service_paths::user_pipe_name((half(1), half(2)));
-    std::fs::create_dir_all(data_dir)?;
-    std::fs::write(data_dir.join(pitcrew_core::service_paths::USER_ENGINE_PIPE_FILE), &name)?;
-    Ok(name)
+pub fn record_user_pipe_name(data_dir: &std::path::Path, name: &str) -> Result<(), crate::error::Error> {
+    crate::store::write_atomic(&data_dir.join(pitcrew_core::service_paths::USER_ENGINE_PIPE_FILE), name)
 }
 
 /// The per-user engine's pipe name recorded in `dir`, if the file holds a name this module could have made.
@@ -331,12 +329,15 @@ mod platform {
     pub async fn serve(tx: Sender<Msg>, data_dir: std::path::PathBuf, permits: Arc<Semaphore>, mode: ServeMode) -> Result<(), String> {
         let name = match mode {
             ServeMode::System => super::pipe_name(&data_dir),
-            ServeMode::User => {
-                super::make_user_pipe_name(&data_dir).map_err(|e| format!("the engine's pipe name could not be recorded ({e})"))?
-            }
+            ServeMode::User => super::new_user_pipe_name().map_err(|e| format!("the engine's pipe name could not be made ({e})"))?,
         };
+        // The pipe first, then its name: a second start never overwrites the name of a running engine's pipe.
         let mut server = create(&name, true, mode)
             .map_err(|e| format!("the pipe {name} could not be created ({e}); is another Pitcrew service running?"))?;
+        if mode == ServeMode::User {
+            super::record_user_pipe_name(&data_dir, &name)
+                .map_err(|e| format!("the engine's pipe name could not be recorded ({e}); the app cannot find this engine"))?;
+        }
         loop {
             server.connect().await.map_err(|e| e.to_string())?;
             let connected = server;
@@ -526,10 +527,12 @@ mod user_pipe_name_tests {
     #[test]
     fn the_engine_records_a_random_pipe_name_and_reads_back_only_a_valid_one() {
         let dir = scratch("roundtrip");
-        let first = make_user_pipe_name(&dir).unwrap();
+        let first = new_user_pipe_name().unwrap();
+        record_user_pipe_name(&dir, &first).unwrap();
         assert!(pitcrew_core::service_paths::is_user_pipe_name(&first), "{first}");
         assert_eq!(read_user_pipe_name(&dir).as_deref(), Some(first.as_str()));
-        let second = make_user_pipe_name(&dir).unwrap();
+        let second = new_user_pipe_name().unwrap();
+        record_user_pipe_name(&dir, &second).unwrap();
         assert_ne!(first, second, "a new name at each start");
         assert_eq!(read_user_pipe_name(&dir).as_deref(), Some(second.as_str()));
         // Whatever else is in the file is not a name that is ever opened.

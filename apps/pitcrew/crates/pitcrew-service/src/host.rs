@@ -332,7 +332,9 @@ mod single_instance_tests {
         assert!(text.contains("already running"), "{text}");
         first.stop();
         // The lock goes with the first engine: a new one starts.
-        start_user(&dir).expect("the folder is free again once the first engine stopped").stop();
+        start_user(&dir)
+            .expect("the folder is free again once the first engine stopped")
+            .stop();
         let _ = std::fs::remove_dir_all(&dir);
     }
 

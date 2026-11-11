@@ -190,6 +190,10 @@ fn start_user_engine_events<R: Runtime>(app: AppHandle<R>) {
             loop {
                 // What is wrong with the engine, if anything, goes to the window with the service's other problems.
                 let mut problem = crate::service_install::start_user_engine().err().map(|e| e.message);
+                if let Some(p) = &problem {
+                    // ER-27: the cause reaches the diagnostic log, not only the window.
+                    crate::applog::write(&format!("the engine for your own runners did not start: {p}"));
+                }
                 let a = app.clone();
                 let result = subscribe_engine(
                     Engine::User,
