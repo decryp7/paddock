@@ -127,8 +127,11 @@ the SYSTEM service keeps the `session = service` runners in administrator-only f
 - **Never elevated.** The engine refuses to start with an elevated token (`user_engine_token_allowed`, checked in `Host::start_with`
   and so in `run`), and the app never starts it from an elevated app: it skips it and the window says so (`ELEVATED_SKIP_NOTICE`
   among the service's problems). Starting it de-elevated through the shell is not built.
-- **Its pipe's name** is 128 random bits, new at each start, recorded in `pipe.name` in the engine's folder (a hint, checked for
-  shape; the pipe's owner is still checked by the client). Another account can neither connect nor create an instance (VM rows).
+- **One engine per user.** The engine holds an exclusive lock on `engine.lock` in its folder for as long as it runs, taken before the
+  supervisor, the pipe or `pipe.name`; a second engine on the same folder exits with a message that says so (round 5, P1-1).
+- **Its pipe's name** is 128 random bits from the OS's random source, new at each start. The pipe is created first and `pipe.name` is
+  written afterwards, atomically, in the engine's folder (a hint, checked for shape; the pipe's owner is still checked by the client).
+  Another account can neither connect nor create an instance (VM rows written, not run yet).
 - **Routing never guesses.** A new runner is refused when the other engine already has its name; a request about one runner goes to
   the engine whose status listed it; a runner nobody lists gets an `UnknownRunner` answer, and if an engine did not answer the
   request is not sent anywhere else. `SaveSettings` compares only the service runners, the defaults and whether an older install
