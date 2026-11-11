@@ -12,7 +12,7 @@
 - **Revision 7 (2026-11-12, `docs/debrief-1-2-restored-scope` from `origin/docs/debrief-1-2-api-landing` `765346486`):**
   applies the user's answers of 2026-11-12 to Q-U1 (c), Q-U2 (b2), Q-U3 (b) and Q-U4 (a), and replaces §14.13's stub with
   the design of the restored scope (investigation-folder features, ADR 0068's checks beyond WP-1: 27 packages, 116 raw plus 13 for the `paddock-tools` and `paddock-deps` subset WP-12 needs; round 2's fixes on 2026-11-12, §17.4).
-  Q-U5 (the cheaper options, ER-37) is open. What changed: §17.4. Heads read for revision 7, re-read right before its
+  Q-U5 and Q-U6 were decided by the user on 2026-11-12, both (a) (§17.2). What changed: §17.4. Heads read for revision 7, re-read right before its
   commit (ADR 0091's block):
 
 ```evidence-heads
@@ -409,7 +409,14 @@ pub enum DifferentWhy { PidDiffers, CreateTimeDiffers, MainModuleDiffers, Machin
   RunByMarkerOnly }` (a marker split runs, nothing proves they are one process); no `run` on either side is `Unconfirmed {
   CreateTimeMissing }` as before. The thread view (§14.13.4) uses this type and this function; it defines no process
   identity of its own. The split is a pure function `debrief_core::process::split_runs(markers: &[(EventId, i64)], pid:
-  &str) -> RunMap` over the spans' lifecycle pairs, so FD-P owns it and IF-3 calls it.
+  u32) -> RunMap` over the spans' lifecycle pairs, so FD-P owns it and IF-3 calls it.
+- **A pid from a log field (revision 7, round 3).** Log fields carry the pid as text. `debrief_core::process::parse_pid(
+  text: &str) -> Option<u32>` (FD-P, pure) is the one parser: decimal (`4242`), or hex with a `0x` or `0X` prefix
+  (`0x1092`, as ETW and EVTX text exports write it), surrounding blanks trimmed, nothing else; a value above `u32::MAX`, an
+  empty field or any other text gives `None`. A `None` pid gives **no `ProcessInstance`**: the thread view still shows the
+  thread's lane, keyed by source and thread only (`ThreadKey.instance: Option<ProcessInstance>`, `None` = "a lane without
+  a process"), and that lane never pairs with another. Tests in `debrief-core/src/process/tests.rs`: decimal, hex, padded,
+  over range, negative, words.
 - Tests: `debrief-core/src/process/tests.rs`, a table of pairs per reason (including both run cases), and a property test
   that `same_process` is symmetric.
 
@@ -2537,9 +2544,9 @@ registry (§4.6), every long operation is a job ending in ADR 0052's `Outcome` (
 | Prerequisite | State on 2026-11-12 | Needed by | Owner |
 |---|---|---|---|
 | ADR 0052 WP-B1: `NextStep`, `Why`, `Outcome` in `paddock-jobs` | no `enum NextStep` in `crates/paddock-jobs` on any branch | every job here; WP-18 adds variants to it | ADR 0052's package (§15, shared dependency) |
-| ADR 0051's crate `paddock-tools` (pins, install on demand, Authenticode check) | no `crates/paddock-tools` on any branch; ADR 0051 (Accepted 2026-11-04, `origin/docs/paddock-tools-design-v2` `a614485c9`) prices the whole crate at 42 to 57 days, scheduled after the releases | WP-12 (the helper's pin, the DAC signature check) | **priced here as PT-1, the subset WP-12 needs** (§14.13.8; Q-U6 offers making .NET conditional instead) |
+| ADR 0051's crate `paddock-tools` (pins, install on demand, Authenticode check) | no `crates/paddock-tools` on any branch; ADR 0051 (Accepted 2026-11-04, `origin/docs/paddock-tools-design-v2` `a614485c9`) prices the whole crate at 42 to 57 days, scheduled after the releases | WP-12 (the helper's pin, the DAC signature check) | **priced here as PT-1, the subset WP-12 needs** (§14.13.8; Q-U6 (a), decided 2026-11-12) |
 | ADR 0028's `paddock-deps` (notices for downloaded tools) | no `crates/paddock-deps` on any branch | WP-12's notices | Y16 (§14.10; ADR 0028's DP1 and DP4 are inside Y16's 15 days, wave 7), plus **PT-2**, ADR 0051's WP-12 (the "downloaded on request" class), priced here |
-| MEM-2's `debrief_budget::MemoryBudget` and `Ticket` (not FD-G's `OpenDocuments`, which is unpriced and undecided) | on `origin/debrief/p0-idle` `a0fd29185` only (`ed8e6005a`), not on `origin/main` or `origin/debrief/1.2-int` | WP-RR (the held dump's ticket) | L-0 (§8) |
+| MEM-2's `debrief_budget::MemoryBudget` and `Ticket` (not FD-G's `OpenDocuments`, which is unpriced and undecided) | on `origin/debrief/p0-idle` `a0fd29185` only (`ed8e6005a`), not on `origin/main` or `origin/debrief/1.2-int` | WP-RR (dumps admitted by `DumpDocs`, not releasable) | L-0 (§8) |
 | FD-E2, FD-I, FD-B, FD-P, Z3, Z6 | 1.2 packages, not built | IF-1 to IF-4, WP-6, WP-9 | their rows (plan §10.1, ADR 0066) |
 | `framehop` | an external crate (MIT or Apache-2.0), not a dependency yet | WP-3 | WP-3 adds it (licence allow-list as for every dependency) |
 
@@ -2733,10 +2740,10 @@ paging (§14.5). A thread id means something only inside one process instance, s
 /// profile (`default_profile.toml`) and user profiles: `process_fields = ["pid", "ProcessId", "ProcessID"]`,
 /// `thread_fields = ["tid", "thread", "ThreadId", "ThreadID", "thread_id"]`, first match wins, at most 16 names each.
 pub struct ThreadRoles { pub process: Vec<FieldName>, pub thread: Vec<FieldName> }
-/// A lane: one thread of one process. `instance` is §2.5's `ProcessInstance` (`pid` from the process field, `started:
+/// A lane: one thread of one process. `instance` is §2.5's `ProcessInstance` (`pid` parsed by `parse_pid`, `started:
 /// None` unless the source records a start time, `run` from FD-P's `split_runs`); two lanes are one process only when
 /// `same_process` says `Same`, and the lane shows an `Unconfirmed` reason when it says so. No second identity type.
-pub struct ThreadKey { pub instance: ProcessInstance, pub source: SourceId, pub thread: Box<str> }
+pub struct ThreadKey { pub instance: Option<ProcessInstance>, pub source: SourceId, pub thread: Box<str> }   // None: the pid field was missing or not a number (§2.5 `parse_pid`)
 pub struct ThreadSummary { pub key: ThreadKey, pub events: u64, pub first: i64, pub last: i64, pub stalls: u32, pub pairing: Option<UnconfirmedWhy> }
 
 pub struct SequenceRequest {
@@ -2905,20 +2912,23 @@ pub enum MissingWire { MemoryNotInDump, OverBudget, Unreadable }
       file: File,                          // held, never re-opened by path while the document is open
       identity: FileIdentity,              // ADR 0068 §1's cache identity, checked before every lend
       header_hash: u64,
-      ticket: debrief_budget::Ticket,      // MEM-2 as built (`origin/debrief/p0-idle`, `debrief-budget/src/lib.rs`)
+      // no budget ticket: `DumpDocs` owns the document's ticket (MEM-2 as built), see below
   }
   ```
 
   **How it counts against the budget.** MEM-2's `MemoryBudget::admit(kind, name, bytes, release) -> Result<Ticket,
-  OverBudget>` [S: `debrief-budget/src/lib.rs:199`, `Ticket` `:232`] already admits the dump's decoded model (kind
-  `dump`, the model's estimated bytes, including the memory index of ADR 0068 §12); WP-RR keeps that one ticket in
-  `HeldDocument` instead of beside it. The held handle itself adds **no bytes**: it is a kernel object, not process
+  OverBudget>` [S: `debrief-budget/src/lib.rs:199`, `Ticket` `:232`] already admits each dump's decoded model, and the
+  **ticket is owned by `DumpDocs`**, the per-window document store in `debrief-dump` (`store.rs:116`, the `Doc { ticket }`
+  of `insert`), with `release: None` (`store.rs:70`): **dumps are not releasable**, they stay in memory until closed,
+  and an open that does not fit fails with MEM-2's `OverBudget`. WP-RR keeps it that way [J]: releasing a dump would mean
+  importing it again through the reader plugin (a whole re-parse, minutes for a large dump), which is a new mechanism
+  WP-RR's 8 days do not hold and which MEM-6 and FD-G may decide later. So `HeldDocument` holds **no ticket**: it lives
+  beside its `Doc` under the same `DocId`, owned by the app's dumps slot (`app/src-tauri/src/dumps.rs`), and is dropped
+  with it when `DumpDocs::close` drops the ticket. The held handle adds **no bytes**: it is a kernel object, not process
   memory, and the plugin's parsed-prefix LRU counts against the reader process's own cap (ADR 0068 §7, §12), not the
-  app's budget. When the budget releases the dump (its `Release` callback drops the model), the handle stays open, so the
-  next use re-reads from the same held file with `Ticket::readmit` (rule 53: hold the name, never re-open by path); the
-  handle closes only with the document. The number of held handles is bounded by the open dumps, a registry row
-  `dumps.held_documents` (32, today's `MAX_DOCS`, `hard`), so nothing here depends on FD-G or the MEM-6 ADR, which may later
-  replace the count with bytes. An `OverBudget` on open is the open's `LimitExceeded` with MEM-2's words and Settings path.
+  app's budget; ADR 0068 §12's memory index is part of the model and so inside the ticket's estimate. The number of held
+  handles is bounded by the open documents, a registry row `dumps.held_documents` (32, today's `MAX_DOCS`, `hard`), so
+  nothing here depends on FD-G or the MEM-6 ADR.
   For each query the host lends the handle by ranges through `HostFiles::lend_ranges` (§4.2) for the call only. A restored session re-opens by path only under a re-confirmed grant
   (`paths.rs`) and re-verifies `FileIdentity` and the header hash; a mismatch is `MissingReason::FileChanged`.
 - **Limits** (registry rows in `debrief-dump/src/limits.rs`, `hard`, each with `limit_case!`): `dumps.query_ranges`
@@ -3115,7 +3125,7 @@ it has one. Every package that ends a job depends on ADR 0052 WP-B1 (§15's shar
 | | **Investigation-folder total** (IF-1 to IF-6) | | | **21.5** | C2 stays in §10.2; IF-3's run split (0.5) moved to FD-P |
 | | **ADR 0068 remainder** (99 [P] less WP-1's 4, less 0.5 netted in WP-17) | | | **94.5** | 76.5 without WP-0 and WP-12 |
 | | **Restored scope** (IF and ADR 0068) | | | **116** | [calc] |
-| | **Its prerequisites priced here** (PT-1, PT-2) | | | **13** | [calc]; Q-U6 offers making .NET conditional instead |
+| | **Its prerequisites priced here** (PT-1, PT-2) | | | **13** | [calc]; Q-U6 (a), decided by the user 2026-11-12 |
 | | **Total added to 1.2** | | | **129** | [calc], plus FD-P's +0.5 in plan §10.1 |
 
 **Test homes of ADR 0068's packages** (crate paths under `apps/debrief/crates/` unless named; each file holds that
@@ -3152,7 +3162,8 @@ gentle level; nothing here uses a starvable level.
 #### 14.13.10 Common practice and cost (ER-37)
 
 Debrief is a personal tool, so ER-37's default is common practice; each row names the cheaper common-practice option,
-which §17.2 Q-U5 offers as a decision. Sources were read on 2026-11-12.
+which §17.2 Q-U5 offered as a decision; the user chose (a), build as designed, on 2026-11-12. Sources were read on
+2026-11-12.
 
 | Function | Common practice, with sources | Cost here (raw) | Cheaper common-practice option: its cost, what it saves |
 |---|---|---|---|
@@ -3324,9 +3335,9 @@ says why, and its cheaper option is a decision the user can still take.
 **Summary.** The plugin, back-pressure, bounded-reply and list mechanisms are accepted ADRs with common practice behind
 them; this revision does not reopen them. The stall Settings and incremental annotation were decided on 2026-11-12 with
 the cheaper option (Q-U3 (b), Q-U1 (c)). The restored scope goes beyond common practice by the user's earlier decisions;
-its cheaper options are §14.13.10's, offered as Q-U5.
+its cheaper options are §14.13.10's; the user declined them on 2026-11-12 (Q-U5 (a)).
 
-### 17.2 Questions for the user (revision 6, decided 2026-11-12; revision 7 adds Q-U5)
+### 17.2 Questions for the user (all decided 2026-11-12: Q-U1 to Q-U4 of revision 6, Q-U5 and Q-U6 of revision 7)
 
 **Decided by the user on 2026-11-12** (answers relayed in revision 7's brief); each is applied in the section named.
 
@@ -3341,12 +3352,15 @@ Options that were offered, for the record: Q-U1 (a) build the listing sequence, 
 generation; Q-U2 (a) skip duplicates, (b1) keep and count, (c) declare EVTX `Position`; Q-U3 (a) per-key Settings, (c) no
 Setting; Q-U4 (b) design before each first package, (c) move it back out.
 
-**Open (revision 7).** Not decided here; the user decides.
+**Revision 7's questions, decided by the user on 2026-11-12** (relayed by the coordinator):
 
-| # | Question | Options | Recommendation |
+| # | Question | Decision (2026-11-12) | Applied in |
 |---|---|---|---|
-| Q-U5 | **Cheaper options for the restored scope** (ER-37, §14.13.10). Each function has a common-practice option that costs less | (a) build as designed, 116 raw plus 13 for PT-1 and PT-2; (b) take one or more of §14.13.10's cheaper options: citations with one UTC time (saves about 2), report blocks as headings in text (about 2.5), sequence view as a thread filter plus Mermaid text (about 3), keep today's one-request narrative (about 3), dump checks without Debrief's own unwinder (12), "Open in WinDbg or Visual Studio" instead of native checks (about 75), link out to Visual Studio or `dotnet-dump` for .NET (about 17.5) | **(a)**: the user decided each function with its size on 2026-11-07 and brought all of it back on 2026-11-11; if the end date must move, the first candidate is the unwinder (WP-3, 12 days), whose loss weakens hang verdicts on unsymbolised dumps but leaves every check working |
-| Q-U6 | **.NET and `paddock-tools`.** WP-12 needs a part of ADR 0051's `paddock-tools` (pins, download and verify, Authenticode), which ADR 0051 prices at 42 to 57 days for the whole crate, after the releases, and which exists on no branch | (a) build the subset in 1.2 as PT-1 and PT-2: **+13 raw** (about 15.6 with the buffer, about 3 working days later), .NET ships in 1.2; (b) **.NET conditional**: 1.2 keeps WP-0 (3) only; WP-12 starts only if `paddock-tools` lands on its own schedule by a date the user sets (suggested 2027-03-31, about T+100 [J]); otherwise WP-12 moves to the next release, and 1.2's checks show the managed part as Not checked with "needs the .NET helper (next release)". Saves 13 raw if the crate lands on its own schedule, 28 (13 + WP-12's 15) if it does not | **(a)**, matching the user's "build everything" (Q-U5 (a)); (b) is the cheaper option, and the right one if ADR 0051's own schedule is expected to deliver the crate before the date |
+| Q-U5 | **Cheaper options for the restored scope** (ER-37, §14.13.10): citations with one UTC time, blocks as headings, a thread filter plus Mermaid, the one-request narrative, no own unwinder, "Open in WinDbg or Visual Studio", linking out for .NET | **(a)**: build everything as designed (116 raw) | §14.13, plan §10.6 |
+| Q-U6 | **.NET and `paddock-tools`.** WP-12 needs a part of ADR 0051's `paddock-tools`, priced for the whole crate at 42 to 57 days after the releases | **(a)**: build the subset in 1.2 as PT-1 (10.5) and PT-2 (2.5), +13 raw, so .NET ships in 1.2 | §14.13.8, plan §9.4 and §10.6 |
+
+Options that were offered, for the record: Q-U5 (b), any of §14.13.10's cheaper options (savings about 2 to 75 each);
+Q-U6 (b), .NET conditional on `paddock-tools` landing on ADR 0051's schedule by a date (saves 13, or 28 if it misses).
 
 ### 17.3 What revision 6 changed
 
@@ -3363,6 +3377,11 @@ option (d), Q-U2's (b1)/(b2) split, §17.1's `define*` row. The plan `debrief-1-
 carries a landing note on its totals.
 
 ### 17.4 What revision 7 changed
+
+**Round 3 (same revision, after round 2 was approved at `6df3df8bc`):** Q-U5 and Q-U6 recorded as decided (a); WP-RR
+keeps dumps unreleasable, `DumpDocs` owning the ticket (MEM-2 as built), `HeldDocument` without one; FD-P's `parse_pid`
+and `split_runs` on a `u32` pid, a lane without a process when the pid is not a number; plan §9.4 moves PT-2 and WP-12
+into wave 7.
 
 **Round 2 (same revision, after the independent review of `72417e82c`):** WP-RR on MEM-2's `Ticket` (no FD-G type);
 PT-1 and PT-2 priced (the `paddock-tools` and `paddock-deps` subsets) and Q-U6; IF-3 on §2.5's `ProcessInstance` with the
@@ -3394,7 +3413,7 @@ the shell move (workbench.md and the move plan own the API), §14.5 store perfor
 **Restored to 1.2, designed in revision 7:** §14.13 (signatures, homes, Settings, limits, logs, jobs, test homes, work
 packages with days and acceptance, ER-37's comparison). Its prerequisites that are not built are listed in its table:
 ADR 0052 WP-B1, MEM-2's landing (L-0), and the parts of ADR 0051's `paddock-tools` and ADR 0028's `paddock-deps` that
-WP-12 needs, priced as PT-1 and PT-2 (Q-U6 offers the cheaper conditional option).
+WP-12 needs, priced as PT-1 and PT-2 (Q-U6 (a), decided 2026-11-12).
 
 **Not verified:** nothing was compiled; signatures were checked against the source files named in the header, not
 built. The listing sequence of §5.6 is not built in 1.2 (Q-U1 (c)). The drawing research's numbers are from

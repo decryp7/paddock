@@ -715,8 +715,9 @@ is the integrator's (an implementer under the coordinator), never the author's.
 - **The restored scope in the waves (section 10.6, 2026-11-12).** Wave 2: WP-0, WP-2, WP-11 (app only; WP-1 is in 10.1).
   Waves 3 and 4: WP-RR once PH2a, 2.6b and L-0's MEM-2 have landed (about T+10), then WP-4, WP-16. Wave 5: WP-8, WP-3
   (12, one agent), WP-9 after FD-E2 and Z6, WP-17 after SI-12, IF-5 after F5 and SI-4, IF-6 after Z1 and SI-3. Wave 6:
-  WP-5, WP-6, WP-7, WP-18 after ADR 0052 WP-B1, WP-10, IF-1 and IF-2 after FD-E2 and FD-I, and PT-1 (shared, after T),
-  then PT-2 after Y16's DP1 and DP4. Wave 7: IF-3 after M3b, IF-4, WP-12 after PT-1, WP-13 after M3a, WP-14, WP-15. **The
+  WP-5, WP-6, WP-7, WP-18 after ADR 0052 WP-B1, WP-10, IF-1 and IF-2 after FD-E2 and FD-I, and PT-1 (shared, after T).
+  Wave 7: PT-2 after Y16's DP1 and DP4 (Y16 is in wave 7), then WP-12 after PT-1 and PT-2; IF-3 after M3b, IF-4, WP-13
+  after M3a, WP-14, WP-15. **The
   serial ADR 0068 chain** WP-RR (8) → WP-8 (3) → WP-3 (12) → WP-5 (8) → WP-6 (4) → WP-7 (4) → WP-14 (8) is about 47
   working days after PH2a and 2.6b, so from about T+10 to about T+57 with one agent on it: far inside the capacity-bound
   end, so it adds no path; the end moves because of the days, about T+123 to about T+149.
@@ -907,8 +908,7 @@ C2 (the time shapes) stays in 10.2, widened to the three places an offset is rea
 (`NextStep` in `paddock-jobs`, every job here and WP-18) and MEM-2's landing by L-0 (WP-RR, which holds MEM-2's
 `debrief_budget::Ticket`). ADR 0051's `paddock-tools` (42 to 57 days for the whole crate, scheduled after the releases)
 and ADR 0028's `paddock-deps` are needed only in part, by WP-12: that part is priced above as PT-1 and PT-2 (`paddock-deps`'
-DP1 and DP4 are already inside Y16). The API design's Q-U6 offers the cheaper option, .NET conditional on `paddock-tools`
-landing by a date. None is on the streaming and folder-open chain, so the critical path of 9.3 does
+DP1 and DP4 are already inside Y16). The user chose the API design's Q-U6 (a) on 2026-11-12: build that part in 1.2. None is on the streaming and folder-open chain, so the critical path of 9.3 does
 not change; these packages run by capacity once their dependencies land.
 
 **Total and calendar, recomputed** [calc; marks as in section 9]:
@@ -929,5 +929,5 @@ not change; these packages run by capacity once their dependencies land.
 At 5.5 agent-days a working day: 782.5 / 5.5 = 142.3, plus Spotter 2.5 and quiet-window slips 4, **about 149 working
 days from 2026-11-09: about 2027-06-03** (no holidays or CI queues counted), against 2027-04-21 before. ADR 0070's own deltas
 (the built-in engine removed, PH1 −1 and LV1 −0.75, against its removal work) are not netted here [U]; its plan table
-owns them. Q-U6 (b), .NET conditional, takes out 13 raw if `paddock-tools` lands on its own schedule (about 3 working days
+owns them. Q-U6 (b), .NET conditional (not chosen, 2026-11-12), would have taken out 13 raw if `paddock-tools` lands on its own schedule (about 3 working days
 earlier) and 28 if it misses the date (about 6 working days earlier).
