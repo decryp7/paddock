@@ -50,6 +50,9 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// serving (`stop_serving` times out at 30 s in `commands::timeout_for`) plus time to close the windows.
 pub const EXIT_STALL_LIMIT: std::time::Duration = std::time::Duration::from_secs(40);
 
+/// Pitwall's `CHANGELOG.md`, the source of What's New (the notes of the running version).
+pub const CHANGELOG: &str = include_str!("../../../CHANGELOG.md");
+
 /// Where the releases are (About's "Release notes", Updates' "Open the releases page").
 pub const RELEASES_PAGE: &str = "https://dev.decryptology.net/decryp7/paddock/releases?q=pitwall-v";
 /// The feed the updater reads (the moving `pitwall-latest` release of the Paddock repository).
@@ -291,6 +294,7 @@ fn updater<R: Runtime>(
         .public_key(key)
         .releases_page(RELEASES_PAGE)
         .homepage("https://dev.decryptology.net/decryp7/paddock")
+        .changelog(CHANGELOG)
         .build_info(option_env!("PADDOCK_BUILD_COMMIT"), option_env!("PADDOCK_BUILD_DATE"));
     match test_dir {
         None => install_with(
@@ -567,6 +571,14 @@ pub(crate) fn flush_on_exit(event: &tauri::RunEvent) {
 #[cfg(test)]
 mod legal_tests {
     use super::LEGAL;
+
+    /// What's New shows the notes of the running version: `CHANGELOG.md` is handed to the updater and has a section for it
+    /// (never another version's), so the window opens after an update.
+    #[test]
+    fn whats_new_has_notes_for_the_running_version() {
+        let notes = paddock_updater::notes::release_for(super::CHANGELOG, env!("CARGO_PKG_VERSION"));
+        assert!(notes.is_some(), "CHANGELOG.md has no section for {}", env!("CARGO_PKG_VERSION"));
+    }
 
     /// The notices come first and name what Pitwall ships (the app's and the server's Rust crates, the UI's npm packages)
     /// with the licence texts (the attribution Apache-2.0 and MIT require).
