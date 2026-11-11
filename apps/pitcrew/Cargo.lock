@@ -3125,11 +3125,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-cli"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "paddock-workspace-hack",
+ "serde_json",
+]
+
+[[package]]
+name = "paddock-commands"
+version = "0.2.0"
+dependencies = [
+ "paddock-workspace-hack",
+ "serde",
+]
+
+[[package]]
 name = "paddock-env"
 version = "0.1.0"
 dependencies = [
  "libc",
  "log",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "paddock-health"
+version = "0.2.0"
+dependencies = [
+ "chrono",
+ "log",
+ "paddock-jobs",
+ "paddock-limits",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
@@ -3200,6 +3230,41 @@ dependencies = [
  "paddock-workspace-hack",
  "windows-sys 0.61.2",
  "zeroize",
+]
+
+[[package]]
+name = "paddock-service"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "log",
+ "objc2",
+ "objc2-foundation",
+ "objc2-service-management",
+ "paddock-cli",
+ "paddock-commands",
+ "paddock-env",
+ "paddock-health",
+ "paddock-proc",
+ "paddock-settings",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.21",
+ "windows 0.62.2",
+ "windows-service",
+]
+
+[[package]]
+name = "paddock-settings"
+version = "0.2.0"
+dependencies = [
+ "log",
+ "paddock-workspace-hack",
+ "regex",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3455,6 +3520,7 @@ dependencies = [
  "libc",
  "nix",
  "paddock-ipc",
+ "paddock-service",
  "pitcrew-core",
  "serde",
  "serde_json",

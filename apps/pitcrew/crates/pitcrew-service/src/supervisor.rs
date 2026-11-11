@@ -82,6 +82,13 @@ pub type Reply = tokio::sync::oneshot::Sender<Response>;
 pub enum Msg {
     /// A request from the app.
     Request(Box<Request>, Reply),
+    /// A request the transport refused because its caller may not send it (it never reached the supervisor); only for the log.
+    Denied {
+        /// The request's kind, never its fields.
+        request: String,
+        /// Who asked.
+        caller: String,
+    },
     /// A subscriber for pushed events.
     Subscribe(tokio::sync::mpsc::Sender<Response>),
     /// A line of a runner's output.
@@ -174,6 +181,21 @@ fn unreachable_time() -> TimeOfDay {
     TimeOfDay::new(0, 0).unwrap()
 }
 
+/// The launcher of this OS; on Windows it asks the trust rule before a runner starts with the service's own token.
+fn os_launcher() -> Box<dyn Launcher> {
+    #[cfg(windows)]
+    {
+        Box::new(crate::launcher::ServiceTokenGuard::new(
+            crate::launcher::OsLauncher,
+            crate::launcher::windows_token_check(),
+        ))
+    }
+    #[cfg(not(windows))]
+    {
+        Box::new(crate::launcher::OsLauncher)
+    }
+}
+
 /// The real environment.
 pub fn os_env(data_dir: PathBuf) -> Env {
     let exe_stamp: Arc<dyn Fn() -> Option<BinaryStamp> + Send + Sync> = if cfg!(windows) {
@@ -199,7 +221,7 @@ pub fn os_env(data_dir: PathBuf) -> Env {
         base_path,
         exe_stamp,
         data_dir,
-        launcher: Box::new(crate::launcher::OsLauncher),
+        launcher: os_launcher(),
         sources: Sources::public(),
         platform: Platform::current().unwrap_or(Platform {
             os: pitcrew_core::platform::Os::Linux,
@@ -513,6 +535,12 @@ impl Supervisor {
         }
     }
 
+    /// Writes a line to the service log.
+    pub fn note(&mut self, text: &str) {
+        let now = (self.env.clock)();
+        self.log_service(now, text);
+    }
+
     /// Handles one message.
     pub fn handle(&mut self, msg: Msg) {
         let now = (self.env.clock)();
@@ -521,6 +549,9 @@ impl Supervisor {
                 if let Some((reply, resp)) = self.request(*req, reply, now) {
                     let _ = reply.send(resp);
                 }
+            }
+            Msg::Denied { request, caller } => {
+                self.log_service(now, &format!("refused {request} from {caller}: it needs an elevated administrator"));
             }
             Msg::Subscribe(sub) => {
                 let status = self.status_event(now);

@@ -3,6 +3,7 @@
 //! `docs/adr/0003-service-model.md` and `docs/adr/0004-ipc.md`.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod caller;
 pub mod cleanup;
 pub mod cli;
 #[cfg(target_os = "macos")]
@@ -21,6 +22,7 @@ pub mod platform;
 pub mod probe;
 pub mod process;
 pub mod process_watch;
+pub mod protected;
 pub mod runner_files;
 pub mod status;
 pub mod store;

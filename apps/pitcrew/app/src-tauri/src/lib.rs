@@ -9,6 +9,7 @@ pub mod commands;
 pub mod credentials;
 pub mod diagnostics;
 pub mod dto;
+pub mod elevated_request;
 pub mod events;
 pub mod gitea;
 pub mod handoff;
@@ -25,6 +26,11 @@ use std::sync::Arc;
 
 /// Starts the app.
 pub fn run() {
+    // The forwarding mode (`elevated_request`): one request for the service, run elevated, then exit; no window.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(code) = elevated_request::run_if_asked(&args, &service_client::DirectClient) {
+        std::process::exit(code);
+    }
     let client: SharedClient = Arc::new(service_client::LocalServiceClient);
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())

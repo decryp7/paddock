@@ -6,9 +6,12 @@
 //!   owner, read/write for interactive users (the logged-on user's app), nothing for anyone else (services, network
 //!   logons, other sessions' non-interactive tokens).
 //! - Unix: `<socket folder>/pitcrew.sock` (the data folder, or `$XDG_RUNTIME_DIR/pitcrew` on Linux) in a 0700 folder, the socket itself 0600: only the user who runs the agent.
+//! - A request that changes something is accepted only from an elevated administrator on Windows ([`crate::caller`]); the
+//!   others get `PermissionDenied` and the supervisor never sees it (it only logs the refusal).
 //! - Every connection starts with a hello; frames are bounded by `MAX_FRAME`; at most [`MAX_CONNECTIONS`] at once.
 //!   A subscribed connection receives pushed events until either side closes it.
 
+use crate::caller::{authorize, kind_of, Caller};
 use crate::supervisor::Msg;
 use pitcrew_core::protocol::{decode_body, encode_frame, frame_len, ErrorCode, FrameError, Request, Response, ServiceError};
 use std::sync::mpsc::Sender;
@@ -81,8 +84,15 @@ fn timeout_for(r: &Request) -> Duration {
     }
 }
 
-/// Serves one connection.
-pub async fn connection<S: AsyncRead + AsyncWrite + Unpin + Send>(mut stream: S, tx: Sender<Msg>) {
+/// Serves one connection. `identify` says who the caller is; it is asked once, when the first request that changes
+/// something arrives (the OS can tell only after the client's first bytes).
+pub async fn connection<S: AsyncRead + AsyncWrite + Unpin + Send>(
+    mut stream: S,
+    tx: Sender<Msg>,
+    identify: impl FnOnce() -> Caller + Send,
+) {
+    let mut identify = Some(identify);
+    let mut caller: Option<Caller> = None;
     let hello = match tokio::time::timeout(HELLO_TIMEOUT, read_frame(&mut stream)).await {
         Ok(Ok(r)) => r,
         _ => return,
@@ -117,6 +127,19 @@ pub async fn connection<S: AsyncRead + AsyncWrite + Unpin + Send>(mut stream: S,
         if req == Request::Subscribe {
             subscribed(stream, tx).await;
             return;
+        }
+        if req.requires_admin() {
+            let who = caller.get_or_insert_with(|| identify.take().map_or(Caller::Standard, |f| f()));
+            if let Err(refusal) = authorize(&req, who) {
+                let _ = tx.send(Msg::Denied {
+                    request: kind_of(&req),
+                    caller: who.describe(),
+                });
+                if write_frame(&mut stream, &Response::Error(refusal)).await.is_err() {
+                    return;
+                }
+                continue;
+            }
         }
         let wait = timeout_for(&req);
         let (otx, orx) = tokio::sync::oneshot::channel();
@@ -177,6 +200,7 @@ mod platform {
     #![allow(unsafe_code)]
 
     use super::{connection, Msg, PIPE_SDDL};
+    use std::os::windows::io::AsRawHandle;
     use std::sync::mpsc::Sender;
     use std::sync::Arc;
     use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
@@ -224,8 +248,13 @@ mod platform {
                 return Ok(());
             };
             let tx = tx.clone();
+            let raw = connected.as_raw_handle() as usize;
             tokio::spawn(async move {
-                connection(connected, tx).await;
+                // The handle lives as long as `connected`, which `connection` owns until it returns.
+                connection(connected, tx, move || {
+                    crate::caller::level_of_pipe(raw as std::os::windows::io::RawHandle)
+                })
+                .await;
                 drop(permit);
             });
         }
@@ -234,7 +263,7 @@ mod platform {
 
 #[cfg(unix)]
 mod platform {
-    use super::{connection, Msg, SOCKET_FILE};
+    use super::{connection, Caller, Msg, SOCKET_FILE};
     use std::os::unix::fs::PermissionsExt;
     use std::sync::mpsc::Sender;
     use std::sync::Arc;
@@ -256,7 +285,7 @@ mod platform {
             };
             let tx = tx.clone();
             tokio::spawn(async move {
-                connection(stream, tx).await;
+                connection(stream, tx, || Caller::Local).await;
                 drop(permit);
             });
         }
@@ -309,7 +338,7 @@ mod tests {
             }
         });
         let (mut client, server) = tokio::io::duplex(64 * 1024);
-        let task = tokio::spawn(connection(server, tx.clone()));
+        let task = tokio::spawn(connection(server, tx.clone(), || Caller::Local));
         send(
             &mut client,
             &Request::Hello {
@@ -328,7 +357,7 @@ mod tests {
 
         // A wrong protocol or no hello closes the connection with a reason.
         let (mut client, server) = tokio::io::duplex(4096);
-        let task = tokio::spawn(connection(server, tx.clone()));
+        let task = tokio::spawn(connection(server, tx.clone(), || Caller::Local));
         send(&mut client, &Request::Hello { protocol: 1 }).await;
         assert!(matches!(
             recv(&mut client).await,
@@ -339,7 +368,7 @@ mod tests {
         ));
         task.await.unwrap();
         let (mut client, server) = tokio::io::duplex(4096);
-        let task = tokio::spawn(connection(server, tx.clone()));
+        let task = tokio::spawn(connection(server, tx.clone(), || Caller::Local));
         send(&mut client, &Request::Status).await;
         assert!(matches!(
             recv(&mut client).await,
@@ -352,7 +381,7 @@ mod tests {
 
         // Junk after the hello is answered and the connection closed.
         let (mut client, server) = tokio::io::duplex(4096);
-        let task = tokio::spawn(connection(server, tx));
+        let task = tokio::spawn(connection(server, tx, || Caller::Local));
         send(
             &mut client,
             &Request::Hello {
@@ -401,5 +430,163 @@ mod pipe_name_tests {
             PIPE_NAME,
             "no ProgramData: never the installed pipe"
         );
+    }
+}
+
+#[cfg(test)]
+mod caller_tests {
+    //! The hole (release blocker 2026-11-11): any program of an interactive user could send `AddRunner` or `SaveSettings`
+    //! and make the LocalSystem service start a program it chose. A caller that is not an elevated administrator never
+    //! gets a request that changes something to the supervisor.
+    use super::*;
+    use pitcrew_core::config::{RunnerConfig, SessionMode};
+    use pitcrew_core::names::RunnerName;
+    use pitcrew_core::protocol::PROTOCOL_VERSION;
+    use std::sync::Mutex;
+
+    type Seen = Arc<Mutex<Vec<String>>>;
+
+    async fn send(c: &mut tokio::io::DuplexStream, r: &Request) {
+        c.write_all(&encode_frame(r).unwrap()).await.unwrap();
+    }
+
+    async fn recv(c: &mut tokio::io::DuplexStream) -> Response {
+        let mut h = [0u8; 4];
+        c.read_exact(&mut h).await.unwrap();
+        let mut b = vec![0u8; frame_len(h).unwrap()];
+        c.read_exact(&mut b).await.unwrap();
+        decode_body(&b).unwrap()
+    }
+
+    /// A stand-in supervisor that records what reached it and answers Ok.
+    fn supervisor() -> (Sender<Msg>, Seen) {
+        let (tx, rx) = std::sync::mpsc::channel::<Msg>();
+        let seen: Seen = Arc::default();
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            for m in rx {
+                match m {
+                    Msg::Request(req, reply) => {
+                        log.lock().unwrap().push(crate::caller::kind_of(&req));
+                        let _ = reply.send(Response::Ok);
+                    }
+                    Msg::Denied { request, .. } => log.lock().unwrap().push(format!("denied:{request}")),
+                    _ => {}
+                }
+            }
+        });
+        (tx, seen)
+    }
+
+    async fn connect(caller: Caller) -> (tokio::io::DuplexStream, Seen) {
+        let (tx, seen) = supervisor();
+        let (mut client, server) = tokio::io::duplex(64 * 1024);
+        tokio::spawn(connection(server, tx, move || caller));
+        send(
+            &mut client,
+            &Request::Hello {
+                protocol: PROTOCOL_VERSION,
+            },
+        )
+        .await;
+        assert!(matches!(recv(&mut client).await, Response::Hello { .. }));
+        (client, seen)
+    }
+
+    fn service_runner() -> Request {
+        let mut runner: RunnerConfig = toml::from_str(
+            "name = \"evil\"\nkind = \"gitea-runner\"\ndir = 'C:\\Users\\someone\\runner'\nbinary_path = 'C:\\Users\\someone\\runner\\run.exe'\nsession = \"service\"\n",
+        )
+        .unwrap();
+        assert_eq!(runner.session, SessionMode::Service);
+        runner.name = RunnerName::parse("evil").unwrap();
+        Request::AddRunner { runner }
+    }
+
+    fn denied(r: &Response) -> bool {
+        matches!(
+            r,
+            Response::Error(ServiceError {
+                code: ErrorCode::PermissionDenied,
+                ..
+            })
+        )
+    }
+
+    #[tokio::test]
+    async fn a_service_runner_from_a_caller_without_administrator_rights_is_refused_and_never_reaches_the_supervisor() {
+        for caller in [Caller::Standard, Caller::Unreadable("OpenThreadToken: denied".into())] {
+            let (mut c, seen) = connect(caller).await;
+            send(&mut c, &service_runner()).await;
+            let answer = recv(&mut c).await;
+            assert!(denied(&answer), "{answer:?}");
+            // The same connection goes on: a read-only request is answered, a second change is refused again.
+            send(&mut c, &Request::Status).await;
+            assert_eq!(recv(&mut c).await, Response::Ok);
+            send(&mut c, &service_runner()).await;
+            assert!(denied(&recv(&mut c).await));
+            // Messages reach the supervisor in order: once this answer is back, the refusal before it has been logged.
+            send(&mut c, &Request::Status).await;
+            assert_eq!(recv(&mut c).await, Response::Ok);
+            assert_eq!(*seen.lock().unwrap(), ["denied:AddRunner", "Status", "denied:AddRunner", "Status"]);
+        }
+    }
+
+    #[tokio::test]
+    async fn every_request_that_changes_something_is_refused_for_a_standard_caller() {
+        let name = RunnerName::parse("a").unwrap();
+        let (mut c, seen) = connect(Caller::Standard).await;
+        for r in [
+            Request::SaveSettings {
+                config: pitcrew_core::config::Config::default(),
+            },
+            Request::RemoveRunner { runner: name.clone() },
+            Request::Drain { runner: name.clone() },
+            Request::CleanDisk { runner: name },
+        ] {
+            assert!(r.mutates());
+            send(&mut c, &r).await;
+            assert!(denied(&recv(&mut c).await), "{r:?}");
+        }
+        // Ordered delivery: the answer to this read proves every refusal before it has been recorded.
+        send(&mut c, &Request::Status).await;
+        assert_eq!(recv(&mut c).await, Response::Ok);
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 5, "{seen:?}");
+        assert!(
+            seen[..4].iter().all(|k| k.starts_with("denied:")) && seen[4] == "Status",
+            "{seen:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_elevated_administrator_and_a_local_caller_are_served() {
+        for caller in [Caller::Elevated, Caller::Local] {
+            let (mut c, seen) = connect(caller).await;
+            send(&mut c, &service_runner()).await;
+            assert_eq!(recv(&mut c).await, Response::Ok);
+            assert_eq!(*seen.lock().unwrap(), ["AddRunner"]);
+        }
+    }
+
+    #[tokio::test]
+    async fn read_only_requests_never_ask_who_the_caller_is() {
+        let (tx, _seen) = supervisor();
+        let (mut client, server) = tokio::io::duplex(64 * 1024);
+        tokio::spawn(connection(server, tx, || -> Caller {
+            panic!("the caller was identified for a read-only request")
+        }));
+        send(
+            &mut client,
+            &Request::Hello {
+                protocol: PROTOCOL_VERSION,
+            },
+        )
+        .await;
+        let _ = recv(&mut client).await;
+        for r in [Request::Status, Request::GetSettings, Request::Diagnostics] {
+            send(&mut client, &r).await;
+            assert_eq!(recv(&mut client).await, Response::Ok);
+        }
     }
 }

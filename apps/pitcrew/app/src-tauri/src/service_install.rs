@@ -118,11 +118,16 @@ mod imp {
 
     /// Runs `pitcrew-service <verb>` with Windows' elevation prompt and waits for it.
     pub fn elevated(verb: &str) -> Result<(), CommandError> {
+        run_elevated(&service_exe()?, verb, std::time::Duration::from_secs(120))
+    }
+
+    /// Runs `exe` with `params` through Windows' elevation prompt and waits at most `wait` for it to end; exit code 0 is success.
+    pub fn run_elevated(exe: &std::path::Path, params: &str, wait: std::time::Duration) -> Result<(), CommandError> {
         const ERROR_CANCELLED: i32 = 1223;
-        let exe = service_exe()?;
+        let verb = params.split_whitespace().next().unwrap_or("");
         let op = HSTRING::from("runas");
         let file = HSTRING::from(exe.as_os_str());
-        let params = HSTRING::from(verb);
+        let params = HSTRING::from(params);
         let mut info = SHELLEXECUTEINFOW {
             cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
             fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC,
@@ -148,7 +153,7 @@ mod imp {
         }
         // SAFETY: a valid process handle we own; waited on (2 minutes at most) and closed once.
         let code = unsafe {
-            let waited = WaitForSingleObject(info.hProcess, 120_000);
+            let waited = WaitForSingleObject(info.hProcess, u32::try_from(wait.as_millis()).unwrap_or(u32::MAX));
             let mut code = 1u32;
             if waited == WAIT_OBJECT_0 {
                 let _ = GetExitCodeProcess(info.hProcess, &mut code);
@@ -160,7 +165,8 @@ mod imp {
             Ok(())
         } else {
             Err(CommandError::internal(format!(
-                "pitcrew-service {verb} failed (exit code {code}); the service log has details"
+                "{} {verb} failed (exit code {code}); the service log has details",
+                exe.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned())
             )))
         }
     }
@@ -566,6 +572,8 @@ mod imp {
     }
 }
 
+#[cfg(windows)]
+pub use imp::run_elevated;
 pub use imp::{install, state, uninstall};
 
 #[cfg(target_os = "macos")]

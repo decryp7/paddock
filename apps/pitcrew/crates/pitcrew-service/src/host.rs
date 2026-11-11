@@ -26,12 +26,16 @@ impl Host {
 
     /// [`Host::start`] with the Unix socket in `socket_dir` (Linux: the user's runtime folder).
     pub fn start_at(data_dir: PathBuf, socket_dir: PathBuf, on_fatal: impl FnOnce(String) + Send + 'static) -> Result<Host, Error> {
+        let protected = protect_installed_folder(&data_dir)?;
         std::fs::create_dir_all(&data_dir).map_err(|source| Error::Io {
             path: data_dir.display().to_string(),
             source,
         })?;
         let (tx, rx) = std::sync::mpsc::channel();
-        let supervisor = Supervisor::new(os_env(data_dir.clone()), tx.clone());
+        let mut supervisor = Supervisor::new(os_env(data_dir.clone()), tx.clone());
+        if let Some(note) = protected {
+            supervisor.note(&note);
+        }
         let handle = std::thread::Builder::new()
             .name("supervisor".into())
             .spawn(move || supervisor.run(rx))
@@ -83,6 +87,44 @@ impl Host {
             rt.shutdown_timeout(Duration::from_secs(2));
         }
     }
+}
+
+/// The installed Windows service's data folder holds the configuration that names the programs the LocalSystem service starts,
+/// so it is made (or locked) protected before anything is read from it ([`crate::protected`]). Returns a line for the service
+/// log. Any other folder (tests, development, macOS, Linux) is left as it is: there the service runs as the user.
+#[cfg(windows)]
+fn protect_installed_folder(data_dir: &std::path::Path) -> Result<Option<String>, Error> {
+    use crate::protected::{ensure_protected_root, RootOutcome};
+    if ipc::pipe_name(data_dir) != ipc::PIPE_NAME {
+        return Ok(None);
+    }
+    let mut machine = paddock_service::privileged::trust_real::RealTrust;
+    let outcome = ensure_protected_root(
+        &mut machine,
+        data_dir,
+        &[crate::paths::CONFIG_FILE, crate::paths::CONFIG_BACKUP, "state.json"],
+        &["logs"],
+    )
+    .map_err(|reason| Error::Os {
+        what: "Protecting the data folder",
+        reason: format!(
+            "{reason}. Run \"pitcrew-service install\" again as an administrator, or remove the folder if nothing in it is needed"
+        ),
+    })?;
+    Ok(Some(match outcome {
+        RootOutcome::Created => format!("the data folder {} was created protected (administrators and SYSTEM only)", data_dir.display()),
+        RootOutcome::Locked => format!("the data folder {} is protected (administrators and SYSTEM only)", data_dir.display()),
+        RootOutcome::MovedAside(aside, why) => format!(
+            "the data folder {} could not be trusted ({why}); it was moved to {aside} and a protected one made. Nothing was deleted: copy back only what you trust",
+            data_dir.display()
+        ),
+    }))
+}
+
+#[cfg(not(windows))]
+#[expect(clippy::unnecessary_wraps, reason = "the Windows version can fail")]
+fn protect_installed_folder(_: &std::path::Path) -> Result<Option<String>, Error> {
+    Ok(None)
 }
 
 /// `run`: supervise in the foreground until Ctrl+C / SIGTERM (launchd stops agents with SIGTERM).

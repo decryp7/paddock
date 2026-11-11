@@ -133,8 +133,9 @@ pub fn timeout_for(r: &Request) -> Duration {
 #[derive(Debug, Default)]
 pub struct LocalServiceClient;
 
-impl ServiceClient for LocalServiceClient {
-    fn request(&self, request: Request) -> Result<Response, ClientError> {
+impl LocalServiceClient {
+    /// One request as this process, with whatever rights it has.
+    fn request_direct(&self, request: Request) -> Result<Response, ClientError> {
         let timeout = timeout_for(&request);
         with_timeout(timeout, move || {
             let mut s = connect()?;
@@ -142,6 +143,80 @@ impl ServiceClient for LocalServiceClient {
             write_frame(&mut s, &request).map_err(|e| ClientError::Unavailable(e.to_string()))?;
             read_frame::<Response>(&mut s).map_err(|e| ClientError::Unavailable(e.to_string()))
         })
+    }
+}
+
+impl ServiceClient for LocalServiceClient {
+    /// The service refuses a change from a caller that is not an elevated administrator (Windows, where it runs as LocalSystem).
+    /// This asks first as itself and, only when refused, runs the one request elevated: Windows' own prompt, once per change
+    /// ([`crate::elevated_request`]).
+    fn request(&self, request: Request) -> Result<Response, ClientError> {
+        let answer = self.request_direct(request.clone())?;
+        if cfg!(windows) && request.requires_admin() && is_permission_denied(&answer) {
+            return elevated::request(&request, timeout_for(&request));
+        }
+        Ok(answer)
+    }
+}
+
+/// The client of the elevated forwarding mode: it never elevates again (a refusal there is the answer).
+#[derive(Debug, Default)]
+pub struct DirectClient;
+
+impl ServiceClient for DirectClient {
+    fn request(&self, request: Request) -> Result<Response, ClientError> {
+        LocalServiceClient.request_direct(request)
+    }
+}
+
+/// Whether the service refused for lack of administrator rights.
+fn is_permission_denied(r: &Response) -> bool {
+    matches!(r, Response::Error(e) if e.code == pitcrew_core::protocol::ErrorCode::PermissionDenied)
+}
+
+#[cfg(windows)]
+mod elevated {
+    use super::*;
+
+    /// Runs `request` through an elevated copy of this program; declining Windows' prompt gives the service's own refusal.
+    pub fn request(request: &Request, wait: Duration) -> Result<Response, ClientError> {
+        let refused = |why: String| {
+            ClientError::Service(ServiceError::new(
+                pitcrew_core::protocol::ErrorCode::PermissionDenied,
+                format!("Changing the runners needs administrator rights: {why}"),
+            ))
+        };
+        let parent = std::env::var_os("LOCALAPPDATA")
+            .map(std::path::PathBuf::from)
+            .ok_or_else(|| ClientError::Protocol("LOCALAPPDATA is not set".into()))?
+            .join("Pitcrew")
+            .join("elevated");
+        let handoff = crate::elevated_request::prepare(&parent, request).map_err(ClientError::Protocol)?;
+        let exe = std::env::current_exe().map_err(|e| ClientError::Protocol(format!("this program cannot be found: {e}")))?;
+        let run =
+            crate::service_install::run_elevated(&exe, &crate::elevated_request::parameters(&handoff), wait + Duration::from_secs(60));
+        match run {
+            Ok(()) => crate::elevated_request::collect(handoff),
+            Err(e) if e.code == crate::dto::CommandErrorCode::Cancelled => {
+                // Nothing was sent; the folder holds only the request the user just made.
+                let _ = crate::elevated_request::collect(handoff);
+                Err(refused("Windows' permission prompt was declined".into()))
+            }
+            Err(e) => {
+                let _ = crate::elevated_request::collect(handoff);
+                Err(ClientError::Protocol(e.message))
+            }
+        }
+    }
+}
+
+#[cfg(not(windows))]
+mod elevated {
+    use super::*;
+
+    /// Only Windows asks (the macOS and Linux services run as the user and accept their own socket's callers).
+    pub fn request(_: &Request, _: Duration) -> Result<Response, ClientError> {
+        Err(ClientError::Protocol("elevation is a Windows feature".into()))
     }
 }
 

@@ -17,6 +17,10 @@ path = "src/main.rs"
 
 [dependencies]
 pitcrew-core.workspace = true
+# Who is on the other end of the pipe (the caller's own token), shared with the other services (ER-22).
+paddock-ipc = { path = "../../../../crates/paddock-ipc" }
+# The trust rule for folders and programs SYSTEM runs (`TrustPort`, `verify_chain`) and its real Windows port.
+paddock-service = { path = "../../../../crates/paddock-service" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

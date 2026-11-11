@@ -71,7 +71,7 @@ impl Harness {
 
     /// `runner_toml` is appended to the runner's table (e.g. an `[runners.env]` table).
     fn with_runner_toml(test: &str, fake: &str, registered: bool, runner_toml: &str) -> Harness {
-        Harness::build(test, fake, registered, runner_toml, None)
+        Harness::build(test, fake, registered, runner_toml, None, Box::new(OsLauncher))
     }
 
     /// `state_json` is written as the service's `state.json` before it starts.
@@ -79,7 +79,14 @@ impl Harness {
         clippy::disallowed_methods,
         reason = "a test builds its scratch path from the OS temp folder and removes it"
     )]
-    fn build(test: &str, fake: &str, registered: bool, runner_toml: &str, state_json: Option<&str>) -> Harness {
+    fn build(
+        test: &str,
+        fake: &str,
+        registered: bool,
+        runner_toml: &str,
+        state_json: Option<&str>,
+        launcher: Box<dyn pitcrew_service::launcher::Launcher>,
+    ) -> Harness {
         pitcrew_service::launch::set_stop_helper(PathBuf::from(env!("CARGO_BIN_EXE_pitcrew-service")));
         let root = std::env::temp_dir().join(format!("pitcrew-it-{test}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -108,7 +115,7 @@ impl Harness {
         let exe2 = exe.clone();
         let env = Env {
             data_dir: data,
-            launcher: Box::new(OsLauncher),
+            launcher,
             sources: Sources::public(),
             platform: pitcrew_core::platform::Platform::current().unwrap(),
             exe_stamp: Arc::new(move || {
@@ -406,6 +413,31 @@ fn a_runner_that_exits_is_restarted_after_the_backoff() {
     h.until("second start", Duration::from_millis(100), |h| {
         count(&h.history(), |k| *k == HistoryKind::Started) >= 2
     });
+    h.finish();
+}
+
+/// The hole closed in 1.1: a runner that starts with the service's own token (LocalSystem on Windows) runs a program and a folder
+/// that a standard user can change. The guard refuses it, and nothing is started.
+#[test]
+fn a_service_account_runner_in_an_unprotected_folder_is_not_started() {
+    use pitcrew_service::launcher::ServiceTokenGuard;
+    let guard = ServiceTokenGuard::new(
+        OsLauncher,
+        Box::new(|spec| Err(format!("{} can be changed by users", spec.dir.display()))),
+    );
+    let mut h = Harness::build("guarded", "mode=idle\n", true, "", None, Box::new(guard));
+    // The first start attempt can meet the runner's own version probe ("already runs outside Pitcrew"); the refusal shows on a retry.
+    h.until("the refusal is shown", Duration::from_secs(5), |h| {
+        h.status().problem.is_some_and(|p| p.contains("can be changed by users"))
+    });
+    let s = h.status();
+    assert!(s.problem.as_deref().is_some_and(|p| p.contains("can be changed by users")), "{s:?}");
+    assert_eq!(
+        count(&h.history(), |k| *k == HistoryKind::Started),
+        0,
+        "the runner was never started"
+    );
+    assert!(!h.log().contains("declare successfully"), "the runner wrote nothing");
     h.finish();
 }
 
@@ -1266,7 +1298,7 @@ fn an_update_that_keeps_failing_is_reported_as_a_loop_with_its_cause() {
         failed(2),
         failed(1)
     );
-    let mut h = Harness::build("loopy", "mode=idle\n", true, "", Some(&state));
+    let mut h = Harness::build("loopy", "mode=idle\n", true, "", Some(&state), Box::new(OsLauncher));
     h.pump(Duration::from_secs(6));
     let s = h.status();
     let l = s.update_loop.expect("a loop is reported");

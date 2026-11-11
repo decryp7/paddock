@@ -43,3 +43,21 @@ polling") and the pipe "ACL'd to the interactive user and SYSTEM".
   pipe's security descriptor.
 - Tested: framing and hello rules (`pitcrew_core::protocol`), the connection state machine over an in-memory duplex
   (`ipc.rs`), and the real pipe or socket end to end (`tests/transport.rs`, which also checks the socket's mode).
+
+## Amendment 2026-11-11: changes need an elevated administrator (Windows)
+
+The decision "authorisation is the ACL" above is reversed on Windows. The pipe still admits interactive users, but the
+service (LocalSystem) runs a program that a request names (`binary_path`, `dir`), so a request that changes something let any
+program of any logged-on user run code as SYSTEM (release blocker, 2026-11-11).
+
+- **Server.** A request with `Request::requires_admin()` (today `mutates()`) is accepted only when the pipe client's own
+  token has Administrators enabled (`paddock_ipc::endpoint::raw_peer_of_pipe`, `ImpersonateNamedPipeClient`; a UAC-filtered
+  token or an unidentifiable caller is refused with `PermissionDenied`). The first such request on a connection asks, so
+  reads never do. macOS and Linux: the socket is the user's own and the service runs as that user; nothing is asked.
+- **App.** The app tries as itself; on `PermissionDenied` it runs itself elevated (`runas`) once to forward that single
+  request (`--forward-request <file> <sha-256> <file>`; the digest on the command line stops a swap of the request file).
+  One Windows prompt per change; the cost is that Pause, Stop and Drain prompt too. `requires_admin` is the one place to
+  narrow if that proves too much.
+- **Folders.** The data folder is protected (shared trust rule); a runner that starts with the service's token needs a
+  protected program and folder, else it is refused rather than copied (a copy of a runner is large, carries its
+  registration and would need repair on every update; moving it is one visible step for the administrator).

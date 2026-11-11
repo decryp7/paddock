@@ -332,6 +332,13 @@ impl Request {
                 | Request::CachePreview { .. }
         )
     }
+
+    /// Whether the service accepts the request only from an elevated administrator (Windows, where the service runs as
+    /// LocalSystem and its pipe is open to every interactive user): every request that changes something. A request that
+    /// only reads stays open to the pipe's users. The one place to narrow if some change must not need a prompt.
+    pub fn requires_admin(&self) -> bool {
+        self.mutates()
+    }
 }
 
 /// What the app shows about one runner.

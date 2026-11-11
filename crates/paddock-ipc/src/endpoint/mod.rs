@@ -240,6 +240,17 @@ impl fmt::Display for SystemConnectError {
 
 impl std::error::Error for SystemConnectError {}
 
+/// The caller's facts on a Windows named pipe the caller does not own as a [`Stream`] (a service that serves its own pipe, such
+/// as Pitcrew's): the same read as [`PeerSource::raw_peer`] (the client's own token through `ImpersonateNamedPipeClient`, never
+/// a pid), for the server end `pipe` of a connected instance. Decide with [`crate::identity::identify`].
+///
+/// # Errors
+/// [`PeerError::NotReady`] before the client's first bytes arrived (read once, then ask again), or what the OS refused.
+#[cfg(windows)]
+pub fn raw_peer_of_pipe(pipe: std::os::windows::io::RawHandle) -> Result<RawPeer, PeerError> {
+    windows_peer::raw_peer(pipe)
+}
+
 /// Ends a connection; see [`Stream::closer`].
 pub struct Closer(sys::Closer);
 

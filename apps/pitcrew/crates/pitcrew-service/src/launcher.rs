@@ -57,3 +57,97 @@ impl Launcher for OsLauncher {
         }
     }
 }
+
+/// What decides whether a program may start with the service's own token.
+pub type TokenCheck = Box<dyn Fn(&LaunchSpec) -> Result<(), String> + Send>;
+
+/// A launcher that starts a runner as the service account only when `check` accepts its program and folder, and otherwise
+/// reports why and starts nothing. Runners in a user's session are not asked: they run with that user's rights.
+///
+/// On Windows the service runs as LocalSystem, so a program a standard user can replace would run as SYSTEM (the hole closed
+/// in 1.1: see [`crate::protected`]). The check is a parameter so the rule is tested without a Windows machine.
+pub struct ServiceTokenGuard<L> {
+    inner: L,
+    check: TokenCheck,
+}
+
+impl<L: Launcher> ServiceTokenGuard<L> {
+    /// Guards `inner` with `check`.
+    pub fn new(inner: L, check: TokenCheck) -> Self {
+        ServiceTokenGuard { inner, check }
+    }
+}
+
+impl<L: Launcher> Launcher for ServiceTokenGuard<L> {
+    fn console(&self) -> Console {
+        self.inner.console()
+    }
+
+    fn launch(&self, target: LaunchTarget, spec: &LaunchSpec, sink: LineSink) -> Result<Box<dyn RunnerProcess>, String> {
+        if target == LaunchTarget::ServiceAccount {
+            (self.check)(spec)?;
+        }
+        self.inner.launch(target, spec, sink)
+    }
+}
+
+/// The check of the real Windows service: when it runs as LocalSystem, the shared trust rule over the real machine; when it runs
+/// as a user (development), nothing, because the token is the user's own.
+#[cfg(windows)]
+pub fn windows_token_check() -> TokenCheck {
+    use crate::platform::win_session::{console_user, ConsoleUser};
+    Box::new(|spec| {
+        if matches!(console_user(), ConsoleUser::NotSystem) {
+            return Ok(());
+        }
+        let mut machine = paddock_service::privileged::trust_real::RealTrust;
+        crate::protected::check_service_launch(&mut machine, &spec.program, &spec.dir)
+    })
+}
+
+#[cfg(test)]
+mod guard_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    struct Counting(Arc<AtomicUsize>);
+
+    impl Launcher for Counting {
+        fn console(&self) -> Console {
+            Console { session: Some(1) }
+        }
+        fn launch(&self, _: LaunchTarget, _: &LaunchSpec, _: LineSink) -> Result<Box<dyn RunnerProcess>, String> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Err("started".into())
+        }
+    }
+
+    fn spec() -> LaunchSpec {
+        LaunchSpec {
+            program: "C:\\Users\\someone\\run.exe".into(),
+            args: vec![],
+            dir: "C:\\Users\\someone".into(),
+            env: vec![],
+        }
+    }
+
+    #[test]
+    fn a_service_token_start_needs_the_check_and_a_user_session_start_does_not() {
+        let started = Arc::new(AtomicUsize::new(0));
+        let guard = ServiceTokenGuard::new(Counting(started.clone()), Box::new(|_| Err("not protected".into())));
+        let sink: LineSink = Arc::new(|_| {});
+        let refused = guard.launch(LaunchTarget::ServiceAccount, &spec(), sink.clone());
+        assert_eq!(refused.err().as_deref(), Some("not protected"));
+        assert_eq!(started.load(Ordering::SeqCst), 0, "nothing was started");
+        let user = guard.launch(LaunchTarget::UserSession { session_id: 1 }, &spec(), sink.clone());
+        assert_eq!(user.err().as_deref(), Some("started"));
+        let accepting = ServiceTokenGuard::new(Counting(started.clone()), Box::new(|_| Ok(())));
+        assert_eq!(
+            accepting.launch(LaunchTarget::ServiceAccount, &spec(), sink).err().as_deref(),
+            Some("started")
+        );
+        assert_eq!(started.load(Ordering::SeqCst), 2);
+        assert_eq!(guard.console(), Console { session: Some(1) });
+    }
+}
