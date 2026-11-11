@@ -15,15 +15,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-/// The system this build runs on.
+/// The system this build runs on: the one place the agent asks the build OS for its host. The composition (`agent.rs`) never
+/// calls it: it is given the host it composes for, so a test can compose every system's agent on one machine (clippy.toml bans it).
+#[allow(clippy::disallowed_methods, reason = "the one real host detection of the agent crate (clippy.toml bans every other caller)")]
 pub fn host() -> HelperHost {
-    if cfg!(windows) {
-        HelperHost::Windows
-    } else if cfg!(target_os = "macos") {
-        HelperHost::Macos
-    } else {
-        HelperHost::Linux
-    }
+    dyno_platform::hardware::this_host()
 }
 
 fn os_of(host: HelperHost) -> Os {
@@ -180,11 +176,13 @@ fn windows_roots() -> WindowsRoots {
 }
 
 /// Where this machine's helper keeps its files (the lifecycle file the report reads, the binary, the endpoint).
+#[allow(clippy::disallowed_methods, reason = "the helper OS glue acts on this machine's own helper, so the build OS is the host")]
 pub fn helper_paths() -> HelperPaths {
     HelperPaths::for_host(host(), &windows_roots())
 }
 
 /// The connection to this machine's helper (also what the VM test sends requests through).
+#[allow(clippy::disallowed_methods, reason = "the helper OS glue acts on this machine's own helper, so the build OS is the host")]
 pub fn transport() -> PeerTransport {
     let host = host();
     let paths = HelperPaths::for_host(host, &windows_roots());
@@ -271,6 +269,7 @@ impl HelperInstaller for NoInstaller {
 
 /// The helper centre of an agent on a data folder of its own: it never reaches this computer's helper (no call, no prompt, no
 /// owner lookup), and its status is "not included" with [`NOT_FOR_THIS_FOLDER`] as the reason.
+#[allow(clippy::disallowed_methods, reason = "the helper OS glue acts on this machine's own helper, so the build OS is the host")]
 pub fn off_centre() -> HelperCentre<Box<dyn HelperTransport>> {
     HelperCentre::new(
         HelperLink::new(Box::new(NoHelper) as Box<dyn HelperTransport>, Arc::new(SystemClock)),
@@ -282,6 +281,7 @@ pub fn off_centre() -> HelperCentre<Box<dyn HelperTransport>> {
 }
 
 /// The helper centre for this machine.
+#[allow(clippy::disallowed_methods, reason = "the helper OS glue acts on this machine's own helper, so the build OS is the host")]
 pub fn centre() -> HelperCentre<Box<dyn HelperTransport>> {
     let host = host();
     let paths = HelperPaths::for_host(host, &windows_roots());

@@ -1,6 +1,11 @@
 # Every child process Dyno starts goes through `dyno_platform::process::command` (it opens no console window on
 # Windows and always gets a timeout). Tests and build scripts may allow this lint.
 disallowed-methods = [
+    # The host a composition builds for is passed in, never taken from the build OS (the second instance of the class: the wear
+    # reading took `this_host()` and the firewall centre `for_this_os`, so the wiring test composing every system's agent on one
+    # machine built the wrong one). `helper_os::host` is the one real detection; its callers are the OS glue and carry an #[allow] with why.
+    { path = "dyno_platform::hardware::this_host", reason = "pass the host being composed for; only helper_os::host asks the build OS" },
+    { path = "dyno_agent::helper_os::host", reason = "pass the host being composed for; only the helper OS glue and the report ask the build OS" },
     { path = "std::process::Command::new", reason = "use dyno_platform::process::command: no console window on Windows, always bounded" },
     { path = "tokio::process::Command::new", allow-invalid = true, reason = "use the app's process helper (paddock-proc): no console window on Windows, always bounded" },
     { path = "std::env::temp_dir", reason = "tests use a scratch folder from the test kit and production code uses paddock-env: nothing is left in the shared temp folder" },
