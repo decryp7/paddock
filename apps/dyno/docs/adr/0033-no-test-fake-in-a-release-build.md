@@ -322,7 +322,11 @@ Each reader is a thin adapter over small OS traits (`RegistryView`, `FolderList`
   - The things not read: services and drivers; boot-trigger tasks (D5); `…\Policies\Explorer\Run` (HKCU and HKLM);
     Winlogon `Userinit` and `Shell`; Active Setup; shell extensions; WMI event subscriptions.
   - The sentence is coverage, not a failure, so it is not part of `unavailable()`. The user guide carries the same list.
-- **Values.** `REG_SZ` and `REG_EXPAND_SZ`; the latter is expanded with `ExpandEnvironmentStringsW` into a bounded buffer.
+- **Values.** `REG_SZ` and `REG_EXPAND_SZ`; the latter is expanded by the pure `expand_env` in `parse/win_startup.rs` over an injected
+  environment lookup, bounded to `MAX_EXPANDED_CHARS` with a running count (one pass, linear in the text), and not with
+  `ExpandEnvironmentStringsW` (WP-4 review: no OS call in the mapping, and the same result in a test and on a runner). A name the
+  environment does not know is left as written, as Windows does. Whether Explorer itself expands `%VAR%` in a `REG_SZ` Run value
+  is not documented; the VM row measures it (below) and the mapping follows what it finds.
   - Bounds (review P2-6):
     - at most `MAX_RUN_VALUES` (1,000) values per key;
     - each value at most `MAX_VALUE_BYTES` (32 KiB), checked against `RegQueryInfoKey`'s longest value before any read;
@@ -518,9 +522,14 @@ The `assemble` cases:
 **Windows-runner test hygiene (ER-14, review P2-8).** Nothing the tests create may run, persist or touch the real user's
 entries:
 
-- Every object the tests create carries the prefix `DynoTest-<uuid>`, and each test first sweeps leftovers with that
-  prefix. Cleanup is an RAII guard that also runs on panic.
-- The startup reader runs over a temporary key `HKCU\Software\DynoTest-<uuid>\…` and a temporary folder, through the
+- Every object the tests create carries the prefix `DynoTest-` and a name no other test or process shares: the owner's pid, its
+  start time and a per-process counter (`DynoTest-<pid>-<start>-<n>-<label>`; the startup reader's temporary tree follows this). The
+  root of each tree records its owner as the values `OwnerPid` and `OwnerStartMicros`. Each test first sweeps leftovers, but a sweep
+  deletes a `DynoTest-*` tree only when its owner process is gone (`paddock_proc::ProcessId::presence()` is `Gone`; an unreadable
+  process table keeps the tree, rule 53), or, for a tree with no owner record, when the key was last written more than an hour ago.
+  It never deletes the tree of a test that is running in another process (two Windows-runner test processes, or a re-run started
+  while the first is still going). Cleanup is an RAII guard that also runs on panic.
+- The startup reader runs over a temporary key `HKCU\Software\DynoTest-<pid>-<start>-<n>-<label>\…` and a temporary folder, through the
   `RegistryView` and `FolderList` traits pointed at them. The real `Run` key is never written.
 - The task test registers its task **disabled**, with an action pointing at a path that does not exist in the test's
   temporary folder, in the root folder under the prefix. WP-0 checks whether a standard user may register a task with a
@@ -550,6 +559,9 @@ merged harness:
 4. Facts: the OS name in the agent's facts equals `Get-CimInstance Win32_OperatingSystem` `Caption` and `BuildNumber`
    (mapped), and is never "Fake OS". The Health card shows "Not checked: pending updates".
 5. Locks: a PowerShell job in the guest holds a file open, and Dyno's "What is locking this file?" lists `powershell`.
+6. Run values: seed an HKCU `Run` value of type `REG_SZ` whose data holds `%SystemRoot%`, and one of type `REG_EXPAND_SZ`, and see
+   in Task Manager (or by the process that starts at sign-in) whether Explorer expands the `REG_SZ` one. Dyno expands only
+   `REG_EXPAND_SZ` today; if Explorer expands both, the mapping changes in the same change as the row's note.
 6. The VM snapshot is reverted afterwards. The seeds never reach the host (ER-14).
 
 ## Work packages
@@ -604,7 +616,9 @@ in 1.1.1, it is a shared package with family ADR 0051 and its own estimate.
     packaged-app lookup are the slow parts; WP-0 measures them.
   - The sources run one after another on the agent's startup job thread, which is never the UI thread. A parallel COM walk
     would need one apartment per thread for a gain of a few hundred milliseconds at most, so it is not done.
-  - The list is cached until `refresh()`.
+  - WP-4 keeps no cache: the sources are a few registry keys and two folders, read in milliseconds, so every `list()` reads them again
+    and a changed key shows at once. The cache until `refresh()` returns with WP-5, when the logon-task walk (the slow source,
+    tens of seconds for a standard user) joins; only that source is cached.
 - **Facts.** They run every few minutes, off the sampling path. The WMI disk query is the slowest read. If WP-0 measures it
   over 250 ms, disk health is kept for 30 minutes, the way `smart_reader` caches.
 - **Locks.** One Restart Manager session per question, bounded by `MAX_HOLDERS` and three retries.
