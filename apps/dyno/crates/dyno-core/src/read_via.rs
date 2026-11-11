@@ -138,4 +138,6 @@ pub struct LiveVia {
     pub others: ReadVia,
     /// The temperatures.
     pub temperatures: ReadVia,
+    /// A note beside the process list while part of it is still to come (not a failure; the page shows it as a hint). Always sent (the agent's wire is postcard, which has no skipped fields).
+    pub processes_hint: Option<String>,
 }

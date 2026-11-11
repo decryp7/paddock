@@ -54,7 +54,7 @@ import { MatMenuModule } from '@angular/material/menu';
           @if (store.via()?.others === 'helper') { It is counted by the administrator helper. } @else { It adds up only the values Dyno can read. }
         </p>
       }
-      <div class="source" data-testid="processes-source"><dy-reading-source [via]="store.via()?.processes" [canRetry]="true" (retry)="retry()" /></div>
+      <div class="source" data-testid="processes-source"><dy-reading-source [via]="store.via()?.processes" [hint]="store.via()?.processesHint ?? ''" [canRetry]="true" (retry)="retry()" /></div>
 
       <div class="body" [class.open]="!!store.selected()">
         <section class="table">

@@ -374,6 +374,15 @@ impl SweepStore {
         }
     }
 
+    /// The worker thread could not be started.
+    fn worker_did_not_start(&self, why: &str) {
+        self.put(
+            None,
+            ReadVia::unavailable(&format!("The helper's reading could not be started: {why}")),
+            false,
+        );
+    }
+
     /// Asks the worker to try the helper again at once (a person pressed "Try again").
     pub fn retry_now(&self) {
         self.retry.store(true, Ordering::SeqCst);
@@ -520,6 +529,8 @@ impl HelperFirstProcesses {
             .spawn(move || worker.run(&cancel))
         {
             log::error!(target: "dyno::helper", "Processes of every account: the worker did not start: {e}");
+            // No sweep will ever come: the page must not wait for one.
+            store.worker_did_not_start(&e.to_string());
         }
         HelperFirstProcesses::new(local, store)
     }
@@ -536,6 +547,7 @@ impl HelperFirstProcesses {
                 },
                 lists_others: v.lists_others,
                 others_total: v.others.clone(),
+                hint: None,
             },
             None => {
                 // Without the helper the list is this computer's. It asks for the helper only when something is hidden.
@@ -543,10 +555,7 @@ impl HelperFirstProcesses {
                     .iter()
                     .any(|p| p.owner == Owner::Other || p.cpu.is_unavailable() || p.memory.is_unavailable());
                 ProcessProvenance {
-                    processes: if hidden && !swept {
-                        // The helper has not been asked yet: its rows are unread yet, not unreadable.
-                        ReadVia::unavailable(AWAITING_FIRST_SWEEP)
-                    } else if hidden && !matches!(worker_via, ReadVia::Helper) {
+                    processes: if hidden && swept && !matches!(worker_via, ReadVia::Helper) {
                         worker_via
                     } else {
                         ReadVia::Local
@@ -554,6 +563,8 @@ impl HelperFirstProcesses {
                     others: ReadVia::Local,
                     lists_others: false,
                     others_total: None,
+                    // The helper has not been asked yet: its rows are unread yet, not unreadable, so this is a note, not a failure.
+                    hint: (hidden && !swept).then(|| AWAITING_FIRST_SWEEP.to_owned()),
                 }
             }
         }
@@ -841,17 +852,36 @@ mod tests {
         let (mut w, store, _) = worker(false, vec![]);
         let mut src = HelperFirstProcesses::new(Box::new(Local(local_table())), store.clone());
         src.processes();
-        let via = src.provenance().processes;
-        assert_eq!(via.reason(), Some(AWAITING_FIRST_SWEEP), "{via:?}");
+        let p = src.provenance();
+        assert_eq!(p.processes, ReadVia::Local, "awaiting is not a failure: {:?}", p.processes);
+        assert_eq!(p.hint.as_deref(), Some(AWAITING_FIRST_SWEEP));
         let mut all_read = HelperFirstProcesses::new(Box::new(Local(vec![proc(1, None, "mine", 1.0, 1)])), store.clone());
         all_read.processes();
         assert_eq!(all_read.provenance().processes, ReadVia::Local, "nothing hidden, nothing awaited");
+        assert_eq!(all_read.provenance().hint, None);
         w.sweep_once();
         src.processes();
         assert!(
             matches!(src.provenance().processes, ReadVia::NeedsHelper { .. }),
             "{:?}",
             src.provenance().processes
+        );
+        assert_eq!(src.provenance().hint, None, "a finished sweep ends the wait");
+    }
+
+    /// A worker that never started would leave "awaited" on the page for ever: the failure to start is the sweep's answer.
+    #[test]
+    fn a_worker_that_did_not_start_ends_the_wait_with_its_reason() {
+        let store = SweepStore::new(Arc::new(FakeClock::new()));
+        store.worker_did_not_start("no thread");
+        let mut src = HelperFirstProcesses::new(Box::new(Local(local_table())), store);
+        src.processes();
+        let p = src.provenance();
+        assert_eq!(p.hint, None);
+        assert!(
+            matches!(&p.processes, ReadVia::Unavailable { reason, .. } if reason.contains("no thread")),
+            "{:?}",
+            p.processes
         );
     }
 
