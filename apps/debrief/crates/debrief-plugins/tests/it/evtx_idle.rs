@@ -133,10 +133,11 @@ fn idle_after_an_event_log_import() {
             );
         }
     }
-    // Let the builds' checkpoint and the allocator release finish before the window opens.
-    std::thread::sleep(Duration::from_secs(10));
+    // The catalogue counts as built only once its checkpoint is saved, and the index only when it is ready (both waited
+    // for above): nothing is left to settle before the window opens.
     store.bench_sql("CALL enable_logging('QueryLog')").unwrap();
     let cpu = cpu_seconds();
+    // conformance: hang-guard — an idle observation window of 60 s or more (DEBRIEF_EVTX_IDLE_S, default 60 s) is the measurement itself, not a settle
     std::thread::sleep(Duration::from_secs(idle));
     let used = cpu_seconds() - cpu;
     let statements = store

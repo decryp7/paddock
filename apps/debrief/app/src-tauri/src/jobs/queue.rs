@@ -157,6 +157,10 @@ fn clean(s: &str, max: usize) -> String {
 /// Whether a finished job asks for attention: a success that took a while, or a failure the user cares
 /// about (a quick analysis failure is shown by its own view).
 pub fn needs_attention(job: &Job) -> bool {
+    // Background housekeeping nobody waits for (the Names rebuild after every import) never asks, even when it is slow or fails.
+    if job.quiet {
+        return false;
+    }
     match job.state() {
         // A research answer is always news ("Research finished · View answer").
         // So is an AI answer started in the background (explain, summarise, root causes): nobody waits for it.
@@ -660,6 +664,29 @@ mod tests {
         q.finish(i1, JobEnd::Done(None), 5).unwrap();
         assert_eq!(q.startable(), vec![a2, i2]);
         assert!(!start.contains(&x[3]) && !start.contains(&e[2]));
+    }
+
+    /// A quiet job (the Names rebuild after every import) never raises a message or a notification, long or failed,
+    /// but still shows in the pane (it is `seen`). Main removed the check with the last quiet job (feddb4f6e); the Names
+    /// job brought `quiet` back.
+    #[test]
+    fn quiet_jobs_never_ask_for_attention_but_still_show() {
+        let mut q = JobQueue::new(2);
+        let long = q
+            .submit(JobSpec::new(JobKind::Names, "Updating names").window("main").quiet(), 0)
+            .unwrap();
+        q.start(long, 0).unwrap();
+        let f = q.finish(long, JobEnd::Done(None), ATTENTION_AFTER_MS * 2).unwrap();
+        assert!(f.kept && !f.attention && f.job.seen, "long and finished, yet no message");
+        let failed = q
+            .submit(JobSpec::new(JobKind::Names, "Updating names").window("main").quiet(), 0)
+            .unwrap();
+        q.start(failed, 0).unwrap();
+        let f = q.finish(failed, JobEnd::Failed("catalogue stopped".into()), 100).unwrap();
+        assert!(!f.attention, "a failure of background housekeeping is logged, not announced");
+        let loud = q.submit(JobSpec::new(JobKind::Maintenance, "clean").window("main"), 0).unwrap();
+        q.start(loud, 0).unwrap();
+        assert!(q.finish(loud, JobEnd::Failed("disk".into()), 100).unwrap().attention);
     }
 
     /// A name table waiting for the catalogue is a job: it must not hold the one Maintenance slot (storage clearing,

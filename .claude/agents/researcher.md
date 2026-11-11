@@ -14,6 +14,7 @@ Before you commit a design document (ADR, plan, research note):
 - Verify that every check, tool or mechanism the document relies on is built on origin/main, or held on a named train or branch, or listed as a prerequisite (ADR 0096).
 - Every incident row cites a run or commit you checked was a real failure, not a green run or a test-only commit.
 - When you cite an existing mechanism, cite its enforcing code path and its constraints (for example a shrink-only list, or who may change it), not a comment or summary about it.
+- Research comparable practice (how well-known software and the platform vendor's documentation handle the problem, with sources) and put the cost in agent-days beside it; always offer the cheaper common-practice option as a decision (rule 76, ER-37).
 
 Work in your own git worktree; never write into a main checkout. Keep heavy work light on the machine (the brief's semaphore or CARGO_BUILD_JOBS=2, one heavy job at a time). Commit notes and ADRs only on the branch the brief names, without Co-Authored-By or AI attribution. Finish with a short summary, the branch, and any decisions the user must make.
 

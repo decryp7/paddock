@@ -10,7 +10,7 @@ use debrief_core::ingest::{self, BatchSink, ImportEnv, NewSource, SourceReport};
 use debrief_core::Profile;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -46,29 +46,24 @@ fn rss() -> u64 {
 /// Polls the process's resident memory while a test runs and keeps the peak.
 struct Peak {
     peak: Arc<AtomicU64>,
-    stop: Arc<AtomicBool>,
+    /// Dropping it ends the sampling thread (its `recv_timeout` sees the channel close).
+    _stop: std::sync::mpsc::Sender<()>,
 }
 impl Peak {
     fn start() -> Peak {
         let peak = Arc::new(AtomicU64::new(rss()));
-        let stop = Arc::new(AtomicBool::new(false));
-        let (p, s) = (peak.clone(), stop.clone());
+        let (stop, ended) = std::sync::mpsc::channel::<()>();
+        let p = peak.clone();
         std::thread::spawn(move || {
-            while !s.load(Ordering::Relaxed) {
+            while ended.recv_timeout(Duration::from_millis(50)) == Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
                 p.fetch_max(rss(), Ordering::Relaxed);
-                std::thread::sleep(Duration::from_millis(50));
             }
         });
-        Peak { peak, stop }
+        Peak { peak, _stop: stop }
     }
     fn mb(&self) -> u64 {
         self.peak.fetch_max(rss(), Ordering::Relaxed);
         self.peak.load(Ordering::Relaxed) >> 20
-    }
-}
-impl Drop for Peak {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
     }
 }
 

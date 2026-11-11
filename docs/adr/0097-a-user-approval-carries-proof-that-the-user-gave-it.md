@@ -1,6 +1,7 @@
 # 97. A user approval carries proof that the user gave it
 
-- Status: Accepted 2026-11-10 (user); D3: no interim signer; (a) when two FIDO2 keys arrive; D7: signed release intents,
+- Status: Withdrawn 2026-11-11 (user): approvals are the user's decisions recorded by the coordinator from chat; nothing
+  here is built or will be. The text below is kept as history. Was: Accepted 2026-11-10 (user); D3: no interim signer; (a) when two FIDO2 keys arrive; D7: signed release intents,
   CI tags when green (changed by the user on 2026-11-10 from signed release tags); D8 (a) declined for now, (b) later
   (changed by the user on 2026-11-10); other decisions as recommended. D3 was first recorded as an interim Secure
   Enclave signer (`79b0f7ca7`) and corrected the same day: the user's Mac mini has no Touch ID. The independent review

@@ -180,10 +180,11 @@ fn an_idle_store_statements_and_cpu() {
     let (store, _report) = common::store_with(&dir, Profile::default_profile(), &common::log_samples()).unwrap();
     assert!(store.wait_for_catalogue(std::time::Duration::from_secs(120)).unwrap());
     assert!(store.wait_for_index(std::time::Duration::from_secs(120)).unwrap().ready);
-    // Let the builds' checkpoint and the allocator release finish before the window opens.
-    std::thread::sleep(std::time::Duration::from_secs(10));
+    // The catalogue counts as built only once its checkpoint is saved, and the index is ready (both waited for above):
+    // nothing is left to settle before the window opens.
     store.bench_sql("CALL enable_logging('QueryLog')").unwrap();
     let cpu = cpu_seconds();
+    // conformance: hang-guard — an idle observation window of 130 s (DEBRIEF_IDLE_S, default 130 s) is the measurement itself, not a settle
     std::thread::sleep(std::time::Duration::from_secs(idle));
     let used = cpu_seconds() - cpu;
     let statements = store
