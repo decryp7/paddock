@@ -237,8 +237,14 @@ mod tests {
     #[test]
     fn a_folder_that_does_not_exist_yet_resolves_to_its_nearest_existing_parent() {
         let dir = tempfile::tempdir().unwrap();
-        let want = dir.path().canonicalize().unwrap();
-        assert_eq!(resolved(&dir.path().join("not/yet/there")), want);
+        // The canonical spelling without Windows' verbatim prefix (`\\?\C:\...`), the form volumes are listed in.
+        let want = strip_verbatim(&dir.path().canonicalize().unwrap());
+        let got = resolved(&dir.path().join("not/yet/there"));
+        assert!(
+            !got.to_string_lossy().starts_with(r"\\?\"),
+            "{got:?} keeps the verbatim prefix"
+        );
+        assert_eq!(got, want);
         assert_eq!(resolved(Path::new("")), PathBuf::new());
     }
 
