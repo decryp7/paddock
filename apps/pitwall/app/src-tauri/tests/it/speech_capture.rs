@@ -69,3 +69,28 @@ fn a_device_failure_while_recording_ends_the_recording_with_its_cause() {
     assert!(e.to_string().contains("unplugged"), "{e}");
     assert_eq!(rec.status(), Status::Idle);
 }
+
+/// Slice 2: macOS ends an app that opens the microphone without saying why, so the bundle's Info.plist (merged by Tauri from the
+/// file next to tauri.conf.json) carries the reason the permission prompt shows.
+#[test]
+fn the_bundle_says_why_it_asks_for_the_microphone() {
+    let plist = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/Info.plist")).unwrap();
+    let key = plist.find("<key>NSMicrophoneUsageDescription</key>").expect("the usage key");
+    let reason = &plist[key..];
+    assert!(
+        reason.contains("<string>") && reason.contains("speak") && reason.contains("never"),
+        "{reason}"
+    );
+}
+
+/// Slice 2: the system's capture exists on every OS; where no adapter is built yet it refuses in words and opens nothing.
+#[test]
+fn the_system_capture_refuses_in_words_where_it_is_not_built() {
+    let rec = Recorder::new(pitwall_app_lib::speech::device::system_capture());
+    if cfg!(target_os = "macos") {
+        // Opening it here would ask for the real microphone (ER-14): only its existence is checked.
+        assert_eq!(rec.status(), Status::Idle);
+    } else {
+        assert_eq!(rec.start().unwrap_err(), RecordError::Capture(CaptureError::Unsupported));
+    }
+}
