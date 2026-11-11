@@ -372,9 +372,9 @@ changes here, every app's copy is updated in the same change.
 
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
-- **Rule 2:** every agent works in its own git worktree of `paddock` (sparse to its app where possible:
-  `git sparse-checkout set --cone crates ui scripts docs apps/<app>`), with its own `CARGO_TARGET_DIR` per app and its own
-  e2e port; the main checkout stays on `main` for the coordinator.
+- **Rule 2:** every agent works in its own git worktree of `paddock` (a full checkout: `./dev worktree add --profile gates`,
+  the default; sparse only for a `--detach` review copy), with its own `CARGO_TARGET_DIR` per app and its own e2e port; the
+  main checkout stays on `main` for the coordinator.
 - **Rule 3:** the affected tests are what `scripts/affected.mjs` selects, plus the touched specs; otherwise unchanged
   (Playwright in Chromium only in a branch; the full suite, Chromium and WebKit, once on the combined result before a
   local build or release, plus CI).

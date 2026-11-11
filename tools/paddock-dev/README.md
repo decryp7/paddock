@@ -19,11 +19,14 @@ The developer and CI tool of ADR 0022. Run it with `./dev <command>` (`dev.cmd` 
 One tool makes, claims and removes agent worktrees, so every one is locked with an owner note and bound to its agent, and no
 cleanup removes a locked one. Run it from any checkout of the repository (or pass `--repo <folder>`); `--json` as everywhere.
 
-- `worktree add <name> --base <ref> [-b <branch>] [--detach] [--sparse a,b] --owner <role>:<task> [--root <folder>]` makes
-  `<root>/<name>` (branch `<name>` unless `-b`; `--detach` for a review copy), always locked with the note
+- `worktree add <name> --base <ref> [-b <branch>] [--detach] [--profile gates | --sparse a,b] --owner <role>:<task> [--root <folder>]`
+  makes `<root>/<name>`: a full checkout (`--profile gates`, the default, because conformance, `affected.mjs`, `gates check` and `plan`
+  read most folders); `--sparse` only with `--detach` (a review copy that reads a few folders). The branch is `<name>` unless `-b`;
+  an existing local branch, or one only a remote has, is attached to (its ahead and behind counts against `--base` and its remote
+  are printed; a branch already merged into the base, or behind its remote, is refused with the fix). Always locked with the note
   `owner=<role>:<task>; branch=; base=; created=; by=`. The root is `--root`, else `git config paddock.worktreeRoot`, else
   `PADDOCK_WORKTREE_ROOT`; with none set it fails and says how to set one. It refuses an existing path, a path in the owner map or
-  being made by another `add`, an existing branch, and **any path inside the primary checkout or another worktree** (compared
+  being made by another `add`, a branch another worktree has checked out, and **any path inside the primary checkout or another worktree** (compared
   by real path). The owner map's lock is held only to reserve and to confirm the path, never while git checks out, so claims
   never wait for a slow `add`. It does not print `CARGO_TARGET_DIR` or an e2e port yet (RT-6).
 - `worktree claim <path>` binds a locked worktree to the caller; refuses an unknown, unlocked or other-owned one.

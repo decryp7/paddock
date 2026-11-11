@@ -34,6 +34,7 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { fullCheckoutProblem } from '../conformance/src/util/full-checkout.mjs';
 import { isMain } from '../conformance/src/util/is-main.mjs';
 
 /**
@@ -1222,6 +1223,11 @@ if (isMain(import.meta.url)) {
       const r = commitLintRange({ event: e.EVENT, ref: e.REF, before: e.BEFORE, sha: e.SHA, base: e.PLAN_BASE, baseRef: e.BASE_REF, app: e.INPUT_APP, known: gitHas });
       console.log(process.argv[2] === '--commit-flags' ? (r?.flags ?? []).join(' ') : r === null ? 'skip' : r.range);
       process.exit(0);
+    }
+    const sparse = fullCheckoutProblem(ROOT);
+    if (sparse) {
+      console.error(sparse);
+      process.exit(1);
     }
     const { files, base, head, all, ci: isCi, app, explain } = parseArgs(process.argv.slice(2));
     if (isCi) await ci(process.env, { app });

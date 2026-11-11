@@ -80,6 +80,10 @@ fn dev_command_paths() -> std::collections::BTreeSet<String> {
 pub fn check(a: &CheckArgs) -> Result<Report, CliError> {
     let root = repo_root(a.root.as_deref())?;
     let started = std::time::Instant::now();
+    // First, so that a sparse checkout is named by one line before anything reads the tree.
+    if let Some(line) = edge::sparse_problem(&root) {
+        return Err(CliError::failure(line));
+    }
     let tree = edge::GitTree::open(&root).map_err(CliError::failure)?;
     let sources = edge::load_sources(&root).map_err(CliError::failure)?;
     let planner = edge::NodePlanner::new(&root);
