@@ -7,6 +7,7 @@ import { PANEL_WINDOWS, PanelWindows } from '../../dock/panel-windows';
 import { PaletteService } from '../../palette/palette.service';
 import { WindowingService } from '../../windowing/windowing.service';
 import { AppMenu, MENU_MODE } from './app-menu.service';
+import { provideDebriefMenus, provideMenuItems } from './menu.contributions';
 import { RecentOpener } from './recent-opener';
 import { TopMenu } from './menu-model';
 import { NATIVE_MENU_GATE, NATIVE_MENU_PORT, NATIVE_MENU_TIMING, NativeMenuBridge, NativeMenuPort, toNativeModel } from './native-menu';
@@ -20,6 +21,17 @@ function setup(extra: unknown[] = []) {
 }
 
 describe('AppMenu', () => {
+  it('lays out the registered placements (menus contributions): a plugin’s group goes at the end of its menu', () => {
+    const { app } = setup([
+      ...provideDebriefMenus(),
+      ...provideMenuItems([{ menu: 'help', command: 'edit.find', group: 'plugin-x', order: 50, label: 'Find again' }]),
+    ]);
+    const help = app.menus().find((m) => m.id === 'help')!;
+    const last = help.items.at(-1);
+    expect(last).toMatchObject({ kind: 'item', id: 'edit.find', label: 'Find again' });
+    expect(help.items.at(-2)).toEqual({ kind: 'separator' });
+  });
+
   it('defaults to the in-app menu bar outside the macOS desktop app', () => {
     setup();
     expect(TestBed.inject(MENU_MODE)).toBe('in-app');
