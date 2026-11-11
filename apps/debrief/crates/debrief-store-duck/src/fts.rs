@@ -993,7 +993,7 @@ mod tests {
             ran.len(),
             ran.first()
         );
-        let _ = std::fs::remove_dir_all(&dir);
+        crate::test_scratch::remove_or_defer(&dir);
     }
 
     #[test]

@@ -782,6 +782,7 @@ mod tests {
             waited < Duration::from_millis(MAX_STATUS_WAIT_MS),
             "the status call waited {waited:?}, a whole wait; a commit has to wake it"
         );
-        let _ = std::fs::remove_dir_all(&dir);
+        drop(store);
+        crate::test_scratch::remove_or_defer(&dir);
     }
 }

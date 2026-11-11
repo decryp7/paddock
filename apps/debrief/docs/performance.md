@@ -179,7 +179,7 @@ some fields; "n/s" means the source does not state them.
 
 ### 2026-11-06, the name rebuild's look-alike reads on a 10-million-event store (branch `debrief/p0-idle`)
 
-- **Commit:** measured on the working tree of `debrief/p0-idle` on top of ed8e6005a (the bench is `tests/bench_name_reads.rs`; the reads are the ones in `names/build.rs`, before the time bound below was added to them)
+- **Commit:** measured on the working tree of `debrief/p0-idle` on top of ed8e6005a (the bench is `tests/bench_name_reads.rs`, the test `name_reads_by_how_often_the_name_occurs`; the reads are the ones in `names/build.rs`, before the time bound below was added to them)
 - **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
 - **Load:** 1-minute load 8-24 during the runs (other agents' builds); the first run and the second differ only by that and by the file cache
 - **Build:** release; libduckdb 2.0.0; the store worker's allocator (mimalloc)

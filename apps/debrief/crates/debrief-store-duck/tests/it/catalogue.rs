@@ -7,7 +7,7 @@ use common::TempDir;
 use debrief_core::catalogue::{CatalogueRequest, Scope};
 use debrief_core::entities::EntityKind;
 use debrief_core::find::{find, resolve_terms, Via, ENTITY_FIELD};
-use debrief_core::ports::{Ingest, Query};
+use debrief_core::ports::{Ingest, Query, Tail};
 use debrief_core::{PluginRegistry, Profile};
 use debrief_store_duck::DuckStore;
 use std::path::Path;
@@ -273,4 +273,32 @@ fn every_name_is_listed_for_the_name_book_and_graphic_builder_groups_its_spellin
     assert_eq!(r.values[0].group.as_deref(), Some("executable|graphic builder"), "{r:#?}");
     assert_eq!(r.values[0].spellings.len(), 2);
     assert!(!r.values[0].evidence.is_empty());
+}
+
+/// A live-follow step (`append_tail`) bumps the store's generation; the idle catalogue loop runs no statement without
+/// news (turns::Gate), so the step must reach it as news: a file that appears under the opened folder is catalogued
+/// without anything waking the thread by hand (`wait_for_catalogue` would). Lines appended to a file the catalogue already
+/// finished are not read again: the catalogue is built per source, as before this change.
+#[test]
+fn a_file_that_live_follow_adds_is_catalogued_without_a_manual_wake() {
+    let (logs, _dir, store) = setup("tail");
+    let first = logs.0.join("a.log");
+    lines(&first, &["Started Alpha.Service.exe", "heartbeat"]);
+    store.open(std::slice::from_ref(&logs.0)).unwrap().wait().unwrap();
+    built(&store);
+    assert!(lookup(&store, "Quokkasoft").is_empty(), "the fixture holds no such name yet");
+    // The catalogue is built and its loop idle: now a file appears and the followed one grows.
+    let added = logs.0.join("b.log");
+    lines(&added, &["Started Quokkasoft.Agent.exe"]);
+    let mut text = std::fs::read_to_string(&first).unwrap();
+    text.push_str("2026-10-14 10:01:00 INFO heartbeat again\n");
+    std::fs::write(&first, text).unwrap();
+    let appended = store.append_tail(&[first, added]).unwrap();
+    assert!(appended.appended > 0, "the step read the new lines: {appended:?}");
+    let catalogued = paddock_testkit::poll_until_within(Duration::from_secs(30), || !lookup(&store, "Quokkasoft").is_empty());
+    assert!(
+        catalogued,
+        "the name in the new file was not catalogued: {:?}",
+        lookup(&store, "Quokkasoft")
+    );
 }
