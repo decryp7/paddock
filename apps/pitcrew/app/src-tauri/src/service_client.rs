@@ -37,23 +37,27 @@ pub trait ServiceClient: Send + Sync {
 trait Stream: Read + Write + Send {}
 impl<T: Read + Write + Send> Stream for T {}
 
-/// Connects to the service. `require_system`: before anything is sent, check that the program serving the pipe is the SYSTEM
-/// service (Windows; the elevated forwarder, which carries a registration token, asks for it). Elsewhere the socket's folder is
-/// the user's own and nothing is asked.
-fn connect(require_system: bool) -> Result<Box<dyn Stream>, ClientError> {
-    let _ = require_system;
+/// Lets a stream through only after `verify` accepted it: the check comes first and the stream is handed on only if it passes, so
+/// nothing is ever written to a server that was not checked.
+#[cfg_attr(
+    not(any(windows, test)),
+    allow(dead_code, reason = "only the Windows pipe is checked; the check itself is tested everywhere")
+)]
+fn checked<S: Stream + 'static>(stream: S, verify: impl FnOnce(&S) -> Result<(), String>) -> Result<Box<dyn Stream>, ClientError> {
+    verify(&stream).map_err(ClientError::Unavailable)?;
+    Ok(Box::new(stream))
+}
+
+/// Connects to the service. On Windows every connection, reads and the event subscription included, is checked first: the pipe
+/// must be owned by SYSTEM or Administrators ([`crate::pipe_server`]). Elsewhere the socket's folder is the user's own.
+fn connect() -> Result<Box<dyn Stream>, ClientError> {
     #[cfg(windows)]
     {
         const ERROR_PIPE_BUSY: i32 = 231;
         let started = std::time::Instant::now();
         loop {
             match pitcrew_core::service_paths::open_pipe_options().open(r"\\.\pipe\pitcrew") {
-                Ok(f) => {
-                    if require_system {
-                        crate::pipe_server::require_system_server(&f).map_err(ClientError::Unavailable)?;
-                    }
-                    return Ok(Box::new(f));
-                }
+                Ok(f) => return checked(f, |f| crate::pipe_server::verify(&crate::pipe_server::PipeOwner(f))),
                 Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY) && started.elapsed() < Duration::from_secs(3) => {
                     std::thread::sleep(Duration::from_millis(50));
                 }
@@ -138,6 +142,14 @@ pub fn timeout_for(r: &Request) -> Duration {
     }
 }
 
+/// One connection, one request: connect (checked), hello, request, response.
+fn exchange(connect: impl FnOnce() -> Result<Box<dyn Stream>, ClientError>, request: &Request) -> Result<Response, ClientError> {
+    let mut s = connect()?;
+    hello(&mut s)?;
+    write_frame(&mut s, request).map_err(|e| ClientError::Unavailable(e.to_string()))?;
+    read_frame::<Response>(&mut s).map_err(|e| ClientError::Unavailable(e.to_string()))
+}
+
 /// The client of the local service.
 #[derive(Debug, Default)]
 pub struct LocalServiceClient;
@@ -145,18 +157,8 @@ pub struct LocalServiceClient;
 impl LocalServiceClient {
     /// One request as this process, with whatever rights it has.
     fn request_direct(&self, request: Request) -> Result<Response, ClientError> {
-        self.request_checked(request, false)
-    }
-
-    /// [`Self::request_direct`], optionally refusing a server that is not the SYSTEM service.
-    fn request_checked(&self, request: Request, require_system: bool) -> Result<Response, ClientError> {
         let timeout = timeout_for(&request);
-        with_timeout(timeout, move || {
-            let mut s = connect(require_system)?;
-            hello(&mut s)?;
-            write_frame(&mut s, &request).map_err(|e| ClientError::Unavailable(e.to_string()))?;
-            read_frame::<Response>(&mut s).map_err(|e| ClientError::Unavailable(e.to_string()))
-        })
+        with_timeout(timeout, move || exchange(connect, &request))
     }
 }
 
@@ -173,14 +175,13 @@ impl ServiceClient for LocalServiceClient {
     }
 }
 
-/// The client of the elevated forwarding mode: it never elevates again (a refusal there is the answer), and it sends nothing
-/// to a pipe whose server is not the SYSTEM service.
+/// The client of the elevated forwarding mode: it never elevates again (a refusal there is the answer).
 #[derive(Debug, Default)]
 pub struct DirectClient;
 
 impl ServiceClient for DirectClient {
     fn request(&self, request: Request) -> Result<Response, ClientError> {
-        LocalServiceClient.request_checked(request, true)
+        LocalServiceClient.request_direct(request)
     }
 }
 
@@ -239,7 +240,7 @@ mod elevated {
 /// `on_connected` gets the service's version once the subscription stands.
 pub fn subscribe(on_connected: impl FnOnce(String), mut on_event: impl FnMut(Response) -> bool) -> Result<(), ClientError> {
     let mut s = with_timeout(Duration::from_secs(10), || {
-        let mut s = connect(false)?;
+        let mut s = connect()?;
         let v = hello(&mut s)?;
         write_frame(&mut s, &Request::Subscribe).map_err(|e| ClientError::Unavailable(e.to_string()))?;
         match read_frame::<Response>(&mut s).map_err(|e| ClientError::Unavailable(e.to_string()))? {
@@ -264,6 +265,75 @@ pub fn subscribe(on_connected: impl FnOnce(String), mut on_event: impl FnMut(Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A stream that records what is done to it, to show the order: the check, then the first write.
+    struct Recording(std::sync::Arc<std::sync::Mutex<Vec<&'static str>>>);
+
+    impl Read for Recording {
+        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().push("read");
+            Ok(0)
+        }
+    }
+
+    impl Write for Recording {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().push("write");
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn nothing_is_written_to_a_pipe_that_the_service_does_not_own() {
+        let log: std::sync::Arc<std::sync::Mutex<Vec<&'static str>>> = std::sync::Arc::default();
+        // A squatter's pipe: the check fails, so even the hello is never sent, for a read as for a change.
+        for request in [
+            Request::Status,
+            Request::SaveSettings {
+                config: pitcrew_core::config::Config::default(),
+            },
+            Request::Subscribe,
+        ] {
+            let l = log.clone();
+            let squat = Recording(log.clone());
+            let result = exchange(
+                move || {
+                    checked(squat, |_| {
+                        l.lock().unwrap().push("check");
+                        crate::pipe_server::judge_owner("S-1-5-21-1-2-3-1001")
+                    })
+                },
+                &request,
+            );
+            assert!(
+                matches!(&result, Err(ClientError::Unavailable(m)) if m.contains("nothing was sent")),
+                "{result:?}"
+            );
+        }
+        assert_eq!(
+            *log.lock().unwrap(),
+            ["check", "check", "check"],
+            "a write or read happened on an unchecked pipe"
+        );
+
+        // The control: when the owner is the service's, the first thing that happens after the check is the hello.
+        log.lock().unwrap().clear();
+        let l = log.clone();
+        let service = Recording(log.clone());
+        let _ = exchange(
+            move || {
+                checked(service, |_| {
+                    l.lock().unwrap().push("check");
+                    crate::pipe_server::judge_owner("S-1-5-18")
+                })
+            },
+            &Request::Status,
+        );
+        assert_eq!(log.lock().unwrap()[..2], ["check", "write"], "{:?}", log.lock().unwrap());
+    }
 
     #[test]
     fn errors_say_what_to_do() {

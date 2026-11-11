@@ -1,112 +1,156 @@
-//! Who serves the pipe the app is about to talk to (Windows). The elevated forwarder carries a registration token and an
-//! administrator's approval, so before it sends anything it checks that the program on the other end of the pipe is the service
-//! running as SYSTEM, not a program of some user that happens to host a pipe of the same name.
+//! Who owns the pipe the app is about to talk to (Windows). The app sends nothing on a pipe, not even the first `Hello`, before
+//! it has checked that the pipe object belongs to the service: SYSTEM or Administrators. A program of some user that hosts a
+//! pipe of the same name owns it as that user, and is refused before it can read a registration token or a settings change.
 //!
-//! The service's pipe ACL no longer lets an interactive user create an instance of it and the client opens at identification
-//! level (`pitcrew_core::service_paths::open_pipe_options`), so a squatter could neither be created nor learn more than an
-//! account; this is the third layer, and the one that keeps the request itself from reaching a stranger.
-//!
-//! Rule 53: a process id names a process only while that process lives. The check holds an open handle to the process it looked
-//! at for the whole check (so the id cannot be reused meanwhile), reads the server's id from the pipe before and after, and
-//! refuses when the two differ.
+//! The pipe's owner is read through the client's own handle (`GetSecurityInfo`, the handle was opened with `READ_CONTROL`), which
+//! is bound to the object the connection is made to: it cannot name another process (no pid is read, so there is no reused id to
+//! trust, rule 53). The service's ACL gives interactive users no right to create an instance of the pipe, and clients open at
+//! identification level (`pitcrew_core::service_paths::open_pipe_options`); this is the third layer, and the one that keeps the
+//! request from ever reaching a stranger.
 
-/// What the check found; judged by [`judge`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Facts {
-    /// The server's process id when the check began.
-    pub first_pid: u32,
-    /// The server's process id when the check ended, read again from the same pipe.
-    pub second_pid: u32,
-    /// Whether the held process's token belongs to SYSTEM (`S-1-5-18`).
-    pub is_system: bool,
+/// SYSTEM (`S-1-5-18`): the account the service runs as.
+const SYSTEM: &str = "S-1-5-18";
+/// BUILTIN\Administrators (`S-1-5-32-544`): the owner Windows gives what a SYSTEM process creates.
+const ADMINISTRATORS: &str = "S-1-5-32-544";
+
+/// What the OS says about the other end of the pipe. A port, so the check is tested without a pipe, and so a test can show that
+/// nothing is written before it passes.
+pub trait ServerIdentity {
+    /// The owner of the pipe object, as a SID string (`S-1-5-...`).
+    ///
+    /// # Errors
+    /// The OS could not tell; the connection is refused.
+    fn owner_sid(&self) -> Result<String, String>;
 }
 
-/// Decides from the facts. Pure.
+/// Decides from the owner. Pure.
 ///
 /// # Errors
-/// A message that says what is wrong and what to do.
-pub fn judge(f: Facts) -> Result<(), String> {
-    if f.first_pid != f.second_pid {
-        return Err("the program serving the Pitcrew pipe changed while it was being checked; nothing was sent".into());
+/// A message that says what is wrong and what to do; nothing has been sent.
+pub fn judge_owner(owner: &str) -> Result<(), String> {
+    if owner == SYSTEM || owner == ADMINISTRATORS {
+        return Ok(());
     }
-    if !f.is_system {
-        return Err(format!(
-            "the program serving the Pitcrew pipe (process {}) is not the Pitcrew service running as SYSTEM; nothing was sent. \
-             Check the service (Settings > Service) and do not approve a permission prompt you did not ask for",
-            f.first_pid
-        ));
-    }
-    Ok(())
+    Err(format!(
+        "the Pitcrew pipe is owned by {owner}, not by SYSTEM or Administrators, so it is not the Pitcrew service; nothing was sent. \
+         Check the service (Settings > Service) and do not approve a permission prompt you did not ask for"
+    ))
+}
+
+/// Refuses a pipe that the service does not own.
+///
+/// # Errors
+/// The owner could not be read, or is not the service's; in both cases nothing was sent.
+pub fn verify(pipe: &dyn ServerIdentity) -> Result<(), String> {
+    let owner = pipe
+        .owner_sid()
+        .map_err(|e| format!("the Pitcrew pipe could not be checked ({e}); nothing was sent"))?;
+    judge_owner(&owner)
 }
 
 #[cfg(windows)]
-pub use imp::require_system_server;
+pub use imp::PipeOwner;
 
 #[cfg(windows)]
 mod imp {
     #![allow(unsafe_code)]
 
-    use super::{judge, Facts};
+    use super::ServerIdentity;
     use std::os::windows::io::AsRawHandle;
-    use windows::Win32::Foundation::{CloseHandle, HANDLE};
-    use windows::Win32::Security::{GetTokenInformation, IsWellKnownSid, TokenUser, WinLocalSystemSid, TOKEN_QUERY, TOKEN_USER};
-    use windows::Win32::System::Pipes::GetNamedPipeServerProcessId;
-    use windows::Win32::System::Threading::{OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION};
+    use windows::core::PWSTR;
+    use windows::Win32::Foundation::{LocalFree, HANDLE, HLOCAL};
+    use windows::Win32::Security::Authorization::{ConvertSidToStringSidW, GetSecurityInfo, SE_KERNEL_OBJECT};
+    use windows::Win32::Security::{OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID};
 
-    /// A handle closed on drop.
-    struct Owned(HANDLE);
+    /// The owner of the pipe object an open client handle is connected to.
+    pub struct PipeOwner<'a>(pub &'a std::fs::File);
 
-    impl Drop for Owned {
-        fn drop(&mut self) {
-            // SAFETY: a handle this value owns, closed once.
-            unsafe {
-                let _ = CloseHandle(self.0);
+    impl ServerIdentity for PipeOwner<'_> {
+        fn owner_sid(&self) -> Result<String, String> {
+            let mut owner = PSID::default();
+            let mut descriptor = PSECURITY_DESCRIPTOR::default();
+            // SAFETY: the handle is open for READ_CONTROL for the whole call; the out pointers are valid; `owner` points into
+            // `descriptor`, which is freed only after the SID is copied out.
+            let status = unsafe {
+                GetSecurityInfo(
+                    HANDLE(self.0.as_raw_handle()),
+                    SE_KERNEL_OBJECT,
+                    OWNER_SECURITY_INFORMATION,
+                    Some(&mut owner),
+                    None,
+                    None,
+                    None,
+                    Some(&mut descriptor),
+                )
+            };
+            if status.0 != 0 {
+                return Err(format!("GetSecurityInfo: error {}", status.0));
             }
+            let mut text = PWSTR::null();
+            // SAFETY: `owner` is a valid SID inside `descriptor`; the string is allocated by the call and freed below.
+            let converted = unsafe { ConvertSidToStringSidW(owner, &mut text) };
+            let result = match converted {
+                // SAFETY: a NUL-terminated string the call allocated.
+                Ok(()) => unsafe { text.to_string() }.map_err(|e| e.to_string()),
+                Err(e) => Err(format!("ConvertSidToStringSid: {e}")),
+            };
+            // SAFETY: both blocks were allocated with LocalAlloc by the calls above and are freed once.
+            unsafe {
+                if !text.is_null() {
+                    let _ = LocalFree(Some(HLOCAL(text.0.cast())));
+                }
+                let _ = LocalFree(Some(HLOCAL(descriptor.0)));
+            }
+            result
         }
     }
 
-    fn server_pid(pipe: &std::fs::File) -> Result<u32, String> {
-        let mut pid = 0u32;
-        // SAFETY: a valid pipe handle for the call and a valid out pointer.
-        unsafe { GetNamedPipeServerProcessId(HANDLE(pipe.as_raw_handle()), &mut pid) }
-            .map_err(|e| format!("the pipe's server could not be identified (GetNamedPipeServerProcessId: {e}); nothing was sent"))?;
-        Ok(pid)
-    }
+    /// On the Windows test VM (`--include-ignored`): the real owner check over real pipes. A pipe hosted by the test's own (not
+    /// SYSTEM) user is refused with nothing sent; the installed service (`PITCREW_TEST_INSTALLED=1`) is accepted.
+    #[cfg(test)]
+    mod vm {
+        use super::*;
+        use windows::core::PCWSTR;
+        use windows::Win32::Storage::FileSystem::{FILE_FLAGS_AND_ATTRIBUTES, PIPE_ACCESS_DUPLEX};
+        use windows::Win32::System::Pipes::{CreateNamedPipeW, PIPE_TYPE_BYTE, PIPE_WAIT};
 
-    fn runs_as_system(pid: u32) -> Result<bool, String> {
-        let read = |what: &str, e: windows::core::Error| format!("the pipe's server could not be examined ({what}: {e}); nothing was sent");
-        // SAFETY: opens a handle to the process with the least right that lets its token be read; owned below.
-        let process = Owned(unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.map_err(|e| read("OpenProcess", e))?);
-        let mut token = HANDLE::default();
-        // SAFETY: a valid process handle and out pointer; the token is owned below.
-        unsafe { OpenProcessToken(process.0, TOKEN_QUERY, &mut token) }.map_err(|e| read("OpenProcessToken", e))?;
-        let token = Owned(token);
-        let mut needed = 0u32;
-        // SAFETY: a size query with no buffer (it fails by design with the size needed).
-        let _ = unsafe { GetTokenInformation(token.0, TokenUser, None, 0, &mut needed) };
-        let mut buf = vec![0u64; (needed as usize).div_ceil(8).max(1)];
-        // SAFETY: `buf` holds at least `needed` bytes and is 8-byte aligned.
-        unsafe { GetTokenInformation(token.0, TokenUser, Some(buf.as_mut_ptr().cast()), needed, &mut needed) }
-            .map_err(|e| read("GetTokenInformation", e))?;
-        // SAFETY: the buffer holds a TOKEN_USER written by the call above, and `process` still pins the process.
-        let sid = unsafe { (*buf.as_ptr().cast::<TOKEN_USER>()).User.Sid };
-        // SAFETY: `sid` points into `buf`, alive here.
-        Ok(unsafe { IsWellKnownSid(sid, WinLocalSystemSid) }.as_bool())
-    }
-
-    /// Refuses a pipe whose server is not the SYSTEM service.
-    ///
-    /// # Errors
-    /// What could not be read, or that the server is not SYSTEM; in both cases nothing was sent.
-    pub fn require_system_server(pipe: &std::fs::File) -> Result<(), String> {
-        let first_pid = server_pid(pipe)?;
-        let is_system = runs_as_system(first_pid)?;
-        let second_pid = server_pid(pipe)?;
-        judge(Facts {
-            first_pid,
-            second_pid,
-            is_system,
-        })
+        #[test]
+        #[ignore = "VM: PITCREW_TEST_INSTALLED=1 on the Windows test VM"]
+        fn a_pipe_hosted_by_a_user_is_refused_and_the_installed_service_is_accepted() {
+            let name: Vec<u16> = format!(r"\\.\pipe\pitcrew-squat-test-{}", std::process::id())
+                .encode_utf16()
+                .chain(Some(0))
+                .collect();
+            // SAFETY: a NUL-terminated name that outlives the call; the handle is closed at the end of the test.
+            let server = unsafe {
+                CreateNamedPipeW(
+                    PCWSTR(name.as_ptr()),
+                    FILE_FLAGS_AND_ATTRIBUTES(PIPE_ACCESS_DUPLEX.0),
+                    PIPE_TYPE_BYTE | PIPE_WAIT,
+                    4,
+                    4096,
+                    4096,
+                    0,
+                    None,
+                )
+            };
+            assert!(!server.is_invalid(), "the test could not host a pipe");
+            let path = String::from_utf16_lossy(&name[..name.len() - 1]);
+            let client = pitcrew_core::service_paths::open_pipe_options().open(&path).unwrap();
+            let refused = super::super::verify(&PipeOwner(&client)).unwrap_err();
+            assert!(
+                refused.contains("not by SYSTEM or Administrators") && refused.contains("nothing was sent"),
+                "{refused}"
+            );
+            // SAFETY: the handle created above, closed once.
+            unsafe {
+                let _ = windows::Win32::Foundation::CloseHandle(server);
+            }
+            if std::env::var("PITCREW_TEST_INSTALLED").as_deref() == Ok("1") {
+                let installed = pitcrew_core::service_paths::open_pipe_options().open(r"\\.\pipe\pitcrew").unwrap();
+                super::super::verify(&PipeOwner(&installed)).expect("the installed service's pipe is owned by SYSTEM or Administrators");
+            }
+        }
     }
 }
 
@@ -114,72 +158,28 @@ mod imp {
 mod tests {
     use super::*;
 
-    #[test]
-    fn only_a_system_server_that_stayed_the_same_process_is_accepted() {
-        assert!(judge(Facts {
-            first_pid: 4,
-            second_pid: 4,
-            is_system: true
-        })
-        .is_ok());
-        let e = judge(Facts {
-            first_pid: 4,
-            second_pid: 4,
-            is_system: false,
-        })
-        .unwrap_err();
-        assert!(e.contains("not the Pitcrew service") && e.contains("nothing was sent"), "{e}");
-        let e = judge(Facts {
-            first_pid: 4,
-            second_pid: 9,
-            is_system: true,
-        })
-        .unwrap_err();
-        assert!(e.contains("changed while"), "{e}");
+    struct Fake(Result<&'static str, &'static str>);
+
+    impl ServerIdentity for Fake {
+        fn owner_sid(&self) -> Result<String, String> {
+            self.0.map(String::from).map_err(String::from)
+        }
     }
 
-    /// On the Windows test VM (`--include-ignored`): the real check over a real pipe. A pipe hosted by the test's own (not SYSTEM)
-    /// user is refused with nothing sent; the installed service (`PITCREW_TEST_INSTALLED=1`) is accepted.
-    #[cfg(windows)]
-    #[allow(unsafe_code)]
     #[test]
-    #[ignore = "VM: PITCREW_TEST_INSTALLED=1 on the Windows test VM"]
-    fn a_pipe_hosted_by_a_user_is_refused_and_the_installed_service_is_accepted() {
-        use windows::core::PCWSTR;
-        use windows::Win32::Storage::FileSystem::{FILE_FLAGS_AND_ATTRIBUTES, PIPE_ACCESS_DUPLEX};
-        use windows::Win32::System::Pipes::{CreateNamedPipeW, PIPE_TYPE_BYTE, PIPE_WAIT};
-        let name: Vec<u16> = format!(r"\\.\pipe\pitcrew-squat-test-{}", std::process::id())
-            .encode_utf16()
-            .chain(Some(0))
-            .collect();
-        // SAFETY: a NUL-terminated name that outlives the call; the handle is closed at the end of the test.
-        let server = unsafe {
-            CreateNamedPipeW(
-                PCWSTR(name.as_ptr()),
-                FILE_FLAGS_AND_ATTRIBUTES(PIPE_ACCESS_DUPLEX.0),
-                PIPE_TYPE_BYTE | PIPE_WAIT,
-                4,
-                4096,
-                4096,
-                0,
-                None,
-            )
-        };
-        assert!(!server.is_invalid(), "the test could not host a pipe");
-        let path = String::from_utf16_lossy(&name[..name.len() - 1]);
-        let client = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
-        let refused = imp::require_system_server(&client).unwrap_err();
-        assert!(
-            refused.contains("not the Pitcrew service") && refused.contains("nothing was sent"),
-            "{refused}"
-        );
-        // SAFETY: the handle created above, closed once.
-        unsafe {
-            let _ = windows::Win32::Foundation::CloseHandle(server);
-        }
-        if std::env::var("PITCREW_TEST_INSTALLED").as_deref() == Ok("1") {
-            let installed = pitcrew_core::service_paths::open_pipe_options().open(r"\\.\pipe\pitcrew").unwrap();
-            imp::require_system_server(&installed).expect("the installed service runs as SYSTEM");
-        }
+    fn only_the_service_s_accounts_own_the_pipe() {
+        assert!(judge_owner("S-1-5-18").is_ok());
+        assert!(judge_owner("S-1-5-32-544").is_ok());
+        let e = judge_owner("S-1-5-21-1-2-3-1001").unwrap_err();
+        assert!(e.contains("S-1-5-21-1-2-3-1001") && e.contains("nothing was sent"), "{e}");
+        assert!(judge_owner("").is_err());
+        assert!(judge_owner("S-1-5-32-545").is_err(), "Users");
+    }
+
+    #[test]
+    fn a_pipe_whose_owner_cannot_be_read_is_refused() {
+        let e = verify(&Fake(Err("access denied"))).unwrap_err();
+        assert!(e.contains("could not be checked") && e.contains("nothing was sent"), "{e}");
+        assert!(verify(&Fake(Ok("S-1-5-18"))).is_ok());
     }
 }

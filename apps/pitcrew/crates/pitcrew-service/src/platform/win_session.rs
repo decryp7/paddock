@@ -19,8 +19,8 @@ use std::time::{Duration, Instant};
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, SetHandleInformation, HANDLE, HANDLE_FLAGS, HANDLE_FLAG_INHERIT, WAIT_OBJECT_0};
 use windows::Win32::Security::{
-    DuplicateTokenEx, GetTokenInformation, ImpersonateLoggedOnUser, IsWellKnownSid, RevertToSelf, SecurityIdentification, TokenPrimary,
-    TokenUser, WinLocalSystemSid, SECURITY_ATTRIBUTES, TOKEN_ALL_ACCESS, TOKEN_QUERY, TOKEN_USER,
+    DuplicateTokenEx, GetTokenInformation, IsWellKnownSid, SecurityIdentification, TokenPrimary, TokenUser, WinLocalSystemSid,
+    SECURITY_ATTRIBUTES, TOKEN_ALL_ACCESS, TOKEN_QUERY, TOKEN_USER,
 };
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
@@ -73,38 +73,6 @@ pub fn is_local_system() -> bool {
     }
     // SAFETY: the buffer holds a TOKEN_USER written by the call above and is alive for the check.
     unsafe { IsWellKnownSid((*buf.as_ptr().cast::<TOKEN_USER>()).User.Sid, WinLocalSystemSid) }.as_bool()
-}
-
-/// The calling thread acts as the logged-on user until this is dropped (file operations then use that user's rights, so a link
-/// the user planted can only lead where the user could already go).
-pub struct Impersonation(());
-
-impl Drop for Impersonation {
-    fn drop(&mut self) {
-        // SAFETY: always valid; failing means there was nothing to revert.
-        unsafe {
-            let _ = RevertToSelf();
-        }
-    }
-}
-
-/// Makes the calling thread the user at the console (or the Remote Desktop user, [`console_user`]) until the result is dropped.
-///
-/// # Errors
-/// Nobody is logged on, or the token could not be used: nothing was changed.
-pub fn impersonate_console_user() -> Result<Impersonation, String> {
-    let session = match console_user() {
-        ConsoleUser::Session(s) => s,
-        ConsoleUser::Nobody => return Err("nobody is logged on".into()),
-        ConsoleUser::NotSystem => return Err("the service does not run as LocalSystem".into()),
-    };
-    let mut user = HANDLE::default();
-    // SAFETY: valid out pointer; owned below.
-    unsafe { WTSQueryUserToken(session, &mut user) }.map_err(|e| os_err("Getting the logged-on user's token", e))?;
-    let user = Owned(user);
-    // SAFETY: `user.0` is a valid token (a primary one is duplicated into an impersonation token by the call).
-    unsafe { ImpersonateLoggedOnUser(user.0) }.map_err(|e| os_err("Acting as the logged-on user", e))?;
-    Ok(Impersonation(()))
 }
 
 /// An owned Win32 handle, closed on drop.

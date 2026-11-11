@@ -323,15 +323,36 @@ pub fn cache_entries(dir: &Path) -> (Vec<CacheEntry>, bool) {
     (out, truncated)
 }
 
-/// The cache folder a runner uses and whether it is the default: `cache.dir` of its configuration (relative paths are
-/// relative to the runner's folder), else `$HOME/.cache/actcache`.
-pub fn cache_dir_of(settings: &RunnerSettings, runner_dir: &Path, home: Option<&Path>) -> Option<(PathBuf, bool)> {
+/// The cache folder a runner uses and whether it is the default: `cache.dir` of its configuration **only when it is a plain
+/// relative path below the runner's own folder**, else `$HOME/.cache/actcache`.
+///
+/// The runner's `config.yaml` is a file in the runner's folder, and the trim deletes in the folder this names: an absolute path
+/// or a `..` in it would aim the service's deletes anywhere on the machine. So the configuration may only name a place inside the
+/// runner's own folder (which the service touches only when only administrators can change it); anything else is refused with
+/// the reason.
+///
+/// # Errors
+/// The configured folder is outside the runner's folder, or there is no home folder for the default.
+pub fn cache_dir_of(settings: &RunnerSettings, runner_dir: &Path, home: Option<&Path>) -> Result<(PathBuf, bool), String> {
     match settings.cache_dir.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
         Some(d) => {
             let p = PathBuf::from(d);
-            Some((if p.is_absolute() { p } else { runner_dir.join(p) }, false))
+            let plain = !p.has_root()
+                && !d.starts_with(['/', '\\'])
+                && d.chars().nth(1) != Some(':')
+                && p.components().all(|c| matches!(c, std::path::Component::Normal(_)));
+            if plain {
+                Ok((runner_dir.join(p), false))
+            } else {
+                Err(format!(
+                    "the cache folder named in the runner's configuration ({d}) is not below the runner's own folder; Pitcrew manages only a \
+                     cache folder inside the runner's folder (set cache.dir to a relative name such as \"cache\")"
+                ))
+            }
         }
-        None => home.map(|h| (h.join(".cache").join("actcache"), true)),
+        None => home
+            .map(|h| (h.join(".cache").join("actcache"), true))
+            .ok_or_else(|| "the cache folder is not known: this account has no home folder".to_string()),
     }
 }
 
@@ -347,8 +368,7 @@ pub fn cache_report(
     home: Option<&Path>,
     free_bytes: Option<u64>,
 ) -> Result<CacheInfo, String> {
-    let (dir, default_dir) =
-        cache_dir_of(settings, runner_dir, home).ok_or("the cache folder is not known: this account has no home folder")?;
+    let (dir, default_dir) = cache_dir_of(settings, runner_dir, home)?;
     let problem = hygiene::safe_cache_dir(&dir, home).err();
     let exists = dir.is_dir();
     let (mut entries, truncated) = if exists { cache_entries(&dir) } else { (vec![], false) };
@@ -386,26 +406,21 @@ pub fn cache_plan(dir: &Path, limits: &CacheLimits, home: Option<&Path>, now: Ti
 /// Deletes the planned entries (names are re-checked: a single path component inside `dir`, never a link target).
 pub fn cache_clean(dir: &Path, plan: &CachePlan) -> Vec<(String, String)> {
     let mut failures = vec![];
-    // No link is followed (safe_delete), and where a user can change the folder the work runs as the logged-on user.
-    let ran = crate::safe_delete::with_rights(dir, || {
-        for (e, _) in &plan.entries {
-            let name = Path::new(&e.name);
-            if name.components().count() != 1 || e.name == ".." || e.name == "." {
-                failures.push((e.name.clone(), "the name is not a plain entry of the cache folder".into()));
-                continue;
-            }
-            if let Err(err) = crate::safe_delete::remove_below(dir, name) {
-                let reason = if err.kind() == std::io::ErrorKind::InvalidInput {
-                    err.to_string()
-                } else {
-                    failure_reason(err.raw_os_error(), cfg!(windows), &err.to_string())
-                };
-                failures.push((e.name.clone(), reason));
-            }
+    // No link is followed (safe_delete); the service reaches this only for a runner whose folder only administrators can change.
+    for (e, _) in &plan.entries {
+        let name = Path::new(&e.name);
+        if name.components().count() != 1 || e.name == ".." || e.name == "." {
+            failures.push((e.name.clone(), "the name is not a plain entry of the cache folder".into()));
+            continue;
         }
-    });
-    if let Err(reason) = ran {
-        failures.push((dir.display().to_string(), reason));
+        if let Err(err) = crate::safe_delete::remove_below(dir, name) {
+            let reason = if err.kind() == std::io::ErrorKind::InvalidInput {
+                err.to_string()
+            } else {
+                failure_reason(err.raw_os_error(), cfg!(windows), &err.to_string())
+            };
+            failures.push((e.name.clone(), reason));
+        }
     }
     failures
 }
@@ -604,7 +619,16 @@ mod tests {
         assert_eq!((p, def), (Path::new("/r").join("caches"), false));
         let (p, def) = cache_dir_of(&RunnerSettings::default(), Path::new("/r"), Some(Path::new("/h"))).unwrap();
         assert_eq!((p, def), (Path::new("/h").join(".cache").join("actcache"), true));
-        assert!(cache_dir_of(&RunnerSettings::default(), Path::new("/r"), None).is_none());
+        assert!(cache_dir_of(&RunnerSettings::default(), Path::new("/r"), None).is_err());
+        // The configuration may name only a place inside the runner's folder (it is a file a user may be able to edit).
+        for evil in ["/etc", "../x", "a/../../x", "C:\\Windows", "\\\\server\\share", "\\Windows"] {
+            let s = RunnerSettings {
+                cache_dir: Some(evil.into()),
+                ..RunnerSettings::default()
+            };
+            let e = cache_dir_of(&s, Path::new("/r"), Some(Path::new("/h"))).unwrap_err();
+            assert!(e.contains("not below the runner's own folder"), "{evil}: {e}");
+        }
         assert_eq!(size_limit_mb("10GB"), Some(9536));
     }
 }

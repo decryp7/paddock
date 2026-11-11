@@ -51,51 +51,99 @@ pub fn check_service_launch(port: &mut dyn TrustPort, program: &Path, dir: &Path
     Ok(())
 }
 
-/// Whether nobody but SYSTEM, Administrators and TrustedInstaller can change `dir` or anything that leads to it (the shared trust
-/// rule, strict inside `dir`). A folder that is not even there is not protected.
-pub fn folder_is_protected(port: &mut dyn TrustPort, dir: &Path) -> bool {
+/// Why the service may not touch a runner's folder, or `Ok` when only SYSTEM, Administrators and TrustedInstaller can change it.
+///
+/// This is the one rule of ADR 0004's second amendment (the model of the GitHub Actions runner service): **the SYSTEM service
+/// works only in folders only administrators can change.** A runner in a folder a user can change is run by the user, in the
+/// user's session; the service never reads, writes, deletes or runs anything in it, so a link, a junction or a swapped file
+/// a user planted there can never be followed with SYSTEM's rights.
+///
+/// Checked: the chain from the drive root to `dir` and `dir` itself (the shared strict rule: owner, no write, add, delete or
+/// take-ownership right for anyone else), and every **direct child** of `dir` the same way (a folder an older Pitcrew made inside
+/// it keeps the rights `C:\ProgramData` gave it, and a user may have planted a link or a file there). Deeper entries are made
+/// by the runner as SYSTEM inside a folder that forbids users to add to it, so they inherit that; checking every one of
+/// millions of work files on every request would make the runner unusable. `list` names the children (the real folder, or a
+/// fake in tests).
+///
+/// # Errors
+/// The first path that a user could change, with the reason and what to do.
+pub fn check_runner_folder(
+    port: &mut dyn TrustPort,
+    list: &dyn Fn(&str) -> std::io::Result<Vec<String>>,
+    dir: &Path,
+) -> Result<(), String> {
     let d = text(dir);
-    verify_chain(port, &d, FileKind::Dir, Some(&d), false).is_ok()
+    let refuse = |e: Untrusted| {
+        format!(
+            "{} is not a folder only administrators can change: {}. The Pitcrew service manages only service runners in such folders \
+             (like the GitHub Actions runner service); move the runner under C:\\Program Files or C:\\ProgramData\\Pitcrew\\runners, \
+             or run it in your own session with the Pitcrew app",
+            d,
+            e.describe()
+        )
+    };
+    verify_chain(port, &d, FileKind::Dir, Some(&d), false).map_err(refuse)?;
+    let names = list(&d).map_err(|e| format!("{d} could not be listed ({e}); the service did not touch it"))?;
+    for name in names {
+        let child = format!("{}\\{name}", d.trim_end_matches('\\'));
+        let Some(node) = port
+            .node(&child)
+            .map_err(|e| format!("{child} could not be examined ({e}); the service did not touch {d}"))?
+        else {
+            continue;
+        };
+        let want = if node.kind == FileKind::Dir {
+            FileKind::Dir
+        } else {
+            FileKind::File
+        };
+        verify_chain(port, &child, want, Some(&d), false).map_err(refuse)?;
+    }
+    Ok(())
 }
 
-/// The `icacls` arguments that give a **new, empty** interactive runner folder its rules: SYSTEM and Administrators full control
-/// and interactive users (`S-1-5-4`) modify, nothing inherited from above, all inherited by what the folder will hold. By
-/// well-known SID, so the language of the system does not matter. Only for an empty folder: `icacls` applies the rule to what is
-/// already in it, and a hard link a user planted there could make that rewrite a file they cannot write.
-pub fn interactive_acl_arguments(dir: &Path) -> Vec<String> {
-    [
-        text(dir).as_str(),
-        "/inheritance:r",
-        "/grant:r",
-        "*S-1-5-18:(OI)(CI)F",
-        "/grant:r",
-        "*S-1-5-32-544:(OI)(CI)F",
-        "/grant:r",
-        "*S-1-5-4:(OI)(CI)M",
-    ]
-    .iter()
-    .map(|s| (*s).to_string())
-    .collect()
+/// What decides whether the service may touch a runner's folder.
+pub type FolderGuard = Arc<dyn Fn(&Path) -> Result<(), String> + Send + Sync>;
+
+/// The guard of this OS: on Windows as LocalSystem, [`check_runner_folder`] over the real machine; everywhere else (the service
+/// is the user's own, or a developer's console) nothing.
+pub fn os_folder_guard() -> FolderGuard {
+    #[cfg(windows)]
+    {
+        Arc::new(|dir| {
+            if !crate::platform::win_session::is_local_system() {
+                return Ok(());
+            }
+            let list = |d: &str| -> std::io::Result<Vec<String>> {
+                std::fs::read_dir(d)?
+                    .map(|e| e.map(|e| e.file_name().to_string_lossy().into_owned()))
+                    .collect()
+            };
+            check_runner_folder(&mut paddock_service::privileged::trust_real::RealTrust, &list, dir)
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        Arc::new(|_| Ok(()))
+    }
 }
 
-/// Gives a runner's folder **inside the data folder** the rules its session needs (Windows, as LocalSystem; the data folder is
-/// protected, but `C:\ProgramData` lets users create folders, so a folder made by an older Pitcrew inherited a rule that lets users
-/// add to it):
-///
-/// - a `service` runner's folder is locked like the data folder (SYSTEM and Administrators full, Users read and execute, by a
-///   handle, on this one folder, never propagated: `TrustPort::lock_dir`), so the guard accepts it;
-/// - an `interactive` runner's **new** folder is made writable for interactive users (`grant_interactive`), because that runner
-///   runs with the user's own token and writes its `work` and cache there; an existing one is left as it is (it already works).
-///
-/// A folder outside the data folder is the user's own choice and is left alone, as is one that SYSTEM or Administrators do not own
-/// (a user made it first; the guard then refuses a service runner there with the reason). Returns a line for the runner's log.
+/// Locks a **service** runner's folder inside the data folder, the folders above it up to the data folder and the folders directly
+/// inside it (Windows, as LocalSystem). `C:\ProgramData` lets users create folders, so a folder an older Pitcrew made there kept what it inherited, and a
+/// folder under one of those is not admin-only (the guard checks every ancestor). Each is locked like the data folder, one
+/// folder at a time, by a handle, never propagated (`TrustPort::lock_dir`). A folder outside the data folder is the
+/// administrator's own choice and is left alone, as is one that SYSTEM or Administrators do not own (a user made it first: the
+/// guard then refuses it with the reason). An `interactive` runner's folder is not touched: the service does not manage one.
+/// Returns a line for the runner's log.
 pub fn settle_runner_dir(
     port: &mut dyn TrustPort,
+    list: &dyn Fn(&str) -> std::io::Result<Vec<String>>,
     data_dir: &Path,
     cfg: &RunnerConfig,
-    is_new: bool,
-    grant_interactive: &mut dyn FnMut(&Path) -> std::io::Result<()>,
 ) -> Option<String> {
+    if cfg.session != SessionMode::Service {
+        return None;
+    }
     let dir = text(&cfg.dir);
     if !is_within(&dir, &text(data_dir), port.style()) {
         return None;
@@ -117,8 +165,6 @@ pub fn settle_runner_dir(
             ));
         }
     }
-    // The folders between the data folder and the runner's: an older Pitcrew made them with what `C:\\ProgramData` gives users (they
-    // may add to them), and a protected folder under one of those is not protected (the guard checks every ancestor).
     let mut ancestors = Vec::new();
     let mut up = parent_of(&dir, port.style());
     while let Some(p) = up {
@@ -141,61 +187,52 @@ pub fn settle_runner_dir(
             }
         }
     }
-    match (cfg.session, is_new) {
-        (SessionMode::Service, _) => Some(match port.lock_dir(&dir) {
-            Ok(()) => {
-                "the runner's folder is locked: only administrators change it (a service runner starts with the service's rights)".into()
-            }
-            Err(e) => format!("the runner's folder could not be locked ({e}); a service runner there will be refused until it is"),
-        }),
-        (SessionMode::Interactive, true) => Some(match grant_interactive(&cfg.dir) {
-            Ok(()) => "the runner's new folder lets interactive users write (the runner runs with the logged-on user's rights)".into(),
-            Err(e) => format!(
-                "the runner's new folder could not be opened to the user ({e}); the runner may not be able to write its work folder"
-            ),
-        }),
-        (SessionMode::Interactive, false) => None,
+    if let Err(e) = port.lock_dir(&dir) {
+        return Some(format!(
+            "the runner's folder could not be locked ({e}); it will be refused until it is"
+        ));
     }
+    // The folders directly inside it (`work`, `cache`, `bin`) the same way: an older Pitcrew made them with what the folder gave
+    // them then, and the guard judges every direct child. Only SYSTEM's or Administrators' own folders, never a link.
+    let mut locked = 0;
+    for name in list(&dir).unwrap_or_default() {
+        let child = format!("{}\\{name}", dir.trim_end_matches('\\'));
+        let ours = matches!(port.node(&child), Ok(Some(n)) if n.kind == FileKind::Dir && match &n.security {
+            Security::Windows(d) => is_trusted_sid(&d.owner),
+            Security::Unix { .. } => true,
+        });
+        if ours && port.lock_dir(&child).is_ok() {
+            locked += 1;
+        }
+    }
+    Some(format!(
+        "the runner's folder and its {locked} folder(s) inside are locked: only administrators change them"
+    ))
 }
 
-/// Applies [`interactive_acl_arguments`] with the system's own `icacls` (Windows).
-///
-/// # Errors
-/// `icacls` could not run or refused.
-#[cfg(windows)]
-pub fn grant_interactive(dir: &Path) -> std::io::Result<()> {
-    use crate::process::{quiet_command, run_with_timeout};
-    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
-    let icacls = std::path::PathBuf::from(root).join("System32").join("icacls.exe");
-    let mut cmd = quiet_command(&icacls);
-    cmd.args(interactive_acl_arguments(dir));
-    match run_with_timeout(cmd, std::time::Duration::from_secs(30)) {
-        Ok(out) if out.success => Ok(()),
-        Ok(out) => Err(std::io::Error::other(format!("icacls: {}", out.stderr.trim()))),
-        Err(e) => Err(std::io::Error::other(e.to_string())),
-    }
-}
+/// What settles a runner's folder; a line for the runner's log.
+pub type SettleHook = Arc<dyn Fn(&RunnerConfig) -> Option<String> + Send + Sync>;
 
-/// What settles a runner's folder: the runner, and whether its folder was made just now; a line for the runner's log.
-pub type SettleHook = Arc<dyn Fn(&RunnerConfig, bool) -> Option<String> + Send + Sync>;
-
-/// The settle hook of this OS: on Windows as LocalSystem, [`settle_runner_dir`] over the real machine (the grant by `icacls`);
-/// nothing elsewhere.
+/// The settle hook of this OS: on Windows as LocalSystem, [`settle_runner_dir`] over the real machine; nothing elsewhere.
 pub fn os_settle(data_dir: std::path::PathBuf) -> SettleHook {
     #[cfg(windows)]
     {
-        Arc::new(move |cfg, is_new| {
+        Arc::new(move |cfg| {
             if !crate::platform::win_session::is_local_system() {
                 return None;
             }
-            let mut machine = paddock_service::privileged::trust_real::RealTrust;
-            settle_runner_dir(&mut machine, &data_dir, cfg, is_new, &mut grant_interactive)
+            let list = |d: &str| -> std::io::Result<Vec<String>> {
+                std::fs::read_dir(d)?
+                    .map(|e| e.map(|e| e.file_name().to_string_lossy().into_owned()))
+                    .collect()
+            };
+            settle_runner_dir(&mut paddock_service::privileged::trust_real::RealTrust, &list, &data_dir, cfg)
         })
     }
     #[cfg(not(windows))]
     {
         drop(data_dir);
-        Arc::new(|_, _| None)
+        Arc::new(|_| None)
     }
 }
 
@@ -375,26 +412,43 @@ mod tests {
 
     const DATA: &str = "C:\\ProgramData\\Pitcrew";
 
-    fn grant_never(_: &Path) -> std::io::Result<()> {
-        panic!("no grant was expected")
-    }
-
     /// An older Pitcrew made `runners\r` with what `C:\ProgramData` lets users do in it (they may add to it).
     fn old_runner_folder() -> FakePort {
         let mut p = machine();
         p.put(DATA, locked())
             .put("C:\\ProgramData\\Pitcrew\\runners", inherited_from_program_data())
-            .put("C:\\ProgramData\\Pitcrew\\runners\\r", inherited_from_program_data());
+            .put("C:\\ProgramData\\Pitcrew\\runners\\r", inherited_from_program_data())
+            .put("C:\\ProgramData\\Pitcrew\\runners\\r\\work", inherited_from_program_data());
         p
+    }
+
+    /// The children of `dir` in the fake machine (what `read_dir` gives on the real one).
+    fn list_of(p: &FakePort) -> impl Fn(&str) -> std::io::Result<Vec<String>> {
+        let nodes: Vec<String> = p.nodes.keys().cloned().collect();
+        move |dir: &str| {
+            let prefix = format!("{}\\", dir.to_lowercase().trim_end_matches('\\'));
+            Ok(nodes
+                .iter()
+                .filter_map(|k| k.strip_prefix(&prefix))
+                .filter(|rest| !rest.contains('\\'))
+                .map(String::from)
+                .collect())
+        }
+    }
+
+    fn settle(p: &mut FakePort, cfg: &RunnerConfig) -> Option<String> {
+        let list = list_of(p);
+        settle_runner_dir(p, &list, Path::new(DATA), cfg)
     }
 
     #[test]
     fn a_service_runner_folder_from_an_older_pitcrew_is_locked_so_the_guard_accepts_it() {
         let mut p = old_runner_folder();
         let dir = "C:\\ProgramData\\Pitcrew\\runners\\r";
-        // Before: users may add to the folder, so a service runner there is refused.
-        assert!(!folder_is_protected(&mut p, Path::new(dir)));
-        let line = settle_runner_dir(&mut p, Path::new(DATA), &runner(dir, "service"), false, &mut grant_never).unwrap();
+        // Before: users may add to the folder, so the service refuses it.
+        let list = list_of(&p);
+        assert!(check_runner_folder(&mut p, &list, Path::new(dir)).is_err());
+        let line = settle(&mut p, &runner(dir, "service")).unwrap();
         assert!(line.contains("locked"), "{line}");
         assert!(p.calls.iter().any(|c| c == &format!("lock_dir {dir}")), "{:?}", p.calls);
         // The folder between the data folder and the runner's is locked too, and first: every ancestor is judged.
@@ -407,53 +461,63 @@ mod tests {
             runners < calls.iter().position(|c| *c == format!("lock_dir {dir}")).unwrap(),
             "{calls:?}"
         );
-        assert!(folder_is_protected(&mut p, Path::new(dir)), "after: the guard accepts the folder");
+        let list = list_of(&p);
+        check_runner_folder(&mut p, &list, Path::new(dir)).expect("after: the guard accepts the folder");
     }
 
     #[test]
-    fn a_new_interactive_runner_folder_is_opened_to_the_user_and_an_old_one_is_left_alone() {
+    fn an_interactive_runner_or_a_folder_outside_the_data_folder_or_made_by_a_user_is_left_alone() {
+        let mut p = old_runner_folder();
         let dir = "C:\\ProgramData\\Pitcrew\\runners\\r";
-        let mut p = old_runner_folder();
-        let mut granted = vec![];
-        let line = settle_runner_dir(&mut p, Path::new(DATA), &runner(dir, "interactive"), true, &mut |d: &Path| {
-            granted.push(d.display().to_string());
-            Ok(())
-        })
-        .unwrap();
-        assert!(line.contains("interactive users write"), "{line}");
-        assert_eq!(granted, [dir]);
-        assert!(
-            !p.calls.iter().any(|c| c == &format!("lock_dir {dir}")),
-            "an interactive folder is not locked: {:?}",
-            p.calls
-        );
-        assert_eq!(
-            settle_runner_dir(&mut p, Path::new(DATA), &runner(dir, "interactive"), false, &mut grant_never),
-            None
-        );
-    }
-
-    #[test]
-    fn a_folder_outside_the_data_folder_or_made_by_a_user_is_left_alone() {
-        let mut p = old_runner_folder();
+        assert_eq!(settle(&mut p, &runner(dir, "interactive")), None, "the service does not manage it");
         p.put("C:\\Users\\someone\\runner", user_owned());
         let outside = runner("C:\\Users\\someone\\runner", "service");
-        assert_eq!(settle_runner_dir(&mut p, Path::new(DATA), &outside, false, &mut grant_never), None);
+        assert_eq!(settle(&mut p, &outside), None);
         p.put("C:\\ProgramData\\Pitcrew\\runners\\u", user_owned());
         let by_user = runner("C:\\ProgramData\\Pitcrew\\runners\\u", "service");
-        let line = settle_runner_dir(&mut p, Path::new(DATA), &by_user, false, &mut grant_never).unwrap();
+        let line = settle(&mut p, &by_user).unwrap();
         assert!(line.contains("left as they are") && line.contains(SID_USER), "{line}");
-        assert!(!p.calls.iter().any(|c| c.starts_with("lock_dir")), "{:?}", p.calls);
+        assert!(p.calls.is_empty(), "nothing was changed: {:?}", p.calls);
     }
 
+    /// B and C in their new form: a runner folder a user can change is refused whole, whatever is in it.
     #[test]
-    fn the_interactive_folder_rule_names_the_accounts_by_sid() {
-        let a = interactive_acl_arguments(Path::new("C:\\ProgramData\\Pitcrew\\runners\\r"));
-        assert_eq!(a[0], "C:\\ProgramData\\Pitcrew\\runners\\r");
-        assert!(a.contains(&"/inheritance:r".to_string()));
-        for rule in ["*S-1-5-18:(OI)(CI)F", "*S-1-5-32-544:(OI)(CI)F", "*S-1-5-4:(OI)(CI)M"] {
-            assert!(a.contains(&rule.to_string()), "{rule}: {a:?}");
-        }
+    fn a_folder_a_user_can_change_is_refused_and_so_is_a_user_made_child_in_an_admin_folder() {
+        let mut p = machine();
+        p.put(
+            "C:\\runner",
+            from_sddl(
+                FileKind::Dir,
+                "O:BAG:SYD:AI(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)(A;OICIID;0x1301bf;;;AU)",
+            ),
+        );
+        let list = list_of(&p);
+        let e = check_runner_folder(&mut p, &list, Path::new("C:\\runner")).unwrap_err();
+        assert!(
+            e.contains("not a folder only administrators can change") && e.contains("GitHub Actions"),
+            "{e}"
+        );
+
+        // An admin-only folder holding a child a user made (a `work` folder they own, or a link).
+        let mut p = machine();
+        p.put("C:\\ProgramData\\Pitcrew", locked())
+            .put("C:\\ProgramData\\Pitcrew\\runners", locked())
+            .put("C:\\ProgramData\\Pitcrew\\runners\\r", locked())
+            .put("C:\\ProgramData\\Pitcrew\\runners\\r\\bin", locked())
+            .put("C:\\ProgramData\\Pitcrew\\runners\\r\\work", user_owned());
+        let list = list_of(&p);
+        let e = check_runner_folder(&mut p, &list, Path::new("C:\\ProgramData\\Pitcrew\\runners\\r")).unwrap_err();
+        assert!(e.contains("work"), "{e}");
+        let mut link = locked();
+        link.kind = FileKind::Symlink;
+        p.put("C:\\ProgramData\\Pitcrew\\runners\\r\\work", link);
+        let list = list_of(&p);
+        let e = check_runner_folder(&mut p, &list, Path::new("C:\\ProgramData\\Pitcrew\\runners\\r")).unwrap_err();
+        assert!(e.contains("work"), "{e}");
+        // Without the user's child the same folder passes.
+        p.nodes.remove(&p.key("C:\\ProgramData\\Pitcrew\\runners\\r\\work"));
+        let list = list_of(&p);
+        check_runner_folder(&mut p, &list, Path::new("C:\\ProgramData\\Pitcrew\\runners\\r")).unwrap();
     }
 
     #[test]

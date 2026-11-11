@@ -26,6 +26,10 @@ use std::time::{Duration, Instant};
 
 const EXE: &str = std::env::consts::EXE_SUFFIX;
 
+fn open_guard() -> pitcrew_service::protected::FolderGuard {
+    Arc::new(|_| Ok(()))
+}
+
 fn fake_runner() -> PathBuf {
     static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     BUILT
@@ -71,7 +75,7 @@ impl Harness {
 
     /// `runner_toml` is appended to the runner's table (e.g. an `[runners.env]` table).
     fn with_runner_toml(test: &str, fake: &str, registered: bool, runner_toml: &str) -> Harness {
-        Harness::build(test, fake, registered, runner_toml, None, Box::new(OsLauncher))
+        Harness::build(test, fake, registered, runner_toml, None, Box::new(OsLauncher), open_guard())
     }
 
     /// `state_json` is written as the service's `state.json` before it starts.
@@ -86,6 +90,7 @@ impl Harness {
         runner_toml: &str,
         state_json: Option<&str>,
         launcher: Box<dyn pitcrew_service::launcher::Launcher>,
+        guard: pitcrew_service::protected::FolderGuard,
     ) -> Harness {
         pitcrew_service::launch::set_stop_helper(PathBuf::from(env!("CARGO_BIN_EXE_pitcrew-service")));
         let root = std::env::temp_dir().join(format!("pitcrew-it-{test}-{}", std::process::id()));
@@ -115,7 +120,8 @@ impl Harness {
         let exe2 = exe.clone();
         let env = Env {
             program_gate: pitcrew_service::launcher::open_gate(),
-            settle_runner_dir: Arc::new(|_, _| None),
+            settle_runner_dir: Arc::new(|_| None),
+            runner_folder_guard: guard,
             data_dir: data,
             launcher,
             sources: Sources::public(),
@@ -427,7 +433,7 @@ fn a_service_account_runner_in_an_unprotected_folder_is_not_started() {
         OsLauncher,
         Box::new(|spec| Err(format!("{} can be changed by users", spec.dir.display()))),
     );
-    let mut h = Harness::build("guarded", "mode=idle\n", true, "", None, Box::new(guard));
+    let mut h = Harness::build("guarded", "mode=idle\n", true, "", None, Box::new(guard), open_guard());
     // The first start attempt can meet the runner's own version probe ("already runs outside Pitcrew"); the refusal shows on a retry.
     h.until("the refusal is shown", Duration::from_secs(5), |h| {
         h.status().problem.is_some_and(|p| p.contains("can be changed by users"))
@@ -441,6 +447,83 @@ fn a_service_account_runner_in_an_unprotected_folder_is_not_started() {
     );
     assert!(!h.log().contains("declare successfully"), "the runner wrote nothing");
     h.finish();
+}
+
+/// ADR 0004, second amendment (B and C in their new form): the service never touches a folder a user can change. Every request
+/// that would read, write or delete in the runner's folder is refused, and nothing in the folder changes: no file deleted, no log
+/// file made, the runner not started.
+#[test]
+fn a_runner_in_a_folder_a_user_can_change_is_refused_every_folder_request_with_no_effect() {
+    use pitcrew_core::hygiene::CacheLimits;
+    let why = "is not a folder only administrators can change";
+    let guard: pitcrew_service::protected::FolderGuard = Arc::new(move |dir| Err(format!("{} {why}", dir.display())));
+    let mut h = Harness::build("blocked", "mode=idle\n", true, "", None, Box::new(OsLauncher), guard);
+    let markers = [
+        h.runner_dir.join("work").join("job").join("keep.txt"),
+        h.runner_dir.join("cache").join("entry").join("keep.bin"),
+        h.runner_dir.join("bin").join("gitea-runner.download"),
+    ];
+    for m in &markers {
+        std::fs::create_dir_all(m.parent().unwrap()).unwrap();
+        std::fs::write(m, b"keep").unwrap();
+    }
+    let name = h.name.clone();
+    let requests = vec![
+        Request::CleanDisk { runner: name.clone() },
+        Request::CacheClean {
+            runner: name.clone(),
+            limits: CacheLimits {
+                max_mb: 0,
+                max_age_days: 1,
+            },
+        },
+        Request::CacheReport { runner: name.clone() },
+        Request::ApplyUpdate { runner: name.clone() },
+        Request::CancelUpdate { runner: name.clone() },
+        Request::Logs {
+            runner: name.clone(),
+            after: None,
+            limit: 10,
+        },
+        Request::Disk { runner: name.clone() },
+        Request::GetRunnerConfig { runner: name.clone() },
+        Request::Start { runner: name.clone() },
+    ];
+    for r in requests {
+        let kind = r.kind();
+        match h.ask(r) {
+            Response::Error(e) => {
+                assert_eq!(e.code, pitcrew_core::protocol::ErrorCode::PermissionDenied, "{kind}: {e:?}");
+                assert!(e.message.contains(why), "{kind}: {}", e.message);
+            }
+            other => panic!("{kind} was answered: {other:?}"),
+        }
+    }
+    // Let the supervisor run: it must not start, probe, scan, clean or update the runner either.
+    h.pump(Duration::from_secs(120));
+    h.pump(Duration::from_secs(120));
+    for m in &markers {
+        assert!(m.exists(), "{} was touched", m.display());
+    }
+    let s = h.status();
+    assert!(s.problem.as_deref().is_some_and(|p| p.contains(why)), "{s:?}");
+    assert_eq!(count(&h.history(), |k| *k == HistoryKind::Started), 0, "the runner was started");
+    assert!(
+        !h.runner_dir.join("logs").exists(),
+        "the service made a log folder inside the runner's folder"
+    );
+    assert!(
+        h.root.join("data").join("logs").join("blocked").join("blocked").exists(),
+        "its log is kept in the service's own folder"
+    );
+    h.finish();
+
+    // The control: the same request in a folder the guard accepts is not refused, so the probes above could have seen a change.
+    let mut ok = Harness::new("allowed", "mode=idle\n", true);
+    if let Response::Error(e) = ok.ask(Request::CleanDisk { runner: ok.name.clone() }) {
+        assert_ne!(e.code, pitcrew_core::protocol::ErrorCode::PermissionDenied, "{e:?}");
+    }
+    ok.finish();
 }
 
 #[test]
@@ -1300,7 +1383,7 @@ fn an_update_that_keeps_failing_is_reported_as_a_loop_with_its_cause() {
         failed(2),
         failed(1)
     );
-    let mut h = Harness::build("loopy", "mode=idle\n", true, "", Some(&state), Box::new(OsLauncher));
+    let mut h = Harness::build("loopy", "mode=idle\n", true, "", Some(&state), Box::new(OsLauncher), open_guard());
     h.pump(Duration::from_secs(6));
     let s = h.status();
     let l = s.update_loop.expect("a loop is reported");
@@ -1309,11 +1392,55 @@ fn an_update_that_keeps_failing_is_reported_as_a_loop_with_its_cause() {
     h.finish();
 }
 
+/// B: the cache folder comes from the runner's `config.yaml`, a file in the runner's folder. A folder it names outside the runner's
+/// own is never trimmed, even by an administrator's request: nothing there is deleted.
+#[test]
+fn a_cache_folder_the_configuration_names_outside_the_runner_folder_is_refused_and_nothing_is_deleted() {
+    use pitcrew_core::hygiene::CacheLimits;
+    let mut h = Harness::new("evilcache", "mode=idle\n", true);
+    let victim = h.root.join("victim");
+    std::fs::create_dir_all(&victim).unwrap();
+    std::fs::write(victim.join("precious.bin"), vec![0u8; 3 * 1024 * 1024]).unwrap();
+    for dir in [victim.display().to_string(), "../../victim".to_string()] {
+        std::fs::write(
+            h.runner_dir.join("config.yaml"),
+            format!("log:\n  level: info\ncache:\n  enabled: true\n  dir: '{dir}'\n"),
+        )
+        .unwrap();
+        for r in [
+            Request::CacheReport { runner: h.name.clone() },
+            Request::CacheClean {
+                runner: h.name.clone(),
+                limits: CacheLimits {
+                    max_mb: 0,
+                    max_age_days: 0,
+                },
+            },
+        ] {
+            let kind = r.kind();
+            match h.ask(r) {
+                Response::Error(e) => assert!(
+                    e.message.contains("not below the runner's own folder"),
+                    "{kind} {dir}: {}",
+                    e.message
+                ),
+                other => panic!("{kind} {dir} was answered: {other:?}"),
+            }
+        }
+    }
+    assert!(
+        victim.join("precious.bin").exists(),
+        "a file outside the runner's folder was deleted"
+    );
+    h.finish();
+}
+
 #[test]
 fn the_actions_cache_of_a_runner_is_reported_previewed_and_trimmed() {
     use pitcrew_core::hygiene::CacheLimits;
     let mut h = Harness::new("cacher", "mode=idle\n", true);
-    let cache = h.root.join("cachedir");
+    // The configuration may name a cache folder only inside the runner's own folder (ADR 0004, second amendment).
+    let cache = h.runner_dir.join("cachedir");
     std::fs::create_dir_all(cache.join("e1")).unwrap();
     std::fs::write(cache.join("e1/blob"), vec![0u8; 3 * 1024 * 1024]).unwrap();
     std::fs::write(cache.join("e2.bin"), vec![0u8; 3 * 1024 * 1024]).unwrap();
@@ -1321,7 +1448,7 @@ fn the_actions_cache_of_a_runner_is_reported_previewed_and_trimmed() {
         h.runner_dir.join("config.yaml"),
         format!(
             "log:\n  level: info\ncache:\n  enabled: true\n  dir: '{}'\n  size_limit: 4MiB\n",
-            cache.display()
+            "cachedir"
         ),
     )
     .unwrap();

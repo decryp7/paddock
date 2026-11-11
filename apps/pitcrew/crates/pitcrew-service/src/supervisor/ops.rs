@@ -90,14 +90,9 @@ impl Supervisor {
         let Some((settings, runner_dir)) = self.cache_inputs(runner) else {
             return Some((reply, unknown(runner)));
         };
-        let Some((dir, _)) = hygiene::cache_dir_of(&settings, &runner_dir, home.as_deref()) else {
-            return Some((
-                reply,
-                err(
-                    ErrorCode::BadRequest,
-                    "the cache folder is not known: this account has no home folder",
-                ),
-            ));
+        let (dir, _) = match hygiene::cache_dir_of(&settings, &runner_dir, home.as_deref()) {
+            Ok(d) => d,
+            Err(why) => return Some((reply, err(ErrorCode::BadRequest, why))),
         };
         if clean {
             self.log_service(now, &format!("trimming the cache of {runner} on request"));

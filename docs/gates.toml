@@ -693,7 +693,7 @@ approved = "coordinator"
 
 [[ignored]]
 path = "apps/pitcrew/crates/pitcrew-service/tests/windows_caller.rs"
-tests = ["the_pipe_refuses_changes_from_a_caller_that_is_not_an_elevated_administrator", "an_interactive_user_can_use_the_installed_pipe_but_not_host_one", "a_new_data_folder_is_protected_from_the_moment_it_exists", "a_data_folder_a_user_made_first_is_not_trusted", "settled_runner_folders_protect_service_runners_and_leave_interactive_ones_writable"]
+tests = ["the_pipe_refuses_changes_from_a_caller_that_is_not_an_elevated_administrator", "an_interactive_user_can_use_the_installed_pipe_but_not_host_one", "a_new_data_folder_is_protected_from_the_moment_it_exists", "a_data_folder_a_user_made_first_is_not_trusted", "settled_service_runner_folders_pass_the_guard_and_a_user_folder_never_does"]
 gate = "not-gated"
 reason = "VM-only rows: they need a standard user's desktop session and an elevated administrator on a Windows machine (PITCREW_TEST_EXPECT), run with --include-ignored through scripts/vm-lock-run.sh; no harness line runs them yet"
 owner = "Pitcrew 1.1"

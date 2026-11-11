@@ -16,7 +16,7 @@ use pitcrew_core::config::RunnerConfig;
 use pitcrew_core::names::RunnerName;
 use pitcrew_core::protocol::{read_frame, write_frame, ErrorCode, Request, Response, PROTOCOL_VERSION};
 use pitcrew_service::host::Host;
-use pitcrew_service::protected::{ensure_protected_root, folder_is_protected, grant_interactive, settle_runner_dir, RootOutcome};
+use pitcrew_service::protected::{check_runner_folder, ensure_protected_root, settle_runner_dir, RootOutcome};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -217,57 +217,54 @@ fn settle_root() -> PathBuf {
     )
 }
 
-/// P1-7, measured on a real machine. The elevated run lays the folders out as an older Pitcrew did (made in `C:\ProgramData`, so
-/// they inherited what it gives users), prints what the guard says before and after, and settles them; the standard run, after it,
-/// shows what the user can and cannot do there.
+/// The children of a folder as the guard lists them on the real machine.
+fn list_real(dir: &str) -> std::io::Result<Vec<String>> {
+    std::fs::read_dir(dir)?
+        .map(|e| e.map(|e| e.file_name().to_string_lossy().into_owned()))
+        .collect()
+}
+
+fn guard(dir: &Path) -> Result<(), String> {
+    check_runner_folder(&mut RealTrust, &list_real, dir)
+}
+
+/// ADR 0004, second amendment, measured on a real machine. The elevated run lays a service runner's folder out as an older
+/// Pitcrew did (made in `C:\ProgramData`, so it inherited what that gives users), shows what the guard says before and after the
+/// service settles it, and the standard run, after it, shows what a user can and cannot do there and that a folder the user owns is
+/// refused.
 #[test]
 #[ignore = "VM: PITCREW_TEST_EXPECT=standard|elevated; the elevated run first"]
-fn settled_runner_folders_protect_service_runners_and_leave_interactive_ones_writable() {
+fn settled_service_runner_folders_pass_the_guard_and_a_user_folder_never_does() {
     let who = expectation();
     let root = settle_root();
     let svc = root.join("runners").join("svc");
-    let interactive = root.join("runners").join("ia");
-    let unprotected = |p: &Path| !folder_is_protected(&mut RealTrust, p);
     if who == "elevated" {
         let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&svc).unwrap();
-        println!(
-            "MEASURED before (an older Pitcrew's folder): service runner folder protected = {}",
-            !unprotected(&svc)
-        );
+        std::fs::create_dir_all(svc.join("work")).unwrap();
+        let before = guard(&svc);
+        println!("MEASURED before (an older Pitcrew's folder): guard = {before:?}");
         assert!(
-            unprotected(&svc),
+            before.is_err(),
             "the old layout should not pass the guard: that is the upgrade problem"
         );
         let out = ensure_protected_root(&mut RealTrust, &root, &["pitcrew.toml"], &["logs"]).unwrap();
         println!("MEASURED data folder: {out:?}");
-        let line = settle_runner_dir(&mut RealTrust, &root, &runner(&svc, "service"), false, &mut grant_interactive);
+        let line = settle_runner_dir(&mut RealTrust, &list_real, &root, &runner(&svc, "service"));
         println!("MEASURED settle service runner: {line:?}");
+        let after = guard(&svc);
+        println!("MEASURED after the service settled the runner folder: guard = {after:?}");
         assert!(
-            folder_is_protected(&mut RealTrust, &svc),
-            "after settling, the guard accepts the service runner's folder: {line:?}"
-        );
-        // A fresh interactive runner folder, made the way `register` makes it.
-        std::fs::create_dir_all(&interactive).unwrap();
-        let line = settle_runner_dir(
-            &mut RealTrust,
-            &root,
-            &runner(&interactive, "interactive"),
-            true,
-            &mut grant_interactive,
-        );
-        println!("MEASURED settle interactive runner: {line:?}");
-        assert!(line.as_deref().is_some_and(|l| l.contains("interactive users write")), "{line:?}");
-        assert!(
-            !folder_is_protected(&mut RealTrust, &interactive),
-            "an interactive folder is writable by users: not protected"
+            after.is_ok(),
+            "after settling, the guard accepts the service runner's folder: {after:?}"
         );
     } else {
-        // The user's view: their runner's work and cache folders can be made; the service runner's folder and the shared ones cannot.
-        std::fs::create_dir_all(interactive.join("work").join("job")).expect("the interactive runner can make its work folder");
-        std::fs::write(interactive.join("work").join("job").join("f.txt"), b"x").expect("and write in it");
-        std::fs::create_dir_all(interactive.join("cache")).expect("and its cache folder");
-        println!("MEASURED standard user: wrote in the interactive runner's folder");
+        // A folder the user owns is refused whole, whatever is in it.
+        let mine = std::path::PathBuf::from(std::env::var_os("PITCREW_TEST_SCRATCH").expect("PITCREW_TEST_SCRATCH")).join("user-runner");
+        std::fs::create_dir_all(mine.join("work")).unwrap();
+        let refused = guard(&mine).unwrap_err();
+        println!("MEASURED standard user's own folder: {refused}");
+        assert!(refused.contains("not a folder only administrators can change"), "{refused}");
+        // What a standard user cannot do in the service runner's folder or beside it.
         assert!(
             std::fs::create_dir(svc.join("evil")).is_err(),
             "a standard user made a folder in a service runner's folder"
@@ -279,10 +276,6 @@ fn settled_runner_folders_protect_service_runners_and_leave_interactive_ones_wri
         assert!(
             std::fs::create_dir(root.join("runners").join("evil")).is_err(),
             "a standard user made a runner folder"
-        );
-        assert!(
-            folder_is_protected(&mut RealTrust, &svc),
-            "the guard still accepts the service runner's folder"
         );
         println!("MEASURED standard user: refused in the service runner's folder and in runners\\");
     }

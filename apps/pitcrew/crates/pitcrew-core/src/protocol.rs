@@ -333,6 +333,96 @@ impl Request {
         )
     }
 
+    /// The request's name, for the log and for audit lines: a variant name, never its fields (a registration token is one of
+    /// them). A `match` naming every request, so a new one cannot be added without a name.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Request::Hello { .. } => "Hello",
+            Request::Status => "Status",
+            Request::Subscribe => "Subscribe",
+            Request::Start { .. } => "Start",
+            Request::Stop { .. } => "Stop",
+            Request::Restart { .. } => "Restart",
+            Request::Drain { .. } => "Drain",
+            Request::Resume { .. } => "Resume",
+            Request::Logs { .. } => "Logs",
+            Request::SearchLogs { .. } => "SearchLogs",
+            Request::CheckUpdate { .. } => "CheckUpdate",
+            Request::ApplyUpdate { .. } => "ApplyUpdate",
+            Request::CancelUpdate { .. } => "CancelUpdate",
+            Request::SkipVersion { .. } => "SkipVersion",
+            Request::PinVersion { .. } => "PinVersion",
+            Request::History { .. } => "History",
+            Request::Disk { .. } => "Disk",
+            Request::CleanDisk { .. } => "CleanDisk",
+            Request::GetSettings => "GetSettings",
+            Request::SaveSettings { .. } => "SaveSettings",
+            Request::AddRunner { .. } => "AddRunner",
+            Request::RemoveRunner { .. } => "RemoveRunner",
+            Request::Register { .. } => "Register",
+            Request::Diagnostics => "Diagnostics",
+            Request::Metrics { .. } => "Metrics",
+            Request::GetRunnerConfig { .. } => "GetRunnerConfig",
+            Request::PreviewRunnerConfig { .. } => "PreviewRunnerConfig",
+            Request::SaveRunnerConfig { .. } => "SaveRunnerConfig",
+            Request::Processes { .. } => "Processes",
+            Request::StopProcess { .. } => "StopProcess",
+            Request::KeepProcess { .. } => "KeepProcess",
+            Request::EngineReport => "EngineReport",
+            Request::EnginePrunePreview { .. } => "EnginePrunePreview",
+            Request::EnginePrune { .. } => "EnginePrune",
+            Request::CacheReport { .. } => "CacheReport",
+            Request::CachePreview { .. } => "CachePreview",
+            Request::CacheClean { .. } => "CacheClean",
+        }
+    }
+
+    /// The runner whose **folder** the request makes the service read, write or delete in (its logs, disk, cache, configuration
+    /// file, update files, registration), or `None` for a request that touches no runner folder. The service refuses these for a
+    /// runner whose folder is not one only administrators can change (ADR 0004). A `match` naming every request, so a new one
+    /// must decide.
+    pub fn folder_runner(&self) -> Option<&RunnerName> {
+        match self {
+            Request::Metrics { runner, .. } => runner.as_ref(),
+            Request::Start { runner, .. }
+            | Request::Restart { runner, .. }
+            | Request::Logs { runner, .. }
+            | Request::SearchLogs { runner, .. }
+            | Request::ApplyUpdate { runner, .. }
+            | Request::CancelUpdate { runner, .. }
+            | Request::Disk { runner, .. }
+            | Request::CleanDisk { runner, .. }
+            | Request::GetRunnerConfig { runner, .. }
+            | Request::PreviewRunnerConfig { runner, .. }
+            | Request::SaveRunnerConfig { runner, .. }
+            | Request::Register { runner, .. }
+            | Request::CacheReport { runner, .. }
+            | Request::CachePreview { runner, .. }
+            | Request::CacheClean { runner, .. } => Some(runner),
+            Request::Hello { .. }
+            | Request::Status
+            | Request::Subscribe
+            | Request::Stop { .. }
+            | Request::Drain { .. }
+            | Request::Resume { .. }
+            | Request::CheckUpdate { .. }
+            | Request::SkipVersion { .. }
+            | Request::PinVersion { .. }
+            | Request::History { .. }
+            | Request::GetSettings
+            | Request::SaveSettings { .. }
+            | Request::AddRunner { .. }
+            | Request::RemoveRunner { .. }
+            | Request::Diagnostics
+            | Request::Processes { .. }
+            | Request::StopProcess { .. }
+            | Request::KeepProcess { .. }
+            | Request::EngineReport
+            | Request::EnginePrunePreview { .. }
+            | Request::EnginePrune { .. } => None,
+        }
+    }
+
     /// Whether the service accepts the request only from an elevated administrator (Windows, where the service runs as
     /// LocalSystem and its pipe is open to every interactive user; rule 77): a request that changes **what runs or where**,
     /// that is, the configuration the service later acts on (runners, their programs, folders, sessions and environment, the
@@ -1087,6 +1177,60 @@ mod tests {
         }
         // A request that needs an administrator always changes something.
         assert!(Request::Drain { runner: name("a") }.mutates() && !Request::Drain { runner: name("a") }.requires_admin());
+    }
+
+    #[test]
+    fn a_request_names_the_runner_folder_it_touches_and_has_a_name_without_fields() {
+        let a = name("a");
+        let limits = CacheLimits {
+            max_mb: 1,
+            max_age_days: 1,
+        };
+        for r in [
+            Request::CleanDisk { runner: a.clone() },
+            Request::CacheClean { runner: a.clone(), limits },
+            Request::ApplyUpdate { runner: a.clone() },
+            Request::CancelUpdate { runner: a.clone() },
+            Request::Logs {
+                runner: a.clone(),
+                after: None,
+                limit: 1,
+            },
+            Request::Disk { runner: a.clone() },
+            Request::Start { runner: a.clone() },
+            Request::Metrics {
+                runner: Some(a.clone()),
+                range_hours: 1,
+            },
+        ] {
+            assert_eq!(r.folder_runner(), Some(&a), "{r:?}");
+        }
+        for r in [
+            Request::Stop { runner: a.clone() },
+            Request::Drain { runner: a.clone() },
+            Request::RemoveRunner { runner: a.clone() },
+            Request::PinVersion {
+                runner: a.clone(),
+                version: None,
+            },
+            Request::Status,
+            Request::Metrics {
+                runner: None,
+                range_hours: 1,
+            },
+        ] {
+            assert_eq!(r.folder_runner(), None, "{r:?}");
+        }
+        let register = Request::Register {
+            runner: a.clone(),
+            server_url: "https://git.example.com".into(),
+            token: Secret::new("the-token").unwrap(),
+            display_name: None,
+        };
+        assert_eq!(register.kind(), "Register");
+        assert!(!register.kind().contains("token"));
+        assert_eq!(Request::CleanDisk { runner: a }.kind(), "CleanDisk");
+        assert_eq!(Request::Status.kind(), "Status");
     }
 
     #[test]

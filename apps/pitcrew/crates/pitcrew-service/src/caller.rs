@@ -89,14 +89,6 @@ pub fn authorize(request: &Request, caller: &Caller) -> Result<(), ServiceError>
     Ok(())
 }
 
-/// The name of a request for the log: its variant, never its fields (a registration token is one of them).
-pub fn kind_of(request: &Request) -> String {
-    format!("{request:?}")
-        .chars()
-        .take_while(|c| c.is_alphanumeric() || *c == '_')
-        .collect()
-}
-
 /// The caller on the server end of a connected pipe instance (the client has sent its first bytes). Windows only.
 #[cfg(windows)]
 pub fn level_of_pipe(pipe: std::os::windows::io::RawHandle) -> Caller {
@@ -170,14 +162,5 @@ mod tests {
             "stopping a runner is open to the pipe's users"
         );
         assert!(authorize(&Request::Status, &Caller::Standard(SID.into())).is_ok());
-    }
-
-    #[test]
-    fn the_log_names_the_request_and_never_its_fields() {
-        let r = Request::Drain {
-            runner: RunnerName::parse("secret-looking-name").unwrap(),
-        };
-        assert_eq!(kind_of(&r), "Drain");
-        assert_eq!(kind_of(&Request::Status), "Status");
     }
 }

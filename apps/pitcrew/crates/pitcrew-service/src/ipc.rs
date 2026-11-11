@@ -12,7 +12,7 @@
 //! - Every connection starts with a hello; frames are bounded by `MAX_FRAME`; at most [`MAX_CONNECTIONS`] at once.
 //!   A subscribed connection receives pushed events until either side closes it.
 
-use crate::caller::{authorize, kind_of, Caller};
+use crate::caller::{authorize, Caller};
 use crate::supervisor::Msg;
 use pitcrew_core::protocol::{decode_body, encode_frame, frame_len, ErrorCode, FrameError, Request, Response, ServiceError};
 use std::sync::mpsc::Sender;
@@ -87,12 +87,52 @@ fn timeout_for(r: &Request) -> Duration {
     }
 }
 
+/// Refusals are logged once per request kind per connection; the rest are counted and summed up when the connection ends (a
+/// program that retries a refused request in a loop must not fill the service log).
+#[derive(Default)]
+struct RefusalLog {
+    seen: std::collections::HashMap<&'static str, (u32, String)>,
+}
+
+impl RefusalLog {
+    fn note(&mut self, tx: &Sender<Msg>, kind: &'static str, caller: &str) {
+        let entry = self.seen.entry(kind).or_insert_with(|| (0, caller.to_string()));
+        entry.0 += 1;
+        if entry.0 == 1 {
+            let _ = tx.send(Msg::Audit {
+                request: kind.to_string(),
+                caller: caller.to_string(),
+                allowed: false,
+            });
+        }
+    }
+
+    fn flush(self, tx: &Sender<Msg>) {
+        for (kind, (n, caller)) in self.seen {
+            if n > 1 {
+                let _ = tx.send(Msg::Audit {
+                    request: format!("{kind} (and {} more like it)", n - 1),
+                    caller,
+                    allowed: false,
+                });
+            }
+        }
+    }
+}
+
 /// Serves one connection. `identify` says who the caller is; it is asked once, when the first request that changes
 /// something arrives (the OS can tell only after the client's first bytes).
-pub async fn connection<S: AsyncRead + AsyncWrite + Unpin + Send>(
+pub async fn connection<S: AsyncRead + AsyncWrite + Unpin + Send>(stream: S, tx: Sender<Msg>, identify: impl FnOnce() -> Caller + Send) {
+    let mut refusals = RefusalLog::default();
+    serve_connection(stream, tx.clone(), identify, &mut refusals).await;
+    refusals.flush(&tx);
+}
+
+async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin + Send>(
     mut stream: S,
     tx: Sender<Msg>,
     identify: impl FnOnce() -> Caller + Send,
+    refusals: &mut RefusalLog,
 ) {
     let mut identify = Some(identify);
     let mut caller: Option<Caller> = None;
@@ -139,11 +179,16 @@ pub async fn connection<S: AsyncRead + AsyncWrite + Unpin + Send>(
                     .map_or_else(|| Caller::Unreadable("the caller was not asked".into()), |f| f())
             });
             let verdict = authorize(&req, who);
-            let _ = tx.send(Msg::Audit {
-                request: kind_of(&req),
-                caller: who.describe(),
-                allowed: verdict.is_ok(),
-            });
+            match &verdict {
+                Ok(()) => {
+                    let _ = tx.send(Msg::Audit {
+                        request: req.kind().to_string(),
+                        caller: who.describe(),
+                        allowed: true,
+                    });
+                }
+                Err(_) => refusals.note(&tx, req.kind(), &who.describe()),
+            }
             if let Err(refusal) = verdict {
                 if write_frame(&mut stream, &Response::Error(refusal)).await.is_err() {
                     return;
@@ -526,7 +571,7 @@ mod caller_tests {
             for m in rx {
                 match m {
                     Msg::Request(req, reply) => {
-                        log.lock().unwrap().push(crate::caller::kind_of(&req));
+                        log.lock().unwrap().push(req.kind().to_string());
                         let _ = reply.send(Response::Ok);
                     }
                     Msg::Audit { request, caller, allowed } => {
@@ -602,7 +647,8 @@ mod caller_tests {
             // Messages reach the supervisor in order: once this answer is back, the refusal before it has been logged.
             send(&mut c, &Request::Status).await;
             assert_eq!(recv(&mut c).await, Response::Ok);
-            assert_eq!(*seen.lock().unwrap(), ["denied:AddRunner", "Status", "denied:AddRunner", "Status"]);
+            // The second identical refusal is not logged again (coalesced; summed up when the connection ends).
+            assert_eq!(*seen.lock().unwrap(), ["denied:AddRunner", "Status", "Status"]);
         }
     }
 
@@ -685,6 +731,45 @@ mod caller_tests {
             "{:?}",
             audits.lock().unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn a_refused_request_repeated_in_a_loop_is_logged_once_and_summed_up_at_the_end() {
+        let (tx, _seen, audits) = supervisor();
+        let (mut client, server) = tokio::io::duplex(64 * 1024);
+        let tx_again = tx.clone();
+        let served = tokio::spawn(connection(server, tx, || Caller::Standard(SID.into())));
+        send(
+            &mut client,
+            &Request::Hello {
+                protocol: PROTOCOL_VERSION,
+            },
+        )
+        .await;
+        let _ = recv(&mut client).await;
+        for _ in 0..5 {
+            send(&mut client, &service_runner()).await;
+            assert!(denied(&recv(&mut client).await));
+        }
+        drop(client);
+        served.await.unwrap();
+        // The stand-in supervisor reads its channel on its own thread: a read-only round trip on a new connection orders after it.
+        let (mut again, server_again) = tokio::io::duplex(64 * 1024);
+        tokio::spawn(connection(server_again, tx_again, || Caller::Local));
+        send(
+            &mut again,
+            &Request::Hello {
+                protocol: PROTOCOL_VERSION,
+            },
+        )
+        .await;
+        let _ = recv(&mut again).await;
+        send(&mut again, &Request::Status).await;
+        assert_eq!(recv(&mut again).await, Response::Ok);
+        let audits = audits.lock().unwrap();
+        assert_eq!(audits.len(), 2, "{audits:?}");
+        assert!(audits[0].starts_with("refused AddRunner ") && audits[0].contains(SID), "{audits:?}");
+        assert!(audits[1].contains("AddRunner (and 4 more like it)"), "{audits:?}");
     }
 
     #[tokio::test]

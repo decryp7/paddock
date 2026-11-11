@@ -203,31 +203,25 @@ pub fn execute(runner: &RunnerConfig, plan: &CleanupPlan, now: Timestamp) -> Cle
         deleted: 0,
         failures: vec![],
     };
-    // As the service where the folder is protected, as the logged-on user where a user can change it (safe_delete).
-    let ran = crate::safe_delete::with_rights(&runner.dir, || {
-        for d in &plan.deletions {
-            let rel_path = &d.entry.path;
-            if rel_path.split('/').any(|part| part == ".." || part.is_empty()) || Path::new(rel_path).is_absolute() {
-                report.failures.push(CleanupFailure {
-                    path: rel_path.clone(),
-                    reason: "the path is outside the runner's folder".into(),
-                });
-                continue;
-            }
-            match delete_below(&runner.dir, Path::new(rel_path)) {
-                Ok(()) => {
-                    report.freed_bytes += d.entry.bytes;
-                    report.deleted += 1;
-                }
-                Err(reason) => report.failures.push(CleanupFailure {
-                    path: rel_path.clone(),
-                    reason,
-                }),
-            }
+    for d in &plan.deletions {
+        let rel_path = &d.entry.path;
+        if rel_path.split('/').any(|part| part == ".." || part.is_empty()) || Path::new(rel_path).is_absolute() {
+            report.failures.push(CleanupFailure {
+                path: rel_path.clone(),
+                reason: "the path is outside the runner's folder".into(),
+            });
+            continue;
         }
-    });
-    if let Err(reason) = ran {
-        report.failures.push(CleanupFailure { path: ".".into(), reason });
+        match delete_below(&runner.dir, Path::new(rel_path)) {
+            Ok(()) => {
+                report.freed_bytes += d.entry.bytes;
+                report.deleted += 1;
+            }
+            Err(reason) => report.failures.push(CleanupFailure {
+                path: rel_path.clone(),
+                reason,
+            }),
+        }
     }
     report
 }

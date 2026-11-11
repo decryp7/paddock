@@ -145,9 +145,13 @@ pub struct Env {
     /// Whether the service may run a runner's program with its own token: its start, its version probe, `generate-config` and
     /// `register` all ask (Windows, as LocalSystem, where a program a standard user can replace would run as SYSTEM).
     pub program_gate: crate::launcher::ProgramGate,
-    /// Gives a runner's folder inside the data folder its access rules (`protected::settle_runner_dir`; Windows, as LocalSystem):
-    /// the second argument says the folder was created just now. Returns a line for the runner's log.
+    /// Gives a service runner's folder inside the data folder its access rules (`protected::settle_runner_dir`; Windows, as
+    /// LocalSystem). Returns a line for the runner's log.
     pub settle_runner_dir: crate::protected::SettleHook,
+    /// Whether the service may touch a runner's folder at all: only a folder only administrators can change (Windows, as
+    /// LocalSystem; ADR 0004, second amendment). A runner whose folder fails is **blocked**: no start, probe, update, cleanup,
+    /// log or request touches its folder, and the status says why.
+    pub runner_folder_guard: crate::protected::FolderGuard,
     /// Starts runner processes.
     pub launcher: Box<dyn Launcher>,
     /// Release information and downloads.
@@ -230,6 +234,7 @@ pub fn os_env(data_dir: PathBuf) -> Env {
     Env {
         program_gate: crate::launcher::os_program_gate(),
         settle_runner_dir: crate::protected::os_settle(data_for_settle),
+        runner_folder_guard: crate::protected::os_folder_guard(),
         base_path,
         exe_stamp,
         data_dir,
@@ -256,6 +261,8 @@ enum Deferred {
 
 struct Runner {
     cfg: RunnerConfig,
+    /// Why the service may not touch this runner's folder (its folder is one a user can change), if it may not.
+    blocked: Option<String>,
     ctl: Controller,
     jobs: JobTracker,
     tail: LogTail,
@@ -426,19 +433,55 @@ impl Supervisor {
         layout::binary(r, self.env.platform.os, |p| p.exists())
     }
 
+    /// Asks the guard about a runner's folder again (the administrator may have fixed it, or a user may have changed it) and logs a
+    /// change once.
+    fn refresh_block(&mut self, name: &RunnerName, now: Timestamp) {
+        let Some(r) = self.runners.get(name) else { return };
+        let verdict = (self.env.runner_folder_guard)(&r.cfg.dir).err();
+        let Some(r) = self.runners.get_mut(name) else { return };
+        if r.blocked != verdict {
+            let line = match &verdict {
+                Some(why) => format!("this runner is blocked: {why}"),
+                None => "this runner's folder is admin-only now: the service manages it again".to_string(),
+            };
+            r.log.supervisor(now, &line);
+            self.log_service(now, &format!("runner {name}: {line}"));
+            if let Some(r) = self.runners.get_mut(name) {
+                r.blocked = verdict;
+            }
+        }
+    }
+
+    /// Why the service may not touch this runner's folder; `None` when it may.
+    fn blocked(&self, name: &RunnerName) -> Option<String> {
+        self.runners.get(name).and_then(|r| r.blocked.clone())
+    }
+
     fn add(&mut self, cfg: RunnerConfig, now: Timestamp) {
-        let settled = (self.env.settle_runner_dir)(&cfg, false);
+        let settled = (self.env.settle_runner_dir)(&cfg);
+        let blocked = (self.env.runner_folder_guard)(&cfg.dir).err();
         let st = self.state.runners.entry(cfg.name.to_string()).or_default().clone();
         let settings = self.settings_for(&cfg);
         let wanted = cfg.enabled && st.wanted;
-        let mut log = LogWriter::open(&layout::log_dir(&cfg), LOG_FILE, self.config.defaults.logs);
+        // A blocked runner's log is kept in the service's own (administrator-only) folder, never in the runner's.
+        let log_dir = if blocked.is_some() {
+            self.env.data_dir.join("logs").join("blocked").join(cfg.name.as_str())
+        } else {
+            layout::log_dir(&cfg)
+        };
+        let mut log = LogWriter::open(&log_dir, LOG_FILE, self.config.defaults.logs);
         log.supervisor(now, "Pitcrew is supervising this runner");
+        if let Some(why) = &blocked {
+            log.supervisor(now, &format!("this runner is blocked: {why}"));
+            self.log_service(now, &format!("runner {}: {why}", cfg.name));
+        }
         if let Some(line) = settled {
             log.supervisor(now, &line);
         }
         let registered = layout::registration(&cfg).exists();
         let name = cfg.name.clone();
         let mut runner = Runner {
+            blocked,
             ctl: Controller::new(settings, wanted, st.paused),
             jobs: JobTracker::new(),
             tail: LogTail::new(TAIL_LINES, TAIL_BYTES),
@@ -674,8 +717,11 @@ impl Supervisor {
         if let Some(code) = exited {
             self.on_exit(name, code, now);
         }
-        let Some(r) = self.runners.get_mut(name) else { return };
         if probe {
+            self.refresh_block(name, now);
+        }
+        let Some(r) = self.runners.get_mut(name) else { return };
+        if probe && r.blocked.is_none() {
             r.registered = layout::registration(&r.cfg).exists();
             if let Some(p) = &r.process {
                 let busy = self.probe.has_job_children(p.pid());
@@ -796,7 +842,9 @@ impl Supervisor {
         let Some(r) = self.runners.get(name) else { return };
         let bin = self.binary(&r.cfg);
         let failure = |reason: String| Input::LaunchFailed(LaunchError::Failed { reason });
-        let input = if !bin.path.exists() {
+        let input = if let Some(why) = self.blocked(name) {
+            Some(failure(why))
+        } else if !bin.path.exists() {
             Some(failure(format!(
                 "the runner binary {} is missing; register the runner from Pitcrew (it installs the binary) or put it there",
                 bin.path.display()
@@ -1083,6 +1131,9 @@ impl Supervisor {
     }
 
     fn spawn_version_probe(&mut self, name: &RunnerName) {
+        if self.blocked(name).is_some() {
+            return;
+        }
         let Some(r) = self.runners.get(name) else { return };
         let bin = self.binary(&r.cfg).path;
         let gate = self.env.program_gate.clone();
@@ -1107,6 +1158,9 @@ impl Supervisor {
     }
 
     fn begin_update(&mut self, name: &RunnerName, to: RunnerVersion, now: Timestamp) {
+        if self.blocked(name).is_some() {
+            return;
+        }
         let Some(r) = self.runners.get(name) else { return };
         if !matches!(r.update.phase(), UpdatePhase::Idle) {
             return;
@@ -1143,6 +1197,17 @@ impl Supervisor {
     }
 
     fn update_command(&mut self, name: &RunnerName, c: UpdateCommand, now: Timestamp) {
+        if let Some(why) = self.blocked(name) {
+            // Nothing in the folder is touched: the commands that would are answered as failures, the rest are dropped.
+            let failure = format!("not done: {why}");
+            match c {
+                UpdateCommand::Download { .. } => self.worker(name, move || Done::Downloaded(Err(failure))),
+                UpdateCommand::Verify => self.worker(name, move || Done::Verified(Err(failure))),
+                UpdateCommand::Swap => self.worker(name, move || Done::Swapped(Err(failure))),
+                _ => {}
+            }
+            return;
+        }
         let Some(r) = self.runners.get_mut(name) else { return };
         let bin = layout::binary(&r.cfg, self.env.platform.os, |p| p.exists()).path;
         let kind = r.cfg.kind;
@@ -1207,6 +1272,9 @@ impl Supervisor {
     }
 
     fn spawn_restore(&mut self, name: &RunnerName) {
+        if self.blocked(name).is_some() {
+            return;
+        }
         let Some(r) = self.runners.get(name) else { return };
         let bin = layout::binary(&r.cfg, self.env.platform.os, |p| p.exists()).path;
         self.worker(name, move || Done::Restored(work::restore_previous(&bin)));
@@ -1381,6 +1449,9 @@ impl Supervisor {
     // ---- housekeeping --------------------------------------------------------------------------------------------
 
     fn maybe_housekeep(&mut self, name: &RunnerName, now: Timestamp) {
+        if self.blocked(name).is_some() {
+            return;
+        }
         let Some(r) = self.runners.get(name) else { return };
         if r.scanning || r.cleaning {
             return;
@@ -1413,6 +1484,9 @@ impl Supervisor {
     }
 
     fn spawn_scan(&mut self, name: &RunnerName, reply: Option<Reply>) {
+        if self.blocked(name).is_some() {
+            return;
+        }
         let Some(r) = self.runners.get_mut(name) else { return };
         r.scanning = true;
         let cfg = r.cfg.clone();
@@ -1422,6 +1496,9 @@ impl Supervisor {
     }
 
     fn spawn_clean(&mut self, name: &RunnerName, plan: CleanupPlan, reply: Option<Reply>) {
+        if self.blocked(name).is_some() {
+            return;
+        }
         let Some(r) = self.runners.get_mut(name) else { return };
         r.cleaning = true;
         r.clean_wanted = false;
@@ -1437,6 +1514,17 @@ impl Supervisor {
 
     /// Answers a request; `None` when the answer comes later (from a worker).
     fn request(&mut self, req: Request, reply: Reply, now: Timestamp) -> Option<(Reply, Response)> {
+        // A request that would make the service read, write or delete in a runner's folder is refused, with no effect, when that
+        // folder is one a user can change (ADR 0004, second amendment). The guard is asked again now: the answer may have changed.
+        if let Some(runner) = req.folder_runner().cloned() {
+            if self.runners.contains_key(&runner) {
+                self.refresh_block(&runner, now);
+                if let Some(why) = self.blocked(&runner) {
+                    self.log_service(now, &format!("refused {} for runner {runner}: {why}", req.kind()));
+                    return Some((reply, err(ErrorCode::PermissionDenied, why)));
+                }
+            }
+        }
         let resp = match req {
             Request::Hello { protocol } => pitcrew_core::protocol::answer_hello(protocol, SERVICE_VERSION),
             Request::Status => {
@@ -1658,9 +1746,8 @@ impl Supervisor {
                 let settle = self.env.settle_runner_dir.clone();
                 self.worker(&runner, move || {
                     let result = (|| {
-                        let existed = cfg.dir.exists();
                         std::fs::create_dir_all(&cfg.dir).map_err(|e| format!("{}: {e}", cfg.dir.display()))?;
-                        let _ = settle(&cfg, !existed);
+                        let _ = settle(&cfg);
                         if !bin.path.exists() {
                             if !bin.managed {
                                 return Err(format!("the runner binary {} is missing", bin.path.display()));
@@ -1889,9 +1976,9 @@ impl Supervisor {
             next_start_at,
             restarts_24h: st.history.restarts_since(Timestamp(now.0.saturating_sub(24 * 3600 * 1000))),
             problem: r
-                .ctl
-                .problem()
-                .map(str::to_string)
+                .blocked
+                .clone()
+                .or_else(|| r.ctl.problem().map(str::to_string))
                 .or_else(|| r.log.failed().then(|| "the runner's log file cannot be written".to_string())),
             current_job: r.jobs.current().cloned().filter(|_| r.jobs.running(now)),
             current_version: r.current_version.clone(),

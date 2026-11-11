@@ -103,9 +103,52 @@ pub fn parse_args(args: &[String]) -> Option<Result<Forward, String>> {
     }))
 }
 
+/// Whether `m` describes a link: a symbolic link, a junction or any other reparse point.
+fn is_link(m: &std::fs::Metadata) -> bool {
+    if m.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        m.file_attributes() & 0x400 != 0
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+/// Opens a hand-off file for reading **without following a link**: the folder it is in and the file itself must not be a
+/// link or reparse point (checked on the opened handle where the OS allows it), so the elevated process never reads what a link
+/// planted by another program leads to.
+fn open_no_link(path: &Path) -> Result<std::fs::File, String> {
+    if let Some(parent) = path.parent() {
+        let m = std::fs::symlink_metadata(parent).map_err(|e| io_message("Examining", parent, &e))?;
+        if is_link(&m) {
+            return Err(format!("{} is a link; the elevated request refuses it", parent.display()));
+        }
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // FILE_FLAG_OPEN_REPARSE_POINT: open the link itself, not what it points to.
+        options.custom_flags(0x0020_0000);
+    }
+    let file = options.open(path).map_err(|e| io_message("Opening", path, &e))?;
+    let m = file.metadata().map_err(|e| io_message("Examining", path, &e))?;
+    let named = std::fs::symlink_metadata(path).map_err(|e| io_message("Examining", path, &e))?;
+    if is_link(&m) || is_link(&named) {
+        return Err(format!("{} is a link; the elevated request refuses it", path.display()));
+    }
+    Ok(file)
+}
+
 fn read_bounded(path: &Path) -> Result<Vec<u8>, String> {
     use std::io::Read;
-    let f = std::fs::File::open(path).map_err(|e| io_message("Reading", path, &e))?;
+    let f = open_no_link(path)?;
     let mut bytes = Vec::new();
     f.take(MAX_FILE + 1)
         .read_to_end(&mut bytes)
@@ -337,6 +380,30 @@ mod tests {
         assert_eq!(sweep_stale(&root, now + 2 * hour, hour), 1);
         assert!(!old.dir.exists() && root.join("keep-me").exists(), "only forward-* folders go");
         assert_eq!(sweep_stale(&root.join("missing"), now, hour), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_hand_off_file_or_folder_that_is_a_link_is_refused() {
+        let root = scratch("links");
+        let h = prepare(&root, &drain()).unwrap();
+        let client = fake(Ok(Response::Ok));
+        // The request file replaced by a link to another file with the very same bytes (so the digest matches).
+        let real = root.join("elsewhere.json");
+        std::fs::copy(&h.request_file, &real).unwrap();
+        std::fs::remove_file(&h.request_file).unwrap();
+        std::os::unix::fs::symlink(&real, &h.request_file).unwrap();
+        let e = serve(&forward_of(&h), &client).unwrap_err();
+        assert!(e.contains("is a link"), "{e}");
+        assert!(client.seen.lock().unwrap().is_empty(), "nothing was sent");
+        // The hand-off folder replaced by a link to a folder that holds the same file.
+        let h2 = prepare(&root, &drain()).unwrap();
+        let moved = root.join("moved");
+        std::fs::rename(&h2.dir, &moved).unwrap();
+        std::os::unix::fs::symlink(&moved, &h2.dir).unwrap();
+        let e = serve(&forward_of(&h2), &client).unwrap_err();
+        assert!(e.contains("is a link"), "{e}");
+        assert!(client.seen.lock().unwrap().is_empty());
     }
 
     #[test]

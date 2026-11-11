@@ -1,40 +1,14 @@
-//! Deleting inside a runner's folder without ever following a link (Windows: a junction or symbolic link; Unix: a symlink), and
-//! without lending the service's own rights to a folder a user can change.
+//! Deleting inside a runner's folder without ever following a link (Windows: a junction or symbolic link; Unix: a symlink).
 //!
-//! The service deletes as LocalSystem (a cleanup, a cache trim). A runner's folder may be one the user owns, so the user can put
-//! a junction where `work` or a cache folder should be; a delete that resolves the path first (`canonicalize`, or just opening
-//! `work\job` through the junction) removes what the junction points at, as SYSTEM. Two defences, both here:
-//!
-//! 1. [`remove_below`] walks from the folder down one component at a time and refuses a link in any directory position; a link
-//!    in the last position is removed as a link, never followed or entered. Nothing is resolved before it is looked at.
-//! 2. [`with_rights`]: where the folder is **not** protected (a standard user can change it) the work runs as the logged-on user
-//!    (impersonation), so a link the user planted can only lead where the user could already go; where it is protected, as the
-//!    service. [`rights_for`] is the pure decision.
-//!
-//! What the walk cannot close alone is the gap between looking at a component and acting on it, which a user who can change the
-//! folder can race; that is why the second defence exists.
+//! The service deletes with its own rights (a cleanup, a cache trim). Since ADR 0004's second amendment it works only in folders
+//! only administrators can change (the guard refuses any other before a request gets here), so a user cannot plant a junction
+//! where `work` or a cache folder should be. This is the second layer: [`remove_below`] walks from the folder down one component
+//! at a time, refuses a link in any directory position, removes a link in the last position as a link (never entered), and
+//! resolves nothing before it is looked at (no `canonicalize`).
 
 use std::ffi::OsStr;
 use std::io;
 use std::path::{Component, Path};
-
-/// Whose rights a deletion in a folder runs with.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Rights {
-    /// The service's own: the folder is protected, or the service is the user.
-    AsService,
-    /// The logged-on user's: the service is LocalSystem and a user can change the folder.
-    AsConsoleUser,
-}
-
-/// The decision. Pure.
-pub fn rights_for(service_is_local_system: bool, folder_is_protected: bool) -> Rights {
-    if service_is_local_system && !folder_is_protected {
-        Rights::AsConsoleUser
-    } else {
-        Rights::AsService
-    }
-}
 
 fn refuse(p: &Path, what: &str) -> io::Error {
     io::Error::new(
@@ -114,37 +88,6 @@ pub fn remove_below(root: &Path, rel: &Path) -> io::Result<()> {
     }
 }
 
-/// Runs `f` (which deletes inside `root`) with the rights [`rights_for`] says. Off Windows, and when the service is not
-/// LocalSystem, `f` simply runs.
-///
-/// # Errors
-/// A folder users can change and nobody logged on: the work waits (the message says so and `f` did not run).
-pub fn with_rights<T>(root: &Path, f: impl FnOnce() -> T) -> Result<T, String> {
-    #[cfg(windows)]
-    {
-        use crate::platform::win_session::{impersonate_console_user, is_local_system};
-        let system = is_local_system();
-        let protected = system && crate::protected::folder_is_protected(&mut paddock_service::privileged::trust_real::RealTrust, root);
-        match rights_for(system, protected) {
-            Rights::AsService => Ok(f()),
-            Rights::AsConsoleUser => {
-                let _acting_as_user = impersonate_console_user().map_err(|e| {
-                    format!(
-                        "{} can be changed by users, so Pitcrew deletes in it only as the logged-on user, and {e}; this waits for a log-on",
-                        root.display()
-                    )
-                })?;
-                Ok(f())
-            }
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = root;
-        Ok(f())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,17 +121,6 @@ mod tests {
                 .unwrap();
             assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
         }
-    }
-
-    #[test]
-    fn rights_follow_who_can_change_the_folder() {
-        assert_eq!(rights_for(true, false), Rights::AsConsoleUser);
-        assert_eq!(rights_for(true, true), Rights::AsService);
-        assert_eq!(
-            rights_for(false, false),
-            Rights::AsService,
-            "the service is the user: nothing to lend"
-        );
     }
 
     #[test]
@@ -273,13 +205,6 @@ mod tests {
                 "{bad:?}"
             );
         }
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn work_runs_directly_where_the_service_is_the_user() {
-        let root = scratch("rights");
-        assert_eq!(with_rights(&root, || 7).unwrap(), 7);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

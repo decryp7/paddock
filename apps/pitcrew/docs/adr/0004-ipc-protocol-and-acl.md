@@ -71,21 +71,64 @@ program of any logged-on user run code as SYSTEM (release blocker, 2026-11-11).
   checks that the server is the SYSTEM service (a held handle to it, its token's user, its pid read twice) before it sends.
 - **Callers.** Every request that changes anything is attributed (an unidentifiable caller changes nothing, not even a Stop) and
   logged with the account's SID. "Elevated" means the Administrators group is enabled and not deny-only.
-- **Programs the service starts.** A runner that starts with the service's token needs a protected program and folder; so does
-  every program the service runs for a runner (the version probe, `generate-config`, `register`, an update's check). For an
-  interactive runner in a folder users can change those are refused with the reason (register it with the runner's own command
-  as the user; Pitcrew adopts it). Deleting in a runner's folder (cleanup, cache trim) never follows a link, and where users can
-  change the folder it runs as the logged-on user.
-- **Data folder and runner folders.** `C:\ProgramData` lets users create folders, so a folder made by an older Pitcrew keeps what it
-  inherited. At start the data folder is locked, and each runner folder inside it is settled: a `service` runner's folder (and the
-  folders above it) is locked (one folder at a time, by handle, never propagated), a **new** `interactive` runner's folder gets
-  SYSTEM and Administrators full control and interactive users modify (an empty folder only: `icacls` rewrites what is already
-  in a folder, and a hard link a user planted could make that rewrite a file they cannot write). An existing interactive folder is
-  left as it is. The VM test `settled_runner_folders_protect_service_runners_and_leave_interactive_ones_writable` measures both the upgrade and the fresh layout (its first VM run is still to be recorded).
-- **Known limits.** (1) A service-mode runner in a user-writable folder such as `C:\actions-runner` is refused at start, with the
-  reason and next step shown; runners under `%ProgramData%\Pitcrew\runners` pass after the settle. (2) An interactive runner in a
-  folder users can change cannot be version-probed, configured or registered by the service (see above). (3) Only the runner's
-  program and folder are checked, not its `config.yaml` or `logs` folder inside it: an older file with a weak ACL would not be
-  detected, and the service writes its runner log under the folder. (4) `EnginePrune` and `CacheClean` by a standard user are an
-  availability point (they delete what the policy allows, never more), not an elevation. (5) The prompt itself: UAC on the same
-  desktop is not a boundary against a program of the same user.
+
+## Second amendment 2026-11-12: the service touches only folders only administrators can change
+
+A security review of the first amendment found, one after another, places where the SYSTEM service did work inside a folder a
+user can change (the update swap, the logs, cleanup, the cache trim whose folder comes from the runner's own `config.yaml`, an
+`icacls` grant on a folder holding a user's hard link). Each fix closed one door and the next review found another. The user
+decided on 2026-11-12 to remove the class, following common practice.
+
+**Decision.** The SYSTEM service manages **only service runners whose folders only administrators can change** (SYSTEM,
+Administrators, TrustedInstaller own them and nobody else may write, delete or take ownership of them or of anything above
+them). A runner in a folder a user can change is run by the user, in the user's own session, and managed with the user's own
+rights. The service never reads, writes, deletes or runs anything in a folder a user can change.
+
+**Common practice (ER-37).** The GitHub Actions runner has the same shape: the application is installed in a folder owned by the
+account that runs it, `svc.sh` or `config.cmd --runasservice` installs a service that runs it as that account (on Windows the
+default service account is NETWORK SERVICE, not SYSTEM), and GitHub's security guidance tells the administrator that workflow
+code runs with that account's rights and that the runner folder must not be writable by others; a runner that needs a desktop
+(UI tests) is started with `run.cmd` in a logged-on session instead of as a service. Pitcrew's service mode is that service; its
+interactive mode is that `run.cmd`. (Quoted from the GitHub documentation as the author knows it; confirm the wording when the
+user guide is written.) A service that does file work with its own rights inside a folder users write to, as Pitcrew did, is the
+shape OS vendors' guidance calls a confused deputy, and the one a link, a junction or a hard link attacks.
+
+**What the service does.**
+- The guard is `protected::check_runner_folder` (the shared strict trust rule over the folder and its ancestors, then every
+  direct child of the folder). Every request that makes the service read, write or delete in a runner's folder
+  (`Request::folder_runner`: logs, disk, cleanup, cache, configuration file, update, start, registration) is refused with
+  `PermissionDenied` and a fix-it message, and logged, when the guard says no; a runner whose folder fails is **blocked**: the
+  service does not start it, probe it, update it, scan or clean it, and keeps its log in its own folder
+  (`data\logs\blocked\<name>`), never in the runner's. The guard is asked again on every request and every probe tick, so an
+  administrator's fix, or a user's change, is seen within seconds. Deeper entries are not walked on every request (a runner's
+  `work` can hold millions of files, made by the runner as SYSTEM inside a folder that forbids users to add to it, so they inherit
+  that); the folders an older Pitcrew made directly inside a service runner's folder are locked at start with the folder itself
+  (`settle_runner_dir`, one folder at a time, by handle, never propagated).
+- The cache trim takes its folder **only below the runner's own folder**, never from `config.yaml`: an absolute path or a `..` there
+  is refused (`hygiene::cache_dir_of`).
+- Deletion never follows a link (`safe_delete::remove_below`: no `canonicalize`, every directory on the way is a real folder).
+- Removed as no longer needed: the `icacls` grant of interactive folders, the impersonation of the logged-on user for deleting,
+  and the settle of interactive runners. Kept: `lock_dir`, the pure decision split, fail closed.
+- The app checks the pipe's **owner** (SYSTEM or Administrators) through its own handle before it writes anything on any Windows
+  connection, reads and the event subscription included (`pipe_server`, tested with a fake identity that shows nothing is written
+  first). The forwarder's hand-off file and folder are opened without following a link.
+
+**What this costs, and what is not built.** A runner in a user's folder is no longer supervised by the SYSTEM service on Windows:
+it is shown blocked, with the reason. Running, updating, cleaning and logging such a runner with the user's own rights is the
+app's side of this decision. The app has no runner supervisor today; the cheapest reuse is the same engine (`pitcrew-service run`)
+started in the user's session at log-on with its own data folder, exactly as on macOS and Linux (where the service already is the
+user's own), and the app talking to both. That is a work package of its own (a design decision for the user: one engine per
+user, or the app hosting it) and is **not** part of this change. Until it lands, an interactive runner must live in an
+administrator-only folder to be supervised by the service at all (and cannot write there), so on Windows the supported supervised
+mode is the service runner.
+
+**New limits.** (1) A service runner in a folder users can change (such as `C:\actions-runner`) is blocked; move it under
+`C:\Program Files` or `C:\ProgramData\Pitcrew\runners`, which the service locks at start. (2) A user's own runner is not
+supervised by the service (above). (3) Only the folder, its ancestors and its direct children are checked, not every file below:
+an older entry deeper down with a weak ACL would not be detected, and a job that runs as SYSTEM can create what it likes in its own
+folder (that is the nature of a service runner; it is why the folder must be administrator-only). (4) `EnginePrune` and
+`CacheClean` by a standard user are an availability point, not an elevation: they delete what the policy allows, in the
+administrator-only cache folder. (5) UAC on the same desktop is not a boundary against a program of the same user; the service's
+check on who asks is. (6) The container engine (`docker`, `podman`) is found on the service's `PATH` by SYSTEM for the engine
+report and prune: a `PATH` entry a user can write could name a program SYSTEM would run. Out of scope here; the engine requests
+should resolve the program from a protected folder (follow-up).
