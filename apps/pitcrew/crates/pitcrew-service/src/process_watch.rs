@@ -17,6 +17,18 @@ use pitcrew_core::protocol::ProcessList;
 use pitcrew_core::time::Timestamp;
 use std::time::Duration;
 
+/// What a look at a stopping process found (rule 53: the OS names are reused, so "still there" is not "still it").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Seen {
+    /// Nothing runs under the pid (or it is a zombie, or another process now holds it).
+    Gone,
+    /// A process runs under the pid and its start time matches the one recorded: it is the same process.
+    Same,
+    /// A process runs under the pid but its start time is unknown (not readable now, or never recorded), so it cannot be
+    /// told from a process that took the pid over: it is waited for, never ended by pid.
+    Unverified,
+}
+
 /// Most stops in progress per runner at once (a cleanup after a big job can have many leftovers).
 pub const MAX_STOPPING: usize = 64;
 
@@ -47,6 +59,8 @@ pub struct Stopped {
     pub by: StopReason,
     /// It ignored the request and was ended.
     pub forced: bool,
+    /// Whether the process is gone is not known: its identity could not be verified, so it was neither seen to stop nor ended.
+    pub unconfirmed: bool,
 }
 
 /// One runner's processes.
@@ -191,10 +205,11 @@ impl ProcessWatch {
     }
 
     /// Moves the stops along: finished ones are returned, those that ignored the request are ended.
-    pub fn advance(&mut self, now: Timestamp, alive: &mut dyn FnMut(u32, Option<u64>) -> bool, term: &dyn Terminator) -> Vec<Stopped> {
+    pub fn advance(&mut self, now: Timestamp, alive: &mut dyn FnMut(u32, Option<u64>) -> Seen, term: &dyn Terminator) -> Vec<Stopped> {
         let mut done = vec![];
         self.stopping.retain_mut(|s| {
-            let is_alive = alive(s.pid, s.started_ms);
+            let seen = alive(s.pid, s.started_ms);
+            let is_alive = seen != Seen::Gone;
             match next_step(&s.progress, is_alive, now) {
                 StopStep::Done => {
                     done.push(Stopped {
@@ -204,10 +219,27 @@ impl ProcessWatch {
                         rule: s.rule.clone(),
                         by: s.by,
                         forced: s.ended,
+                        unconfirmed: false,
                     });
                     false
                 }
                 StopStep::Wait => true,
+                StopStep::Kill if seen == Seen::Unverified => {
+                    // The pid may have been handed on: ending it by pid could end another process (rule 53).
+                    done.push(Stopped {
+                        name: s.name.clone(),
+                        pid: s.pid,
+                        age_ms: s.started_ms.map_or(0, |st| now.0.saturating_sub(st)),
+                        rule: format!(
+                            "{} (could not confirm that it stopped: the process could not be verified to be the same one)",
+                            s.rule
+                        ),
+                        by: s.by,
+                        forced: s.ended,
+                        unconfirmed: true,
+                    });
+                    false
+                }
                 StopStep::Kill => {
                     if !s.ended {
                         term.end(s.pid);
@@ -224,6 +256,7 @@ impl ProcessWatch {
                             rule: format!("{} (could not be ended)", s.rule),
                             by: s.by,
                             forced: true,
+                            unconfirmed: false,
                         });
                         return false;
                     }
@@ -344,8 +377,8 @@ mod tests {
             .unwrap();
         assert_eq!(*term.asked.lock().unwrap(), vec![11]);
         // Still alive: wait. Then gone.
-        assert!(w.advance(t(805), &mut |_, _| true, &term).is_empty());
-        let done = w.advance(t(806), &mut |_, _| false, &term);
+        assert!(w.advance(t(805), &mut |_, _| Seen::Same, &term).is_empty());
+        let done = w.advance(t(806), &mut |_, _| Seen::Gone, &term);
         assert_eq!(done.len(), 1);
         assert_eq!((done[0].pid, done[0].forced, done[0].by), (11, false, StopReason::Cleanup));
         assert_eq!(done[0].age_ms, 806_000 - 150_000);
@@ -359,18 +392,40 @@ mod tests {
         let term = Fake::default();
         let target = w.check(11, None, 99, false).unwrap().clone();
         w.begin(&target, "you".into(), StopReason::User, t(800), &policy, &term).unwrap();
-        assert!(w.advance(t(814), &mut |_, _| true, &term).is_empty());
+        assert!(w.advance(t(814), &mut |_, _| Seen::Same, &term).is_empty());
         assert!(term.ended.lock().unwrap().is_empty());
-        assert!(w.advance(t(815), &mut |_, _| true, &term).is_empty());
+        assert!(w.advance(t(815), &mut |_, _| Seen::Same, &term).is_empty());
         assert_eq!(*term.ended.lock().unwrap(), vec![11], "ended after the 15 s timeout");
-        let done = w.advance(t(816), &mut |_, _| false, &term);
+        let done = w.advance(t(816), &mut |_, _| Seen::Gone, &term);
         assert!(done[0].forced && done[0].by == StopReason::User);
         // A process that survives even that.
         w.begin(&target, "you".into(), StopReason::User, t(900), &policy, &term).unwrap();
-        w.advance(t(915), &mut |_, _| true, &term);
-        let done = w.advance(t(921), &mut |_, _| true, &term);
+        w.advance(t(915), &mut |_, _| Seen::Same, &term);
+        let done = w.advance(t(921), &mut |_, _| Seen::Same, &term);
         assert_eq!(done.len(), 1);
         assert!(done[0].rule.contains("could not be ended"));
+    }
+
+    #[test]
+    fn a_process_whose_identity_cannot_be_verified_is_never_ended_by_its_pid() {
+        let (mut w, policy) = watch();
+        let term = Fake::default();
+        let target = w.check(11, None, 99, false).unwrap().clone();
+        w.begin(&target, "you".into(), StopReason::User, t(800), &policy, &term).unwrap();
+        assert!(w.advance(t(814), &mut |_, _| Seen::Unverified, &term).is_empty());
+        // The timeout has passed: a pid that reports start time 0 may be a recycled one.
+        let done = w.advance(t(815), &mut |_, _| Seen::Unverified, &term);
+        assert!(term.ended.lock().unwrap().is_empty(), "never ended by a bare pid");
+        let reported: Vec<_> = done
+            .iter()
+            .filter(|d| d.rule.contains("could not confirm that it stopped"))
+            .collect();
+        assert_eq!(reported.len(), 1, "reported, not silently dropped: {done:?}");
+        assert!(
+            reported[0].unconfirmed && !reported[0].forced,
+            "not claimed as a stop or a kill: {done:?}"
+        );
+        assert!(!w.is_stopping(11));
     }
 
     #[test]

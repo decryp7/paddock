@@ -73,7 +73,7 @@ pub fn get(shared: &Shared) -> SystemInventory {
     };
     let total = if total > 0 { total } else { os_total_memory() };
     let (memory, via) = read_memory(shared, total);
-    let inv = SystemInventory::new(os_name(), sysinfo::System::host_name(), cpu_info(), memory, disks).with_memory_via(via);
+    let inv = SystemInventory::new(os_name(), sysinfo::System::host_name().ok(), cpu_info(), memory, disks).with_memory_via(via);
     let mut core = lock(&shared.core);
     core.inventory = Some(inv.clone());
     core.inventory_epoch = epoch;
@@ -103,20 +103,29 @@ fn read_memory(shared: &Shared, total: u64) -> (MemoryLayout, dyno_core::read_vi
 
 fn os_name() -> String {
     sysinfo::System::long_os_version()
-        .or_else(sysinfo::System::name)
-        .unwrap_or_else(|| "Unknown OS".into())
+        .or_else(|_| sysinfo::System::name())
+        .unwrap_or_else(|_| "Unknown OS".into())
 }
 
 fn os_total_memory() -> u64 {
-    let mut sys = sysinfo::System::new();
+    let Ok(mut sys) =
+        sysinfo::System::new().inspect_err(|why| log::warn!("installed RAM unavailable (sysinfo): {why}; the total reads zero"))
+    else {
+        return 0;
+    };
     sys.refresh_memory();
     sys.total_memory()
 }
 
 fn cpu_info() -> CpuInfo {
-    let mut sys = sysinfo::System::new();
-    sys.refresh_cpu_all();
-    let cpus = sys.cpus();
+    let sys = sysinfo::System::new()
+        .inspect_err(|why| log::warn!("CPU details unavailable (sysinfo): {why}; the CPU reads empty"))
+        .ok()
+        .map(|mut sys| {
+            sys.refresh_cpu_all();
+            sys
+        });
+    let cpus = sys.as_ref().map_or(&[][..], |s| s.cpus());
     let first = cpus.first();
     CpuInfo {
         name: first.map(|c| c.brand().trim().to_string()).unwrap_or_default(),

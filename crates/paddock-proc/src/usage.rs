@@ -9,6 +9,7 @@
 use crate::identity::{ProcessId, StartTime};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
 /// A CPU time and the start time of the process it was read from, when the OS gave both in one call.
@@ -69,10 +70,50 @@ pub fn table_from(entries: impl IntoIterator<Item = ProcEntry>) -> Table {
         .collect()
 }
 
+/// An empty sysinfo `System` to refresh process data into. Since sysinfo 0.40 the constructor can fail (a platform whose
+/// process table cannot be opened); that is logged (once per process, the failure is permanent) and the caller answers
+/// "unknown" instead of panicking. `make` is `System::new`; tests give a constructor that fails.
+pub(crate) fn new_system_with(
+    make: impl FnOnce() -> Result<System, sysinfo::Error>,
+) -> Option<System> {
+    static WARNED: AtomicBool = AtomicBool::new(false);
+    new_system_with_flag(make, &WARNED).0
+}
+
+/// [`new_system_with`] over an explicit once-flag, also saying whether this call logged the failure (only the first failure
+/// on `warned` does). The process uses one static flag; a test gives its own so the order of tests cannot matter.
+pub(crate) fn new_system_with_flag(
+    make: impl FnOnce() -> Result<System, sysinfo::Error>,
+    warned: &AtomicBool,
+) -> (Option<System>, bool) {
+    let mut logged = false;
+    let sys = make()
+        .inspect_err(|why| {
+            if first_time(warned) {
+                logged = true;
+                log::warn!("the OS process table is unavailable (sysinfo): {why}; the answer is unknown (logged once)")
+            }
+        })
+        .ok();
+    (sys, logged)
+}
+
+/// True for the first call on `flag` only: a permanent failure is logged once, not on every call of a tick loop.
+pub(crate) fn first_time(flag: &AtomicBool) -> bool {
+    !flag.swap(true, Ordering::Relaxed)
+}
+
 /// A look at the OS process table: parents, start times and resident memory only (command lines, environments and
 /// working folders are slow to read on Windows and nothing here needs them).
 pub fn snapshot() -> Table {
-    let mut sys = System::new();
+    snapshot_with(System::new)
+}
+
+/// [`snapshot`] over a constructor; an empty table when it fails.
+pub(crate) fn snapshot_with(make: impl FnOnce() -> Result<System, sysinfo::Error>) -> Table {
+    let Some(mut sys) = new_system_with(make) else {
+        return Table::default();
+    };
     sys.refresh_processes_specifics(
         ProcessesToUpdate::All,
         true,
@@ -329,8 +370,13 @@ fn direct_children(table: &Table, pid: u32) -> Vec<u32> {
 /// The resident size of one process (the last resort when its real memory cannot be read), from a refresh of that pid
 /// only; `None` when it is gone or is a thread entry.
 fn resident(pid: u32) -> Option<u64> {
+    resident_with(pid, System::new)
+}
+
+/// [`resident`] over a constructor; `None` when it fails.
+fn resident_with(pid: u32, make: impl FnOnce() -> Result<System, sysinfo::Error>) -> Option<u64> {
     let id = Pid::from_u32(pid);
-    let mut sys = System::new();
+    let mut sys = new_system_with(make)?;
     sys.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[id]),
         true,
@@ -1223,6 +1269,38 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
         );
     }
 
+    fn broken() -> Result<System, sysinfo::Error> {
+        Err(sysinfo::Error::Unsupported)
+    }
+
+    #[test]
+    fn a_failed_process_table_gives_an_empty_snapshot_no_resident_size_and_no_system() {
+        assert!(snapshot_with(broken).is_empty());
+        assert_eq!(resident_with(std::process::id(), broken), None);
+        assert!(new_system_with(broken).is_none());
+        assert!(new_system_with(System::new).is_some());
+    }
+
+    #[test]
+    fn the_real_wrapper_logs_a_permanent_failure_once() {
+        // A private flag: the shared one may already be set by another test of this process.
+        let warned = AtomicBool::new(false);
+        assert!(!new_system_with_flag(System::new, &warned).1);
+        let first = new_system_with_flag(broken, &warned);
+        let second = new_system_with_flag(broken, &warned);
+        assert!(first.0.is_none() && second.0.is_none());
+        assert!(first.1, "the first failure is logged");
+        assert!(!second.1, "the second failure is not logged again");
+    }
+
+    #[test]
+    fn a_permanent_failure_is_logged_once() {
+        let flag = AtomicBool::new(false);
+        assert!(first_time(&flag));
+        assert!(!first_time(&flag));
+        assert!(!first_time(&flag));
+    }
+
     #[test]
     fn the_resident_size_of_one_pid_is_read_and_a_missing_pid_has_none() {
         assert!(resident(std::process::id()).is_some_and(|m| m > 0));
@@ -1245,7 +1323,7 @@ Rss:              219040 kB\nPss:              131633 kB\nPss_Anon:          900
             let kids = OsSource::default().children(pid);
             for kid in kids {
                 let id = Pid::from_u32(kid);
-                let mut sys = System::new();
+                let mut sys = System::new().expect("a System");
                 sys.refresh_processes_specifics(
                     ProcessesToUpdate::Some(&[id]),
                     true,

@@ -1,0 +1,17 @@
+2026-11-10T10:00:00.1234567Z captured with cargo-nextest 0.9.149 (the CI pin, in the paddock-ci:v2 image; identical status lines with 0.9.151): retries = 0, flaky-result = "fail", slow-timeout = 1s terminate-after 1 (scratch crate nxflaky: hangs)
+2026-11-10T10:00:01.1234567Z [1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+2026-11-10T10:00:02.1234567Z ────────────
+2026-11-10T10:00:03.1234567Z [32;1m Nextest run[0m ID [1me1013cef-9583-4fd1-863b-54f313c0dd74[0m with nextest profile: [1mdefault[0m
+2026-11-10T10:00:04.1234567Z [32;1m    Starting[0m [1m1[0m test across [1m1[0m binary ([1m3[0m tests [33;1mskipped[0m)
+2026-11-10T10:00:05.1234567Z [31;1m TERMINATING[0m [>  1.000s] (───) [35;1mnxflaky[0m [36mslow[0m[36m::[0m[34;1mhangs[0m
+2026-11-10T10:00:06.1234567Z [31;1m     TIMEOUT[0m [   1.005s] (1/1) [35;1mnxflaky[0m [36mslow[0m[36m::[0m[34;1mhangs[0m
+2026-11-10T10:00:07.1234567Z [31;1m [0m [31;1mstdout[0m [31;1m───[0m
+2026-11-10T10:00:08.1234567Z 
+2026-11-10T10:00:09.1234567Z     running 1 test[0m
+2026-11-10T10:00:10.1234567Z 
+2026-11-10T10:00:11.1234567Z     (test [31;1mtimed out[0m)
+2026-11-10T10:00:12.1234567Z 
+2026-11-10T10:00:13.1234567Z ────────────
+2026-11-10T10:00:14.1234567Z [31;1m     Summary[0m [   1.038s] [1m1[0m test run: [1m0[0m [32;1mpassed[0m, [1m1[0m [31;1mtimed out[0m, [1m3[0m [33;1mskipped[0m
+2026-11-10T10:00:15.1234567Z [31;1m     TIMEOUT[0m [   1.005s] (1/1) [35;1mnxflaky[0m [36mslow[0m[36m::[0m[34;1mhangs[0m
+2026-11-10T10:00:16.1234567Z [31;1merror[0m: test run failed

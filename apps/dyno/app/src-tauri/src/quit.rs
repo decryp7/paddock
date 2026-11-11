@@ -319,10 +319,16 @@ impl DirectAgent for LiveAgent {
 
     fn gone(&mut self) -> bool {
         match self.target {
-            Some(id) => !id.is_alive(),
+            Some(id) => confirmed_gone(id.presence()),
             None => !dyno_agent::instance::is_held(&self.dirs),
         }
     }
+}
+
+/// Whether a look at the process confirms it left: only a proven `Gone`. An unreadable process table or start time is not a
+/// confirmed stop (ER-33): the stop is then reported as not confirmed, with the next step.
+fn confirmed_gone(p: paddock_proc::Presence) -> bool {
+    p == paddock_proc::Presence::Gone
 }
 
 /// "Quit and stop measuring", off the UI thread (ER-17): the link stops first (nothing may start another agent), then the service
@@ -482,6 +488,17 @@ mod tests {
         clear_marker(&dir);
         assert_eq!(peek_marker(&dir), None);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_stop_is_confirmed_only_when_the_process_is_proven_gone() {
+        use paddock_proc::Presence::{Gone, Running, Unknown};
+        assert!(confirmed_gone(Gone));
+        assert!(!confirmed_gone(Running));
+        assert!(
+            !confirmed_gone(Unknown),
+            "an unreadable process table is not a confirmed stop (ER-33)"
+        );
     }
 
     struct Direct {

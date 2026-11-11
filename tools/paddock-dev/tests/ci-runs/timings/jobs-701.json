@@ -1,0 +1,244 @@
+{
+"total_count": 5,
+"jobs": [
+{
+"id": 5001,
+"name": "plan (affected projects)",
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:00:07+08:00",
+"completed_at": "2026-11-09T08:00:21+08:00",
+"runner_name": "Gitea Action Runner (d-gtr9)",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:00:07+08:00",
+"completed_at": "2026-11-09T08:00:10+08:00"
+},
+{
+"name": "Affected projects",
+"number": 1,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:00:10+08:00",
+"completed_at": "2026-11-09T08:00:12+08:00"
+}
+]
+},
+{
+"id": 5002,
+"name": "crate (macos-latest)",
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:00:24+08:00",
+"completed_at": "2026-11-09T08:05:25+08:00",
+"runner_name": "Gitea Action Runner (mac-mini)",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:00:24+08:00",
+"completed_at": "2026-11-09T08:00:32+08:00"
+},
+{
+"name": "Run ./.gitea/actions/rust-cache",
+"number": 1,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:00:32+08:00",
+"completed_at": "2026-11-09T08:00:46+08:00"
+},
+{
+"name": "Install nextest",
+"number": 2,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:00:46+08:00",
+"completed_at": "2026-11-09T08:00:55+08:00"
+},
+{
+"name": "Tests (workspace, every feature)",
+"number": 3,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:00:55+08:00",
+"completed_at": "2026-11-09T08:04:20+08:00"
+},
+{
+"name": "Run clippy",
+"number": 4,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:04:20+08:00",
+"completed_at": "2026-11-09T08:05:20+08:00"
+},
+{
+"name": "Post Run actions/cache@v4",
+"number": 5,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:05:20+08:00",
+"completed_at": "2026-11-09T08:05:25+08:00"
+}
+]
+},
+{
+"id": 5003,
+"name": "crate (windows-latest)",
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:00:27+08:00",
+"completed_at": "2026-11-09T08:07:36+08:00",
+"runner_name": "Gitea Action Runner (win-ci)",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:00:27+08:00",
+"completed_at": "2026-11-09T08:00:35+08:00"
+},
+{
+"name": "Run ./.gitea/actions/rust-cache",
+"number": 1,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:00:35+08:00",
+"completed_at": "2026-11-09T08:00:49+08:00"
+},
+{
+"name": "Install nextest",
+"number": 2,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:00:49+08:00",
+"completed_at": "2026-11-09T08:00:58+08:00"
+},
+{
+"name": "Tests (workspace, every feature)",
+"number": 3,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:00:58+08:00",
+"completed_at": "2026-11-09T08:06:31+08:00"
+},
+{
+"name": "Run clippy",
+"number": 4,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:06:31+08:00",
+"completed_at": "2026-11-09T08:07:31+08:00"
+},
+{
+"name": "Post Run actions/cache@v4",
+"number": 5,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:07:31+08:00",
+"completed_at": "2026-11-09T08:07:36+08:00"
+}
+]
+},
+{
+"id": 5004,
+"name": "app dyno (ubuntu-latest)",
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:00:27+08:00",
+"completed_at": "2026-11-09T08:03:44+08:00",
+"runner_name": "undefined",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:00:27+08:00",
+"completed_at": "2026-11-09T08:00:33+08:00"
+},
+{
+"name": "Run ./.gitea/actions/node-caches",
+"number": 1,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:00:33+08:00",
+"completed_at": "2026-11-09T08:00:53+08:00"
+},
+{
+"name": "Install",
+"number": 2,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:00:53+08:00",
+"completed_at": "2026-11-09T08:01:28+08:00"
+},
+{
+"name": "Run playwright install",
+"number": 3,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:01:28+08:00",
+"completed_at": "2026-11-09T08:01:50+08:00"
+},
+{
+"name": "End-to-end tests",
+"number": 4,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:01:50+08:00",
+"completed_at": "2026-11-09T08:03:04+08:00"
+},
+{
+"name": "Unit tests",
+"number": 5,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:03:04+08:00",
+"completed_at": "2026-11-09T08:03:44+08:00"
+},
+{
+"name": "Run ./.gitea/actions/app-gates",
+"number": 6,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:03:44+08:00",
+"completed_at": "2026-11-09T08:03:44+08:00"
+}
+]
+},
+{
+"id": 5005,
+"name": "paddock-dev (ubuntu-latest)",
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:00:24+08:00",
+"completed_at": "2026-11-09T08:01:07+08:00",
+"runner_name": "",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:00:24+08:00",
+"completed_at": "2026-11-09T08:00:27+08:00"
+},
+{
+"name": "Affected projects",
+"number": 1,
+"status": "completed",
+"conclusion": "success",
+"started_at": "2026-11-09T08:00:27+08:00",
+"completed_at": "2026-11-09T08:00:29+08:00"
+}
+]
+}
+]
+}

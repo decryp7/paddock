@@ -4,6 +4,7 @@
   and the independent review approved it: revision 1 (`69ef3c161`) CHANGES NEEDED with 3 P1; revision 2 (`16657fcc2`)
   fixed two of them and the delta review raised two more (the Debrief ratchet, the nightly backstop of the ADR 0038
   amendment) with P2s; revision 3 answers those.
+- Trimmed 2026-11-11 (user, comparable-practice review): TRIM: keep WP-5 (rule), WP-7 (run or delete orphan scripts), WP-8 (nightly proptest and `npm audit`) and a reduced WP-4 (Debrief's conformance step in `debrief.yml` only); dropped WP-6; deferred WP-9 (the 27 `paddock-setup` VM rows stay a manual pre-release check).
 - Date: 2026-11-08
 - Related: ER-21 / rule 40 (recurring bugs mean a missing design rule), ER-33 / rule 71 (a check counts only if its probe
   can see the thing), ER-27 / rule 56 (every failing step prints one `::error::` with the cause and the next step), ER-30

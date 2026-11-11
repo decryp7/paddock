@@ -4,6 +4,7 @@
   (P1-1 to P1-5, P2s) and 2 (P2-1 to P2-5, P2-7)). Amends
   ADR 0034 §3 (waivers, the entry guard's trailers, the range check's unit) and the trailer parts of rule 55 (a), (c) and
   (d). Everything else in ADR 0034 (the register, members, counted lines, modes a and c, the freeze rule) stays as it is.
+- Trimmed 2026-11-11 (user, comparable-practice review): DROPPED: the unit walk is moot since a reached delete-by no longer blocks a tag (rule 55); `docs/known-copies.toml` stays as documentation.
 - Date: 2026-11-09
 - Related: ER-21 / rule 40 (recurring bugs mean a missing design rule), ER-22 (share first), ER-33 / rule 71 (a check
   counts only if its probe can see the thing), ER-36 (improve the process), rule 48 (benchmarks recorded), rule 55 and

@@ -422,6 +422,14 @@ impl Supervised {
         }
     }
 
+    /// The exit status of a child that has ended, without taking it over: on Unix the root may be reaped, but the guard,
+    /// the job and the registry entry are kept, so [`Supervised::kill`] or [`Supervised::terminate`] afterwards still end
+    /// the rest of its group (helpers it left behind). `None` while it runs, after [`Supervised::wait`] or
+    /// [`Supervised::kill`] took the child, or when the OS cannot say. Repeated calls give the same status.
+    pub fn exit_status(&mut self) -> Option<ExitStatus> {
+        self.child.as_mut()?.try_wait().ok().flatten()
+    }
+
     /// Waits for the child to end (a memory stop or [`Supervised::kill`] from elsewhere ends it too), reaps it and
     /// forgets the tree. `None` if it was already reaped.
     pub fn wait(&mut self) -> Option<ExitStatus> {
@@ -542,6 +550,40 @@ mod tests {
                 return p.trim().parse().unwrap();
             }
         }
+    }
+
+    /// The root exits and its status is read, leaving a sleeping grandchild: the status stays, and `kill` afterwards still
+    /// ends the grandchild (reading the status releases nothing).
+    #[test]
+    fn exit_status_is_stable_and_leaves_the_group_and_job_to_kill() {
+        let mut s = Supervised::spawn_in(&Registry::new(), piped(Mode::Leave), None).unwrap();
+        let mut r = BufReader::new(s.take_stdout().unwrap());
+        let grand = pid_line(&mut r);
+        // conformance: hang-guard — the root exits at once; the bound only keeps a broken run from hanging
+        let end = Instant::now() + Duration::from_secs(60);
+        let status = loop {
+            if let Some(st) = s.exit_status() {
+                break st;
+            }
+            assert!(Instant::now() < end, "the child did not exit");
+            std::thread::yield_now();
+        };
+        assert!(status.code().is_some(), "{status:?}");
+        assert_eq!(s.exit_status(), Some(status), "the status stays");
+        s.kill();
+        assert!(s.exit_status().is_none(), "kill took the child");
+        let mut rest = Vec::new();
+        r.read_to_end(&mut rest).unwrap();
+        assert!(
+            crate::testchild::is_gone(grand),
+            "the grandchild survived kill after exit_status"
+        );
+        let mut running = Supervised::spawn(child(Mode::Sleep)).unwrap();
+        assert!(
+            running.exit_status().is_none(),
+            "a running child has no status"
+        );
+        running.kill();
     }
 
     #[test]

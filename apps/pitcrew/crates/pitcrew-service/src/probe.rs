@@ -3,6 +3,7 @@
 //!
 //! One `sysinfo` snapshot is refreshed per supervision tick (every few seconds), not per question.
 
+use crate::process_watch::Seen;
 use pitcrew_core::jobs::is_job_process;
 use pitcrew_core::metrics::{permille, MachineSample};
 use pitcrew_core::process_track::ProcessMeta;
@@ -17,8 +18,10 @@ use sysinfo::{Disks, Pid, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, Sy
 
 /// The process and machine snapshot.
 pub struct Probe {
-    sys: System,
-    disks: Disks,
+    /// `None` when sysinfo could not start (logged once): the process table is then empty and the machine reads zero.
+    sys: Option<System>,
+    /// `None` when the volume list could not be read (logged): free space is then unknown.
+    disks: Option<Disks>,
     space: SpaceCache,
     cpus: usize,
 }
@@ -32,10 +35,19 @@ impl Default for Probe {
 impl Probe {
     /// A probe with a first snapshot.
     pub fn new() -> Self {
-        let sys = System::new_with_specifics(RefreshKind::nothing());
+        let sys = System::new_with_specifics(RefreshKind::nothing())
+            .inspect_err(|why| {
+                eprintln!("pitcrew-service: warning: the OS process table is unavailable (sysinfo): {why}; no process is seen")
+            })
+            .ok();
+        let disks = Disks::new_with_refreshed_list()
+            .inspect_err(|why| {
+                eprintln!("pitcrew-service: warning: the volume list is unavailable (sysinfo): {why}; free space is unknown")
+            })
+            .ok();
         let mut p = Probe {
             sys,
-            disks: Disks::new_with_refreshed_list(),
+            disks,
             space: SpaceCache::default(),
             cpus: std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
         };
@@ -45,7 +57,8 @@ impl Probe {
 
     /// Refreshes the process list (names, parents, executables, CPU).
     pub fn refresh_processes(&mut self) {
-        self.sys.refresh_processes_specifics(
+        let Some(sys) = self.sys.as_mut() else { return };
+        sys.refresh_processes_specifics(
             ProcessesToUpdate::All,
             true,
             ProcessRefreshKind::nothing()
@@ -63,8 +76,8 @@ impl Probe {
         // to reap it (in a container without an init it may never be), so it uses nothing and must never be stopped
         // or counted again.
         self.sys
-            .processes()
             .iter()
+            .flat_map(|sys| sys.processes().iter())
             .filter(|(_, p)| p.thread_kind().is_none() && p.status() != sysinfo::ProcessStatus::Zombie)
     }
 
@@ -93,7 +106,10 @@ impl Probe {
         ordered.sort_by_key(|p| (p.pid != runner_pid, p.pid));
         ordered.truncate(MAX_DESCRIBED);
         let pids: Vec<Pid> = ordered.iter().map(|p| Pid::from_u32(p.pid)).collect();
-        self.sys.refresh_processes_specifics(
+        let Some(sys) = self.sys.as_mut() else {
+            return Vec::new();
+        };
+        sys.refresh_processes_specifics(
             ProcessesToUpdate::Some(&pids),
             false,
             ProcessRefreshKind::nothing()
@@ -103,7 +119,7 @@ impl Probe {
         ordered
             .into_iter()
             .map(|info| {
-                let p = self.sys.process(Pid::from_u32(info.pid));
+                let p = sys.process(Pid::from_u32(info.pid));
                 let start = p.map(sysinfo::Process::start_time).filter(|s| *s > 0);
                 ProcessMeta {
                     pid: info.pid,
@@ -121,24 +137,18 @@ impl Probe {
             .collect()
     }
 
-    /// Whether the process `pid` (started at `started_ms` when known) still runs. A zombie that nobody has reaped
-    /// yet does not count: it is dead, only its entry is left.
-    // ADR 0033 WP-6: a missing start time counts as a match; compare start times or use paddock_proc::ProcessId
-    pub fn alive(&mut self, pid: u32, started_ms: Option<u64>) -> bool {
+    /// What the process `pid` (started at `started_ms` when known) is now. A zombie that nobody has reaped yet does not
+    /// count: it is dead, only its entry is left.
+    pub fn alive(&mut self, pid: u32, started_ms: Option<u64>) -> Seen {
         let id = Pid::from_u32(pid);
-        self.sys
-            .refresh_processes_specifics(ProcessesToUpdate::Some(&[id]), true, ProcessRefreshKind::nothing());
-        match self.sys.process(id) {
-            None => false,
-            Some(p) => {
-                if p.status() == sysinfo::ProcessStatus::Zombie {
-                    return false;
-                }
-                let start = p.start_time().saturating_mul(1000);
-                // The same process: start times are whole seconds, so allow rounding.
-                started_ms.is_none_or(|s| start == 0 || s.abs_diff(start) <= 1500)
-            }
-        }
+        // Unknown counts as alive: a runner is never restarted because the process table could not be read.
+        let Some(sys) = self.sys.as_mut() else {
+            return Seen::Unverified;
+        };
+        sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[id]), true, ProcessRefreshKind::nothing());
+        seen(sys.process(id).map(|p| (p.start_time(), p.status())), started_ms, || {
+            paddock_proc::presence(pid)
+        })
     }
 
     /// Whether `pid` has child processes that belong to a job (its console host does not).
@@ -160,16 +170,21 @@ impl Probe {
 
     /// A machine sample (without the runners' share, which the supervisor adds); `disk_of` names a folder on the disk to report.
     pub fn machine(&mut self, now: Timestamp, disk_of: &Path) -> MachineSample {
-        self.sys.refresh_cpu_usage();
-        self.sys.refresh_memory();
-        let cpu = permille(self.sys.global_cpu_usage() / 100.0);
+        let (cpu, mem_used_bytes, mem_total_bytes) = match self.sys.as_mut() {
+            Some(sys) => {
+                sys.refresh_cpu_usage();
+                sys.refresh_memory();
+                (permille(sys.global_cpu_usage() / 100.0), sys.used_memory(), sys.total_memory())
+            }
+            None => (permille(0.0), 0, 0),
+        };
         let (free, total) = self.disk_space(disk_of, now).unwrap_or((0, 0));
         MachineSample {
             at: now,
             cpu_permille: cpu,
             cpu_peak_permille: cpu,
-            mem_used_bytes: self.sys.used_memory(),
-            mem_total_bytes: self.sys.total_memory(),
+            mem_used_bytes,
+            mem_total_bytes,
             disk_free_bytes: free,
             disk_total_bytes: total,
             runners: Usage::default(),
@@ -179,14 +194,13 @@ impl Probe {
     /// Free and total bytes of the disk holding `path`. The OS is asked at most once a minute per disk
     /// ([`SpaceCache`]); in between the last reading is returned.
     pub fn disk_space(&mut self, path: &Path, now: Timestamp) -> Option<(u64, u64)> {
-        let disks = &mut self.disks;
+        let disks = self.disks.as_mut()?;
         let key = path.to_string_lossy().to_string();
         self.space.get(&key, now, || {
             disks.refresh(true);
             let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
             let target = normalise(&target);
             disks
-                .list()
                 .iter()
                 .filter(|d| target.starts_with(&normalise(d.mount_point())))
                 .max_by_key(|d| d.mount_point().as_os_str().len())
@@ -197,9 +211,11 @@ impl Probe {
     /// The service's own CPU (per mille of the whole machine) and memory.
     pub fn own_usage(&self) -> (u32, u64) {
         let me = Pid::from_u32(std::process::id());
-        let cpus = self.sys.cpus().len().max(1) as f32;
-        self.sys
-            .process(me)
+        let Some(sys) = self.sys.as_ref() else {
+            return (0, 0);
+        };
+        let cpus = sys.cpus().len().max(1) as f32;
+        sys.process(me)
             .map(|p| (permille(p.cpu_usage() / 100.0 / cpus), p.memory()))
             .unwrap_or((0, 0))
     }
@@ -305,5 +321,61 @@ mod tests {
         for t in threads {
             let _ = t.join();
         }
+    }
+}
+
+/// What sysinfo's listing of a pid (start time in seconds and status; `None` when it is not listed) says about the process
+/// recorded at `started_ms`.
+///
+/// A pid sysinfo does not list is gone only when `paddock_proc::presence` (`absent`, asked only then) says so: sysinfo drops
+/// processes it could not read.
+fn seen(listed: Option<(u64, sysinfo::ProcessStatus)>, started_ms: Option<u64>, absent: impl FnOnce() -> paddock_proc::Presence) -> Seen {
+    match listed {
+        None => match absent() {
+            paddock_proc::Presence::Gone => Seen::Gone,
+            paddock_proc::Presence::Running | paddock_proc::Presence::Unknown => Seen::Unverified,
+        },
+        Some((_, sysinfo::ProcessStatus::Zombie)) => Seen::Gone,
+        // An unreadable start time (0), or none recorded: this cannot be told from a process that took the pid over.
+        Some((0, _)) => Seen::Unverified,
+        Some((start, _)) => match started_ms {
+            None => Seen::Unverified,
+            // The same process: start times are whole seconds, so allow rounding. Another start is a recycled pid.
+            Some(s) if s.abs_diff(start.saturating_mul(1000)) <= 1500 => Seen::Same,
+            Some(_) => Seen::Gone,
+        },
+    }
+}
+
+#[cfg(test)]
+mod seen_tests {
+    use super::*;
+    use paddock_proc::Presence;
+    use sysinfo::ProcessStatus::{Run, Zombie};
+
+    fn never() -> Presence {
+        panic!("a listed process needs no second look")
+    }
+
+    /// sysinfo drops processes it could not read: an unlisted pid is not gone until the OS says so.
+    #[test]
+    fn an_unlisted_pid_is_gone_only_when_the_os_confirms_it() {
+        assert_eq!(seen(None, Some(5_000), || Presence::Unknown), Seen::Unverified);
+        assert_eq!(seen(None, Some(5_000), || Presence::Running), Seen::Unverified);
+    }
+
+    #[test]
+    fn a_pid_that_reports_start_zero_or_has_no_recorded_start_is_unverified_not_the_same_process() {
+        assert_eq!(seen(Some((0, Run)), Some(5_000), never), Seen::Unverified, "start time unreadable");
+        assert_eq!(seen(Some((5, Run)), None, never), Seen::Unverified, "no recorded start");
+    }
+
+    #[test]
+    fn the_same_start_is_the_same_process_and_a_recycled_pid_or_a_zombie_is_gone() {
+        assert_eq!(seen(Some((5, Run)), Some(5_000), never), Seen::Same);
+        assert_eq!(seen(Some((5, Run)), Some(5_900), never), Seen::Same, "rounding");
+        assert_eq!(seen(Some((9, Run)), Some(5_000), never), Seen::Gone, "recycled pid");
+        assert_eq!(seen(Some((5, Zombie)), Some(5_000), never), Seen::Gone);
+        assert_eq!(seen(None, Some(5_000), || Presence::Gone), Seen::Gone);
     }
 }

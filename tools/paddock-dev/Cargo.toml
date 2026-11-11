@@ -24,6 +24,8 @@ clap = { version = "4", default-features = false, features = ["std", "derive", "
 # Keep the key order of the JSON the planner prints, as scripts/affected.mjs does.
 serde_json = { version = "1", features = ["preserve_order"] }
 regex = "1"
+# ci_isolation: the {src} key of a kept build folder (ADR 0025 amendment); release_isolation: SHA-256 of the .crate archives.
+sha2 = "0.10"
 # C102 (ipc_endpoints): the syn pass over non-test code and the register/ratchet files.
 syn = { version = "2", default-features = false, features = ["full", "parsing", "visit", "printing"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
@@ -39,8 +41,8 @@ toml = { version = "1", default-features = false, features = ["parse", "serde"] 
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-# fds.rs: the standard handles are made non-inheritable before the holder starts.
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
+# fds.rs: the standard handles are made non-inheritable before the holder starts; release_isolation: the file index.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 tempfile = "3"

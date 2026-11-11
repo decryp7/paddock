@@ -1,4 +1,6 @@
-use crate::{gates, input_hash, ipc_endpoints, plan, plan_cmd, slots, wait};
+use crate::{
+    check, ci_isolation, ci_runs, gates, hook, input_hash, ipc_endpoints, plan, plan_cmd, release_isolation, slots, wait, worktree,
+};
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
 use std::io::Write;
@@ -40,6 +42,12 @@ enum Command {
         #[command(subcommand)]
         command: CheckCommand,
     },
+    /// Agent worktrees (ADR 0083): add, claim, reassign, release, drop, list and clean. The caller's agent id is self-declared
+    /// until the guard hook (RT-7) passes the real one.
+    Worktree {
+        #[command(subcommand)]
+        command: worktree::WorktreeCommand,
+    },
     /// The CI planner: which projects a change reaches, the CI matrix and the commit lint's range (the port of
     /// scripts/affected.mjs; the arguments are its: <base> [<head>], --files a,b, --all, --ci [--app x], --commit-range, --commit-flags, --explain).
     /// It prints no JSON object: `--json` is refused.
@@ -49,10 +57,53 @@ enum Command {
         #[command(subcommand)]
         command: GraphCommand,
     },
+    /// Claude Code hooks (ADR 0083). Run by the installed copy, never through `./dev`.
+    Hook {
+        #[command(subcommand)]
+        command: HookCommand,
+    },
+    /// Put the hook binary and its shim in place.
+    Hooks {
+        #[command(subcommand)]
+        command: HooksCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum HookCommand {
+    /// The PreToolUse guard: reads one tool call as JSON on standard input, prints a deny decision or nothing. Exit 0 always.
+    PreToolUse,
+}
+
+#[derive(Subcommand)]
+enum HooksCommand {
+    /// Copy this binary to <git-common-dir>/paddock/hooks/ and write the shim tools/githooks/claude-pre-tool-use.
+    Install(hook::install::InstallArgs),
 }
 
 #[derive(Subcommand)]
 enum CheckCommand {
+    /// The probe of the primary checkout (ADR 0083): on main, no local-only commit, no tracked change, owners match locks. Exit 5: a problem; exit 6: only checks that could not run (not measured). Liveness is measured only with --live.
+    Primary(worktree::PrimaryArgs),
+    /// The repository checks ported to Rust so far (C39, C53; RT-5): findings, expiring waivers from paddock.waivers.toml, a run
+    /// record per check (`not measured` is told from `clean`). The report JSON has the shape of paddock-conformance's, plus `runs`.
+    Run {
+        /// Only these check ids, comma separated (for example C39,C53).
+        #[arg(long, value_delimiter = ',')]
+        only: Option<Vec<String>>,
+        /// Only these repository-relative files, comma separated (the scope of a push gate).
+        #[arg(long, value_delimiter = ',')]
+        files: Option<Vec<String>>,
+        /// The repository root (default: the folder containing .git, found from the current folder).
+        #[arg(long)]
+        root: Option<PathBuf>,
+        /// The app name in the report.
+        #[arg(long, default_value = "paddock")]
+        app: String,
+        /// Also write the report JSON to this file.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
     /// C102 (ADR 0072): every listen site is in docs/ipc-endpoints.toml with an ending test or a reason, and the ratchet of
     /// connection endings is well formed. With `--tag`, also refuses a release tag that a ratchet entry blocks.
     IpcEndpoints {
@@ -78,6 +129,22 @@ enum CiCommand {
         #[command(subcommand)]
         command: SlotCommand,
     },
+    /// The CI kit's job isolation on a host runner: slots, kept folders, ports, process patterns, temp folders (the port of
+    /// `conformance/ci/job-isolation.sh`). Values go to standard output, messages to standard error.
+    Isolation(ci_isolation::IsolationArgs),
+    /// Release mode (ADR 0085): a tag build reads nothing kept. `setup` makes the job's folders, `record` is the only
+    /// ledger writer, `verify` proves it.
+    ReleaseIsolation {
+        #[command(subcommand)]
+        command: release_isolation::Command,
+    },
+    /// The tests CI marked flaky (nextest, Playwright), vitest's failed specs and tests that failed and then passed on a
+    /// rerun of the same commit, over a window of runs. An incomplete measurement ("not measured") exits 1 for now;
+    /// flaky tests found exit 5 only with --fail-on-flakes;
+    /// cancelled runs are counted and listed but never change the exit code.
+    Flakes(ci_runs::FlakesArgs),
+    /// Real CI timings of the family from the Gitea API (the port of scripts/ci-timings.mjs, same Markdown).
+    Timings(ci_runs::TimingsArgs),
 }
 
 #[derive(Subcommand)]
@@ -194,6 +261,23 @@ struct AffectedArgs {
 
 /// Runs the tool: `args` are the command line without the program name. Returns the exit code.
 pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
+    // What `./dev --print-binary` answers (the wrapper prints its cached binary): this binary's own path, so the CI kit can pin
+    // whichever of the two `PADDOCK_DEV` names.
+    if args == ["--print-binary"] {
+        return match std::env::current_exe() {
+            Ok(p) => {
+                let _ = writeln!(out, "{}", p.display());
+                Exit::Ok.code()
+            }
+            Err(e) => finish(
+                Format::Text,
+                Err(CliError::failure(format!("the program's own path is unknown: {e}."))),
+                out,
+                err,
+            )
+            .code(),
+        };
+    }
     let format = if args.iter().any(|a| a == "--json") {
         Format::Json
     } else {
@@ -218,8 +302,26 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             .with_hint("Its output is the planner's own: JSON for a plan, true or false, a range.");
         return finish(Format::Json, Err(e), out, err).code();
     }
+    if let Command::Ci {
+        command: CiCommand::Isolation(a),
+    } = &cli.command
+    {
+        // The script's contract: plain values on standard output, `::error::` lines on standard error, no `error:` prefix.
+        return ci_isolation::run(a, out, err);
+    }
+    if matches!(cli.command, Command::Hook { .. }) {
+        // The hook's answer is its own JSON on standard output, not a report, and its exit code is always 0.
+        return hook::pre_tool_use(&mut std::io::stdin(), out, err);
+    }
     let result = dispatch(cli.command);
-    finish(if cli.json { Format::Json } else { Format::Text }, result, out, err).code()
+    // A probe whose only problems are checks that could not run ends with `worktree::EXIT_NOT_MEASURED` (ER-33).
+    let not_measured_only = result.as_ref().is_ok_and(|r| r.data["not_measured_only"] == true);
+    let code = finish(if cli.json { Format::Json } else { Format::Text }, result, out, err);
+    if not_measured_only && code == Exit::Findings {
+        worktree::EXIT_NOT_MEASURED
+    } else {
+        code.code()
+    }
 }
 
 fn dispatch(command: Command) -> Result<Report, CliError> {
@@ -236,6 +338,18 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             SlotCommand::IdleRun(a) => slots::idle_run(&a),
             SlotCommand::Hold(a) => slots::hold(&a),
         },
+        Command::Ci {
+            command: CiCommand::Isolation(_),
+        } => Err(CliError::failure("`ci isolation` was dispatched through the report path.")),
+        Command::Ci {
+            command: CiCommand::ReleaseIsolation { command },
+        } => release_isolation::command(command),
+        Command::Ci {
+            command: CiCommand::Flakes(a),
+        } => ci_runs::flakes(&a),
+        Command::Ci {
+            command: CiCommand::Timings(a),
+        } => ci_runs::timings(&a),
         Command::Wait(a) => wait::command(&a),
         Command::Gates {
             command: GatesCommand::Model(a),
@@ -258,9 +372,33 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: GatesCommand::Ratchet(a),
         } => gates::command::ratchet(a.root.as_deref(), &a.base, &a.release_tag),
         Command::Check {
+            command:
+                CheckCommand::Run {
+                    only,
+                    files,
+                    root,
+                    app,
+                    out,
+                },
+        } => check::command(check::Args {
+            only,
+            files,
+            root,
+            app,
+            out,
+        }),
+        Command::Check {
             command: CheckCommand::IpcEndpoints { tag, root },
         } => ipc_endpoints::command(root, tag),
+        Command::Check {
+            command: CheckCommand::Primary(a),
+        } => worktree::check_primary(&a),
+        Command::Worktree { command } => worktree::command(command),
         Command::Plan(a) => plan_cmd::command(&a.args, a.root),
+        Command::Hook { .. } => Ok(Report::new(serde_json::json!({}), String::new())),
+        Command::Hooks {
+            command: HooksCommand::Install(a),
+        } => hook::install::command(&a),
         Command::Graph {
             command: GraphCommand::Affected(a),
         } => plan::command(&plan::Request {

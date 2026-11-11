@@ -315,7 +315,7 @@ fn a_clean_exit_ends_the_run_by_removing_the_running_marker() {
             app_version: "1.2.3",
         },
         4242,
-        &|_| None,
+        &|_| paddock_startup::Look::Gone,
     );
     let startup = Startup::builder().lifecycle(life).build().unwrap();
     let app = app(shell().startup(startup));

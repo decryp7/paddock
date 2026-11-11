@@ -10,10 +10,26 @@ use std::path::{Path, PathBuf};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use thiserror::Error;
 
+/// What a look at a pid found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Look {
+    /// A process runs under the pid and started at this time (seconds since the epoch).
+    Started(u64),
+    /// No process runs under the pid.
+    Gone,
+    /// The OS process table could not be read: nothing is known.
+    Unknown,
+}
+
 /// Tells whether a process is running.
 pub trait ProcessProbe: Send + Sync {
-    /// The process's start time (seconds since the epoch), or `None` when no such process runs.
+    /// The process's start time (seconds since the epoch), or `None` when no such process runs (or none could be read).
     fn start_time(&self, pid: u32) -> Option<u64>;
+    /// A look at the pid that tells "gone" from "could not look": a lock is only taken over from a process that is proven
+    /// gone (rule 53). The default trusts `start_time`.
+    fn look(&self, pid: u32) -> Look {
+        self.start_time(pid).map_or(Look::Gone, Look::Started)
+    }
 }
 
 /// [`ProcessProbe`] backed by `sysinfo` (all platforms).
@@ -21,10 +37,37 @@ pub struct SystemProbe;
 
 impl ProcessProbe for SystemProbe {
     fn start_time(&self, pid: u32) -> Option<u64> {
-        let mut sys = System::new();
+        match self.look(pid) {
+            Look::Started(t) => Some(t),
+            Look::Gone | Look::Unknown => None,
+        }
+    }
+
+    fn look(&self, pid: u32) -> Look {
+        Self::look_logged(pid, System::new).0
+    }
+}
+
+impl SystemProbe {
+    /// [`ProcessProbe::look`] over a constructor of the sysinfo `System`, also saying whether this call logged a failure
+    /// (only the first failure of the process is logged: it is permanent).
+    fn look_logged(pid: u32, make: impl FnOnce() -> Result<System, sysinfo::Error>) -> (Look, bool) {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static WARNED: AtomicBool = AtomicBool::new(false);
+        let mut logged = false;
+        let Ok(mut sys) = make().inspect_err(|why| {
+            if !WARNED.swap(true, Ordering::Relaxed) {
+                logged = true;
+                log::warn!(
+                    "the OS process table is unavailable (sysinfo): {why}; a lock is never taken over on a failed read (logged once)"
+                );
+            }
+        }) else {
+            return (Look::Unknown, logged);
+        };
         let p = Pid::from_u32(pid);
         sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[p]), true, ProcessRefreshKind::nothing());
-        sys.process(p).map(|proc| proc.start_time())
+        (sys.process(p).map_or(Look::Gone, |proc| Look::Started(proc.start_time())), false)
     }
 }
 
@@ -107,10 +150,12 @@ impl RunLock {
 }
 
 fn is_alive(h: &LockInfo, probe: &dyn ProcessProbe) -> bool {
-    match (probe.start_time(h.pid), h.process_start) {
-        (None, _) => false,
-        (Some(now), Some(then)) => now == then,
-        (Some(_), None) => true,
+    // Unknown counts as alive: a lock is never taken over because the process table could not be read.
+    match (probe.look(h.pid), h.process_start) {
+        (Look::Gone, _) => false,
+        (Look::Unknown, _) => true,
+        (Look::Started(now), Some(then)) => now == then,
+        (Look::Started(_), None) => true,
     }
 }
 
@@ -186,6 +231,52 @@ mod tests {
         // Garbage (a crash while writing): taken over.
         std::fs::write(dir.path().join("nightly.lock"), "{not json").unwrap();
         drop(RunLock::acquire(dir.path(), "nightly", 1, &probe).unwrap());
+    }
+
+    /// A probe whose process table cannot be read.
+    struct Unreadable;
+
+    impl ProcessProbe for Unreadable {
+        fn start_time(&self, _pid: u32) -> Option<u64> {
+            None
+        }
+        fn look(&self, _pid: u32) -> Look {
+            Look::Unknown
+        }
+    }
+
+    #[test]
+    fn an_unreadable_process_table_never_lets_a_lock_be_taken_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let info = LockInfo {
+            pid: 42,
+            process_start: Some(7),
+            started_ms: 5,
+            schedule: "nightly".into(),
+        };
+        write_lock(dir.path(), &info);
+        let err = RunLock::acquire(dir.path(), "nightly", 1, &Unreadable).unwrap_err();
+        assert_eq!(
+            err,
+            LockError::Held {
+                schedule: "nightly".into(),
+                pid: 42,
+                started_ms: 5
+            }
+        );
+        assert!(dir.path().join("nightly.lock").exists(), "the lock file stays");
+        // A probe that can read the table and finds nobody still takes it over.
+        let gone = FakeProbe([(std::process::id(), 100)].into());
+        drop(RunLock::acquire(dir.path(), "nightly", 1, &gone).unwrap());
+    }
+
+    #[test]
+    fn the_real_probe_says_unknown_when_the_table_cannot_be_opened_and_logs_once() {
+        let first = SystemProbe::look_logged(1, || Err(sysinfo::Error::Unsupported));
+        let second = SystemProbe::look_logged(1, || Err(sysinfo::Error::Unsupported));
+        assert_eq!((first.0, second.0), (Look::Unknown, Look::Unknown));
+        assert!(!second.1, "the second failure is not logged again");
+        assert_eq!(SystemProbe::look_logged(u32::MAX - 7, System::new), (Look::Gone, false));
     }
 
     #[test]

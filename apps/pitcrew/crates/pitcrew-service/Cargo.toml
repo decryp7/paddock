@@ -29,8 +29,10 @@ toml.workspace = true
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 # The IPC server (named pipe / Unix socket) only; supervision runs on plain threads.
 tokio = { version = "1.54", default-features = false, features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros", "signal"] }
+# The three-valued look at a pid (an unlisted pid is gone only when the OS says so).
+paddock-proc = { path = "../../../../crates/paddock-proc" }
 # Child processes, machine metrics and disk space without platform FFI.
-sysinfo = { version = "0.37", default-features = false, features = ["system", "disk"] }
+sysinfo = { version = "0.40", default-features = false, features = ["system", "disk"] }
 # Release discovery and downloads: HTTPS with the OS certificate store.
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"] }
 

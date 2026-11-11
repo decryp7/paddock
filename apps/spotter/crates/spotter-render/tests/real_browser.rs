@@ -17,6 +17,11 @@ const PAGE: &str = "<!doctype html><html><head><title>Rendered</title></head><bo
 <script>setTimeout(()=>{document.getElementById('v').textContent='version 1.2.3';\
 for(let i=1;i<=3;i++){const l=document.createElement('li');l.className='rel';l.textContent='item '+i;r.appendChild(l);}},400)</script></body></html>";
 
+/// The guard for a browser start that hangs. A start ends when the browser is ready or has exited (ADR 0071); on a shared
+/// host a starved browser gets its first CPU late (run 7918 and 7929: over 20 s), and only a start that is still silent
+/// after this long is a failure. nextest's waiver for these tests (apps/spotter/.config/nextest.toml) allows for it.
+const START_GUARD: Duration = Duration::from_secs(120);
+
 /// Real browsers are heavy: started side by side on a small CI runner they starve each other (a DevTools call then
 /// times out and the render is reported as a slow page), so the tests in this file take turns.
 fn serial() -> std::sync::MutexGuard<'static, ()> {
@@ -24,9 +29,30 @@ fn serial() -> std::sync::MutexGuard<'static, ()> {
     LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// The first run of a browser bundle on macOS is held by the OS for 4.2 to 42.06 s on an idle host (docs/performance.md, 2026-11-11),
+/// far more on a busy one, with no CPU and no child to judge it by (`launch::warm_up`). The first test of a test process pays it
+/// here, outside any start guard, by waiting for the browser's own `--version` to end; only the first pays the OS hold, every
+/// later start is about half a second. Its time comes out of the test's slow-timeout (nextest's 240 s, the waiver in
+/// apps/spotter/.config/nextest.toml), which is its only bound.
+fn warm(b: &Browser) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        if cfg!(target_os = "macos") {
+            eprintln!("running the test browser once (first run on this Mac, the OS may hold it for a while)...");
+            match spotter_render::launch::warm_up(b) {
+                Ok(took) => eprintln!("the test browser's first run took {took:?}"),
+                Err(e) => panic!("{e}"),
+            }
+        }
+    });
+}
+
 fn browser() -> Option<Browser> {
     // Only the dedicated test browser, never an installed Chrome/Edge (see `find_for_tests`).
     let b = find_for_tests();
+    if let Some(b) = &b {
+        warm(b);
+    }
     if b.is_none() {
         // CI sets this: a skipped real-browser test there means the install step failed, which must not pass silently.
         assert!(
@@ -64,6 +90,7 @@ fn renderer(b: Browser, base: &Path) -> (ChromiumRenderer, NetLog) {
     let r = ChromiumRenderer::new(base, base)
         .with_browser(b)
         .with_mode(Mode::Headless)
+        .with_start_limit(START_GUARD)
         .with_extra_args(flags);
     (r, log)
 }
@@ -112,6 +139,7 @@ async fn off_screen_headful_mode_and_redirects() {
     let marker = base.path().to_string_lossy().to_string();
     let r = ChromiumRenderer::new(base.path(), base.path())
         .with_browser(b)
+        .with_start_limit(START_GUARD)
         .with_extra_args(test_browser_flags());
     let page = r
         .render(&format!("http://127.0.0.1:{port}/redirect"), Some("#done"), Duration::from_secs(40))
@@ -157,6 +185,9 @@ async fn a_missing_element_times_out_as_failed() {
     assert_no_leftovers(&marker);
 }
 
+/// The page's own budget ends a hang. The browser is started first (a starved start is not what is tested), then the clock
+/// runs only over the load: it must end at the 6 s budget (not before, not at the watchdog), and the renderer reports it as a
+/// failed render.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_server_that_never_answers_is_stopped_at_the_timeout() {
     let _turn = serial();
@@ -164,20 +195,38 @@ async fn a_server_that_never_answers_is_stopped_at_the_timeout() {
     let port = site().await;
     let base = tempfile::tempdir().unwrap();
     let marker = base.path().to_string_lossy().to_string();
-    let (r, log) = renderer(b, base.path());
-    let t = Instant::now();
+    let dir = base.path().to_path_buf();
+    let (elapsed, error, profile) = tokio::task::spawn_blocking(move || {
+        let mut opts = LaunchOptions::new(&dir);
+        opts.extra_args = test_browser_flags();
+        opts.mode = Mode::Headless;
+        opts.start_limit = START_GUARD;
+        let c = Chromium::launch(&b, &opts).unwrap();
+        let page = c.new_page().unwrap();
+        let t = Instant::now();
+        let e = page
+            .navigate(&format!("http://127.0.0.1:{port}/hang"), Duration::from_secs(6))
+            .unwrap_err();
+        let elapsed = t.elapsed();
+        let profile = c.profile_dir().to_path_buf();
+        drop(c);
+        (elapsed, e, profile)
+    })
+    .await
+    .unwrap();
+    assert!(matches!(error, spotter_render::Error::Timeout(_)), "{error:?}");
+    assert!(elapsed >= Duration::from_millis(5500), "ended before the 6 s budget: {elapsed:?}");
+    // conformance: hang-guard — the budget is 6 s; this bound (at least 10 s) only keeps a broken run from waiting for the watchdog
+    assert!(elapsed < Duration::from_secs(20), "the load took {elapsed:?}: {error:?}");
+    assert!(!profile.exists(), "profile not removed");
+    assert_no_leftovers(&marker);
+    // The same hang through the renderer is a failed render.
+    let (r, log) = renderer(browser().unwrap(), base.path());
     let e = r
         .render(&format!("http://127.0.0.1:{port}/hang"), None, Duration::from_secs(6))
         .await
         .unwrap_err();
     assert!(matches!(e, RenderError::Failed(_)), "{e:?}\n{}", log.tail());
-    // Start-up has its own limit; the hang itself must end at the 6 s page budget, not at the watchdog.
-    assert!(
-        t.elapsed() < spotter_render::launch::lifetime_for(Duration::from_secs(6)),
-        "took {:?}",
-        t.elapsed()
-    );
-    assert_eq!(std::fs::read_dir(base.path()).unwrap().count(), 0);
     assert_no_leftovers(&marker);
 }
 
@@ -204,6 +253,7 @@ async fn a_load_replaced_by_another_navigation_names_it() {
         let mut opts = LaunchOptions::new(&dir);
         opts.extra_args = test_browser_flags();
         opts.mode = Mode::Headless;
+        opts.start_limit = START_GUARD;
         let c = Chromium::launch(&b, &opts).unwrap();
         let page = c.new_page().unwrap();
         std::thread::scope(|s| {
@@ -286,14 +336,17 @@ fn the_watchdog_kills_the_whole_tree_at_the_wall_clock_limit() {
     let mut opts = LaunchOptions::new(base.path());
     opts.extra_args = test_browser_flags();
     opts.mode = Mode::Headless;
-    // The limit runs from the spawn, so it has to leave room for a slow start on a loaded runner (which is not what is tested).
-    opts.max_lifetime = spotter_render::launch::START_LIMIT + Duration::from_secs(4);
+    opts.start_limit = START_GUARD;
+    // The launch's own cap runs from the spawn and stays out of the way; the cap under test is armed once the browser is up,
+    // so a slow start on a loaded host is not what is measured.
+    opts.max_lifetime = Duration::from_secs(600);
     let mut c = Chromium::launch(&b, &opts).unwrap();
     let dir = c.profile_dir().to_path_buf();
     assert!(c.is_running());
     let marker = dir.to_string_lossy().to_string();
     assert!(!processes_mentioning(&marker).is_empty());
-    let end = Instant::now() + spotter_render::launch::START_LIMIT + Duration::from_secs(30);
+    c.limit_lifetime(Duration::from_secs(2));
+    let end = Instant::now() + Duration::from_secs(60);
     while c.is_running() && Instant::now() < end {
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -312,6 +365,7 @@ fn the_memory_cap_kills_the_tree() {
     let mut opts = LaunchOptions::new(base.path());
     opts.extra_args = test_browser_flags();
     opts.mode = Mode::Headless;
+    opts.start_limit = START_GUARD;
     opts.memory_cap = Some(1);
     let marker = base.path().to_string_lossy().to_string();
     // The cap also applies while the browser starts: it may be stopped before the connection is up, or after.
@@ -334,6 +388,7 @@ fn dropping_a_running_browser_kills_it_and_removes_the_profile() {
     let mut opts = LaunchOptions::new(base.path());
     opts.extra_args = test_browser_flags();
     opts.mode = Mode::Headless;
+    opts.start_limit = START_GUARD;
     let c = Chromium::launch(&b, &opts).unwrap();
     let dir = c.profile_dir().to_path_buf();
     let marker = dir.to_string_lossy().to_string();
@@ -350,6 +405,7 @@ fn closing_quits_the_browser_by_itself_before_any_kill() {
     let mut opts = LaunchOptions::new(base.path());
     opts.extra_args = test_browser_flags();
     opts.mode = Mode::Headless;
+    opts.start_limit = START_GUARD;
     let mut c = Chromium::launch(&b, &opts).unwrap();
     let marker = c.profile_dir().to_string_lossy().to_string();
     let t = Instant::now();

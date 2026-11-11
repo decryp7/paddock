@@ -22,3 +22,10 @@ slow-timeout = { period = "30s", terminate-after = 2 }
 
 [profile.ci.junit]
 path = "junit.xml"
+
+# waiver: the real agent's start is judged on whether the process is alive, not on a clock (CI run 7918: a starved shared Mac let
+# four agents wait over 40 s for their first CPU). A working start on a loaded host is waited for and only a hung one fails, after the
+# 120 s READY_GUARD of tests/term.rs; the default 60 s would stop the tests first.
+[[profile.ci.overrides]]
+filter = "package(dyno-agent) & binary(term) & (test(/^term_stops_/) | test(/^the_agents_start/) | test(/^a_refused_second/) | test(/^an_agent_on_a_data/))"
+slow-timeout = { period = "30s", terminate-after = 6 }

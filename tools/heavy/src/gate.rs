@@ -19,7 +19,8 @@ impl LoadSource for SysLoad {
         if cfg!(windows) {
             return None;
         }
-        let l = sysinfo::System::load_average();
+        // Since sysinfo 0.40 the read can fail; an unknown load is `None`, like on Windows.
+        let l = sysinfo::System::load_average().ok()?;
         Some([l.one, l.five, l.fifteen])
     }
 }

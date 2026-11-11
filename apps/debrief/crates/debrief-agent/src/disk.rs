@@ -16,12 +16,10 @@ pub struct SystemDisks;
 impl DiskProbe for SystemDisks {
     fn free_bytes(&self, path: &Path) -> Option<u64> {
         let path = existing_ancestor(path)?;
-        let disks = sysinfo::Disks::new_with_refreshed_list();
-        let mounts: Vec<(PathBuf, u64)> = disks
-            .list()
-            .iter()
-            .map(|d| (d.mount_point().to_path_buf(), d.available_space()))
-            .collect();
+        let disks = sysinfo::Disks::new_with_refreshed_list()
+            .inspect_err(|why| log::warn!("the volume list is unavailable (sysinfo): {why}; free space is unknown"))
+            .ok()?;
+        let mounts: Vec<(PathBuf, u64)> = disks.iter().map(|d| (d.mount_point().to_path_buf(), d.available_space())).collect();
         volume_free(&path, &mounts)
     }
 }

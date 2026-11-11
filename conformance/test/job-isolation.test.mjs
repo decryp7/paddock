@@ -15,6 +15,22 @@ const TABLE = join(PADDOCK, 'conformance', 'ci', 'kept-folders.txt');
 const read = (p) => readFileSync(p, 'utf8');
 
 /**
+ * The implementation under test. By default the shell script. With ISOLATION_CMD=<path of the paddock-dev binary> every case runs
+ * against `paddock-dev ci isolation` instead (the Rust port, RT-1 of docs/plans/rust-tooling-2026-11-10.md, on origin/docs/rust-tooling-plan until it lands): the same cases, the
+ * same fakes, the same assertions on exit codes, standard output and standard error. The cases that read the script's text
+ * (bash-5 pitfalls, "no shell lock") are about the shell and run only when it is the implementation.
+ */
+const ISOLATION_CMD = process.env.ISOLATION_CMD || '';
+const RUST = ISOLATION_CMD !== '';
+/** Runs the implementation under test: `[args]` -> the finished process (stdout, stderr and status as text). */
+function isolation(args, env, tables = join(PADDOCK, 'conformance', 'ci')) {
+  if (RUST) return spawnSync(ISOLATION_CMD, ['ci', 'isolation', ...args], { env: { ...env, PADDOCK_CI_TABLES: tables }, encoding: 'utf8' });
+  return spawnSync('bash', [SCRIPT, ...args], { env, encoding: 'utf8' });
+}
+/** The command line `idle-run` is given to run for a sweep of a slot (what the fake dev logs after `--`). */
+const SWEEP_CMD = RUST ? '\\S+paddock-dev ci isolation sweep-slot' : 'bash \\S+job-isolation\\.sh sweep-slot';
+
+/**
  * A stand-in for `./dev ci slot` (paddock-dev), for these sequential tests of the shell wiring: a slot is a folder made with
  * mkdir, and a held slot whose owner folder is gone is free again (the real holder ends when the job folder goes; the real
  * lock is the kernel's, tested with racing processes in tools/paddock-dev/tests/slots.rs and crates/paddock-slots). It logs
@@ -85,7 +101,7 @@ function host() {
     const envFile = join(root, 'work', id, 'github-env');
     writeFileSync(envFile, '');
     const base = { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: 'macOS', RUNNER_TEMP: temp, GITHUB_ENV: envFile, GITHUB_RUN_ID: '7', GITHUB_JOB: id, PADDOCK_DEV: dev, FAKE_DEV_LOG: log, PADDOCK_SLOT_WAIT_TRIES: '0', PADDOCK_DF: df, PADDOCK_CI_MIN_FREE_GB: '0', PADDOCK_SOCKET_ROOT: sockets, ...extra };
-    const exec = (args, more = {}) => spawnSync('bash', [SCRIPT, ...args], { env: { ...base, ...more }, encoding: 'utf8' });
+    const exec = (args, more = {}) => isolation(args, { ...base, ...more });
     const exported = () => Object.fromEntries(read(envFile).split('\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
     /** Runs a command with what acquire exported, as the job's later steps see it. */
     const later = (args, more = {}) => exec(args, { ...exported(), ...more });
@@ -137,8 +153,11 @@ test('the slot count follows PADDOCK_CI_SLOTS (the pool maximum); a full house w
   assert.equal(jobs[3].exported().PADDOCK_CI_SLOT, 's2', 'the lowest free slot: its kept folders are the warmest');
   const bad = h.job('5'.repeat(16), { PADDOCK_CI_SLOTS: 'many' }).exec(['acquire']);
   assert.notEqual(bad.status, 0);
-  assert.match(read(SCRIPT), /PADDOCK_CI_SLOT=.*\n(?:.*\n)*?.*PADDOCK_CI_SLOT_TOKEN=/, 'the token goes to the later steps');
-  assert.doesNotMatch(read(SCRIPT), /stale\(|\.stale-|PADDOCK_SLOT_MAX_AGE_MIN|mkdir "\$lock"/, 'no shell lock and no reclaim: the kernel frees a dead holder\'s lock');
+  if (!RUST) {
+    assert.match(read(SCRIPT), /PADDOCK_CI_SLOT=.*\n(?:.*\n)*?.*PADDOCK_CI_SLOT_TOKEN=/, 'the token goes to the later steps');
+    assert.doesNotMatch(read(SCRIPT), /stale\(|\.stale-|PADDOCK_SLOT_MAX_AGE_MIN|mkdir "\$lock"/, 'no shell lock and no reclaim: the kernel frees a dead holder\'s lock');
+  }
+  assert.match(read(join(h.root, 'work', '1'.repeat(16), 'github-env')), /^PADDOCK_CI_SLOT=s1\nPADDOCK_CI_SLOT_TOKEN=t1\d+$/m, 'the slot and its token go to the later steps');
 });
 
 test('a job that ends without its release frees its slot (the holder ends with the job folder); a release whose holder died fails loudly', () => {
@@ -248,6 +267,11 @@ test('owns, port and pattern scope to the job\'s own slot and folders', () => {
   assert.equal(a.later(['owns', mine, 'target']).status, 0);
   assert.notEqual(a.later(['owns', join(h.ci, 'target-x-app-s2'), 'target']).status, 0, 'another slot\'s folder');
   assert.notEqual(a.later(['owns', mine, 'src']).status, 0, 'not a folder of that kind');
+  // A folder inside a kept folder or a checkout is not a kept folder: the layout's `*` would match across the `/` without the depth guard.
+  mkdirSync(join(mine, 'nested-s1'), { recursive: true });
+  mkdirSync(join(h.ci, 'src', 'x-app-macOS-s1', 'target-y-s1'), { recursive: true });
+  assert.notEqual(a.later(['owns', join(mine, 'nested-s1')]).status, 0, 'a folder inside a kept folder');
+  assert.notEqual(a.later(['owns', join(h.ci, 'src', 'x-app-macOS-s1', 'target-y-s1')]).status, 0, 'a folder inside a checkout');
   assert.notEqual(a.later(['owns', h.ci]).status, 0);
   assert.notEqual(a.later(['owns', join(h.root, 'home')]).status, 0);
   assert.equal(a.later(['port', 'sccache']).stdout.trim(), '4227');
@@ -296,7 +320,7 @@ test('disk: the first s1 job takes over a kept folder of the old layout; idle sl
   assert.equal(rc.status, 0, rc.stdout + rc.stderr);
   assert.ok(!existsSync(third), 'slot s3 is above the kept slots: its folders are removed with it');
   assert.ok(existsSync(secondFolder), 'slot s2 is kept');
-  assert.match(h.log(), /^ci slot idle-run --slot s3 --root \S+ -- bash \S+job-isolation\.sh sweep-slot$/m, 'deleted only under s3\'s lock');
+  assert.match(h.log(), new RegExp(`^ci slot idle-run --slot s3 --root \\S+ -- ${SWEEP_CMD}$`, 'm'), 'deleted only under s3\'s lock');
   // A held slot above the limit is never swept: its job still builds in it.
   const d = h.job('d'.repeat(16), { PADDOCK_CI_KEEP_SLOTS: '1' });
   assert.equal(d.exec(['acquire']).status, 0);
@@ -390,7 +414,10 @@ test('acquire sweeps the socket folders of jobs that were killed before their re
 });
 
 test('the declared port blocks never overlap each other or an end-to-end port, for every slot up to the default PADDOCK_CI_SLOTS', () => {
-  const slots = Number(/PADDOCK_CI_SLOTS:-(\d+)/.exec(read(SCRIPT))[1]);
+  // The default number of slots: from the shell script's text, and for the Rust port from `slots` itself (no PADDOCK_CI_SLOTS set).
+  const slots = RUST
+    ? Number(isolation(['slots'], { PATH: '/usr/bin:/bin' }).stdout.trim())
+    : Number(/PADDOCK_CI_SLOTS:-(\d+)/.exec(read(SCRIPT))[1]);
   const blocks = read(join(PADDOCK, 'conformance', 'ci', 'ports.txt')).split('\n').filter((l) => l.trim() && !l.startsWith('#')).map((l) => l.trim().split(/\s+/));
   const used = new Map();
   const take = (port, who) => {
@@ -478,9 +505,11 @@ test('every kind a CI file asks for is in kept-folders.txt, and every kind there
 // backslash in ${v//p/r}'s replacement as an escape (the separator class [/\\] became [/\]), and command substitutions
 // drop -e unless inherit_errexit is set (a missing CI home became an empty one, paths at the root of the disk).
 test('job-isolation.sh fills patterns as plain text and keeps -e in command substitutions (bash 5)', () => {
-  const text = read(SCRIPT);
-  assert.doesNotMatch(text, /\$\{pat\/\/[^}]*\$\(/, 'no ${pat//...} with a computed replacement: use fill');
-  assert.match(text, /^shopt -s inherit_errexit 2>\/dev\/null \|\| true/m);
+  if (!RUST) {
+    const text = read(SCRIPT);
+    assert.doesNotMatch(text, /\$\{pat\/\/[^}]*\$\(/, 'no ${pat//...} with a computed replacement: use fill');
+    assert.match(text, /^shopt -s inherit_errexit 2>\/dev\/null \|\| true/m);
+  }
   const h = host();
   const a = h.job('a'.repeat(16));
   a.exec(['acquire']);
@@ -560,11 +589,12 @@ test('the tables read the same with Windows line ends (a checkout there turns ke
     const ci = join(dir, 'ci');
     mkdirSync(ci);
     for (const f of ['job-isolation.sh', 'ci-home.sh', 'job-tmpdir.sh', 'kept-folders.txt', 'ports.txt']) {
+      if (RUST && f.endsWith('.sh')) continue;
       const p = join(PADDOCK, 'conformance', 'ci', f);
       if (existsSync(p)) writeFileSync(join(ci, f), f.endsWith('.txt') ? read(p).replace(/\r?\n/g, '\r\n') : read(p));
     }
     const env = { PATH: '/usr/bin:/bin', HOME: dir, RUNNER_OS: 'Windows', PADDOCK_CI_SLOT: 's1' };
-    const run = (...args) => spawnSync('bash', [join(ci, 'job-isolation.sh'), ...args], { env, encoding: 'utf8' });
+    const run = (...args) => (RUST ? isolation(args, env, ci) : spawnSync('bash', [join(ci, 'job-isolation.sh'), ...args], { env, encoding: 'utf8' }));
     const p = run('pattern', '[/\\\\]test-browser-spotter-{slot}');
     assert.equal(p.status, 0, `a {slot} pattern is refused with CRLF tables: ${p.stderr}`);
     assert.match(p.stdout, /test-browser-spotter-s1/);
@@ -591,4 +621,24 @@ test('acquire says so, naming the fallback, when the tool cannot be pinned (a bu
   assert.equal(r.status, 0, 'the job still runs');
   assert.match(r.stderr, /::warning::job-isolation: the tool could not be pinned.*PADDOCK_DEV/, r.stderr);
   assert.equal(a.exported().PADDOCK_DEV, undefined, 'nothing pinned');
+});
+
+// Wiring of the Rust path (RT-1; docs/adr/amendments/0025-2026-11-10-rt1-source-key.md): once the job-isolation action runs
+// `ci isolation`, its release step must run the tool `acquire` pinned ("$PADDOCK_DEV"), and a build of the tool must land under the CI
+// home (PADDOCK_DEV_HOME and PADDOCK_DEV_TARGET_DIR, taken from the shared `tools` folder), never inside a job folder.
+const wiringProblems = (text) => {
+  if (!/ci isolation/.test(text)) return []; // not switched yet: nothing to check
+  const found = [];
+  if (!/"\$PADDOCK_DEV" ci isolation release/.test(text) && !/"\$PADDOCK_DEV" ci isolation "\$MODE"/.test(text)) found.push('the release step does not run "$PADDOCK_DEV" ci isolation release');
+  for (const v of ['PADDOCK_DEV_HOME', 'PADDOCK_DEV_TARGET_DIR']) if (!new RegExp(`${v}=.*isolation path tools|${v}=.*\\$tools`).test(text)) found.push(`${v} is not under the CI home (the tools folder)`);
+  return found;
+};
+
+test('the job-isolation action, once it runs the Rust path, releases with the pinned tool and builds it under the CI home (with a positive control)', () => {
+  const action = read(join(PADDOCK, '.gitea', 'actions', 'job-isolation', 'action.yml'));
+  assert.deepEqual(wiringProblems(action), [], 'the action is wired as the amendment addendum says');
+  // Positive controls: a switched action without the pieces is caught, a complete one passes.
+  assert.equal(wiringProblems('run: ./dev ci isolation "$MODE"').length, 3);
+  assert.equal(wiringProblems('run: |\n  tools="$(./dev ci isolation path tools)"\n  PADDOCK_DEV_HOME="$tools/paddock-dev" PADDOCK_DEV_TARGET_DIR="$tools/target" "$PADDOCK_DEV" ci isolation release').length, 0);
+  assert.deepEqual(wiringProblems('run: bash conformance/ci/job-isolation.sh "$MODE"'), [], 'the shell path is not checked');
 });

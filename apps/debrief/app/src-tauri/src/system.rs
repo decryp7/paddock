@@ -101,7 +101,12 @@ pub(crate) fn process_elevated() -> bool {
 pub(crate) fn process_elevated() -> bool {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
     let pid = Pid::from_u32(std::process::id());
-    let mut sys = System::new();
+    // Unknown reads as "not elevated" (the pre-0.40 behaviour for a missing process); the log says why.
+    let Ok(mut sys) = System::new()
+        .inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; the process is reported as not elevated"))
+    else {
+        return false;
+    };
     sys.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[pid]),
         false,

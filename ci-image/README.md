@@ -18,7 +18,7 @@ The last Dockerfile step runs `verify.sh` (`paddock-ci-verify`): the build fails
 `/etc/paddock-ci-release` lists every version. Jobs test `[ -f /etc/paddock-ci-release ]`; the `setup-rust` action then skips its
 toolchain install.
 
-Pending: the next rebuild (v3) will include shellcheck and DuckDB 2.0; the tag is not bumped until then.
+Pending: the next rebuild (v3) will include shellcheck, DuckDB 2.0 and `jq` (the live oracle of `paddock-dev`'s hook tests runs the old shell hooks, which need it; the test fails when `jq` is missing); the tag is not bumped until then.
 
 ## Building
 

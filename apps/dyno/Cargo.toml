@@ -21,7 +21,7 @@ exclude = ["vendor"]
 [workspace.package]
 edition = "2021"
 license = "MIT OR Apache-2.0"
-rust-version = "1.89"
+rust-version = "1.95"
 repository = "https://dev.decryptology.net/decryp7/dyno"
 version = "1.1.0"
 
@@ -73,5 +73,3 @@ expect_used = "warn"
 # tray-icon with a GUID provider (vendor/PATCHES.md, ADR 0028): Windows keeps each tray icon's place by GUID.
 [patch.crates-io]
 tray-icon = { path = "vendor/tray-icon" }
-# sysinfo with upstream's fix for a null IOKit iterator on macOS (vendor/PATCHES.md): a vanished disk panicked or was UB.
-sysinfo = { path = "vendor/sysinfo" }

@@ -145,7 +145,7 @@ fn an_error_names_a_service_outage_only_while_that_service_is_down() {
 /// and it is used as it is. It used to be rebuilt here on every run: `cargo build -p debrief-store-worker` resolves
 /// features for that one package, unlike the workspace build, so it recompiled part of the dependency graph inside the
 /// test and swapped the binary under the other tests, and on a busy CI runner the test ran past nextest's five-minute
-/// limit. Like the plugins binary (`test_support::ensure_plugins_binary`), it is built only when it is missing (a
+/// limit. It is built only when it is missing (a
 /// `cargo test -p debrief-app` without a workspace build).
 fn built_store_worker() -> std::path::PathBuf {
     let test_exe = std::env::current_exe().unwrap();
@@ -196,7 +196,7 @@ fn the_real_worker_test_uses_the_built_worker_and_builds_one_only_when_it_is_mis
 
 fn process_is_alive(pid: u32) -> bool {
     let p = sysinfo::Pid::from_u32(pid);
-    let mut sys = sysinfo::System::new();
+    let mut sys = sysinfo::System::new().expect("a System");
     sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[p]), true);
     sys.process(p).is_some()
 }
@@ -208,7 +208,7 @@ fn process_is_alive(pid: u32) -> bool {
 )]
 fn kill_process(pid: u32) {
     let p = sysinfo::Pid::from_u32(pid);
-    let mut sys = sysinfo::System::new();
+    let mut sys = sysinfo::System::new().expect("a System");
     sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[p]), true);
     if let Some(process) = sys.process(p) {
         process.kill();

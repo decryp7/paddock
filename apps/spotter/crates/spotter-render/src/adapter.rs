@@ -19,6 +19,7 @@ pub struct ChromiumRenderer {
     memory_cap: Option<u64>,
     browser: Option<Browser>,
     extra_args: Vec<String>,
+    start_limit: Duration,
 }
 
 impl ChromiumRenderer {
@@ -32,6 +33,7 @@ impl ChromiumRenderer {
             memory_cap: Some(2 << 30),
             browser: None,
             extra_args: Vec::new(),
+            start_limit: launch::START_LIMIT,
         }
     }
 
@@ -44,6 +46,14 @@ impl ChromiumRenderer {
     /// Extra browser flags (none by default; tests use this for a root container, see `discover::test_browser_flags`).
     pub fn with_extra_args(mut self, args: Vec<String>) -> Self {
         self.extra_args = args;
+        self
+    }
+
+    /// The guard for a browser start that hangs (default [`launch::START_LIMIT`]). The start ends earlier when the browser is
+    /// ready or has exited; tests on a shared, starved host pass a long guard (ADR 0071). The render's wall-clock cap grows
+    /// with it.
+    pub fn with_start_limit(mut self, limit: Duration) -> Self {
+        self.start_limit = limit;
         self
     }
 
@@ -136,7 +146,8 @@ impl ChromiumRenderer {
         opts.extra_args = self.extra_args.clone();
         opts.memory_cap = self.memory_cap;
         // The watchdog is the backstop behind the page's own deadline.
-        opts.max_lifetime = launch::lifetime_for(timeout);
+        opts.start_limit = self.start_limit;
+        opts.max_lifetime = launch::lifetime_with(self.start_limit, timeout);
         let (url, sel) = (url.to_string(), wait_selector.map(str::to_string));
         tokio::task::spawn_blocking(move || blocking_render(exe, opts, url, sel, timeout))
             .await

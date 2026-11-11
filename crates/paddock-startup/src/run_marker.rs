@@ -53,11 +53,18 @@ pub fn begin(
             Process = process;
             "Previous run did not end cleanly (no clean-exit mark was left): a crash, a power cut, or a stop that was not answered in time and ended in a kill (its 'stopping' line, if any, is just before this run in the log); look for a crash marker or the OS's crash report"
         ),
+        PreviousRun::Unknown => log::warn!(
+            Process = process;
+            "Whether the previous run of this process ended cleanly is not known: the process table could not be read"
+        ),
         PreviousRun::StillRunning => {
             log::info!(Process = process; "Another run of this process is still alive")
         }
     }
-    let started = probe(own_pid).map(|t| t.to_string()).unwrap_or_default();
+    let started = probe(own_pid)
+        .started()
+        .map(|t| t.to_string())
+        .unwrap_or_default();
     if let Err(e) = std::fs::write(&path, format!("{own_pid} {started}\n")) {
         log::warn!(Process = process, Error = e.to_string().as_str(); "The run marker could not be written; the next start cannot tell whether this run ended cleanly");
     }
@@ -79,6 +86,7 @@ impl RunMarker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lifecycle::Look;
 
     /// A marker that cannot be read (here, a folder where the file belongs) is an unreadable one, not a crash of the
     /// start; and one that cannot be removed is reported, not raised.
@@ -97,8 +105,8 @@ mod tests {
         assert!(path.is_dir(), "the folder in the marker's place stays");
     }
 
-    fn probe_none(_: u32) -> Option<u64> {
-        None
+    fn probe_none(_: u32) -> Look {
+        Look::Gone
     }
 
     #[test]
@@ -125,7 +133,7 @@ mod tests {
     fn a_live_process_is_not_a_crash_and_garbage_is() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(marker_path(dir.path(), "tool"), "4242 100\n").unwrap();
-        let alive = |pid: u32| (pid == 4242).then_some(100u64);
+        let alive = |pid: u32| Look::from((pid == 4242).then_some(100u64));
         assert_eq!(
             begin(dir.path(), "tool", 1, &alive).1,
             PreviousRun::StillRunning

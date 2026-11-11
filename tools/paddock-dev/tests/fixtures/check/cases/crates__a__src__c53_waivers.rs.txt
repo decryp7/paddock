@@ -1,0 +1,12 @@
+fn a(h: HANDLE) {
+    // conformance: pid-kill — a handle we own
+    unsafe { TerminateProcess(h, 1) };
+}
+
+fn b(h: HANDLE) {
+    unsafe { TerminateProcess(h, 1) }; // conformance: pid-kill
+}
+
+fn c(h: HANDLE) {
+    unsafe { TerminateProcess(h, 1) }; // conformance: pid-kill — ok
+}

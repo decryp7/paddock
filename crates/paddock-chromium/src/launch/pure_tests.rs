@@ -375,7 +375,7 @@ fn a_live_owner_whose_start_time_reads_a_little_apart_keeps_its_profile() {
     for name in [&near, &far] {
         std::fs::create_dir_all(base.path().join(name)).unwrap();
     }
-    let removed = sweep_profiles_with(base.path(), super::me(), &owner_alive);
+    let removed = sweep_profiles_by_presence(base.path(), &owner_presence);
     // Ended through the handle of this test's own child, before any assert can fail (ER-14).
     other.kill().unwrap();
     other.wait().unwrap();
@@ -393,6 +393,29 @@ fn a_live_owner_whose_start_time_reads_a_little_apart_keeps_its_profile() {
 /// A profile named without its owner's start time is judged by the pid alone.
 #[test]
 fn an_owner_without_a_start_time_is_judged_by_its_pid() {
-    assert!(owner_alive(std::process::id(), None));
-    assert!(!owner_alive(i32::MAX as u32 - 1, None), "no such process");
+    assert!(owner_presence(std::process::id(), None).may_be_alive());
+    assert!(
+        !owner_presence(i32::MAX as u32 - 1, None).may_be_alive(),
+        "no such process"
+    );
+}
+
+/// Review follow-up: the start time a profile's name records must reach the look at its owner, not be dropped on the way.
+#[test]
+fn the_recorded_start_time_reaches_the_look_at_the_owner() {
+    let base = tempfile::tempdir().unwrap();
+    let pid = 999_999u32;
+    let micros = 1_700_000_000_123_456u64;
+    let name = format!("chromium-{pid}-s{micros}-1-1");
+    std::fs::create_dir_all(base.path().join(&name)).unwrap();
+    let expected = Some(StartTime::from_micros(micros));
+    let removed = sweep_profiles_by_presence(base.path(), &|p, started| {
+        if p == pid && started == expected {
+            paddock_proc::Presence::Gone
+        } else {
+            paddock_proc::Presence::Running
+        }
+    });
+    assert_eq!(removed, 1, "the look never saw the recorded start time");
+    assert!(!base.path().join(&name).exists());
 }

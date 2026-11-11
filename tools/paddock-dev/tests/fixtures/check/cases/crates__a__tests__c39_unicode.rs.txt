@@ -1,0 +1,12 @@
+fn a() {
+    let s = "😀 café"; // 😀
+    let c = '😀';
+    let d = 'é';
+    let r = r#"😀"#;
+    let p = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+}
+/* 😀 */ fn b() {
+    let q = '\u{1F600}';
+    let p = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+}
+fn lifetime<'a>(x: &'a str) { let p = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port(); }

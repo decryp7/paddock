@@ -1575,6 +1575,7 @@ dependencies = [
  "debrief-monitor",
  "debrief-plugin-tools",
  "globset",
+ "log",
  "serde",
  "serde_json",
  "sysinfo",
@@ -1667,6 +1668,7 @@ dependencies = [
  "objc2-web-kit",
  "open",
  "paddock-diag",
+ "paddock-proc",
  "semver",
  "serde",
  "serde_json",
@@ -1727,6 +1729,7 @@ dependencies = [
  "chrono",
  "debrief-core",
  "globset",
+ "log",
  "regex",
  "serde",
  "serde_json",
@@ -1889,6 +1892,7 @@ dependencies = [
  "ctrlc",
  "debrief-core",
  "globset",
+ "log",
  "paddock-testkit",
  "serde",
  "serde_json",
@@ -7278,9 +7282,9 @@ dependencies = [
 
 [[package]]
 name = "sysinfo"
-version = "0.39.6"
+version = "0.40.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2071df9448915b71c4fe6d25deaf1c22f12bd234f01540b77312bb8e41361e6"
+checksum = "0e8a3edbe0394ce115f3917a00349dd242be09eb5a091ed509eaf67b55cfb8a8"
 dependencies = [
  "libc",
  "memchr",

@@ -159,7 +159,7 @@ pub fn overall(actions: &[ActionRecord], stopped: bool, errors: bool) -> RunStat
 }
 
 fn host_name() -> String {
-    sysinfo::System::host_name().unwrap_or_else(|| "unknown-host".into())
+    sysinfo::System::host_name().unwrap_or_else(|_| "unknown-host".into())
 }
 
 /// Creates a new, uniquely named run folder.

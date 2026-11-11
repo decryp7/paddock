@@ -12,6 +12,12 @@ Conventional Commits; one semver tag for the whole repo.
 - **Second and third review rounds (same release): one rule, the GitHub Actions runner model.** The SYSTEM service manages only service runners whose folders only administrators can change (`protected::check_runner_folder`: the folder, its ancestors and its direct children). Every request that makes the service read, write or delete in a runner's folder (logs, disk, cleanup, cache, `config.yaml`, update, start, registration) is refused with a fix-it message, and logged, for a runner whose folder a user can change; such a runner is shown blocked, is not started, probed, updated or cleaned, and its log is kept in the service's own folder. The cache trim takes its folder only below the runner's folder, never from `config.yaml`. Deletion never follows a link. The app checks that the pipe is owned by SYSTEM or Administrators before it writes anything on any connection. The pipe's ACL gives interactive users no right to host the pipe (`0x12019b`), clients open at identification level. Every program the service starts for a runner goes through the guard. `PinVersion` and `SkipVersion` need an administrator. An unidentifiable caller changes nothing; every change is logged with the caller's SID (a refused request repeated in a loop is logged once and summed up). "Elevated" needs the group enabled. The forwarder opens its hand-off file and folder without following a link; stale hand-off folders are swept. The runners in a user's folders are kept by a **per-user engine**: the same engine (`pitcrew-service run`) started as the user, with its own data folder and a pipe that admits only that user; the app talks to both engines and shows one list (new runners go by session, `SaveSettings` is split and the service is asked only when its part changed). Also: new runner folders are made protected at creation, the `logs` folder is locked with the data folder, the container engine on `PATH` goes through the program guard, Windows device names are refused as runner names, `pitcrew-service status` checks the pipe's owner, a runner that turns blocked is stopped. **Fail closed:** a service runner's folder is accepted only if the service made it (empty, protected at creation) or adopted it (the shared adopt-a-tree step, in review), recorded in `adopted-folders.json` in the data folder; an upgraded v1.0.1 tree and a hand-made folder stay blocked until adopted (ADR 0004's limit 3). The per-user engine never runs elevated (it refuses an elevated token; an elevated app does not start it and the window says so), its pipe name is random and recorded in its folder, requests are never routed by a guess, and `runners` is locked and owner-checked with `logs` (children that are links or not SYSTEM's or Administrators' are moved aside).
 - ADR 0004 is amended twice (its "authorisation is the ACL" decision is reversed on Windows; the service touches only administrator-only folders), with the known limits.
 
+### `paddock-proc`: `Supervised::exit_status`; Spotter's browser start ends on ready or exit (ADR 0071)
+- New `Supervised::exit_status`: the status of a child that has ended, without taking the child, so the tree is still ended
+  by `kill` or `terminate` afterwards (`wait` forgets the tree).
+- `spotter-render`: the browser start guard is `LaunchOptions::start_limit` (default 20 s); a failed start names the exit
+  status or the pid and the browser's stderr; the real-browser tests wait on the browser being alive (a 120 s guard).
+
 ### Pitwall: no test double or test switch in the shipped build (ADR 0073, rule 73, WP-P)
 - Removes P1 to P6 of ADR 0073's Pitwall survey; the register and the shared crates follow.
 - `pitwall-server` no longer knows `--fake-engine`, `--die-after-ms` or `--ready-when` (it answers `unknown option`, exit 2). The fake OpenAI-compatible engine is the `pitwall-fake-engine` bin of the same package, built only with the `test-support` feature, which only the package's self dev-dependency enables; the `fake_engine` module is behind `cfg(any(test, feature = "test-support"))`. The tests start it through `CARGO_BIN_EXE_pitwall-fake-engine`, and the host-cleanup process pattern follows the new name.
@@ -34,8 +40,15 @@ Conventional Commits; one semver tag for the whole repo.
   mains that reach `paddock-proc` and do not call it first in `main` yet (`ADOPTING`, which only shrinks; `[[bin]] path`
   included, `#![no_main]` fuzz targets skipped; an `async` or `#[tokio::main]` main is refused: call it from a plain
   `fn main`). The guardian never removes the home folder, its ancestors or a path of two components or fewer.
-- New `Supervised::spawn_owning_folder(cmd, cap, folder)`; `ProcessId::may_be_alive` and `StartTime::is_near` (start times
-  within the clock's slack, for decisions that err towards "still there"; kills still compare exactly).
+- New `Supervised::spawn_owning_folder(cmd, cap, folder)`; `ProcessId::may_be_alive` (false only when the OS proved the
+  process gone: **`Unknown` counts as alive**) and `StartTime::is_near` (start times within the clock's slack, for decisions
+  that err towards "still there"; kills still compare exactly).
+- `paddock-proc`: the three-valued look at a process. New `Presence` (`Running`, `Gone`, `Unknown` when the process table or
+  the holder's start time cannot be read; `Presence::may_be_alive` counts `Unknown` as alive), `ProcessId::presence`,
+  `ProcessId::presence_near` (start time compared within the clock's slack) and `ProcessId::recorded_presence(pid,
+  written_ms)` (the holder must have started no later than the record). Code that deletes something on "gone" (a profile
+  folder, a discovery or lock file) uses these, so an unreadable process table removes nothing; `is_alive` keeps `Unknown`
+  as not running, for code that ends or waits for a process (ADR 0081).
 - `paddock-chromium`: throwaway profiles go with an orphaned browser, are named `chromium-<pid>-s<start µs>-...`, and each
   throwaway launch sweeps profiles whose owner is gone (by pid and start time, within the slack).
 
