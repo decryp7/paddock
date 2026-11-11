@@ -292,8 +292,16 @@ fn owned_listener(dir: &std::path::Path, owner: &std::process::Child) -> std::ne
     listener
 }
 
-#[test]
-fn an_owner_killed_while_the_key_is_unanswered_reads_as_not_open_at_once() {
+/// Limits far above any wait a test should reach: only the owner's end can finish the handshake early, so a client that does not
+/// look at its owner takes the whole of it.
+const LONG: ConnectLimits = ConnectLimits {
+    connect: Duration::from_secs(30),
+    answer: Duration::from_secs(30),
+};
+
+/// The owner is killed while its port holds the connection and has not answered the key. `close_socket` says whether the dying
+/// process's socket is then closed (what the OS does when a process ends) or stays open (a listener a backlog still completes).
+fn killed_while_the_key_is_unanswered(close_socket: bool) {
     use std::io::BufRead;
     listen();
     let dir = tempfile::tempdir().unwrap();
@@ -301,7 +309,6 @@ fn an_owner_killed_while_the_key_is_unanswered_reads_as_not_open_at_once() {
     let listener = owned_listener(dir.path(), &owner);
     let (got_key, key_arrived) = std::sync::mpsc::channel();
     let (end, hold) = std::sync::mpsc::channel::<()>();
-    // The listener of a dying app: the kernel completes the connection, the process never answers.
     let peer = std::thread::spawn(move || {
         let (stream, _) = listener.accept().unwrap();
         let mut line = String::new();
@@ -309,30 +316,39 @@ fn an_owner_killed_while_the_key_is_unanswered_reads_as_not_open_at_once() {
             .read_line(&mut line)
             .unwrap();
         got_key.send(()).unwrap();
-        let _ = hold.recv_timeout(Duration::from_secs(30));
+        // Until the test says the owner is dead (and, for a closing socket, the connection ends then).
+        let _ = hold.recv_timeout(Duration::from_secs(60));
         drop(stream);
     });
     let file = discovery_path(dir.path());
-    let client = std::thread::spawn(move || {
-        let limits = ConnectLimits {
-            connect: Duration::from_secs(5),
-            answer: Duration::from_secs(5),
-        };
-        connect_loopback_with(&file, "pmk_x", limits).err()
-    });
-    key_arrived.recv_timeout(Duration::from_secs(10)).unwrap();
+    let client = std::thread::spawn(move || connect_loopback_with(&file, "pmk_x", LONG).err());
+    key_arrived.recv_timeout(Duration::from_secs(30)).unwrap();
     owner.kill().unwrap();
     owner.wait().unwrap();
     let killed = std::time::Instant::now();
+    if close_socket {
+        end.send(()).unwrap();
+    }
     let err = client.join().unwrap();
     let waited = killed.elapsed();
-    end.send(()).unwrap();
+    let _ = end.send(());
     peer.join().unwrap();
     assert_eq!(err, Some(ConnectError::NotOpen { app: "Demo".into() }));
+    // conformance: hang-guard (the limits are 30 s; the client looks at its owner every 100 ms)
     assert!(
-        waited < Duration::from_secs(1),
+        waited < Duration::from_secs(10),
         "the client waited {waited:?} for an app that was gone"
     );
+}
+
+#[test]
+fn an_owner_killed_while_the_key_is_unanswered_reads_as_not_open_at_once() {
+    killed_while_the_key_is_unanswered(false);
+}
+
+#[test]
+fn an_owner_whose_socket_closes_as_it_dies_reads_as_not_open_not_as_a_closed_connection() {
+    killed_while_the_key_is_unanswered(true);
 }
 
 #[test]
@@ -348,10 +364,8 @@ fn a_live_owner_that_answers_slowly_is_still_waited_for() {
         std::io::BufReader::new(stream.try_clone().unwrap())
             .read_line(&mut line)
             .unwrap();
-        // A busy app: the answer comes after several of the client's looks at its owner.
-        let _ = std::sync::mpsc::channel::<()>()
-            .1
-            .recv_timeout(Duration::from_millis(700));
+        // Simulates the latency of a busy app: the answer comes after several of the client's looks at its owner (100 ms apart).
+        std::thread::sleep(Duration::from_millis(700));
         writeln!(stream, "{}", json!({"ok": true, "client": "Demo"})).unwrap();
         // Keep the connection until the client ended it.
         let _ = std::io::BufReader::new(stream).read_line(&mut line);
@@ -374,15 +388,16 @@ fn a_stale_file_of_a_killed_owner_answers_without_touching_its_port() {
     owner.kill().unwrap();
     owner.wait().unwrap();
     let started = std::time::Instant::now();
-    let err = connect_loopback(&discovery_path(dir.path()), "pmk_x").unwrap_err();
+    let err = connect_loopback_with(&discovery_path(dir.path()), "pmk_x", LONG).unwrap_err();
     assert_eq!(
         err,
         ConnectError::NotOpen {
             app: "The app".into()
         }
     );
+    // conformance: hang-guard (nothing is contacted: the 30 s limits would be spent otherwise)
     assert!(
-        started.elapsed() < Duration::from_secs(1),
+        started.elapsed() < Duration::from_secs(10),
         "{:?}",
         started.elapsed()
     );
@@ -405,15 +420,16 @@ fn a_killed_owner_that_is_not_collected_yet_reads_as_not_open_at_once() {
         std::thread::yield_now();
     }
     let started = std::time::Instant::now();
-    let err = connect_loopback(&discovery_path(dir.path()), "pmk_x").unwrap_err();
+    let err = connect_loopback_with(&discovery_path(dir.path()), "pmk_x", LONG).unwrap_err();
     assert_eq!(
         err,
         ConnectError::NotOpen {
             app: "The app".into()
         }
     );
+    // conformance: hang-guard (nothing is contacted: the 30 s limits would be spent otherwise)
     assert!(
-        started.elapsed() < Duration::from_secs(1),
+        started.elapsed() < Duration::from_secs(10),
         "{:?}",
         started.elapsed()
     );

@@ -561,8 +561,8 @@ impl McpControl {
         (self.emit)(&McpEvent::Audit { count: 0 });
     }
 
-    /// The server, for tests of the adapter.
-    #[cfg(test)]
+    /// The server, for tests of the adapter (only the `tauri` adapter's tests use it).
+    #[cfg(all(test, feature = "tauri"))]
     pub(crate) fn server_for_tests(&self) -> &Server {
         &self.server
     }

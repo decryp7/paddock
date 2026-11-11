@@ -10,6 +10,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// The longest answer to the key line that is read.
@@ -198,7 +199,8 @@ impl From<std::io::Error> for Waited {
 }
 
 /// Connects to the app's port in short tries, looking at its process between them, for at most `limit` (a live but slow app is
-/// still waited for).
+/// still waited for). Windows retries a refused loopback connection for about 2 s, so a dead listener can cost that long per try
+/// there; the look between tries is what ends the wait when the owner is gone.
 fn connect_watching(hint: &Discovery, limit: Duration) -> Result<TcpStream, Waited> {
     let addr = ([127, 0, 0, 1], hint.port).into();
     let end = Instant::now() + limit;
@@ -223,8 +225,10 @@ fn connect_watching(hint: &Discovery, limit: Duration) -> Result<TcpStream, Wait
     }
 }
 
-/// Reads the answer line into `into` (at most [`MAX_ANSWER`] bytes) in short reads, looking at the app's process between them,
-/// for at most `limit`.
+/// Reads the answer line into `into` (at most [`MAX_ANSWER`] bytes) with one blocking read bounded by `limit`, while a watcher
+/// thread looks at the app's process every [`OWNER_LOOK`] and, when it is gone, ends the connection so the read returns at once.
+/// One read, not slices of a read timeout: Windows documents the socket as indeterminate after a receive timeout. A read that
+/// ends in EOF or an error because the owner died (the OS closes its sockets) is the app being gone, not a closed connection.
 fn read_answer(
     stream: &SharedStream,
     reader: &mut BufReader<SharedStream>,
@@ -232,31 +236,32 @@ fn read_answer(
     hint: &Discovery,
     limit: Duration,
 ) -> Result<(), Waited> {
-    let end = Instant::now() + limit;
-    stream.0.set_read_timeout(Some(OWNER_LOOK))?;
-    loop {
-        let room = MAX_ANSWER.saturating_sub(into.len() as u64);
-        if room == 0 {
-            return Ok(());
-        }
-        // `read_until` keeps what it read when a read times out, so no byte of a slow line is lost.
-        match reader.by_ref().take(room).read_until(b'\n', into) {
-            Ok(_) => return Ok(()),
-            Err(e)
-                if e.kind() == std::io::ErrorKind::TimedOut
-                    || e.kind() == std::io::ErrorKind::WouldBlock =>
+    stream.0.set_read_timeout(Some(limit))?;
+    let gone = Arc::new(AtomicBool::new(false));
+    let (stop, tick) = std::sync::mpsc::channel::<()>();
+    let watcher = {
+        let (stream, hint, gone) = (stream.clone(), hint.clone(), gone.clone());
+        std::thread::spawn(move || {
+            // The sender is dropped when the read is over: that wakes the tick and ends the watcher.
+            while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) =
+                tick.recv_timeout(OWNER_LOOK)
             {
                 if !hint.writer_alive() {
-                    return Err(Waited::OwnerGone);
-                }
-                if Instant::now() >= end {
-                    return Err(Waited::Failed(e));
+                    gone.store(true, Ordering::SeqCst);
+                    stream.shutdown(Shutdown::Both);
+                    break;
                 }
             }
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(e) => return Err(Waited::Failed(e)),
-        }
+        })
+    };
+    let read = reader.by_ref().take(MAX_ANSWER).read_until(b'\n', into);
+    drop(stop);
+    let _ = watcher.join();
+    let ended = !matches!(read, Ok(n) if n > 0);
+    if gone.load(Ordering::SeqCst) || (ended && !hint.writer_alive()) {
+        return Err(Waited::OwnerGone);
     }
+    read.map(|_| ()).map_err(Waited::Failed)
 }
 
 /// Connects with the default limits; see [`connect_loopback_with`].
@@ -320,6 +325,10 @@ pub fn connect_loopback_with(
     })()
     .map_err(|e| match e {
         Waited::OwnerGone => not_open("its process ended before it answered the key"),
+        // A write to a socket the dying owner closed fails like any other: look at the owner before blaming the app's answer.
+        Waited::Failed(_) if !hint.writer_alive() => {
+            not_open("its process ended while the key was sent")
+        }
         Waited::Failed(e) => {
             log::warn!("paddock_mcp client: {app} gave no answer to the key: {e}");
             ConnectError::NoAnswer {
