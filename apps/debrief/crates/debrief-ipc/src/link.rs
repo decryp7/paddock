@@ -10,7 +10,8 @@ use crate::frame::{self, Frame, FrameError, ProtocolVersion, TOKEN_BYTES, VERSIO
 use crate::peer::{Duplex, Handler, Peer, PeerOptions};
 use crate::IpcError;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tokio::time::Instant;
 
 /// How long either side waits for the other's handshake frame once connected.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -376,6 +377,40 @@ mod platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    /// A child that is alive and not yet connected is waited for under the default window until it ends or connects
+    /// (ADR 0071; CI 7919 and 7925, "the store worker did not connect within 15 s": the first run of a fresh binary on a busy
+    /// macOS host is held for far longer). Time here is tokio's paused clock, which the 25 ms poll advances on its own: 40 s pass
+    /// with no sleep, and what ends the wait is the child's exit, with its own message, not the window.
+    #[cfg(unix)]
+    #[tokio::test(start_paused = true)]
+    async fn a_child_that_starts_late_is_waited_for_until_it_exits_or_connects() {
+        let listener = Listener::create("debrief-test-late", Access::Owner).unwrap();
+        let window = crate::process::SpawnSpec::new("x", "the late child").connect_window;
+        let looked = AtomicU32::new(0);
+        // 25 ms per look: 1600 looks are 40 s, far over the old 15 s window and well inside the new one.
+        let ends =
+            || (looked.fetch_add(1, Ordering::Relaxed) >= 1600).then(|| "the late child exited while starting (status 7)".to_string());
+        let started = Instant::now();
+        let r = listener
+            .accept(
+                Some(1),
+                window,
+                ends,
+                Arc::new(crate::peer::NoCalls),
+                PeerOptions::new("the late child"),
+            )
+            .await;
+        let Err(IpcError::Died(why)) = r else {
+            panic!("expected the child's exit to end the wait")
+        };
+        assert!(
+            why.contains("exited while starting"),
+            "ended by the window instead of the child's exit: {why}"
+        );
+        assert!(started.elapsed() >= Duration::from_secs(40), "{:?}", started.elapsed());
+    }
 
     #[test]
     fn tokens_roundtrip_through_hex_and_compare() {
