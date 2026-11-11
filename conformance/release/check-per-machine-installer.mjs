@@ -9,6 +9,7 @@
 //        [--hashes crates/paddock-setup/released-hashes.json] [--root <build folder to look for in the program>]... [--tag-prefix <app>-v]
 //        [--must-contain <file name>]...   (files of the app's own the installer must carry, by base name)
 //        (the roots also come from PADDOCK_BUILD_FOLDER, PADDOCK_WORKSPACE, GITHUB_WORKSPACE and the home folder)
+//        (PADDOCK_EXPECT_UPDATE_KEY, set on a tag run: the program's self-test key_fingerprint must be this updater key's id)
 //
 // Needs 7-Zip (it opens NSIS installers): on PATH or in C:\\Program Files\\7-Zip; without it the gate fails, it never passes unchecked.
 import { spawnSync } from 'node:child_process';
@@ -17,6 +18,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isMain } from '../src/util/is-main.mjs';
+import { parsePublicKey } from './updater-key-check.mjs';
 
 /** Whole-installer checks are on bytes: the manifest is stored as plain XML. */
 export function hasAdministratorManifest(bytes) {
@@ -182,13 +184,18 @@ export function checkNsisVersion({ bytes, name }) {
 }
 
 /** What the embedded program's `self-test` must say: the app's identifier, and `stop_all=present` (a build without the stopper
- * would fail `stop-all` at install time). */
-export function checkSelfTest({ stdout, status, identifier, name }) {
+ * would fail `stop-all` at install time). With `keyId` (a tag run: the minisign key id of the updater public key the app
+ * carries, ADR 0085 D7), its `key_fingerprint` must be that key, so the program verifies updates with the app's own key. */
+export function checkSelfTest({ stdout, status, identifier, name, keyId }) {
   const out = typeof stdout === 'string' ? stdout : '';
   if (status !== 0) return [`${name}: paddock-setup.exe self-test did not run or failed (exit ${status ?? 'none'})`];
   const f = [];
   if (!out.includes(identifier)) f.push(`${name}: paddock-setup.exe self-test does not name ${identifier} (output: ${out.trim()})`);
   if (!/^stop_all=present\s*$/m.test(out)) f.push(`${name}: paddock-setup.exe self-test does not say stop_all=present: this build cannot stop other sessions' programs`);
+  if (keyId) {
+    const got = /^key_fingerprint=(\S+)\s*$/m.exec(out)?.[1] ?? 'missing';
+    if (got !== keyId) f.push(`${name}: paddock-setup.exe verifies updates with key ${got}, but the app's updater key is ${keyId}: it would refuse every update. Stage it with the same TAURI_UPDATER_PUBKEY (scripts/stage-paddock-setup.mjs)`);
+  }
   return f;
 }
 
@@ -302,6 +309,16 @@ function main(argv) {
     console.error(`::error::${sevenZip.error}`);
     return 1;
   }
+  // A tag run names the updater public key the app carries (PADDOCK_EXPECT_UPDATE_KEY): the program inside must verify with it.
+  let expectKeyId;
+  if (process.env.PADDOCK_EXPECT_UPDATE_KEY) {
+    try {
+      expectKeyId = parsePublicKey(process.env.PADDOCK_EXPECT_UPDATE_KEY.replace(/\s+/g, '')).id;
+    } catch (e) {
+      console.error(`::error::PADDOCK_EXPECT_UPDATE_KEY is not a minisign public key (${e.message}). Next step: pass TAURI_UPDATER_PUBKEY.`);
+      return 1;
+    }
+  }
   let failed = false;
   for (const path of installers) {
     const name = path.split(/[\\/]/).pop();
@@ -328,7 +345,7 @@ function main(argv) {
         // Running it needs Windows. Its output is read through pipes: a GUI-subsystem program still writes to inherited handles.
         if (process.platform === 'win32' && ex.status === 0) {
           const run = spawnSync(exe, ['self-test'], { encoding: 'utf8', timeout: 60000 });
-          problems.push(...checkSelfTest({ stdout: run.stdout, status: run.status, identifier: conf.identifier, name }));
+          problems.push(...checkSelfTest({ stdout: run.stdout, status: run.status, identifier: conf.identifier, name, keyId: expectKeyId }));
         }
       } finally {
         rmSync(tmp, { recursive: true, force: true });

@@ -1888,3 +1888,19 @@ and `paddock_testkit::guarded` for a slow job judged on units finished (the live
 of ADR 0071 section 1 is NOT built yet: `paddock_proc::StartWatch` is the judge it is to drive, and a second wait beside it
 would be a copy (rule 55). Still open: ADR 0071 row 13 (the 20-40 s receives and deadlines in the real-browser tests of
 paddock-chromium, Spotter and Debrief's chromium-driver; only the first-run warm-up is done) and rows 1, 5-12 and 14-15.
+
+## Every dispatch handed the updater key to npm ci, and bundler tools came unpinned (2026-11-12)
+
+ADR 0085 found that `tauri-bundle.sh:55` ran `npm ci` with `TAURI_SIGNING_PRIVATE_KEY` set on every rule 54 dispatch, so
+every install script of every branch could read the key that signs updates (not rotated: user, 2026-11-10), and that Tauri
+fetched linuxdeploy, AppRun and NSIS at bundle time into a kept per-user folder. Rule 78: the key reaches `tauri build` only
+and the real key only on a tag (other runs sign with a throw-away key made in the job; `conformance/ci/updater-key.sh`), and
+the bundler tools come from pinned URLs and SHA-256 values into `<build folder>/.tauri` (`conformance/ci/tauri-tools.mjs`,
+`useLocalToolsDir`). A secret given to a whole step reaches every program the step starts; hand it to the one command that
+needs it.
+
+A review of that fix (2026-11-12) found the key moved into `env`'s command line (`env K=V npx tauri build`), where the process
+list shows it to every user of the machine, while the app's `beforeBuildCommand` still ran inside `tauri build` with it, and a
+Debrief Windows tag still reused a branch-written `node_modules`. Hand a secret over by `export` and `exec`, never as an
+argument; check what a tool starts on its own (a build hook) before calling a step "the one command"; and list every kept
+input a tag reads, not only the one that was found.
