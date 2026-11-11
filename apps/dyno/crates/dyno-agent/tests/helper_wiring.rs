@@ -134,7 +134,8 @@ impl<'ast> Visit<'ast> for Body<'_> {
         if let syn::Expr::Path(p) = &*e.func {
             let ids = path_idents(&p.path);
             // The last two segments: `crate::helper_first::HelperFirst::new(..)` hands a reading to the seam like `HelperFirst::new(..)`.
-            if ids.len() >= 2 && matches!(ids[ids.len() - 2].as_str(), "Box" | "Arc" | "Rc" | "HelperFirst") && ids[ids.len() - 1] == "new" {
+            if ids.len() >= 2 && matches!(ids[ids.len() - 2].as_str(), "Box" | "Arc" | "Rc" | "HelperFirst") && ids[ids.len() - 1] == "new"
+            {
                 let mut names = TypeNames(BTreeSet::new());
                 for a in &e.args {
                     names.visit_expr(a);
@@ -612,7 +613,11 @@ fn a_trait_impl_counts_only_when_the_composition_boxes_the_type() {
 fn a_reading_handed_to_the_seam_by_a_full_path_is_composed() {
     let defs = "trait HelperReading { fn via_helper(&self); } struct R; impl HelperReading for R { fn via_helper(&self) { let _ = HelperRequest::LogTail(1); } }
         struct Seam; impl Seam { fn read(&self, r: &dyn HelperReading) { r.via_helper(); } }";
-    for call in ["HelperFirst::new(R, ())", "crate::helper_first::HelperFirst::new(R, ())", "std::sync::Arc::new(R)"] {
+    for call in [
+        "HelperFirst::new(R, ())",
+        "crate::helper_first::HelperFirst::new(R, ())",
+        "std::sync::Arc::new(R)",
+    ] {
         let fns = composed(defs, &format!("fn compose() {{ let s = {call}; Seam.read(&s); }}"));
         assert_eq!(wired_kinds(&fns).get("LogTail"), Some(&true), "{call}");
     }
@@ -622,10 +627,17 @@ fn a_reading_handed_to_the_seam_by_a_full_path_is_composed() {
 fn a_reading_bound_to_a_local_before_it_is_handed_to_the_seam_is_composed() {
     let defs = "trait HelperReading { fn via_helper(&self); } struct R { n: u8 } impl HelperReading for R { fn via_helper(&self) { let _ = HelperRequest::FileHolders; } }
         struct Seam; impl Seam { fn read(&self, r: &dyn HelperReading) { r.via_helper(); } }";
-    let fns = composed(defs, "fn compose() { let reading = R { n: 0 }; let s = HelperFirst::new(reading, ()); Seam.read(&s); }");
+    let fns = composed(
+        defs,
+        "fn compose() { let reading = R { n: 0 }; let s = HelperFirst::new(reading, ()); Seam.read(&s); }",
+    );
     assert_eq!(wired_kinds(&fns).get("FileHolders"), Some(&true));
     let other = composed(defs, "fn compose() { let reading = R { n: 0 }; let s = Seam; s.read(&reading); }");
-    assert_eq!(wired_kinds(&other).get("FileHolders"), Some(&false), "a local that is not handed to the seam is not composed");
+    assert_eq!(
+        wired_kinds(&other).get("FileHolders"),
+        Some(&false),
+        "a local that is not handed to the seam is not composed"
+    );
 }
 
 #[test]
