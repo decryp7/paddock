@@ -426,6 +426,20 @@ impl ReadyGate {
     }
 }
 
+/// The request kinds that are not readings: the helper's own state and actions, each sent by the code that owns the action, so no
+/// `HelperReading` declares them. `tests/helper_wiring.rs` gives each its reason and checks this list is the same set.
+#[doc(hidden)]
+pub const NOT_A_READING_KINDS: [RequestKind; 8] = [
+    RequestKind::Info,
+    RequestKind::Audit,
+    RequestKind::InstallTool,
+    RequestKind::Uninstall,
+    RequestKind::ScheduleWake,
+    RequestKind::CancelWake,
+    RequestKind::ListWakes,
+    RequestKind::Build,
+];
+
 /// One reading the helper can give better than the agent.
 pub trait HelperReading: Send {
     /// The domain value: the same type from both paths.

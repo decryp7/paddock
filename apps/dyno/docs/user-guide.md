@@ -262,7 +262,7 @@ publisher because the Windows build is not signed; that is expected. The helper 
 
 What it adds: every account's processes in detail; on Windows, per-program network traffic, disk health (SMART) and what keeps
 the computer awake; on macOS, login items and background tasks, the firewall (pf) rules, and temperatures, fan speeds and CPU energy; on
-Linux, the program that holds a socket or a file, the firewall (nft) rules, and memory modules. Who sees what: the account that turned it on and administrators see everything; any other
+Linux, the program that holds a socket or a file, the firewall (nft) rules, disk health (SMART) and memory modules. Who sees what: the account that turned it on and administrators see everything; any other
 account sees its own and the system's programs, and the rest as one **Other users** total (or not at all), never another
 person's program folder. Every change request is recorded in the helper's audit log, which the card shows. The helper's log never
 holds file contents or command lines.

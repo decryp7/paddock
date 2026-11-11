@@ -26,18 +26,10 @@ pub struct SmartWear {
 }
 
 impl SmartWear {
-    /// The reading with `local` as the agent's own reader.
-    pub fn new(local: Box<dyn DiskWearSource>) -> SmartWear {
-        SmartWear {
-            local,
-            host: dyno_platform::hardware::this_host(),
-        }
-    }
-
-    /// Reads as if on `host` (tests).
-    pub fn with_host(mut self, host: HelperHost) -> SmartWear {
-        self.host = host;
-        self
+    /// The reading for `host`, with `local` as the agent's own reader. The host is the one the composition builds for, never a
+    /// default taken from the machine the code runs on.
+    pub fn new(local: Box<dyn DiskWearSource>, host: HelperHost) -> SmartWear {
+        SmartWear { local, host }
     }
 }
 
@@ -51,7 +43,7 @@ pub fn helper_first_wear_on(
     port: Box<dyn crate::helper_first::HelperPort>,
     local: Box<dyn DiskWearSource>,
 ) -> HelperFirstWear {
-    HelperFirst::new(SmartWear::new(local).with_host(host), port).with_fallback(READ_LOCALLY_WHEN_HELPER_OFF)
+    HelperFirst::new(SmartWear::new(local, host), port).with_fallback(READ_LOCALLY_WHEN_HELPER_OFF)
 }
 
 impl HelperReading for SmartWear {

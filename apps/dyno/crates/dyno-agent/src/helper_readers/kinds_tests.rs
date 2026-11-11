@@ -5,7 +5,7 @@
 
 use crate::diagnostics::HelperLog;
 use crate::firewall::HelperFirewall;
-use crate::helper_first::{HelperCalls, HelperReading};
+use crate::helper_first::{HelperCalls, HelperReading, NOT_A_READING_KINDS};
 use crate::helper_link::CallError;
 use crate::helper_readers::counters::MacCounters;
 use crate::helper_readers::extras::WakeRequests;
@@ -105,16 +105,18 @@ fn asked<R: HelperReading>(name: &str, reading: R) -> (String, Vec<RequestKind>,
     (name.to_string(), asked, R::KINDS)
 }
 
-#[test]
-fn every_reading_asks_only_for_the_kinds_it_declares_and_asks_for_at_least_one() {
+type Row = (String, Vec<RequestKind>, &'static [RequestKind]);
+
+/// One row per `HelperReading` the agent has.
+fn rows() -> Vec<Row> {
     let memory = |t| MemoryLayout::TotalOnly {
         total: t,
         reason: Unavailable::failed("x"),
     };
-    let rows = [
+    vec![
         asked("HelperLog", HelperLog),
         asked("HelperFirewall", HelperFirewall::new(RuleSource::Pf)),
-        asked("SmartWear", SmartWear::new(Box::new(NoWear))),
+        asked("SmartWear", SmartWear::new(Box::new(NoWear), HelperHost::Linux)),
         asked("LoginItems", LoginItems),
         asked("WakeRequests", WakeRequests::new(Box::new(|| Ok(vec![])), |_| String::new())),
         asked("MemoryModules", MemoryModules::new(HelperHost::Linux, Box::new(memory))),
@@ -124,7 +126,37 @@ fn every_reading_asks_only_for_the_kinds_it_declares_and_asks_for_at_least_one()
         asked("WolModes", WolModes::for_card(IfName::parse("eth0").unwrap())),
         asked("MacCounters", MacCounters { active: true }),
         asked("ProgramTraffic", ProgramTraffic::new(Box::new(dyno_platform::fake::Fake::new()))),
-    ];
+    ]
+}
+
+/// The request kinds that are readings but that no row of `rows` declares: a reading added without a row here would never be held
+/// to what its `via_helper` sends.
+fn kinds_without_a_row(rows: &[Row]) -> Vec<RequestKind> {
+    RequestKind::ALL
+        .into_iter()
+        .filter(|k| !NOT_A_READING_KINDS.contains(k) && !rows.iter().any(|(_, _, declared)| declared.contains(k)))
+        .collect()
+}
+
+#[test]
+fn every_reading_kind_has_a_row_here() {
+    let missing = kinds_without_a_row(&rows());
+    assert!(
+        missing.is_empty(),
+        "{missing:?} are request kinds that are readings (not in NOT_A_READING_KINDS) but no row of rows() declares them; add the HelperReading \
+         to rows(), or list the kind in helper_first::NOT_A_READING_KINDS if it is not a reading"
+    );
+}
+
+#[test]
+fn a_reading_missing_from_the_rows_is_named() {
+    let without_wear: Vec<Row> = rows().into_iter().filter(|(name, _, _)| name != "SmartWear").collect();
+    assert_eq!(kinds_without_a_row(&without_wear), vec![RequestKind::Smart]);
+}
+
+#[test]
+fn every_reading_asks_only_for_the_kinds_it_declares_and_asks_for_at_least_one() {
+    let rows = rows();
     let mut problems = Vec::new();
     for (name, asked, declared) in &rows {
         if asked.is_empty() {

@@ -202,17 +202,6 @@ impl Inner {
 }
 
 impl FirewallCentre {
-    /// The readers of this OS (the host the program was built for).
-    pub fn for_this_os(clock: Arc<dyn paddock_jobs::time::Clock>) -> FirewallCentre {
-        #[cfg(windows)]
-        let host = HelperHost::Windows;
-        #[cfg(target_os = "macos")]
-        let host = HelperHost::Macos;
-        #[cfg(not(any(windows, target_os = "macos")))]
-        let host = HelperHost::Linux;
-        FirewallCentre::for_host(host, clock)
-    }
-
     /// The readers for `host`. The helper's sources (`pf`, `nft`) are chosen by `host`, not by what this program was built for, so
     /// a test agent for another system wires what that system's agent would; the readers that run on this computer exist only
     /// for the host that is this computer's. The sources only the helper reads say it is off until

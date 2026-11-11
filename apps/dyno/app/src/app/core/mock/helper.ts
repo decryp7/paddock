@@ -22,7 +22,7 @@ function prompt(os: MockOs, verb: string): string {
 const READINGS: Record<MockOs, string[]> = {
   macos: ['Every process of every account', 'Login items and background tasks', 'Firewall (pf) rules', 'Temperature and energy readings'],
   windows: ['Every process of every account', 'Per-program network traffic', 'Disk health', 'What is keeping the computer awake'],
-  linux: ['Every process of every account', 'Which program owns each socket and file', 'Firewall (nft) rules', 'Memory modules'],
+  linux: ['Every process of every account', 'Which program owns each socket and file', 'Firewall (nft) rules', 'Disk health', 'Memory modules'],
 };
 
 /** The sentences the engine's `assess` gives, so the card reads the same against the mock. */

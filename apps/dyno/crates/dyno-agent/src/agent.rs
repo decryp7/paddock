@@ -851,7 +851,7 @@ impl Shared {
             wake: (Mutex::new(false), Condvar::new()),
             next_conn: AtomicU64::new(1),
         });
-        // What keeps Windows awake is read helper first.
+        // What the helper reads for the agent (wake requests on Windows, the firewall, login items on macOS) is bound here.
         if helper_first {
             // Only Windows asks the helper what keeps it awake (`powercfg /requests`); the other systems read it themselves.
             if host == dyno_core::helper::HelperHost::Windows {

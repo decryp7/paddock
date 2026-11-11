@@ -14,7 +14,7 @@
 //!
 //! The user guide lists the advertised readings between `<!-- helper-readings:start -->` and `<!-- helper-readings:end -->`.
 
-use dyno_agent::helper_first::{wired_kinds_while, HelperReading};
+use dyno_agent::helper_first::{wired_kinds_while, HelperReading, NOT_A_READING_KINDS};
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
 use dyno_core::helper::HelperHost;
@@ -62,10 +62,6 @@ fn wired_on(host: HelperHost) -> HashSet<RequestKind> {
 /// fails the check, and an entry that is wired nowhere unadvertised is stale.
 const UNLISTED: &[(RequestKind, &str)] = &[
     (
-        RequestKind::Smart,
-        "Linux: the agent's wear forecast asks the helper for SMART (the helper applies on every system but macOS), while the card lists disk health for Windows only",
-    ),
-    (
         RequestKind::LogTail,
         "the problem report's copy of the helper's own log, not a reading on the card (diagnostics::HelperLog)",
     ),
@@ -102,6 +98,16 @@ const NOT_A_READING: &[(RequestKind, &str)] = &[
         "the helper's build id, to tell a stale helper from this build (helper_centre)",
     ),
 ];
+
+#[test]
+fn not_a_reading_is_the_set_the_unit_tests_hold_readings_against() {
+    let here: BTreeSet<String> = NOT_A_READING.iter().map(|(k, _)| format!("{k:?}")).collect();
+    let shared: BTreeSet<String> = NOT_A_READING_KINDS.iter().map(|k| format!("{k:?}")).collect();
+    assert_eq!(
+        here, shared,
+        "NOT_A_READING and dyno_agent::helper_first::NOT_A_READING_KINDS must list the same kinds"
+    );
+}
 
 fn advertised_on(host: HelperHost) -> HashSet<RequestKind> {
     readings(host).iter().flat_map(|a| a.kinds.iter().copied()).collect()
@@ -175,6 +181,12 @@ fn kind_problems(wired_any: &HashSet<RequestKind>, entries: &[Unwired], today: i
         }
     }
     for e in entries {
+        if !RequestKind::ALL.iter().any(|k| format!("{k:?}") == e.kind) {
+            out.push(format!(
+                "wiring.toml: {}: names no request kind (the names are those of RequestKind::ALL); fix the spelling or delete the entry",
+                e.kind
+            ));
+        }
         if let Some(p) = until_problem(&e.until, today) {
             out.push(format!(
                 "wiring.toml: {}: {p}; wire it or move the date with a Wiring-date trailer",
@@ -244,6 +256,12 @@ fn the_kind_rules_name_each_way_a_kind_can_be_wrong() {
     let wired_all: HashSet<RequestKind> = all_but(RequestKind::Info);
     let p = kind_problems(&wired_all, &[unwired("LogTail", "2026-12-01")], today);
     assert!(p.iter().any(|m| m.starts_with("LogTail: wired or advertised, but")), "{p:?}");
+    // An entry whose kind matches no request kind is a typo that would otherwise sit there unseen.
+    let p = kind_problems(&wired_all, &[unwired("LogTale", "2026-12-01")], today);
+    assert!(
+        p.iter().any(|m| m.starts_with("wiring.toml: LogTale: names no request kind")),
+        "{p:?}"
+    );
     // A NOT_A_READING kind that is also declared is claimed twice.
     let p = kind_problems(&wired_all, &[unwired("Info", "2026-12-01")], today);
     assert!(p.iter().any(|m| m.starts_with("Info: claimed in more than one place")), "{p:?}");
@@ -266,12 +284,12 @@ fn the_check_names_each_way_the_two_sides_can_differ() {
         "{p:?}"
     );
     let mut extra = advertised;
-    extra.insert(RequestKind::Smart);
+    extra.insert(RequestKind::Traffic);
     let p = problems(host, &extra, &[]);
     assert_eq!(p.len(), 1, "{p:?}");
-    assert!(p[0].contains("Smart is wired but not advertised"), "{p:?}");
+    assert!(p[0].contains("Traffic is wired but not advertised"), "{p:?}");
     assert!(
-        problems(host, &extra, &[(RequestKind::Smart, "x")]).is_empty(),
+        problems(host, &extra, &[(RequestKind::Traffic, "x")]).is_empty(),
         "a reason lets it through"
     );
 }
