@@ -184,7 +184,7 @@ starts from are not written into a baseline as accepted.
 [[feature]]
 id = "lifespan.ssd-wear"
 title = "SSD wear on the Lifespan page"
-surfaces = ["route:/lifespan", "job:InstallTool", "setting:tools"]
+surfaces = ["route:/lifespan", "job:InstallTool", "settings:tools"]
 wires = ["app-agent:Hardware", "agent-helper:Smart", "agent-helper:InstallTool", "agent-helper:Info"]
 platforms = ["macos", "windows", "linux"]
 tests = { tauri = "e2e-tauri/lifespan.e2e.ts#reads wear through the helper", vm = ["windows:helper-smart", "macos:helper-smart"] }
@@ -197,6 +197,28 @@ C85 (source check, no build) fails when:
 - a feature names a test that does not exist (the spec title or vm-smoke step id is looked up);
 - a feature that depends on a platform (its `platforms` are not all three, or it uses a privileged wire such as
   `agent-helper`) has no vm-smoke step for each OS it lists, **Windows included**.
+
+**Amendment 2026-11-12: the schema as built (C85, `conformance/src/checks/C85-features-register.mjs`).** The example above
+is the minimum; the check reads these further keys, and a row that uses any other is a finding:
+- `tests.outcome` and `tests.layout` are **required**, like `tauri`: the visible-outcome and real-layout rows that C86 and
+  C89 enumerate. The user decided on 2026-11-12 that the kit (ADR 0037 WP-7, the outcome harness and the layout check) is
+  built before the Pitwall 1.1 tag, so `owed` for them is bounded by that tag.
+- `owed = ["tauri", "outcome", "layout", "vm:windows"]` with `owed_why` and `owed_until`: a test that does not exist yet,
+  said on the row. `owed_until` is a tag `<app>-vX.Y.Z` that does **not exist yet** and is **at most the next release line**
+  (the latest tag's minor plus one, patch 0), or a real date at most 60 days after the commit that wrote the entry (`git
+  blame`; today where git cannot say). A tag that exists, a tag past the next line, a date that is not a date, and an
+  expired or reached entry are findings. In a release run (`--version`, the plan job of `pitwall-release.yml`) these are
+  errors and fail the plan, so no release runs and an owed test cannot ride past its release; in branch runs they are warnings
+  (report-only). A row never names a test it does not have.
+- `na = ["outcome", "layout"]` with `na_why`: a kind of test that does not apply (Pitwall's HTTP APIs have no UI). It is the
+  honest alternative to `owed` when nothing is due; it never covers `tauri`.
+- `supporting = ["path#title"]`: tests that exist but are not real-engine (a spec on the mock backend). Looked up, never
+  counted. A TypeScript title must start a live `test(` or `it(` call; `.skip` and `.fixme` do not count.
+- `privileged:<kind>` is a wire kind beside `agent-helper:`; the wire and surface kinds are an allow-list (`app-command`,
+  `app-agent`, `agent-helper`, `plugin`, `privileged`; `route`, `dialog`, `settings`, `job`, `pane`, `tray`, `widget`, `http`).
+  The Settings surface is written `settings:<id>` (this ADR's first example said `setting:`).
+- Not measured yet: panes, tray popovers and widget kinds have no reader (their spelling is checked, their existence is
+  not); `docs/gates.toml` records the gap. The job summary of a C85 run says the owed count and the nearest expiry (§1.1).
 
 The tests run against the real engine, never the mock: the `tauri` test in ADR 0037 §8's shared real-app kit (Linux and
 Windows CI legs), the `vm` steps in `vm-smoke` (the Windows GUI session of ADR 0040; macOS through ADR 0037's `--smoke`
