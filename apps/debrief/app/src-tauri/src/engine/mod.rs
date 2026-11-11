@@ -169,7 +169,28 @@ pub(crate) enum StoreKind {
     Project,
 }
 
+/// Which store a window holds: a new number for every store the window opens, creates or is handed, so a table or a
+/// job tied to one store can tell that the window now holds another (two stores can have the same catalogue
+/// generation, and a freed store's address can be reused, so neither says it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct StoreId(u64);
+
+impl StoreId {
+    /// The next identity; unique in the process.
+    fn next() -> StoreId {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        StoreId(NEXT.fetch_add(1, Ordering::SeqCst))
+    }
+
+    /// An identity for tests that stand in for a store.
+    #[cfg(test)]
+    pub(crate) fn for_test(n: u64) -> StoreId {
+        StoreId(n)
+    }
+}
+
 struct Current {
+    id: StoreId,
     store: SharedStore,
     kind: StoreKind,
 }
@@ -229,23 +250,30 @@ impl Engine {
 
     /// The window's store, opened in a new scratch folder on first use.
     pub(crate) fn store(&self) -> CmdResult<SharedStore> {
+        self.tagged_store().map(|(_, store)| store)
+    }
+
+    /// The window's store with its identity ([`StoreId`]): what a job tied to one store keeps to notice a replacement.
+    pub(crate) fn tagged_store(&self) -> CmdResult<(StoreId, SharedStore)> {
         if let Some(c) = crate::sync::read(&self.current).as_ref() {
-            return Ok(c.store.clone());
+            return Ok((c.id, c.store.clone()));
         }
         let mut slot = crate::sync::write(&self.current);
         if let Some(c) = slot.as_ref() {
-            return Ok(c.store.clone());
+            return Ok((c.id, c.store.clone()));
         }
         let dir = self.scratch_dir();
         let profile = crate::sync::lock(&self.profile).clone();
         let store = self.host.create(&dir, &profile).map_err(|e| unavailable(&e))?;
         self.hand_parsers(store.as_ref());
         self.new_ordering_episode();
+        let id = StoreId::next();
         *slot = Some(Current {
+            id,
             store: store.clone(),
             kind: StoreKind::Scratch,
         });
-        Ok(store)
+        Ok((id, store))
     }
 
     /// Another store in the window (opened, created, replaced or closed): a new ordering episode (`crate::ordering`,
@@ -307,7 +335,11 @@ impl Engine {
     pub(crate) fn replace(&self, store: SharedStore, kind: StoreKind) {
         self.hand_parsers(store.as_ref());
         self.new_ordering_episode();
-        let previous = crate::sync::write(&self.current).replace(Current { store, kind });
+        let previous = crate::sync::write(&self.current).replace(Current {
+            id: StoreId::next(),
+            store,
+            kind,
+        });
         if let Some(p) = previous {
             retire(p);
         }
@@ -579,6 +611,24 @@ pub(crate) mod local;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A window's store has an identity that changes with the store, so a job tied to one store sees that the window now holds
+    /// another (two stores can be at the same catalogue generation).
+    #[test]
+    fn the_window_store_has_an_identity_that_changes_when_the_store_is_replaced() {
+        let state = crate::windows::tests::window_state("engine-store-id", debrief_core::PluginRegistry::new());
+        let engine = &state.engine;
+        let (first_id, first) = engine.tagged_store().unwrap();
+        let (again_id, again) = engine.tagged_store().unwrap();
+        assert_eq!(first_id, again_id, "the same store keeps its identity");
+        assert!(Arc::ptr_eq(&first, &again));
+        let second = engine.host().create(&engine.unpack_root(), &engine.profile()).unwrap();
+        engine.replace(second.clone(), StoreKind::Project);
+        let (second_id, current) = engine.tagged_store().unwrap();
+        assert_ne!(second_id, first_id, "another store, another identity");
+        assert!(Arc::ptr_eq(&current, &second), "the window holds the store it was given");
+        assert_eq!(engine.kind(), Some(StoreKind::Project));
+    }
 
     #[test]
     fn a_release_build_ignores_debrief_store_worker() {

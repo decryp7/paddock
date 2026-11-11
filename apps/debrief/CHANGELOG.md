@@ -8,11 +8,17 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 ### Added
 
 - **Names:** Searching for an abbreviation of a program name now finds it: "rptbldr" finds Report Builder and "netmon" finds Network Monitor, with the reason "abbreviation: letters of report builder", without any AI model
+- **Memory:** Settings ▸ Performance ▸ "Memory for open documents": how much memory the profiles, heap snapshots and dumps you have open may use together in all windows (Automatic: a quarter of the computer's memory, 512 MB to 8 GB). When it is used up, the captures opened longest ago are released and read again from their files when you use them, and a dump or pasted capture that does not fit is refused with a message that names it and says what to close. Before, 32 per window could be open however large they were
 
 ### Fixed
 
 - **Sandbox:** On Linux a child's log sometimes said that a thread had started before the lockdown and kept its file access. The thread was the start-up handshake thread, finished but not yet removed by the kernel; the child now waits for it to go before it locks itself down (and logs it if it does not go within two seconds).
 - **Search:** Closing a log store while its word-search index was still merging could leave the index's background merges writing into the store's folder after it was closed or deleted. Closing now waits for them to end
+- **Memory:** Opening a large profile or heap snapshot no longer reads the whole file into Debrief itself first: the reader process is lent the file by ranges. A 128 MB capture took 395 MB of Debrief's memory to open and now 140 MB. While a capture opens, the captures you already have open stay usable instead of waiting for it
+- **Names:** The name table is now rebuilt in a background job ("Updating names" in Jobs, with phases and Cancel) instead of inside a search or an AI chat turn, and only after the catalogue is built. A search always answers at once from the last table, and joining look-alike names no longer compares every pair of names (8,000 names: 7.5 ms instead of 43 s)
+- **CPU:** After an import, Debrief no longer keeps a core busy while it sits idle: the background loops that build the name catalogue and the word-search index run no database statement when nothing has changed, and a pass over a very large Event Viewer import no longer compares every pair of names
+- **Names:** Opening another project while the name table is being rebuilt no longer shows the old project's names in the new window, and a change that arrives while a rebuild runs is no longer lost: it queues the next rebuild. A catalogue with one source that cannot be read is now treated as finished (the Jobs pane says how many sources are missing) instead of being waited for until the rebuild gave up
+- **Memory:** A capture that Debrief released from memory to make room for others is read again only if its file is unchanged since you opened it (otherwise it says to open it again), and it is read again by the same reader process as when you opened it, without holding up the captures you have open
 
 ### Security
 
@@ -21,7 +27,7 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 ### Removed
 
 - **AI:** Pitwall is now the only AI engine. Debrief no longer downloads or runs its own models: the set-up wizard, the model manager, the inference runtimes, their update checks and manual downloads, the engine choice and the AI worker's memory cap are gone, and every AI feature runs on the model Pitwall serves. Install Pitwall and connect Debrief to it in Settings ▸ AI; Debrief's own model and runtime files stay on disk until you remove them. The AI download proxy and connection settings are gone too: the FFmpeg download now follows your system's proxy settings (HTTPS_PROXY, NO_PROXY or the operating system's)
-- **Names:** Debrief no longer asks the AI model for human names in the background. "Learning human names" after an import, and the Settings ▸ AI switch "AI aliases for names", are gone, so opening logs no longer loads or runs a model. Aliases an earlier version already learned stay, labelled AI-generated, and you can still remove any of them
+- **Names:** Debrief no longer asks the AI model for human names in the background. "Learning human names" after an import, and the Settings ▸ AI switch "AI aliases for names", are gone, so opening logs no longer loads or runs a model. Aliases an earlier version already learned stay, labelled AI-generated, and you can still remove any of them. If you had switched "AI aliases for names" off, aliases an earlier version learned now count again in name matching; each is labelled and removable.
 
 ### Changed
 

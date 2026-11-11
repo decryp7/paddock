@@ -939,7 +939,7 @@ export interface ValueMatch {
   /**
    * How the value matched: `userAlias` (you said so), `exact`, `segmented` (the same name written differently or run
    * together), `parts`, `prefix`, `alias` (suggested by the local model, AI-generated), `abbreviation` (the letters of
-   * the name's words: `gfxbldr` for `graphic builder`) or `fuzzy` (typos).
+   * the name's words: `rptbldr` for `report builder`) or `fuzzy` (typos).
    */
   via: 'userAlias' | 'exact' | 'segmented' | 'parts' | 'prefix' | 'alias' | 'abbreviation' | 'fuzzy';
   /** What an entity is (`executable`, `library`, `file`, `path`, `host`, `ip`, `url`, `exception`, `errorCode`, `guid`). */

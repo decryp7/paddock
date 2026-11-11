@@ -21,7 +21,7 @@ pub mod resolve;
 pub mod segment;
 
 pub use book::NameBook;
-pub use build::Names;
+pub use build::{Names, RebuildControl, RebuildEnd, RebuildPhase, RebuildProgress};
 pub use context::{Cooccurrence, SearchContext};
 pub use resolve::{How, NameSettings, Resolution, Resolver};
 pub use segment::Vocabulary;

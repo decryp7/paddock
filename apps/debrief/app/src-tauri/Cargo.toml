@@ -22,6 +22,7 @@ tauri-build = { version = "2.7.3", features = [] }
 [dependencies]
 tempfile.workspace = true
 debrief-alloc = { path = "../../crates/debrief-alloc" }
+debrief-budget = { path = "../../crates/debrief-budget" }
 debrief-core = { path = "../../crates/debrief-core" }
 debrief-pdf = { path = "../../crates/debrief-pdf" }
 debrief-profile = { path = "../../crates/debrief-profile" }

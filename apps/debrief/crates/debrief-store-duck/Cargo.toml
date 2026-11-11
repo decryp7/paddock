@@ -52,3 +52,5 @@ chrono.workspace = true
 zip.workspace = true
 # Test folders removed after the store that uses them, also after a panic (rule 49).
 tempfile.workspace = true
+# Generates the big `.gz` of tests/regress_1_2.rs at test time.
+flate2.workspace = true

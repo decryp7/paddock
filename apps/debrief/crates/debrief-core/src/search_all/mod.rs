@@ -51,6 +51,16 @@ pub trait SearchSource {
     fn catalogue(&self, _req: &crate::catalogue::CatalogueRequest) -> StoreResult<crate::catalogue::CatalogueReply> {
         Ok(Default::default())
     }
+    /// How far the catalogue is, without its names (the default asks for an empty lookup).
+    fn catalogue_status(&self, _req: &crate::catalogue::CatalogueStatusRequest) -> StoreResult<crate::catalogue::CatalogueStatus> {
+        let reply = self.catalogue(&Default::default())?;
+        Ok(crate::catalogue::CatalogueStatus {
+            built: reply.built,
+            pending: reply.pending,
+            failed: 0,
+            generation: 0,
+        })
+    }
 }
 
 impl<T: Query + Analysis + ?Sized> SearchSource for T {
@@ -68,6 +78,9 @@ impl<T: Query + Analysis + ?Sized> SearchSource for T {
     }
     fn catalogue(&self, req: &crate::catalogue::CatalogueRequest) -> StoreResult<crate::catalogue::CatalogueReply> {
         Query::catalogue(self, req)
+    }
+    fn catalogue_status(&self, req: &crate::catalogue::CatalogueStatusRequest) -> StoreResult<crate::catalogue::CatalogueStatus> {
+        Query::catalogue_status(self, req)
     }
 }
 

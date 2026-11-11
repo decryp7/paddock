@@ -191,6 +191,40 @@ fn an_unbuilt_catalogue_falls_back_to_facets_and_reports_pending() {
     assert!(reply.built && reply.candidates.is_empty() && reply.pending == 0);
 }
 
+/// A source whose build failed is given up on, not retried until the store is reopened: it counts as done (the catalogue is
+/// built without it, and a wait for the catalogue ends) and is reported, where a source that is only not yet catalogued is
+/// pending.
+#[test]
+fn a_source_whose_build_failed_counts_as_done_and_is_reported() {
+    let (logs, _dir, store) = setup("failed");
+    lines(&logs.0.join("a.log"), &["Started CompanyA.Graphic.Builder.exe"]);
+    lines(&logs.0.join("b.log"), &["Started CompanyA.Tray.Agent.exe"]);
+    store.open(std::slice::from_ref(&logs.0)).unwrap().wait().unwrap();
+    built(&store);
+    let status = || store.catalogue_status(&Default::default()).unwrap();
+    let sources: Vec<u32> = store.summary().unwrap().sources.iter().map(|s| s.id).collect();
+    assert_eq!(sources.len(), 2);
+    assert_eq!((status().built, status().pending, status().failed), (true, 0, 0));
+    // One source failed: done and reported.
+    store.catalogue_give_up_on(sources[0]).unwrap();
+    let s = status();
+    assert_eq!(
+        (s.built, s.pending, s.failed),
+        (true, 0, 1),
+        "a failed source does not keep the catalogue from being built"
+    );
+    let reply = store.catalogue(&CatalogueRequest::default()).unwrap();
+    assert_eq!((reply.built, reply.pending), (true, 0));
+    // Another one that is only missing from the catalogue (not given up on) is pending, and the catalogue is not built.
+    store
+        .bench_sql(&format!("DELETE FROM catalogue_sources WHERE source = {}", sources[1]))
+        .unwrap();
+    let s = status();
+    assert_eq!((s.built, s.pending, s.failed), (false, 1, 1));
+    let reply = store.catalogue(&CatalogueRequest::default()).unwrap();
+    assert_eq!((reply.built, reply.pending), (false, 1));
+}
+
 #[test]
 fn every_name_is_listed_for_the_name_book_and_graphic_builder_groups_its_spellings() {
     use debrief_core::names::Names;
@@ -239,4 +273,31 @@ fn every_name_is_listed_for_the_name_book_and_graphic_builder_groups_its_spellin
     assert_eq!(r.values[0].group.as_deref(), Some("executable|graphic builder"), "{r:#?}");
     assert_eq!(r.values[0].spellings.len(), 2);
     assert!(!r.values[0].evidence.is_empty());
+}
+
+/// A live-follow step (`append_tail`) bumps the store's generation; the idle catalogue loop runs no statement without
+/// news (turns::Gate), so the step must reach it as news: a file that appears under the opened folder is catalogued
+/// without anything waking the thread by hand (`wait_for_catalogue` would).
+#[test]
+fn a_file_that_live_follow_adds_is_catalogued_without_a_manual_wake() {
+    let (logs, _dir, store) = setup("tail");
+    let first = logs.0.join("a.log");
+    lines(&first, &["Started Alpha.Service.exe", "heartbeat"]);
+    store.open(std::slice::from_ref(&logs.0)).unwrap().wait().unwrap();
+    built(&store);
+    assert!(lookup(&store, "Quokkasoft").is_empty(), "the fixture holds no such name yet");
+    // The catalogue is built and its loop idle: now a file appears and the followed one grows.
+    let added = logs.0.join("b.log");
+    lines(&added, &["Started Quokkasoft.Agent.exe"]);
+    let mut text = std::fs::read_to_string(&first).unwrap();
+    text.push_str("2026-10-14 10:01:00 INFO heartbeat again\n");
+    std::fs::write(&first, text).unwrap();
+    let appended = store.append_tail(&[first, added]).unwrap();
+    assert!(appended.appended > 0, "the step read the new lines: {appended:?}");
+    let catalogued = paddock_testkit::poll_until_within(Duration::from_secs(30), || !lookup(&store, "Quokkasoft").is_empty());
+    assert!(
+        catalogued,
+        "the name in the new file was not catalogued: {:?}",
+        lookup(&store, "Quokkasoft")
+    );
 }

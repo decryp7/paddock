@@ -9,7 +9,7 @@
 
 use super::model::{Job, JobId, JobKind, JobProgress, JobResult, JobSpec, JobState, PhaseScale};
 use super::persist::JobsRecord;
-use super::queue::{Cancel, Finished, JobEnd, JobInfo, JobQueue, JobsSnapshot, QueueError, Refusal};
+use super::queue::{Cancel, Finished, JobEnd, JobInfo, JobQueue, JobsSnapshot, QueueError, Refusal, Submission};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -369,10 +369,24 @@ impl Jobs {
         controls: Controls,
         work: impl FnOnce(&JobCtx) -> JobEnd + Send + 'static,
     ) -> Result<JobId, Refusal> {
+        self.submit_keyed_work(spec, controls, work).map(|s| s.id)
+    }
+
+    /// As [`submit_work`](Self::submit_work), saying whether a job was added or an equal keyed one serves the request.
+    pub fn submit_keyed_work(
+        &self,
+        spec: JobSpec,
+        controls: Controls,
+        work: impl FnOnce(&JobCtx) -> JobEnd + Send + 'static,
+    ) -> Result<Submission, Refusal> {
         let now = self.now();
         let id = {
             let mut inner = self.lock();
-            let id = inner.queue.submit(spec, now)?;
+            let Submission { id, created } = inner.queue.submit_or_existing(spec, now)?;
+            if !created {
+                // The same keyed request is already queued or running: it serves this one; `work` is dropped unrun.
+                return Ok(Submission { id, created: false });
+            }
             inner.controls.insert(
                 id,
                 Control {
@@ -390,11 +404,13 @@ impl Jobs {
         self.emit(&JobsEvent::Changed);
         self.pump();
         self.ensure_ticker();
-        Ok(id)
+        Ok(Submission { id, created: true })
     }
 
     /// Queues `f` and hands its value to the returned handle. Errors fail the job with their text
-    /// (cancelled ones cancel it); `Done::result` is what View opens.
+    /// (cancelled ones cancel it); `Done::result` is what View opens. A keyed spec is refused
+    /// ([`Refusal::KeyedWithHandle`]): a request that joins a running job has no value to hand over, so its handle
+    /// would report a cancel while the job runs; keyed work uses [`submit_work`](Self::submit_work).
     pub fn submit<T, E>(
         &self,
         spec: JobSpec,
@@ -405,6 +421,9 @@ impl Jobs {
         T: Send + 'static,
         E: JobFailure + Send + 'static,
     {
+        if spec.key.is_some() {
+            return Err(Refusal::KeyedWithHandle);
+        }
         let (tx, rx) = mpsc::channel();
         let id = self.submit_work(spec, controls, move |ctx| {
             let (end, value) = match f(ctx) {
@@ -611,13 +630,13 @@ impl Jobs {
 
     /// Runs a failed, cancelled or interrupted job again (a new job; the old one counts as seen).
     pub fn retry(&self, id: JobId) -> Result<Option<JobId>, String> {
-        let job = {
+        let (job, first_new_id) = {
             let inner = self.lock();
             let job = inner.queue.get(id).ok_or_else(|| QueueError::Unknown(id).to_string())?;
             if !matches!(job.state(), JobState::Failed | JobState::Interrupted | JobState::Cancelled) || job.request.is_none() {
                 return Err("only failed, cancelled or interrupted jobs that know their request can be retried".into());
             }
-            job.clone()
+            (job.clone(), inner.queue.next_id())
         };
         let handler = lock(&self.0.retry)
             .get(&job.kind)
@@ -627,7 +646,9 @@ impl Jobs {
             .map_err(|p| format!("retrying failed: {}", debrief_core::guard::panic_message(&*p)))??;
         {
             let mut inner = self.lock();
-            if let Some(new) = new {
+            // Only a job this retry created is its retry: a keyed request that is already queued or running serves
+            // it, and that job (older than the call) is nobody's retry.
+            if let Some(new) = new.filter(|n| *n >= first_new_id) {
                 inner.queue.set_retry_of(new, id);
             }
             inner.queue.mark_seen(id);
@@ -1126,6 +1147,53 @@ pub(crate) mod tests {
         let _ = plain.wait();
         wait_until("failed", || jobs.state_of(pid) == Some(JobState::Failed));
         assert!(jobs.retry(pid).unwrap_err().contains("cannot be retried"));
+    }
+
+    /// A retry whose request is already queued or running (same key) is served by that job: the job is not marked as a
+    /// retry of the failed one, because it is not one.
+    #[test]
+    fn a_retry_that_joins_a_job_already_running_does_not_mark_it_as_the_retry() {
+        let (jobs, _clock) = service();
+        let old: JobHandle<(), String> = jobs
+            .submit(
+                ai("explain").retry_with(serde_json::json!({"op": "explain"})),
+                Controls::default(),
+                |_| Err("busy".to_string()),
+            )
+            .unwrap();
+        let old_id = old.id;
+        let _ = old.wait();
+        wait_until("failed", || jobs.state_of(old_id) == Some(JobState::Failed));
+        // The same request (same key) is running now.
+        let (release, gate) = mpsc::channel::<()>();
+        let gate = Arc::new(Mutex::new(gate));
+        let spec = || ai("explain").keyed("main|explain|1");
+        let running = jobs
+            .submit_work(spec(), Controls::default(), move |_| {
+                let _ = lock(&gate).recv();
+                JobEnd::Done(None)
+            })
+            .unwrap();
+        let j2 = jobs.clone();
+        jobs.set_retry(JobKind::Ai, move |job| {
+            let spec = spec().retry_with(job.request.clone().unwrap());
+            j2.submit_work(spec, Controls::default(), |_| JobEnd::Done(None))
+                .map(Some)
+                .map_err(|e| e.to_string())
+        });
+        let joined = jobs.retry(old_id).unwrap().unwrap();
+        assert_eq!(joined, running, "the running job serves the retry");
+        assert_eq!(jobs.info(joined).unwrap().retry_of, None, "and is not a retry of the failed one");
+        release.send(()).unwrap();
+    }
+
+    #[test]
+    fn a_keyed_spec_is_refused_where_the_handle_could_not_follow_a_joined_job() {
+        let (jobs, _clock) = service();
+        let refused: Result<JobHandle<(), String>, _> =
+            jobs.submit(ai("explain").keyed("main|explain|1"), Controls::default(), |_| Ok(Done::new(())));
+        assert_eq!(refused.err(), Some(Refusal::KeyedWithHandle));
+        assert!(jobs.snapshot(None).jobs.is_empty(), "nothing was queued");
     }
 
     #[test]

@@ -42,6 +42,7 @@ pub mod test_scratch;
 mod turns;
 mod writer;
 
+pub use catalogue::RowStats;
 pub use compact::Compaction;
 pub use fts::WriterBudget;
 pub use schema::FORMAT_VERSION;
@@ -973,10 +974,12 @@ impl DuckStore {
         let write_lock = Arc::new(Mutex::new(()));
         let heavy = Arc::new(Mutex::new(()));
         let bulk_import = Arc::new(AtomicBool::new(false));
+        // Bumped by every change of the data; the background loops look at the database only when it moved.
+        let generation = Arc::new(AtomicU64::new(0));
         let started = conn
             .try_clone()
             .map_err(anyhow::Error::from)
-            .and_then(|c| fts::FtsService::start(dir, c, write_lock.clone(), bulk_import.clone(), opts.index));
+            .and_then(|c| fts::FtsService::start(dir, c, write_lock.clone(), bulk_import.clone(), generation.clone(), opts.index));
         let (fts, fts_error) = match started {
             Ok(f) => (Some(f), None),
             Err(e) => {
@@ -987,7 +990,7 @@ impl DuckStore {
         let catalogue = conn
             .try_clone()
             .map_err(anyhow::Error::from)
-            .and_then(|c| catalogue::CatalogueService::start(c, write_lock.clone(), heavy.clone()))
+            .and_then(|c| catalogue::CatalogueService::start(c, write_lock.clone(), heavy.clone(), generation.clone()))
             .map_err(|e| log::warn!("the catalogue is unavailable: {e:#}"))
             .ok();
         DuckStore {
@@ -1004,7 +1007,7 @@ impl DuckStore {
                     removed: HashSet::new(),
                     unrecognized: Vec::new(),
                 }),
-                generation: Arc::new(AtomicU64::new(0)),
+                generation,
                 importing: AtomicBool::new(false),
                 bulk_import,
                 import_window: RwLock::new(Default::default()),

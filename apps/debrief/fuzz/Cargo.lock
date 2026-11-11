@@ -569,6 +569,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "debrief-budget"
+version = "0.1.0"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "debrief-collect"
 version = "0.1.0"
 dependencies = [
@@ -625,6 +632,7 @@ dependencies = [
 name = "debrief-dump"
 version = "0.1.0"
 dependencies = [
+ "debrief-budget",
  "debrief-symbols",
  "postcard",
  "serde",
@@ -846,6 +854,8 @@ dependencies = [
 name = "debrief-profile"
 version = "0.1.0"
 dependencies = [
+ "debrief-budget",
+ "log",
  "postcard",
  "regex",
  "rustc-hash",

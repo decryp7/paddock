@@ -28,14 +28,14 @@ const CHUNK: usize = 65536;
 /// The cap a plugin gets when the user changed nothing (`PerformanceSettings::default().plugin_memory_mb`).
 const DEFAULT_CAP_MB: u64 = 1024;
 
-struct TempDir(PathBuf);
+pub(crate) struct TempDir(pub(crate) PathBuf);
 impl Drop for TempDir {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
-fn temp(name: &str) -> TempDir {
+pub(crate) fn temp(name: &str) -> TempDir {
     let d = tempfile::Builder::new()
         .prefix(&format!("debrief-evtx-memory-{name}-"))
         .tempdir()
@@ -83,7 +83,7 @@ fn dense_chunk(sample: &[u8]) -> (Vec<u8>, Vec<usize>) {
 }
 
 /// Writes an `.evtx` of about `mb` MiB: the sample's header, then dense chunks with record numbers and ids running on.
-fn generate(dir: &Path, mb: u64) -> PathBuf {
+pub(crate) fn generate(dir: &Path, mb: u64) -> PathBuf {
     let sample = std::fs::read(common::fixture("debrief-plugin-windows", "security.evtx")).unwrap();
     assert_eq!(sample.len(), HEADER + CHUNK, "the sample is one header and one chunk");
     let (chunk, records) = dense_chunk(&sample);

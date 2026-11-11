@@ -34,6 +34,11 @@ pub fn encode_result(result: &Result<Document>) -> Vec<u8> {
     })
 }
 
+/// How many bytes `d` takes encoded (counted, nothing allocated): the size the memory budget estimates from.
+pub fn encoded_size(d: &Document) -> u64 {
+    postcard::serialize_with_flavor(d, postcard::ser_flavors::Size::default()).unwrap_or(0) as u64
+}
+
 /// The document (or the plugin's typed error) from `bytes`, checked against `limits`.
 pub fn decode_result(bytes: &[u8], limits: &Limits) -> Result<Document> {
     if bytes.len() as u64 > limits.max_encoded_bytes {

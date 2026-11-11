@@ -61,7 +61,7 @@ pub enum Via {
     Prefix,
     /// An alias suggested by a local model (marked AI-generated).
     Alias,
-    /// The letters of the name's words, in order (`gfxbldr` for `graphic builder`).
+    /// The letters of the name's words, in order (`rptbldr` for `report builder`).
     Abbreviation,
     /// Most of the three-letter groups of the words are in the value (typos).
     Fuzzy,

@@ -7,7 +7,12 @@ use crate::import::{DumpImporter, Produces, SNIFF_THRESHOLD};
 use crate::limits::Limits;
 use crate::model::{Document, Dump, UmdhKind, UmdhLog};
 use crate::umdh::{self, Growth};
+use debrief_budget::{MemoryBudget, Ticket};
 use std::sync::{Arc, Mutex};
+
+/// A decoded document takes about this many times its encoded size in memory (vectors, strings, padding): the memory
+/// budget's estimate, measured on the generated documents of the tests.
+const RESIDENT_FACTOR: u64 = 3;
 
 /// Most documents open per window.
 pub const MAX_DOCS: usize = 32;
@@ -19,6 +24,8 @@ struct Doc {
     name: String,
     path: Option<String>,
     body: Document,
+    /// Its place in the memory budget (documents are counted, never released: they can be changed in place).
+    ticket: Option<Ticket>,
 }
 
 type GrowthKey = (Option<u32>, u32);
@@ -28,6 +35,8 @@ pub struct DumpDocs {
     importers: Vec<Arc<dyn DumpImporter>>,
     limits: Limits,
     docs: Vec<Doc>,
+    /// The app-wide memory budget for open captures and documents (none: unlimited, as in tests).
+    budget: Option<Arc<MemoryBudget>>,
     next_id: u32,
     /// The last growth computed (paging and tree expansion ask for the same pair again and again).
     growth: Mutex<Option<(GrowthKey, Arc<Vec<Growth>>)>>,
@@ -39,9 +48,28 @@ impl DumpDocs {
             importers,
             limits,
             docs: Vec::new(),
+            budget: None,
             next_id: 1,
             growth: Mutex::new(None),
         }
+    }
+
+    /// Counts the open documents in `budget`, shared with the other windows and the captures.
+    pub fn with_budget(mut self, budget: Arc<MemoryBudget>) -> DumpDocs {
+        self.budget = Some(budget);
+        self
+    }
+
+    fn admit(&self, name: &str, body: &Document) -> Result<Option<Ticket>> {
+        let Some(budget) = &self.budget else { return Ok(None) };
+        let kind = match body {
+            Document::Dump(_) => "dump",
+            Document::Umdh(_) => "UMDH log",
+        };
+        budget
+            .admit(kind, name, crate::wire::encoded_size(body).saturating_mul(RESIDENT_FACTOR), None)
+            .map(Some)
+            .map_err(|e| DumpError::limit(e.to_string()))
     }
 
     pub fn limits(&self) -> &Limits {
@@ -85,6 +113,7 @@ impl DumpDocs {
                 "at most {MAX_DOCS} dumps and UMDH logs can be open; close one first"
             )));
         }
+        let ticket = self.admit(name, &body)?;
         let id = self.next_id;
         self.next_id += 1;
         self.docs.push(Doc {
@@ -92,6 +121,7 @@ impl DumpDocs {
             name: name.into(),
             path: path.map(str::to_string),
             body,
+            ticket,
         });
         self.forget_growth();
         let doc = self.docs.last().ok_or_else(|| DumpError::invalid("no document"))?;
@@ -102,9 +132,14 @@ impl DumpDocs {
     /// open any more (closed, or reopened as another document), and nothing changed.
     pub fn replace(&mut self, id: u32, body: Document) -> Result<bool> {
         crate::wire::check(&body, &self.limits)?;
-        let Some(doc) = self.docs.iter_mut().find(|d| d.id == id) else {
+        let Some(i) = self.docs.iter().position(|d| d.id == id) else {
             return Ok(false);
         };
+        if let (Some(t), Some(_)) = (&self.docs[i].ticket, &self.budget) {
+            t.readmit(crate::wire::encoded_size(&body).saturating_mul(RESIDENT_FACTOR))
+                .map_err(|e| DumpError::limit(e.to_string()))?;
+        }
+        let doc = &mut self.docs[i];
         doc.body = body;
         self.forget_growth();
         Ok(true)
@@ -347,6 +382,31 @@ mod tests {
             vec![Arc::new(Fake(Produces::Dump, b"MDMP")), Arc::new(Fake(Produces::Umdh, b"// UMDH"))],
             Limits::default(),
         )
+    }
+
+    /// MEM-2: open documents are counted in the app-wide budget; a document that does not fit says which one it is and
+    /// what to close, and closing a document frees its room.
+    #[test]
+    fn documents_are_counted_in_the_memory_budget() {
+        let one = crate::wire::encoded_size(&Document::Dump(sample_dump())) * RESIDENT_FACTOR;
+        assert!(one > 0);
+        let budget = debrief_budget::MemoryBudget::new(one * 3 / 2);
+        let mut d = docs().with_budget(budget.clone());
+        let first = d.insert("first.dmp", Some("/x/first.dmp"), Document::Dump(sample_dump())).unwrap();
+        assert_eq!(budget.used(), one);
+        let e = d
+            .insert("second.dmp", Some("/x/second.dmp"), Document::Dump(sample_dump()))
+            .unwrap_err();
+        assert_eq!(e.code, ErrorCode::Limit);
+        assert!(e.message.contains("second.dmp") && e.message.contains("first.dmp"), "{}", e.message);
+        assert!(e.message.contains("Close one of them"), "{}", e.message);
+        assert_eq!(d.list().len(), 1, "the failed open added nothing");
+        assert!(d.close(first.id));
+        assert_eq!(budget.used(), 0);
+        assert!(d.insert("second.dmp", Some("/x/second.dmp"), Document::Dump(sample_dump())).is_ok());
+        // Reopening the same path replaces the document, and its room is reused.
+        assert!(d.insert("second.dmp", Some("/x/second.dmp"), Document::Dump(sample_dump())).is_ok());
+        assert_eq!(budget.used(), one);
     }
 
     #[test]

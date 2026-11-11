@@ -11,6 +11,8 @@ description = "Debrief dump engine (ADR 0023): the model of crash/memory dumps a
 [dependencies]
 # PDB identities (name, GUID, age) as symbol stores file them; pure (no DbgHelp, no downloads).
 debrief-symbols = { path = "../debrief-symbols", default-features = false }
+# The app-wide memory budget the open documents are counted in (MEM-2).
+debrief-budget = { path = "../debrief-budget" }
 # The document on the wire from the dumps plugin's process (`wire`, ADR 0017).
 postcard.workspace = true
 serde.workspace = true
