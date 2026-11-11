@@ -39,24 +39,14 @@ fn re(pattern: &str) -> Regex {
 /// failures are all read from its log, reruns only its failed tests. `composite`: the step is a composite action that runs
 /// several commands and names each failed one in an `::error::failed (exit N): <command>` line (app-gates), so every such line
 /// must be a nextest run. Debrief's `Memory budget` is `continue-on-error` (it never fails the job, but the API may list it as
-/// failed); the narrowed rerun skips it. Its `No temp folders left behind` check fails when a failed test left its folder
-/// behind (run 7961); the narrowed rerun runs it again, so a leak that is not the failed tests' still fails there.
+/// failed); the narrowed rerun skips it. A failed `No temp folders left behind` check is not listed: the leaked folder may be
+/// any test's, not only a failed one's, so the whole job reruns (run 7961 failed both steps and reruns whole).
 pub const TEST_STEPS: &[(&str, &str, &[&str], bool)] = &[
     ("ci.yml", "crate", &["Tests (workspace, every feature)"], false),
     ("ci.yml", "paddock-dev", &["Tests"], false),
     ("ci.yml", "app", &["Run ./.gitea/actions/app-gates"], true),
-    (
-        "debrief.yml",
-        "rust-test",
-        &["Tests (workspace)", "No temp folders left behind", "Memory budget"],
-        false,
-    ),
-    (
-        "debrief.yml",
-        "rust-test-macos",
-        &["Tests (workspace)", "No temp folders left behind"],
-        false,
-    ),
+    ("debrief.yml", "rust-test", &["Tests (workspace)", "Memory budget"], false),
+    ("debrief.yml", "rust-test-macos", &["Tests (workspace)"], false),
 ];
 
 /// The steps of a workflow's job that run vitest and take a list of spec files (the plan job's `<job>_include` output), as
@@ -76,7 +66,12 @@ pub struct AppWorkflow {
     pub full_changes: &'static [&'static str],
     /// Jobs a manual run never has (a tag's release, a schedule's mark): never added as skipped dependents.
     pub never_manual: &'static [&'static str],
+    /// Sharded jobs whose failed shards the plan job names (`<job>_shards`, a matrix `include` of `{"shard": n}` legs).
+    pub shard_jobs: &'static [&'static str],
 }
+
+/// The line the plan job of an app workflow prints with the run's mode (`plan mode: full=true`), read back by a rerun.
+pub const MODE_LINE: &str = "plan mode: full=";
 
 /// The app workflows a rerun of failures is planned for (`dev plan --ci --app <app>` with `PLAN_SINCE_RUN`).
 pub const APP_WORKFLOWS: &[AppWorkflow] = &[AppWorkflow {
@@ -85,7 +80,67 @@ pub const APP_WORKFLOWS: &[AppWorkflow] = &[AppWorkflow {
     full_only: &["tauri-smoke", "bundle"],
     full_changes: &["e2e"],
     never_manual: &["release", "nightly-mark"],
+    shard_jobs: &["e2e"],
 }];
+
+/// The outputs [`SincePlan::app_outputs`] can write for an app workflow besides `rerun_jobs`: `<job>_filter` of its
+/// [`TEST_STEPS`] jobs, `<job>_include` of its [`VITEST_STEPS`] jobs and `<job>_shards` of its sharded jobs.
+pub fn app_output_names() -> Vec<String> {
+    let mut out = Vec::new();
+    for a in APP_WORKFLOWS {
+        out.extend(
+            TEST_STEPS
+                .iter()
+                .filter(|t| t.0 == a.file)
+                .map(|t| format!("{}_filter", t.1.replace('-', "_"))),
+        );
+        out.extend(
+            VITEST_STEPS
+                .iter()
+                .filter(|t| t.0 == a.file)
+                .map(|t| format!("{}_include", t.1.replace('-', "_"))),
+        );
+        out.extend(a.shard_jobs.iter().map(|j| format!("{}_shards", j.replace('-', "_"))));
+    }
+    out
+}
+
+/// Whether an app workflow's run was full, from its plan job's log: the [`MODE_LINE`] its Decide step prints; for a run from
+/// before that line, a schedule or a push is full and a manual run says so in the runner's `Inputs` group (`bundles: true`).
+/// An error when none of these tells it: the rerun then plans everything.
+pub fn read_full(a: &AppWorkflow, event: &str, plan_log: Result<&str, &str>) -> Result<bool, String> {
+    let log = plan_log.map_err(|e| format!("the plan job's log could not be read ({e})"))?;
+    let lines: Vec<String> = log.lines().map(plain).collect();
+    if let Some(v) = lines.iter().find_map(|l| l.trim().strip_prefix(MODE_LINE)) {
+        return match v.trim() {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            other => Err(format!("the plan job logged an unknown mode {other:?}")),
+        };
+    }
+    match event {
+        "schedule" | "push" => return Ok(true),
+        "pull_request" => return Ok(false),
+        _ => {}
+    }
+    let mut inputs = false;
+    for l in &lines {
+        match l.trim() {
+            "::group::Inputs" => inputs = true,
+            "::endgroup::" if inputs => break,
+            t if inputs => {
+                if let Some(v) = t.strip_prefix(&format!("{}: ", a.full_input)) {
+                    return Ok(v.trim() == "true");
+                }
+            }
+            _ => {}
+        }
+    }
+    Err(format!(
+        "the plan job's log has no \"{MODE_LINE}\" line and no {} input, so whether run was full is unknown",
+        a.full_input
+    ))
+}
 
 /// The workflow file of a run's `path` (`ci.yml@refs/heads/main` is `ci.yml`; `ci.yaml` reads as `ci.yml`).
 pub fn workflow_file(path: &str) -> String {
@@ -523,8 +578,8 @@ pub struct SincePlan {
     pub not_rerun: usize,
     /// Why everything reruns instead, when the failures cannot be told job by job.
     pub everything: Option<String>,
-    /// Whether the run was a full run of an app's workflow ([`AppWorkflow`]): its event is a schedule or a push, or a job only
-    /// a full run has ran. A rerun of its full-run jobs must be full too.
+    /// Whether the run was a full run of an app's workflow ([`AppWorkflow`]), read by [`read_full`] from its plan job's log. A
+    /// rerun of its full-run jobs must be full too.
     pub full_ran: bool,
 }
 
@@ -559,12 +614,21 @@ impl SincePlan {
                 .find(|r| !r.key.as_deref().is_some_and(|k| templates.iter().any(|(j, _)| j == k)))
                 .map(|r| format!("job \"{}\" is not a job of this {workflow}", r.name))
         };
-        let full_ran = APP_WORKFLOWS.iter().find(|a| a.file == workflow).is_some_and(|a| {
-            matches!(run["event"].as_str(), Some("schedule" | "push"))
-                || jobs.iter().any(|j| {
-                    j.conclusion != "skipped" && key_by_name(&j.name, templates).is_some_and(|k| a.full_only.contains(&k.as_str()))
-                })
-        });
+        let mut everything = everything;
+        let mut full_ran = false;
+        if let Some(a) = APP_WORKFLOWS.iter().find(|a| a.file == workflow) {
+            let plan_job = jobs.iter().find(|j| key_by_name(&j.name, templates).as_deref() == Some("plan"));
+            let text = match plan_job {
+                Some(j) => log(j.id),
+                None => Err("the run has no plan job".into()),
+            };
+            match read_full(a, run["event"].as_str().unwrap_or(""), text.as_deref().map_err(String::as_str)) {
+                Ok(f) => full_ran = f,
+                Err(e) => {
+                    everything.get_or_insert(format!("whether run {} was full cannot be told: {e}", run["id"]));
+                }
+            }
+        }
         SincePlan {
             run: run["id"].as_u64().unwrap_or(0),
             workflow,
@@ -636,7 +700,8 @@ impl SincePlan {
     /// - `rerun_jobs`: the job keys that rerun (each job's `if` reads an empty list as its own name);
     /// - `<job>_filter`: the nextest filterset of a job narrowed to its failed tests (`rust-test` is `rust_test_filter`);
     /// - `<job>_include`: the spec files, space separated, of a job narrowed to its failed vitest files;
-    /// - `<job>_shards`: the failed shards of a sharded job as a JSON list, written only when every failed leg's shard is known
+    /// - `<job>_shards`: the failed shards of a sharded job ([`AppWorkflow::shard_jobs`]) as matrix legs (`[{"shard": 3}]`), written
+    ///   only when every failed leg's shard is known
     ///   (otherwise the plan step writes every shard).
     pub fn app_outputs(&self) -> Vec<(String, String)> {
         let keys: BTreeSet<&str> = self.reruns.iter().filter_map(|r| r.key.as_deref()).collect();
@@ -652,11 +717,12 @@ impl SincePlan {
                     Scope::Job(_) => {}
                 }
             }
-            if runs.iter().all(|r| r.leg.shard.is_some()) && runs.iter().any(|r| r.leg.shard.is_some()) {
+            let sharded = APP_WORKFLOWS.iter().any(|a| a.file == self.workflow && a.shard_jobs.contains(key));
+            if sharded && runs.iter().all(|r| r.leg.shard.is_some()) {
                 let mut shards: Vec<Value> = Vec::new();
                 for r in &runs {
                     let s = r.leg.shard.as_deref().unwrap_or("");
-                    let v = s.parse::<u64>().map_or_else(|_| json!(s), |n| json!(n));
+                    let v = s.parse::<u64>().map_or_else(|_| json!({ "shard": s }), |n| json!({ "shard": n }));
                     if !shards.contains(&v) {
                         shards.push(v);
                     }
@@ -1439,26 +1505,56 @@ mod tests {
         jobs
     }
 
-    fn debrief_logs(id: u64) -> Result<String, String> {
-        Ok(match id {
-            41004 => DEBRIEF_MACOS,
-            41007 => VITEST,
-            _ => return Err("not in the fixture".into()),
+    /// The plan job's log: the runner's header with the `bundles` input, and the mode line when given.
+    fn plan_log(bundles: &str, mode: Option<&str>) -> String {
+        let stamp = "2026-11-11T14:01:05.0000000Z ";
+        let mut l =
+            format!("{stamp}Job: plan\n{stamp}::group::Inputs\n{stamp}bundles: {bundles}\n{stamp}since_run: \n{stamp}::endgroup::\n");
+        if let Some(m) = mode {
+            l.push_str(&format!("{stamp}{MODE_LINE}{m}\n"));
         }
-        .to_string())
+        l
     }
 
-    fn plan_debrief(event: &str, jobs: &[RunJob]) -> SincePlan {
+    fn plan_debrief_with(event: &str, jobs: &[RunJob], plan: Result<String, String>) -> SincePlan {
         let templates = name_templates(DEBRIEF_YML);
-        let mut plan = SincePlan::new(&debrief_run(event), jobs, &templates, &mut debrief_logs);
-        plan.add_skipped_dependents(jobs, &templates, &job_needs(DEBRIEF_YML));
-        plan
+        let mut logs = |id: u64| -> Result<String, String> {
+            match id {
+                41001 => plan.clone(),
+                41004 => Ok(DEBRIEF_MACOS.into()),
+                41007 => Ok(VITEST.into()),
+                _ => Err("not in the fixture".into()),
+            }
+        };
+        let mut p = SincePlan::new(&debrief_run(event), jobs, &templates, &mut logs);
+        if p.everything.is_none() {
+            p.add_skipped_dependents(jobs, &templates, &job_needs(DEBRIEF_YML));
+        }
+        p
+    }
+
+    /// A run whose plan job logged its mode: full for a schedule, not full for a manual run without bundles.
+    fn plan_debrief(event: &str, jobs: &[RunJob]) -> SincePlan {
+        let full = if event == "schedule" { "true" } else { "false" };
+        plan_debrief_with(event, jobs, Ok(plan_log("false", Some(full))))
     }
 
     #[test]
     fn a_debrief_run_that_failed_only_in_rust_tests_on_macos_reruns_that_job_and_its_failed_tests_only() {
-        // Run 7961's shape: 20 jobs, only `rust tests (macOS)` failed, in its nextest step.
-        let jobs = debrief_jobs();
+        // Run 7961's shape: 20 jobs, only `rust tests (macOS)` failed. The fixture also failed the leak check after the tests,
+        // as run 7961 did: the leaked folder may be any test's, so the whole job reruns.
+        let whole = plan_debrief("workflow_dispatch", &debrief_jobs());
+        assert_eq!(whole.reruns.len(), 1);
+        assert_eq!(
+            whole.reruns[0].scope,
+            Scope::Job("step \"No temp folders left behind\" failed and takes no test filter".into())
+        );
+        assert_eq!(
+            whole.app_outputs(),
+            vec![("rerun_jobs".to_string(), r#"["rust-test-macos"]"#.to_string())]
+        );
+        // Only the nextest step failed: only its failed tests.
+        let jobs = debrief_with(&[(41004, "failure", &["Tests (workspace)"])]);
         assert_eq!(jobs.len(), 20);
         let plan = plan_debrief("workflow_dispatch", &jobs);
         assert_eq!(plan.everything, None);
@@ -1485,7 +1581,7 @@ mod tests {
         let plan = plan_debrief("workflow_dispatch", &jobs);
         let out: BTreeMap<String, String> = plan.app_outputs().into_iter().collect();
         assert_eq!(out["rerun_jobs"], r#"["e2e","frontend"]"#);
-        assert_eq!(out["e2e_shards"], "[3]", "only shard 3 of 4");
+        assert_eq!(out["e2e_shards"], r#"[{"shard":3}]"#, "only shard 3 of 4");
         assert!(!out.contains_key("e2e_filter"), "Playwright reruns the whole shard");
         assert_eq!(
             out["frontend_include"],
@@ -1500,7 +1596,7 @@ mod tests {
 
     #[test]
     fn a_full_runs_failed_lint_reruns_the_jobs_it_skipped_and_asks_for_a_full_rerun() {
-        let mut jobs = debrief_with(&[(41004, "success", &[]), (41002, "failure", &["Clippy (workspace)"])]);
+        let jobs = debrief_with(&[(41004, "success", &[]), (41002, "failure", &["Clippy (workspace)"])]);
         let plan = plan_debrief("schedule", &jobs);
         assert!(plan.full_ran);
         let out: BTreeMap<String, String> = plan.app_outputs().into_iter().collect();
@@ -1511,9 +1607,6 @@ mod tests {
         assert_eq!(smoke.scope, Scope::Job("it did not run: rust-lint, which it needs, failed".into()));
         assert_eq!(smoke.leg.os.as_deref(), Some("ubuntu-latest"));
         assert_eq!(plan.not_rerun, 13);
-        // A manual run is full when a full-run job ran.
-        jobs.iter_mut().find(|j| j.id == 41014).unwrap().conclusion = "success".into();
-        assert!(plan_debrief("workflow_dispatch", &jobs).full_ran);
         // The release (a tag's) and the nightly mark (a schedule's) need the failed job too, but a manual run never has them.
         assert!(
             !plan
@@ -1521,6 +1614,39 @@ mod tests {
                 .iter()
                 .any(|r| matches!(r.key.as_deref(), Some("plan" | "release" | "nightly-mark")))
         );
+    }
+
+    #[test]
+    fn a_manual_full_run_whose_lint_failed_is_known_full_from_its_plan_log_and_an_unknown_mode_plans_everything() {
+        // bundles: true, rust-lint failed, so the installers and the real-app smoke never ran (skipped): nothing in the job list
+        // says the run was full; the plan job's mode line does.
+        let jobs = debrief_with(&[(41004, "success", &[]), (41002, "failure", &["Clippy (workspace)"])]);
+        assert!(
+            jobs.iter()
+                .filter(|j| j.name.starts_with("bundle") || j.name.starts_with("real-app"))
+                .all(|j| j.conclusion == "skipped")
+        );
+        let plan = plan_debrief_with("workflow_dispatch", &jobs, Ok(plan_log("true", Some("true"))));
+        assert!(plan.full_ran && plan.needs_full());
+        assert_eq!(plan.app_outputs()[0].1, r#"["bundle","rust-lint","tauri-smoke"]"#);
+        // A run from before the mode line: the runner's Inputs group tells it.
+        assert!(plan_debrief_with("workflow_dispatch", &jobs, Ok(plan_log("true", None))).full_ran);
+        assert!(!plan_debrief_with("workflow_dispatch", &jobs, Ok(plan_log("false", None))).full_ran);
+        // A failed WebKit-changing job (e2e) of a full manual run asks for a full rerun too.
+        let e2e = debrief_with(&[(41004, "success", &[]), (41009, "failure", &["Frontend end-to-end tests"])]);
+        assert!(plan_debrief_with("workflow_dispatch", &e2e, Ok(plan_log("true", Some("true")))).needs_full());
+        // Nothing tells the mode (an unreadable plan log, or no line and no input): everything reruns.
+        for log in [
+            Err("HTTP 404".to_string()),
+            Ok("2026-11-11T14:01:05.0000000Z Job: plan\n".to_string()),
+        ] {
+            let p = plan_debrief_with("workflow_dispatch", &jobs, log);
+            assert!(
+                p.everything.as_deref().is_some_and(|e| e.contains("cannot be told")),
+                "{:?}",
+                p.everything
+            );
+        }
     }
 
     #[test]

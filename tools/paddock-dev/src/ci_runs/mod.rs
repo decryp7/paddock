@@ -99,6 +99,13 @@ pub struct ScheduleSkipArgs {
     /// The Gitea server (default: GITHUB_SERVER_URL, then the family's).
     #[arg(long)]
     server: Option<String>,
+    /// The workflow file being decided (`nightly.yml`): its own scheduled runs bound the skip.
+    #[arg(long)]
+    workflow: String,
+    /// Never skip when the workflow's last measured scheduled run is older than this (36 h: one nightly at most; a weekly
+    /// workflow passes a week and a day). Whatever the limit, a workflow is never skipped twice in a row.
+    #[arg(long, default_value_t = 36.0)]
+    max_gap_hours: f64,
 }
 
 /// `ci schedule-skip`: `skip=true|false` to `GITHUB_OUTPUT` (standard output without it), the annotation on standard output,
@@ -118,14 +125,18 @@ pub fn schedule_skip(a: &ScheduleSkipArgs) -> Result<Report, CliError> {
         .unwrap_or_else(|| "decryp7/paddock".into());
     let token = env("PLAN_TOKEN").or_else(|| env("GITEA_TOKEN")).unwrap_or_default();
     let now_ms = time::now_secs() as f64 * 1000.0;
+    let mut http = CurlHttp;
+    let mut client = Client::new(&mut http, &server, &repo, &token);
     let runs = if event == "schedule" {
-        let mut http = CurlHttp;
-        let mut client = Client::new(&mut http, &server, &repo, &token);
         schedule_skip::read(&mut client, now_ms)
     } else {
         Ok(Vec::new())
     };
-    let d = schedule_skip::decide(&event, runs, now_ms);
+    let mut d = schedule_skip::decide(&event, runs, now_ms);
+    if d.skip() {
+        let past = schedule_skip::read_past(&mut client, &a.workflow);
+        d = schedule_skip::bounded(d, &a.workflow, past, now_ms, a.max_gap_hours);
+    }
     let answer = format!("skip={}", d.skip());
     let mut text: Vec<String> = d.annotation().into_iter().collect();
     match env("GITHUB_OUTPUT") {

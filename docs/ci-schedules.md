@@ -8,8 +8,9 @@ runner slots. Matrix jobs are capped with `strategy.max-parallel` so one Linux s
 `schedule-skip` action, or the `plan` action's step): while a train's `workflow_dispatch` run on `train/*` is queued or in
 progress, the scheduled run ends early with one `::notice::skipped: train <branch> in CI ...` line, runs nothing and
 writes no green marker; it runs again on the next schedule after the train lands. Such a run is not measured, never green
-(ADR 0093, amendment 2026-11-12). When the Actions API cannot be read the run proceeds (fail open) and says so in its
-summary. A run still listed as running after 24 h is named but not counted, so a lost runner cannot stop every schedule.
+(ADR 0093, amendment 2026-11-12), and the nightly's installers verdict warns so. A workflow is never skipped twice in a row,
+nor when its last measured scheduled run is older than 36 h (`debrief-mutants`, weekly: 192 h), so a long train costs at
+most one skipped night. When the Actions API cannot be read the run proceeds (fail open) and says so in its summary. A run still listed as running after 24 h is named but not counted, so a lost runner cannot stop every schedule.
 
 **Proxmox backup window.** Starts at 00:00 local (UTC+8; 16:00 UTC), stated by the user on 2026-11-10. The end is not
 known; 04:00 local (20:00 UTC) is assumed until evidence says otherwise. The Windows CI VM crawled from 00:52 local on

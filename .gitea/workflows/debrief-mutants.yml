@@ -46,6 +46,8 @@ jobs:
         if: github.event_name == 'schedule'
         uses: ./.gitea/actions/schedule-skip
         with:
+          workflow: debrief-mutants.yml
+          max-gap-hours: "192"
           dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
       # Exact-key lookup only: nothing is downloaded. The marker is saved by the weekly-mark job after a fully green run.

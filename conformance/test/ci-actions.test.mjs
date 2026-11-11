@@ -1066,8 +1066,8 @@ test('Debrief runs its installers and real-app smoke tests only on main, debrief
 test('Debrief\'s end-to-end tests run sharded on the image\'s browsers with kept caches, WebKit only on full runs', () => {
   const block = jobBlock(debriefYml(), 'e2e');
   // The shards come from the plan job: every shard, or the failed ones in a since_run rerun of failures.
-  assert.match(block, /shard: \$\{\{ fromJSON\(needs\.plan\.outputs\.e2e_shards\) \}\}/);
-  const shards = jobBlock(debriefYml(), 'plan').match(/e2e_shards=\[([^\]]*)\]/)?.[1].split(',').map((x) => Number(x.trim())) ?? [];
+  assert.match(block, /include: \$\{\{ fromJSON\(needs\.plan\.outputs\.e2e_shards\) \}\}/);
+  const shards = JSON.parse(jobBlock(debriefYml(), 'plan').match(/e2e_shards=(\[[^\]]*\])/)?.[1] ?? '[]').map((l) => l.shard);
   assert.ok(shards.length >= 2, 'sharded');
   assert.deepEqual(shards, shards.map((_, i) => i + 1));
   assert.match(block, new RegExp(`--shard=\\$\\{\\{ matrix\\.shard \\}\\}/${shards.length} `), 'every shard runs its part');

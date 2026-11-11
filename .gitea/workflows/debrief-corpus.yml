@@ -43,6 +43,7 @@ jobs:
         if: github.event_name == 'schedule'
         uses: ./.gitea/actions/schedule-skip
         with:
+          workflow: debrief-corpus.yml
           dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
       # Exact-key lookup only: nothing is downloaded. The marker is saved by the nightly-mark job after a fully green run.

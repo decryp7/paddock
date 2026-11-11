@@ -946,10 +946,20 @@ fn debrief_yml_takes_a_rerun_of_its_failures() {
     }
     assert!(plan.contains("PLAN_SINCE_RUN: ${{ github.event.inputs.since_run }}"));
     assert!(
-        plan.contains("e2e_shards=[1,2,3,4]"),
+        plan.contains(r#"e2e_shards=[{"shard":1},{"shard":2},{"shard":3},{"shard":4}]"#),
         "the plan step writes every shard when no rerun names some"
     );
-    assert!(text.contains("shard: ${{ fromJSON(needs.plan.outputs.e2e_shards) }}"));
+    assert!(text.contains("include: ${{ fromJSON(needs.plan.outputs.e2e_shards) }}"));
+    // The mode line a rerun reads (plan_since::read_full) prints the `full` output's own expression.
+    let full = plan
+        .lines()
+        .find_map(|l| l.strip_prefix("      full: "))
+        .expect("the plan job's full output");
+    assert!(
+        plan.contains(&format!("          PLAN_MODE_FULL: {full}\n")),
+        "PLAN_MODE_FULL is the full output's expression"
+    );
+    assert!(plan.contains(&format!("echo \"{}$PLAN_MODE_FULL\"", paddock_dev::plan_since::MODE_LINE)));
     for (w, job, steps, _) in TEST_STEPS.iter().filter(|t| t.0 == "debrief.yml") {
         let body = &wf.jobs.iter().find(|(k, _)| k == job).unwrap_or_else(|| panic!("{w} {job}")).1;
         for s in *steps {
@@ -988,8 +998,10 @@ fn every_scheduled_workflow_skips_while_a_train_is_in_ci_and_never_marks_a_skipp
         scheduled += 1;
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         assert!(
-            text.contains("uses: ./.gitea/actions/schedule-skip") || text.contains("uses: ./.gitea/actions/plan\n"),
-            "{name} does not ask whether a train is in CI"
+            text.contains(&format!(
+                "uses: ./.gitea/actions/schedule-skip\n        with:\n          workflow: {name}\n"
+            )) || text.contains(&format!("          schedule-workflow: {name}\n")),
+            "{name} does not ask whether a train is in CI, under its own name"
         );
         for line in text
             .lines()

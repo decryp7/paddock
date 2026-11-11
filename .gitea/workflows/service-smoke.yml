@@ -21,9 +21,10 @@ concurrency:
 
 jobs:
   # A scheduled run ends early while a train's dispatch run is in CI (./dev ci schedule-skip; ADR 0093 amendment 2026-11-12).
-  # Every other event passes at once (no checkout, nothing read).
+  # Only scheduled runs have it; the jobs below run when it was skipped (any other event) or said run, never when it failed or was cancelled.
   gate:
     name: gate (no train in CI?)
+    if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -34,11 +35,10 @@ jobs:
       run: ${{ steps.decide.outputs.run }}
     steps:
       - uses: actions/checkout@v4
-        if: github.event_name == 'schedule'
       - id: train
-        if: github.event_name == 'schedule'
         uses: ./.gitea/actions/schedule-skip
         with:
+          workflow: service-smoke.yml
           dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
       - id: decide
         env:
@@ -48,7 +48,7 @@ jobs:
   macos-vm:
     name: update smoke in a macOS VM
     needs: [gate]
-    if: needs.gate.outputs.run == 'true'
+    if: always() && needs.gate.result != 'failure' && needs.gate.result != 'cancelled' && needs.gate.outputs.run != 'false'
     runs-on: macos-latest
     timeout-minutes: 120
     env:

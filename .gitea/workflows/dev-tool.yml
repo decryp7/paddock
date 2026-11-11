@@ -40,10 +40,10 @@ concurrency:
 
 jobs:
   # A scheduled run ends early while a train's dispatch run is in CI (./dev ci schedule-skip; ADR 0093 amendment 2026-11-12).
-  # Every other event passes at once (no checkout, nothing read).
+  # Only scheduled runs have it; the jobs below run when it was skipped (any other event) or said run, never when it failed or was cancelled.
   gate:
     name: gate (no train in CI?)
-    if: ${{ github.ref == 'refs/heads/main' }}
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -54,11 +54,10 @@ jobs:
       run: ${{ steps.decide.outputs.run }}
     steps:
       - uses: actions/checkout@v4
-        if: github.event_name == 'schedule'
       - id: train
-        if: github.event_name == 'schedule'
         uses: ./.gitea/actions/schedule-skip
         with:
+          workflow: dev-tool.yml
           dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
       - id: decide
         env:
@@ -68,7 +67,7 @@ jobs:
   publish:
     name: publish (${{ matrix.os }})
     needs: [gate]
-    if: ${{ github.ref == 'refs/heads/main' && needs.gate.outputs.run == 'true' }}
+    if: ${{ github.ref == 'refs/heads/main' && always() && needs.gate.result != 'failure' && needs.gate.result != 'cancelled' && needs.gate.outputs.run != 'false' }}
     strategy:
       fail-fast: false
       matrix:
@@ -111,7 +110,7 @@ jobs:
     name: publish (macos-latest)
     # A manual run can leave this leg out while the macOS runner is busy (macos: false).
     needs: [gate]
-    if: ${{ github.ref == 'refs/heads/main' && github.event.inputs.macos != 'false' && needs.gate.outputs.run == 'true' }}
+    if: ${{ github.ref == 'refs/heads/main' && github.event.inputs.macos != 'false' && always() && needs.gate.result != 'failure' && needs.gate.result != 'cancelled' && needs.gate.outputs.run != 'false' }}
     runs-on: macos-latest
     defaults:
       run:

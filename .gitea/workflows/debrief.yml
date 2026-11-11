@@ -106,6 +106,7 @@ jobs:
       - id: train
         uses: ./.gitea/actions/schedule-skip
         with:
+          workflow: debrief.yml
           dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
       - name: Decide
@@ -123,7 +124,11 @@ jobs:
           # The rerun reads the earlier run's jobs and logs through the API; PLAN_FULL says whether this rerun is full.
           PLAN_SINCE_RUN: ${{ github.event.inputs.since_run }}
           PLAN_FULL: ${{ github.event.inputs.bundles }}
+          # The `full` output's expression, copied (tools/paddock-dev/tests/it/tree.rs keeps them equal): the mode line below lets a
+          # later rerun of this run's failures tell whether it was full (plan_since::read_full).
+          PLAN_MODE_FULL: ${{ github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/debrief-v') || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && (inputs.bundles == true || github.event.inputs.bundles == 'true')) }}
         run: |
+          echo "plan mode: full=$PLAN_MODE_FULL"
           run=$(./dev plan --ci --app debrief)
           if [ "$EVENT" = schedule ] && [ "$GREEN" = true ]; then
             run=false
@@ -132,7 +137,7 @@ jobs:
           if [ "$EVENT" = schedule ] && [ "$TRAIN_SKIP" = true ]; then
             run=false
           fi
-          grep -q '^e2e_shards=' "$GITHUB_OUTPUT" || echo 'e2e_shards=[1,2,3,4]' >> "$GITHUB_OUTPUT"
+          grep -q '^e2e_shards=' "$GITHUB_OUTPUT" || echo 'e2e_shards=[{"shard":1},{"shard":2},{"shard":3},{"shard":4}]' >> "$GITHUB_OUTPUT"
           if [ "$EVENT" = push ] && [ "$REF" = refs/heads/main ]; then
             # Lightweight tags list the commit itself, annotated ones list the tag object and the peeled commit (^{}).
             tag=$(git ls-remote --tags origin 'refs/tags/debrief-v*' | awk -v sha="$SHA" '$1 == sha { sub("refs/tags/", "", $2); sub(/\^\{\}$/, "", $2); print $2; exit }')
@@ -582,8 +587,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Every shard; a since_run rerun only the failed ones (the plan job writes [1,2,3,4] otherwise).
-        shard: ${{ fromJSON(needs.plan.outputs.e2e_shards) }}
+        # Every shard; a since_run rerun only the failed ones (the plan job writes all four otherwise). The `include` form of
+        # ci.yml's crate legs, proven on this Gitea.
+        include: ${{ fromJSON(needs.plan.outputs.e2e_shards) }}
     defaults:
       run:
         working-directory: apps/debrief/app

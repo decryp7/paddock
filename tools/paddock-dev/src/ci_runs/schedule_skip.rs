@@ -8,7 +8,13 @@
 //! scheduled run proceeds (fail open) and says so. A skipped run measured nothing: a reader of scheduled results counts it as
 //! not measured, never as green, and the green markers (`nightly-mark`) are not written for it.
 //!
-//! The pure decision is [`decide`]; [`read`] lists the dispatch runs through RT-8's [`Client`].
+//! **Upper bound.** A skip never leaves a workflow unmeasured for long: it is not skipped when its last scheduled run was itself
+//! skipped for a train (never twice in a row, which bounds a weekly workflow), nor when its last measured scheduled run is older
+//! than `--max-gap-hours` (36 h for a nightly: one skipped night at most). Measured means a completed, not cancelled scheduled
+//! run of this workflow whose gate did not log the skip notice. When that history cannot be read the run proceeds.
+//!
+//! The pure decision is [`decide`] and [`bound`]; [`read`] lists the dispatch runs and [`read_past`] the workflow's scheduled
+//! runs through RT-8's [`Client`].
 
 use super::client::{Client, RunInfo};
 use super::time::ts;
@@ -53,6 +59,13 @@ pub enum Decision {
     },
     /// The runs could not be read: the scheduled run proceeds (fail open).
     Unreadable(String),
+    /// A train is in CI, but skipping would leave the workflow unmeasured too long (or that cannot be told): it proceeds.
+    Overdue {
+        /// The train runs found.
+        trains: Vec<TrainRun>,
+        /// Why it is not skipped.
+        why: String,
+    },
 }
 
 impl Decision {
@@ -65,6 +78,7 @@ impl Decision {
     pub fn annotation(&self) -> Option<String> {
         match self {
             Decision::NotScheduled | Decision::Run { .. } => None,
+            Decision::Overdue { trains, why } => Some(format!("::notice::{}", overdue_line(trains, why))),
             Decision::Skip { trains, .. } => Some(format!("::notice::{}", skip_line(trains))),
             Decision::Unreadable(e) => Some(format!(
                 "::warning::schedule skip: the Actions runs could not be read ({e}); this scheduled run proceeds (fail open). Check that the job token can read the repository's Actions runs."
@@ -92,6 +106,7 @@ impl Decision {
                 skip_line(trains),
                 stale(s)
             ),
+            Decision::Overdue { trains, why } => format!("### Schedule skip\n\n{}\n", overdue_line(trains, why)),
             Decision::Run { stale: s } => format!("### Schedule skip\n\nNo train is in CI: the scheduled run proceeds.{}\n", stale(s)),
             Decision::Unreadable(e) => format!(
                 "### Schedule skip\n\nNot checked: the Actions runs could not be read ({e}). The scheduled run proceeds (fail open).\n"
@@ -104,10 +119,110 @@ fn skip_line(trains: &[TrainRun]) -> String {
     let branches: BTreeSet<&str> = trains.iter().map(|t| t.branch.as_str()).collect();
     let runs: Vec<String> = trains.iter().map(|t| format!("{} {}", t.workflow, t.id)).collect();
     format!(
-        "skipped: train {} in CI (runs {}); runs on the next schedule after it lands",
+        "{}{} in CI (runs {}); runs on the next schedule after it lands",
+        SKIP_NOTICE.trim_start_matches("::notice::"),
         branches.into_iter().collect::<Vec<_>>().join(", "),
         runs.join(", ")
     )
+}
+
+fn overdue_line(trains: &[TrainRun], why: &str) -> String {
+    let branches: BTreeSet<&str> = trains.iter().map(|t| t.branch.as_str()).collect();
+    format!(
+        "not skipped although train {} is in CI: {why}",
+        branches.into_iter().collect::<Vec<_>>().join(", ")
+    )
+}
+
+/// The notice a skipped run's gate logs; [`read_past`] looks for it to tell a skipped run from a measured one.
+pub const SKIP_NOTICE: &str = "::notice::skipped: train ";
+
+/// A completed scheduled run of the workflow, newest first.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Past {
+    /// The run's id.
+    pub id: u64,
+    /// When it was created (milliseconds), when the API says.
+    pub created_ms: Option<f64>,
+    /// Whether it was skipped for a train (its gate logged [`SKIP_NOTICE`]).
+    pub train_skip: bool,
+}
+
+/// Why a skip would leave the workflow unmeasured too long, or `None` when it may skip. `past` is newest first.
+pub fn bound(workflow: &str, past: &[Past], now_ms: f64, max_gap_hours: f64) -> Option<String> {
+    if let Some(last) = past.first().filter(|p| p.train_skip) {
+        return Some(format!(
+            "its last scheduled run ({}) was already skipped for a train, and a workflow is never skipped twice in a row",
+            last.id
+        ));
+    }
+    let Some(measured) = past.iter().find(|p| !p.train_skip) else {
+        return Some(format!("no measured scheduled run of {workflow} was found"));
+    };
+    match measured.created_ms {
+        Some(c) if (now_ms - c) / 3_600_000.0 <= max_gap_hours => None,
+        Some(c) => Some(format!(
+            "its last measured scheduled run ({}) is {:.0} h old, over the {max_gap_hours:.0} h limit",
+            measured.id,
+            (now_ms - c) / 3_600_000.0
+        )),
+        None => Some(format!("the time of its last measured scheduled run ({}) is unknown", measured.id)),
+    }
+}
+
+/// A skip turned into a run when [`bound`] (or an unreadable history) says so; any other decision unchanged.
+pub fn bounded(d: Decision, workflow: &str, past: Result<Vec<Past>, String>, now_ms: f64, max_gap_hours: f64) -> Decision {
+    let Decision::Skip { trains, stale } = d else { return d };
+    let why = match past {
+        Err(e) => Some(format!(
+            "the scheduled runs of {workflow} could not be read ({e}), so the skip limit cannot be checked"
+        )),
+        Ok(p) => bound(workflow, &p, now_ms, max_gap_hours),
+    };
+    match why {
+        Some(why) => Decision::Overdue { trains, why },
+        None => Decision::Skip { trains, stale },
+    }
+}
+
+/// The workflow's completed, not cancelled scheduled runs, newest first, up to and including the newest measured one (at most
+/// eight). A run is a train skip when a job with a schedule-skip (or plan action) step logged [`SKIP_NOTICE`].
+pub fn read_past(client: &mut Client, workflow: &str) -> Result<Vec<Past>, String> {
+    let mut out = Vec::new();
+    for page in 1..=3 {
+        let p = client.runs_page_where(page, "event=schedule")?;
+        let n = p.runs.len();
+        for r in p
+            .runs
+            .iter()
+            .filter(|r| r.workflow() == workflow && r.finished() && r.conclusion != "cancelled")
+        {
+            let jobs = client.timed_jobs(r.id)?.unwrap_or_default();
+            let mut train_skip = false;
+            for j in jobs.iter().filter(|j| j.conclusion == "success") {
+                let gate = j
+                    .steps
+                    .iter()
+                    .any(|(name, _)| name.contains("actions/schedule-skip") || name.contains("actions/plan"));
+                if gate && client.log(j.id)?.is_some_and(|l| l.contains(SKIP_NOTICE)) {
+                    train_skip = true;
+                    break;
+                }
+            }
+            out.push(Past {
+                id: r.id,
+                created_ms: ts(&r.created_at),
+                train_skip,
+            });
+            if !train_skip || out.len() >= 8 {
+                return Ok(out);
+            }
+        }
+        if n < 50 {
+            break;
+        }
+    }
+    Ok(out)
 }
 
 /// The train branch a run's `path` names (`ci.yml@refs/heads/train/x` is `train/x`), `None` for any other ref.
@@ -282,6 +397,104 @@ mod tests {
         let Decision::Run { stale } = &d else { panic!("{d:?}") };
         assert_eq!(stale[0].id, 7001);
         assert!(d.summary().contains("7001 (train/2026-11-09-3)"));
+    }
+
+    fn past(id: u64, created: &str, train_skip: bool) -> Past {
+        Past {
+            id,
+            created_ms: ts(created),
+            train_skip,
+        }
+    }
+
+    fn a_skip() -> Decision {
+        decide(
+            "schedule",
+            Ok(vec![run(
+                7990,
+                "ci.yml@refs/heads/train/t",
+                "workflow_dispatch",
+                "queued",
+                "2026-11-12T05:10:00+08:00",
+            )]),
+            now(),
+        )
+    }
+
+    #[test]
+    fn a_skip_never_leaves_a_workflow_unmeasured_past_its_limit_nor_skips_twice_in_a_row() {
+        // Measured 35 h ago: inside 36 h, the skip stands.
+        let ok = vec![past(1, "2026-11-10T19:00:00+08:00", false)];
+        assert!(bounded(a_skip(), "nightly.yml", Ok(ok), now(), 36.0).skip());
+        // Measured 37 h ago: over the limit, it runs and says why.
+        let late = vec![past(1, "2026-11-10T17:00:00+08:00", false)];
+        let d = bounded(a_skip(), "nightly.yml", Ok(late), now(), 36.0);
+        assert!(!d.skip());
+        assert!(d.annotation().unwrap().contains("is 37 h old, over the 36 h limit"), "{d:?}");
+        // The last run was itself a train skip (a weekly workflow measured within its limit): never twice in a row.
+        let weekly = vec![
+            past(2, "2026-11-11T20:00:00+08:00", true),
+            past(1, "2026-11-08T20:00:00+08:00", false),
+        ];
+        assert!(
+            bounded(a_skip(), "debrief-mutants.yml", Ok(weekly.clone()), now(), 200.0)
+                .annotation()
+                .unwrap()
+                .contains("never skipped twice")
+        );
+        assert!(bounded(a_skip(), "debrief-mutants.yml", Ok(weekly[1..].to_vec()), now(), 200.0).skip());
+        // Never measured, or the history unreadable: it runs.
+        assert!(!bounded(a_skip(), "x.yml", Ok(vec![]), now(), 36.0).skip());
+        assert!(
+            bounded(a_skip(), "x.yml", Err("HTTP 500".into()), now(), 36.0)
+                .annotation()
+                .unwrap()
+                .contains("cannot be checked")
+        );
+        // Any other decision is left as it is.
+        assert_eq!(
+            bounded(Decision::NotScheduled, "x.yml", Err("x".into()), now(), 36.0),
+            Decision::NotScheduled
+        );
+    }
+
+    #[test]
+    fn the_past_runs_tell_a_train_skip_by_the_gates_notice() {
+        let api = "https://gitea.invalid/api/v1/repos/o/r/actions";
+        let mut http = Fake::default();
+        let r = |id: u64, path: &str, conclusion: &str, created: &str| json!({"id": id, "path": path, "event": "schedule", "status": "completed", "conclusion": conclusion, "created_at": created});
+        http.json(
+            &format!("{api}/runs?event=schedule&limit=50&page=1"),
+            json!({"workflow_runs": [
+                r(30, "nightly.yml@refs/heads/main", "success", "2026-11-12T05:03:00+08:00"),
+                r(29, "canary.yml@refs/heads/main", "success", "2026-11-11T22:23:00+08:00"),
+                r(28, "nightly.yml@refs/heads/main", "cancelled", "2026-11-11T05:03:00+08:00"),
+                r(27, "nightly.yml@refs/heads/main", "failure", "2026-11-10T05:03:00+08:00"),
+            ]}),
+        );
+        let job =
+            |id: u64, step: &str| json!({"id": id, "name": "gate", "conclusion": "success", "runner_id": 1, "steps": [{"name": step}]});
+        http.json(
+            &format!("{api}/runs/30/jobs?limit=50&page=1"),
+            json!({"jobs": [job(300, "Run ./.gitea/actions/plan")]}),
+        );
+        http.json(
+            &format!("{api}/runs/27/jobs?limit=50&page=1"),
+            json!({"jobs": [job(270, "Run ./.gitea/actions/plan")]}),
+        );
+        http.log(
+            300,
+            "2026-11-12T05:03:10Z ::notice::skipped: train train/x in CI (runs ci.yml 1); runs on the next schedule after it lands\n",
+        );
+        http.log(270, "2026-11-10T05:03:10Z run=true\n");
+        let mut client = Client::new(&mut http, "https://gitea.invalid", "o/r", "t");
+        client.backoff_ms = 0;
+        let p = read_past(&mut client, "nightly.yml").unwrap();
+        assert_eq!(
+            p.iter().map(|x| (x.id, x.train_skip)).collect::<Vec<_>>(),
+            [(30, true), (27, false)]
+        );
+        assert!(bound("nightly.yml", &p, now(), 36.0).unwrap().contains("never skipped twice"));
     }
 
     #[test]

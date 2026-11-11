@@ -110,6 +110,16 @@ test('the nightly builds every app\'s installers with the app\'s own release inp
   assert.match(nightly, /\n  installers-mark:\n(?:.*\n)*?    needs: \[installers-gate, installers-dyno, installers-spotter, installers-pitcrew, installers-pitwall\]\n    if: \$\{\{ github\.event_name == 'schedule' && success\(\) && needs\.installers-gate\.outputs\.run == 'true' \}\}/, 'the marker is saved only after every build, never for a skipped night');
 });
 
+test('a night ended early for a train in CI warns that it measured nothing, and the nightly passes that reason', () => {
+  const v = verdict({ app: 'dyno', event: 'schedule', planRun: 'false', skipReason: 'train', releaseResult: 'skipped' });
+  assert.equal(v.ok, true);
+  assert.equal(v.level, 'warning');
+  assert.match(v.line, /a train was in CI.*not measured, not green/);
+  assert.match(verdict({ app: 'dyno', event: 'schedule', planRun: 'false', releaseResult: 'skipped' }).line, /unchanged since the last nightly/);
+  const nightly = read('.gitea', 'workflows', 'nightly.yml');
+  assert.equal((nightly.match(/skip-reason: \$\{\{ needs\.gate\.outputs\.train_skip == 'true' && 'train' \|\| '' \}\}/g) ?? []).length, 4);
+});
+
 test('the release-verdict action is documented and runs the script', () => {
   assert.match(read('.gitea', 'actions', 'release-verdict', 'action.yml'), /conformance\/ci\/release-verdict\.mjs/);
   assert.match(read('.gitea', 'actions', 'README.md'), /\| `release-verdict` \|/);
