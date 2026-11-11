@@ -29,6 +29,19 @@ pub const CLOSE_GRACE: Duration = Duration::from_secs(5);
 /// (ER-17).
 pub const CLOSE_GRACE_KEPT: Duration = Duration::from_secs(20);
 
+/// Runs `exe --version` to its end and returns how long it took: the first execution of a browser bundle on this machine,
+/// made on its own so that a start that follows is not charged for it (ADR 0071; the same function as Spotter's copy of this
+/// driver, both over [`paddock_proc::warm_up`]).
+///
+/// On macOS the first run of a freshly installed bundle is held before its first instruction while the OS assesses it
+/// (XProtect, syspolicyd): 4.2 to 42 s for Chrome for Testing 156 on an idle Mac mini, with no CPU used and no child process,
+/// and more on a loaded host. A process in that state cannot be judged by its CPU or its output, so this waits for the process
+/// to end with no limit of its own: the caller's bound (a test runner's slow-timeout) is the guard. Failure says the exit
+/// status and the browser's output.
+pub fn warm_up(exe: &Browser) -> Result<Duration> {
+    paddock_proc::warm_up(&exe.path, &["--version"]).map_err(Error::Launch)
+}
+
 /// The close grace for a profile kind: [`CLOSE_GRACE`] for a throwaway one, [`CLOSE_GRACE_KEPT`] for a kept one.
 pub fn close_grace_for(profile: &Profile) -> Duration {
     match profile {

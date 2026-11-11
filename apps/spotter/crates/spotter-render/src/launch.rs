@@ -212,7 +212,8 @@ pub fn lifetime_with(start_limit: Duration, page_budget: Duration) -> Duration {
 }
 
 /// Runs `exe --version` to its end and returns how long it took: the first execution of a browser bundle on this machine,
-/// made on its own so that a start that follows is not charged for it.
+/// made on its own so that a start that follows is not charged for it (ADR 0071; the same function as `paddock-chromium`'s,
+/// both over [`paddock_proc::warm_up`]).
 ///
 /// On macOS the first run of a freshly installed bundle is held before its first instruction while the OS assesses it
 /// (XProtect, syspolicyd): measured 4.2 to 42.06 s for Chrome for Testing 156 on an idle Mac mini (docs/performance.md, 2026-11-11), with no CPU used by the
@@ -223,26 +224,8 @@ pub fn lifetime_with(start_limit: Duration, page_budget: Duration) -> Duration {
 ///
 /// Public, with no product caller yet: it serves the tests until the product's first-start decision (Spotter warms the browser
 /// up right after downloading it, in a "preparing the browser" step without a time limit; queued, not built).
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the browser, a GUI program: std Command, as the driver is copied between apps"
-)]
 pub fn warm_up(exe: &Browser) -> Result<Duration> {
-    let began = Instant::now();
-    let out = std::process::Command::new(&exe.path)
-        .arg("--version")
-        .stdin(std::process::Stdio::null())
-        .output()
-        .map_err(|e| Error::Launch(format!("the browser could not be run for its first start: {e}")))?;
-    if !out.status.success() {
-        let tail = stderr_tail(&out.stderr);
-        return Err(Error::Launch(format!(
-            "the browser's first run ended with {} (browser output: {})",
-            out.status,
-            if tail.is_empty() { "none" } else { &tail }
-        )));
-    }
-    Ok(began.elapsed())
+    paddock_proc::warm_up(&exe.path, &["--version"]).map_err(Error::Launch)
 }
 
 /// How long a browser gets to quit by itself after `Browser.close` before it is killed.

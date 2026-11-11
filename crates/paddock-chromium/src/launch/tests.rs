@@ -1314,3 +1314,38 @@ fn a_sweep_removes_nothing_when_the_process_table_cannot_be_read() {
     );
     assert!(!a.exists() && b.exists() && !c.exists());
 }
+
+/// `warm_up` runs the browser's `--version` to its end through the shared `paddock_proc::warm_up` (tested there against a
+/// released-by-gate stand-in) and reports a failed first run as a launch error naming the status and the output.
+#[cfg(unix)]
+#[test]
+fn warm_up_is_the_shared_first_run_and_a_failure_is_a_launch_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let base = tempfile::tempdir().unwrap();
+    let write = |name: &str, body: &str| {
+        let path = base.path().join(name);
+        std::fs::write(&path, body).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        Browser {
+            flavor: crate::discover::Flavor::Chromium,
+            path,
+        }
+    };
+    assert!(warm_up(&write("good.sh", "#!/bin/sh\necho 'Fake Chrome 1.0'\n")).is_ok());
+    let e = warm_up(&write(
+        "bad.sh",
+        "#!/bin/sh\necho 'bundle damaged' >&2\nexit 5\n",
+    ))
+    .unwrap_err();
+    assert!(matches!(e, Error::Launch(_)), "{e:?}");
+    let text = e.to_string();
+    assert!(
+        text.contains("exit status: 5") && text.contains("bundle damaged"),
+        "{text}"
+    );
+    let missing = Browser {
+        flavor: crate::discover::Flavor::Chromium,
+        path: base.path().join("nope"),
+    };
+    assert!(matches!(warm_up(&missing), Err(Error::Launch(_))));
+}
