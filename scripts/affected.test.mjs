@@ -49,6 +49,23 @@ describe('the graph of this tree', () => {
     assert.ok(r.packages['apps/shell-demo/src-tauri'].includes('paddock-shell-demo'));
   });
 
+  // Debrief 1.2 package 0.4: Debrief consumes the shared code in-tree, so a change there reaches it.
+  test('a change in crates/paddock-proc marks Debrief (Rust half, through its path dependencies)', () => {
+    const r = run('crates/paddock-proc/src/lib.rs');
+    assert.ok(r.crates);
+    assert.ok(r.apps.includes('debrief'), JSON.stringify(r.apps));
+    assert.deepEqual(r.kinds.debrief, ['rust']);
+    assert.ok(r.packages['apps/debrief'].includes('debrief-store-worker'));
+  });
+
+  test('a change in the shared ui and e2e packages marks Debrief (UI half, through its tsconfig paths)', () => {
+    for (const f of ['ui/projects/paddock-ui/src/public-api.ts', 'ui/projects/paddock-e2e/src/index.ts']) {
+      const r = run(f);
+      assert.ok(r.apps.includes('debrief'), `${f}: debrief not marked: ${JSON.stringify(r.apps)}`);
+      assert.ok(r.kinds.debrief?.includes('ui'), `${f}: debrief UI half not marked: ${JSON.stringify(r.kinds.debrief)}`);
+    }
+  });
+
   test('a crate nothing else uses marks only crates', () => {
     const leaf = [...graph.cargo].find(([d, c]) => c.workspace === 'crates' && ![...graph.cargo.values()].some((o) => o.deps.includes(d)) && d.startsWith('crates/paddock-'));
     assert.ok(leaf, 'a leaf crate exists');
@@ -75,7 +92,9 @@ describe('the graph of this tree', () => {
     const r = run('ui/projects/paddock-ui/shell/src/public-api.ts');
     assert.ok(r.ui);
     // Spotter and Dyno map @decryp7/paddock-ui to ui/dist in their tsconfig (a path edge, no npm edge); Pitwall loads its CSS.
-    assert.deepEqual(r.apps, ['dyno', 'pitwall', 'shell-demo', 'spotter', 'workbench-demo']);
+    // Debrief maps both packages the same way (package 0.4 of the 1.2 plan), so its UI half is marked too.
+    assert.deepEqual(r.apps, ['debrief', 'dyno', 'pitwall', 'shell-demo', 'spotter', 'workbench-demo']);
+    assert.deepEqual(r.kinds.debrief, ['ui']);
     assert.deepEqual(r.kinds.pitwall, ['ui']);
     assert.deepEqual(r.kinds.spotter, ['ui']);
     assert.deepEqual(r.kinds.dyno, ['ui']);
