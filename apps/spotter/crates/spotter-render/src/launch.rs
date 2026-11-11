@@ -211,6 +211,37 @@ pub fn lifetime_with(start_limit: Duration, page_budget: Duration) -> Duration {
     start_limit + page_budget + Duration::from_secs(10)
 }
 
+/// Runs `exe --version` to its end and returns how long it took: the first execution of a browser bundle on this machine,
+/// made on its own so that a start that follows is not charged for it.
+///
+/// On macOS the first run of a freshly installed bundle is held before its first instruction while the OS assesses it
+/// (XProtect, syspolicyd): measured 21 to 35 s for Chrome for Testing 156 on an idle Mac mini, with no CPU used by the
+/// browser and no child process, against 0.4 to 0.7 s for every later start; a loaded CI host stretched it past a 120 s start
+/// guard (CI runs 7918, 7929 and 7932, always the first test of the binary). A process in that state cannot be judged by
+/// its CPU or its output, so this waits for the process to end, with no time limit of its own: the caller's own bound (a test
+/// runner's slow-timeout) is the only guard. Failure says the exit status and the browser's output.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the browser, a GUI program: std Command, as the driver is copied between apps"
+)]
+pub fn warm_up(exe: &Browser) -> Result<Duration> {
+    let began = Instant::now();
+    let out = std::process::Command::new(&exe.path)
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| Error::Launch(format!("the browser could not be run for its first start: {e}")))?;
+    if !out.status.success() {
+        let tail = stderr_tail(&out.stderr);
+        return Err(Error::Launch(format!(
+            "the browser's first run ended with {} (browser output: {})",
+            out.status,
+            if tail.is_empty() { "none" } else { &tail }
+        )));
+    }
+    Ok(began.elapsed())
+}
+
 /// How long a browser gets to quit by itself after `Browser.close` before it is killed.
 pub const CLOSE_GRACE: Duration = Duration::from_secs(5);
 
@@ -774,6 +805,47 @@ mod tests {
         assert!(tail.len() <= STDERR_TAIL);
         assert!(with_stderr("failed", d.path()).ends_with("the real cause)"));
         assert!(read_stderr_tail(&d.path().join("none")).is_none());
+    }
+
+    /// A stand-in that takes its time before answering (the OS holding a first run): `warm_up` waits for it however long it
+    /// takes, with no budget of its own, and reports how long it waited.
+    #[cfg(unix)]
+    #[test]
+    fn warm_up_waits_for_a_slow_first_run_without_a_budget() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = tempfile::tempdir().unwrap();
+        let exe_path = base.path().join("slow-chrome.sh");
+        // conformance: hang-guard — the stand-in's own delay is 2 s; nothing in `warm_up` is a clock
+        std::fs::write(&exe_path, "#!/bin/sh\nsleep 2\necho 'Fake Chrome 1.0'\n").unwrap();
+        std::fs::set_permissions(&exe_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let exe = Browser {
+            flavor: crate::discover::Flavor::Chromium,
+            path: exe_path,
+        };
+        let took = warm_up(&exe).unwrap();
+        assert!(took >= Duration::from_secs(2), "{took:?}");
+    }
+
+    /// A first run that fails says its exit status and output; one that cannot be run says why.
+    #[cfg(unix)]
+    #[test]
+    fn warm_up_failures_name_the_status_and_the_output() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = tempfile::tempdir().unwrap();
+        let exe_path = base.path().join("broken-chrome.sh");
+        std::fs::write(&exe_path, "#!/bin/sh\necho 'bundle damaged' >&2\nexit 5\n").unwrap();
+        std::fs::set_permissions(&exe_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let broken = Browser {
+            flavor: crate::discover::Flavor::Chromium,
+            path: exe_path,
+        };
+        let e = warm_up(&broken).unwrap_err().to_string();
+        assert!(e.contains("exit status: 5") && e.contains("bundle damaged"), "{e}");
+        let missing = Browser {
+            flavor: crate::discover::Flavor::Chromium,
+            path: base.path().join("nope"),
+        };
+        assert!(matches!(warm_up(&missing), Err(Error::Launch(_))));
     }
 
     #[test]
