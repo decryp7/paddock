@@ -26,6 +26,7 @@ thread_local! {
 
 /// Makes the next [`remove_or_defer`] on this thread fail without touching the folder: the seam a test uses to stage a
 /// failed removal. File modes cannot stage one portably (root ignores a read-only folder, as in the Linux CI container).
+/// Unix only, like its one caller (the lone-process leak probe in `properties.rs`); unused on Windows (dead code under `-D warnings`).
 #[cfg(unix)]
 pub fn fail_next_removal() {
     FAIL_NEXT_REMOVAL.with(|f| f.set(true));
