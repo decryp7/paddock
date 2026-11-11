@@ -1,4 +1,4 @@
-import { expect, Locator, Page, test } from '@playwright/test';
+import { expect, Page, test } from '@playwright/test';
 import { gridTotal, parseCount } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith } from './mock-url';
@@ -14,15 +14,6 @@ const timelineFrom = async (page: Page) => Number(await page.locator('debrief-ti
 async function liveOn(page: Page): Promise<void> {
   await liveButton(page).click();
   await expect(liveButton(page)).toHaveAttribute('aria-pressed', 'true');
-}
-
-/**
- * Presses a button of a toast. The toast stack grows upwards from the bottom of the window, so an alert arriving between
- * the mouse going down and up on a button moves it from under the pointer and the browser sends it no click (the clock runs
- * in real time while a test acts, so alerts do arrive then). The click event goes to the button itself instead.
- */
-async function pressToastAction(toast: Locator, name: string): Promise<void> {
-  await toast.getByRole('button', { name }).dispatchEvent('click');
 }
 
 /** The `setLive` calls the mock backend received (published by `?mockLive=1`). */
@@ -117,7 +108,7 @@ test.describe('live tail: alerts', () => {
     await expect(toast).toContainText('Critical');
     await expect(toast).toContainText('Error spike');
     await expectNoSeriousViolations(page, testInfo, 'notification', 'debrief-notification-host');
-    await pressToastAction(toast, 'Show');
+    await toast.getByRole('button', { name: 'Show' }).click();
     // The evidence: errors and fatals in the alert's time range (which pauses following).
     const level = (l: string) => page.getByRole('toolbar', { name: 'Levels' }).locator(`button[data-level=${l}]`);
     await expect(level('Error')).toHaveAttribute('aria-pressed', 'true');
@@ -127,29 +118,27 @@ test.describe('live tail: alerts', () => {
     await expect(page.locator('debrief-events-grid [role=row].row').first()).toBeVisible();
   });
 
-  test('a toast arriving while a toast button is pressed does not swallow the press', async ({ page }) => {
+  test('an alert arriving while a toast button is pressed does not take the press from it', async ({ page }) => {
     await openOnClock(page, `${ALERTS}&mockLiveAlertMs=1000`);
+    await openView(page, 'Alerts');
     await liveOn(page);
     await page.clock.runFor(1_500);
     const spikes = page.getByTestId('notification').filter({ hasText: 'Error spike' });
     await expect(spikes.first()).toBeVisible();
-    // What a newer alert does between the button going down and up (Playwright's click is two events, a few ms apart): a toast
-    // below the bottom-anchored stack pushes the older one up, so the button goes up under another element and the browser
-    // sends no click to it. Stood in for by a block of the same width.
-    await page.evaluate(() =>
-      document.addEventListener(
-        'mousedown',
-        () => {
-          const newcomer = document.createElement('div');
-          newcomer.style.width = '380px';
-          newcomer.style.height = '160px';
-          document.querySelector('debrief-notification-host .stack')?.append(newcomer);
-        },
-        { once: true, capture: true },
-      ),
-    );
-    await pressToastAction(spikes.first(), 'Mute this kind for 15 min');
+    const rules = page.locator('debrief-alerts-view').getByTestId('alert-row').filter({ hasText: 'Rule: payment errors' });
+    const ruleCount = await rules.count();
+    const mute = spikes.first().getByRole('button', { name: 'Mute this kind for 15 min' });
+    // A press is two events: the next alert (a rule, due one second after the spike) arrives between the button going down
+    // and up. A toast that pushed the older one away would send the release to another element and no click to the button.
+    await mute.hover();
+    await page.mouse.down();
+    await page.clock.runFor(1_000);
+    await expect.poll(() => rules.count()).toBeGreaterThan(ruleCount);
+    await page.mouse.up();
     await expect(spikes).toHaveCount(0);
+    // Once the pointer has left, the alert that arrived meanwhile shows.
+    await page.mouse.move(0, 0);
+    await expect(page.getByTestId('notification').filter({ hasText: /Rule: payment errors/ })).toBeVisible();
   });
 
   test('mute this kind for 15 min stops its toasts', async ({ page }) => {
@@ -163,7 +152,7 @@ test.describe('live tail: alerts', () => {
     await page.clock.runFor(1_500);
     const toast = page.getByTestId('notification').filter({ hasText: 'Error spike' }).first();
     await expect(toast).toBeVisible();
-    await pressToastAction(toast, 'Mute this kind for 15 min');
+    await toast.getByRole('button', { name: 'Mute this kind for 15 min' }).click();
     await expect(page.getByTestId('notification').filter({ hasText: 'Error spike' })).toHaveCount(0);
     // The next alerts of other kinds still toast.
     await page.clock.runFor(1_000);

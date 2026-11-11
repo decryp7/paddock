@@ -8,11 +8,11 @@ import { NotificationHost } from './notification-host';
 const n = (cause: string, extra: Partial<HostNotification> = {}): HostNotification => ({ cause, severity: 'info', title: cause, dismiss: () => undefined, ...extra });
 
 describe('visibleNotifications (the one display rule)', () => {
-  it('one toast per cause: the same cause three times is one, in the newest position', () => {
+  it('one toast per cause: the same cause three times is one, with the latest content, where it first appeared', () => {
     const out = visibleNotifications([n('a', { title: 'first' }), n('b'), n('a', { title: 'third', count: 3 })]);
     expect(out.map((x) => [x.cause, x.title])).toEqual([
-      ['b', 'b'],
       ['a', 'third'],
+      ['b', 'b'],
     ]);
   });
 
@@ -69,9 +69,10 @@ describe('NotificationHost', () => {
     const { f } = setup([n('e', { severity: 'error' }), n('i')]);
     await settle(f);
     const toasts = all(f, '[data-testid=notification]');
+    // The newest comes first (see 'the newest toast enters at the top').
     expect(toasts.map((t) => [t.getAttribute('role'), t.getAttribute('data-severity')])).toEqual([
-      ['alert', 'error'],
       ['status', 'info'],
+      ['alert', 'error'],
     ]);
   });
 
@@ -114,6 +115,64 @@ describe('NotificationHost', () => {
     const f = TestBed.createComponent(NotificationHost);
     await settle(f);
     expect(all(f, '[data-testid=notification]')).toHaveLength(0);
+  });
+
+  describe('the stack does not move under the pointer', () => {
+    const order = (f: ReturnType<typeof setup>['f']) => all(f, '[data-testid=notification]').map((t) => t.getAttribute('data-cause'));
+
+    it('the newest toast enters at the top: the ones already there keep their place and their elements', async () => {
+      const { f, list } = setup([n('a')]);
+      await settle(f);
+      const before = el(f, '[data-cause=a]');
+      list.set([n('a'), n('b')]);
+      await settle(f);
+      expect(order(f)).toEqual(['b', 'a']);
+      expect(el(f, '[data-cause=a]')).toBe(before);
+    });
+
+    it('posting a cause again updates it where it is, it does not move to the top', async () => {
+      const { f, list } = setup([n('a'), n('b')]);
+      await settle(f);
+      list.set([n('a', { count: 2 }), n('b')]);
+      await settle(f);
+      expect(order(f)).toEqual(['b', 'a']);
+      expect(el(f, '[data-cause=a] [data-testid=notification-count]').textContent).toContain('×2');
+    });
+
+    it('while the pointer is in the stack, new toasts wait, nothing is dropped past the limit, and the order stays', async () => {
+      const { f, list } = setup([n('a'), n('b'), n('c')]);
+      await settle(f);
+      el(f, '[data-testid=notification-stack]').dispatchEvent(new MouseEvent('mouseenter'));
+      list.set([n('a'), n('b'), n('c'), n('d'), n('a', { count: 5 })]);
+      await settle(f);
+      expect(order(f)).toEqual(['c', 'b', 'a']);
+      expect(el(f, '[data-cause=a] [data-testid=notification-count]').textContent).toContain('×5'); // updated in place
+      el(f, '[data-testid=notification-stack]').dispatchEvent(new MouseEvent('mouseleave'));
+      await settle(f);
+      expect(order(f)).toEqual(['d', 'c', 'b']);
+    });
+
+    it('while the pointer is in the stack, a toast that goes away still goes away at once', async () => {
+      const { f, list } = setup([n('a'), n('b')]);
+      await settle(f);
+      el(f, '[data-testid=notification-stack]').dispatchEvent(new MouseEvent('mouseenter'));
+      list.set([n('a'), n('b'), n('c')]);
+      await settle(f);
+      list.set([n('a'), n('c')]);
+      await settle(f);
+      expect(order(f)).toEqual(['a']);
+    });
+
+    it('a stack that has emptied under the pointer does not hold back what arrives next', async () => {
+      const { f, list } = setup([n('a')]);
+      await settle(f);
+      el(f, '[data-testid=notification-stack]').dispatchEvent(new MouseEvent('mouseenter'));
+      list.set([]);
+      await settle(f);
+      list.set([n('z')]);
+      await settle(f);
+      expect(order(f)).toEqual(['z']);
+    });
   });
 
   describe('time', () => {
@@ -165,20 +224,31 @@ describe('NotificationHost', () => {
     it('holds a toast while the pointer or focus is on it and times it out once both have left', async () => {
       const gone: string[] = [];
       const { f } = await timed([n('a', { dismiss: () => gone.push('a'), actions: [{ label: 'Go', run: () => undefined }] })]);
-      const toast = el(f, '[data-testid=notification]');
-      toast.dispatchEvent(new MouseEvent('mouseenter'));
+      const stack = el(f, '[data-testid=notification-stack]');
+      stack.dispatchEvent(new MouseEvent('mouseenter'));
       await vi.advanceTimersByTimeAsync(TOAST_MS * 5);
       expect(gone).toEqual([]);
       el<HTMLButtonElement>(f, '[data-testid=notification-action]').focus();
-      toast.dispatchEvent(new MouseEvent('mouseleave'));
+      stack.dispatchEvent(new MouseEvent('mouseleave'));
       await vi.advanceTimersByTimeAsync(TOAST_MS * 5);
       expect(gone).toEqual([]); // focus is still inside
       el<HTMLButtonElement>(f, '[data-testid=notification-action]').blur();
-      toast.dispatchEvent(new FocusEvent('focusout', { relatedTarget: document.body }));
+      stack.dispatchEvent(new FocusEvent('focusout', { relatedTarget: document.body }));
       await vi.advanceTimersByTimeAsync(TOAST_MS - 1);
       expect(gone).toEqual([]);
       await vi.advanceTimersByTimeAsync(1);
       expect(gone).toEqual(['a']);
+    });
+
+    it('the pointer on one toast holds the time of every toast in the stack', async () => {
+      const gone: string[] = [];
+      const { f } = await timed([n('a', { dismiss: () => gone.push('a') }), n('b', { dismiss: () => gone.push('b') })]);
+      el(f, '[data-testid=notification-stack]').dispatchEvent(new MouseEvent('mouseenter'));
+      await vi.advanceTimersByTimeAsync(TOAST_MS * 5);
+      expect(gone).toEqual([]);
+      el(f, '[data-testid=notification-stack]').dispatchEvent(new MouseEvent('mouseleave'));
+      await vi.advanceTimersByTimeAsync(TOAST_MS);
+      expect(gone.sort()).toEqual(['a', 'b']);
     });
 
     it('a toast that went away loses its timer', async () => {

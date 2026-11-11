@@ -1770,3 +1770,19 @@ A survey found that Pitcrew's LocalSystem service (shipped in pitcrew-v1.0.1) st
 over its pipe, with no prompt, because ADR 0004 authorised by the pipe ACL alone; Dyno's helper already checked the caller
 per connection. Rule 77 (ER-38): privileged services authorise changing requests by the caller's OS identity, and a
 request that changes what runs elevated needs an administrator caller; user-chosen elevation needs only a risk warning.
+
+## A toast stack that moves under the pointer swallows a real click (2026-11-12)
+
+Symptom: CI run 7941 job 35690 (WebKit): "mute this kind for 15 min stops its toasts" failed on the try and the retry, an
+Error spike toast still shown after the Mute press. First hypothesis: a flaky test on a clock that runs in real time. A
+first fix made the test dispatch the click event itself, which hid the defect: a real user's click is lost the same way.
+Root cause: Debrief's notification host appended the newest toast below the older ones in a stack anchored at the bottom of
+the window, so each arrival pushed every older toast up, and a toast posted again moved to the end. A press is two events;
+an alert arriving between the button going down and up put another element under the pointer, and the browser sent the
+button no click. The same drop past the limit and re-order moved toasts too. Logs: the trace showed the rule alert and
+the press in the same millisecond, no mute logged. Fix: the newest toast enters at the top and the others keep their place
+and elements, a cause posted again updates in place, and while the pointer or focus is in the stack its time is held and
+its set of toasts is frozen (only what goes away leaves at once). Class: layout shift under the pointer in a stack of
+things that arrive on their own (toasts, banners, lists that refresh); a test that works around it with a synthetic click
+is hiding a product defect. The shared `@decryp7/paddock-ui` shell has its own copy of the host with the same stacking
+(`ui/projects/paddock-ui/shell/notify/src/notification-host.ts`), not yet changed. Source: run 7941 job 35690.

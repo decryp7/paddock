@@ -53,18 +53,22 @@ export const TOAST_MS = 8000;
 export const MAX_VISIBLE = 3;
 
 /**
- * The one display rule as a pure function: one toast per cause (the later source's entry replaces an earlier one with the
- * same cause, keeping the later position), a cause the status chip already states is never toasted, and at most `max`
- * (the newest) are shown.
+ * One toast per cause, in the order the causes first appeared (the later source's entry replaces an earlier one with the
+ * same cause and keeps its place: posting a cause again updates it where it is, so nothing moves under the pointer),
+ * without the causes the status chip already states.
  */
-export function visibleNotifications(items: readonly HostNotification[], max = MAX_VISIBLE): HostNotification[] {
+export function mergeNotifications(items: readonly HostNotification[]): HostNotification[] {
   const byCause = new Map<string, HostNotification>();
   for (const n of items) {
     if (isHealthCause(n.cause)) continue;
-    byCause.delete(n.cause);
     byCause.set(n.cause, n);
   }
-  return [...byCause.values()].slice(-max);
+  return [...byCause.values()];
+}
+
+/** The one display rule as a pure function: {@link mergeNotifications}, and at most `max` (the newest) are shown. */
+export function visibleNotifications(items: readonly HostNotification[], max = MAX_VISIBLE): HostNotification[] {
+  return mergeNotifications(items).slice(-max);
 }
 
 /** Errors, critical failures and sticky notifications stay until resolved or dismissed; the rest time out. */

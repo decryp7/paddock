@@ -226,7 +226,12 @@ describe('alert components', () => {
     expect(text(fixture)).toContain('Critical');
     expect(text(fixture)).toContain('Error spike');
     expect(text(fixture)).toContain('WEB01 · 100');
-    buttonByText(fixture, 'Show').click();
+    // The newest toast is first (the rule's): press Show on the error spike's own toast.
+    const spike = all(fixture, '[data-testid=notification]').find((t) => t.textContent?.includes('Error spike'));
+    if (!spike) throw new Error('no toast for the error spike');
+    const showButton = Array.from(spike.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Show');
+    if (!showButton) throw new Error('the error spike toast has no Show button');
+    showButton.click();
     await settle(fixture);
     expect(show).toHaveBeenCalledWith(expect.objectContaining({ kind: 'errorSpike' }));
     expect(all(fixture, '[data-testid=notification]').length).toBe(1);

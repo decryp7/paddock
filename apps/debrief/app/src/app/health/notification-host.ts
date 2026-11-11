@@ -1,13 +1,18 @@
 import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, inject, signal } from '@angular/core';
 import { Icon } from '../shared/icon';
-import { HostAction, HostNotification, NOTIFICATION_SOURCES, persists, TOAST_MS, visibleNotifications } from './notification-host.model';
+import { HostAction, HostNotification, MAX_VISIBLE, mergeNotifications, NOTIFICATION_SOURCES, persists, TOAST_MS } from './notification-host.model';
 
 /**
  * The one place notifications appear (ADR 0055), replacing a separate toast component per feature. One toast per cause,
  * details collapsed behind "Details", updated in place; errors and critical failures stay until resolved or dismissed;
  * a cause the status chip states (`health:...`) is never toasted. The host owns the time of every toast (sources only post, update
- * and resolve): a toast that times out stays `TOAST_MS`, is held while the pointer or focus is on it, and starts over when its
- * cause is posted again. Mounted once per window.
+ * and resolve): a toast that times out stays `TOAST_MS`, and starts over when its cause is posted again. Mounted once per window.
+ *
+ * Nothing moves under the pointer. The stack is anchored at the bottom of the window, so the newest toast enters at the top (the
+ * DOM lists the newest first, as they appear) and the ones already there keep their place; a cause posted again is updated in
+ * place. While the pointer or focus is anywhere in the stack, its time is held and its set of toasts is frozen: a new toast waits,
+ * nothing is dropped past `MAX_VISIBLE`, and the order stays; only what goes away (dismissed, resolved, muted) leaves at once. A
+ * press is two events, and a layout change between them would send the click to another element.
  */
 @Component({
   selector: 'debrief-notification-host',
@@ -15,7 +20,8 @@ import { HostAction, HostNotification, NOTIFICATION_SOURCES, persists, TOAST_MS,
   imports: [Icon],
   host: { 'data-snapshot-ignore': '' },
   template: `
-    <div class="stack" role="region" aria-label="Notifications" i18n-aria-label="@@health.host.region" aria-live="polite">
+    <div class="stack" data-testid="notification-stack" role="region" aria-label="Notifications" i18n-aria-label="@@health.host.region" aria-live="polite"
+         (mouseenter)="enter()" (focusin)="enter()" (mouseleave)="leave($event)" (focusout)="leave($event)">
       @for (n of items(); track n.cause) {
         <div
           class="toast"
@@ -25,10 +31,6 @@ import { HostAction, HostNotification, NOTIFICATION_SOURCES, persists, TOAST_MS,
           [attr.data-cause]="n.cause"
           data-testid="notification"
           [attr.role]="persistent(n) ? 'alert' : 'status'"
-          (mouseenter)="hold(n)"
-          (focusin)="hold(n)"
-          (mouseleave)="leave(n, $event)"
-          (focusout)="leave(n, $event)"
         >
           <div class="head">
             <debrief-icon [name]="icon(n)" [size]="15" />
@@ -60,7 +62,7 @@ import { HostAction, HostNotification, NOTIFICATION_SOURCES, persists, TOAST_MS,
   `,
   styles: `
     :host { position: fixed; right: 16px; bottom: 32px; z-index: 1900; pointer-events: none; }
-    .stack { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+    .stack { pointer-events: auto; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
     .toast { pointer-events: auto; position: relative; width: 380px; max-width: calc(100vw - 32px); box-sizing: border-box; padding: 10px 32px 10px 12px; border: 1px solid var(--border-2); border-left: 3px solid var(--accent); border-radius: 8px; background: var(--bg-3); color: var(--text); box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-md); }
     .toast[data-severity='success'] { border-left-color: var(--ok); }
     .toast[data-severity='warning'] { border-left-color: var(--lvl-warn); }
@@ -79,7 +81,18 @@ import { HostAction, HostNotification, NOTIFICATION_SOURCES, persists, TOAST_MS,
 })
 export class NotificationHost {
   private readonly sources = inject(NOTIFICATION_SOURCES, { optional: true }) ?? [];
-  protected readonly items = computed(() => visibleNotifications(this.sources.flatMap((s) => s.items())));
+  /** Every toast, oldest first (not yet cut to `MAX_VISIBLE`). */
+  private readonly merged = computed(() => mergeNotifications(this.sources.flatMap((s) => s.items())));
+  /** The causes on screen when the pointer or focus came into the stack, oldest first; null while it is outside. */
+  private readonly frozen = signal<readonly string[] | null>(null);
+  /** What is shown, newest first: the live set, or while frozen the frozen causes that are still posted (updated in place). */
+  protected readonly items = computed(() => {
+    const merged = this.merged();
+    const frozen = this.frozen();
+    const kept = frozen === null ? [] : frozen.map((c) => merged.find((n) => n.cause === c)).filter((n): n is HostNotification => !!n);
+    // A stack that emptied under the pointer has nothing left to protect: what arrives next shows.
+    return (kept.length ? kept : merged.slice(-MAX_VISIBLE)).slice().reverse();
+  });
   private readonly opened = signal<ReadonlySet<string>>(new Set());
   /** An action that rejected: why, until the next try. */
   protected readonly failed = signal<Record<string, string>>({});
@@ -90,8 +103,8 @@ export class NotificationHost {
 
   /** Per cause: the occurrence the running timer belongs to, and the timer. */
   private readonly timers = new Map<string, { key: string; handle: ReturnType<typeof setTimeout> | undefined }>();
-  /** Causes the pointer or focus is on. */
-  private readonly held = new Set<string>();
+  /** The pointer or focus is in the stack: no toast's time runs. */
+  private held = false;
 
   constructor() {
     // Timers are outside the signal graph: one per toast that times out, started when it appears or is posted again.
@@ -105,7 +118,6 @@ export class NotificationHost {
       if (live.has(cause)) continue;
       clearTimeout(t.handle);
       this.timers.delete(cause);
-      this.held.delete(cause);
     }
     for (const n of items) {
       if (persists(n)) continue;
@@ -113,7 +125,7 @@ export class NotificationHost {
       const current = this.timers.get(n.cause);
       if (current?.key === key) continue;
       clearTimeout(current?.handle);
-      this.timers.set(n.cause, { key, handle: this.held.has(n.cause) ? undefined : this.start(n) });
+      this.timers.set(n.cause, { key, handle: this.held ? undefined : this.start(n) });
     }
   }
 
@@ -121,11 +133,12 @@ export class NotificationHost {
     return setTimeout(() => n.dismiss(), n.ttl ?? TOAST_MS);
   }
 
-  /** The pointer or focus is on a toast: its time stops. */
-  protected hold(n: HostNotification): void {
-    this.held.add(n.cause);
-    const t = this.timers.get(n.cause);
-    if (t) {
+  /** The pointer or focus came into the stack: the time of every toast stops and the set of toasts is frozen. */
+  protected enter(): void {
+    if (this.held) return;
+    this.held = true;
+    this.frozen.set(this.items().map((n) => n.cause).reverse());
+    for (const t of this.timers.values()) {
       clearTimeout(t.handle);
       t.handle = undefined;
     }
@@ -152,17 +165,19 @@ export class NotificationHost {
     });
   }
 
-  /** The pointer or focus left a toast: once neither is on it, its timer runs again. */
-  protected leave(n: HostNotification, e: MouseEvent | FocusEvent): void {
-    const toast = e.currentTarget as HTMLElement;
-    const focusStays = e instanceof FocusEvent ? toast.contains(e.relatedTarget as Node | null) : toast.contains(document.activeElement);
-    const pointerStays = e instanceof FocusEvent && toast.matches(':hover');
-    if (focusStays || pointerStays) return;
-    this.held.delete(n.cause);
-    const t = this.timers.get(n.cause);
-    if (t && !persists(n)) {
+  /** The pointer or focus left the stack: once neither is in it, the toasts' time runs again and the waiting ones appear. */
+  protected leave(e: MouseEvent | FocusEvent): void {
+    const stack = e.currentTarget as HTMLElement;
+    const focusStays = e instanceof FocusEvent ? stack.contains(e.relatedTarget as Node | null) : stack.contains(document.activeElement);
+    const pointerStays = e instanceof FocusEvent && stack.matches(':hover');
+    if (focusStays || pointerStays || !this.held) return;
+    this.held = false;
+    this.frozen.set(null);
+    this.sync(this.items());
+    for (const [cause, t] of this.timers) {
+      const n = this.items().find((x) => x.cause === cause);
       clearTimeout(t.handle);
-      t.handle = this.start(n);
+      t.handle = n && !persists(n) ? this.start(n) : undefined;
     }
   }
 
