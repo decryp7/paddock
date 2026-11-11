@@ -96,7 +96,7 @@ if [ -n "$hook" ]; then node "$here/before-build.mjs" --app-dir "$app_dir"; fi
     echo '::warning::No updater signing secrets: this build cannot update itself.'
   fi
   if [ -n "$hook" ]; then
-    echo '{"build":{"beforeBuildCommand":""}}' > ../target/no-hook.conf.json
+    echo '{"build":{"beforeBuildCommand":null}}' > ../target/no-hook.conf.json
     extra=(${extra[@]+"${extra[@]}"} --config ../target/no-hook.conf.json)
   fi
   rc=0

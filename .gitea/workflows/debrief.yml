@@ -1021,7 +1021,7 @@ jobs:
           # The UI and sidecar builds (beforeBuildCommand, merged with tauri.sidecars.conf.json) run here without the key;
           # tauri build gets a configuration that empties the hook (ADR 0085 D7).
           node ../../../conformance/ci/before-build.mjs --app-dir . --config src-tauri/tauri.sidecars.conf.json
-          echo '{"build":{"beforeBuildCommand":""}}' > ../target/no-hook.conf.json
+          echo '{"build":{"beforeBuildCommand":null}}' > ../target/no-hook.conf.json
           # The key is in the environment of this one command only, never in its arguments (updater_key_exec).
           updater_key_exec npx tauri build --bundles "$bundles" --config src-tauri/tauri.sidecars.conf.json ${extra[@]+"${extra[@]}"} --config ../target/no-hook.conf.json -- --profile dist
           case ",$bundles," in *,nsis,* | *,appimage,*) node ../../../conformance/ci/tauri-tools.mjs check --bundles "$bundles" --src-tauri src-tauri ;; esac

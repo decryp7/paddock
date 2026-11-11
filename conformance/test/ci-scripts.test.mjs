@@ -320,7 +320,7 @@ test('tauri-bundle: the app\'s beforeBuildCommand runs before tauri build withou
   assert.ok(hook >= 0 && hook < build, 'the hook ran first');
   assert.equal(log[hook], 'hook in app [key=unset|debug=false]');
   assert.match(log[build], /--config \.\.\/target\/no-hook\.conf\.json -- --profile dist$/, 'the emptying configuration comes last');
-  assert.deepEqual(JSON.parse(readFileSync(join(root, 'target/no-hook.conf.json'), 'utf8')), { build: { beforeBuildCommand: '' } });
+  assert.deepEqual(JSON.parse(readFileSync(join(root, 'target/no-hook.conf.json'), 'utf8')), { build: { beforeBuildCommand: null } }, 'null: the merge patch deletes the key, so tauri build has no hook');
   // A failing hook stops before tauri build.
   const bad = signedRepo();
   writeFileSync(join(bad, 'app/src-tauri/tauri.conf.json'), JSON.stringify({ version: '1.2.3', build: { beforeBuildCommand: 'exit 4' } }));
