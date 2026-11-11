@@ -107,14 +107,19 @@
 
 ; Installs the VC++ runtime when the PC lacks it or has an older one (the package itself also skips the install when a newer one is there).
 ; The pinned version is 14.52.37029 (vc-redist.lock.json): the registry value Major.Minor.Bld of HKLM\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64
-; says what is installed, and nothing is run when that is the pinned version or newer. Exit codes of the package: 0 installed, 1638 a newer
-; version is installed, 3010 and 1641 installed but a restart is advised (the engine starts without one; /norestart keeps the PC from
-; restarting, and SetRebootFlag asks the installer's finish page to offer it), 1618 another installation is running. A package that
-; did not start ("error"), one that did not finish in 10 minutes ("timeout"), 1618 and any other code are shown in the details and, in a normal run, in a message: Pitwall installs, and the
-; engine's self-test then names the missing runtime and the next step (engines.rs).
+; says what is installed, and nothing is run when that is the pinned version or newer. The x64 key is read in the 64-bit registry view:
+; this installer is for an x64 target, whose template already works in that view (SetRegView 64), and the macro sets it again and leaves it.
+; Exit codes of the package: 0 installed, 1638 a newer version is installed, 3010 and 1641 installed but a restart is advised (the engine
+; starts without one; /norestart keeps the PC from restarting; no reboot flag is set, which would make the finish page offer "Reboot now"
+; first), 1618 another installation is running. A package that could not be started ("error"), one that was stopped after the time limit
+; ("timeout": nsExec ends the process) and any other code are shown in the details and, in a normal run, in a message: Pitwall installs, and the
+; engine's self-test then names the missing runtime and the next step (engines.rs). The limit is 5 minutes: the package took 25 s on the
+; test VM (measured 2026-11-11, fresh install of this installer, redist log dd_vcredist_amd64_*.log in %TEMP%), so a longer wait means it is stuck.
+; ARM64: no ARM64 installer is built; the x64 installer was run only under emulation on Windows 11 ARM64 (it installed the runtime there).
 !define PITWALL_VC_MAJOR 14
 !define PITWALL_VC_MINOR 52
 !define PITWALL_VC_BLD 37029
+!define PITWALL_VC_TIMEOUT_MS 300000
 !macro _PITWALL_INSTALL_VC_RUNTIME
   Push $0
   Push $1
@@ -141,24 +146,26 @@
   SetOutPath "$PLUGINSDIR"
   File "${PITWALL_WINDOWS_DIR}\vc_redist.x64.exe"
   DetailPrint "Installing the Microsoft Visual C++ runtime (vc_redist.x64.exe)"
-  ; nsExec waits at most 10 minutes (a package stuck behind another installation, Windows Update for example, must not hold the
-  ; installer for ever; it keeps running and finishes on its own). The result is the exit code, "error" (it could not be started)
-  ; or "timeout".
-  nsExec::Exec /TIMEOUT=600000 '"$PLUGINSDIR\vc_redist.x64.exe" /install /quiet /norestart'
+  ; nsExec stops (terminates) the package after the limit, so a stuck one cannot hold the installer for ever. The result is the
+  ; exit code, "error" (it could not be started) or "timeout".
+  nsExec::Exec /TIMEOUT=${PITWALL_VC_TIMEOUT_MS} '"$PLUGINSDIR\vc_redist.x64.exe" /install /quiet /norestart'
   Pop $0
   DetailPrint "vc_redist.x64.exe: exit code $0"
   Delete "$PLUGINSDIR\vc_redist.x64.exe"
   ${If} $0 == 3010
   ${OrIf} $0 == 1641
-    SetRebootFlag true
     DetailPrint "The Visual C++ runtime is installed; Windows advises a restart (the engine starts without one)."
   ${ElseIf} $0 == 0
   ${OrIf} $0 == 1638
     ; installed, or a newer version is there already
   ${ElseIf} $0 == "timeout"
-    DetailPrint "WARNING the Visual C++ runtime package did not finish within 10 minutes (another installation or Windows Update may be running); it keeps running."
+    DetailPrint "WARNING the Visual C++ runtime package did not finish within 5 minutes and was stopped (see dd_vcredist_amd64_*.log in %TEMP%). Install it from https://aka.ms/vc14/vc_redist.x64.exe, then restart Pitwall."
     IfSilent vc_runtime_done
-      MessageBox MB_ICONEXCLAMATION|MB_OK "Pitwall is installed, but the Microsoft Visual C++ runtime did not finish installing within 10 minutes (another installation or Windows Update may be running). It keeps installing in the background; restart Pitwall when it is done. The llama.cpp engine cannot start without it."
+      MessageBox MB_ICONEXCLAMATION|MB_OK "Pitwall is installed, but the Microsoft Visual C++ runtime did not finish installing within 5 minutes and was stopped. The llama.cpp engine cannot start without it. Install it from https://aka.ms/vc14/vc_redist.x64.exe, then restart Pitwall."
+  ${ElseIf} $0 == "error"
+    DetailPrint "WARNING the Visual C++ runtime package could not be started. Install it from https://aka.ms/vc14/vc_redist.x64.exe"
+    IfSilent vc_runtime_done
+      MessageBox MB_ICONEXCLAMATION|MB_OK "Pitwall is installed, but the Microsoft Visual C++ runtime package could not be started. The llama.cpp engine cannot start without it. Install it from https://aka.ms/vc14/vc_redist.x64.exe, then restart Pitwall."
   ${ElseIf} $0 == 1618
     DetailPrint "WARNING the Visual C++ runtime was not installed: another installation is running (exit code 1618)."
     IfSilent vc_runtime_done

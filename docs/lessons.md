@@ -1776,7 +1776,7 @@ hypothesis, that the self-test or the pinned asset was wrong, was refuted by the
 the binaries an installer ships, never one fetched at run time; CI runners have Visual Studio's runtime, so every run was green (the 2026-10-30 lesson
 above, reached through a download). **Fix:** the Windows installer runs the pinned `vc_redist.x64.exe` (Microsoft recommends central
 deployment because it services the libraries: redistributing-visual-cpp-files), the engine's exit status `0xC0000135` is
-explained by `engines::exit_problem` with the next step, and the installer build is proven on a clean VM. **Class:** a
+explained by `engines::exit_problem` with the next step, and a fresh install of the CI-built installer (run 7931 artifact, sha256 00bbd3a93b44c8927320f29ef45c7cb98449ef82f2e309b4690c5faa09c22291) on the Paddock test VM clean-baseline (Windows 11 ARM64 build 26300, 2026-11-11) ran the pinned vc_redist (exit 0, 25 s) and the engine self-test passed; the update over 1.0.3 is not yet proven. **Class:** a
 dependency the build machine has and a user's PC lacks, introduced through a binary no build step sees (second instance after the
 Dyno sidecar lesson); proposed for a redesign ADR: every downloaded or staged executable has a declared runtime-dependency check
 at install time.
