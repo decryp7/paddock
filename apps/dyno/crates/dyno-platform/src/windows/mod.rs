@@ -10,6 +10,7 @@ pub mod net;
 pub mod nt_query;
 pub mod pdh;
 pub mod power;
+pub mod startup;
 pub mod topology;
 pub mod traffic;
 pub mod wake_timer;
@@ -22,14 +23,13 @@ use dyno_core::ports::PlatformError;
 use std::path::{Path, PathBuf};
 
 const NO_LOCKS: &str = "Dyno does not read which programs hold a file on Windows yet.";
-const NO_STARTUP: &str = "Dyno does not read Windows startup items yet.";
 
 /// The ports for Windows.
 pub fn platform(secrets_dir: &std::path::Path) -> Platform {
     Platform {
-        // The ports without a Windows reader yet say so; they are never a fake (ADR 0033). WP-4 and WP-6 replace them.
+        // The ports without a Windows reader yet say so; they are never a fake (ADR 0033). WP-6 replaces the locks one.
         locks: Box::new(NotReadHere::new("File locks", NO_LOCKS)),
-        startup: Box::new(NotReadHere::new("Startup items", NO_STARTUP)),
+        startup: Box::new(startup::os_startup()),
         facts: Box::new(facts::os_facts()),
         sensors: Box::new(SysinfoSensors::new(Box::new(pdh::WinProbe::new()))),
         processes: Box::new(SysinfoProcesses::new(Box::new(NoDetails)).with_nt(Box::new(nt_query::NtQuery::load()))),

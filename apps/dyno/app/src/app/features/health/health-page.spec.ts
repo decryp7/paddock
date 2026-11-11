@@ -32,6 +32,30 @@ describe('dy-health-page', () => {
     expect(el.querySelectorAll('[aria-label="Start-up items"] [role="row"][data-key]').length).toBe(store.startup().length);
   });
 
+  it('disables "Hide signed apps" and says why when the engine reads no signer, and shows the coverage sentence', async () => {
+    const { f, el, mock } = render();
+    await settle(f);
+    const signed = () => el.querySelector<HTMLInputElement>('[data-testid="hide-signed"] input')!;
+    expect(signed().disabled).toBe(false);
+    expect(signed().getAttribute('aria-describedby') ?? '').toBe('');
+    expect(el.querySelector('[data-testid="signer-not-read"]')).toBeNull();
+    expect(el.querySelector('[data-testid="startup-coverage"]')).toBeNull();
+    // A remembered "hide signed" from another system must not read as active while the filter cannot work.
+    TestBed.inject(ViewPrefs).setStartupFilter({ hideOs: false, hideSigned: true });
+    const real = mock.startupOverview.bind(mock);
+    vi.spyOn(mock, 'startupOverview').mockImplementation(async (filter) => ({ ...(await real(filter)), signerRead: false, coverage: 'Lists Run entries.' }));
+    await TestBed.inject(HealthStore).loadStartup(TestBed.inject(ViewPrefs).startupFilter());
+    await settle(f);
+    expect(signed().disabled).toBe(true);
+    expect(signed().checked).toBe(false);
+    expect(el.querySelector('[data-testid="signer-not-read"]')?.textContent).toContain('Signer not read on this system yet');
+    expect(el.querySelector('[data-testid="startup-coverage"]')?.textContent).toBe('Lists Run entries.');
+    // The disabled box points at the sentence that says why, so a screen reader reads both.
+    const sentence = el.querySelector('[data-testid="signer-not-read"]')!;
+    expect(sentence.id).not.toBe('');
+    expect(signed().getAttribute('aria-describedby')).toBe(sentence.id);
+  });
+
   it('only shows start-up items: no switch, no delay, no helper prompt', async () => {
     const { f, el } = render();
     await settle(f);

@@ -249,6 +249,38 @@ fn the_startup_list_is_filtered_by_the_engine_with_counts() {
     .is_err());
 }
 
+#[test]
+fn the_overview_carries_the_readers_signer_and_coverage_answers() {
+    let ask_overview = |h: &Harness| {
+        let peer = h.client();
+        let Reply::StartupOverview(o) = ask(
+            &peer,
+            Request::StartupOverview {
+                filter: StartupFilter::default(),
+            },
+        )
+        .unwrap() else {
+            panic!("overview")
+        };
+        *o
+    };
+    // A reader that reads publishers and says nothing about coverage.
+    let reads = Harness::start(|f| f.with(|s| s.startup = vec![startup("a", "/tmp/a", None)]));
+    let o = ask_overview(&reads);
+    assert!(o.signer_read);
+    assert_eq!(o.coverage, None);
+    // One that does not (the Windows reader) and covers a stated set.
+    let blind = Harness::start(|f| {
+        f.with(|s| {
+            s.startup_signer_unread = true;
+            s.startup_coverage = Some("Lists X.".into());
+        })
+    });
+    let o = ask_overview(&blind);
+    assert!(!o.signer_read);
+    assert_eq!(o.coverage.as_deref(), Some("Lists X."));
+}
+
 fn net(links: Vec<Link>, ssid: Option<&str>) -> NetState {
     NetState {
         links,

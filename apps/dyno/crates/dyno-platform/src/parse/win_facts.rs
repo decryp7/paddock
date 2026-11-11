@@ -117,6 +117,20 @@ pub fn effective_power_plan(scheme: Option<&str>, friendly_name: Option<&str>, o
 const OVERLAY_BEST_EFFICIENCY: &str = "961cc777-2547-4f9d-8174-7d86181b8a7a";
 /// "Better performance" (`OVERLAY_SCHEME_HIGH`).
 const OVERLAY_BETTER_PERFORMANCE: &str = "3af9b8d9-7c97-431d-ad78-34a8bfea439f";
+/// The overlay GUID the OS reported that this Dyno does not know (so the scheme alone is reported), for the caller to log. `None`
+/// for no overlay, a known one, a failed call or text that is not a GUID.
+pub fn unknown_overlay(overlay: &Overlay) -> Option<String> {
+    let Overlay::Read(g) = overlay else { return None };
+    let g = guid_lower(g)?;
+    let known = [
+        NIL_GUID,
+        OVERLAY_BEST_EFFICIENCY,
+        OVERLAY_BETTER_PERFORMANCE,
+        OVERLAY_BEST_PERFORMANCE,
+    ];
+    (!known.contains(&g.as_str())).then_some(g)
+}
+
 /// "No overlay".
 const NIL_GUID: &str = "00000000-0000-0000-0000-000000000000";
 /// "Best performance" (`OVERLAY_SCHEME_MAX`).
@@ -156,16 +170,11 @@ pub fn power_plan(scheme: Option<&str>, friendly_name: Option<&str>, overlay: Op
             name: format!("{name} ({label})"),
             id,
         },
-        (other, _) => {
-            if let Some(unknown) = other.as_deref().filter(|g| *g != NIL_GUID) {
-                log::warn!(target: "dyno::facts", "power_plan: an overlay this Dyno does not know ({unknown}); the scheme alone is reported");
-            }
-            PowerPlan {
-                power_saver: scheme_saver,
-                name,
-                id: scheme,
-            }
-        }
+        _ => PowerPlan {
+            power_saver: scheme_saver,
+            name,
+            id: scheme,
+        },
     })
 }
 
@@ -384,6 +393,20 @@ mod tests {
         // Garbage and nothing.
         assert!(power_plan(None, Some("x"), None).is_none());
         assert!(power_plan(Some("not a guid"), None, None).is_none());
+    }
+
+    #[test]
+    fn an_unknown_overlay_is_returned_for_the_caller_to_log() {
+        let read = |g: &str| Overlay::Read(g.into());
+        assert_eq!(
+            unknown_overlay(&read("12345678-1234-1234-1234-123456789ABC")).as_deref(),
+            Some("12345678-1234-1234-1234-123456789abc")
+        );
+        assert_eq!(unknown_overlay(&read("00000000-0000-0000-0000-000000000000")), None);
+        assert_eq!(unknown_overlay(&read("3AF9B8D9-7C97-431D-AD78-34A8BFEA439F")), None);
+        assert_eq!(unknown_overlay(&read("not a guid")), None);
+        assert_eq!(unknown_overlay(&Overlay::NotPresent), None);
+        assert_eq!(unknown_overlay(&Overlay::Failed(5)), None);
     }
 
     #[test]

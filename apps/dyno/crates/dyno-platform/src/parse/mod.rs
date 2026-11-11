@@ -29,4 +29,5 @@ pub mod wifi;
 pub mod win_estats;
 pub mod win_facts;
 pub mod win_indirect;
+pub mod win_startup;
 pub mod win_tcp;

@@ -17,6 +17,10 @@ interface HealthState {
   startupUnavailable: string[];
   /** Who read the login items and background tasks (macOS). */
   startupBtmVia: ReadVia;
+  /** False when the system's reader gives no publishers: the "Hide signed apps" filter is disabled. */
+  startupSignerRead: boolean;
+  /** What the list covers and does not (Windows), shown under it. */
+  startupCoverage: string | null;
   startupError: CommandError | null;
 }
 
@@ -29,6 +33,8 @@ const initial: HealthState = {
   startupLoaded: false,
   startupUnavailable: [],
   startupBtmVia: 'local',
+  startupSignerRead: true,
+  startupCoverage: null,
   startupError: null,
 };
 
@@ -52,7 +58,7 @@ export const HealthStore = signalStore(
         patchState(store, { startupError: null });
         try {
           const o = await backend.startupOverview(filter);
-          patchState(store, { startup: o.entries, startupCounts: { total: o.total, os: o.osCount, signed: o.signedCount }, startupLoaded: true, startupUnavailable: o.unavailable, startupBtmVia: o.btmVia });
+          patchState(store, { startup: o.entries, startupCounts: { total: o.total, os: o.osCount, signed: o.signedCount }, startupLoaded: true, startupUnavailable: o.unavailable, startupBtmVia: o.btmVia, startupSignerRead: o.signerRead, startupCoverage: o.coverage });
         } catch (e) {
           patchState(store, { startupError: toCommandError(e) });
         }

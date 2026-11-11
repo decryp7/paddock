@@ -76,6 +76,9 @@ use serde::{Deserialize, Serialize};
 /// The bytes are pinned by `tests/health_wire.rs`.
 /// `LiveVia` (inside `LiveUpdate.via`, `Message::Live`) also gained `processes_hint: Option<String>` at the end, always sent (postcard
 /// has no skipped fields); like the other `via` fields it is unreleased and pinned by `tests/read_via_wire.rs` and `read-via.wire.json`.
+///
+/// Also in version 8 (still unreleased, so no further bump; ADR 0033, WP-4): `StartupOverview` gained `signer_read` and `coverage`, and
+/// `StartupLocation` gained `UserRunOnceKey`, `MachineRunOnceKey` and `PackagedApp` appended after `LoginItem`. `tests/startup_wire.rs` pins both.
 pub const PROTOCOL_VERSION: u32 = 8;
 
 /// The major version the IPC handshake carries between the app (or the command line) and the agent: [`PROTOCOL_VERSION`], so a
