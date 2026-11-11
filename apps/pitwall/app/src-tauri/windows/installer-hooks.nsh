@@ -113,8 +113,10 @@
 ; starts without one; /norestart keeps the PC from restarting; no reboot flag is set, which would make the finish page offer "Reboot now"
 ; first), 1618 another installation is running. A package that could not be started ("error"), one that was stopped after the time limit
 ; ("timeout": nsExec ends the process) and any other code are shown in the details and, in a normal run, in a message: Pitwall installs, and the
-; engine's self-test then names the missing runtime and the next step (engines.rs). The limit is 5 minutes: the package took 25 s on the
-; test VM (measured 2026-11-11, fresh install of this installer, redist log dd_vcredist_amd64_*.log in %TEMP%), so a longer wait means it is stuck.
+; engine's self-test then names the missing runtime and the next step (engines.rs). The limit is 5 minutes: on the test VM the package took 20 to 36 s
+; in four healthy runs (2026-11-11: fresh install 25 s, over 1.0.3 33 s and 36 s, direct 20 s; dd_vcredist_amd64_*.log in %TEMP%). Three earlier runs
+; of the update over 1.0.3 hung for 4 to 13+ minutes while the VM was very slow (SSH ready after 6 to 20+ minutes, not 1); the cause is not
+; confirmed (lesson 2026-11-11).
 ; ARM64: no ARM64 installer is built; the x64 installer was run only under emulation on Windows 11 ARM64 (it installed the runtime there).
 !define PITWALL_VC_MAJOR 14
 !define PITWALL_VC_MINOR 52

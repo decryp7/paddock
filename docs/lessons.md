@@ -1780,3 +1780,12 @@ explained by `engines::exit_problem` with the next step, and a fresh install of 
 dependency the build machine has and a user's PC lacks, introduced through a binary no build step sees (second instance after the
 Dyno sidecar lesson); proposed for a redesign ADR: every downloaded or staged executable has a declared runtime-dependency check
 at install time.
+**Update over 1.0.3 (open, ER-28).** The silent 1.1.0 installer over an installed 1.0.3 hung in three early VM runs (4 to 13+ minutes; its
+`vc_redist.x64.exe` children were alive with no `msiexec` yet, next to `MicrosoftEdgeUpdateSetup`). Plausible causes and what each
+measurement showed: a busy Windows Installer (the `_MSIExecute` mutex or `msiexec`: not held in the later runs, and the redist
+finished in 20 to 36 s while `TiWorker`, `TrustedInstaller` and `MicrosoftEdgeUpdate` were running); a pending reboot
+(`PendingFileRenameOperations` after the 1.0.3 install, present in the runs that passed); Burn's package cache (the log shows it
+caches and installs normally); the Edge update (running in the passing runs too). Four later runs did not reproduce it (the redist
+directly right after the 1.0.3 install, the 1.1.0 installer right after it, and after a 5-minute wait): 20 to 36 s each. The hung runs
+had a very slow VM (SSH ready after 6 to 20+ minutes, against about 1 minute later), so host disk contention is the best guess; it is
+not confirmed. The installer therefore bounds its wait at 5 minutes and says what to do (the hook comment has the numbers).
