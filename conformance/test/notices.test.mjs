@@ -64,6 +64,14 @@ test('render is deterministic, deduplicates texts and does not depend on input o
   assert.doesNotMatch(a.markdown, /\r/);
 });
 
+test('bundled components are appended verbatim under their own heading', () => {
+  const rust = rustCrates([aboutJson([['alpha', '2.0.0', 'MIT']])]);
+  const none = render(rust.packages, [], 'Pitwall').markdown;
+  const comp = '### A vendor package  \r\n\r\nSome words.\r\n';
+  const withComp = render(rust.packages, [], 'Pitwall', [comp]).markdown;
+  assert.equal(withComp, `${none.trimEnd()}\n\n## Bundled components\n\n### A vendor package\n\nSome words.\n`);
+});
+
 test('a vendored copy of a third-party crate is listed although it is a path dependency; first-party path crates are not', () => {
   const doc = (root) => ({
     crates: [

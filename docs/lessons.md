@@ -1823,3 +1823,28 @@ A survey found that Pitcrew's LocalSystem service (shipped in pitcrew-v1.0.1) st
 over its pipe, with no prompt, because ADR 0004 authorised by the pipe ACL alone; Dyno's helper already checked the caller
 per connection. Rule 77 (ER-38): privileged services authorise changing requests by the caller's OS identity, and a
 request that changes what runs elevated needs an administrator caller; user-chosen elevation needs only a risk warning.
+
+## A downloaded engine needed the VC++ runtime and no installer check could see it (Pitwall, 2026-11-11)
+
+On a clean Windows PC the llama.cpp `llama-server.exe` Pitwall downloads (pin b11669) exits with `0xC0000135`
+(`STATUS_DLL_NOT_FOUND`): its archive imports `vcruntime140.dll` and `msvcp140.dll` and ships neither, so the engine's `--version`
+self-test failed and the install was discarded with "it could not start" or an empty `--version failed:`. Measured on the Paddock
+test VM `clean-baseline` (speech spike 2026-11-11, section 6); shipped since pitwall-v1.0.3 (same pin, same self-test). The first
+hypothesis, that the self-test or the pinned asset was wrong, was refuted by the same binary starting after Microsoft's
+`vc_redist` was installed. Root cause: ADR 0032's import check (`conformance/ci/tauri-bundle.sh` runs it for every NSIS bundle) sees only
+the binaries an installer ships, never one fetched at run time; CI runners have Visual Studio's runtime, so every run was green (the 2026-10-30 lesson
+above, reached through a download). **Fix:** the Windows installer runs the pinned `vc_redist.x64.exe` (Microsoft recommends central
+deployment because it services the libraries: redistributing-visual-cpp-files), the engine's exit status `0xC0000135` is
+explained by `engines::exit_problem` with the next step, and a fresh install of the CI-built installer (run 7931 artifact, sha256 00bbd3a93b44c8927320f29ef45c7cb98449ef82f2e309b4690c5faa09c22291) on the Paddock test VM clean-baseline (Windows 11 ARM64 build 26300, 2026-11-11) ran the pinned vc_redist (exit 0, 25 s) and the engine self-test passed; the update over 1.0.3 is not yet proven. **Class:** a
+dependency the build machine has and a user's PC lacks, introduced through a binary no build step sees (second instance after the
+Dyno sidecar lesson); proposed for a redesign ADR: every downloaded or staged executable has a declared runtime-dependency check
+at install time.
+**Update over 1.0.3 (open, ER-28).** The silent 1.1.0 installer over an installed 1.0.3 hung in three early VM runs (4 to 13+ minutes; its
+`vc_redist.x64.exe` children were alive with no `msiexec` yet, next to `MicrosoftEdgeUpdateSetup`). Plausible causes and what each
+measurement showed: a busy Windows Installer (the `_MSIExecute` mutex or `msiexec`: not held in the later runs, and the redist
+finished in 20 to 36 s while `TiWorker`, `TrustedInstaller` and `MicrosoftEdgeUpdate` were running); a pending reboot
+(`PendingFileRenameOperations` after the 1.0.3 install, present in the runs that passed); Burn's package cache (the log shows it
+caches and installs normally); the Edge update (running in the passing runs too). Four later runs did not reproduce it (the redist
+directly right after the 1.0.3 install, the 1.1.0 installer right after it, and after a 5-minute wait): 20 to 36 s each. The hung runs
+had a very slow VM (SSH ready after 6 to 20+ minutes, against about 1 minute later), so host disk contention is the best guess; it is
+not confirmed. The installer therefore bounds its wait at 5 minutes and says what to do (the hook comment has the numbers).

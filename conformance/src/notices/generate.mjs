@@ -170,8 +170,12 @@ function wrap(items, width = 100, indent = '') {
   return lines;
 }
 
-/** The notices document: { markdown, counts }. `appName` is the product name in the intro. */
-export function render(rust, npm, appName = 'This application') {
+/**
+ * The notices document: { markdown, counts }. `appName` is the product name in the intro. `components` are texts for
+ * software that is neither a crate nor an npm package (a vendor's installer the app carries, say), each a markdown block with
+ * its own `###` heading, added verbatim under "Bundled components" after the licence texts.
+ */
+export function render(rust, npm, appName = 'This application', components = []) {
   const all = [...rust, ...npm].map((p) => ({ ...p })).sort((a, b) => cmp(a.kind, b.kind) || cmp(a.name, b.name) || cmp(a.version, b.version));
   const byHash = new Map();
   for (const p of all) {
@@ -208,6 +212,10 @@ export function render(rust, npm, appName = 'This application') {
     out.push(`### ${t.label}`, '');
     out.push(`Used by (${new Set(t.users).size}):`, ...wrap([...new Set(t.users)].sort(cmp), 96).map((l) => `  ${l}`), '');
     out.push(...t.text.split('\n').map((l) => (l ? `    ${l}` : '')), '');
+  }
+  if (components.length) {
+    out.push('## Bundled components', '');
+    for (const c of components) out.push(...normalise(c).split('\n'), '');
   }
   return { markdown: `${out.join('\n').replace(/\n+$/, '')}\n`, counts: { rust: rust.length, npm: npm.length, texts: texts.length, tally } };
 }
