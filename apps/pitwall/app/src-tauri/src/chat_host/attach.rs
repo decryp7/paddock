@@ -2,9 +2,11 @@
 //! only, up to [`MAX_TEXT_BYTES`] each. The bytes come from the webview and are judged here, never there: the UI may look at
 //! [`AttachRules`] to refuse an obvious misfit before reading it, and this module checks everything again.
 //!
-//! Images are recognised by their magic bytes and refused in words until WP-5 prepares them (decode with limits, downscale to
-//! the projector's budget, strip metadata). TODO(ADR 0023 WP-5): accept images here once `prepare_image` exists.
+//! Pictures (WP-5) are told apart by their magic bytes and prepared by [`super::images`]; [`take`] routes a file to the one or the
+//! other, and refuses a picture in words when the chosen model cannot read pictures ([`super::models::ChatImages`]).
 
+use super::models::ChatImages;
+use super::pictures::{self, PreparedImage, Sniffed, MAX_SOURCE_BYTES};
 use paddock_assistant::{Attachment, MAX_ATTACHMENTS};
 use serde::Serialize;
 
@@ -21,6 +23,8 @@ pub struct AttachRules {
     pub max_file_bytes: usize,
     /// Most attachments one question carries.
     pub max_count: usize,
+    /// Largest picture, in bytes (the engine shrinks it afterwards; a picture is judged by its own limit).
+    pub max_image_bytes: usize,
     /// The file picker's filter (an `accept` list of extensions and types).
     pub accept: String,
     /// What can be attached, in a few words (the attach button's tooltip).
@@ -32,10 +36,15 @@ pub fn rules() -> AttachRules {
     AttachRules {
         max_file_bytes: MAX_TEXT_BYTES,
         max_count: MAX_ATTACHMENTS,
-        accept: ".txt,.md,.markdown,.csv,.tsv,.json,.jsonl,.yaml,.yml,.toml,.ini,.cfg,.conf,.log,.xml,.html,.css,.js,.mjs,.ts,.tsx,\
+        max_image_bytes: MAX_SOURCE_BYTES,
+        accept: "image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif,.txt,.md,.markdown,.csv,.tsv,.json,.jsonl,.yaml,.yml,.toml,.ini,.cfg,.conf,.log,.xml,.html,.css,.js,.mjs,.ts,.tsx,\
 .jsx,.rs,.py,.go,.java,.kt,.c,.h,.cpp,.hpp,.cs,.swift,.rb,.php,.sh,.ps1,.sql,text/*"
             .into(),
-        hint: format!("Attach text or code files (UTF-8, up to {} KiB each)", MAX_TEXT_BYTES / 1024),
+        hint: format!(
+            "Attach images (PNG, JPEG, WebP, GIF, up to {} MiB; an animated GIF or WebP sends its first frame) or text and code files (UTF-8, up to {} KiB each)",
+            MAX_SOURCE_BYTES / (1024 * 1024),
+            MAX_TEXT_BYTES / 1024
+        ),
     }
 }
 
@@ -47,8 +56,10 @@ pub struct Attached {
     pub attachment: Attachment,
     /// Its size in bytes, as kept.
     pub bytes: usize,
-    /// Its lines.
+    /// Its lines (0 for a picture).
     pub lines: usize,
+    /// A picture's small copy as a `data:` URL for the chip; `None` for text (and for a picture that could not be shown small).
+    pub thumbnail: Option<String>,
 }
 
 /// A file ready to keep: the text's bytes (a UTF-8 byte-order mark removed) and its shown name.
@@ -89,15 +100,6 @@ pub fn clean_name(raw: &str) -> String {
     format!("…{tail}")
 }
 
-/// Whether `bytes` start like an image the engine could read (PNG, JPEG, GIF, WebP).
-fn looks_like_image(bytes: &[u8]) -> bool {
-    bytes.starts_with(b"\x89PNG\r\n\x1a\n")
-        || bytes.starts_with(&[0xff, 0xd8, 0xff])
-        || bytes.starts_with(b"GIF87a")
-        || bytes.starts_with(b"GIF89a")
-        || (bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP")
-}
-
 /// Checks a file the user attached: a UTF-8 text without NUL bytes, at most [`MAX_TEXT_BYTES`]. Never panics on any input.
 pub fn prepare(raw_name: &str, bytes: &[u8]) -> Result<Prepared, Refused> {
     let name = clean_name(raw_name);
@@ -107,10 +109,8 @@ pub fn prepare(raw_name: &str, bytes: &[u8]) -> Result<Prepared, Refused> {
             MAX_TEXT_BYTES / 1024
         )));
     }
-    if looks_like_image(bytes) {
-        return Err(Refused(format!(
-            "\"{name}\" is an image. The chat can't attach images yet; attach text or code files."
-        )));
+    if !matches!(pictures::sniff(bytes), Sniffed::NotAnImage) {
+        return Err(Refused(format!("\"{name}\" is an image, not text. Attach it as an image.")));
     }
     let body = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes);
     let not_text = || {
@@ -133,6 +133,37 @@ pub fn prepare(raw_name: &str, bytes: &[u8]) -> Result<Prepared, Refused> {
     })
 }
 
+/// What [`take`] made of a file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Taken {
+    /// A text or code file.
+    Text(Prepared),
+    /// A picture, prepared.
+    Image {
+        /// The shown name.
+        name: String,
+        /// The prepared picture.
+        image: PreparedImage,
+    },
+}
+
+/// Takes a file the user attached: a picture (by its bytes, never its name) is checked and prepared for the chosen model's
+/// budget, and refused in words when that model cannot read pictures; anything else is checked as text. Never panics.
+pub fn take(raw_name: &str, bytes: &[u8], images: &ChatImages) -> Result<Taken, Refused> {
+    match pictures::sniff(bytes) {
+        Sniffed::NotAnImage => prepare(raw_name, bytes).map(Taken::Text),
+        Sniffed::Unsupported => Err(pictures::unsupported(&clean_name(raw_name))),
+        Sniffed::Supported(_) => {
+            if let Some(why) = images.reason.as_ref().filter(|_| !images.allowed) {
+                return Err(Refused(why.clone()));
+            }
+            let name = clean_name(raw_name);
+            let image = pictures::prepare_image(&name, bytes, images.max_pixels)?;
+            Ok(Taken::Image { name, image })
+        }
+    }
+}
+
 /// A kept attachment as a bounded read finds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeptFile {
@@ -150,12 +181,17 @@ pub fn with_files(text: &str, attachments: &[Attachment], read: &dyn Fn(&str) ->
     let mut out = text.to_string();
     for a in attachments {
         let Attachment::File { sha256, name } = a else {
-            // TODO(ADR 0023 WP-5, WP-7): images and audio go to the engine as their own parts, not as text.
+            // Pictures go to the engine as their own parts (`chat_provider`); a clip waits for WP-7.
             continue;
         };
         out.push_str("\n\n");
         let name = quoted(name);
         match read(sha256) {
+            // The reader's bound is the largest image's: a text file over its own bound is not sent.
+            KeptFile::Bytes(b) if b.len() > MAX_TEXT_BYTES => out.push_str(&format!(
+                "Attached file {name} is too large to send (over {} KiB); its content is not included.",
+                MAX_TEXT_BYTES / 1024
+            )),
             KeptFile::Bytes(b) => match String::from_utf8(b) {
                 Ok(body) => {
                     let fence = fence_for(&body);
@@ -225,7 +261,10 @@ mod tests {
             b"RIFF\0\0\0\0WEBPVP8 ".to_vec(),
         ] {
             let words = prepare("photo", &image).unwrap_err().0;
-            assert!(words.contains("is an image") && words.contains("text or code"), "{words}");
+            assert!(
+                words.contains("is an image, not text") && words.contains("Attach it as an image"),
+                "{words}"
+            );
         }
         for binary in [vec![0xc3, 0x28], b"text\0with a nul".to_vec()] {
             let words = prepare("a.bin", &binary).unwrap_err().0;
@@ -285,12 +324,79 @@ mod tests {
         );
     }
 
+    fn seeing() -> ChatImages {
+        ChatImages {
+            allowed: true,
+            reason: None,
+            suggest: None,
+            max_pixels: 10_000,
+        }
+    }
+
+    fn blind() -> ChatImages {
+        ChatImages {
+            allowed: false,
+            reason: Some("Tiny can't read images. Choose Eyes to ask about an image.".into()),
+            suggest: None,
+            max_pixels: 10_000,
+        }
+    }
+
+    fn a_png() -> Vec<u8> {
+        use image::ImageEncoder;
+        let img = image::RgbaImage::from_fn(30, 20, |x, y| image::Rgba([x as u8, y as u8, 7, 255]));
+        let mut out = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut out)
+            .write_image(img.as_raw(), 30, 20, image::ExtendedColorType::Rgba8)
+            .unwrap();
+        out
+    }
+
+    /// WP-5: a picture goes to the picture path by its bytes, whatever its name; text stays text; a model without vision refuses
+    /// the picture with its own words and the text file is still taken.
+    #[test]
+    fn a_file_is_routed_by_its_bytes_and_a_picture_needs_a_model_that_reads_pictures() {
+        let png = a_png();
+        match take("notes.txt", &png, &seeing()).unwrap() {
+            Taken::Image { name, image } => {
+                assert_eq!(
+                    (name.as_str(), image.width, image.height),
+                    ("notes.txt", 30, 20),
+                    "the name does not decide"
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(take("a.md", b"# hi\n", &seeing()).unwrap(), Taken::Text(_)));
+        assert!(
+            matches!(take("a.md", b"# hi\n", &blind()).unwrap(), Taken::Text(_)),
+            "text needs no vision"
+        );
+        let words = take("shot.png", &png, &blind()).unwrap_err().0;
+        assert_eq!(words, "Tiny can't read images. Choose Eyes to ask about an image.");
+        let words = take("scan.tiff", b"II*\0....", &seeing()).unwrap_err().0;
+        assert!(words.contains("scan.tiff") && words.contains("can't read"), "{words}");
+        // A picture's refusal for its own size or damage still reaches the user.
+        let words = take("cut.png", &png[..png.len() / 2], &seeing()).unwrap_err().0;
+        assert!(words.contains("cut.png") && words.contains("damaged"), "{words}");
+    }
+
     #[test]
     fn the_rules_name_the_limits() {
         let r = rules();
         assert_eq!((r.max_file_bytes, r.max_count), (MAX_TEXT_BYTES, MAX_ATTACHMENTS));
+        assert_eq!(r.max_image_bytes, 25 * 1024 * 1024);
         assert!(r.accept.contains(".rs") && r.accept.contains("text/*"));
-        assert!(r.hint.contains("256 KiB"), "{}", r.hint);
+        assert!(
+            r.accept.contains("image/png") && r.accept.contains(".webp"),
+            "the picker offers images: {}",
+            r.accept
+        );
+        assert!(
+            r.hint.contains("256 KiB") && r.hint.contains("25 MiB") && r.hint.contains("images") && r.hint.contains("first frame"),
+            "{}",
+            r.hint
+        );
     }
 
     /// Many pseudo-random names and byte strings (a fixed seed, so a failure repeats), with the magic numbers and a byte-order

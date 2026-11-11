@@ -62,6 +62,23 @@ describe('PlaygroundChat', () => {
     expect(el.querySelector('[data-testid=assistant-empty-action]')?.textContent?.trim()).toBe('Connected apps…');
   });
 
+  it('says which models read images only inside the open list, and keeps the bar quiet until an image meets a model that cannot read it (WP-5)', async () => {
+    const backend = new MockBackend();
+    const { fixture, el } = await render(PlaygroundChat, backend);
+    await until(fixture, () => !!el.querySelector('[data-testid=chat-apps]')?.textContent?.trim());
+    // No image yet: nothing about images in the bar, and the closed field is the name alone.
+    expect(el.querySelector('[data-testid=chat-vision]')).toBeNull();
+    expect(el.querySelector('[data-testid=chat-model] .mat-mdc-select-value')?.textContent?.trim()).toBe('Qwen3.5 4B');
+    (el.querySelector('[data-testid=chat-model] .mat-mdc-select-trigger') as HTMLElement).click();
+    await settle(fixture);
+    const options = Array.from(document.querySelectorAll<HTMLElement>('mat-option'));
+    expect(options.find((o) => o.textContent?.includes('Gemma 4 E4B'))?.textContent).toContain(' · reads images');
+    expect(options.find((o) => o.textContent?.includes('Qwen3.5 9B'))?.textContent).not.toContain('reads images');
+    options.find((o) => o.textContent?.includes('Gemma 4 E4B'))!.click();
+    await settle(fixture);
+    expect(el.querySelector('[data-testid=chat-model] .mat-mdc-select-value')?.textContent?.trim()).toBe('Gemma 4 E4B');
+  });
+
   it('says when no model can use tools, and shows a failure with Try again', async () => {
     const none = new MockBackend({ empty: true });
     const r = await render(PlaygroundChat, none);

@@ -1,5 +1,15 @@
+import { signal, type Signal } from '@angular/core';
 import type { Attachment } from '../generated/assistant';
 import type { Unlisten } from './backend';
+
+/** The image types the chat reads (SVG is text, not an image here). */
+export const RASTER_IMAGE_TYPES: readonly string[] = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+
+/** What the host offers beside the words of `imageBlock`: a button that does it (for example "Use Gemma 4 E4B for images"). */
+export interface ImageAction {
+  readonly label: string;
+  run(): void;
+}
 
 /** A file the user picked, pasted or dropped, before the host has read it. */
 export interface AttachSource {
@@ -17,6 +27,8 @@ export interface AttachSource {
 export interface AttachRules {
   /** Largest file in bytes (the engine checks again). */
   readonly maxFileBytes: number;
+  /** Largest picture in bytes, when pictures have their own limit (ADR 0023 Decision 4, WP-5); `maxFileBytes` otherwise. */
+  readonly maxImageBytes?: number;
   /** Most attachments one question carries. */
   readonly maxCount: number;
   /** The file picker's filter (`accept`). */
@@ -33,6 +45,8 @@ export interface AttachmentChip {
   readonly label: string;
   /** A second, quieter part ("12 KB · 340 lines"); `null` for none. */
   readonly detail: string | null;
+  /** An image's small copy as a `data:` URL, for a thumbnail beside its name (WP-5); absent or `null` for none. */
+  readonly thumbnail?: string | null;
 }
 
 /**
@@ -49,6 +63,18 @@ export abstract class AssistantAttachments {
   remove(attachment: Attachment): Promise<void> {
     void attachment;
     return Promise.resolve();
+  }
+  /**
+   * Why images cannot be sent now (the chosen model cannot read them), in words that say what to do; `null` when they can, or
+   * when the host does not gate them. An image waiting in the composer then disables Send and the words are shown (WP-5).
+   */
+  readonly imageBlock: Signal<string | null> = signal<string | null>(null);
+  /** What the host offers beside `imageBlock`'s words (a button in the note and in the refusal); `null` for nothing. */
+  readonly imageAction: Signal<ImageAction | null> = signal<ImageAction | null>(null);
+  /** An image's small copy as a `data:` URL, for a question already sent (a reopened conversation); default: none. */
+  thumbnail(attachment: Attachment): Promise<string | null> {
+    void attachment;
+    return Promise.resolve(null);
   }
   /** The chip of an attachment a stored question carries (for a reopened conversation); a host may say more. */
   chipOf(attachment: Attachment): AttachmentChip {

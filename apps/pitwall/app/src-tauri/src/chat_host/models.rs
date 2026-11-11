@@ -18,6 +18,47 @@ pub const TOOLS_NOTE: &str = "\"Can't use tools\": the model's chat template has
 /// The note of [`NOT_DOWNLOADED`].
 pub const DOWNLOAD_NOTE: &str = "Starter models that can use tools: download one in Models, then choose it here.";
 
+/// Why the chat cannot take a picture when no model has been chosen yet.
+pub const NO_MODEL_IMAGES: &str = "Choose a model that can read images first.";
+
+/// A downloaded model that can use tools and read images: the one the pane offers when the chosen model cannot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VisionSuggestion {
+    /// The model's id.
+    pub id: String,
+    /// Its name.
+    pub name: String,
+}
+
+/// What the chosen model means for pictures (ADR 0023 Decision 4): whether it reads them, why not in words that say what to do,
+/// the downloaded model the pane offers instead, and the pixel budget a picture is shrunk to. Rust decides; the pane shows it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatImages {
+    /// The chosen model reads images (it has a vision projector).
+    pub allowed: bool,
+    /// When it does not: why, and what to do.
+    pub reason: Option<String>,
+    /// A downloaded model that can use tools and read images; `None` when there is none.
+    pub suggest: Option<VisionSuggestion>,
+    /// Most pixels of a picture sent to the chosen model (not sent to the pane).
+    #[serde(skip)]
+    pub max_pixels: u64,
+}
+
+impl Default for ChatImages {
+    /// Before a model is chosen: no pictures.
+    fn default() -> ChatImages {
+        ChatImages {
+            allowed: false,
+            reason: Some(NO_MODEL_IMAGES.into()),
+            suggest: None,
+            max_pixels: super::pictures::DEFAULT_MAX_PIXELS,
+        }
+    }
+}
+
 /// One model as the picker shows it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,6 +71,8 @@ pub struct ChatModel {
     pub loaded: bool,
     /// Why it cannot be chosen; `None` when it can.
     pub disabled: Option<String>,
+    /// It has a vision projector: it reads pictures.
+    pub vision: bool,
 }
 
 /// The picker: the models and the one the chat uses (`None`: no model can call tools).
@@ -42,6 +85,8 @@ pub struct ChatModels {
     pub selected: Option<String>,
     /// For each reason in `models`, its full note (the list's group label).
     pub notes: BTreeMap<String, String>,
+    /// What the chosen model means for pictures.
+    pub images: ChatImages,
 }
 
 /// What the picker needs to know of a downloaded model.
@@ -57,6 +102,14 @@ pub struct Facts<'a> {
     pub loaded: bool,
     /// What it can do.
     pub capabilities: &'a [Capability],
+    /// Most pixels of a picture its projector takes (`None`: unknown, the default budget is used).
+    pub image_max_pixels: Option<u64>,
+}
+
+impl Facts<'_> {
+    fn vision(&self) -> bool {
+        self.capabilities.contains(&Capability::Vision)
+    }
 }
 
 impl<'a> From<&'a LocalModel> for Facts<'a> {
@@ -67,6 +120,7 @@ impl<'a> From<&'a LocalModel> for Facts<'a> {
             repo: &m.repo,
             loaded: m.loaded,
             capabilities: &m.capabilities,
+            image_max_pixels: m.image_max_pixels,
         }
     }
 }
@@ -97,6 +151,7 @@ pub fn chat_models<'a>(locals: impl IntoIterator<Item = Facts<'a>>, catalog: &[C
             name: m.name.into(),
             loaded: m.loaded,
             disabled: reason(m),
+            vision: m.vision(),
         })
         .collect();
     models.sort_by(|a, b| {
@@ -110,6 +165,7 @@ pub fn chat_models<'a>(locals: impl IntoIterator<Item = Facts<'a>>, catalog: &[C
             name: c.name.clone(),
             loaded: false,
             disabled: Some(NOT_DOWNLOADED.into()),
+            vision: c.capabilities.contains(&Capability::Vision),
         })
         .collect();
     missing.sort_by_key(|m| m.name.to_lowercase());
@@ -133,7 +189,50 @@ pub fn chat_models<'a>(locals: impl IntoIterator<Item = Facts<'a>>, catalog: &[C
             _ => None,
         };
     }
-    ChatModels { models, selected, notes }
+    let images = chat_images(&locals, selected.as_deref());
+    ChatModels {
+        models,
+        selected,
+        notes,
+        images,
+    }
+}
+
+/// What `selected` (a model id) means for pictures, among the downloaded `locals`: a model with a projector reads them, at its
+/// projector's pixel budget; any other is told what to do, naming the downloaded vision model that can also use tools (a loaded
+/// one first, then by name) when there is one.
+pub fn chat_images(locals: &[Facts<'_>], selected: Option<&str>) -> ChatImages {
+    let chosen = selected.and_then(|id| locals.iter().find(|m| m.id == id));
+    let Some(chosen) = chosen else {
+        return ChatImages::default();
+    };
+    if chosen.vision() {
+        return ChatImages {
+            allowed: true,
+            reason: None,
+            suggest: None,
+            max_pixels: chosen.image_max_pixels.unwrap_or(super::pictures::DEFAULT_MAX_PIXELS),
+        };
+    }
+    let mut seeing: Vec<&Facts<'_>> = locals.iter().filter(|m| reason(m).is_none() && m.vision()).collect();
+    seeing.sort_by_key(|m| (!m.loaded, m.name.to_lowercase()));
+    let suggest = seeing.first().map(|m| VisionSuggestion {
+        id: m.id.to_string(),
+        name: m.name.to_string(),
+    });
+    let words = match &suggest {
+        Some(s) => format!("{} can't read images. Choose {} to ask about an image.", chosen.name, s.name),
+        None => format!(
+            "{} can't read images. Download a model that can (one with a vision file, for example Gemma 3 or Qwen2.5-VL) in Models, then choose it here.",
+            chosen.name
+        ),
+    };
+    ChatImages {
+        allowed: false,
+        reason: Some(words),
+        suggest,
+        max_pixels: super::pictures::DEFAULT_MAX_PIXELS,
+    }
 }
 
 /// The chat's window in tokens (ADR 0023 WP-4b): what one request may hold, so the meter and the check before sending use it.
@@ -173,6 +272,7 @@ mod tests {
             repo: id,
             loaded,
             capabilities: caps,
+            image_max_pixels: None,
         }
     }
 
@@ -242,6 +342,7 @@ mod tests {
                 repo: "me/x",
                 loaded: true,
                 capabilities: &[Chat, Tools],
+                image_max_pixels: None,
             },
             Facts {
                 id: "qwen-q4",
@@ -249,6 +350,7 @@ mod tests {
                 repo: "org/qwen",
                 loaded: false,
                 capabilities: &[Chat, Tools],
+                image_max_pixels: None,
             },
         ];
         let p = chat_models(locals, &cat, None);
@@ -268,5 +370,70 @@ mod tests {
         let none = chat_models([], &cat, None);
         assert_eq!(none.selected, None);
         assert_eq!(none.models.len(), 2);
+    }
+
+    fn seeing(id: &str, loaded: bool, caps: &[Capability], px: Option<u64>) -> Facts<'static> {
+        // The test facts live as long as the program: leak the small slice (a test only).
+        let caps: &'static [Capability] = Box::leak(caps.to_vec().into_boxed_slice());
+        let id: &'static str = Box::leak(id.to_string().into_boxed_str());
+        Facts {
+            id,
+            name: id,
+            repo: id,
+            loaded,
+            capabilities: caps,
+            image_max_pixels: px,
+        }
+    }
+
+    /// WP-5 (ADR 0023 Decision 4): only a model with a vision projector reads pictures, at its projector's budget; any other says
+    /// so in words that name the downloaded vision model to choose, or what to download.
+    #[test]
+    fn images_are_for_models_with_a_projector_and_the_others_say_what_to_do() {
+        let plain = seeing("plain", true, &[Chat, Tools], None);
+        let eyes_b = seeing("b-eyes", false, &[Chat, Tools, Capability::Vision], Some(500_000));
+        let eyes_a = seeing("a-eyes", false, &[Chat, Tools, Capability::Vision], Some(900_000));
+        let eyes_notools = seeing("c-eyes", true, &[Chat, Capability::Vision], None);
+
+        let ok = chat_images(&[plain, eyes_b, eyes_a], Some("b-eyes"));
+        assert_eq!((ok.allowed, ok.reason, ok.suggest, ok.max_pixels), (true, None, None, 500_000));
+        let default_budget = chat_images(&[eyes_notools], Some("c-eyes"));
+        assert_eq!(
+            default_budget.max_pixels,
+            super::super::pictures::DEFAULT_MAX_PIXELS,
+            "no projector header: the default budget"
+        );
+
+        let no = chat_images(&[plain, eyes_b, eyes_a, eyes_notools], Some("plain"));
+        assert!(!no.allowed);
+        // The first by name among those that can also use tools: a model without tools is never offered (the chat would refuse it).
+        assert_eq!(no.suggest.as_ref().map(|s| s.id.as_str()), Some("a-eyes"));
+        let words = no.reason.unwrap();
+        assert!(
+            words.contains("plain can't read images") && words.contains("Choose a-eyes"),
+            "{words}"
+        );
+
+        let none = chat_images(&[plain], Some("plain"));
+        assert!(none.suggest.is_none());
+        let words = none.reason.unwrap();
+        assert!(words.contains("Download a model") && words.contains("Models"), "{words}");
+
+        // Nothing chosen yet, or a choice that is not downloaded: no pictures, in words.
+        assert_eq!(chat_images(&[plain], None).reason.as_deref(), Some(NO_MODEL_IMAGES));
+        assert!(!chat_images(&[plain], Some("gone")).allowed);
+    }
+
+    /// The picker carries each model's vision flag and the chosen model's image state.
+    #[test]
+    fn the_picker_says_which_models_read_images() {
+        let eyes = seeing("eyes", true, &[Chat, Tools, Capability::Vision], None);
+        let plain = seeing("plain", false, &[Chat, Tools], None);
+        let p = chat_models([eyes, plain], &[], None);
+        let flags: Vec<(&str, bool)> = p.models.iter().map(|m| (m.id.as_str(), m.vision)).collect();
+        assert_eq!(flags, [("eyes", true), ("plain", false)]);
+        assert!(p.images.allowed);
+        let q = chat_models([eyes, plain], &[], Some("plain"));
+        assert!(!q.images.allowed && q.images.suggest.as_ref().is_some_and(|s| s.id == "eyes"));
     }
 }

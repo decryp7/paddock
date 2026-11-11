@@ -4,9 +4,10 @@
 //! of this build.
 
 use super::apps::{AppsError, ConnectedApp, ConnectedApps, Opened};
-use super::attach::{prepare, AttachRules, Attached, MAX_TEXT_BYTES};
+use super::attach::{take, AttachRules, Attached, Taken};
 use super::chats::{ChatStorage, ChatStores, ChatsError};
 use super::models::{chat_models, chat_window, ChatModels, Facts};
+use super::pictures::{thumbnail, MAX_PREPARED_BYTES, MAX_SOURCE_BYTES};
 use super::{ChatLog, PitwallPolicy, ToolNames};
 use crate::chat_provider::ServerChatProvider;
 use crate::commands::{forward, SharedClient};
@@ -54,7 +55,7 @@ fn secrets(data_dir: &Path) -> Arc<dyn paddock_secrets::Secrets> {
 
 /// The assistant's settings for Pitwall's chat: no wall limits (ER-19); 8 rounds and 16 tool calls a turn; the whole
 /// conversation sent to the model (user decision 2026-11-08: no silent trim, the window decides and a turn that cannot fit is
-/// refused in words); attached files counted by their size (about four bytes a token).
+/// refused in words); attached files counted by their size (about four bytes a token), pictures by their pixels.
 pub fn chat_config(chats: Arc<ChatStores>, policy: Arc<dyn paddock_assistant::ApprovalPolicy>) -> AssistantConfig {
     let mut cfg = AssistantConfig::new("Pitwall", SYSTEM);
     cfg.budgets.max_wall = None;
@@ -67,10 +68,19 @@ pub fn chat_config(chats: Arc<ChatStores>, policy: Arc<dyn paddock_assistant::Ap
         paddock_assistant::Attachment::File { sha256, .. } => chats
             .attachment_len(sha256)
             .map_or(0, |n| paddock_assistant::estimate_tokens(usize::try_from(n).unwrap_or(usize::MAX))),
-        // TODO(ADR 0023 WP-5, WP-7): an image's and a clip's tokens, once the engine prepares them.
+        paddock_assistant::Attachment::Image { width, height, .. } => image_tokens(*width, *height),
+        // TODO(ADR 0023 WP-7): a clip's tokens, once the engine takes audio.
         _ => 0,
     });
     cfg
+}
+
+/// What a picture costs the model's window: one token per 28 x 28 pixels (the projectors' usual side), at most the budget of
+/// [`pitwall_core::gguf::MAX_IMAGE_TOKENS`] a picture is shrunk to. An estimate for the meter; the engine counts exactly.
+pub fn image_tokens(width: u32, height: u32) -> u64 {
+    (u64::from(width) * u64::from(height))
+        .div_ceil(28 * 28)
+        .clamp(1, pitwall_core::gguf::MAX_IMAGE_TOKENS)
 }
 
 /// Builds the chat: its conversations saved in `<data>/chats` unless the user says "Don't save this chat" (ADR 0023
@@ -85,8 +95,9 @@ pub fn compose(client: SharedClient, data_dir: &Path, runtime: tokio::runtime::H
     let policy = Arc::new(PitwallPolicy::new(Some(data_dir), names.clone(), now));
     let chats = Arc::new(ChatStores::new(data_dir, Arc::new(paddock_health::SystemClock)));
     let files = chats.clone();
-    // A kept file is read only within the size a text attachment may have (review P2-6).
-    let read = move |sha: &str| files.attachment_up_to(sha, MAX_TEXT_BYTES);
+    // A kept file is read only within the size of the largest prepared picture (review P2-6); a text file over its own, smaller bound
+    // is not sent either (`attach::with_files`).
+    let read = move |sha: &str| files.attachment_up_to(sha, MAX_PREPARED_BYTES);
     let provider = Arc::new(ServerChatProvider::new(client.clone(), runtime, "").with_attachments(Arc::new(read)));
     let cfg = chat_config(chats.clone(), policy.clone());
     let assistant = Assistant::with_conversations(
@@ -242,6 +253,7 @@ async fn models_for(chat: &ChatState, wanted: Option<String>) -> Result<ChatMode
     let catalog = pitwall_core::packs::Packs::builtin().models;
     let picker = chat_models(locals.iter().map(Facts::from), &catalog, wanted.as_deref());
     chat.provider.set_model(picker.selected.clone().unwrap_or_default());
+    chat.provider.set_images(picker.images.clone());
     if let Some(m) = locals.iter().find(|m| Some(&m.id) == picker.selected.as_ref()) {
         chat.provider.set_context_length(chat_window(m.context_max, m.context_per_slot));
     }
@@ -329,29 +341,102 @@ pub async fn chat_attach_rules<R: Runtime>(app: AppHandle<R>) -> Result<AttachRu
     Ok(super::attach::rules())
 }
 
-/// Takes a file the user attached (picker, paste or drop): checked here (text or code in UTF-8, at most 256 KiB), then kept in
-/// memory until its question is sent (ADR 0023 WP-4b). A refusal says why and what to do.
+/// Takes a file the user attached (picker, paste or drop; its bytes as base64, so a picture is not a JSON array of numbers):
+/// text or code in UTF-8 up to 256 KiB, or a picture (PNG, JPEG, WebP, GIF, up to 25 MiB) prepared for the chosen model, which
+/// must read pictures. It is kept in memory until its question is sent (ADR 0023 WP-4b, WP-5). A refusal says why and what to do.
 #[tauri::command]
-pub async fn chat_attach<R: Runtime>(app: AppHandle<R>, name: String, bytes: Vec<u8>) -> Result<Attached, CommandError> {
+pub async fn chat_attach<R: Runtime>(app: AppHandle<R>, name: String, data: String) -> Result<Attached, CommandError> {
+    use base64::Engine;
     let chat = chat_of(&app)?;
+    let images = chat.provider.images();
     tauri::async_runtime::spawn_blocking(move || {
-        let file = prepare(&name, &bytes).map_err(|r| {
-            log::info!(target: "pitwall_chat", "attach: refused a file of {} bytes", bytes.len());
+        // The text of a base64 file is a third longer than the file: refuse by length before decoding anything.
+        if data.len() > MAX_SOURCE_BYTES / 3 * 4 + 8 {
+            log::info!(target: "pitwall_chat", "attach: refused a file of about {} bytes (over the limit)", data.len() / 4 * 3);
+            return Err(CommandError::new(
+                ErrorCode::BadRequest,
+                format!(
+                    "\"{}\" is larger than {} MiB. Attach a smaller file.",
+                    super::attach::clean_name(&name),
+                    MAX_SOURCE_BYTES / (1024 * 1024)
+                ),
+            ));
+        }
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(data.as_bytes())
+            .map_err(|_| CommandError::new(ErrorCode::BadRequest, "The file could not be read. Attach it again."))?;
+        let taken = take(&name, &bytes, &images).map_err(|r| {
+            log::info!(target: "pitwall_chat", "attach: refused a file of {} bytes: {}", bytes.len(), refusal_kind(&r.0));
             CommandError::new(ErrorCode::BadRequest, r.0)
         })?;
-        let sha = chat.chats.stage_attachment(&file.text).map_err(chats_error)?;
-        log::info!(target: "pitwall_chat", "attach: took a text file of {} bytes, {} lines", file.text.len(), file.lines);
-        Ok(Attached {
-            attachment: paddock_assistant::Attachment::File {
-                sha256: sha,
-                name: file.name,
-            },
-            bytes: file.text.len(),
-            lines: file.lines,
-        })
+        match taken {
+            Taken::Text(file) => {
+                let sha = chat.chats.stage_attachment(&file.text).map_err(chats_error)?;
+                log::info!(target: "pitwall_chat", "attach: took a text file of {} bytes, {} lines", file.text.len(), file.lines);
+                Ok(Attached {
+                    attachment: paddock_assistant::Attachment::File {
+                        sha256: sha,
+                        name: file.name,
+                    },
+                    bytes: file.text.len(),
+                    lines: file.lines,
+                    thumbnail: None,
+                })
+            }
+            Taken::Image { image, .. } => {
+                let started = std::time::Instant::now();
+                let sha = chat.chats.stage_attachment(&image.bytes).map_err(chats_error)?;
+                let small = thumbnail(&image.bytes);
+                log::info!(
+                    target: "pitwall_chat",
+                    "attach: took an image, {} bytes in, {} bytes kept, {} x {}, shrunk {}, {} ms",
+                    bytes.len(),
+                    image.bytes.len(),
+                    image.width,
+                    image.height,
+                    image.shrunk,
+                    started.elapsed().as_millis()
+                );
+                Ok(Attached {
+                    attachment: paddock_assistant::Attachment::Image {
+                        sha256: sha,
+                        mime: image.mime.as_str().into(),
+                        width: image.width,
+                        height: image.height,
+                    },
+                    bytes: image.bytes.len(),
+                    lines: 0,
+                    thumbnail: small,
+                })
+            }
+        }
     })
     .await
     .map_err(|e| CommandError::new(ErrorCode::Internal, format!("the attachment stopped unexpectedly: {e}")))?
+}
+
+/// The refusal's kind for the log line (never the file's name or content).
+fn refusal_kind(words: &str) -> &'static str {
+    if words.contains("can't read images") || words.contains("Choose a model") {
+        "no model that reads images"
+    } else if words.contains("image") || words.contains("pixels") {
+        "image"
+    } else {
+        "text"
+    }
+}
+
+/// A kept picture's small copy as a `data:` URL, for the chip of a question already sent (a reopened chat); `None` when the
+/// picture is gone or cannot be shown small.
+#[tauri::command]
+pub async fn chat_thumbnail<R: Runtime>(app: AppHandle<R>, sha256: String) -> Result<Option<String>, CommandError> {
+    let chat = chat_of(&app)?;
+    tauri::async_runtime::spawn_blocking(move || match chat.chats.attachment_up_to(&sha256, MAX_PREPARED_BYTES) {
+        super::attach::KeptFile::Bytes(bytes) => thumbnail(&bytes),
+        _ => None,
+    })
+    .await
+    .map_err(|e| CommandError::new(ErrorCode::Internal, format!("the image stopped unexpectedly: {e}")))
 }
 
 /// Takes a file off the question before it is sent: Pitwall forgets it (review P2-1).

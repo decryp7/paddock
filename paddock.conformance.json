@@ -6,6 +6,7 @@
     "ui/docs/screenshots"
   ],
   "ownTestBinaries": {
+    "apps/pitwall/app/src-tauri/tests/picture_memory.rs": "a counting global allocator must run alone: it counts every allocation of its process, so no other test may share the binary",
     "crates/paddock-assistant/tests/tauri.rs": "needs the tauri feature (required-features), which the crate's other tests do not",
     "crates/paddock-service/tests/service_main_process.rs": "runs itself again as the service (child mode): SIGTERM handling and exit statuses belong to a process of its own",
     "crates/paddock-env/tests/dev_override_log.rs": "installs the process-wide log, once per process, and reads what the ignored override wrote",

@@ -71,6 +71,14 @@ export interface TauriBridge {
 }
 
 /* v8 ignore start -- the real Tauri primitives exist only inside the app's webview. */
+/** A file's bytes as base64 (in slices: one `String.fromCharCode` call over a big array overflows the stack). */
+export function toBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const slice = 0x8000;
+  for (let i = 0; i < bytes.length; i += slice) binary += String.fromCharCode(...bytes.subarray(i, i + slice));
+  return btoa(binary);
+}
+
 const realBridge: TauriBridge = {
   invoke: (cmd, args) => invoke(cmd, args),
   listen: (event, handler) => listen(event, (e) => handler(e.payload as never)),
@@ -454,8 +462,11 @@ export class TauriBackend implements PitwallBackend {
     return this.run('chat_attach_rules');
   }
   chatAttach(name: string, bytes: Uint8Array): Promise<ChatAttached> {
-    // Tauri carries a byte array as a JSON list of numbers; Rust bounds the request (2 MiB) and checks the file.
-    return this.run('chat_attach', { name, bytes: Array.from(bytes) });
+    // Base64, not Tauri's JSON list of numbers: a 25 MiB picture would be about 90 MB of digits. Rust bounds the request and checks the file.
+    return this.run('chat_attach', { name, data: toBase64(bytes) });
+  }
+  chatThumbnail(sha256: string): Promise<string | null> {
+    return this.run('chat_thumbnail', { sha256 });
   }
   chatDetach(sha256: string): Promise<void> {
     return this.run('chat_detach', { sha256 });

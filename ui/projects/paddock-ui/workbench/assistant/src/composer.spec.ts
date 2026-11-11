@@ -117,12 +117,14 @@ describe('PdAssistant composer (ADR 0023 WP-4b)', () => {
 
   it("says the engine's refusal and the early size check in words, and attaches the rest", async () => {
     const { r, attachments } = await open({ attachments: new MemoryAssistantAttachments({ maxFileBytes: 10 }) });
+    attachments?.blockImages('Tiny can\'t read images. Choose Eyes to ask about an image.');
     await pick(r, [file('photo.png', 'png', 'image/png'), file('huge.log', 'x'.repeat(11)), file('ok.txt', 'fine')]);
     const failure = text(r, 'assistant-failure');
-    expect(failure).toContain('"photo.png" is an image');
+    expect(failure).toContain("Tiny can't read images. Choose Eyes to ask about an image.");
     // The early size check uses the engine's own words, next step included (review 2 P2-D).
     expect(failure).toContain('"huge.log" is larger than 10 bytes. Attach a smaller file, or paste the part that matters.');
-    expect(attachments?.added).toEqual(['photo.png', 'ok.txt']);
+    // The host's gate refuses the picture before it is read; the engine would refuse it too.
+    expect(attachments?.added).toEqual(['ok.txt']);
     expect(text(r, 'assistant-file')).toContain('ok.txt');
   });
 
@@ -168,6 +170,118 @@ describe('PdAssistant composer (ADR 0023 WP-4b)', () => {
     expect(composer.classList.contains('dropping')).toBe(false);
     expect(text(r, 'assistant-file')).toContain('pasted.txt');
     expect(text(r, 'assistant-file')).toContain('dropped.txt');
+  });
+
+  describe('images (ADR 0023 WP-5)', () => {
+    const picture = (name = 'cat.png', body = 'pixels'): File => file(name, body, 'image/png');
+
+    it('attaches an image as a chip with its thumbnail, sends it with the question and shows the thumbnail on the sent turn', async () => {
+      const { r, backend } = await open();
+      expect(r.one('[data-testid=assistant-file-input]').getAttribute('accept')).toContain('image/png');
+      await pick(r, [picture()]);
+      expect(r.all('[data-testid=assistant-file-thumb]')).toHaveLength(1);
+      expect(r.one('[data-testid=assistant-file-thumb]').getAttribute('src')).toMatch(/^data:image\/png;base64,/);
+      expect(r.one('[data-testid=assistant-file]').getAttribute('title')).toBe('cat.png (640 × 480)');
+      await type(r, 'What is this?');
+      r.one<HTMLButtonElement>('[data-testid=assistant-send]').click();
+      await settleAll(r);
+      expect(backend.sent[0]?.attachments?.map((a) => a.kind)).toEqual(['image']);
+      expect(r.all('[data-testid=assistant-file]')).toHaveLength(0);
+      expect(r.all('[data-testid=assistant-turn-thumb]')).toHaveLength(1);
+    });
+
+    it("asks the host for a sent image's thumbnail when its chip had none (a reopened chat)", async () => {
+      class Plain extends MemoryAssistantAttachments {
+        override async add(f: Parameters<MemoryAssistantAttachments['add']>[0]) {
+          return { ...(await super.add(f)), thumbnail: null };
+        }
+      }
+      const { r } = await open({ attachments: new Plain() });
+      await pick(r, [picture()]);
+      expect(r.all('[data-testid=assistant-file-thumb]')).toHaveLength(0);
+      await type(r, 'q');
+      r.one<HTMLButtonElement>('[data-testid=assistant-send]').click();
+      await settleAll(r);
+      expect(r.all('[data-testid=assistant-turn-thumb]')).toHaveLength(1);
+    });
+
+    it('refuses an image over its own size limit in words, before reading it, while a text file is judged by its own', async () => {
+      const { r, attachments } = await open({ attachments: new MemoryAssistantAttachments({ maxFileBytes: 4, maxImageBytes: 3 * 1024 * 1024 }) });
+      await pick(r, [picture('big.png', 'x'.repeat(3 * 1024 * 1024 + 1)), picture('ok.png', 'xxxxx')]);
+      expect(text(r, 'assistant-failure')).toContain('"big.png" is larger than 3 MiB. Attach a smaller image, or export a smaller copy.');
+      expect(attachments?.added).toEqual(['ok.png']);
+    });
+
+    it("keeps Send off, with the host's words, while an image waits for a model that cannot read images; text and removing the image clear it", async () => {
+      const { r, attachments } = await open();
+      await pick(r, [picture()]);
+      await type(r, 'What is this?');
+      const send = r.one<HTMLButtonElement>('[data-testid=assistant-send]');
+      expect(send.disabled).toBe(false);
+      expect(r.all('[data-testid=assistant-image-block]')).toHaveLength(0);
+      attachments?.blockImages("Tiny can't read images. Choose Eyes to ask about an image.");
+      await settleAll(r);
+      expect(send.disabled).toBe(true);
+      expect(text(r, 'assistant-image-block')).toBe("Tiny can't read images. Choose Eyes to ask about an image.");
+      r.one<HTMLButtonElement>('[data-testid=assistant-file-remove]').click();
+      await settleAll(r);
+      expect(r.all('[data-testid=assistant-image-block]')).toHaveLength(0);
+      expect(r.one<HTMLButtonElement>('[data-testid=assistant-send]').disabled).toBe(false);
+      await pick(r, [file('notes.txt', 'text needs no vision')]);
+      expect(r.one<HTMLButtonElement>('[data-testid=assistant-send]').disabled).toBe(false);
+    });
+
+    it('says an image limit under 1 MiB in KiB or bytes, never "0 MiB"', async () => {
+      const { r } = await open({ attachments: new MemoryAssistantAttachments({ maxImageBytes: 3 * 1024 }) });
+      await pick(r, [picture('big.png', 'x'.repeat(3 * 1024 + 1))]);
+      expect(text(r, 'assistant-failure')).toContain('"big.png" is larger than 3 KiB. Attach a smaller image');
+      const small = await open({ attachments: new MemoryAssistantAttachments({ maxImageBytes: 500 }) });
+      await pick(small.r, [picture('big.png', 'x'.repeat(501))]);
+      expect(text(small.r, 'assistant-failure')).toContain('"big.png" is larger than 500 bytes. Attach a smaller image');
+    });
+
+    it('treats only the four raster types as images: an SVG is text, judged by the text limit and never held back by the image gate', async () => {
+      const { r, attachments } = await open({ attachments: new MemoryAssistantAttachments({ maxFileBytes: 10, maxImageBytes: 5 * 1024 * 1024 }) });
+      attachments?.blockImages("Tiny can't read images.");
+      await pick(r, [file('logo.svg', 'x'.repeat(11), 'image/svg+xml')]);
+      expect(text(r, 'assistant-failure')).toContain('"logo.svg" is larger than 10 bytes. Attach a smaller file');
+      expect(text(r, 'assistant-failure')).not.toContain("can't read images");
+    });
+
+    it("offers the host's button beside the words, in the note and in the refusal", async () => {
+      const run = vi.fn();
+      const { r, attachments } = await open();
+      attachments?.blockImages("Tiny can't read images. Choose Eyes to ask about an image.", { label: 'Use Eyes for images', run });
+      await pick(r, [picture()]);
+      expect(text(r, 'assistant-failure-image-action')).toBe('Use Eyes for images');
+      r.one<HTMLButtonElement>('[data-testid=assistant-failure-image-action]').click();
+      expect(run).toHaveBeenCalledTimes(1);
+      await settleAll(r);
+      expect(r.all('[data-testid=assistant-failure]')).toHaveLength(0);
+      // A text file's refusal is not about images: no button there.
+      attachments?.blockImages(null, null);
+      await settleAll(r);
+      expect(r.all('[data-testid=assistant-failure-image-action]')).toHaveLength(0);
+    });
+
+    it("shows an image's name beside its thumbnail (so the thumbnail's alt is empty), and the tray scrolls on whole rows", async () => {
+      const { r } = await open();
+      await pick(r, [picture('rack-photo.png')]);
+      expect(r.one('[data-testid=assistant-file-thumb]').getAttribute('alt')).toBe('');
+      expect(r.one('[data-testid=assistant-files]').classList.contains('thumbs')).toBe(true);
+    });
+
+    it('attaches a pasted image and a dropped one like any file', async () => {
+      const { r } = await open();
+      const box = r.one<HTMLTextAreaElement>('[data-testid=assistant-input]');
+      const paste = carrying(new Event('paste', { bubbles: true, cancelable: true }), 'clipboardData', [picture('image.png')]);
+      box.dispatchEvent(paste);
+      await settleAll(r);
+      expect(paste.defaultPrevented).toBe(true);
+      r.one<HTMLFormElement>('[data-testid=assistant-composer]').dispatchEvent(carrying(new Event('drop', { bubbles: true, cancelable: true }), 'dataTransfer', [picture('dropped.png', 'other')]));
+      await settleAll(r);
+      expect(r.all('[data-testid=assistant-file-thumb]')).toHaveLength(2);
+    });
   });
 
   it('has no attach button, paste or drop in a host without attachments, and no microphone without speech', async () => {

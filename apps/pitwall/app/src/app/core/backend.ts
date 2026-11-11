@@ -241,6 +241,8 @@ export interface PitwallBackend {
   chatAttach(name: string, bytes: Uint8Array): Promise<ChatAttached>;
   /** Forgets a file taken off the question before it was sent. */
   chatDetach(sha256: string): Promise<void>;
+  /** A kept picture's small copy as a `data:` URL (a reopened chat's chip); null when it is gone or cannot be shown small. */
+  chatThumbnail(sha256: string): Promise<string | null>;
   /** The app asks the open window to show the "When you quit" dialog. */
   onQuitAsk(handler: () => void): Unsubscribe;
   autostart(): Promise<boolean>;

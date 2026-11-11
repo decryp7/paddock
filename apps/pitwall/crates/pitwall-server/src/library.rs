@@ -31,6 +31,8 @@ pub struct LocalFile {
     pub info: GgufInfo,
     /// Matching vision projector, if one sits next to it.
     pub projector: Option<PathBuf>,
+    /// Most pixels of one image the projector takes (its header's token budget); `None` without a readable projector.
+    pub image_max_pixels: Option<u64>,
     /// Modified time.
     pub modified: u64,
     /// `owner/repo` when it was downloaded from there.
@@ -80,6 +82,10 @@ pub fn scan(dir: &Path) -> Vec<LocalFile> {
                 })
             })
             .cloned();
+        let image_max_pixels = projector
+            .as_ref()
+            .and_then(|p| gguf::inspect_projector(p).ok())
+            .map(|i| i.max_image_pixels());
         let modified = std::fs::metadata(p)
             .and_then(|m| m.modified())
             .ok()
@@ -95,6 +101,7 @@ pub fn scan(dir: &Path) -> Vec<LocalFile> {
             size,
             info,
             projector,
+            image_max_pixels,
             modified,
             repo,
         });
@@ -513,6 +520,7 @@ pub fn to_dto(
             .as_ref()
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().into_owned()),
+        image_max_pixels: f.image_max_pixels,
         added_at: f.modified,
         last_used_at: None,
         loaded,
@@ -539,6 +547,76 @@ pub fn capabilities(f: &LocalFile) -> Vec<pitwall_core::select::Capability> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A value of a test GGUF header.
+    enum V<'a> {
+        S(&'a str),
+        U(u32),
+        B(bool),
+    }
+
+    /// A minimal GGUF header (what a model's and a projector's size facts need), padded so it looks like a file.
+    fn gguf_with(arch: &str, kvs: &[(&str, V)]) -> Vec<u8> {
+        let mut b = b"GGUF".to_vec();
+        b.extend(3u32.to_le_bytes());
+        b.extend(0u64.to_le_bytes());
+        b.extend((kvs.len() as u64 + 1).to_le_bytes());
+        let mut put = |k: &str, v: &V| {
+            b.extend((k.len() as u64).to_le_bytes());
+            b.extend(k.as_bytes());
+            match v {
+                V::S(s) => {
+                    b.extend(8u32.to_le_bytes());
+                    b.extend((s.len() as u64).to_le_bytes());
+                    b.extend(s.as_bytes());
+                }
+                V::U(n) => {
+                    b.extend(4u32.to_le_bytes());
+                    b.extend(n.to_le_bytes());
+                }
+                V::B(x) => {
+                    b.extend(7u32.to_le_bytes());
+                    b.push(u8::from(*x));
+                }
+            }
+        };
+        put("general.architecture", &V::S(arch));
+        for (k, v) in kvs {
+            put(k, v);
+        }
+        b.extend(vec![0u8; 70_000]);
+        b
+    }
+
+    /// WP-5 (ADR 0023 Decision 4): the projector's pixel budget, unused until now, reaches the model list, so a caller can
+    /// downscale an image to what the projector takes. A model without a projector has none.
+    #[test]
+    fn a_model_with_a_projector_reports_its_image_budget() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("o/vis");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("vis-q4_k_m.gguf"), gguf_with("llama", &[])).unwrap();
+        let proj = gguf_with(
+            "clip",
+            &[
+                ("general.type", V::S("mmproj")),
+                ("clip.has_vision_encoder", V::B(true)),
+                ("clip.projector_type", V::S("qwen3vl_merger")),
+                ("clip.vision.image_size", V::U(768)),
+                ("clip.vision.patch_size", V::U(16)),
+                ("clip.vision.spatial_merge_size", V::U(2)),
+            ],
+        );
+        std::fs::write(dir.join("mmproj-vis.gguf"), proj).unwrap();
+        let plain = d.path().join("o/plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        std::fs::write(plain.join("plain-q4_k_m.gguf"), gguf_with("llama", &[])).unwrap();
+        let found = scan(d.path());
+        let vis = found.iter().find(|f| f.id.to_string().starts_with("vis")).unwrap();
+        assert_eq!(vis.image_max_pixels, Some(pitwall_core::gguf::MAX_IMAGE_TOKENS * 32 * 32));
+        let plain = found.iter().find(|f| f.id.to_string().starts_with("plain")).unwrap();
+        assert_eq!(plain.image_max_pixels, None);
+    }
 
     #[test]
     fn scan_skips_damaged_and_non_gguf_files() {

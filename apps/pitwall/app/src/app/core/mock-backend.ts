@@ -1,6 +1,7 @@
 import { buildDownloadName } from '../shared/build-download';
 import type {
   AppDetail,
+  ChatImages,
   ChatModels,
   ChatAttached,
   ChatAttachRules,
@@ -120,7 +121,7 @@ const APP_METHODS: ReadonlySet<string> = new Set([
   'serviceState', 'installService', 'uninstallService', 'repairService', 'declineService', 'openLoginItems',
   'autostart', 'setAutostart', 'quitApp', 'takeQuitAsk', 'chatEnabled',
   'connectedApps', 'setAppKey', 'connectApp', 'forgetApp', 'revokeToolApproval', 'openConnectedApp',
-  'chatStorage', 'setChatSaveNew', 'chatSaved', 'setChatSaved', 'deleteAllChats', 'chatAttachRules', 'chatAttach', 'chatDetach', 'chatRefreshWindow',
+  'chatStorage', 'setChatSaveNew', 'chatSaved', 'setChatSaved', 'deleteAllChats', 'chatAttachRules', 'chatAttach', 'chatDetach', 'chatThumbnail', 'chatRefreshWindow',
   // The popup's widgets are the app's own too (its layout is kept by the app; the values say "server not running" themselves).
   'popoverView', 'popoverValues', 'popoverHeader', 'popoverShape', 'editPopover',
 ]);
@@ -168,6 +169,26 @@ export interface MockOptions {
 }
 
 const clone = <T>(v: T): T => structuredClone(v);
+
+/** The type of a picture by its first bytes, as Rust's `chat_host::image::sniff` (`'unsupported'`: an image type the chat can't read; null: not a picture). */
+function sniffImage(b: Uint8Array): string | 'unsupported' | null {
+  const at = (...v: number[]) => v.every((x, i) => b[i] === x);
+  if (at(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return 'image/png';
+  if (at(0xff, 0xd8, 0xff)) return 'image/jpeg';
+  if (at(0x47, 0x49, 0x46, 0x38)) return 'image/gif';
+  if (at(0x52, 0x49, 0x46, 0x46) && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return 'image/webp';
+  if (at(0x42, 0x4d) || at(0x49, 0x49, 0x2a, 0x00) || at(0x4d, 0x4d, 0x00, 0x2a)) return 'unsupported';
+  return null;
+}
+
+/** A picture's size when it is a PNG (its header says), else a plausible one: the browser build never decodes. */
+function pictureSize(b: Uint8Array): { width: number; height: number } {
+  if (b.length >= 24 && b[0] === 0x89) {
+    const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    return { width: v.getUint32(16), height: v.getUint32(20) };
+  }
+  return { width: 640, height: 480 };
+}
 
 /**
  * The browser-build backend: realistic, deterministic demo data and simulated live updates. Browser development and
@@ -395,7 +416,7 @@ export class MockBackend implements PitwallBackend {
       const quant = /-(Q\d\w*|F16|BF16)(?:-|\.)/i.exec(d.name)?.[1] ?? null;
       const id = d.name.replace(/\.gguf$/i, '').toLowerCase();
       if (!this.library.some((m) => m.id === id)) {
-        this.library.push({ id, repo: d.host, file: d.name, name: d.name.replace(/\.gguf$/i, '').replace(/-/g, ' '), quant, sizeBytes: d.bytesTotal, paramsB: null, contextMax: null, architecture: null, capabilities: ['chat'], projector: null, addedAt: now, lastUsedAt: null, loaded: false, pinned: false, idleSecs: null, slots: DEFAULT_SLOTS, slotsCustom: false, loadedSlots: null, contextPerSlot: 8192, fit: demoFit(d.bytesTotal) });
+        this.library.push({ id, repo: d.host, file: d.name, name: d.name.replace(/\.gguf$/i, '').replace(/-/g, ' '), quant, sizeBytes: d.bytesTotal, paramsB: null, contextMax: null, architecture: null, capabilities: ['chat'], projector: null, imageMaxPixels: null, addedAt: now, lastUsedAt: null, loaded: false, pinned: false, idleSecs: null, slots: DEFAULT_SLOTS, slotsCustom: false, loadedSlots: null, contextPerSlot: 8192, fit: demoFit(d.bytesTotal) });
       }
     } else {
       const engine = this.engineOfBuild(d.id.replace(/^eng-\d+-/, ''));
@@ -1517,8 +1538,9 @@ export class MockBackend implements PitwallBackend {
     return this.reply('chatAttachRules', () => ({
       maxFileBytes: 256 * 1024,
       maxCount: 16,
-      accept: '.txt,.md,.csv,.json,.log,.rs,.ts,.py,text/*',
-      hint: 'Attach text or code files (UTF-8, up to 256 KiB each)',
+      maxImageBytes: 25 * 1024 * 1024,
+      accept: 'image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif,.txt,.md,.csv,.json,.log,.rs,.ts,.py,text/*',
+      hint: 'Attach images (PNG, JPEG, WebP, GIF, up to 25 MiB) or text and code files (UTF-8, up to 256 KiB each)',
     }));
   }
 
@@ -1539,8 +1561,9 @@ export class MockBackend implements PitwallBackend {
   async chatAttach(name: string, bytes: Uint8Array): Promise<ChatAttached> {
     if (this.attachGate) await this.attachGate;
     return this.reply('chatAttach', () => {
-      const png = bytes[0] === 0x89 && bytes[1] === 0x50;
-      if (png) this.fail('badRequest', `"${name}" is an image. The chat can't attach images yet; attach text or code files.`);
+      const picture = sniffImage(bytes);
+      if (picture === 'unsupported') this.fail('badRequest', `"${name}" is an image type the chat can't read. It reads PNG, JPEG, WebP and GIF; convert it, then attach it again.`);
+      if (picture !== null) return this.attachPicture(name, bytes, picture);
       let text: string;
       try {
         text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -1554,8 +1577,32 @@ export class MockBackend implements PitwallBackend {
       // Bounded like Rust's staging: the oldest size goes first.
       if (this.attachedBytes.size >= 1024) this.attachedBytes.delete(this.attachedBytes.keys().next().value as string);
       this.attachedBytes.set(sha256, bytes.length);
-      return { attachment: { kind: 'file' as const, sha256, name }, bytes: bytes.length, lines };
+      return { attachment: { kind: 'file' as const, sha256, name }, bytes: bytes.length, lines, thumbnail: null };
     });
+  }
+
+  /** A picture, as Rust's `chat_host::image` takes it (the browser build keeps the file itself as its own thumbnail). */
+  private attachPicture(name: string, bytes: Uint8Array, mime: string): ChatAttached {
+    const images = this.picker(this.chatModel_).images;
+    if (!images.allowed) this.fail('badRequest', images.reason ?? 'Choose a model that can read images first.');
+    if (bytes.length > 25 * 1024 * 1024) this.fail('badRequest', `"${name}" is larger than 25 MiB. Attach a smaller image, or export a smaller copy.`);
+    const { width, height } = pictureSize(bytes);
+    let h = 7;
+    for (let i = 0; i < bytes.length; i++) h = (Math.imul(h, 31) + (bytes[i] ?? 0)) >>> 0;
+    const sha256 = h.toString(16).padStart(8, '0').repeat(8);
+    // The meter counts a picture by its pixels (one token per 28 x 28, at most 1024), as Rust's `image_tokens`; this map is in bytes at four a token.
+    this.attachedBytes.set(sha256, 4 * Math.min(1024, Math.max(1, Math.ceil((width * height) / 784))));
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    const thumbnail = `data:${mime};base64,${btoa(binary)}`;
+    this.thumbnails.set(sha256, thumbnail);
+    return { attachment: { kind: 'image' as const, sha256, mime, width, height }, bytes: bytes.length, lines: 0, thumbnail };
+  }
+
+  private readonly thumbnails = new Map<string, string>();
+
+  chatThumbnail(sha256: string): Promise<string | null> {
+    return this.reply('chatThumbnail', () => this.thumbnails.get(sha256) ?? null);
   }
 
   /** Sizes of the files taken, by digest (the browser build's context meter counts them, as Rust does). */
@@ -1644,16 +1691,31 @@ export class MockBackend implements PitwallBackend {
   private picker(wanted: string | null): ChatModels {
     const chat = this.library.filter((m) => m.capabilities.includes('chat'));
     const models = chat
-      .map((m) => ({ id: m.id, name: m.name, loaded: m.loaded, disabled: m.capabilities.includes('tools') ? null : "Can't use tools" }))
+      .map((m) => ({ id: m.id, name: m.name, loaded: m.loaded, disabled: m.capabilities.includes('tools') ? null : "Can't use tools", vision: m.capabilities.includes('vision') }))
       .sort((a, b) => Number(a.disabled !== null) - Number(b.disabled !== null) || Number(!a.loaded) - Number(!b.loaded) || a.name.localeCompare(b.name));
     // The starter catalog's tool models not downloaded yet (as Rust lists them).
-    models.push({ id: 'qwen3.8-27b', name: 'Qwen3.8 27B', loaded: false, disabled: 'Not downloaded' });
+    models.push({ id: 'qwen3.8-27b', name: 'Qwen3.8 27B', loaded: false, disabled: 'Not downloaded', vision: false });
     const usable = (id: string | null) => models.some((m) => m.id === id && m.disabled === null);
     const selected = usable(wanted) ? wanted : (models.find((m) => m.disabled === null)?.id ?? null);
     this.chatModel_ = selected;
     const notes: Record<string, string> = { 'Not downloaded': 'Starter models that can use tools: download one in Models, then choose it here.' };
     if (models.some((m) => m.disabled === "Can't use tools")) notes["Can't use tools"] = '"Can\'t use tools": the model\'s chat template has no tool calls, so it can\'t use a connected app\'s tools.';
-    return { models, selected, notes };
+    return { models, selected, notes, images: this.imagesOf(chat, selected) };
+  }
+
+  /** What the chosen model means for pictures, as `chat_host::models::chat_images` words it. */
+  private imagesOf(chat: LocalModel[], selected: string | null): ChatImages {
+    const chosen = chat.find((m) => m.id === selected);
+    if (!chosen) return { allowed: false, reason: 'Choose a model that can read images first.', suggest: null };
+    if (chosen.capabilities.includes('vision')) return { allowed: true, reason: null, suggest: null };
+    const seeing = chat
+      .filter((m) => m.capabilities.includes('vision') && m.capabilities.includes('tools'))
+      .sort((a, b) => Number(!a.loaded) - Number(!b.loaded) || a.name.toLowerCase().localeCompare(b.name.toLowerCase()))[0];
+    const suggest = seeing ? { id: seeing.id, name: seeing.name } : null;
+    const reason = suggest
+      ? `${chosen.name} can't read images. Choose ${suggest.name} to ask about an image.`
+      : `${chosen.name} can't read images. Download a model that can (one with a vision file, for example Gemma 3 or Qwen2.5-VL) in Models, then choose it here.`;
+    return { allowed: false, reason, suggest };
   }
 
   takeQuitAsk(): Promise<boolean> {

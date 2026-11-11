@@ -3125,6 +3125,15 @@
       <trans-unit id="pd.wb.assistant.attach.image" datatype="html">
         <source>Image</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.attach.image-too-big" datatype="html">
+        <source>&quot;<x id="name"/>&quot; is larger than <x id="mib"/> MiB. Attach a smaller image, or export a smaller copy.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.attach.image-too-big-bytes" datatype="html">
+        <source>&quot;<x id="name"/>&quot; is larger than <x id="bytes"/> bytes. Attach a smaller image, or export a smaller copy.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.attach.image-too-big-kib" datatype="html">
+        <source>&quot;<x id="name"/>&quot; is larger than <x id="kib"/> KiB. Attach a smaller image, or export a smaller copy.</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.attach.remove" datatype="html">
         <source>Remove from this question</source>
       </trans-unit>
@@ -3277,6 +3286,12 @@
       </trans-unit>
       <trans-unit id="pd.wb.assistant.hint.unavailable" datatype="html">
         <source>Pitwall is not available right now</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.images.many" datatype="html">
+        <source><x id="count"/> images</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.images.one" datatype="html">
+        <source>1 image</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.jump" datatype="html">
         <source>Jump to latest</source>
