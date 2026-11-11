@@ -5,6 +5,7 @@
 ### Fixed
 
 - An administrator helper from an older Dyno that Dyno still accepts is now offered the newer helper that ships with the app: Settings shows "Update available" and "Update the helper", and the helper's readings keep working until you choose to update. A helper of the same version and build, or a newer one, is left alone; a newer one is never replaced by an older one. The agent's checks of its own program file now end on time even on a busy computer.
+- A helper version with a pre-release suffix (for example 1.1.0-beta.1) now counts as below the release it precedes, as SemVer says, so a pre-release helper is no longer accepted where 1.1.0 is the minimum. Settings now says "Update needed" for a helper that must be updated before Dyno can use it.
 - When Dyno cannot find your home folder, it no longer falls back to a shared folder in the temporary folder, where another user on the same computer could have put a file for Dyno to trust. It now uses a private folder made for your account only and refuses a folder that belongs to someone else or is a link. If no safe folder exists, the command stops and says what to set. The file that tells the app where the agent is runs is also ignored when its folder is a link or belongs to another user.
 
 ### Changed

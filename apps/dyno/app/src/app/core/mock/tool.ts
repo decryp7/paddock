@@ -8,5 +8,5 @@ export function mockToolOffer(helper: MockHelperVariant, os: 'windows' | 'macos'
   if (os === 'macos') return { ...base, version: '', size: 0, from: '', state: { notHere: 'On macOS Dyno will run smartctl from its own copy; that is not in this version. You can install smartmontools yourself (for example with Homebrew).' } };
   if (os === 'linux') return { ...base, version: '', size: 0, from: '', state: { notHere: "Install smartmontools with your distribution's package manager (for example: sudo apt install smartmontools)." } };
   const pinned = { ...base, version: '7.5', size: 1_508_408, from: 'github.com' };
-  return helper === 'ready' ? { ...pinned, state: 'available' } : { ...pinned, state: { needsHelper: 'Turn on administrator readings first (above): the helper installs the tool for all accounts.' } };
+  return helper === 'ready' || helper === 'updateAvailable' ? { ...pinned, state: 'available' } : { ...pinned, state: { needsHelper: 'Turn on administrator readings first (above): the helper installs the tool for all accounts.' } };
 }

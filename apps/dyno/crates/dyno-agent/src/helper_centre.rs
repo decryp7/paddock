@@ -177,6 +177,13 @@ impl<T: HelperTransport> HelperCentre<T> {
             (self.pause)(PAUSE);
         }
         let last = self.status();
+        if last.state == HelperState::UpdateAvailable {
+            // It answers all along, but still as the older version: the update did not take.
+            return Err(JobError::Failed(format!(
+                "The helper still reports version {}; Repair or try again.",
+                last.version.as_deref().unwrap_or("unknown")
+            )));
+        }
         Err(JobError::Failed(format!(
             "The helper was installed but did not answer within a minute ({}). Choose Repair, or open the log from Settings.",
             last.message
@@ -364,6 +371,33 @@ mod tests {
         assert!(
             clock.monotonic() < Duration::from_secs(1),
             "no minute of waiting for a helper that is already answering"
+        );
+    }
+
+    #[test]
+    fn an_update_that_leaves_the_older_helper_running_says_which_version_it_still_reports() {
+        // The helper answers as 1.1.0 although this Dyno (1.1.1) shipped a newer one: the update did not take.
+        let machine = Arc::new(Machine {
+            version: Mutex::new("1.1.0".into()),
+            up: Mutex::new(false),
+            asks_until_up: Mutex::new(0),
+            installed: Mutex::new(true),
+        });
+        let clock = FakeClock::new();
+        let link = HelperLink::new(Fake(machine.clone()), Arc::new(clock.clone())).with_bundled_build(Arc::new(|| Some("bbbb".into())));
+        let prompt = Prompt {
+            machine,
+            answer: Ok(()),
+            asked: Arc::new(Mutex::new(0)),
+        };
+        let tick = clock.clone();
+        let c =
+            HelperCentre::new(link, HelperHost::Linux, Ok(()), "1.1.1", Box::new(prompt)).with_pause(Box::new(move |d| tick.advance(d)));
+        assert_eq!(c.status().state, HelperState::UpdateAvailable);
+        let err = Run::new().job(|ctx| c.run(ctx, HelperAction::Update)).unwrap_err();
+        assert!(
+            matches!(&err, JobError::Failed(m) if m.contains("still reports version 1.1.0") && m.contains("Repair or try again") && !m.contains("did not answer")),
+            "{err:?}"
         );
     }
 

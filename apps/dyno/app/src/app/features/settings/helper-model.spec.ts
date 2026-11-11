@@ -11,7 +11,7 @@ describe('helperFace', () => {
 
   it('tints by what the person must do: warning when something needs them, success when on, info when not here, neutral when off', () => {
     const status = (s: HelperState) => helperFace(s).status;
-    expect(STATES.map(status)).toEqual(['info', 'neutral', 'warning', 'info', 'warning', 'warning', 'warning', 'info', 'success']);
+    expect(STATES.map(status)).toEqual(['info', 'neutral', 'warning', 'info', 'warning', 'warning', 'warning', 'success', 'success']);
     expect(helperFace('foreign').label).toBe('Not trusted');
   });
 
