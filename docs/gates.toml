@@ -362,6 +362,16 @@ review_by = 2027-01-07
 approved = "coordinator"
 
 [[ignored]]
+path = "crates/paddock-env/src/winpath/tests.rs"
+tests = ["a_subst_drive_resolves_to_its_folder"]
+gate = "not-gated"
+reason = "makes a session-wide drive letter with subst (ER-14): run by hand on Windows with --run-ignored, or on a CI leg that sets it up"
+owner = "Paddock"
+since = 2026-11-11
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
 path = "apps/debrief/app/src-tauri/src/lifecycle.rs"
 tests = ["quitting_finishes_with_live_tail_jobs_and_the_tray"]
 gate = "not-gated"

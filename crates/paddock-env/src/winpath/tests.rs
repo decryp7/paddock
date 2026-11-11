@@ -465,6 +465,7 @@ mod on_windows {
     /// `subst X: <folder>` makes a drive that is another name for a folder: `real` resolves it to the folder, and the result is
     /// plain and compares equal with the folder's own path.
     #[test]
+    #[ignore = "makes a session-wide drive letter with `subst` (ER-14); run on the Windows CI leg or by hand with --run-ignored"]
     fn a_subst_drive_resolves_to_its_folder() {
         struct Subst(String);
         impl Drop for Subst {
@@ -581,6 +582,13 @@ fn the_fold_leaves_characters_above_the_basic_plane_alone() {
     // Deseret small and capital letter long i: two UTF-16 units each; CompareStringOrdinal does not fold surrogate pairs.
     assert!(!same(p("C:\\\u{10428}"), p("C:\\\u{10400}"), W));
     assert!(same(p("C:\\\u{10428}"), p("c:\\\u{10428}"), W));
+}
+
+#[test]
+fn the_fold_keeps_dotless_i_and_long_s_apart_from_the_ascii_letters() {
+    assert!(!same(p("C:\\\u{131}"), p(r"C:\I"), W));
+    assert!(!same(p("C:\\\u{17f}"), p(r"C:\s"), W));
+    assert!(same(p("C:\\\u{131}"), p("c:\\\u{131}"), W));
 }
 
 #[test]

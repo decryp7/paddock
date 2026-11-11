@@ -75,6 +75,10 @@ fn tool_path(os: Os, path: &Path) -> std::result::Result<PathBuf, NotPlain> {
         Os::Mac => paddock_env::Os::MacOs,
         Os::Linux => paddock_env::Os::Linux,
     };
+    if os != Os::Windows {
+        // Nothing to strip off Windows, and a name that is not text can still be opened.
+        return Ok(path.to_path_buf());
+    }
     paddock_env::winpath::for_tools_native(path, rules).map(PathBuf::from)
 }
 
@@ -418,6 +422,19 @@ mod tests {
             );
         }
         assert!(reveal(Os::Windows, Path::new(r"\\?\Volume{1}\x")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_name_that_is_not_text_is_passed_through_off_windows() {
+        use std::os::unix::ffi::OsStrExt;
+        let odd = Path::new(OsStr::from_bytes(b"/logs/\xff.log"));
+        let i = open_default(Os::Linux, odd).unwrap();
+        assert_eq!(i.args, vec![odd.as_os_str().to_os_string()]);
+        assert!(
+            open_default(Os::Windows, odd).is_err(),
+            "Windows names are text"
+        );
     }
 
     #[test]

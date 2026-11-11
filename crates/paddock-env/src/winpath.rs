@@ -537,7 +537,9 @@ fn parse(text: &str) -> (Class, Vec<String>) {
 fn fold(name: &str) -> String {
     name.chars()
         .map(|c| {
-            if u32::from(c) > 0xFFFF {
+            // Above U+FFFF: two UTF-16 units, never folded. Dotless i and long s: Unicode's simple uppercase gives I and S, but
+            // the OS's ordinal table keeps them apart from the ASCII letters (the Windows test checks against the OS).
+            if u32::from(c) > 0xFFFF || matches!(c, '\u{131}' | '\u{17f}') {
                 return c;
             }
             let mut upper = c.to_uppercase();

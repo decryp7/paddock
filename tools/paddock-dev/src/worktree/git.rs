@@ -251,7 +251,7 @@ mod tests {
     #[test]
     fn a_path_that_does_not_exist_yet_resolves_through_its_existing_parent() {
         let d = tempfile::tempdir().unwrap();
-        let real = paddock_env::winpath::real_or_given(d.path());
+        let real = paddock_env::winpath::real_verbatim(d.path()).unwrap();
         assert_eq!(canonical(&d.path().join("a").join("b")), real.join("a").join("b"));
     }
 

@@ -1166,6 +1166,7 @@ adr = "docs/adr/amendments/0021-windows-verbatim-paths-2026-11-11.md"
 
   [[mechanism.copy]]
   paths = ["apps/debrief/crates/cargo-debrief-plugin/src/main.rs"]
+  symbols = ["text:strip_prefix"]
   owner = "debrief"
   delete_by = "debrief-v1.2.0"
   note = "Strips the prefix from the SDK path before handing it to cargo; adopts winpath::real_for_tools."
@@ -1186,6 +1187,7 @@ adr = "docs/adr/amendments/0021-windows-verbatim-paths-2026-11-11.md"
 
   [[mechanism.copy]]
   paths = ["apps/dyno/crates/dyno-helper/src/protect.rs"]
+  symbols = ["text:strip_prefix"]
   owner = "dyno"
   delete_by = "dyno-v1.2.0"
   note = "Drops the prefix from a held final path before the trust check (strip_prefix on the text); adopts winpath::same or components."
