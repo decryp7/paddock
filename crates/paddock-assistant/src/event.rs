@@ -84,6 +84,9 @@ pub enum AssistantEvent {
         write: bool,
         /// What it changes cannot be undone (implies `write`).
         destructive: bool,
+        /// The arguments as parsed, for the card's details once the call has run (also for a call that never asked).
+        #[cfg_attr(test, ts(type = "unknown"))]
+        input: Value,
     },
     /// A call waits for the user's choice (`assistant_approve_tool`): the approval policy asked for it (by default, every
     /// call of a tool that writes).
@@ -94,6 +97,8 @@ pub enum AssistantEvent {
         name: String,
         /// What it would do.
         summary: String,
+        /// What the tool says it does, as the host cleaned it (shown under Details before the first approval).
+        description: String,
         /// What it would change cannot be undone: the UI makes Decline the default and Allow a danger button.
         destructive: bool,
         /// The card offers "Always allow" besides Allow once and Deny (an action asks every call, so it never does).
@@ -112,6 +117,10 @@ pub enum AssistantEvent {
         ok: bool,
         /// One line for the card.
         summary: String,
+        /// The result as the model read it (what the card's details show), when there is one.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(test, ts(optional))]
+        output: Option<String>,
         /// The structured result for the app's renderer of this tool.
         #[serde(skip_serializing_if = "Option::is_none")]
         #[cfg_attr(test, ts(optional, type = "unknown"))]

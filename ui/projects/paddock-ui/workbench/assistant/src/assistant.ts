@@ -5,7 +5,7 @@ import { PdNeedsAi, PitwallStore, type NextStep } from '@decryp7/paddock-ui/shel
 import { AssistantStore, type ActionsGate } from './assistant.store';
 import { AssistantAttachments, attachmentChip, type AttachmentChip, type AttachSource } from './composer-ports';
 import type { Attachment, ContextUse } from '../generated/assistant';
-import { chipText, conversationTitle, waitingPhase, type TurnPart, type TurnView } from './chat-model';
+import { chipText, conversationTitle, hasValue, waitingPhase, type TurnPart, type TurnView } from './chat-model';
 import type { ProviderPhase } from '../generated/assistant';
 import { PdAssistantRichText, type CitationOpened } from './rich-text';
 import { ASSISTANT_CITATIONS, injectToolRenderers, PdAssistantToolCard, rendererFor } from './tool-cards';
@@ -188,6 +188,10 @@ const SCROLL_STICK_PX = 24;
           <dl>
             <dt>{{ t.tool }}</dt>
             <dd data-testid="assistant-approval-tool">{{ ask.name }}</dd>
+            @if (ask.description) {
+              <dt>{{ t.toolDescription }}</dt>
+              <dd data-testid="assistant-approval-description">{{ ask.description }}</dd>
+            }
             <dt>{{ t.arguments }}</dt>
             <dd>
               @if (hasArgs(ask.input)) {
@@ -591,6 +595,7 @@ export class PdAssistant {
     details: $localize`:@@pd.wb.assistant.approve.details:Details`,
     tool: $localize`:@@pd.wb.assistant.approve.tool:Tool`,
     arguments: $localize`:@@pd.wb.assistant.approve.arguments:Arguments`,
+    toolDescription: $localize`:@@pd.wb.assistant.approve.tool-description:What it does`,
     noArguments: $localize`:@@pd.wb.assistant.approve.no-arguments:No arguments`,
     cannotUndo: $localize`:@@pd.wb.assistant.approve.cannot-undo:This cannot be undone.`,
     failedTitle: $localize`:@@pd.wb.assistant.turn-failed.title:The answer did not finish.`,
@@ -785,14 +790,14 @@ export class PdAssistant {
     return name.replace(/^pd:/, '') in PD_ICON_PATHS;
   }
 
-  /** The call's arguments as the prompt's details show them (bounded). */
+  /** Whether the call has arguments to show. */
   protected hasArgs(input: unknown): boolean {
-    return !(input === undefined || input === null || (typeof input === 'object' && Object.keys(input).length === 0));
+    return hasValue(input);
   }
 
+  /** The call's arguments in full, as the prompt's details show them: what the user approves is everything that will be sent (the box scrolls). */
   protected args(input: unknown): string {
-    const text = JSON.stringify(input, null, 2) ?? '';
-    return text.length <= 2000 ? text : `${text.slice(0, 1999)}…`;
+    return JSON.stringify(input, null, 2) ?? '';
   }
 
   /** The composer's hint: the question, or what to do about Pitwall in the state's own words. */

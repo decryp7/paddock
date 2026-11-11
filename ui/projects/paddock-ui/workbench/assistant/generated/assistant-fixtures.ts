@@ -77,7 +77,10 @@ export const FIXTURE_EVENTS: Envelope[] = [
     "name": "find_events",
     "summary": "build failed",
     "write": false,
-    "destructive": false
+    "destructive": false,
+    "input": {
+      "query": "build failed"
+    }
   },
   {
     "conversationId": "c1-1",
@@ -87,6 +90,7 @@ export const FIXTURE_EVENTS: Envelope[] = [
     "name": "find_events",
     "ok": true,
     "summary": "3 events found",
+    "output": "events 4, 7, 9",
     "data": {
       "ids": [
         4,

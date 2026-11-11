@@ -20,8 +20,12 @@ export interface ToolCard {
   readonly result: string | null;
   /** The structured result, for the app's renderer of this tool (never shown as HTML). */
   readonly data: unknown;
-  /** The arguments of the call, known once a write asks for approval (shown in the prompt's details). */
+  /** The arguments of the call, in full (shown in the prompt's details and in the finished card's details). */
   readonly input?: unknown;
+  /** What the tool says it does, as the host cleaned it (shown under the prompt's details). */
+  readonly description?: string;
+  /** The result as the model read it, once the call ended (shown in the card's details). */
+  readonly output?: string;
   /** The user declined this call: a choice, not a failure (the card is neutral). */
   readonly declined?: boolean;
   /** The user stopped the turn while this call ran or waited: a choice, not a failure (the card is neutral). */
@@ -86,6 +90,11 @@ export function answerText(t: TurnView): string {
   return t.parts.map((p) => (p.kind === 'text' ? p.text : '')).join('');
 }
 
+/** Whether the arguments of a call are worth showing: not missing, null or an empty object. */
+export function hasValue(input: unknown): boolean {
+  return !(input === undefined || input === null || (typeof input === 'object' && Object.keys(input).length === 0));
+}
+
 function setCard(t: TurnView, callId: string, change: (c: ToolCard) => ToolCard): TurnView {
   return { ...t, parts: t.parts.map((p) => (p.kind === 'tool' && p.card.callId === callId ? { kind: 'tool', card: change(p.card) } : p)) };
 }
@@ -117,17 +126,18 @@ export function reduceTurn(t: TurnView, e: AssistantEvent): TurnView {
       return { ...t, phase: null, parts: [...t.parts, { kind: 'text', text: e.text }] };
     }
     case 'toolStarted': {
-      const card: ToolCard = { callId: e.callId, name: e.name, ...(e.title ? { title: e.title } : {}), summary: e.summary, write: e.write, destructive: e.destructive, state: 'running', result: null, data: undefined };
+      const card: ToolCard = { callId: e.callId, name: e.name, ...(e.title ? { title: e.title } : {}), summary: e.summary, write: e.write, destructive: e.destructive, state: 'running', result: null, data: undefined, ...(hasValue(e.input) ? { input: e.input } : {}) };
       return { ...t, phase: null, parts: [...t.parts, { kind: 'tool', card }] };
     }
     case 'approvalNeeded':
-      return setCard(t, e.callId, (c) => ({ ...c, state: 'awaiting', input: e.input, destructive: e.destructive, ...(e.remember ? { remember: true } : {}) }));
+      return setCard(t, e.callId, (c) => ({ ...c, state: 'awaiting', input: e.input, destructive: e.destructive, description: e.description, ...(e.remember ? { remember: true } : {}) }));
     case 'toolFinished': {
       const cites = citationsOf(e.data);
       const next = setCard(t, e.callId, (c) => ({
         ...c,
         state: e.ok ? 'ok' : 'failed',
         result: e.summary,
+        ...(e.output ? { output: e.output } : {}),
         data: e.data,
         ...(e.outcome === 'declined' ? { declined: true } : {}),
         ...(e.outcome === 'stopped' ? { stopped: true } : {}),

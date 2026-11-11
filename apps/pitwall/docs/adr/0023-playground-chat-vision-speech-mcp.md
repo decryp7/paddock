@@ -491,6 +491,15 @@ From building WP-2a and WP-4a (`pitwall/1.1-wp2a` `9dc147e24`, `pitwall/1.1-wp4a
   silent trimming. The window is read again before each measure and send (`chat_refresh_window`), so a change of the context
   per slot or a reload with other slots is followed.
 
+## Deviations for 1.1 (2026-11-11; approved: coordinator, 2026-11-11)
+
+Found by the independent security review of the chat host (WP-11); each is a gap between this ADR and the 1.1 build.
+
+- **The per-chat tool chooser is not built.** `publish()` offers the model every connected tool (Decisions 7 and 9, the
+  "Tool schemas in the prompt" row above). Deferred, accepted 2026-11-11; no risk with Dyno's tools.
+- **The result cap of a quarter of the model's context is not built.** Each result is cut to 16 KiB only (Decision 9, "Limits
+  on what reaches the model"). Deferred, accepted 2026-11-11; no risk with Dyno's tools.
+
 ## Consequences
 
 - Pitwall keeps its promise: no new outbound connection and no new engine. Its only new trust is a key the user pasted.

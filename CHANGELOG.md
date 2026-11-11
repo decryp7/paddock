@@ -43,6 +43,20 @@ Conventional Commits; one semver tag for the whole repo.
   refusal wording is "grants access to ..."; `paddock-ipc`'s peer-facts test no longer expects the primary gid in the
   supplementary group list (it fails under `setpriv --clear-groups`).
 
+### Pitwall chat: the eight P2s of the security review (WP-11, ADR 0023)
+- The approval card shows an action's arguments in full (the box scrolls) and, under Details, what the tool says it does
+  (`ApprovalNeeded.description`, cleaned by Rust). A call that ran can be opened on its card to show the arguments it was
+  sent and the result the model read (`ToolStarted.input`, `ToolFinished.output`; paddock-ui assistant wire types regenerated).
+- `AssistantTool::argument_problem` (new, defaults to the small check) runs before the approval policy; Pitwall's MCP tools
+  validate against the whole schema with `paddock_mcp::schema::validate`, so a call that fails never reaches a card (ADR 0023
+  Decision 9).
+- The approval book is a `VersionedFile` (owner-only, atomic, backup, a newer file never overwritten) instead of a hand-rolled
+  write (rule 55). The approval fingerprint now covers the server's whole description and its MCP `title`
+  (`pitwall_core::approvals::fingerprint` takes the title): every remembered Always allow asks again once.
+- Logs carry only the argument names the schema declares, with a count of the others (`other_args=`); names from outside
+  (tool, server, argument names, the tool named over IPC) are escaped so they cannot forge a log line (ER-27).
+- ADR 0023 records two deviations for 1.1: the per-chat tool chooser and the quarter-of-context result cap are not built.
+
 ### Pitwall: no test double or test switch in the shipped build (ADR 0073, rule 73, WP-P)
 - Removes P1 to P6 of ADR 0073's Pitwall survey; the register and the shared crates follow.
 - `pitwall-server` no longer knows `--fake-engine`, `--die-after-ms` or `--ready-when` (it answers `unknown option`, exit 2). The fake OpenAI-compatible engine is the `pitwall-fake-engine` bin of the same package, built only with the `test-support` feature, which only the package's self dev-dependency enables; the `fake_engine` module is behind `cfg(any(test, feature = "test-support"))`. The tests start it through `CARGO_BIN_EXE_pitwall-fake-engine`, and the host-cleanup process pattern follows the new name.

@@ -500,3 +500,101 @@ fn a_tools_title_reaches_its_card_and_the_tool_list() {
     );
     assert_eq!(infos.iter().find(|t| t.name == "echo").unwrap().title, None);
 }
+
+/// A write tool with a stricter schema than the loop's small check: its own validator refuses a wrong type.
+struct Strict(Arc<AtomicUsize>);
+
+impl AssistantTool for Strict {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "strict".into(),
+            description: "Needs a whole number".into(),
+            input_schema: json!({"type": "object", "properties": {"limit": {"type": "integer"}}}),
+        }
+    }
+    fn access(&self) -> Access {
+        Access::Write
+    }
+    fn argument_problem(&self, input: &serde_json::Value) -> Option<String> {
+        (!input["limit"].is_i64()).then(|| "arguments.limit must be integer, not string".into())
+    }
+    fn call(&self, _: &serde_json::Value, _: &Cancel) -> ToolOutput {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        ToolOutput::ok("ran")
+    }
+}
+
+#[test]
+fn a_tools_own_argument_check_runs_before_the_policy_so_a_wrong_call_never_reaches_a_card() {
+    let runs = counter();
+    let r = rig_with(
+        vec![
+            Step::Reply(
+                vec![],
+                calls("", vec![call("c1", "strict", json!({"limit": "ten"}))]),
+            ),
+            Step::Reply(vec![], text("done")),
+        ],
+        vec![Arc::new(Strict(runs.clone()))],
+        |_| {},
+    );
+    let (_, events) = r.turn(SendRequest {
+        allow_write: true,
+        ..ask("go")
+    });
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, AssistantEvent::ApprovalNeeded { .. })),
+        "a call that fails its schema is never asked about"
+    );
+    assert!(events.iter().any(|e| matches!(
+        e,
+        AssistantEvent::ToolFinished { ok: false, summary, .. }
+            if summary.contains("was not run") && summary.contains("limit must be integer")
+    )));
+    assert_eq!(runs.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn the_card_events_carry_the_description_the_arguments_and_the_result() {
+    let r = rig_with(
+        vec![
+            Step::Reply(
+                vec![],
+                calls(
+                    "",
+                    vec![call("c1", "note", json!({"text": "a".repeat(5000)}))],
+                ),
+            ),
+            Step::Reply(vec![], text("done")),
+        ],
+        vec![Arc::new(Note(counter()))],
+        |_| {},
+    );
+    let ack = r
+        .send(SendRequest {
+            allow_write: true,
+            ..ask("go")
+        })
+        .unwrap();
+    let seen = until(&r.rx, |e| {
+        matches!(e, AssistantEvent::ApprovalNeeded { .. })
+    });
+    assert!(
+        matches!(seen.last().unwrap(), AssistantEvent::ApprovalNeeded { description, .. } if description == "Adds a note"),
+        "the tool's description is part of the approval"
+    );
+    assert!(
+        seen.iter().any(|e| matches!(e, AssistantEvent::ToolStarted { input, .. } if input["text"].as_str().map(str::len) == Some(5000))),
+        "the started call carries its whole arguments"
+    );
+    r.assistant
+        .approve(&ack.conversation_id, "c1", ApprovalChoice::AllowOnce)
+        .unwrap();
+    let events = until_end(&r.rx);
+    assert!(events.iter().any(|e| matches!(
+        e,
+        AssistantEvent::ToolFinished { output: Some(o), .. } if o == "noted"
+    )));
+}

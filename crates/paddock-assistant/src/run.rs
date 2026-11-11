@@ -11,7 +11,7 @@ use crate::approval::{Approval, ApprovalChoice, ApprovalPolicy, CallInfo, Verdic
 use crate::conversation::{StoredMessage, ToolOutcome};
 use crate::event::{AssistantEvent, EndReason};
 use crate::provider::{LlmProvider, ProviderError};
-use crate::tool::{Access, Tools, argument_problem};
+use crate::tool::{Access, Tools};
 use crate::types::{Cancel, ChatMessage, ChatRequest, StopReason, ToolCall, ToolSpec, Usage};
 use paddock_health::Clock;
 use serde_json::Value;
@@ -504,6 +504,11 @@ fn dispatch(
         title: tool.and_then(|t| t.title()),
         write,
         destructive: access.destructive(),
+        input: if call.is_malformed() {
+            Value::Null
+        } else {
+            call.input.clone()
+        },
     });
     let Ran {
         output,
@@ -515,6 +520,7 @@ fn dispatch(
         name: call.name.clone(),
         ok: !output.error,
         summary: output.summary.clone(),
+        output: (!output.text.is_empty()).then(|| output.text.clone()),
         data: output.data.clone(),
         outcome,
         approval,
@@ -581,7 +587,7 @@ fn decide_and_run(
             call.name
         )));
     };
-    if let Some(problem) = argument_problem(&tool.spec(), &call.input) {
+    if let Some(problem) = tool.argument_problem(&call.input) {
         return plain(ToolOutput::failed(format!(
             "the call to {} was not run: {problem}",
             call.name
@@ -613,6 +619,7 @@ fn decide_and_run(
                 call_id: call.id.clone(),
                 name: call.name.clone(),
                 summary: summary.into(),
+                description: spec.description.clone(),
                 destructive: access.destructive(),
                 remember,
                 input: call.input.clone(),

@@ -336,21 +336,22 @@ fn stop_ends_a_hung_tool_call() {
 fn the_book_file_falls_back_to_its_backup_and_a_changed_tool_asks_again() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(policy::FILE);
+    let file = policy::BookFile::new(&path);
     let mut book = pitwall_core::approvals::ApprovalBook::new();
     book.remember("dyno", "disks", "f", 1).unwrap();
-    policy::save(&path, &book).unwrap();
-    policy::save(&path, &book).unwrap();
+    file.save(&book).unwrap();
+    file.save(&book).unwrap();
     std::fs::write(&path, "{damaged").unwrap();
-    let (back, problem) = policy::load(&path);
+    let (back, problem) = policy::BookFile::new(&path).load();
     assert_eq!(back, book);
     assert!(problem.is_some());
     std::fs::write(&path, r#"{"version": 9}"#).unwrap();
     assert!(
-        policy::load(&path).0.entries().is_empty(),
+        policy::BookFile::new(&path).load().0.entries().is_empty(),
         "a newer book is not replaced by an older backup"
     );
     assert_eq!(
-        policy::load(&dir.path().join("none.json")).0,
+        policy::BookFile::new(&dir.path().join("none.json")).load().0,
         pitwall_core::approvals::ApprovalBook::new()
     );
 
@@ -414,7 +415,8 @@ fn the_book_file_falls_back_to_its_backup_and_a_changed_tool_asks_again() {
             access: Access::ReadOnly,
             call: &call
         }),
-        Verdict::AskOrRemember
+        Verdict::Remembered,
+        "the fingerprint is the server's own text, not the model's copy of it"
     );
     p.record(&info, ApprovalChoice::AllowOnce);
     assert_eq!(p.remembered().len(), 1, "Allow once is not remembered");
@@ -812,4 +814,177 @@ fn a_retry_that_meets_a_too_old_app_stops_and_asks_for_an_update() {
     apps.tick(t + D::from_secs(120));
     apps.tick(t + D::from_secs(600));
     assert_eq!(old.accepted.load(Ordering::SeqCst), 1);
+}
+
+/// The fingerprint covers what the server said, whole: a description changed after the model's 1,024-character cut, or a
+/// changed MCP title, asks again (the model's copy of the text, cleaned and cut, cannot show either).
+#[test]
+fn a_change_past_the_models_cut_or_to_the_title_asks_again() {
+    let dyno = fake_dyno();
+    let conn = Arc::new(
+        connect_loopback(&discovery_path(dyno.dir.path()), &dyno.key)
+            .unwrap()
+            .into_connection(ConnectionConfig::default()),
+    );
+    let def = |title: Option<&str>, tail: &str| -> Vec<paddock_mcp::types::Tool> {
+        let mut v = json!({"name": "disks", "description": format!("{}{tail}", "d".repeat(1500)),
+            "inputSchema": {"type": "object"}, "annotations": {"readOnlyHint": true}});
+        if let Some(t) = title {
+            v["title"] = json!(t);
+        }
+        vec![serde_json::from_value(v).unwrap()]
+    };
+    let names = ToolNames::default();
+    let p = PitwallPolicy::new(None, names.clone(), || 1);
+    let call = ToolCall {
+        id: "c".into(),
+        name: "dyno_disks".into(),
+        input: Value::Null,
+    };
+    let verdict = |title: Option<&str>, tail: &str| {
+        let tool = tools_of("dyno", "Dyno", &def(title, tail), true, &conn, &names).remove(0);
+        let spec = tool.spec();
+        let info = CallInfo {
+            tool: &spec,
+            access: Access::ReadOnly,
+            call: &call,
+        };
+        (p.check(&info), info.tool.description.clone())
+    };
+    let tool = tools_of("dyno", "Dyno", &def(Some("Disks"), "A"), true, &conn, &names).remove(0);
+    let spec = tool.spec();
+    let info = CallInfo {
+        tool: &spec,
+        access: Access::ReadOnly,
+        call: &call,
+    };
+    p.record(&info, ApprovalChoice::AlwaysAllow);
+    let (same, shown) = verdict(Some("Disks"), "A");
+    assert_eq!(same, Verdict::Remembered);
+    assert!(shown.chars().count() <= tool::MAX_DESCRIPTION_CHARS, "the model's copy is cut");
+    let (changed_tail, shown2) = verdict(Some("Disks"), "B");
+    assert_eq!(shown, shown2, "the cut copy cannot show the change");
+    assert_eq!(changed_tail, Verdict::AskOrRemember, "a change past the cut asks again");
+    assert_eq!(
+        verdict(Some("Disk usage"), "A").0,
+        Verdict::AskOrRemember,
+        "a changed title asks again"
+    );
+    assert_eq!(verdict(None, "A").0, Verdict::AskOrRemember, "a removed title asks again");
+}
+
+#[test]
+fn the_book_file_is_owner_only_leaves_no_temp_file_and_a_newer_file_is_never_overwritten() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(policy::FILE);
+    let mut book = pitwall_core::approvals::ApprovalBook::new();
+    book.remember("dyno", "disks", "f", 1).unwrap();
+    let file = policy::BookFile::new(&path);
+    file.load();
+    file.save(&book).unwrap();
+    file.save(&book).unwrap();
+    #[cfg(unix)]
+    for f in [path.clone(), path.with_extension("json.bak")] {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600, "{f:?}");
+    }
+    let names: Vec<String> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    assert!(!names.iter().any(|n| n.ends_with(".tmp")), "{names:?}");
+
+    // A book written by a newer Pitwall stays as it is: this build loads nothing and its save is refused.
+    std::fs::write(&path, r#"{"version": 9, "entries": []}"#).unwrap();
+    let newer = policy::BookFile::new(&path);
+    assert!(newer.load().1.is_some());
+    assert!(newer.save(&book).is_err());
+    assert!(std::fs::read_to_string(&path).unwrap().contains("\"version\": 9"));
+}
+
+/// A call whose arguments break the full schema (a wrong type, which the loop's small check misses) is refused before the
+/// policy: no approval card, nothing sent to the app.
+#[test]
+fn a_call_that_breaks_the_schema_never_reaches_a_card() {
+    let dyno = fake_dyno();
+    let bad = ChatResponse {
+        text: String::new(),
+        tool_calls: vec![ToolCall {
+            id: String::new(),
+            name: "dyno_keep_awake".into(),
+            input: json!({"limit": "three"}),
+        }],
+        stop_reason: StopReason::ToolUse,
+        usage: None,
+    };
+    let h = host(&dyno, vec![bad, answer("I could not.")]);
+    h.assistant.send(ask("Stay awake", None), h.sink.clone()).unwrap();
+    let events = until(&h.rx, ended);
+    assert!(
+        !events.iter().any(|e| matches!(e, AssistantEvent::ApprovalNeeded { .. })),
+        "{events:?}"
+    );
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            AssistantEvent::ToolFinished { ok: false, summary, .. } if summary.contains("limit must be integer")
+        )),
+        "{events:?}"
+    );
+    assert_eq!(dyno.awake.load(Ordering::SeqCst), 0);
+}
+
+/// The first approval shows what the tool says it does, cleaned by Rust.
+#[test]
+fn the_approval_carries_the_tools_description() {
+    let dyno = fake_dyno();
+    let h = host(&dyno, vec![calls("dyno_top_processes"), answer("ok")]);
+    h.assistant.send(ask("What is slow?", None), h.sink.clone()).unwrap();
+    let seen = until(&h.rx, |e| matches!(e, AssistantEvent::ApprovalNeeded { .. }));
+    assert!(
+        matches!(seen.last().unwrap(), AssistantEvent::ApprovalNeeded { description, .. } if description.contains("The busiest processes.")),
+        "{seen:?}"
+    );
+}
+
+#[test]
+fn logs_carry_only_declared_argument_names_and_never_forge_lines() {
+    let schema = json!({"type": "object", "properties": {"limit": {}, "sort": {}}});
+    let (known, other) = tool::logged_args(&schema, &json!({"limit": 1, "evil\nINFO fake line": 2, "x": 3}));
+    assert_eq!((known.as_slice(), other), (["limit".to_string()].as_slice(), 2));
+    assert_eq!(tool::logged_args(&json!({"type": "object"}), &json!({"a": 1})), (vec![], 1));
+    assert_eq!(tool::logged_args(&schema, &Value::Null), (vec![], 0));
+
+    let finished = AssistantEvent::ToolFinished {
+        call_id: "c1".into(),
+        name: "dyno_x".into(),
+        ok: true,
+        summary: String::new(),
+        output: None,
+        data: Some(
+            json!({"pitwall": {"server": "dyno\nERROR forged", "tool": "t\r\nWARN forged", "bytes": 1, "durationMs": 2,
+            "argKeys": ["limit", "bad\nkey"], "otherArgs": 4}}),
+        ),
+        outcome: None,
+        approval: None,
+    };
+    let l = log_line::line("c1", &finished).unwrap();
+    assert!(!l.contains('\n') && !l.contains('\r'), "one line: {l:?}");
+    assert!(l.contains("other_args=4"), "{l}");
+
+    let forged = AssistantEvent::ToolFinished {
+        call_id: "c1\nINFO forged".into(),
+        name: "dyno_x".into(),
+        ok: true,
+        summary: String::new(),
+        output: None,
+        data: None,
+        outcome: None,
+        approval: None,
+    };
+    let l = log_line::line("conv\r\nWARN forged", &forged).unwrap();
+    assert!(!l.contains('\n') && !l.contains('\r'), "ids cannot forge a line: {l:?}");
+
+    let r = log_line::revoke_line("dyno", "disks\nINFO pitwall_chat: forged");
+    assert!(!r.contains('\n'), "{r:?}");
 }
