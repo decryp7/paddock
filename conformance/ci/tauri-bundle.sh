@@ -54,6 +54,11 @@ eval "$(node "$here/../release/strip-keys.mjs")"
 
 (cd "$root" && npm ci)
 if [ -n "$prepare" ]; then (cd "$root" && bash -euo pipefail -c "$prepare"); fi
+# An AppImage build needs linuxdeploy and AppRun, which Tauri would fetch from GitHub: put the pinned, verified copies (from the
+# action's cache, else downloaded once) where it looks, so it downloads nothing (Dyno 1.1.1 WP-2; a failure prints its ::error::).
+appimage=false
+case ",$bundles," in *,appimage,*) appimage=true ;; esac
+if [ "$appimage" = true ]; then node "$here/appimage-tools.mjs" install; fi
 (
   cd "$app_dir"
   # Ad-hoc builds ship WITHOUT the hardened runtime (tauri.macos.conf.json, rule 23): ad-hoc code under it cannot load a
@@ -66,13 +71,19 @@ if [ -n "$prepare" ]; then (cd "$root" && bash -euo pipefail -c "$prepare"); fi
   fi
   if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ] && [ -n "${TAURI_UPDATER_PUBKEY:-}" ]; then
     node -e 'process.stdout.write(JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY } } }))' > ../target/updater.conf.json
-    npx tauri build --bundles "$bundles" --config ../target/updater.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
+    extra=(--config ../target/updater.conf.json ${extra[@]+"${extra[@]}"})
   else
     echo '::warning::No updater signing secrets: this build cannot update itself.'
     unset TAURI_UPDATER_PUBKEY TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-    npx tauri build --bundles "$bundles" ${extra[@]+"${extra[@]}"} -- --profile dist
+  fi
+  rc=0
+  npx tauri build --bundles "$bundles" ${extra[@]+"${extra[@]}"} -- --profile dist || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "::error::tauri build --bundles $bundles failed (exit $rc). Next step: the last error lines of tauri above name the failing bundle step (a download names its URL and status); fix that and re-run this job."
+    exit "$rc"
   fi
 )
+if [ "$appimage" = true ]; then node "$here/appimage-tools.mjs" check; fi
 
 # ADR 0032: no binary the Windows installer carries imports the VC++ runtime (a PC without the redistributable cannot start
 # it; CI runners have it, so only this check shows it). The list comes from the Tauri configuration (the app, its

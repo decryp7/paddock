@@ -284,7 +284,7 @@ test('tauri-bundle: --prepare runs in --root after npm ci and before the build; 
 // The composite action's own `run:` line, as the runner would expand it: every caller reaches the script through it.
 test("the tauri-bundle action's run line works with and without `prepare` (an empty one adds no flag)", () => {
   const action = readFileSync(join(PADDOCK, '.gitea', 'actions', 'tauri-bundle', 'action.yml'), 'utf8');
-  const line = action.slice(action.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n').replace('${{ github.action_path }}', join(PADDOCK, '.gitea', 'actions', 'tauri-bundle'));
+  const line = action.slice(action.lastIndexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n').replace('${{ github.action_path }}', join(PADDOCK, '.gitea', 'actions', 'tauri-bundle'));
   for (const prepare of ['', 'npm run build -w ui']) {
     const root = bundleRepo();
     const r = spawnSync('bash', ['-c', line], {

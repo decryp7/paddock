@@ -126,6 +126,12 @@ Windows installer ships, named by the Tauri configuration, imports the VC++ runt
 kin, or is missing; `<file-or-folder>...` checks given paths; pure Node, no dumpbin; `tauri-bundle.sh` runs it after
 every NSIS build).
 
+`ci/appimage-tools.mjs` pins the linuxdeploy and AppRun that `tauri build --bundles appimage` would download from GitHub (URL
+and SHA-256, following tauri-bundler's `prepare_tools`). `install` verifies each (a cached copy too), downloads only a missing
+or changed one, and copies it into Tauri's tools folder; `key` prints the actions/cache key; `check` warns when Tauri fetched a
+linuxdeploy that is not pinned (the CLI moved on: move the pins). `tauri-bundle.sh` runs `install` and `check` around every
+AppImage build.
+
 ## Sidecars (`paddock-sidecar`, plan X34)
 
 One mechanism for the helper binaries an app bundles (`bundle.externalBin`), replacing the per-app `sidecar.mjs` scripts:
