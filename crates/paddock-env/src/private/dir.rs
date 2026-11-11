@@ -1232,6 +1232,40 @@ mod tests {
         assert!(status.success());
         assert!(made.open_file("g").is_ok());
     }
+
+    /// A new file is owner-only from creation (umask 002 cannot widen it), a taken name is refused and not followed, and the new file
+    /// passes the type's own read check.
+    #[test]
+    fn create_new_file_is_owner_only_exclusive_and_never_follows_a_link() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let held = PrivateDir::create_all(&tmp.path().join("d")).unwrap();
+        let made = held.create_new_file("db").unwrap();
+        assert_eq!(
+            made.as_file().metadata().unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        drop(made);
+        held.open_file("db").unwrap();
+        let again = held.create_new_file("db").unwrap_err();
+        assert!(
+            matches!(&again, PrivateError::Io { source, .. } if source.kind() == std::io::ErrorKind::AlreadyExists),
+            "{again}"
+        );
+        let target = tmp.path().join("victim");
+        std::fs::write(&target, "x").unwrap();
+        std::os::unix::fs::symlink(&target, tmp.path().join("d").join("lnk")).unwrap();
+        assert!(held.create_new_file("lnk").is_err());
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "x",
+            "nothing was written through the link"
+        );
+        assert!(matches!(
+            held.create_new_file("a/b"),
+            Err(PrivateError::BadName(_))
+        ));
+    }
 }
 
 #[cfg(all(test, windows))]
@@ -1541,48 +1575,21 @@ mod windows_tests {
         assert_eq!(d.read("f", 10).unwrap(), b"new");
         assert!(!d.path().join(tmp).exists());
     }
-    /// A new file is owner-only from creation (umask 002 cannot widen it), a taken name is refused and not followed, and the new file
-    /// passes the type's own read check.
-    #[cfg(unix)]
+    /// The file's owner-only rights come from the explicit descriptor, not from inheritance: the folder gets an inheritable Everyone
+    /// read entry after the type made it, and the new file still has no entry for anyone but the account and SYSTEM.
     #[test]
-    fn create_new_file_is_owner_only_exclusive_and_never_follows_a_link() {
-        use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
-        let held = PrivateDir::create_all(&tmp.path().join("d")).unwrap();
-        let made = held.create_new_file("db").unwrap();
-        assert_eq!(
-            made.as_file().metadata().unwrap().permissions().mode() & 0o777,
-            0o600
-        );
-        drop(made);
-        held.open_file("db").unwrap();
-        let again = held.create_new_file("db").unwrap_err();
-        assert!(
-            matches!(&again, PrivateError::Io { source, .. } if source.kind() == std::io::ErrorKind::AlreadyExists),
-            "{again}"
-        );
-        let target = tmp.path().join("victim");
-        std::fs::write(&target, "x").unwrap();
-        std::os::unix::fs::symlink(&target, tmp.path().join("d").join("lnk")).unwrap();
-        assert!(held.create_new_file("lnk").is_err());
-        assert_eq!(
-            std::fs::read_to_string(&target).unwrap(),
-            "x",
-            "nothing was written through the link"
-        );
-        assert!(matches!(
-            held.create_new_file("a/b"),
-            Err(PrivateError::BadName(_))
-        ));
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn create_new_file_on_windows_is_exclusive_and_passes_the_read_check() {
-        let tmp = tempfile::tempdir().unwrap();
-        let held = PrivateDir::create_all(&tmp.path().join("d")).unwrap();
+    fn create_new_file_on_windows_has_its_own_descriptor_and_is_exclusive() {
+        let t = temp();
+        let held = PrivateDir::create_all(&t.path().join("d")).unwrap();
+        icacls(held.path(), &["/grant", &format!("*{EVERYONE}:(OI)R")]);
         drop(held.create_new_file("db").unwrap());
-        held.open_file("db").unwrap();
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .access_mode(0x0002_0000)
+            .open(held.path().join("db"))
+            .unwrap();
+        let (owner, aces) = sys::file_security(&file, &me()).unwrap();
+        allows_only_me_and_system(&owner, &aces);
         assert!(held.create_new_file("db").is_err());
     }
 }
