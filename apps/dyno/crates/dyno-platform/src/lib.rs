@@ -40,6 +40,7 @@ pub mod runner;
 pub mod sensors;
 pub mod smart_reader;
 pub mod smartctl_search;
+pub mod system_powershell;
 pub mod tool_install;
 #[cfg(unix)]
 #[allow(unsafe_code)]

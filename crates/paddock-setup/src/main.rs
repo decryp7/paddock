@@ -10,6 +10,10 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 fn main() {
+    // Before anything can load a library: dynamic loads (`LoadLibrary`, delay loads) search the system folder only, as the link flag
+    // does for the imports the loader resolves at start (`/DEPENDENTLOADFLAG:0x800`, src/linkargs.rs). Dyno 1.1.1 WP-6.
+    #[cfg(windows)]
+    restrict_dll_search_to_system32();
     #[cfg(windows)]
     paddock_proc::console::attach_parent_console();
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -25,4 +29,15 @@ fn run(args: &[String]) -> i32 {
 fn run(_args: &[String]) -> i32 {
     eprintln!("paddock-setup runs on Windows only");
     paddock_setup::exit::Exit::Failed.code()
+}
+
+/// `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32)`. A failure (a Windows without the API) is not fatal: the link flag
+/// still covers the start-up imports.
+#[cfg(windows)]
+fn restrict_dll_search_to_system32() {
+    use windows_sys::Win32::System::LibraryLoader::{
+        LOAD_LIBRARY_SEARCH_SYSTEM32, SetDefaultDllDirectories,
+    };
+    // SAFETY: a plain call with a documented flag value; it touches no memory of ours.
+    let _ = unsafe { SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32) };
 }

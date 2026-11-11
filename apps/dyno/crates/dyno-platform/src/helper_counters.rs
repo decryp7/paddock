@@ -3,7 +3,7 @@
 //! `root/wmi`, administrators). The sysfs readers take the `/sys` root so a test builds a tree in a temporary folder; the text
 //! parsers are pure. The helper reads only these fixed places; no request names a path.
 
-use crate::runner::{Tool, ToolRunner};
+use crate::runner::ToolRunner;
 use dyno_core::helper::HelperHost;
 use dyno_core::helper_counters::{CounterReader, CounterValue, EnergyDomain, FanSpeed, ThermalZone, MAX_ENTRIES};
 use dyno_core::helper_requests::CounterId;
@@ -13,9 +13,6 @@ use std::time::Duration;
 
 const TIMEOUT: Duration = Duration::from_secs(15);
 const POWERMETRICS: &str = "/usr/bin/powermetrics";
-const POWERSHELL: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
-/// `$PSHOME\Modules`: the only module folder the SYSTEM PowerShell may load from (`PSModulePath` is set to it for the call).
-const PSHOME_MODULES: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0\Modules";
 const MSACPI: &str = "Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature | Select-Object InstanceName,CurrentTemperature | ConvertTo-Json -Compress";
 /// The largest sensor file or tool output read.
 const MAX_TEXT: u64 = 1 << 20;
@@ -192,6 +189,8 @@ pub struct SystemCounters {
     host: HelperHost,
     sys: std::path::PathBuf,
     runner: Box<dyn ToolRunner>,
+    /// The Windows system folder (`GetSystemDirectoryW`); empty where there is none.
+    system_dir: String,
 }
 
 impl SystemCounters {
@@ -201,12 +200,19 @@ impl SystemCounters {
             host,
             sys: "/sys".into(),
             runner,
+            system_dir: crate::system_powershell::windows_system_directory().unwrap_or_default(),
         }
     }
 
     /// A reader of a sysfs tree elsewhere (tests).
     pub fn with_sys_root(mut self, sys: impl Into<std::path::PathBuf>) -> SystemCounters {
         self.sys = sys.into();
+        self
+    }
+
+    /// Names the Windows system folder (tests; the real one is asked of the OS).
+    pub fn with_system_directory(mut self, dir: impl Into<String>) -> SystemCounters {
+        self.system_dir = dir.into();
         self
     }
 
@@ -247,14 +253,13 @@ impl CounterReader for SystemCounters {
                 "macOS reports a thermal pressure level, not temperatures, to software.".into(),
             )),
             (HelperHost::Windows, CounterId::Thermal) => {
-                let args = ["-NoProfile", "-NonInteractive", "-Command", MSACPI].map(String::from);
+                if self.system_dir.is_empty() {
+                    return Err(PlatformError::Failed(
+                        "The system folder is unknown, so PowerShell was not started.".into(),
+                    ));
+                }
                 // "Not supported": the machine has no ACPI thermal zone class (a virtual machine), not a failure to explain.
-                let tool = Tool {
-                    program: POWERSHELL.to_string(),
-                    args: args.to_vec(),
-                    // Run as SYSTEM: never load modules from a path the service inherited (ADR 0053 audit P2, Dyno 1.1.1 WP-6).
-                    env: vec![("PSModulePath".to_string(), PSHOME_MODULES.to_string())],
-                };
+                let tool = crate::system_powershell::system_powershell(&self.system_dir, MSACPI);
                 let text = match self.runner.run_tool(&tool, TIMEOUT) {
                     Ok(out) if out.ok => out.stdout,
                     Ok(out) if out.error.contains("Not supported") => return Err(nothing("thermal zones")),
@@ -301,7 +306,8 @@ impl dyno_core::helper_memory::MemoryReader for SystemMemory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runner::ToolOutput;
+    use crate::runner::{Tool, ToolOutput};
+    const SYS: &str = r"C:\Windows\System32";
 
     fn put(root: &Path, rel: &str, text: &str) {
         let p = root.join(rel);
@@ -450,7 +456,8 @@ mod tests {
         let win = SystemCounters::new(
             HelperHost::Windows,
             Box::new(Scripted(r#"{"InstanceName":"z","CurrentTemperature":3000}"#)),
-        );
+        )
+        .with_system_directory(SYS);
         assert!(matches!(win.read(CounterId::Thermal), Ok(CounterValue::Thermal(z)) if z[0].milli_celsius == 26_850));
         assert!(matches!(win.read(CounterId::Fans), Err(PlatformError::Unsupported(_))));
         struct NotSupported;
@@ -463,9 +470,9 @@ mod tests {
                 })
             }
         }
-        let vm = SystemCounters::new(HelperHost::Windows, Box::new(NotSupported));
+        let vm = SystemCounters::new(HelperHost::Windows, Box::new(NotSupported)).with_system_directory(SYS);
         assert!(matches!(vm.read(CounterId::Thermal), Err(PlatformError::Unsupported(m)) if m.contains("thermal zones")));
-        let empty = SystemCounters::new(HelperHost::Windows, Box::new(Scripted("")));
+        let empty = SystemCounters::new(HelperHost::Windows, Box::new(Scripted(""))).with_system_directory(SYS);
         assert!(empty.read(CounterId::Thermal).is_err());
     }
 
@@ -486,16 +493,16 @@ mod tests {
             }
         }
         let seen = Arc::new(Mutex::new(Vec::new()));
-        let win = SystemCounters::new(HelperHost::Windows, Box::new(Records(seen.clone())));
+        let win = SystemCounters::new(HelperHost::Windows, Box::new(Records(seen.clone()))).with_system_directory(r"D:\Win\System32");
         win.read(CounterId::Thermal).unwrap();
         let tools = seen.lock().unwrap();
         assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].program, POWERSHELL);
+        assert_eq!(tools[0].program, r"D:\Win\System32\WindowsPowerShell\v1.0\powershell.exe");
         assert_eq!(
             tools[0].env,
             [(
                 "PSModulePath".to_string(),
-                r"C:\Windows\System32\WindowsPowerShell\v1.0\Modules".to_string()
+                r"D:\Win\System32\WindowsPowerShell\v1.0\Modules".to_string()
             )],
             "the module path is exactly $PSHOME\\Modules"
         );

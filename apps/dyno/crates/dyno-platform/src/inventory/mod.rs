@@ -66,10 +66,31 @@ fn read_impl(total: u64) -> MemoryLayout {
 
 #[cfg(windows)]
 fn read_impl(total: u64) -> MemoryLayout {
+    match crate::system_powershell::windows_system_directory() {
+        Some(dir) => read_windows_memory(&crate::runner::SystemRunner, &dir, total),
+        None => MemoryLayout::TotalOnly {
+            total,
+            reason: Unavailable::failed("The memory details could not be read: the system folder is unknown."),
+        },
+    }
+}
+
+/// The Windows memory read through `runner`: the two CIM queries run by the system PowerShell, which is the one in `system_dir` (the
+/// OS's system folder) with its module path pinned (see [`crate::system_powershell`]). The reader runs as SYSTEM in the helper.
+#[cfg(any(windows, test))]
+pub(crate) fn read_windows_memory(runner: &dyn crate::runner::ToolRunner, system_dir: &str, total: u64) -> MemoryLayout {
     let run = |script: &str| {
-        let mut cmd = crate::process::command("powershell.exe");
-        cmd.args(["-NoProfile", "-NonInteractive", "-Command", script]);
-        crate::process::output_text(cmd, TOOL_TIMEOUT)
+        let tool = crate::system_powershell::system_powershell(system_dir, script);
+        runner.run_tool(&tool, TOOL_TIMEOUT).and_then(|out| {
+            if out.ok {
+                Ok(out.stdout)
+            } else {
+                Err(dyno_core::ports::PlatformError::Failed(format!(
+                    "powershell.exe failed: {}",
+                    if out.error.is_empty() { "no message" } else { out.error.as_str() }
+                )))
+            }
+        })
     };
     let modules = run("Get-CimInstance Win32_PhysicalMemory | Select-Object BankLabel,DeviceLocator,Capacity,Speed,ConfiguredClockSpeed,SMBIOSMemoryType,Manufacturer,PartNumber,FormFactor | ConvertTo-Json -Compress");
     let array =
@@ -80,15 +101,6 @@ fn read_impl(total: u64) -> MemoryLayout {
             total,
             reason: Unavailable::failed(format!("The memory details could not be read: {e}")),
         },
-    }
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
-fn read_impl(total: u64) -> MemoryLayout {
-    let _: Duration = TOOL_TIMEOUT;
-    MemoryLayout::TotalOnly {
-        total,
-        reason: Unavailable::failed("Memory details are not available on this operating system."),
     }
 }
 
@@ -109,4 +121,55 @@ pub(crate) fn clean(s: &str) -> Option<String> {
         "empty",
     ];
     (!junk.contains(&l.as_str()) && !l.chars().all(|c| c == '0' || c == 'f' || c == ' ')).then_some(t)
+}
+
+#[cfg(test)]
+mod windows_read_tests {
+    use super::*;
+    use crate::runner::{Tool, ToolOutput, ToolRunner};
+    use dyno_core::ports::PlatformError;
+    use std::sync::{Arc, Mutex};
+
+    struct Records(Arc<Mutex<Vec<Tool>>>);
+    impl ToolRunner for Records {
+        fn run_tool(&self, t: &Tool, _: Duration) -> Result<ToolOutput, PlatformError> {
+            self.0.lock().unwrap().push(t.clone());
+            Ok(ToolOutput {
+                ok: true,
+                stdout: "[]".into(),
+                error: String::new(),
+            })
+        }
+    }
+
+    /// Plan WP-6 (3), review P1-1: the memory read runs as SYSTEM too, so it uses the system folder's PowerShell and the pinned module path.
+    #[test]
+    fn the_powershell_run_as_system_pins_its_module_path_to_pshome() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let _ = read_windows_memory(&Records(seen.clone()), r"D:\Win\System32", 8 << 30);
+        let tools = seen.lock().unwrap();
+        assert_eq!(tools.len(), 2, "the module query and the array query");
+        for t in tools.iter() {
+            assert_eq!(
+                t.program, r"D:\Win\System32\WindowsPowerShell\v1.0\powershell.exe",
+                "never a bare name, never C:\\Windows"
+            );
+            assert_eq!(
+                t.env,
+                [(
+                    "PSModulePath".to_string(),
+                    r"D:\Win\System32\WindowsPowerShell\v1.0\Modules".to_string()
+                )]
+            );
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+fn read_impl(total: u64) -> MemoryLayout {
+    let _: Duration = TOOL_TIMEOUT;
+    MemoryLayout::TotalOnly {
+        total,
+        reason: Unavailable::failed("Memory details are not available on this operating system."),
+    }
 }

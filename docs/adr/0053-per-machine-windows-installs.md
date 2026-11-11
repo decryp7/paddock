@@ -22,6 +22,9 @@
   carries a version-resource description, and "What stays" names the split-token `%TEMP%` point (§4.2); the abort restart only
   for the desktop user's own hit and no "stopped" message while the installer still runs (§4.1, §4.3, §5); H1's order (Dyno
   amendment); the last `RmGetList` is in `PREINSTALL`.
+- Amendments: Amendment 1 (2026-11-05: stopping every session, the installer lock and the trust of `apply-update`, the include's
+  contract for hold-installing and the version check); Amendment 2 (2026-11-12: §2.5 is the installer's and the updater's rule, a
+  service data root under `%ProgramData%` goes through `privileged::trust`). They are at the end of this record.
 - Date: 2026-11-04
 - Related:
   - Dyno ADR [0027](../../apps/dyno/docs/adr/0027-helper-for-1-1-0.md) D1 (L: packaging unchanged), reversed for Windows only
@@ -680,8 +683,10 @@ What holds for a service's data root under `%ProgramData%` (a standard user can 
    vendor folder (no other account may delete its children, so it cannot be swapped for a junction) and `verify_chain` on the data
    root (every component owned and locked as the service left it, no link or reparse point). A folder that fails is refused with the
    reason and left as it is; Repair (which locks again) or an administrator's hand fixes it.
-3. Dyno's helper complies: tools and staging (`protect.rs`) and, from WP-6, `remove_data_folder` (`setup.rs`), which verified nothing
-   before this amendment and so followed a junction planted in place of the data folder.
+3. Dyno's helper complies: tools and staging (`protect.rs`) and, from WP-6, `remove_data_folder` (`setup.rs`). Before this amendment the
+   removal only refused a data folder that was itself a link (`symlink_metadata`); a junction in a folder above it (`C:\ProgramData\Dyno`,
+   which a standard user can make) was followed by every later `std::fs` call, as SYSTEM. After the folder is verified (the log line
+   "data folder verified, removing") the removal goes on; a folder that is not there is "was not there", not a refusal.
 
-Check: a fake-machine test in `apps/dyno/crates/dyno-helper/src/setup.rs` (a junction as the data folder, and a vendor folder users
-can swap, are each refused with nothing removed). The VM row that does it for real is listed in the WP-6 hand-off.
+Check: fake-machine tests in `apps/dyno/crates/dyno-helper/src/setup.rs` (a junction as the data folder, a junction as the vendor
+folder, and a vendor folder users can swap, are each refused with nothing removed; a missing folder is "was not there"). The VM row that does it for real is listed in the WP-6 hand-off.

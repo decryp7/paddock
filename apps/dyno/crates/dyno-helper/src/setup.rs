@@ -397,8 +397,8 @@ pub fn remove_data_folder(paths: &HelperPaths) -> Result<String, String> {
 /// # Errors
 /// What could not be removed.
 pub fn remove_data_folder_with(paths: &HelperPaths, quiesce_log: &dyn Fn(), trust: &mut dyn TrustPort) -> Result<String, String> {
-    if paths.host == HelperHost::Windows {
-        verify_data_folder(paths, trust)?;
+    if paths.host == HelperHost::Windows && !verify_data_folder(paths, trust)? {
+        return Ok("was not there".into());
     }
     quiesce_log();
     // The lifecycle file lives beside the data folder (macOS) or in the logs folder (Linux): it goes with the helper, before the
@@ -458,17 +458,32 @@ pub fn remove_data_folder_with(paths: &HelperPaths, quiesce_log: &dyn Fn(), trus
 /// junction there redirects a SYSTEM delete, so before anything is removed the vendor folder must be one no other account can
 /// swap (`verify_container`) and the data folder a real folder, owned and locked as the helper left it (`verify_chain`, which
 /// refuses a link or reparse point in any component). A folder that fails is left as it is and the error says what to do.
-fn verify_data_folder(paths: &HelperPaths, trust: &mut dyn TrustPort) -> Result<(), String> {
+fn verify_data_folder(paths: &HelperPaths, trust: &mut dyn TrustPort) -> Result<bool, String> {
     let dir = paths.data_dir.to_string_lossy().into_owned();
     let style = trust.style();
     let refused = |what: &str, why: String| {
         log::error!(Dir = dir.as_str(), Check = what, Why = why.as_str(); "Helper: the data folder was not removed, its place is not protected");
         format!("The helper's data folder {dir} was not removed: {why}. Nothing was deleted; remove the folder as an administrator once it is the helper's own again.")
     };
-    if let Some(vendor) = parent_of(&dir, style) {
-        verify_container(trust, &vendor).map_err(|e| refused("vendor folder", e.describe()))?;
+    let started = std::time::Instant::now();
+    let vendor = parent_of(&dir, style);
+    // A folder that is not there needs no check (and has nothing to remove): not a "not protected" refusal.
+    for place in vendor.iter().chain(std::iter::once(&dir)) {
+        match trust.node(place) {
+            Ok(None) => {
+                log::info!(Dir = dir.as_str(), Missing = place.as_str(); "Helper: the data folder is not there, nothing to remove");
+                return Ok(false);
+            }
+            Ok(Some(_)) => {}
+            Err(e) => return Err(refused("existence", format!("{place} cannot be read: {e}"))),
+        }
     }
-    verify_chain(trust, &dir, FileKind::Dir, Some(&dir), false).map_err(|e| refused("data folder", e.describe()))
+    if let Some(vendor) = &vendor {
+        verify_container(trust, vendor).map_err(|e| refused("vendor folder", e.describe()))?;
+    }
+    verify_chain(trust, &dir, FileKind::Dir, Some(&dir), false).map_err(|e| refused("data folder", e.describe()))?;
+    log::info!(Dir = dir.as_str(), Ms = started.elapsed().as_millis() as u64; "Helper: data folder verified, removing");
+    Ok(true)
 }
 
 /// What the log says when the data folder could not be removed: the real error, and whether the folder holds items (someone
@@ -583,8 +598,8 @@ mod tests {
             "{why}"
         );
         assert!(
-            machine.calls.iter().all(|c| !c.starts_with("remove_tree")),
-            "nothing was removed: {:?}",
+            machine.calls.is_empty(),
+            "nothing was changed through the port: {:?}",
             machine.calls
         );
         assert!(!quiesced.get(), "the helper's log is left running when nothing is removed");
@@ -607,13 +622,55 @@ mod tests {
         assert!(why.contains("not removed") && why.contains("Dyno"), "{why}");
     }
 
-    /// The same folder, protected, passes the check and the removal goes on (here the real folder is not there).
+    /// The same folder, protected, passes the check. Only the check is run here: the removal itself would act on the real
+    /// `C:\ProgramData\Dyno\Helper` of a Windows machine (ER-14).
     #[test]
     fn a_protected_data_folder_passes_the_check() {
         use paddock_service::privileged::trust_fake::{locked, windows_machine};
         let mut machine = windows_machine(|_| locked());
-        let note = remove_data_folder_with(&windows_paths(), &|| {}, &mut machine).unwrap();
+        assert_eq!(verify_data_folder(&windows_paths(), &mut machine), Ok(true));
+        assert!(machine.calls.is_empty(), "the check changes nothing: {:?}", machine.calls);
+    }
+
+    /// Review P2-1: a folder that is not there is "was not there", not a refusal, and nothing else runs (not even the log quiesce).
+    #[test]
+    fn a_missing_vendor_or_data_folder_is_not_there_not_unprotected() {
+        use paddock_service::privileged::trust_fake::{locked, windows_machine};
+        let mut machine = windows_machine(|_| locked());
+        machine.nodes.retain(|k, _| !k.starts_with("c:\\programdata\\dyno"));
+        // Only `C:\` and `C:\ProgramData` are left.
+        let quiesced = std::cell::Cell::new(false);
+        let note = remove_data_folder_with(&windows_paths(), &|| quiesced.set(true), &mut machine).unwrap();
         assert_eq!(note, "was not there");
+        assert!(!quiesced.get());
+        // Dyno there, Helper not.
+        let mut machine = windows_machine(|_| locked());
+        machine.nodes.retain(|k, _| !k.starts_with("c:\\programdata\\dyno\\helper"));
+        assert_eq!(
+            remove_data_folder_with(&windows_paths(), &|| {}, &mut machine).unwrap(),
+            "was not there"
+        );
+    }
+
+    /// Review P2-2: the real hole the check closes. The data folder itself being a link was refused before (`symlink_metadata`), but a
+    /// junction one level up (`C:\ProgramData\Dyno`) is followed by every later `std::fs` call.
+    #[test]
+    fn a_vendor_folder_that_is_a_junction_is_refused_and_nothing_is_removed() {
+        use paddock_service::privileged::files::FileKind;
+        use paddock_service::privileged::trust_fake::{locked, windows_machine};
+        let mut machine = windows_machine(|_| locked());
+        let mut junction = locked();
+        junction.kind = FileKind::Symlink;
+        machine.put("C:\\ProgramData\\Dyno", junction);
+        let quiesced = std::cell::Cell::new(false);
+        let why = remove_data_folder_with(&windows_paths(), &|| quiesced.set(true), &mut machine).unwrap_err();
+        assert!(why.contains("link") && why.contains("Dyno") && why.contains("not removed"), "{why}");
+        assert!(
+            machine.calls.is_empty(),
+            "nothing was changed through the port: {:?}",
+            machine.calls
+        );
+        assert!(!quiesced.get(), "nothing ran before the refusal");
     }
 
     #[cfg(unix)]

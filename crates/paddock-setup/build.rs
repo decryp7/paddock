@@ -19,6 +19,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=PADDOCK_SETUP_PRODUCT");
     println!("cargo:rerun-if-env-changed=PADDOCK_SETUP_TEST_VERSION");
     println!("cargo:rerun-if-changed=src/versionres.rs");
+    println!("cargo:rerun-if-changed=src/linkargs.rs");
     // `stop-all` calls `paddock_proc::installed` (plan S1). It is compiled in when that module is in the tree and left out
     // otherwise, so the crate builds with `--workspace --all-features` before and after S1 merges (no feature to forget).
     println!("cargo:rustc-check-cfg=cfg(has_proc_installed)");
