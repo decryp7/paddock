@@ -122,7 +122,12 @@ const OVERLAY_BETTER_PERFORMANCE: &str = "3af9b8d9-7c97-431d-ad78-34a8bfea439f";
 pub fn unknown_overlay(overlay: &Overlay) -> Option<String> {
     let Overlay::Read(g) = overlay else { return None };
     let g = guid_lower(g)?;
-    let known = [NIL_GUID, OVERLAY_BEST_EFFICIENCY, OVERLAY_BETTER_PERFORMANCE, OVERLAY_BEST_PERFORMANCE];
+    let known = [
+        NIL_GUID,
+        OVERLAY_BEST_EFFICIENCY,
+        OVERLAY_BETTER_PERFORMANCE,
+        OVERLAY_BEST_PERFORMANCE,
+    ];
     (!known.contains(&g.as_str())).then_some(g)
 }
 

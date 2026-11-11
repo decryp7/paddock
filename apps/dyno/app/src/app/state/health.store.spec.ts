@@ -51,6 +51,17 @@ describe('HealthStore', () => {
     await store.loadStartup();
     expect(store.startupUnavailable()).toEqual(['Login items: need administrator rights']);
   });
+  it('keeps whether signers were read and the coverage sentence the engine gave', async () => {
+    const { store, mock } = setup();
+    await store.loadStartup();
+    expect(store.startupSignerRead()).toBe(true);
+    expect(store.startupCoverage()).toBeNull();
+    const real = mock.startupOverview.bind(mock);
+    vi.spyOn(mock, 'startupOverview').mockImplementation(async (f) => ({ ...(await real(f)), signerRead: false, coverage: 'Lists Run entries.' }));
+    await store.loadStartup();
+    expect(store.startupSignerRead()).toBe(false);
+    expect(store.startupCoverage()).toBe('Lists Run entries.');
+  });
   it('asks the engine to filter the startup list and keeps the counts', async () => {
     const { store } = setup();
     await store.loadStartup();

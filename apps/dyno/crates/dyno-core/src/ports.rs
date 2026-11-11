@@ -160,6 +160,15 @@ pub trait StartupItems: Send {
     fn unavailable(&self) -> Vec<String> {
         Vec::new()
     }
+    /// Whether this reader gives entries a publisher (`StartupEntry::publisher`). `false` makes the page disable "Hide signed apps"
+    /// (ADR 0033 D8); the Windows reader does not read signers in 1.1.1.
+    fn signer_read(&self) -> bool {
+        true
+    }
+    /// What the list covers and does not, one sentence for the page to show under the list (`None`: nothing to add).
+    fn coverage(&self) -> Option<String> {
+        None
+    }
     /// Gives the list the administrator helper's login items (macOS reads them only through it); other systems ignore it. The
     /// agent calls it once it exists, because the platform is built before it.
     fn use_login_items(&mut self, _link: Box<dyn crate::btm::LoginItemsLink>) {}

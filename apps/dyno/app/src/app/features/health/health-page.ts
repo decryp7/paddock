@@ -45,7 +45,7 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
           <span class="spacer"></span>
           <div class="filters" role="group" aria-label="Hide from the list">
             <mat-checkbox [checked]="filter().hideOs" (change)="toggle('hideOs')">Hide system entries <span class="num">{{ store.startupCounts().os }}</span></mat-checkbox>
-            <mat-checkbox [checked]="filter().hideSigned" (change)="toggle('hideSigned')">Hide signed apps <span class="num">{{ store.startupCounts().signed }}</span></mat-checkbox>
+            <mat-checkbox [checked]="store.startupSignerRead() && filter().hideSigned" [disabled]="!store.startupSignerRead()" (change)="toggle('hideSigned')" data-testid="hide-signed">Hide signed apps <span class="num">{{ store.startupCounts().signed }}</span></mat-checkbox>
           </div>
         </div>
         @if (startupGap(); as gap) {
@@ -62,6 +62,8 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
           @for (u of store.startupUnavailable(); track u) {
             @if (u !== btmReason()) { <p class="shown" role="status">Not shown: {{ u }}</p> }
           }
+          @if (!store.startupSignerRead()) { <p class="shown" role="status" data-testid="signer-not-read">Signer not read on this system yet, so signed apps cannot be hidden.</p> }
+          @if (store.startupCoverage(); as coverage) { <p class="shown" role="status" data-testid="startup-coverage">{{ coverage }}</p> }
           <p class="shown">Showing {{ store.startup().length }} of {{ store.startupCounts().total }} entries@if (hidden() > 0) {, {{ hidden() }} hidden by the filter}.</p>
         </dy-async>
         }
