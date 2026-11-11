@@ -35,7 +35,14 @@ arrive in the app as usual.
   byte, so a link planted at the old fixed name (`apps.tmp`) is no longer written through (ADR 0092 W4). The backup copy
   (`apps.json.bak`) is gone: when `apps.json` is damaged Pitwall loads no apps and no keys, says so in the log with the file's
   path, and you pair your apps again; a backup could bring back a key you had revoked. A leftover `apps.json.bak` is
-  removed on the first start. On Windows a data folder where other accounts may write is refused.
+  removed on the first start. `apps.json` is also read only when it is trusted: a file others can read or change, a link,
+  a file of another account, or (Windows) one in a folder where other accounts may write loads no apps and no keys, and
+  the log says why. This matters when the data folder was moved (`--data-dir`, `PITWALL_HOME`) to a shared place.
+- Pairing: the request id is 128 random bits, and a separate 256-bit poll token, given only in the answer to
+  `POST /x/v1/pair`, is required to poll (header `X-Pitwall-Pair-Token`); before, the id was guessable and anyone local
+  who guessed it could take the approved key. A poll without the token, with a wrong one or for an unknown or expired
+  request gets the same `denied`; 5 wrong polls close the request. **An app that pairs with Pitwall must send the token**
+  (Debrief and `paddock-pitwall` do); a script of your own that polled `/x/v1/pair/{id}` must add the header.
 - Pitwall makes no key, pairing code or engine key when the operating system's random source fails, instead of using a
   time-seeded stand-in that could be guessed (ADR 0092 W5). The request fails with the reason in the log.
 

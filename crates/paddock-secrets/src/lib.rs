@@ -19,14 +19,16 @@ mod name;
 #[cfg(feature = "keyring")]
 mod os;
 mod secret;
+mod token;
 mod vault;
 
 pub use error::SecretsError;
 pub use fallback::WithFileFallback;
-pub use file::{FileSecrets, SecretFile, make_folder_private, write_owner_only};
+pub use file::{FileSecrets, SecretFile, make_folder_private, read_owner_only, write_owner_only};
 pub use memory::{MemorySecrets, MemoryVault};
 pub use name::{MAX_NAME_LEN, Name};
 #[cfg(feature = "keyring")]
 pub use os::{KeyringSecrets, OsVault, real_blocked};
 pub use secret::{MAX_SECRET_LEN, Secret};
+pub use token::{random_token, random_token_with};
 pub use vault::{Renamed, Secrets, Vault, VaultSecrets, rename_entry};

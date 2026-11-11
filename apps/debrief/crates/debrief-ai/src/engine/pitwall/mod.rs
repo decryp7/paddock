@@ -355,7 +355,7 @@ impl Pitwall {
             _ => {
                 return Err(AiError::Engine(
                     "Pitwall is not running. Open Pitwall, then choose Connect again.".into(),
-                ))
+                ));
             }
         };
         // A stored key Pitwall no longer accepts is replaced by the new one.
@@ -392,7 +392,7 @@ impl Pitwall {
                             "The pairing request expired before it was approved in Pitwall. Choose Connect to try again.".to_string(),
                         ))
                     } else {
-                        match Client::new(port, None).poll(&start.pairing_id) {
+                        match Client::new(port, None).poll(&start.pairing_id, &start.poll_token) {
                             Ok(PairPoll::Pending) => None,
                             Ok(PairPoll::Approved(Some(key))) => Some(p.keys.set(&key).map_err(|e| {
                                 format!("Pitwall approved Debrief, but the key could not be stored in the credential store ({e}).")
@@ -462,7 +462,9 @@ fn incompatible(version: &str, api: u32) -> String {
     if api > API_VERSION {
         format!("Pitwall {version} speaks a newer connection version ({api}) than this Debrief ({API_VERSION}). Update Debrief to use it.")
     } else {
-        format!("Pitwall {version} speaks an older connection version ({api}) than this Debrief needs ({API_VERSION}). Update Pitwall to use it.")
+        format!(
+            "Pitwall {version} speaks an older connection version ({api}) than this Debrief needs ({API_VERSION}). Update Pitwall to use it."
+        )
     }
 }
 
