@@ -246,6 +246,10 @@ static DOC_INPUTS: LazyLock<Vec<(Regex, Marks)>> = LazyLock::new(|| {
             re(r"^ui/projects/paddock-ui/format/src/storage-cases\.json$"),
             Marks::Projects(&["ui", "app:dyno"]),
         ),
+        (
+            re(r"^crates/paddock-service/tests/fixtures/launchctl-print-running\.txt$"),
+            Marks::Projects(&["crates", "app:pitcrew"]),
+        ),
         (re(r"^apps/debrief/docs/ai/sql-views\.md$"), Marks::Owner),
         (re(r"^apps/debrief/docs/testing/quarantine\.md$"), Marks::Owner),
         (re(r"^apps/[^/]+/vendor/.*\.md$"), Marks::Owner),
@@ -1088,6 +1092,9 @@ mod tests {
         let cases = plan(&["ui/projects/paddock-ui/format/src/storage-cases.json"]);
         assert!(cases["apps"].as_array().unwrap().contains(&json!("dyno")));
         assert!(cases["kinds"]["dyno"].as_array().unwrap().contains(&json!("rust")));
+        let capture = plan(&["crates/paddock-service/tests/fixtures/launchctl-print-running.txt"]);
+        // The sample repo has no Pitcrew app: the declared input names it, so its explanation does too.
+        assert!(capture.to_string().contains("app:pitcrew"), "{capture}");
         assert_eq!(plan(&["Mystery"])["all"], true);
     }
 

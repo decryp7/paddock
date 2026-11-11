@@ -508,16 +508,26 @@ impl<'a> Installer<'a> {
         // is removed (Windows cannot delete a program a process still holds).
         if let Some(process) = running.filter(|_| !self.running_here) {
             let mut waited = Duration::ZERO;
-            while self.backend.process_alive(process) {
+            loop {
+                let look = self.backend.process_presence(process);
+                if look == paddock_proc::Presence::Gone {
+                    break;
+                }
                 if waited >= self.waits.gone {
-                    return Err(failed(
-                        Step::StopExisting,
+                    let why = if look == paddock_proc::Presence::Unknown {
+                        format!(
+                            "the old process (pid {}) could not be checked for {} s because the OS process table cannot be read; nothing was removed; close it, or restart the computer, and try again",
+                            process.pid(),
+                            self.waits.gone.as_secs()
+                        )
+                    } else {
                         format!(
                             "the old process (pid {}) is still running {} s after it was asked to stop; close it, or restart the computer, and try again",
                             process.pid(),
                             self.waits.gone.as_secs()
-                        ),
-                    ));
+                        )
+                    };
+                    return Err(failed(Step::StopExisting, why));
                 }
                 self.backend.pause(self.waits.poll);
                 waited += self.waits.poll;

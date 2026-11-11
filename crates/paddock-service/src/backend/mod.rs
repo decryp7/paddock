@@ -420,9 +420,10 @@ pub trait Backend: Send {
     fn job_process(&mut self) -> Option<paddock_proc::ProcessId> {
         None
     }
-    /// Whether `process` still runs (by identity, never by pid alone: rule 53).
-    fn process_alive(&mut self, process: paddock_proc::ProcessId) -> bool {
-        process.is_alive()
+    /// Whether `process` still runs (by identity, never by pid alone: rule 53). `Unknown` when the process table or the
+    /// holder's start time cannot be read: a stop must not go on as if the process were gone.
+    fn process_presence(&mut self, process: paddock_proc::ProcessId) -> paddock_proc::Presence {
+        process.presence()
     }
     /// Waits (through the port: the fake only advances its clock).
     fn pause(&mut self, how_long: Duration);

@@ -369,7 +369,7 @@ pub(crate) mod tests {
     // ADR 0033 WP-6 (test): a tree by parent pids without start times; use paddock_proc::descendants
     fn tree_members(pid: u32) -> Vec<Member> {
         use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
-        let mut sys = System::new();
+        let mut sys = System::new().expect("a System");
         sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
         let mut tree = vec![Pid::from_u32(pid)];
         loop {
@@ -427,7 +427,7 @@ pub(crate) mod tests {
     #[cfg(windows)]
     fn running(m: Member) -> bool {
         use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
-        let mut sys = System::new();
+        let mut sys = System::new().expect("a System");
         let pid = Pid::from_u32(m.pid);
         sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), true, ProcessRefreshKind::nothing());
         sys.process(pid).is_some_and(|p| p.start_time() == m.mark)

@@ -34,7 +34,9 @@ use walk::Budget;
 
 /// When this process started (whole seconds, rounded down), so files of this run are recognised.
 fn session_start() -> Option<SystemTime> {
-    crate::lifecycle::os_probe(std::process::id()).map(|secs| UNIX_EPOCH + Duration::from_secs(secs))
+    crate::lifecycle::os_probe(std::process::id())
+        .started()
+        .map(|secs| UNIX_EPOCH + Duration::from_secs(secs))
 }
 
 /// Resolves every folder of the categories (see the module docs).
@@ -238,7 +240,12 @@ fn process_alive(pid: u32) -> bool {
         return true;
     }
     let p = sysinfo::Pid::from_u32(pid);
-    let mut sys = sysinfo::System::new();
+    // Unknown counts as alive: a store folder is never removed because the process table could not be read.
+    let Ok(mut sys) = sysinfo::System::new()
+        .inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; pid {pid} is assumed alive"))
+    else {
+        return true;
+    };
     sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[p]), true);
     sys.process(p).is_some()
 }

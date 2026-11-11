@@ -457,7 +457,7 @@ Licence expressions (packages):
 - syn 3.0.9 — MIT OR Apache-2.0 [MIT-47]
 - sync_wrapper 1.0.2 — Apache-2.0 [Apache-2.0-9]
 - synstructure 0.14.0 — MIT [MIT-60]
-- sysinfo 0.39.6 — MIT [MIT-5]
+- sysinfo 0.40.1 — MIT [MIT-5]
 - tao 0.37.1 — Apache-2.0 [Apache-2.0-4]
 - tao-macros 0.1.4 — MIT OR Apache-2.0 [MIT-33]
 - tar 0.4.46 — MIT OR Apache-2.0 [MIT-211]
@@ -4087,7 +4087,7 @@ Used by (103):
 ### MIT-5
 
 Used by (1):
-  sysinfo 0.39.6
+  sysinfo 0.40.1
 
     The MIT License (MIT)
 

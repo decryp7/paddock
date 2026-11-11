@@ -72,7 +72,7 @@ fn install_in_with(
         // the phases up to ready are the app's and the start-up contract's lines that follow.
         log::info!(
             Version = identity.version.as_str(), Commit = commit, Os = std::env::consts::OS, Arch = std::env::consts::ARCH, Pid = std::process::id(),
-            Portable = dirs.source() == paddock_env::Source::Portable, BootSecs = sysinfo::System::uptime(),
+            Portable = dirs.source() == paddock_env::Source::Portable, BootSecs = sysinfo::System::uptime().ok(),
             Flags = launch_flags(std::env::args().skip(1)).as_str();
             "Starting {}", identity.name
         );

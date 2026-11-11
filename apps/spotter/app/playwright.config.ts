@@ -19,7 +19,9 @@ export default defineConfig({
   outputDir: './.angular/playwright-results',
   fullyParallel: false,
   workers: 1,
+  // ER-12: a test that needed its one retry fails the run (the report marks it flaky), so a retry never turns red into green.
   retries: process.env['CI'] ? 1 : 0,
+  failOnFlakyTests: !!process.env['CI'],
   reporter: 'list',
   timeout: 60_000,
   use: {

@@ -419,20 +419,33 @@ fn owner_of(name: &str) -> Option<(u32, Option<StartTime>)> {
     Some((pid, started))
 }
 
-/// Whether the owner a profile's name gives may still run: by identity when the name has the start time (within the
-/// clock's slack: on Linux two processes can read a start time a second apart, and a live owner's folder must never be
-/// taken for a dead one's), else by pid.
-fn owner_alive(pid: u32, started: Option<StartTime>) -> bool {
+/// A look at the owner a profile's name gives: by identity when the name has the start time (within the clock's slack: on
+/// Linux two processes can read a start time a second apart, and a live owner's folder must never be taken for a dead
+/// one's), else by pid. `Unknown` when the process table cannot be read.
+fn owner_presence(pid: u32, started: Option<StartTime>) -> paddock_proc::Presence {
     match started {
-        Some(s) => ProcessId::new(pid, s).may_be_alive(),
-        None => paddock_proc::is_alive(pid),
+        Some(s) => ProcessId::new(pid, s).presence_near(),
+        None => paddock_proc::presence(pid),
     }
 }
 
 /// Removes throwaway profiles in `base` whose owner is gone (a crash, a kill; the owner by pid and start time, rule 53).
-/// Each launch with a throwaway profile calls it; an app may also call it at start-up. Returns how many were removed.
+/// Each launch with a throwaway profile calls it; an app may also call it at start-up. Returns how many were removed. A
+/// process counts as gone only when the OS said so: when the process table cannot be read nothing is known, every owner
+/// counts as alive and nothing is removed.
 pub fn sweep_profiles(base: &Path) -> usize {
-    sweep_profiles_with(base, me(), &owner_alive)
+    sweep_profiles_by_presence(base, &owner_presence)
+}
+
+/// [`sweep_profiles`] over a look at each owner (tests give one that cannot read the process table): only a proven
+/// `Gone` makes a profile removable.
+fn sweep_profiles_by_presence(
+    base: &Path,
+    look: &dyn Fn(u32, Option<StartTime>) -> paddock_proc::Presence,
+) -> usize {
+    sweep_profiles_with(base, me(), &|pid, started| {
+        look(pid, started).may_be_alive()
+    })
 }
 
 fn sweep_profiles_with(

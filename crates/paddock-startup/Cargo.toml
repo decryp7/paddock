@@ -11,7 +11,7 @@ publish = ["decryp7"]
 # The Tauri adapter (`paddock_startup::tauri`); the core above it never depends on Tauri.
 tauri = ["dep:tauri", "os-probe", "paddock-commands/tauri"]
 # The OS process table behind `lifecycle::os_probe` (is the process of a left-behind running marker still alive?).
-os-probe = ["dep:sysinfo"]
+os-probe = ["dep:sysinfo", "dep:paddock-proc"]
 # The native question through `tauri-plugin-dialog` (`paddock_startup::tauri::NativeAsker`); the app registers the plugin.
 dialog = ["tauri", "dep:tauri-plugin-dialog", "dep:block2", "dep:objc2", "dep:objc2-app-kit", "dep:objc2-foundation", "dep:windows-sys", "dep:gtk"]
 
@@ -23,7 +23,8 @@ log = { version = "0.4", features = ["kv"] }
 paddock-commands = { workspace = true }
 paddock-env = { workspace = true }
 paddock-log = { workspace = true }
-sysinfo = { version = "0.39", default-features = false, features = ["system"], optional = true }
+paddock-proc = { workspace = true, optional = true }
+sysinfo = { version = "0.40", default-features = false, features = ["system"], optional = true }
 tauri-plugin-dialog = { version = "2.8", optional = true }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 

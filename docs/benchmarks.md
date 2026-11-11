@@ -95,9 +95,10 @@ corpora are in each app's file.
 | [`crates/paddock-bench`](../crates/paddock-bench) + [`bench-nightly.yml` template](../.gitea/workflow-templates/bench-nightly.yml) | The harness for rule 16: `Recorder`, `bench/<app>.results.json`, `bench/budgets.toml` (limit, tolerance, regression), `paddock-bench check` | see [crates/README.md](../crates/README.md#paddock-bench-plan-x26) | — | Whatever an app's `budgets.toml` says | **No app uses it yet** | — |
 | `perf/proc-per-pid`: `crates/paddock-proc/examples/watch_cpu.rs` (branch, not on main) | A process watcher's own CPU: whole process table against one pid | `cargo run --release -p paddock-proc --example watch_cpu -- 60` (Unix) | A `sleep` child | none (ADR 0024 D7: ≤ 0.5% of a core) | No | branch CHANGELOG |
 | C29 window weight ([`conformance/src/window-weight`](../conformance/src/window-weight)) | JS each window loads before first paint (rule 35) | `ng build --stats-json`, then `paddock-conformance window-weight [kind] [--max kB] [--record]` | The build | `windowWeight` in `paddock.conformance.json`, **not configured anywhere** (C29 warns) | `ci.yml` conformance (warns) | — |
+| `./dev hook pre-tool-use` (RT-4, [ADR 0083](adr/0083-agents-cannot-write-outside-their-own-worktree.md) §2) | Per-call time of the installed guard binary on a PreToolUse call, the shim around it, and the binary's size growth | 300 runs of `<git-common-dir>/paddock/hooks/paddock-dev hook pre-tool-use` with a JSON call on stdin, as described in the section below (the script is not kept) | A short, a 6 KB and a malformed call | none yet (the plan expects about 4 to 6 ms) | No | [results](#hook-per-call-cost-and-binary-size-rt-4-2026-11-10) |
 | `./dev gates check` (C100, [ADR 0060](adr/0060-every-check-runs-somewhere.md)) | Run time of the meta-check: 328 checks, the CI model, 3,192 Rust files scanned, the docs | `./dev gates check` (release build of `tools/paddock-dev`) | This repository | none (ADR 0060: quote it only from here; a few seconds at most) | `ci.yml` conformance job, `nightly.yml` c100 job | [results](#2026-11-08-dev-gates-check) |
 | Angular build budgets in `ui/angular.json` | Initial chunk size | `npm run build -w ui` (and each demo's build) | — | gallery 1.5 MB / 3 MB; shell-demo 500 kB / 1 MB; workbench-demo 580 kB / 1 MB (warn / error) | `ci.yml` ui jobs, through `ng build` | — |
-| [`scripts/ci-timings.mjs`](../scripts/ci-timings.mjs) | CI wall time, queueing, runners, per-step and compile/test phases, critical path (Gitea API, read-only) | `GITEA_TOKEN=… node scripts/ci-timings.mjs [--repos …] [--limit 30] [--out docs/research/2026-10-ci-timings.md] [--json F]` | Gitea run history | none | No (manual) | [research/2026-10-ci-timings.md](research/2026-10-ci-timings.md) |
+| `./dev ci timings` ([`tools/paddock-dev/src/ci_runs/timings.rs`](../tools/paddock-dev/src/ci_runs/timings.rs); the script [`scripts/ci-timings.mjs`](../scripts/ci-timings.mjs) is its oracle until it is deleted, [known-copies](known-copies.toml) `ci-timings`) | CI wall time, queueing, runners, per-step and compile/test phases, critical path (Gitea API, read-only) | `GITEA_TOKEN=… ./dev ci timings [--repos paddock] [--limit 30] [--cache DIR] [--out docs/research/2026-10-ci-timings.md] [--json-file F]` (default repo: `paddock`; the script defaulted to the old per-app repos) | Gitea run history | none | No (manual) | [research/2026-10-ci-timings.md](research/2026-10-ci-timings.md) |
 
 Not benchmarks, though the names suggest it:
 - `ui/e2e/shell-demo-startup.spec.ts` checks the start-up contract (splash, ready, pings). Its 1.5 s busy loop simulates
@@ -878,7 +879,7 @@ These are ordered by impact.
    - Re-run each with the template once a quiet window exists. The search-perf runbook
      (`/Volumes/d7sst7/dev-targets/handoff/search-perf-bench.md`) already plans one for Debrief.
 5. **Stale or doubtful numbers:**
-   - CI timings predate the monorepo, and `ci-timings.mjs` still defaults to the old per-app repos.
+   - CI timings predate the monorepo, and `./dev ci timings` defaults to `paddock`; only the script (until deleted) defaults to the old per-app repos.
    - Debrief ADR 0010's spike numbers are from DuckDB 1.5 on the Windows VM.
    - The R2a/R2b/R2c numbers use RSS and a different machine.
    - The `paddock-names`, `paddock-download` and `paddock-proc` figures give no machine or load.
@@ -895,6 +896,21 @@ These are ordered by impact.
    - Search-perf's per-change A/B, the writer grid, the 10M runs and the Model2Vec throughput are pending.
    - Pitcrew ADR 0021's contention measurement (WP-0) is pending.
    - The Pacenotes measurement plan on real repositories is pending.
+
+## `./dev check run` against the JS conformance host (RT-5, 2026-11-10)
+
+Question: is the Rust host of C39 and C53 faster than `paddock-conformance.mjs` on this tree? Same two checks, same tree
+(3466 tracked `.rs` files), release build of `tools/paddock-dev`.
+
+| Host | Command | Wall time |
+|---|---|---|
+| Rust | `./dev check run --only C39,C53` (OS file cache warm) | 0.16 s |
+| Rust | the same, cold file cache | 0.51 s |
+| JS | `node conformance/bin/paddock-conformance.mjs --app paddock --only C39,C53 --root .` | 0.6 s |
+
+- **Machine:** Mac mini M4 Pro, macOS 27.2. **Source:** the independent review of `feat/rt5-check-host` (40b7faf8f), single runs
+  each, not interleaved; the load was not recorded. Treat the ratio (about 3.6 warm) as the figure, not the seconds.
+- The debug build the tests use is slower; no budget is asserted. The shadow release (RT-5 wiring) can record CI timings.
 
 ## `./dev` cold build (planner port, 2026-11-08)
 
@@ -932,6 +948,56 @@ figure. The CI download figure needs a measurement once the package is populated
 The first publish attempts failed for two reasons found on the way: `curl --data-binary` makes Gitea answer 500 (fixed with `-T`),
 and a binary published for one hash is a miss after any commit that touches `tools/paddock-dev` (a test file changed between
 publish and consume): the hash is per commit of the tool's inputs, so each such commit needs its own publish.
+
+## Hook per-call cost and binary size (RT-4, 2026-11-10)
+
+Question: what does the guard hook cost per tool call, and what does it add to `paddock-dev`? The hook is `paddock-dev hook
+pre-tool-use` run as the installed copy (`<git-common-dir>/paddock/hooks/paddock-dev`, put there by `./dev hooks install
+--local` in a throw-away repository), never through the `./dev` wrapper. Each run is a new process fed one JSON call on
+standard input by a Python `subprocess.run`, so every figure includes the spawn (`/usr/bin/true` is the floor). 300 timed runs
+after 20 warm-up runs, release build with `CARGO_BUILD_JOBS=2`, Mac mini (arm64), load average 15 to 16 (a busy machine).
+
+| Per call | min | median | p90 | max |
+|---|---|---|---|---|
+| `/usr/bin/true` (the spawn floor) | 1.65 ms | 2.12 ms | 2.59 ms | 5.47 ms |
+| Installed hook, an allowed Bash call (`cd /x && git status --short \| head -5; ls -la`) | 4.07 ms | 5.07 ms | 5.69 ms | 9.14 ms |
+| Installed hook, a denied call (a `while` loop that polls `pgrep -f`) | 4.00 ms | 4.89 ms | 5.58 ms | 14.69 ms |
+| Installed hook, a 6 KB commit command (heredoc in `$(...)`, then a push) | 4.04 ms | 4.96 ms | 9.85 ms | 15.15 ms |
+| Installed hook, malformed input (allowed, one stderr line) | 4.35 ms | 7.05 ms | 10.72 ms | 27.41 ms |
+| The first shim (`sh`, `git rev-parse`, then `exec` of the installed hook), an allowed call | 13.38 ms | 15.54 ms | 29.42 ms | 66.06 ms |
+| A `brush-parser` 0.4.0 probe binary that only parses one `while` loop (no rules) | 2.29 ms | 4.24 ms | 5.81 ms | 10.29 ms |
+
+The hook itself costs about 3 ms over the spawn floor, inside the plan's 4 to 6 ms range, and a longer command costs no more at the
+median (every loop of the lexer has a limit: 1 MiB of text, 16 levels, 10,000 nested pieces, 4 MiB of `((` scanning; before the
+last one 1 MiB of `(` took 256.7 s of CPU and 224 MB, after it 0.01 s: `hook pre-tool-use < 1 MiB of (`, release build, measured
+with `/usr/bin/time -p`; the reviewer's `dos.py` set of 15 worst cases ran 0.2 to 2.0 s wall each, at a machine load of 15 to 60, including
+Python's own spawn and a 1.05 to 8.39 MB input). Of the first shim's 15.5 ms, about 10 ms was the `git rev-parse` that finds the
+common folder. The shim now finds it with shell builtins only (it walks up to `.git`; for a linked worktree it reads the
+`gitdir:` line of the `.git` file and cuts `/worktrees/<name>`; the deny-all fallback and the install-command exception are
+unchanged). Second run, same method, 300 runs, after that change (load average 18 to 20, busier than the first run, so its
+spawn floor is higher too):
+
+| Per call, second run | min | median | p90 | max |
+|---|---|---|---|---|
+| `/usr/bin/true` (the spawn floor) | 1.86 ms | 3.00 ms | 4.19 ms | 8.21 ms |
+| Installed hook, an allowed Bash call | 4.04 ms | 5.87 ms | 7.99 ms | 17.56 ms |
+| Installed hook, a 6 KB commit command | 3.65 ms | 5.20 ms | 6.56 ms | 10.99 ms |
+| The shim without `git`, an allowed call | 6.80 ms | 8.55 ms | 9.23 ms | 19.59 ms |
+
+The shim path falls from 15.5 ms to 8.6 ms at the median (about 2.7 ms over the hook alone, which is the `sh` start). The
+binary of this second run is 7,684,640 bytes (the rule changes added 688 bytes).
+
+| Binary size (`cargo build --release --locked`, `tools/paddock-dev`) | Bytes |
+|---|---|
+| `origin/train/2026-11-09-3` (before RT-4) | 7,567,536 |
+| With `hook` and `hooks install` (hand lexer, two rules, installer) | 7,683,952 (+116,416, +1.5%) |
+| `brush-parser` 0.4.0 probe alone (a hello-world that parses one command) | 871,216, with 94 new crates in its lockfile (`bon`, `darling`, `cached`, a second `syn` major) |
+
+Decision recorded with the numbers: the lexer is hand written (`tools/paddock-dev/src/hook/lex.rs`, one file, 21 tests). The
+brush-parser probe's start cost is not the problem (its parse-only run costs the same as the whole hook); the 94 crates
+(proc-macro crates, a second `syn` major, licence and supply-chain review, every change to the lockfile changing the tool's input
+hash) and an AST walk for what the rules read as a flat command list are. Reverse it if a later rule needs a real grammar.
+Not measured: Linux and Windows hosts, and a run at the load of 53 that ADR 0083 quotes.
 
 ## Approval signature verification (ADR 0097, 2026-11-10)
 

@@ -1,0 +1,2 @@
+fn a(){ let p = TcpListener::bind("x").unwrap().local_addr(); // conformance: freed-port — 😀a
+}

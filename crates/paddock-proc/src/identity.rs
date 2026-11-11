@@ -3,6 +3,7 @@
 //! is used. A [`ProcessId`] is the pid plus the time that process started; before anything acts on it, the start time of
 //! whoever holds the pid now is compared ([`holder`]), and a mismatch is skipped with a warning instead of killed.
 
+use crate::tree::Presence;
 use std::fmt;
 
 /// When a process started, in microseconds since the Unix epoch, as the OS reports it: the creation time on Windows,
@@ -70,17 +71,85 @@ impl ProcessId {
     }
 
     /// Whether a process that may be this one runs: its pid is alive and started [near](StartTime::is_near) this start
-    /// time. For decisions that err towards "still there", such as keeping a folder its owner may still use; never for a
-    /// kill ([`ProcessId::is_alive`] compares exactly).
+    /// time, or that cannot be told ([`ProcessId::presence_near`] is `Unknown`). For decisions that err towards "still
+    /// there", such as keeping a folder its owner may still use; never for a kill ([`ProcessId::is_alive`] compares
+    /// exactly).
     pub fn may_be_alive(self) -> bool {
-        crate::sys::start_time(self.pid).is_some_and(|now| now.is_near(self.started))
-            && crate::tree::is_alive(self.pid)
+        self.presence_near().may_be_alive()
     }
 
-    /// Whether this process still runs: its pid is alive and still belongs to it.
+    /// Whether this process still runs: its pid is alive and still belongs to it. **Unknown counts as not alive** (the process
+    /// table or its start time could not be read): right for code that ends or waits for a process, wrong for code that
+    /// deletes a file, takes a lock over or starts a second copy on "gone". Those use [`ProcessId::presence`] or
+    /// [`ProcessId::recorded_presence`] and treat [`Presence::Unknown`] as running (rule 53).
     pub fn is_alive(self) -> bool {
         holder(self, crate::sys::start_time(self.pid)) == Holder::Same
             && crate::tree::is_alive(self.pid)
+    }
+}
+
+impl ProcessId {
+    /// The three-valued [`ProcessId::is_alive`]: `Unknown` when the process table or the holder's start time cannot be read.
+    pub fn presence(self) -> Presence {
+        self.presence_given(
+            crate::tree::presence(self.pid),
+            crate::sys::start_time(self.pid),
+        )
+    }
+
+    /// [`ProcessId::presence`] over what was read: the table's look at the pid and the start time of its holder.
+    pub(crate) fn presence_given(self, table: Presence, now: Option<StartTime>) -> Presence {
+        match (table, now) {
+            (Presence::Unknown, _) => Presence::Unknown,
+            (Presence::Gone, _) => Presence::Gone,
+            (Presence::Running, None) => Presence::Unknown,
+            (Presence::Running, Some(_)) => match holder(self, now) {
+                Holder::Same => Presence::Running,
+                Holder::Gone | Holder::Other(_) => Presence::Gone,
+            },
+        }
+    }
+
+    /// [`ProcessId::presence`] with the start time compared [near](StartTime::is_near), not exactly: `Running` when the
+    /// pid's holder started within the clock's slack of this start. For decisions that err towards "still there"
+    /// ([`ProcessId::may_be_alive`]); never for a kill.
+    pub fn presence_near(self) -> Presence {
+        self.presence_near_given(
+            crate::tree::presence(self.pid),
+            crate::sys::start_time(self.pid),
+        )
+    }
+
+    /// [`ProcessId::presence_near`] over what was read.
+    pub(crate) fn presence_near_given(self, table: Presence, now: Option<StartTime>) -> Presence {
+        match (table, now) {
+            (Presence::Unknown, _) | (Presence::Running, None) => Presence::Unknown,
+            (Presence::Gone, _) => Presence::Gone,
+            (Presence::Running, Some(s)) if s.is_near(self.started) => Presence::Running,
+            (Presence::Running, Some(_)) => Presence::Gone,
+        }
+    }
+
+    /// Whether the process that wrote a record at `written_ms` (ms since the Unix epoch) under `pid` still runs: the holder
+    /// of `pid` must have started no later than the record ([`ProcessId::of_recorded`]). `Unknown` when the process table
+    /// or the holder's start time cannot be read, so a discovery or lock file is never judged stale on a failed read.
+    pub fn recorded_presence(pid: u32, written_ms: i64) -> Presence {
+        recorded_given(
+            crate::tree::presence(pid),
+            crate::sys::start_time(pid),
+            written_ms,
+        )
+    }
+}
+
+/// [`ProcessId::recorded_presence`] over what was read.
+pub(crate) fn recorded_given(table: Presence, now: Option<StartTime>, written_ms: i64) -> Presence {
+    match (table, now) {
+        (Presence::Unknown, _) => Presence::Unknown,
+        (Presence::Gone, _) => Presence::Gone,
+        (Presence::Running, None) => Presence::Unknown,
+        (Presence::Running, Some(s)) if started_by(s, written_ms) => Presence::Running,
+        (Presence::Running, Some(_)) => Presence::Gone,
     }
 }
 
@@ -242,6 +311,73 @@ mod tests {
             "two seconds off is another process"
         );
         assert!(!off(500).is_alive(), "a kill still compares exactly");
+    }
+
+    #[test]
+    fn a_near_look_is_unknown_on_an_unreadable_table_and_gone_only_off_the_slack() {
+        use crate::tree::Presence::{Gone, Running, Unknown};
+        let id = ProcessId::new(4242, at(5_000_000));
+        assert_eq!(
+            id.presence_near_given(Unknown, Some(at(5_000_000))),
+            Unknown
+        );
+        assert_eq!(id.presence_near_given(Running, None), Unknown);
+        assert_eq!(id.presence_near_given(Gone, None), Gone);
+        assert_eq!(
+            id.presence_near_given(Running, Some(at(5_000_000 + CLOCK_SLACK_MICROS))),
+            Running
+        );
+        assert_eq!(
+            id.presence_near_given(Running, Some(at(5_000_000 + CLOCK_SLACK_MICROS + 1))),
+            Gone,
+            "a pid handed on"
+        );
+    }
+
+    #[test]
+    fn an_unreadable_table_or_start_time_is_unknown_never_gone() {
+        use crate::tree::Presence::{Gone, Running, Unknown};
+        let id = ProcessId::new(4242, at(1_000));
+        assert_eq!(id.presence_given(Unknown, Some(at(1_000))), Unknown);
+        assert_eq!(id.presence_given(Unknown, None), Unknown);
+        assert_eq!(id.presence_given(Gone, None), Gone);
+        assert_eq!(id.presence_given(Running, Some(at(1_000))), Running);
+        assert_eq!(
+            id.presence_given(Running, Some(at(9_000))),
+            Gone,
+            "a pid handed on"
+        );
+        assert_eq!(
+            id.presence_given(Running, None),
+            Unknown,
+            "running, but its start time cannot be read"
+        );
+        assert!(
+            !id.is_alive(),
+            "is_alive stays false for an unknown or absent process"
+        );
+    }
+
+    #[test]
+    fn a_recorded_pid_is_judged_the_same_three_ways() {
+        use crate::tree::Presence::{Gone, Running, Unknown};
+        let written_ms = 10;
+        assert_eq!(recorded_given(Unknown, None, written_ms), Unknown);
+        assert_eq!(recorded_given(Gone, None, written_ms), Gone);
+        assert_eq!(
+            recorded_given(Running, Some(at(5_000)), written_ms),
+            Running
+        );
+        assert_eq!(
+            recorded_given(Running, Some(at(9_000_000)), written_ms),
+            Gone,
+            "started after the record"
+        );
+        assert_eq!(recorded_given(Running, None, written_ms), Unknown);
+        assert_eq!(
+            ProcessId::recorded_presence(std::process::id(), i64::MAX / 4000),
+            Running
+        );
     }
 
     #[test]

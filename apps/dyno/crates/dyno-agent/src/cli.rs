@@ -413,7 +413,7 @@ fn bench(seconds: u64, who: &str) -> Result<(), String> {
         ask(&listener, Request::Subscribe { detail })?;
     }
     let me = sysinfo::Pid::from_u32(std::process::id());
-    let mut sys = System::new();
+    let mut sys = System::new().map_err(|e| format!("The OS process table could not be read ({e})."))?;
     let kind = ProcessRefreshKind::nothing().with_cpu().with_memory();
     sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[me]), true, kind);
     let started = Instant::now();

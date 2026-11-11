@@ -39,13 +39,17 @@ pub struct OsInterfaces;
 
 impl Interfaces for OsInterfaces {
     fn ipv4(&self) -> Vec<NetIf> {
-        let networks = sysinfo::Networks::new_with_refreshed_list();
+        let Ok(networks) = sysinfo::Networks::new_with_refreshed_list()
+            .inspect_err(|why| log::warn!("the network interface list is unavailable (sysinfo): {why}; no cards are offered"))
+        else {
+            return Vec::new();
+        };
         let mut out = Vec::new();
         for (name, data) in &networks {
             for n in data.ip_networks() {
                 if let std::net::IpAddr::V4(addr) = n.addr {
                     out.push(NetIf {
-                        name: name.clone(),
+                        name: name.to_string_lossy().into_owned(),
                         addr,
                         prefix: n.prefix,
                     });

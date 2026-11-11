@@ -1,0 +1,2 @@
+fn a(){ unsafe { TerminateProcess(h,1) }; // conformance: pid-kill — 😀b
+}

@@ -2,7 +2,7 @@
 //! up must never panic or run away on any input, and a gzip wrapper must not inflate past its cap (ADR 0031 §3.1).
 #![no_main]
 
-use dyno_agent::geo_db::{DbKind, GeoReader, inflate_capped, open_checked};
+use dyno_agent::geo_db::{inflate_capped, open_checked, DbKind, GeoReader};
 use dyno_core::geo::GeoLookup;
 use libfuzzer_sys::fuzz_target;
 

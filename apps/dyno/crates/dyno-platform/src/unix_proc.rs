@@ -43,7 +43,9 @@ unsafe fn errno_ptr() -> *mut libc::c_int {
 
 /// The start time sysinfo reports for `pid`, as a [`Timestamp`].
 pub fn started_of(pid: Pid) -> Option<Timestamp> {
-    let mut sys = System::new();
+    let mut sys = System::new()
+        .inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; the start time of pid {pid} is unknown"))
+        .ok()?;
     let sp = sysinfo::Pid::from_u32(pid);
     sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[sp]), true, ProcessRefreshKind::nothing());
     sys.process(sp).map(|p| started_from_unix_secs(p.start_time()))

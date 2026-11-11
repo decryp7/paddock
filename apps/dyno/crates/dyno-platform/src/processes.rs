@@ -129,8 +129,10 @@ struct NtDriver {
 
 /// The common process source.
 pub struct SysinfoProcesses {
-    sys: System,
-    users: Users,
+    /// `None` when sysinfo could not start (logged once): no process is listed and details say why.
+    sys: Option<System>,
+    /// `None` when the user list could not be read (logged once): owners fall back to the well-known accounts.
+    users: Option<Users>,
     users_read: Instant,
     last: Option<Instant>,
     cores: f32,
@@ -146,12 +148,20 @@ pub struct SysinfoProcesses {
 impl SysinfoProcesses {
     /// A source with an OS probe.
     pub fn new(probe: Box<dyn DetailsProbe>) -> Self {
-        let mut sys = System::new();
-        sys.refresh_cpu_list(CpuRefreshKind::nothing());
-        let cores = sys.cpus().len().max(1) as f32;
+        let sys = System::new()
+            .inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; no process is listed"))
+            .ok()
+            .map(|mut sys| {
+                sys.refresh_cpu_list(CpuRefreshKind::nothing());
+                sys
+            });
+        let cores = sys.as_ref().map_or(0, |s| s.cpus().len()).max(1) as f32;
+        let users = Users::new_with_refreshed_list()
+            .inspect_err(|why| log::warn!("the user list is unavailable (sysinfo): {why}; owners show only well-known accounts"))
+            .ok();
         SysinfoProcesses {
             sys,
-            users: Users::new_with_refreshed_list(),
+            users,
             users_read: Instant::now(),
             last: None,
             cores,
@@ -186,14 +196,15 @@ impl SysinfoProcesses {
     fn user_name(&self, p: &Process) -> Option<String> {
         let uid = p.user_id()?;
         self.users
-            .get_user_by_id(uid)
+            .as_ref()
+            .and_then(|users| users.get_user_by_id(uid))
             .map(|u| u.name().to_string())
             .or_else(|| well_known_account(&uid.to_string()).map(str::to_string))
     }
 
     #[cfg(unix)]
     fn user_name_of_uid(&self, uid: u32) -> Option<String> {
-        self.users.list().iter().find(|u| **u.id() == uid).map(|u| u.name().to_string())
+        self.users.as_ref()?.iter().find(|u| **u.id() == uid).map(|u| u.name().to_string())
     }
 
     #[cfg(windows)]
@@ -274,7 +285,9 @@ impl SysinfoProcesses {
             if out.len() >= MAX_PARENT_DEPTH || out.iter().any(|l: &ParentLink| l.pid == pp.as_u32()) {
                 break;
             }
-            let Some(parent) = self.sys.process(pp) else { break };
+            let Some(parent) = self.sys.as_ref().and_then(|s| s.process(pp)) else {
+                break;
+            };
             // A "parent" that started after its child is a reused pid, not the real parent.
             if parent.start_time() > child_start {
                 break;
@@ -295,8 +308,10 @@ impl ProcessSource for SysinfoProcesses {
         let now = Instant::now();
         let secs = self.last.map(|l| now.duration_since(l).as_secs_f64()).unwrap_or(0.0);
         self.last = Some(now);
-        self.sys
-            .refresh_processes_specifics(ProcessesToUpdate::All, true, Self::tick_kind());
+        let Some(sys) = self.sys.as_mut() else {
+            return Vec::new();
+        };
+        sys.refresh_processes_specifics(ProcessesToUpdate::All, true, Self::tick_kind());
         if let Some(nt) = &mut self.nt {
             let snapshot = nt.source.snapshot();
             let api = (*nt.tracker.state() == NtState::Unchecked)
@@ -308,22 +323,31 @@ impl ProcessSource for SysinfoProcesses {
         }
         let unknown_user = self
             .sys
-            .processes()
-            .values()
+            .iter()
+            .flat_map(|s| s.processes().values())
             .filter_map(Process::user_id)
-            .any(|u| self.users.get_user_by_id(u).is_none() && well_known_account(&u.to_string()).is_none());
+            .any(|u| {
+                self.users.as_ref().is_none_or(|users| users.get_user_by_id(u).is_none()) && well_known_account(&u.to_string()).is_none()
+            });
         if unknown_user && self.users_read.elapsed() >= USERS_REFRESH {
-            self.users.refresh();
+            if let Some(users) = self.users.as_mut() {
+                users.refresh();
+            }
             self.users_read = Instant::now();
         }
         if self.own_user.is_none() {
             self.own_user = sysinfo::get_current_pid()
                 .ok()
-                .and_then(|me| self.sys.process(me))
+                .and_then(|me| self.sys.as_ref()?.process(me))
                 .and_then(|p| p.user_id())
                 .map(own_user_of);
         }
-        let mut out: Vec<ProcessSample> = self.sys.processes().values().map(|p| self.sample_of(p, secs)).collect();
+        let mut out: Vec<ProcessSample> = self
+            .sys
+            .iter()
+            .flat_map(|s| s.processes().values())
+            .map(|p| self.sample_of(p, secs))
+            .collect();
         out.sort_by_key(|p| p.pid);
         out
     }
@@ -337,8 +361,11 @@ impl ProcessSource for SysinfoProcesses {
             .with_exe(UpdateKind::OnlyIfNotSet)
             .with_user(UpdateKind::OnlyIfNotSet)
             .with_tasks();
-        self.sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), true, kind);
-        let p = self.sys.process(pid).ok_or_else(|| gone(target.pid))?;
+        let Some(sys) = self.sys.as_mut() else {
+            return Err(PlatformError::Failed("The OS process table is unavailable.".into()));
+        };
+        sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), true, kind);
+        let p = self.sys.as_ref().and_then(|s| s.process(pid)).ok_or_else(|| gone(target.pid))?;
         // sysinfo lists Linux threads as processes; a thread id is never a target.
         if p.thread_kind().is_some()
             || target

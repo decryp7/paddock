@@ -46,7 +46,7 @@ status = "built"
   paths = ["apps/pitcrew/app/src-tauri/src/service_repair.rs"]
   owner = "pitcrew"
   delete_by = "pitcrew-v1.1.0"
-  note = "Both B4 defects (nested state lines, has_lwcr && !running). Pitcrew 1.1 adopts paddock-service; its parse_extras is in paddock-service (JobReport pid, runs and last exit code); its start_wait.rs moves in as StartWatch/StartWait only after Pitwall 1.1 B1 (the merge with ADR 0056 left it out). Both are deleted by the adoption."
+  note = "The copy of parse_job and stale() mirrors the canonical logic since fix/pitcrew-launchctl-copy (nested blocks skipped, has LWCR alone is not stale; test over the canonical real capture); it still lacks the JobReport pid, runs and last exit code. Pitcrew 1.1 adopts paddock-service; its parse_extras is in paddock-service (JobReport pid, runs and last exit code); its start_wait.rs moves in as StartWatch/StartWait only after Pitwall 1.1 B1 (the merge with ADR 0056 left it out). Both are deleted by the adoption."
 
 [[mechanism]]
 id = "service-registration"
@@ -1018,3 +1018,38 @@ status = "planned"
   owner = "pitwall"
   delete_by = "pitwall-v1.2.0"
   note = "The same wiring as Dyno's (B6b). Follow-up as in Dyno's note."
+
+# =====================================================================================================================
+# CI kit: job isolation (ADR 0025, ADR 0022 R1; Rust tooling plan RT-1)
+# =====================================================================================================================
+
+[[mechanism]]
+id = "ci-job-isolation"
+title = "Job isolation on a host runner: slots, kept folders, ports, process patterns, the job's temp and socket folders"
+canonical = "tools/paddock-dev"
+paths = ["tools/paddock-dev/src/ci_isolation/**"]
+status = "built"
+adr = "docs/adr/0025-ci-job-isolation.md"
+
+  [[mechanism.copy]]
+  paths = ["conformance/ci/job-isolation.sh", "conformance/ci/job-tmpdir.sh", "conformance/ci/ci-home.sh"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "The shell kit runs one release in parallel with `dev ci isolation` (plan decision D5, `PADDOCK_CI_KIT=shell` as the fallback); `conformance/test/job-isolation.test.mjs` runs the same cases against both (ISOLATION_CMD). The retirement PR after the next app tag whose release run went through the Rust path green deletes the scripts, that switch and this entry; the date follows that point (a paddock tag, as no app tag fits `owner = paddock`)."
+
+# =====================================================================================================================
+# CI run readers (RT-8)
+# =====================================================================================================================
+
+[[mechanism]]
+id = "ci-timings"
+title = "CI timings from the Gitea Actions API: wall time, delay, runners, step categories, critical path, log phases"
+canonical = "tools/paddock-dev"
+paths = ["tools/paddock-dev/src/ci_runs/timings.rs"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["scripts/ci-timings.mjs"]
+  owner = "paddock"
+  delete_by = "v0.4.0"
+  note = "The oracle of `./dev ci timings` (a test compares its Markdown, byte for byte, with this script's output on recorded API replies: tools/paddock-dev/tests/ci-runs/timings/golden.md). It has no CI caller; delete it, and engineering-rules' copy one release later, once the Rust command is the only reader."

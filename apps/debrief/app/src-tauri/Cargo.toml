@@ -45,6 +45,7 @@ keyring = "4.2"
 debrief-collect = { path = "../../crates/debrief-collect" }
 # The shared report redactor (secrets, user names, home folders, e-mail and IP addresses) for problem reports.
 paddock-diag = { path = "../../../../crates/paddock-diag" }
+paddock-proc = { path = "../../../../crates/paddock-proc" }
 # Child-process logs (`debrief_ipc::child_log`) for problem reports.
 debrief-ipc = { path = "../../crates/debrief-ipc" }
 # The store worker's client (ADR 0014): every window's store over the worker; links no database.

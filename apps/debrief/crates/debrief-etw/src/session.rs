@@ -7,6 +7,7 @@
 //! ([`stop_orphans`]).
 
 use crate::kernel::{guids, opcodes};
+use crate::orphan::{is_orphan, owner_after_open_failed, Owner};
 use crate::sys::{self, wide, Source};
 use crate::{win32_error, EtwError, RawEvent};
 use std::path::Path;
@@ -153,15 +154,6 @@ fn stop_by_name(name: &str) {
     }
 }
 
-/// Whether a session name with `prefix` belongs to a Debrief that is no longer running.
-pub fn is_orphan(prefix: &str, name: &str, alive: impl Fn(u32) -> bool) -> bool {
-    let Some(rest) = name.strip_prefix(prefix) else { return false };
-    match rest.split('-').next().and_then(|p| p.parse::<u32>().ok()) {
-        Some(owner) => owner != std::process::id() && !alive(owner),
-        None => false,
-    }
-}
-
 /// Whether process `pid` is running.
 pub fn process_alive(pid: u32) -> bool {
     // SAFETY: the handle is closed below.
@@ -177,6 +169,27 @@ pub fn process_alive(pid: u32) -> bool {
     }
 }
 
+/// What a look at process `pid` finds: running, gone (`OpenProcess` says no such process) or unknown (the look was refused:
+/// an elevated Debrief, or one of another user, answers access denied). Never a bare "not alive".
+pub fn owner_of(pid: u32) -> Owner {
+    // SAFETY: the handle is closed below.
+    match unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, pid) } {
+        Ok(h) => {
+            let running = unsafe { WaitForSingleObject(h, 0) } != WAIT_OBJECT_0;
+            unsafe {
+                let _ = CloseHandle(h);
+            }
+            if running {
+                Owner::Running
+            } else {
+                Owner::Gone
+            }
+        }
+        // The HRESULT of a Win32 error carries it in its low 16 bits.
+        Err(e) => owner_after_open_failed((e.code().0 as u32) & 0xFFFF),
+    }
+}
+
 /// Stops sessions with `prefix` left by a Debrief that crashed.
 pub fn stop_orphans(prefix: &str) {
     let mut bufs: Vec<Properties> = (0..64).map(|_| Properties::new()).collect();
@@ -188,7 +201,7 @@ pub fn stop_orphans(prefix: &str) {
     }
     for b in bufs.iter().take(count as usize) {
         let name = b.logger_name();
-        if is_orphan(prefix, &name, process_alive) {
+        if is_orphan(prefix, &name, owner_of) {
             stop_by_name(&name);
         }
     }
@@ -395,15 +408,31 @@ mod tests {
     const PREFIX: &str = "Debrief-test-";
 
     #[test]
-    fn orphans_are_sessions_of_dead_debriefs_only() {
+    fn orphans_are_sessions_of_debriefs_seen_gone_only() {
         let me = std::process::id();
-        assert!(is_orphan(PREFIX, "Debrief-test-999999-5-1", |_| false));
-        assert!(!is_orphan(PREFIX, "Debrief-test-999999-5-1", |_| true));
-        assert!(!is_orphan(PREFIX, &format!("Debrief-test-{me}-5-1"), |_| false), "our own sessions");
-        assert!(!is_orphan(PREFIX, "NT Kernel Logger", |_| false));
-        assert!(!is_orphan(PREFIX, "Debrief-test-x-5-1", |_| false));
+        assert!(is_orphan(PREFIX, "Debrief-test-999999-5-1", |_| Owner::Gone));
+        assert!(!is_orphan(PREFIX, "Debrief-test-999999-5-1", |_| Owner::Running));
+        assert!(
+            !is_orphan(PREFIX, "Debrief-test-999999-5-1", |_| Owner::Unknown),
+            "a refused look keeps the session"
+        );
+        assert!(
+            !is_orphan(PREFIX, &format!("Debrief-test-{me}-5-1"), |_| Owner::Gone),
+            "our own sessions"
+        );
+        assert!(!is_orphan(PREFIX, "NT Kernel Logger", |_| Owner::Gone));
+        assert!(!is_orphan(PREFIX, "Debrief-test-x-5-1", |_| Owner::Gone));
         let a = session_name(PREFIX, 7);
         assert!(a.starts_with(&format!("{PREFIX}{me}-7-")) && a != session_name(PREFIX, 7));
+    }
+
+    /// Windows controls for the look at a session's owner: this process runs, a pid nobody holds is gone, and the System
+    /// process (pid 4, which refuses the open) is never gone.
+    #[test]
+    fn the_owner_look_tells_running_gone_and_refused_apart() {
+        assert_eq!(owner_of(std::process::id()), Owner::Running);
+        assert_eq!(owner_of(u32::MAX - 1), Owner::Gone);
+        assert_ne!(owner_of(4), Owner::Gone, "a refused look is not a gone process");
     }
 
     #[test]

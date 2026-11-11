@@ -89,6 +89,8 @@ struct State {
     /// The running job's process, and how many asks it stays alive for.
     process: Option<paddock_proc::ProcessId>,
     alive_polls: u32,
+    /// The process table cannot be read: every look at the process is `Unknown`.
+    process_unreadable: bool,
 }
 
 /// One look at the scripted OS: it counts as a poll for a job that starts after some.
@@ -197,14 +199,18 @@ impl Backend for Scripted {
     fn job_process(&mut self) -> Option<paddock_proc::ProcessId> {
         self.0.lock().unwrap().process
     }
-    fn process_alive(&mut self, process: paddock_proc::ProcessId) -> bool {
+    fn process_presence(&mut self, process: paddock_proc::ProcessId) -> paddock_proc::Presence {
+        use paddock_proc::Presence;
         let mut s = self.0.lock().unwrap();
         s.log.push(format!("alive {}", process.pid()));
+        if s.process_unreadable {
+            return Presence::Unknown;
+        }
         if s.alive_polls > 0 {
             s.alive_polls -= 1;
-            return true;
+            return Presence::Running;
         }
-        false
+        Presence::Gone
     }
 }
 
@@ -1303,6 +1309,27 @@ fn a_process_that_does_not_end_is_an_error_that_names_it_and_removes_nothing() {
     let err = run_uninstall(&layout_for(Os::MacOs), &files, &backend).unwrap_err();
     assert!(
         matches!(&err, InstallError::Failed { phase: Step::StopExisting, why } if why.contains("4242") && why.contains("still running")),
+        "{err:?}"
+    );
+    assert!(
+        files.facts_of(Path::new(MAC_PROGRAM)).is_some(),
+        "the program stays"
+    );
+}
+
+#[test]
+fn an_unreadable_process_table_is_not_a_stopped_process_and_removes_nothing() {
+    let files = mac_disk();
+    files.put_file(MAC_PROGRAM, b"x", 0, 0o755);
+    let backend = Scripted::with(|s| {
+        s.registered = true;
+        s.running = true;
+        s.process = Some(helper_process());
+        s.process_unreadable = true;
+    });
+    let err = run_uninstall(&layout_for(Os::MacOs), &files, &backend).unwrap_err();
+    assert!(
+        matches!(&err, InstallError::Failed { phase: Step::StopExisting, why } if why.contains("4242") && why.contains("could not be checked")),
         "{err:?}"
     );
     assert!(

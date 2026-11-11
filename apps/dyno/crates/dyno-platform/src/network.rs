@@ -128,7 +128,11 @@ pub fn parents_of(pids: impl Iterator<Item = u32>) -> std::collections::HashMap<
     if pids.is_empty() {
         return std::collections::HashMap::new();
     }
-    let mut sys = System::new();
+    let Ok(mut sys) =
+        System::new().inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; parent processes are unknown"))
+    else {
+        return std::collections::HashMap::new();
+    };
     sys.refresh_processes_specifics(ProcessesToUpdate::Some(&pids), false, ProcessRefreshKind::nothing());
     pids.iter()
         .filter_map(|p| Some((p.as_u32(), sys.process(*p)?.parent()?.as_u32())))

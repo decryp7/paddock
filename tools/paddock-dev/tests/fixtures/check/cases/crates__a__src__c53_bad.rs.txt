@@ -1,0 +1,22 @@
+fn a(h: HANDLE) {
+    unsafe { TerminateProcess(h, 1) };
+    unsafe { TerminateJobObject(h, 1) };
+    Command::new("taskkill").args(["/T", "/F"]);
+    root.join("taskkill.exe")
+}
+
+fn b() {
+    std::process::Command::new("kill").arg("-9");
+    paddock_proc::command("pkill");
+    ps.arg("Stop-Process -Id 42 -Force");
+    Command::new("/bin/kill");
+    Command::new("/usr/bin/kill");
+}
+
+#[expect(clippy::disallowed_methods, reason = "ADR 0033 WP-5: killpg after reap")]
+fn c() {}
+// ADR 0033 WP-6: parent pids
+// conformance: pid-kill — no
+// ADR 0033 WP-7: x
+#![allow(clippy::unwrap_used, clippy::disallowed_methods)]
+#![cfg_attr(test, allow(clippy::disallowed_methods))]

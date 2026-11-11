@@ -147,7 +147,10 @@ fn user_of(u: &sysinfo::Uid) -> HelperUser {
 impl ProcessSweeper for SystemSweeper {
     fn sweep(&self) -> Result<Sweep, PlatformError> {
         let homes = self.homes()?;
-        let mut sys = System::new();
+        let mut sys = System::new().map_err(|why| {
+            log::warn!("the OS process table is unavailable (sysinfo): {why}; the sweep is refused");
+            PlatformError::Failed(format!("The OS process table could not be read ({why})."))
+        })?;
         let what = ProcessRefreshKind::nothing()
             .with_cpu()
             .with_memory()
@@ -155,7 +158,10 @@ impl ProcessSweeper for SystemSweeper {
             .with_user(UpdateKind::Always)
             .with_exe(UpdateKind::Always);
         sys.refresh_processes_specifics(ProcessesToUpdate::All, true, what);
-        let users = Users::new_with_refreshed_list();
+        let users = Users::new_with_refreshed_list().map_err(|why| {
+            log::warn!("the user list is unavailable (sysinfo): {why}; the sweep is refused");
+            PlatformError::Failed(format!("The OS user list could not be read ({why})."))
+        })?;
         let first_person = first_person_uid(self.host);
         let processes = sys
             .processes()

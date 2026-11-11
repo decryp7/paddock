@@ -22,7 +22,7 @@ const row1 = [
 // Recce is planned (placeholder icon and page only): its card carries the Planned chip like Sighter's and Pacenotes'.
 const row3 = [
   { id: 'recce-placeholder', key: 'recce', name: 'Recce', accent: '#2E9E75', lines: ['One search box for the', 'whole PC, answers with', 'sources. Retrieval engine.'] },
-  { id: 'dyno', name: 'Dyno', accent: '#C2287C', lines: ['Watches your PC:', 'read-only monitor.'] },
+  { id: 'dyno', name: 'Dyno', accent: '#C2287C', lines: ['Watches your PC and', 'explains why it is slow.'] },
   { id: 'spotter', name: 'Spotter', accent: '#0E8577', lines: ['Watches for new releases', 'anywhere, the moment', 'one appears.'] },
 ];
 const pitcrew = { id: 'pitcrew', name: 'Pitcrew', accent: '#D2420F', ci: 'Runs CI for all apps', lines: ['Keeps CI runners alive,', 'updated and clean.'] };

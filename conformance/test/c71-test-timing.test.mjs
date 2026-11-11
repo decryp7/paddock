@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { againstBaseline, lineHash, rustTimingSites, shrinkBaseline, timingSites, tsTimingSites } from '../src/checks/C71-test-timing.mjs';
+import { againstBaseline, retriesWithoutFlakyFailure, lineHash, rustTimingSites, shrinkBaseline, timingSites, tsTimingSites } from '../src/checks/C71-test-timing.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
 
 const ts = (t) => tsTimingSites(t).map((s) => s.line);
@@ -174,4 +174,19 @@ test('C71 leaves vendored third-party code to its own upstream (a vendor/ folder
   assert.deepEqual(await findingsOf('C71', makeApp(files), { options: firstIntroduction }), []);
   const own = await findingsOf('C71', makeApp({ ...files, 'crates/x/src/vendor/a.rs': sleepy }), { options: firstIntroduction });
   assert.deepEqual(own.map((x) => x.file), ['crates/x/src/vendor/a.rs'], 'a first-party folder named vendor is still checked');
+});
+
+test('C71 flags a Playwright config whose retries can exceed 0 without failOnFlakyTests (ER-12), and passes the safe forms', async () => {
+  const bad = "export default defineConfig({\n  retries: process.env['CI'] ? 1 : 0,\n  reporter: 'list',\n});\n";
+  assert.equal(retriesWithoutFlakyFailure(bad), 2, 'positive control: the unsafe form is seen');
+  assert.equal(retriesWithoutFlakyFailure(bad.replace('reporter', "failOnFlakyTests: !!process.env['CI'],\n  reporter")), 0);
+  assert.equal(retriesWithoutFlakyFailure(bad.replace('reporter', 'failOnFlakyTests: false,\n  reporter')), 2, 'false is not a safeguard');
+  assert.equal(retriesWithoutFlakyFailure('export default defineConfig({\n  retries: 0,\n});\n'), 0);
+  assert.equal(retriesWithoutFlakyFailure('export default defineConfig({ retries: 0 });\n'), 0);
+  assert.equal(retriesWithoutFlakyFailure('export default defineConfig({\n  // retries: 2,\n});\n'), 0, 'a comment is not a setting');
+  assert.equal(retriesWithoutFlakyFailure('export default defineConfig({});\n'), 0);
+  const files = (cfg) => ({ 'paddock.conformance.json': JSON.stringify({ app: 'demo', timingLint: true }), 'apps/x/app/playwright.config.ts': cfg });
+  const f = await findingsOf('C71', makeApp(files(bad)), { options: firstIntroduction });
+  assert.deepEqual(f.map((x) => [x.severity, x.file, x.line]), [['error', 'apps/x/app/playwright.config.ts', 2]]);
+  assert.deepEqual(await findingsOf('C71', makeApp(files('export default defineConfig({ retries: 1, failOnFlakyTests: true });\n')), { options: firstIntroduction }), []);
 });

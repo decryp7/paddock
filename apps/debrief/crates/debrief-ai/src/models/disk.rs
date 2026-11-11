@@ -12,12 +12,10 @@ pub struct SystemDisk;
 impl DiskSpace for SystemDisk {
     fn available_bytes(&self, dir: &Path) -> Option<u64> {
         let dir = dir.canonicalize().ok()?;
-        let disks = sysinfo::Disks::new_with_refreshed_list();
-        let mounts: Vec<(PathBuf, u64)> = disks
-            .list()
-            .iter()
-            .map(|d| (d.mount_point().to_path_buf(), d.available_space()))
-            .collect();
+        let disks = sysinfo::Disks::new_with_refreshed_list()
+            .inspect_err(|why| log::warn!("the volume list is unavailable (sysinfo): {why}; free space is unknown"))
+            .ok()?;
+        let mounts: Vec<(PathBuf, u64)> = disks.iter().map(|d| (d.mount_point().to_path_buf(), d.available_space())).collect();
         volume_free(&dir, &mounts)
     }
 }

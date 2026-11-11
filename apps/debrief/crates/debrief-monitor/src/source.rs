@@ -53,7 +53,8 @@ pub fn expand_children(matched: &mut HashSet<u32>, parents: &HashMap<u32, u32>) 
 
 /// [`ProcessSource`] backed by `sysinfo`; refreshes only matched processes in detail.
 pub struct SysinfoSource {
-    sys: System,
+    /// `None` when sysinfo could not start (logged once): nothing is then sampled.
+    sys: Option<System>,
     /// PIDs measured before: CPU and IO deltas are meaningless on the first sight.
     seen: HashSet<u32>,
 }
@@ -67,29 +68,34 @@ impl Default for SysinfoSource {
 impl SysinfoSource {
     pub fn new() -> Self {
         SysinfoSource {
-            sys: System::new(),
+            sys: System::new()
+                .inspect_err(|why| log::warn!("the OS process table is unavailable (sysinfo): {why}; no process is sampled"))
+                .ok(),
             seen: HashSet::new(),
         }
     }
 
     fn matched_pids(&mut self, targets: &Targets, include_children: bool) -> Vec<Pid> {
+        let Some(sys) = self.sys.as_mut() else {
+            return Vec::new();
+        };
         if let (Some(pids), false) = (targets.only_pids(), include_children) {
             let pids: Vec<Pid> = pids.into_iter().map(Pid::from_u32).collect();
-            self.sys.refresh_processes_specifics(
+            sys.refresh_processes_specifics(
                 ProcessesToUpdate::Some(&pids),
                 true,
                 ProcessRefreshKind::nothing().with_exe(UpdateKind::OnlyIfNotSet),
             );
-            return pids.into_iter().filter(|p| self.sys.process(*p).is_some()).collect();
+            return pids.into_iter().filter(|p| sys.process(*p).is_some()).collect();
         }
-        self.sys.refresh_processes_specifics(
+        sys.refresh_processes_specifics(
             ProcessesToUpdate::All,
             true,
             ProcessRefreshKind::nothing().with_exe(UpdateKind::OnlyIfNotSet),
         );
         let mut matched: HashSet<u32> = HashSet::new();
         let mut parents = HashMap::new();
-        for (pid, p) in self.sys.processes() {
+        for (pid, p) in sys.processes() {
             // Linux lists every thread as a process that repeats its process's whole resident size: only real
             // processes are monitored (otherwise a 400-thread process reads as 400 processes of the full size).
             if p.thread_kind().is_some() {
@@ -116,7 +122,7 @@ impl ProcessSource for SysinfoSource {
     }
 
     fn host_name(&self) -> String {
-        System::host_name().unwrap_or_else(|| "localhost".into())
+        System::host_name().unwrap_or_else(|_| "localhost".into())
     }
 
     fn sample(&mut self, targets: &Targets, include_children: bool) -> Vec<ProcSample> {
@@ -126,11 +132,14 @@ impl ProcessSource for SysinfoSource {
             .with_memory()
             .with_disk_usage()
             .with_exe(UpdateKind::OnlyIfNotSet);
-        self.sys.refresh_processes_specifics(ProcessesToUpdate::Some(&pids), true, kind);
+        let Some(sys) = self.sys.as_mut() else {
+            return Vec::new();
+        };
+        sys.refresh_processes_specifics(ProcessesToUpdate::Some(&pids), true, kind);
         let mut out = Vec::new();
         let mut alive = HashSet::new();
         for pid in pids {
-            let Some(p) = self.sys.process(pid) else { continue };
+            let Some(p) = sys.process(pid) else { continue };
             let id = pid.as_u32();
             alive.insert(id);
             let known = self.seen.contains(&id);

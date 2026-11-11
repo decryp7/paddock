@@ -92,9 +92,18 @@ pub struct SysinfoInterfaces;
 
 impl Interfaces for SysinfoInterfaces {
     fn all(&self) -> Vec<(String, Vec<std::net::IpAddr>)> {
-        let nets = sysinfo::Networks::new_with_refreshed_list();
+        let Ok(nets) = sysinfo::Networks::new_with_refreshed_list()
+            .inspect_err(|why| log::warn!("the network interface list is unavailable (sysinfo): {why}; no interfaces are listed"))
+        else {
+            return Vec::new();
+        };
         nets.iter()
-            .map(|(name, data)| (name.clone(), data.ip_networks().iter().map(|n| n.addr).collect()))
+            .map(|(name, data)| {
+                (
+                    name.to_string_lossy().into_owned(),
+                    data.ip_networks().iter().map(|n| n.addr).collect(),
+                )
+            })
             .collect()
     }
 }
