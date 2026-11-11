@@ -258,3 +258,154 @@ fn the_link_reports_its_version_and_a_connection_pings() {
     drop(conn);
     drop(l);
 }
+
+/// A long-lived child that stands for the app's process: the discovery file can name it with its true start time, and killing it
+/// is the app being killed. Never the user's programs (ER-14).
+fn owner_process() -> std::process::Child {
+    #[cfg(unix)]
+    let mut c = std::process::Command::new("sleep");
+    #[cfg(unix)]
+    c.arg("300");
+    #[cfg(windows)]
+    let mut c = std::process::Command::new("ping");
+    #[cfg(windows)]
+    c.args(["-n", "300", "127.0.0.1"]);
+    c.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap()
+}
+
+/// A discovery file for `owner` (its true start time) and a listener on a loopback port.
+fn owned_listener(dir: &std::path::Path, owner: &std::process::Child) -> std::net::TcpListener {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let id = paddock_proc::ProcessId::of(owner.id()).unwrap();
+    let hint = Discovery {
+        pid: id.pid(),
+        started_us: id.started().as_micros(),
+        port: listener.local_addr().unwrap().port(),
+        app: "Demo".into(),
+        version: "1".into(),
+    };
+    std::fs::write(discovery_path(dir), serde_json::to_string(&hint).unwrap()).unwrap();
+    listener
+}
+
+/// Limits far above any wait a test should reach: only the owner's end can finish the handshake early, so a client that does not
+/// look at its owner takes the whole of it.
+const LONG: ConnectLimits = ConnectLimits {
+    connect: Duration::from_secs(30),
+    answer: Duration::from_secs(30),
+};
+
+/// The owner is killed while its port holds the connection and has not answered the key. `close_socket` says whether the dying
+/// process's socket is then closed (what the OS does when a process ends) or stays open (a listener a backlog still completes).
+fn killed_while_the_key_is_unanswered(close_socket: bool) {
+    use std::io::BufRead;
+    listen();
+    let dir = tempfile::tempdir().unwrap();
+    let mut owner = owner_process();
+    let listener = owned_listener(dir.path(), &owner);
+    let (got_key, key_arrived) = std::sync::mpsc::channel();
+    let (end, hold) = std::sync::mpsc::channel::<()>();
+    let peer = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut line = String::new();
+        std::io::BufReader::new(stream.try_clone().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        got_key.send(()).unwrap();
+        // Until the test says the owner is dead (and, for a closing socket, the connection ends then).
+        let _ = hold.recv_timeout(Duration::from_secs(60));
+        drop(stream);
+    });
+    let file = discovery_path(dir.path());
+    let client = std::thread::spawn(move || connect_loopback_with(&file, "pmk_x", LONG).err());
+    key_arrived.recv_timeout(Duration::from_secs(30)).unwrap();
+    owner.kill().unwrap();
+    owner.wait().unwrap();
+    let killed = std::time::Instant::now();
+    if close_socket {
+        end.send(()).unwrap();
+    }
+    let err = client.join().unwrap();
+    let waited = killed.elapsed();
+    let _ = end.send(());
+    peer.join().unwrap();
+    assert_eq!(err, Some(ConnectError::NotOpen { app: "Demo".into() }));
+    // conformance: hang-guard (the limits are 30 s; the client looks at its owner every 100 ms)
+    assert!(
+        waited < Duration::from_secs(10),
+        "the client waited {waited:?} for an app that was gone"
+    );
+}
+
+#[test]
+fn an_owner_killed_while_the_key_is_unanswered_reads_as_not_open_at_once() {
+    killed_while_the_key_is_unanswered(false);
+}
+
+#[test]
+fn an_owner_whose_socket_closes_as_it_dies_reads_as_not_open_not_as_a_closed_connection() {
+    killed_while_the_key_is_unanswered(true);
+}
+
+#[test]
+fn a_stale_file_of_a_killed_owner_answers_without_touching_its_port() {
+    listen();
+    let dir = tempfile::tempdir().unwrap();
+    let mut owner = owner_process();
+    // A port that completes connections and never answers: contacting it would cost the whole answer limit.
+    let listener = owned_listener(dir.path(), &owner);
+    owner.kill().unwrap();
+    owner.wait().unwrap();
+    let started = std::time::Instant::now();
+    let err = connect_loopback_with(&discovery_path(dir.path()), "pmk_x", LONG).unwrap_err();
+    assert_eq!(
+        err,
+        ConnectError::NotOpen {
+            app: "The app".into()
+        }
+    );
+    // conformance: hang-guard (nothing is contacted: the 30 s limits would be spent otherwise)
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "{:?}",
+        started.elapsed()
+    );
+    drop(listener);
+}
+
+/// A killed app that its parent has not collected yet is a zombie: its pid and start time still read, but nothing runs.
+#[cfg(unix)]
+#[test]
+fn a_killed_owner_that_is_not_collected_yet_reads_as_not_open_at_once() {
+    listen();
+    let dir = tempfile::tempdir().unwrap();
+    let mut owner = owner_process();
+    let listener = owned_listener(dir.path(), &owner);
+    owner.kill().unwrap();
+    // Not waited for: the child stays a zombie until `wait` below. The kill is delivered when the signal call returns, but the
+    // process table changes a moment later, so look until it is a zombie (a condition, not a delay).
+    let id = paddock_proc::ProcessId::of(owner.id()).unwrap();
+    while id.is_alive() {
+        std::thread::yield_now();
+    }
+    let started = std::time::Instant::now();
+    let err = connect_loopback_with(&discovery_path(dir.path()), "pmk_x", LONG).unwrap_err();
+    assert_eq!(
+        err,
+        ConnectError::NotOpen {
+            app: "The app".into()
+        }
+    );
+    // conformance: hang-guard (nothing is contacted: the 30 s limits would be spent otherwise)
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "{:?}",
+        started.elapsed()
+    );
+    owner.wait().unwrap();
+    drop(listener);
+}
