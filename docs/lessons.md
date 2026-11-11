@@ -1770,3 +1770,16 @@ A survey found that Pitcrew's LocalSystem service (shipped in pitcrew-v1.0.1) st
 over its pipe, with no prompt, because ADR 0004 authorised by the pipe ACL alone; Dyno's helper already checked the caller
 per connection. Rule 77 (ER-38): privileged services authorise changing requests by the caller's OS identity, and a
 request that changes what runs elevated needs an administrator caller; user-chosen elevation needs only a risk warning.
+
+## Start waits kept coming back as fixed budgets: one shared wait, ready or exit (2026-11-11)
+
+Tests on busy macOS runners failed because they gave a real process, browser or scan a fixed time: dyno-agent's start (CI
+7918), Spotter's and paddock-chromium's real browser (7912, 7918, 7929, 7932), Debrief's store worker (the product's 15 s
+connect window, "the store worker did not connect within 15 s", main 7919 and 7925), and paddock-dev's whole-repository
+live scans (budgets only raised). The first run of a freshly installed binary is held by the OS for 42 s on an idle Mac and
+over 240 s under I/O load, with no CPU and no output, so neither a clock nor a CPU judge can tell it from a hang. The shared
+mechanism (ADR 0071 applies; no new ADR): `paddock_proc::wait_ready_or_exit` (alive and ready, or exited with its status and
+error output at once, one outer hang guard that progress restarts), `paddock_proc::warm_up` (pay a first run before the start
+that matters), `paddock_testkit::guarded` (a slow job judged on units finished, not total time) and the product default
+`debrief_ipc::process::START_HANG_GUARD` instead of 15 s. A start wait in a test or a product default that names a short
+duration is the pattern; the fix is the shared wait, never a longer number.

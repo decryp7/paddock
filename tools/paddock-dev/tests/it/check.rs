@@ -8,7 +8,8 @@
 //! - the host: `--only`, `--files`, run records, `not measured`, `check broken`, the report shape and the CLI.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::check::mask::mask_rust;
-use paddock_dev::check::{RunOptions, registry, run_checks};
+use paddock_dev::check::tree::Tree;
+use paddock_dev::check::{RunOptions, registry, run_checks, run_checks_in};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -95,6 +96,27 @@ fn fixture_findings_equal_the_recorded_js_findings_exactly() {
     );
 }
 
+/// The tree reports its work: once when the listing is done and once per file read from disk (a cached read is no new work), so a
+/// run over a slow disk can be judged on progress (ADR 0071).
+#[test]
+fn a_tree_reports_the_listing_and_every_file_it_reads_once() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.rs"), "fn a() {}").unwrap();
+    std::fs::write(dir.path().join("b.rs"), "fn b() {}").unwrap();
+    let ticks = std::rc::Rc::new(std::cell::Cell::new(0u32));
+    let seen = ticks.clone();
+    let tree = Tree::open(dir.path()).with_progress(move || seen.set(seen.get() + 1));
+    assert_eq!(ticks.get(), 0, "nothing is read until asked");
+    assert_eq!(tree.files().len(), 2);
+    assert_eq!(ticks.get(), 1, "the listing");
+    tree.files();
+    assert_eq!(ticks.get(), 1, "a listing is made once");
+    tree.read("a.rs").unwrap();
+    tree.read("b.rs").unwrap();
+    tree.read("a.rs").unwrap();
+    assert_eq!(ticks.get(), 3, "two files read from disk, the repeat served from the cache");
+}
+
 #[test]
 fn fixture_masks_equal_the_recorded_js_masks() {
     let want = read_json(&fixtures().join("masked.json"));
@@ -122,6 +144,45 @@ fn node(driver: &str, env: &[(&str, String)]) -> String {
     let out = c.output().expect("node");
     assert!(out.status.success(), "node failed: {}", String::from_utf8_lossy(&out.stderr));
     String::from_utf8(out.stdout).unwrap()
+}
+
+/// The longest a whole-repository live run may finish no unit of work (a file read, parsed or masked) before it is called hung
+/// (ADR 0071). A slow disk or a loaded host stretches the run, never this: 42-49 s quiet against over 240 s under I/O load, and
+/// every one of those seconds finished files. nextest's slow-timeout (`.config/nextest.toml`) is only the backstop.
+// conformance: hang-guard
+const LIVE_STALL: std::time::Duration = std::time::Duration::from_secs(120);
+
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test spawns node, git or the built binary; it ends them itself"
+)]
+/// [`node`] for a driver that prints one line per unit of work: every line is a tick of `progress`, and the lines are not part
+/// of the answer. The child's end (its exit status) ends the wait; a hang ends it through the progress guard around the call.
+fn node_ticking(driver: &str, env: &[(&str, String)], progress: &paddock_testkit::Progress) {
+    use std::io::{BufRead, Read};
+    let mut c = Command::new("node");
+    c.args(["--input-type=module", "-e", driver])
+        .current_dir(repo_root())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    for (k, v) in env {
+        c.env(k, v);
+    }
+    let mut child = c.spawn().expect("node");
+    let mut stderr = child.stderr.take().unwrap();
+    let errors = std::thread::spawn(move || {
+        let mut text = String::new();
+        drop(stderr.read_to_string(&mut text));
+        text
+    });
+    for line in std::io::BufReader::new(child.stdout.take().unwrap()).lines() {
+        if line.is_ok() {
+            progress.tick();
+        }
+    }
+    let status = child.wait().unwrap();
+    let errors = errors.join().unwrap();
+    assert!(status.success(), "node failed: {errors}");
 }
 
 const JS_RUN: &str = r#"
@@ -158,17 +219,25 @@ fn live_tree_findings_equal_the_js_host() {
         return skip("node is not installed");
     }
     let root = repo_root();
+    // The JS host is one node process with no unit to count: it is waited for until it ends, under nextest's backstop.
     let js: Value = serde_json::from_str(&node(
         JS_RUN,
         &[("RT5_ROOT", root.display().to_string()), ("RT5_APP", "paddock".into())],
     ))
     .unwrap();
-    let opts = RunOptions {
-        app: "paddock".into(),
-        today: paddock_dev::check::today_utc(),
-        ..options(&root)
-    };
-    let r = run_checks(&opts, &registry()).unwrap();
+    // The Rust host reports every file it reads: a slow disk passes, a run that reads nothing for LIVE_STALL does not.
+    let r = paddock_testkit::guarded("the Rust check host over the live tree", LIVE_STALL, {
+        let root = root.clone();
+        move |progress| {
+            let opts = RunOptions {
+                app: "paddock".into(),
+                today: paddock_dev::check::today_utc(),
+                ..options(&root)
+            };
+            let tree = Tree::open(&root).with_progress(move || progress.tick());
+            run_checks_in(&tree, &opts, &registry()).unwrap()
+        }
+    });
     let (got, want) = (shared_part(&r.json()), shared_part(&js));
     assert_eq!(
         got["findings"], want["findings"],
@@ -201,37 +270,45 @@ fn live_mask_equals_the_js_mask_on_every_tracked_rust_file() {
         .map(String::from)
         .collect();
     assert!(files.len() > 1000, "the golden needs every tracked .rs file, found {}", files.len());
-    let out = tempfile::tempdir().unwrap();
-    const DRIVER: &str = r#"
+    // The JS side masks every file and prints a line per file; the Rust side then masks and compares each file. Both count as
+    // progress, so a disk that is slow under load passes and one that finishes no file for LIVE_STALL does not.
+    let differ = paddock_testkit::guarded("masking every tracked .rs file in JS and in Rust", LIVE_STALL, move |progress| {
+        let out = tempfile::tempdir().unwrap();
+        const DRIVER: &str = r#"
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 import { readFileSync, writeFileSync } from 'node:fs';
 const { maskRust } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/checks/C39-freed-port.mjs')).href);
 const files = JSON.parse(readFileSync(process.env.RT5_LIST, 'utf8'));
-files.forEach((f, i) => writeFileSync(join(process.env.RT5_OUT, `${i}.txt`), maskRust(readFileSync(f, 'utf8')), 'utf8'));
+files.forEach((f, i) => { writeFileSync(join(process.env.RT5_OUT, `${i}.txt`), maskRust(readFileSync(f, 'utf8')), 'utf8'); process.stdout.write('.\n'); });
 "#;
-    let list = out.path().join("list.json");
-    std::fs::write(&list, serde_json::to_string(&files).unwrap()).unwrap();
-    node(
-        DRIVER,
-        &[
-            ("RT5_LIST", list.display().to_string()),
-            ("RT5_OUT", out.path().display().to_string()),
-        ],
-    );
-    let mut differ = Vec::new();
-    for (i, f) in files.iter().enumerate() {
-        let text = String::from_utf8_lossy(&std::fs::read(root.join(f)).unwrap()).into_owned();
-        let want = std::fs::read(out.path().join(format!("{i}.txt"))).unwrap();
-        if mask_rust(&text).as_bytes() != want.as_slice() {
-            differ.push(f.clone());
+        let list = out.path().join("list.json");
+        std::fs::write(&list, serde_json::to_string(&files).unwrap()).unwrap();
+        node_ticking(
+            DRIVER,
+            &[
+                ("RT5_LIST", list.display().to_string()),
+                ("RT5_OUT", out.path().display().to_string()),
+            ],
+            &progress,
+        );
+        let mut differ = Vec::new();
+        for (i, f) in files.iter().enumerate() {
+            let text = String::from_utf8_lossy(&std::fs::read(root.join(f)).unwrap()).into_owned();
+            let want = std::fs::read(out.path().join(format!("{i}.txt"))).unwrap();
+            if mask_rust(&text).as_bytes() != want.as_slice() {
+                differ.push(f.clone());
+            }
+            progress.tick();
         }
-    }
+        (differ, files.len())
+    });
+    let (differ, total) = differ;
     assert!(
         differ.is_empty(),
         "{} of {} files are masked differently from the JS maskRust: {:?}",
         differ.len(),
-        files.len(),
+        total,
         &differ[..differ.len().min(5)]
     );
 }

@@ -28,6 +28,9 @@ pub struct Tree {
     unlisted: RefCell<Vec<String>>,
     /// A tree held in memory (a check's positive control), instead of a folder.
     memory: Option<BTreeMap<String, String>>,
+    /// Called once per file read from disk and once when the listing is done: how a whole-repository run on a slow disk shows
+    /// it is still working (ADR 0071; a test judges it on progress, not on total time).
+    on_progress: Option<Box<dyn Fn()>>,
 }
 
 impl Tree {
@@ -39,6 +42,20 @@ impl Tree {
             cache: RefCell::new(HashMap::new()),
             unlisted: RefCell::new(Vec::new()),
             memory: None,
+            on_progress: None,
+        }
+    }
+
+    /// The same tree reporting its work to `f` (see the `on_progress` field).
+    #[must_use]
+    pub fn with_progress(mut self, f: impl Fn() + 'static) -> Tree {
+        self.on_progress = Some(Box::new(f));
+        self
+    }
+
+    fn progressed(&self) {
+        if let Some(f) = &self.on_progress {
+            f();
         }
     }
 
@@ -90,6 +107,7 @@ impl Tree {
         out.sort();
         let rc = Rc::new(out);
         *self.files.borrow_mut() = Some(rc.clone());
+        self.progressed();
         rc
     }
 
@@ -105,6 +123,7 @@ impl Tree {
             .ok()
             .map(|b| Rc::new(String::from_utf8_lossy(&b).into_owned()));
         self.cache.borrow_mut().insert(rel.to_string(), text.clone());
+        self.progressed();
         text
     }
 }
