@@ -20,7 +20,7 @@ crate-type = ["rlib"]
 # Test doubles (the scripted server `server_client::fake`, the fixed admin key `StaticKeys`); enabled only through the
 # self dev-dependency below, never by a normal dependency (ADR 0073 / rule 73).
 test-support = []
-# The Playground's chat (ADR 0023), temporary until ADR 0049's switches. A default feature since 2026-11-12 (user, D-3):
+# The Playground's chat (ADR 0023), temporary until ADR 0049's switches. A default feature since 2026-11-12 (user decision, 2026-11-12: Pitwall 1.1 ships the chat on):
 # the release workflow builds with the defaults, so the release has the chat (tests/it/release_features.rs).
 chat = []
 default = ["chat"]
@@ -121,7 +121,7 @@ workspace = true
 # A socket bound but not listening refuses connections on Linux and Windows (not macOS): "nothing listens" with the port held.
 socket2 = { version = "0.6", features = ["all"] }
 # The self dev-dependency that turns `test-support` on for this package's tests (ADR 0073 / rule 73).
-pitwall-app = { path = ".", features = ["test-support"] }
+pitwall-app = { path = ".", default-features = false, features = ["test-support"] }
 tempfile.workspace = true
 # Builds a PNG whose colour profile inflates to hundreds of megabytes (tests/picture_memory.rs).
 miniz_oxide = "0.8"
