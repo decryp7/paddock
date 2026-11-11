@@ -204,7 +204,9 @@ fn an_idle_store_statements_and_cpu() {
 fn building_the_catalogue_keeps_its_unsaved_rows_bounded() {
     let base = TempDir::new("regress-unsaved-corpus");
     let dir = TempDir::new("regress-unsaved");
-    let corpus = common::corpus::corpus(&base.0.join("corpus"), 300_000);
+    // 100 000 events commit about 340 000 rows, over three times the bound, which is all the probe below needs (ER-33);
+    // 300 000 committed ten times the bound and took 46-61 s on the CI Mac, past the 90 s limit under load (CI 7961).
+    let corpus = common::corpus::corpus(&base.0.join("corpus"), 100_000);
     let store = debrief_store_duck::DuckStore::create(&dir.0, Profile::default_profile(), debrief_core::PluginRegistry::new()).unwrap();
     store.open(&[corpus]).unwrap().wait().unwrap();
     assert!(
