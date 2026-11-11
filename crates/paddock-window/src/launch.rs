@@ -150,6 +150,10 @@ pub fn wants_single_instance(args: &LaunchArgs, safe_mode_env: bool) -> bool {
 }
 
 /// Existing paths only, canonicalized (the edge between the OS and the app).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "an existing path resolved at the edge between the OS and the app; paddock-window has no paddock-env dependency to use winpath, WP-P2 moves it (ADR 0021 amendment 2026-11-11)"
+)]
 pub fn existing(paths: &[PathBuf]) -> Vec<String> {
     paths
         .iter()

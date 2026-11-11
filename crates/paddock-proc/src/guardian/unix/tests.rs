@@ -265,6 +265,10 @@ fn only_its_parent_running_the_same_executable_is_served() {
 }
 
 fn marked(dir: &Path, name: &str, owner: ProcessId) -> PathBuf {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency yet: until WP-P2 (row 12) of the ADR 0021 amendment 2026-11-11"
+    )]
     let f = std::fs::canonicalize(dir).unwrap().join(name);
     std::fs::create_dir_all(&f).unwrap();
     std::fs::write(f.join(MARKER), identity_text(owner)).unwrap();
@@ -278,6 +282,10 @@ fn only_a_canonical_folder_with_the_owners_marker_is_removed() {
     let good = marked(d.path(), "good", owner);
     assert_eq!(removable(&good, owner, None), Ok(()));
     // A folder of the user's without the owner's marker: a forged line cannot name it.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency yet: until WP-P2 (row 12) of the ADR 0021 amendment 2026-11-11"
+    )]
     let plain = std::fs::canonicalize(d.path()).unwrap().join("plain");
     std::fs::create_dir_all(&plain).unwrap();
     assert!(removable(&plain, owner, None).is_err());
@@ -292,6 +300,10 @@ fn only_a_canonical_folder_with_the_owners_marker_is_removed() {
     let link = d.path().join("link");
     std::os::unix::fs::symlink(&good, &link).unwrap();
     assert!(removable(&link, owner, None).is_err());
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency yet: until WP-P2 (row 12) of the ADR 0021 amendment 2026-11-11"
+    )]
     let canonical_link = std::fs::canonicalize(d.path()).unwrap().join("link");
     assert!(removable(&canonical_link, owner, None).is_err());
     assert!(
@@ -299,6 +311,10 @@ fn only_a_canonical_folder_with_the_owners_marker_is_removed() {
         "not canonical"
     );
     // A marker that is a link to a file naming the owner.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency yet: until WP-P2 (row 12) of the ADR 0021 amendment 2026-11-11"
+    )]
     let linked = std::fs::canonicalize(d.path())
         .unwrap()
         .join("linked-marker");
@@ -370,6 +386,10 @@ fn forged_owner(act_as_user: bool) {
         .unwrap();
     let keeper_id = ProcessId::of(keeper.id()).unwrap();
     let folder = marked(d.path(), "profile", victim_id);
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency yet: until WP-P2 (row 12) of the ADR 0021 amendment 2026-11-11"
+    )]
     let log = std::fs::canonicalize(d.path())
         .unwrap()
         .join("guardian.log");
@@ -798,6 +818,10 @@ fn a_folder_that_cannot_be_removed_is_left_and_the_reason_logged() {
 #[test]
 fn a_file_is_not_a_folder_to_remove() {
     let d = tempfile::tempdir().unwrap();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency yet: until WP-P2 (row 12) of the ADR 0021 amendment 2026-11-11"
+    )]
     let file = std::fs::canonicalize(d.path()).unwrap().join("file");
     std::fs::write(&file, "").unwrap();
     assert_eq!(
@@ -835,6 +859,10 @@ fn the_log_reads_as_its_path_or_off() {
 #[test]
 fn a_folder_whose_marker_cannot_be_written_is_not_guarded() {
     let d = tempfile::tempdir().unwrap();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency yet: until WP-P2 (row 12) of the ADR 0021 amendment 2026-11-11"
+    )]
     let folder = std::fs::canonicalize(d.path()).unwrap();
     // The marker's place is taken by a link: it is never written through (O_NOFOLLOW).
     std::os::unix::fs::symlink(folder.join("elsewhere"), folder.join(MARKER)).unwrap();
@@ -850,6 +878,10 @@ fn refused_guardian(owner_env: Option<String>, stdin: Stdio) -> (Option<i32>, St
         std::os::unix::fs::PermissionsExt::from_mode(0o700),
     )
     .unwrap();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency yet: until WP-P2 (row 12) of the ADR 0021 amendment 2026-11-11"
+    )]
     let log = std::fs::canonicalize(d.path())
         .unwrap()
         .join("guardian.log");

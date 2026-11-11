@@ -331,7 +331,7 @@ mod tests {
     fn fixture() -> Fixture {
         let dir = tempfile::tempdir().unwrap();
         // Without Windows' `\\?\` prefix: git cannot clone to or add a worktree at such a path (run 7904).
-        let base = paddock_repo_graph::real_path(dir.path());
+        let base = paddock_env::winpath::real_or_given(dir.path());
         let home = base.join("home");
         let root = base.join("repo");
         std::fs::create_dir_all(&home).unwrap();

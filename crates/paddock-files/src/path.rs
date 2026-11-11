@@ -33,7 +33,7 @@ pub fn parse(raw: &str) -> Result<&Path> {
 
 /// An existing file or folder, canonicalised (links and `..` resolved).
 pub fn canonical(path: &Path) -> Result<PathBuf> {
-    std::fs::canonicalize(path).map(plain).map_err(|e| {
+    paddock_env::winpath::real(path).map_err(|e| {
         let message = format!("cannot open {}: {e}", path.display());
         if e.kind() == std::io::ErrorKind::NotFound {
             CommandError::not_found(message)
@@ -41,25 +41,6 @@ pub fn canonical(path: &Path) -> Result<PathBuf> {
             CommandError::io(message)
         }
     })
-}
-
-/// A canonical Windows path without its verbatim prefix when it has an ordinary spelling (`C:` drives and `UNC` shares), so
-/// messages and results show the path the user knows. Elsewhere: unchanged.
-pub fn plain(path: PathBuf) -> PathBuf {
-    let Some(text) = path.to_str() else {
-        return path;
-    };
-    let Some(rest) = text.strip_prefix(r"\\?\") else {
-        return path;
-    };
-    if let Some(share) = rest.strip_prefix(r"UNC\") {
-        return PathBuf::from(format!(r"\\{share}"));
-    }
-    let b = rest.as_bytes();
-    if b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\' {
-        return PathBuf::from(rest);
-    }
-    path
 }
 
 /// Where a file will be written: its folder canonicalised (it must exist) joined with its name, which must not name a
@@ -73,10 +54,10 @@ pub fn output_target(path: &Path) -> Result<PathBuf> {
         .parent()
         .filter(|d| !d.as_os_str().is_empty())
         .ok_or_else(|| CommandError::invalid("choose a folder"))?;
-    let dir = std::fs::canonicalize(parent).map_err(|_| {
+    let dir = paddock_env::winpath::real(parent).map_err(|_| {
         CommandError::not_found(format!("the folder {} does not exist", parent.display()))
     })?;
-    let target = plain(dir).join(name);
+    let target = dir.join(name);
     if target.is_dir() {
         return Err(CommandError::invalid(format!(
             "{} is a folder",
@@ -201,30 +182,6 @@ mod tests {
         std::fs::write(t.path().join("f"), "x").unwrap();
         let io = canonical(&t.path().join("f").join("x")).unwrap_err();
         assert!(matches!(io.code, ErrorCode::Io | ErrorCode::NotFound));
-    }
-
-    #[test]
-    fn plain_drops_the_verbatim_prefix_only_for_ordinary_spellings() {
-        let p = |t: &str| plain(PathBuf::from(t));
-        assert_eq!(p(r"\\?\C:\logs\a.log"), PathBuf::from(r"C:\logs\a.log"));
-        assert_eq!(
-            p(r"\\?\UNC\srv\share\a.log"),
-            PathBuf::from(r"\\srv\share\a.log")
-        );
-        assert_eq!(
-            p(r"\\?\Volume{x}\a.log"),
-            PathBuf::from(r"\\?\Volume{x}\a.log")
-        );
-        assert_eq!(p(r"\\?\C:"), PathBuf::from(r"\\?\C:"));
-        assert_eq!(p("/var/log/a.log"), PathBuf::from("/var/log/a.log"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn plain_leaves_names_that_are_not_text_alone() {
-        use std::os::unix::ffi::OsStringExt;
-        let odd = PathBuf::from(std::ffi::OsString::from_vec(vec![b'/', 0xff, b'a']));
-        assert_eq!(plain(odd.clone()), odd);
     }
 
     #[test]

@@ -104,7 +104,7 @@ pub fn job_start(root: &Path, overlay: bool, birth: &dyn Fn(&Path) -> Result<i12
 /// is an error: the freshness check could not work). `dev_tool` is the folder `./dev` was built into for this run (it exists
 /// before `setup`, because `setup` itself runs through `./dev`); it is recorded as `dev-tool` with mode `run`.
 pub fn setup(temp: &Path, ledger_path: &Path, dev_tool: Option<&Path>) -> Result<Made, String> {
-    let job_root = temp.canonicalize().map_err(|e| {
+    let job_root = paddock_env::winpath::real_verbatim(temp).map_err(|e| {
         format!(
             "the job folder {} is not usable: {e}. Pass --temp or set RUNNER_TEMP.",
             temp.display()
@@ -116,7 +116,7 @@ pub fn setup(temp: &Path, ledger_path: &Path, dev_tool: Option<&Path>) -> Result
     let started = job_start(&job_root, on_overlayfs(&job_root), &|p| {
         identity_of(p).map(|i| i.birth_ns).map_err(|e| e.to_string())
     })?;
-    ledger::create(ledger_path, &simplified(&job_root), started)?;
+    ledger::create(ledger_path, &simplified(&job_root)?, started)?;
     let mut folders: Vec<(Kind, PathBuf)> = Vec::new();
     for kind in MADE {
         let made = match kind {
@@ -143,19 +143,18 @@ pub fn setup(temp: &Path, ledger_path: &Path, dev_tool: Option<&Path>) -> Result
         folders
             .iter()
             .find(|(kk, _)| *kk == k)
-            .map(|(_, p)| simplified(p).display().to_string())
-            .unwrap_or_default()
+            .map_or_else(|| Ok(String::new()), |(_, p)| simplified(p).map(|s| s.display().to_string()))
     };
     let env = vec![
         ("PADDOCK_RELEASE_MODE".to_string(), "1".to_string()),
-        ("PADDOCK_RELEASE_LEDGER".to_string(), simplified(ledger_path).display().to_string()),
-        ("PADDOCK_RELEASE_CLONE".to_string(), path_of(Kind::Workspace)),
-        ("PADDOCK_RELEASE_TARGET".to_string(), path_of(Kind::Target)),
-        ("CARGO_TARGET_DIR".to_string(), path_of(Kind::Target)),
-        ("CARGO_HOME".to_string(), path_of(Kind::CargoHome)),
-        ("npm_config_cache".to_string(), path_of(Kind::Npm)),
-        ("PADDOCK_RELEASE_NODE_MODULES".to_string(), path_of(Kind::NodeModules)),
-        ("PADDOCK_RELEASE_TAURI_TOOLS".to_string(), path_of(Kind::TauriTools)),
+        ("PADDOCK_RELEASE_LEDGER".to_string(), simplified(ledger_path)?.display().to_string()),
+        ("PADDOCK_RELEASE_CLONE".to_string(), path_of(Kind::Workspace)?),
+        ("PADDOCK_RELEASE_TARGET".to_string(), path_of(Kind::Target)?),
+        ("CARGO_TARGET_DIR".to_string(), path_of(Kind::Target)?),
+        ("CARGO_HOME".to_string(), path_of(Kind::CargoHome)?),
+        ("npm_config_cache".to_string(), path_of(Kind::Npm)?),
+        ("PADDOCK_RELEASE_NODE_MODULES".to_string(), path_of(Kind::NodeModules)?),
+        ("PADDOCK_RELEASE_TAURI_TOOLS".to_string(), path_of(Kind::TauriTools)?),
         ("RUSTC_WRAPPER".to_string(), String::new()),
         ("CARGO_BUILD_RUSTC_WRAPPER".to_string(), String::new()),
         ("RUSTC_WORKSPACE_WRAPPER".to_string(), String::new()),

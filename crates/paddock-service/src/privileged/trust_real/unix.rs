@@ -51,7 +51,11 @@ impl TrustPort for RealTrust {
     }
 
     fn canonical(&mut self, path: &str) -> io::Result<String> {
-        Ok(std::fs::canonicalize(path)?.to_string_lossy().into_owned())
+        Ok(
+            paddock_env::winpath::real_verbatim(std::path::Path::new(path))?
+                .to_string_lossy()
+                .into_owned(),
+        )
     }
 
     fn walk(&mut self, path: &str, limit: usize) -> io::Result<Vec<(String, Node)>> {
@@ -128,7 +132,7 @@ pub(super) fn open_with(
     proc_fd_dir: &str,
 ) -> io::Result<HeldImage> {
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
-    let resolved = std::fs::canonicalize(requested)?
+    let resolved = paddock_env::winpath::real_verbatim(std::path::Path::new(requested))?
         .to_string_lossy()
         .into_owned();
     let file = std::fs::OpenOptions::new()
@@ -385,7 +389,7 @@ mod unix_tests {
         let held = open_with(&text(&elf), false, "/proc/self/fd").unwrap();
         assert_eq!(
             std::path::Path::new(held.final_path()),
-            std::fs::canonicalize(&elf).unwrap()
+            paddock_env::winpath::real_verbatim(&elf).unwrap()
         );
         if cfg!(target_os = "linux") {
             assert!(

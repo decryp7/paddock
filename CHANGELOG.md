@@ -92,6 +92,13 @@ Conventional Commits; one semver tag for the whole repo.
 - The floor that turns away short operations counts only entries of the last 24 hours, so a day after a slow session short operations are recorded again.
 - Pitwall is the first app wired (startup phases, finished jobs by kind and outcome saved off the job thread, a flush at exit, the section). `paddock-diag` depends on `sysinfo` 0.40 (one version in every lockfile).
 
+### `paddock-files`: `open::reveal`, `open_default` and `open_at_line` return a `Result` (ADR 0021 amendment 2026-11-11)
+- They return `Result<Invocation, NotPlain>` instead of an `Invocation`, and `open_at_line` takes the `Os` first. A Windows
+  path that has no plain spelling (a volume without a drive letter, over 259 UTF-16 units, an unsafe name) is refused with its
+  cause and next step instead of being handed to Explorer or the editor with the `\\?\` prefix. `Files` maps the refusal to a
+  `CommandError` with a hint. Off Windows the path is passed through unchanged, so a name that is not text still opens.
+- `open::plain_path` is gone (it kept the prefix past 259 units); `paddock_env::winpath::for_tools_native` is the door.
+
 ### `paddock-proc`: `Supervised::exit_status`; Spotter's browser start ends on ready or exit (ADR 0071)
 - New `Supervised::exit_status`: the status of a child that has ended, without taking the child, so the tree is still ended
   by `kill` or `terminate` afterwards (`wait` forgets the tree).
