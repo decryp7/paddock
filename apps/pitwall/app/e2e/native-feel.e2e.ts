@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { pressTab } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 import { openApp } from './app';
 
 // The app should feel like a desktop app (ADR 0012): no browser menu on chrome, no reload or page zoom keys, no
@@ -112,7 +113,8 @@ test.describe('native feel', () => {
     const mouseOutline = await page.getByRole('tab', { name: 'Library' }).evaluate((el) => getComputedStyle(el).outlineStyle);
     expect(mouseOutline).toBe('none');
     expect(await page.getByRole('tab', { name: 'Library' }).evaluate((el) => el.matches(':focus-visible'))).toBe(false);
-    await page.keyboard.press('Tab');
+    // pressTab: WebKit on macOS skips buttons on a plain Tab unless full keyboard access is on (keyboard.ts tabKey).
+    await pressTab(page);
     // The keyboard's focus is :focus-visible, so the family's ring (an outline, or Material's focus indicator) shows.
     expect(await page.evaluate(() => document.activeElement?.matches(':focus-visible') ?? false)).toBe(true);
   });
