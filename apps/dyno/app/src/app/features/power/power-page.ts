@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
+import { SHELL_PORTS } from '@decryp7/paddock-ui/shell/contributions';
 import { MatButton } from '@angular/material/button';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { MatCheckbox } from '@angular/material/checkbox';

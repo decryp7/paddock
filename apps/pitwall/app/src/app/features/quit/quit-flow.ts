@@ -1,5 +1,5 @@
 import { Injectable, inject, type Provider } from '@angular/core';
-import { APP_QUIT } from '@decryp7/paddock-ui/shell';
+import { APP_QUIT } from '@decryp7/paddock-ui/shell/contributions';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import type { OnQuit } from '../../core/api.types';
 import { BACKEND, type Unsubscribe } from '../../core/backend';

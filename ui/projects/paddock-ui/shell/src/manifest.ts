@@ -10,10 +10,10 @@ import type {
   PageDef,
   SettingsPageDef,
   StatusItemDef,
-} from './define';
-import { DIALOG_KINDS } from './define';
-import { normalizeKey, toAccelerator } from './keys';
-import { isMessage, type Message } from './message';
+} from '@decryp7/paddock-ui/shell/contributions';
+import { DIALOG_KINDS } from '@decryp7/paddock-ui/shell/contributions';
+import { normalizeKey, toAccelerator } from '@decryp7/paddock-ui/shell/contributions';
+import { isMessage, type Message } from '@decryp7/paddock-ui/shell/contributions';
 
 /*
  * `paddock-manifest.json`: the static parts of a window's contributions that Rust needs, generated from the registry by

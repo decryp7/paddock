@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
-import { ContributionRegistry } from '@decryp7/paddock-ui/shell';
+import { ContributionRegistry } from '@decryp7/paddock-ui/shell/contributions';
 import { DemoPage, SECTION_STYLES } from './demo-page';
 
 /** One part of the shell and the work package of docs/plans/workbench.md that brings it to this app. */

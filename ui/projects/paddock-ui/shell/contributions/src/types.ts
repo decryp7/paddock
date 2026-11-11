@@ -1,4 +1,4 @@
-import type { ShellCommand } from '../generated/shell-commands';
+import type { ShellCommand } from '@decryp7/paddock-ui/shell/generated';
 
 /**
  * Types an app plugs into the shell once, by module augmentation, so every `define*` is checked against them:

@@ -1,10 +1,10 @@
 import { ChangeDetectionStrategy, Component, inject, Injectable, InjectionToken, input, type OnDestroy, provideZonelessChangeDetection, signal, type Type } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { msg } from '../message';
-import { defineStatusItem, type StatusItemDef } from '../define';
-import { provideContributions } from '../provide';
-import { provideShellContext } from '../context';
-import type { LazyPart } from '../lazy';
+import { msg } from '@decryp7/paddock-ui/shell/contributions';
+import { defineStatusItem, type StatusItemDef } from '@decryp7/paddock-ui/shell/contributions';
+import { provideContributions } from '@decryp7/paddock-ui/shell/contributions';
+import { provideShellContext } from '@decryp7/paddock-ui/shell/contributions';
+import type { LazyPart } from '@decryp7/paddock-ui/shell/contributions';
 import { iconLetter, PdIcon, PdShellIcon, provideShellIcon } from './icon';
 import { PD_ICON_PATHS } from '@decryp7/paddock-ui/icons';
 import { PdPartOutlet } from './part-outlet';

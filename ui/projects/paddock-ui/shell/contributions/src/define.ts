@@ -1,5 +1,5 @@
-import type { DialogSize } from '../generated/dialogs';
-import { DIALOG_KIND_TABLE, DIALOG_MIN_SIZE, type DialogWidthStep } from '../generated/dialog-kinds';
+import type { DialogSize } from '@decryp7/paddock-ui/shell/generated';
+import { DIALOG_KIND_TABLE, DIALOG_MIN_SIZE, type DialogWidthStep } from '@decryp7/paddock-ui/shell/generated';
 import type { ShellContext } from './context';
 import type { ComponentLoader, LazyPart, ProvidersLoader } from './lazy';
 import type { Message } from './message';
