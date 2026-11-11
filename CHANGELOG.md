@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-secrets`: `write_owner_only`, the secret-file writer for any trust-bearing file (ADR 0092 WP-0)
+- New `paddock_secrets::write_owner_only(path, bytes)`: the mechanism of `SecretFile::write` for a file that is not a secret
+  value (Pitwall's `apps.json`, the access list). The folder is made private or refused, then a unique temporary file is
+  created new and owner-only (0600 and no link followed on Unix; a protected DACL with no sharing on Windows), flushed and
+  renamed over the target. No backup copy. `SecretFile::write` now calls it, so there is one implementation.
+
 ### `paddock-env`: `dev_override`, the development-only environment override (ADR 0073 WP-S)
 - New `paddock_env::dev_override`: `decide(debug, value)` (pure; empty is unset), `resolve(debug, name, value)` (a set variable is ignored in a release build and logged once per name, never its value; a poisoned lock still answers), `from_environment(debug, name)`, `warn_ignored(name)` and the `dev_override!(NAME)` macro. The build mode is `cfg!(debug_assertions)` of the calling crate (the macro expands it there), not of `paddock-env`, so a per-package profile override or a prebuilt copy cannot make a release app honour the variable.
 - Adopted in the same change: Debrief (`debrief_ipc::dev_env` removed; the store worker in the app and CLI and the plugins lookup use it), Dyno (`agent_override` removed; `DYNO_AGENT_BIN` now logs the ignored name too) and Debrief's chromium-driver (its own log-once removed). Register: `dev-env-override` is built, its three copies are gone.

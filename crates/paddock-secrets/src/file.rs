@@ -337,6 +337,21 @@ fn check_open(path: &Path, file: &fs::File, me: u32) -> Result<(), SecretsError>
     Ok(())
 }
 
+/// Writes `bytes` to `path` atomically and owner-only, the mechanism of [`SecretFile::write`] for any trust-bearing file
+/// (an access list, not only a secret): the folder is made private or refused (a Windows folder where others may write
+/// is refused, a Unix one owned by another user too), the new content goes to a unique temporary file in the same folder
+/// that is created new, owner-only from its first byte (0600 and no link followed on Unix; a protected DACL and no sharing
+/// on Windows), flushed and renamed over the target (or over a link, which is replaced, never followed). No backup copy.
+pub fn write_owner_only(path: &Path, bytes: &[u8]) -> Result<(), SecretsError> {
+    let dir = path
+        .parent()
+        .filter(|d| !d.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    secure_folder(dir)?;
+    paddock_env::write_atomic_created(path, bytes, &mut create_temp)
+        .map_err(|e| SecretsError::Failed(format!("the secret could not be stored: {e}")))
+}
+
 impl SecretFile {
     /// The secret at `path` (its folder is created on the first write).
     pub fn new(path: impl Into<PathBuf>) -> SecretFile {
@@ -371,14 +386,7 @@ impl SecretFile {
     /// Stores (or replaces) the secret atomically: a new owner-only file renamed over the old one (or over a link, which is
     /// replaced, never followed).
     pub fn write(&self, value: &Secret) -> Result<(), SecretsError> {
-        let dir = self
-            .path
-            .parent()
-            .filter(|d| !d.as_os_str().is_empty())
-            .unwrap_or(Path::new("."));
-        secure_folder(dir)?;
-        paddock_env::write_atomic_created(&self.path, value.expose().as_bytes(), &mut create_temp)
-            .map_err(|e| SecretsError::Failed(format!("the secret could not be stored: {e}")))
+        write_owner_only(&self.path, value.expose().as_bytes())
     }
 
     /// Removes the secret; no error when there is none.
@@ -414,6 +422,55 @@ mod tests {
     }
     fn s(v: &str) -> Secret {
         Secret::new(v).unwrap()
+    }
+
+    /// The shared writer for any trust-bearing file (ADR 0092 WP-0): owner-only from the first byte on both OS, replaces the
+    /// old content, leaves no temporary file and no backup, and what it wrote passes the secret-file checks (on Windows
+    /// that reads the DACL of the handle). Needs a Windows run for the DACL half.
+    #[test]
+    fn write_owner_only_writes_and_replaces_a_private_file() {
+        let d = private_tempdir();
+        let f = d.path().join("data/apps.json");
+        write_owner_only(&f, b"one").unwrap();
+        write_owner_only(&f, b"two").unwrap();
+        assert_eq!(fs::read(&f).unwrap(), b"two");
+        let names: Vec<_> = fs::read_dir(f.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            names,
+            vec![std::ffi::OsString::from("apps.json")],
+            "no temporary file, no backup"
+        );
+        assert_eq!(
+            SecretFile::new(&f).read().unwrap().unwrap().expose(),
+            "two",
+            "it passes the owner-only checks"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&f).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+
+    /// A link planted where the file goes is replaced, never written through.
+    #[cfg(unix)]
+    #[test]
+    fn write_owner_only_never_writes_through_a_link() {
+        let d = private_tempdir();
+        let outside = d.path().join("outside");
+        fs::write(&outside, "precious").unwrap();
+        let f = d.path().join("apps.json");
+        std::os::unix::fs::symlink(&outside, &f).unwrap();
+        write_owner_only(&f, b"list").unwrap();
+        assert_eq!(fs::read_to_string(&outside).unwrap(), "precious");
+        assert_eq!(fs::read(&f).unwrap(), b"list");
+        assert!(!fs::symlink_metadata(&f).unwrap().file_type().is_symlink());
     }
 
     #[test]
