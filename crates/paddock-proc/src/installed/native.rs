@@ -477,6 +477,10 @@ fn own_session_id() -> Option<u32> {
 pub fn stop_all_here(dir: &Path, images: &[String], bounds: &Bounds) -> StopReport {
     // One canonical folder (long names, no 8.3 form, no verbatim prefix needed by the callers): the folder of a running
     // program is read from its handle in that form, and the two are compared by components.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency to use winpath (ADR 0021 amendment 2026-11-11)"
+    )]
     let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
     let own = ProcessId::of(std::process::id())
         .unwrap_or_else(|| ProcessId::new(std::process::id(), StartTime::from_micros(0)));
