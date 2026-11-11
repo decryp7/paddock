@@ -3,7 +3,8 @@
 //! the expected sites, and removing any fixture file must change that list, so a call the parser stops seeing turns this red.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::ipc_endpoints::{
-    FAULTS, PRIMITIVES, RATCHET, REGISTER, RatchetEntry, SCENARIOS, Site, blocked_by, check, parse_ratchet, scan, tag_matches,
+    FAULTS, PRIMITIVES, RATCHET, REGISTER, RatchetEntry, SCENARIOS, Site, blocked_by, check, check_with, parse_ratchet, scan, scan_with,
+    tag_matches,
 };
 use std::path::{Path, PathBuf};
 
@@ -392,7 +393,14 @@ fn the_check_and_the_harness_agree_on_names() {
 /// CI runs it on every OS. It needs the whole tree (a sparse checkout without `apps/` cannot hold the register's files).
 #[test]
 fn the_repository_register_is_complete_and_the_ratchet_is_well_formed() {
-    let (sites, register, _ratchet, found) = check(&repo_root()).unwrap_or_else(|e| panic!("{e}"));
+    // Judged on progress, not on total time (ADR 0071): every source file read is a unit, so a slow disk passes and a scan that
+    // reads no file for the stall limit does not. nextest's slow-timeout (`.config/nextest.toml`) is only the backstop.
+    // conformance: hang-guard
+    let stall = std::time::Duration::from_secs(120);
+    let (sites, register, _ratchet, found) = paddock_testkit::guarded("the C102 scan of the repository", stall, |progress| {
+        check_with(&repo_root(), &|| progress.tick())
+    })
+    .unwrap_or_else(|e| panic!("{e}"));
     assert!(
         found.is_empty(),
         "C102 findings (run `./dev check ipc-endpoints`):\n{}",
@@ -401,6 +409,21 @@ fn the_repository_register_is_complete_and_the_ratchet_is_well_formed() {
     assert!(
         !sites.is_empty() && !register.endpoints.is_empty(),
         "the scan found the repository's listeners"
+    );
+}
+
+/// The scan reports one unit per source file it read, which is what lets a live run be judged on progress.
+#[test]
+fn the_scan_ticks_once_per_source_file_it_reads() {
+    let ticks = std::cell::Cell::new(0usize);
+    let sites = scan_with(&fixtures(), &|| ticks.set(ticks.get() + 1)).unwrap();
+    assert_eq!(sites, scan(&fixtures()).unwrap());
+    let files: std::collections::BTreeSet<_> = sites.iter().map(|s| s.file.clone()).collect();
+    assert!(
+        ticks.get() >= files.len() && ticks.get() > 0,
+        "{} ticks for {} files with sites",
+        ticks.get(),
+        files.len()
     );
 }
 

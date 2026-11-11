@@ -527,11 +527,18 @@ fn source_files(root: &Path) -> Result<Vec<PathBuf>, String> {
 /// # Errors
 /// The folder cannot be read, or a file does not parse (every such file is named).
 pub fn scan(root: &Path) -> Result<Vec<Site>, String> {
+    scan_with(root, &|| {})
+}
+
+/// [`scan`] calling `tick` after every source file it has read and parsed, so that a run over a slow disk can show it is
+/// working (ADR 0071).
+pub fn scan_with(root: &Path, tick: &dyn Fn()) -> Result<Vec<Site>, String> {
     let files = source_files(root)?;
     let mut per_file: BTreeMap<PathBuf, FileScan> = BTreeMap::new();
     let mut unparsed = Vec::new();
     for f in &files {
         let text = std::fs::read_to_string(f).map_err(|e| format!("{}: {e}", f.display()))?;
+        tick();
         match scan_source(&text) {
             Ok(found) => {
                 per_file.insert(f.clone(), found);
@@ -953,10 +960,15 @@ pub type Checked = (Vec<Site>, Register, Vec<RatchetEntry>, Vec<String>);
 /// # Errors
 /// The register or the ratchet cannot be read, or a file does not parse.
 pub fn check(root: &Path) -> Result<Checked, String> {
+    check_with(root, &|| {})
+}
+
+/// [`check`] reporting progress to `tick` (see [`scan_with`]).
+pub fn check_with(root: &Path, tick: &dyn Fn()) -> Result<Checked, String> {
     let read = |name: &str| std::fs::read_to_string(root.join(name)).map_err(|e| format!("{name}: {e}"));
     let register = parse_register(&read(REGISTER)?).map_err(|e| format!("{REGISTER}: {e}"))?;
     let ratchet = parse_ratchet(&read(RATCHET)?).map_err(|e| format!("{RATCHET}: {e}"))?;
-    let sites = scan(root)?;
+    let sites = scan_with(root, tick)?;
     let found = findings(root, &sites, &register, &ratchet);
     Ok((sites, register, ratchet, found))
 }

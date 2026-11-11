@@ -35,16 +35,11 @@ fn serial() -> std::sync::MutexGuard<'static, ()> {
 /// later start is about half a second. Its time comes out of the test's slow-timeout (nextest's 240 s, the waiver in
 /// apps/spotter/.config/nextest.toml), which is its only bound.
 fn warm(b: &Browser) {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-        if cfg!(target_os = "macos") {
-            eprintln!("running the test browser once (first run on this Mac, the OS may hold it for a while)...");
-            match spotter_render::launch::warm_up(b) {
-                Ok(took) => eprintln!("the test browser's first run took {took:?}"),
-                Err(e) => panic!("{e}"),
-            }
-        }
-    });
+    static WARM: std::sync::OnceLock<Result<Duration, String>> = std::sync::OnceLock::new();
+    // A failed first run fails every test of the process, not only the first one to call it. `warm_up` runs on macOS only.
+    if let Err(e) = WARM.get_or_init(|| spotter_render::launch::warm_up(b).map_err(|e| e.to_string())) {
+        panic!("{e}");
+    }
 }
 
 fn browser() -> Option<Browser> {

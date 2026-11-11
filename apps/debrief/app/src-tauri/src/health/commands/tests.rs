@@ -232,7 +232,11 @@ fn a_real_store_worker_killed_over_and_over_is_quarantined_then_repair_restarts_
     let health = app.state::<Arc<Health>>().inner().clone();
     // A real worker process, started from this build tree and supervised like the app's.
     let tmp = crate::test_support::TempDir::new("health-real-worker");
-    let mut cfg = debrief_store_client::WorkerConfig::new(built_store_worker());
+    // The worker is freshly built: its first run is paid here (macOS holds it for far longer than the product's 15 s window), and
+    // the test then waits until it connects or exits (`for_tests`, ADR 0071 row 2). `--self-test` loads the database library too.
+    let exe = built_store_worker();
+    paddock_proc::warm_up(&exe, &["--self-test"]).unwrap_or_else(|e| panic!("{e}"));
+    let mut cfg = debrief_store_client::WorkerConfig::for_tests(exe);
     cfg.supervisor.max_crashes = 3;
     cfg.supervisor.backoff_base = std::time::Duration::from_millis(1);
     cfg.supervisor.backoff_max = std::time::Duration::from_millis(5);

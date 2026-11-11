@@ -153,7 +153,7 @@ fn every_operation_over_the_worker_answers_like_the_store() {
         assert_eq!(events, store.summary().unwrap().total);
         answers
     };
-    let w = StoreWorker::new(WorkerConfig::new(env!("CARGO_BIN_EXE_debrief-store-worker"))).unwrap();
+    let w = StoreWorker::new(WorkerConfig::for_tests(env!("CARGO_BIN_EXE_debrief-store-worker"))).unwrap();
     let remote_store = w.open_store(&dir.0, Profile::default_profile(), false, None).unwrap();
     let remote = ask(&remote_store, &exports.0.join("remote.csv"));
     for ((name, l), (_, r)) in local.iter().zip(&remote) {
@@ -283,7 +283,7 @@ fn mixed_sources_imported_by_the_worker_read_like_in_process() {
     drop(local);
 
     let remote_dir = TempDir::new("mixed-remote");
-    let w = StoreWorker::new(WorkerConfig::new(env!("CARGO_BIN_EXE_debrief-store-worker"))).unwrap();
+    let w = StoreWorker::new(WorkerConfig::for_tests(env!("CARGO_BIN_EXE_debrief-store-worker"))).unwrap();
     let remote = w.open_store(&remote_dir.0, Profile::default_profile(), true, None).unwrap();
     remote.open(&paths).unwrap().wait().unwrap();
     let remote_answers = mixed_answers(&remote);
@@ -323,7 +323,7 @@ fn the_redaction_summary_over_the_worker_answers_like_the_store() {
     assert!(expected.changed > 0, "the samples hold something to redact");
     drop(local);
 
-    let w = StoreWorker::new(WorkerConfig::new(env!("CARGO_BIN_EXE_debrief-store-worker"))).unwrap();
+    let w = StoreWorker::new(WorkerConfig::for_tests(env!("CARGO_BIN_EXE_debrief-store-worker"))).unwrap();
     let remote = w.open_store(&dir.0, profile, false, None).unwrap();
     assert_eq!(j(remote.redaction_summary(&request).unwrap()), j(&expected));
     let control = QueryControl::new();
@@ -424,7 +424,7 @@ fn clock_skew_and_live_tail_over_the_worker_answer_like_the_store() {
     let registry = debrief_store_worker::server::install_plugins(plugins, &[]);
     let local = DuckStore::create(&d1.0, Profile::default_profile(), registry).unwrap();
     let expected = live_session(&local, &std::fs::canonicalize(&l1.0).unwrap());
-    let w = StoreWorker::new(WorkerConfig::new(env!("CARGO_BIN_EXE_debrief-store-worker"))).unwrap();
+    let w = StoreWorker::new(WorkerConfig::for_tests(env!("CARGO_BIN_EXE_debrief-store-worker"))).unwrap();
     let remote = w.open_store(&d2.0, Profile::default_profile(), true, None).unwrap();
     let got = live_session(&remote, &std::fs::canonicalize(&l2.0).unwrap());
     for ((name, e), (_, g)) in expected.iter().zip(&got) {
