@@ -165,6 +165,15 @@ since = 2026-11-08
 review_by = 2026-12-06
 approved = "coordinator"
 
+[[not_gated]]
+id = "C85"
+apps = ["debrief", "dyno", "pacenotes", "pitcrew", "pitwall", "shell-demo", "sighter", "spotter", "workbench-demo"]
+reason = "report-only first (ADR 0052 WP-A4, enforced before Pitcrew 1.1): no workflow line runs it for the apps yet. Pitwall's paddock.ci.json conformance line runs it for the one register that exists (apps/pitwall/features.toml); Dyno's and Spotter's registers are not written yet"
+owner = "ADR 0052 WP-A4"
+since = 2026-11-11
+review_by = 2027-01-10
+approved = "coordinator"
+
 [[planned]]
 id = "C58"
 adr = "0034"

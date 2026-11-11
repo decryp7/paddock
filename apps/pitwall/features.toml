@@ -1,0 +1,461 @@
+# Pitwall's features register (ADR 0052 §1.4, check C85, report-only for now; `conformance/src/checks/C85-features-register.mjs` says what the keys mean).
+#
+# One row per user-facing feature of 1.1, the chat included. Each row names the real-engine test that covers it (`tauri`, the
+# shared real-app kit of ADR 0037 WP-7), its visible-outcome and real-layout rows (C86 and C89 will enumerate those), and, for a
+# feature that depends on a platform (a privileged wire or not all three OS), a vm-smoke step for each OS it lists.
+#
+# Where a test does not exist the row says so in `owed`, with the reason and the date it ends (`owed_until`): nothing here names
+# a test that is not in the tree (C85 looks each one up). `supporting` lists tests that exist but are not real-engine: Pitwall's
+# Playwright specs run against the mock backend, and the Rust tests under crates/pitwall-server/tests/it run the real server
+# against a fake engine (the one real-engine test, `llama_e2e.rs`, is manual and needs PITWALL_LLAMA_E2E=1). They are looked up
+# and never counted.
+#
+# What is not covered by a row yet: the shell's own surfaces (About, Updates, What's new, Report a problem, Appearance, Logging,
+# the confirmation dialog) belong to the shared shell and are tested there; the status-bar items and the tray widgets are not
+# enumerated by C85 (it reads routes, dialogs, Settings pages, job kinds and the command table). Pitwall's HTTP APIs (the
+# OpenAI, Anthropic and Ollama families and /x/v1) have no wire.toml (ADR 0052 WP-A1) and so no request kinds to cover; row
+# `server.api` stands for them.
+
+[[feature]]
+id = "dashboard"
+title = "Dashboard: live tiles, loaded models, history, events, pause and resume serving, release memory"
+surfaces = [
+  "route:/dashboard",
+]
+wires = [
+  "app-command:overview",
+  "app-command:history",
+  "app-command:events",
+  "app-command:usage_series",
+  "app-command:set_serving",
+  "app-command:release_memory",
+  "app-command:unload_model",
+]
+platforms = ["macos", "windows", "linux"]
+tests = {}
+supporting = [
+  "app/e2e/dashboard.e2e.ts#shows live tiles, loaded models with idle countdowns, a history chart and the events feed",
+  "crates/pitwall-server/tests/it/discovery.rs#start_writes_serving_true_and_a_clean_stop_rewrites_it_false",
+]
+owed = ["tauri", "outcome", "layout"]
+owed_why = "the real-app kit (ADR 0037 WP-7) is not built, so no test drives the real app; C86's outcome harness and the shared layout check (ADR 0052 §3.2) are not built either, and app/e2e specs run against the mock backend"
+owed_until = "pitwall-v1.1.0"
+
+[[feature]]
+id = "models.library"
+title = "Models: the library, load a model, details, slots, pins, delete, disk use"
+surfaces = [
+  "route:/models",
+  "job:load-model",
+]
+wires = [
+  "app-command:local_models",
+  "app-command:model_fit",
+  "app-command:start_load_model",
+  "app-command:cancel_job",
+  "app-command:delete_model",
+  "app-command:pin_model",
+  "app-command:set_model_pin",
+  "app-command:set_model_idle",
+  "app-command:set_model_slots",
+  "app-command:disk_usage",
+  "app-command:packs",
+  "app-command:repo_files",
+]
+platforms = ["macos", "windows", "linux"]
+tests = {}
+supporting = [
+  "app/e2e/models.e2e.ts#lists the library and loads a model",
+  "crates/pitwall-server/tests/it/cancel.rs#cancelling_a_load_stops_it_and_leaves_no_model_and_no_stuck_load",
+  "crates/pitwall-server/tests/it/llama_e2e.rs#the_real_engine_answers_one_chat_request",
+]
+owed = ["tauri", "outcome", "layout"]
+owed_why = "the real-app kit (ADR 0037 WP-7) is not built, so no test drives the real app; C86's outcome harness and the shared layout check (ADR 0052 §3.2) are not built either, and app/e2e specs run against the mock backend"
+owed_until = "pitwall-v1.1.0"
+
+[[feature]]
+id = "models.download"
+title = "Models: search Hugging Face, download a variant, cancel a download"
+surfaces = [
+  "route:/models",
+]
+wires = [
+  "app-command:search_models",
+  "app-command:download_model",
+  "app-command:downloads",
+  "app-command:cancel_download",
+]
+platforms = ["macos", "windows", "linux"]
+tests = {}
+supporting = [
+  "app/e2e/models.e2e.ts#searches Hugging Face, shows fit verdicts and downloads a variant",
+]
+owed = ["tauri", "outcome", "layout"]
+owed_why = "the real-app kit (ADR 0037 WP-7) is not built, so no test drives the real app; C86's outcome harness and the shared layout check (ADR 0052 §3.2) are not built either, and app/e2e specs run against the mock backend"
+owed_until = "pitwall-v1.1.0"
+
+[[feature]]
+id = "engines"
+title = "llama.cpp page: install a build, select, pin, roll back, remove, leftovers, automatic first install"
+surfaces = [
+  "route:/engines",
+]
+wires = [
+  "app-command:engines",
+  "app-command:engine_pins",
+  "app-command:build_capabilities",
+  "app-command:install_build",
+  "app-command:select_build",
+  "app-command:remove_build",
+  "app-command:rollback_build",
+  "app-command:set_global_pin",
+  "app-command:retry_engine_setup",
+  "app-command:remove_leftover",
+]
+platforms = ["macos", "windows", "linux"]
+tests = {}
+supporting = [
+  "app/e2e/engines.e2e.ts#installs a build from the catalog and shows progress",
+  "crates/pitwall-server/tests/it/engine_pins.rs#an_old_build_refuses_tools_in_every_api_family_naming_the_build_needed",
+]
+owed = ["tauri", "outcome", "layout"]
+owed_why = "the real-app kit (ADR 0037 WP-7) is not built, so no test drives the real app; C86's outcome harness and the shared layout check (ADR 0052 §3.2) are not built either, and app/e2e specs run against the mock backend"
+owed_until = "pitwall-v1.1.0"
+
+[[feature]]
+id = "apps.keys"
+title = "Apps and keys: create an app, issue and revoke keys, permissions, limits, pairing requests"
+surfaces = [
+  "route:/apps",
+  "dialog:pw.create-app",
+  "dialog:pw.key-secret",
+]
+wires = [
+  "app-command:apps",
+  "app-command:app_detail",
+  "app-command:create_app",
+  "app-command:delete_app",
+  "app-command:forget_app",
+  "app-command:create_key",
+  "app-command:revoke_key",
+  "app-command:set_app_key",
+  "app-command:set_permissions",
+  "app-command:pairings",
+  "app-command:approve_pairing",
+  "app-command:deny_pairing",
+]
+platforms = ["macos", "windows", "linux"]
+tests = {}
+supporting = [
+  "app/e2e/apps.e2e.ts#creates an app and shows its key once",
+  "crates/pitwall-server/tests/it/usage.rs#limits_refuse_at_the_boundary_with_an_explanation_and_warn_at_80_percent",
+]
+owed = ["tauri", "outcome", "layout"]
+owed_why = "the real-app kit (ADR 0037 WP-7) is not built, so no test drives the real app; C86's outcome harness and the shared layout check (ADR 0052 §3.2) are not built either, and app/e2e specs run against the mock backend"
+owed_until = "pitwall-v1.1.0"
+
+[[feature]]
+id = "requests"
+title = "Requests: the request log, timing, content kept only on request"
+surfaces = [
+  "route:/requests",
+]
+wires = [
+  "app-command:requests",
+  "app-command:request_content",
+]
+platforms = ["macos", "windows", "linux"]
+tests = {}
+supporting = [
+  "app/e2e/requests.e2e.ts#opens a request, shows its timing and keeps content hidden until asked",
+]
+owed = ["tauri", "outcome", "layout"]
+owed_why = "the real-app kit (ADR 0037 WP-7) is not built, so no test drives the real app; C86's outcome harness and the shared layout check (ADR 0052 §3.2) are not built either, and app/e2e specs run against the mock backend"
+owed_until = "pitwall-v1.1.0"
+
+[[feature]]
+id = "presets"
+title = "Presets: aliases an app can use as the model name"
+surfaces = [
+  "route:/playground",
+]
+wires = [
+  "app-command:presets",
+  "app-command:create_preset",
+  "app-command:update_preset",
+  "app-command:delete_preset",
+  "app-command:apply_preset",
+  "app-command:resolve_preset",
+]
+platforms = ["macos", "windows", "linux"]
+tests = {}
+supporting = [
+  "crates/pitwall-server/tests/it/presets.rs#an_alias_is_listed_and_works_as_the_model_in_every_family",
+]
+owed = ["tauri", "outcome", "layout"]
+owed_why = "the real-app kit (ADR 0037 WP-7) is not built, so no test drives the real app; C86's outcome harness and the shared layout check (ADR 0052 §3.2) are not built either, and app/e2e specs run against the mock backend"
+owed_until = "pitwall-v1.1.0"
+
+[[feature]]
+id = "playground.compare"
+title = "Playground: Compare two models side by side"
+surfaces = [
+  "route:/playground",
+]
+wires = []
+platforms = ["macos", "windows", "linux"]
+tests = {}
+supporting = [
+  "app/e2e/playground.e2e.ts#Compare streams an answer from both models with stats, and keeps the chat when switching back",
+  "crates/pitwall-server/tests/it/e2e.rs#streaming_in_all_three_families",
+]
+owed = ["tauri", "outcome", "layout"]
+owed_why = "the real-app kit (ADR 0037 WP-7) is not built, so no test drives the real app; C86's outcome harness and the shared layout check (ADR 0052 §3.2) are not built either, and app/e2e specs run against the mock backend"
+owed_until = "pitwall-v1.1.0"
+
+[[feature]]
+id = "chat"
+title = "Playground chat with tools from connected apps, attachments, images and saved chats (ships ON, decision D-3)"
+# the chat is behind the `chat` Cargo feature, off by default (app/src-tauri/Cargo.toml); decision D-3 makes it ship ON, so the feature goes before the tag
+surfaces = [
+  "route:/playground",
+  "settings:pw.chats",
+]
+wires = [
+  "app-command:chat",
+  "app-command:chat_attach",
+  "app-command:chat_attach_rules",
+  "app-command:chat_cancel",
+  "app-command:chat_detach",
+  "app-command:chat_enabled",
+  "app-command:chat_models_list",
+  "app-command:chat_refresh_window",
+  "app-command:chat_saved",
+  "app-command:chat_storage",
+  "app-command:chat_thumbnail",
+  "app-command:delete_all_chats",
+  "app-command:set_chat_model",
+  "app-command:set_chat_save_new",
+  "app-command:set_chat_saved",
+]
+platforms = ["macos", "windows", "linux"]
+tests = {}
+supporting = [
+  "app/e2e/playground.e2e.ts#opens on Chat: an answer streams in the assistant pane, a tool call shows its card, Stop ends a turn",
+  "app/e2e/chat-composer.e2e.ts#attaches a text file, sends it with the question and shows it on the sent turn; the meter follows the chat",
+  "crates/pitwall-server/tests/it/playground_chat.rs#the_stream_starts_and_says_loading_before_a_cold_model_load_finishes",
+]
+owed = ["tauri", "outcome", "layout"]
+owed_why = "the real-app kit (ADR 0037 WP-7) is not built, so no test drives the real app; C86's outcome harness and the shared layout check (ADR 0052 §3.2) are not built either, and app/e2e specs run against the mock backend"
+owed_until = "pitwall-v1.1.0"
+
+[[feature]]
+id = "chat.connected-apps"
+title = "Connected apps: connect an app with a pasted key, see its tools, approvals, forget it"
+surfaces = [
+  "settings:pw.connected-apps",
+  "dialog:pw.mcp-key",
+]
+wires = [
+  "app-command:connected_apps",
+  "app-command:connect_app",
+  "app-command:open_connected_app",
+  "app-command:revoke_tool_approval",
+]
+platforms = ["macos", "windows", "linux"]
+tests = {}
+supporting = [
+  "app/e2e/connected-apps.e2e.ts#not installed and too old are said once, and the actions they name are there",
+  "app/e2e/dialogs.e2e.ts#New app: Create app waits for a name, and answers it",
+]
+owed = ["tauri", "outcome", "layout"]
+owed_why = "the real-app kit (ADR 0037 WP-7) is not built, so no test drives the real app; C86's outcome harness and the shared layout check (ADR 0052 §3.2) are not built either, and app/e2e specs run against the mock backend"
+owed_until = "pitwall-v1.1.0"
+
+[[feature]]
+id = "benchmarks"
+title = "Benchmarks: run one model or all, see the history"
+surfaces = [
+  "route:/benchmarks",
+  "job:benchmark",
+]
+wires = [
+  "app-command:benchmarks",
+  "app-command:start_benchmark",
+]
+platforms = ["macos", "windows", "linux"]
+tests = {}
+supporting = [
+  "app/e2e/benchmarks.e2e.ts#runs one model from its row and has a single Run all; units are in the headers",
+]
+owed = ["tauri", "outcome", "layout"]
+owed_why = "the real-app kit (ADR 0037 WP-7) is not built, so no test drives the real app; C86's outcome harness and the shared layout check (ADR 0052 §3.2) are not built either, and app/e2e specs run against the mock backend"
+owed_until = "pitwall-v1.1.0"
+
+[[feature]]
+id = "model-updates"
+title = "Model updates: check Hugging Face for changed files, notices, schedule (off until turned on)"
+surfaces = [
+  "job:check-updates",
+]
+wires = [
+  "app-command:start_check_updates",
+  "app-command:update_check_status",
+  "app-command:update_notices",
+  "app-command:dismiss_update",
+  "app-command:set_update_check",
+]
+platforms = ["macos", "windows", "linux"]
+tests = {}
+supporting = [
+  "app/e2e/model-updates.e2e.ts#turns the schedule on and off",
+  "crates/pitwall-server/tests/it/updates.rs#a_changed_file_becomes_a_notice_that_can_be_dismissed_and_stays_dismissed_after_a_restart",
+]
+owed = ["tauri", "outcome", "layout"]
+owed_why = "the real-app kit (ADR 0037 WP-7) is not built, so no test drives the real app; C86's outcome harness and the shared layout check (ADR 0052 §3.2) are not built either, and app/e2e specs run against the mock backend"
+owed_until = "pitwall-v1.1.0"
+
+[[feature]]
+id = "cache"
+title = "Answer cache: opt in per app or preset, expiry, clear"
+surfaces = [
+  "settings:pw.general",
+  "route:/apps",
+]
+wires = [
+  "app-command:cache_info",
+  "app-command:clear_cache",
+]
+platforms = ["macos", "windows", "linux"]
+tests = {}
+supporting = [
+  "app/e2e/cache.e2e.ts#settings: sets an expiry, sees the figures and clears a cache after confirming",
+  "crates/pitwall-server/tests/it/caching.rs#an_opted_in_app_gets_the_stored_answer_for_an_identical_deterministic_request",
+]
+owed = ["tauri", "outcome", "layout"]
+owed_why = "the real-app kit (ADR 0037 WP-7) is not built, so no test drives the real app; C86's outcome harness and the shared layout check (ADR 0052 §3.2) are not built either, and app/e2e specs run against the mock backend"
+owed_until = "pitwall-v1.1.0"
+
+[[feature]]
+id = "settings"
+title = "Settings: the Pitwall page, launch at login, the Settings window"
+surfaces = [
+  "settings:pw.general",
+  "dialog:pd.settings",
+]
+wires = [
+  "app-command:settings",
+  "app-command:save_settings",
+  "app-command:get_autostart",
+  "app-command:set_autostart",
+]
+platforms = ["macos", "windows", "linux"]
+tests = {}
+supporting = [
+  "app/e2e/settings.e2e.ts#turns a switch on; it is saved by itself and still on when Settings opens again",
+]
+owed = ["tauri", "outcome", "layout"]
+owed_why = "the real-app kit (ADR 0037 WP-7) is not built, so no test drives the real app; C86's outcome harness and the shared layout check (ADR 0052 §3.2) are not built either, and app/e2e specs run against the mock backend"
+owed_until = "pitwall-v1.1.0"
+
+[[feature]]
+id = "tray"
+title = "Tray popup: status, widgets, Customize widgets, quit from the tray"
+surfaces = [
+  "settings:pw.tray",
+]
+wires = [
+  "app-command:popover_header",
+  "app-command:popover_shape",
+  "app-command:popover_values",
+  "app-command:popover_view",
+  "app-command:edit_popover",
+  "app-command:quit_from_tray",
+]
+platforms = ["macos", "windows", "linux"]
+tests = {}
+supporting = [
+  "app/e2e/tray.e2e.ts#the text check reports a text past the frame and a clipped text",
+]
+owed = ["tauri", "outcome", "layout"]
+owed_why = "the real-app kit (ADR 0037 WP-7) is not built, so no test drives the real app; C86's outcome harness and the shared layout check (ADR 0052 §3.2) are not built either, and app/e2e specs run against the mock backend"
+owed_until = "pitwall-v1.1.0"
+
+[[feature]]
+id = "jobs.panel"
+title = "Jobs panel: phases, Cancel, Stop waiting and Still working for every long job"
+surfaces = [
+  "pane:jobs",
+]
+wires = [
+  "app-command:app_job_cancel",
+  "app-command:app_job_stop_waiting",
+]
+platforms = ["macos", "windows", "linux"]
+tests = {}
+supporting = [
+  "crates/pitwall-server/tests/it/cancel.rs#a_cancel_that_arrives_before_the_operation_registers_stops_it_as_it_starts",
+]
+owed = ["tauri", "outcome", "layout"]
+owed_why = "the real-app kit (ADR 0037 WP-7) is not built, so no test drives the real app; C86's outcome harness and the shared layout check (ADR 0052 §3.2) are not built either, and app/e2e specs run against the mock backend"
+owed_until = "pitwall-v1.1.0"
+
+[[feature]]
+id = "quit"
+title = "Quit: keep serving after quit? (the quit question)"
+surfaces = [
+  "dialog:pw.quit",
+]
+wires = [
+  "app-command:quit_app",
+  "app-command:take_quit_ask",
+]
+platforms = ["macos", "windows", "linux"]
+tests = {}
+owed = ["tauri", "outcome", "layout"]
+owed_why = "the real-app kit (ADR 0037 WP-7) is not built, so no test drives the real app; C86's outcome harness and the shared layout check (ADR 0052 §3.2) are not built either, and app/e2e specs run against the mock backend"
+owed_until = "pitwall-v1.1.0"
+
+[[feature]]
+id = "service"
+title = "Background service: the first-run question, install, remove, Repair; per machine on Windows"
+# the service runs as a system account on Windows and as a launch agent or user unit elsewhere; B1, B6 and B6b of the 1.1 plan change it
+surfaces = [
+  "dialog:pw.service-consent",
+  "job:install-service",
+  "job:uninstall-service",
+  "job:repair-service",
+]
+wires = [
+  "privileged:service",
+  "app-command:service_state",
+  "app-command:decline_service",
+  "app-command:start_install_service",
+  "app-command:start_uninstall_service",
+  "app-command:start_repair_service",
+  "app-command:open_service_login_items",
+]
+platforms = ["macos", "windows", "linux"]
+tests = {}
+supporting = [
+  "app/e2e/service.e2e.ts#asks the first-run question once, installs the service on yes",
+]
+owed = ["tauri", "outcome", "layout", "vm:macos", "vm:windows", "vm:linux"]
+owed_why = "the real-app kit (ADR 0037 WP-7) is not built, so no test drives the real app; C86's outcome harness and the shared layout check (ADR 0052 §3.2) are not built either, and app/e2e specs run against the mock backend; the VM steps are not built: scripts/vm-smoke/manifest.mjs holds only Dyno's rows and Pitwall's B12 rows (plan section 7) have no step ids yet"
+owed_until = "pitwall-v1.1.0"
+
+[[feature]]
+id = "server.api"
+title = "The standard APIs and /x/v1: OpenAI, Anthropic and Ollama shapes, queue, provenance, load on first use"
+surfaces = ["http:/v1", "http:/x/v1"]
+wires = []
+platforms = ["macos", "windows", "linux"]
+tests = {}
+supporting = [
+  "crates/pitwall-server/tests/it/e2e.rs#keys_are_required_and_the_answer_carries_provenance",
+  "crates/pitwall-server/tests/it/e2e.rs#streaming_in_all_three_families",
+  "crates/pitwall-server/tests/it/llama_e2e.rs#the_real_engine_answers_one_chat_request",
+]
+owed = ["tauri", "outcome", "layout"]
+owed_why = "the real-app kit (ADR 0037 WP-7) is not built; the server's own tests run it with a fake engine, and the one real-engine test is manual (PITWALL_LLAMA_E2E=1); no UI, so layout and outcome are not applicable until a wire.toml (ADR 0052 WP-A1) says what a visible outcome is for it"
+owed_until = "pitwall-v1.1.0"
