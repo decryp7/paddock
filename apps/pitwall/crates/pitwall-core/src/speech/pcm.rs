@@ -305,6 +305,15 @@ mod tests {
     }
 
     #[test]
+    fn a_chunk_that_fills_the_cap_exactly_says_full() {
+        let mut b = ClipBuilder::new(fmt(16_000, 1), 4);
+        assert!(b.is_empty());
+        assert_eq!(b.push(&[0.1; 4]), Push::Full);
+        assert!(!b.is_empty());
+        assert_eq!(fmt(44_100, 1).sample_rate(), 44_100);
+    }
+
+    #[test]
     fn the_cap_never_exceeds_five_minutes() {
         let b = ClipBuilder::new(fmt(16_000, 1), usize::MAX);
         assert_eq!(b.cap, MAX_CLIP_SAMPLES);
