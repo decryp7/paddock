@@ -1,7 +1,8 @@
 import { effect, EnvironmentInjector, EnvironmentProviders, inject, makeEnvironmentProviders, provideAppInitializer, untracked } from '@angular/core';
 import { DockService } from '../dock/dock.service';
-import { DebriefCommand, DebriefView } from '../extensions/tokens';
+import { DebriefView } from '../extensions/tokens';
 import { PROBLEMS_VIEW, problemsTitle } from './problems-model';
+import { PROBLEMS_COMMANDS_CONTRIBUTIONS } from './problems.contributions';
 import { ProblemsStore } from './problems.store';
 import { contributeFrom } from '../extensions/contributions';
 
@@ -16,14 +17,6 @@ export function problemsViews(): DebriefView[] {
       layout: { area: 'status', min: { width: 320, height: 180 }, pref: { width: 480, height: 360 }, priority: 25 },
       component: () => import('./problems-panel').then((m) => m.ProblemsPanel),
     },
-  ];
-}
-
-export function problemsCommands(store: InstanceType<typeof ProblemsStore>): DebriefCommand[] {
-  const category = $localize`:Command palette category@@problems.category:View`;
-  return [
-    { id: 'problems.show', title: $localize`:@@problems.cmd.show:View: Problems`, category, view: PROBLEMS_VIEW, run: (ctx) => ctx.showView(PROBLEMS_VIEW) },
-    { id: 'problems.refresh', title: $localize`:@@problems.cmd.refresh:Problems: Refresh`, category, run: () => void store.load() },
   ];
 }
 
@@ -49,7 +42,8 @@ export function startProblemsTitle(): void {
 export function provideProblems(): EnvironmentProviders {
   return makeEnvironmentProviders([
     ...contributeFrom('views', problemsViews),
-    ...contributeFrom('commands', () => problemsCommands(inject(ProblemsStore))),
+    // Stubs only: the commands' code loads when the window is idle or one runs.
+    ...PROBLEMS_COMMANDS_CONTRIBUTIONS,
     provideAppInitializer(() => startProblemsTitle()),
   ]);
 }

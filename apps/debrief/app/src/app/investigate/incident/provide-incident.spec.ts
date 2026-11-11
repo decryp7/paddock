@@ -14,10 +14,11 @@ function setup() {
 const ctx = (total: number) => ({ showView: vi.fn(), summary: { total } }) as unknown as CommandContext;
 
 describe('provideIncident', () => {
-  it('registers the palette command, offered only with data', () => {
+  it('registers the palette command, offered only with data', async () => {
     const { command } = setup();
     expect(command.title).toBe('Report: Incident summary…');
-    expect(command.when?.(ctx(0))).toBe(false);
+    // The command loads when the window is idle; until then its stub is offered.
+    await vi.waitFor(() => expect(command.when?.(ctx(0))).toBe(false));
     expect(command.when?.(ctx(5))).toBe(true);
   });
 

@@ -5,9 +5,7 @@ import { EVENT_ID_FORMATTER } from '../extensions/field-formatters';
 import { builtinActivityItems } from './builtin-activity';
 import { BuiltinCommands } from './builtin-commands';
 import { BUILTIN_VIEWS } from './builtin-views';
-import { RegionNavigator } from '../shell/regions';
-import { EditCommands } from '../shell/edit-commands';
-import { PasteCommands } from '../sources/paste/paste-commands';
+import { BUILTIN_COMMANDS_CONTRIBUTIONS } from './builtin.contributions';
 import { startTextDrops } from '../sources/paste/paste-drop';
 import { contributeFrom, debriefContributionProviders } from '../extensions/contributions';
 
@@ -17,9 +15,8 @@ export function provideDebriefBuiltins(views: readonly DebriefView[] = BUILTIN_V
   return makeEnvironmentProviders([
     ...debriefContributionProviders({ views: views }),
     ...contributeFrom('commands', () => inject(BuiltinCommands).commands),
-    ...contributeFrom('commands', () => inject(RegionNavigator).commands),
-    ...contributeFrom('commands', () => inject(EditCommands).commands),
-    ...contributeFrom('commands', () => inject(PasteCommands).commands),
+    // Stubs only: the region, Edit and Paste commands' code loads when the window is idle or one runs.
+    ...BUILTIN_COMMANDS_CONTRIBUTIONS,
     provideAppInitializer(startTextDrops),
     ...debriefContributionProviders({ fieldFormatters: [EVENT_ID_FORMATTER] }),
     ...contributeFrom('activityItems', () => builtinActivityItems(inject(WorkspaceStore))),

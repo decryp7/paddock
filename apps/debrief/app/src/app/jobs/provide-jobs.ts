@@ -1,12 +1,13 @@
 import { effect, EnvironmentProviders, inject, Injectable, makeEnvironmentProviders, provideAppInitializer, signal, untracked } from '@angular/core';
 import { Logger } from '../core/logger';
-import { DebriefCommand, DebriefView } from '../extensions/tokens';
+import { DebriefView } from '../extensions/tokens';
 import { UI_STATE_CONTRIBUTIONS, UiStateContribution } from '../lifecycle/ui-state';
-import { JOBS_VIEW } from './job-viewer';
+import { JOBS_VIEW } from './jobs.ids';
 import { JobsBackend } from './jobs-backend';
 import { JobsStore } from './jobs.store';
 import { JobsRecord } from './jobs.types';
 import { contributeFrom } from '../extensions/contributions';
+import { JOBS_COMMANDS_CONTRIBUTIONS } from './jobs.contributions';
 
 export function jobsViews(): DebriefView[] {
   return [
@@ -18,20 +19,6 @@ export function jobsViews(): DebriefView[] {
       defaultPosition: 'bottom',
       layout: { area: 'status', min: { width: 320, height: 180 }, pref: { width: 480, height: 360 }, priority: 20 },
       component: () => import('./jobs-panel').then((m) => m.JobsPanel),
-    },
-  ];
-}
-
-export function jobsCommands(store: InstanceType<typeof JobsStore>): DebriefCommand[] {
-  const category = $localize`:Command palette category@@jobs.category:View`;
-  return [
-    { id: 'jobs.show', title: $localize`:@@jobs.cmd.show:View: Jobs`, category, view: JOBS_VIEW, run: (ctx) => ctx.showView(JOBS_VIEW) },
-    {
-      id: 'jobs.clearFinished',
-      title: $localize`:@@jobs.cmd.clear:Jobs: Clear finished`,
-      category,
-      when: () => store.snapshot().jobs.some((j) => j.state !== 'queued' && j.state !== 'running'),
-      run: () => void store.clearFinished(),
     },
   ];
 }
@@ -96,7 +83,8 @@ export class JobsPersistence {
 export function provideJobs(): EnvironmentProviders {
   return makeEnvironmentProviders([
     ...contributeFrom('views', jobsViews),
-    ...contributeFrom('commands', () => jobsCommands(inject(JobsStore))),
+    // Stubs only: the commands' code loads when the window is idle or one runs.
+    ...JOBS_COMMANDS_CONTRIBUTIONS,
     { provide: UI_STATE_CONTRIBUTIONS, multi: true, useFactory: () => [inject(JobsPersistence).contribution] },
     provideAppInitializer(() => {
       inject(JobsStore);

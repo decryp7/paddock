@@ -14,7 +14,8 @@ import { KnownIssuesBackend } from '../investigate-backend';
 import { MockKnownIssuesBackend } from '../mock/mock-investigate-backends';
 import { KnownIssues } from './known-issues';
 import { KnownIssuesStore } from './known-issues.store';
-import { knownIssuesCommands, provideKnownIssues } from './provide-known-issues';
+import { knownIssuesCommands } from './known-issues.commands';
+import { provideKnownIssues } from './provide-known-issues';
 import { DebriefBackend } from '../../core/backend';
 import { contributed } from '../../../testing/contributions';
 

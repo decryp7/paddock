@@ -5,20 +5,9 @@ import { CapturesStore } from './captures.store';
 import { ProfilingBackend } from './profiling-backend';
 import { isHeap, isProfile } from './profiling-format';
 import { ProfileViewState } from './profile-view-state.store';
+import { PROFILING_VIEW_IDS } from './profiling.ids';
 
-/** Dock view ids of the profiling views. */
-export const PROFILING_VIEW_IDS = {
-  captures: 'profiling-captures',
-  hotspots: 'profiling-hotspots',
-  tree: 'profiling-tree',
-  inverted: 'profiling-inverted',
-  butterfly: 'profiling-butterfly',
-  flame: 'profiling-flame',
-  compare: 'profiling-compare',
-  threads: 'profiling-threads',
-  findings: 'profiling-findings',
-  heap: 'profiling-heap',
-} as const;
+export { PROFILING_VIEW_IDS };
 
 const EVIDENCE_VIEW: Record<EvidenceView, string> = {
   hotspots: PROFILING_VIEW_IDS.hotspots,

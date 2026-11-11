@@ -1,36 +1,18 @@
 import { EnvironmentProviders, inject, makeEnvironmentProviders } from '@angular/core';
 import { DEBRIEF_RECORD_MENU_ITEMS, RecordMenuContribution } from '../context/record-actions';
-import { WorkspaceStore } from '../core/workspace.store';
-import { DebriefCommand, DebriefInspectorSection, DebriefView } from '../extensions/tokens';
+import { DebriefInspectorSection, DebriefView } from '../extensions/tokens';
 import { UI_STATE_CONTRIBUTIONS } from '../lifecycle/ui-state';
-import { anchors, NOTE_IMAGE_VIEW, NoteActions, NOTES_VIEW } from './note-actions';
+import { anchors, NoteActions } from './note-actions';
+import { NOTE_IMAGE_VIEW, NOTES_VIEW } from './notes.ids';
+import { NOTES_COMMANDS_CONTRIBUTIONS } from './notes.contributions';
 import { NotesInspectorSection } from './notes-inspector-section';
 import { NotesPersistence } from './notes-persistence';
 import { contributeFrom, debriefContributionProviders } from '../extensions/contributions';
-
-const CATEGORY = () => $localize`:Command palette category|@@notes.category:Notes`;
 
 export function notesViews(): DebriefView[] {
   return [
     { id: NOTES_VIEW, category: 'Analysis', title: $localize`:@@notes.view.notes:Notes`, icon: 'note', defaultPosition: 'right', layout: { area: 'side', min: { width: 320, height: 240 }, pref: { width: 372, height: 400 }, priority: 50 }, component: () => import('./notes-panel').then((m) => m.NotesPanel) },
     { id: NOTE_IMAGE_VIEW, category: 'Analysis', title: $localize`:@@notes.view.image:Image notes`, icon: 'image', defaultPosition: 'center', layout: { area: 'document', min: { width: 420, height: 240 }, pref: { width: 640, height: 400 }, priority: 55 }, component: () => import('./image/note-image-view').then((m) => m.NoteImageView) },
-  ];
-}
-
-export function notesCommands(actions: NoteActions, workspace: WorkspaceStore): DebriefCommand[] {
-  return [
-    { id: 'notes.show', title: $localize`:@@notes.cmd.show:Show notes`, category: CATEGORY(), view: NOTES_VIEW, run: (ctx) => ctx.showView(NOTES_VIEW) },
-    {
-      id: 'notes.addSelected',
-      title: $localize`:@@notes.cmd.addSelected:Add note to the selected event…`,
-      category: CATEGORY(),
-      keybinding: 'Mod+D',
-      when: () => !!workspace.selected(),
-      run: () => void actions.writeOnSelected(),
-    },
-    { id: 'notes.addRange', title: $localize`:@@notes.cmd.addRange:Add note to the time range…`, category: CATEGORY(), when: () => workspace.hasRange(), run: () => void actions.writeOnRange() },
-    { id: 'notes.addProject', title: $localize`:@@notes.cmd.addProject:Add note to the project…`, category: CATEGORY(), run: () => void actions.write(anchors.project()) },
-    { id: 'notes.image', title: $localize`:@@notes.cmd.image:Mark up an image…`, category: CATEGORY(), view: NOTE_IMAGE_VIEW, run: (ctx) => ctx.showView(NOTE_IMAGE_VIEW) },
   ];
 }
 
@@ -45,7 +27,8 @@ const INSPECTOR_SECTION: DebriefInspectorSection = { id: 'notes', title: $locali
 export function provideNotes(): EnvironmentProviders {
   return makeEnvironmentProviders([
     ...contributeFrom('views', notesViews),
-    ...contributeFrom('commands', () => notesCommands(inject(NoteActions), inject(WorkspaceStore))),
+    // Stubs only: the commands' code loads when the window is idle or one runs.
+    ...NOTES_COMMANDS_CONTRIBUTIONS,
     { provide: DEBRIEF_RECORD_MENU_ITEMS, multi: true, useFactory: () => notesRecordMenu(inject(NoteActions)) },
     ...debriefContributionProviders({ inspectorSections: [INSPECTOR_SECTION] }),
     { provide: UI_STATE_CONTRIBUTIONS, multi: true, useFactory: () => [inject(NotesPersistence).contribution] },

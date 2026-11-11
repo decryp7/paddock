@@ -2,12 +2,14 @@ import { EnvironmentProviders, inject, Injectable, makeEnvironmentProviders, pro
 import { FolderSetupNotice } from './folder-setup-notice';
 import { ParserSuggestNotice } from '../parser-suggest-notice';
 import { WorkspaceStore } from '../../core/workspace.store';
-import { DebriefActivityItem, DebriefCommand } from '../../extensions/tokens';
+import { DebriefActivityItem } from '../../extensions/tokens';
 import { DialogService } from '../../ui/dialog.service';
 import { FolderSetupStore } from './folder-setup.store';
 import { contributeFrom } from '../../extensions/contributions';
+import { FOLDER_SETUP_COMMANDS_CONTRIBUTIONS } from './folder-setup.contributions';
+import { FOLDER_SETUP_COMMAND } from './folder-setup.ids';
 
-export const FOLDER_SETUP_COMMAND = 'folder.setupAnalysis';
+export { FOLDER_SETUP_COMMAND };
 
 /**
  * Opens the wizard and starts a survey. Closing it leaves a running survey or AI refinement going in Jobs: its
@@ -39,22 +41,11 @@ export function hasOpenFiles(store: InstanceType<typeof WorkspaceStore>): boolea
   return !!s && (s.sources.length > 0 || s.unrecognized.length > 0);
 }
 
-export function folderSetupCommands(launcher: FolderSetupLauncher, store: InstanceType<typeof WorkspaceStore>): DebriefCommand[] {
-  return [
-    {
-      id: FOLDER_SETUP_COMMAND,
-      title: $localize`:Command and File menu item@@ai.folderSetup.cmd:Set up analysis for this folder…`,
-      category: $localize`:Command palette category@@ai.folderSetup.category:File`,
-      when: () => hasOpenFiles(store),
-      run: () => launcher.open(),
-    },
-  ];
-}
-
 /** One line in `app.config.ts`: the command (palette, File menu) and its activity-bar button. The hint banner sits in the app shell. */
 export function provideFolderSetup(): EnvironmentProviders {
   return makeEnvironmentProviders([
-    ...contributeFrom('commands', () => folderSetupCommands(inject(FolderSetupLauncher), inject(WorkspaceStore))),
+    // Stubs only: the command's code loads when the window is idle or it runs.
+    ...FOLDER_SETUP_COMMANDS_CONTRIBUTIONS,
     ...contributeFrom('activityItems', () => folderSetupActivityItems(inject(WorkspaceStore))),
     // After a folder is opened: a message in the notification centre offers the set-up.
     provideEnvironmentInitializer(() => inject(FolderSetupNotice)),

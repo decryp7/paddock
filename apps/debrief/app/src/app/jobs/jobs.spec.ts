@@ -24,7 +24,8 @@ import { kindLabel, linkLabel, queuedLabel, stateLabel } from './jobs-text';
 import { JobsPanel } from './jobs-panel';
 import { releaseMockHolds } from '../core/mock/mock-hold';
 import { MockJobCancelled, MockJobsOptions, MockJobs, mockJobs, mockJobsOptionsFromSearch, mockSteps, resetMockJobs } from './mock-jobs';
-import { jobsCommands, JobsPersistence, jobsViews, provideJobs } from './provide-jobs';
+import { JobsPersistence, jobsViews, provideJobs } from './provide-jobs';
+import { jobsCommands } from './jobs.commands';
 import { contributed } from '../../testing/contributions';
 
 function jobInfo(p: Partial<JobInfo> & { id: number }): JobInfo {

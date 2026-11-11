@@ -11,7 +11,7 @@ import { DebriefActivityItem } from '../extensions/tokens';
 import { liveActivityItems } from '../live/live-activity';
 import { SCHEDULES_VIEWS } from '../schedules/provide-schedules';
 import { toolsActivityItems } from '../tools/tools-activity';
-import { toolsViews } from '../tools/tools-commands';
+import { toolsViews } from '../tools/tools-views';
 import { DialogService } from '../ui/dialog.service';
 import { LiveTail } from '../workspace/live-tail';
 import { ActivityBar } from './activity-bar';

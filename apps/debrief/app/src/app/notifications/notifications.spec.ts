@@ -24,7 +24,8 @@ import { MAX_TOASTS, NotificationsStore } from './notifications.store';
 import { EMPTY_NOTICES, Notice, NoticeAction, NoticesEvent, NoticesRecord, NoticesSnapshot, NOTICE_SOURCES } from './notifications.types';
 import { sourceLabel, titleWithCount } from './notifications-text';
 import { NotificationsPanel } from './notifications-panel';
-import { notificationsCommands, NotificationsPersistence, notificationsViews, provideNotifications, startNotifications } from './provide-notifications';
+import { notificationsCommands } from './notifications.commands';
+import { NotificationsPersistence, notificationsViews, provideNotifications, startNotifications } from './provide-notifications';
 import { contributed } from '../../testing/contributions';
 
 function notice(p: Partial<Notice> & { id: number }): Notice {

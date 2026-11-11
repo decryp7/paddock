@@ -2,7 +2,8 @@ import { EnvironmentProviders, ErrorHandler, inject, Injector, makeEnvironmentPr
 import { FailureReporter } from '../core/failure-reporter';
 import { Logger, LoggingErrorHandler, withFailureLogging } from '../core/logger';
 import { isTauri } from '../core/platform';
-import { DiagnosticsCommands, DIAGNOSTICS_VIEWS } from './diagnostics-commands';
+import { DIAGNOSTICS_COMMANDS_CONTRIBUTIONS } from './diagnostics.contributions';
+import { DIAGNOSTICS_VIEWS } from './diagnostics-views';
 import { ErrorSnapshotService } from './error-snapshot.service';
 import { SnapshotErrorHandler } from './snapshot-error-handler';
 import { SnapshotBackend, TauriSnapshotBackend } from './snapshot-backend';
@@ -11,7 +12,7 @@ import { provideNotificationSource } from '../health/provide-notification-host';
 import { DiagnosticsReportService } from './diagnostics-report.service';
 import { DebriefEvents } from '../extensions/events';
 import { browserMocks } from '../core/mock-registry';
-import { contributeFrom, debriefContributionProviders } from '../extensions/contributions';
+import { debriefContributionProviders } from '../extensions/contributions';
 
 /** The real backend inside Tauri, an in-memory one in a plain browser (ng serve, e2e). */
 export function createSnapshotBackend(): SnapshotBackend {
@@ -40,7 +41,8 @@ export function provideDiagnostics(): EnvironmentProviders {
     LoggingErrorHandler,
     { provide: ErrorHandler, useClass: SnapshotErrorHandler },
     ...debriefContributionProviders({ views: DIAGNOSTICS_VIEWS }),
-    ...contributeFrom('commands', () => inject(DiagnosticsCommands).commands),
+    // Stubs only: the commands' code loads when the window is idle or one runs.
+    ...DIAGNOSTICS_COMMANDS_CONTRIBUTIONS,
     provideNotificationSource(SnapshotSource),
     provideAppInitializer(() => startDiagnostics()),
   ]);

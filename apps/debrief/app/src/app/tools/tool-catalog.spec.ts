@@ -12,7 +12,8 @@ import { mockTools, provideToolsTesting } from './mock/test-support';
 import { MockToolsOptions } from './mock/mock-tools-backend';
 import { ToolCatalog } from './tool-catalog.store';
 import { ToolUnavailable } from './tool-unavailable';
-import { ToolsCommands, toolsViews } from './tools-commands';
+import { ToolsCommands } from './tools-commands';
+import { toolsViews } from './tools-views';
 import { contributeFrom } from '../extensions/contributions';
 
 @Component({ imports: [ToolUnavailable], template: `<debrief-tool-unavailable tool="process-monitor" />` })

@@ -22,7 +22,8 @@ import { AiStatusStore } from './ai-status.store';
 import { AiStatus, ChatHistoryRecord } from './ai.types';
 import { SettingsDialogService } from '../settings/settings-dialog';
 import { NotificationsStore } from '../notifications/notifications.store';
-import { aiCommands, aiRecordMenu, aiViews, provideAi, rangeToSummarize } from './provide-ai';
+import { aiCommands, rangeToSummarize } from './ai.commands';
+import { aiRecordMenu, aiViews, provideAi } from './provide-ai';
 import { at } from '../../testing/must';
 import { contributed } from '../../testing/contributions';
 

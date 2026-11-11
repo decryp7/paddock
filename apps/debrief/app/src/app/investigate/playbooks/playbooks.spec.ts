@@ -35,7 +35,8 @@ import { PlaybookPersistence } from './playbook-persistence';
 import { PlaybookRunView } from './playbook-run';
 import { PlaybookStore } from './playbook.store';
 import { PlaybooksPanel } from './playbooks-panel';
-import { playbooksCommands, playbooksViews, providePlaybooks } from './provide-playbooks';
+import { playbooksCommands } from './playbooks.commands';
+import { playbooksViews, providePlaybooks } from './provide-playbooks';
 
 const ctx = () => ({ showView: vi.fn(), jumpTo: vi.fn(async () => undefined), notifyError: vi.fn() }) as unknown as CommandContext;
 

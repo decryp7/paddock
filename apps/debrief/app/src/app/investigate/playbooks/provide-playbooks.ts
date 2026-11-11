@@ -1,9 +1,9 @@
 import { EnvironmentProviders, inject, makeEnvironmentProviders } from '@angular/core';
-import { DebriefCommand, DebriefView } from '../../extensions/tokens';
+import { DebriefView } from '../../extensions/tokens';
 import { UI_STATE_CONTRIBUTIONS } from '../../lifecycle/ui-state';
-import { PLAYBOOKS_VIEW } from './playbook-model';
+import { PLAYBOOKS_VIEW } from './playbooks.ids';
+import { PLAYBOOKS_COMMANDS_CONTRIBUTIONS } from './playbooks.contributions';
 import { PlaybookPersistence } from './playbook-persistence';
-import { PlaybookStore } from './playbook.store';
 import { contributeFrom } from '../../extensions/contributions';
 
 export function playbooksViews(): DebriefView[] {
@@ -19,27 +19,12 @@ export function playbooksViews(): DebriefView[] {
   ];
 }
 
-export function playbooksCommands(store: InstanceType<typeof PlaybookStore>): DebriefCommand[] {
-  const category = $localize`:Command palette category@@playbooks.category:View`;
-  return [
-    { id: 'playbooks.show', title: $localize`:@@playbooks.cmd.show:View: Playbooks`, category, view: PLAYBOOKS_VIEW, run: (ctx) => ctx.showView(PLAYBOOKS_VIEW) },
-    {
-      id: 'playbooks.new',
-      title: $localize`:@@playbooks.cmd.new:Playbooks: New playbook`,
-      category,
-      run: (ctx) => {
-        ctx.showView(PLAYBOOKS_VIEW);
-        store.startNew();
-      },
-    },
-  ];
-}
-
 /** One line in `app.config.ts`: the Playbooks pane, its commands and the runs saved in the project (ADR 0039). */
 export function providePlaybooks(): EnvironmentProviders {
   return makeEnvironmentProviders([
     ...contributeFrom('views', playbooksViews),
-    ...contributeFrom('commands', () => playbooksCommands(inject(PlaybookStore))),
+    // Stubs only: the commands' code loads when the window is idle or one runs.
+    ...PLAYBOOKS_COMMANDS_CONTRIBUTIONS,
     { provide: UI_STATE_CONTRIBUTIONS, multi: true, useFactory: () => [inject(PlaybookPersistence).contribution] },
   ]);
 }

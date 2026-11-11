@@ -4,14 +4,16 @@ import { RecordActions } from '../context/record-actions';
 import { WorkspaceStore } from '../core/workspace.store';
 import { GridSelection } from '../grid/grid-selection';
 import { CommandContext } from '../extensions/tokens';
-import { provideMarkers, MarkersCommands } from './markers.plugin';
+import { MarkersCommands } from './markers-commands';
+import { provideMarkers } from './markers.plugin';
 import { MarkersManager } from './markers-manager';
 import { contributed } from '../../testing/contributions';
 
 describe('markers plugin', () => {
   const setup = () => {
     TestBed.configureTestingModule({ providers: [provideTinyBackend(tinyBackend()), provideMarkers()] });
-    const commands = contributed('commands') as { id: string; run(ctx: CommandContext): void }[];
+    // The commands' own code (the registered ones are stubs that load it; `lazy-commands.spec.ts` keeps them equal).
+    const commands = TestBed.inject(MarkersCommands).commands as { id: string; run(ctx: CommandContext): void }[];
     const ctx = { showView: vi.fn(), notifyError: vi.fn() } as unknown as CommandContext;
     return { commands, ctx, store: TestBed.inject(WorkspaceStore) };
   };

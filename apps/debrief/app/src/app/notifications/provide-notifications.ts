@@ -11,7 +11,7 @@ import {
 } from '@angular/core';
 import { Logger } from '../core/logger';
 import { DockService } from '../dock/dock.service';
-import { DebriefCommand, DebriefView } from '../extensions/tokens';
+import { DebriefView } from '../extensions/tokens';
 import { UI_STATE_CONTRIBUTIONS, UiStateContribution } from '../lifecycle/ui-state';
 import { NOTIFICATIONS_VIEW } from './notice-actions';
 import { NotificationsSource } from './notifications-source';
@@ -20,6 +20,7 @@ import { NotificationsBackend } from './notifications-backend';
 import { NotificationsStore } from './notifications.store';
 import { NoticesRecord } from './notifications.types';
 import { contributeFrom } from '../extensions/contributions';
+import { NOTIFICATIONS_COMMANDS_CONTRIBUTIONS } from './notifications.contributions';
 
 export function notificationsViews(): DebriefView[] {
   return [
@@ -31,14 +32,6 @@ export function notificationsViews(): DebriefView[] {
       defaultPosition: 'right', layout: { area: 'status', min: { width: 320, height: 180 }, pref: { width: 480, height: 360 }, priority: 20 },
       component: () => import('./notifications-panel').then((m) => m.NotificationsPanel),
     },
-  ];
-}
-
-export function notificationsCommands(store: InstanceType<typeof NotificationsStore>): DebriefCommand[] {
-  const category = $localize`:Command palette category@@notifications.category:View`;
-  return [
-    { id: 'notifications.show', title: $localize`:@@notifications.cmd.show:View: Notifications`, category, view: NOTIFICATIONS_VIEW, run: (ctx) => ctx.showView(NOTIFICATIONS_VIEW) },
-    { id: 'notifications.markAllRead', title: $localize`:@@notifications.cmd.markAll:Notifications: Mark all read`, category, when: () => store.unread() > 0, run: () => void store.markAllRead() },
   ];
 }
 
@@ -111,7 +104,8 @@ export function startNotifications(): void {
 export function provideNotifications(): EnvironmentProviders {
   return makeEnvironmentProviders([
     ...contributeFrom('views', notificationsViews),
-    ...contributeFrom('commands', () => notificationsCommands(inject(NotificationsStore))),
+    // Stubs only: the commands' code loads when the window is idle or one runs.
+    ...NOTIFICATIONS_COMMANDS_CONTRIBUTIONS,
     { provide: UI_STATE_CONTRIBUTIONS, multi: true, useFactory: () => [inject(NotificationsPersistence).contribution] },
     provideNotificationSource(NotificationsSource),
     provideAppInitializer(() => startNotifications()),

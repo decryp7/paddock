@@ -1,13 +1,14 @@
-import { Injectable, signal } from '@angular/core';
+import { inject, Injectable, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { SHELL_IDLE } from '@decryp7/paddock-ui/shell';
 import { FakeCommandContext } from '../../testing/contributions';
 import { provideFakeDock, provideTinyBackendBare } from '../../testing/helpers';
 import { COMMAND_CONTEXT, CommandRegistry } from './command-registry';
-import { lazyCommands, type CommandStub } from './lazy-registration';
+import { LAZY_COMMAND_SETS, lazyCommandFactory, lazyCommands, type CommandStub } from './lazy-registration';
 import type { DebriefCommand } from './tokens';
 
 const shown = signal(false);
+const following = signal(false);
 const runs: unknown[] = [];
 
 @Injectable({ providedIn: 'root' })
@@ -17,6 +18,21 @@ class TestCommands {
     { id: 't.close', title: 'Close thing', when: () => shown(), run: () => void runs.push(['close']) },
   ];
 }
+
+/** A factory module's export: runs in the root injector, so it may inject. */
+const followCommands = (): DebriefCommand[] => {
+  const ctx = inject(COMMAND_CONTEXT);
+  return [
+    {
+      id: 't.follow',
+      get title() {
+        return following() ? 'Stop following' : 'Follow';
+      },
+      category: 'Test',
+      run: () => void runs.push(['follow', ctx.workspace.window]),
+    },
+  ];
+};
 
 const STUBS: readonly CommandStub[] = [
   { id: 't.open', title: 'Open thing', category: 'Test', keybinding: 'F8' },
@@ -87,5 +103,38 @@ describe('lazyCommands', () => {
     const registry = setup([...STUBS, { id: 't.gone', title: 'Gone' }]);
     expect(await registry.run('t.gone')).toBe(false);
     expect(runs).toEqual([]);
+  });
+
+  it('follows the loaded command’s title once the code is there (a toggle’s title changes)', async () => {
+    const registry = setup();
+    following.set(false);
+    for (const work of idle) work();
+    await registry.run('t.open');
+    expect(registry.find('t.open')?.title).toBe('Open thing');
+    TestBed.resetTestingModule();
+    idle = [];
+    TestBed.configureTestingModule({
+      providers: [
+        provideTinyBackendBare(),
+        provideFakeDock(),
+        { provide: COMMAND_CONTEXT, useValue: new FakeCommandContext() },
+        { provide: SHELL_IDLE, useValue: (work: () => void) => void idle.push(work) },
+        ...lazyCommandFactory(async () => followCommands, [{ id: 't.follow', title: 'Follow', category: 'Test' }]),
+      ],
+    });
+    const second = TestBed.inject(CommandRegistry);
+    expect(second.find('t.follow')?.title).toBe('Follow');
+    expect(await second.run('t.follow')).toBe(true);
+    following.set(true);
+    expect(second.find('t.follow')?.title).toBe('Stop following');
+    expect(runs).toContainEqual(['follow', 'main']);
+  });
+
+  it('lists each lazy set with a loader that builds its commands, so one spec compares every stub with its code', async () => {
+    setup();
+    const sets = TestBed.inject(LAZY_COMMAND_SETS);
+    expect(sets).toHaveLength(1);
+    expect(sets[0]?.stubs).toBe(STUBS);
+    expect((await sets[0]!.load()).map((c) => c.id)).toEqual(['t.open', 't.close']);
   });
 });
