@@ -12,6 +12,7 @@
     "crates/paddock-env/tests/dev_override_log.rs": "installs the process-wide log, once per process, and reads what the ignored override wrote",
     "crates/paddock-diag/tests/trail.rs": "installs the process-wide log, once per process",
     "crates/paddock-diag/tests/webview.rs": "installs the process-wide log, once per process",
+    "crates/paddock-diag/tests/perf.rs": "drives the process-wide performance recorder, once per process (its state is global)",
     "crates/paddock-shell/tests/start_log.rs": "installs the process-wide log, once per process, and reads what the start wrote (needs mock-runtime)",
     "crates/paddock-log/tests/installed.rs": "installs the process-wide subscriber, log logger and panic hook, once per process",
     "crates/paddock-pitwall/tests/contract.rs": "needs the testing feature (required-features)",
