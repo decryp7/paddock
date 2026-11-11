@@ -175,7 +175,11 @@ fn cpu_seconds() -> f64 {
 #[test]
 #[ignore = "measurement: waits DEBRIEF_IDLE_S seconds (default 130); run with --ignored --nocapture"]
 fn an_idle_store_statements_and_cpu() {
-    let idle: u64 = std::env::var("DEBRIEF_IDLE_S").ok().and_then(|v| v.parse().ok()).unwrap_or(130);
+    let idle: u64 = std::env::var("DEBRIEF_IDLE_S")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(130)
+        .max(10);
     let dir = TempDir::new("regress-idle");
     let (store, _report) = common::store_with(&dir, Profile::default_profile(), &common::log_samples()).unwrap();
     assert!(store.wait_for_catalogue(std::time::Duration::from_secs(120)).unwrap());
@@ -184,7 +188,7 @@ fn an_idle_store_statements_and_cpu() {
     // nothing is left to settle before the window opens.
     store.bench_sql("CALL enable_logging('QueryLog')").unwrap();
     let cpu = cpu_seconds();
-    // conformance: hang-guard — an idle observation window of 130 s (DEBRIEF_IDLE_S, default 130 s) is the measurement itself, not a settle
+    // conformance: hang-guard — the idle observation window (DEBRIEF_IDLE_S, default 130 s, clamped to at least 10 s) is the measurement itself, not a settle
     std::thread::sleep(std::time::Duration::from_secs(idle));
     let used = cpu_seconds() - cpu;
     let statements = store

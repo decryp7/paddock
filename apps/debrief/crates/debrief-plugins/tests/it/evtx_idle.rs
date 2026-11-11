@@ -4,7 +4,7 @@
 //! and the index being built, the name table being rebuilt (what the app's name watcher does once the catalogue is
 //! built), and an idle window. Each phase reports this process's CPU time (the plugin's own process is not counted) and,
 //! for the idle window, the statements the store ran. Ignored: a measurement, run with `--ignored --nocapture`;
-//! `DEBRIEF_EVTX_IDLE_MB` sets the log's size (default 64), `DEBRIEF_EVTX_IDLE_S` the idle window (default 60).
+//! `DEBRIEF_EVTX_IDLE_MB` sets the log's size (default 64), `DEBRIEF_EVTX_IDLE_S` the idle window (default 60, at least 10).
 
 use crate::common;
 use crate::evtx_memory::{generate, temp};
@@ -46,7 +46,7 @@ fn phase<T>(label: &str, f: impl FnOnce() -> T) -> T {
 #[test]
 #[ignore = "measurement: imports a generated event log and idles DEBRIEF_EVTX_IDLE_S seconds; run with --ignored --nocapture"]
 fn idle_after_an_event_log_import() {
-    let (mb, idle) = (env("DEBRIEF_EVTX_IDLE_MB", 64), env("DEBRIEF_EVTX_IDLE_S", 60));
+    let (mb, idle) = (env("DEBRIEF_EVTX_IDLE_MB", 64), env("DEBRIEF_EVTX_IDLE_S", 60).max(10));
     let data = temp("idle-data");
     let log = generate(&data.0, mb);
     let dir = temp("idle-store");
@@ -137,7 +137,7 @@ fn idle_after_an_event_log_import() {
     // for above): nothing is left to settle before the window opens.
     store.bench_sql("CALL enable_logging('QueryLog')").unwrap();
     let cpu = cpu_seconds();
-    // conformance: hang-guard — an idle observation window of 60 s or more (DEBRIEF_EVTX_IDLE_S, default 60 s) is the measurement itself, not a settle
+    // conformance: hang-guard — the idle observation window (DEBRIEF_EVTX_IDLE_S, default 60 s, clamped to at least 10 s) is the measurement itself, not a settle
     std::thread::sleep(Duration::from_secs(idle));
     let used = cpu_seconds() - cpu;
     let statements = store
