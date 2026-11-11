@@ -328,6 +328,8 @@ impl AiRequest {
     /// palette each start the same request). Keyed are the requests that read the store and nothing else the user typed:
     /// Summarize (range), Explain (event) and Root causes; the rest carry free text or samples and are never merged.
     /// Window and store identity come first, so another window or another project is another job.
+    /// The key is made when the request is made: a request that waits in the queue keeps the store of that moment as its key but
+    /// runs on whatever store the window holds when its turn comes.
     fn dedupe_key(&self, window: &str, store: StoreId) -> Option<String> {
         let what = match self {
             AiRequest::Summarize { from, to } => format!("summarize|{from}|{to}"),
@@ -564,7 +566,9 @@ pub(crate) fn start_use_case<R: Runtime>(app: &AppHandle<R>, win: &Arc<WindowSta
     // Fail fast (no model, AI off) instead of queueing a request that cannot run.
     core.provider()?;
     let req = req.validated()?;
-    let store = win.engine.tagged_store().ok().map(|(id, _)| id);
+    // Only an open store keys the request: asking for its identity must not create a scratch store and start a worker for a
+    // request that may be refused. Without one the request is not merged.
+    let store = win.engine.opened_id();
     let mut spec = req.spec(win.label(), store);
     if let Some(id) = req.image_id() {
         // Fail fast: the image must be open and the model must read images (never an automatic download).
@@ -583,7 +587,8 @@ pub(crate) fn start_use_case<R: Runtime>(app: &AppHandle<R>, win: &Arc<WindowSta
     jobs::spawn(app, spec, Controls::default(), use_case_work(core, win.clone(), req)).map_err(AiCmdError::busy)
 }
 
-/// Cancels the window's use cases, running and waiting (not its chat turns, which have their own Stop). Returns how many.
+/// Cancels the window's use cases, running and waiting (not its chat turns, which have their own Stop). Returns how many it
+/// cancelled now: a running job that is already stopping (an earlier Cancel, its work not ended yet) is not counted again.
 pub(super) fn cancel_use_cases<R: Runtime>(app: &AppHandle<R>, window: &str) -> usize {
     let Some(jobs) = app.try_state::<jobs::Jobs>() else { return 0 };
     let ids = jobs.find_active(|j| {
@@ -592,7 +597,9 @@ pub(super) fn cancel_use_cases<R: Runtime>(app: &AppHandle<R>, window: &str) -> 
             && !j.state().is_finished()
             && !matches!(j.source.link, Some(JobLink::Chat { .. }))
     });
-    ids.into_iter().filter(|id| jobs.cancel(*id).is_ok()).count()
+    ids.into_iter()
+        .filter(|id| !jobs.is_stopping(*id) && jobs.cancel(*id).is_ok())
+        .count()
 }
 
 /// Cancels the chat's waiting turn, if any. True when one was waiting.

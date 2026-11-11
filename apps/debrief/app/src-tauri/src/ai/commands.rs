@@ -115,7 +115,7 @@ pub async fn ai_start<R: Runtime>(app: AppHandle<R>, win: CurrentWindow, request
 }
 
 /// Stops this window's use cases: the running ones fail with `cancelled`, the waiting ones are dropped
-/// (chat turns have their own Stop). Returns how many.
+/// (chat turns have their own Stop). Returns how many it cancelled now; a job already stopping is not counted again.
 #[tauri::command]
 pub async fn ai_cancel<R: Runtime>(app: AppHandle<R>, win: CurrentWindow) -> Ai<usize> {
     core(&app)?;

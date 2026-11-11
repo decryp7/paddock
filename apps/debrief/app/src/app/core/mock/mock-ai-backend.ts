@@ -514,8 +514,6 @@ export class MockAiBackend extends AiBackend {
 
   /** Stops the window's use cases (running and waiting), not its chat turns. */
   cancel() {
-    // A cancelled job is stopping: the next equal request is a new job, as in the engine.
-    this.keyedJobs.clear();
     return this.later(() => mockJobs().cancelWhere((j) => j.kind === 'ai' && j.source.link?.type !== 'chat'), 0);
   }
 

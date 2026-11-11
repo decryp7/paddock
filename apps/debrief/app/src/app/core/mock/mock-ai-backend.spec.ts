@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChatEventEnvelope } from '../../ai/ai.types';
 import { AI_FAILABLE, MockAiBackend, mockAiOptionsFromSearch } from './mock-ai-backend';
+import { resetMockJobs, mockJobs } from '../../jobs/mock-jobs';
 import { demoRecordIds } from './mock-ai-data';
 
 const code = (p: Promise<unknown>) =>
@@ -80,6 +81,21 @@ describe('MockAiBackend', () => {
     await b.cancel();
     expect(await b.start({ op: 'rootCauses' })).not.toBe(root);
     await b.cancel();
+  });
+
+  it('starts a new job for a request made after Cancel, from the AI dialog or from the Jobs pane', async () => {
+    resetMockJobs();
+    const b = new MockAiBackend({ stepMs: 200 });
+    // The Jobs pane cancels a RUNNING job: its work has not ended, but it is stopping and is never joined.
+    const first = await b.start({ op: 'summarize', from: 0, to: 1000 });
+    await mockJobs().cancel(first);
+    const second = await b.start({ op: 'summarize', from: 0, to: 1000 });
+    expect(second).not.toBe(first);
+    // The same through the dialog's Cancel.
+    await b.cancel();
+    expect(await b.start({ op: 'summarize', from: 0, to: 1000 })).not.toBe(second);
+    await b.cancel();
+    resetMockJobs();
   });
 
   it('opens only https links', async () => {

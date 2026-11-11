@@ -427,6 +427,11 @@ impl JobQueue {
         }
     }
 
+    /// Whether Cancel was already requested for a running job that has not ended yet.
+    pub fn is_stopping(&self, id: JobId) -> bool {
+        self.stopping.contains(&id)
+    }
+
     /// Moves a queued, reorderable job one place up (`up`) or down within its kind's queue.
     pub fn move_queued(&mut self, id: JobId, up: bool) -> Result<(), QueueError> {
         let i = self.active.iter().position(|j| j.id == id).ok_or(QueueError::Unknown(id))?;

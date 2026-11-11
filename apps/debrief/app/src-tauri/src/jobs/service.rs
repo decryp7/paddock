@@ -628,6 +628,11 @@ impl Jobs {
         }
     }
 
+    /// Whether Cancel was already requested for the job and it still runs (see `JobQueue::is_stopping`).
+    pub fn is_stopping(&self, id: JobId) -> bool {
+        self.lock().queue.is_stopping(id)
+    }
+
     /// Moves a queued AI job up or down.
     pub fn move_job(&self, id: JobId, up: bool) -> Result<(), String> {
         self.lock().queue.move_queued(id, up).map_err(|e| e.to_string())?;

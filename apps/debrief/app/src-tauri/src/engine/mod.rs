@@ -315,6 +315,11 @@ impl Engine {
         crate::sync::read(&self.current).as_ref().map(|c| c.store.clone())
     }
 
+    /// The identity of the open store, if one is open (no worker start, nothing created): for a key that must not open a store.
+    pub(crate) fn opened_id(&self) -> Option<StoreId> {
+        crate::sync::read(&self.current).as_ref().map(|c| c.id)
+    }
+
     /// What the store's folder is (`None` before the first use).
     #[cfg(test)]
     pub(crate) fn kind(&self) -> Option<StoreKind> {
@@ -624,6 +629,16 @@ mod tests {
         assert_ne!(second_id, first_id, "another store, another identity");
         assert!(Arc::ptr_eq(&current, &second), "the window holds the store it was given");
         assert_eq!(engine.kind(), Some(StoreKind::Project));
+    }
+
+    #[test]
+    fn asking_for_the_open_stores_identity_opens_nothing() {
+        let state = crate::windows::tests::window_state("engine-opened-id", debrief_core::PluginRegistry::new());
+        let engine = &state.engine;
+        assert_eq!(engine.opened_id(), None, "no store is open yet");
+        assert!(engine.opened().is_none(), "and asking did not create one");
+        let (id, _) = engine.tagged_store().unwrap();
+        assert_eq!(engine.opened_id(), Some(id));
     }
 
     #[test]

@@ -800,12 +800,13 @@ fn explain_and_root_causes_started_twice_give_one_job_each() {
     assert_eq!(start(&main, json!({"op": "rootCauses"})), root, "Root causes twice");
     assert_ne!(root, first);
     assert_eq!(active_ai(&app).len(), 2);
-    // Cancel, then ask again: the new request is a new job (the cancelled one is stopping).
+    // Cancel: the waiting Root causes is dropped and the RUNNING Explain is stopping (the model's step is still held).
     assert_eq!(ipc(&main, "ai_cancel", json!({})).unwrap(), 2);
-    let after = start(&main, json!({"op": "rootCauses"}));
-    assert_ne!(after, root, "a request after Cancel joined the job being stopped");
-    // The jobs being stopped may still be listed: only the new one must be among those cancelled.
-    assert!(ipc(&main, "ai_cancel", json!({})).unwrap().as_u64().unwrap() >= 1);
+    wait_until("only the stopping job is active", || active_ai(&app).len() == 1);
+    let again = start(&main, json!({"op": "explain", "recordId": 1}));
+    assert_ne!(again, first, "a request after Cancel joined the running job that is being stopped");
+    // A second Cancel counts only the new request, not the job that is already stopping.
+    assert_eq!(ipc(&main, "ai_cancel", json!({})).unwrap(), 1);
     for _ in 0..3 {
         let _ = steps.send(Step::Answer);
     }

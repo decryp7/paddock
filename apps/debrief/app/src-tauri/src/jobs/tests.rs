@@ -117,17 +117,41 @@ fn a_new_project_never_joins_the_old_projects_job() {
     assert_ne!(old, new);
 }
 
-/// Summarize, then Cancel, then Summarize again: the cancelled job is still running until its work notices, but it is
-/// stopping, so the new request is a new job and is not lost with the old one.
+/// A job of `spec` whose work ignores Cancel and ends only when the test sends on the returned channel: it stays running
+/// (and stopping, once cancelled) for as long as the test needs.
+fn held_spec(app: &tauri::App<MockRuntime>, spec: JobSpec) -> (JobId, mpsc::Sender<()>) {
+    let (tx, rx) = mpsc::channel::<()>();
+    let rx = Mutex::new(rx);
+    let id = spawn(
+        app.handle(),
+        spec,
+        Controls::default(),
+        move |_: &JobCtx| -> Result<Done<()>, String> {
+            let _ = rx.lock().unwrap().recv();
+            Ok(Done::new(()))
+        },
+    )
+    .unwrap();
+    (id, tx)
+}
+
+/// Summarize, then Cancel, then Summarize again: the cancelled job is still running until its work ends (here: when the test
+/// lets it), but it is stopping, so the new request is a new job and is not lost with the old one.
 #[test]
 fn a_request_after_cancel_is_a_new_job_not_the_one_being_stopped() {
     use crate::ai::requests::AiRequest::Summarize;
     let app = test_app_with_commands(None);
-    let (first, _release_first) = gated_spec(&app, ai_spec(Summarize { from: 0, to: 10 }, "main", 1));
+    let (first, release_first) = held_spec(&app, ai_spec(Summarize { from: 0, to: 10 }, "main", 1));
     wait_until("running", || jobs(&app).state_of(first) == Some(JobState::Running));
     assert!(jobs(&app).cancel(first).is_ok());
-    let (second, _release_second) = gated_spec(&app, ai_spec(Summarize { from: 0, to: 10 }, "main", 1));
+    assert_eq!(
+        jobs(&app).state_of(first),
+        Some(JobState::Running),
+        "the work has not ended: the job is still running"
+    );
+    let (second, release_second) = held_spec(&app, ai_spec(Summarize { from: 0, to: 10 }, "main", 1));
     assert_ne!(first, second, "the request joined the job that is being cancelled");
+    drop((release_first, release_second));
 }
 
 #[test]
