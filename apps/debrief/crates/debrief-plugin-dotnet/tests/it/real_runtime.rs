@@ -6,9 +6,6 @@
 //! - ETW (Windows, elevated): `#[ignore]`d; run once from an elevated prompt with
 //!   `DEBRIEF_ETW_TESTS=1 cargo test -p debrief-plugin-dotnet --test it real_runtime:: -- --ignored --nocapture`.
 
-// Tests start the fixture and the SDK directly (no console window concerns).
-#![allow(clippy::disallowed_methods)]
-
 use debrief_plugin_dotnet::{Limits, Preset};
 use debrief_profile::{Capture, CaptureImporter, MetricId, Profile};
 use std::io::{BufRead, BufReader};
@@ -17,6 +14,10 @@ use std::process::{Child, Command, Stdio};
 use std::sync::OnceLock;
 use std::time::Duration;
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the SDK or the fixture directly (no console window concerns)"
+)]
 fn dotnet() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("DEBRIEF_DOTNET") {
         return Some(PathBuf::from(p));
@@ -40,6 +41,10 @@ fn out_dir() -> PathBuf {
 }
 
 /// Builds the fixture for `tfm` (and `x86` when asked); `None` (with a message) when it cannot be built.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the SDK or the fixture directly (no console window concerns)"
+)]
 fn fixture(tfm: &str, x86: bool) -> Option<PathBuf> {
     static BUILDS: OnceLock<std::sync::Mutex<std::collections::HashMap<String, Option<PathBuf>>>> = OnceLock::new();
     let key = format!("{tfm}-{}", if x86 { "x86" } else { "x64" });
@@ -91,6 +96,10 @@ impl Drop for Target {
     }
 }
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the SDK or the fixture directly (no console window concerns)"
+)]
 fn run(exe: &Path) -> Target {
     let mut cmd = Command::new(exe);
     // A framework-dependent fixture finds the runtime of a per-user install (`~/.dotnet`) only through DOTNET_ROOT.

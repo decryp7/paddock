@@ -10,8 +10,26 @@ expires = "2027-04-30"
 # each app's follow-up work, dated so they cannot be forgotten.
 [[waiver]]
 check = "C36"
-path = "apps/*"
-reason = "parser crates of the imported apps without a fuzz target or never-panics test (Debrief 7, Dyno 4, Pitcrew 2, Pitwall 3, Spotter 1); each app adds its never-panics tests as a follow-up"
+path = "apps/dyno/*"
+reason = "Dyno: parser crates without a fuzz target or never-panics test (4); added as a follow-up of the app"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C36"
+path = "apps/pitcrew/*"
+reason = "Pitcrew: parser crates without a fuzz target or never-panics test (2); added as a follow-up of the app"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C36"
+path = "apps/pitwall/*"
+reason = "Pitwall: parser crates without a fuzz target or never-panics test (2); added as a follow-up of the app"
+expires = "2026-12-31"
+
+[[waiver]]
+check = "C36"
+path = "apps/spotter/*"
+reason = "Spotter: parser crates without a fuzz target or never-panics test (1); added as a follow-up of the app"
 expires = "2026-12-31"
 
 [[waiver]]
@@ -35,18 +53,6 @@ expires = "2026-12-31"
 # C39 (ADR 0023): the apps' ports read off dropped listeners, one waiver per file so a new one in an app is still caught.
 [[waiver]]
 check = "C39"
-path = "apps/debrief/crates/debrief-ai/src/engine/pitwall/http.rs"
-reason = "Debrief: a refused-connection test on a freed port; to use a refusing connector or a mapping test"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C39"
-path = "apps/debrief/crates/debrief-ai/tests/it/net_tls.rs"
-reason = "Debrief: an offline test on a freed port; to use a HeldPort or a mapping test"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C39"
 path = "apps/pitcrew/crates/notify-channels/src/tests.rs"
 reason = "Pitcrew: two refused-connection tests on freed ports; to use HeldPort::reset or a mapping test"
 expires = "2026-12-31"
@@ -59,60 +65,6 @@ expires = "2026-12-31"
 
 # ADR 0033 (rule 53): known bare-pid kills, parent-pid walks and file-wide allows of the kill ban in the apps and tools,
 # each a dated follow-up with its work package.
-[[waiver]]
-check = "C53"
-path = "apps/debrief/app/src-tauri/src/health/commands/tests.rs"
-reason = "ADR 0033 WP-5 (test): sysinfo kill of the worker by the pid the supervisor reported; use paddock_proc::end with a ProcessId"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/debrief/crates/chromium-driver/src/launch.rs"
-reason = "ADR 0033 WP-5: the watchdog killpg()s a pid captured at launch, also after is_running() reaped the browser; move to paddock-chromium"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/debrief/crates/chromium-driver/src/process.rs"
-reason = "ADR 0033 WP-5: killpg and taskkill /T after try_wait may have reaped the leader, and a signal-0 liveness probe; replace with paddock_proc::Supervised"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/debrief/crates/debrief-collect/src/runner.rs"
-reason = "ADR 0033 WP-5 (test): kill -9 of a grandchild by the pid it printed; use paddock_proc::end"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/debrief/crates/debrief-ipc/src/process.rs"
-reason = "ADR 0033 WP-5: OsChild::kill_group killpg()s after try_wait may have reaped the leader; tests probe and kill by pid; go through a ProcessId"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/debrief/crates/debrief-monitor/src/source.rs"
-reason = "ADR 0033 WP-5: expand_children follows parent pids without start times (display only); skip a child older than its parent"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/debrief/crates/debrief-plugin-dotnet/tests/it/real_runtime.rs"
-reason = "ADR 0033 WP-5 (test): a file-wide allow of disallowed_methods; allow it on the items that start programs"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/debrief/crates/debrief-plugin-windows/src/command.rs"
-reason = "ADR 0033 WP-5 (test): kill -9 of a grandchild by the pid it printed; use paddock_proc::end"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs"
-reason = "ADR 0033 WP-5 (test): sysinfo kill of the worker by the pid it reported; use paddock_proc::end with a ProcessId"
-expires = "2026-12-31"
-
 [[waiver]]
 check = "C53"
 path = "apps/dyno/crates/dyno-platform/src/macos/procinfo.rs"
@@ -209,14 +161,6 @@ expires = "2026-12-31"
 check = "C54"
 path = "crates/paddock-service/src/golden.rs"
 reason = "paddock-service: the golden specs request ProcessType::Background as the apps do today; changes with the renderer (ADR 0020 helper)"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C54"
-path = "apps/debrief/crates/debrief-agent/src/service/launchd.rs"
-reason = "Debrief: the headless diagnostics agent's daemon plist is ProcessType Background. Scheduled collection is work nobody waits on, but a person may wait for a triggered capture, so this is a known violation of rule 52"
-owner = "debrief"
-follow_up = "Debrief 1.2: render the agent's plist at Standard (or Adaptive with an XPC trigger) and keep Background only for scheduled collection, through the ADR 0020 priority helper; delete this waiver then"
 expires = "2026-12-31"
 
 [[waiver]]

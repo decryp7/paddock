@@ -35,13 +35,21 @@ pub trait ProcessSource {
     fn sample(&mut self, targets: &Targets, include_children: bool) -> Vec<ProcSample>;
 }
 
-/// Adds descendants of matched processes (`parents` maps pid to parent pid) until stable.
-// ADR 0033 WP-5: watched children found by parent pid without start times (display only); skip a child older than its parent
-pub fn expand_children(matched: &mut HashSet<u32>, parents: &HashMap<u32, u32>) {
+/// A process's parent pid and when the process started (seconds since the epoch).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Link {
+    pub parent: u32,
+    pub started: u64,
+}
+
+/// Adds descendants of matched processes (`links` maps pid to its parent link) until stable. A pid can be handed on, so a
+/// process that started before the present holder of its parent pid is not that holder's child and is not followed
+/// (ADR 0033: parent links are read with start times).
+pub fn expand_children(matched: &mut HashSet<u32>, links: &HashMap<u32, Link>) {
     loop {
         let before = matched.len();
-        for (pid, parent) in parents {
-            if matched.contains(parent) {
+        for (pid, link) in links {
+            if matched.contains(&link.parent) && links.get(&link.parent).is_none_or(|p| link.started >= p.started) {
                 matched.insert(*pid);
             }
         }
@@ -94,7 +102,7 @@ impl SysinfoSource {
             ProcessRefreshKind::nothing().with_exe(UpdateKind::OnlyIfNotSet),
         );
         let mut matched: HashSet<u32> = HashSet::new();
-        let mut parents = HashMap::new();
+        let mut links = HashMap::new();
         for (pid, p) in sys.processes() {
             // Linux lists every thread as a process that repeats its process's whole resident size: only real
             // processes are monitored (otherwise a 400-thread process reads as 400 processes of the full size).
@@ -106,11 +114,17 @@ impl SysinfoSource {
                 matched.insert(pid.as_u32());
             }
             if let Some(parent) = p.parent() {
-                parents.insert(pid.as_u32(), parent.as_u32());
+                links.insert(
+                    pid.as_u32(),
+                    Link {
+                        parent: parent.as_u32(),
+                        started: p.start_time(),
+                    },
+                );
             }
         }
         if include_children {
-            expand_children(&mut matched, &parents);
+            expand_children(&mut matched, &links);
         }
         matched.into_iter().map(Pid::from_u32).collect()
     }
@@ -172,10 +186,30 @@ mod tests {
 
     #[test]
     fn children_are_found_transitively() {
-        let parents = HashMap::from([(2, 1), (3, 2), (4, 99), (5, 4)]);
+        let links = HashMap::from([
+            (1, link(0, 10)),
+            (2, link(1, 20)),
+            (3, link(2, 30)),
+            (4, link(99, 40)),
+            (5, link(4, 50)),
+        ]);
         let mut m = HashSet::from([1]);
-        expand_children(&mut m, &parents);
+        expand_children(&mut m, &links);
         assert_eq!(m, HashSet::from([1, 2, 3]));
+    }
+
+    fn link(parent: u32, started: u64) -> Link {
+        Link { parent, started }
+    }
+
+    /// A process that started before the pid it names as parent was handed to its present holder is not that holder's child.
+    #[test]
+    fn children_older_than_their_parent_are_skipped() {
+        // 2's parent pid 1 now belongs to a process that started (at 100) after 2 did (at 20): the pid was handed on.
+        let links = HashMap::from([(1, link(0, 100)), (2, link(1, 20)), (3, link(1, 150)), (4, link(3, 160))]);
+        let mut m = HashSet::from([1]);
+        expand_children(&mut m, &links);
+        assert_eq!(m, HashSet::from([1, 3, 4]));
     }
 
     /// Linux lists threads as processes; each would repeat the process's whole resident size.

@@ -280,16 +280,21 @@ impl Conn {
     }
 }
 
+/// What a failed connect to the server means: a wait that ran out, or nothing answering.
+fn connect_error(e: std::io::Error) -> HttpError {
+    match e.kind() {
+        ErrorKind::TimedOut | ErrorKind::WouldBlock => HttpError::Timeout("connecting"),
+        _ => HttpError::Refused(e.to_string()),
+    }
+}
+
 /// Sends `req` to `127.0.0.1:port` and reads the status and headers. The body is read from the [`Response`].
 pub fn send(port: u16, req: &Request<'_>, t: Timeouts, cancel: Option<Arc<AtomicBool>>) -> Result<Response, HttpError> {
     if cancel.as_ref().is_some_and(|c| c.load(Ordering::Relaxed)) {
         return Err(HttpError::Cancelled);
     }
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
-    let stream = TcpStream::connect_timeout(&addr, t.connect).map_err(|e| match e.kind() {
-        ErrorKind::TimedOut | ErrorKind::WouldBlock => HttpError::Timeout("connecting"),
-        _ => HttpError::Refused(e.to_string()),
-    })?;
+    let stream = TcpStream::connect_timeout(&addr, t.connect).map_err(connect_error)?;
     let _ = stream.set_nodelay(true);
     stream
         .set_read_timeout(Some(SLICE))
@@ -451,11 +456,15 @@ mod tests {
 
     #[test]
     fn refused_garbage_and_header_injection() {
-        let free = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        // A refusal cannot be provoked portably (a freed port may belong to another test's server): the mapping is tested.
         assert!(matches!(
-            send(free, &Request::get("/"), Timeouts::QUICK, None),
-            Err(HttpError::Refused(_))
+            connect_error(std::io::Error::from(ErrorKind::ConnectionRefused)),
+            HttpError::Refused(_)
         ));
+        assert_eq!(
+            connect_error(std::io::Error::from(ErrorKind::TimedOut)),
+            HttpError::Timeout("connecting")
+        );
         let (port, _h) = serve(vec![b"SSH-2.0-nope\r\n\r\n".to_vec()], Duration::ZERO);
         assert!(matches!(
             send(port, &Request::get("/"), Timeouts::QUICK, None),

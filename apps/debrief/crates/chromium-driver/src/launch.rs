@@ -4,8 +4,8 @@
 use crate::cdp::Connection;
 use crate::discover::{Browser, Flavor};
 use crate::page::Page;
-use crate::process::Supervised;
 use crate::{Error, Result};
+use paddock_proc::Supervised;
 use paddock_proc::{ExitInfo, Liveness, Pace, Patience, ProcessId, StallReport, StartProbe, StartState, StartWatch, Watched};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -1038,7 +1038,7 @@ mod tests {
         // conformance: hang-guard — the exit is waited for on the condition; a loaded runner needs more than the grace
         assert!(b.close_gracefully(Duration::from_secs(40)), "it exited by itself");
         assert!(!dir.exists(), "the throwaway profile is gone");
-        assert!(!crate::process::process_exists(pid) || !b.is_running());
+        assert!(!paddock_proc::is_alive(pid) || !b.is_running());
     }
 
     #[cfg(unix)]

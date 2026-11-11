@@ -135,7 +135,10 @@ impl ExitNote {
 /// The OS process behind a [`ChildProcess`]: started by the standard library, or (a contained child on Windows) in
 /// an AppContainer by [`crate::contain`].
 enum OsChild {
-    Std(Child),
+    /// The child and, read right after the spawn (while no one could have reaped it), its identity. Only the Unix group kill
+    /// reads the identity; on Windows the job object ends the tree by handle.
+    #[cfg_attr(windows, expect(dead_code, reason = "the job object, not the identity, ends the tree on Windows"))]
+    Std(Child, Option<paddock_proc::ProcessId>),
     #[cfg(windows)]
     Contained(crate::contain::Contained),
 }
@@ -143,7 +146,7 @@ enum OsChild {
 impl OsChild {
     fn id(&self) -> u32 {
         match self {
-            OsChild::Std(c) => c.id(),
+            OsChild::Std(c, _) => c.id(),
             #[cfg(windows)]
             OsChild::Contained(c) => c.id(),
         }
@@ -151,38 +154,30 @@ impl OsChild {
 
     fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
         match self {
-            OsChild::Std(c) => c.try_wait(),
+            OsChild::Std(c, _) => c.try_wait(),
             #[cfg(windows)]
             OsChild::Contained(c) => c.try_wait(),
         }
     }
 
-    /// Ends the child's whole process group (Unix: every child is the leader of its own group, see
+    /// Ends the child's whole process group and tree (Unix: every child is the leader of its own group, see
     /// [`ChildProcess::spawn`]), so what it started (a grandchild of the worker) ends with it even when its
-    /// own clean-up never runs. Windows children are in a job object that does the same.
-    #[cfg_attr(
-        unix,
-        expect(
-            clippy::disallowed_methods,
-            reason = "ADR 0033 WP-5: killpg after try_wait may have reaped the leader; kill through a ProcessId"
-        )
-    )]
+    /// own clean-up never runs. It goes by the child's identity ([`paddock_proc::kill_tree`]): a leader that was
+    /// reaped and whose pid was handed on is left alone. Windows children are in a job object that does the same.
     fn kill_group(&self) {
         #[cfg(unix)]
         {
             // Unix children are all plain ones (`Contained` is Windows only).
-            let OsChild::Std(c) = self;
-            // SAFETY: killpg takes plain integers; the group is the one this child leads (it is not reaped yet, or
-            // its group still has members, so the id is not reused).
-            unsafe {
-                libc::killpg(c.id() as libc::pid_t, libc::SIGKILL);
+            let OsChild::Std(_, id) = self;
+            if let Some(id) = id {
+                paddock_proc::kill_tree(*id);
             }
         }
     }
 
     fn kill(&mut self) -> std::io::Result<()> {
         match self {
-            OsChild::Std(c) => c.kill(),
+            OsChild::Std(c, _) => c.kill(),
             #[cfg(windows)]
             OsChild::Contained(c) => c.kill(),
         }
@@ -190,7 +185,7 @@ impl OsChild {
 
     fn wait(&mut self) -> std::io::Result<ExitStatus> {
         match self {
-            OsChild::Std(c) => c.wait(),
+            OsChild::Std(c, _) => c.wait(),
             #[cfg(windows)]
             OsChild::Contained(c) => c.wait(),
         }
@@ -410,7 +405,8 @@ impl ChildProcess {
         let job = ();
         let stdin = child.stdin.take().map(|s| Box::new(s) as Box<dyn Write + Send>);
         let stderr = child.stderr.take().map(|s| Box::new(s) as Box<dyn Read + Send>);
-        let mut process = ChildProcess::assemble(spec, OsChild::Std(child), stdin, stderr, job);
+        let leader = paddock_proc::ProcessId::of(child.id());
+        let mut process = ChildProcess::assemble(spec, OsChild::Std(child, leader), stdin, stderr, job);
         if let Some(log) = process.log() {
             for n in &sandbox_notes {
                 log.record(&child_log::ChildEvent::Note(n.log_line()));
@@ -691,79 +687,17 @@ mod tests {
         assert_eq!(super::unix_nice(&s), 19);
     }
 
-    /// Whether `pid` is a process that still runs. A zombie has ended already: it only waits for its parent to collect
-    /// its exit status, and a killed child's orphan is collected by PID 1, which never happens in a container whose
-    /// PID 1 reaps nothing (CI's job container runs `sleep`). `kill(pid, 0)` alone counts such a zombie as alive.
+    /// Whether `pid` is a process that still runs (a zombie, which only waits for its parent to collect its exit status,
+    /// is not one: a killed child's orphan is never collected in a container whose PID 1 reaps nothing).
     #[cfg(unix)]
-    #[cfg_attr(
-        unix,
-        expect(clippy::disallowed_methods, reason = "ADR 0033 WP-5 (test): a liveness probe by pid (signal 0)")
-    )]
-    fn running(pid: i32) -> bool {
-        // SAFETY: signal 0 only checks that the process exists.
-        if unsafe { libc::kill(pid, 0) } != 0 {
-            return false;
-        }
-        !is_zombie(pid)
-    }
-
-    #[cfg(target_os = "linux")]
-    fn is_zombie(pid: i32) -> bool {
-        // `/proc/<pid>/stat` is "pid (comm) state ..."; comm may hold spaces and parentheses, so read after the last ')'.
-        std::fs::read_to_string(format!("/proc/{pid}/stat"))
-            .ok()
-            .and_then(|s| s.rsplit_once(')').and_then(|(_, rest)| rest.trim_start().chars().next()))
-            .is_none_or(|state| state == 'Z' || state == 'X')
-    }
-
-    #[cfg(target_os = "macos")]
-    fn is_zombie(pid: i32) -> bool {
-        // SAFETY: proc_bsdinfo is plain data; proc_pidinfo writes at most the size it is given.
-        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
-        let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
-        let got = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&mut info as *mut libc::proc_bsdinfo).cast(), size) };
-        got != size || info.pbi_status == libc::SZOMB
-    }
-
-    #[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
-    fn is_zombie(_: i32) -> bool {
-        false
-    }
-
-    /// A zombie (ended, not yet collected by its parent) is not running; a live process is.
-    #[cfg(unix)]
-    #[test]
-    #[cfg_attr(
-        unix,
-        expect(clippy::disallowed_methods, reason = "ADR 0033 WP-5 (test): a liveness probe by pid (signal 0)")
-    )]
-    fn a_zombie_is_not_running() {
-        // A child that has exited but is not waited for yet is a zombie of this test process.
-        #[allow(clippy::disallowed_methods)]
-        let mut c = std::process::Command::new("sh").args(["-c", "exit 0"]).spawn().unwrap();
-        let pid = c.id() as i32;
-        let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while running(pid) {
-            assert!(std::time::Instant::now() < end, "the exited child is seen as a zombie");
-            std::thread::yield_now();
-        }
-        // SAFETY: signal 0 only checks that the process exists.
-        assert_eq!(unsafe { libc::kill(pid, 0) }, 0, "it still exists until it is reaped");
-        c.wait().unwrap();
-        assert!(running(std::process::id() as i32), "this process runs");
+    fn running(pid: u32) -> bool {
+        paddock_proc::is_alive(pid)
     }
 
     /// A child killed after its grace period takes what it started with it (a worker's own child, which on
     /// macOS has no parent-death signal and whose exit hook never runs under SIGKILL).
     #[cfg(unix)]
     #[test]
-    #[cfg_attr(
-        unix,
-        expect(
-            clippy::disallowed_methods,
-            reason = "ADR 0033 WP-5 (test): kills a grandchild by the pid it printed"
-        )
-    )]
     fn a_child_killed_after_its_grace_takes_its_own_children_with_it() {
         let d = tempfile::tempdir().unwrap();
         let pid_file = d.path().join("grandchild.pid");
@@ -780,7 +714,7 @@ mod tests {
         std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         let child = super::ChildProcess::spawn(&super::SpawnSpec::new(&script, "fake worker")).unwrap();
         let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        let grandchild: i32 = loop {
+        let grandchild: u32 = loop {
             if let Some(p) = std::fs::read_to_string(&pid_file).ok().and_then(|s| s.trim().parse().ok()) {
                 break p;
             }
@@ -791,7 +725,9 @@ mod tests {
         let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while running(grandchild) {
             if std::time::Instant::now() >= end {
-                unsafe { libc::kill(grandchild, libc::SIGKILL) };
+                if let Some(id) = paddock_proc::ProcessId::of(grandchild) {
+                    let _ = paddock_proc::end(id);
+                }
                 panic!("the grandchild was left behind");
             }
             std::thread::yield_now();
