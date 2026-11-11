@@ -36,7 +36,7 @@ import { CANCEL_NOTE, HELPER_READS_ONLY, TURN_OFF_LABEL, auditTime, helperAction
             <p class="note" role="status" data-testid="helper-still-starting"><dy-icon name="info" /> Still starting. This is taking longer than usual; check again, or repair the helper.</p>
           }
 
-          @if (!store.action() && s.readings.length && (s.state === 'off' || s.state === 'ready')) {
+          @if (!store.action() && s.readings.length && (s.state === 'off' || s.state === 'ready' || s.state === 'updateAvailable')) {
             <p class="lead">{{ s.state === 'off' ? 'Turning it on adds:' : 'Dyno now also shows:' }}</p>
             <ul class="benefits" data-testid="helper-readings">
               @for (r of s.readings; track r) {
@@ -45,7 +45,7 @@ import { CANCEL_NOTE, HELPER_READS_ONLY, TURN_OFF_LABEL, auditTime, helperAction
             </ul>
             <p class="reads-only">{{ readsOnly }}</p>
           }
-          @if (!store.action() && (s.state === 'off' || s.state === 'outdated' || s.state === 'foreign' || s.state === 'notRunning' || s.state === 'missing' || store.stillStarting())) {
+          @if (!store.action() && (s.state === 'off' || s.state === 'outdated' || s.state === 'updateAvailable' || s.state === 'foreign' || s.state === 'notRunning' || s.state === 'missing' || store.stillStarting())) {
             <p class="prompt"><dy-icon name="lock" /> <span>{{ s.prompt }} Each change asks once.</span></p>
           }
 
@@ -89,7 +89,7 @@ import { CANCEL_NOTE, HELPER_READS_ONLY, TURN_OFF_LABEL, auditTime, helperAction
               <p>{{ s.detail }}</p>
             </details>
           }
-          @if (s.state === 'ready' && s.recent.length) {
+          @if ((s.state === 'ready' || s.state === 'updateAvailable') && s.recent.length) {
             <details class="audit">
               <summary>What the helper did recently</summary>
               <ul>

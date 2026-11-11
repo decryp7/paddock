@@ -22,7 +22,8 @@ const FACES: Record<HelperState, HelperFace> = {
   starting: { label: 'Starting', status: 'info', action: null, canTurnOff: false, canRecheck: true },
   missing: { label: 'Needs repair', status: 'warning', action: { kind: 'repair', label: 'Repair the helper' }, canTurnOff: true, canRecheck: true },
   foreign: { label: 'Not trusted', status: 'warning', action: { kind: 'repair', label: 'Repair the helper' }, canTurnOff: true, canRecheck: true },
-  outdated: { label: 'Update available', status: 'warning', action: { kind: 'update', label: 'Update the helper' }, canTurnOff: true, canRecheck: true },
+  outdated: { label: 'Update needed', status: 'warning', action: { kind: 'update', label: 'Update the helper' }, canTurnOff: true, canRecheck: true },
+  updateAvailable: { label: 'On, update available', status: 'success', action: { kind: 'update', label: 'Update the helper' }, canTurnOff: true, canRecheck: true },
   ready: { label: 'On', status: 'success', action: null, canTurnOff: true, canRecheck: true },
 };
 

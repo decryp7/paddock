@@ -20,7 +20,7 @@ test.describe('administrator readings', () => {
     ['off', 'Off', 'Turn on administrator readings'],
     ['silent', 'Not running', 'Repair the helper'],
     ['foreign', 'Not trusted', 'Repair the helper'],
-    ['outdated', 'Update available', 'Update the helper'],
+    ['outdated', 'Update needed', 'Update the helper'],
     ['notIncluded', 'Not available here', 'AppImage'],
   ] as const) {
     test(`${helper}: says ${chip} in words, with its one action`, async ({ page }) => {

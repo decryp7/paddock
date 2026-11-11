@@ -1,7 +1,7 @@
 import type { HelperState } from '../../core/api.types';
 import { CANCEL_NOTE, HELPER_READS_ONLY, TURN_OFF_LABEL, auditTime, helperActionBadge, helperActionSentence, helperFace } from './helper-model';
 
-const STATES: HelperState[] = ['notIncluded', 'off', 'notRunning', 'starting', 'missing', 'foreign', 'outdated', 'ready'];
+const STATES: HelperState[] = ['notIncluded', 'off', 'notRunning', 'starting', 'missing', 'foreign', 'outdated', 'updateAvailable', 'ready'];
 
 describe('helperFace', () => {
   it('gives every state its own word, so no state is colour alone', () => {
@@ -11,14 +11,14 @@ describe('helperFace', () => {
 
   it('tints by what the person must do: warning when something needs them, success when on, info when not here, neutral when off', () => {
     const status = (s: HelperState) => helperFace(s).status;
-    expect(STATES.map(status)).toEqual(['info', 'neutral', 'warning', 'info', 'warning', 'warning', 'warning', 'success']);
+    expect(STATES.map(status)).toEqual(['info', 'neutral', 'warning', 'info', 'warning', 'warning', 'warning', 'success', 'success']);
     expect(helperFace('foreign').label).toBe('Not trusted');
   });
 
   it('offers exactly the action each state needs, and no re-check where the helper cannot exist', () => {
     const act = (s: HelperState) => helperFace(s).action?.kind ?? null;
-    expect(STATES.map(act)).toEqual([null, 'turnOn', 'repair', null, 'repair', 'repair', 'update', null]);
-    expect(STATES.filter((s) => helperFace(s).canTurnOff)).toEqual(['notRunning', 'missing', 'foreign', 'outdated', 'ready']);
+    expect(STATES.map(act)).toEqual([null, 'turnOn', 'repair', null, 'repair', 'repair', 'update', 'update', null]);
+    expect(STATES.filter((s) => helperFace(s).canTurnOff)).toEqual(['notRunning', 'missing', 'foreign', 'outdated', 'updateAvailable', 'ready']);
     expect(STATES.filter((s) => !helperFace(s).canRecheck)).toEqual(['notIncluded']);
   });
 
