@@ -165,7 +165,8 @@ async fn a_missing_element_times_out_as_failed() {
 }
 
 /// The page's own budget ends a hang. The browser is started first (a starved start is not what is tested), then the clock
-/// runs only over the load: it must end at the 6 s budget, far below the watchdog.
+/// runs only over the load: it must end at the 6 s budget (not before, not at the watchdog), and the renderer reports it as a
+/// failed render.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_server_that_never_answers_is_stopped_at_the_timeout() {
     let _turn = serial();
@@ -188,12 +189,23 @@ async fn a_server_that_never_answers_is_stopped_at_the_timeout() {
         let elapsed = t.elapsed();
         let profile = c.profile_dir().to_path_buf();
         drop(c);
-        (elapsed, e.to_string(), profile)
+        (elapsed, e, profile)
     })
     .await
     .unwrap();
-    assert!(elapsed < Duration::from_secs(20), "the load took {elapsed:?}: {error}");
+    assert!(matches!(error, spotter_render::Error::Timeout(_)), "{error:?}");
+    assert!(elapsed >= Duration::from_millis(5500), "ended before the 6 s budget: {elapsed:?}");
+    // conformance: hang-guard — the budget is 6 s; this bound (at least 10 s) only keeps a broken run from waiting for the watchdog
+    assert!(elapsed < Duration::from_secs(20), "the load took {elapsed:?}: {error:?}");
     assert!(!profile.exists(), "profile not removed");
+    assert_no_leftovers(&marker);
+    // The same hang through the renderer is a failed render.
+    let (r, log) = renderer(browser().unwrap(), base.path());
+    let e = r
+        .render(&format!("http://127.0.0.1:{port}/hang"), None, Duration::from_secs(6))
+        .await
+        .unwrap_err();
+    assert!(matches!(e, RenderError::Failed(_)), "{e:?}\n{}", log.tail());
     assert_no_leftovers(&marker);
 }
 
