@@ -169,6 +169,12 @@ pub(crate) enum StoreKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct StoreId(u64);
 
+impl std::fmt::Display for StoreId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 impl StoreId {
     /// The next identity; unique in the process.
     fn next() -> StoreId {

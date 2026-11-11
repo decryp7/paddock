@@ -146,6 +146,23 @@ impl<T> Done<T> {
     }
 }
 
+/// How a job's work ended, as the queue records it, and the value it produced: a cancelled flag or error makes a cancelled
+/// job, any other error a failed one. The one mapping every submit path uses.
+pub(crate) fn settle<T, E: JobFailure>(r: Result<Done<T>, E>, ctx: &JobCtx) -> (JobEnd, Result<T, E>) {
+    match r {
+        Ok(done) => {
+            let end = if done.cancelled {
+                JobEnd::Cancelled
+            } else {
+                JobEnd::Done(done.result)
+            };
+            (end, Ok(done.value))
+        }
+        Err(e) if e.cancelled() || ctx.is_cancelled() => (JobEnd::Cancelled, Err(e)),
+        Err(e) => (JobEnd::Failed(e.to_string()), Err(e)),
+    }
+}
+
 /// An error of a job's work. `cancelled` errors end the job as cancelled instead of failed.
 pub trait JobFailure: std::fmt::Display {
     fn cancelled(&self) -> bool {
@@ -385,6 +402,7 @@ impl Jobs {
             let Submission { id, created } = inner.queue.submit_or_existing(spec, now)?;
             if !created {
                 // The same keyed request is already queued or running: it serves this one; `work` is dropped unrun.
+                log::info!(Job = id.0; "job.joined: an equal keyed request is served by this job");
                 return Ok(Submission { id, created: false });
             }
             inner.controls.insert(
@@ -426,18 +444,7 @@ impl Jobs {
         }
         let (tx, rx) = mpsc::channel();
         let id = self.submit_work(spec, controls, move |ctx| {
-            let (end, value) = match f(ctx) {
-                Ok(done) => {
-                    let end = if done.cancelled {
-                        JobEnd::Cancelled
-                    } else {
-                        JobEnd::Done(done.result)
-                    };
-                    (end, Ok(done.value))
-                }
-                Err(e) if e.cancelled() || ctx.is_cancelled() => (JobEnd::Cancelled, Err(e)),
-                Err(e) => (JobEnd::Failed(e.to_string()), Err(e)),
-            };
+            let (end, value) = settle(f(ctx), ctx);
             // The waiter may be gone (a dialog closed): the job still ends normally.
             let _ = tx.send(value);
             end

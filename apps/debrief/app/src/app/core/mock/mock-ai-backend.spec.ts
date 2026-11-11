@@ -67,6 +67,21 @@ describe('MockAiBackend', () => {
     expect((await failing.pitwallConnect()).problem).toBe('Pitwall is not running.');
   });
 
+  it('starts one job for an equal Summarize, Explain or Root causes request while it is active', async () => {
+    const b = new MockAiBackend({ stepMs: 5 });
+    const summarize = await b.start({ op: 'summarize', from: 0, to: 1000 });
+    expect(await b.start({ op: 'summarize', from: 0, to: 1000 })).toBe(summarize);
+    expect(await b.start({ op: 'summarize', from: 0, to: 2000 })).not.toBe(summarize);
+    const explain = await b.start({ op: 'explain', recordId: 5 });
+    expect(await b.start({ op: 'explain', recordId: 5 })).toBe(explain);
+    const root = await b.start({ op: 'rootCauses' });
+    expect(await b.start({ op: 'rootCauses' })).toBe(root);
+    // After Cancel the same request is a new job.
+    await b.cancel();
+    expect(await b.start({ op: 'rootCauses' })).not.toBe(root);
+    await b.cancel();
+  });
+
   it('opens only https links', async () => {
     const b = new MockAiBackend({ stepMs: 0 });
     expect(await code(b.openLink('http://x'))).toBe('refused');

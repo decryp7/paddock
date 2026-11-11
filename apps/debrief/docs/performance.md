@@ -386,7 +386,7 @@ some fields; "n/s" means the source does not state them.
   | `names_perf::merge_scaling` (NR1) | `merge_cooccurring` over 8,000 groups (500 / 1,000 / 2,000 / 4,000 groups: 0.17 / 0.65 / 2.6 / 10.5 s) | 43.5 s | under 0.5 s |
   | `names_perf::a_refresh_while_the_catalogue_is_not_built_reads_no_names` (P3) | reads of the whole catalogue in 20 refreshes of an unbuilt one | 20 | 0 |
   | `regress_1_2::a_1_6_million_row_catalogue_is_read_within_the_query_budget` (P3) | `catalogue(all)` over 1.6 M rows | Out of Memory at 183.0/183.1 MiB | answers within 192 MB |
-  | `jobs::tests::two_identical_requests_give_one_job` (J1) | job ids for two identical submits | 2 | 1 |
+  | `jobs::tests::two_identical_requests_give_one_job` (J1, AI part: fixed; imports and exports stay open) | job ids for two identical submits | 2 | 1 |
   | `regress_1_2::a_3_gib_csv_imports_under_the_worker_cap` (3.5) | peak RSS importing a 3 GiB CSV | 17,399 MB | 768 MB |
   | `regress_1_2::a_gz_of_1_5_gb_uncompressed_imports_under_the_import_budget` (3.5) | lines imported from the `.gz` | 0 of 17,960,344 | all, under 768 MB |
   | `regress_1_2::an_exceptions_view_with_50_000_groups_...` (4.2) | groups returned | 50,000 | at most 5,000, with `truncated` |

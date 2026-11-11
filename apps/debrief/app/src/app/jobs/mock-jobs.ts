@@ -217,6 +217,11 @@ export class MockJobs implements JobsBackend {
     return { id: e.info.id, state: e.info.state, result: e.result, error: e.info.error, message: e.info.message };
   }
 
+  /** Whether job `id` is queued or running (also while the Jobs pane does not list it yet). */
+  isActive(id: number): boolean {
+    return this.entries.some((e) => e.info.id === id && (e.info.state === 'queued' || e.info.state === 'running'));
+  }
+
   /** The id the next job gets. */
   nextId(): number {
     return this.next;

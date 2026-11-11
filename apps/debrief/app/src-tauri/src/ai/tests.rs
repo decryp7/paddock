@@ -775,7 +775,41 @@ fn clicking_summarize_twice_gives_one_job() {
     assert_eq!(ipc(&main, "ai_cancel", json!({})).unwrap(), 1);
     steps.send(Step::Answer).unwrap();
     wait_until("no AI jobs", || active_ai(&app).is_empty());
-    assert_ne!(start(&main, range), first);
+    let again = start(&main, range);
+    assert_ne!(again, first);
+    // Leave nothing running: stop the new job and let the model's step end.
+    assert_eq!(ipc(&main, "ai_cancel", json!({})).unwrap(), 1);
+    steps.send(Step::Answer).unwrap();
+    wait_until("no AI jobs at the end", || active_ai(&app).is_empty());
+}
+
+#[test]
+fn explain_and_root_causes_started_twice_give_one_job_each() {
+    let f = Fixture::new("explain-root-twice");
+    let core = f.core();
+    let (model, steps, entered) = gated_counted(vec![text("Explained."), text("Causes.")]);
+    core.set_fixed_provider(model);
+    let app = f.app(core);
+    let main = window(&app, "main");
+    open_samples(&main);
+    let explain = json!({"op": "explain", "recordId": 1});
+    let first = start(&main, explain.clone());
+    wait_until("the model to be asked", || entered.load(Ordering::SeqCst) == 1);
+    assert_eq!(start(&main, explain), first, "Explain twice");
+    let root = start(&main, json!({"op": "rootCauses"}));
+    assert_eq!(start(&main, json!({"op": "rootCauses"})), root, "Root causes twice");
+    assert_ne!(root, first);
+    assert_eq!(active_ai(&app).len(), 2);
+    // Cancel, then ask again: the new request is a new job (the cancelled one is stopping).
+    assert_eq!(ipc(&main, "ai_cancel", json!({})).unwrap(), 2);
+    let after = start(&main, json!({"op": "rootCauses"}));
+    assert_ne!(after, root, "a request after Cancel joined the job being stopped");
+    // The jobs being stopped may still be listed: only the new one must be among those cancelled.
+    assert!(ipc(&main, "ai_cancel", json!({})).unwrap().as_u64().unwrap() >= 1);
+    for _ in 0..3 {
+        let _ = steps.send(Step::Answer);
+    }
+    wait_until("no AI jobs", || active_ai(&app).is_empty());
 }
 
 #[test]

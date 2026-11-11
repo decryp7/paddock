@@ -64,13 +64,18 @@ fn listed(main: &tauri::WebviewWindow<MockRuntime>) -> Vec<Value> {
     ipc(main, "jobs_list", json!({})).unwrap()["jobs"].as_array().unwrap().clone()
 }
 
+/// The spec the producers of an AI request build (the button, the menu and the palette all go through it), in store `store`.
+fn ai_spec(request: crate::ai::requests::AiRequest, window: &str, store: u64) -> JobSpec {
+    request.spec(window, Some(crate::engine::StoreId::for_test(store)))
+}
+
 /// H11 (docs/research/2026-10-28-cpu-memory.md): Summarize from the button, the menu and the palette each queued a job. A
 /// request that is already queued or running gives the same job, not a second one.
 #[test]
 fn two_identical_requests_give_one_job() {
+    use crate::ai::requests::AiRequest::Summarize;
     let app = test_app_with_commands(None);
-    // The spec Summarize's producers (the button, the menu, the palette) all build.
-    let summarize = |from, to| crate::ai::requests::AiRequest::Summarize { from, to }.spec("main");
+    let summarize = |from, to| ai_spec(Summarize { from, to }, "main", 1);
     let (first, _release_first) = gated_spec(&app, summarize(0, 10));
     let (second, _release_second) = gated_spec(&app, summarize(0, 10));
     assert_eq!(
@@ -82,6 +87,47 @@ fn two_identical_requests_give_one_job() {
     // Another range is another request.
     let (other, _release_other) = gated_spec(&app, summarize(0, 11));
     assert_ne!(first, other);
+}
+
+/// Explain (by event) and Root causes are keyed like Summarize; a different event, window or project is another job.
+#[test]
+fn explain_and_root_causes_merge_per_event_window_and_project() {
+    use crate::ai::requests::AiRequest::{Explain, RootCauses};
+    let app = test_app_with_commands(None);
+    let (explain, _r1) = gated_spec(&app, ai_spec(Explain { record_id: 5 }, "main", 1));
+    let (again, _r2) = gated_spec(&app, ai_spec(Explain { record_id: 5 }, "main", 1));
+    assert_eq!(explain, again, "the same event twice");
+    let (other_event, _r3) = gated_spec(&app, ai_spec(Explain { record_id: 6 }, "main", 1));
+    assert_ne!(explain, other_event);
+    let (root, _r4) = gated_spec(&app, ai_spec(RootCauses, "main", 1));
+    let (root_again, _r5) = gated_spec(&app, ai_spec(RootCauses, "main", 1));
+    assert_eq!(root, root_again, "root causes twice");
+    // The same ask in another window is that window's own job.
+    let (other_window, _r6) = gated_spec(&app, ai_spec(RootCauses, "w-2", 1));
+    assert_ne!(root, other_window);
+}
+
+/// The window now holds another project (another store): its request never joins the old project's job.
+#[test]
+fn a_new_project_never_joins_the_old_projects_job() {
+    use crate::ai::requests::AiRequest::Summarize;
+    let app = test_app_with_commands(None);
+    let (old, _r1) = gated_spec(&app, ai_spec(Summarize { from: 0, to: 10 }, "main", 1));
+    let (new, _r2) = gated_spec(&app, ai_spec(Summarize { from: 0, to: 10 }, "main", 2));
+    assert_ne!(old, new);
+}
+
+/// Summarize, then Cancel, then Summarize again: the cancelled job is still running until its work notices, but it is
+/// stopping, so the new request is a new job and is not lost with the old one.
+#[test]
+fn a_request_after_cancel_is_a_new_job_not_the_one_being_stopped() {
+    use crate::ai::requests::AiRequest::Summarize;
+    let app = test_app_with_commands(None);
+    let (first, _release_first) = gated_spec(&app, ai_spec(Summarize { from: 0, to: 10 }, "main", 1));
+    wait_until("running", || jobs(&app).state_of(first) == Some(JobState::Running));
+    assert!(jobs(&app).cancel(first).is_ok());
+    let (second, _release_second) = gated_spec(&app, ai_spec(Summarize { from: 0, to: 10 }, "main", 1));
+    assert_ne!(first, second, "the request joined the job that is being cancelled");
 }
 
 #[test]
