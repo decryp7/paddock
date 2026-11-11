@@ -8,7 +8,7 @@
 
 use super::model::{IllegalTransition, Job, JobEvent, JobId, JobKind, JobLink, JobProgress, JobResult, JobSource, JobSpec, JobState};
 use serde::Serialize;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 /// A job appears in the pane once it has existed this long: quick work never flickers in.
 pub const VISIBLE_AFTER_MS: i64 = 2_000;
@@ -229,6 +229,9 @@ pub struct JobQueue {
     /// Finished jobs, oldest first.
     history: VecDeque<Job>,
     next_id: u64,
+    /// Running jobs whose Cancel was requested: they still run until their work notices, but a keyed request never
+    /// joins one (it would be served by a job that is about to end cancelled, and be lost).
+    stopping: HashSet<JobId>,
 }
 
 impl JobQueue {
@@ -238,6 +241,7 @@ impl JobQueue {
             active: Vec::new(),
             history: VecDeque::new(),
             next_id: 1,
+            stopping: HashSet::new(),
         }
     }
 
@@ -261,6 +265,7 @@ impl JobQueue {
                 j.kind == spec.kind
                     && j.key.as_ref() == Some(key)
                     && !j.state().is_finished()
+                    && !self.stopping.contains(&j.id)
                     && (spec.joins_running || j.state() == JobState::Queued)
             }) {
                 return Ok(Submission { id: j.id, created: false });
@@ -372,6 +377,7 @@ impl JobQueue {
             JobEnd::Interrupted(_) => JobEvent::Interrupt,
         };
         let next = self.active[i].state.step(event)?;
+        self.stopping.remove(&id);
         let mut job = self.active.remove(i);
         job.state = next;
         job.finished_at = Some(now.max(job.queued_at));
@@ -414,8 +420,16 @@ impl JobQueue {
         match j.state() {
             JobState::Queued => Ok(Cancel::Dequeued(Box::new(self.finish(id, JobEnd::Cancelled, now)?))),
             _ if !j.cancellable => Ok(Cancel::NotCancellable),
-            _ => Ok(Cancel::Running),
+            _ => {
+                self.stopping.insert(id);
+                Ok(Cancel::Running)
+            }
         }
+    }
+
+    /// Whether Cancel was already requested for a running job that has not ended yet.
+    pub fn is_stopping(&self, id: JobId) -> bool {
+        self.stopping.contains(&id)
     }
 
     /// Moves a queued, reorderable job one place up (`up`) or down within its kind's queue.
@@ -576,6 +590,21 @@ mod tests {
 
     fn ai(title: &str) -> JobSpec {
         JobSpec::new(JobKind::Ai, title).window("main")
+    }
+
+    #[test]
+    fn a_job_whose_cancel_was_requested_is_never_joined() {
+        let mut q = JobQueue::new(2);
+        let a = q.submit(ai("a").keyed("main|x"), 0).unwrap();
+        q.start(a, 1).unwrap();
+        assert!(matches!(q.cancel(a, 2).unwrap(), Cancel::Running));
+        // It still runs, but a new equal request is a new job, and that one is joined in turn.
+        let b = q.submit(ai("a").keyed("main|x"), 3).unwrap();
+        assert_ne!(a, b);
+        assert_eq!(q.submit(ai("a").keyed("main|x"), 4).unwrap(), b);
+        // The mark goes with the job.
+        q.finish(a, JobEnd::Cancelled, 5).unwrap();
+        assert_eq!(q.submit(ai("a").keyed("main|x"), 6).unwrap(), b);
     }
 
     #[test]

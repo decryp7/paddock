@@ -502,16 +502,6 @@ review_by = 2027-01-07
 approved = "coordinator"
 
 [[ignored]]
-path = "apps/debrief/app/src-tauri/src/jobs/tests.rs"
-tests = ["two_identical_requests_give_one_job"]
-gate = "not-gated"
-reason = "a marked failing test of a later plan package (J1, an idempotency key on every producer's job): fails today by design, enabled when J1 lands"
-owner = "Debrief 1.2"
-since = 2026-11-11
-review_by = 2027-01-10
-approved = "coordinator"
-
-[[ignored]]
 path = "apps/debrief/crates/debrief-core/tests/it/regress_1_2.rs"
 tests = ["a_3_gib_csv_imports_under_the_worker_cap"]
 gate = "not-gated"

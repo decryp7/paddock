@@ -22,11 +22,16 @@ type Release = mpsc::Sender<Result<Option<JobResult>, String>>;
 
 /// An export job of `window` that runs until the test releases it with a result.
 fn gated_export(app: &tauri::App<MockRuntime>, window: &str, title: &str) -> (JobId, Release) {
-    let (tx, rx) = mpsc::channel::<Result<Option<JobResult>, String>>();
-    let rx = Mutex::new(rx);
     let spec = JobSpec::new(JobKind::Export, title)
         .window(window)
         .retry_with(json!({"op": "export"}));
+    gated_spec(app, spec)
+}
+
+/// A job of `spec` that runs until the test releases it with a result.
+fn gated_spec(app: &tauri::App<MockRuntime>, spec: JobSpec) -> (JobId, Release) {
+    let (tx, rx) = mpsc::channel::<Result<Option<JobResult>, String>>();
+    let rx = Mutex::new(rx);
     let id = spawn(
         app.handle(),
         spec,
@@ -59,20 +64,94 @@ fn listed(main: &tauri::WebviewWindow<MockRuntime>) -> Vec<Value> {
     ipc(main, "jobs_list", json!({})).unwrap()["jobs"].as_array().unwrap().clone()
 }
 
+/// The spec the producers of an AI request build (the button, the menu and the palette all go through it), in store `store`.
+fn ai_spec(request: crate::ai::requests::AiRequest, window: &str, store: u64) -> JobSpec {
+    request.spec(window, Some(crate::engine::StoreId::for_test(store)))
+}
+
 /// H11 (docs/research/2026-10-28-cpu-memory.md): Summarize from the button, the menu and the palette each queued a job. A
 /// request that is already queued or running gives the same job, not a second one.
 #[test]
-#[ignore = "regress-1-2: FAILING TODAY (fixed by plan package J1, idempotency key on jobs): the same request twice queued 2 jobs (JobId(1) against JobId(2))"]
 fn two_identical_requests_give_one_job() {
+    use crate::ai::requests::AiRequest::Summarize;
     let app = test_app_with_commands(None);
-    let (first, _release_first) = gated_export(&app, "main", "Summarize r.log");
-    let (second, _release_second) = gated_export(&app, "main", "Summarize r.log");
+    let summarize = |from, to| ai_spec(Summarize { from, to }, "main", 1);
+    let (first, _release_first) = gated_spec(&app, summarize(0, 10));
+    let (second, _release_second) = gated_spec(&app, summarize(0, 10));
     assert_eq!(
         first,
         second,
         "the same request twice queued {} jobs",
         jobs(&app).find_active(|_| true).len()
     );
+    // Another range is another request.
+    let (other, _release_other) = gated_spec(&app, summarize(0, 11));
+    assert_ne!(first, other);
+}
+
+/// Explain (by event) and Root causes are keyed like Summarize; a different event, window or project is another job.
+#[test]
+fn explain_and_root_causes_merge_per_event_window_and_project() {
+    use crate::ai::requests::AiRequest::{Explain, RootCauses};
+    let app = test_app_with_commands(None);
+    let (explain, _r1) = gated_spec(&app, ai_spec(Explain { record_id: 5 }, "main", 1));
+    let (again, _r2) = gated_spec(&app, ai_spec(Explain { record_id: 5 }, "main", 1));
+    assert_eq!(explain, again, "the same event twice");
+    let (other_event, _r3) = gated_spec(&app, ai_spec(Explain { record_id: 6 }, "main", 1));
+    assert_ne!(explain, other_event);
+    let (root, _r4) = gated_spec(&app, ai_spec(RootCauses, "main", 1));
+    let (root_again, _r5) = gated_spec(&app, ai_spec(RootCauses, "main", 1));
+    assert_eq!(root, root_again, "root causes twice");
+    // The same ask in another window is that window's own job.
+    let (other_window, _r6) = gated_spec(&app, ai_spec(RootCauses, "w-2", 1));
+    assert_ne!(root, other_window);
+}
+
+/// The window now holds another project (another store): its request never joins the old project's job.
+#[test]
+fn a_new_project_never_joins_the_old_projects_job() {
+    use crate::ai::requests::AiRequest::Summarize;
+    let app = test_app_with_commands(None);
+    let (old, _r1) = gated_spec(&app, ai_spec(Summarize { from: 0, to: 10 }, "main", 1));
+    let (new, _r2) = gated_spec(&app, ai_spec(Summarize { from: 0, to: 10 }, "main", 2));
+    assert_ne!(old, new);
+}
+
+/// A job of `spec` whose work ignores Cancel and ends only when the test sends on the returned channel: it stays running
+/// (and stopping, once cancelled) for as long as the test needs.
+fn held_spec(app: &tauri::App<MockRuntime>, spec: JobSpec) -> (JobId, mpsc::Sender<()>) {
+    let (tx, rx) = mpsc::channel::<()>();
+    let rx = Mutex::new(rx);
+    let id = spawn(
+        app.handle(),
+        spec,
+        Controls::default(),
+        move |_: &JobCtx| -> Result<Done<()>, String> {
+            let _ = rx.lock().unwrap().recv();
+            Ok(Done::new(()))
+        },
+    )
+    .unwrap();
+    (id, tx)
+}
+
+/// Summarize, then Cancel, then Summarize again: the cancelled job is still running until its work ends (here: when the test
+/// lets it), but it is stopping, so the new request is a new job and is not lost with the old one.
+#[test]
+fn a_request_after_cancel_is_a_new_job_not_the_one_being_stopped() {
+    use crate::ai::requests::AiRequest::Summarize;
+    let app = test_app_with_commands(None);
+    let (first, release_first) = held_spec(&app, ai_spec(Summarize { from: 0, to: 10 }, "main", 1));
+    wait_until("running", || jobs(&app).state_of(first) == Some(JobState::Running));
+    assert!(jobs(&app).cancel(first).is_ok());
+    assert_eq!(
+        jobs(&app).state_of(first),
+        Some(JobState::Running),
+        "the work has not ended: the job is still running"
+    );
+    let (second, release_second) = held_spec(&app, ai_spec(Summarize { from: 0, to: 10 }, "main", 1));
+    assert_ne!(first, second, "the request joined the job that is being cancelled");
+    drop((release_first, release_second));
 }
 
 #[test]

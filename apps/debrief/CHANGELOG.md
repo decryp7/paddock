@@ -19,6 +19,7 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 - **CPU:** After an import, Debrief no longer keeps a core busy while it sits idle: the background loops that build the name catalogue and the word-search index run no database statement when nothing has changed, and a pass over a very large Event Viewer import no longer compares every pair of names
 - **Names:** Opening another project while the name table is being rebuilt no longer shows the old project's names in the new window, and a change that arrives while a rebuild runs is no longer lost: it queues the next rebuild. A catalogue with one source that cannot be read is now treated as finished (the Jobs pane says how many sources are missing) instead of being waited for until the rebuild gave up
 - **Memory:** A capture that Debrief released from memory to make room for others is read again only if its file is unchanged since you opened it (otherwise it says to open it again), and it is read again by the same reader process as when you opened it, without holding up the captures you have open
+- **AI:** Asking for the same summary, event explanation or root-cause search again while it is queued or running (from the button, the menu or the palette) no longer starts a second job: it joins the first one in Jobs. A request made after you cancelled one starts a new job instead of joining the one being stopped
 
 ### Security
 

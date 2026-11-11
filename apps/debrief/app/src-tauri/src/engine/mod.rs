@@ -175,6 +175,12 @@ pub(crate) enum StoreKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct StoreId(u64);
 
+impl std::fmt::Display for StoreId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 impl StoreId {
     /// The next identity; unique in the process.
     fn next() -> StoreId {
@@ -313,6 +319,11 @@ impl Engine {
     /// The store if one is open (no worker start): for cheap questions such as "is anything loaded".
     pub(crate) fn opened(&self) -> Option<SharedStore> {
         crate::sync::read(&self.current).as_ref().map(|c| c.store.clone())
+    }
+
+    /// The identity of the open store, if one is open (no worker start, nothing created): for a key that must not open a store.
+    pub(crate) fn opened_id(&self) -> Option<StoreId> {
+        crate::sync::read(&self.current).as_ref().map(|c| c.id)
     }
 
     /// What the store's folder is (`None` before the first use).
@@ -637,6 +648,16 @@ mod tests {
         let release = worker_binary_with(false, evil);
         assert_ne!(release, PathBuf::from("/evil/store-worker"));
         assert!(release.file_name().unwrap().to_string_lossy().starts_with("debrief-store-worker"));
+    }
+
+    #[test]
+    fn asking_for_the_open_stores_identity_opens_nothing() {
+        let state = crate::windows::tests::window_state("engine-opened-id", debrief_core::PluginRegistry::new());
+        let engine = &state.engine;
+        assert_eq!(engine.opened_id(), None, "no store is open yet");
+        assert!(engine.opened().is_none(), "and asking did not create one");
+        let (id, _) = engine.tagged_store().unwrap();
+        assert_eq!(engine.opened_id(), Some(id));
     }
 
     #[test]

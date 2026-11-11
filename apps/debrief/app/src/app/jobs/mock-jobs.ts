@@ -69,6 +69,8 @@ interface Entry {
   result: JobResult | null;
   start: (() => void) | null;
   cancel: () => void;
+  /** Cancel was requested for a running job that has not ended yet: it is never joined by an equal request. */
+  stopping?: boolean;
   rerun: (() => Promise<unknown>) | null;
   doneTitle?: string;
 }
@@ -217,6 +219,11 @@ export class MockJobs implements JobsBackend {
     return { id: e.info.id, state: e.info.state, result: e.result, error: e.info.error, message: e.info.message };
   }
 
+  /** Whether job `id` is queued or running and not being stopped (also while the Jobs pane does not list it yet). */
+  isActive(id: number): boolean {
+    return this.entries.some((e) => e.info.id === id && !e.stopping && (e.info.state === 'queued' || e.info.state === 'running'));
+  }
+
   /** The id the next job gets. */
   nextId(): number {
     return this.next;
@@ -270,6 +277,8 @@ export class MockJobs implements JobsBackend {
           if (entry.info.state === 'queued') {
             this.finish(entry, 'cancelled');
             reject(new MockJobCancelled());
+          } else {
+            entry.stopping = true;
           }
         },
       };
