@@ -830,7 +830,10 @@ pub(crate) mod tests {
         tamper(&|f| *file(f, SIGNATURE) = vec![0xff, 0xfe], "not text");
         // A signature with an unsigned manifest.
         let p = sample(t.path(), None);
-        let signed = sample(&t.path().join("..").canonicalize().unwrap(), Some(&key));
+        let signed = sample(
+            &paddock_env::winpath::real_verbatim(&t.path().join("..")).unwrap(),
+            Some(&key),
+        );
         let mut sig = Vec::new();
         zip::ZipArchive::new(std::fs::File::open(&signed).unwrap())
             .unwrap()

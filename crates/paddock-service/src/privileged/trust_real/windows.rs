@@ -61,7 +61,11 @@ impl TrustPort for RealTrust {
     }
 
     fn canonical(&mut self, path: &str) -> io::Result<String> {
-        Ok(std::fs::canonicalize(path)?.to_string_lossy().into_owned())
+        Ok(
+            paddock_env::winpath::real_verbatim(std::path::Path::new(path))?
+                .to_string_lossy()
+                .into_owned(),
+        )
     }
 
     fn walk(&mut self, path: &str, limit: usize) -> io::Result<Vec<(String, Node)>> {

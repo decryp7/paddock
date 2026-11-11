@@ -103,7 +103,7 @@ impl HostFiles {
         let inside = grants
             .readable(manifest)
             .iter()
-            .filter_map(|r| std::fs::canonicalize(r).ok())
+            .filter_map(|r| paddock_env::winpath::real_verbatim(r).ok())
             .any(|r| resolved.starts_with(&r));
         if !inside {
             return Err(FileError::Denied(format!(
