@@ -837,6 +837,10 @@ M1's acceptance ("well below 1233 kB") is met at 1136.7 kB (−96 kB); the API d
 what remains is the window's own chrome (dock 132 kB, core 82, shell 66), Angular and the CDK (414 kB) and the stores
 that `app.ts` and the title bar import, which M3 moves behind the workbench.
 
+Review fixes, re-measured the same way on the fix head: main 1139.5 kB in 146 chunks (+2.8 kB), pop-out 1102.7 kB,
+about dialog 456.3 kB. The increase is the status bar's Retry slot for an item whose code failed to load (`src/app/shell`
++2.0 kB) and the `gated` flags of 80 command stubs (spread over the registration files).
+
 ## 2026-11-12, contributions in the shell's registry (Debrief 1.2 M1, branch feat/debrief-m1-contributions)
 
 M1 moves every Debrief contribution (commands and their keys, views, activity items, inspector sections, field
