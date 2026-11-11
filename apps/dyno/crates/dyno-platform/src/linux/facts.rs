@@ -1,6 +1,6 @@
 //! Slow-changing facts on Linux. Everything that would need a heavy or privileged tool is an unavailable reading
-//! with the reason: disk health (SMART) needs root and `smartctl`, pending updates would need the package manager
-//! to refresh its lists; neither is run.
+//! with the reason: pending updates would need the package manager to refresh its lists, so they are not run. Disk
+//! health (SMART) needs root and `smartctl`: the helper reads it, so without the helper the reading says so.
 
 use super::paths::{home_dir, read_text, read_trim, HostPaths};
 use super::tools::Tools;
@@ -100,7 +100,7 @@ impl FactsSource for LinuxFacts {
         let mut facts = SystemFacts::unknown(os);
         facts.declare_not_read_here(
             FactKind::Disks,
-            "Disk health (SMART) needs smartctl and administrator rights; Dyno doesn't run it",
+            "Disk health (SMART) needs the helper (smartctl and administrator rights); it is read once the helper is installed",
         );
         match self.restart_pending() {
             Some(pending) => facts.restart_pending = Reading::Available(pending),

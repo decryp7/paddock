@@ -111,7 +111,10 @@ impl AgentPort for NoAgent {
 }
 
 /// The sections that need no running app: the OS, the disk and (when `agent` answers) the agent.
-#[allow(clippy::disallowed_methods, reason = "the report describes this machine, so the build OS is the host")]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the report describes this machine, so the build OS is the host"
+)]
 fn disk_sections(agent: Arc<dyn AgentPort>) -> Vec<Arc<dyn Section>> {
     let runner: Arc<dyn ToolRunner> = Arc::new(dyno_platform::runner::SystemRunner);
     let host = dyno_agent::helper_os::host();
