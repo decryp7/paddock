@@ -724,8 +724,10 @@ pub struct RatchetEntry {
     pub scenario: String,
     /// The fault kind.
     pub fault: String,
-    /// The tag pattern this entry blocks, or `none` for a logging gap.
+    /// The tag pattern this entry blocks, or `none` for a logging gap or a deferred fault.
     pub blocks_tag: String,
+    /// Why a fault that is not a logging gap blocks no tag (the ADR or decision that deferred it); empty when it blocks.
+    pub deferred_by: String,
     /// The operating systems it applies to (empty: all).
     pub os: String,
 }
@@ -744,6 +746,7 @@ pub fn parse_ratchet(text: &str) -> Result<Vec<RatchetEntry>, String> {
             scenario: text_of(t, "scenario"),
             fault: text_of(t, "fault"),
             blocks_tag: text_of(t, "blocks_tag"),
+            deferred_by: text_of(t, "deferred_by"),
             os: text_of(t, "os"),
         })
         .collect())
@@ -938,9 +941,15 @@ pub fn findings(root: &Path, sites: &[Site], register: &Register, ratchet: &[Rat
             out.push(format!("{at}: unknown fault `{}`.", r.fault));
         }
         let logging = LOGGING_FAULTS.contains(&r.fault.as_str());
-        if r.blocks_tag.is_empty() || (r.blocks_tag == "none" && !logging) {
+        let deferred = !r.deferred_by.trim().is_empty();
+        if r.blocks_tag.is_empty() || (r.blocks_tag == "none" && !logging && !deferred) {
             out.push(format!(
-                "{at}: `blocks_tag` names the tag pattern this entry blocks (`dyno-v*`, `pitcrew-v*`); only a logging gap may say `none`."
+                "{at}: `blocks_tag` names the tag pattern this entry blocks (`dyno-v*`, `pitcrew-v*`); only a logging gap or a deferred fault may say `none` (a deferred fault names its decision in `deferred_by`)."
+            ));
+        }
+        if deferred && r.blocks_tag != "none" {
+            out.push(format!(
+                "{at}: a deferred entry says `none` in `blocks_tag`, or drop `deferred_by`."
             ));
         }
         for o in r.os.split(',').map(str::trim).filter(|o| !o.is_empty()) {

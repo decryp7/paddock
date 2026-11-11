@@ -275,7 +275,7 @@ blocks_tag = "none"
     let text = found.join("\n");
     assert!(text.contains("the endpoint is not in"), "{text}");
     assert!(text.contains("unknown scenario"), "{text}");
-    assert!(text.contains("only a logging gap may say `none`"), "{text}");
+    assert!(text.contains("only a logging gap or a deferred fault may say `none`"), "{text}");
     assert!(text.contains("unknown os `beos`"), "{text}");
     assert_eq!(found.len(), 4, "the good entries produce nothing: {text}");
 }
@@ -522,4 +522,31 @@ fn the_scan_reads_the_files_git_knows_and_not_the_file_system() {
     std::fs::write(dir.path().join("target/built.rs"), SERVER).unwrap();
     let files: Vec<String> = scan(dir.path()).unwrap().into_iter().map(|s| s.file).collect();
     assert_eq!(files, ["src/m\u{fc}ller server.rs", "src/tracked.rs", "src/untracked.rs"]);
+}
+
+/// A deferred fault (user's 2026-11-11 trim of ADR 0072) stays listed but blocks no tag; one without the reason still blocks.
+#[test]
+fn a_deferred_fault_blocks_no_tag_and_one_without_the_reason_still_does() {
+    let entry = |blocks: &str, deferred: &str| {
+        format!(
+            "[[ratchet]]\ninstance = \"I1\"\nendpoint = \"ep\"\nscenario = \"stop-with-open-connection\"\nfault = \"no-reason\"\nblocks_tag = \"{blocks}\"\n{deferred}\n"
+        )
+    };
+    let files = [("src/server.rs", SERVER), ("tests/endings.rs", TEST_FILE)];
+    let deferred = entry("none", "deferred_by = \"ADR 0072, trimmed 2026-11-11\"");
+    let found = run(&files, GOOD_REGISTER, &deferred);
+    assert!(found.is_empty(), "a deferred entry is well formed: {found:?}");
+    let ratchet = parse_ratchet(&deferred).unwrap();
+    assert!(blocked_by(&ratchet, "dyno-v1.1.1").is_empty(), "a deferred fault blocks no tag");
+
+    let bare = entry("none", "");
+    let found = run(&files, GOOD_REGISTER, &bare).join("\n");
+    assert!(found.contains("only a logging gap or a deferred fault may say `none`"), "{found}");
+
+    let both = entry("dyno-v*", "deferred_by = \"ADR 0072\"");
+    let found = run(&files, GOOD_REGISTER, &both).join("\n");
+    assert!(found.contains("a deferred entry says `none`"), "{found}");
+
+    let blocking = parse_ratchet(&entry("dyno-v*", "")).unwrap();
+    assert_eq!(blocked_by(&blocking, "dyno-v1.1.1").len(), 1, "no reason, still blocks");
 }
