@@ -21,7 +21,6 @@ use paddock_jobs::time::Clock;
 use paddock_jobs::{JobContext, Phase};
 use paddock_net::{Egress, Policy, Reach, SystemLookup};
 use sha2::{Digest, Sha256};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -306,23 +305,10 @@ fn hex(b: &[u8]) -> String {
 /// Writes the staging file, moves the older `current-*` files aside (the newest becomes `previous.mmdb`, the rest go) and puts the
 /// new file in place.
 fn swap_in(cache: &Path, y: i32, m: u32, raw: &[u8]) -> std::io::Result<()> {
-    std::fs::create_dir_all(cache)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(cache, std::fs::Permissions::from_mode(0o700))?;
-    }
+    let held = crate::paths::open_private_io(cache, "the geo cache folder")?;
     let staging = cache.join(".staging");
-    {
-        let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).open(&staging)?;
-        f.write_all(raw)?;
-        f.sync_all()?;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o600))?;
-    }
+    held.write_atomic(".staging", raw)
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
     let mut older: Vec<PathBuf> = std::fs::read_dir(cache)?
         .flatten()
         .map(|e| e.path())
@@ -365,6 +351,7 @@ mod tests {
     use flate2::{write::GzEncoder, Compression};
     use paddock_jobs::time::FakeClock;
     use paddock_net::{FakeWire, Reply, StaticLookup};
+    use std::io::Write;
 
     // 2026-11-03 12:00 UTC.
     const NOW_MS: i64 = 1_793_707_200_000;
@@ -534,5 +521,38 @@ mod tests {
         let last = Some(i64::try_from(day(2) * 1000).unwrap());
         assert!(!automatic_due(day(2) + 3600, last, Some((2026, 10))), "inside the floor");
         assert!(automatic_due(day(3), last, Some((2026, 10))), "daily until the file appears");
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_cache_folder_others_can_write_is_refused_and_left_as_it_was() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_tmp, open) = crate::paths::tests::open_parent();
+        let e = swap_in(&open, 2026, 11, b"x").unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{e}");
+        assert_eq!(
+            std::fs::metadata(&open).unwrap().permissions().mode() & 0o777,
+            0o777,
+            "never tightened"
+        );
+        assert_eq!(std::fs::read_dir(&open).unwrap().count(), 0, "nothing was written");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_new_cache_folder_is_owner_only_and_the_staged_file_is_too() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let cache = tmp.path().join("cache");
+        swap_in(&cache, 2026, 11, b"x").unwrap();
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&cache), 0o700);
+        assert_eq!(mode(&cache.join(file_name(2026, 11))), 0o600);
+    }
+    #[cfg(windows)]
+    #[test]
+    fn windows_a_geo_cache_folder_everyone_can_write_is_refused() {
+        let (_tmp, open) = crate::paths::tests::everyone_folder();
+        let e = swap_in(&open, 2026, 11, b"x").unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{e}");
     }
 }

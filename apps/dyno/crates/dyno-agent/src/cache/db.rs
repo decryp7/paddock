@@ -290,26 +290,40 @@ pub fn wipe_in_place(path: &Path) -> Result<(), CacheError> {
     Ok(())
 }
 
+/// Makes the database's folder and file ready (ADR 0092): the folder through the shared private-folder type (made owner-only, or an
+/// existing one checked and refused when others can change it), the file created through the same held folder owner-only from its
+/// first byte, or, when it exists, checked from its handle (owner, no group or other access). SQLite gives `-wal` and `-shm` the
+/// same mode on Unix; on Windows they inherit the folder's owner-only descriptor. Nothing is narrowed after creation, and an
+/// existing file open to others is refused as it is (no migration): the next step is in the error text and the log.
 fn prepare_folder(path: &Path) -> Result<(), CacheError> {
-    if let Some(dir) = path.parent() {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-            std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
-            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name().and_then(|n| n.to_str())) else {
+        return Err(CacheError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "the cache database needs a folder and a name",
+        )));
+    };
+    let held = crate::paths::open_private_io(dir, "the cache folder")?;
+    let refused = |e: paddock_env::private::PrivateError| {
+        log::warn!(Why = e.reason(); "Not using the cache database: it is not safe");
+        CacheError::Io(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("{e}. Next step: delete the cache folder and start Dyno again (it is rebuilt)"),
+        ))
+    };
+    match held.open_file(name) {
+        Ok(_) => Ok(()),
+        Err(paddock_env::private::PrivateError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {
+            match held.create_new_file(name) {
+                Ok(_) => Ok(()),
+                // A concurrent opener made it first: check what it made like any existing file.
+                Err(paddock_env::private::PrivateError::Io { source, .. }) if source.kind() == std::io::ErrorKind::AlreadyExists => {
+                    held.open_file(name).map(|_| ()).map_err(refused)
+                }
+                Err(e) => Err(refused(e)),
+            }
         }
-        #[cfg(not(unix))]
-        std::fs::create_dir_all(dir)?;
+        Err(e) => Err(refused(e)),
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        // Created private from the first byte; SQLite gives `-wal` and `-shm` the same mode.
-        let f = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(path)?;
-        drop(f);
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    }
-    Ok(())
 }
 
 impl CacheDb {
@@ -711,7 +725,8 @@ pub(crate) mod tests {
     #[test]
     fn creates_saves_lists_and_loads_back() {
         let d = tempfile::tempdir().unwrap();
-        let mut db = open_in(d.path());
+        let folder = d.path().join("cache");
+        let mut db = open_in(&folder);
         let t = tree("alpha", 50);
         let saved = db.save_disk(&params("volume:/"), &t, 5000, CacheLimits::default(), &Roomy).unwrap();
         let rows = db.list().unwrap();
@@ -727,7 +742,7 @@ pub(crate) mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
-            assert_eq!(mode(d.path()), 0o700);
+            assert_eq!(mode(&folder), 0o700);
             assert_eq!(mode(db.path()), 0o600);
         }
     }
@@ -799,6 +814,8 @@ pub(crate) mod tests {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("cache.db");
         std::fs::write(&p, vec![0xAB; 5000]).unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(&p, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
         std::fs::write(files_of(&p)[1].clone(), b"stale wal").unwrap();
         std::fs::write(files_of(&p)[2].clone(), b"stale shm").unwrap();
         match CacheDb::open(&p).unwrap() {
@@ -1157,5 +1174,40 @@ pub(crate) mod tests {
             delete_files(&d.path().join("never-existed.db")).is_ok(),
             "nothing there is not a failure"
         );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_cache_under_a_parent_others_can_change_is_refused_and_holds_no_database() {
+        let (_tmp, open) = crate::paths::tests::open_parent();
+        let e = CacheDb::open(&open.join("cache").join("cache.db")).err().expect("refused");
+        assert!(e.to_string().contains("chmod go-w"), "{e}");
+        assert!(
+            !open.join("cache").join("cache.db").exists(),
+            "no database file was made in the open folder's child"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_existing_cache_file_open_to_others_is_refused_not_narrowed() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("cache.db");
+        std::fs::write(&path, b"").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(CacheDb::open(&path).is_err());
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o644,
+            "left as it was"
+        );
+    }
+    #[cfg(windows)]
+    #[test]
+    fn windows_a_cache_folder_everyone_can_write_is_refused_and_a_new_database_opens_in_a_private_one() {
+        let (tmp, open) = crate::paths::tests::everyone_folder();
+        let e = CacheDb::open(&open.join("cache.db")).err().expect("refused");
+        assert!(e.to_string().contains("Security tab") || e.to_string().contains("entries"), "{e}");
+        let _ = open_in(&tmp.path().join("own"));
     }
 }
