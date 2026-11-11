@@ -30,6 +30,11 @@ fn open_guard() -> pitcrew_service::protected::FolderGuard {
     Arc::new(|_| Ok(()))
 }
 
+thread_local! {
+    /// The forget hook the next `Harness::build` on this thread uses (set by the test that watches it).
+    static FORGET: std::cell::RefCell<Option<pitcrew_service::protected::ForgetHook>> = const { std::cell::RefCell::new(None) };
+}
+
 fn no_prepare() -> pitcrew_service::protected::PrepareHook {
     Arc::new(|_| Ok(None))
 }
@@ -141,6 +146,7 @@ impl Harness {
             settle_runner_dir: Arc::new(|_| None),
             runner_folder_guard: guard,
             prepare_runner_dir: prepare,
+            forget_runner_dir: FORGET.with(|f| f.borrow_mut().take()).unwrap_or_else(|| Arc::new(|_| Ok(None))),
             data_dir: data,
             launcher,
             sources: Sources::public(),
@@ -730,6 +736,35 @@ fn a_new_runner_whose_folder_does_not_exist_yet_is_made_and_then_accepted_by_the
         runner: RunnerName::parse("fresh").unwrap(),
     });
     assert!(matches!(&disk, Response::Error(e) if e.message.contains("is missing")), "{disk:?}");
+    h.finish();
+}
+
+/// Round 5 P2-3: removing a runner forgets its folder in the list of folders the service made, once the runner is gone; a hook that
+/// fails does not undo the removal.
+#[test]
+fn removing_a_runner_forgets_its_folder_in_the_list_the_service_keeps() {
+    let seen: Arc<std::sync::Mutex<Vec<PathBuf>>> = Arc::default();
+    let s = seen.clone();
+    FORGET.with(|f| {
+        *f.borrow_mut() = Some(Arc::new(move |dir: &std::path::Path| {
+            s.lock().unwrap().push(dir.to_path_buf());
+            Ok(Some("forgotten".into()))
+        }));
+    });
+    let mut h = Harness::new("forget", "mode=idle\n", true);
+    let name = h.name.clone();
+    assert_eq!(h.ask(Request::RemoveRunner { runner: name.clone() }), Response::Ok);
+    assert_eq!(*seen.lock().unwrap(), [h.runner_dir.clone()]);
+    // A runner nobody has: nothing is forgotten.
+    assert!(matches!(h.ask(Request::RemoveRunner { runner: name }), Response::Error(_)));
+    assert_eq!(seen.lock().unwrap().len(), 1);
+    h.finish();
+
+    // A failing hook is logged, and the runner is removed all the same.
+    FORGET.with(|f| *f.borrow_mut() = Some(Arc::new(|_| Err("the list is locked".into()))));
+    let mut h = Harness::new("forget2", "mode=idle\n", true);
+    let name = h.name.clone();
+    assert_eq!(h.ask(Request::RemoveRunner { runner: name }), Response::Ok);
     h.finish();
 }
 

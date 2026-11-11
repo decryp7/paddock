@@ -156,6 +156,9 @@ pub struct Env {
     /// rules at creation, when the nearest existing folder above it is admin-only; `Ok(None)` when nothing was needed. Without it
     /// a new runner's folder would be "missing" to the guard for good (`protected::prepare_runner_dir`).
     pub prepare_runner_dir: crate::protected::PrepareHook,
+    /// Forgets a removed runner's folder in the list of folders the service made (`protected::forget_adopted`), so a folder put at
+    /// the same path later is not accepted on the old entry.
+    pub forget_runner_dir: crate::protected::ForgetHook,
     /// Starts runner processes.
     pub launcher: Box<dyn Launcher>,
     /// Release information and downloads.
@@ -240,6 +243,7 @@ pub fn os_env(data_dir: PathBuf) -> Env {
         settle_runner_dir: crate::protected::os_settle(data_for_settle),
         runner_folder_guard: crate::protected::os_folder_guard(data_dir.clone()),
         prepare_runner_dir: crate::protected::os_prepare(data_dir.clone()),
+        forget_runner_dir: crate::protected::os_forget(data_dir.clone()),
         base_path,
         exe_stamp,
         data_dir,
@@ -1753,11 +1757,28 @@ impl Supervisor {
             Request::RemoveRunner { runner } => {
                 let mut cfg = self.config.clone();
                 let before = cfg.runners.len();
+                let dir = cfg.runners.iter().find(|r| r.name == runner).map(|r| r.dir.clone());
                 cfg.runners.retain(|r| r.name != runner);
                 if cfg.runners.len() == before {
                     unknown(&runner)
                 } else {
-                    self.save_settings(cfg, now)
+                    let answer = self.save_settings(cfg, now);
+                    if let (Response::Ok, Some(dir)) = (&answer, dir) {
+                        // Only once the runner is gone: its folder leaves the list of folders the service made. A failure is logged,
+                        // not an error: the runner is removed either way, and an entry left behind is bound to the old folder.
+                        match (self.env.forget_runner_dir)(&dir) {
+                            Ok(Some(line)) => self.log_service(now, &format!("runner {runner}: {line}")),
+                            Ok(None) => {}
+                            Err(why) => self.log_service(
+                                now,
+                                &format!(
+                                    "runner {runner}: its folder {} could not be removed from the folders the service made ({why})",
+                                    dir.display()
+                                ),
+                            ),
+                        }
+                    }
+                    answer
                 }
             }
             Request::Register {

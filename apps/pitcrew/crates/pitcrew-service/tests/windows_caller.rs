@@ -16,7 +16,10 @@ use pitcrew_core::config::RunnerConfig;
 use pitcrew_core::names::RunnerName;
 use pitcrew_core::protocol::{read_frame, write_frame, ErrorCode, Request, Response, PROTOCOL_VERSION};
 use pitcrew_service::host::Host;
-use pitcrew_service::protected::{check_runner_folder, ensure_protected_root, settle_runner_dir, RootOutcome};
+use pitcrew_service::protected::{
+    check_adopted_runner_folder, check_runner_folder, ensure_protected_root, forget_adopted, prepare_runner_dir, read_adopted,
+    settle_runner_dir, RootOutcome, ADOPTED_FILE,
+};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -308,6 +311,99 @@ fn a_grandchild_of_a_settled_service_runner_folder_is_not_writable_by_a_user() {
             "a standard user made a folder two levels inside a settled service runner's folder"
         );
     }
+}
+
+/// What `os_prepare` records and `os_folder_guard` reads, on a real NTFS volume (round 5 P2-1; `os_prepare` and `os_folder_guard`
+/// themselves act only as LocalSystem, so this row runs their steps as the elevated administrator): the service makes a runner's
+/// folder (recorded first, then bound to the file it made), the guard accepts it; the folder renamed away and another put at the same
+/// name is refused; removing the runner forgets the entry.
+#[test]
+#[ignore = "VM: PITCREW_TEST_EXPECT=elevated"]
+fn the_folder_the_service_made_is_accepted_and_a_replacement_under_its_name_is_not() {
+    assert_eq!(expectation(), "elevated", "this row makes protected folders");
+    let root = PathBuf::from(format!("{}-adopt", settle_root().display()));
+    let _ = std::fs::remove_dir_all(&root);
+    let out = ensure_protected_root(&mut RealTrust, &list_real, &root, &["pitcrew.toml"], &["logs", "runners"]).unwrap();
+    println!("MEASURED data folder: {out:?}");
+    let file = root.join(ADOPTED_FILE);
+    let dir = root.join("runners").join("made");
+    let mut record = |made: &Path, id: Option<paddock_service::privileged::trust::FileIdentity>| -> Result<(), String> {
+        let mut list = read_adopted(&file)?;
+        match id {
+            Some(id) => list.bind(made, id),
+            None => list.insert(made),
+        }
+        pitcrew_service::store::write_atomic(&file, &list.to_json()).map_err(|e| e.to_string())
+    };
+    let line = prepare_runner_dir(&mut RealTrust, &dir, &mut record).unwrap();
+    println!("MEASURED prepare: {line:?}");
+    let accepts = |dir: &Path| check_adopted_runner_folder(&mut RealTrust, &list_real, &read_adopted(&file).unwrap(), dir);
+    let accepted = accepts(&dir);
+    println!("MEASURED guard on the folder the service made: {accepted:?}");
+    assert!(accepted.is_ok(), "{accepted:?}");
+    // Swapped: the made folder moves away, another (same protections, made by the same account) takes its name.
+    std::fs::rename(&dir, root.join("runners").join("moved")).unwrap();
+    std::fs::create_dir(&dir).unwrap();
+    let swapped = accepts(&dir).unwrap_err();
+    println!("MEASURED guard on a replacement: {swapped}");
+    assert!(swapped.contains("replaced") || swapped.contains("never bound"), "{swapped}");
+    assert_eq!(forget_adopted(&file, &dir), Ok(true));
+    assert!(!read_adopted(&file).unwrap().contains(&dir));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Round 5 P1-2 and P2-9 on a real folder: a file in `logs` with a second hard link is moved aside, one with a single name stays, and a
+/// second start does not move the aside again.
+#[test]
+#[ignore = "VM: PITCREW_TEST_EXPECT=elevated"]
+fn the_sweep_of_logs_moves_a_hard_linked_file_aside_once() {
+    assert_eq!(expectation(), "elevated", "this row makes protected folders");
+    let root = PathBuf::from(format!("{}-sweep", settle_root().display()));
+    let _ = std::fs::remove_dir_all(&root);
+    ensure_protected_root(&mut RealTrust, &list_real, &root, &["pitcrew.toml"], &["logs"]).unwrap();
+    let logs = root.join("logs");
+    std::fs::write(logs.join("service.log"), b"x").unwrap();
+    std::fs::write(logs.join("planted.log"), b"x").unwrap();
+    let outside = root.join("outside-name.log");
+    std::fs::hard_link(logs.join("planted.log"), &outside).unwrap();
+    let first = ensure_protected_root(&mut RealTrust, &list_real, &root, &["pitcrew.toml"], &["logs"]).unwrap();
+    println!("MEASURED first start: {first:?}");
+    let RootOutcome::Locked(swept) = first else { panic!("{first:?}") };
+    assert_eq!(swept.moved.len(), 1, "{swept:?}");
+    assert!(
+        swept.moved[0].0.ends_with("planted.log") && swept.moved[0].2.contains("hard link"),
+        "{swept:?}"
+    );
+    assert!(logs.join("service.log").exists(), "a file with one name stays");
+    let second = ensure_protected_root(&mut RealTrust, &list_real, &root, &["pitcrew.toml"], &["logs"]).unwrap();
+    println!("MEASURED second start: {second:?}");
+    assert!(matches!(second, RootOutcome::Locked(s) if s.moved.is_empty() && s.failed.is_empty()));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Round 5 P1-1 on Windows: a second per-user engine on one folder is refused (the lock is `File::try_lock`, LockFileEx here), and the
+/// first keeps working.
+#[test]
+#[ignore = "VM: PITCREW_TEST_EXPECT=standard"]
+fn a_second_per_user_engine_on_one_folder_is_refused() {
+    use pitcrew_service::ipc::ServeMode;
+    assert_eq!(expectation(), "standard", "the per-user engine runs as an ordinary user");
+    let data = scratch("two-engines");
+    let first = Host::start_with(data.clone(), data.clone(), ServeMode::User, |e| panic!("the engine stopped: {e}")).unwrap();
+    let before = std::fs::read_to_string(data.join(pitcrew_core::service_paths::USER_ENGINE_PIPE_FILE)).unwrap();
+    let second = Host::start_with(data.clone(), data.clone(), ServeMode::User, |_| {})
+        .err()
+        .expect("a second engine must be refused");
+    println!("MEASURED second engine: {second}");
+    assert!(second.to_string().contains("already running"), "{second}");
+    let after = std::fs::read_to_string(data.join(pitcrew_core::service_paths::USER_ENGINE_PIPE_FILE)).unwrap();
+    assert_eq!(before, after, "the refused engine did not touch pipe.name");
+    assert!(
+        pitcrew_core::service_paths::open_pipe_options().open(before.trim()).is_ok(),
+        "the first engine's pipe still answers"
+    );
+    first.stop();
+    let _ = std::fs::remove_dir_all(&data);
 }
 
 /// The per-user engine (ADR 0004, second amendment) as the standard user runs it: its pipe is owned by that user and the app's

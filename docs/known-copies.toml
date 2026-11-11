@@ -61,6 +61,21 @@ status = "built"
   delete_by = "pitcrew-v1.1.0"
 
 [[mechanism]]
+id = "own-token-elevated"
+title = "Whether this process runs with an elevated token (Windows TokenElevation; unknown counts as elevated)"
+canonical = "pitcrew-service"
+paths = ["apps/pitcrew/crates/pitcrew-service/src/platform/win_session.rs"]
+symbols = ["item:is_elevated"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["apps/pitcrew/app/src-tauri/src/service_install.rs"]
+  symbols = ["item:app_is_elevated"]
+  owner = "pitcrew"
+  delete_by = "pitcrew-v1.1.0"
+  note = "The app does not depend on pitcrew-service and the shared paddock-ipc has no own-process check, so the app keeps its own copy (Pitcrew round 5, P2-6: no shared home now, user 2026-11-12). Debrief has its own copies of the same call (debrief-ipc elevation.rs, debrief-plugin-tools, debrief-etw, debrief-plugin-dotnet, its app's system.rs); a shared home is one function in paddock-ipc (identity.rs) that all of them call."
+
+[[mechanism]]
 id = "launch-at-login"
 title = "The launch-at-login switch: the app's own login item and the start reason (login item, restored at login)"
 canonical = "paddock-service"

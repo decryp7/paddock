@@ -22,7 +22,9 @@
 
 use paddock_service::privileged::files::FileKind;
 use paddock_service::privileged::install::without_verbatim_prefix;
-use paddock_service::privileged::trust::{is_trusted_sid, is_within, parent_of, verify_chain, Reason, Security, TrustPort, Untrusted};
+use paddock_service::privileged::trust::{
+    is_trusted_sid, is_within, parent_of, verify_chain, FileIdentity, Reason, Security, TrustPort, Untrusted,
+};
 use pitcrew_core::config::{RunnerConfig, SessionMode};
 use std::path::Path;
 use std::sync::Arc;
@@ -111,28 +113,31 @@ pub const ADOPTED_FILE: &str = "adopted-folders.json";
 /// blocked until it is adopted. The list lives in the data folder (administrator-only, and checked at start like the
 /// configuration), never in a runner's folder; text that cannot be read is the empty list (fail closed).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Adopted(std::collections::BTreeSet<String>);
+pub struct Adopted(std::collections::BTreeMap<String, Option<FileIdentity>>);
 
 fn adopted_key(p: &Path) -> String {
     text(p).replace('/', "\\").trim_end_matches('\\').to_lowercase()
 }
 
+/// One entry of the list file: the folder and, once the folder exists, which folder it is (volume and file index).
+#[derive(serde::Serialize, serde::Deserialize)]
+struct AdoptedEntry {
+    path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    volume: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    index: Option<u64>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct AdoptedFile {
+    folders: Vec<AdoptedEntry>,
+}
+
 impl Adopted {
     /// Reads the file's text; anything that is not the expected JSON is no folders at all.
     pub fn parse(text: &str) -> Self {
-        #[derive(serde::Deserialize)]
-        struct File {
-            folders: Vec<String>,
-        }
-        serde_json::from_str::<File>(text).map_or_else(
-            |_| Adopted::default(),
-            |f| Adopted(f.folders.iter().map(|d| adopted_key(Path::new(d))).collect()),
-        )
-    }
-
-    /// The file's text.
-    pub fn to_json(&self) -> String {
-        serde_json::json!({ "folders": self.0.iter().collect::<Vec<_>>() }).to_string()
+        Adopted::try_parse(text).unwrap_or_default()
     }
 
     /// The file's text as a list: an error (to be logged) when it is not the expected JSON, never silently no folders. The caller
@@ -141,23 +146,62 @@ impl Adopted {
     /// # Errors
     /// The text is not the list's JSON.
     pub fn try_parse(text: &str) -> Result<Self, String> {
-        #[derive(serde::Deserialize)]
-        struct File {
-            folders: Vec<String>,
-        }
-        serde_json::from_str::<File>(text)
-            .map(|f| Adopted(f.folders.iter().map(|d| adopted_key(Path::new(d))).collect()))
+        serde_json::from_str::<AdoptedFile>(text)
+            .map(|f| {
+                Adopted(
+                    f.folders
+                        .into_iter()
+                        .map(|e| {
+                            let id = e
+                                .volume
+                                .zip(e.index)
+                                .map(|(volume, index)| FileIdentity { volume, index, links: 1 });
+                            (adopted_key(Path::new(&e.path)), id)
+                        })
+                        .collect(),
+                )
+            })
             .map_err(|e| format!("{ADOPTED_FILE} is not the list of folders the service made ({e})"))
     }
 
-    /// Adds a folder (paths compare without case or trailing separators, as on Windows).
+    /// The file's text.
+    pub fn to_json(&self) -> String {
+        let folders = self
+            .0
+            .iter()
+            .map(|(path, id)| AdoptedEntry {
+                path: path.clone(),
+                volume: id.map(|i| i.volume),
+                index: id.map(|i| i.index),
+            })
+            .collect();
+        serde_json::to_string(&AdoptedFile { folders }).unwrap_or_default()
+    }
+
+    /// Adds a folder, not yet bound to a file (paths compare without case or trailing separators, as on Windows). Where the port can
+    /// tell files apart, an entry without a file is **not accepted** until [`Adopted::bind`] gives it one.
     pub fn insert(&mut self, dir: &Path) {
-        self.0.insert(adopted_key(dir));
+        self.0.entry(adopted_key(dir)).or_insert(None);
+    }
+
+    /// Binds the folder's entry to the file it is (replacing what was there).
+    pub fn bind(&mut self, dir: &Path, id: FileIdentity) {
+        self.0.insert(adopted_key(dir), Some(id));
+    }
+
+    /// Forgets a folder; whether it was there.
+    pub fn remove(&mut self, dir: &Path) -> bool {
+        self.0.remove(&adopted_key(dir)).is_some()
     }
 
     /// Whether the service made (or adopted) the folder.
     pub fn contains(&self, dir: &Path) -> bool {
-        self.0.contains(&adopted_key(dir))
+        self.0.contains_key(&adopted_key(dir))
+    }
+
+    /// The file the folder's entry is bound to (`None`: not in the list, or not bound).
+    pub fn bound(&self, dir: &Path) -> Option<FileIdentity> {
+        self.0.get(&adopted_key(dir)).copied().flatten()
     }
 }
 
@@ -179,8 +223,36 @@ pub fn check_adopted_runner_folder(
             text(dir)
         ));
     }
+    // The entry names a path; it must also be this folder. A folder swapped in under the recorded name (renamed away and replaced) is a
+    // different file, and an entry that was never bound to a file is not accepted either. A port that cannot tell files apart
+    // (`identity` is `None`) leaves the path as the only evidence, as the fakes do.
+    if let Some(actual) = port
+        .identity(&text(dir))
+        .map_err(|e| format!("{} could not be identified ({e}); the service did not touch it", text(dir)))?
+    {
+        match adopted.bound(dir) {
+            Some(recorded) if (recorded.volume, recorded.index) == (actual.volume, actual.index) => {}
+            Some(_) => {
+                return Err(format!(
+                "{} is not the folder this service made under that name (it was replaced); the service accepts only the folder it made. \
+                     Remove the runner and add it again",
+                text(dir)
+            ))
+            }
+            None => {
+                return Err(format!(
+                    "{} is recorded as made by this service but was never bound to the folder it made; it stays blocked. Remove the \
+                     runner and add it again",
+                    text(dir)
+                ))
+            }
+        }
+    }
     check_runner_folder(port, list, dir)
 }
+
+/// What records a runner folder in the list of folders the service made: the folder, and the file it is once it exists.
+pub type Record<'a> = dyn FnMut(&Path, Option<FileIdentity>) -> Result<(), String> + 'a;
 
 /// Makes the folder `dir` and any folders above it that do not exist yet, each with the protected rules **at creation**
 /// (`TrustPort::create_dir`: no moment in which a user could add to it), but only when the nearest folder that does exist is itself
@@ -190,11 +262,7 @@ pub fn check_adopted_runner_folder(
 ///
 /// # Errors
 /// The nearest existing folder is one a user can change, or a folder could not be made.
-pub fn prepare_runner_dir(
-    port: &mut dyn TrustPort,
-    dir: &Path,
-    record: &mut dyn FnMut(&Path) -> Result<(), String>,
-) -> Result<Option<String>, String> {
+pub fn prepare_runner_dir(port: &mut dyn TrustPort, dir: &Path, record: &mut Record) -> Result<Option<String>, String> {
     let d = text(dir);
     if port.node(&d).map_err(|e| format!("{d} could not be examined ({e})"))?.is_some() {
         return Ok(None);
@@ -219,9 +287,16 @@ pub fn prepare_runner_dir(
     // Recorded first, in the service's own (administrator-only) folder, never in the runner's: a folder that could not be recorded is
     // not made, so no protected folder is left that nobody accepts. A recorded folder that was never made is only a name the guard
     // finds missing.
-    record(dir).map_err(|e| format!("{d} could not be recorded as the service's own ({e}); nothing was made"))?;
+    record(dir, None).map_err(|e| format!("{d} could not be recorded as the service's own ({e}); nothing was made"))?;
     for p in missing.iter().rev() {
         port.create_dir(p).map_err(|e| format!("{p} could not be made ({e})"))?;
+    }
+    // Then the entry is bound to the folder just made: which file it is, so a folder put there later under the same name is not it.
+    let made = port
+        .identity(&d)
+        .map_err(|e| format!("{d} was made but could not be identified ({e}); it stays blocked"))?;
+    if let Some(id) = made {
+        record(dir, Some(id)).map_err(|e| format!("{d} was made but its entry could not be bound to it ({e}); it stays blocked"))?;
     }
     Ok(Some(format!("made the runner folder {d} (administrators and SYSTEM only)")))
 }
@@ -251,13 +326,53 @@ pub fn os_prepare(data_dir: std::path::PathBuf) -> PrepareHook {
             if !crate::platform::win_session::is_local_system() {
                 return Ok(None);
             }
-            let mut record = |made: &Path| -> Result<(), String> {
+            let mut record = |made: &Path, id: Option<FileIdentity>| -> Result<(), String> {
                 let file = data_dir.join(ADOPTED_FILE);
                 let mut list = read_adopted(&file)?;
-                list.insert(made);
+                match id {
+                    Some(id) => list.bind(made, id),
+                    None => list.insert(made),
+                }
                 crate::store::write_atomic(&file, &list.to_json()).map_err(|e| e.to_string())
             };
             prepare_runner_dir(&mut paddock_service::privileged::trust_real::RealTrust, dir, &mut record)
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        drop(data_dir);
+        Arc::new(|_| Ok(None))
+    }
+}
+
+/// Removes `dir` from the list of folders the service made, in `file` (the data folder's `adopted-folders.json`). Returns whether it
+/// was there. A missing file is nothing to remove.
+///
+/// # Errors
+/// The list cannot be read, is not the list, or cannot be written; the cause is in the message.
+pub fn forget_adopted(file: &Path, dir: &Path) -> Result<bool, String> {
+    let mut list = read_adopted(file)?;
+    if !list.remove(dir) {
+        return Ok(false);
+    }
+    crate::store::write_atomic(file, &list.to_json()).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+/// What forgets a removed runner's folder: it leaves the list, so a folder put at the same path later is not accepted on the old
+/// entry. Returns a line for the service log when an entry was removed.
+pub type ForgetHook = Arc<dyn Fn(&Path) -> Result<Option<String>, String> + Send + Sync>;
+
+/// The forget hook of this OS: on Windows as LocalSystem, [`forget_adopted`] over the data folder's list; nothing elsewhere.
+pub fn os_forget(data_dir: std::path::PathBuf) -> ForgetHook {
+    #[cfg(windows)]
+    {
+        Arc::new(move |dir| {
+            if !crate::platform::win_session::is_local_system() {
+                return Ok(None);
+            }
+            forget_adopted(&data_dir.join(ADOPTED_FILE), dir)
+                .map(|was| was.then(|| format!("{} is no longer a folder the service made (the runner was removed)", dir.display())))
         })
     }
     #[cfg(not(windows))]
@@ -516,11 +631,20 @@ pub fn ensure_protected_root(
                         Security::Windows(d) => is_trusted_sid(&d.owner),
                         Security::Unix { .. } => true,
                     };
-                    if n.kind == FileKind::Symlink || !ours {
+                    // A file with a second name is a hard link a user may hold from outside the folder: a write the service makes
+                    // through this name would reach their file, and their name keeps reaching what the service wrote (round 5 P2-9).
+                    let hard_linked = n.kind == FileKind::File
+                        && port
+                            .identity(&entry)
+                            .map_err(|e| io("Identifying", e))?
+                            .is_some_and(|id| id.links > 1);
+                    if n.kind == FileKind::Symlink || !ours || hard_linked {
                         let why = if n.kind == FileKind::Symlink {
                             "a link"
-                        } else {
+                        } else if !ours {
                             "not owned by SYSTEM or Administrators"
+                        } else {
+                            "a file with more than one hard link"
                         };
                         match port.rename_aside(&entry) {
                             Ok(aside) => swept.moved.push((entry, aside, why.to_string())),
@@ -904,6 +1028,148 @@ mod tests {
         }
     }
 
+    /// A port that also knows which file each path is (the fake models no identities): `ids` by lower-case path.
+    struct WithIds<'a>(&'a mut FakePort, std::collections::HashMap<String, FileIdentity>);
+    impl paddock_service::privileged::trust::TrustPort for WithIds<'_> {
+        fn style(&self) -> Style {
+            self.0.style()
+        }
+        fn node(&mut self, p: &str) -> std::io::Result<Option<paddock_service::privileged::trust::Node>> {
+            self.0.node(p)
+        }
+        fn identity(&mut self, p: &str) -> std::io::Result<Option<FileIdentity>> {
+            Ok(self.1.get(&self.0.key(p)).copied())
+        }
+        fn canonical(&mut self, p: &str) -> std::io::Result<String> {
+            self.0.canonical(p)
+        }
+        fn walk(&mut self, p: &str, l: usize) -> std::io::Result<Vec<(String, paddock_service::privileged::trust::Node)>> {
+            self.0.walk(p, l)
+        }
+        fn create_dir(&mut self, p: &str) -> std::io::Result<()> {
+            self.0.create_dir(p)
+        }
+        fn lock_dir(&mut self, p: &str) -> std::io::Result<()> {
+            self.0.lock_dir(p)
+        }
+        fn rename_aside(&mut self, p: &str) -> std::io::Result<String> {
+            self.0.rename_aside(p)
+        }
+        fn sweep_aside(&mut self, a: &str, b: &str, k: usize) -> std::io::Result<Vec<String>> {
+            self.0.sweep_aside(a, b, k)
+        }
+        fn remove_tree(&mut self, p: &str) -> std::io::Result<()> {
+            self.0.remove_tree(p)
+        }
+    }
+
+    fn id(index: u64, links: u32) -> FileIdentity {
+        FileIdentity { volume: 7, index, links }
+    }
+
+    /// Round 5 P2-9: a file in `logs` with a second hard link is moved aside, one with a single link stays.
+    #[test]
+    fn a_file_in_logs_with_a_second_hard_link_is_moved_aside() {
+        let mut fake = machine();
+        fake.put("C:\\ProgramData\\Pitcrew", locked())
+            .put("C:\\ProgramData\\Pitcrew\\logs", locked())
+            .put("C:\\ProgramData\\Pitcrew\\logs\\service.log", file(locked()))
+            .put("C:\\ProgramData\\Pitcrew\\logs\\planted.log", file(locked()));
+        let list = list_of(&fake);
+        let ids = [
+            ("c:\\programdata\\pitcrew\\logs\\service.log".to_string(), id(1, 1)),
+            ("c:\\programdata\\pitcrew\\logs\\planted.log".to_string(), id(2, 2)),
+        ];
+        let mut port = WithIds(&mut fake, ids.into_iter().collect());
+        let out = ensure_protected_root(
+            &mut port,
+            &list,
+            Path::new("C:\\ProgramData\\Pitcrew"),
+            &["pitcrew.toml"],
+            &["logs"],
+        )
+        .unwrap();
+        let RootOutcome::Locked(swept) = out else { panic!("{out:?}") };
+        assert_eq!(swept.moved.len(), 1, "{swept:?}");
+        assert!(
+            swept.moved[0].0.ends_with("planted.log") && swept.moved[0].2.contains("hard link"),
+            "{swept:?}"
+        );
+    }
+
+    /// Round 5 P2-3: the entry is bound to the folder the service made; a folder put there under the same name is a different file.
+    #[test]
+    fn a_runner_folder_replaced_under_its_recorded_name_is_not_accepted() {
+        let dir = Path::new("C:\\ProgramData\\Pitcrew\\runners\\r");
+        let mut fake = machine();
+        fake.put(DATA, locked())
+            .put("C:\\ProgramData\\Pitcrew\\runners", locked())
+            .put("C:\\ProgramData\\Pitcrew\\runners\\r", locked());
+        let key = "c:\\programdata\\pitcrew\\runners\\r".to_string();
+        let list = list_of(&fake);
+        let mut adopted = Adopted::default();
+        adopted.bind(dir, id(10, 1));
+        // The same file: accepted.
+        let mut same = WithIds(&mut fake, [(key.clone(), id(10, 1))].into_iter().collect());
+        check_adopted_runner_folder(&mut same, &list, &adopted, dir).expect("the folder the service made");
+        // Another file under the name: refused.
+        let mut swapped = WithIds(&mut fake, [(key.clone(), id(11, 1))].into_iter().collect());
+        let e = check_adopted_runner_folder(&mut swapped, &list, &adopted, dir).unwrap_err();
+        assert!(e.contains("replaced"), "{e}");
+        // An entry never bound to a file: refused where the port can tell files apart.
+        let mut unbound = Adopted::default();
+        unbound.insert(dir);
+        let mut port = WithIds(&mut fake, [(key, id(10, 1))].into_iter().collect());
+        let e = check_adopted_runner_folder(&mut port, &list, &unbound, dir).unwrap_err();
+        assert!(e.contains("never bound"), "{e}");
+    }
+
+    /// Round 5 P2-3: after making the folder the entry is bound to it.
+    #[test]
+    fn a_made_runner_folder_is_bound_to_its_entry() {
+        let mut fake = machine();
+        fake.put(DATA, locked()).put("C:\\ProgramData\\Pitcrew\\runners", locked());
+        let dir = Path::new("C:\\ProgramData\\Pitcrew\\runners\\new");
+        let key = "c:\\programdata\\pitcrew\\runners\\new".to_string();
+        let mut port = WithIds(&mut fake, [(key, id(5, 1))].into_iter().collect());
+        let mut records: Vec<Option<FileIdentity>> = vec![];
+        prepare_runner_dir(&mut port, dir, &mut |_, id| {
+            records.push(id);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            records,
+            [None, Some(id(5, 1))],
+            "recorded first, then bound to the folder that was made"
+        );
+    }
+
+    /// Round 5 P2-3: a removed runner's entry leaves the list.
+    #[test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
+    fn a_removed_runners_folder_leaves_the_list_of_folders_the_service_made() {
+        let root = std::env::temp_dir().join(format!("pitcrew-it-forget-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join(ADOPTED_FILE);
+        assert_eq!(forget_adopted(&file, Path::new("C:\\a")), Ok(false), "no list, nothing to forget");
+        let mut list = Adopted::default();
+        list.bind(Path::new("C:\\a"), id(1, 1));
+        list.insert(Path::new("C:\\b"));
+        std::fs::write(&file, list.to_json()).unwrap();
+        assert_eq!(forget_adopted(&file, Path::new("c:/A/")), Ok(true));
+        let after = read_adopted(&file).unwrap();
+        assert!(!after.contains(Path::new("C:\\a")) && after.contains(Path::new("C:\\b")));
+        assert_eq!(forget_adopted(&file, Path::new("C:\\a")), Ok(false));
+        std::fs::write(&file, "garbage").unwrap();
+        assert!(forget_adopted(&file, Path::new("C:\\b")).unwrap_err().contains("not the list"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// Round 5 P1-2: a failed move stopped the service for good.
     #[test]
     fn a_failed_move_is_reported_and_never_stops_the_start() {
@@ -937,7 +1203,7 @@ mod tests {
         let mut p = machine();
         p.put(DATA, locked()).put("C:\\ProgramData\\Pitcrew\\runners", locked());
         let dir = Path::new("C:\\ProgramData\\Pitcrew\\runners\\new");
-        let e = prepare_runner_dir(&mut p, dir, &mut |_| Err("disk full".into())).unwrap_err();
+        let e = prepare_runner_dir(&mut p, dir, &mut |_, _| Err("disk full".into())).unwrap_err();
         assert!(e.contains("disk full") && e.contains("could not be recorded"), "{e}");
         assert!(
             !p.calls.iter().any(|c| c.starts_with("create_dir")),
@@ -949,7 +1215,7 @@ mod tests {
     /// Round 5 P2-3: text that is not the list was silently no folders; now it is an error the caller logs.
     #[test]
     fn a_list_of_adopted_folders_that_does_not_parse_is_an_error_and_an_empty_text_is_not() {
-        assert!(Adopted::try_parse("{\"folders\":[\"C:\\\\a\"]}")
+        assert!(Adopted::try_parse("{\"folders\":[{\"path\":\"C:\\\\a\"}]}")
             .unwrap()
             .contains(Path::new("C:\\a")));
         let e = Adopted::try_parse("not json").unwrap_err();
@@ -986,7 +1252,7 @@ mod tests {
             check_runner_folder(&mut p, &list, dir).is_err(),
             "before: missing, so blocked for good"
         );
-        let line = prepare_runner_dir(&mut p, dir, &mut |d| {
+        let line = prepare_runner_dir(&mut p, dir, &mut |d, _| {
             adopted.insert(d);
             Ok(())
         })
@@ -997,7 +1263,7 @@ mod tests {
         let list = list_of(&p);
         check_adopted_runner_folder(&mut p, &list, &adopted, dir).expect("after: the guard accepts the folder the service made");
         assert_eq!(
-            prepare_runner_dir(&mut p, dir, &mut |_| panic!("nothing was made")),
+            prepare_runner_dir(&mut p, dir, &mut |_, _| panic!("nothing was made")),
             Ok(None),
             "an existing folder is left alone"
         );
@@ -1005,7 +1271,7 @@ mod tests {
         // Folders above are made too, each protected at creation; only the runner's own folder is recorded.
         let deeper = Path::new("C:\\ProgramData\\Pitcrew\\runners\\a\\b");
         let mut recorded = vec![];
-        prepare_runner_dir(&mut p, deeper, &mut |d| {
+        prepare_runner_dir(&mut p, deeper, &mut |d, _| {
             recorded.push(d.display().to_string());
             Ok(())
         })
@@ -1023,7 +1289,7 @@ mod tests {
         // Under a folder a user can change: refused, nothing made, nothing recorded.
         let mut p = machine();
         p.put("C:\\Users\\someone", user_owned());
-        let e = prepare_runner_dir(&mut p, Path::new("C:\\Users\\someone\\runner"), &mut |_| panic!("recorded")).unwrap_err();
+        let e = prepare_runner_dir(&mut p, Path::new("C:\\Users\\someone\\runner"), &mut |_, _| panic!("recorded")).unwrap_err();
         assert!(
             e.contains("does not exist yet") && e.contains("only administrators can change"),
             "{e}"
@@ -1033,7 +1299,7 @@ mod tests {
         // A folder that could not be recorded is not made (round 5 P2-3: recorded first).
         let mut p = machine();
         p.put(DATA, locked()).put("C:\\ProgramData\\Pitcrew\\runners", locked());
-        let e = prepare_runner_dir(&mut p, Path::new("C:\\ProgramData\\Pitcrew\\runners\\x"), &mut |_| {
+        let e = prepare_runner_dir(&mut p, Path::new("C:\\ProgramData\\Pitcrew\\runners\\x"), &mut |_, _| {
             Err("disk full".into())
         })
         .unwrap_err();
@@ -1067,6 +1333,7 @@ mod tests {
     #[test]
     fn the_list_of_adopted_folders_round_trips_and_garbage_is_no_folders() {
         let mut a = Adopted::default();
+        a.bind(Path::new("C:\\ProgramData\\Pitcrew\\runners\\bound"), id(3, 1));
         a.insert(Path::new("C:\\ProgramData\\Pitcrew\\runners\\one"));
         a.insert(Path::new("C:\\ProgramData\\Pitcrew\\runners\\two"));
         let again = Adopted::parse(&a.to_json());
