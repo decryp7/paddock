@@ -23,6 +23,16 @@ use std::sync::{Arc, Mutex};
 pub struct RoutingClient {
     system: Arc<dyn ServiceClient>,
     user: Arc<dyn ServiceClient>,
+    /// Which engines answered the last `GetSettings` (round 5 P1-3): the window's list holds only what was read, so a save never
+    /// writes the part of an engine that was not.
+    read: Mutex<SettingsRead>,
+}
+
+/// Which engines the last settings read came from. Nothing is read until the window asks: a save before that writes nothing for either.
+#[derive(Debug, Clone, Copy, Default)]
+struct SettingsRead {
+    system: bool,
+    user: bool,
 }
 
 /// Who has a runner, by the status each engine reported.
@@ -38,7 +48,11 @@ enum Owner<'a> {
 impl RoutingClient {
     /// A router over the service's client and the user engine's.
     pub fn new(system: Arc<dyn ServiceClient>, user: Arc<dyn ServiceClient>) -> Self {
-        RoutingClient { system, user }
+        RoutingClient {
+            system,
+            user,
+            read: Mutex::default(),
+        }
     }
 
     fn by_session(&self, session: SessionMode) -> (&dyn ServiceClient, &dyn ServiceClient) {
@@ -109,6 +123,11 @@ impl RoutingClient {
     fn merged_settings(&self) -> Result<Response, ClientError> {
         let system = self.system.request(Request::GetSettings);
         let user = self.user.request(Request::GetSettings);
+        let got = |r: &Result<Response, ClientError>| matches!(r, Ok(Response::Settings { .. }));
+        *self.read.lock().unwrap_or_else(|p| p.into_inner()) = SettingsRead {
+            system: got(&system),
+            user: got(&user),
+        };
         Ok(match (system, user) {
             (
                 Ok(Response::Settings {
@@ -122,7 +141,15 @@ impl RoutingClient {
                     ..
                 }),
             ) => {
-                config.runners.extend(mine.runners);
+                // The user's engine is asked only for its own kind of runner: a service runner in its reply is not a runner of the service.
+                let mine: Vec<_> = mine.runners.into_iter().filter(|r| r.session == SessionMode::Interactive).collect();
+                if let Some(name) = Self::duplicate_name(config.runners.iter().chain(mine.iter())) {
+                    return Ok(Response::Error(ServiceError::new(
+                        ErrorCode::BadRequest,
+                        format!("both engines list a runner named {name}; runner names are unique across both. Remove one of them in its own configuration"),
+                    )));
+                }
+                config.runners.extend(mine);
                 problems.extend(more);
                 Response::Settings {
                     config,
@@ -134,6 +161,12 @@ impl RoutingClient {
             (Err(_), Ok(answer @ Response::Settings { .. })) => answer,
             (Err(e), _) => return Err(e),
         })
+    }
+
+    /// The first runner name that occurs twice.
+    fn duplicate_name<'a>(runners: impl Iterator<Item = &'a pitcrew_core::config::RunnerConfig>) -> Option<String> {
+        let mut seen = std::collections::HashSet::new();
+        runners.map(|r| r.name.to_string()).find(|n| !seen.insert(n.clone()))
     }
 
     /// The configuration of each engine: the runners of its session, the defaults for both.
@@ -162,25 +195,66 @@ impl RoutingClient {
     }
 
     fn save_split(&self, config: &Config) -> Result<Response, ClientError> {
+        let refuse = |message: String| Ok(Response::Error(ServiceError::new(ErrorCode::BadRequest, message)));
         let (system, user) = Self::split(config);
-        let mut service_saved = false;
+        if let Some(name) = Self::duplicate_name(system.runners.iter().chain(user.runners.iter())) {
+            return refuse(format!(
+                "the configuration names {name} for both engines; runner names are unique across both. Nothing was saved"
+            ));
+        }
+        let read = *self.read.lock().unwrap_or_else(|p| p.into_inner());
+        // The part of an engine that was not read is not what that engine has: it is never written. A part that holds runners could
+        // only come from somewhere else, so it is refused whole (nothing applied) rather than half done.
+        for (engine, was_read, part) in [
+            ("the service", read.system, &system),
+            ("your own runners' engine", read.user, &user),
+        ] {
+            if !was_read && !part.runners.is_empty() {
+                return refuse(format!(
+                    "the settings of {engine} were not read (it did not answer when they were loaded), so its part was not saved and nothing was saved. Reload the settings and save again"
+                ));
+            }
+        }
         let current = match self.system.request(Request::GetSettings) {
-            Ok(Response::Settings { config, .. }) => Some(config),
+            Ok(Response::Settings { config, .. }) if read.system => Some(config),
             _ => None,
         };
-        if !current.as_ref().is_some_and(|c| Self::service_part_is_current(c, &system)) {
-            if let r @ Response::Error(_) = self.system.request(Request::SaveSettings { config: system })? {
-                return Ok(r); // nothing was applied
-            }
-            service_saved = true;
-        }
-        let answer = self.user.request(Request::SaveSettings { config: user });
-        let failed = match &answer {
+        // A runner of the user's kind left in the service's configuration by an older Pitcrew moves to the user's engine first: if
+        // that fails the service part is not saved, so the runner is not dropped from the only place that has it.
+        let stray = current
+            .as_ref()
+            .is_some_and(|c| c.runners.iter().any(|r| r.session == SessionMode::Interactive));
+        let needs_service = read.system && !current.as_ref().is_some_and(|c| Self::service_part_is_current(c, &system));
+        let mut service_saved = false;
+        let mut user_answer: Option<Result<Response, ClientError>> = None;
+        let save_user = |this: &Self| this.user.request(Request::SaveSettings { config: user.clone() });
+        let failure_of = |a: &Result<Response, ClientError>| match a {
             Ok(Response::Error(e)) => Some(e.message.clone()),
             Err(e) => Some(e.to_string()),
             Ok(_) => None,
         };
-        match (service_saved, failed) {
+        if read.user && stray {
+            let answer = save_user(self);
+            if let Some(why) = failure_of(&answer) {
+                return refuse(format!(
+                    "your own runners could not be moved to their engine ({why}); the service's part was not saved, so nothing was lost. Save again when that engine runs"
+                ));
+            }
+            user_answer = Some(answer);
+        }
+        if needs_service {
+            if let r @ Response::Error(_) = self.system.request(Request::SaveSettings { config: system })? {
+                return Ok(r); // nothing was applied by the service
+            }
+            service_saved = true;
+        }
+        if read.user && user_answer.is_none() {
+            user_answer = Some(save_user(self));
+        }
+        let Some(answer) = user_answer else {
+            return Ok(Response::Ok);
+        };
+        match (service_saved, failure_of(&answer)) {
             // The service's part is already saved and cannot be taken back: say so, so nobody believes nothing changed.
             (true, Some(why)) => Ok(Response::Error(ServiceError::new(
                 ErrorCode::Internal,
@@ -325,7 +399,7 @@ mod tests {
         runners: Vec<String>,
         config: Mutex<Config>,
         asked: Mutex<Vec<String>>,
-        down: bool,
+        down: std::sync::atomic::AtomicBool,
     }
 
     fn snapshot(name: &str) -> RunnerSnapshot {
@@ -347,8 +421,12 @@ mod tests {
                 runners: runners.iter().map(ToString::to_string).collect(),
                 config: Mutex::new(Config::default()),
                 asked: Mutex::default(),
-                down,
+                down: std::sync::atomic::AtomicBool::new(down),
             })
+        }
+
+        fn set_down(&self, down: bool) {
+            self.down.store(down, std::sync::atomic::Ordering::SeqCst);
         }
 
         fn asked(&self) -> Vec<String> {
@@ -359,7 +437,7 @@ mod tests {
     impl ServiceClient for Fake {
         fn request(&self, r: Request) -> Result<Response, ClientError> {
             self.asked.lock().unwrap().push(r.kind().to_string());
-            if self.down {
+            if self.down.load(std::sync::atomic::Ordering::SeqCst) {
                 return Err(ClientError::Unavailable("not running".into()));
             }
             Ok(match r {
@@ -560,11 +638,13 @@ mod tests {
 
     #[test]
     fn a_save_that_reached_the_service_but_not_the_users_engine_says_so() {
-        let (system, user) = (Fake::new(&[], false), Fake::new(&[], true));
+        let (system, user) = (Fake::new(&[], false), Fake::new(&[], false));
         let c = router(&system, &user);
+        c.request(Request::GetSettings).unwrap();
         let mut config = Config::default();
         config.runners.push(runner("svc", "service"));
         config.runners.push(runner("mine", "interactive"));
+        user.set_down(true);
         let answer = c.request(Request::SaveSettings { config }).unwrap();
         let Response::Error(e) = answer else { panic!("{answer:?}") };
         assert!(
@@ -581,6 +661,7 @@ mod tests {
         let refusing: Arc<dyn ServiceClient> = Arc::new(Refusing);
         let user = Fake::new(&[], false);
         let c = RoutingClient::new(refusing, user.clone());
+        c.request(Request::GetSettings).unwrap();
         let mut config = Config::default();
         config.runners.push(runner("svc", "service"));
         config.runners.push(runner("mine", "interactive"));
@@ -590,6 +671,142 @@ mod tests {
             "{answer:?}"
         );
         assert!(!user.asked().contains(&"SaveSettings".to_string()), "{:?}", user.asked());
+    }
+
+    fn saves(f: &Fake) -> usize {
+        f.asked().iter().filter(|k| *k == "SaveSettings").count()
+    }
+
+    /// Round 5 P1-3: the window read only the service's part (the user's engine did not answer), and saving it wrote the user's
+    /// engine an empty part: its runners were gone.
+    #[test]
+    fn a_save_after_a_partial_read_never_writes_the_part_of_the_engine_that_was_missing() {
+        let (system, user) = (Fake::new(&[], false), Fake::new(&[], false));
+        system.config.lock().unwrap().runners.push(runner("svc", "service"));
+        user.config.lock().unwrap().runners.push(runner("mine", "interactive"));
+        user.set_down(true);
+        let c = router(&system, &user);
+        let Ok(Response::Settings { mut config, .. }) = c.request(Request::GetSettings) else {
+            panic!()
+        };
+        assert_eq!(config.runners.len(), 1, "only the service's runner was read");
+        config.runners[0].labels = vec!["x".into()];
+        user.set_down(false);
+        let answer = c.request(Request::SaveSettings { config }).unwrap();
+        assert!(!matches!(answer, Response::Error(_)), "{answer:?}");
+        assert_eq!(
+            saves(&user),
+            0,
+            "the part of an engine that was not read is never saved: {:?}",
+            user.asked()
+        );
+        assert_eq!(user.config.lock().unwrap().runners.len(), 1, "the user's runner is still there");
+        assert_eq!(
+            system.config.lock().unwrap().runners[0].labels,
+            vec!["x".to_string()],
+            "the read part is saved"
+        );
+    }
+
+    /// The same, the other way round: the service did not answer.
+    #[test]
+    fn a_save_after_a_read_without_the_service_never_writes_the_services_part() {
+        let (system, user) = (Fake::new(&[], false), Fake::new(&[], false));
+        system.config.lock().unwrap().runners.push(runner("svc", "service"));
+        user.config.lock().unwrap().runners.push(runner("mine", "interactive"));
+        system.set_down(true);
+        let c = router(&system, &user);
+        let Ok(Response::Settings { config, .. }) = c.request(Request::GetSettings) else {
+            panic!()
+        };
+        system.set_down(false);
+        c.request(Request::SaveSettings { config }).unwrap();
+        assert_eq!(saves(&system), 0, "{:?}", system.asked());
+        assert_eq!(system.config.lock().unwrap().runners.len(), 1);
+    }
+
+    /// A part with runners for an engine that was not read cannot be saved: nothing is applied anywhere, and it says why.
+    #[test]
+    fn a_save_with_runners_for_an_engine_that_was_not_read_is_refused_whole() {
+        let (system, user) = (Fake::new(&[], false), Fake::new(&[], true));
+        let c = router(&system, &user);
+        c.request(Request::GetSettings).unwrap();
+        let mut config = Config::default();
+        config.runners.push(runner("svc", "service"));
+        config.runners.push(runner("mine", "interactive"));
+        let answer = c.request(Request::SaveSettings { config }).unwrap();
+        let Response::Error(e) = answer else { panic!("{answer:?}") };
+        assert!(
+            e.message.contains("not read") && e.message.contains("nothing was saved"),
+            "{}",
+            e.message
+        );
+        assert_eq!(saves(&system) + saves(&user), 0);
+    }
+
+    /// Round 5 P1-3: the stray migration saved the service part first, dropping the stray, then the user's engine refused it.
+    #[test]
+    fn moving_a_stray_runner_saves_the_users_engine_first_and_stops_if_it_refuses() {
+        let system = Fake::new(&[], false);
+        system.config.lock().unwrap().runners.push(runner("svc", "service"));
+        system.config.lock().unwrap().runners.push(runner("old", "interactive"));
+        let c = RoutingClient::new(system.clone(), Arc::new(Refusing));
+        let Ok(Response::Settings { config, .. }) = c.request(Request::GetSettings) else {
+            panic!()
+        };
+        let answer = c.request(Request::SaveSettings { config }).unwrap();
+        assert!(matches!(answer, Response::Error(_)), "{answer:?}");
+        assert_eq!(
+            saves(&system),
+            0,
+            "the service part is saved only after the user's engine kept the stray"
+        );
+        assert_eq!(
+            system.config.lock().unwrap().runners.len(),
+            2,
+            "the stray is still in the service's config"
+        );
+    }
+
+    /// Round 5 P2-4: a name in both parts makes every later request ambiguous.
+    #[test]
+    fn a_save_with_one_name_in_both_engines_is_refused() {
+        let (system, user) = (Fake::new(&[], false), Fake::new(&[], false));
+        let c = router(&system, &user);
+        c.request(Request::GetSettings).unwrap();
+        let mut config = Config::default();
+        config.runners.push(runner("same", "service"));
+        config.runners.push(runner("same", "interactive"));
+        let answer = c.request(Request::SaveSettings { config }).unwrap();
+        assert!(matches!(&answer, Response::Error(e) if e.message.contains("same")), "{answer:?}");
+        assert_eq!(saves(&system) + saves(&user), 0);
+    }
+
+    /// Round 5 P2-5: the user's engine's own settings reply never adds a service runner to the window's list.
+    #[test]
+    fn only_interactive_runners_are_taken_from_the_users_engine() {
+        let (system, user) = (Fake::new(&[], false), Fake::new(&[], false));
+        user.config.lock().unwrap().runners.push(runner("impostor", "service"));
+        user.config.lock().unwrap().runners.push(runner("mine", "interactive"));
+        let Ok(Response::Settings { config, .. }) = router(&system, &user).request(Request::GetSettings) else {
+            panic!()
+        };
+        assert_eq!(
+            config.runners.len(),
+            1,
+            "{:?}",
+            config.runners.iter().map(|r| r.name.to_string()).collect::<Vec<_>>()
+        );
+    }
+
+    /// Round 5 P2-4: a name both engines list is an error, not two rows.
+    #[test]
+    fn a_name_listed_by_both_engines_is_refused_when_the_settings_are_read() {
+        let (system, user) = (Fake::new(&[], false), Fake::new(&[], false));
+        system.config.lock().unwrap().runners.push(runner("same", "service"));
+        user.config.lock().unwrap().runners.push(runner("same", "interactive"));
+        let answer = router(&system, &user).request(Request::GetSettings).unwrap();
+        assert!(matches!(&answer, Response::Error(e) if e.message.contains("same")), "{answer:?}");
     }
 
     /// An engine that refuses every change.
