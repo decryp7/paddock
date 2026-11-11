@@ -310,7 +310,7 @@ fn reading<T>(r: &Reading<T>, f: impl FnOnce(&T) -> Value) -> Value {
     }
 }
 
-/// `reason`, with what the helper's state adds ("Turn on Administrator readings in Settings ...") when it differs.
+/// `reason`, with what the helper's state adds ("Turn on administrator readings in Settings ...") when it differs.
 fn with_via(reason: &str, via: &ReadVia) -> String {
     match via.reason() {
         Some(extra) if !reason.contains(extra) => format!("{} {}", dyno_core::read_via::sentence(reason), extra),

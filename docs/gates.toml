@@ -662,7 +662,7 @@ approved = "coordinator"
 
 [[ignored]]
 path = "apps/dyno/app/e2e/screenshots-shell.spec.ts"
-tests = ["Dyno shell screenshots"]
+tests = ["Dyno shell screenshots", "Dyno shell screenshots, sized"]
 gate = "not-gated"
 reason = "documentation screenshot capture, skipped without its output folder variable; run by hand to regenerate the images"
 owner = "Dyno 1.1.1"

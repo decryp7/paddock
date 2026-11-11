@@ -116,6 +116,7 @@ export const ROW_TITLES = {
   linuxLogDir: 'Release row: Linux uninstall leaves /var/log/dyno-helper',
   hungPage: 'Release row: a hung or paused visible page gets one question, no stack',
   secondUser: 'Release row: a second user\'s session sees "An update is being installed"',
+  secondInstall: 'Release row: a second install while one runs is refused: Install update says "Another install of this app is already running."',
   killInstaller: 'Release row: killing the installer on the fixed build gives "Not installed"',
   installAgain: 'Release row: install again works',
   keychainUpdate: 'Release row: an update keeps the app openable with a key the earlier build made',
@@ -129,6 +130,7 @@ export const NOT_DRIVEN = {
   macReopen: 'needs the "Quit and stop measuring" menu item clicked over AX and the Login Items state read with sfltool; neither is wired in the macOS driver yet',
   hungPage: 'needs a way to hang or pause a visible page (a debugger pause over CDP on Windows; no equivalent wired for AX or AT-SPI)',
   secondUser: 'needs a second console logon (a fast-user-switch) that the VM driver cannot make',
+  secondInstall: 'needs installer A held past PREINSTALL (its UAC prompt answered over VNC, then paused while it holds Global\\<id>.setup), then Install update pressed in Dyno and "Not installed: Another install of this app is already running." read; the hold point is not wired in the driver',
   killInstaller: 'needs the installer killed mid-run and the app\'s "Not installed" text read; the kill point and the text are not specified',
   installAgain: 'needs a second install with its own UAC prompt answered over VNC (the suite answers only the first)',
 };

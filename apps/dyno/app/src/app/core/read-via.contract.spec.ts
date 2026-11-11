@@ -22,7 +22,7 @@ const sleep: Pick<SleepReport, 'blockersVia'> = { blockersVia: 'helper' };
 const inventory: Pick<SystemInventory, 'memoryVia'> = { memoryVia: needsHelper };
 const startup: Pick<StartupOverview, 'btmVia'> = { btmVia: 'helper' };
 const locker: Pick<Locker, 'via'> = { via: 'helper' };
-const liveVia: LiveVia = { processes: 'helper', others: needsHelper, temperatures: { unavailable: { reason: 'macOS reports a pressure level, not temperatures.', next: null } } };
+const liveVia: LiveVia = { processes: 'helper', others: needsHelper, temperatures: { unavailable: { reason: 'macOS reports a pressure level, not temperatures.', next: null } }, processesHint: null };
 
 describe('the via wire contract with the engine', () => {
   it('has the engine shapes for every kind of source', () => {

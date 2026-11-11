@@ -134,6 +134,18 @@ Days are taken from each ADR's own work-package table.
 |---|---|---|---|---|---|---|
 | WP-R | **Release 1.1.1**: version bump and regenerated files, release notes, dyno-release dispatched with gates and bundles on the candidate (rule 54), VM rounds per OS (install, update from 1.1.0, per-machine rows, jobs-restart row, helper across versions), the Defender evidence run (WP-4) N times on the final installer, the FP submission (WP-4 step), tag from CI only. | `apps/dyno/CHANGELOG.md`, version files, release log | implementer + scout (CI watch) + VM agents | all chosen packages | full suite once on the combined tree (ER-8); every VM row PASS or recorded `not measured` with a reason (rule 71) | 3-5 |
 
+### WP-14 status (2026-11-12)
+
+- (c) Processes: before the helper's first read the engine sends a hint (`LiveVia.processesHint`), not an unavailable reading; a worker that
+  cannot start ends the wait with its reason. The page shows the hint through the reading source's hint line.
+- (d) macOS Disk activity "Not available": **root cause open.** The branch makes the card say the platform's own reason, and on the
+  development Mac the probe measures disk busy time, so the failure was not reproduced there. The VM round, or the user on the Mac that showed it,
+  reads which reason now shows; the cause is recorded from that.
+- (e) Listening toolbar: one row at 1280 and 1240 (test `layout-p2.spec.ts`, red first at 1240 on the old layout). **Deferred: Firewall rows at 1280** (about 11 rows): the
+  table's height is what the window leaves after the pf card, and the last row is cut by the scroller's edge; no condition for "cut" was agreed, so no
+  test could fail first. Take it up with the layout designer before the screenshot review. The "State at most 200 px" check on Alarms was vacuous
+  (the column is a fixed 190 px) and is dropped.
+
 ## 3. Totals (raw ranges, agent-days)
 
 | Group | Packages | Raw days |

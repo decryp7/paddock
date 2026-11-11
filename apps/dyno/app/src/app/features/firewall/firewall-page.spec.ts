@@ -72,6 +72,8 @@ describe('FirewallPage', () => {
     const { el } = await open();
     const buttons = [...el.querySelectorAll('button')].map((b) => b.textContent!.trim());
     expect(buttons).toEqual(['Refresh', 'Turn on administrator readings']);
+    // The sentence above the button names the switch in the button's own words.
+    expect(el.querySelector('[data-source="pf"]')!.textContent).toContain('Turn on administrator readings in Settings');
   });
 
   it('shows an error with Retry when the firewall cannot be read, and no Refresh beside it', async () => {

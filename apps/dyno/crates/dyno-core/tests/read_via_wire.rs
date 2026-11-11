@@ -140,6 +140,7 @@ fn every_reply_type_that_carries_a_reading_has_a_via_that_defaults_to_local_and_
         processes: h.clone(),
         others: needs_helper(),
         temperatures: ReadVia::unavailable("x"),
+        processes_hint: None,
     };
     let locker = Locker::new(ProcessRef { pid: 1, started: None }, "x".into(), None).with_via(h);
     assert_eq!(locker.via, ReadVia::Helper);
@@ -197,5 +198,29 @@ fn live_via() -> LiveVia {
         processes: ReadVia::Helper,
         others: needs_helper(),
         temperatures: ReadVia::unavailable("macOS reports a pressure level, not temperatures."),
+        processes_hint: None,
     }
+}
+
+#[test]
+fn the_processes_hint_travels_in_both_wire_forms() {
+    let mut v = LiveVia::default();
+    assert_eq!(serde_json::to_value(&v).unwrap()["processesHint"], serde_json::Value::Null);
+    v.processes_hint = Some("Other accounts appear after the helper's first read.".into());
+    assert_eq!(
+        serde_json::to_value(&v).unwrap()["processesHint"],
+        "Other accounts appear after the helper's first read."
+    );
+    let bytes = postcard::to_stdvec(&v).unwrap();
+    assert_eq!(postcard::from_bytes::<LiveVia>(&bytes).unwrap(), v);
+}
+
+/// The sentence a reading shows when only the helper can read it names the same switch as its button ("Turn on administrator
+/// readings"), in the same case (WP-14 screenshot review, Firewall page).
+#[test]
+fn the_needs_admin_sentence_uses_the_buttons_words() {
+    assert_eq!(
+        NEEDS_ADMIN,
+        "Turn on administrator readings in Settings so the helper can read this."
+    );
 }

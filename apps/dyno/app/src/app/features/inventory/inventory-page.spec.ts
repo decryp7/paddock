@@ -47,7 +47,7 @@ describe('InventoryPage', () => {
     const needs: SystemInventory = {
       ...mockInventory('linux'),
       memory: { totalOnly: { total: 16 * 1024 ** 3, reason: { reason: 'Linux lets only an administrator read the memory slots.' } } },
-      memoryVia: { needsHelper: { reason: 'The memory slots are readable only by an administrator. Turn on Administrator readings in Settings so the helper can read this.', next: { openSettings: 'helper' } } },
+      memoryVia: { needsHelper: { reason: 'The memory slots are readable only by an administrator. Turn on administrator readings in Settings so the helper can read this.', next: { openSettings: 'helper' } } },
       hints: [],
     };
     const f = await render(needs);
