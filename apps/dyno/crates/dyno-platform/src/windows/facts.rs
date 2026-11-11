@@ -2,16 +2,17 @@
 //! OS version call and WMI, all with the caller's own rights (Dyno changes nothing here). Which fact comes from where, and how a
 //! failure reads, is in `win_facts_source`; the mapping is in `parse::win_facts`. This file only calls the OS and says what failed.
 
-use crate::parse::win_facts::{classify_wmi_hresult, format_guid, DiskReadError, OsValues, RawDisk};
+use crate::parse::win_facts::{classify_wmi_hresult, format_guid, DiskReadError, OsValues, Overlay, RawDisk};
 use crate::win_facts_source::{PowerRead, RestartKey, WinFacts, WinSystem};
 use std::path::PathBuf;
 use windows::core::{s, w, GUID, PCWSTR};
+use windows::Wdk::System::SystemServices::RtlGetVersion;
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_MORE_DATA, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, HLOCAL, WIN32_ERROR};
-use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LoadLibraryW};
+use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryExW, LOAD_LIBRARY_SEARCH_SYSTEM32};
 use windows::Win32::System::Power::{PowerGetActiveScheme, PowerReadFriendlyName};
 use windows::Win32::System::Registry::{
-    RegCloseKey, RegGetValueW, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY, REG_ROUTINE_FLAGS,
-    RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY,
+    RegCloseKey, RegGetValueW, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, KEY_WOW64_64KEY,
+    REG_ROUTINE_FLAGS, RRF_RT_REG_DWORD, RRF_RT_REG_SZ, RRF_SUBKEY_WOW6464KEY,
 };
 use windows::Win32::System::SystemInformation::OSVERSIONINFOW;
 
@@ -24,6 +25,13 @@ pub fn os_facts() -> WinFacts<OsWinSystem> {
 pub struct OsWinSystem;
 
 const CURRENT_VERSION: PCWSTR = w!(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
+
+/// A registry value name for a log line (the names are our own literals).
+#[allow(unsafe_code)]
+fn name_of(name: PCWSTR) -> String {
+    // SAFETY: only called with the NUL-terminated literals of `os_values`.
+    unsafe { name.to_string() }.unwrap_or_default()
+}
 
 fn code(e: WIN32_ERROR) -> String {
     format!("registry error {}", e.0)
@@ -98,7 +106,7 @@ fn reg_dword(hive: HKEY, subkey: PCWSTR, name: PCWSTR, flags: REG_ROUTINE_FLAGS)
 fn hklm_key_exists(subkey: PCWSTR) -> Result<bool, String> {
     let mut key = HKEY::default();
     // SAFETY: the sub-key name is NUL-terminated and `key` is a valid out pointer; the key is closed below on success.
-    let rc = unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, subkey, None, KEY_READ | KEY_WOW64_64KEY, &mut key) };
+    let rc = unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, subkey, None, KEY_QUERY_VALUE | KEY_WOW64_64KEY, &mut key) };
     match rc {
         ERROR_SUCCESS => {
             // SAFETY: `key` was just opened and is closed once.
@@ -141,21 +149,37 @@ fn friendly_name(scheme: &GUID) -> Option<String> {
     Some(String::from_utf16_lossy(&wide))
 }
 
-/// `PowerGetEffectiveOverlayScheme` lives in `powrprof.dll` only on Windows 10 1709 and later, so it is looked up at run time
-/// (a missing function means no overlay, not a failed start).
+/// Asks `powrprof.dll` for the effective overlay (the Windows 11 power mode).
+///
+/// `PowerGetEffectiveOverlayScheme` is not in the Windows SDK metadata that the `windows` crate is generated from (checked in
+/// windows 0.62.2), and no Microsoft Learn page for it exists (a fetch of its expected URL answered 404 on 2026-11-12). The
+/// signature `DWORD PowerGetEffectiveOverlayScheme(GUID *EffectiveOverlayGuid)` and "0 on success" are therefore the widely
+/// published declaration, not a Microsoft contract, and the one measurement is a single observed rc=0 on Windows 11 build 26300
+/// (ADR 0033, WP-0 item 8). So the function is looked up at run time, and any non-zero code is reported, never read as "no overlay".
 #[allow(unsafe_code)]
-fn effective_overlay() -> Option<String> {
+fn effective_overlay() -> Overlay {
     type OverlayFn = unsafe extern "system" fn(*mut GUID) -> u32;
-    // SAFETY: a NUL-terminated literal; powrprof.dll is a system library that stays loaded.
-    let module = unsafe { LoadLibraryW(w!("powrprof.dll")) }.ok()?;
+    // SAFETY: a NUL-terminated literal; only the System32 copy of the library is loaded.
+    let Ok(module) = (unsafe { LoadLibraryExW(w!("powrprof.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32) }) else {
+        log::debug!(target: "dyno::facts", "power_plan: powrprof.dll did not load; no overlay is read");
+        return Overlay::NotPresent;
+    };
     // SAFETY: a NUL-terminated literal name.
-    let f = unsafe { GetProcAddress(module, s!("PowerGetEffectiveOverlayScheme")) }?;
-    // SAFETY: the function has exactly this documented signature (a GUID out pointer, a Win32 error back).
+    let Some(f) = (unsafe { GetProcAddress(module, s!("PowerGetEffectiveOverlayScheme")) }) else {
+        log::debug!(target: "dyno::facts", "power_plan: this Windows has no PowerGetEffectiveOverlayScheme; no overlay is read");
+        return Overlay::NotPresent;
+    };
+    // SAFETY: the signature is the one described above (a GUID out pointer, 0 on success); an unmeasured assumption, see the doc.
     let f = unsafe { std::mem::transmute::<unsafe extern "system" fn() -> isize, OverlayFn>(f) };
     let mut guid = GUID::zeroed();
     // SAFETY: `guid` is a valid out pointer.
     let rc = unsafe { f(&mut guid) };
-    (rc == 0).then(|| format_guid(guid.data1, guid.data2, guid.data3, guid.data4))
+    if rc == 0 {
+        Overlay::Read(format_guid(guid.data1, guid.data2, guid.data3, guid.data4))
+    } else {
+        log::warn!(target: "dyno::facts", "power_plan: PowerGetEffectiveOverlayScheme returned {rc}; the power mode is not reported");
+        Overlay::Failed(rc)
+    }
 }
 
 impl WinSystem for OsWinSystem {
@@ -163,34 +187,37 @@ impl WinSystem for OsWinSystem {
         let hive = HKEY_LOCAL_MACHINE;
         let flags = RRF_SUBKEY_WOW6464KEY;
         let string = |name: PCWSTR| reg_string(hive, CURRENT_VERSION, name, flags);
+        // A value that cannot be read leaves the name shorter, and the failure is logged with its code.
+        let optional = |name: PCWSTR| {
+            string(name).unwrap_or_else(|why| {
+                log::warn!(target: "dyno::facts", "fact os: value {} unreadable ({why})", name_of(name));
+                None
+            })
+        };
         let product_name = string(w!("ProductName"))?;
         Ok(OsValues {
             product_name,
-            edition_id: string(w!("EditionID")).unwrap_or(None),
-            display_version: string(w!("DisplayVersion")).unwrap_or(None),
-            release_id: string(w!("ReleaseId")).unwrap_or(None),
-            installation_type: string(w!("InstallationType")).unwrap_or(None),
-            build: string(w!("CurrentBuildNumber")).unwrap_or(None).and_then(|b| b.trim().parse().ok()),
-            ubr: reg_dword(hive, CURRENT_VERSION, w!("UBR"), flags).unwrap_or(None),
+            edition_id: optional(w!("EditionID")),
+            display_version: optional(w!("DisplayVersion")),
+            release_id: optional(w!("ReleaseId")),
+            installation_type: optional(w!("InstallationType")),
+            build: optional(w!("CurrentBuildNumber")).and_then(|b| b.trim().parse().ok()),
+            ubr: reg_dword(hive, CURRENT_VERSION, w!("UBR"), flags).unwrap_or_else(|why| {
+                log::warn!(target: "dyno::facts", "fact os: value UBR unreadable ({why})");
+                None
+            }),
         })
     }
 
     #[allow(unsafe_code)]
     fn api_build(&mut self) -> Option<u32> {
-        type RtlGetVersion = unsafe extern "system" fn(*mut OSVERSIONINFOW) -> i32;
-        // SAFETY: a NUL-terminated literal; ntdll.dll is loaded in every process.
-        let ntdll = unsafe { GetModuleHandleW(w!("ntdll.dll")) }.ok()?;
-        // SAFETY: a NUL-terminated literal name.
-        let f = unsafe { GetProcAddress(ntdll, s!("RtlGetVersion")) }?;
-        // SAFETY: RtlGetVersion has exactly this documented signature.
-        let f = unsafe { std::mem::transmute::<unsafe extern "system" fn() -> isize, RtlGetVersion>(f) };
         let mut info = OSVERSIONINFOW {
             dwOSVersionInfoSize: std::mem::size_of::<OSVERSIONINFOW>() as u32,
             ..Default::default()
         };
         // SAFETY: `info` is valid and its size field is set, as the call requires.
-        let status = unsafe { f(&mut info) };
-        (status >= 0).then_some(info.dwBuildNumber)
+        let status = unsafe { RtlGetVersion(&mut info) };
+        (status.0 >= 0).then_some(info.dwBuildNumber)
     }
 
     fn restart_key_exists(&mut self, key: RestartKey) -> Result<bool, String> {
@@ -303,7 +330,33 @@ mod tests {
 
     #[test]
     fn the_real_facts_name_the_os_and_are_never_the_fake() {
-        let f = os_facts().facts();
+        // The profile folder is a temporary one: the test never walks the real %USERPROFILE% (ER-14).
+        struct InTemp(OsWinSystem, PathBuf);
+        impl WinSystem for InTemp {
+            fn os_values(&mut self) -> Result<OsValues, String> {
+                self.0.os_values()
+            }
+            fn api_build(&mut self) -> Option<u32> {
+                self.0.api_build()
+            }
+            fn restart_key_exists(&mut self, key: RestartKey) -> Result<bool, String> {
+                self.0.restart_key_exists(key)
+            }
+            fn visual_fx_setting(&mut self) -> Result<Option<u32>, String> {
+                self.0.visual_fx_setting()
+            }
+            fn power(&mut self) -> Result<PowerRead, String> {
+                self.0.power()
+            }
+            fn physical_disks(&mut self) -> Result<Vec<RawDisk>, DiskReadError> {
+                self.0.physical_disks()
+            }
+            fn home(&self) -> Option<PathBuf> {
+                Some(self.1.clone())
+            }
+        }
+        let home = tempfile::tempdir().unwrap();
+        let f = WinFacts::new(InTemp(OsWinSystem, home.path().to_path_buf())).facts();
         assert!(f.os.starts_with("Windows"), "{}", f.os);
         assert_ne!(f.os, "Fake OS 1.0");
         assert!(f.restart_pending.value().is_some(), "{:?}", f.restart_pending);

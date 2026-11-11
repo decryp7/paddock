@@ -37,9 +37,11 @@ fn clean(s: &Option<String>) -> Option<&str> {
 
 /// The OS name for the facts, for example "Windows 11 Pro 24H2 (build 26100.2314)". `ProductName` still says "Windows 10" on a
 /// Windows 11 client, so a client at build 22000 or later is named "Windows 11"; a server keeps its product name. `api_build` is
-/// the build `RtlGetVersion` reports (not shimmed by a manifest) and wins over the registry's.
+/// the build `RtlGetVersion` reports (not shimmed by a manifest) and wins over the registry's; when the two differ the registry's
+/// version and revision belong to another build, so they are left out.
 pub fn win_os_name(v: &OsValues, api_build: Option<u32>) -> String {
     let build = api_build.or(v.build);
+    let stale = matches!((api_build, v.build), (Some(api), Some(reg)) if api != reg);
     let server = clean(&v.installation_type).is_some_and(|t| t.to_ascii_lowercase().starts_with("server"));
     let mut name = match (clean(&v.product_name), clean(&v.edition_id)) {
         (Some(p), _) => p.to_string(),
@@ -53,10 +55,10 @@ pub fn win_os_name(v: &OsValues, api_build: Option<u32>) -> String {
             }
         }
     }
-    if let Some(version) = clean(&v.display_version).or_else(|| clean(&v.release_id)) {
+    if let Some(version) = clean(&v.display_version).or_else(|| clean(&v.release_id)).filter(|_| !stale) {
         name = format!("{name} {version}");
     }
-    match (build, v.ubr) {
+    match (build, v.ubr.filter(|_| !stale)) {
         (Some(b), Some(u)) => format!("{name} (build {b}.{u})"),
         (Some(b), None) => format!("{name} (build {b})"),
         _ => name,
@@ -85,10 +87,38 @@ pub fn visual_effects(setting: Result<Option<u32>, String>) -> Reading<bool> {
     }
 }
 
+/// What the effective-overlay call answered.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Overlay {
+    /// The DLL or the function is not on this Windows (nothing to read; the scheme alone is the answer).
+    #[default]
+    NotPresent,
+    /// The overlay GUID the call returned (all zeros means no overlay).
+    Read(String),
+    /// The function exists and returned this non-zero code: the mode is not known.
+    Failed(u32),
+}
+
+/// The power fact: [`power_plan`] over what the OS said. A failed overlay call is unavailable with its code, never "no overlay",
+/// because that would report "not power saver" for a mode Dyno could not read.
+pub fn effective_power_plan(scheme: Option<&str>, friendly_name: Option<&str>, overlay: &Overlay) -> Reading<PowerPlan> {
+    let guid = match overlay {
+        Overlay::Failed(rc) => return Reading::unavailable(format!("Windows did not report the power mode (error {rc}).")),
+        Overlay::NotPresent => None,
+        Overlay::Read(g) => Some(g.as_str()),
+    };
+    match power_plan(scheme, friendly_name, guid) {
+        Some(plan) => Reading::Available(plan),
+        None => Reading::unavailable("Windows did not name the active power plan."),
+    }
+}
+
 /// "Best power efficiency", Windows 11's lowest power mode (`OVERLAY_SCHEME_MIN`, measured in the WP-0 run).
 const OVERLAY_BEST_EFFICIENCY: &str = "961cc777-2547-4f9d-8174-7d86181b8a7a";
 /// "Better performance" (`OVERLAY_SCHEME_HIGH`).
 const OVERLAY_BETTER_PERFORMANCE: &str = "3af9b8d9-7c97-431d-ad78-34a8bfea439f";
+/// "No overlay".
+const NIL_GUID: &str = "00000000-0000-0000-0000-000000000000";
 /// "Best performance" (`OVERLAY_SCHEME_MAX`).
 const OVERLAY_BEST_PERFORMANCE: &str = "ded574b5-45a0-4f42-8737-46345c09c238";
 
@@ -126,11 +156,16 @@ pub fn power_plan(scheme: Option<&str>, friendly_name: Option<&str>, overlay: Op
             name: format!("{name} ({label})"),
             id,
         },
-        _ => PowerPlan {
-            power_saver: scheme_saver,
-            name,
-            id: scheme,
-        },
+        (other, _) => {
+            if let Some(unknown) = other.as_deref().filter(|g| *g != NIL_GUID) {
+                log::warn!(target: "dyno::facts", "power_plan: an overlay this Dyno does not know ({unknown}); the scheme alone is reported");
+            }
+            PowerPlan {
+                power_saver: scheme_saver,
+                name,
+                id: scheme,
+            }
+        }
     })
 }
 
@@ -279,7 +314,11 @@ mod tests {
         assert_eq!(win_os_name(&v, None), "Windows 11 Pro 24H2 (build 26100.2314)");
         // The build from RtlGetVersion wins over a stale registry value.
         let v = os("Windows 10 Home", Some("Client"), Some("23H2"), None, Some(19045));
-        assert_eq!(win_os_name(&v, Some(22631)), "Windows 11 Home 23H2 (build 22631)");
+        assert_eq!(
+            win_os_name(&v, Some(22631)),
+            "Windows 11 Home (build 22631)",
+            "the registry version and revision are of another build"
+        );
         // Build 21999 is still Windows 10 (Insider builds before the release).
         assert_eq!(
             win_os_name(&os("Windows 10 Pro", None, None, None, Some(21999)), None),
@@ -345,6 +384,26 @@ mod tests {
         // Garbage and nothing.
         assert!(power_plan(None, Some("x"), None).is_none());
         assert!(power_plan(Some("not a guid"), None, None).is_none());
+    }
+
+    #[test]
+    fn the_overlay_answer_decides_the_power_fact() {
+        let ok = |o: Overlay| effective_power_plan(Some(BALANCED), Some("Balanced"), &o);
+        assert_eq!(ok(Overlay::NotPresent).value().map(|p| p.power_saver), Some(false));
+        assert_eq!(
+            ok(Overlay::Read("961cc777-2547-4f9d-8174-7d86181b8a7a".into()))
+                .value()
+                .map(|p| p.power_saver),
+            Some(true)
+        );
+        assert_eq!(
+            ok(Overlay::Failed(87)),
+            Reading::Unavailable("Windows did not report the power mode (error 87).".into())
+        );
+        assert_eq!(
+            effective_power_plan(None, None, &Overlay::NotPresent),
+            Reading::Unavailable("Windows did not name the active power plan.".into())
+        );
     }
 
     #[test]

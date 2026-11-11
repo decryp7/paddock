@@ -6,7 +6,7 @@
 //! contract). Facts Dyno does not read on Windows by design say so and are declared in `SystemFacts::not_read_here`.
 
 use crate::dev_folders::{scan, ScanLimits};
-use crate::parse::win_facts::{self, DiskReadError, OsValues, RawDisk};
+use crate::parse::win_facts::{self, DiskReadError, OsValues, Overlay, RawDisk};
 use dyno_core::facts::{FactKind, SystemFacts};
 use dyno_core::metrics::Reading;
 use dyno_core::ports::FactsSource;
@@ -39,8 +39,8 @@ pub struct PowerRead {
     pub scheme: Option<String>,
     /// The scheme's friendly name (localised).
     pub friendly_name: Option<String>,
-    /// The effective overlay's GUID (Windows 11), when the call exists.
-    pub overlay: Option<String>,
+    /// The effective overlay (Windows 11): not there, read, or the call failed.
+    pub overlay: Overlay,
 }
 
 /// The OS calls the facts need. Every method answers for itself: an `Err` is the reason that one fact is unavailable.
@@ -124,10 +124,7 @@ impl<S: WinSystem> FactsSource for WinFacts<S> {
             )
         });
         f.power_plan = read_fact("power_plan", || match self.system.power() {
-            Ok(p) => match win_facts::power_plan(p.scheme.as_deref(), p.friendly_name.as_deref(), p.overlay.as_deref()) {
-                Some(plan) => Reading::Available(plan),
-                None => Reading::unavailable("Windows did not name the active power plan."),
-            },
+            Ok(p) => win_facts::effective_power_plan(p.scheme.as_deref(), p.friendly_name.as_deref(), &p.overlay),
             Err(why) => Reading::unavailable(format!("Windows did not answer the power plan question ({why}).")),
         });
         f.visual_effects_full = read_fact("visual_effects_full", || win_facts::visual_effects(self.system.visual_fx_setting()));
@@ -217,7 +214,7 @@ mod tests {
             power: Some(Ok(PowerRead {
                 scheme: Some("381b4222-f694-41f0-9685-ff5bb260df2e".into()),
                 friendly_name: Some("Balanced".into()),
-                overlay: Some("961cc777-2547-4f9d-8174-7d86181b8a7a".into()),
+                overlay: Overlay::Read("961cc777-2547-4f9d-8174-7d86181b8a7a".into()),
             })),
             disks: Some(Ok(vec![RawDisk {
                 friendly_name: Some("Model A".into()),
@@ -313,6 +310,29 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(WinFacts::new(sys).facts().os, "Windows (build 26100)");
+    }
+
+    #[test]
+    fn a_failed_overlay_call_is_unavailable_never_a_guess_of_no_overlay() {
+        let mut sys = windows_11();
+        sys.power = Some(Ok(PowerRead {
+            scheme: Some("381b4222-f694-41f0-9685-ff5bb260df2e".into()),
+            friendly_name: Some("Balanced".into()),
+            overlay: Overlay::Failed(5),
+        }));
+        let f = WinFacts::new(sys).facts();
+        assert_eq!(
+            f.power_plan,
+            Reading::Unavailable("Windows did not report the power mode (error 5).".into())
+        );
+        // A machine without the call (Windows 10) is the scheme alone, and that is a real answer.
+        let mut sys = windows_11();
+        sys.power = Some(Ok(PowerRead {
+            scheme: Some("a1841308-3541-4fab-bc81-f71556f20b4a".into()),
+            friendly_name: Some("Power saver".into()),
+            overlay: Overlay::NotPresent,
+        }));
+        assert!(WinFacts::new(sys).facts().power_plan.value().unwrap().power_saver);
     }
 
     #[test]

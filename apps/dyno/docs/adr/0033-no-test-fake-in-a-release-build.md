@@ -747,7 +747,19 @@ Green: the tip (`008969752`): the same test passes. Two other tests of `windows:
   - `MSFT_PhysicalDisk`;
   - `PowerGetActiveScheme`, `PowerGetEffectiveOverlayScheme`;
   - the MSIX `uap5:StartupTask` extension.
+- **`PowerGetEffectiveOverlayScheme` (checked 2026-11-12):** not in the Windows SDK metadata the `windows` crate 0.62.2 is
+  generated from, and its expected Microsoft Learn page answers 404. The signature `DWORD (GUID *)` with 0 on success is
+  the widely published declaration, not a Microsoft contract; the only measurement is one observed rc=0 (WP-0 item 8). The
+  reader looks the function up at run time and reports any non-zero code as the power fact being unavailable, never as "no
+  overlay". Whether it exists on Windows 10 is not established.
 - **Measured, not sourced:**
   - StartupApproved values: the format is in `parse/startup_approved.rs` (Dyno's own, tested); the per-source key mapping
     is measured in WP-0.
   - The packaged-app `SystemAppData` `State` layout is not documented by Microsoft; WP-0 measures it.
+
+## WP-3 notes (2026-11-12)
+
+WP-3 is built on `feat/dyno-a33-3-windows-facts` (`windows/facts.rs`, `win_facts_source.rs`, `parse/win_facts.rs`). Owed on the
+test VM before the Dyno tag: the interactive `MSFT_PhysicalDisk` re-measure (standard user and administrator, from an
+interactive token, not a network logon), the `PowerGetEffectiveOverlayScheme` return code, and a run of the `#[cfg(windows)]`
+tests of `windows/facts.rs` and of `windows::tests::the_windows_platform_wires_no_fake`. The coordinator schedules that run.
