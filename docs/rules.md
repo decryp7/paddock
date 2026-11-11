@@ -189,7 +189,9 @@ changes here, every app's copy is updated in the same change.
     in parallel and bounded by the machine's load: `cargo fmt --check`, clippy on the host and, for Windows, `cargo xwin clippy
     --target x86_64-pc-windows-msvc --workspace --all-targets -- -D warnings` (an import or helper used only by a unix-gated
     test is dead code there; ADR 0021, lessons.md "Windows-only assumptions in tests"), lint and type-check of the touched
-    files, conformance, commit-lint (rule 50g), lockfiles with `--locked`. Then dispatch with `./dev`
+    files, conformance, commit-lint (rule 50g), lockfiles with `--locked`. When `crates/` or `.cargo/` changed, also CI's
+    workspace Clippy on Linux, `bash tools/linux-clippy-touched.sh` (the CI image, `--cpus 4 --memory 12g`; without Docker it
+    exits 3, "NOT MEASURED", and an agent never starts Docker, ER-14). Then dispatch with `./dev`
     and, at the same time, run the slower local checks in parallel: the affected tests on the dev OS, the same tests in the
     `train3-linux-dev:1` container (CI limits, `ulimit -n 1024`) and timing-sensitive tests under load. Cap local builds
     (`CARGO_BUILD_JOBS=2`) while CI runners share the machine. If a local check fails, cancel that run at once through the Gitea
