@@ -14,7 +14,7 @@
   "windowsClippy": true,
   "processPatterns": ["{build}[/\\\\]debug[/\\\\]pitwall-fake-engine(\\.exe)?( |$)"],
   "checks": [
-    "node conformance/bin/paddock-conformance.mjs --app pitwall --root apps/pitwall --only C13 --paddock .",
+    "node conformance/bin/paddock-conformance.mjs --app pitwall --root apps/pitwall --only C13,C85 --paddock .",
     "cd apps/pitwall",
     "node --test scripts/ci/*.test.mjs docs/diagrams/src/*.test.mjs",
     "node scripts/ci/check-icons.mjs",
