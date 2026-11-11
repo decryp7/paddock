@@ -749,6 +749,11 @@ impl Jobs {
         self.lock().queue.report(id, Some(progress), None);
     }
 
+    /// What a submit of `spec` would meet now (see [`JobQueue::preflight`]): the id of the job that would serve it.
+    pub fn preflight(&self, spec: &JobSpec) -> Result<Option<JobId>, Refusal> {
+        self.lock().queue.preflight(spec)
+    }
+
     /// The queued and running jobs matching `pred` (e.g. a window's waiting AI requests).
     pub fn find_active(&self, pred: impl Fn(&Job) -> bool) -> Vec<JobId> {
         let inner = self.lock();

@@ -213,7 +213,7 @@ pub(crate) async fn dashboard_tile(state: CurrentWindow, request: TileRequest) -
     .await
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ReportExportRequest {
     pub report: Value,
@@ -260,19 +260,17 @@ pub(crate) async fn export_report<R: Runtime>(
         .write(&request.path, &[renderer.extension()])?
         .path()
         .to_path_buf();
-    check_overwrite(Path::new(&request.path), request.overwrite)?;
-    let params = format!(
-        "{}|{}|{}|{}",
-        request.format,
-        request.redact,
-        serde_json::to_string(&request.theme).unwrap_or_default(),
-        request.report
-    );
+    // The same report export already running serves this ask (before the overwrite question), another export of the file is refused.
+    let spec = crate::jobs::export_spec_for(&state, "Export report", &target, &request);
+    if let Some(id) = crate::jobs::preflight(&app, &spec)? {
+        return Ok(id);
+    }
+    check_overwrite(&target, request.overwrite)?;
     let report = parse_report(request.report)?;
     let (redact, theme) = (request.redact, request.theme);
     let shown = target.clone();
     let redact_cfg = state.host.compiled().profile.redact.clone();
-    crate::jobs::export(&app, &state, "Export report", &shown, &params, move |store| {
+    crate::jobs::export(&app, &state, spec, &shown, move |store| {
         let redactor = if redact {
             Some(debrief_core::redact::Redactor::from_config(&redact_cfg, debrief_core::redact::Salt::random()).map_err(err)?)
         } else {
@@ -426,7 +424,11 @@ pub(crate) async fn open_bundle<R: Runtime>(
     let spec = crate::jobs::JobSpec::new(crate::jobs::JobKind::Import, "Open the bundle")
         .window(state.label())
         .link(crate::jobs::JobLink::Path { path: path.clone() })
-        .keyed(crate::jobs::work_key("open-bundle", Some(state.label()), &[path.as_str()]));
+        .keyed(
+            crate::jobs::key::JobKey::new("open-bundle", Some(state.label()))
+                .path(&source)
+                .finish(),
+        );
     let (controls, flag) = crate::engine::import::controls();
     let (handle, win) = (app.clone(), state.clone());
     crate::jobs::start_value(&app, spec, controls, move |ctx: &crate::jobs::JobCtx| {

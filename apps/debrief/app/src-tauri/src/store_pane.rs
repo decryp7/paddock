@@ -324,16 +324,20 @@ pub(crate) async fn sql_export<R: Runtime>(
         .write(&path, &[])?
         .path()
         .to_path_buf();
-    // Checked now, so the dialog can ask to replace the file; the store checks again when it writes.
-    debrief_core::overwrite::check_overwrite(std::path::Path::new(&path), overwrite)?;
     let request = SqlExportRequest {
         sql,
         notes: window_notes(&state),
         path: target.to_string_lossy().into_owned(),
         overwrite,
     };
-    let params = serde_json::to_string(&request).unwrap_or_default();
-    crate::jobs::export(&app, &state, "Export SQL result to", &target, &params, move |store| {
+    // The same export already running serves this ask (before the overwrite question), another export of the file is refused.
+    let spec = crate::jobs::export_spec_for(&state, "Export SQL result to", &target, &request);
+    if let Some(id) = crate::jobs::preflight(&app, &spec)? {
+        return Ok(id);
+    }
+    // Checked now, so the dialog can ask to replace the file; the store checks again when it writes.
+    debrief_core::overwrite::check_overwrite(&target, overwrite)?;
+    crate::jobs::export(&app, &state, spec, &target, move |store| {
         let r = store.sql_export(&request).map_err(CmdError::from)?;
         log::info!(Rows = r.rows, Bytes = r.bytes, Truncated = r.truncated; "SQL result exported");
         Ok(exported_rows(r.rows, r.truncated))
@@ -744,5 +748,42 @@ mod tests {
             value: None,
         }));
         assert_eq!((c.anchor.as_str(), c.from), ("chartPoint", Some(4)));
+    }
+
+    #[test]
+    fn a_sql_export_asked_again_joins_the_running_one_even_though_its_file_exists() {
+        let dir = crate::test_support::TempDir::new("sql-export-exists");
+        let app = {
+            let app = test_app(Some(dir.0.clone()));
+            main_window(&app).queue(crate::instance::existing(&[samples().join("serilog-clef")]));
+            app
+        };
+        let st = || main_window(&app);
+        crate::paths::allow_under(app.handle(), "main", &dir.0);
+        let jobs = app.state::<crate::jobs::Jobs>().inner().clone();
+        let out = dir.0.join("rows.csv").to_string_lossy().into_owned();
+        let ask = |sql: &str, overwrite: bool| block(sql_export(app.handle().clone(), st(), sql.into(), out.clone(), overwrite));
+        jobs.hold_starts(true);
+        let first = ask("SELECT 1", false).unwrap();
+        std::fs::write(&out, "x").unwrap();
+        assert_eq!(
+            ask("SELECT 1", false).unwrap(),
+            first,
+            "the file's existence stopped a repeated export"
+        );
+        assert_eq!(
+            ask("SELECT 1", true).unwrap(),
+            first,
+            "confirming the replacement started a second writer"
+        );
+        // Another query into the same file is refused while this one writes it.
+        let refused = ask("SELECT 2", true).unwrap_err();
+        assert!(
+            refused.message.contains("Another export is already writing this file"),
+            "{}",
+            refused.message
+        );
+        jobs.hold_starts(false);
+        crate::test_support::job_end(&app, first);
     }
 }

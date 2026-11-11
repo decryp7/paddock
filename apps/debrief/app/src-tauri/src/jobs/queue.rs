@@ -39,6 +39,8 @@ pub enum Refusal {
     },
     /// A keyed spec was given to a call whose handle cannot follow a job it joins (see `Jobs::submit`).
     KeyedWithHandle,
+    /// Another export is already writing the same file, with other parameters: two writers would meet in one file.
+    TargetBusy,
 }
 
 impl std::fmt::Display for Refusal {
@@ -50,6 +52,10 @@ impl std::fmt::Display for Refusal {
                 kind.as_str()
             ),
             Refusal::KeyedWithHandle => write!(f, "a keyed job cannot hand its value to a waiter: use submit_work"),
+            Refusal::TargetBusy => write!(
+                f,
+                "Another export is already writing this file with other settings; wait for it to finish or cancel it in the Jobs pane, or choose another file"
+            ),
         }
     }
 }
@@ -258,8 +264,10 @@ impl JobQueue {
         self.submit_or_existing(spec, now).map(|s| s.id)
     }
 
-    /// As [`submit`](Self::submit), saying whether a job was added.
-    pub fn submit_or_existing(&mut self, spec: JobSpec, now: i64) -> Result<Submission, Refusal> {
+    /// What a submit of `spec` would meet: the active job that serves an equal keyed request (`Some`), or `None` when it would
+    /// add a job. An export of a file another active export is writing with other parameters is refused
+    /// ([`Refusal::TargetBusy`]); the check is here so it holds for every caller and cannot race the submit.
+    pub fn preflight(&self, spec: &JobSpec) -> Result<Option<JobId>, Refusal> {
         if let Some(key) = &spec.key {
             if let Some(j) = self.active.iter().find(|j| {
                 j.kind == spec.kind
@@ -268,8 +276,26 @@ impl JobQueue {
                     && !self.stopping.contains(&j.id)
                     && (spec.joins_running || j.state() == JobState::Queued)
             }) {
-                return Ok(Submission { id: j.id, created: false });
+                return Ok(Some(j.id));
             }
+        }
+        if let (JobKind::Export, Some(JobLink::Path { path })) = (spec.kind, &spec.source.link) {
+            let busy = self.active.iter().any(|j| {
+                j.kind == JobKind::Export
+                    && !j.state().is_finished()
+                    && matches!(&j.source.link, Some(JobLink::Path { path: p }) if p == path)
+            });
+            if busy {
+                return Err(Refusal::TargetBusy);
+            }
+        }
+        Ok(None)
+    }
+
+    /// As [`submit`](Self::submit), saying whether a job was added.
+    pub fn submit_or_existing(&mut self, spec: JobSpec, now: i64) -> Result<Submission, Refusal> {
+        if let Some(id) = self.preflight(&spec)? {
+            return Ok(Submission { id, created: false });
         }
         let waiting = self
             .active
@@ -992,6 +1018,23 @@ mod tests {
         assert_eq!(ended.len(), 2);
         assert!(ended.iter().all(|f| f.job.state() == JobState::Interrupted && f.kept));
         assert!(!q.has_active() && q.active_ids().is_empty());
+    }
+
+    #[test]
+    fn an_export_of_a_file_another_export_is_writing_is_refused_unless_it_is_the_same_request() {
+        let export = |key: &str, path: &str| {
+            JobSpec::new(JobKind::Export, "e")
+                .link(JobLink::Path { path: path.into() })
+                .keyed(key)
+        };
+        let mut q = JobQueue::new(2);
+        let a = q.submit(export("k1", "/x/a.csv"), 0).unwrap();
+        assert_eq!(q.submit(export("k1", "/x/a.csv"), 1).unwrap(), a, "the same request joins");
+        assert_eq!(q.submit(export("k2", "/x/a.csv"), 2), Err(Refusal::TargetBusy));
+        assert!(q.submit(export("k2", "/x/b.csv"), 3).is_ok(), "another file runs beside it");
+        // Unkeyed exports of one file are two writers as well.
+        let plain = JobSpec::new(JobKind::Export, "p").link(JobLink::Path { path: "/x/a.csv".into() });
+        assert_eq!(q.submit(plain, 4), Err(Refusal::TargetBusy));
     }
 
     #[test]

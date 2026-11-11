@@ -16,6 +16,7 @@
 //!
 //! Event: `debrief://jobs` (the window's [`JobsSnapshot`]). Wire contract: `app/src/app/jobs/jobs.types.ts`.
 
+pub(crate) mod key;
 pub mod model;
 pub mod persist;
 pub mod queue;
@@ -421,28 +422,19 @@ pub(crate) async fn analysis_announced<R: Runtime, T: Send + 'static>(
     .await
 }
 
-/// The idempotency key of an import or export (see [`JobSpec::key`]): the window, the kind of work and a fingerprint of what
-/// it is about (`parts`: the sources or the target and the parameters). The fingerprint keeps paths and queries out of the key,
-/// so neither the Jobs record nor a log line carries them.
-pub(crate) fn work_key(what: &str, window: Option<&str>, parts: &[&str]) -> String {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    for p in parts {
-        p.hash(&mut h);
-    }
-    format!("{}|{what}|{:016x}", window.unwrap_or("app"), h.finish())
+/// The key of an export of `title` to `path` by `window`: the work and its target.
+pub(crate) fn export_key(title: &str, window: Option<&str>, path: &std::path::Path) -> key::JobKey {
+    key::JobKey::new("export", window).text(title).path(path)
 }
 
-/// The spec of an export to `path` by the window (or the app). Keyed by the target and the title (what is exported): the same
-/// export asked for while it runs is served by that job.
+/// The spec of an export to `path` by the window (or the app), keyed by the work and its target alone: the same export asked
+/// for while it runs is served by that job. An export that depends on a request uses [`export_spec_for`].
 pub(crate) fn export_spec(title: &str, window: Option<&str>, path: &std::path::Path) -> JobSpec {
-    export_spec_with(title, window, path, "")
+    export_spec_with(title, window, path, Some(export_key(title, window, path)))
 }
 
-/// [`export_spec`] for an export whose result also depends on `params` (the query, the format, what to mask): the key
-/// includes them, so the same file written with other parameters is another job.
-pub(crate) fn export_spec_with(title: &str, window: Option<&str>, path: &std::path::Path, params: &str) -> JobSpec {
-    let key = work_key("export", window, &[title, &path.to_string_lossy(), params]);
+/// An export spec with the key the caller built (`None`: the request could not be fingerprinted, so the job is never merged).
+pub(crate) fn export_spec_with(title: &str, window: Option<&str>, path: &std::path::Path, key: Option<key::JobKey>) -> JobSpec {
     let name = path
         .file_name()
         .map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
@@ -452,7 +444,36 @@ pub(crate) fn export_spec_with(title: &str, window: Option<&str>, path: &std::pa
     if let Some(w) = window {
         spec = spec.window(w);
     }
-    spec.keyed(key)
+    key::keyed(spec, key)
+}
+
+/// The spec of an export of the window's logs to `path` described by `request`: keyed by the target, the project, the
+/// profile's `[redact]` rules and the whole request except what only confirms it (`overwrite`, and the path as the user wrote
+/// it, which `path` replaces). The same request while it runs is served by that job.
+pub(crate) fn export_spec_for<T: Serialize>(win: &CurrentWindow, title: &str, path: &std::path::Path, request: &T) -> JobSpec {
+    let key = export_key(title, Some(win.label()), path)
+        .text(&win.engine.opened_id().map_or_else(String::new, |id| id.to_string()))
+        .request(&win.host.compiled().profile.redact, &[])
+        .and_then(|k| {
+            let skip: Vec<&str> = key::CONFIRMATION_ONLY.iter().copied().chain(["path"]).collect();
+            k.request(request, &skip)
+        });
+    export_spec_with(title, Some(win.label()), path, key)
+}
+
+/// Before a command checks what the user must confirm (an existing file): the job that already serves `spec`, if one runs
+/// (a repeated request joins it, and the user is told), or the refusal of an export of a file another export is writing with
+/// other settings. `None`: nothing in the way.
+pub(crate) fn preflight<R: Runtime>(app: &AppHandle<R>, spec: &JobSpec) -> CmdResult<Option<u64>> {
+    let Some(jobs) = app.try_state::<Jobs>() else { return Ok(None) };
+    match jobs.preflight(spec) {
+        Ok(Some(id)) => {
+            tell_joined(app, spec.kind, spec.source.window.as_deref());
+            Ok(Some(id.0))
+        }
+        Ok(None) => Ok(None),
+        Err(refusal) => Err(refusal.to_string().into()),
+    }
 }
 
 /// The progress of an export under way: rows (or events) written of those to write (`total` 0 while unknown) and the
@@ -498,22 +519,15 @@ pub(crate) fn start_file<R: Runtime>(
     )
 }
 
-/// An export of the window's logs to `path` as a background export job (two at a time); see [`start_file`].
+/// An export of the window's logs to `path` as a background export job (two at a time); see [`start_file`]. `spec` is
+/// [`export_spec_for`]'s.
 pub(crate) fn export<R: Runtime>(
     app: &AppHandle<R>,
     win: &CurrentWindow,
-    title: &str,
+    spec: JobSpec,
     path: &std::path::Path,
-    params: &str,
     f: impl FnOnce(&dyn debrief_core::ports::Store) -> CmdResult<String> + Send + 'static,
 ) -> CmdResult<u64> {
-    // The same file with the same parameters from the same project is one job (a second ask joins it).
-    let params = format!(
-        "{}|{}",
-        win.engine.opened_id().map_or_else(String::new, |id| id.to_string()),
-        params
-    );
-    let spec = export_spec_with(title, Some(win.label()), path, &params);
     let w = win.arc().clone();
     let control = debrief_core::ql::QueryControl::new();
     let result = JobResult::file(path.display().to_string());
@@ -604,8 +618,8 @@ where
 fn tell_joined<R: Runtime>(app: &AppHandle<R>, kind: JobKind, window: Option<&str>) {
     use crate::notification_centre::centre::{NewNotice, NoticeScope, NoticeSeverity, NoticeSource};
     let (source, body) = match kind {
-        JobKind::Import => (NoticeSource::Import, "Already importing these files; showing that job."),
-        JobKind::Export => (NoticeSource::Job, "Already exporting this; showing that job."),
+        JobKind::Import => (NoticeSource::Import, "Already importing these files; follow it in the Jobs pane."),
+        JobKind::Export => (NoticeSource::Job, "Already exporting this; follow it in the Jobs pane."),
         _ => return,
     };
     let notice = NewNotice::new(
