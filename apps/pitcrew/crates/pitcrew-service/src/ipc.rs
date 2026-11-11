@@ -362,7 +362,11 @@ mod platform {
         let mut server = create(&name, true, mode)
             .map_err(|e| format!("the pipe {name} could not be created ({e}); is another Pitcrew service running?"))?;
         if mode == ServeMode::User {
-            super::record_user_pipe_name(&data_dir, &name)
+            // Blocking work (file I/O with a short retry pause) off the runtime's two workers.
+            let (dir, recorded) = (data_dir.clone(), name.clone());
+            tokio::task::spawn_blocking(move || super::record_user_pipe_name(&dir, &recorded))
+                .await
+                .map_err(|e| format!("recording the engine's pipe name was interrupted ({e})"))?
                 .map_err(|e| format!("the engine's pipe name could not be recorded ({e}); the app cannot find this engine"))?;
         }
         loop {

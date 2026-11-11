@@ -130,7 +130,7 @@ the SYSTEM service keeps the `session = service` runners in administrator-only f
 - **One engine per user.** The engine holds an exclusive lock on `engine.lock` in its folder for as long as it runs, taken before the
   supervisor, the pipe or `pipe.name`; a second engine on the same folder exits with a message that says so (round 5, P1-1).
 - **Its pipe's name** is 128 random bits from the OS's random source, new at each start. The pipe is created first and `pipe.name` is
-  written afterwards, atomically (retried briefly on a sharing violation), in the engine's **own** folder (`%LOCALAPPDATA%\\Pitcrew\\engine`, never `%ProgramData%\\Pitcrew`: `socket_dir_for`), a hint checked for shape; the pipe's owner is still checked by the client. The lock file is opened shared for read and write only, so nothing can delete or replace it under the engine; a failure that ends the engine is written to its own `logs\\service.log`.
+  written afterwards, atomically (retried briefly on a sharing violation), in the engine's **own** folder (`%LOCALAPPDATA%\Pitcrew\engine`, never `%ProgramData%\Pitcrew`: `socket_dir_for`), a hint checked for shape; the pipe's owner is still checked by the client. The lock file is opened shared for read and write only, so nothing can delete or replace it under the engine; a failure that ends the engine is written to its own `logs\service.log`.
   Another account can neither connect nor create an instance (VM rows written, not run yet).
 - **Routing never guesses.** A new runner is refused when the other engine already has its name; a request about one runner goes to
   the engine whose status listed it; a runner nobody lists gets an `UnknownRunner` answer, and if an engine did not answer the

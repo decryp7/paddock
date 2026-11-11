@@ -148,22 +148,22 @@ impl Adopted {
     /// # Errors
     /// The text is not the list's JSON.
     pub fn try_parse(text: &str) -> Result<Self, String> {
-        serde_json::from_str::<AdoptedFile>(text)
-            .map(|f| {
-                Adopted(
-                    f.folders
-                        .into_iter()
-                        .map(|e| {
-                            let id = e
-                                .volume
-                                .zip(e.index.and_then(|h| u128::from_str_radix(&h, 16).ok()))
-                                .map(|(volume, index)| FileIdentity { volume, index, links: 1 });
-                            (adopted_key(Path::new(&e.path)), id)
-                        })
-                        .collect(),
-                )
-            })
-            .map_err(|e| format!("{ADOPTED_FILE} is not the list of folders the service made ({e})"))
+        let bad = |e: String| format!("{ADOPTED_FILE} is not the list of folders the service made ({e})");
+        let file = serde_json::from_str::<AdoptedFile>(text).map_err(|e| bad(e.to_string()))?;
+        let mut map = std::collections::BTreeMap::new();
+        for e in file.folders {
+            // A volume without an index (or the reverse), or an index that is not hex, is a damaged list, not an unbound entry.
+            let id = match (e.volume, e.index.as_deref()) {
+                (None, None) => None,
+                (Some(volume), Some(hex)) => {
+                    let index = u128::from_str_radix(hex, 16).map_err(|_| bad(format!("the file id {hex:?} of {} is not hex", e.path)))?;
+                    Some(FileIdentity { volume, index, links: 1 })
+                }
+                _ => return Err(bad(format!("the entry of {} has a volume or a file id but not both", e.path))),
+            };
+            map.insert(adopted_key(Path::new(&e.path)), id);
+        }
+        Ok(Adopted(map))
     }
 
     /// The file's text.
@@ -587,16 +587,18 @@ impl Swept {
 }
 
 /// Whether `name` is an entry this sweep already moved aside (`<name>.untrusted-<secs>-<n>`): moving it again would only grow its name.
-fn is_moved_aside(name: &str) -> bool {
+/// Exactly `parts` numbers follow: two for the real port, one for the fake that counts with a single number ([`TrustPort::aside_name_parts`]).
+fn is_moved_aside(name: &str, parts: usize) -> bool {
     let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
-    // The real names are `<secs>-<n>`; the fake machine of the tests counts with one number.
     name.rsplit_once(".untrusted-")
-        .is_some_and(|(base, tail)| !base.is_empty() && tail.split('-').count() <= 2 && tail.split('-').all(digits))
+        .is_some_and(|(base, tail)| !base.is_empty() && tail.split('-').count() == parts && tail.split('-').all(digits))
 }
 
 /// A name the service opens for writing in `logs` (the service log and its rotation names): if one of them cannot be moved away the
 /// service must not start, because it would open it (round 6 P1-B).
 fn is_service_log_name(name: &str) -> bool {
+    // Windows compares names without case: `SERVICE.LOG` is the file the service opens.
+    let name = name.to_ascii_lowercase();
     name == "service.log"
         || name
             .strip_prefix("service.log.")
@@ -645,6 +647,7 @@ pub fn ensure_protected_root(
     };
     let is_folder = node.kind == FileKind::Dir;
     let mut swept = Swept::default();
+    let aside_parts = port.aside_name_parts();
     let mut verdict: Result<(), String> = if is_folder { Ok(()) } else { Err("it is not a folder".into()) };
     if is_folder {
         port.lock_dir(&path).map_err(|e| io("Locking", e))?;
@@ -678,7 +681,7 @@ pub fn ensure_protected_root(
                 // could then make links inside it: it is locked like the data folder, by handle, never propagated.
                 port.lock_dir(&child).map_err(|e| io("Locking", e))?;
                 let names = list(&child).map_err(|e| io("Listing", e))?;
-                for name in names.into_iter().filter(|n| !is_moved_aside(n)) {
+                for name in names.into_iter().filter(|n| !is_moved_aside(n, aside_parts)) {
                     let entry = format!("{}\\{name}", child.trim_end_matches('\\'));
                     let Some(n) = port.node(&entry).map_err(|e| io("Examining", e))? else {
                         continue;
@@ -724,7 +727,7 @@ pub fn ensure_protected_root(
     if is_folder && verdict.is_ok() {
         let names = list(&path).map_err(|e| io("Listing", e))?;
         for name in names.into_iter().filter(|n| {
-            !is_moved_aside(n)
+            !is_moved_aside(n, aside_parts)
                 && !trusted_files.iter().any(|f| f.eq_ignore_ascii_case(n))
                 && !trusted_dirs.iter().any(|d| d.eq_ignore_ascii_case(n))
         }) {
@@ -1312,6 +1315,52 @@ mod tests {
         assert_eq!(swept.moved.len(), 2, "the two service log names moved: {swept:?}");
     }
 
+    /// Round 7: through a port that models identities and cannot say which file a log is (an empty map), the file is moved aside.
+    #[test]
+    fn a_log_whose_identity_is_unknown_is_moved_aside() {
+        let mut fake = machine();
+        fake.put("C:\\ProgramData\\Pitcrew", locked())
+            .put("C:\\ProgramData\\Pitcrew\\logs", locked())
+            .put("C:\\ProgramData\\Pitcrew\\logs\\other.log", file(locked()));
+        let list = list_of(&fake);
+        let mut port = WithIds(&mut fake, std::collections::HashMap::new());
+        let out = ensure_protected_root(
+            &mut port,
+            &list,
+            Path::new("C:\\ProgramData\\Pitcrew"),
+            &["pitcrew.toml"],
+            &["logs"],
+        )
+        .unwrap();
+        let RootOutcome::Locked(swept) = out else { panic!("{out:?}") };
+        assert_eq!(swept.moved.len(), 1, "{swept:?}");
+        assert!(swept.moved[0].2.contains("hard link"), "{swept:?}");
+    }
+
+    /// Round 7: an index that is not hex, or a volume without an index, is a damaged list.
+    #[test]
+    fn a_damaged_file_id_in_the_list_is_a_parse_error() {
+        for bad in [
+            r#"{"folders":[{"path":"C:\\a","volume":1,"index":"zz"}]}"#,
+            r#"{"folders":[{"path":"C:\\a","volume":1}]}"#,
+            r#"{"folders":[{"path":"C:\\a","index":"ab"}]}"#,
+        ] {
+            assert!(Adopted::try_parse(bad).is_err(), "{bad}");
+        }
+        assert!(Adopted::try_parse(r#"{"folders":[{"path":"C:\\a"},{"path":"C:\\b","volume":1,"index":"ff"}]}"#).is_ok());
+    }
+
+    /// Round 7: `SERVICE.LOG` is the file the service opens on Windows.
+    #[test]
+    fn the_service_log_names_compare_without_case() {
+        for name in ["service.log", "SERVICE.LOG", "Service.Log.3"] {
+            assert!(is_service_log_name(name), "{name}");
+        }
+        for name in ["service.log.x", "service.logs", "other.log", "service.log."] {
+            assert!(!is_service_log_name(name), "{name}");
+        }
+    }
+
     /// Round 6 P2-1: a port that models identities and cannot say which file a path is does not pass a security decision.
     #[test]
     fn an_unknown_identity_from_a_port_that_models_identities_is_a_refusal() {
@@ -1355,8 +1404,13 @@ mod tests {
     #[test]
     fn only_the_exact_aside_pattern_is_skipped_by_the_sweep() {
         for ok in ["evil.untrusted-1760000000-0", "a.b.untrusted-5-12"] {
-            assert!(is_moved_aside(ok), "{ok}");
+            assert!(is_moved_aside(ok, 2), "{ok}");
         }
+        assert!(!is_moved_aside("evil.untrusted-1", 2), "the real port makes two numbers");
+        assert!(
+            is_moved_aside("evil.untrusted-1", 1) && !is_moved_aside("evil.untrusted-1-2", 1),
+            "the fake counts with one"
+        );
         for bad in [
             "evil.untrusted-x",
             "evil.untrusted-1-",
@@ -1365,7 +1419,7 @@ mod tests {
             "untrusted-1-2",
             "evil.untrusted-1-2x",
         ] {
-            assert!(!is_moved_aside(bad), "{bad}");
+            assert!(!is_moved_aside(bad, 2) && !is_moved_aside(bad, 1), "{bad}");
         }
         let mut p = machine();
         p.put("C:\\ProgramData\\Pitcrew", locked())

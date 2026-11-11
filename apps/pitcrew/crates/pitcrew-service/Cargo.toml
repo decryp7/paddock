@@ -64,6 +64,8 @@ nix = { version = "0.31", default-features = false, features = ["signal", "proce
 libc = "0.2"
 
 [dev-dependencies]
+# The fake machine of the trust rule (`trust_fake`), for tests only.
+paddock-service = { path = "../../../../crates/paddock-service", features = ["test-support"] }
 # The ending harness of ADR 0072 (tests/endings.rs): the raw-stream client, the scenarios, the ratchet.
 paddock-ipc = { path = "../../../../crates/paddock-ipc", features = ["testing"] }
 # The fake runner (examples/fake_runner.rs) stops on Ctrl+Break / SIGTERM like the real one.

@@ -14,7 +14,8 @@ use std::path::{Path, PathBuf};
 fn require_trusted_owner() -> bool {
     #[cfg(windows)]
     {
-        crate::platform::win_session::is_local_system()
+        // A token that cannot be read is not "an engine in a user's session": the stricter rule applies.
+        !matches!(crate::platform::win_session::local_system_state(), Some(false))
     }
     #[cfg(not(windows))]
     {
@@ -26,7 +27,7 @@ fn require_trusted_owner() -> bool {
 /// owner where that is asked: [`paddock_service::privileged::trust_real::open_append_no_follow`], checked on the handle). A file that
 /// is not acceptable (a hard link a user holds, a planted file) is moved aside to a fresh `<name>.untrusted-<secs>-<n>` name and a new
 /// file is made, so what the service writes never reaches the other name; if it cannot be moved, nothing is written (round 6 P1-B).
-fn open_log(path: &Path) -> std::io::Result<File> {
+fn open_log(path: &Path) -> std::io::Result<(File, Option<String>)> {
     let owner = require_trusted_owner();
     match paddock_service::privileged::trust_real::open_append_no_follow(path, owner) {
         Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
@@ -40,11 +41,13 @@ fn open_log(path: &Path) -> std::io::Result<File> {
                 }
                 std::fs::rename(path, &aside)
                     .map_err(|e2| std::io::Error::new(e2.kind(), format!("{e}; it could not be moved aside ({e2})")))?;
-                return paddock_service::privileged::trust_real::open_append_no_follow(path, owner);
+                let file = paddock_service::privileged::trust_real::open_append_no_follow(path, owner)?;
+                // `e` already reads "<path> <why>": the line says what was moved and where.
+                return Ok((file, Some(format!("{e}; moved to {}", aside.display()))));
             }
             Err(e)
         }
-        other => other,
+        other => other.map(|f| (f, None)),
     }
 }
 
@@ -56,6 +59,8 @@ pub struct LogWriter {
     file: Option<File>,
     size: u64,
     failed: bool,
+    /// Why the file could not be opened or written the last time (for the service log: the writer cannot log its own failure).
+    last_error: Option<String>,
     /// Writes nothing anywhere (see [`LogWriter::discarding`]).
     discard: bool,
 }
@@ -71,6 +76,7 @@ impl LogWriter {
             file: None,
             size: 0,
             failed: false,
+            last_error: None,
             discard: false,
         };
         w.reopen();
@@ -86,6 +92,7 @@ impl LogWriter {
             file: None,
             size: 0,
             failed: false,
+            last_error: None,
             discard: true,
         }
     }
@@ -98,6 +105,11 @@ impl LogWriter {
     /// Whether the file could not be written.
     pub fn failed(&self) -> bool {
         self.failed
+    }
+
+    /// Why the file could not be opened or written the last time, if it could not.
+    pub fn last_error(&self) -> Option<&str> {
+        self.last_error.as_deref()
     }
 
     /// Changes the rotation policy.
@@ -113,14 +125,23 @@ impl LogWriter {
             let _ = std::fs::create_dir_all(parent);
         }
         match open_log(&self.path) {
-            Ok(f) => {
+            Ok((mut f, note)) => {
                 self.size = f.metadata().map(|m| m.len()).unwrap_or(0);
+                if let Some(note) = note {
+                    // What was moved aside and why is the first line of the new file (ER-27).
+                    let line = format!("{} supervisor: {note}\n", format_rfc3339(crate::cleanup::now()));
+                    if f.write_all(line.as_bytes()).is_ok() {
+                        self.size += line.len() as u64;
+                    }
+                }
                 self.file = Some(f);
                 self.failed = false;
+                self.last_error = None;
             }
-            Err(_) => {
+            Err(e) => {
                 self.file = None;
                 self.failed = true;
+                self.last_error = Some(e.to_string());
             }
         }
     }
@@ -144,6 +165,7 @@ impl LogWriter {
             } else {
                 self.failed = true;
                 self.file = None;
+                self.last_error = Some(format!("{} could not be written", self.path.display()));
             }
         }
     }
@@ -246,7 +268,7 @@ mod tests {
 
     /// Round 6 P1-B: a hard link a user holds to the log made the privileged writer append to the user's file's name too (and to the file
     /// it pointed at). Now the file is moved aside and a new one is started; the other name keeps only what it had.
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn a_log_with_a_second_name_is_moved_aside_and_the_other_name_is_never_written() {
         let d = temp("hardlink");
@@ -263,7 +285,12 @@ mod tests {
             "old line\n",
             "the other name was written to"
         );
-        assert_eq!(std::fs::read_to_string(&log).unwrap(), "new line\n");
+        let mine = std::fs::read_to_string(&log).unwrap();
+        assert!(mine.ends_with("new line\n"), "{mine}");
+        assert!(
+            mine.contains("more than one name") && mine.contains("moved to "),
+            "the move is written first: {mine}"
+        );
         let asides = std::fs::read_dir(&d)
             .unwrap()
             .filter_map(Result::ok)
@@ -285,6 +312,11 @@ mod tests {
         let mut w = LogWriter::open(&d, "service.log", RotationPolicy::default());
         w.write_line("a line");
         assert!(w.failed(), "a link is not a log");
+        assert!(
+            w.last_error().is_some_and(|e| !e.is_empty()),
+            "the cause is kept: {:?}",
+            w.last_error()
+        );
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "mine");
         let _ = std::fs::remove_dir_all(&d);
     }

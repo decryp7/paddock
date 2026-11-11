@@ -410,6 +410,86 @@ fn a_second_per_user_engine_on_one_folder_is_refused() {
     let _ = std::fs::remove_dir_all(&data);
 }
 
+/// Round 7 (P1-B on a real machine): a hard link to `logs\\service.log` that is held open without share-delete makes the rename fail. The
+/// start then stops with the cause, and the log writer opens nothing through the link: the other name keeps what it had.
+#[test]
+#[ignore = "VM: PITCREW_TEST_EXPECT=elevated"]
+fn a_held_open_hard_link_to_the_service_log_stops_the_sweep_and_is_never_written() {
+    use std::os::windows::fs::OpenOptionsExt;
+    assert_eq!(expectation(), "elevated", "this row makes protected folders");
+    let root = PathBuf::from(format!("{}-held", settle_root().display()));
+    let _ = std::fs::remove_dir_all(&root);
+    ensure_protected_root(&mut RealTrust, &list_real, &root, &["pitcrew.toml"], &["logs"]).unwrap();
+    let logs = root.join("logs");
+    std::fs::write(logs.join("service.log"), b"planted").unwrap();
+    let theirs = root.join("theirs.log");
+    std::fs::hard_link(logs.join("service.log"), &theirs).unwrap();
+    // Held open for read and write but not delete: the rename of the other name cannot succeed.
+    let held = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .share_mode(3)
+        .open(&theirs)
+        .unwrap();
+    let e = ensure_protected_root(&mut RealTrust, &list_real, &root, &["pitcrew.toml"], &["logs"]).unwrap_err();
+    println!("MEASURED sweep with a held-open link: {e}");
+    assert!(e.contains("service.log") && e.contains("does not start"), "{e}");
+    let mut w = pitcrew_service::logfile::LogWriter::open(&logs, "service.log", pitcrew_core::logs::RotationPolicy::default());
+    w.write_line("a line the service writes");
+    println!("MEASURED writer: failed {} ({:?})", w.failed(), w.last_error());
+    assert!(w.failed(), "the writer must not open a log it cannot move away from its other name");
+    drop(held);
+    assert_eq!(std::fs::read_to_string(&theirs).unwrap(), "planted", "the other name was written");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Round 7 (P2-9): while an engine runs, its lock file can be neither deleted nor renamed (it is shared for read and write only).
+#[test]
+#[ignore = "VM: PITCREW_TEST_EXPECT=standard"]
+fn the_engine_lock_file_cannot_be_deleted_or_renamed_while_the_engine_runs() {
+    use pitcrew_service::ipc::ServeMode;
+    assert_eq!(expectation(), "standard", "the per-user engine runs as an ordinary user");
+    let data = scratch("lock-share");
+    let host = Host::start_with(data.clone(), data.clone(), ServeMode::User, |e| panic!("the engine stopped: {e}")).unwrap();
+    let lock = data.join(pitcrew_service::host::ENGINE_LOCK_FILE);
+    let removed = std::fs::remove_file(&lock);
+    let renamed = std::fs::rename(&lock, data.join("moved.lock"));
+    println!("MEASURED delete: {removed:?}; rename: {renamed:?}");
+    assert!(
+        removed.is_err() && renamed.is_err() && lock.exists(),
+        "the lock file was removed or renamed under a running engine"
+    );
+    host.stop();
+    let _ = std::fs::remove_dir_all(&data);
+}
+
+/// Round 7 (P2-4): the real error code when the atomic rename of `pipe.name` hits a file that is held open, measured: the retry
+/// treats 32 and 33; if this shows 5 (access denied), 5 is added to the codes the retry handles.
+#[test]
+#[ignore = "VM: PITCREW_TEST_EXPECT=standard"]
+fn the_rename_over_a_held_open_pipe_name_fails_with_a_code_the_retry_handles() {
+    use std::os::windows::fs::OpenOptionsExt;
+    assert_eq!(expectation(), "standard", "an ordinary user's file");
+    let dir = scratch("pipe-name-held");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join(pitcrew_core::service_paths::USER_ENGINE_PIPE_FILE);
+    std::fs::write(&file, "old").unwrap();
+    // A reader (the app, a scanner) holds the file: read access, shared for read and write, not delete.
+    let held = std::fs::OpenOptions::new().read(true).share_mode(3).open(&file).unwrap();
+    let e = pitcrew_service::store::write_atomic(&file, "new").unwrap_err();
+    let code = match &e {
+        pitcrew_service::error::Error::Io { source, .. } => source.raw_os_error(),
+        other => panic!("{other:?}"),
+    };
+    println!("MEASURED rename over a held-open file: raw os error {code:?} ({e})");
+    drop(held);
+    assert!(
+        matches!(code, Some(32 | 33)),
+        "the retry handles 32 and 33; the machine said {code:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The per-user engine (ADR 0004, second amendment) as the standard user runs it: its pipe is owned by that user and the app's
 /// owner check accepts it only when told it is the user's own engine; it serves its own user every request (no administrator
 /// needed for their own runners), and the SYSTEM service's rule for the same request is the opposite.

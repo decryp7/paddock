@@ -436,7 +436,7 @@ mod tests {
             .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
             .spawn()
             .expect("the engine starts");
-        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        let deadline = std::time::Instant::now() + Duration::from_secs(40);
         let found = loop {
             if let Ok(name) = pipe_of(Engine::User) {
                 break Some(name);
@@ -444,7 +444,7 @@ mod tests {
             if child.try_wait().ok().flatten().is_some() || std::time::Instant::now() > deadline {
                 break None;
             }
-            std::thread::sleep(Duration::from_millis(250)); // conformance: hang-guard — polls for the engine's pipe.name, bounded by the 60 s deadline above
+            std::thread::sleep(Duration::from_millis(250)); // conformance: hang-guard — polls for the engine's pipe.name, bounded by the 40 s deadline above
         };
         let answer = found.as_ref().map(|_| request_to(Engine::User, Request::Status));
         println!("MEASURED pipe name: {found:?}; status: {answer:?}");

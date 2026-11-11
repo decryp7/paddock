@@ -80,8 +80,19 @@ impl Host {
         mode: ipc::ServeMode,
         on_fatal: impl FnOnce(String) + Send + 'static,
     ) -> Result<Host, Error> {
+        Host::start_with_token(data_dir, socket_dir, mode, token_is_elevated(), on_fatal)
+    }
+
+    /// [`Host::start_with`] with the token's elevation given (the test seam of the refusal).
+    fn start_with_token(
+        data_dir: PathBuf,
+        socket_dir: PathBuf,
+        mode: ipc::ServeMode,
+        elevated: bool,
+        on_fatal: impl FnOnce(String) + Send + 'static,
+    ) -> Result<Host, Error> {
         if mode == ipc::ServeMode::User {
-            user_engine_token_allowed(token_is_elevated()).map_err(|reason| Error::Os {
+            user_engine_token_allowed(elevated).map_err(|reason| Error::Os {
                 what: "Starting the engine for your own runners",
                 reason,
             })?;
@@ -92,6 +103,22 @@ impl Host {
         } else {
             None
         };
+        // From here the engine owns its folder: a failure is written to its own log. Before the lock (an elevated refusal, a second
+        // engine) it touches nothing, not even the log of the engine that holds the folder.
+        let result = Host::start_locked(data_dir.clone(), socket_dir, mode, on_fatal, instance_lock);
+        if let Err(e) = &result {
+            log_engine_failure(&data_dir, mode, &e.to_string());
+        }
+        result
+    }
+
+    fn start_locked(
+        data_dir: PathBuf,
+        socket_dir: PathBuf,
+        mode: ipc::ServeMode,
+        on_fatal: impl FnOnce(String) + Send + 'static,
+        instance_lock: Option<std::fs::File>,
+    ) -> Result<Host, Error> {
         let protected = protect_installed_folder(&data_dir)?;
         std::fs::create_dir_all(&data_dir).map_err(|source| Error::Io {
             path: data_dir.display().to_string(),
@@ -263,8 +290,7 @@ pub fn run_foreground(data_dir: PathBuf) -> Result<(), Error> {
     let own_dir = data_dir.clone();
     let host = Host::start_with(data_dir, socket_dir, mode, move |e| {
         let _ = fatal_tx.send(e);
-    })
-    .inspect_err(|e| log_engine_failure(&own_dir, mode, &e.to_string()))?;
+    })?;
     let signals = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -296,15 +322,16 @@ pub fn run_foreground(data_dir: PathBuf) -> Result<(), Error> {
         }
     });
     let fatal = fatal_rx.try_recv().ok();
+    if let Some(reason) = &fatal {
+        // While the host still holds the engine's lock (stopping it releases the lock).
+        log_engine_failure(&own_dir, mode, reason);
+    }
     host.stop();
     match fatal {
-        Some(reason) => {
-            log_engine_failure(&own_dir, mode, &reason);
-            Err(Error::Os {
-                what: "Serving the Pitcrew app",
-                reason,
-            })
-        }
+        Some(reason) => Err(Error::Os {
+            what: "Serving the Pitcrew app",
+            reason,
+        }),
         None => Ok(()),
     }
 }
@@ -322,6 +349,10 @@ pub fn socket_dir_for(mode: ipc::ServeMode, data_dir: &std::path::Path, os_socke
 /// Writes why the engine could not start or stopped to its own `logs/service.log` (ER-27): a user's engine has no console, so this is
 /// where the cause can be found from a diagnostic bundle. A log that cannot be written is the only thing left unsaid.
 pub fn log_engine_failure(data_dir: &std::path::Path, mode: ipc::ServeMode, cause: &str) {
+    // The SYSTEM service's supervisor writes its own log; only the per-user engine, which owns its folder, writes here.
+    if mode != ipc::ServeMode::User {
+        return;
+    }
     let who = if mode == ipc::ServeMode::User {
         "the engine for your own runners"
     } else {
@@ -430,6 +461,32 @@ mod location_tests {
         );
         host.stop();
         let _ = (std::fs::remove_dir_all(&data), std::fs::remove_dir_all(&sock));
+    }
+
+    /// Round 7: an elevated refusal happens before the engine owns its folder: nothing is written, not a log, not a lock.
+    #[test]
+    fn an_elevated_refusal_writes_nothing_and_the_service_mode_never_writes_this_log() {
+        let data = scratch("elevated");
+        let e = Host::start_with_token(data.clone(), data.clone(), ipc::ServeMode::User, true, |_| {})
+            .err()
+            .expect("refused");
+        assert!(e.to_string().contains("must not run elevated"), "{e}");
+        assert!(!data.exists(), "an elevated refusal touched {}", data.display());
+        log_engine_failure(&data, ipc::ServeMode::System, "a cause");
+        assert!(!data.exists(), "the service mode writes no engine log");
+    }
+
+    /// Round 7: a second engine, refused at the lock, writes nothing to the first's log either.
+    #[test]
+    fn a_second_engine_refused_at_the_lock_leaves_the_first_ones_log_alone() {
+        let data = scratch("second");
+        let first = Host::start_with(data.clone(), data.clone(), ipc::ServeMode::User, |_| {}).expect("starts");
+        let log = data.join("logs").join("service.log");
+        let before = std::fs::read_to_string(&log).unwrap_or_default();
+        assert!(Host::start_with(data.clone(), data.clone(), ipc::ServeMode::User, |_| {}).is_err());
+        assert_eq!(before, std::fs::read_to_string(&log).unwrap_or_default());
+        first.stop();
+        let _ = std::fs::remove_dir_all(&data);
     }
 
     /// Round 6 P1-A (ER-27): a failure that ends the engine is in its own service log.

@@ -39,6 +39,8 @@ struct SettingsRead {
 enum Owner<'a> {
     /// This engine listed it.
     Engine(&'a dyn ServiceClient),
+    /// Both engines list it: a request would go to a guess, so it goes nowhere.
+    Both,
     /// Neither engine listed it, and both answered.
     Nobody,
     /// Neither listed it and one did not answer: it may be there.
@@ -74,17 +76,13 @@ impl RoutingClient {
     /// answer: a runner that nobody listed gets an answer that says so, not a guess.
     fn owner_of(&self, runner: &RunnerName) -> Owner<'_> {
         let user = Self::lists(&*self.user, runner);
-        if user == Some(true) {
-            return Owner::Engine(&*self.user);
-        }
         let system = Self::lists(&*self.system, runner);
-        if system == Some(true) {
-            return Owner::Engine(&*self.system);
-        }
-        if user.is_none() || system.is_none() {
-            Owner::NotKnown
-        } else {
-            Owner::Nobody
+        match (user, system) {
+            (Some(true), Some(true)) => Owner::Both,
+            (Some(true), _) => Owner::Engine(&*self.user),
+            (_, Some(true)) => Owner::Engine(&*self.system),
+            (None, _) | (_, None) => Owner::NotKnown,
+            (Some(false), Some(false)) => Owner::Nobody,
         }
     }
 
@@ -111,6 +109,15 @@ impl RoutingClient {
         let user = self.user.request(Request::Status);
         Ok(match (system, user) {
             (Ok(Response::Status { mut runners, service }), Ok(Response::Status { runners: mine, .. })) => {
+                if let Some(r) = mine.iter().find(|m| runners.iter().any(|s| s.name == m.name)) {
+                    return Ok(Response::Error(ServiceError::new(
+                        ErrorCode::BadRequest,
+                        format!(
+                            "both engines list a runner named {}; runner names are unique across both. Remove one of them",
+                            r.name
+                        ),
+                    )));
+                }
                 runners.extend(mine);
                 Response::Status { runners, service }
             }
@@ -292,6 +299,10 @@ impl ServiceClient for RoutingClient {
             other => match other.target_runner() {
                 Some(runner) => match self.owner_of(runner) {
                     Owner::Engine(engine) => engine.request(request),
+                    Owner::Both => Ok(Response::Error(ServiceError::new(
+                        ErrorCode::BadRequest,
+                        format!("both engines list a runner named {runner}; the request was not sent to either. Remove one of them"),
+                    ))),
                     Owner::Nobody => Ok(Response::Error(ServiceError::new(
                         ErrorCode::UnknownRunner,
                         format!("no runner is named {runner}"),
@@ -536,7 +547,8 @@ mod tests {
         c.request(Request::Stop { runner: name("mine") }).unwrap();
         c.request(Request::Stop { runner: name("svc") }).unwrap();
         assert_eq!(user.asked(), ["Status", "Stop", "Status"]);
-        assert_eq!(system.asked(), ["Status", "Stop"]);
+        // Both engines are asked who lists the name, so a name both list is caught (round 7): the service saw two lookups and one Stop.
+        assert_eq!(system.asked(), ["Status", "Status", "Stop"]);
         // A runner nobody has, both engines answering: an answer that says so, and nothing is sent to either.
         let answer = c.request(Request::Stop { runner: name("nobody") }).unwrap();
         assert!(
@@ -840,6 +852,21 @@ mod tests {
             config.runners.iter().map(|r| r.name.to_string()).collect::<Vec<_>>()
         );
         assert_eq!(config.runners[0].name.to_string(), "mine");
+    }
+
+    /// Round 7: a name both engines list is refused for status and for a request about it; nothing is sent to a guess.
+    #[test]
+    fn a_name_both_engines_list_is_refused_for_status_and_for_a_request() {
+        let (system, user) = (Fake::new(&["same"], false), Fake::new(&["same"], false));
+        let c = router(&system, &user);
+        let answer = c.request(Request::Status).unwrap();
+        assert!(matches!(&answer, Response::Error(e) if e.message.contains("same")), "{answer:?}");
+        let answer = c.request(Request::Stop { runner: name("same") }).unwrap();
+        assert!(
+            matches!(&answer, Response::Error(e) if e.message.contains("not sent to either")),
+            "{answer:?}"
+        );
+        assert!(!system.asked().contains(&"Stop".to_string()) && !user.asked().contains(&"Stop".to_string()));
     }
 
     /// An engine that refuses every change.

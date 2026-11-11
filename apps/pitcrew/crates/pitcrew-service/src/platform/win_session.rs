@@ -54,13 +54,13 @@ pub enum ConsoleUser {
     NotSystem,
 }
 
-/// Whether this service process runs as LocalSystem: its own token's user is `S-1-5-18`. (Not guessed from whether another call
+/// Whether this service process runs as LocalSystem, or `None` when its own token could not be read: its own token's user is `S-1-5-18`. (Not guessed from whether another call
 /// fails: `WTSQueryUserToken` also fails for other reasons, and a service running as an administrator account is not SYSTEM.)
-pub fn is_local_system() -> bool {
+pub fn local_system_state() -> Option<bool> {
     let mut token = HANDLE::default();
     // SAFETY: the pseudo handle of this process and a valid out pointer; the token is owned below.
     if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) }.is_err() {
-        return false;
+        return None;
     }
     let token = Owned(token);
     let mut needed = 0u32;
@@ -69,10 +69,15 @@ pub fn is_local_system() -> bool {
     let mut buf = vec![0u64; (needed as usize).div_ceil(8).max(1)];
     // SAFETY: `buf` holds at least `needed` bytes and is 8-byte aligned.
     if unsafe { GetTokenInformation(token.0, TokenUser, Some(buf.as_mut_ptr().cast()), needed, &mut needed) }.is_err() {
-        return false;
+        return None;
     }
     // SAFETY: the buffer holds a TOKEN_USER written by the call above and is alive for the check.
-    unsafe { IsWellKnownSid((*buf.as_ptr().cast::<TOKEN_USER>()).User.Sid, WinLocalSystemSid) }.as_bool()
+    Some(unsafe { IsWellKnownSid((*buf.as_ptr().cast::<TOKEN_USER>()).User.Sid, WinLocalSystemSid) }.as_bool())
+}
+
+/// Whether this service process runs as LocalSystem (an unreadable token counts as not).
+pub fn is_local_system() -> bool {
+    local_system_state() == Some(true)
 }
 
 /// Whether this process runs with an **elevated** token (an administrator's full token, UAC "Run as administrator"). The per-user
