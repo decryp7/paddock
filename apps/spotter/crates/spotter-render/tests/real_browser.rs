@@ -29,9 +29,28 @@ fn serial() -> std::sync::MutexGuard<'static, ()> {
     LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// The first run of a browser bundle on macOS is held by the OS for 20 to 35 s on an idle host, far more on a busy one, with
+/// no CPU and no child to judge it by (`launch::warm_up`). The first test of a process pays it here, outside any start guard,
+/// by waiting for the browser's own `--version` to end; nextest's slow-timeout (the waiver in apps/spotter/.config/nextest.toml)
+/// is its only bound. Every later start is then about half a second.
+fn warm(b: &Browser) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        if cfg!(target_os = "macos") {
+            match spotter_render::launch::warm_up(b) {
+                Ok(took) => eprintln!("the test browser's first run took {took:?}"),
+                Err(e) => panic!("{e}"),
+            }
+        }
+    });
+}
+
 fn browser() -> Option<Browser> {
     // Only the dedicated test browser, never an installed Chrome/Edge (see `find_for_tests`).
     let b = find_for_tests();
+    if let Some(b) = &b {
+        warm(b);
+    }
     if b.is_none() {
         // CI sets this: a skipped real-browser test there means the install step failed, which must not pass silently.
         assert!(
