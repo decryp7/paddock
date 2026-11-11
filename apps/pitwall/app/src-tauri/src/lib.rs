@@ -26,6 +26,7 @@ pub mod report;
 pub mod server_client;
 pub mod service_install;
 pub mod service_manager;
+pub mod speech;
 pub mod start_at_login;
 pub mod tray;
 pub mod tray_model;
