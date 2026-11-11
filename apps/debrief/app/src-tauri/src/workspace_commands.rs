@@ -275,6 +275,11 @@ pub(crate) fn start_open_at<R: Runtime>(
     let (controls, flag) = crate::engine::import::controls();
     let (handle, win) = (app.clone(), state.clone());
     let spec = open_spec(&paths).window(state.label());
+    // The same sources read the same way while the import runs: one job (a second ask joins it, and its `then` does not run).
+    let mut sorted: Vec<&str> = paths.iter().map(String::as_str).collect();
+    sorted.sort_unstable();
+    sorted.push(if at_end { "at-end" } else { "from-start" });
+    let spec = spec.keyed(crate::jobs::work_key("import", Some(state.label()), &sorted));
     crate::jobs::start_value(app, spec, controls, move |ctx: &crate::jobs::JobCtx| {
         let summary = open_in_job(&handle, &win, ctx, &flag, paths, at_end)?;
         then(&summary);
@@ -378,7 +383,9 @@ pub(crate) async fn clear_workspace(state: CurrentWindow) -> CmdResult<Workspace
 /// Reads the opened files again as an import job; returns its id at once (the job's value is the [`WorkspaceSummary`]).
 #[tauri::command]
 pub(crate) async fn reload_workspace<R: Runtime>(app: AppHandle<R>, state: CurrentWindow) -> CmdResult<u64> {
-    let spec = JobSpec::new(JobKind::Import, "Reload the files").window(state.label());
+    let spec = JobSpec::new(JobKind::Import, "Reload the files")
+        .window(state.label())
+        .keyed(crate::jobs::work_key("reload", Some(state.label()), &[]));
     let (controls, flag) = crate::engine::import::controls();
     let (handle, win) = (app.clone(), state.clone());
     crate::jobs::start_value(&app, spec, controls, move |ctx: &crate::jobs::JobCtx| {
@@ -542,7 +549,8 @@ pub(crate) async fn export_events<R: Runtime>(
     debrief_core::overwrite::check_overwrite(std::path::Path::new(&request.path), request.overwrite)?;
     request.path = target.to_string_lossy().into_owned();
     let redact = request.redact;
-    crate::jobs::export(&app, &state, "Export events to", &target, move |store| {
+    let params = serde_json::to_string(&request).unwrap_or_default();
+    crate::jobs::export(&app, &state, "Export events to", &target, &params, move |store| {
         let result = store.export(&request).map_err(CmdError::from)?;
         log::info!(Format = result.format.as_str(), Events = result.events as u64; "Events exported");
         let path = privacy::safe_path(std::path::Path::new(&result.path));
@@ -686,7 +694,8 @@ pub(crate) async fn open_project<R: Runtime>(
     let session = crate::lifecycle::is_session_file(&file);
     let spec = JobSpec::new(JobKind::Import, "Open the project")
         .window(state.label())
-        .link(JobLink::Path { path: path.clone() });
+        .link(JobLink::Path { path: path.clone() })
+        .keyed(crate::jobs::work_key("open-project", Some(state.label()), &[path.as_str()]));
     let (controls, flag) = crate::engine::import::controls();
     let (handle, win) = (app.clone(), state.clone());
     crate::jobs::start_value(&app, spec, controls, move |ctx: &crate::jobs::JobCtx| {
@@ -1793,5 +1802,89 @@ mod tests {
         .unwrap_err();
         assert!(e.contains("only reads files you choose"), "{e}");
         assert!(crate::services::project::captures(&json!(null)).is_empty());
+    }
+
+    /// Starts an events export to `name` that holds its job until the returned sender is used (or dropped); the job's key is
+    /// made from the target and `params`.
+    fn held_export(app: &tauri::App<MockRuntime>, dir: &std::path::Path, name: &str, params: &str) -> (u64, std::sync::mpsc::Sender<()>) {
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let id = crate::jobs::export(
+            app.handle(),
+            &main_window(app),
+            "Export events to",
+            &dir.join(name),
+            params,
+            move |_| {
+                let _ = rx.recv();
+                Ok("Exported.".to_string())
+            },
+        )
+        .unwrap();
+        (id, tx)
+    }
+
+    #[test]
+    fn the_same_export_started_twice_while_it_runs_is_one_job_and_other_exports_run_beside_it() {
+        let dir = TempDir::new("export-twice");
+        let app = opened(Some(dir.0.clone()), &[samples().join("log4net")]);
+        let (first, release_first) = held_export(&app, &dir.0, "a.clef", "clef");
+        // The same target with the same parameters, from the dialog again or the menu: it joins the running job.
+        let (again, _unused) = held_export(&app, &dir.0, "a.clef", "clef");
+        assert_eq!(again, first, "a second export of the same file started a second job");
+        let exports = || app.state::<crate::jobs::Jobs>().find_active(|j| j.kind == JobKind::Export);
+        assert_eq!(exports().len(), 1);
+        // Another target, or the same target with other parameters, is another job.
+        let (other_file, release_other_file) = held_export(&app, &dir.0, "b.clef", "clef");
+        let (other_params, release_other_params) = held_export(&app, &dir.0, "a.clef", "json");
+        assert!(other_file != first && other_params != first && other_file != other_params);
+        assert_eq!(exports().len(), 3);
+        for tx in [release_first, release_other_file, release_other_params] {
+            tx.send(()).unwrap();
+        }
+        for id in [first, other_file, other_params] {
+            assert_eq!(crate::test_support::job_end(&app, id).state, crate::jobs::JobState::Done);
+        }
+        // A finished export frees its key: asking again exports again.
+        let (fresh, release_fresh) = held_export(&app, &dir.0, "a.clef", "clef");
+        assert_ne!(fresh, first);
+        release_fresh.send(()).unwrap();
+        crate::test_support::job_end(&app, fresh);
+    }
+
+    #[test]
+    fn the_same_import_started_twice_while_it_runs_is_one_job_and_other_sources_run_beside_it() {
+        let dir = TempDir::new("import-twice");
+        let app = opened(Some(dir.0.clone()), &[samples().join("log4net")]);
+        let start = |path: &str, at_end: bool| {
+            let (tx, rx) = std::sync::mpsc::channel::<()>();
+            // `then` runs inside the job after the import: holding it holds the job.
+            let id = start_open_at(
+                app.handle(),
+                &main_window(&app),
+                vec![samples().join(path).to_string_lossy().into_owned()],
+                at_end,
+                move |_| {
+                    let _ = rx.recv();
+                },
+            )
+            .unwrap();
+            (id, tx)
+        };
+        let (first, release_first) = start("csv", false);
+        let (again, _unused) = start("csv", false);
+        assert_eq!(again, first, "the same source imported twice started a second job");
+        let imports = || app.state::<crate::jobs::Jobs>().find_active(|j| j.kind == JobKind::Import);
+        assert_eq!(imports().len(), 1);
+        // Another source, or the same one read from its end, is another job.
+        let (other, release_other) = start("log4net", false);
+        let (tail, release_tail) = start("csv", true);
+        assert!(other != first && tail != first && other != tail);
+        assert_eq!(imports().len(), 3);
+        for tx in [release_first, release_other, release_tail] {
+            tx.send(()).unwrap();
+        }
+        for id in [first, other, tail] {
+            crate::test_support::job_end(&app, id);
+        }
     }
 }

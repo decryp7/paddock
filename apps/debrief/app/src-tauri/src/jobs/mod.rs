@@ -421,8 +421,28 @@ pub(crate) async fn analysis_announced<R: Runtime, T: Send + 'static>(
     .await
 }
 
-/// The spec of an export to `path` by the window (or the app).
+/// The idempotency key of an import or export (see [`JobSpec::key`]): the window, the kind of work and a fingerprint of what
+/// it is about (`parts`: the sources or the target and the parameters). The fingerprint keeps paths and queries out of the key,
+/// so neither the Jobs record nor a log line carries them.
+pub(crate) fn work_key(what: &str, window: Option<&str>, parts: &[&str]) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for p in parts {
+        p.hash(&mut h);
+    }
+    format!("{}|{what}|{:016x}", window.unwrap_or("app"), h.finish())
+}
+
+/// The spec of an export to `path` by the window (or the app). Keyed by the target and the title (what is exported): the same
+/// export asked for while it runs is served by that job.
 pub(crate) fn export_spec(title: &str, window: Option<&str>, path: &std::path::Path) -> JobSpec {
+    export_spec_with(title, window, path, "")
+}
+
+/// [`export_spec`] for an export whose result also depends on `params` (the query, the format, what to mask): the key
+/// includes them, so the same file written with other parameters is another job.
+pub(crate) fn export_spec_with(title: &str, window: Option<&str>, path: &std::path::Path, params: &str) -> JobSpec {
+    let key = work_key("export", window, &[title, &path.to_string_lossy(), params]);
     let name = path
         .file_name()
         .map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
@@ -432,7 +452,7 @@ pub(crate) fn export_spec(title: &str, window: Option<&str>, path: &std::path::P
     if let Some(w) = window {
         spec = spec.window(w);
     }
-    spec
+    spec.keyed(key)
 }
 
 /// The progress of an export under way: rows (or events) written of those to write (`total` 0 while unknown) and the
@@ -484,9 +504,16 @@ pub(crate) fn export<R: Runtime>(
     win: &CurrentWindow,
     title: &str,
     path: &std::path::Path,
+    params: &str,
     f: impl FnOnce(&dyn debrief_core::ports::Store) -> CmdResult<String> + Send + 'static,
 ) -> CmdResult<u64> {
-    let spec = export_spec(title, Some(win.label()), path);
+    // The same file with the same parameters from the same project is one job (a second ask joins it).
+    let params = format!(
+        "{}|{}",
+        win.engine.opened_id().map_or_else(String::new, |id| id.to_string()),
+        params
+    );
+    let spec = export_spec_with(title, Some(win.label()), path, &params);
     let w = win.arc().clone();
     let control = debrief_core::ql::QueryControl::new();
     let result = JobResult::file(path.display().to_string());

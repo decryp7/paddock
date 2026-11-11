@@ -332,7 +332,8 @@ pub(crate) async fn sql_export<R: Runtime>(
         path: target.to_string_lossy().into_owned(),
         overwrite,
     };
-    crate::jobs::export(&app, &state, "Export SQL result to", &target, move |store| {
+    let params = serde_json::to_string(&request).unwrap_or_default();
+    crate::jobs::export(&app, &state, "Export SQL result to", &target, &params, move |store| {
         let r = store.sql_export(&request).map_err(CmdError::from)?;
         log::info!(Rows = r.rows, Bytes = r.bytes, Truncated = r.truncated; "SQL result exported");
         Ok(exported_rows(r.rows, r.truncated))

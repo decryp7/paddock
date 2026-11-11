@@ -167,7 +167,8 @@ pub(crate) async fn export_redacted_copy<R: Runtime>(
     };
     // A file job: the Jobs pane shows each stage (events redacted, the copy imported, the archive written) with its
     // counts, and Cancel stops the copy and removes its work folder and any partial archive.
-    let spec = crate::jobs::export_spec("Redacted copy", Some(state.label()), &request.out);
+    let params = serde_json::to_string(&request.cfg).unwrap_or_default();
+    let spec = crate::jobs::export_spec_with("Redacted copy", Some(state.label()), &request.out, &params);
     let result = crate::jobs::JobResult::file(request.out.display().to_string());
     let (controls, control) = crate::jobs::store_cancel(Default::default());
     let controls = crate::jobs::with_stage_probe(controls, &control, "Redacting events", "Writing the archive");

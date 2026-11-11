@@ -397,12 +397,13 @@ impl Jobs {
         work: impl FnOnce(&JobCtx) -> JobEnd + Send + 'static,
     ) -> Result<Submission, Refusal> {
         let now = self.now();
+        let kind = spec.kind;
         let id = {
             let mut inner = self.lock();
             let Submission { id, created } = inner.queue.submit_or_existing(spec, now)?;
             if !created {
                 // The same keyed request is already queued or running: it serves this one; `work` is dropped unrun.
-                log::info!(Job = id.0; "job.joined: an equal keyed request is served by this job");
+                log::info!(Job = id.0, Kind = kind.as_str(); "job.joined: an equal keyed request is served by this job");
                 return Ok(Submission { id, created: false });
             }
             inner.controls.insert(

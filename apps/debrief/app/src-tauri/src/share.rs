@@ -261,11 +261,18 @@ pub(crate) async fn export_report<R: Runtime>(
         .path()
         .to_path_buf();
     check_overwrite(Path::new(&request.path), request.overwrite)?;
+    let params = format!(
+        "{}|{}|{}|{}",
+        request.format,
+        request.redact,
+        serde_json::to_string(&request.theme).unwrap_or_default(),
+        request.report
+    );
     let report = parse_report(request.report)?;
     let (redact, theme) = (request.redact, request.theme);
     let shown = target.clone();
     let redact_cfg = state.host.compiled().profile.redact.clone();
-    crate::jobs::export(&app, &state, "Export report", &shown, move |store| {
+    crate::jobs::export(&app, &state, "Export report", &shown, &params, move |store| {
         let redactor = if redact {
             Some(debrief_core::redact::Redactor::from_config(&redact_cfg, debrief_core::redact::Salt::random()).map_err(err)?)
         } else {
@@ -418,7 +425,8 @@ pub(crate) async fn open_bundle<R: Runtime>(
     // Unpacking is part of the import: the job unpacks, then opens what the bundle holds.
     let spec = crate::jobs::JobSpec::new(crate::jobs::JobKind::Import, "Open the bundle")
         .window(state.label())
-        .link(crate::jobs::JobLink::Path { path: path.clone() });
+        .link(crate::jobs::JobLink::Path { path: path.clone() })
+        .keyed(crate::jobs::work_key("open-bundle", Some(state.label()), &[path.as_str()]));
     let (controls, flag) = crate::engine::import::controls();
     let (handle, win) = (app.clone(), state.clone());
     crate::jobs::start_value(&app, spec, controls, move |ctx: &crate::jobs::JobCtx| {
