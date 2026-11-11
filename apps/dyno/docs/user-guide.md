@@ -267,6 +267,21 @@ account sees its own and the system's programs, and the rest as one **Other user
 person's program folder. Every change request is recorded in the helper's audit log, which the card shows. The helper's log never
 holds file contents or command lines.
 
+The card lists these readings (some only on one system; a test compares this list with what the helper offers):
+
+<!-- helper-readings:start -->
+- Every process of every account
+- Per-program network traffic
+- Disk health
+- What is keeping the computer awake
+- Login items and background tasks
+- Firewall (pf) rules
+- Temperature and energy readings
+- Which program owns each socket and file
+- Firewall (nft) rules
+- Memory modules
+<!-- helper-readings:end -->
+
 ## Troubleshooting
 
 <picture>

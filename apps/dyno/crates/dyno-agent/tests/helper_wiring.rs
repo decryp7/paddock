@@ -10,8 +10,8 @@
 //! run-time `served:` counts (ADR 0052 section 1.5) are the backstop for those.
 //!
 //! The kinds that are neither advertised nor wired must be declared in `apps/dyno/wiring.toml` with a reason and an end.
-//! The tests over the checker itself (fixtures that must fail) run always; the two tests over the real tree are `#[ignore]`d
-//! until WP-INT has wired every reading and reconciled the user guide and the changelog.
+//! The tests over the checker itself (fixtures that must fail) and the two tests over the real tree all run, locally and in CI
+//! (the `checks` list of `apps/dyno/paddock.ci.json`).
 
 use dyno_core::helper::HelperHost;
 use dyno_core::helper_policy::RequestKind;
@@ -77,7 +77,11 @@ fn type_name(ty: &syn::Type) -> Option<String> {
 }
 
 /// Collects what one function body constructs, calls and boxes.
-struct Body<'a>(&'a mut FnInfo);
+struct Body<'a> {
+    info: &'a mut FnInfo,
+    /// The type names in what each local was bound to (`let reading = R { .. };`), so `HelperFirst::new(reading, ..)` hands over `R`.
+    locals: BTreeMap<String, BTreeSet<String>>,
+}
 
 fn path_idents(p: &syn::Path) -> Vec<String> {
     p.segments.iter().map(|s| s.ident.to_string()).collect()
@@ -87,10 +91,10 @@ impl Body<'_> {
     fn path(&mut self, p: &syn::Path) {
         let ids = path_idents(p);
         if ids.len() >= 2 && ids[ids.len() - 2] == "HelperRequest" {
-            self.0.builds.insert(ids[ids.len() - 1].clone());
+            self.info.builds.insert(ids[ids.len() - 1].clone());
         }
         if let Some(last) = ids.last() {
-            self.0.mentions.insert(last.clone());
+            self.info.mentions.insert(last.clone());
         }
     }
 }
@@ -110,23 +114,37 @@ impl<'ast> Visit<'ast> for Body<'_> {
         self.path(&e.path);
         syn::visit::visit_expr_path(self, e);
     }
+    fn visit_local(&mut self, l: &'ast syn::Local) {
+        if let (syn::Pat::Ident(p), Some(init)) = (&l.pat, &l.init) {
+            let mut names = TypeNames(BTreeSet::new());
+            names.visit_expr(&init.expr);
+            self.locals.insert(p.ident.to_string(), names.0);
+        }
+        syn::visit::visit_local(self, l);
+    }
     fn visit_expr_struct(&mut self, e: &'ast syn::ExprStruct) {
         self.path(&e.path);
         syn::visit::visit_expr_struct(self, e);
     }
     fn visit_expr_method_call(&mut self, e: &'ast syn::ExprMethodCall) {
-        self.0.mentions.insert(e.method.to_string());
+        self.info.mentions.insert(e.method.to_string());
         syn::visit::visit_expr_method_call(self, e);
     }
     fn visit_expr_call(&mut self, e: &'ast syn::ExprCall) {
         if let syn::Expr::Path(p) = &*e.func {
             let ids = path_idents(&p.path);
-            if ids.len() == 2 && matches!(ids[0].as_str(), "Box" | "Arc" | "Rc" | "HelperFirst") && ids[1] == "new" {
+            // The last two segments: `crate::helper_first::HelperFirst::new(..)` hands a reading to the seam like `HelperFirst::new(..)`.
+            if ids.len() >= 2 && matches!(ids[ids.len() - 2].as_str(), "Box" | "Arc" | "Rc" | "HelperFirst") && ids[ids.len() - 1] == "new" {
                 let mut names = TypeNames(BTreeSet::new());
                 for a in &e.args {
                     names.visit_expr(a);
+                    if let syn::Expr::Path(p) = a {
+                        if let Some(bound) = p.path.get_ident().and_then(|i| self.locals.get(&i.to_string())) {
+                            names.0.extend(bound.iter().cloned());
+                        }
+                    }
                 }
-                self.0.boxed.extend(names.0);
+                self.info.boxed.extend(names.0);
             }
         }
         syn::visit::visit_expr_call(self, e);
@@ -145,7 +163,11 @@ impl Scan {
             trait_impl: self.trait_impl.clone(),
             ..FnInfo::default()
         };
-        Body(&mut info).visit_block(block);
+        Body {
+            info: &mut info,
+            locals: BTreeMap::new(),
+        }
+        .visit_block(block);
         self.fns.push(info);
     }
 }
@@ -426,7 +448,6 @@ fn today() -> i64 {
 }
 
 #[test]
-#[ignore = "red until every advertised reading is wired (WP-FW, WP-PROC, WP-CNT, WP-LNX, WP-MEM, WP-BTM, WP-TRF, WP-EXT); WP-INT un-ignores it"]
 fn every_advertised_reading_has_a_production_sender() {
     let fns = scan(&real_sources()).unwrap();
     let wiring = std::fs::read_to_string(dyno_root().join("wiring.toml")).expect("apps/dyno/wiring.toml");
@@ -487,7 +508,6 @@ fn all_advertised() -> Vec<Advertised> {
 }
 
 #[test]
-#[ignore = "red until WP-INT reconciles docs/user-guide.md and CHANGELOG.md with readings() (they are WP-INT's files)"]
 fn the_user_guide_and_the_changelog_claim_what_readings_advertises() {
     let root = dyno_root();
     let mut problems = Vec::new();
@@ -589,6 +609,26 @@ fn a_trait_impl_counts_only_when_the_composition_boxes_the_type() {
 }
 
 #[test]
+fn a_reading_handed_to_the_seam_by_a_full_path_is_composed() {
+    let defs = "trait HelperReading { fn via_helper(&self); } struct R; impl HelperReading for R { fn via_helper(&self) { let _ = HelperRequest::LogTail(1); } }
+        struct Seam; impl Seam { fn read(&self, r: &dyn HelperReading) { r.via_helper(); } }";
+    for call in ["HelperFirst::new(R, ())", "crate::helper_first::HelperFirst::new(R, ())", "std::sync::Arc::new(R)"] {
+        let fns = composed(defs, &format!("fn compose() {{ let s = {call}; Seam.read(&s); }}"));
+        assert_eq!(wired_kinds(&fns).get("LogTail"), Some(&true), "{call}");
+    }
+}
+
+#[test]
+fn a_reading_bound_to_a_local_before_it_is_handed_to_the_seam_is_composed() {
+    let defs = "trait HelperReading { fn via_helper(&self); } struct R { n: u8 } impl HelperReading for R { fn via_helper(&self) { let _ = HelperRequest::FileHolders; } }
+        struct Seam; impl Seam { fn read(&self, r: &dyn HelperReading) { r.via_helper(); } }";
+    let fns = composed(defs, "fn compose() { let reading = R { n: 0 }; let s = HelperFirst::new(reading, ()); Seam.read(&s); }");
+    assert_eq!(wired_kinds(&fns).get("FileHolders"), Some(&true));
+    let other = composed(defs, "fn compose() { let reading = R { n: 0 }; let s = Seam; s.read(&reading); }");
+    assert_eq!(wired_kinds(&other).get("FileHolders"), Some(&false), "a local that is not handed to the seam is not composed");
+}
+
+#[test]
 fn a_boxed_type_does_not_make_every_trait_method_a_sender() {
     let defs = "struct B; trait Calls { fn processes(&self); fn memory(&self); }
         impl Calls for B { fn processes(&self) { let _ = HelperRequest::Processes; } fn memory(&self) { let _ = HelperRequest::MemoryModules; } }
@@ -677,7 +717,7 @@ fn waivers_are_bounded() {
 fn wiring_toml_of_the_tree_parses_and_names_real_kinds() {
     let text = std::fs::read_to_string(dyno_root().join("wiring.toml")).expect("apps/dyno/wiring.toml");
     let entries = parse_wiring(&text).unwrap();
-    assert!(!entries.is_empty());
+    // No entry is a valid file: every kind is advertised or wired.
     for e in &entries {
         assert!(RequestKind::ALL.iter().any(|k| format!("{k:?}") == e.kind), "{e:?}");
         assert!(

@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- The list of what the administrator helper reads, in this changelog and in the user guide, is now checked against what the helper offers on every change, so a reading cannot be advertised without being sent, or sent without being listed.
 - When Dyno cannot find your home folder, it no longer falls back to a shared folder in the temporary folder, where another user on the same computer could have put a file for Dyno to trust. It now uses a private folder made for your account only and refuses a folder that belongs to someone else or is a link. If no safe folder exists, the command stops and says what to set. The file that tells the app where the agent is runs is also ignored when its folder is a link or belongs to another user.
 
 ### Changed
@@ -41,6 +42,19 @@ To keep your data, open Settings > Apps, uninstall Dyno and leave "Delete the ap
 ### New
 
 - Administrator helper: optional. Turn it on, repair it, update it or turn it off in Settings.
+  - What it can read, each on the systems that have it (a test compares this list with what the helper offers):
+    <!-- helper-readings:start -->
+    - Every process of every account
+    - Per-program network traffic
+    - Disk health
+    - What is keeping the computer awake
+    - Login items and background tasks
+    - Firewall (pf) rules
+    - Temperature and energy readings
+    - Which program owns each socket and file
+    - Firewall (nft) rules
+    - Memory modules
+    <!-- helper-readings:end -->
   - With it, Dyno reads every account's processes, temperatures, fans, energy, memory modules and which program owns each connection or file.
   - Without it, everything keeps working with your own rights. A reading Dyno cannot get says why.
   - Dyno asks the system for permission each time the helper is installed, repaired or removed.
